@@ -51,6 +51,9 @@ interface SendWelcomeEmailPayload {
 }
 
 export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
+  // Name recorded in queued messages (default: the class name)
+  static jobName = 'SendWelcomeEmailJob'
+
   // Queue name (default: 'default')
   static queue = 'emails'
 
@@ -116,8 +119,10 @@ export class SendWelcomeEmailJob extends Job<{ userId: string }> {
 ```
 
 Once pinned, the class is free to be renamed — only `jobName` is durable, and it
-is the string `registerJob()` keys on and the worker resolves. Jobs without a
-`jobName` keep resolving by class name, so this is opt-in.
+is the string `registerJob()` keys on and the worker resolves. `make:job` writes
+the pin with the class name it generates, so a scaffolded job starts pinned; change
+the string before the first dispatch if you want a different one. A job written
+by hand without a `jobName` keeps resolving by class name.
 
 A subclass does **not** inherit its parent's `jobName`, even though JavaScript
 statics are inherited. It resolves by its own class name until it declares one:
@@ -135,6 +140,17 @@ class ProxyJob extends BaseJob {
 
 Without that rule, registering both classes would collapse them onto one
 registry entry and the second registration would evict the first.
+
+A name belongs to one class. When a different class registers under a name
+another class holds, `registerJob()` warns once, naming both, and the worker
+runs the class registered last. Two modules that each declare a `SendMail` hit
+this, and so does `ProxyJob` above registered beside `BaseJob`: a subclass can
+share its parent's name only while the parent is not registered. Give one of
+them a distinct class name or its own `jobName`. The framework's own jobs take
+`SendMailJob`, `SendNotificationJob`, `QueuedEventJob`, `GenerateVariantsJob`
+(attachments) and `RunAgentJob` (`@guren/plugin-ai`), so app jobs need other
+names. Registering the same class again is silent. A future major will throw
+instead of warning.
 
 Changing or adding a `jobName` on a job that already has messages in a durable
 queue is itself a rename: drain the queue first, or keep the old name registered

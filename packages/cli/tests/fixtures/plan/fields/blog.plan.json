@@ -1,0 +1,336 @@
+{
+  "planVersion": 1,
+  "title": "blog fields",
+  "summary": "Measure the field readers.",
+  "locale": "en",
+  "scope": {
+    "goals": [],
+    "nonGoals": []
+  },
+  "models": [
+    {
+      "id": "model.post",
+      "change": {
+        "kind": "existing"
+      },
+      "name": "Post",
+      "table": "posts",
+      "columns": [],
+      "relationships": [],
+      "fillable": []
+    }
+  ],
+  "validators": [
+    {
+      "id": "validator.PostPayloadSchema",
+      "change": {
+        "kind": "add"
+      },
+      "name": "PostPayloadSchema",
+      "fields": [
+        {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 1"
+          ]
+        },
+        {
+          "name": "excerpt",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 1"
+          ]
+        },
+        {
+          "name": "body",
+          "type": "text",
+          "required": true,
+          "rules": [
+            "min 1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "validator.PostFormSchema",
+      "change": {
+        "kind": "add"
+      },
+      "name": "PostFormSchema",
+      "fields": [
+        {
+          "name": "id",
+          "type": "integer",
+          "required": false,
+          "rules": []
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 1"
+          ]
+        },
+        {
+          "name": "excerpt",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 1"
+          ]
+        },
+        {
+          "name": "body",
+          "type": "text",
+          "required": false,
+          "rules": []
+        }
+      ]
+    },
+    {
+      "id": "validator.PageQuerySchema",
+      "change": {
+        "kind": "add"
+      },
+      "name": "PageQuerySchema",
+      "fields": [
+        {
+          "name": "page",
+          "type": "integer",
+          "required": false,
+          "rules": [
+            "min 1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "validator.PostIdParamSchema",
+      "change": {
+        "kind": "add"
+      },
+      "name": "PostIdParamSchema",
+      "fields": [
+        {
+          "name": "id",
+          "type": "integer",
+          "required": true,
+          "rules": [
+            "positive"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "validator.LoginSchema",
+      "change": {
+        "kind": "add"
+      },
+      "name": "LoginSchema",
+      "fields": [
+        {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 1",
+            "email"
+          ]
+        },
+        {
+          "name": "password",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 1"
+          ]
+        },
+        {
+          "name": "remember",
+          "type": "boolean",
+          "required": false,
+          "rules": []
+        }
+      ]
+    },
+    {
+      "id": "validator.RegisterSchema",
+      "change": {
+        "kind": "add"
+      },
+      "name": "RegisterSchema",
+      "fields": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 1",
+            "max 120"
+          ]
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "email"
+          ]
+        },
+        {
+          "name": "password",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 8"
+          ]
+        },
+        {
+          "name": "passwordConfirmation",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "validator.ResetPasswordSchema",
+      "change": {
+        "kind": "add"
+      },
+      "name": "ResetPasswordSchema",
+      "fields": [
+        {
+          "name": "token",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 1"
+          ]
+        },
+        {
+          "name": "password",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 8"
+          ]
+        },
+        {
+          "name": "passwordConfirmation",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "validator.ForgotPasswordSchema",
+      "change": {
+        "kind": "add"
+      },
+      "name": "ForgotPasswordSchema",
+      "fields": [
+        {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "email"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "validator.ProfileUpdateSchema",
+      "change": {
+        "kind": "add"
+      },
+      "name": "ProfileUpdateSchema",
+      "fields": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 1"
+          ]
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "email"
+          ]
+        },
+        {
+          "name": "password",
+          "type": "string",
+          "required": false,
+          "rules": [
+            "min 8"
+          ]
+        },
+        {
+          "name": "passwordConfirmation",
+          "type": "string",
+          "required": false,
+          "rules": []
+        }
+      ]
+    }
+  ],
+  "resources": [
+    {
+      "id": "resource.PostResource",
+      "change": {
+        "kind": "add"
+      },
+      "name": "PostResource",
+      "model": "model.post",
+      "fields": [
+        {
+          "name": "id",
+          "type": "number"
+        },
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "excerpt",
+          "type": "string"
+        },
+        {
+          "name": "body",
+          "type": "string | null"
+        },
+        {
+          "name": "cover",
+          "type": "AttachmentData | null"
+        },
+        {
+          "name": "notificationArtifactPath",
+          "type": "string"
+        },
+        {
+          "name": "broadcastChannels",
+          "type": "{ public: string; private: string }"
+        },
+        {
+          "name": "author",
+          "type": "PostAuthorSummary"
+        }
+      ]
+    }
+  ]
+}

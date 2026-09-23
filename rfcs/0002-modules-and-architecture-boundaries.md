@@ -14,6 +14,27 @@ never had a `modules/` directory. The application that actually dogfoods
 `web/modules/blog` shipped the day after acceptance; `guren check` was
 never wired into CI for that app until this correction, so the module
 boundary check it exercises went unverified by CI for nearly two months.
+Correction (2026-09-23): `examples/blog` now carries `modules/auth`
+(login, registration, password reset, email verification, OAuth), closing
+the gap the first correction named. Unlike `web/modules/blog`, which keeps
+its tables in the root `db/schema.ts` and a single `modules/blog/routes.ts`,
+`modules/auth` keeps its routes in a `modules/auth/routes/` directory with
+a file (`oauth.ts`) beside the `routes/index.ts` registrar. Only that shape
+gives `guren check`'s route-registrar wiring check something to verify for
+a module: it scans a module's `routes/` directory alone
+(`discoverModuleRoutesFiles()`) and never counts the entry file as a
+candidate, so the single-file `routes.ts` that `make:module` scaffolds, as
+`web/modules/blog` uses, leaves it vacuous. Neither app had exercised that
+half of the check before this.
+`examples/blog`'s tsconfig and
+vitest config did not include `modules/`, so a module file nothing imports
+(its tests, above all) was silently outside `bun run typecheck:blog` and
+`bun run test`; files the entry reaches were already checked — fixed
+alongside. Still not exercised anywhere: a module's own `db/schema.ts` (both
+dogfood apps keep their tables in the root schema, reached from the module
+via a root import) and a per-module RFC 0027 config definition
+(`ModuleDefinition` has no `config` field — a module's config still has to
+be added to the root `createApp({ config })` array by hand).
 
 ## Problem
 

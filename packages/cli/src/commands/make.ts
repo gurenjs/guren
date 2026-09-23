@@ -1,11 +1,10 @@
 import { consola } from 'consola'
+
 import { defineCommand } from '../define-command'
 import { ISSUE_REF_FORMS, splitIssueList } from '../issue-refs'
 import { makeLanguage } from '../lang'
 import { parseFieldsString } from '../fields'
 import { announceWrittenFiles, type WriterOptions } from '../utils'
-import { ATTACH_ARG, FIELDS_ARG, MODULE_ARG, toWriterOptions } from './scaffold-options'
-import { describePath, describeMigrationsFolder } from './display-paths'
 import { makeAuth } from '../make-auth'
 import { makeChannel } from '../make-channel'
 import { makeCommand, registerScaffoldedCommand } from '../make-command'
@@ -32,6 +31,9 @@ import { makeValidator } from '../make-validator'
 import { makeTest, type TestRunner } from '../make-test'
 import { makeView } from '../make-view'
 import { makeFeature } from '../make-feature'
+import { UsageError } from '../run-cli'
+import { describePath, describeMigrationsFolder } from './display-paths'
+import { ATTACH_ARG, FIELDS_ARG, FORCE_ARG, MODULE_ARG, toWriterOptions } from './scaffold-options'
 
 function createMakeCommand(spec: MakeCommandSpec) {
   const { name: commandName, description, argDescription, makeFn, resourceName, nextStep } = spec
@@ -39,7 +41,7 @@ function createMakeCommand(spec: MakeCommandSpec) {
     meta: { name: commandName, description },
     args: {
       name: { type: 'positional', required: true, description: argDescription },
-      force: { type: 'boolean', description: 'Overwrite existing files', alias: 'f' },
+      force: FORCE_ARG,
       module: MODULE_ARG,
     },
     async run({ args }) {
@@ -97,6 +99,7 @@ export const makeCommands = Object.fromEntries(
   ]),
 )
 
+// Its own command rather than a makeCommandSpecs entry, for the extra flags.
 export const makeAdrCommand = defineCommand({
   meta: {
     name: 'make:adr',
@@ -117,7 +120,7 @@ export const makeAdrCommand = defineCommand({
       type: 'string',
       description: `GitHub issues or PRs to prefill issues: with, comma-separated for several. Each: ${ISSUE_REF_FORMS}.`,
     },
-    force: { type: 'boolean', description: 'Overwrite existing files', alias: 'f' },
+    force: FORCE_ARG,
     module: MODULE_ARG,
   },
   async run({ args }) {
@@ -131,6 +134,7 @@ export const makeAdrCommand = defineCommand({
   },
 })
 
+// Its own command rather than a makeCommandSpecs entry, for the extra --fields.
 export const makeValidatorCommand = defineCommand({
   meta: {
     name: 'make:validator',
@@ -139,7 +143,7 @@ export const makeValidatorCommand = defineCommand({
   args: {
     name: { type: 'positional', required: true, description: 'Entity or validator class name' },
     fields: FIELDS_ARG,
-    force: { type: 'boolean', description: 'Overwrite existing files', alias: 'f' },
+    force: FORCE_ARG,
     module: MODULE_ARG,
   },
   async run({ args }) {
@@ -171,11 +175,7 @@ export const makeTestCommand = defineCommand({
       type: 'boolean',
       description: 'Scaffold a controller test in tests/controllers/ with a Controller suffix',
     },
-    force: {
-      type: 'boolean',
-      description: 'Overwrite existing files',
-      alias: 'f',
-    },
+    force: FORCE_ARG,
     module: MODULE_ARG,
   },
   async run({ args }) {
@@ -184,9 +184,7 @@ export const makeTestCommand = defineCommand({
 
     if (runnerArg) {
       if (runnerArg !== 'bun' && runnerArg !== 'vitest') {
-        consola.error(`Invalid runner "${args.runner}". Expected one of: bun, vitest.`)
-        process.exit(1)
-        return
+        throw new UsageError(`Invalid runner "${args.runner}". Expected one of: bun, vitest.`)
       }
 
       runner = runnerArg
@@ -208,11 +206,7 @@ export const makeAuthCommand = defineCommand({
     description: 'Scaffold authentication controllers, views, provider, and database resources.',
   },
   args: {
-    force: {
-      type: 'boolean',
-      description: 'Overwrite existing files',
-      alias: 'f',
-    },
+    force: FORCE_ARG,
     install: {
       type: 'boolean',
       description: 'Automatically wire up auth configuration in app.ts and routes',
@@ -267,11 +261,7 @@ export const makeModuleCommand = defineCommand({
       required: true,
       description: 'Module name (e.g., billing)',
     },
-    force: {
-      type: 'boolean',
-      description: 'Overwrite existing files',
-      alias: 'f',
-    },
+    force: FORCE_ARG,
   },
   async run({ args }) {
     const overwritten: string[] = []
@@ -295,11 +285,7 @@ export const makeAgentCommand = defineCommand({
       required: true,
       description: 'Agent class name (e.g., Triager)',
     },
-    force: {
-      type: 'boolean',
-      description: 'Overwrite existing files',
-      alias: 'f',
-    },
+    force: FORCE_ARG,
     // Declared so the refusal is a documented argument rather than parser
     // leniency: a user who passes it deserves `makeAgent`'s reason, not
     // "unknown flag". The description is overridden because the shared one
@@ -356,11 +342,7 @@ export const makeAiAgentCommand = defineCommand({
       type: 'boolean',
       description: 'Also write a test that scripts the agent with app.fakeAi().',
     },
-    force: {
-      type: 'boolean',
-      description: 'Overwrite existing files',
-      alias: 'f',
-    },
+    force: FORCE_ARG,
     module: MODULE_ARG,
   },
   async run({ args }) {
@@ -391,18 +373,13 @@ export const makeListenerCommand = defineCommand({
       description: 'Event class to listen for',
       alias: 'e',
     },
-    force: {
-      type: 'boolean',
-      description: 'Overwrite existing files',
-      alias: 'f',
-    },
+    force: FORCE_ARG,
     module: MODULE_ARG,
   },
   async run({ args }) {
     const { makeListener: makeListenerFn } = await import('../make-listener')
     const file = await makeListenerFn(args.name, {
-      force: Boolean(args.force),
-      root: args.module,
+      ...toWriterOptions(args),
       event: args.event,
     })
     consola.success(`Listener created at ${file}`)
@@ -425,17 +402,12 @@ export const makeResourceCommand = defineCommand({
       description: 'Model class this resource wraps',
       alias: 'm',
     },
-    force: {
-      type: 'boolean',
-      description: 'Overwrite existing files',
-      alias: 'f',
-    },
+    force: FORCE_ARG,
     module: MODULE_ARG,
   },
   async run({ args }) {
     const file = await makeResource(args.name, {
-      force: Boolean(args.force),
-      root: args.module,
+      ...toWriterOptions(args),
       model: args.model,
     })
     consola.success(`Resource created at ${file}`)
@@ -458,17 +430,12 @@ export const makeFactoryCommand = defineCommand({
       description: 'Model class this factory creates',
       alias: 'm',
     },
-    force: {
-      type: 'boolean',
-      description: 'Overwrite existing files',
-      alias: 'f',
-    },
+    force: FORCE_ARG,
     module: MODULE_ARG,
   },
   async run({ args }) {
     const file = await makeFactory(args.name, {
-      force: Boolean(args.force),
-      root: args.module,
+      ...toWriterOptions(args),
       model: args.model,
     })
     consola.success(`Factory created at ${file}`)
@@ -491,17 +458,12 @@ export const makeConsoleCommandCommand = defineCommand({
       description: 'Console command name (e.g., users:import)',
       alias: 'c',
     },
-    force: {
-      type: 'boolean',
-      description: 'Overwrite existing files',
-      alias: 'f',
-    },
+    force: FORCE_ARG,
     module: MODULE_ARG,
   },
   async run({ args }) {
     const options = {
-      force: Boolean(args.force),
-      root: args.module,
+      ...toWriterOptions(args),
       command: args.command,
     }
     const file = await makeCommand(args.name, options)
@@ -534,17 +496,12 @@ export const makeChannelCommand = defineCommand({
       type: 'boolean',
       description: 'Create a presence channel',
     },
-    force: {
-      type: 'boolean',
-      description: 'Overwrite existing files',
-      alias: 'f',
-    },
+    force: FORCE_ARG,
     module: MODULE_ARG,
   },
   async run({ args }) {
     const file = await makeChannel(args.name, {
-      force: Boolean(args.force),
-      root: args.module,
+      ...toWriterOptions(args),
       channel: args.channel,
       private: Boolean(args.private),
       presence: Boolean(args.presence),
@@ -552,6 +509,15 @@ export const makeChannelCommand = defineCommand({
     consola.success(`Channel created at ${file}`)
   },
 })
+
+function parseStatusArg(value: string | undefined): number | undefined {
+  if (value === undefined || value === '') return undefined
+  const status = Number(value)
+  if (!/^\d+$/.test(value) || status < 400 || status > 599) {
+    throw new UsageError(`Invalid --status "${value}". Expected an HTTP error status code between 400 and 599.`)
+  }
+  return status
+}
 
 export const makeExceptionCommand = defineCommand({
   meta: {
@@ -574,18 +540,13 @@ export const makeExceptionCommand = defineCommand({
       description: 'Default error message',
       alias: 'm',
     },
-    force: {
-      type: 'boolean',
-      description: 'Overwrite existing files',
-      alias: 'f',
-    },
+    force: FORCE_ARG,
     module: MODULE_ARG,
   },
   async run({ args }) {
     const file = await makeException(args.name, {
-      force: Boolean(args.force),
-      root: args.module,
-      status: args.status ? parseInt(args.status, 10) : undefined,
+      ...toWriterOptions(args),
+      status: parseStatusArg(args.status),
       message: args.message,
     })
     consola.success(`Exception created at ${file}`)
@@ -698,11 +659,7 @@ export const makeLangCommand = defineCommand({
       type: 'string',
       description: 'Copy structure from existing locale',
     },
-    force: {
-      type: 'boolean',
-      description: 'Overwrite existing files',
-      alias: 'f',
-    },
+    force: FORCE_ARG,
   },
   async run({ args }) {
     makeLanguage(args.locale, {
@@ -727,11 +684,7 @@ export const makeFeatureCommand = defineCommand({
     },
     fields: FIELDS_ARG,
     attach: ATTACH_ARG,
-    force: {
-      type: 'boolean',
-      alias: 'f',
-      description: 'Overwrite existing files.',
-    },
+    force: FORCE_ARG,
     test: {
       type: 'boolean',
       description: 'Also generate a test file.',
@@ -758,8 +711,7 @@ export const makeFeatureCommand = defineCommand({
     await makeFeature(args.name as string, {
       fields: args.fields,
       attach: args.attach,
-      force: Boolean(args.force),
-      root: args.module,
+      ...toWriterOptions(args),
       withTest: Boolean(args.test),
       withFactory: Boolean(args.factory),
       publicAccess: Boolean(args.public),

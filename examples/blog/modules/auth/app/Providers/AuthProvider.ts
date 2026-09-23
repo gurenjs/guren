@@ -1,6 +1,6 @@
 import { ServiceProvider } from '@guren/core'
 import type { AuthManager } from '@guren/core'
-import { User } from '../Models/User.js'
+import { User } from '../../../../app/Models/User.js'
 
 export default class AuthProvider extends ServiceProvider {
   register(): void {

@@ -6,6 +6,7 @@ import type { ContainerLike } from '../container/types'
 import { resolveOptional } from '../container/resolve-optional'
 import { ambientBinding, ambientContainer, defaultContainer } from '../http/default-application'
 import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
+import { reportRegistryCollision } from '../support/registry-collision'
 
 /**
  * The pin `setQueueDriver()` writes, and nothing else does. A manager that
@@ -239,7 +240,9 @@ export function resolveJobName(jobClass: Pick<JobClass, 'name' | 'jobName'>): st
 const jobRegistry = new Map<string, JobClass>()
 
 export function registerJob<T>(jobClass: JobClass<T>): void {
-  jobRegistry.set(resolveJobName(jobClass), jobClass as JobClass)
+  const name = resolveJobName(jobClass)
+  reportRegistryCollision('job', name, jobRegistry.get(name), jobClass)
+  jobRegistry.set(name, jobClass as JobClass)
 }
 
 export function getJob(name: string): JobClass | undefined {

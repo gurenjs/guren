@@ -1131,8 +1131,10 @@ then a `differ` (see *status rules after Part 2* below); an earlier reading
 made it `unjudged`.
 Prose (`purpose`, `rules`, a description) is not
 a planned property and is not counted as one. Flows, tasks, behaviours and
-questions are not judged; a `command` and a `mail` / `notification` class are
-`unjudged`, since nothing reads whether one was run or discovers the other.
+questions are not judged; a `command` ~~and a `mail` / `notification` class are
+`unjudged`, since nothing reads whether one was run or discovers the other~~ is
+`unjudged`, since nothing reads whether one was run (a mail and a notification
+class are read since, see *policy abilities and side-effect uses* below).
 
 A property with no reader is **unknown**. Unknown never counts towards
 `present`, never satisfies a `drop`, and is listed on the page as "planned,
@@ -1160,7 +1162,7 @@ loaded *and* of the export the loader picks from it; a module's route when
 a spread, or an element this cannot trace to a file leave the route `present`
 with the reason. An action is `wired` when such a route dispatches to it, and a
 page when such an action returns it. A model, a column, a controller, a
-resource, a policy and a side effect have no mount point a static reader can
+resource~~, a policy and a side effect~~ and a policy have no mount point a static reader can
 name: they complete at `present`, and the Completion table below reads
 "`wired` where the kind has one".
 
@@ -1611,6 +1613,226 @@ migration).** Two defects the loop hit once a plan had more than one task.
   folder, so a change outside the plan's tables fails the step too:
   `db:migrate` would not apply it either.
 
+**Amended in implementation (validator and resource field readers).** The
+`plan:status` amendment above left a validator's and a resource's fields with no
+reader, and Part 2 measured both at 100% `unknown`. What shipped
+(`plan/field-readers.ts`, judged by `plan/field-status.ts`):
+
+- A validator's fields are read off the exported schema object. The object
+  comes from the import the contract-identity match makes, which now runs for
+  every validator file rather than only when a registered route carries a
+  contract. Every caller that loads the detail therefore imports the
+  validators: `plan:status`, `plan:verify`, `plan:next`, `plan:close`,
+  `guren check --plan` and the `Stop` hook. A static reading of
+  `z.object({...})` was the first design and was dropped: the blog's own
+  `PostPayloadSchema` is `z.object(baseFields)` over helper calls, which a
+  static reader can only call opaque.
+- A planned validator's fields are the keys a client sends. Each yields
+  `field <name>`, `field <name> type`, `field <name> required` and one
+  `field <name> rule <text>` per rule; each resource field yields
+  `field <name>` and `field <name> type`. A key the object does not declare is
+  a `differ` and its other properties are `unknown`; an object that accepts
+  undeclared keys (`z.looseObject()`, `.catchall()`) makes it `unknown`. An
+  export that reaches no object (`z.lazy()`, a plain object, a zod v3 schema)
+  or a file that would not import leaves every property `unknown` with the
+  reason.
+- Every verdict beyond a key's existence rests on an allowlist, and fails
+  closed. An entry must mean the same on every zod the apps admit (`^4`, from
+  4.0), since the reader runs against the app's own copy. A field's type,
+  `required` and rules are read only when every node from the export to the
+  field is on it: the export is the object itself, unrefined; the field is
+  `.optional()`, `.nullable()`, `.nullish()`, `.default()`, `.prefault()` or
+  `.required()`'s `nonoptional` over a leaf (`string`, `number`, `boolean`,
+  `bigint`, `date`, `enum`, `z.coerce.*`) or over a pipe of two plain leaves
+  (`.pipe(z.email())`, and `z.stringbool()` from zod 4.1); and every check on
+  the leaf is a length, bound, integer, multiple or string format, with an
+  `overwrite` only ahead of them. Any other node on the path (a transform, a
+  preprocess, a refinement or `superRefine()` on any node, `.catch()`,
+  `z.lazy()`, `z.custom()`, a union, an intersection, an array, a pipe or
+  transform around the object, a zod/mini schema, which carries no `_def`, a
+  node this reader does not know) leaves the field's type, `required` and rules
+  `unknown`, with a reason naming the node. Patching the shapes one review at a
+  time did not converge: four rounds each found another wrapper that made a
+  correct field read `differ`.
+- Within the allowlist, three entries are read only in part. A pipe's last stage
+  validates the final value, so its type is read (`z.stringbool()` matches a
+  planned `boolean` from zod 4.1, and is opaque on 4.0), but a step may run
+  between the stages (a codec's decode), so its `required` and rules are
+  `unknown`. `nonoptional` over a `.default()` or `.prefault()` accepts a
+  missing key before zod 4.4 and rejects it from 4.4, so its `required` is
+  `unknown`; so is a `z.coerce.string()`, `boolean()`, `number()` or `date()`,
+  which accepts `null` (the string and boolean ones also accepted a missing key
+  before zod 4.4). And an `.overwrite()` that is not zod's own `.trim()`,
+  `.toLowerCase()`, `.toUpperCase()` or `.normalize()` may rewrite a value past
+  its bounds, so its rules are `unknown`.
+- On a field read in full, a planned `type` is the validated value, compared
+  with the walker's output side, so `z.coerce.number().int()` matches `integer`.
+  It is a `differ` only across JSON families; a format the planned type needs
+  and the schema does not declare (`uuid`, `date`) and a number for a planned
+  `integer` are `unknown`. A `Date` matches a planned `datetime` and is
+  `unknown` against anything else, since the walker renders it as a string.
+  `required` means a client must send a non-null value: the outermost of
+  `optional`, `default`, `prefault` and `nonoptional` decides whether a key may
+  be omitted, and a `nullable` anywhere lets it be sent as `null`. Rules are
+  prose, and only `min`, `max`, `email`, `url` and `uuid` are compared, on the
+  validated value in the planned type's unit: a bound equal to the planned one
+  is a `match`, a tighter one a `differ` (it rejects a value the plan accepts),
+  and a looser or absent one `unknown`, since a format or pattern may tighten
+  it. That settles the `max(500)` against a planned `max(2000)` near-miss of
+  cause 3.
+- A resource's payload is `guren codegen`'s own reading, the definitions
+  `data.gen.ts` is emitted from (`readResourceDefinitions()`), with the
+  `extends` clause the copied body drops now kept beside it. A payload codegen
+  references rather than copies, or one whose heritage is anything but a single
+  `Record<string, ...>`, leaves an absent field `unknown`; an index signature,
+  like that heritage, names no member. A type is compared as a set of union
+  members with `undefined` set aside, string literals under one quoting. It is a
+  `differ` only when every member on both sides is a keyword or a literal, and
+  a literal only against a keyword it is not an instance of (`'draft'` against
+  `number`, never against `string`); an alias or an object type is `unknown`
+  unless it reads the same. A payload member typed `string | null` against a
+  planned `string` is a deliberate `differ`: a resource has no `required`, so
+  its type is the whole contract the frontend reads, nullability included,
+  where a validator states nullability through `required`.
+- What this changes downstream. A validator or resource with a matching type,
+  `required` or rule is no longer an element "none of whose planned properties
+  matched", so the verification overlay lifts it without a behaviour reaching
+  it. A match on a key's existence alone (`field <name>`) is marked as such and
+  does not count: a validator the reader could only read keys of still needs a
+  behaviour that reaches it. A differing
+  field makes the element `drifted`, which `plan:verify` reports as
+  `incomplete`; unlike an action's validator, it is not held at `present`. An
+  `add` resource with fields is no longer `unjudged` once its payload is read.
+  Readings recorded at approval are keyed on the property name, so an `alter`
+  approved before this change has no reading of the new properties: its matches
+  read `unrecorded` until `plan:approve` records them, as for any approval that
+  predates a reader.
+- Measured on `examples/blog` (9 validators, 1 resource) and `examples/api` (8
+  validators, 2 resources) against hand-written plans that state the code as it
+  is (`packages/cli/tests/fixtures/plan/fields/{blog,api}.plan.json`, run with
+  `bun packages/cli/src/bin.ts plan:status <plan> --json` from the example's
+  directory): before, all 20 elements carried one `unknown` `fields` property
+  each; after, the 209 per-field properties read 160 `match`, 49 `unknown`, 0
+  `differ`. Most of the unknowns are the blog's: its register, reset and profile
+  schemas refine or transform the object, so only their keys' existence is read,
+  its `email` fields pipe into `z.email()`, and the `remember` and `body` fields
+  are unions behind a transform. The api's are the free-form `positive` (3), an
+  array, and a `z.coerce.number()` id. On `examples/api` the command writes its
+  JSON and does not exit; it does the same on the tree before these readers, so
+  something the application's routes load keeps the process alive, and finding
+  it is left to a follow-up.
+**Amended in implementation (policy abilities and side-effect uses).** Two
+kinds that were judged on existence alone now have a reader
+(`plan/policy-abilities.ts`, `plan/side-effect-uses.ts`, both run under
+`detail` from `plan/app-detail.ts`).
+
+- A planned ability is a property, `ability <name>`: `match` when the policy
+  declares a member of that name, `differ` when it does not. Members are read
+  the way `Router` dispatch reads a controller's (`classActionMembers()`: a
+  method or an arrow-function field, static members excluded), or off the keys
+  of a `definePolicy({ … })` object. A name the class may hold unread is
+  `unknown`, never a `differ`: a field whose value is not a function literal
+  (`delete = ownerOnly`), a computed member name, a spread in the definition, or
+  a base class other than `Policy` from `@guren/core` / `@guren/server`. A getter
+  is read the same way. The class `definePolicy()` returns declares only the
+  seven standard abilities and drops every other key of the definition, so a
+  planned ability outside those seven is a `differ` there whatever the object
+  holds. A file that declares no class of the planned name leaves every ability
+  `unknown`, so the policy stays `unjudged` as before. The ability's `rule` is
+  prose and is never compared; it is listed as `ability <name> rule`,
+  `unknown`, so the page shows under "planned, not checkable" that nothing read
+  what the ability decides. It cannot move the state while the ability names
+  are readable.
+- An ability's `match` is a match on existence, marked as the field readers
+  mark a key's (`existence`), and so does not count towards lifting the policy
+  without a behaviour: `make:policy` writes the five standard names into every
+  policy, so a name says nothing of the rule the plan asked for. The policy is
+  lifted to `verified` only while a verified behaviour reaches it (through an
+  action's `policy`), exactly as when its abilities had no reader. Both kinds
+  of existence match go through one predicate, `restsOnReach()` in
+  `verification.ts`, which the overlay and `plan:close`'s remedies both ask.
+- A side effect is `wired` when the application's source uses the class, and
+  this is a mount rather than a property. A use is a call of the framework's
+  own API with the class as its subject: `Job.dispatch()` / `dispatchAfter()`,
+  `queue.dispatch(Job, …)` and `schedule.job(Job, …)` for a job;
+  `events.emit()` / `emitParallel()` of a `new Event(…)` for an event;
+  `events.listen(Listener)`, or an `events.on()` / `once()` handler that refers
+  to the listener class or a binding holding `new Listener(…)` (the blog's
+  idiom) for a listener; `.send()` / `.queue()` on a builder chain rooted at
+  `new Mail(…)` for a mail; `send` / `sendNow` / `sendToMany` /
+  `sendNowToMany` taking `new Notification(…)` for a notification. A mail
+  module that declares no class and exports functions (the blog's and the
+  api's idiom) is sent by calling one of those functions, a helper among them
+  included. An instance is followed through bindings scoped as ES modules scope
+  them (`var` to the function, `let` / `const` to the block, each `case` block
+  its own, a parameter's default), so a parameter or an inner binding of the
+  same name shadows it. A `var` initialised twice with two classes, and a name
+  the file assigns to anywhere, hold neither, since which value is current the
+  order cannot say (an assignment, destructuring and a `for (x of …)` or
+  `for (var x of …)` head all count). An `on()` / `once()` handler (the second
+  argument, never the options) registers a listener it constructs, or a class
+  or instance whose own member it calls, directly or through `call` / `apply`,
+  other than one every object has (`toString`, `bind`, …); a
+  `listener.handle.bind(listener)` handed over as the handler itself registers
+  too. That holds only when the first argument is an app event class or a class
+  `@guren/core` / `@guren/server` exports. A listener class or instance only
+  named there (`OptionsOnly.priority`), a member of one of its properties
+  (`L.name.toUpperCase()`), a computed member other than a string literal and a
+  bind nobody calls are mentions; so, on the safe side, are
+  `L.instance.handle()`, `L.prototype.handle.call(x)`, a bound member chosen by
+  a condition and one bound twice. On the other side, a call in the handler's
+  own place (`events.on(E, L.handler())`) counts, since a factory returning the
+  handler is written that way, although it runs once, at registration. The
+  same done in any other `on()` (a string event name, which `EventManager`
+  accepts, reads the same as
+  `router.on('POST', path, handler)` or a process hook, whose every argument is
+  read) is kept apart as unconfirmed: the element stays `present`, and the note
+  names the file rather than calling the class unused. A handler defined apart
+  from the call and passed by name is not followed, and reads as a mention.
+  Classes are resolved through the import, relative or `@/`, a barrel
+  (`app/Events/index.ts`) or a namespace import included, so a class of the
+  same name in another app root is another class.
+- The source read is every app root's `app/`, `routes/`, `src/`, `config/` and
+  top-level files, tests excluded, and never the class's own file: a job that
+  dispatches itself is not reached by that. The scan is AST-only, so a comment,
+  a string, an import, a type position and `registerJob()` are never a use. A
+  file that names the class without a use is kept as a mention and only feeds
+  the note. A source file that does not parse makes an absent use unprovable,
+  and the note says so; it is never `wired` on absent evidence. So does a
+  `new AutoDiscovery(…)` for a listener: it finds listener classes by directory,
+  and whatever registers them names none.
+- Why a mount and not a property. A property with a `match` lifts an element
+  to `verified` without a behaviour (*status rules after Part 2*), and nothing
+  in a plan links a behaviour to a side effect. As a mount, a side effect still
+  has no planned property, so it still closes only by a waiver, exactly as
+  before; being `wired` changes which hold it carries (`unreached` instead of
+  `incomplete`). What the mount changes is completion: a side effect completes
+  at `wired`, so its step is `incomplete` under `plan:verify` while nothing
+  uses the class, and `plan:close` names that as the remedy.
+- What the use does not say. The `trigger` is prose and is not matched: a
+  dispatch from another action than the one the plan names still counts. The
+  reach of the dispatch site is not followed either: a dispatch in an action
+  no route mounts counts.
+- The cost of `wired`, measured on the comments fixture. A side effect named
+  after a planned model is placed in that model's `http` step, after the
+  controller that dispatches it (`CommentPosted` lands in
+  `task/entity/model.comment/http/2`, the controller in `http/1`). One named
+  after no planned model (`WeeklyDigest`, `NotifyPostAuthor`) lands in the
+  Foundation task, which runs first, and its step stays `incomplete` until an
+  action of a later task dispatches it. Such an element is one the derivation
+  already reports as unplaced (`element-unassigned`), and the remedy is the
+  plan's: a task intent that `covers` the side effect beside the action that
+  uses it, or a waiver. Holding the step open is the reading this RFC asks for,
+  since a step is complete only when every element it covers is; exempting a
+  side effect from its step's completion would hide the misplacement.
+- Measured on the examples with every side effect planned as an `add`: in
+  `examples/blog`, 10 of 12 read `wired`; `ProcessNewPostJob` is registered and
+  never dispatched, and `NewPostMail`'s `sendNewPostMail` is called only from a
+  test, both true readings. In `examples/api`, 7 of 8; `SendRegistrationEmailJob`
+  is registered and never dispatched. Policies, read on the `create-app` blog
+  template (the examples have none): the five abilities `PostPolicy` declares
+  match, and a planned `restore` it lacks differs.
+
 **What is durable and what is not.** The decision log (waivers, deviations,
 the reason for each revision) is part of the record and lives in the store
 (§9), committed or on the issue. `.guren/plans/<slug>.state.json` is
@@ -1835,12 +2057,13 @@ readings (`packages/cli/src/plan-close.ts`, `plan/close-docs.ts`,
   element is printed with what holds it and, on the next line, the command
   that moves it: `plan:verify <plan> --step <id>` for the step that verifies
   it (preceded by the step whose behaviour reaches it, when none of its
-  planned properties matched), fixing the code first where it is below its
-  completion state or blocked, and `plan:waive <plan> <id> --reason` where no
-  `plan:verify` run can lift it: no step verifies it, nothing of it can be
-  fingerprinted, or none of its planned properties matched and no step's
-  behaviour reaches it. The last is predicted before any run, so a reader is
-  not sent to `plan:verify` only to find the element held as unreached.
+  planned properties matched beyond an existence), fixing the code first
+  where it is below its completion state or blocked, and
+  `plan:waive <plan> <id> --reason` where no `plan:verify` run can lift it:
+  no step verifies it, nothing of it can be fingerprinted, or none of its
+  planned properties matched beyond an existence and no step's behaviour
+  reaches it. The last is predicted before any run, so a reader is not sent
+  to `plan:verify` only to find the element held as unreached.
   `plan:next`, once every step is verified, lists the same lines
   (`plan/close-remedy.ts`), so the two commands give one piece of advice.
 - "Archives the plan" is the doc node. Under the `file` store nothing is moved

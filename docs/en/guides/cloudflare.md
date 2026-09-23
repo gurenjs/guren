@@ -36,6 +36,8 @@ bunx wrangler deploy
 
 Before the app build it runs the deploy-runtime checks `guren doctor` reports and warns, without failing, when sessions or OAuth state would sit in process memory, a [Bun-only password hasher](/docs/guides/authentication#password-hasher) is selected, or providers are discovered from the filesystem. Each works locally and breaks on Workers, and the warning prints where you are still reading rather than after the Vite output.
 
+The build also refuses a `wrangler.jsonc` that sets `"keep_names": false`, at the top level or in any `env.<name>` block. Guren keeps class names in records that outlive a deploy: queued jobs, queued events and stored notifications are keyed by class name unless they pin `static jobName`, `static eventName` or a `type` getter, and a [durable agent](./durable-agents.md) is found by its class name. wrangler bundles with esbuild's `keepNames` on unless `keep_names` turns it off, so `"minify": true` alone keeps those names. With `keep_names` off, minification renames every class, and even an unminified bundle renames the second of two top-level classes that share a name (`OrderShipped2`). Records the previous deploy wrote then stop resolving.
+
 ## Database (D1)
 
 Create the database and record its id in `wrangler.jsonc`:

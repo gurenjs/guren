@@ -18,7 +18,7 @@ async function auditBlog(root: string): Promise<void> {
   assert(appBootstrap.includes('EventServiceProvider'), 'Blog app must register EventServiceProvider.')
   assert(appBootstrap.includes('SchedulingProvider'), 'Blog app must register SchedulingProvider.')
 
-  const loginController = await read(root, 'app/Http/Controllers/Auth/LoginController.ts')
+  const loginController = await read(root, 'modules/auth/app/Http/Controllers/LoginController.ts')
   assert(loginController.includes('await this.validateBody('), 'Blog auth controller must use validateBody().')
   assert(!loginController.includes('.safeParse('), 'Blog auth controller must not use manual safeParse().')
 

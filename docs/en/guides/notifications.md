@@ -59,6 +59,27 @@ export class OrderShipped extends Notification {
 bunx guren make:notification OrderShipped
 ```
 
+This creates `app/Notifications/OrderShippedNotification.ts`, a `Notification`
+subclass with `via()`, `toMail()`, `toDatabase()` and `toArray()` to fill in. It
+also pins `type` to the generated class name:
+
+```ts
+override get type(): string {
+  return this.constructor === OrderShippedNotification ? 'OrderShippedNotification' : this.constructor.name
+}
+```
+
+`type` is the key a queue worker rebuilds the notification from and the `type`
+the database channel stores. Without the override it is the class name, which a
+bundler can rename. Change the string before the first notification is queued
+or stored if you want a different one.
+
+The constructor check limits the pin to the generated class, the way a job's
+`jobName` only counts on the class that declares it. A getter is inherited, so
+without the check a subclass would report the same `type` and replace this
+class in the registry. A subclass resolves by its own class name until it
+overrides `type` itself.
+
 ## Sending Notifications
 
 ### Setup
@@ -348,6 +369,14 @@ export class NotificationServiceProvider extends ServiceProvider {
 
 An unregistered notification fails loudly rather than silently delivering
 nothing.
+
+The registry key is the notification's `type`, which defaults to the class name.
+When a different class registers under a type another class holds, through
+`registerNotification()` or by being queued, it warns once, naming both, and the
+worker rebuilds the class registered last. Give one of them a distinct class
+name or override its `type` getter. Registering one class under a second type,
+to keep an old type resolving, is silent. A future major will throw instead of
+warning.
 
 Two things do not survive the queue, because only a notification's own
 properties are stored:

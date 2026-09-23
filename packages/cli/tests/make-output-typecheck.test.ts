@@ -280,6 +280,24 @@ const singleFileRenders: Array<[string, () => Promise<unknown>]> = [
   ['make:route', () => makeRoute('admin')],
 ]
 
+/**
+ * What an app does with the job and notification rendered above. Each file
+ * compiles alone whatever it extends; only a use tells a class the queue and
+ * the notification manager accept from one they reject.
+ */
+const QUEUE_AND_NOTIFICATION_USE = `import { NotificationManager, registerJob, registerNotification, type Notifiable } from '@guren/core'
+import { ProcessUploadJob } from '../Jobs/ProcessUploadJob'
+import { InvoicePaidNotification } from '../Notifications/InvoicePaidNotification'
+
+registerJob(ProcessUploadJob)
+registerNotification(InvoicePaidNotification)
+
+export async function deliver(notifications: NotificationManager, user: Notifiable): Promise<void> {
+  await ProcessUploadJob.dispatch({ uploadId: 1 })
+  await notifications.send(user, new InvoicePaidNotification({ invoiceId: 1 }))
+}
+`
+
 /** Generators this gate leaves to another, by name so a stale exemption fails. */
 const COVERED_ELSEWHERE: Record<string, string> = {
   ...SKIPPED_GENERATORS,
@@ -313,6 +331,7 @@ describe('rendered single-file make:* output typechecks', () => {
         }
         // Two renders writing one path would let the later hide the earlier from the gate.
         expect(new Set(created).size).toBe(created.length)
+        await writeWorkspaceFiles(workspace.dir, { 'app/Providers/QueueAndNotificationUse.ts': QUEUE_AND_NOTIFICATION_USE })
 
         await generatePageTypes({ appRoot: workspace.dir, extractProps: true, force: true })
         await typecheckRenderedApp(workspace.dir, created)

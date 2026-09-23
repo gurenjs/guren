@@ -317,7 +317,7 @@ export function pagePropMember(read: PagePropMembers, name: string): PagePropMem
  * signature, a computed key). A method signature has no single type node, so its
  * text runs from the parameter list on, and it never admits undefined.
  */
-function readMember(member: TSTypeElement, source: string, ast?: File): PagePropMemberInfo | undefined {
+export function readMember(member: TSTypeElement, source: string, ast?: File): PagePropMemberInfo | undefined {
   if (member.type !== 'TSPropertySignature' && member.type !== 'TSMethodSignature') return undefined
   const name = memberKeyName(member)
   if (!name) return undefined

@@ -1,8 +1,8 @@
 import { Controller, createEmailVerificationToken, completeEmailVerification, buildVerificationUrl } from '@guren/core'
-import { User, type UserRecord } from '../../../Models/User.js'
-import { emailVerificationStore } from '../../../Auth/EmailVerificationStore.js'
-import { appUrl } from '../../../Auth/AppUrl.js'
-import { sendEmailVerificationMail } from '../../../Mail/EmailVerificationMail.js'
+import { User, type UserRecord } from '../../../../../app/Models/User.js'
+import { emailVerificationStore } from '../../../../../app/Auth/EmailVerificationStore.js'
+import { appUrl } from '../../../../../app/Auth/AppUrl.js'
+import { sendEmailVerificationMail } from '../../../../../app/Mail/EmailVerificationMail.js'
 import { pages } from '@/.guren/pages.gen'
 
 const EXPIRED_MESSAGE = 'This verification link is invalid or has expired. Request a new one below.'

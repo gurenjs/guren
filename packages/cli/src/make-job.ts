@@ -11,6 +11,7 @@ export interface ${className}Payload {
 }
 
 export class ${className} extends Job<${className}Payload> {
+  static override jobName = '${className}'
   static override queue = 'default'
   static override maxAttempts = 3
 

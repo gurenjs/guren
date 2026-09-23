@@ -346,7 +346,7 @@ describe('plan:close', () => {
 
     expect(error.message).toContain(`  column.comment.id: present\n    Run \`bunx guren plan:verify ${app.plan} --step task/entity/model.comment/data\`;`)
     expect(error.message).toContain(
-      `  view.posts.show: unjudged (No planned property of this change has a reader)\n    No planned property of it matched and no step's behaviour reaches it, so no plan:verify run lifts it: waive it with \`bunx guren plan:waive ${app.plan} view.posts.show --reason "<why>"\``,
+      `  view.posts.show: unjudged (No planned property of this change has a reader)\n    No planned property of it matched beyond its existence and no step's behaviour reaches it, so no plan:verify run lifts it: waive it with \`bunx guren plan:waive ${app.plan} view.posts.show --reason "<why>"\``,
     )
   })
 
@@ -489,7 +489,7 @@ describe('describeCloseBlockers', () => {
 
   test('should name what a run found ahead of the reason the reader gave, except for an incomplete hold', () => {
     const expired = 'Verified t by s; changed since: a.ts.'
-    const unreached = 'Verified t by s, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.'
+    const unreached = 'Verified t by s, but no planned property of it matched beyond its existence and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.'
     const incomplete = 'Verified t by s, and no longer at the state that completes it.'
     const reason = 'No planned property of this element could be read.'
 
@@ -524,6 +524,9 @@ describe('describeCloseBlockers', () => {
 
     expect(lift(unreached).hold?.kind).toBe('unreached')
     expect(blockerOf(unreached)).toContain('so no plan:verify run lifts it: waive it with')
+    const onKeys = element('resource.comment', 'present', { properties: [{ property: 'field body', verdict: 'match', planned: 'declared', actual: 'declared', existence: true }] })
+    expect(lift(onKeys).hold?.kind).toBe('unreached')
+    expect(blockerOf(onKeys)).toContain('so no plan:verify run lifts it: waive it with')
     const reached = element('model.comment', 'present')
     expect(lift(reached).state).toBe('verified')
     expect(blockerOf(reached)).not.toContain('waive it with')

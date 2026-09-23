@@ -1,4 +1,5 @@
 import type { Notification } from './Notification'
+import { reportRegistryCollision } from '../support/registry-collision'
 
 /**
  * A notification class usable for queue reconstruction. Only the prototype and
@@ -32,17 +33,16 @@ function resolveRegistryKey(notificationClass: NotificationConstructor): string 
 /**
  * Register a notification class so queued instances can be rebuilt. Queueing
  * registers automatically, which covers a worker in the same process; a worker
- * in a separate process must register at boot. Type names must be unique — a
- * second class under an existing type replaces the first.
+ * in a separate process must register at boot. A second class under a taken
+ * type warns and replaces the first.
  */
 export function registerNotification(
   notificationClass: NotificationConstructor,
   type?: string
 ): void {
-  notificationRegistry.set(
-    type ?? resolveRegistryKey(notificationClass),
-    notificationClass
-  )
+  const key = type ?? resolveRegistryKey(notificationClass)
+  reportRegistryCollision('notification', key, notificationRegistry.get(key), notificationClass)
+  notificationRegistry.set(key, notificationClass)
 }
 
 export function getNotification(

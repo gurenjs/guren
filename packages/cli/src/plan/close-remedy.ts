@@ -7,13 +7,13 @@
 import type { Plan, PlanDraft } from './schema'
 import { awaitsVerification, type PlanElementState, type PlanElementStatus } from './status'
 import { listPlanSteps, type PlanTaskDerivation } from './tasks'
-import { behaviourReach } from './verification'
+import { behaviourReach, restsOnReach } from './verification'
 
 interface BlockerContext {
   planArgument: string
   /** The step that verifies each element. */
   owners: Map<string, string>
-  /** The steps whose behaviours reach each element, which is what lifts one none of whose planned properties matched. */
+  /** The steps whose behaviours reach each element, which is what lifts one `restsOnReach()` holds for. */
   carriers: Map<string, string[]>
 }
 
@@ -72,11 +72,11 @@ function closeRemedy(element: PlanElementStatus<PlanElementState>, context: Bloc
     const target = element.state === 'planned' ? 'Implement it' : `Change the code until plan:status reports it ${element.completesAt}`
     return `${target}, then run ${verify(owner)}${orWaive}`
   }
-  const unmatched = element.change !== 'drop' && !element.properties.some((property) => property.verdict === 'match')
+  const unmatched = restsOnReach(element)
   const needsNoFiles = element.change === 'drop' || element.state === 'unjudged'
   const carriers = context.carriers.get(element.id) ?? []
   if (unmatched && carriers.length === 0) {
-    return `No planned property of it matched and no step's behaviour reaches it, so no plan:verify run lifts it: waive it with ${waive}, or add a behaviour that reaches it and approve the plan again`
+    return `No planned property of it matched beyond its existence and no step's behaviour reaches it, so no plan:verify run lifts it: waive it with ${waive}, or add a behaviour that reaches it and approve the plan again`
   }
   if (element.files.length === 0 && !needsNoFiles) return `plan:verify cannot fingerprint it, so no run lifts it: waive it with ${waive}`
   const runs = unmatched && !carriers.includes(owner) ? [carriers[0]!, owner] : [owner]

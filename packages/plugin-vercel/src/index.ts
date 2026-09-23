@@ -3,12 +3,14 @@ import { basename, extname, resolve } from 'node:path'
 import { definePlugin, type ServiceProviderConstructor } from '@guren/core'
 import {
   assertOutputDirOutsideRoot,
+  BUN_DEPLOY_MINIFY,
   bundledRuntimeEnv,
   DEV_ONLY_MODULES,
   DOCUMENT_ASSET_EXTENSIONS,
   DOCUMENT_ASSET_HEADERS,
   removeShadowingIndex,
   renderDevOnlyStub,
+  reportRenamedNameKeyedClasses,
   resetOutputDir,
   resolveClientAssetEnv,
   resolvePathLike,
@@ -280,12 +282,8 @@ async function bundleFunction(input: {
     throw: false,
     outdir: input.funcDir,
     target: 'bun',
-    // Whitespace and syntax only — plain `minify: true` also mangles
-    // identifiers, and Guren keys durable records on class names (the queue
-    // registry stores each job's wire name in every queued message,
-    // notifications persist `constructor.name` as their `type`). Not
-    // `keepNames`: on Bun 1.3.14 and 1.4.2 it silently leaves class names mangled.
-    minify: { whitespace: true, syntax: true, identifiers: false },
+    minify: BUN_DEPLOY_MINIFY,
+    metafile: true,
     define: {
       // `bun build` inlines `process.env.NODE_ENV` at bundle time (defaulting
       // to "development"), so pin it to "production" for the deployed function.
@@ -314,6 +312,8 @@ async function bundleFunction(input: {
   if (!result.success) {
     throw new Error(`${LABEL}: bun build failed.\n${result.logs.map((log) => String(log)).join('\n')}`)
   }
+
+  await reportRenamedNameKeyedClasses(result, { root: input.root, label: LABEL })
 }
 
 function buildVercelEnvironment(publicDir: string, ssrDir: string): Record<string, string> {

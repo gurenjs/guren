@@ -206,7 +206,6 @@ describe('token:issue flag parsing', () => {
   let workspace: TempWorkspace
   let appDir: string
   let logSpy: ReturnType<typeof spyOn>
-  let exitSpy: ReturnType<typeof spyOn>
 
   beforeEach(async () => {
     workspace = await createTempWorkspace('guren-cli-token-flags-')
@@ -217,18 +216,17 @@ describe('token:issue flag parsing', () => {
     await writeFile(join(appDir, 'routes/web.ts'), ROUTES)
     await writeFile(join(appDir, 'src/main.ts'), MAIN)
     logSpy = spyOn(console, 'log').mockImplementation(() => {})
-    // A successful run ends in `process.exit(0)` and closes nothing it opened,
-    // so success is observed as this sentinel rather than left real.
-    exitSpy = spyOn(process, 'exit').mockImplementation(((code?: number) => {
-      throw new Error(`process.exit(${code ?? 0})`)
-    }) as never)
   })
 
   afterEach(async () => {
-    exitSpy.mockRestore()
     logSpy.mockRestore()
     await workspace.cleanup()
   })
+
+  function issued(): { token: unknown; granted: unknown } {
+    const printed = logSpy.mock.calls.at(-1)?.[0]
+    return JSON.parse(String(printed)) as { token: unknown; granted: unknown }
+  }
 
   async function runFlags(rawArgs: string[]): Promise<unknown> {
     const command = builtinSubCommands['token:issue']
@@ -243,18 +241,19 @@ describe('token:issue flag parsing', () => {
 
   it('honours the last value of a repeated boolean rather than any false', async () => {
     // The inverse direction on a write tool: a lingering `--read-only=true`
-    // would refuse `posts.store`, so reaching the success exit is the assertion.
-    await expect(
-      runFlags(['--name', 'ci', '--user', '42', '--tools', 'posts.store', '--read-only=true', '--read-only=false']),
-    ).rejects.toThrow('process.exit(0)')
+    // would refuse `posts.store`, so issuing the token is the assertion.
+    await runFlags(['--name', 'ci', '--user', '42', '--tools', 'posts.store', '--read-only=true', '--read-only=false'])
+    expect(issued().token).toEqual(expect.any(String))
+    expect(JSON.stringify(issued().granted)).toContain('posts.store')
   })
 
   it('reads the last --tools rather than joining repeats', async () => {
     // Joined, the repeat would name neither tool and be refused; last-wins
-    // issues against the second one and reaches the success exit.
-    await expect(
-      runFlags(['--name', 'ci', '--user', '42', '--tools', 'internal.index', '--tools', 'posts.index']),
-    ).rejects.toThrow('process.exit(0)')
+    // issues against the second one.
+    await runFlags(['--name', 'ci', '--user', '42', '--tools', 'internal.index', '--tools', 'posts.index'])
+    expect(issued().token).toEqual(expect.any(String))
+    expect(JSON.stringify(issued().granted)).toContain('posts.index')
+    expect(JSON.stringify(issued().granted)).not.toContain('internal.index')
   })
 
   it('refuses a repeated --allow-unmatched that ends in false', async () => {

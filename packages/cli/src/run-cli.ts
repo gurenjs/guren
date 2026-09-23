@@ -11,7 +11,8 @@ export async function resolveValue<T>(input: T | (() => T | Promise<T>)): Promis
   return typeof input === 'function' ? await (input as () => T | Promise<T>)() : await input
 }
 
-async function resolveSubCommand(
+/** The command `rawArgs` dispatches to (the leaf), and its parent. */
+export async function resolveSubCommand(
   cmd: AnyCommandDef,
   rawArgs: string[],
   parent?: AnyCommandDef,

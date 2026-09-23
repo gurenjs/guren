@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
+import type { Notification } from '@guren/core'
 import { makeChannel as scaffoldChannel } from '../src/make-channel'
 import { makeCommand as scaffoldCommand } from '../src/make-command'
 import { makeEvent as scaffoldEvent } from '../src/make-event'
@@ -20,6 +21,7 @@ import { makeValidator as scaffoldValidator } from '../src/make-validator'
 import { makeFeature as scaffoldFeature } from '../src/make-feature'
 import { parseFieldsString } from '../src/fields'
 import type { WriterOptions } from '../src/utils'
+import { linkWorkspacePackage } from './helpers'
 
 // A predictable path under the shared OS temp dir lets another process
 // pre-plant a symlink there; mkdtempSync's random suffix is what makes this
@@ -94,6 +96,14 @@ describe('CLI make:* commands', () => {
       expect(content).toContain('async handle(payload: SendEmailJobPayload)')
       expect(content).toContain('async failed(payload: SendEmailJobPayload, error: Error)')
       expect(content).toContain("static override queue = 'default'")
+    })
+
+    it('pins jobName to the class name it emits', async () => {
+      for (const name of ['SendEmail', 'SendEmailJob']) {
+        const content = fs.readFileSync(await makeJob(name, { force: true }), 'utf-8')
+        expect(content.match(/class (\w+) extends Job/)?.[1]).toBe('SendEmailJob')
+        expect(content).toContain("static override jobName = 'SendEmailJob'")
+      }
     })
 
     it('preserves Job suffix if already present', async () => {
@@ -338,11 +348,61 @@ describe('CLI make:* commands', () => {
     it('generates correct notification template', async () => {
       const result = await makeNotification('InvoicePaid')
       const content = fs.readFileSync(result, 'utf-8')
-      expect(content).toContain('class InvoicePaidNotification')
+      expect(content).toContain("import { Notification, type NotificationMailMessage } from '@guren/core'")
+      expect(content).toContain('class InvoicePaidNotification extends Notification')
+      expect(content).toContain('super()')
       expect(content).toContain('via()')
-      expect(content).toContain('toMail()')
+      expect(content).toContain('toMail(): NotificationMailMessage')
       expect(content).toContain('toDatabase()')
       expect(content).toContain('toArray()')
+    })
+
+    it('pins type to the class name it emits', async () => {
+      for (const name of ['InvoicePaid', 'InvoicePaidNotification']) {
+        const content = fs.readFileSync(await makeNotification(name, { force: true }), 'utf-8')
+        expect(content.match(/class (\w+) extends Notification/)?.[1]).toBe('InvoicePaidNotification')
+        expect(content).toContain(
+          "return this.constructor === InvoicePaidNotification ? 'InvoicePaidNotification' : this.constructor.name",
+        )
+      }
+    })
+
+    // The rendered class, the channels and the registry must share one module instance.
+    it('delivers through the mail and database channels under a type its subclasses do not take', async () => {
+      await linkWorkspacePackage('core', TEST_DIR)
+      const corePath = fs.realpathSync(Bun.resolveSync('@guren/core', TEST_DIR))
+      expect(corePath).toStartWith(path.resolve(import.meta.dir, '../../core') + path.sep)
+      const core = (await import(corePath)) as typeof import('@guren/core')
+      const { InvoicePaidNotification } = (await import(await makeNotification('InvoicePaid'))) as {
+        InvoicePaidNotification: new (data?: Record<string, unknown>) => Notification & { via(): string[] }
+      }
+
+      const mailed: Array<{ subject: string; text?: string }> = []
+      const mailManager = {
+        transport: () => ({ send: async (message: { subject: string; text?: string }) => { mailed.push(message) } }),
+      } as unknown as ConstructorParameters<typeof core.MailChannel>[0]
+      const database = new core.DatabaseChannel()
+      const notifications = new core.NotificationManager({ channels: { mail: new core.MailChannel(mailManager), database } })
+      const user = { id: 1, routeNotificationFor: () => 'user@example.com' }
+      await notifications.send(user, new InvoicePaidNotification({ invoiceId: 7 }))
+
+      expect(mailed.map(({ subject, text }) => ({ subject, text }))).toEqual([
+        { subject: 'InvoicePaid', text: 'Your notification content here.' },
+      ])
+      expect(database.getStored().map(({ type, data }) => ({ type, data }))).toEqual([
+        { type: 'InvoicePaidNotification', data: { invoiceId: 7 } },
+      ])
+
+      class OverdueInvoiceNotification extends InvoicePaidNotification {}
+      core.clearNotificationRegistry()
+      try {
+        core.registerNotification(InvoicePaidNotification)
+        core.registerNotification(OverdueInvoiceNotification)
+        expect(new OverdueInvoiceNotification().type).toBe('OverdueInvoiceNotification')
+        expect(core.getNotification('InvoicePaidNotification')).toBe(InvoicePaidNotification)
+      } finally {
+        core.clearNotificationRegistry()
+      }
     })
   })
 

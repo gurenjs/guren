@@ -12,7 +12,6 @@ import {
   NotificationServiceProvider as CoreNotificationServiceProvider,
   BroadcastServiceProvider as CoreBroadcastServiceProvider,
 } from '@guren/core'
-import AuthProvider from '../app/Providers/AuthProvider.js'
 import requestLogger from '../app/Http/middleware/requestLogger.js'
 import EventServiceProvider from '../app/Providers/EventServiceProvider.js'
 import SchedulingProvider from '../app/Providers/SchedulingProvider.js'
@@ -28,6 +27,7 @@ import oauth from '../config/oauth.js'
 import queue from '../config/queue.js'
 import session from '../config/session.js'
 import storage from '../config/storage.js'
+import { authModule } from '../modules/auth/index.js'
 import { registerWebRoutes } from '../routes/web.js'
 import '../config/inertia.js'
 
@@ -45,11 +45,11 @@ const app = createApp({
   env,
   config: [database, http, session, cache, mail, queue, storage, oauth],
   routes: registerWebRoutes,
+  modules: [authModule],
   providers: [
     ErrorServiceProvider,
     InertiaServiceProvider,
     CoreAuthServiceProvider,
-    AuthProvider,
     CoreNotificationServiceProvider,
     NotificationProvider,
     AttachmentsProvider,

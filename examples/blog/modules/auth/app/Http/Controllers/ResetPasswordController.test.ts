@@ -11,7 +11,7 @@ const { mockUserWhere, mockUserUpdate } = vi.hoisted(() => ({
   mockUserUpdate: vi.fn(),
 }))
 
-vi.mock('../../app/Models/User.js', () => ({
+vi.mock('../../../../../app/Models/User.js', () => ({
   User: {
     where: mockUserWhere,
     update: mockUserUpdate,
@@ -26,8 +26,8 @@ vi.mock('@guren/core', async () => {
   }
 })
 
-import ResetPasswordController from '../../app/Http/Controllers/Auth/ResetPasswordController.js'
-import { passwordResetStore } from '../../app/Auth/PasswordResetStore.js'
+import ResetPasswordController from './ResetPasswordController.js'
+import { passwordResetStore } from '../../../../../app/Auth/PasswordResetStore.js'
 import { createPasswordResetToken } from '@guren/core'
 
 describe('ResetPasswordController', () => {

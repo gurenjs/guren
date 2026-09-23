@@ -157,10 +157,10 @@ API アプリをフルスタック化するときは、先に `@guren/inertia-cl
 | `make:auth` | ログイン/ログアウト・新規登録・パスワードリセットのコントローラー、プロバイダー、ビュー、マイグレーション、シーダー、ルートをスキャフォールド(`--minimal` で登録・パスワードリセットを省略、`--verify` でメール確認も追加、`--oauth <providers>` でカンマ区切りのプロバイダー向け OAuth ログインボタンも追加、`--oauth-only` でパスワードログインを完全に外して OAuth のみにする) | `bunx guren make:auth --oauth github,google` |
 | `make:middleware <Name>` | `app/Http/Middleware` にミドルウェアを生成 | `bunx guren make:middleware Auth` |
 | `make:seeder <Name>` | データベースシーダーファイルを生成 | `bunx guren make:seeder UserSeeder` |
-| `make:job <Name>` | キュー可能なジョブクラスを生成 | `bunx guren make:job SendEmail` |
+| `make:job <Name>` | キュー可能なジョブクラスを生成（`jobName` はクラス名で固定） | `bunx guren make:job SendEmail` |
 | `make:event <Name>` | イベントクラスを生成 | `bunx guren make:event UserRegistered` |
 | `make:listener <Name>` | イベントリスナークラスを生成 | `bunx guren make:listener SendWelcomeEmail` |
-| `make:notification <Name>` | 通知クラスを生成 | `bunx guren make:notification InvoicePaid` |
+| `make:notification <Name>` | 通知クラスを生成（`type` はクラス名で固定） | `bunx guren make:notification InvoicePaid` |
 | `make:mail <Name>` | メールクラスを生成 | `bunx guren make:mail WelcomeEmail` |
 | `make:command <Name>` | `app/Console/Commands` にコンソールコマンドを生成。`--command <name>` で呼び出し名を指定。`src/console.ts` への登録が必要([コンソールコマンドガイド](./console.md)参照) | `bunx guren make:command SendDigest --command reports:digest` |
 | `make:policy <Name>` | 所有者ベースのデフォルトを備えた認可ポリシーを `app/Policies` に生成 | `bunx guren make:policy Post` |

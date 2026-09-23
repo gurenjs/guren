@@ -7,6 +7,18 @@ import { buildVercelOutput, createVercelHandler, vercelPlugin } from '../src/ind
 
 const DEFAULT_ENTRYPOINT_SOURCE = "export default { fetch() { return new Response('ok') } }\n"
 
+async function captureWarnings(run: () => Promise<void>): Promise<string[]> {
+  const warnings: string[] = []
+  const original = console.warn
+  console.warn = (message: string) => warnings.push(message)
+  try {
+    await run()
+  } finally {
+    console.warn = original
+  }
+  return warnings
+}
+
 /** Writes a minimal buildable app under `root`, as `buildVercelOutput` options. */
 function scaffoldApp(
   root: string,
@@ -310,23 +322,62 @@ describe('@guren/plugin-vercel', () => {
       expect(copied).toContain('Hello docs.')
     })
 
-    it('preserves class names through the bundler', async () => {
-      // Regression guard for the bundler flags in src/index.ts — see the comment
-      // on that argv for why mangled class names outlive a deploy.
+    it('preserves class and function names through the bundler', async () => {
+      // The queue registry keys on the class name: mangling renames declarations, and
+      // syntax minification alone drops an expression's name or swaps in the binding's.
       const app = scaffoldApp(root, {
-        source:
-          'class GurenJobProbe {}\nexport default { fetch() { return new Response(GurenJobProbe.name) } }\n',
+        source: [
+          'class Job {}',
+          'const registry: Array<{ name: string }> = []',
+          'const register = (job: { name: string }) => { registry.push(job) }',
+          'register(class SendWelcomeMailJob extends Job {})',
+          'register(function inlineNamedFn() {})',
+          'const makeJob = () => class ReturnedJob extends Job {}',
+          'const SendMail = class SendMailJob extends Job {}',
+          'const names = () => [Job.name, ...registry.map((job) => job.name), makeJob().name, SendMail.name].join(",")',
+          'export default { fetch() { return new Response(names()) } }',
+          '',
+        ].join('\n'),
       })
 
       await buildVercelOutput(app)
 
-      // Asserting on the runtime name rather than the bundle text: `.name` is
-      // what the queue registry and notification types actually read, and it
-      // survives any reformatting the bundler may do.
       const bundled = await import(join(app.outputDir, 'functions/index.func/index.js'))
       const response = await bundled.default.fetch(new Request('http://example.com/'))
 
-      expect(await response.text()).toBe('GurenJobProbe')
+      expect(await response.text()).toBe('Job,SendWelcomeMailJob,inlineNamedFn,ReturnedJob,SendMailJob')
+    })
+
+    it('warns when the bundle renames a name-keyed class another module shares a name with', async () => {
+      const app = scaffoldApp(root, {
+        source: [
+          "import { OrderShipped as ShippedEvent } from '../app/Events/OrderShipped'",
+          "import { OrderShipped as ShippedNotification } from '../app/Notifications/OrderShipped'",
+          'const names = () => [ShippedEvent.name, ShippedNotification.name].join(",")',
+          'export default { fetch() { return new Response(names()) } }',
+          '',
+        ].join('\n'),
+      })
+      // Unimported bases read as the framework's, and only the plugin's wiring is under test.
+      mkdirSync(join(root, 'app/Events'), { recursive: true })
+      mkdirSync(join(root, 'app/Notifications'), { recursive: true })
+      writeFileSync(
+        join(root, 'app/Events/OrderShipped.ts'),
+        'export class OrderShipped extends Event {}\n',
+      )
+      writeFileSync(
+        join(root, 'app/Notifications/OrderShipped.ts'),
+        'export class OrderShipped extends Notification {}\n',
+      )
+
+      const warnings = await captureWarnings(() => buildVercelOutput(app))
+
+      const renamed = warnings.find((line) =>
+        line.startsWith('Vercel build: the bundle names a class OrderShipped as OrderShipped2'),
+      )
+      expect(renamed).toBeDefined()
+      // Whichever of the two the bundle renamed, named by its app-relative path.
+      expect(renamed).toMatch(/ app[\\/](Events|Notifications)[\\/]OrderShipped\.ts declares a job/)
     })
 
     it('finds docs in a parent directory when the app root is nested', async () => {
@@ -407,14 +458,7 @@ describe('buildVercelOutput deploy-runtime warnings (RFC 0020 Part 0)', () => {
       'utf8',
     )
 
-    const warnings: string[] = []
-    const original = console.warn
-    console.warn = (message: string) => warnings.push(message)
-    try {
-      await buildVercelOutput(app)
-    } finally {
-      console.warn = original
-    }
+    const warnings = await captureWarnings(() => buildVercelOutput(app))
 
     const hazard = warnings.find((line) => line.startsWith('Vercel build: Vercel shares no memory'))
     expect(hazard).toBeDefined()

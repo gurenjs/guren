@@ -21,6 +21,9 @@ import {
   renderDevOnlyStub,
   importSpecifier,
   readManifest,
+  BUN_DEPLOY_MINIFY,
+  renamedNameKeyedClasses,
+  reportRenamedNameKeyedClasses,
   resolveClientAssetEnv,
   resolvePathLike,
   ssrRuntimePaths,
@@ -839,5 +842,217 @@ describe('DATABASE_FACTORIES', () => {
 
     expect(exported.length).toBeGreaterThan(0)
     expect(new Set(Object.keys(DATABASE_FACTORIES))).toEqual(new Set(exported))
+  })
+})
+
+describe('renamedNameKeyedClasses', () => {
+  const event = { file: 'app/Events/OrderShipped.ts', text: 'export class OrderShipped extends Event {}\n' }
+  const notification = {
+    file: 'app/Notifications/OrderShipped.ts',
+    text: 'export class OrderShipped extends Notification<Payload> {}\n',
+  }
+
+  test('should report the declaration whose base the numbered class extends', () => {
+    const bundle = 'class OrderShipped extends Event{}class OrderShipped2 extends Notification{}'
+
+    expect(renamedNameKeyedClasses(bundle, [event, notification])).toEqual([
+      { name: 'OrderShipped', bundledAs: 'OrderShipped2', kind: 'record', files: [notification.file] },
+    ])
+  })
+
+  test('should follow extends through the app own base classes', () => {
+    const sources = [
+      { file: 'app/Jobs/BaseJob.ts', text: 'export abstract class BaseJob<T> extends Job<T> {}\n' },
+      { file: 'app/Jobs/SendMail.ts', text: 'export default class SendMail extends BaseJob<{ to: string }> {}\n' },
+    ]
+
+    expect(renamedNameKeyedClasses('class SendMail2 extends BaseJob2{}', sources)).toEqual([
+      { name: 'SendMail', bundledAs: 'SendMail2', kind: 'record', files: ['app/Jobs/SendMail.ts'] },
+    ])
+  })
+
+  test('should report a model, which has no name to pin', () => {
+    const sources = [
+      { file: 'app/Models/Channel.ts', text: 'export class Channel extends defineModel(channels, {\n  fillable: [],\n}) {}\n' },
+      { file: 'app/Models/Photo.ts', text: "export class Photo extends Attachable(defineModel(photos), { image: 'one' }) {}\n" },
+      { file: 'app/Models/User.ts', text: "export class User extends AuthenticatableModel {\n  notifiableType = 'User'\n}\n" },
+      { file: 'app/Models/Post.ts', text: 'export class Post extends SoftDeletes(defineModel(posts)) {}\n' },
+    ]
+    const bundle =
+      'class Channel2 extends defineModel(channels){}class Photo2 extends Attachable(defineModel(photos)){}' +
+      'class User2 extends AuthenticatableModel{}class Post2 extends SoftDeletes(defineModel(posts)){}'
+
+    expect(renamedNameKeyedClasses(bundle, sources)).toEqual([
+      { name: 'Channel', bundledAs: 'Channel2', kind: 'model', files: ['app/Models/Channel.ts'] },
+      { name: 'Photo', bundledAs: 'Photo2', kind: 'model', files: ['app/Models/Photo.ts'] },
+      { name: 'User', bundledAs: 'User2', kind: 'model', files: ['app/Models/User.ts'] },
+      { name: 'Post', bundledAs: 'Post2', kind: 'model', files: ['app/Models/Post.ts'] },
+    ])
+  })
+
+  test('should not blame the app for a dependency class the bundle renamed', () => {
+    const channel = { file: 'app/Models/Channel.ts', text: 'export class Channel extends defineModel(channels) {}\n' }
+    const bundle = 'class Channel extends defineModel(channels){}class Channel2 extends EventEmitter{}class Channel3{}'
+
+    expect(renamedNameKeyedClasses(bundle, [channel])).toEqual([])
+  })
+
+  test('should resolve an aliased framework import, and let an app class shadow a framework name', () => {
+    const sources = [
+      { file: 'app/Jobs/SendMail.ts', text: "import { Job as QueuedJob } from '@guren/core'\nexport class SendMail extends QueuedJob {}\n" },
+      { file: 'app/Models/Event.ts', text: "import { defineModel } from '@guren/core'\nexport class Event extends defineModel(events) {}\n" },
+      { file: 'app/Models/Meetup.ts', text: "import { Event } from './Event'\nexport class Meetup extends Event {}\n" },
+      { file: 'app/Events/Booked.ts', text: "import { Event } from '@guren/core'\nexport class Booked extends Event {}\n" },
+    ]
+    const bundle = 'class SendMail2 extends Job{}class Meetup2 extends Event2{}class Booked2 extends Event{}'
+
+    expect(renamedNameKeyedClasses(bundle, sources)).toEqual([
+      { name: 'SendMail', bundledAs: 'SendMail2', kind: 'record', files: ['app/Jobs/SendMail.ts'] },
+      { name: 'Meetup', bundledAs: 'Meetup2', kind: 'model', files: ['app/Models/Meetup.ts'] },
+      { name: 'Booked', bundledAs: 'Booked2', kind: 'record', files: ['app/Events/Booked.ts'] },
+    ])
+  })
+
+  test('should report one result per kind when a record and a model share the renamed name', () => {
+    const sources = [
+      { file: 'app/Models/Event.ts', text: "import { defineModel } from '@guren/core'\nexport class Event extends defineModel(events) {}\n" },
+      { file: 'app/Models/Booked.ts', text: "import { Event } from './Event'\nexport class Booked extends Event {}\n" },
+      { file: 'app/Events/Booked.ts', text: "import { Event } from '@guren/core'\nexport class Booked extends Event {}\n" },
+    ]
+
+    expect(renamedNameKeyedClasses('class Booked2 extends Event{}', sources)).toEqual([
+      { name: 'Booked', bundledAs: 'Booked2', kind: 'model', files: ['app/Models/Booked.ts'] },
+      { name: 'Booked', bundledAs: 'Booked2', kind: 'record', files: ['app/Events/Booked.ts'] },
+    ])
+  })
+
+  test('should read an extends clause on the next line and a member-expression base', () => {
+    const sources = [
+      {
+        file: 'app/Notifications/OrderShippedToCustomerNotification.ts',
+        text: 'export class OrderShippedToCustomerNotification\n  extends Notification<{ orderId: number }> {}\n',
+      },
+      { file: 'app/Models/Channel.ts', text: 'export class Channel extends core.defineModel(channels) {}\n' },
+    ]
+    const bundle =
+      'class OrderShippedToCustomerNotification2 extends Notification{}' +
+      'class Channel2 extends import_core.defineModel(channels){}'
+
+    expect(renamedNameKeyedClasses(bundle, sources)).toEqual([
+      {
+        name: 'OrderShippedToCustomerNotification',
+        bundledAs: 'OrderShippedToCustomerNotification2',
+        kind: 'record',
+        files: ['app/Notifications/OrderShippedToCustomerNotification.ts'],
+      },
+      { name: 'Channel', bundledAs: 'Channel2', kind: 'model', files: ['app/Models/Channel.ts'] },
+    ])
+  })
+
+  test('should skip a record that pins its name, or a class nothing stores by name', () => {
+    const sources = [
+      { file: 'app/Jobs/SendMail.ts', text: "export class SendMail extends Job {\n  static jobName = 'send-mail'\n}\n" },
+      { file: 'app/Agents/Triage.ts', text: "export class Triage extends Agent {\n  static override agentName = 'triage'\n}\n" },
+      { file: 'app/Notifications/Shipped.ts', text: "export class Shipped extends Notification {\n  get type() { return 'shipped' }\n}\n" },
+      { file: 'app/Providers/EventServiceProvider.ts', text: 'export default class EventServiceProvider extends ServiceProvider {}\n' },
+    ]
+    const bundle =
+      'class SendMail2 extends Job{}class Triage2 extends Agent{}class Shipped2 extends Notification{}' +
+      'class EventServiceProvider2 extends ServiceProvider{}'
+
+    expect(renamedNameKeyedClasses(bundle, sources)).toEqual([])
+  })
+
+  test('should not read a numbered name the app declares itself as a rename', () => {
+    const sources = [
+      event,
+      { file: 'app/Events/OrderShipped2.ts', text: 'export class OrderShipped2 extends Event {}\n' },
+    ]
+
+    expect(renamedNameKeyedClasses('class OrderShipped extends Event{}class OrderShipped2 extends Event{}', sources)).toEqual([])
+  })
+})
+
+describe('reportRenamedNameKeyedClasses', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'guren-renamed-classes-'))
+    for (const dir of ['app/Events', 'app/Notifications', 'app/Models', 'app/lib', 'node_modules/@guren/core']) {
+      mkdirSync(join(root, dir), { recursive: true })
+    }
+    writeFileSync(join(root, 'node_modules/@guren/core/package.json'), '{ "name": "@guren/core", "type": "module", "main": "index.js" }\n')
+    writeFileSync(
+      join(root, 'node_modules/@guren/core/index.js'),
+      'export class Event {}\nexport class Notification {}\nexport class Model {}\n',
+    )
+    writeFileSync(join(root, 'app/Events/OrderShipped.ts'), "import { Event } from '@guren/core'\nexport class OrderShipped extends Event {}\n")
+    writeFileSync(
+      join(root, 'app/Notifications/OrderShipped.ts'),
+      "import { Notification } from '@guren/core'\nexport class OrderShipped extends Notification {}\n",
+    )
+    writeFileSync(join(root, 'app/lib/channel.ts'), 'export class Channel {}\n')
+    writeFileSync(join(root, 'app/Models/Channel.ts'), "import { Model } from '@guren/core'\nexport class Channel extends Model {}\n")
+    writeFileSync(
+      join(root, 'entry.ts'),
+      [
+        "import { OrderShipped as ShippedEvent } from './app/Events/OrderShipped'",
+        "import { OrderShipped as ShippedNotification } from './app/Notifications/OrderShipped'",
+        "import { Channel as Broadcast } from './app/lib/channel'",
+        "import { Channel } from './app/Models/Channel'",
+        'export const names = [ShippedEvent.name, ShippedNotification.name, Broadcast.name, Channel.name]',
+        '',
+      ].join('\n'),
+    )
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  test('should warn about the renames a real bundle makes, naming the app-relative file', async () => {
+    const result = await Bun.build({ entrypoints: [join(root, 'entry.ts')], metafile: true, minify: BUN_DEPLOY_MINIFY })
+    const bundle = await result.outputs[0]!.text()
+    // Bun 1.3.14 and 1.4.2 rename one of each pair whatever keepNames says. Should this
+    // start failing, Bun has fixed it and the warning can go.
+    const renamedRecord = /class OrderShipped2 extends (Event|Notification)\b/.exec(bundle)?.[1]
+    expect(renamedRecord).toBeDefined()
+    expect(bundle).toContain('class Channel2 extends Model')
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+
+    try {
+      await reportRenamedNameKeyedClasses(result, { root, label: 'Test build' })
+
+      const messages = warn.mock.calls.map(([message]) => String(message))
+      expect(messages).toHaveLength(2)
+      const record = messages.find((message) => message.startsWith('Test build: the bundle names a class OrderShipped as OrderShipped2'))
+      const recordFile = join('app', renamedRecord === 'Event' ? 'Events' : 'Notifications', 'OrderShipped.ts')
+      expect(record).toContain(` ${recordFile} declares a job, event, notification or agent named OrderShipped`)
+      const model = messages.find((message) => message.startsWith('Test build: the bundle names a class Channel as Channel2'))
+      expect(model).toContain(` ${join('app', 'Models', 'Channel.ts')} declares a model named Channel.`)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  test('should leave module dependencies, plugin namespaces and non-code outputs unread', async () => {
+    mkdirSync(join(root, 'node_modules/shipping'), { recursive: true })
+    writeFileSync(join(root, 'node_modules/shipping/index.ts'), 'export class Receipt extends Event {}\n')
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+    const asset = { kind: 'asset', text: () => Promise.reject(new Error('an asset was decoded')) }
+
+    try {
+      await reportRenamedNameKeyedClasses(
+        {
+          outputs: [{ kind: 'entry-point', text: async () => 'class Receipt extends Event{}class Receipt2 extends Event{}' }, asset],
+          metafile: { inputs: { [join(root, 'node_modules/shipping/index.ts')]: {}, 'guren-lambda-stub:vite': {} } },
+        },
+        { root, label: 'Test build' },
+      )
+
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

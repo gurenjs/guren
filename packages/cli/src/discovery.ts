@@ -344,6 +344,20 @@ export function discoverPolicyFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app/Policies')
 }
 
+/** Where `make:mail` writes a mail class and `discoverMailFiles` reads one: one path, so the two cannot drift. */
+export const MAIL_DIR = 'app/Mail'
+
+export function discoverMailFiles(appRoot: string): Promise<string[]> {
+  return discoverDir(appRoot, MAIL_DIR)
+}
+
+/** Where `make:notification` writes a notification class and `discoverNotificationFiles` reads one. */
+export const NOTIFICATIONS_DIR = 'app/Notifications'
+
+export function discoverNotificationFiles(appRoot: string): Promise<string[]> {
+  return discoverDir(appRoot, NOTIFICATIONS_DIR)
+}
+
 /**
  * Route files under `<appRoot>/routes/`, tests excluded. Scoped to the given root
  * on purpose, unlike the `discover*Files` siblings that fan out over

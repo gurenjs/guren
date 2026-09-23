@@ -51,6 +51,9 @@ interface SendWelcomeEmailPayload {
 }
 
 export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
+  // キューのメッセージに記録される名前（デフォルト: クラス名）
+  static jobName = 'SendWelcomeEmailJob'
+
   // キュー名（デフォルト: 'default'）
   static queue = 'emails'
 
@@ -116,8 +119,10 @@ export class SendWelcomeEmailJob extends Job<{ userId: string }> {
 ```
 
 固定したあとはクラス名を自由に変更できます。永続化されるのは `jobName` だけで、
-これが `registerJob()` のキーになり、ワーカーもこの文字列で解決します。`jobName` を
-持たないジョブは従来どおりクラス名で解決されるので、この設定はオプトインです。
+これが `registerJob()` のキーになり、ワーカーもこの文字列で解決します。`make:job` は
+生成するクラス名で `jobName` を書き込むので、生成したジョブは最初から固定されています。
+別の名前にしたい場合は、最初にディスパッチする前に書き換えてください。`jobName` を
+持たない手書きのジョブは、クラス名で解決されます。
 
 JavaScript の static メンバーは継承されますが、サブクラスは親の `jobName` を
 **継承しません**。自分で宣言するまでは自身のクラス名で解決されます。
@@ -135,6 +140,17 @@ class ProxyJob extends BaseJob {
 
 この規則がないと、両方のクラスを登録したときにレジストリの同じエントリへ潰れてしまい、
 後から登録したほうが先のものを追い出します。
+
+1 つの名前を使えるのは 1 つのクラスだけです。登録済みの名前で別のクラスを登録すると、
+`registerJob()` は両方のクラス名を挙げた警告を 1 度出し、ワーカーは後から登録した
+クラスを実行します。2 つのモジュールがそれぞれ `SendMail` を宣言した場合や、上の
+`ProxyJob` を `BaseJob` と並べて登録した場合がこれに当たります。サブクラスが親と
+名前を共有できるのは、親を登録しない場合だけです。どちらかのクラス名を変えるか、
+`jobName` を固定してください。フレームワーク自身のジョブは `SendMailJob`・
+`SendNotificationJob`・`QueuedEventJob`・`GenerateVariantsJob`（attachments）・
+`RunAgentJob`（`@guren/plugin-ai`）の名前を使うので、アプリのジョブには別の名前を
+付けてください。同じクラスをもう一度登録しても警告は出ません。次のメジャーでは
+例外を投げます。
 
 すでに永続キューにメッセージが残っているジョブの `jobName` を変更・追加するのは、
 リネームと同じことです。先にキューを空にするか、バックログが消えるまで旧名の登録を

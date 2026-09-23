@@ -3,8 +3,8 @@ type: adr
 status: stable
 entities: [User]
 related:
-  - app/Http/Controllers/Auth/LoginController.ts
-  - app/Http/Controllers/Auth/OAuthController.ts
+  - modules/auth/app/Http/Controllers/LoginController.ts
+  - modules/auth/app/Http/Controllers/OAuthController.ts
 generated: { by: "human:7nohe", at: 2026-08-11T11:19:25.406Z }
 ---
 

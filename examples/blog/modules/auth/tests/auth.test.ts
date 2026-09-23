@@ -17,7 +17,7 @@ vi.mock('@guren/core', async () => {
   }
 })
 
-import LoginController from '../../app/Http/Controllers/Auth/LoginController.js'
+import LoginController from '../app/Http/Controllers/LoginController.js'
 
 type MockAuth = {
   user: ReturnType<typeof vi.fn>
