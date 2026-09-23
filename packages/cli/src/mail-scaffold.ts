@@ -3,6 +3,7 @@ import { consola } from 'consola'
 import { createAppListsFile } from './app-entry'
 import { appBindsService, toPosixRelative } from './discovery'
 import { ParseCache } from './parse-cache'
+import { readDeclaredDependencyNames } from './plugin-manifest'
 import { resolveAppEntry } from './provider-registrar'
 import type { ServiceScaffold } from './service-scaffold'
 
@@ -48,7 +49,8 @@ async function provablyUnregistered(bindings: readonly string[]): Promise<boolea
   const entryFile = resolve(cwd, entry)
   const parsed = await new ParseCache().get(entryFile)
   if (parsed === null) return false
-  return createAppListsFile(parsed.ast.program, cwd, entryFile, bindings.map((file) => resolve(cwd, file))) === false
+  const packages = new Set(await readDeclaredDependencyNames(cwd))
+  return createAppListsFile(parsed.ast.program, cwd, entryFile, bindings.map((file) => resolve(cwd, file)), packages) === false
 }
 
 /** Reports the mail setup a scaffold keeps in place of its own; `instead` says what it did. */

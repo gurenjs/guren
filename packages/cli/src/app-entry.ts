@@ -31,9 +31,6 @@ export function createAppOptions(program: unknown): ObjectExpression | null {
   return firstCallOptions(program, 'createApp')
 }
 
-/** `name`, `@scope/name` or a `node:` builtin, with or without a subpath: never an app file. */
-const BARE_PACKAGE = /^(?:@[\w.-]+\/)?\w[\w.-]*(?:[/:]|$)/
-
 /**
  * Each element of an array option traced to the import its identifier names, `file` absolute
  * and without extension (`null` when `specifierBase` cannot resolve it); `null` for an element
@@ -68,6 +65,12 @@ export function importedArrayFiles(
   return importedArrayEntries(declared, program, cwd, fromFile)?.map((entry) => entry?.file ?? null)
 }
 
+/** The package an import specifier names, `name` or `@scope/name`, without its subpath. */
+function packageOf(specifier: string): string {
+  const [first = '', second] = specifier.split('/')
+  return first.startsWith('@') && second !== undefined ? `${first}/${second}` : first
+}
+
 /** Whether an import traced to `listed` names the module at `target`, a directory through its index. */
 function importedAs(listed: string, target: string): boolean {
   return listed === target || resolve(listed, 'index') === target
@@ -75,11 +78,18 @@ function importedAs(listed: string, target: string): boolean {
 
 /**
  * Whether `createApp({ providers, config })` in `entryFile` imports one of `files` (absolute).
- * `null` is no evidence, and on purpose broader than what `guren check` reads: an element
- * this cannot trace, an alias, or an import that may re-export one of them. A wrong `false`
- * tells the user to register the file a second time.
+ * `null` is no evidence, and on purpose broader than what `guren check` reads: an element this
+ * cannot trace, an import that may re-export one of them, or a specifier outside `packages`
+ * (the app's declared dependencies), which may be a path alias. A wrong `false` tells the user
+ * to register the file a second time.
  */
-export function createAppListsFile(program: File['program'], cwd: string, entryFile: string, files: readonly string[]): boolean | null {
+export function createAppListsFile(
+  program: File['program'],
+  cwd: string,
+  entryFile: string,
+  files: readonly string[],
+  packages: ReadonlySet<string>,
+): boolean | null {
   const options = createAppOptions(program)
   if (!options) return null
   const wanted = files.map(withoutExtension)
@@ -100,7 +110,7 @@ export function createAppListsFile(program: File['program'], cwd: string, entryF
       }
       const { file, kind, specifier } = entry
       if (file === null) {
-        if (!BARE_PACKAGE.test(specifier)) untraced = true
+        if (!packages.has(packageOf(specifier))) untraced = true
         continue
       }
       if (wanted.some((target) => importedAs(file, target))) return true

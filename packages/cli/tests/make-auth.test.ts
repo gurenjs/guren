@@ -1675,6 +1675,28 @@ export default class NotifierProvider extends ServiceProvider {
     }
   })
 
+  // Only a declared dependency is known to be a package: an undeclared specifier may be a path alias.
+  for (const declared of [true, false]) {
+    it(`${declared ? 'warns' : 'stays silent'} beside a package provider ${declared ? 'package.json declares' : 'nothing declares'}`, async () => {
+      const workspace = await createTempWorkspace('guren-cli-mail-package-provider-')
+      try {
+        await seedMailApp(workspace.dir, {
+          'src/app.ts': APP_FIXTURE
+            .replace("import { createApp } from '@guren/core'", "import { createApp, MailServiceProvider } from '@guren/core'")
+            .replace('providers: [],', 'providers: [MailServiceProvider],'),
+          ...(declared ? { 'package.json': JSON.stringify({ dependencies: { '@guren/core': '*' } }) } : {}),
+        })
+        await makeAuth({})
+
+        const { warnings } = await captureWarnings(() => runBlueprint('mail'))
+
+        expect(warnings.includes(unregistered('app/Providers/MailProvider.ts'))).toBe(declared)
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+  }
+
   // A spread may carry the kept provider, so it is no evidence either way.
   it('does not warn about registration when createApp() spreads providers it cannot trace', async () => {
     const workspace = await createTempWorkspace('guren-cli-mail-untraced-providers-')
