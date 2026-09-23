@@ -151,8 +151,9 @@ export interface AdapterQueryOptions {
 
 export type ModelWriteOptions = AdapterQueryOptions
 /** The options of `create(data, { set })` and `update(where, data, { set })` (RFC 0031). */
-export type ModelSetOptions<T extends typeof Model, S extends SetFor<T>> = ModelWriteOptions & SetOption<T, S>
+export type ModelSetOptions<T extends typeof Model, S extends PlainObject> = ModelWriteOptions & SetOption<T, S>
 type SetWriteOptions = ModelWriteOptions & { set?: PlainObject }
+type WithoutSet = ModelWriteOptions & { set?: never }
 export type ModelQueryOptions = AdapterQueryOptions
 export type TransactionHandle = NonNullable<AdapterQueryOptions['trx']>
 
@@ -289,10 +290,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       first: (where) => this.first(where, { trx }),
       where,
       newQuery: () => this.newQuery({ trx }),
+      // `set` rides in the options object, and create()/update() split it back out.
       create: ((data: TCreateFor<T>, options?: SetWriteOptions) =>
-        this.create(data, { ...options, trx })) as TransactionModelScope<T>['create'],
+        this.create(data, { ...options, trx } as ModelWriteOptions)) as TransactionModelScope<T>['create'],
       update: ((where: WhereClauseFor<T>, data: Partial<TCreateFor<T>>, options?: SetWriteOptions) =>
-        this.update(where, data, { ...options, trx })) as TransactionModelScope<T>['update'],
+        this.update(where, data, { ...options, trx } as ModelWriteOptions)) as TransactionModelScope<T>['update'],
       delete: (where) => this.delete(where, { trx }),
       paginate: (options) => this.paginate(options, { trx }),
     }
@@ -1114,13 +1116,14 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * @example
    * await Post.create(data, { set: { authorId: user.id } })
    */
-  static create<T extends typeof Model, S extends SetFor<T>>(
+  static create<T extends typeof Model, S extends PlainObject>(
     this: T,
     data: CreateDataFor<T, NoInfer<S>>,
     options: ModelSetOptions<T, S>,
   ): Promise<TRecordFor<T>>
   // Last: `.call`/`.bind`/`Parameters<>` read the last overload, and must see the one without `set`.
-  static create<T extends typeof Model>(this: T, data: TCreateFor<T>, writeOptions?: ModelWriteOptions): Promise<TRecordFor<T>>
+  // `set?: never`: options held in a variable with `trx` would otherwise match here and skip the checks above.
+  static create<T extends typeof Model>(this: T, data: TCreateFor<T>, writeOptions?: WithoutSet): Promise<TRecordFor<T>>
   static async create<T extends typeof Model>(
     this: T,
     data: TCreateFor<T>,
@@ -1166,7 +1169,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /** `set` as in `create(data, { set })`. */
-  static update<T extends typeof Model, S extends SetFor<T>>(
+  static update<T extends typeof Model, S extends PlainObject>(
     this: T,
     where: WhereClauseFor<T>,
     data: Partial<CreateDataFor<T, NoInfer<S>>>,
@@ -1176,7 +1179,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     this: T,
     where: WhereClauseFor<T>,
     data: Partial<TCreateFor<T>>,
-    writeOptions?: ModelWriteOptions,
+    writeOptions?: WithoutSet,
   ): Promise<TRecordFor<T>>
   static async update<T extends typeof Model>(
     this: T,
@@ -1583,19 +1586,18 @@ type TCreateFor<T extends typeof Model> = T extends { createType: infer R }
 type OmitNamed<T, K extends PropertyKey> = { [P in keyof T as P extends K ? never : P]: T[P] }
 type NamedKeys<T> = keyof { [P in keyof T as string extends P ? never : number extends P ? never : P]: T[P] }
 
-type SetFor<T extends typeof Model> = OmitNamed<Partial<TCreateFor<T>>, 'id'>
-
-// `S` is inferred from the `set` literal, and an inferred type parameter gets no
-// excess-property check: the `never` keys are what reject `id` and a misspelt
-// column, and the create type's own value types what reject `undefined` for a
-// required one (`SetFor` is partial). A model whose create type names no key
-// accepts any.
+// `S` is inferred from the `set` literal and constrained only to PlainObject: a
+// constraint on the create type, with `T` inferred in the same call, widens an
+// enum column's literal. An inferred `S` gets no excess-property check, so the `never`
+// keys reject `id` and a misspelt column, and the create type's value types the
+// wrong value. A model whose create type names no key accepts any.
 type SetOption<T extends typeof Model, S> = {
   set: S
     & { [K in Exclude<keyof S, SettableKey<T>>]: never }
     & { [K in Extract<keyof S, keyof TCreateFor<T>>]: TCreateFor<T>[K] }
 }
-type SettableKey<T extends typeof Model> = [NamedKeys<SetFor<T>>] extends [never] ? PropertyKey : NamedKeys<SetFor<T>>
+type SettableKey<T extends typeof Model> = [SetKey<T>] extends [never] ? PropertyKey : SetKey<T>
+type SetKey<T extends typeof Model> = Exclude<NamedKeys<TCreateFor<T>>, 'id'>
 
 type CreateDataFor<T extends typeof Model, S> = OmitNamed<TCreateFor<T>, keyof S> & { [K in keyof S]?: never }
 
@@ -1645,9 +1647,9 @@ export interface TransactionModelScope<T extends typeof Model> {
   where(field: FieldFor<T>, value: unknown): QueryBuilder<TRecordFor<T>>
   where(field: FieldFor<T>, operator: WhereOperator, value: unknown): QueryBuilder<TRecordFor<T>>
   newQuery(): QueryBuilder<TRecordFor<T>>
-  create<S extends SetFor<T>>(data: CreateDataFor<T, NoInfer<S>>, options: SetOption<T, S>): Promise<TRecordFor<T>>
+  create<S extends PlainObject>(data: CreateDataFor<T, NoInfer<S>>, options: SetOption<T, S>): Promise<TRecordFor<T>>
   create(data: TCreateFor<T>): Promise<TRecordFor<T>>
-  update<S extends SetFor<T>>(
+  update<S extends PlainObject>(
     where: WhereClauseFor<T>,
     data: Partial<CreateDataFor<T, NoInfer<S>>>,
     options: SetOption<T, S>,

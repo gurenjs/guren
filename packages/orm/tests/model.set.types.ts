@@ -18,6 +18,7 @@ const posts = pgTable('posts', {
   body: text('body').notNull(),
   authorId: integer('author_id').notNull(),
   categoryId: integer('category_id'),
+  status: text('status', { enum: ['draft', 'published'] }).notNull().default('draft'),
 })
 
 class Post extends defineModel(posts, { fillable: ['title', 'body', 'categoryId'] }) {}
@@ -55,6 +56,11 @@ async function _setIsCheckedAgainstTheCreatePayload() {
   await Post.create(payload, { set: { authorId: maybeAuthorId } })
 
   await Post.create({ ...payload, categoryId: 3 }, { set: { authorId: 1 } })
+  await Post.create(payload, { set: { authorId: 1, status: 'published' } })
+  await Post.update({ id: 1 }, {}, { set: { status: 'draft' } })
+
+  // @ts-expect-error an enum column keeps its literal type
+  await Post.create(payload, { set: { authorId: 1, status: 'archived' } })
   await Post.update({ id: 1 }, {}, { set: { categoryId: undefined } })
 }
 void _setIsCheckedAgainstTheCreatePayload
@@ -74,6 +80,16 @@ async function _optionsByVariable() {
 
   const typed: ModelSetOptions<typeof Post, { authorId: number }> = { set: { authorId: 1 }, trx }
   await Post.create(payload, typed)
+
+  // With trx beside it, a variable must not fall through to the overload without set.
+  const withId = { set: { authorId: 1, id: 7 }, trx }
+  // @ts-expect-error id in set, held in a variable
+  await Post.update({ id: 1 }, { title: 'Renamed' }, withId)
+  const misspelt = { set: { autorId: 1 }, trx }
+  // @ts-expect-error a misspelt key in set, held in a variable
+  await Post.create({ ...payload, authorId: 1 }, misspelt)
+  const plain: ModelWriteOptions = { trx }
+  await Post.update({ id: 1 }, { title: 'Renamed' }, plain)
 }
 void _optionsByVariable
 

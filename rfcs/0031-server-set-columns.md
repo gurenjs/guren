@@ -140,23 +140,31 @@ static update<T extends typeof Model, S extends SetFor<T>>(
   happens inside one `if (options.set)` branch; the path without `set` passes
   `writeOptions` through untouched.
 
-**Amended in implementation:** three changes to the types above.
+**Amended in implementation:** five changes to the types above.
 
 - `defineModel`'s create type carries an index signature (a plain `Model` base
-  adds `PlainObject`), and `Omit` collapses the named columns into it. `SetFor`
-  and `CreateDataFor` use a key-remapping omit instead. With `Omit`, `data` lost
-  its required columns as soon as `set` was used.
+  adds `PlainObject`), and `Omit` collapses the named columns into it.
+  `CreateDataFor` uses a key-remapping omit instead, and the settable keys are
+  the create type's named keys. With `Omit`, `data` lost its required columns as
+  soon as `set` was used.
 - An inferred `S` gets no excess-property check, so `SetFor` alone rejects
   neither `id` nor a misspelt column. `set` is typed
   `S & { [K in Exclude<keyof S, SettableKey<T>>]: never }`, where `SettableKey`
   is the create type's named keys without `id`. A model whose create type names
-  no key (no `createType`) still accepts any. `set` is also intersected with the
-  create type's own value types: `SetFor` is partial, so without that
-  `{ set: { authorId: user?.id } }` would take a required column out of `data`
-  and hand it `undefined`.
+  no key (no `createType`) still accepts any.
+- `S` is constrained to `PlainObject` rather than `SetFor<T>`: with `T` inferred
+  in the same call, that constraint widened an enum column's literal. The value
+  check moved into the `set` type, which is intersected with the create type's
+  own value types. That also rejects `undefined` for a required column taken out
+  of `data` (`{ set: { authorId: user?.id } }`), which the partial `SetFor`
+  admitted.
 - The `set` overload comes first and the unchanged signature last. `.bind`,
   `.call` and `Parameters<>` read the last overload, so they still see the
   signature they always did.
+- That signature's options become `ModelWriteOptions & { set?: never }`.
+  `ModelWriteOptions` has only optional properties, so an options object held
+  in a variable with `trx` beside `set` matched it and skipped every check
+  above. No call without `set` is affected.
 
 ### 2. The rules, in the one input step
 
