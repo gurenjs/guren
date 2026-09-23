@@ -406,7 +406,7 @@ describe('toJsonSchema()', () => {
 
 describe('toPlainJson()', () => {
   test('drops undefined keys and refuses what JSON cannot carry', () => {
-    expect(toPlainJson({ a: 1, b: undefined, c: [{ d: undefined }] })).toStrictEqual({ a: 1, c: [{}] })
+    expect(toPlainJson<unknown>({ a: 1, b: undefined, c: [{ d: undefined }] })).toStrictEqual({ a: 1, c: [{}] })
     expect(() => toPlainJson({ routes: new Map() })).toThrow('manifest.routes is a Map')
     expect(() => toPlainJson({ hook: () => {} })).toThrow('manifest.hook is a function')
     expect(() => toPlainJson({ controller: new InvoiceController() })).toThrow('manifest.controller is a InvoiceController')
