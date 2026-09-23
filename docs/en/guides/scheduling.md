@@ -58,6 +58,8 @@ process.on('SIGTERM', () => {
 })
 ```
 
+The scheduler ticks inside a process that something else keeps alive, such as the app server, so a standalone script that only calls `scheduler.start()` exits without waiting for the next tick. To run due tasks from outside the process, have cron call `bunx guren schedule:run` (see [CLI Integration](#cli-integration)).
+
 ### On Serverless Runtimes
 
 `scheduler.start()` needs a long-lived process, which neither Cloudflare Workers nor AWS Lambda has. There the platform's own scheduler supplies the tick and the app only registers tasks:

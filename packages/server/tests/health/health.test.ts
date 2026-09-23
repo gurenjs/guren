@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, mock } from 'bun:test'
+import { describe, it, expect, beforeEach, mock, spyOn } from 'bun:test'
 import { Hono } from 'hono'
 import {
   HealthCheck,
@@ -235,7 +235,7 @@ describe('HealthManager', () => {
       const report = await manager.check()
 
       expect(report.checks[0].status).toBe('unhealthy')
-      expect(report.checks[0].message).toContain('timed out')
+      expect(report.checks[0].message).toBe('Health check timed out after 50ms')
     })
 
     it('should handle check errors', async () => {
@@ -252,6 +252,58 @@ describe('HealthManager', () => {
 
       expect(report.checks[0].status).toBe('unhealthy')
       expect(report.checks[0].message).toBe('Check failed')
+    })
+  })
+
+  describe('timeout timer', () => {
+    // A delay no other timer in these tests uses, so the spy can pick out the
+    // manager's own timeout timer.
+    const TIMEOUT_MS = 4321
+
+    async function timeoutTimerCleared(run: () => Promise<unknown>): Promise<boolean> {
+      const setTimeoutSpy = spyOn(globalThis, 'setTimeout')
+      const clearTimeoutSpy = spyOn(globalThis, 'clearTimeout')
+      try {
+        await run()
+        const started = setTimeoutSpy.mock.calls.flatMap((call, index) =>
+          call[1] === TIMEOUT_MS ? [setTimeoutSpy.mock.results[index]?.value] : [],
+        )
+        expect(started).toHaveLength(1)
+        return clearTimeoutSpy.mock.calls.some((call) => call[0] === started[0])
+      } finally {
+        setTimeoutSpy.mockRestore()
+        clearTimeoutSpy.mockRestore()
+      }
+    }
+
+    it('should clear the timer when a check passes', async () => {
+      manager.register(new SimpleCheck('passing', 'healthy'), { timeout: TIMEOUT_MS })
+
+      let report: Awaited<ReturnType<HealthManager['check']>> | undefined
+      const cleared = await timeoutTimerCleared(async () => {
+        report = await manager.check()
+      })
+
+      expect(report?.status).toBe('healthy')
+      expect(cleared).toBe(true)
+    })
+
+    it('should clear the timer when a check throws', async () => {
+      class ErrorCheck extends HealthCheck {
+        readonly name = 'error'
+        async check(): Promise<CheckResult> {
+          throw new Error('Check failed')
+        }
+      }
+      manager.register(new ErrorCheck(), { timeout: TIMEOUT_MS })
+
+      let result: CheckResult | null = null
+      const cleared = await timeoutTimerCleared(async () => {
+        result = await manager.getCheck('error')
+      })
+
+      expect(result).toMatchObject({ status: 'unhealthy', message: 'Check failed' })
+      expect(cleared).toBe(true)
     })
   })
 

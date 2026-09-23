@@ -129,11 +129,16 @@ export class HealthManager {
   private async runCheck(registered: RegisteredCheck): Promise<CheckResult> {
     const { check, options } = registered
     const start = performance.now()
+    let timer: ReturnType<typeof setTimeout> | undefined
 
     try {
       const result = await Promise.race([
         check.check(),
-        this.timeoutPromise(options.timeout!),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(new Error(`Health check timed out after ${options.timeout}ms`))
+          }, options.timeout)
+        }),
       ])
 
       result.duration = Math.round(performance.now() - start)
@@ -147,15 +152,11 @@ export class HealthManager {
           error instanceof Error ? error.message : 'Check failed with error',
         duration,
       }
+    } finally {
+      // Cleared rather than unref()ed: a frequently probed /health would
+      // otherwise keep one pending timer per check per probe.
+      clearTimeout(timer)
     }
-  }
-
-  private timeoutPromise(ms: number): Promise<never> {
-    return new Promise((_, reject) => {
-      setTimeout(() => {
-        reject(new Error(`Health check timed out after ${ms}ms`))
-      }, ms)
-    })
   }
 }
 
