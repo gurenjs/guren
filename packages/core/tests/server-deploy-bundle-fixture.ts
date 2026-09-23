@@ -31,9 +31,9 @@ const stubs: Record<string, string> = Object.fromEntries(
   ]),
 )
 
-// Exact specifiers, as the deploy builds filter. On Bun 1.3.14 a catch-all filter
-// that returns undefined for the rest resolves the server's `@guren/orm` import
-// through the root tsconfig paths into src instead of dist.
+// Exact specifiers, as the deploy builds filter. A catch-all filter that returns
+// undefined for the rest resolves the server's `@guren/orm` import through the
+// root tsconfig paths into src instead of dist.
 const stubFilter = new RegExp(
   `^(?:${Object.keys(stubs).map((specifier) => specifier.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')).join('|')})$`,
 )
