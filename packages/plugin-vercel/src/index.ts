@@ -284,7 +284,7 @@ async function bundleFunction(input: {
     // identifiers, and Guren keys durable records on class names (the queue
     // registry stores each job's wire name in every queued message,
     // notifications persist `constructor.name` as their `type`). Not
-    // `keepNames`: as of Bun 1.3.14 it silently leaves class names mangled.
+    // `keepNames`: on Bun 1.3.14 and 1.4.2 it silently leaves class names mangled.
     minify: { whitespace: true, syntax: true, identifiers: false },
     define: {
       // `bun build` inlines `process.env.NODE_ENV` at bundle time (defaulting
