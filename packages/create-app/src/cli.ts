@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { relative, resolve } from 'node:path'
 import process from 'node:process'
 import { consola } from 'consola'
@@ -52,20 +52,6 @@ async function runAppCli(targetDir: string, cliArgs: string[]): Promise<boolean>
     stdio: 'inherit',
   })
   return result.status === 0
-}
-
-// `guren add auth` generates the users migration itself when drizzle-kit runs,
-// but exits 0 either way, so the directory is the only record of whether
-// `db:make` is still needed. Any entry but the template's `.gitkeep` counts:
-// drizzle-kit 1.x writes `<timestamp>_<name>/migration.sql`, older lines a flat
-// `<n>_<name>.sql`. `out` is `./db/migrations` in every shipped drizzle.config.ts.
-async function hasGeneratedMigration(appRoot: string): Promise<boolean> {
-  try {
-    const entries = await readdir(resolve(appRoot, 'db/migrations'))
-    return entries.some((entry) => !entry.startsWith('.'))
-  } catch {
-    return false
-  }
 }
 
 async function resolveRenderingMode(flagValue: unknown): Promise<RenderingMode> {
@@ -470,10 +456,9 @@ const command = defineCommand({
 
     if (authInstalled) {
       consola.log('')
+      // No database steps of its own: `guren add auth` printed them above,
+      // leaving out `db:make` when it generated the migration itself.
       consola.info('Auth scaffolding was included automatically.')
-      consola.info(await hasGeneratedMigration(targetDir)
-        ? 'Its migration is already in db/migrations. Set up the users table with: bun run db:migrate && bun run db:seed'
-        : 'Set up the users table with: bun run db:make && bun run db:migrate && bun run db:seed')
     }
 
     if (renderingMode === 'ssr') {

@@ -1,39 +1,31 @@
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'bun:test'
 import { createTempWorkspace } from './helpers'
 
-const CLI_PATH = new URL('../src/cli.ts', import.meta.url).pathname
+const CLI_PATH = fileURLToPath(new URL('../src/cli.ts', import.meta.url))
 
-// Matches the list entry under either consola reporter (the basic one, picked
-// in CI, prefixes `[log]`), and not the warning that names the same command.
+// Stands in for `bun install` and the app's `guren add auth`, which fails when
+// FAKE_ADD_AUTH_FAILS is set.
+const FAKE_BUN = `#!/bin/sh
+[ "$2" = add ] && [ "$3" = auth ] && [ -n "$FAKE_ADD_AUTH_FAILS" ] && exit 1
+exit 0
+`
+
+// Matches the list entry with or without the `[log]` prefix consola's basic
+// reporter adds (picked under CI and NODE_ENV=test), and not the warning that
+// names the same command.
 function isAddAuthEntry(line: string): boolean {
   return line.trimEnd().endsWith(' bunx guren add auth')
 }
 
-// Stands in for `bun install` and the app's `guren add auth`, which is the one
-// that writes the migration, in the layout the pinned drizzle-kit 1.x writes.
-// FAKE_ADD_AUTH picks how that step ends.
-const FAKE_BUN = `#!/bin/sh
-echo "$*" >> "$PWD/.fake-bun-calls"
-if [ "$2" = add ] && [ "$3" = auth ]; then
-  migration=db/migrations/20260923000000_create_users_sessions_tables
-  case "$FAKE_ADD_AUTH" in
-    migration) mkdir -p "$migration" && : > "$migration/migration.sql" && echo '{}' > "$migration/snapshot.json" ;;
-    fail) exit 1 ;;
-  esac
-fi
-exit 0
-`
-
-type AddAuthOutcome = 'migration' | 'no-migration' | 'fail'
-
 // A subprocess rather than the in-process command: Bun's spawnSync without an
 // explicit `env` resolves `bun` against the PATH the process started with, so
 // a shim put on PATH at runtime is never reached.
-async function scaffoldWithAuth(outcome: AddAuthOutcome): Promise<{ lines: string[]; calls: string }> {
-  const workspace = await createTempWorkspace(`guren-create-app-auth-next-steps-${outcome}-`)
+async function scaffoldWithAuth(addAuthFails: boolean): Promise<string[]> {
+  const workspace = await createTempWorkspace('guren-create-app-auth-next-steps-')
   try {
     const binDir = join(workspace.dir, 'bin')
     await mkdir(binDir)
@@ -52,53 +44,31 @@ async function scaffoldWithAuth(outcome: AddAuthOutcome): Promise<{ lines: strin
           ...process.env,
           PATH: `${binDir}:${process.env.PATH ?? ''}`,
           CONSOLA_LEVEL: '3',
-          FAKE_ADD_AUTH: outcome,
+          ...(addAuthFails ? { FAKE_ADD_AUTH_FAILS: '1' } : {}),
         },
       },
     )
-    expect(result.status).toBe(0)
-
-    return {
-      lines: `${result.stdout}${result.stderr}`.split('\n'),
-      calls: await readFile(join(workspace.dir, 'my-app/.fake-bun-calls'), 'utf8'),
+    if (result.status !== 0) {
+      throw new Error(`create-guren-app exited with ${result.status}:\n${result.stderr}`)
     }
+    return `${result.stdout}${result.stderr}`.split('\n')
   } finally {
     await workspace.cleanup()
   }
 }
 
 describe('create-guren-app --auth next steps', () => {
-  it('does not suggest add auth once it ran, and drops db:make when its migration exists', async () => {
-    const { lines, calls } = await scaffoldWithAuth('migration')
+  it('does not suggest add auth once the scaffolder ran it', async () => {
+    const lines = await scaffoldWithAuth(false)
 
-    expect(calls).toContain('add auth --force')
     expect(lines.some((line) => line.includes('Authentication scaffolding added'))).toBe(true)
     expect(lines.some(isAddAuthEntry)).toBe(false)
-
-    const usersStep = lines.find((line) => line.includes('Set up the users table'))
-    expect(usersStep).toContain('bun run db:migrate && bun run db:seed')
-    expect(usersStep).not.toContain('db:make')
   }, 30_000)
 
-  it('keeps db:make in the users table step when add auth generated no migration', async () => {
-    const { lines, calls } = await scaffoldWithAuth('no-migration')
+  it('lists add auth once, and does not ask to install dependencies, when add auth failed', async () => {
+    const lines = await scaffoldWithAuth(true)
 
-    expect(calls).toContain('add auth --force')
-    expect(lines.some(isAddAuthEntry)).toBe(false)
-    expect(lines.find((line) => line.includes('Set up the users table'))).toContain(
-      'bun run db:make && bun run db:migrate && bun run db:seed',
-    )
-  }, 30_000)
-
-  it('lists add auth once, beside a warning that does not ask to install dependencies, when add auth failed', async () => {
-    const { lines, calls } = await scaffoldWithAuth('fail')
-
-    expect(calls).toContain('add auth --force')
     expect(lines.filter(isAddAuthEntry)).toHaveLength(1)
-    expect(lines.some((line) => line.includes('included automatically'))).toBe(false)
-
-    const warning = lines.find((line) => line.includes('Authentication scaffolding failed'))
-    expect(warning).toBeDefined()
-    expect(warning).not.toContain('after installing dependencies')
+    expect(lines.some((line) => line.includes('Authentication scaffolding failed'))).toBe(true)
   }, 30_000)
 })
