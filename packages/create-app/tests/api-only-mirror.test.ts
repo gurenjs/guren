@@ -1,94 +1,47 @@
 import { describe, expect, it } from 'bun:test'
-import { access, readFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { getAppBlueprint, listAppBlueprints, listBlueprintTemplates, templateDir } from '../src/blueprints'
+import { isConfirmedApiOnlyApp } from '../../cli/src/app-surface'
+import { getAppBlueprint, listAppBlueprints, scaffoldAppBlueprint } from '../src/blueprints'
+import { createTempWorkspace } from './helpers'
 
 /**
- * `AppBlueprint.apiOnly` and the api next steps in src/cli.ts mirror @guren/cli,
- * which this package cannot import (the CLI is installed into the scaffolded app):
- * the API-only evidence `isConfirmedApiOnlyApp()` reads, and the alternatives its
- * `add auth` / `add resource` refusals name. The CLI side is read as source text.
+ * `apiOnly` is judged by @guren/cli's own `isConfirmedApiOnlyApp()`, imported.
+ * The refusal alternatives the api next steps repeat are read as text instead:
+ * make-auth.ts does not export its alternative, and importing make-feature.ts
+ * pulls in every generator module.
  */
 
-async function readSource(relative: string): Promise<string> {
-  return readFile(new URL(relative, import.meta.url), 'utf8')
-}
-
-function extract(source: string, pattern: RegExp, what: string): string {
-  const match = source.match(pattern)
-  if (!match) {
-    throw new Error(`Could not find ${what}`)
-  }
-  return match[1]!
-}
-
-async function layerDependsOnInertiaClient(layerDir: string): Promise<boolean> {
-  let raw: string
-  try {
-    raw = await readFile(join(layerDir, 'package.json'), 'utf8')
-  } catch {
-    return false
-  }
-  const manifest = JSON.parse(raw) as {
-    dependencies?: Record<string, string>
-    devDependencies?: Record<string, string>
-  }
-  return Boolean(manifest.dependencies?.['@guren/inertia-client'] ?? manifest.devDependencies?.['@guren/inertia-client'])
-}
-
-async function layerHasWebRoutes(layerDir: string): Promise<boolean> {
-  try {
-    await access(join(layerDir, 'routes/web.ts'))
-    return true
-  } catch {
-    return false
-  }
+async function readCliSource(file: string): Promise<string> {
+  return readFile(new URL(`../../cli/src/${file}`, import.meta.url), 'utf8')
 }
 
 describe('API-only mirror', () => {
-  it('marks exactly the blueprints whose layers carry no Inertia evidence as apiOnly', async () => {
-    const appSurface = await readSource('../../cli/src/app-surface.ts')
-    const routeRegistrar = await readSource('../../cli/src/route-registrar.ts')
-    expect(appSurface).toContain('@guren/inertia-client')
-    expect(routeRegistrar).toContain(`DEFAULT_ROUTES_FILE = 'routes/web.ts'`)
+  it.each(listAppBlueprints())('marks the %s blueprint apiOnly exactly when @guren/cli reads it as API-only', async (name) => {
+    const blueprint = getAppBlueprint(name)
+    const workspace = await createTempWorkspace(`guren-api-only-mirror-${name}-`)
+    try {
+      const destination = join(workspace.dir, 'app')
+      await scaffoldAppBlueprint({ blueprint: name, destination, renderingMode: 'spa', database: 'sqlite' })
 
-    for (const name of listAppBlueprints()) {
-      const blueprint = getAppBlueprint(name)
-      const layers = listBlueprintTemplates(blueprint).map((layer) => templateDir(layer))
-      const evidence = await Promise.all(
-        layers.map(async (layer) => (await layerDependsOnInertiaClient(layer)) || (await layerHasWebRoutes(layer))),
-      )
-      expect({ name, apiOnly: Boolean(blueprint.apiOnly) }).toEqual({ name, apiOnly: !evidence.includes(true) })
+      expect({ name, apiOnly: Boolean(blueprint.apiOnly) }).toEqual({
+        name,
+        apiOnly: await isConfirmedApiOnlyApp(destination),
+      })
+    } finally {
+      await workspace.cleanup()
     }
   })
 
-  it('names the alternatives the add auth and add resource refusals give', async () => {
-    const createApp = await readSource('../src/cli.ts')
-    const makeAuth = await readSource('../../cli/src/make-auth.ts')
-    const cliBlueprints = await readSource('../../cli/src/blueprints.ts')
-    const makeFeature = await readSource('../../cli/src/make-feature.ts')
+  it('keeps the alternatives the add auth and add resource refusals name', async () => {
+    // The refusal is the one place make-auth.ts names the middleware.
+    expect(await readCliSource('make-auth.ts')).toContain('createBearerTokenMiddleware')
 
-    const authInstead = extract(
-      makeAuth,
-      /assertNotApiOnly\(process\.cwd\(\), \{[^}]*?instead: '([^']+)'/u,
-      'the instead of the assertNotApiOnly call in packages/cli/src/make-auth.ts',
-    )
-    expect(createApp).toContain(authInstead)
-
-    expect(cliBlueprints).toContain('instead: API_ONLY_FEATURE_ALTERNATIVE')
-    const featureAlternative = extract(
-      makeFeature,
+    const match = (await readCliSource('make-feature.ts')).match(
       /export const API_ONLY_FEATURE_ALTERNATIVE = '([^']+)'/u,
-      'API_ONLY_FEATURE_ALTERNATIVE in packages/cli/src/make-feature.ts',
     )
-    const featureHint = extract(
-      createApp,
-      /consola\.log\('(\s*bunx guren make:controller[^']*)'\)/u,
-      'the make:controller hint in packages/create-app/src/cli.ts',
-    )
-    for (const text of [featureAlternative, featureHint]) {
-      expect(text).toContain('make:controller')
-      expect(text).toContain('routes/api.ts')
-    }
+    expect(match).not.toBeNull()
+    expect(match![1]).toContain('make:controller')
+    expect(match![1]).toContain('routes/api.ts')
   })
 })

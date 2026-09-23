@@ -75,7 +75,7 @@ export interface AppBlueprint {
    * `routes/web.ts`, the evidence @guren/cli's `isConfirmedApiOnlyApp()` reads.
    * `guren add auth`, `add resource` and `add prototype` refuse such an app, so
    * the scaffolder skips `--auth`/`--prototype` and forces SPA mode.
-   * tests/api-only-mirror.test.ts pins it to the templates.
+   * tests/api-only-mirror.test.ts pins it to `isConfirmedApiOnlyApp()`.
    */
   apiOnly?: boolean
   postScaffold?: (context: BlueprintContext) => Promise<void>
