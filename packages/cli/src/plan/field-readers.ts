@@ -7,52 +7,38 @@
 
 import {
   innerSchema,
+  isZod3Schema,
   objectShape,
   pipeSides,
   schemaAt,
   schemaChecks,
-  SINGLE_CHILD_WRAPPERS,
   typeOf,
-  unwrapSingleChild,
   ZOD3_UNSUPPORTED_MESSAGE,
-  type SchemaIo,
   type ZodSchemaLike,
 } from '@guren/server/internal/zod-compat'
-import { isZodSchema, readObjectSchema, toJsonSchema, type JsonSchemaObject } from '@guren/server/internal/zod-json-schema'
+import { isZodSchema, toJsonSchema, type JsonSchemaObject } from '@guren/server/internal/zod-json-schema'
 
 import { readResourceDefinitions, type ResourceDefinition } from '../data-types'
 import { parseSourceFile } from '../parse-cache'
 import { readMember, type PagePropKey } from '../page-props-extractor'
 import type { PlanAppUnreadable } from './unreadable'
 
-/** One key of an object schema. A side is absent where the walker could not render the field itself. */
-export interface PlanAppSchemaField {
-  /** What a client sends. */
-  input?: JsonSchemaObject
-  /** The validated value, which a plan's field type describes; absent for a field the output object lacks. */
-  output?: JsonSchemaObject
-  /** The first warning the walker gave on the key itself. */
-  unrendered?: string
-  /**
-   * False when a client may leave the key out. For a key the walker dropped unrendered, read off
-   * its outermost presence wrapper (`.required()` adds `nonoptional` over `.optional()`), and absent without one.
-   */
-  required?: boolean
-  /** A pipe or transform in the field's own chain, so its two sides may differ. */
-  piped: boolean
-  /** A transform, default, prefault or catch in any stage of that chain, which may fill a value the walker reads as missing. */
-  fillsMissing: boolean
-  /** A refinement on the object, or on the field above its outermost presence wrapper, which may require an omissible key. */
-  refinedPresence: boolean
-  /** The output reaches a transform, which the walker renders as the value the transform was given. */
-  transformed: boolean
-}
-
 /**
- * `reshaped`: a transform on the object itself, after every field's checks ran, so no field's output
- * type is its own. `repiped`: the object pipes into a second one, whose keys and presence decide.
+ * One key of an object schema. A verdict beyond the key's existence is read only off a path of
+ * nodes whose meaning `ALLOWED_*` below pins; any other node leaves `opaque`, naming it, and
+ * nothing else. That is what keeps a node this does not model from reading as a `differ`.
  */
-export type PlanAppSchemaFields = { fields: Record<string, PlanAppSchemaField>; reshaped: boolean; repiped: boolean } | PlanAppUnreadable
+export type PlanAppSchemaField =
+  | { opaque: string }
+  | {
+      /** The validated value as the walker renders it: the output side, a pipe's last stage. */
+      output: JsonSchemaObject
+      /** Whether a client must send a non-null value; absent for a coercion that turns a missing value into one. */
+      required?: boolean
+    }
+
+/** `open` names why a key the object does not declare may still be accepted. */
+export type PlanAppSchemaFields = { fields: Record<string, PlanAppSchemaField>; open?: string } | PlanAppUnreadable
 
 export interface PlanAppResourcePayload {
   className: string
@@ -61,6 +47,18 @@ export interface PlanAppResourcePayload {
   /** `open` names why a member missing from `members` may still be declared. */
   payload: { members: PagePropKey[]; open?: string } | PlanAppUnreadable
 }
+
+/** Wrappers whose presence rule is pinned: `nonoptional` is what `.required()` adds over `.optional()`. */
+const ALLOWED_WRAPPERS = new Set(['optional', 'nullable', 'default', 'prefault', 'nonoptional'])
+
+/** Leaves whose rendered type is the validated value's. `z.coerce.*` stays a leaf; `z.stringbool()` is a pipe of two. */
+const ALLOWED_LEAVES = new Set(['string', 'number', 'boolean', 'bigint', 'date', 'enum'])
+
+/** Checks that only restrict the value, so a stated bound is one it must meet; `overwrite` (`.trim()`) only ahead of every bound. */
+const ALLOWED_CHECKS = new Set(['min_length', 'max_length', 'length_equals', 'greater_than', 'less_than', 'multiple_of', 'number_format', 'string_format'])
+
+/** A coercion that turns `undefined` into a value it accepts, so a missing key passes. */
+const COERCES_MISSING = new Set(['string', 'boolean'])
 
 /** A walk that throws (a recursive getter schema overflows the walker) leaves this export's fields unread, never the command. */
 export function readSchemaFields(name: string, value: unknown): PlanAppSchemaFields {
@@ -71,105 +69,88 @@ export function readSchemaFields(name: string, value: unknown): PlanAppSchemaFie
   }
 }
 
-/** The wrappers that decide a key's presence on the input side, `nonoptional` re-requiring what an inner one made omissible. */
-const INPUT_PRESENCE_WRAPPERS = new Set(['nonoptional', 'optional', 'default', 'prefault', 'catch'])
-
-/** The wrappers that supply a value for a missing key. */
-const FILLING_WRAPPERS = new Set(['default', 'prefault', 'catch'])
-
 function walkSchemaFields(name: string, value: unknown): PlanAppSchemaFields {
-  const warnings: string[] = []
-  const object = readObjectSchema(value, warnings, name, 'input')
-  const inputObject = object ? objectPath(value as ZodSchemaLike, 'input') : undefined
-  const inputShape = inputObject && objectShape(inputObject.at(-1)!)
-  if (!object || !inputObject || !inputShape) {
-    if (!isZodSchema(value) || warnings.some((warning) => warning.includes(ZOD3_UNSUPPORTED_MESSAGE))) return { unreadable: warnings[0] ?? `${name} is not a zod schema` }
-    return { unreadable: `${name} does not reach an object schema this walker can read` }
-  }
-  const outputObject = objectPath(value as ZodSchemaLike, 'output')?.at(-1)
-  const outputShape = (outputObject && objectShape(outputObject)) ?? {}
-  const objectRefined = inputObject.some((node) => schemaChecks(node).length > 0)
+  if (value !== null && typeof value === 'object' && isZod3Schema(value)) return { unreadable: `${name}: ${ZOD3_UNSUPPORTED_MESSAGE}` }
+  if (!isZodSchema(value)) return { unreadable: `${name} is not a zod schema` }
+  const root = objectRoot(value)
+  if (!root) return { unreadable: `${name} does not reach an object schema this reader can read` }
+  const shape = objectShape(root.object) ?? {}
+  const catchall = schemaAt(root.object._def ?? {}, 'catchall')
+  const open = catchall && typeOf(catchall) !== 'never' ? `${name} accepts keys it does not declare (a loose object or a catchall)` : undefined
   const fields: Record<string, PlanAppSchemaField> = {}
-  for (const [key, node] of Object.entries(inputShape)) {
-    const outputNode = Object.hasOwn(outputShape, key) ? outputShape[key] : undefined
-    const input = renderSide(node, key, 'input')
-    const output = outputNode ? renderSide(outputNode, key, 'output') : { unrendered: 'the output object does not declare it' }
-    const unrendered = input.unrendered ?? output.unrendered
-    const chain = wrapperChain(node)
-    const types = chain.map(typeOf)
-    const presence = types.findIndex((type) => INPUT_PRESENCE_WRAPPERS.has(type))
-    const required = key in object.properties ? object.required.has(key) : presence < 0 || types[presence] === 'nonoptional' ? undefined : false
-    fields[key] = {
-      ...(input.schema ? { input: input.schema } : {}),
-      ...(output.schema ? { output: output.schema } : {}),
-      ...(unrendered ? { unrendered } : {}),
-      ...(required === undefined ? {} : { required }),
-      piped: types.includes('pipe') || types.includes('transform'),
-      fillsMissing: fillsMissing(node),
-      refinedPresence: objectRefined || chain.slice(0, presence + 1).some((wrapper) => schemaChecks(wrapper).length > 0),
-      transformed: outputNode !== undefined && reachesTransform(outputNode),
-    }
+  for (const [key, node] of Object.entries(shape)) {
+    const opaque = root.opaque ?? opaqueNode(node, 'field')
+    fields[key] = opaque ? { opaque: `${key}: ${opaque}` } : readField(key, node)
   }
-  return { fields, reshaped: reachesTransform(value as ZodSchemaLike), repiped: outputObject !== inputObject.at(-1) }
+  return { fields, ...(open ? { open } : {}) }
 }
 
-/** The field rendered on one side; a warning labelled with the key itself, not a part below it, means the rendering is not the field's. */
-function renderSide(node: ZodSchemaLike, key: string, io: SchemaIo): { schema?: JsonSchemaObject; unrendered?: string } {
-  const warnings: string[] = []
-  const schema = toJsonSchema(node, warnings, key, io)
-  const own = warnings.find((warning) => warning.startsWith(`${key}:`))
-  if (own || !schema) return { unrendered: own ?? `the schema walker renders nothing for the ${io} side` }
-  return { schema }
-}
-
-/** The nodes from a schema down to the object it wraps, unwrapped the way `readObjectSchema()` unwraps it. */
-function objectPath(schema: ZodSchemaLike, io: SchemaIo): ZodSchemaLike[] | undefined {
-  const path: ZodSchemaLike[] = []
-  let node: ZodSchemaLike | undefined = schema
-  while (node) {
-    path.push(node)
-    if (typeOf(node) === 'object') return path
-    node = unwrapSingleChild(node, io)
+/**
+ * The object a schema is, or wraps. Every verdict but a key's existence needs the export to be
+ * the object itself, unrefined: a key the object does not declare is stripped whatever wraps it,
+ * but a pipe, a transform, a catch or a refinement around it may change any field's verdict.
+ */
+function objectRoot(value: ZodSchemaLike): { object: ZodSchemaLike; opaque?: string } | undefined {
+  let node: ZodSchemaLike | undefined = value
+  const around: string[] = []
+  while (node && typeOf(node) !== 'object') {
+    around.push(typeOf(node))
+    node = typeOf(node) === 'pipe' ? pipeSides(node._def ?? {}).from : innerSchema(node._def ?? {})
   }
-  return undefined
+  if (!node) return undefined
+  if (around.length > 0) return { object: node, opaque: `the object is wrapped in ${around.join(' > ')}` }
+  const checks = uncheckedKinds(node, false, false)
+  return checks ? { object: node, opaque: `the object carries ${checks}` } : { object: node }
 }
 
-/** A field's single-child wrappers, outermost first, down to the first node that is not one. */
-function wrapperChain(schema: ZodSchemaLike): ZodSchemaLike[] {
-  const chain: ZodSchemaLike[] = []
-  let node: ZodSchemaLike | undefined = schema
-  while (node) {
-    chain.push(node)
-    const type = typeOf(node)
-    if (type === 'pipe' || !SINGLE_CHILD_WRAPPERS.has(type)) break
-    node = innerSchema(node._def ?? {})
-  }
-  return chain
-}
-
-function fillsMissing(schema: ZodSchemaLike): boolean {
-  const type = typeOf(schema)
-  if (type === 'transform' || FILLING_WRAPPERS.has(type)) return true
+/**
+ * Why a field's node is outside the allowlist, or `undefined` when every node on it is in. A pipe's
+ * stages must be plain leaves, since a wrapper inside one could fill a value in between; only the
+ * stage whose bounds are read (`field` or a pipe's `out`) needs its overwrites ahead of them.
+ */
+function opaqueNode(node: ZodSchemaLike, role: 'field' | 'in' | 'out'): string | undefined {
+  const type = typeOf(node)
+  const checks = uncheckedKinds(node, ALLOWED_LEAVES.has(type), role !== 'in')
+  if (checks) return `a ${type} carries ${checks}`
+  if (ALLOWED_LEAVES.has(type)) return undefined
+  if (role !== 'field') return `a pipe has a ${type} stage`
   if (type === 'pipe') {
-    const def = schema._def ?? {}
-    return [schemaAt(def, 'in'), schemaAt(def, 'out')].some((stage) => stage !== undefined && fillsMissing(stage))
+    const def = node._def ?? {}
+    const stages = [schemaAt(def, 'in'), schemaAt(def, 'out')] as const
+    if (!stages[0] || !stages[1]) return 'a pipe has a missing stage'
+    return opaqueNode(stages[0], 'in') ?? opaqueNode(stages[1], 'out')
   }
-  const inner = SINGLE_CHILD_WRAPPERS.has(type) ? innerSchema(schema._def ?? {}) : undefined
-  return inner !== undefined && fillsMissing(inner)
+  const inner = ALLOWED_WRAPPERS.has(type) ? innerSchema(node._def ?? {}) : undefined
+  return inner ? opaqueNode(inner, 'field') : `it holds a ${type}, whose meaning this reader does not model`
 }
 
-function reachesTransform(schema: ZodSchemaLike): boolean {
-  let node: ZodSchemaLike | undefined = schema
-  while (node) {
-    const type = typeOf(node)
-    if (type === 'transform') return true
-    if (type === 'pipe') {
-      node = pipeSides(node._def ?? {}).to
-      if (!node) return true
-    } else if (SINGLE_CHILD_WRAPPERS.has(type)) node = unwrapSingleChild(node, 'output')
-    else return false
+/** The check kinds on a node outside `ALLOWED_CHECKS`, or an `overwrite` after a bound when `ordered`; `undefined` when none. */
+function uncheckedKinds(node: ZodSchemaLike, leaf: boolean, ordered: boolean): string | undefined {
+  const checks = schemaChecks(node).map((check) => check.check)
+  const outside = checks.filter((check) => !leaf || (check !== 'overwrite' && !ALLOWED_CHECKS.has(check)))
+  if (outside.length > 0) return `a check this reader does not model (${[...new Set(outside)].join(', ')})`
+  const bounded = checks.findIndex((check) => check !== 'overwrite')
+  return ordered && bounded >= 0 && checks.lastIndexOf('overwrite') > bounded ? 'an overwrite (such as .trim()) after a bound' : undefined
+}
+
+/** A field whose every node is allowed: its presence read off its wrappers, its type off the walker's output side. */
+function readField(key: string, node: ZodSchemaLike): PlanAppSchemaField {
+  const warnings: string[] = []
+  const output = toJsonSchema(node, warnings, key, 'output')
+  if (!output || warnings.length > 0) return { opaque: warnings[0] ?? `${key}: the schema walker renders nothing for it` }
+  let omissible: boolean | undefined
+  let nullable = false
+  let leaf: ZodSchemaLike | undefined = node
+  while (leaf && ALLOWED_WRAPPERS.has(typeOf(leaf))) {
+    const type = typeOf(leaf)
+    if (type === 'nullable') nullable = true
+    else omissible ??= type !== 'nonoptional'
+    leaf = innerSchema(leaf._def ?? {})
   }
-  return false
+  if (omissible || nullable) return { output, required: false }
+  const first = leaf && typeOf(leaf) === 'pipe' ? pipeSides(leaf._def ?? {}).from : leaf
+  const coercing = first?._def?.coerce === true && COERCES_MISSING.has(typeOf(first))
+  return coercing ? { output } : { output, required: true }
 }
 
 /** Every resource class codegen discovers, with the members of the payload type it would emit. */

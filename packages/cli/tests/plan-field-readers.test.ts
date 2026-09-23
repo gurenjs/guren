@@ -68,16 +68,33 @@ export const OpaqueSchema = z.object({
 
 export const ReshapedSchema = z.object({ amount: z.string(), label: z.string().max(20) }).transform((value) => ({ ...value, amount: Number(value.amount) }))
 
-export const PresenceSchema = z
-  .object({
-    upload: z.file().optional(),
-    page: z.string().default('1').pipe(z.coerce.number().int().min(1)),
-    tab: z.string().catch('all').pipe(z.enum(['all', 'mine'])),
-    nick: z.string().optional().refine((value) => value !== undefined),
-  })
+export const PresenceSchema = z.object({
+  upload: z.file().optional(),
+  page: z.string().default('1').pipe(z.coerce.number().int().min(1)),
+  tab: z.string().catch('all').pipe(z.enum(['all', 'mine'])),
+  nick: z.string().optional().refine((value) => value !== undefined),
+  toString: z.file(),
+})
 export const RequiredSchema = PresenceSchema.required()
 export const RefinedObjectSchema = z.object({ note: z.string().optional() }).superRefine(() => {})
 export const RepipedSchema = z.looseObject({ a: z.string().optional() }).pipe(z.object({ a: z.string(), b: z.string().optional() }))
+
+export const RefinedDefaultSchema = z.object({ a: z.string().default('').refine((value) => value !== '') })
+export const RefineInPipeSchema = z.object({ a: z.string().optional().refine((value) => value !== undefined).transform((value) => value) })
+export const IssueInTransformSchema = z.object({
+  a: z.string().optional().transform((value, ctx) => {
+    if (value === undefined) ctx.addIssue({ code: 'custom', message: 'required' })
+    return value
+  }),
+})
+export const NullishRefinedSchema = z.object({ a: z.string().nullish().refine((value) => value != null).transform((value) => value) })
+export const ObjectIssueSchema = z.object({ a: z.string().optional() }).transform((value, ctx) => {
+  if (!value.a) ctx.addIssue({ code: 'custom', message: 'required' })
+  return value
+})
+export const PipedTransformBoundSchema = z.object({ a: z.string().max(3).transform((value) => value + 'xx').pipe(z.string()) })
+export const CaughtObjectSchema = z.object({ a: z.string() }).catch({ a: 'x' })
+export const ReshapedBoundSchema = z.object({ a: z.string().max(3) }).transform((value) => ({ a: value.a + 'xxxx' }))
 
 export const BoundsSchema = z.object({
   digits: z.string().max(3).transform(Number),
@@ -215,7 +232,7 @@ describe('plan:status validator fields', () => {
   test('should leave a union behind a transform unknown rather than a differ', () => {
     const element = judged(validator('LoginSchema', [{ name: 'remember', type: 'boolean', required: false, rules: [] }]), 'val')
 
-    expect(verdicts(element)).toEqual({ 'field remember': 'match', 'field remember type': 'unknown', 'field remember required': 'match' })
+    expect(verdicts(element)).toEqual({ 'field remember': 'match', 'field remember type': 'unknown', 'field remember required': 'unknown' })
   })
 
   test('should leave free-form rule text unknown', () => {
@@ -224,7 +241,7 @@ describe('plan:status validator fields', () => {
     expect(verdicts(element)['field body rule must not be spam']).toBe('unknown')
   })
 
-  test('should judge the validated value: a coerced or stringbool field matches, a transform is unknown, never a differ', () => {
+  test('should judge the validated value: a coerced or stringbool field matches, a transform or preprocess is unknown, never a differ', () => {
     const element = judged(validator('FormSchema', [
       { name: 'count', type: 'integer', required: true, rules: [] },
       { name: 'agreed', type: 'boolean', required: true, rules: [] },
@@ -237,10 +254,10 @@ describe('plan:status validator fields', () => {
       'field count type': 'unknown',
       'field agreed type': 'match',
       'field page type': 'match',
-      'field size type': 'match',
+      'field size type': 'unknown',
       'field contact type': 'match',
       'field contact required': 'match',
-      'field contact rule min 1': 'match',
+      'field contact rule min 1': 'unknown',
       'field contact rule email': 'match',
     })
   })
@@ -254,7 +271,7 @@ describe('plan:status validator fields', () => {
     ]), 'val')
 
     expect(Object.values(verdicts(element))).not.toContain('differ')
-    expect(verdicts(element)).toMatchObject({ 'field filled required': 'unknown', 'field a.b type': 'match', 'field gone': 'match' })
+    expect(verdicts(element)).toMatchObject({ 'field filled required': 'unknown', 'field a.b': 'match', 'field gone': 'match' })
   })
 
   test('should read presence off the outermost wrapper, and leave a fill or a refinement unknown rather than differ', () => {
@@ -265,7 +282,7 @@ describe('plan:status validator fields', () => {
       { name: 'nick', type: 'string', required: true, rules: [] },
     ]
     expect(verdicts(judged(validator('PresenceSchema', fields), 'val'))).toMatchObject({
-      'field upload required': 'match',
+      'field upload required': 'unknown',
       'field page required': 'unknown',
       'field tab required': 'unknown',
       'field nick required': 'unknown',
@@ -273,6 +290,7 @@ describe('plan:status validator fields', () => {
     const required = verdicts(judged(validator('RequiredSchema', fields.map((field) => ({ ...field, required: true }))), 'val'))
     expect(Object.entries(required).filter(([, verdict]) => verdict === 'differ')).toEqual([])
     expect(required['field upload required']).toBe('unknown')
+    expect(verdicts(judged(validator('PresenceSchema', [{ name: 'toString', type: 'json', required: true, rules: [] }]), 'val'))['field toString required']).toBe('unknown')
   })
 
   test('should leave a key an object refinement may require unknown', () => {
@@ -287,10 +305,13 @@ describe('plan:status validator fields', () => {
     expect(verdicts(element)).toMatchObject({ 'field a required': 'unknown', 'field b': 'unknown' })
   })
 
-  test('should leave a recursive schema unread rather than fail the command', () => {
-    const element = judged(validator('TreeSchema', [{ name: 'name', type: 'string', required: true, rules: [] }]), 'val')
+  test('should read a recursive schema without walking into it', () => {
+    const element = judged(validator('TreeSchema', [
+      { name: 'name', type: 'string', required: true, rules: [] },
+      { name: 'children', type: 'json', required: true, rules: [] },
+    ]), 'val')
 
-    expect(element.properties[0]).toMatchObject({ verdict: 'unknown', reason: expect.stringContaining('could not be walked') })
+    expect(verdicts(element)).toMatchObject({ 'field name type': 'match', 'field children': 'match', 'field children type': 'unknown' })
   })
 
   test('should not read a key the walker drops unrendered as omissible', () => {
@@ -300,13 +321,39 @@ describe('plan:status validator fields', () => {
       { name: 'maybe', type: 'string', required: false, rules: [] },
     ]), 'val')
 
-    expect(verdicts(element)).toMatchObject({ 'field upload required': 'unknown', 'field lazy required': 'unknown', 'field maybe required': 'match' })
+    expect(verdicts(element)).toMatchObject({ 'field upload required': 'unknown', 'field lazy required': 'unknown', 'field maybe required': 'unknown' })
   })
 
-  test('should leave every type unknown under a transform on the object itself, and still read the checks that ran before it', () => {
+  test('should leave everything but a key’s existence unknown under a transform on the object itself', () => {
     const element = judged(validator('ReshapedSchema', [{ name: 'amount', type: 'integer', required: true, rules: [] }, { name: 'label', type: 'string', required: true, rules: ['max 20'] }]), 'val')
 
-    expect(verdicts(element)).toMatchObject({ 'field amount type': 'unknown', 'field label type': 'unknown', 'field label rule max 20': 'match' })
+    expect(verdicts(element)).toEqual({
+      'field amount': 'match',
+      'field amount type': 'unknown',
+      'field amount required': 'unknown',
+      'field label': 'match',
+      'field label type': 'unknown',
+      'field label required': 'unknown',
+      'field label rule max 20': 'unknown',
+    })
+  })
+
+  test('should never differ on a node outside the allowlist, wherever it sits', () => {
+    const cases: Array<[string, Field]> = [
+      ['RefinedDefaultSchema', { name: 'a', type: 'string', required: false, rules: [] }],
+      ['RefineInPipeSchema', { name: 'a', type: 'string', required: true, rules: [] }],
+      ['IssueInTransformSchema', { name: 'a', type: 'string', required: true, rules: [] }],
+      ['NullishRefinedSchema', { name: 'a', type: 'string', required: true, rules: [] }],
+      ['ObjectIssueSchema', { name: 'a', type: 'string', required: true, rules: [] }],
+      ['PipedTransformBoundSchema', { name: 'a', type: 'string', required: true, rules: ['max 5'] }],
+      ['CaughtObjectSchema', { name: 'a', type: 'string', required: false, rules: [] }],
+      ['ReshapedBoundSchema', { name: 'a', type: 'string', required: true, rules: ['max 7'] }],
+    ]
+    for (const [schema, field] of cases) {
+      const element = judged(validator(schema, [field]), 'val')
+      expect([schema, Object.values(verdicts(element)).includes('differ')]).toEqual([schema, false])
+      expect(verdicts(element)[`field ${field.name}`]).toBe('match')
+    }
   })
 
   test('should read a bound only in the planned type’s unit, never a transformed field’s input length', () => {

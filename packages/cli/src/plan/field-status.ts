@@ -1,14 +1,14 @@
 /**
  * How a planned validator's and resource's fields compare with what `field-readers.ts` read
  * (RFC 0030 §6). Pure, like the rest of the status. A verdict is `differ` only where the two
- * readings cannot both be true of one field; a transform, a pipe, a union, a refinement or a
+ * readings cannot both be true of one field; a node outside the reader's allowlist, a union or a
  * type this cannot map leaves the property `unknown`.
  */
 
 import type { JsonSchemaObject } from '@guren/server/internal/zod-json-schema'
 
 import type { PagePropKey } from '../page-props-extractor'
-import type { PlanAppResourcePayload, PlanAppSchemaField, PlanAppSchemaFields } from './field-readers'
+import type { PlanAppResourcePayload, PlanAppSchemaFields } from './field-readers'
 import type { PlanResource, PlanValidator } from './schema'
 import type { PlanPropertyStatus } from './status'
 
@@ -75,44 +75,29 @@ function validatorField(field: PlanValidatorField, read: PlanAppSchemaFields): P
   ]
   if ('unreadable' in read) return [unknown(name, 'declared', read.unreadable), ...details(read.unreadable)]
 
-  const actual = read.fields[field.name]
-  if (!actual && read.repiped) {
-    const reason = 'the object pipes into a second one, whose keys this does not compare'
-    return [unknown(name, 'declared', reason), ...details(reason)]
+  const actual = Object.hasOwn(read.fields, field.name) ? read.fields[field.name] : undefined
+  if (!actual) {
+    if (read.open) return [unknown(name, 'declared', read.open), ...details(read.open)]
+    return [differ(name, 'declared', 'not declared'), ...details('the schema does not declare it')]
   }
-  if (!actual) return [differ(name, 'declared', 'not declared'), ...details('the schema does not declare it')]
+  if ('opaque' in actual) return [match(name, 'declared'), ...details(actual.opaque)]
+  const shape = shapeOf(actual.output)
   return [
     match(name, 'declared'),
-    read.reshaped ? unknown(`${name} type`, field.type, 'a transform on the object reshapes the validated value, whose type is not read') : typeProperty(`${name} type`, field.type, actual),
-    read.repiped ? unknown(`${name} required`, String(field.required), 'the object pipes into a second one, which decides whether it must be sent') : requiredProperty(`${name} required`, field.required, actual),
-    ...rules.map(({ property, rule }) => ruleProperty(property, rule, field.type, actual)),
+    typeProperty(`${name} type`, field.type, shape),
+    actual.required === undefined
+      ? unknown(`${name} required`, String(field.required), 'a coercion turns a missing value into one it accepts')
+      : compareBoolean(`${name} required`, field.required, actual.required, actual.required ? 'must be sent' : 'may be omitted or sent as null'),
+    ...rules.map(({ property, rule }) => ruleProperty(property, rule, field.type, shape)),
   ]
 }
 
-/** The planned type describes the validated value, so the output side is read, and `differ` only where both sides are one node. */
-function typeProperty(property: string, planned: PlanValidatorField['type'], field: PlanAppSchemaField): PlanPropertyStatus {
-  if (field.transformed) return unknown(property, planned, 'the value passes through a transform, whose result type is not read')
-  if (!field.output) return unknown(property, planned, field.unrendered ?? 'the output side was not rendered')
-  const shape = shapeOf(field.output)
+/** The planned type describes the validated value, which the walker's output side renders. */
+function typeProperty(property: string, planned: PlanValidatorField['type'], shape: FieldShape): PlanPropertyStatus {
   const type = VALIDATOR_TYPES[planned]
   if (type.holds(shape)) return match(property, planned, describe(shape))
-  if (!field.piped && shape.family && type.excludes.includes(shape.family)) return differ(property, planned, describe(shape))
-  return unknown(property, planned, `${describe(shape)} may hold a ${planned} under a format, a pipe or a refinement this does not read`)
-}
-
-/** Required means a client must send a value: a key it may omit, or one it may send as `null`, is not. */
-function requiredProperty(property: string, planned: boolean, field: PlanAppSchemaField): PlanPropertyStatus {
-  if (field.required === undefined) return unknown(property, String(planned), field.unrendered ?? 'the schema walker renders nothing for the field')
-  if (!field.required && planned && field.refinedPresence) return unknown(property, 'true', 'the key may be omitted, and a refinement this does not read may require it')
-  if (!field.required) return compareBoolean(property, planned, false, 'may be omitted')
-  if (!field.input) return unknown(property, String(planned), field.unrendered ?? 'the input side was not rendered')
-  const shape = shapeOf(field.input)
-  if (shape.nullable) return compareBoolean(property, planned, false, 'accepts null')
-  // A union may hold `null` or `undefined` in a member this does not unwrap.
-  if (!shape.family) return unknown(property, String(planned), 'the field is a union, which may accept null')
-  // The walker reads a pipe as required even where a stage of it fills in the missing value.
-  if (field.fillsMissing) return unknown(property, String(planned), 'a transform, default or catch in the field may supply a missing value')
-  return compareBoolean(property, planned, true, 'must be sent')
+  if (shape.family && type.excludes.includes(shape.family)) return differ(property, planned, describe(shape))
+  return unknown(property, planned, `${describe(shape)} may hold a ${planned} under a format this does not read`)
 }
 
 function compareBoolean(property: string, planned: boolean, actual: boolean, said: string): PlanPropertyStatus {
@@ -144,49 +129,38 @@ function isTighter(side: 'min' | 'max', a: { value: number; exclusive: boolean }
   return side === 'min' ? a.value > b.value : a.value < b.value
 }
 
-/**
- * The tightest bound the field states in the planned type's unit, on either rendered side, both
- * stages being enforced. An integer's exclusive bound is the next integer in. A transformed
- * field's output side is its input again, and its input bounds a value the plan does not describe.
- */
-function statedBound(field: PlanAppSchemaField, type: PlanValidatorField['type'], side: 'min' | 'max'): Bound | undefined {
-  if (field.transformed) return undefined
+/** The tightest bound the validated value states in the planned type's unit; an integer's exclusive bound is the next integer in. */
+function statedBound(shape: FieldShape, type: PlanValidatorField['type'], side: 'min' | 'max'): Bound | undefined {
+  const keywords = shape.family && VALIDATOR_TYPES[type].bounds.includes(shape.family) ? BOUND_KEYWORDS[shape.family] : undefined
   let bound: Bound | undefined
-  for (const schema of [field.input, field.output]) {
-    if (!schema) continue
-    const shape = shapeOf(schema)
-    const keywords = shape.family && VALIDATOR_TYPES[type].bounds.includes(shape.family) ? BOUND_KEYWORDS[shape.family] : undefined
-    if (!keywords) continue
-    for (const keyword of keywords[side]) {
-      const stated = shape.schema[keyword]
-      if (typeof stated !== 'number') continue
-      const exclusive = keyword.startsWith('exclusive')
-      const candidate: Bound = shape.family === 'integer' && exclusive && Number.isInteger(stated)
-        ? { value: side === 'min' ? stated + 1 : stated - 1, exclusive: false, keyword }
-        : { value: stated, exclusive, keyword }
-      if (!bound || isTighter(side, candidate, bound)) bound = candidate
-    }
+  for (const keyword of keywords?.[side] ?? []) {
+    const stated = shape.schema[keyword]
+    if (typeof stated !== 'number') continue
+    const exclusive = keyword.startsWith('exclusive')
+    const candidate: Bound = shape.family === 'integer' && exclusive && Number.isInteger(stated)
+      ? { value: side === 'min' ? stated + 1 : stated - 1, exclusive: false, keyword }
+      : { value: stated, exclusive, keyword }
+    if (!bound || isTighter(side, candidate, bound)) bound = candidate
   }
   return bound
 }
 
-/** A stated bound tighter than the planned one rejects a value the plan accepts; a looser one may be tightened by a refinement. */
-function ruleProperty(property: string, rule: string, type: PlanValidatorField['type'], field: PlanAppSchemaField): PlanPropertyStatus {
+/** A stated bound tighter than the planned one rejects a value the plan accepts; a looser one may be tightened by a format or pattern. */
+function ruleProperty(property: string, rule: string, type: PlanValidatorField['type'], shape: FieldShape): PlanPropertyStatus {
   const text = rule.trim()
   const format = FORMAT_RULES[text.toLowerCase()]
   if (format) {
-    const formats = [field.input?.format, field.transformed ? undefined : field.output?.format]
-    return formats.includes(format) ? match(property, rule, `format ${format}`) : unknown(property, rule, 'no such format is declared, and a refinement this does not read may check it')
+    return shape.format === format ? match(property, rule, `format ${format}`) : unknown(property, rule, 'no such format is declared on the validated value')
   }
   const parsed = BOUND_RULE.exec(text)
   if (!parsed) return unknown(property, rule, 'rule text is compared only as min, max, email, url or uuid')
   const side = parsed[1]!.toLowerCase() as 'min' | 'max'
   const planned = Number(parsed[2])
-  const bound = statedBound(field, type, side)
-  if (!bound) return unknown(property, rule, `no ${side} bound is declared, and a refinement this does not read may check it`)
+  const bound = statedBound(shape, type, side)
+  if (!bound) return unknown(property, rule, `no ${side} bound is declared on the validated value`)
   const said = `${bound.keyword} ${bound.value}`
   if (!bound.exclusive && bound.value === planned) return match(property, rule, said)
-  return isTighter(side, bound, { value: planned }) ? differ(property, rule, said) : unknown(property, rule, `${said} is looser than planned, and a refinement this does not read may tighten it`)
+  return isTighter(side, bound, { value: planned }) ? differ(property, rule, said) : unknown(property, rule, `${said} is looser than planned, and a format or pattern may tighten it`)
 }
 
 export function resourceFieldProperties(planned: ReadonlyArray<PlanResourceField>, read: PlanAppResourcePayload['payload']): PlanPropertyStatus[] {
