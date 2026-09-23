@@ -211,6 +211,20 @@ bunx guren check --prototype  # prototype ハンドラーのルートに名前�
 main とのマージベースからの変更ファイルに限定します。エージェントハーネスの
 edit hook が使う高速パスです。
 
+ファイルを再生成すれば消える指摘もあります。`.guren/*.gen.ts` マニフェストの
+欠落(`guren codegen`)と、`docs/spec/` のビューのずれ(`guren spec:generate`)です。
+`check --json` はこれらの指摘に `fix` フィールドを付けます。中身は
+`{ "kind": "command", "args": ["codegen"] }` のような `guren` 以降の引数です。
+`--fix` は重複を除いた fix を一度ずつ実行し、もう一度チェックして2回目の結果を
+報告します。実行したコマンドは `fixes` に入り、どれかが失敗すると非ゼロで
+終了します。コードの変更や判断が要る指摘には `fix` がなく、`suggestion` の
+文章だけが付きます。
+
+```bash
+bunx guren check --fix          # 指摘が示すファイルを再生成して、もう一度チェック
+bunx guren check --spec --fix   # 同じことをスペックビューに限って行う
+```
+
 `gate` は「この変更は完了か」に一つの exit code で答えるコマンドです。
 codegen、typecheck、lint(アプリに `.oxlintrc.json` がある場合)、
 `--ci` 規則の `check`、`audit`、テストスイート、つまり scaffold された CI ワークフローが

@@ -66,7 +66,7 @@ import { checkConfigWiring } from './config-check'
 import { runSpecCheck } from './spec-check'
 import { checkPlans, isPlanInput } from './plan-check'
 import { getChangedFiles } from './changed-files'
-import { check, type CheckResult, type CheckReport, type CheckStatus } from './check-result'
+import { check, commandFix, formatFixCommand, pendingFixes, type CheckFix, type CheckResult, type CheckReport, type CheckStatus } from './check-result'
 
 export type { CheckStatus, CheckResult, CheckReport }
 
@@ -127,12 +127,8 @@ export interface RunCheckOptions {
  * `guren check --routes routes/api.ts` prints a remedy that reads the codegen
  * default instead, and writes or deletes the manifest from the wrong graph.
  */
-function codegenCommandFor(routesFile?: string): string {
-  if (routesFile === undefined) return 'bunx guren codegen'
-  // Quoted only when it would not survive a shell word-split, so the ordinary
-  // `routes/api.ts` stays copy-pasteable as written.
-  const argument = /^[\w./@-]+$/u.test(routesFile) ? routesFile : `'${routesFile.replace(/'/gu, `'\\''`)}'`
-  return `bunx guren codegen --routes ${argument}`
+function codegenFix(routesFile?: string): CheckFix {
+  return routesFile === undefined ? commandFix('codegen') : commandFix('codegen', '--routes', routesFile)
 }
 
 /**
@@ -148,7 +144,8 @@ async function checkAgentManifest(
 ): Promise<CheckResult> {
   const key = `manifest:${AGENTS_MANIFEST_FILE}`
   const plan = await planAgentManifest(cwd, routesFile, definitions)
-  const codegen = codegenCommandFor(routesFile)
+  const fix = codegenFix(routesFile)
+  const codegen = formatFixCommand(fix)
 
   if (plan.reason === 'unreadable') {
     return check(
@@ -162,13 +159,16 @@ async function checkAgentManifest(
   }
 
   if (plan.staleManifest) {
-    return check(
-      key,
-      AGENTS_MANIFEST_FILE,
-      'warn',
-      `${AGENTS_MANIFEST_FILE} describes agent tools this app no longer exposes — no route derives one.`,
-      `Run: ${codegen} (it removes ${AGENTS_MANIFEST_FILE})`,
-    )
+    return {
+      ...check(
+        key,
+        AGENTS_MANIFEST_FILE,
+        'warn',
+        `${AGENTS_MANIFEST_FILE} describes agent tools this app no longer exposes — no route derives one.`,
+        `Run: ${codegen} (it removes ${AGENTS_MANIFEST_FILE})`,
+      ),
+      fix,
+    }
   }
 
   if (plan.reason === 'no-tools') {
@@ -181,15 +181,24 @@ async function checkAgentManifest(
   }
 
   const present = await fileExists(cwd, AGENTS_MANIFEST_FILE)
-  return check(
-    key,
-    AGENTS_MANIFEST_FILE,
-    present ? 'pass' : 'warn',
-    present
-      ? `${AGENTS_MANIFEST_FILE} is present (${plan.toolCount} ${plan.toolCount === 1 ? 'tool' : 'tools'}).`
-      : `${AGENTS_MANIFEST_FILE} is missing; ${plan.toolCount} ${plan.toolCount === 1 ? 'route derives' : 'routes derive'} an agent tool.`,
-    present ? undefined : `Run: ${codegen}`,
-  )
+  if (present) {
+    return check(
+      key,
+      AGENTS_MANIFEST_FILE,
+      'pass',
+      `${AGENTS_MANIFEST_FILE} is present (${plan.toolCount} ${plan.toolCount === 1 ? 'tool' : 'tools'}).`,
+    )
+  }
+  return {
+    ...check(
+      key,
+      AGENTS_MANIFEST_FILE,
+      'warn',
+      `${AGENTS_MANIFEST_FILE} is missing; ${plan.toolCount} ${plan.toolCount === 1 ? 'route derives' : 'routes derive'} an agent tool.`,
+      `Run: ${codegen}`,
+    ),
+    fix,
+  }
 }
 
 /**
@@ -442,17 +451,16 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       ...(pagesPlan.reason === 'pages' ? [PAGES_MANIFEST_FILE] : []),
       '.guren/data.gen.ts',
     ]
+    const manifestFix = codegenFix(options.routesFile)
     for (const manifest of manifests) {
-      const exists = await fileExists(cwd, manifest)
-      checks.push(
-        check(
-          `manifest:${manifest}`,
-          manifest,
-          exists ? 'pass' : 'warn',
-          exists ? `${manifest} is present.` : `${manifest} is missing.`,
-          exists ? undefined : 'Run: bunx guren codegen',
-        ),
-      )
+      if (await fileExists(cwd, manifest)) {
+        checks.push(check(`manifest:${manifest}`, manifest, 'pass', `${manifest} is present.`))
+        continue
+      }
+      checks.push({
+        ...check(`manifest:${manifest}`, manifest, 'warn', `${manifest} is missing.`, `Run: ${formatFixCommand(manifestFix)}`),
+        fix: manifestFix,
+      })
     }
 
     // 5.5. The agent manifest cannot ride the loop above: codegen writes it only
@@ -913,6 +921,15 @@ async function checkInertiaPages(
 export function renderCheckReport(report: CheckReport): void {
   consola.box(`Guren integrity check for ${report.cwd}`)
 
+  for (const run of report.fixes ?? []) {
+    if (run.ok) {
+      consola.success(`[fixed] ${run.command}`)
+      continue
+    }
+    consola.error(`[fix failed] ${run.command}`)
+    for (const line of run.output ?? []) consola.info(`       ${line}`)
+  }
+
   for (const c of report.checks) {
     const prefix = c.status === 'pass' ? '[ok]' : c.status === 'warn' ? '[warn]' : '[fail]'
     const log = c.status === 'pass' ? consola.success : c.status === 'warn' ? consola.warn : consola.error
@@ -924,4 +941,8 @@ export function renderCheckReport(report: CheckReport): void {
 
   console.log('')
   console.log(`Results: ${report.passCount} passed, ${report.warnCount} warnings, ${report.failCount} failures`)
+  if (report.fixes === undefined && pendingFixes(report).length > 0) {
+    const fixable = report.checks.filter((result) => result.status !== 'pass' && result.fix).length
+    console.log(`${fixable === 1 ? 'One finding clears' : `${fixable} findings clear`} by regenerating files: run this check again with --fix.`)
+  }
 }
