@@ -31,3 +31,6 @@ export const BULK_DELETE = Symbol('guren.orm.bulkDelete')
 
 /** Explicit physical deletion, used by SoftDeletes.forceDelete. */
 export const PHYSICAL_DELETE = Symbol('guren.orm.physicalDelete')
+
+/** A static delete run inside the model's lifecycle, shared with SoftDeletes. */
+export const LIFECYCLE_DELETE = Symbol('guren.orm.lifecycleDelete')

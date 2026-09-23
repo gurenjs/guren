@@ -507,8 +507,9 @@ async destroy() {
   attachment), then the rows. A crash between the two leaves a row pointing
   at nothing (which the next render surfaces loudly) rather than invisible
   orphaned objects.
-- Model delete hooks are *not* used as the purge mechanism: they only fire
-  on one of the delete paths and receive the where clause, not the row.
+- Model delete hooks are *not* used as the purge mechanism: they do not fire
+  on builder deletes (`Post.where(...).delete()`), they fire on a soft delete
+  as well as on `forceDelete`, and they receive the where clause, not the row.
   Call `purgeAttachments()` explicitly in destroy actions.
 - With `SoftDeletes`, soft-deleting a record leaves its attachments in
   place (restore must work); call `purgeAttachments()` on `forceDelete`

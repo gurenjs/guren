@@ -2,7 +2,7 @@
 
 ## Write execution
 
-`Model.update()` and `Model.delete()` handle model hooks and observers, then
+`Model.update()` and `Model.delete()` run the model lifecycle (below), then
 delegate to a scoped `QueryBuilder`. Builder writes share validation for adapter
 capabilities, dropped filters, and unsupported ordering or pagination before
 calling the adapter. Bulk builder writes retain their existing behavior: they do
@@ -13,6 +13,28 @@ filtering, mutators, and casts have run. Do not prepare them again inside that
 boundary. Internal soft-delete timestamps bypass user payload transforms.
 `SoftDeletes` supplies the `BULK_DELETE` handler used by both static and
 builder deletion; `PHYSICAL_DELETE` is the internal path for explicit hard deletes.
+
+## Model lifecycle
+
+`model-lifecycle.ts` owns event order and cancellation for static create, update,
+and delete, and for the `SoftDeletes` `delete()` and `forceDelete()`. Each write
+holds its hooks object and a copy of its observer list from before the first
+event, so replacing `hooks` or calling `observe()` or `clearObservers()` inside a
+callback applies from the next write. Before events run all hooks first, then
+observers in registration order for each event. A false result aborts before
+persistence; exceptions propagate. After events run only after a successful
+write, before read transforms, and their return values do not cancel the write.
+
+Model retains payload preparation, scoped query construction, and return types.
+Create and update pass the prepared payload to before events and the adapter
+result to after events. Every static delete goes through the symbol-keyed
+`LIFECYCLE_DELETE` on Model: the caller checks its own adapter capability, the
+dropped-filter guard runs before `deleting`, and the same condition object
+reaches both phases. `restore()` fires no events, since no hook name covers it.
+
+`model-lifecycle.test.ts` fixes these contracts through the public Model and
+`SoftDeletes` methods, including asynchronous ordering, abort messages, failure
+paths, and registration changes during callbacks.
 
 ## Connection ownership
 

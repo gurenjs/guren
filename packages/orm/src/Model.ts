@@ -4,13 +4,12 @@ import type { AccessorDefinitions, MutatorDefinitions } from './attributes'
 import { warnDeprecated } from './deprecate'
 import { GlobalScopeRegistry } from './GlobalScopeRegistry'
 import type { ScopeFunction } from './GlobalScopeRegistry'
-import { executeHook } from './hooks'
 import type { ModelHooks } from './hooks'
-import { executeObservers } from './ModelObserver'
+import { modelLifecycle } from './model-lifecycle'
 import type { ModelObserver, ModelObserverConstructor } from './ModelObserver'
 import { ModelNotFoundException } from './ModelNotFoundException'
 import { everyFilterDropped } from './where-conditions'
-import { DEFAULT_IN_LIST_SIZE, PREPARED_UPDATE, RAW_RESULTS, READ_TRANSFORMS, SEAL_SCOPES } from './internal-keys'
+import { DEFAULT_IN_LIST_SIZE, LIFECYCLE_DELETE, PREPARED_UPDATE, RAW_RESULTS, READ_TRANSFORMS, SEAL_SCOPES } from './internal-keys'
 import { QueryBuilder } from './QueryBuilder'
 import type {
   EagerLoadConstraint,
@@ -1100,38 +1099,12 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const filtered = applyFillable ? this.filterFillable(data) : { ...(data as PlainObject) }
     const payload = await this.preparePersistencePayload(filtered)
 
-    const hooks = this.hooks
-    const observers = this.observers
-    if (hooks) {
-      if (!(await executeHook(hooks, 'creating', payload))) {
-        throw new Error(`${this.name}.create() aborted by 'creating' hook.`)
-      }
-      if (!(await executeHook(hooks, 'saving', payload))) {
-        throw new Error(`${this.name}.create() aborted by 'saving' hook.`)
-      }
-    }
-    if (observers) {
-      if (!(await executeObservers(observers, 'creating', payload))) {
-        throw new Error(`${this.name}.create() aborted by observer 'creating'.`)
-      }
-      if (!(await executeObservers(observers, 'saving', payload))) {
-        throw new Error(`${this.name}.create() aborted by observer 'saving'.`)
-      }
-    }
+    const lifecycle = modelLifecycle(this.name, 'create', this.hooks, this.observers)
+    await lifecycle.before(payload)
 
     const result = await this.getAdapter().create(table, payload, writeOptions) as TRecordFor<T>
 
-    if (hooks) {
-      const resultData = result as unknown as Record<string, unknown>
-      await executeHook(hooks, 'created', resultData)
-      await executeHook(hooks, 'saved', resultData)
-    }
-
-    if (observers) {
-      const resultData = result as unknown as Record<string, unknown>
-      await executeObservers(observers, 'created', resultData)
-      await executeObservers(observers, 'saved', resultData)
-    }
+    await lifecycle.after(result as unknown as Record<string, unknown>)
 
     return this.applyReadTransforms(result)
   }
@@ -1174,40 +1147,14 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const filtered = applyFillable ? this.filterFillable(data) : { ...(data as PlainObject) }
     const payload = await this.preparePersistencePayload(filtered)
 
-    const hooks = this.hooks
-    const observers = this.observers
-    if (hooks) {
-      if (!(await executeHook(hooks, 'updating', payload))) {
-        throw new Error(`${this.name}.update() aborted by 'updating' hook.`)
-      }
-      if (!(await executeHook(hooks, 'saving', payload))) {
-        throw new Error(`${this.name}.update() aborted by 'saving' hook.`)
-      }
-    }
-    if (observers) {
-      if (!(await executeObservers(observers, 'updating', payload))) {
-        throw new Error(`${this.name}.update() aborted by observer 'updating'.`)
-      }
-      if (!(await executeObservers(observers, 'saving', payload))) {
-        throw new Error(`${this.name}.update() aborted by observer 'saving'.`)
-      }
-    }
+    const lifecycle = modelLifecycle(this.name, 'update', this.hooks, this.observers)
+    await lifecycle.before(payload)
 
     const result = await this.newQuery(writeOptions)
       .where(where as Partial<Record<string, unknown>>)
       [PREPARED_UPDATE](payload) as TRecordFor<T>
 
-    if (hooks) {
-      const resultData = result as unknown as Record<string, unknown>
-      await executeHook(hooks, 'updated', resultData)
-      await executeHook(hooks, 'saved', resultData)
-    }
-
-    if (observers) {
-      const resultData = result as unknown as Record<string, unknown>
-      await executeObservers(observers, 'updated', resultData)
-      await executeObservers(observers, 'saved', resultData)
-    }
+    await lifecycle.after(result as unknown as Record<string, unknown>)
 
     return this.applyReadTransforms(result)
   }
@@ -1222,32 +1169,31 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       throw new Error('Configured adapter does not support delete operations.')
     }
 
+    return this[LIFECYCLE_DELETE](where, 'delete', () => this.newQuery(writeOptions)
+      .where(where as Partial<Record<string, unknown>>)
+      .delete())
+  }
+
+  /**
+   * Runs `write` between the `deleting` and `deleted` events, for `delete()`
+   * and the SoftDeletes overrides. Symbol-keyed and kept out of the package
+   * entry point; each caller checks its own adapter capability first.
+   */
+  static async [LIFECYCLE_DELETE](
+    this: typeof Model,
+    where: object,
+    method: string,
+    write: () => Promise<number | PlainObject | void>,
+  ): Promise<number | PlainObject | void> {
     this.assertFiltersSurvived(where, 'delete')
 
-    const hooks = this.hooks
-    const observers = this.observers
-    const whereData = where as unknown as Record<string, unknown>
-    if (hooks) {
-      if (!(await executeHook(hooks, 'deleting', whereData))) {
-        throw new Error(`${this.name}.delete() aborted by 'deleting' hook.`)
-      }
-    }
-    if (observers) {
-      if (!(await executeObservers(observers, 'deleting', whereData))) {
-        throw new Error(`${this.name}.delete() aborted by observer 'deleting'.`)
-      }
-    }
+    const lifecycle = modelLifecycle(this.name, 'delete', this.hooks, this.observers, method)
+    const whereData = where as Record<string, unknown>
+    await lifecycle.before(whereData)
 
-    const result = await this.newQuery(writeOptions)
-      .where(where as Partial<Record<string, unknown>>)
-      .delete()
+    const result = await write()
 
-    if (hooks) {
-      await executeHook(hooks, 'deleted', whereData)
-    }
-    if (observers) {
-      await executeObservers(observers, 'deleted', whereData)
-    }
+    await lifecycle.after(whereData)
 
     return result
   }
