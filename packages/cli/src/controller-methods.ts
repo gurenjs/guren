@@ -1,13 +1,11 @@
 import { relative } from 'node:path'
 import type {
-  ArrowFunctionExpression,
   BlockStatement,
   ClassDeclaration,
   ClassMethod,
   ClassProperty,
   Expression,
   File,
-  FunctionExpression,
 } from '@babel/types'
 import { classNameFromPath, discoverControllerFiles } from './discovery'
 import { extractClassDeclaration } from './model-parser'
@@ -27,8 +25,6 @@ export interface ControllerMethodInfo {
   body: string
   /** The same span as written, for what blanking removes, such as a page name in a string. */
   rawBody: string
-  /** The action's function, parameters and body, for a rule that has to follow bindings rather than match text. */
-  fn: ClassActionMember['fn']
   /** Controller file, relative to the project root. */
   filePath: string
 }
@@ -339,11 +335,10 @@ export async function parseControllerMethods(
       }
       classFiles.set(className, relPath)
 
-      for (const { fn, name, body } of classActionMembers(classDecl)) {
+      for (const { name, body } of classActionMembers(classDecl)) {
         methods.set(`${className}.${name}`, {
           body: scrubbed.slice(body.start ?? 0, body.end ?? 0),
           rawBody: source.slice(body.start ?? 0, body.end ?? 0),
-          fn,
           filePath: relPath,
         })
       }
@@ -364,8 +359,6 @@ export interface ClassActionMember {
   /** The member node itself, for its source span, `accessibility`, and `static`. */
   member: ClassMethod | ClassProperty
   name: string
-  /** The function: the method itself, or the one a class field holds. */
-  fn: ClassMethod | ArrowFunctionExpression | FunctionExpression
   /**
    * A `BlockStatement`, or the expression itself for an expression-bodied
    * arrow. A caller asking whether a body is empty must test for the block
@@ -380,7 +373,7 @@ export function* classActionMembers(
   for (const member of classDecl.body.body) {
     if (member.type === 'ClassMethod') {
       const name = memberKeyName(member)
-      if (name !== undefined) yield { member, name, fn: member, body: member.body }
+      if (name !== undefined) yield { member, name, body: member.body }
       continue
     }
 
@@ -391,7 +384,7 @@ export function* classActionMembers(
         && (value.type === 'ArrowFunctionExpression' || value.type === 'FunctionExpression')
       ) {
         const name = memberKeyName(member)
-        if (name !== undefined) yield { member, name, fn: value, body: value.body }
+        if (name !== undefined) yield { member, name, body: value.body }
       }
     }
   }
