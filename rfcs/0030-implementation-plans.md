@@ -1642,41 +1642,42 @@ reader, and Part 2 measured both at 100% `unknown`. What shipped
   `.optional()`, `.nullable()`, `.nullish()`, `.default()`, `.prefault()` or
   `.required()`'s `nonoptional` over a leaf (`string`, `number`, `boolean`,
   `bigint`, `date`, `enum`, `z.coerce.*`) or over a pipe of two plain leaves
-  (`.pipe(z.email())`, `z.stringbool()`); and every check on the leaf is a
-  length, bound, integer, multiple or string format, with an `overwrite` only
-  ahead of them. Any other node on the path (a transform, a preprocess, a
-  refinement or `superRefine()` on any node, `.catch()`, `z.lazy()`,
-  `z.custom()`, a union, an intersection, an array, a pipe or transform around
-  the object, a zod/mini schema, which carries no `_def`, a node this reader
-  does not know) leaves the field's type, `required` and rules `unknown`, with
-  a reason naming the node. Patching the shapes one review at a time did not
-  converge: four rounds each found another wrapper that made a correct field
-  read `differ`.
-- Within the allowlist, three entries are read only in part. A pipe's last
-  stage validates the final value, so its type is read, but a step may run
+  (`.pipe(z.email())`, and `z.stringbool()` from zod 4.1); and every check on
+  the leaf is a length, bound, integer, multiple or string format, with an
+  `overwrite` only ahead of them. Any other node on the path (a transform, a
+  preprocess, a refinement or `superRefine()` on any node, `.catch()`,
+  `z.lazy()`, `z.custom()`, a union, an intersection, an array, a pipe or
+  transform around the object, a zod/mini schema, which carries no `_def`, a
+  node this reader does not know) leaves the field's type, `required` and rules
+  `unknown`, with a reason naming the node. Patching the shapes one review at a
+  time did not converge: four rounds each found another wrapper that made a
+  correct field read `differ`.
+- Within the allowlist, three entries are read only in part. A pipe's last stage
+  validates the final value, so its type is read (`z.stringbool()` matches a
+  planned `boolean` from zod 4.1, and is opaque on 4.0), but a step may run
   between the stages (a codec's decode), so its `required` and rules are
   `unknown`. `nonoptional` over a `.default()` or `.prefault()` accepts a
   missing key before zod 4.4 and rejects it from 4.4, so its `required` is
   `unknown`; so is a `z.coerce.string()`, `boolean()`, `number()` or `date()`,
-  which accepts `null`, and before zod 4.4 a missing key. And an `.overwrite()`
-  that is not zod's own `.trim()`, `.toLowerCase()`, `.toUpperCase()` or
-  `.normalize()` may rewrite a value past its bounds, so its rules are
-  `unknown`.
+  which accepts `null` (the string and boolean ones also accepted a missing key
+  before zod 4.4). And an `.overwrite()` that is not zod's own `.trim()`,
+  `.toLowerCase()`, `.toUpperCase()` or `.normalize()` may rewrite a value past
+  its bounds, so its rules are `unknown`.
 - On a field read in full, a planned `type` is the validated value, compared
-  with the walker's output side, so `z.coerce.number().int()` and
-  `z.stringbool()` match `integer` and `boolean`. It is a `differ` only across
-  JSON families; a format the planned type needs and the schema does not
-  declare (`uuid`, `date`) and a number for a planned `integer` are `unknown`.
-  A `Date` matches a planned `datetime` and is `unknown` against anything else,
-  since the walker renders it as a string. `required` means a client must send
-  a non-null value: the outermost of `optional`, `default`, `prefault` and
-  `nonoptional` decides whether a key may be omitted, and a `nullable` anywhere
-  lets it be sent as `null`. Rules are prose, and only `min`, `max`, `email`,
-  `url` and `uuid` are compared, on the validated value in the planned type's
-  unit: a bound equal to the planned one is a `match`, a tighter one a `differ`
-  (it rejects a value the plan accepts), and a looser or absent one `unknown`,
-  since a format or pattern may tighten it. That settles the `max(500)`
-  against a planned `max(2000)` near-miss of cause 3.
+  with the walker's output side, so `z.coerce.number().int()` matches `integer`.
+  It is a `differ` only across JSON families; a format the planned type needs
+  and the schema does not declare (`uuid`, `date`) and a number for a planned
+  `integer` are `unknown`. A `Date` matches a planned `datetime` and is
+  `unknown` against anything else, since the walker renders it as a string.
+  `required` means a client must send a non-null value: the outermost of
+  `optional`, `default`, `prefault` and `nonoptional` decides whether a key may
+  be omitted, and a `nullable` anywhere lets it be sent as `null`. Rules are
+  prose, and only `min`, `max`, `email`, `url` and `uuid` are compared, on the
+  validated value in the planned type's unit: a bound equal to the planned one
+  is a `match`, a tighter one a `differ` (it rejects a value the plan accepts),
+  and a looser or absent one `unknown`, since a format or pattern may tighten
+  it. That settles the `max(500)` against a planned `max(2000)` near-miss of
+  cause 3.
 - A resource's payload is `guren codegen`'s own reading, the definitions
   `data.gen.ts` is emitted from (`readResourceDefinitions()`), with the
   `extends` clause the copied body drops now kept beside it. A payload codegen
@@ -1706,13 +1707,15 @@ reader, and Part 2 measured both at 100% `unknown`. What shipped
   predates a reader.
 - Measured on `examples/blog` (9 validators, 1 resource) and `examples/api` (8
   validators, 2 resources) against hand-written plans that state the code as it
-  is: before, all 20 elements carried one `unknown` `fields` property each;
-  after, the 209 per-field properties read 160 `match`, 49 `unknown`, 0
-  `differ`. Most of the unknowns are the blog's: its register, reset and
-  profile schemas refine or transform the object, so only their keys'
-  existence is read, its `email` fields pipe into `z.email()`, and the
-  `remember` and `body` fields are unions behind a transform. The api's are the
-  free-form `positive` (3), an array, and a `z.coerce.number()` id.
+  is (`packages/cli/tests/fixtures/plan/fields/{blog,api}.plan.json`, run with
+  `bun packages/cli/src/bin.ts plan:status <plan> --json` from the example's
+  directory): before, all 20 elements carried one `unknown` `fields` property
+  each; after, the 209 per-field properties read 160 `match`, 49 `unknown`, 0
+  `differ`. Most of the unknowns are the blog's: its register, reset and profile
+  schemas refine or transform the object, so only their keys' existence is read,
+  its `email` fields pipe into `z.email()`, and the `remember` and `body` fields
+  are unions behind a transform. The api's are the free-form `positive` (3), an
+  array, and a `z.coerce.number()` id.
 
 **What is durable and what is not.** The decision log (waivers, deviations,
 the reason for each revision) is part of the record and lives in the store

@@ -524,6 +524,9 @@ describe('describeCloseBlockers', () => {
 
     expect(lift(unreached).hold?.kind).toBe('unreached')
     expect(blockerOf(unreached)).toContain('so no plan:verify run lifts it: waive it with')
+    const onKeys = element('resource.comment', 'present', { properties: [{ property: 'field body', verdict: 'match', planned: 'declared', actual: 'declared', existence: true }] })
+    expect(lift(onKeys).hold?.kind).toBe('unreached')
+    expect(blockerOf(onKeys)).toContain('so no plan:verify run lifts it: waive it with')
     const reached = element('model.comment', 'present')
     expect(lift(reached).state).toBe('verified')
     expect(blockerOf(reached)).not.toContain('waive it with')

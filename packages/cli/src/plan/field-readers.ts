@@ -62,13 +62,13 @@ export interface PlanAppResourcePayload {
  */
 const ALLOWED_WRAPPERS = new Set(['optional', 'nullable', 'default', 'prefault', 'nonoptional'])
 
-/** Leaves whose rendered type is the validated value's. `z.coerce.*` stays a leaf; `z.stringbool()` is a pipe of two. */
+/** Leaves whose rendered type is the validated value's. `z.coerce.*` stays a leaf; `.pipe(z.email())` is a pipe of two. */
 const ALLOWED_LEAVES = new Set(['string', 'number', 'boolean', 'bigint', 'date', 'enum'])
 
 /** Checks that only restrict the value, so a stated bound is one it must meet; an `overwrite` only ahead of every bound. */
 const ALLOWED_CHECKS = new Set(['min_length', 'max_length', 'length_equals', 'greater_than', 'less_than', 'multiple_of', 'number_format', 'string_format'])
 
-/** A coercion that accepts `null`, and before zod 4.4 a missing key. */
+/** A coercion that accepts `null`; the string and boolean ones also accepted a missing key before zod 4.4. */
 const COERCES_NULL = new Set(['string', 'boolean', 'number', 'date'])
 
 /** zod's own `.trim()`, `.toLowerCase()`, `.toUpperCase()` and `.normalize()`; any other `.overwrite()` may rewrite a value past its bounds. */
@@ -184,7 +184,7 @@ function readField(key: string, node: ZodSchemaLike): PlanAppSchemaField {
 function requiredOf(leaf: ZodSchemaLike, decider: string | undefined, filled: boolean, nullable: boolean): Presence {
   if (nullable || (decider !== undefined && decider !== 'nonoptional')) return false
   if (decider === 'nonoptional' && filled) return { unknown: 'nonoptional over a default or prefault accepts a missing key before zod 4.4 and rejects it from 4.4' }
-  if (leaf._def?.coerce === true && COERCES_NULL.has(typeOf(leaf))) return { unknown: 'a coercion accepts null, and before zod 4.4 a missing key' }
+  if (leaf._def?.coerce === true && COERCES_NULL.has(typeOf(leaf))) return { unknown: 'a coercion accepts null (a coerced string or boolean also accepted a missing key before zod 4.4)' }
   return true
 }
 

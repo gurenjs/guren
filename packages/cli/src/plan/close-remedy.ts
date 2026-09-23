@@ -7,7 +7,7 @@
 import type { Plan, PlanDraft } from './schema'
 import { awaitsVerification, type PlanElementState, type PlanElementStatus } from './status'
 import { listPlanSteps, type PlanTaskDerivation } from './tasks'
-import { behaviourReach } from './verification'
+import { behaviourReach, hasShapeMatch } from './verification'
 
 interface BlockerContext {
   planArgument: string
@@ -72,7 +72,7 @@ function closeRemedy(element: PlanElementStatus<PlanElementState>, context: Bloc
     const target = element.state === 'planned' ? 'Implement it' : `Change the code until plan:status reports it ${element.completesAt}`
     return `${target}, then run ${verify(owner)}${orWaive}`
   }
-  const unmatched = element.change !== 'drop' && !element.properties.some((property) => property.verdict === 'match')
+  const unmatched = element.change !== 'drop' && !hasShapeMatch(element)
   const needsNoFiles = element.change === 'drop' || element.state === 'unjudged'
   const carriers = context.carriers.get(element.id) ?? []
   if (unmatched && carriers.length === 0) {

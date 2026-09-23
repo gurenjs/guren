@@ -1,0 +1,323 @@
+{
+  "planVersion": 1,
+  "title": "api fields",
+  "summary": "Measure the field readers.",
+  "locale": "en",
+  "scope": {
+    "goals": [],
+    "nonGoals": []
+  },
+  "models": [
+    {
+      "id": "model.task",
+      "change": {
+        "kind": "existing"
+      },
+      "name": "Task",
+      "table": "tasks",
+      "columns": [],
+      "relationships": [],
+      "fillable": []
+    },
+    {
+      "id": "model.user",
+      "change": {
+        "kind": "existing"
+      },
+      "name": "User",
+      "table": "users",
+      "columns": [],
+      "relationships": [],
+      "fillable": []
+    }
+  ],
+  "validators": [
+    {
+      "id": "validator.RegisterSchema",
+      "change": {
+        "kind": "add"
+      },
+      "name": "RegisterSchema",
+      "fields": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 1",
+            "max 255"
+          ]
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "email"
+          ]
+        },
+        {
+          "name": "password",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 8"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "validator.LoginSchema",
+      "change": {
+        "kind": "add"
+      },
+      "name": "LoginSchema",
+      "fields": [
+        {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "email"
+          ]
+        },
+        {
+          "name": "password",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "validator.CreateTokenSchema",
+      "change": {
+        "kind": "add"
+      },
+      "name": "CreateTokenSchema",
+      "fields": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 1",
+            "max 255"
+          ]
+        },
+        {
+          "name": "abilities",
+          "type": "json",
+          "required": false,
+          "rules": []
+        },
+        {
+          "name": "expiresInDays",
+          "type": "integer",
+          "required": false,
+          "rules": [
+            "positive"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "validator.TokenIdParamSchema",
+      "change": {
+        "kind": "add"
+      },
+      "name": "TokenIdParamSchema",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "validator.CreateTaskSchema",
+      "change": {
+        "kind": "add"
+      },
+      "name": "CreateTaskSchema",
+      "fields": [
+        {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "rules": [
+            "min 1",
+            "max 255"
+          ]
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "required": false,
+          "rules": [
+            "max 1000"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "validator.UpdateTaskSchema",
+      "change": {
+        "kind": "add"
+      },
+      "name": "UpdateTaskSchema",
+      "fields": [
+        {
+          "name": "title",
+          "type": "string",
+          "required": false,
+          "rules": [
+            "min 1",
+            "max 255"
+          ]
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "required": false,
+          "rules": [
+            "max 1000"
+          ]
+        },
+        {
+          "name": "completed",
+          "type": "boolean",
+          "required": false,
+          "rules": []
+        }
+      ]
+    },
+    {
+      "id": "validator.TaskIdParamSchema",
+      "change": {
+        "kind": "add"
+      },
+      "name": "TaskIdParamSchema",
+      "fields": [
+        {
+          "name": "id",
+          "type": "integer",
+          "required": true,
+          "rules": [
+            "positive"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "validator.ListTasksQuerySchema",
+      "change": {
+        "kind": "add"
+      },
+      "name": "ListTasksQuerySchema",
+      "fields": [
+        {
+          "name": "page",
+          "type": "integer",
+          "required": false,
+          "rules": []
+        },
+        {
+          "name": "per_page",
+          "type": "integer",
+          "required": false,
+          "rules": [
+            "min 1",
+            "max 100"
+          ]
+        },
+        {
+          "name": "completed",
+          "type": "string",
+          "required": false,
+          "rules": []
+        }
+      ]
+    }
+  ],
+  "resources": [
+    {
+      "id": "resource.TaskResource",
+      "change": {
+        "kind": "add"
+      },
+      "name": "TaskResource",
+      "model": "model.task",
+      "fields": [
+        {
+          "name": "id",
+          "type": "number"
+        },
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "type": "string | null"
+        },
+        {
+          "name": "completed",
+          "type": "boolean"
+        },
+        {
+          "name": "notificationArtifactPath",
+          "type": "string"
+        },
+        {
+          "name": "broadcastChannels",
+          "type": "{ public: string; private: string }"
+        },
+        {
+          "name": "createdAt",
+          "type": "string"
+        },
+        {
+          "name": "updatedAt",
+          "type": "string"
+        },
+        {
+          "name": "owner",
+          "type": "{ id: number | undefined; name: string | undefined }"
+        }
+      ]
+    },
+    {
+      "id": "resource.UserResource",
+      "change": {
+        "kind": "add"
+      },
+      "name": "UserResource",
+      "model": "model.user",
+      "fields": [
+        {
+          "name": "id",
+          "type": "number"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "email",
+          "type": "string"
+        },
+        {
+          "name": "createdAt",
+          "type": "string"
+        }
+      ]
+    }
+  ]
+}

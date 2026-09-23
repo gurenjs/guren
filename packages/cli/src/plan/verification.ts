@@ -103,6 +103,11 @@ export function behaviourReach(plan: PlanDraft | Plan, acceptanceIds: Iterable<s
   return reached
 }
 
+/** Whether a planned property of the element matched as more than a key's existence, which says nothing of its shape. */
+export function hasShapeMatch(element: Pick<PlanElementStatus<PlanElementState>, 'properties'>): boolean {
+  return element.properties.some((property) => property.verdict === 'match' && !property.existence)
+}
+
 /**
  * An element its step verified is `verified` while every fingerprinted file still hashes the
  * same, `drifted` once one does not or cannot be read. Lifted: one at its completion state or
@@ -145,7 +150,7 @@ export function applyVerification(
         const element = lifted.get(id)
         if (!element) continue
         const uncovered = element.files.filter((file) => !(file in recorded))
-        const unmatched = element.change !== 'drop' && !element.properties.some((property) => property.verdict === 'match' && !property.existence)
+        const unmatched = element.change !== 'drop' && !hasShapeMatch(element)
         // An `unjudged` element with no file rests on the behaviours reaching it, whose test files their record covers.
         const needsNoFiles = element.change === 'drop' || element.state === 'unjudged'
         const hold = (kind: PlanVerificationHold, note: string): void => {
