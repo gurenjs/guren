@@ -1457,10 +1457,65 @@ each rule was read.
   `view.posts.show` changes only `form`, `actions` and `states`, and its form
   targets a route, which does not carry reach. Both need a waiver, or a
   behaviour with `expect.inertia` on the route that shows the post.
-- Pending: cause 1, an `alter` completing on a property that already held.
-  Telling the two apart needs the per-property readings of every `alter`
-  recorded at approval, which arrives with the change to re-approval; the rule
-  is applied in a later change on top of it.
+- Cause 1, an `alter` completing on a property that already held, is settled
+  by the readings recorded at approval (the next amendment).
+
+**Amended in implementation (an `alter` against its readings at approval).**
+An `alter`'s target existed before the plan, so a planned property that already
+matched when the plan was approved says nothing about the change. What shipped
+(`judgePlan()` and `readAlterProperties()` in `plan/status.ts`, the readings in
+`plan/approvals.ts`, `plan-approve.ts`):
+
+- `plan:approve` reads the application with `detail` when the plan has an
+  `alter`, and records one reading per planned property of each `alter` it
+  could compare: element id, the element's name in code, property, planned
+  value and verdict. An element it could not compare (not found, blocked, no
+  reader) records nothing, and neither does a state loaded without `detail`,
+  whose every property would read a blind `unknown`.
+- A match counts towards an `alter`'s completion only against a reading that
+  was `differ` or `unknown`. A match that already held, or has no reading,
+  reads `unknown` with the reason, so an `alter` whose readable properties all
+  held is `unjudged`, and a page `alter` that restates a declared prop beside a
+  new one is `planned` rather than `drifted` before its work. A property that
+  held and differs now stays a `differ`. The rule is applied inside
+  `judgePlan()`, which takes the readings as an argument, so `plan:status`,
+  `plan:verify`, the `Stop` hook, `plan:next`, `plan:close` and
+  `guren check --plan` count the same ones. An `unjudged` `alter` is lifted to
+  `verified` only while a verified behaviour reaches it, by the reach rule
+  above; the readings need no change to that overlay, since a set-aside match
+  is not a `match` there either. `plan:render` never judges status.
+- The readings live on the approval entry beside the plan, outside the hash,
+  and never in `baseline`. A reading taken late can only miss a change and
+  never credit one: a property that already matched is never counted, and one
+  that did not has moved since it was read. So a re-approval may record the
+  readings an approval lacks, where a baseline, never restamped, could not.
+  Inside the baseline, every plan approved before this change, and every
+  revision that adds an `alter` or changes a planned value, could close its
+  `alter`s only by a waiver.
+- Each approval carries the readings for its own hash: every reading the file
+  already holds under the same baseline, earliest first (keyed on element, name
+  in code, property and planned value), then one taken now for each key they
+  lack. A revision approved after its work therefore keeps the reading from
+  before the work, and a section that cannot be read at re-approval loses
+  none. Readings under
+  another baseline are another plan's start and are never carried: a restamp
+  after the baseline was removed, or an unrelated plan sharing the file.
+- Approving a hash already approved writes nothing unless the entry lacks a
+  reading of a current `alter` property; then it adds those, and replaces none.
+  That is the remedy the `unjudged` reason names for an approval recorded
+  before readings existed. A draft has no approval, so its `alter`s count no
+  match; its verification records start over at approval anyway.
+- A reading is as protected as the approval that carries it: whoever can edit
+  one can forge the other, and both are committed and reviewed. An older CLI
+  that rewrites the approvals file drops the field, which fails closed.
+- Limits: an `unknown` reading that turns into a match counts, as the rule
+  says, even when only the reader changed (a schema the runtime reader could
+  not import at approval and can now). A later approval does not replace it
+  with what it reads then: an `unknown` also precedes real work (an action
+  that returned JSON before it rendered the planned page), and a re-approval
+  in the middle of that work would stop crediting it. The §2 warning on an `alter` whose
+  readable properties all held at approval, which the producer row of Part 2
+  asks for, is not part of this change.
 
 **What is durable and what is not.** The decision log (waivers, deviations,
 the reason for each revision) is part of the record and lives in the store

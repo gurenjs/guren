@@ -18,7 +18,7 @@ import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
 import { planStatusFile } from './plan-status'
 import { loadPlanAppState, type PlanAppState } from './plan/app-state'
-import { requirePlanApproval } from './plan/approvals'
+import { requirePlanApproval, type PlanApprovedStanding } from './plan/approvals'
 import { planBesideExclusions } from './plan/beside'
 import { planDecisionsPath, type PlanWaiver } from './plan/decisions'
 import { judgeFreshness } from './plan/freshness'
@@ -168,9 +168,10 @@ async function unverifiedElements(
   root: string,
   options: PlanNextFileOptions,
   waivers: PlanWaiversRead,
+  approval: PlanApprovedStanding | undefined,
 ): Promise<Pick<PlanNextReport, 'unverified' | 'unverifiedUnreadable'>> {
   try {
-    const status = await planStatusFile(path, { app: options.statusApp ?? (() => loadPlanAppState(root, { detail: true })), appRoot: root, read: { path, plan }, waivers, approval: undefined })
+    const status = await planStatusFile(path, { app: options.statusApp ?? (() => loadPlanAppState(root, { detail: true })), appRoot: root, read: { path, plan }, waivers, approval })
     const open = status.elements.filter((element) => element.change !== 'existing' && element.state !== 'verified' && element.state !== 'waived')
     return { unverified: open.map((element) => ({ id: element.id, state: element.state, holds: whatHoldsElement(element) })) }
   } catch (error) {
@@ -264,7 +265,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
     const reported = [...held, ...waiting].some((step) => step.stalled !== undefined)
     if (previous && !reported) await writePlanActiveStep(root, slug, undefined)
     if (held.length > 0 || waiting.length > 0) return { ...head, step: null }
-    return { ...head, step: null, ...(await unverifiedElements(path, plan, root, options, log)) }
+    return { ...head, step: null, ...(await unverifiedElements(path, plan, root, options, log, approval)) }
   }
   const { task, step } = next
 

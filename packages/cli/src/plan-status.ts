@@ -9,7 +9,7 @@ import { basename } from 'node:path'
 
 import { readPlanFile } from './plan-render'
 import type { PlanAppState } from './plan/app-state'
-import { PLAN_APPROVAL_GATED_COMMANDS, readPlanApprovalStanding, type PlanApprovalStanding } from './plan/approvals'
+import { approvedReadings, PLAN_APPROVAL_GATED_COMMANDS, readPlanApprovalStanding, type PlanApprovalStanding } from './plan/approvals'
 import { judgeFreshness, PLAN_FRESHNESS_VERDICTS, type PlanFreshness } from './plan/freshness'
 import { planHash } from './plan/identity'
 import { hasBaseline } from './plan/render'
@@ -62,8 +62,8 @@ export interface PlanStatusFileOptions {
 export async function planStatusFile(planPath: string, options: PlanStatusFileOptions): Promise<PlanStatusReport> {
   const { path, plan } = options.read ?? (await readPlanFile(planPath, options.cwd))
   const app = typeof options.app === 'function' ? await options.app() : options.app
-  const status = judgePlan(plan, app)
   const approval = 'approval' in options ? options.approval : await readPlanApprovalStanding(path, plan)
+  const status = judgePlan(plan, app, approvedReadings(approval))
   const head = {
     reportVersion: PLAN_STATUS_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: approval?.hash ?? (hasBaseline(plan) ? planHash(plan) : null) },

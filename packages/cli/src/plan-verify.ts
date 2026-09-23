@@ -13,7 +13,7 @@ import { readScripts } from './command-output'
 import { readPlanFile } from './plan-render'
 import { formatPlanStatus, type PlanStatusReport, PLAN_STATUS_REPORT_VERSION } from './plan-status'
 import type { PlanAppState } from './plan/app-state'
-import { requirePlanApproval } from './plan/approvals'
+import { approvedReadings, requirePlanApproval } from './plan/approvals'
 import { judgeFreshness, type PlanFreshness } from './plan/freshness'
 import { hasBaseline } from './plan/render'
 import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress, type PlanStepContext } from './plan/step-context'
@@ -57,6 +57,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   // Judged on the plan this run read, never a caller's earlier reading: the file may have changed since.
   // Before anything runs or is recorded: a result about a hash nobody approved verifies nothing anyone agreed to.
   const approval = await requirePlanApproval(path, plan, 'no step is verified against it')
+  const readings = approvedReadings(approval)
   const app = options.app
   const loadApp = typeof app === 'function' ? app : async () => app
   const root = options.appRoot
@@ -95,7 +96,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   // One app load answers both: the status after codegen, and freshness for a plan with a baseline.
   let judged: Promise<{ status: PlanStatus; freshness?: PlanFreshness }> | undefined
   const judge = () =>
-    (judged ??= loadApp().then((loadedApp) => ({ status: judgePlan(plan, loadedApp), ...(hasBaseline(plan) ? { freshness: judgeFreshness(plan, loadedApp) } : {}) })))
+    (judged ??= loadApp().then((loadedApp) => ({ status: judgePlan(plan, loadedApp, readings), ...(hasBaseline(plan) ? { freshness: judgeFreshness(plan, loadedApp) } : {}) })))
   const verifier = new PlanVerifier(plan, derivation, {
     root,
     planDigest: digest,

@@ -42,6 +42,7 @@ import { buildDocsGraphReport, renderDocsGraphMarkdown } from './docs-graph'
 import { renderPlanFile } from './plan-render'
 import { loadPlanAppState } from './plan/app-state'
 import { planChangesExisting } from './plan/impact'
+import { planHasAlter } from './plan/status'
 import { formatPlanApprove, planApproveFile } from './plan-approve'
 import { formatPlanStatus, planStatusFile } from './plan-status'
 import { DEFAULT_VERIFY_TIMEOUT_MS, formatPlanVerify, planVerifyFile } from './plan-verify'
@@ -397,7 +398,11 @@ const planApproveCommand = defineCommand({
   },
   async run({ args }) {
     const appRoot = resolve(args.app ?? process.cwd())
-    const report = await planApproveFile(args.plan, { app: () => loadPlanAppState(appRoot), appRoot, allowUnstamped: args['allow-unstamped'] })
+    const report = await planApproveFile(args.plan, {
+      app: (plan) => loadPlanAppState(appRoot, { detail: planHasAlter(plan) }),
+      appRoot,
+      allowUnstamped: args['allow-unstamped'],
+    })
     console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanApprove(report))
   },
 })
