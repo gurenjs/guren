@@ -9,7 +9,7 @@ import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import type { AppManifest } from '@guren/server'
 
-import { classNameFromPath, discoverControllerFiles, toPosixRelative } from './discovery'
+import { classNameFromPath, discoverControllerFiles, excludeBarrelFiles, toPosixRelative } from './discovery'
 import type { Introspection, IntrospectionFailure } from './introspect'
 import { bootstrapApplication, resolveMainEntry } from './runtime'
 
@@ -26,15 +26,12 @@ interface IntrospectableApp {
   router?: { registeredHandlers?: () => ReadonlyArray<{ index: number; controller?: unknown }> }
 }
 
-let listenRefusal: unknown
-const otherRejections: string[] = []
-
 /** The refusal itself or anywhere in its `cause` chain: `bootstrapApplication()` wraps a rejected `ready`. */
-function findListenRefusal(error: unknown): unknown {
+function isListenRefusal(error: unknown): boolean {
   for (let current = error, depth = 0; current && depth < 5; current = (current as { cause?: unknown }).cause, depth++) {
-    if ((current as { code?: unknown }).code === LISTEN_REFUSED) return current
+    if ((current as { code?: unknown }).code === LISTEN_REFUSED) return true
   }
-  return undefined
+  return false
 }
 
 function messageOf(error: unknown): string {
@@ -43,10 +40,6 @@ function messageOf(error: unknown): string {
 
 function failed(reason: IntrospectionFailure, message: string): Introspection {
   return { status: 'failed', reason, message }
-}
-
-function crashedByListen(): Introspection {
-  return failed('crashed', LISTEN_GUIDANCE)
 }
 
 /**
@@ -76,34 +69,47 @@ async function resolvesOldServer(entry: string): Promise<boolean> {
 /**
  * Upgrades each `name-only` controller reference to the file that exports the
  * very class the router holds (RFC 0026 §3). Files are found by the CLI's one
- * discovery rule. A routed controller's import is a module-cache hit; an
- * unrouted one is evaluated here, and a failure is a `controller-import` warning.
+ * discovery rule, those named after a routed class first (a module-cache hit);
+ * the rest are imported only for a class still unmatched, such as a renamed export.
  */
 async function resolveControllers(manifest: AppManifest, app: IntrospectableApp, root: string): Promise<void> {
   const handlers = app.router?.registeredHandlers?.() ?? []
   const wanted = new Set<unknown>(handlers.map((handler) => handler.controller).filter((controller) => controller !== undefined))
   if (wanted.size === 0) return
 
+  const routedNames = new Set(handlers.map((handler) => manifest.routes[handler.index]?.controller?.name))
+  const files = await discoverControllerFiles(root)
+  const named = files.filter((file) => routedNames.has(classNameFromPath(file)))
   const exportsOf = new Map<unknown, Array<{ file: string; exportName: string }>>()
-  for (const file of await discoverControllerFiles(root)) {
-    let mod: Record<string, unknown>
-    try {
-      mod = (await import(pathToFileURL(file).href)) as Record<string, unknown>
-    } catch (error) {
-      manifest.warnings.push({ code: 'controller-import', message: `${toPosixRelative(root, file)} could not be imported: ${messageOf(error)}` })
-      continue
+
+  const scan = async (batch: string[]): Promise<void> => {
+    for (const file of batch) {
+      let mod: Record<string, unknown>
+      try {
+        mod = (await import(pathToFileURL(file).href)) as Record<string, unknown>
+      } catch (error) {
+        manifest.warnings.push({ code: 'controller-import', message: `${toPosixRelative(root, file)} could not be imported: ${messageOf(error)}` })
+        continue
+      }
+      for (const [exportName, value] of Object.entries(mod)) {
+        if (wanted.has(value)) exportsOf.set(value, [...(exportsOf.get(value) ?? []), { file, exportName }])
+      }
     }
-    for (const [exportName, value] of Object.entries(mod)) {
-      if (wanted.has(value)) exportsOf.set(value, [...(exportsOf.get(value) ?? []), { file, exportName }])
-    }
+  }
+
+  await scan(named)
+  if ([...wanted].some((controller) => !exportsOf.has(controller))) {
+    await scan(files.filter((file) => !named.includes(file)))
   }
 
   for (const handler of handlers) {
     const route = manifest.routes[handler.index]
     const candidates = exportsOf.get(handler.controller)
     if (!route?.controller || !candidates) continue
-    // A barrel re-exports the class too; the file named after it declares it.
-    const declared = candidates.find(({ file }) => classNameFromPath(file) === route.controller!.name) ?? candidates[0]!
+    // A barrel re-exports the class too: the file named after it declares it, and any non-barrel beats one.
+    const declared = candidates.find(({ file }) => classNameFromPath(file) === route.controller!.name)
+      ?? candidates.find(({ file }) => excludeBarrelFiles([file]).length > 0)
+      ?? candidates[0]!
     route.controller = {
       ...route.controller,
       file: toPosixRelative(root, declared.file),
@@ -129,7 +135,7 @@ async function introspect(root: string): Promise<Introspection> {
   try {
     mod = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
   } catch (error) {
-    if (findListenRefusal(error)) throw error
+    if (isListenRefusal(error)) return failed('crashed', LISTEN_GUIDANCE)
     return failed('import', `Could not load ${toPosixRelative(root, entry)}: ${messageOf(error)}`)
   }
 
@@ -152,10 +158,11 @@ async function main(): Promise<void> {
     process.exit(2)
   }
 
+  let listenRefused = false
+  const otherRejections: string[] = []
   // A module-scope `app.listen()` with no await rejects outside any frame we hold.
   process.on('unhandledRejection', (reason) => {
-    const refusal = findListenRefusal(reason)
-    if (refusal) listenRefusal ??= refusal
+    if (isListenRefusal(reason)) listenRefused = true
     else otherRejections.push(messageOf(reason))
   })
 
@@ -163,12 +170,12 @@ async function main(): Promise<void> {
   try {
     result = await introspect(process.cwd())
   } catch (error) {
-    const refusal = findListenRefusal(error)
-    result = refusal ? crashedByListen() : failed('crashed', messageOf(error))
+    if (isListenRefusal(error)) listenRefused = true
+    result = failed('crashed', messageOf(error))
   }
   // Let a rejection raised during the last await reach the handler above.
   await new Promise((resolve) => setTimeout(resolve, 0))
-  if (listenRefusal !== undefined) result = crashedByListen()
+  if (listenRefused) result = failed('crashed', LISTEN_GUIDANCE)
   // `bun run dev` would have died on these; a manifest must not read clean past them.
   if (result.status === 'ok') {
     for (const message of otherRejections) result.manifest.warnings.push({ code: 'unhandled-rejection', message })

@@ -39,11 +39,6 @@ export function introspectApp(cwd: string, options: IntrospectOptions = {}): Pro
   return run
 }
 
-/** Forgets every memoised run; for tests that introspect one root twice. */
-export function resetIntrospections(): void {
-  runs.clear()
-}
-
 async function runIntrospection(root: string, options: IntrospectOptions): Promise<Introspection> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_INTROSPECT_TIMEOUT_MS
   const child = siblingEntry('introspect-child')
@@ -88,12 +83,10 @@ async function readResult(file: string): Promise<Introspection | undefined> {
     return undefined
   }
 
-  const result = parsed as Partial<Introspection> | null
-  if (result?.status === 'ok' && (result as { manifest?: { schemaVersion?: unknown } }).manifest?.schemaVersion === 1) {
-    return result as Introspection
+  // Written by this CLI's own child, so only the manifest's version needs checking.
+  const result = parsed as Introspection
+  if (result.status === 'ok' && result.manifest.schemaVersion !== 1) {
+    return { status: 'failed', reason: 'crashed', message: `The manifest has schemaVersion ${String(result.manifest.schemaVersion)}; this CLI reads 1.` }
   }
-  if (result?.status === 'failed' && typeof (result as { reason?: unknown }).reason === 'string') {
-    return result as Introspection
-  }
-  return undefined
+  return result
 }

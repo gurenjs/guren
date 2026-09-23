@@ -4,7 +4,7 @@ import { readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { AppManifest } from '@guren/core'
 
-import { introspectApp, resetIntrospections, type Introspection } from '../src/introspect'
+import { introspectApp, type Introspection, type IntrospectionFailure } from '../src/introspect'
 import {
   assertWorkspaceBuilt,
   createTempRoot,
@@ -95,10 +95,10 @@ export default class PostController extends Controller {
   })
 }
 
-function expectFailure(result: Introspection, reason: string): string {
+function expectFailure(result: Introspection, reason: IntrospectionFailure): string {
   expect(result.status).toBe('failed')
   if (result.status !== 'failed') throw new Error('unreachable')
-  expect(result.reason).toBe(reason as never)
+  expect(result.reason).toBe(reason)
   return result.message
 }
 
@@ -118,7 +118,6 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  resetIntrospections()
   await rm(root, { recursive: true, force: true })
 })
 
@@ -151,6 +150,34 @@ describe('introspectApp()', () => {
     })
     expect(controllerOf('shop.reports')?.file).toBe('modules/shop/app/Http/Controllers/ReportController.ts')
     expect(controllerOf('posts.index')).toMatchObject({ file: 'app/Http/Controllers/PostController.ts', exportName: 'default', resolved: 'identity' })
+  }, 30_000)
+
+  test('finds a controller declared in a file not named after it', async () => {
+    const dir = await app('renamed', {
+      'routes/web.ts': `import type { Router } from '@guren/core'
+import { InvoiceController } from '../app/Http/Controllers/billing.js'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/invoices', [InvoiceController, 'index']).name('invoices.index')
+}
+`,
+      'app/Http/Controllers/billing.ts': `import { Controller } from '@guren/core'
+
+export class InvoiceController extends Controller {
+  async index() {
+    return this.json([])
+  }
+}
+`,
+    })
+
+    const result = await introspectApp(dir)
+
+    if (result.status !== 'ok') throw new Error(`expected ok, got ${JSON.stringify(result)}`)
+    expect(result.manifest.routes.find((route) => route.name === 'invoices.index')?.controller).toMatchObject({
+      file: 'app/Http/Controllers/billing.ts',
+      resolved: 'identity',
+    })
   }, 30_000)
 
   test('memoises one run per app root', () => {

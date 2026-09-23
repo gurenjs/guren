@@ -30,9 +30,7 @@ function driverMap(label: string, entry: DriverMapEntry | undefined): string[] {
 /** The sections as text tables; `--json` prints the manifest itself. */
 function renderManifest(manifest: AppManifest): string {
   const services = [
-    ...(manifest.session
-      ? [`session: ${manifest.session.source}, default ${manifest.session.default}; ${Object.entries(manifest.session.stores).map(([name, store]) => `${name}=${store.driver ?? '?'}`).join(', ')}`]
-      : []),
+    ...driverMap(`session (${manifest.session?.source})`, manifest.session && { default: manifest.session.default, entries: manifest.session.stores }),
     ...(manifest.auth
       ? [`auth: guards ${manifest.auth.guards.join(', ') || '(none)'}, default ${manifest.auth.defaultGuard ?? '(none)'}, hasher ${manifest.auth.hasher}`]
       : []),

@@ -303,7 +303,9 @@ user's middleware may add it, and an absent value means "not determinable", whic
 > **Amended in implementation (Part 1):** identity resolution runs in the CLI's
 > introspection child, not in `@guren/server`. The child holds the app, walks
 > `app.router.registeredHandlers()`, finds controller files through the CLI's
-> `discoverControllerFiles()` and compares exports with `===`. The server would
+> `discoverControllerFiles()` and compares exports with `===`. It imports the
+> files named after a routed class first, and the rest only while a class is
+> still unmatched, so an unrouted controller is evaluated only when needed. The server would
 > otherwise restate that discovery rule and import `node:fs` from a module
 > Workers bundles. An in-process `introspect()` therefore reports every
 > controller `resolved: 'name-only'`. Middleware resolution stays in the Router,
