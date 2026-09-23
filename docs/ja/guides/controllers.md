@@ -218,6 +218,7 @@ export default class PostsController extends Controller {
 import { Controller } from '@guren/core'
 import { z } from 'zod'
 import { Post } from '@/app/Models/Post'
+import type { UserRecord } from '@/app/Models/User'
 
 const PostIdParamSchema = z.object({ id: z.coerce.number().int().positive() })
 const StorePostSchema = z.object({ title: z.string().min(1), content: z.string().min(10) })
@@ -245,7 +246,7 @@ export default class PostsController extends Controller {
 
   async store() {
     const data = await this.validateBody(StorePostSchema)     // 422 をスロー
-    const user = await this.auth.userOrFail()                 // 401 をスロー
+    const user = await this.auth.userOrFail<UserRecord>()     // 401 をスロー
     const post = await Post.create({ ...data, authorId: user.id })
     return this.redirect('/posts')
   }
