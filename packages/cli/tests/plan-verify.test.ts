@@ -9,7 +9,7 @@ import { planDigest, planSlug, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, readPla
 import { planHash } from '../src/plan/identity'
 import { judgePlan, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus } from '../src/plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds, type PlanTaskDerivation } from '../src/plan/tasks'
-import { applyVerification, applyWaivers, behaviourReach, hashFiles, whatHoldsElement, overlayVerification, planWaivers, recordDrift, recordStillHolds, sha256 } from '../src/plan/verification'
+import { applyVerification, applyWaivers, behaviourReach, hashFiles, overlayVerification, planWaivers, recordDrift, recordStillHolds, sha256 } from '../src/plan/verification'
 import { PLAN_STATUS_REPORT_VERSION } from '../src/plan-status'
 import { formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
 import { acceptanceTestFiles, PlanVerifier, type PlanStepVerification, type PlanVerifierOptions } from '../src/plan/verify'
@@ -663,47 +663,6 @@ describe('behaviourReach', () => {
 
     expect(listAfter({ [owner.id]: covered })).toBe('present')
     expect(listAfter({ [owner.id]: covered, [carrier.id]: covered })).toBe('verified')
-  })
-})
-
-describe('whatHoldsElement', () => {
-  const element = (state: PlanElementState, extra: Partial<PlanElementStatus<PlanElementState>> = {}): PlanElementStatus<PlanElementState> => ({
-    id: 'e',
-    section: 'resources',
-    change: 'add',
-    label: 'E',
-    state,
-    properties: [],
-    notes: [],
-    completesAt: 'present',
-    files: [],
-    ...extra,
-  })
-
-  test('should suggest plan:verify only where a run can lift the element', () => {
-    expect(whatHoldsElement(element('present'))).toBe('run guren plan:verify')
-    const expired = 'Verified t by s; changed since: a.ts.'
-    expect(whatHoldsElement(element('drifted', { notes: [expired], hold: { kind: 'expired', note: expired } }))).toBe('Verified t by s; changed since: a.ts; run guren plan:verify')
-    expect(whatHoldsElement(element('planned'))).toBe('implement it, or waive it')
-    const incomplete = 'Verified t by s, and no longer at the state that completes it.'
-    expect(whatHoldsElement(element('drifted', { notes: ['Not wired: x.', incomplete], hold: { kind: 'incomplete', note: incomplete } }))).toBe('Not wired: x; implement it, or waive it')
-    expect(whatHoldsElement(element('blocked', { reason: 'the models could not be read' }))).toBe('the models could not be read; fix what keeps it from being read, or waive it')
-    const unfingerprinted = 'Verified t by s, and nothing of it was fingerprinted, so that result could not expire and is not counted.'
-    expect(whatHoldsElement(element('present', { notes: [unfingerprinted], hold: { kind: 'unfingerprinted', note: unfingerprinted } }))).toBe(
-      'Verified t by s, and nothing of it was fingerprinted, so that result could not expire and is not counted; plan:verify cannot lift what it cannot fingerprint, so waive it',
-    )
-  })
-
-  test('should keep what a run found ahead of the reason the reader gave', () => {
-    const expired = 'Verified t by s; changed since: a.ts.'
-    const unjudged = element('drifted', { reason: 'No planned property of this element could be read.', notes: [expired], hold: { kind: 'expired', note: expired } })
-    expect(whatHoldsElement(unjudged)).toBe('Verified t by s; changed since: a.ts; run guren plan:verify')
-  })
-
-  test('should name the missing behaviour for an element no verified behaviour reaches, whatever reason the reader gave', () => {
-    const stuck = 'Verified t by s, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.'
-    const unjudged = element('unjudged', { reason: 'Nothing discovers a mail class.', notes: [stuck], hold: { kind: 'unreached', note: stuck } })
-    expect(whatHoldsElement(unjudged)).toBe(stuck.slice(0, -1))
   })
 })
 

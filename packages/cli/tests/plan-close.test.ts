@@ -485,6 +485,20 @@ describe('describeCloseBlockers', () => {
     expect(blockerOf(element('resource.ghost', 'present'))).toBe(`  resource.ghost: present\n    No step of the plan verifies it, so no plan:verify run lifts it: waive it with ${waive('resource.ghost')}`)
   })
 
+  test('should name what a run found ahead of the reason the reader gave, except for an incomplete hold', () => {
+    const holdsOf = (entry: PlanElementStatus): string | undefined => describeCloseBlockers(plan, derivation, [entry], 'p.json')[0]!.holds
+    const expired = 'Verified t by s; changed since: a.ts.'
+    const unreached = 'Verified t by s, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.'
+    const incomplete = 'Verified t by s, and no longer at the state that completes it.'
+    const reason = 'No planned property of this element could be read.'
+
+    expect(holdsOf(element('model.comment', 'drifted', { reason, notes: [expired], hold: { kind: 'expired', note: expired } }))).toBe(expired.slice(0, -1))
+    expect(holdsOf(element('resource.comment', 'unjudged', { reason, notes: [unreached], hold: { kind: 'unreached', note: unreached } }))).toBe(unreached.slice(0, -1))
+    expect(holdsOf(element('route.comments.store', 'present', { reason, notes: ['Not wired: x.', incomplete], hold: { kind: 'incomplete', note: incomplete } }))).toBe(reason.slice(0, -1))
+    expect(holdsOf(element('route.comments.store', 'present', { notes: ['Not wired: x.', incomplete], hold: { kind: 'incomplete', note: incomplete } }))).toBe('Not wired: x')
+    expect(holdsOf(element('route.comments.store', 'present'))).toBeUndefined()
+  })
+
   test('should send an element nothing matched to the step whose behaviour reaches it first', () => {
     expect(blockerOf(element('model.comment', 'present'))).toBe(`  model.comment: present\n    Run ${verify(HTTP)}, then ${verify(DATA)}; or waive it: ${waive('model.comment')}`)
     expect(blockerOf(element('controller.comments', 'present'))).toBe(`  controller.comments: present\n    Run ${verify(HTTP)}; or waive it: ${waive('controller.comments')}`)
