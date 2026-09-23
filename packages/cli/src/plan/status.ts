@@ -51,6 +51,8 @@ export interface PlanPropertyStatus {
   actual?: string
   /** Why the property could not be compared, on `unknown`. */
   reason?: string
+  /** A match on a key's existence alone, which the verification overlay does not count as evidence of the planned shape. */
+  existence?: true
 }
 
 /**

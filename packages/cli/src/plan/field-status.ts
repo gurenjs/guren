@@ -80,16 +80,27 @@ function validatorField(field: PlanValidatorField, read: PlanAppSchemaFields): P
     if (read.open) return [unknown(name, 'declared', read.open), ...details(read.open)]
     return [differ(name, 'declared', 'not declared'), ...details('the schema does not declare it')]
   }
-  if ('opaque' in actual) return [match(name, 'declared'), ...details(actual.opaque)]
+  if ('opaque' in actual) return [existence(name), ...details(actual.opaque)]
   const shape = shapeOf(actual.output)
+  const required = actual.required
   return [
-    match(name, 'declared'),
-    typeProperty(`${name} type`, field.type, shape),
-    actual.required === undefined
-      ? unknown(`${name} required`, String(field.required), 'a coercion turns a missing value into one it accepts')
-      : compareBoolean(`${name} required`, field.required, actual.required, actual.required ? 'must be sent' : 'may be omitted or sent as null'),
-    ...rules.map(({ property, rule }) => ruleProperty(property, rule, field.type, shape)),
+    existence(name),
+    actual.date ? dateType(`${name} type`, field.type) : typeProperty(`${name} type`, field.type, shape),
+    typeof required === 'object'
+      ? unknown(`${name} required`, String(field.required), required.unknown)
+      : compareBoolean(`${name} required`, field.required, required, required ? 'must be sent' : 'may be omitted or sent as null'),
+    ...rules.map(({ property, rule }) => (actual.rulesUnread ? unknown(property, rule, actual.rulesUnread) : ruleProperty(property, rule, field.type, shape))),
   ]
+}
+
+/** A key's existence says nothing of the planned shape, so the verification overlay does not count it as a match. */
+function existence(property: string): PlanPropertyStatus {
+  return { ...match(property, 'declared'), existence: true }
+}
+
+/** A `Date` is neither the string the walker renders it as nor a calendar date without a time. */
+function dateType(property: string, planned: PlanValidatorField['type']): PlanPropertyStatus {
+  return planned === 'datetime' ? match(property, planned, 'Date') : unknown(property, planned, `the validated value is a Date, which may carry a ${planned} this does not read`)
 }
 
 /** The planned type describes the validated value, which the walker's output side renders. */
@@ -177,7 +188,7 @@ function resourceField(field: PlanResourceField, read: PlanAppResourcePayload['p
     if (read.open) return both(read.open)
     return [differ(name, 'declared', 'not declared'), unknown(`${name} type`, field.type, 'the payload type does not declare it')]
   }
-  return [match(name, 'declared'), payloadType(`${name} type`, field.type, member)]
+  return [existence(name), payloadType(`${name} type`, field.type, member)]
 }
 
 const PRIMITIVE_TYPES = new Set(['string', 'number', 'boolean', 'bigint', 'null'])

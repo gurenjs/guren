@@ -145,7 +145,7 @@ export function applyVerification(
         const element = lifted.get(id)
         if (!element) continue
         const uncovered = element.files.filter((file) => !(file in recorded))
-        const unmatched = element.change !== 'drop' && !element.properties.some((property) => property.verdict === 'match')
+        const unmatched = element.change !== 'drop' && !element.properties.some((property) => property.verdict === 'match' && !property.existence)
         // An `unjudged` element with no file rests on the behaviours reaching it, whose test files their record covers.
         const needsNoFiles = element.change === 'drop' || element.state === 'unjudged'
         const hold = (kind: PlanVerificationHold, note: string): void => {

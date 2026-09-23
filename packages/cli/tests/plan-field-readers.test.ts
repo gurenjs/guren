@@ -17,6 +17,9 @@ const WORKSPACE_ZOD = resolve(import.meta.dir, '../../../node_modules/zod')
 
 const VALIDATORS = `import { z } from 'zod'
 import { z as z3 } from 'zod/v3'
+import * as zm from 'zod/mini'
+
+export const MiniSchema = zm.looseObject({ a: zm.string() })
 
 export const LegacySchema = z3.object({ body: z3.string() })
 
@@ -95,6 +98,20 @@ export const ObjectIssueSchema = z.object({ a: z.string().optional() }).transfor
 export const PipedTransformBoundSchema = z.object({ a: z.string().max(3).transform((value) => value + 'xx').pipe(z.string()) })
 export const CaughtObjectSchema = z.object({ a: z.string() }).catch({ a: 'x' })
 export const ReshapedBoundSchema = z.object({ a: z.string().max(3) }).transform((value) => ({ a: value.a + 'xxxx' }))
+
+export const VersionedSchema = z.object({
+  filled: z.string().default('x'),
+  primed: z.string().prefault('x'),
+  count: z.coerce.number(),
+  when: z.coerce.date(),
+  at: z.date(),
+  kept: z.string().optional(),
+}).required()
+export const CodecSchema = z.object({
+  a: z.codec(z.string(), z.string().max(3), { decode: (value) => value.slice(0, 3), encode: (value) => value }),
+})
+export const OverwrittenSchema = z.object({ a: z.string().overwrite((value) => value.padEnd(5)).min(5), b: z.string().trim().min(1) })
+export const ProtoSchema = z.object({ ['__proto__']: z.string() })
 
 export const BoundsSchema = z.object({
   digits: z.string().max(3).transform(Number),
@@ -256,9 +273,10 @@ describe('plan:status validator fields', () => {
       'field page type': 'match',
       'field size type': 'unknown',
       'field contact type': 'match',
-      'field contact required': 'match',
+      'field contact required': 'unknown',
       'field contact rule min 1': 'unknown',
-      'field contact rule email': 'match',
+      'field contact rule email': 'unknown',
+      'field page required': 'unknown',
     })
   })
 
@@ -303,6 +321,58 @@ describe('plan:status validator fields', () => {
     const element = judged(validator('RepipedSchema', [{ name: 'a', type: 'string', required: true, rules: [] }, { name: 'b', type: 'string', required: false, rules: [] }]), 'val')
 
     expect(verdicts(element)).toMatchObject({ 'field a required': 'unknown', 'field b': 'unknown' })
+  })
+
+  test('should read no presence that changed across zod 4 versions: nonoptional over a fill, a null-accepting coercion', () => {
+    const element = judged(validator('VersionedSchema', [
+      { name: 'filled', type: 'string', required: false, rules: [] },
+      { name: 'primed', type: 'string', required: false, rules: [] },
+      { name: 'count', type: 'number', required: false, rules: [] },
+      { name: 'when', type: 'datetime', required: false, rules: [] },
+      { name: 'kept', type: 'string', required: true, rules: [] },
+    ]), 'val')
+
+    expect(verdicts(element)).toMatchObject({
+      'field filled required': 'unknown',
+      'field primed required': 'unknown',
+      'field count required': 'unknown',
+      'field when required': 'unknown',
+      'field when type': 'match',
+      'field kept required': 'match',
+    })
+  })
+
+  test('should read a Date as a datetime and never as a string', () => {
+    const verdictOf = (type: string): string => verdicts(judged(validator('VersionedSchema', [{ name: 'at', type, required: true, rules: [] }]), 'val'))['field at type']!
+
+    expect([verdictOf('datetime'), verdictOf('string'), verdictOf('date')]).toEqual(['match', 'unknown', 'unknown'])
+  })
+
+  test('should read no rule of a codec, whose decode runs between its stages', () => {
+    const element = judged(validator('CodecSchema', [{ name: 'a', type: 'string', required: true, rules: ['max 10'] }]), 'val')
+
+    expect(verdicts(element)).toMatchObject({ 'field a type': 'match', 'field a required': 'unknown', 'field a rule max 10': 'unknown' })
+  })
+
+  test('should read no rule past a custom overwrite, and read one past zod’s own trim', () => {
+    const element = judged(validator('OverwrittenSchema', [
+      { name: 'a', type: 'string', required: true, rules: ['min 1'] },
+      { name: 'b', type: 'string', required: true, rules: ['min 1'] },
+    ]), 'val')
+
+    expect(verdicts(element)).toMatchObject({ 'field a rule min 1': 'unknown', 'field b rule min 1': 'match' })
+  })
+
+  test('should leave a zod/mini schema unread, whose checks and catchall carry no _def', () => {
+    const element = judged(validator('MiniSchema', [{ name: 'b', type: 'string', required: true, rules: [] }]), 'val')
+
+    expect(element.properties[0]).toMatchObject({ verdict: 'unknown', reason: expect.stringContaining('zod/mini') })
+  })
+
+  test('should find a __proto__ key the object declares', () => {
+    const element = judged(validator('ProtoSchema', [{ name: '__proto__', type: 'string', required: true, rules: [] }]), 'val')
+
+    expect(verdicts(element)).toMatchObject({ 'field __proto__': 'match', 'field __proto__ type': 'match' })
   })
 
   test('should read a recursive schema without walking into it', () => {

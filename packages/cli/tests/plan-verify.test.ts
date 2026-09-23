@@ -765,6 +765,9 @@ describe('applyVerification', () => {
     expect(elementOf(bare, 'resource.comment').hold?.kind).toBe('unreached')
     // A property a reader matched is a reading of the change itself, which needs no behaviour to reach it.
     expect(elementOf(applyVerification(statusOf(), derivation, { [HTTP]: http }, 'digest', hashes, plan).status, 'resource.comment').state).toBe('verified')
+    // A field's existence alone is not: it says nothing of the planned shape.
+    const onKeys = statusOf({ 'resource.comment': { properties: [{ property: 'field body', verdict: 'match', planned: 'declared', actual: 'declared', existence: true }] } })
+    expect(elementOf(applyVerification(onKeys, derivation, { [HTTP]: http }, 'digest', hashes, plan).status, 'resource.comment').hold?.kind).toBe('unreached')
   })
 
   test('should reach an element of a split step\u2019s earlier part through the part that runs the behaviours, while its record stands', async () => {

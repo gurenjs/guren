@@ -23,6 +23,9 @@ import { parseSourceFile } from '../parse-cache'
 import { readMember, type PagePropKey } from '../page-props-extractor'
 import type { PlanAppUnreadable } from './unreadable'
 
+/** Whether a client must send a non-null value, or why that cannot be read on every zod version. */
+export type Presence = boolean | { unknown: string }
+
 /**
  * One key of an object schema. A verdict beyond the key's existence is read only off a path of
  * nodes whose meaning `ALLOWED_*` below pins; any other node leaves `opaque`, naming it, and
@@ -33,8 +36,11 @@ export type PlanAppSchemaField =
   | {
       /** The validated value as the walker renders it: the output side, a pipe's last stage. */
       output: JsonSchemaObject
-      /** Whether a client must send a non-null value; absent for a coercion that turns a missing value into one. */
-      required?: boolean
+      /** The validated value is a `Date`, which the walker renders as a date-time string. */
+      date: boolean
+      required: Presence
+      /** Why `output`'s bounds and formats are not the validated value's; absent when they are. */
+      rulesUnread?: string
     }
 
 /** `open` names why a key the object does not declare may still be accepted. */
@@ -48,17 +54,25 @@ export interface PlanAppResourcePayload {
   payload: { members: PagePropKey[]; open?: string } | PlanAppUnreadable
 }
 
-/** Wrappers whose presence rule is pinned: `nonoptional` is what `.required()` adds over `.optional()`. */
+/**
+ * An entry here must mean the same on every zod the apps admit (`^4`, from 4.0): the reader runs
+ * against the app's own copy. `nonoptional` is what `.required()` adds over `.optional()`; over a
+ * `default` or `prefault` it accepts a missing key before 4.4 and rejects it from 4.4, so that
+ * combination is read as unknown.
+ */
 const ALLOWED_WRAPPERS = new Set(['optional', 'nullable', 'default', 'prefault', 'nonoptional'])
 
 /** Leaves whose rendered type is the validated value's. `z.coerce.*` stays a leaf; `z.stringbool()` is a pipe of two. */
 const ALLOWED_LEAVES = new Set(['string', 'number', 'boolean', 'bigint', 'date', 'enum'])
 
-/** Checks that only restrict the value, so a stated bound is one it must meet; `overwrite` (`.trim()`) only ahead of every bound. */
+/** Checks that only restrict the value, so a stated bound is one it must meet; an `overwrite` only ahead of every bound. */
 const ALLOWED_CHECKS = new Set(['min_length', 'max_length', 'length_equals', 'greater_than', 'less_than', 'multiple_of', 'number_format', 'string_format'])
 
-/** A coercion that turns `undefined` into a value it accepts, so a missing key passes. */
-const COERCES_MISSING = new Set(['string', 'boolean'])
+/** A coercion that accepts `null`, and before zod 4.4 a missing key. */
+const COERCES_NULL = new Set(['string', 'boolean', 'number', 'date'])
+
+/** zod's own `.trim()`, `.toLowerCase()`, `.toUpperCase()` and `.normalize()`; any other `.overwrite()` may rewrite a value past its bounds. */
+const BUILT_IN_OVERWRITES = new Set(['(input) => input.trim()', '(input) => input.toLowerCase()', '(input) => input.toUpperCase()', '(input) => input.normalize(form)'])
 
 /** A walk that throws (a recursive getter schema overflows the walker) leaves this export's fields unread, never the command. */
 export function readSchemaFields(name: string, value: unknown): PlanAppSchemaFields {
@@ -72,12 +86,13 @@ export function readSchemaFields(name: string, value: unknown): PlanAppSchemaFie
 function walkSchemaFields(name: string, value: unknown): PlanAppSchemaFields {
   if (value !== null && typeof value === 'object' && isZod3Schema(value)) return { unreadable: `${name}: ${ZOD3_UNSUPPORTED_MESSAGE}` }
   if (!isZodSchema(value)) return { unreadable: `${name} is not a zod schema` }
+  if (!value._def) return { unreadable: `${name} carries no _def (zod/mini), so its checks and catchall are not visible` }
   const root = objectRoot(value)
   if (!root) return { unreadable: `${name} does not reach an object schema this reader can read` }
   const shape = objectShape(root.object) ?? {}
   const catchall = schemaAt(root.object._def ?? {}, 'catchall')
   const open = catchall && typeOf(catchall) !== 'never' ? `${name} accepts keys it does not declare (a loose object or a catchall)` : undefined
-  const fields: Record<string, PlanAppSchemaField> = {}
+  const fields: Record<string, PlanAppSchemaField> = Object.create(null)
   for (const [key, node] of Object.entries(shape)) {
     const opaque = root.opaque ?? opaqueNode(node, 'field')
     fields[key] = opaque ? { opaque: `${key}: ${opaque}` } : readField(key, node)
@@ -109,6 +124,7 @@ function objectRoot(value: ZodSchemaLike): { object: ZodSchemaLike; opaque?: str
  * stage whose bounds are read (`field` or a pipe's `out`) needs its overwrites ahead of them.
  */
 function opaqueNode(node: ZodSchemaLike, role: 'field' | 'in' | 'out'): string | undefined {
+  if (!node._def) return 'a node carries no _def (zod/mini)'
   const type = typeOf(node)
   const checks = uncheckedKinds(node, ALLOWED_LEAVES.has(type), role !== 'in')
   if (checks) return `a ${type} carries ${checks}`
@@ -133,24 +149,43 @@ function uncheckedKinds(node: ZodSchemaLike, leaf: boolean, ordered: boolean): s
   return ordered && bounded >= 0 && checks.lastIndexOf('overwrite') > bounded ? 'an overwrite (such as .trim()) after a bound' : undefined
 }
 
-/** A field whose every node is allowed: its presence read off its wrappers, its type off the walker's output side. */
+/**
+ * A field whose every node is allowed: its presence read off its wrappers, its type off the
+ * walker's output side. A pipe's out stage validates the final value, so its type holds, but a
+ * step may run between the stages (a codec's decode), so its presence and rules are not read.
+ */
 function readField(key: string, node: ZodSchemaLike): PlanAppSchemaField {
   const warnings: string[] = []
   const output = toJsonSchema(node, warnings, key, 'output')
   if (!output || warnings.length > 0) return { opaque: warnings[0] ?? `${key}: the schema walker renders nothing for it` }
-  let omissible: boolean | undefined
+  let decider: string | undefined
+  let filled = false
   let nullable = false
-  let leaf: ZodSchemaLike | undefined = node
-  while (leaf && ALLOWED_WRAPPERS.has(typeOf(leaf))) {
+  let leaf = node
+  while (ALLOWED_WRAPPERS.has(typeOf(leaf))) {
     const type = typeOf(leaf)
     if (type === 'nullable') nullable = true
-    else omissible ??= type !== 'nonoptional'
-    leaf = innerSchema(leaf._def ?? {})
+    else if (decider === undefined) decider = type
+    else if (type === 'default' || type === 'prefault') filled = true
+    leaf = innerSchema(leaf._def ?? {})!
   }
-  if (omissible || nullable) return { output, required: false }
-  const first = leaf && typeOf(leaf) === 'pipe' ? pipeSides(leaf._def ?? {}).from : leaf
-  const coercing = first?._def?.coerce === true && COERCES_MISSING.has(typeOf(first))
-  return coercing ? { output } : { output, required: true }
+  const piped = typeOf(leaf) === 'pipe'
+  const read = piped ? schemaAt(leaf._def ?? {}, 'out')! : leaf
+  const date = typeOf(read) === 'date'
+  if (piped) {
+    const reason = 'a pipe or codec may run a step between its stages'
+    return { output, date, required: nullable || (decider !== undefined && decider !== 'nonoptional') ? false : { unknown: reason }, rulesUnread: reason }
+  }
+  const custom = schemaChecks(leaf).some((check) => check.check === 'overwrite' && !BUILT_IN_OVERWRITES.has(String(check.tx)))
+  const rules = custom ? { rulesUnread: 'a custom .overwrite() may rewrite the value past its bounds' } : {}
+  return { output, date, required: requiredOf(leaf, decider, filled, nullable), ...rules }
+}
+
+function requiredOf(leaf: ZodSchemaLike, decider: string | undefined, filled: boolean, nullable: boolean): Presence {
+  if (nullable || (decider !== undefined && decider !== 'nonoptional')) return false
+  if (decider === 'nonoptional' && filled) return { unknown: 'nonoptional over a default or prefault accepts a missing key before zod 4.4 and rejects it from 4.4' }
+  if (leaf._def?.coerce === true && COERCES_NULL.has(typeOf(leaf))) return { unknown: 'a coercion accepts null, and before zod 4.4 a missing key' }
+  return true
 }
 
 /** Every resource class codegen discovers, with the members of the payload type it would emit. */
