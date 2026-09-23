@@ -98,10 +98,12 @@ describe('plan:verify', () => {
     // The plan's destroy action, route, resource and policy are not written, so the step cannot verify.
     expect(record.outcome).toBe('incomplete')
     expect(record.incomplete).toEqual(expect.arrayContaining(['action.comments.destroy: planned', 'route.comments.destroy: planned', 'resource.comment: planned', 'policy.comment: planned']))
-    // The store route is drifted, so nothing of it would be lifted and its file is not fingerprinted.
+    // The store route is drifted and not fingerprinted as itself; its routes file and the entry are, as what the store action's `wired` rests on.
     expect(Object.keys(record.fingerprint.files)).toEqual([
       'app/Http/Controllers/CommentController.ts',
       'app/Http/Validators/CommentValidator.ts',
+      'routes/web.ts',
+      'src/app.ts',
       'tests/comments.test.ts',
     ])
     expect(record.fingerprint.files['app/Http/Controllers/CommentController.ts']).toBe(sha256(APP['app/Http/Controllers/CommentController.ts']!))

@@ -6,17 +6,20 @@ import type {
   PresenceChannelAuthorizer,
   ChannelRegistration,
   SSEMiddlewareOptions,
+  WebSocketMiddlewareOptions,
   AuthMiddlewareOptions,
   SSEClient,
   WebSocketClient,
   BroadcastEvent,
+  PresenceMember,
 } from './types'
 import { Channel, PrivateChannel, PresenceChannel } from './channels'
 import { MemoryDriver } from './drivers'
 import { claimHotDisposable, isHotReloadRuntime } from '../hot-reload/hot-disposables'
 import type { Context } from '../http/Application'
 import type { Middleware } from '../http/middleware'
-import { parseRequestPayload } from '../http/request'
+import { webSocketOriginCheck } from '../http/middleware/websocket-origin'
+import { asRecord, parseRequestPayload } from '../http/request'
 import { randomHex } from '../encryption/Random'
 import { ambientBinding, bindAmbient } from '../http/default-application'
 import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
@@ -36,6 +39,58 @@ function resolveClientUserId(user: unknown): string | number | undefined {
   }
   return undefined
 }
+
+/** The channels a connection asks for up front, as `?channels=a,b`, each once. */
+function requestedChannels(ctx: Context): string[] {
+  const channels = (ctx.req.query('channels') ?? '').split(',').map((value) => value.trim())
+  return [...new Set(channels.filter(Boolean))]
+}
+
+/**
+ * Whether the request came through a server that can upgrade it: `{ server }`
+ * from `Application.listen()`, or the server itself when an app passes
+ * `app.fetch` to `Bun.serve`. Mirrors `getBunServer()`, which cannot be asked:
+ * `hono/bun` reads the `Bun` global at load, and this check is what answers 501 off Bun.
+ */
+function canUpgrade(ctx: Context): boolean {
+  const env = ctx.env as Record<string, unknown> | undefined
+  if (typeof env !== 'object' || env === null) return false
+  const server = ('server' in env ? env.server : env) as { upgrade?: unknown } | undefined
+  return typeof server?.upgrade === 'function'
+}
+
+// The protocol's messages are under 100 bytes; Bun admits 16 MB frames by default.
+const MAX_WEBSOCKET_MESSAGE_LENGTH = 4096
+
+// Each queued message may run an authorizer against the database, and nothing
+// rate-limits frames once the socket is open.
+const MAX_PENDING_WEBSOCKET_MESSAGES = 32
+
+interface WebSocketClientMessage {
+  action: 'subscribe' | 'unsubscribe'
+  channel: string
+}
+
+function parseWebSocketClientMessage(data: unknown): WebSocketClientMessage | undefined {
+  if (typeof data !== 'string' || data.length > MAX_WEBSOCKET_MESSAGE_LENGTH) return undefined
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(data)
+  } catch {
+    return undefined
+  }
+
+  const { action, channel } = asRecord(parsed)
+  if ((action !== 'subscribe' && action !== 'unsubscribe') || typeof channel !== 'string' || channel === '') {
+    return undefined
+  }
+  return { action, channel }
+}
+
+type ChannelAuthResult =
+  | { authorized: false }
+  | { authorized: true; subscribed: boolean; member?: PresenceMember }
 
 /** Broadcast manager for real-time event broadcasting. */
 export class BroadcastManager {
@@ -171,6 +226,17 @@ export class BroadcastManager {
     return await (registration.authorizer as ChannelAuthorizer)(channelName, user) === true
   }
 
+  private async filterAuthorizedChannels(channels: string[], user: unknown): Promise<string[]> {
+    const authorized: string[] = []
+    for (const channelName of channels) {
+      const authResult = await this.authorize(channelName, user)
+      if (authResult !== false && authResult !== null) {
+        authorized.push(channelName)
+      }
+    }
+    return authorized
+  }
+
   protected findChannelRegistration(
     channelName: string
   ): ChannelRegistration | undefined {
@@ -199,18 +265,8 @@ export class BroadcastManager {
 
       // Channels requested up front (?channels=a,b) are authorized and
       // subscribed before the stream starts, so a plain EventSource works.
-      const requestedChannels = (ctx.req.query('channels') ?? '')
-        .split(',')
-        .map((value) => value.trim())
-        .filter(Boolean)
       const user = options.getUser ? await options.getUser(ctx) : undefined
-      const authorizedChannels: string[] = []
-      for (const channelName of requestedChannels) {
-        const authResult = await this.authorize(channelName, user)
-        if (authResult !== false && authResult !== null) {
-          authorizedChannels.push(channelName)
-        }
-      }
+      const authorizedChannels = await this.filterAuthorizedChannels(requestedChannels(ctx), user)
 
       // Resolved out here, not inside `start()`: the client object outlives this
       // handler, so reading `user` in there would retain the whole user record
@@ -302,6 +358,121 @@ export class BroadcastManager {
     }
   }
 
+  /**
+   * A route that upgrades to a WebSocket carrying broadcast events, the socket
+   * counterpart of `sseMiddleware()`; it needs `Application.listen()` on Bun.
+   * Frames are JSON. The server sends `{ event, data }`, first `connected` with
+   * `{ clientId, channels }`; the client sends `{ action: 'subscribe' | 'unsubscribe',
+   * channel }`, answered by a `subscription` event, and anything else is ignored.
+   */
+  webSocketMiddleware(options: WebSocketMiddlewareOptions = {}): Middleware {
+    const isAllowedOrigin = webSocketOriginCheck(options.allowedOrigins)
+
+    return async (ctx: Context) => {
+      if (!isAllowedOrigin(ctx)) {
+        return ctx.json({ message: 'Forbidden: cross-origin WebSocket upgrade' }, 403)
+      }
+
+      if (ctx.req.header('upgrade')?.toLowerCase() !== 'websocket') {
+        return ctx.json({ message: 'Expected a WebSocket upgrade request' }, 426, { Upgrade: 'websocket' })
+      }
+
+      if (!canUpgrade(ctx)) {
+        return ctx.json(
+          { message: 'This runtime cannot upgrade to a WebSocket. Serve the app with Application.listen() on Bun.' },
+          501,
+        )
+      }
+
+      // Checked before `getUser` and the authorizers run, which a request that
+      // cannot be upgraded should not cost.
+      if (!ctx.req.header('sec-websocket-key')) {
+        return ctx.json({ message: 'Invalid WebSocket handshake' }, 400)
+      }
+
+      // Held for the socket's lifetime, unlike in `sseMiddleware()`: every later
+      // `subscribe` message is authorized against this same user.
+      const user = options.getUser ? await options.getUser(ctx) : undefined
+      const authorizedChannels = await this.filterAuthorizedChannels(requestedChannels(ctx), user)
+      const userId = resolveClientUserId(user)
+      let clientId: string | undefined
+      let handled: Promise<void> = Promise.resolve()
+      let pending = 0
+
+      const { upgradeWebSocket } = await import('hono/bun')
+      const upgrade = upgradeWebSocket(() => ({
+        onOpen: (_event, ws) => {
+          const send = (event: string, data: unknown) => ws.send(JSON.stringify({ event, data }))
+          clientId = this.registerWebSocketClient({ userId, send, close: () => ws.close() })
+          send('connected', { clientId, channels: authorizedChannels })
+          for (const channelName of authorizedChannels) {
+            this.subscribeWebSocketClient(clientId, channelName)
+          }
+        },
+        onMessage: (event, ws) => {
+          const message = parseWebSocketClientMessage(event.data)
+          const id = clientId
+          if (!id || !message) return
+          if (pending >= MAX_PENDING_WEBSOCKET_MESSAGES) {
+            ws.close(1008, 'Too many pending messages')
+            return
+          }
+          // In arrival order, so a `subscribe` still awaiting its authorizer
+          // cannot land after an `unsubscribe` sent behind it. Nothing awaits
+          // this handler, so a rejection must be caught here.
+          pending += 1
+          handled = handled
+            .then(() => this.handleWebSocketMessage(id, message, user))
+            .catch((error: unknown) => {
+              console.error('Error handling broadcast WebSocket message:', error)
+            })
+            .finally(() => {
+              pending -= 1
+            })
+        },
+        onClose: () => {
+          if (clientId) this.removeWebSocketClient(clientId)
+        },
+      }))
+
+      // No response means Bun refused the handshake headers.
+      return (await upgrade(ctx, async () => {})) ?? ctx.json({ message: 'Invalid WebSocket handshake' }, 400)
+    }
+  }
+
+  private async handleWebSocketMessage(
+    clientId: string,
+    message: WebSocketClientMessage,
+    user: unknown,
+  ): Promise<void> {
+    const client = this.wsClients.get(clientId)
+    if (!client) return
+    const { channel } = message
+
+    if (message.action === 'unsubscribe') {
+      this.unsubscribeWebSocketClient(clientId, channel)
+      await client.send('subscription', { channel, subscribed: false })
+      return
+    }
+
+    const result = await this.authorizeAndAttach(channel, user, clientId).catch((error: unknown) => {
+      console.error(`Error authorizing broadcast channel "${channel}":`, error)
+      return { authorized: false } as const
+    })
+    await client.send('subscription', { channel, ...result })
+  }
+
+  /** The one answer `POST /broadcasting/auth` and a socket's `subscribe` both give. */
+  private async authorizeAndAttach(channel: string, user: unknown, clientId?: string): Promise<ChannelAuthResult> {
+    const authResult = await this.authorize(channel, user)
+    if (authResult === false || authResult === null) return { authorized: false }
+
+    // Ids carry their transport's prefix, so at most one of the two matches.
+    const subscribed =
+      clientId !== undefined && (this.subscribeClient(clientId, channel) || this.subscribeWebSocketClient(clientId, channel))
+    return authResult === true ? { authorized: true, subscribed } : { authorized: true, subscribed, member: authResult }
+  }
+
   authMiddleware(options: AuthMiddlewareOptions = {}): Middleware {
     return async (ctx: Context) => {
       const getUser = options.getUser ?? ((c) => (c as any).auth?.user)
@@ -321,38 +492,22 @@ export class BroadcastManager {
         return ctx.json({ error: 'No channel specified' }, 400)
       }
 
-      // With the SSE clientId in the payload, also subscribe the client so
-      // authorized events actually flow.
+      // With a clientId (SSE stream or WebSocket) in the payload, also subscribe
+      // the client so authorized events actually flow.
       const clientId = typeof payload.clientId === 'string' ? payload.clientId : undefined
-      const results: Record<string, unknown> = {}
+      const results: Record<string, ChannelAuthResult> = {}
 
       // Authorization answers "may this user read the channel", not "may they
       // attach it to *that* stream": without this check, a request naming
       // someone else's clientId pushes events into that person's stream. An
       // unowned stream (opened before sign-in) stays attachable.
       const requesterId = resolveClientUserId(user)
-      const target = clientId ? this.sseClients.get(clientId) : undefined
+      const target = clientId ? (this.sseClients.get(clientId) ?? this.wsClients.get(clientId)) : undefined
       const attachTo =
         target && (target.userId === undefined || target.userId === requesterId) ? target : undefined
 
       for (const ch of channels) {
-        const authResult = await this.authorize(ch, user)
-
-        if (authResult === false || authResult === null) {
-          results[ch] = { authorized: false }
-          continue
-        }
-
-        const subscribed = attachTo ? this.subscribeClient(attachTo.id, ch) : false
-        if (authResult === true) {
-          results[ch] = { authorized: true, subscribed }
-        } else {
-          results[ch] = {
-            authorized: true,
-            subscribed,
-            member: authResult,
-          }
-        }
+        results[ch] = await this.authorizeAndAttach(ch, user, attachTo?.id)
       }
 
       return ctx.json(results)
@@ -443,6 +598,11 @@ export class BroadcastManager {
     return true
   }
 
+  /**
+   * Subscribes without authorizing, like `subscribeClient()`: for a channel the
+   * server chose. Put a channel the client named through `authorize()` first,
+   * as `webSocketMiddleware()` and `authMiddleware()` do.
+   */
   subscribeWebSocketClient(clientId: string, channel: string): boolean {
     const client = this.wsClients.get(clientId)
     if (!client) return false
@@ -496,11 +656,11 @@ export class BroadcastManager {
   }
 
   /**
-   * Close every SSE connection this manager holds. Each owns a ping timer that
-   * is only cleared on stream cancel or request abort, and `Bun.serve().stop()`
-   * waits for in-flight requests while an SSE response never finishes — so on a
-   * hot reload the timers would go on pinging. `getClients()` is a snapshot: a
-   * `close()` reaching another client would drop it from a live iteration.
+   * Close every SSE and WebSocket connection this manager holds. Each SSE stream
+   * owns a ping timer that is only cleared on stream cancel or request abort, and
+   * `Bun.serve().stop()` waits for in-flight requests while an SSE response never
+   * finishes — so on a hot reload the timers would go on pinging. Both lists are
+   * snapshots: a `close()` reaching another client would drop it mid-iteration.
    */
   disconnectAll(): void {
     for (const client of this.getClients()) {
@@ -508,6 +668,14 @@ export class BroadcastManager {
         client.close()
       } catch {
         // A stream torn down from the other end is already what we wanted.
+      }
+    }
+
+    for (const client of this.getWebSocketClients()) {
+      try {
+        this.removeWebSocketClient(client.id)
+      } catch {
+        // Removal releases the driver subscriptions before closing the socket.
       }
     }
   }

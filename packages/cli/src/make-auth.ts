@@ -22,7 +22,7 @@ import { appendOAuthStateTable } from './oauth-state-table'
 import { registerConsoleCommand } from './console-registrar'
 import { generateSchemaMigration } from './make-migration'
 import { ensureGurenUiTokens, FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_SUBMIT_CLASS } from './guren-css'
-import { MAIL_SCAFFOLD } from './mail-scaffold'
+import { appMailBindings, MAIL_SCAFFOLD, reportKeptMail } from './mail-scaffold'
 import { KNOWN_OAUTH_PROVIDERS, OAUTH_PROVIDER_LABELS, oauthEnvEntries } from './oauth-scaffold'
 import { definitionTemplateFile, scaffoldTemplateFile } from './scaffold-templates'
 import { appendScaffoldEnv, installsConfigDefinition, scaffoldEnv } from './service-scaffold'
@@ -1393,31 +1393,30 @@ const PASSWORD_SCAFFOLD_PATHS = [
   'app/Auth/EmailVerificationStore.ts',
   'app/Mail/PasswordResetMail.ts',
   'app/Mail/EmailVerificationMail.ts',
-  'app/Providers/MailProvider.ts',
-  'config/mail.ts',
 ]
 
+/** Also what `guren add mail` writes, so a leftover here is not make:auth's alone. */
 const MAIL_SCAFFOLD_PATHS = ['app/Providers/MailProvider.ts', 'config/mail.ts']
 
 async function warnAboutStalePasswordScaffold(): Promise<void> {
   const { existsSync } = await import('node:fs')
-  const leftovers = PASSWORD_SCAFFOLD_PATHS.filter((path) => existsSync(resolve(process.cwd(), path)))
+  const exists = (path: string) => existsSync(resolve(process.cwd(), path))
+  const passwordOnly = PASSWORD_SCAFFOLD_PATHS.filter(exists)
+  const mail = MAIL_SCAFFOLD_PATHS.filter(exists)
 
-  if (leftovers.length === 0) {
-    return
+  if (passwordOnly.length > 0) {
+    consola.warn(
+      `These files from an earlier make:auth run serve password login only and are no longer wired into routes/auth.ts — delete them: ${passwordOnly.join(', ')}`,
+    )
   }
-
-  consola.warn(
-    `These files from an earlier make:auth run serve password login only and are no longer wired into routes/auth.ts — delete them: ${leftovers.join(', ')}`,
-  )
-  if (leftovers.includes('db/seeders/UsersSeeder.ts')) {
+  if (passwordOnly.includes('db/seeders/UsersSeeder.ts')) {
     consola.warn(
       'db/seeders/UsersSeeder.ts still runs on `db:seed` and would insert a password account that cannot sign in.',
     )
   }
-  if (leftovers.some((path) => MAIL_SCAFFOLD_PATHS.includes(path))) {
+  if (mail.length > 0) {
     consola.warn(
-      'Your app entry may still register MailProvider and CoreMailServiceProvider, or list mail in its config array, from that run — remove them too if nothing else sends mail.',
+      `${mail.join(', ')} set up mail, for an earlier make:auth run or for guren add mail. If nothing else sends mail, delete them and remove MailProvider and CoreMailServiceProvider, or mail in the config array, from your app entry.`,
     )
   }
 }
@@ -1463,7 +1462,7 @@ export interface MakeAuthOptions extends WriterOptions {
  * a new way to switch one off lands in `resolveAuthFeatures()` alone.
  */
 interface AuthFeatures {
-  /** Registration and password reset, plus the mail wiring they need. */
+  /** Registration and password reset, plus a mail binding when the app has none. */
   includeExtras: boolean
   /** Email verification. Builds on the registration flow. */
   includeVerify: boolean
@@ -1476,6 +1475,9 @@ interface AuthFeatures {
   /** Providers to scaffold buttons, a callback, and id columns for. */
   oauthProviders: string[]
 }
+
+/** The form of the mail binding make:auth installs for its reset mail. */
+type MailSetup = 'definition' | 'provider'
 
 function resolveAuthFeatures(options: MakeAuthOptions): AuthFeatures {
   const oauthProviders = parseOAuthProviders(options.oauth)
@@ -1552,7 +1554,10 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   const schemaSource = await readIfExists(process.cwd(), 'db/schema.ts')
   const oauthStateTable = includeOAuth && schemaSource !== null
   // Also before any write: the config files written below would otherwise decide these.
-  const mailDefinition = includeExtras && (await installsConfigDefinition('mail'))
+  const existingMail = includeExtras ? await appMailBindings() : []
+  const mailSetup: MailSetup | null = !includeExtras || existingMail.length > 0
+    ? null
+    : (await installsConfigDefinition('mail')) ? 'definition' : 'provider'
   const oauthDefinition = includeOAuth && (await installsConfigDefinition('oauth'))
 
   const files = [
@@ -1599,10 +1604,13 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
       authFile('resources/js/pages/auth/ResetPassword.tsx'),
       authFile('app/Auth/PasswordResetStore.ts'),
       authFile('app/Mail/PasswordResetMail.ts'),
-      ...(mailDefinition
-        ? [definitionTemplateFile('mail', 'config/mail.ts')]
-        : [authFile('app/Providers/MailProvider.ts'), authFile('config/mail.ts')]),
     )
+  }
+
+  if (mailSetup === 'definition') {
+    files.push(definitionTemplateFile('mail', 'config/mail.ts'))
+  } else if (mailSetup === 'provider') {
+    files.push(authFile('app/Providers/MailProvider.ts'), authFile('config/mail.ts'))
   }
 
   if (includeVerify) {
@@ -1624,8 +1632,11 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   }
 
   const created = await writeScaffoldFiles(files, options)
+  if (existingMail.length > 0) {
+    await reportKeptMail(existingMail, 'no mail config or provider was written; the password reset mail sends through it')
+  }
   await appendScaffoldEnv([
-    ...(mailDefinition ? scaffoldEnv(MAIL_SCAFFOLD, true) : []),
+    ...(mailSetup === 'definition' ? scaffoldEnv(MAIL_SCAFFOLD, true) : []),
     ...oauthEnvEntries(oauthProviders),
   ])
 
@@ -1657,17 +1668,19 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   )
 
   if (options.install) {
-    await installAuth(features, { migrationGenerated, oauthStateTable, mailDefinition, oauthDefinition })
+    await installAuth(features, { migrationGenerated, oauthStateTable, mailSetup, oauthDefinition })
   } else {
     consola.info('Next steps:')
     consola.info(CODEGEN_STEP)
     consola.info('  • Register AuthProvider in your createApp() providers array')
     consola.info('  • Enable sessions and CSRF by adding `auth: {}` to your createApp() options')
     consola.info('  • Import registerAuthRoutes from routes/auth.ts and call it from your routes/web.ts registrar')
-    if (includeExtras) {
-      consola.info(mailDefinition
+    if (mailSetup !== null) {
+      consola.info(mailSetup === 'definition'
         ? '  • Add the default export of config/mail.ts to your createApp() config array (used to send password reset emails)'
         : '  • Register MailProvider in your createApp() providers array (used to send password reset emails)')
+    }
+    if (includeExtras) {
       consola.info('  • Set APP_URL in your .env to the public base URL of this app — emailed links are built from it, and production refuses to send without it')
     }
     if (!migrationGenerated) {
@@ -1695,8 +1708,8 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
 }
 
 async function installAuth(
-  { includeExtras, includePassword, oauthProviders }: AuthFeatures,
-  { migrationGenerated, oauthStateTable, mailDefinition, oauthDefinition }: { migrationGenerated: boolean; oauthStateTable: boolean; mailDefinition: boolean; oauthDefinition: boolean },
+  { includePassword, oauthProviders }: AuthFeatures,
+  { migrationGenerated, oauthStateTable, mailSetup, oauthDefinition }: { migrationGenerated: boolean; oauthStateTable: boolean; mailSetup: MailSetup | null; oauthDefinition: boolean },
 ): Promise<void> {
   consola.info('Installing authentication configuration...')
 
@@ -1712,9 +1725,9 @@ async function installAuth(
 
   await wireAppProvider('AuthProvider', wiring)
 
-  if (mailDefinition) {
+  if (mailSetup === 'definition') {
     await wireConfig('mail', wiring)
-  } else if (includeExtras) {
+  } else if (mailSetup === 'provider') {
     // Core's provider goes before MailProvider (the `guren add mail`
     // convention) so `'mail'` resolves to the configured manager rather than
     // Core's empty-config default, whichever order the two commands run in.

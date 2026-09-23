@@ -430,7 +430,7 @@ task/entity/model.comment/data: failed (1383 ms)
 
 ### 一ステップ、一コミット
 
-変更はステップが挙げる要素だけにとどめ、verified になったらコミットしてください。検証を通ったステップは、担当する要素が入っているファイルとテストファイルの指紋を記録します。そのどれかが変わると、ステップの要素は `drifted` になります。後のステップがそうしたファイルに書き込むのは珍しくありません。`routes/web.ts` の既存ルートの隣に足すルート、`db/schema.ts` のテーブル、Resource のフィールドなどです。例のコピーで、`pages` ステップのあとのコミットが `CommentResource.ts` にフィールドを足しました。このファイルは `http` ステップが検証したものなので、`http` の要素の大半が drifted になりました。
+変更はステップが挙げる要素だけにとどめ、verified になったらコミットしてください。検証を通ったステップは、担当する要素が入っているファイル、要素を取り付けるファイル (アクションに振り分けるルート、ページを返すコントローラー)、テストファイルの指紋を記録します。そのどれかが変わると、ステップの要素は `drifted` になります。後のステップがそうしたファイルに書き込むのは珍しくありません。`routes/web.ts` の既存ルートの隣に足すルート、`db/schema.ts` のテーブル、Resource のフィールドなどです。例のコピーで、`pages` ステップのあとのコミットが `CommentResource.ts` にフィールドを足しました。このファイルは `http` ステップが検証したものなので、`http` の要素の大半が drifted になりました。
 
 ```text
 Routes
@@ -654,11 +654,11 @@ The decision log is committed with the plan. A waiver names this plan hash, so a
  ERROR  docs/plans/comments/plan.json is not closed: every element must be verified or waived with a reason (guren plan:waive), and these are not, each with what holds it and what moves it:
   validator.comment: drifted (Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http; changed since: app/Http/Resources/CommentResource.ts)
     Run bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/http again, since that run no longer holds; or waive it: bunx guren plan:waive docs/plans/comments/plan.json validator.comment --reason "<why>"
-  controller.comments: present (Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http, but no planned property of it matched beyond its existence and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it)
+  controller.comments: present (Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http, but no planned property of it matched beyond its existence and no verified run of a step whose behaviours reach it (task/entity/model.comment/http) holds now, so that result is not counted: run plan:verify on that step, or waive it)
     Run bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/http; or waive it: bunx guren plan:waive docs/plans/comments/plan.json controller.comments --reason "<why>"
 ```
 
-`controller.comments` は `http` の振る舞いを通してしか verified にならないので、そのステップを確かめ直せば一緒に持ち上がります。完了の状態に届いていない要素や `blocked` の要素は、`plan:verify` の前にコードや環境を直す必要があります。どの `plan:verify` の実行でも持ち上がらない要素には `plan:waive` が示されます。足りないのが届く振る舞いだけの要素には、振る舞いを足して計画を承認し直す道も示されます。ただしカラム、コマンド、side effect には waiver だけです (「要素を waive する」の節を参照してください)。すべてのステップを検証し終えたあとは `plan:next` も同じ行を表示するので、計画を閉じられない理由がエージェントにも分かります。
+`controller.comments` は `http` の振る舞いを通してしか verified にならないので、そのステップを確かめ直せば一緒に持ち上がります。完了の状態に届いていない要素や `blocked` の要素は、`plan:verify` の前にコードや環境を直す必要があります。どの `plan:verify` の実行でも持ち上がらない要素には `plan:waive` が示されます。足りないのが届く振る舞いだけの要素には、振る舞いを足して計画を承認し直す道も示されます。ただしカラム、コマンド、side effect には waiver だけです (「要素を waive する」の節を参照してください)。`plan:verify` が指紋を取れない要素にも、waiver だけが示されます。どの実行でも持ち上がらないからです。すべてのステップを検証し終えたあとは `plan:next` も同じ行を表示するので、計画を閉じられない理由がエージェントにも分かります。
 
 すべての要素が verified か waived になったら、`--dry-run` で書き込む内容を確かめられます。問題がなければ閉じます。
 

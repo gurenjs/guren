@@ -33,6 +33,7 @@ import {
 import { checkEnvExample } from '../src/app-env'
 import { loadResolvedConfig } from '../src/resolved-config'
 import { addResource, listBlueprints, runBlueprint } from '../src/blueprints'
+import { CliError } from '../src/cli-error'
 import { builtinSubCommands } from '../src/commands'
 import { runCheck } from '../src/check'
 
@@ -1283,5 +1284,49 @@ describe('oauth blueprint output', () => {
     const routes = await readFile('routes/oauth.ts', 'utf8')
     expect(routes).toContain("[OAuthController, 'redirectToProvider']")
     expect(routes).not.toContain("[OAuthController, 'redirect']")
+  })
+})
+
+// Every blueprint writes its files in one batch, so a file in the way refuses the
+// whole command: the sample event, job or mailable included, and before any wiring.
+describe('blueprints over a file that already exists', () => {
+  let workspace: TempWorkspace
+
+  beforeEach(async () => {
+    workspace = await createTempWorkspace('guren-cli-blueprint-existing-')
+  })
+
+  afterEach(async () => {
+    await workspace.cleanup()
+  })
+
+  it.each<{ blueprint: string; inTheWay: string[]; seed?: Record<string, string> }>([
+    { blueprint: 'events', inTheWay: ['app/Providers/EventProvider.ts'] },
+    { blueprint: 'mail', inTheWay: ['app/Providers/MailProvider.ts'] },
+    { blueprint: 'queue', inTheWay: ['app/Providers/QueueProvider.ts'] },
+    { blueprint: 'notifications', inTheWay: ['app/Providers/NotificationProvider.ts'] },
+    { blueprint: 'broadcasting', inTheWay: ['app/Providers/BroadcastProvider.ts'] },
+    { blueprint: 'storage', inTheWay: ['app/Services/FileStorage.ts'] },
+    { blueprint: 'attachments', inTheWay: ['app/Services/FileStorage.ts'] },
+    { blueprint: 'admin', inTheWay: ['routes/admin.ts'] },
+    { blueprint: 'oauth', inTheWay: ['routes/oauth.ts'], seed: { 'db/schema.ts': PG_SCHEMA_FIXTURE } },
+    { blueprint: 'auth', inTheWay: ['app/Models/User.ts', 'routes/auth.ts'], seed: { 'db/schema.ts': PG_SCHEMA_FIXTURE } },
+  ])('refuses $blueprint whole, naming what is in the way and writing nothing', async ({ blueprint, inTheWay, seed }) => {
+    await writeWorkspaceFiles(workspace.dir, {
+      'src/app.ts': APP_FIXTURE,
+      'routes/web.ts': DEFAULT_ROUTES_FIXTURE,
+      ...seed,
+      ...Object.fromEntries(inTheWay.map((path) => [path, 'export {}\n'])),
+    })
+    const before = await snapshotTree(workspace.dir)
+
+    const error = await runBlueprint(blueprint).catch((reason: unknown) => reason)
+
+    // scaffold-files.test.ts pins the wording; this pins which files are listed and that no name or flag is offered.
+    expect(error).toBeInstanceOf(CliError)
+    const lines = (error as CliError).message.split('\n')
+    expect(lines.slice(1, -1)).toEqual(inTheWay.map((path) => `  ${path}`))
+    expect(lines.at(-1)).toStartWith('Nothing was scaffolded. Pass --force to overwrite')
+    expect(await snapshotTree(workspace.dir)).toEqual(before)
   })
 })

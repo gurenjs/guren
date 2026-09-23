@@ -9,17 +9,17 @@ import { assertNotApiOnly } from './app-surface'
 import { CliError } from './cli-error'
 import { fileExists, readIfExists } from './discovery'
 import { makeAuth } from './make-auth'
-import { makeChannel } from './make-channel'
+import { channelFile } from './make-channel'
 import { API_ONLY_FEATURE_ALTERNATIVE, buildRouteRegistrationHint, makeFeature } from './make-feature'
 import { parseFieldsString, type FieldDefinition, type FieldType } from './fields'
 import { collectionSlug, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
 import { schemaDeclaresTable, schemaPathFor } from './schema-parser'
-import { makeEvent } from './make-event'
-import { makeJob } from './make-job'
-import { makeListener } from './make-listener'
-import { makeMail } from './make-mail'
-import { MAIL_SCAFFOLD } from './mail-scaffold'
-import { makeNotification } from './make-notification'
+import { eventFile } from './make-event'
+import { jobFile } from './make-job'
+import { listenerFile } from './make-listener'
+import { mailFile } from './make-mail'
+import { appMailBindings, MAIL_SCAFFOLD, reportKeptMail } from './mail-scaffold'
+import { notificationFile } from './make-notification'
 import { appendTableToSchema, detectSchemaDialect, ensureMysqlImports, ensurePgImports, ensureSqliteImports, insertImport } from './patch-helpers'
 import { wireProviders } from './provider-registrar'
 import { DEFAULT_ROUTES_FILE, findRouteRegistrar, wireRouteRegistrar } from './route-registrar'
@@ -175,9 +175,9 @@ export default registerAdminRoutes
     description: 'Install event infrastructure with a sample event and listener.',
     run: async (options) => {
       const writerOptions = blueprintWriterOptions(options)
-      const eventPath = await makeEvent('OrderPlaced', writerOptions)
-      const listenerPath = await makeListener('SendOrderReceipt', { ...writerOptions, event: 'OrderPlaced' })
       const created = await writeScaffoldFiles([
+        eventFile('OrderPlaced', writerOptions),
+        listenerFile('SendOrderReceipt', { ...writerOptions, event: 'OrderPlaced' }),
         scaffoldTemplateFile('events', 'app/Providers/EventProvider.ts'),
       ], writerOptions)
 
@@ -186,23 +186,28 @@ export default registerAdminRoutes
         { name: 'EventProvider' },
       ])
 
-      return [eventPath, listenerPath, ...created]
+      return created
     },
   },
   mail: {
     description: 'Install mail infrastructure with a transport switchable via MAIL_MAILER and a sample mailable.',
     run: async (options) => {
       const writerOptions = blueprintWriterOptions(options)
-      const mailPath = await makeMail('WelcomeEmail', writerOptions)
-      return [mailPath, ...(await installServiceScaffold(MAIL_SCAFFOLD, writerOptions))]
+      const existingMail = await appMailBindings()
+      const mailable = mailFile('WelcomeEmail', writerOptions)
+      if (existingMail.length > 0) {
+        const created = await writeScaffoldFiles([mailable], writerOptions)
+        await reportKeptMail(existingMail, 'only the sample mailable was written')
+        return created
+      }
+      return installServiceScaffold(MAIL_SCAFFOLD, writerOptions, [mailable])
     },
   },
   queue: {
     description: 'Install queue infrastructure with sync/memory drivers (switchable via QUEUE_CONNECTION) and a sample job.',
     run: async (options) => {
       const writerOptions = blueprintWriterOptions(options)
-      const jobPath = await makeJob('ProcessWelcomeSequence', writerOptions)
-      const created = await installServiceScaffold({
+      return installServiceScaffold({
         key: 'queue',
         coreProvider: 'QueueServiceProvider',
         provider: 'QueueProvider',
@@ -215,17 +220,15 @@ export default registerAdminRoutes
 QUEUE_CONNECTION=sync
 `,
         }],
-      }, writerOptions)
-
-      return [jobPath, ...created]
+      }, writerOptions, [jobFile('ProcessWelcomeSequence', writerOptions)])
     },
   },
   notifications: {
     description: 'Install notification infrastructure with mail/database channels and a sample notification.',
     run: async (options) => {
       const writerOptions = blueprintWriterOptions(options)
-      const notificationPath = await makeNotification('WelcomeUser', writerOptions)
       const created = await writeScaffoldFiles([
+        notificationFile('WelcomeUser', writerOptions),
         scaffoldTemplateFile('notifications', 'app/Providers/NotificationProvider.ts'),
       ], writerOptions)
 
@@ -234,7 +237,7 @@ QUEUE_CONNECTION=sync
         { name: 'NotificationProvider' },
       ])
 
-      return [notificationPath, ...created]
+      return created
     },
   },
   storage: {
@@ -257,13 +260,9 @@ STORAGE_DISK=local
     description: 'Install broadcasting infrastructure with a memory driver and sample public/private channels.',
     run: async (options) => {
       const writerOptions = blueprintWriterOptions(options)
-      const publicChannelPath = await makeChannel('Orders', { ...writerOptions, channel: 'orders' })
-      const privateChannelPath = await makeChannel('UserFeed', {
-        ...writerOptions,
-        channel: 'users.{id}.feed',
-        private: true,
-      })
       const created = await writeScaffoldFiles([
+        channelFile('Orders', { ...writerOptions, channel: 'orders' }),
+        channelFile('UserFeed', { ...writerOptions, channel: 'users.{id}.feed', private: true }),
         scaffoldTemplateFile('broadcasting', 'app/Providers/BroadcastProvider.ts'),
       ], writerOptions)
 
@@ -272,7 +271,7 @@ STORAGE_DISK=local
         { name: 'BroadcastProvider' },
       ])
 
-      return [publicChannelPath, privateChannelPath, ...created]
+      return created
     },
   },
   resource: {

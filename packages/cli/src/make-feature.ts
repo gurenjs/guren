@@ -175,8 +175,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
       { path: prototypeTypesPath(singular), contents: generatePrototypeTypes(singular, fields) },
       ...pageFiles,
     ]
-    await assertNoExistingTargets(singular, appRoot, files, options.force)
-    const created = await writeScaffoldFiles(files, writerOptions)
+    const created = await writeScaffoldFiles(files, { ...writerOptions, subject: singular })
     await ensureGurenUiTokens(appRoot)
     const appended = await appendPrototypeEntries(appRoot, { singular, collection: routeVar, routeName, variableName, fields })
     // `guren add prototype` created the fixture; this run only appended to it.
@@ -189,7 +188,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     return created
   }
 
-  const backendFiles: FeatureFile[] = [
+  const backendFiles: ScaffoldFileEntry[] = [
     validator,
     {
       path: `${appPrefix}app/Http/Resources/${singular}Resource.ts`,
@@ -202,7 +201,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
       contents: generateController(singular, collection, routeName, routeVar, variableName, fields, withAuth, withPolicy, moduleName, attachments),
     },
   ]
-  const modelFiles: FeatureFile[] = [
+  const modelFiles: ScaffoldFileEntry[] = [
     modelFile(singular, { ...writerOptions, attachments }),
     ...(options.withFactory ? [{ ...factoryFile(singular, writerOptions), flag: '--factory' }] : []),
     ...(withPolicy ? [{ ...policyFile(singular, writerOptions), flag: '--policy' }] : []),
@@ -211,8 +210,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   // At promotion the validator and pages are the prototype run's, possibly hand-edited since.
   const keptFiles = promoting && !options.force ? await existingFiles(appRoot, [validator, ...pageFiles]) : []
   const files = [...backendFiles, ...pageFiles, ...modelFiles].filter((file) => !keptFiles.includes(file))
-  await assertNoExistingTargets(singular, appRoot, files, options.force)
-  const created = await writeScaffoldFiles(files, writerOptions)
+  const created = await writeScaffoldFiles(files, { ...writerOptions, subject: singular })
   const kept = keptFiles.map((file) => resolve(appRoot, file.path))
   options.kept?.push(...kept)
 
@@ -291,37 +289,12 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   return created
 }
 
-interface FeatureFile extends ScaffoldFileEntry {
-  /** The option that added the file; a refusal offers dropping it. */
-  flag?: string
-}
-
-async function existingFiles(appRoot: string, files: readonly FeatureFile[]): Promise<FeatureFile[]> {
-  const existing: FeatureFile[] = []
+async function existingFiles(appRoot: string, files: readonly ScaffoldFileEntry[]): Promise<ScaffoldFileEntry[]> {
+  const existing: ScaffoldFileEntry[] = []
   for (const file of files) {
     if (await fileExists(appRoot, file.path)) existing.push(file)
   }
   return existing
-}
-
-/**
- * Runs before the first write because `writeScaffoldFiles` would stop partway, and names
- * every file because `--force` overwrites all of them, hand-written ones included.
- */
-async function assertNoExistingTargets(singular: string, appRoot: string, files: readonly FeatureFile[], force: boolean | undefined): Promise<void> {
-  if (force) return
-  const existing = await existingFiles(appRoot, files)
-  if (existing.length === 0) return
-
-  const one = existing.length === 1
-  // Dropping a flag is only a way out when every file in the way came from one.
-  const flags = existing.flatMap((file) => file.flag ?? [])
-  const pick = flags.length === existing.length ? `Drop ${flags.join(' and ')}, pick` : 'Pick'
-  throw new CliError([
-    `Scaffolding ${singular} would overwrite ${one ? 'a file that already exists' : `${existing.length} files that already exist`}:`,
-    ...existing.map((file) => `  ${file.path}${file.flag ? ` (${file.flag})` : ''}`),
-    `Nothing was scaffolded. ${pick} another name, or pass --force to overwrite ${one ? 'it' : 'them'}.`,
-  ].join('\n'))
 }
 
 function announcePrototypeFeature(options: { created: string[]; overwritten: string[]; patchedFixture: string | undefined; singular: string; routeName: string; routeVar: string; withAuth: boolean }): void {

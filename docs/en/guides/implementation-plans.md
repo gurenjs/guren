@@ -420,7 +420,7 @@ Generate the migration (`bunx guren make:migration --name create_comments_table`
 
 ### One step, one commit
 
-Change only the elements a step lists, and commit it once it verifies. A verified step records a fingerprint of the files that hold its elements and of its test files. When one of them changes, the step's elements read `drifted`. A later step often has good reason to write into such a file: a route beside an earlier one in `routes/web.ts`, a table in `db/schema.ts`, a field on a resource. In a copy of the example, a commit after the `pages` step added a field to `CommentResource.ts`, a file the `http` step had verified, so most elements of `http` drifted:
+Change only the elements a step lists, and commit it once it verifies. A verified step records a fingerprint of the files that hold its elements, of the files that wire them (the routes dispatching to an action, the controller returning a page), and of its test files. When one of them changes, the step's elements read `drifted`. A later step often has good reason to write into such a file: a route beside an earlier one in `routes/web.ts`, a table in `db/schema.ts`, a field on a resource. In a copy of the example, a commit after the `pages` step added a field to `CommentResource.ts`, a file the `http` step had verified, so most elements of `http` drifted:
 
 ```text
 Routes
@@ -628,11 +628,11 @@ A plan is closed when an approval names its current hash and every element it ch
  ERROR  docs/plans/comments/plan.json is not closed: every element must be verified or waived with a reason (guren plan:waive), and these are not, each with what holds it and what moves it:
   validator.comment: drifted (Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http; changed since: app/Http/Resources/CommentResource.ts)
     Run bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/http again, since that run no longer holds; or waive it: bunx guren plan:waive docs/plans/comments/plan.json validator.comment --reason "<why>"
-  controller.comments: present (Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http, but no planned property of it matched beyond its existence and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it)
+  controller.comments: present (Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http, but no planned property of it matched beyond its existence and no verified run of a step whose behaviours reach it (task/entity/model.comment/http) holds now, so that result is not counted: run plan:verify on that step, or waive it)
     Run bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/http; or waive it: bunx guren plan:waive docs/plans/comments/plan.json controller.comments --reason "<why>"
 ```
 
-`controller.comments` is verified only through a behaviour of `http`, so re-checking that step lifts it too. An element below its completion state, or `blocked`, needs the code or the environment fixed before `plan:verify`. Where no `plan:verify` run can lift an element, the line names `plan:waive`. When all the element lacks is a behaviour that reaches it, the line also offers adding one and approving the plan again, except for a column, a command or a side effect, where it names only the waiver (see Waiving). `plan:next` prints the same lines once every step is verified, so an agent at the end of the loop still sees what keeps the plan open.
+`controller.comments` is verified only through a behaviour of `http`, so re-checking that step lifts it too. An element below its completion state, or `blocked`, needs the code or the environment fixed before `plan:verify`. Where no `plan:verify` run can lift an element, the line names `plan:waive`. When all the element lacks is a behaviour that reaches it, the line also offers adding one and approving the plan again, except for a column, a command or a side effect, where it names only the waiver (see Waiving). An element `plan:verify` cannot fingerprint gets only the waiver too, since no run lifts it. `plan:next` prints the same lines once every step is verified, so an agent at the end of the loop still sees what keeps the plan open.
 
 When every element is verified or waived, `--dry-run` prints everything the close would write. Then:
 

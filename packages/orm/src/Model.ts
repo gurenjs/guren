@@ -150,6 +150,10 @@ export interface AdapterQueryOptions {
 }
 
 export type ModelWriteOptions = AdapterQueryOptions
+/** The options of `create(data, { set })` and `update(where, data, { set })` (RFC 0031). */
+export type ModelSetOptions<T extends typeof Model, S extends PlainObject> = ModelWriteOptions & SetOption<T, S>
+type SetWriteOptions = ModelWriteOptions & { set?: PlainObject }
+type WithoutSet = ModelWriteOptions & { set?: never }
 export type ModelQueryOptions = AdapterQueryOptions
 export type TransactionHandle = NonNullable<AdapterQueryOptions['trx']>
 
@@ -196,9 +200,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   /**
    * Mass-assignment allowlist. When set, any other key in `create()`/`update()`
    * input throws a MassAssignmentException rather than being discarded, so
-   * bugs and injection attempts surface; `forceCreate()`/`forceUpdate()` are
-   * the trusted-data escape. Independent of it, `id` is always stripped and
-   * `deniedFields()` always throws.
+   * bugs and injection attempts surface. A column the server chooses goes in
+   * `set`, and must stay out of this list. Independent of it, `id` is always
+   * stripped and `deniedFields()` always throws.
    */
   static fillable?: string[]
 
@@ -286,8 +290,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       first: (where) => this.first(where, { trx }),
       where,
       newQuery: () => this.newQuery({ trx }),
-      create: (data) => this.create(data, { trx }),
-      update: (where, data) => this.update(where, data, { trx }),
+      // `set` rides in the options object, and create()/update() split it back out.
+      create: ((data: TCreateFor<T>, options?: SetWriteOptions) =>
+        this.create(data, { ...options, trx } as ModelWriteOptions)) as TransactionModelScope<T>['create'],
+      update: ((where: WhereClauseFor<T>, data: Partial<TCreateFor<T>>, options?: SetWriteOptions) =>
+        this.update(where, data, { ...options, trx } as ModelWriteOptions)) as TransactionModelScope<T>['update'],
       delete: (where) => this.delete(where, { trx }),
       paginate: (options) => this.paginate(options, { trx }),
     }
@@ -429,12 +436,18 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * In order: `deniedFields()` throws, checked on the raw input so no later
-   * rule can swallow them; `id` is stripped silently; then, with `fillable`
-   * set, anything outside it throws.
+   * In order: a non-empty `set` is refused without `fillable`, or holding `id`,
+   * a denied or a fillable key (RFC 0031); `deniedFields()` throws, checked on
+   * the raw input so no later rule can swallow them; `id` is stripped silently;
+   * then, with `fillable` set, anything outside it throws. `set` is merged last.
    */
-  static filterFillable(data: PlainObject): PlainObject {
-    const denied = this.deniedFields().filter((field) => field in data)
+  static filterFillable(data: PlainObject, set?: PlainObject): PlainObject {
+    const fillableFields = this.fillable
+    const deniedFields = this.deniedFields()
+    const setKeys = set ? Object.keys(set) : []
+    if (setKeys.length > 0) this.assertSettable(setKeys, fillableFields, deniedFields)
+
+    const denied = deniedFields.filter((field) => field in data)
     if (denied.length > 0) {
       throw new MassAssignmentException(this.name, denied, { reason: 'denied' })
     }
@@ -445,14 +458,16 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       candidate = rest
     }
 
-    const fillableFields = this.fillable
     if (!fillableFields) {
       return candidate
     }
 
     const blocked = Object.keys(candidate).filter((key) => !fillableFields.includes(key))
     if (blocked.length > 0) {
-      throw new MassAssignmentException(this.name, blocked)
+      const alsoSet = blocked.filter((key) => setKeys.includes(key))
+      throw alsoSet.length > 0
+        ? new MassAssignmentException(this.name, alsoSet, { set: 'conflict' })
+        : new MassAssignmentException(this.name, blocked)
     }
 
     const filtered: PlainObject = {}
@@ -461,7 +476,24 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
         filtered[key] = candidate[key]
       }
     }
-    return filtered
+    return setKeys.length > 0 ? { ...filtered, ...set } : filtered
+  }
+
+  private static assertSettable(keys: string[], fillableFields: string[] | undefined, deniedFields: string[]): void {
+    if (!fillableFields) {
+      throw new MassAssignmentException(this.name, keys, { set: 'no-fillable' })
+    }
+    if (keys.includes('id')) {
+      throw new MassAssignmentException(this.name, ['id'], { set: 'id' })
+    }
+    const denied = keys.filter((key) => deniedFields.includes(key))
+    if (denied.length > 0) {
+      throw new MassAssignmentException(this.name, denied, { reason: 'denied' })
+    }
+    const fillable = keys.filter((key) => fillableFields.includes(key))
+    if (fillable.length > 0) {
+      throw new MassAssignmentException(this.name, fillable, { set: 'fillable' })
+    }
   }
 
   protected static async preparePersistencePayload(data: PlainObject): Promise<PlainObject> {
@@ -1077,17 +1109,35 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     >
   }
 
+  /**
+   * `set` holds the columns the server chose, such as an owner. They skip
+   * `fillable`, must not be in it, and `data` is filtered as without `set`.
+   *
+   * @example
+   * await Post.create(data, { set: { authorId: user.id } })
+   */
+  static create<T extends typeof Model, S extends PlainObject>(
+    this: T,
+    data: CreateDataFor<T, NoInfer<S>>,
+    options: ModelSetOptions<T, S>,
+  ): Promise<TRecordFor<T>>
+  // Last: `.call`/`.bind`/`Parameters<>` read the last overload, and must see the one without `set`.
+  // `set?: never`: options held in a variable with `trx` would otherwise match here and skip the checks above.
+  static create<T extends typeof Model>(this: T, data: TCreateFor<T>, writeOptions?: WithoutSet): Promise<TRecordFor<T>>
   static async create<T extends typeof Model>(
     this: T,
     data: TCreateFor<T>,
-    writeOptions?: ModelWriteOptions,
+    options?: SetWriteOptions,
   ): Promise<TRecordFor<T>> {
-    return this.runCreate(data, writeOptions, true)
+    if (options?.set === undefined) return this.runCreate(data, options, true)
+    const { set, ...writeOptions } = options
+    return this.runCreate(data, writeOptions, true, set)
   }
 
   /**
-   * Create bypassing mass-assignment protection. Trusted server-side data only
-   * (OAuth linking, seeders, system records), never raw request input.
+   * Create bypassing mass-assignment protection. Data that carries nothing from
+   * the request only (OAuth linking, seeders, system records); a server-chosen
+   * column next to request data goes in `create(data, { set })`.
    */
   static async forceCreate<T extends typeof Model>(
     this: T,
@@ -1102,9 +1152,10 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     data: TCreateFor<T>,
     writeOptions: ModelWriteOptions | undefined,
     applyFillable: boolean,
+    set?: PlainObject,
   ): Promise<TRecordFor<T>> {
     const table = this.resolveTable()
-    const filtered = applyFillable ? this.filterFillable(data) : { ...(data as PlainObject) }
+    const filtered = applyFillable ? this.filterFillable(data, set) : { ...(data as PlainObject) }
     const payload = await this.preparePersistencePayload(filtered)
 
     const lifecycle = modelLifecycle(this.name, 'create', this.hooks, this.observers)
@@ -1117,18 +1168,34 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return this.applyReadTransforms(result)
   }
 
+  /** `set` as in `create(data, { set })`. */
+  static update<T extends typeof Model, S extends PlainObject>(
+    this: T,
+    where: WhereClauseFor<T>,
+    data: Partial<CreateDataFor<T, NoInfer<S>>>,
+    options: ModelSetOptions<T, S>,
+  ): Promise<TRecordFor<T>>
+  static update<T extends typeof Model>(
+    this: T,
+    where: WhereClauseFor<T>,
+    data: Partial<TCreateFor<T>>,
+    writeOptions?: WithoutSet,
+  ): Promise<TRecordFor<T>>
   static async update<T extends typeof Model>(
     this: T,
     where: WhereClauseFor<T>,
     data: Partial<TCreateFor<T>>,
-    writeOptions?: ModelWriteOptions,
+    options?: SetWriteOptions,
   ): Promise<TRecordFor<T>> {
-    return this.runUpdate(where, data, writeOptions, true)
+    if (options?.set === undefined) return this.runUpdate(where, data, options, true)
+    const { set, ...writeOptions } = options
+    return this.runUpdate(where, data, writeOptions, true, set)
   }
 
   /**
-   * Update bypassing mass-assignment protection. Trusted server-side data only,
-   * never raw request input.
+   * Update bypassing mass-assignment protection. Data that carries nothing from
+   * the request only; a server-chosen column next to request data goes in
+   * `update(where, data, { set })`.
    */
   static async forceUpdate<T extends typeof Model>(
     this: T,
@@ -1145,6 +1212,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     data: Partial<TCreateFor<T>>,
     writeOptions: ModelWriteOptions | undefined,
     applyFillable: boolean,
+    set?: PlainObject,
   ): Promise<TRecordFor<T>> {
     const adapter = this.getAdapter()
     if (!adapter.update) {
@@ -1152,7 +1220,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
     this.assertFiltersSurvived(where, 'update')
 
-    const filtered = applyFillable ? this.filterFillable(data) : { ...(data as PlainObject) }
+    const filtered = applyFillable ? this.filterFillable(data, set) : { ...(data as PlainObject) }
     const payload = await this.preparePersistencePayload(filtered)
 
     const lifecycle = modelLifecycle(this.name, 'update', this.hooks, this.observers)
@@ -1513,6 +1581,26 @@ type TCreateFor<T extends typeof Model> = T extends { createType: infer R }
     : PlainObject
   : PlainObject
 
+// defineModel's create type carries an index signature (a plain Model base adds
+// PlainObject), which `Omit` would collapse the named columns into.
+type OmitNamed<T, K extends PropertyKey> = { [P in keyof T as P extends K ? never : P]: T[P] }
+type NamedKeys<T> = keyof { [P in keyof T as string extends P ? never : number extends P ? never : P]: T[P] }
+
+// `S` is inferred from the `set` literal and constrained only to PlainObject: a
+// constraint on the create type, with `T` inferred in the same call, widens an
+// enum column's literal. An inferred `S` gets no excess-property check, so the `never`
+// keys reject `id` and a misspelt column, and the create type's value types the
+// wrong value. A model whose create type names no key accepts any.
+type SetOption<T extends typeof Model, S> = {
+  set: S
+    & { [K in Exclude<keyof S, SettableKey<T>>]: never }
+    & { [K in Extract<keyof S, keyof TCreateFor<T>>]: TCreateFor<T>[K] }
+}
+type SettableKey<T extends typeof Model> = [SetKey<T>] extends [never] ? PropertyKey : SetKey<T>
+type SetKey<T extends typeof Model> = Exclude<NamedKeys<TCreateFor<T>>, 'id'>
+
+type CreateDataFor<T extends typeof Model, S> = OmitNamed<TCreateFor<T>, keyof S> & { [K in keyof S]?: never }
+
 type WhereClauseFor<T extends typeof Model> = WhereClause<TRecordFor<T>>
 type FieldFor<T extends typeof Model> = keyof TRecordFor<T> & string
 
@@ -1559,7 +1647,13 @@ export interface TransactionModelScope<T extends typeof Model> {
   where(field: FieldFor<T>, value: unknown): QueryBuilder<TRecordFor<T>>
   where(field: FieldFor<T>, operator: WhereOperator, value: unknown): QueryBuilder<TRecordFor<T>>
   newQuery(): QueryBuilder<TRecordFor<T>>
+  create<S extends PlainObject>(data: CreateDataFor<T, NoInfer<S>>, options: SetOption<T, S>): Promise<TRecordFor<T>>
   create(data: TCreateFor<T>): Promise<TRecordFor<T>>
+  update<S extends PlainObject>(
+    where: WhereClauseFor<T>,
+    data: Partial<CreateDataFor<T, NoInfer<S>>>,
+    options: SetOption<T, S>,
+  ): Promise<TRecordFor<T>>
   update(where: WhereClauseFor<T>, data: Partial<TCreateFor<T>>): Promise<TRecordFor<T>>
   delete(where: WhereClauseFor<T>): Promise<number | PlainObject | void>
   paginate(options?: PaginateOptions<TRecordFor<T>>): Promise<PaginatedResult<TRecordFor<T>>>

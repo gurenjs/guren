@@ -43,7 +43,7 @@ function state(detail: Partial<Pick<PlanAppDetail, 'policies' | 'sideEffects' | 
   return planAppState({
     detail: {
       routes: [],
-      mounts: { entry: 'mounted', modules: {} },
+      mounts: { entry: 'mounted', modules: {}, files: { entry: [], descriptors: {} } },
       tables: [],
       models: [],
       unparsedModelFiles: [],

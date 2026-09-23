@@ -12,7 +12,7 @@ import type { RouteDefinition } from '@guren/server'
 import type { File, Node, Statement } from '@babel/types'
 
 import { memberKeyName, unwrapTypeAssertion, propertyValue, topLevelDeclaration } from '../ast-walk'
-import { createAppOptions, hidesKeys, moduleMountState } from '../app-entry'
+import { createAppOptions, findModuleDescriptor, hidesKeys, moduleMountState } from '../app-entry'
 import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { ContextRoute } from '../context-route'
 import { accessorCallPattern, blankCommentsAndStrings, type ControllerMemberName, type ControllerMethodScan } from '../controller-methods'
@@ -160,11 +160,21 @@ export interface PlanAppSideEffectDetail extends PlanAppClassDetail {
   mentionedIn: string[]
 }
 
+export interface PlanAppMounts {
+  entry: PlanAppMount
+  modules: Record<string, PlanAppMount>
+  /**
+   * Part of what `wired` rests on: the entry `createApp()` is read from, and per module its
+   * descriptor, which names the registrar the CLI loads though no verdict here reads it.
+   */
+  files: { entry: string[]; descriptors: Record<string, string> }
+}
+
 export interface PlanAppDetail {
   routes: PlanAppRouteDetail[] | PlanAppUnreadable
   /** Set when a module's routes did not load, which leaves `routes` a lower bound. */
   routesIncomplete?: string
-  mounts: { entry: PlanAppMount; modules: Record<string, PlanAppMount> }
+  mounts: PlanAppMounts
   tables: SourcedSchemaTable[] | PlanAppUnreadable
   models: PlanAppModelDetail[] | PlanAppUnreadable
   /** Files under a models directory that yielded no model class, app-relative. */
@@ -631,14 +641,22 @@ function registrarExport(ast: File): string | null {
  * executing the entry registrar and from a directory scan of `modules/`, neither of
  * which asks the application; this reads the entry's `routes` and `modules` options.
  */
-async function mountDetail(root: string, cache: ParseCache, input: PlanAppDetailInput): Promise<PlanAppDetail['mounts']> {
+async function mountDetail(root: string, cache: ParseCache, input: PlanAppDetailInput): Promise<PlanAppMounts> {
   const modules = unique(input.provenance.filter((name): name is string => name !== null))
-  const all = (mount: PlanAppMount): PlanAppDetail['mounts'] => ({
+  const [entryPath, descriptors] = await Promise.all([
+    resolveAppEntry(root),
+    Promise.all(modules.map((name) => findModuleDescriptor(root, resolve(root, 'modules', name)))),
+  ])
+  const files: PlanAppMounts['files'] = {
+    entry: entryPath === null ? [] : [entryPath],
+    descriptors: Object.fromEntries(modules.flatMap((name, index) => (descriptors[index] ? [[name, descriptors[index]]] : []))),
+  }
+  const all = (mount: PlanAppMount): PlanAppMounts => ({
     entry: mount,
     modules: Object.fromEntries(modules.map((name) => [name, mount])),
+    files,
   })
 
-  const entryPath = await resolveAppEntry(root)
   if (entryPath === null) return all({ unconfirmed: 'the application has no src/app.ts or app.ts to read createApp() from' })
   const parsed = await cache.get(resolve(root, entryPath))
   const options = parsed ? createAppOptions(parsed.ast.program) : null
@@ -658,6 +676,7 @@ async function mountDetail(root: string, cache: ParseCache, input: PlanAppDetail
   return {
     entry: await entryMount(),
     modules: Object.fromEntries(modules.map((name) => [name, moduleMount(name)])),
+    files,
   }
 
   async function entryMount(): Promise<PlanAppMount> {

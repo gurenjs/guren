@@ -1,5 +1,5 @@
-import type { WriterOptions } from './utils'
-import { scaffoldFile } from './utils'
+import type { ScaffoldFileEntry, WriterOptions } from './utils'
+import { scaffoldFileEntry, writeScaffoldFile } from './utils'
 
 const JOBS_DIR = 'app/Jobs'
 
@@ -28,7 +28,12 @@ export class ${className} extends Job<${className}Payload> {
 }
 
 export async function makeJob(name: string, options: WriterOptions = {}): Promise<string> {
-  return scaffoldFile(name, {
+  const { path, contents } = jobFile(name, options)
+  return writeScaffoldFile(path, contents, options)
+}
+
+export function jobFile(name: string, options: WriterOptions = {}): ScaffoldFileEntry {
+  return scaffoldFileEntry(name, {
     dir: JOBS_DIR,
     suffix: 'Job',
     template: ({ normalizedName }) => jobTemplate(normalizedName),

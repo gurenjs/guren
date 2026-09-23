@@ -174,7 +174,7 @@ construction rather than by five `if` statements.
 import { defineModel, belongsTo, hasMany, type WithRelations } from '@guren/orm'
 import { User } from './User'                      // static import; the thunk below defers the cycle
 
-export class Post extends defineModel(posts, { fillable: ['title', 'body', 'authorId'] }) {
+export class Post extends defineModel(posts, { fillable: ['title', 'body'] }) {
   static relations = {
     author: belongsTo(() => User, 'authorId'),          // ownerKey defaults to 'id'
   }
@@ -186,6 +186,9 @@ export class User extends defineModel(users) {
   }
 }
 ```
+
+**Amended by RFC 0031:** the example listed `authorId` in `fillable`. An owner
+column stays out of it and is written with `create(data, { set })`.
 
 The descriptors are branded objects: the type carries the related model and
 the key names, the value carries what `getRelationDefinitions()` needs:

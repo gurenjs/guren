@@ -15,7 +15,7 @@ import { planHash } from '../src/plan/identity'
 import { PlanSchema } from '../src/plan/schema'
 import { PLAN_STATE_VERSION, planDigest, type PlanStepRecord } from '../src/plan/state'
 import { derivePlanTasks } from '../src/plan/tasks'
-import { createTempRoot, writeWorkspaceFiles } from './helpers'
+import { CAN_DENY_FILE_READS, createTempRoot, writeWorkspaceFiles } from './helpers'
 import { loadApprovedCommentsPlan, loadCommentsPlan, writePlanVerifyApp } from './plan-fixture'
 
 // Each application has a directory of its own: Bun keys an imported routes file on its path.
@@ -155,7 +155,7 @@ describe('guren check --plan', () => {
       expect(files.map((path) => path.slice(dir.length + 1))).toEqual(['comments.plan.json', 'docs/plans/status/plan.json', 'docs/plans/tags.plan.json'])
     })
 
-    test('should report a docs/plans directory that will not list, rather than throw', async () => {
+    test.skipIf(!CAN_DENY_FILE_READS)('should report a docs/plans directory that will not list, rather than throw', async () => {
       const dir = await createApp('eacces')
       await writeWorkspaceFiles(dir, { 'docs/plans/tags.plan.json': '{}' })
       await chmod(join(dir, 'docs/plans'), 0o000)
