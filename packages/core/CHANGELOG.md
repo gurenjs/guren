@@ -1,5 +1,98 @@
 # @guren/core
 
+## 1.21.0
+
+### Minor Changes
+
+- 002d087: A module can carry its own config definitions (RFC 0002, RFC 0027 §2). `defineModule({ config: [...] })` takes the same definitions as `createApp({ config })`, conventionally from `modules/<name>/config/<key>.ts`. The app's definitions bind first, then each module's in `createApp({ modules })` order, through the one `ConfigServiceProvider`, which now also registers when only a module carries definitions. Keys stay app-wide: a key the app and a module both define, or two modules define, fails the boot naming both places (`"oauth" has two config definitions, at createApp({ config })[3] and the "auth" module's config[0]`). The duplicate-key error for two root definitions is reworded to the same shape. `Application.configDefinitions` now includes the modules' definitions after the root's, and `Application.configEntries` (typed `ConfiguredDefinition`, now exported) carries where each was listed. `GurenModule.config` is optional, so a module literal built without `defineModule()` still typechecks.
+
+### Patch Changes
+
+- 002d087: Consume password reset and email verification tokens atomically before invoking application updates. Replace tokens per normalized email atomically so concurrent reissuance leaves only one valid token. Memory and Redis stores implement the new operations; custom stores must implement `replace` and `consume` to use the issuance and completion helpers. Failed updates require a new token.
+
+  Generate password reset controllers that use the atomic completion helper. The helper only requires a provider's credential lookup, allowing applications to use their existing record types.
+
+- 002d087: `@guren/core/internal/deploy-build` exports `BUN_DEPLOY_MINIFY`, the `Bun.build` minify options the Lambda and Vercel builds share (`keepNames` included), and `renamedNameKeyedClasses` / `reportRenamedNameKeyedClasses`, which find a job, event, notification or agent a bundle renamed to `<Name><n>` because another module declares the same top-level name.
+- 002d087: The Lambda and Vercel deploy builds stub `mysql2/promise` with only `createPool` (the name drizzle imports) when the app declares a different dialect. Application code importing any other name (`createConnection`, `escape`, a `Connection` type, …) failed `bun build` with "No matching export in \"guren-lambda-stub:mysql2/promise\"" (`guren-vercel-stub:` on Vercel), the exact failure the stub exists to prevent. `SQL_CLIENT_MODULES` in `@guren/core/internal/deploy-build` now stubs the module's whole public API.
+- 002d087: Isolate concurrent container scopes and make Redis queue transitions atomic. Fence stale reservations and renew active leases while handlers run. Jobs can pass `this.signal` to cancellable I/O; timeouts request cancellation and retries wait for the handler to settle. A handler that completes after its timeout is acknowledged rather than retried, a failed lease renewal is retried at the next heartbeat, and a lease another worker took is reported per job without stopping the worker. `SqsDriver` renews message visibility while a job runs (`visibilityTimeout` option) and `SqsAdapter.changeMessageVisibility` may resolve `false` for an expired receipt. Worker lifecycle state is reset after driver failures.
+
+  Remove the CLI's runtime dependency on the core facade by sharing registration conventions below both packages. Document queue delivery guarantees, mass-assignment boundaries and the supported runtime baseline.
+
+- 002d087: The Lambda and Vercel builds' renamed-class warning (`reportRenamedNameKeyedClasses`) also covers models, including ones built with `Attachable(...)` or `SoftDeletes(...)`. When another module declares the same top-level name, Bun bundles the model as `<Name>2`, and attachments and `morphMany` then store that name while `Model.morphMap` resolves the source name, so the two stop matching within one deploy. An app model named `Channel` can hit this when broadcasting is in the bundle, since `@guren/server` declares a top-level `Channel` there. A model has no name to pin, so the warning asks for a new class name. The warning now also names only the declaration whose base the numbered class extends, so a dependency's renamed class is not reported as the app's. A base resolves through the file's named imports: an aliased `import { Job as QueuedJob } from '@guren/core'` is recognized, and an app class that shares a framework base's name (a calendar `Event` model) is read as the app's own. An `extends` clause on the next line and a bundled member-expression base are read too.
+- 002d087: Protect SQLite transaction isolation, reject unsupported bulk-write pagination, and honor soft deletes through query builders. Preserve concurrent cache counters, expiration deadlines, tag namespaces, rate-limit admission, and once-listener execution. Apply scheduler timezones, validate cron fields, find leap-day occurrences, and encode storage URL paths. Serialize single-attachment replacements within a process and support a shared collection lock across processes.
+
+  Tagged caches create tag namespaces with the store's atomic `add()` when it has one; a custom store without it keeps the previous non-atomic behavior. The file store locks only its read-modify-write operations (`add()`, `increment()`, `decrement()`), and takes over a lock still held after five seconds, so a crashed process no longer leaves a key unusable. Bulk writes with limit, offset, or ordering now throw rather than silently ignoring those options.
+
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [0fdf11f]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+  - @guren/cli@2.27.0
+  - @guren/server@2.26.0
+  - @guren/orm@2.12.0
+
 ## 1.20.1
 
 ### Patch Changes
