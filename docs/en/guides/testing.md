@@ -415,3 +415,12 @@ bunx guren make:test posts/PostController --runner bun
 
 > [!NOTE]
 > Framework packages use Bun's native test runner (`bun:test`). Example apps and React components use Vitest with jsdom. Keep the runners separate to get fast feedback from Bun for framework code and realistic DOM behavior for SPA tests.
+
+### File uploads under jsdom
+
+Under Vitest's `jsdom` environment, a test that posts a `File` inside a `FormData` body (for example through `createControllerContext(url, { method: 'POST', body: formData })` to an action that calls `this.file()`) hangs until its timeout and reports no error. jsdom replaces `File` and `Blob` with its own classes, and undici's multipart encoder never finishes reading them, so `formData()` never resolves. String-only forms are not affected. Controller tests render no DOM, so switch the file to the Node environment with a comment on its first line:
+
+```ts
+// @vitest-environment node
+import { describe, expect, it } from 'vitest'
+```

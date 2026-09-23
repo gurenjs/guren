@@ -437,3 +437,9 @@ configureAttachments({ table: attachments, storage: () => storage, disk: 'media'
 const record = await Post.attach(post.id, 'cover', new File([bytes], 'cover.png'))
 expect(await storage.disk('media').exists(record.path)).toBe(true)
 ```
+
+Vitest の `jsdom` 環境で `createControllerContext()` から `File` をアップロードするコントローラーテストは、エラーを出さずにタイムアウトまで止まります。jsdom の `File` は undici の multipart エンコーダーが読み取れず、`formData()` が解決しないためです。こうしたテストファイルは、先頭行に次のコメントを書いて Node 環境で実行してください。
+
+```ts
+// @vitest-environment node
+```

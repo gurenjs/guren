@@ -193,6 +193,12 @@ await app
 
 - `vi.mock is not a function` が表示される場合、そのテストは Bun で実行されています。上記の Vitest コマンドに切り替えてください。
 - `ReferenceError: document is not defined` は、DOM 依存のテストが jsdom の外で実行されていることを示しています。Vitest ランナーを使うか、jsdom を明示的に設定してください。
+- `FormData` に `File` を入れて送るテストがエラーなしでタイムアウトまで止まる場合は、jsdom 環境が原因です。`createControllerContext(url, { method: 'POST', body: formData })` で `this.file()` を呼ぶアクションをテストすると起きます。jsdom は `File` と `Blob` を独自のクラスに置き換えます。undici の multipart エンコーダーはこのクラスを読み終えられず、`formData()` が解決しません。文字列だけのフォームは影響を受けません。コントローラーテストは DOM を描画しないので、ファイルの先頭行に次のコメントを書いて Node 環境で実行してください。
+
+```ts
+// @vitest-environment node
+import { describe, expect, it } from 'vitest'
+```
 
 ランナーを分けることで、フレームワークコードには Bun の高速なフィードバックを、SPA テストにはリアルな DOM 動作を、それぞれ確保できます。
 
