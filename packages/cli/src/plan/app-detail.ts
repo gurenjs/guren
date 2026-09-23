@@ -646,6 +646,7 @@ async function mountDetail(root: string, cache: ParseCache, input: PlanAppDetail
 
   const imports = importsByLocal(parsed.ast.program.body)
   const optionsHideKeys = hidesKeys(options)
+  const routesMethod = options.properties.some((property) => property.type === 'ObjectMethod' && memberKeyName(property) === 'routes')
   const mountState = (name: string) => moduleMountState(options, parsed.ast.program, root, resolve(root, entryPath), resolve(root, 'modules', name))
   const importedFile = (node: Node | null | undefined): { base: string; imported: string } | null => {
     const value = node ? unwrapTypeAssertion(node) : undefined
@@ -663,7 +664,7 @@ async function mountDetail(root: string, cache: ParseCache, input: PlanAppDetail
     if (input.routesFile === undefined) return { unconfirmed: 'the application has no routes entry file' }
     const declared = propertyValue(options, 'routes')
     if (declared === undefined) {
-      if (options.properties.some((property) => property.type === 'ObjectMethod' && memberKeyName(property) === 'routes')) {
+      if (routesMethod) {
         return { unconfirmed: `createApp({ routes }) in ${entryPath} is not a registrar imported from a file` }
       }
       return { unconfirmed: optionsHideKeys ? `createApp() in ${entryPath} spreads its options or computes a key, which may carry routes` : `createApp() in ${entryPath} passes no routes` }
