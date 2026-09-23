@@ -97,15 +97,14 @@ export function writeRoot(options: WriterOptions): string {
   return resolveAppRoot(options)
 }
 
-/** `writeFileSafe` for generated scaffolds: containment-checked. */
+/** A batch of one, so a single-file generator refuses an existing file as a batch does. */
 export async function writeScaffoldFile(
   relativePath: string,
   contents: string,
   options: WriterOptions = {},
 ): Promise<string> {
-  const cwd = writeRoot(options)
-  assertScaffoldPath(relativePath, cwd)
-  return writeFileSafe(relativePath, contents, { ...options, cwd })
+  const [written] = await writeScaffoldFiles([{ path: relativePath, contents }], options)
+  return written!
 }
 
 export async function writeFileSafe(relativePath: string, contents: string, options: WriterOptions = {}): Promise<string> {
@@ -231,8 +230,8 @@ export interface ScaffoldFileEntry {
 
 /**
  * `lstat`, not `access`: a `wx` write refuses a dangling symlink, so a probe that followed
- * it would pass a path the write then stops on. Anything but ENOENT is thrown, not read as
- * absent. Local to avoid a cycle: discovery.ts imports from this module.
+ * it would pass a path the write then stops on. A probe that cannot answer throws, so the
+ * batch stops before its first write. Local to avoid a cycle: discovery.ts imports this module.
  */
 async function pathExists(path: string): Promise<boolean> {
   try {
@@ -255,7 +254,7 @@ export type ScaffoldFilesOptions = WriterOptions & {
 }
 
 /**
- * `writeScaffoldFile` over a batch. Before the first write every path is checked for
+ * `writeFileSafe` for generated scaffolds. Before the first write every path is checked for
  * containment, then, unless `force`, for existence: an existing file is skipped under
  * `skipExisting` and otherwise refuses the whole batch. `wx` on each write still stops
  * one that appears after the probe.
@@ -271,10 +270,10 @@ export async function writeScaffoldFiles(
   }
 
   const existing: ScaffoldFileEntry[] = []
-  if (!options.force) {
-    for (const entry of entries) {
-      if (await pathExists(resolve(cwd, entry.path))) existing.push(entry)
-    }
+  const pending: ScaffoldFileEntry[] = []
+  for (const entry of entries) {
+    if (!options.force && (await pathExists(resolve(cwd, entry.path)))) existing.push(entry)
+    else pending.push(entry)
   }
   if (existing.length > 0 && !options.skipExisting) {
     throw existingTargetsError(existing, options.subject)
@@ -285,8 +284,7 @@ export async function writeScaffoldFiles(
 
   const created: string[] = []
 
-  for (const entry of entries) {
-    if (existing.includes(entry)) continue
+  for (const entry of pending) {
     created.push(await writeFileSafe(entry.path, entry.contents, { ...options, cwd }))
   }
 
@@ -296,14 +294,13 @@ export async function writeScaffoldFiles(
 /** Names every file in the way, because `--force` overwrites all of them, hand-written ones included. */
 function existingTargetsError(existing: readonly ScaffoldFileEntry[], subject: string | undefined): CliError {
   const one = existing.length === 1
-  const flags = [...new Set(existing.flatMap((entry) => entry.flag ?? []))]
-  const remedies = [
+  const force = `pass --force to overwrite ${one ? 'it' : 'them'}`
+  const ways = [
     // Dropping a flag is only a way out when every file in the way came from one.
-    ...(existing.every((entry) => entry.flag) ? [`drop ${flags.join(' and ')}`] : []),
+    ...(existing.every((entry) => entry.flag) ? [`drop ${[...new Set(existing.map((entry) => entry.flag))].join(' and ')}`] : []),
     ...(subject ? ['pick another name'] : []),
-    `pass --force to overwrite ${one ? 'it' : 'them'}`,
   ]
-  const remedy = remedies.length === 1 ? remedies[0]! : `${remedies.slice(0, -1).join(', ')}, or ${remedies.at(-1)}`
+  const remedy = ways.length > 0 ? `${ways.join(', ')}, or ${force}` : force
   return new CliError([
     `Scaffolding ${subject ? `${subject} ` : ''}would overwrite ${one ? 'a file that already exists' : `${existing.length} files that already exist`}:`,
     ...existing.map((entry) => `  ${entry.path}${entry.flag ? ` (${entry.flag})` : ''}`),
@@ -311,7 +308,7 @@ function existingTargetsError(existing: readonly ScaffoldFileEntry[], subject: s
   ].join('\n'))
 }
 
-/** What `scaffoldFile` writes, for a caller that checks every target before its first write. */
+/** What `scaffoldFile` writes, for a caller writing it in a `writeScaffoldFiles` batch. */
 export function scaffoldFileEntry(name: string, config: ScaffoldConfig, options: WriterOptions = {}): ScaffoldFileEntry {
   const { className, fileName } = resourceName(name)
   const normalizedName = config.suffix ? ensureSuffix(className, config.suffix) : className

@@ -157,8 +157,9 @@ API アプリをフルスタック化するときは、先に `@guren/inertia-cl
 複数のファイルを書き出すほかのコマンドも、最初の書き込みの前に同じ確認をして中断します。
 対象は `make:auth`、`make:module`、`make:ai-agent`(`--test` がフラグにあたります)、
 `deploy`、そして `add` の各ブループリントで、サンプルのイベント・ジョブ・Mailable も
-含みます。途中まで入ったものを再実行で補うためのブループリント(`add session`、
-`add schedule`、`add ai`、`add prototype`)は、既存のファイルを残して残りだけを書きます。
+含みます。ファイルを1つだけ書く `make:*` コマンドも同じ文言で中断します。途中まで
+入ったものを再実行で補うためのブループリント(`add session`、`add cache`、`add schedule`、
+`add ai`、`add prototype`)は、既存のファイルを残して残りだけを書きます。
 
 ## 主要コマンド
 

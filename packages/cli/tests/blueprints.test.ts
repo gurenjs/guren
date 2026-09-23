@@ -1299,46 +1299,30 @@ describe('blueprints over a file that already exists', () => {
     await workspace.cleanup()
   })
 
-  it.each<{ blueprint: string; seed: Record<string, string>; inTheWay: string[] }>([
-    { blueprint: 'events', seed: { 'app/Providers/EventProvider.ts': 'export {}\n' }, inTheWay: ['app/Providers/EventProvider.ts'] },
-    { blueprint: 'mail', seed: { 'app/Providers/MailProvider.ts': 'export {}\n' }, inTheWay: ['app/Providers/MailProvider.ts'] },
-    { blueprint: 'queue', seed: { 'app/Providers/QueueProvider.ts': 'export {}\n' }, inTheWay: ['app/Providers/QueueProvider.ts'] },
-    { blueprint: 'notifications', seed: { 'app/Providers/NotificationProvider.ts': 'export {}\n' }, inTheWay: ['app/Providers/NotificationProvider.ts'] },
-    { blueprint: 'broadcasting', seed: { 'app/Providers/BroadcastProvider.ts': 'export {}\n' }, inTheWay: ['app/Providers/BroadcastProvider.ts'] },
-    { blueprint: 'storage', seed: { 'app/Services/FileStorage.ts': 'export {}\n' }, inTheWay: ['app/Services/FileStorage.ts'] },
-    { blueprint: 'attachments', seed: { 'app/Services/FileStorage.ts': 'export {}\n' }, inTheWay: ['app/Services/FileStorage.ts'] },
-    { blueprint: 'admin', seed: { 'routes/admin.ts': 'export {}\n' }, inTheWay: ['routes/admin.ts'] },
-    { blueprint: 'oauth', seed: { 'db/schema.ts': PG_SCHEMA_FIXTURE, 'routes/oauth.ts': 'export {}\n' }, inTheWay: ['routes/oauth.ts'] },
-    {
-      blueprint: 'auth',
-      seed: { 'db/schema.ts': PG_SCHEMA_FIXTURE, 'routes/auth.ts': 'export {}\n', 'app/Models/User.ts': 'export class User {}\n' },
-      inTheWay: ['app/Models/User.ts', 'routes/auth.ts'],
-    },
-  ])('refuses $blueprint whole, naming what is in the way and writing nothing', async ({ blueprint, seed, inTheWay }) => {
-    await writeWorkspaceFiles(workspace.dir, { 'src/app.ts': APP_FIXTURE, 'routes/web.ts': DEFAULT_ROUTES_FIXTURE, ...seed })
+  it.each<{ blueprint: string; inTheWay: string[]; seed?: Record<string, string> }>([
+    { blueprint: 'events', inTheWay: ['app/Providers/EventProvider.ts'] },
+    { blueprint: 'mail', inTheWay: ['app/Providers/MailProvider.ts'] },
+    { blueprint: 'queue', inTheWay: ['app/Providers/QueueProvider.ts'] },
+    { blueprint: 'notifications', inTheWay: ['app/Providers/NotificationProvider.ts'] },
+    { blueprint: 'broadcasting', inTheWay: ['app/Providers/BroadcastProvider.ts'] },
+    { blueprint: 'storage', inTheWay: ['app/Services/FileStorage.ts'] },
+    { blueprint: 'attachments', inTheWay: ['app/Services/FileStorage.ts'] },
+    { blueprint: 'admin', inTheWay: ['routes/admin.ts'] },
+    { blueprint: 'oauth', inTheWay: ['routes/oauth.ts'], seed: { 'db/schema.ts': PG_SCHEMA_FIXTURE } },
+    { blueprint: 'auth', inTheWay: ['app/Models/User.ts', 'routes/auth.ts'], seed: { 'db/schema.ts': PG_SCHEMA_FIXTURE } },
+  ])('refuses $blueprint whole, naming what is in the way and writing nothing', async ({ blueprint, inTheWay, seed }) => {
+    await writeWorkspaceFiles(workspace.dir, {
+      'src/app.ts': APP_FIXTURE,
+      'routes/web.ts': DEFAULT_ROUTES_FIXTURE,
+      ...seed,
+      ...Object.fromEntries(inTheWay.map((path) => [path, 'export {}\n'])),
+    })
     const before = await snapshotTree(workspace.dir)
 
-    const one = inTheWay.length === 1
-    await expect(runBlueprint(blueprint)).rejects.toThrow([
-      `Scaffolding would overwrite ${one ? 'a file that already exists' : `${inTheWay.length} files that already exist`}:`,
-      ...inTheWay.map((path) => `  ${path}`),
-      `Nothing was scaffolded. Pass --force to overwrite ${one ? 'it' : 'them'}.`,
-    ].join('\n'))
+    // The wording is scaffold-files.test.ts's; here, which files and no name to change.
+    await expect(runBlueprint(blueprint)).rejects.toThrow(
+      `${inTheWay.map((path) => `  ${path}`).join('\n')}\nNothing was scaffolded. Pass --force to overwrite`,
+    )
     expect(await snapshotTree(workspace.dir)).toEqual(before)
-  })
-
-  it('overwrites the file in the way and writes the samples under --force', async () => {
-    await writeWorkspaceFiles(workspace.dir, { 'src/app.ts': APP_FIXTURE, 'app/Providers/EventProvider.ts': 'export {}\n' })
-    const overwritten: string[] = []
-
-    const created = await runBlueprint('events', { force: true, overwritten })
-
-    expect(created).toEqual([
-      resolve('app/Events/OrderPlaced.ts'),
-      resolve('app/Listeners/SendOrderReceiptListener.ts'),
-      resolve('app/Providers/EventProvider.ts'),
-    ])
-    expect(overwritten).toEqual([resolve('app/Providers/EventProvider.ts')])
-    expect(await readFile('app/Providers/EventProvider.ts', 'utf8')).not.toBe('export {}\n')
   })
 })

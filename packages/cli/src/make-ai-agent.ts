@@ -11,6 +11,7 @@ import {
   safeModuleName,
   splitCommaList,
   writeScaffoldFiles,
+  writerOptionsFrom,
   type ScaffoldFileEntry,
   type WriterOptions,
 } from './utils'
@@ -70,7 +71,7 @@ export async function makeAiAgent(name: string, options: MakeAiAgentOptions = {}
     })
   }
 
-  const files = await writeScaffoldFiles(entries, { force: options.force, overwritten: options.overwritten, cwd, subject: className })
+  const files = await writeScaffoldFiles(entries, { ...writerOptionsFrom(options), subject: className })
   return { files, notes }
 }
 

@@ -3,7 +3,7 @@ import { mkdtemp, readdir, readFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { CliError } from '../src/cli-error'
-import { writeScaffoldFiles, type ScaffoldFileEntry, type ScaffoldFilesOptions } from '../src/utils'
+import { writeScaffoldFile, writeScaffoldFiles, type ScaffoldFileEntry, type ScaffoldFilesOptions } from '../src/utils'
 import { captureInfos, snapshotTree, writeWorkspaceFiles } from './helpers'
 
 const ENTRIES: ScaffoldFileEntry[] = [
@@ -40,40 +40,65 @@ describe('writeScaffoldFiles over files that already exist', () => {
     expect(await snapshotTree(dir)).toEqual(before)
   })
 
-  it.each<{ name: string; entries: ScaffoldFileEntry[]; options: ScaffoldFilesOptions; remedy: string }>([
+  it.each<{ name: string; entries: ScaffoldFileEntry[]; options: ScaffoldFilesOptions; message: string[] }>([
     {
       name: 'offers another name when the command was given one',
       entries: ENTRIES.slice(0, 1),
       options: { subject: 'Post' },
-      remedy: 'Pick another name, or pass --force to overwrite it.',
+      message: [
+        'Scaffolding Post would overwrite a file that already exists:',
+        '  app/Models/Post.ts',
+        'Nothing was scaffolded. Pick another name, or pass --force to overwrite it.',
+      ],
     },
     {
       name: 'offers dropping the flags when every file in the way came from one',
       entries: [{ ...ENTRIES[0]!, flag: '--policy' }, { ...ENTRIES[1]!, flag: '--test' }],
       options: {},
-      remedy: 'Drop --policy and --test, or pass --force to overwrite them.',
+      message: [
+        'Scaffolding would overwrite 2 files that already exist:',
+        '  app/Models/Post.ts (--policy)',
+        '  config/mail.ts (--test)',
+        'Nothing was scaffolded. Drop --policy and --test, or pass --force to overwrite them.',
+      ],
     },
     {
       name: 'names a flag once however many of its files are in the way',
       entries: [{ ...ENTRIES[0]!, flag: '--test' }, { ...ENTRIES[1]!, flag: '--test' }],
       options: { subject: 'Post' },
-      remedy: 'Drop --test, pick another name, or pass --force to overwrite them.',
+      message: [
+        'Scaffolding Post would overwrite 2 files that already exist:',
+        '  app/Models/Post.ts (--test)',
+        '  config/mail.ts (--test)',
+        'Nothing was scaffolded. Drop --test, pick another name, or pass --force to overwrite them.',
+      ],
     },
     {
       name: 'offers no flag when one file in the way came from none',
       entries: [{ ...ENTRIES[0]!, flag: '--test' }, ENTRIES[1]!],
       options: {},
-      remedy: 'Pass --force to overwrite them.',
+      message: [
+        'Scaffolding would overwrite 2 files that already exist:',
+        '  app/Models/Post.ts (--test)',
+        '  config/mail.ts',
+        'Nothing was scaffolded. Pass --force to overwrite them.',
+      ],
     },
-  ])('$name', async ({ entries, options, remedy }) => {
+  ])('$name', async ({ entries, options, message }) => {
     await writeWorkspaceFiles(dir, Object.fromEntries(entries.map((entry) => [entry.path, '// mine\n'])))
 
-    const error = await writeScaffoldFiles(entries, { ...options, cwd: dir }).catch((reason: unknown) => reason)
+    await expect(writeScaffoldFiles(entries, { ...options, cwd: dir })).rejects.toThrow(message.join('\n'))
+  })
 
-    const lines = (error as CliError).message.split('\n')
-    expect(lines[0]).toStartWith(options.subject ? `Scaffolding ${options.subject} would overwrite` : 'Scaffolding would overwrite')
-    expect(lines.slice(1, -1)).toEqual(entries.map((entry) => `  ${entry.path}${entry.flag ? ` (${entry.flag})` : ''}`))
-    expect(lines.at(-1)).toBe(`Nothing was scaffolded. ${remedy}`)
+  it('refuses a single-file write in the same words', async () => {
+    await writeWorkspaceFiles(dir, { 'config/mail.ts': '// mine\n' })
+
+    await expect(writeScaffoldFile('config/mail.ts', 'export default {}\n', { cwd: dir })).rejects.toThrow([
+      'Scaffolding would overwrite a file that already exists:',
+      '  config/mail.ts',
+      'Nothing was scaffolded. Pass --force to overwrite it.',
+    ].join('\n'))
+    expect(await readFile(join(dir, 'config/mail.ts'), 'utf8')).toBe('// mine\n')
   })
 
   // `wx` refuses a dangling symlink, so a probe that followed it (`access`) would let the

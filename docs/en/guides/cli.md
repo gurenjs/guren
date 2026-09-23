@@ -157,10 +157,10 @@ pages and validator the prototype run wrote, so those never count.
 
 Every other command that writes several files refuses the same way before its first
 write: `make:auth`, `make:module`, `make:ai-agent` (where `--test` is the flag),
-`deploy`, and the `add` blueprints, their sample event, job or mailable included. The
-blueprints meant to be re-run to repair a partial install (`add session`,
-`add schedule`, `add ai`, `add prototype`) keep the files already there and write the
-rest instead.
+`deploy`, and the `add` blueprints, their sample event, job or mailable included. A
+single-file `make:*` command refuses in the same words. The blueprints meant to be
+re-run to repair a partial install (`add session`, `add cache`, `add schedule`,
+`add ai`, `add prototype`) keep the files already there and write the rest instead.
 
 ## Core Commands
 
