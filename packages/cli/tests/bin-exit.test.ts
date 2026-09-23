@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
-import { copyFile, mkdir, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 import { CLI_BIN_PATH, SERVER_DIST_ENTRY, assertWorkspaceBuilt, createTempRoot, linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
@@ -26,29 +26,25 @@ const ARCH_VIOLATION: Record<string, string> = {
 }
 
 const HARD_TIMEOUT_MS = 20_000
+const TEST_TIMEOUT_MS = HARD_TIMEOUT_MS + 5_000
 
 interface Run {
   exitCode: number | null
   stdout: string
-  stderr: string
   killed: boolean
 }
 
 async function runBin(args: string[], cwd: string): Promise<Run> {
   assertWorkspaceBuilt([SERVER_DIST_ENTRY])
-  const proc = Bun.spawn(['bun', CLI_BIN_PATH, ...args], { cwd, stdout: 'pipe', stderr: 'pipe' })
-  let killed = false
-  const timer = setTimeout(() => {
-    killed = true
-    proc.kill('SIGKILL')
-  }, HARD_TIMEOUT_MS)
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ])
-  clearTimeout(timer)
-  return { exitCode: killed ? null : exitCode, stdout, stderr, killed }
+  const proc = Bun.spawn(['bun', CLI_BIN_PATH, ...args], {
+    cwd,
+    stdout: 'pipe',
+    stderr: 'ignore',
+    timeout: HARD_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
+  })
+  const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
+  return { exitCode: proc.exitCode, stdout, killed: proc.signalCode === 'SIGKILL' }
 }
 
 describe('guren exits after a command that imported app code holding a handle open', () => {
@@ -66,7 +62,7 @@ describe('guren exits after a command that imported app code holding a handle op
   })
 
   afterAll(async () => {
-    await Bun.$`rm -rf ${root}`.quiet().nothrow()
+    await rm(root, { recursive: true, force: true })
   })
 
   it('plan:status prints its report and exits 0', async () => {
@@ -75,7 +71,7 @@ describe('guren exits after a command that imported app code holding a handle op
     expect(run.killed).toBe(false)
     expect(run.exitCode).toBe(0)
     expect(JSON.parse(run.stdout)).toHaveProperty('elements')
-  }, HARD_TIMEOUT_MS + 5_000)
+  }, TEST_TIMEOUT_MS)
 
   it('route:list prints the route the module registered and exits 0', async () => {
     const run = await runBin(['route:list', '--app', app, '--format', 'json'], app)
@@ -83,7 +79,7 @@ describe('guren exits after a command that imported app code holding a handle op
     expect(run.killed).toBe(false)
     expect(run.exitCode).toBe(0)
     expect(JSON.stringify(JSON.parse(run.stdout))).toContain('posts.index')
-  }, HARD_TIMEOUT_MS + 5_000)
+  }, TEST_TIMEOUT_MS)
 
   it('keeps the exit code a command set through process.exitCode', async () => {
     // `check --ci` loads the routes for its full suite and reports the arch violation by
@@ -92,7 +88,7 @@ describe('guren exits after a command that imported app code holding a handle op
 
     expect(run.killed).toBe(false)
     expect(run.exitCode).toBe(1)
-  }, HARD_TIMEOUT_MS + 5_000)
+  }, TEST_TIMEOUT_MS)
 })
 
 describe('exitWhenFlushed', () => {
@@ -117,7 +113,7 @@ await exitWhenFlushed(0)
       expect(stdout.trim()).toBe(String(4 * 1024 * 1024))
       expect(exitCode).toBe(3)
     } finally {
-      await Bun.$`rm -rf ${root}`.quiet().nothrow()
+      await rm(root, { recursive: true, force: true })
     }
   }, 20_000)
 })

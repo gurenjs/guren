@@ -237,18 +237,14 @@ describe('token:issue flag parsing', () => {
   it('honours the last value of a repeated boolean rather than any false', async () => {
     // The inverse direction on a write tool: a lingering `--read-only=true`
     // would refuse `posts.store`, so issuing the token is the assertion.
-    await expect(
-      runFlags(['--name', 'ci', '--user', '42', '--tools', 'posts.store', '--read-only=true', '--read-only=false']),
-    ).resolves.toBeDefined()
+    await runFlags(['--name', 'ci', '--user', '42', '--tools', 'posts.store', '--read-only=true', '--read-only=false'])
     expect(logSpy).toHaveBeenCalled()
   })
 
   it('reads the last --tools rather than joining repeats', async () => {
     // Joined, the repeat would name neither tool and be refused; last-wins
     // issues against the second one.
-    await expect(
-      runFlags(['--name', 'ci', '--user', '42', '--tools', 'internal.index', '--tools', 'posts.index']),
-    ).resolves.toBeDefined()
+    await runFlags(['--name', 'ci', '--user', '42', '--tools', 'internal.index', '--tools', 'posts.index'])
     expect(logSpy).toHaveBeenCalled()
   })
 
