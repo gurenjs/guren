@@ -1,3 +1,5 @@
+import { relative } from 'node:path'
+import { appBindsService } from './discovery'
 import type { ServiceScaffold } from './service-scaffold'
 
 /** The mail service `guren add mail` installs and `make:auth` shares for its reset mail (RFC 0027 §2). */
@@ -22,4 +24,15 @@ MAIL_MAILER=log
     { key: 'SMTP_USER', entry: 'SMTP_USER=\n' },
     { key: 'SMTP_PASS', entry: 'SMTP_PASS=\n', declare: { secret: true } },
   ],
+}
+
+/**
+ * The project-relative files that already bind `mail`: a `defineMailConfig()` definition
+ * or a provider's `singleton('mail', …)`, the two forms `guren add mail` and `make:auth`
+ * write. Read from sources, not file names: a custom provider counts, and a second
+ * scaffold over any of them collides on its files or shadows its binding.
+ */
+export async function appMailBindings(): Promise<string[]> {
+  const cwd = process.cwd()
+  return (await appBindsService('mail', cwd, { definitions: true })).map((file) => relative(cwd, file))
 }

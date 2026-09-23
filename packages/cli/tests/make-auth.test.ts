@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import { consola } from 'consola'
 import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, APP_FIXTURE, BLOG_ROUTES_FIXTURE, captureInfos, captureWarnings, CONSOLE_FIXTURE, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, ENV_SCHEMA_FIXTURE, linkWorkspaceCore, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, seedApiOnlyApp, SQLITE_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
 import { checkEnvExample } from '../src/app-env'
 import { runBlueprint } from '../src/blueprints'
+import { appMailBindings } from '../src/mail-scaffold'
 import { makeAuth } from '../src/make-auth'
 import { loadResolvedConfig } from '../src/resolved-config'
 
@@ -704,7 +705,7 @@ export const users = mysqlTable('users', {
       await linkWorkspaceCore(workspace.dir)
 
       const created = await makeAuth({ install: true, force: true })
-      await runBlueprint('mail', { force: true })
+      await runBlueprint('mail')
 
       expect(created).not.toEqual(expect.arrayContaining([expect.stringContaining('MailProvider.ts')]))
       expect(existsSync(join(workspace.dir, 'app/Providers/MailProvider.ts'))).toBe(false)
@@ -1489,4 +1490,163 @@ export default app
       }
     })
   })
+})
+
+// `guren add mail` and the reset mail of `guren add auth` both need one `mail`
+// binding. Whichever runs second keeps the first's and writes none of its own:
+// a second setup collides on config/mail.ts or MailProvider.ts, or shadows it.
+describe('makeAuth beside guren add mail', () => {
+  const MAIL_TEMPLATES = resolve(import.meta.dir, '../templates/scaffold')
+  const mailForms = [
+    {
+      form: 'provider',
+      files: {},
+      mailBinding: 'app/Providers/MailProvider.ts',
+      mailTemplate: 'mail/app/Providers/MailProvider.ts',
+      authTemplate: 'auth/app/Providers/MailProvider.ts',
+      authMailFiles: ['app/Providers/MailProvider.ts', 'config/mail.ts'],
+    },
+    {
+      form: 'definition',
+      files: { 'config/env.ts': ENV_SCHEMA_FIXTURE },
+      mailBinding: 'config/mail.ts',
+      mailTemplate: 'mail/definition/config/mail.ts',
+      authTemplate: 'mail/definition/config/mail.ts',
+      authMailFiles: ['config/mail.ts'],
+    },
+  ] as const
+
+  async function seedMailApp(dir: string, files: Record<string, string>): Promise<void> {
+    await writeWorkspaceFiles(dir, {
+      'src/app.ts': APP_FIXTURE,
+      'routes/web.ts': DEFAULT_ROUTES_FIXTURE,
+      'db/schema.ts': PG_SCHEMA_FIXTURE,
+      '.env.example': 'APP_KEY=\n',
+      ...files,
+    })
+  }
+
+  function countOf(source: string, needle: string): number {
+    return source.split(needle).length - 1
+  }
+
+  function arrayOption(app: string, key: 'providers' | 'config'): string[] {
+    return app.match(new RegExp(`${key}: \\[([^\\]]*)\\]`))?.[1].split(',').map((entry) => entry.trim()).filter(Boolean) ?? []
+  }
+
+  for (const { form, files, mailBinding, mailTemplate, authTemplate } of mailForms) {
+    it(`keeps the ${form} setup guren add mail wrote`, async () => {
+      const workspace = await createTempWorkspace(`guren-cli-make-auth-after-mail-${form}-`)
+      try {
+        await seedMailApp(workspace.dir, files)
+        await runBlueprint('mail')
+        const mailSetup = await readFile(join(workspace.dir, mailBinding), 'utf8')
+
+        const created = await makeAuth({ install: true })
+
+        expect(created).toEqual(expect.arrayContaining([expect.stringContaining('app/Mail/PasswordResetMail.ts')]))
+        expect(created).not.toEqual(expect.arrayContaining([expect.stringContaining('MailProvider.ts')]))
+        expect(created).not.toEqual(expect.arrayContaining([expect.stringContaining('config/mail.ts')]))
+        expect(await appMailBindings()).toEqual([mailBinding])
+        expect(await readFile(join(workspace.dir, mailBinding), 'utf8')).toBe(mailSetup)
+        expect(mailSetup).toBe(await readFile(join(MAIL_TEMPLATES, mailTemplate), 'utf8'))
+
+        const app = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
+        const mailProviders = arrayOption(app, 'providers').filter((entry) => /Mail/.test(entry))
+        expect(mailProviders).toEqual(form === 'provider' ? ['CoreMailServiceProvider', 'MailProvider'] : [])
+        expect(arrayOption(app, 'config').filter((entry) => entry === 'mail')).toEqual(form === 'definition' ? ['mail'] : [])
+        const envExample = await readFile(join(workspace.dir, '.env.example'), 'utf8')
+        expect(countOf(envExample, 'MAIL_MAILER=')).toBe(1)
+        expect(countOf(envExample, 'SMTP_PORT=')).toBe(form === 'definition' ? 1 : 0)
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+
+    it(`leaves the ${form} setup guren add auth wrote to a later guren add mail`, async () => {
+      const workspace = await createTempWorkspace(`guren-cli-mail-after-make-auth-${form}-`)
+      try {
+        await seedMailApp(workspace.dir, files)
+        await makeAuth({ install: true })
+        const app = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
+        const envExample = await readFile(join(workspace.dir, '.env.example'), 'utf8')
+
+        const created = await runBlueprint('mail')
+
+        expect(created).toEqual([expect.stringContaining('app/Mail/WelcomeEmailMail.ts')])
+        expect(await appMailBindings()).toEqual([mailBinding])
+        expect(await readFile(join(workspace.dir, mailBinding), 'utf8'))
+          .toBe(await readFile(join(MAIL_TEMPLATES, authTemplate), 'utf8'))
+        expect(await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')).toBe(app)
+        expect(await readFile(join(workspace.dir, '.env.example'), 'utf8')).toBe(envExample)
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+  }
+
+  it('keeps a mail binding that no conventional file holds', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-custom-mail-')
+    try {
+      await seedMailApp(workspace.dir, {
+        'app/Providers/NotifierProvider.ts': `import { ServiceProvider, createMailManager } from '@guren/core'
+
+export default class NotifierProvider extends ServiceProvider {
+  register(): void {
+    this.container.singleton('mail', (container) => createMailManager({ default: 'log', from: { email: 'ops@example.com' }, transports: { log: { driver: 'log' } } }, container))
+  }
+}
+`,
+      })
+
+      await makeAuth({ install: true })
+
+      expect(await appMailBindings()).toEqual(['app/Providers/NotifierProvider.ts'])
+      expect(existsSync(join(workspace.dir, 'config/mail.ts'))).toBe(false)
+      expect(await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')).not.toContain('MailServiceProvider')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('names the existing binding instead of a mail provider to register', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-mail-next-steps-')
+    try {
+      await seedMailApp(workspace.dir, {})
+      await runBlueprint('mail')
+
+      const infos = await captureInfos(() => makeAuth({}))
+
+      expect(infos).toContain('Mail is already bound in app/Providers/MailProvider.ts; the password reset mail sends through it, so no mail config or provider was written.')
+      expect(infos.filter((line) => /MailProvider in your createApp|config\/mail\.ts to your createApp/.test(line))).toEqual([])
+      expect(infos.some((line) => line.includes('Set APP_URL'))).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  for (const { form, files, mailBinding, authTemplate, authMailFiles } of mailForms) {
+    it(`still installs the ${form} setup in an app with no mail`, async () => {
+      const workspace = await createTempWorkspace(`guren-cli-make-auth-no-mail-${form}-`)
+      try {
+        await seedMailApp(workspace.dir, files)
+
+        let created: string[] = []
+        const infos = await captureInfos(async () => {
+          created = await makeAuth({})
+        })
+
+        const mailFiles = created.map((file) => relative(process.cwd(), file)).filter((file) => /Mail(Provider)?\.ts$|mail\.ts$/.test(file))
+        expect(mailFiles.sort()).toEqual(['app/Mail/PasswordResetMail.ts', ...authMailFiles].sort())
+        expect(await readFile(join(workspace.dir, mailBinding), 'utf8'))
+          .toBe(await readFile(join(MAIL_TEMPLATES, authTemplate), 'utf8'))
+        expect(infos).toContain(form === 'provider'
+          ? '  • Register MailProvider in your createApp() providers array (used to send password reset emails)'
+          : '  • Add the default export of config/mail.ts to your createApp() config array (used to send password reset emails)')
+        expect(infos.some((line) => line.startsWith('Mail is already bound'))).toBe(false)
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+  }
 })
