@@ -290,6 +290,15 @@ Already approved at 2026-09-22T10:16:20.673Z; recorded the readings it lacked in
 
 After the work, a reading would find the property already held, so approving again cannot help. An `alter` whose matches all lack a reading reads `unjudged`, and its note says to verify the change through a behaviour that reaches it; once its step has verified, a second note adds the waiver. For an element no behaviour can reach, such as a column, the note names only the waiver.
 
+An `alter` whose readable planned properties all held at approval cannot complete on them. `plan:approve` still approves it, and warns, naming the element and the properties; `--json` lists them under `heldAlters`. The warning is judged on the readings of the approval entry, so approving the same hash again repeats it, and a re-approval after the work does not raise it for a property the work changed. For a plan whose `view.posts.show` only restates the `post` prop the page already declares:
+
+```text
+Warning, advisory (the approval stands):
+  view.posts.show (posts/Show): every readable planned property already held at approval (prop post); none shows the change, so plan:status reports it unjudged. State the change in a property the application does not hold yet and approve the plan again, or expect that it completes only through a verified behaviour that reaches it, or by a waiver.
+```
+
+A property that read `unknown` at approval is not counted as held: the warning names it as the only one that can still show the change, which it does only if a reader comes to see it match. An `alter` none of whose properties could be read gets no warning, and `plan:status` reports it `unjudged` as above.
+
 ## Implementing: `plan:next` and `plan:verify`
 
 Guren derives the work from the plan, and the order does not depend on a model. Every entity the plan adds or changes is a task, ordered by foreign keys, and there are six kinds of step, and a task gets only those it has work for:

@@ -10,7 +10,7 @@ import type { PlanCloseReport } from '../src/plan-close'
 import type { PlanNextReport } from '../src/plan-next'
 import type { PlanStatusReport } from '../src/plan-status'
 import type { PlanVerifyReport } from '../src/plan-verify'
-import { approvalReadings, baselineDigest, planApprovalsPath, readPlanApprovals, type PlanApprovals } from '../src/plan/approvals'
+import { approvalReadings, baselineDigest, heldAlters, planApprovalsPath, readPlanApprovals, type PlanApprovals } from '../src/plan/approvals'
 import { planHash } from '../src/plan/identity'
 import { PlanSchema } from '../src/plan/schema'
 import type { PlanPropertyReading } from '../src/plan/status'
@@ -70,6 +70,16 @@ const RELATIONSHIP_PLAN = {
   models: [
     { id: 'model.post', change: { kind: 'alter' }, name: 'Post', table: 'posts', columns: [], relationships: [{ name: 'comments', type: 'hasMany', target: 'model.comment' }], fillable: [] },
     { id: 'model.comment', change: { kind: 'existing' }, name: 'Comment', table: 'comments', columns: [], relationships: [], fillable: [] },
+  ],
+}
+
+/** `posts/Show` restates its prop beside an unread state; `posts/Index` plans only an unread state. */
+const UNREAD_PLAN = {
+  ...PLAN_DOCUMENT,
+  title: 'Post states',
+  views: [
+    { ...PLAN_DOCUMENT.views[0]!, states: { empty: 'No post.' } },
+    { ...PLAN_DOCUMENT.views[1]!, props: [], states: { empty: 'No posts yet.' } },
   ],
 }
 
@@ -144,6 +154,13 @@ describe('an alter judged against how it read at approval', () => {
     return JSON.parse(log.mock.calls.map((call) => String(call[0])).join('\n')) as T
   }
 
+  async function runText(command: 'plan:approve', app: { dir: string; plan: string }): Promise<string> {
+    log.mockClear()
+    log.mockImplementation(() => {})
+    await runCommand(builtinSubCommands[command] as CommandDef, { rawArgs: [app.plan, '--app', app.dir] })
+    return log.mock.calls.map((call) => String(call[0])).join('\n')
+  }
+
   const states = (report: { elements: Array<{ id: string; state: string }> }): Record<string, string> =>
     Object.fromEntries(report.elements.map((element) => [element.id, element.state]))
 
@@ -157,6 +174,63 @@ describe('an alter judged against how it read at approval', () => {
       { element: 'view.posts.show', label: 'posts/Show', property: 'prop post', planned: 'declared', verdict: 'match' },
       { element: 'view.posts.index', label: 'posts/Index', property: 'prop posts', planned: 'declared', verdict: 'match' },
       { element: 'view.posts.index', label: 'posts/Index', property: 'prop total', planned: 'declared', verdict: 'differ' },
+    ])
+  })
+
+  test('should warn at approval on an alter whose readable properties all held, and not on one with a property still to change', async () => {
+    const app = await createApp('held-warning')
+
+    const report = await run<PlanApproveReport>('plan:approve', app)
+
+    expect(report.alreadyApproved).toBe(false)
+    expect(report.heldAlters).toEqual([
+      {
+        element: 'view.posts.show',
+        label: 'posts/Show',
+        held: ['prop post'],
+        unread: [],
+        message: expect.stringContaining('view.posts.show (posts/Show): every readable planned property already held at approval (prop post); none shows the change'),
+      },
+    ])
+    expect(report.heldAlters![0]!.message).toContain('State the change in a property the application does not hold yet and approve the plan again')
+
+    // Already approved: the entry is unchanged, and so is the warning.
+    const again = await runText('plan:approve', app)
+    expect(again).toContain('left alone')
+    expect(again).toContain('Warning, advisory (the approval stands):')
+    expect(again).toContain(`  ${report.heldAlters![0]!.message}`)
+    expect(again).not.toContain('view.posts.index (')
+    expect((await run<PlanApproveReport>('plan:approve', app)).heldAlters).toEqual(report.heldAlters)
+  })
+
+  test('should keep the warning on a revision approved after the work, and never raise it for the property the work changed', async () => {
+    const app = await createApp('held-revision')
+    await run('plan:approve', app)
+    await buildTotal(app.dir)
+    const document = JSON.parse(await readFile(app.plan, 'utf8')) as { scope: { goals: string[] } }
+    document.scope.goals.push('Keep the list short')
+    await writeFile(app.plan, JSON.stringify(document), 'utf8')
+
+    const reapproved = await run<PlanApproveReport>('plan:approve', app)
+
+    expect(reapproved.alreadyApproved).toBe(false)
+    expect(reapproved.heldAlters?.map((alter) => alter.element)).toEqual(['view.posts.show'])
+  })
+
+  test('should name the unread properties that can still show the change, and not warn on an alter nothing of which was readable', async () => {
+    const app = await createApp('held-unread', UNREAD_PLAN)
+
+    const report = await run<PlanApproveReport>('plan:approve', app)
+
+    expect(report.readingsRecorded).toEqual(['view.posts.show', 'view.posts.index'])
+    expect(report.heldAlters).toEqual([
+      {
+        element: 'view.posts.show',
+        label: 'posts/Show',
+        held: ['prop post'],
+        unread: ['states'],
+        message: expect.stringContaining('states read unknown then, and only a match on it can still show the change'),
+      },
     ])
   })
 
@@ -233,6 +307,37 @@ describe('an alter judged against how it read at approval', () => {
     const [first, second] = (await readPlanApprovals(app.plan)).value!.approvals
     expect(second!.readings).toEqual(first!.readings)
     expect(states(await run<PlanStatusReport>('plan:status', app))).toEqual({ 'view.posts.show': 'unjudged', 'view.posts.index': 'wired' })
+  })
+})
+
+describe('heldAlters', () => {
+  const plan = PlanSchema.parse({ ...PLAN_DOCUMENT, baseline: { rev: 'abc123', contextHash: {} } })
+  const reading = (element: string, property: string, verdict: PlanPropertyReading['verdict']): PlanPropertyReading => ({
+    element,
+    label: element === 'view.posts.show' ? 'posts/Show' : 'posts/Index',
+    property,
+    planned: 'declared',
+    verdict,
+  })
+  const post = reading('view.posts.show', 'prop post', 'match')
+
+  test('should judge on the recorded verdict, not on how the property reads now', () => {
+    const total = (verdict: PlanPropertyReading['verdict']) => reading('view.posts.index', 'prop total', verdict)
+    const posts = reading('view.posts.index', 'prop posts', 'match')
+
+    expect(heldAlters(plan, [posts, total('match')], [posts, total('differ')])).toEqual([])
+    expect(heldAlters(plan, [posts, total('differ')], [posts, total('match')]).map((alter) => alter.element)).toEqual(['view.posts.index'])
+  })
+
+  test('should keep the warning when the section is unreadable at re-approval, from the readings recorded before', () => {
+    expect(heldAlters(plan, [], [post])).toEqual([{ element: 'view.posts.show', label: 'posts/Show', held: ['prop post'], unread: [] }])
+  })
+
+  test('should not count an unknown reading as held', () => {
+    const unread = reading('view.posts.show', 'states', 'unknown')
+
+    expect(heldAlters(plan, [unread], [unread])).toEqual([])
+    expect(heldAlters(plan, [post, unread], [post, unread])).toEqual([{ element: 'view.posts.show', label: 'posts/Show', held: ['prop post'], unread: ['states'] }])
   })
 })
 
