@@ -388,6 +388,23 @@ describe('generateDataTypes reports Resource classes it could not extract', () =
     expect(warnings[0]).toContain('Export PostPayload so data.gen.ts can reference the declaration')
   })
 
+  it('still refuses a parenthesized alias that composes its body with another type', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      // The parens around `{ id: number }` are harmless grouping, but the
+      // `&` after them still makes the body one operand of a larger type.
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        'type PostPayload = ({ id: number }) & { title: string }',
+        'PostPayload',
+      ),
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(definitions.map((d) => d.rawType)).toEqual([null])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('uses its object body as one operand of a larger type')
+  })
+
   it('tells the author to close an unterminated body instead of rewriting it', async () => {
     await writeWorkspaceFiles(appRoot, {
       'app/Http/Resources/PostResource.ts':
@@ -431,6 +448,22 @@ describe('generateDataTypes reports Resource classes it could not extract', () =
     await writeWorkspaceFiles(appRoot, {
       'app/Http/Resources/PostResource.ts': postResourceFile(
         'export type PostResourceData = {\n  id: number\n}',
+        'PostResourceData',
+      ),
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toEqual([])
+    expect(definitions.map((d) => d.rawType)).toEqual(['{\n  id: number\n}'])
+  })
+
+  it('reads a parenthesized alias exactly as its unparenthesized body', async () => {
+    // #418 point 2: the parens are harmless grouping, not composition, and
+    // must not carry into the emitted body.
+    await writeWorkspaceFiles(appRoot, {
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        'export type PostResourceData = ({\n  id: number\n})',
         'PostResourceData',
       ),
     })
@@ -514,6 +547,12 @@ describe('generateDataTypes references exported types it cannot copy', () => {
       // it. Copying the body describes neither; the reference names the alias.
       'an alias that uses its body as an operand',
       'export type PostResourceData = { id: number }[]',
+    ],
+    [
+      // The parens around the body are harmless grouping; `[]` after them
+      // still makes the body an array element type rather than the alias.
+      'a parenthesized alias that uses its body as an operand',
+      'export type PostResourceData = ({ id: number })[]',
     ],
     [
       'an alias indexed into, rather than emitting what it indexes',
