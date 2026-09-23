@@ -685,8 +685,8 @@ describe('judgePlan', () => {
       })
       const readings = readAlterProperties(document, app())
       const relationships = [
-        { name: 'author', type: 'belongsTo', relatedModel: 'User' },
-        { name: 'comments', type: 'hasMany', relatedModel: 'User' },
+        { name: 'author', type: 'belongsTo' as const, relatedModel: 'User' },
+        { name: 'comments', type: 'hasMany' as const, relatedModel: 'User' },
       ]
       const built = app({
         models: [

@@ -17,7 +17,7 @@ import { writePlanWaiver, type PlanWaiver } from '../src/plan/decisions'
 import { planHash } from '../src/plan/identity'
 import { PlanSchema, listPlanElements } from '../src/plan/schema'
 import { PLAN_STATE_VERSION, planDigest, planSlug, planStatePath, type PlanStepRecord } from '../src/plan/state'
-import { PLAN_STATUS_SECTIONS, summarize, type PlanElementStatus, type PlanStatusState } from '../src/plan/status'
+import { PLAN_STATUS_SECTIONS, summarize, type PlanElementState, type PlanElementStatus, type PlanStatusState } from '../src/plan/status'
 import { derivePlanTasks, listPlanSteps } from '../src/plan/tasks'
 import { applyVerification, applyWaivers, hashFiles } from '../src/plan/verification'
 import { createTempRoot, writeWorkspaceFiles } from './helpers'
@@ -543,7 +543,7 @@ describe('describeCloseBlockers', () => {
       commands: [{ id: 'command.attachments', command: 'guren add attachments', reason: 'comments take images' }],
     })
     const tasks = derivePlanTasks(document, { apiOnly: false })
-    const blocker = (entry: PlanElementStatus) => describeCloseBlockers(document, tasks, [entry], 'p.json')[0]!
+    const blocker = (entry: PlanElementStatus<PlanElementState>) => describeCloseBlockers(document, tasks, [entry], 'p.json')[0]!
     const never = [
       element('event.commentPosted', 'wired', { section: 'sideEffects', completesAt: 'wired' }),
       element('command.attachments', 'unjudged', { section: 'commands', files: [] }),
