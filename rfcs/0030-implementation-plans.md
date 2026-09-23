@@ -613,15 +613,15 @@ revision too; it is never a silent edit.
 
 **Amended after re-review (2026-09-23), Part 3.** The command above is the
 model-calling form, and it keeps the name `plan --revise`. It waits with the
-headless producer (§8). Part 3 ships a model-free `plan:revise` first: it
+headless producer (§8). Part 3 ships a model-free `plan:revise` first. It
 takes ops from a file or standard input, or an edited plan whose ops
-`diffPlans()` derives (`packages/cli/src/plan/revision.ts:484`), stamps them
-through `createPlanRevision()` and writes the revision under `revisions/`.
-Given feedback, it applies the two rules below, the lock and the answered
-question, which `createPlanRevision()` already enforces. It does not turn a
-reviewer's comments into ops; that is the model's work. It gives the page's
-exported feedback its first reader (`plan/feedback.ts:5-6` says none exists
-yet), and it is the command the `plan-implement` skill already names.
+`diffPlans()` derives (`packages/cli/src/plan/revision.ts:484`). It stamps
+them through `createPlanRevision()` and writes the revision under
+`revisions/`. Given feedback, it applies the two rules below, the lock and the
+answered question, which `createPlanRevision()` already enforces. It does not
+turn a reviewer's comments into ops; that is the model's work. It gives the
+page's exported feedback its first reader (`plan/feedback.ts:5-6` says none
+exists yet). It is also the command the `plan-implement` skill already names.
 
 The producer is asked for `ops`, against a revision schema, and never for a
 whole plan. A model that re-emits the document can change a part nobody was
@@ -704,9 +704,11 @@ before the open is a race between the check and the read.
 
 Before approval, editing `plan.json` by hand is as legitimate as a revision:
 it is a JSON file, and `plan:render` re-validates it. Renaming a column does
-not need a model. **Amended after re-review (2026-09-23), Part 3:** after
-approval, the same hand edit goes through `plan:revise`, which records it as
-a revision rather than a silent edit (Open Question 13).
+not need a model.
+
+**Amended after re-review (2026-09-23), Part 3:** after approval, the same
+hand edit goes through `plan:revise`, which records it as a revision rather
+than a silent edit (Open Question 13).
 
 **Freshness.** `baseline.rev` records where the plan was written and gates
 nothing: the implementation's own commits move it on the first step.
@@ -1036,14 +1038,16 @@ writer the CLI already has:
 ~~Routes go in their own file because the existing patch mounts a registrar
 call and does not insert route lines into `routes/web.ts`.~~
 
-**Amended after re-review (2026-09-23), Part 3.** The premise struck above,
-the "Next steps" account of what `make:feature` leaves undone, the table's
-first and fourth rows, and the generated pages the next paragraph mentions are
-stale:
+**Amended after re-review (2026-09-23), Part 3.** Five passages here are
+stale: the premise struck above, the "Next steps" account of what
+`make:feature` leaves undone, the table's first and fourth rows, and two
+points of the next paragraph, the generated pages and the relationships and
+fillable left to the agent (the emitter below writes both). What replaces
+them:
 
 - `guren add resource` predates this RFC and already writes two of the three
-  wirings the table says are missing. It runs `makeFeature`, appends a
-  per-dialect table through `appendTableToSchema()` and inserts the CRUD
+  wirings the table says are missing. It runs `makeFeature` and appends a
+  per-dialect table through `appendTableToSchema()`. It also inserts the CRUD
   route group into `routes/web.ts`
   (`packages/cli/src/blueprints.ts:389-426, 428-473, 526-566`). Its limits: the
   six `--fields` types (`fields.ts:11`, against the plan's ten at
@@ -1053,48 +1057,52 @@ stale:
 - `make:feature` is not the scaffold's writer, and neither is `add resource`.
   Both write a fixed CRUD surface whatever the plan says: seven actions
   (`make-feature.ts:491-600`), four pages (`:155-167`) and seven routes
-  (`buildRouteRegistrationHint`, `:354-382`), which `add resource` also
-  mounts. The endpoints the plan does not declare are unapproved, and no
-  status reading or §2 check sees them. The scaffold is a plan-driven emitter,
-  a pure function from plan to files, written by `guren plan:scaffold <plan>
-  --step <id>`, which `plan:next` names for a scaffold step. It reuses the
-  per-dialect column builders, `appendTableToSchema()`, the model and policy
-  templates, `wireAppProvider()` and `wireRouteRegistrar()`, factored rather
-  than called whole.
+  (`buildRouteRegistrationHint`, `:354-382`). `add resource` also mounts the
+  routes. The endpoints the plan does not declare are unapproved, and no
+  status reading or §2 check sees them.
+- The scaffold is a plan-driven emitter, a pure function from plan to files.
+  `guren plan:scaffold <plan> --step <id>` writes them, and `plan:next` names
+  that command for a scaffold step. The emitter reuses the per-dialect column
+  builders, `appendTableToSchema()`, the model and policy templates,
+  `wireAppProvider()` and `wireRouteRegistrar()`, factored rather than called
+  whole.
 - What it emits, per element: the table with every column option the plan
   states and its foreign keys; the model with relationships and fillable;
   validators; resources; the policy class and a registration provider; the
   controller with exactly the planned actions as stubs; the routes file;
   side-effect classes; and `@docs` tags. No pages, no action bodies and no
   CRUD extras.
-- Policy registration needs no `boot()` patcher. A per-entity
-  `app/Providers/<Entity>PolicyProvider.ts` whose `boot()` calls
-  `this.container.make('gate').policy(Model, Policy)`, the shape of the blog
-  template's `AuthorizationProvider.ts`, is registered with
-  `wireAppProvider()` (`provider-registrar.ts:125-127`).
-- The routes go in a `routes/<entity>.ts` of their own. That waits for a fix
-  in progress in a separate change: an entry route is fingerprinted as the
-  entry routes file alone (`plan/app-detail.ts:295`, `plan/status.ts:1012-1016`),
-  although `routeFileDetail()` already lists every project routes file
-  (`plan/app-detail.ts:555-569`). Read from code: editing a `routes/<x>.ts` the
-  entry registrar calls does not drift a verified step.
-- The scaffold writes the routes file and does not mount it; the `http` step
+- Policy registration needs no `boot()` patcher. A proposal, to settle in the
+  change that implements it: a per-entity
+  `app/Providers/<Entity>PolicyProvider.ts` in the shape of the blog
+  template's `AuthorizationProvider.ts`. Its `boot()` calls
+  `this.container.make('gate').policy(Model, Policy)`, and `wireAppProvider()`
+  registers it (`provider-registrar.ts:125-127`).
+- The routes go in a `routes/<entity>.ts` of their own, after #1039. At
+  2a784c4d an entry route is fingerprinted as the entry routes file alone
+  (`plan/app-detail.ts:295`). `routeFileDetail()` already lists every project
+  routes file (`plan/app-detail.ts:555-569`). Predicted from that code:
+  editing a `routes/<x>.ts` the entry registrar calls does not drift a
+  verified step.
+- The scaffold writes the routes file and does not mount it. The `http` step
   mounts it with one `wireRouteRegistrar()` call. This is pending the
-  mounted-routes experiment in the Part 3 note under Phasing. The prediction
-  it tests: `scaffold` runs before `tests` (`plan/tasks.ts:786-818`), and a
+  mounted-routes experiment in the Part 3 note under Phasing, which tests a
+  prediction. `scaffold` runs before `tests` (`plan/tasks.ts:786-818`). A
   mounted route whose auth middleware, `userOrFail()` or contract validation
-  answers 401, a redirect or 422 before any table exists can pass the
-  slice's `validation`, `unauthenticated` and `forbidden` behaviours before
-  the `tests` step runs. `tests:fail` needs every case to fail
-  (`plan/verify.ts:172-183`), so that step could never verify. Unmounted stubs
-  validate with `validateBody(Schema)`, since `validated('<name>')` is typed
-  from generated route names (`packages/server/src/mvc/Controller.ts:479-481`)
-  and would not typecheck while the route is unmounted.
+  answers 401, a redirect or 422 before any table exists can pass the slice's
+  `unauthenticated` and `validation` behaviours before the `tests` step runs.
+  A `forbidden` behaviour usually needs the record, so it is not predicted to
+  pass. `tests:fail` needs every case to fail (`plan/verify.ts:172-183`), so
+  that step could never verify.
+- A proposal, to settle in the change that implements it: unmounted stubs
+  validate with `validateBody(Schema)`. `validated('<name>')` is typed from
+  generated route names (`packages/server/src/mvc/Controller.ts:479-481`), so
+  it would not typecheck while the route is unmounted.
 - Pages are not emitted. A page written with the plan's `Props` makes every
-  readable property of its view match by construction (`plan/status.ts:1075-1091`),
-  so the `pages` step would verify it on a typecheck while its form, actions
-  and states, which nothing reads, are unwritten. Layout stays with prototype
-  mode (Open Question 4).
+  readable property of its view match by construction
+  (`plan/status.ts:1075-1091`). The `pages` step would then verify it on a
+  typecheck while its form, actions and states, which nothing reads, are
+  unwritten. Layout stays with prototype mode (Open Question 4).
 
 The migration is not generated here: `db:make` needs drizzle-kit and
 `db:migrate` a database, which makes it the `data` step's and `plan:verify`'s
@@ -1106,6 +1114,7 @@ An API-only application gets no scaffold step: `make:feature` refuses one
 (`assertNotApiOnly`), since it generates Inertia pages. Its slices are
 `make:controller` and `make:validator` plus agent steps, and `views` must be
 empty in its plans (a §2 check).
+
 **Amended after re-review (2026-09-23), Part 3:** the reason given here rests
 on `make:feature` being the writer. The plan-driven emitter above writes no
 pages, so whether an API-only slice now gets a scaffold step is open; until it
@@ -1114,6 +1123,7 @@ is decided, task derivation keeps leaving it out.
 A step whose remaining work exceeds a threshold (files touched, elements
 covered) is split, pages by screen group first. The threshold starts at five
 files and is tuned from the metrics in §7.
+
 **Amended after re-review (2026-09-23), Part 3:** those metrics are not
 recorded yet (a step record in `plan/state.ts` holds fingerprints, not the
 files touched or lines changed). Part 3 records them, and the threshold stays
@@ -1129,6 +1139,7 @@ step is verified without turning `drifted`. These are tamper detection, not
 proof: a test can satisfy all three and still assert nothing that matters.
 What they rule out is the cheap failure, a test emptied or rewritten until it
 passes, and the task-end reviewer (§7) reads the tests for the rest.
+
 **Amended after re-review (2026-09-23), Part 3:** no skeleton emitter ships,
 and the static "still calls its route" check is not implemented. Both are the
 optional last item of Part 3; `packages/cli/src/test-requests.ts`, which reads
@@ -2270,8 +2281,8 @@ and verify commands come from the step table in §5, never from the plan.
 
 **Amended after re-review (2026-09-23), Part 3.** The headless producer is
 not in Part 3. It waits for the probes that answer Open Questions 2, 10 and
-12, whose procedures are in the Part 3 note under Phasing. What the command
-line above and the paragraph after it will change to when it ships, from the
+12, whose procedures are in the Part 3 note under Phasing. When it ships, the
+command line and the confinement paragraph above change as follows, from the
 Claude Code docs as read on 2026-09-23:
 
 - **Auth.** `--bare` reads no OAuth credentials and no keychain. It needs
@@ -2282,52 +2293,56 @@ Claude Code docs as read on 2026-09-23:
   login (see Alternatives).
 - **Where it runs.** In a checkout of the tracked files at HEAD (for
   instance a detached `git worktree add` in a temporary directory), not in the
-  working tree. `plan:approve` already needs a clean tree, so nothing
-  uncommitted is lost, and gitignored files are simply absent.
+  working tree. The checkout is read at HEAD, so uncommitted work is not in
+  what the producer sees, and gitignored files are absent.
 - **Deny rules are not enough on their own.** Read rules reach Grep and Glob
   only as a "best-effort attempt"
   (https://code.claude.com/docs/en/permissions#read-and-edit). Glob does not
   respect `.gitignore` by default
-  (https://code.claude.com/docs/en/tools-reference#glob-tool-behavior), so
+  (https://code.claude.com/docs/en/tools-reference#glob-tool-behavior). So
   "whatever `.gitignore` excludes" is not one `--disallowedTools` pattern.
-  The tracked-files checkout is what removes gitignored secrets; deny rules
-  on `.env*` and key files stay, for secrets that are tracked. Under `--bare`
-  the project settings' `env` block still applies
-  (https://code.claude.com/docs/en/permissions#what-runs-before-you-trust-a-folder),
-  and the checkout keeps a tracked `.claude/settings.json`, so its `env` still
+  The tracked-files checkout is what removes gitignored secrets. Deny rules
+  on `.env*` and key files stay, for secrets that are tracked.
+- **The `env` block.** Under `--bare` the project settings' `env` block still
+  applies
+  (https://code.claude.com/docs/en/permissions#what-runs-before-you-trust-a-folder).
+  The checkout keeps a tracked `.claude/settings.json`, so its `env` still
   reaches the producer. That stays open under Open Question 10.
-- **Pinned mode and caps.** `--permission-mode dontAsk`: the flag overrides
-  a `defaultMode` from settings, and `dontAsk` denies whatever would prompt,
-  a read outside the working directory included; `--permission-prompts none` (Claude Code v2.1.259 or later);
-  `--max-budget-usd` and `--max-turns`; `--no-session-persistence` on a
-  first draft, dropped for the first call of an `--ask` pair, which has to be
-  resumable (https://code.claude.com/docs/en/cli-reference#cli-flags,
-  https://code.claude.com/docs/en/permissions#permission-system).
+- **Pinned mode and caps.** `--permission-mode dontAsk`: the flag overrides a
+  `defaultMode` from settings, and `dontAsk` denies whatever would prompt, a
+  read outside the working directory included. Also `--permission-prompts
+  none` (Claude Code v2.1.259 or later), `--max-budget-usd` and `--max-turns`
+  (https://code.claude.com/docs/en/cli-reference#cli-flags,
+  https://code.claude.com/docs/en/permissions#permission-system). A proposal,
+  to settle in the change that ships the producer: `--no-session-persistence`
+  on a first draft, and not on the first call of an `--ask` pair, which has
+  to be resumable.
 - **Schema size.** `--json-schema` is validated as draft-07, with retries on
   mismatch (https://code.claude.com/docs/en/agent-sdk/structured-outputs).
   The API's constrained decoding caps a request at 24 optional parameters and
-  16 union-typed ones, and answers a schema past its internal limits with a
+  16 union-typed ones. It answers a schema past its internal limits with a
   400 "Schema is too complex for compilation"
   (https://platform.claude.com/docs/en/build-with-claude/structured-outputs#schema-complexity-limits).
   Counted at 2a784c4d with a walker that approximates the API's counting,
   `planDraftJsonSchema()` has 56 optional and 14 union-typed properties, and
-  `planRevisionOpsJsonSchema()` 150 and 32. Whether `claude --json-schema`
-  goes through constrained decoding is not stated on the pages read, so this
-  is not asserted; the Open Question 2 probe settles it.
+  `planRevisionOpsJsonSchema()` 150 and 32. The pages read do not say whether
+  `claude --json-schema` goes through constrained decoding, so this is not
+  asserted. The Open Question 2 probe settles it.
 - **The `commands` allowlist is not implemented.** `PlanCommandSchema` takes a
-  free string (`packages/cli/src/plan/schema.ts:277-281`), and `plan:next
-  --json` hands it to the implementing agent as written. That path exists
-  already for a hand-written or in-session plan, so the allowlist is a §2
-  check in Part 3, ahead of `--print-prompt`.
+  free string (`packages/cli/src/plan/schema.ts:277-281`). `plan:next --json`
+  hands it to the implementing agent as written. That path already exists for
+  a hand-written or in-session plan, so the allowlist is a §2 check in Part 3,
+  ahead of `--print-prompt`.
 
 `guren plan --print-prompt` writes the prompt and the schema to stdout and
 calls nothing, for any other agent, and for a Claude Code session already in
 progress, where the harness skill has the running agent write the JSON and
 call `plan:render` rather than nesting a second `claude`.
+
 **Amended after re-review (2026-09-23), Part 3:** this is the producer Part 3
-ships, with an in-session plan-writing harness skill. It needs no
-confinement of its own: the running agent already holds the person's
-permissions, and it is the path the guide describes today
+ships, with an in-session plan-writing harness skill. It needs no confinement
+of its own, since the running agent already holds the person's permissions.
+It is the path the guide describes today
 (`docs/en/guides/implementation-plans.md:46`).
 
 **Two producers, for two situations.** The headless one cannot ask anything:
@@ -2350,15 +2365,16 @@ leaves a structural choice open. The second call resumes the first
 Every producer call, first draft, `--ask` and each revise, records its
 `total_cost_usd` in state, so the price of a plan is the sum of its rounds and
 visible as such.
+
 **Amended after re-review (2026-09-23), Part 3:** `--ask` is deferred with the
 headless producer. When it returns, a round's cost is not its own
-`total_cost_usd`: a run continued with `--resume` reports the conversation's
-whole total, earlier runs included
-(https://code.claude.com/docs/en/headless, the paragraph on
-`total_cost_usd`), so summing the rounds counts the first call of an `--ask`
-pair twice. The second call's cost is its total less the first's. The cap
-differs the other way: `--max-budget-usd` does not count totals restored from
-earlier runs (https://code.claude.com/docs/en/cli-reference#cli-flags).
+`total_cost_usd`. A run continued with `--resume` reports the conversation's
+whole total, earlier runs included (https://code.claude.com/docs/en/headless,
+the paragraph on `total_cost_usd`). Summing the rounds would count the first
+call of an `--ask` pair twice, so the second call's cost is its total less the
+first's. The cap differs the other way: `--max-budget-usd` does not count
+totals restored from earlier runs
+(https://code.claude.com/docs/en/cli-reference#cli-flags).
 
 **Amended after acceptance (2026-09-19), the served mode.** Besides the file,
 the page can be served by the development server, the way the `_guren/docs`
@@ -2683,11 +2699,10 @@ marks what was read and not run.
 - The "proceed" on scaffold emitters covered four kinds: models, columns,
   actions and routes. The §5 writer table also named validators, resources,
   policies and pages. Validators and resources have had field readers since
-  #987, and policy abilities are read since #988, as existence only, so a
-  policy completes only where a behaviour reaches it (`restsOnReach()`,
+  #987. Policy abilities are read since #988, as existence only, so a policy
+  completes only where a behaviour reaches it (`restsOnReach()`,
   `packages/cli/src/plan/verification.ts:58-60`). Emitting those three is safe.
-  Pages are the one kind whose emitted output lifts by construction, so they
-  are not emitted (§5 amendment).
+  Pages are not emitted (§5 amendment).
 - The reshape's §2 warning, on an `alter` whose readable properties all held
   at approval, is not implemented: `plan/validate.ts` has no such check kind.
   The readings it needs are on the approval entry since #978, so
@@ -2700,8 +2715,8 @@ marks what was read and not run.
 - `guren add resource` already appends a table and inserts route lines, and
   `make:feature` / `add resource` write a fixed CRUD surface (§5 amendment).
 - Route fingerprints fail open for a `routes/<x>.ts` the entry registrar
-  calls, read from code (§5 amendment). The fix is in progress in a separate
-  change. It is a Part 2 defect and lands regardless of the rest.
+  calls, predicted from the code (§5 amendment). #1039 fixes it. It is a
+  Part 2 defect and lands regardless of the rest.
 
 *Decisions (maintainer, 2026-09-23).*
 
@@ -2711,32 +2726,29 @@ marks what was read and not run.
 | D2 | When headless ships, it runs with `--bare` and an API key, in a checkout of the tracked files at HEAD (§8 amendment, and Alternatives). |
 | D3 | The `http` step mounts the scaffolded routes, pending the mounted-routes experiment (below). |
 | D4 | The scaffold emits no pages, and plans carry no layout, which belongs to prototype mode (Open Question 4). |
-| D5 | Scaffolded routes go in a `routes/<entity>.ts` of their own, after the route-file fingerprint fix. |
+| D5 | Scaffolded routes go in a `routes/<entity>.ts` of their own, after the route-file fingerprint fix (#1039). |
 | D6 | A model-free `plan:revise` is in Part 3. `plan --revise` stays the name of the model-calling form (§4 amendment). |
 | OQ3 | Five files, until the per-step metrics exist. |
 | OQ13 | No editing in the page; `plan:revise` from an edited plan covers it. |
 
 *Scope and order.*
 
-1. The route-file fingerprint fix.
+1. The route-file fingerprint fix (#1039).
 2. Two §2 checks: the `commands` allowlist, and a warning for an `alter`
    whose properties all held at approval.
 3. Files touched and lines changed, recorded per step.
 4. `plan --print-prompt`, `plan:revise`, and an in-session plan-writing
    harness skill.
 5. The mounted-routes experiment.
-6. `plan:scaffold`: the table with full column options and foreign keys, the
-   model, validators, resources, the policy and a registration provider,
-   controller stubs for exactly the planned actions, the routes file,
-   side-effect classes and `@docs` tags. No pages.
+6. `plan:scaffold`, emitting what the §5 amendment lists. No pages.
 7. Optional: test skeletons, and the static "still calls its route" check.
 
 Deferred: the headless producer, `--ask`, the headless `plan --revise`, page
 emission, the characterization step, and retuning the step width.
 
-*The mounted-routes experiment* (D3). It runs inside the workspace, on
-`examples/blog` or a scratch copy in the repository, never outside it, where
-`@guren/*` could resolve from npm.
+*The mounted-routes experiment* (D3). It runs on `examples/blog` or a
+scratch copy inside the repository. Outside it, `@guren/*` could resolve from
+npm.
 
 1. `guren add resource <Entity> --fields "body:text"` for an entity the blog
    does not have, with no migration run.
@@ -2747,18 +2759,18 @@ emission, the characterization step, and retuning the step width.
 4. Run only that file under `bun test --reporter=junit`; the blog's own suite
    is written for Vitest (Part 2 measurements above).
 
-Both passing confirms the prediction: mounted routes pass those behaviours
-before the `tests` step, so they stay unmounted until `http`. Either failing
-reopens D3.
+Both passing confirms the §5 prediction: mounted routes pass the
+`unauthenticated` and `validation` behaviours before the `tests` step, so they
+stay unmounted until `http`. Either failing reopens D3.
 
 *Probes before the headless producer* (D1). None needs shipped code; a script
 in scratch is enough.
 
-- **Open Question 2, one call or two.** Three requests, the Part 2 fixtures
-  (blog comments, scheduled publishing, and kadai checklists, which live
-  outside the repository). Ten calls each with the exact producer flags,
-  `--tools Read,Grep,Glob` included, since restricting tools may change how
-  structured output is delivered. Record the result subtype, whether
+- **Open Question 2, one call or two.** Three requests, the Part 2 fixtures:
+  blog comments, scheduled publishing, and the checklists plan for kadai,
+  which lives outside the repository. Ten calls each with the exact producer
+  flags, `--tools Read,Grep,Glob` included, since restricting tools may
+  change how structured output is delivered. Record the result subtype, whether
   `PlanSchema` parses the output again, the §2 failures, `total_cost_usd` and
   the duration. Repeat once with the ops schema. A 400 on the first call
   answers the constrained-decoding question at once.
@@ -2766,7 +2778,10 @@ in scratch is enough.
   one canary and a gitignored `.env` holding another, make the tracked-files
   checkout, and prompt the producer to quote both, the working tree's `.env`
   by absolute path included. Grep the output for either canary. Repeat asking
-  for them through Grep and Glob patterns.
+  for them through Grep and Glob patterns. Keep `--tools Read,Grep,Glob` on
+  every run: on macOS and Linux the default tool set leaves out Glob and Grep,
+  and only naming them in `--tools` brings them back
+  (https://code.claude.com/docs/en/cli-reference#cli-flags).
 - **Open Question 12, `--resume` under `--bare`.** Run `claude --bare -p …
   --output-format json` and keep its `session_id`, then `claude --bare -p …
   --resume <id> --json-schema …`. Check that the second call succeeds and that
@@ -2809,18 +2824,16 @@ someone can skip. Deriving status makes the false claim impossible to record.
 key to manage and a dependency to the CLI. ~~`claude -p` reuses the login and the
 read-only tools the user already has,~~ and the producer boundary keeps the
 choice reversible.
-**Amended after re-review (2026-09-23):** under `--bare`, which the producer
-uses (§8 amendment, D2), `claude -p` reads no OAuth or keychain credentials
-and needs an API key as the API would
-(https://code.claude.com/docs/en/headless#start-faster-with-bare-mode). What
-is left of the argument is that `claude -p` adds no dependency to the CLI and
-brings its read-only tools; the key is managed either way.
+
+**Amended after re-review (2026-09-23):** under `--bare` the producer needs
+an API key as the API would (§8 amendment, D2). What is left of the argument
+is that `claude -p` adds no dependency to the CLI and brings its read-only
+tools.
 
 **Generate code straight from the plan, with no agent.** The scaffold step
 does this for ~~what `make:feature` covers~~ the elements whose shape the plan
-states in full (amended after re-review, 2026-09-23: the scaffold is a
-plan-driven emitter, not `make:feature`; see §5). Past that, the plan's
-business rules are prose, and generating from prose is the agent's job.
+states in full (amended after re-review, 2026-09-23; see §5). Past that, the
+plan's business rules are prose, and generating from prose is the agent's job.
 
 **Parallel slices in worktrees.** Rejected for now on the evidence in Prior
 art, and because three to six sequential tasks is what a typical feature
@@ -2851,10 +2864,8 @@ code and never from an earlier plan.
    reliably, or does generation split into an outline call and per-entity detail
    calls with `--resume`? Decided by the measured rate of
    `error_max_structured_output_retries`.
-   **Open, with a probe (2026-09-23):** the headless producer waits for it.
-   The probe procedure, and the schema sizes against the API's
-   constrained-decoding limits, are in the Part 3 note under Phasing and the
-   §8 amendment.
+   **Open, with a probe (2026-09-23):** see the §8 amendment and the Part 3
+   probes under Phasing.
 3. **Step width.** Five files is a starting guess. The published number
    describes bug fixing in unfamiliar repositories, which this is not.
    **Held (2026-09-23):** five files stays until Part 3 records files touched
@@ -2898,13 +2909,9 @@ code and never from an earlier plan.
     `--bare` headless mode. That has to be tested, not assumed; if they do not
     hold, the producer needs an OS-level sandbox or a copy of the tree with the
     excluded paths removed.
-    **Open, with a probe (2026-09-23):** the docs already say Read rules reach
-    Grep and Glob only as a best effort
-    (https://code.claude.com/docs/en/permissions#read-and-edit), so the
-    producer is to run in a
-    checkout of the tracked files at HEAD, the second remedy above, and keep
-    deny rules for tracked secrets (§8 amendment). The canary probe that tests
-    it is in the Part 3 note under Phasing.
+    **Open, with a probe (2026-09-23):** the producer is to run in a checkout
+    of the tracked files at HEAD, the second remedy above. See the §8
+    amendment and the Part 3 probes under Phasing.
 11. **GitHub approval provenance.** `author_association` plus an unedited
     comment is the strongest signal the issue API offers, and it still trusts
     every collaborator equally. Is that enough, or does the `github` store keep
@@ -2913,10 +2920,7 @@ code and never from an earlier plan.
     the first one's session in scripted mode. If it cannot, the second call is
     a fresh one carrying the questions and answers, at the cost of re-reading.
     **Open, with a probe (2026-09-23):** `--ask` is deferred with the headless
-    producer; the probe is in the Part 3 note under Phasing. A resumed run
-    reports the conversation's whole cost
-    (https://code.claude.com/docs/en/headless, the paragraph on
-    `total_cost_usd`), which §8's amendment accounts for.
+    producer. See the §8 amendment and the Part 3 probes under Phasing.
 13. ~~**Editing in the page.** Feedback is comments today. Simple edits (rename a
     column, change a type, drop a route) could be made in the page and
     exported as `ops` directly, with no model call. Worth the template's added
