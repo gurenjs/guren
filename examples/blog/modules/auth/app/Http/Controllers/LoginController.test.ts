@@ -17,7 +17,7 @@ vi.mock('@guren/core', async () => {
     ...createControllerModuleMock(),
   }
 })
-import LoginController from '../../app/Http/Controllers/Auth/LoginController.js'
+import LoginController from './LoginController.js'
 
 function createAuthStub(user: unknown = null) {
   const session = {

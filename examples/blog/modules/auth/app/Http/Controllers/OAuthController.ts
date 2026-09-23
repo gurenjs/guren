@@ -1,7 +1,7 @@
 import { Controller, ValidationException, type OAuthManager } from '@guren/core'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { User, type UserRecord } from '../../../Models/User.js'
+import { User, type UserRecord } from '../../../../../app/Models/User.js'
 
 const ProviderParamSchema = z.object({
   provider: z.enum(['github', 'google']),

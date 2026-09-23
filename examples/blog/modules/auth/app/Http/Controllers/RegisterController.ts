@@ -1,10 +1,10 @@
 import { Controller, ValidationException, createEmailVerificationToken, buildVerificationUrl } from '@guren/core'
-import { RegisterSchema } from '../../Validators/RegisterValidator.js'
-import { User } from '../../../Models/User.js'
-import { emailVerificationStore } from '../../../Auth/EmailVerificationStore.js'
-import { appUrl } from '../../../Auth/AppUrl.js'
-import { sendEmailVerificationMail } from '../../../Mail/EmailVerificationMail.js'
-import { SendWelcomeEmailJob } from '../../../Jobs/SendWelcomeEmailJob.js'
+import { RegisterSchema } from '../Validators/RegisterValidator.js'
+import { User } from '../../../../../app/Models/User.js'
+import { emailVerificationStore } from '../../../../../app/Auth/EmailVerificationStore.js'
+import { appUrl } from '../../../../../app/Auth/AppUrl.js'
+import { sendEmailVerificationMail } from '../../../../../app/Mail/EmailVerificationMail.js'
+import { SendWelcomeEmailJob } from '../../../../../app/Jobs/SendWelcomeEmailJob.js'
 import { pages } from '@/.guren/pages.gen'
 
 export default class RegisterController extends Controller {

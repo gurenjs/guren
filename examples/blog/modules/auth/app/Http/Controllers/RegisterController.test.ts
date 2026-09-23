@@ -13,18 +13,18 @@ const { mockUserWhere, mockUserCreate, mockDispatch, mockSendEmailVerificationMa
   mockSendEmailVerificationMail: vi.fn(),
 }))
 
-vi.mock('../../app/Models/User.js', () => ({
+vi.mock('../../../../../app/Models/User.js', () => ({
   User: {
     where: mockUserWhere,
     create: mockUserCreate,
   },
 }))
 
-vi.mock('../../app/Jobs/SendWelcomeEmailJob.js', () => ({
+vi.mock('../../../../../app/Jobs/SendWelcomeEmailJob.js', () => ({
   SendWelcomeEmailJob: { dispatch: mockDispatch },
 }))
 
-vi.mock('../../app/Mail/EmailVerificationMail.js', () => ({
+vi.mock('../../../../../app/Mail/EmailVerificationMail.js', () => ({
   sendEmailVerificationMail: mockSendEmailVerificationMail,
 }))
 
@@ -36,7 +36,7 @@ vi.mock('@guren/core', async () => {
   }
 })
 
-import RegisterController from '../../app/Http/Controllers/Auth/RegisterController.js'
+import RegisterController from './RegisterController.js'
 
 function createAuthStub() {
   return {

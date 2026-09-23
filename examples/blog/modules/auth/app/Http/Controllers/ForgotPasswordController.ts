@@ -1,9 +1,9 @@
 import { Controller, createPasswordResetToken, buildPasswordResetUrl } from '@guren/core'
-import { ForgotPasswordSchema } from '../../Validators/ForgotPasswordValidator.js'
-import { User } from '../../../Models/User.js'
-import { passwordResetStore } from '../../../Auth/PasswordResetStore.js'
-import { appUrl } from '../../../Auth/AppUrl.js'
-import { SendPasswordResetEmailJob } from '../../../Jobs/SendPasswordResetEmailJob.js'
+import { ForgotPasswordSchema } from '../Validators/ForgotPasswordValidator.js'
+import { User } from '../../../../../app/Models/User.js'
+import { passwordResetStore } from '../../../../../app/Auth/PasswordResetStore.js'
+import { appUrl } from '../../../../../app/Auth/AppUrl.js'
+import { SendPasswordResetEmailJob } from '../../../../../app/Jobs/SendPasswordResetEmailJob.js'
 import { pages } from '@/.guren/pages.gen'
 
 const STATUS_MESSAGE = "If an account exists for that email, we've sent a password reset link."

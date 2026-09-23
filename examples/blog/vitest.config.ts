@@ -108,7 +108,9 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
-    include: ['tests/**/*.test.{ts,tsx}'],
+    // modules/**: a module's own tests are colocated with its source (RFC 0002),
+    // not under tests/ — see modules/auth.
+    include: ['tests/**/*.test.{ts,tsx}', 'modules/**/*.test.{ts,tsx}'],
     setupFiles: ['./tests/setup.ts'],
     server: {
       deps: {
