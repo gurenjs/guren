@@ -7,6 +7,18 @@ import { buildVercelOutput, createVercelHandler, vercelPlugin } from '../src/ind
 
 const DEFAULT_ENTRYPOINT_SOURCE = "export default { fetch() { return new Response('ok') } }\n"
 
+async function captureWarnings(run: () => Promise<void>): Promise<string[]> {
+  const warnings: string[] = []
+  const original = console.warn
+  console.warn = (message: string) => warnings.push(message)
+  try {
+    await run()
+  } finally {
+    console.warn = original
+  }
+  return warnings
+}
+
 /** Writes a minimal buildable app under `root`, as `buildVercelOutput` options. */
 function scaffoldApp(
   root: string,
@@ -310,29 +322,9 @@ describe('@guren/plugin-vercel', () => {
       expect(copied).toContain('Hello docs.')
     })
 
-    it('preserves class names through the bundler', async () => {
-      // Regression guard for `BUN_DEPLOY_MINIFY` in @guren/core/internal/deploy-build,
-      // whose comment says why mangled class names outlive a deploy.
-      const app = scaffoldApp(root, {
-        source:
-          'class GurenJobProbe {}\nexport default { fetch() { return new Response(GurenJobProbe.name) } }\n',
-      })
-
-      await buildVercelOutput(app)
-
-      // Asserting on the runtime name rather than the bundle text: `.name` is
-      // what the queue registry and notification types actually read, and it
-      // survives any reformatting the bundler may do.
-      const bundled = await import(join(app.outputDir, 'functions/index.func/index.js'))
-      const response = await bundled.default.fetch(new Request('http://example.com/'))
-
-      expect(await response.text()).toBe('GurenJobProbe')
-    })
-
-    it('preserves the names of class and function expressions through the bundler', async () => {
-      // Syntax minification alone drops the name of a class or function expression
-      // whose body never refers to it, or swaps in the binding's; `keepNames` is
-      // what restores the source name.
+    it('preserves class and function names through the bundler', async () => {
+      // The queue registry keys on the class name: mangling renames declarations, and
+      // syntax minification alone drops an expression's name or swaps in the binding's.
       const app = scaffoldApp(root, {
         source: [
           'class Job {}',
@@ -342,7 +334,7 @@ describe('@guren/plugin-vercel', () => {
           'register(function inlineNamedFn() {})',
           'const makeJob = () => class ReturnedJob extends Job {}',
           'const SendMail = class SendMailJob extends Job {}',
-          'const names = () => [...registry.map((job) => job.name), makeJob().name, SendMail.name].join(",")',
+          'const names = () => [Job.name, ...registry.map((job) => job.name), makeJob().name, SendMail.name].join(",")',
           'export default { fetch() { return new Response(names()) } }',
           '',
         ].join('\n'),
@@ -353,7 +345,7 @@ describe('@guren/plugin-vercel', () => {
       const bundled = await import(join(app.outputDir, 'functions/index.func/index.js'))
       const response = await bundled.default.fetch(new Request('http://example.com/'))
 
-      expect(await response.text()).toBe('SendWelcomeMailJob,inlineNamedFn,ReturnedJob,SendMailJob')
+      expect(await response.text()).toBe('Job,SendWelcomeMailJob,inlineNamedFn,ReturnedJob,SendMailJob')
     })
 
     it('warns when the bundle renames a name-keyed class another module shares a name with', async () => {
@@ -378,19 +370,7 @@ describe('@guren/plugin-vercel', () => {
         "import { Notification } from '../base'\nexport class OrderShipped extends Notification {}\n",
       )
 
-      const warnings: string[] = []
-      const original = console.warn
-      console.warn = (message: string) => warnings.push(message)
-      try {
-        await buildVercelOutput(app)
-      } finally {
-        console.warn = original
-      }
-
-      const bundled = await import(join(app.outputDir, 'functions/index.func/index.js'))
-      const response = await bundled.default.fetch(new Request('http://example.com/'))
-      // Bun 1.3.14 and 1.4.2 bundle one of the two as `OrderShipped2`, keepNames or not.
-      expect((await response.text()).split(',').sort()).toEqual(['OrderShipped', 'OrderShipped2'])
+      const warnings = await captureWarnings(() => buildVercelOutput(app))
 
       const renamed = warnings.find((line) =>
         line.startsWith('Vercel build: the bundle names a class OrderShipped as OrderShipped2'),
@@ -478,14 +458,7 @@ describe('buildVercelOutput deploy-runtime warnings (RFC 0020 Part 0)', () => {
       'utf8',
     )
 
-    const warnings: string[] = []
-    const original = console.warn
-    console.warn = (message: string) => warnings.push(message)
-    try {
-      await buildVercelOutput(app)
-    } finally {
-      console.warn = original
-    }
+    const warnings = await captureWarnings(() => buildVercelOutput(app))
 
     const hazard = warnings.find((line) => line.startsWith('Vercel build: Vercel shares no memory'))
     expect(hazard).toBeDefined()

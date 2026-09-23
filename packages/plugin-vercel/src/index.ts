@@ -313,12 +313,7 @@ async function bundleFunction(input: {
     throw new Error(`${LABEL}: bun build failed.\n${result.logs.map((log) => String(log)).join('\n')}`)
   }
 
-  reportRenamedNameKeyedClasses({
-    bundle: (await Promise.all(result.outputs.map((output) => output.text()))).join('\n'),
-    inputs: Object.keys(result.metafile?.inputs ?? {}),
-    root: input.root,
-    label: LABEL,
-  })
+  await reportRenamedNameKeyedClasses(result, { root: input.root, label: LABEL })
 }
 
 function buildVercelEnvironment(publicDir: string, ssrDir: string): Record<string, string> {

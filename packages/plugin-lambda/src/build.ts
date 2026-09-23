@@ -304,12 +304,7 @@ async function bundleHandler(
     throw new Error(`Lambda build: bun build failed.\n${details}`)
   }
 
-  reportRenamedNameKeyedClasses({
-    bundle: (await Promise.all(result.outputs.map((output) => output.text()))).join('\n'),
-    inputs: Object.keys(result.metafile?.inputs ?? {}),
-    root,
-    label: 'Lambda build',
-  })
+  await reportRenamedNameKeyedClasses(result, { root, label: 'Lambda build' })
 }
 
 function zipFunction(out: string, funcDir: string): void {

@@ -21,6 +21,7 @@ import {
   renderDevOnlyStub,
   importSpecifier,
   readManifest,
+  BUN_DEPLOY_MINIFY,
   renamedNameKeyedClasses,
   reportRenamedNameKeyedClasses,
   resolveClientAssetEnv,
@@ -897,35 +898,65 @@ describe('reportRenamedNameKeyedClasses', () => {
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'guren-renamed-classes-'))
+    mkdirSync(join(root, 'app/Events'), { recursive: true })
+    mkdirSync(join(root, 'app/Notifications'), { recursive: true })
+    writeFileSync(join(root, 'app/base.ts'), 'export class Event {}\nexport class Notification {}\n')
+    writeFileSync(join(root, 'app/Events/OrderShipped.ts'), "import { Event } from '../base'\nexport class OrderShipped extends Event {}\n")
+    writeFileSync(
+      join(root, 'app/Notifications/OrderShipped.ts'),
+      "import { Notification } from '../base'\nexport class OrderShipped extends Notification {}\n",
+    )
+    writeFileSync(
+      join(root, 'entry.ts'),
+      [
+        "import { OrderShipped as ShippedEvent } from './app/Events/OrderShipped'",
+        "import { OrderShipped as ShippedNotification } from './app/Notifications/OrderShipped'",
+        'export const names = [ShippedEvent.name, ShippedNotification.name]',
+        '',
+      ].join('\n'),
+    )
   })
 
   afterEach(() => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  test('should warn with the app-relative files and leave module dependencies and plugin namespaces unread', () => {
-    mkdirSync(join(root, 'app/Events'), { recursive: true })
-    mkdirSync(join(root, 'node_modules/shipping'), { recursive: true })
-    writeFileSync(join(root, 'app/Events/OrderShipped.ts'), 'export class OrderShipped extends Event {}\n')
-    writeFileSync(join(root, 'node_modules/shipping/index.ts'), 'export class OrderShipped extends Event {}\n')
+  test('should warn about the rename a real bundle makes, naming the app-relative files', async () => {
+    const result = await Bun.build({ entrypoints: [join(root, 'entry.ts')], metafile: true, minify: BUN_DEPLOY_MINIFY })
+    // Bun 1.3.14 and 1.4.2 rename one of the two whatever keepNames says. Should this
+    // start failing, Bun has fixed it and the warning can go.
+    expect(await result.outputs[0]!.text()).toContain('class OrderShipped2')
     const warn = spyOn(console, 'warn').mockImplementation(() => {})
 
     try {
-      const messages = reportRenamedNameKeyedClasses({
-        bundle: 'class OrderShipped{}class OrderShipped2{}',
-        inputs: [
-          join(root, 'app/Events/OrderShipped.ts'),
-          join(root, 'node_modules/shipping/index.ts'),
-          'guren-lambda-stub:vite',
-        ],
-        root,
-        label: 'Test build',
-      })
+      await reportRenamedNameKeyedClasses(result, { root, label: 'Test build' })
 
-      expect(messages).toHaveLength(1)
-      expect(messages[0]).toStartWith('Test build: the bundle names a class OrderShipped as OrderShipped2')
-      expect(messages[0]).toContain(`${join('app', 'Events', 'OrderShipped.ts')} declares a job`)
-      expect(warn).toHaveBeenCalledWith(messages[0])
+      expect(warn).toHaveBeenCalledTimes(1)
+      const message = String(warn.mock.calls[0]![0])
+      expect(message).toStartWith('Test build: the bundle names a class OrderShipped as OrderShipped2')
+      const declaring = [join('app', 'Events', 'OrderShipped.ts'), join('app', 'Notifications', 'OrderShipped.ts')]
+      expect(message).toContain(` ${declaring.join(', ')} declare a job`)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  test('should leave module dependencies, plugin namespaces and non-code outputs unread', async () => {
+    mkdirSync(join(root, 'node_modules/shipping'), { recursive: true })
+    writeFileSync(join(root, 'node_modules/shipping/index.ts'), 'export class Receipt extends Event {}\n')
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+    const asset = { kind: 'asset', text: () => Promise.reject(new Error('an asset was decoded')) }
+
+    try {
+      await reportRenamedNameKeyedClasses(
+        {
+          outputs: [{ kind: 'entry-point', text: async () => 'class Receipt{}class Receipt2{}' }, asset],
+          metafile: { inputs: { [join(root, 'node_modules/shipping/index.ts')]: {}, 'guren-lambda-stub:vite': {} } },
+        },
+        { root, label: 'Test build' },
+      )
+
+      expect(warn).not.toHaveBeenCalled()
     } finally {
       warn.mockRestore()
     }

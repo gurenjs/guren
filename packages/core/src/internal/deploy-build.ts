@@ -750,8 +750,9 @@ export interface RenamedNameKeyedClass {
 /**
  * App classes the bundle renamed to `<name><n>` because another module declares the
  * same top-level name; which one keeps it follows import order. Only unpinned
- * subclasses of `NAME_KEYED_BASES` count, traced through the app's own `extends`
- * by name, so an aliased base import is missed rather than guessed.
+ * subclasses of `NAME_KEYED_BASES` count, traced through the app's own `extends` by
+ * name with regexes (this module imports only builtins, so not the CLI's AST readers):
+ * an aliased base import is missed rather than guessed.
  */
 export function renamedNameKeyedClasses(
   bundle: string,
@@ -794,36 +795,42 @@ function withoutNumericSuffix(name: string): string | undefined {
   return end > 0 && end < name.length ? name.slice(0, end) : undefined
 }
 
+/** The part of a `Bun.build` result the reporter reads, structural so this module needs no bun-types. */
+export interface BundleResultLike {
+  readonly outputs: ReadonlyArray<{ readonly kind: string; text(): Promise<string> }>
+  readonly metafile?: { readonly inputs: Readonly<Record<string, unknown>> }
+}
+
 /**
- * Warns about each `renamedNameKeyedClasses` result for a finished bundle and returns
- * the messages. `inputs` are the metafile's input paths, relative to the cwd; module
- * dependencies and plugin namespaces are skipped, and so is a file that will not read.
+ * Warns about each `renamedNameKeyedClasses` result of a `Bun.build` run with
+ * `metafile: true`, whose input paths (relative to the cwd) are the sources read.
+ * Module dependencies are skipped, and so is an input that will not read, such as a
+ * plugin namespace.
  */
-export function reportRenamedNameKeyedClasses(options: {
-  bundle: string
-  inputs: Iterable<string>
-  root: string
-  label: string
-}): string[] {
+export async function reportRenamedNameKeyedClasses(
+  result: BundleResultLike,
+  options: { root: string; label: string },
+): Promise<void> {
+  const code = result.outputs.filter((output) => output.kind === 'entry-point' || output.kind === 'chunk')
+  const bundle = (await Promise.all(code.map((output) => output.text()))).join('\n')
   const root = realpathOfNearestExisting(options.root)
   const sources: Array<{ file: string; text: string }> = []
-  for (const input of options.inputs) {
-    if (/(?:^|[\\/])node_modules[\\/]/.test(input) || /^[\w-]+:/.test(input) && !isAbsolute(input)) continue
+  for (const input of Object.keys(result.metafile?.inputs ?? {})) {
+    if (/(?:^|[\\/])node_modules[\\/]/.test(input)) continue
     try {
       const path = realpathSync(resolve(input))
-      sources.push({ file: relative(root, path) || path, text: readFileSync(path, 'utf8') })
+      sources.push({ file: relative(root, path), text: readFileSync(path, 'utf8') })
     } catch {
       continue
     }
   }
 
-  return renamedNameKeyedClasses(options.bundle, sources).map(({ name, bundledAs, files }) => {
-    const message =
+  for (const { name, bundledAs, files } of renamedNameKeyedClasses(bundle, sources)) {
+    console.warn(
       `${options.label}: the bundle names a class ${name} as ${bundledAs}, because another module declares ` +
-      `${name} too and import order picks which one keeps it. ${files.join(', ')} ${files.length === 1 ? 'declares' : 'declare'} ` +
-      `a job, event, notification or agent named ${name}, and those are stored under their class name. Rename it, ` +
-      'or pin `static jobName`, `static eventName`, `get type()` or `static agentName`.'
-    console.warn(message)
-    return message
-  })
+        `${name} too and import order picks which one keeps it. ${files.join(', ')} ${files.length === 1 ? 'declares' : 'declare'} ` +
+        `a job, event, notification or agent named ${name}, and those are stored under their class name. Rename it, ` +
+        'or pin `static jobName`, `static eventName`, `get type()` or `static agentName`.',
+    )
+  }
 }
