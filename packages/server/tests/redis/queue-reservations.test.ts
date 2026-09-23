@@ -4,6 +4,7 @@ import { createRedisClient, type Redis } from '../../src/redis'
 import { RedisDriver } from '../../src/queue/drivers/RedisDriver'
 import { Job, enqueueJob, registerJob } from '../../src/queue/Job'
 import { Worker } from '../../src/queue/Worker'
+import type { QueuedJob } from '../../src/queue/types'
 
 const describeRedis = process.env.REDIS_URL ? describe : describe.skip
 
@@ -70,22 +71,33 @@ describeRedis('Redis queue reservations', () => {
   })
 
   test('renews reservations while a timed-out handler drains, then acknowledges it', async () => {
-    const started = Promise.withResolvers<void>()
+    const lease = 300
+    const renewedPastLease = Promise.withResolvers<void>()
     const drain = Promise.withResolvers<void>()
     class DrainingJob extends Job {
-      async handle() { started.resolve(); await drain.promise }
+      async handle() { await drain.promise }
     }
+    class WatchedDriver extends RedisDriver {
+      override async extendReservation(job: QueuedJob) {
+        const calledAt = Date.now()
+        const owned = await super.extendReservation(job)
+        if (owned && job.reservedAt && calledAt > job.reservedAt.getTime() + lease) renewedPastLease.resolve()
+        return owned
+      }
+    }
+    // The pop runs a Redis round trip after the renewal it waits on; the lease has to outlast a stall there.
+    const leased = new WatchedDriver(redis, { prefix, visibilityTimeout: lease })
     registerJob(DrainingJob)
-    const id = await enqueueJob(driver, DrainingJob, {}, { maxAttempts: 1 })
-    const worker = new Worker(driver, { timeout: 5, stopWhenEmpty: true })
+    const id = await enqueueJob(leased, DrainingJob, {}, { maxAttempts: 1 })
+    const worker = new Worker(leased, { timeout: 5, stopWhenEmpty: true })
     const running = worker.start()
     try {
-      await started.promise
-      await new Promise((resolve) => setTimeout(resolve, 150))
-      expect(await driver.pop('default')).toBeNull()
+      const deadline = setTimeout(() => renewedPastLease.reject(new Error('no renewal past the first lease within 2000ms')), 2000)
+      await renewedPastLease.promise.finally(() => clearTimeout(deadline))
+      expect(await leased.pop('default')).toBeNull()
       expect(worker.isRunning()).toBe(true)
     } finally { drain.resolve(); await running }
-    expect(await driver.getFailedJobs('default')).toHaveLength(0)
+    expect(await leased.getFailedJobs('default')).toHaveLength(0)
     expect(await redis.exists(`${prefix}job:${id}`)).toBe(0)
   })
 
