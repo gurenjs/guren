@@ -60,6 +60,12 @@ interface ProviderRegistryEntry<User = unknown> {
   description?: AuthProviderEntry
 }
 
+/** `DefaultHasher.algorithm`, read structurally so a custom `PasswordHasher` reads as unknown. */
+function hasherAlgorithm(hasher: PasswordHasher): string | null {
+  const algorithm = (hasher as { algorithm?: unknown }).algorithm
+  return typeof algorithm === 'string' ? algorithm : null
+}
+
 export class AuthManager implements AuthManagerContract {
   private readonly guards = new Map<string, GuardRegistryEntry>()
   private readonly providers = new Map<string, ProviderRegistryEntry<any>>()
@@ -269,6 +275,7 @@ export class AuthManager implements AuthManagerContract {
       kind: 'model',
       model: model.name,
       hasher: hasher.constructor.name,
+      algorithm: hasherAlgorithm(hasher),
     })
 
     this.registerGuard(guardName, ({ session, manager }) => {
@@ -346,12 +353,13 @@ export class AuthManager implements AuthManagerContract {
   describe(): AuthEntry {
     const providers: Record<string, AuthProviderEntry> = {}
     for (const [name, entry] of this.providers) {
-      providers[name] = entry.description ? { ...entry.description } : { kind: 'custom', hasher: null }
+      providers[name] = entry.description ? { ...entry.description } : { kind: 'custom', hasher: null, algorithm: null }
     }
     return {
       guards: this.guardNames(),
       defaultGuard: this.defaultGuard,
       hasher: this.passwordHasher.constructor.name,
+      algorithm: hasherAlgorithm(this.passwordHasher),
       providers,
     }
   }

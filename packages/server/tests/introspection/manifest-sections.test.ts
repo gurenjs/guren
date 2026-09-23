@@ -34,7 +34,9 @@ class ManagersProvider extends ServiceProvider {
     const cache = new CacheManager({ default: 'redis', stores: { redis: { driver: 'redis', client: () => { throw new Error('connected') } } } })
     cache.registerStore('custom', () => { throw new Error('built') })
     this.container.instance('cache', cache)
-    this.container.instance('storage', new StorageManager({ default: 'media', disks: { media: { driver: 'memory' } } }))
+    const storage = new StorageManager({ default: 'media', disks: { media: { driver: 'memory' } } })
+    storage.registerDisk('vault', () => { throw new Error('built') })
+    this.container.instance('storage', storage)
     this.container.instance('queue', new QueueManager({ default: 'sync', drivers: { sync: () => { throw new Error('resolved') } } }))
   }
 }
@@ -55,9 +57,9 @@ describe('manager sections (RFC 0026 §1)', () => {
       stores: { memory: { driver: 'memory', perProcess: true }, redis: { driver: 'redis', perProcess: false } },
     })
     expect(manifest.cache).toEqual({ default: 'redis', entries: { redis: { driver: 'redis' }, custom: { driver: null } } })
-    expect(manifest.storage).toEqual({ default: 'media', entries: { media: { driver: 'memory' } } })
+    expect(manifest.storage).toEqual({ default: 'media', entries: { media: { driver: 'memory' }, vault: { driver: null } } })
     expect(manifest.queue).toEqual({ default: 'sync', entries: { sync: { driver: null } } })
-    expect(manifest.auth).toEqual({ guards: ['web'], defaultGuard: 'web', hasher: 'DefaultHasher', providers: {} })
+    expect(manifest.auth).toEqual({ guards: ['web'], defaultGuard: 'web', hasher: 'DefaultHasher', algorithm: 'scrypt', providers: {} })
     expect(manifest.attachments).toBeUndefined()
   })
 
@@ -135,10 +137,50 @@ describe('manager sections (RFC 0026 §1)', () => {
     expect(manifest.warnings.find((warning) => warning.code === 'section-unreadable')?.message).toContain('Session store not found: missing')
   })
 
+  test('reports the database driver\'s table by its SQL name', () => {
+    const table = { [Symbol.for('drizzle:Name')]: 'sessions' }
+    const manager = new SessionManager({ default: 'db', stores: { db: { driver: 'database', table } as never } })
+
+    expect(manager.describe().stores.db).toEqual({ driver: 'database', table: 'sessions', perProcess: false })
+  })
+
   test('reports a plugin session driver as unverifiable rather than shared', () => {
     const manager = new SessionManager({ default: 'dynamo', stores: { dynamo: { driver: 'dynamo' as 'memory' } } })
 
     expect(manager.describe().stores.dynamo).toEqual({ driver: 'dynamo', perProcess: null })
+  })
+})
+
+describe('auth section', () => {
+  test('tells the argon2 hasher from the scrypt default, which share one class name', async () => {
+    const scrypt = await createApp({ auth: {} }).introspect()
+    const argon2 = await createApp({ auth: { hasher: 'argon2' } }).introspect()
+
+    expect(scrypt.auth).toMatchObject({ hasher: 'DefaultHasher', algorithm: 'scrypt' })
+    expect(argon2.auth).toMatchObject({ hasher: 'DefaultHasher', algorithm: 'argon2' })
+  })
+
+  test('describes a useModel() provider and a bare registerProvider() factory without calling either', async () => {
+    class User {}
+    let built = false
+    class UsersProvider extends ServiceProvider {
+      register(): void {
+        const auth = this.container.make('auth')
+        auth.useModel(User as never)
+        auth.registerProvider('admins', () => {
+          built = true
+          throw new Error('built')
+        })
+      }
+    }
+
+    const manifest = await createApp({ auth: { hasher: 'argon2' }, providers: [UsersProvider] }).introspect()
+
+    expect(manifest.auth?.providers).toEqual({
+      users: { kind: 'model', model: 'User', hasher: 'DefaultHasher', algorithm: 'argon2' },
+      admins: { kind: 'custom', hasher: null, algorithm: null },
+    })
+    expect(built).toBe(false)
   })
 })
 
@@ -153,11 +195,15 @@ describe('ability on middleware entries', () => {
           .aliasMiddleware('can-resource', authorizeResourceMiddleware(() => ({})))
           .groupMiddleware('web', ['auth', 'can-edit'])
           .aliasMiddleware('deny-all', authorizeMiddleware([]))
+          .groupMiddleware('resource-and-named', ['can-resource', 'can-edit'])
           .groupMiddleware('mixed', ['can-edit', 'can-resource'])
           .groupMiddleware('undetermined', ['deny-all', 'can-resource'])
         router.delete('/posts/:id', [PostController, 'update']).middleware(authorizeResourceMiddleware(() => ({})))
         router.middleware('undetermined').group((scoped) => {
           scoped.get('/posts', [PostController, 'update'])
+        })
+        router.middleware('resource-and-named').group((scoped) => {
+          scoped.put('/posts/:id', [PostController, 'update'])
         })
       },
     })
@@ -172,6 +218,9 @@ describe('ability on middleware entries', () => {
     expect(manifest.routes[0]?.middleware[0]).toMatchObject({ kind: 'inline', ability: 'delete' })
     expect(manifest.routes[1]?.middleware[0]).toMatchObject({ kind: 'group', name: 'undetermined' })
     expect(manifest.routes[1]?.middleware[0]?.ability).toBeUndefined()
+    // A resource check merged with a named one: `abilities` is non-empty, so no verb-map ability.
+    expect(manifest.routes[2]?.middleware[0]).toMatchObject({ kind: 'group', name: 'resource-and-named' })
+    expect(manifest.routes[2]?.middleware[0]?.ability).toBeUndefined()
   })
 })
 

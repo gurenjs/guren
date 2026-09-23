@@ -115,6 +115,8 @@ export interface AuthProviderEntry {
   model?: string
   /** The hasher's constructor name; null for a custom provider, whose hasher only its factory knows. */
   hasher: string | null
+  /** `'scrypt'` or `'argon2'` for the framework's hasher, which reports one class name for both; null otherwise. */
+  algorithm: string | null
 }
 
 export interface AuthEntry {
@@ -122,6 +124,8 @@ export interface AuthEntry {
   defaultGuard: string | null
   /** The hasher new passwords are written with (`createApp({ auth: { hasher } })`), by constructor name. */
   hasher: string
+  /** Its algorithm, as on {@link AuthProviderEntry.algorithm}: `'argon2'` needs `Bun.password`. */
+  algorithm: string | null
   providers: Record<string, AuthProviderEntry>
 }
 

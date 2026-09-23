@@ -17,6 +17,8 @@ import {
 import { Container } from '../../src/container/Container'
 import { ProviderManager } from '../../src/container/ServiceProvider'
 import { defineConfig } from '../../src/config/define'
+import { toPlainJson } from '../../src/introspection/plain-json'
+import { toJsonSchema } from '../../src/internal/zod-json-schema'
 import { resetDefaultApplication } from '../../src/http/default-application'
 import { withEnv } from '../support/env'
 
@@ -39,6 +41,14 @@ class PostController extends Controller {
 class InvoiceController extends Controller {
   async index() {
     return this.json([])
+  }
+
+  async show() {
+    return this.json({})
+  }
+
+  async store() {
+    return this.json({})
   }
 }
 
@@ -110,7 +120,7 @@ function registerRoutes(baseRouter: Router): void {
   })
   router.delete('/posts/:id', [PostController, 'update'])
     .middleware(authorizeResourceMiddleware(() => ({})))
-  // All-optional: the schema walker emits `required: undefined` for it.
+  // All-optional: no `required` key, which the walker must omit rather than set to undefined.
   router.get('/search', { name: 'search', query: z.object({ q: z.string().optional() }) }, () => 'ok')
 }
 
@@ -322,6 +332,22 @@ describe('isIntrospecting()', () => {
     }
   }
 
+  class TickingFlagProvider extends ServiceProvider {
+    static seen: Array<[string, boolean]> = []
+
+    async register(): Promise<void> {
+      const label = this.container.make<string>('label')
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      TickingFlagProvider.seen.push([label, isIntrospecting()])
+    }
+  }
+
+  const labelled = (label: string) => class extends ServiceProvider {
+    register(): void {
+      this.container.instance('label', label)
+    }
+  }
+
   test('is true inside an in-process introspect() and false for a normal boot()', async () => {
     FlagReadingProvider.seen = []
 
@@ -332,6 +358,16 @@ describe('isIntrospecting()', () => {
     expect(isIntrospecting()).toBe(false)
   })
 
+  test('is not seen by another app booting while one introspects', async () => {
+    TickingFlagProvider.seen = []
+    const introspected = createApp({ providers: [labelled('introspect'), TickingFlagProvider] })
+    const booted = createApp({ providers: [labelled('boot'), TickingFlagProvider] })
+
+    await Promise.all([introspected.introspect(), booted.boot()])
+
+    expect(Object.fromEntries(TickingFlagProvider.seen)).toEqual({ introspect: true, boot: false })
+  })
+
   test('a normal boot() never calls a provider\'s introspect hook', async () => {
     lifecycle.length = 0
 
@@ -340,16 +376,40 @@ describe('isIntrospecting()', () => {
     expect(lifecycle).toEqual(['hooked:register'])
   })
 
-  test('the same provider instance registered twice keeps its first outcome', async () => {
+  test('the same provider instance registered twice keeps its first outcome, origin and warnings', async () => {
+    class WarningProvider extends HookedProvider {
+      manifestWarnings() {
+        return [{ code: 'example', message: 'once' }]
+      }
+    }
     const container = new Container()
     const manager = new ProviderManager(container)
-    const hooked = new HookedProvider(container)
-    manager.register(hooked).register(hooked)
+    const hooked = new WarningProvider(container)
+    manager.register(hooked, { source: 'module', module: 'billing' }).register(hooked, { source: 'app.register' })
 
     const providers = await manager.registerAllForIntrospection()
 
-    expect(providers.filter((provider) => provider.name === 'HookedProvider').map((provider) => provider.register))
-      .toEqual(['introspect-hook'])
+    expect(providers.filter((provider) => provider.name === 'WarningProvider')).toEqual([
+      expect.objectContaining({ source: 'module', module: 'billing', register: 'introspect-hook' }),
+    ])
+    expect(manager.manifestWarnings()).toEqual([{ code: 'example', message: 'once', provider: 'WarningProvider' }])
+  })
+})
+
+describe('toJsonSchema()', () => {
+  test('omits `required` on an all-optional object instead of setting it to undefined', () => {
+    const schema = toJsonSchema(z.object({ q: z.string().optional() }), [], 'query', 'input')
+
+    expect(schema).toStrictEqual({ type: 'object', properties: { q: { type: 'string' } } })
+  })
+})
+
+describe('toPlainJson()', () => {
+  test('drops undefined keys and refuses what JSON cannot carry', () => {
+    expect(toPlainJson({ a: 1, b: undefined, c: [{ d: undefined }] })).toStrictEqual({ a: 1, c: [{}] })
+    expect(() => toPlainJson({ routes: new Map() })).toThrow('manifest.routes is a Map')
+    expect(() => toPlainJson({ hook: () => {} })).toThrow('manifest.hook is a function')
+    expect(() => toPlainJson({ controller: new InvoiceController() })).toThrow('manifest.controller is a InvoiceController')
   })
 })
 
@@ -394,7 +454,9 @@ describe('Router.registeredHandlers()', () => {
     expect(handlers.map((handler) => handler.index)).toEqual(definitions.map((_, index) => index))
     expect(handlers[0]).toEqual({ index: 0 })
     expect(handlers[1]).toEqual({ index: 1, controller: PostController, action: 'index' })
-    expect(definitions.map((definition) => definition.path)).toEqual(['/a', '/admin/posts', '/admin/invoices'])
+    expect(definitions.map((definition) => `${definition.method} ${definition.path}`)).toEqual([
+      'GET /a', 'GET /admin/posts', 'GET /admin/invoices', 'POST /admin/invoices', 'GET /admin/invoices/:id',
+    ])
     handlers.forEach((handler, index) => {
       expect(handler.controller?.name).toBe(definitions[index]?.controller?.name)
       expect(handler.action).toBe(definitions[index]?.controller?.action)

@@ -122,7 +122,8 @@ export class ProviderManager {
       )
     }
 
-    this.origins.set(provider, origin)
+    // The first registration names where an instance came from; a repeat adds nothing.
+    if (!this.origins.has(provider)) this.origins.set(provider, origin)
 
     // Deferred providers are loaded on-demand when Container.make() is called
     if (provider.isDeferred()) {
@@ -136,6 +137,7 @@ export class ProviderManager {
     return this
   }
 
+  /** `origin` is internal, as on {@link register}. */
   registerMany(providers: Array<ServiceProvider | ServiceProviderConstructor>, origin?: ProviderOrigin): this {
     for (const provider of providers) {
       this.register(provider, origin)
@@ -194,7 +196,7 @@ export class ProviderManager {
 
   /** @internal Findings registered providers hold for the manifest, each named after its provider. */
   manifestWarnings(): ManifestWarning[] {
-    return this.providers
+    return [...new Set(this.providers)]
       .filter((provider) => this.registered.has(provider))
       .filter(isManifestWarningSource)
       .flatMap((provider) =>

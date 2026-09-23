@@ -106,7 +106,7 @@ only for facts that exist nowhere but in a method body.
 async introspect(): Promise<AppManifest>
 
 // @guren/core (re-exported), for providers and app code
-export function isIntrospecting(): boolean   // process.env.GUREN_INTROSPECT === '1'
+export function isIntrospecting(): boolean   // GUREN_INTROSPECT=1, or inside app.introspect() (amended below)
 ```
 
 `introspect()` runs, in order: `providerManager.registerAll()` (with the
@@ -176,7 +176,7 @@ export type RouteEntry = Omit<RouteDefinition, 'schemas' | 'controller' | 'middl
 export interface SessionEntry {
   source: 'manager' | 'auth.sessionOptions.store' | 'none'
   default: string
-  stores: Record<string, { driver: string; table?: string; perProcess: boolean }>
+  stores: Record<string, { driver: string | null; table?: string; perProcess: boolean | null }>   // amended below
 }
 
 export interface AuthEntry {
@@ -202,8 +202,8 @@ read-only method each so the manifest never resolves a store:
 `session-manager.ts:96`; the `database` driver's `table` reported through
 drizzle's `getTableName()`), `CacheManager.describe()`, `StorageManager.describe()`,
 `QueueManager.describe()`, `AuthManager.describe()`, and
-`describeActiveAttachmentEngine()` in `@guren/core`. `perProcess` comes from the
-same `PER_PROCESS_SESSION_DRIVERS` set the runtime warning uses.
+`describeActiveAttachmentEngine()` in `@guren/core`. `perProcess` comes from
+`BUILT_IN_SESSION_DRIVERS` (amended below).
 
 > **Amended in implementation (Part 1):** the shapes above changed where the
 > code they describe differs from what the draft assumed, and each change reports
@@ -224,9 +224,18 @@ same `PER_PROCESS_SESSION_DRIVERS` set the runtime warning uses.
 >   `auth.sessionOptions.store` thunk, which only calling it would answer. With no
 >   manager and no explicit store, `source: 'none'` describes the in-memory store
 >   the session middleware falls back to.
-> - `AuthEntry` gains `hasher`, the one the app writes with. A provider entry is
->   `{ kind: 'model', model, hasher }` for `useModel()` and `{ kind: 'custom',
->   hasher: null }` for a bare `registerProvider()` factory.
+> - `perProcess` (`boolean | null`) comes from `BUILT_IN_SESSION_DRIVERS`, not
+>   `PER_PROCESS_SESSION_DRIVERS`: that map records every framework driver and
+>   whether it shares state, so a driver outside it (a plugin's) is `null`. An
+>   explicit store's class is mapped to its driver first (`MemorySessionStore` to
+>   `memory`, core's `DatabaseSessionStore` to `database`); any other class is
+>   `null`.
+> - `AuthEntry` gains `hasher`, the one the app writes with, and `algorithm`:
+>   `DefaultHasher` writes scrypt or, with `hasher: 'argon2'`, Bun-only Argon2id
+>   under one class name, so the class alone cannot tell them apart. A provider
+>   entry is `{ kind: 'model', model, hasher, algorithm }` for `useModel()` and
+>   `{ kind: 'custom', hasher: null, algorithm: null }` for a bare
+>   `registerProvider()` factory. `algorithm` is null for a custom hasher.
 > - `AttachmentsEntry.delivery` is `{ prefix, routeName, mounted }`, and a `disks`
 >   map carries each disk's `visibility`, `route` and `serve`. RFC 0015 made the
 >   serve mode per disk, so the draft's single `mode` has no source.
@@ -241,14 +250,20 @@ same `PER_PROCESS_SESSION_DRIVERS` set the runtime warning uses.
 >   run enters an `AsyncLocalStorage` scope, and `GUREN_INTROSPECT=1` stays the
 >   CLI child's way to set it for the whole process. A provider prefers the
 >   `introspect?()` hook; `isIntrospecting()` is for a check inside `register()`.
+>   Provider constructors run at `createApp()`, before any introspection, so in
+>   process they see `false` while the CLI child sees `true`: read the flag inside
+>   `register()`, never in a constructor. Timers scheduled inside the run keep
+>   reading `true` after it finished.
 > - A route registrar that throws fails the whole introspection (`introspect()`
 >   rejects, and the CLI reports `crashed`), unlike a provider's `register()`,
 >   which is recorded as `threw` while the rest continue. Routes have no
 >   per-registrar outcome to record, and a partial route list would read as
 >   complete.
-> - The manifest is round-tripped through JSON before it is returned, so it is
->   plain data: a nested `undefined` (an all-optional schema's `required`) is
->   dropped, and the in-memory manifest equals the `--json` output.
+> - The manifest is copied into plain JSON before it is returned: `undefined`
+>   keys are dropped, so the in-memory manifest equals the `--json` output, and
+>   a value JSON cannot carry (a function, a Map, a class instance) throws
+>   rather than vanishing. The schema walker omits an all-optional object's
+>   `required` instead of setting it to `undefined`.
 > - `ConfigServiceProvider` implements `introspect()` itself, parsing the
 >   environment in report mode, so an in-process `introspect()` reports env
 >   problems the way a CLI run does instead of recording the provider `threw`.
@@ -325,9 +340,10 @@ user's middleware may add it, and an absent value means "not determinable", whic
 > alias and group maps are private to it. `ability` is not a new capability
 > field: the authorization stamp has carried `abilities` since RFC 0016 §4, so
 > `ability` is derived from it by `derivableAbility()`, the rule agent tools
-> use too. It is the one ability of a single-ability `all` check, or on a route
-> entry the verb-map ability of a resource check whose `fromMethodMap` holds and
-> that no other check shares the chain with.
+> use too. It is the one ability of a single-ability `all` stamp, or on a route
+> entry the verb-map ability of a resource stamp whose `fromMethodMap` holds and
+> that names no ability of its own. The stamp is per entry: a group's merges its
+> members', so a group combining a resource check with a named one has none.
 
 ### 4. `guren introspect --json`
 
