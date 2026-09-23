@@ -180,6 +180,17 @@ describe('introspectApp()', () => {
     expect(expectFailure(await introspectApp(dir), 'crashed')).toContain('registrar exploded')
   }, 30_000)
 
+  test('carries an unrelated unhandled rejection into the manifest warnings', async () => {
+    const dir = await app('rejection', {
+      'src/main.ts': "import app from './app.js'\n\nvoid Promise.reject(new Error('stray rejection'))\n\nexport default app\n",
+    })
+
+    const result = await introspectApp(dir)
+
+    if (result.status !== 'ok') throw new Error(`expected ok, got ${JSON.stringify(result)}`)
+    expect(result.manifest.warnings).toContainEqual({ code: 'unhandled-rejection', message: 'stray rejection' })
+  }, 30_000)
+
   test('reports timeout when a provider never finishes registering', async () => {
     const dir = await app('timeout', {
       'src/app.ts': `import { createApp, ServiceProvider } from '@guren/core'
@@ -233,8 +244,11 @@ describe('guren introspect --json', () => {
   test('prints the manifest, and exits non-zero with the failure as JSON', async () => {
     const dir = apps.ok!
 
+    const empty = join(root, 'json-no-entry')
+    await writeWorkspaceFiles(empty, { 'bunfig.toml': '[install]\nauto = "disable"\n' })
+
     const ok = await runCliBinCaptured(['introspect', '--json'], dir)
-    const failed = await runCliBinCaptured(['introspect', '--json'], join(root, 'empty'))
+    const failed = await runCliBinCaptured(['introspect', '--json'], empty)
 
     expect(ok.exitCode).toBe(0)
     const manifest = JSON.parse(ok.stdout) as AppManifest

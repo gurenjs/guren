@@ -344,7 +344,8 @@ every check that asks: the same shape as `check.ts`'s `loadRouteGraph()`
 > A scaffolded `src/main.ts` boots at import, and an older server would ignore
 > the flag and run the real boot. `guren introspect` also takes `--app <dir>`
 > and `--timeout <s>`. On failure `--json` prints `{ status, reason, message }`
-> and the command exits 1.
+> and the command exits 1. An unhandled rejection other than the `listen()`
+> refusal becomes an `unhandled-rejection` warning on an otherwise `ok` manifest.
 
 ### 5. Who reads the manifest, who stays static
 

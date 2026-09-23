@@ -17,9 +17,9 @@ import { bootstrapApplication, resolveMainEntry } from './runtime'
 const LISTEN_REFUSED = 'GUREN_INTROSPECT_LISTEN'
 
 const LISTEN_GUIDANCE =
-  'The entry calls listen() while it is imported, and introspection never serves. Export the app from src/main.ts '
-  + '(`export default app`, with `export const ready = bootstrap()` if it boots) and call listen() from bin/serve.ts, '
-  + 'as the scaffold does.'
+  'The entry calls listen() while it is imported, which GUREN_INTROSPECT=1 refuses: introspection never serves. '
+  + 'Export the app from src/main.ts (`export default app`, with `export const ready = bootstrap()` if it boots) '
+  + 'and call listen() from bin/serve.ts, as the scaffold does.'
 
 interface IntrospectableApp {
   introspect?: () => Promise<AppManifest>
@@ -27,6 +27,7 @@ interface IntrospectableApp {
 }
 
 let listenRefusal: unknown
+const otherRejections: string[] = []
 
 /** The refusal itself or anywhere in its `cause` chain: `bootstrapApplication()` wraps a rejected `ready`. */
 function findListenRefusal(error: unknown): unknown {
@@ -44,8 +45,8 @@ function failed(reason: IntrospectionFailure, message: string): Introspection {
   return { status: 'failed', reason, message }
 }
 
-function crashedByListen(error: unknown): Introspection {
-  return failed('crashed', `${messageOf(error)} ${LISTEN_GUIDANCE}`)
+function crashedByListen(): Introspection {
+  return failed('crashed', LISTEN_GUIDANCE)
 }
 
 /**
@@ -75,7 +76,8 @@ async function resolvesOldServer(entry: string): Promise<boolean> {
 /**
  * Upgrades each `name-only` controller reference to the file that exports the
  * very class the router holds (RFC 0026 §3). Files are found by the CLI's one
- * discovery rule; importing them is a module-cache hit after the routes import.
+ * discovery rule. A routed controller's import is a module-cache hit; an
+ * unrouted one is evaluated here, and a failure is a `controller-import` warning.
  */
 async function resolveControllers(manifest: AppManifest, app: IntrospectableApp, root: string): Promise<void> {
   const handlers = app.router?.registeredHandlers?.() ?? []
@@ -134,7 +136,7 @@ async function introspect(root: string): Promise<Introspection> {
   // Past the import, a throw is a failure to register: `main()` reports it as `crashed`.
   const app = (await bootstrapApplication(mod)) as IntrospectableApp
   if (typeof app.introspect !== 'function') {
-    return failed('old-server', 'The application has no introspect() method: its @guren/server predates RFC 0026.')
+    return failed('old-server', 'The application has no introspect() method: its @guren/server predates RFC 0026, and its boot() may already have run.')
   }
 
   const manifest = await app.introspect()
@@ -154,7 +156,7 @@ async function main(): Promise<void> {
   process.on('unhandledRejection', (reason) => {
     const refusal = findListenRefusal(reason)
     if (refusal) listenRefusal ??= refusal
-    else console.error('[guren] Unhandled rejection during introspection:', reason)
+    else otherRejections.push(messageOf(reason))
   })
 
   let result: Introspection
@@ -162,11 +164,15 @@ async function main(): Promise<void> {
     result = await introspect(process.cwd())
   } catch (error) {
     const refusal = findListenRefusal(error)
-    result = refusal ? crashedByListen(refusal) : failed('crashed', messageOf(error))
+    result = refusal ? crashedByListen() : failed('crashed', messageOf(error))
   }
   // Let a rejection raised during the last await reach the handler above.
   await new Promise((resolve) => setTimeout(resolve, 0))
-  if (listenRefusal !== undefined) result = crashedByListen(listenRefusal)
+  if (listenRefusal !== undefined) result = crashedByListen()
+  // `bun run dev` would have died on these; a manifest must not read clean past them.
+  if (result.status === 'ok') {
+    for (const message of otherRejections) result.manifest.warnings.push({ code: 'unhandled-rejection', message })
+  }
 
   await writeFile(outFile, JSON.stringify(result))
   process.exit(0)

@@ -180,7 +180,7 @@ API アプリをフルスタック化するときは、先に `@guren/inertia-cl
 | `check` | ルート・コントローラ・ページ・モデル間の整合性(`routes/` 配下の各ファイルがエントリのレジストラから、モジュールの `routes/` 配下は各モジュール自身のレジストラから実際に呼ばれているかを含む)に加え、`config/agents.ts` の永続エージェントレジストリ・インプロセスエージェントの `appTools()` の名前とスコープ・deferred props(ページの `Props` が必須として宣言している prop に `defer()` を渡していないか。advisory)・docリンク・スペックビューの鮮度・アーキテクチャ境界を検証 | `bunx guren check --json` |
 | `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定、`hidden` 未登録の機微カラム、リクエストのホストから組み立てられたメール内リンク、アプリまたはインストール済みパッケージが宣言した CSRF 除外、インプロセスエージェントのローカルツールを検査 | `bunx guren audit --json` |
 | `gate` | scaffold された CI が回す検証ステージ(codegen・typecheck・lint・`--ci` 規則の `check`・`audit`・テスト)をまとめて実行し、いずれかが失敗すれば非ゼロ exit。実行できないステージは skip ではなく失敗 | `bunx guren gate --changed` |
-| `introspect` | boot も listen もせずにアプリの provider を登録してルートをマウントし、マニフェストを出力。provider ごとの登録結果、解決済みのミドルウェアとコントローラのファイルを含むルート、session・auth・cache・storage・queue・attachments の設定を含む | `bunx guren introspect --json` |
+| `introspect` | boot も listen もせずにアプリの provider とルートを登録し、マニフェストを出力。provider ごとの登録結果、解決済みのミドルウェアとコントローラのファイルを含むルート、session・auth・cache・storage・queue・attachments の設定を含む | `bunx guren introspect --json` |
 | `doctor` | プロジェクトの健全性レポート(環境変数・設定・生成ファイル)と次のアクション | `bunx guren doctor --next` |
 | `context [Entity]` | プロジェクトコンテキストマップ。エンティティ名を渡すと1モデルのすべて — テーブル・リレーション・`fillable`/`hidden`/`visible`/`casts`・スキーマ付きルート(`<Entity>Controller`、モデルを指す `bind`、モデルを使うアクション本体のいずれかで対応付け)・Props付きページ・Resource・Policy・紐付きdocsとIssue — を出力(同名モデルは `--module` で解決、`"app"` はプロジェクトルート。`--live` で `gh` にIssueの状態を問い合わせ、`--repo owner/name` でoriginリモートを上書き) | `bunx guren context User --json` |
 | `docs:graph` | OKF docsのリレーショングラフ。文書・エンティティ・コードパスがノード、検証済みリレーションがエッジ。`--entity <Model>` / `--path <file>` で近傍に絞り、リネーム前に「これを統べるdocsはどれか」を照会 | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |
@@ -231,8 +231,8 @@ MCP サーバは `guren_gate` ツールとして公開します。それ以外�
 
 `guren introspect` はアプリ自身から答えを得ます。ソースコードの文面は読みません。
 `GUREN_INTROSPECT=1` を付けた子プロセスで `src/main.ts` を import し、すべての
-provider を登録してすべてのルートをマウントしたところで止まります。provider の
-`boot()`、`createApp({ boot })` のコールバック、`listen()` は実行されないので、
+provider とすべてのルートを登録したところで止まります。ルートはマウントしません。
+provider の `boot()`、`createApp({ boot })` のコールバック、`listen()` は実行されないので、
 データベースは開かれず、ポートも使いません。子プロセスは `guren dev` と同じく
 アプリのルートにある `.env` を読み込みます。
 
@@ -273,7 +273,6 @@ provider の外のコードでは `isIntrospecting()` で同じ判定ができ�
 インストールされている場合で、エントリを import する前に検出します。
 
 ### エージェントに公開したルート
-
 
 `.agent()` メタデータを宣言したルート([ルーティング](./routing.md)を参照)は、`check` の検査対象になり、`audit` ではより厳しく扱われます。ルールは通常の `check` スイートで実行され、内容によって有効化されます。エージェント公開ルートが存在しないアプリでは findings は生成されず、コントローラの走査も行われません。
 

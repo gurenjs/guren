@@ -3,7 +3,7 @@ import { consola } from 'consola'
 
 import { CliError } from '../cli-error'
 import { defineCommand } from '../define-command'
-import { introspectApp } from '../introspect'
+import { DEFAULT_INTROSPECT_TIMEOUT_MS, introspectApp } from '../introspect'
 
 function table(headers: string[], rows: string[][]): string {
   const widths = headers.map((header, column) => Math.max(header.length, ...rows.map((row) => row[column]?.length ?? 0)))
@@ -75,7 +75,7 @@ function renderManifest(manifest: AppManifest): string {
 export const introspectCommand = defineCommand({
   meta: {
     name: 'introspect',
-    description: 'Register providers and mount routes without booting or listening, and print the app manifest (RFC 0026).',
+    description: 'Register providers and routes without booting or listening, and print the app manifest (RFC 0026).',
   },
   args: {
     json: {
@@ -84,7 +84,7 @@ export const introspectCommand = defineCommand({
     },
     timeout: {
       type: 'string',
-      description: 'Seconds the app may take to register before the run is abandoned. Defaults to 30.',
+      description: `Seconds the app may take to register before the run is abandoned. Defaults to ${DEFAULT_INTROSPECT_TIMEOUT_MS / 1000}.`,
     },
     app: {
       type: 'string',
