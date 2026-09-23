@@ -581,7 +581,8 @@ export async function appBindsService(
   )
   const bindingPattern = new RegExp(`\\b(?:instance|singleton|bind)\\(\\s*['"]${escapeRegExp(key)}['"]`)
   const binding: string[] = []
-  for (const filePath of groups.flat()) {
+  // A test's `container.instance(key, fake)` binds nothing the app boots with.
+  for (const filePath of groups.flat().filter((file) => !TEST_FILE_PATTERN.test(file))) {
     const source = await readIfExists(appRoot, filePath)
     if (source && (bindingPattern.test(source) || (options.definitions && callsDefineConfig(source, key)))) binding.push(filePath)
   }

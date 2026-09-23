@@ -22,7 +22,7 @@ import { appendOAuthStateTable } from './oauth-state-table'
 import { registerConsoleCommand } from './console-registrar'
 import { generateSchemaMigration } from './make-migration'
 import { ensureGurenUiTokens, FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_SUBMIT_CLASS } from './guren-css'
-import { appMailBindings, MAIL_SCAFFOLD } from './mail-scaffold'
+import { appMailBindings, MAIL_SCAFFOLD, reportKeptMail } from './mail-scaffold'
 import { KNOWN_OAUTH_PROVIDERS, OAUTH_PROVIDER_LABELS, oauthEnvEntries } from './oauth-scaffold'
 import { definitionTemplateFile, scaffoldTemplateFile } from './scaffold-templates'
 import { appendScaffoldEnv, installsConfigDefinition, scaffoldEnv } from './service-scaffold'
@@ -1407,17 +1407,22 @@ async function warnAboutStalePasswordScaffold(): Promise<void> {
     return
   }
 
-  consola.warn(
-    `These files from an earlier make:auth run serve password login only and are no longer wired into routes/auth.ts — delete them: ${leftovers.join(', ')}`,
-  )
-  if (leftovers.includes('db/seeders/UsersSeeder.ts')) {
+  // `guren add mail` writes the same mail paths, so those are not called make:auth's alone.
+  const mail = leftovers.filter((path) => MAIL_SCAFFOLD_PATHS.includes(path))
+  const passwordOnly = leftovers.filter((path) => !mail.includes(path))
+  if (passwordOnly.length > 0) {
+    consola.warn(
+      `These files from an earlier make:auth run serve password login only and are no longer wired into routes/auth.ts — delete them: ${passwordOnly.join(', ')}`,
+    )
+  }
+  if (passwordOnly.includes('db/seeders/UsersSeeder.ts')) {
     consola.warn(
       'db/seeders/UsersSeeder.ts still runs on `db:seed` and would insert a password account that cannot sign in.',
     )
   }
-  if (leftovers.some((path) => MAIL_SCAFFOLD_PATHS.includes(path))) {
+  if (mail.length > 0) {
     consola.warn(
-      'Your app entry may still register MailProvider and CoreMailServiceProvider, or list mail in its config array, from that run — remove them too if nothing else sends mail.',
+      `${mail.join(', ')} set up mail, for an earlier make:auth run or for guren add mail. If nothing else sends mail, delete them too, and remove MailProvider and CoreMailServiceProvider, or mail in the config array, from your app entry.`,
     )
   }
 }
@@ -1631,7 +1636,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
 
   const created = await writeScaffoldFiles(files, options)
   if (existingMail.length > 0) {
-    consola.info(`Mail is already bound in ${existingMail.join(', ')}; the password reset mail sends through it, so no mail config or provider was written.`)
+    await reportKeptMail(existingMail, 'no mail config or provider was written; the password reset mail sends through it')
   }
   await appendScaffoldEnv([
     ...(mailDefinition ? scaffoldEnv(MAIL_SCAFFOLD, true) : []),
