@@ -10,7 +10,7 @@ import { loadPlanAppState } from '../src/plan/app-state'
 import { impactBreakingChanges, planChangesExisting, planImpact, type PlanImpactEntry, type PlanImpactSources } from '../src/plan/impact'
 import { planBreakingChanges, renderPlanHtml } from '../src/plan/render'
 import { PlanDraftSchema, type PlanChange, type PlanDraft } from '../src/plan/schema'
-import { createTempWorkspace, linkWorkspaceCore, writeWorkspaceFiles, type TempWorkspace } from './helpers'
+import { CAN_DENY_FILE_READS, createTempWorkspace, linkWorkspaceCore, writeWorkspaceFiles, type TempWorkspace } from './helpers'
 import { loadCommentsPlan, PLAN_APP_FILES, PLAN_VERIFY_APP_FILES, planPageData } from './plan-fixture'
 import { openPlanPage, type Page, type PageNode } from './plan-page-dom'
 
@@ -497,7 +497,7 @@ describe('loadPlanAppState({ impact: true })', () => {
     expect(impact.models.map((model) => model.className).sort()).toEqual(['Post', 'User'])
   })
 
-  test('should say the controllers directory would not open, rather than scan nothing in silence', async () => {
+  test.skipIf(!CAN_DENY_FILE_READS)('should say the controllers directory would not open, rather than scan nothing in silence', async () => {
     await writeWorkspaceFiles(workspace.dir, PLAN_APP_FILES)
     await chmod(join(workspace.dir, 'app/Http/Controllers'), 0o000)
 
@@ -560,7 +560,7 @@ await http.get(\`/posts/\${id}\`)
     expect(entry.notes).toEqual([{ key: 'impact.testRequests.uncertain', values: { count: '1', requests: 'tests/posts-http.test.ts:6' } }])
   })
 
-  test('should carry the models verdict the checks reached', async () => {
+  test.skipIf(!CAN_DENY_FILE_READS)('should carry the models verdict the checks reached', async () => {
     await writeWorkspaceFiles(workspace.dir, PLAN_APP_FILES)
     await chmod(join(workspace.dir, 'app/Models'), 0o000)
 
