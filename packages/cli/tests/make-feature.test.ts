@@ -9,7 +9,7 @@ import { makeFeature, buildRouteRegistrationHint, type MakeFeatureOptions } from
 import { findMigrationCreatingTable } from '../src/make-migration'
 import { generateDataTypes } from '../src/data-types'
 import { parseAttachString, parseFieldsString } from '../src/fields'
-import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, captureSuccesses, captureWarnings, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyApp, seedAttachmentsConfig, snapshotTree, writeWorkspaceFiles } from './helpers'
+import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, captureInfos, captureSuccesses, captureWarnings, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyApp, seedAttachmentsConfig, snapshotTree, writeWorkspaceFiles } from './helpers'
 
 describe('parseFieldsString', () => {
   it('parses simple fields', () => {
@@ -677,7 +677,7 @@ describe('makeFeature over files that already exist', () => {
     {
       name: 'a hand-written model',
       singular: 'Comment',
-      seed: { 'routes/web.ts': DEFAULT_ROUTES_FIXTURE, 'app/Models/Comment.ts': HAND_WRITTEN_MODEL },
+      seed: { 'app/Models/Comment.ts': HAND_WRITTEN_MODEL },
       options: { fields: 'body:text' },
       message: [
         'Scaffolding Comment would overwrite a file that already exists:',
@@ -734,7 +734,7 @@ describe('makeFeature over files that already exist', () => {
     await writeWorkspaceFiles(dir, seed)
     const before = await snapshotTree(dir)
 
-    const error = await makeFeature(singular, { ...options, cwd: dir, announce: false }).then(() => undefined, (reason: unknown) => reason)
+    const error = await makeFeature(singular, { ...options, cwd: dir, announce: false }).catch((reason: unknown) => reason)
 
     expect(error).toBeInstanceOf(CliError)
     expect((error as CliError).message).toBe(message.join('\n'))
@@ -913,10 +913,10 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
       await makeFeature('Note', { fields: 'title:string,done:boolean', prototype: true })
       const indexPath = join(workspace.dir, 'resources/js/pages/notes/Index.tsx')
       const validatorPath = join(workspace.dir, 'app/Http/Validators/NoteValidator.ts')
-      await writeFile(indexPath, '// edited during the walkthrough\n' + (await readFile(indexPath, 'utf8')))
-      await writeFile(validatorPath, '// tightened during the walkthrough\n' + (await readFile(validatorPath, 'utf8')))
-      const index = await readFile(indexPath, 'utf8')
-      const validator = await readFile(validatorPath, 'utf8')
+      const index = '// edited during the walkthrough\n' + (await readFile(indexPath, 'utf8'))
+      const validator = '// tightened during the walkthrough\n' + (await readFile(validatorPath, 'utf8'))
+      await writeFile(indexPath, index)
+      await writeFile(validatorPath, validator)
 
       const created = await makeFeature('Note', { fields: 'title:string,done:boolean' })
 
@@ -943,6 +943,41 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
       expect(generated.definitions.find((d) => d.className === 'NoteResource')?.rawType)
         .toContain('.NoteResourceData')
       expect(await readFile(join(workspace.dir, '.guren/data.gen.ts'), 'utf8')).toContain('Note =')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('writes a page the prototype run no longer has at promotion, keeping the rest', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-promote-missing-page-')
+    try {
+      await seedPrototypeApp(workspace.dir)
+      await makeFeature('Note', { fields: 'title:string', prototype: true })
+      await rm(join(workspace.dir, 'resources/js/pages/notes/Show.tsx'))
+      const keptPaths = [
+        'app/Http/Validators/NoteValidator.ts',
+        'resources/js/pages/notes/Index.tsx',
+        'resources/js/pages/notes/New.tsx',
+        'resources/js/pages/notes/Edit.tsx',
+      ]
+      const before = await Promise.all(keptPaths.map((path) => readFile(join(workspace.dir, path), 'utf8')))
+
+      let created: string[] = []
+      const infos = await captureInfos(async () => {
+        created = await makeFeature('Note', { fields: 'title:string' })
+      })
+
+      const root = await realpath(workspace.dir)
+      expect(created.map((file) => relative(root, file))).toEqual([
+        'app/Http/Resources/NoteResource.ts',
+        'app/Http/Controllers/NoteController.ts',
+        'resources/js/pages/notes/Show.tsx',
+        'app/Models/Note.ts',
+      ])
+      expect(await Promise.all(keptPaths.map((path) => readFile(join(workspace.dir, path), 'utf8')))).toEqual(before)
+      expect(infos.filter((line) => line.startsWith('Kept '))).toEqual(
+        keptPaths.map((path) => `Kept ${join(root, path)} (pass --force to regenerate it)`),
+      )
     } finally {
       await workspace.cleanup()
     }

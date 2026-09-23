@@ -139,9 +139,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     ? `import type { ${singular}Data as ${singular}ResourceData } from '${prototypeTypesSpecifier(singular)}'`
     : `import type { ${singular}ResourceData } from '@/${appPrefix}app/Http/Resources/${singular}Resource'`
 
-  // At promotion the prototype run already wrote it, and it is kept as edited.
   const validator = validatorFile(singular, { ...writerOptions, fields })
-  const validatorKept = promoting && !options.force && (await fileExists(appRoot, validator.path))
 
   const pageFiles = [
     {
@@ -183,7 +181,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   }
 
   const backendFiles: FeatureFile[] = [
-    ...(validatorKept ? [] : [validator]),
+    validator,
     {
       path: `${appPrefix}app/Http/Resources/${singular}Resource.ts`,
       contents: promoting
@@ -201,11 +199,12 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     ...(withPolicy ? [{ ...policyFile(singular, writerOptions), flag: '--policy' }] : []),
     ...(options.withTest ? [{ ...(await testFile(singular, writerOptions)), flag: '--test' }] : []),
   ]
-  // At promotion the pages are the prototype's, possibly hand-edited since; a
-  // page that exists is kept, and only a missing one is written. Past the check,
-  // the pages are the only files `skipExisting` can find already there.
-  await assertNoExistingTargets(singular, appRoot, [...backendFiles, ...(promoting ? [] : pageFiles), ...modelFiles], options.force)
-  const created = await writeScaffoldFiles([...backendFiles, ...pageFiles, ...modelFiles], { ...writerOptions, skipExisting: promoting })
+  // At promotion the validator and pages are the prototype run's, possibly hand-edited
+  // since: each one there is kept, and only a missing one is written.
+  const kept = promoting && !options.force ? await existingFiles(appRoot, [validator, ...pageFiles]) : []
+  const files = [...backendFiles, ...pageFiles, ...modelFiles].filter((file) => !kept.includes(file))
+  await assertNoExistingTargets(singular, appRoot, files, options.force)
+  const created = await writeScaffoldFiles(files, writerOptions)
 
   // The pages above style with Guren UI tokens (bg-g-page, …).
   await ensureGurenUiTokens(appRoot)
@@ -215,8 +214,8 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   }
 
   announceWrittenFiles(created, overwritten)
-  if (validatorKept) {
-    consola.info(`Kept ${resolve(appRoot, validator.path)} (pass --force to regenerate it)`)
+  for (const file of kept) {
+    consola.info(`Kept ${resolve(appRoot, file.path)} (pass --force to regenerate it)`)
   }
 
   const schemaPath = schemaPathFor(moduleName)
@@ -289,17 +288,21 @@ interface FeatureFile extends ScaffoldFileEntry {
   flag?: string
 }
 
-/**
- * Stopping at the first file already there would leave the files written before it
- * behind, and every one is named because `--force` overwrites them all, the author's
- * own files included.
- */
-async function assertNoExistingTargets(singular: string, appRoot: string, files: readonly FeatureFile[], force: boolean | undefined): Promise<void> {
-  if (force) return
-  const existing: FeatureFile[] = []
+async function existingFiles<T extends ScaffoldFileEntry>(appRoot: string, files: readonly T[]): Promise<T[]> {
+  const existing: T[] = []
   for (const file of files) {
     if (await fileExists(appRoot, file.path)) existing.push(file)
   }
+  return existing
+}
+
+/**
+ * Runs before the first write because `writeScaffoldFiles` would stop partway, and names
+ * every file because `--force` overwrites all of them, hand-written ones included.
+ */
+async function assertNoExistingTargets(singular: string, appRoot: string, files: readonly FeatureFile[], force: boolean | undefined): Promise<void> {
+  if (force) return
+  const existing = await existingFiles(appRoot, files)
   if (existing.length === 0) return
 
   const one = existing.length === 1
