@@ -319,6 +319,39 @@ describe('PlanVerifier', () => {
     expect(failed.record.outcome).toBe('failed')
   })
 
+  describe('recheckTests', () => {
+    const titles = (ids: string[]): string => ids.map((id) => `test('[${id}] x', () => {})\n`).join('')
+
+    test('should keep a drifted tests step verified while one file carries each id, and name a lost or doubled one', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'guren-plan-recheck-'))
+      try {
+        await mkdir(join(root, 'tests'), { recursive: true })
+        await writeFile(join(root, 'tests/comments.test.ts'), titles(['AC-comments-1', 'AC-comments-3', 'AC-comments-4']), 'utf8')
+        await writeFile(join(root, 'tests/more.test.ts'), titles(['AC-comments-3']), 'utf8')
+        const previous = record({ acceptance: IDS.map((id) => ({ id, status: 'failing' as const })) })
+        const recheck = (): Promise<PlanStepVerification> =>
+          verifier(statusOf(), fakeExec(), { root, testFiles: async () => [join(root, 'tests/comments.test.ts'), join(root, 'tests/more.test.ts')] }).recheckTests(TESTS, previous)
+
+        const step = await recheck()
+
+        expect(step.record.outcome).toBe('failed')
+        expect(step.record.commands[0]!.findings).toEqual(['[AC-comments-2] is carried by no test file', '[AC-comments-3] is carried by tests/comments.test.ts and tests/more.test.ts'])
+        expect(step.record.acceptance).toEqual([
+          { id: 'AC-comments-1', status: 'failing' },
+          { id: 'AC-comments-2', status: 'pending' },
+          { id: 'AC-comments-3', status: 'failing' },
+          { id: 'AC-comments-4', status: 'failing' },
+        ])
+
+        await writeFile(join(root, 'tests/comments.test.ts'), titles(IDS), 'utf8')
+        await writeFile(join(root, 'tests/more.test.ts'), '', 'utf8')
+        expect((await recheck()).record.outcome).toBe('verified')
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    })
+  })
+
   describe('whether a migration covers the schema', () => {
     const GENERATE = 'drizzle-kit generate --config drizzle.config.ts --explain --output json'
 
@@ -1066,7 +1099,7 @@ describe('formatPlanVerify', () => {
     const text = formatPlanVerify(report([DATA], [HTTP]))
 
     expect(text).toContain(`Re-checked, since files they were verified at have changed: ${DATA}`)
-    expect(text).toContain(`Left verified for a later run to re-check, since this run did not verify the step or the re-check was blocked: ${HTTP}`)
+    expect(text).toContain(`Left verified for a later run to re-check, since a step they share commands with did not verify, or the re-check was blocked or found a behaviour no test file carries: ${HTTP}`)
     expect(formatPlanVerify(report([], []))).not.toContain('Re-checked')
     expect(formatPlanVerify(report([], []))).not.toContain('Left verified')
   })

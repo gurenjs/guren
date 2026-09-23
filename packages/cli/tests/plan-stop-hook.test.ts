@@ -23,7 +23,7 @@ import { approvedAgainst, approveIfStamped, approvePlanFile, loadApprovedComment
 // agent-hook-gate.test.ts. What this covers is the decision and what it writes to state.
 const PLAN = parsePlanDocument(loadCommentsPlan())
 const DIGEST = planDigest(PLAN)
-const [SCAFFOLD, , DATA, HTTP] = planStepIds(derivePlanTasks(PLAN)) as [string, string, string, string]
+const [SCAFFOLD, TESTS, DATA, HTTP] = planStepIds(derivePlanTasks(PLAN)) as [string, string, string, string]
 const NOW = () => new Date('2026-09-21T10:00:00.000Z')
 const ENVIRONMENT = { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'h' }
 
@@ -284,6 +284,21 @@ describe('planStopHookFindings', () => {
       message: `plan:verify on stop (comments.plan.json, ${HTTP}): ${DATA}, whose files changed since it verified, could not be re-checked (db:migrate: the database is unreachable); its record stays for the next run.`,
     })
     expect((await readState(app)).active).toEqual(active({ continuations: 1 }))
+  })
+
+  test('should report an earlier step whose static re-check found a lost behaviour with the broken ones, not as unchecked', async () => {
+    const app = await createApp('recheck-lost', { active: active() })
+    const lost = record({ outcome: 'failed', commands: [{ command: 'tests:fail', label: 'not run: a re-check that one test file still carries each behaviour', status: 'fail', durationMs: 0, reason: 'the test files no longer carry the behaviours the step saw fail', findings: ['[AC-comments-2] is carried by no test file'] }], acceptance: [], incomplete: [] })
+    const verified = report(HTTP, record({ outcome: 'verified', incomplete: [] }))
+    const run = { ...verified, steps: [...verified.steps, { stepId: TESTS, taskId: 'task/entity/model.comment', record: lost }], recheckPending: [TESTS] }
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => run })
+
+    expect(verdict.block).toBe(false)
+    expect(verdict.message).toContain(`its changes broke an earlier step:\n${TESTS}: failed (3 ms)`)
+    expect(verdict.message).toContain('      [AC-comments-2] is carried by no test file')
+    expect(verdict.message).toContain('returns it next.')
+    expect(verdict.message).not.toContain('could not be re-checked')
   })
 
   test('should give up on a marked step whose drifted re-check came out blocked, its record left for the next run', async () => {

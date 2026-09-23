@@ -261,7 +261,8 @@ export class PlanVerifier {
   /**
    * A `tests:fail` step whose verified record drifted, judged without a run: `tests:fail` cannot
    * pass once the implementation exists, and its red run was observed when it verified. It stays
-   * verified while one test file still carries each behaviour's id, as the run would select them.
+   * verified while one test file still carries each behaviour's id as a bracketed token, which a
+   * comment carries as well as a test title: a gap the run itself would catch, accepted here.
    */
   async recheckTests(stepId: string, previous: PlanStepRecord): Promise<PlanStepVerification> {
     const found = findPlanStep(this.derivation, stepId)

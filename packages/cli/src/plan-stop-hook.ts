@@ -152,7 +152,10 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
   if (judgement.kind === 'verified') {
     // An earlier step this run re-checked is not this step's continuation: plan:next returns it once this one is done.
     const broken = report.steps.filter(({ stepId, record: earlier }) => report.reverified.includes(stepId) && earlier.outcome !== 'verified')
-    const unchecked = report.steps.filter(({ stepId }) => report.recheckPending.includes(stepId))
+    const pending = report.steps.filter(({ stepId }) => report.recheckPending.includes(stepId))
+    // A failed static re-check is pending too, but it did answer: it is reported with the broken ones.
+    const unchecked = pending.filter(({ record: earlier }) => earlier.outcome === 'blocked')
+    broken.push(...pending.filter(({ record: earlier }) => earlier.outcome !== 'blocked'))
     if (broken.length === 0 && unchecked.length === 0) return withNotice({ block: false })
     const said: string[] = []
     if (broken.length > 0) {

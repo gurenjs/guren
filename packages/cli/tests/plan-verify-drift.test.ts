@@ -276,6 +276,21 @@ describe('plan:verify re-checks the steps a later step drifted', () => {
     expect(state.steps[COMMENTS_HTTP]!.outcome).toBe('verified')
   }, 60_000)
 
+  test('should stop re-checking at the first drifted step that fails, leaving the rest verified for a later run', async () => {
+    const app = await afterDeletionIsWritten('every-step-drifted', 'store')
+    await writePlanStepRecord(app, 'comments', DELETION_HTTP, doneRecord({ 'routes/web.ts': sha256('the routes before') }))
+    const manifest = JSON.parse(await readFile(join(app, 'package.json'), 'utf8')) as { scripts: Record<string, string> }
+    await writeFile(join(app, 'package.json'), JSON.stringify({ ...manifest, scripts: { ...manifest.scripts, codegen: 'echo "error: half-written" && exit 1' } }), 'utf8')
+
+    const report = verifyAll(app)
+
+    expect(report.steps.map((step) => step.stepId)).toEqual([COMMENTS_HTTP])
+    expect(outcome(report, COMMENTS_HTTP)).toBe('failed')
+    expect(report.recheckPending).toEqual([DELETION_HTTP])
+    const state = JSON.parse(await readFile(join(app, '.guren/plans/comments.state.json'), 'utf8')) as { steps: Record<string, { outcome: string }> }
+    expect(state.steps[DELETION_HTTP]!.outcome).toBe('verified')
+  }, 60_000)
+
   test('should keep an earlier step drifted and verified when its re-check comes out blocked', async () => {
     const app = await afterDeletionIsWritten('recheck-blocked', 'store')
     const DATA = 'task/entity/model.comment/data'
@@ -286,8 +301,9 @@ describe('plan:verify re-checks the steps a later step drifted', () => {
 
     expect(outcome(report, DELETION_HTTP)).toBe('verified')
     expect(outcome(report, DATA)).toBe('blocked')
-    expect(report.recheckPending).toEqual([DATA])
-    expect(report.reverified).toEqual([COMMENTS_HTTP])
+    // The re-checks stop at the first that does not verify, so the comment step waits beside it.
+    expect(report.recheckPending).toEqual([DATA, COMMENTS_HTTP])
+    expect(report.reverified).toEqual([])
     const state = JSON.parse(await readFile(join(app, '.guren/plans/comments.state.json'), 'utf8')) as { steps: Record<string, { outcome: string }> }
     expect(state.steps[DATA]!.outcome).toBe('verified')
   }, 60_000)
