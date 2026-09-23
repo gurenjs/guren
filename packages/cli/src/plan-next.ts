@@ -454,7 +454,7 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     }
     const verify = `bunx guren plan:verify ${planArgument} --step ${step.id}`
     if (step.drifted) {
-      lines.push('', `Verified before; a later step changed files it was verified at: ${step.drifted.join(', ')}.`, `Re-check it with \`${verify}\` rather than re-implementing it, fix only what that run reports, and commit once it is verified.`)
+      lines.push('', `Verified before; files it was verified at have changed since: ${step.drifted.join(', ')}.`, `Re-check it with \`${verify}\` rather than re-implementing it, fix only what that run reports, and commit once it is verified.`)
     } else {
       lines.push('', `Implement this step only, then run \`${verify}\` and commit once it is verified.`)
     }

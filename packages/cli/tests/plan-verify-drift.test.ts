@@ -5,13 +5,15 @@ import { join } from 'node:path'
 import { formatPlanNext, planNextFile } from '../src/plan-next'
 import { parsePlanDocument } from '../src/plan-render'
 import type { PlanVerifyReport } from '../src/plan-verify'
-import { planDigest, writePlanStepRecord } from '../src/plan/state'
+import { planDigest, writePlanStepRecord, type PlanStepRecord } from '../src/plan/state'
+import { sha256 } from '../src/plan/verification'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { CLI_BIN_PATH, createTempRoot, writeWorkspaceFiles } from './helpers'
 import { approvePlanFile, createPlanVerifyApp, DRIZZLE_KIT_STUB_FILES, loadApprovedCommentsPlan, PLAN_VERIFY_APP_FILES as APP, waiveForTest } from './plan-fixture'
 
 let ROOT: string
 
+const COMMENTS_TESTS = 'task/entity/model.comment/tests'
 const COMMENTS_HTTP = 'task/entity/model.comment/http'
 const DELETION_HTTP = 'task/story/task.comment-deletion/http'
 
@@ -118,6 +120,25 @@ function verify(app: string, step: string): PlanVerifyReport {
   }
 }
 
+function verifyAll(app: string): PlanVerifyReport {
+  const result = Bun.spawnSync([process.execPath, CLI_BIN_PATH, 'plan:verify', join(app, 'comments.plan.json'), '--app', app, '--json'], { cwd: app, stdout: 'pipe', stderr: 'pipe' })
+  return JSON.parse(result.stdout.toString()) as PlanVerifyReport
+}
+
+function doneRecord(files: Record<string, string> = {}): PlanStepRecord {
+  return {
+    outcome: 'verified',
+    planDigest: planDigest(parsePlanDocument(splitPlan())),
+    ranAt: '2026-09-23T00:00:00.000Z',
+    durationMs: 1,
+    commands: [],
+    acceptance: [],
+    incomplete: [],
+    waived: [],
+    fingerprint: { files, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'h' } },
+  }
+}
+
 function outcome(report: PlanVerifyReport, step: string): string | undefined {
   return report.steps.find((entry) => entry.stepId === step)?.record.outcome
 }
@@ -135,19 +156,8 @@ async function afterDeletionIsWritten(name: string, store: 'store' | 'destroy'):
   await waiveForTest(join(app, 'comments.plan.json'), ['action.comments.destroy', 'resource.comment', 'policy.comment'])
   expect(outcome(verify(app, COMMENTS_HTTP), COMMENTS_HTTP)).toBe('verified')
   // Every other step done before, on nothing fingerprinted, so plan:next reads only the two under test.
-  const plan = parsePlanDocument(splitPlan())
-  for (const id of planStepIds(derivePlanTasks(plan)).filter((step) => step !== COMMENTS_HTTP && step !== DELETION_HTTP)) {
-    await writePlanStepRecord(app, 'comments', id, {
-      outcome: 'verified',
-      planDigest: planDigest(plan),
-      ranAt: '2026-09-23T00:00:00.000Z',
-      durationMs: 1,
-      commands: [],
-      acceptance: [],
-      incomplete: [],
-      waived: [],
-      fingerprint: { files: {}, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'h' } },
-    })
+  for (const id of planStepIds(derivePlanTasks(parsePlanDocument(splitPlan()))).filter((step) => step !== COMMENTS_HTTP && step !== DELETION_HTTP)) {
+    await writePlanStepRecord(app, 'comments', id, doneRecord())
   }
 
   await writeFile(join(app, 'routes/web.ts'), routesWithDestroy(store), 'utf8')
@@ -172,6 +182,8 @@ describe('plan:verify re-checks the steps a later step drifted', () => {
     expect(outcome(report, DELETION_HTTP)).toBe('verified')
     expect(report.reverified).toEqual([COMMENTS_HTTP])
     expect(outcome(report, COMMENTS_HTTP)).toBe('verified')
+    // The step itself runs first: an earlier one is re-checked only once nothing it shares has failed.
+    expect(report.steps.map((step) => step.stepId)).toEqual([DELETION_HTTP, COMMENTS_HTTP])
     const next = await planNextFile(join(app, 'comments.plan.json'), { appRoot: app })
     expect(next.verified).toEqual(expect.arrayContaining([COMMENTS_HTTP, DELETION_HTTP]))
     expect(next.step).toBeNull()
@@ -189,6 +201,54 @@ describe('plan:verify re-checks the steps a later step drifted', () => {
     const next = await planNextFile(join(app, 'comments.plan.json'), { appRoot: app })
     expect(next.step?.id).toBe(COMMENTS_HTTP)
     expect(next.step?.drifted).toBeUndefined()
+  }, 60_000)
+
+  test('should leave a drifted step verified while the step being verified fails a command they share, and re-check it once that step verifies', async () => {
+    const app = await afterDeletionIsWritten('shared-failure', 'store')
+    const manifest = JSON.parse(await readFile(join(app, 'package.json'), 'utf8')) as { scripts: Record<string, string> }
+    await writeFile(join(app, 'package.json'), JSON.stringify({ ...manifest, scripts: { ...manifest.scripts, codegen: 'echo "error: half-written" && exit 1' } }), 'utf8')
+
+    const failing = verify(app, DELETION_HTTP)
+
+    expect(outcome(failing, DELETION_HTTP)).toBe('failed')
+    expect(failing.reverified).toEqual([])
+    expect(failing.recheckPending).toEqual([COMMENTS_HTTP])
+    const kept = JSON.parse(await readFile(join(app, '.guren/plans/comments.state.json'), 'utf8')) as { steps: Record<string, { outcome: string }> }
+    expect(kept.steps[COMMENTS_HTTP]!.outcome).toBe('verified')
+
+    await writeFile(join(app, 'package.json'), JSON.stringify(manifest), 'utf8')
+    const passing = verify(app, DELETION_HTTP)
+
+    expect(outcome(passing, DELETION_HTTP)).toBe('verified')
+    expect(passing.reverified).toEqual([COMMENTS_HTTP])
+  }, 60_000)
+
+  test('should re-check a drifted tests:fail step without a run, verified while each behaviour keeps a test case', async () => {
+    const app = await afterDeletionIsWritten('tests-step', 'store')
+    await writePlanStepRecord(app, 'comments', COMMENTS_TESTS, doneRecord({ 'tests/comments.test.ts': sha256(COMMENT_TESTS) }))
+    await writeFile(join(app, 'tests/comments.test.ts'), `${COMMENT_TESTS}\n// the http step's helper\n`, 'utf8')
+
+    const kept = verify(app, COMMENTS_TESTS)
+
+    expect(outcome(kept, COMMENTS_TESTS)).toBe('verified')
+    expect(kept.steps[0]!.record.commands).toEqual([expect.objectContaining({ command: 'tests:fail', status: 'pass', label: 'not run: a re-check that each behaviour still has a test case' })])
+
+    await writePlanStepRecord(app, 'comments', COMMENTS_TESTS, doneRecord({ 'tests/comments.test.ts': sha256(COMMENT_TESTS) }))
+    await writeFile(join(app, 'tests/comments.test.ts'), COMMENT_TESTS.replace('[AC-comments-2] ', ''), 'utf8')
+    const lost = verify(app, COMMENTS_TESTS)
+
+    expect(outcome(lost, COMMENTS_TESTS)).toBe('failed')
+    expect(lost.steps[0]!.record.commands[0]!.findings).toEqual(['[AC-comments-2] has no test case'])
+  }, 60_000)
+
+  test('should re-check every drifted step in a whole-plan run and name them', async () => {
+    const app = await afterDeletionIsWritten('whole-plan', 'store')
+
+    const report = verifyAll(app)
+
+    expect(report.reverified).toEqual([COMMENTS_HTTP])
+    expect(outcome(report, COMMENTS_HTTP)).toBe('verified')
+    expect(outcome(report, DELETION_HTTP)).toBe('verified')
   }, 60_000)
 
   test('should tell plan:next to re-check a drifted step rather than re-implement it', async () => {

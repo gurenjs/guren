@@ -258,6 +258,44 @@ export class PlanVerifier {
     }
   }
 
+  /**
+   * A `tests:fail` step whose verified record drifted, judged without a run: `tests:fail` cannot
+   * pass once the implementation exists, and its red run was observed when it verified. It stays
+   * verified while each behaviour still has a test case, and fails naming the ones that lost theirs.
+   */
+  async recheckTests(stepId: string, previous: PlanStepRecord): Promise<PlanStepVerification> {
+    const found = findPlanStep(this.derivation, stepId)
+    if (!found) throw new Error(`no step ${stepId} is derived from this plan`)
+    const started = performance.now()
+    const ranAt = this.now().toISOString()
+    const { files } = await this.selection(found.step)
+    const carried = new Set((await readBracketedTokenFiles(this.options.root, files.map((file) => join(this.options.root, file)), () => true)).keys())
+    const missing = found.step.acceptanceIds.filter((id) => !carried.has(id))
+    const command: PlanCommandRecord = {
+      command: 'tests:fail',
+      label: 'not run: a re-check that each behaviour still has a test case',
+      status: missing.length > 0 ? 'fail' : 'pass',
+      durationMs: 0,
+      ...(missing.length > 0 ? { reason: 'a behaviour lost its test case since the step saw it fail' } : {}),
+      findings: missing.map((id) => `[${id}] has no test case`),
+    }
+    return {
+      stepId,
+      taskId: found.task.id,
+      record: {
+        outcome: missing.length > 0 ? 'failed' : 'verified',
+        planDigest: this.options.planDigest,
+        ranAt,
+        durationMs: Math.round(performance.now() - started),
+        commands: [command],
+        acceptance: previous.acceptance,
+        incomplete: [],
+        waived: [],
+        fingerprint: { files: Object.fromEntries(await hashFiles(this.options.root, files)), environment: currentEnvironment() },
+      },
+    }
+  }
+
   private async runStep(step: PlanDerivedStep): Promise<Omit<PlanStepRecord, 'planDigest' | 'ranAt' | 'durationMs'>> {
     const commands = await this.runCommands(step)
     const { elements } = await this.load()

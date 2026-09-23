@@ -68,6 +68,7 @@ function report(stepId: string, stepRecord: PlanStepRecord, blocked: string[] = 
     steps: [{ stepId, taskId: 'task/entity/model.comment', record: stepRecord }],
     skipped: [],
     reverified: [],
+    recheckPending: [],
   }
 }
 

@@ -1039,6 +1039,7 @@ describe('formatPlanVerify', () => {
       steps: steps.map(([stepId, entry]) => ({ stepId, taskId: 'task/entity/model.comment', record: entry })),
       skipped: [],
       reverified: [],
+      recheckPending: [],
     })
 
     const behind = formatPlanVerify(report([[DATA, failed], [HTTP, passed]]))
@@ -1047,5 +1048,25 @@ describe('formatPlanVerify', () => {
     expect(behind).toContain(`codegen did not pass in ${DATA}, so the status below was judged without the generated files.`)
     expect(behind).toContain('  fail     codegen     bun run codegen\n      `bun run codegen` exited 1\n      error: no')
     expect(clean).not.toContain('judged without the generated files')
+  })
+
+  test('should name the steps it re-checked and the ones it left for a later run', () => {
+    const report = (reverified: string[], recheckPending: string[]): PlanVerifyReport => ({
+      reportVersion: PLAN_STATUS_REPORT_VERSION,
+      plan: { file: 'comments.plan.json', title: 'Comments', hash: null },
+      elements: [],
+      summary: summarize([]),
+      verification: { stateFile: '.guren/plans/comments.state.json', staleSteps: [], decisionsFile: 'comments.decisions.json', staleWaivers: [] },
+      steps: [],
+      skipped: [],
+      reverified,
+      recheckPending,
+    })
+
+    const text = formatPlanVerify(report([DATA], [HTTP]))
+
+    expect(text).toContain(`Re-checked, since files they were verified at have changed: ${DATA}`)
+    expect(text).toContain(`Left verified for a later run to re-check, since this run did not verify the step or the re-check was blocked: ${HTTP}`)
+    expect(formatPlanVerify(report([], []))).not.toContain('Re-checked')
   })
 })
