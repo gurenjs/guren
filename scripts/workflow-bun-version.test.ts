@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { OLDEST_TESTED_BUN } from '../packages/cli/src/bun-support.ts'
 import { repoRoot } from './workspace-packages.ts'
 
 /**
@@ -28,6 +29,10 @@ const MATRIX = /^[^\S\n]*bun-version:[^\S\n]*\[([^\]]*)\]/m
 
 function workflowFiles(): string[] {
   return [...new Bun.Glob('*.{yml,yaml}').scanSync({ cwd: WORKFLOW_DIR })].sort()
+}
+
+function actionFiles(): string[] {
+  return [...new Bun.Glob('*/action.{yml,yaml}').scanSync({ cwd: ACTION_DIR })].sort()
 }
 
 /** Every literal Bun version a workflow pins, in file order. */
@@ -85,16 +90,32 @@ describe('workflow Bun pins', () => {
     },
   )
 
-  it('defaults every composite action taking a Bun version to the primary runtime', () => {
+  it('holds every composite action to the primary runtime', () => {
     // ci.yml's jobs outside the matrix call setup-and-build without `bun-version`,
-    // so an action's default is a pin the workflow scan above never reads.
-    const defaults = [...new Bun.Glob('*/action.{yml,yaml}').scanSync({ cwd: ACTION_DIR })]
-      .map((file) => Bun.YAML.parse(readFileSync(join(ACTION_DIR, file), 'utf8')) as ActionManifest)
-      .map((action) => action.inputs?.['bun-version']?.default)
-      .filter((version) => version !== undefined)
+    // so an action's input default is a pin just like a literal in its steps.
+    const actions = actionFiles()
+    const pinned: string[] = []
+    const unpinned: string[] = []
+    for (const file of actions) {
+      const source = readFileSync(join(ACTION_DIR, file), 'utf8')
+      const inputDefault = (Bun.YAML.parse(source) as ActionManifest).inputs?.['bun-version']?.default
+      const pins = [...pinnedVersions(source), ...(inputDefault === undefined ? [] : [String(inputDefault)])]
+      if (source.includes('oven-sh/setup-bun') && pins.length === 0) unpinned.push(file)
+      pinned.push(...pins.map((pin) => `${file}: ${pin}`))
+    }
 
-    expect(defaults.length).toBeGreaterThan(0)
-    for (const version of defaults) expect(String(version)).toBe(primary)
+    expect(actions.length).toBeGreaterThan(0)
+    expect(pinned.length).toBeGreaterThan(0)
+    expect(unpinned).toEqual([])
+    expect(pinned.filter((entry) => !entry.endsWith(`: ${primary}`))).toEqual([])
+  })
+
+  it("keeps the CLI's oldest tested Bun on the oldest matrix line", () => {
+    // `guren doctor` and `guren upgrade` warn below it, so it has to name a line CI runs.
+    const line = (version: string) => version.split('.').slice(0, 2).join('.')
+    const oldest = [...matrix].sort(Bun.semver.order)[0]!
+
+    expect(line(OLDEST_TESTED_BUN)).toBe(line(oldest))
   })
 
   it("ci.yml's own pins stay inside its matrix", () => {

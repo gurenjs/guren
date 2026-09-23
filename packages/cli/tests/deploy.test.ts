@@ -117,6 +117,15 @@ describe('scaffoldDeploy', () => {
     expect(await readFile('Dockerfile', 'utf8')).toContain('FROM oven/bun:1 AS builder')
   })
 
+  it('keeps the committed Docker recipe identical to what `guren deploy` writes', async () => {
+    // A reader copies examples/deploy/docker, so a hand edit there is a fix the
+    // generator never gets, or one the generator got and the recipe missed.
+    await scaffoldDeploy()
+    const recipe = await readFile(join(import.meta.dir, '../../../examples/deploy/docker/Dockerfile'), 'utf8')
+
+    expect(recipe).toBe(await readFile('Dockerfile', 'utf8'))
+  })
+
   it('copies every runtime entry the create-app templates ship into the production image', async () => {
     await scaffoldDeploy()
     const dockerfile = await readFile('Dockerfile', 'utf8')

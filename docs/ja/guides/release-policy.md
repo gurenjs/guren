@@ -21,7 +21,7 @@
 | Node.js | デプロイ用 | AWS Lambda・Vercel のアダプターが対応するランタイムで実行。開発と CLI には Bun が必要 |
 | Cloudflare Workers | デプロイ用 | Cloudflare プラグインと、その生成する互換性設定が必要 |
 
-マトリクスを変更する場合は、このガイドと `CHANGELOG.md` を同じ PR で更新します。
+マトリクスを変更する場合は、このガイドと[サポートマトリクス](./support-matrix.md)を同じ PR で更新し、変更を書いた changeset を追加してリリースノートに載せます。
 
 ## 後方互換ルール
 

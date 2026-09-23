@@ -21,7 +21,7 @@ From `1.0`, breaking changes ship only in major releases; minors and patches are
 | Node.js | Deployment adapters | AWS Lambda and Vercel builds use their adapter's supported runtime; development and CLI still require Bun |
 | Cloudflare Workers | Deployment adapter | Requires the Cloudflare plugin and its generated compatibility settings |
 
-If the matrix changes, update this guide and `CHANGELOG.md` in the same PR.
+If the matrix changes, update this guide and the [Support Matrix](./support-matrix.md) in the same PR, and add a changeset that states the change so it reaches the release notes.
 
 ## Backward Compatibility Rules
 

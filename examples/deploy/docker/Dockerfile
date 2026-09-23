@@ -1,34 +1,35 @@
-# Build stage
-FROM oven/bun:1.4 AS builder
+# Build stage — includes devDependencies for Vite/TypeScript
+FROM oven/bun:1 AS builder
 WORKDIR /app
 
-COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production=false
+COPY bun.lock package.json ./
+RUN bun install --frozen-lockfile
 
 COPY . .
-RUN bun run codegen && bun run build
+RUN bun run build
+# COPY fails on a missing source, and not every app has every runtime
+# directory (an API-only app has no public/, lang/ or .guren/).
+RUN mkdir -p bin src app config routes modules db lang public .guren
 
-# Production stage
-FROM oven/bun:1.4-slim
+# Production stage — runtime only
+FROM oven/bun:1-slim
 WORKDIR /app
 
 COPY --from=builder /app/package.json /app/bun.lock ./
 RUN bun install --frozen-lockfile --production
 
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/bin ./bin
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/app ./app
 COPY --from=builder /app/config ./config
 COPY --from=builder /app/routes ./routes
-COPY --from=builder /app/public ./public
+COPY --from=builder /app/modules ./modules
 COPY --from=builder /app/db ./db
+COPY --from=builder /app/lang ./lang
+COPY --from=builder /app/public ./public
 COPY --from=builder /app/.guren ./.guren
 
-ENV NODE_ENV=production
-ENV PORT=3333
 EXPOSE 3333
-
-HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-  CMD curl -f http://localhost:3333/health || exit 1
-
+ENV NODE_ENV=production
 CMD ["bun", "bin/serve.ts"]

@@ -38,6 +38,6 @@
 
 ## CI Coverage
 
-- Every PR: Bun 1.4.x (gating) and 1.3.x (non-blocking), no external DB (mocked), Redis service
-- Nightly: same as PR, plus full runtime smoke tests against a real database, security audits, and an end-to-end scaffold-to-build check
+- Every PR: Bun 1.4.x (gating) and 1.3.x (non-blocking), each with Redis, PostgreSQL and MySQL services for the integration tests
+- Nightly: Bun 1.4.x only, running the PR suite plus full runtime smoke tests against a real database, security audits, and an end-to-end scaffold-to-build check
 - Release: Full validation before publish

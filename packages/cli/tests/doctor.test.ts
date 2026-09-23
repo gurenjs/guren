@@ -2,7 +2,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { consola } from 'consola'
-import { getDoctorRuleEvaluations, runDoctor, buildJsonOutput, suggestNextSteps, renderDoctorReport } from '../src/doctor'
+import { getDoctorRuleEvaluations, runDoctor, buildJsonOutput, suggestNextSteps, renderDoctorReport, judgeBunVersion } from '../src/doctor'
+import { OLDEST_TESTED_BUN } from '../src/bun-support'
 import type { DoctorCheck } from '../src/doctor'
 import {
   API_ONLY_APP_FILES,
@@ -310,6 +311,15 @@ describe('runDoctor', () => {
     } finally {
       await workspace.cleanup()
     }
+  })
+
+  it('judges Bun against the oldest line CI still tests', () => {
+    expect(judgeBunVersion(OLDEST_TESTED_BUN).status).toBe('pass')
+    expect(judgeBunVersion('1.4.2').status).toBe('pass')
+    expect(judgeBunVersion('1.2.21').status).toBe('warn')
+    expect(judgeBunVersion('1.2.21').message).toContain(`>= ${OLDEST_TESTED_BUN}`)
+    expect(judgeBunVersion('0.8.1').status).toBe('fail')
+    expect(judgeBunVersion(null).status).toBe('fail')
   })
 
   it('warns when .env is missing but .env.example exists', async () => {
