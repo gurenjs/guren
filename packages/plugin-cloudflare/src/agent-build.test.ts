@@ -385,14 +385,15 @@ describe('Durable Object bindings for registered agents', () => {
     expect((error as Error).message).not.toContain('"class_name"')
   })
 
-  test('should refuse a config that minifies the worker it hosts agents from', async () => {
-    // Identifier mangling renames the class an agent looks itself up by.
+  test('should accept a minified worker hosting agents, since wrangler keeps class names by default', async () => {
+    // wrangler hands esbuild `keepNames: keep_names ?? true`, so the class an
+    // agent looks itself up by survives minification.
     scaffoldAgentApp(root)
     writeJson(join(root, 'wrangler.jsonc'), hostingConfig({ minify: true }))
 
-    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
-      /"minify": true/,
-    )
+    await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
+
+    expect(readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')).toContain('export { Triager }')
   })
 
   test('should read the migrations list as history, not as a set of declarations', async () => {
@@ -467,14 +468,16 @@ describe('Durable Object bindings for registered agents', () => {
     )
   })
 
-  test('should refuse minification set on a named environment alone', async () => {
+  test('should refuse keep_names turned off in a named environment that hosts the agent', async () => {
+    // Without keepNames, esbuild renames a class under minification, and even
+    // unminified it suffixes one that shares its name with another module's.
     scaffoldAgentApp(root)
     writeJson(
       join(root, 'wrangler.jsonc'),
       hostingConfig({
         env: {
           production: {
-            minify: true,
+            keep_names: false,
             durable_objects: { bindings: [{ name: 'TRIAGER', class_name: 'Triager' }] },
           },
         },
@@ -482,7 +485,7 @@ describe('Durable Object bindings for registered agents', () => {
     )
 
     await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
-      /\(env\.production\) sets "minify": true/,
+      /\(env\.production\) sets "keep_names": false/,
     )
   })
 
