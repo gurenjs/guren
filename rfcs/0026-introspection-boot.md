@@ -237,6 +237,18 @@ same `PER_PROCESS_SESSION_DRIVERS` set the runtime warning uses.
 >   prototype fixture: mounting throws on an alias nothing registers, which the
 >   manifest reports as `unresolved`, and preparing prototype routes refuses in
 >   production. Nothing the manifest describes needs the mount.
+> - `isIntrospecting()` is also true inside an in-process `app.introspect()`: the
+>   run enters an `AsyncLocalStorage` scope, and `GUREN_INTROSPECT=1` stays the
+>   CLI child's way to set it for the whole process. A provider prefers the
+>   `introspect?()` hook; `isIntrospecting()` is for a check inside `register()`.
+> - A route registrar that throws fails the whole introspection (`introspect()`
+>   rejects, and the CLI reports `crashed`), unlike a provider's `register()`,
+>   which is recorded as `threw` while the rest continue. Routes have no
+>   per-registrar outcome to record, and a partial route list would read as
+>   complete.
+> - The manifest is round-tripped through JSON before it is returned, so it is
+>   plain data: a nested `undefined` (an all-optional schema's `required`) is
+>   dropped, and the in-memory manifest equals the `--json` output.
 > - `ConfigServiceProvider` implements `introspect()` itself, parsing the
 >   environment in report mode, so an in-process `introspect()` reports env
 >   problems the way a CLI run does instead of recording the provider `threw`.

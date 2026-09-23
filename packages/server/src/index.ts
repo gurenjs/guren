@@ -19,7 +19,8 @@ export type {
   ListenAddress,
   ServiceProviderConstructor,
 } from './http/Application'
-// Introspection boot (RFC 0026): the flag a provider reads, and the manifest `Application.introspect()` returns.
+// Introspection boot (RFC 0026). A provider prefers `introspect()` in place of `register()`;
+// `isIntrospecting()` is for a check inside `register()`, true in the CLI child and during `app.introspect()`.
 export { isIntrospecting } from './introspection/flag'
 export type {
   AppManifest,

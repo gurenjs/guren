@@ -49,9 +49,9 @@ export class ConfigServiceProvider extends ServiceProvider {
       const { env, read } = recordEnvReads(this.env)
       const config = definition.resolve(env)
 
-      // Reachable only where parsing reported rather than threw, which today is
-      // GUREN_INTROSPECT=1. Binding would hand the redacted placeholder to a
-      // manager constructor that validates it; nothing bound answers 503 instead.
+      // Reachable only where parsing reported rather than threw, which is
+      // introspection (`introspect()` below). Binding would hand the redacted placeholder
+      // to a manager constructor that validates it; nothing bound answers 503 instead.
       const placeholders = [...read].filter((key) => this.unset.has(key))
       if (placeholders.length > 0) {
         const message = `the "${definition.key}" config reads ${placeholders.join(', ')}, which the environment does not set; it was left unbound.`

@@ -8,6 +8,7 @@ import {
   defineEnv,
   defineModule,
   Env,
+  isIntrospecting,
   requireAuthenticated,
   ServiceProvider,
   type AppManifest,
@@ -107,6 +108,8 @@ function registerRoutes(baseRouter: Router): void {
   })
   router.delete('/posts/:id', [PostController, 'update'])
     .middleware(authorizeResourceMiddleware(() => ({})))
+  // All-optional: the schema walker emits `required: undefined` for it.
+  router.get('/search', { name: 'search', query: z.object({ q: z.string().optional() }) }, () => 'ok')
 }
 
 function fixtureApp(options: Parameters<typeof createApp>[0] = {}) {
@@ -119,7 +122,7 @@ function fixtureApp(options: Parameters<typeof createApp>[0] = {}) {
 }
 
 describe('Application.introspect()', () => {
-  test('registers and mounts without booting, and returns a JSON-safe manifest', async () => {
+  test('registers without mounting or booting, and returns a JSON-safe manifest', async () => {
     lifecycle.length = 0
     let bootCallbackRan = false
     const app = fixtureApp({ boot: () => { bootCallbackRan = true } })
@@ -131,7 +134,7 @@ describe('Application.introspect()', () => {
     expect(manifest.warnings.map((warning) => warning.code)).toContain('boot-callback-skipped')
     expect(manifest.schemaVersion).toBe(1)
     expect(manifest.entry).toEqual({ file: null, root: process.cwd(), stage: 'register' })
-    expect(JSON.parse(JSON.stringify(manifest)) as AppManifest).toEqual(manifest)
+    expect(JSON.parse(JSON.stringify(manifest)) as AppManifest).toStrictEqual(manifest)
   })
 
   test('records every provider with its source and register outcome, continuing past a throw', async () => {
@@ -308,6 +311,45 @@ describe('Application.introspect()', () => {
   })
 })
 
+describe('isIntrospecting()', () => {
+  class FlagReadingProvider extends ServiceProvider {
+    static seen: boolean[] = []
+
+    register(): void {
+      FlagReadingProvider.seen.push(isIntrospecting())
+    }
+  }
+
+  test('is true inside an in-process introspect() and false for a normal boot()', async () => {
+    FlagReadingProvider.seen = []
+
+    await createApp({ providers: [FlagReadingProvider] }).introspect()
+    await createApp({ providers: [FlagReadingProvider] }).boot()
+
+    expect(FlagReadingProvider.seen).toEqual([true, false])
+    expect(isIntrospecting()).toBe(false)
+  })
+
+  test('a normal boot() never calls a provider\'s introspect hook', async () => {
+    lifecycle.length = 0
+
+    await createApp({ providers: [HookedProvider] }).boot()
+
+    expect(lifecycle).toEqual(['hooked:register'])
+  })
+
+  test('the same provider instance registered twice keeps its first outcome', async () => {
+    const app = createApp()
+    const hooked = new HookedProvider(app.container)
+    app.register(hooked).register(hooked)
+
+    const manifest = await app.introspect()
+
+    expect(manifest.providers.filter((provider) => provider.name === 'HookedProvider').map((provider) => provider.register))
+      .toEqual(['introspect-hook'])
+  })
+})
+
 describe('GUREN_INTROSPECT=1', () => {
   test('degrades boot() to introspect(): providers register, none boots', async () => {
     lifecycle.length = 0
@@ -335,15 +377,24 @@ describe('GUREN_INTROSPECT=1', () => {
 })
 
 describe('Router.registeredHandlers()', () => {
-  test('is index-aligned with definitions() and keeps the controller class', () => {
+  test('is index-aligned with definitions() under a group prefix and a resource() expansion', () => {
     const app = createApp()
     app.router.get('/a', () => 'a')
-    app.router.get('/posts', [PostController, 'index'])
+    app.router.group('/admin', (admin) => {
+      admin.get('/posts', [PostController, 'index'])
+      admin.resource('/invoices', InvoiceController)
+    })
 
     const handlers = app.router.registeredHandlers()
     const definitions = app.router.definitions()
 
-    expect(handlers).toEqual([{ index: 0 }, { index: 1, controller: PostController, action: 'index' }])
-    expect(definitions[1]?.controller).toEqual({ name: 'PostController', action: 'index' })
+    expect(handlers.map((handler) => handler.index)).toEqual(definitions.map((_, index) => index))
+    expect(handlers[0]).toEqual({ index: 0 })
+    expect(handlers[1]).toEqual({ index: 1, controller: PostController, action: 'index' })
+    expect(definitions.map((definition) => definition.path)).toEqual(['/a', '/admin/posts', '/admin/invoices'])
+    handlers.forEach((handler, index) => {
+      expect(handler.controller?.name).toBe(definitions[index]?.controller?.name)
+      expect(handler.action).toBe(definitions[index]?.controller?.action)
+    })
   })
 })
