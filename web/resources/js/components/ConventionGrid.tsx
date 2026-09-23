@@ -20,7 +20,7 @@ function Panel({ children }: { children: ReactNode }) {
 function Status({ code, delay }: { code: string; delay: number }) {
   return (
     <span
-      className="vg-pop rounded border border-crimson-400/40 bg-crimson-900/40 px-1.5 text-[11px] font-medium text-crimson-300"
+      className="vg-pop rounded border border-crimson-400/40 bg-crimson-900/40 px-1.5 text-[11px] text-crimson-300"
       style={step(delay)}
     >
       {code}
@@ -69,7 +69,7 @@ function RenameBreaksBuild() {
         <span className="relative text-crimson-50">
           &apos;posts.show&apos;
           <span
-            className="vg-grow absolute inset-x-0 -bottom-0.5 h-[2px] origin-left bg-[repeating-linear-gradient(135deg,#fc6d6d_0_2px,transparent_2px_4px)]"
+            className="vg-grow absolute inset-x-0 -bottom-0.5 h-[2px] origin-left bg-[repeating-linear-gradient(135deg,var(--color-crimson-400)_0_2px,transparent_2px_4px)]"
             style={step(1)}
           />
         </span>
@@ -109,7 +109,7 @@ function PropsHandOff() {
             {'{ posts }'}
           </span>
         </span>
-        <span className="vg-light shrink-0 rounded border border-white/15 px-2 py-1 text-crimson-50" style={step(1.1)}>
+        <span className="vg-light shrink-0 rounded border px-2 py-1 text-crimson-50" style={step(1.1)}>
           Index.tsx
         </span>
       </div>
@@ -129,7 +129,7 @@ function Batteries() {
         {BATTERIES.map((name, i) => (
           <span
             key={name}
-            className="vg-light rounded border border-white/15 py-1 text-center text-crimson-50"
+            className="vg-light rounded border py-1 text-center text-crimson-50"
             style={step(0.2 + i * 0.12)}
           >
             {name}
@@ -161,7 +161,7 @@ function PrototypeToController() {
           </g>
           <path className="vg-draw" pathLength={1} d="M0 61 C 22 61, 18 37, 40 37" style={step(1.35)} />
         </svg>
-        <div className="vg-light min-w-0 flex-1 rounded border border-white/15 p-2.5" style={step(1.75)}>
+        <div className="vg-light min-w-0 flex-1 rounded border p-2.5" style={step(1.75)}>
           <p className="truncate text-[11px] text-smoke/70">posts/Index</p>
           {[88, 64, 76].map((width, i) => (
             <span
@@ -214,41 +214,62 @@ const FEATURES: Array<{ title: string; body: ReactNode; Visual: () => ReactNode 
   },
 ]
 
+type Phase = 'armed' | 'play'
+
 /**
- * The six conventions, each with a small panel that plays once when the grid
- * comes into view. Server output, and reduced motion, show the end state.
+ * The six conventions, each with a small panel that plays once when it comes
+ * into view. Server output, reduced motion, and a panel already on screen when
+ * the page loads all show the end state.
  */
 export function ConventionGrid() {
-  const ref = useRef<HTMLDivElement>(null)
-  const [armed, setArmed] = useState(false)
-  const [playing, setPlaying] = useState(false)
+  const items = useRef<Array<HTMLDivElement | null>>([])
+  const [phases, setPhases] = useState<Array<Phase | undefined>>([])
 
   useEffect(() => {
-    const grid = ref.current
-    if (!grid || typeof IntersectionObserver === 'undefined') return
+    if (typeof IntersectionObserver === 'undefined') return
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-    setArmed(true)
+    const seen = new Set<Element>()
     const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry?.isIntersecting) return
-        observer.disconnect()
-        setPlaying(true)
+      (entries) => {
+        const changes = new Map<number, Phase>()
+        for (const entry of entries) {
+          const first = !seen.has(entry.target)
+          seen.add(entry.target)
+          const index = items.current.indexOf(entry.target as HTMLDivElement)
+          if (entry.isIntersecting) {
+            observer.unobserve(entry.target)
+            // A panel visible at its first report keeps its finished state
+            // instead of blanking out to replay.
+            if (!first) changes.set(index, 'play')
+          } else if (first) {
+            changes.set(index, 'armed')
+          }
+        }
+        if (changes.size === 0) return
+        setPhases((previous) => {
+          const next = [...previous]
+          changes.forEach((phase, index) => {
+            next[index] = phase
+          })
+          return next
+        })
       },
-      { threshold: 0.25 },
+      { threshold: 0.5 },
     )
-    observer.observe(grid)
+    items.current.forEach((item) => item && observer.observe(item))
     return () => observer.disconnect()
   }, [])
 
   return (
-    <div
-      ref={ref}
-      data-armed={armed || undefined}
-      data-play={playing || undefined}
-      className="vg mt-14 grid grid-cols-1 gap-x-10 gap-y-12 sm:grid-cols-2 lg:grid-cols-3"
-    >
-      {FEATURES.map(({ title, body, Visual }) => (
-        <div key={title}>
+    <div className="vg mt-14 grid grid-cols-1 gap-x-10 gap-y-12 sm:grid-cols-2 lg:grid-cols-3">
+      {FEATURES.map(({ title, body, Visual }, index) => (
+        <div
+          key={title}
+          ref={(item) => {
+            items.current[index] = item
+          }}
+          data-phase={phases[index]}
+        >
           <Visual />
           <h3 className="mt-5 text-lg font-bold leading-snug text-crimson-50">{title}</h3>
           <p className="mt-2 text-[0.9375rem] leading-[1.6] text-smoke">{body}</p>

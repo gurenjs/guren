@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react'
-import { Fragment, useState, type ReactNode } from 'react'
+import { Fragment, useState, type KeyboardEvent, type ReactNode } from 'react'
 interface Props {
   codeExamples: Record<string, string>
 }
@@ -9,7 +9,7 @@ import { ConventionGrid } from '../components/ConventionGrid.js'
 import { Footer } from '../components/Footer.js'
 import { Header } from '../components/Header.js'
 import { FunctionIcon, GithubIcon, GlobeIcon, LayersIcon, ServerIcon } from '../components/icons.js'
-import { InlineCode as Code } from '../components/InlineCode.js'
+import { InlineCode } from '../components/InlineCode.js'
 import { Seo } from '../components/Seo.js'
 import { softwareJsonLd, websiteJsonLd } from '../lib/structured-data.js'
 
@@ -29,10 +29,10 @@ const benchmarks = [
 // Agents on Guren, 2026-08-18: 20 tasks × 3 models × {bare, shipped} × 3 trials.
 // First two tiles are the Sonnet 5 column of results/RESULTS.md in
 // gurenjs/agents-on-guren; the third counts all 180 runs per condition.
-const agentBenchmarkStats = [
+const agentBenchmarkStats: Array<{ value: string; versus?: string; label: string }> = [
   { value: '−28%', label: 'turns with the harness (Sonnet 5, 60 runs each)' },
   { value: '−25%', label: 'cost, at 60/60 vs 58/60 runs passed' },
-  { value: '119 vs 15', label: 'runs that ran guren check, harness vs bare (180 each)' },
+  { value: '119', versus: '15', label: 'runs that ran guren check, harness vs bare (180 each)' },
 ]
 
 const deployTargets = [
@@ -83,10 +83,17 @@ function Tick() {
 
 function SectionHeading({ children }: { children: ReactNode }) {
   return (
-    <h2 className="mt-5 text-balance text-[2rem] font-bold leading-[1.1] tracking-[-0.025em] text-crimson-50 md:text-[2.5rem]">
-      {children}
-    </h2>
+    <>
+      <Tick />
+      <h2 className="mt-5 text-balance text-[2rem] font-bold leading-[1.1] tracking-[-0.025em] text-crimson-50 md:text-[2.5rem]">
+        {children}
+      </h2>
+    </>
   )
+}
+
+function Lead({ children }: { children: ReactNode }) {
+  return <p className="mt-5 max-w-[34rem] text-[1.0625rem] leading-[1.65] text-smoke">{children}</p>
 }
 
 function TextLink({ href, external, children }: { href: string; external?: boolean; children: ReactNode }) {
@@ -155,6 +162,16 @@ function HeroName() {
 export default function Home({ codeExamples }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>('Routes')
 
+  // Arrow keys move between the tabs, as the ARIA tabs pattern expects.
+  const moveTab = (event: KeyboardEvent<HTMLDivElement>) => {
+    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key]
+    if (!step) return
+    event.preventDefault()
+    const next = TAB_KEYS[(TAB_KEYS.indexOf(activeTab) + step + TAB_KEYS.length) % TAB_KEYS.length]!
+    setActiveTab(next)
+    document.getElementById(`loop-tab-${next}`)?.focus()
+  }
+
   return (
     <>
       <Seo
@@ -201,13 +218,12 @@ export default function Home({ codeExamples }: Props) {
         <section className="border-b border-white/10">
           <div className="mx-auto grid grid-cols-1 max-w-6xl gap-12 px-6 py-20 md:py-28 lg:grid-cols-[minmax(0,4fr)_minmax(0,7fr)] lg:gap-16">
             <div>
-              <Tick />
               <SectionHeading>Route to React, one loop</SectionHeading>
-              <p className="mt-5 max-w-[34rem] text-[1.0625rem] leading-[1.65] text-smoke">
+              <Lead>
                 A route points at a controller, and the controller&apos;s props reach the React
                 component type-checked. There is no API client to write.
-              </p>
-              <div role="tablist" aria-label="Files in the loop" className="relative mt-10">
+              </Lead>
+              <div role="tablist" aria-label="Files in the loop" onKeyDown={moveTab} className="relative mt-10">
                 <span aria-hidden className="absolute bottom-5 left-[5px] top-5 w-px bg-white/15" />
                 {TAB_KEYS.map((tab) => {
                   const active = activeTab === tab
@@ -217,6 +233,7 @@ export default function Home({ codeExamples }: Props) {
                       id={`loop-tab-${tab}`}
                       type="button"
                       role="tab"
+                      tabIndex={active ? 0 : -1}
                       aria-selected={active}
                       aria-controls="loop-panel"
                       onClick={() => setActiveTab(tab)}
@@ -248,7 +265,7 @@ export default function Home({ codeExamples }: Props) {
               className="min-w-0 self-start overflow-hidden rounded-md border border-white/10 bg-ink"
             >
               <p className="border-b border-white/10 px-5 py-3 font-mono text-xs text-smoke">{TAB_FILES[activeTab]}</p>
-              <div className="overflow-x-auto p-5 [font-variant-ligatures:none] [&_.shiki]:!m-0 [&_.shiki]:!rounded-none [&_.shiki]:!border-0 [&_.shiki]:!bg-transparent [&_.shiki]:!p-0 [&_.shiki]:!text-[12.5px] [&_.shiki]:!leading-[1.7]">
+              <div className="overflow-x-auto p-5 text-[12.5px] leading-[1.7] [font-variant-ligatures:none] [&_.shiki]:!bg-transparent">
                 <div dangerouslySetInnerHTML={{ __html: codeExamples[activeTab] ?? '' }} />
               </div>
             </div>
@@ -259,15 +276,14 @@ export default function Home({ codeExamples }: Props) {
           <div className="mx-auto max-w-6xl px-6 py-20 md:py-28">
             <div className="grid grid-cols-1 items-start gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-16">
               <div>
-                <Tick />
                 <SectionHeading>Built for AI coding agents</SectionHeading>
                 <p className="mt-4 font-mono text-sm text-crimson-300">
                   derived where possible, declared where not, checked always
                 </p>
-                <p className="mt-5 max-w-[34rem] text-[1.0625rem] leading-[1.65] text-smoke">
+                <Lead>
                   Your agent reads what the project knows from the code itself, and CI fails when
                   the wiring, docs or spec drift.
-                </p>
+                </Lead>
                 <dl className="mt-8 border-b border-white/10">
                   {agentCommands.map((c) => (
                     <div key={c.command} className="grid grid-cols-1 gap-1 border-t border-white/10 py-3 sm:grid-cols-[12.5rem_1fr] sm:gap-4">
@@ -299,7 +315,7 @@ export default function Home({ codeExamples }: Props) {
                 </a>
                 <figcaption className="mt-4 text-sm leading-relaxed text-smoke">
                   The blog example&apos;s docs graph. Your app gets the same view at{' '}
-                  <Code>/_guren/docs</Code>.
+                  <InlineCode>/_guren/docs</InlineCode>.
                 </figcaption>
               </figure>
             </div>
@@ -321,12 +337,13 @@ export default function Home({ codeExamples }: Props) {
                   <div key={s.label} className="flex flex-col sm:border-l sm:border-white/10 sm:px-6 sm:first:border-l-0 sm:first:pl-0">
                     <dt className="order-2 mt-2 text-sm leading-snug text-smoke">{s.label}</dt>
                     <dd className="order-1 text-[2.75rem] font-bold leading-none tracking-[-0.03em] text-foam tabular-nums">
-                      {s.value.split(' vs ').map((part, i) => (
-                        <Fragment key={i}>
-                          {i > 0 && <span className="mx-1.5 text-lg font-normal text-smoke">vs</span>}
-                          {part}
-                        </Fragment>
-                      ))}
+                      {s.value}
+                      {s.versus && (
+                        <>
+                          <span className="mx-1.5 text-lg font-normal text-smoke">vs</span>
+                          {s.versus}
+                        </>
+                      )}
                     </dd>
                   </div>
                 ))}
@@ -337,7 +354,6 @@ export default function Home({ codeExamples }: Props) {
 
         <section className="border-b border-white/10">
           <div className="mx-auto max-w-6xl px-6 py-20 md:py-28">
-            <Tick />
             <SectionHeading>Conventions you know. Types you didn&apos;t have.</SectionHeading>
             <ConventionGrid />
           </div>
@@ -346,12 +362,11 @@ export default function Home({ codeExamples }: Props) {
         <section className="border-b border-white/10">
           <div className="mx-auto grid grid-cols-1 max-w-6xl gap-12 px-6 py-20 md:py-28 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16">
             <div>
-              <Tick />
               <SectionHeading>Fast where it counts</SectionHeading>
-              <p className="mt-5 max-w-[34rem] text-[1.0625rem] leading-[1.65] text-smoke">
+              <Lead>
                 The same app on Guren and on a Node.js MVC framework, under identical conditions.
                 The code is held constant, so the difference is Bun.
-              </p>
+              </Lead>
               <p className="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-sm">
                 <TextLink href="https://github.com/gurenjs/framework-comparison/blob/main/BENCHMARK.md" external>
                   Methodology &amp; reproduction
@@ -371,7 +386,7 @@ export default function Home({ codeExamples }: Props) {
                   </p>
                   <div>
                     <p className="font-bold text-crimson-50">{b.label}</p>
-                    <div className="mt-4 space-y-1.5" aria-label={`Guren ${b.ratio}×, Node 1×`}>
+                    <div aria-hidden className="mt-4 space-y-1.5">
                       <div className="flex items-center gap-3">
                         <span className="h-2 flex-1 rounded-r-sm bg-gradient-to-r from-crimson-700 to-ember" />
                         <span className="w-12 shrink-0 font-mono text-xs text-crimson-50">Guren</span>
@@ -395,11 +410,10 @@ export default function Home({ codeExamples }: Props) {
 
         <section className="border-b border-white/10">
           <div className="mx-auto max-w-6xl px-6 py-20 md:py-28">
-            <Tick />
             <SectionHeading>Develop on Bun. Ship where you want.</SectionHeading>
-            <p className="mt-5 max-w-[40rem] text-[1.0625rem] leading-[1.65] text-smoke">
+            <Lead>
               Pick a target, add its plugin, ship the same app.
-            </p>
+            </Lead>
             <ul className="mt-12 border-b border-white/10">
               {deployTargets.map((t) => (
                 <li key={t.name} className="border-t border-white/10">

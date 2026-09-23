@@ -1,12 +1,28 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 
 const NAME = '紅蓮'
-// Keep in sync with --font-mincho in app.css: the canvas draws the glyphs the
-// static fallback shows, so both must pick the same face.
-const MINCHO = '"Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", "Noto Serif CJK JP", serif'
 const BURN_MS = 1800
 // Past 1 the front has left the top of the text and the rim has faded out.
 const END = 1.12
+
+// The burnt-in colour, bottom to top. The shader and the text it hands back to
+// both read these, so the hand-over cannot change colour.
+const STOPS = [
+  { at: 0, hex: '#ffb35c' },
+  { at: 0.38, hex: '#ff3c28' },
+  { at: 1, hex: '#db1b1b' },
+] as const
+
+const TEXT_FILL: CSSProperties = {
+  backgroundImage: `linear-gradient(to top, ${STOPS.map((stop) => `${stop.hex} ${stop.at * 100}%`).join(', ')})`,
+}
+
+function glslColor(hex: string): string {
+  const [r, g, b] = [1, 3, 5].map((i) => (Number.parseInt(hex.slice(i, i + 2), 16) / 255).toFixed(3))
+  return `vec3(${r}, ${g}, ${b})`
+}
+
+const [LOW, MID, HIGH] = STOPS
 
 const VERTEX = `
 attribute vec2 a;
@@ -17,7 +33,11 @@ void main() {
 }`
 
 const FRAGMENT = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
+#else
+precision mediump float;
+#endif
 varying vec2 v;
 uniform sampler2D uMask;
 uniform sampler2D uGlow;
@@ -63,26 +83,30 @@ void main() {
   float shown = smoothstep(0.0, 0.01, d);
   float rim = smoothstep(-0.003, 0.0, d) * (1.0 - smoothstep(0.0, 0.075, d)) * active;
 
-  vec3 c0 = vec3(1.0, 0.702, 0.361);
-  vec3 c1 = vec3(1.0, 0.235, 0.157);
-  vec3 c2 = vec3(0.859, 0.106, 0.106);
-  vec3 base = ty < 0.38 ? mix(c0, c1, ty / 0.38) : mix(c1, c2, (ty - 0.38) / 0.62);
+  vec3 base = ty < ${MID.at.toFixed(2)}
+    ? mix(${glslColor(LOW.hex)}, ${glslColor(MID.hex)}, ty / ${MID.at.toFixed(2)})
+    : mix(${glslColor(MID.hex)}, ${glslColor(HIGH.hex)}, (ty - ${MID.at.toFixed(2)}) / ${(HIGH.at - MID.at).toFixed(2)});
   vec3 hot = mix(vec3(1.0, 0.97, 0.85), vec3(1.0, 0.5, 0.14), smoothstep(0.0, 0.06, d));
   vec3 ink = mix(base, hot, rim);
   float inkA = mask * shown;
 
+  // Flames and sparks exist only just above the front; skip their noise elsewhere.
   float above = -d;
+  float tongue = 0.0;
   float band = step(0.0, above) * (1.0 - smoothstep(0.0, 0.24, above)) * active;
-  float source = texture2D(uGlow, v - vec2(0.0, max(above, 0.0) * 0.85)).a;
-  float lick = fbm(vec2(p.x * 7.0, p.y * 2.2 - uTime * 2.6));
-  float tongue = smoothstep(0.34, 0.85, lick * source * 2.4) * band;
-
-  float glow = texture2D(uGlow, v).a;
-  float halo = glow * exp(-abs(d) * 20.0) * active;
-
-  float sparkField = noise(vec2(p.x * 70.0, p.y * 70.0 - uTime * 9.0));
+  if (band > 0.0) {
+    float source = texture2D(uGlow, v - vec2(0.0, above * 0.85)).a;
+    float lick = fbm(vec2(p.x * 7.0, p.y * 2.2 - uTime * 2.6));
+    tongue = smoothstep(0.34, 0.85, lick * source * 2.4) * band;
+  }
+  float spark = 0.0;
   float sparkBand = step(0.0, above) * (1.0 - smoothstep(0.0, 0.3, above)) * active;
-  float spark = step(0.992, sparkField) * sparkBand * smoothstep(0.02, 0.2, texture2D(uGlow, v - vec2(0.0, max(above, 0.0))).a);
+  if (sparkBand > 0.0) {
+    float sparkField = noise(vec2(p.x * 70.0, p.y * 70.0 - uTime * 9.0));
+    spark = step(0.992, sparkField) * sparkBand * smoothstep(0.02, 0.2, texture2D(uGlow, v - vec2(0.0, above)).a);
+  }
+
+  float halo = texture2D(uGlow, v).a * exp(-abs(d) * 20.0) * active;
 
   vec3 fire = mix(vec3(0.9, 0.18, 0.05), vec3(1.0, 0.82, 0.45), tongue);
   vec3 color = ink * inkA + vec3(1.0, 0.42, 0.1) * halo * 0.85 + fire * tongue + vec3(1.0, 0.85, 0.55) * spark;
@@ -113,12 +137,15 @@ function glyphCanvas(width: number, height: number, draw: (ctx: CanvasRenderingC
 }
 
 /** Lays the name out on the canvas, one glyph per em box, and returns a renderer for any progress. */
-function createBurn(canvas: HTMLCanvasElement, glyph: number): Burn | null {
-  const gl = canvas.getContext('webgl', { premultipliedAlpha: true, antialias: false })
+function createBurn(canvas: HTMLCanvasElement, glyph: number, family: string): Burn | null {
+  const gl = canvas.getContext('webgl', { premultipliedAlpha: true, antialias: false, depth: false })
   if (!gl) return null
+  const release = () => gl.getExtension('WEBGL_lose_context')?.loseContext()
 
   const pad = glyph * 0.5
-  const cssWidth = glyph * 1.8
+  // Every effect offsets its texture reads vertically only, so nothing is drawn
+  // wider than the glyph plus its glow.
+  const cssWidth = glyph * 1.5
   const cssHeight = glyph * NAME.length + pad * 2
   const ratio = Math.min(window.devicePixelRatio || 1, 2)
   canvas.style.width = `${cssWidth}px`
@@ -128,7 +155,7 @@ function createBurn(canvas: HTMLCanvasElement, glyph: number): Burn | null {
 
   const size = glyph * ratio
   const layout = (ctx: CanvasRenderingContext2D, dx = 0) => {
-    ctx.font = `700 ${size}px ${MINCHO}`
+    ctx.font = `700 ${size}px ${family}`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillStyle = '#fff'
@@ -148,31 +175,38 @@ function createBurn(canvas: HTMLCanvasElement, glyph: number): Burn | null {
   const vertex = compile(gl, gl.VERTEX_SHADER, VERTEX)
   const fragment = compile(gl, gl.FRAGMENT_SHADER, FRAGMENT)
   const program = gl.createProgram()
-  if (!vertex || !fragment || !program) return null
+  if (!vertex || !fragment || !program) {
+    release()
+    return null
+  }
   gl.attachShader(program, vertex)
   gl.attachShader(program, fragment)
   gl.linkProgram(program)
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return null
+  gl.deleteShader(vertex)
+  gl.deleteShader(fragment)
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    release()
+    return null
+  }
   gl.useProgram(program)
 
-  const buffer = gl.createBuffer()
-  gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer())
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW)
   const position = gl.getAttribLocation(program, 'a')
   gl.enableVertexAttribArray(position)
   gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0)
 
+  // The shader reads only alpha, so the glyphs upload at a quarter of RGBA's size.
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
-  const textures = [mask, glow].map((source, unit) => {
-    const texture = gl.createTexture()
+  ;[mask, glow].forEach((source, unit) => {
     gl.activeTexture(gl.TEXTURE0 + unit)
-    gl.bindTexture(gl.TEXTURE_2D, texture)
+    gl.bindTexture(gl.TEXTURE_2D, gl.createTexture())
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source)
-    return texture
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.ALPHA, gl.ALPHA, gl.UNSIGNED_BYTE, source)
+    source.width = 0
   })
 
   gl.uniform1i(gl.getUniformLocation(program, 'uMask'), 0)
@@ -191,11 +225,8 @@ function createBurn(canvas: HTMLCanvasElement, glyph: number): Burn | null {
       gl.clear(gl.COLOR_BUFFER_BIT)
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
     },
-    dispose() {
-      textures.forEach((texture) => gl.deleteTexture(texture))
-      gl.deleteBuffer(buffer)
-      gl.deleteProgram(program)
-    },
+    // Losing the context frees its buffer, program and textures in one call.
+    dispose: release,
   }
 }
 
@@ -215,39 +246,53 @@ export function BurningName() {
   useEffect(() => {
     const text = textRef.current
     const canvas = canvasRef.current
-    if (!text || !canvas || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (
+      !text
+      || !canvas
+      || typeof IntersectionObserver === 'undefined'
+      || window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
       setPhase('static')
       return
     }
 
+    // The canvas draws the face the text shows, so both read one computed style.
+    const { fontFamily, fontSize } = getComputedStyle(text)
     let burn: Burn | null = null
     let frame = 0
     let cancelled = false
     const observer = new IntersectionObserver(([entry]) => {
-      if (!entry?.isIntersecting || burn) return
+      if (!entry?.isIntersecting) return
       observer.disconnect()
-      burn = createBurn(canvas, Number.parseFloat(getComputedStyle(text).fontSize))
-      if (!burn) {
+      const created = createBurn(canvas, Number.parseFloat(fontSize), fontFamily)
+      if (!created) {
         setPhase('static')
         return
       }
+      burn = created
       setPhase('burning')
       const started = performance.now()
       const tick = (now: number) => {
-        if (cancelled || !burn) return
+        if (cancelled) return
         const t = (now - started) / BURN_MS
-        burn.draw(easeInOut(Math.min(t, 1)) * END, (now - started) / 1000)
-        // The finished name is handed back to the text, which stays sharp
-        // under zoom and resize where the canvas would not.
-        if (t < 1) frame = requestAnimationFrame(tick)
-        else setPhase('static')
+        created.draw(easeInOut(Math.min(t, 1)) * END, (now - started) / 1000)
+        if (t < 1) {
+          frame = requestAnimationFrame(tick)
+          return
+        }
+        // The finished name goes back to the text, which stays sharp under
+        // zoom and resize, and the canvas's GPU memory goes with it.
+        created.dispose()
+        burn = null
+        setPhase('static')
       }
       frame = requestAnimationFrame(tick)
     })
 
-    void document.fonts.load(`700 16px ${MINCHO}`, NAME).finally(() => {
+    const start = () => {
       if (!cancelled) observer.observe(canvas)
-    })
+    }
+    void document.fonts.load(`700 16px ${fontFamily}`, NAME).then(start, start)
 
     return () => {
       cancelled = true
@@ -262,16 +307,19 @@ export function BurningName() {
       <span
         ref={textRef}
         lang="ja"
-        className={`block bg-[linear-gradient(to_top,#ffb35c_0%,#ff3c28_38%,#db1b1b_100%)] bg-clip-text font-mincho text-[9.5rem] font-bold leading-none text-transparent [writing-mode:vertical-rl] ${
+        style={TEXT_FILL}
+        className={`block bg-clip-text font-mincho text-[9.5rem] font-bold leading-none text-transparent [writing-mode:vertical-rl] ${
           phase === 'burning' ? 'invisible' : phase === 'pending' ? 'guren-name-pending' : ''
         }`}
       >
         {NAME}
       </span>
-      <canvas
-        ref={canvasRef}
-        className={`pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 ${phase === 'burning' ? '' : 'invisible'}`}
-      />
+      {phase !== 'static' && (
+        <canvas
+          ref={canvasRef}
+          className={`pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 ${phase === 'burning' ? '' : 'invisible'}`}
+        />
+      )}
     </span>
   )
 }

@@ -41,12 +41,12 @@
 @theme {
   --font-family-display: 'Inter', 'Inter var', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-home: 'Noto Sans JP', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-mono: var(--g-font-mono);
   /* Only 紅蓮 is set in it; no mincho is self-hostable at that size budget. */
   --font-mincho: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', 'Noto Serif CJK JP', serif;
   /* The Guren Deck palette: ink is the code surface, smoke the secondary text
      on crimson-950 (7.5:1), foam the counter-signal for measured numbers. */
-  --color-ink: #1a1212;
+  --color-ink: var(--g-ink);
   --color-smoke: #c9a9a9;
   --color-foam: #9ccfd8;
   --color-ember: #ff3c28;
@@ -73,7 +73,6 @@
   --color-docs-border: var(--docs-border-soft);
   --color-docs-border-strong: var(--docs-border-strong);
   --animate-slide-in-right: slide-in-right 0.3s ease-out both;
-  --animate-cursor-blink: cursor-blink 1s step-end infinite;
   --animate-gradient-shift: gradient-shift 8s ease infinite;
 }
 
@@ -97,54 +96,43 @@
 }
 
 /* ConventionGrid's panels. Each vg-* class's own style is its end state, which
-   the server renders and reduced motion keeps; data-armed adds the animation
-   paused at its start, and data-play runs it once. */
+   the server renders and reduced motion keeps. data-phase="armed" holds a panel
+   at its first frame until it scrolls into view; "play" runs it once. */
 .vg .vg-out { opacity: 0; }
 .vg .vg-dim { opacity: 0.35; }
 .vg .vg-draw { stroke-dasharray: 1; }
 .vg .vg-light {
-  border-color: rgb(252 109 109 / 0.55);
-  background-color: rgb(127 29 29 / 0.35);
+  border-color: color-mix(in srgb, var(--color-crimson-400) 55%, transparent);
+  background-color: color-mix(in srgb, var(--color-crimson-900) 35%, transparent);
 }
 
-.vg[data-armed] :is(.vg-out, .vg-in, .vg-pop, .vg-grow, .vg-reveal, .vg-slide, .vg-light, .vg-dim, .vg-draw) {
-  animation-duration: 0.45s;
-  animation-timing-function: cubic-bezier(0.3, 0.7, 0.3, 1);
-  animation-fill-mode: both;
-  animation-play-state: paused;
+@media (prefers-reduced-motion: no-preference) {
+  .vg [data-phase] { --vg-ease: cubic-bezier(0.3, 0.7, 0.3, 1); }
+  .vg [data-phase='armed'] { --vg-state: paused; }
+
+  .vg [data-phase] :is(.vg-out, .vg-dim) { animation: vg-fade 0.45s var(--vg-ease) both var(--vg-state, running); }
+  .vg [data-phase] .vg-in { animation: vg-in 0.45s var(--vg-ease) both var(--vg-state, running); }
+  .vg [data-phase] .vg-pop { animation: vg-pop 0.45s var(--vg-ease) both var(--vg-state, running); }
+  .vg [data-phase] .vg-grow { animation: vg-grow 0.45s var(--vg-ease) both var(--vg-state, running); }
+  .vg [data-phase] .vg-draw { animation: vg-draw 0.45s var(--vg-ease) both var(--vg-state, running); }
+  .vg [data-phase] .vg-light { animation: vg-light 0.45s var(--vg-ease) both var(--vg-state, running); }
+  .vg [data-phase] .vg-slide { animation: vg-slide 0.8s var(--vg-ease) both var(--vg-state, running); }
+  .vg [data-phase] .vg-reveal { animation: vg-reveal 0.9s steps(38, end) both var(--vg-state, running); }
 }
 
-.vg[data-armed][data-play] :is(.vg-out, .vg-in, .vg-pop, .vg-grow, .vg-reveal, .vg-slide, .vg-light, .vg-dim, .vg-draw) {
-  animation-play-state: running;
-}
-
-.vg[data-armed] .vg-out { animation-name: vg-out; }
-.vg[data-armed] .vg-in { animation-name: vg-in; }
-.vg[data-armed] .vg-pop { animation-name: vg-pop; }
-.vg[data-armed] .vg-grow { animation-name: vg-grow; }
-.vg[data-armed] .vg-light { animation-name: vg-light; }
-.vg[data-armed] .vg-dim { animation-name: vg-dim; }
-.vg[data-armed] .vg-draw { animation-name: vg-draw; }
-.vg[data-armed] .vg-slide { animation-name: vg-slide; animation-duration: 0.8s; }
-.vg[data-armed] .vg-reveal {
-  animation-name: vg-reveal;
-  animation-duration: 0.9s;
-  animation-timing-function: steps(38, end);
-}
-
-@keyframes vg-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes vg-fade { from { opacity: 1; } }
 @keyframes vg-in { from { opacity: 0; transform: translateY(3px); } }
 @keyframes vg-pop { from { opacity: 0; transform: scale(0.6); } }
 @keyframes vg-grow { from { transform: scaleX(0); } }
-@keyframes vg-dim { from { opacity: 1; } to { opacity: 0.35; } }
-@keyframes vg-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes vg-draw { from { stroke-dashoffset: 1; } }
+/* inset() cannot interpolate to the initial `none`, so the end is spelled out. */
 @keyframes vg-reveal { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
 @keyframes vg-slide { from { opacity: 0; transform: translateX(-5.5rem); } 25% { opacity: 1; } }
 @keyframes vg-light {
   from {
-    border-color: rgb(255 245 245 / 0.15);
+    border-color: color-mix(in srgb, var(--color-crimson-50) 15%, transparent);
     background-color: transparent;
-    color: rgb(201 169 169 / 0.6);
+    color: color-mix(in srgb, var(--color-smoke) 60%, transparent);
   }
 }
 
@@ -159,10 +147,6 @@
   }
 }
 
-@keyframes cursor-blink {
-  50% { opacity: 0; }
-}
-
 @keyframes gradient-shift {
   0%, 100% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
@@ -175,8 +159,8 @@ html {
 /* ─── Guren UI tokens (gurenjs/guren-ui dist/tokens.css) ───
    The design system was derived from these docs themes, so the values match
    what the site already shipped; --docs-* below are aliases kept for the
-   existing markup. Fonts stay on the site's own policy (no self-hosted
-   family is introduced here). */
+   existing markup. The faces these stacks name are self-hosted by the
+   @font-face rules at the top of this file. */
 :root {
   --g-font-mono: 'JetBrains Mono', 'SFMono-Regular', ui-monospace, monospace;
 
@@ -604,10 +588,10 @@ body.docs-theme {
   border-bottom-color: var(--docs-accent-strong);
 }
 
-/* The code surface has no theme: ink in light and dark alike (the same
-   --color-ink the home page's code panel paints), syntax from rose-pine-moon.
+/* The code surface has no theme: ink in light and dark alike (--g-ink, which
+   the home page's code panel paints too), syntax from rose-pine-moon.
    !important beats the theme background shiki inlines on the element. */
-.shiki {
+.docs-content .shiki {
   border-radius: var(--g-r-card);
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 1rem 1.25rem;
@@ -617,7 +601,7 @@ body.docs-theme {
   line-height: 1.5;
 }
 
-.shiki code {
+.docs-content .shiki code {
   font-family: var(--g-font-mono);
 }
 
