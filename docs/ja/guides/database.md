@@ -193,7 +193,7 @@ bunx guren make:migration --schema ./custom/schema.ts --out ./custom/migrations
 bunx guren make:migration --dialect postgresql --schema ./db/schema.ts --out ./db/migrations
 ```
 
-`make:migration` はアプリにインストールされた drizzle-kit を実行します。アプリの `node_modules` を探し、無ければ親ディレクトリの `node_modules`(ワークスペースで巻き上げられたもの)を探します。どこにも無い場合は `bun install` を求めて停止します。npm のバージョンはフラグが異なる場合があるため、npm からは取得しません。
+`make:migration` はアプリにインストールされた drizzle-kit を実行します。アプリの `node_modules` を探し、無ければ親ディレクトリの `node_modules`(ワークスペースで巻き上げられたもの)を探します。どこにも無い場合は `bun install` を求めて停止します。npm 上の drizzle-kit はアプリが入れたものとフラグが異なる場合があるため、npm からは取得しません。
 
 なお設定ファイルの `schema` を配列で宣言している場合、`--schema` は値を 1 つしか取らないため上書き経路では引き継げません。この場合は Guren がエラーで停止します(黙って一部のテーブルだけを生成しないためです)。`--schema` に 1 つのパスか glob を渡すか、上書きをやめて設定ファイルをそのまま使ってください。
 

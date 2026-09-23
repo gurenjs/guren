@@ -13,8 +13,8 @@ const DEFAULT_OUTPUT = 'db/migrations'
 /**
  * Wider than drizzle-kit's own discovery (`.ts`/`.js`/`.json`): its loader
  * accepts an explicit `--config` pointing at `.mts`/`.mjs` too. A `.json` loads
- * only because drizzle-kit runs under Bun here; under its Node shebang the import
- * lacks `type: json`. Order follows drizzle-kit's own preference, `.json` last.
+ * only because this process and the drizzle-kit it spawns both run under Bun; under
+ * Node the import lacks `type: json`. Order follows drizzle-kit's, `.json` last.
  * Verified against drizzle-kit 1.0.0-rc.4.
  */
 const DRIZZLE_CONFIG_CANDIDATES = [

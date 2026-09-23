@@ -1,10 +1,11 @@
-import { describe, expect, it, mock } from 'bun:test'
+import { describe, expect, it, mock, spyOn } from 'bun:test'
+import { consola } from 'consola'
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { createTempWorkspace, runCliBin, type TempWorkspace } from './helpers'
+import { createTempWorkspace, runCliBin, runCliBinCaptured, type TempWorkspace } from './helpers'
 import { resolveAppDrizzleKit } from '../src/make-migration'
 import * as realUtils from '../src/utils'
 
@@ -12,11 +13,11 @@ const repoRoot = resolve(import.meta.dir, '../../..')
 
 /**
  * A `node_modules` holding the real `drizzle-kit` and a `drizzle-orm` it can
- * resolve, or undefined when neither is installed. Resolved from `examples/blog`
+ * resolve, or undefined when either is missing. Resolved from `examples/blog`
  * (bun's isolated layout keeps both out of the root `node_modules`); undefined
  * rather than a throw keeps the suite runnable without the examples installed.
  */
-function resolveDrizzleKit(): { nodeModules: string } | undefined {
+function blogNodeModules(): string | undefined {
   const from = join(repoRoot, 'examples/blog')
   try {
     // `Bun.resolveSync` can answer from the root `.bun/` store even when blog
@@ -25,14 +26,14 @@ function resolveDrizzleKit(): { nodeModules: string } | undefined {
       return undefined
     }
 
-    Bun.resolveSync('drizzle-kit/package.json', from)
     // The generated schema imports `drizzle-orm/pg-core`, which drizzle-kit
-    // resolves from the *workspace*. A throw here is the skip signal.
+    // resolves from the *workspace*. A throw from either is the skip signal.
+    Bun.resolveSync('drizzle-kit/package.json', from)
     Bun.resolveSync('drizzle-orm/pg-core', from)
 
     // blog's own link farm, not the resolved path: node's resolver finds
     // nothing by bare specifier under bun's isolated layout.
-    return { nodeModules: join(from, 'node_modules') }
+    return join(from, 'node_modules')
   } catch {
     return undefined
   }
@@ -469,8 +470,8 @@ describe('makeMigration', () => {
    * `--dialect` exits 1 with "Please provide required params: [x] dialect".
    */
   it('builds an argument list real drizzle-kit accepts', async () => {
-    const drizzleKit = resolveDrizzleKit()
-    if (!drizzleKit) {
+    const nodeModules = blogNodeModules()
+    if (!nodeModules) {
       // A silent pass would read as "the args were verified" when nothing ran.
       console.warn('[make-migration] skipped: no drizzle-kit installed (run `bun install` at the repo root)')
       return
@@ -480,7 +481,7 @@ describe('makeMigration', () => {
     try {
       // drizzle-kit reads the schema with node's resolver from the cwd, so the
       // workspace needs a `drizzle-orm` to resolve; symlinking beats installing.
-      await symlink(drizzleKit.nodeModules, join(workspace.dir, 'node_modules'), 'dir')
+      await symlink(nodeModules, join(workspace.dir, 'node_modules'), 'dir')
       await mkdir(join(workspace.dir, 'custom'), { recursive: true })
       await writeFile(
         join(workspace.dir, 'custom/schema.ts'),
@@ -767,10 +768,37 @@ describe('the drizzle-kit make:migration runs', () => {
     try {
       await writeFile(join(workspace.dir, 'drizzle.config.ts'), "export default { dialect: 'sqlite' }", 'utf8')
 
-      expect(await generateSchemaMigration('create_sessions_table', 'sessions')).toBe(false)
+      const info = spyOn(consola, 'info').mockImplementation((() => {}) as never)
+      const warn = spyOn(consola, 'warn').mockImplementation((() => {}) as never)
+      try {
+        expect(await generateSchemaMigration('create_sessions_table', 'sessions')).toBe(false)
+        expect(info.mock.calls.map((call) => String(call[0]))).toEqual([
+          'drizzle-kit is not installed in the application — run `bun run db:make` after `bun install` to generate the sessions migration.',
+        ])
+        expect(warn).not.toHaveBeenCalled()
+      } finally {
+        info.mockRestore()
+        warn.mockRestore()
+      }
       expect(spawnCalls.length).toBe(0)
     } finally {
       await workspace.cleanup()
+    }
+  })
+
+  it('should print the refusal without a stack trace when the application installs no drizzle-kit', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'guren-cli-make-migration-no-kit-bin-'))
+    try {
+      await writeFile(join(dir, 'bunfig.toml'), '[install]\nauto = "disable"\n', 'utf8')
+      await writeFile(join(dir, 'drizzle.config.ts'), "export default { dialect: 'sqlite' }", 'utf8')
+
+      const { stdout, stderr, exitCode } = await runCliBinCaptured(['make:migration', 'add_x'], dir)
+
+      expect(exitCode).toBe(1)
+      expect(stdout + stderr).toContain('drizzle-kit is not installed in the application. Run bun install')
+      expect(stdout + stderr).not.toMatch(/\n\s+at /)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
     }
   })
 })

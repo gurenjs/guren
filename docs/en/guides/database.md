@@ -953,8 +953,9 @@ bunx guren make:migration --name add_posts_table
 bun run db:migrate
 ```
 
-The command reads `drizzle.config.ts` (or `.mts`/`.js`/`.mjs`) for the schema
-path, output directory, and dialect. You can override the paths:
+The command reads `drizzle.config.ts` (or `.mts`/`.js`/`.mjs`, or a
+`drizzle.config.json`, which a `.ts` or `.js` beside it takes precedence over)
+for the schema path, output directory, and dialect. You can override the paths:
 
 ```bash
 bunx guren make:migration --schema ./custom/schema.ts --out ./custom/migrations

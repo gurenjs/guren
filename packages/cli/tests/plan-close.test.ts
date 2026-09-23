@@ -460,8 +460,9 @@ describe('describeCloseBlockers', () => {
     files: ['app/x.ts'],
     ...extra,
   })
-  const blockerOf = (entry: PlanElementStatus): string => formatCloseBlocker(describeCloseBlockers(plan, derivation, [entry], 'p.json')[0]!)
-  const holdsOf = (entry: PlanElementStatus): string | undefined => describeCloseBlockers(plan, derivation, [entry], 'p.json')[0]!.holds
+  const blockerFor = (entry: PlanElementStatus) => describeCloseBlockers(plan, derivation, [entry], 'p.json')[0]!
+  const blockerOf = (entry: PlanElementStatus): string => formatCloseBlocker(blockerFor(entry))
+  const holdsOf = (entry: PlanElementStatus): string | undefined => blockerFor(entry).holds
 
   test('should name the command that moves each kind of hold', () => {
     const incomplete = 'Verified t by s, and no longer at the state that completes it.'
