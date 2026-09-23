@@ -8,18 +8,16 @@
  * section first (RFC 0026 §5), the source reading being the fallback.
  */
 import { relative } from 'node:path'
-import type { ObjectExpression } from '@babel/types'
 import type { SessionEntry } from '@guren/server'
-import { objectLiteral, propertyValue, type BabelNode } from './ast-walk'
-import { resolveSchemaTableBinding } from './schema-binding'
+import { resolveSchemaTableBinding, schemaDeclaresSqlTable, type SchemaTableBinding } from './schema-binding'
 import { check, type CheckResult } from './check-result'
 import { appBindsService, readIfExists } from './discovery'
 import type { Introspection } from './introspect'
-import { introspectedSection, judgedFromSource, mergeVerdicts } from './manifest-section'
+import { introspectedSection, judgedFromManifest, judgedFromSource, mergeVerdicts, type IntrospectedSection } from './manifest-section'
 import type { ParseCache, ParsedFile } from './parse-cache'
 import { resolveAppEntry } from './provider-registrar'
 import type { SchemaTable } from './schema-parser'
-import { readSessionConfig, sessionConfigsIn, storeTableIdentifier, type SessionConfigSite } from './session-config'
+import { readSessionConfig, sessionConfigsIn, type SessionConfigSite } from './session-config'
 
 const TABLE_TITLE = 'Session store table'
 const TABLE_FIX = 'Run `bunx guren add session` to add the sessions table, or point the store at the table your schema does export.'
@@ -28,7 +26,7 @@ const BINDING_TITLE = 'Session manager binding'
 const BINDING_FIX = "Register a provider whose register() calls container.instance('session', createSessionManager(sessionConfig)), "
   + 'and list it in createApp({ providers }). `bunx guren add session` writes one.'
 
-interface SessionSite extends SessionConfigSite {
+export interface SessionSite extends SessionConfigSite {
   filePath: string
   relPath: string
   parsed: ParsedFile
@@ -67,23 +65,46 @@ async function readSessionSites(cwd: string, cache: ParseCache, files: string[])
   return sites
 }
 
+/** The session configs in source and, once one is found, the introspected `session` section. */
+export interface SessionWiring {
+  sites: SessionSite[]
+  session: Promise<IntrospectedSection<SessionEntry | undefined>>
+}
+
+/**
+ * Reads the session configs and starts the introspection when there is one, so `guren check`
+ * can call it before its suites and have the child overlap them (RFC 0026 §5).
+ */
+export async function readSessionWiring(
+  cwd: string,
+  cache: ParseCache,
+  files: string[],
+  introspect?: () => Promise<Introspection>,
+): Promise<SessionWiring> {
+  const sites = await readSessionSites(cwd, cache, files)
+  const session = sites.length > 0 ? introspectedSection(introspect, 'session') : Promise.resolve({ status: 'static' as const })
+  return { sites, session }
+}
+
 export async function checkSessionsConfig(options: {
   cwd: string
   cache: ParseCache
   files: string[]
   schemaTables: SchemaTable[]
-  /** The run's introspection, asked for only once a session config is found (RFC 0026 §5). */
+  /** The run's introspection, asked for only once a session config is found. */
   introspect?: () => Promise<Introspection>
+  /** {@link readSessionWiring}'s result when the caller started it early; read here otherwise. */
+  wiring?: Promise<SessionWiring>
 }): Promise<CheckResult[]> {
   const { cwd, cache, files, schemaTables } = options
-  const sites = await readSessionSites(cwd, cache, files)
+  const { sites, session: sessionRead } = await (options.wiring ?? readSessionWiring(cwd, cache, files, options.introspect))
   if (sites.length === 0) return []
 
   // A definition is bound by the entry's `config` array, which `config-unwired` judges.
   const bindingApplies = sites.some((site) => site.form === 'declared')
   const staticTables = sites.flatMap((site) => checkStoreTables(site, cwd, schemaTables))
 
-  const session = await introspectedSection(options.introspect, 'session')
+  const session = await sessionRead
   if (session.status === 'static') {
     return judgedFromSource([...staticTables, ...(bindingApplies ? [await checkBinding(cwd)] : [])], session.reason)
   }
@@ -91,36 +112,28 @@ export async function checkSessionsConfig(options: {
   // A config the app does not read has no stores in the manifest to judge, so its tables stay on the scan.
   const entry = session.value
   const tables = entry?.source === 'manager'
-    ? mergeVerdicts(
-        checkManifestStoreTables(entry, sites, cwd, schemaTables).map((result) => ({ ...result, evidence: 'manifest' as const })),
-        judgedFromSource(staticTables),
-      )
+    ? mergeVerdicts(judgedFromManifest(checkManifestStoreTables(entry, sites, cwd, schemaTables)), judgedFromSource(staticTables))
     : judgedFromSource(staticTables, 'the introspected app binds no session manager, so it never reads this config')
-  return bindingApplies ? [...tables, { ...judgeManifestBinding(entry), evidence: 'manifest' }] : tables
+  return bindingApplies ? [...tables, ...judgedFromManifest([judgeManifestBinding(entry)])] : tables
 }
 
-/** The store `name` declares in `config`, by its key. */
-function storeNamed(config: ObjectExpression, name: string): ObjectExpression | undefined {
-  const stores = objectLiteral(propertyValue(config, 'stores'))
-  for (const entry of (stores?.properties ?? []) as unknown as BabelNode[]) {
-    if (entry.type === 'ObjectProperty' && nameOf(entry) === name) return objectLiteral(entry.value as never) ?? undefined
-  }
-  return undefined
+/** What store `name` of a config binds, by the identifier its `table` names. */
+function storeBinding(site: SessionSite, name: string, cwd: string, schemaTables: SchemaTable[]): { identifier?: string; binding?: SchemaTableBinding } {
+  const identifier = readSessionConfig(site.config).tables.get(name)
+  if (!identifier) return {}
+  const binding = resolveSchemaTableBinding({ cwd, filePath: site.filePath, body: site.parsed.ast.program.body, identifier, schemaTables })
+  return { identifier, ...(binding ? { binding } : {}) }
 }
 
 /** The source reading of one config's `database` stores against the schema's exports. */
 function checkStoreTables(site: SessionSite, cwd: string, schemaTables: SchemaTable[]): CheckResult[] {
-  const { config, filePath, relPath, parsed } = site
+  const { config, relPath } = site
   const results: CheckResult[] = []
 
   // Only the database driver binds a table; every other store's options are its own business.
   for (const [name, driver] of readSessionConfig(config).stores) {
     if (driver !== 'database') continue
-    const store = storeNamed(config, name)
-    const identifier = store ? storeTableIdentifier(store) : undefined
-    if (!identifier) continue
-
-    const binding = resolveSchemaTableBinding({ cwd, filePath, body: parsed.ast.program.body, identifier, schemaTables })
+    const { binding } = storeBinding(site, name, cwd, schemaTables)
     if (!binding) continue
 
     const key = `sessions-config:${relPath}:${binding.tableName}`
@@ -152,23 +165,15 @@ function checkStoreTables(site: SessionSite, cwd: string, schemaTables: SchemaTa
  */
 function checkManifestStoreTables(entry: SessionEntry, sites: SessionSite[], cwd: string, schemaTables: SchemaTable[]): CheckResult[] {
   const results: CheckResult[] = []
-  // A table the static reader could not name is not evidence that the schema lacks one.
-  const namesReadable = schemaTables.length > 0 && schemaTables.every((table) => table.tableName !== undefined)
 
   for (const [name, store] of Object.entries(entry.stores)) {
     if (store.driver !== 'database') continue
     // The manifest does not say which config built the manager: among the configs declaring the store,
     // the one whose export the schema names as this table, else the first.
-    const candidates = sites.filter((candidate) => readSessionConfig(candidate.config).stores.has(name)).map((candidate) => {
-      const storeNode = storeNamed(candidate.config, name)
-      const identifier = storeNode ? storeTableIdentifier(storeNode) : undefined
-      const binding = identifier
-        ? resolveSchemaTableBinding({ cwd, filePath: candidate.filePath, body: candidate.parsed.ast.program.body, identifier, schemaTables })
-        : undefined
-      return { site: candidate, identifier, binding }
-    })
-    const sqlNameOf = (exported: string | undefined) => schemaTables.find((table) => table.identifier === exported)?.tableName
-    const { site, identifier, binding } = candidates.find((candidate) => candidate.binding?.declared && sqlNameOf(candidate.binding.tableName) === store.table)
+    const candidates = sites
+      .filter((candidate) => readSessionConfig(candidate.config).stores.has(name))
+      .map((candidate) => ({ site: candidate, ...storeBinding(candidate, name, cwd, schemaTables) }))
+    const { site, identifier, binding } = candidates.find((candidate) => candidate.binding?.sqlName === store.table)
       ?? candidates[0]
       ?? { site: sites[0]!, identifier: undefined, binding: undefined }
     const key = `sessions-config:${site.relPath}:${binding?.tableName ?? identifier ?? store.table ?? name}`
@@ -187,11 +192,13 @@ function checkManifestStoreTables(entry: SessionEntry, sites: SessionSite[], cwd
       )
       continue
     }
-    if (schemaTables.some((table) => table.tableName === store.table)) {
+    const declared = schemaDeclaresSqlTable(schemaTables, store.table)
+    if (declared) {
       results.push(check(key, TABLE_TITLE, 'pass', `The database session store '${name}' binds schema table '${store.table}'.`))
       continue
     }
-    if (!namesReadable) continue
+    // Unreadable schema names: the source verdict for this key, if any, stands.
+    if (declared === undefined) continue
     results.push(
       check(
         key,
@@ -263,12 +270,4 @@ async function checkBinding(cwd: string): Promise<CheckResult> {
       + 'register it, so it never runs and sessions stay on the in-memory default.',
     'Add the provider to createApp({ providers: [...] }); `bunx guren add session` wires it for you.',
   )
-}
-
-function nameOf(entry: BabelNode): string | undefined {
-  const key = entry.key as BabelNode
-  if (entry.computed) return undefined
-  if (key?.type === 'Identifier') return key.name as string
-  if (key?.type === 'StringLiteral') return key.value as string
-  return undefined
 }

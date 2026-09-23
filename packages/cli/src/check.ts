@@ -32,7 +32,7 @@ import { checkRouteContracts } from './route-contract-check'
 import { checkAgentRoutes } from './agent-route-check'
 import { checkDeferredProps } from './deferred-props-check'
 import { checkAiAgents } from './ai-agent-check'
-import { checkSessionsConfig } from './sessions-check'
+import { checkSessionsConfig, readSessionWiring } from './sessions-check'
 import { checkPrototypeRoutes } from './prototype-check'
 import { checkDeployRuntime } from './deploy-runtime'
 import { loadRouteDefinitions } from './load-routes'
@@ -50,6 +50,7 @@ import {
   checkAttachmentsConfig,
   checkAttachmentsDelivery,
   checkAttachmentsPublicDisk,
+  readAttachmentsWiring,
 } from './attachments-check'
 import { checkAgentsConfig, type AgentsConfigExpansion } from './agents-config-check'
 import { declaredTableIdentifiers, findSchemaAggregate, moduleSchemaAggregateName, moduleSchemaSpecifier, parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
@@ -406,6 +407,14 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       : undefined
   // Awaited at step 12; until then a rejection must not surface as unhandled.
   deployRuntime?.catch(() => {})
+  // The session and attachments rules (8.5-8.7) introspect once they find their config, started here for
+  // the same overlap. Gated like 7.7: a run that changed no source must not execute the app.
+  const wiringIntrospect = sourceChanged ? introspect : undefined
+  const appConfigFiles = runs('core') ? discoverAppConfigFiles(cwd) : undefined
+  const sessionWiring = appConfigFiles?.then((files) => readSessionWiring(cwd, cache, files, wiringIntrospect))
+  const attachmentsWiring = appConfigFiles?.then((files) => readAttachmentsWiring(cwd, cache, files, wiringIntrospect))
+  sessionWiring?.catch(() => {})
+  attachmentsWiring?.catch(() => {})
 
   if (runs('core')) {
     // 1. Check controllers for empty methods. The unfiltered list is kept for
@@ -608,18 +617,14 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // 0013); the layer takes it untyped, so a renamed export only fails on the
     // first attach. Not changed-filtered: the failure originates in db/schema.ts,
     // so filtering by the config file would hide the rename this exists for.
-    const appConfigFiles = await discoverAppConfigFiles(cwd)
-    // Handed to the session and attachments rules, each of which introspects only once it finds
-    // its own config (RFC 0026 §5). Gated like 7.7: a run that changed no source must not execute the app.
-    const wiringIntrospect = sourceChanged ? introspect : undefined
-    checks.push(
-      ...(await checkAttachmentsConfig({ cwd, cache, files: appConfigFiles, schemaTables, introspect: wiringIntrospect })),
-    )
+    const configFiles = (await appConfigFiles) ?? []
+    const wiring = { introspect: wiringIntrospect, wiring: attachmentsWiring }
+    checks.push(...(await checkAttachmentsConfig({ cwd, cache, files: configFiles, schemaTables, ...wiring })))
 
     // 8.6. The prior question: a model mixing in Attachable(...) in an app with
     // no configureAttachments() call at all. Same runtime-only failure as 8.5.
     checks.push(
-      ...(await checkAttachableModels({ cwd, cache, files: allModelFiles, configFiles: appConfigFiles, introspect: wiringIntrospect })),
+      ...(await checkAttachableModels({ cwd, cache, files: allModelFiles, configFiles, ...wiring })),
     )
 
     // 8.6b. Session wiring (RFC 0020 §2): a `database` store bound to a table
@@ -627,7 +632,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // the same config/src/app scan the attachments rules use. Not
     // changed-filtered: the config and its provider are different files.
     checks.push(
-      ...(await checkSessionsConfig({ cwd, cache, files: appConfigFiles, schemaTables, introspect: wiringIntrospect })),
+      ...(await checkSessionsConfig({ cwd, cache, files: configFiles, schemaTables, introspect: wiringIntrospect, wiring: sessionWiring })),
     )
 
     // 8.6c. Config wiring (RFC 0027 §6): a config/<key>.ts definition the entry's
@@ -643,7 +648,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // changed-filtered: the two halves of the finding live in different files
     // (the config names the disk, the storage provider roots it).
     checks.push(
-      ...(await checkAttachmentsPublicDisk({ cwd, cache, files: appConfigFiles, introspect: wiringIntrospect })),
+      ...(await checkAttachmentsPublicDisk({ cwd, cache, files: configFiles, ...wiring })),
     )
 
     // 8.7. Delivery-route wiring (RFC 0015): a `delivery` config with no
@@ -656,10 +661,10 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
         ...(await checkAttachmentsDelivery({
           cwd,
           cache,
-          files: appConfigFiles,
+          files: configFiles,
           routesFile: routeGraphFile,
           definitions: graph?.definitions,
-          introspect: wiringIntrospect,
+          ...wiring,
         })),
       )
     }

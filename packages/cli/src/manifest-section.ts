@@ -80,6 +80,11 @@ export function judgedFromSource(results: CheckResult[], reason?: string): Check
   }))
 }
 
+/** Results judged with the introspected app; one that set its own evidence (a fact read from source) keeps it. */
+export function judgedFromManifest(results: CheckResult[]): CheckResult[] {
+  return results.map((result) => ({ evidence: 'manifest', ...result }))
+}
+
 /** Manifest verdicts win per key; a source verdict the manifest did not judge (another config file) stays. */
 export function mergeVerdicts(manifest: CheckResult[], source: CheckResult[]): CheckResult[] {
   const judged = new Set(manifest.map((result) => result.key))

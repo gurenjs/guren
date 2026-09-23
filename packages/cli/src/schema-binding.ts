@@ -102,7 +102,21 @@ export interface SchemaTableBinding {
   /** The exported name the schema is asked for — an alias resolves to what it aliases. */
   tableName: string
   source: string
+  /** The schema module the import lands on: null for the root schema. */
+  schemaModule: string | null
   declared: boolean
+  /** The SQL name the schema gives that export, when it declares one the reader can name. */
+  sqlName?: string
+}
+
+/**
+ * Whether the schema declares a table by its SQL name, as the introspected app reports tables;
+ * `undefined` when it does not name one and some table's name is unreadable, which is not evidence.
+ */
+export function schemaDeclaresSqlTable(schemaTables: SchemaTable[], sqlName: string): boolean | undefined {
+  if (schemaTables.some((table) => table.tableName === sqlName)) return true
+  const namesReadable = schemaTables.length > 0 && schemaTables.every((table) => table.tableName !== undefined)
+  return namesReadable ? false : undefined
 }
 
 /**
@@ -125,9 +139,12 @@ export function resolveSchemaTableBinding(options: {
   const schemaModule = schemaModuleFor(cwd, filePath, entry.source)
   if (schemaModule === undefined) return undefined
 
+  const declared = schemaTables.find((table) => table.identifier === entry.imported && table.module === schemaModule)
   return {
     tableName: entry.imported,
     source: entry.source,
-    declared: schemaTables.some((table) => table.identifier === entry.imported && table.module === schemaModule),
+    schemaModule,
+    declared: declared !== undefined,
+    ...(declared?.tableName === undefined ? {} : { sqlName: declared.tableName }),
   }
 }

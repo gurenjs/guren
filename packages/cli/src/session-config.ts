@@ -25,6 +25,8 @@ export interface SessionConfigRead {
   selected: string | undefined
   /** Declared store name → its `driver`, or undefined when the driver is not a literal. */
   stores: Map<string, string | undefined>
+  /** Declared store name → the identifier its `table` names, for stores whose `table` is a plain identifier. */
+  tables: Map<string, string>
 }
 
 /** Locals bound to `imported` from `@guren/*`, type-only imports included. */
@@ -141,6 +143,7 @@ function fallbackString(node: Node): string | undefined {
 
 export function readSessionConfig(config: ObjectExpression): SessionConfigRead {
   const stores = new Map<string, string | undefined>()
+  const tables = new Map<string, string>()
   const declared = objectLiteral(propertyValue(config, 'stores'))
   for (const entry of (declared?.properties ?? []) as unknown as BabelNode[]) {
     if (entry.type !== 'ObjectProperty') continue
@@ -148,14 +151,10 @@ export function readSessionConfig(config: ObjectExpression): SessionConfigRead {
     if (!name) continue
     const store = objectLiteral(entry.value as Node)
     stores.set(name, store ? fallbackString(propertyValue(store, 'driver') as Node) : undefined)
+    const table = store ? (propertyValue(store, 'table') as BabelNode | undefined) : undefined
+    if (table?.type === 'Identifier') tables.set(name, table.name as string)
   }
 
-  return { ...selectedStore(config), stores }
-}
-
-/** The `table` identifier a store binds, for the `database` driver's schema check. */
-export function storeTableIdentifier(store: ObjectExpression): string | undefined {
-  const table = propertyValue(store, 'table') as BabelNode | undefined
-  return table?.type === 'Identifier' ? (table.name as string) : undefined
+  return { ...selectedStore(config), stores, tables }
 }
 
