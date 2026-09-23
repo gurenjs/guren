@@ -127,7 +127,7 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
   const readingsRecorded = [...new Set(recorded.readingsAdded.map((reading) => reading.element))]
   const entry = recorded.existing ?? approval
   const reachable = behaviourCanReach(approved)
-  const held = heldAlters(approved, current, entry.readings?.properties ?? []).map((alter) => ({ ...alter, message: heldAlterMessage(alter, reachable.has(alter.element)) }))
+  const warnings = heldAlters(approved, current, entry.readings?.properties ?? []).map((alter) => ({ ...alter, message: heldAlterMessage(alter, reachable.has(alter.element)) }))
   return {
     reportVersion: PLAN_APPROVE_REPORT_VERSION,
     plan: { file: basename(path), title: approved.title, hash },
@@ -137,16 +137,21 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
     alreadyApproved: recorded.existing !== undefined,
     ...(settled.built.length > 0 ? { builtByPlan: settled.built } : {}),
     ...(readingsRecorded.length > 0 ? { readingsRecorded } : {}),
-    ...(held.length > 0 ? { heldAlters: held } : {}),
+    ...(warnings.length > 0 ? { heldAlters: warnings } : {}),
   }
 }
 
 /** Agrees with `plan:status`'s `unjudged` reason and `plan:close`'s remedies: `reachable` is `behaviourCanReach()`. */
 function heldAlterMessage(alter: HeldAlter, reachable: boolean): string {
-  const shows =
-    alter.unread.length > 0
-      ? `${alter.unread.join(', ')} read unknown then, and only a match on ${alter.unread.length === 1 ? 'it' : 'one of them'} can still show the change (a property no reader sees never matches)`
-      : 'none shows the change, so plan:status reports it unjudged'
+  let shows = 'none shows the change'
+  if (alter.unread.length > 0) {
+    const which = alter.unread.length === 1 ? 'it' : 'one of them'
+    shows = `${alter.unread.join(', ')} read unknown then, and only a match on ${which} can still show the change (a property no reader sees never matches)`
+  } else if (alter.readNow) {
+    shows += ', so plan:status reports it unjudged'
+  } else {
+    shows += ' (it is not read now, so this rests on the readings recorded at approval)'
+  }
   const otherwise = reachable ? 'it completes only through a verified behaviour that reaches it, or by a waiver' : 'only a waiver completes it, since no behaviour can reach it'
   return `${alter.element} (${alter.label}): every readable planned property already held at approval (${alter.held.join(', ')}); ${shows}. State the change in a property the application does not hold yet and approve the plan again, or expect that ${otherwise}.`
 }

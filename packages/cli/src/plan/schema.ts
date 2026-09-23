@@ -458,6 +458,13 @@ export function listPlanElementEntries(plan: PlanDraft): PlanElementEntry[] {
   return refs
 }
 
+/** The ids of the elements whose change is `alter`, in document order. */
+export function listPlanAlterIds(plan: PlanDraft): string[] {
+  return listPlanElementEntries(plan)
+    .filter(({ element }) => (element as { change?: PlanChange }).change?.kind === 'alter')
+    .map(({ id }) => id)
+}
+
 export function findDuplicatePlanIds(plan: PlanDraft): string[] {
   const seen = new Set<string>()
   const duplicates = new Set<string>()

@@ -290,7 +290,7 @@ Already approved at 2026-09-22T10:16:20.673Z; recorded the readings it lacked in
 
 After the work, a reading would find the property already held, so approving again cannot help. An `alter` whose matches all lack a reading reads `unjudged`, and its note says to verify the change through a behaviour that reaches it; once its step has verified, a second note adds the waiver. For an element no behaviour can reach, such as a column, the note names only the waiver.
 
-An `alter` whose readable planned properties all held at approval cannot complete on them. `plan:approve` still approves it, and warns, naming the element and the properties; `--json` lists them under `heldAlters`. The warning is judged on the readings of the approval entry, so approving the same hash again repeats it, and a re-approval after the work does not raise it for a property the work changed. For a plan whose `view.posts.show` only restates the `post` prop the page already declares:
+An `alter` whose readable planned properties all held at approval cannot complete on them. `plan:approve` still approves it, and warns, naming the element and the properties; `--json` lists them under `heldAlters`. The warning is judged on the readings of the approval entry, so approving the same hash again repeats it, and a re-approval after the work, under the same baseline, does not raise it for a property the work changed. For a plan whose `view.posts.show` only restates the `post` prop the page already declares:
 
 ```text
 Warning, advisory (the approval stands):

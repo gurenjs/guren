@@ -1,15 +1,16 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from 'bun:test'
-import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 import { runCommand, type CommandDef } from 'citty'
 
 import { builtinSubCommands } from '../src/commands'
-import type { PlanApproveReport } from '../src/plan-approve'
+import { planApproveFile, type PlanApproveReport } from '../src/plan-approve'
 import type { PlanCloseReport } from '../src/plan-close'
 import type { PlanNextReport } from '../src/plan-next'
 import type { PlanStatusReport } from '../src/plan-status'
 import type { PlanVerifyReport } from '../src/plan-verify'
+import { loadPlanAppState } from '../src/plan/app-state'
 import { approvalReadings, baselineDigest, heldAlters, planApprovalsPath, readPlanApprovals, type PlanApprovals } from '../src/plan/approvals'
 import { planHash } from '../src/plan/identity'
 import { PlanSchema } from '../src/plan/schema'
@@ -94,6 +95,9 @@ export class Post extends defineModel(posts) {
 Post.hasMany('comments', () => import('./Comment').then((module) => module.Comment), 'postId', 'id')
 `
 
+/** The plan with a baseline, for the pure functions that read one. */
+const plan = PlanSchema.parse({ ...PLAN_DOCUMENT, baseline: { rev: 'abc123', contextHash: {} } })
+
 function git(dir: string, ...args: string[]): void {
   const result = Bun.spawnSync(['git', '-c', 'user.name=Approver', '-c', 'user.email=approver@example.com', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
   if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr.toString()}`)
@@ -147,18 +151,17 @@ describe('an alter judged against how it read at approval', () => {
     log.mockRestore()
   })
 
-  async function run<T>(command: 'plan:approve' | 'plan:status' | 'plan:verify' | 'plan:next' | 'plan:close', app: { dir: string; plan: string }): Promise<T> {
+  type Command = 'plan:approve' | 'plan:status' | 'plan:verify' | 'plan:next' | 'plan:close'
+
+  async function output(command: Command, app: { dir: string; plan: string }, ...flags: string[]): Promise<string> {
     log.mockClear()
     log.mockImplementation(() => {})
-    await runCommand(builtinSubCommands[command] as CommandDef, { rawArgs: [app.plan, '--app', app.dir, '--json'] })
-    return JSON.parse(log.mock.calls.map((call) => String(call[0])).join('\n')) as T
+    await runCommand(builtinSubCommands[command] as CommandDef, { rawArgs: [app.plan, '--app', app.dir, ...flags] })
+    return log.mock.calls.map((call) => String(call[0])).join('\n')
   }
 
-  async function runText(command: 'plan:approve', app: { dir: string; plan: string }): Promise<string> {
-    log.mockClear()
-    log.mockImplementation(() => {})
-    await runCommand(builtinSubCommands[command] as CommandDef, { rawArgs: [app.plan, '--app', app.dir] })
-    return log.mock.calls.map((call) => String(call[0])).join('\n')
+  async function run<T>(command: Command, app: { dir: string; plan: string }): Promise<T> {
+    return JSON.parse(await output(command, app, '--json')) as T
   }
 
   const states = (report: { elements: Array<{ id: string; state: string }> }): Record<string, string> =>
@@ -189,13 +192,13 @@ describe('an alter judged against how it read at approval', () => {
         label: 'posts/Show',
         held: ['prop post'],
         unread: [],
-        message: expect.stringContaining('view.posts.show (posts/Show): every readable planned property already held at approval (prop post); none shows the change'),
+        readNow: true,
+        message: expect.stringContaining('view.posts.show (posts/Show): every readable planned property already held at approval (prop post); none shows the change, so plan:status reports it unjudged'),
       },
     ])
     expect(report.heldAlters![0]!.message).toContain('State the change in a property the application does not hold yet and approve the plan again')
 
-    // Already approved: the entry is unchanged, and so is the warning.
-    const again = await runText('plan:approve', app)
+    const again = await output('plan:approve', app)
     expect(again).toContain('left alone')
     expect(again).toContain('Warning, advisory (the approval stands):')
     expect(again).toContain(`  ${report.heldAlters![0]!.message}`)
@@ -229,9 +232,32 @@ describe('an alter judged against how it read at approval', () => {
         label: 'posts/Show',
         held: ['prop post'],
         unread: ['states'],
+        readNow: true,
         message: expect.stringContaining('states read unknown then, and only a match on it can still show the change'),
       },
     ])
+  })
+
+  test('should rest the warning on the recorded readings, without claiming a state, when the altered page cannot be read at re-approval', async () => {
+    const app = await createApp('held-unreadable')
+    await run('plan:approve', app)
+    const state = await loadPlanAppState(app.dir, { detail: true })
+
+    const report = await planApproveFile(app.plan, { app: { ...state, pages: { unreadable: 'the pages could not be listed' } }, appRoot: app.dir })
+
+    expect(report.alreadyApproved).toBe(true)
+    expect(report.heldAlters).toEqual([expect.objectContaining({ element: 'view.posts.show', held: ['prop post'], readNow: false })])
+    expect(report.heldAlters![0]!.message).toContain('none shows the change (it is not read now, so this rests on the readings recorded at approval)')
+    expect(report.heldAlters![0]!.message).not.toContain('plan:status')
+  })
+
+  test('should refuse a re-approval whose altered page is no longer found, rather than warn on its readings', async () => {
+    const app = await createApp('held-missing')
+    await run('plan:approve', app)
+    await rm(join(app.dir, SHOW))
+    git(app.dir, 'commit', '-q', '-am', 'remove the page')
+
+    await expect(output('plan:approve', app)).rejects.toThrow(/view\.posts\.show: The page "posts\/Show" was not found/u)
   })
 
   test('should complete no alter on a property that already held, before or after its step verifies', async () => {
@@ -311,7 +337,6 @@ describe('an alter judged against how it read at approval', () => {
 })
 
 describe('heldAlters', () => {
-  const plan = PlanSchema.parse({ ...PLAN_DOCUMENT, baseline: { rev: 'abc123', contextHash: {} } })
   const reading = (element: string, property: string, verdict: PlanPropertyReading['verdict']): PlanPropertyReading => ({
     element,
     label: element === 'view.posts.show' ? 'posts/Show' : 'posts/Index',
@@ -330,19 +355,18 @@ describe('heldAlters', () => {
   })
 
   test('should keep the warning when the section is unreadable at re-approval, from the readings recorded before', () => {
-    expect(heldAlters(plan, [], [post])).toEqual([{ element: 'view.posts.show', label: 'posts/Show', held: ['prop post'], unread: [] }])
+    expect(heldAlters(plan, [], [post])).toEqual([{ element: 'view.posts.show', label: 'posts/Show', held: ['prop post'], unread: [], readNow: false }])
   })
 
   test('should not count an unknown reading as held', () => {
     const unread = reading('view.posts.show', 'states', 'unknown')
 
     expect(heldAlters(plan, [unread], [unread])).toEqual([])
-    expect(heldAlters(plan, [post, unread], [post, unread])).toEqual([{ element: 'view.posts.show', label: 'posts/Show', held: ['prop post'], unread: ['states'] }])
+    expect(heldAlters(plan, [post, unread], [post, unread])).toEqual([{ element: 'view.posts.show', label: 'posts/Show', held: ['prop post'], unread: ['states'], readNow: true }])
   })
 })
 
 describe('approvalReadings', () => {
-  const plan = PlanSchema.parse({ ...PLAN_DOCUMENT, baseline: { rev: 'abc123', contextHash: {} } })
   const total = (verdict: PlanPropertyReading['verdict']): PlanPropertyReading => ({ element: 'view.posts.index', label: 'posts/Index', property: 'prop total', planned: 'declared', verdict })
   const approvals = (baseline: string): PlanApprovals => ({
     approvalsVersion: 1,
