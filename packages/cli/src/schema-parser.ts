@@ -185,10 +185,9 @@ function typeQueriedNames(ast: File): Set<string> {
 /**
  * The app's hand-kept aggregate of its tables (`export const schema = { posts, users }`), handed
  * to drizzle for relational queries; nothing generated reads it, so a missing key goes unnoticed.
- * Positive evidence only: every property a table this file declares (shorthand or `name: name`),
- * or `extraKey`; a key or spread imported from a module schema only when `confident`, and `{}`
- * only when named.
- * A second candidate answers null, and `confident` grades what is left.
+ * Positive evidence only: each property a table this file declares (shorthand or `name: name`) or
+ * `extraKey`; a module import only when `confident`, `{}` only when named. A second candidate
+ * answers null, and `confident` grades what is left.
  */
 export function findSchemaAggregate(ast: File, options: FindSchemaAggregateOptions = {}): SchemaAggregate | null {
   const { extraKey, location, identifiedAs } = options
