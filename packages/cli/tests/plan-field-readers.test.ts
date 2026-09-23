@@ -384,7 +384,7 @@ describe('plan:status validator fields', () => {
     expect(verdicts(element)).toMatchObject({ 'field name type': 'match', 'field children': 'match', 'field children type': 'unknown' })
   })
 
-  test('should not read a key the walker drops unrendered as omissible', () => {
+  test('should leave a file or lazy field’s presence unknown, as nodes outside the allowlist', () => {
     const element = judged(validator('OpaqueSchema', [
       { name: 'upload', type: 'json', required: true, rules: [] },
       { name: 'lazy', type: 'string', required: true, rules: [] },

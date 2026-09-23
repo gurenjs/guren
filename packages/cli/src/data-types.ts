@@ -67,8 +67,7 @@ export async function generateDataTypes(
 
   let definitions: ResourceDefinition[]
   try {
-    const files = await discoverResourceFiles(appRoot, resourcesDir)
-    const collected = await collectResourceDefinitions(appRoot, files, outputDirectory)
+    const collected = await readResourceDefinitions(appRoot, resourcesDir, outputDirectory)
     definitions = collected.definitions
     warnings.push(...collected.warnings)
   } catch {
@@ -90,9 +89,12 @@ export async function generateDataTypes(
  * The definitions `guren codegen` would emit `data.gen.ts` from, without writing it: the one
  * reading of a resource's payload, which `plan:status` compares a planned resource's fields with.
  */
-export async function readResourceDefinitions(appRoot: string): Promise<{ definitions: ResourceDefinition[]; warnings: string[] }> {
-  const files = await discoverResourceFiles(appRoot, RESOURCES_DIR)
-  return collectResourceDefinitions(appRoot, files, dirname(resolve(appRoot, DEFAULT_OUTPUT_FILE)))
+export async function readResourceDefinitions(
+  appRoot: string,
+  resourcesDir = RESOURCES_DIR,
+  outputDirectory = dirname(resolve(appRoot, DEFAULT_OUTPUT_FILE)),
+): Promise<{ definitions: ResourceDefinition[]; warnings: string[] }> {
+  return collectResourceDefinitions(appRoot, await discoverResourceFiles(appRoot, resourcesDir), outputDirectory)
 }
 
 export function buildDataModuleContent(

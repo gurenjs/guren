@@ -131,12 +131,12 @@ function opaqueNode(node: ZodSchemaLike, role: 'field' | 'in' | 'out'): string |
   if (ALLOWED_LEAVES.has(type)) return undefined
   if (role !== 'field') return `a pipe has a ${type} stage`
   if (type === 'pipe') {
-    const def = node._def ?? {}
+    const def = node._def
     const stages = [schemaAt(def, 'in'), schemaAt(def, 'out')] as const
     if (!stages[0] || !stages[1]) return 'a pipe has a missing stage'
     return opaqueNode(stages[0], 'in') ?? opaqueNode(stages[1], 'out')
   }
-  const inner = ALLOWED_WRAPPERS.has(type) ? innerSchema(node._def ?? {}) : undefined
+  const inner = ALLOWED_WRAPPERS.has(type) ? innerSchema(node._def) : undefined
   return inner ? opaqueNode(inner, 'field') : `it holds a ${type}, whose meaning this reader does not model`
 }
 
@@ -172,18 +172,19 @@ function readField(key: string, node: ZodSchemaLike): PlanAppSchemaField {
   const piped = typeOf(leaf) === 'pipe'
   const read = piped ? schemaAt(leaf._def ?? {}, 'out')! : leaf
   const date = typeOf(read) === 'date'
+  const notRequired = nullable || (decider !== undefined && decider !== 'nonoptional')
   if (piped) {
     const reason = 'a pipe or codec may run a step between its stages'
-    return { output, date, required: nullable || (decider !== undefined && decider !== 'nonoptional') ? false : { unknown: reason }, rulesUnread: reason }
+    return { output, date, required: notRequired ? false : { unknown: reason }, rulesUnread: reason }
   }
   const custom = schemaChecks(leaf).some((check) => check.check === 'overwrite' && !BUILT_IN_OVERWRITES.has(String(check.tx)))
   const rules = custom ? { rulesUnread: 'a custom .overwrite() may rewrite the value past its bounds' } : {}
-  return { output, date, required: requiredOf(leaf, decider, filled, nullable), ...rules }
+  return { output, date, required: requiredOf(leaf, notRequired, decider === 'nonoptional' && filled), ...rules }
 }
 
-function requiredOf(leaf: ZodSchemaLike, decider: string | undefined, filled: boolean, nullable: boolean): Presence {
-  if (nullable || (decider !== undefined && decider !== 'nonoptional')) return false
-  if (decider === 'nonoptional' && filled) return { unknown: 'nonoptional over a default or prefault accepts a missing key before zod 4.4 and rejects it from 4.4' }
+function requiredOf(leaf: ZodSchemaLike, notRequired: boolean, nonoptionalOverFill: boolean): Presence {
+  if (notRequired) return false
+  if (nonoptionalOverFill) return { unknown: 'nonoptional over a default or prefault accepts a missing key before zod 4.4 and rejects it from 4.4' }
   if (leaf._def?.coerce === true && COERCES_NULL.has(typeOf(leaf))) return { unknown: 'a coercion accepts null (a coerced string or boolean also accepted a missing key before zod 4.4)' }
   return true
 }
