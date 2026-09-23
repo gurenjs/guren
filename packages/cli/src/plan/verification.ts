@@ -109,7 +109,7 @@ export function applyVerification(
           element.notes.push(note)
           element.hold = { kind, note }
         }
-        // `reason` is why the readers left it `unjudged`, which a verified step answers.
+        // `reason` is why the readers left it `unjudged`; the lifted state and its hold carry their own account.
         const settle = (state: 'verified' | 'drifted'): void => {
           element.state = state
           delete element.reason

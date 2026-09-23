@@ -1540,8 +1540,8 @@ matched when the plan was approved says nothing about the change. What shipped
 - A model's relationship is read as two properties, its type and its target,
   under those keys whether it is declared or not, so the reading taken before
   the work is the one the match after it is set against. An approval taken
-  before this recorded one combined property, which the two keys do not
-  match: the note names `plan:approve` while the relationship is still
+  before this recorded one combined property for a relationship not yet
+  declared, which the two keys do not match: the note names `plan:approve` while the relationship is still
   missing, and once it is written the `alter` needs a behaviour or a waiver.
 - A reading is as protected as the approval that carries it: whoever can edit
   one can forge the other, and both are committed and reviewed. An older CLI
@@ -2081,7 +2081,8 @@ readings (`packages/cli/src/plan-close.ts`, `plan/close-docs.ts`,
   to `plan:verify` only to find the element held as unreached. Adding a
   behaviour and approving again is offered beside the waiver only for an
   element some behaviour could reach (`behaviourCanReach()`, the reach walk
-  seeded with every element of a section a carrying reference names); a
+  seeded with every element of a section a carrying reference names and the
+  plan's behaviours); a
   column, a command, a job, event, listener, mail or notification is sent to
   `plan:waive` alone.
   `plan:next`, once every step is verified, lists the same lines

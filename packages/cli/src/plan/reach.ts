@@ -66,9 +66,9 @@ const BEHAVIOUR_TARGETS = new Set(PLAN_REFERENCES.filter((entry) => REFERENCE_CA
 
 /**
  * The elements some behaviour could reach, were one added: every element of a section a carrying
- * reference names, and what {@link behaviourReach} walks to from them and from the plan's behaviours. The rest (a column, a
- * command, a job, event, listener, mail or notification) no behaviour reaches, so only a waiver
- * lifts one for which `restsOnReach()` holds.
+ * reference names, and what {@link behaviourReach} walks to from them and from the plan's
+ * behaviours. The rest (a column, a command, a job, event, listener, mail or notification) no
+ * behaviour reaches, so only a waiver lifts one for which `restsOnReach()` holds.
  */
 export function behaviourCanReach(plan: PlanDraft | Plan): Set<string> {
   const targets = listPlanElementEntries(plan)
