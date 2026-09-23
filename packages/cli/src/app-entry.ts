@@ -159,6 +159,11 @@ export interface ModuleDescriptor {
   readonly options: ObjectExpression
 }
 
+/** A module's `modules/<name>/index.*`, relative to `cwd`; null when it has none. */
+export function findModuleDescriptor(cwd: string, moduleDir: string): Promise<string | null> {
+  return findFirstExisting(cwd, moduleDescriptorCandidates(toPosixRelative(cwd, moduleDir)))
+}
+
 /**
  * A module's `modules/<name>/index.*` and the literal its `defineModule()` takes.
  * `absent` when there is no descriptor file, `unreadable` when it does not parse
@@ -169,7 +174,7 @@ export async function readModuleDescriptor(
   cache: ParseCache,
   moduleDir: string,
 ): Promise<ModuleDescriptor | 'absent' | 'unreadable'> {
-  const file = await findFirstExisting(cwd, moduleDescriptorCandidates(toPosixRelative(cwd, moduleDir)))
+  const file = await findModuleDescriptor(cwd, moduleDir)
   if (file === null) return 'absent'
   const parsed = await cache.get(resolve(cwd, file))
   const options = parsed ? firstCallOptions(parsed.ast.program, 'defineModule') : null

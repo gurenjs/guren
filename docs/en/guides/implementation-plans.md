@@ -420,7 +420,7 @@ Generate the migration (`bunx guren make:migration --name create_comments_table`
 
 ### One step, one commit
 
-Change only the elements a step lists, and commit it once it verifies. A verified step records a fingerprint of the files that hold its elements and of its test files. When one of them changes, the step's elements read `drifted`. A later step often has good reason to write into such a file: a route beside an earlier one in `routes/web.ts`, a table in `db/schema.ts`, a field on a resource. In a copy of the example, a commit after the `pages` step added a field to `CommentResource.ts`, a file the `http` step had verified, so most elements of `http` drifted:
+Change only the elements a step lists, and commit it once it verifies. A verified step records a fingerprint of the files that hold its elements, of the files that wire them (the routes dispatching to an action, the controller returning a page), and of its test files. When one of them changes, the step's elements read `drifted`. A later step often has good reason to write into such a file: a route beside an earlier one in `routes/web.ts`, a table in `db/schema.ts`, a field on a resource. In a copy of the example, a commit after the `pages` step added a field to `CommentResource.ts`, a file the `http` step had verified, so most elements of `http` drifted:
 
 ```text
 Routes
