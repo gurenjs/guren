@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
+import { getMimeType } from 'hono/utils/mime'
 import { Application } from '../../src'
-import { DEFAULT_ROOT_PUBLIC_ASSET_EXTENSIONS, registerRootPublicAssets } from '../../src/http/public-assets'
+import { DEFAULT_CONTENT_TYPES, DEFAULT_ROOT_PUBLIC_ASSET_EXTENSIONS, registerRootPublicAssets } from '../../src/http/public-assets'
 import { useAssetFixture } from './asset-fixture'
 
 // Real files rather than a stubbed `Bun.file`: containment is a filesystem
@@ -137,6 +138,17 @@ describe('registerRootPublicAssets serving self-hosted fonts', () => {
     expect(response.status).toBe(200)
     expect(response.headers.get('Content-Type')).toBe(contentType)
     expect(response.headers.get('Content-Disposition')).toBeNull()
+  })
+})
+
+// `/fonts/x.woff2` is typed by this table and `/public/fonts/x.woff2` by Hono's.
+// Media types only: Hono adds `charset=utf-8` to SVG, which this table leaves to
+// the file's XML declaration.
+describe('DEFAULT_CONTENT_TYPES', () => {
+  const mediaType = (contentType: string | undefined) => contentType?.split(';', 1)[0]!.trim()
+
+  it.each(Object.entries(DEFAULT_CONTENT_TYPES))('types %s as serveStatic does under /public/', (extension, contentType) => {
+    expect(mediaType(contentType)).toBe(mediaType(getMimeType(`file${extension}`)))
   })
 })
 

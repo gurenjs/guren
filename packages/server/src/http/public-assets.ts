@@ -17,7 +17,11 @@ export const DEFAULT_ROOT_PUBLIC_ASSET_EXTENSIONS = [
   '.svg', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.avif', '.webmanifest', '.txt',
   '.woff2', '.woff', '.ttf', '.otf',
 ] as const
-const DEFAULT_CONTENT_TYPES: Record<string, string> = {
+/**
+ * Must give each extension the media type Hono's `getMimeType` does
+ * (`public-assets.test.ts`): `serveStatic` types the same file under `/public/*`.
+ */
+export const DEFAULT_CONTENT_TYPES: Readonly<Record<string, string>> = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
