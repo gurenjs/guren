@@ -270,6 +270,10 @@ jobs:
       - name: Guren integrity check (blog example)
         run: cd examples/blog && bun ../../packages/cli/src/bin.ts check
 
+      # RFC 0026: the registered, unbooted app must produce a manifest.
+      - name: Introspection manifest (blog example)
+        run: cd examples/blog && bun ../../packages/cli/src/bin.ts introspect --json > /dev/null
+
       - name: Build example apps
         run: |
           bun run --cwd examples/blog build
@@ -534,6 +538,9 @@ jobs:
       # This is the one place the module boundary check runs in CI.
       - name: Guren integrity check
         run: cd web && bun ../packages/cli/src/bin.ts check
+
+      - name: Introspection manifest
+        run: cd web && bun ../packages/cli/src/bin.ts introspect --json > /dev/null
 
       - name: Run tests
         run: bun run --cwd web test

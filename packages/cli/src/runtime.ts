@@ -95,7 +95,7 @@ export async function bootstrapApplication(mod: Record<string, unknown>): Promis
     try {
       results.push(await ready)
     } catch (error) {
-      throw new Error(`Application ready() promise rejected: ${String(error)}`)
+      throw new Error(`Application ready() promise rejected: ${String(error)}`, { cause: error })
     }
   }
 
