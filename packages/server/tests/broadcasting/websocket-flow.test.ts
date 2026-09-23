@@ -19,6 +19,7 @@ interface Frame {
 const openApps: Application[] = []
 const openSockets: WebSocket[] = []
 const originalBanner = process.env.GUREN_DEV_BANNER
+const originalStopTimeout = process.env.GUREN_BUN_STOP_TIMEOUT_MS
 
 beforeEach(() => {
   process.env.GUREN_DEV_BANNER = '0'
@@ -31,6 +32,8 @@ afterEach(async () => {
   }
   if (originalBanner === undefined) delete process.env.GUREN_DEV_BANNER
   else process.env.GUREN_DEV_BANNER = originalBanner
+  if (originalStopTimeout === undefined) delete process.env.GUREN_BUN_STOP_TIMEOUT_MS
+  else process.env.GUREN_BUN_STOP_TIMEOUT_MS = originalStopTimeout
 })
 
 function createManager(): BroadcastManager {
@@ -236,6 +239,11 @@ describe('WebSocket subscription flow', () => {
       return true
     })
     const url = await serve(manager)
+    // On Bun 1.3.x, `server.stop()` never resolves once the server itself closed
+    // a WebSocket (a client-initiated close is fine; 1.4.0 resolves at once), so
+    // the default 5 s bound races the hook's 5 s timeout. The socket is already
+    // closed, so nothing is left to drain: give the wait up quickly.
+    process.env.GUREN_BUN_STOP_TIMEOUT_MS = '100'
 
     const { socket, clientId } = await connect(url)
     const closed = new Promise<number>((resolve) => {
