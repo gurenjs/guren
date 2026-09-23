@@ -283,13 +283,22 @@ Built as the plan leaves them, so their collision or absence is the plan's own w
 
 `alter` は計画より前からあるものを変えるので、承認の時点ですでに一致していた性質は、変更が済んだ証拠になりません。そこで承認のたびに、`alter` の要素ごとに計画が書いた性質をその場で読み、結果を `approvals.json` のその承認の項目に記録します。`plan:status` が `alter` の性質を完了と数えるのは、承認時に `differ` か `unknown` だったものが、いま一致している場合だけです。読み取りが実装前のアプリケーションを表すように、計画は実装を始める前に承認してください。編集した計画を承認し直しても、同じ baseline のもとで記録した読み取りは引き継がれます。引き継がれるのは、計画上の値とコード上の名前を編集で変えていない性質の読み取りだけです。
 
-読み取りのない性質は一致しても数えません。数えるものが一つも残らない `alter` は `unjudged` になり、注記には対処が二つ示されます。`plan:approve` をもう一度実行するか、その要素に届く振る舞いで検証するかです。承認済みのハッシュで `plan:approve` を実行すると、承認の項目に足りない読み取りだけを書き足します。
+承認時の読み取りがない性質は、一致しても数えません。実装の前なら、`plan:status` はまだ食い違っているそうした性質を挙げ、直し方を示します。
+
+```text
+  planned   alter     Post                       model.post
+      differs: relationship comments (planned hasMany, found not declared)
+      differs: relationship comments target (planned Comment, found not declared)
+      The approval recorded no reading of relationship comments, relationship comments target: run guren plan:approve on the plan before changing them, since a match with no reading from before the work does not count.
+```
+
+承認済みのハッシュで `plan:approve` を実行すると、承認の項目に足りない読み取りだけを書き足します。
 
 ```text
 Already approved at 2026-09-22T10:16:20.673Z; recorded the readings it lacked in docs/plans/comments/approvals.json: model.post, view.posts.show.
 ```
 
-`plan:approve` の再実行が役に立つのは実装の前だけです。実装のあとに取った読み取りは最初から一致しているので、数えられることはありません。コードを書き終えてからは、その要素に届く振る舞いを足すか、waive するしかありません。
+実装のあとに読み取ると性質はすでに一致しているので、承認し直しても役に立ちません。一致がどれも読み取りを持たない `alter` は `unjudged` になり、注記には届く振る舞いか waiver が示されます。カラムのように振る舞いが届かない要素には、waiver だけが示されます。
 
 ## 実装: `plan:next` と `plan:verify`
 
@@ -429,7 +438,7 @@ Routes
       Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http; changed since: app/Http/Resources/CommentResource.ts.
 ```
 
-`http` の振る舞いを通してしか verified にならない要素 (コントローラーと Policy、`data` ステップの `model.post`) は、`plan:status` が読む状態に戻りました。ファイルが変わったステップの振る舞いは経路にならないからです (「進捗を読む」の節を参照してください)。
+`http` の振る舞いを通してしか verified にならない要素 (コントローラーと Policy) は、`plan:status` が読む状態に戻りました。ファイルが変わったステップの振る舞いは経路にならないからです (「進捗を読む」の節を参照してください)。
 
 こうしたステップは `plan:verify --step` が確かめ直します。指定したステップが verified になると、同じ実行の中で、ファイルが変わった前のステップをタスク順に確かめ直します。コマンドを実行するステップが verified にならなかったところで止まります。結果はそれぞれ記録され (`failed` なら壊れた箇所を添えます)、レポートの「Re-checked」の下に並びます。そのあと `plan:next` は、verified でない最初のステップを返します。たいていは失敗したステップです。確かめ直しが `blocked` になったステップは、後の実行に回します。指定したステップが verified にならなければ、前のステップの記録には手を付けず、後の実行に回したステップとして示します。ステップ間で共有するコマンドが失敗している以上、確かめ直しても同じ理由で失敗するからです。
 
@@ -528,7 +537,7 @@ Elements the plan changes: 16
 
 side effect が取り付けられたと読まれるのは、テストとクラス自身のファイルを除くアプリケーションのソースが、フレームワークの API でそのクラスを使っているときです。ジョブの dispatch やスケジュール登録、イベントの emit、リスナーの登録、メールの送信やキュー投入、通知の送信がこれに当たります。その使用が書かれるまで、ステップは `incomplete` です。使用が書かれればステップは検証を通れるようになりますが、要素は `wired` のままです。どのアクションから使っているかは、計画の `trigger` と照らし合わせません。
 
-計画が書いた性質のうち、存在以外に一致したものがない要素は、ステップが検証を通っても `verified` にはなりません。validator や Resource が宣言するキーと、Policy が宣言する ability は、存在だけの一致です。名前があることしか分かりません。こうした要素は、記録の有効なステップの振る舞いがその要素に届いているときだけ `verified` になります。届く経路は計画自身の参照をたどります。振る舞いのルートと期待するページ、ルートのアクションと束ねたモデル、アクションの validator と Policy と返すページや Resource、ページの prop の Resource、届いた Resource や Policy の裏にあるモデル、そして届いたアクションのコントローラーです。フォームの validator、フォームの送信先ルート、ページのボタンが呼ぶルートは経路になりません。あるルートへのリクエストは、そこへリンクするページについて何も語らないからです。数えるのは、その振る舞いが通ることを求めるステップの振る舞いだけで、失敗を確かめる `tests` ステップは経路になりません。したがってこうした要素があると、届く振る舞いを足すか waiver を書くまで計画を閉じられません。該当するのは、キーや ability しか一致しなかった validator、Resource、Policy と、計画が書いた prop がどれも一致しなかったページ、性質を一つも書かないコントローラー、読み取りに照らして数える一致がない `alter` (例では `model.post`) です。コマンド、ジョブ、イベント、リスナー、メール、通知に届く経路は計画にないので、これらは waiver でしか閉じられません。持ち上がらなかった理由は `--json` の `hold` に記録されます。
+計画が書いた性質のうち、存在以外に一致したものがない要素は、ステップが検証を通っても `verified` にはなりません。validator や Resource が宣言するキーと、Policy が宣言する ability は、存在だけの一致です。名前があることしか分かりません。こうした要素は、記録の有効なステップの振る舞いがその要素に届いているときだけ `verified` になります。届く経路は計画自身の参照をたどります。振る舞いのルートと期待するページ、ルートのアクションと束ねたモデル、アクションの validator と Policy と返すページや Resource、ページの prop の Resource、届いた Resource や Policy の裏にあるモデル、そして届いたアクションのコントローラーです。フォームの validator、フォームの送信先ルート、ページのボタンが呼ぶルートは経路になりません。あるルートへのリクエストは、そこへリンクするページについて何も語らないからです。数えるのは、その振る舞いが通ることを求めるステップの振る舞いだけで、失敗を確かめる `tests` ステップは経路になりません。したがってこうした要素があると、届く振る舞いを足すか waiver を書くまで計画を閉じられません。該当するのは、キーや ability しか一致しなかった validator、Resource、Policy と、計画が書いた prop がどれも一致しなかったページ、性質を一つも書かないコントローラー、読み取りに照らして数える一致がない `alter` です。カラム、コマンド、ジョブ、イベント、リスナー、メール、通知にはどの振る舞いも届かないので、自身の性質で持ち上がらなければ waiver でしか閉じられません。持ち上がらなかった理由は `--json` の `hold` に記録されます。
 
 計画が書いた `body`、`params`、`query` の validator は、アクションがそれで検証しているか、ルートが契約スキーマとして持っていれば一致と数えます。別のものを使っている場合、その場で組み立てたスキーマ (`this.validateBody(PostSchema.partial())` など)、ヘルパー経由の検証は、アクションを drifted にはせず、注記付きの `present` にとどめます。
 
@@ -608,10 +617,10 @@ bunx guren check --plan
 
 ```text
   event.commentPosted: wired
-    No planned property of it matched beyond its existence and no step's behaviour reaches it, so no plan:verify run lifts it: waive it with bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "<why>", or add a behaviour that reaches it and approve the plan again
+    No planned property of it matched beyond its existence and no behaviour can reach it, so no plan:verify run lifts it: waive it with bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "<why>"
 ```
 
-出力は振る舞いの追加も示しますが、side effect には振る舞いが届かないので (「進捗を読む」の節を参照してください)、使えるのは waiver だけです。
+side effect にはどの振る舞いも届かないので (「進捗を読む」の節を参照してください)、示されるのは waiver だけです。
 
 ```bash
 bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "no behaviour can observe an emitted event; the listener's own plan tests the notification"
@@ -639,17 +648,17 @@ The decision log is committed with the plan. A waiver names this plan hash, so a
 
 ## 閉じる: `plan:close`
 
-現在のハッシュを名指しする承認があり、計画が変更する要素がすべて `verified` か `waived` になったら、計画を閉じられます。それまでは拒否され、残っている要素ごとに、それを留めているものと、次の行にそれを動かすコマンドが示されます。上の drifted の例で、`http` を確かめ直す前の出力です (示された九つの要素のうち二つを抜き出しています)。
+現在のハッシュを名指しする承認があり、計画が変更する要素がすべて `verified` か `waived` になったら、計画を閉じられます。それまでは拒否され、残っている要素ごとに、それを留めているものと、次の行にそれを動かすコマンドが示されます。上の drifted の例で、`http` を確かめ直す前の出力です (示された八つの要素のうち二つを抜き出しています)。
 
 ```text
  ERROR  docs/plans/comments/plan.json is not closed: every element must be verified or waived with a reason (guren plan:waive), and these are not, each with what holds it and what moves it:
-  model.post: unjudged (Verified 2026-09-22T10:16:33.499Z by task/entity/model.comment/data, but no planned property of it matched beyond its existence and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it)
-    Run bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/http, then bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/data; or waive it: bunx guren plan:waive docs/plans/comments/plan.json model.post --reason "<why>"
   validator.comment: drifted (Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http; changed since: app/Http/Resources/CommentResource.ts)
     Run bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/http again, since that run no longer holds; or waive it: bunx guren plan:waive docs/plans/comments/plan.json validator.comment --reason "<why>"
+  controller.comments: present (Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http, but no planned property of it matched beyond its existence and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it)
+    Run bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/http; or waive it: bunx guren plan:waive docs/plans/comments/plan.json controller.comments --reason "<why>"
 ```
 
-`model.post` は `http` ステップの振る舞いを通してしか verified にならないので、そのステップが先に来ます。完了の状態に届いていない要素や `blocked` の要素は、`plan:verify` の前にコードや環境を直す必要があります。どの `plan:verify` の実行でも持ち上がらない要素には、`plan:waive` が示されます。足りないのが届く振る舞いだけの要素には、振る舞いを足して計画を承認し直す道も示されますが、コマンドと side effect には役に立ちません (「要素を waive する」の節を参照してください)。すべてのステップを検証し終えたあとは `plan:next` も同じ行を表示するので、計画を閉じられない理由がエージェントにも分かります。
+`controller.comments` は `http` の振る舞いを通してしか verified にならないので、そのステップを確かめ直せば一緒に持ち上がります。完了の状態に届いていない要素や `blocked` の要素は、`plan:verify` の前にコードや環境を直す必要があります。どの `plan:verify` の実行でも持ち上がらない要素には `plan:waive` が示され、振る舞いが届きうる要素には、振る舞いを足して計画を承認し直す道も示されます。カラム、コマンド、side effect には waiver だけが示されます (「要素を waive する」の節を参照してください)。すべてのステップを検証し終えたあとは `plan:next` も同じ行を表示するので、計画を閉じられない理由がエージェントにも分かります。
 
 すべての要素が verified か waived になったら、`--dry-run` で書き込む内容を確かめられます。問題がなければ閉じます。
 
