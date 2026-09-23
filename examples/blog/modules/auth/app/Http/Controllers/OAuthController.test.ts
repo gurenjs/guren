@@ -10,7 +10,7 @@ const { mockUserWhere, mockUserCreate } = vi.hoisted(() => ({
   mockUserCreate: vi.fn(),
 }))
 
-vi.mock('../../app/Models/User.js', () => ({
+vi.mock('../../../../../app/Models/User.js', () => ({
   User: {
     where: mockUserWhere,
     create: mockUserCreate,
@@ -25,7 +25,7 @@ vi.mock('@guren/core', async () => {
   }
 })
 
-import OAuthController from '../../app/Http/Controllers/Auth/OAuthController.js'
+import OAuthController from './OAuthController.js'
 
 function createOAuthStub() {
   return {

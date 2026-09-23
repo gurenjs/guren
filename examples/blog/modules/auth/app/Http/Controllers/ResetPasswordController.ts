@@ -1,7 +1,7 @@
 import { Controller, ValidationException, completePasswordReset } from '@guren/core'
-import { ResetPasswordSchema } from '../../Validators/ResetPasswordValidator.js'
-import { User } from '../../../Models/User.js'
-import { passwordResetStore } from '../../../Auth/PasswordResetStore.js'
+import { ResetPasswordSchema } from '../Validators/ResetPasswordValidator.js'
+import { User } from '../../../../../app/Models/User.js'
+import { passwordResetStore } from '../../../../../app/Auth/PasswordResetStore.js'
 import { pages } from '@/.guren/pages.gen'
 
 const INVALID_TOKEN_MESSAGE = 'This password reset link is invalid or has expired.'

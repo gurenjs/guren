@@ -11,11 +11,11 @@ const { mockUserWhere, mockDispatch } = vi.hoisted(() => ({
   mockDispatch: vi.fn(),
 }))
 
-vi.mock('../../app/Models/User.js', () => ({
+vi.mock('../../../../../app/Models/User.js', () => ({
   User: { where: mockUserWhere },
 }))
 
-vi.mock('../../app/Jobs/SendPasswordResetEmailJob.js', () => ({
+vi.mock('../../../../../app/Jobs/SendPasswordResetEmailJob.js', () => ({
   SendPasswordResetEmailJob: { dispatch: mockDispatch },
 }))
 
@@ -27,7 +27,7 @@ vi.mock('@guren/core', async () => {
   }
 })
 
-import ForgotPasswordController from '../../app/Http/Controllers/Auth/ForgotPasswordController.js'
+import ForgotPasswordController from './ForgotPasswordController.js'
 
 const STATUS_MESSAGE = "If an account exists for that email, we've sent a password reset link."
 

@@ -1,13 +1,11 @@
-import { Router, registerAttachmentRoutes, requireAuthenticated, requireGuest } from '@guren/core'
+import { Router, registerAttachmentRoutes, requireAuthenticated } from '@guren/core'
 import PostController from '../app/Http/Controllers/PostController.js'
 import { Post } from '../app/Models/Post.js'
 import { PostPayloadSchema } from '../app/Http/Validators/PostValidator.js'
-import { registerAuthRoutes } from './auth.js'
+import { registerAuthenticatedAreaRoutes } from './authenticated.js'
 
 export function registerWebRoutes(baseRouter: Router): void {
-  const router = baseRouter
-    .aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
-    .aliasMiddleware('guest', requireGuest({ redirectTo: '/dashboard' }))
+  const router = baseRouter.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
 
   // Attachment URLs point at this signed route, so unmounted every cover image
   // 404s — with the route's own uniform failure, naming no cause.
@@ -18,7 +16,7 @@ export function registerWebRoutes(baseRouter: Router): void {
   // Matches the path the generated deploy configs probe and host authorization excludes.
   router.get('/health', (c) => c.json({ status: 'ok' })).name('health')
 
-  registerAuthRoutes(router)
+  registerAuthenticatedAreaRoutes(router)
 
   router.group('/posts', (posts) => {
     posts.get('/', [PostController, 'index']).name('posts.index')

@@ -52,6 +52,7 @@
     "bin/**/*",
     "config/**/*",
     "db/**/*",
+    "modules/**/*",
     "routes/**/*",
     "resources/js/**/*",
     "types/**/*",

@@ -11,11 +11,11 @@ const { mockUserUpdate, mockSendEmailVerificationMail } = vi.hoisted(() => ({
   mockSendEmailVerificationMail: vi.fn(),
 }))
 
-vi.mock('../../app/Models/User.js', () => ({
+vi.mock('../../../../../app/Models/User.js', () => ({
   User: { update: mockUserUpdate },
 }))
 
-vi.mock('../../app/Mail/EmailVerificationMail.js', () => ({
+vi.mock('../../../../../app/Mail/EmailVerificationMail.js', () => ({
   sendEmailVerificationMail: mockSendEmailVerificationMail,
 }))
 
@@ -27,8 +27,8 @@ vi.mock('@guren/core', async () => {
   }
 })
 
-import VerifyEmailController from '../../app/Http/Controllers/Auth/VerifyEmailController.js'
-import { emailVerificationStore } from '../../app/Auth/EmailVerificationStore.js'
+import VerifyEmailController from './VerifyEmailController.js'
+import { emailVerificationStore } from '../../../../../app/Auth/EmailVerificationStore.js'
 import { createEmailVerificationToken } from '@guren/core'
 
 function createController(user: unknown) {

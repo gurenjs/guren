@@ -9,16 +9,29 @@ generated: { by: process:guren-spec-generate }
 
 # Modules
 
-This app has no `modules/` directory — all code lives at the application root.
+Application modules under `modules/`, the models each owns, and the dependencies between them — derived from the directory layout and static imports, not this document.
 
 ```mermaid
 graph LR
   m_app["app<br/>Post, User"]
+  m_auth["auth"]
+  m_app --> m_auth
+  m_auth --> m_app
 ```
 
 ## app
+
+Depends on: auth
 
 Models (2):
 
 - Post — app/Models/Post.ts
 - User — app/Models/User.ts
+
+## auth
+
+Depends on: app
+
+Models (0):
+
+- none

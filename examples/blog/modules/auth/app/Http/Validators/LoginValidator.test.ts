@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LoginSchema } from '../../app/Http/Validators/LoginValidator.js'
+import { LoginSchema } from './LoginValidator.js'
 
 describe('LoginSchema', () => {
   it('coerces remember values to boolean', () => {

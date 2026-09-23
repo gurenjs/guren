@@ -1,7 +1,7 @@
 import { Controller, ValidationException } from '@guren/core'
-import { LoginSchema } from '../../Validators/LoginValidator.js'
-import { UserLoggedIn } from '../../../Events/UserLoggedIn.js'
-import type { UserRecord } from '../../../Models/User.js'
+import { LoginSchema } from '../Validators/LoginValidator.js'
+import { UserLoggedIn } from '../../../../../app/Events/UserLoggedIn.js'
+import type { UserRecord } from '../../../../../app/Models/User.js'
 import { pages } from '@/.guren/pages.gen'
 
 export default class LoginController extends Controller {
