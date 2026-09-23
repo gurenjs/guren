@@ -221,19 +221,24 @@ describe('Application.introspect()', () => {
       web.get('/x', () => 'x')
     })
 
-    expect(app.router.describeMiddleware().aliases.web).toMatchObject({ members: ['auth', 'missing'], unresolvedMembers: ['missing'] })
-    expect(app.router.describeMiddleware().aliases.auth?.unresolved).toBeUndefined()
+    const { aliases } = app.router.describeMiddleware()
+
+    expect(aliases.web).toMatchObject({ members: ['auth', 'missing'], unresolvedMembers: ['missing'] })
+    expect(aliases.auth?.unresolved).toBeUndefined()
   })
 
-  test('reports a middleware name nothing registers instead of throwing', () => {
-    const app = createApp()
-    app.router.middleware('missing' as never).group((router) => {
-      router.get('/x', () => 'x')
+  test('reports a middleware name nothing registers instead of throwing', async () => {
+    const app = createApp({
+      routes: (router) => {
+        router.middleware('missing' as never).group((scoped) => {
+          scoped.get('/x', () => 'x')
+        })
+      },
     })
 
-    const { routes } = app.router.describeMiddleware()
+    const [route] = (await app.introspect()).routes
 
-    expect(routes[0]).toEqual([{ kind: 'alias', name: 'missing', capabilities: {}, unresolved: true }])
+    expect(route?.middleware).toEqual([{ kind: 'alias', name: 'missing', capabilities: {}, unresolved: true }])
   })
 
   test('carries route schemas as JSON Schema, and a non-Zod schema as unreadable', async () => {
@@ -272,7 +277,7 @@ describe('Application.introspect()', () => {
 
       const manifest = await withEnv({ GUREN_INTROSPECT: undefined, RFC26_IN_PROCESS_KEY: undefined }, () => app.introspect())
 
-      expect(manifest.providers.find((provider) => provider.name === 'ConfigServiceProvider')?.register).toBe('ran')
+      expect(manifest.providers.find((provider) => provider.name === 'ConfigServiceProvider')?.register).toBe('introspect-hook')
       expect(manifest.warnings).toContainEqual({ code: 'env-invalid', message: 'RFC26_IN_PROCESS_KEY required, not set', provider: 'ConfigServiceProvider' })
     } finally {
       warn.mockRestore()

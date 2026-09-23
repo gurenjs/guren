@@ -556,7 +556,6 @@ export class Application {
   private bootPromise?: Promise<void>
   private manifestPromise?: Promise<AppManifest>
   private bootAttempted = false
-  private introspectionRunning = false
   private readonly moduleRouteRanges: ModuleRouteRange[] = []
 
   constructor(private readonly options: ApplicationOptions = {}) {
@@ -729,6 +728,13 @@ export class Application {
   }
 
   async mountRoutes(): Promise<void> {
+    await this.registerRoutes()
+    await this.preparePrototypeRoutes()
+    this.router.mount(this.hono, { container: this.container })
+  }
+
+  /** Runs the registrars once; `introspect()` stops here, since mounting refuses an unregistered alias it reports. */
+  private async registerRoutes(): Promise<void> {
     if (!this.routesRegistered) {
       if (this.options.routes) {
         // Not cleared: routes added directly to app.router before boot() stay.
@@ -743,9 +749,6 @@ export class Application {
 
       this.routesRegistered = true
     }
-
-    await this.preparePrototypeRoutes()
-    this.router.mount(this.hono, { container: this.container })
   }
 
   /**
@@ -843,9 +846,9 @@ export class Application {
   }
 
   /**
-   * Registers providers and mounts routes, then describes the result (RFC 0026
-   * §1). Never runs `createApp({ boot })`, a provider's `boot()`, or `listen()`.
-   * Memoised; the application cannot boot afterwards.
+   * Registers providers and routes, then describes the result (RFC 0026 §1).
+   * Never mounts on Hono or runs `createApp({ boot })`, a provider's `boot()`
+   * or `listen()`. Memoised; the application cannot boot afterwards.
    */
   async introspect(): Promise<AppManifest> {
     // A failed boot clears `bootPromise` but may have booted providers and run `createApp({ boot })`.
@@ -857,15 +860,9 @@ export class Application {
     return this.manifestPromise
   }
 
-  /** True while `introspect()` registers, so config and env report problems as they do under `GUREN_INTROSPECT=1`. */
-  get introspecting(): boolean {
-    return this.introspectionRunning || isIntrospecting()
-  }
-
   private async introspectOnce(): Promise<AppManifest> {
-    this.introspectionRunning = true
     const providers = await this.providerManager.registerAllForIntrospection()
-    await this.mountRoutes()
+    await this.registerRoutes()
     return buildAppManifest({
       router: this.router,
       container: this.container,

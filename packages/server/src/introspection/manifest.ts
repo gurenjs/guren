@@ -12,7 +12,7 @@ export interface ModuleRouteRange {
   readonly end: number
 }
 
-export interface ManifestSources {
+interface ManifestSources {
   readonly router: Router
   readonly container: Container
   readonly providers: ProviderEntry[]
@@ -56,9 +56,7 @@ export function buildAppManifest(sources: ManifestSources): AppManifest {
       ...(gurenModule.prefix === undefined ? {} : { prefix: gurenModule.prefix }),
       providers: gurenModule.providers.map((provider) => provider.name),
       commands: gurenModule.commands.map((command) => command.name),
-      routeCount: sources.moduleRouteRanges
-        .filter((range) => range.module === gurenModule.name)
-        .reduce((count, range) => count + range.end - range.start, 0),
+      routeCount: routes.filter((route) => route.module === gurenModule.name).length,
     })),
     routes,
     middlewareAliases,

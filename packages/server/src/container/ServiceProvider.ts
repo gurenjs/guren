@@ -68,7 +68,7 @@ function isManifestWarningSource(provider: ServiceProvider): provider is Service
 }
 
 /** Where a provider came from, for the manifest's `providers[].source`. */
-export interface ProviderOrigin {
+interface ProviderOrigin {
   readonly source: ProviderSource
   readonly module?: string
 }

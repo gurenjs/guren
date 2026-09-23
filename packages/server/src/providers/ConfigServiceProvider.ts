@@ -26,9 +26,18 @@ export class ConfigServiceProvider extends ServiceProvider {
   private warnings: ManifestWarning[] = []
 
   register(): void {
+    this.bindAll('throw')
+  }
+
+  /** Under introspection (RFC 0026) the environment has no secrets: problems are reported, not thrown. */
+  override introspect(): void {
+    this.bindAll('report')
+  }
+
+  private bindAll(mode: 'throw' | 'report'): void {
     const app = this.container.make<Application>('app')
     this.warnings = []
-    this.env = this.parseEnv(app)
+    this.env = this.parseEnv(app, mode)
     this.resolved = []
     this.owned = new Map()
 
@@ -80,14 +89,13 @@ export class ConfigServiceProvider extends ServiceProvider {
     return this.owned
   }
 
-  private parseEnv(app: Application): AppEnv {
+  private parseEnv(app: Application, mode: 'throw' | 'report'): AppEnv {
     const schema = app.envSchema
     this.unset = new Set()
     if (!schema) return {} as AppEnv
 
     const source = this.container.makeOptional<EnvSource>('env.source')
-    // RFC 0026's introspection child has no secrets; it reports rather than failing the manifest.
-    const parsed = schema.parse(source, { mode: app.introspecting ? 'report' : 'throw' })
+    const parsed = schema.parse(source, { mode })
 
     for (const problem of parsed.problems) {
       warnOnce(`env-invalid:${problem.key}`, `[guren] Invalid environment: ${problem.key} ${problem.message} (reported under introspection).`)

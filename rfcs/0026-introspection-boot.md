@@ -233,9 +233,13 @@ same `PER_PROCESS_SESSION_DRIVERS` set the runtime warning uses.
 > - `MiddlewareEntry` gains `unresolved: true` for a name no alias or group
 >   registers, which `definitions()` already skips rather than throws on, and a
 >   group entry gains `unresolvedMembers` for members no alias registers.
-> - `Application.introspecting` is true while `introspect()` runs as well as
->   under the flag, so an in-process `introspect()` reports env problems the
->   way a CLI run does instead of recording `ConfigServiceProvider` as `threw`.
+> - `introspect()` registers routes but does not mount them on Hono or load the
+>   prototype fixture: mounting throws on an alias nothing registers, which the
+>   manifest reports as `unresolved`, and preparing prototype routes refuses in
+>   production. Nothing the manifest describes needs the mount.
+> - `ConfigServiceProvider` implements `introspect()` itself, parsing the
+>   environment in report mode, so an in-process `introspect()` reports env
+>   problems the way a CLI run does instead of recording the provider `threw`.
 > - Warning codes: `boot-callback-skipped`, `env-invalid` and `config-unverified`
 >   (RFC 0027 §1, collected from `ConfigServiceProvider`), `schema-partial`,
 >   `agent-tool`, `section-unreadable` (a bound manager whose construction threw),
