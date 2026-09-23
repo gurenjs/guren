@@ -5,51 +5,13 @@ interface Props {
 }
 import { GITHUB_URL, OWN_REPO_LINK_REL, SITE_DESCRIPTION, SITE_TITLE } from '../../../config/site.js'
 import { BurningName } from '../components/BurningName.js'
+import { ConventionGrid } from '../components/ConventionGrid.js'
 import { Footer } from '../components/Footer.js'
 import { Header } from '../components/Header.js'
 import { FunctionIcon, GithubIcon, GlobeIcon, LayersIcon, ServerIcon } from '../components/icons.js'
+import { InlineCode as Code } from '../components/InlineCode.js'
 import { Seo } from '../components/Seo.js'
 import { softwareJsonLd, websiteJsonLd } from '../lib/structured-data.js'
-
-function Code({ children }: { children: ReactNode }) {
-  return <code className="font-mono text-[0.92em] text-crimson-300">{children}</code>
-}
-
-const features: Array<{ title: string; body: ReactNode }> = [
-  {
-    title: 'Controllers you already know',
-    body: (
-      <>
-        <Code>validateBody()</Code> throws a 422, <Code>findOrFail()</Code> a 404,{' '}
-        <Code>userOrFail()</Code> a 401.
-      </>
-    ),
-  },
-  {
-    title: 'Types from route to React',
-    body: 'Routes, page props and the API client are checked at compile time.',
-  },
-  {
-    title: 'Drizzle models, Eloquent manners',
-    body: (
-      <>
-        <Code>Post.where('published', true).get()</Code>, on top of Drizzle ORM.
-      </>
-    ),
-  },
-  {
-    title: 'No API layer to babysit',
-    body: 'Inertia passes controller props straight to React.',
-  },
-  {
-    title: 'Batteries actually included',
-    body: 'Auth, queues, mail, cache, events, scheduling, storage and i18n.',
-  },
-  {
-    title: 'Prototype before the backend',
-    body: 'Build the pages on fixtures, show them, then write the controllers.',
-  },
-]
 
 const agentCommands = [
   { command: 'guren context User', detail: 'Everything about one entity' },
@@ -377,14 +339,7 @@ export default function Home({ codeExamples }: Props) {
           <div className="mx-auto max-w-6xl px-6 py-20 md:py-28">
             <Tick />
             <SectionHeading>Conventions you know. Types you didn&apos;t have.</SectionHeading>
-            <div className="mt-14 grid grid-cols-1 gap-x-12 gap-y-12 sm:grid-cols-2 lg:grid-cols-3">
-              {features.map((f) => (
-                <div key={f.title} className="border-t border-white/10 pt-6">
-                  <h3 className="text-lg font-bold leading-snug text-crimson-50">{f.title}</h3>
-                  <p className="mt-3 text-[0.9375rem] leading-[1.65] text-smoke">{f.body}</p>
-                </div>
-              ))}
-            </div>
+            <ConventionGrid />
           </div>
         </section>
 
