@@ -1,5 +1,5 @@
 import { resourceName, safePathSegments, writeScaffoldFile, ensureSuffix, safeModuleName } from './utils'
-import type { WriterOptions } from './utils'
+import type { ScaffoldFileEntry, WriterOptions } from './utils'
 import { appDependsOn, fileExists } from './discovery'
 
 const TEST_ROOT = 'tests'
@@ -53,6 +53,12 @@ export interface MakeTestOptions extends WriterOptions {
 }
 
 export async function makeTest(name: string, options: MakeTestOptions = {}): Promise<string> {
+  const { path, contents } = await testFile(name, options)
+  const { runner: _runner, controller: _controller, ...writer } = options
+  return writeScaffoldFile(path, contents, writer)
+}
+
+export async function testFile(name: string, options: MakeTestOptions = {}): Promise<ScaffoldFileEntry> {
   const trimmed = name.trim()
   if (!trimmed) {
     throw new Error('Test name is required.')
@@ -74,6 +80,5 @@ export async function makeTest(name: string, options: MakeTestOptions = {}): Pro
     ? `${testRoot}/controllers/${fileName}`
     : `${testRoot}/${[...segments, fileName].join('/')}`
 
-  const { runner: _runner, controller: _controller, ...writer } = options
-  return writeScaffoldFile(filePath, testTemplate(className, runner), writer)
+  return { path: filePath, contents: testTemplate(className, runner) }
 }
