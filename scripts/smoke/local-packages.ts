@@ -221,22 +221,63 @@ export async function vendorLocalPackages(vendorRoot: string): Promise<Map<strin
 }
 
 /**
- * After `bun install`: every vendored package resolves to exactly one copy, the
- * hoisted one, at the version this checkout carries. The optional-peer rewrite in
- * `vendorLocalPackages()` is what keeps bun from nesting a registry copy under a
- * tarball; this is the check that it did, since two `@guren/orm` in one process
- * fail minutes later as "database has not been configured".
+ * The files under `dist/` that differ between this checkout's build and an
+ * installed copy: missing, extra, or with other bytes. Empty means the copy is
+ * this checkout's build.
+ */
+export async function distDifferences(sourceDir: string, installedDir: string): Promise<string[]> {
+  const list = async (dir: string): Promise<Set<string>> =>
+    new Set(await Array.fromAsync(new Bun.Glob('**/*').scan({ cwd: join(dir, 'dist'), onlyFiles: true })))
+  const [expected, actual] = await Promise.all([list(sourceDir), list(installedDir)])
+
+  const differences: string[] = []
+  for (const file of expected) {
+    if (!actual.has(file)) {
+      differences.push(`dist/${file} missing`)
+      continue
+    }
+    const [want, got] = await Promise.all([
+      Bun.file(join(sourceDir, 'dist', file)).bytes(),
+      Bun.file(join(installedDir, 'dist', file)).bytes(),
+    ])
+    if (!Buffer.from(want).equals(got)) {
+      differences.push(`dist/${file} differs`)
+    }
+  }
+  for (const file of actual) {
+    if (!expected.has(file)) {
+      differences.push(`dist/${file} is not in this checkout's build`)
+    }
+  }
+  return differences.sort()
+}
+
+/**
+ * After `bun install`: every vendored package resolves to one hoisted copy with
+ * this checkout's version and `dist/` bytes (between releases npm has the same
+ * version). The optional-peer rewrite in `vendorLocalPackages()` keeps bun from
+ * nesting a registry copy; two `@guren/orm` in one process fail minutes later
+ * as "database has not been configured".
  */
 export async function assertSingleInstalledCopies(appDir: string): Promise<void> {
   const nodeModules = join(appDir, 'node_modules')
   const problems: string[] = []
 
   for (const pkg of await collectLocalPackages()) {
-    const installed = await readManifest(join(nodeModules, pkg.name)).catch(() => null) as
+    const installedDir = join(nodeModules, pkg.name)
+    const installed = await readManifest(installedDir).catch(() => null) as
       | (DependencyManifest & { version?: string })
       | null
     if (installed?.version !== pkg.version) {
       problems.push(`${pkg.name}: expected ${pkg.version} at node_modules/${pkg.name}, found ${installed?.version ?? 'nothing'}`)
+      continue
+    }
+    const differences = await distDifferences(pkg.sourceDir, installedDir)
+    if (differences.length > 0) {
+      problems.push(
+        `${pkg.name}: node_modules/${pkg.name} is not this checkout's build (a published or stale copy): ` +
+        `${differences.slice(0, 3).join(', ')}${differences.length > 3 ? `, and ${differences.length - 3} more` : ''}`,
+      )
     }
   }
 
