@@ -24,7 +24,7 @@ interface ManifestSources {
 
 const SCHEMA_KEYS = ['params', 'query', 'body', 'output'] as const
 
-/** Builds the manifest from a registered, mounted, unbooted app (RFC 0026 §1). */
+/** Builds the manifest from a registered, unmounted, unbooted app (RFC 0026 §1). */
 export function buildAppManifest(sources: ManifestSources): AppManifest {
   const warnings: ManifestWarning[] = [...sources.providerWarnings]
   if (sources.hasBootCallback) {
@@ -41,7 +41,9 @@ export function buildAppManifest(sources: ManifestSources): AppManifest {
   const derived = deriveAgentTools(definitions)
   for (const message of derived.warnings) warnings.push({ code: 'agent-tool', message })
 
-  return {
+  // Round-tripped so it is plain JSON: a nested `undefined` (a schema's `required`, a route's `name`) is dropped
+  // and the in-memory manifest equals its `--json` output key for key.
+  const manifest: AppManifest = {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     entry: { file: null, root: process.cwd(), stage: 'register' },
@@ -64,6 +66,7 @@ export function buildAppManifest(sources: ManifestSources): AppManifest {
     agentTools: derived.tools,
     warnings,
   }
+  return JSON.parse(JSON.stringify(manifest)) as AppManifest
 }
 
 function describeRoutes(
@@ -79,8 +82,7 @@ function describeRoutes(
     const { schemas, controller, middlewareNames, ...rest } = definition
     const label = `${definition.method} ${definition.path}`
     const entry: RouteEntry = {
-      // Undefined fields dropped, so the in-memory manifest and its JSON agree key for key.
-      ...Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined)) as typeof rest,
+      ...rest,
       module: moduleAt(index),
       middleware: chains[index] ?? [],
       schemas: {},

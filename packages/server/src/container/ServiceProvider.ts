@@ -67,8 +67,8 @@ function isManifestWarningSource(provider: ServiceProvider): provider is Service
   return typeof (provider as Partial<ManifestWarningSource>).manifestWarnings === 'function'
 }
 
-/** Where a provider came from, for the manifest's `providers[].source`. */
-interface ProviderOrigin {
+/** @internal Where a provider came from, for the manifest's `providers[].source`. */
+export interface ProviderOrigin {
   readonly source: ProviderSource
   readonly module?: string
 }
@@ -94,6 +94,7 @@ export class ProviderManager {
 
   constructor(protected container: Container) {}
 
+  /** `origin` is internal: `Application` passes it for the manifest (RFC 0026). */
   register(
     providerOrClass: ServiceProvider | ServiceProviderConstructor,
     origin: ProviderOrigin = { source: 'app.register' },
@@ -157,7 +158,7 @@ export class ProviderManager {
   }
 
   /**
-   * `registerAll()` for introspection (RFC 0026 §2): `introspect()` where a
+   * @internal `registerAll()` for introspection (RFC 0026 §2): `introspect()` where a
    * provider has one, and a throw is recorded rather than stopping the rest.
    * Deferred providers are reported `skipped`; they register only after boot.
    */
@@ -165,6 +166,8 @@ export class ProviderManager {
     const outcomes = new Map<ServiceProvider, Pick<ProviderEntry, 'register' | 'error'>>()
 
     for (const provider of this.providers) {
+      // The same instance registered twice keeps the outcome of its first pass.
+      if (outcomes.has(provider)) continue
       if (this.registered.has(provider)) {
         outcomes.set(provider, { register: 'ran' })
         continue
@@ -189,7 +192,7 @@ export class ProviderManager {
     }))
   }
 
-  /** Findings registered providers hold for the manifest, each named after its provider. */
+  /** @internal Findings registered providers hold for the manifest, each named after its provider. */
   manifestWarnings(): ManifestWarning[] {
     return this.providers
       .filter((provider) => this.registered.has(provider))
