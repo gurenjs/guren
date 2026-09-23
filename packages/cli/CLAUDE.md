@@ -26,6 +26,20 @@ Ships the Citty-based CLI (`guren` bin) with generators and database helpers. Ge
 - Reuse shared option helpers (such as the `force` writer option) instead of ad-hoc flag parsing
 - Parse app-authored source only through `parseSourceFile()` / `ParseCache` (`parse-cache.ts`); never call `@babel/parser` directly, and pass the file path so plugin selection can order its attempts. Plugin choice is not a per-call detail — no single set parses every decorator dialect and JSX/cast combination TypeScript accepts, and a wrong set makes the whole file unparseable, which every caller treats as "contributes nothing" without saying so
 
+## Command Registration
+
+- `src/commands.ts` composes the builtin registry in help-display order. Keep
+  `builtinSubCommands` as the entry point for the CLI, audits, and scaffold tests.
+- `src/commands/make.ts` owns every `make:*` command definition and execution
+  wrapper. The root imports those objects without redefining their arguments or
+  handlers. Generator implementations and templates stay in their existing modules.
+- `src/commands/scaffold-options.ts` owns the shared writer options and scaffold
+  arguments used by make, add, and codegen commands. `display-paths.ts` formats
+  paths shared by migration generation and database command output.
+- These modules only construct command objects at import time. Resolve cwd,
+  environment, and application state inside command execution. Use the local
+  `defineCommand` wrapper so repeated flags keep their existing semantics.
+
 ## Build & Distribution
 - Built via `bun run --cwd packages/cli build`; bin entry is `src/bin.ts`
 - Update `package.json` exports/bin when adding new entry points
