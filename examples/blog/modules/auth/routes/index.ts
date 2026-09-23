@@ -10,10 +10,11 @@ import { ForgotPasswordSchema } from '../app/Http/Validators/ForgotPasswordValid
 import { ResetPasswordSchema } from '../app/Http/Validators/ResetPasswordValidator.js'
 import { registerOAuthRoutes } from './oauth.js'
 
-// A module registrar receives the app's shared Router, but not the alias names
-// the root registrar defined on it (defineModule's `routes` is typed
-// `(router: Router) => void`, an unparameterized Router) — so gating goes
-// through the handler directly rather than through `.middleware('guest')`.
+// defineModule's `routes` is typed `(router: Router) => void`, an
+// unparameterized Router, so an alias name the root registrar set on this
+// same instance (e.g. 'auth') is not in scope here at the type level —
+// `.middleware('guest')` would not compile even though the name would
+// resolve at runtime. Gating goes through the handler directly instead.
 export function registerAuthModuleRoutes(router: Router): void {
   router.middleware(requireGuest({ redirectTo: '/dashboard' })).group((guest) => {
     guest.get('/login', { name: 'login' }, [LoginController, 'show'])

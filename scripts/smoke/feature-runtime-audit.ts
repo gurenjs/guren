@@ -46,7 +46,7 @@ async function auditBlog(root: string): Promise<void> {
   const scheduleKernel = await read(root, 'examples/blog/app/Console/Kernel.ts')
   assert(scheduleKernel.includes("name('blog:warm-post-cache')"), 'Blog schedule kernel must register the cache warm task.')
 
-  const loginController = await read(root, 'examples/blog/app/Http/Controllers/Auth/LoginController.ts')
+  const loginController = await read(root, 'examples/blog/modules/auth/app/Http/Controllers/LoginController.ts')
   assert(loginController.includes("this.make('events')"), 'Blog login controller must resolve the event manager from the container.')
   assert(loginController.includes('.emit(new UserLoggedIn'), 'Blog login controller must emit auth events through the event manager.')
 

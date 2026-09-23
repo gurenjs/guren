@@ -23,8 +23,8 @@ its tables in the root `db/schema.ts` and a single `modules/blog/routes.ts`,
 scans to verify a module's own route-registrar graph is reachable. Neither
 app had exercised that half of `guren check`'s route-registrar wiring check
 before this: a module using the single-file `routes.ts` shape `make:module`
-itself scaffolds (which both `web/modules/blog` and, until now,
-`modules/auth` used) leaves it vacuous. `examples/blog`'s tsconfig and
+itself scaffolds, as `web/modules/blog` does, leaves it vacuous.
+`examples/blog`'s tsconfig and
 vitest config did not include `modules/`, so a module's own files and tests
 were silently outside `bun run typecheck:blog` and `bun run test` — fixed
 alongside. Still not exercised anywhere: a module's own `db/schema.ts` (both
