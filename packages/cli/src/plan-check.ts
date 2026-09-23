@@ -1,6 +1,6 @@
 /**
- * `guren check --plan` (RFC 0030 §8): approved plans with `drifted` elements, and two open
- * plans that change the same application target. Advisory throughout, so it never sets an
+ * `guren check --plan` (RFC 0030 §8): approved plans with `drifted` elements or a command the
+ * allowlist refuses, and two open plans that change the same application target. Advisory throughout, so it never sets an
  * exit code, and it runs only under `--plan`: judging a plan imports `db/schema.ts` and every
  * validator file, which plain `check` never does. An app with no plan file reads nothing else.
  */
@@ -71,7 +71,7 @@ export async function discoverPlanFiles(appRoot: string): Promise<PlanDiscovery>
 }
 
 async function loadModules() {
-  const [render, approvals, state, closeDocs, targets, status, appState] = await Promise.all([
+  const [render, approvals, state, closeDocs, targets, status, appState, allowlist] = await Promise.all([
     import('./plan-render'),
     import('./plan/approvals'),
     import('./plan/state'),
@@ -79,6 +79,7 @@ async function loadModules() {
     import('./plan/app-targets'),
     import('./plan-status'),
     import('./plan/app-state'),
+    import('./plan/command-allowlist'),
   ])
   return {
     readPlanFile: render.readPlanFile,
@@ -90,6 +91,7 @@ async function loadModules() {
     listPlanAppTargets: targets.listPlanAppTargets,
     planStatusFile: status.planStatusFile,
     loadPlanAppState: appState.loadPlanAppState,
+    judgePlanCommand: allowlist.judgePlanCommand,
   }
 }
 
@@ -291,6 +293,22 @@ export async function checkPlans(options: PlanCheckOptions): Promise<CheckResult
   }
 
   if (open.length === 0) return results
+  // An approval that predates the allowlist never ran it, and plan:next refuses such a plan.
+  for (const plan of open) {
+    for (const command of plan.plan.commands) {
+      const verdict = m.judgePlanCommand(command.command)
+      if (verdict.allowed) continue
+      results.push({
+        key: `plan:command:${plan.file}:${command.id}`,
+        title: 'Approved plan carries a refused command',
+        status: 'warn',
+        message: `${plan.file}: ${command.id} (${JSON.stringify(command.command)}) is refused: ${verdict.reason}. plan:next hands out no step of this plan while it stays.`,
+        suggestion: `Replace or remove the command, then run guren plan:approve ${plan.file} again.`,
+        filePath: plan.file,
+        advisory: true,
+      })
+    }
+  }
   let app: Promise<PlanAppState> | undefined
   const loadApp = (): Promise<PlanAppState> => (app ??= m.loadPlanAppState(appRoot, { detail: true, routesFile: options.routesFile }))
   for (const plan of open) {

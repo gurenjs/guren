@@ -20,6 +20,7 @@ import { planStatusFile } from './plan-status'
 import { loadPlanAppState, type PlanAppState } from './plan/app-state'
 import { requirePlanApproval, type PlanApprovedStanding } from './plan/approvals'
 import { planBesideExclusions } from './plan/beside'
+import { judgePlanCommand, PLAN_COMMAND_FORM } from './plan/command-allowlist'
 import { describeCloseBlockers, formatCloseBlocker, type CloseBlocker } from './plan/close-remedy'
 import { planDecisionsPath, type PlanWaiver } from './plan/decisions'
 import { judgeFreshness } from './plan/freshness'
@@ -182,10 +183,25 @@ async function unverifiedElements(
   }
 }
 
+/** The step hands a plan's commands to the implementing agent as written, so one the allowlist refuses stops the whole plan (§8). */
+function refuseDisallowedCommands(path: string, plan: PlanDraft): void {
+  const refused = plan.commands.flatMap((command) => {
+    const verdict = judgePlanCommand(command.command)
+    return verdict.allowed ? [] : [`  ${command.id}: ${JSON.stringify(command.command)} is refused: ${verdict.reason}`]
+  })
+  if (refused.length === 0) return
+  throw new CliError(
+    `${basename(path)} carries commands the implementing agent would run as written, so no step of it is handed out:\n${refused.join('\n')}\n`
+      + `A plan's commands are ${PLAN_COMMAND_FORM} naming a generator; fix them in the plan (plan:render shows each finding), and approve it again if it was approved.`,
+  )
+}
+
 export async function planNextFile(planPath: string, options: PlanNextFileOptions): Promise<PlanNextReport> {
   const { path, plan } = await readPlanFile(planPath, options.cwd)
   // Before the tree is read or a step marked: an unapproved plan hands out no work, whatever else is wrong.
   const approval = await requirePlanApproval(path, plan, 'no step of it is handed out')
+  // A draft passes the gate above without §2 having run, and an approval may predate the allowlist.
+  refuseDisallowedCommands(path, plan)
   const root = options.appRoot
   const derivation = derivePlanTasks(plan, { apiOnly: await isConfirmedApiOnlyApp(root).catch(() => false) })
   const digest = planDigest(plan)

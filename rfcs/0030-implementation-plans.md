@@ -2347,11 +2347,17 @@ Claude Code docs as read on 2026-09-23:
   `planRevisionOpsJsonSchema()` 150 and 32. The pages read do not say whether
   `claude --json-schema` goes through constrained decoding, so this is not
   asserted. The Open Question 2 probe settles it.
-- **The `commands` allowlist is not implemented.** `PlanCommandSchema` takes a
-  free string (`packages/cli/src/plan/schema.ts:277-281`). `plan:next --json`
-  hands it to the implementing agent as written. That path already exists for
-  a hand-written or in-session plan, so the allowlist is a §2 check in Part 3,
-  ahead of `--print-prompt`.
+- ~~**The `commands` allowlist is not implemented.**~~ The allowlist is a §2
+  check (`plan:command`, a failure) in `packages/cli/src/plan/command-allowlist.ts`.
+  A command passes as `guren <subcommand>` or `bunx guren <subcommand>`, with
+  arguments in a closed character set and `'`/`"` quoting, and a subcommand
+  the table classifies as a generator: `make:*` except `make:migration`,
+  `lang:publish`, and `add <blueprint>` except `add plugin`. A registry
+  command the table does not list is refused, and a test fails until it is
+  classified. `PlanCommandSchema` still takes a string, so a plan with a
+  refused command parses and shows the finding. `plan:next` refuses such a
+  plan before it marks a step, drafts included, since a draft never passes
+  `plan:approve`. `check --plan` warns on an approved one.
 
 `guren plan --print-prompt` writes the prompt and the schema to stdout and
 calls nothing, for any other agent, and for a Claude Code session already in
@@ -2703,7 +2709,7 @@ not started:
 | Item | Call | On what |
 |---|---|---|
 | scaffold emitters (§5) | proceed | 0 false verdicts at completion on the kinds a scaffold writes (models, columns, actions, routes), at 0% to 6% unknown |
-| `claude -p` producer, `--print-prompt` (§8) | reshape | the prompt asks every `alter` to state its change in readable properties, and §2 warns on an `alter` whose readable properties all held at approval; an `alter` in prose alone is cause 1 |
+| `claude -p` producer, `--print-prompt` (§8) | reshape | the prompt asks every `alter` to state its change in readable properties, and ~~§2~~ `plan:approve` warns (§6 amendment on readings) on an `alter` whose readable properties all held at approval; an `alter` in prose alone is cause 1 |
 | `guren check --plan` (§9) | proceed | a single reading of the rules above serves it |
 | `github` store (§9) | defer | nothing measured here bears on it; it waits for a user |
 | the guide | proceed; update when the §6 rules land | the guide describes today's rules, which the changes above alter |
@@ -2725,7 +2731,7 @@ marks what was read and not run.
 - The reshape's warning, on an `alter` whose readable properties all held
   at approval, is implemented in `plan:approve` from the approval entry's
   readings, and is not a §2 check (§6 amendment on readings).
-- The `commands` allowlist of §8 is not implemented (§8 amendment).
+- The `commands` allowlist of §8 is implemented as a §2 check (§8 amendment).
 - Files touched and lines changed per step are not recorded, so neither the
   step width (Open Question 3) nor what a scaffold saves can be judged yet.
 - Re-approving a plan mid-build settles the plan's own built elements
@@ -2752,8 +2758,10 @@ marks what was read and not run.
 *Scope and order.*
 
 1. The route-file fingerprint fix (#1039).
-2. Two §2 checks: the `commands` allowlist, and a warning for an `alter`
-   whose properties all held at approval.
+2. The `commands` allowlist, a §2 check (§8 amendment), and a warning for
+   an `alter` whose properties all held at approval, which `plan:approve`
+   computes from the approval readings and is not a §2 check (§6 amendment
+   on readings).
 3. Files touched and lines changed, recorded per step.
 4. `plan --print-prompt`, `plan:revise`, and an in-session plan-writing
    harness skill.
