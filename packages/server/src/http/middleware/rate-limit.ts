@@ -33,7 +33,7 @@ abstract class BaseMemoryStore implements RateLimitStore {
 
     this.cleanupInterval = setInterval(() => this.cleanup(), cleanupIntervalMs)
     // A sweep must not keep alive a process that merely evaluated a routes
-    // module (a CLI command, a test). Workers return a number: hence the `?.`.
+    // module (a CLI command, a test). Workers may return a number: hence the `?.`.
     this.cleanupInterval.unref?.()
 
     // Subclasses declare no constructor, so a synthetic frame for the implicit

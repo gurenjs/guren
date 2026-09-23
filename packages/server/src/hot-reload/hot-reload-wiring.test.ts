@@ -128,8 +128,8 @@ describe('rate limit store hot-reload wiring', () => {
   const survivors: Array<MemoryRateLimitStore | SlidingWindowRateLimitStore> = []
 
   afterEach(() => {
-    // The cleanup timer is unref()ed, so a survivor cannot hang the run — but
-    // it would sweep during a later test.
+    // The cleanup timer is unref()ed, so a survivor cannot hang the run, but
+    // one built under withHotRuntime still holds a hot-reload slot.
     for (const store of survivors.splice(0)) {
       store.destroy()
     }
