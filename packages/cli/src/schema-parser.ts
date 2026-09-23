@@ -20,6 +20,7 @@ import {
 } from './ast-walk'
 import { listAppRoots } from './discovery'
 import { importsByLocal, schemaModuleFor } from './schema-binding'
+import { camelCase } from './utils'
 import { isDrizzleBuilderSpecifier } from './drizzle-specifiers'
 import { parseSourceFile } from './parse-cache'
 
@@ -142,18 +143,18 @@ export interface SchemaAggregate {
   object: ObjectExpression
   /** The statement declaring it, whose start a table's own declaration must precede. */
   statement: Statement
-  /** Keys the object lists, in source order: tables the file declares and `imported` ones. */
+  /** Keys the object lists, in source order: tables the file declares and ones it imports. */
   keys: string[]
   /** Every table the same file declares. */
   declared: Set<string>
-  /** Keys naming a binding imported from a module's schema, by local name. */
-  imported: Map<string, { module: string; name: string }>
-  /** Modules whose schema the object spreads (`...billingSchema`), handing their tables to that file. */
-  delegated: Set<string>
+  /** Module → the names of its tables the object lists as keys imported from that module's schema. */
+  listed: Map<string, Set<string>>
+  /** Module → the export the object spreads (`...billingSchema`), `''` for a namespace import. */
+  delegated: Map<string, string>
   /**
    * The file's own evidence that this object is the schema drizzle is handed: named
-   * `schema`, or read by a `typeof`. False leaves a caller holding a shape match alone,
-   * which a grouping of table shorthands satisfies just as well.
+   * `schema` or `identifiedAs`, or read by a `typeof`. False leaves a caller holding a shape
+   * match alone, which a grouping of table shorthands satisfies just as well.
    */
   confident: boolean
 }
@@ -166,18 +167,19 @@ export interface FindSchemaAggregateOptions {
    * Without it, a key or spread reaching another file is not evidence of an aggregate.
    */
   location?: { cwd: string; file: string }
+  /** A name another file vouches for: the export the root schema object spreads from this module. */
+  identifiedAs?: string
 }
 
-/** Whether the file reads `name` in a `typeof` position — `export type X = typeof schema`. */
-function typeQueried(ast: File, name: string): boolean {
-  let found = false
+/** The names the file reads in a `typeof` position — `export type X = typeof schema`. */
+function typeQueriedNames(ast: File): Set<string> {
+  const names = new Set<string>()
   walk(ast.program, (node) => {
-    if (found) return false
     if (node.type !== 'TSTypeQuery') return
     const exprName = node.exprName as { type?: string; name?: string } | undefined
-    if (exprName?.type === 'Identifier' && exprName.name === name) found = true
+    if (exprName?.type === 'Identifier' && exprName.name) names.add(exprName.name)
   })
-  return found
+  return names
 }
 
 /**
@@ -188,17 +190,19 @@ function typeQueried(ast: File, name: string): boolean {
  * A second candidate answers null, and `confident` grades what is left.
  */
 export function findSchemaAggregate(ast: File, options: FindSchemaAggregateOptions = {}): SchemaAggregate | null {
-  const { extraKey, location } = options
+  const { extraKey, location, identifiedAs } = options
   const declared = declaredTableIdentifiers(ast)
-  const moduleImports = new Map<string, { module: string; name: string; namespace: boolean }>()
+  // `name` is the export a local binds, `''` for a namespace import.
+  const moduleImports = new Map<string, { module: string; name: string }>()
   if (location) {
     for (const [local, entry] of importsByLocal(ast.program.body)) {
       if (entry.kind === 'default') continue
       const module = schemaModuleFor(location.cwd, location.file, entry.source)
-      if (typeof module === 'string') moduleImports.set(local, { module, name: entry.imported, namespace: entry.kind === 'namespace' })
+      if (typeof module === 'string') moduleImports.set(local, { module, name: entry.imported })
     }
   }
 
+  let typeQueried: Set<string> | undefined
   let found: SchemaAggregate | null = null
 
   for (const node of ast.program.body) {
@@ -210,8 +214,8 @@ export function findSchemaAggregate(ast: File, options: FindSchemaAggregateOptio
       if (!object || declarator.id.type !== 'Identifier') continue
 
       const keys: string[] = []
-      const imported = new Map<string, { module: string; name: string }>()
-      const delegated = new Set<string>()
+      const listed = new Map<string, Set<string>>()
+      const delegated = new Map<string, string>()
       let isAggregate = true
 
       for (const property of object.properties) {
@@ -221,7 +225,7 @@ export function findSchemaAggregate(ast: File, options: FindSchemaAggregateOptio
             isAggregate = false
             break
           }
-          delegated.add(source.module)
+          delegated.set(source.module, source.name)
           continue
         }
         if (property.type !== 'ObjectProperty') {
@@ -231,25 +235,27 @@ export function findSchemaAggregate(ast: File, options: FindSchemaAggregateOptio
         const key = memberKeyName(property)
         const referencesKey =
           property.shorthand || (property.value.type === 'Identifier' && property.value.name === key)
-        const source = key ? moduleImports.get(key) : undefined
-        if (!key || !referencesKey || !(declared.has(key) || key === extraKey || (source && !source.namespace))) {
+        const source = key && !declared.has(key) ? moduleImports.get(key) : undefined
+        const listable = key !== undefined && (declared.has(key) || key === extraKey || Boolean(source?.name))
+        if (!listable || !referencesKey) {
           isAggregate = false
           break
         }
-        if (source && !declared.has(key)) imported.set(key, { module: source.module, name: source.name })
+        if (source) listed.set(source.module, (listed.get(source.module) ?? new Set()).add(source.name))
         keys.push(key)
       }
       if (!isAggregate) continue
 
       const name = declarator.id.name
-      const confident = name === 'schema' || typeQueried(ast, name)
+      typeQueried ??= typeQueriedNames(ast)
+      const confident = name === 'schema' || name === identifiedAs || typeQueried.has(name)
       if (object.properties.length === 0 && !confident) continue
 
       // A second candidate means the file's shape does not identify one aggregate,
       // so neither can this.
       if (found) return null
 
-      found = { object, statement: node, keys, declared, imported, delegated, confident }
+      found = { object, statement: node, keys, declared, listed, delegated, confident }
     }
   }
 
@@ -715,6 +721,16 @@ export async function schemaDeclaresTable(cwd: string, identifier: string, modul
  */
 export function schemaPathFor(module: string | null | undefined): string {
   return module ? `modules/${module}/db/schema.ts` : 'db/schema.ts'
+}
+
+/** How the root `db/schema.ts` imports and re-exports a module's schema. */
+export function moduleSchemaSpecifier(module: string): string {
+  return `../modules/${module}/db/schema`
+}
+
+/** The aggregate object `make:module` gives a module for the root schema object to spread. */
+export function moduleSchemaAggregateName(module: string): string {
+  return `${camelCase(module)}Schema`
 }
 
 /**

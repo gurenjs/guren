@@ -124,7 +124,6 @@ export const invoices = pgTable('invoices', {
 })
 
 export const billingSchema = {}
-export type BillingSchema = typeof billingSchema
 `
         await writeWorkspaceFiles(workspace.dir, { 'modules/billing/db/schema.ts': moduleSchema })
         const unlisted = await aggregateCheck('billing')

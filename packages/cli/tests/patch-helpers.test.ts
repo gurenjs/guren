@@ -858,7 +858,7 @@ export const schema = {
 }
 `, 'billing', 'billingSchema')
 
-    expect(updated).toContain('  posts,\n  ...billingSchema,\n}')
+    expect(updated.content).toContain('  posts,\n  ...billingSchema,\n}')
   })
 
   it('leaves an object already spreading the module unchanged, whatever it spreads it as', () => {
@@ -867,14 +867,14 @@ import * as billing from '../modules/billing/db/schema'
 
 export const schema = { users, posts, ...billing }
 `
-    expect(spreadModuleIntoSchema(source, 'billing', 'billingSchema')).toBe('unchanged')
+    expect(spreadModuleIntoSchema(source, 'billing', 'billingSchema').reason).toBe(PATCH_REASONS.alreadyPresent)
   })
 
   it('declines a root whose object nothing identifies as the schema', () => {
     expect(spreadModuleIntoSchema(`${PG_TABLES}
 export const authTables = { users }
-`, 'billing', 'billingSchema')).toBeNull()
-    expect(spreadModuleIntoSchema(PG_TABLES, 'billing', 'billingSchema')).toBeNull()
+`, 'billing', 'billingSchema').content).toBeUndefined()
+    expect(spreadModuleIntoSchema(PG_TABLES, 'billing', 'billingSchema').content).toBeUndefined()
   })
 })
 

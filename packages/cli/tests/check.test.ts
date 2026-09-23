@@ -824,10 +824,10 @@ export const receipts = pgTable('receipts', {
 })
 
 export const billingSchema = { invoices }
-export type BillingSchema = typeof billingSchema
 `,
     })
 
+    // Nothing in the module names or reads the object; the root spreading it is the evidence.
     expect(report.checks.find(c => c.key === 'schema-aggregate-keys:app')!.status).toBe('pass')
     const moduleObject = report.checks.find(c => c.key === 'schema-aggregate-keys:billing')
     expect(moduleObject!.status).toBe('warn')

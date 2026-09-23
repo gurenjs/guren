@@ -825,36 +825,18 @@ function planAggregateSplice(source: string, name: string): AggregateSplice | nu
 }
 
 /**
- * `source` (the root `db/schema.ts`) with `...identifier` spread into its schema object, handing
- * `module`'s tables to that module's own aggregate. `unchanged` when the object already spreads
- * one from `module`; null when the file identifies no aggregate, so there is nothing to keep.
+ * The root `db/schema.ts` with `...identifier` spread into its schema object, handing `module`'s
+ * tables to that module's own aggregate. `alreadyPresent` when the object spreads one from
+ * `module` already; another reason when the file identifies no aggregate to keep.
  */
-export function spreadModuleIntoSchema(source: string, module: string, identifier: string): string | 'unchanged' | null {
-  const aggregate = identifiedRootAggregate(source)
-  if (!aggregate) return null
-  if (aggregate.delegated.has(module)) return 'unchanged'
-  const entry = aggregateEntrySplice(source, aggregate.object, `...${identifier}`)
-  if (!entry) return null
-  return source.slice(0, entry.offset) + entry.text + source.slice(entry.offset)
-}
-
-/**
- * Spreads `module`'s aggregate into the root schema object and imports it, the import only
- * once the spread lands: an import nothing reads fails `noUnusedLocals`. `alreadyPresent`
- * when the object already spreads one from `module`.
- */
-export async function addModuleSchemaSpread(module: string, identifier: string): Promise<PatchResult> {
+export function spreadModuleIntoSchema(source: string, module: string, identifier: string): InsertResult {
   const file = schemaPathFor(null)
-  const source = await readIfExists(process.cwd(), file)
-  if (source === null) return { modified: false, reason: PATCH_REASONS.fileNotFound }
-
-  const spread = spreadModuleIntoSchema(source, module, identifier)
-  if (spread === 'unchanged') return { modified: false, reason: PATCH_REASONS.alreadyPresent }
-  if (spread === null) return { modified: false, reason: `${file} has no schema object it identifies as one` }
-
-  const imported = insertImport(spread, `import { ${identifier} } from '../modules/${module}/db/schema'`) ?? spread
-  await writeFile(resolve(process.cwd(), file), imported, 'utf8')
-  return { modified: true }
+  const aggregate = identifiedRootAggregate(source)
+  if (!aggregate) return { reason: `${file} has no schema object it identifies as one` }
+  if (aggregate.delegated.has(module)) return { reason: PATCH_REASONS.alreadyPresent }
+  const entry = aggregateEntrySplice(source, aggregate.object, `...${identifier}`)
+  if (!entry) return { reason: `Could not find where to add an entry to the schema object in ${file}` }
+  return { content: source.slice(0, entry.offset) + entry.text + source.slice(entry.offset) }
 }
 
 /** The offset the line containing `offset` starts at. */
