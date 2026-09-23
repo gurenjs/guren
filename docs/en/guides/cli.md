@@ -218,8 +218,11 @@ manifest (`guren codegen`) and a drifted `docs/spec/` view
 field, `{ "kind": "command", "args": ["codegen"] }`, holding the
 arguments after `guren`. `--fix` runs every distinct fix once, then
 checks again and reports that second run, with what it ran under
-`fixes`. It exits non-zero when one of the commands fails. A finding
-that needs a code change or a decision has no `fix`, only the
+`fixes`. It exits non-zero when one of the commands fails, or exits 0
+while the findings it was meant to clear are still reported. `--fix`
+is refused under `--ci`: a gate that regenerated the drift it checks
+for would always pass, so run it locally and commit what it writes. A
+finding that needs a code change or a decision has no `fix`, only the
 `suggestion` text.
 
 ```bash

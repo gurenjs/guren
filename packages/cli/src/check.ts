@@ -36,7 +36,7 @@ import { checkSessionsConfig } from './sessions-check'
 import { checkPrototypeRoutes } from './prototype-check'
 import { checkDeployRuntime } from './deploy-runtime'
 import { loadRouteDefinitions } from './load-routes'
-import { routesEntryOrDefault } from './route-registrar'
+import { DEFAULT_ROUTES_FILE, routesEntryOrDefault } from './route-registrar'
 import type { RouteDefinition } from '@guren/server'
 
 /**
@@ -66,7 +66,7 @@ import { checkConfigWiring } from './config-check'
 import { runSpecCheck } from './spec-check'
 import { checkPlans, isPlanInput } from './plan-check'
 import { getChangedFiles } from './changed-files'
-import { check, commandFix, formatFixCommand, pendingFixes, type CheckFix, type CheckResult, type CheckReport, type CheckStatus } from './check-result'
+import { check, formatFixCommand, routesCommandFix, type CheckFix, type CheckResult, type CheckReport, type CheckStatus } from './check-result'
 
 export type { CheckStatus, CheckResult, CheckReport }
 
@@ -123,12 +123,12 @@ export interface RunCheckOptions {
 
 /**
  * The `guren codegen` invocation that regenerates the artifacts *this* check
- * read — carrying `--routes` when the caller passed one. Without it, a
- * `guren check --routes routes/api.ts` prints a remedy that reads the codegen
- * default instead, and writes or deletes the manifest from the wrong graph.
+ * read — carrying `--routes` for any entry other than codegen's default. Without
+ * it, the remedy reads routes/web.ts instead, and writes or deletes the manifest
+ * from the wrong graph (or, on an API-only app, skips it and exits 0).
  */
 function codegenFix(routesFile?: string): CheckFix {
-  return routesFile === undefined ? commandFix('codegen') : commandFix('codegen', '--routes', routesFile)
+  return routesCommandFix('codegen', routesFile)
 }
 
 /**
@@ -451,7 +451,11 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       ...(pagesPlan.reason === 'pages' ? [PAGES_MANIFEST_FILE] : []),
       '.guren/data.gen.ts',
     ]
-    const manifestFix = codegenFix(options.routesFile)
+    // The entry is probed: the API-only template ships routes/api.ts only. codegen
+    // itself defaults to routes/web.ts, so its fix has to name any other entry.
+    const routeGraphFile = await routesEntryOrDefault(cwd, options.routesFile)
+    const codegenRoutes = options.routesFile ?? (routeGraphFile === DEFAULT_ROUTES_FILE ? undefined : routeGraphFile)
+    const manifestFix = codegenFix(codegenRoutes)
     for (const manifest of manifests) {
       if (await fileExists(cwd, manifest)) {
         checks.push(check(`manifest:${manifest}`, manifest, 'pass', `${manifest} is present.`))
@@ -467,8 +471,6 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // for apps deriving a tool and *removes* it otherwise (see planAgentManifest).
     // The graph is loaded once here for 5.5, 7.7, 7.8 and 8.7 — two loads could
     // resolve different routes entries and disagree about what the app mounted.
-    // The entry is probed: the API-only template ships routes/api.ts only.
-    const routeGraphFile = await routesEntryOrDefault(cwd, options.routesFile)
     if (sourceChanged) {
       graph = await loadRouteGraph(cwd, routeGraphFile)
       if (graph.error) {
@@ -484,7 +486,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
           ),
         )
       } else {
-        checks.push(await checkAgentManifest(cwd, options.routesFile, graph.definitions))
+        checks.push(await checkAgentManifest(cwd, codegenRoutes, graph.definitions))
       }
     }
 
@@ -941,8 +943,8 @@ export function renderCheckReport(report: CheckReport): void {
 
   console.log('')
   console.log(`Results: ${report.passCount} passed, ${report.warnCount} warnings, ${report.failCount} failures`)
-  if (report.fixes === undefined && pendingFixes(report).length > 0) {
-    const fixable = report.checks.filter((result) => result.status !== 'pass' && result.fix).length
+  const fixable = report.checks.filter((result) => result.status !== 'pass' && result.fix).length
+  if (report.fixes === undefined && fixable > 0) {
     console.log(`${fixable === 1 ? 'One finding clears' : `${fixable} findings clear`} by regenerating files: run this check again with --fix.`)
   }
 }

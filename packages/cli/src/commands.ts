@@ -88,7 +88,7 @@ import { ENV_EXAMPLE_FILE, ENV_SCHEMA_FILE, loadEnvSchema, writeEnvExample } fro
 import { readAppDefaultLocale } from './app-locale'
 import { CliError } from './cli-error'
 import { gatingResults } from './check-result'
-import { runCheckFixes } from './check-fix'
+import { recheckInChild, runCheckFixes, settleFixRuns } from './check-fix'
 import { runAudit, renderAuditReport } from './audit'
 import { runGate, renderGateReport } from './gate'
 import { generateGuidelines } from './guidelines'
@@ -1894,6 +1894,11 @@ const checkCommand = defineCommand({
       process.exitCode = 1
       return
     }
+    if (args.ci && args.fix) {
+      consola.error('--fix regenerates the files a --ci gate exists to catch drifting. Run guren check --fix locally and commit what it writes.')
+      process.exitCode = 1
+      return
+    }
 
     const options = {
       cwd: args.app,
@@ -1910,8 +1915,11 @@ const checkCommand = defineCommand({
     }
     let report = await runCheck(options)
     if (args.fix) {
-      const fixes = await runCheckFixes(report)
-      if (fixes.length > 0) report = await runCheck(options)
+      let fixes = await runCheckFixes(report)
+      if (fixes.length > 0) {
+        report = (await recheckInChild(options, report.cwd)) ?? (await runCheck(options))
+        fixes = settleFixRuns(fixes, report)
+      }
       report.fixes = fixes
       if (fixes.some((run) => !run.ok)) process.exitCode = 1
     }

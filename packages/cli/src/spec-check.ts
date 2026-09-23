@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import { readIfExists, directoryExists } from './discovery'
 import { generateSpecArtifacts, SPEC_VIEWS, type SpecViewDescriptor } from './spec-generate'
 import { SPEC_DIR } from './spec-artifact'
-import { check, commandFix, formatFixCommand, type CheckResult } from './check-result'
+import { check, formatFixCommand, routesCommandFix, type CheckResult } from './check-result'
 import { escapeRegExp } from './utils'
 
 export interface SpecCheckOptions {
@@ -52,7 +52,7 @@ export async function runSpecCheck(options: SpecCheckOptions): Promise<CheckResu
 
   const artifacts = await generateSpecArtifacts({ cwd, routesFile }, views)
   // The views were derived from `routesFile`, so the regeneration has to read the same one.
-  const fix = routesFile === undefined ? commandFix('spec:generate') : commandFix('spec:generate', '--routes', routesFile)
+  const fix = routesCommandFix('spec:generate', routesFile)
   const results: CheckResult[] = []
 
   for (const artifact of artifacts) {

@@ -93,6 +93,11 @@ export function commandFix(...args: string[]): CheckFix {
   return { kind: 'command', args }
 }
 
+/** A generator command that reads the route graph, pointed at the routes file the check read. */
+export function routesCommandFix(command: string, routesFile?: string): CheckFix {
+  return routesFile === undefined ? commandFix(command) : commandFix(command, '--routes', routesFile)
+}
+
 /** The fix as a copy-pasteable command line; an argument is quoted only when a shell would split it. */
 export function formatFixCommand(fix: CheckFix): string {
   const words = fix.args.map((arg) => (/^[\w./@:=-]+$/u.test(arg) ? arg : `'${arg.replace(/'/gu, `'\\''`)}'`))
