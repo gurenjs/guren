@@ -1671,9 +1671,8 @@ matched when the plan was approved says nothing about the change. What shipped
   the approval entry's readings for the properties the `alter` reads now, or
   all of its recorded ones where it cannot be read or is not found. An
   `unknown` is not held, and the warning names it as what can still show the
-  change. An
-  `alter` with no readable reading gets none: its readings cannot tell a
-  property no reader sees from one a failed import hid, and a model or
+  change. An `alter` with no readable reading gets none: its readings cannot
+  tell a property no reader sees from one a failed import hid, and a model or
   controller whose change lies in its columns or actions plans no property of
   its own. `plan:render` reads no approval, and `plan:status` reports the
   element `unjudged` with the same remedy.

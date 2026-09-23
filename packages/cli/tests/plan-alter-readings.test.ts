@@ -95,7 +95,6 @@ export class Post extends defineModel(posts) {
 Post.hasMany('comments', () => import('./Comment').then((module) => module.Comment), 'postId', 'id')
 `
 
-/** The plan with a baseline, for the pure functions that read one. */
 const plan = PlanSchema.parse({ ...PLAN_DOCUMENT, baseline: { rev: 'abc123', contextHash: {} } })
 
 function git(dir: string, ...args: string[]): void {
