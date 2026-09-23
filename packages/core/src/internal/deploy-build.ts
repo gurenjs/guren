@@ -721,3 +721,116 @@ export function renderDevOnlyStub(module: Pick<DevOnlyModule, 'exportNames'>, me
   const fallback = `function unavailable() { ${error} }`
   return `// ${comment}\n${throwing}\n${fallback}\nexport default Object.assign(unavailable${named})\n`
 }
+
+/**
+ * `Bun.build` minify options for a deploy bundle. Jobs, events, notifications and
+ * agents are stored under their class name, so identifiers stay unmangled, and
+ * `keepNames` restores the name syntax minification drops from a named class or
+ * function expression. It never replaces `identifiers: false`: on Bun 1.3.14 and
+ * 1.4.2 mangling wins. Neither restores a cross-module rename (`renamedNameKeyedClasses`).
+ */
+export const BUN_DEPLOY_MINIFY = { whitespace: true, syntax: true, identifiers: false, keepNames: true } as const
+
+/** Framework base classes whose subclasses are stored under their class name unless pinned. */
+const NAME_KEYED_BASES = new Set(['Job', 'Event', 'Notification', 'Agent'])
+const NAME_PIN = /\bstatic\s+(?:override\s+)?(?:jobName|eventName|agentName)\b|\bget\s+type\s*\(/
+const SOURCE_CLASS =
+  /^[ \t]*(?:export[ \t]+(?:default[ \t]+)?)?(?:abstract[ \t]+)?class[ \t]+([A-Za-z_$][\w$]*)(?:[ \t]*<[^{>\n]*>)?(?:[ \t]+extends[ \t]+([A-Za-z_$][\w$]*))?/gm
+const BUNDLED_CLASS = /(?:^|[^\w$.])class\s+([A-Za-z_$][\w$]*)/g
+
+export interface RenamedNameKeyedClass {
+  /** The name in source, which `bun run` reports. */
+  readonly name: string
+  /** The name the bundle declares instead, and so the class's runtime `.name`. */
+  readonly bundledAs: string
+  /** The app files declaring an unpinned name-keyed class called `name`. */
+  readonly files: readonly string[]
+}
+
+/**
+ * App classes the bundle renamed to `<name><n>` because another module declares the
+ * same top-level name; which one keeps it follows import order. Only unpinned
+ * subclasses of `NAME_KEYED_BASES` count, traced through the app's own `extends` by
+ * name with regexes (this module imports only builtins, so not the CLI's AST readers):
+ * an aliased base import is missed rather than guessed.
+ */
+export function renamedNameKeyedClasses(
+  bundle: string,
+  sources: ReadonlyArray<{ readonly file: string; readonly text: string }>,
+): RenamedNameKeyedClass[] {
+  const declared = new Map<string, Array<{ file: string; base: string | undefined; pinned: boolean }>>()
+  for (const { file, text } of sources) {
+    const pinned = NAME_PIN.test(text)
+    for (const match of text.matchAll(SOURCE_CLASS)) {
+      const entries = declared.get(match[1]!) ?? []
+      entries.push({ file, base: match[2], pinned })
+      declared.set(match[1]!, entries)
+    }
+  }
+
+  const nameKeyed = (base: string | undefined, seen = new Set<string>()): boolean => {
+    if (base === undefined || seen.has(base)) return false
+    if (NAME_KEYED_BASES.has(base)) return true
+    seen.add(base)
+    return (declared.get(base) ?? []).some((entry) => nameKeyed(entry.base, seen))
+  }
+
+  const renamed: RenamedNameKeyedClass[] = []
+  for (const bundledAs of new Set(Array.from(bundle.matchAll(BUNDLED_CLASS), (match) => match[1]!))) {
+    const name = withoutNumericSuffix(bundledAs)
+    if (name === undefined || declared.has(bundledAs)) continue
+    const files = (declared.get(name) ?? [])
+      .filter((entry) => !entry.pinned && nameKeyed(entry.base))
+      .map((entry) => entry.file)
+      .sort()
+    if (files.length > 0) renamed.push({ name, bundledAs, files })
+  }
+  return renamed
+}
+
+// A scan rather than `/^(.+?)\d+$/`, which backtracks polynomially on a long digit run.
+function withoutNumericSuffix(name: string): string | undefined {
+  let end = name.length
+  while (end > 0 && name.charCodeAt(end - 1) >= 48 && name.charCodeAt(end - 1) <= 57) end--
+  return end > 0 && end < name.length ? name.slice(0, end) : undefined
+}
+
+/** The part of a `Bun.build` result the reporter reads, structural so this module needs no bun-types. */
+export interface BundleResultLike {
+  readonly outputs: ReadonlyArray<{ readonly kind: string; text(): Promise<string> }>
+  readonly metafile?: { readonly inputs: Readonly<Record<string, unknown>> }
+}
+
+/**
+ * Warns about each `renamedNameKeyedClasses` result of a `Bun.build` run with
+ * `metafile: true`, whose input paths (relative to the cwd) are the sources read.
+ * Module dependencies are skipped, and so is an input that will not read, such as a
+ * plugin namespace.
+ */
+export async function reportRenamedNameKeyedClasses(
+  result: BundleResultLike,
+  options: { root: string; label: string },
+): Promise<void> {
+  const code = result.outputs.filter((output) => output.kind === 'entry-point' || output.kind === 'chunk')
+  const bundle = (await Promise.all(code.map((output) => output.text()))).join('\n')
+  const root = realpathOfNearestExisting(options.root)
+  const sources: Array<{ file: string; text: string }> = []
+  for (const input of Object.keys(result.metafile?.inputs ?? {})) {
+    if (/(?:^|[\\/])node_modules[\\/]/.test(input)) continue
+    try {
+      const path = realpathSync(resolve(input))
+      sources.push({ file: relative(root, path), text: readFileSync(path, 'utf8') })
+    } catch {
+      continue
+    }
+  }
+
+  for (const { name, bundledAs, files } of renamedNameKeyedClasses(bundle, sources)) {
+    console.warn(
+      `${options.label}: the bundle names a class ${name} as ${bundledAs}, because another module declares ` +
+        `${name} too and import order picks which one keeps it. ${files.join(', ')} ${files.length === 1 ? 'declares' : 'declare'} ` +
+        `a job, event, notification or agent named ${name}, and those are stored under their class name. Rename it, ` +
+        'or pin `static jobName`, `static eventName`, `get type()` or `static agentName`.',
+    )
+  }
+}

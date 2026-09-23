@@ -1,10 +1,12 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
+  BUN_DEPLOY_MINIFY,
   bundledRuntimeEnv,
   DEV_ONLY_MODULES,
   importSpecifier,
   renderDevOnlyStub,
+  reportRenamedNameKeyedClasses,
   assertOutputDirOutsideRoot,
   resetOutputDir,
   resolveClientAssetEnv,
@@ -160,7 +162,7 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   const wrapperPath = resolve(out, `${LAMBDA_HANDLER_MODULE}.ts`)
   writeFileSync(wrapperPath, renderHandlerModule({ out, entrypoint, env: bakedEnv }))
 
-  await bundleHandler(wrapperPath, funcDir, stubsFor(root, options.databaseDialects))
+  await bundleHandler(wrapperPath, funcDir, stubsFor(root, options.databaseDialects), root)
 
   // Lambda's Node.js runtime treats `.js` as CommonJS unless the package is
   // marked as a module; the bundle and the SSR chunks are both ESM.
@@ -254,6 +256,7 @@ async function bundleHandler(
   handlerEntry: string,
   funcDir: string,
   stubs: Record<string, string>,
+  root: string,
 ): Promise<void> {
   const filter = stubFilter(stubs)
 
@@ -264,12 +267,8 @@ async function bundleHandler(
     throw: false,
     outdir: funcDir,
     target: 'node',
-    // `identifiers: false`: class names are runtime identity here — the job
-    // registry keys on `JobClass.name` and serializes it into every queued
-    // message, and notifications persist theirs as `type`. Not
-    // `keepNames`/`--keep-names`: on Bun 1.3.14 and 1.4.2 both are accepted
-    // and silently leave class names mangled.
-    minify: { whitespace: true, syntax: true, identifiers: false },
+    minify: BUN_DEPLOY_MINIFY,
+    metafile: true,
     define: {
       // `bun build` inlines `process.env.NODE_ENV` at bundle time (defaulting
       // to "development"), so pin it to "production" for the deployed function.
@@ -304,6 +303,8 @@ async function bundleHandler(
     const details = result.logs.map((log) => String(log)).join('\n')
     throw new Error(`Lambda build: bun build failed.\n${details}`)
   }
+
+  await reportRenamedNameKeyedClasses(result, { root, label: 'Lambda build' })
 }
 
 function zipFunction(out: string, funcDir: string): void {

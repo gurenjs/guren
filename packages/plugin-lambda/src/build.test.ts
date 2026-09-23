@@ -28,6 +28,18 @@ function probeHttpExport(root: string): string {
   return result.stdout.toString().trim()
 }
 
+async function captureWarnings(run: () => Promise<void>): Promise<string[]> {
+  const warnings: string[] = []
+  const original = console.warn
+  console.warn = (message: string) => warnings.push(message)
+  try {
+    await run()
+  } finally {
+    console.warn = original
+  }
+  return warnings
+}
+
 /** The client manifest `scaffoldApp` writes — assertions derive from this. */
 const CLIENT_MANIFEST = {
   'resources/js/app.tsx': { file: 'app-Abc123.js', css: ['app-Def456.css'] },
@@ -209,17 +221,57 @@ describe('buildLambdaOutput', () => {
     expect(report.bakedEntry).toBe('/public/assets/app-Abc123.js')
   })
 
-  test('should preserve class names through minification', async () => {
-    // Regression test for the `minify` option in bundleHandler: the framework
-    // keys the job registry on `JobClass.name`, so mangled identifiers make
-    // `getJob()` miss and no job code ever runs.
+  test('should preserve class and function names through minification', async () => {
+    // The job registry keys on `JobClass.name`: mangling renames declarations, and
+    // syntax minification alone drops an expression's name or swaps in the binding's.
     scaffoldApp(root, {
-      entry: { preamble: ['class ProcessNewPostJob { handle() {} }'], http: 'ProcessNewPostJob.name' },
+      entry: {
+        preamble: [
+          'class Job {}',
+          'const registry: Array<{ name: string }> = []',
+          'const register = (job: { name: string }) => { registry.push(job) }',
+          'register(class SendWelcomeMailJob extends Job {})',
+          'register(function inlineNamedFn() {})',
+          'const makeJob = () => class ReturnedJob extends Job {}',
+          'const SendMail = class SendMailJob extends Job {}',
+        ],
+        http: '[Job.name, ...registry.map((job) => job.name), makeJob().name, SendMail.name].join(",")',
+      },
     })
 
     await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
 
-    expect(probeHttpExport(root)).toBe('ProcessNewPostJob')
+    expect(probeHttpExport(root)).toBe('Job,SendWelcomeMailJob,inlineNamedFn,ReturnedJob,SendMailJob')
+  })
+
+  test('should warn when the bundle renames a name-keyed class another module shares a name with', async () => {
+    scaffoldApp(root, {
+      entry: {
+        preamble: [
+          "import { OrderShipped as ShippedEvent } from '../app/Events/OrderShipped'",
+          "import { OrderShipped as ShippedNotification } from '../app/Notifications/OrderShipped'",
+        ],
+        http: '[ShippedEvent.name, ShippedNotification.name].join(",")',
+      },
+    })
+    mkdirSync(join(root, 'app/Events'), { recursive: true })
+    mkdirSync(join(root, 'app/Notifications'), { recursive: true })
+    writeFileSync(join(root, 'app/base.ts'), 'export class Event {}\nexport class Notification {}\n')
+    writeFileSync(
+      join(root, 'app/Events/OrderShipped.ts'),
+      "import { Event } from '../base'\nexport class OrderShipped extends Event {}\n",
+    )
+    writeFileSync(
+      join(root, 'app/Notifications/OrderShipped.ts'),
+      "import { Notification } from '../base'\nexport class OrderShipped extends Notification {}\n",
+    )
+
+    const warnings = await captureWarnings(() => buildLambdaOutput({ rootDir: root, skipAppBuild: true }))
+
+    const renamed = warnings.find((line) => line.startsWith('Lambda build: the bundle names a class OrderShipped as OrderShipped2'))
+    expect(renamed).toBeDefined()
+    const declaring = [join('app', 'Events', 'OrderShipped.ts'), join('app', 'Notifications', 'OrderShipped.ts')]
+    expect(renamed).toContain(` ${declaring.join(', ')} declare a job`)
   })
 
   test('should copy the SSR bundle and migrations, but never seeders, into the function directory', async () => {
@@ -433,14 +485,7 @@ describe('buildLambdaOutput deploy-runtime warnings (RFC 0020 Part 0)', () => {
       "import { createApp } from '@guren/core'\nexport default createApp({ auth: { autoSession: true } })\n",
     )
 
-    const warnings: string[] = []
-    const original = console.warn
-    console.warn = (message: string) => warnings.push(message)
-    try {
-      await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
-    } finally {
-      console.warn = original
-    }
+    const warnings = await captureWarnings(() => buildLambdaOutput({ rootDir: root, skipAppBuild: true }))
 
     const hazard = warnings.find((line) => line.startsWith('Lambda build: AWS Lambda shares no memory'))
     expect(hazard).toBeDefined()
