@@ -225,6 +225,39 @@ describe('checkConfigWiring with defineModule({ config }) (RFC 0002)', () => {
     expect(results.map((result) => [result.key, result.status])).toContainEqual(['config-duplicate-key:cache', 'fail'])
   })
 
+  test('fails a duplicate key when neither side resolves on this machine, since the boot refuses before resolving', async () => {
+    const throwing = `import { defineConfig } from '@guren/core'\n\nexport default defineConfig({ key: 'cache', resolve: () => { throw new Error('no redis') }, bind: () => {} })\n`
+    const results = await run({
+      'config/cache.ts': throwing,
+      'modules/billing/config/cache.ts': throwing,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing', config: [cache] }`, `import cache from './config/cache'\n`),
+      'src/app.ts': entry('{ config: [cache], modules: [billing] }', MOUNTS_BILLING),
+    })
+
+    expect(results.map((result) => [result.key, result.status])).toContainEqual(['config-duplicate-key:cache', 'fail'])
+  })
+
+  test('still judges the app beside an unmounted module whose descriptor is not a defineModule() call', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/legacy/index.ts': `export const legacy = { name: 'legacy' }\n`,
+      'src/app.ts': entry('{ providers: [] }', ''),
+    })
+
+    expect(results.map((result) => [result.key, result.status])).toEqual([['config-unwired:config/cache.ts', 'warn']])
+  })
+
+  test('judges nothing when createApp({ modules }) holds an element it cannot trace and a module lists config', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/config/oauth.ts': OAUTH_CONFIG,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing', config: [oauth] }`),
+      'src/app.ts': entry('{ config: [cache], modules: [inline] }', `import cache from '../config/cache'\nconst inline = { name: 'inline', providers: [], commands: [] }\n`),
+    })
+
+    expect(results).toEqual([])
+  })
+
   test('judges nothing when a module descriptor is not a defineModule() call, since it may list any file', async () => {
     const results = await run({
       ...WITH_CACHE,

@@ -547,7 +547,7 @@ export class Application {
   private disposeBunTeardown?: () => void
   private autoSessionAttached = false
   private readonly cookielessAuthPaths = new Set<string>()
-  /** @internal {@link configDefinitions} with where each was listed, for ConfigServiceProvider's errors. */
+  /** {@link configDefinitions} with where each was listed, which ConfigServiceProvider's errors name. */
   readonly configEntries: ReadonlyArray<ConfiguredDefinition>
   private routesRegistered = false
   private bootPromise?: Promise<void>
@@ -674,7 +674,6 @@ export class Application {
   get configDefinitions(): ReadonlyArray<ConfigDefinition> {
     return this.configEntries.map((entry) => entry.definition)
   }
-
 
   markAutoSessionAttached(): void {
     this.autoSessionAttached = true

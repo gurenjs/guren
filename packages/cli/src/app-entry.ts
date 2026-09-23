@@ -54,9 +54,9 @@ export function importedArrayFiles(
   })
 }
 
-/** Whether a spread (or other unnamed member) may carry a key the literal does not spell. */
-export function hasSpread(options: ObjectExpression): boolean {
-  return options.properties.some((property) => property.type === 'SpreadElement')
+/** Whether a spread or a computed key may carry a key the literal does not spell. */
+export function hidesKeys(options: ObjectExpression): boolean {
+  return options.properties.some((property) => property.type === 'SpreadElement' || property.computed)
 }
 
 /**
@@ -76,7 +76,7 @@ export function moduleMountState(
 ): ModuleMountState {
   const declared = propertyValue(options, 'modules')
   const files = declared === undefined ? undefined : importedArrayFiles(declared, program, cwd, entryFile)
-  if (files === undefined) return declared === undefined && !hasSpread(options) ? 'no-modules' : 'not-array'
+  if (files === undefined) return declared === undefined && !hidesKeys(options) ? 'no-modules' : 'not-array'
   if (files.some((file) => file === moduleDir || file === resolve(moduleDir, 'index'))) return 'mounted'
   return files.includes(null) ? 'untraceable' : 'unlisted'
 }

@@ -187,7 +187,7 @@ describe('defineModule({ config }) (RFC 0002, RFC 0027 §2)', () => {
       modules: [defineModule({ name: 'billing', config: [sentinelCache('module')], providers: [CacheProvider] })],
     })
 
-    await expect(app.boot()).rejects.toThrow('"cache" is configured twice: modules/billing/config/cache.ts and CacheProvider.register(). Keep one.')
+    await expect(app.boot()).rejects.toThrow('"cache" is configured twice: config/cache.ts of the "billing" module and CacheProvider.register(). Keep one.')
   })
 
   test('fails the boot when a module provider rebinds a key createApp({ config }) configured', async () => {

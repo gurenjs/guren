@@ -2,7 +2,7 @@ import { stat } from 'node:fs/promises'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { Statement } from '@babel/types'
 import { memberKeyName, walk } from './ast-walk'
-import { hasSpread as hasSpreadProperty, readModuleDescriptor } from './app-entry'
+import { hidesKeys, readModuleDescriptor } from './app-entry'
 import {
   discoverModuleRoutesFiles,
   discoverRoutesFiles,
@@ -350,7 +350,7 @@ async function resolveModuleEntry(
     }
   }
 
-  const hasSpread = hasSpreadProperty(read.options)
+  const hasSpread = hidesKeys(read.options)
   let routesValue: { type?: string; name?: string } | null = null
   for (const property of read.options.properties) {
     // Computed keys answer `undefined` here, which is the skip this wants.

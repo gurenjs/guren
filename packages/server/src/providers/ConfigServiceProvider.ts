@@ -55,7 +55,7 @@ export class ConfigServiceProvider extends ServiceProvider {
       for (const key of this.container.getBindings()) {
         const binding = this.container.bindingOf(key)
         if (binding !== before.get(key)) {
-          this.owned.set(key, { binding, source: `${entry.module === undefined ? '' : `modules/${entry.module}/`}config/${definition.key}.ts` })
+          this.owned.set(key, { binding, source: `config/${definition.key}.ts${entry.module === undefined ? '' : ` of the "${entry.module}" module`}` })
         }
       }
       this.resolved.push({ definition, config })

@@ -432,8 +432,9 @@ provider registers, and boot before any provider boots. The key space stays
 the container's, which is one per app, so "one definition per key" counts
 every module too, and the error names where each was listed
 (`createApp({ config })[0]`, `the "auth" module's config[0]`). A binding a
-module definition made is reported as `modules/<name>/config/<key>.ts` in
-the configured-twice error. The constructor registers
+module definition made is reported as `config/<key>.ts of the "<name>"
+module` in the configured-twice error, by the module's declared name, since
+nothing ties that name to its directory. The constructor registers
 `ConfigServiceProvider` when the flattened list is non-empty, so a module's
 definitions bind in an app with no `env` and no root `config`. §6's
 `config-unwired` reads the module arrays too, counting one only for a module

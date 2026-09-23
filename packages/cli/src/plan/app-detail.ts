@@ -12,7 +12,7 @@ import type { RouteDefinition } from '@guren/server'
 import type { File, Node, Statement } from '@babel/types'
 
 import { unwrapTypeAssertion, propertyValue, topLevelDeclaration } from '../ast-walk'
-import { createAppOptions, moduleMountState } from '../app-entry'
+import { createAppOptions, hidesKeys, moduleMountState } from '../app-entry'
 import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { ContextRoute } from '../context-route'
 import { accessorCallPattern, blankCommentsAndStrings, type ControllerMemberName, type ControllerMethodScan } from '../controller-methods'
@@ -645,7 +645,7 @@ async function mountDetail(root: string, cache: ParseCache, input: PlanAppDetail
   if (!parsed || !options) return all({ unconfirmed: `${entryPath} does not call createApp() with an object literal` })
 
   const imports = importsByLocal(parsed.ast.program.body)
-  const hasSpread = options.properties.some((property) => property.type !== 'ObjectProperty')
+  const hasSpread = hidesKeys(options)
   const mountState = (name: string) => moduleMountState(options, parsed.ast.program, root, resolve(root, entryPath), resolve(root, 'modules', name))
   const importedFile = (node: Node | null | undefined): { base: string; imported: string } | null => {
     const value = node ? unwrapTypeAssertion(node) : undefined
@@ -687,5 +687,4 @@ async function mountDetail(root: string, cache: ParseCache, input: PlanAppDetail
       case 'unlisted': return { unconfirmed: `createApp({ modules }) in ${entryPath} does not list modules/${name}` }
     }
   }
-
 }

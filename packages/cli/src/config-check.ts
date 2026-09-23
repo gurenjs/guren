@@ -9,7 +9,7 @@
 import { resolve } from 'node:path'
 import type { Node } from '@babel/types'
 import { propertyValue } from './ast-walk'
-import { createAppOptions, hasSpread, importedArrayFiles, moduleMountState, readModuleDescriptor } from './app-entry'
+import { createAppOptions, hidesKeys, importedArrayFiles, moduleMountState, readModuleDescriptor } from './app-entry'
 import { check, type CheckResult } from './check-result'
 import { listAppRoots, moduleNameFromRelPath, toPosixRelative } from './discovery'
 import type { ParseCache } from './parse-cache'
@@ -70,20 +70,25 @@ async function readListings(cwd: string, cache: ParseCache, entryPath: string): 
     if (module === null) continue
     const descriptor = await readModuleDescriptor(cwd, cache, dir)
     if (descriptor === 'absent') continue
-    // Not a readable `defineModule({…})`, or a spread beside no `config`: either may list any file.
-    if (descriptor === 'unreadable') return null
-    descriptors.set(module, descriptor.file)
-    const declared = propertyValue(descriptor.options, 'config')
-    if (declared === undefined) {
-      if (hasSpread(descriptor.options)) return null
+    const mount = moduleMountState(options, parsed.ast.program, cwd, entryFile, dir)
+    // Only a module the boot may read can list a file; an unmounted one is judged by what it spells.
+    const mayBeRead = mount === 'mounted' || mount === 'not-array' || mount === 'untraceable'
+    // Not a readable `defineModule({…})`, or keys hidden beside no `config`: either may list any file.
+    const declared = descriptor === 'unreadable' ? undefined : propertyValue(descriptor.options, 'config')
+    const files = descriptor === 'unreadable'
+      ? null
+      : declared === undefined
+        ? (hidesKeys(descriptor.options) ? null : [])
+        : configArrayFiles(declared, descriptor.ast.program, cwd, resolve(cwd, descriptor.file))
+    if (files === null) {
+      if (mayBeRead) return null
       continue
     }
-    const files = configArrayFiles(declared, descriptor.ast.program, cwd, resolve(cwd, descriptor.file))
-    if (files === null) return null
+    if (descriptor === 'unreadable') continue
+    descriptors.set(module, descriptor.file)
     if (files.length === 0) continue
-
-    const mount = moduleMountState(options, parsed.ast.program, cwd, entryFile, dir)
     if (mount === 'not-array' || mount === 'untraceable') return null
+
     const moduleDir = toPosixRelative(cwd, dir)
     list(files, { label: `defineModule({ config }) in ${descriptor.file}`, file: descriptor.file, ...(mount === 'mounted' ? {} : { unmounted: moduleDir }) })
   }
@@ -173,7 +178,7 @@ export async function checkConfigWiring(options: { cwd: string; cache: ParseCach
   const listings = entryPath === null ? null : await readListings(cwd, cache, entryPath)
   if (listings === null || entryPath === null) return []
 
-  // An unmounted module's array is never read, so it does not earn a file an import.
+  // A file only an unmounted module lists is not forced in; one that reads as a definition is imported anyway.
   const readFiles = [...listings.byFile].filter(([, listers]) => listers.some((lister) => !lister.unmounted)).map(([file]) => `${file}.ts`)
   const resolved = await loadResolvedConfig(cwd, new Set(readFiles))
   const judged: Judged[] = []
@@ -186,12 +191,14 @@ export async function checkConfigWiring(options: { cwd: string; cache: ParseCach
     if (result) results.push(result)
   }
 
+  // Before the early return: the boot refuses a duplicate before any resolve() runs.
+  const duplicates = judgeDistinctKeys(judged)
   const wired = judged.filter(({ entry, read }) => !entry.problem && read.length > 0)
-  if (wired.length === 0) return results
+  if (wired.length === 0) return [...results, ...duplicates]
 
   const moduleListers = new Set(wired.flatMap(({ read }) => read).filter((lister) => lister !== listings.root))
   const summary = moduleListers.size === 0
     ? `${entryPath} lists ${wired.length} config definition(s) in createApp({ config }).`
     : `${wired.length} config definition(s) are listed across ${entryPath} and ${[...moduleListers].map((lister) => lister.file).sort().join(', ')}.`
-  return [check('config-wired', 'Config wiring', 'pass', summary), ...results, ...judgeDistinctKeys(judged)]
+  return [check('config-wired', 'Config wiring', 'pass', summary), ...results, ...duplicates]
 }

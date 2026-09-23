@@ -157,6 +157,22 @@ describe('loadPlanAppState({ detail: true })', () => {
     expect(detail.mounts.modules.billing).toEqual({ unconfirmed: expect.stringContaining('lists no modules') })
   })
 
+  test('should leave a module unconfirmed when createApp({ modules }) is not an array literal', async () => {
+    const detail = await detailOf('modules-not-array', {
+      'src/app.ts': entry('{ routes: registerWebRoutes, modules: allModules }', "import { registerWebRoutes } from '../routes/web.js'\nimport { allModules } from '../modules/all.js'\n"),
+    })
+
+    expect(detail.mounts.modules.billing).toEqual({ unconfirmed: expect.stringContaining('is not an array literal') })
+  })
+
+  test('should leave a module unconfirmed when createApp({ modules }) holds an entry it cannot trace', async () => {
+    const detail = await detailOf('modules-untraceable', {
+      'src/app.ts': entry('{ routes: registerWebRoutes, modules: [inline] }', "import { registerWebRoutes } from '../routes/web.js'\nconst inline = { name: 'inline', providers: [], commands: [] }\n"),
+    })
+
+    expect(detail.mounts.modules.billing).toEqual({ unconfirmed: expect.stringContaining('cannot trace to a file') })
+  })
+
   test('should not call the entry mounted when createApp() takes a registrar from another file', async () => {
     const detail = await detailOf('other-file', {
       'src/app.ts': entry('{ routes: registerAdminRoutes }', "import { registerAdminRoutes } from '../routes/admin.js'\n"),
