@@ -31,7 +31,7 @@ for (const config of runtimeConfigs) {
   }
   if (typeof parsed.extends !== 'string' || resolve(config, '..', parsed.extends) !== rootTsconfig) {
     failures += 1
-    console.error(`[check-build-configs] ${label}: must extend the root tsconfig.json, and only it; a runtime config that loses the root paths makes Bun load a second copy of every sibling from dist.`)
+    console.error(`[check-build-configs] ${label}: must extend the root tsconfig.json as "../../tsconfig.json", and only it; Bun ignores an extension-less or array extends that TypeScript accepts, and a runtime config that loses the root paths makes Bun load a second copy of every sibling from dist.`)
   }
   if (parsed.compilerOptions && 'paths' in parsed.compilerOptions) {
     failures += 1
