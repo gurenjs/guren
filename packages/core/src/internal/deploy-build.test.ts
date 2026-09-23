@@ -21,6 +21,8 @@ import {
   renderDevOnlyStub,
   importSpecifier,
   readManifest,
+  renamedNameKeyedClasses,
+  reportRenamedNameKeyedClasses,
   resolveClientAssetEnv,
   resolvePathLike,
   ssrRuntimePaths,
@@ -839,5 +841,93 @@ describe('DATABASE_FACTORIES', () => {
 
     expect(exported.length).toBeGreaterThan(0)
     expect(new Set(Object.keys(DATABASE_FACTORIES))).toEqual(new Set(exported))
+  })
+})
+
+describe('renamedNameKeyedClasses', () => {
+  const event = { file: 'app/Events/OrderShipped.ts', text: 'export class OrderShipped extends Event {}\n' }
+  const notification = {
+    file: 'app/Notifications/OrderShipped.ts',
+    text: 'export class OrderShipped extends Notification<Payload> {}\n',
+  }
+
+  test('should report a name-keyed class the bundle declares under a numbered name', () => {
+    const bundle = 'class OrderShipped extends Event{}class OrderShipped2 extends Notification{}'
+
+    expect(renamedNameKeyedClasses(bundle, [event, notification])).toEqual([
+      { name: 'OrderShipped', bundledAs: 'OrderShipped2', files: [event.file, notification.file] },
+    ])
+  })
+
+  test('should follow extends through the app own base classes', () => {
+    const sources = [
+      { file: 'app/Jobs/BaseJob.ts', text: 'export abstract class BaseJob<T> extends Job<T> {}\n' },
+      { file: 'app/Jobs/SendMail.ts', text: 'export default class SendMail extends BaseJob<{ to: string }> {}\n' },
+    ]
+
+    expect(renamedNameKeyedClasses('class SendMail2 extends BaseJob{}', sources)).toEqual([
+      { name: 'SendMail', bundledAs: 'SendMail2', files: ['app/Jobs/SendMail.ts'] },
+    ])
+  })
+
+  test('should skip a class that pins its name, or that nothing stores by name', () => {
+    const sources = [
+      { file: 'app/Jobs/SendMail.ts', text: "export class SendMail extends Job {\n  static jobName = 'send-mail'\n}\n" },
+      { file: 'app/Agents/Triage.ts', text: "export class Triage extends Agent {\n  static override agentName = 'triage'\n}\n" },
+      { file: 'app/Notifications/Shipped.ts', text: "export class Shipped extends Notification {\n  get type() { return 'shipped' }\n}\n" },
+      { file: 'app/Providers/EventServiceProvider.ts', text: 'export default class EventServiceProvider extends ServiceProvider {}\n' },
+    ]
+    const bundle = 'class SendMail2{}class Triage2{}class Shipped2{}class EventServiceProvider2{}'
+
+    expect(renamedNameKeyedClasses(bundle, sources)).toEqual([])
+  })
+
+  test('should not read a numbered name the app declares itself as a rename', () => {
+    const sources = [
+      event,
+      { file: 'app/Events/OrderShipped2.ts', text: 'export class OrderShipped2 extends Event {}\n' },
+    ]
+
+    expect(renamedNameKeyedClasses('class OrderShipped{}class OrderShipped2{}', sources)).toEqual([])
+  })
+})
+
+describe('reportRenamedNameKeyedClasses', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'guren-renamed-classes-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  test('should warn with the app-relative files and leave module dependencies and plugin namespaces unread', () => {
+    mkdirSync(join(root, 'app/Events'), { recursive: true })
+    mkdirSync(join(root, 'node_modules/shipping'), { recursive: true })
+    writeFileSync(join(root, 'app/Events/OrderShipped.ts'), 'export class OrderShipped extends Event {}\n')
+    writeFileSync(join(root, 'node_modules/shipping/index.ts'), 'export class OrderShipped extends Event {}\n')
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+
+    try {
+      const messages = reportRenamedNameKeyedClasses({
+        bundle: 'class OrderShipped{}class OrderShipped2{}',
+        inputs: [
+          join(root, 'app/Events/OrderShipped.ts'),
+          join(root, 'node_modules/shipping/index.ts'),
+          'guren-lambda-stub:vite',
+        ],
+        root,
+        label: 'Test build',
+      })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toStartWith('Test build: the bundle names a class OrderShipped as OrderShipped2')
+      expect(messages[0]).toContain(`${join('app', 'Events', 'OrderShipped.ts')} declares a job`)
+      expect(warn).toHaveBeenCalledWith(messages[0])
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

@@ -210,7 +210,7 @@ describe('buildLambdaOutput', () => {
   })
 
   test('should preserve class names through minification', async () => {
-    // Regression test for the `minify` option in bundleHandler: the framework
+    // Regression test for the `BUN_DEPLOY_MINIFY` bundleHandler passes: the framework
     // keys the job registry on `JobClass.name`, so mangled identifiers make
     // `getJob()` miss and no job code ever runs.
     scaffoldApp(root, {
@@ -220,6 +220,69 @@ describe('buildLambdaOutput', () => {
     await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
 
     expect(probeHttpExport(root)).toBe('ProcessNewPostJob')
+  })
+
+  test('should preserve the names of class and function expressions through minification', async () => {
+    // Syntax minification alone drops the name of a class or function expression
+    // whose body never refers to it, or swaps in the binding's; `keepNames` is
+    // what restores the source name.
+    scaffoldApp(root, {
+      entry: {
+        preamble: [
+          'class Job {}',
+          'const registry: Array<{ name: string }> = []',
+          'const register = (job: { name: string }) => { registry.push(job) }',
+          'register(class SendWelcomeMailJob extends Job {})',
+          'register(function inlineNamedFn() {})',
+          'const makeJob = () => class ReturnedJob extends Job {}',
+          'const SendMail = class SendMailJob extends Job {}',
+        ],
+        http: '[...registry.map((job) => job.name), makeJob().name, SendMail.name].join(",")',
+      },
+    })
+
+    await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
+
+    expect(probeHttpExport(root)).toBe('SendWelcomeMailJob,inlineNamedFn,ReturnedJob,SendMailJob')
+  })
+
+  test('should warn when the bundle renames a name-keyed class another module shares a name with', async () => {
+    scaffoldApp(root, {
+      entry: {
+        preamble: [
+          "import { OrderShipped as ShippedEvent } from '../app/Events/OrderShipped'",
+          "import { OrderShipped as ShippedNotification } from '../app/Notifications/OrderShipped'",
+        ],
+        http: '[ShippedEvent.name, ShippedNotification.name].join(",")',
+      },
+    })
+    mkdirSync(join(root, 'app/Events'), { recursive: true })
+    mkdirSync(join(root, 'app/Notifications'), { recursive: true })
+    writeFileSync(join(root, 'app/base.ts'), 'export class Event {}\nexport class Notification {}\n')
+    writeFileSync(
+      join(root, 'app/Events/OrderShipped.ts'),
+      "import { Event } from '../base'\nexport class OrderShipped extends Event {}\n",
+    )
+    writeFileSync(
+      join(root, 'app/Notifications/OrderShipped.ts'),
+      "import { Notification } from '../base'\nexport class OrderShipped extends Notification {}\n",
+    )
+
+    const warnings: string[] = []
+    const original = console.warn
+    console.warn = (message: string) => warnings.push(message)
+    try {
+      await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
+    } finally {
+      console.warn = original
+    }
+
+    // Bun 1.3.14 and 1.4.2 bundle one of the two as `OrderShipped2`, keepNames or not.
+    expect(probeHttpExport(root).split(',').sort()).toEqual(['OrderShipped', 'OrderShipped2'])
+    const renamed = warnings.find((line) => line.startsWith('Lambda build: the bundle names a class OrderShipped as OrderShipped2'))
+    expect(renamed).toBeDefined()
+    const declaring = [join('app', 'Events', 'OrderShipped.ts'), join('app', 'Notifications', 'OrderShipped.ts')]
+    expect(renamed).toContain(` ${declaring.join(', ')} declare a job`)
   })
 
   test('should copy the SSR bundle and migrations, but never seeders, into the function directory', async () => {

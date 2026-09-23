@@ -311,8 +311,8 @@ describe('@guren/plugin-vercel', () => {
     })
 
     it('preserves class names through the bundler', async () => {
-      // Regression guard for the bundler flags in src/index.ts — see the comment
-      // on that argv for why mangled class names outlive a deploy.
+      // Regression guard for `BUN_DEPLOY_MINIFY` in @guren/core/internal/deploy-build,
+      // whose comment says why mangled class names outlive a deploy.
       const app = scaffoldApp(root, {
         source:
           'class GurenJobProbe {}\nexport default { fetch() { return new Response(GurenJobProbe.name) } }\n',
@@ -327,6 +327,77 @@ describe('@guren/plugin-vercel', () => {
       const response = await bundled.default.fetch(new Request('http://example.com/'))
 
       expect(await response.text()).toBe('GurenJobProbe')
+    })
+
+    it('preserves the names of class and function expressions through the bundler', async () => {
+      // Syntax minification alone drops the name of a class or function expression
+      // whose body never refers to it, or swaps in the binding's; `keepNames` is
+      // what restores the source name.
+      const app = scaffoldApp(root, {
+        source: [
+          'class Job {}',
+          'const registry: Array<{ name: string }> = []',
+          'const register = (job: { name: string }) => { registry.push(job) }',
+          'register(class SendWelcomeMailJob extends Job {})',
+          'register(function inlineNamedFn() {})',
+          'const makeJob = () => class ReturnedJob extends Job {}',
+          'const SendMail = class SendMailJob extends Job {}',
+          'const names = () => [...registry.map((job) => job.name), makeJob().name, SendMail.name].join(",")',
+          'export default { fetch() { return new Response(names()) } }',
+          '',
+        ].join('\n'),
+      })
+
+      await buildVercelOutput(app)
+
+      const bundled = await import(join(app.outputDir, 'functions/index.func/index.js'))
+      const response = await bundled.default.fetch(new Request('http://example.com/'))
+
+      expect(await response.text()).toBe('SendWelcomeMailJob,inlineNamedFn,ReturnedJob,SendMailJob')
+    })
+
+    it('warns when the bundle renames a name-keyed class another module shares a name with', async () => {
+      const app = scaffoldApp(root, {
+        source: [
+          "import { OrderShipped as ShippedEvent } from '../app/Events/OrderShipped'",
+          "import { OrderShipped as ShippedNotification } from '../app/Notifications/OrderShipped'",
+          'const names = () => [ShippedEvent.name, ShippedNotification.name].join(",")',
+          'export default { fetch() { return new Response(names()) } }',
+          '',
+        ].join('\n'),
+      })
+      mkdirSync(join(root, 'app/Events'), { recursive: true })
+      mkdirSync(join(root, 'app/Notifications'), { recursive: true })
+      writeFileSync(join(root, 'app/base.ts'), 'export class Event {}\nexport class Notification {}\n')
+      writeFileSync(
+        join(root, 'app/Events/OrderShipped.ts'),
+        "import { Event } from '../base'\nexport class OrderShipped extends Event {}\n",
+      )
+      writeFileSync(
+        join(root, 'app/Notifications/OrderShipped.ts'),
+        "import { Notification } from '../base'\nexport class OrderShipped extends Notification {}\n",
+      )
+
+      const warnings: string[] = []
+      const original = console.warn
+      console.warn = (message: string) => warnings.push(message)
+      try {
+        await buildVercelOutput(app)
+      } finally {
+        console.warn = original
+      }
+
+      const bundled = await import(join(app.outputDir, 'functions/index.func/index.js'))
+      const response = await bundled.default.fetch(new Request('http://example.com/'))
+      // Bun 1.3.14 and 1.4.2 bundle one of the two as `OrderShipped2`, keepNames or not.
+      expect((await response.text()).split(',').sort()).toEqual(['OrderShipped', 'OrderShipped2'])
+
+      const renamed = warnings.find((line) =>
+        line.startsWith('Vercel build: the bundle names a class OrderShipped as OrderShipped2'),
+      )
+      expect(renamed).toBeDefined()
+      const declaring = [join('app', 'Events', 'OrderShipped.ts'), join('app', 'Notifications', 'OrderShipped.ts')]
+      expect(renamed).toContain(` ${declaring.join(', ')} declare a job`)
     })
 
     it('finds docs in a parent directory when the app root is nested', async () => {
