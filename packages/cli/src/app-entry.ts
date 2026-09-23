@@ -55,6 +55,31 @@ export function importedArrayFiles(
 }
 
 /**
+ * Whether `createApp({ providers, config })` in `entryFile` imports one of `files` (absolute),
+ * traced as `importedArrayFiles` traces them. `null` is no evidence: options or an array that
+ * is not a literal, or an element this cannot trace, which may be one of them.
+ */
+export function createAppListsFile(program: File['program'], cwd: string, entryFile: string, files: readonly string[]): boolean | null {
+  const options = createAppOptions(program)
+  if (!options) return null
+  const wanted = new Set(files.map(withoutExtension))
+  let untraced = false
+  for (const key of ['providers', 'config']) {
+    const declared = propertyValue(options, key)
+    const listed = declared === undefined
+      ? (hidesKeys(options) ? undefined : [])
+      : importedArrayFiles(declared, program, cwd, entryFile)
+    if (listed === undefined) {
+      untraced = true
+      continue
+    }
+    if (listed.some((file) => file !== null && wanted.has(file))) return true
+    if (listed.includes(null)) untraced = true
+  }
+  return untraced ? null : false
+}
+
+/**
  * Whether a spread or a computed key may carry a key the literal does not spell.
  * A method is named (`routes(router) {}` is a registrar), so unlike `staticProperty` it hides nothing.
  */

@@ -193,8 +193,6 @@ export default registerAdminRoutes
     description: 'Install mail infrastructure with a transport switchable via MAIL_MAILER and a sample mailable.',
     run: async (options) => {
       const writerOptions = blueprintWriterOptions(options)
-      // A second setup beside the app's own (make:auth writes one) collides on its
-      // files or shadows its binding.
       const existingMail = await appMailBindings()
       const mailPath = await makeMail('WelcomeEmail', writerOptions)
       if (existingMail.length > 0) {
