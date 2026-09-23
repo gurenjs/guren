@@ -219,6 +219,14 @@ Apps that configure the cache in a service provider keep working; see [Apps with
 | `extension` | `'.cache'` | File extension for cache files |
 | `now` | `Date.now` | Clock for TTL calculations (epoch ms); injectable for tests |
 
+Reading an expired entry with `get()`, `has()` or `ttl()` reports it as missing but leaves its file on disk, since a writer may have replaced the file after the read. `cleanup()` deletes expired files under the same lock that `add()` and `increment()` take, so it never removes an entry written after it looked. Call it periodically, for example from a scheduled task, to reclaim disk space:
+
+```ts
+import { FileCacheStore } from '@guren/core'
+
+const removed = await new FileCacheStore({ path: 'storage/cache' }).cleanup()
+```
+
 ## Tagged Cache
 
 Counters preserve their original expiration when incremented or decremented. On the file store, `add()`, `increment()` and `decrement()` take a filesystem lock that store instances and processes share. A lock one writer has held for five seconds is treated as abandoned by a crashed process and taken over, so a key never stays locked. A writer still running at that point (a suspended process, a stalled disk) then runs alongside the one that took its lock over, and one of their updates can be lost. Keep counters that several processes update, and that must not lose an update, on the Redis store.

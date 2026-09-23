@@ -1,4 +1,4 @@
-import { readFile, writeFile, unlink, readdir, mkdir, rm, rename } from 'node:fs/promises'
+import { readFile, writeFile, unlink, readdir, mkdir, rm, rename, link } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
@@ -83,8 +83,8 @@ export class FileStore implements CacheStore {
       return null
     }
 
+    // Reads never delete an expired file: a writer may have replaced it since the read.
     if (this.isExpired(item)) {
-      await this.deleteCacheFile(filePath)
       return null
     }
 
@@ -207,7 +207,6 @@ export class FileStore implements CacheStore {
     }
 
     if (this.isExpired(item)) {
-      await this.deleteCacheFile(filePath)
       return -2
     }
 
@@ -245,11 +244,28 @@ export class FileStore implements CacheStore {
 
         const filePath = join(subdirPath, file)
         const item = await this.readCacheFile(filePath)
-        if (item && this.isExpired(item) && await this.deleteCacheFile(filePath)) cleaned++
+        if (item && this.isExpired(item) && await this.locked(filePath, () => this.removeIfExpired(filePath))) cleaned++
       }
     }
 
     return cleaned
+  }
+
+  // The lock keeps add() and increment() out; set() takes none, so the file is judged
+  // after it is moved aside, and one set() replaced since the read goes back. A newer
+  // set() already in its place wins (EEXIST). Readers miss the key while it is aside.
+  private async removeIfExpired(filePath: string): Promise<boolean> {
+    const grave = `${filePath}.${randomUUID()}.grave`
+    try {
+      await rename(filePath, grave)
+    } catch {
+      return false
+    }
+    const item = await this.readCacheFile(grave)
+    const expired = item !== null && this.isExpired(item)
+    if (!expired) await link(grave, filePath).catch(() => undefined)
+    await unlink(grave).catch(() => undefined)
+    return expired
   }
 
   getBasePath(): string {
