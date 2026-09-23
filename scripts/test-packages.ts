@@ -60,6 +60,10 @@ const cwdGuard = join(import.meta.dir, 'test-cwd-guard.ts')
 // Absolute for the same reason.
 const fetchGuard = join(import.meta.dir, 'test-global-fetch-guard.ts')
 
+// First in the list: it imports nothing, and the two guards above evaluate
+// node:fs and bun:test in every realm before the swap otherwise.
+const finalizationRegistryGuard = join(import.meta.dir, 'test-finalization-registry-guard.ts')
+
 // Guards whose own code lives outside packages/, so a package sweep would never
 // run them. Discovered rather than named, so the next one is covered by
 // existing; globbed to explicit file paths rather than handing `bun test` a bare
@@ -80,6 +84,8 @@ async function collectScriptTests(): Promise<string[]> {
 const testArgs = [
   'test',
   '--isolate',
+  '--preload',
+  finalizationRegistryGuard,
   '--preload',
   cwdGuard,
   '--preload',
