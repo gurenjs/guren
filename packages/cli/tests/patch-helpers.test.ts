@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { parseSourceFile } from '../src/parse-cache'
-import { addEntryWithImport, addImport, addToArrayArgument, addToArrayOption, appendSchemaTable, insertArrayArgumentEntry, insertArrayOptionEntry, insertImport, PATCH_REASONS } from '../src/patch-helpers'
+import { addEntryWithImport, addImport, addToArrayArgument, addToArrayOption, appendSchemaTable, insertArrayArgumentEntry, insertArrayOptionEntry, insertImport, PATCH_REASONS, spreadModuleIntoSchema } from '../src/patch-helpers'
 import { captureWarnings, createTempWorkspace, PG_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
 
 describe('addImport', () => {
@@ -828,6 +828,79 @@ export const schema = { users, posts, sessions }
     expect(content).toContain('export const schema = { users, posts, sessions }')
     expect(content).not.toContain('sessions, sessions')
     expect(content.indexOf('export const sessions =')).toBeLessThan(content.indexOf('export const schema ='))
+  })
+  it('adds the identifier after a module spread the object hands its tables to', async () => {
+    const content = await appendSessions(`${PG_TABLES}
+import { billingSchema } from '../modules/billing/db/schema'
+
+export const schema = { users, ...billingSchema }
+`)
+
+    expect(content).toContain('export const schema = { users, ...billingSchema, sessions }')
+  })
+
+  it('fills an empty schema object the file identifies', async () => {
+    const content = await appendSessions(`${PG_TABLES}
+export const schema = {}
+`)
+
+    expect(content).toContain('export const schema = { sessions }')
+    expect(content.indexOf('export const sessions =')).toBeLessThan(content.indexOf('export const schema ='))
+  })
+})
+
+describe('spreadModuleIntoSchema', () => {
+  it('spreads the module aggregate into the root schema object', () => {
+    const updated = spreadModuleIntoSchema(`${PG_TABLES}
+export const schema = {
+  users,
+  posts,
+}
+`, 'billing', 'billingSchema')
+
+    expect(updated.content).toContain('  posts,\n  ...billingSchema,\n}')
+  })
+
+  it('leaves an object spreading the module under another binding alone', () => {
+    const source = `${PG_TABLES}
+import * as billing from '../modules/billing/db/schema'
+
+export const schema = { users, posts, ...billing }
+`
+    const result = spreadModuleIntoSchema(source, 'billing', 'billingSchema')
+    expect(result.content).toBeUndefined()
+    expect(result.reason).toContain('as a namespace')
+    expect(spreadModuleIntoSchema(source.replace('* as billing', '{ billingSchema }').replace('...billing', '...billingSchema'), 'billing', 'billingSchema').reason).toBe(PATCH_REASONS.alreadyPresent)
+  })
+
+  it('declines a root whose object nothing identifies as the schema', () => {
+    expect(spreadModuleIntoSchema(`${PG_TABLES}
+export const authTables = { users }
+`, 'billing', 'billingSchema').content).toBeUndefined()
+    expect(spreadModuleIntoSchema(PG_TABLES, 'billing', 'billingSchema').content).toBeUndefined()
+  })
+
+  it('declines an identifier the root already binds to something else', () => {
+    const source = `${PG_TABLES}
+export const userSchema = { kind: 'zod' } as const
+export const schema = { users, posts }
+`
+    const result = spreadModuleIntoSchema(source, 'user', 'userSchema')
+    expect(result.content).toBeUndefined()
+    expect(result.reason).toContain('already binds userSchema')
+
+    // The module's own export, imported but not yet spread, is the binding the spread wants.
+    const imported = spreadModuleIntoSchema(`import { userSchema } from '../modules/user/db/schema'\n${source.replace("export const userSchema = { kind: 'zod' } as const\n", '')}`, 'user', 'userSchema')
+    expect(imported.content).toContain('export const schema = { users, posts, ...userSchema }')
+  })
+
+  it('opens an empty multi-line schema object onto its own line', () => {
+    const updated = spreadModuleIntoSchema(`${PG_TABLES}
+export const schema = {
+}
+`, 'billing', 'billingSchema')
+
+    expect(updated.content).toContain('export const schema = {\n  ...billingSchema,\n}')
   })
 })
 

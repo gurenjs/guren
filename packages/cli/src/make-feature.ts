@@ -14,7 +14,7 @@ import { makeValidator } from './make-validator'
 import { parseAttachString, parseFieldsString, type AttachmentDefinition, type FieldDefinition, type FieldType } from './fields'
 import { ensureGurenUiTokens, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
 import { ParseCache } from './parse-cache'
-import { findDeclaredTable, schemaPathFor } from './schema-parser'
+import { findDeclaredTable, moduleSchemaAggregateName, schemaPathFor } from './schema-parser'
 import { appHasPrototypeFixture, PROTOTYPE_FIXTURE_PATH } from './add-prototype'
 import {
   appendPrototypeEntries,
@@ -246,7 +246,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   if (declaredTable) {
     consola.info(`  1. ${schemaPath} already declares ${schemaIdentifierFor(singular)}: nothing to add`)
   } else {
-    consola.info(`  1. Add table definition to ${schemaPath}`)
+    consola.info(`  1. Add table definition to ${schemaPath}${moduleName ? `, and list it in ${moduleSchemaAggregateName(moduleName)} if the file keeps that object` : ''}`)
   }
   consola.info(`  2. Register routes in ${routesPath} with body schemas:`)
   consola.info(`     import ${singular}Controller from '${controllerImportPath}/${singular}Controller.js'`)
