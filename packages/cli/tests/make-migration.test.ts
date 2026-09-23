@@ -1,11 +1,11 @@
-import { describe, expect, it, mock, spyOn } from 'bun:test'
-import { consola } from 'consola'
+import { describe, expect, it, mock } from 'bun:test'
+import { stripAnsi } from 'consola/utils'
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { createTempWorkspace, runCliBin, runCliBinCaptured, type TempWorkspace } from './helpers'
+import { captureConsolaLines, createTempWorkspace, runCliBin, runCliBinCaptured, type TempWorkspace } from './helpers'
 import { resolveAppDrizzleKit } from '../src/make-migration'
 import * as realUtils from '../src/utils'
 
@@ -768,18 +768,13 @@ describe('the drizzle-kit make:migration runs', () => {
     try {
       await writeFile(join(workspace.dir, 'drizzle.config.ts'), "export default { dialect: 'sqlite' }", 'utf8')
 
-      const info = spyOn(consola, 'info').mockImplementation((() => {}) as never)
-      const warn = spyOn(consola, 'warn').mockImplementation((() => {}) as never)
-      try {
-        expect(await generateSchemaMigration('create_sessions_table', 'sessions')).toBe(false)
-        expect(info.mock.calls.map((call) => String(call[0]))).toEqual([
-          'drizzle-kit is not installed in the application — run `bun run db:make` after `bun install` to generate the sessions migration.',
-        ])
-        expect(warn).not.toHaveBeenCalled()
-      } finally {
-        info.mockRestore()
-        warn.mockRestore()
-      }
+      let generated: boolean | undefined
+      const lines = await captureConsolaLines(['info', 'warn'], async () => {
+        generated = await generateSchemaMigration('create_sessions_table', 'sessions')
+      })
+
+      expect(generated).toBe(false)
+      expect(lines).toEqual(['info: drizzle-kit is not installed in the application — run `bun run db:make` after `bun install` to generate the sessions migration.'])
       expect(spawnCalls.length).toBe(0)
     } finally {
       await workspace.cleanup()
@@ -794,9 +789,11 @@ describe('the drizzle-kit make:migration runs', () => {
 
       const { stdout, stderr, exitCode } = await runCliBinCaptured(['make:migration', 'add_x'], dir)
 
+      // consola's CI reporter keeps code-span backticks its TTY reporter strips.
+      const output = stripAnsi(stdout + stderr).replace(/`/g, '')
       expect(exitCode).toBe(1)
-      expect(stdout + stderr).toContain('drizzle-kit is not installed in the application. Run bun install')
-      expect(stdout + stderr).not.toMatch(/\n\s+at /)
+      expect(output).toContain('drizzle-kit is not installed in the application. Run bun install')
+      expect(output).not.toMatch(/\n\s+at /)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
