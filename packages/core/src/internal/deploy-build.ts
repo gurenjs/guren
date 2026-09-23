@@ -523,15 +523,39 @@ export interface SqlClientModule extends DevOnlyModule {
 
 /**
  * Client libraries the Postgres, MySQL and Aurora Data API factories reach for.
- * Apart from `DEV_ONLY_MODULES` because their fate is per platform: unreachable on
- * Workers (D1 only), load-bearing on Lambda/Vercel, which stub only undeclared
- * dialects (`unusedSqlClients`). Stub the client *and* drizzle's entry importing it,
- * or a D1 app fails on `Could not resolve "postgres"`; export names mirror drizzle-orm's.
+ * Apart from `DEV_ONLY_MODULES`: unreachable on Workers (D1 only), load-bearing on
+ * Lambda/Vercel, which stub only undeclared dialects (`unusedSqlClients`). Stub the
+ * client *and* drizzle's entry importing it, or a D1 app fails to resolve `postgres`.
+ * `mysql2/promise` lists its whole public API, not just drizzle's `createPool` (#507).
  */
 export const SQL_CLIENT_MODULES = [
   { specifier: 'postgres', kind: 'sql-driver', dialect: 'postgres', exportNames: [], importedBy: 'packages/orm/src' },
   { specifier: 'mysql2', kind: 'sql-driver', dialect: 'mysql', exportNames: [], importedBy: 'packages/orm/src' },
-  { specifier: 'mysql2/promise', kind: 'sql-driver', dialect: 'mysql', exportNames: ['createPool'], importedBy: 'packages/orm/src' },
+  {
+    specifier: 'mysql2/promise',
+    kind: 'sql-driver',
+    dialect: 'mysql',
+    exportNames: [
+      'createConnection',
+      'createPool',
+      'createPoolCluster',
+      'escape',
+      'escapeId',
+      'format',
+      'raw',
+      'Connection',
+      'PoolConnection',
+      'PromisePool',
+      'PromiseConnection',
+      'PromisePoolConnection',
+      'Types',
+      'Charsets',
+      'CharsetToEncoding',
+      'setMaxParserCache',
+      'clearParserCache',
+    ],
+    importedBy: 'packages/orm/src',
+  },
   {
     specifier: '@aws-sdk/client-rds-data',
     kind: 'sql-driver',
