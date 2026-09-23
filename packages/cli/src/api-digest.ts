@@ -52,10 +52,25 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
   a route \`.name()\` is required (it *is* the tool name), and anything not read-only needs
   authorization — \`this.auth.userOrFail()\` alone fails \`guren check\`
 
+### Health Checks (@guren/core)
+- \`const health = createHealthManager()\` · \`health.register(check, { timeout?, critical? })\` — \`timeout\` in ms, default \`5000\`;
+  \`critical\` defaults to \`false\` — an unhealthy critical check fails the whole report \`unhealthy\`, a non-critical one only \`degrades\` it
+- \`new DatabaseCheck(db, { name?, query? })\` (defaults \`'database'\`, \`'SELECT 1'\`)
+- \`router.get('/health', health.middleware({ checks?, detailed? }))\` — \`checks\` runs only those names,
+  \`detailed\` (default \`true\`) includes per-check results; responds 200 for \`healthy\`/\`degraded\`, 503 for \`unhealthy\`
+
+### Redirect Safety (@guren/core)
+- \`isSafeRedirectUrl(url, requestUrl, allowedHosts?)\` → boolean — same origin as \`requestUrl\`, or a host in \`allowedHosts\`
+- \`sanitizeOAuthRedirect(redirectTo, allowedHosts?)\` → app-relative paths always pass; protocol-relative URLs, backslash
+  tricks and non-http schemes never do; an absolute URL passes only with an allowlisted host, else \`undefined\`
+- \`createRedirectSafetyMiddleware({ allowedHosts?, fallbackUrl? })\` (opt-in) — rewrites an unsafe 3xx \`Location\` to
+  \`fallbackUrl\` (default \`'/'\`); keep its \`allowedHosts\` in sync with \`sanitizeOAuthRedirect\`'s or it rewrites an approved redirect
+
 ### Testing (@guren/testing)
 - \`const app = await TestApp.create()\` · \`app.actingAs(user)\` / \`app.json()\` / \`await app.withCsrf()\` — each returns a NEW TestApp
 - HTTP helpers: \`get(path)\` · \`post/put/patch/delete/query(path, body?)\` (\`query\` = HTTP QUERY, RFC 10008)
 - \`await app.get('/posts').assertOk()\` · assertions: \`assertStatus / assertCreated / assertRedirect(url?) /
   assertUnprocessable / assertJson / assertJsonPath(path, value) / assertInertia(component, props?)\`
 
-Full reference and gotchas: \`.claude/rules/orm-models.md\`, \`controllers-http.md\`, \`routes-codegen.md\`, \`testing.md\`.`
+Full reference and gotchas: \`.claude/rules/orm-models.md\`, \`controllers-http.md\`, \`routes-codegen.md\`, \`testing.md\`;
+health checks and redirect safety: \`docs/en/guides/health-checks.md\`, \`authentication.md\`.`

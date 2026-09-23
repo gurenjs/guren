@@ -332,4 +332,35 @@ describe('GUREN_API_DIGEST', () => {
       }
     })
   }
+
+  // No agent rule file documents these two subsystems (they live in docs/en/guides/
+  // only), so this pins the digest content directly instead of via the loop above.
+  it('documents the health check subsystem', () => {
+    expect(GUREN_API_DIGEST).toContain('createHealthManager()')
+    expect(GUREN_API_DIGEST).toContain('health.register(check, { timeout?, critical? })')
+    expect(GUREN_API_DIGEST).toContain(
+      'an unhealthy critical check fails the whole report `unhealthy`, a non-critical one only `degrades` it',
+    )
+    expect(GUREN_API_DIGEST).toContain('new DatabaseCheck(db, { name?, query? })')
+    expect(GUREN_API_DIGEST).toContain('health.middleware({ checks?, detailed? })')
+  })
+
+  it('documents the redirect safety helpers', () => {
+    expect(GUREN_API_DIGEST).toContain('isSafeRedirectUrl(url, requestUrl, allowedHosts?)')
+    expect(GUREN_API_DIGEST).toContain('sanitizeOAuthRedirect(redirectTo, allowedHosts?)')
+    expect(GUREN_API_DIGEST).toContain('createRedirectSafetyMiddleware({ allowedHosts?, fallbackUrl? })')
+  })
+
+  for (const [guideFile, tokens] of Object.entries({
+    'health-checks.md': ['createHealthManager', 'health.middleware(', 'DatabaseCheck(db,'],
+    'authentication.md': ['createRedirectSafetyMiddleware', 'allowedHosts'],
+  })) {
+    it(`stays in sync with the docs/en/guides/${guideFile} guide`, async () => {
+      const guideText = await readFile(new URL(`../../../docs/en/guides/${guideFile}`, import.meta.url), 'utf8')
+      for (const token of tokens) {
+        expect(GUREN_API_DIGEST).toContain(token)
+        expect(guideText).toContain(token)
+      }
+    })
+  }
 })
