@@ -1,6 +1,6 @@
 # フロントエンドガイド
 
-Guren では Inertia.js と React を組み合わせて単一ページアプリの体験を作ります。コントローラーは Inertia レスポンスを返し、フロントエンドは `resources/js/pages/` 配下の React コンポーネントを描画します。
+Guren では Inertia.js と React を組み合わせて単一ページアプリの体験を作ります。コントローラーは Inertia レスポンスを返し、フロントエンドは `resources/js/pages/` 配下の React コンポーネントを描画します。サーバーが実装している Inertia プロトコルの範囲は [Inertia プロトコル対応](./inertia.md)を参照してください。
 
 ## プロジェクト構成
 - `resources/js/app.tsx`: Inertia アプリのブートストラップとグローバルプロバイダー登録。

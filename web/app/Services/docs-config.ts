@@ -44,7 +44,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
   },
   {
     title: { en: 'The Basics', ja: '基本' },
-    slugs: ['routing', 'controllers', 'middleware', 'csrf', 'validation', 'error-handling', 'database', 'frontend', 'views'],
+    slugs: ['routing', 'controllers', 'middleware', 'csrf', 'validation', 'error-handling', 'database', 'frontend', 'inertia', 'views'],
   },
   {
     title: { en: 'Security', ja: 'セキュリティ' },

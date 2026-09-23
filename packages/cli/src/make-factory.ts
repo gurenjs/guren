@@ -1,6 +1,6 @@
 import { DB_ARTIFACT_DIRS } from './discovery'
-import type { WriterOptions } from './utils'
-import { scaffoldFile } from './utils'
+import type { ScaffoldFileEntry, WriterOptions } from './utils'
+import { scaffoldFileEntry, writeScaffoldFile } from './utils'
 
 // `Factory<T>` is typed over the *record*: `definition()` returns its attributes.
 function factoryTemplate(className: string, modelName: string): string {
@@ -20,7 +20,12 @@ export interface MakeFactoryOptions extends WriterOptions {
 }
 
 export async function makeFactory(name: string, options: MakeFactoryOptions = {}): Promise<string> {
-  return scaffoldFile(name, {
+  const { path, contents } = factoryFile(name, options)
+  return writeScaffoldFile(path, contents, options)
+}
+
+export function factoryFile(name: string, options: MakeFactoryOptions = {}): ScaffoldFileEntry {
+  return scaffoldFileEntry(name, {
     dir: DB_ARTIFACT_DIRS.Factory,
     suffix: 'Factory',
     template: ({ normalizedName }) => {

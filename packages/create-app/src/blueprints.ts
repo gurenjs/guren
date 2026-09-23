@@ -78,8 +78,22 @@ export interface AppBlueprint {
    * tests/api-only-mirror.test.ts pins it to `isConfirmedApiOnlyApp()`.
    */
   apiOnly?: boolean
+  /**
+   * The `guren add resource` call the next steps suggest. It must name a
+   * resource the template does not ship, since `add resource` refuses one whose
+   * files exist. Defaults to `DEFAULT_RESOURCE_EXAMPLE`.
+   * tests/resource-example.test.ts pins it.
+   */
+  resourceExample?: ResourceExample
   postScaffold?: (context: BlueprintContext) => Promise<void>
 }
+
+export interface ResourceExample {
+  name: string
+  fields: string
+}
+
+export const DEFAULT_RESOURCE_EXAMPLE: ResourceExample = { name: 'posts', fields: 'title:string,body:text' }
 
 export interface ScaffoldAppBlueprintOptions {
   blueprint?: string
@@ -141,6 +155,7 @@ const blueprintRegistry: Record<AppBlueprintName, AppBlueprint> = {
     },
     transformFiles: BLOG_TRANSFORM_FILES,
     includesAuth: true,
+    resourceExample: { name: 'tags', fields: 'name:string' },
   },
   worker: {
     name: 'worker',

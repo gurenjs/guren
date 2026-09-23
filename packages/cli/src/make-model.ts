@@ -1,5 +1,5 @@
-import type { WriterOptions } from './utils'
-import { scaffoldFile } from './utils'
+import type { ScaffoldFileEntry, WriterOptions } from './utils'
+import { scaffoldFileEntry, writeScaffoldFile } from './utils'
 import { MODELS_DIR } from './discovery'
 import { schemaIdentifierFor } from './inflect'
 import type { AttachmentDefinition } from './fields'
@@ -46,7 +46,12 @@ export class ${className} extends ${heritage} {
 }
 
 export async function makeModel(name: string, options: MakeModelOptions = {}): Promise<string> {
-  return scaffoldFile(name, {
+  const { path, contents } = modelFile(name, options)
+  return writeScaffoldFile(path, contents, options)
+}
+
+export function modelFile(name: string, options: MakeModelOptions = {}): ScaffoldFileEntry {
+  return scaffoldFileEntry(name, {
     dir: MODELS_DIR,
     template: ({ className }) => modelTemplate(className, options.attachments ?? []),
   }, options)
