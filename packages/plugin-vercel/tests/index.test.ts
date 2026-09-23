@@ -376,8 +376,8 @@ describe('@guren/plugin-vercel', () => {
         line.startsWith('Vercel build: the bundle names a class OrderShipped as OrderShipped2'),
       )
       expect(renamed).toBeDefined()
-      const declaring = [join('app', 'Events', 'OrderShipped.ts'), join('app', 'Notifications', 'OrderShipped.ts')]
-      expect(renamed).toContain(` ${declaring.join(', ')} declare a job`)
+      // Whichever of the two the bundle renamed, named by its app-relative path.
+      expect(renamed).toMatch(/ app[\\/](Events|Notifications)[\\/]OrderShipped\.ts declares a job/)
     })
 
     it('finds docs in a parent directory when the app root is nested', async () => {

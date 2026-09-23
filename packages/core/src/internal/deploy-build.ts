@@ -731,28 +731,39 @@ export function renderDevOnlyStub(module: Pick<DevOnlyModule, 'exportNames'>, me
  */
 export const BUN_DEPLOY_MINIFY = { whitespace: true, syntax: true, identifiers: false, keepNames: true } as const
 
-/** Framework base classes whose subclasses are stored under their class name unless pinned. */
-const NAME_KEYED_BASES = new Set(['Job', 'Event', 'Notification', 'Agent'])
+/**
+ * Framework bases whose subclasses are stored under their class name. A record kind
+ * can pin that name; a model cannot: attachments and `morphMany` write `model.name`
+ * while `Model.morphMap` finds the model by its source name, so a rename splits them.
+ */
+const NAME_KEYED_BASES: ReadonlyMap<string, NameKeyedKind> = new Map([
+  ...['Job', 'Event', 'Notification', 'Agent'].map((base) => [base, 'record'] as const),
+  ...['Model', 'AuthenticatableModel', 'defineModel', 'Attachable'].map((base) => [base, 'model'] as const),
+])
 const NAME_PIN = /\bstatic\s+(?:override\s+)?(?:jobName|eventName|agentName)\b|\bget\s+type\s*\(/
 const SOURCE_CLASS =
   /^[ \t]*(?:export[ \t]+(?:default[ \t]+)?)?(?:abstract[ \t]+)?class[ \t]+([A-Za-z_$][\w$]*)(?:[ \t]*<[^{>\n]*>)?(?:[ \t]+extends[ \t]+([A-Za-z_$][\w$]*))?/gm
-const BUNDLED_CLASS = /(?:^|[^\w$.])class\s+([A-Za-z_$][\w$]*)/g
+const BUNDLED_CLASS = /(?:^|[^\w$.])class\s+([A-Za-z_$][\w$]*)(?:\s+extends\s+([A-Za-z_$][\w$]*))?/g
+
+type NameKeyedKind = 'record' | 'model'
 
 export interface RenamedNameKeyedClass {
   /** The name in source, which `bun run` reports. */
   readonly name: string
   /** The name the bundle declares instead, and so the class's runtime `.name`. */
   readonly bundledAs: string
-  /** The app files declaring an unpinned name-keyed class called `name`. */
-  readonly files: readonly string[]
+  /** App files declaring an unpinned job, event, notification or agent called `name`. */
+  readonly records: readonly string[]
+  /** App files declaring a model called `name`. */
+  readonly models: readonly string[]
 }
 
 /**
- * App classes the bundle renamed to `<name><n>` because another module declares the
- * same top-level name; which one keeps it follows import order. Only unpinned
- * subclasses of `NAME_KEYED_BASES` count, traced through the app's own `extends` by
- * name with regexes (this module imports only builtins, so not the CLI's AST readers):
- * an aliased base import is missed rather than guessed.
+ * App models and unpinned records (`NAME_KEYED_BASES`) the bundle renamed to `<name><n>`,
+ * which happens when another module declares the same top-level name. A declaration counts
+ * only when the numbered class extends its base, so a renamed dependency class is not the app's.
+ * Bases are traced through the app's own `extends` by name with regexes (builtins-only module,
+ * so not the CLI's AST readers): an aliased base import is missed rather than guessed.
  */
 export function renamedNameKeyedClasses(
   bundle: string,
@@ -768,22 +779,38 @@ export function renamedNameKeyedClasses(
     }
   }
 
-  const nameKeyed = (base: string | undefined, seen = new Set<string>()): boolean => {
-    if (base === undefined || seen.has(base)) return false
-    if (NAME_KEYED_BASES.has(base)) return true
+  const kindOf = (base: string | undefined, seen = new Set<string>()): NameKeyedKind | undefined => {
+    if (base === undefined || seen.has(base)) return undefined
+    const kind = NAME_KEYED_BASES.get(base)
+    if (kind !== undefined) return kind
     seen.add(base)
-    return (declared.get(base) ?? []).some((entry) => nameKeyed(entry.base, seen))
+    for (const entry of declared.get(base) ?? []) {
+      const inherited = kindOf(entry.base, seen)
+      if (inherited !== undefined) return inherited
+    }
+    return undefined
+  }
+
+  const bundledBases = new Map<string, Set<string | undefined>>()
+  for (const [, bundledAs, base] of bundle.matchAll(BUNDLED_CLASS)) {
+    const bases = bundledBases.get(bundledAs!) ?? new Set()
+    bases.add(stem(base))
+    bundledBases.set(bundledAs!, bases)
   }
 
   const renamed: RenamedNameKeyedClass[] = []
-  for (const bundledAs of new Set(Array.from(bundle.matchAll(BUNDLED_CLASS), (match) => match[1]!))) {
+  for (const [bundledAs, bases] of bundledBases) {
     const name = withoutNumericSuffix(bundledAs)
     if (name === undefined || declared.has(bundledAs)) continue
-    const files = (declared.get(name) ?? [])
-      .filter((entry) => !entry.pinned && nameKeyed(entry.base))
-      .map((entry) => entry.file)
-      .sort()
-    if (files.length > 0) renamed.push({ name, bundledAs, files })
+    const records: string[] = []
+    const models: string[] = []
+    for (const entry of declared.get(name) ?? []) {
+      if (!bases.has(stem(entry.base))) continue
+      const kind = kindOf(entry.base)
+      if (kind === 'model') models.push(entry.file)
+      else if (kind === 'record' && !entry.pinned) records.push(entry.file)
+    }
+    if (records.length + models.length > 0) renamed.push({ name, bundledAs, records: records.sort(), models: models.sort() })
   }
   return renamed
 }
@@ -793,6 +820,11 @@ function withoutNumericSuffix(name: string): string | undefined {
   let end = name.length
   while (end > 0 && name.charCodeAt(end - 1) >= 48 && name.charCodeAt(end - 1) <= 57) end--
   return end > 0 && end < name.length ? name.slice(0, end) : undefined
+}
+
+// A base may be renamed in the bundle too, so bases compare without a numeric suffix.
+function stem(name: string | undefined): string | undefined {
+  return name === undefined ? undefined : (withoutNumericSuffix(name) ?? name)
 }
 
 /** The part of a `Bun.build` result the reporter reads, structural so this module needs no bun-types. */
@@ -825,12 +857,19 @@ export async function reportRenamedNameKeyedClasses(
     }
   }
 
-  for (const { name, bundledAs, files } of renamedNameKeyedClasses(bundle, sources)) {
+  const declare = (files: readonly string[]) => `${files.join(', ')} ${files.length === 1 ? 'declares' : 'declare'}`
+  for (const { name, bundledAs, records, models } of renamedNameKeyedClasses(bundle, sources)) {
+    const found = [
+      records.length > 0 &&
+        `${declare(records)} a job, event, notification or agent named ${name}, which is stored under its class ` +
+          'name: rename it, or pin `static jobName`, `static eventName`, `get type()` or `static agentName`.',
+      models.length > 0 &&
+        `${declare(models)} a model named ${name}: attachments and polymorphic relations store it as ` +
+          `${bundledAs} while \`Model.morphMap\` looks it up as ${name}, so rename the class.`,
+    ].filter(Boolean)
     console.warn(
       `${options.label}: the bundle names a class ${name} as ${bundledAs}, because another module declares ` +
-        `${name} too and import order picks which one keeps it. ${files.join(', ')} ${files.length === 1 ? 'declares' : 'declare'} ` +
-        `a job, event, notification or agent named ${name}, and those are stored under their class name. Rename it, ` +
-        'or pin `static jobName`, `static eventName`, `get type()` or `static agentName`.',
+        `${name} too and import order picks which one keeps it. ${found.join(' ')}`,
     )
   }
 }

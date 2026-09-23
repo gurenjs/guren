@@ -270,8 +270,8 @@ describe('buildLambdaOutput', () => {
 
     const renamed = warnings.find((line) => line.startsWith('Lambda build: the bundle names a class OrderShipped as OrderShipped2'))
     expect(renamed).toBeDefined()
-    const declaring = [join('app', 'Events', 'OrderShipped.ts'), join('app', 'Notifications', 'OrderShipped.ts')]
-    expect(renamed).toContain(` ${declaring.join(', ')} declare a job`)
+    // Whichever of the two the bundle renamed, named by its app-relative path.
+    expect(renamed).toMatch(/ app[\\/](Events|Notifications)[\\/]OrderShipped\.ts declares a job/)
   })
 
   test('should copy the SSR bundle and migrations, but never seeders, into the function directory', async () => {
