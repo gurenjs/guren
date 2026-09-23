@@ -2294,7 +2294,8 @@ Claude Code docs as read on 2026-09-23:
   on `.env*` and key files stay, for secrets that are tracked. Under `--bare`
   the project settings' `env` block still applies
   (https://code.claude.com/docs/en/permissions#what-runs-before-you-trust-a-folder),
-  which is one more reason to run from that checkout.
+  and the checkout keeps a tracked `.claude/settings.json`, so its `env` still
+  reaches the producer. That stays open under Open Question 10.
 - **Pinned mode and caps.** `--permission-mode dontAsk`: the flag overrides
   a `defaultMode` from settings, and `dontAsk` denies whatever would prompt,
   a read outside the working directory included; `--permission-prompts none` (Claude Code v2.1.259 or later);
@@ -2898,7 +2899,9 @@ code and never from an earlier plan.
     hold, the producer needs an OS-level sandbox or a copy of the tree with the
     excluded paths removed.
     **Open, with a probe (2026-09-23):** the docs already say Read rules reach
-    Grep and Glob only as a best effort, so the producer is to run in a
+    Grep and Glob only as a best effort
+    (https://code.claude.com/docs/en/permissions#read-and-edit), so the
+    producer is to run in a
     checkout of the tracked files at HEAD, the second remedy above, and keep
     deny rules for tracked secrets (§8 amendment). The canary probe that tests
     it is in the Part 3 note under Phasing.
@@ -2911,7 +2914,9 @@ code and never from an earlier plan.
     a fresh one carrying the questions and answers, at the cost of re-reading.
     **Open, with a probe (2026-09-23):** `--ask` is deferred with the headless
     producer; the probe is in the Part 3 note under Phasing. A resumed run
-    reports the conversation's whole cost, which §8's amendment accounts for.
+    reports the conversation's whole cost
+    (https://code.claude.com/docs/en/headless, the paragraph on
+    `total_cost_usd`), which §8's amendment accounts for.
 13. ~~**Editing in the page.** Feedback is comments today. Simple edits (rename a
     column, change a type, drop a route) could be made in the page and
     exported as `ops` directly, with no model call. Worth the template's added
