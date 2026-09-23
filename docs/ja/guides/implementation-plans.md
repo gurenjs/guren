@@ -281,19 +281,19 @@ Built as the plan leaves them, so their collision or absence is the plan's own w
 
 ### `alter` の読み取り
 
-`alter` は計画より前からあるものを変えるので、承認の時点ですでに一致していた性質は、変更が済んだ証拠になりません。そこで承認のたびに、`alter` の要素ごとに計画が書いた性質をその場で読み、結果を `approvals.json` のその承認の項目に記録します。`plan:status` が `alter` の性質を完了と数えるのは、承認時に `differ` か `unknown` だったものが、いま一致している場合だけです。読み取りが実装前のアプリケーションを表すように、計画は実装を始める前に承認してください。編集した計画を承認し直しても、同じ baseline のもとで記録した読み取りは引き継がれます。ただし引き継ぐのは、計画上の値とコード上の名前を編集で変えていない性質の分だけです。
+`alter` は計画より前からあるものを変えるので、承認の時点ですでに一致していた性質は、変更が済んだ証拠になりません。そこで承認のたびに、`alter` の要素ごとに計画が書いた性質をその場で読み、結果を `approvals.json` のその承認の項目に記録します。`plan:status` が `alter` の性質を完了と数えるのは、承認時に `differ` か `unknown` だったものが、いま一致している場合だけです。読み取りが実装前のアプリケーションを表すように、計画は実装を始める前に承認してください。編集した計画を承認し直しても、同じ baseline のもとで記録した読み取りは引き継がれます。引き継がれるのは、計画上の値とコード上の名前を編集で変えていない性質の読み取りだけです。
 
-読み取りのない性質は一致しても数えません。数えるものが一つも残らない `alter` は `unjudged` になり、注記は二つの道を示します。`plan:approve` をもう一度実行するか、その要素に届く振る舞いで検証するかです。承認済みのハッシュで `plan:approve` を実行すると、承認の項目に足りない読み取りだけを書き足します。
+読み取りのない性質は一致しても数えません。数えるものが一つも残らない `alter` は `unjudged` になり、注記には対処が二つ示されます。`plan:approve` をもう一度実行するか、その要素に届く振る舞いで検証するかです。承認済みのハッシュで `plan:approve` を実行すると、承認の項目に足りない読み取りだけを書き足します。
 
 ```text
 Already approved at 2026-09-22T10:16:20.673Z; recorded the readings it lacked in docs/plans/comments/approvals.json: model.post, view.posts.show.
 ```
 
-これが効くのは実装の前だけです。実装のあとに取った読み取りは最初から一致しているので、数えられることはありません。コードを書き終えてからは、その要素に届く振る舞いを足すか、waive するしかありません。
+`plan:approve` の再実行が役に立つのは実装の前だけです。実装のあとに取った読み取りは最初から一致しているので、数えられることはありません。コードを書き終えてからは、その要素に届く振る舞いを足すか、waive するしかありません。
 
 ## 実装: `plan:next` と `plan:verify`
 
-作業の分解と順序は、モデルではなく Guren が計画から導きます。計画が足したり変えたりするエンティティごとにタスクができ、タスクは外部キーの順に並びます。各タスクが持つステップは最大で六種類です。
+作業の分解と順序は、モデルではなく Guren が計画から導きます。計画が足したり変えたりするエンティティごとにタスクができ、タスクは外部キーの順に並びます。ステップは六種類あり、各タスクには作業のある種類だけが入ります。
 
 | ステップ | 作業 | 検証 |
 |---|---|---|
@@ -304,7 +304,7 @@ Already approved at 2026-09-22T10:16:20.673Z; recorded the readings it lacked in
 | `http` | validator、コントローラー、ルート、Resource、Policy | `codegen`、`guren check`、テストが通ること |
 | `pages` | ページコンポーネント | `codegen`、`typecheck`、`guren check` |
 
-複数のエンティティが共有する作業は `task/foundation` に入り、作業のないステップは省かれます。ステップの id は `task/entity/model.comment/http` のような形です。`data`、`http`、`pages` のステップは、担当する要素が五つを超えるファイルにまたがると複数に分かれ、`task/entity/model.comment/http/1`、`task/entity/model.comment/http/2` のような id になります。`scaffold` と `tests` は分かれません。`--step` に渡す正確な id は `plan:next` が表示します。次のステップを尋ね、実装し、検証し、コミットする。これを繰り返します。
+複数のエンティティが共有する作業は `task/foundation` に入り、作業のないステップは省かれます。ステップの id は `task/entity/model.comment/http` のような形です。`commands`、`data`、`http`、`pages` のステップは、担当する要素が五つを超えるファイルにまたがると複数に分かれ、`task/entity/model.comment/http/1`、`task/entity/model.comment/http/2` のような id になります。`scaffold` と `tests` は分かれません。`--step` に渡す正確な id は `plan:next` が表示します。次のステップを尋ね、実装し、検証し、コミットする。これを繰り返します。
 
 ```bash
 bunx guren plan:next docs/plans/comments/plan.json
@@ -421,7 +421,7 @@ task/entity/model.comment/data: failed (1383 ms)
 
 ### 一ステップ、一コミット
 
-変更はステップが挙げる要素だけにとどめ、verified になったらコミットしてください。検証を通ったステップは、担当する要素が入っているファイルとテストファイルの指紋を記録します。そのどれかが変わると、ステップの要素は `drifted` になります。後のステップがそうしたファイルに書き込むのは珍しくありません。`routes/web.ts` の既存ルートの隣に足すルート、`db/schema.ts` のテーブル、Resource のフィールドなどです。例のコピーで、`pages` ステップのあとのコミットが `CommentResource.ts` にフィールドを足しました。このファイルは `http` ステップが検証したものなので、`http` の要素は drifted になりました。
+変更はステップが挙げる要素だけにとどめ、verified になったらコミットしてください。検証を通ったステップは、担当する要素が入っているファイルとテストファイルの指紋を記録します。そのどれかが変わると、ステップの要素は `drifted` になります。後のステップがそうしたファイルに書き込むのは珍しくありません。`routes/web.ts` の既存ルートの隣に足すルート、`db/schema.ts` のテーブル、Resource のフィールドなどです。例のコピーで、`pages` ステップのあとのコミットが `CommentResource.ts` にフィールドを足しました。このファイルは `http` ステップが検証したものなので、`http` の要素の大半が drifted になりました。
 
 ```text
 Routes
@@ -429,11 +429,13 @@ Routes
       Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http; changed since: app/Http/Resources/CommentResource.ts.
 ```
 
-`http` の振る舞いを通してしか verified にならない要素 (コントローラーと Policy、`data` ステップの `model.post`) も `verified` ではなくなりました。ファイルが変わったステップの振る舞いは経路にならないからです (「進捗を読む」の節を参照してください)。
+`http` の振る舞いを通してしか verified にならない要素 (コントローラーと Policy、`data` ステップの `model.post`) は、`plan:status` が読む状態に戻りました。ファイルが変わったステップの振る舞いは経路にならないからです (「進捗を読む」の節を参照してください)。
 
-こうしたステップは `plan:verify --step` が確かめ直します。指定したステップが verified になると、同じ実行の中で、ファイルが変わった前のステップをタスク順に確かめ直します。verified にならないステップが出たところで止まります。結果はそれぞれ記録され (`failed` なら壊れた箇所を添えます)、レポートの「Re-checked」の下に並びます。確かめ直しで失敗したステップは、`plan:next` が次に返します。確かめ直しが `blocked` になったステップは、後の実行に回します。指定したステップが verified にならなければ、前のステップの記録には手を付けません。ステップ間で共有するコマンドが失敗している以上、確かめ直しても同じ理由で失敗するからです。レポートでは後の実行に回したステップとして示されます。`tests` ステップは何も実行せずに確かめ直します。コードができたあとではテストが通ってしまうからです。各振る舞いの id を書いたテストファイルがちょうど一つずつあれば、verified のままです。そうでなければ、その振る舞いを示してステップを drifted のまま残します。
+こうしたステップは `plan:verify --step` が確かめ直します。指定したステップが verified になると、同じ実行の中で、ファイルが変わった前のステップをタスク順に確かめ直します。コマンドを実行して verified にならないステップが出たところで止まります。結果はそれぞれ記録され (`failed` なら壊れた箇所を添えます)、レポートの「Re-checked」の下に並びます。そのあと `plan:next` は、verified でない最初のステップを返します。たいていは失敗したステップです。確かめ直しが `blocked` になったステップは、後の実行に回します。指定したステップが verified にならなければ、前のステップの記録には手を付けず、後の実行に回したステップとして示します。ステップ間で共有するコマンドが失敗している以上、確かめ直しても同じ理由で失敗するからです。
 
-`plan:next` は何も実行しないので、次のステップが drifted なら、それを確かめ直すよう伝えます。
+`tests` ステップは何も実行せずに確かめ直します。コードができたあとではテストが通ってしまうからです。各振る舞いの id を書いたテストファイルがちょうど一つずつあれば、verified のままです。そうでなければ、実行はその振る舞いを示し、ステップを drifted のまま残します。
+
+`plan:next` は何も実行しないので、次のステップが drifted なら、確かめ直すよう伝えます。
 
 ```text
 Verified before; files it was verified at have changed since: app/Http/Resources/CommentResource.ts.
@@ -516,21 +518,21 @@ Elements the plan changes: 16
 | `wired` | 到達できる。`createApp()` がマウントし、先に登録されたルートに横取りされないルート、そのルートが呼ぶアクション、そのアクションが返すページ、そのルートやアクションが検証に使う validator、アプリケーションが dispatch、emit、登録、送信する side effect |
 | `verified` | 所属するステップが検証を通り、指紋を取ったファイルが変わっていない |
 | `drifted` | 一部はあるが性質が食い違う、または検証後に変わった |
-| `unjudged` | 計画が書いた性質をどれも読み取れず (`alter` なら、承認時から動いたものがなく)、変更が起きたかを言えるものがほかにない |
+| `unjudged` | 計画が書いた性質をどれも読み取れず (`alter` なら、食い違う性質がなく、読み取りに照らして数える一致もなく)、変更が起きたかを言えるものがほかにない |
 | `blocked` | ここでは判定できない。理由が添えられます |
 | `waived` | 人が理由を付けて、未完成のまま受け入れた |
 
 どのスキャナーも読まない性質は、一致とは数えません。計画が書いた性質をどれも読めない要素は、完了ではなく `unjudged` になります。例外は取り付け先を持つ種類で、validator、アクション、ルート、ページ、side effect は取り付けられていることで完了します。取り付けはその要素自身を読んだ結果だからです。コントローラーのように性質を一つも書いていない要素は、存在するだけで完了します。`alter` は取り付け先があっても、承認時の読み取りから動いたものしか数えません (「承認」の節の「`alter` の読み取り」を参照してください)。
 
-ルートはマウントされていても、届かないことがあります。同じメソッドか `ALL` で先に登録されたルートが、そのパスに合うリクエストをすべて受けてしまう場合です。`GET /comments/:id` のあとに登録した `GET /comments/new` には、リクエストが一件も届きません。このルートは `present` にとどまり、このルートからしか届かないアクション、validator、ページも同じです。注記には先に登録されたルートと、それを登録したルートファイルかモジュールが出ます。計画のルートを先に登録するか、パスを変えてください。登録順やパスを比べられず、横取りされているかもしれないルートも `present` にとどまります。
+ルートはマウントされていても、届かないことがあります。同じメソッドか `ALL` で先に登録されたルートが、そのパスに合うリクエストをすべて受けてしまう場合です。`GET /comments/:id` のあとに登録した `GET /comments/new` には、リクエストが一件も届きません。このルートは `present` にとどまり、このルートからしか届かないアクション、validator、ページも同じです。登録順やパスを比べられず、横取りされているかもしれないルートも `present` にとどまります。注記には先に登録されたルートと、それを登録したルートファイルかモジュールが出ます。計画のルートを先に登録するか、パスを変えてください。
 
-side effect が取り付けられたと読まれるのは、テストとクラス自身のファイルを除くアプリケーションのソースが、フレームワークの API でそのクラスを使っているときです。ジョブの dispatch やスケジュール登録、イベントの emit、リスナーの登録、メールの送信やキュー投入、通知の送信がこれに当たります。その使用が書かれるまで、ステップは `incomplete` です。使用が書かれればステップは検証を通りますが、要素は `wired` のままで、waiver でしか閉じられません (後述)。どのアクションから使っているかは、計画の `trigger` と照らし合わせません。
+side effect が取り付けられたと読まれるのは、テストとクラス自身のファイルを除くアプリケーションのソースが、フレームワークの API でそのクラスを使っているときです。ジョブの dispatch やスケジュール登録、イベントの emit、リスナーの登録、メールの送信やキュー投入、通知の送信がこれに当たります。その使用が書かれるまで、ステップは `incomplete` です。使用が書かれればステップは検証を通れるようになりますが、要素は `wired` のままです。どのアクションから使っているかは、計画の `trigger` と照らし合わせません。
 
-計画が書いた性質のうち、存在以外に一致したものがない要素は、ステップが検証を通っても `verified` にはなりません。validator や Resource が宣言するキーと、Policy が宣言する ability は、存在だけの一致です。名前があることしか分かりません。こうした要素は、記録の有効なステップの振る舞いがその要素に届いているときだけ `verified` になります。届く経路は計画自身の参照をたどります。振る舞いのルートと期待するページ、ルートのアクションと束ねたモデル、アクションの validator と Policy と返すページや Resource、ページの prop の Resource、届いた Resource や Policy の裏にあるモデル、そして届いたアクションのコントローラーです。フォームの validator、フォームの送信先ルート、ページのボタンが呼ぶルートは経路になりません。あるルートへのリクエストは、そこへリンクするページについて何も語らないからです。数えるのは、その振る舞いが通ることを求めるステップの振る舞いだけで、失敗を確かめる `tests` ステップは経路になりません。したがって存在だけで一致した要素 (キーや ability しか一致しなかった validator、Resource、Policy、計画が書いた prop がどれも一致しなかったページ) は、届く振る舞いを足すか waiver を書かないと計画を閉じられません。コマンド、ジョブ、イベント、リスナー、メール、通知に届く経路は計画にないので、これらは waiver でしか閉じられません。持ち上がらなかった理由は `--json` の `hold` に記録されます。
+計画が書いた性質のうち、存在以外に一致したものがない要素は、ステップが検証を通っても `verified` にはなりません。validator や Resource が宣言するキーと、Policy が宣言する ability は、存在だけの一致です。名前があることしか分かりません。こうした要素は、記録の有効なステップの振る舞いがその要素に届いているときだけ `verified` になります。届く経路は計画自身の参照をたどります。振る舞いのルートと期待するページ、ルートのアクションと束ねたモデル、アクションの validator と Policy と返すページや Resource、ページの prop の Resource、届いた Resource や Policy の裏にあるモデル、そして届いたアクションのコントローラーです。フォームの validator、フォームの送信先ルート、ページのボタンが呼ぶルートは経路になりません。あるルートへのリクエストは、そこへリンクするページについて何も語らないからです。数えるのは、その振る舞いが通ることを求めるステップの振る舞いだけで、失敗を確かめる `tests` ステップは経路になりません。したがってこうした要素は、届く振る舞いを足すか waiver を書かないと計画を閉じられません。キーや ability しか一致しなかった validator、Resource、Policy と、計画が書いた prop がどれも一致しなかったページ、性質を一つも書かないコントローラー、読み取りに照らして数える一致がない `alter` (例では `model.post`) です。コマンド、ジョブ、イベント、リスナー、メール、通知に届く経路は計画にないので、これらは waiver でしか閉じられません。持ち上がらなかった理由は `--json` の `hold` に記録されます。
 
 計画が書いた `body`、`params`、`query` の validator は、アクションがそれで検証しているか、ルートが契約スキーマとして持っていれば一致と数えます。別のものを使っている場合、その場で組み立てたスキーマ (`this.validateBody(PostSchema.partial())` など)、ヘルパー経由の検証は、アクションを drifted にはせず、注記付きの `present` にとどめます。
 
-validator の `fields` は、export された zod のスキーマから読みます。キーはすべて確かめます。フィールドの型、必須かどうか、ルールの `min`、`max`、`email`、`url`、`uuid` を読むのは、フィールドが単純な部品だけでできているときです。プリミティブか `z.coerce.*`、`.optional()`、`.nullable()`、`.default()`、長さや範囲や形式の検査がそれに当たります。ただし `z.coerce.*` のフィールドが必須かどうかは読みません。途中に transform、refinement、union などのラッパーがあれば、型、必須かどうか、ルールは `unknown` になります。理由は `--json` の性質ごとに出ます。Resource の `fields` は、`guren codegen` が読むペイロードの型から読みます。スキーマやペイロードにないキーや、型、必須かどうか、ルールの食い違いがあれば要素は `drifted` になり、`plan:verify` はそのステップを `incomplete` と報告します。
+validator の `fields` は、export された zod のスキーマから読みます。キーはすべて確かめます。フィールドの型、必須かどうか、ルールの `min`、`max`、`email`、`url`、`uuid` を読むのは、フィールドが単純な部品だけでできているときです。プリミティブか `z.coerce.*`、`.optional()`、`.nullable()`、`.default()`、長さや範囲や形式の検査がそれに当たります。何も付けない `z.coerce` の string、number、boolean、date は、必須かどうかが `unknown` になります。途中に transform、refinement、union などのラッパーがあれば、型、必須かどうか、ルールは `unknown` になります。理由は `--json` の性質ごとに出ます。Resource の `fields` は、`guren codegen` が読むペイロードの型から読みます。スキーマやペイロードにないキーや、型、必須かどうか、ルールの食い違いがあれば要素は `drifted` になり、`plan:verify` はそのステップを `incomplete` と報告します。
 
 `unknown` のまま残った計画上の性質は、すべて「Planned, not checkable」の下に並びます。どのスキャナーも読まない性質、読んでも判定できない性質 (文字列としてしか比べられない型や、計画より緩い範囲など)、承認時にすでに一致していた `alter` の性質です。Guren が判定できない部分が、緑に紛れて見えなくなることはありません。
 
@@ -559,7 +561,7 @@ Against the approved baseline: fresh 13, stale 0, unstamped 0, unjudged 1
   unjudged: validator.comment
 ```
 
-アプリケーションが承認時の形か、計画が目指す形を保っている間、その要素は `fresh` です (どちらなのかは `--json` の `basis` に出ます)。ほかの変更で別の形に動くと `stale` になります。`unstamped` はハッシュがない要素で、承認時にセクションを読めなかったものです。`unjudged` はいま読めない要素です。validator は常に `unjudged` になり (承認の節で述べたとおりハッシュを取らないため)、validator を宣言した計画には上の行が必ず出ます。参照している要素に触れないコミットなら、計画は fresh のままです。
+アプリケーションが承認時の形か、計画が目指す形を保っている間、その要素は `fresh` です (どちらなのかは `--json` の `basis` に出ます)。ほかの変更で別の形に動くと `stale` になります。`unstamped` はハッシュがない要素で、承認時にセクションを読めなかったものです。`unjudged` はいま読めない要素です。validator はハッシュを取らないので (「承認」の節を参照してください)、常に `unjudged` になります。そのため validator を宣言した計画には上の行が必ず出ます。参照している要素に触れないコミットなら、計画は fresh のままです。
 
 stale になった要素は、それに依存するステップをすべて保留にします。例のコピーで、実装を始める前に別のコミットが `comments.store` というルートを登録したときの出力です。
 
@@ -609,7 +611,7 @@ bunx guren check --plan
     No planned property of it matched beyond its existence and no step's behaviour reaches it, so no plan:verify run lifts it: waive it with bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "<why>", or add a behaviour that reaches it and approve the plan again
 ```
 
-side effect には振る舞いが届かないので (「進捗を読む」の節を参照してください)、使えるのは waiver だけです。
+出力は振る舞いの追加も示しますが、side effect には振る舞いが届かないので (「進捗を読む」の節を参照してください)、使えるのは waiver だけです。
 
 ```bash
 bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "no behaviour can observe an emitted event; the listener's own plan tests the notification"
@@ -647,7 +649,7 @@ The decision log is committed with the plan. A waiver names this plan hash, so a
     Run bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/http again, since that run no longer holds; or waive it: bunx guren plan:waive docs/plans/comments/plan.json validator.comment --reason "<why>"
 ```
 
-`model.post` は `http` ステップの振る舞いを通してしか verified にならないので、そのステップが先に来ます。完了の状態に届いていない要素や `blocked` の要素は、`plan:verify` の前にコードや環境を直す必要があります。どの `plan:verify` の実行でも持ち上がらない要素には、`plan:waive` と、届く振る舞いがありうる場合はその追加が示されます。すべてのステップを検証し終えたあとは `plan:next` も同じ行を表示するので、計画を閉じられないまま作業が終わったと見なされることはありません。
+`model.post` は `http` ステップの振る舞いを通してしか verified にならないので、そのステップが先に来ます。完了の状態に届いていない要素や `blocked` の要素は、`plan:verify` の前にコードや環境を直す必要があります。どの `plan:verify` の実行でも持ち上がらない要素には、`plan:waive` が示されます。足りないのが届く振る舞いだけの要素には、振る舞いを足して計画を承認し直す道も示されますが、コマンドと side effect には役に立ちません (「要素を waive する」の節を参照してください)。すべてのステップを検証し終えたあとは `plan:next` も同じ行を表示するので、計画を閉じられない理由がエージェントにも分かります。
 
 すべての要素が verified か waived になったら、`--dry-run` で書き込む内容を確かめられます。問題がなければ閉じます。
 
