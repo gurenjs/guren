@@ -13,8 +13,15 @@ const DEFAULT_CACHE_CONTROL = 'public, max-age=31536000, immutable'
  * extending it — an app that wants one more extension spreads this rather
  * than restating it, so additions here reach it.
  */
-export const DEFAULT_ROOT_PUBLIC_ASSET_EXTENSIONS = ['.svg', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.avif', '.webmanifest', '.txt'] as const
-const DEFAULT_CONTENT_TYPES: Record<string, string> = {
+export const DEFAULT_ROOT_PUBLIC_ASSET_EXTENSIONS = [
+  '.svg', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.avif', '.webmanifest', '.txt',
+  '.woff2', '.woff', '.ttf', '.otf',
+] as const
+/**
+ * Must give each extension the media type Hono's `getMimeType` does
+ * (`public-assets.test.ts`): `serveStatic` types the same file under `/public/*`.
+ */
+export const DEFAULT_CONTENT_TYPES: Readonly<Record<string, string>> = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -25,6 +32,10 @@ const DEFAULT_CONTENT_TYPES: Record<string, string> = {
   '.avif': 'image/avif',
   '.webmanifest': 'application/manifest+json',
   '.txt': 'text/plain; charset=utf-8',
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+  '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
   // Reachable only for an app that opts in via `extensions`, which should not
   // also have to restate the type: as octet-stream a browser refuses them.
   '.js': 'text/javascript; charset=utf-8',
