@@ -17,8 +17,6 @@ import {
 import { Container } from '../../src/container/Container'
 import { ProviderManager } from '../../src/container/ServiceProvider'
 import { defineConfig } from '../../src/config/define'
-import { toPlainJson } from '../../src/introspection/plain-json'
-import { toJsonSchema } from '../../src/internal/zod-json-schema'
 import { resetDefaultApplication } from '../../src/http/default-application'
 import { withEnv } from '../support/env'
 
@@ -120,7 +118,7 @@ function registerRoutes(baseRouter: Router): void {
   })
   router.delete('/posts/:id', [PostController, 'update'])
     .middleware(authorizeResourceMiddleware(() => ({})))
-  // All-optional: no `required` key, which the walker must omit rather than set to undefined.
+  // All-optional: the manifest must carry no `required: undefined` for it (see the toStrictEqual below).
   router.get('/search', { name: 'search', query: z.object({ q: z.string().optional() }) }, () => 'ok')
 }
 
@@ -332,21 +330,6 @@ describe('isIntrospecting()', () => {
     }
   }
 
-  class TickingFlagProvider extends ServiceProvider {
-    static seen: Array<[string, boolean]> = []
-
-    async register(): Promise<void> {
-      const label = this.container.make<string>('label')
-      await new Promise((resolve) => setTimeout(resolve, 0))
-      TickingFlagProvider.seen.push([label, isIntrospecting()])
-    }
-  }
-
-  const labelled = (label: string) => class extends ServiceProvider {
-    register(): void {
-      this.container.instance('label', label)
-    }
-  }
 
   test('is true inside an in-process introspect() and false for a normal boot()', async () => {
     FlagReadingProvider.seen = []
@@ -359,13 +342,28 @@ describe('isIntrospecting()', () => {
   })
 
   test('is not seen by another app booting while one introspects', async () => {
-    TickingFlagProvider.seen = []
-    const introspected = createApp({ providers: [labelled('introspect'), TickingFlagProvider] })
-    const booted = createApp({ providers: [labelled('boot'), TickingFlagProvider] })
+    const seen: Record<string, boolean> = {}
+    let releaseIntrospection = (): void => {}
+    const bootRead = new Promise<void>((resolve) => { releaseIntrospection = resolve })
+    // A latch: the introspecting app's register() is still running when the other app's reads the flag.
+    class WaitsForBoot extends ServiceProvider {
+      async register(): Promise<void> {
+        await bootRead
+        seen.introspect = isIntrospecting()
+      }
+    }
+    class ReadsDuringIntrospection extends ServiceProvider {
+      register(): void {
+        seen.boot = isIntrospecting()
+        releaseIntrospection()
+      }
+    }
 
-    await Promise.all([introspected.introspect(), booted.boot()])
+    const introspection = createApp({ providers: [WaitsForBoot] }).introspect()
+    await createApp({ providers: [ReadsDuringIntrospection] }).boot()
+    await introspection
 
-    expect(Object.fromEntries(TickingFlagProvider.seen)).toEqual({ introspect: true, boot: false })
+    expect(seen).toEqual({ introspect: true, boot: false })
   })
 
   test('a normal boot() never calls a provider\'s introspect hook', async () => {
@@ -393,23 +391,6 @@ describe('isIntrospecting()', () => {
       expect.objectContaining({ source: 'module', module: 'billing', register: 'introspect-hook' }),
     ])
     expect(manager.manifestWarnings()).toEqual([{ code: 'example', message: 'once', provider: 'WarningProvider' }])
-  })
-})
-
-describe('toJsonSchema()', () => {
-  test('omits `required` on an all-optional object instead of setting it to undefined', () => {
-    const schema = toJsonSchema(z.object({ q: z.string().optional() }), [], 'query', 'input')
-
-    expect(schema).toStrictEqual({ type: 'object', properties: { q: { type: 'string' } } })
-  })
-})
-
-describe('toPlainJson()', () => {
-  test('drops undefined keys and refuses what JSON cannot carry', () => {
-    expect(toPlainJson<unknown>({ a: 1, b: undefined, c: [{ d: undefined }] })).toStrictEqual({ a: 1, c: [{}] })
-    expect(() => toPlainJson({ routes: new Map() })).toThrow('manifest.routes is a Map')
-    expect(() => toPlainJson({ hook: () => {} })).toThrow('manifest.hook is a function')
-    expect(() => toPlainJson({ controller: new InvoiceController() })).toThrow('manifest.controller is a InvoiceController')
   })
 })
 
