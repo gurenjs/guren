@@ -370,6 +370,30 @@ describe('create-guren-app CLI', () => {
     }
   })
 
+  it('suggests a resource the blog template does not already ship', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-blog-features-')
+    try {
+      logMock.mockClear()
+      await capturedCommand.run({
+        args: {
+          target: join(workspace.dir, 'blog-app'),
+          force: false,
+          mode: 'spa',
+          auth: false,
+          blueprint: 'blog',
+          db: 'sqlite',
+          install: false,
+        },
+      })
+
+      // The blog ships Post, so `add resource posts` refuses to write anything.
+      expect(logged(logMock, 'bunx guren add resource tags')).toBe(true)
+      expect(logged(logMock, 'add resource posts')).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('lists only commands an API-only app accepts, and ignores --auth, for the api blueprint', async () => {
     const workspace = await createTempWorkspace('guren-create-app-cli-api-features-')
     try {

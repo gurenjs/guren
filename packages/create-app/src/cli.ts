@@ -3,7 +3,7 @@ import { relative, resolve } from 'node:path'
 import process from 'node:process'
 import { consola } from 'consola'
 import { defineCommand, runMain } from 'citty'
-import { DATABASE_DRIVERS, getAppBlueprint, listAppBlueprints, scaffoldAppBlueprint, usesDatabaseContainer, type DatabaseDriver, type RenderingMode } from './blueprints'
+import { DATABASE_DRIVERS, DEFAULT_RESOURCE_EXAMPLE, getAppBlueprint, listAppBlueprints, scaffoldAppBlueprint, usesDatabaseContainer, type DatabaseDriver, type RenderingMode } from './blueprints'
 import { directoryExists, isDirectoryEmpty } from './utils'
 import { initGitRepository, isInsideGitWorkTree } from './git'
 
@@ -452,7 +452,7 @@ const command = defineCommand({
       if (!blueprint.includesAuth && !authInstalled) {
         consola.log('  bunx guren add auth')
       }
-      consola.log('  bunx guren add resource posts --fields "title:string,body:text"')
+      consola.log(`  bunx guren add resource ${blueprint.resourceExample ?? DEFAULT_RESOURCE_EXAMPLE}`)
     }
     consola.log('')
     consola.info('Generate types and set up database:')
