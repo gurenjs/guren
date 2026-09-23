@@ -4,12 +4,12 @@
  * descriptor (RFC 0002). `guren check` and `plan:status` judge wiring through it,
  * so the two cannot disagree about whether a module is mounted.
  */
-import { resolve } from 'node:path'
+import { basename, dirname, resolve, sep } from 'node:path'
 import type { File, Node, ObjectExpression } from '@babel/types'
 import { objectLiteral, propertyValue, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
 import { findFirstExisting, moduleDescriptorCandidates, toPosixRelative } from './discovery'
 import type { ParseCache } from './parse-cache'
-import { importsByLocal, specifierBase, withoutExtension } from './schema-binding'
+import { importsByLocal, specifierBase, withoutExtension, type ImportEntry } from './schema-binding'
 
 /** The object literal the first `callee({ … })` call takes; a call passing anything else is skipped. */
 export function firstCallOptions(program: unknown, callee: string): ObjectExpression | null {
@@ -31,6 +31,35 @@ export function createAppOptions(program: unknown): ObjectExpression | null {
   return firstCallOptions(program, 'createApp')
 }
 
+/** One array element traced to its import: `file` absolute and without extension, `null` for a package. */
+export interface ArrayImport {
+  file: string | null
+  kind: ImportEntry['kind']
+}
+
+/**
+ * Each element of an array option traced to the import its identifier names; `null` for an
+ * element that is not an imported identifier. `undefined` when the value is not an array literal.
+ */
+export function importedArrayEntries(
+  declared: Node,
+  program: { body: unknown[] },
+  cwd: string,
+  fromFile: string,
+): Array<ArrayImport | null> | undefined {
+  const array = unwrapTypeAssertion(declared)
+  if (array.type !== 'ArrayExpression') return undefined
+
+  const imports = importsByLocal(program.body as never)
+  return array.elements.map((element) => {
+    const value = element ? unwrapTypeAssertion(element as Node) : null
+    const entry = value?.type === 'Identifier' ? imports.get(value.name) : undefined
+    if (entry === undefined) return null
+    const base = specifierBase(cwd, fromFile, entry.source)
+    return { file: base === null ? null : withoutExtension(base), kind: entry.kind }
+  })
+}
+
 /**
  * Each element of an array option traced to the file its identifier is imported
  * from, absolute and without extension; `null` for an element this cannot trace.
@@ -42,41 +71,48 @@ export function importedArrayFiles(
   cwd: string,
   fromFile: string,
 ): Array<string | null> | undefined {
-  const array = unwrapTypeAssertion(declared)
-  if (array.type !== 'ArrayExpression') return undefined
-
-  const imports = importsByLocal(program.body as never)
-  return array.elements.map((element) => {
-    const value = element ? unwrapTypeAssertion(element as Node) : null
-    const source = value?.type === 'Identifier' ? imports.get(value.name)?.source : undefined
-    const base = source === undefined ? null : specifierBase(cwd, fromFile, source)
-    return base === null ? null : withoutExtension(base)
-  })
+  return importedArrayEntries(declared, program, cwd, fromFile)?.map((entry) => entry?.file ?? null)
 }
 
 /**
- * Whether `createApp({ providers, config })` in `entryFile` imports one of `files` (absolute),
- * traced as `importedArrayFiles` traces them. `null` is no evidence: options or an array that
- * is not a literal, or an element this cannot trace, which may be one of them.
+ * Whether `createApp({ providers, config })` in `entryFile` imports one of `files` (absolute).
+ * `null` is no evidence: options or an array that is not a literal, or an element that may be
+ * one of them under another path (see {@link mayReexport}).
  */
 export function createAppListsFile(program: File['program'], cwd: string, entryFile: string, files: readonly string[]): boolean | null {
   const options = createAppOptions(program)
   if (!options) return null
-  const wanted = new Set(files.map(withoutExtension))
+  const wanted = files.map(withoutExtension)
+  // A file at `<dir>/index.ts` is imported as `<dir>`.
+  const names = new Set(wanted.flatMap((file) => (basename(file) === 'index' ? [file, dirname(file)] : [file])))
   let untraced = false
   for (const key of ['providers', 'config']) {
     const declared = propertyValue(options, key)
-    const listed = declared === undefined
+    const entries = declared === undefined
       ? (hidesKeys(options) ? undefined : [])
-      : importedArrayFiles(declared, program, cwd, entryFile)
-    if (listed === undefined) {
+      : importedArrayEntries(declared, program, cwd, entryFile)
+    if (entries === undefined) {
       untraced = true
       continue
     }
-    if (listed.some((file) => file !== null && wanted.has(file))) return true
-    if (listed.includes(null)) untraced = true
+    for (const entry of entries) {
+      if (entry?.file != null && names.has(entry.file)) return true
+      if (mayReexport(entry, wanted)) untraced = true
+    }
   }
   return untraced ? null : false
+}
+
+/**
+ * Whether an element traced elsewhere may still be one of `wanted`: an untraced one, a named or
+ * namespace import from an app file (a barrel), or a default import of a directory holding one.
+ * A package import never is an app file.
+ */
+function mayReexport(entry: ArrayImport | null, wanted: readonly string[]): boolean {
+  if (entry === null) return true
+  if (entry.file === null) return false
+  const file = entry.file
+  return entry.kind !== 'default' || wanted.some((target) => target.startsWith(`${file}${sep}`))
 }
 
 /**

@@ -1416,7 +1416,7 @@ async function warnAboutStalePasswordScaffold(): Promise<void> {
   }
   if (mail.length > 0) {
     consola.warn(
-      `${mail.join(', ')} set up mail, for an earlier make:auth run or for guren add mail. If nothing else sends mail, delete them too, and remove MailProvider and CoreMailServiceProvider, or mail in the config array, from your app entry.`,
+      `${mail.join(', ')} set up mail, for an earlier make:auth run or for guren add mail. If nothing else sends mail, delete them and remove MailProvider and CoreMailServiceProvider, or mail in the config array, from your app entry.`,
     )
   }
 }

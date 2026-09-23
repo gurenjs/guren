@@ -1737,7 +1737,7 @@ export default class NotifierProvider extends ServiceProvider {
       const passwordOnly = warnings.find((line) => line.includes('serve password login only'))
       expect(passwordOnly).toContain('app/Mail/PasswordResetMail.ts')
       expect(passwordOnly).not.toContain('MailProvider.ts')
-      expect(warnings).toContain('app/Providers/MailProvider.ts set up mail, for an earlier make:auth run or for guren add mail. If nothing else sends mail, delete them too, and remove MailProvider and CoreMailServiceProvider, or mail in the config array, from your app entry.')
+      expect(warnings).toContain('app/Providers/MailProvider.ts set up mail, for an earlier make:auth run or for guren add mail. If nothing else sends mail, delete them and remove MailProvider and CoreMailServiceProvider, or mail in the config array, from your app entry.')
     } finally {
       await workspace.cleanup()
     }
