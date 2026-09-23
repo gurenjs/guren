@@ -1,5 +1,4 @@
 import { resolve, relative } from 'node:path'
-import { readFile } from 'node:fs/promises'
 import { consola } from 'consola'
 import type { Statement } from '@babel/types'
 import {
@@ -53,7 +52,9 @@ import {
   checkAttachmentsPublicDisk,
 } from './attachments-check'
 import { checkAgentsConfig, type AgentsConfigExpansion } from './agents-config-check'
-import { findSchemaAggregate, parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
+import { declaredTableIdentifiers, findSchemaAggregate, parseSchemaTables, schemaPathFor, type SchemaAggregate, type SchemaTable } from './schema-parser'
+import { schemaModuleFor } from './schema-binding'
+import { camelCase } from './utils'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { describePageManifestSuppression, PAGES_MANIFEST_FILE, planPageManifest } from './pages-types'
@@ -211,58 +212,66 @@ async function loadRouteGraph(
 }
 
 /**
+ * The modules whose schema `db/schema.ts` re-exports (`export *`, or a named `export … from`),
+ * read from the AST: the root also *imports* a module's schema to spread its aggregate, and
+ * that import alone puts none of the module's tables in the root's exports. Null when the
+ * root does not parse.
+ */
+async function reExportedSchemaModules(cwd: string, cache: ParseCache): Promise<Set<string> | null> {
+  const rootSchemaPath = resolve(cwd, schemaPathFor(null))
+  const outcome = await cache.read(rootSchemaPath)
+  if (outcome.status !== 'parsed') return null
+
+  const modules = new Set<string>()
+  for (const statement of outcome.ast.program.body) {
+    if (statement.type !== 'ExportAllDeclaration' && statement.type !== 'ExportNamedDeclaration') continue
+    if (!statement.source) continue
+    const module = schemaModuleFor(cwd, rootSchemaPath, statement.source.value)
+    if (typeof module === 'string') modules.add(module)
+  }
+  return modules
+}
+
+/**
  * Verifies every `modules/<name>/db/schema.ts` is re-exported from the project's
  * root `db/schema.ts` (RFC 0002). A project without a root `db/schema.ts` warns
  * rather than fails, since not every app uses a database.
  */
-async function checkModuleSchemaAggregation(cwd: string): Promise<CheckResult[]> {
+async function checkModuleSchemaAggregation(cwd: string, cache: ParseCache): Promise<CheckResult[]> {
   const results: CheckResult[] = []
-  const moduleNames = await listModuleNames(cwd)
+  const rootSchemaPath = schemaPathFor(null)
+  const rootExists = await fileExists(cwd, rootSchemaPath)
+  const reExported = rootExists ? await reExportedSchemaModules(cwd, cache) : null
 
-  for (const moduleName of moduleNames) {
-    const moduleSchemaPath = `modules/${moduleName}/db/schema.ts`
+  for (const moduleName of await listModuleNames(cwd)) {
+    const moduleSchemaPath = schemaPathFor(moduleName)
     if (!(await fileExists(cwd, moduleSchemaPath))) continue
 
-    const rootSchemaPath = 'db/schema.ts'
-    if (!(await fileExists(cwd, rootSchemaPath))) {
-      results.push(
-        check(
-          `module-schema-aggregation:${moduleName}`,
-          `${moduleName} schema aggregation`,
-          'warn',
-          `${moduleSchemaPath} exists but there is no root ${rootSchemaPath} to re-export it from.`,
-          `Create ${rootSchemaPath} and add: export * from '../modules/${moduleName}/db/schema'`,
-        ),
-      )
-      continue
+    const reExport = `export * from '../modules/${moduleName}/db/schema'`
+    const id = `module-schema-aggregation:${moduleName}`
+    const label = `${moduleName} schema aggregation`
+
+    if (!rootExists) {
+      results.push(check(id, label, 'warn', `${moduleSchemaPath} exists but there is no root ${rootSchemaPath} to re-export it from.`, `Create ${rootSchemaPath} and add: ${reExport}`))
+    } else if (!reExported) {
+      results.push(check(id, label, 'warn', `${rootSchemaPath} does not parse, so whether it re-exports ${moduleSchemaPath} is unknown.`))
+    } else if (reExported.has(moduleName)) {
+      results.push(check(id, label, 'pass', `${rootSchemaPath} re-exports ${moduleSchemaPath}.`))
+    } else {
+      results.push(check(id, label, 'warn', `${rootSchemaPath} does not re-export ${moduleSchemaPath}.`, `Add to ${rootSchemaPath}: ${reExport}`))
     }
-
-    const rootSchemaContent = await readFile(resolve(cwd, rootSchemaPath), 'utf-8')
-    // Substring match, tolerant of quote style and a trailing .js/.ts extension.
-    const isReExported = rootSchemaContent.includes(`modules/${moduleName}/db/schema`)
-
-    results.push(
-      check(
-        `module-schema-aggregation:${moduleName}`,
-        `${moduleName} schema aggregation`,
-        isReExported ? 'pass' : 'warn',
-        isReExported
-          ? `${rootSchemaPath} re-exports ${moduleSchemaPath}.`
-          : `${rootSchemaPath} does not re-export ${moduleSchemaPath}.`,
-        isReExported ? undefined : `Add to ${rootSchemaPath}: export * from '../modules/${moduleName}/db/schema'`,
-      ),
-    )
   }
 
   return results
 }
 
 /**
- * The hand-kept aggregate object (`export const schema = { posts, users }`) missing a table
- * the same file declares. Gating only where the file itself identifies the object
- * (`findSchemaAggregate`'s `confident`) — on a shape match alone the report is a guess, and a
- * grouping the app keeps for itself must not turn a correct schema's CI red. Content-activated;
- * a root reaching module tables through `export *` lists no identifier to be asked for.
+ * A hand-kept aggregate object (`export const schema = { posts, users }`) missing a table:
+ * one its own file declares, or, for the root's, a module table the object neither lists
+ * nor hands to that module's aggregate by a spread. Gating only where the file itself
+ * identifies the object (`findSchemaAggregate`'s `confident`) — on a shape match alone the
+ * report is a guess, and a grouping the app keeps for itself must not turn a correct
+ * schema's CI red. Content-activated.
  */
 async function checkSchemaAggregateKeys(cwd: string, cache: ParseCache): Promise<CheckResult[]> {
   const results: CheckResult[] = []
@@ -270,23 +279,48 @@ async function checkSchemaAggregateKeys(cwd: string, cache: ParseCache): Promise
   // Roots, not `schemaTables`: a table whose columns are passed as an identifier is one
   // `declaredTableIdentifiers` keeps and `parseSchemaTables` drops, and a file holding only
   // those would never be visited. `read()`, so a root with no schema records no skip.
+  const schemas: Array<{ module: string | null; relPath: string; aggregate: SchemaAggregate | null; declared: Set<string> }> = []
   for (const { module } of await listAppRoots(cwd)) {
     const relPath = schemaPathFor(module)
-    const outcome = await cache.read(resolve(cwd, relPath))
+    const file = resolve(cwd, relPath)
+    const outcome = await cache.read(file)
     if (outcome.status !== 'parsed') continue
+    schemas.push({
+      module,
+      relPath,
+      aggregate: findSchemaAggregate(outcome.ast, { location: { cwd, file } }),
+      declared: declaredTableIdentifiers(outcome.ast),
+    })
+  }
 
-    const aggregate = findSchemaAggregate(outcome.ast)
+  for (const { module, relPath, aggregate } of schemas) {
     if (!aggregate) continue
 
+    const own = [...aggregate.declared].filter((name) => !aggregate.keys.includes(name))
+    // Only the root's object is the one drizzle is handed; a module's lists its own tables.
+    const fromModules = module !== null ? [] : schemas.flatMap((other) => {
+      if (other.module === null || aggregate.delegated.has(other.module)) return []
+      const listed = new Set([...aggregate.imported.values()].filter((entry) => entry.module === other.module).map((entry) => entry.name))
+      const missing = [...other.declared].filter((name) => !listed.has(name))
+      return missing.length === 0 ? [] : [{ module: other.module, relPath: other.relPath, missing }]
+    })
+
     const scope = module ?? 'app'
-    const missing = [...aggregate.declared].filter((name) => !aggregate.keys.includes(name))
+    const missing = [...own, ...fromModules.flatMap((entry) => entry.missing.map((name) => `${name} (${entry.relPath})`))]
     const complete = missing.length === 0
 
     // The fix splits on the same evidence the writer does: on a shape match alone no
     // scaffolder will add the key either, so it names what would make them.
-    const fix = aggregate.confident
-      ? `Add ${missing.join(', ')} to it, keeping each table's own declaration above the object.`
-      : `Nothing identifies this object as the schema, so scaffolders leave it alone: name it \`schema\` or read it in a \`typeof\` to have them keep it current, or add ${missing.join(', ')} by hand.`
+    const fixes: string[] = []
+    if (!aggregate.confident) {
+      fixes.push(`Nothing identifies this object as the schema, so scaffolders leave it alone: name it \`schema\` or read it in a \`typeof\` to have them keep it current, or add ${missing.join(', ')} by hand.`)
+    } else {
+      if (own.length > 0) fixes.push(`Add ${own.join(', ')} to it, keeping each table's own declaration above the object.`)
+      for (const entry of fromModules) {
+        const identifier = `${camelCase(entry.module)}Schema`
+        fixes.push(`Keep ${entry.relPath}'s tables in its own \`export const ${identifier} = { … }\` and spread it into this object: \`...${identifier}\`, imported from '../modules/${entry.module}/db/schema'.`)
+      }
+    }
 
     results.push({
       ...check(
@@ -294,9 +328,9 @@ async function checkSchemaAggregateKeys(cwd: string, cache: ParseCache): Promise
         `${scope} schema object`,
         complete ? 'pass' : 'warn',
         complete
-          ? `The schema object in ${relPath} lists every table the file declares.`
+          ? `The schema object in ${relPath} lists every table ${module === null ? 'the app declares' : 'the file declares'}.`
           : `The schema object in ${relPath} does not list ${formatTruncatedList(missing)}.`,
-        complete ? undefined : fix,
+        complete ? undefined : fixes.join(' '),
       ),
       advisory: !aggregate.confident,
     })
@@ -444,12 +478,13 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
 
     // 6. Check every module's db/schema.ts is re-exported from the root
     // db/schema.ts, for modules created or edited by hand.
-    const schemaAggregationResults = await checkModuleSchemaAggregation(cwd)
+    const schemaAggregationResults = await checkModuleSchemaAggregation(cwd, cache)
     checks.push(...schemaAggregationResults)
 
-    // 6.5. Check the app's own aggregate object lists every table its file
-    // declares, for a table added by hand or by a release before the
-    // scaffolders wrote the key. Not changed-filtered, for check 8's reason.
+    // 6.5. Check each aggregate object lists every table its file declares, and
+    // the root's every module table it does not spread, for a table added by hand
+    // or by a release before the scaffolders wrote the key. Not changed-filtered,
+    // for check 8's reason.
     checks.push(...(await checkSchemaAggregateKeys(cwd, cache)))
 
     // 7. Check every console command is registered with a kernel, for commands

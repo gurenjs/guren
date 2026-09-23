@@ -2,7 +2,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { makeModule } from '../src/make-module'
-import { captureWarnings, createTempWorkspace } from './helpers'
+import { runCheck } from '../src/check'
+import { captureWarnings, checkTypes, createTempWorkspace, PG_SCHEMA_FIXTURE, renderedAppCompilerOptions, TSC_TIMEOUT, writeWorkspaceFiles } from './helpers'
 
 describe('makeModule', () => {
   it('scaffolds index.ts, routes.ts, and db/schema.ts', async () => {
@@ -83,6 +84,70 @@ describe('makeModule', () => {
       await workspace.cleanup()
     }
   })
+
+  it('leaves the module schema a bare module when the root keeps no schema object', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-module-no-aggregate-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': PG_SCHEMA_FIXTURE })
+
+      await makeModule('billing')
+
+      expect(await readFile(join(workspace.dir, 'modules/billing/db/schema.ts'), 'utf8')).toContain('export {}')
+      expect(await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')).not.toContain('billingSchema')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it(
+    'gives the module an aggregate the root schema object spreads, and check holds both to their tables',
+    async () => {
+      const workspace = await createTempWorkspace('guren-cli-make-module-aggregate-')
+      const aggregateCheck = async (scope: string) =>
+        (await runCheck({ cwd: workspace.dir })).checks.find((c) => c.key === `schema-aggregate-keys:${scope}`)
+      try {
+        await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': `${PG_SCHEMA_FIXTURE}\nexport const schema = { users }\n` })
+
+        await makeModule('Billing')
+
+        const root = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+        expect(root).toContain("import { billingSchema } from '../modules/billing/db/schema'")
+        expect(root).toContain('export const schema = { users, ...billingSchema }')
+        expect(await readFile(join(workspace.dir, 'modules/billing/db/schema.ts'), 'utf8')).toContain('export const billingSchema = {}')
+        expect((await aggregateCheck('app'))!.status).toBe('pass')
+
+        // The author's next step: a table the module declares and forgets to list.
+        const moduleSchema = `import { pgTable, serial } from '@guren/orm/drizzle/pg'
+
+export const invoices = pgTable('invoices', {
+  id: serial('id').primaryKey(),
+})
+
+export const billingSchema = {}
+export type BillingSchema = typeof billingSchema
+`
+        await writeWorkspaceFiles(workspace.dir, { 'modules/billing/db/schema.ts': moduleSchema })
+        const unlisted = await aggregateCheck('billing')
+        expect(unlisted!.status).toBe('warn')
+        expect(unlisted!.advisory).toBe(false)
+        expect(unlisted!.message).toContain('invoices')
+
+        await writeWorkspaceFiles(workspace.dir, { 'modules/billing/db/schema.ts': moduleSchema.replace('billingSchema = {}', 'billingSchema = { invoices }') })
+        expect((await aggregateCheck('billing'))!.status).toBe('pass')
+        expect((await aggregateCheck('app'))!.status).toBe('pass')
+        const program = ['db/schema.ts', 'modules/billing/db/schema.ts'].map((file) => join(workspace.dir, file))
+        expect(checkTypes(program, renderedAppCompilerOptions(workspace.dir))).toEqual([])
+
+        await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': root.replace(', ...billingSchema', '') })
+        const unspread = await aggregateCheck('app')
+        expect(unspread!.status).toBe('warn')
+        expect(unspread!.message).toContain('invoices (modules/billing/db/schema.ts)')
+      } finally {
+        await workspace.cleanup()
+      }
+    },
+    TSC_TIMEOUT,
+  )
 
   it('skips schema patching when the project has no db/schema.ts', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-module-no-schema-')

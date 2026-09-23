@@ -1,10 +1,11 @@
 import { readFile, writeFile } from 'node:fs/promises'
+import type { ObjectExpression } from '@babel/types'
 import { consola } from 'consola'
 import { readIfExists } from './discovery'
 import { DIALECT_BARRELS, DRIZZLE_CORE_SUBPATHS } from './drizzle-specifiers'
 import { parseSourceFile } from './parse-cache'
 import { posix, resolve } from 'node:path'
-import { findSchemaAggregate, type SchemaDialect } from './schema-parser'
+import { findSchemaAggregate, schemaPathFor, type SchemaAggregate, type SchemaDialect } from './schema-parser'
 import { escapeRegExp } from './utils'
 
 export interface PatchResult {
@@ -774,22 +775,22 @@ function statementStart(source: string, offset: number): number {
 }
 
 /**
- * Where `name`'s declaration and its aggregate key go, from the one aggregate reading in
- * `schema-parser.ts`, for an aggregate the file itself identifies. `name` is passed as the
- * extra key so a re-run over a file that already declares the table still recognizes the
- * object listing it.
+ * The root schema's aggregate, from the one aggregate reading in `schema-parser.ts`, when the
+ * file itself identifies it. A shape match the file does not identify is not enough to edit a
+ * hand-kept object: `guren check` grades the same match advisory.
  */
-function planAggregateSplice(source: string, name: string): AggregateSplice | null {
-  const ast = parseSourceFile(source, 'db/schema.ts')
-  const aggregate = ast && findSchemaAggregate(ast, name)
-  // A shape match the file does not identify is not enough to edit a hand-kept object:
-  // `guren check` grades the same match advisory. Null here also silences
-  // `appendSchemaTable`'s stale-aggregate warning, deliberately — advising by hand the
-  // edit the writer itself declined is that same guess in prose.
-  if (!aggregate?.confident) return null
+function identifiedRootAggregate(source: string, extraKey?: string): SchemaAggregate | null {
+  const file = schemaPathFor(null)
+  const ast = parseSourceFile(source, file)
+  const location = { cwd: process.cwd(), file: resolve(process.cwd(), file) }
+  const aggregate = ast && findSchemaAggregate(ast, { extraKey, location })
+  return aggregate?.confident ? aggregate : null
+}
 
-  const { object, statement, keys } = aggregate
+/** Where one more entry goes in the aggregate's object literal, and its text. */
+function aggregateEntrySplice(source: string, object: ObjectExpression, entry: string): { offset: number; text: string } | null {
   const last = object.properties[object.properties.length - 1]
+  if (!last) return object.start == null ? null : { offset: object.start + 1, text: ` ${entry} ` }
   const lastStart = last.start ?? -1
   const lastEnd = last.end ?? -1
   if (lastStart < 0 || lastEnd < 0) return null
@@ -802,14 +803,58 @@ function planAggregateSplice(source: string, name: string): AggregateSplice | nu
   const lineEnd = source.indexOf('\n', lastEnd)
   const commented = multiline && lineEnd > 0 && /^\s*,\s*\/\//.test(source.slice(lastEnd, lineEnd))
 
-  return {
-    declarationOffset: statementStart(source, statement.start ?? 0),
-    key: keys.includes(name)
-      ? null
-      : commented
-        ? { offset: lineEnd, text: `\n${indent}${name},` }
-        : { offset: lastEnd, text: `${multiline ? `,\n${indent}` : ', '}${name}` },
-  }
+  return commented
+    ? { offset: lineEnd, text: `\n${indent}${entry},` }
+    : { offset: lastEnd, text: `${multiline ? `,\n${indent}` : ', '}${entry}` }
+}
+
+/**
+ * Where `name`'s declaration and its aggregate key go. `name` is passed as the extra key so
+ * a re-run over a file that already declares the table still recognizes the object listing
+ * it. Null also silences `appendSchemaTable`'s stale-aggregate warning, deliberately:
+ * advising by hand the edit the writer itself declined is the same guess in prose.
+ */
+function planAggregateSplice(source: string, name: string): AggregateSplice | null {
+  const aggregate = identifiedRootAggregate(source, name)
+  if (!aggregate) return null
+
+  const declarationOffset = statementStart(source, aggregate.statement.start ?? 0)
+  if (aggregate.keys.includes(name)) return { declarationOffset, key: null }
+  const key = aggregateEntrySplice(source, aggregate.object, name)
+  return key && { declarationOffset, key }
+}
+
+/**
+ * `source` (the root `db/schema.ts`) with `...identifier` spread into its schema object, handing
+ * `module`'s tables to that module's own aggregate. `unchanged` when the object already spreads
+ * one from `module`; null when the file identifies no aggregate, so there is nothing to keep.
+ */
+export function spreadModuleIntoSchema(source: string, module: string, identifier: string): string | 'unchanged' | null {
+  const aggregate = identifiedRootAggregate(source)
+  if (!aggregate) return null
+  if (aggregate.delegated.has(module)) return 'unchanged'
+  const entry = aggregateEntrySplice(source, aggregate.object, `...${identifier}`)
+  if (!entry) return null
+  return source.slice(0, entry.offset) + entry.text + source.slice(entry.offset)
+}
+
+/**
+ * Spreads `module`'s aggregate into the root schema object and imports it, the import only
+ * once the spread lands: an import nothing reads fails `noUnusedLocals`. `alreadyPresent`
+ * when the object already spreads one from `module`.
+ */
+export async function addModuleSchemaSpread(module: string, identifier: string): Promise<PatchResult> {
+  const file = schemaPathFor(null)
+  const source = await readIfExists(process.cwd(), file)
+  if (source === null) return { modified: false, reason: PATCH_REASONS.fileNotFound }
+
+  const spread = spreadModuleIntoSchema(source, module, identifier)
+  if (spread === 'unchanged') return { modified: false, reason: PATCH_REASONS.alreadyPresent }
+  if (spread === null) return { modified: false, reason: `${file} has no schema object it identifies as one` }
+
+  const imported = insertImport(spread, `import { ${identifier} } from '../modules/${module}/db/schema'`) ?? spread
+  await writeFile(resolve(process.cwd(), file), imported, 'utf8')
+  return { modified: true }
 }
 
 /** The offset the line containing `offset` starts at. */

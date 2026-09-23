@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { parseSourceFile } from '../src/parse-cache'
-import { addEntryWithImport, addImport, addToArrayArgument, addToArrayOption, appendSchemaTable, insertArrayArgumentEntry, insertArrayOptionEntry, insertImport, PATCH_REASONS } from '../src/patch-helpers'
+import { addEntryWithImport, addImport, addToArrayArgument, addToArrayOption, appendSchemaTable, insertArrayArgumentEntry, insertArrayOptionEntry, insertImport, PATCH_REASONS, spreadModuleIntoSchema } from '../src/patch-helpers'
 import { captureWarnings, createTempWorkspace, PG_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
 
 describe('addImport', () => {
@@ -828,6 +828,53 @@ export const schema = { users, posts, sessions }
     expect(content).toContain('export const schema = { users, posts, sessions }')
     expect(content).not.toContain('sessions, sessions')
     expect(content.indexOf('export const sessions =')).toBeLessThan(content.indexOf('export const schema ='))
+  })
+  it('adds the identifier after a module spread the object hands its tables to', async () => {
+    const content = await appendSessions(`${PG_TABLES}
+import { billingSchema } from '../modules/billing/db/schema'
+
+export const schema = { users, ...billingSchema }
+`)
+
+    expect(content).toContain('export const schema = { users, ...billingSchema, sessions }')
+  })
+
+  it('fills an empty schema object the file identifies', async () => {
+    const content = await appendSessions(`${PG_TABLES}
+export const schema = {}
+`)
+
+    expect(content).toContain('export const schema = { sessions }')
+    expect(content.indexOf('export const sessions =')).toBeLessThan(content.indexOf('export const schema ='))
+  })
+})
+
+describe('spreadModuleIntoSchema', () => {
+  it('spreads the module aggregate into the root schema object', () => {
+    const updated = spreadModuleIntoSchema(`${PG_TABLES}
+export const schema = {
+  users,
+  posts,
+}
+`, 'billing', 'billingSchema')
+
+    expect(updated).toContain('  posts,\n  ...billingSchema,\n}')
+  })
+
+  it('leaves an object already spreading the module unchanged, whatever it spreads it as', () => {
+    const source = `${PG_TABLES}
+import * as billing from '../modules/billing/db/schema'
+
+export const schema = { users, posts, ...billing }
+`
+    expect(spreadModuleIntoSchema(source, 'billing', 'billingSchema')).toBe('unchanged')
+  })
+
+  it('declines a root whose object nothing identifies as the schema', () => {
+    expect(spreadModuleIntoSchema(`${PG_TABLES}
+export const authTables = { users }
+`, 'billing', 'billingSchema')).toBeNull()
+    expect(spreadModuleIntoSchema(PG_TABLES, 'billing', 'billingSchema')).toBeNull()
   })
 })
 

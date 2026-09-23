@@ -360,6 +360,8 @@ bunx guren make:module Billing
 
 `modules/billing/{index.ts, routes.ts, db/schema.ts}` が生成され、配線も自動で行われます。`db/schema.ts` には `export * from '../modules/billing/db/schema'` が追加され、`src/app.ts` には `billingModule` の import と `createApp({ modules: [...] })` への登録が追加されます。
 
+ルートの `db/schema.ts` が drizzle に渡すスキーマオブジェクト(`export const schema = { posts, users }` のように、名前が `schema` か `typeof` で参照されているもの)を持っている場合は、モジュール側にも `export const billingSchema = {}` が生成され、ルートのオブジェクトがそれを展開します(`{ posts, users, ...billingSchema }`)。モジュールのテーブルは `modules/billing/db/schema.ts` に宣言し、それぞれを `billingSchema` に列挙してください。どちらかのオブジェクトからテーブルが漏れていると `guren check` が報告します。ルートのオブジェクトが列挙も展開もしていないモジュールのテーブルも対象です。
+
 ほとんどの `make:*` コマンドは `--module <name>` を受け付け、プロジェクトルートの代わりにモジュール内にスキャフォールドできます:
 
 ```bash

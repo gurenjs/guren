@@ -19,6 +19,7 @@ import {
   walk,
 } from './ast-walk'
 import { listAppRoots } from './discovery'
+import { importsByLocal, schemaModuleFor } from './schema-binding'
 import { isDrizzleBuilderSpecifier } from './drizzle-specifiers'
 import { parseSourceFile } from './parse-cache'
 
@@ -132,7 +133,7 @@ function* tableDeclarations(ast: File): Generator<{ identifier: string; call: Ca
  * `parseSchemaTables` it keeps a table whose columns are passed as an identifier rather
  * than a literal — the difference that decides which tables an aggregate is asked for.
  */
-function declaredTableIdentifiers(ast: File): Set<string> {
+export function declaredTableIdentifiers(ast: File): Set<string> {
   return new Set([...tableDeclarations(ast)].map((table) => table.identifier))
 }
 
@@ -141,16 +142,30 @@ export interface SchemaAggregate {
   object: ObjectExpression
   /** The statement declaring it, whose start a table's own declaration must precede. */
   statement: Statement
-  /** Table identifiers the object lists, in source order. */
+  /** Keys the object lists, in source order: tables the file declares and `imported` ones. */
   keys: string[]
   /** Every table the same file declares. */
   declared: Set<string>
+  /** Keys naming a binding imported from a module's schema, by local name. */
+  imported: Map<string, { module: string; name: string }>
+  /** Modules whose schema the object spreads (`...billingSchema`), handing their tables to that file. */
+  delegated: Set<string>
   /**
    * The file's own evidence that this object is the schema drizzle is handed: named
    * `schema`, or read by a `typeof`. False leaves a caller holding a shape match alone,
    * which a grouping of table shorthands satisfies just as well.
    */
   confident: boolean
+}
+
+export interface FindSchemaAggregateOptions {
+  /** A key accepted as if the file declared it: the table a writer is about to add. */
+  extraKey?: string
+  /**
+   * Where the file sits, so an import can be resolved to the module schema it names.
+   * Without it, a key or spread reaching another file is not evidence of an aggregate.
+   */
+  location?: { cwd: string; file: string }
 }
 
 /** Whether the file reads `name` in a `typeof` position — `export type X = typeof schema`. */
@@ -166,15 +181,24 @@ function typeQueried(ast: File, name: string): boolean {
 }
 
 /**
- * The app's hand-kept aggregate of its own tables — `export const schema = { posts, users }`,
+ * The app's hand-kept aggregate of its tables — `export const schema = { posts, users }`,
  * handed to drizzle for relational queries. Nothing the framework generates reads it, so a
  * table missing a key here leaves it incomplete with nothing to notice. Positive evidence only:
- * every property a shorthand (or `name: name`) reference to a table this file declares,
- * `extraKey` excepted; a second candidate answers null, and `confident` grades what is left.
+ * every property a shorthand (or `name: name`) reference to a table this file declares, a key
+ * or a spread imported from a module's schema, or `extraKey`; an empty object only when
+ * `confident`. A second candidate answers null, and `confident` grades what is left.
  */
-export function findSchemaAggregate(ast: File, extraKey?: string): SchemaAggregate | null {
+export function findSchemaAggregate(ast: File, options: FindSchemaAggregateOptions = {}): SchemaAggregate | null {
+  const { extraKey, location } = options
   const declared = declaredTableIdentifiers(ast)
-  if (declared.size === 0) return null
+  const moduleImports = new Map<string, { module: string; name: string; namespace: boolean }>()
+  if (location) {
+    for (const [local, entry] of importsByLocal(ast.program.body)) {
+      if (entry.kind === 'default') continue
+      const module = schemaModuleFor(location.cwd, location.file, entry.source)
+      if (typeof module === 'string') moduleImports.set(local, { module, name: entry.imported, namespace: entry.kind === 'namespace' })
+    }
+  }
 
   let found: SchemaAggregate | null = null
 
@@ -184,13 +208,23 @@ export function findSchemaAggregate(ast: File, extraKey?: string): SchemaAggrega
 
     for (const declarator of declaration.declarations) {
       const object = objectLiteral(declarator.init)
-      if (!object || object.properties.length === 0) continue
-      if (declarator.id.type !== 'Identifier') continue
+      if (!object || declarator.id.type !== 'Identifier') continue
 
       const keys: string[] = []
+      const imported = new Map<string, { module: string; name: string }>()
+      const delegated = new Set<string>()
       let isAggregate = true
 
       for (const property of object.properties) {
+        if (property.type === 'SpreadElement') {
+          const source = property.argument.type === 'Identifier' ? moduleImports.get(property.argument.name) : undefined
+          if (!source) {
+            isAggregate = false
+            break
+          }
+          delegated.add(source.module)
+          continue
+        }
         if (property.type !== 'ObjectProperty') {
           isAggregate = false
           break
@@ -198,20 +232,25 @@ export function findSchemaAggregate(ast: File, extraKey?: string): SchemaAggrega
         const key = memberKeyName(property)
         const referencesKey =
           property.shorthand || (property.value.type === 'Identifier' && property.value.name === key)
-        if (!key || !referencesKey || !(declared.has(key) || key === extraKey)) {
+        const source = key ? moduleImports.get(key) : undefined
+        if (!key || !referencesKey || !(declared.has(key) || key === extraKey || (source && !source.namespace))) {
           isAggregate = false
           break
         }
+        if (source && !declared.has(key)) imported.set(key, { module: source.module, name: source.name })
         keys.push(key)
       }
       if (!isAggregate) continue
+
+      const name = declarator.id.name
+      const confident = name === 'schema' || typeQueried(ast, name)
+      if (object.properties.length === 0 && !confident) continue
 
       // A second candidate means the file's shape does not identify one aggregate,
       // so neither can this.
       if (found) return null
 
-      const name = declarator.id.name
-      found = { object, statement: node, keys, declared, confident: name === 'schema' || typeQueried(ast, name) }
+      found = { object, statement: node, keys, declared, imported, delegated, confident }
     }
   }
 

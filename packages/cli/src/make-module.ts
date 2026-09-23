@@ -1,7 +1,8 @@
 import { consola } from 'consola'
 import { assertCwdUnsupported, camelCase, pascalCase, relativeImportPath, safeModuleName, writeScaffoldFiles, type WriterOptions } from './utils'
-import { addImport, addToArrayOption, PATCH_REASONS } from './patch-helpers'
-import { fileExists } from './discovery'
+import { addImport, addModuleSchemaSpread, addToArrayOption, PATCH_REASONS, spreadModuleIntoSchema } from './patch-helpers'
+import { fileExists, readIfExists } from './discovery'
+import { schemaPathFor } from './schema-parser'
 import { APP_ENTRY_CANDIDATES, resolveAppEntry } from './provider-registrar'
 
 export interface MakeModuleResult {
@@ -39,8 +40,19 @@ export function register${pascalName}Routes(router: Router): void {
 }
 `
 
-  // `export {}` keeps the file a module: the root schema's `export *` fails on a script (TS2306).
-  const schemaContents = `// Define this module's Drizzle tables here.
+  // A root schema object is what drizzle is handed, so the module keeps its own for the
+  // root to spread; without one, `export {}` keeps the file a module: the root schema's
+  // `export *` fails on a script (TS2306).
+  const aggregate = `${camelName}Schema`
+  const rootSchema = await readIfExists(process.cwd(), schemaPathFor(null))
+  const spreadsIntoRoot = rootSchema !== null && spreadModuleIntoSchema(rootSchema, moduleName, aggregate) !== null
+  const schemaContents = spreadsIntoRoot
+    ? `// Define this module's Drizzle tables here and list each one in ${aggregate},
+// which the project's db/schema.ts spreads into its schema object.
+export const ${aggregate} = {}
+export type ${pascalName}Schema = typeof ${aggregate}
+`
+    : `// Define this module's Drizzle tables here.
 // Re-exported into the project's db/schema.ts by \`guren make:module\`.
 export {}
 `
@@ -55,6 +67,7 @@ export {}
   )
 
   await patchRootSchema(moduleDir)
+  if (spreadsIntoRoot) await patchRootSchemaObject(moduleName, aggregate)
   await patchAppEntry(moduleDir, camelName)
 
   return { moduleDir, filesCreated }
@@ -79,6 +92,19 @@ async function patchRootSchema(moduleDir: string): Promise<void> {
   } else {
     consola.warn(`Could not add the schema re-export automatically: ${result.reason}`)
     consola.info(`Add \`${reExport}\` to ${rootSchemaPath}.`)
+  }
+}
+
+async function patchRootSchemaObject(moduleName: string, aggregate: string): Promise<void> {
+  const rootSchemaPath = schemaPathFor(null)
+  const result = await addModuleSchemaSpread(moduleName, aggregate)
+  if (result.modified) {
+    consola.success(`Spread ${aggregate} into the schema object in ${rootSchemaPath}`)
+  } else if (result.reason === PATCH_REASONS.alreadyPresent) {
+    consola.info(`The schema object in ${rootSchemaPath} already spreads modules/${moduleName}'s tables`)
+  } else {
+    consola.warn(`Could not spread ${aggregate} into the schema object automatically: ${result.reason}`)
+    consola.info(`Import ${aggregate} from '../modules/${moduleName}/db/schema' in ${rootSchemaPath} and add \`...${aggregate}\` to its schema object.`)
   }
 }
 
