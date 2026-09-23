@@ -384,6 +384,8 @@ export const billingModule = defineModule({
 })
 ```
 
+モジュール自身だけが使うサービスの config 定義も、モジュールに持たせられます。`modules/<name>/config/` に置き、`defineModule({ config: [...] })` に並べてください。これらはアプリの `createApp({ config })` の後にバインドされ、キーを共有します。そのため、同じキーを両方で定義すると起動に失敗します([設定](./configuration.md#モジュールが持つ定義)を参照)。`guren check` は、`createApp({ modules })` が並べているモジュールについて、この配列を配線として読みます。
+
 Inertia のページは `modules/<name>/` 配下にはコロケーションされません。トップレベルの `resources/js/pages/` にそのまま置かれ、代わりにモジュール名で名前空間分けされます(`resources/js/pages/billing/Invoices/Index.tsx`)。`make:feature Invoice --module billing` はこの規約に自動で従います。
 
 ## AIエージェントハーネス

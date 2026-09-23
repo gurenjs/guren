@@ -32,9 +32,11 @@ vitest config did not include `modules/`, so a module file nothing imports
 `bun run test`; files the entry reaches were already checked — fixed
 alongside. Still not exercised anywhere: a module's own `db/schema.ts` (both
 dogfood apps keep their tables in the root schema, reached from the module
-via a root import) and a per-module RFC 0027 config definition
-(`ModuleDefinition` has no `config` field — a module's config still has to
-be added to the root `createApp({ config })` array by hand).
+via a root import). A per-module RFC 0027 config definition was not
+possible at the time of the second correction (`ModuleDefinition` had no
+`config` field); it is now, see "Amended: module config definitions" under
+the runtime API, and `examples/blog`'s `modules/auth` carries its OAuth
+definition that way.
 
 ## Problem
 
@@ -297,6 +299,10 @@ export interface ModuleDefinition {
   routes?: RouteRegistration
   /** Providers appended to the application's provider list. */
   providers?: ServiceProviderConstructor[]
+  /** Amended: console commands for the console entrypoint to register. */
+  commands?: CommandClass[]
+  /** Amended: RFC 0027 config definitions, bound after createApp({ config }). */
+  config?: ReadonlyArray<ConfigDefinition>
 }
 
 export function defineModule(definition: ModuleDefinition): GurenModule
@@ -332,6 +338,29 @@ undertaking than originally scoped here. Left as a documented,
 not-yet-built follow-up; a collision still surfaces today, just later
 (as a codegen or typecheck failure) rather than as an early `guren
 check` warning.
+
+**Amended: module config definitions.** RFC 0027 moved service
+configuration into definitions passed as `createApp({ config })`, which
+left a module no way to own the configuration of a service only it uses:
+its definition had to sit in the root array. `ModuleDefinition` gains
+`config?: ReadonlyArray<ConfigDefinition>`, kept in
+`modules/<name>/config/<key>.ts` (the top-level layout, mirrored).
+`Application` hands `ConfigServiceProvider` the root definitions first,
+then each module's in `modules` order, the order providers and routes
+already follow. This is still no new execution path, only a longer list
+for the provider that already binds definitions. Keys stay app-wide,
+because there is one container: a module's `oauth` definition binds the
+same `oauth` the root array would, and a key defined twice (root and
+module, or two modules) fails the boot naming both places, through the
+duplicate-key rule RFC 0027 §2 already has. `GurenModule.config` is
+optional, so a module literal built without `defineModule()` still
+typechecks. `guren check`'s `config-unwired` reads a module's
+`defineModule({ config })` as wiring only for a module `createApp({
+modules })` lists, and reports a key two read arrays define
+(`config-duplicate-key`) before the boot would. `make:module` does not
+emit a `config` entry, because a scaffolded app installs `@guren/core`
+from npm and the field does not exist there until this ships; that
+follows the release.
 
 Modules are listed explicitly rather than auto-discovered from the
 filesystem, for the same reason providers are explicit on serverless

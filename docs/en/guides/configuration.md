@@ -172,6 +172,25 @@ export default defineOAuthConfig((env) => {
 })
 ```
 
+### Definitions in a module
+
+A [module](./cli.md#application-modules) can keep the definitions for services only it uses in `modules/<name>/config/` and list them in its own `defineModule({ config })`, rather than in the app's `createApp({ config })`:
+
+```ts
+// modules/auth/index.ts
+import { defineModule } from '@guren/core'
+import oauth from './config/oauth.js'
+import { registerAuthRoutes } from './routes'
+
+export const authModule = defineModule({
+  name: 'auth',
+  routes: registerAuthRoutes,
+  config: [oauth],
+})
+```
+
+The app still has one container, so a module's definition binds the same app-wide key (`oauth` above) that a `createApp({ config })` entry would. `ConfigServiceProvider` binds the app's definitions first, then each module's in `createApp({ modules })` order. A key that the app and a module both define, or that two modules define, fails the boot and names both places. `guren check` reports that collision before you boot, and counts a module's `config` as wiring only while `createApp({ modules })` lists the module.
+
 ## The database connection
 
 `config/database.ts` keeps its named exports, because `guren db:migrate` and `guren db:seed` import them outside a running app. Its connection resolver receives the validated env when the app boots, and parses the schema itself when the CLI calls it:

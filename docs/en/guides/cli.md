@@ -386,6 +386,8 @@ export const billingModule = defineModule({
 })
 ```
 
+A module can also carry config definitions for services only it uses: keep them in `modules/<name>/config/` and list them in `defineModule({ config: [...] })`. They bind after the app's `createApp({ config })` and share its keys, so a key defined in both places fails the boot (see [Configuration](./configuration.md#definitions-in-a-module)). `guren check` reads that list as wiring for any module `createApp({ modules })` lists.
+
 Inertia pages are not colocated inside `modules/<name>/`. They stay under the top-level `resources/js/pages/`, namespaced by module name instead (`resources/js/pages/billing/Invoices/Index.tsx`). `make:feature Invoice --module billing` follows this convention automatically.
 
 ## AI Agent Harness

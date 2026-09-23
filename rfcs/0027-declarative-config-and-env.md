@@ -421,6 +421,25 @@ Behaviour stays in providers. Broadcast channel authorization, event listeners,
 schedules, notification channels and `auth.useModel(User, ...)` are closures and
 class references, not configuration, and keep their providers.
 
+#### Definitions a module owns
+
+**Amended after implementation.** A module (RFC 0002) can list definitions
+in `defineModule({ config })`, kept in `modules/<name>/config/<key>.ts`.
+`Application.configDefinitions` is the root array followed by each module's
+in `createApp({ modules })` order, and `ConfigServiceProvider` binds that one
+list, so everything in §3 holds unchanged: the definitions bind before any
+provider registers, and boot before any provider boots. The key space stays
+the container's, which is one per app, so "one definition per key" counts
+every module too, and the error names where each was listed
+(`createApp({ config })[0]`, `the "auth" module's config[0]`). A binding a
+module definition made is reported as `modules/<name>/config/<key>.ts` in
+the configured-twice error. The constructor registers
+`ConfigServiceProvider` when the flattened list is non-empty, so a module's
+definitions bind in an app with no `env` and no root `config`. §6's
+`config-unwired` reads the module arrays too, counting one only for a module
+the entry's `createApp({ modules })` lists, and `loadResolvedConfig()` reads
+`modules/*/config/` beside `config/`.
+
 #### What `config/` may contain
 
 After this RFC a file directly under `config/` is `env.ts` or a module

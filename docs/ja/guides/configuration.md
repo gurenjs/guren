@@ -172,6 +172,25 @@ export default defineOAuthConfig((env) => {
 })
 ```
 
+### モジュールが持つ定義
+
+[モジュール](./cli.md#アプリケーションモジュール)は、自分だけが使うサービスの定義を `modules/<name>/config/` に置き、アプリの `createApp({ config })` ではなく自身の `defineModule({ config })` に並べられます。
+
+```ts
+// modules/auth/index.ts
+import { defineModule } from '@guren/core'
+import oauth from './config/oauth.js'
+import { registerAuthRoutes } from './routes'
+
+export const authModule = defineModule({
+  name: 'auth',
+  routes: registerAuthRoutes,
+  config: [oauth],
+})
+```
+
+コンテナはアプリに 1 つだけです。モジュールの定義も、`createApp({ config })` に並べた場合と同じアプリ全体のキー（上の例では `oauth`）をバインドします。`ConfigServiceProvider` はアプリの定義を先にバインドし、続いて各モジュールの定義を `createApp({ modules })` の順にバインドします。アプリとモジュール、または 2 つのモジュールが同じキーを定義すると、両方の場所を挙げて起動に失敗します。`guren check` は起動前にこの重複を報告します。モジュールの `config` を配線済みと数えるのは、`createApp({ modules })` がそのモジュールを並べている場合だけです。
+
 ## データベース接続
 
 `config/database.ts` の名前付き export はそのまま残します。`guren db:migrate` と `guren db:seed` が、アプリを起動せずにこれらを import するためです。接続リゾルバは、アプリの起動時には検証済みの env を受け取り、CLI から呼ばれたときは自分でスキーマを解析します。
