@@ -20,6 +20,12 @@ export interface AppManifest {
   middlewareAliases: Record<string, MiddlewareEntry>
   /** Container keys present after `register()`, sorted. */
   bindings: string[]
+  session?: SessionEntry
+  auth?: AuthEntry
+  cache?: DriverMapEntry
+  storage?: DriverMapEntry
+  queue?: DriverMapEntry
+  attachments?: AttachmentsEntry
   agentTools: DerivedAgentTool[]
   warnings: ManifestWarning[]
 }
@@ -68,6 +74,8 @@ export interface MiddlewareEntry {
   /** A group's aliases, expanded through nested groups. */
   members?: string[]
   capabilities: MiddlewareCapabilities
+  /** The one ability this middleware checks: a single-ability check, or on a route the verb-map ability of a resource check. */
+  ability?: string
   /** A name no alias or group registers; `mount()` refuses it. */
   unresolved?: true
   /** A group's members no alias registers, which `mount()` refuses the same way. */
@@ -84,6 +92,67 @@ export type RouteEntry = Omit<RouteDefinition, 'schemas' | 'controller' | 'middl
   /** In the order `mount()` runs them: named, then group-scoped inline, then route-local inline. */
   middleware: MiddlewareEntry[]
   schemas: Partial<Record<'params' | 'query' | 'body' | 'output', RouteSchemaEntry>>
+}
+
+/** `driver` and `perProcess` are null for an `auth.sessionOptions.store` thunk, which only calling it would answer. */
+export interface SessionStoreEntry {
+  /** The configured driver name, or the store's constructor name for `auth.sessionOptions.store`. */
+  driver: string | null
+  /** The `database` driver's table, by its SQL name. */
+  table?: string
+  perProcess: boolean | null
+}
+
+export interface SessionEntry {
+  source: 'manager' | 'auth.sessionOptions.store' | 'none'
+  default: string
+  stores: Record<string, SessionStoreEntry>
+}
+
+export interface AuthProviderEntry {
+  /** `model` for `useModel()`; `custom` for a factory passed to `registerProvider()`. */
+  kind: 'model' | 'custom'
+  model?: string
+  /** The hasher's constructor name; null for a custom provider, whose hasher only its factory knows. */
+  hasher: string | null
+  /**
+   * The format a framework hasher writes, matched by exact class: `DefaultHasher`
+   * reports one class name for scrypt and Argon2id. Null for a subclass or an app's own hasher.
+   */
+  algorithm: 'scrypt' | 'argon2' | 'bcrypt' | null
+  /** Whether writing needs `Bun.password` (`ScryptHasher`, `DefaultHasher` on argon2); null where `algorithm` is. */
+  requiresBun: boolean | null
+}
+
+export interface AuthEntry {
+  guards: string[]
+  defaultGuard: string | null
+  /** The hasher new passwords are written with (`createApp({ auth: { hasher } })`), by constructor name. */
+  hasher: string
+  /** As on {@link AuthProviderEntry}. */
+  algorithm: 'scrypt' | 'argon2' | 'bcrypt' | null
+  requiresBun: boolean | null
+  providers: Record<string, AuthProviderEntry>
+}
+
+export interface DriverMapEntry {
+  default: string
+  /** `driver` is null for an entry registered as a bare factory, whose driver is unknowable without calling it. */
+  entries: Record<string, { driver: string | null }>
+}
+
+export interface AttachmentsEntry {
+  configured: boolean
+  table?: string
+  disk?: string
+  /** `route: false` is a disk configured `serve: 'direct'`, whose URLs bypass the delivery route. */
+  disks?: Record<string, { visibility: 'public' | 'private'; route: boolean; serve: 'auto' | 'redirect' | 'proxy' }>
+  delivery?: { prefix: string; routeName: string; mounted: boolean }
+}
+
+/** What an attachments engine reports of itself; the manifest adds `delivery.mounted` from the route registry. */
+export type AttachmentsDescription = Omit<AttachmentsEntry, 'delivery'> & {
+  delivery?: Omit<NonNullable<AttachmentsEntry['delivery']>, 'mounted'>
 }
 
 export interface ManifestWarning {

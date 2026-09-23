@@ -176,12 +176,12 @@ export type RouteEntry = Omit<RouteDefinition, 'schemas' | 'controller' | 'middl
 export interface SessionEntry {
   source: 'manager' | 'auth.sessionOptions.store' | 'none'
   default: string
-  stores: Record<string, { driver: string; table?: string; perProcess: boolean }>
+  stores: Record<string, { driver: string | null; table?: string; perProcess: boolean | null }>   // amended below
 }
 
 export interface AuthEntry {
   guards: string[]; defaultGuard: string | null
-  providers: Record<string, { kind: string; model?: string; hasher: string }>   // hasher: constructor.name
+  providers: Record<string, { kind: string; model?: string; hasher: string }>   // hasher: constructor.name; amended below
 }
 
 export interface DriverMapEntry { default: string; entries: Record<string, { driver: string }> }
@@ -202,8 +202,8 @@ read-only method each so the manifest never resolves a store:
 `session-manager.ts:96`; the `database` driver's `table` reported through
 drizzle's `getTableName()`), `CacheManager.describe()`, `StorageManager.describe()`,
 `QueueManager.describe()`, `AuthManager.describe()`, and
-`describeActiveAttachmentEngine()` in `@guren/core`. `perProcess` comes from the
-same `PER_PROCESS_SESSION_DRIVERS` set the runtime warning uses.
+`describeActiveAttachmentEngine()` in `@guren/core`. `perProcess` comes from
+`BUILT_IN_SESSION_DRIVERS` (amended below).
 
 > **Amended in implementation (Part 1):** the shapes above changed where the
 > code they describe differs from what the draft assumed, and each change reports
@@ -224,9 +224,22 @@ same `PER_PROCESS_SESSION_DRIVERS` set the runtime warning uses.
 >   `auth.sessionOptions.store` thunk, which only calling it would answer. With no
 >   manager and no explicit store, `source: 'none'` describes the in-memory store
 >   the session middleware falls back to.
-> - `AuthEntry` gains `hasher`, the one the app writes with. A provider entry is
->   `{ kind: 'model', model, hasher }` for `useModel()` and `{ kind: 'custom',
->   hasher: null }` for a bare `registerProvider()` factory.
+> - `perProcess` (`boolean | null`) comes from `BUILT_IN_SESSION_DRIVERS`, not
+>   `PER_PROCESS_SESSION_DRIVERS`: that map records every framework driver and
+>   whether it shares state, so a driver outside it (a plugin's) is `null`. An
+>   explicit store's class is mapped to its driver first (`MemorySessionStore` to
+>   `memory`, core's `DatabaseSessionStore` to `database`); any other class is
+>   `null`.
+> - `AuthEntry` gains `hasher`, the one the app writes with, plus `algorithm`
+>   (`'scrypt' | 'argon2' | 'bcrypt' | null`) and `requiresBun` (`boolean |
+>   null`), because the class name alone hides the answer: `DefaultHasher`
+>   writes scrypt, or Bun-only Argon2id with `hasher: 'argon2'`. Both are read by
+>   exact constructor: `DefaultHasher` reports its algorithm, `NodeHasher` scrypt
+>   without Bun, `ScryptHasher` (exported as `Argon2Hasher`) Argon2id or bcrypt
+>   with Bun, and a subclass or an app's own hasher `null` for both, since it may
+>   override `hash()`. A provider entry is `{ kind: 'model', model, hasher,
+>   algorithm, requiresBun }` for `useModel()` and `{ kind: 'custom', hasher:
+>   null, algorithm: null, requiresBun: null }` for a bare `registerProvider()`.
 > - `AttachmentsEntry.delivery` is `{ prefix, routeName, mounted }`, and a `disks`
 >   map carries each disk's `visibility`, `route` and `serve`. RFC 0015 made the
 >   serve mode per disk, so the draft's single `mode` has no source.
@@ -261,10 +274,14 @@ same `PER_PROCESS_SESSION_DRIVERS` set the runtime warning uses.
 > - Warning codes: `boot-callback-skipped`, `env-invalid` and `config-unverified`
 >   (RFC 0027 §1, collected from `ConfigServiceProvider`), `schema-partial`,
 >   `agent-tool`, `section-unreadable` (a bound manager whose construction threw),
->   `section-unverified` and `controller-import`. `section-unverified` covers a
+>   `section-unverified`, `session-configured-twice` (a `session` binding beside
+>   `auth.sessionOptions.store`, which the app refuses at boot) and
+>   `controller-import`. `section-unverified` covers a
 >   section a deferred provider supplies, a key bound to something without
 >   `describe()`, and a session left unbound while a provider threw: none of them
->   falls back to `source: 'none'`.
+>   falls back to `source: 'none'`. A provider that threw makes every unbound
+>   section unverified, since the manifest cannot tell which key it would have
+>   bound.
 > - `introspect()` is terminal. A `boot()` after it refuses, since a provider may
 >   have run `introspect()` in place of `register()`, and an `introspect()` after
 >   `boot()` refuses too, including a boot that failed part way.
@@ -324,9 +341,11 @@ user's middleware may add it, and an absent value means "not determinable", whic
 > as `Router.describeMiddleware()` beside `registeredHandlers()`, because the
 > alias and group maps are private to it. `ability` is not a new capability
 > field: the authorization stamp has carried `abilities` since RFC 0016 §4, so
-> `ability` is derived from it. It is the one ability of a single-ability `all`
-> check, or on a route entry the verb-map ability of a resource check whose
-> `fromMethodMap` holds.
+> `ability` is derived from it by `derivableAbility()`, the rule agent tools
+> use too. It is the one ability of a single-ability `all` stamp, or on a route
+> entry the verb-map ability of a resource stamp whose `fromMethodMap` holds,
+> whose mode is `all`, and that names no ability of its own. The stamp is per entry: a group's merges its
+> members', so a group combining a resource check with a named one has none.
 
 ### 4. `guren introspect --json`
 

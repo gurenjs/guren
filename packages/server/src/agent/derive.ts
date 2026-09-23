@@ -10,7 +10,7 @@
  */
 import type { ResourceResponseShape, RouteDefinition } from '../mvc/Router'
 import { extractPathParamNames } from '../internal/route-path'
-import { resourceAbilityForMethod } from '../authorization/middleware'
+import { derivableAbility } from '../authorization/middleware'
 import {
   type JsonSchemaObject,
   readObjectSchema,
@@ -400,23 +400,8 @@ function deriveAuthorization(
   definition: RouteDefinition,
   method: string,
 ): { ability: string } | undefined {
-  const authorization = definition.capabilities?.authorization
-  if (!authorization) return undefined
-
-  if (authorization.resource) {
-    // `authorizeResourceMiddleware` resolves its ability per request. Only the
-    // built-in verb map is derivable, and only through the function that owns
-    // it — restating the table here is how a tool comes to advertise an ability
-    // the middleware stopped checking.
-    if (!authorization.resource.fromMethodMap) return undefined
-    if (authorization.abilities.length > 0 || authorization.mode !== 'all') return undefined
-    const ability = resourceAbilityForMethod(method)
-    return ability ? { ability } : undefined
-  }
-
-  if (authorization.abilities.length === 1 && authorization.mode === 'all') {
-    return { ability: authorization.abilities[0]! }
-  }
-
-  return undefined
+  // Through the one rule that owns the verb map: restating it here is how a
+  // tool comes to advertise an ability the middleware stopped checking.
+  const ability = derivableAbility(definition.capabilities?.authorization, method)
+  return ability === undefined ? undefined : { ability }
 }
