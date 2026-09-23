@@ -40,6 +40,8 @@ interface Listings {
   readonly byFile: ReadonlyMap<string, readonly Lister[]>
   /** Each module's descriptor file, by module name. */
   readonly descriptors: ReadonlyMap<string, string>
+  /** Modules `createApp({ modules })` does not list, by name, as `modules/<name>`. */
+  readonly unmounted: ReadonlyMap<string, string>
 }
 
 /** Every config array the app holds, or `null` when one of them cannot be read whole. */
@@ -52,6 +54,7 @@ async function readListings(cwd: string, cache: ParseCache, entryPath: string): 
   const root: Lister = { label: `createApp({ config }) in ${entryPath}`, file: entryPath }
   const byFile = new Map<string, Lister[]>()
   const descriptors = new Map<string, string>()
+  const unmounted = new Map<string, string>()
   const list = (files: string[], lister: Lister) => {
     for (const file of files) {
       for (const key of [file, `${file}/index`]) byFile.set(key, [...(byFile.get(key) ?? []), lister])
@@ -73,6 +76,8 @@ async function readListings(cwd: string, cache: ParseCache, entryPath: string): 
     const mount = moduleMountState(options, parsed.ast.program, cwd, entryFile, dir)
     // Only a module the boot may read can list a file; an unmounted one is judged by what it spells.
     const mayBeRead = mount === 'mounted' || mount === 'not-array' || mount === 'untraceable'
+    const moduleDir = toPosixRelative(cwd, dir)
+    if (!mayBeRead) unmounted.set(module, moduleDir)
     // Not a readable `defineModule({…})`, or keys hidden beside no `config`: either may list any file.
     const declared = descriptor === 'unreadable' ? undefined : propertyValue(descriptor.options, 'config')
     const files = descriptor === 'unreadable'
@@ -89,10 +94,9 @@ async function readListings(cwd: string, cache: ParseCache, entryPath: string): 
     if (files.length === 0) continue
     if (mount === 'not-array' || mount === 'untraceable') return null
 
-    const moduleDir = toPosixRelative(cwd, dir)
     list(files, { label: `defineModule({ config }) in ${descriptor.file}`, file: descriptor.file, ...(mount === 'mounted' ? {} : { unmounted: moduleDir }) })
   }
-  return { root, byFile, descriptors }
+  return { root, byFile, descriptors, unmounted }
 }
 
 /** Only a file an array lists can fail; everything else is a warning or nothing at all. */
@@ -105,8 +109,13 @@ function judge(entry: ResolvedConfigEntry, read: readonly Lister[], unmounted: r
     const module = moduleNameFromRelPath(entry.file)
     let why: string
     let fix: string
+    // An unmounted module whose descriptor this cannot read may list the file; what is certain is that nothing mounts it.
+    const unreadUnmounted = module !== null && !listings.descriptors.has(module) ? listings.unmounted.get(module) : undefined
     if (unmounted[0]) {
       why = `${declares}, and ${unmounted[0].label} lists it, but createApp({ modules }) in ${entryPath} does not list ${unmounted[0].unmounted}.`
+      fix = `Add the module to createApp({ modules: [...] }) in ${entryPath}.`
+    } else if (unreadUnmounted !== undefined) {
+      why = `${declares}, but createApp({ modules }) in ${entryPath} does not list ${unreadUnmounted}.`
       fix = `Add the module to createApp({ modules: [...] }) in ${entryPath}.`
     } else if (module !== null) {
       why = `${declares}, but neither its module's defineModule({ config }) nor createApp({ config }) in ${entryPath} lists it.`

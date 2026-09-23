@@ -247,6 +247,32 @@ describe('checkConfigWiring with defineModule({ config }) (RFC 0002)', () => {
     expect(results.map((result) => [result.key, result.status])).toEqual([['config-unwired:config/cache.ts', 'warn']])
   })
 
+  test('points a definition in an unmounted, unreadable module at mounting it, not at its descriptor', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/legacy/config/oauth.ts': OAUTH_CONFIG,
+      'modules/legacy/index.ts': `import oauth from './config/oauth'\n\nexport const legacy = { name: 'legacy', providers: [], commands: [], config: [oauth] }\n`,
+      'src/app.ts': entry('{ config: [cache] }'),
+    })
+
+    expect(results).toContainEqual(expect.objectContaining({
+      key: 'config-unwired:modules/legacy/config/oauth.ts',
+      message: 'modules/legacy/config/oauth.ts declares the "oauth" config, but createApp({ modules }) in src/app.ts does not list modules/legacy. Nothing reads it, so the defaults apply instead.',
+      suggestion: 'Add the module to createApp({ modules: [...] }) in src/app.ts.',
+    }))
+  })
+
+  test('judges nothing when createApp computes a key that may carry modules and a module lists config', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/config/oauth.ts': OAUTH_CONFIG,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing', config: [oauth] }`),
+      'src/app.ts': entry('{ config: [cache], [key]: [] }', `import cache from '../config/cache'\nconst key = 'modules'\n`),
+    })
+
+    expect(results).toEqual([])
+  })
+
   test('judges nothing when createApp({ modules }) holds an element it cannot trace and a module lists config', async () => {
     const results = await run({
       ...WITH_CACHE,

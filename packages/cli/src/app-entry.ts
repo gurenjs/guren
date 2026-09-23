@@ -54,7 +54,10 @@ export function importedArrayFiles(
   })
 }
 
-/** Whether a spread or a computed key may carry a key the literal does not spell. */
+/**
+ * Whether a spread or a computed key may carry a key the literal does not spell.
+ * A method is named (`routes(router) {}` is a registrar), so unlike `staticProperty` it hides nothing.
+ */
 export function hidesKeys(options: ObjectExpression): boolean {
   return options.properties.some((property) => property.type === 'SpreadElement' || property.computed)
 }

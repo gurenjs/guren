@@ -327,8 +327,8 @@ type ModuleEntryResolution =
  * Resolves the file a module's `defineModule({ routes })` takes its registrar from — the
  * same link the runtime follows, which is what makes it the scope entry rather than any
  * conventionally named file. Misses rather than invents: a `routes` value this cannot
- * trace yields `opaque`, which skips the module, and a spread in the descriptor makes an
- * absent `routes` property `opaque` too rather than `unwired`.
+ * trace yields `opaque`, which skips the module, and a spread or computed key in the
+ * descriptor makes an absent `routes` property `opaque` too rather than `unwired`.
  */
 async function resolveModuleEntry(
   cwd: string,
