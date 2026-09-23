@@ -358,16 +358,18 @@ describe('@guren/plugin-vercel', () => {
           '',
         ].join('\n'),
       })
-      mkdirSync(join(root, 'app/Events'), { recursive: true })
-      mkdirSync(join(root, 'app/Notifications'), { recursive: true })
-      writeFileSync(join(root, 'app/base.ts'), 'export class Event {}\nexport class Notification {}\n')
+      for (const dir of ['app/Events', 'app/Notifications', 'node_modules/@guren/core']) {
+        mkdirSync(join(root, dir), { recursive: true })
+      }
+      writeFileSync(join(root, 'node_modules/@guren/core/package.json'), '{ "name": "@guren/core", "type": "module", "main": "index.js" }\n')
+      writeFileSync(join(root, 'node_modules/@guren/core/index.js'), 'export class Event {}\nexport class Notification {}\n')
       writeFileSync(
         join(root, 'app/Events/OrderShipped.ts'),
-        "import { Event } from '../base'\nexport class OrderShipped extends Event {}\n",
+        "import { Event } from '@guren/core'\nexport class OrderShipped extends Event {}\n",
       )
       writeFileSync(
         join(root, 'app/Notifications/OrderShipped.ts'),
-        "import { Notification } from '../base'\nexport class OrderShipped extends Notification {}\n",
+        "import { Notification } from '@guren/core'\nexport class OrderShipped extends Notification {}\n",
       )
 
       const warnings = await captureWarnings(() => buildVercelOutput(app))

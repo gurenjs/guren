@@ -741,9 +741,15 @@ const NAME_KEYED_BASES: ReadonlyMap<string, NameKeyedKind> = new Map([
   ...['Model', 'AuthenticatableModel', 'defineModel', 'Attachable'].map((base) => [base, 'model'] as const),
 ])
 const NAME_PIN = /\bstatic\s+(?:override\s+)?(?:jobName|eventName|agentName)\b|\bget\s+type\s*\(/
-const SOURCE_CLASS =
-  /^[ \t]*(?:export[ \t]+(?:default[ \t]+)?)?(?:abstract[ \t]+)?class[ \t]+([A-Za-z_$][\w$]*)(?:[ \t]*<[^{>\n]*>)?(?:[ \t]+extends[ \t]+([A-Za-z_$][\w$]*))?/gm
-const BUNDLED_CLASS = /(?:^|[^\w$.])class\s+([A-Za-z_$][\w$]*)(?:\s+extends\s+([A-Za-z_$][\w$]*))?/g
+// A heritage is read as its last identifier: `core.Job`, `(0, x.defineModel)(...)`.
+const HERITAGE = String.raw`\s+extends\s+(?:\(0,\s*)?(?:[A-Za-z_$][\w$]*\.)*([A-Za-z_$][\w$]*)`
+const SOURCE_CLASS = new RegExp(
+  String.raw`^[ \t]*(?:export[ \t]+(?:default[ \t]+)?)?(?:abstract[ \t]+)?class[ \t]+([A-Za-z_$][\w$]*)(?:[ \t]*<[^{>\n]*>)?(?:${HERITAGE})?`,
+  'gm',
+)
+const BUNDLED_CLASS = new RegExp(String.raw`(?:^|[^\w$.])class\s+([A-Za-z_$][\w$]*)(?:${HERITAGE})?`, 'g')
+const NAMED_IMPORTS = /import\s+(?:type\s+)?(?:[A-Za-z_$][\w$]*\s*,\s*)?\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g
+const IMPORT_SPECIFIER = /^(?:type\s+)?([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/
 
 type NameKeyedKind = 'record' | 'model'
 
@@ -762,30 +768,42 @@ export interface RenamedNameKeyedClass {
  * App models and unpinned records (`NAME_KEYED_BASES`) the bundle renamed to `<name><n>`,
  * which happens when another module declares the same top-level name. A declaration counts
  * only when the numbered class extends its base, so a renamed dependency class is not the app's.
- * Bases are traced through the app's own `extends` by name with regexes (builtins-only module,
- * so not the CLI's AST readers): an aliased base import is missed rather than guessed.
+ * Bases resolve through each file's named imports (`@guren/*` means the framework's) and the
+ * app's own `extends`, read with regexes: this module imports only builtins, not the CLI's AST readers.
  */
 export function renamedNameKeyedClasses(
   bundle: string,
   sources: ReadonlyArray<{ readonly file: string; readonly text: string }>,
 ): RenamedNameKeyedClass[] {
-  const declared = new Map<string, Array<{ file: string; base: string | undefined; pinned: boolean }>>()
+  interface Declaration {
+    file: string
+    /** The base as the file names it, resolved through an import alias. */
+    base: string | undefined
+    fromFramework: boolean
+    pinned: boolean
+  }
+  const declared = new Map<string, Declaration[]>()
   for (const { file, text } of sources) {
+    const imports = namedImports(text)
     const pinned = NAME_PIN.test(text)
-    for (const match of text.matchAll(SOURCE_CLASS)) {
-      const entries = declared.get(match[1]!) ?? []
-      entries.push({ file, base: match[2], pinned })
-      declared.set(match[1]!, entries)
+    for (const [, name, local] of text.matchAll(SOURCE_CLASS)) {
+      const imported = local === undefined ? undefined : imports.get(local)
+      const entries = declared.get(name!) ?? []
+      entries.push({ file, base: imported?.name ?? local, fromFramework: imported?.fromFramework ?? false, pinned })
+      declared.set(name!, entries)
     }
   }
 
-  const kindOf = (base: string | undefined, seen = new Set<string>()): NameKeyedKind | undefined => {
-    if (base === undefined || seen.has(base)) return undefined
-    const kind = NAME_KEYED_BASES.get(base)
-    if (kind !== undefined) return kind
-    seen.add(base)
-    for (const entry of declared.get(base) ?? []) {
-      const inherited = kindOf(entry.base, seen)
+  // An app class sharing a framework base's name (a calendar `Event` model) shadows it,
+  // unless the file imports that name from `@guren/*`.
+  const kindOf = (entry: Declaration, seen = new Set<string>()): NameKeyedKind | undefined => {
+    if (entry.base === undefined) return undefined
+    const own = entry.fromFramework ? undefined : declared.get(entry.base)
+    if (own === undefined) return NAME_KEYED_BASES.get(entry.base)
+    if (seen.has(entry.base)) return undefined
+    seen.add(entry.base)
+    for (const parent of own) {
+      const inherited = kindOf(parent, seen)
       if (inherited !== undefined) return inherited
     }
     return undefined
@@ -806,7 +824,7 @@ export function renamedNameKeyedClasses(
     const models: string[] = []
     for (const entry of declared.get(name) ?? []) {
       if (!bases.has(stem(entry.base))) continue
-      const kind = kindOf(entry.base)
+      const kind = kindOf(entry)
       if (kind === 'model') models.push(entry.file)
       else if (kind === 'record' && !entry.pinned) records.push(entry.file)
     }
@@ -825,6 +843,18 @@ function withoutNumericSuffix(name: string): string | undefined {
 // A base may be renamed in the bundle too, so bases compare without a numeric suffix.
 function stem(name: string | undefined): string | undefined {
   return name === undefined ? undefined : (withoutNumericSuffix(name) ?? name)
+}
+
+/** Local name → imported name, for a file's `import { A as B } from '…'` statements. */
+function namedImports(text: string): Map<string, { name: string; fromFramework: boolean }> {
+  const imports = new Map<string, { name: string; fromFramework: boolean }>()
+  for (const [, specifiers, from] of text.matchAll(NAMED_IMPORTS)) {
+    for (const specifier of specifiers!.split(',')) {
+      const match = IMPORT_SPECIFIER.exec(specifier.trim())
+      if (match) imports.set(match[2] ?? match[1]!, { name: match[1]!, fromFramework: from!.startsWith('@guren/') })
+    }
+  }
+  return imports
 }
 
 /** The part of a `Bun.build` result the reporter reads, structural so this module needs no bun-types. */
@@ -859,14 +889,19 @@ export async function reportRenamedNameKeyedClasses(
 
   const declare = (files: readonly string[]) => `${files.join(', ')} ${files.length === 1 ? 'declares' : 'declare'}`
   for (const { name, bundledAs, records, models } of renamedNameKeyedClasses(bundle, sources)) {
-    const found = [
-      records.length > 0 &&
+    const found: string[] = []
+    if (records.length > 0) {
+      found.push(
         `${declare(records)} a job, event, notification or agent named ${name}, which is stored under its class ` +
           'name: rename it, or pin `static jobName`, `static eventName`, `get type()` or `static agentName`.',
-      models.length > 0 &&
-        `${declare(models)} a model named ${name}: attachments and polymorphic relations store it as ` +
-          `${bundledAs} while \`Model.morphMap\` looks it up as ${name}, so rename the class.`,
-    ].filter(Boolean)
+      )
+    }
+    if (models.length > 0) {
+      found.push(
+        `${declare(models)} a model named ${name}. Its attachments and polymorphic relations, if it has any, are ` +
+          `stored as ${bundledAs} while \`Model.morphMap\` looks it up as ${name}: a model has no name to pin, so rename the class.`,
+      )
+    }
     console.warn(
       `${options.label}: the bundle names a class ${name} as ${bundledAs}, because another module declares ` +
         `${name} too and import order picks which one keeps it. ${found.join(' ')}`,
