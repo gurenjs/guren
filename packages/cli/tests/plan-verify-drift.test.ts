@@ -231,14 +231,23 @@ describe('plan:verify re-checks the steps a later step drifted', () => {
     const kept = verify(app, COMMENTS_TESTS)
 
     expect(outcome(kept, COMMENTS_TESTS)).toBe('verified')
-    expect(kept.steps[0]!.record.commands).toEqual([expect.objectContaining({ command: 'tests:fail', status: 'pass', label: 'not run: a re-check that each behaviour still has a test case' })])
+    expect(kept.steps[0]!.record.commands).toEqual([expect.objectContaining({ command: 'tests:fail', status: 'pass', label: 'not run: a re-check that one test file still carries each behaviour' })])
 
     await writePlanStepRecord(app, 'comments', COMMENTS_TESTS, doneRecord({ 'tests/comments.test.ts': sha256(COMMENT_TESTS) }))
     await writeFile(join(app, 'tests/comments.test.ts'), COMMENT_TESTS.replace('[AC-comments-2] ', ''), 'utf8')
     const lost = verify(app, COMMENTS_TESTS)
 
+    // Reported, and left drifted rather than recorded: a recorded failure would send the next run to `tests:fail`, which cannot pass now.
     expect(outcome(lost, COMMENTS_TESTS)).toBe('failed')
-    expect(lost.steps[0]!.record.commands[0]!.findings).toEqual(['[AC-comments-2] has no test case'])
+    expect(lost.steps[0]!.record.commands[0]!.findings).toEqual(['[AC-comments-2] is carried by no test file'])
+    expect(lost.recheckPending).toEqual([COMMENTS_TESTS])
+    expect((JSON.parse(await readFile(join(app, '.guren/plans/comments.state.json'), 'utf8')) as { steps: Record<string, { outcome: string }> }).steps[COMMENTS_TESTS]!.outcome).toBe('verified')
+
+    await writeFile(join(app, 'tests/comments.test.ts'), `${COMMENT_TESTS}\n// restored\n`, 'utf8')
+    const restored = verify(app, COMMENTS_TESTS)
+
+    expect(outcome(restored, COMMENTS_TESTS)).toBe('verified')
+    expect(restored.reverified).toEqual([COMMENTS_TESTS])
   }, 60_000)
 
   test('should re-check every drifted step in a whole-plan run and name them', async () => {
@@ -249,6 +258,38 @@ describe('plan:verify re-checks the steps a later step drifted', () => {
     expect(report.reverified).toEqual([COMMENTS_HTTP])
     expect(outcome(report, COMMENTS_HTTP)).toBe('verified')
     expect(outcome(report, DELETION_HTTP)).toBe('verified')
+    // The steps that did not drift run first, whatever their task order.
+    expect(report.steps.map((step) => step.stepId)).toEqual([DELETION_HTTP, COMMENTS_HTTP])
+  }, 60_000)
+
+  test('should leave drifted steps verified in a whole-plan run while another step fails a command they share', async () => {
+    const app = await afterDeletionIsWritten('whole-plan-failure', 'store')
+    const manifest = JSON.parse(await readFile(join(app, 'package.json'), 'utf8')) as { scripts: Record<string, string> }
+    await writeFile(join(app, 'package.json'), JSON.stringify({ ...manifest, scripts: { ...manifest.scripts, codegen: 'echo "error: half-written" && exit 1' } }), 'utf8')
+
+    const report = verifyAll(app)
+
+    expect(outcome(report, DELETION_HTTP)).toBe('failed')
+    expect(report.reverified).toEqual([])
+    expect(report.recheckPending).toEqual([COMMENTS_HTTP])
+    const state = JSON.parse(await readFile(join(app, '.guren/plans/comments.state.json'), 'utf8')) as { steps: Record<string, { outcome: string }> }
+    expect(state.steps[COMMENTS_HTTP]!.outcome).toBe('verified')
+  }, 60_000)
+
+  test('should keep an earlier step drifted and verified when its re-check comes out blocked', async () => {
+    const app = await afterDeletionIsWritten('recheck-blocked', 'store')
+    const DATA = 'task/entity/model.comment/data'
+    await writePlanStepRecord(app, 'comments', DATA, doneRecord({ 'db/schema.ts': sha256('the schema before') }))
+    await writeFile(join(app, 'node_modules/drizzle-kit/bin.cjs'), "console.log(JSON.stringify({ status: 'error', error: { code: 'internal_error' } }))\nprocess.exit(1)\n", 'utf8')
+
+    const report = verify(app, DELETION_HTTP)
+
+    expect(outcome(report, DELETION_HTTP)).toBe('verified')
+    expect(outcome(report, DATA)).toBe('blocked')
+    expect(report.recheckPending).toEqual([DATA])
+    expect(report.reverified).toEqual([COMMENTS_HTTP])
+    const state = JSON.parse(await readFile(join(app, '.guren/plans/comments.state.json'), 'utf8')) as { steps: Record<string, { outcome: string }> }
+    expect(state.steps[DATA]!.outcome).toBe('verified')
   }, 60_000)
 
   test('should tell plan:next to re-check a drifted step rather than re-implement it', async () => {

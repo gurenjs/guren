@@ -286,6 +286,18 @@ describe('planStopHookFindings', () => {
     expect((await readState(app)).active).toEqual(active({ continuations: 1 }))
   })
 
+  test('should give up on a marked step whose drifted re-check came out blocked, its record left for the next run', async () => {
+    const app = await createApp('marked-blocked', { active: active() })
+    const blocked = record({ outcome: 'blocked', commands: [{ command: 'check', label: 'guren check', status: 'blocked', durationMs: 3, reason: 'could not run: no routes', findings: [] }], acceptance: [], incomplete: [] })
+    const run = { ...report(HTTP, blocked), recheckPending: [HTTP] }
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => run, now: NOW })
+
+    expect(verdict.block).toBe(false)
+    expect(verdict.message).toContain('giving up, the step is blocked (check: could not run: no routes)')
+    expect((await readState(app)).active?.stalled?.reason).toContain('the step is blocked')
+  })
+
   test('should let the stop through with the reason when the verification itself throws, and name an unreadable state file', async () => {
     const app = await createApp('throws', { active: active() })
     const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => { throw new TypeError('boom') } })

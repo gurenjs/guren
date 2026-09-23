@@ -1068,5 +1068,6 @@ describe('formatPlanVerify', () => {
     expect(text).toContain(`Re-checked, since files they were verified at have changed: ${DATA}`)
     expect(text).toContain(`Left verified for a later run to re-check, since this run did not verify the step or the re-check was blocked: ${HTTP}`)
     expect(formatPlanVerify(report([], []))).not.toContain('Re-checked')
+    expect(formatPlanVerify(report([], []))).not.toContain('Left verified')
   })
 })

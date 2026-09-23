@@ -1560,15 +1560,20 @@ migration).** Two defects the loop hit once a plan had more than one task.
   earlier step would inherit that failure. So a step that does not verify
   leaves the drifted records as they are, and the report lists them as
   `recheckPending`; so does a re-check that comes out `blocked`, which is the
-  environment's and never replaces a drifted record. A whole-plan run
-  re-checks every drifted step it reaches under the same two rules.
+  environment's and never replaces a drifted record. A whole-plan run keeps
+  the same order: the steps that did not drift run first, and the drifted ones
+  are re-checked only once all of those verified. A drifted `--step` itself is
+  re-checked under the same rules.
 - A drifted `tests:fail` step is re-checked without a run
   (`PlanVerifier.recheckTests()`), wherever `plan:verify` meets it (a
   whole-plan run, `--step` on it, or as an earlier step): `tests:fail` cannot
   pass once the implementation exists, and its red run was observed when it
-  verified. It stays `verified` while each of its behaviours still has a test
-  case, and fails naming the ones that lost theirs. `plan:next` and the `Stop`
-  hook reach it through `plan:verify --step`, so all four agree.
+  verified. It stays `verified` while one test file still carries each of its
+  behaviours' ids, as the run would select them. One carried by no file or by
+  several is reported, and the record is left drifted rather than replaced: a
+  recorded failure would send the next run to `tests:fail`, which cannot pass
+  then. `plan:next` and the `Stop` hook reach it through `plan:verify --step`,
+  so all four agree.
 - The `Stop` hook verifies the marked step through the same run, so a drifted
   earlier step is re-checked on every stop that verifies the marked step (one
   whose record still stands returns before any run), without a continuation of
