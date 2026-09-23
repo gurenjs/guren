@@ -349,6 +349,14 @@ export class NotificationServiceProvider extends ServiceProvider {
 An unregistered notification fails loudly rather than silently delivering
 nothing.
 
+The registry key is the notification's `type`, which defaults to the class name.
+When a different class registers under a type another class holds, through
+`registerNotification()` or by being queued, it warns once, naming both, and the
+worker rebuilds the class registered last. Give one of them a distinct class
+name or override its `type` getter. Registering one class under a second type,
+to keep an old type resolving, is silent. A future major will throw instead of
+warning.
+
 Two things do not survive the queue, because only a notification's own
 properties are stored:
 

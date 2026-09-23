@@ -324,6 +324,8 @@ export class UserRegistered extends Event {
 
 Only an *own* `eventName` counts, so a subclass does not inherit its parent's pin. A worker that emits nothing and only drains the queue registers the class with `events.registerEvent(UserRegistered)`; `events.on(UserRegistered, ...)` already does.
 
+Within one manager, an event name belongs to one class. Listeners are keyed by the name, so when a different class reaches `on()`, `listen()` or `registerEvent()` under a name another class holds, the manager warns once, naming both. Left as is, each class's listeners run for the other's emits, and a queued emit is rebuilt as the class registered last. Give one of them a distinct class name or its own `eventName`. A future major will make this an error.
+
 A listener registered with `queue` on a manager that cannot reach a queue warns once and runs inline. A future major will throw there instead.
 
 An app that builds its own `EventManager` wires it in one line:

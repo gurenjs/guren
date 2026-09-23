@@ -1,6 +1,7 @@
 import { resolveEventName, type Event } from './Event'
 import type { ListenerClass } from './Listener'
 import { decodeEventData } from './serialize'
+import { reportRegistryCollision } from '../support/registry-collision'
 import { warnOnce } from '../support/warn-once'
 import type {
   EventClass,
@@ -39,7 +40,7 @@ export class EventManager {
   ): EventSubscription {
     const eventName = this.nameOf(event)
     if (typeof event !== 'string') {
-      this.eventClasses.set(eventName, event)
+      this.rememberEventClass(eventName, event)
     }
     const registeredListeners = this.listeners.get(eventName) ?? []
 
@@ -75,7 +76,12 @@ export class EventManager {
    * listeners anyway, so this is for a process that emits and never listens.
    */
   registerEvent(eventClass: EventClass): void {
-    this.eventClasses.set(resolveEventName(eventClass), eventClass)
+    this.rememberEventClass(resolveEventName(eventClass), eventClass)
+  }
+
+  private rememberEventClass(eventName: string, eventClass: EventClass): void {
+    reportRegistryCollision('event', eventName, this.eventClasses.get(eventName), eventClass)
+    this.eventClasses.set(eventName, eventClass)
   }
 
   /**

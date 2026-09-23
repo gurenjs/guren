@@ -1,0 +1,48 @@
+import { warnOnce } from './warn-once'
+
+/** The name-keyed class registries a queued message is resolved back through. */
+export type ClassRegistryKind = 'job' | 'event' | 'notification'
+
+interface NamedClass {
+  readonly name: string
+}
+
+const ADVICE: Record<ClassRegistryKind, (name: string) => string> = {
+  job: (name) =>
+    `A queued "${name}" message runs whichever registered last. ` +
+    'Give one a different class name or its own static jobName.',
+  event: (name) =>
+    `Listeners are keyed by "${name}", so each class's listeners also run for the other's emits, ` +
+    'and a queued emit is rebuilt as whichever registered last. ' +
+    'Give one a different class name or its own static eventName.',
+  notification: (name) =>
+    `A queued "${name}" notification is rebuilt as whichever registered last. ` +
+    'Give one a different class name or override its type getter.',
+}
+
+function label(cls: NamedClass): string {
+  return cls.name === '' ? '(anonymous class)' : cls.name
+}
+
+/**
+ * Warns when a different class takes a name another class holds; the same class
+ * again is silent. The caller still overwrites, last wins, so only the log
+ * changes. A future major will throw here instead.
+ */
+export function reportRegistryCollision(
+  kind: ClassRegistryKind,
+  name: string,
+  taken: NamedClass | undefined,
+  incoming: NamedClass,
+): void {
+  if (taken === undefined || taken === incoming) return
+
+  const classes = taken.name === incoming.name
+    ? `both named ${label(taken)}`
+    : `${label(taken)} and ${label(incoming)}`
+  warnOnce(
+    `registry-collision:${kind}:${name}`,
+    `[guren] Two different ${kind} classes are registered as "${name}" (${classes}). ` +
+      `${ADVICE[kind](name)} A future major will throw here instead.`,
+  )
+}

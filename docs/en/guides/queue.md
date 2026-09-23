@@ -136,6 +136,17 @@ class ProxyJob extends BaseJob {
 Without that rule, registering both classes would collapse them onto one
 registry entry and the second registration would evict the first.
 
+A name belongs to one class. When a different class registers under a name
+another class holds, `registerJob()` warns once, naming both, and the worker
+runs the class registered last. Two modules that each declare a `SendMail` hit
+this, and so does `ProxyJob` above registered beside `BaseJob`: a subclass can
+share its parent's name only while the parent is not registered. Give one of
+them a distinct class name or its own `jobName`. The framework's own jobs take
+`SendMailJob`, `SendNotificationJob`, `QueuedEventJob`, `GenerateVariantsJob`
+(attachments) and `RunAgentJob` (`@guren/plugin-ai`), so app jobs need other
+names. Registering the same class again is silent. A future major will throw
+instead of warning.
+
 Changing or adding a `jobName` on a job that already has messages in a durable
 queue is itself a rename: drain the queue first, or keep the old name registered
 until the backlog clears.
