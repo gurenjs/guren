@@ -4,7 +4,7 @@ import { runDatabaseMigrations, runDatabaseSeeders, resetDatabase } from '../db-
 import type { MigrationRunSummary, SeederRunSummary } from '../db-migrate'
 import { showMigrationStatus } from '../db-status'
 import { describeMigrationsFolder, describeSeedersFolder } from './display-paths'
-import { ensureDestructiveCommandAllowed } from './destructive-guard'
+import { assertDestructiveCommandAllowed } from './destructive-guard'
 
 function reportDryRun(action: string, message: string, json: boolean, extra?: Record<string, unknown>): void {
   if (json) {
@@ -101,9 +101,7 @@ async function runResetCommand(
   doneVerb: 'reset' | 'refreshed',
   args: { seed?: boolean; force?: boolean; json?: boolean; 'dry-run'?: boolean },
 ): Promise<void> {
-  if (!ensureDestructiveCommandAllowed(args.force)) {
-    return
-  }
+  assertDestructiveCommandAllowed(args.force)
 
   const seed = Boolean(args.seed)
   const json = Boolean(args.json)
@@ -116,7 +114,7 @@ async function runResetCommand(
     return
   }
 
-  consola.info('Dropping all tables...')
+  if (!json) consola.info('Dropping all tables...')
   const { migrations, seeders } = await resetDatabase({ seed })
   // Assembled once so every exit below reports the same run the same way.
   const runFields = { ...migrationRunFields(migrations), ...seederRunFields(seeders), seed }
@@ -194,9 +192,7 @@ export const seedCommand = defineCommand({
     },
   },
   async run({ args }) {
-    if (!ensureDestructiveCommandAllowed(args.force)) {
-      return
-    }
+    assertDestructiveCommandAllowed(args.force)
 
     if (args['dry-run']) {
       reportDryRun('db:seed', 'Would execute database seeders.', Boolean(args.json))

@@ -64,18 +64,18 @@ describe('database command boundary', () => {
       const result = await invoke([command, '--force', '--seed', '--json'], true)
       expect(result.exitCode).toBe(0)
       expect(result.calls).toEqual(['import', 'reset', 'migrate', 'seed', 'close'])
-      expect(JSON.parse(result.stdout.slice(result.stdout.indexOf('{')))).toMatchObject({
+      expect(JSON.parse(result.stdout)).toMatchObject({
         action: command, success: true, seed: true, migrationsFound: 2, seedersRan: 1,
       })
     })
   }
 
   it('a failed migration closes the database and exits unsuccessfully', async () => {
-    const result = await invoke(['db:reset', '--seed'], false, true)
+    const result = await invoke(['db:reset', '--seed', '--json'], false, true)
     expect(result.exitCode).toBe(1)
     expect(result.calls).toEqual(['import', 'reset', 'migrate', 'close'])
     expect(result.stderr).toContain('fixture migration failed')
-    expect(result.stdout).not.toContain('"success": true')
+    expect(result.stdout).toBe('')
   })
 
   it('db:rollback reports unsupported and exits 1 without loading the database', async () => {

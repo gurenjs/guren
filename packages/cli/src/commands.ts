@@ -32,7 +32,7 @@ import {
 } from './commands/make'
 import { ATTACH_ARG, FIELDS_ARG, toWriterOptions } from './commands/scaffold-options'
 import { migrateCommand, seedCommand, resetCommand, freshCommand, rollbackCommand, statusCommand } from './commands/database'
-import { ensureDestructiveCommandAllowed } from './commands/destructive-guard'
+import { assertDestructiveCommandAllowed } from './commands/destructive-guard'
 import { defineCommand, keepsProcessAlive } from './define-command'
 import { UsageError } from './run-cli'
 import { newCommand } from './new-command'
@@ -841,9 +841,7 @@ const queueRetryCommand = defineCommand({
     },
   },
   async run({ args }) {
-    if (!ensureDestructiveCommandAllowed(args.force)) {
-      return
-    }
+    assertDestructiveCommandAllowed(args.force)
 
     if (args.all) {
       await retryAllFailedJobs(args.queue)
@@ -878,9 +876,7 @@ const queueFlushCommand = defineCommand({
     },
   },
   async run({ args }) {
-    if (!ensureDestructiveCommandAllowed(args.force)) {
-      return
-    }
+    assertDestructiveCommandAllowed(args.force)
 
     if (args['dry-run']) {
       const queueFilter = args.queue ? ` on queue "${args.queue}"` : ''

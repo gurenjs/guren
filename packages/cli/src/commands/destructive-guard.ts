@@ -1,11 +1,7 @@
-import { consola } from 'consola'
+import { CliError } from '../cli-error'
 
-export function ensureDestructiveCommandAllowed(force?: boolean): boolean {
+export function assertDestructiveCommandAllowed(force?: boolean): void {
   if (process.env.NODE_ENV === 'production' && !force) {
-    consola.error('This command is destructive. Use --force to run in production.')
-    process.exit(1)
-    return false
+    throw new CliError('This command is destructive. Use --force to run in production.')
   }
-
-  return true
 }
