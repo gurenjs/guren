@@ -133,9 +133,10 @@ ${body}
     const run = await runProbe(
       'callback-write.ts',
       "process.stdout.write('x'.repeat(1024 * 1024), () => { process.stdout.write('y'.repeat(4 * 1024 * 1024)) })\nawait exitWhenFlushed(0)",
-      'bun callback-write.ts | (sleep 1; wc -c)',
+      'set -o pipefail; bun callback-write.ts | (sleep 1; wc -c)',
     )
 
+    expect(run).toMatchObject({ killed: false, exitCode: 0 })
     expect(run.stdout.trim()).toBe(String(5 * 1024 * 1024))
   }, TEST_TIMEOUT_MS)
 
@@ -144,9 +145,10 @@ ${body}
     const run = await runProbe(
       'throwing-callback.ts',
       "try { process.stdout.write('a', () => { throw new Error('from the callback') }) } catch {}\nprocess.stdout.write('x'.repeat(4 * 1024 * 1024))\nawait exitWhenFlushed(0)",
-      'bun throwing-callback.ts | (sleep 1; wc -c)',
+      'set -o pipefail; bun throwing-callback.ts | (sleep 1; wc -c)',
     )
 
+    expect(run).toMatchObject({ killed: false, exitCode: 0 })
     expect(run.stdout.trim()).toBe(String(4 * 1024 * 1024 + 1))
   }, TEST_TIMEOUT_MS)
 
