@@ -284,7 +284,9 @@ describe('plan:verify', () => {
     const redone = await verify(plan, app)
     // The pages step verified in the run before and still stands, and the scaffold step, which fingerprints nothing, stands on its commands.
     expect(redone.skipped).toEqual(['task/entity/model.comment/scaffold', 'task/entity/model.comment/pages'])
-    expect(redone.steps.map((step) => step.stepId)).toContain(DATA)
+    // DATA drifted, and a step beside it (the incomplete http step) did not verify, so it is left for a later re-check.
+    expect(redone.steps.map((step) => step.stepId)).not.toContain(DATA)
+    expect(redone.recheckPending).toEqual([DATA])
 
     const revised = await writePlan('lift-revised.plan.json', { ...loadCommentsPlan(), title: 'Revised' })
     await writeFile(join(app, '.guren/plans/lift-revised.state.json'), JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: { [DATA]: record } }), 'utf8')
