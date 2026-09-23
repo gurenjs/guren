@@ -138,6 +138,13 @@ export function announceWrittenFiles(files: readonly string[], overwritten: read
   }
 }
 
+/** For the files a scaffold found in place and left as they were, printed after the written ones. */
+export function announceKeptFiles(files: readonly string[]): void {
+  for (const file of files) {
+    consola.info(`Kept ${file} (pass --force to regenerate it)`)
+  }
+}
+
 /**
  * Writes a generated artifact, skipping the write when the file already holds
  * byte-identical content. Codegen re-runs on every save under the watched directories,

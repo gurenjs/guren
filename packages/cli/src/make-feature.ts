@@ -3,7 +3,7 @@ import { consola } from 'consola'
 import { assertNotApiOnly } from './app-surface'
 import { CliError } from './cli-error'
 import { appConfiguresAttachments } from './attachments-check'
-import { announceWrittenFiles, camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeRoot, writeScaffoldFiles, writerOptionsFrom, writtenFileMessage, type ScaffoldFileEntry, type WriterOptions } from './utils'
+import { announceKeptFiles, announceWrittenFiles, camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeRoot, writeScaffoldFiles, writerOptionsFrom, writtenFileMessage, type ScaffoldFileEntry, type WriterOptions } from './utils'
 import { pluralize, schemaIdentifierFor, tableNameFor } from './inflect'
 import { factoryFile } from './make-factory'
 import { findMigrationCreatingTable } from './make-migration'
@@ -46,16 +46,25 @@ export interface MakeFeatureOptions extends WriterOptions {
   publicAccess?: boolean
   /** Also generate an authorization policy and enforce it in mutating actions. */
   withPolicy?: boolean
-  /** Print created files and next steps (default: true). Callers that wire routes/schema themselves pass false. */
+  /**
+   * Print created and kept files and next steps (default: true). Callers that wire
+   * routes/schema themselves pass false, and report `created` and `kept` themselves.
+   */
   announce?: boolean
   /**
    * Prototype-first (RFC 0021): pages, validator, the page-data type and fixture
    * entries only — no model, migration, Resource or controller. Requires
    * `guren add prototype`. Re-running without the flag promotes the feature: the
    * Resource is typed against the page-data type, the prototype's validator and pages
-   * that exist are kept, and any missing are written.
+   * that exist are kept (`--force` regenerates them), and any missing ones are written.
    */
   prototype?: boolean
+  /**
+   * Receives the absolute path of each prototype file a promotion kept rather than
+   * wrote, the way `overwritten` receives the replaced ones. Only a caller passing
+   * `announce: false` needs it: announcing prints them.
+   */
+  kept?: string[]
 }
 
 export async function makeFeature(name: string, options: MakeFeatureOptions = {}): Promise<string[]> {
@@ -200,23 +209,22 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     ...(options.withTest ? [{ ...(await testFile(singular, writerOptions)), flag: '--test' }] : []),
   ]
   // At promotion the validator and pages are the prototype run's, possibly hand-edited since.
-  const kept = promoting && !options.force ? await existingFiles(appRoot, [validator, ...pageFiles]) : []
-  const files = [...backendFiles, ...pageFiles, ...modelFiles].filter((file) => !kept.includes(file))
+  const keptFiles = promoting && !options.force ? await existingFiles(appRoot, [validator, ...pageFiles]) : []
+  const files = [...backendFiles, ...pageFiles, ...modelFiles].filter((file) => !keptFiles.includes(file))
   await assertNoExistingTargets(singular, appRoot, files, options.force)
   const created = await writeScaffoldFiles(files, writerOptions)
+  const kept = keptFiles.map((file) => resolve(appRoot, file.path))
+  options.kept?.push(...kept)
 
   // The pages above style with Guren UI tokens (bg-g-page, …).
   await ensureGurenUiTokens(appRoot)
 
-  if (options.announce !== false) announceWrittenFiles(created, overwritten)
-  // Printed either way: a caller that announces `created` itself has no list of what was kept.
-  for (const file of kept) {
-    consola.info(`Kept ${resolve(appRoot, file.path)} (pass --force to regenerate it)`)
-  }
-
   if (options.announce === false) {
     return created
   }
+
+  announceWrittenFiles(created, overwritten)
+  announceKeptFiles(kept)
 
   const schemaPath = schemaPathFor(moduleName)
   const routesPath = moduleName ? `modules/${moduleName}/routes.ts` : 'routes/web.ts'

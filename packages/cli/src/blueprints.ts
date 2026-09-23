@@ -378,6 +378,8 @@ function snakeCase(value: string): string {
 
 export interface AddResourceResult {
   created: string[]
+  /** The prototype's validator and pages a promotion left as they were. */
+  kept: string[]
   /** False when `db/schema.ts` already exported the table and was left as it was. */
   schemaUpdated: boolean
   /** False when `routes/web.ts` already registered the resource's routes. */
@@ -407,18 +409,20 @@ export async function addResource(options: RunBlueprintOptions): Promise<AddReso
   // rather than about a missing file.
   await assertResourceTargetsPatchable(routeName)
 
+  const kept: string[] = []
   const created = await makeFeature(singular, {
     ...blueprintWriterOptions(options),
     fields: options.fields,
     attach: options.attach,
     publicAccess: options.publicAccess,
     announce: false,
+    kept,
   })
 
   const schemaUpdated = await updateResourceSchema(singular, fields)
   const routesUpdated = await updateResourceRoutes(singular, routeName, routeVar)
 
-  return { created, schemaUpdated, routesUpdated }
+  return { created, kept, schemaUpdated, routesUpdated }
 }
 
 async function updateResourceSchema(singular: string, fields: FieldDefinition[]): Promise<boolean> {

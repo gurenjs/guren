@@ -9,7 +9,7 @@ import { makeFeature, buildRouteRegistrationHint, type MakeFeatureOptions } from
 import { findMigrationCreatingTable } from '../src/make-migration'
 import { generateDataTypes } from '../src/data-types'
 import { parseAttachString, parseFieldsString } from '../src/fields'
-import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, captureInfos, captureSuccesses, captureWarnings, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyApp, seedAttachmentsConfig, snapshotTree, writeWorkspaceFiles } from './helpers'
+import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, captureConsolaLines, captureInfos, captureSuccesses, captureWarnings, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyApp, seedAttachmentsConfig, snapshotTree, writeWorkspaceFiles } from './helpers'
 
 describe('parseFieldsString', () => {
   it('parses simple fields', () => {
@@ -918,7 +918,10 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
       await writeFile(indexPath, index)
       await writeFile(validatorPath, validator)
 
-      const created = await makeFeature('Note', { fields: 'title:string,done:boolean' })
+      let created: string[] = []
+      const lines = await captureConsolaLines(['info', 'success'], async () => {
+        created = await makeFeature('Note', { fields: 'title:string,done:boolean' })
+      })
 
       // The pages and validator are kept as edited, so none is reported as created.
       // The generators report the realpath of the macOS tmpdir symlink.
@@ -927,6 +930,12 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
         'app/Http/Resources/NoteResource.ts',
         'app/Http/Controllers/NoteController.ts',
         'app/Models/Note.ts',
+      ])
+      const keptPaths = ['app/Http/Validators/NoteValidator.ts', ...['Index', 'Show', 'New', 'Edit'].map((page) => `resources/js/pages/notes/${page}.tsx`)]
+      expect(lines.filter((line) => /^(success: Created |info: Kept |info: Next steps:$)/u.test(line))).toEqual([
+        ...created.map((file) => `success: Created ${file}`),
+        ...keptPaths.map((path) => `info: Kept ${join(root, path)} (pass --force to regenerate it)`),
+        'info: Next steps:',
       ])
       expect(await readFile(indexPath, 'utf8')).toBe(index)
       expect(await readFile(validatorPath, 'utf8')).toBe(validator)
@@ -961,10 +970,11 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
         'resources/js/pages/notes/Edit.tsx',
       ]
 
-      // Announcing off, as `add resource` promotes: the Kept lines still print.
+      // Announcing off, as `add resource` promotes: nothing prints, and the caller gets the list.
+      const kept: string[] = []
       let created: string[] = []
       const infos = await captureInfos(async () => {
-        created = await makeFeature('Note', { fields: 'title:string', announce: false })
+        created = await makeFeature('Note', { fields: 'title:string', announce: false, kept })
       })
 
       const root = await realpath(workspace.dir)
@@ -974,9 +984,8 @@ describe('makeFeature --prototype (RFC 0021 Part 3)', () => {
         'resources/js/pages/notes/Show.tsx',
         'app/Models/Note.ts',
       ])
-      expect(infos.filter((line) => line.startsWith('Kept '))).toEqual(
-        keptPaths.map((path) => `Kept ${join(root, path)} (pass --force to regenerate it)`),
-      )
+      expect(infos).toEqual([])
+      expect(kept).toEqual(keptPaths.map((path) => join(root, path)))
     } finally {
       await workspace.cleanup()
     }

@@ -16,6 +16,7 @@ import {
   PROVIDERLESS_APP_FIXTURE,
   SQLITE_SCHEMA_FIXTURE,
   REGISTRAR_LESS_ROUTES_FIXTURE,
+  captureConsolaLines,
   captureWarnings,
   createTempWorkspace,
   readApiOnlyTemplateFile,
@@ -302,6 +303,36 @@ export default registerWebRoutes
     expect(first).toMatchObject({ schemaUpdated: true, routesUpdated: true })
     expect(second).toMatchObject({ schemaUpdated: false, routesUpdated: false })
     expect(await readFile('db/schema.ts', 'utf8')).toBe(schemaAfterFirst)
+  })
+
+  // A promotion keeps the prototype's validator and pages; `add resource` passes
+  // announce: false, so the command is what reports them, after the written files.
+  it('announces the prototype files a promotion kept after the files it wrote', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+    await writeWorkspaceFiles(workspace.dir, {
+      'resources/js/types/Post.ts': 'export interface PostData extends Record<string, unknown> { id: number }\n',
+      'app/Http/Validators/PostValidator.ts': 'export {}\n',
+      'resources/js/pages/posts/Index.tsx': 'export default function Index() { return null }\n',
+      // Present, so ensureGurenUiTokens stays quiet: it announces its own write.
+      'resources/css/guren.css': '',
+    })
+
+    const lines = await captureConsolaLines(['info', 'success'], () =>
+      runCommand(builtinSubCommands.add as CommandDef<never>, { rawArgs: ['resource', 'Post'] }))
+
+    const created = [
+      'app/Http/Resources/PostResource.ts',
+      'app/Http/Controllers/PostController.ts',
+      'resources/js/pages/posts/Show.tsx',
+      'resources/js/pages/posts/New.tsx',
+      'resources/js/pages/posts/Edit.tsx',
+      'app/Models/Post.ts',
+    ]
+    const kept = ['app/Http/Validators/PostValidator.ts', 'resources/js/pages/posts/Index.tsx']
+    expect(lines.filter((line) => /^(success: Created |info: Kept )/u.test(line))).toEqual([
+      ...created.map((path) => `success: Created ${resolve(process.cwd(), path)}`),
+      ...kept.map((path) => `info: Kept ${resolve(process.cwd(), path)} (pass --force to regenerate it)`),
+    ])
   })
 
   // A text match on `export const posts = pgTable(` misses this shape; appending a
