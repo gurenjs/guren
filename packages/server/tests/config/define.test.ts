@@ -10,6 +10,7 @@ import {
   defineStorageConfig,
 } from '../../src/config/define'
 import { defineEnv, Env } from '../../src/config/env'
+import { defineModule } from '../../src/container/defineModule'
 import { ServiceProvider } from '../../src/container/ServiceProvider'
 import { createApp } from '../../src/http/Application'
 import { resetDefaultApplication } from '../../src/http/default-application'
@@ -99,7 +100,7 @@ describe('createApp({ config }) (RFC 0027 §2, §3)', () => {
   test('fails the boot when two definitions share a key', async () => {
     const app = createApp({ config: [sentinelCache('first'), sentinelCache('second')] })
 
-    await expect(app.boot()).rejects.toThrow('two "cache" definitions, at config[0] and config[1]')
+    await expect(app.boot()).rejects.toThrow('"cache" has two config definitions, at createApp({ config })[0] and createApp({ config })[1]. Keep one.')
   })
 
   test('fails the boot when a later provider rebinds a configured key, naming both', async () => {
@@ -120,6 +121,93 @@ describe('createApp({ config }) (RFC 0027 §2, §3)', () => {
     await app.boot()
 
     expect(log[0]).toBe('register sees configured')
+  })
+})
+
+describe('defineModule({ config }) (RFC 0002, RFC 0027 §2)', () => {
+  test('binds a module definition when the app has no env and no config of its own', async () => {
+    const app = createApp({
+      modules: [defineModule({ name: 'billing', config: [sentinelCache('module')] })],
+      providers: [ReadsCache],
+    })
+    await app.boot()
+
+    expect(app.container.make<{ label: string }>('cache').label).toBe('module')
+    expect(log).toEqual(['register sees module', 'boot module', 'boot app provider'])
+  })
+
+  test('boots createApp({ config }) first, then each module in modules order', async () => {
+    const tagged = (label: string, key: 'mail' | 'queue' | 'storage') => defineConfig({
+      key,
+      resolve: () => ({}) as never,
+      bind: () => {},
+      boot: () => {
+        log.push(`boot ${label}`)
+      },
+    })
+    const app = createApp({
+      config: [sentinelCache('root')],
+      modules: [
+        defineModule({ name: 'billing', config: [tagged('billing', 'mail')] }),
+        defineModule({ name: 'shipping', config: [tagged('shipping', 'queue'), tagged('shipping', 'storage')] }),
+      ],
+    })
+    await app.boot()
+
+    expect(log).toEqual(['boot root', 'boot billing', 'boot shipping', 'boot shipping'])
+  })
+
+  test('fails the boot when the app and a module define one key, naming both', async () => {
+    const app = createApp({
+      config: [sentinelCache('root')],
+      modules: [defineModule({ name: 'billing', config: [sentinelCache('module')] })],
+    })
+
+    await expect(app.boot()).rejects.toThrow('"cache" has two config definitions, at createApp({ config })[0] and the "billing" module\'s config[0]. Keep one.')
+  })
+
+  test('fails the boot when two modules define one key, naming both', async () => {
+    const app = createApp({
+      modules: [
+        defineModule({ name: 'billing', config: [sentinelCache('billing')] }),
+        defineModule({ name: 'shipping', config: [sentinelCache('shipping')] }),
+      ],
+    })
+
+    await expect(app.boot()).rejects.toThrow('at the "billing" module\'s config[0] and the "shipping" module\'s config[0]')
+  })
+
+  test('fails the boot when a module provider rebinds a key a module definition configured', async () => {
+    class CacheProvider extends ServiceProvider {
+      register(): void {
+        this.container.instance('cache', { label: 'provider' })
+      }
+    }
+    const app = createApp({
+      modules: [defineModule({ name: 'billing', config: [sentinelCache('module')], providers: [CacheProvider] })],
+    })
+
+    await expect(app.boot()).rejects.toThrow('"cache" is configured twice: modules/billing/config/cache.ts and CacheProvider.register(). Keep one.')
+  })
+
+  test('fails the boot when a module provider rebinds a key createApp({ config }) configured', async () => {
+    class CacheProvider extends ServiceProvider {
+      register(): void {
+        this.container.instance('cache', { label: 'provider' })
+      }
+    }
+    const app = createApp({
+      config: [sentinelCache('root')],
+      modules: [defineModule({ name: 'billing', providers: [CacheProvider] })],
+    })
+
+    await expect(app.boot()).rejects.toThrow('"cache" is configured twice: config/cache.ts and CacheProvider.register(). Keep one.')
+  })
+
+  test('accepts a module literal built without defineModule() and with no config', async () => {
+    const app = createApp({ modules: [{ name: 'billing', providers: [], commands: [] }] })
+
+    await expect(app.boot()).resolves.toBeUndefined()
   })
 })
 
@@ -220,6 +308,15 @@ describe('defineHttpConfig() host authorization (RFC 0027 §5)', () => {
     const app = createApp({
       hostAuthorization: { allowedHosts: ['good.example'] },
       config: [defineHttpConfig(() => ({ hostAuthorization: false }))],
+    })
+
+    await expect(app.boot()).rejects.toThrow('Host authorization is configured twice')
+  })
+
+  test('fails the boot when a module carries the http definition and createApp({ hostAuthorization }) is given', async () => {
+    const app = createApp({
+      hostAuthorization: { allowedHosts: ['good.example'] },
+      modules: [defineModule({ name: 'edge', config: [defineHttpConfig(() => ({ hostAuthorization: false }))] })],
     })
 
     await expect(app.boot()).rejects.toThrow('Host authorization is configured twice')

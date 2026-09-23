@@ -1,3 +1,4 @@
+import type { ConfigDefinition } from '../config/define'
 import type { CommandClass } from '../console/types'
 import type { Router } from '../mvc/Router'
 import type { ServiceProviderConstructor } from './ServiceProvider'
@@ -27,6 +28,13 @@ export interface ModuleDefinition {
    * explicit registration keeps a bundled deployment resolving the same set.
    */
   commands?: CommandClass[]
+  /**
+   * Config definitions the module owns (`modules/<name>/config/<key>.ts`),
+   * bound after `createApp({ config })` in `modules` order. Keys share the
+   * application's one container, so a key the app or another module also
+   * defines fails the boot, naming both.
+   */
+  config?: ReadonlyArray<ConfigDefinition>
 }
 
 /**
@@ -39,6 +47,8 @@ export interface GurenModule {
   routes?: (router: Router) => void | Promise<void>
   providers: ServiceProviderConstructor[]
   commands: CommandClass[]
+  /** Optional, unlike `providers`, so a module literal built without `defineModule()` stays valid. */
+  config?: ReadonlyArray<ConfigDefinition>
 }
 
 /** Define a Guren application module without boilerplate. */
@@ -49,6 +59,7 @@ export function defineModule(definition: ModuleDefinition): GurenModule {
     routes: definition.routes,
     providers: definition.providers ?? [],
     commands: definition.commands ?? [],
+    config: definition.config ?? [],
   }
 }
 

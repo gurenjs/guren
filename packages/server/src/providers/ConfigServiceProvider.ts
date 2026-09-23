@@ -2,7 +2,7 @@ import { ServiceProvider, type OwnedBinding } from '../container/ServiceProvider
 import type { ConfigDefinition, ConfigDefinitions } from '../config/define'
 import type { AppEnv, EnvSource } from '../config/env'
 import { recordEnvReads } from '../config/env-reads'
-import type { Application } from '../http/Application'
+import type { Application, ConfiguredDefinition } from '../http/Application'
 import { warnOnce } from '../support/warn-once'
 
 interface ResolvedDefinition {
@@ -12,7 +12,8 @@ interface ResolvedDefinition {
 
 /**
  * Validates `createApp({ env })` and binds it as `env`, then resolves and binds
- * each `createApp({ config })` definition (RFC 0027 §1-§3). Registered before
+ * each `createApp({ config })` definition and each module's `config` after them
+ * (RFC 0027 §1-§3, RFC 0002). Registered before
  * every other provider: a bad environment fails the boot before anything
  * registers, every later register() sees the configured managers, and a later
  * provider that rebinds one fails the boot through {@link ownedBindings}.
@@ -29,10 +30,11 @@ export class ConfigServiceProvider extends ServiceProvider {
     this.resolved = []
     this.owned = new Map()
 
-    const definitions = app.configDefinitions
-    assertDistinctKeys(definitions)
+    const entries = app.configEntries
+    assertDistinctKeys(entries)
 
-    for (const definition of definitions) {
+    for (const entry of entries) {
+      const { definition } = entry
       const { env, read } = recordEnvReads(this.env)
       const config = definition.resolve(env)
 
@@ -54,7 +56,7 @@ export class ConfigServiceProvider extends ServiceProvider {
       for (const key of this.container.getBindings()) {
         const binding = this.container.bindingOf(key)
         if (binding !== before.get(key)) {
-          this.owned.set(key, { binding, source: `config/${definition.key}.ts` })
+          this.owned.set(key, { binding, source: `${entry.module === undefined ? '' : `modules/${entry.module}/`}config/${definition.key}.ts` })
         }
       }
       this.resolved.push({ definition, config })
@@ -92,15 +94,21 @@ export class ConfigServiceProvider extends ServiceProvider {
   }
 }
 
-function assertDistinctKeys(definitions: ReadonlyArray<ConfigDefinition>): void {
-  const seen = new Map<string, number>()
-  definitions.forEach((definition, index) => {
-    const first = seen.get(definition.key)
+function assertDistinctKeys(entries: ReadonlyArray<ConfiguredDefinition>): void {
+  const seen = new Map<string, ConfiguredDefinition>()
+  for (const entry of entries) {
+    const first = seen.get(entry.definition.key)
     if (first !== undefined) {
       throw new Error(
-        `[guren] createApp({ config }) has two "${definition.key}" definitions, at config[${first}] and config[${index}]. Keep one.`,
+        `[guren] "${entry.definition.key}" has two config definitions, at ${listedAt(first)} and ${listedAt(entry)}. Keep one.`,
       )
     }
-    seen.set(definition.key, index)
-  })
+    seen.set(entry.definition.key, entry)
+  }
+}
+
+function listedAt(entry: ConfiguredDefinition): string {
+  return entry.module === undefined
+    ? `createApp({ config })[${entry.index}]`
+    : `the "${entry.module}" module's config[${entry.index}]`
 }
