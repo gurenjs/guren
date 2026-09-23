@@ -314,7 +314,7 @@ describe('Application.introspect()', () => {
       const manifest = await withEnv({ GUREN_INTROSPECT: '1', RFC26_REQUIRED_KEY: undefined }, () => app.introspect())
 
       expect(manifest.warnings).toContainEqual({ code: 'env-invalid', message: 'RFC26_REQUIRED_KEY required, not set', provider: 'ConfigServiceProvider' })
-      expect(manifest.warnings.find((warning) => warning.code === 'config-unverified')).toMatchObject({ provider: 'ConfigServiceProvider' })
+      expect(manifest.warnings.find((warning) => warning.code === 'config-unverified')).toMatchObject({ provider: 'ConfigServiceProvider', key: 'cache' })
     } finally {
       warn.mockRestore()
     }

@@ -61,6 +61,7 @@ import { AGENTS_MANIFEST_FILE, planAgentManifest } from './agents-types'
 import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
 import { runI18nCheck } from './i18n-check'
+import { introspectApp, type Introspection } from './introspect'
 import { checkEnvExample, ENV_EXAMPLE_FILE } from './app-env'
 import { checkConfigWiring } from './config-check'
 import { runSpecCheck } from './spec-check'
@@ -119,6 +120,12 @@ export interface RunCheckOptions {
   env?: boolean
   /** Run the implementation-plan checks (RFC 0030 §8). Advisory, and never part of a run without this flag. */
   plan?: boolean
+  /**
+   * Read the introspected app where a check can (RFC 0026 §5). `guren check` sets
+   * it unless `--no-introspect`; an in-process caller (the edit hook, the gate, the
+   * dev MCP) leaves it off, since the manifest memo would outlive a long-lived process.
+   */
+  introspect?: boolean
 }
 
 /**
@@ -343,6 +350,26 @@ async function checkSchemaAggregateKeys(cwd: string, cache: ParseCache): Promise
   return results
 }
 
+/**
+ * The one line a failed introspection leaves in the report (RFC 0026 §5), whichever
+ * check started it: those checks fell back to source and say so in `evidence`.
+ */
+async function introspectionUnavailable(run: Promise<Introspection> | undefined): Promise<CheckResult | undefined> {
+  const result = await run
+  if (result?.status !== 'failed') return undefined
+  const reason = result.message.split('\n')[0].replace(/\.?$/u, '.')
+  return {
+    ...check(
+      'introspection-unavailable',
+      'Introspection',
+      'warn',
+      `The app could not be introspected (${result.reason}): ${reason} The checks that read it were judged from source instead.`,
+      'Run `bunx guren introspect` to see the failure, or pass --no-introspect to skip it.',
+    ),
+    advisory: true,
+  }
+}
+
 export async function runCheck(options: RunCheckOptions = {}): Promise<CheckReport> {
   const cwd = resolve(options.cwd ?? process.cwd())
   const checks: CheckResult[] = []
@@ -368,6 +395,17 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   // Loaded once by the core suite and reused by the prototype suite, which
   // loads it itself only when running alone.
   let graph: Awaited<ReturnType<typeof loadRouteGraph>> | undefined
+  // One introspection per run, started only by a check that reads the manifest.
+  let introspection: Promise<Introspection> | undefined
+  const introspect = options.introspect ? () => (introspection ??= introspectApp(cwd)) : undefined
+  // The deploy verdicts start before the suites so their introspection child overlaps them,
+  // whenever package.json or any source could have moved: the verdict joins the two.
+  const deployRuntime =
+    runs('core') && (sourceChanged || changedFiles?.has('package.json'))
+      ? checkDeployRuntime(cwd, { introspect: introspect ?? false })
+      : undefined
+  // Awaited at step 12; until then a rejection must not surface as unhandled.
+  deployRuntime?.catch(() => {})
 
   if (runs('core')) {
     // 1. Check controllers for empty methods. The unfiltered list is kept for
@@ -679,20 +717,18 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
 
   // 12. Deploy runtime (RFC 0020 Part 0): doctor's three verdicts, for an app
   // declaring a deploy plugin or the Lambda adapter; every other app adds nothing.
-  // Advisory: the scan reads constructions, not intent (a custom `SessionStore`
-  // passed as `store:` reads as unbacked), and a false positive must not fail a gate.
-  // Runs whenever package.json or any source could have moved: the verdict joins the two.
-  if (runs('core')) {
-    const manifestChanged = !changedFiles || changedFiles.has('package.json')
-    if (sourceChanged || manifestChanged) {
-      for (const verdict of await checkDeployRuntime(cwd)) {
-        checks.push({
-          ...check(verdict.key, verdict.title, verdict.status, verdict.message, verdict.fix),
-          advisory: true,
-        })
-      }
-    }
+  // Advisory: the manifest is read in this environment, and its static fallback reads
+  // constructions, not intent, so a false positive must not fail a gate.
+  for (const verdict of (await deployRuntime) ?? []) {
+    checks.push({
+      ...check(verdict.key, verdict.title, verdict.status, verdict.message, verdict.fix),
+      advisory: true,
+      evidence: verdict.evidence,
+    })
   }
+
+  const unavailable = await introspectionUnavailable(introspection)
+  if (unavailable) checks.push(unavailable)
 
   // Every checker treats an unparsable file as contributing nothing, which is
   // indistinguishable from a file with nothing wrong. Reported once here, after

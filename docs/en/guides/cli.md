@@ -297,6 +297,40 @@ entry that calls `listen()` while it is imported fails with a pointer to the
 `@guren/core` from before introspection, detected before the entry is
 imported).
 
+### Checks that read the introspected app
+
+`guren check` and `guren doctor` judge the deploy-runtime verdicts from the
+introspected app first: the hashers the auth manager holds, the session store
+and cache store it selects, and whether a provider threw while registering. For
+now these are the only checks that read it, so a run introspects only when the
+app declares a deploy plugin or the Lambda adapter; checks that read sessions and
+attachments will join them. Each run introspects at most once. The manifest is
+read with this environment's `.env`, so a store selected by an environment
+variable is judged at its local value.
+
+Each of these results carries `evidence` in `--json` output. A verdict that reads
+several facts reports the weakest source among them:
+
+| `evidence` | Meaning |
+|------------|---------|
+| `manifest` | Judged with the introspected app. Facts the manifest does not carry (OAuth state stores, the queue, explicit in-memory constructions) still come from the source scan |
+| `static` | Judged from the source scan: introspection failed or was skipped, the verdict needs nothing the manifest carries (provider discovery), or the app could not vouch for what the verdict reads. The last happens when a provider threw in `register()`, a config was left unbound because it reads an unset environment variable, or a deferred provider or an undescribable binding supplies the section; the message says which |
+| `none` | The fact has no source to fall back to (whether the cache store is per-process). The key ends in `-unverified` and the result is a warning, never a pass |
+
+When introspection fails, `check` adds one advisory `introspection-unavailable`
+line with the reason, and the verdicts fall back to the source scan. `doctor`
+reports the reason as `evidenceReason` in its JSON, which a run with
+`--no-introspect` leaves out. `--no-introspect` skips introspection and judges
+from source only, which suits an app whose entry does not import yet:
+
+```bash
+bunx guren check --no-introspect
+bunx guren doctor --no-introspect
+```
+
+The deploy builds run the same verdicts, with introspection capped at 10
+seconds, and print one line naming what each was judged from.
+
 ### Agent-exposed routes
 
 Routes that declare `.agent()` metadata (see [Routing](./routing.md)) are checked by `check` and treated more strictly by `audit`. The rules run in the normal `check` suite and are content-activated: an app with no agent routes contributes no findings, and no controller is scanned.

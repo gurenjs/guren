@@ -4,13 +4,23 @@
  * Its own entry, not part of `deploy-build`: that one imports node builtins
  * only (its test scans the built artifact), while the scan lives in
  * `@guren/cli`, reached here lazily so nothing loads until a build asks.
- * Warns, never throws: the scan reads constructions, not intent, and a wrong
- * guess must not block a deploy.
+ * The CLI reads the introspected app, and the source scan where it cannot (RFC 0026 §5).
+ * Warns, never throws: a wrong guess must not block a deploy.
  */
 
 interface DeployCheckCliApi {
   /** Absent on a @guren/cli older than RFC 0020 Part 0. */
-  checkDeployRuntime?(cwd: string): Promise<Array<{ status: 'pass' | 'warn'; message: string; fix?: string }>>
+  checkDeployRuntime?(cwd: string): Promise<DeployRuntimeVerdict[]>
+}
+
+interface DeployRuntimeVerdict {
+  title: string
+  status: 'pass' | 'warn'
+  message: string
+  fix?: string
+  /** Absent on a @guren/cli older than RFC 0026 Part 2a. */
+  evidence?: 'manifest' | 'static' | 'none'
+  evidenceReason?: string
 }
 
 export interface ReportDeployRuntimeHazardsOptions {
@@ -25,9 +35,9 @@ function describeError(error: unknown): string {
 }
 
 /**
- * Print every non-passing verdict through `console.warn`, one line each, and
- * return the lines. A scan that cannot run prints one line saying so rather
- * than nothing: silence would read as a clean report.
+ * Print one `console.log` line naming the evidence, then every non-passing verdict
+ * through `console.warn`, one line each, and return those. A scan that cannot run
+ * prints one line saying so rather than nothing: silence would read as a clean report.
  */
 export async function reportDeployRuntimeHazards(options: ReportDeployRuntimeHazardsOptions): Promise<string[]> {
   const { root, label } = options
@@ -43,12 +53,15 @@ export async function reportDeployRuntimeHazards(options: ReportDeployRuntimeHaz
     return skipped(label, 'the installed @guren/cli predates them; upgrade it')
   }
 
-  let verdicts: Awaited<ReturnType<NonNullable<DeployCheckCliApi['checkDeployRuntime']>>>
+  let verdicts: DeployRuntimeVerdict[]
   try {
     verdicts = await cli.checkDeployRuntime(root)
   } catch (error) {
     return skipped(label, `the scan failed (${describeError(error)})`)
   }
+
+  const evidence = describeEvidence(label, verdicts)
+  if (evidence) console.log(evidence)
 
   const lines = verdicts
     .filter((verdict) => verdict.status !== 'pass')
@@ -58,6 +71,20 @@ export async function reportDeployRuntimeHazards(options: ReportDeployRuntimeHaz
   }
   return lines
 }
+
+/** One line naming what each verdict was judged from, and why the source when the app could not be read. */
+function describeEvidence(label: string, verdicts: DeployRuntimeVerdict[]): string | undefined {
+  const judged: string[] = []
+  for (const { title, evidence } of verdicts) {
+    if (evidence === undefined) return undefined
+    judged.push(`${title} from ${EVIDENCE_LABELS[evidence]}`)
+  }
+  if (judged.length === 0) return undefined
+  const reasons = [...new Set(verdicts.flatMap((verdict) => (verdict.evidenceReason ? [verdict.evidenceReason] : [])))]
+  return `${label}: deploy-runtime checks judged ${judged.join(', ')}${reasons.length > 0 ? ` (${reasons.join('; ')})` : ''}.`
+}
+
+const EVIDENCE_LABELS = { manifest: 'the introspected app', static: 'source', none: 'nothing verifiable' } as const
 
 function skipped(label: string, reason: string): string[] {
   const line = `${label}: deploy-runtime checks skipped — ${reason}. Run \`bunx guren doctor\` before deploying.`

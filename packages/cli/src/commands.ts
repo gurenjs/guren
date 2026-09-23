@@ -1688,11 +1688,18 @@ const doctorCommand = defineCommand({
       type: 'boolean',
       description: 'Show actionable next steps for the project.',
     },
+    // Positive on purpose, so citty's negation lands on this key; `default: true` prints `--no-introspect`.
+    introspect: {
+      type: 'boolean',
+      default: true,
+      description: 'Judge from source only, without introspecting the app (RFC 0026).',
+    },
   },
   async run({ args }) {
     const report = await runDoctor({
       json: Boolean(args.json),
       next: Boolean(args.next),
+      introspect: args.introspect !== false,
     })
 
     if (args.json) {
@@ -1876,6 +1883,12 @@ const checkCommand = defineCommand({
       type: 'boolean',
       description: 'Restrict file-scanning checks to files changed vs. the merge base with main.',
     },
+    // Positive on purpose, so citty's negation lands on this key; `default: true` prints `--no-introspect`.
+    introspect: {
+      type: 'boolean',
+      default: true,
+      description: 'Judge from source only, without introspecting the app (RFC 0026).',
+    },
     ci: {
       type: 'boolean',
       description: 'Exit non-zero when any check fails or warns (runs the full suite; for CI gates).',
@@ -1896,6 +1909,7 @@ const checkCommand = defineCommand({
       json: Boolean(args.json),
       routesFile: args.routes,
       arch: Boolean(args.arch),
+      introspect: args.introspect !== false,
       docs: Boolean(args.docs),
       spec: Boolean(args.spec),
       i18n: Boolean(args.i18n),

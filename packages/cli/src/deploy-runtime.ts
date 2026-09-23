@@ -13,8 +13,12 @@ import {
 } from './discovery'
 import { parseSourceFile } from './parse-cache'
 import { readDeclaredDependencyNames } from './plugin-manifest'
+import type { CheckEvidence } from './check-result'
+import { introspectApp, type Introspection } from './introspect'
 // The runtime warning in the session middleware names the target by the same label.
 import { SERVERLESS_RUNTIME_LABELS } from '@guren/server'
+import type { AppManifest, AuthProviderEntry, DriverMapEntry, SessionEntry } from '@guren/server'
+import { mapSection, readManifestSection, UNVERIFIED_SECTION_FIX, type ManifestSection } from './manifest-section'
 
 /**
  * Deploy targets whose runtime invalidates one or more of Guren's Bun-first
@@ -115,6 +119,52 @@ export interface DeployRuntimeAnalysis {
    * too: the Lambda adapter is found in source, so a skipped file hides it.
    */
   unparsedFiles: string[]
+  /**
+   * What the introspected app reported for the sections a verdict reads (RFC 0026
+   * §5). Absent when no introspection was asked for or it failed: the verdicts
+   * are then judged from the signals above alone.
+   */
+  manifest?: DeployManifestFacts
+  /** Why an introspection that was asked for gave no manifest, e.g. `import: Could not load src/main.ts`. */
+  introspectionFailure?: string
+}
+
+export type ManifestHasher = Pick<AuthProviderEntry, 'hasher' | 'algorithm' | 'requiresBun'> & {
+  /** The user provider holding it; null for the one `createApp({ auth })` writes with. */
+  provider: string | null
+}
+
+/** The session store the app selects, as the manifest describes it. `perProcess` null: nothing installed says. */
+export type ManifestSession =
+  /** No store configured: the session middleware keeps sessions in memory. */
+  | { kind: 'unconfigured' }
+  | { kind: 'store'; name: string; driver: string; perProcess: boolean | null }
+  /** A `default` naming a store the config does not declare. */
+  | { kind: 'undeclared'; name: string }
+  /** An `auth.sessionOptions.store` instance, by its class. */
+  | { kind: 'class'; className: string; perProcess: boolean | null }
+  /** An `auth.sessionOptions.store` factory, which only calling it would describe: the scan judges it. */
+  | { kind: 'scan' }
+
+export interface DeployManifestFacts {
+  /** Every hasher the auth manager holds: the one `createApp({ auth })` writes with, then each user provider's. */
+  hashers: ManifestSection<ManifestHasher[]>
+  /** Null when the app configures no session. */
+  session: ManifestSection<ManifestSession | null>
+  /**
+   * The default cache store's label when its driver is `memory`, else null. No other
+   * driver is judged: the scan never read a cache config, so none is claimed either way.
+   */
+  perProcessCache: ManifestSection<string | null>
+}
+
+export interface DeployRuntimeOptions {
+  /**
+   * The app's introspection, asked for only once a deploy target is found, so an
+   * app with none never spawns it. `analyzeDeployRuntime()` judges from source
+   * without one; `checkDeployRuntime()` introspects unless this is `false`.
+   */
+  introspect?: (() => Promise<Introspection>) | false
 }
 
 const DEPLOY_SCAN_DIRS = ['src', 'app', 'config', 'db', 'routes', 'modules', 'bin', 'functions', 'api'] as const
@@ -586,12 +636,15 @@ async function readAppSources(
  * Deploy targets declared by the app: plugin packages from its package.json
  * dependencies, plus the Lambda adapter detected from source imports.
  */
-async function detectDeployTargets(cwd: string, files: ScannedFile[]): Promise<DeployTargetDetection[]> {
+function declaresDeployPlugin(declared: string[]): boolean {
+  return declared.some((name) => Object.hasOwn(DEPLOY_PLUGIN_PACKAGES, name))
+}
+
+function detectDeployTargets(declared: string[], files: ScannedFile[]): DeployTargetDetection[] {
   const detections: DeployTargetDetection[] = []
 
-  const declared = new Set(await readDeclaredDependencyNames(cwd))
   for (const [packageName, targetId] of Object.entries(DEPLOY_PLUGIN_PACKAGES)) {
-    if (declared.has(packageName)) {
+    if (declared.includes(packageName)) {
       detections.push({
         profile: DEPLOY_TARGET_PROFILES[targetId],
         detectedVia: `${packageName} in package.json`,
@@ -619,12 +672,15 @@ async function detectDeployTargets(cwd: string, files: ScannedFile[]): Promise<D
  * Scan the app once for everything the deploy-runtime doctor checks need:
  * declared deploy targets, and Bun-only defaults still in force.
  */
-export async function analyzeDeployRuntime(cwd: string): Promise<DeployRuntimeAnalysis> {
+export async function analyzeDeployRuntime(cwd: string, options: DeployRuntimeOptions = {}): Promise<DeployRuntimeAnalysis> {
   // Read once, before the per-file walk: resolving a driver name means
   // reading node_modules, and the walk that needs the answer is synchronous.
-  const drivers = await resolveSessionDrivers(cwd)
+  const [drivers, declared] = await Promise.all([resolveSessionDrivers(cwd), readDeclaredDependencyNames(cwd)])
+  // A declared plugin is a target before any file is parsed, so the child overlaps the scan.
+  const early = options.introspect && declaresDeployPlugin(declared) ? options.introspect() : undefined
   const { files, unparsed } = await readAppSources(cwd, drivers)
-  const targets = await detectDeployTargets(cwd, files)
+  const targets = detectDeployTargets(declared, files)
+  const introspection = options.introspect && targets.length > 0 ? await (early ?? options.introspect()) : undefined
 
   const collect = (kind: SignalKind): SourceSignal[] =>
     files.flatMap((file) =>
@@ -650,7 +706,51 @@ export async function analyzeDeployRuntime(cwd: string): Promise<DeployRuntimeAn
     unknownSessionDriverSignals: collect('unknownSessionDriver'),
     discoverySignals: collect('discovery'),
     unparsedFiles: unparsed,
+    ...(introspection?.status === 'ok' ? { manifest: readDeployManifestFacts(introspection.manifest, drivers) } : {}),
+    ...(introspection?.status === 'failed'
+      ? { introspectionFailure: `${introspection.reason}: ${introspection.message.split('\n')[0].replace(/\.$/u, '')}` }
+      : {}),
   }
+}
+
+export function readDeployManifestFacts(manifest: AppManifest, drivers: SessionDriverRegistry): DeployManifestFacts {
+  return {
+    hashers: mapSection(readManifestSection(manifest, 'auth'), (auth) =>
+      auth === undefined
+        ? []
+        : [
+            { provider: null, hasher: auth.hasher, algorithm: auth.algorithm, requiresBun: auth.requiresBun },
+            ...Object.entries(auth.providers).map(([name, { hasher, algorithm, requiresBun }]) => ({
+              provider: name,
+              hasher,
+              algorithm,
+              requiresBun,
+            })),
+          ],
+    ),
+    session: mapSection(readManifestSection(manifest, 'session'), (session) =>
+      session === undefined ? null : sessionStoreOf(session, drivers),
+    ),
+    perProcessCache: mapSection(readManifestSection(manifest, 'cache'), (cache) => (cache === undefined ? null : perProcessCacheOf(cache))),
+  }
+}
+
+function sessionStoreOf(session: SessionEntry, drivers: SessionDriverRegistry): ManifestSession {
+  if (session.source === 'none') return { kind: 'unconfigured' }
+  const store = session.stores[session.default]
+  if (session.source === 'auth.sessionOptions.store') {
+    // `driver` is the store's constructor name here, never a driver name a plugin could declare.
+    return store?.driver ? { kind: 'class', className: store.driver, perProcess: store.perProcess } : { kind: 'scan' }
+  }
+  if (!store?.driver) return { kind: 'undeclared', name: session.default }
+  const { driver } = store
+  // The manifest knows the framework's drivers; an installed plugin's manifest knows its own.
+  const perProcess = store.perProcess ?? (drivers.has(driver) ? !drivers.get(driver) : null)
+  return { kind: 'store', name: session.default, driver, perProcess }
+}
+
+function perProcessCacheOf(cache: DriverMapEntry): string | null {
+  return cache.entries[cache.default]?.driver === 'memory' ? `the '${cache.default}' cache store (driver \`memory\`)` : null
 }
 
 /** Caveat appended to a check message when the scan was incomplete. */
@@ -686,17 +786,24 @@ export function formatSignals(signals: SourceSignal[]): string {
 
 export type DeployRuntimeVerdictStatus = 'pass' | 'warn'
 
+type DeployRuntimeCheckKey = 'deploy-password-hashing' | 'deploy-runtime-stores' | 'deploy-provider-discovery'
+
 /**
  * One deploy-runtime verdict, shaped for every consumer: `guren doctor` maps it
  * onto a DoctorCheck, `guren check` onto an advisory CheckResult, and the
  * deploy builds print it (RFC 0020 Part 0). A passing verdict carries no `fix`.
+ * The `-unverified` key is a verdict resting on a manifest fact that could not be
+ * trusted and has no static path (RFC 0026 §5): always a warn, with `evidence: 'none'`.
  */
 export interface DeployRuntimeVerdict {
-  key: 'deploy-password-hashing' | 'deploy-runtime-stores' | 'deploy-provider-discovery'
+  key: DeployRuntimeCheckKey | `${DeployRuntimeCheckKey}-unverified`
   title: string
   status: DeployRuntimeVerdictStatus
   message: string
   fix?: string
+  evidence: CheckEvidence
+  /** Why a verdict that asked for the introspected app was judged from source instead. */
+  evidenceReason?: string
 }
 
 function verdict(
@@ -704,10 +811,13 @@ function verdict(
   title: string,
   status: DeployRuntimeVerdictStatus,
   message: string,
+  evidence: CheckEvidence,
   fix?: string,
 ): DeployRuntimeVerdict {
-  return status === 'pass' ? { key, title, status, message } : { key, title, status, message, fix }
+  return status === 'pass' ? { key, title, status, message, evidence } : { key, title, status, message, fix, evidence }
 }
+
+const UNVERIFIED_FIX = `${UNVERIFIED_SECTION_FIX} This check never fails a build.`
 
 const BUN_ONLY_HASHER_FIX = "Drop `hasher: 'argon2'`, or replace `new ScryptHasher()` with `new Hash()`: the default writes `node:crypto` scrypt, which every runtime reads back. Rows already written as Argon2id are rehashed on their next successful login under Bun, so have them log in there first (or reset those passwords) before this runtime has to verify them."
 
@@ -729,7 +839,6 @@ function judgePasswordHashing(analysis: DeployRuntimeAnalysis): DeployRuntimeVer
   // Lambda adapter is detected from source, so a skipped file can turn a real
   // warning into "no deploy target detected".
   const caveat = formatParseCaveat(analysis)
-
   if (bunless.length === 0) {
     return verdict(
       key,
@@ -738,10 +847,28 @@ function judgePasswordHashing(analysis: DeployRuntimeAnalysis): DeployRuntimeVer
       analysis.targets.length > 0
         ? `${formatTargetLabels(analysis.targets)} runs on Bun, so every built-in hasher applies.${caveat}`
         : `No deploy plugin or Lambda adapter detected.${caveat}`,
+      'static',
     )
   }
 
   const labels = formatTargetLabels(bunless)
+
+  const hashers = analysis.manifest?.hashers
+  if (hashers?.status === 'described') {
+    const fromManifest = judgeManifestHashing(analysis, hashers.value, labels, caveat)
+    if (fromManifest) return fromManifest
+  }
+  if (hashers?.status === 'unverified') {
+    const judged = judgeStaticHashing(analysis, labels, caveat)
+    return { ...judged, message: `${judged.message} Judged from source: ${hashers.reason}.`, evidenceReason: hashers.reason }
+  }
+  return judgeStaticHashing(analysis, labels, caveat)
+}
+
+function judgeStaticHashing(analysis: DeployRuntimeAnalysis, labels: string, caveat: string): DeployRuntimeVerdict {
+  const key = 'deploy-password-hashing'
+  const title = 'Deploy Password Hashing'
+  const evidence = 'static'
 
   if (analysis.bunOnlyHasherSignals.length > 0) {
     return verdict(
@@ -749,6 +876,7 @@ function judgePasswordHashing(analysis: DeployRuntimeAnalysis): DeployRuntimeVer
       title,
       'warn',
       `${labels} detected, but a Bun-only hasher is selected (${formatSignals(analysis.bunOnlyHasherSignals)}). It hashes through Bun.password, so the rows it writes cannot be verified on this runtime.${caveat}`,
+      evidence,
       BUN_ONLY_HASHER_FIX,
     )
   }
@@ -768,12 +896,13 @@ function judgePasswordHashing(analysis: DeployRuntimeAnalysis): DeployRuntimeVer
       title,
       'warn',
       `${labels} detected, and the hasher is selected by an expression this check cannot read (${formatSignals(unreadable)}). Whether it writes node:crypto scrypt or Bun-only Argon2id is unknown, so this is not a pass.${caveat}`,
+      evidence,
       UNREADABLE_HASHER_FIX,
     )
   }
 
   if (analysis.passwordAuthSignals.length === 0) {
-    return verdict(key, title, 'pass', `${labels} detected, and no password authentication was found.${caveat}`)
+    return verdict(key, title, 'pass', `${labels} detected, and no password authentication was found.${caveat}`, evidence)
   }
 
   return verdict(
@@ -781,6 +910,77 @@ function judgePasswordHashing(analysis: DeployRuntimeAnalysis): DeployRuntimeVer
     title,
     'pass',
     `${labels} detected with password authentication (${formatSignals(analysis.passwordAuthSignals)}), and no Bun-only hasher is selected. The default hasher writes node:crypto scrypt on every runtime.${caveat}`,
+    evidence,
+  )
+}
+
+const UNKNOWN_HASHER_FIX = "A hasher of the app's own, a subclass of a framework one, or a custom user provider can override `hash()`, so the manifest reports no format for it. Confirm it does not write through Bun.password (Argon2id or bcrypt). This check never fails a build, so an app whose hasher is correct can leave it."
+
+function formatHashers(hashers: ManifestHasher[]): string {
+  return hashers
+    .map((entry) => {
+      const where = entry.provider === null ? 'createApp({ auth })' : `user provider '${entry.provider}'`
+      return `${where}: ${entry.hasher ?? 'custom'}${entry.algorithm ? ` (${entry.algorithm})` : ''}`
+    })
+    .join(', ')
+}
+
+/**
+ * The hashers the auth manager holds, as the introspected app registered them (RFC 0026 §5).
+ * Undefined, leaving the verdict to the scan, when no user provider is registered yet the
+ * source hashes passwords: a `useModel()` in a provider's `boot()` is past what the manifest sees.
+ * An unverified `auth` section never reaches here: the scan judges it (§5's fallback rule).
+ */
+function judgeManifestHashing(
+  analysis: DeployRuntimeAnalysis,
+  hashers: ManifestHasher[],
+  labels: string,
+  caveat: string,
+): DeployRuntimeVerdict | undefined {
+  const key = 'deploy-password-hashing'
+  const title = 'Deploy Password Hashing'
+
+  const bunOnly = hashers.filter((entry) => entry.requiresBun === true)
+  if (bunOnly.length > 0) {
+    return verdict(
+      key,
+      title,
+      'warn',
+      `${labels} detected, but a Bun-only hasher is registered (${formatHashers(bunOnly)}). It hashes through Bun.password, so the rows it writes cannot be verified on this runtime.${caveat}`,
+      'manifest',
+      BUN_ONLY_HASHER_FIX,
+    )
+  }
+
+  const unknown = hashers.filter((entry) => entry.requiresBun === null)
+  if (unknown.length > 0) {
+    return verdict(
+      key,
+      title,
+      'warn',
+      `${labels} detected, and whether these hashers need Bun.password is unverified (${formatHashers(unknown)}). Whether they write node:crypto scrypt or Bun-only Argon2id is unknown, so this is not a pass.${caveat}`,
+      'manifest',
+      UNKNOWN_HASHER_FIX,
+    )
+  }
+
+  if (hashers.every((entry) => entry.provider === null)) {
+    if (analysis.passwordAuthSignals.length > 0 || analysis.bunOnlyHasherSignals.length > 0) return undefined
+    return verdict(
+      key,
+      title,
+      'pass',
+      `${labels} detected, and neither the registered app nor its source shows password authentication.${caveat}`,
+      'manifest',
+    )
+  }
+
+  return verdict(
+    key,
+    title,
+    'pass',
+    `${labels} detected, and every registered hasher writes node:crypto scrypt (${formatHashers(hashers)}).${caveat}`,
+    'manifest',
   )
 }
 
@@ -795,41 +995,15 @@ const MEMORY_STORE_FIXES: Record<string, string> = {
   MemoryOAuthStateStore: OAUTH_STATE_STORE_FIX,
 }
 
-/**
- * Serverless targets share no memory between invocations, so in-memory stores
- * drop every session, cache entry, queued job, and OAuth state in production
- * while working perfectly in local development.
- */
-function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdict {
-  const key = 'deploy-runtime-stores'
-  const title = 'Deploy Runtime Stores'
+const UNKNOWN_MANIFEST_DRIVER_FIX = 'A driver registered in application code is not one the framework knows, and a plugin declares its own in `gurenPlugin.drivers.session`. This check never fails a build, so an app whose driver is correct can leave it.'
 
-  const caveat = formatParseCaveat(analysis)
+const STORE_CLASS_FIX = "The manifest knows only the framework's session store classes. Confirm this one keeps sessions outside process memory (a database, Redis, or a platform binding). This check never fails a build, so an app whose store is correct can leave it."
 
-  if (analysis.targets.length === 0) {
-    return verdict(key, title, 'pass', `No deploy plugin or Lambda adapter detected.${caveat}`)
-  }
+const UNDECLARED_STORE_FIX = 'Declare the store under `stores` in the session config, or point `default` (often `SESSION_DRIVER`) at a store it declares: the session manager refuses an undeclared default when it is built.'
 
-  const labels = formatTargetLabels(analysis.targets)
-  const issues: string[] = []
-  // Each issue names the remedy that fits it, deduped in order: telling an app
-  // that deliberately registered a driver to install a database store instead
-  // is the wrong advice, and the generic fix says exactly that.
-  const fixes: string[] = []
-  const raise = (issue: string, fix: string): void => {
-    issues.push(issue)
-    if (!fixes.includes(fix)) fixes.push(fix)
-  }
+type RaiseIssue = (issue: string, fix: string) => void
 
-  const memoryStoresByFix = new Map<string, SourceSignal[]>()
-  for (const signal of analysis.memoryStoreSignals) {
-    const fix = MEMORY_STORE_FIXES[signal.symbol] ?? BACKED_STORE_FIX
-    memoryStoresByFix.set(fix, [...(memoryStoresByFix.get(fix) ?? []), signal])
-  }
-  for (const [fix, signals] of memoryStoresByFix) {
-    raise(`in-memory stores are constructed explicitly (${formatSignals(signals)})`, fix)
-  }
-
+function raiseStaticSessionIssues(analysis: DeployRuntimeAnalysis, raise: RaiseIssue): void {
   if (analysis.memorySessionDefaultSignals.length > 0 && analysis.sessionDisabledSignals.length === 0) {
     raise(
       `the session config selects the per-process \`memory\` store (${formatSignals(analysis.memorySessionDefaultSignals)})`,
@@ -856,6 +1030,105 @@ function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdi
       BACKED_STORE_FIX,
     )
   }
+}
+
+/**
+ * The session store as the introspected app configured it, read with this environment's
+ * `.env`. A session middleware mounted by hand (`createSessionMiddleware`) is outside
+ * the manager, so it stays on the scan.
+ */
+function raiseManifestSessionIssues(analysis: DeployRuntimeAnalysis, session: ManifestSession | null, raise: RaiseIssue): void {
+  if (session === null) {
+    const manual = analysis.sessionSignals.filter((signal) => signal.symbol === 'createSessionMiddleware')
+    if (manual.length > 0 && analysis.backedSessionSignals.length === 0 && analysis.sessionDisabledSignals.length === 0) {
+      raise(
+        `sessions are enabled (${formatSignals(manual)}) with no persistent store: no DatabaseSessionStore or RedisSessionStore is constructed`,
+        BACKED_STORE_FIX,
+      )
+    }
+    return
+  }
+  if (session.kind === 'scan') return raiseStaticSessionIssues(analysis, raise)
+  if (analysis.sessionDisabledSignals.length > 0) return
+
+  switch (session.kind) {
+    case 'unconfigured':
+      return raise('sessions are enabled with no session store configured, so the session middleware keeps them in per-process memory', BACKED_STORE_FIX)
+    case 'undeclared':
+      return raise(`the session config's \`default\` names '${session.name}', a store it does not declare`, UNDECLARED_STORE_FIX)
+    case 'store': {
+      const label = `the '${session.name}' session store (driver \`${session.driver}\`)`
+      if (session.perProcess === true) return raise(`sessions use ${label} in this environment, which is per-process`, BACKED_STORE_FIX)
+      if (session.perProcess === null) {
+        return raise(
+          `sessions use ${label}, which this check cannot vouch for, being neither built in nor declared by an installed plugin's \`gurenPlugin.drivers.session\``,
+          UNKNOWN_MANIFEST_DRIVER_FIX,
+        )
+      }
+      return
+    }
+    case 'class': {
+      const label = `auth.sessionOptions.store (${session.className})`
+      if (session.perProcess === true) return raise(`sessions use ${label}, which is per-process`, BACKED_STORE_FIX)
+      if (session.perProcess === null) return raise(`sessions use ${label}, a store class this check cannot vouch for`, STORE_CLASS_FIX)
+      return
+    }
+  }
+}
+
+/**
+ * Serverless targets share no memory between invocations, so in-memory stores
+ * drop every session, cache entry, queued job, and OAuth state in production
+ * while working perfectly in local development.
+ */
+function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdict {
+  const key = 'deploy-runtime-stores'
+  const title = 'Deploy Runtime Stores'
+
+  const caveat = formatParseCaveat(analysis)
+
+  if (analysis.targets.length === 0) {
+    return verdict(key, title, 'pass', `No deploy plugin or Lambda adapter detected.${caveat}`, 'static')
+  }
+
+  const manifest = analysis.manifest
+  const sessionSection = manifest?.session
+  const cacheSection = manifest?.perProcessCache
+  // A session the manifest cannot vouch for falls back to the scan; the cache has no scan to fall back to.
+  const session = sessionSection?.status === 'described' ? sessionSection.value : undefined
+  const sessionFromScan = session === undefined || session?.kind === 'scan'
+  const evidence: CheckEvidence = manifest && !sessionFromScan ? 'manifest' : 'static'
+  const sessionNote =
+    sessionSection?.status === 'unverified' ? ` The session store was judged from source: ${sessionSection.reason}.` : ''
+
+  const labels = formatTargetLabels(analysis.targets)
+  const issues: string[] = []
+  // Each issue names the remedy that fits it, deduped in order: telling an app
+  // that deliberately registered a driver to install a database store instead
+  // is the wrong advice, and the generic fix says exactly that.
+  const fixes: string[] = []
+  const raise: RaiseIssue = (issue, fix) => {
+    issues.push(issue)
+    if (!fixes.includes(fix)) fixes.push(fix)
+  }
+
+  const memoryStoresByFix = new Map<string, SourceSignal[]>()
+  for (const signal of analysis.memoryStoreSignals) {
+    // The manifest names the session store the app actually selected.
+    if (session && session.kind !== 'scan' && signal.symbol === 'MemorySessionStore') continue
+    const fix = MEMORY_STORE_FIXES[signal.symbol] ?? BACKED_STORE_FIX
+    memoryStoresByFix.set(fix, [...(memoryStoresByFix.get(fix) ?? []), signal])
+  }
+  for (const [fix, signals] of memoryStoresByFix) {
+    raise(`in-memory stores are constructed explicitly (${formatSignals(signals)})`, fix)
+  }
+
+  if (session !== undefined) raiseManifestSessionIssues(analysis, session, raise)
+  else raiseStaticSessionIssues(analysis, raise)
+
+  if (cacheSection?.status === 'described' && cacheSection.value !== null) {
+    raise(`the cache uses ${cacheSection.value} in this environment, which is per-process`, BACKED_STORE_FIX)
+  }
 
   if (analysis.oauthSignals.length > 0 && analysis.backedOAuthSignals.length === 0) {
     raise(
@@ -864,17 +1137,26 @@ function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdi
     )
   }
 
-  if (issues.length === 0) {
-    return verdict(key, title, 'pass', `${labels} detected, and no in-memory store defaults were found.${caveat}`)
+  if (cacheSection?.status === 'unverified') {
+    const also = issues.length > 0 ? `; beyond that, ${issues.join('; ')}` : ''
+    const note = sessionNote && sessionSection?.status === 'unverified' && sessionSection.reason === cacheSection.reason
+      ? ' The session store was judged from source.'
+      : sessionNote
+    return verdict(
+      `${key}-unverified`,
+      title,
+      'warn',
+      `${labels} shares no memory between requests, but whether the cache store is per-process is unverified: ${cacheSection.reason}${also}.${note}${caveat}`,
+      'none',
+      [UNVERIFIED_FIX, ...fixes].join(' '),
+    )
   }
 
-  return verdict(
-    key,
-    title,
-    'warn',
-    `${labels} shares no memory between requests, but ${issues.join('; ')}.${caveat}`,
-    fixes.join(' '),
-  )
+  const judged =
+    issues.length === 0
+      ? verdict(key, title, 'pass', `${labels} detected, and no in-memory store defaults were found.${sessionNote}${caveat}`, evidence)
+      : verdict(key, title, 'warn', `${labels} shares no memory between requests, but ${issues.join('; ')}.${sessionNote}${caveat}`, evidence, fixes.join(' '))
+  return sessionSection?.status === 'unverified' ? { ...judged, evidenceReason: sessionSection.reason } : judged
 }
 
 const EXPLICIT_PROVIDERS_FIX = 'List providers explicitly in `createApp({ providers: [...] })` instead of discovering them from the filesystem.'
@@ -882,7 +1164,9 @@ const EXPLICIT_PROVIDERS_FIX = 'List providers explicitly in `createApp({ provid
 /**
  * `AutoDiscovery` scans directories with `Bun.Glob` and imports what it finds.
  * Every deploy target breaks that, either by having no Bun runtime or by
- * shipping a bundle with no source tree to scan.
+ * shipping a bundle with no source tree to scan. Always judged from source: a
+ * provider it finds registers as `app.register`, as an explicit
+ * `app.register(X)` does, and the listeners and jobs it finds are not in the manifest.
  */
 function judgeProviderDiscovery(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdict {
   const key = 'deploy-provider-discovery'
@@ -891,13 +1175,13 @@ function judgeProviderDiscovery(analysis: DeployRuntimeAnalysis): DeployRuntimeV
   const caveat = formatParseCaveat(analysis)
 
   if (analysis.targets.length === 0) {
-    return verdict(key, title, 'pass', `No deploy plugin or Lambda adapter detected.${caveat}`)
+    return verdict(key, title, 'pass', `No deploy plugin or Lambda adapter detected.${caveat}`, 'static')
   }
 
   const labels = formatTargetLabels(analysis.targets)
 
   if (analysis.discoverySignals.length === 0) {
-    return verdict(key, title, 'pass', `${labels} detected, and provider discovery is not used.${caveat}`)
+    return verdict(key, title, 'pass', `${labels} detected, and provider discovery is not used.${caveat}`, 'static')
   }
 
   const blockers = analysis.targets.map((target) => `${target.profile.label}: ${target.profile.discoveryBlocker}`)
@@ -907,22 +1191,39 @@ function judgeProviderDiscovery(analysis: DeployRuntimeAnalysis): DeployRuntimeV
     title,
     'warn',
     `${labels} detected, but the app uses filesystem provider discovery (${formatSignals(analysis.discoverySignals)}). ${blockers.join(' ')}${caveat}`,
+    'static',
     EXPLICIT_PROVIDERS_FIX,
   )
 }
 
 /** The three deploy-runtime verdicts over one analysis, in report order. */
 export function judgeDeployRuntime(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdict[] {
-  return [judgePasswordHashing(analysis), judgeRuntimeStores(analysis), judgeProviderDiscovery(analysis)]
+  const verdicts = [judgePasswordHashing(analysis), judgeRuntimeStores(analysis)]
+  const judged = analysis.introspectionFailure
+    ? verdicts.map((one) => (one.evidence === 'static' ? { ...one, evidenceReason: `introspection failed with ${analysis.introspectionFailure}` } : one))
+    : verdicts
+  return [...judged, judgeProviderDiscovery(analysis)]
 }
+
+/**
+ * The deploy builds' cap on the introspection child, under `guren introspect`'s 30 s: the
+ * verdicts are advice printed before the build, so a `register()` waiting on a binding the
+ * build machine lacks must not hold it long. web and examples/blog introspect in under 0.5 s.
+ */
+const DEPLOY_INTROSPECT_TIMEOUT_MS = 10_000
 
 /**
  * Scan and judge in one call: what a deploy build runs before the app build.
  * Empty when the app declares no deploy target, so a caller prints nothing
  * for an app this cannot apply to; every verdict is present otherwise, passing
- * ones included, since the build may want to say what it verified.
+ * ones included, since the build may want to say what it verified. Reads the
+ * introspected app unless `options` says otherwise, falling back to source.
  */
-export async function checkDeployRuntime(cwd: string): Promise<DeployRuntimeVerdict[]> {
-  const analysis = await analyzeDeployRuntime(cwd)
+export async function checkDeployRuntime(
+  cwd: string,
+  options: DeployRuntimeOptions = {},
+): Promise<DeployRuntimeVerdict[]> {
+  const introspect = options.introspect ?? (() => introspectApp(cwd, { timeoutMs: DEPLOY_INTROSPECT_TIMEOUT_MS }))
+  const analysis = await analyzeDeployRuntime(cwd, { ...options, introspect })
   return analysis.targets.length === 0 ? [] : judgeDeployRuntime(analysis)
 }

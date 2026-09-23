@@ -7,6 +7,8 @@ export interface CheckResult {
   message: string
   suggestion?: string
   filePath?: string
+  /** Set by the checks that read the manifest; absent on every other check. */
+  evidence?: CheckEvidence
   /**
    * Advice rather than integrity (e.g. test-coverage nudges): exit-code gates
    * such as `check --ci` skip advisory warns.
@@ -51,6 +53,12 @@ export function formatFinding(finding: {
   const suggestion = finding.suggestion ? ` -> ${finding.suggestion}` : ''
   return `${finding.title}: ${finding.message}${location}${suggestion}`
 }
+
+/**
+ * What a verdict was judged from (RFC 0026 §5): the introspected app's manifest,
+ * the source scan it falls back to, or nothing, which is never a pass.
+ */
+export type CheckEvidence = 'manifest' | 'static' | 'none'
 
 export function check(
   key: string,

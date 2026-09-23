@@ -56,7 +56,7 @@ export class ConfigServiceProvider extends ServiceProvider {
       if (placeholders.length > 0) {
         const message = `the "${definition.key}" config reads ${placeholders.join(', ')}, which the environment does not set; it was left unbound.`
         warnOnce(`config-unverified:${definition.key}`, `[guren] ${message}`)
-        this.warnings.push({ code: 'config-unverified', message })
+        this.warnings.push({ code: 'config-unverified', message, key: definition.key })
         continue
       }
 

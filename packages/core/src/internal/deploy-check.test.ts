@@ -1,7 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { checkDeployRuntime } from '@guren/cli'
 import { reportDeployRuntimeHazards } from './deploy-check'
 
 const SESSION_APP = `import { createApp } from '@guren/core'
@@ -42,12 +43,21 @@ describe('reportDeployRuntimeHazards', () => {
     writeApp(root, { '@guren/plugin-cloudflare': '^0.2.0' })
 
     let lines: string[] = []
-    const warnings = await captureWarnings(async () => {
-      lines = await reportDeployRuntimeHazards({ root, label: 'Cloudflare build' })
-    })
+    const logged: string[] = []
+    const log = console.log
+    console.log = (message: string) => logged.push(message)
+    let warnings: string[]
+    try {
+      warnings = await captureWarnings(async () => {
+        lines = await reportDeployRuntimeHazards({ root, label: 'Cloudflare build' })
+      })
+    } finally {
+      console.log = log
+    }
 
     expect(lines).toEqual(warnings)
     expect(lines).toHaveLength(1)
+    expect(logged.join('\n')).toContain('Deploy Provider Discovery from source (introspection failed with no-entry: Could not locate')
     expect(lines[0]).toStartWith('Cloudflare build: Cloudflare Workers shares no memory')
     expect(lines[0]).toContain('sessions are enabled')
     expect(lines[0]).toContain('DatabaseSessionStore')
@@ -83,5 +93,40 @@ export default createApp({ auth: { sessionOptions: { store: new DatabaseSessionS
     })
 
     expect(warnings).toEqual([])
+  })
+
+  test('should name the evidence, then report what the introspected app registers, as checkDeployRuntime() does', async () => {
+    // An app the CLI can introspect: an entry, and this workspace's @guren/core to import.
+    mkdirSync(join(root, 'src'), { recursive: true })
+    mkdirSync(join(root, 'node_modules/@guren'), { recursive: true })
+    symlinkSync(resolve(import.meta.dir, '../..'), join(root, 'node_modules/@guren/core'), 'dir')
+    writeFileSync(join(root, 'bunfig.toml'), '[install]\nauto = "disable"\n')
+    writeFileSync(join(root, 'src/main.ts'), "import app from './app.js'\nexport default app\n")
+    writeFileSync(join(root, 'src/app.ts'), "import { createApp } from '@guren/core'\nexport default createApp({ auth: { hasher: 'argon2' } })\n")
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ name: 'demo-app', type: 'module', dependencies: { '@guren/plugin-cloudflare': '^0.2.0' } }),
+    )
+
+    let lines: string[] = []
+    const logged: string[] = []
+    const log = console.log
+    console.log = (message: string) => logged.push(message)
+    try {
+      await captureWarnings(async () => {
+        lines = await reportDeployRuntimeHazards({ root, label: 'Cloudflare build' })
+      })
+    } finally {
+      console.log = log
+    }
+
+    expect(logged).toEqual([
+      'Cloudflare build: deploy-runtime checks judged Deploy Password Hashing from the introspected app, Deploy Runtime Stores from the introspected app, Deploy Provider Discovery from source.',
+    ])
+    const expected = (await checkDeployRuntime(root))
+      .filter((verdict) => verdict.status !== 'pass')
+      .map((verdict) => `Cloudflare build: ${verdict.message}${verdict.fix ? ` ${verdict.fix}` : ''}`)
+    expect(lines).toEqual(expected)
+    expect(lines.some((line) => line.includes('a Bun-only hasher is registered (createApp({ auth }): DefaultHasher (argon2))'))).toBe(true)
   })
 })
