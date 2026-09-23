@@ -1351,7 +1351,9 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
   report, and a migration whose output carries one of a short list of database
   signatures (`ECONNREFUSED`, `password authentication failed`,
   `SQLITE_CANTOPEN`, a missing `drizzle-kit`). The list is literal on purpose: a
-  broader one would turn failed migrations into environment problems.
+  broader one would turn failed migrations into environment problems. A
+  `db:migrate` that no migration backs is `failed`, amended below under *a data
+  step's migration*.
 - Tests run as `bun test <files>` on the files whose source carries a step's
   acceptance ids as literal bracketed tokens; a step whose ids no file carries
   fails its tests command with the ids named, as does one whose test files
@@ -1537,6 +1539,77 @@ matched when the plan was approved says nothing about the change. What shipped
   in the middle of that work would stop crediting it. The §2 warning on an `alter` whose
   readable properties all held at approval, which the producer row of Part 2
   asks for, is not part of this change.
+
+**Amended in implementation (drift re-verification, and a data step's
+migration).** Two defects the loop hit once a plan had more than one task.
+
+- A later step that legitimately writes into a file an earlier step's element
+  sits in (a route beside it in `routes/web.ts`, a table in `db/schema.ts`, a
+  second action in its controller) expires the earlier record, and that is the
+  correct reading: the edit may have broken the earlier step. What was wrong is
+  what followed. `plan:next` returned the earlier step as work to implement,
+  and nothing re-ran its verification. A record now drifts
+  (`recordDrift()`) when it was verified against this plan digest, every
+  waiver it rested on still holds, and only fingerprinted files changed.
+  `plan:verify --step <id>` runs the step, and once it verifies, re-checks in
+  the same invocation every earlier step in task order whose record drifted,
+  recording each as its commands now say: `verified` again, or `failed` with
+  what broke. The report lists them as `reverified`. The step runs first
+  because commands are shared across one run's steps: re-checked beside a
+  step that failed `codegen`, `typecheck`, `check` or the migration check, an
+  earlier step would inherit that failure. So a step that does not verify
+  leaves the drifted records as they are, and the report lists them as
+  `recheckPending`; so does a re-check that comes out `blocked`, which is the
+  environment's and never replaces a drifted record. The re-checks also stop at
+  the first that runs commands and does not verify, leaving the rest pending,
+  since two drifted steps share commands as well; a static re-check (below)
+  runs nothing, so its failure does not stop the rest. A whole-plan run keeps
+  the same order: the steps that did not drift run first, and the drifted ones
+  are re-checked only once all of those verified. A drifted `--step` target is
+  its own re-check: its failure is recorded like any step's, and only a
+  `blocked` result or a failed static re-check (below) leaves its record
+  drifted.
+- A drifted `tests:fail` step is re-checked without a run
+  (`PlanVerifier.recheckTests()`), wherever `plan:verify` meets it (a
+  whole-plan run, `--step` on it, or as an earlier step): `tests:fail` cannot
+  pass once the implementation exists, and its red run was observed when it
+  verified. It stays `verified` while one test file still carries each of its
+  behaviours' ids as a bracketed token, which a comment carries as well as a
+  test title (a gap the run itself would catch). One carried by no file or by
+  several is reported, and the record is left drifted rather than replaced: a
+  recorded failure would send the next run to `tests:fail`, which cannot pass
+  then. `plan:next` and the `Stop` hook reach it through `plan:verify --step`,
+  so all four agree.
+- The `Stop` hook verifies the marked step through the same run, so a drifted
+  earlier step is re-checked on every stop that verifies the marked step (one
+  whose record still stands returns before any run), without a continuation of
+  its own:
+  the give-up rules still judge the marked step's record alone. A verified
+  step whose changes broke an earlier one lets the stop through, naming the
+  earlier step, which `plan:next` returns next; so does one whose run could
+  not re-check an earlier step, naming it and why, or left one for the next
+  run behind a re-check that did not verify.
+- `recordStillHolds()` stays the one rule for a step being done. `plan:next`
+  still runs nothing: a drifted step it returns carries the changed files as
+  `drifted`, and the text says to re-check it with `plan:verify --step` rather
+  than re-implement it.
+- Per-element fingerprints were tried first and dropped. Every review of the
+  static span reader found another shape (a router mutator, a base-class
+  override, a registrar called by name) through which an edit outside the span
+  changes the element's behaviour, so a span could only ever fail open.
+- A data step's `db:migrate` passed on a schema no migration covered, since
+  the migration then has nothing to apply. Before the script runs, the command
+  asks the application's own drizzle-kit, resolved through `node_modules` from
+  the application root and never through `bun x`, for
+  `generate --config <config> --explain --output json`, a dry run that writes
+  no migration and opens no database (it may create an empty migrations
+  folder). `no_changes` goes on to the script. Statements (`ok`) or a rename it
+  cannot decide without a hint (`missing_hints`) fail the command, naming what
+  is uncovered, since a migration is the fix. No drizzle config, no
+  drizzle-kit, a timeout, an `error` status or output it cannot read block it
+  with the reason. The dry run compares the whole schema with the migrations
+  folder, so a change outside the plan's tables fails the step too:
+  `db:migrate` would not apply it either.
 
 **What is durable and what is not.** The decision log (waivers, deviations,
 the reason for each revision) is part of the record and lives in the store

@@ -20,7 +20,7 @@ import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress,
 import { planDigest, planSlug, readPlanState, writePlanStepRecord, type PlanStepRecord } from './plan/state'
 import { judgePlan, type PlanStatus } from './plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds } from './plan/tasks'
-import { hashFiles, overlayVerification, readPlanWaivers, recordStillHolds, type PlanVerificationSummary } from './plan/verification'
+import { hashFiles, overlayVerification, readPlanWaivers, recordDrift, recordStillHolds, type PlanVerificationSummary } from './plan/verification'
 import { PlanVerifier, type PlanStepVerification } from './plan/verify'
 import { runCaptured } from './subprocess'
 
@@ -32,6 +32,19 @@ export interface PlanVerifyReport extends PlanStatusReport {
   steps: PlanStepVerification[]
   /** Steps a whole-plan run left alone: verified before, at a fingerprint that still matches. */
   skipped: string[]
+  /**
+   * Steps verified before whose fingerprinted files changed since, re-checked and recorded here:
+   * a drifted `--step` itself, the drifted steps before it once it verified, and in a whole-plan
+   * run every drifted step once the others verified. A `tests:fail` step is re-checked without a
+   * run ({@link PlanVerifier.recheckTests}).
+   */
+  reverified: string[]
+  /**
+   * Drifted steps this run left verified for a later one: not re-checked, since a step they share
+   * commands with did not verify, or re-checked into `blocked` (the environment's) or into a
+   * failed static re-check, which a run of `tests:fail` could never answer.
+   */
+  recheckPending: string[]
   verification: PlanVerificationSummary
   /**
    * The steps this run covered that depend on an element stale against the baseline (RFC
@@ -72,13 +85,15 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   // must be the same set, and a second read could answer differently.
   const log = await readPlanWaivers(path, plan)
   let stepIds: string[]
+  let rechecks: string[]
   const skipped: string[] = []
+  const records = before.state?.steps ?? {}
+  const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
+  const drifted = (id: string): boolean => records[id] !== undefined && recordDrift(records[id], digest, hashes, log.waived).length > 0
   if (options.step === undefined) {
     // A whole-plan run redoes nothing that stands: the `tests` step must fail before its
     // implementation and cannot pass again once the `http` step has made the tests pass.
     // The record lives in this checkout only, so a fresh one has nothing to keep.
-    const records = before.state?.steps ?? {}
-    const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
     stepIds = planStepIds(derivation).filter((id) => {
       const record = records[id]
       if (record && recordStillHolds(record, digest, hashes, log.waived)) {
@@ -87,7 +102,11 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
       }
       return true
     })
+    rechecks = stepIds.filter(drifted)
+    stepIds = stepIds.filter((id) => !drifted(id))
   } else if (findPlanStep(derivation, options.step)) {
+    const ids = planStepIds(derivation)
+    rechecks = ids.slice(0, ids.indexOf(options.step)).filter(drifted)
     stepIds = [options.step]
   } else {
     throw new CliError(`No step "${options.step}" is derived from this plan. The steps are:\n${planStepIds(derivation).map((id) => `  ${id}`).join('\n')}`)
@@ -107,16 +126,40 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
     waived: log.waived,
   })
   const steps: PlanStepVerification[] = []
-  for (const stepId of stepIds) {
-    const verification = await verifier.verify(stepId)
-    await writePlanStepRecord(root, slug, stepId, verification.record)
+  const reverified: string[] = []
+  const recheckPending: string[] = []
+  /**
+   * Runs one step and records it unless it stays pending; true where it ran commands and did not
+   * verify. Commands are shared across one run's steps, so a drifted step re-checked beside such a
+   * one would inherit its failure.
+   */
+  const run = async (stepId: string): Promise<boolean> => {
+    const record = records[stepId]
+    const recheck = record !== undefined && drifted(stepId)
+    const tests = findPlanStep(derivation, stepId)?.step.verify.includes('tests:fail') === true
+    const statically = recheck && tests
+    const verification = statically ? await verifier.recheckTests(stepId, record) : await verifier.verify(stepId)
     steps.push(verification)
+    const verified = verification.record.outcome === 'verified'
+    // A failed static re-check stays drifted: once recorded, the next run would ask a `tests:fail` it can never pass.
+    if (recheck && (verification.record.outcome === 'blocked' || (statically && !verified))) recheckPending.push(stepId)
+    else {
+      await writePlanStepRecord(root, slug, stepId, verification.record)
+      if (recheck) reverified.push(stepId)
+    }
+    return !statically && !verified
+  }
+  for (const stepId of stepIds) await run(stepId)
+  let deferred = steps.some((step) => step.record.outcome !== 'verified')
+  for (const stepId of rechecks) {
+    if (deferred) recheckPending.push(stepId)
+    else deferred = await run(stepId)
   }
 
   const overlaid = await overlayVerification(root, path, plan, await verifier.status(), derivation, { replacedUnreadable: before.unreadable, waivers: log })
   const { freshness } = await judge()
   const contexts = freshness ? judgeStepContext(plan, freshness, derivation, { inProgress: stepInProgress(before.state?.active) }) : new Map<string, PlanStepContext>()
-  const staleContext = stepIds.flatMap((id) => {
+  const staleContext = steps.map((step) => step.stepId).flatMap((id) => {
     const context = contexts.get(id)
     return context && context.stale.length > 0 ? [context] : []
   })
@@ -127,6 +170,8 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
     verification: overlaid.verification,
     steps,
     skipped,
+    reverified,
+    recheckPending,
     ...(freshness ? { freshness } : {}),
     ...(approval ? { approval } : {}),
     ...(staleContext.length > 0 ? { staleContext } : {}),
@@ -156,6 +201,10 @@ export function formatPlanVerify(report: PlanVerifyReport): string {
   for (const context of report.staleContext ?? []) {
     const named = context.stale.map((element) => `${element.id} (${describeDependency(element)})`)
     lines.push(`${context.stepId}: depends on what changed since the plan was approved: ${named.join(', ')}; plan:next holds it until a person decides: ${HELD_STEP_REMEDY}`, '')
+  }
+  if (report.reverified.length > 0) lines.push(`Re-checked, since files they were verified at have changed: ${report.reverified.join(', ')}`, '')
+  if (report.recheckPending.length > 0) {
+    lines.push(`Left verified for a later run to re-check (a step they share commands with did not verify, the re-check was blocked, or a static re-check failed): ${report.recheckPending.join(', ')}`, '')
   }
   for (const stepId of report.skipped) lines.push(`${stepId}: verified before, and nothing it fingerprinted has changed`)
   if (report.skipped.length > 0) lines.push('')

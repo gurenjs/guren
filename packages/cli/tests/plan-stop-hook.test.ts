@@ -23,7 +23,7 @@ import { approvedAgainst, approveIfStamped, approvePlanFile, loadApprovedComment
 // agent-hook-gate.test.ts. What this covers is the decision and what it writes to state.
 const PLAN = parsePlanDocument(loadCommentsPlan())
 const DIGEST = planDigest(PLAN)
-const [SCAFFOLD, , DATA, HTTP] = planStepIds(derivePlanTasks(PLAN)) as [string, string, string, string]
+const [SCAFFOLD, TESTS, DATA, HTTP, PAGES] = planStepIds(derivePlanTasks(PLAN)) as [string, string, string, string, string]
 const NOW = () => new Date('2026-09-21T10:00:00.000Z')
 const ENVIRONMENT = { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'h' }
 
@@ -67,6 +67,8 @@ function report(stepId: string, stepRecord: PlanStepRecord, blocked: string[] = 
     verification: { stateFile: '.guren/plans/comments.state.json', staleSteps: [], decisionsFile: 'comments.decisions.json', staleWaivers: [] },
     steps: [{ stepId, taskId: 'task/entity/model.comment', record: stepRecord }],
     skipped: [],
+    reverified: [],
+    recheckPending: [],
   }
 }
 
@@ -253,6 +255,85 @@ describe('planStopHookFindings', () => {
 
     expect(await planStopHookFindings(app, { stopHookActive: true }, { verify: async () => report(HTTP, record({ outcome: 'verified', incomplete: [] })) })).toEqual({ block: false })
     expect((await readState(app)).active).toEqual(active({ continuations: 2 }))
+  })
+
+  test('should let a verified step through, naming an earlier step its changes broke, without spending a continuation', async () => {
+    const app = await createApp('broke-earlier', { active: active({ continuations: 2 }) })
+    const failed = record({ outcome: 'failed', commands: [{ command: 'tests', label: 'bun test tests/comments.test.ts', status: 'fail', durationMs: 3, reason: 'a behaviour is not passing', findings: [] }], acceptance: [], incomplete: [] })
+    const verified = report(HTTP, record({ outcome: 'verified', incomplete: [] }))
+    const run = { ...verified, steps: [{ stepId: DATA, taskId: 'task/entity/model.comment', record: failed }, ...verified.steps], reverified: [DATA] }
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: true }, { verify: async () => run })
+
+    expect(verdict.block).toBe(false)
+    expect(verdict.message).toContain(`the step is verified, and its changes broke an earlier step:\n${DATA}: failed (3 ms)`)
+    expect(verdict.message).toContain('`bunx guren plan:next comments.plan.json` returns it next.')
+    expect((await readState(app)).active).toEqual(active({ continuations: 2 }))
+  })
+
+  test('should name an earlier step whose re-check was blocked, its record kept for the next run', async () => {
+    const app = await createApp('recheck-blocked', { active: active({ step: PAGES, continuations: 1 }) })
+    const blocked = record({ outcome: 'blocked', commands: [{ command: 'db:migrate', label: 'bun run db:migrate', status: 'blocked', durationMs: 3, reason: 'the database is unreachable', findings: [] }], acceptance: [], incomplete: [] })
+    const verified = report(PAGES, record({ outcome: 'verified', incomplete: [] }))
+    // HTTP never ran: the blocked re-check of DATA before it stopped the rest.
+    const run = { ...verified, steps: [...verified.steps, { stepId: DATA, taskId: 'task/entity/model.comment', record: blocked }], recheckPending: [DATA, HTTP] }
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: true }, { verify: async () => run })
+
+    expect(verdict).toEqual({
+      block: false,
+      message: [
+        `plan:verify on stop (comments.plan.json, ${PAGES}): ${DATA}, whose files changed since it verified, could not be re-checked (db:migrate: the database is unreachable); its record stays for the next run.`,
+        `plan:verify on stop (comments.plan.json, ${PAGES}): ${HTTP}, whose files changed since it verified, is left for the next run to re-check, since an earlier re-check did not verify.`,
+      ].join('\n'),
+    })
+    expect((await readState(app)).active).toEqual(active({ step: PAGES, continuations: 1 }))
+  })
+
+  test('should list every earlier step a verified one broke, in the order the run reports them, a failed static re-check among them', async () => {
+    const app = await createApp('broke-two', { active: active({ step: PAGES }) })
+    const lost = record({ outcome: 'failed', commands: [{ command: 'tests:fail', label: 'not run: a re-check that one test file still carries each behaviour', status: 'fail', durationMs: 0, reason: 'the test files no longer carry the behaviours the step saw fail', findings: ['[AC-comments-2] is carried by no test file'] }], acceptance: [], incomplete: [] })
+    const failed = record({ outcome: 'failed', commands: [{ command: 'tests', label: 'bun test tests/comments.test.ts', status: 'fail', durationMs: 3, reason: 'a behaviour is not passing', findings: [] }], acceptance: [], incomplete: [] })
+    const verified = report(PAGES, record({ outcome: 'verified', incomplete: [] }))
+    const run = {
+      ...verified,
+      steps: [...verified.steps, { stepId: TESTS, taskId: 'task/entity/model.comment', record: lost }, { stepId: HTTP, taskId: 'task/entity/model.comment', record: failed }],
+      reverified: [HTTP],
+      recheckPending: [TESTS],
+    }
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => run })
+
+    expect(verdict.block).toBe(false)
+    const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+    expect(verdict.message).toMatch(new RegExp(`its changes broke 2 earlier steps:\\n${escape(TESTS)}: failed[^]*\\n${escape(HTTP)}: failed[^]*returns them in turn\\.$`))
+  })
+
+  test('should report an earlier step whose static re-check found a lost behaviour with the broken ones, not as unchecked', async () => {
+    const app = await createApp('recheck-lost', { active: active() })
+    const lost = record({ outcome: 'failed', commands: [{ command: 'tests:fail', label: 'not run: a re-check that one test file still carries each behaviour', status: 'fail', durationMs: 0, reason: 'the test files no longer carry the behaviours the step saw fail', findings: ['[AC-comments-2] is carried by no test file'] }], acceptance: [], incomplete: [] })
+    const verified = report(HTTP, record({ outcome: 'verified', incomplete: [] }))
+    const run = { ...verified, steps: [...verified.steps, { stepId: TESTS, taskId: 'task/entity/model.comment', record: lost }], recheckPending: [TESTS] }
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => run })
+
+    expect(verdict.block).toBe(false)
+    expect(verdict.message).toContain(`its changes broke an earlier step:\n${TESTS}: failed (3 ms)`)
+    expect(verdict.message).toContain('      [AC-comments-2] is carried by no test file')
+    expect(verdict.message).toContain('returns it next.')
+    expect(verdict.message).not.toContain('could not be re-checked')
+  })
+
+  test('should give up on a marked step whose drifted re-check came out blocked, its record left for the next run', async () => {
+    const app = await createApp('marked-blocked', { active: active() })
+    const blocked = record({ outcome: 'blocked', commands: [{ command: 'check', label: 'guren check', status: 'blocked', durationMs: 3, reason: 'could not run: no routes', findings: [] }], acceptance: [], incomplete: [] })
+    const run = { ...report(HTTP, blocked), recheckPending: [HTTP] }
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => run, now: NOW })
+
+    expect(verdict.block).toBe(false)
+    expect(verdict.message).toContain('giving up, the step is blocked (check: could not run: no routes)')
+    expect((await readState(app)).active?.stalled?.reason).toContain('the step is blocked')
   })
 
   test('should let the stop through with the reason when the verification itself throws, and name an unreadable state file', async () => {

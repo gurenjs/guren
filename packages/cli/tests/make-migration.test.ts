@@ -5,6 +5,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { createTempWorkspace, runCliBin } from './helpers'
+import { resolveAppDrizzleKit } from '../src/make-migration'
 import * as realUtils from '../src/utils'
 
 const repoRoot = resolve(import.meta.dir, '../../..')
@@ -805,4 +806,38 @@ describe('make:migration name argument', () => {
       expect(argv.some((arg) => arg.startsWith('--name'))).toBe(false)
     })
   }
+})
+
+describe('resolveAppDrizzleKit', () => {
+  async function app(files: Record<string, string>): Promise<string> {
+    const root = await mkdtemp(join(tmpdir(), 'guren-app-drizzle-kit-'))
+    for (const [file, text] of Object.entries(files)) {
+      await mkdir(dirname(join(root, file)), { recursive: true })
+      await writeFile(join(root, file), text, 'utf8')
+    }
+    return root
+  }
+
+  it('should find the drizzle-kit the application installs, and its config', async () => {
+    const root = await app({ 'drizzle.config.ts': 'export default {}\n', 'node_modules/drizzle-kit/package.json': JSON.stringify({ bin: { 'drizzle-kit': 'bin.cjs' } }) })
+    try {
+      expect(await resolveAppDrizzleKit(root)).toEqual({ bin: join(root, 'node_modules/drizzle-kit/bin.cjs'), config: 'drizzle.config.ts' })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('should walk past a manifest with no bin, a null one included, and name one that does not parse', async () => {
+    const root = await app({ 'drizzle.config.ts': 'export default {}\n', 'app/node_modules/drizzle-kit/package.json': 'null', 'node_modules/drizzle-kit/package.json': JSON.stringify({ bin: 'bin.cjs' }) })
+    const broken = await app({ 'drizzle.config.ts': 'export default {}\n', 'node_modules/drizzle-kit/package.json': '{' })
+    const bare = await app({ 'node_modules/drizzle-kit/package.json': JSON.stringify({ bin: 'bin.cjs' }) })
+    try {
+      await writeFile(join(root, 'app/drizzle.config.ts'), 'export default {}\n', 'utf8')
+      expect(await resolveAppDrizzleKit(join(root, 'app'))).toEqual({ bin: join(root, 'node_modules/drizzle-kit/bin.cjs'), config: 'drizzle.config.ts' })
+      expect(await resolveAppDrizzleKit(broken)).toEqual({ missing: `${join(broken, 'node_modules/drizzle-kit/package.json')} does not parse as JSON` })
+      expect(await resolveAppDrizzleKit(bare)).toEqual({ missing: 'the application has no drizzle config (drizzle.config.ts)' })
+    } finally {
+      for (const dir of [root, broken, bare]) await rm(dir, { recursive: true, force: true })
+    }
+  })
 })

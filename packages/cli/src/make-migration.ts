@@ -1,7 +1,7 @@
 import { consola } from 'consola'
 import { existsSync, readdirSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { findFirstExisting } from './discovery'
 import { runCommand, slugifyProse } from './utils'
@@ -98,6 +98,33 @@ function toSlug(value: string): string {
 
 async function resolveDrizzleConfig(root = process.cwd()): Promise<string | undefined> {
   return (await findFirstExisting(root, DRIZZLE_CONFIG_CANDIDATES)) ?? undefined
+}
+
+/** The application's own drizzle-kit and the config it reads, or why there is none to ask. */
+export type AppDrizzleKit = { bin: string; config: string } | { missing: string }
+
+/**
+ * The drizzle-kit `root` installs, found by Node's lookup (each `node_modules` from `root` up) and
+ * never by `bun x`, which falls back to whatever npm serves: a different major with other flags.
+ */
+export async function resolveAppDrizzleKit(root: string): Promise<AppDrizzleKit> {
+  const config = await resolveDrizzleConfig(root)
+  if (!config) return { missing: 'the application has no drizzle config (drizzle.config.ts)' }
+  for (let dir = resolve(root); ; dir = dirname(dir)) {
+    const manifest = resolve(dir, 'node_modules', 'drizzle-kit', 'package.json')
+    const text = await readFile(manifest, 'utf8').catch(() => undefined)
+    if (text !== undefined) {
+      let declared: { bin?: string | Record<string, string> } | null
+      try {
+        declared = JSON.parse(text) as typeof declared
+      } catch {
+        return { missing: `${manifest} does not parse as JSON` }
+      }
+      const bin = typeof declared?.bin === 'string' ? declared.bin : declared?.bin?.['drizzle-kit']
+      if (bin) return { bin: resolve(dirname(manifest), bin), config }
+    }
+    if (dirname(dir) === dir) return { missing: 'drizzle-kit is not installed in the application' }
+  }
 }
 
 /**

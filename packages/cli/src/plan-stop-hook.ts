@@ -149,7 +149,29 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
   const blockedElements = report.elements.filter((element) => owned.has(element.id) && element.state === 'blocked')
   const stale = report.staleContext?.find((context) => context.stepId === active.step)?.stale ?? []
   const judgement = judgeStopHook(active, verification.record, blockedElements, stopHookActive, stale)
-  if (judgement.kind === 'verified') return withNotice({ block: false })
+  if (judgement.kind === 'verified') {
+    // Earlier steps are not this step's continuation: plan:next returns them once this one is done.
+    const pending = new Set(report.recheckPending)
+    // A failed static re-check is pending too, but it answered, so it is reported with the broken ones.
+    const broken = report.steps.filter(({ stepId, record: earlier }) => (report.reverified.includes(stepId) || pending.has(stepId)) && earlier.outcome !== 'verified' && earlier.outcome !== 'blocked')
+    const unchecked = report.steps.filter(({ stepId, record: earlier }) => pending.has(stepId) && earlier.outcome === 'blocked')
+    const deferred = report.recheckPending.filter((stepId) => !report.steps.some((step) => step.stepId === stepId))
+    if (broken.length === 0 && unchecked.length === 0 && deferred.length === 0) return withNotice({ block: false })
+    const said: string[] = []
+    if (broken.length > 0) {
+      const lines = broken.flatMap(({ stepId, record: earlier }) => formatPlanStepRecord(stepId, earlier))
+      const which = broken.length === 1 ? 'an earlier step' : `${broken.length} earlier steps`
+      said.push(`${heading}: the step is verified, and its changes broke ${which}:\n${lines.join('\n')}\n\`bunx guren plan:next ${active.plan}\` returns ${broken.length === 1 ? 'it next' : 'them in turn'}.`)
+    }
+    for (const { stepId, record: earlier } of unchecked) {
+      const why = earlier.commands.filter((command) => command.status === 'blocked').map((command) => `${command.command}: ${command.reason ?? 'blocked'}`)
+      said.push(`${heading}: ${stepId}, whose files changed since it verified, could not be re-checked (${why.join('; ')}); its record stays for the next run.`)
+    }
+    if (deferred.length > 0) {
+      said.push(`${heading}: ${deferred.join(', ')}, whose files changed since ${deferred.length === 1 ? 'it' : 'they'} verified, ${deferred.length === 1 ? 'is' : 'are'} left for the next run to re-check, since an earlier re-check did not verify.`)
+    }
+    return withNotice({ block: false, message: said.join('\n') })
+  }
 
   const output = formatPlanStepRecord(active.step, verification.record).join('\n')
   if (judgement.kind === 'stalled') {

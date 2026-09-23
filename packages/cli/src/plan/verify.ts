@@ -3,8 +3,8 @@
  * and its tests, and records the result at a fingerprint of the files that hold the
  * step's elements. `bun test` boots the application and `db:migrate` opens the configured
  * database, so this runs where those can. What cannot run here (no script, no tool, no
- * database reachable, a timeout) is `blocked`, never a failed implementation.
- * Subprocesses go through `exec`, the seam tests fake. Callers verify one step at a time.
+ * drizzle-kit to ask, no database reachable, a timeout) is `blocked`, never a failed
+ * implementation. Subprocesses go through `exec`, the seam tests fake.
  */
 
 import { readFile, rm } from 'node:fs/promises'
@@ -16,6 +16,7 @@ import { formatFinding, gatingResults, type CheckReport } from '../check-result'
 import { capFindings, codegenFallback, OUTPUT_ERROR_PATTERN, outputFindings, outputTail, resolveScriptCommand } from '../command-output'
 import { discoverTestFiles } from '../discovery'
 import { readBracketedTokenFiles } from '../docs-acceptance'
+import { resolveAppDrizzleKit, type AppDrizzleKit } from '../make-migration'
 import { bunExecutable, type CapturedExec, type CapturedRun } from '../subprocess'
 import {
   acceptanceStatus,
@@ -56,6 +57,8 @@ export interface PlanVerifierOptions {
   check?: () => Promise<CheckReport>
   /** Test files, absolute. Defaults to `discoverTestFiles(root)`. */
   testFiles?: () => Promise<string[]>
+  /** The drizzle-kit `db:migrate` asks whether a migration covers the schema. Defaults to the one `root` installs. */
+  drizzleKit?: () => Promise<AppDrizzleKit>
   now?: () => Date
 }
 
@@ -83,6 +86,39 @@ const MISSING_TOOL_EXIT_CODE = 127
 const MISSING_TOOL_PATTERN = /command not found/iu
 
 const TYPECHECK_PATTERN = /error TS\d+/u
+
+/** What `drizzle-kit generate --explain --output json` prints (measured against 1.0.0-rc.4). */
+interface ExplainedMigration {
+  status: string
+  statements?: Array<Record<string, unknown>>
+  unresolved?: Array<{ type?: string; kind?: string; entity?: string[] }>
+  /** `{ code, ...meta }`; only an `internal_error` carries a `message`. */
+  error?: { code?: string; message?: string }
+  /** Set by a plain `generate`, which wrote this migration: drizzle-kit ignored `--explain`. */
+  migration_path?: string
+}
+
+/** The last stdout line that parses as an object with a `status`: drizzle-kit may print progress before it. */
+function explainedMigration(stdout: string): ExplainedMigration | undefined {
+  for (const line of stdout.split('\n').reverse()) {
+    try {
+      const parsed = JSON.parse(line) as unknown
+      if (parsed !== null && typeof parsed === 'object' && typeof (parsed as ExplainedMigration).status === 'string') return parsed as ExplainedMigration
+    } catch {
+      // Not the JSON line.
+    }
+  }
+  return undefined
+}
+
+/** `create_table comments`, `add_column comments.edited_at`: the statement's type and what it names. */
+function describeStatement(statement: Record<string, unknown>): string {
+  const named = (value: unknown): { name?: unknown; table?: unknown } | undefined => (value !== null && typeof value === 'object' ? (value as { name?: unknown; table?: unknown }) : undefined)
+  const column = named(statement.column)
+  const table = named(statement.table)?.name ?? statement.table ?? column?.table ?? named(statement.index)?.table
+  const target = [table, column?.name].filter((part) => typeof part === 'string').join('.')
+  return `${String(statement.type)}${target ? ` ${target}` : ''}`
+}
 
 function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -180,6 +216,7 @@ export class PlanVerifier {
   private readonly declaredIds: string[]
   private readonly check: () => Promise<CheckReport>
   private readonly testFiles: () => Promise<string[]>
+  private readonly drizzleKit: () => Promise<AppDrizzleKit>
   private readonly now: () => Date
   private judged: Promise<{ status: PlanStatus; elements: Map<string, PlanElementStatus> }> | undefined
   private testFilesPromise: Promise<string[]> | undefined
@@ -192,6 +229,7 @@ export class PlanVerifier {
     this.declaredIds = planAcceptanceIds(plan)
     this.check = options.check ?? (() => runCheck({ cwd: options.root, json: true }))
     this.testFiles = options.testFiles ?? (() => discoverTestFiles(options.root))
+    this.drizzleKit = options.drizzleKit ?? (() => resolveAppDrizzleKit(options.root))
     this.now = options.now ?? (() => new Date())
   }
 
@@ -217,6 +255,50 @@ export class PlanVerifier {
       stepId,
       taskId: found.task.id,
       record: { planDigest: this.options.planDigest, ranAt, durationMs: Math.round(performance.now() - started), ...run },
+    }
+  }
+
+  /**
+   * A `tests:fail` step whose verified record drifted, judged without a run: `tests:fail` cannot
+   * pass once the implementation exists, and its red run was observed when it verified. It stays
+   * verified while one test file still carries each behaviour's id as a bracketed token, which a
+   * comment carries as well as a test title: a gap the run itself would catch, accepted here.
+   */
+  async recheckTests(stepId: string, previous: PlanStepRecord): Promise<PlanStepVerification> {
+    const found = findPlanStep(this.derivation, stepId)
+    if (!found) throw new Error(`no step ${stepId} is derived from this plan`)
+    const started = performance.now()
+    const ranAt = this.now().toISOString()
+    const { files } = await this.selection(found.step)
+    const wanted = new Set(found.step.acceptanceIds)
+    const carriers = await readBracketedTokenFiles(this.options.root, files.map((file) => join(this.options.root, file)), (token) => wanted.has(token))
+    const missing = found.step.acceptanceIds.filter((id) => !carriers.has(id))
+    const findings = [
+      ...missing.map((id) => `[${id}] is carried by no test file`),
+      ...[...carriers].filter(([, carrying]) => carrying.length > 1).map(([id, carrying]) => `[${id}] is carried by ${carrying.join(' and ')}`),
+    ]
+    const command: PlanCommandRecord = {
+      command: 'tests:fail',
+      label: 'not run: a re-check that one test file still carries each behaviour',
+      status: findings.length > 0 ? 'fail' : 'pass',
+      durationMs: 0,
+      ...(findings.length > 0 ? { reason: 'the test files no longer carry the behaviours the step saw fail' } : {}),
+      findings,
+    }
+    return {
+      stepId,
+      taskId: found.task.id,
+      record: {
+        outcome: findings.length > 0 ? 'failed' : 'verified',
+        planDigest: this.options.planDigest,
+        ranAt,
+        durationMs: Math.round(performance.now() - started),
+        commands: [command],
+        acceptance: previous.acceptance.map((behaviour) => (missing.includes(behaviour.id) ? { ...behaviour, status: 'pending' as const } : behaviour)),
+        incomplete: [],
+        waived: [],
+        fingerprint: { files: Object.fromEntries(await hashFiles(this.options.root, files)), environment: currentEnvironment() },
+      },
     }
   }
 
@@ -296,7 +378,7 @@ export class PlanVerifier {
       case 'typecheck':
         return this.script('typecheck', null, TYPECHECK_PATTERN)
       case 'db:migrate':
-        return this.script('db:migrate', null, OUTPUT_ERROR_PATTERN, DATABASE_SIGNATURES)
+        return this.migrate()
       case 'check':
         return this.runCheck()
       case 'tests':
@@ -320,7 +402,7 @@ export class PlanVerifier {
     if (!resolved) return { label: `bun run ${script}`, status: 'blocked', reason: `no "${script}" script in package.json`, findings: [] }
     const { label } = resolved
     const result = await this.exec(resolved.command)
-    if (result.timedOut) return { label, status: 'blocked', reason: `\`${label}\` timed out after ${this.options.timeoutMs} ms`, findings: [] }
+    if (result.timedOut) return this.timedOut(label)
     if (result.exitCode === 0) return { label, status: 'pass', findings: [] }
     const output = `${result.stdout}\n${result.stderr}`
     const findings = outputFindings(output, pattern)
@@ -331,6 +413,44 @@ export class PlanVerifier {
       return { label, status: 'blocked', reason: `\`${label}\` exited ${result.exitCode} on what reads as an unreachable database`, findings }
     }
     return { label, status: 'fail', reason: `\`${label}\` exited ${result.exitCode}`, findings }
+  }
+
+  /**
+   * The app's `db:migrate`, once drizzle-kit says the migrations cover the schema: with nothing
+   * generated the migrate applies nothing and passes, so a table the step adds would verify with
+   * no migration behind it. Uncovered changes fail the command; drizzle-kit that cannot answer
+   * blocks it.
+   */
+  private async migrate(): Promise<CommandOutcome> {
+    if (resolveScriptCommand(this.options.scripts, 'db:migrate', null)) {
+      const refused = await this.migrationCoverage()
+      if (refused) return refused
+    }
+    return this.script('db:migrate', null, OUTPUT_ERROR_PATTERN, DATABASE_SIGNATURES)
+  }
+
+  private timedOut(label: string): CommandOutcome {
+    return { label, status: 'blocked', reason: `\`${label}\` timed out after ${this.options.timeoutMs} ms`, findings: [] }
+  }
+
+  private async migrationCoverage(): Promise<CommandOutcome | undefined> {
+    const label = 'drizzle-kit generate --explain'
+    const kit = await this.drizzleKit()
+    if ('missing' in kit) return { label, status: 'blocked', reason: `cannot tell whether a migration covers the schema: ${kit.missing}`, findings: [] }
+    const result = await this.exec([bunExecutable(), kit.bin, 'generate', '--config', kit.config, '--explain', '--output', 'json'])
+    if (result.timedOut) return this.timedOut(label)
+    const explained = explainedMigration(result.stdout)
+    // An `ok` with no statement list says nothing either way, so it falls through to blocked.
+    const statements = explained?.status === 'ok' && Array.isArray(explained.statements) ? explained.statements : undefined
+    if (explained?.status === 'no_changes' || statements?.length === 0) return undefined
+    const fix = 'generate one with `guren make:migration`'
+    if (statements) return { label, status: 'fail', reason: `the schema has changes no migration covers: ${fix}`, findings: capFindings(statements.map(describeStatement)) }
+    if (explained?.status === 'missing_hints') {
+      const findings = (explained.unresolved ?? []).map((entry) => `${entry.type ?? 'unresolved'}: ${entry.kind ?? ''} ${(entry.entity ?? []).join('.')}`.trim())
+      return { label, status: 'fail', reason: `the schema has changes no migration covers, and drizzle-kit asks whether each is a rename: ${fix}`, findings: capFindings(findings) }
+    }
+    const said = [explained?.error?.code, explained?.error?.message, explained?.migration_path && `it wrote ${explained.migration_path}`].filter(Boolean).map((part) => `: ${part}`).join('')
+    return { label, status: 'blocked', reason: `\`${label}\` exited ${result.exitCode} without saying whether a migration covers the schema${said}`, findings: outputTail(`${result.stdout}\n${result.stderr}`) }
   }
 
   private async runCheck(): Promise<CommandOutcome> {
@@ -394,7 +514,7 @@ export class PlanVerifier {
     }
 
     const { label, result, report } = await this.outcome(step)
-    if (!report) return { label, status: 'blocked', reason: `\`${label}\` timed out after ${this.options.timeoutMs} ms`, findings: [] }
+    if (!report) return this.timedOut(label)
     const tail = outputTail(`${result.stdout}\n${result.stderr}`)
     if (report.state === 'blocked') return { label, status: 'blocked', reason: report.reason, findings: tail }
     if (report.state === 'invalid') {

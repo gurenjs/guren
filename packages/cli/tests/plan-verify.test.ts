@@ -9,7 +9,7 @@ import { planDigest, planSlug, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, readPla
 import { planHash } from '../src/plan/identity'
 import { judgePlan, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus } from '../src/plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds, type PlanTaskDerivation } from '../src/plan/tasks'
-import { applyVerification, applyWaivers, behaviourReach, hashFiles, whatHoldsElement, overlayVerification, planWaivers, recordStillHolds, sha256 } from '../src/plan/verification'
+import { applyVerification, applyWaivers, behaviourReach, hashFiles, whatHoldsElement, overlayVerification, planWaivers, recordDrift, recordStillHolds, sha256 } from '../src/plan/verification'
 import { PLAN_STATUS_REPORT_VERSION } from '../src/plan-status'
 import { formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
 import { acceptanceTestFiles, PlanVerifier, type PlanStepVerification, type PlanVerifierOptions } from '../src/plan/verify'
@@ -89,6 +89,9 @@ function junit(cases: Array<{ name: string; file?: string; inner?: string }>): s
 const PASSING = junit(IDS.map((id) => ({ name: `[${id}] x` })))
 const FAILING = junit(IDS.map((id) => ({ name: `[${id}] x`, inner: '<failure message="no"/>' })))
 
+/** What drizzle-kit prints when the migrations cover the schema; every fake answers a data step's check with it unless told otherwise. */
+const NO_CHANGES = '{"status":"no_changes","dialect":"postgresql"}\n'
+
 interface FakeExec {
   exec: CapturedExec
   calls: string[][]
@@ -103,7 +106,8 @@ function fakeExec(answers: Record<string, Partial<CapturedRun>> = {}, report: st
     const outfile = command.find((arg) => arg.startsWith('--reporter-outfile='))?.slice('--reporter-outfile='.length)
     if (outfile !== undefined && report !== null) await writeFile(outfile, report, 'utf8')
     const match = Object.entries(answers).find(([prefix]) => key.startsWith(prefix))
-    return { exitCode: 0, stdout: '', stderr: '', ...match?.[1] }
+    const stdout = key.startsWith('drizzle-kit generate') ? NO_CHANGES : ''
+    return { exitCode: 0, stdout, stderr: '', ...match?.[1] }
   }
   return { exec, calls }
 }
@@ -121,6 +125,7 @@ function verifier(status: PlanStatus, fake: Pick<FakeExec, 'exec'>, overrides: P
     timeoutMs: 1000,
     scripts: { codegen: 'guren codegen', typecheck: 'tsc --noEmit', 'db:migrate': 'guren db:migrate' },
     check: async () => checkReport([]),
+    drizzleKit: async () => ({ bin: 'drizzle-kit', config: 'drizzle.config.ts' }),
     now: () => new Date('2026-09-21T00:00:00Z'),
     ...overrides,
   })
@@ -312,6 +317,91 @@ describe('PlanVerifier', () => {
     expect(blocked.record.outcome).toBe('blocked')
     expect(commandsOf(failed)['db:migrate']).toBe('fail')
     expect(failed.record.outcome).toBe('failed')
+  })
+
+  describe('recheckTests', () => {
+    const titles = (ids: string[]): string => ids.map((id) => `test('[${id}] x', () => {})\n`).join('')
+
+    test('should keep a drifted tests step verified while one file carries each id, and name a lost or doubled one', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'guren-plan-recheck-'))
+      try {
+        await mkdir(join(root, 'tests'), { recursive: true })
+        await writeFile(join(root, 'tests/comments.test.ts'), titles(['AC-comments-1', 'AC-comments-3', 'AC-comments-4']), 'utf8')
+        await writeFile(join(root, 'tests/more.test.ts'), titles(['AC-comments-3']), 'utf8')
+        const previous = record({ acceptance: IDS.map((id) => ({ id, status: 'failing' as const })) })
+        const recheck = (): Promise<PlanStepVerification> =>
+          verifier(statusOf(), fakeExec(), { root, testFiles: async () => [join(root, 'tests/comments.test.ts'), join(root, 'tests/more.test.ts')] }).recheckTests(TESTS, previous)
+
+        const step = await recheck()
+
+        expect(step.record.outcome).toBe('failed')
+        expect(step.record.commands[0]!.findings).toEqual(['[AC-comments-2] is carried by no test file', '[AC-comments-3] is carried by tests/comments.test.ts and tests/more.test.ts'])
+        expect(step.record.acceptance).toEqual([
+          { id: 'AC-comments-1', status: 'failing' },
+          { id: 'AC-comments-2', status: 'pending' },
+          { id: 'AC-comments-3', status: 'failing' },
+          { id: 'AC-comments-4', status: 'failing' },
+        ])
+
+        await writeFile(join(root, 'tests/comments.test.ts'), titles(IDS), 'utf8')
+        await writeFile(join(root, 'tests/more.test.ts'), '', 'utf8')
+        expect((await recheck()).record.outcome).toBe('verified')
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    })
+  })
+
+  describe('whether a migration covers the schema', () => {
+    const GENERATE = 'drizzle-kit generate --config drizzle.config.ts --explain --output json'
+
+    test('should fail db:migrate, without running it, on statements no migration covers, naming them', async () => {
+      const fake = fakeExec({
+        [GENERATE]: {
+          stdout: `Reading config\n${JSON.stringify({ status: 'ok', statements: [{ type: 'create_table', table: { name: 'comments' } }, { type: 'add_column', column: { table: 'posts', name: 'edited_at' } }] })}\n`,
+        },
+      })
+
+      const step = await verifier(statusOf(), fake).verify(DATA)
+
+      expect(commandOf(step, 'db:migrate')).toMatchObject({
+        status: 'fail',
+        label: 'drizzle-kit generate --explain',
+        reason: 'the schema has changes no migration covers: generate one with `guren make:migration`',
+        findings: ['create_table comments', 'add_column posts.edited_at'],
+      })
+      expect(step.record.outcome).toBe('failed')
+      expect(fake.calls.some((call) => call.includes('db:migrate'))).toBe(false)
+    })
+
+    test('should fail db:migrate where drizzle-kit needs a rename answered, since a migration is still missing', async () => {
+      const fake = fakeExec({
+        [GENERATE]: { exitCode: 2, stdout: `${JSON.stringify({ status: 'missing_hints', unresolved: [{ type: 'rename_or_create', kind: 'column', entity: ['public', 'posts', 'headline'] }] })}\n` },
+      })
+
+      const step = await verifier(statusOf(), fake).verify(DATA)
+
+      expect(commandOf(step, 'db:migrate')).toMatchObject({ status: 'fail', findings: ['rename_or_create: column public.posts.headline'] })
+    })
+
+    test('should block db:migrate, never pass it, where drizzle-kit cannot say or is not there to ask', async () => {
+      const failed = fakeExec({ [GENERATE]: { exitCode: 1, stdout: `${JSON.stringify({ status: 'error', error: { code: 'internal_error', message: '2 errors building db/schema.ts' } })}\n` } })
+      const silent = fakeExec({ [GENERATE]: { exitCode: 1, stdout: '', stderr: "Unrecognized options for command 'generate': --explain\n" } })
+      const slow = fakeExec({ [GENERATE]: { timedOut: true } })
+      const wrote = fakeExec({ [GENERATE]: { stdout: `${JSON.stringify({ status: 'ok', dialect: 'postgresql', migration_path: 'drizzle/0001_x.sql' })}\n` } })
+
+      const errored = await verifier(statusOf(), failed).verify(DATA)
+      const unrecognized = await verifier(statusOf(), silent).verify(DATA)
+      const timedOut = await verifier(statusOf(), slow).verify(DATA)
+      const missing = await verifier(statusOf(), fakeExec(), { drizzleKit: async () => ({ missing: 'drizzle-kit is not installed in the application' }) }).verify(DATA)
+
+      expect(commandOf(errored, 'db:migrate')).toMatchObject({ status: 'blocked', reason: expect.stringContaining(': internal_error: 2 errors building db/schema.ts') })
+      expect(commandOf(unrecognized, 'db:migrate')).toMatchObject({ status: 'blocked', findings: ["Unrecognized options for command 'generate': --explain"] })
+      expect(commandOf(timedOut, 'db:migrate').status).toBe('blocked')
+      expect(commandOf(await verifier(statusOf(), wrote).verify(DATA), 'db:migrate')).toMatchObject({ status: 'blocked', reason: expect.stringContaining(': it wrote drizzle/0001_x.sql') })
+      expect(commandOf(missing, 'db:migrate')).toMatchObject({ status: 'blocked', reason: 'cannot tell whether a migration covers the schema: drizzle-kit is not installed in the application' })
+      expect(missing.record.outcome).toBe('blocked')
+    })
   })
 
   test('should call a step failed when a command failed, whatever else was blocked', async () => {
@@ -738,6 +828,19 @@ describe('applyVerification', () => {
     expect(controllerAfter({ [first]: record({ fingerprint: covered }), [last]: record({ fingerprint: { ...covered, files: { [controllerFile]: 'older' } } }) })).toBe('present')
   })
 
+  test('should call a record drifted only where changed files are all that keep it from standing', async () => {
+    const hashes = await hashFiles(ROOT, DATA_FILES)
+    const changed = new Map([...hashes, ['db/schema.ts', 'other']])
+
+    expect(recordDrift(record(), 'digest', changed)).toEqual(['db/schema.ts'])
+    expect(recordStillHolds(record(), 'digest', changed)).toBe(false)
+    expect(recordDrift(record(), 'digest', hashes)).toEqual([])
+    expect(recordDrift(record({ outcome: 'failed' }), 'digest', changed)).toEqual([])
+    expect(recordDrift(record({ planDigest: 'older' }), 'digest', changed)).toEqual([])
+    expect(recordDrift(record({ waived: ['policy.comment'] }), 'digest', changed)).toEqual([])
+    expect(recordDrift(record({ waived: ['policy.comment'] }), 'digest', changed, new Set(['policy.comment']))).toEqual(['db/schema.ts'])
+  })
+
   test('should let a record stand while every fingerprinted file still matches, an empty fingerprint on the plan digest alone', async () => {
     const hashes = await hashFiles(ROOT, DATA_FILES)
     const empty = record({ fingerprint: { ...FINGERPRINT, files: {} } })
@@ -968,6 +1071,8 @@ describe('formatPlanVerify', () => {
       verification: { stateFile: '.guren/plans/comments.state.json', staleSteps: [], decisionsFile: 'comments.decisions.json', staleWaivers: [] },
       steps: steps.map(([stepId, entry]) => ({ stepId, taskId: 'task/entity/model.comment', record: entry })),
       skipped: [],
+      reverified: [],
+      recheckPending: [],
     })
 
     const behind = formatPlanVerify(report([[DATA, failed], [HTTP, passed]]))
@@ -976,5 +1081,26 @@ describe('formatPlanVerify', () => {
     expect(behind).toContain(`codegen did not pass in ${DATA}, so the status below was judged without the generated files.`)
     expect(behind).toContain('  fail     codegen     bun run codegen\n      `bun run codegen` exited 1\n      error: no')
     expect(clean).not.toContain('judged without the generated files')
+  })
+
+  test('should name the steps it re-checked and the ones it left for a later run', () => {
+    const report = (reverified: string[], recheckPending: string[]): PlanVerifyReport => ({
+      reportVersion: PLAN_STATUS_REPORT_VERSION,
+      plan: { file: 'comments.plan.json', title: 'Comments', hash: null },
+      elements: [],
+      summary: summarize([]),
+      verification: { stateFile: '.guren/plans/comments.state.json', staleSteps: [], decisionsFile: 'comments.decisions.json', staleWaivers: [] },
+      steps: [],
+      skipped: [],
+      reverified,
+      recheckPending,
+    })
+
+    const text = formatPlanVerify(report([DATA], [HTTP]))
+
+    expect(text).toContain(`Re-checked, since files they were verified at have changed: ${DATA}`)
+    expect(text).toContain(`Left verified for a later run to re-check (a step they share commands with did not verify, the re-check was blocked, or a static re-check failed): ${HTTP}`)
+    expect(formatPlanVerify(report([], []))).not.toContain('Re-checked')
+    expect(formatPlanVerify(report([], []))).not.toContain('Left verified')
   })
 })

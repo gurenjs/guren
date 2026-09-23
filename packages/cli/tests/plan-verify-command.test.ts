@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from 'bun:test'
-import { mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 import { runCommand, type CommandDef } from 'citty'
 
@@ -16,25 +16,19 @@ import { loadPlanAppState } from '../src/plan/app-state'
 import { planDigest, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, type PlanStepRecord } from '../src/plan/state'
 import { stampContextHash } from '../src/plan/freshness'
 import { sha256 } from '../src/plan/verification'
-import { createTempRoot, linkWorkspaceCore, writeWorkspaceFiles } from './helpers'
-import { approveIfStamped, approvePlanFile, loadApprovedCommentsPlan, loadCommentsPlan, PLAN_APP_FILES, planAppState, PLAN_VERIFY_APP_FILES as APP, PLAN_VERIFY_SCHEMA as SCHEMA } from './plan-fixture'
+import { createTempRoot, writeWorkspaceFiles } from './helpers'
+import { approveIfStamped, approvePlanFile, createPlanVerifyApp, loadApprovedCommentsPlan, loadCommentsPlan, PLAN_APP_FILES, planAppState, PLAN_VERIFY_APP_FILES as APP, PLAN_VERIFY_SCHEMA as SCHEMA } from './plan-fixture'
 
 // Each application has a directory of its own, since Bun keys an imported routes file on
 // its path and a second test would read the first one's route graph back.
 const ROOT_PREFIX = 'guren-plan-verify-command-'
 let ROOT: string
-const WORKSPACE_DRIZZLE = resolve(import.meta.dir, '../../orm/node_modules/drizzle-orm')
 
 const HTTP = 'task/entity/model.comment/http'
 const DATA = 'task/entity/model.comment/data'
 
-async function createApp(name: string, files: Record<string, string> = APP): Promise<string> {
-  const dir = join(ROOT, name)
-  await writeWorkspaceFiles(dir, files)
-  await linkWorkspaceCore(dir)
-  await mkdir(join(dir, 'node_modules'), { recursive: true })
-  await symlink(WORKSPACE_DRIZZLE, join(dir, 'node_modules', 'drizzle-orm'), 'dir')
-  return dir
+function createApp(name: string, files: Record<string, string> = APP): Promise<string> {
+  return createPlanVerifyApp(join(ROOT, name), files)
 }
 
 function git(dir: string, ...args: string[]): void {
@@ -290,7 +284,9 @@ describe('plan:verify', () => {
     const redone = await verify(plan, app)
     // The pages step verified in the run before and still stands, and the scaffold step, which fingerprints nothing, stands on its commands.
     expect(redone.skipped).toEqual(['task/entity/model.comment/scaffold', 'task/entity/model.comment/pages'])
-    expect(redone.steps.map((step) => step.stepId)).toContain(DATA)
+    // DATA drifted, and a step beside it (the incomplete http step) did not verify, so it is left for a later re-check.
+    expect(redone.steps.map((step) => step.stepId)).not.toContain(DATA)
+    expect(redone.recheckPending).toEqual([DATA])
 
     const revised = await writePlan('lift-revised.plan.json', { ...loadCommentsPlan(), title: 'Revised' })
     await writeFile(join(app, '.guren/plans/lift-revised.state.json'), JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: { [DATA]: record } }), 'utf8')
