@@ -1808,35 +1808,66 @@ describe('deploy-runtime verdicts over a manifest (RFC 0026 §5)', () => {
     expect(judge(manifestFixture())['deploy-password-hashing']).toMatchObject({ status: 'pass', evidence: 'manifest' })
   })
 
-  it('judges a section behind a provider that threw as unverified, never as described', () => {
-    const verdicts = judge(
-      manifestFixture({
-        providers: [{ name: 'AuthProvider', source: 'options.providers', deferred: false, provides: [], register: 'threw', error: 'no binding' }],
-      }),
-    )
+  it('falls back to the scan for hashing and sessions after a provider threw, and cannot vouch for the cache', () => {
+    const threw = manifestFixture({
+      providers: [{ name: 'AuthProvider', source: 'options.providers', deferred: false, provides: [], register: 'threw', error: 'no binding' }],
+    })
+    const verdicts = judge(threw, { sessionSignals: [{ symbol: 'auth', filePath: 'src/app.ts', line: 3 }] })
 
-    expect(Object.keys(verdicts)).toEqual([
-      'deploy-password-hashing-unverified',
-      'deploy-runtime-stores-unverified',
-      'deploy-provider-discovery',
-    ])
-    expect(verdicts['deploy-password-hashing-unverified']).toMatchObject({ status: 'warn', evidence: 'none' })
-    expect(verdicts['deploy-password-hashing-unverified'].message).toContain('AuthProvider threw in register()')
-    expect(verdicts['deploy-runtime-stores-unverified']).toMatchObject({ status: 'warn', evidence: 'none' })
+    expect(Object.keys(verdicts)).toEqual(['deploy-password-hashing', 'deploy-runtime-stores-unverified', 'deploy-provider-discovery'])
+    // The source shows no password authentication, so the scan passes it, and says why it was asked.
+    expect(verdicts['deploy-password-hashing']).toMatchObject({ status: 'pass', evidence: 'static' })
+    expect(verdicts['deploy-password-hashing'].message).toContain('Judged from source: AuthProvider threw in register()')
+    expect(verdicts['deploy-password-hashing'].evidenceReason).toContain('AuthProvider threw')
+
+    const stores = verdicts['deploy-runtime-stores-unverified']
+    expect(stores).toMatchObject({ status: 'warn', evidence: 'none' })
+    expect(stores.message).toContain('whether the cache store is per-process is unverified: AuthProvider threw in register()')
+    // The session half comes from the scan, beside the unverified cache.
+    expect(stores.message).toContain('beyond that, sessions are enabled (auth (src/app.ts:3)) with no persistent store')
+    expect(stores.message).toContain('The session store was judged from source.')
     expect(verdicts['deploy-provider-discovery'].evidence).toBe('static')
   })
 
-  it('judges a session a deferred provider supplies, or one bound without describe(), as unverified', () => {
+  it('judges a session a deferred provider supplies, or one bound without describe(), from source', () => {
     const deferred = judge(
       manifestFixture({
         providers: [{ name: 'SessionProvider', source: 'options.providers', deferred: true, provides: ['session'], register: 'skipped' }],
       }),
-    )
-    expect(deferred['deploy-runtime-stores-unverified'].message).toContain('whether the session store is per-process is unverified')
-    expect(deferred['deploy-runtime-stores-unverified'].message).toContain('deferred SessionProvider')
+    )['deploy-runtime-stores']
+    expect(deferred).toMatchObject({ status: 'pass', evidence: 'static' })
+    expect(deferred.message).toContain('The session store was judged from source: "session" is supplied by the deferred SessionProvider')
+    expect(deferred.evidenceReason).toContain('deferred SessionProvider')
 
-    const opaque = judge(manifestFixture({ bindings: ['app', 'auth', 'session'] }))
-    expect(opaque['deploy-runtime-stores-unverified'].message).toContain('"session" is bound')
+    const opaque = judge(manifestFixture({ bindings: ['app', 'auth', 'session'] }))['deploy-runtime-stores']
+    expect(opaque.message).toContain('"session" is bound, but the introspected app could not describe it')
+  })
+
+  it('never reads a config left unbound for an unset env key as absent (RFC 0027 config-unverified)', () => {
+    const unset = (key?: string): AppManifest =>
+      manifestFixture({
+        warnings: [
+          {
+            code: 'config-unverified',
+            message: 'the "session" config reads SESSION_DRIVER, which the environment does not set; it was left unbound.',
+            provider: 'ConfigServiceProvider',
+            ...(key === undefined ? {} : { key }),
+          },
+        ],
+      })
+
+    const session = judge(unset('session'), { sessionSignals: [{ symbol: 'auth', filePath: 'src/app.ts', line: 3 }] })['deploy-runtime-stores']
+    expect(session).toMatchObject({ status: 'warn', evidence: 'static' })
+    expect(session.message).toContain('with no persistent store')
+    expect(session.message).toContain('reads SESSION_DRIVER, which the environment does not set')
+
+    // A cache config left unbound has no scan to fall back to.
+    const cache = judge(unset('cache'))
+    expect(cache['deploy-runtime-stores-unverified']).toMatchObject({ status: 'warn', evidence: 'none' })
+    // Another key's warning says nothing about these sections.
+    expect(judge(unset('mail'))['deploy-runtime-stores']).toMatchObject({ status: 'pass', evidence: 'manifest' })
+    // An older server's warning names no key, so it may be any section.
+    expect(judge(unset())['deploy-runtime-stores-unverified']).toBeDefined()
   })
 
   it('warns on a per-process session default and passes a shared one', () => {
@@ -1887,7 +1918,50 @@ describe('deploy-runtime verdicts over a manifest (RFC 0026 §5)', () => {
     )['deploy-runtime-stores']
 
     expect(stores.status).toBe('warn')
-    expect(stores.message).toContain('auth.sessionOptions.store (KvSessionStore)')
+    expect(stores.message).toContain('auth.sessionOptions.store (KvSessionStore), a store class this check cannot vouch for')
+    // A store class is not a driver name, so no plugin manifest can vouch for it.
+    expect(stores.fix).not.toContain('gurenPlugin')
+    expect(
+      judge(
+        manifestFixture({
+          session: {
+            source: 'auth.sessionOptions.store',
+            default: 'sessionOptions.store',
+            stores: { 'sessionOptions.store': { driver: 'KvSessionStore', perProcess: null } },
+          },
+        }),
+        {},
+        new Map([...BUILT_IN_SESSION_DRIVERS, ['KvSessionStore', true]]),
+      )['deploy-runtime-stores'].status,
+    ).toBe('warn')
+  })
+
+  it('names a default that no store declares as the misconfiguration it is', () => {
+    const stores = judge(
+      manifestFixture({ session: { source: 'manager', default: 'redis', stores: { memory: { driver: 'memory', perProcess: true } } } }),
+    )['deploy-runtime-stores']
+
+    expect(stores.message).toContain("the session config's `default` names 'redis', a store it does not declare")
+    expect(stores.fix).toContain('Declare the store under `stores`')
+  })
+
+  it('keeps a hand-mounted createSessionMiddleware on the scan when the manifest has no session', () => {
+    const manual = { symbol: 'createSessionMiddleware', filePath: 'src/app.ts', line: 8 }
+
+    const unbacked = judge(manifestFixture(), { sessionSignals: [manual] })['deploy-runtime-stores']
+    expect(unbacked.status).toBe('warn')
+    expect(unbacked.message).toContain('sessions are enabled (createSessionMiddleware (src/app.ts:8)) with no persistent store')
+
+    const backed = { symbol: 'DatabaseSessionStore', filePath: 'src/app.ts', line: 7 }
+    expect(judge(manifestFixture(), { sessionSignals: [manual], backedSessionSignals: [backed] })['deploy-runtime-stores'].status).toBe('pass')
+  })
+
+  it('honours autoSession: false beside a per-process session in the manifest', () => {
+    const memory = manifestFixture({ session: { source: 'manager', default: 'memory', stores: { memory: { driver: 'memory', perProcess: true } } } })
+    const disabled = { symbol: 'autoSession: false', filePath: 'src/app.ts', line: 4 }
+
+    expect(judge(memory)['deploy-runtime-stores'].status).toBe('warn')
+    expect(judge(memory, { sessionDisabledSignals: [disabled] })['deploy-runtime-stores']).toMatchObject({ status: 'pass', evidence: 'manifest' })
   })
 
   it('leaves an auth.sessionOptions.store factory to the scan, which reads what it constructs', () => {

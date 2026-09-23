@@ -43,12 +43,21 @@ describe('reportDeployRuntimeHazards', () => {
     writeApp(root, { '@guren/plugin-cloudflare': '^0.2.0' })
 
     let lines: string[] = []
-    const warnings = await captureWarnings(async () => {
-      lines = await reportDeployRuntimeHazards({ root, label: 'Cloudflare build' })
-    })
+    const logged: string[] = []
+    const log = console.log
+    console.log = (message: string) => logged.push(message)
+    let warnings: string[]
+    try {
+      warnings = await captureWarnings(async () => {
+        lines = await reportDeployRuntimeHazards({ root, label: 'Cloudflare build' })
+      })
+    } finally {
+      console.log = log
+    }
 
     expect(lines).toEqual(warnings)
     expect(lines).toHaveLength(1)
+    expect(logged.join('\n')).toContain('Deploy Provider Discovery from source (introspection failed with no-entry: Could not locate')
     expect(lines[0]).toStartWith('Cloudflare build: Cloudflare Workers shares no memory')
     expect(lines[0]).toContain('sessions are enabled')
     expect(lines[0]).toContain('DatabaseSessionStore')
@@ -86,7 +95,7 @@ export default createApp({ auth: { sessionOptions: { store: new DatabaseSessionS
     expect(warnings).toEqual([])
   })
 
-  test('should report what the introspected app registers, as checkDeployRuntime() does', async () => {
+  test('should name the evidence, then report what the introspected app registers, as checkDeployRuntime() does', async () => {
     // An app the CLI can introspect: an entry, and this workspace's @guren/core to import.
     mkdirSync(join(root, 'src'), { recursive: true })
     mkdirSync(join(root, 'node_modules/@guren'), { recursive: true })
@@ -100,10 +109,20 @@ export default createApp({ auth: { sessionOptions: { store: new DatabaseSessionS
     )
 
     let lines: string[] = []
-    await captureWarnings(async () => {
-      lines = await reportDeployRuntimeHazards({ root, label: 'Cloudflare build' })
-    })
+    const logged: string[] = []
+    const log = console.log
+    console.log = (message: string) => logged.push(message)
+    try {
+      await captureWarnings(async () => {
+        lines = await reportDeployRuntimeHazards({ root, label: 'Cloudflare build' })
+      })
+    } finally {
+      console.log = log
+    }
 
+    expect(logged).toEqual([
+      'Cloudflare build: deploy-runtime checks judged Deploy Password Hashing from the introspected app, Deploy Runtime Stores from the introspected app, Deploy Provider Discovery from source.',
+    ])
     const expected = (await checkDeployRuntime(root))
       .filter((verdict) => verdict.status !== 'pass')
       .map((verdict) => `Cloudflare build: ${verdict.message}${verdict.fix ? ` ${verdict.fix}` : ''}`)

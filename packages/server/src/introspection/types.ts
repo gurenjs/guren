@@ -160,4 +160,6 @@ export interface ManifestWarning {
   message: string
   provider?: string
   route?: string
+  /** The container key a `config-unverified` warning left unbound, so a reader can tell that section from an absent one. */
+  key?: string
 }

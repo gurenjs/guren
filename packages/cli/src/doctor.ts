@@ -50,6 +50,8 @@ export interface DoctorCheck {
   manualFix?: string
   /** Set by the checks that read the introspected app (RFC 0026 §5). */
   evidence?: CheckEvidence
+  /** Why such a check was judged from source, which `--no-introspect` leaves unset. */
+  evidenceReason?: string
 }
 
 export interface NextStep {
@@ -116,6 +118,7 @@ export interface DoctorJsonOutput {
     canAutofix: boolean
     manualFix: string | null
     evidence?: CheckEvidence
+    evidenceReason?: string
   }>
   nextSteps: NextStep[] | null
   recommendedCommands: string[]
@@ -1305,6 +1308,7 @@ export async function getDoctorRuleEvaluations(
         manualFix: verdict.fix,
       }),
       evidence: verdict.evidence,
+      ...(verdict.evidenceReason ? { evidenceReason: verdict.evidenceReason } : {}),
     },
     autofix: null,
   }))
@@ -1372,6 +1376,7 @@ export function buildJsonOutput(report: DoctorReport): DoctorJsonOutput {
       canAutofix: c.canAutofix ?? false,
       manualFix: c.manualFix ?? null,
       ...(c.evidence ? { evidence: c.evidence } : {}),
+      ...(c.evidenceReason ? { evidenceReason: c.evidenceReason } : {}),
     })),
     nextSteps: report.nextSteps ?? null,
     recommendedCommands: report.recommendedCommands,

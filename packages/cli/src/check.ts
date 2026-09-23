@@ -398,6 +398,14 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   // One introspection per run, started only by a check that reads the manifest.
   let introspection: Promise<Introspection> | undefined
   const introspect = options.introspect ? () => (introspection ??= introspectApp(cwd)) : undefined
+  // The deploy verdicts start before the suites so their introspection child overlaps them,
+  // whenever package.json or any source could have moved: the verdict joins the two.
+  const deployRuntime =
+    runs('core') && (sourceChanged || changedFiles?.has('package.json'))
+      ? checkDeployRuntime(cwd, { introspect: introspect ?? false })
+      : undefined
+  // Awaited at step 12; until then a rejection must not surface as unhandled.
+  deployRuntime?.catch(() => {})
 
   if (runs('core')) {
     // 1. Check controllers for empty methods. The unfiltered list is kept for
@@ -711,18 +719,12 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   // declaring a deploy plugin or the Lambda adapter; every other app adds nothing.
   // Advisory: the manifest is read in this environment, and its static fallback reads
   // constructions, not intent, so a false positive must not fail a gate.
-  // Runs whenever package.json or any source could have moved: the verdict joins the two.
-  if (runs('core')) {
-    const manifestChanged = !changedFiles || changedFiles.has('package.json')
-    if (sourceChanged || manifestChanged) {
-      for (const verdict of await checkDeployRuntime(cwd, { introspect: introspect ?? false })) {
-        checks.push({
-          ...check(verdict.key, verdict.title, verdict.status, verdict.message, verdict.fix),
-          advisory: true,
-          evidence: verdict.evidence,
-        })
-      }
-    }
+  for (const verdict of (await deployRuntime) ?? []) {
+    checks.push({
+      ...check(verdict.key, verdict.title, verdict.status, verdict.message, verdict.fix),
+      advisory: true,
+      evidence: verdict.evidence,
+    })
   }
 
   const unavailable = await introspectionUnavailable(introspection)

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { runCheck, type CheckResult } from '../src/check'
 import { analyzeDeployRuntime, checkDeployRuntime } from '../src/deploy-runtime'
 import { getDoctorRuleEvaluations } from '../src/doctor'
-import { assertWorkspaceBuilt, createTempRoot, linkWorkspaceCore, SERVER_DIST_ENTRY, writeWorkspaceFiles } from './helpers'
+import { assertWorkspaceBuilt, createTempRoot, linkWorkspaceCore, runCliBinCaptured, SERVER_DIST_ENTRY, writeWorkspaceFiles } from './helpers'
 
 const ENTRY = "import app from './app.js'\n\nexport default app\n"
 
@@ -26,6 +26,19 @@ class AuthProvider extends ServiceProvider {
 export default createApp({ auth: {}, providers: [AuthProvider] })
 `
 
+/** Reads an env key without a default, which a CI build with no .env leaves unset. */
+const UNSET_ENV_APP = `import { createApp, defineEnv, defineSessionConfig, Env } from '@guren/core'
+
+const env = defineEnv({ RFC26_UNSET_SESSION_DRIVER: Env.string() })
+
+const session = defineSessionConfig((values) => ({
+  default: (values as unknown as Record<string, string>).RFC26_UNSET_SESSION_DRIVER,
+  stores: { cookie: { driver: 'cookie' } },
+}))
+
+export default createApp({ env, config: [session], auth: {} })
+`
+
 let root: string
 
 /** One directory per scenario: `introspectApp()` memoises per app root for the whole test process. */
@@ -40,6 +53,17 @@ async function cloudflareApp(name: string, files: Record<string, string>): Promi
     ...files,
   })
   return dir
+}
+
+/** `guren doctor --json` prints its report twice; the first document is enough. */
+function firstJsonDocument(output: string): string {
+  const start = output.indexOf('{')
+  let depth = 0
+  for (let index = start; index < output.length; index++) {
+    if (output[index] === '{') depth++
+    else if (output[index] === '}' && --depth === 0) return output.slice(start, index + 1)
+  }
+  throw new Error(`no JSON document in: ${output.slice(0, 200)}`)
 }
 
 function byKey(checks: CheckResult[]): Record<string, CheckResult> {
@@ -106,18 +130,52 @@ describe('deploy-runtime verdicts read from the introspected app (RFC 0026 §5)'
     expect(skipped['introspection-unavailable']).toBeUndefined()
   })
 
-  test('never passes what a provider that threw may have configured', async () => {
+  test('falls back to the scan after a provider threw, and cannot vouch for the cache', async () => {
     const dir = await cloudflareApp('threw', { 'src/app.ts': THROWING_APP })
 
     const checks = byKey((await runCheck({ cwd: dir, introspect: true })).checks)
-    expect(checks['deploy-password-hashing']).toBeUndefined()
-    expect(checks['deploy-password-hashing-unverified']).toMatchObject({ status: 'warn', evidence: 'none', advisory: true })
-    expect(checks['deploy-password-hashing-unverified'].message).toContain('AuthProvider threw in register()')
-    expect(checks['deploy-runtime-stores-unverified']).toMatchObject({ status: 'warn', evidence: 'none' })
+    expect(checks['deploy-password-hashing']).toMatchObject({ status: 'pass', evidence: 'static', advisory: true })
+    expect(checks['deploy-password-hashing'].message).toContain('Judged from source: AuthProvider threw in register()')
+    expect(checks['deploy-runtime-stores-unverified']).toMatchObject({ status: 'warn', evidence: 'none', advisory: true })
+    expect(checks['deploy-runtime-stores-unverified'].message).toContain('sessions are enabled (auth (src/app.ts:9)) with no persistent store')
 
-    // The scan finds no password authentication in this source and passes it.
     const source = byKey((await runCheck({ cwd: dir, introspect: false })).checks)
     expect(source['deploy-password-hashing']).toMatchObject({ status: 'pass', evidence: 'static' })
+  })
+
+  test('judges a session config left unbound for an unset env key from source, never as absent', async () => {
+    const dir = await cloudflareApp('unset-env', { 'src/app.ts': UNSET_ENV_APP })
+
+    const stores = byKey((await runCheck({ cwd: dir, introspect: true })).checks)['deploy-runtime-stores']
+    // The scan reads the config's declared stores: `cookie` is shared, so it passes.
+    expect(stores).toMatchObject({ status: 'pass', evidence: 'static' })
+    expect(stores.message).toContain('RFC26_UNSET_SESSION_DRIVER, which the environment does not set')
+    expect(stores.message).not.toContain('no session store configured')
+  })
+
+  test('introspects a Lambda target found only in source, after the scan', async () => {
+    const dir = await cloudflareApp('lambda-source', {
+      'package.json': JSON.stringify({ name: 'lambda-source', type: 'module' }),
+      'src/app.ts': ARGON2_APP,
+      'src/lambda.ts': "import { createLambdaHandler } from '@guren/core/lambda'\nimport app from './app.js'\n\nexport const handler = createLambdaHandler(app)\n",
+    })
+
+    const verdicts = await checkDeployRuntime(dir)
+    expect(verdicts[0]).toMatchObject({ key: 'deploy-password-hashing', status: 'warn', evidence: 'manifest' })
+    expect(verdicts[0].message).toStartWith('AWS Lambda detected')
+  })
+
+  test('wires --no-introspect through the guren check and doctor commands', async () => {
+    const dir = await cloudflareApp('cli-flag', { 'src/app.ts': ARGON2_APP })
+    const evidence = async (args: string[]): Promise<string | undefined> => {
+      const run = await runCliBinCaptured([...args, '--json'], dir)
+      const report = JSON.parse(firstJsonDocument(run.stdout)) as { checks: Array<{ key: string; evidence?: string }> }
+      return report.checks.find((result) => result.key === 'deploy-password-hashing')?.evidence
+    }
+
+    expect(await evidence(['check'])).toBe('manifest')
+    expect(await evidence(['check', '--no-introspect'])).toBe('static')
+    expect(await evidence(['doctor', '--no-introspect'])).toBe('static')
   })
 
   test('does not introspect an app with no deploy target', async () => {

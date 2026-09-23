@@ -434,23 +434,38 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   `runDoctor()` introspect only with `introspect: true`: the edit hook, the
 >   gate and the dev MCP server read gating results or live for the session,
 >   and `introspectApp()`'s per-process memo would outlive the app it read.
->   `checkDeployRuntime(cwd)` introspects by default, as the deploy builds call it.
+>   `checkDeployRuntime(cwd)` introspects by default, as the deploy builds call it,
+>   capped at 10 s against the command's 30 s, and the build prints one line
+>   naming each verdict's evidence. Only `deploy-runtime` reads the manifest in
+>   2a, so the deploy target is the introspection trigger; 2b widens it.
 > - A failed introspection adds one advisory `introspection-unavailable` line to
 >   `guren check`. `guren doctor` adds no warning for it, since `doctor --strict`
 >   would then fail every app whose entry does not import yet (a fresh clone
->   before codegen); its JSON carries `evidence` instead. An `-unverified`
->   verdict is a warning `doctor --strict` counts, like every deploy warning:
->   it describes the app, not the environment the command ran in.
+>   before codegen); its JSON carries `evidence` and an `evidenceReason` that
+>   `--no-introspect` leaves out. An `-unverified` verdict is a warning
+>   `doctor --strict` counts, like every deploy warning.
 > - Any provider that threw makes every section a verdict reads unverified, not
 >   only an unbound one: `auth` is bound in the `Application` constructor and
 >   `useModel()` runs inside a provider, so a throw before it leaves `auth`
->   described with no providers and the default hasher, which would pass. An
->   unverified verdict is keyed `<check>-unverified`. The rule lives in
+>   described with no providers and the default hasher, which would pass. A
+>   config left unbound because it reads an unset environment variable
+>   (`config-unverified`, which now carries the config's `key`) makes its
+>   section unverified too, checked before the value: an unbound `session`
+>   still reads as `source: 'none'`. The rule lives in
 >   `packages/cli/src/manifest-section.ts`, for Parts 2b to 2d to share.
+> - An unverified section follows the fallback rule above: a check with a static
+>   path falls back to it with `evidence: 'static'` and names the reason, since
+>   the throw is evidence against the manifest, not against the scan, and most
+>   throws are environmental (a provider reaching for a Workers binding). Only a
+>   fact with no static path becomes `<check>-unverified` with `evidence:
+>   'none'`: in 2a, whether the cache store is per-process. A verdict reading
+>   several facts reports the weakest evidence among them.
 > - `deploy-runtime` reads what the manifest carries: `requiresBun` of
 >   `auth.hasher` and of every `auth.providers` entry (null warns), the session
->   store `default` selects with its `perProcess` (a null resolved through an
->   installed plugin's `gurenPlugin.drivers.session`, then warned), and a
+>   store `default` selects with its `perProcess` (for the manager, a null
+>   resolved through an installed plugin's `gurenPlugin.drivers.session`, then
+>   warned; an `auth.sessionOptions.store` class is a constructor name no plugin
+>   declares, so its null warns as a class the check cannot vouch for), and a
 >   `memory` cache default, which the scan never read. Two cases the manifest
 >   holds no fact for go back to the scan: an `auth.sessionOptions.store`
 >   factory (reported with `driver: null`), and no user provider registered
