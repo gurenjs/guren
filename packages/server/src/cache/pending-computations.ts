@@ -12,39 +12,42 @@ interface Pending {
   readonly startedAt: number
 }
 
-export interface PendingComputationsOptions {
-  /** Epoch milliseconds. @default Date.now */
-  now?: () => number
-  /** @default PENDING_JOIN_WINDOW_MS */
-  joinWindowMs?: number
-}
-
-/** One running computation per key, shared by the callers that ask while it runs. */
+/**
+ * One running computation per key and TTL, shared by the callers that ask
+ * while it runs. The TTL is part of the match because it is what the
+ * computation stores: a caller asking for 60 seconds must not get a forever entry.
+ */
 export class PendingComputations {
-  private readonly pending = new Map<string, Pending>()
-  private readonly now: () => number
-  private readonly joinWindowMs: number
+  // Grouped by key so that forget(key) drops every TTL at once.
+  private readonly pending = new Map<string, Map<number | undefined, Pending>>()
 
-  constructor(options: PendingComputationsOptions = {}) {
-    this.now = options.now ?? Date.now
-    this.joinWindowMs = options.joinWindowMs ?? PENDING_JOIN_WINDOW_MS
-  }
+  constructor(private readonly now: () => number = Date.now) {}
 
-  run<T>(key: string, compute: () => Promise<T>): Promise<T> {
+  run<T>(key: string, ttl: number | undefined, compute: () => Promise<T>): Promise<T> {
     const now = this.now()
-    const current = this.pending.get(key)
-    if (current && now - current.startedAt < this.joinWindowMs) {
-      return current.promise.then() as Promise<T>
-    }
-
-    const entry: Pending = { promise: new Promise<T>((resolve) => resolve(compute())), startedAt: now }
-    this.pending.set(key, entry)
-    const settle = () => {
-      if (this.pending.get(key) === entry) this.pending.delete(key)
-    }
-    entry.promise.then(settle, settle)
+    const current = this.pending.get(key)?.get(ttl)
+    const entry = current && now - current.startedAt < PENDING_JOIN_WINDOW_MS ? current : this.start(key, ttl, compute, now)
     // A promise per caller, so a rejection nobody awaits is still reported as unhandled.
     return entry.promise.then() as Promise<T>
+  }
+
+  private start(key: string, ttl: number | undefined, compute: () => Promise<unknown>, now: number): Pending {
+    const entry: Pending = { promise: new Promise((resolve) => resolve(compute())), startedAt: now }
+    let byTtl = this.pending.get(key)
+    if (!byTtl) {
+      byTtl = new Map()
+      this.pending.set(key, byTtl)
+    }
+    byTtl.set(ttl, entry)
+
+    const settle = () => {
+      const current = this.pending.get(key)
+      if (current?.get(ttl) !== entry) return
+      current.delete(ttl)
+      if (current.size === 0) this.pending.delete(key)
+    }
+    entry.promise.then(settle, settle)
+    return entry
   }
 
   forget(key: string): void {

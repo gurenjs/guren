@@ -109,10 +109,14 @@ export class TaggedCache implements TaggedCacheStore {
 
   // Writes under the namespace it read, not a fresh one: after a flush the
   // callers sharing this computation were keyed on the old namespace.
-  private rememberAt<T>(taggedKey: string, ttl: number | undefined, callback: () => Promise<T>): Promise<T> {
-    return this.pending.run(taggedKey, async () => {
-      const cached = await this.store.get<T>(taggedKey)
-      if (cached !== null) return cached
+  private async rememberAt<T>(taggedKey: string, ttl: number | undefined, callback: () => Promise<T>): Promise<T> {
+    const cached = await this.store.get<T>(taggedKey)
+    if (cached !== null) return cached
+
+    return this.pending.run(taggedKey, ttl, async () => {
+      // The computation this caller missed alongside may have stored its value since.
+      const stored = await this.store.get<T>(taggedKey)
+      if (stored !== null) return stored
 
       const value = await callback()
       await this.store.set(taggedKey, value, ttl)

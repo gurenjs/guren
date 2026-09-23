@@ -2,47 +2,39 @@ import { describe, expect, it } from 'bun:test'
 
 import { PENDING_JOIN_WINDOW_MS, PendingComputations } from '../../src/cache/pending-computations'
 
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((res) => {
-    resolve = res
-  })
-  return { promise, resolve }
-}
-
 describe('PendingComputations', () => {
   it('joins a computation that started within the window', async () => {
     let clock = 1_000
-    const pending = new PendingComputations({ now: () => clock, joinWindowMs: 100 })
-    const held = deferred<{ id: number }>()
+    const pending = new PendingComputations(() => clock)
+    const held = Promise.withResolvers<{ id: number }>()
     let computed = 0
     const compute = () => {
       computed += 1
       return held.promise
     }
 
-    const first = pending.run('key', compute)
-    clock += 99
-    const second = pending.run('key', compute)
+    const first = pending.run('key', 60, compute)
+    clock += PENDING_JOIN_WINDOW_MS - 1
+    const second = pending.run('key', 60, compute)
     held.resolve({ id: 1 })
 
     expect(computed).toBe(1)
     expect(await second).toBe(await first)
   })
 
-  it('starts a new computation once the running one is older than the window', async () => {
+  it('starts a new computation once the running one is as old as the window', async () => {
     let clock = 1_000
-    const pending = new PendingComputations({ now: () => clock, joinWindowMs: 100 })
-    const hung = deferred<string>()
-    const replacement = deferred<string>()
+    const pending = new PendingComputations(() => clock)
+    const hung = Promise.withResolvers<string>()
+    const replacement = Promise.withResolvers<string>()
     const started: string[] = []
 
-    const stuck = pending.run('key', () => {
+    const stuck = pending.run('key', 60, () => {
       started.push('hung')
       return hung.promise
     })
-    clock += 100
-    const fresh = pending.run('key', () => {
+    clock += PENDING_JOIN_WINDOW_MS
+    const fresh = pending.run('key', 60, () => {
       started.push('replacement')
       return replacement.promise
     })
@@ -52,7 +44,7 @@ describe('PendingComputations', () => {
 
     // The hung computation settling must not evict the one that replaced it.
     clock += 1
-    const joined = pending.run('key', () => {
+    const joined = pending.run('key', 60, () => {
       started.push('third')
       return Promise.resolve('unused')
     })
@@ -63,52 +55,47 @@ describe('PendingComputations', () => {
     expect(started).toEqual(['hung', 'replacement'])
   })
 
+  // The cache guide states this number.
+  it('uses a ten-second window', () => {
+    expect(PENDING_JOIN_WINDOW_MS).toBe(10_000)
+  })
+
+  it('does not share between different TTLs of one key', async () => {
+    const pending = new PendingComputations()
+    const held = Promise.withResolvers<string>()
+
+    const forever = pending.run('key', undefined, () => held.promise)
+    const minute = pending.run('key', 60, async () => 'minute')
+    held.resolve('forever')
+
+    expect(await minute).toBe('minute')
+    expect(await forever).toBe('forever')
+  })
+
   it('turns a synchronous throw into a rejection and lets the next call retry', async () => {
     const pending = new PendingComputations()
     const failure = new Error('thrown before any await')
 
     await expect(
-      pending.run('key', () => {
+      pending.run('key', 60, () => {
         throw failure
       }),
     ).rejects.toBe(failure)
-    expect(await pending.run('key', async () => 'retried')).toBe('retried')
+    expect(await pending.run('key', 60, async () => 'retried')).toBe('retried')
   })
 
-  it('starts a new computation after the key is forgotten', async () => {
+  it('starts a new computation for every TTL after the key is forgotten', async () => {
     const pending = new PendingComputations()
-    const held = deferred<string>()
+    const minute = Promise.withResolvers<string>()
+    const forever = Promise.withResolvers<string>()
 
-    const first = pending.run('key', () => held.promise)
+    const first = [pending.run('key', 60, () => minute.promise), pending.run('key', undefined, () => forever.promise)]
     pending.forget('key')
-    const second = pending.run('key', async () => 'second')
-    held.resolve('first')
+    const second = [pending.run('key', 60, async () => 'minute again'), pending.run('key', undefined, async () => 'forever again')]
+    minute.resolve('minute')
+    forever.resolve('forever')
 
-    expect(await second).toBe('second')
-    expect(await first).toBe('first')
-  })
-
-  // The cache guide states this number.
-  it('stops joining ten seconds after a computation started, by default', async () => {
-    let clock = 0
-    const pending = new PendingComputations({ now: () => clock })
-    const hung = deferred<string>()
-    let computed = 0
-    const compute = () => {
-      computed += 1
-      return hung.promise
-    }
-
-    const callers = [pending.run('key', compute)]
-    clock = 9_999
-    callers.push(pending.run('key', compute))
-    expect(computed).toBe(1)
-    clock = PENDING_JOIN_WINDOW_MS
-    callers.push(pending.run('key', compute))
-
-    expect(PENDING_JOIN_WINDOW_MS).toBe(10_000)
-    expect(computed).toBe(2)
-    hung.resolve('done')
-    expect(await Promise.all(callers)).toEqual(['done', 'done', 'done'])
+    expect(await Promise.all(second)).toEqual(['minute again', 'forever again'])
+    expect(await Promise.all(first)).toEqual(['minute', 'forever'])
   })
 })

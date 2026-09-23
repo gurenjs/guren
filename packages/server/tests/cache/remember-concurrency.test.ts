@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { CacheManager } from '../../src/cache/CacheManager'
-import type { StoreConfig } from '../../src/cache/types'
+import type { CacheStore, StoreConfig } from '../../src/cache/types'
 
 /** The part of ioredis RedisStore uses on these paths, with every reply a real async hop. */
 class FakeRedis {
@@ -32,16 +32,6 @@ class FakeRedis {
   async ttl(key: string): Promise<number> {
     return this.data.get(key)?.seconds ?? -2
   }
-}
-
-function deferred<T = void>() {
-  let resolve!: (value: T) => void
-  let reject!: (reason: unknown) => void
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res
-    reject = rej
-  })
-  return { promise, resolve, reject }
 }
 
 // Lets every caller reach its callback before a test releases the first one.
@@ -83,7 +73,7 @@ async function managerFor(config: () => Promise<StoreConfig>): Promise<CacheMana
 describe.each(drivers)('remember on the %s store', (_name, config) => {
   it('runs the callback once for concurrent misses and hands every caller the same object', async () => {
     const cache = await managerFor(config)
-    const release = deferred()
+    const release = Promise.withResolvers<void>()
     let calls = 0
     const callback = async () => {
       calls += 1
@@ -103,7 +93,7 @@ describe.each(drivers)('remember on the %s store', (_name, config) => {
 
   it('shares one callback between concurrent rememberForever calls', async () => {
     const cache = await managerFor(config)
-    const release = deferred()
+    const release = Promise.withResolvers<void>()
     let calls = 0
     const callback = async () => {
       calls += 1
@@ -123,7 +113,7 @@ describe.each(drivers)('remember on the %s store', (_name, config) => {
 
   it('hands every concurrent caller the same error, then lets the next call retry', async () => {
     const cache = await managerFor(config)
-    const release = deferred()
+    const release = Promise.withResolvers<void>()
     const failure = new Error('database unavailable')
     let calls = 0
     const failing = async (): Promise<string> => {
@@ -149,7 +139,7 @@ describe.each(drivers)('remember on the %s store', (_name, config) => {
 
   it('keeps different keys apart', async () => {
     const cache = await managerFor(config)
-    const release = deferred()
+    const release = Promise.withResolvers<void>()
     const seen: string[] = []
     const callbackFor = (key: string) => async () => {
       seen.push(key)
@@ -171,7 +161,7 @@ describe.each(drivers)('remember on the %s store', (_name, config) => {
 
   it('shares one callback between tagged caches built for each call', async () => {
     const cache = await managerFor(config)
-    const release = deferred()
+    const release = Promise.withResolvers<void>()
     let calls = 0
     const callback = async () => {
       calls += 1
@@ -198,62 +188,108 @@ describe.each(drivers)('remember on the %s store', (_name, config) => {
   })
 })
 
+describe.each(drivers.slice(1))('remember hits on the %s store', (_name, config) => {
+  // The memory store hands out the stored object itself; these two decode a copy per read.
+  it('hands each concurrent hit its own copy, as get does', async () => {
+    const cache = await managerFor(config)
+    await cache.store().set('posts', { id: 1 })
+    const callback = async () => ({ id: 2 })
+
+    const results = await Promise.all(Array.from({ length: 5 }, () => cache.store().remember('posts', 60, callback)))
+
+    expect(results).toEqual(Array.from({ length: 5 }, () => ({ id: 1 })))
+    expect(new Set(results).size).toBe(5)
+  })
+
+  it('hands each concurrent tagged hit its own copy', async () => {
+    const cache = await managerFor(config)
+    await cache.store().tags(['posts']).set('posts', { id: 1 })
+    const callback = async () => ({ id: 2 })
+
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () => cache.store().tags(['posts']).remember('posts', 60, callback)),
+    )
+
+    expect(results).toEqual(Array.from({ length: 5 }, () => ({ id: 1 })))
+    expect(new Set(results).size).toBe(5)
+  })
+})
+
 describe('remember across operations', () => {
   const memory = drivers[0][1]
 
-  it('shares one callback between remember and rememberForever on the same key', async () => {
-    const cache = await managerFor(memory)
-    const release = deferred()
+  const scopes: Array<[string, (cache: CacheManager) => CacheStore]> = [
+    ['store', (cache) => cache.store()],
+    ['tagged cache', (cache) => cache.store().tags(['posts'])],
+  ]
+
+  it.each(scopes)('runs a separate callback for a call on the %s with another TTL', async (_name, scope) => {
+    let clock = 1_000_000
+    const cache = new CacheManager({ stores: { memory: { driver: 'memory', checkPeriod: 0, now: () => clock } } })
+    const forever = Promise.withResolvers<string>()
+    const minute = Promise.withResolvers<string>()
     let calls = 0
-    const callback = async () => {
+
+    const pendingForever = scope(cache).rememberForever('key', async () => {
       calls += 1
-      await release.promise
-      return 'value'
-    }
-
-    const callers = [
-      cache.store().remember('key', 60, callback),
-      cache.store().rememberForever('key', callback),
-    ]
+      return forever.promise
+    })
     await letCallersRun()
-    release.resolve()
+    const pendingMinute = scope(cache).remember('key', 60, async () => {
+      calls += 1
+      return minute.promise
+    })
+    await letCallersRun()
+    forever.resolve('forever')
+    expect(await pendingForever).toBe('forever')
+    minute.resolve('minute')
 
-    expect(await Promise.all(callers)).toEqual(['value', 'value'])
-    expect(calls).toBe(1)
+    expect(await pendingMinute).toBe('minute')
+    expect(calls).toBe(2)
+    expect(await scope(cache).ttl('key')).toBe(60)
   })
 
-  it('does not join a callback that started before the key was deleted', async () => {
+  it('stores a tagged result under the namespace it read, so a flush while it runs discards it', async () => {
     const cache = await managerFor(memory)
-    const first = deferred<string>()
-    const calls: string[] = []
+    const held = Promise.withResolvers<string>()
 
-    const before = cache.store().remember('key', 60, async () => {
-      calls.push('before')
-      return first.promise
-    })
+    const pending = cache.store().tags(['posts']).remember('key', 60, async () => held.promise)
     await letCallersRun()
-    await cache.store().delete('key')
-    const after = cache.store().remember('key', 60, async () => {
-      calls.push('after')
-      return 'fresh'
-    })
+    await cache.store().tags(['posts']).flush()
+    held.resolve('from before the flush')
+
+    expect(await pending).toBe('from before the flush')
+    expect(await cache.store().tags(['posts']).get('key')).toBeNull()
+  })
+
+  type Remember = (cache: CacheManager, callback: () => Promise<string>) => Promise<string>
+  const plain: Remember = (cache, callback) => cache.store().remember('key', 60, callback)
+  const tagged: Remember = (cache, callback) => cache.store().tags(['posts']).remember('key', 60, callback)
+
+  // A write the next call reads back is a hit, which never reaches the join, so
+  // the writes store a one-second entry that the test's clock then expires.
+  const writes: Array<[string, Remember, (cache: CacheManager) => Promise<unknown>]> = [
+    ['set', plain, (cache) => cache.store().set('key', 'written', 1)],
+    ['delete', plain, (cache) => cache.store().delete('key')],
+    ['clear', plain, (cache) => cache.store().clear()],
+    ['setMany', plain, (cache) => cache.store().setMany(new Map([['key', 'written']]), 1)],
+    ['deleteMany', plain, (cache) => cache.store().deleteMany(['key'])],
+    ['a tagged set', tagged, (cache) => cache.store().tags(['posts']).set('key', 'written', 1)],
+    ['a tagged delete', tagged, (cache) => cache.store().tags(['posts']).delete('key')],
+  ]
+
+  it.each(writes)('does not join a callback that started before %s', async (_name, remember, write) => {
+    let clock = 1_000_000
+    const cache = new CacheManager({ stores: { memory: { driver: 'memory', checkPeriod: 0, now: () => clock } } })
+    const first = Promise.withResolvers<string>()
+
+    const before = remember(cache, async () => first.promise)
+    await letCallersRun()
+    await write(cache)
+    clock += 2_000
+    const after = remember(cache, async () => 'fresh')
 
     expect(await settledOrWaiting(after)).toBe('fresh')
-    first.resolve('stale')
-    expect(await before).toBe('stale')
-    expect(calls).toEqual(['before', 'after'])
-  })
-
-  it('does not join a tagged callback that started before the key was set', async () => {
-    const cache = await managerFor(memory)
-    const first = deferred<string>()
-
-    const before = cache.store().tags(['posts']).remember('key', 60, async () => first.promise)
-    await letCallersRun()
-    await cache.store().tags(['posts']).set('key', 'written')
-    const after = cache.store().tags(['posts']).remember('key', 60, async () => 'unused')
-
-    expect(await settledOrWaiting(after)).toBe('written')
     first.resolve('stale')
     expect(await before).toBe('stale')
   })
