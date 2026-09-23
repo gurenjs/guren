@@ -2,7 +2,9 @@
 
 **Author:** Urata Daiki (@7nohe)
 **Date:** 2026-09-23
-**Status:** Draft
+**Status:** Accepted (2026-09-23; the standard two-week discussion window was
+shortened by the deciding maintainer, after a code review and simplify pass
+recorded in PR #1033)
 
 > A write that carries request data and one column the server chooses, such as
 > the post's author, has no call today that keeps `fillable` on the request
@@ -16,12 +18,12 @@ request must never choose. Guren offers two ways to write that row, and each
 gives up one of RFC 0006's protections.
 
 **Owner in `fillable`.** `Post.create({ ...data, authorId: user.id })` works
-once `authorId` is in `fillable`. The explicit key after the spread wins, so
-this `create` call is safe. The cost is every other fillable path. The
-`update` action is usually `Post.update({ id }, data)`, and from then on a
-request can reassign a post whenever its validator admits `authorId`. A schema
-that uses `.passthrough()`, or one that later gains the field, is enough.
-`fillable` was the net meant to catch that, and it now lists the column.
+once `authorId` is in `fillable`, and the explicit key after the spread keeps
+that call safe. The cost is every other fillable path. The `update` action is
+usually `Post.update({ id }, data)`, and from then on a request can reassign a
+post whenever its validator admits `authorId`: a schema that uses
+`.passthrough()`, or one that later gains the field, is enough. `fillable` was
+the net meant to catch that, and it now lists the column.
 
 **Owner outside `fillable`, written with `forceCreate`.** The tutorial does
 this: `Post.forceCreate({ ...data, authorId: author.id })` after
@@ -30,62 +32,52 @@ skips `filterFillable` for the whole payload, so the spread request data loses
 the second of RFC 0006's three nets (the Zod schema, `filterFillable`, the
 `force*` boundary). It is also the shape of RFC 0006's residual risk 1, an
 agent that hits `MassAssignmentException` and switches the call to
-`forceCreate()` with the same request-derived payload. The mitigations RFC 0006
-put in place fire on it:
+`forceCreate()` with the same request-derived payload, so every mitigation
+RFC 0006 put in place fires on the tutorial's own code:
 
 - `MassAssignmentException` ends with "Never call forceCreate/forceUpdate with
   request input."
 - The harness rule `orm-models.md` says a `MassAssignmentException` "is never
   fixed by switching the same payload to `force*`".
 - `guren audit` warns on a method that validates a body and calls a force
-  write. Tutorial chapter 6 then teaches the reader to accept that warning.
+  write, and tutorial chapter 6 teaches the reader to accept that warning.
 
-`guren audit` cannot tell the tutorial's shape from risk 1, because the
-difference is whether the schema admits keys `fillable` would refuse, and the
-schema is not in the action body. The first version of PR #1024 let the owner
-shape through with an AST allowlist, and was reverted within that PR for this
-reason: it removed mitigation (c) from exactly the pattern risk 1 describes.
+The audit cannot tell the tutorial's shape from risk 1: the difference is
+whether the schema admits keys `fillable` would refuse, and the schema is not
+in the action body. The first version of PR #1024 let the owner shape through
+with an AST allowlist and was reverted within that PR for that reason.
 
-The two forms have spread across the project:
+Both forms have spread across the project:
 
 | Form | Where |
 |---|---|
-| `forceCreate({ ...data, ownerId })` | tutorial chapters 6 to 13 (16 controller sites per locale), `upgrading.md`, the create-app `blog` template, `examples/blog`, the guren.dev home page sample |
-| `create({ ...data, ownerId })` with the owner in `fillable` | harness `entry-body.md`, `rules/orm-models.md`, `skills/guren-api/SKILL.md`, `skills/feature/SKILL.md`, `examples/api` |
+| `forceCreate({ ...data, ownerId })` | tutorial chapters 6 to 13 (16 controller sites per locale), `upgrading.md`, the create-app `blog` template, the guren.dev home page sample |
+| `create({ ...data, ownerId })` with the owner in `fillable` | harness `entry-body.md`, `rules/orm-models.md`, `skills/guren-api/SKILL.md`, `skills/feature/SKILL.md`, `examples/api`, `examples/blog` (#1024 moves it to the first row) |
 | `create({ ...data, ownerId })` with no model shown | the routing, authentication, error-handling and controllers guides, `README.md`, the root `CLAUDE.md` |
 
 The third group throws against the `fillable` the docs' own `Post` declares.
-An agent reading the harness learns the first pattern's opposite, and the
-code-review agent in the same harness says to keep owner columns out of
-`fillable`.
+An agent reading the harness learns the second form, while the code-review
+agent in the same harness says to keep owner columns out of `fillable`.
 
 The problem is not limited to owners. The server also chooses a comment's
 `postId` (from the route-bound post), a default `status: 'draft'`, and the
 `emailVerifiedAt` and `{provider}Id` that `make:auth`'s OAuth controller
-writes. The generated `User` model works today only because it declares no
-`fillable`; adding one, which `guren audit` suggests, makes those writes throw.
+writes.
 
 ## Prior art
 
-- **Laravel** sets a foreign key through the relationship:
-  `$request->user()->posts()->create($validated)` fills `$validated` through
-  `$fillable` and sets `user_id` from the relation, which need not be
-  fillable. `forceFill()` and `forceCreate()` are the unguarded hatch, as in
-  Guren.
-- **Rails** writes `current_user.posts.create(post_params)`. Strong parameters
-  filter the request, and the association sets the owner.
-- **AdonisJS Lucid** writes `await user.related('posts').create(payload)`.
-- **Django** saves a `ModelForm` with `commit=False`, sets the owner on the
-  instance, then saves.
-
-Each keeps request data and server data apart until the last step. Every one
-of them does it through a relation or a model instance, and Guren has neither:
+Laravel (`$request->user()->posts()->create($validated)`), Rails
+(`current_user.posts.create(post_params)`), AdonisJS Lucid
+(`user.related('posts').create(payload)`) and Django (`form.save(commit=False)`,
+then set the owner) all keep request data and server data apart until the last
+step, and all do it through a relation or a model instance. Guren has neither:
 records are plain objects, and a relation is metadata registered with
-`belongsTo()`/`hasMany()`, with no create through it.
+`belongsTo()`/`hasMany()`, with no create through it. A separate argument is the
+form that fits.
 
 ## Proposed Solution
 
-### 1. `set` on `create` and `update`
+### 1. The API
 
 ```ts
 const author = await this.auth.userOrFail<UserRecord>()
@@ -93,204 +85,205 @@ const data = await this.validateBody(PostPayloadSchema)
 const post = await Post.create(data, { set: { authorId: author.id } })
 ```
 
-`data` goes through `filterFillable` exactly as it does today. `set` is a map
-of columns the server chose. Its keys are exempt from `fillable`, and from
-nothing else.
+`data` goes through `filterFillable` exactly as it does today. `set` holds the
+columns the server chose; its keys are exempt from `fillable`, and from nothing
+else.
 
-The write options become:
+`create` and `update` gain an overload. The existing signatures are kept
+word for word, so a call without `set` typechecks and costs exactly what it does
+today:
 
 ```ts
 // packages/orm/src/Model.ts
-export interface ModelCreateOptions<T extends typeof Model, S extends SetFor<T>>
-  extends ModelWriteOptions {
-  /** Columns the server chose; exempt from `fillable`, not from anything else. */
-  set?: S
-}
+export type ModelSetOptions<T extends typeof Model, S extends SetFor<T>> =
+  ModelWriteOptions & { set: S }
 
-type SetFor<T extends typeof Model> = Partial<InsertFor<T>>
+type SetFor<T extends typeof Model> = Omit<Partial<TCreateFor<T>>, 'id'>
 
-static async create<T extends typeof Model, S extends SetFor<T> = {}>(
-  this: T,
-  data: CreateDataFor<T, S>,
-  options?: ModelCreateOptions<T, S>,
-): Promise<TRecordFor<T>>
-
-static async update<T extends typeof Model, S extends SetFor<T> = {}>(
-  this: T,
-  where: WhereClauseFor<T>,
-  data: Partial<CreateDataFor<T, S>>,
-  options?: ModelCreateOptions<T, S>,
-): Promise<TRecordFor<T>>
-```
-
-`InsertFor<T>` is the table's insert type (what `InferModelInsert` already
-computes), so `set` keys are checked against real columns.
-`CreateDataFor<T, S>` is `TCreateFor<T>` with the keys of `S` removed and
-forbidden:
-
-```ts
 type CreateDataFor<T extends typeof Model, S> =
   Omit<TCreateFor<T>, keyof S> & { [K in keyof S]?: never }
+
+// unchanged
+static create<T extends typeof Model>(this: T, data: TCreateFor<T>, writeOptions?: ModelWriteOptions): Promise<TRecordFor<T>>
+// new
+static create<T extends typeof Model, S extends SetFor<T>>(
+  this: T,
+  data: CreateDataFor<T, NoInfer<S>>,
+  options: ModelSetOptions<T, S>,
+): Promise<TRecordFor<T>>
+
+// unchanged
+static update<T extends typeof Model>(this: T, where: WhereClauseFor<T>, data: Partial<TCreateFor<T>>, writeOptions?: ModelWriteOptions): Promise<TRecordFor<T>>
+// new
+static update<T extends typeof Model, S extends SetFor<T>>(
+  this: T,
+  where: WhereClauseFor<T>,
+  data: Partial<CreateDataFor<T, NoInfer<S>>>,
+  options: ModelSetOptions<T, S>,
+): Promise<TRecordFor<T>>
 ```
 
-A column that `set` supplies is therefore no longer required in `data`, which
-is what lets `data` be the validator's output without a cast. A literal that
-names the same key in both places fails to compile. `forceCreate` and
-`forceUpdate` keep their signatures and their one `createType`, so RFC 0006's
-amendment against a second payload marker still holds.
+- `SetFor` reuses `TCreateFor`, so `set` keys are checked against the same
+  shape `data` is, for models written by hand as well as with `defineModel`.
+  `id` is left out at the type level.
+- `CreateDataFor` drops the `set` keys from `data`, so a column `set` supplies
+  is no longer required there and `data` can be the validator's output without
+  a cast. A literal that names the same key in both places fails to compile.
+- `NoInfer<S>` keeps `data` from being an inference site: `S` comes from `set`
+  alone. (`{ [K in keyof S]?: never }` is a homomorphic mapped type, which
+  TypeScript would otherwise reverse-infer from `data`.)
+- `forceCreate` and `forceUpdate` keep their signatures and their one
+  `createType`, so RFC 0006's amendment against a second payload marker holds.
+- The transaction scope's `create` and `update` pass an options argument
+  through (`create: (data, options) => this.create(data, { ...options, trx })`).
+- `set` is removed from the options before they reach the adapter. All of this
+  happens inside one `if (options.set)` branch; the path without `set` passes
+  `writeOptions` through untouched.
 
-`options` without `set` is today's `writeOptions`, so `{ trx }` callers are
-unchanged. `set` is removed before the options reach the adapter.
+### 2. The rules, in the one input step
 
-### 2. What `set` goes through
+RFC 0006 made `filterFillable` the framework's single input-protection step and
+rejected enforcing input rules separately in each write runner. The `set` rules
+go there too: `filterFillable(data, set?)` returns the payload, and `runCreate`,
+`runUpdate` and (later) `QueryBuilder.update` call it as they call it today.
+When `set` is present, it checks, in order:
 
-`runCreate` and `runUpdate` build the payload in this order:
+1. **The model declares `fillable`.** Without an allowlist every column is
+   already writable through `data`, so `set` would promise a separation that
+   does not exist. A `set` on such a model throws, naming `fillable`.
+2. **No `set` key is `id`.** A server-chosen primary key is a system write and
+   belongs to `forceCreate`.
+3. **No `set` key is in `deniedFields()`.** It throws with `reason: 'denied'`, as
+   it would in `data`: credential columns stay reachable only through the model's
+   own derivation or a force write.
+4. **No `set` key is in `fillable`.** A column a request may set belongs in
+   `data`, and a column the server sets must not be fillable, or every other
+   write would accept it from a request. It throws with `reason: 'not-fillable'`
+   and a message that says the key is fillable. This is the check that closes the
+   escalation `set` would otherwise reopen: `create({}, { set: { ...data, authorId } })`
+   puts `data`'s fillable keys into `set`, and throws here.
+5. **`data` is filtered as today.** Because a `set` key is never fillable, a
+   `data` key that `set` also carries is refused as `not-fillable`. When the
+   refused key is also in `set`, the message says so ("`authorId` is set by the
+   server in this call; it must not also arrive in the data") rather than
+   suggesting `set`, which the caller already used.
 
-1. A key that the raw `data` and `set` both carry throws, with a new
-   `reason: 'conflict'`. A validated body that contains a server-owned column
-   means the schema admits it, and that is the bug to surface; it is not
-   resolved in either direction. The check runs before `filterFillable`, so the
-   recommended setup (owner outside `fillable`) gets this diagnosis rather than
-   a `not-fillable` error whose remedy the caller already applied.
-2. `filterFillable(data)`, unchanged: denied fields throw, `id` is stripped,
-   anything outside `fillable` throws.
-3. The `set` keys are checked:
-   - a key in `deniedFields()` throws `MassAssignmentException` with
-     `reason: 'denied'` (credential columns stay reachable only through the
-     model's own derivation or a force write);
-   - `id` throws, since a server-chosen primary key is a system write and
-     belongs to `forceCreate`.
-4. The two are merged, and the merged payload goes through
-   `preparePersistencePayload` (mutators, casts, password hashing), the
-   lifecycle hooks and observers, and the adapter, as every write does today.
+The merged payload then goes through `preparePersistencePayload` (mutators,
+casts, password hashing), the lifecycle hooks and observers, and the adapter, as
+every write does today. `deniedFields()` is resolved once per call and shared by
+steps 3 and 5.
 
-The only rule `set` skips is the `fillable` allowlist. That exemption is safe
-only while every `set` key is one the author wrote down. Nothing in the types
-stops `Post.create({}, { set: { ...data, authorId: user.id } })`, which passes
-every check above and puts validated request data past `fillable`: RFC 0006's
-risk 1 under a new name. Sections 4 and 5 answer it the way RFC 0006 answered
-the force writes, with an explicit negative and an audit finding.
+No new `reason` is added to `MassAssignmentException`: every refusal above is a
+`denied` or `not-fillable` one, so RFC 0006's single `catch` target holds and
+the public union does not widen.
 
-### 3. The other write entry points
-
-- **Transaction scope.** The scope's `create(data)` and `update(where, data)`
-  gain the same optional `{ set }` argument, so a store inside
-  `Model.transaction()` needs no force write either.
-- **`QueryBuilder.update(data)`** gains `update(data, { set })` with the same
-  checks. `forceUpdate(data)` is unchanged.
-- **Force writes** keep their meaning and are narrowed in the docs to writes
-  that carry no request data at all: seeders, runtime stores (sessions, API
-  tokens, attachments, AI conversations), OAuth hash sentinels.
-
-### 4. `MassAssignmentException`
+### 3. `MassAssignmentException`
 
 The `not-fillable` remediation names `set`, and the closing negative covers
 `set` as well as the force writes:
 
 > `Post: mass assignment blocked for field(s) "authorId". Add them to fillable
-> if a request may set them; if the server chooses the value, name it in
-> set: Post.create(data, { set: { authorId } }). Never pass request input to
+> if a request may set them; if the server chooses the value, name it in set:
+> Post.create(data, { set: { authorId } }). Never pass request input to
 > forceCreate/forceUpdate or spread it into set.`
 
-The `conflict` reason reads:
-
-> `Post: "authorId" is in both the data and set. The data comes from the
-> request, so its schema admits a column the server sets; remove it from the
-> schema.`
-
-Adding `'conflict'` to `MassAssignmentException['reason']` widens a public
-union, so an exhaustive `switch` over it in application code stops compiling.
-Open Question 6 asks whether that is acceptable in a minor.
-
-### 5. `guren audit`
+### 4. `guren audit`
 
 RFC 0006's mitigation (c) is unchanged: a method that validates a body and
-calls a force write still warns, as a review prompt. Two things change around
-it:
+calls a force write still warns, as a review prompt. Its fix text names
+`create(data, { set })` for the owner case. Once the tutorial and the templates
+stop using force writes for request data, the warning stops appearing in code
+the project ships, and chapter 6 no longer needs a paragraph asking the reader
+to accept it.
 
-- The fix text names `create(data, { set })` as the remedy for the owner case.
-  The tutorial and the templates stop using force writes for request data, so
-  the warning stops appearing in code the project itself ships, and it no
-  longer needs chapter 6's paragraph asking the reader to accept it.
-- The trigger also covers a body read through `this.validated()` (route
-  contracts). Today it looks only for `validateBody`, so the blog template's
-  `validated()` plus `forceCreate` is never flagged. Once no shipped code
-  relies on that shape, the wider trigger costs no false positives in
-  scaffolded apps.
+`set` needs no audit finding of its own. Step 4 refuses a spread of fillable
+data into `set` at runtime, which is where RFC 0006 put the authoritative
+checks, and it does so whatever shape the call has in the source.
 
-A new finding covers `set` itself. In a method that reads a body
-(`validateBody()` or `validated()`), `guren audit` warns when a `set` argument
-is not an object literal or contains a spread. This is a syntactic check on the
-claim `set` rests on, that every key is written out, and unlike the reverted
-allowlist in PR #1024 it never needs to see the schema.
+`set` keys are judged; `set` values are not. A key written under a column name
+is a choice the author made, which is what mass assignment protection is about.
+Whether the value is right, `authorId: user.id` rather than a value read from
+the body, is an authorization question for policies and tests.
 
-`set` keys are judged; `set` values are not. A key written out under a column
-name is a choice the author made in the source, which is the property mass
-assignment protection is about. Whether the value is the right one, say
-`authorId: user.id` rather than `authorId: body.authorId`, is an authorization
-question for policies and tests.
+### 5. What force writes are for
+
+Force writes keep their meaning and are narrowed, in the docs and the harness,
+to writes that carry no request data at all: seeders, the runtime stores
+(sessions, API tokens, attachments, AI conversations), and OAuth hash sentinels.
 
 ### 6. Implementation plan
 
-1. **`@guren/orm`** (minor), with the new option types re-exported from
+1. **`@guren/orm`** (minor), with `ModelSetOptions` re-exported from
    `@guren/core` (minor; core's ORM exports are an allowlist):
-   - `ModelCreateOptions` and the `set` handling in `runCreate`, `runUpdate`,
-     the transaction scope and `QueryBuilder.update`;
-   - `MassAssignmentException` `reason: 'conflict'` and the new messages;
-   - runtime tests for every step in section 2, and type tests beside the
-     existing `optionalOnCreate`/`requireOnCreate` tests;
-   - type tests showing that `create(data)` and `update(where, data)` without
-     `set` accept and reject exactly what they do today. `Omit<X, never>` is a
-     mapped type, which can collapse a union and change excess-property errors,
-     so this is checked rather than assumed.
-2. **`@guren/cli`** (patch), after part 1 is released, since everything here
-   is read by apps against their installed `@guren/core`:
-   - the audit's fix text, the `validated()` trigger and the `set` finding;
-   - harness `rules/orm-models.md`, `entry-body.md`, `skills/guren-api/SKILL.md`
-     and `skills/feature/SKILL.md` move to `set`, with owner columns out of
-     `fillable`;
-   - `make:auth`'s OAuth and profile controllers write `emailVerifiedAt` and
-     the provider id through `set`, and the generated `User` model gains a
-     `fillable`.
+   - the overloads, `filterFillable(data, set?)`, the runners and the
+     transaction scope passing options through;
+   - the new messages;
+   - runtime tests for every step in section 2, including the spread into
+     `set` and a `set` on a model without `fillable`;
+   - type tests beside the existing `optionalOnCreate`/`requireOnCreate` ones:
+     `set` removes a required key from `data`, a key in both fails, `id` in
+     `set` fails, and `S` is inferred from `set` alone.
+2. **`@guren/cli`** (patch), after part 1 is released, since what it ships is
+   read by apps against their installed `@guren/core`:
+   - the force-write finding's fix text;
+   - the harness `rules/orm-models.md`, `entry-body.md`,
+     `skills/guren-api/SKILL.md` and `skills/feature/SKILL.md` move to `set`, with
+     owner columns out of `fillable`.
 3. **Docs and shipped code**, also after part 1 is released, so that
-   `smoke:starter:npm` never sees a template using an unpublished API:
-   - tutorial chapters 6 to 13 in both locales, chapter 6's force-write
-     section rewritten around `set` and chapter 8's agent rule 3;
-   - the create-app `blog` template, `examples/blog`, `examples/api`;
-   - the four guides, `README.md`, the root `CLAUDE.md`, the guren.dev home
-     page sample, and `upgrading.md`.
+   `smoke:starter:npm` never sees a template using an unpublished API: the
+   first and third rows of the table in Problem, chapter 6's force-write section
+   rewritten around `set`, and chapter 8's agent rule 3.
+
+Left for follow-ups, each small and independent of this design:
+
+- **The audit's view of `this.validated()`.** The force-write trigger looks
+  only for `validateBody`, so a route-contract body plus a force write is never
+  flagged. The trigger shares its pattern with the route-validation check, so the
+  fix is a "returns request data" classification in `controller-methods.ts`
+  that both use, not a hand-written widening.
+- **`make:auth`.** Its `User` model declares no `fillable`, and its OAuth and
+  profile controllers write `emailVerifiedAt` and the provider id through plain
+  `create`/`update`. Giving the model a `fillable` and those writes `set` is a
+  scaffold change of its own.
+- **`QueryBuilder.update(data, { set })`.** It already calls `filterFillable`,
+  so it takes `set` without a design change once a caller needs it.
+- **A declared group of server-owned columns**, which is RFC 0006's Open
+  Question 4 (public `deniedFields()`). It would let a model refuse an owner
+  column in `data` even on a path that does not use `set`.
 
 ## Alternatives Considered
 
-**Keep the owner in `fillable`.** This is the form the harness teaches. It
-protects the create call and opens every fillable update to a request-chosen
-owner, as described above.
+**Keep the owner in `fillable`, or keep `forceCreate` with validated data.**
+These are the two forms in Problem, and each gives up a net.
 
-**Keep `forceCreate` with validated data and accept the warning.** This is the
-tutorial today. It removes `filterFillable` from the request data, and it
-cannot be told apart from RFC 0006's risk 1, so the audit and the exception
-message keep contradicting the shipped code.
+**Let the audit recognise the owner shape.** Reverted in PR #1024, for the
+reason given in Problem.
 
-**Let the audit recognise the owner shape.** PR #1024 tried this with an AST
-allowlist: a spread of the `validateBody()` result plus explicit keys from the
-session. It was reverted because the unsafe case differs only in the schema's
-keys, which the action body does not show, so exempting the shape removes
-RFC 0006's mitigation (c) from exactly the pattern it was written for.
+**Guard `set` with an audit finding instead of a runtime rule.** The first draft
+of this RFC warned on a `set` argument that was not an object literal or held a
+spread. It misses an options object passed by variable, it needs a second AST
+pass over the controllers, and it is a syntactic proxy for what step 4 checks
+directly.
 
-**Create through a relation.** `user.posts().create(data)` or
-`Post.createFor({ author: user }, data)` would read like Laravel and Lucid. It
-needs a relation API that Guren does not have (records are plain objects), it
-covers only foreign keys and not `status: 'draft'` or `emailVerifiedAt`, and it
-can be built later on top of `set`, which it would compile down to. See Open
-Questions.
+**Create through a relation** (`user.posts().create(data)`,
+`Post.createFor({ author: user }, data)`). It needs a relation API Guren does
+not have, and it covers only foreign keys, not `status: 'draft'` or
+`emailVerifiedAt`. It could be built later on top of `set`, which it would
+compile down to. Deriving server-owned columns from `belongsTo` is not an
+option either: many foreign keys, a post's category for one, are the request's
+to choose.
 
-**A separate method, such as `createWith(set, data)`.** It avoids putting
-`set` next to `trx`, at the cost of a second vocabulary for every write and an
-argument order that is easy to swap. One option object is one thing to teach.
+**A request-scoped context that stamps owner columns.** It covers owners only,
+and it puts authentication knowledge inside the ORM's write path, the coupling
+RFC 0006 rejected; `packages/orm` does not import `@guren/server`.
 
-**Widen `fillable` per call** (`create(data, { fillable: [...] })`). It lets a
-caller open the allowlist for the request data itself, which is the opposite
-of what is needed.
+**A separate method, such as `createWith(set, data)`.** It keeps `set` apart
+from `trx`, at the cost of a second vocabulary and an argument order that is
+easy to swap.
+
+**Widen `fillable` per call** (`create(data, { fillable: [...] })`). It opens
+the allowlist for the request data itself, which is the opposite of what is
+needed.
 
 ## Migration Path
 
@@ -299,36 +292,35 @@ The ORM change is additive. Existing `create`, `update`, `forceCreate` and
 `forceCreate({ ...data, ownerId })` keeps working and keeps its audit warning,
 whose fix text now points at `set`. Nothing is deprecated.
 
-One change is visible after a CLI upgrade. The force-write finding's trigger
-widens to `this.validated()`, so an app scaffolded from today's create-app
-`blog` template, whose `store` reads `validated()` and calls `forceCreate`,
-gets a new warning on that action. It is a warning, `guren gate` still passes,
-and its fix text names the one-line change to `set`. The changeset for part 2
-says so.
-
 Moving a call is mechanical: `Post.forceCreate({ ...data, authorId: author.id })`
-becomes `Post.create(data, { set: { authorId: author.id } })`, and an owner in
-`fillable` is removed from it once every write uses `set`. No codemod is
-proposed; the audit warning already lists the force-write sites, and the
-`fillable` sites need a person to decide which columns the request may set.
+becomes `Post.create(data, { set: { authorId: author.id } })`. A model that
+lists the owner in `fillable` removes it in the same change, since step 4
+refuses a fillable key in `set`. No codemod is proposed: the audit warning
+already lists the force-write sites, and deciding which columns a request may
+set needs a person.
 
 ## Open Questions
 
-1. **The name.** `set` reads well at the call site and names nothing else in
-   the ORM today. `with`, `assign` and `server` are the alternatives.
-2. **A key in both `data` and `set`.** This RFC throws. The alternative is
-   that `set` wins, which is what `{ ...data, authorId }` does today and hides
-   a schema that admits the column.
-3. **`id` in `set`.** This RFC throws and leaves server-chosen keys to
-   `forceCreate`. Allowing it would let the runtime stores that set ULIDs move
-   off force writes, but they carry no request data, so they gain nothing.
-4. **Relation sugar.** Whether `Post.create(data, { for: { author: user } })`
-   should derive `set` from a `belongsTo` definition, and whether that waits
-   for RFC 0025's relation descriptors. RFC 0025's own example keeps
-   `authorId` in `fillable`; it would follow this RFC either way.
-5. **Bulk writes.** There is no `createMany` today (RFC 0006 recorded the
-   same). If one is added, it should take `set` for the whole batch.
-6. **`'conflict'` in a minor.** Widening `MassAssignmentException['reason']`
-   breaks an exhaustive `switch` over it at compile time. The alternatives are
-   to accept that in a minor with a changeset note, or to throw a subclass
-   (`MassAssignmentConflictException`) and leave the union as it is.
+1. **The name.** `set`, `with`, `assign` or `server`.
+   **Decision:** `set`. It reads as what the server does at the call site and
+   names nothing else in the ORM.
+2. **A key in both `data` and `set`.** Throw, or let `set` win as
+   `{ ...data, authorId }` does today.
+   **Decision:** throw. With step 4 it follows from the other rules (the key is
+   not fillable), and a schema that admits a server-owned column is the bug to
+   surface.
+3. **`id` in `set`.**
+   **Decision:** refused, at the type level and at runtime. The runtime stores
+   that choose ULIDs carry no request data and stay on `forceCreate`.
+4. **Relation sugar** (`Post.create(data, { for: { author: user } })`).
+   **Decision:** not in this RFC. It can derive `set` later, once RFC 0025's
+   relation descriptors settle. RFC 0025's example, which listed `authorId` in
+   `fillable`, is amended by this RFC.
+5. **Bulk writes.** There is no `createMany` today (RFC 0006 recorded the same).
+   **Decision:** one added later takes `set` for the whole batch, through the
+   same `filterFillable(data, set)` step.
+6. **A new `reason` for the conflict case.**
+   **Decision:** none. Every refusal is `denied` or `not-fillable`, so the
+   public union keeps its members and RFC 0006's single `catch` target holds.
+7. **`set` on a model without `fillable`.**
+   **Decision:** it throws (section 2, step 1).
