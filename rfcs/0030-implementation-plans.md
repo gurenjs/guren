@@ -2350,7 +2350,8 @@ Claude Code docs as read on 2026-09-23:
 - ~~**The `commands` allowlist is not implemented.**~~ The allowlist is a §2
   check (`plan:command`, a failure) in `packages/cli/src/plan/command-allowlist.ts`.
   A command passes as `guren <subcommand>` or `bunx guren <subcommand>`, with
-  arguments in a closed character set and `'`/`"` quoting, and a subcommand
+  arguments in a closed character set and `'`/`"` quoting, naming no
+  absolute path and no `..` segment, and a subcommand
   the table classifies as a generator: `make:*` except `make:migration`,
   `lang:publish`, and `add <blueprint>` except `add plugin`. A registry
   command the table does not list is refused, and a test fails until it is

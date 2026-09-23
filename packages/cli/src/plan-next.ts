@@ -20,8 +20,8 @@ import { planStatusFile } from './plan-status'
 import { loadPlanAppState, type PlanAppState } from './plan/app-state'
 import { requirePlanApproval, type PlanApprovedStanding } from './plan/approvals'
 import { planBesideExclusions } from './plan/beside'
-import { judgePlanCommand, PLAN_COMMAND_FORM } from './plan/command-allowlist'
 import { describeCloseBlockers, formatCloseBlocker, type CloseBlocker } from './plan/close-remedy'
+import { PLAN_COMMAND_FORM, refusedPlanCommands } from './plan/command-allowlist'
 import { planDecisionsPath, type PlanWaiver } from './plan/decisions'
 import { judgeFreshness } from './plan/freshness'
 import { hasBaseline } from './plan/render'
@@ -185,10 +185,7 @@ async function unverifiedElements(
 
 /** The step hands a plan's commands to the implementing agent as written, so one the allowlist refuses stops the whole plan (§8). */
 function refuseDisallowedCommands(path: string, plan: PlanDraft): void {
-  const refused = plan.commands.flatMap((command) => {
-    const verdict = judgePlanCommand(command.command)
-    return verdict.allowed ? [] : [`  ${command.id}: ${JSON.stringify(command.command)} is refused: ${verdict.reason}`]
-  })
+  const refused = refusedPlanCommands(plan.commands).map(({ id, quoted, reason }) => `  ${id}: ${quoted} is refused: ${reason}`)
   if (refused.length === 0) return
   throw new CliError(
     `${basename(path)} carries commands the implementing agent would run as written, so no step of it is handed out:\n${refused.join('\n')}\n`

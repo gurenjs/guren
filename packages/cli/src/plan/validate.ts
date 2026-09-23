@@ -24,8 +24,8 @@ import {
   type PlanAppTable,
   type PlanAppUnreadable,
 } from './app-state'
-import { judgePlanCommand, PLAN_COMMAND_FORM } from './command-allowlist'
 import { actionTargets, columnTargets, endpointKey, NAMED_APP_SECTIONS, namedTargets, routeTarget, tableTarget, type PlanAppTarget } from './app-targets'
+import { PLAN_COMMAND_FORM, refusedPlanCommands } from './command-allowlist'
 import { judgeFreshness } from './freshness'
 import { listPlanReferences } from './references'
 import {
@@ -191,12 +191,10 @@ function checkDuplicateIds(plan: PlanDraft, results: PlanCheckResult[]): void {
 
 /** `plan:next` hands a command to the implementing agent as written, so only the allowlist's forms pass (§8). */
 function checkCommands(plan: PlanDraft, results: PlanCheckResult[]): void {
-  for (const command of plan.commands) {
-    const verdict = judgePlanCommand(command.command)
-    if (verdict.allowed) continue
+  for (const { id, quoted, reason } of refusedPlanCommands(plan.commands)) {
     results.push(
-      finding('plan:command', 'fail', `The command ${JSON.stringify(command.command)} is refused: ${verdict.reason}.`, {
-        elementId: command.id,
+      finding('plan:command', 'fail', `The command ${quoted} is refused: ${reason}.`, {
+        elementId: id,
         section: 'commands',
         suggestion: `A plan's commands are ${PLAN_COMMAND_FORM} naming a generator (make:*, add <blueprint>); other work belongs to a step.`,
       }),

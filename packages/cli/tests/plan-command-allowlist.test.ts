@@ -2,18 +2,24 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { CommandDef } from 'citty'
-
 import { builtinSubCommands } from '../src/commands'
 import { checkPlans } from '../src/plan-check'
 import { planApproveFile } from '../src/plan-approve'
 import { planNextFile } from '../src/plan-next'
 import { renderPlanFile } from '../src/plan-render'
 import { planApprovalsPath } from '../src/plan/approvals'
-import { judgePlanCommand, PLAN_COMMAND_CLASSES, PLAN_COMMAND_GROUPS, tokenizePlanCommand } from '../src/plan/command-allowlist'
+import {
+  judgePlanCommand,
+  PLAN_COMMAND_CLASSES,
+  PLAN_COMMAND_GROUPS,
+  quotePlanCommand,
+  refusedPlanCommands,
+  tokenizePlanCommand,
+} from '../src/plan/command-allowlist'
 import { planHash } from '../src/plan/identity'
 import { PlanDraftSchema, PlanSchema } from '../src/plan/schema'
 import { validatePlan } from '../src/plan/validate'
+import { resolveValue } from '../src/run-cli'
 import { createTempRoot, writeWorkspaceFiles } from './helpers'
 import { loadApprovedCommentsPlan, loadCommentsPlan, PLAN_APP_FILES, planAppState, planPageData, writePlanVerifyApp } from './plan-fixture'
 
@@ -26,8 +32,9 @@ function refusal(command: string): string {
   return verdict.allowed ? '' : verdict.reason
 }
 
-async function resolveCommand(def: unknown): Promise<CommandDef> {
-  return (typeof def === 'function' ? await def() : await def) as CommandDef
+function unreadable(command: string): string | undefined {
+  const tokens = tokenizePlanCommand(command)
+  return 'unreadable' in tokens ? tokens.unreadable : undefined
 }
 
 /** The registry as a plan names it: each builtin command, and each member of a command that has its own subcommands. */
@@ -35,8 +42,8 @@ async function registryNames(): Promise<{ names: string[]; groups: string[] }> {
   const names: string[] = []
   const groups: string[] = []
   for (const [name, def] of Object.entries(builtinSubCommands)) {
-    const command = await resolveCommand(def)
-    const subCommands = command.subCommands === undefined ? undefined : await resolveCommand(command.subCommands)
+    const command = await resolveValue(def)
+    const subCommands = await resolveValue(command.subCommands)
     if (subCommands === undefined) {
       names.push(name)
       continue
@@ -90,16 +97,12 @@ describe('tokenizePlanCommand', () => {
     ['guren add #x', '"#"'],
     ['guren add (x)', '"("'],
     ['guren make:controller =ls', 'opening with "="'],
+    ['guren make:controller ""=ls', 'opening with "="'],
+    ["guren make:controller ''=ls", 'opening with "="'],
     ['guren add session &', '"&"'],
     ['guren make:adr "\u202Eevil"', 'U+202E'],
     ['guren make:adr "a\u200Bb"', 'U+200B'],
-  ])('should refuse %j, naming %s', (command, named) => {
-    const tokens = tokenizePlanCommand(command)
-    expect('unreadable' in tokens).toBe(true)
-    expect((tokens as { unreadable: string }).unreadable).toContain(named)
-  })
-
-  test.each([
+    ['guren make:adr "a\u2028b"', 'U+2028'],
     ['guren make:adr "$(whoami)"', '"$"'],
     ['guren make:adr "`whoami`"', '"`"'],
     ['guren make:adr "a; b"', '";"'],
@@ -107,13 +110,21 @@ describe('tokenizePlanCommand', () => {
     ['guren make:adr "a > b"', '">"'],
     ["guren make:adr 'it\\'s'", '"\\"'],
     ['guren make:adr "line\nbreak"', 'a line break'],
-  ])('should refuse a metacharacter inside quotes as well: %j', (command, named) => {
-    const tokens = tokenizePlanCommand(command)
-    expect((tokens as { unreadable?: string }).unreadable).toContain(named)
+    ['guren make:adr "open', 'quote is never closed'],
+    ["guren make:adr 'open", 'quote is never closed'],
+    ['guren make:adr "a" "b', 'quote is never closed'],
+  ])('should refuse %j, naming %s', (command, named) => {
+    expect(unreadable(command)).toContain(named)
   })
 
-  test.each([['guren make:adr "open'], ["guren make:adr 'open"], ['guren make:adr "a" "b']])('should refuse an unbalanced quote: %j', (command) => {
-    expect(tokenizePlanCommand(command)).toEqual({ unreadable: expect.stringContaining('quote is never closed') })
+  test.each([
+    [`guren make:adr "Billing isn't monthly"`, "Billing isn't monthly"],
+    [`guren make:adr 'Say "hi" first'`, 'Say "hi" first'],
+    [`guren make:controller '=x'`, '=x'],
+    [`guren make:controller "a"=b`, 'a=b'],
+  ])('should read %j as literal text', (command, text) => {
+    const tokens = tokenizePlanCommand(command)
+    expect('words' in tokens ? tokens.words[2] : tokens).toEqual({ text, quoted: true })
   })
 })
 
@@ -124,6 +135,9 @@ describe('judgePlanCommand', () => {
     ['guren make:feature Post --fields "title:string,body:text?" --policy', 'make:feature', ['Post', '--fields', 'title:string,body:text?', '--policy']],
     ['bunx guren make:controller Invoice --module billing', 'make:controller', ['Invoice', '--module', 'billing']],
     ['guren add ai --provider anthropic', 'add ai', ['--provider', 'anthropic']],
+    ['guren make:adr "Billing... moves to month end"', 'make:adr', ['Billing... moves to month end']],
+    ['guren make:controller Admin/Invoice', 'make:controller', ['Admin/Invoice']],
+    ['guren lang:publish --path lang/overrides', 'lang:publish', ['--path', 'lang/overrides']],
   ])('should allow %j', (command, subcommand, args) => {
     expect(judgePlanCommand(command)).toEqual({ allowed: true, subcommand, args })
   })
@@ -149,6 +163,13 @@ describe('judgePlanCommand', () => {
     ['guren constructor', '"constructor" is not a subcommand classified for plans'],
     ['guren __proto__', '"__proto__" is not a subcommand classified for plans'],
     ['guren toString', '"toString" is not a subcommand classified for plans'],
+    ['guren make:widget Foo', '"make:widget" is not a subcommand classified for plans'],
+    ['guren lang:publish --path /Users/x/.ssh --force', 'the argument "/Users/x/.ssh" names an absolute path'],
+    ['guren make:lang ja --app ../other', 'the argument "../other" names an absolute path or leaves the application'],
+    ['guren lang:publish --path=/etc', 'the argument "--path=/etc"'],
+    ['guren make:lang ja --app=../x', 'the argument "--app=../x"'],
+    ['guren make:controller a/../../b', 'the argument "a/../../b"'],
+    ['guren make:adr "/abs title"', 'the argument "/abs title"'],
     ['guren db:migrate', 'reads or writes a database'],
     ['guren db:fresh', 'reads or writes a database'],
     ['guren deploy --target docker', 'deployment recipes'],
@@ -182,14 +203,11 @@ describe('the classification against the registry', () => {
     expect(groups.sort()).toEqual([...PLAN_COMMAND_GROUPS].sort())
   })
 
-  test('should refuse a registry command the table does not classify', () => {
-    expect(PLAN_COMMAND_CLASSES['make:widget']).toBeUndefined()
-    expect(refusal('guren make:widget Foo')).toContain('not a subcommand classified for plans')
-  })
-
   test('should allow generators only: make:* writers, lang:publish and add <blueprint>, never add plugin', () => {
-    const allowed = Object.entries(PLAN_COMMAND_CLASSES).filter(([, verdict]) => verdict === 'generator').map(([name]) => name)
-    for (const name of allowed) expect(name).toMatch(/^(?:make:(?!migration$)[a-z-]+|lang:publish|add (?!plugin$)[a-z]+)$/)
+    const offenders = Object.entries(PLAN_COMMAND_CLASSES)
+      .filter(([name, commandClass]) => commandClass === 'generator' && !/^(?:make:(?!migration$)[a-z-]+|lang:publish|add (?!plugin$)[a-z]+)$/.test(name))
+      .map(([name]) => name)
+    expect(offenders).toEqual([])
   })
 })
 
@@ -214,6 +232,13 @@ describe('the §2 check', () => {
   test('should quote the command escaped, so a control character cannot reach the terminal', () => {
     const [result] = validatePlan(planWith({ id: 'command.x', command: 'guren add \u001b[2Jsession', reason: 'x' }), planAppState()).filter((entry) => entry.key === 'plan:command')
     expect(result?.message).toStartWith('The command "guren add \\u001b[2Jsession" is refused')
+  })
+
+  test('should escape what JSON.stringify leaves raw: DEL, C1, line separators and format characters', () => {
+    expect(quotePlanCommand('a\u007Fb\u009Bc\u202Ed\u2028e\u2029f\u{E0001}g\u001bh')).toBe('"a\\u007Fb\\u009Bc\\u202Ed\\u2028e\\u2029f\\u{E0001}g\\u001bh"')
+    expect(refusedPlanCommands([{ id: 'command.x', command: 'guren add \u009Bx\u202E\u2028' }])).toEqual([
+      { id: 'command.x', quoted: '"guren add \\u009Bx\\u202E\\u2028"', reason: expect.stringContaining('U+009B') },
+    ])
   })
 })
 
