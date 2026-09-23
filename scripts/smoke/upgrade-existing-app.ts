@@ -89,11 +89,10 @@ async function main(): Promise<void> {
       install: true,
       installRunner: async (cwd) => {
         installInvoked = true
-        // Tarballs, as smoke:starter installs them: a `file:` directory brings its
-        // own `@guren/*` ranges, which resolve from npm and fail outright once a
-        // version bump names a release npm does not have yet. `upgrade` has just
-        // rewritten every @guren/* range to a fixture version no registry has, so
-        // the rewrite asserts none is left before `bun install` meets one.
+        // Tarballs, as smoke:starter installs them: a `file:` directory brings its own
+        // `@guren/*` ranges, which resolve from npm and fail outright once a version bump
+        // names a release npm does not have yet. `upgrade` has just written such a range
+        // (FIXTURE_VERSION) to every @guren/* entry; the rewrite fails on any it misses.
         const roots = await vendorLocalPackages(join(cwd, '.guren-vendor'))
         await rewriteAppDependencies(cwd, roots, 'The upgraded fixture app')
         await run(['bun', 'install'], cwd)

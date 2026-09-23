@@ -4,7 +4,7 @@
 import { describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   assertLocalGurenDependencies,
   collectLocalPackages,
@@ -104,8 +104,9 @@ describe('distDifferences', () => {
     try {
       for (const [dir, files] of [['source', source], ['installed', installed]] as const) {
         for (const [file, content] of Object.entries(files)) {
-          await mkdir(join(root, dir, 'dist', file, '..'), { recursive: true })
-          await writeFile(join(root, dir, 'dist', file), content, 'utf8')
+          const path = join(root, dir, 'dist', file)
+          await mkdir(dirname(path), { recursive: true })
+          await writeFile(path, content, 'utf8')
         }
       }
       await body(join(root, 'source'), join(root, 'installed'))
@@ -134,6 +135,15 @@ describe('distDifferences', () => {
         ])
       },
     )
+  })
+
+  test('reports every file missing when the installed copy has no dist/', async () => {
+    await withTrees({ 'index.js': '\n', 'sub/x.d.ts': '\n' }, {}, async (sourceDir, installedDir) => {
+      expect(await distDifferences(sourceDir, installedDir)).toEqual([
+        'dist/index.js missing',
+        'dist/sub/x.d.ts missing',
+      ])
+    })
   })
 })
 

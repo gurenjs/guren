@@ -221,13 +221,19 @@ export async function vendorLocalPackages(vendorRoot: string): Promise<Map<strin
 }
 
 /**
- * The files under `dist/` that differ between this checkout's build and an
- * installed copy: missing, extra, or with other bytes. Empty means the copy is
- * this checkout's build.
+ * The files under an installed copy's `dist/` that differ from this checkout's
+ * build: missing, extra, or with other bytes.
  */
 export async function distDifferences(sourceDir: string, installedDir: string): Promise<string[]> {
-  const list = async (dir: string): Promise<Set<string>> =>
-    new Set(await Array.fromAsync(new Bun.Glob('**/*').scan({ cwd: join(dir, 'dist'), onlyFiles: true })))
+  const list = async (dir: string): Promise<Set<string>> => {
+    try {
+      return new Set(await Array.fromAsync(new Bun.Glob('**/*').scan({ cwd: join(dir, 'dist'), onlyFiles: true })))
+    } catch (error) {
+      // No dist/ at all is a difference to report, not a reason to stop checking.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return new Set()
+      throw error
+    }
+  }
   const [expected, actual] = await Promise.all([list(sourceDir), list(installedDir)])
 
   const differences: string[] = []
@@ -240,7 +246,7 @@ export async function distDifferences(sourceDir: string, installedDir: string): 
       Bun.file(join(sourceDir, 'dist', file)).bytes(),
       Bun.file(join(installedDir, 'dist', file)).bytes(),
     ])
-    if (!Buffer.from(want).equals(got)) {
+    if (Buffer.compare(want, got) !== 0) {
       differences.push(`dist/${file} differs`)
     }
   }
@@ -274,10 +280,9 @@ export async function assertSingleInstalledCopies(appDir: string): Promise<void>
     }
     const differences = await distDifferences(pkg.sourceDir, installedDir)
     if (differences.length > 0) {
-      problems.push(
-        `${pkg.name}: node_modules/${pkg.name} is not this checkout's build (a published or stale copy): ` +
-        `${differences.slice(0, 3).join(', ')}${differences.length > 3 ? `, and ${differences.length - 3} more` : ''}`,
-      )
+      const shown = differences.slice(0, 3).join(', ')
+      const more = differences.length > 3 ? `, and ${differences.length - 3} more` : ''
+      problems.push(`${pkg.name}: node_modules/${pkg.name} is not this checkout's build (a published or stale copy): ${shown}${more}`)
     }
   }
 
