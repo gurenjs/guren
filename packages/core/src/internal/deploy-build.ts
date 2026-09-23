@@ -553,6 +553,7 @@ export const SQL_CLIENT_MODULES = [
       'CharsetToEncoding',
       'setMaxParserCache',
       'clearParserCache',
+      'TypedParameter',
     ],
     importedBy: 'packages/orm/src',
   },
