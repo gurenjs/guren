@@ -427,6 +427,7 @@ Controllers now expose an `auth` helper:
 
 ```ts
 import { pages } from '@/.guren/pages.gen'
+import type { UserRecord } from '@/app/Models/User'
 
 export default class DashboardController extends Controller {
   async index() {
@@ -435,7 +436,7 @@ export default class DashboardController extends Controller {
   }
 
   async store() {
-    const user = await this.auth.userOrFail()  // throws 401 if not authenticated
+    const user = await this.auth.userOrFail<UserRecord>()  // throws 401 if not authenticated
     // user is guaranteed non-null here
     await Post.create({ authorId: user.id, ...data })
     return this.redirect('/posts')

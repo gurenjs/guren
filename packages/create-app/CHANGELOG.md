@@ -1,5 +1,12 @@
 # create-guren-app
 
+## 1.17.2
+
+### Patch Changes
+
+- 2ac55a4: `--blueprint api` no longer lists `bunx guren add auth` and `bunx guren add resource` under "Add features:", since both refuse an API-only app. It suggests `bunx guren make:controller Post` instead, which writes a JSON controller there. The same line says to register the controller's actions in `routes/api.ts`. `--auth` with the api blueprint is now ignored with an info line that names `createBearerTokenMiddleware` from `@guren/core` and links the API tokens guide, instead of running `guren add auth` and warning when it fails.
+- 002d087: `--auth` no longer lists `bunx guren add auth` under "Add features:" once the scaffolder has run it, and no longer repeats a users table step that told you to run `bun run db:make` first: `guren add auth` prints its own database steps and generates the migration itself. When the step fails after dependencies are installed, the warning no longer tells you to install them first.
+
 ## 1.17.1
 
 ### Patch Changes

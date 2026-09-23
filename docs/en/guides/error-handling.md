@@ -204,6 +204,7 @@ import { Controller } from '@guren/core'
 import { z } from 'zod'
 import { PostResource } from '@/app/Http/Resources/PostResource'
 import { pages } from '@/.guren/pages.gen'
+import type { UserRecord } from '@/app/Models/User'
 
 const StorePostSchema = z.object({ title: z.string().min(1), content: z.string().min(10) })
 const PostIdSchema = z.object({ id: z.coerce.number().int().positive() })
@@ -211,7 +212,7 @@ const PostIdSchema = z.object({ id: z.coerce.number().int().positive() })
 export default class PostController extends Controller {
   async store(): Promise<Response> {
     const data = await this.validateBody(StorePostSchema)  // 422 on failure
-    const user = await this.auth.userOrFail()              // 401 if not logged in
+    const user = await this.auth.userOrFail<UserRecord>()  // 401 if not logged in
     const post = await Post.create({ ...data, authorId: user.id })
     return this.redirect(`/posts/${post.id}`)
   }

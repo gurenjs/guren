@@ -43,20 +43,20 @@ export function Footer({ variant }: FooterProps) {
   }
 
   return (
-    <footer className="border-t border-white/10 bg-[#0a0707]">
+    <footer className="border-t border-white/10 bg-[#2b0606] font-home">
       <div className="mx-auto grid max-w-6xl gap-10 px-6 py-16 sm:grid-cols-2 lg:grid-cols-4">
         <div>
           <div className="mb-4 flex items-center gap-3">
             <img src="/logo.svg" alt="Guren" className="size-9 rounded-xl p-0.5" />
             <span className="text-lg font-bold text-white">Guren</span>
           </div>
-          <p className="text-sm leading-relaxed text-white/50">
+          <p className="text-sm leading-relaxed text-smoke">
             The Bun-first fullstack TypeScript framework, built for coding agents.
           </p>
         </div>
         <div>
-          <h4 className="mb-4 text-sm font-semibold uppercase tracking-wider text-white/70">Resources</h4>
-          <nav className="flex flex-col gap-2.5 text-sm text-white/50">
+          <h4 className="mb-4 text-sm font-bold text-crimson-50">Resources</h4>
+          <nav className="flex flex-col gap-2.5 text-sm text-smoke">
             <Link href="/docs" className="no-underline transition hover:text-white">Documentation</Link>
             <Link href="/docs/guides/getting-started" className="no-underline transition hover:text-white">Getting Started</Link>
             <Link href="/docs/tutorials/00-overview" className="no-underline transition hover:text-white">Tutorials</Link>
@@ -66,16 +66,16 @@ export function Footer({ variant }: FooterProps) {
           </nav>
         </div>
         <div>
-          <h4 className="mb-4 text-sm font-semibold uppercase tracking-wider text-white/70">Community</h4>
-          <nav className="flex flex-col gap-2.5 text-sm text-white/50">
+          <h4 className="mb-4 text-sm font-bold text-crimson-50">Community</h4>
+          <nav className="flex flex-col gap-2.5 text-sm text-smoke">
             <a href="https://github.com/gurenjs/guren" target="_blank" rel={OWN_REPO_LINK_REL} className="no-underline transition hover:text-white">GitHub</a>
             <a href="https://github.com/gurenjs/guren/issues" target="_blank" rel={OWN_REPO_LINK_REL} className="no-underline transition hover:text-white">Issues</a>
             <a href="https://github.com/gurenjs/guren/discussions" target="_blank" rel={OWN_REPO_LINK_REL} className="no-underline transition hover:text-white">Discussions</a>
           </nav>
         </div>
         <div>
-          <h4 className="mb-4 text-sm font-semibold uppercase tracking-wider text-white/70">Legal</h4>
-          <nav className="flex flex-col gap-2.5 text-sm text-white/50">
+          <h4 className="mb-4 text-sm font-bold text-crimson-50">Legal</h4>
+          <nav className="flex flex-col gap-2.5 text-sm text-smoke">
             <a
               href={`${GITHUB_URL}/blob/main/LICENSE`}
               target="_blank"
@@ -87,7 +87,7 @@ export function Footer({ variant }: FooterProps) {
           </nav>
         </div>
       </div>
-      <div className="border-t border-white/10 px-6 py-5 text-center text-sm text-white/40">
+      <div className="border-t border-white/10 px-6 py-5 text-center text-sm text-smoke/80">
         &copy; {year} Guren Framework &middot; MIT License
       </div>
     </footer>

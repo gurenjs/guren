@@ -289,10 +289,12 @@ router.get('/posts/:id', {
 アクションは、スキーマがパースした値を `this.validated()` で読みます。引数には自分のルート名を渡します。
 
 ```ts
+import type { UserRecord } from '@/app/Models/User'
+
 export default class PostsController extends Controller {
   async store() {
     const { body } = this.validated('posts.store')
-    const user = await this.auth.userOrFail()
+    const user = await this.auth.userOrFail<UserRecord>()
     const post = await Post.create({ ...body, authorId: user.id })
     return this.redirect(`/posts/${post.id}`)
   }

@@ -9,22 +9,6 @@ import {
 
 type IconProps = SVGProps<SVGSVGElement>
 
-export function BoltIcon(props: IconProps) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
-      <path fillRule="evenodd" d="M14.615 1.595a.75.75 0 0 1 .359.852L12.982 9.75h7.268a.75.75 0 0 1 .548 1.262l-10.5 11.25a.75.75 0 0 1-1.272-.71l1.992-7.302H3.75a.75.75 0 0 1-.548-1.262l10.5-11.25a.75.75 0 0 1 .913-.143Z" clipRule="evenodd" />
-    </svg>
-  )
-}
-
-export function ShieldCheckIcon(props: IconProps) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
-      <path fillRule="evenodd" d="M12.516 2.17a.75.75 0 0 0-1.032 0 11.209 11.209 0 0 1-7.877 3.08.75.75 0 0 0-.722.515A12.74 12.74 0 0 0 2.25 9.75c0 5.942 4.064 10.933 9.563 12.348a.749.749 0 0 0 .374 0c5.499-1.415 9.563-6.406 9.563-12.348 0-1.39-.223-2.73-.635-3.985a.75.75 0 0 0-.722-.516l-.143.001c-2.996 0-5.717-1.17-7.734-3.08Zm3.094 8.016a.75.75 0 1 0-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 0 0-1.06 1.06l2.25 2.25a.75.75 0 0 0 1.14-.094l3.75-5.25Z" clipRule="evenodd" />
-    </svg>
-  )
-}
-
 export function TerminalIcon(props: IconProps) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
@@ -81,30 +65,6 @@ export function ChevronRightIcon(props: IconProps) {
   )
 }
 
-export function ArrowRightIcon(props: IconProps) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
-      <path fillRule="evenodd" d="M12.97 3.97a.75.75 0 0 1 1.06 0l7.5 7.5a.75.75 0 0 1 0 1.06l-7.5 7.5a.75.75 0 1 1-1.06-1.06l6.22-6.22H3a.75.75 0 0 1 0-1.5h16.19l-6.22-6.22a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
-    </svg>
-  )
-}
-
-export function CubeIcon(props: IconProps) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
-      <path d="M12.378 1.602a.75.75 0 0 0-.756 0L3 6.632l9 5.25 9-5.25-8.622-5.03ZM21.75 7.93l-9 5.25v9l8.628-5.032a.75.75 0 0 0 .372-.648V7.93ZM11.25 22.18v-9l-9-5.25v8.57a.75.75 0 0 0 .372.648l8.628 5.033Z" />
-    </svg>
-  )
-}
-
-export function CodeBracketIcon(props: IconProps) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
-      <path fillRule="evenodd" d="M14.447 3.026a.75.75 0 0 1 .527.921l-4.5 16.5a.75.75 0 0 1-1.448-.394l4.5-16.5a.75.75 0 0 1 .921-.527ZM16.72 6.22a.75.75 0 0 1 1.06 0l5.25 5.25a.75.75 0 0 1 0 1.06l-5.25 5.25a.75.75 0 1 1-1.06-1.06L21.44 12l-4.72-4.72a.75.75 0 0 1 0-1.06Zm-9.44 0a.75.75 0 0 1 0 1.06L2.56 12l4.72 4.72a.75.75 0 0 1-1.06 1.06L.97 12.53a.75.75 0 0 1 0-1.06l5.25-5.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
-    </svg>
-  )
-}
-
 export function SunIcon(props: IconProps) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
@@ -121,19 +81,66 @@ export function MoonIcon(props: IconProps) {
   )
 }
 
-export function RocketIcon(props: IconProps) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
-      <path fillRule="evenodd" d="M9.315 7.584C12.195 3.883 16.695 1.5 21.75 1.5a.75.75 0 0 1 .75.75c0 5.056-2.383 9.555-6.084 12.436A6.75 6.75 0 0 1 9.75 22.5a.75.75 0 0 1-.75-.75v-4.131A15.838 15.838 0 0 1 6.382 15H2.25a.75.75 0 0 1-.75-.75 6.75 6.75 0 0 1 7.815-6.666ZM15 6.75a2.25 2.25 0 1 0 0 4.5 2.25 2.25 0 0 0 0-4.5Z" clipRule="evenodd" />
-      <path d="M5.26 17.242a.75.75 0 1 0-.897-1.203 5.243 5.243 0 0 0-2.05 5.022.75.75 0 0 0 .625.627 5.243 5.243 0 0 0 5.022-2.051.75.75 0 1 0-1.202-.897 3.744 3.744 0 0 1-3.008 1.51c0-1.23.592-2.323 1.51-3.008Z" />
-    </svg>
-  )
-}
-
 export function RssIcon(props: IconProps) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
       <path fillRule="evenodd" d={RSS_ICON_PATH} clipRule="evenodd" />
+    </svg>
+  )
+}
+
+/* Deploy-target glyphs, drawn for this site rather than taken from a vendor:
+   Cloudflare's and AWS's marks need permission, so none imitates a logo. */
+const LINE = {
+  xmlns: 'http://www.w3.org/2000/svg',
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.5,
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+} as const
+
+/** A long-running server you host. */
+export function ServerIcon(props: IconProps) {
+  return (
+    <svg {...LINE} {...props}>
+      <rect x="3.75" y="4.5" width="16.5" height="6.5" rx="1.5" />
+      <rect x="3.75" y="13" width="16.5" height="6.5" rx="1.5" />
+      <path d="M7.25 7.75h.01M7.25 16.25h.01M11 7.75h5.75M11 16.25h5.75" />
+    </svg>
+  )
+}
+
+/** Many locations at the network edge. */
+export function GlobeIcon(props: IconProps) {
+  return (
+    <svg {...LINE} {...props}>
+      <circle cx="12" cy="12" r="8.25" />
+      <path d="M3.75 12h16.5" />
+      <path d="M12 3.75c2.2 2.25 3.3 5 3.3 8.25s-1.1 6-3.3 8.25c-2.2-2.25-3.3-5-3.3-8.25S9.8 6 12 3.75Z" />
+    </svg>
+  )
+}
+
+/** A build output a platform serves: static files over functions. */
+export function LayersIcon(props: IconProps) {
+  return (
+    <svg {...LINE} {...props}>
+      <path d="m12 3.75 8.25 4.25L12 12.25 3.75 8 12 3.75Z" />
+      <path d="m3.75 12 8.25 4.25L20.25 12" />
+      <path d="m3.75 16 8.25 4.25L20.25 16" />
+    </svg>
+  )
+}
+
+/** A function started on demand for each event. */
+export function FunctionIcon(props: IconProps) {
+  return (
+    <svg {...LINE} {...props}>
+      <path d="M8 4.5H7a2 2 0 0 0-2 2v3.25L3.75 12 5 14.25v3.25a2 2 0 0 0 2 2h1" />
+      <path d="M16 4.5h1a2 2 0 0 1 2 2v3.25L20.25 12 19 14.25v3.25a2 2 0 0 1-2 2h-1" />
+      <path d="m12.75 7.5-2.5 4.75h3.5l-2.5 4.75" />
     </svg>
   )
 }
