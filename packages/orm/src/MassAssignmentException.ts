@@ -18,11 +18,12 @@ export class MassAssignmentException extends Error {
           `not even via ${model}.fillable. Pass the plain input field (e.g. \`password\`) and let ` +
           `the model derive them, or use ${model}.forceCreate()/forceUpdate() for trusted ` +
           `server-side values such as \`passwordHash: 'oauth:...'\`.`
-        : `Add them to fillable, or use ${model}.forceCreate()/forceUpdate() for trusted ` +
-          `server-side data.`
+        : `Add them to fillable if a request may set them; otherwise write them with ` +
+          `${model}.forceCreate()/forceUpdate() from values the server chose, such as the ` +
+          `signed-in user's id.`
     super(
       `${model}: mass assignment blocked for field(s) ${list}. ${remediation} ` +
-        `Never call forceCreate/forceUpdate with request input.`,
+        `Never pass a raw request body to forceCreate/forceUpdate.`,
     )
     this.name = 'MassAssignmentException'
     this.model = model

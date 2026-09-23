@@ -397,7 +397,7 @@ export default class PostController extends Controller {
 }
 ```
 
-`forceCreate` is the deliberate choice here, and it is worth a moment. `fillable` on the model lists `title` and `body`, and `authorId` is not on it: a request must never be able to say who wrote a post. `Post.create(data)` would therefore drop `authorId`. `forceCreate` bypasses the filter, and it is safe because nothing in that object came from the request unfiltered: `data` passed the validator, and `author.id` came from the session. The rule is not "never use forceCreate"; it is "only with values the server chose".
+`forceCreate` is the deliberate choice here, and it is worth a moment. `fillable` on the model lists `title` and `body`, and `authorId` is not on it: a request must never be able to say who wrote a post. `Post.create({ ...data, authorId: author.id })` would therefore throw a `MassAssignmentException` naming `authorId`. `forceCreate` bypasses the filter, and it is safe because nothing in that object came from the request unfiltered: `data` passed the validator, and `author.id` came from the session. The rule is not "never use forceCreate"; it is "only with values the server chose".
 
 ```bash run
 bun test
@@ -411,9 +411,9 @@ bunx guren audit
 
 The three authentication warnings are gone. The report prints only what still needs attention, so to see what replaced them run `bunx guren audit --json`: each of those routes now passes with "Protected by an authentication guard (verified via middleware capabilities)". That last phrase matters. `requireAuthenticated` carries a marker the framework stamps on it; `audit` trusts the marker, not the name. Had you written your own `requireLogin` middleware and aliased it as `auth`, the audit would say the middleware is *named like* a guard but is not one it recognises, and keep warning. That is the right answer: a reviewer, human or machine, cannot tell from a name whether a function checks anything.
 
-One warning is left, and it is not a mistake: `[warn] [API3] PostController.store force write`, on a method that validates a body and then calls `forceCreate`. Every action of that shape gets it, here and in the chapters after this one.
+Nothing else is left: the report ends on `No security findings.`, and that includes `store`, which validates a body and then calls `forceCreate`. `audit` warns on that combination unless every force write in the method has the shape above: an object literal that spreads only what `this.validateBody()` returned and names each other column from the session, a bound record or a literal. The schema chose the spread keys and you named `authorId`, so the request chose none of them.
 
-It is a review prompt, not a verdict. `audit` can see that validated input reaches `forceCreate`; it cannot follow the data to know that the validator is the allowlist standing in for `fillable`. That is the judgement you made above, and it holds, so the warning is right to be raised and right for you to accept. For the same reason it is only ever a warning: `guren gate` below passes with it in place. Read a finding and decide, rather than arranging for it to disappear. The next force write might be one that really does pass a raw body through.
+That makes the schema the allowlist standing in for `fillable`, and `audit` cannot see inside it. The shape relies on `z.object()` dropping keys it does not declare; a schema built with `.passthrough()` or `.loose()` keeps them, and `forceCreate` would write whatever a client sent. Spread a raw body, or leave out the column the server sets, and the method gets `[warn] [API3] PostController.store force write` back. It is only a warning, and `guren gate` below passes with one in place. Read it and judge the write; do not reshape the code just to make it go away.
 
 ```bash run
 bunx guren gate
@@ -910,7 +910,7 @@ One file survives `git clean` on purpose: `.env` is ignored, and `add auth` appe
 ## Where you are
 
 - Post mutations, the profile and logout behind `requireAuthenticated`; the login and registration pages behind `requireGuest`.
-- An audit you can read: the authentication warnings answered, the force-write warning accepted on purpose, and an understanding of why it trusts the framework's guard and not a name.
+- An audit you can read: the authentication warnings answered, a force write in the one shape it accepts, and an understanding of why it trusts the framework's guard and not a name.
 - An author on every post, added without losing a row: nullable, backfilled, required.
 - The agent's first migration, run under the `db-manage` skill's rules.
 
@@ -919,7 +919,7 @@ One file survives `git clean` on purpose: `.env` is ignored, and `add auth` appe
 - **`.middleware('auth')` does not compile.** `aliasMiddleware()` returns a new router type that knows the name; the result was not captured. Chain and assign, as in the file above.
 - **A signed-in test gets redirected to `/login`.** `actingAs()` must come before `withCsrf()`: the priming request has to be authenticated too. Both return new clients; reassign.
 - **`db:migrate` fails with "NOT NULL constraint failed".** A post still has no author; run `bun scripts/backfill-post-authors.ts` first. The order is the whole point of section 3.
-- **The stored post has `authorId: null`.** `store` used `Post.create`, and `fillable` dropped the author. Use `forceCreate` with a value the server chose.
+- **`store` answers 500 with a `MassAssignmentException`.** It passed `authorId` to `Post.create`, and `fillable` does not list it. Use `forceCreate` with a value the server chose.
 - **The list shows "unknown" for every author.** The `IN` query got ids of the wrong type, or the map is keyed by something other than the user's id. Log `authors` once; it should have one entry per distinct author.
 
 ## Exercises

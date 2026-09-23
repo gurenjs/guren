@@ -8,7 +8,8 @@ export type PostAuthorSummary = Pick<UserRecord, 'id' | 'name'>
 
 export class Post extends Attachable(
   defineModel(posts, {
-    fillable: ['title', 'excerpt', 'body', 'authorId'],
+    // `authorId` is set from the signed-in user, never from request input.
+    fillable: ['title', 'excerpt', 'body'],
   }),
   {
     cover: hasOneAttached({

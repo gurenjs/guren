@@ -1739,6 +1739,83 @@ export default function registerRoutes(router: any) {
     }
   })
 
+  async function forceWriteFinding(label: string, body: string) {
+    const workspace = await createTempWorkspace(`guren-cli-audit-force-${label}-`)
+
+    try {
+      await writeController(workspace.dir, 'PostController', `export default class PostController {
+  async store() {
+${body}
+    return null
+  }
+}`)
+      await writeRoutes(workspace.dir, POST_ROUTE)
+
+      const report = await runAudit({ cwd: workspace.dir })
+      return report.findings.find(f => f.key === 'force-write-request-data:PostController.store')
+    } finally {
+      await workspace.cleanup()
+    }
+  }
+
+  const SERVER_OWNED_FORCE_WRITES: Array<[string, string]> = [
+    ['session-owner', `    const author = await this.auth.userOrFail<UserRecord>()
+    const data = await this.validateBody(PostPayloadSchema)
+    await Post.forceCreate({ ...data, authorId: author.id })`],
+    ['rest-element', `    const author = await this.auth.userOrFail<UserRecord>()
+    const { tags, ...data } = await this.validateBody(PostPayloadSchema)
+    await Post.forceCreate({ ...data, authorId: author.id })`],
+    ['bound-model', `    const post = this.model(Post)
+    const author = await this.auth.userOrFail<UserRecord>()
+    const data = await this.validateBody(CommentPayloadSchema)
+    await Comment.forceCreate({ ...data, postId: post.id, authorId: author.id })`],
+    ['update', `    const post = this.model(Post)
+    const author = await this.auth.userOrFail<UserRecord>()
+    const data = await this.validateBody(PostPayloadSchema) as PostPayload
+    await Post.forceUpdate({ id: post.id }, { ...data, editedBy: author.id, reviewed: false })`],
+  ]
+
+  for (const [label, body] of SERVER_OWNED_FORCE_WRITES) {
+    it(`does not warn when a force write spreads the validated body and adds server-set columns (${label})`, async () => {
+      expect(await forceWriteFinding(label, body)).toBeUndefined()
+    })
+  }
+
+  const UNPROVEN_FORCE_WRITES: Array<[string, string]> = [
+    ['spread-only', `    const data = await this.validateBody(PostPayloadSchema)
+    await Post.forceCreate({ ...data })`],
+    ['request-value', `    const data = await this.validateBody(PostPayloadSchema)
+    await Post.forceCreate({ ...data, authorId: this.request.query('author') })`],
+    ['raw-spread', `    const data = await this.validateBody(PostPayloadSchema)
+    const author = await this.auth.userOrFail<UserRecord>()
+    await Post.forceCreate({ ...(await this.request.json()), authorId: author.id })`],
+    ['let-binding', `    let data = await this.validateBody(PostPayloadSchema)
+    const author = await this.auth.userOrFail<UserRecord>()
+    await Post.forceCreate({ ...data, authorId: author.id })`],
+    ['computed-key', `    const data = await this.validateBody(PostPayloadSchema)
+    const author = await this.auth.userOrFail<UserRecord>()
+    await Post.forceCreate({ ...data, [column]: author.id })`],
+    ['shadowed', `    const data = await this.validateBody(PostPayloadSchema)
+    const author = await this.auth.userOrFail<UserRecord>()
+    await Promise.all(rows.map((data) => Post.forceCreate({ ...data, authorId: author.id })))`],
+    ['mutated', `    const data = await this.validateBody(PostPayloadSchema)
+    const author = await this.auth.userOrFail<UserRecord>()
+    data.published = this.request.query('published')
+    await Post.forceCreate({ ...data, authorId: author.id })`],
+    ['one-of-two', `    const data = await this.validateBody(PostPayloadSchema)
+    const author = await this.auth.userOrFail<UserRecord>()
+    await Post.forceCreate({ ...data, authorId: author.id })
+    await Post.forceUpdate({ id: 1 }, data)`],
+  ]
+
+  for (const [label, body] of UNPROVEN_FORCE_WRITES) {
+    it(`still warns when a force write's keys are not proven server-owned (${label})`, async () => {
+      const forceWrite = await forceWriteFinding(label, body)
+      expect(forceWrite).toBeDefined()
+      expect(forceWrite!.status).toBe('warn')
+    })
+  }
+
   it('does not warn about a forceCreate that only appears in a comment', async () => {
     const workspace = await createTempWorkspace('guren-cli-audit-force-comment-')
 

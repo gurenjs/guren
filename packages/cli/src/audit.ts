@@ -37,6 +37,7 @@ import {
   type ControllerMethodInfo,
   type ControllerNameCollision,
 } from './controller-methods'
+import { forceWritesKeepServerOwnedColumns } from './force-write-shape'
 import { describeMethod } from './http-methods'
 import { parseSchemaTableColumns } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
@@ -386,9 +387,10 @@ function controllerCollisionFinding(collision: ControllerNameCollision): AuditFi
 
 /**
  * A controller method that both validates a request body and calls
- * forceCreate/forceUpdate is likely feeding request-derived data past
- * mass-assignment protection. Static analysis cannot prove data flow, so this is
- * a review prompt (warn), never a fail.
+ * forceCreate/forceUpdate may be feeding request-derived data past
+ * mass-assignment protection. The owner shape the tutorial teaches is let
+ * through by `forceWritesKeepServerOwnedColumns`; anything else is a review
+ * prompt (warn), never a fail, since static analysis cannot prove data flow.
  */
 function auditForceWrites(controllerMethods: Map<string, ControllerMethodInfo>, findings: AuditFinding[]): void {
   for (const [methodKey, info] of controllerMethods) {
@@ -396,16 +398,20 @@ function auditForceWrites(controllerMethods: Map<string, ControllerMethodInfo>, 
     // Same predicate the route-validation check uses, so the two findings
     // cannot disagree about whether a method validates its body.
     if (!VALIDATE_BODY_PATTERN.test(info.body)) continue
+    if (forceWritesKeepServerOwnedColumns(info)) continue
 
     findings.push(
       finding(
         `force-write-request-data:${methodKey}`,
         `${methodKey} force write`,
         'warn',
-        `${methodKey} validates a request body and calls forceCreate/forceUpdate in the same method — `
-        + `if the validated input reaches the force* call, mass-assignment protection is bypassed with request data.`,
-        `Pass request-derived data through create()/update() (protected), and reserve forceCreate/forceUpdate `
-        + `for trusted server-side values assembled without request input.`,
+        `${methodKey} validates a request body and calls forceCreate/forceUpdate in the same method, `
+        + `with an argument whose keys the request may have chosen. If the validated input reaches the force* call, `
+        + `mass-assignment protection is bypassed with request data.`,
+        `Pass request-derived data through create()/update() (protected). A force* argument is accepted when it is `
+        + `an object literal that spreads only a const bound to await this.validateBody(...) and names the columns `
+        + `the server sets, from this.auth.userOrFail(), this.model() or a literal: `
+        + `forceCreate({ ...data, authorId: user.id }).`,
         info.filePath,
       ),
     )
