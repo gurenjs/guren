@@ -5,20 +5,18 @@ import { fileExists, MODELS_DIR } from '../../cli/src/discovery'
 import { parseFieldsString } from '../../cli/src/fields'
 import { collectionSlug, schemaIdentifierFor, singularize } from '../../cli/src/inflect'
 import { DEFAULT_ROUTES_FILE, findRouteRegistrar } from '../../cli/src/route-registrar'
-import { schemaDeclaresTable } from '../../cli/src/schema-parser'
+import { schemaDeclaresTable, schemaPathFor } from '../../cli/src/schema-parser'
 import { pascalCase } from '../../cli/src/utils'
 import { DEFAULT_RESOURCE_EXAMPLE, getAppBlueprint, listAppBlueprints, scaffoldAppBlueprint } from '../src/blueprints'
 import { createTempWorkspace, type TempWorkspace } from './helpers'
 
 /**
- * Names are derived as @guren/cli's addResource() derives them and read with the
- * CLI's own readers. The blog blueprint doubles as the control: the same
- * derivation must find everything its own Post ships.
+ * The blog blueprint doubles as the control: the same derivation must find its
+ * own Post, so a mistyped path or route string cannot pass as absent.
  */
 const PAGE_BLUEPRINTS = listAppBlueprints().filter((name) => !getAppBlueprint(name).apiOnly)
 
-const EXAMPLES = [...new Set(PAGE_BLUEPRINTS.map((name) => getAppBlueprint(name).resourceExample ?? DEFAULT_RESOURCE_EXAMPLE))]
-
+/** Derived as @guren/cli's addResource() derives them. */
 function resourceNames(name: string): { singular: string; slug: string; identifier: string } {
   const singular = singularize(pascalCase(name))
   return { singular, slug: collectionSlug(singular), identifier: schemaIdentifierFor(singular) }
@@ -49,10 +47,6 @@ it('keeps the blog blueprint, whose Post is the control', () => {
   expect(PAGE_BLUEPRINTS).toContain('blog')
 })
 
-it.each(EXAMPLES.map((example) => [example.name, example.fields] as const))('passes %s fields add resource accepts', (_name, fields) => {
-  expect(() => parseFieldsString(fields)).not.toThrow()
-})
-
 describe.each(PAGE_BLUEPRINTS)('%s blueprint add resource example', (name) => {
   const example = getAppBlueprint(name).resourceExample ?? DEFAULT_RESOURCE_EXAMPLE
   const { singular, slug, identifier } = resourceNames(example.name)
@@ -74,11 +68,12 @@ describe.each(PAGE_BLUEPRINTS)('%s blueprint add resource example', (name) => {
   })
 
   it('names a resource the template does not already ship', async () => {
-    expect(await fileExists(app, 'db/schema.ts')).toBe(true)
+    expect(await fileExists(app, schemaPathFor(null))).toBe(true)
     expect(await schemaDeclaresTable(app, identifier)).toBe(false)
 
     const routes = await readFile(join(app, DEFAULT_ROUTES_FILE), 'utf8')
     expect(findRouteRegistrar(routes)).not.toBeNull()
+    // Restates the private routesAlreadyRegister() in packages/cli/src/blueprints.ts; keep in step.
     expect(routes).not.toContain(`'${slug}.index'`)
     expect(routes).not.toContain(`'/${slug}'`)
   })
@@ -91,5 +86,9 @@ describe.each(PAGE_BLUEPRINTS)('%s blueprint add resource example', (name) => {
     const routes = await readFile(join(app, DEFAULT_ROUTES_FILE), 'utf8')
     expect(routes).toContain(`'${post.slug}.index'`)
     expect(routes).toContain(`'/${post.slug}'`)
+  })
+
+  it('passes fields add resource accepts', () => {
+    expect(() => parseFieldsString(example.fields)).not.toThrow()
   })
 })
