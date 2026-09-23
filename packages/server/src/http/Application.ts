@@ -119,9 +119,10 @@ let devBanner: DevBannerModule | undefined
 
 /**
  * The banner module brings figlet and chalk, so it is loaded outside production
- * only. The NODE_ENV test stays alone around the import, in plain member access:
- * a deploy bundle's `--define` folds that one expression to `false` and drops the
- * module, and neither Bun nor esbuild folds it through a call or a wider condition.
+ * only. The NODE_ENV test guards the import directly, in plain member access: a
+ * deploy bundle's `--define` folds it to `false` and drops the module. Neither
+ * Bun nor esbuild folds it behind a function call, or beside a runtime value in
+ * `||` (as `shouldLogBanner` has); an `&&` with such a value still folds.
  */
 async function loadDevBanner(): Promise<DevBannerModule | undefined> {
   if (typeof process === 'undefined') {
@@ -987,6 +988,17 @@ export class Application {
         : undefined
     let resolvedAssetsUrl = assetsUrl ?? externalAssetsUrl
 
+    const shouldLogBanner =
+      typeof process === 'undefined' ||
+      (process.env.NODE_ENV !== 'production' && process.env?.GUREN_DEV_BANNER !== '0')
+
+    // Before Vite starts, so a failed import leaves no asset server behind, and
+    // before the bind: from publishing the server to returning its address,
+    // `listen()` must not yield, or a concurrent `stop()` lands in between.
+    if (shouldLogBanner) {
+      await loadDevBanner()
+    }
+
     const shouldStartVite =
       vite !== false &&
       typeof process !== 'undefined' &&
@@ -1047,16 +1059,6 @@ export class Application {
         console.error('Failed to start Vite dev server:', error)
         process.exit(1)
       }
-    }
-
-    const shouldLogBanner =
-      typeof process === 'undefined' ||
-      (process.env.NODE_ENV !== 'production' && process.env?.GUREN_DEV_BANNER !== '0')
-
-    // Before the bind: from publishing the server to returning its address,
-    // `listen()` must not yield, or a concurrent `stop()` lands in between.
-    if (shouldLogBanner) {
-      await loadDevBanner()
     }
 
     const attempts = resolvePortAttempts(portFallback, port)

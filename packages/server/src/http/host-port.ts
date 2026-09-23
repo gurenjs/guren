@@ -1,7 +1,7 @@
 /**
  * A wildcard bind answers on every interface but is not itself dialable on
- * every platform. Shared with `Application.listen()`'s returned address, which
- * is the same fact rendered twice.
+ * every platform. The dev banner and `Application.listen()`'s returned address
+ * both render this fact.
  */
 export function isWildcardHost(hostname: string): boolean {
   return hostname === '0.0.0.0' || hostname === '::'
