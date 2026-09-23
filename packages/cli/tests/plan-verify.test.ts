@@ -718,7 +718,7 @@ describe('applyVerification', () => {
     expect(elementOf(lifted, 'action.comments.store').state).toBe('verified')
     const body = elementOf(lifted, 'column.comment.body')
     expect(body.state).toBe('unjudged')
-    expect(body.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${DATA}, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.`])
+    expect(body.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${DATA}, but no planned property of it matched beyond its existence and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.`])
   })
 
   test('should reach what a behaviour\u2019s route dispatches to and names, and nothing the plan does not link to it', () => {
@@ -750,7 +750,7 @@ describe('applyVerification', () => {
     expect(elementOf(lifted, 'validator.comment').state).toBe('verified')
     const resource = elementOf(lifted, 'resource.comment')
     expect(resource.state).toBe('present')
-    expect(resource.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${HTTP}, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.`])
+    expect(resource.notes).toEqual([`Verified 2026-09-21T00:00:00.000Z by ${HTTP}, but no planned property of it matched beyond its existence and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.`])
     // A matched element with no file is held by its fingerprint, and a changed file expires a verified one.
     const unfingerprinted = applyVerification(statusOf({ 'controller.comments': { files: [] } }), derivation, { [HTTP]: http }, 'digest', hashes, plan).status
     expect(elementOf(unfingerprinted, 'controller.comments')).toMatchObject({ state: 'present', hold: { kind: 'unfingerprinted' } })
@@ -765,6 +765,9 @@ describe('applyVerification', () => {
     expect(elementOf(bare, 'resource.comment').hold?.kind).toBe('unreached')
     // A property a reader matched is a reading of the change itself, which needs no behaviour to reach it.
     expect(elementOf(applyVerification(statusOf(), derivation, { [HTTP]: http }, 'digest', hashes, plan).status, 'resource.comment').state).toBe('verified')
+    // A field's existence alone is not: it says nothing of the planned shape.
+    const onKeys = statusOf({ 'resource.comment': { properties: [{ property: 'field body', verdict: 'match', planned: 'declared', actual: 'declared', existence: true }] } })
+    expect(elementOf(applyVerification(onKeys, derivation, { [HTTP]: http }, 'digest', hashes, plan).status, 'resource.comment').hold?.kind).toBe('unreached')
   })
 
   test('should reach an element of a split step\u2019s earlier part through the part that runs the behaviours, while its record stands', async () => {

@@ -68,6 +68,9 @@ const USERS_TABLE: SourcedSchemaTable = {
   columns: [{ name: 'id', columnName: 'id', type: 'serial', sqlType: 'serial', notNull: true, primaryKey: true, unique: false }],
 }
 
+const NO_FIELDS = { fields: {} }
+const UNIMPORTED_FIELDS = { unreadable: 'app/Http/Validators/PostValidator.ts would not import (it threw)' }
+
 function detail(overrides: Partial<PlanAppDetail> = {}): PlanAppDetail {
   return {
     routes: [
@@ -91,8 +94,9 @@ function detail(overrides: Partial<PlanAppDetail> = {}): PlanAppDetail {
       { id: 'posts/Index', file: 'resources/js/pages/posts/Index.tsx', props: { status: 'keys', keys: [{ name: 'posts', type: 'Post[]', optional: false }] } },
       { id: 'posts/Show', file: 'resources/js/pages/posts/Show.tsx', props: { status: 'undeclared' } },
     ],
-    validators: [{ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null }],
+    validators: [{ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null, fields: NO_FIELDS }],
     resources: [{ className: 'PostResource', module: null, file: 'app/Http/Resources/PostResource.ts' }],
+    resourcePayloads: [],
     policies: [{ className: 'PostPolicy', module: null, file: 'app/Policies/PostPolicy.ts' }],
     routeFiles: [{ file: 'routes/web.ts', identifiers: ['PostController', 'PostPayloadSchema'] }],
     sideEffects: { job: [{ className: 'SendDigest', module: null, file: 'app/Jobs/SendDigest.ts' }], event: [], listener: [] },
@@ -242,7 +246,7 @@ const CASES: Case[] = [
     name: 'a validator whose file would not import, so no contract could be matched to it',
     plan: validator(ADD),
     app: app({
-      validators: [{ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null, unimported: 'it threw' }],
+      validators: [{ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null, unimported: 'it threw', fields: UNIMPORTED_FIELDS }],
     }),
     id: 'val',
     state: 'present',
@@ -278,7 +282,7 @@ const CASES: Case[] = [
   {
     name: 'a validator the plan puts at the project root and only a module exports',
     plan: validator(ADD),
-    app: app({ validators: [{ name: 'PostPayloadSchema', file: 'modules/billing/app/Http/Validators/PostValidator.ts', module: 'billing' }] }),
+    app: app({ validators: [{ name: 'PostPayloadSchema', file: 'modules/billing/app/Http/Validators/PostValidator.ts', module: 'billing', fields: NO_FIELDS }] }),
     id: 'val',
     state: 'planned',
   },
@@ -439,7 +443,7 @@ const CASES: Case[] = [
   { name: 'an added resource', plan: plan({ resources: [{ id: 'res', change: ADD, name: 'PostResource', model: 'm', fields: [] }] }), app: app(), id: 'res', state: 'present' },
   { name: 'an added policy', plan: plan({ policies: [{ id: 'pol', change: ADD, name: 'PostPolicy', model: 'm', abilities: [] }] }), app: app(), id: 'pol', state: 'present' },
   {
-    name: 'an added resource whose planned fields nothing reads',
+    name: 'an added resource whose payload guren codegen does not read',
     plan: plan({ resources: [{ id: 'res', change: ADD, name: 'PostResource', model: 'm', fields: [{ name: 'id', type: 'number' }] }] }),
     app: app(),
     id: 'res',
@@ -460,9 +464,9 @@ const CASES: Case[] = [
     state: 'unjudged',
   },
   {
-    name: 'an added validator whose planned fields nothing reads, on its mount',
+    name: 'an added validator whose planned fields cannot be read, on its mount',
     plan: validator(ADD, 'PostPayloadSchema', { fields: [{ name: 'body', type: 'text', required: true, rules: [] }] }),
-    app: app({ routes: [contractRoute(null)] }),
+    app: app({ routes: [contractRoute(null)], validators: [{ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null, fields: { unreadable: 'PostPayloadSchema is not a zod schema' } }] }),
     id: 'val',
     state: 'wired',
   },
@@ -719,7 +723,7 @@ describe('judgePlan', () => {
 
   describe('a validator’s evidence of mounting', () => {
     test('should say a file would not import rather than that no contract holds the symbol', () => {
-      const unimported = app({ validators: [{ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null, unimported: 'it threw' }] })
+      const unimported = app({ validators: [{ name: 'PostPayloadSchema', file: 'app/Http/Validators/PostValidator.ts', module: null, unimported: 'it threw', fields: UNIMPORTED_FIELDS }] })
 
       expect(only(judgePlan(validator(ADD), unimported), 'val').notes).toEqual([
         'Not confirmed as wired: app/Http/Validators/PostValidator.ts would not import, so no route contract could be matched to it (it threw).',

@@ -45,6 +45,7 @@ import { importsByLocal, specifierBase } from '../schema-binding'
 import { readSchemaTables, withImportTimeout, type SourcedSchemaTable } from '../schema-runtime'
 import { routePathCovers } from '../test-requests'
 import type { PlanAppScope, PlanAppUnreadable } from './app-state'
+import { readResourcePayloads, readSchemaFields, type PlanAppResourcePayload, type PlanAppSchemaFields } from './field-readers'
 
 /** `mounted`, or why this command could not confirm it. Absence of evidence is never `mounted`. */
 export type PlanAppMount = 'mounted' | { unconfirmed: string }
@@ -120,6 +121,8 @@ export interface PlanAppValidatorDetail {
   module: PlanAppScope
   /** Why the file would not import, which leaves the symbol unmatchable against a route contract. */
   unimported?: string
+  /** The export's input fields, read off the imported object; unreadable for anything but an object schema. */
+  fields: PlanAppSchemaFields
 }
 
 /** A class a plan names and a directory scan discovers, for the kinds with no other reader. */
@@ -154,6 +157,8 @@ export interface PlanAppDetail {
   pages: PlanAppPageDetail[] | PlanAppUnreadable
   validators: PlanAppValidatorDetail[] | PlanAppUnreadable
   resources: PlanAppClassDetail[]
+  /** What `guren codegen` reads each resource's payload as, for a planned resource's fields. */
+  resourcePayloads: PlanAppResourcePayload[] | PlanAppUnreadable
   policies: PlanAppClassDetail[]
   routeFiles: PlanAppRouteFile[]
   sideEffects: Record<PlanAppSideEffectKind, PlanAppClassDetail[]>
@@ -193,7 +198,7 @@ const VALIDATE_CALL_PATTERN = new RegExp(
   'g',
 )
 
-/** A validator file is imported only to match a contract schema, so it gets the schema reader's budget. */
+/** A validator file is imported like the schema, so it gets the schema reader's budget. */
 const VALIDATOR_IMPORT_TIMEOUT_MS = 5000
 
 function reasonOf(error: unknown): string {
@@ -208,12 +213,13 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
   const { root } = input
   const cache = new ParseCache()
 
-  const [tables, models, pages, validatorRead, resources, policies, routeFiles, sideEffects, mounts] = await Promise.all([
+  const [tables, models, pages, validatorRead, resources, resourcePayloads, policies, routeFiles, sideEffects, mounts] = await Promise.all([
     tableDetail(root),
     modelDetail(root, input.models),
     pageDetail(root, input.pages),
     validatorDetail(root, cache, contractSchemaObjects(input.definitions)),
     classDetail(root, discoverResourceFiles),
+    readResourcePayloads(root),
     classDetail(root, discoverPolicyFiles),
     routeFileDetail(root, cache, input.routesFile),
     sideEffectDetail(root),
@@ -230,6 +236,7 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
     pages,
     validators: validatorRead.validators,
     resources,
+    resourcePayloads,
     policies,
     routeFiles,
     sideEffects,
@@ -461,11 +468,11 @@ interface ValidatorRead {
 }
 
 /**
- * Validators by exported symbol, plus the identity of the objects those symbols hold,
- * which answers "is this the schema a route registered". Identity costs an import, so
- * the files are imported only when a registered route carries a contract; one that
- * would not import leaves its own symbols unmatchable, never the section unreadable.
- * Barrels are excluded as for models: a re-export belongs to the file that declares it.
+ * Validators by exported symbol, with the fields each holds and the identity of the
+ * objects, which answers "is this the schema a route registered". Both need the file
+ * imported; one that would not import leaves its own symbols unmatchable and their
+ * fields unread, never the section unreadable. Barrels are excluded as for models: a
+ * re-export belongs to the file that declares it.
  */
 async function validatorDetail(root: string, cache: ParseCache, contracts: Set<object>): Promise<ValidatorRead> {
   const files = excludeBarrelFiles(await discoverValidatorFiles(root))
@@ -478,25 +485,29 @@ async function validatorDetail(root: string, cache: ParseCache, contracts: Set<o
     // One unread file makes every absent name unprovable, as with the controller scan.
     if (names === null) return { validators: { unreadable: `${file} could not be read for its exported schemas` }, symbols }
     const module = moduleNameFromRelPath(file)
-    const unimported = contracts.size === 0 ? undefined : await readSchemaIdentities(filePath, contracts, symbols)
-    validators.push(...names.filter((name) => name !== 'default').map((name) => ({ name, file, module, ...(unimported ? { unimported } : {}) })))
+    const exported = names.filter((name) => name !== 'default')
+    const imported = await importValidatorFile(filePath)
+    if (typeof imported === 'string') {
+      const fields = { unreadable: `${file} would not import (${imported})` }
+      validators.push(...exported.map((name) => ({ name, file, module, unimported: imported, fields })))
+      continue
+    }
+    for (const [name, value] of Object.entries(imported)) {
+      if (value === null || typeof value !== 'object' || !contracts.has(value)) continue
+      symbols.set(value, [...(symbols.get(value) ?? []), name])
+    }
+    validators.push(...exported.map((name) => ({ name, file, module, fields: readSchemaFields(name, imported[name]) })))
   }
   return { validators, symbols }
 }
 
-/** Imports one validator file for the identity of the schemas it exports, or answers why it would not. */
-async function readSchemaIdentities(filePath: string, contracts: Set<object>, symbols: SchemaSymbols): Promise<string | undefined> {
-  let exports: Record<string, unknown>
+/** One validator file's exports, or why it would not import. */
+async function importValidatorFile(filePath: string): Promise<Record<string, unknown> | string> {
   try {
-    exports = await withImportTimeout(import(pathToFileURL(filePath).href) as Promise<Record<string, unknown>>, VALIDATOR_IMPORT_TIMEOUT_MS)
+    return await withImportTimeout(import(pathToFileURL(filePath).href) as Promise<Record<string, unknown>>, VALIDATOR_IMPORT_TIMEOUT_MS)
   } catch (error) {
     return reasonOf(error)
   }
-  for (const [name, value] of Object.entries(exports)) {
-    if (value === null || typeof value !== 'object' || !contracts.has(value)) continue
-    symbols.set(value, [...(symbols.get(value) ?? []), name])
-  }
-  return undefined
 }
 
 /**

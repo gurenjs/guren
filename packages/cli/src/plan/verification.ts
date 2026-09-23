@@ -103,6 +103,11 @@ export function behaviourReach(plan: PlanDraft | Plan, acceptanceIds: Iterable<s
   return reached
 }
 
+/** Whether a planned property of the element matched as more than a key's existence, which says nothing of its shape. */
+export function hasShapeMatch(element: Pick<PlanElementStatus<PlanElementState>, 'properties'>): boolean {
+  return element.properties.some((property) => property.verdict === 'match' && !property.existence)
+}
+
 /**
  * An element its step verified is `verified` while every fingerprinted file still hashes the
  * same, `drifted` once one does not or cannot be read. Lifted: one at its completion state or
@@ -145,7 +150,7 @@ export function applyVerification(
         const element = lifted.get(id)
         if (!element) continue
         const uncovered = element.files.filter((file) => !(file in recorded))
-        const unmatched = element.change !== 'drop' && !element.properties.some((property) => property.verdict === 'match')
+        const unmatched = element.change !== 'drop' && !hasShapeMatch(element)
         // An `unjudged` element with no file rests on the behaviours reaching it, whose test files their record covers.
         const needsNoFiles = element.change === 'drop' || element.state === 'unjudged'
         const hold = (kind: PlanVerificationHold, note: string): void => {
@@ -155,7 +160,7 @@ export function applyVerification(
         if (!awaitsVerification(element)) {
           hold('incomplete', `${verifiedBy}, and no longer at the state that completes it.`)
         } else if (unmatched && !reached.has(id)) {
-          hold('unreached', `${verifiedBy}, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.`)
+          hold('unreached', `${verifiedBy}, but no planned property of it matched beyond its existence and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.`)
         } else if (element.files.length === 0 && !needsNoFiles) {
           hold('unfingerprinted', `${verifiedBy}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`)
         } else if (uncovered.length > 0) {
