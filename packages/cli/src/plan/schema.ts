@@ -126,7 +126,7 @@ export const PlanValidatorSchema = z.strictObject({
       name: NonEmptySchema,
       /** The validated value's type, not what the client sends: a coerced or piped field is its result. */
       type: z.enum(PLAN_COLUMN_TYPES),
-      /** Whether a client must send a non-null value: `.optional()`, `.default()` and `.nullable()` make it `false`. */
+      /** Whether a client must send a non-null value: `.optional()`, `.nullish()`, `.nullable()`, `.default()`, `.prefault()` and `.catch()` make it `false`. */
       required: z.boolean(),
       /** Prose; `plan:status` compares only `min <n>`, `max <n>`, `email`, `url` and `uuid`. */
       rules: z.array(z.string()),

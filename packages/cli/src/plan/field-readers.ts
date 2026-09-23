@@ -30,10 +30,10 @@ export interface PlanAppSchemaField {
   input?: JsonSchemaObject
   /** The validated value, which a plan's field type describes; absent for a field the output object lacks. */
   output?: JsonSchemaObject
-  /** Why a side is absent. */
+  /** The first warning the walker gave on the key itself. */
   unrendered?: string
-  /** The walker's presence: false when a client may leave the key out. */
-  required: boolean
+  /** False when a client may leave the key out; absent where the walker dropped the key unrendered, which says nothing of it. */
+  required?: boolean
   /** A pipe or transform in the field's own chain, so its two sides may differ. */
   piped: boolean
   /** A transform in any stage of that chain, which may supply a value the walker reads as missing. */
@@ -42,7 +42,8 @@ export interface PlanAppSchemaField {
   transformed: boolean
 }
 
-export type PlanAppSchemaFields = { fields: Record<string, PlanAppSchemaField> } | PlanAppUnreadable
+/** `reshaped`: a transform on the object itself, after every field's checks ran, so no field's output type is its own. */
+export type PlanAppSchemaFields = { fields: Record<string, PlanAppSchemaField>; reshaped: boolean } | PlanAppUnreadable
 
 export interface PlanAppResourcePayload {
   className: string
@@ -52,31 +53,46 @@ export interface PlanAppResourcePayload {
   payload: { members: PagePropKey[]; open?: string } | PlanAppUnreadable
 }
 
+/** A walk that throws (a recursive getter schema overflows the walker) leaves this export's fields unread, never the command. */
 export function readSchemaFields(name: string, value: unknown): PlanAppSchemaFields {
+  try {
+    return walkSchemaFields(name, value)
+  } catch (error) {
+    return { unreadable: `${name} could not be walked (${error instanceof Error ? error.message : String(error)})` }
+  }
+}
+
+/** The input presence wrappers the walker reads as omissible, for a key it dropped unrendered. */
+const OMISSIBLE_WRAPPERS = new Set(['optional', 'default', 'prefault', 'catch'])
+
+function walkSchemaFields(name: string, value: unknown): PlanAppSchemaFields {
   const warnings: string[] = []
   const object = readObjectSchema(value, warnings, name, 'input')
   const inputShape = object && objectShapeOf(value as ZodSchemaLike, 'input')
   if (!object || !inputShape) {
-    if (warnings.some((warning) => warning.includes(ZOD3_UNSUPPORTED_MESSAGE)) || !isZodSchema(value)) return { unreadable: warnings[0] ?? `${name} is not a zod schema` }
-    return { unreadable: `${name} does not reach an object schema this walker can read` }
+    const refused = !isZodSchema(value) || warnings.some((warning) => warning.includes(ZOD3_UNSUPPORTED_MESSAGE))
+    return { unreadable: refused ? (warnings[0] ?? `${name} is not a zod schema`) : `${name} does not reach an object schema this walker can read` }
   }
   const outputShape = objectShapeOf(value as ZodSchemaLike, 'output') ?? {}
   const fields: Record<string, PlanAppSchemaField> = {}
   for (const [key, node] of Object.entries(inputShape)) {
+    const outputNode = outputShape[key]
     const input = renderSide(node, key, 'input')
-    const output = key in outputShape ? renderSide(outputShape[key]!, key, 'output') : { unrendered: 'the output object does not declare it' }
+    const output = outputNode ? renderSide(outputNode, key, 'output') : { unrendered: 'the output object does not declare it' }
     const unrendered = input.unrendered ?? output.unrendered
+    const chain = wrapperChain(node)
+    const required = key in object.properties ? object.required.has(key) : chain.some((type) => OMISSIBLE_WRAPPERS.has(type)) ? false : undefined
     fields[key] = {
       ...(input.schema ? { input: input.schema } : {}),
       ...(output.schema ? { output: output.schema } : {}),
       ...(unrendered ? { unrendered } : {}),
-      required: object.required.has(key),
-      piped: wrapperChain(node).some((type) => type === 'pipe' || type === 'transform'),
+      ...(required === undefined ? {} : { required }),
+      piped: chain.includes('pipe') || chain.includes('transform'),
       transforming: hasTransformStage(node),
-      transformed: key in outputShape && reachesTransform(outputShape[key]!),
+      transformed: outputNode !== undefined && reachesTransform(outputNode),
     }
   }
-  return { fields }
+  return { fields, reshaped: reachesTransform(value as ZodSchemaLike) }
 }
 
 /** The field rendered on one side; a warning labelled with the key itself, not a part below it, means the rendering is not the field's. */
@@ -135,17 +151,13 @@ function reachesTransform(schema: ZodSchemaLike): boolean {
 
 /** Every resource class codegen discovers, with the members of the payload type it would emit. */
 export async function readResourcePayloads(root: string): Promise<PlanAppResourcePayload[] | PlanAppUnreadable> {
-  let read: Awaited<ReturnType<typeof readResourceDefinitions>>
-  try {
-    read = await readResourceDefinitions(root)
-  } catch (error) {
-    return { unreadable: error instanceof Error ? error.message : String(error) }
-  }
+  const read = await readResourceDefinitions(root).catch((error: unknown): PlanAppUnreadable => ({ unreadable: error instanceof Error ? error.message : String(error) }))
+  if ('unreadable' in read) return read
   return read.definitions.map((definition) => ({
     className: definition.className,
     module: definition.module,
     file: definition.filePath,
-    payload: payloadMembers(definition, read.warnings.find((warning) => warning.includes(`(${definition.filePath})`))),
+    payload: payloadMembers(definition, read.warnings.find((warning) => warning.startsWith(`Resource ${definition.className} (${definition.filePath})`))),
   }))
 }
 

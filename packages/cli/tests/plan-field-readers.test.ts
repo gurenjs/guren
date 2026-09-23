@@ -53,7 +53,23 @@ export const FormSchema = z.object({
   contact: z.string().min(1).pipe(z.email()),
 })
 
+export const TreeSchema = z.object({
+  name: z.string(),
+  get children() {
+    return z.array(TreeSchema)
+  },
+})
+
+export const OpaqueSchema = z.object({
+  upload: z.file(),
+  lazy: z.lazy(() => z.string()),
+  maybe: z.lazy(() => z.string()).optional(),
+})
+
+export const ReshapedSchema = z.object({ amount: z.string(), label: z.string().max(20) }).transform((value) => ({ ...value, amount: Number(value.amount) }))
+
 export const BoundsSchema = z.object({
+  digits: z.string().max(3).transform(Number),
   quantity: z.number().int().min(0).gt(0),
   note: z.string().max(500),
   title: z.string().max(2000),
@@ -150,12 +166,13 @@ describe('plan:status validator fields', () => {
 
   test('should call a tighter bound, a type of another family and a required field made optional a differ', () => {
     const element = judged(validator('CommentPayloadSchema', [
-      { name: 'body', type: 'boolean', required: true, rules: ['max 3000'] },
+      { name: 'body', type: 'text', required: true, rules: ['max 3000'] },
+      { name: 'email', type: 'boolean', required: true, rules: [] },
       { name: 'rating', type: 'integer', required: true, rules: [] },
     ]), 'val')
 
     expect(verdicts(element)).toMatchObject({
-      'field body type': 'differ',
+      'field email type': 'differ',
       'field body rule max 3000': 'differ',
       'field rating required': 'differ',
     })
@@ -228,6 +245,34 @@ describe('plan:status validator fields', () => {
     expect(verdicts(element)).toMatchObject({ 'field filled required': 'unknown', 'field a.b type': 'match', 'field gone': 'match' })
   })
 
+  test('should leave a recursive schema unread rather than fail the command', () => {
+    const element = judged(validator('TreeSchema', [{ name: 'name', type: 'string', required: true, rules: [] }]), 'val')
+
+    expect(element.properties[0]).toMatchObject({ verdict: 'unknown', reason: expect.stringContaining('could not be walked') })
+  })
+
+  test('should not read a key the walker drops unrendered as omissible', () => {
+    const element = judged(validator('OpaqueSchema', [
+      { name: 'upload', type: 'json', required: true, rules: [] },
+      { name: 'lazy', type: 'string', required: true, rules: [] },
+      { name: 'maybe', type: 'string', required: false, rules: [] },
+    ]), 'val')
+
+    expect(verdicts(element)).toMatchObject({ 'field upload required': 'unknown', 'field lazy required': 'unknown', 'field maybe required': 'match' })
+  })
+
+  test('should leave every type unknown under a transform on the object itself, and still read the checks that ran before it', () => {
+    const element = judged(validator('ReshapedSchema', [{ name: 'amount', type: 'integer', required: true, rules: [] }, { name: 'label', type: 'string', required: true, rules: ['max 20'] }]), 'val')
+
+    expect(verdicts(element)).toMatchObject({ 'field amount type': 'unknown', 'field label type': 'unknown', 'field label rule max 20': 'match' })
+  })
+
+  test('should read a bound only in the planned type’s unit, never a transformed field’s input length', () => {
+    const element = judged(validator('BoundsSchema', [{ name: 'digits', type: 'integer', required: true, rules: ['max 500'] }]), 'val')
+
+    expect(verdicts(element)['field digits rule max 500']).toBe('unknown')
+  })
+
   test('should call only a bound tighter than planned a differ, reading an integer’s exclusive bound as the next integer', () => {
     const element = judged(validator('BoundsSchema', [
       { name: 'quantity', type: 'integer', required: true, rules: ['min 1'] },
@@ -292,6 +337,7 @@ describe('plan:status resource fields', () => {
     expect(verdictOf('status', 'string')).toBe('unknown')
     expect(verdictOf('status', 'number')).toBe('differ')
     expect(verdictOf('rank', 'number')).toBe('unknown')
+    expect(verdictOf('rank', 'bigint')).toBe('differ')
   })
 
   test('should keep an index signature from opening the key set, as a Record heritage does', () => {

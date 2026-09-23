@@ -68,7 +68,7 @@ const USERS_TABLE: SourcedSchemaTable = {
   columns: [{ name: 'id', columnName: 'id', type: 'serial', sqlType: 'serial', notNull: true, primaryKey: true, unique: false }],
 }
 
-const NO_FIELDS = { fields: {} }
+const NO_FIELDS = { fields: {}, reshaped: false }
 const UNIMPORTED_FIELDS = { unreadable: 'app/Http/Validators/PostValidator.ts would not import (it threw)' }
 
 function detail(overrides: Partial<PlanAppDetail> = {}): PlanAppDetail {

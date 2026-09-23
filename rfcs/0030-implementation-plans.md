@@ -1633,12 +1633,14 @@ reader, and Part 2 measured both at 100% `unknown`. What shipped
   resource field yields `field <name>` and `field <name> type`. A key the
   schema's object does not declare is a `differ` and its other properties are
   `unknown`. An export that reaches no object (`z.lazy()`, a plain object, a
-  zod v3 schema) or a file that would not import leaves every property
-  `unknown` with the reason.
+  zod v3 schema), a walk that throws (a recursive getter schema), or a file
+  that would not import leaves every property `unknown` with the reason.
 - A planned `type` describes the validated value, so it is compared with the
   walker's output side: `z.coerce.number().int()` and `z.stringbool()` match
   `integer` and `boolean`. A field whose output passes through a `.transform()`
-  is `unknown`, since the walker renders a transform's result as its input. A
+  is `unknown`, since the walker renders a transform's result as its input, and
+  so is every field's type under a transform on the object itself (the checks
+  that ran before it are still read). A
   type is a `differ` only across JSON families and only on a field with no pipe
   or transform, where both sides are one node; a format the planned type needs
   and the schema does not declare (`uuid`, `date`), a number for a planned
@@ -1646,9 +1648,12 @@ reader, and Part 2 measured both at 100% `unknown`. What shipped
 - `required` means a client must send a non-null value, so a key it may omit or
   send as `null` reads `false`; a union reads `unknown`, and so does a key the
   walker calls required on a field with a transform stage, which may fill a
-  missing value in. Rules are prose, and only `min`, `max`, `email`, `url` and
-  `uuid` are compared. A bound is the tightest either stage states (both stages
-  run), an integer's exclusive bound read as the next integer in. It is a
+  missing value in, and a key the walker drops unrendered (`z.file()`,
+  `z.lazy()`), which says nothing of its presence. Rules are prose, and only `min`, `max`, `email`, `url` and
+  `uuid` are compared. A bound is the tightest either stage states in the
+  planned type's unit (both stages run; a transformed field's input length says
+  nothing of an `integer`), an integer's exclusive bound read as the next
+  integer in. It is a
   `match` when it equals the planned bound, a `differ` when it is tighter, since
   it rejects a value the plan accepts, and `unknown` when it is looser or absent,
   since a refinement the walker does not render may tighten it. That settles
@@ -1677,8 +1682,9 @@ reader, and Part 2 measured both at 100% `unknown`. What shipped
 - Measured on `examples/blog` (9 validators, 1 resource) and `examples/api` (8
   validators, 2 resources) against hand-written plans that state the code as it
   is: before, all 20 elements carried one `unknown` `fields` property each;
-  after, the 209 per-field properties read 200 `match`, 9 `unknown`, 0
-  `differ`. The unknowns are a type behind a transform (4), a union's presence
+  after, the 209 per-field properties read 198 `match`, 11 `unknown`, 0
+  `differ`. The unknowns are a type behind a field's transform (2), every type
+  under the blog's `ProfileUpdateSchema.transform()` (4), a union's presence
   (1), a `min 8` enforced in `superRefine()` (1), and the free-form `positive`
   (3).
 

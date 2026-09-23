@@ -78,9 +78,9 @@ function validatorField(field: PlanValidatorField, read: PlanAppSchemaFields): P
   if (!actual) return [differ(name, 'declared', 'not declared'), ...details('the schema does not declare it')]
   return [
     match(name, 'declared'),
-    typeProperty(`${name} type`, field.type, actual),
+    read.reshaped ? unknown(`${name} type`, field.type, 'a transform on the object reshapes the validated value, whose type is not read') : typeProperty(`${name} type`, field.type, actual),
     requiredProperty(`${name} required`, field.required, actual),
-    ...rules.map(({ property, rule }) => ruleProperty(property, rule, actual)),
+    ...rules.map(({ property, rule }) => ruleProperty(property, rule, field.type, actual)),
   ]
 }
 
@@ -97,6 +97,7 @@ function typeProperty(property: string, planned: PlanValidatorField['type'], fie
 
 /** Required means a client must send a value: a key it may omit, or one it may send as `null`, is not. */
 function requiredProperty(property: string, planned: boolean, field: PlanAppSchemaField): PlanPropertyStatus {
+  if (field.required === undefined) return unknown(property, String(planned), field.unrendered ?? 'the schema walker renders nothing for the field')
   if (!field.required) return compareBoolean(property, planned, false, 'may be omitted')
   if (!field.input) return unknown(property, String(planned), field.unrendered ?? 'the input side was not rendered')
   const shape = shapeOf(field.input)
@@ -131,35 +132,53 @@ interface Bound {
   keyword: BoundKeyword
 }
 
+/** The families a planned type's bound is stated in: a string's length, a number's value, an array's size. */
+const BOUND_FAMILIES: Record<PlanValidatorField['type'], Family[]> = {
+  string: ['string'],
+  text: ['string'],
+  uuid: ['string'],
+  date: ['string'],
+  datetime: ['string'],
+  integer: ['integer', 'number'],
+  number: ['integer', 'number'],
+  decimal: ['integer', 'number'],
+  boolean: [],
+  json: ['array'],
+}
+
+/** Whether `a` admits less than `b` on this side; at an equal value an exclusive `a` is the tighter. */
+function isTighter(side: 'min' | 'max', a: { value: number; exclusive: boolean }, b: { value: number }): boolean {
+  if (a.value === b.value) return a.exclusive
+  return side === 'min' ? a.value > b.value : a.value < b.value
+}
+
 /**
- * The tightest bound the field states on either rendered side, both stages being enforced. An
- * integer's exclusive bound is the next integer in. A side of another family bounds something else.
+ * The tightest bound the field states in the planned type's unit, on either rendered side, both
+ * stages being enforced. An integer's exclusive bound is the next integer in. A transformed
+ * field's output side is its input again, and its input bounds a value the plan does not describe.
  */
-function statedBound(field: PlanAppSchemaField, side: 'min' | 'max'): Bound | undefined {
-  const outputShape = field.output && !field.transformed ? shapeOf(field.output) : undefined
-  const inputShape = field.input ? shapeOf(field.input) : undefined
-  const family = outputShape?.family ?? inputShape?.family
-  const keywords = family ? BOUND_KEYWORDS[family] : undefined
-  if (!keywords) return undefined
-  const tighter = (a: Bound, b: Bound): boolean => (side === 'min' ? a.value > b.value || (a.value === b.value && a.exclusive) : a.value < b.value || (a.value === b.value && a.exclusive))
+function statedBound(field: PlanAppSchemaField, type: PlanValidatorField['type'], side: 'min' | 'max'): Bound | undefined {
+  const sides = field.transformed ? [] : [field.input, field.output]
   let bound: Bound | undefined
-  for (const shape of [inputShape, outputShape]) {
-    if (!shape || shape.family !== family) continue
+  for (const schema of sides) {
+    const shape = schema ? shapeOf(schema) : undefined
+    const keywords = shape?.family && BOUND_FAMILIES[type].includes(shape.family) ? BOUND_KEYWORDS[shape.family] : undefined
+    if (!shape || !keywords) continue
     for (const keyword of keywords[side]) {
       const stated = shape.schema[keyword]
       if (typeof stated !== 'number') continue
       const exclusive = keyword.startsWith('exclusive')
-      const candidate: Bound = family === 'integer' && exclusive && Number.isInteger(stated)
+      const candidate: Bound = shape.family === 'integer' && exclusive && Number.isInteger(stated)
         ? { value: side === 'min' ? stated + 1 : stated - 1, exclusive: false, keyword }
         : { value: stated, exclusive, keyword }
-      if (!bound || tighter(candidate, bound)) bound = candidate
+      if (!bound || isTighter(side, candidate, bound)) bound = candidate
     }
   }
   return bound
 }
 
 /** A stated bound tighter than the planned one rejects a value the plan accepts; a looser one may be tightened by a refinement. */
-function ruleProperty(property: string, rule: string, field: PlanAppSchemaField): PlanPropertyStatus {
+function ruleProperty(property: string, rule: string, type: PlanValidatorField['type'], field: PlanAppSchemaField): PlanPropertyStatus {
   const text = rule.trim()
   const format = FORMAT_RULES[text.toLowerCase()]
   if (format) {
@@ -170,12 +189,11 @@ function ruleProperty(property: string, rule: string, field: PlanAppSchemaField)
   if (!parsed) return unknown(property, rule, 'rule text is compared only as min, max, email, url or uuid')
   const side = parsed[1]!.toLowerCase() as 'min' | 'max'
   const planned = Number(parsed[2])
-  const bound = statedBound(field, side)
+  const bound = statedBound(field, type, side)
   if (!bound) return unknown(property, rule, `no ${side} bound is declared, and a refinement this does not read may check it`)
   const said = `${bound.keyword} ${bound.value}`
   if (!bound.exclusive && bound.value === planned) return match(property, rule, said)
-  const tighter = side === 'min' ? bound.value > planned || (bound.value === planned && bound.exclusive) : bound.value < planned || (bound.value === planned && bound.exclusive)
-  return tighter ? differ(property, rule, said) : unknown(property, rule, `${said} is looser than planned, and a refinement this does not read may tighten it`)
+  return isTighter(side, bound, { value: planned }) ? differ(property, rule, said) : unknown(property, rule, `${said} is looser than planned, and a refinement this does not read may tighten it`)
 }
 
 export function resourceFieldProperties(planned: ReadonlyArray<PlanResourceField>, read: PlanAppResourcePayload['payload']): PlanPropertyStatus[] {
@@ -197,10 +215,18 @@ function resourceField(field: PlanResourceField, read: PlanAppResourcePayload['p
 
 const PRIMITIVE_TYPES = new Set(['string', 'number', 'boolean', 'bigint', 'null'])
 
+interface TypeKind {
+  keyword: string
+  literal: boolean
+}
+
+const isKind = (kind: TypeKind | undefined): kind is TypeKind => kind !== undefined
+
 /** The keyword a union member is an instance of, or `undefined` for anything but a keyword or a literal. */
-function keywordOf(member: string): { keyword: string; literal: boolean } | undefined {
+function keywordOf(member: string): TypeKind | undefined {
   if (PRIMITIVE_TYPES.has(member)) return { keyword: member, literal: false }
   if (member.startsWith('"')) return { keyword: 'string', literal: true }
+  if (/^-?\d[\d_]*n$/u.test(member)) return { keyword: 'bigint', literal: true }
   if (/^-?\d/u.test(member)) return { keyword: 'number', literal: true }
   if (member === 'true' || member === 'false') return { keyword: 'boolean', literal: true }
   return undefined
@@ -220,9 +246,9 @@ function payloadType(property: string, planned: string, member: PagePropKey): Pl
   if (sameSet(want, have)) return match(property, planned, member.type)
   const wantKinds = want.map(keywordOf)
   const haveKinds = have.map(keywordOf)
-  if (wantKinds.includes(undefined) || haveKinds.includes(undefined)) return asText
-  const keywords = (kinds: typeof wantKinds): Set<string> => new Set(kinds.map((kind) => kind!.keyword))
-  const literal = [...wantKinds, ...haveKinds].some((kind) => kind!.literal)
+  if (!wantKinds.every(isKind) || !haveKinds.every(isKind)) return asText
+  const keywords = (kinds: TypeKind[]): Set<string> => new Set(kinds.map((kind) => kind.keyword))
+  const literal = [...wantKinds, ...haveKinds].some((kind) => kind.literal)
   const wantKeywords = keywords(wantKinds)
   const disjoint = [...keywords(haveKinds)].every((keyword) => !wantKeywords.has(keyword))
   if (!literal || disjoint) return differ(property, planned, member.type)
