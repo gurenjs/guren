@@ -79,16 +79,21 @@ export interface AppBlueprint {
    */
   apiOnly?: boolean
   /**
-   * The `guren add resource` arguments the next steps suggest, when not
-   * DEFAULT_RESOURCE_EXAMPLE. It must name a resource the template does not
-   * ship: add resource refuses an existing file, and the --force its refusal
-   * suggests would overwrite the template's own. tests/resource-example.test.ts pins it.
+   * The `guren add resource` call the next steps suggest. It must name a
+   * resource the template does not ship, since `add resource` refuses one whose
+   * files exist. Defaults to `DEFAULT_RESOURCE_EXAMPLE`.
+   * tests/resource-example.test.ts pins it.
    */
-  resourceExample?: string
+  resourceExample?: ResourceExample
   postScaffold?: (context: BlueprintContext) => Promise<void>
 }
 
-export const DEFAULT_RESOURCE_EXAMPLE = 'posts --fields "title:string,body:text"'
+export interface ResourceExample {
+  name: string
+  fields: string
+}
+
+export const DEFAULT_RESOURCE_EXAMPLE: ResourceExample = { name: 'posts', fields: 'title:string,body:text' }
 
 export interface ScaffoldAppBlueprintOptions {
   blueprint?: string
@@ -150,7 +155,7 @@ const blueprintRegistry: Record<AppBlueprintName, AppBlueprint> = {
     },
     transformFiles: BLOG_TRANSFORM_FILES,
     includesAuth: true,
-    resourceExample: 'tags --fields "name:string"',
+    resourceExample: { name: 'tags', fields: 'name:string' },
   },
   worker: {
     name: 'worker',

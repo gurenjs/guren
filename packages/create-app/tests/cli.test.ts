@@ -363,7 +363,7 @@ describe('create-guren-app CLI', () => {
       })
 
       expect(logged(logMock, 'bunx guren add auth')).toBe(true)
-      expect(logged(logMock, 'bunx guren add resource posts')).toBe(true)
+      expect(logMock.mock.calls.map((call) => call.join(' '))).toContain('  bunx guren add resource posts --fields "title:string,body:text"')
       expect(logged(logMock, 'make:controller')).toBe(false)
     } finally {
       await workspace.cleanup()
@@ -386,7 +386,6 @@ describe('create-guren-app CLI', () => {
         },
       })
 
-      // The blog ships Post, so `add resource posts` refuses to write anything.
       expect(logged(logMock, 'bunx guren add resource tags')).toBe(true)
       expect(logged(logMock, 'add resource posts')).toBe(false)
     } finally {

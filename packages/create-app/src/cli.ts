@@ -452,7 +452,8 @@ const command = defineCommand({
       if (!blueprint.includesAuth && !authInstalled) {
         consola.log('  bunx guren add auth')
       }
-      consola.log(`  bunx guren add resource ${blueprint.resourceExample ?? DEFAULT_RESOURCE_EXAMPLE}`)
+      const example = blueprint.resourceExample ?? DEFAULT_RESOURCE_EXAMPLE
+      consola.log(`  bunx guren add resource ${example.name} --fields "${example.fields}"`)
     }
     consola.log('')
     consola.info('Generate types and set up database:')
