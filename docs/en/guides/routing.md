@@ -366,6 +366,8 @@ The hint mirrors the JSON the controller builds: a bare class (`resource: PostRe
 > [!NOTE]
 > Every leaf of the hint must be a Resource class. An envelope that mixes Resources with plain typed objects (a paginated response's `meta` and `links`, for example) cannot be expressed yet; bind an `output` schema for those routes instead.
 
+`guren openapi:generate` reads only `output` and cannot express a hint, so a route declared through one gets no response schema in the generated document, and the command prints a warning naming that route. Bind an `output` schema when the OpenAPI response matters.
+
 ### OpenAPI Metadata
 
 Route contracts also accept lightweight OpenAPI annotations. These are stored on the route definition and used by the optional `@guren/openapi` plugin to generate an OpenAPI 3.1 document.
