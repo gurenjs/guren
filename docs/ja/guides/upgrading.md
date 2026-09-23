@@ -1,5 +1,16 @@
 # Guren アップグレードガイド
 
+## 未リリース: キャッシュの同時ミスでコールバックを共有
+
+`cache.store()` で取得したストアの `remember()` と `rememberForever()` は、
+同じプロセス内で同じキーと同じ TTL への呼び出しが同時にミスしたとき、
+コールバックを1回だけ実行します。それらの呼び出し元は全員が同じ結果オブジェクトか
+同じ例外を受け取ります。ヒットの挙動は変わりません。ファイルストアと Redis ストアでは、
+一緒にミスした呼び出し元は、これまでそれぞれ別のコピーを受け取っていました。
+そのため、取得した値をその場で書き換えるコードは、結果を共有する他の呼び出し元にも
+影響します。書き換える前に値をコピーしてください。
+詳しくは[同時ミス](./cache.md#同時ミス)を参照してください。
+
 ## 未リリース: キューのキャンセルと予約
 
 ジョブの `this.signal` を `fetch` など中断に対応する I/O に渡してください。
@@ -130,7 +141,7 @@ export class User extends defineModel(users, { base: AuthenticatableModel }) {
 // Before: authorId silently dropped when not in fillable
 await Post.create({ ...data, authorId: user.id })
 
-// After: either add authorId to fillable, or use forceCreate for trusted data
+// After: keep authorId out of fillable and set it from the session with forceCreate
 await Post.forceCreate({ ...validated, authorId: user.id })
 ```
 

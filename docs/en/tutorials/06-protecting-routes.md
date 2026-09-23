@@ -397,7 +397,7 @@ export default class PostController extends Controller {
 }
 ```
 
-`forceCreate` is the deliberate choice here, and it is worth a moment. `fillable` on the model lists `title` and `body`, and `authorId` is not on it: a request must never be able to say who wrote a post. `Post.create(data)` would therefore drop `authorId`. `forceCreate` bypasses the filter, and it is safe because nothing in that object came from the request unfiltered: `data` passed the validator, and `author.id` came from the session. The rule is not "never use forceCreate"; it is "only with values the server chose".
+`forceCreate` is the deliberate choice here, and it is worth a moment. `fillable` on the model lists `title` and `body`, and `authorId` is not on it: a request must never be able to say who wrote a post. `Post.create({ ...data, authorId: author.id })` would therefore throw a `MassAssignmentException` naming `authorId`. `forceCreate` bypasses the filter, and it is safe because nothing in that object came from the request unfiltered: `data` passed the validator, and `author.id` came from the session. The rule is not "never use forceCreate"; it is "only with values the server chose".
 
 ```bash run
 bun test
@@ -919,7 +919,7 @@ One file survives `git clean` on purpose: `.env` is ignored, and `add auth` appe
 - **`.middleware('auth')` does not compile.** `aliasMiddleware()` returns a new router type that knows the name; the result was not captured. Chain and assign, as in the file above.
 - **A signed-in test gets redirected to `/login`.** `actingAs()` must come before `withCsrf()`: the priming request has to be authenticated too. Both return new clients; reassign.
 - **`db:migrate` fails with "NOT NULL constraint failed".** A post still has no author; run `bun scripts/backfill-post-authors.ts` first. The order is the whole point of section 3.
-- **The stored post has `authorId: null`.** `store` used `Post.create`, and `fillable` dropped the author. Use `forceCreate` with a value the server chose.
+- **`store` answers 500 with a `MassAssignmentException`.** It passed `authorId` to `Post.create`, and `fillable` does not list it. Use `forceCreate` with a value the server chose.
 - **The list shows "unknown" for every author.** The `IN` query got ids of the wrong type, or the map is keyed by something other than the user's id. Log `authors` once; it should have one entry per distinct author.
 
 ## Exercises

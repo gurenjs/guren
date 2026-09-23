@@ -71,7 +71,7 @@ export class Post extends defineModel(posts, { fillable: ['title', 'body'] }) {
 
 モデルはこれだけで、意図的に薄くしています。`defineModel(posts)` はクラスに `find`、`findOrFail`、`all`、`create`、`update`、`delete`、`paginate` とクエリビルダーを持たせます。いずれもテーブルから型が付きます。`PostRecord` は上の 4 列そのもので、この型を手で書くことはありません。
 
-`fillable` は利便性のためではなく、安全のための 1 行です。`Post.create(data)` はここに挙げたキーだけを書き込み、`data` に紛れ込んだ `id` や `createdAt` は捨てます。第 4 章ではバリデーション済みのリクエストボディを `create` に渡しますが、フォームが差し出していないフィールドをクライアントに設定させないのがこの 1 行です。`guren audit` もここを検査します。
+`fillable` は利便性のためではなく、安全のための 1 行です。`Post.create(data)` はここに挙げたキーだけを書き込みます。`data` に紛れ込んだ `id` は黙って取り除かれますが、それ以外のキー、たとえば `createdAt` があると `create` は `MassAssignmentException` をスローし、何も書き込みません。第 4 章ではバリデーション済みのリクエストボディを `create` に渡しますが、フォームが差し出していないフィールドをクライアントに設定させないのがこの 1 行です。`guren audit` もここを検査します。
 
 ## 3. 仕様
 

@@ -13,7 +13,7 @@ import type { Context } from '@guren/core'
 const {
   mockFindOrFail,
   mockFindWithOrFail,
-  mockCreate,
+  mockForceCreate,
   mockUpdate,
   mockDelete,
   mockAttach,
@@ -26,7 +26,7 @@ const {
 } = vi.hoisted(() => ({
   mockFindOrFail: vi.fn(),
   mockFindWithOrFail: vi.fn(),
-  mockCreate: vi.fn(),
+  mockForceCreate: vi.fn(),
   mockUpdate: vi.fn(),
   mockDelete: vi.fn(),
   mockAttach: vi.fn(),
@@ -48,7 +48,7 @@ vi.mock('../../app/Models/Post.js', () => ({
   Post: {
     findOrFail: mockFindOrFail,
     findWithOrFail: mockFindWithOrFail,
-    create: mockCreate,
+    forceCreate: mockForceCreate,
     update: mockUpdate,
     delete: mockDelete,
     attach: mockAttach,
@@ -357,7 +357,7 @@ describe('PostController', () => {
     it('creates post and redirects when authenticated', async () => {
       const mockUser = { id: 1, name: 'John Doe' }
       const createdPost = { id: 42, title: 'New Post', excerpt: 'Excerpt', body: 'Body content', authorId: 1 }
-      mockCreate.mockResolvedValue(createdPost)
+      mockForceCreate.mockResolvedValue(createdPost)
       const auth = createAuthStub(mockUser)
       const ctx = createControllerContext('http://blog.test/posts', {
         method: 'POST',
@@ -374,7 +374,7 @@ describe('PostController', () => {
 
       expect(response.status).toBe(303)
       expect(response.headers.get('Location')).toBe('/posts/42')
-      expect(mockCreate).toHaveBeenCalledWith({
+      expect(mockForceCreate).toHaveBeenCalledWith({
         title: 'New Post',
         excerpt: 'Excerpt',
         body: 'Body content',
@@ -385,7 +385,7 @@ describe('PostController', () => {
     it('attaches an uploaded cover to the created post', async () => {
       const mockUser = { id: 1, name: 'John Doe' }
       const createdPost = { id: 42, title: 'New Post', excerpt: 'Excerpt', body: 'Body content', authorId: 1 }
-      mockCreate.mockResolvedValue(createdPost)
+      mockForceCreate.mockResolvedValue(createdPost)
       mockAttach.mockResolvedValue({ id: '01ARZ3NDEKTSV4RRFFQ69G5FAV' })
       const auth = createAuthStub(mockUser)
 
@@ -416,7 +416,7 @@ describe('PostController', () => {
     it('skips attach when no cover was uploaded', async () => {
       const mockUser = { id: 1, name: 'John Doe' }
       const createdPost = { id: 42, title: 'New Post', excerpt: 'Excerpt', body: 'Body content', authorId: 1 }
-      mockCreate.mockResolvedValue(createdPost)
+      mockForceCreate.mockResolvedValue(createdPost)
       const auth = createAuthStub(mockUser)
 
       const formData = new FormData()
@@ -516,6 +516,11 @@ describe('PostController', () => {
 
       expect(response.status).toBe(303)
       expect(response.headers.get('Location')).toBe('/posts/1')
+      expect(mockUpdate).toHaveBeenCalledWith({ id: 1 }, {
+        title: 'Updated Title',
+        excerpt: 'Updated excerpt',
+        body: 'Updated body',
+      })
       expect(mockAttach).not.toHaveBeenCalled()
     })
 

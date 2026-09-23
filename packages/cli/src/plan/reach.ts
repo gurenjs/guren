@@ -5,7 +5,7 @@
 
 import { listPlanReferences, PLAN_REFERENCES, type PlanReferenceField } from './references'
 import { listPlanElementEntries, type Plan, type PlanDraft } from './schema'
-import { planElementParents } from './tasks'
+import { listPlanSteps, planElementParents, type PlanTaskDerivation } from './tasks'
 
 /**
  * Which references a behaviour's reach follows (RFC 0030 §6). A route runs its action, which
@@ -59,6 +59,19 @@ export function behaviourReach(plan: PlanDraft | Plan, acceptanceIds: Iterable<s
     }
   }
   return reached
+}
+
+/**
+ * The steps whose behaviours reach each element, in task order, whatever their records say: a
+ * standing run of one of them is what lifts an element for which `restsOnReach()` holds.
+ */
+export function behaviourCarriers(plan: PlanDraft | Plan, derivation: PlanTaskDerivation): Map<string, string[]> {
+  const carriers = new Map<string, string[]>()
+  for (const { step } of listPlanSteps(derivation)) {
+    if (step.kind === 'tests' || step.acceptanceIds.length === 0) continue
+    for (const id of behaviourReach(plan, step.acceptanceIds)) carriers.set(id, [...(carriers.get(id) ?? []), step.id])
+  }
+  return carriers
 }
 
 /** The sections a carrying reference may name; `null` is a reference that may name any element. */

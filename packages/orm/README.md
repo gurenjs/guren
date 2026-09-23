@@ -57,7 +57,13 @@ Relationships, scopes, soft deletes, observers, accessors and mutators, and eage
 
 ## Mass assignment
 
-`fillable` is the allowlist, and it is always strict: primary keys are excluded, and an `AuthenticatableModel` refuses password hashes and remember tokens whatever the list says. Trusted values go through `forceCreate()` and `forceUpdate()`.
+`fillable` is the allowlist, and it is always strict: primary keys are excluded, and an `AuthenticatableModel` refuses password hashes and remember tokens whatever the list says. A column the server chooses next to request data, such as an owner, goes in `set` and stays out of `fillable`:
+
+```typescript
+const post = await Post.create(data, { set: { authorId: user.id } })
+```
+
+Writes that carry no request data at all (seeders, system records) go through `forceCreate()` and `forceUpdate()`.
 
 ## Dialect subpaths
 

@@ -9,6 +9,7 @@ import {
   createConsoleKernel,
   parseSignature,
 } from '../../src/console'
+import { settleWithin } from '../support/deadline'
 
 describe('parseSignature', () => {
   test('parses command name', () => {
@@ -1124,18 +1125,6 @@ function createFakeTerminal() {
       stderr: stream as unknown as NodeJS.WriteStream,
     }),
   }
-}
-
-/**
- * Reject if `promise` has not settled within `ms`, so a prompt that never
- * settles fails the test instead of hanging the runner.
- */
-function settleWithin<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>
-  const deadline = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`promise did not settle within ${ms}ms`)), ms)
-  })
-  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer))
 }
 
 function type(terminal: NodeJS.ReadStream, text: string): void {

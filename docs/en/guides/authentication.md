@@ -25,6 +25,8 @@ This command generates login, registration, and password reset controllers, Iner
 3. Wires `registerAuthRoutes(router)` into `routes/web.ts`
 4. Updates `db/schema.ts` to include password and remember-token columns
 
+An app that already binds mail, through `guren add mail` or a provider of its own, keeps that setup. `make:auth` then writes no `config/mail.ts`, registers nothing for mail, and the reset mail sends through the existing binding. Likewise, `guren add mail` run after `make:auth` keeps the setup auth wrote and adds only its sample mailable.
+
 After scaffolding, simply run:
 
 ```bash

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { chmod, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { chmod, mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -15,7 +15,7 @@ import {
 } from '../src/controller-methods'
 import { firstClassDeclaration } from '../src/model-parser'
 import { parseSourceFile } from '../src/parse-cache'
-import { writeWorkspaceFiles } from './helpers'
+import { CAN_DENY_FILE_READS, writeWorkspaceFiles } from './helpers'
 
 function scrub(source: string): string {
   const ast = parseSourceFile(source, 'test.ts')
@@ -197,7 +197,7 @@ export class PostController extends Controller {
 
   // A file that will not open must not reject the whole promise and take the
   // check/audit run down with it.
-  it('reports an unreadable controller instead of rejecting', async () => {
+  it.skipIf(!CAN_DENY_FILE_READS)('reports an unreadable controller instead of rejecting', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'guren-controller-methods-unreadable-'))
     try {
       await writeWorkspaceFiles(dir, {
@@ -213,8 +213,6 @@ export class PostController extends Controller {
       // failing read is to make a discovered file unopenable.
       const controller = join(dir, 'app/Http/Controllers/PostController.ts')
       await chmod(controller, 0o000)
-      const stillReadable = await readFile(controller, 'utf8').then(() => true, () => false)
-      if (stillReadable) return // running as root: the mode says nothing
 
       const { methods, unreadableFiles } = await parseControllerMethods(dir)
 

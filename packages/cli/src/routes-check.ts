@@ -10,6 +10,7 @@ import {
   findFirstExisting,
   formatTruncatedList,
   moduleRoutesEntryCandidates,
+  ROUTES_DIR,
   toPosixRelative,
 } from './discovery'
 import type { ParseCache } from './parse-cache'
@@ -17,9 +18,6 @@ import { specifierBase } from './schema-binding'
 import { DEFAULT_ROUTES_FILE, isRegistrarExportName, resolveRoutesEntry, specifierName } from './route-registrar'
 import { pascalCase, referencesIdentifier, relativeImportPath } from './utils'
 import { check, type CheckResult } from './check-result'
-
-/** The directory whose files this check asks about, per scope. */
-const ROUTES_DIR = 'routes'
 
 /**
  * A path that can move a module scope's answer: its descriptor (where
