@@ -221,9 +221,9 @@ Apps that configure the cache in a service provider keep working; see [Apps with
 
 ## Tagged Cache
 
-Counters preserve their original expiration when incremented or decremented. File counters use filesystem locks shared by store instances and processes, with atomic file replacement. A lock wait exceeding five seconds throws; remove an abandoned `.lock` directory only after confirming its writer has stopped.
+Counters preserve their original expiration when incremented or decremented. On the file store, `add()`, `increment()` and `decrement()` take a filesystem lock that store instances and processes share. A lock one writer has held for five seconds is treated as abandoned by a crashed process and taken over, so a key never stays locked. A writer still running at that point (a suspended process, a stalled disk) then runs alongside the one that took its lock over, and one of their updates can be lost. Keep counters that several processes update, and that must not lose an update, on the Redis store.
 
-Custom stores used with tags must implement atomic `add(key, value): Promise<boolean>`: insert without expiration only when the key is absent, and return whether insertion succeeded. Built-in stores implement this operation.
+Custom stores used with tags must implement atomic `add(key, value): Promise<boolean>`: insert without expiration only when the key is absent, and return whether insertion succeeded. Built-in stores implement this operation; the file store's `add()` is not atomic across a lock takeover.
 
 Tags allow you to group related cache items for easy invalidation:
 

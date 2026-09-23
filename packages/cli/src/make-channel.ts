@@ -1,5 +1,5 @@
-import type { WriterOptions } from './utils'
-import { escapeTemplateLiteral, kebabCase, scaffoldFile } from './utils'
+import type { ScaffoldFileEntry, WriterOptions } from './utils'
+import { escapeTemplateLiteral, kebabCase, scaffoldFileEntry, writeScaffoldFile } from './utils'
 
 const CHANNELS_DIR = 'app/Broadcasting'
 
@@ -98,7 +98,12 @@ export interface MakeChannelOptions extends WriterOptions {
 }
 
 export async function makeChannel(name: string, options: MakeChannelOptions = {}): Promise<string> {
-  return scaffoldFile(name, {
+  const { path, contents } = channelFile(name, options)
+  return writeScaffoldFile(path, contents, options)
+}
+
+export function channelFile(name: string, options: MakeChannelOptions = {}): ScaffoldFileEntry {
+  return scaffoldFileEntry(name, {
     dir: CHANNELS_DIR,
     suffix: 'Channel',
     template: ({ normalizedName }) => {

@@ -1,5 +1,5 @@
-import type { WriterOptions } from './utils'
-import { scaffoldFile } from './utils'
+import type { ScaffoldFileEntry, WriterOptions } from './utils'
+import { scaffoldFileEntry, writeScaffoldFile } from './utils'
 
 const EVENTS_DIR = 'app/Events'
 
@@ -19,7 +19,12 @@ export class ${className} extends Event {
 }
 
 export async function makeEvent(name: string, options: WriterOptions = {}): Promise<string> {
-  return scaffoldFile(name, {
+  const { path, contents } = eventFile(name, options)
+  return writeScaffoldFile(path, contents, options)
+}
+
+export function eventFile(name: string, options: WriterOptions = {}): ScaffoldFileEntry {
+  return scaffoldFileEntry(name, {
     dir: EVENTS_DIR,
     template: ({ className }) => eventTemplate(className),
   }, options)

@@ -65,7 +65,7 @@ export {}
       { path: `${moduleDir}/routes.ts`, contents: routesContents },
       { path: `${moduleDir}/db/schema.ts`, contents: schemaContents },
     ],
-    options,
+    { ...options, subject: moduleDir },
   )
 
   await patchRootSchema(moduleName, rootSchema, keepsAggregate ? aggregate : null)
