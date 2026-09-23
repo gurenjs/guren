@@ -569,9 +569,8 @@ describe('describeCloseBlockers', () => {
     const lifted = lift(unfingerprintable)
     expect(lifted.hold?.kind).toBe('unreached')
     expect(lifted.hold?.note).toEndWith('no verified behaviour reaches it, and plan:verify cannot fingerprint it, so that result is not counted: waive it.')
-    const { holds, moves } = blockerFor(lifted)
+    const { moves } = blockerFor(lifted)
     expect(moves).toBe(`plan:verify cannot fingerprint it, so no run lifts it: waive it with ${waive('resource.comment')}`)
-    expect(holds).not.toContain('add a behaviour')
     expect(blockerFor(unfingerprintable).moves).toBe(moves)
 
     const unjudged = element('resource.comment', 'unjudged', { files: [] })

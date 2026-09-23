@@ -2090,7 +2090,7 @@ readings (`packages/cli/src/plan-close.ts`, `plan/close-docs.ts`,
   seeded with every element of a section a carrying reference names and the
   plan's behaviours) and that `plan:verify` can fingerprint; a
   column, a command, a job, event, listener, mail or notification, and an
-  element with nothing to fingerprint, are sent to `plan:waive` alone.
+  element `plan:verify` cannot fingerprint, are sent to `plan:waive` alone.
   `plan:next`, once every step is verified, lists the same lines
   (`plan/close-remedy.ts`), so the two commands give one piece of advice.
 - "Archives the plan" is the doc node. Under the `file` store nothing is moved

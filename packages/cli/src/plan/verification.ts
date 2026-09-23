@@ -60,12 +60,12 @@ export function restsOnReach(element: Pick<PlanElementStatus<PlanElementState>, 
 }
 
 /**
- * Whether a run lifts the element with nothing of it fingerprinted: a `drop` has no file, and an
- * `unjudged` one rests on the behaviours reaching it, whose test files their record covers. The
- * one rule the overlay's `unfingerprinted` hold and `unreached` notes and `plan:close`'s remedies ask.
+ * Whether a verified run leaves the element held as `unfingerprinted`: no reader found a file of it,
+ * and it is neither a `drop` (no file to have) nor `unjudged` (resting on the behaviours reaching
+ * it, whose test files their record covers). No run or added behaviour lifts such an element.
  */
-export function needsNoFiles(element: Pick<PlanElementStatus<PlanElementState>, 'change' | 'state'>): boolean {
-  return element.change === 'drop' || element.state === 'unjudged'
+export function cannotFingerprint(element: Pick<PlanElementStatus<PlanElementState>, 'change' | 'state' | 'files'>): boolean {
+  return element.files.length === 0 && element.change !== 'drop' && element.state !== 'unjudged'
 }
 
 /**
@@ -96,16 +96,13 @@ export function applyVerification(
   const reachable = behaviourCanReach(plan)
   const unreached = (element: PlanElementStatus<PlanElementState>): string => {
     const reaching = carriers.get(element.id) ?? []
-    if (reaching.length > 0) {
-      const steps = `no verified run of a step whose behaviours reach it (${reaching.join(', ')}) holds now`
-      // A run of a carrier would still be held as `unfingerprinted`, so it is not suggested.
-      if (element.files.length === 0 && !needsNoFiles(element)) return `${steps}, and plan:verify cannot fingerprint it, so that result is not counted: waive it`
-      const which = reaching.length === 1 ? 'that step' : 'one of those steps'
-      return `${steps}, so that result is not counted: run plan:verify on ${which}, or waive it`
+    if (reaching.length === 0 && !reachable.has(element.id)) return 'no verified behaviour reaches it, so that result is not counted: no behaviour can reach it, so waive it'
+    const steps = `no verified run of a step whose behaviours reach it (${reaching.join(', ')}) holds now`
+    // Neither a carrier's run nor a behaviour added to the plan would lift it, so neither is suggested.
+    if (cannotFingerprint(element)) {
+      return `${reaching.length > 0 ? steps : 'no verified behaviour reaches it'}, and plan:verify cannot fingerprint it, so that result is not counted: waive it`
     }
-    if (!reachable.has(element.id)) return 'no verified behaviour reaches it, so that result is not counted: no behaviour can reach it, so waive it'
-    // A behaviour added to the plan would leave it `unfingerprinted`, so none is suggested.
-    if (element.files.length === 0 && !needsNoFiles(element)) return 'no verified behaviour reaches it, and plan:verify cannot fingerprint it, so that result is not counted: waive it'
+    if (reaching.length > 0) return `${steps}, so that result is not counted: run plan:verify on ${reaching.length === 1 ? 'that step' : 'one of those steps'}, or waive it`
     return 'no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it'
   }
 
@@ -138,7 +135,7 @@ export function applyVerification(
           hold('incomplete', `${verifiedBy}, and no longer at the state that completes it.`)
         } else if (unmatched && !(carriers.get(id) ?? []).some((stepId) => standing.has(stepId))) {
           hold('unreached', `${verifiedBy}, but no planned property of it matched beyond its existence and ${unreached(element)}.`)
-        } else if (element.files.length === 0 && !needsNoFiles(element)) {
+        } else if (cannotFingerprint(element)) {
           hold('unfingerprinted', `${verifiedBy}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`)
         } else if (uncovered.length > 0) {
           settle('drifted')
