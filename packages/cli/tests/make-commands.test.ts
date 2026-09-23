@@ -96,6 +96,14 @@ describe('CLI make:* commands', () => {
       expect(content).toContain("static override queue = 'default'")
     })
 
+    it('pins jobName to the class name it emits', async () => {
+      for (const name of ['SendEmail', 'SendEmailJob']) {
+        const content = fs.readFileSync(await makeJob(name, { force: true }), 'utf-8')
+        expect(content.match(/class (\w+) extends Job/)?.[1]).toBe('SendEmailJob')
+        expect(content).toContain("static override jobName = 'SendEmailJob'")
+      }
+    })
+
     it('preserves Job suffix if already present', async () => {
       const result = await makeJob('SendEmailJob')
       expect(result).toContain('SendEmailJob.ts')
@@ -338,11 +346,21 @@ describe('CLI make:* commands', () => {
     it('generates correct notification template', async () => {
       const result = await makeNotification('InvoicePaid')
       const content = fs.readFileSync(result, 'utf-8')
-      expect(content).toContain('class InvoicePaidNotification')
+      expect(content).toContain("import { Notification } from '@guren/core'")
+      expect(content).toContain('class InvoicePaidNotification extends Notification')
+      expect(content).toContain('super()')
       expect(content).toContain('via()')
-      expect(content).toContain('toMail()')
+      expect(content).toContain('toMail(): NotificationMailMessage')
       expect(content).toContain('toDatabase()')
       expect(content).toContain('toArray()')
+    })
+
+    it('pins type to the class name it emits', async () => {
+      for (const name of ['InvoicePaid', 'InvoicePaidNotification']) {
+        const content = fs.readFileSync(await makeNotification(name, { force: true }), 'utf-8')
+        expect(content.match(/class (\w+) extends Notification/)?.[1]).toBe('InvoicePaidNotification')
+        expect(content).toContain("override get type(): string {\n    return 'InvoicePaidNotification'\n  }")
+      }
     })
   })
 

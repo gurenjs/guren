@@ -59,6 +59,25 @@ export class OrderShipped extends Notification {
 bunx guren make:notification OrderShipped
 ```
 
+This creates `app/Notifications/OrderShippedNotification.ts`, a `Notification`
+subclass with `via()`, `toMail()`, `toDatabase()` and `toArray()` to fill in. It
+also pins `type` to the generated class name:
+
+```ts
+override get type(): string {
+  return 'OrderShippedNotification'
+}
+```
+
+`type` is the key a queue worker rebuilds the notification from and the `type`
+the database channel stores. Without the override it is the class name, which a
+bundler can rename. Change the string before the first notification is queued
+or stored if you want a different one.
+
+A getter is inherited, unlike a job's `jobName`. A subclass of this
+notification reports the same `type` and registers under the same key, so give
+the subclass its own `type` override.
+
 ## Sending Notifications
 
 ### Setup

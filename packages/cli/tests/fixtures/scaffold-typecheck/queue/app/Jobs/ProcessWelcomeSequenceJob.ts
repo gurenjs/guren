@@ -9,6 +9,7 @@ export interface ProcessWelcomeSequenceJobPayload {
 }
 
 export class ProcessWelcomeSequenceJob extends Job<ProcessWelcomeSequenceJobPayload> {
+  static override jobName = 'ProcessWelcomeSequenceJob'
   static override queue = 'default'
   static override maxAttempts = 3
 

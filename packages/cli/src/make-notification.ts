@@ -4,30 +4,38 @@ import { scaffoldFile } from './utils'
 const NOTIFICATIONS_DIR = 'app/Notifications'
 
 function notificationTemplate(className: string): string {
-  return `export class ${className} {
+  return `import { Notification } from '@guren/core'
+import type { NotificationMailMessage } from '@guren/core'
+
+export class ${className} extends Notification {
   constructor(
     public readonly data: Record<string, unknown> = {},
-  ) {}
+  ) {
+    super()
+  }
+
+  override get type(): string {
+    return '${className}'
+  }
 
   via(): string[] {
     return ['mail', 'database']
   }
 
-  toMail() {
+  override toMail(): NotificationMailMessage {
     return {
       subject: '${className.replace(/Notification$/, '')}',
-      body: 'Your notification content here.',
+      text: 'Your notification content here.',
     }
   }
 
-  toDatabase() {
+  override toDatabase(): Record<string, unknown> {
     return {
-      type: '${className}',
-      data: this.data,
+      ...this.data,
     }
   }
 
-  toArray() {
+  override toArray(): Record<string, unknown> {
     return {
       ...this.data,
     }

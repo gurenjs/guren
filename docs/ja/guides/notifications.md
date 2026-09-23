@@ -59,6 +59,24 @@ export class OrderShipped extends Notification {
 bunx guren make:notification OrderShipped
 ```
 
+`app/Notifications/OrderShippedNotification.ts` が作成されます。`Notification` を
+継承したクラスで、`via()`、`toMail()`、`toDatabase()`、`toArray()` の中身を書いて
+使います。`type` は生成したクラス名で固定されています。
+
+```ts
+override get type(): string {
+  return 'OrderShippedNotification'
+}
+```
+
+`type` は、キューのワーカーが通知を復元するときのキーです。データベースチャネルが
+保存する `type` にもなります。上書きしなければクラス名が使われ、クラス名はバンドラーに
+変えられることがあります。別の名前にしたい場合は、最初に通知をキューへ積むか保存する
+前に書き換えてください。
+
+ジョブの `jobName` と違い、getter は継承されます。この通知のサブクラスは同じ `type` を
+返し、レジストリでも同じキーに登録されるので、サブクラスでも `type` を上書きしてください。
+
 ## 通知の送信
 
 ### セットアップ

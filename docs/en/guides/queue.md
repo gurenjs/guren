@@ -51,6 +51,9 @@ interface SendWelcomeEmailPayload {
 }
 
 export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
+  // Name recorded in queued messages (default: the class name)
+  static jobName = 'SendWelcomeEmailJob'
+
   // Queue name (default: 'default')
   static queue = 'emails'
 
@@ -116,8 +119,10 @@ export class SendWelcomeEmailJob extends Job<{ userId: string }> {
 ```
 
 Once pinned, the class is free to be renamed — only `jobName` is durable, and it
-is the string `registerJob()` keys on and the worker resolves. Jobs without a
-`jobName` keep resolving by class name, so this is opt-in.
+is the string `registerJob()` keys on and the worker resolves. `make:job` writes
+the pin with the class name it generates, so a scaffolded job starts pinned; change
+the string before the first dispatch if you want a different one. A job written
+by hand without a `jobName` keeps resolving by class name.
 
 A subclass does **not** inherit its parent's `jobName`, even though JavaScript
 statics are inherited. It resolves by its own class name until it declares one:
