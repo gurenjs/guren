@@ -298,7 +298,7 @@ Built as the plan leaves them, so their collision or absence is the plan's own w
 Already approved at 2026-09-22T10:16:20.673Z; recorded the readings it lacked in docs/plans/comments/approvals.json: model.post, view.posts.show.
 ```
 
-実装のあとに読み取ると性質はすでに一致しているので、承認し直しても役に立ちません。一致がどれも読み取りを持たない `alter` は `unjudged` になり、注記には届く振る舞いか waiver が示されます。カラムのように振る舞いが届かない要素には、waiver だけが示されます。
+実装のあとに読み取ると性質はすでに一致しているので、承認し直しても役に立ちません。一致した性質のどれにも読み取りがない `alter` は `unjudged` になり、注記はその要素に届く振る舞いで検証するよう示します。ステップが検証を通ったあとは、waive する道を示す注記が加わります。カラムのように振る舞いが届かない要素には、waiver だけが示されます。
 
 ## 実装: `plan:next` と `plan:verify`
 
@@ -658,7 +658,7 @@ The decision log is committed with the plan. A waiver names this plan hash, so a
     Run bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/http; or waive it: bunx guren plan:waive docs/plans/comments/plan.json controller.comments --reason "<why>"
 ```
 
-`controller.comments` は `http` の振る舞いを通してしか verified にならないので、そのステップを確かめ直せば一緒に持ち上がります。完了の状態に届いていない要素や `blocked` の要素は、`plan:verify` の前にコードや環境を直す必要があります。どの `plan:verify` の実行でも持ち上がらない要素には `plan:waive` が示され、振る舞いが届きうる要素には、振る舞いを足して計画を承認し直す道も示されます。カラム、コマンド、side effect には waiver だけが示されます (「要素を waive する」の節を参照してください)。すべてのステップを検証し終えたあとは `plan:next` も同じ行を表示するので、計画を閉じられない理由がエージェントにも分かります。
+`controller.comments` は `http` の振る舞いを通してしか verified にならないので、そのステップを確かめ直せば一緒に持ち上がります。完了の状態に届いていない要素や `blocked` の要素は、`plan:verify` の前にコードや環境を直す必要があります。どの `plan:verify` の実行でも持ち上がらない要素には `plan:waive` が示されます。足りないのが届く振る舞いだけの要素には、振る舞いを足して計画を承認し直す道も示されます。ただしカラム、コマンド、side effect には waiver だけです (「要素を waive する」の節を参照してください)。すべてのステップを検証し終えたあとは `plan:next` も同じ行を表示するので、計画を閉じられない理由がエージェントにも分かります。
 
 すべての要素が verified か waived になったら、`--dry-run` で書き込む内容を確かめられます。問題がなければ閉じます。
 
