@@ -880,6 +880,20 @@ export const authTables = { users }
     expect(spreadModuleIntoSchema(PG_TABLES, 'billing', 'billingSchema').content).toBeUndefined()
   })
 
+  it('declines an identifier the root already binds to something else', () => {
+    const source = `${PG_TABLES}
+export const userSchema = { kind: 'zod' } as const
+export const schema = { users, posts }
+`
+    const result = spreadModuleIntoSchema(source, 'user', 'userSchema')
+    expect(result.content).toBeUndefined()
+    expect(result.reason).toContain('already binds userSchema')
+
+    // The module's own export, imported but not yet spread, is the binding the spread wants.
+    const imported = spreadModuleIntoSchema(`import { userSchema } from '../modules/user/db/schema'\n${source.replace("export const userSchema = { kind: 'zod' } as const\n", '')}`, 'user', 'userSchema')
+    expect(imported.content).toContain('export const schema = { users, posts, ...userSchema }')
+  })
+
   it('opens an empty multi-line schema object onto its own line', () => {
     const updated = spreadModuleIntoSchema(`${PG_TABLES}
 export const schema = {

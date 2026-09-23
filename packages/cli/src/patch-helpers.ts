@@ -1,11 +1,12 @@
 import { readFile, writeFile } from 'node:fs/promises'
-import type { ObjectExpression } from '@babel/types'
+import type { File, ObjectExpression } from '@babel/types'
 import { consola } from 'consola'
 import { readIfExists } from './discovery'
 import { DIALECT_BARRELS, DRIZZLE_CORE_SUBPATHS } from './drizzle-specifiers'
 import { parseSourceFile } from './parse-cache'
 import { posix, resolve } from 'node:path'
-import { findSchemaAggregate, schemaPathFor, type SchemaAggregate, type SchemaDialect } from './schema-parser'
+import { findSchemaAggregate, schemaPathFor, topLevelBindings, type SchemaAggregate, type SchemaDialect } from './schema-parser'
+import { importsByLocal, schemaModuleFor } from './schema-binding'
 import { escapeRegExp } from './utils'
 
 export interface PatchResult {
@@ -780,12 +781,11 @@ function statementStart(source: string, offset: number): number {
  * hand-kept object: `guren check` grades the same match advisory. `source` is read as the root
  * `db/schema.ts`, which is where its module imports resolve from.
  */
-function identifiedRootAggregate(source: string, extraKey?: string): SchemaAggregate | null {
-  const file = schemaPathFor(null)
+function identifiedRootAggregate(source: string, extraKey?: string): { aggregate: SchemaAggregate; ast: File; file: string } | null {
+  const file = resolve(process.cwd(), schemaPathFor(null))
   const ast = parseSourceFile(source, file)
-  const location = { cwd: process.cwd(), file: resolve(process.cwd(), file) }
-  const aggregate = ast && findSchemaAggregate(ast, { extraKey, location })
-  return aggregate?.confident ? aggregate : null
+  const aggregate = ast && findSchemaAggregate(ast, { extraKey, location: { cwd: process.cwd(), file } })
+  return ast && aggregate?.confident ? { aggregate, ast, file } : null
 }
 
 /** Where one more entry goes in the aggregate's object literal, and its text. */
@@ -820,7 +820,7 @@ function aggregateEntrySplice(source: string, object: ObjectExpression, entry: s
  * advising by hand the edit the writer itself declined is the same guess in prose.
  */
 function planAggregateSplice(source: string, name: string): AggregateSplice | null {
-  const aggregate = identifiedRootAggregate(source, name)
+  const aggregate = identifiedRootAggregate(source, name)?.aggregate
   if (!aggregate) return null
 
   const declarationOffset = statementStart(source, aggregate.statement.start ?? 0)
@@ -836,11 +836,16 @@ function planAggregateSplice(source: string, name: string): AggregateSplice | nu
  */
 export function spreadModuleIntoSchema(source: string, module: string, identifier: string): InsertResult {
   const file = schemaPathFor(null)
-  const aggregate = identifiedRootAggregate(source)
-  if (!aggregate) return { reason: `${file} has no schema object it identifies as one` }
+  const root = identifiedRootAggregate(source)
+  if (!root) return { reason: `${file} has no schema object it identifies as one` }
+  const { aggregate, ast } = root
   const spread = aggregate.delegated.get(module)
   if (spread === identifier) return { reason: PATCH_REASONS.alreadyPresent }
   if (spread !== undefined) return { reason: `The schema object in ${file} already spreads modules/${module}'s schema as ${spread || 'a namespace'}` }
+  // An import of `identifier` from the module itself is the binding the spread wants.
+  const imported = importsByLocal(ast.program.body).get(identifier)
+  const fromModule = imported?.imported === identifier && schemaModuleFor(process.cwd(), root.file, imported.source) === module
+  if (topLevelBindings(ast).has(identifier) && !fromModule) return { reason: `${file} already binds ${identifier}` }
   const entry = aggregateEntrySplice(source, aggregate.object, `...${identifier}`)
   if (!entry) return { reason: `Could not find where to add an entry to the schema object in ${file}` }
   return { content: source.slice(0, entry.offset) + entry.text + source.slice(entry.offset) }

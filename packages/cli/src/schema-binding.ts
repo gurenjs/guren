@@ -48,7 +48,7 @@ export function withoutExtension(path: string): string {
 }
 
 /**
- * The modules whose schema a file re-exports (`export *`, or a named `export … from`). An
+ * The modules whose schema a file re-exports (`export *`, or a named value `export … from`). An
  * `import` of a module's schema puts none of its tables in the importer's own exports, which
  * is what drizzle-kit reads.
  */
@@ -57,6 +57,8 @@ export function reExportedSchemaModules(cwd: string, filePath: string, body: Sta
   for (const statement of body) {
     if (statement.type !== 'ExportAllDeclaration' && statement.type !== 'ExportNamedDeclaration') continue
     if (!statement.source || statement.exportKind === 'type') continue
+    // `export * as billing from` exports one namespace object, not the tables.
+    if (statement.type === 'ExportNamedDeclaration' && !statement.specifiers.some((specifier) => specifier.type === 'ExportSpecifier' && specifier.exportKind !== 'type')) continue
     const module = schemaModuleFor(cwd, filePath, statement.source.value)
     if (typeof module === 'string') modules.add(module)
   }

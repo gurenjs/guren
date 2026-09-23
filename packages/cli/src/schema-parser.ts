@@ -139,6 +139,8 @@ export function declaredTableIdentifiers(ast: File): Set<string> {
 }
 
 export interface SchemaAggregate {
+  /** The binding the object is declared under. */
+  name: string
   /** The object literal, for a caller that needs its span. */
   object: ObjectExpression
   /** The statement declaring it, whose start a table's own declaration must precede. */
@@ -169,6 +171,32 @@ export interface FindSchemaAggregateOptions {
   location?: { cwd: string; file: string }
   /** A name another file vouches for: the export the root schema object spreads from this module. */
   identifiedAs?: string
+}
+
+/** The value names a file binds at its top level: imports, variables, functions, classes, enums. */
+export function topLevelBindings(ast: File): Set<string> {
+  const names = new Set<string>()
+  for (const statement of ast.program.body) {
+    if (statement.type === 'ImportDeclaration') {
+      for (const specifier of statement.specifiers) names.add(specifier.local.name)
+      continue
+    }
+    const declaration = statement.type === 'ExportNamedDeclaration' || statement.type === 'ExportDefaultDeclaration' ? statement.declaration : statement
+    if (!declaration) continue
+    if (declaration.type === 'VariableDeclaration') {
+      // Every identifier in a destructuring pattern, keys and defaults included: an over-count
+      // only makes a writer decline a name it could have used.
+      walk(declaration.declarations.map((declarator) => declarator.id), (node) => {
+        if (node.type === 'Identifier') names.add(node.name as string)
+      })
+    } else if (
+      (declaration.type === 'FunctionDeclaration' || declaration.type === 'ClassDeclaration' || declaration.type === 'TSEnumDeclaration') &&
+      declaration.id
+    ) {
+      names.add(declaration.id.name)
+    }
+  }
+  return names
 }
 
 /** The names the file reads in a `typeof` position — `export type X = typeof schema`. */
@@ -250,15 +278,15 @@ export function findSchemaAggregate(ast: File, options: FindSchemaAggregateOptio
       const named = name === 'schema' || name === identifiedAs
       typeQueried ??= typeQueriedNames(ast)
       const confident = named || typeQueried.has(name)
-      // Candidates only on the evidence that identifies them, so an object this reader newly
-      // accepts cannot make an app's identified aggregate ambiguous.
+      // A module grouping or an empty object is a candidate only on the evidence that
+      // identifies it, so neither can make an identified aggregate beside it ambiguous.
       if (object.properties.length === 0 ? !named : (listed.size > 0 || delegated.size > 0) && !confident) continue
 
       // A second candidate means the file's shape does not identify one aggregate,
       // so neither can this.
       if (found) return null
 
-      found = { object, statement: node, keys, declared, listed, delegated, confident }
+      found = { name, object, statement: node, keys, declared, listed, delegated, confident }
     }
   }
 

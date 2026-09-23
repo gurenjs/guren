@@ -266,22 +266,39 @@ async function checkSchemaAggregateKeys(cwd: string, cache: ParseCache): Promise
   const rootAggregate = root ? findSchemaAggregate(root.ast, { location: root.location }) : null
 
   const schemas = parsed.map((entry) => {
+    const spread = entry.module === null || !rootAggregate?.confident ? undefined : rootAggregate.delegated.get(entry.module)
+    // A namespace spread hands the root every table the module exports, so no module object is
+    // what drizzle is handed.
+    if (spread === '') return { ...entry, aggregate: null, declared: new Set<string>(), unreadable: undefined }
     // The root object spreading a module's export is what identifies that export as the module's aggregate.
-    const identifiedAs = entry.module === null || !rootAggregate?.confident ? undefined : rootAggregate.delegated.get(entry.module) || undefined
-    const aggregate = entry.module === null ? rootAggregate : findSchemaAggregate(entry.ast, { location: entry.location, identifiedAs })
-    return { ...entry, aggregate, declared: aggregate?.declared ?? declaredTableIdentifiers(entry.ast) }
+    const aggregate = entry.module === null ? rootAggregate : findSchemaAggregate(entry.ast, { location: entry.location, identifiedAs: spread })
+    const unreadable = spread !== undefined && aggregate?.name !== spread ? spread : undefined
+    return { ...entry, aggregate: unreadable ? null : aggregate, declared: aggregate?.declared ?? declaredTableIdentifiers(entry.ast), unreadable }
   })
 
-  // Only the root's object is the one drizzle is handed; a module's lists its own tables.
-  const moduleGaps = !rootAggregate ? [] : schemas.flatMap(({ module, relPath, declared }) => {
-    if (module === null || rootAggregate.delegated.has(module)) return []
+  // Only the root's object is the one drizzle is handed; a module's lists its own tables. A
+  // spread whose object this reader cannot follow covers nothing it can confirm.
+  const moduleGaps = !rootAggregate ? [] : schemas.flatMap(({ module, relPath, declared, unreadable }) => {
+    if (module === null || (rootAggregate.delegated.has(module) && !unreadable)) return []
     const listed = rootAggregate.listed.get(module)
     const missing = [...declared].filter((name) => !listed?.has(name))
-    return missing.length === 0 ? [] : [{ module, relPath, missing }]
+    return missing.length === 0 ? [] : [{ module, relPath, missing, unreadable }]
   })
 
   const results: CheckResult[] = []
-  for (const { module, relPath, aggregate } of schemas) {
+  for (const { module, relPath, aggregate, unreadable } of schemas) {
+    if (unreadable) {
+      results.push({
+        ...check(
+          `schema-aggregate-keys:${module}`,
+          `${module} schema object`,
+          'warn',
+          `${unreadable} in ${relPath}, which the root schema object spreads, is not an object of table references this check can read, so which tables it carries is unverified.`,
+          `List each table as a shorthand key in ${unreadable}, with no spread, computed key or call.`,
+        ),
+        advisory: true,
+      })
+    }
     if (!aggregate) continue
 
     const own = [...aggregate.declared].filter((name) => !aggregate.keys.includes(name))
@@ -289,6 +306,8 @@ async function checkSchemaAggregateKeys(cwd: string, cache: ParseCache): Promise
     const scope = module ?? 'app'
     const missing = [...own, ...fromModules.flatMap((gap) => gap.missing.map((name) => `${name} (${gap.relPath})`))]
     const complete = missing.length === 0
+    // Tables behind an unreadable spread may be there, so their gap is advisory on its own.
+    const unverifiedOnly = !complete && own.length === 0 && fromModules.every((gap) => gap.unreadable)
 
     // The fix splits on the same evidence the writer does: on a shape match alone no
     // scaffolder will add the key either, so it names what would make them.
@@ -298,6 +317,10 @@ async function checkSchemaAggregateKeys(cwd: string, cache: ParseCache): Promise
     } else {
       if (own.length > 0) fixes.push(`Add ${own.join(', ')} to it, keeping each table's own declaration above the object.`)
       for (const gap of fromModules) {
+        if (gap.unreadable) {
+          fixes.push(`It spreads ${gap.unreadable} from ${gap.relPath}, which this check cannot read (see the ${gap.module} schema object).`)
+          continue
+        }
         const identifier = moduleSchemaAggregateName(gap.module)
         fixes.push(`Keep ${gap.relPath}'s tables in its own \`export const ${identifier} = { … }\` and spread it into this object (\`...${identifier}\`, imported from '${moduleSchemaSpecifier(gap.module)}'), or import ${gap.missing.join(', ')} from there and list them here.`)
       }
@@ -310,10 +333,10 @@ async function checkSchemaAggregateKeys(cwd: string, cache: ParseCache): Promise
         complete ? 'pass' : 'warn',
         complete
           ? `The schema object in ${relPath} lists every table ${module === null ? 'the app declares' : 'the file declares'}.`
-          : `The schema object in ${relPath} does not list ${formatTruncatedList(missing)}.`,
+          : `The schema object in ${relPath} does not ${unverifiedOnly ? 'verifiably ' : ''}list ${formatTruncatedList(missing)}.`,
         complete ? undefined : fixes.join(' '),
       ),
-      advisory: !aggregate.confident,
+      advisory: !aggregate.confident || unverifiedOnly,
     })
   }
 

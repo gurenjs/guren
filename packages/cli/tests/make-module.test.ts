@@ -268,4 +268,24 @@ export const schema = { users, ...billing }
       await workspace.cleanup()
     }
   })
+
+  it('keeps the module schema a bare module when the root binds the aggregate name already', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-module-name-taken-')
+    try {
+      const root = `${PG_SCHEMA_FIXTURE}
+export const userSchema = { kind: 'zod' } as const
+export const schema = { users }
+`
+      await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': root })
+
+      await makeModule('user')
+
+      expect(await readFile(join(workspace.dir, 'modules/user/db/schema.ts'), 'utf8')).toContain('export {}')
+      const patched = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      expect(patched).toContain('export const schema = { users }')
+      expect(patched).not.toContain("import { userSchema }")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })
