@@ -118,6 +118,8 @@ export const PLAN_COMMAND_CLASSES: Readonly<Record<string, 'generator' | PlanCom
   console: 'process',
   dev: 'process',
   gate: 'process',
+  // Boots the application to read its manifest (RFC 0026).
+  introspect: 'process',
   plugin: 'dependencies',
   upgrade: 'dependencies',
   new: 'dependencies',
