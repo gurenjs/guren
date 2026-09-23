@@ -62,7 +62,7 @@ export function restsOnReach(element: Pick<PlanElementStatus<PlanElementState>, 
 /**
  * Whether a run lifts the element with nothing of it fingerprinted: a `drop` has no file, and an
  * `unjudged` one rests on the behaviours reaching it, whose test files their record covers. The
- * one rule the overlay's `unfingerprinted` hold and `plan:close`'s remedies ask.
+ * one rule the overlay's `unfingerprinted` hold and `unreached` notes and `plan:close`'s remedies ask.
  */
 export function needsNoFiles(element: Pick<PlanElementStatus<PlanElementState>, 'change' | 'state'>): boolean {
   return element.change === 'drop' || element.state === 'unjudged'
@@ -103,8 +103,10 @@ export function applyVerification(
       const which = reaching.length === 1 ? 'that step' : 'one of those steps'
       return `${steps}, so that result is not counted: run plan:verify on ${which}, or waive it`
     }
-    const remedy = reachable.has(element.id) ? 'add a behaviour that reaches it, or waive it' : 'no behaviour can reach it, so waive it'
-    return `no verified behaviour reaches it, so that result is not counted: ${remedy}`
+    if (!reachable.has(element.id)) return 'no verified behaviour reaches it, so that result is not counted: no behaviour can reach it, so waive it'
+    // A behaviour added to the plan would leave it `unfingerprinted`, so none is suggested.
+    if (element.files.length === 0 && !needsNoFiles(element)) return 'no verified behaviour reaches it, and plan:verify cannot fingerprint it, so that result is not counted: waive it'
+    return 'no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it'
   }
 
   for (const task of derivation.tasks) {

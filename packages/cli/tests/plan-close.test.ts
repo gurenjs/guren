@@ -563,6 +563,36 @@ describe('describeCloseBlockers', () => {
     )
   })
 
+  test('should not offer a behaviour for an element plan:verify cannot fingerprint, since a run of it would still be held', () => {
+    const unfingerprintable = element('resource.comment', 'present', { files: [] })
+
+    const lifted = lift(unfingerprintable)
+    expect(lifted.hold?.kind).toBe('unreached')
+    expect(lifted.hold?.note).toEndWith('no verified behaviour reaches it, and plan:verify cannot fingerprint it, so that result is not counted: waive it.')
+    const { holds, moves } = blockerFor(lifted)
+    expect(moves).toBe(`plan:verify cannot fingerprint it, so no run lifts it: waive it with ${waive('resource.comment')}`)
+    expect(holds).not.toContain('add a behaviour')
+    expect(blockerFor(unfingerprintable).moves).toBe(moves)
+
+    const unjudged = element('resource.comment', 'unjudged', { files: [] })
+    expect(lift(unjudged).hold?.note).toEndWith('add a behaviour that reaches it, or waive it.')
+    expect(blockerFor(unjudged).moves).toEndWith('or add a behaviour that reaches it and approve the plan again')
+
+    const column = element('column.comment.body', 'present', { section: 'columns', files: [] })
+    expect(lift(column).hold?.note).toEndWith('no behaviour can reach it, so waive it.')
+    expect(blockerFor(column).moves).toStartWith('No planned property of it matched beyond its existence and no behaviour can reach it')
+  })
+
+  test('should send an unjudged or dropped element with no file to plan:verify, since a run lifts it with nothing fingerprinted', () => {
+    const unjudged = element('model.comment', 'unjudged', { section: 'models', change: 'alter', files: [] })
+    const dropped = element('column.comment.body', 'present', { section: 'columns', change: 'drop', files: [] })
+
+    expect(lift(unjudged).state).toBe('verified')
+    expect(blockerFor(unjudged).moves).toBe(`Run ${verify(HTTP)}, then ${verify(DATA)}; or waive it: ${waive('model.comment')}`)
+    expect(lift(dropped).state).toBe('verified')
+    expect(blockerFor(dropped).moves).toBe(`Run ${verify(DATA)}; or waive it: ${waive('column.comment.body')}`)
+  })
+
   test('should keep no reason on an element the overlay lifts past unjudged, since a remedy there can change nothing', () => {
     const reason = 'The approval recorded no reading of the planned properties that match, so none can be told from one that already held.'
     const unjudged = element('model.comment', 'unjudged', { section: 'models', change: 'alter', reason })
