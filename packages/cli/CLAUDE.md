@@ -36,6 +36,14 @@ Ships the Citty-based CLI (`guren` bin) with generators and database helpers. Ge
 - `src/commands/scaffold-options.ts` owns the shared writer options and scaffold
   arguments used by make, add, and codegen commands. `display-paths.ts` formats
   paths shared by migration generation and database command output.
+- `src/commands/database.ts` owns the six `db:*` command definitions, reset/fresh
+  sequencing, and database result messages. The production refusal lives in
+  `destructive-guard.ts` and throws a `CliError`; `db:seed`, `db:reset`,
+  `db:fresh`, `queue:retry` and `queue:flush` call it ahead of database loading
+  and dry-run handling. `db:migrate` is not guarded and runs in production.
+  `database-command-boundary.test.ts` exercises the CLI in subprocesses with
+  inert database hooks, including refusal, dry-run, reset ordering, failures,
+  and JSON status/rollback output.
 - These modules only construct command objects at import time. Resolve cwd,
   environment, and application state inside command execution. Use the local
   `defineCommand` wrapper so repeated flags keep their existing semantics.
