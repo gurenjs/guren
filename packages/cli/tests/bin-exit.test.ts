@@ -104,15 +104,15 @@ describe('exitWhenFlushed', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  async function runProbe(name: string, body: string, shell: string): Promise<{ stdout: string; exitCode: number | null; killed: boolean }> {
+  async function runProbe(name: string, body: string, shell: string): Promise<Run> {
     await writeFile(join(root, name), `import { exitWhenFlushed, trackStdioWrites } from ${HELPER}
 trackStdioWrites()
 setInterval(() => {}, 60_000)
 ${body}
 `)
-    const proc = Bun.spawn(['bash', '-c', shell], { cwd: root, stdout: 'pipe', timeout: HARD_TIMEOUT_MS, killSignal: 'SIGKILL' })
-    const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
-    return { stdout, exitCode: proc.exitCode, killed: proc.signalCode === 'SIGKILL' }
+    const proc = Bun.spawn(['bash', '-c', shell], { cwd: root, stdout: 'pipe', stderr: 'pipe', timeout: HARD_TIMEOUT_MS, killSignal: 'SIGKILL' })
+    const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited])
+    return { exitCode: proc.exitCode, stdout, stderr, killed: proc.signalCode === 'SIGKILL' }
   }
 
   it('delivers everything written before exiting, with the exit code a command set', async () => {
@@ -127,6 +127,27 @@ ${body}
 
     expect(run.stdout.trim()).toBe(String(4 * 1024 * 1024))
     expect(run.exitCode).toBe(3)
+  }, TEST_TIMEOUT_MS)
+
+  it('waits for a write issued from another write\'s callback', async () => {
+    const run = await runProbe(
+      'callback-write.ts',
+      "process.stdout.write('x'.repeat(1024 * 1024), () => { process.stdout.write('y'.repeat(4 * 1024 * 1024)) })\nawait exitWhenFlushed(0)",
+      'bun callback-write.ts | (sleep 1; wc -c)',
+    )
+
+    expect(run.stdout.trim()).toBe(String(5 * 1024 * 1024))
+  }, TEST_TIMEOUT_MS)
+
+  it('still waits for later writes after a write callback threw', async () => {
+    // Bun runs a small write's callback inside write(), so its throw escapes write() too.
+    const run = await runProbe(
+      'throwing-callback.ts',
+      "try { process.stdout.write('a', () => { throw new Error('from the callback') }) } catch {}\nprocess.stdout.write('x'.repeat(4 * 1024 * 1024))\nawait exitWhenFlushed(0)",
+      'bun throwing-callback.ts | (sleep 1; wc -c)',
+    )
+
+    expect(run.stdout.trim()).toBe(String(4 * 1024 * 1024 + 1))
   }, TEST_TIMEOUT_MS)
 
   it('still exits after a write that threw instead of calling back', async () => {

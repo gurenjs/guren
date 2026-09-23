@@ -20,8 +20,10 @@ function track(stream: NodeJS.WriteStream): void {
   stream.write = ((chunk: unknown, encoding?: unknown, callback?: unknown): boolean => {
     const done = typeof encoding === 'function' ? encoding : callback
     pending += 1
+    let calledBack = false
     try {
       return write(chunk, typeof encoding === 'function' ? undefined : encoding, (error) => {
+        calledBack = true
         // Released after the caller's callback, so a write it issues is waited for too.
         try {
           if (typeof done === 'function') (done as (error?: Error | null) => void)(error)
@@ -30,8 +32,9 @@ function track(stream: NodeJS.WriteStream): void {
         }
       })
     } catch (error) {
-      // Bun throws on a chunk that is not a string or buffer and never calls back.
-      release()
+      // Bun throws on a chunk that is not a string or buffer and never calls back, but it
+      // also runs a small write's callback inside write(), so a throw can be the caller's.
+      if (!calledBack) release()
       throw error
     }
   }) as NodeJS.WriteStream['write']
