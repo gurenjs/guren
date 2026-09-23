@@ -11,12 +11,11 @@ interface ResolvedDefinition {
 }
 
 /**
- * Validates `createApp({ env })` and binds it as `env`, then resolves and binds
- * each `createApp({ config })` definition and each module's `config` after them
- * (RFC 0027 §1-§3, RFC 0002). Registered before
- * every other provider: a bad environment fails the boot before anything
- * registers, every later register() sees the configured managers, and a later
- * provider that rebinds one fails the boot through {@link ownedBindings}.
+ * Validates `createApp({ env })` and binds it as `env`, then resolves and binds each
+ * `createApp({ config })` definition, then each module's (RFC 0027 §1-§3, RFC 0002).
+ * Registered first: a bad environment fails the boot before anything registers,
+ * every later register() sees the configured managers, and a later provider that
+ * rebinds one fails the boot through {@link ownedBindings}.
  */
 export class ConfigServiceProvider extends ServiceProvider {
   private env = {} as AppEnv

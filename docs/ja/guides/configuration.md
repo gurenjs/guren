@@ -174,7 +174,7 @@ export default defineOAuthConfig((env) => {
 
 ### モジュールが持つ定義
 
-[モジュール](./cli.md#アプリケーションモジュール)は、自分だけが使うサービスの定義を `modules/<name>/config/` に置き、アプリの `createApp({ config })` ではなく自身の `defineModule({ config })` に並べられます。
+[モジュール](./cli.md#アプリケーションモジュール)は、自分だけが使うサービスの定義を `modules/<name>/config/` に置き、自身の `defineModule({ config })` に並べられます。アプリの `createApp({ config })` に置く必要はありません。
 
 ```ts
 // modules/auth/index.ts

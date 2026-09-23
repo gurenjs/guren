@@ -123,9 +123,12 @@ async function readListings(cwd: string, cache: ParseCache, entryPath: string): 
     if (root.module === null) continue
     const moduleDir = toPosixRelative(cwd, root.dir)
     const descriptor = await findFirstExisting(cwd, [`${moduleDir}/index.ts`, `${moduleDir}/index.js`])
-    const descriptorAst = descriptor === null ? null : await cache.get(resolve(cwd, descriptor))
+    // No descriptor, no module to mount. One that is not a readable `defineModule({…})`
+    // may still carry a `config` naming any file, so nothing is judged.
+    if (descriptor === null) continue
+    const descriptorAst = await cache.get(resolve(cwd, descriptor))
     const moduleOptions = descriptorAst ? calleeOptions(descriptorAst.ast.program, 'defineModule') : null
-    if (!descriptor || !descriptorAst || !moduleOptions) continue
+    if (!descriptorAst || !moduleOptions) return null
 
     const declared = propertyValue(moduleOptions, 'config')
     if (declared === undefined) {
@@ -209,7 +212,8 @@ function judge(entry: ResolvedConfigEntry, listers: Lister[], entryPath: string)
 function judgeDistinctKeys(entries: ReadonlyArray<ResolvedConfigEntry>, listersOf: (entry: ResolvedConfigEntry) => Lister[]): CheckResult[] {
   const byKey = new Map<string, Array<{ file: string; lister: Lister }>>()
   for (const entry of entries) {
-    if (entry.problem) continue
+    // Only these two carry the file's name in place of the definition's key.
+    if (entry.problem === 'import-failed' || entry.problem === 'not-a-definition') continue
     for (const lister of listersOf(entry)) {
       if (lister.unmountedModule !== undefined) continue
       byKey.set(entry.key, [...(byKey.get(entry.key) ?? []), { file: entry.file, lister }])
@@ -240,7 +244,9 @@ export async function checkConfigWiring(options: { cwd: string; cache: ParseCach
     const file = entry.file.replace(/\.[jt]s$/u, '')
     return listings.filter((listing) => listing.file === file || `${listing.file}/index` === file).map((listing) => listing.lister)
   }
-  const listed = new Set(listings.flatMap(({ file }) => [`${file}.ts`, `${file}/index.ts`]))
+  // An unmounted module's array is never read, so it does not earn a file an import.
+  const read = listings.filter(({ lister }) => lister.unmountedModule === undefined)
+  const listed = new Set(read.flatMap(({ file }) => [`${file}.ts`, `${file}/index.ts`]))
   const resolved = await loadResolvedConfig(cwd, listed)
   const results = resolved.entries.flatMap((entry) => {
     const result = judge(entry, listersOf(entry), entryPath)

@@ -214,6 +214,28 @@ describe('checkConfigWiring with defineModule({ config }) (RFC 0002)', () => {
     expect(results[1].message).toBe('The "cache" config is listed 2 times: config/cache.ts by createApp({ config }) in src/app.ts, modules/billing/config/cache.ts by defineModule({ config }) in modules/billing/index.ts. The boot fails on the second.')
   })
 
+  test('fails a duplicate key even when one side could not be resolved on this machine', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/config/cache.ts': `import { defineConfig } from '@guren/core'\n\nexport default defineConfig({ key: 'cache', resolve: () => { throw new Error('no redis') }, bind: () => {} })\n`,
+      'modules/billing/index.ts': billingModule(`{ name: 'billing', config: [cache] }`, `import cache from './config/cache'\n`),
+      'src/app.ts': entry('{ config: [cache], modules: [billing] }', MOUNTS_BILLING),
+    })
+
+    expect(results.map((result) => [result.key, result.status])).toContainEqual(['config-duplicate-key:cache', 'fail'])
+  })
+
+  test('judges nothing when a module descriptor is not a defineModule() call, since it may list any file', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'modules/billing/config/oauth.ts': OAUTH_CONFIG,
+      'modules/billing/index.ts': `import oauth from './config/oauth'\n\nexport const billing = { name: 'billing', providers: [], commands: [], config: [oauth] }\n`,
+      'src/app.ts': entry('{ config: [cache], modules: [billing] }', MOUNTS_BILLING),
+    })
+
+    expect(results).toEqual([])
+  })
+
   test('judges nothing when a module config array is not a literal, since it may list any file', async () => {
     const results = await run({
       ...WITH_CACHE,
