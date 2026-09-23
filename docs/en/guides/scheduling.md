@@ -58,6 +58,8 @@ process.on('SIGTERM', () => {
 })
 ```
 
+`scheduler.start()` ticks once right away and keeps ticking only inside a process that something else keeps alive, such as the app server. A standalone script that only calls it runs whatever is due at that moment and exits without waiting for the next tick. To run due tasks from outside the process, have cron call `bunx guren schedule:run`, which reads its tasks from the schedule kernel (see [Making tasks visible to the CLI](#making-tasks-visible-to-the-cli)).
+
 ### On Serverless Runtimes
 
 `scheduler.start()` needs a long-lived process, which neither Cloudflare Workers nor AWS Lambda has. There the platform's own scheduler supplies the tick and the app only registers tasks:
