@@ -100,7 +100,7 @@ describe('worker cancellation and recovery', () => {
   test('retries a rejected renewal at the next heartbeat instead of dropping the lease', async () => {
     let aborted = false
     const renewed = Promise.withResolvers<void>()
-    class LeaseJob extends Job {
+    class RenewingLeaseJob extends Job {
       async handle() {
         this.signal.addEventListener('abort', () => { aborted = true }, { once: true })
         const deadline = setTimeout(() => renewed.reject(new Error('no renewal followed the rejected one within 2000ms')), 2000)
@@ -117,9 +117,9 @@ describe('worker cancellation and recovery', () => {
         return true
       }
     }
-    registerJob(LeaseJob)
+    registerJob(RenewingLeaseJob)
     const driver = new FlakyLeaseDriver()
-    await enqueueJob(driver, LeaseJob, {}, { maxAttempts: 1 })
+    await enqueueJob(driver, RenewingLeaseJob, {}, { maxAttempts: 1 })
     await new Worker(driver, { stopWhenEmpty: true }).start()
     expect((await driver.getFailedJobs()).map((failed) => failed.error)).toEqual([])
     expect(aborted).toBe(false)
