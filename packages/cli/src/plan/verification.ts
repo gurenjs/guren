@@ -59,8 +59,12 @@ export function restsOnReach(element: Pick<PlanElementStatus<PlanElementState>, 
   return element.change !== 'drop' && !element.properties.some((property) => property.verdict === 'match' && !property.existence)
 }
 
-/** An `unjudged` element with no file rests on the behaviours reaching it, whose test files their record covers; a `drop` has no file. */
-function needsNoFiles(element: Pick<PlanElementStatus<PlanElementState>, 'change' | 'state'>): boolean {
+/**
+ * Whether a run lifts the element with nothing of it fingerprinted: a `drop` has no file, and an
+ * `unjudged` one rests on the behaviours reaching it, whose test files their record covers. The
+ * one rule the overlay's `unfingerprinted` hold and `plan:close`'s remedies ask.
+ */
+export function needsNoFiles(element: Pick<PlanElementStatus<PlanElementState>, 'change' | 'state'>): boolean {
   return element.change === 'drop' || element.state === 'unjudged'
 }
 
@@ -84,13 +88,17 @@ export function applyVerification(
 
   // A carrier in any task counts: one task's behaviour may render a page or return a resource another task placed.
   const carriers = behaviourCarriers(plan, derivation)
-  const standing = new Set(Object.keys(records).filter((stepId) => recordStands(records[stepId]!, digest, hashes)))
+  const standing = new Set(
+    Object.entries(records)
+      .filter(([, record]) => recordStands(record, digest, hashes))
+      .map(([stepId]) => stepId),
+  )
   const reachable = behaviourCanReach(plan)
   const unreached = (element: PlanElementStatus<PlanElementState>): string => {
     const reaching = carriers.get(element.id) ?? []
     if (reaching.length > 0) {
       const steps = `no verified run of a step whose behaviours reach it (${reaching.join(', ')}) holds now`
-      // Mirrors close-remedy: a run of a carrier would still be held as `unfingerprinted`, so it is not suggested.
+      // A run of a carrier would still be held as `unfingerprinted`, so it is not suggested.
       if (element.files.length === 0 && !needsNoFiles(element)) return `${steps}, and plan:verify cannot fingerprint it, so that result is not counted: waive it`
       const which = reaching.length === 1 ? 'that step' : 'one of those steps'
       return `${steps}, so that result is not counted: run plan:verify on ${which}, or waive it`

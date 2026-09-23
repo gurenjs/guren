@@ -813,6 +813,18 @@ describe('applyVerification', () => {
     expect(blocker?.moves).toStartWith('plan:verify cannot fingerprint it, so no run lifts it: waive it with')
   })
 
+  test('should send an unjudged element with no file back to the step whose behaviours reach it, since its run needs no file of it', () => {
+    const testFile = 'tests/comments.test.ts'
+    const status = statusOf({ 'action.comments.store': { state: 'unjudged', files: [], properties: [] } })
+    const http = record({ fingerprint: { ...FINGERPRINT, files: { [testFile]: sha256(FILES[testFile]!) } } })
+
+    const { status: held } = applyVerification(status, derivation, { [HTTP]: http }, 'digest', new Map([[testFile, 'changed']]), plan)
+
+    const action = elementOf(held, 'action.comments.store')
+    expect(action.hold?.kind).toBe('unreached')
+    expect(action.hold?.note).toEndWith(`reach it (${HTTP}) holds now, so that result is not counted: run plan:verify on that step, or waive it.`)
+  })
+
   test('should reach an element of a split step\u2019s earlier part through the part that runs the behaviours, while its record stands', async () => {
     const controllerFile = 'app/Http/Controllers/CommentController.ts'
     const split = derivePlanTasks(plan, { splitThreshold: 3 })

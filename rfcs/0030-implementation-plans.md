@@ -1470,7 +1470,8 @@ each rule was read.
   a command, a side effect), in "no behaviour can reach it, so waive it". Where
   the plan has a step whose behaviours reach it but no run of that step stands,
   the note names the step and ends in "run plan:verify on that step, or waive
-  it" (only "waive it" when `plan:verify` cannot fingerprint the element). An
+  it" ("on one of those steps" when several reach it; only "waive it" when
+  `plan:verify` cannot fingerprint the element). An
   element lifted to `verified`, `drifted` or `waived` keeps no `reason`, which
   says why the readers could not complete it and is answered there. The overlay records why it did not lift an element (`hold`: below its
   completion state, nothing fingerprinted, a file changed since, or no

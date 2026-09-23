@@ -8,7 +8,7 @@ import type { Plan, PlanDraft } from './schema'
 import { awaitsVerification, type PlanElementState, type PlanElementStatus } from './status'
 import { listPlanSteps, type PlanTaskDerivation } from './tasks'
 import { behaviourCanReach, behaviourCarriers } from './reach'
-import { restsOnReach } from './verification'
+import { needsNoFiles, restsOnReach } from './verification'
 
 interface BlockerContext {
   planArgument: string
@@ -68,7 +68,6 @@ function closeRemedy(element: PlanElementStatus<PlanElementState>, context: Bloc
     return `${target}, then run ${verify(owner)}${orWaive}`
   }
   const unmatched = restsOnReach(element)
-  const needsNoFiles = element.change === 'drop' || element.state === 'unjudged'
   const carriers = context.carriers.get(element.id) ?? []
   if (unmatched && carriers.length === 0) {
     if (!context.reachable.has(element.id)) {
@@ -76,7 +75,7 @@ function closeRemedy(element: PlanElementStatus<PlanElementState>, context: Bloc
     }
     return `No planned property of it matched beyond its existence and no step's behaviour reaches it, so no plan:verify run lifts it: waive it with ${waive}, or add a behaviour that reaches it and approve the plan again`
   }
-  if (element.files.length === 0 && !needsNoFiles) return `plan:verify cannot fingerprint it, so no run lifts it: waive it with ${waive}`
+  if (element.files.length === 0 && !needsNoFiles(element)) return `plan:verify cannot fingerprint it, so no run lifts it: waive it with ${waive}`
   const runs = unmatched && !carriers.includes(owner) ? [carriers[0]!, owner] : [owner]
   return `Run ${runs.map(verify).join(', then ')}${orWaive}`
 }
