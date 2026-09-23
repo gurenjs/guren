@@ -735,7 +735,7 @@ export const BUN_DEPLOY_MINIFY = { whitespace: true, syntax: true, identifiers: 
 const NAME_KEYED_BASES = new Set(['Job', 'Event', 'Notification', 'Agent'])
 const NAME_PIN = /\bstatic\s+(?:override\s+)?(?:jobName|eventName|agentName)\b|\bget\s+type\s*\(/
 const SOURCE_CLASS =
-  /^[ \t]*(?:export[ \t]+(?:default[ \t]+)?)?(?:abstract[ \t]+)?class[ \t]+([A-Za-z_$][\w$]*)(?:[ \t]*<[^{]*?>)?(?:[ \t]+extends[ \t]+([A-Za-z_$][\w$]*))?/gm
+  /^[ \t]*(?:export[ \t]+(?:default[ \t]+)?)?(?:abstract[ \t]+)?class[ \t]+([A-Za-z_$][\w$]*)(?:[ \t]*<[^{>\n]*>)?(?:[ \t]+extends[ \t]+([A-Za-z_$][\w$]*))?/gm
 const BUNDLED_CLASS = /(?:^|[^\w$.])class\s+([A-Za-z_$][\w$]*)/g
 
 export interface RenamedNameKeyedClass {
@@ -776,7 +776,7 @@ export function renamedNameKeyedClasses(
 
   const renamed: RenamedNameKeyedClass[] = []
   for (const bundledAs of new Set(Array.from(bundle.matchAll(BUNDLED_CLASS), (match) => match[1]!))) {
-    const name = /^(.+?)\d+$/.exec(bundledAs)?.[1]
+    const name = withoutNumericSuffix(bundledAs)
     if (name === undefined || declared.has(bundledAs)) continue
     const files = (declared.get(name) ?? [])
       .filter((entry) => !entry.pinned && nameKeyed(entry.base))
@@ -785,6 +785,13 @@ export function renamedNameKeyedClasses(
     if (files.length > 0) renamed.push({ name, bundledAs, files })
   }
   return renamed
+}
+
+// A scan rather than `/^(.+?)\d+$/`, which backtracks polynomially on a long digit run.
+function withoutNumericSuffix(name: string): string | undefined {
+  let end = name.length
+  while (end > 0 && name.charCodeAt(end - 1) >= 48 && name.charCodeAt(end - 1) <= 57) end--
+  return end > 0 && end < name.length ? name.slice(0, end) : undefined
 }
 
 /**
