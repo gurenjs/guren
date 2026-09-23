@@ -14,10 +14,11 @@ import { CliError, formatSchemaIssues } from './cli-error'
 import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
 import type { PlanAppState } from './plan/app-state'
-import { approvalReadings, planApprovalsPath, readPlanApprovals, recordPlanApproval, requireReadableApprovals, type PlanApproval } from './plan/approvals'
+import { approvalReadings, heldAlters, planApprovalsPath, readPlanApprovals, recordPlanApproval, requireReadableApprovals, type HeldAlter, type PlanApproval } from './plan/approvals'
 import { gitAuthor, planBesideExclusions, writeFileAtomic } from './plan/beside'
 import { stampContextHash, type PlanContextStamp } from './plan/freshness'
 import { planHash } from './plan/identity'
+import { behaviourCanReach } from './plan/reach'
 import { hasBaseline } from './plan/render'
 import { PlanSchema, type Plan, type PlanDraft } from './plan/schema'
 import { PLAN_STATE_DIR } from './plan/state'
@@ -42,6 +43,11 @@ export interface PlanApproveReport {
   builtByPlan?: string[]
   /** `alter` elements whose readings (RFC 0030 §6) this run wrote to the approvals file, carried over or read now; absent when it wrote none. */
   readingsRecorded?: string[]
+  /**
+   * Advisory, never a refusal: `alter`s whose readable planned properties all held at approval,
+   * judged on the approval entry's readings, so none of those can complete them. Absent when none.
+   */
+  heldAlters?: Array<HeldAlter & { message: string }>
 }
 
 export interface PlanApproveFileOptions {
@@ -109,7 +115,8 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
 
   const hash = planHash(approved)
   const by = await gitAuthor(appRoot, exec)
-  const readings = approvalReadings(approvals, approved, readAlterProperties(approved, app))
+  const current = readAlterProperties(approved, app)
+  const readings = approvalReadings(approvals, approved, current)
   const approval: PlanApproval = {
     hash,
     approvedAt: (options.now ?? (() => new Date()))().toISOString(),
@@ -118,16 +125,35 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
   }
   const recorded = await recordPlanApproval(path, approvals, approval)
   const readingsRecorded = [...new Set(recorded.readingsAdded.map((reading) => reading.element))]
+  const entry = recorded.existing ?? approval
+  const reachable = behaviourCanReach(approved)
+  const warnings = heldAlters(approved, current, entry.readings?.properties ?? []).map((alter) => ({ ...alter, message: heldAlterMessage(alter, reachable.has(alter.element)) }))
   return {
     reportVersion: PLAN_APPROVE_REPORT_VERSION,
     plan: { file: basename(path), title: approved.title, hash },
     approvalsFile: toPosixRelative(appRoot, planApprovalsPath(path)),
     ...(stamped ? { stamped } : {}),
-    approval: recorded.existing ?? approval,
+    approval: entry,
     alreadyApproved: recorded.existing !== undefined,
     ...(settled.built.length > 0 ? { builtByPlan: settled.built } : {}),
     ...(readingsRecorded.length > 0 ? { readingsRecorded } : {}),
+    ...(warnings.length > 0 ? { heldAlters: warnings } : {}),
   }
+}
+
+/** Agrees with `plan:status`'s `unjudged` reason and `plan:close`'s remedies: `reachable` is `behaviourCanReach()`. */
+function heldAlterMessage(alter: HeldAlter, reachable: boolean): string {
+  let shows = 'none shows the change'
+  if (alter.unread.length > 0) {
+    const which = alter.unread.length === 1 ? 'it' : 'one of them'
+    shows = `${alter.unread.join(', ')} read unknown then, and only a match on ${which} can still show the change (a property no reader sees never matches)`
+  } else if (alter.readNow) {
+    shows += ', so plan:status reports it unjudged'
+  } else {
+    shows += ' (it is not read now, so this rests on the readings recorded at approval)'
+  }
+  const otherwise = reachable ? 'it completes only through a verified behaviour that reaches it, or by a waiver' : 'only a waiver completes it, since no behaviour can reach it'
+  return `${alter.element} (${alter.label}): every readable planned property already held at approval (${alter.held.join(', ')}); ${shows}. State the change in a property the application does not hold yet and approve the plan again, or expect that ${otherwise}.`
 }
 
 /**
@@ -192,6 +218,9 @@ export function formatPlanApprove(report: PlanApproveReport): string {
     lines.push(`Already approved at ${report.approval.approvedAt}; recorded the readings it lacked in ${report.approvalsFile}: ${report.readingsRecorded.join(', ')}.`)
   } else {
     lines.push(`Already approved at ${report.approval.approvedAt}; ${report.approvalsFile} was left alone.`)
+  }
+  if (report.heldAlters) {
+    lines.push('', 'Warning, advisory (the approval stands):', ...report.heldAlters.map((alter) => `  ${alter.message}`))
   }
   return lines.join('\n')
 }

@@ -12,7 +12,7 @@ import { CliError } from '../cli-error'
 import { planSiblingPath, readBesideRecord, writeFileAtomic, type BesideRecordRead } from './beside'
 import { canonicalJson, planHash } from './identity'
 import { hasBaseline } from './render'
-import type { Plan, PlanDraft } from './schema'
+import { listPlanAlterIds, type Plan, type PlanDraft } from './schema'
 import type { PlanPropertyReading } from './status'
 
 const PLAN_APPROVALS_VERSION = 1
@@ -119,6 +119,37 @@ export function approvalReadings(approvals: PlanApprovals, plan: Plan, current: 
     if (!properties.some((held) => sameReading(held, reading))) properties.push(reading)
   }
   return { baseline, properties }
+}
+
+/** An `alter` whose readable planned properties all read `match` at approval (RFC 0030 §6), so none of them can show its change. */
+export interface HeldAlter {
+  element: string
+  label: string
+  held: string[]
+  /** Read `unknown` at approval: a match on one of these still counts. */
+  unread: string[]
+  /** `false` when the element is not read now (its section unreadable, or it is not found), so this rests on the recorded readings alone. */
+  readNow: boolean
+}
+
+/**
+ * The `alter`s of `plan` that {@link HeldAlter} describes, judged on the verdicts `recorded` (the
+ * approval entry's readings, which `judgePlan()` counts against) holds for the keys `current`
+ * reads now. An element `current` does not read (its section unreadable, or it is not found) is
+ * judged on every recorded reading of its id, so a re-approval that adds none keeps the answer.
+ * An element with no readable reading, all `unknown` or none planned, is not one.
+ */
+export function heldAlters(plan: PlanDraft | Plan, current: readonly PlanPropertyReading[], recorded: readonly PlanPropertyReading[]): HeldAlter[] {
+  return listPlanAlterIds(plan).flatMap((id): HeldAlter[] => {
+    const keys = current.filter((reading) => reading.element === id)
+    const readings = keys.length > 0 ? keys.flatMap((key) => recorded.find((reading) => sameReading(reading, key)) ?? []) : recorded.filter((reading) => reading.element === id)
+    const held = readings.filter((reading) => reading.verdict === 'match')
+    if (held.length === 0 || readings.some((reading) => reading.verdict === 'differ')) return []
+    const unread = readings.filter((reading) => reading.verdict === 'unknown')
+    return [
+      { element: id, label: held[0]!.label, held: held.map((reading) => reading.property), unread: unread.map((reading) => reading.property), readNow: keys.length > 0 },
+    ]
+  })
 }
 
 /**

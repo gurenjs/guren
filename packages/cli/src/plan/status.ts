@@ -27,7 +27,7 @@ import { resourceFieldProperties, validatorFieldProperties } from './field-statu
 import { differ, existenceMatch, match, unknown, type PlanPropertyStatus, type PlanPropertyVerdict } from './property-status'
 import { behaviourCanReach } from './reach'
 import {
-  listPlanElementEntries,
+  listPlanAlterIds,
   type PlanAction,
   type PlanChange,
   type PlanColumn,
@@ -443,7 +443,7 @@ export function readAlterProperties(plan: PlanDraft, app: PlanAppState): PlanPro
 
 /** Whether the plan alters anything: its properties are read through the detail, which imports db/schema.ts and the validators. */
 export function planHasAlter(plan: PlanDraft): boolean {
-  return listPlanElementEntries(plan).some(({ element }) => (element as { change?: PlanChange }).change?.kind === 'alter')
+  return listPlanAlterIds(plan).length > 0
 }
 
 function judgeWith(plan: PlanDraft, app: PlanAppState, credit: AlterCredit): PlanStatus {

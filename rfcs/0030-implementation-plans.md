@@ -1662,9 +1662,20 @@ matched when the plan was approved says nothing about the change. What shipped
   not import at approval and can now). A later approval does not replace it
   with what it reads then: an `unknown` also precedes real work (an action
   that returned JSON before it rendered the planned page), and a re-approval
-  in the middle of that work would stop crediting it. The §2 warning on an `alter` whose
-  readable properties all held at approval, which the producer row of Part 2
-  asks for, is not part of this change.
+  in the middle of that work would stop crediting it.
+- The warning the producer row of Part 2 asks for came later: `plan:approve`
+  approves and warns when an `alter` has a readable reading and every one is a
+  `match` (`heldAlters` in its report). It is not a §2 check. A §2 check reads
+  the application as it is now, and a re-approval after the work reads a built
+  property as a `match` too, so `heldAlters()` in `plan/approvals.ts` judges
+  the approval entry's readings for the properties the `alter` reads now, or
+  all of its recorded ones where it cannot be read or is not found. An
+  `unknown` is not held, and the warning names it as what can still show the
+  change. An `alter` with no readable reading gets none: its readings cannot
+  tell a property no reader sees from one a failed import hid, and a model or
+  controller whose change lies in its columns or actions plans no property of
+  its own. `plan:render` reads no approval, and `plan:status` reports the
+  element `unjudged` with the same remedy.
 
 **Amended in implementation (drift re-verification, and a data step's
 migration).** Two defects the loop hit once a plan had more than one task.
@@ -2711,10 +2722,9 @@ marks what was read and not run.
   completes only where a behaviour reaches it (`restsOnReach()`,
   `packages/cli/src/plan/verification.ts:58-60`). Emitting those three is safe.
   Pages are not emitted (§5 amendment).
-- The reshape's §2 warning, on an `alter` whose readable properties all held
-  at approval, is not implemented: `plan/validate.ts` has no such check kind.
-  The readings it needs are on the approval entry since #978, so
-  `plan:approve` can compute it from them.
+- The reshape's warning, on an `alter` whose readable properties all held
+  at approval, is implemented in `plan:approve` from the approval entry's
+  readings, and is not a §2 check (§6 amendment on readings).
 - The `commands` allowlist of §8 is not implemented (§8 amendment).
 - Files touched and lines changed per step are not recorded, so neither the
   step width (Open Question 3) nor what a scaffold saves can be judged yet.

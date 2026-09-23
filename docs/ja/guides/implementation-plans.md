@@ -300,6 +300,15 @@ Already approved at 2026-09-22T10:16:20.673Z; recorded the readings it lacked in
 
 実装のあとに読み取ると性質はすでに一致しているので、承認し直しても役に立ちません。一致した性質のどれにも読み取りがない `alter` は `unjudged` になり、注記はその要素に届く振る舞いで検証するよう示します。ステップが検証を通ったあとは、waive する道を示す注記が加わります。カラムのように振る舞いが届かない要素には、waiver だけが示されます。
 
+読める性質がすべて承認時にすでに一致していた `alter` は、性質では完了しません。`plan:approve` はそうした計画も承認し、要素と性質を挙げて警告します。`--json` では `heldAlters` に並びます。警告は承認の項目の読み取りから判定します。同じハッシュを承認し直すと同じ警告が出ます。同じ baseline のもとで実装のあとに承認し直した場合は、実装で変えた性質については警告しません。次の例は、`view.posts.show` がページですでに宣言済みの `post` prop を書き直しただけの計画です。
+
+```text
+Warning, advisory (the approval stands):
+  view.posts.show (posts/Show): every readable planned property already held at approval (prop post); none shows the change, so plan:status reports it unjudged. State the change in a property the application does not hold yet and approve the plan again, or expect that it completes only through a verified behaviour that reaches it, or by a waiver.
+```
+
+承認時に `unknown` だった性質は、一致していたとは数えません。警告はその性質を、まだ変更を示せる唯一のものとして挙げます。示せるのは、読み取れるようになってから一致したときだけです。読める性質が一つもない `alter` には警告を出さず、`plan:status` が前述のとおり `unjudged` と報告します。
+
 ## 実装: `plan:next` と `plan:verify`
 
 作業の分解と順序は、モデルではなく Guren が計画から導きます。計画が足したり変えたりするエンティティごとにタスクができ、タスクは外部キーの順に並びます。ステップは六種類あり、各タスクには作業のある種類だけが入ります。
