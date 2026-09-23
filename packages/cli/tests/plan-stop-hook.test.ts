@@ -290,7 +290,7 @@ describe('planStopHookFindings', () => {
     expect((await readState(app)).active).toEqual(active({ step: PAGES, continuations: 1 }))
   })
 
-  test('should list every earlier step a verified one broke, in step order, a failed static re-check among them', async () => {
+  test('should list every earlier step a verified one broke, in the order the run reports them, a failed static re-check among them', async () => {
     const app = await createApp('broke-two', { active: active({ step: PAGES }) })
     const lost = record({ outcome: 'failed', commands: [{ command: 'tests:fail', label: 'not run: a re-check that one test file still carries each behaviour', status: 'fail', durationMs: 0, reason: 'the test files no longer carry the behaviours the step saw fail', findings: ['[AC-comments-2] is carried by no test file'] }], acceptance: [], incomplete: [] })
     const failed = record({ outcome: 'failed', commands: [{ command: 'tests', label: 'bun test tests/comments.test.ts', status: 'fail', durationMs: 3, reason: 'a behaviour is not passing', findings: [] }], acceptance: [], incomplete: [] })
@@ -305,7 +305,8 @@ describe('planStopHookFindings', () => {
     const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => run })
 
     expect(verdict.block).toBe(false)
-    expect(verdict.message).toMatch(new RegExp(`its changes broke 2 earlier steps:\\n${TESTS}: failed[^]*\\n${HTTP}: failed[^]*returns them in turn\\.$`))
+    const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+    expect(verdict.message).toMatch(new RegExp(`its changes broke 2 earlier steps:\\n${escape(TESTS)}: failed[^]*\\n${escape(HTTP)}: failed[^]*returns them in turn\\.$`))
   })
 
   test('should report an earlier step whose static re-check found a lost behaviour with the broken ones, not as unchecked', async () => {

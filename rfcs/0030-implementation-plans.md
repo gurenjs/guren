@@ -1565,9 +1565,10 @@ migration).** Two defects the loop hit once a plan had more than one task.
   since two drifted steps share commands as well; a static re-check (below)
   runs nothing, so its failure does not stop the rest. A whole-plan run keeps
   the same order: the steps that did not drift run first, and the drifted ones
-  are re-checked only once all of those verified. A drifted `--step` target is its own re-check:
-  its failure is recorded like any step's, and only a `blocked` result or a
-  failed static re-check (below) leaves its record drifted.
+  are re-checked only once all of those verified. A drifted `--step` target is
+  its own re-check: its failure is recorded like any step's, and only a
+  `blocked` result or a failed static re-check (below) leaves its record
+  drifted.
 - A drifted `tests:fail` step is re-checked without a run
   (`PlanVerifier.recheckTests()`), wherever `plan:verify` meets it (a
   whole-plan run, `--step` on it, or as an earlier step): `tests:fail` cannot
