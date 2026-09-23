@@ -33,6 +33,7 @@ import {
 import { checkEnvExample } from '../src/app-env'
 import { loadResolvedConfig } from '../src/resolved-config'
 import { addResource, listBlueprints, runBlueprint } from '../src/blueprints'
+import { CliError } from '../src/cli-error'
 import { builtinSubCommands } from '../src/commands'
 import { runCheck } from '../src/check'
 
@@ -1319,10 +1320,13 @@ describe('blueprints over a file that already exists', () => {
     })
     const before = await snapshotTree(workspace.dir)
 
-    // The wording is scaffold-files.test.ts's; here, which files and no name to change.
-    await expect(runBlueprint(blueprint)).rejects.toThrow(
-      `${inTheWay.map((path) => `  ${path}`).join('\n')}\nNothing was scaffolded. Pass --force to overwrite`,
-    )
+    const error = await runBlueprint(blueprint).catch((reason: unknown) => reason)
+
+    // scaffold-files.test.ts pins the wording; this pins which files are listed and that no name or flag is offered.
+    expect(error).toBeInstanceOf(CliError)
+    const lines = (error as CliError).message.split('\n')
+    expect(lines.slice(1, -1)).toEqual(inTheWay.map((path) => `  ${path}`))
+    expect(lines.at(-1)).toStartWith('Nothing was scaffolded. Pass --force to overwrite')
     expect(await snapshotTree(workspace.dir)).toEqual(before)
   })
 })
