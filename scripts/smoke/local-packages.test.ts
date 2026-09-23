@@ -145,6 +145,13 @@ describe('distDifferences', () => {
       ])
     })
   })
+
+  // An unbuilt checkout must not read as a clean comparison, or as the copy's fault.
+  test('throws when this checkout has no dist/', async () => {
+    await withTrees({}, { 'index.js': '\n' }, async (sourceDir, installedDir) => {
+      await expect(distDifferences(sourceDir, installedDir)).rejects.toThrow(/ENOENT/)
+    })
+  })
 })
 
 describe('vendorLocalPackages', () => {

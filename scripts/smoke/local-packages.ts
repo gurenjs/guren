@@ -225,16 +225,16 @@ export async function vendorLocalPackages(vendorRoot: string): Promise<Map<strin
  * build: missing, extra, or with other bytes.
  */
 export async function distDifferences(sourceDir: string, installedDir: string): Promise<string[]> {
-  const list = async (dir: string): Promise<Set<string>> => {
-    try {
-      return new Set(await Array.fromAsync(new Bun.Glob('**/*').scan({ cwd: join(dir, 'dist'), onlyFiles: true })))
-    } catch (error) {
-      // No dist/ at all is a difference to report, not a reason to stop checking.
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return new Set()
+  const list = async (dir: string): Promise<Set<string>> =>
+    new Set(await Array.fromAsync(new Bun.Glob('**/*').scan({ cwd: join(dir, 'dist'), onlyFiles: true })))
+  const [expected, actual] = await Promise.all([
+    list(sourceDir),
+    // An installed copy with no dist/ is a difference to report, not a reason to stop checking.
+    list(installedDir).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return new Set<string>()
       throw error
-    }
-  }
-  const [expected, actual] = await Promise.all([list(sourceDir), list(installedDir)])
+    }),
+  ])
 
   const differences: string[] = []
   for (const file of expected) {
