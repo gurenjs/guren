@@ -5,11 +5,6 @@ import { PostPayloadSchema } from '../app/Http/Validators/PostValidator.js'
 import { registerAuthenticatedAreaRoutes } from './authenticated.js'
 
 export function registerWebRoutes(baseRouter: Router): void {
-  // aliasMiddleware() returns a Router carrying the alias name in its type —
-  // capture it, or a later .middleware('auth') will not compile. 'guest' has
-  // no alias here: modules/auth applies requireGuest() directly, since a
-  // module registrar's bare Router type carries no alias name even though
-  // 'auth' is registered on this same instance at runtime.
   const router = baseRouter.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
 
   // Attachment URLs point at this signed route, so unmounted every cover image

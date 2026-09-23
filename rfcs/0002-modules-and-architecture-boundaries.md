@@ -18,12 +18,14 @@ Correction (2026-09-23): `examples/blog` now carries `modules/auth`
 (login, registration, password reset, email verification, OAuth), closing
 the gap the first correction named. Unlike `web/modules/blog`, which keeps
 its tables in the root `db/schema.ts` and a single `modules/blog/routes.ts`,
-`modules/auth` uses a `modules/auth/routes/` *directory* — the shape
-`discoverModuleRoutesFiles()` (`packages/cli/src/discovery.ts`) actually
-scans to verify a module's own route-registrar graph is reachable. Neither
-app had exercised that half of `guren check`'s route-registrar wiring check
-before this: a module using the single-file `routes.ts` shape `make:module`
-itself scaffolds, as `web/modules/blog` does, leaves it vacuous.
+`modules/auth` keeps its routes in a `modules/auth/routes/` directory with
+a file (`oauth.ts`) beside the `routes/index.ts` registrar. Only that shape
+gives `guren check`'s route-registrar wiring check something to verify for
+a module: it scans a module's `routes/` directory alone
+(`discoverModuleRoutesFiles()`) and never counts the entry file as a
+candidate, so the single-file `routes.ts` that `make:module` scaffolds, as
+`web/modules/blog` uses, leaves it vacuous. Neither app had exercised that
+half of the check before this.
 `examples/blog`'s tsconfig and
 vitest config did not include `modules/`, so a module's own files and tests
 were silently outside `bun run typecheck:blog` and `bun run test` — fixed

@@ -10,13 +10,14 @@ import { ForgotPasswordSchema } from '../app/Http/Validators/ForgotPasswordValid
 import { ResetPasswordSchema } from '../app/Http/Validators/ResetPasswordValidator.js'
 import { registerOAuthRoutes } from './oauth.js'
 
-// defineModule's `routes` is typed `(router: Router) => void`, an
-// unparameterized Router, so an alias name the root registrar set on this
-// same instance (e.g. 'auth') is not in scope here at the type level —
-// `.middleware('guest')` would not compile even though the name would
-// resolve at runtime. Gating goes through the handler directly instead.
-export function registerAuthModuleRoutes(router: Router): void {
-  router.middleware(requireGuest({ redirectTo: '/dashboard' })).group((guest) => {
+// Aliased under the module's own names: a module Router's type carries none of
+// the root's aliases, and re-aliasing 'auth' would overwrite the root's entry.
+export function registerAuthModuleRoutes(baseRouter: Router): void {
+  const router = baseRouter
+    .aliasMiddleware('auth.guest', requireGuest({ redirectTo: '/dashboard' }))
+    .aliasMiddleware('auth.user', requireAuthenticated({ redirectTo: '/login' }))
+
+  router.middleware('auth.guest').group((guest) => {
     guest.get('/login', { name: 'login' }, [LoginController, 'show'])
     guest.post('/login', { name: 'login.store', body: LoginSchema }, [LoginController, 'store'])
 
@@ -29,7 +30,7 @@ export function registerAuthModuleRoutes(router: Router): void {
     guest.post('/reset-password', { name: 'reset-password.store', body: ResetPasswordSchema }, [ResetPasswordController, 'store'])
   })
 
-  router.middleware(requireAuthenticated({ redirectTo: '/login' })).group((authed) => {
+  router.middleware('auth.user').group((authed) => {
     authed.post('/logout', { name: 'logout' }, [LoginController, 'destroy'])
     authed.get('/verify-email', { name: 'verify-email' }, [VerifyEmailController, 'notice'])
     authed.post('/verify-email', { name: 'verify-email.resend' }, [VerifyEmailController, 'resend'])
