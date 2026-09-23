@@ -266,12 +266,10 @@ async function checkModuleSchemaAggregation(cwd: string, cache: ParseCache): Pro
 }
 
 /**
- * A hand-kept aggregate object (`export const schema = { posts, users }`) missing a table:
- * one its own file declares, or, for the root's, a module table the object neither lists
- * nor hands to that module's aggregate by a spread. Gating only where the file itself
- * identifies the object (`findSchemaAggregate`'s `confident`) — on a shape match alone the
- * report is a guess, and a grouping the app keeps for itself must not turn a correct
- * schema's CI red. Content-activated.
+ * A hand-kept aggregate object (`export const schema = { posts, users }`) missing a table its
+ * file declares or, for the root's, a module table it neither lists nor spreads. Gating only
+ * where the file identifies the object (`findSchemaAggregate`'s `confident`): on a shape match
+ * alone the report is a guess, and an app's own grouping must not turn CI red. Content-activated.
  */
 async function checkSchemaAggregateKeys(cwd: string, cache: ParseCache): Promise<CheckResult[]> {
   const results: CheckResult[] = []

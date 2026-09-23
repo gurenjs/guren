@@ -181,12 +181,11 @@ function typeQueried(ast: File, name: string): boolean {
 }
 
 /**
- * The app's hand-kept aggregate of its tables — `export const schema = { posts, users }`,
- * handed to drizzle for relational queries. Nothing the framework generates reads it, so a
- * table missing a key here leaves it incomplete with nothing to notice. Positive evidence only:
- * every property a shorthand (or `name: name`) reference to a table this file declares, a key
- * or a spread imported from a module's schema, or `extraKey`; an empty object only when
- * `confident`. A second candidate answers null, and `confident` grades what is left.
+ * The app's hand-kept aggregate of its tables (`export const schema = { posts, users }`), handed
+ * to drizzle for relational queries; nothing generated reads it, so a missing key goes unnoticed.
+ * Positive evidence only: every property a table this file declares (shorthand or `name: name`),
+ * a key or spread imported from a module's schema, or `extraKey`; `{}` only when `confident`.
+ * A second candidate answers null, and `confident` grades what is left.
  */
 export function findSchemaAggregate(ast: File, options: FindSchemaAggregateOptions = {}): SchemaAggregate | null {
   const { extraKey, location } = options
