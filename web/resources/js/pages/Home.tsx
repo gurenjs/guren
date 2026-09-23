@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react'
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 interface Props {
   codeExamples: Record<string, string>
 }
@@ -150,11 +150,19 @@ function CopyCommand({ command }: { command: string }) {
     <button
       type="button"
       onClick={copy}
-      className="group inline-flex items-center gap-3 rounded-lg border border-white/15 bg-black/40 px-5 py-3 font-mono text-sm text-white/90 transition hover:border-crimson-400/60"
+      className="group inline-flex max-w-full items-center gap-2 rounded-lg border border-white/15 bg-black/40 px-4 py-3 text-left font-mono text-[13px] text-white/90 transition hover:border-crimson-400/60 sm:gap-3 sm:px-5 sm:text-sm"
       aria-label={`Copy command: ${command}`}
     >
       <span className="select-none text-crimson-400">$</span>
-      {command}
+      {/* Break between words only: the hyphens in create-guren-app are line-break opportunities. */}
+      <span className="min-w-0">
+        {command.split(' ').map((word, i) => (
+          <Fragment key={i}>
+            {i > 0 && ' '}
+            <span className="whitespace-nowrap">{word}</span>
+          </Fragment>
+        ))}
+      </span>
       <span className="select-none text-xs text-white/40 transition group-hover:text-white/70">
         {copied ? 'copied' : 'copy'}
       </span>
@@ -300,9 +308,9 @@ export default function Home({ codeExamples }: Props) {
                 with and without the harness <code className="text-white/70">agent:init</code>{' '}
                 installs — 360 runs, each one's patch, logs and verdict published.
               </p>
-              <dl className="mt-4 grid grid-cols-3 gap-3">
+              <dl className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
                 {agentBenchmarkStats.map((s) => (
-                  <div key={s.label} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3 text-center">
+                  <div key={s.label} className="flex flex-col rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3 text-center">
                     <dt className="order-2 mt-1 text-[11px] leading-snug text-white/50">{s.label}</dt>
                     <dd className="order-1 bg-gradient-to-r from-crimson-300 to-crimson-500 bg-clip-text text-2xl font-extrabold text-transparent">
                       {s.value}
@@ -499,7 +507,7 @@ export default function Home({ codeExamples }: Props) {
               Your first app is one command away
             </h2>
             <p className="mt-4 text-lg text-white/60">
-              Guren is stable at v1.0. SQLite by default — no Docker, no config, no boilerplate.
+              Guren v2 is stable. SQLite by default — no Docker, no config, no boilerplate.
             </p>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
               <CopyCommand command="bunx create-guren-app my-app" />
