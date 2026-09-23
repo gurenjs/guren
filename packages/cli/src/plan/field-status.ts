@@ -9,12 +9,11 @@ import type { JsonSchemaObject } from '@guren/server/internal/zod-json-schema'
 
 import type { PagePropKey } from '../page-props-extractor'
 import type { PlanAppResourcePayload, PlanAppSchemaFields } from './field-readers'
-import type { PlanResource, PlanValidator } from './schema'
 import { differ, existenceMatch, match, unknown, type PlanPropertyStatus } from './property-status'
+import type { PlanResource, PlanValidator } from './schema'
 
 type PlanValidatorField = PlanValidator['fields'][number]
 type PlanResourceField = PlanResource['fields'][number]
-
 
 /** One JSON value family, the level at which two types can be told apart without a guess. */
 type Family = 'string' | 'integer' | 'number' | 'boolean' | 'object' | 'array'

@@ -151,7 +151,6 @@ export function awaitsVerification(element: PlanElementStatus<PlanElementState>)
   return element.state === 'unjudged' || element.state === element.completesAt
 }
 
-
 function compare(property: string, planned: string, actual: string | undefined, whyUnknown: string): PlanPropertyStatus {
   if (actual === undefined) return unknown(property, planned, whyUnknown)
   return actual === planned ? match(property, planned) : differ(property, planned, actual)
@@ -546,8 +545,9 @@ class StatusContext {
     names: PlanAppNames,
     noun: PlanNoun,
     classes: T[] | undefined,
-    judge: { properties?: (found: T | undefined) => PlanPropertyStatus[]; mount?: (found: T) => PlanAppMount } = {},
+    judge: { properties?: (found: T | undefined) => PlanPropertyStatus[]; mount?: (found: T) => PlanAppMount },
   ): PlanElementStatus {
+    const { properties, mount } = judge
     const find = (name: string): Existence =>
       existsInScope(names, name, noun, element.module, classes, (entry) => entry.className === name)
     const found = (): T | undefined => findClass(classes, element.name, element.module)
@@ -558,8 +558,8 @@ class StatusContext {
       label: element.name,
       exists: find(element.name),
       previous: previousOf(element.change, find),
-      ...(judge.properties ? { properties: () => judge.properties!(found()) } : {}),
-      ...(judge.mount ? { mount: () => judge.mount!(found()!) } : {}),
+      properties: properties && (() => properties(found())),
+      mount: mount && (() => mount(found()!)),
       files: () => classFiles(classes, element.name, element.module),
     })
   }

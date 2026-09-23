@@ -21,5 +21,4 @@ export const match = (property: string, planned: string, actual = planned): Plan
 export const differ = (property: string, planned: string, actual: string): PlanPropertyStatus => ({ property, verdict: 'differ', planned, actual })
 export const unknown = (property: string, planned: string, reason: string): PlanPropertyStatus => ({ property, verdict: 'unknown', planned, reason })
 
-/** A `match` that says only that the planned name exists, not that it holds the planned shape or rule. */
 export const existenceMatch = (property: string, planned: string): PlanPropertyStatus => ({ ...match(property, planned), existence: true })

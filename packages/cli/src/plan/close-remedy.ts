@@ -13,7 +13,7 @@ interface BlockerContext {
   planArgument: string
   /** The step that verifies each element. */
   owners: Map<string, string>
-  /** The steps whose behaviours reach each element, which is what lifts one none of whose planned properties matched. */
+  /** The steps whose behaviours reach each element, which is what lifts one `restsOnReach()` holds for. */
   carriers: Map<string, string[]>
 }
 

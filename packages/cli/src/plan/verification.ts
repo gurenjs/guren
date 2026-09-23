@@ -117,8 +117,8 @@ export function restsOnReach(element: Pick<PlanElementStatus<PlanElementState>, 
  * An element its step verified is `verified` while every fingerprinted file still hashes the
  * same, `drifted` once one does not or cannot be read. Lifted: one at its completion state or
  * `unjudged`, in files the record covers, since a result nothing could expire is not one. A
- * `drop` has no file, its absence re-read per status. An element that `restsOnReach()` is lifted
- * only while a behaviour of a standing step, in any task, reaches it.
+ * `drop` has no file, its absence re-read per status. An element for which `restsOnReach()` holds
+ * is lifted only while a behaviour of a standing step, in any task, reaches it.
  */
 export function applyVerification(
   status: PlanStatus,

@@ -78,9 +78,10 @@ function only(document: PlanDraft, app: PlanAppState, id: string): PlanElementSt
   return element
 }
 
-/** The element after every step of the plan is recorded as verified, with no behaviour run. */
-function liftEveryStep(document: PlanDraft, app: PlanAppState, id: string, file: string): PlanElementStatus<PlanElementState> {
+/** The elements after every step of the plan is recorded as verified over `files`, with no behaviour run. */
+function liftAll(document: PlanDraft, app: PlanAppState, files: string[]): PlanElementStatus<PlanElementState>[] {
   const derivation = derivePlanTasks(document)
+  const hashes = Object.fromEntries(files.map((file) => [file, 'h']))
   const record: PlanStepRecord = {
     outcome: 'verified',
     planDigest: 'digest',
@@ -90,11 +91,14 @@ function liftEveryStep(document: PlanDraft, app: PlanAppState, id: string, file:
     acceptance: [],
     incomplete: [],
     waived: [],
-    fingerprint: { files: { [file]: 'h' }, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'test' } },
+    fingerprint: { files: hashes, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'test' } },
   }
   const records = Object.fromEntries(listPlanSteps(derivation).map(({ step }) => [step.id, record]))
-  const lifted = applyVerification(judgePlan(document, app), derivation, records, 'digest', new Map([[file, 'h']]), document)
-  return lifted.status.elements.find((element) => element.id === id)!
+  return applyVerification(judgePlan(document, app), derivation, records, 'digest', new Map(Object.entries(hashes)), document).status.elements
+}
+
+function liftEveryStep(document: PlanDraft, app: PlanAppState, id: string, file: string): PlanElementStatus<PlanElementState> {
+  return liftAll(document, app, [file]).find((element) => element.id === id)!
 }
 
 const verdicts = (element: PlanElementStatus): Record<string, string> =>
@@ -164,22 +168,8 @@ describe('judgePlan on policy abilities', () => {
         resourcePayloads: [payload('PostResource', 'body', 'BodyAlias'), payload('TagResource', 'label', 'string')],
       },
     })
-    const derivation = derivePlanTasks(document)
-    const record: PlanStepRecord = {
-      outcome: 'verified',
-      planDigest: 'digest',
-      ranAt: 't',
-      durationMs: 1,
-      commands: [],
-      acceptance: [],
-      incomplete: [],
-      waived: [],
-      fingerprint: { files: {}, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'test' } },
-    }
     const files = ['app/Policies/PostPolicy.ts', 'app/Http/Resources/PostResource.ts', 'app/Http/Resources/TagResource.ts']
-    record.fingerprint.files = Object.fromEntries(files.map((file) => [file, 'h']))
-    const records = Object.fromEntries(listPlanSteps(derivation).map(({ step }) => [step.id, record]))
-    const lifted = applyVerification(judgePlan(document, app), derivation, records, 'digest', new Map(files.map((file) => [file, 'h'])), document).status.elements
+    const lifted = liftAll(document, app, files)
     const byId = (id: string) => lifted.find((element) => element.id === id)!
 
     expect(byId('pol').properties.find((property) => property.property === 'ability update')).toMatchObject({ verdict: 'match', existence: true })
@@ -187,7 +177,7 @@ describe('judgePlan on policy abilities', () => {
     expect(byId('pol').hold?.kind).toBe('unreached')
     expect(byId('res.keys').hold?.kind).toBe('unreached')
     expect(byId('res.shape').state).toBe('verified')
-    const blockers = describeCloseBlockers(document, derivation, [byId('pol'), byId('res.keys')], 'p.json')
+    const blockers = describeCloseBlockers(document, derivePlanTasks(document), [byId('pol'), byId('res.keys')], 'p.json')
     for (const blocker of blockers) expect(blocker.moves).toStartWith("No planned property of it matched beyond its existence and no step's behaviour reaches it")
   })
 

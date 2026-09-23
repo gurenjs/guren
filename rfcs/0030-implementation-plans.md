@@ -2057,12 +2057,13 @@ readings (`packages/cli/src/plan-close.ts`, `plan/close-docs.ts`,
   element is printed with what holds it and, on the next line, the command
   that moves it: `plan:verify <plan> --step <id>` for the step that verifies
   it (preceded by the step whose behaviour reaches it, when none of its
-  planned properties matched), fixing the code first where it is below its
-  completion state or blocked, and `plan:waive <plan> <id> --reason` where no
-  `plan:verify` run can lift it: no step verifies it, nothing of it can be
-  fingerprinted, or none of its planned properties matched and no step's
-  behaviour reaches it. The last is predicted before any run, so a reader is
-  not sent to `plan:verify` only to find the element held as unreached.
+  planned properties matched beyond an existence), fixing the code first
+  where it is below its completion state or blocked, and
+  `plan:waive <plan> <id> --reason` where no `plan:verify` run can lift it:
+  no step verifies it, nothing of it can be fingerprinted, or none of its
+  planned properties matched beyond an existence and no step's behaviour
+  reaches it. The last is predicted before any run, so a reader is not sent
+  to `plan:verify` only to find the element held as unreached.
   `plan:next`, once every step is verified, lists the same lines
   (`plan/close-remedy.ts`), so the two commands give one piece of advice.
 - "Archives the plan" is the doc node. Under the `file` store nothing is moved
