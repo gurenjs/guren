@@ -18,7 +18,7 @@ export interface CapturedOptions {
    * or when this process exits: what the child spawned (an app's `register()`
    * starting a helper) goes with it. POSIX only; elsewhere the child alone is killed.
    */
-  processGroup?: true
+  processGroup?: boolean
 }
 
 /** A subprocess run to completion with its output captured. `command[0]` is the executable. */
@@ -36,7 +36,7 @@ export const runCaptured: CapturedExec = (command, cwd, options) =>
       rejectPromise(new Error('empty command'))
       return
     }
-    const grouped = options?.processGroup === true && process.platform !== 'win32'
+    const grouped = Boolean(options?.processGroup) && process.platform !== 'win32'
     // Colour codes would end up inside findings an agent reads back.
     const child = spawn(executable, args, {
       cwd,
@@ -45,27 +45,25 @@ export const runCaptured: CapturedExec = (command, cwd, options) =>
       detached: grouped,
     })
     const kill = (): void => {
-      if (grouped && child.pid !== undefined) {
-        try {
-          process.kill(-child.pid, 'SIGKILL')
-          return
-        } catch {
-          // The group is already gone; fall through to the child itself.
-        }
+      try {
+        if (grouped && child.pid !== undefined) process.kill(-child.pid, 'SIGKILL')
+        else child.kill('SIGKILL')
+      } catch {
+        // Already gone: the child leads its group, so an empty group means it exited too.
       }
-      child.kill('SIGKILL')
     }
     if (grouped) process.once('exit', kill)
     let stdout = ''
     let stderr = ''
     let settled = false
-    const settle = (run: CapturedRun): void => {
+    const finish = (complete: () => void): void => {
       if (settled) return
       settled = true
       clearTimeout(timer)
       process.off('exit', kill)
-      resolvePromise(run)
+      complete()
     }
+    const settle = (run: CapturedRun): void => finish(() => resolvePromise(run))
     // SIGKILL outright (a child ignoring SIGTERM would outlive the CLI's own
     // exit), and settle now rather than on `close`: a grandchild holding the
     // pipes would otherwise keep `close` from firing until it finishes.
@@ -84,13 +82,7 @@ export const runCaptured: CapturedExec = (command, cwd, options) =>
     child.stderr.on('data', (chunk: Buffer | string) => {
       stderr += chunk.toString()
     })
-    child.on('error', (error) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      process.off('exit', kill)
-      rejectPromise(error)
-    })
+    child.on('error', (error) => finish(() => rejectPromise(error)))
     // What the child left behind would hold the pipes open, keeping `close` from firing.
     if (grouped) child.on('exit', kill)
     child.on('close', (code) => settle({ exitCode: code ?? 1, stdout, stderr }))

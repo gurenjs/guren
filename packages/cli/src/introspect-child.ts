@@ -4,6 +4,7 @@
  * to the file named in argv, never stdout: the app's own modules print there.
  * It exits explicitly, since an app may hold open handles (timers, a Redis client).
  */
+import { writeFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -35,16 +36,14 @@ interface FrameworkModule {
   describeActiveAttachmentEngine?: () => AttachmentsDescription
 }
 
-/** Written beside the result as each phase starts, so the parent can say where a timeout struck. */
-export type IntrospectionPhase = { phase: 'app' } | { phase: 'controllers'; file: string }
-
-let phaseFile: string | undefined
+const outFile = process.argv[2]
+/** The controller file being imported, beside the result, so the parent can name where a timeout struck. */
+const scanFile = `${outFile}.scanning`
 /** True until the controller scan: only the entry's `listen()` refusal fails the run. */
 let loadingApp = true
 
-async function enterPhase(phase: IntrospectionPhase): Promise<void> {
-  if (phaseFile) await writeFile(phaseFile, JSON.stringify(phase))
-}
+/** A timer tick: `unhandledRejection` is delivered only after one. */
+const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
 
 /** The refusal itself or anywhere in its `cause` chain: `bootstrapApplication()` wraps a rejected `ready`. */
 function isListenRefusal(error: unknown): boolean {
@@ -68,8 +67,7 @@ function failed(reason: IntrospectionFailure, message: string): Introspection {
  * would run the real boot. Resolved as the entry's own imports are (Bun, ESM
  * conditions); a module that will not resolve or load is a failure, not a pass.
  */
-async function loadFramework(entry: string): Promise<{ modules: FrameworkModule[] } | Introspection> {
-  const modules: FrameworkModule[] = []
+async function loadFramework(entry: string): Promise<{ framework: FrameworkModule } | Introspection> {
   for (const specifier of ['@guren/core', '@guren/server']) {
     let resolved: string
     try {
@@ -77,21 +75,18 @@ async function loadFramework(entry: string): Promise<{ modules: FrameworkModule[
     } catch {
       continue
     }
+    let framework: FrameworkModule
     try {
-      modules.push((await import(pathToFileURL(resolved).href)) as FrameworkModule)
+      framework = (await import(pathToFileURL(resolved).href)) as FrameworkModule
     } catch (error) {
       return failed('crashed', `${specifier} resolved from the entry but did not load: ${messageOf(error)}`)
     }
+    if (typeof framework.Application?.prototype?.introspect !== 'function') {
+      return failed('old-server', 'The app resolves a @guren/server without Application.introspect(). Upgrade @guren/core to a release with RFC 0026 introspection.')
+    }
+    return { framework }
   }
-
-  const application = modules[0]?.Application
-  if (!application) {
-    return failed('crashed', 'Neither @guren/core nor @guren/server resolves from the entry, so the app cannot be introspected.')
-  }
-  if (typeof application.prototype?.introspect !== 'function') {
-    return failed('old-server', 'The app resolves a @guren/server without Application.introspect(). Upgrade @guren/core to a release with RFC 0026 introspection.')
-  }
-  return { modules }
+  return failed('crashed', 'Neither @guren/core nor @guren/server resolves from the entry, so the app cannot be introspected.')
 }
 
 /**
@@ -105,9 +100,10 @@ async function resolveControllers(
   manifest: AppManifest,
   app: IntrospectableApp,
   root: string,
-  framework: FrameworkModule[],
+  framework: FrameworkModule,
 ): Promise<void> {
-  const frameworkExports = new Set<unknown>(framework.flatMap((mod) => Object.values(mod)))
+  // Core re-exports server, so one module holds every framework class a route can name.
+  const frameworkExports = new Set<unknown>(Object.values(framework))
   const handlers = app.router?.registeredHandlers?.() ?? []
   const wanted = new Set<unknown>(handlers
     .map((handler) => handler.controller)
@@ -121,7 +117,7 @@ async function resolveControllers(
 
   const scan = async (batch: string[]): Promise<void> => {
     for (const file of batch) {
-      await enterPhase({ phase: 'controllers', file: toPosixRelative(root, file) })
+      writeFileSync(scanFile, toPosixRelative(root, file))
       let mod: Record<string, unknown>
       try {
         mod = (await import(pathToFileURL(file).href)) as Record<string, unknown>
@@ -165,10 +161,9 @@ async function introspect(root: string): Promise<Introspection> {
     return failed('no-entry', messageOf(error))
   }
 
-  const framework = await loadFramework(entry)
-  if ('status' in framework) return framework
+  const loaded = await loadFramework(entry)
+  if ('status' in loaded) return loaded
 
-  await enterPhase({ phase: 'app' })
   let mod: Record<string, unknown>
   try {
     mod = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
@@ -185,11 +180,10 @@ async function introspect(root: string): Promise<Introspection> {
 
   const manifest = await app.introspect()
   manifest.entry.file = toPosixRelative(root, entry)
-  describeUnboundAttachments(manifest, app, framework.modules)
-  // `unhandledRejection` arrives after a timer tick: let the entry's land before the phase ends.
-  await new Promise((resolve) => setTimeout(resolve, 0))
+  describeUnboundAttachments(manifest, app, loaded.framework)
+  await tick()
   loadingApp = false
-  await resolveControllers(manifest, app, root, framework.modules)
+  await resolveControllers(manifest, app, root, loaded.framework)
   return { status: 'ok', manifest }
 }
 
@@ -198,10 +192,11 @@ async function introspect(root: string): Promise<Introspection> {
  * `configureAttachments()` built last, which only core can read, so the server's
  * manifest cannot (RFC 0026 §1, amended).
  */
-function describeUnboundAttachments(manifest: AppManifest, app: IntrospectableApp, framework: FrameworkModule[]): void {
-  if (manifest.attachments) return
-  const describe = framework.find((mod) => typeof mod.describeActiveAttachmentEngine === 'function')?.describeActiveAttachmentEngine
-  const description = describe?.()
+function describeUnboundAttachments(manifest: AppManifest, app: IntrospectableApp, framework: FrameworkModule): void {
+  // A section the server warned about is bound somewhere it could not read; the fallback would contradict it.
+  const warned = manifest.warnings.some((warning) => warning.code.startsWith('section-') && warning.message.startsWith('"attachments"'))
+  if (manifest.attachments || warned) return
+  const description = framework.describeActiveAttachmentEngine?.()
   if (!description?.configured) return
   const { delivery, ...rest } = description
   manifest.attachments = delivery
@@ -211,12 +206,10 @@ function describeUnboundAttachments(manifest: AppManifest, app: IntrospectableAp
 
 
 async function main(): Promise<void> {
-  const outFile = process.argv[2]
   if (!outFile) {
     console.error('usage: introspect-child <result-file>')
     process.exit(2)
   }
-  phaseFile = `${outFile}.phase`
 
   let listenRefused = false
   const otherRejections: string[] = []
@@ -234,7 +227,7 @@ async function main(): Promise<void> {
     result = failed('crashed', messageOf(error))
   }
   // Let a rejection raised during the last await reach the handler above.
-  await new Promise((resolve) => setTimeout(resolve, 0))
+  await tick()
   if (listenRefused) result = failed('crashed', LISTEN_GUIDANCE)
   // `bun run dev` would have died on these; a manifest must not read clean past them.
   if (result.status === 'ok') {

@@ -10,7 +10,6 @@ import { join, resolve } from 'node:path'
 import type { AppManifest } from '@guren/server'
 
 import { siblingEntry } from './cli-entry'
-import type { IntrospectionPhase } from './introspect-child'
 import { outputTail } from './command-output'
 import { bunExecutable, runCaptured } from './subprocess'
 
@@ -36,9 +35,9 @@ export function introspectApp(cwd: string, options: IntrospectOptions = {}): Pro
   const key = `${timeoutMs}:${root}`
   let run = runs.get(key)
   if (!run) {
-    run = runIntrospection(root, timeoutMs).catch((error: unknown) => ({
-      status: 'failed' as const,
-      reason: 'crashed' as const,
+    run = runIntrospection(root, timeoutMs).catch((error: unknown): Introspection => ({
+      status: 'failed',
+      reason: 'crashed',
       message: `The introspection process could not run: ${error instanceof Error ? error.message : String(error)}`,
     }))
     runs.set(key, run)
@@ -61,7 +60,7 @@ async function runIntrospection(root: string, timeoutMs: number): Promise<Intros
       processGroup: true,
     })
     if (run.timedOut) {
-      return { status: 'failed', reason: 'timeout', message: await timeoutMessage(`${resultFile}.phase`, timeoutMs) }
+      return { status: 'failed', reason: 'timeout', message: await timeoutMessage(`${resultFile}.scanning`, timeoutMs) }
     }
 
     const result = await readResult(resultFile)
@@ -78,16 +77,11 @@ async function runIntrospection(root: string, timeoutMs: number): Promise<Intros
   }
 }
 
-/** Where the child was when the clock ran out, from the phase it last recorded. */
-async function timeoutMessage(phaseFile: string, timeoutMs: number): Promise<string> {
-  let phase: IntrospectionPhase | undefined
-  try {
-    phase = JSON.parse(await readFile(phaseFile, 'utf8')) as IntrospectionPhase
-  } catch {
-    phase = undefined
-  }
-  if (phase?.phase === 'controllers') {
-    return `The app registered, but importing ${phase.file} to match a routed controller did not finish within ${timeoutMs}ms. `
+/** Where the child was when the clock ran out: the controller file it was importing, if any. */
+async function timeoutMessage(scanFile: string, timeoutMs: number): Promise<string> {
+  const file = await readFile(scanFile, 'utf8').catch(() => '')
+  if (file) {
+    return `The app registered, but importing ${file} to match a routed controller did not finish within ${timeoutMs}ms. `
       + 'Its module scope may await something that never settles.'
   }
   return `The app did not finish loading and registering within ${timeoutMs}ms. `
