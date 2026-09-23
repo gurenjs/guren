@@ -41,6 +41,27 @@ export function defineCommand<T extends ArgsDef = ArgsDef>(def: CommandDef<T>): 
   return defined
 }
 
+const KEEPS_PROCESS_ALIVE = Symbol('guren.cli.keepsProcessAlive')
+
+/**
+ * Marks a command whose `run()` returns while what it started (a listener, a REPL)
+ * must keep the process alive. Every other command defined here ends the process
+ * once `run()` settles (`bin.ts`), so a new server that forgets this dies at once.
+ */
+export function keepsProcessAlive<T extends object>(command: T): T {
+  Object.defineProperty(command, KEEPS_PROCESS_ALIVE, { value: true })
+  return command
+}
+
+/**
+ * Whether `bin.ts` exits once the command's `run()` settles without error (a failure
+ * always exits). A plugin's command is built with citty's own `defineCommand` and
+ * reads false: its lifetime is unknown.
+ */
+export function exitsWhenDone(command: object): boolean {
+  return normalizesRepeatedFlags(command) && (command as Record<symbol, unknown>)[KEEPS_PROCESS_ALIVE] !== true
+}
+
 /**
  * Collapse repeated flags to their last value and type declared booleans, in
  * place. citty's `args` Proxy has no `set` or `ownKeys` trap, so the keys

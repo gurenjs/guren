@@ -3,7 +3,8 @@ import { defineCommand as defineCittyCommand, runCommand } from 'citty'
 import type { CommandDef } from 'citty'
 import { consola } from 'consola'
 import { builtinSubCommands } from '../src/commands'
-import { defineCommand, normalizesRepeatedFlags } from '../src/define-command'
+import { defineCommand, exitsWhenDone, normalizesRepeatedFlags } from '../src/define-command'
+import { createPluginCommandProxy } from '../src/plugin-commands'
 import { resolveValue } from '../src/run-cli'
 
 /**
@@ -137,6 +138,20 @@ describe('built-in commands', () => {
       .filter(([, command]) => !normalizesRepeatedFlags(command))
       .map(([path]) => path)
     expect(bypassing).toEqual([])
+  })
+
+  it('end the process when run() settles, except the three that hand it to a listener or a REPL', async () => {
+    // Each of these returns from run() with the process still in use; ending it
+    // there would stop the dev server, the tool server, or the console at once.
+    const outliving = (await everyCommand(builtinSubCommands as Record<string, CommandDef<never>>))
+      .filter(([, command]) => !exitsWhenDone(command))
+      .map(([path]) => path)
+    expect(outliving.sort()).toEqual(['console', 'dev', 'tool:dev'])
+  })
+
+  it('leave a plugin command to end on its own, since its lifetime is unknown here', () => {
+    const proxy = createPluginCommandProxy({ name: 'probe', packageName: 'guren-plugin-probe', entryPath: '/nonexistent.js' })
+    expect(exitsWhenDone(proxy)).toBe(false)
   })
 })
 

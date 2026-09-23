@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url'
 import readline from 'node:readline'
 import { inspect } from 'node:util'
 import { consola } from 'consola'
-import { defineCommand } from '../define-command'
+import { defineCommand, keepsProcessAlive } from '../define-command'
 import { parse } from '@babel/parser'
 import {
   bootstrapApplication,
@@ -384,7 +384,7 @@ async function populateReplContext(app: MaybeApplication, onExitTasks: Array<() 
   return provided
 }
 
-export const consoleCommand = defineCommand({
+export const consoleCommand = keepsProcessAlive(defineCommand({
   meta: {
     name: 'console',
     description: 'Start an interactive Guren console.',
@@ -534,4 +534,4 @@ export const consoleCommand = defineCommand({
       })
     })
   },
-})
+}))

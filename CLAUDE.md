@@ -409,7 +409,7 @@ export const handler = createLambdaHandler(app)
 | `packages/orm/src/ModelNotFoundException.ts` | 404 exception for models |
 | `packages/server/src/lambda/index.ts` | AWS Lambda adapter |
 | `packages/server/src/auth/password/NodeHasher.ts` | Node.js-compatible password hasher |
-| `packages/cli/src/bin.ts` | CLI entry point |
+| `packages/cli/src/bin.ts` | CLI entry point, and the one place a finished command ends the process: a routes file or `db/schema.ts` a command imported may hold a timer or client open that nothing in the CLI closes, so every command built with `define-command.ts` exits once `run()` settles, through `process-exit.ts`, which waits for each stdout/stderr write first (Bun's `process.exit()` drops what is still queued on a pipe). `keepsProcessAlive()` exempts the commands that hand the process to a listener or REPL (`dev`, `tool:dev`, `console`); a plugin's command that succeeds is never ended here, since its lifetime is unknown (a failing one exits with its code, as before). A command does not end its own `run()` with `process.exit(0)` |
 | `packages/cli/src/context.ts` | AI agent: project context map generation |
 | `packages/cli/src/entity-context.ts` | AI agent: entity-centric context bundles (`guren context <Entity>`, RFC 0004) |
 | `packages/cli/src/docs-index.ts` | AI agent: docs/ scanning (DocRef, entity index, `@docs` tags); facade over the parsers below |
