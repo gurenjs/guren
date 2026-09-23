@@ -76,7 +76,7 @@ function closeRemedy(element: PlanElementStatus<PlanElementState>, context: Bloc
   const needsNoFiles = element.change === 'drop' || element.state === 'unjudged'
   const carriers = context.carriers.get(element.id) ?? []
   if (unmatched && carriers.length === 0) {
-    return `No planned property of it matched and no step's behaviour reaches it, so no plan:verify run lifts it: waive it with ${waive}, or add a behaviour that reaches it and approve the plan again`
+    return `No planned property of it matched beyond its existence and no step's behaviour reaches it, so no plan:verify run lifts it: waive it with ${waive}, or add a behaviour that reaches it and approve the plan again`
   }
   if (element.files.length === 0 && !needsNoFiles) return `plan:verify cannot fingerprint it, so no run lifts it: waive it with ${waive}`
   const runs = unmatched && !carriers.includes(owner) ? [carriers[0]!, owner] : [owner]

@@ -160,7 +160,7 @@ export function applyVerification(
         if (!awaitsVerification(element)) {
           hold('incomplete', `${verifiedBy}, and no longer at the state that completes it.`)
         } else if (unmatched && !reached.has(id)) {
-          hold('unreached', `${verifiedBy}, but no planned property of it matched and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.`)
+          hold('unreached', `${verifiedBy}, but no planned property of it matched beyond its existence and no verified behaviour reaches it, so that result is not counted: add a behaviour that reaches it, or waive it.`)
         } else if (element.files.length === 0 && !needsNoFiles) {
           hold('unfingerprinted', `${verifiedBy}, and nothing of it was fingerprinted, so that result could not expire and is not counted.`)
         } else if (uncovered.length > 0) {

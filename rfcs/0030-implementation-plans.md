@@ -1715,7 +1715,10 @@ reader, and Part 2 measured both at 100% `unknown`. What shipped
   schemas refine or transform the object, so only their keys' existence is read,
   its `email` fields pipe into `z.email()`, and the `remember` and `body` fields
   are unions behind a transform. The api's are the free-form `positive` (3), an
-  array, and a `z.coerce.number()` id.
+  array, and a `z.coerce.number()` id. On `examples/api` the command writes its
+  JSON and does not exit; it does the same on the tree before these readers, so
+  something the application's routes load keeps the process alive, and finding
+  it is left to a follow-up.
 
 **What is durable and what is not.** The decision log (waivers, deviations,
 the reason for each revision) is part of the record and lives in the store
