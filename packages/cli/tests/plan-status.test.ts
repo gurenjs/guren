@@ -704,6 +704,17 @@ describe('judgePlan', () => {
       expect(element.properties.filter((property) => property.property.startsWith('relationship comments')).map((property) => property.verdict)).toEqual(['match', 'match'])
     })
 
+    test('should send an alter no behaviour can reach to a waiver, and a reachable one to a behaviour, when no match counts', () => {
+      const column = only(judgePlan(withColumn(ALTER), app(), []), 'c')
+      const action = only(judgePlan(showAlter, app(), []), 'a')
+
+      expect(column.state).toBe('unjudged')
+      expect(column.reason).toEndWith('waive it, since no behaviour can reach it.')
+      expect(action.reason).toEndWith('verify the change through a behaviour that reaches it.')
+      const held = only(judgePlan(withColumn(ALTER), app(), readAlterProperties(withColumn(ALTER), app())), 'c')
+      expect(held.reason).toEndWith('state the change in a property the application did not hold, or waive it, since no behaviour can reach it.')
+    })
+
     test('should name plan:approve where a planned property still differs and the approval holds no reading of it', () => {
       const document = view(ALTER, { props: [{ name: 'posts', type: 'Post[]' }, { name: 'total', type: 'number' }] })
       const lacking = only(judgePlan(document, app(), []), 'v')

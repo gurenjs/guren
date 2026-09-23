@@ -7,7 +7,8 @@
 import type { Plan, PlanDraft } from './schema'
 import { awaitsVerification, type PlanElementState, type PlanElementStatus } from './status'
 import { listPlanSteps, type PlanTaskDerivation } from './tasks'
-import { behaviourCanReach, behaviourReach, restsOnReach } from './verification'
+import { behaviourCanReach, behaviourReach } from './reach'
+import { restsOnReach } from './verification'
 
 interface BlockerContext {
   planArgument: string

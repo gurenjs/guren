@@ -1533,11 +1533,16 @@ matched when the plan was approved says nothing about the change. What shipped
   That helps only before the work: a planned property that still differs and
   has no reading gets a note naming `plan:approve`. A match with no reading
   does not, since a reading taken then records it as one that already held;
-  the `unjudged` reason sends it to a behaviour that reaches it.
+  the `unjudged` reason sends it to a behaviour that reaches it, or to a
+  waiver where no behaviour can (`behaviourCanReach()`). A draft has no
+  approval, so its `alter`s count no match; its verification records start
+  over at approval anyway.
 - A model's relationship is read as two properties, its type and its target,
   under those keys whether it is declared or not, so the reading taken before
-  the work is the one the match after it is set against. A draft has no approval, so its `alter`s count no
-  match; its verification records start over at approval anyway.
+  the work is the one the match after it is set against. An approval taken
+  before this recorded one combined property, which the two keys do not
+  match: the note names `plan:approve` while the relationship is still
+  missing, and once it is written the `alter` needs a behaviour or a waiver.
 - A reading is as protected as the approval that carries it: whoever can edit
   one can forge the other, and both are committed and reviewed. An older CLI
   that rewrites the approvals file drops the field, which fails closed.
