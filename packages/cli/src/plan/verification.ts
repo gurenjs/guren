@@ -60,8 +60,8 @@ export function restsOnReach(element: Pick<PlanElementStatus<PlanElementState>, 
 }
 
 /**
- * Whether a verified run leaves the element held as `unfingerprinted`: no reader found a file of it,
- * and it is neither a `drop` (no file to have) nor `unjudged` (resting on the behaviours reaching
+ * Whether nothing of the element can be fingerprinted: no reader found a file of it, and it is
+ * neither a `drop` (no file to have) nor `unjudged` (resting on the behaviours reaching
  * it, whose test files their record covers). No run or added behaviour lifts such an element.
  */
 export function cannotFingerprint(element: Pick<PlanElementStatus<PlanElementState>, 'change' | 'state' | 'files'>): boolean {
