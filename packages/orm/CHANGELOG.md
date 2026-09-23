@@ -1,5 +1,20 @@
 # @guren/orm
 
+## 2.12.0
+
+### Minor Changes
+
+- 8555cc4: `toDrizzle()` without an argument no longer throws on SQLite while another request holds a transaction open. Awaiting the query now waits for that transaction to settle, like the model's own reads and writes (a statement from `.prepare()` too), and a query awaited inside the transaction's callback runs on it instead of throwing. The synchronous `.all()`, `.get()`, `.run()` and `.values()` still throw during another request's transaction, since they cannot wait. Adapters gain an optional `queueExecution()` hook for this.
+
+### Patch Changes
+
+- a923c9b: `SoftDeletes` models now run the `deleting` and `deleted` hooks and observers on `delete()` and `forceDelete()`, so a `deleting` callback that returns `false` stops a soft delete as the documentation describes. An observer registered with `observe()` inside a lifecycle callback now applies from the next write rather than joining the one in progress. Model create, update, and delete share one internal lifecycle sequence.
+- cde0638: Separate relation fetching, record matching, and nested traversal from Model while preserving scoped queries, batching, transforms, and protected loader overrides.
+- 87ccdc1: Keep transaction state with its database connection when the default connection changes. Route model updates and deletes through the same scoped write pipeline as query builders, with shared SQLite, PostgreSQL, and MySQL contract coverage.
+- 2ef86a8: Protect SQLite transaction isolation, reject unsupported bulk-write pagination, and honor soft deletes through query builders. Preserve concurrent cache counters, expiration deadlines, tag namespaces, rate-limit admission, and once-listener execution. Apply scheduler timezones, validate cron fields, find leap-day occurrences, and encode storage URL paths. Serialize single-attachment replacements within a process and support a shared collection lock across processes.
+
+  Tagged caches create tag namespaces with the store's atomic `add()` when it has one; a custom store without it keeps the previous non-atomic behavior. The file store locks only its read-modify-write operations (`add()`, `increment()`, `decrement()`), and takes over a lock still held after five seconds, so a crashed process no longer leaves a key unusable. Bulk writes with limit, offset, or ordering now throw rather than silently ignoring those options.
+
 ## 2.11.1
 
 ### Patch Changes

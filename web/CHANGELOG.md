@@ -1,5 +1,79 @@
 # web
 
+## 0.1.47
+
+### Patch Changes
+
+- Updated dependencies [07b623c]
+- Updated dependencies [f0f0124]
+- Updated dependencies [c84729b]
+- Updated dependencies [1fa7d5d]
+- Updated dependencies [760d020]
+- Updated dependencies [c418470]
+- Updated dependencies [3d7bcf7]
+- Updated dependencies [8218811]
+- Updated dependencies [8218811]
+- Updated dependencies [667abb7]
+- Updated dependencies [5d15be6]
+- Updated dependencies [bce6db1]
+- Updated dependencies [d6638fe]
+- Updated dependencies [07b623c]
+- Updated dependencies [376531b]
+- Updated dependencies [aed3492]
+- Updated dependencies [25f8153]
+- Updated dependencies [4fabcaf]
+- Updated dependencies [c0024a6]
+- Updated dependencies [37d7618]
+- Updated dependencies [b3a779f]
+- Updated dependencies [bda8f42]
+- Updated dependencies [a923c9b]
+- Updated dependencies [cde0638]
+- Updated dependencies [760d020]
+- Updated dependencies [5811e68]
+- Updated dependencies [6905e22]
+- Updated dependencies [87ccdc1]
+- Updated dependencies [583eb2d]
+- Updated dependencies [f9b95a7]
+- Updated dependencies [f78af07]
+- Updated dependencies [c713ee5]
+- Updated dependencies [692fc4d]
+- Updated dependencies [d7a92a5]
+- Updated dependencies [37fd541]
+- Updated dependencies [6aba2f6]
+- Updated dependencies [15f880e]
+- Updated dependencies [9266f70]
+- Updated dependencies [f1fa11f]
+- Updated dependencies [b867948]
+- Updated dependencies [09e221c]
+- Updated dependencies [d297f78]
+- Updated dependencies [2b7fe53]
+- Updated dependencies [46c8dea]
+- Updated dependencies [fbcd04f]
+- Updated dependencies [8a9dc05]
+- Updated dependencies [7330c8a]
+- Updated dependencies [fed375b]
+- Updated dependencies [10b4a0d]
+- Updated dependencies [0833aeb]
+- Updated dependencies [302a0ce]
+- Updated dependencies [6a26e13]
+- Updated dependencies [6086880]
+- Updated dependencies [f9b6fbd]
+- Updated dependencies [119b155]
+- Updated dependencies [568ce23]
+- Updated dependencies [e659aac]
+- Updated dependencies [7ea7497]
+- Updated dependencies [e2b4cb2]
+- Updated dependencies [474842f]
+- Updated dependencies [2ef86a8]
+- Updated dependencies [bd61c26]
+- Updated dependencies [94fcb7a]
+- Updated dependencies [8555cc4]
+  - @guren/cli@2.27.0
+  - @guren/core@1.21.0
+  - @guren/plugin-cloudflare@0.12.2
+  - @guren/testing@1.14.0
+  - @guren/orm@2.12.0
+
 ## 0.1.46
 
 ### Patch Changes

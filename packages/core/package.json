@@ -1,6 +1,6 @@
 {
   "name": "@guren/core",
-  "version": "1.20.1",
+  "version": "1.21.0",
   "description": "Guren: the Bun-first fullstack TypeScript framework. Laravel-style MVC on Hono, Drizzle ORM and Inertia.js + React. Develop on Bun; deploy to Bun, AWS Lambda (Node.js), Vercel or Cloudflare Workers.",
   "keywords": [
     "guren",
@@ -104,9 +104,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/cli": "^2.26.0",
-    "@guren/orm": "^2.11.1",
-    "@guren/server": "^2.25.1"
+    "@guren/cli": "^2.27.0",
+    "@guren/orm": "^2.12.0",
+    "@guren/server": "^2.26.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

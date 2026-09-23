@@ -1,6 +1,6 @@
 {
   "name": "@guren/testing",
-  "version": "1.13.0",
+  "version": "1.14.0",
   "description": "Testing utilities for Guren applications: TestApp with HTTP and Inertia assertions, plus auth, mail, queue and event fakes for bun:test.",
   "keywords": [
     "guren",
@@ -51,7 +51,7 @@
   "peerDependencies": {
     "@guren/core": ">=1.8.0",
     "@guren/plugin-ai": ">=0.1.0",
-    "@guren/server": ">=2.24.0",
+    "@guren/server": ">=2.26.0",
     "@inertiajs/react": "^3.6.1",
     "@testing-library/react": "^14.0.0 || ^15.0.0 || ^16.0.0",
     "ai": "^7.0.106",
