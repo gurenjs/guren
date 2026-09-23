@@ -420,6 +420,59 @@ the first five rows runs its current static path and marks the result
 `register` is `'threw'` is treated the same way. No verdict is ever `pass` on
 absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 
+> **Amended in implementation (Part 2a):** Part 2 ships as four PRs: 2a the
+> fallback base and `deploy-runtime.ts`; 2b `session-config.ts`,
+> `sessions-check.ts` and `attachments-check.ts`; 2c the `controller-methods.ts`
+> key and the `audit.ts` auth and validation half; 2d the route consumers with
+> `doctor.ts`, `context.ts` and `spec-generate.ts`.
+>
+> - `CheckResult.evidence` is optional, set only by the checks that read the
+>   manifest. `guren check` and `guren doctor` take `--no-introspect`, which
+>   judges from source. A consumer asks for the introspection lazily
+>   (`deploy-runtime` once a deploy target is found), so an app no consumer
+>   applies to never spawns the child. In process, `runCheck()` and
+>   `runDoctor()` introspect only with `introspect: true`: the edit hook, the
+>   gate and the dev MCP server read gating results or live for the session,
+>   and `introspectApp()`'s per-process memo would outlive the app it read.
+>   `checkDeployRuntime(cwd)` introspects by default, as the deploy builds call it.
+> - A failed introspection adds one advisory `introspection-unavailable` line to
+>   `guren check`. `guren doctor` adds no warning for it, since `doctor --strict`
+>   would then fail every app whose entry does not import yet (a fresh clone
+>   before codegen); its JSON carries `evidence` instead. An `-unverified`
+>   verdict is a warning `doctor --strict` counts, like every deploy warning:
+>   it describes the app, not the environment the command ran in.
+> - Any provider that threw makes every section a verdict reads unverified, not
+>   only an unbound one: `auth` is bound in the `Application` constructor and
+>   `useModel()` runs inside a provider, so a throw before it leaves `auth`
+>   described with no providers and the default hasher, which would pass. An
+>   unverified verdict is keyed `<check>-unverified`. The rule lives in
+>   `packages/cli/src/manifest-section.ts`, for Parts 2b to 2d to share.
+> - `deploy-runtime` reads what the manifest carries: `requiresBun` of
+>   `auth.hasher` and of every `auth.providers` entry (null warns), the session
+>   store `default` selects with its `perProcess` (a null resolved through an
+>   installed plugin's `gurenPlugin.drivers.session`, then warned), and a
+>   `memory` cache default, which the scan never read. Two cases the manifest
+>   holds no fact for go back to the scan: an `auth.sessionOptions.store`
+>   factory (reported with `driver: null`), and no user provider registered
+>   while the source hashes passwords (a `useModel()` in `boot()` is past the
+>   register stage). The rest stays on the scan
+>   because the manifest does not carry it: target detection; `AutoDiscovery`,
+>   since a provider it finds registers as `app.register` exactly as an explicit
+>   `app.register(X)` does, and the listeners and jobs it finds are not in the
+>   manifest; OAuth state stores; the queue, whose `QueueManager.describe()`
+>   reports every driver `null` because its config is factories only; explicit
+>   `Memory*Store` constructions (rate limiters, scheduler locks); a hand-mounted
+>   `createSessionMiddleware`; and `autoSession: false` beside a bound session
+>   manager. Part 3 can delete the extractor only after those facts reach the
+>   manifest.
+> - `provider-connected-in-register` is deferred again. `@guren/orm`'s
+>   `active-connections.ts` keys a client only under `bun --hot` and exports no
+>   reader, so there is no registry to watch. It needs a connection registry the
+>   ORM exposes, and moves to Part 2b or later.
+> - The child loads the app root's `.env`, so a store an environment variable
+>   selects is judged at its local value. The deploy verdicts stay advisory for
+>   that reason.
+
 ### 6. Enabling refactor: one module per command
 
 `commands.ts` becomes `packages/cli/src/commands/<name>.ts`, one `defineCommand()`
@@ -521,6 +574,12 @@ Internal for the most part:
   manifest contradicts the scan (a `SessionStore` passed as `store:` that the
   scan read as unbacked becomes `pass`; a `configureOrm()` in `register()`
   becomes a warning). Each is listed in the Part 2 changeset under the check key.
+
+  > **Amended in implementation (Part 2a):** a `SessionStore` of the app's own
+  > passed as `store:` does not become `pass`. The manifest reports
+  > `perProcess: null` for a class outside the framework's map, and the fallback
+  > rule forbids a pass on absent evidence, so it stays a warning that now names
+  > the class. `configureOrm()` in `register()` is not reported yet (§5).
 - `loadRouteDefinitions()` is not deprecated: it is the static fallback and the
   path for a scaffold mid-generation whose `src/app.ts` does not import yet.
 - No deprecation is introduced, so `deprecations.ts` and `codemods.ts` are

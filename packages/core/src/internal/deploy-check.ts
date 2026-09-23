@@ -4,8 +4,8 @@
  * Its own entry, not part of `deploy-build`: that one imports node builtins
  * only (its test scans the built artifact), while the scan lives in
  * `@guren/cli`, reached here lazily so nothing loads until a build asks.
- * Warns, never throws: the scan reads constructions, not intent, and a wrong
- * guess must not block a deploy.
+ * The CLI reads the introspected app, and the source scan where it cannot (RFC 0026 §5).
+ * Warns, never throws: a wrong guess must not block a deploy.
  */
 
 interface DeployCheckCliApi {

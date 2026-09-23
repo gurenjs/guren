@@ -1,0 +1,15 @@
+---
+'@guren/cli': minor
+---
+
+`guren check` and `guren doctor` judge the deploy-runtime verdicts from the introspected app first (RFC 0026 Part 2a). Once an app declares a deploy plugin or the Lambda adapter, one `guren introspect` run per command reads the hashers the auth manager holds, the session store and cache store it selects, and whether a provider threw while registering. Every verdict carries `evidence` in `--json` output: `manifest`, `static` (the source scan, as before) or `none`. When introspection fails, `guren check` adds one advisory `introspection-unavailable` line and the verdicts fall back to the scan. `--no-introspect` on either command judges from source only. In process, `runCheck()`, `runDoctor()` and `getDoctorRuleEvaluations()` introspect only when passed `introspect: true`, so the edit hook, `guren gate` and the dev MCP server stay on the scan. `checkDeployRuntime(cwd)`, which the deploy builds call through `@guren/core/internal/deploy-check`, introspects the same way and keeps its signature; `analyzeDeployRuntime(cwd)` stays on the scan unless it is passed `{ introspect }`.
+
+Verdicts that can change, by check key:
+
+- `deploy-password-hashing`: judged from the registered hashers' `requiresBun`, not from `new ScryptHasher()` constructions and `auth.attempt()` calls. A hasher selected by an expression the scan could not read is now judged by what it resolved to, and a `ScryptHasher` constructed outside the auth configuration no longer warns. A hasher the manifest cannot classify (an app's own class, a subclass, or a custom user provider registered with `registerProvider()`) warns instead of passing. A pass message now names the hashers it checked. When no user provider is registered but the source hashes passwords (a `useModel()` in a provider's `boot()`), the scan still decides.
+- `deploy-runtime-stores`: the session verdict comes from the store the session manager's `default` selects, or from `auth.sessionOptions.store`. A `SessionStore` class of the app's own passed as `store:` still warns, now naming the class, because the manifest cannot say whether it persists. A `store:` factory is left to the scan, as before. A `memory` cache default warns, which the scan never read. OAuth state stores, the queue, explicit `Memory*Store` constructions and a hand-mounted `createSessionMiddleware` stay on the scan.
+- `deploy-password-hashing-unverified`, `deploy-runtime-stores-unverified` (new keys): a provider threw in `register()`, or the section comes from a deferred provider or a binding with no `describe()`, so what the verdict reads is unknown. `guren doctor --strict` counts them as it counts every deploy warning. Always an advisory warning with `evidence: 'none'`, in place of the verdict it stands for.
+- `deploy-provider-discovery`: unchanged, and always `evidence: 'static'`, since a provider `AutoDiscovery` finds registers as `app.register` like an explicit one.
+- `introspection-unavailable` (new key): advisory, in `guren check` only.
+
+The introspected app loads the local `.env`, so a store an environment variable selects is judged at its local value.

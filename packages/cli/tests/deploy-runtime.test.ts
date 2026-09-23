@@ -1,7 +1,15 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
-import { analyzeDeployRuntime, checkDeployRuntime } from '../src/deploy-runtime'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, spyOn } from 'bun:test'
+import { BUILT_IN_SESSION_DRIVERS, type AppManifest } from '@guren/server'
+import {
+  analyzeDeployRuntime,
+  checkDeployRuntime,
+  judgeDeployRuntime,
+  readDeployManifestFacts,
+  type DeployRuntimeAnalysis,
+  type DeployRuntimeVerdict,
+} from '../src/deploy-runtime'
 import { APP_FIXTURE, DEFAULT_ROUTES_FIXTURE, ENV_SCHEMA_FIXTURE, SESSION_PROVIDER, SQLITE_SCHEMA_FIXTURE, sessionConfigSource, writeInstalledPackage } from './helpers'
 import { makeAuth } from '../src/make-auth'
 import { runCheck } from '../src/check'
@@ -1624,7 +1632,7 @@ describe('checkDeployRuntime', () => {
       { 'src/app.ts': SESSION_APP },
       { '@guren/plugin-cloudflare': '^0.2.0' },
       async (dir) => {
-        const verdicts = await checkDeployRuntime(dir)
+        const verdicts = await checkDeployRuntime(dir, { introspect: false })
 
         expect(verdicts.map((verdict) => verdict.key)).toEqual([...DEPLOY_CHECK_KEYS])
         const stores = verdicts.find((verdict) => verdict.key === 'deploy-runtime-stores')!
@@ -1644,11 +1652,12 @@ describe('checkDeployRuntime', () => {
       { '@guren/plugin-cloudflare': '^0.2.0' },
       async (dir) => {
         const doctor = await deployChecks(dir)
-        for (const verdict of await checkDeployRuntime(dir)) {
+        for (const verdict of await checkDeployRuntime(dir, { introspect: false })) {
+          const key = verdict.key as DeployCheckKey
           // Doctor's side is the wider status type, so it is the subject.
-          expect(doctor[verdict.key].status).toBe(verdict.status)
-          expect(doctor[verdict.key].message).toBe(verdict.message)
-          expect(doctor[verdict.key].fix).toBe(verdict.fix)
+          expect(doctor[key].status).toBe(verdict.status)
+          expect(doctor[key].message).toBe(verdict.message)
+          expect(doctor[key].fix).toBe(verdict.fix)
         }
       },
     )
@@ -1696,5 +1705,248 @@ describe('guren check deploy-runtime verdicts', () => {
         expect(unrelated.checks.some((result) => result.key.startsWith('deploy-'))).toBe(false)
       },
     )
+  })
+})
+
+/** A manifest with nothing but what a test sets: every section absent, every provider registered. */
+function manifestFixture(overrides: Partial<AppManifest> = {}): AppManifest {
+  return {
+    schemaVersion: 1,
+    generatedAt: '2026-09-24T00:00:00.000Z',
+    entry: { file: 'src/main.ts', root: '/app', stage: 'register' },
+    runtime: { bun: '1.3.14', node: null, platform: 'darwin' },
+    providers: [],
+    modules: [],
+    routes: [],
+    middlewareAliases: {},
+    bindings: ['app', 'auth', 'hono', 'router'],
+    auth: {
+      guards: ['web'],
+      defaultGuard: 'web',
+      hasher: 'DefaultHasher',
+      algorithm: 'scrypt',
+      requiresBun: false,
+      providers: {},
+    },
+    agentTools: [],
+    warnings: [],
+    ...overrides,
+  }
+}
+
+const SCRYPT_USERS = {
+  users: { kind: 'model', model: 'User', hasher: 'DefaultHasher', algorithm: 'scrypt', requiresBun: false },
+} as const
+
+describe('deploy-runtime verdicts over a manifest (RFC 0026 §5)', () => {
+  let base: DeployRuntimeAnalysis
+  let workspace: Awaited<ReturnType<typeof createTempWorkspace>>
+
+  beforeAll(async () => {
+    // The static half (targets, OAuth, explicit constructions) of a Cloudflare app with nothing in it.
+    workspace = await createTempWorkspace('guren-deploy-manifest-')
+    await writeApp(workspace.dir, { 'src/app.ts': 'export {}\n' }, { '@guren/plugin-cloudflare': '^0.2.0' })
+    base = await analyzeDeployRuntime(workspace.dir)
+  })
+
+  afterAll(async () => {
+    await workspace.cleanup()
+  })
+
+  function judge(
+    manifest: AppManifest,
+    extra: Partial<DeployRuntimeAnalysis> = {},
+    drivers: ReadonlyMap<string, boolean> = BUILT_IN_SESSION_DRIVERS,
+  ): Record<string, DeployRuntimeVerdict> {
+    const analysis = { ...base, ...extra, manifest: readDeployManifestFacts(manifest, drivers) }
+    return Object.fromEntries(judgeDeployRuntime(analysis).map((verdict) => [verdict.key, verdict]))
+  }
+
+  it('passes password hashing on the hashers the auth manager holds, even with no auth.attempt() in source', () => {
+    const hashing = judge(manifestFixture({ auth: { ...manifestFixture().auth!, providers: { ...SCRYPT_USERS } } }))['deploy-password-hashing']
+
+    expect(hashing.status).toBe('pass')
+    expect(hashing.evidence).toBe('manifest')
+    expect(hashing.message).toContain("user provider 'users': DefaultHasher (scrypt)")
+  })
+
+  it('warns on a Bun-only hasher the app registers', () => {
+    const hashing = judge(
+      manifestFixture({
+        auth: {
+          ...manifestFixture().auth!,
+          providers: { users: { kind: 'model', model: 'User', hasher: 'ScryptHasher', algorithm: 'argon2', requiresBun: true } },
+        },
+      }),
+    )['deploy-password-hashing']
+
+    expect(hashing.status).toBe('warn')
+    expect(hashing.message).toContain("a Bun-only hasher is registered (user provider 'users': ScryptHasher (argon2))")
+    expect(hashing.fix).toContain("Drop `hasher: 'argon2'`")
+  })
+
+  it('never passes a hasher whose format the manifest cannot tell', () => {
+    const hashing = judge(
+      manifestFixture({
+        auth: { ...manifestFixture().auth!, providers: { api: { kind: 'custom', hasher: null, algorithm: null, requiresBun: null } } },
+      }),
+    )['deploy-password-hashing']
+
+    expect(hashing.status).toBe('warn')
+    expect(hashing.evidence).toBe('manifest')
+    expect(hashing.message).toContain("user provider 'api': custom")
+  })
+
+  it('leaves hashing to the scan when no user provider is registered but the source hashes passwords', () => {
+    // A useModel() in a provider's boot() is past the register stage the manifest describes.
+    const hashing = judge(manifestFixture(), {
+      bunOnlyHasherSignals: [{ symbol: 'ScryptHasher', filePath: 'app/Providers/AuthProvider.ts', line: 12 }],
+    })['deploy-password-hashing']
+
+    expect(hashing).toMatchObject({ status: 'warn', evidence: 'static' })
+    expect(hashing.message).toContain('ScryptHasher (app/Providers/AuthProvider.ts:12)')
+    expect(judge(manifestFixture())['deploy-password-hashing']).toMatchObject({ status: 'pass', evidence: 'manifest' })
+  })
+
+  it('judges a section behind a provider that threw as unverified, never as described', () => {
+    const verdicts = judge(
+      manifestFixture({
+        providers: [{ name: 'AuthProvider', source: 'options.providers', deferred: false, provides: [], register: 'threw', error: 'no binding' }],
+      }),
+    )
+
+    expect(Object.keys(verdicts)).toEqual([
+      'deploy-password-hashing-unverified',
+      'deploy-runtime-stores-unverified',
+      'deploy-provider-discovery',
+    ])
+    expect(verdicts['deploy-password-hashing-unverified']).toMatchObject({ status: 'warn', evidence: 'none' })
+    expect(verdicts['deploy-password-hashing-unverified'].message).toContain('AuthProvider threw in register()')
+    expect(verdicts['deploy-runtime-stores-unverified']).toMatchObject({ status: 'warn', evidence: 'none' })
+    expect(verdicts['deploy-provider-discovery'].evidence).toBe('static')
+  })
+
+  it('judges a session a deferred provider supplies, or one bound without describe(), as unverified', () => {
+    const deferred = judge(
+      manifestFixture({
+        providers: [{ name: 'SessionProvider', source: 'options.providers', deferred: true, provides: ['session'], register: 'skipped' }],
+      }),
+    )
+    expect(deferred['deploy-runtime-stores-unverified'].message).toContain('whether the session store is per-process is unverified')
+    expect(deferred['deploy-runtime-stores-unverified'].message).toContain('deferred SessionProvider')
+
+    const opaque = judge(manifestFixture({ bindings: ['app', 'auth', 'session'] }))
+    expect(opaque['deploy-runtime-stores-unverified'].message).toContain('"session" is bound')
+  })
+
+  it('warns on a per-process session default and passes a shared one', () => {
+    const session = (store: string): AppManifest['session'] => ({
+      source: 'manager',
+      default: store,
+      stores: {
+        memory: { driver: 'memory', perProcess: true },
+        database: { driver: 'database', table: 'sessions', perProcess: false },
+      },
+    })
+
+    const memory = judge(manifestFixture({ session: session('memory') }))['deploy-runtime-stores']
+    expect(memory.status).toBe('warn')
+    expect(memory.message).toContain("the 'memory' session store (driver `memory`) in this environment, which is per-process")
+
+    const database = judge(manifestFixture({ session: session('database') }))['deploy-runtime-stores']
+    expect(database).toMatchObject({ status: 'pass', evidence: 'manifest' })
+  })
+
+  it('warns on sessions with no store configured', () => {
+    const stores = judge(
+      manifestFixture({ session: { source: 'none', default: 'memory', stores: { memory: { driver: 'memory', perProcess: true } } } }),
+    )['deploy-runtime-stores']
+
+    expect(stores.status).toBe('warn')
+    expect(stores.message).toContain('no session store configured')
+  })
+
+  it("reads a plugin's session driver from its installed manifest, and cannot vouch for an undeclared one", () => {
+    const kv = manifestFixture({ session: { source: 'manager', default: 'kv', stores: { kv: { driver: 'kv', perProcess: null } } } })
+
+    expect(judge(kv, {}, new Map([...BUILT_IN_SESSION_DRIVERS, ['kv', true]]))['deploy-runtime-stores'].status).toBe('pass')
+    const unknown = judge(kv)['deploy-runtime-stores']
+    expect(unknown.status).toBe('warn')
+    expect(unknown.fix).toContain('gurenPlugin.drivers.session')
+  })
+
+  it('cannot vouch for a SessionStore of the app’s own passed as auth.sessionOptions.store', () => {
+    const stores = judge(
+      manifestFixture({
+        session: {
+          source: 'auth.sessionOptions.store',
+          default: 'sessionOptions.store',
+          stores: { 'sessionOptions.store': { driver: 'KvSessionStore', perProcess: null } },
+        },
+      }),
+    )['deploy-runtime-stores']
+
+    expect(stores.status).toBe('warn')
+    expect(stores.message).toContain('auth.sessionOptions.store (KvSessionStore)')
+  })
+
+  it('leaves an auth.sessionOptions.store factory to the scan, which reads what it constructs', () => {
+    const factory = manifestFixture({
+      session: {
+        source: 'auth.sessionOptions.store',
+        default: 'sessionOptions.store',
+        stores: { 'sessionOptions.store': { driver: null, perProcess: null } },
+      },
+    })
+    const backed = { symbol: 'DatabaseSessionStore', filePath: 'src/app.ts', line: 5 }
+
+    expect(judge(factory, { backedSessionSignals: [backed] })['deploy-runtime-stores'].status).toBe('pass')
+    expect(
+      judge(factory, { sessionSignals: [{ symbol: 'sessionOptions', filePath: 'src/app.ts', line: 5 }] })['deploy-runtime-stores'].message,
+    ).toContain('with no persistent store')
+  })
+
+  it('warns on a memory cache default, which the source scan never read', () => {
+    const cache = (driver: string): AppManifest['cache'] => ({ default: 'main', entries: { main: { driver } } })
+
+    expect(judge(manifestFixture({ cache: cache('memory') }))['deploy-runtime-stores'].message).toContain(
+      "the cache uses the 'main' cache store (driver `memory`)",
+    )
+    expect(judge(manifestFixture({ cache: cache('redis') }))['deploy-runtime-stores'].status).toBe('pass')
+  })
+
+  it('lets the manifest, not a MemorySessionStore construction, name the session store', () => {
+    const signal = { symbol: 'MemorySessionStore', filePath: 'tests/support/session.ts', line: 3 }
+    const shared = manifestFixture({
+      session: { source: 'manager', default: 'database', stores: { database: { driver: 'database', perProcess: false } } },
+    })
+
+    expect(judge(shared, { memoryStoreSignals: [signal] })['deploy-runtime-stores'].status).toBe('pass')
+    // With no session in the manifest, the construction is all there is to go on.
+    expect(judge(manifestFixture(), { memoryStoreSignals: [signal] })['deploy-runtime-stores'].status).toBe('warn')
+  })
+
+  it('keeps OAuth state and explicit memory constructions on the scan, which the manifest does not carry', () => {
+    const stores = judge(manifestFixture(), {
+      oauthSignals: [{ symbol: 'OAuthServiceProvider', filePath: 'src/app.ts', line: 4 }],
+      memoryStoreSignals: [{ symbol: 'MemoryRateLimitStore', filePath: 'app/limit.ts', line: 9 }],
+    })['deploy-runtime-stores']
+
+    expect(stores.status).toBe('warn')
+    expect(stores.message).toContain('MemoryRateLimitStore (app/limit.ts:9)')
+    expect(stores.message).toContain('OAuth is configured')
+    expect(stores.evidence).toBe('manifest')
+  })
+
+  it('judges provider discovery from source, since a discovered provider registers as app.register', () => {
+    const discovery = judge(
+      manifestFixture({
+        providers: [{ name: 'MailProvider', source: 'app.register', deferred: false, provides: [], register: 'ran' }],
+      }),
+      { discoverySignals: [{ symbol: 'AutoDiscovery', filePath: 'src/app.ts', line: 7 }] },
+    )['deploy-provider-discovery']
+
+    expect(discovery).toMatchObject({ status: 'warn', evidence: 'static' })
+    expect(judge(manifestFixture())['deploy-provider-discovery'].status).toBe('pass')
   })
 })

@@ -1,7 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { checkDeployRuntime } from '@guren/cli'
 import { reportDeployRuntimeHazards } from './deploy-check'
 
 const SESSION_APP = `import { createApp } from '@guren/core'
@@ -83,5 +84,30 @@ export default createApp({ auth: { sessionOptions: { store: new DatabaseSessionS
     })
 
     expect(warnings).toEqual([])
+  })
+
+  test('should report what the introspected app registers, as checkDeployRuntime() does', async () => {
+    // An app the CLI can introspect: an entry, and this workspace's @guren/core to import.
+    mkdirSync(join(root, 'src'), { recursive: true })
+    mkdirSync(join(root, 'node_modules/@guren'), { recursive: true })
+    symlinkSync(resolve(import.meta.dir, '../..'), join(root, 'node_modules/@guren/core'), 'dir')
+    writeFileSync(join(root, 'bunfig.toml'), '[install]\nauto = "disable"\n')
+    writeFileSync(join(root, 'src/main.ts'), "import app from './app.js'\nexport default app\n")
+    writeFileSync(join(root, 'src/app.ts'), "import { createApp } from '@guren/core'\nexport default createApp({ auth: { hasher: 'argon2' } })\n")
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ name: 'demo-app', type: 'module', dependencies: { '@guren/plugin-cloudflare': '^0.2.0' } }),
+    )
+
+    let lines: string[] = []
+    await captureWarnings(async () => {
+      lines = await reportDeployRuntimeHazards({ root, label: 'Cloudflare build' })
+    })
+
+    const expected = (await checkDeployRuntime(root))
+      .filter((verdict) => verdict.status !== 'pass')
+      .map((verdict) => `Cloudflare build: ${verdict.message}${verdict.fix ? ` ${verdict.fix}` : ''}`)
+    expect(lines).toEqual(expected)
+    expect(lines.some((line) => line.includes('a Bun-only hasher is registered (createApp({ auth }): DefaultHasher (argon2))'))).toBe(true)
   })
 })
