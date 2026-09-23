@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 import type { z } from 'zod'
 
 import { parsePlanDocument } from '../src/plan-render'
+import { planWaiveFile } from '../src/plan-waive'
 import type {
   PlanAppName,
   PlanAppNames,
@@ -350,6 +351,16 @@ describe('comments', () => {
 `,
 }
 
+/**
+ * A drizzle-kit that answers every schema as covered by its migrations, and the config it is
+ * asked with: what a data step's `db:migrate` asks before it runs.
+ */
+export const DRIZZLE_KIT_STUB_FILES: Record<string, string> = {
+  'drizzle.config.ts': "export default { schema: './db/schema.ts', out: './db/migrations', dialect: 'postgresql' }\n",
+  'node_modules/drizzle-kit/package.json': JSON.stringify({ name: 'drizzle-kit', bin: { 'drizzle-kit': 'bin.cjs' } }),
+  'node_modules/drizzle-kit/bin.cjs': "console.log(JSON.stringify({ status: 'no_changes', dialect: 'postgresql' }))\n",
+}
+
 /** The step of the comments fixture that {@link PLAN_VERIFY_APP_FILES} leaves incomplete. */
 export const HTTP_STEP = 'task/entity/model.comment/http'
 
@@ -359,13 +370,29 @@ export const HTTP_STEP = 'task/entity/model.comment/http'
  * a committed copy reads as a clean tree.
  */
 export async function writePlanVerifyApp(dir: string, active?: PlanActiveStep): Promise<void> {
-  await writeWorkspaceFiles(dir, {
+  await createPlanVerifyApp(dir, {
     ...PLAN_VERIFY_APP_FILES,
     '.gitignore': 'node_modules\n',
     'comments.plan.json': JSON.stringify(loadCommentsPlan()),
     ...(active ? { '.guren/plans/.gitignore': '*.state.json\n.gitignore\n', '.guren/plans/comments.state.json': JSON.stringify({ stateVersion: PLAN_STATE_VERSION, steps: {}, active }) } : {}),
   })
+}
+
+/** `files` on disk at `dir`, resolvable like an install: `@guren/core` linked, `drizzle-orm` the workspace's copy. */
+export async function createPlanVerifyApp(dir: string, files: Record<string, string> = PLAN_VERIFY_APP_FILES): Promise<string> {
+  await writeWorkspaceFiles(dir, files)
   await linkWorkspaceCore(dir)
   await mkdir(join(dir, 'node_modules'), { recursive: true })
   await symlink(resolve(import.meta.dir, '../../orm/node_modules/drizzle-orm'), join(dir, 'node_modules', 'drizzle-orm'), 'dir')
+  return dir
+}
+
+/** A waiver on each of `elementIds`, for a test that verifies a step around what the fixture app leaves unwritten. */
+export async function waiveForTest(planPath: string, elementIds: string[]): Promise<void> {
+  await planWaiveFile(planPath, {
+    elementIds,
+    reason: 'outside what this test verifies',
+    now: () => new Date('2026-09-23T12:00:00.000Z'),
+    exec: async () => ({ exitCode: 1, stdout: '', stderr: '' }),
+  })
 }
