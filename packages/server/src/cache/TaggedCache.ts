@@ -114,7 +114,7 @@ export class TaggedCache implements TaggedCacheStore {
     if (cached !== null) return cached
 
     return this.pending.run(taggedKey, ttl, async () => {
-      // The computation this caller missed alongside may have stored its value since.
+      // A computation that settled after this caller's read may have stored the value.
       const stored = await this.store.get<T>(taggedKey)
       if (stored !== null) return stored
 

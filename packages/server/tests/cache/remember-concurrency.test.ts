@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { CacheManager } from '../../src/cache/CacheManager'
-import type { CacheStore, StoreConfig } from '../../src/cache/types'
+import { FileStore } from '../../src/cache/stores/FileStore'
+import { MemoryStore } from '../../src/cache/stores/MemoryStore'
+import { RedisStore } from '../../src/cache/stores/RedisStore'
+import type { CacheStore } from '../../src/cache/types'
 
 /** The part of ioredis RedisStore uses on these paths, with every reply a real async hop. */
 class FakeRedis {
@@ -34,18 +37,43 @@ class FakeRedis {
   }
 }
 
-// Lets every caller reach its callback before a test releases the first one.
-// The file store reads the disk, so one microtask flush is not enough there.
-async function letCallersRun(): Promise<void> {
-  for (let turn = 0; turn < 20; turn++) {
-    await new Promise((resolve) => setImmediate(resolve))
+/**
+ * Records every `get` the store finishes, the reads inside its own `remember`
+ * included. A caller decides whether to join as soon as its first read
+ * finishes, so waiting for a count of reads is a barrier that the file store's
+ * uneven disk timing cannot slip past.
+ */
+class ReadLog {
+  private readonly keys: string[] = []
+
+  constructor(store: CacheStore) {
+    const read = store.get.bind(store)
+    store.get = async <T,>(key: string): Promise<T | null> => {
+      try {
+        return await read<T>(key)
+      } finally {
+        this.keys.push(key)
+      }
+    }
+  }
+
+  clear(): void {
+    this.keys.length = 0
+  }
+
+  async waitFor(count: number, matches: (key: string) => boolean): Promise<void> {
+    const deadline = Date.now() + 2_000
+    while (this.keys.filter(matches).length < count) {
+      if (Date.now() > deadline) {
+        throw new Error(`waited for ${count} finished reads, saw ${this.keys.filter(matches).length}`)
+      }
+      await new Promise((resolve) => setImmediate(resolve))
+    }
   }
 }
 
-// A caller that joined a held computation would never settle; report it instead of hanging.
-async function settledOrWaiting<T>(promise: Promise<T>): Promise<T | 'still waiting'> {
-  return Promise.race([promise, letCallersRun().then(() => 'still waiting' as const)])
-}
+const isKey = (name: string) => (key: string) => key === name
+const isTagged = (key: string) => key.startsWith('tagged:')
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -53,26 +81,32 @@ afterEach(async () => {
   while (cleanups.length > 0) await cleanups.pop()?.()
 })
 
-const drivers: Array<[string, () => Promise<StoreConfig>]> = [
-  ['memory', async () => ({ driver: 'memory', checkPeriod: 0 })],
+const drivers: Array<[string, () => Promise<CacheStore>]> = [
+  ['memory', async () => new MemoryStore({ checkPeriod: 0 })],
   [
     'file',
     async () => {
       const path = await mkdtemp(join(tmpdir(), 'guren-remember-'))
       cleanups.push(() => rm(path, { recursive: true, force: true }))
-      return { driver: 'file', path }
+      return new FileStore({ path })
     },
   ],
-  ['redis', async () => ({ driver: 'redis', client: new FakeRedis() })],
+  ['redis', async () => new RedisStore({ client: new FakeRedis() })],
 ]
 
-async function managerFor(config: () => Promise<StoreConfig>): Promise<CacheManager> {
-  return new CacheManager({ default: 'main', stores: { main: await config() } })
+const memoryAt = (now: () => number) => async () => new MemoryStore({ checkPeriod: 0, now })
+
+async function managerFor(createStore: () => Promise<CacheStore>): Promise<{ cache: CacheManager; reads: ReadLog }> {
+  const store = await createStore()
+  const reads = new ReadLog(store)
+  const cache = new CacheManager({ default: 'main' })
+  cache.registerStore('main', () => store)
+  return { cache, reads }
 }
 
-describe.each(drivers)('remember on the %s store', (_name, config) => {
+describe.each(drivers)('remember on the %s store', (_name, createStore) => {
   it('runs the callback once for concurrent misses and hands every caller the same object', async () => {
-    const cache = await managerFor(config)
+    const { cache, reads } = await managerFor(createStore)
     const release = Promise.withResolvers<void>()
     let calls = 0
     const callback = async () => {
@@ -82,7 +116,8 @@ describe.each(drivers)('remember on the %s store', (_name, config) => {
     }
 
     const callers = Array.from({ length: 5 }, () => cache.store().remember('posts', 60, callback))
-    await letCallersRun()
+    // Each caller's own read, and the one inside the computation they share.
+    await reads.waitFor(6, isKey('posts'))
     release.resolve()
     const results = await Promise.all(callers)
 
@@ -92,7 +127,7 @@ describe.each(drivers)('remember on the %s store', (_name, config) => {
   })
 
   it('shares one callback between concurrent rememberForever calls', async () => {
-    const cache = await managerFor(config)
+    const { cache, reads } = await managerFor(createStore)
     const release = Promise.withResolvers<void>()
     let calls = 0
     const callback = async () => {
@@ -102,7 +137,7 @@ describe.each(drivers)('remember on the %s store', (_name, config) => {
     }
 
     const callers = Array.from({ length: 5 }, () => cache.store().rememberForever('settings', callback))
-    await letCallersRun()
+    await reads.waitFor(6, isKey('settings'))
     release.resolve()
     const results = await Promise.all(callers)
 
@@ -112,7 +147,7 @@ describe.each(drivers)('remember on the %s store', (_name, config) => {
   })
 
   it('hands every concurrent caller the same error, then lets the next call retry', async () => {
-    const cache = await managerFor(config)
+    const { cache, reads } = await managerFor(createStore)
     const release = Promise.withResolvers<void>()
     const failure = new Error('database unavailable')
     let calls = 0
@@ -123,7 +158,7 @@ describe.each(drivers)('remember on the %s store', (_name, config) => {
     }
 
     const callers = Array.from({ length: 5 }, () => cache.store().remember('report', 60, failing))
-    await letCallersRun()
+    await reads.waitFor(6, isKey('report'))
     release.resolve()
     const settled = await Promise.allSettled(callers)
 
@@ -138,7 +173,7 @@ describe.each(drivers)('remember on the %s store', (_name, config) => {
   })
 
   it('keeps different keys apart', async () => {
-    const cache = await managerFor(config)
+    const { cache, reads } = await managerFor(createStore)
     const release = Promise.withResolvers<void>()
     const seen: string[] = []
     const callbackFor = (key: string) => async () => {
@@ -152,7 +187,8 @@ describe.each(drivers)('remember on the %s store', (_name, config) => {
       cache.store().remember('b', 60, callbackFor('b')),
       cache.store().remember('a', 60, callbackFor('a')),
     ]
-    await letCallersRun()
+    await reads.waitFor(3, isKey('a'))
+    await reads.waitFor(2, isKey('b'))
     release.resolve()
 
     expect(await Promise.all(callers)).toEqual(['a', 'b', 'a'])
@@ -160,7 +196,7 @@ describe.each(drivers)('remember on the %s store', (_name, config) => {
   })
 
   it('shares one callback between tagged caches built for each call', async () => {
-    const cache = await managerFor(config)
+    const { cache, reads } = await managerFor(createStore)
     const release = Promise.withResolvers<void>()
     let calls = 0
     const callback = async () => {
@@ -169,13 +205,12 @@ describe.each(drivers)('remember on the %s store', (_name, config) => {
       return { title: 'Hello' }
     }
 
-    // Creating a namespace takes the file store's lock, whose retry sleeps, so
-    // a cold one would let some callers arrive after the computation finished.
     await cache.store().tags(['posts', 'post:1']).get('post:1')
+    reads.clear()
     const callers = Array.from({ length: 5 }, () =>
       cache.store().tags(['posts', 'post:1']).remember('post:1', 60, callback),
     )
-    await letCallersRun()
+    await reads.waitFor(6, isTagged)
     release.resolve()
     const results = await Promise.all(callers)
 
@@ -188,10 +223,10 @@ describe.each(drivers)('remember on the %s store', (_name, config) => {
   })
 })
 
-describe.each(drivers.slice(1))('remember hits on the %s store', (_name, config) => {
+describe.each(drivers.slice(1))('remember hits on the %s store', (_name, createStore) => {
   // The memory store hands out the stored object itself; these two decode a copy per read.
   it('hands each concurrent hit its own copy, as get does', async () => {
-    const cache = await managerFor(config)
+    const { cache } = await managerFor(createStore)
     await cache.store().set('posts', { id: 1 })
     const callback = async () => ({ id: 2 })
 
@@ -202,7 +237,7 @@ describe.each(drivers.slice(1))('remember hits on the %s store', (_name, config)
   })
 
   it('hands each concurrent tagged hit its own copy', async () => {
-    const cache = await managerFor(config)
+    const { cache } = await managerFor(createStore)
     await cache.store().tags(['posts']).set('posts', { id: 1 })
     const callback = async () => ({ id: 2 })
 
@@ -218,14 +253,13 @@ describe.each(drivers.slice(1))('remember hits on the %s store', (_name, config)
 describe('remember across operations', () => {
   const memory = drivers[0][1]
 
-  const scopes: Array<[string, (cache: CacheManager) => CacheStore]> = [
-    ['store', (cache) => cache.store()],
-    ['tagged cache', (cache) => cache.store().tags(['posts'])],
+  const scopes: Array<[string, (cache: CacheManager) => CacheStore, (key: string) => boolean]> = [
+    ['store', (cache) => cache.store(), isKey('key')],
+    ['tagged cache', (cache) => cache.store().tags(['posts']), isTagged],
   ]
 
-  it.each(scopes)('runs a separate callback for a call on the %s with another TTL', async (_name, scope) => {
-    let clock = 1_000_000
-    const cache = new CacheManager({ stores: { memory: { driver: 'memory', checkPeriod: 0, now: () => clock } } })
+  it.each(scopes)('runs a separate callback for a call on the %s with another TTL', async (_name, scope, isRead) => {
+    const { cache, reads } = await managerFor(memoryAt(() => 1_000_000))
     const forever = Promise.withResolvers<string>()
     const minute = Promise.withResolvers<string>()
     let calls = 0
@@ -234,12 +268,13 @@ describe('remember across operations', () => {
       calls += 1
       return forever.promise
     })
-    await letCallersRun()
+    await reads.waitFor(2, isRead)
     const pendingMinute = scope(cache).remember('key', 60, async () => {
       calls += 1
       return minute.promise
     })
-    await letCallersRun()
+    // The minute call's own read, then the one inside its own computation.
+    await reads.waitFor(4, isRead)
     forever.resolve('forever')
     expect(await pendingForever).toBe('forever')
     minute.resolve('minute')
@@ -249,12 +284,48 @@ describe('remember across operations', () => {
     expect(await scope(cache).ttl('key')).toBe(60)
   })
 
+  it.each(scopes)(
+    'does not run the callback again for a caller on the %s whose read missed before the value was stored',
+    async (_name, scope, isRead) => {
+      const store = new MemoryStore({ checkPeriod: 0 })
+      const cache = new CacheManager({ default: 'main' })
+      cache.registerStore('main', () => store)
+      const read = store.get.bind(store)
+      const holding = Promise.withResolvers<void>()
+      const heldRead = Promise.withResolvers<void>()
+      let reads = 0
+      store.get = async <T,>(key: string): Promise<T | null> => {
+        const value = await read<T>(key)
+        if (isRead(key) && ++reads === 1) {
+          holding.resolve()
+          await heldRead.promise
+        }
+        return value
+      }
+      let calls = 0
+      const callback = async () => {
+        calls += 1
+        return { id: 1 }
+      }
+
+      // This caller has read a miss and is held before it can join anything.
+      const late = scope(cache).remember('key', 60, callback)
+      await holding.promise
+      const first = await scope(cache).remember('key', 60, callback)
+      heldRead.resolve()
+
+      expect(await late).toEqual(first)
+      expect(calls).toBe(1)
+    },
+  )
+
   it('stores a tagged result under the namespace it read, so a flush while it runs discards it', async () => {
-    const cache = await managerFor(memory)
+    const { cache, reads } = await managerFor(memory)
     const held = Promise.withResolvers<string>()
 
     const pending = cache.store().tags(['posts']).remember('key', 60, async () => held.promise)
-    await letCallersRun()
+    // The tagged key is resolved before this read, so it names the namespace from before the flush.
+    await reads.waitFor(1, isTagged)
     await cache.store().tags(['posts']).flush()
     held.resolve('from before the flush')
 
@@ -262,40 +333,39 @@ describe('remember across operations', () => {
     expect(await cache.store().tags(['posts']).get('key')).toBeNull()
   })
 
-  type Remember = (cache: CacheManager, callback: () => Promise<string>) => Promise<string>
-  const plain: Remember = (cache, callback) => cache.store().remember('key', 60, callback)
-  const tagged: Remember = (cache, callback) => cache.store().tags(['posts']).remember('key', 60, callback)
-
   // A write the next call reads back is a hit, which never reaches the join, so
   // the writes store a one-second entry that the test's clock then expires.
-  const writes: Array<[string, Remember, (cache: CacheManager) => Promise<unknown>]> = [
-    ['set', plain, (cache) => cache.store().set('key', 'written', 1)],
-    ['delete', plain, (cache) => cache.store().delete('key')],
-    ['clear', plain, (cache) => cache.store().clear()],
-    ['setMany', plain, (cache) => cache.store().setMany(new Map([['key', 'written']]), 1)],
-    ['deleteMany', plain, (cache) => cache.store().deleteMany(['key'])],
-    ['a tagged set', tagged, (cache) => cache.store().tags(['posts']).set('key', 'written', 1)],
-    ['a tagged delete', tagged, (cache) => cache.store().tags(['posts']).delete('key')],
+  const writes: Array<[string, (cache: CacheManager) => CacheStore, (cache: CacheManager) => Promise<unknown>]> = [
+    ['set', (cache) => cache.store(), (cache) => cache.store().set('key', 'written', 1)],
+    ['delete', (cache) => cache.store(), (cache) => cache.store().delete('key')],
+    ['clear', (cache) => cache.store(), (cache) => cache.store().clear()],
+    ['setMany', (cache) => cache.store(), (cache) => cache.store().setMany(new Map([['key', 'written']]), 1)],
+    ['deleteMany', (cache) => cache.store(), (cache) => cache.store().deleteMany(['key'])],
+    ['a tagged set', (cache) => cache.store().tags(['posts']), (cache) => cache.store().tags(['posts']).set('key', 'written', 1)],
+    ['a tagged delete', (cache) => cache.store().tags(['posts']), (cache) => cache.store().tags(['posts']).delete('key')],
   ]
 
-  it.each(writes)('does not join a callback that started before %s', async (_name, remember, write) => {
+  it.each(writes)('does not join a callback that started before %s', async (_name, scope, write) => {
     let clock = 1_000_000
-    const cache = new CacheManager({ stores: { memory: { driver: 'memory', checkPeriod: 0, now: () => clock } } })
+    const { cache, reads } = await managerFor(memoryAt(() => clock))
+    const isRead = (key: string) => key === 'key' || isTagged(key)
     const first = Promise.withResolvers<string>()
 
-    const before = remember(cache, async () => first.promise)
-    await letCallersRun()
+    const before = scope(cache).remember('key', 60, async () => first.promise)
+    await reads.waitFor(1, isRead)
     await write(cache)
     clock += 2_000
-    const after = remember(cache, async () => 'fresh')
-
-    expect(await settledOrWaiting(after)).toBe('fresh')
+    const after = scope(cache).remember('key', 60, async () => 'fresh')
+    // The first call's two reads, then the later call's own: it has joined or started by now.
+    await reads.waitFor(3, isRead)
     first.resolve('stale')
+
+    expect(await after).toBe('fresh')
     expect(await before).toBe('stale')
   })
 
   it('still treats a cached null as a miss', async () => {
-    const cache = await managerFor(memory)
+    const { cache } = await managerFor(memory)
     let calls = 0
     const callback = async () => {
       calls += 1
