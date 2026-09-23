@@ -28,7 +28,6 @@ const BINDING_TITLE = 'Session manager binding'
 const BINDING_FIX = "Register a provider whose register() calls container.instance('session', createSessionManager(sessionConfig)), "
   + 'and list it in createApp({ providers }). `bunx guren add session` writes one.'
 
-/** One session config in the source, with the file it came from. */
 interface SessionSite extends SessionConfigSite {
   filePath: string
   relPath: string
@@ -96,7 +95,7 @@ export async function checkSessionsConfig(options: {
         checkManifestStoreTables(entry, sites, cwd, schemaTables).map((result) => ({ ...result, evidence: 'manifest' as const })),
         judgedFromSource(staticTables),
       )
-    : judgedFromSource(staticTables)
+    : judgedFromSource(staticTables, 'the introspected app binds no session manager, so it never reads this config')
   return bindingApplies ? [...tables, { ...judgeManifestBinding(entry), evidence: 'manifest' }] : tables
 }
 
@@ -154,16 +153,24 @@ function checkStoreTables(site: SessionSite, cwd: string, schemaTables: SchemaTa
 function checkManifestStoreTables(entry: SessionEntry, sites: SessionSite[], cwd: string, schemaTables: SchemaTable[]): CheckResult[] {
   const results: CheckResult[] = []
   // A table the static reader could not name is not evidence that the schema lacks one.
-  const namesReadable = schemaTables.every((table) => table.tableName !== undefined)
+  const namesReadable = schemaTables.length > 0 && schemaTables.every((table) => table.tableName !== undefined)
 
   for (const [name, store] of Object.entries(entry.stores)) {
     if (store.driver !== 'database') continue
-    const site = sites.find((candidate) => readSessionConfig(candidate.config).stores.has(name)) ?? sites[0]!
-    const storeNode = storeNamed(site.config, name)
-    const identifier = storeNode ? storeTableIdentifier(storeNode) : undefined
-    const binding = identifier
-      ? resolveSchemaTableBinding({ cwd, filePath: site.filePath, body: site.parsed.ast.program.body, identifier, schemaTables })
-      : undefined
+    // The manifest does not say which config built the manager: among the configs declaring the store,
+    // the one whose export the schema names as this table, else the first.
+    const candidates = sites.filter((candidate) => readSessionConfig(candidate.config).stores.has(name)).map((candidate) => {
+      const storeNode = storeNamed(candidate.config, name)
+      const identifier = storeNode ? storeTableIdentifier(storeNode) : undefined
+      const binding = identifier
+        ? resolveSchemaTableBinding({ cwd, filePath: candidate.filePath, body: candidate.parsed.ast.program.body, identifier, schemaTables })
+        : undefined
+      return { site: candidate, identifier, binding }
+    })
+    const sqlNameOf = (exported: string | undefined) => schemaTables.find((table) => table.identifier === exported)?.tableName
+    const { site, identifier, binding } = candidates.find((candidate) => candidate.binding?.declared && sqlNameOf(candidate.binding.tableName) === store.table)
+      ?? candidates[0]
+      ?? { site: sites[0]!, identifier: undefined, binding: undefined }
     const key = `sessions-config:${site.relPath}:${binding?.tableName ?? identifier ?? store.table ?? name}`
 
     if (store.table === undefined) {

@@ -217,7 +217,7 @@ export async function checkAttachmentsConfig(options: {
   if (engine.status === 'static') return judgedFromSource(results, engine.reason)
 
   const { table } = engine.value
-  const namesReadable = schemaTables.every((candidate) => candidate.tableName !== undefined)
+  const namesReadable = schemaTables.length > 0 && schemaTables.every((candidate) => candidate.tableName !== undefined)
   const declared = table !== undefined && schemaTables.some((candidate) => candidate.tableName === table)
   // A table the static reader could not name is not evidence that the schema lacks one.
   if (!declared && table !== undefined && !namesReadable) return judgedFromSource(results)
@@ -722,14 +722,14 @@ export async function checkAttachmentsPublicDisk(options: {
   return judgedFromSource(results, engine.status === 'static' ? engine.reason : undefined)
 }
 
-/** The scanned default disks with the engine's disk in place of the config it came from (its literal, else the first config). */
+/** The scanned default disks plus the engine's, attributed to the config naming it literally, else the first config. */
 function withEngineDisk(
   scanned: Array<{ relPath: string; disk: string }>,
   disk: string,
   sites: string[],
 ): Array<{ relPath: string; disk: string }> {
   const relPath = scanned.find((entry) => entry.disk === disk)?.relPath ?? scanned[0]?.relPath ?? sites[0]!
-  return [{ relPath, disk }, ...scanned.filter((entry) => entry.relPath !== relPath)]
+  return [{ relPath, disk }, ...scanned.filter((entry) => entry.relPath !== relPath || entry.disk !== disk)]
 }
 
 /** Each storage disk's driver as the introspected storage manager registered it; a factory-registered disk has none. */
@@ -782,7 +782,11 @@ export async function checkAttachmentsDelivery(options: {
   const { cwd, cache, files } = options
   const scan = await scanAttachmentsDelivery(cwd, cache, files)
   const engine = await introspectedEngine(cwd, cache, files, options.introspect)
-  if (engine.status === 'described') return judgeManifestDelivery(engine.value, engine.manifest, scan, engine.sites, cache, files)
+  if (engine.status === 'described') {
+    // Mounting is app-wide, so only another config's redirect disks keep their source verdict.
+    const manifest = await judgeManifestDelivery(engine.value, engine.manifest, scan, engine.sites, cache, files)
+    return mergeVerdicts(manifest, judgedFromSource(await staticRedirectVerdicts(scan, cache, files)))
+  }
 
   const results: CheckResult[] = []
 
@@ -836,16 +840,15 @@ export async function checkAttachmentsDelivery(options: {
     }
   }
 
-  if (scan.redirectDisks.length > 0) {
-    const declarations = await scanStorageDisks(cache, files)
-    for (const { relPath, disk } of scan.redirectDisks) {
-      // Unreadable (absent or conflicting evidence): skip, never guess.
-      const verdict = judgeRedirectDisk(relPath, disk, declarations.get(disk)?.driver)
-      if (verdict) results.push(verdict)
-    }
-  }
-
+  results.push(...(await staticRedirectVerdicts(scan, cache, files)))
   return judgedFromSource(results, engine.reason)
+}
+
+async function staticRedirectVerdicts(scan: AttachmentsDeliveryScan, cache: ParseCache, files: string[]): Promise<CheckResult[]> {
+  if (scan.redirectDisks.length === 0) return []
+  const declarations = await scanStorageDisks(cache, files)
+  // Unreadable (absent or conflicting evidence): skip, never guess.
+  return scan.redirectDisks.flatMap(({ relPath, disk }) => judgeRedirectDisk(relPath, disk, declarations.get(disk)?.driver) ?? [])
 }
 
 /**
@@ -883,7 +886,7 @@ async function judgeManifestDelivery(
   const redirected = Object.entries(engine.disks ?? {}).filter(([, disk]) => disk.serve === 'redirect')
   if (redirected.length > 0) {
     const drivers = manifestDiskDrivers(manifest)
-    const declarations = drivers.size < redirected.length ? await scanStorageDisks(cache, files) : undefined
+    const declarations = redirected.some(([disk]) => !drivers.has(disk)) ? await scanStorageDisks(cache, files) : undefined
     for (const [disk] of redirected) {
       const relPath = scan.redirectDisks.find((entry) => entry.disk === disk)?.relPath ?? sites[0]!
       const driver = drivers.get(disk)

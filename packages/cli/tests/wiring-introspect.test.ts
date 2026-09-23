@@ -242,6 +242,63 @@ export default class AttachmentsProvider extends ServiceProvider {
     expect(manifest['attachments-model:app/Models/User.ts']!.message).toContain("a call in a provider's boot()")
   })
 
+  test('reads the disk an environment variable selects, which the scan cannot', async () => {
+    const dir = await scaffoldApp('env-disk', ['attachments'], { '.env': 'RFC26_ATTACHMENTS_DISK=public\n' })
+    const config = await Bun.file(join(dir, 'config/attachments.ts')).text()
+    await writeWorkspaceFiles(dir, {
+      'config/attachments.ts': config.replace("disk: 'local',", "disk: process.env.RFC26_ATTACHMENTS_DISK || 'local',"),
+    })
+    const { manifest, source } = await bothWays(dir)
+
+    // The disk comes from the engine; its root, under public/, from source.
+    expect(manifest['attachments-public-disk:config/attachments.ts:public']).toMatchObject({ status: 'fail', evidence: 'static' })
+    expect(Object.keys(source).filter((key) => key.startsWith('attachments-public-disk:'))).toEqual([])
+  })
+
+  test('names auth.sessionOptions.store as why the session config is never read', async () => {
+    const dir = await scaffoldApp('session-options-store', ['session'], {
+      'src/app.ts': APP.replace("import { createApp } from '@guren/core'", "import { createApp, MemorySessionStore } from '@guren/core'")
+        .replace('auth: {},', 'auth: { sessionOptions: { store: new MemorySessionStore() } },'),
+    })
+    const { manifest } = await bothWays(dir)
+
+    expect(manifest['sessions-binding']).toMatchObject({ status: 'warn', evidence: 'manifest' })
+    expect(manifest['sessions-binding']!.message).toContain('sessionOptions: { store }')
+  })
+
+  test('judges a session config left unbound for an unset env key from source, and says so', async () => {
+    const dir = await scaffoldApp('unset-env', [], {
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}
+export const sessions = pgTable('sessions', {
+  id: text('id').primaryKey(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+})
+`,
+      'config/session.ts': `import { defineSessionConfig } from '@guren/core'
+import { sessions } from '../db/schema.js'
+
+export default defineSessionConfig((values) => ({
+  default: (values as unknown as Record<string, string>).RFC26_UNSET_SESSION_DRIVER,
+  stores: { database: { driver: 'database', table: sessions } },
+}))
+`,
+      'src/app.ts': `import { createApp, defineEnv, Env } from '@guren/core'
+import session from '../config/session.js'
+import registerWebRoutes from '../routes/web.js'
+
+const env = defineEnv({ RFC26_UNSET_SESSION_DRIVER: Env.string() })
+
+export default createApp({ env, config: [session], auth: {}, routes: registerWebRoutes })
+`,
+    })
+    const { manifest } = await bothWays(dir)
+
+    expect(manifest['sessions-config:config/session.ts:sessions']).toMatchObject({ status: 'pass', evidence: 'static' })
+    expect(manifest['sessions-config:config/session.ts:sessions']!.message).toContain('Judged from source:')
+    expect(manifest['sessions-config:config/session.ts:sessions']!.message).toContain('RFC26_UNSET_SESSION_DRIVER')
+    expect(manifest['sessions-binding']).toBeUndefined()
+  })
+
   test('falls back to the scan after a provider threw', async () => {
     const dir = await scaffoldApp('threw', ['session', 'attachments'], { 'app/Providers/BindingProvider.ts': THROWING_PROVIDER })
     const app = await Bun.file(join(dir, 'src/app.ts')).text()

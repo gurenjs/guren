@@ -506,7 +506,7 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 > - `sessions-config:*` reads each `database` store's `table` (its SQL name)
 >   against the tables the static schema reader names. The key stays the one the
 >   scan builds: the config declaring the store and the export it imports, then
->   the local identifier, then the SQL name. A missing named export is a link
+>   the local identifier, the SQL name and the store's name. A missing named export is a link
 >   error that fails the introspection, so that case stays on the scan. What the
 >   manifest adds is a table object the schema does not declare (built inline, or
 >   imported from outside `db/schema`) and a value that is not a Drizzle table.
@@ -535,8 +535,11 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   `StorageManager.describe()` does not report. Its evidence is `static` either
 >   way.
 > - When the manifest judges one config and the source holds others (a second
->   session config, a module's `configureAttachments()`), the source verdicts for
->   the others are kept under their own keys.
+>   session config, another `configureAttachments()` call's table or redirect
+>   disks), the source verdicts for the others are kept under their own keys.
+>   The delivery mount is app-wide, so it is the manifest's alone. The manifest
+>   does not say which config it describes: a verdict goes to the config whose
+>   export the schema names as that table, else to the first that declares it.
 
 ### 6. Enabling refactor: one module per command
 
