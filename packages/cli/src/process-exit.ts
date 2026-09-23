@@ -1,8 +1,8 @@
 /**
  * Bun's `process.exit()` drops `process.stdout.write()` data still queued on a slow
- * pipe (measured on 1.3.14 and 1.4.2: 64 KB of 4 MB arrives), and neither
- * `writableLength` nor an empty write's callback reports that queue, so each real
- * write's callback is counted and the exit waits for the count to reach zero.
+ * pipe: only the first pipe buffer's worth arrives. Neither `writableLength` nor an
+ * empty write's callback reports that queue, so each real write's callback is
+ * counted and the exit waits for the count to reach zero.
  */
 
 type WriteWithCallback = (chunk: unknown, encoding: unknown, callback: (error?: Error | null) => void) => boolean
@@ -22,8 +22,12 @@ function track(stream: NodeJS.WriteStream): void {
     pending += 1
     try {
       return write(chunk, typeof encoding === 'function' ? undefined : encoding, (error) => {
-        release()
-        if (typeof done === 'function') (done as (error?: Error | null) => void)(error)
+        // Released after the caller's callback, so a write it issues is waited for too.
+        try {
+          if (typeof done === 'function') (done as (error?: Error | null) => void)(error)
+        } finally {
+          release()
+        }
       })
     } catch (error) {
       // Bun throws on a chunk that is not a string or buffer and never calls back.

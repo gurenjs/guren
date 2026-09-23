@@ -28,9 +28,11 @@ const ARCH_VIOLATION: Record<string, string> = {
 const HARD_TIMEOUT_MS = 20_000
 const TEST_TIMEOUT_MS = HARD_TIMEOUT_MS + 5_000
 
+// Tests match a whole Run, so a failure prints the child's stderr beside its code.
 interface Run {
   exitCode: number | null
   stdout: string
+  stderr: string
   killed: boolean
 }
 
@@ -39,12 +41,12 @@ async function runBin(args: string[], cwd: string): Promise<Run> {
   const proc = Bun.spawn(['bun', CLI_BIN_PATH, ...args], {
     cwd,
     stdout: 'pipe',
-    stderr: 'ignore',
+    stderr: 'pipe',
     timeout: HARD_TIMEOUT_MS,
     killSignal: 'SIGKILL',
   })
-  const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
-  return { exitCode: proc.exitCode, stdout, killed: proc.signalCode === 'SIGKILL' }
+  const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited])
+  return { exitCode: proc.exitCode, stdout, stderr, killed: proc.signalCode === 'SIGKILL' }
 }
 
 describe('guren exits after a command that imported app code holding a handle open', () => {
@@ -68,16 +70,14 @@ describe('guren exits after a command that imported app code holding a handle op
   it('plan:status prints its report and exits 0', async () => {
     const run = await runBin(['plan:status', 'plans/comments.plan.json', '--app', app, '--json'], app)
 
-    expect(run.killed).toBe(false)
-    expect(run.exitCode).toBe(0)
+    expect(run).toMatchObject({ killed: false, exitCode: 0 })
     expect(JSON.parse(run.stdout)).toHaveProperty('elements')
   }, TEST_TIMEOUT_MS)
 
   it('route:list prints the route the module registered and exits 0', async () => {
     const run = await runBin(['route:list', '--app', app, '--format', 'json'], app)
 
-    expect(run.killed).toBe(false)
-    expect(run.exitCode).toBe(0)
+    expect(run).toMatchObject({ killed: false, exitCode: 0 })
     expect(JSON.stringify(JSON.parse(run.stdout))).toContain('posts.index')
   }, TEST_TIMEOUT_MS)
 
@@ -86,8 +86,7 @@ describe('guren exits after a command that imported app code holding a handle op
     // setting process.exitCode, not by throwing, so runCli itself returns 0.
     const run = await runBin(['check', '--ci', '--app', app], app)
 
-    expect(run.killed).toBe(false)
-    expect(run.exitCode).toBe(1)
+    expect(run).toMatchObject({ killed: false, exitCode: 1 })
   }, TEST_TIMEOUT_MS)
 })
 
