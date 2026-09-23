@@ -532,7 +532,7 @@ side effect が取り付けられたと読まれるのは、テストとクラ�
 
 計画が書いた `body`、`params`、`query` の validator は、アクションがそれで検証しているか、ルートが契約スキーマとして持っていれば一致と数えます。別のものを使っている場合、その場で組み立てたスキーマ (`this.validateBody(PostSchema.partial())` など)、ヘルパー経由の検証は、アクションを drifted にはせず、注記付きの `present` にとどめます。
 
-validator の `fields` は export された zod のスキーマから、Resource の `fields` は `guren codegen` が読むペイロードの型から、Policy の ability はメンバー名から読みます。キーや ability がない場合、フィールドの型や必須かどうかが計画と食い違う場合、範囲が計画より狭い場合は `differ` になり、`plan:verify` はそのステップを `incomplete` と報告します。transform、refinement、union の奥にあるフィールドなど、確実に判定できないものは、推測せず `unknown` にします。理由は `--json` の性質ごとに出ます。部品ごとの規則は、[RFC 0030](https://github.com/gurenjs/guren/blob/main/rfcs/0030-implementation-plans.md) §6 のフィールドの読み取りについての追記にあります。
+validator の `fields` は export された zod のスキーマから、Resource の `fields` は `guren codegen` が読むペイロードの型から、Policy の ability はメンバー名から読みます。キーや ability がない場合、フィールドの型や必須かどうかが計画と食い違う場合、範囲が計画より狭い場合は `differ` になり、`plan:verify` はそのステップを `incomplete` と報告します。transform、refinement、union の奥にあるフィールドなど、確実に判定できないものは、推測せず `unknown` にします。理由は `--json` の性質ごとに出ます。部品ごとの規則は、[RFC 0030](https://github.com/gurenjs/guren/blob/main/rfcs/0030-implementation-plans.md) §6 の、フィールドの読み取りと Policy の ability についての追記にあります。
 
 `unknown` のまま残った計画上の性質は、すべて「Planned, not checkable」の下に並びます。どのスキャナーも読まない性質、読んでも判定できない性質 (文字列としてしか比べられない型や、計画より緩い範囲など)、承認時にすでに一致していた `alter` の性質です。Guren が判定できない部分が、緑に紛れて見えなくなることはありません。
 
