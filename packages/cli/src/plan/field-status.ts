@@ -9,15 +9,11 @@ import type { JsonSchemaObject } from '@guren/server/internal/zod-json-schema'
 
 import type { PagePropKey } from '../page-props-extractor'
 import type { PlanAppResourcePayload, PlanAppSchemaFields } from './field-readers'
+import { differ, existenceMatch, match, unknown, type PlanPropertyStatus } from './property-status'
 import type { PlanResource, PlanValidator } from './schema'
-import type { PlanPropertyStatus } from './status'
 
 type PlanValidatorField = PlanValidator['fields'][number]
 type PlanResourceField = PlanResource['fields'][number]
-
-const match = (property: string, planned: string, actual = planned): PlanPropertyStatus => ({ property, verdict: 'match', planned, actual })
-const differ = (property: string, planned: string, actual: string): PlanPropertyStatus => ({ property, verdict: 'differ', planned, actual })
-const unknown = (property: string, planned: string, reason: string): PlanPropertyStatus => ({ property, verdict: 'unknown', planned, reason })
 
 /** One JSON value family, the level at which two types can be told apart without a guess. */
 type Family = 'string' | 'integer' | 'number' | 'boolean' | 'object' | 'array'
@@ -80,22 +76,17 @@ function validatorField(field: PlanValidatorField, read: PlanAppSchemaFields): P
     if (read.open) return [unknown(name, 'declared', read.open), ...details(read.open)]
     return [differ(name, 'declared', 'not declared'), ...details('the schema does not declare it')]
   }
-  if ('opaque' in actual) return [existence(name), ...details(actual.opaque)]
+  if ('opaque' in actual) return [existenceMatch(name, 'declared'), ...details(actual.opaque)]
   const shape = shapeOf(actual.output)
   const required = actual.required
   return [
-    existence(name),
+    existenceMatch(name, 'declared'),
     actual.date ? dateType(`${name} type`, field.type) : typeProperty(`${name} type`, field.type, shape),
     typeof required === 'object'
       ? unknown(`${name} required`, String(field.required), required.unknown)
       : compareBoolean(`${name} required`, field.required, required, required ? 'must be sent' : 'may be omitted or sent as null'),
     ...rules.map(({ property, rule }) => (actual.rulesUnread ? unknown(property, rule, actual.rulesUnread) : ruleProperty(property, rule, field.type, shape))),
   ]
-}
-
-/** A key's existence says nothing of the planned shape, so the verification overlay does not count it as a match. */
-function existence(property: string): PlanPropertyStatus {
-  return { ...match(property, 'declared'), existence: true }
 }
 
 /** A `Date` is neither the string the walker renders it as nor a calendar date without a time. */
@@ -188,7 +179,7 @@ function resourceField(field: PlanResourceField, read: PlanAppResourcePayload['p
     if (read.open) return both(read.open)
     return [differ(name, 'declared', 'not declared'), unknown(`${name} type`, field.type, 'the payload type does not declare it')]
   }
-  return [existence(name), payloadType(`${name} type`, field.type, member)]
+  return [existenceMatch(name, 'declared'), payloadType(`${name} type`, field.type, member)]
 }
 
 const PRIMITIVE_TYPES = new Set(['string', 'number', 'boolean', 'bigint', 'null'])

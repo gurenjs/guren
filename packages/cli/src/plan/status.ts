@@ -11,15 +11,18 @@ import type { SchemaColumnDefault, SchemaConstraint } from '../schema-parser'
 import type { RuntimeSchemaColumn, SourcedSchemaTable } from '../schema-runtime'
 import type {
   PlanAppActionDetail,
+  PlanAppClassDetail,
   PlanAppDetail,
   PlanAppMount,
+  PlanAppPolicyDetail,
   PlanAppRouteDetail,
-  PlanAppSideEffectKind,
+  PlanAppSideEffectDetail,
   PlanAppValidatorDetail,
 } from './app-detail'
 import { isUnreadable, scopeName, type PlanAppNames, type PlanAppState, type PlanAppUnreadable } from './app-state'
 import { sameReading } from './approvals'
 import { resourceFieldProperties, validatorFieldProperties } from './field-status'
+import { differ, existenceMatch, match, unknown, type PlanPropertyStatus, type PlanPropertyVerdict } from './property-status'
 import {
   listPlanElementEntries,
   type PlanAction,
@@ -29,8 +32,10 @@ import {
   type PlanDraft,
   type PlanElementSection,
   type PlanModel,
+  type PlanPolicy,
   type PlanResource,
   type PlanRoute,
+  type PlanSideEffect,
   type PlanView,
 } from './schema'
 
@@ -41,19 +46,7 @@ export type PlanStatusState = Exclude<PlanElementState, 'verified' | 'waived'>
 
 export const PLAN_ELEMENT_STATES = ['planned', 'present', 'wired', 'verified', 'drifted', 'unjudged', 'blocked', 'waived'] as const satisfies readonly PlanElementState[]
 
-export type PlanPropertyVerdict = 'match' | 'differ' | 'unknown'
-
-export interface PlanPropertyStatus {
-  property: string
-  verdict: PlanPropertyVerdict
-  planned?: string
-  /** What the reader found, on `match` and `differ`. */
-  actual?: string
-  /** Why the property could not be compared, on `unknown`. */
-  reason?: string
-  /** A match on a key's existence alone, which the verification overlay does not count as evidence of the planned shape. */
-  existence?: true
-}
+export type { PlanPropertyStatus, PlanPropertyVerdict } from './property-status'
 
 /**
  * How one planned property of an `alter` read when the plan was approved (RFC 0030 §6), kept
@@ -157,10 +150,6 @@ export function awaitsVerification(element: PlanElementStatus<PlanElementState>)
   if (element.change === 'existing') return false
   return element.state === 'unjudged' || element.state === element.completesAt
 }
-
-const match = (property: string, planned: string, actual = planned): PlanPropertyStatus => ({ property, verdict: 'match', planned, actual })
-const differ = (property: string, planned: string, actual: string): PlanPropertyStatus => ({ property, verdict: 'differ', planned, actual })
-const unknown = (property: string, planned: string, reason: string): PlanPropertyStatus => ({ property, verdict: 'unknown', planned, reason })
 
 function compare(property: string, planned: string, actual: string | undefined, whyUnknown: string): PlanPropertyStatus {
   if (actual === undefined) return unknown(property, planned, whyUnknown)
@@ -339,13 +328,18 @@ function existsInScope<T extends { module: string | null }>(
   return entries.some((entry) => matches(entry) && entry.module === (declared ?? null)) ? 'yes' : 'no'
 }
 
+/** The discovered class matching a name in the plan's app root. */
+function findClass<T extends { className: string; module: string | null }>(classes: ReadonlyArray<T> | undefined, name: string, module: string | undefined): T | undefined {
+  return classes?.find((entry) => entry.className === name && entry.module === (module ?? null))
+}
+
 /** The file of the discovered class matching a name in the plan's app root, as a list for `files`. */
 function classFiles(
   classes: ReadonlyArray<{ className: string; module: string | null; file: string }> | undefined,
   name: string,
   module: string | undefined,
 ): string[] {
-  const found = classes?.find((entry) => entry.className === name && entry.module === (module ?? null))
+  const found = findClass(classes, name, module)
   return found ? [found.file] : []
 }
 
@@ -432,7 +426,7 @@ function judgeWith(plan: PlanDraft, app: PlanAppState, credit: AlterCredit): Pla
     ...plan.routes.map((route) => context.route(route)),
     ...plan.views.map((view) => context.view(view)),
     ...plan.resources.map((resource) => context.resource(resource)),
-    ...plan.policies.map((policy) => context.named('policies', policy, app.policies, NOUNS.policies, policy.abilities.length > 0 ? ['abilities'] : [])),
+    ...plan.policies.map((policy) => context.policy(policy)),
     ...plan.sideEffects.map((effect) => context.sideEffect(effect)),
     ...plan.commands.map((command): PlanElementStatus =>
       conclude({ id: command.id, section: 'commands', change: { kind: 'add' }, label: command.command, exists: 'no', unjudged: 'Nothing reads whether a command has been run.' }),
@@ -541,16 +535,22 @@ class StatusContext {
     return this.detail ? this.detail[key] : NO_DETAIL
   }
 
-  named(
+  /**
+   * An element a discovered class satisfies: found by name in the plan's app root, fingerprinted
+   * by the class's file. `properties` and `mount` are asked of the class found, as `conclude()` asks.
+   */
+  private named<T extends PlanAppClassDetail>(
     section: PlanElementSection,
     element: { id: string; change: PlanChange; name: string; module?: string },
     names: PlanAppNames,
     noun: PlanNoun,
-    unread: string[],
+    classes: T[] | undefined,
+    judge: { properties?: (found: T | undefined) => PlanPropertyStatus[]; mount?: (found: T) => PlanAppMount },
   ): PlanElementStatus {
-    const classes = section === 'resources' ? this.detail?.resources : this.detail?.policies
+    const { properties, mount } = judge
     const find = (name: string): Existence =>
       existsInScope(names, name, noun, element.module, classes, (entry) => entry.className === name)
+    const found = (): T | undefined => findClass(classes, element.name, element.module)
     return this.conclude({
       id: element.id,
       section,
@@ -558,30 +558,20 @@ class StatusContext {
       label: element.name,
       exists: find(element.name),
       previous: previousOf(element.change, find),
-      properties: () => unread.map((property) => unknown(property, 'as planned', `nothing reads a ${noun.singular}'s ${property}`)),
+      properties: properties && (() => properties(found())),
+      mount: mount && (() => mount(found()!)),
       files: () => classFiles(classes, element.name, element.module),
     })
   }
 
-  /** A resource is found as `named()` finds one, and its fields are read off the payload `guren codegen` reads. */
+  /** A resource's fields are read off the payload `guren codegen` reads. */
   resource(resource: PlanResource): PlanElementStatus {
-    const classes = this.detail?.resources
-    const find = (name: string): Existence =>
-      existsInScope(this.app.resources, name, NOUNS.resources, resource.module, classes, (entry) => entry.className === name)
     const payloads = this.detail?.resourcePayloads ?? NO_DETAIL
     const payload = isUnreadable(payloads)
       ? { unreadable: `the resources could not be read for their payload (${payloads.unreadable})` }
-      : (payloads.find((candidate) => candidate.className === resource.name && candidate.module === (resource.module ?? null))?.payload
-        ?? { unreadable: 'guren codegen does not discover the class as a resource' })
-    return this.conclude({
-      id: resource.id,
-      section: 'resources',
-      change: resource.change,
-      label: resource.name,
-      exists: find(resource.name),
-      previous: previousOf(resource.change, find),
+      : (findClass(payloads, resource.name, resource.module)?.payload ?? { unreadable: 'guren codegen does not discover the class as a resource' })
+    return this.named('resources', resource, this.app.resources, NOUNS.resources, this.detail?.resources, {
       properties: () => resourceFieldProperties(resource.fields, payload),
-      files: () => classFiles(classes, resource.name, resource.module),
     })
   }
 
@@ -1090,20 +1080,58 @@ class StatusContext {
     return mounts.includes('mounted') ? 'mounted' : { unconfirmed: `${returning[0]!.key} returns it, and ${(mounts[0] as { unconfirmed: string }).unconfirmed}` }
   }
 
-  sideEffect(effect: PlanDraft['sideEffects'][number]): PlanElementStatus {
-    const base = { id: effect.id, section: 'sideEffects' as const, change: effect.change, label: effect.name }
-    const readable: ReadonlyArray<string> = ['job', 'event', 'listener'] satisfies PlanAppSideEffectKind[]
-    if (!readable.includes(effect.kind)) return this.conclude({ ...base, exists: 'no', unjudged: `Nothing discovers a ${effect.kind} class.` })
-    const classes = this.detail?.sideEffects[effect.kind as PlanAppSideEffectKind]
-    const names: PlanAppNames = classes ? classes.map((entry) => ({ name: entry.className, module: entry.module })) : NO_DETAIL
-    const noun = { plural: `${effect.kind} classes`, singular: effect.kind }
-    const find = (name: string): Existence =>
-      existsInScope(names, name, noun, effect.module, classes, (entry) => entry.className === name)
-    return this.conclude({
-      ...base,
-      exists: find(effect.name),
-      previous: previousOf(effect.change, find),
-      files: () => classFiles(classes, effect.name, effect.module),
+  policy(policy: PlanPolicy): PlanElementStatus {
+    return this.named('policies', policy, this.app.policies, NOUNS.policies, this.detail?.policies, {
+      properties: (found) => this.abilityProperties(policy, found),
     })
   }
+
+  /** An ability is a member by name; its `rule` is prose, which no reader compares. */
+  private abilityProperties(policy: PlanPolicy, found: PlanAppPolicyDetail | undefined): PlanPropertyStatus[] {
+    const read = found?.abilities ?? { unreadable: "nothing read the policy's abilities" }
+    return policy.abilities.flatMap(({ name, rule }): PlanPropertyStatus[] => {
+      const property = `ability ${name}`
+      const ruleUnread = unknown(`${property} rule`, rule, 'a rule is prose, and nothing reads what an ability method decides')
+      if ('unreadable' in read) return [unknown(property, 'declared', `the policy's abilities could not be read (${read.unreadable})`), ruleUnread]
+      if (read.exposes && !read.exposes.includes(name)) return [differ(property, 'declared', `definePolicy() exposes only ${read.exposes.join(', ')}`), ruleUnread]
+      // `make:policy` writes the standard names into every policy, so a name shows nothing of the rule.
+      if (read.declared.includes(name)) return [existenceMatch(property, 'declared'), ruleUnread]
+      if (read.fields.includes(name)) return [unknown(property, 'declared', 'it is a getter, or a field whose value is not a function literal'), ruleUnread]
+      if (read.open) return [unknown(property, 'declared', `the class may declare it elsewhere: ${read.open}`), ruleUnread]
+      return [differ(property, 'declared', 'not declared'), ruleUnread]
+    })
+  }
+
+  sideEffect(effect: PlanSideEffect): PlanElementStatus {
+    const classes = this.detail?.sideEffects[effect.kind]
+    const names: PlanAppNames = classes ? classes.map((entry) => ({ name: entry.className, module: entry.module })) : NO_DETAIL
+    return this.named('sideEffects', effect, names, { plural: `${effect.kind} classes`, singular: effect.kind }, classes, {
+      mount: (found) => this.sideEffectMount(effect, found),
+    })
+  }
+
+  /**
+   * Wired when the application's source uses the class: a dispatch, a listener registration, a
+   * send. A mention (an import, a type, `registerJob()`, a construction nothing sends) is not one.
+   * The site's own reach is not followed: a dispatch in an action no route mounts still counts.
+   */
+  private sideEffectMount(effect: PlanSideEffect, found: PlanAppSideEffectDetail): PlanAppMount {
+    if (found.usedIn.length > 0) return 'mounted'
+    const [verb, gerund] = SIDE_EFFECT_USES[effect.kind]
+    const unread = this.detail?.sideEffectUsesUnread?.[effect.kind]
+    if (unread) return { unconfirmed: `nothing the scan read ${verb} it, and ${unread}` }
+    const unproven = found.unprovenIn[0]
+    if (unproven) return { unconfirmed: `${unproven} refers to it in an on() or once() handler whose event is not an event class, which may or may not register it` }
+    const mention = found.mentionedIn[0]
+    return { unconfirmed: `nothing in the application's source ${verb} it${mention ? ` (${mention} names it without ${gerund} it)` : ''}` }
+  }
+}
+
+/** How a note says what a side effect's use is, per kind. */
+const SIDE_EFFECT_USES: Record<PlanSideEffect['kind'], [verb: string, gerund: string]> = {
+  job: ['dispatches', 'dispatching'],
+  event: ['emits', 'emitting'],
+  listener: ['registers', 'registering'],
+  mail: ['sends', 'sending'],
+  notification: ['sends', 'sending'],
 }

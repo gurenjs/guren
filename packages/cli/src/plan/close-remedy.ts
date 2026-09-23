@@ -7,13 +7,13 @@
 import type { Plan, PlanDraft } from './schema'
 import { awaitsVerification, type PlanElementState, type PlanElementStatus } from './status'
 import { listPlanSteps, type PlanTaskDerivation } from './tasks'
-import { behaviourReach, hasShapeMatch } from './verification'
+import { behaviourReach, restsOnReach } from './verification'
 
 interface BlockerContext {
   planArgument: string
   /** The step that verifies each element. */
   owners: Map<string, string>
-  /** The steps whose behaviours reach each element, which is what lifts one none of whose planned properties matched. */
+  /** The steps whose behaviours reach each element, which is what lifts one `restsOnReach()` holds for. */
   carriers: Map<string, string[]>
 }
 
@@ -72,7 +72,7 @@ function closeRemedy(element: PlanElementStatus<PlanElementState>, context: Bloc
     const target = element.state === 'planned' ? 'Implement it' : `Change the code until plan:status reports it ${element.completesAt}`
     return `${target}, then run ${verify(owner)}${orWaive}`
   }
-  const unmatched = element.change !== 'drop' && !hasShapeMatch(element)
+  const unmatched = restsOnReach(element)
   const needsNoFiles = element.change === 'drop' || element.state === 'unjudged'
   const carriers = context.carriers.get(element.id) ?? []
   if (unmatched && carriers.length === 0) {
