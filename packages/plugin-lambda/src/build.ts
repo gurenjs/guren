@@ -267,8 +267,8 @@ async function bundleHandler(
     // `identifiers: false`: class names are runtime identity here — the job
     // registry keys on `JobClass.name` and serializes it into every queued
     // message, and notifications persist theirs as `type`. Not
-    // `keepNames`/`--keep-names`: as of Bun 1.3.14 both are accepted and
-    // silently leave class names mangled.
+    // `keepNames`/`--keep-names`: on Bun 1.3.14 and 1.4.2 both are accepted
+    // and silently leave class names mangled.
     minify: { whitespace: true, syntax: true, identifiers: false },
     define: {
       // `bun build` inlines `process.env.NODE_ENV` at bundle time (defaulting
