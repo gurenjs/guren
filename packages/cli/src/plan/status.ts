@@ -1017,7 +1017,8 @@ class StatusContext {
   private routeFiles(route: PlanAppRouteDetail): string[] {
     const files = (this.detail?.routeFiles ?? []).map((entry) => entry.file)
     if (route.module === null) {
-      return [...new Set([...(route.file === undefined ? [] : [route.file]), ...files.filter((file) => file.startsWith(`${ROUTES_DIR}/`))])]
+      const project = files.filter((file) => file.startsWith(`${ROUTES_DIR}/`))
+      return route.file === undefined ? project : [...new Set([route.file, ...project])]
     }
     const prefix = `modules/${route.module}/`
     return files.filter((file) => file.startsWith(prefix))

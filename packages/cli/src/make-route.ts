@@ -1,8 +1,7 @@
 import type { WriterOptions } from './utils'
 import { kebabCase, scaffoldFile } from './utils'
+import { ROUTES_DIR } from './discovery'
 import { singularize } from './inflect'
-
-const ROUTES_DIR = 'routes'
 
 function routeTemplate(prefix: string, controller: string): string {
   return `import { Router } from '@guren/core'

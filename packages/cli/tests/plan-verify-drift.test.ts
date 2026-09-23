@@ -7,7 +7,7 @@ import { parsePlanDocument } from '../src/plan-render'
 import type { PlanStatusReport } from '../src/plan-status'
 import type { PlanVerifyReport } from '../src/plan-verify'
 import { planDigest, writePlanStepRecord, type PlanStepRecord } from '../src/plan/state'
-import { hashFiles, recordDrift, sha256 } from '../src/plan/verification'
+import { sha256 } from '../src/plan/verification'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { CLI_BIN_PATH, createTempRoot, writeWorkspaceFiles } from './helpers'
 import { approvePlanFile, createPlanVerifyApp, DRIZZLE_KIT_STUB_FILES, loadApprovedCommentsPlan, PLAN_VERIFY_APP_FILES as APP, waiveForTest } from './plan-fixture'
@@ -144,18 +144,25 @@ function outcome(report: PlanVerifyReport, step: string): string | undefined {
   return report.steps.find((entry) => entry.stepId === step)?.record.outcome
 }
 
-/** The comment task's `http` step verified with what the deletion story will write waived, then the story's work written and committed. */
-async function afterDeletionIsWritten(name: string, store: 'store' | 'destroy'): Promise<string> {
+/** The split plan approved on `files`, and the comment task's `http` step verified with what the deletion story will write waived. */
+async function withCommentsVerified(name: string, files: Record<string, string> = {}): Promise<string> {
   const app = await createPlanVerifyApp(join(ROOT, name), {
     ...APP,
     ...DRIZZLE_KIT_STUB_FILES,
     '.gitignore': 'node_modules\n',
     'tests/comments.test.ts': COMMENT_TESTS,
     'comments.plan.json': JSON.stringify(splitPlan()),
+    ...files,
   })
   await approvePlanFile(join(app, 'comments.plan.json'))
   await waiveForTest(join(app, 'comments.plan.json'), ['action.comments.destroy', 'resource.comment', 'policy.comment'])
   expect(outcome(verify(app, COMMENTS_HTTP), COMMENTS_HTTP)).toBe('verified')
+  return app
+}
+
+/** The comment task's `http` step verified, then the deletion story's work written and committed. */
+async function afterDeletionIsWritten(name: string, store: 'store' | 'destroy'): Promise<string> {
+  const app = await withCommentsVerified(name)
   // Every other step done before, on nothing fingerprinted, so plan:next reads only the two under test.
   for (const id of planStepIds(derivePlanTasks(parsePlanDocument(splitPlan()))).filter((step) => step !== COMMENTS_HTTP && step !== DELETION_HTTP)) {
     await writePlanStepRecord(app, 'comments', id, doneRecord())
@@ -170,11 +177,11 @@ async function afterDeletionIsWritten(name: string, store: 'store' | 'destroy'):
   return app
 }
 
-describe('plan:verify re-checks the steps a later step drifted', () => {
-  beforeAll(async () => {
-    ROOT = await createTempRoot('guren-plan-verify-drift-')
-  })
+beforeAll(async () => {
+  ROOT = await createTempRoot('guren-plan-verify-drift-')
+})
 
+describe('plan:verify re-checks the steps a later step drifted', () => {
   test('should re-verify an earlier step whose files the verified step wrote into, so plan:next moves past it', async () => {
     const app = await afterDeletionIsWritten('refreshed', 'store')
 
@@ -358,18 +365,11 @@ export function registerCommentRoutes(router: Router): void {
 
 describe('plan:verify fingerprints every routes file an entry route may be declared in', () => {
   test('should turn a verified route drifted when the routes file its entry registrar calls changes', async () => {
-    const app = await createPlanVerifyApp(join(await createTempRoot('guren-plan-verify-split-routes-'), 'app'), {
-      ...APP,
-      ...DRIZZLE_KIT_STUB_FILES,
+    const app = await withCommentsVerified('split-routes', {
       ...SPLIT_ROUTES,
-      '.gitignore': 'node_modules\n',
       'tests/comments.test.ts': COMMENT_TESTS.replace('../routes/web.ts', '../routes/comments.ts'),
-      'comments.plan.json': JSON.stringify(splitPlan()),
     })
     const planPath = join(app, 'comments.plan.json')
-    await approvePlanFile(planPath)
-    await waiveForTest(planPath, ['action.comments.destroy', 'resource.comment', 'policy.comment'])
-    expect(outcome(verify(app, COMMENTS_HTTP), COMMENTS_HTTP)).toBe('verified')
     const state = JSON.parse(await readFile(join(app, '.guren/plans/comments.state.json'), 'utf8')) as { steps: Record<string, PlanStepRecord> }
     const record = state.steps[COMMENTS_HTTP]!
     expect(Object.keys(record.fingerprint.files)).toEqual(expect.arrayContaining(['routes/web.ts', 'routes/comments.ts']))
@@ -387,8 +387,6 @@ describe('plan:verify fingerprints every routes file an entry route may be decla
     const store = (JSON.parse(status.stdout.toString()) as PlanStatusReport).elements.find((element) => element.id === 'route.comments.store')!
     expect(store.state).toBe('drifted')
     expect(store.notes.join('\n')).toContain('changed since: routes/comments.ts')
-    const hashes = await hashFiles(app, Object.keys(record.fingerprint.files))
-    expect(recordDrift(record, record.planDigest, hashes, new Set(record.waived))).toEqual(['routes/comments.ts'])
     const next = await planNextFile(planPath, { appRoot: app })
     expect(next.step?.id).toBe(COMMENTS_HTTP)
     expect(next.step?.drifted).toEqual(['routes/comments.ts'])
