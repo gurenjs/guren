@@ -425,6 +425,7 @@ OAuth 専用のサインアップなど、パスワードなしでアカウン�
 
 ```ts
 import { pages } from '@/.guren/pages.gen'
+import type { UserRecord } from '@/app/Models/User'
 
 export default class DashboardController extends Controller {
   async index() {
@@ -433,7 +434,7 @@ export default class DashboardController extends Controller {
   }
 
   async store() {
-    const user = await this.auth.userOrFail()  // 未認証なら 401 をスロー
+    const user = await this.auth.userOrFail<UserRecord>()  // 未認証なら 401 をスロー
     // user は non-null が保証される
     await Post.create({ authorId: user.id, ...data })
     return this.redirect('/posts')
