@@ -23,6 +23,7 @@ import { discoverRoutePathFiles } from './route-path-check'
 import { appDependsOn, fileExists } from './discovery'
 import { PLUGIN_AI_PACKAGE, renderPluginAiTypes } from './agents-types-plugin-ai'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
+import type { RouteDefinition as CodegenRouteDefinition } from './routes-types'
 import { escapeSingleQuoted, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 
 export const AGENTS_MANIFEST_FILE = '.guren/agents.gen.ts'
@@ -127,14 +128,20 @@ export async function planAgentManifest(
 }
 
 export async function generateAgentTypes(
-  definitions: RouteDefinition[],
+  definitions: Array<RouteDefinition & Pick<CodegenRouteDefinition, 'introspectedAgentTool'>>,
   options: GenerateAgentTypesOptions = {},
 ): Promise<{ outputPath: string; tools: DerivedAgentTool[]; warnings: string[] }> {
   const appRoot = resolveAppRoot(options)
   const outputFile = resolve(appRoot, options.outputFile ?? AGENTS_MANIFEST_FILE)
 
   // Returned rather than logged, same contract as `generateDataTypes`.
-  const { tools, warnings } = deriveAgentTools(definitions)
+  const { tools: derived, warnings } = deriveAgentTools(definitions)
+  // `guren codegen --introspect`: a route with no Zod here brings the introspected app's tool.
+  const derivedNames = new Set(derived.map((tool) => tool.toolName))
+  const tools = [
+    ...derived,
+    ...definitions.flatMap(({ introspectedAgentTool: tool }) => (tool && !derivedNames.has(tool.toolName) ? [tool] : [])),
+  ]
 
   if (tools.length === 0) {
     await rm(outputFile, { force: true })

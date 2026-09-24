@@ -1,6 +1,8 @@
 import { resolve } from 'node:path'
 import type { AgentRouteMetadata, RouteDefinition } from '@guren/server'
+import { loadAppRouteDefinitions } from './app-routes'
 import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
+import type { IntrospectSource } from './manifest-section'
 import { schemaToTypeString } from './schema-type-extractor'
 
 /**
@@ -122,18 +124,21 @@ export function escapeMarkdownTableCell(value: string): string {
  * (missing deps, mid-scaffold app) so context commands degrade to a route-less view.
  * Pass `loadErrors` unless there is nowhere to render it: a failed load and an app
  * with no routes produce the same empty list. A legitimately absent routes file
- * carries no reason — see `resolveRoutesFile()`.
+ * carries no reason — see `resolveRoutesFile()`. With `introspect`, the list is the
+ * introspected app's (RFC 0026 §5), a provider's routes included; a route the routes
+ * file does not register has no schema types, since those are rendered from its Zod.
  */
 export async function loadContextRoutes(
   cwd: string,
   routesFile?: string,
   loadErrors?: string[],
+  introspect?: IntrospectSource,
 ): Promise<ContextRoute[]> {
   const target = await resolveRoutesFile(cwd, routesFile)
   if (target.silentlyAbsent) return []
 
   try {
-    const definitions = await loadRouteDefinitions(resolve(cwd, target.path), cwd)
+    const { definitions } = await loadAppRouteDefinitions(introspect, () => loadRouteDefinitions(resolve(cwd, target.path), cwd))
     return definitions.map(routeDefinitionToContextRoute)
   } catch (error) {
     loadErrors?.push(error instanceof Error ? error.message : String(error))

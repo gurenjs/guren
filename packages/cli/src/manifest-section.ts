@@ -108,6 +108,9 @@ export function skippedRegistrars(manifest: Pick<AppManifest, 'warnings' | 'prov
   ]
 }
 
+/** Why a command given `--routes` reads that file: the manifest describes the entry's routes, which may not be the file's. */
+export const ROUTES_FLAG_NOT_INTROSPECTED = '--routes names a routes file, and the introspected app describes its entry'
+
 /** The remedy the one `introspection-unavailable` line carries, in `guren check` and `guren audit` alike. */
 export const INTROSPECTION_UNAVAILABLE_FIX = 'Run `bunx guren introspect` to see the failure, or pass --no-introspect to skip it.'
 

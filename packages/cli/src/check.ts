@@ -63,7 +63,7 @@ import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
 import { runI18nCheck } from './i18n-check'
 import { introspectApp, type Introspection } from './introspect'
-import { INTROSPECTION_UNAVAILABLE_FIX, introspectionUnavailableMessage } from './manifest-section'
+import { INTROSPECTION_UNAVAILABLE_FIX, introspectionUnavailableMessage, ROUTES_FLAG_NOT_INTROSPECTED } from './manifest-section'
 import { checkEnvExample, ENV_EXAMPLE_FILE } from './app-env'
 import { checkConfigWiring } from './config-check'
 import { runSpecCheck } from './spec-check'
@@ -419,6 +419,8 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   // The session and attachments rules (8.5-8.7) introspect once they find their config, started here for
   // the same overlap. Gated like 7.7: a run that changed no source must not execute the app.
   const wiringIntrospect = introspect && !sourceChanged ? { skipped: 'this run changed no source, so the app was not introspected' } : introspect
+  // The route rules (7.7, 7.8, 10.6) judge the manifest's routes, which describe the entry, not a file `--routes` names.
+  const routeIntrospect = wiringIntrospect && options.routesFile ? { skipped: ROUTES_FLAG_NOT_INTROSPECTED } : wiringIntrospect
   const appConfigFiles = runs('core') ? discoverAppConfigFiles(cwd) : undefined
   const sessionWiring = appConfigFiles?.then((files) => readSessionWiring(cwd, cache, files, wiringIntrospect))
   const attachmentsWiring = appConfigFiles?.then((files) => readAttachmentsWiring(cwd, cache, files, wiringIntrospect))
@@ -579,14 +581,14 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // rather than 7.5's `routesChanged`. A load failure was already reported at 5.5.
     if (graph?.definitions) {
       const definitions = graph.definitions
-      checks.push(...(await checkRouteContracts({ cwd, routesFile: routeGraphFile, definitions })))
+      checks.push(...(await checkRouteContracts({ cwd, routesFile: routeGraphFile, definitions, introspect: routeIntrospect })))
 
       // 7.8. Check the routes that declare `.agent()` metadata (RFC 0016): the
       // tool name is legal and unique, a non-read-only tool is covered by
       // authorization rather than merely authentication, and the schemas an
       // agent reads exist. Shares 7.7's gate; content-activated inside.
       checks.push(
-        ...(await checkAgentRoutes({ cwd, routesFile: routeGraphFile, definitions, cache, introspect: wiringIntrospect })),
+        ...(await checkAgentRoutes({ cwd, routesFile: routeGraphFile, definitions, cache, introspect: routeIntrospect })),
       )
     }
 
@@ -719,7 +721,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     if (!graph && !runs('core')) {
       graph = await loadRouteGraph(cwd, await routesEntryOrDefault(cwd, options.routesFile))
     }
-    checks.push(...(await checkPrototypeRoutes({ cwd, cache, definitions: graph?.definitions })))
+    checks.push(...(await checkPrototypeRoutes({ cwd, cache, definitions: graph?.definitions, introspect: routeIntrospect })))
   }
 
   // Implementation plans (RFC 0030 §8), only when asked for: judging a plan imports

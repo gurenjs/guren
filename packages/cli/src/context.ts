@@ -18,6 +18,7 @@ import { discoverDeclaredCommandFiles } from './console-check'
 import { ParseCache } from './parse-cache'
 import { parseModelFile, type ModelInfo } from './model-parser'
 import { loadContextRoutes, escapeMarkdownTableCell, type ContextRoute } from './context-route'
+import { introspectApp } from './introspect'
 import { listInertiaPageIds } from './inertia-pages'
 import { readInstalledVersion } from './plugin-manifest'
 
@@ -43,6 +44,11 @@ export interface ContextOptions {
   cwd?: string
   json?: boolean
   routesFile?: string
+  /**
+   * List the introspected app's routes (RFC 0026 §5), a provider's included. `guren context` sets it
+   * unless `--no-introspect`; `routesFile` turns it off, since the manifest describes the entry.
+   */
+  introspect?: boolean
 }
 
 /**
@@ -104,7 +110,7 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
   ] = await Promise.all([
     resolveFrameworkVersion(cwd),
     collectModels(),
-    loadContextRoutes(cwd, options.routesFile, routeLoadErrors),
+    loadContextRoutes(cwd, options.routesFile, routeLoadErrors, options.introspect && !options.routesFile ? () => introspectApp(cwd) : undefined),
     listInertiaPageIds(cwd),
     toNames(discoverControllerFiles),
     toNames(discoverResourceFiles),
