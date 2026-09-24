@@ -7,7 +7,7 @@
  */
 import type { AppManifest, RouteDefinition, RouteEntry } from '@guren/server'
 
-import { introspectedRoutes, type IntrospectionFailed, type IntrospectSource } from './manifest-section'
+import { introspectedRoutes, introspectionUnavailableMessage, type IntrospectionFailed, type IntrospectSource } from './manifest-section'
 
 type JoinableRoute = Pick<RouteDefinition, 'method' | 'path' | 'name'> & { controller?: { name: string; action: string } }
 
@@ -52,6 +52,11 @@ export function manifestMiddlewareNames(entry: Pick<RouteEntry, 'middleware'>): 
   return entry.middleware.flatMap((item) => (item.kind !== 'inline' && item.name ? [item.name] : []))
 }
 
+/** The route an agent tool was derived from, as codegen pairs a manifest tool with a definition. */
+export function agentToolRouteKey(method: string, path: string, routeName: string | undefined): string {
+  return `${method.toUpperCase()} ${path} ${routeName ?? ''}`
+}
+
 /** A manifest entry in a registered definition's shape, with no schemas: nothing in the manifest is Zod. */
 function definitionFromEntry(entry: RouteEntry): RouteDefinition {
   const { module, controller, middleware, schemas, ...rest } = entry
@@ -94,4 +99,11 @@ export async function loadIntrospectedRouteDefinitions(
     definitions: manifest.routes.map((entry, index) => joined[index] ?? definitionFromEntry(entry)),
     source: { evidence: 'manifest', manifest, unmatched },
   }
+}
+
+/** Why the routes file stood in for the introspected app, then what the command did instead. */
+export function routesFileFallbackMessage(source: Extract<IntrospectedRouteSource, { evidence: 'static' }>, instead: string): string {
+  return source.failure
+    ? introspectionUnavailableMessage(source.failure, instead)
+    : `The app was not introspected: ${source.reason ?? 'the introspection was not usable'}. ${instead}`
 }

@@ -244,8 +244,11 @@ function staticParamKeys(definition: RouteDefinition): ParamKeysResult | undefin
  * unreadable node), or a `schema-partial` note under it. The walker also drops some keys with no
  * note (`z.undefined()`), which only the Zod shows.
  */
-function manifestParamKeys(entry: RouteEntry, warnings: AppManifest['warnings']): { keys: ParamKey[] } | { short: string } {
-  const schema = entry.schemas.params!
+function manifestParamKeys(
+  entry: RouteEntry,
+  schema: NonNullable<RouteEntry['schemas']['params']>,
+  warnings: AppManifest['warnings'],
+): { keys: ParamKey[] } | { short: string } {
   if ('unreadable' in schema) return { short: schema.unreadable }
   if (schema.type !== 'object' || !schema.properties) return { short: 'the introspected app renders the params schema as something other than an object with properties' }
   const route = `${entry.method} ${entry.path}`
@@ -268,8 +271,9 @@ function manifestParams(
   warnings: AppManifest['warnings'],
   definition: RouteDefinition | undefined,
 ): { parsed?: ParamKeysResult; evidence?: CheckEvidence } {
-  if (!entry.schemas.params) return {}
-  const fromManifest = manifestParamKeys(entry, warnings)
+  const declared = entry.schemas.params
+  if (!declared) return {}
+  const fromManifest = manifestParamKeys(entry, declared, warnings)
   const fromZod = definition ? staticParamKeys(definition) : undefined
   if ('short' in fromManifest) {
     return fromZod

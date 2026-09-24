@@ -24,9 +24,14 @@ import { appDependsOn, fileExists } from './discovery'
 import { PLUGIN_AI_PACKAGE, renderPluginAiTypes } from './agents-types-plugin-ai'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
 import type { RouteDefinition as CodegenRouteDefinition } from './routes-types'
+import { agentToolRouteKey } from './app-routes'
 import { escapeSingleQuoted, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 
 export const AGENTS_MANIFEST_FILE = '.guren/agents.gen.ts'
+
+/** What `check` and `doctor` say about a manifest `planAgentManifest()` calls stale (`codegen --introspect` output is one-shot). */
+export const STALE_AGENT_MANIFEST_MESSAGE = `${AGENTS_MANIFEST_FILE} describes agent tools no route in the routes file derives, so \`guren codegen\` removes it. `
+  + `A file \`guren codegen --introspect\` wrote from routes only the app registers reads the same way: that output lasts until the next codegen without the flag.`
 
 /**
  * What the API client resolves hints against, plus `rawType`: the extracted type
@@ -137,7 +142,7 @@ export async function generateAgentTypes(
   // Returned rather than logged, same contract as `generateDataTypes`. The derivation is first-wins,
   // as at runtime, and a route with no Zod here (`codegen --introspect`) takes the introspected app's tool.
   const { tools: derived, warnings } = deriveAgentTools(definitions)
-  const routeKey = (tool: Pick<DerivedAgentTool, 'method' | 'path' | 'routeName'>) => `${tool.method} ${tool.path} ${tool.routeName}`
+  const routeKey = (tool: DerivedAgentTool) => agentToolRouteKey(tool.method, tool.path, tool.routeName)
   const introspected = new Map(definitions.flatMap(({ introspectedAgentTool: tool }) => (tool ? [[routeKey(tool), tool] as const] : [])))
   const tools = derived.map((tool) => introspected.get(routeKey(tool)) ?? tool)
 

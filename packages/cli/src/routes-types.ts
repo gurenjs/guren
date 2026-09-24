@@ -1,9 +1,9 @@
 import { relative, resolve } from 'node:path'
 import { consola } from 'consola'
 import type { DerivedAgentTool, RouteDefinition as ServerRouteDefinition } from '@guren/server'
-import { loadIntrospectedRouteDefinitions } from './app-routes'
+import { agentToolRouteKey, loadIntrospectedRouteDefinitions, routesFileFallbackMessage } from './app-routes'
 import { introspectApp } from './introspect'
-import { introspectionUnavailableMessage, ROUTES_FLAG_NOT_INTROSPECTED } from './manifest-section'
+import { ROUTES_FLAG_NOT_INTROSPECTED } from './manifest-section'
 import { routesEntryOrDefault } from './route-registrar'
 import { PATH_PARAM_PATTERN, escapeSingleQuoted as escapeSingleQuotes, escapeTemplateLiteral as escapeTemplateSegment, extractPathParamNames, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { CONTRACT_SEGMENTS } from './contract-segments'
@@ -52,9 +52,7 @@ async function loadCodegenRoutes(routesFile: string, appRoot: string, introspect
   const introspection = entryRoutes === routesFile ? () => introspectApp(appRoot) : { skipped: ROUTES_FLAG_NOT_INTROSPECTED }
   const { definitions, source } = await loadIntrospectedRouteDefinitions(introspection, loadStatic)
   if (source.evidence === 'static') {
-    consola.warn(source.failure
-      ? introspectionUnavailableMessage(source.failure, 'Generated from the routes file instead.')
-      : `Generated from the routes file instead of the introspected app: ${source.reason ?? 'the introspection was not usable'}.`)
+    consola.warn(routesFileFallbackMessage(source, 'Generated from the routes file instead.'))
     return definitions
   }
   if (source.unmatched.length === 0) return definitions
@@ -64,11 +62,10 @@ async function loadCodegenRoutes(routesFile: string, appRoot: string, introspect
     + `${source.unmatched.map((route) => `${route.method} ${route.path}`).join(', ')}.`,
   )
   const unmatched = new Set(source.unmatched)
-  const toolKey = (method: string, path: string, name: string | undefined) => `${method.toUpperCase()} ${path} ${name ?? ''}`
-  const tools = new Map(source.manifest.agentTools.map((tool) => [toolKey(tool.method, tool.path, tool.routeName), tool]))
+  const tools = new Map(source.manifest.agentTools.map((tool) => [agentToolRouteKey(tool.method, tool.path, tool.routeName), tool]))
   return definitions.map((definition, index) => {
     if (!unmatched.has(source.manifest.routes[index]!)) return definition
-    const tool = definition.agent ? tools.get(toolKey(definition.method, definition.path, definition.name)) : undefined
+    const tool = tools.get(agentToolRouteKey(definition.method, definition.path, definition.name))
     return tool ? { ...definition, introspectedAgentTool: tool } : definition
   })
 }

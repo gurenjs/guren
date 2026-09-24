@@ -1,8 +1,8 @@
 import { resolve } from 'node:path'
 import type { AgentRouteMetadata, RouteDefinition } from '@guren/server'
-import { loadIntrospectedRouteDefinitions } from './app-routes'
+import { loadIntrospectedRouteDefinitions, routesFileFallbackMessage } from './app-routes'
 import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
-import { introspectionUnavailableMessage, type IntrospectSource } from './manifest-section'
+import type { IntrospectSource } from './manifest-section'
 import { schemaToTypeString } from './schema-type-extractor'
 
 /**
@@ -140,7 +140,7 @@ export async function loadContextRoutes(
   try {
     const { definitions, source } = await loadIntrospectedRouteDefinitions(introspect, () => loadRouteDefinitions(resolve(cwd, target.path), cwd))
     if (introspect && source.evidence === 'static') {
-      fallbackReasons?.push(source.failure ? introspectionUnavailableMessage(source.failure, 'Routes are listed from the routes file.') : `${source.reason ?? 'The app was not introspected'}.`)
+      fallbackReasons?.push(routesFileFallbackMessage(source, 'Routes are listed from the routes file.'))
     }
     return definitions.map(routeDefinitionToContextRoute)
   } catch (error) {

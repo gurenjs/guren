@@ -26,7 +26,7 @@ import {
   planPageManifest,
   type PageManifestPlan,
 } from './pages-types'
-import { AGENTS_MANIFEST_FILE, planAgentManifest, type AgentManifestPlan } from './agents-types'
+import { AGENTS_MANIFEST_FILE, planAgentManifest, STALE_AGENT_MANIFEST_MESSAGE, type AgentManifestPlan } from './agents-types'
 import { emptyActions } from './controller-methods'
 import { parseSourceFile } from './parse-cache'
 import { resolveRoutesEntry } from './route-registrar'
@@ -190,7 +190,7 @@ function createAgentManifestRule(): DoctorRule {
           key,
           AGENTS_MANIFEST_FILE,
           'warn',
-          `${AGENTS_MANIFEST_FILE} describes agent tools no route in the routes file derives, so \`guren codegen\` removes it. A file \`guren codegen --introspect\` wrote from routes only the app registers reads the same way: that output lasts until the next codegen without the flag.`,
+          STALE_AGENT_MANIFEST_MESSAGE,
           {
             fix: `Run \`guren codegen --force\` to remove ${AGENTS_MANIFEST_FILE}.`,
             manualFix: `Run \`guren codegen --force\` to remove ${AGENTS_MANIFEST_FILE}.`,

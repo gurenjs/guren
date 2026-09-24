@@ -58,7 +58,7 @@ import { reExportedSchemaModules } from './schema-binding'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { describePageManifestSuppression, PAGES_MANIFEST_FILE, planPageManifest } from './pages-types'
-import { AGENTS_MANIFEST_FILE, planAgentManifest } from './agents-types'
+import { AGENTS_MANIFEST_FILE, planAgentManifest, STALE_AGENT_MANIFEST_MESSAGE } from './agents-types'
 import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
 import { runI18nCheck } from './i18n-check'
@@ -173,7 +173,7 @@ async function checkAgentManifest(
         key,
         AGENTS_MANIFEST_FILE,
         'warn',
-        `${AGENTS_MANIFEST_FILE} describes agent tools no route in the routes file derives, so \`guren codegen\` removes it. A file \`guren codegen --introspect\` wrote from routes only the app registers reads the same way: that output lasts until the next codegen without the flag.`,
+        STALE_AGENT_MANIFEST_MESSAGE,
         `Run: ${codegen} (it removes ${AGENTS_MANIFEST_FILE})`,
       ),
       fix,
