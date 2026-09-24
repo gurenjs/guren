@@ -400,9 +400,13 @@ async function detectPrototypeRoutes(context: DoctorRuleContext): Promise<Doctor
       )
     }
   }
+  const failure = await context.introspection?.()
+  const reason = failure?.status === 'failed'
+    ? `introspection failed with ${failure.reason}: ${failure.message.split('\n')[0]!.replace(/\.$/u, '')}`
+    : introspected.status === 'static' ? introspected.reason : undefined
   const evidence: Pick<DoctorCheck, 'evidence' | 'evidenceReason'> = introspected.status === 'described'
     ? { evidence: 'manifest' }
-    : { evidence: 'static', ...(introspected.reason ? { evidenceReason: introspected.reason } : {}) }
+    : { evidence: 'static', ...(reason ? { evidenceReason: reason } : {}) }
 
   const backlog = definitions.filter((route) => route.prototype)
   if (backlog.length === 0) {

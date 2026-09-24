@@ -659,7 +659,11 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   `z.undefined()` without a note). The routes file's definition of the same
 >   route, joined on method, path, name and controller action, then decides
 >   (`static`); a route with no such definition is an unreadable warning, never
->   a pass.
+>   a pass. That last case rests on the walker's notes, so a `z.undefined()` key
+>   on a route only the app registers goes unseen; a server walker that noted
+>   the drop would close it. The join leaves a key both sides count differently
+>   unmatched, so a provider registering a route identical to one in the routes
+>   file (method, path, name and action) sends both to the manifest's reading.
 > - Evidence: a verdict that read or looked for a controller body is `static`
 >   (agent-route authorization, `readOnlyHint` honesty, the Inertia output
 >   finding, the approval-queue scan), and so are `prototype-app-wiring` and an

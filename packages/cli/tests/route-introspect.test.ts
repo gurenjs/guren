@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, symlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 
 import { generateAgentTypes } from '../src/agents-types'
+import { joinRouteDefinitions } from '../src/app-routes'
 import { runCheck, type CheckResult } from '../src/check'
 import { generateContext, renderContextMarkdown } from '../src/context'
 import { getDoctorRuleEvaluations } from '../src/doctor'
@@ -74,6 +75,7 @@ export function registerWebRoutes(router: Router): void {
   router.get('/w/any/:id', { params: withStray(z.any()) }, () => 'ok')
   router.get('/w/nullable/:id', { params: withStray(z.string()).nullable() }, () => 'ok')
   router.get('/w/undefined/:id', { params: withStray(z.undefined()) }, () => 'ok')
+  router.get('/w/query-any/:id', { params: z.object({ id: z.string() }), query: z.object({ q: z.any() }) }, () => 'ok')
 }
 `
 
@@ -158,9 +160,14 @@ describe('guren check route rules against the introspected app (RFC 0026 §5, Pa
   test('judges the routes the routes file registers the same way on both paths', () => {
     const shared = Object.keys(source).filter((key) => key in manifest)
     expect(shared.length).toBeGreaterThan(10)
-    for (const key of shared) {
-      expect({ key, status: manifest[key]!.status }).toEqual({ key, status: source[key]!.status })
+    // An app-wide summary names the provider's route too.
+    const appWide = 'prototype-pages-unreachable'
+    for (const key of shared.filter((key) => key !== appWide)) {
+      const { status, message } = manifest[key]!
+      expect({ key, status, message }).toEqual({ key, status: source[key]!.status, message: source[key]!.message })
     }
+    expect(manifest[appWide]!.message).toContain('hooks.draft, posts.show')
+    expect(source[appWide]!.message).toContain(': posts.show.')
     expect(Object.keys(source).filter((key) => !(key in manifest))).toEqual(['prototype-fixture-orphan:hooks.show'])
   })
 
@@ -173,6 +180,11 @@ describe('guren check route rules against the introspected app (RFC 0026 §5, Pa
       expect({ wrapper, key: severity(manifest, wrapper) }).toEqual({ wrapper, key: severity(source, wrapper) })
       expect(manifest[severity(manifest, wrapper)!]?.evidence).toBe('manifest')
     }
+  })
+
+  test('keeps a params schema on the manifest when only another segment renders short', () => {
+    expect(manifest['route-contract-params:GET:/w/query-any/:id']).toBeUndefined()
+    expect(manifest['route-contracts']).toBeUndefined()
   })
 
   test('falls back to the Zod for a params schema the manifest renders short', () => {
@@ -214,12 +226,38 @@ describe('guren check route rules against the introspected app (RFC 0026 §5, Pa
     const checks = await routeChecks(dir, true)
     expect(checks['route-contract-params:GET:/posts/:id']).toMatchObject({ status: 'fail', evidence: 'static' })
     expect(checks['introspection-unavailable']).toMatchObject({ status: 'warn', advisory: true })
+
+    const { evaluations } = await getDoctorRuleEvaluations({ cwd: dir, introspect: true })
+    const rule = evaluations.find(({ check }) => check.key === 'prototype-routes')?.check
+    expect(rule).toMatchObject({ status: 'fail', evidence: 'static' })
+    expect(rule?.evidenceReason).toContain('introspection failed with import')
   })
 
   test('reads the routes file for a --routes run: the manifest describes the entry', async () => {
     const checks = Object.fromEntries((await runCheck({ cwd: withProvider, introspect: true, routesFile: 'routes/web.ts' })).checks.map((result) => [result.key, result]))
     expect(checks[HOOK_KEY]).toBeUndefined()
     expect(checks['route-contract-params:GET:/posts/:id']?.message).toContain('--routes names a routes file')
+  })
+})
+
+describe('joinRouteDefinitions', () => {
+  const route = (method: string, path: string, name?: string) => ({ method, path, ...(name ? { name } : {}) })
+
+  test('pairs repeats nth to nth, whatever the method\'s case', () => {
+    const definitions = [route('GET', '/a', 'first'), route('get', '/b'), route('GET', '/b')]
+    expect(joinRouteDefinitions([route('GET', '/b'), route('get', '/a', 'first'), route('GET', '/b')], definitions))
+      .toEqual([definitions[1], definitions[0], definitions[2]])
+  })
+
+  test('matches nothing for a key the two sides count differently, and a route the routes file lacks', () => {
+    expect(joinRouteDefinitions([route('GET', '/b'), route('GET', '/b'), route('GET', '/c')], [route('GET', '/b')]))
+      .toEqual([undefined, undefined, undefined])
+  })
+
+  test('tells two routes on one path apart by controller action', () => {
+    const show = { ...route('GET', '/p'), controller: { name: 'P', action: 'show' } }
+    const index = { ...route('GET', '/p'), controller: { name: 'P', action: 'index' } }
+    expect(joinRouteDefinitions([index, show], [show, index])).toEqual([index, show])
   })
 })
 

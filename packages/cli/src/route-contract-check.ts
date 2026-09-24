@@ -51,7 +51,7 @@ function objectNode(schema: ZodSchemaLike): ZodSchemaLike | undefined {
  * Whether a request may leave this key out without the schema rejecting it. Over-reports
  * on purpose: under-reporting files a real 422 as advice. Kept apart from the JSON Schema
  * walker's `isOptional(schema, 'input')`, whose `required` the manifest path reads instead;
- * `tests/route-contract-introspect.test.ts` pins the two equal, so a fix aimed at an OpenAPI
+ * `tests/route-introspect.test.ts` pins the two equal, so a fix aimed at an OpenAPI
  * document fails there rather than silently reclassifying a finding.
  */
 function permitsOmission(schema: ZodSchemaLike): boolean {
@@ -246,8 +246,10 @@ function staticParamKeys(definition: RouteDefinition): ParamKeysResult | undefin
 function manifestParamKeys(entry: RouteEntry, warnings: AppManifest['warnings']): ParamKeysResult | undefined {
   const schema = entry.schemas.params
   if (!schema || 'unreadable' in schema || schema.type !== 'object' || !schema.properties) return undefined
-  const label = `${entry.method} ${entry.path} params`
-  if (warnings.some((warning) => warning.code === 'schema-partial' && warning.message.startsWith(label))) return undefined
+  const route = `${entry.method} ${entry.path}`
+  const partial = (warning: AppManifest['warnings'][number]) =>
+    warning.code === 'schema-partial' && warning.route === route && warning.message.startsWith(`${route} params`)
+  if (warnings.some(partial)) return undefined
   const required = new Set(schema.required ?? [])
   return { keys: Object.keys(schema.properties).map((name) => ({ name, omissible: !required.has(name) })) }
 }

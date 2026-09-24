@@ -501,6 +501,8 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
       await routeSourceClasses(cwd, introspected.manifest, resolve(cwd, routesFile), cache),
     ).filter((route) => route.agent)
     : definitions.filter((definition) => definition.agent)
+  // The routes file's agent routes may all sit in a module the app never mounts.
+  if (agentDefinitions.length === 0) return []
 
   // Skipped when every agent route is an inline handler: no body for any rule to read.
   const scan = agentDefinitions.some((definition) => definition.controller)
@@ -517,7 +519,6 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
   const push = (result: CheckResult | undefined, evidence: CheckEvidence): void => {
     if (result) tagged.push({ result, evidence })
   }
-
 
   // Reported separately because the per-route could-not-verify message blames
   // the discovery set, not a file that is there and would not open.

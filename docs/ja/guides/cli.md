@@ -326,7 +326,7 @@ provider の外のコードでは `isIntrospecting()` で同じ判定ができ�
 | `attachments-route-name:*` | そのルート名を持つ登録済みルートの数 |
 | `attachments-serve-redirect:*` | エンジンがリダイレクトで配信するディスクと、storage manager から読んだ各ディスクのドライバ |
 | `attachments-public-disk:*` | エンジンが書き込むディスク。ディスクの `root` はソースから読む |
-| `route-contract-*` | provider やプラグインが登録したものも含む、登録済みのすべてのルート。params スキーマのキーは JSON Schema の `properties` から、重さは `required` から読む。JSON Schema がスキーマを表しきれない場合(nullable なオブジェクト、`z.any()` や `z.undefined()` のキー)は、同じルートをルートファイルの Zod で判定する |
+| `route-contract-*` | provider やプラグインが登録したものも含む、登録済みのすべてのルート。params スキーマのキーは JSON Schema の `properties` から読み、fail か warn かは `required` で決まる。JSON Schema がスキーマを表しきれない場合(nullable なオブジェクト、`z.any()` や `z.undefined()` のキー)は、同じルートをルートファイルの Zod で判定する |
 | `agent-route-*` | `.agent()` を宣言したすべてのルート。コントローラはファイルと export で特定する |
 | `prototype-*` | 名前付きのすべてのルート。provider が登録するルートを指すフィクスチャのエントリは孤立扱いにならない。`createApp({ prototype })` の配線とフィクスチャ自体はソースから読む |
 
