@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { rm, writeFile } from 'node:fs/promises'
+import { rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { describeStepWork } from '../src/plan-verify'
 import type { PlanActiveStep, PlanStepRecord, PlanStepWork } from '../src/plan/state'
 import { measureStepWork, readStepStart, stepWork, type PlanStepWorkReading } from '../src/plan/work'
 import { createTempRoot, writeWorkspaceFiles } from './helpers'
+import { measured } from './plan-fixture'
 
 let ROOT: string
 
@@ -32,11 +33,6 @@ async function createRepo(name: string, files: Record<string, string> = {}): Pro
   })
   git(app, 'init', '-q')
   return { app, plan: join(app, 'comments.plan.json'), start: commit(app, 'init') }
-}
-
-function measured(reading: PlanStepWorkReading): Extract<PlanStepWorkReading, { measured: true }> {
-  if (!reading.measured) throw new Error(`not measured: ${reading.reason}`)
-  return reading
 }
 
 beforeAll(async () => {
@@ -103,6 +99,38 @@ describe('measureStepWork', () => {
 
     // A `snapshot.json` with no `migration.sql` beside it is not drizzle-kit's, so it counts.
     expect(work.files.map((file) => file.path)).toEqual(['db/migrations/20260924000000_comments/migration.sql', 'fixtures/snapshot.json'])
+  })
+
+  test('should keep a path git would quote, or one ending in a space, as the file is named, and count its lines', async () => {
+    const names = ['src/back\\slash.ts', 'src/"quoted".ts', 'src/trailing .ts', 'src/tab\there.ts']
+    const { app, plan, start } = await createRepo('odd-names', Object.fromEntries(names.map((name) => [name, 'one\n'])))
+    await Promise.all(names.map((name) => writeFile(join(app, name), 'one\ntwo\n', 'utf8')))
+    await writeWorkspaceFiles(app, Object.fromEntries(names.map((name) => [name.replace('src/', 'new/'), 'a\nb\nc\n'])))
+
+    const work = measured(await measureStepWork(app, plan, start))
+
+    const expected = [
+      ...names.map((name) => ({ path: name, added: 1, removed: 0 })),
+      ...names.map((name) => ({ path: name.replace('src/', 'new/'), added: 3, removed: 0 })),
+    ].sort((a, b) => a.path.localeCompare(b.path))
+    expect(work.files).toEqual(expected)
+  })
+
+  test('should count an untracked symlink as one line, as git does its target, and a large file without reading it whole', async () => {
+    const { app, plan, start } = await createRepo('symlink-and-large')
+    await symlink('a.ts', join(app, 'src/link.ts'))
+    // Past one stream chunk (64 KiB), with no newline at the end: the last line still counts.
+    await writeFile(join(app, 'src/large.ts'), `${'x'.repeat(99)}\n`.repeat(2000) + 'last', 'utf8')
+    // A NUL past the 8000-byte probe does not make a file binary, as it does not for git.
+    await writeFile(join(app, 'src/late-nul.ts'), `${'y'.repeat(9000)}\n\0\n`, 'utf8')
+
+    const work = measured(await measureStepWork(app, plan, start))
+
+    expect(work.files).toEqual([
+      { path: 'src/large.ts', added: 2001, removed: 0 },
+      { path: 'src/late-nul.ts', added: 2, removed: 0 },
+      { path: 'src/link.ts', added: 1, removed: 0 },
+    ])
   })
 
   test('should measure an application below the repository root in paths relative to it, and leave out work beside it', async () => {
@@ -219,10 +247,15 @@ describe('stepWork', () => {
     expect(await stepWork({ stepId: STEP, planFile: 'comments.plan.json', active: MARK, previous: record('failed', unmarked), outcome: 'failed', measure })).toMatchObject({ measured: true, settled: false })
   })
 
-  test('should record why a mark with no start, or a record verified before the field existed, carries no measurement', async () => {
+  test('should tell a mark whose HEAD git could not read from one written before marks recorded a start, and a record verified before the field existed', async () => {
     const { measure, starts } = measureFrom(RECHECK)
-    const { from: _from, ...noStart } = MARK
-    expect(await stepWork({ stepId: STEP, planFile: 'comments.plan.json', active: noStart, previous: undefined, outcome: 'failed', measure })).toEqual({
+    const { from: _from, ...oldMark } = MARK
+    expect(await stepWork({ stepId: STEP, planFile: 'comments.plan.json', active: oldMark, previous: undefined, outcome: 'failed', measure })).toEqual({
+      measured: false,
+      reason: 'plan:next marked this step before it recorded where work starts',
+      settled: false,
+    })
+    expect(await stepWork({ stepId: STEP, planFile: 'comments.plan.json', active: { ...MARK, from: null }, previous: undefined, outcome: 'failed', measure })).toEqual({
       measured: false,
       reason: 'git could not read HEAD when plan:next marked the step',
       settled: false,

@@ -2781,30 +2781,38 @@ entry, `packages/cli/src/plan/work.ts`. It is a measurement: nothing refuses
 or blocks on it.
 
 - The step starts at the commit `HEAD` names when `plan:next` first marks it,
-  kept on the mark as `from`. Marking the same step again (resumed, after a
-  stall or an approval stall) keeps it. `plan:next` refuses a dirty tree for
-  a new step, so that commit holds none of the step's work.
-- A run of the marked step measures `git diff --numstat --no-renames` from
+  kept on the mark as `from` (`null` where git could not read `HEAD`).
+  Marking the same step again (resumed, after a stall or an approval stall)
+  keeps it. `plan:next` refuses a dirty tree for a new step, so that commit
+  holds none of the step's work.
+- A run of the marked step measures `git diff --numstat -z --no-renames` from
   there to the working tree, plus untracked files, under the application
   root. Several commits and uncommitted work count alike; a rename counts as
-  a removed file and an added one.
+  a removed file and an added one, and an untracked symlink as one line, as
+  git counts a tracked one.
 - The first run that verifies the step settles the measurement. Every later
   record carries it: a drift re-check under a fresh mark, a failed re-check
   and its fix, the `Stop` hook, `--step` again. Work after that run is not
-  counted, and neither is work a revision sends the step back for: the
-  record of another plan digest still carries the settled measurement.
+  counted.
+- A revision that sends a settled step back as new work does not re-measure
+  it, so a step the revision widened is undercounted. That is deliberate:
+  the datum the step width is tuned from is the work of implementing the
+  step as first planned, and a second measurement would mix a revision's
+  delta into it.
 - Excluded: the plan, its approvals, decision log and rendered page;
   `.guren/`, which holds codegen output and this state; lockfiles; and
   drizzle-kit snapshots. A migration's SQL counts.
 - Not measured, with the reason and never a zero: a step no mark names (a
-  whole-plan run, `--step` while another step is marked), a mark with no
-  start (no git, no commit), and a start that is not in the repository or no
-  longer an ancestor of `HEAD`. The baseline's `rev` is no fallback for a
+  whole-plan run, `--step` while another step is marked), a mark whose
+  `HEAD` git could not read (no git, no commit), a mark written before marks
+  carried `from`, and a start that is not in the repository or no longer an
+  ancestor of `HEAD`. The baseline's `rev` is no fallback for a
   first step: the plan and approval commits land after it.
 - It stays in the state file, as §7 says. That file is per machine, which
   suits a default retuned by whoever runs the loop, and `from` names the
   commit the numbers can be recomputed from. `plan:close` copies nothing of
-  it into the committed docs.
+  it into the committed docs. An older CLI that rewrites the state file
+  drops `from` and `work`, since its schema does not know them.
 - Reported as a `work:` line per step by `plan:verify` and the `Stop` hook,
   in the record under `--json`, and by step id under `verification.work` in
   `plan:status --json`.

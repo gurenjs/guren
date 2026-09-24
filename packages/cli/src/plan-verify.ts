@@ -130,6 +130,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   const steps: PlanStepVerification[] = []
   const reverified: string[] = []
   const recheckPending: string[] = []
+  const planFile = toPosixRelative(root, path)
   /**
    * Runs one step and records it unless it stays pending; true where it ran commands and did not
    * verify. Commands are shared across one run's steps, so a drifted step re-checked beside such a
@@ -143,7 +144,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
     const ran = statically ? await verifier.recheckTests(stepId, record) : await verifier.verify(stepId)
     const work = await stepWork({
       stepId,
-      planFile: toPosixRelative(root, path),
+      planFile,
       active: before.state?.active,
       previous: record,
       outcome: ran.record.outcome,

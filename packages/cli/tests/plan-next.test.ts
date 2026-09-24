@@ -29,9 +29,10 @@ const NOW = () => new Date('2026-09-21T10:00:00.000Z')
 
 let ROOT: string
 
-function git(dir: string, ...args: string[]): void {
+function git(dir: string, ...args: string[]): string {
   const result = Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
   if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr.toString()}`)
+  return result.stdout.toString().trim()
 }
 
 /** A record that stands: verified against this plan at the hash `lib.ts` has in the app. */
@@ -86,7 +87,8 @@ describe('plan:next', () => {
     expect(report.step).toMatchObject({ id: SCAFFOLD, kind: 'scaffold', taskId: 'task/entity/model.comment', task: { kind: 'entity', name: 'Comment' }, verify: ['codegen', 'typecheck'], elements: [] })
     expect(report.step!.generates).toContain('model.comment')
     expect(report.stateFile).toBe('.guren/plans/comments.state.json')
-    expect((await readState(app)).active).toEqual({ plan: 'comments.plan.json', step: SCAFFOLD, startedAt: '2026-09-21T10:00:00.000Z', continuations: 0 })
+    // Outside a repository git reads no HEAD: `null`, which a mark from before the field (no key) is told apart from.
+    expect((await readState(app)).active).toEqual({ plan: 'comments.plan.json', step: SCAFFOLD, startedAt: '2026-09-21T10:00:00.000Z', continuations: 0, from: null })
     // The mark's `.gitignore` ignores itself, so a plan loop leaves no untracked file behind; one that does not gains the line.
     expect(await readFile(join(app, '.guren/plans/.gitignore'), 'utf8')).toBe('*.state.json\n.gitignore\n')
     await writeFile(join(app, '.guren/plans/.gitignore'), '*.state.json\nnotes/', 'utf8')
@@ -307,8 +309,7 @@ describe('plan:next', () => {
     git(app, 'init', '-q')
     git(app, 'add', '-A')
     git(app, 'commit', '-q', '-m', 'init')
-    const head = (): string => Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd: app, stdout: 'pipe' }).stdout.toString().trim()
-    const start = head()
+    const start = git(app, 'rev-parse', 'HEAD')
 
     await planNextFile(plan, { appRoot: app, now: NOW })
     expect((await readState(app)).active).toEqual({ plan: 'comments.plan.json', step: SCAFFOLD, startedAt: '2026-09-21T10:00:00.000Z', continuations: 0, from: start })
@@ -325,8 +326,8 @@ describe('plan:next', () => {
 
     await writeState(app, { steps: { [SCAFFOLD]: await holding(app) }, active: (await readState(app)).active })
     expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.id).toBe(TESTS)
-    expect((await readState(app)).active!.from).toBe(head())
-    expect(head()).not.toBe(start)
+    expect((await readState(app)).active!.from).toBe(git(app, 'rev-parse', 'HEAD'))
+    expect(git(app, 'rev-parse', 'HEAD')).not.toBe(start)
   })
 
   test('should keep the mark of a step it returns again, continuations included', async () => {

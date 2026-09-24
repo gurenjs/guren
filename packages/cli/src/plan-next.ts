@@ -320,13 +320,13 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   // A stall is what the last session ended on: reported once, then the hook is asked again.
   const resumed = previous && previous.step === step.id && !previous.stalled && !answered ? previous : undefined
   // The step's work is measured from here (plan/work.ts), so marking the same step again keeps where it started.
-  const from = previous?.step === step.id ? previous.from : await readStepStart(root)
+  const from = previous?.step === step.id ? previous.from : ((await readStepStart(realRoot)) ?? null)
   const active: PlanActiveStep = resumed ?? {
     plan: toPosixRelative(root, path),
     step: step.id,
     startedAt: (options.now ?? (() => new Date()))().toISOString(),
     continuations: 0,
-    ...(from ? { from } : {}),
+    ...(from !== undefined ? { from } : {}),
   }
   await writePlanActiveStep(root, slug, active)
   const unconfirmed = judged.contexts.get(step.id)?.unconfirmed ?? []

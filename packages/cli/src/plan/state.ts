@@ -47,7 +47,7 @@ const PlanFingerprintSchema = z.object({
   }),
 })
 
-const PlanWorkFileSchema = z.object({
+const PlanStepWorkFileSchema = z.object({
   /** App-relative, POSIX separators. */
   path: z.string(),
   /** `null` for a binary file, which `git diff --numstat` prints as `-`. */
@@ -64,7 +64,7 @@ export const PlanStepWorkSchema = z.discriminatedUnion('measured', [
   z.object({
     measured: z.literal(true),
     from: z.string(),
-    files: z.array(PlanWorkFileSchema),
+    files: z.array(PlanStepWorkFileSchema),
     /** Summed over the text files. */
     added: z.number().int().nonnegative(),
     removed: z.number().int().nonnegative(),
@@ -112,8 +112,11 @@ const PlanActiveStepSchema = z.object({
   plan: z.string(),
   step: z.string(),
   startedAt: z.string(),
-  /** The commit HEAD named when the step was first marked, kept when it is marked again; absent where git could not say. */
-  from: z.string().optional(),
+  /**
+   * The commit HEAD named when the step was first marked, kept when it is marked again. `null`
+   * where git could not read HEAD; absent on a mark written before the field existed.
+   */
+  from: z.string().nullable().optional(),
   /** Stops the hook has blocked on this step since it was marked. */
   continuations: z.number().int().nonnegative(),
   /** A digest of the record the last continuation was blocked on; the same one again is no progress. */
@@ -131,6 +134,7 @@ export type PlanCommandRecord = z.infer<typeof PlanCommandRecordSchema>
 export type PlanFingerprint = z.infer<typeof PlanFingerprintSchema>
 export type PlanStepRecord = z.infer<typeof PlanStepRecordSchema>
 export type PlanStepWork = z.infer<typeof PlanStepWorkSchema>
+export type PlanStepWorkFile = z.infer<typeof PlanStepWorkFileSchema>
 export type PlanStall = z.infer<typeof PlanStallSchema>
 export type PlanActiveStep = z.infer<typeof PlanActiveStepSchema>
 export type PlanState = z.infer<typeof PlanStateSchema>

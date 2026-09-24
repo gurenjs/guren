@@ -10,7 +10,7 @@ import { planDigest, writePlanStepRecord, type PlanStepRecord } from '../src/pla
 import { sha256 } from '../src/plan/verification'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { CLI_BIN_PATH, createTempRoot, writeWorkspaceFiles } from './helpers'
-import { approvePlanFile, createPlanVerifyApp, DRIZZLE_KIT_STUB_FILES, loadApprovedCommentsPlan, PLAN_VERIFY_APP_FILES as APP, waiveForTest } from './plan-fixture'
+import { approvePlanFile, createPlanVerifyApp, DRIZZLE_KIT_STUB_FILES, loadApprovedCommentsPlan, measured, PLAN_VERIFY_APP_FILES as APP, waiveForTest } from './plan-fixture'
 
 let ROOT: string
 
@@ -102,9 +102,10 @@ export function registerWebRoutes(router: Router): void {
 `
 }
 
-function git(dir: string, ...args: string[]): void {
+function git(dir: string, ...args: string[]): string {
   const result = Bun.spawnSync(['git', '-c', 'user.name=Agent', '-c', 'user.email=agent@example.com', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
   if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr.toString()}`)
+  return result.stdout.toString().trim()
 }
 
 /**
@@ -343,10 +344,6 @@ describe('plan:verify re-checks the steps a later step drifted', () => {
   }, 60_000)
 })
 
-function head(app: string): string {
-  return Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd: app, stdout: 'pipe' }).stdout.toString().trim()
-}
-
 function stepRecord(report: PlanVerifyReport, step: string): PlanStepRecord {
   return report.steps.find((entry) => entry.stepId === step)!.record
 }
@@ -364,7 +361,7 @@ describe('plan:verify records the files and lines a step’s work changed', () =
     git(app, 'init', '-q')
     git(app, 'add', '-A')
     git(app, 'commit', '-q', '-m', 'the comment task')
-    const start = head(app)
+    const start = git(app, 'rev-parse', 'HEAD')
     expect((await planNextFile(join(app, 'comments.plan.json'), { appRoot: app })).step?.id).toBe(DELETION_HTTP)
 
     await writeFile(join(app, 'routes/web.ts'), routesWithDestroy('store'), 'utf8')
@@ -376,9 +373,8 @@ describe('plan:verify records the files and lines a step’s work changed', () =
     const report = verify(app, DELETION_HTTP)
 
     expect(outcome(report, DELETION_HTTP)).toBe('verified')
-    const work = stepRecord(report, DELETION_HTTP).work!
-    expect(work).toMatchObject({ measured: true, from: start, settled: true })
-    if (!work.measured) throw new Error(work.reason)
+    const work = measured(stepRecord(report, DELETION_HTTP).work)
+    expect(work).toMatchObject({ from: start, settled: true })
     expect(work.files.map((file) => file.path)).toEqual(['app/Http/Controllers/CommentController.ts', 'routes/web.ts', 'tests/deletion.test.ts'])
     expect(work.files[2]).toEqual({ path: 'tests/deletion.test.ts', added: 5, removed: 0 })
     expect(work.added).toBe(work.files.reduce((total, file) => total + (file.added ?? 0), 0))

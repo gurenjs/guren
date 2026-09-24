@@ -18,7 +18,7 @@ import { readPlanApprovals, recordPlanApproval, requireReadableApprovals } from 
 import { stampContextHash } from '../src/plan/freshness'
 import { planHash } from '../src/plan/identity'
 import { hasBaseline } from '../src/plan/render'
-import { PLAN_STATE_VERSION, type PlanActiveStep } from '../src/plan/state'
+import { PLAN_STATE_VERSION, type PlanActiveStep, type PlanStepWork } from '../src/plan/state'
 import { PlanSchema, type Plan, type PlanDraft, type PlanDraftSchema } from '../src/plan/schema'
 import type { PlanPagePayload } from '../src/plan/render'
 import { FOUNDATION_TASK_ID, type PlanTaskDerivation } from '../src/plan/tasks'
@@ -395,4 +395,11 @@ export async function waiveForTest(planPath: string, elementIds: string[]): Prom
     now: () => new Date('2026-09-23T12:00:00.000Z'),
     exec: async () => ({ exitCode: 1, stdout: '', stderr: '' }),
   })
+}
+
+/** The measured half of a step's `work`, or a throw naming why it was not measured. */
+export function measured<T extends Pick<PlanStepWork, 'measured'> & { reason?: string }>(work: T | undefined): Extract<T, { measured: true }> {
+  if (!work) throw new Error('no work recorded')
+  if (!work.measured) throw new Error(`not measured: ${work.reason}`)
+  return work as Extract<T, { measured: true }>
 }
