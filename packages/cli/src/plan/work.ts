@@ -26,6 +26,7 @@ const DRIZZLE_SNAPSHOT = /(?:^|\/)snapshot\.json$/u
 
 /** git's own test for a binary file: a NUL byte in the first 8000 bytes. */
 const BINARY_PROBE_BYTES = 8000
+const COUNT_CHUNK_BYTES = 65536
 
 function unmeasured(reason: string): Extract<PlanStepWorkReading, { measured: false }> {
   return { measured: false, reason }
@@ -69,17 +70,25 @@ async function untrackedLines(file: string): Promise<number | null> {
       probed += bytesRead
     }
     if (probe.subarray(0, probed).includes(0)) return null
+    // Positional reads, not a stream over the handle: on Bun 1.3.14 a drained `createReadStream`
+    // keeps the descriptor open past `handle.close()`.
+    const chunk = Buffer.alloc(COUNT_CHUNK_BYTES)
     let lines = 0
     let last: number | undefined
-    for await (const chunk of handle.createReadStream({ start: 0, autoClose: false }) as AsyncIterable<Buffer>) {
-      for (const byte of chunk) if (byte === 0x0a) lines += 1
-      last = chunk[chunk.length - 1]
+    let position = 0
+    for (;;) {
+      const { bytesRead } = await handle.read(chunk, 0, COUNT_CHUNK_BYTES, position)
+      if (bytesRead === 0) break
+      for (let index = 0; index < bytesRead; index += 1) if (chunk[index] === 0x0a) lines += 1
+      last = chunk[bytesRead - 1]
+      position += bytesRead
     }
     return last === undefined || last === 0x0a ? lines : lines + 1
   } catch {
     return null
   } finally {
-    await handle.close()
+    // A measurement never fails a run, a close that throws included.
+    await handle.close().catch(() => undefined)
   }
 }
 

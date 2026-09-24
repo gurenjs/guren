@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { existsSync, readdirSync } from 'node:fs'
 import { rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -126,16 +127,37 @@ describe('measureStepWork', () => {
     await writeFile(join(app, 'src/large.ts'), `${'x'.repeat(99)}\n`.repeat(2000) + 'last', 'utf8')
     // A NUL past the 8000-byte probe does not make a file binary, as it does not for git.
     await writeFile(join(app, 'src/late-nul.ts'), `${'y'.repeat(9000)}\n\0\n`, 'utf8')
+    // Many short lines across two 64 KiB reads, and an empty file, which has none.
+    await writeFile(join(app, 'src/many.ts'), `${'l\n'.repeat(60000)}end`, 'utf8')
+    await writeFile(join(app, 'src/empty.ts'), '', 'utf8')
 
     const work = measured(await measureStepWork(app, plan, start))
 
     expect(work.files).toEqual([
       { path: 'src/dangling.ts', added: 1, removed: 0 },
       { path: 'src/dir-link', added: 1, removed: 0 },
+      { path: 'src/empty.ts', added: 0, removed: 0 },
       { path: 'src/large.ts', added: 2001, removed: 0 },
       { path: 'src/late-nul.ts', added: 2, removed: 0 },
       { path: 'src/link.ts', added: 1, removed: 0 },
+      { path: 'src/many.ts', added: 60001, removed: 0 },
     ])
+  })
+
+  // `/dev/fd` lists this process's open descriptors on macOS and Linux; elsewhere there is nothing to count.
+  test.skipIf(!existsSync('/dev/fd'))('should close every untracked file it reads, leaving no descriptor open', async () => {
+    const { app, plan, start } = await createRepo('descriptors')
+    await writeWorkspaceFiles(app, Object.fromEntries(Array.from({ length: 40 }, (_, index) => [`src/new-${index}.ts`, `${'z\n'.repeat(index)}tail`])))
+    const open = (): number => readdirSync('/dev/fd').length
+
+    const before = open()
+    const work = measured(await measureStepWork(app, plan, start))
+    const after = open()
+
+    expect(work.files).toHaveLength(40)
+    expect(work.added).toBe(Array.from({ length: 40 }, (_, index) => index + 1).reduce((total, lines) => total + lines, 0))
+    // A leak is one descriptor per file read; a few may belong to the runtime.
+    expect(after - before).toBeLessThan(5)
   })
 
   test('should measure an application below the repository root in paths relative to it, and leave out work beside it', async () => {
