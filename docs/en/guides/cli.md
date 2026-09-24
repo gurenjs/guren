@@ -334,7 +334,8 @@ and cache store it selects, and whether a provider threw while registering.
 
 A run introspects only when some check needs it: the app declares a deploy
 plugin or the Lambda adapter, has a session config, calls
-`configureAttachments()`, or has a model that mixes in `Attachable(...)`. Each
+`configureAttachments()`, has a model that mixes in `Attachable(...)`, or has a
+route that declares `.agent()`. Each
 run introspects at most once, and a `--changed` run that changed no source
 file does not introspect at all. The manifest is read with this environment's
 `.env`, so a store selected by an environment variable is judged at its local
@@ -380,22 +381,23 @@ you named. From the manifest:
   `null` user, and a policy may let it through.
 - A name no alias or group registers anywhere in the app is reported as
   unresolved. Mounting such a route fails at boot, so the warning comes ahead of
-  any guard beside it. When something introspection does not run could register
-  the name (a `createApp({ boot })` callback, or a provider whose `introspect()`
-  hook replaces its `register()`), the message names it, and a guard or a
-  `userOrFail()` in the action still passes the route.
+  any guard beside it, and a guard never passes it. When something introspection
+  skips could register the name (a `createApp({ boot })` callback, a provider
+  whose `introspect()` hook replaced its `register()`, or one whose `register()`
+  threw), the message names it.
 - A controller is found by its file and export. Two modules may each declare a
-  `ReportController`, and each route is judged against its own class. A class
-  declared outside the controller files (inside the routes file, or by a
-  package) is not judged by a controller file's class of the same name: the
-  route is reported as not analyzable. `controller-name-collision:*` is reported
+  `ReportController`, and each route is judged against its own class. When a
+  route's class matches no export of the controller files (a class declared in
+  the routes file, say) while one of them exports a class of the same name, that
+  other class's body is not used: the route is reported as not analyzable. A
+  class a controller file declares without exporting it keeps its body. `controller-name-collision:*` is reported
   only when the manifest cannot place a route's class, because the file declaring
   it failed to import or the class was found through a re-export, and two files
   declare that name. The body checks (`validateBody()`, `userOrFail()`) still
   read the action's source.
 
-`guren check` uses the same lookup for its agent-route rules when an agent
-route names a class two files declare. Raw SQL, secrets, mass assignment and
+`guren check` uses the same lookup for its agent-route rules, so it introspects
+an app with agent routes. Raw SQL, secrets, mass assignment and
 CSRF exemptions are judged from source either way.
 
 Route-level findings carry `evidence`: `manifest` when the manifest alone

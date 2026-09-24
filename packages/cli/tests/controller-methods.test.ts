@@ -332,6 +332,30 @@ export class PostController extends Controller {
     expect(controllerMethodFor(result, { name: 'PostController', action: 'store' }).by).toBe('name')
   })
 
+  it('reads an unexported same-named class by name, since the child can never match one', async () => {
+    const result = await scan({
+      'app/Http/Controllers/NoteController.ts': `import { Controller } from '@guren/core'
+
+class NoteController extends Controller {
+  async store() { return this.json('colocated') }
+}
+`,
+    })
+    const nameOnly = { name: 'NoteController', action: 'store', file: null, exportName: null, resolved: 'name-only' as const, unimported: [] }
+    expect(controllerMethodFor(result, nameOnly)).toMatchObject({ by: 'name', info: { filePath: 'app/Http/Controllers/NoteController.ts' } })
+  })
+
+  it('follows the name only to a declaration that could be the routed class, not to a last-scanned exported one', async () => {
+    const result = await scan({
+      'app/Http/Controllers/A.ts': body('failed-import'),
+      'app/Http/Controllers/B.ts': body('imported'),
+    })
+    const nameOnly = { name: 'PostController', action: 'store', file: null, exportName: null, resolved: 'name-only' as const }
+    for (const unimported of [['app/Http/Controllers/A.ts'], ['app/Http/Controllers/B.ts']]) {
+      expect(controllerMethodFor(result, { ...nameOnly, unimported }).info?.filePath).toBe(unimported[0])
+    }
+  })
+
   it('reports a collision only for a class some route reached by its name alone', async () => {
     const result = await scan({
       'app/Http/Controllers/PostController.ts': body('root'),

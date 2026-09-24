@@ -490,7 +490,7 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
     ? await parseControllerMethods(cwd, options.cache)
     : EMPTY_CONTROLLER_SCAN
 
-  agentDefinitions = await withManifestControllerRefs(agentDefinitions, scan, options.introspect)
+  agentDefinitions = await withManifestControllerRefs(agentDefinitions, options.introspect)
 
   const routes = agentDefinitions.flatMap((definition) => {
     const route = toAgentRoute(definition, scan)

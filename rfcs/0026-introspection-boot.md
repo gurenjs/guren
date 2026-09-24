@@ -570,11 +570,13 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   class) falls back to the name, as a `name-only` reference does. A placed class
 >   that declares no such action, or whose file would not read or parse, has no
 >   body, never another class's. A `name-only` reference is evidence too: the
->   child imports every controller file while an app class is unmatched and
->   never matches a framework class, so a same-named declaration in a file it
->   imported is another class, and the route has no body here (`elsewhere`). Only
->   a declaration in a file whose import failed (`controller-import`) may be the
->   routed one, and then the name is followed. `collisionsReachedByName()` keeps a
+>   child imports every controller file while an app class is unmatched, matches
+>   only exports, and never matches a framework class. So only a same-named
+>   declaration it cannot have matched may be the routed class: one the file does
+>   not export (a controller file routing its own class), or one in a file whose
+>   import failed (`controller-import`). The last such declaration is read by
+>   name; with none, the route has no body here (`elsewhere`), and the routed
+>   class is declared somewhere the scan does not read. `collisionsReachedByName()` keeps a
 >   collision only for a class some route reached by name.
 > - `guren audit` reads `manifest.routes` for `validation:*`, `authz:*` and
 >   `agent-annotation:*`. It introspects only when the routes file, loaded first,
@@ -594,12 +596,13 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   "unresolved alias" warning splits in two: an alias registered outside the
 >   routes file resolves and stops warning, while a name no alias or group
 >   registers anywhere is its own warning, judged before any guard beside it,
->   since mounting it throws. That order holds only when nothing introspection
->   skips could register the name: a skipped `options.boot` (which runs before
->   `mountRoutes()`) or an app provider registered through its `introspect()`
->   hook (`ConfigServiceProvider` always is, hence `source !== 'framework'`).
->   Then a guard or `userOrFail()` passes first and the warning names what may
->   register it. The auth-like name match reads alias and group entries only, as
+>   since mounting it throws. A guard never turns it into a pass: when something
+>   introspection skips could register the name (a skipped `options.boot`, which
+>   runs before `mountRoutes()`; an app provider registered through its
+>   `introspect()` hook, which `ConfigServiceProvider` always is, hence
+>   `source !== 'framework'`; a provider whose `register()` threw) the warning
+>   names it instead of stating the boot failure as fact. An empty hook (as
+>   `cloudflarePlugin`'s) qualifies too, so a typo there is never passed. The auth-like name match reads alias and group entries only, as
 >   the static path does.
 > - Body validation passes when `schemas.body` is present, `{ unreadable }`
 >   included: the live schema validates whatever its JSON Schema reads as.
@@ -613,10 +616,12 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   (moving them to `manifest.routes` is 2d) and take the manifest's references
 >   through `attachControllerRefs()`, matched on method, path, class and action,
 >   since the manifest lists the whole app's routes in its own order, through the
->   one bridge `withManifestControllerRefs()`, which asks for the introspection
->   only when a route names a class two files declare.
->   `guren check` passes its run's introspection; `generateEntityContext()` takes
->   `introspect: true`, and the `guren context` command is left to 2d.
+>   one bridge `withManifestControllerRefs()`. The agent-route rules ask for it
+>   whenever the app has agent routes (content-activated, like 2b's triggers), so
+>   they agree with `guren audit` on a routed class the manifest places
+>   elsewhere; `guren check` passes its run's introspection.
+>   `generateEntityContext()` takes `introspect: true` and asks only when a route
+>   names a class two files declare; the `guren context` command is left to 2d.
 > - `plan/app-state.ts` stays name-keyed. A plan element names a class and its
 >   module, never a route, and `plan/status.ts` keys action bodies and route
 >   wiring by `Class.action` throughout, so a collision stays `blocked` there on

@@ -272,7 +272,7 @@ describe('guren audit against the introspected app (RFC 0026 §5)', () => {
 })
 
 describe('guren audit on what the manifest cannot place', () => {
-  test('a class declared in the routes file is not judged by a same-named controller file\'s body', async () => {
+  test('a class declared in the routes file is not judged by a same-named controller file\'s body, in audit and check alike', async () => {
     const dir = await scaffoldApp('routes-file-class', {
       'routes/web.ts': ROUTES.replace(
         "import NoteController from '../app/Http/Controllers/NoteController.js'\n",
@@ -280,6 +280,17 @@ describe('guren audit on what the manifest cannot place', () => {
       ).replace(
         'class InlineController extends Controller {',
         'class NoteController extends Controller {\n  async store() {\n    return this.json(await this.input())\n  }\n\n  async import() {\n    return this.json(await this.input())\n  }\n}\n\nclass InlineController extends Controller {',
+      ).replace(
+        "router.post('/notes/import', [NoteController, 'import'])",
+        "router.post('/notes/import', [NoteController, 'import']).name('notes_import').agent({})",
+      ),
+      // No agent route reaches a colliding class, so only the agent routes themselves start the introspection.
+      'modules/shop/index.ts': "import { defineModule } from '@guren/core'\nexport default defineModule({ name: 'shop' })\n",
+      'modules/shop/app/Http/Controllers/ReportController.ts': REPORT_CONTROLLER.shop.replace('class ReportController', 'class ShopReportController'),
+      // The controller file's class validates and authorizes; the routed one does neither.
+      'app/Http/Controllers/NoteController.ts': NOTE_CONTROLLER.replace(
+        '  async import() {\n',
+        "  async import() {\n    await this.authorize('import')\n",
       ),
     })
     const [manifest, source] = await Promise.all([
@@ -287,14 +298,66 @@ describe('guren audit on what the manifest cannot place', () => {
       runAudit({ cwd: dir, introspect: false }).then(byKey),
     ])
 
-    // The routes-file class reads its input unvalidated; the controller file's class validates.
     expect(source['validation:POST /notes/import']?.status).toBe('pass')
-    expect(manifest['validation:POST /notes/import']?.status).toBe('warn')
+    expect(manifest['validation:POST /notes/import']?.status).toBe('fail')
     expect(manifest['validation:POST /notes/import']?.message).toContain('could not be analyzed')
     expect(manifest['controller-name-collision:NoteController']).toBeUndefined()
+
+    const authorization = async (introspect: boolean) => (await runCheck({ cwd: dir, introspect })).checks
+      .find((result) => result.key === 'agent-route-authorization:POST:/notes/import')
+    expect(await authorization(false)).toBeUndefined()
+    expect((await authorization(true))?.message).toContain('could not be verified')
   })
 
-  test('an alias a provider registers only outside its introspect() hook is not called a boot failure, and a guard still passes', async () => {
+  test('an unexported class a controller file routes itself keeps its own body', async () => {
+    const dir = await scaffoldApp('colocated', {
+      'routes/web.ts': "import type { Router } from '@guren/core'\nimport { registerNotes } from '../app/Http/Controllers/NoteController.js'\n\nexport function registerWebRoutes(router: Router): void {\n  registerNotes(router)\n}\n",
+      'app/Http/Controllers/NoteController.ts': `import { Controller, type Router } from '@guren/core'
+
+${PAYLOAD}
+
+class NoteController extends Controller {
+  async store() {
+    await this.auth.userOrFail()
+    return this.json(await this.validateBody(Payload))
+  }
+}
+
+export function registerNotes(router: Router): void {
+  router.post('/notes', [NoteController, 'store']).name('notes_store').agent({})
+}
+`,
+    })
+    const findings = byKey(await runAudit({ cwd: dir, introspect: true }))
+    expect(findings['validation:POST /notes']?.status).toBe('pass')
+    expect(findings['authz:POST /notes']?.status).toBe('pass')
+  })
+
+  test('a controller file whose import throws may be the routed class: its body is read, and the collision reported', async () => {
+    const legacy = (validates: boolean, tail = '') => `import { Controller } from '@guren/core'
+
+${PAYLOAD}
+
+export class LegacyController extends Controller {
+  async store() {
+    return this.json(await this.${validates ? 'validateBody(Payload)' : 'input()'})
+  }
+}
+${tail}`
+    const dir = await scaffoldApp('import-throws', {
+      'routes/web.ts': "import { Controller, type Router } from '@guren/core'\n\nclass LegacyController extends Controller {\n  async store() {\n    return this.json(await this.input())\n  }\n}\n\nexport function registerWebRoutes(router: Router): void {\n  router.post('/legacy', [LegacyController, 'store'])\n}\n",
+      'app/Http/Controllers/Broken.ts': legacy(true, "\nthrow new Error('broken at import')\n"),
+      'app/Http/Controllers/Working.ts': legacy(false),
+    })
+    const report = await runAudit({ cwd: dir, introspect: true })
+    const findings = byKey(report)
+
+    expect(report.routeSource).toEqual({ from: 'manifest' })
+    expect(findings['validation:POST /legacy']?.status).toBe('pass')
+    expect(findings['controller-name-collision:LegacyController']?.status).toBe('fail')
+  })
+
+  test('an unregistered alias is never passed by a guard, and names a provider whose introspect() hook replaced register()', async () => {
     const dir = await scaffoldApp('introspect-hook', {
       'src/app.ts': APP_TS.replace(
         "    this.container.make<Router>('router').aliasMiddleware('auth', requireAuthenticated())\n  }",
@@ -308,10 +371,10 @@ describe('guren audit on what the manifest cannot place', () => {
     const findings = byKey(await runAudit({ cwd: dir, introspect: true }))
 
     expect(findings['authz:POST /posts']?.status).toBe('warn')
-    expect(findings['authz:POST /posts']?.message).toContain('unless RouteAliasProvider, whose introspect() hook')
-    expect(findings['authz:POST /posts']?.message).not.toContain('fails at boot')
-    // Behind 'auth.admin', which the hook provider may register too: the action's userOrFail() decides.
-    expect(findings['authz:DELETE /posts/:id']?.status).toBe('pass')
+    expect(findings['authz:POST /posts']?.message).toContain(
+      'fails at boot unless something introspection skips registers it: RouteAliasProvider.register() (its introspect() hook ran instead).',
+    )
+    expect(findings['authz:DELETE /posts/:id']?.status).toBe('warn')
   })
 
   test('an unregistered alias names a skipped createApp({ boot }) callback as what may register it', async () => {
@@ -319,7 +382,7 @@ describe('guren audit on what the manifest cannot place', () => {
       'src/app.ts': APP_TS.replace('modules: [billing, shop] })', 'modules: [billing, shop], boot: () => {} })'),
     })
     const findings = byKey(await runAudit({ cwd: dir, introspect: true }))
-    expect(findings['authz:DELETE /posts/:id']?.message).toContain('unless the createApp({ boot }) callback')
+    expect(findings['authz:DELETE /posts/:id']?.message).toContain('registers it: the createApp({ boot }) callback.')
   })
 
   test('names an anonymous default-export controller by its file', async () => {

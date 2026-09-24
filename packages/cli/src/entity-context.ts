@@ -320,7 +320,7 @@ function unverifiedReason(scan: ControllerMethodScan, controller: ControllerTarg
   }
   if (lookup.info) return undefined
   if (lookup.by === 'identity') return `${controller.file} declares no ${controller.action} action body (inherited or missing)`
-  if (lookup.by === 'elsewhere') return `${controller.name} is declared outside the controller files (in the routes file, or by a package), and a controller file declares another class of that name`
+  if (lookup.by === 'elsewhere') return `${controller.name} is none of the exported classes the controller files declare under that name, so its body was not found`
   const unreadable = scan.unreadableFiles.find((file) => classNameFromPath(file) === controller.name)
   if (unreadable) return `${unreadable} could not be read`
   const unparsed = scan.unparsedFiles.find((file) => classNameFromPath(file) === controller.name)
@@ -396,7 +396,7 @@ export async function generateEntityContext(
     const scan = candidates.some((def) => def.controller && def.controller.name !== controllerName)
       ? await parseControllerMethods(cwd, cache)
       : EMPTY_CONTROLLER_SCAN
-    if (options.introspect) candidates = await withManifestControllerRefs(candidates, scan, () => introspectApp(cwd))
+    if (options.introspect) candidates = await withManifestControllerRefs(candidates, () => introspectApp(cwd), scan)
     const modelFile = resolve(cwd, match.relPath)
 
     const referencesModel = async (method: ControllerMethodInfo): Promise<boolean> => {

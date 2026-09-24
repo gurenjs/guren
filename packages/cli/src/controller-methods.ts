@@ -443,8 +443,8 @@ export interface ControllerMethodLookup {
 /**
  * The one lookup of a route's action body (RFC 0026 §5): an `identity` reference reads its own file,
  * one the scan cannot place (a re-export the child picked) follows the name. A `name-only` one matched
- * no export of a file the child imported (all of them while an app class is unmatched; a framework
- * class never matches), so a same-named declaration there is another class, declared `elsewhere`.
+ * no export the child imported, so only an unexported declaration or one in a file whose import failed
+ * can be it; with none, the routed class is `elsewhere` (the routes file, a package) and has no body.
  */
 export function controllerMethodFor(scan: ControllerMethodScan, controller: ControllerTarget): ControllerMethodLookup {
   const { file, exportName, unimported } = controller
@@ -459,9 +459,10 @@ export function controllerMethodFor(scan: ControllerMethodScan, controller: Cont
   }
   if (controller.resolved === 'name-only' && unimported) {
     const sameName = scan.declarations.filter((declaration) => declaration.className === controller.name)
-    if (sameName.length > 0 && sameName.every((declaration) => !unimported.includes(declaration.file))) {
-      return { info: undefined, by: 'elsewhere', className: controller.name }
-    }
+    const candidate = sameName.filter((declaration) =>
+      declaration.exportNames.length === 0 || unimported.includes(declaration.file)).at(-1)
+    if (candidate) return { info: candidate.methods.get(controller.action), by: 'name', className: controller.name }
+    if (sameName.length > 0) return { info: undefined, by: 'elsewhere', className: controller.name }
   }
   return { info: scan.methods.get(`${controller.name}.${controller.action}`), by: 'name', className: controller.name }
 }
@@ -512,17 +513,17 @@ export function attachControllerRefs<T extends { method: string; path: string; c
 }
 
 /**
- * Registered definitions with the manifest's references attached, asking for the introspection
- * only when a route among `definitions` reaches a class two files declare by name: the one bridge
- * for consumers that still judge the routes file's definitions.
+ * Registered definitions with the manifest's references attached: the one bridge for consumers
+ * that still judge the routes file's definitions. With `onlyOnCollision`, the introspection is
+ * asked for only when a route reaches a class two files declare by name.
  */
 export async function withManifestControllerRefs<T extends { method: string; path: string; controller?: { name: string; action: string } }>(
   definitions: T[],
-  scan: ControllerMethodScan,
   introspect: IntrospectSource | undefined,
+  onlyOnCollision?: ControllerMethodScan,
 ): Promise<T[]> {
   const controllers = definitions.flatMap((definition) => (definition.controller ? [definition.controller] : []))
-  if (collisionsReachedByName(scan, controllers).length === 0) return definitions
+  if (onlyOnCollision && collisionsReachedByName(onlyOnCollision, controllers).length === 0) return definitions
   const introspected = await introspectedRoutes(introspect)
   return introspected.status === 'described' ? attachControllerRefs(definitions, introspected.manifest) : definitions
 }

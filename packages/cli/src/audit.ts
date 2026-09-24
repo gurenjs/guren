@@ -827,9 +827,8 @@ function auditRoutes(
       const { verdict, names, unresolved } = route.auth
       const hasAuthMiddleware = verdict === 'verified' || verdict === 'legacy-name-match'
       const hasControllerAuth = methodInfo ? AUTH_CALL_PATTERN.test(methodInfo.body) : false
-      // A route naming a name nothing can register does not mount, so no guard beside it protects
-      // anything; while something skipped may register it, a guard still passes the route.
-      if (unresolved.length > 0 && (unregisteredBy.length === 0 || !(hasAuthMiddleware || hasControllerAuth))) {
+      // A route naming an unregistered name does not mount, so no guard beside it protects anything.
+      if (unresolved.length > 0) {
         findings.push(withEvidence(
           fromManifest,
           finding(
@@ -837,10 +836,10 @@ function auditRoutes(
             routeLabel,
             'warn',
             `Middleware ${unresolved.map((name) => `'${name}'`).join(', ')} is registered as no alias or group anywhere in the app, `
-            + 'so nothing says what the chain enforces'
+            + 'so nothing says what the chain enforces, and mounting the route fails at boot'
             + (unregisteredBy.length > 0
-              ? `, unless ${unregisteredBy.join(' or ')} registers it.`
-              : ', and mounting the route fails at boot.'),
+              ? ` unless something introspection skips registers it: ${unregisteredBy.join(' or ')}.`
+              : '.'),
             'Register the alias (router.aliasMiddleware(name, requireAuthenticated())) or remove the name from the route.',
           ),
         ))
