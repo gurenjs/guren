@@ -198,8 +198,8 @@ export const sessionConfig: SessionConfig = {
     const { manifest, source } = await bothWays(dir)
 
     for (const key of ['attachments-delivery:config/attachments.ts', 'attachments-serve-redirect:config/attachments.ts:local']) {
-      expect({ key, ...manifest[key] }).toMatchObject({ key, status: 'fail', evidence: 'manifest' })
-      expect({ key, ...source[key] }).toMatchObject({ key, status: 'fail', evidence: 'static' })
+      expect({ ...manifest[key], key }).toMatchObject({ key, status: 'fail', evidence: 'manifest' })
+      expect({ ...source[key], key }).toMatchObject({ key, status: 'fail', evidence: 'static' })
     }
     expect(manifest['attachments-delivery:config/attachments.ts']!.message).toContain("no registerAttachmentRoutes() route named 'attachments.show'")
     expect(manifest['attachments-delivery']).toBeUndefined()
@@ -309,7 +309,7 @@ export default createApp({ env, config: [session], auth: {}, routes: registerWeb
 
     expect(manifest['introspection-unavailable']).toBeUndefined()
     for (const key of ['sessions-binding', 'sessions-config:config/session.ts:sessions', 'attachments-config:config/attachments.ts', 'attachments-delivery']) {
-      expect({ key, ...manifest[key] }).toMatchObject({ key, status: source[key]!.status, evidence: 'static' })
+      expect({ ...manifest[key], key }).toMatchObject({ key, status: source[key]!.status, evidence: 'static' })
       expect(manifest[key]!.message).toContain('Judged from source: BindingProvider threw in register()')
     }
   })
