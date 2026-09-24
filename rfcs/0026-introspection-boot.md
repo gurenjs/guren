@@ -569,9 +569,13 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   the scan cannot place there (the child picked a file that re-exports the
 >   class) falls back to the name, as a `name-only` reference does. A placed class
 >   that declares no such action, or whose file would not read or parse, has no
->   body, never another class's.
->   `collisionsReachedByName()` keeps a collision only for a class some route
->   reached by name.
+>   body, never another class's. A `name-only` reference is evidence too: the
+>   child imports every controller file while an app class is unmatched and
+>   never matches a framework class, so a same-named declaration in a file it
+>   imported is another class, and the route has no body here (`elsewhere`). Only
+>   a declaration in a file whose import failed (`controller-import`) may be the
+>   routed one, and then the name is followed. `collisionsReachedByName()` keeps a
+>   collision only for a class some route reached by name.
 > - `guren audit` reads `manifest.routes` for `validation:*`, `authz:*` and
 >   `agent-annotation:*`. It introspects only when the routes file, loaded first,
 >   registers a route that is unsafe or carries a body (or fails to load, since
@@ -585,13 +589,18 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   only `authorization`, `Gate.resolveUser()` returns `null` for a guest, and a
 >   policy is called with that `null`, so an authorizing chain with no
 >   `requireAuthenticated()` lets a guest reach a policy that may allow it. It
->   stays a warning whose message names `ability`, or says the ability is decided
->   at request time. The draft's "unresolved alias" warning splits in two: an
->   alias registered outside the routes file resolves and stops warning, while a
->   name no alias or group registers anywhere is its own warning, judged before
->   any guard beside it, since mounting it throws (softened when a skipped `options.boot`, which runs before
->   `mountRoutes()`, might register it). The auth-like name match reads alias and
->   group entries only, as the static path does.
+>   stays a warning whose message says what the chain checks: `ability`, any or
+>   all of several, an ability decided at request time, or deny-all. The draft's
+>   "unresolved alias" warning splits in two: an alias registered outside the
+>   routes file resolves and stops warning, while a name no alias or group
+>   registers anywhere is its own warning, judged before any guard beside it,
+>   since mounting it throws. That order holds only when nothing introspection
+>   skips could register the name: a skipped `options.boot` (which runs before
+>   `mountRoutes()`) or an app provider registered through its `introspect()`
+>   hook (`ConfigServiceProvider` always is, hence `source !== 'framework'`).
+>   Then a guard or `userOrFail()` passes first and the warning names what may
+>   register it. The auth-like name match reads alias and group entries only, as
+>   the static path does.
 > - Body validation passes when `schemas.body` is present, `{ unreadable }`
 >   included: the live schema validates whatever its JSON Schema reads as.
 >   `evidence` follows 2a's weakest-fact rule: `manifest` only for a guard's

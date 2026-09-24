@@ -271,6 +271,118 @@ describe('guren audit against the introspected app (RFC 0026 §5)', () => {
   })
 })
 
+describe('guren audit on what the manifest cannot place', () => {
+  test('a class declared in the routes file is not judged by a same-named controller file\'s body', async () => {
+    const dir = await scaffoldApp('routes-file-class', {
+      'routes/web.ts': ROUTES.replace(
+        "import NoteController from '../app/Http/Controllers/NoteController.js'\n",
+        '',
+      ).replace(
+        'class InlineController extends Controller {',
+        'class NoteController extends Controller {\n  async store() {\n    return this.json(await this.input())\n  }\n\n  async import() {\n    return this.json(await this.input())\n  }\n}\n\nclass InlineController extends Controller {',
+      ),
+    })
+    const [manifest, source] = await Promise.all([
+      runAudit({ cwd: dir, introspect: true }).then(byKey),
+      runAudit({ cwd: dir, introspect: false }).then(byKey),
+    ])
+
+    // The routes-file class reads its input unvalidated; the controller file's class validates.
+    expect(source['validation:POST /notes/import']?.status).toBe('pass')
+    expect(manifest['validation:POST /notes/import']?.status).toBe('warn')
+    expect(manifest['validation:POST /notes/import']?.message).toContain('could not be analyzed')
+    expect(manifest['controller-name-collision:NoteController']).toBeUndefined()
+  })
+
+  test('an alias a provider registers only outside its introspect() hook is not called a boot failure, and a guard still passes', async () => {
+    const dir = await scaffoldApp('introspect-hook', {
+      'src/app.ts': APP_TS.replace(
+        "    this.container.make<Router>('router').aliasMiddleware('auth', requireAuthenticated())\n  }",
+        "    this.container.make<Router>('router').aliasMiddleware('auth', requireAuthenticated())\n  }\n\n  override introspect(): void {}",
+      ),
+      'app/Http/Controllers/PostController.ts': POST_CONTROLLER.replace(
+        '  async destroy() {\n',
+        '  async destroy() {\n    await this.auth.userOrFail()\n',
+      ),
+    })
+    const findings = byKey(await runAudit({ cwd: dir, introspect: true }))
+
+    expect(findings['authz:POST /posts']?.status).toBe('warn')
+    expect(findings['authz:POST /posts']?.message).toContain('unless RouteAliasProvider, whose introspect() hook')
+    expect(findings['authz:POST /posts']?.message).not.toContain('fails at boot')
+    // Behind 'auth.admin', which the hook provider may register too: the action's userOrFail() decides.
+    expect(findings['authz:DELETE /posts/:id']?.status).toBe('pass')
+  })
+
+  test('an unregistered alias names a skipped createApp({ boot }) callback as what may register it', async () => {
+    const dir = await scaffoldApp('boot-callback', {
+      'src/app.ts': APP_TS.replace('modules: [billing, shop] })', 'modules: [billing, shop], boot: () => {} })'),
+    })
+    const findings = byKey(await runAudit({ cwd: dir, introspect: true }))
+    expect(findings['authz:DELETE /posts/:id']?.message).toContain('unless the createApp({ boot }) callback')
+  })
+
+  test('names an anonymous default-export controller by its file', async () => {
+    const dir = await scaffoldApp('anonymous-default', {
+      'app/Http/Controllers/NoteController.ts': NOTE_CONTROLLER.replace('export default class NoteController', 'export default class'),
+    })
+    const findings = byKey(await runAudit({ cwd: dir, introspect: true }))
+    expect(findings['validation:POST /notes/import']?.message).toContain('NoteController.import (app/Http/Controllers/NoteController.ts)')
+  })
+})
+
+describe('the body rules on the manifest path', () => {
+  const WRITING_REPORT = (module: string) => `import { Controller } from '@guren/core'
+import { User } from '../../../../../app/Models/User.js'
+
+${PAYLOAD}
+
+export class ReportController extends Controller {
+  async store() {
+    await this.auth.userOrFail()
+    const data = await this.validateBody(Payload)
+    return this.json(await User.forceCreate({ ...(data as object), module: '${module}' }))
+  }
+}
+`
+
+  const AGENT = `import { Agent, tool } from '@guren/plugin-ai'
+import { z } from 'zod'
+import { User } from '@/app/Models/User'
+
+export class Onboarder extends Agent {
+  static override scopes = ['tool:billing_reports_store'] as const
+  instructions = 'Onboard.'
+
+  tools() {
+    return {
+      invite: tool({
+        inputSchema: z.object({ email: z.string() }),
+        async execute({ email }) {
+          return User.create({ email })
+        },
+      }),
+    }
+  }
+}
+`
+
+  test('keys a force write in a shared class name by its file, and finds an agent tool\'s action by file', async () => {
+    const dir = await scaffoldApp('writes', {
+      'modules/billing/app/Http/Controllers/ReportController.ts': WRITING_REPORT('billing'),
+      'app/Ai/Agents/Onboarder.ts': AGENT,
+    })
+    const findings = byKey(await runAudit({ cwd: dir, introspect: true }))
+
+    expect(Object.keys(findings).filter((key) => key.startsWith('force-write-request-data:'))).toEqual([
+      'force-write-request-data:modules/billing/app/Http/Controllers/ReportController.ts#ReportController.store',
+    ])
+    // Only billing's action touches users; shop's same-named class does not.
+    expect(findings['ai-local-tool-write:Onboarder.invite']?.message).toContain('billing_reports_store')
+    expect(findings['ai-local-tool-write:Onboarder.invite']?.message).not.toContain('shop_reports_store')
+  })
+})
+
 describe('guren audit when the manifest cannot be used', () => {
   test('a failed introspection judges from the routes file and leaves one warning, exit code unchanged', async () => {
     const dir = await scaffoldApp('import-failure', {
@@ -281,7 +393,7 @@ describe('guren audit when the manifest cannot be used', () => {
 
     expect(findings['introspection-unavailable']?.status).toBe('warn')
     expect(findings['introspection-unavailable']?.message).toContain('(import)')
-    expect(report.routeSource.from).toBe('routes-file')
+    expect(report.routeSource).toEqual({ from: 'routes-file', reason: 'the app could not be introspected (import)' })
     expect(findings['controller-name-collision:ReportController']?.status).toBe('fail')
     expect(findings['authz:POST /posts']?.evidence).toBe('static')
   })

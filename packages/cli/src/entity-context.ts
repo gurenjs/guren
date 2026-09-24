@@ -320,6 +320,7 @@ function unverifiedReason(scan: ControllerMethodScan, controller: ControllerTarg
   }
   if (lookup.info) return undefined
   if (lookup.by === 'identity') return `${controller.file} declares no ${controller.action} action body (inherited or missing)`
+  if (lookup.by === 'elsewhere') return `${controller.name} is declared outside the controller files (in the routes file, or by a package), and a controller file declares another class of that name`
   const unreadable = scan.unreadableFiles.find((file) => classNameFromPath(file) === controller.name)
   if (unreadable) return `${unreadable} could not be read`
   const unparsed = scan.unparsedFiles.find((file) => classNameFromPath(file) === controller.name)

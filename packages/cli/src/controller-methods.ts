@@ -13,6 +13,7 @@ import { classNameFromPath, discoverControllerFiles, toPosixRelative } from './d
 import { extractClassDeclaration } from './model-parser'
 import { ParseCache } from './parse-cache'
 import { memberKeyName, walk } from './ast-walk'
+import { controllerImportFailures } from './introspect-controller-file'
 import { introspectedRoutes, type IntrospectSource } from './manifest-section'
 import { specifierName } from './route-registrar'
 import { escapeRegExp } from './utils'
@@ -418,36 +419,59 @@ function classExportNames(body: Statement[]): (node: Statement, classDecl: Class
  * What a route names its action by: a registered definition's `{ name, action }`,
  * or a manifest `ControllerRef`, which may also carry the class's file and export.
  */
-export type ControllerTarget = { name: string; action: string } & Partial<Pick<ControllerRef, 'file' | 'exportName' | 'resolved'>>
+export type ControllerTarget = { name: string; action: string } & Partial<Pick<ControllerRef, 'file' | 'exportName' | 'resolved'>> & {
+  /**
+   * On a manifest's reference only: the controller files the introspection child could not
+   * import (`controller-import`), where a class it left `name-only` may still be declared.
+   */
+  unimported?: readonly string[]
+}
 
 export interface ControllerMethodLookup {
   info: ControllerMethodInfo | undefined
   /**
    * `identity` when the body was found through the class's file and export, so no
-   * same-named class can stand in for it; `name` when only the class name was
-   * followed, which a collision on that name makes unreliable.
+   * same-named class can stand in for it; `elsewhere` when the manifest shows the routed
+   * class is none of the scanned declarations of its name, so it has no body here;
+   * `name` when only the class name was followed, which a collision makes unreliable.
    */
-  by: 'identity' | 'name'
+  by: 'identity' | 'elsewhere' | 'name'
+  /** The class as the scan names it: an anonymous default export by its file, not as `default`. */
+  className: string
 }
 
 /**
  * The one lookup of a route's action body (RFC 0026 §5). A reference resolved by
  * identity is judged against its own file; one the scan cannot place there (the
- * child picked a file that re-exports the class) falls back to the class name, as
- * a `name-only` reference does.
+ * child picked a file that re-exports the class) falls back to the class name.
+ * A `name-only` reference matched no export of any controller file the child
+ * imported (it imports them all while an app class is unmatched, and never
+ * matches a framework class), so a same-named declaration in one of those is
+ * another class: the routed one is declared elsewhere, in the routes file or a package.
  */
 export function controllerMethodFor(scan: ControllerMethodScan, controller: ControllerTarget): ControllerMethodLookup {
-  const { file, exportName } = controller
+  const { file, exportName, unimported } = controller
   if (controller.resolved === 'identity' && file && exportName) {
     // A placed class without the action (inherited, or missing) has no body, nor does one whose
     // file would not read or parse: another class's body is no answer either way.
     const declaration = scan.byExport.get(`${file}#${exportName}`)
-    if (declaration) return { info: declaration.methods.get(controller.action), by: 'identity' }
+    if (declaration) return { info: declaration.methods.get(controller.action), by: 'identity', className: declaration.className }
     if ([...scan.unreadableFiles, ...scan.unparsedFiles].some((skipped) => skipped.split(sep).join('/') === file)) {
-      return { info: undefined, by: 'identity' }
+      return { info: undefined, by: 'identity', className: controller.name }
     }
   }
-  return { info: scan.methods.get(`${controller.name}.${controller.action}`), by: 'name' }
+  if (controller.resolved === 'name-only' && unimported) {
+    const sameName = scan.declarations.filter((declaration) => declaration.className === controller.name)
+    if (sameName.length > 0 && sameName.every((declaration) => !unimported.includes(declaration.file))) {
+      return { info: undefined, by: 'elsewhere', className: controller.name }
+    }
+  }
+  return { info: scan.methods.get(`${controller.name}.${controller.action}`), by: 'name', className: controller.name }
+}
+
+/** A manifest's reference as the lookup takes it: a `name-only` one carries the files the child could not import. */
+export function manifestControllerTarget(ref: ControllerRef, unimported: readonly string[]): ControllerTarget {
+  return ref.resolved === 'name-only' ? { ...ref, unimported } : ref
 }
 
 /** The collisions a verdict could have read through: those on a class some route reached by its name alone. */
@@ -471,13 +495,14 @@ export function collisionsReachedByName(
  */
 export function attachControllerRefs<T extends { method: string; path: string; controller?: { name: string; action: string } }>(
   definitions: T[],
-  manifest: Pick<AppManifest, 'routes'>,
+  manifest: Pick<AppManifest, 'routes' | 'warnings'>,
 ): T[] {
-  const refs = new Map<string, ControllerRef | null>()
+  const unimported = controllerImportFailures(manifest)
+  const refs = new Map<string, ControllerTarget | null>()
   for (const route of manifest.routes) {
     if (!route.controller) continue
     const key = routeControllerKey(route, route.controller)
-    refs.set(key, refs.has(key) ? null : route.controller)
+    refs.set(key, refs.has(key) ? null : manifestControllerTarget(route.controller, unimported))
   }
   return definitions.map((definition) => {
     const ref = definition.controller && refs.get(routeControllerKey(definition, definition.controller))

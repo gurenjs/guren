@@ -310,7 +310,7 @@ export class PostController extends Controller {
 }
 `,
     })
-    expect(controllerMethodFor(result, ref('modules/blog/app/Http/Controllers/PostController.ts', 'PostController'))).toEqual({ by: 'identity', info: undefined })
+    expect(controllerMethodFor(result, ref('modules/blog/app/Http/Controllers/PostController.ts', 'PostController'))).toMatchObject({ by: 'identity', info: undefined })
   })
 
   it('answers no body for a placed class whose file did not parse, rather than a same-named class\'s', async () => {
@@ -319,7 +319,17 @@ export class PostController extends Controller {
       'modules/blog/app/Http/Controllers/PostController.ts': 'export default class PostController {',
     })
     expect(result.collisions).toEqual([])
-    expect(controllerMethodFor(result, ref('modules/blog/app/Http/Controllers/PostController.ts', 'default'))).toEqual({ by: 'identity', info: undefined })
+    expect(controllerMethodFor(result, ref('modules/blog/app/Http/Controllers/PostController.ts', 'default'))).toMatchObject({ by: 'identity', info: undefined })
+  })
+
+  it('gives a name-only reference no body when every same-named declaration is a class the child imported', async () => {
+    const result = await scan({ 'app/Http/Controllers/PostController.ts': body('root') })
+    const nameOnly = { name: 'PostController', action: 'store', file: null, exportName: null, resolved: 'name-only' as const }
+
+    expect(controllerMethodFor(result, { ...nameOnly, unimported: [] })).toMatchObject({ by: 'elsewhere', info: undefined })
+    expect(controllerMethodFor(result, { ...nameOnly, unimported: ['app/Http/Controllers/PostController.ts'] }).by).toBe('name')
+    // A definition the routes file registered carries no manifest evidence either way.
+    expect(controllerMethodFor(result, { name: 'PostController', action: 'store' }).by).toBe('name')
   })
 
   it('reports a collision only for a class some route reached by its name alone', async () => {
@@ -339,7 +349,7 @@ describe('attachControllerRefs', () => {
   it('gives a registered definition the manifest\'s reference for the same route', () => {
     const [definition] = attachControllerRefs(
       [{ method: 'post', path: '/posts', controller: { name: 'PostController', action: 'store' } }],
-      { routes: [{ method: 'POST', path: '/posts', controller: placed }] as never },
+      { routes: [{ method: 'POST', path: '/posts', controller: placed }], warnings: [] } as never,
     )
     expect(definition?.controller).toEqual(placed)
   })
@@ -347,7 +357,7 @@ describe('attachControllerRefs', () => {
   it('keeps the name when the manifest matches the route more than once', () => {
     const [definition] = attachControllerRefs(
       [{ method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } }],
-      { routes: [{ method: 'POST', path: '/posts', controller: placed }, { method: 'POST', path: '/posts', controller: { ...placed, file: 'modules/blog/x.ts' } }] as never },
+      { routes: [{ method: 'POST', path: '/posts', controller: placed }, { method: 'POST', path: '/posts', controller: { ...placed, file: 'modules/blog/x.ts' } }], warnings: [] } as never,
     )
     expect(definition?.controller).toEqual({ name: 'PostController', action: 'store' })
   })

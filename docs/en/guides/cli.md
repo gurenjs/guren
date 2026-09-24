@@ -375,16 +375,24 @@ you named. From the manifest:
   behind an `auth` alias that a provider registers passes `authz:*`, where the
   routes file loaded on its own reports a guard it does not recognize.
 - A chain that authorizes but never authenticates stays a warning, and the
-  message names the ability it checks. A guest request reaches the gate with a
+  message says what it checks: the ability, any or all of several, or an
+  ability decided at request time. A guest request reaches the gate with a
   `null` user, and a policy may let it through.
 - A name no alias or group registers anywhere in the app is reported as
-  unresolved, ahead of any guard beside it: mounting such a route fails at boot,
-  unless a `createApp({ boot })` callback registers the name.
+  unresolved. Mounting such a route fails at boot, so the warning comes ahead of
+  any guard beside it. When something introspection does not run could register
+  the name (a `createApp({ boot })` callback, or a provider whose `introspect()`
+  hook replaces its `register()`), the message names it, and a guard or a
+  `userOrFail()` in the action still passes the route.
 - A controller is found by its file and export. Two modules may each declare a
-  `ReportController`; each route is judged against its own class, and
-  `controller-name-collision:*` is reported only for a class some route reaches
-  by name alone, such as a class declared inside the routes file. The body checks
-  (`validateBody()`, `userOrFail()`) still read the action's source.
+  `ReportController`, and each route is judged against its own class. A class
+  declared outside the controller files (inside the routes file, or by a
+  package) is not judged by a controller file's class of the same name: the
+  route is reported as not analyzable. `controller-name-collision:*` is reported
+  only when the manifest cannot place a route's class, because the file declaring
+  it failed to import or the class was found through a re-export, and two files
+  declare that name. The body checks (`validateBody()`, `userOrFail()`) still
+  read the action's source.
 
 `guren check` uses the same lookup for its agent-route rules when an agent
 route names a class two files declare. Raw SQL, secrets, mass assignment and
