@@ -1127,7 +1127,8 @@ files and is tuned from the metrics in §7.
 **Amended after re-review (2026-09-23), Part 3:** those metrics are not
 recorded yet (a step record in `plan/state.ts` holds fingerprints, not the
 files touched or lines changed). Part 3 records them, and the threshold stays
-at five files until they exist (Open Question 3).
+at five files until they exist (Open Question 3). They are recorded now (the
+per-step work note under Phasing); the threshold waits for enough plans.
 
 **Test skeletons are generated the same way.** Each acceptance behaviour
 becomes one `TestApp` test whose title starts with its id
@@ -1507,8 +1508,9 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
   the readers say, with a note. For that the status report carries each
   element's `files` and `completesAt`, and its summary counts all eight states.
 - Of the per-step metrics of §7, the state carries `durationMs` per command
-  and per step and the `Stop` hook's continuations; `total_cost_usd`, files
-  touched and lines changed are not recorded yet. `--ci` exits 1 when a step
+  and per step, the `Stop` hook's continuations, and files touched and lines
+  changed (the per-step work note under Phasing); `total_cost_usd` is not
+  recorded yet. `--ci` exits 1 when a step
   the run covered did not verify.
 - The `.gitignore` written beside the state ignores itself as well, so a
   verify leaves the working tree as clean as it found it, which `plan:next`
@@ -2763,7 +2765,8 @@ marks what was read and not run.
    an `alter` whose properties all held at approval, which `plan:approve`
    computes from the approval readings and is not a §2 check (§6 amendment
    on readings).
-3. Files touched and lines changed, recorded per step.
+3. Files touched and lines changed, recorded per step. Implemented, as the
+   per-step work note below reads it.
 4. `plan --print-prompt`, `plan:revise`, and an in-session plan-writing
    harness skill.
 5. The mounted-routes experiment.
@@ -2772,6 +2775,39 @@ marks what was read and not run.
 
 Deferred: the headless producer, `--ask`, the headless `plan --revise`, page
 emission, the characterization step, and retuning the step width.
+
+*Per-step work* (item 3). `plan:verify` records on each step record a `work`
+entry, `packages/cli/src/plan/work.ts`. It is a measurement: nothing refuses
+or blocks on it.
+
+- The step starts at the commit `HEAD` names when `plan:next` first marks it,
+  kept on the mark as `from`. Marking the same step again (resumed, after a
+  stall or an approval stall) keeps it. `plan:next` refuses a dirty tree for
+  a new step, so that commit holds none of the step's work.
+- A run of the marked step measures `git diff --numstat --no-renames` from
+  there to the working tree, plus untracked files, under the application
+  root. Several commits and uncommitted work count alike; a rename counts as
+  a removed file and an added one.
+- The first run that verifies the step settles the measurement. Every later
+  record carries it: a drift re-check under a fresh mark, a failed re-check
+  and its fix, the `Stop` hook, `--step` again. Work after that run is not
+  counted, and neither is work a revision sends the step back for: the
+  record of another plan digest still carries the settled measurement.
+- Excluded: the plan, its approvals, decision log and rendered page;
+  `.guren/`, which holds codegen output and this state; lockfiles; and
+  drizzle-kit snapshots. A migration's SQL counts.
+- Not measured, with the reason and never a zero: a step no mark names (a
+  whole-plan run, `--step` while another step is marked), a mark with no
+  start (no git, no commit), and a start that is not in the repository or no
+  longer an ancestor of `HEAD`. The baseline's `rev` is no fallback for a
+  first step: the plan and approval commits land after it.
+- It stays in the state file, as §7 says. That file is per machine, which
+  suits a default retuned by whoever runs the loop, and `from` names the
+  commit the numbers can be recomputed from. `plan:close` copies nothing of
+  it into the committed docs.
+- Reported as a `work:` line per step by `plan:verify` and the `Stop` hook,
+  in the record under `--json`, and by step id under `verification.work` in
+  `plan:status --json`.
 
 *The mounted-routes experiment* (D3). It runs on `examples/blog` or a
 scratch copy inside the repository. Outside it, `@guren/*` could resolve from
@@ -2896,7 +2932,8 @@ code and never from an earlier plan.
 3. **Step width.** Five files is a starting guess. The published number
    describes bug fixing in unfamiliar repositories, which this is not.
    **Held (2026-09-23):** five files stays until Part 3 records files touched
-   and lines changed per step; the width is retuned from those numbers.
+   and lines changed per step; the width is retuned from those numbers. They
+   are recorded now (Part 3, item 3); the retuning waits for enough plans.
 4. ~~**View detail.** Fields, actions and states are in. Should a plan also carry
    layout (a wireframe-level description), or does that belong to prototype
    mode (RFC 0021), with a plan able to request `make:feature --prototype`?~~

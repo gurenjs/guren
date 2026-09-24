@@ -10,6 +10,7 @@ import { basename } from 'node:path'
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { CliError } from './cli-error'
 import { readScripts } from './command-output'
+import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
 import { formatPlanStatus, type PlanStatusReport, PLAN_STATUS_REPORT_VERSION } from './plan-status'
 import type { PlanAppState } from './plan/app-state'
@@ -17,11 +18,12 @@ import { approvedReadings, requirePlanApproval } from './plan/approvals'
 import { judgeFreshness, type PlanFreshness } from './plan/freshness'
 import { hasBaseline } from './plan/render'
 import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress, type PlanStepContext } from './plan/step-context'
-import { planDigest, planSlug, readPlanState, writePlanStepRecord, type PlanStepRecord } from './plan/state'
+import { planDigest, planSlug, readPlanState, writePlanStepRecord, type PlanStepRecord, type PlanStepWork } from './plan/state'
 import { judgePlan, type PlanStatus } from './plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds } from './plan/tasks'
 import { hashFiles, overlayVerification, readPlanWaivers, recordDrift, recordStillHolds, type PlanVerificationSummary } from './plan/verification'
 import { PlanVerifier, type PlanStepVerification } from './plan/verify'
+import { measureStepWork, stepWork } from './plan/work'
 import { runCaptured } from './subprocess'
 
 /** Per command. A migration or a suite past this is an environment to look at, not a slow step. */
@@ -138,7 +140,16 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
     const recheck = record !== undefined && drifted(stepId)
     const tests = findPlanStep(derivation, stepId)?.step.verify.includes('tests:fail') === true
     const statically = recheck && tests
-    const verification = statically ? await verifier.recheckTests(stepId, record) : await verifier.verify(stepId)
+    const ran = statically ? await verifier.recheckTests(stepId, record) : await verifier.verify(stepId)
+    const work = await stepWork({
+      stepId,
+      planFile: toPosixRelative(root, path),
+      active: before.state?.active,
+      previous: record,
+      outcome: ran.record.outcome,
+      measure: (from) => measureStepWork(root, path, from),
+    })
+    const verification = { ...ran, record: { ...ran.record, work } }
     steps.push(verification)
     const verified = verification.record.outcome === 'verified'
     // A failed static re-check stays drifted: once recorded, the next run would ask a `tests:fail` it can never pass.
@@ -178,6 +189,14 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   }
 }
 
+/** `3 files (1 binary), +120 -8 since 1a2b3c4d5e6f`, or why the work was not measured. */
+export function describeStepWork(work: PlanStepWork): string {
+  if (!work.measured) return `not measured, ${work.reason}`
+  const binary = work.files.filter((file) => file.added === null).length
+  const files = `${work.files.length} ${work.files.length === 1 ? 'file' : 'files'}${binary > 0 ? ` (${binary} binary)` : ''}`
+  return `${files}, +${work.added} -${work.removed} since ${work.from.slice(0, 12)}`
+}
+
 /** One step's record as `plan:verify` prints it; the Stop hook prints the same lines. */
 export function formatPlanStepRecord(stepId: string, record: PlanStepRecord): string[] {
   const lines = [`${stepId}: ${record.outcome} (${record.durationMs} ms)`]
@@ -189,6 +208,7 @@ export function formatPlanStepRecord(stepId: string, record: PlanStepRecord): st
   for (const behaviour of record.acceptance) lines.push(`  ${behaviour.status.padEnd('pending'.length)}  [${behaviour.id}]`)
   for (const element of record.incomplete) lines.push(`  not at its completion state: ${element}`)
   for (const element of record.waived) lines.push(`  waived, so not judged here: ${element}`)
+  if (record.work) lines.push(`  work: ${describeStepWork(record.work)}`)
   return lines
 }
 

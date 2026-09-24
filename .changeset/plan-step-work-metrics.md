@@ -1,0 +1,5 @@
+---
+'@guren/cli': minor
+---
+
+`guren plan:verify` records, per step, the files touched and the lines added and removed by the work that implemented it (RFC 0030 §7, Part 3). `plan:next` now stores on its mark the commit `HEAD` names when it first marks a step (`from`), and keeps it when it marks the same step again after a stall. A run of the marked step measures from there to the working tree, commits and uncommitted changes alike, untracked files included. The plan and its approvals, decision log and rendered page, `.guren/`, lockfiles and drizzle-kit snapshots are left out, and a migration's SQL counts. The first run that verifies the step settles the numbers, so a later drift re-check, the Stop hook or another `--step` run keeps them. A step no mark names, a mark with no start commit, and a start commit that is gone from the history record `measured: false` with the reason, never a zero. The numbers appear as a `work:` line per step in `plan:verify` and the Stop hook, as `work` on each step record in `--json`, and by step id under `verification.work` in `plan:status --json`. Nothing refuses or blocks on them.

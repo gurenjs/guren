@@ -302,6 +302,33 @@ describe('plan:next', () => {
     expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.stalled).toBeUndefined()
   })
 
+  test('should mark a step at the commit HEAD names, keep that start when the stalled step is marked again, and start the next step at its own', async () => {
+    const { app, plan } = await createApp('started')
+    git(app, 'init', '-q')
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'init')
+    const head = (): string => Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd: app, stdout: 'pipe' }).stdout.toString().trim()
+    const start = head()
+
+    await planNextFile(plan, { appRoot: app, now: NOW })
+    expect((await readState(app)).active).toEqual({ plan: 'comments.plan.json', step: SCAFFOLD, startedAt: '2026-09-21T10:00:00.000Z', continuations: 0, from: start })
+
+    // The step's first session committed part of its work, then the hook gave up on it.
+    await writeFile(join(app, 'lib.ts'), 'export const a = 2\n', 'utf8')
+    git(app, 'commit', '-q', '-am', 'the step, part one')
+    const marked = (await readState(app)).active!
+    await writeState(app, { active: { ...marked, continuations: 3, stalled: { at: 't', reason: '3 continuations on this step' } } })
+
+    const again = await planNextFile(plan, { appRoot: app, now: NOW })
+    expect(again.step!.stalled).toBeDefined()
+    expect((await readState(app)).active).toEqual({ plan: 'comments.plan.json', step: SCAFFOLD, startedAt: '2026-09-21T10:00:00.000Z', continuations: 0, from: start })
+
+    await writeState(app, { steps: { [SCAFFOLD]: await holding(app) }, active: (await readState(app)).active })
+    expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.id).toBe(TESTS)
+    expect((await readState(app)).active!.from).toBe(head())
+    expect(head()).not.toBe(start)
+  })
+
   test('should keep the mark of a step it returns again, continuations included', async () => {
     const active = { plan: 'comments.plan.json', step: SCAFFOLD, startedAt: '2026-09-20T00:00:00.000Z', continuations: 2, lastSignature: 'sig' }
     const { app, plan } = await createApp('resumed', { active })
