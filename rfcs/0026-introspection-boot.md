@@ -713,7 +713,10 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 > - `load-routes.ts` is not a fallback only. It is the Zod source for every
 >   renderer on both paths, the path for an app whose entry does not import yet,
 >   and what `plan:*`, `openapi:generate`, `route:list`, `tool:list` and the dev
->   MCP server read. The join lives in `packages/cli/src/app-routes.ts`.
+>   MCP server read. The join the Part 2d consumers use lives in
+>   `packages/cli/src/app-routes.ts`. Part 2c's `attachControllerRefs()`, which
+>   `guren context <Entity>` still reads, joins on method, path and action alone
+>   and drops a repeated key; moving it onto the same join is left to a follow-up.
 
 ### 6. Enabling refactor: one module per command
 
