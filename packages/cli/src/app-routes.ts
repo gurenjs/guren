@@ -58,13 +58,13 @@ export function definitionFromEntry(entry: RouteEntry): RouteDefinition {
   }
 }
 
-export type AppRouteSource =
+export type IntrospectedRouteSource =
   | { evidence: 'manifest'; manifest: AppManifest; unmatched: RouteEntry[] }
   | { evidence: 'static'; reason?: string }
 
-export interface AppRouteDefinitions {
+export interface IntrospectedRouteDefinitions {
   definitions: RouteDefinition[]
-  source: AppRouteSource
+  source: IntrospectedRouteSource
 }
 
 /**
@@ -74,10 +74,10 @@ export interface AppRouteDefinitions {
  * routes file is loaded on either path, since its Zod is what the callers render, and its load
  * error propagates on both.
  */
-export async function loadAppRouteDefinitions(
+export async function loadIntrospectedRouteDefinitions(
   introspect: IntrospectSource | undefined,
   loadStatic: () => Promise<RouteDefinition[]>,
-): Promise<AppRouteDefinitions> {
+): Promise<IntrospectedRouteDefinitions> {
   const [introspected, definitions] = await Promise.all([introspectedRoutes(introspect), loadStatic()])
   if (introspected.status === 'static') {
     return { definitions, source: { evidence: 'static', ...(introspected.reason ? { reason: introspected.reason } : {}) } }

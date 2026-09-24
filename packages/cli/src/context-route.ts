@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
 import type { AgentRouteMetadata, RouteDefinition } from '@guren/server'
-import { loadAppRouteDefinitions } from './app-routes'
+import { loadIntrospectedRouteDefinitions } from './app-routes'
 import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
 import type { IntrospectSource } from './manifest-section'
 import { schemaToTypeString } from './schema-type-extractor'
@@ -138,7 +138,7 @@ export async function loadContextRoutes(
   if (target.silentlyAbsent) return []
 
   try {
-    const { definitions } = await loadAppRouteDefinitions(introspect, () => loadRouteDefinitions(resolve(cwd, target.path), cwd))
+    const { definitions } = await loadIntrospectedRouteDefinitions(introspect, () => loadRouteDefinitions(resolve(cwd, target.path), cwd))
     return definitions.map(routeDefinitionToContextRoute)
   } catch (error) {
     loadErrors?.push(error instanceof Error ? error.message : String(error))

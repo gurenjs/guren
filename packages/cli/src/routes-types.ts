@@ -1,7 +1,7 @@
 import { relative, resolve } from 'node:path'
 import { consola } from 'consola'
 import type { DerivedAgentTool, RouteDefinition as ServerRouteDefinition } from '@guren/server'
-import { loadAppRouteDefinitions } from './app-routes'
+import { loadIntrospectedRouteDefinitions } from './app-routes'
 import { introspectApp } from './introspect'
 import { PATH_PARAM_PATTERN, escapeSingleQuoted as escapeSingleQuotes, escapeTemplateLiteral as escapeTemplateSegment, extractPathParamNames, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { CONTRACT_SEGMENTS } from './contract-segments'
@@ -49,7 +49,7 @@ async function loadCodegenRoutes(routesFile: string, appRoot: string, introspect
   if (!introspect) return loadStatic()
 
   const introspection = introspectApp(appRoot)
-  const { definitions, source } = await loadAppRouteDefinitions(() => introspection, loadStatic)
+  const { definitions, source } = await loadIntrospectedRouteDefinitions(() => introspection, loadStatic)
   if (source.evidence === 'static') {
     const run = await introspection
     const reason = run.status === 'failed' ? `the app could not be introspected (${run.reason}): ${run.message.split('\n')[0]}` : source.reason

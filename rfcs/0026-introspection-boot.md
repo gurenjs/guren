@@ -401,14 +401,15 @@ every check that asks: the same shape as `check.ts`'s `loadRouteGraph()`
 
 | Module | Today | After Part 2 | Part 3 |
 |---|---|---|---|
-| `deploy-runtime.ts` | AST scan (`:156-467`) feeding `judgePasswordHashing`, `judgeRuntimeStores`, `judgeProviderDiscovery` (`:661-822`) | `DeployRuntimeAnalysis` built from `auth.providers[*].hasher`, `session`, `cache`, `queue`, `providers[*].source` | Extractor deleted; `checkDeployRuntime(cwd)` keeps its signature, so `@guren/core/internal/deploy-check` (`deploy-check.ts:33-58`) is untouched |
-| `session-config.ts`, `sessions-check.ts` | AST for `SessionConfig`, regex for the binding provider | `session.source === 'none'` while a `SessionConfig` file exists is the inert-config finding; `stores[*].table` against the schema export list (the schema half stays AST, §5 last row) | `session-config.ts` reduced to the schema-binding lookup |
-| `attachments-check.ts` | AST over `configureAttachments()` arguments, route lookup | `attachments.{table,disk,delivery}`; `delivery.mounted` from the routes | Argument parsing deleted; `Attachable(...)` model detection stays AST (a model file is not executed by registration) |
-| `controller-methods.ts` | key `ClassName.method`, collisions | key `file#export.method` from `ControllerRef`; the body scan itself stays | `ControllerNameCollision` reported only for `name-only` refs |
-| `audit.ts` auth/validation | middleware names + body regex | resolved `middleware[]` with capabilities and `ability`; contract `schemas.body` presence; body regex only for the in-action `userOrFail()` / `validateBody()` case | unchanged scope |
+| `deploy-runtime.ts` | AST scan (`:156-467`) feeding `judgePasswordHashing`, `judgeRuntimeStores`, `judgeProviderDiscovery` (`:661-822`) | 2a: `requiresBun` of `auth.hasher` and `auth.providers[*]`, the selected session store's `perProcess`, a `memory` cache default. Target detection, provider discovery, OAuth state stores, the queue, explicit `Memory*Store` constructions, `autoSession: false`, a `sessionOptions.store` factory and a `useModel()` in `boot()` stay on the scan | The hasher, session-store and cache halves of the extractor, once a failed introspection reports those verdicts `-unverified` rather than scanning. The rest stays until the manifest carries it. `checkDeployRuntime(cwd)` keeps its signature, so `@guren/core/internal/deploy-check` (`deploy-check.ts:33-58`) is untouched |
+| `session-config.ts`, `sessions-check.ts` | AST for `SessionConfig`, regex for the binding provider | 2b: `session.source` for the binding; each `database` store's `table` against the tables the schema reader names | The binding-provider regex. The `SessionConfig` reader stays: a config the app does not read, and a missing named export (a link error, which fails the introspection), are judged from source |
+| `attachments-check.ts` | AST over `configureAttachments()` arguments, route lookup | 2b: `attachments.{table,disk,delivery}`, `delivery.mounted`, the storage section's driver for a redirect disk | Argument parsing for a call that runs at register time. A call inside a function (a provider's `boot()`), the disk's `root` and `Attachable(...)` detection stay source |
+| `controller-methods.ts` | key `ClassName.method`, collisions | 2c: `byExport` and `file#export.method` through `controllerMethodFor()`; a collision is reported only for a class some route reaches by name | Nothing: the name-keyed maps are the fallback, and the key `plan:*` judges by |
+| `audit.ts` auth/validation | middleware names + body regex | 2c: resolved `middleware[]` with capabilities and `ability`, `schemas.body` presence; the routes file after a failure or a provider that threw | The routes-file verdicts only if a failed introspection becomes an unverified audit; unchanged scope otherwise |
 | `audit.ts` raw SQL, secrets, mass assignment, CSRF exemptions | source and `node_modules` scans (`:656-660`, `csrf-exemption-audit.ts`) | unchanged: body-level and dependency-level facts | unchanged |
-| `route-contract-check`, `agent-route-check`, `agents-types`, `routes-types`, `prototype-check` | `loadRouteDefinitions()` | the manifest's `routes` (a `RouteDefinition` superset) plus `module` provenance; no rule changes | `load-routes.ts` becomes the static fallback only |
-| `doctor.ts` deploy section, `context.ts`, `spec-generate.ts` | `analyzeDeployRuntime`, `loadContextRoutes` | manifest | |
+| `route-contract-check`, `agent-route-check`, `prototype-check` | `loadRouteDefinitions()` | 2d: `manifest.routes`, asked for by content. Params keys come from `properties` and their severity from `required`; the routes file's Zod decides where the rendering is short of the schema | Nothing: `load-routes.ts` is the fallback, and a params schema the walker renders short has only its Zod |
+| `agents-types`, `routes-types` (codegen) | `loadRouteDefinitions()` | 2d: the routes file by default. `codegen --introspect` takes the route set from the manifest and each route's Zod from the routes file; `planAgentManifest()` follows codegen's default | Nothing: every renderer reads Zod, and the manifest carries JSON Schema (Decision 5) |
+| `doctor.ts`, `context.ts`, `spec-generate.ts` | `analyzeDeployRuntime`, `loadContextRoutes` | 2a and 2d: doctor's deploy section and `prototype-routes`; `guren context` lists the manifest's routes with the routes file's Zod; the spec views stay on the routes file | Nothing: `spec:generate` writes committed files that the in-process gate regenerates without introspecting |
 | `docs-check`, `docs-index`, `i18n-check`, `spec-check`, `arch-check`, `audit:prose` | static | static by nature: prose, links, import graphs | |
 | `schema-parser`, `schema-check`, `schema-binding` | Drizzle AST | static: the database is never opened, and `db/schema.ts` is data, not behaviour | |
 | all `make:*` / `add` scaffolders, `route-registrar` patching, `inflect`, `drizzle-pins` | static | static: they write source, and must run on an app that does not compile yet | |
@@ -633,6 +634,81 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   wiring by `Class.action` throughout, so a collision stays `blocked` there on
 >   either path. Lifting it needs module-qualified action keys in RFC 0030's
 >   status reader.
+
+> **Amended in implementation (Part 2d):** the table above records Part 2 as
+> shipped, and its last column what Part 3 can remove given what the manifest
+> carries.
+>
+> - `route-contract-check`, `agent-route-check` and `prototype-check` judge
+>   `manifest.routes` when `guren check` introspects. Each asks for the run's one
+>   introspection only after the routes file shows its content: a params schema
+>   or a binding, an agent route, a prototype fixture or a `prototype` route. So
+>   a route a provider or plugin registers is judged only beside such a route,
+>   and a module in `modules/` that `createApp()` never mounts drops out. A
+>   provider that threw, a failed introspection, and `--routes` (the manifest
+>   describes the entry, as in `guren audit`) send the rules back to the routes
+>   file with `evidence: 'static'`.
+> - Params keys are the JSON Schema's `properties` (Decision 5), and a key's
+>   severity is `required`. The walker's `isOptional(schema, 'input')` and
+>   `permitsOmission()` stay two functions, and a test registers one route per
+>   wrapper to pin that both paths give every stray key the same severity. The
+>   manifest is not used for a route whose params schema it renders short: not an
+>   object with `properties` (a nullable object is `anyOf`, a transform a bare
+>   `object`), a `schema-partial` note under it (the walker drops `z.any()`), or
+>   keys other than the ones the routes file's Zod declares (it drops
+>   `z.undefined()` without a note). The routes file's definition of the same
+>   route, joined on method, path, name and controller action, then decides
+>   (`static`); a route with no such definition is an unreadable warning, never
+>   a pass.
+> - Evidence: a verdict that read or looked for a controller body is `static`
+>   (agent-route authorization, `readOnlyHint` honesty, the Inertia output
+>   finding, the approval-queue scan), and so are `prototype-app-wiring` and an
+>   unparsable fixture. Everything read from the route is `manifest`.
+> - The agent-route rules introspect whenever the routes file has an agent
+>   route, no longer only when one names a controller, since the manifest now
+>   supplies the routes themselves.
+> - Codegen stays on the routes file by default, and `guren codegen --introspect`
+>   (and `routes:types --introspect`) opts in. Three reasons. The Vite plugin runs
+>   codegen on every edit to a watched file, and a child process per keystroke is
+>   the cost Part 2a kept off the in-process callers. The generated files must
+>   not depend on which path wrote them, and the dev MCP server and the Vite
+>   plugin never introspect. And every renderer (`schemaToTypeString()`,
+>   `schemaPropertyTypes()`, the plugin-ai input types) reads Zod, which the
+>   manifest does not carry. So `--introspect` means: the manifest decides which
+>   routes exist and in which order, and each route the routes file also
+>   registers is rendered from that definition. The two paths write the same
+>   bytes exactly when the route sets match: measured on `examples/blog` (29
+>   routes) and `web/` (22), the same set in the same order on both, every
+>   generated file identical. A route only the manifest has is rendered without
+>   schema types, with a warning naming it; an agent tool on it comes from
+>   `manifest.agentTools`. A failed introspection writes from the routes file and
+>   says why; a routes file that fails to load fails as before, since its Zod is
+>   required.
+> - `planAgentManifest()`, which `check` and `doctor` ask whether
+>   `.guren/agents.gen.ts` should exist, stays on the routes file: it is the rule
+>   for what codegen writes by default, and a check reading another derivation
+>   would ask for a file codegen then deletes.
+> - The spec views stay on the routes file, with no flag. `docs/spec/` is
+>   committed and drift-gated, and `guren gate` and the edit hook run
+>   `runCheck()` in process, which does not introspect (2a). A `spec:generate`
+>   that read the manifest would write a `screens.md` the gate regenerates
+>   without an app's provider routes and then reports as drift. The outputs match
+>   on blog and web; the reason is the second writer, not a measured difference.
+> - `guren context` lists the introspected app's routes by default, and
+>   `--no-introspect` or `--routes` reads the routes file. Type strings are still
+>   rendered from the routes file's Zod, so a provider's route is listed with
+>   none, and `controller` keeps its `{ name, action }` shape in `--json`. The
+>   dev MCP server's context stays on the routes file. `guren context <Entity>`
+>   passes the flag to `generateEntityContext()`, which introspects only when a
+>   route reaches a class two files declare (2c).
+> - `guren doctor`'s `prototype-routes` counts the manifest's routes once a
+>   routes file passes the `prototype` handler, with `evidence` and, when it read
+>   the routes file for a reason, `evidenceReason`. Doctor still adds no warning
+>   for a failed introspection.
+> - `load-routes.ts` is not a fallback only. It is the Zod source for every
+>   renderer on both paths, the path for an app whose entry does not import yet,
+>   and what `plan:*`, `openapi:generate`, `route:list`, `tool:list` and the dev
+>   MCP server read. The join lives in `packages/cli/src/app-routes.ts`.
 
 ### 6. Enabling refactor: one module per command
 
