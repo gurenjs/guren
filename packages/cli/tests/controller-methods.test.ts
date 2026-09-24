@@ -345,6 +345,21 @@ class NoteController extends Controller {
     expect(controllerMethodFor(result, nameOnly)).toMatchObject({ by: 'name', info: { filePath: 'app/Http/Controllers/NoteController.ts' } })
   })
 
+  it('reads a name-only reference the routes file or entry declares as elsewhere, even beside an unexported class', async () => {
+    const result = await scan({
+      'app/Http/Controllers/NoteController.ts': "import { Controller } from '@guren/core'\n\nclass NoteController extends Controller {\n  async store() { return this.json('x') }\n}\n",
+    })
+    const nameOnly = { name: 'NoteController', action: 'store', file: null, exportName: null, resolved: 'name-only' as const, unimported: [] }
+    expect(controllerMethodFor(result, { ...nameOnly, inRouteSource: true })).toMatchObject({ by: 'elsewhere', info: undefined })
+  })
+
+  it('counts a type-only export as no export of the class', async () => {
+    const result = await scan({
+      'app/Http/Controllers/NoteController.ts': "import { Controller } from '@guren/core'\n\nclass NoteController extends Controller {\n  async store() { return this.json('x') }\n}\n\nexport type { NoteController }\nexport { type NoteController as Notes }\n",
+    })
+    expect(result.declarations[0]?.exportNames).toEqual([])
+  })
+
   it('follows the name only to a declaration that could be the routed class, not to a last-scanned exported one', async () => {
     const result = await scan({
       'app/Http/Controllers/A.ts': body('failed-import'),

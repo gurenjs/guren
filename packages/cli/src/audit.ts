@@ -48,6 +48,7 @@ import {
   type ControllerNameCollision,
   type ControllerTarget,
   manifestRouteTargets,
+  routeSourceClasses,
 } from './controller-methods'
 import type { CheckEvidence } from './check-result'
 import { introspectApp } from './introspect'
@@ -613,7 +614,7 @@ async function loadAuditRoutes(cwd: string, options: RunAuditOptions): Promise<A
   const routes = await introspectedRoutes(introspect)
   if (routes.status === 'described') {
     const { manifest } = routes
-    const targets = manifestRouteTargets(manifest)
+    const targets = manifestRouteTargets(manifest, await routeSourceClasses(cwd, manifest, routesFile))
     return {
       analyzed: true,
       audited: targets.map(auditedFromManifest),
@@ -835,7 +836,7 @@ function auditRoutes(
             `authz:${routeLabel}`,
             routeLabel,
             'warn',
-            `Middleware ${unresolved.map((name) => `'${name}'`).join(', ')} is registered as no alias or group anywhere in the app, `
+            `Middleware ${unresolved.map((name) => `'${name}'`).join(', ')} is not registered as an alias or group in the introspected app, `
             + 'so nothing says what the chain enforces, and mounting the route fails at boot'
             + (unregisteredBy.length > 0
               ? ` unless something introspection skips registers it: ${unregisteredBy.join(' or ')}.`

@@ -489,7 +489,7 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
   const withControllers = agentDefinitions.some((definition) => definition.controller)
   const [scan, placed] = await Promise.all([
     withControllers ? parseControllerMethods(cwd, options.cache) : EMPTY_CONTROLLER_SCAN,
-    withManifestControllerRefs(agentDefinitions, options.introspect),
+    withManifestControllerRefs(agentDefinitions, options.introspect, { cwd, routesFile: resolve(cwd, routesFile) }),
   ])
   agentDefinitions = placed
 

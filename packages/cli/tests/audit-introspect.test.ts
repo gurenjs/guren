@@ -5,6 +5,8 @@ import { join, resolve } from 'node:path'
 import { runAudit, type AuditFinding, type AuditReport } from '../src/audit'
 import { runCheck } from '../src/check'
 import { generateEntityContext } from '../src/entity-context'
+import { introspectApp } from '../src/introspect'
+import { controllerImportFailures } from '../src/introspect-controller-file'
 import {
   assertWorkspaceBuilt,
   createTempRoot,
@@ -254,7 +256,7 @@ describe('guren audit against the introspected app (RFC 0026 §5)', () => {
 
   test('reports an alias nothing in the app registers as unresolved, not as an unrecognized guard', () => {
     expect(manifest['authz:DELETE /posts/:id']?.status).toBe('warn')
-    expect(manifest['authz:DELETE /posts/:id']?.message).toContain("'auth.admin' is registered as no alias or group")
+    expect(manifest['authz:DELETE /posts/:id']?.message).toContain("'auth.admin' is not registered as an alias or group")
     expect(source['authz:DELETE /posts/:id']?.message).toContain('named like an auth guard')
   })
 
@@ -333,28 +335,42 @@ export function registerNotes(router: Router): void {
     expect(findings['authz:POST /notes']?.status).toBe('pass')
   })
 
-  test('a controller file whose import throws may be the routed class: its body is read, and the collision reported', async () => {
-    const legacy = (validates: boolean, tail = '') => `import { Controller } from '@guren/core'
+  const LEGACY_ROUTES = "import { Controller, type Router } from '@guren/core'\n\nclass LegacyController extends Controller {\n  async store() {\n    return this.json(await this.input())\n  }\n}\n\nexport function registerWebRoutes(router: Router): void {\n  router.post('/legacy', [LegacyController, 'store'])\n}\n"
+  const legacy = (options: { exported: boolean; validates: boolean; tail?: string }) => `import { Controller } from '@guren/core'
 
 ${PAYLOAD}
 
-export class LegacyController extends Controller {
+${options.exported ? 'export ' : ''}class LegacyController extends Controller {
   async store() {
-    return this.json(await this.${validates ? 'validateBody(Payload)' : 'input()'})
+    return this.json(await this.${options.validates ? 'validateBody(Payload)' : 'input()'})
   }
 }
-${tail}`
-    const dir = await scaffoldApp('import-throws', {
-      'routes/web.ts': "import { Controller, type Router } from '@guren/core'\n\nclass LegacyController extends Controller {\n  async store() {\n    return this.json(await this.input())\n  }\n}\n\nexport function registerWebRoutes(router: Router): void {\n  router.post('/legacy', [LegacyController, 'store'])\n}\n",
-      'app/Http/Controllers/Broken.ts': legacy(true, "\nthrow new Error('broken at import')\n"),
-      'app/Http/Controllers/Working.ts': legacy(false),
-    })
-    const report = await runAudit({ cwd: dir, introspect: true })
-    const findings = byKey(report)
 
-    expect(report.routeSource).toEqual({ from: 'manifest' })
-    expect(findings['validation:POST /legacy']?.status).toBe('pass')
-    expect(findings['controller-name-collision:LegacyController']?.status).toBe('fail')
+export const loaded = true
+${options.tail ?? ''}`
+
+  test('a class the routes file declares is not judged by an unexported same-named class in a controller file', async () => {
+    const dir = await scaffoldApp('routes-file-beside-unexported', {
+      'routes/web.ts': LEGACY_ROUTES,
+      'app/Http/Controllers/Legacy.ts': legacy({ exported: false, validates: true }),
+    })
+    const findings = byKey(await runAudit({ cwd: dir, introspect: true }))
+    expect(findings['validation:POST /legacy']?.status).toBe('warn')
+    expect(findings['validation:POST /legacy']?.message).toContain('could not be analyzed')
+  })
+
+  test('a controller file whose import throws is reported by the child, and its class does not stand in for the routes file\'s', async () => {
+    const dir = await scaffoldApp('import-throws', {
+      'routes/web.ts': LEGACY_ROUTES,
+      'app/Http/Controllers/Broken.ts': legacy({ exported: true, validates: true, tail: "\nthrow new Error('broken at import')\n" }),
+    })
+    const introspection = await introspectApp(dir)
+    if (introspection.status !== 'ok') throw new Error(`expected ok, got ${JSON.stringify(introspection)}`)
+    expect(controllerImportFailures(introspection.manifest)).toEqual(['app/Http/Controllers/Broken.ts'])
+
+    // The routed class is the routes file's, which reads its body unvalidated: never a pass.
+    const findings = byKey(await runAudit({ cwd: dir, introspect: true }))
+    expect(findings['validation:POST /legacy']?.status).toBe('warn')
   })
 
   test('an unregistered alias is never passed by a guard, and names a provider whose introspect() hook replaced register()', async () => {

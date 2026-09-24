@@ -334,8 +334,8 @@ and cache store it selects, and whether a provider threw while registering.
 
 A run introspects only when some check needs it: the app declares a deploy
 plugin or the Lambda adapter, has a session config, calls
-`configureAttachments()`, has a model that mixes in `Attachable(...)`, or has a
-route that declares `.agent()`. Each
+`configureAttachments()`, has a model that mixes in `Attachable(...)`, or has
+a route that declares `.agent()` on a controller action. Each
 run introspects at most once, and a `--changed` run that changed no source
 file does not introspect at all. The manifest is read with this environment's
 `.env`, so a store selected by an environment variable is judged at its local
@@ -387,17 +387,19 @@ you named. From the manifest:
 - A controller is found by its file and export. Two modules may each declare a
   `ReportController`, and each route is judged against its own class. When a
   route's class matches no export of the controller files (a class declared in
-  the routes file, say) while one of them exports a class of the same name, that
-  other class's body is not used: the route is reported as not analyzable. A
-  class a controller file declares without exporting it keeps its body. `controller-name-collision:*` is reported
-  only when the manifest cannot place a route's class, because the file declaring
-  it failed to import or the class was found through a re-export, and two files
-  declare that name. The body checks (`validateBody()`, `userOrFail()`) still
-  read the action's source.
+  the routes file, say), an exported class of the same name is not used, and
+  neither is any same-named class while the routes file or the entry declares
+  the name: the route is reported as not analyzable. Otherwise a same-named
+  class a controller file declares without exporting it, or one in a file that
+  failed to import during introspection, is read by name.
+  `controller-name-collision:*` is reported only when such a name fallback
+  meets two files declaring the name, or the class was found through a
+  re-export. The body checks (`validateBody()`, `userOrFail()`) still read the
+  action's source.
 
 `guren check` uses the same lookup for its agent-route rules, so it introspects
-an app with agent routes. Raw SQL, secrets, mass assignment and
-CSRF exemptions are judged from source either way.
+an app whose agent routes name a controller. Raw SQL, secrets, mass assignment
+and CSRF exemptions are judged from source either way.
 
 Route-level findings carry `evidence`: `manifest` when the manifest alone
 decided them (a guard's capability, a body schema the route enforces), `static`

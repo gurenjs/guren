@@ -1,4 +1,4 @@
-import { relative, sep } from 'node:path'
+import { relative, resolve, sep } from 'node:path'
 import type {
   BlockStatement,
   ClassDeclaration,
@@ -400,9 +400,10 @@ function classExportNames(body: Statement[]): (node: Statement, classDecl: Class
     if (node.type === 'ExportDefaultDeclaration' && node.declaration.type === 'Identifier') {
       add(node.declaration.name, 'default')
     }
-    if (node.type !== 'ExportNamedDeclaration' || node.source) continue
+    // A type-only export (`export type { X }`, `export { type X }`) exports no runtime class.
+    if (node.type !== 'ExportNamedDeclaration' || node.source || node.exportKind === 'type') continue
     for (const specifier of node.specifiers) {
-      if (specifier.type !== 'ExportSpecifier') continue
+      if (specifier.type !== 'ExportSpecifier' || specifier.exportKind === 'type') continue
       add(specifier.local.name, specifierName(specifier.exported))
     }
   }
@@ -425,6 +426,8 @@ export type ControllerTarget = { name: string; action: string } & Partial<Pick<C
    * import (`controller-import`), where a class it left `name-only` may still be declared.
    */
   unimported?: readonly string[]
+  /** On a manifest's `name-only` reference only: the routes file or the app entry declares a class of this name. */
+  inRouteSource?: boolean
 }
 
 export interface ControllerMethodLookup {
@@ -442,9 +445,10 @@ export interface ControllerMethodLookup {
 
 /**
  * The one lookup of a route's action body (RFC 0026 §5): an `identity` reference reads its own file,
- * one the scan cannot place (a re-export the child picked) follows the name. A `name-only` one matched
- * no export the child imported, so only an unexported declaration or one in a file whose import failed
- * can be it; with none, the routed class is `elsewhere` (the routes file, a package) and has no body.
+ * one the scan cannot place (a re-export the child picked) follows the name. A `name-only` one is no
+ * export of a controller file the app loaded: it is `elsewhere` (no body) when the routes file or the
+ * entry declares its name, else read from an unexported same-named declaration or one in a file whose
+ * import failed, else `elsewhere`.
  */
 export function controllerMethodFor(scan: ControllerMethodScan, controller: ControllerTarget): ControllerMethodLookup {
   const { file, exportName, unimported } = controller
@@ -459,6 +463,7 @@ export function controllerMethodFor(scan: ControllerMethodScan, controller: Cont
   }
   if (controller.resolved === 'name-only' && unimported) {
     const sameName = scan.declarations.filter((declaration) => declaration.className === controller.name)
+    if (controller.inRouteSource && sameName.length > 0) return { info: undefined, by: 'elsewhere', className: controller.name }
     const candidate = sameName.filter((declaration) =>
       declaration.exportNames.length === 0 || unimported.includes(declaration.file)).at(-1)
     if (candidate) return { info: candidate.methods.get(controller.action), by: 'name', className: controller.name }
@@ -471,10 +476,38 @@ export function controllerMethodFor(scan: ControllerMethodScan, controller: Cont
  * The manifest's routes with each controller as the lookup takes it: a `name-only` reference
  * carries the files the child could not import, where its class may still be declared.
  */
-export function manifestRouteTargets(manifest: Pick<AppManifest, 'routes' | 'warnings'>): Array<RouteEntry & { controller?: ControllerTarget }> {
+export function manifestRouteTargets(
+  manifest: Pick<AppManifest, 'routes' | 'warnings'>,
+  routeSourceClasses: ReadonlySet<string> = new Set(),
+): Array<RouteEntry & { controller?: ControllerTarget }> {
   const unimported = controllerImportFailures(manifest)
-  return manifest.routes.map((route) =>
-    route.controller?.resolved === 'name-only' ? { ...route, controller: { ...route.controller, unimported } } : route)
+  return manifest.routes.map((route) => route.controller?.resolved === 'name-only'
+    ? { ...route, controller: { ...route.controller, unimported, inRouteSource: routeSourceClasses.has(route.controller.name) } }
+    : route)
+}
+
+/**
+ * Class names the routes file and the app entry declare, anywhere in the file: a routed class
+ * declared there is the likelier one when a controller file declares the same name unexported.
+ * An unreadable file contributes none.
+ */
+export async function routeSourceClasses(
+  cwd: string,
+  manifest: Pick<AppManifest, 'entry'>,
+  routesFile: string,
+  cache: ParseCache = new ParseCache(),
+): Promise<Set<string>> {
+  const names = new Set<string>()
+  for (const file of [routesFile, manifest.entry.file]) {
+    if (!file) continue
+    const outcome = await cache.read(resolve(cwd, file))
+    if (outcome.status !== 'parsed') continue
+    walk(outcome.ast.program, (node) => {
+      const id = node.type === 'ClassDeclaration' ? (node as { id?: { name: string } | null }).id : null
+      if (id) names.add(id.name)
+    })
+  }
+  return names
 }
 
 /** The collisions a verdict could have read through: those on a class some route reached by its name alone. */
@@ -499,9 +532,10 @@ export function collisionsReachedByName(
 export function attachControllerRefs<T extends { method: string; path: string; controller?: { name: string; action: string } }>(
   definitions: T[],
   manifest: Pick<AppManifest, 'routes' | 'warnings'>,
+  routeSources?: ReadonlySet<string>,
 ): T[] {
   const refs = new Map<string, ControllerTarget | null>()
-  for (const route of manifestRouteTargets(manifest)) {
+  for (const route of manifestRouteTargets(manifest, routeSources)) {
     if (!route.controller) continue
     const key = routeControllerKey(route, route.controller)
     refs.set(key, refs.has(key) ? null : route.controller)
@@ -519,10 +553,13 @@ export function attachControllerRefs<T extends { method: string; path: string; c
 export async function withManifestControllerRefs<T extends { method: string; path: string; controller?: { name: string; action: string } }>(
   definitions: T[],
   introspect: IntrospectSource | undefined,
+  source: { cwd: string; routesFile: string },
 ): Promise<T[]> {
   if (!definitions.some((definition) => definition.controller)) return definitions
   const introspected = await introspectedRoutes(introspect)
-  return introspected.status === 'described' ? attachControllerRefs(definitions, introspected.manifest) : definitions
+  if (introspected.status !== 'described') return definitions
+  const { manifest } = introspected
+  return attachControllerRefs(definitions, manifest, await routeSourceClasses(source.cwd, manifest, source.routesFile))
 }
 
 function routeControllerKey(route: { method: string; path: string }, controller: { name: string; action: string }): string {

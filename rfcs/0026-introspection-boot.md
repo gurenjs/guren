@@ -570,13 +570,16 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   class) falls back to the name, as a `name-only` reference does. A placed class
 >   that declares no such action, or whose file would not read or parse, has no
 >   body, never another class's. A `name-only` reference is evidence too: the
->   child imports every controller file while an app class is unmatched, matches
->   only exports, and never matches a framework class. So only a same-named
->   declaration it cannot have matched may be the routed class: one the file does
->   not export (a controller file routing its own class), or one in a file whose
->   import failed (`controller-import`). The last such declaration is read by
->   name; with none, the route has no body here (`elsewhere`), and the routed
->   class is declared somewhere the scan does not read. `collisionsReachedByName()` keeps a
+>   router holds a class that is no export of any controller file the app loaded
+>   (a framework class, or an app class the child found in no export). So a
+>   same-named exported declaration is another class. The route has no body here
+>   (`elsewhere`) when the routes file or the entry declares the name, or when
+>   no same-named declaration is left: one the file does not export (a
+>   controller file routing its own class), or one in a file whose import failed
+>   (`controller-import`). The last of those is read by name. A file whose import
+>   failed holds the routed class only when the app evaluated that module under
+>   another path (a symlink resolved differently), since the app could not have
+>   loaded it otherwise. `collisionsReachedByName()` keeps a
 >   collision only for a class some route reached by name.
 > - `guren audit` reads `manifest.routes` for `validation:*`, `authz:*` and
 >   `agent-annotation:*`. It introspects only when the routes file, loaded first,
@@ -596,15 +599,15 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   "unresolved alias" warning splits in two: an alias registered outside the
 >   routes file resolves and stops warning, while a name no alias or group
 >   registers anywhere is its own warning, judged before any guard beside it,
->   since mounting it throws. A guard never turns it into a pass: when something
->   introspection skips could register the name (a skipped `options.boot`, which
->   runs before `mountRoutes()`; an app provider registered through its
->   `introspect()` hook, which `ConfigServiceProvider` always is, hence
->   `source !== 'framework'`; a provider that threw already sent the rules to the
->   routes file) the warning
->   names it instead of stating the boot failure as fact. An empty hook (as
->   `cloudflarePlugin`'s) qualifies too, so a typo there is never passed. The auth-like name match reads alias and group entries only, as
->   the static path does.
+>   since mounting it throws, and a guard never turns it into a pass. When
+>   something introspection skips could register the name, the warning names it
+>   instead of stating the boot failure as fact: a skipped `options.boot`, which
+>   runs before `mountRoutes()`, or an app provider registered through its
+>   `introspect()` hook (an empty hook, as `cloudflarePlugin`'s, included;
+>   `ConfigServiceProvider` always runs one, hence `source !== 'framework'`). A
+>   provider that threw is not listed: the rules have gone back to the routes
+>   file. The auth-like name match reads alias and group entries only, as the
+>   static path does.
 > - Body validation passes when `schemas.body` is present, `{ unreadable }`
 >   included: the live schema validates whatever its JSON Schema reads as.
 >   `evidence` follows 2a's weakest-fact rule: `manifest` only for a guard's
@@ -617,8 +620,10 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   (moving them to `manifest.routes` is 2d) and take the manifest's references
 >   through `attachControllerRefs()`, matched on method, path, class and action,
 >   since the manifest lists the whole app's routes in its own order, through the
->   one bridge `withManifestControllerRefs()`. The agent-route rules ask for it
->   whenever the app has agent routes (content-activated, like 2b's triggers), so
+>   one bridge `withManifestControllerRefs()`, which introspects whenever a route
+>   has a controller and marks a name the routes file or entry declares. The
+>   agent-route rules ask for it whenever an agent route names a controller
+>   (content-activated, like 2b's triggers), so
 >   they agree with `guren audit` on a routed class the manifest places
 >   elsewhere; `guren check` passes its run's introspection.
 >   `generateEntityContext()` takes `introspect: true` and asks only when a route
