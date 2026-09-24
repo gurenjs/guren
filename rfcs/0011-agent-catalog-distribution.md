@@ -14,7 +14,8 @@ publish script + docs.)
 RFC 0008 made the agent harness work for five agents. It did nothing for
 discovery. `guren agent:init` ships inside `@guren/cli`, which is a
 dependency of a Guren app and is not installable on its own (the `guren`
-package does not exist on npm). The command itself guards nothing — point it
+package does not exist on npm; **Amended (2026-09-24):** `guren` is now a
+placeholder on npm whose bin prints how to create an app and exits 1). The command itself guards nothing — point it
 at any directory and it writes — but nobody has it until they have already
 chosen Guren and scaffolded. So the harness reaches exactly the developers who
 needed no convincing. It is a retention feature that we have been treating as

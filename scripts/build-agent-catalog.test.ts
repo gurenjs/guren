@@ -76,8 +76,8 @@ describe('renderCatalog', () => {
   })
 
   it('the pre-app skill never invokes bunx guren before an app exists', async () => {
-    // the whole point of guren-new-app: `guren` is not on npm, so every
-    // `bunx guren` line must come after the scaffold + postcondition section
+    // every `bunx guren` line must come after the scaffold + postcondition
+    // section: before an app exists it runs the npm placeholder, which exits 1
     const files = await catalog()
     const skill = files.find((f) => f.path.endsWith('guren-new-app/SKILL.md'))!.content
     const handoff = skill.indexOf('## Check the postcondition')

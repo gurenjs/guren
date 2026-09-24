@@ -1,6 +1,6 @@
 // No workspace-internal code may invoke the CLI as `bunx guren` (or `bun x
-// guren` / `npx guren`): `guren` does not exist on npm, so a missing workspace
-// link makes the runner fall back to the registry and die on a 404. Run the
+// guren` / `npx guren`): the npm `guren` is a placeholder that exits 1, so a
+// missing workspace link makes the runner fall back to it and fail. Run the
 // source: `bun …/packages/cli/src/bin.ts`. Scopes: package.json scripts (root +
 // every member), TypeScript and shell under scripts/. A smoke's `['bunx', 'guren']`
 // argv passes locally only because its temp app gets `.bin/guren` from a `file:`
@@ -278,7 +278,7 @@ async function main(): Promise<void> {
   }
 
   if (violations.length > 0) {
-    console.error('Workspace scripts audit failed: `guren` is not published to npm, so workspace code must run packages/cli/src/bin.ts directly — and through a path that resolves.')
+    console.error('Workspace scripts audit failed: the npm `guren` package is a placeholder that exits 1, so workspace code must run packages/cli/src/bin.ts directly — and through a path that resolves.')
     for (const { file, where, problem } of violations) {
       console.error(`  ${file} → ${where} ${problem}`)
     }
