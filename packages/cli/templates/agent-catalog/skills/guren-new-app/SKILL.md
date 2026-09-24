@@ -36,8 +36,7 @@ dependency in this directory or a parent. If there is one, stop and use the
 
 **Do not run `bunx guren …` before the app exists.** The `guren` package on
 npm is a placeholder that only prints how to create an app and exits 1; the
-real command comes from an app's local `@guren/cli`. Outside an app it fails,
-and outside an app there is nothing for it to introspect anyway.
+real command comes from an app's local `@guren/cli`.
 
 ## Scaffold
 

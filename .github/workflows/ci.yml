@@ -120,10 +120,8 @@ jobs:
       - name: Core-first audit
         run: bun run audit:core-first
 
-      # The npm `guren` is a placeholder that exits 1: `bunx guren` in a
-      # workspace manifest runs it whenever the local .bin link is missing.
-      # Template trees are exempt — scaffolded apps install @guren/cli from
-      # npm and get a real bin.
+      # Why workspace code must not call `bunx guren`: see the header of
+      # scripts/smoke/workspace-scripts-audit.ts.
       - name: Workspace scripts audit
         run: bun run audit:workspace-scripts
 
