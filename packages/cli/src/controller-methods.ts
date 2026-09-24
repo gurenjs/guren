@@ -8,7 +8,7 @@ import type {
   File,
   Statement,
 } from '@babel/types'
-import type { AppManifest, ControllerRef } from '@guren/server'
+import type { AppManifest, ControllerRef, RouteEntry } from '@guren/server'
 import { classNameFromPath, discoverControllerFiles, toPosixRelative } from './discovery'
 import { extractClassDeclaration } from './model-parser'
 import { ParseCache } from './parse-cache'
@@ -466,9 +466,14 @@ export function controllerMethodFor(scan: ControllerMethodScan, controller: Cont
   return { info: scan.methods.get(`${controller.name}.${controller.action}`), by: 'name', className: controller.name }
 }
 
-/** A manifest's reference as the lookup takes it: a `name-only` one carries the files the child could not import. */
-export function manifestControllerTarget(ref: ControllerRef, unimported: readonly string[]): ControllerTarget {
-  return ref.resolved === 'name-only' ? { ...ref, unimported } : ref
+/**
+ * The manifest's routes with each controller as the lookup takes it: a `name-only` reference
+ * carries the files the child could not import, where its class may still be declared.
+ */
+export function manifestRouteTargets(manifest: Pick<AppManifest, 'routes' | 'warnings'>): Array<RouteEntry & { controller?: ControllerTarget }> {
+  const unimported = controllerImportFailures(manifest)
+  return manifest.routes.map((route) =>
+    route.controller?.resolved === 'name-only' ? { ...route, controller: { ...route.controller, unimported } } : route)
 }
 
 /** The collisions a verdict could have read through: those on a class some route reached by its name alone. */
@@ -494,12 +499,11 @@ export function attachControllerRefs<T extends { method: string; path: string; c
   definitions: T[],
   manifest: Pick<AppManifest, 'routes' | 'warnings'>,
 ): T[] {
-  const unimported = controllerImportFailures(manifest)
   const refs = new Map<string, ControllerTarget | null>()
-  for (const route of manifest.routes) {
+  for (const route of manifestRouteTargets(manifest)) {
     if (!route.controller) continue
     const key = routeControllerKey(route, route.controller)
-    refs.set(key, refs.has(key) ? null : manifestControllerTarget(route.controller, unimported))
+    refs.set(key, refs.has(key) ? null : route.controller)
   }
   return definitions.map((definition) => {
     const ref = definition.controller && refs.get(routeControllerKey(definition, definition.controller))

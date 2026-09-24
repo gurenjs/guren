@@ -47,15 +47,15 @@ import {
   type ControllerMethodScan,
   type ControllerNameCollision,
   type ControllerTarget,
-  manifestControllerTarget,
+  manifestRouteTargets,
 } from './controller-methods'
-import { controllerImportFailures } from './introspect-controller-file'
 import type { CheckEvidence } from './check-result'
 import { introspectApp } from './introspect'
 import {
   INTROSPECTION_UNAVAILABLE_FIX,
   introspectedRoutes,
   introspectionUnavailableMessage,
+  skippedRegistrars,
   type IntrospectSource,
 } from './manifest-section'
 import { describeMethod } from './http-methods'
@@ -566,11 +566,11 @@ function auditedFromDefinition(route: RouteDefinition): AuditedRoute {
 }
 
 /** A `{ unreadable }` body schema still validates at runtime: only its JSON Schema could not be written. */
-function auditedFromManifest(route: RouteEntry, unimported: readonly string[]): AuditedRoute {
+function auditedFromManifest(route: ReturnType<typeof manifestRouteTargets>[number]): AuditedRoute {
   return {
     method: route.method,
     path: route.path,
-    controller: route.controller && manifestControllerTarget(route.controller, unimported),
+    controller: route.controller,
     agent: route.agent,
     hasBodySchema: route.schemas.body !== undefined,
     validatesBody: Boolean(route.validatesBody),
@@ -613,21 +613,20 @@ async function loadAuditRoutes(cwd: string, options: RunAuditOptions): Promise<A
   const routes = await introspectedRoutes(introspect)
   if (routes.status === 'described') {
     const { manifest } = routes
-    const unimported = controllerImportFailures(manifest)
+    const targets = manifestRouteTargets(manifest)
     return {
       analyzed: true,
-      audited: manifest.routes.map((route) => auditedFromManifest(route, unimported)),
+      audited: targets.map(auditedFromManifest),
       manifest,
       loadFindings,
-      agentActions: agentToolActions(manifest.agentTools, manifest.routes.map((route) => ({
-        ...route,
-        controller: route.controller && manifestControllerTarget(route.controller, unimported),
-      }))),
+      agentActions: agentToolActions(manifest.agentTools, targets),
     }
   }
 
+  let staticReason = routes.reason
   const failed = typeof introspect === 'function' ? await introspect() : undefined
   if (failed?.status === 'failed') {
+    staticReason ??= `the app could not be introspected (${failed.reason})`
     loadFindings.push(finding(
       'introspection-unavailable',
       'Introspection',
@@ -636,7 +635,6 @@ async function loadAuditRoutes(cwd: string, options: RunAuditOptions): Promise<A
       INTROSPECTION_UNAVAILABLE_FIX,
     ))
   }
-  const staticReason = routes.reason ?? (failed?.status === 'failed' ? `the app could not be introspected (${failed.reason})` : undefined)
 
   if (!definitions) {
     loadFindings.push(
@@ -710,13 +708,7 @@ function auditRoutes(
   const fromManifest: CheckEvidence = manifest ? 'manifest' : 'static'
   const shared = new Set(scan.collisions.map((collision) => collision.className))
   // What may register a name the manifest calls unresolved: then a route naming it may still mount.
-  const unregisteredBy = [
-    ...(manifest?.warnings.some((warning) => warning.code === 'boot-callback-skipped')
-      ? ['the createApp({ boot }) callback, which introspection does not run'] : []),
-    ...(manifest?.providers ?? [])
-      .filter((provider) => provider.register === 'introspect-hook' && provider.source !== 'framework')
-      .map((provider) => `${provider.name}, whose introspect() hook runs in place of register() here`),
-  ]
+  const unregisteredBy = manifest ? skippedRegistrars(manifest) : []
 
   for (const route of routes) {
     const judged = findings.length
@@ -835,24 +827,23 @@ function auditRoutes(
       const { verdict, names, unresolved } = route.auth
       const hasAuthMiddleware = verdict === 'verified' || verdict === 'legacy-name-match'
       const hasControllerAuth = methodInfo ? AUTH_CALL_PATTERN.test(methodInfo.body) : false
-      const unresolvedFinding = (): AuditFinding => withEvidence(
-        fromManifest,
-        finding(
-          `authz:${routeLabel}`,
-          routeLabel,
-          'warn',
-          `Middleware ${unresolved.map((name) => `'${name}'`).join(', ')} is registered as no alias or group anywhere in the app, `
-          + 'so nothing says what the chain enforces'
-          + (unregisteredBy.length > 0
-            ? `, unless ${unregisteredBy.join(' or ')} registers it.`
-            : ', and mounting the route fails at boot.'),
-          'Register the alias (router.aliasMiddleware(name, requireAuthenticated())) or remove the name from the route.',
-        ),
-      )
-
-      // A route naming a name nothing can register does not mount, so no guard beside it protects anything.
-      if (unresolved.length > 0 && unregisteredBy.length === 0) {
-        findings.push(unresolvedFinding())
+      // A route naming a name nothing can register does not mount, so no guard beside it protects
+      // anything; while something skipped may register it, a guard still passes the route.
+      if (unresolved.length > 0 && (unregisteredBy.length === 0 || !(hasAuthMiddleware || hasControllerAuth))) {
+        findings.push(withEvidence(
+          fromManifest,
+          finding(
+            `authz:${routeLabel}`,
+            routeLabel,
+            'warn',
+            `Middleware ${unresolved.map((name) => `'${name}'`).join(', ')} is registered as no alias or group anywhere in the app, `
+            + 'so nothing says what the chain enforces'
+            + (unregisteredBy.length > 0
+              ? `, unless ${unregisteredBy.join(' or ')} registers it.`
+              : ', and mounting the route fails at boot.'),
+            'Register the alias (router.aliasMiddleware(name, requireAuthenticated())) or remove the name from the route.',
+          ),
+        ))
       } else if (hasAuthMiddleware || hasControllerAuth) {
         findings.push(withEvidence(
           verdict === 'verified' ? fromManifest : 'static',
@@ -867,8 +858,6 @@ function auditRoutes(
                 : `Controller checks authentication in ${controllerKey}.`,
           ),
         ))
-      } else if (unresolved.length > 0) {
-        findings.push(unresolvedFinding())
       } else if (verdict === 'unverified-auth-name') {
         findings.push(
           finding(

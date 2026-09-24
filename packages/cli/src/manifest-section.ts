@@ -93,6 +93,21 @@ export async function introspectedRoutes(
   return thrown ? { status: 'static', reason: thrown } : { status: 'described', manifest: introspection.manifest }
 }
 
+/**
+ * What introspection skipped that could register app state, in words: a `createApp({ boot })`
+ * callback, and each app provider whose `introspect()` hook ran in place of `register()`.
+ * `ConfigServiceProvider` always runs its hook, hence the `framework` exclusion.
+ */
+export function skippedRegistrars(manifest: Pick<AppManifest, 'warnings' | 'providers'>): string[] {
+  return [
+    ...(manifest.warnings.some((warning) => warning.code === 'boot-callback-skipped')
+      ? ['the createApp({ boot }) callback, which introspection does not run'] : []),
+    ...manifest.providers
+      .filter((provider) => provider.register === 'introspect-hook' && provider.source !== 'framework')
+      .map((provider) => `${provider.name}, whose introspect() hook runs in place of register() here`),
+  ]
+}
+
 /** The remedy the one `introspection-unavailable` line carries, in `guren check` and `guren audit` alike. */
 export const INTROSPECTION_UNAVAILABLE_FIX = 'Run `bunx guren introspect` to see the failure, or pass --no-introspect to skip it.'
 
