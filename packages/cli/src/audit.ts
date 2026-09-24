@@ -24,7 +24,7 @@ import {
   hasModelConfig,
   resolveModelStringArrayConfig,
 } from './model-parser'
-import { parseSourceFile } from './parse-cache'
+import { ParseCache, parseSourceFile } from './parse-cache'
 // Every pattern naming a `Controller` member lives beside the scan that
 // produces the bodies, inside the reach of controller-surface.test.ts.
 import {
@@ -42,6 +42,7 @@ import { parseSchemaTableColumns } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
 import { auditAiLocalTools, describeLocalTool, type AiLocalToolListing } from './ai-local-tools-audit'
 import { auditCsrfExemptions, DECLARE_CALL_PATTERN, type CsrfExemptionScan } from './csrf-exemption-audit'
+import { auditAuthorization, GUEST_PATH_PATTERN } from './authorization-audit'
 
 export type AuditStatus = 'pass' | 'warn' | 'fail' | 'ignored'
 
@@ -90,9 +91,6 @@ export interface RunAuditOptions {
    */
   deps?: boolean
 }
-
-/** Guest flows (login/registration), reachable without authentication. */
-const GUEST_PATH_PATTERN = /(login|logout|register|signup|sign-up|password|forgot|reset|verification|verify-email)/i
 
 const WEBHOOK_PATH_PATTERN = /(webhook|callback)/i
 
@@ -203,7 +201,8 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   // Kicked off first so the registry round-trip overlaps the local parsing.
   const dependencyScanOutput = options.deps ? startDependencyScan(cwd) : null
 
-  const { methods: controllerMethods, collisions, unreadableFiles } = await parseControllerMethods(cwd)
+  const cache = new ParseCache()
+  const { methods: controllerMethods, collisions, unreadableFiles } = await parseControllerMethods(cwd, cache)
   for (const collision of collisions) {
     findings.push(controllerCollisionFinding(collision))
   }
@@ -225,6 +224,7 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
 
   const definitions = await auditRoutes(cwd, options.routesFile, controllerMethods, findings)
   const routesAnalyzed = definitions !== undefined
+  await auditAuthorization(cwd, definitions, controllerMethods, cache, findings)
   auditForceWrites(controllerMethods, findings)
   await auditSourceFiles(cwd, findings)
   await auditModels(cwd, findings)

@@ -195,7 +195,7 @@ Validate your app before shipping. These commands are also designed for AI codin
 | Command | Description | Example |
 |---------|-------------|---------|
 | `check` | Validate integrity across routes, controllers, pages, and models — including whether every file in `routes/` is actually reached from your entry registrar (and every file in a module's `routes/` from that module's own registrar) — plus the durable-agent registry in `config/agents.ts`, in-process agents' `appTools()` names and scopes, deferred Inertia props (a `defer()` passed for a prop the page's `Props` declares as required, advisory), doc links, spec-view freshness, architecture boundaries, and (for an app that declares a deploy plugin or the Lambda adapter) the deploy-runtime verdicts `guren doctor` reports, as advisory results | `bunx guren check --json` |
-| `audit` | Security audit: missing input validation or authentication on mutating routes, raw SQL with interpolation, hardcoded credentials, disabled security defaults, mass-assignment configuration, sensitive columns not listed in `hidden`, emailed links built from the request host, CSRF exemptions declared by the app or by an installed package, and in-process agents' local tools | `bunx guren audit --json` |
+| `audit` | Security audit: missing input validation, authentication or policy authorization on mutating routes, raw SQL with interpolation, hardcoded credentials, disabled security defaults, mass-assignment configuration, sensitive columns not listed in `hidden`, emailed links built from the request host, CSRF exemptions declared by the app or by an installed package, and in-process agents' local tools | `bunx guren audit --json` |
 | `gate` | Every verification stage the scaffolded CI runs — codegen, typecheck, lint, `check` (the `--ci` rule), `audit`, tests — reported together; exits non-zero if any stage fails, and a stage that cannot run fails rather than skips | `bunx guren gate --changed` |
 | `introspect` | Registers the app's providers and routes without booting or listening, then prints the manifest: providers and how each registered, routes with resolved middleware and controller files, and the session, auth, cache, storage, queue and attachments configuration | `bunx guren introspect --json` |
 | `doctor` | Project health report (env, config, generated files) with actionable next steps | `bunx guren doctor --next` |
@@ -203,8 +203,18 @@ Validate your app before shipping. These commands are also designed for AI codin
 | `docs:graph` | The OKF docs relation graph: documents, entities, and code paths as nodes, verified relations as edges. `--entity <Model>` or `--path <file>` narrows to a neighborhood — ask "what governs this?" before renaming | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |
 | `spec:generate` | Regenerates the derived spec views in `docs/spec/` (ER diagram, domain model, screens, module map) — see [Spec-Anchored Development](./spec-anchored.md) | `bunx guren spec:generate` |
 
-`audit` exits with a non-zero status when it finds failures. Plain
-`check` is informational. Its suite flags each exit non-zero on
+`audit` exits with a non-zero status when it finds failures. Its policy
+rule only ever warns: once the app keeps a policy for a model
+(`app/Policies/<Model>Policy.ts`, what `make:policy` writes), every
+controller action on a non-safe method whose body names that model gets an
+`authorization:<METHOD> <path>` finding. It passes when the action calls
+`this.authorize()` or `this.can()`, references the policy class, or sits
+behind `authorize()`/`authorizeResource()` middleware. It warns, naming the
+action, the policy and the fix, when nothing the scan can see consults the
+policy, and it warns rather than passes when the controller source is not
+among those the audit reads. An app with no policy gets no such finding.
+Put `// guren-audit-ignore` above an action whose check lives in a service
+it calls. Plain `check` is informational. Its suite flags each exit non-zero on
 failures in that suite, and `gate` (below) is what the scaffolded CI
 workflow runs:
 
@@ -405,7 +415,7 @@ Suppress a false positive by placing `// guren-audit-ignore` on the flagged line
 const apiKey = 'example-not-a-real-key'
 ```
 
-Route- and model-level findings (`authz:*`, `validation:*`, `agent-annotation:*`, `mass-assignment:*`, `hidden-columns:*`) have no single line to attach a comment to: they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead, keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`:
+Route- and model-level findings (`authz:*`, `authorization:*`, `validation:*`, `agent-annotation:*`, `mass-assignment:*`, `hidden-columns:*`) have no single line to attach a comment to: they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead, keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`:
 
 ```ts
 // config/audit.ts

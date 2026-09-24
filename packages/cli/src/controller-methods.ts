@@ -27,6 +27,8 @@ export interface ControllerMethodInfo {
   rawBody: string
   /** Controller file, relative to the project root. */
   filePath: string
+  /** 1-based line of the member's declaration, where a `// guren-audit-ignore` above it is read from. */
+  line: number
 }
 
 /**
@@ -183,6 +185,14 @@ export const AUTH_CALL_PATTERN = new RegExp(
  */
 export const AUTHORIZE_CALL_PATTERN = controllerMemberCall('authorize')
 
+/**
+ * An authorization decision the action shows: `this.authorize(...)` throws and
+ * `this.can(...)` answers, and either proves the policy was consulted. Wider
+ * than {@link AUTHORIZE_CALL_PATTERN} on purpose: the audit's policy rule asks
+ * whether authorization was *considered*, the agent-route rule whether it is *enforced*.
+ */
+export const AUTHORIZATION_CALL_PATTERN = controllerMemberCall('authorize', 'can')
+
 /** An Inertia page response, which carries no JSON schema an agent could read. */
 export const INERTIA_CALL_PATTERN = controllerMemberCall('inertia')
 
@@ -335,17 +345,26 @@ export async function parseControllerMethods(
       }
       classFiles.set(className, relPath)
 
-      for (const { name, body } of classActionMembers(classDecl)) {
+      for (const { member, name, body } of classActionMembers(classDecl)) {
         methods.set(`${className}.${name}`, {
           body: scrubbed.slice(body.start ?? 0, body.end ?? 0),
           rawBody: source.slice(body.start ?? 0, body.end ?? 0),
           filePath: relPath,
+          line: lineAt(source, member.start ?? 0),
         })
       }
     }
   }
 
   return { methods, collisions, unreadableFiles, unparsedFiles, classFiles }
+}
+
+function lineAt(source: string, offset: number): number {
+  let line = 1
+  for (let i = 0; i < offset && i < source.length; i++) {
+    if (source.charCodeAt(i) === 10) line++
+  }
+  return line
 }
 
 /**
