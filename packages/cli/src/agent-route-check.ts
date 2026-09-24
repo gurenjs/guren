@@ -37,8 +37,8 @@ export interface AgentRouteCheckOptions {
   /** Parse cache to read controller sources through, shared so files are not parsed twice. */
   cache?: ParseCache
   /**
-   * The run's introspection (RFC 0026 §5), asked for only when an agent route names a class two
-   * controller files declare: the manifest's reference then says which file the route dispatches to.
+   * The run's introspection (RFC 0026 §5), asked for whenever an agent route names a controller:
+   * the manifest's reference says which class the route dispatches to, as `guren audit` reads it.
    */
   introspect?: IntrospectSource
 }
@@ -486,11 +486,12 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
   if (agentDefinitions.length === 0) return []
 
   // Skipped when every agent route is an inline handler: no body for any rule to read.
-  const scan = agentDefinitions.some((definition) => definition.controller)
-    ? await parseControllerMethods(cwd, options.cache)
-    : EMPTY_CONTROLLER_SCAN
-
-  agentDefinitions = await withManifestControllerRefs(agentDefinitions, options.introspect)
+  const withControllers = agentDefinitions.some((definition) => definition.controller)
+  const [scan, placed] = await Promise.all([
+    withControllers ? parseControllerMethods(cwd, options.cache) : EMPTY_CONTROLLER_SCAN,
+    withManifestControllerRefs(agentDefinitions, options.introspect),
+  ])
+  agentDefinitions = placed
 
   const routes = agentDefinitions.flatMap((definition) => {
     const route = toAgentRoute(definition, scan)

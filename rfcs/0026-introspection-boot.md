@@ -600,7 +600,8 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   introspection skips could register the name (a skipped `options.boot`, which
 >   runs before `mountRoutes()`; an app provider registered through its
 >   `introspect()` hook, which `ConfigServiceProvider` always is, hence
->   `source !== 'framework'`; a provider whose `register()` threw) the warning
+>   `source !== 'framework'`; a provider that threw already sent the rules to the
+>   routes file) the warning
 >   names it instead of stating the boot failure as fact. An empty hook (as
 >   `cloudflarePlugin`'s) qualifies too, so a typo there is never passed. The auth-like name match reads alias and group entries only, as
 >   the static path does.

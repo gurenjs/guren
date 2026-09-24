@@ -382,9 +382,8 @@ you named. From the manifest:
 - A name no alias or group registers anywhere in the app is reported as
   unresolved. Mounting such a route fails at boot, so the warning comes ahead of
   any guard beside it, and a guard never passes it. When something introspection
-  skips could register the name (a `createApp({ boot })` callback, a provider
-  whose `introspect()` hook replaced its `register()`, or one whose `register()`
-  threw), the message names it.
+  skips could register the name (a `createApp({ boot })` callback, or a provider
+  whose `introspect()` hook replaced its `register()`), the message names it.
 - A controller is found by its file and export. Two modules may each declare a
   `ReportController`, and each route is judged against its own class. When a
   route's class matches no export of the controller files (a class declared in

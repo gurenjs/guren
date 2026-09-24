@@ -26,6 +26,7 @@ import {
 import {
   authTypeArgumentPattern,
   classActionMembers,
+  collisionsReachedByName,
   controllerMethodFor,
   EMPTY_CONTROLLER_SCAN,
   parseControllerMethods,
@@ -396,7 +397,10 @@ export async function generateEntityContext(
     const scan = candidates.some((def) => def.controller && def.controller.name !== controllerName)
       ? await parseControllerMethods(cwd, cache)
       : EMPTY_CONTROLLER_SCAN
-    if (options.introspect) candidates = await withManifestControllerRefs(candidates, () => introspectApp(cwd), scan)
+    const named = candidates.flatMap((def) => (def.controller ? [def.controller] : []))
+    if (options.introspect && collisionsReachedByName(scan, named).length > 0) {
+      candidates = await withManifestControllerRefs(candidates, () => introspectApp(cwd))
+    }
     const modelFile = resolve(cwd, match.relPath)
 
     const referencesModel = async (method: ControllerMethodInfo): Promise<boolean> => {

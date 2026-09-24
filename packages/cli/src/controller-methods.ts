@@ -514,16 +514,13 @@ export function attachControllerRefs<T extends { method: string; path: string; c
 
 /**
  * Registered definitions with the manifest's references attached: the one bridge for consumers
- * that still judge the routes file's definitions. With `onlyOnCollision`, the introspection is
- * asked for only when a route reaches a class two files declare by name.
+ * that still judge the routes file's definitions. Routes without a controller have nothing to attach.
  */
 export async function withManifestControllerRefs<T extends { method: string; path: string; controller?: { name: string; action: string } }>(
   definitions: T[],
   introspect: IntrospectSource | undefined,
-  onlyOnCollision?: ControllerMethodScan,
 ): Promise<T[]> {
-  const controllers = definitions.flatMap((definition) => (definition.controller ? [definition.controller] : []))
-  if (onlyOnCollision && collisionsReachedByName(onlyOnCollision, controllers).length === 0) return definitions
+  if (!definitions.some((definition) => definition.controller)) return definitions
   const introspected = await introspectedRoutes(introspect)
   return introspected.status === 'described' ? attachControllerRefs(definitions, introspected.manifest) : definitions
 }

@@ -95,16 +95,16 @@ export async function introspectedRoutes(
 
 /**
  * What introspection skipped that could register app state, in words: a `createApp({ boot })`
- * callback, and each app provider whose `register()` did not run to the end (an `introspect()`
- * hook ran instead, or it threw). `ConfigServiceProvider` always runs its hook, hence the `framework` exclusion.
+ * callback, and each app provider whose `introspect()` hook ran in place of `register()`
+ * (`ConfigServiceProvider` always does, hence the `framework` exclusion). A provider that threw
+ * never reaches here: {@link introspectedRoutes} already judges such an app from source.
  */
 export function skippedRegistrars(manifest: Pick<AppManifest, 'warnings' | 'providers'>): string[] {
-  const hook = (provider: AppManifest['providers'][number]): boolean =>
-    provider.register === 'introspect-hook' && provider.source !== 'framework'
   return [
     ...(manifest.warnings.some((warning) => warning.code === 'boot-callback-skipped') ? ['the createApp({ boot }) callback'] : []),
-    ...manifest.providers.filter(hook).map((provider) => `${provider.name}.register() (its introspect() hook ran instead)`),
-    ...manifest.providers.filter((provider) => provider.register === 'threw').map((provider) => `${provider.name}.register() (it threw)`),
+    ...manifest.providers
+      .filter((provider) => provider.register === 'introspect-hook' && provider.source !== 'framework')
+      .map((provider) => `${provider.name}.register() (its introspect() hook ran instead)`),
   ]
 }
 
