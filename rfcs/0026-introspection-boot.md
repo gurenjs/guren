@@ -707,14 +707,19 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   to load fails as before, since its Zod is required.
 > - `--introspect` output is one-shot. The default codegen (the Vite watcher's,
 >   the gate's, a plain `guren codegen`) is what every comparer reads, and the
->   next run of it drops the routes only the app registers again.
->   `planAgentManifest()`, which `check` and `doctor` ask whether
->   `.guren/agents.gen.ts` should exist, follows the default: in an app whose
->   agent tools all come from a provider, a file `--introspect` wrote reads as
->   stale to both, and the `guren codegen` they name removes it. The finding says
->   so. Reading the manifest there instead would not settle it: `guren gate` and
->   the edit hook run `runCheck()` without introspecting, so the gate would call
->   the same file stale while `guren check` passed it.
+>   next run of it drops the routes only the app registers again (`guren gate`
+>   runs `codegen --force` before its check stage, so it never sees
+>   `--introspect` output). `planAgentManifest()`, which `check` and `doctor`
+>   ask whether `.guren/agents.gen.ts` should exist, follows the default: in an
+>   app whose agent tools all come from a provider, a file `--introspect` wrote
+>   reads as stale to both, and the `guren codegen` they name removes it. The
+>   finding says so. Reading the manifest there instead would not settle it: the
+>   callers of `runCheck()` that do not introspect (the edit hook, the dev MCP
+>   server, `plan:verify`'s check step) would call the same file stale while
+>   `guren check` passed it. The rule asks only whether the file should exist:
+>   when the routes file derives tools of its own, a file `--introspect` wrote
+>   with a provider's tools as well passes as present, and nothing reports the
+>   extra ones.
 > - The spec views stay on the routes file, with no flag. `docs/spec/` is
 >   committed and drift-gated, and `guren gate` and the edit hook run
 >   `runCheck()` in process, which does not introspect (2a). A `spec:generate`

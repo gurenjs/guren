@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, symlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 
 import { generateAgentTypes } from '../src/agents-types'
-import { joinRouteDefinitions } from '../src/app-routes'
+import { agentToolRouteKey, joinRouteDefinitions } from '../src/app-routes'
 import { runCheck, type CheckResult } from '../src/check'
 import { generateContext, renderContextMarkdown } from '../src/context'
 import { getDoctorRuleEvaluations } from '../src/doctor'
@@ -26,6 +26,7 @@ export default class HookRouteProvider extends ServiceProvider {
       .agent({})
     this.container.make<Router>('router').get('/hooks/any/:id', { params: z.object({ id: z.string(), extra: z.any() }) }, () => 'ok')
     this.container.make<Router>('router').get('/hooks/draft', prototype).name('hooks.draft')
+    this.container.make<Router>('router').get('/hooks/raw/:id', { params: z.any() }, () => 'ok')
   }
 }
 `
@@ -198,6 +199,9 @@ describe('guren check route rules against the introspected app (RFC 0026 §5, Pa
     // No Zod to fall back to, and the walker dropped a key: unreadable, never a pass.
     expect(manifest['route-contract-params:GET:/hooks/any/:id']).toMatchObject({ status: 'warn', evidence: 'manifest' })
     expect(manifest['route-contract-params:GET:/hooks/any/:id']!.message).toContain('renders the params schema only in part')
+    // A schema the walker cannot render at all: its note, then the rest, with no doubled stop.
+    expect(manifest['route-contract-params:GET:/hooks/raw/:id']).toMatchObject({ status: 'warn', evidence: 'manifest' })
+    expect(manifest['route-contract-params:GET:/hooks/raw/:id']!.message).toMatch(/unsupported Zod type "any", and the routes file registers no route/u)
     expect(manifest['agent-route-output:GET:/hooks/:hook']).toMatchObject({ status: 'warn', evidence: 'manifest' })
     expect(manifest['prototype-fixture-orphan:hooks.show']).toBeUndefined()
     expect(source['prototype-fixture-orphan:hooks.show']).toMatchObject({ status: 'fail', evidence: 'static' })
@@ -296,7 +300,11 @@ describe('the rules each start the introspection on their own content', () => {
   })
 
   test('codegen --introspect keeps the tool the running app exposes when two routes claim one name', async () => {
-    const dir = join(root, 'triggers')
+    const dir = await scaffoldApp('triggers-codegen', {
+      'src/app.ts': APP('HookRouteProvider'),
+      'app/Providers/HookRouteProvider.ts': TRIGGER_PROVIDER,
+      'routes/web.ts': TRIGGER_ROUTES,
+    })
     const { result } = await captureWarnings(() => generateRouteTypes({ appRoot: dir, introspect: true, outputFile: 'out/routes.d.ts', runtimeOutputFile: 'out/routes.gen.ts' }))
     const { tools } = await generateAgentTypes(result.definitions, { appRoot: dir, outputFile: 'out/agents.gen.ts' })
     expect(tools.map((tool) => `${tool.toolName} ${tool.method} ${tool.path}`)).toEqual(['tasks.run POST /hooks/run'])
@@ -305,12 +313,20 @@ describe('the rules each start the introspection on their own content', () => {
   })
 })
 
+describe('agentToolRouteKey', () => {
+  test('tells apart two routes on one method, path and name that differ in agent.toolName', () => {
+    expect(agentToolRouteKey('post', '/a', 'a.run', 'first')).not.toBe(agentToolRouteKey('POST', '/a', 'a.run', 'second'))
+    expect(agentToolRouteKey('post', '/a', 'a.run', undefined)).toBe(agentToolRouteKey('POST', '/a', 'a.run', 'a.run'))
+  })
+})
+
 describe('an app whose agent tools come only from a provider', () => {
   test('codegen --introspect writes them, check and doctor call the file stale, and codegen without the flag removes it', async () => {
     const dir = await scaffoldApp('provider-tools', {
       'src/app.ts': APP('HookRouteProvider'),
       'app/Providers/HookRouteProvider.ts': TOOL_PROVIDER,
-      'routes/web.ts': "import type { Router } from '@guren/core'\n\nexport function registerWebRoutes(router: Router): void {\n  router.get('/health', () => 'ok').name('health')\n}\n",
+      // The params schema starts the route rules' introspection, so the stale verdict is an introspected run's.
+      'routes/web.ts': "import type { Router } from '@guren/core'\nimport { z } from 'zod'\n\nexport function registerWebRoutes(router: Router): void {\n  router.get('/health/:id', { params: z.object({ id: z.string() }) }, () => 'ok').name('health')\n}\n",
     })
     const manifestFile = join(dir, '.guren/agents.gen.ts')
     const codegenBoth = async (introspect: boolean) => {
@@ -322,7 +338,9 @@ describe('an app whose agent tools come only from a provider', () => {
     expect(await readFile(manifestFile, 'utf8')).toContain('hooks.ping')
 
     const staleKey = 'manifest:.guren/agents.gen.ts'
-    const checked = (await runCheck({ cwd: dir, introspect: true })).checks.find((result) => result.key === staleKey)
+    const report = await runCheck({ cwd: dir, introspect: true })
+    expect(report.checks.find((result) => result.key === 'route-contracts')).toMatchObject({ status: 'pass', evidence: 'manifest' })
+    const checked = report.checks.find((result) => result.key === staleKey)
     expect(checked).toMatchObject({ status: 'warn' })
     expect(checked!.message).toContain('codegen --introspect')
     const { evaluations } = await getDoctorRuleEvaluations({ cwd: dir, introspect: true })

@@ -62,10 +62,12 @@ async function loadCodegenRoutes(routesFile: string, appRoot: string, introspect
     + `${source.unmatched.map((route) => `${route.method} ${route.path}`).join(', ')}.`,
   )
   const unmatched = new Set(source.unmatched)
-  const tools = new Map(source.manifest.agentTools.map((tool) => [agentToolRouteKey(tool.method, tool.path, tool.routeName), tool]))
+  const tools = new Map(source.manifest.agentTools.map((tool) => [agentToolRouteKey(tool.method, tool.path, tool.routeName, tool.toolName), tool]))
+  // An unmatched route keeps `agent`, so codegen derives a schema-less tool from it and then takes this
+  // one in its place; the manifest's tools are plain JSON, which every field of a derived tool survives.
   return definitions.map((definition, index) => {
     if (!unmatched.has(source.manifest.routes[index]!)) return definition
-    const tool = tools.get(agentToolRouteKey(definition.method, definition.path, definition.name))
+    const tool = tools.get(agentToolRouteKey(definition.method, definition.path, definition.name, definition.agent?.toolName))
     return tool ? { ...definition, introspectedAgentTool: tool } : definition
   })
 }

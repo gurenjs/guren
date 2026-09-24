@@ -398,7 +398,7 @@ export async function generateEntityContext(
       ? await parseControllerMethods(cwd, cache)
       : EMPTY_CONTROLLER_SCAN
     const named = candidates.flatMap((def) => (def.controller ? [def.controller] : []))
-    // `--routes` names a file the manifest, which describes the entry, may not.
+    // The manifest describes the entry, not a file `--routes` names.
     if (options.introspect && !options.routesFile && collisionsReachedByName(scan, named).length > 0) {
       candidates = await withManifestControllerRefs(candidates, () => introspectApp(cwd), { cwd, routesFile: resolve(cwd, target.path) })
     }

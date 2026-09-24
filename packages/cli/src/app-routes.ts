@@ -52,9 +52,9 @@ export function manifestMiddlewareNames(entry: Pick<RouteEntry, 'middleware'>): 
   return entry.middleware.flatMap((item) => (item.kind !== 'inline' && item.name ? [item.name] : []))
 }
 
-/** The route an agent tool was derived from, as codegen pairs a manifest tool with a definition. */
-export function agentToolRouteKey(method: string, path: string, routeName: string | undefined): string {
-  return `${method.toUpperCase()} ${path} ${routeName ?? ''}`
+/** The route an agent tool was derived from, as codegen pairs a manifest tool with a definition; `toolName` apart from the route name. */
+export function agentToolRouteKey(method: string, path: string, routeName: string | undefined, toolName: string | undefined): string {
+  return JSON.stringify([method.toUpperCase(), path, routeName ?? null, toolName ?? routeName ?? null])
 }
 
 /** A manifest entry in a registered definition's shape, with no schemas: nothing in the manifest is Zod. */

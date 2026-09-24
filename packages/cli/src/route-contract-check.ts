@@ -278,7 +278,7 @@ function manifestParams(
   if ('short' in fromManifest) {
     return fromZod
       ? { parsed: fromZod, evidence: 'static' }
-      : { parsed: { unreadable: `${fromManifest.short}, and the routes file registers no route to read its Zod from` } }
+      : { parsed: { unreadable: `${fromManifest.short.replace(/\.$/u, '')}, and the routes file registers no route to read its Zod from` } }
   }
   if (fromZod && !('keys' in fromZod && keyNames(fromZod) === keyNames(fromManifest))) return { parsed: fromZod, evidence: 'static' }
   return { parsed: fromManifest }

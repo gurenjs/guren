@@ -437,8 +437,8 @@ reaches a controller class that two files declare, and never with `--routes`.
 routes file passes the `prototype` handler.
 
 `guren codegen` reads the routes file unless you pass `--introspect`. The Vite
-plugin runs codegen on every edit, and `guren check`, `doctor` and `guren gate`
-compare against what the default writes. With `--introspect` the app decides
+plugin runs codegen on every edit, and the default codegen is the reference
+`guren check`, `doctor` and `guren gate` work from. With `--introspect` the app decides
 which routes exist and in which order, and each route is rendered from the
 routes file's Zod. An app whose routes all come from the routes file and its
 modules gets the same files byte for byte, unless two routes share a name and
@@ -449,7 +449,8 @@ two routes claim one tool name, the one the running app registers first wins,
 as at runtime. The output lasts until the next codegen without the flag, the
 Vite watcher's included. In an app whose agent tools all come from a provider,
 `check` and `doctor` report the `.guren/agents.gen.ts` it wrote as stale, and
-the `guren codegen` they name removes it. When the app cannot be introspected, or `--routes` names a
+the `guren codegen` they name removes it. When the routes file derives tools of
+its own, they only ask whether the file exists, so the extra tools pass unseen. When the app cannot be introspected, or `--routes` names a
 file other than the one `check` finds as the entry, codegen writes from the
 routes file and says why:
 

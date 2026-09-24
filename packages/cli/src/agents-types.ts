@@ -142,7 +142,7 @@ export async function generateAgentTypes(
   // Returned rather than logged, same contract as `generateDataTypes`. The derivation is first-wins,
   // as at runtime, and a route with no Zod here (`codegen --introspect`) takes the introspected app's tool.
   const { tools: derived, warnings } = deriveAgentTools(definitions)
-  const routeKey = (tool: DerivedAgentTool) => agentToolRouteKey(tool.method, tool.path, tool.routeName)
+  const routeKey = (tool: DerivedAgentTool) => agentToolRouteKey(tool.method, tool.path, tool.routeName, tool.toolName)
   const introspected = new Map(definitions.flatMap(({ introspectedAgentTool: tool }) => (tool ? [[routeKey(tool), tool] as const] : [])))
   const tools = derived.map((tool) => introspected.get(routeKey(tool)) ?? tool)
 
