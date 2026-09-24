@@ -94,3 +94,8 @@ export function mergeVerdicts(manifest: CheckResult[], source: CheckResult[]): C
   const judged = new Set(manifest.map((result) => result.key))
   return [...manifest, ...source.filter((result) => !judged.has(result.key))]
 }
+
+/** The one element of a list, else `undefined`: a manifest fact goes to a config only when no other could own it. */
+export function sole<T>(items: readonly T[]): T | undefined {
+  return items.length === 1 ? items[0] : undefined
+}

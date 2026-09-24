@@ -9,8 +9,8 @@
  */
 import { relative } from 'node:path'
 import type { SessionEntry } from '@guren/server'
-import { resolveSchemaTableBinding, schemaDeclaresSqlTable, type SchemaTableBinding } from './schema-binding'
-import { check, type CheckResult } from './check-result'
+import { attributeManifestTable, resolveSchemaTableBinding, type SchemaTableBinding } from './schema-binding'
+import { advisory, check, type CheckResult } from './check-result'
 import { appBindsService, readIfExists } from './discovery'
 import { introspectedSection, judgedFromManifest, judgedFromSource, mergeVerdicts, type IntrospectedSection, type IntrospectSource } from './manifest-section'
 import type { ParseCache, ParsedFile } from './parse-cache'
@@ -114,8 +114,9 @@ export async function checkSessionsConfig(options: {
     ? mergeVerdicts(judgedFromManifest(checkManifestStoreTables(entry, sites, cwd, schemaTables)), judgedFromSource(staticTables))
     : judgedFromSource(staticTables, 'the introspected app binds no session manager, so it never reads this config')
   // The app refuses to boot with both, whichever form the config takes, so this is reported for either.
-  const twice = session.manifest.warnings.some((warning) => warning.code === 'session-configured-twice')
-  if (twice) return [...tables, ...judgedFromManifest([configuredTwice()])]
+  if (session.manifest.warnings.some((warning) => warning.code === 'session-configured-twice')) {
+    return [...tables, ...judgedFromManifest([configuredTwice()])]
+  }
   return bindingApplies ? [...tables, ...judgedFromManifest([judgeManifestBinding(entry)])] : tables
 }
 
@@ -160,13 +161,7 @@ function checkStoreTables(site: SessionSite, cwd: string, schemaTables: SchemaTa
   return results
 }
 
-/**
- * The `database` stores of the session manager the app binds, by the table object each holds.
- * The manifest names that table by SQL name and not by the config that built it, so a verdict
- * goes to the config whose export the schema names as that table, or to the one config declaring
- * the store. A SQL name the static schema reader does not find is not evidence: it reads each
- * root's `db/schema.ts` only, and names a `pgTableCreator()` table without its prefix.
- */
+/** The `database` stores of the session manager the app binds, by the table object each holds, attributed by {@link attributeManifestTable}. */
 function checkManifestStoreTables(entry: SessionEntry, sites: SessionSite[], cwd: string, schemaTables: SchemaTable[]): CheckResult[] {
   const results: CheckResult[] = []
 
@@ -175,47 +170,43 @@ function checkManifestStoreTables(entry: SessionEntry, sites: SessionSite[], cwd
     const candidates = sites
       .filter((candidate) => readSessionConfig(candidate.config).stores.has(name))
       .map((candidate) => ({ site: candidate, ...storeBinding(candidate, name, cwd, schemaTables) }))
-    const matched = candidates.find((candidate) => candidate.binding?.sqlName === store.table)
-    const only = candidates.length === 1 ? candidates[0] : undefined
-    const keyOf = ({ site, identifier, binding }: (typeof candidates)[number]) =>
-      `sessions-config:${site.relPath}:${binding?.tableName ?? identifier ?? store.table ?? name}`
+    const attributed = attributeManifestTable(store.table, candidates, schemaTables)
+    if (!attributed) continue
+    const { site, identifier, binding } = attributed.at
+    const key = `sessions-config:${site.relPath}:${binding?.tableName ?? identifier ?? store.table ?? name}`
 
-    if (store.table === undefined) {
-      if (!only) continue
-      results.push(
-        check(
-          keyOf(only),
-          TABLE_TITLE,
-          'fail',
-          `The '${name}' session store uses the database driver, but its \`table\` is not a Drizzle table in the introspected `
-            + `app. The store takes the table untyped, so this only fails at runtime, on the first request that writes a session.`,
-          TABLE_FIX,
-          only.site.relPath,
-        ),
-      )
-      continue
+    switch (attributed.outcome) {
+      case 'declared':
+        results.push(check(key, TABLE_TITLE, 'pass', `The database session store '${name}' binds schema table '${store.table}'.`))
+        break
+      case 'untyped':
+        results.push(
+          check(
+            key,
+            TABLE_TITLE,
+            'fail',
+            `The '${name}' session store uses the database driver, but its \`table\` is not a Drizzle table in the introspected `
+              + `app. The store takes the table untyped, so this only fails at runtime, on the first request that writes a session.`,
+            TABLE_FIX,
+            site.relPath,
+          ),
+        )
+        break
+      case 'unfound':
+        results.push(
+          advisory(
+            key,
+            TABLE_TITLE,
+            'warn',
+            `The '${name}' session store writes to table '${store.table}', which the schema reader did not find in any app root's `
+              + 'db/schema.ts. If no schema file drizzle-kit reads declares it, no migration creates it and the first request '
+              + 'that writes a session fails.',
+            'Declare the table in db/schema.ts (`bunx guren add session` adds one), or ignore this if your drizzle.config reads it from another file.',
+            site.relPath,
+          ),
+        )
+        break
     }
-
-    const declared = matched ?? (schemaDeclaresSqlTable(schemaTables, store.table) ? only : undefined)
-    if (declared) {
-      results.push(check(keyOf(declared), TABLE_TITLE, 'pass', `The database session store '${name}' binds schema table '${store.table}'.`))
-      continue
-    }
-    // A store whose export the source resolves keeps the source verdict for it.
-    if (!only || only.binding) continue
-    results.push({
-      ...check(
-        keyOf(only),
-        TABLE_TITLE,
-        'warn',
-        `The '${name}' session store writes to table '${store.table}', which the schema reader did not find in any app root's `
-          + 'db/schema.ts. If no schema file drizzle-kit reads declares it, no migration creates it and the first request '
-          + 'that writes a session fails.',
-        'Declare the table in db/schema.ts (`bunx guren add session` adds one), or ignore this if your drizzle.config reads it from another file.',
-        only.site.relPath,
-      ),
-      advisory: true,
-    })
   }
 
   return results

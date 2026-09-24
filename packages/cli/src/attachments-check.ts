@@ -3,11 +3,11 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import type { CallExpression, ConditionalExpression, ObjectExpression, ObjectProperty } from '@babel/types'
 import type { AppManifest, AttachmentsEntry, RouteDefinition } from '@guren/server'
 import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
-import { check, type CheckResult } from './check-result'
-import { resolveSchemaTableBinding, schemaDeclaresSqlTable, type SchemaTableBinding } from './schema-binding'
+import { advisory, check, type CheckResult } from './check-result'
+import { attributeManifestTable, resolveSchemaTableBinding, type SchemaTableBinding } from './schema-binding'
 import { discoverAppConfigFiles, fileExists } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
-import { introspectedSection, judgedFromManifest, judgedFromSource, mergeVerdicts, readManifestSection, type IntrospectedSection, type IntrospectSource } from './manifest-section'
+import { introspectedSection, judgedFromManifest, judgedFromSource, mergeVerdicts, readManifestSection, sole, type IntrospectedSection, type IntrospectSource } from './manifest-section'
 import { routesEntryOrDefault } from './route-registrar'
 import { parseModelSource } from './model-parser'
 import type { ParseCache, ParsedFile } from './parse-cache'
@@ -98,17 +98,19 @@ async function configureAttachmentsCalls(cache: ParseCache, filePath: string): P
       callee.property.name === 'configureAttachments'
     )
   }
-  let total = 0
   let moduleScope = 0
-  walk(parsed.ast, (node) => {
-    if (isCall(node)) total++
-  })
+  let inFunction = 0
   walk(parsed.ast, (node) => {
     // Every Babel function node (declarations, expressions, arrows, object and class methods) carries `params`.
-    if (Array.isArray(node.params)) return false
+    if (Array.isArray(node.params)) {
+      walk(node, (inner) => {
+        if (isCall(inner)) inFunction++
+      })
+      return false
+    }
     if (isCall(node)) moduleScope++
   })
-  return { total, inFunction: total - moduleScope }
+  return { total: moduleScope + inFunction, inFunction }
 }
 
 async function fileCallsConfigureAttachments(cache: ParseCache, filePath: string): Promise<boolean> {
@@ -160,9 +162,22 @@ export async function checkAttachableModels(options: {
   })
   if (attachableModels.length === 0) return []
 
-  const judge = (configured: boolean): CheckResult[] => attachableModels.map(({ className, relPath }) => {
+  const judge = (configured: boolean, neverRan?: string[]): CheckResult[] => attachableModels.map(({ className, relPath }) => {
     const key = `attachments-model:${relPath}`
     const title = 'Attachable model wiring'
+    if (neverRan) {
+      return check(
+        key,
+        title,
+        'fail',
+        `${className} in ${relPath} mixes in Attachable(...), and ${neverRan.join(', ')} calls configureAttachments(), `
+          + 'but the introspected app never loads that module while it registers, so the call never runs and the first '
+          + 'attach fails at runtime.',
+        'Import the config from a provider the app registers (`bunx guren add attachments` writes AttachmentsProvider), '
+          + 'so configureAttachments() runs at boot.',
+        relPath,
+      )
+    }
     if (configured) {
       return check(key, title, 'pass', `${className} declares attachments and configureAttachments() is present.`)
     }
@@ -180,19 +195,7 @@ export async function checkAttachableModels(options: {
   })
 
   const wiring = await (options.wiring ?? readAttachmentsWiring(cwd, cache, configFiles, options.introspect))
-  if (wiring.neverRan) {
-    return judgedFromManifest(attachableModels.map(({ className, relPath }) => check(
-      `attachments-model:${relPath}`,
-      'Attachable model wiring',
-      'fail',
-      `${className} in ${relPath} mixes in Attachable(...), and ${wiring.neverRan!.join(', ')} calls configureAttachments(), `
-        + 'but the introspected app never loads that module while it registers, so the call never runs and the first '
-        + 'attach fails at runtime.',
-      'Import the config from a provider the app registers (`bunx guren add attachments` writes AttachmentsProvider), '
-        + 'so configureAttachments() runs at boot.',
-      relPath,
-    )))
-  }
+  if (wiring.neverRan) return judgedFromManifest(judge(false, wiring.sites))
   if (wiring.sites.length > 0) {
     return wiring.engine.status === 'described' ? judgedFromManifest(judge(true)) : judgedFromSource(judge(true), wiring.engine.reason)
   }
@@ -242,49 +245,45 @@ export async function checkAttachmentsConfig(options: {
   const { sites, engine } = await (options.wiring ?? readAttachmentsWiring(cwd, cache, files, options.introspect))
   if (engine.status === 'static') return judgedFromSource(results, engine.reason)
 
-  // The manifest names the engine's table, not the call that built it: a verdict goes to the call
-  // whose export the schema names as that table, or to the one file calling configureAttachments().
   const { table } = engine.value
-  const only = sites.length === 1 ? sites[0] : undefined
+  const candidates = sites.map((relPath) => {
+    const own = bindings.filter((binding) => binding.relPath === relPath)
+    return { relPath, binding: own.find((binding) => binding.sqlName === table) ?? own[0] }
+  })
+  const attributed = attributeManifestTable(table, candidates, schemaTables)
+  const verdict = attributed && manifestTableVerdict(attributed.outcome, attributed.at.relPath, table)
+  return mergeVerdicts(judgedFromManifest(verdict ? [verdict] : []), judgedFromSource(results))
+}
+
+function manifestTableVerdict(outcome: 'untyped' | 'declared' | 'unfound', relPath: string, table: string | undefined): CheckResult {
+  const key = `attachments-config:${relPath}`
   const title = 'configureAttachments table'
   const fix = 'Export the attachments table from db/schema.ts (the attachments guide has the snippet per dialect), and pass '
     + 'that export to configureAttachments().'
-  let verdict: CheckResult | undefined
-  if (table === undefined) {
-    if (only) {
-      verdict = check(
-        `attachments-config:${only}`,
+  switch (outcome) {
+    case 'declared':
+      return check(key, title, 'pass', `configureAttachments() binds schema table '${table}'.`)
+    case 'untyped':
+      return check(
+        key,
         title,
         'fail',
         `The introspected attachments engine's \`table\` is not a Drizzle table. The layer takes the table untyped, so `
           + 'this only fails at runtime, on the first attach.',
         fix,
-        only,
+        relPath,
       )
-    }
-  } else {
-    const site = bindings.find((binding) => binding.sqlName === table)?.relPath
-      ?? (schemaDeclaresSqlTable(schemaTables, table) ? only : undefined)
-    if (site) {
-      verdict = check(`attachments-config:${site}`, title, 'pass', `configureAttachments() binds schema table '${table}'.`)
-    } else if (only && !bindings.some((binding) => binding.relPath === only)) {
-      // A SQL name the static reader does not find is not evidence (it reads each root's db/schema.ts only,
-      // and names a pgTableCreator() table without its prefix), so an export the source resolves keeps its verdict.
-      verdict = {
-        ...check(
-          `attachments-config:${only}`,
-          title,
-          'warn',
-          `The introspected attachments engine writes to table '${table}', which the schema reader did not find in any app `
-            + "root's db/schema.ts. If no schema file drizzle-kit reads declares it, no migration creates it and the first attach fails.",
-          `${fix} Ignore this if your drizzle.config reads it from another file.`,
-          only,
-        ),
-        advisory: true,
-      }
-    }
+    case 'unfound':
+      return advisory(
+        key,
+        title,
+        'warn',
+        `The introspected attachments engine writes to table '${table}', which the schema reader did not find in any app `
+          + "root's db/schema.ts. If no schema file drizzle-kit reads declares it, no migration creates it and the first attach fails.",
+        `${fix} Ignore this if your drizzle.config reads it from another file.`,
+        relPath,
+      )
   }
-  return mergeVerdicts(judgedFromManifest(verdict ? [verdict] : []), judgedFromSource(results))
 }
 
 /** One `configureAttachments({ table })` whose table is a named `db/schema` import. */
@@ -344,10 +343,10 @@ export interface AttachmentsWiring {
   sites: string[]
   engine: IntrospectedSection<AttachmentsEntry>
   /**
-   * Set when every call sits at module scope and the introspected app configured no engine: nothing
-   * it loads while registering imports those files, and no later `boot()` can explain that.
+   * Set when every call sits at module scope and the introspected app configured no engine: nothing it
+   * loads while registering imports those files statically (a dynamic `import()` in a `boot()` would also read so).
    */
-  neverRan?: string[]
+  neverRan?: true
 }
 
 /**
@@ -369,7 +368,7 @@ export async function readAttachmentsWiring(
   if (section.value?.configured) return { sites, engine: { status: 'described', value: section.value, manifest: section.manifest } }
   if (calls.some((call) => call.inFunction > 0)) return { sites, engine: { status: 'static', reason: NOT_REGISTERED_REASON } }
   const neverRanReason = `the introspected app never loaded ${sites.join(', ')} while it registered, so its configureAttachments() never ran`
-  return { sites, engine: { status: 'static', reason: neverRanReason }, neverRan: sites }
+  return { sites, engine: { status: 'static', reason: neverRanReason }, neverRan: true }
 }
 
 /**
@@ -678,7 +677,7 @@ export async function checkAttachmentsPublicDisk(options: {
   const { sites, engine } = await (options.wiring ?? readAttachmentsWiring(cwd, cache, files, options.introspect))
   // The engine's disk joins the literals, which `disk: env.X` does not have.
   const defaults = engine.status === 'described' && engine.value.disk !== undefined
-    ? withEngineDisk(scanned, engine.value.disk, sites.length === 1 ? sites[0] : undefined)
+    ? withEngineDisk(scanned, engine.value.disk, sole(sites))
     : scanned
   if (defaults.length === 0) return []
 
@@ -802,7 +801,7 @@ export async function checkAttachmentsDelivery(options: {
   const declarations = () => (disks ??= scanStorageDisks(cache, files))
   if (engine.status === 'described') {
     // Mounting is app-wide, so only another config's redirect disks keep their source verdict.
-    const manifest = await judgeManifestDelivery(engine.value, engine.manifest, scan, sites, declarations)
+    const manifest = await judgeManifestDelivery(engine.value, engine.manifest, scan, sole(sites), declarations)
     return mergeVerdicts(manifest, judgedFromSource(await staticRedirectVerdicts(scan, declarations)))
   }
 
@@ -881,7 +880,8 @@ async function judgeManifestDelivery(
   engine: AttachmentsEntry,
   manifest: AppManifest,
   scan: AttachmentsDeliveryScan,
-  sites: string[],
+  /** The one file calling configureAttachments(), which a fact no literal names is attributed to. */
+  only: string | undefined,
   declarations: () => Promise<Map<string, StorageDiskDeclaration>>,
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = []
@@ -891,10 +891,13 @@ async function judgeManifestDelivery(
       (route) => route.name === delivery.routeName && route.controller?.name === ATTACHMENT_DELIVERY_CONTROLLER_NAME,
     )
     // The mount is app-wide, so an unmounted route is reported for every config enabling delivery, as the scan does.
-    const relPaths = scan.deliveryConfigs.length > 0 ? scan.deliveryConfigs : sites.length === 1 ? sites : []
-    if (mounted) results.push(deliveryMounted())
-    for (const relPath of mounted ? [] : relPaths) {
-      results.push(deliveryUnmounted(relPath, `the introspected app registers no registerAttachmentRoutes() route named '${delivery.routeName}'. `))
+    const relPaths = scan.deliveryConfigs.length > 0 ? scan.deliveryConfigs : only ? [only] : []
+    if (mounted) {
+      results.push(deliveryMounted())
+    } else {
+      for (const relPath of relPaths) {
+        results.push(deliveryUnmounted(relPath, `the introspected app registers no registerAttachmentRoutes() route named '${delivery.routeName}'. `))
+      }
     }
     const duplicate = duplicateRouteName(delivery.routeName, manifest.routes)
     if (duplicate) results.push(duplicate)
@@ -904,7 +907,7 @@ async function judgeManifestDelivery(
   if (redirected.length > 0) {
     const drivers = manifestDiskDrivers(manifest)
     for (const [disk] of redirected) {
-      const relPath = scan.redirectDisks.find((entry) => entry.disk === disk)?.relPath ?? (sites.length === 1 ? sites[0] : undefined)
+      const relPath = scan.redirectDisks.find((entry) => entry.disk === disk)?.relPath ?? only
       if (relPath === undefined) continue
       const driver = drivers.get(disk)
       const verdict = judgeRedirectDisk(relPath, disk, driver ?? (await declarations()).get(disk)?.driver)

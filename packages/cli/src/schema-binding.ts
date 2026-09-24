@@ -110,12 +110,23 @@ export interface SchemaTableBinding {
 }
 
 /**
- * Whether the schema declares a table by its SQL name, as the introspected app reports tables.
- * Only `true` is evidence: the static reader reads each root's `db/schema.ts` and nothing
- * `drizzle.config` adds, and names a `pgTableCreator()` or `pgSchema().table()` table wrongly or not at all.
+ * A table the introspected app names by SQL name (RFC 0026 §5): `untyped`, `declared` or an advisory
+ * `unfound`, at the candidate whose export the schema names so, else the only one; the manifest names no config.
+ * Only a found name is evidence: the reader sees no other `drizzle.config` schema file and no `pgTableCreator()`
+ * prefix, so a candidate whose export the source resolves keeps the source verdict (`undefined`).
  */
-export function schemaDeclaresSqlTable(schemaTables: SchemaTable[], sqlName: string): boolean {
-  return schemaTables.some((table) => table.tableName === sqlName)
+export function attributeManifestTable<C extends { binding?: SchemaTableBinding }>(
+  sqlName: string | undefined,
+  candidates: C[],
+  schemaTables: SchemaTable[],
+): { outcome: 'untyped' | 'declared' | 'unfound'; at: C } | undefined {
+  const only = candidates.length === 1 ? candidates[0] : undefined
+  if (sqlName === undefined) return only && { outcome: 'untyped', at: only }
+  const matched = candidates.find((candidate) => candidate.binding?.sqlName === sqlName)
+  if (matched) return { outcome: 'declared', at: matched }
+  if (!only) return undefined
+  if (schemaTables.some((table) => table.tableName === sqlName)) return { outcome: 'declared', at: only }
+  return only.binding ? undefined : { outcome: 'unfound', at: only }
 }
 
 /**
