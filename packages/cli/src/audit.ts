@@ -194,7 +194,7 @@ function manifestAuthVerdict(route: Pick<RouteEntry, 'middleware'>): ManifestAut
   if (middleware.some((entry) => entry.capabilities.authentication?.mode === 'required')) return { verdict: 'verified', names: [] }
 
   const named = middleware.flatMap((entry) =>
-    entry.kind !== 'inline' && entry.name && AUTH_MIDDLEWARE_PATTERN.test(entry.name) ? [entry.name] : [])
+    entry.kind !== 'inline' && !entry.capabilities.authorization && entry.name && AUTH_MIDDLEWARE_PATTERN.test(entry.name) ? [entry.name] : [])
   if (named.length > 0) return { verdict: 'unverified-auth-name', names: named }
 
   const authorizing = middleware.filter((entry) => entry.capabilities.authorization)
