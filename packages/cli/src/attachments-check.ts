@@ -68,8 +68,6 @@ function scanAttachmentsImports(parsed: ParsedFile): AttachmentsImportScan {
   return { configureLocal, coreNamespaces, importsByLocal }
 }
 
-const FUNCTION_NODES = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression', 'ObjectMethod', 'ClassMethod', 'ClassPrivateMethod'])
-
 /**
  * The `configureAttachments()` calls a file makes under its `@guren/core` bindings (the named
  * import, aliases included, or `core.configureAttachments()` on a namespace import), and how many
@@ -106,7 +104,8 @@ async function configureAttachmentsCalls(cache: ParseCache, filePath: string): P
     if (isCall(node)) total++
   })
   walk(parsed.ast, (node) => {
-    if (FUNCTION_NODES.has(node.type)) return false
+    // Every Babel function node (declarations, expressions, arrows, object and class methods) carries `params`.
+    if (Array.isArray(node.params)) return false
     if (isCall(node)) moduleScope++
   })
   return { total, inFunction: total - moduleScope }
