@@ -203,7 +203,7 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   // Kicked off first so the registry round-trip overlaps the local parsing.
   const dependencyScanOutput = options.deps ? startDependencyScan(cwd) : null
 
-  const { methods: controllerMethods, collisions, unreadableFiles } = await parseControllerMethods(cwd)
+  const { methods: controllerMethods, collisions, unreadableFiles, unparsedFiles } = await parseControllerMethods(cwd)
   for (const collision of collisions) {
     findings.push(controllerCollisionFinding(collision))
   }
@@ -218,6 +218,22 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
         `${filePath} could not be read, so the validation, authentication, and annotation rules saw no `
         + 'body for any action it declares.',
         `Check the file's permissions and that it still exists, then re-run: bunx guren audit`,
+        filePath,
+      ),
+    )
+  }
+  // An unparsed file never reaches the class index, so a same-named class in
+  // another file wins every route with no controller-name-collision reported.
+  for (const filePath of unparsedFiles) {
+    findings.push(
+      finding(
+        `controller-unparsed:${filePath}`,
+        `${filePath} unparsed`,
+        'warn',
+        `${filePath} could not be parsed, so the validation, authentication, and annotation rules saw no `
+        + 'body for any action it declares. A route naming a class it declares is judged against another '
+        + 'controller file when one declares the same class name, and no name collision is reported.',
+        `Fix the syntax error in ${filePath}, then re-run: bunx guren audit`,
         filePath,
       ),
     )

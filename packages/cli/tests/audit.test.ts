@@ -1615,6 +1615,56 @@ export const billingModule = { name: 'billing', providers: [], routes: registerB
     }
   })
 
+  it('warns about a controller that does not parse, which hides a class-name collision', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-controller-unparsed-')
+
+    try {
+      await writeController(
+        workspace.dir,
+        'PostController',
+        `export default class PostController {
+  async store() {
+    const data = await this.validateBody(schema)
+    return null
+  }
+}`,
+      )
+      await mkdir(join(workspace.dir, 'app/Http/Controllers/Admin'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/Admin/PostController.ts'),
+        `export default class PostController {
+  async store( {
+    const data = await this.request.json()
+`,
+        'utf8',
+      )
+      await writeRoutes(
+        workspace.dir,
+        `class PostController {
+  async store() { return null }
+}
+export default function registerRoutes(router: any) {
+  router.post('/posts', [PostController, 'store'])
+}`,
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      expect(report.routesAnalyzed).toBe(true)
+      const unparsedPath = 'app/Http/Controllers/Admin/PostController.ts'
+      const unparsed = report.findings.find(f => f.key === `controller-unparsed:${unparsedPath}`)
+      expect(unparsed).toBeDefined()
+      expect(unparsed!.status).toBe('warn')
+      expect(unparsed!.filePath).toBe(unparsedPath)
+      expect(unparsed!.line).toBeUndefined()
+      expect(unparsed!.message).toContain('no name collision is reported')
+      expect(report.findings.some(f => f.key === 'controller-name-collision:PostController')).toBe(false)
+      expect(report.findings.some(f => f.key.startsWith('controller-unreadable:'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('audits mutating routes registered inside a module (RFC 0002), not just the top-level routes file', async () => {
     const workspace = await createTempWorkspace('guren-cli-audit-module-')
 
@@ -1983,6 +2033,32 @@ describe('runAudit ignore config', () => {
       const invalid = report.findings.find(f => f.key === 'audit-config:invalid')
       expect(invalid).toBeDefined()
       expect(invalid!.message).toContain("missing a non-empty 'key'")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('ignores an unparsed-controller finding matched by key', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-ignore-unparsed-')
+
+    try {
+      await writeController(workspace.dir, 'DraftController', `export default class DraftController {\n  async store( {\n`)
+      await writeAuditConfig(
+        workspace.dir,
+        `export default {
+  ignore: [
+    { key: 'controller-unparsed:app/Http/Controllers/DraftController.ts', reason: 'work in progress, not routed' },
+  ],
+}`,
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const finding = report.findings.find(f => f.key === 'controller-unparsed:app/Http/Controllers/DraftController.ts')
+      expect(finding).toBeDefined()
+      expect(finding!.status).toBe('ignored')
+      expect(finding!.ignoreReason).toBe('work in progress, not routed')
+      expect(report.findings.some(f => f.key.startsWith('audit-config:'))).toBe(false)
     } finally {
       await workspace.cleanup()
     }
