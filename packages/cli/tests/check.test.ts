@@ -207,9 +207,11 @@ test('lists tasks', async () => {
       const agentManifest = manifestChecks.find(c => c.key === 'manifest:.guren/agents.gen.ts')
       expect(agentManifest?.status).toBe('pass')
       expect(agentManifest?.message).toContain('not applicable')
+      expect(agentManifest?.fix).toBeUndefined()
       const unconditional = manifestChecks.filter(c => c !== agentManifest)
       expect(unconditional.length).toBeGreaterThan(0)
       expect(unconditional.every(c => c.status === 'warn')).toBe(true)
+      expect(unconditional.every(c => c.fix?.args.join(' ') === 'codegen')).toBe(true)
     } finally {
       await workspace.cleanup()
     }
@@ -236,6 +238,7 @@ export function registerWebRoutes(router: Router): void {
       // A bare `guren codegen` reads routes/web.ts, so it would write the
       // manifest from a different route graph and not clear this finding.
       expect(check?.suggestion).toContain('--routes routes/api.ts')
+      expect(check?.fix).toEqual({ kind: 'command', args: ['codegen', '--routes', 'routes/api.ts'] })
     })
 
     it('prints the plain command when no custom routes file is in play', async () => {
@@ -259,6 +262,7 @@ export function registerWebRoutes(router: Router): void {
       expect(check?.status).toBe('warn')
       expect(check?.message).toContain('no longer exposes')
       expect(check?.suggestion).toContain('it removes')
+      expect(check?.fix).toEqual({ kind: 'command', args: ['codegen'] })
     })
 
     it('is skipped under --changed when only non-source files changed', async () => {

@@ -220,6 +220,24 @@ Combining suite flags runs their union. `--changed` restricts any of
 them to files changed against the merge base with `main`, the fast
 path the agent-harness edit hook uses.
 
+Some findings clear by regenerating files: a missing `.guren/*.gen.ts`
+manifest (`guren codegen`) and a drifted `docs/spec/` view
+(`guren spec:generate`). `check --json` gives each of these a `fix`
+field, `{ "kind": "command", "args": ["codegen"] }`, holding the
+arguments after `guren`. `--fix` runs every distinct fix once, then
+checks again and reports that second run, with what it ran under
+`fixes`. It exits non-zero when one of the commands fails, or exits 0
+while the findings it was meant to clear are still reported. `--fix`
+is refused under `--ci`: a gate that regenerated the drift it checks
+for would always pass, so run it locally and commit what it writes. A
+finding that needs a code change or a decision has no `fix`, only the
+`suggestion` text.
+
+```bash
+bunx guren check --fix          # regenerate what the findings name, then check again
+bunx guren check --spec --fix   # the same, limited to the spec views
+```
+
 `gate` is the one command that answers "is this change done?". It runs
 codegen, typecheck, lint (when the app has an `.oxlintrc.json`),
 `check` under the `--ci` rule, `audit`, and the test suite (the stages

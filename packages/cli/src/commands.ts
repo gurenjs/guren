@@ -89,6 +89,7 @@ import { ENV_EXAMPLE_FILE, ENV_SCHEMA_FILE, loadEnvSchema, writeEnvExample } fro
 import { readAppDefaultLocale } from './app-locale'
 import { CliError } from './cli-error'
 import { gatingResults } from './check-result'
+import { recheckInChild, runCheckFixes, settleFixRuns } from './check-fix'
 import { runAudit, renderAuditReport } from './audit'
 import { runGate, renderGateReport } from './gate'
 import { generateGuidelines } from './guidelines'
@@ -1893,6 +1894,10 @@ const checkCommand = defineCommand({
       type: 'boolean',
       description: 'Exit non-zero when any check fails or warns (runs the full suite; for CI gates).',
     },
+    fix: {
+      type: 'boolean',
+      description: 'Run the guren command each finding names as its fix (codegen, spec:generate: generated files only), then check again.',
+    },
   },
   async run({ args }) {
     // --ci promises a full-suite gate; letting a suite flag narrow the run
@@ -1903,8 +1908,13 @@ const checkCommand = defineCommand({
       process.exitCode = 1
       return
     }
+    if (args.ci && args.fix) {
+      consola.error('--fix regenerates the files a --ci gate exists to catch drifting. Run guren check --fix locally and commit what it writes.')
+      process.exitCode = 1
+      return
+    }
 
-    const report = await runCheck({
+    const options = {
       cwd: args.app,
       json: Boolean(args.json),
       routesFile: args.routes,
@@ -1917,7 +1927,17 @@ const checkCommand = defineCommand({
       env: Boolean(args.env),
       plan: Boolean(args.plan),
       changed: Boolean(args.changed),
-    })
+    }
+    let report = await runCheck(options)
+    if (args.fix) {
+      let fixes = await runCheckFixes(report)
+      if (fixes.length > 0) {
+        report = (await recheckInChild(options, report.cwd)) ?? (await runCheck(options))
+        fixes = settleFixRuns(fixes, report)
+      }
+      report.fixes = fixes
+      if (fixes.some((run) => !run.ok)) process.exitCode = 1
+    }
 
     if (args.json) {
       console.log(JSON.stringify(report, null, 2))
