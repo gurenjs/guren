@@ -439,7 +439,8 @@ routes exist and in which order, and each route is rendered from the routes
 file's Zod, so an app whose routes all come from the routes file and its modules
 gets the same files byte for byte. A route only the app registers is added
 without schema types, with a warning naming it, and an agent tool on it comes
-from the manifest. When the app cannot be introspected, codegen writes from the
+from the manifest. When the app cannot be introspected, or `--routes` names a
+file other than the one `check` finds as the entry, codegen writes from the
 routes file and says why:
 
 ```bash

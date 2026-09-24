@@ -685,9 +685,10 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   routes) and `web/` (22), the same set in the same order on both, every
 >   generated file identical. A route only the manifest has is rendered without
 >   schema types, with a warning naming it; an agent tool on it comes from
->   `manifest.agentTools`. A failed introspection writes from the routes file and
->   says why; a routes file that fails to load fails as before, since its Zod is
->   required.
+>   `manifest.agentTools`, unless a routes-file tool already takes its name. A
+>   failed introspection, and a `--routes` file other than the one `check` probes
+>   as the entry, write from the routes file and say why; a routes file that
+>   fails to load fails as before, since its Zod is required.
 > - `planAgentManifest()`, which `check` and `doctor` ask whether
 >   `.guren/agents.gen.ts` should exist, stays on the routes file: it is the rule
 >   for what codegen writes by default, and a check reading another derivation
