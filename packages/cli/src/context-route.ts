@@ -120,13 +120,11 @@ export function escapeMarkdownTableCell(value: string): string {
 }
 
 /**
- * Every route as a `ContextRoute`, or `[]` when the routes file can't be loaded
- * (missing deps, mid-scaffold app) so context commands degrade to a route-less view.
- * Pass `loadErrors` unless there is nowhere to render it: a failed load and an app
- * with no routes produce the same empty list. A legitimately absent routes file
- * carries no reason — see `resolveRoutesFile()`. With `introspect`, the list is the
- * introspected app's (RFC 0026 §5), a provider's routes included; a route the routes
- * file does not register has no schema types, since those are rendered from its Zod.
+ * Every route as a `ContextRoute`, or `[]` with the reason in `loadErrors` when the routes
+ * file can't be loaded (a failed load and a routeless app give the same list; a legitimately
+ * absent file gives no reason, see `resolveRoutesFile()`). With `introspect`, the introspected
+ * app's routes (RFC 0026 §5); one the routes file does not register has no schema types,
+ * since those are rendered from its Zod.
  */
 export async function loadContextRoutes(
   cwd: string,

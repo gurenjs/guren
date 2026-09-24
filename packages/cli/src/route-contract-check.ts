@@ -298,11 +298,10 @@ function summary(count: number): CheckResult {
 
 /**
  * Route contract checks: `params` and `bind` keys against the parameters their route path
- * declares (see {@link checkRoute} for why only that direction). Runs against registered
- * definitions, not the routes file's AST: the registered path is the joined one, and a
- * params schema is usually imported from elsewhere. With an introspection, the introspected
- * app's routes are judged (a provider's included). A clean run still emits one summary pass,
- * so it cannot be mistaken for a run that never happened.
+ * declares (see {@link checkRoute}). Runs against registered definitions, not the AST: the
+ * registered path is the joined one, and a params schema is usually imported from elsewhere.
+ * Introspected, the app's own routes are judged, a provider's included. A clean run still
+ * emits one summary pass, so it cannot be mistaken for a run that never happened.
  */
 export async function checkRouteContracts(options: RouteContractCheckOptions): Promise<CheckResult[]> {
   const { cwd, routesFile = DEFAULT_ROUTES_FILE } = options
