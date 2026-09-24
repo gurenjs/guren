@@ -47,6 +47,32 @@ const PlanFingerprintSchema = z.object({
   }),
 })
 
+const PlanStepWorkFileSchema = z.object({
+  /** App-relative, POSIX separators. */
+  path: z.string(),
+  /** `null` for a binary file, which `git diff --numstat` prints as `-`. */
+  added: z.number().int().nonnegative().nullable(),
+  removed: z.number().int().nonnegative().nullable(),
+})
+
+/**
+ * Files touched and lines changed by the work that implemented a step (RFC 0030 §7), from the
+ * commit the step's mark names to the working tree. `settled` once a run of the step verified:
+ * later runs, a drift re-check among them, carry it unchanged. See `plan/work.ts`.
+ */
+export const PlanStepWorkSchema = z.discriminatedUnion('measured', [
+  z.object({
+    measured: z.literal(true),
+    from: z.string(),
+    files: z.array(PlanStepWorkFileSchema),
+    /** Summed over the text files. */
+    added: z.number().int().nonnegative(),
+    removed: z.number().int().nonnegative(),
+    settled: z.boolean(),
+  }),
+  z.object({ measured: z.literal(false), reason: z.string(), settled: z.boolean() }),
+])
+
 export const PlanStepRecordSchema = z.object({
   outcome: z.enum(['verified', 'failed', 'blocked', 'incomplete']),
   /** {@link planDigest} of the plan the step was verified against. */
@@ -63,6 +89,8 @@ export const PlanStepRecordSchema = z.object({
    */
   waived: z.array(z.string()).default([]),
   fingerprint: PlanFingerprintSchema,
+  /** Absent on a record written before the field existed. */
+  work: PlanStepWorkSchema.optional(),
 })
 
 const PlanStallSchema = z.object({
@@ -84,6 +112,11 @@ const PlanActiveStepSchema = z.object({
   plan: z.string(),
   step: z.string(),
   startedAt: z.string(),
+  /**
+   * The commit HEAD named when the step was first marked, kept when it is marked again. `null`
+   * where git could not read HEAD; absent on a mark written before the field existed.
+   */
+  from: z.string().nullable().optional(),
   /** Stops the hook has blocked on this step since it was marked. */
   continuations: z.number().int().nonnegative(),
   /** A digest of the record the last continuation was blocked on; the same one again is no progress. */
@@ -100,6 +133,8 @@ export const PlanStateSchema = z.object({
 export type PlanCommandRecord = z.infer<typeof PlanCommandRecordSchema>
 export type PlanFingerprint = z.infer<typeof PlanFingerprintSchema>
 export type PlanStepRecord = z.infer<typeof PlanStepRecordSchema>
+export type PlanStepWork = z.infer<typeof PlanStepWorkSchema>
+export type PlanStepWorkFile = z.infer<typeof PlanStepWorkFileSchema>
 export type PlanStall = z.infer<typeof PlanStallSchema>
 export type PlanActiveStep = z.infer<typeof PlanActiveStepSchema>
 export type PlanState = z.infer<typeof PlanStateSchema>
