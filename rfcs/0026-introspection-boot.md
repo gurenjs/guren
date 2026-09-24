@@ -567,7 +567,8 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   one lookup: a reference resolved by `identity` reads its own file, and one
 >   the scan cannot place there (the child picked a file that re-exports the
 >   class) falls back to the name, as a `name-only` reference does. A placed class
->   that declares no such action has no body, never another class's.
+>   that declares no such action, or whose file would not read or parse, has no
+>   body, never another class's.
 >   `collisionsReachedByName()` keeps a collision only for a class some route
 >   reached by name.
 > - `guren audit` reads `manifest.routes` for `validation:*`, `authz:*` and
@@ -586,8 +587,8 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   stays a warning whose message names `ability`, or says the ability is decided
 >   at request time. The draft's "unresolved alias" warning splits in two: an
 >   alias registered outside the routes file resolves and stops warning, while a
->   name no alias or group registers anywhere is its own warning, since mounting
->   it throws (softened when a skipped `options.boot`, which runs before
+>   name no alias or group registers anywhere is its own warning, judged before
+>   any guard beside it, since mounting it throws (softened when a skipped `options.boot`, which runs before
 >   `mountRoutes()`, might register it). The auth-like name match reads alias and
 >   group entries only, as the static path does.
 > - Body validation passes when `schemas.body` is present, `{ unreadable }`

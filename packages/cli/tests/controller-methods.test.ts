@@ -313,6 +313,15 @@ export class PostController extends Controller {
     expect(controllerMethodFor(result, ref('modules/blog/app/Http/Controllers/PostController.ts', 'PostController'))).toEqual({ by: 'identity', info: undefined })
   })
 
+  it('answers no body for a placed class whose file did not parse, rather than a same-named class\'s', async () => {
+    const result = await scan({
+      'app/Http/Controllers/PostController.ts': body('root'),
+      'modules/blog/app/Http/Controllers/PostController.ts': 'export default class PostController {',
+    })
+    expect(result.collisions).toEqual([])
+    expect(controllerMethodFor(result, ref('modules/blog/app/Http/Controllers/PostController.ts', 'default'))).toEqual({ by: 'identity', info: undefined })
+  })
+
   it('reports a collision only for a class some route reached by its name alone', async () => {
     const result = await scan({
       'app/Http/Controllers/PostController.ts': body('root'),

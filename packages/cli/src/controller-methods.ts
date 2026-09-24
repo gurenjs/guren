@@ -1,4 +1,4 @@
-import { relative } from 'node:path'
+import { relative, sep } from 'node:path'
 import type {
   BlockStatement,
   ClassDeclaration,
@@ -440,8 +440,12 @@ export function controllerMethodFor(scan: ControllerMethodScan, controller: Cont
   if (controller.resolved === 'identity' && file && exportName) {
     const info = scan.byExport.get(`${file}#${exportName}.${controller.action}`)
     if (info) return { info, by: 'identity' }
-    // The class is there and declares no such action (inherited, or missing): another class's body is no answer.
+    // The class is there and declares no such action (inherited, or missing), or its file would
+    // not read or parse: another class's body is no answer either way.
     if (scan.declarations.some((declaration) => declaration.file === file && declaration.exportNames.includes(exportName))) {
+      return { info: undefined, by: 'identity' }
+    }
+    if ([...scan.unreadableFiles, ...scan.unparsedFiles].some((skipped) => skipped.split(sep).join('/') === file)) {
       return { info: undefined, by: 'identity' }
     }
   }

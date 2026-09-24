@@ -175,11 +175,12 @@ export interface ManifestAuthVerdict {
  */
 export function manifestAuthVerdict(route: Pick<RouteEntry, 'middleware'>): ManifestAuthVerdict {
   const { middleware } = route
-  if (middleware.some((entry) => entry.capabilities.authentication?.mode === 'required')) return { verdict: 'verified', names: [] }
-
+  // First: a route naming an unregistered alias does not mount, so no guard beside it protects anything.
   const unresolved = middleware.flatMap((entry) =>
     entry.unresolved ? [entry.name ?? ''] : (entry.unresolvedMembers ?? []))
   if (unresolved.length > 0) return { verdict: 'unresolved-alias', names: unresolved }
+
+  if (middleware.some((entry) => entry.capabilities.authentication?.mode === 'required')) return { verdict: 'verified', names: [] }
 
   const named = middleware.flatMap((entry) =>
     entry.kind !== 'inline' && entry.name && AUTH_MIDDLEWARE_PATTERN.test(entry.name) ? [entry.name] : [])
@@ -643,7 +644,9 @@ async function auditIntrospectSource(
   const none: AuditIntrospection = { failure: Promise.resolve(undefined) }
   if (!options.introspect) return none
   if (options.routesFile) return { ...none, reason: '--routes names a routes file, and the introspected app describes its entry' }
-  if (!(await access(routesFile).then(() => true, () => false))) return none
+  if (!(await access(routesFile).then(() => true, () => false))) {
+    return { ...none, reason: `there is no routes file at ${relative(cwd, routesFile)}, so the app was not introspected` }
+  }
   // A routes file that would not load may still register through the app, so it does not skip the run.
   if (definitions && !definitions.some(isJudgedRoute)) {
     return { ...none, reason: 'no route mutates or carries a body, so the app was not introspected' }
@@ -806,7 +809,22 @@ function auditRoutes(
       const hasAuthMiddleware = verdict === 'verified' || verdict === 'legacy-name-match'
       const hasControllerAuth = methodInfo ? AUTH_CALL_PATTERN.test(methodInfo.body) : false
 
-      if (hasAuthMiddleware || hasControllerAuth) {
+      if (verdict === 'unresolved-alias') {
+        findings.push(withEvidence(
+          fromManifest,
+          finding(
+            `authz:${routeLabel}`,
+            routeLabel,
+            'warn',
+            `Middleware ${names.map((name) => `'${name}'`).join(', ')} is registered as no alias or group anywhere in the app, `
+            + 'so nothing says what the chain enforces'
+            + (bootSkipped
+              ? ', unless the createApp({ boot }) callback, which introspection does not run, registers it.'
+              : ', and mounting the route fails at boot.'),
+            'Register the alias (router.aliasMiddleware(name, requireAuthenticated())) or remove the name from the route.',
+          ),
+        ))
+      } else if (hasAuthMiddleware || hasControllerAuth) {
         findings.push(withEvidence(
           verdict === 'verified' ? fromManifest : 'static',
           finding(
@@ -820,20 +838,6 @@ function auditRoutes(
                 : `Controller checks authentication in ${controllerKey}.`,
           ),
         ))
-      } else if (verdict === 'unresolved-alias') {
-        findings.push(
-          finding(
-            `authz:${routeLabel}`,
-            routeLabel,
-            'warn',
-            `Middleware ${names.map((name) => `'${name}'`).join(', ')} is registered as no alias or group anywhere in the app, `
-            + 'so nothing says what the chain enforces'
-            + (bootSkipped
-              ? ', unless the createApp({ boot }) callback, which introspection does not run, registers it.'
-              : ', and mounting the route fails at boot.'),
-            'Register the alias (router.aliasMiddleware(name, requireAuthenticated())) or remove the name from the route.',
-          ),
-        )
       } else if (verdict === 'unverified-auth-name') {
         findings.push(
           finding(

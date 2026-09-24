@@ -2032,7 +2032,7 @@ const auditCommand = defineCommand({
       default: true,
       description: 'Scan dependencies via bun audit (requires registry access). Disable with --no-deps.',
     },
-    // Positive on purpose, so citty's negation lands on this key; `default: true` prints `--no-introspect`.
+    // Same shape as check's `introspect` flag above.
     introspect: {
       type: 'boolean',
       default: true,

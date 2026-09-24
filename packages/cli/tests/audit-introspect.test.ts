@@ -243,6 +243,15 @@ describe('guren audit against the introspected app (RFC 0026 §5)', () => {
     expect(source['authz:PUT /posts/:id']?.message).toContain('Inline middleware')
   })
 
+  test('reports an unregistered alias ahead of a guard that would pass, since the route does not mount', async () => {
+    const dir = await scaffoldApp('unresolved-beside-guard', {
+      'routes/web.ts': ROUTES.replace("router.middleware('auth').group((auth) => {", "router.middleware('auth', 'auth.typo').group((auth) => {"),
+    })
+    const findings = byKey(await runAudit({ cwd: dir, introspect: true }))
+    expect(findings['authz:POST /posts']).toMatchObject({ status: 'warn', evidence: 'manifest' })
+    expect(findings['authz:POST /posts']?.message).toContain("'auth.typo'")
+  })
+
   test('reports an alias nothing in the app registers as unresolved, not as an unrecognized guard', () => {
     expect(manifest['authz:DELETE /posts/:id']?.status).toBe('warn')
     expect(manifest['authz:DELETE /posts/:id']?.message).toContain("'auth.admin' is registered as no alias or group")
@@ -300,6 +309,13 @@ describe('guren audit when the manifest cannot be used', () => {
     })
     const report = await runAudit({ cwd: dir, introspect: true })
     expect(report.routeSource).toEqual({ from: 'routes-file', reason: expect.stringContaining('no route mutates') })
+  })
+
+  test('an app with no routes file is not introspected, and the report says why', async () => {
+    const dir = join(root, 'no-routes')
+    await writeWorkspaceFiles(dir, { 'package.json': JSON.stringify({ name: 'no-routes', type: 'module' }) })
+    const report = await runAudit({ cwd: dir, introspect: true })
+    expect(report.routeSource).toEqual({ from: 'routes-file', reason: expect.stringContaining('no routes file at routes/web.ts') })
   })
 
   test('the CLI introspects by default and --no-introspect reads the routes file', async () => {

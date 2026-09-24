@@ -366,7 +366,8 @@ seconds, and print one line naming what each was judged from.
 
 `guren audit` reads the introspected app for its route-level rules
 (`validation:*`, `authz:*`, `agent-annotation:*`). It introspects only when the
-routes file registers a route that mutates or carries a body, and never with
+routes file registers a route that mutates or carries a body, or fails to load
+on its own (the app may still register it), and never with
 `--routes`, since the manifest describes the app's entry rather than the file
 you named. From the manifest:
 
@@ -377,11 +378,12 @@ you named. From the manifest:
   message names the ability it checks. A guest request reaches the gate with a
   `null` user, and a policy may let it through.
 - A name no alias or group registers anywhere in the app is reported as
-  unresolved. Mounting such a route fails at boot.
+  unresolved, ahead of any guard beside it: mounting such a route fails at boot,
+  unless a `createApp({ boot })` callback registers the name.
 - A controller is found by its file and export. Two modules may each declare a
   `ReportController`; each route is judged against its own class, and
-  `controller-name-collision:*` is reported only for a route the manifest could
-  not place, such as a class declared inside the routes file. The body checks
+  `controller-name-collision:*` is reported only for a class some route reaches
+  by name alone, such as a class declared inside the routes file. The body checks
   (`validateBody()`, `userOrFail()`) still read the action's source.
 
 `guren check` uses the same lookup for its agent-route rules when an agent
