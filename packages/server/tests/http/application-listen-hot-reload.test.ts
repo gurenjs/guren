@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test'
 
 import { Application } from '../../src/http/Application'
+import { withHotRuntime } from '../../src/hot-reload/testing'
 import { gurenGlobals, resetGurenGlobals } from './vite-dev-server-fixture'
 
 /**
@@ -13,19 +14,20 @@ import { gurenGlobals, resetGurenGlobals } from './vite-dev-server-fixture'
 interface StubServer {
   readonly port: number
   readonly hostname: string
+  readonly stops: unknown[]
   stop: (closeActiveConnections?: boolean) => Promise<void>
 }
 
 function neverStopping(): StubServer {
-  return { port: 3610, hostname: '127.0.0.1', stop: () => new Promise<void>(() => {}) }
-}
-
-async function withHotRuntime<T>(callback: () => Promise<T>): Promise<T> {
-  process.execArgv.push('--hot')
-  try {
-    return await callback()
-  } finally {
-    process.execArgv.splice(process.execArgv.indexOf('--hot'), 1)
+  const stops: unknown[] = []
+  return {
+    port: 3610,
+    hostname: '127.0.0.1',
+    stops,
+    stop: (closeActiveConnections?: boolean) => {
+      stops.push(closeActiveConnections)
+      return new Promise<void>(() => {})
+    },
   }
 }
 
@@ -33,6 +35,7 @@ describe('Application.listen under bun --hot', () => {
   const originalEnv = { ...process.env }
   const originalServe = Bun.serve
   let warn: ReturnType<typeof spyOn>
+  let apps: Application[]
 
   beforeEach(() => {
     process.env = { ...originalEnv }
@@ -40,34 +43,66 @@ describe('Application.listen under bun --hot', () => {
     process.env.GUREN_DEV_BANNER = '0'
     delete process.env.GUREN_BUN_STOP_TIMEOUT_MS
     resetGurenGlobals()
+    apps = []
     warn = spyOn(console, 'warn').mockImplementation(() => {})
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Releases each app's signal handlers; the stubs never resolve, so bound it.
+    process.env.GUREN_BUN_STOP_TIMEOUT_MS = '20'
+    for (const app of apps) await app.stop(true)
     warn.mockRestore()
     process.env = { ...originalEnv }
     Bun.serve = originalServe
     resetGurenGlobals()
   })
 
-  it('gives up on the replaced server well inside the default bound, without warning', async () => {
+  function listen(): Promise<Application> {
+    const app = new Application()
+    apps.push(app)
+    return app.listen({ port: 3610, hostname: '127.0.0.1', vite: false }).then(() => app)
+  }
+
+  it('force-stops the replaced server and gives it up at the short bound, without warning', async () => {
     const servers = [neverStopping(), neverStopping()]
     let next = 0
     Bun.serve = mock(() => servers[next++]) as unknown as typeof Bun.serve
 
     await withHotRuntime(async () => {
-      const first = new Application()
-      await first.listen({ port: 3610, hostname: '127.0.0.1', vite: false })
+      await listen()
 
       const started = performance.now()
-      const second = new Application()
-      await second.listen({ port: 3610, hostname: '127.0.0.1', vite: false })
+      await listen()
       const elapsed = performance.now() - started
 
-      // 250 ms is the bound; 2 s is the widest a slow CI runner may stretch it
-      // while still telling it apart from the 5 s default.
+      // The bound is 250 ms: under 200 would mean the stop was skipped, and
+      // 2 s is the widest a slow CI runner may stretch it while still telling
+      // it apart from the 5 s default.
+      expect(servers[0].stops).toEqual([true])
+      expect(elapsed).toBeGreaterThanOrEqual(200)
       expect(elapsed).toBeLessThan(2000)
       expect(gurenGlobals.__gurenActiveServer).toBe(servers[1])
+      expect(warn).not.toHaveBeenCalled()
+    })
+  })
+
+  it('lets GUREN_BUN_STOP_TIMEOUT_MS shorten the bound but not lengthen it', async () => {
+    process.env.GUREN_BUN_STOP_TIMEOUT_MS = '30000'
+    const servers = [neverStopping(), neverStopping(), neverStopping()]
+    let next = 0
+    Bun.serve = mock(() => servers[next++]) as unknown as typeof Bun.serve
+
+    await withHotRuntime(async () => {
+      await listen()
+      let started = performance.now()
+      await listen()
+      expect(performance.now() - started).toBeLessThan(2000)
+
+      process.env.GUREN_BUN_STOP_TIMEOUT_MS = '20'
+      started = performance.now()
+      await listen()
+      expect(performance.now() - started).toBeLessThan(200)
+      expect(servers[1].stops).toEqual([true])
       expect(warn).not.toHaveBeenCalled()
     })
   })
@@ -78,11 +113,10 @@ describe('Application.listen under bun --hot', () => {
     let next = 0
     Bun.serve = mock(() => servers[next++]) as unknown as typeof Bun.serve
 
-    const first = new Application()
-    await first.listen({ port: 3610, hostname: '127.0.0.1', vite: false })
-    const second = new Application()
-    await second.listen({ port: 3610, hostname: '127.0.0.1', vite: false })
+    await listen()
+    await listen()
 
+    expect(servers[0].stops).toEqual([true])
     expect(gurenGlobals.__gurenActiveServer).toBe(servers[1])
     expect(warn).toHaveBeenCalledTimes(1)
     expect(String(warn.mock.calls[0]?.[0])).toContain('did not stop within 50ms')

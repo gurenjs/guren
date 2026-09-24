@@ -222,7 +222,7 @@ function bunStopTimeoutMs(): number {
  * How long a `bun --hot` reload waits on the server it replaces. That stop is
  * forced, and the hot-reload teardown has already server-closed every broadcast
  * WebSocket, so nothing is draining; on Bun 1.3.x `stop()` then never resolves
- * (1.4.0 resolves at once), and the default bound cost every reload 5 s.
+ * (1.4.0 resolves at once). Quoted in docs/{en,ja}/guides/architecture.md.
  */
 const HOT_RELOAD_STOP_TIMEOUT_MS = 250
 
@@ -236,9 +236,13 @@ function defaultStopBound(): StopBound {
   return { timeoutMs: bunStopTimeoutMs(), warn: true }
 }
 
-/** Silent: on Bun 1.3.x it is hit on every reload, and there is nothing to report. */
+/**
+ * Silent: on Bun 1.3.x it is hit on every reload, and there is nothing to
+ * report. `GUREN_BUN_STOP_TIMEOUT_MS` can only shorten it: it is set for a
+ * production drain, which a reload never is.
+ */
 function hotReloadStopBound(): StopBound {
-  return { timeoutMs: HOT_RELOAD_STOP_TIMEOUT_MS, warn: false }
+  return { timeoutMs: Math.min(bunStopTimeoutMs(), HOT_RELOAD_STOP_TIMEOUT_MS), warn: false }
 }
 
 /**
@@ -1068,8 +1072,9 @@ export class Application {
       throw new Error('Bun runtime is required to call Application.listen')
     }
 
-    // Force-close: this only runs when a `bun --hot` reload replaces a previous
-    // `listen()`, which must not wait on the old server's in-flight requests.
+    // Force-close: a `bun --hot` reload replacing a previous `listen()` must not
+    // wait on the old server's in-flight requests, and takes the short bound;
+    // a second `listen()` in any other process (tests) keeps the default one.
     // The retired server is remembered so the check below can tell "already
     // stopped here" from "bound by a concurrent call".
     const supersededServer = getGlobalState().__gurenActiveServer

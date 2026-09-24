@@ -270,8 +270,9 @@ remaining connections to drain on their own. The socket has already stopped
 accepting new connections by then. Set `GUREN_BUN_STOP_TIMEOUT_MS` to change
 the bound.
 
-A `bun --hot` reload is the exception: the server it replaces gets 250 ms, and
-running out is not reported. That stop is forced, and the reload has already
+A `bun --hot` reload is the exception: the server it replaces gets 250 ms (or
+`GUREN_BUN_STOP_TIMEOUT_MS` when that is shorter), and running out is not
+reported. That stop is forced, and the reload has already
 closed every broadcasting socket, so nothing is left to drain. The short bound
 matters on Bun 1.3.x, where `stop()` never resolves once the server itself has
 closed a WebSocket: with one broadcasting client connected, each reload took
