@@ -306,9 +306,9 @@ and cache store it selects, and whether a provider threw while registering.
 
 | Check keys | Read from the introspected app |
 |------------|--------------------------------|
-| `sessions-binding` | Whether a provider binds `session` in `register()`. A session config the app never reads (no binding, or `auth.sessionOptions.store` supplying the store instead) is the warning |
-| `sessions-config:*` | The table each `database` store of the bound session manager holds, by its SQL name, against the tables `db/schema.ts` declares |
-| `attachments-model:*`, `attachments-config:*` | Whether an attachments engine was configured while the app registered, and the table it writes to |
+| `sessions-binding` | Whether a provider binds `session` in `register()`. A session config the app never reads (no binding, or `auth.sessionOptions.store` supplying the store instead) is the warning; a bound manager beside `auth.sessionOptions.store`, which the app refuses at boot, is a failure |
+| `sessions-config:*` | The table each `database` store of the bound session manager holds, by its SQL name, against the tables every app root's `db/schema.ts` declares, module schemas included. A name the schema reader does not find is only an advisory warning, and only for a table the source cannot trace to a schema export: the reader sees neither the other files `drizzle.config` lists nor a `pgTableCreator()` prefix |
+| `attachments-model:*`, `attachments-config:*` | Whether an attachments engine was configured while the app registered, and the table it writes to, read like the session tables. A module-scope `configureAttachments()` in a file the app never loads fails the model |
 | `attachments-delivery` | Whether the route the engine's `delivery` names is registered, and registered by `registerAttachmentRoutes()` |
 | `attachments-route-name:*` | How many registered routes carry that route name |
 | `attachments-serve-redirect:*` | The disks the engine serves by redirect, with each disk's driver from the storage manager |
@@ -317,10 +317,11 @@ and cache store it selects, and whether a provider threw while registering.
 A run introspects only when some check needs it: the app declares a deploy
 plugin or the Lambda adapter, has a session config, calls
 `configureAttachments()`, or has a model that mixes in `Attachable(...)`. Each
-run introspects at most once. The manifest is read with this environment's
+run introspects at most once, and a `--changed` run that changed no source
+file does not introspect at all. The manifest is read with this environment's
 `.env`, so a store selected by an environment variable is judged at its local
 value. Introspection stops before any provider's `boot()`, so a
-`configureAttachments()` called there is judged from source.
+`configureAttachments()` called inside a function is judged from source.
 
 Each of these results carries `evidence` in `--json` output. A verdict that reads
 several facts reports the weakest source among them:

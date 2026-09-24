@@ -302,9 +302,9 @@ provider の外のコードでは `isIntrospecting()` で同じ判定ができ�
 
 | チェックキー | イントロスペクションの結果から読むもの |
 |--------------|----------------------------------------|
-| `sessions-binding` | `register()` で `session` をバインドする provider があるか。アプリが読まないセッション設定(バインドがない、または `auth.sessionOptions.store` が代わりにストアを渡している)が警告になる |
-| `sessions-config:*` | バインドされたセッションマネージャの `database` ストアが持つテーブルの SQL 名。`db/schema.ts` が宣言するテーブルと照合する |
-| `attachments-model:*`、`attachments-config:*` | アプリの登録中に添付ファイルのエンジンが設定されたか、そのエンジンが書き込むテーブル |
+| `sessions-binding` | `register()` で `session` をバインドする provider があるか。アプリが読まないセッション設定(バインドがない、または `auth.sessionOptions.store` が代わりにストアを渡している)が警告になる。バインドしたマネージャと `auth.sessionOptions.store` の併用はアプリが boot を拒否するので fail になる |
+| `sessions-config:*` | バインドされたセッションマネージャの `database` ストアが持つテーブルの SQL 名。モジュールも含め、各アプリルートの `db/schema.ts` が宣言するテーブルと照合する。スキーマの読み取りで見つからない名前は advisory の警告にとどめ、それもソースからスキーマの export をたどれないテーブルに限る。この読み取りは `drizzle.config` が挙げる他のファイルも `pgTableCreator()` の接頭辞も見ないため |
+| `attachments-model:*`、`attachments-config:*` | アプリの登録中に添付ファイルのエンジンが設定されたか、そのエンジンが書き込むテーブル。テーブルはセッションと同じように照合する。アプリが読み込まないファイルのモジュールスコープで `configureAttachments()` を呼んでいる場合、モデルが fail になる |
 | `attachments-delivery` | エンジンの `delivery` が指すルートが登録されていて、それが `registerAttachmentRoutes()` のルートであるか |
 | `attachments-route-name:*` | そのルート名を持つ登録済みルートの数 |
 | `attachments-serve-redirect:*` | エンジンがリダイレクトで配信するディスクと、storage manager から読んだ各ディスクのドライバ |
@@ -313,9 +313,10 @@ provider の外のコードでは `isIntrospecting()` で同じ判定ができ�
 イントロスペクションは、それを必要とするチェックがあるときだけ行います。デプロイプラグインか
 Lambda アダプタを宣言したアプリ、セッション設定があるアプリ、`configureAttachments()` を
 呼ぶアプリ、`Attachable(...)` を mixin するモデルがあるアプリが対象です。1 回の実行につき
-最大 1 回です。マニフェストは実行環境の `.env` を読み込んだ状態で作られるので、環境変数で
-選ぶストアはローカルの値で判定されます。イントロスペクションは provider の `boot()` より前で
-止まるため、`boot()` の中で呼ぶ `configureAttachments()` はソースから判定します。
+最大 1 回で、ソースファイルを変更していない `--changed` の実行では行いません。マニフェストは
+実行環境の `.env` を読み込んだ状態で作られるので、環境変数で選ぶストアはローカルの値で
+判定されます。イントロスペクションは provider の `boot()` より前で止まるため、関数の中で呼ぶ
+`configureAttachments()` はソースから判定します。
 
 これらの結果には、`--json` の出力で `evidence` が付きます。複数の事実を読む判定では、
 そのうち最も弱い根拠を示します。

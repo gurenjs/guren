@@ -409,7 +409,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   deployRuntime?.catch(() => {})
   // The session and attachments rules (8.5-8.7) introspect once they find their config, started here for
   // the same overlap. Gated like 7.7: a run that changed no source must not execute the app.
-  const wiringIntrospect = sourceChanged ? introspect : undefined
+  const wiringIntrospect = introspect && !sourceChanged ? { skipped: 'this run changed no source, so the app was not introspected' } : introspect
   const appConfigFiles = runs('core') ? discoverAppConfigFiles(cwd) : undefined
   const sessionWiring = appConfigFiles?.then((files) => readSessionWiring(cwd, cache, files, wiringIntrospect))
   const attachmentsWiring = appConfigFiles?.then((files) => readAttachmentsWiring(cwd, cache, files, wiringIntrospect))

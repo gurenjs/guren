@@ -495,30 +495,39 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   a `configureAttachments()` call, or an `Attachable(...)` model. Each rule asks
 >   for the run's one introspection only after it finds its own content, through
 >   `introspectedSection()` in `manifest-section.ts`, and `check.ts` hands the
->   thunk to these rules only when the run's changed files include source. blog
->   and web both match, so their CI `guren check` introspects.
+>   thunk to these rules only when the run's changed files include source; a
+>   `--changed` run without one judges from source and says so. blog and web both
+>   match, so their CI `guren check` introspects.
 > - `sessions-binding` reads `session.source`. `manager` passes. `none`, an
 >   absent section (no session middleware at all) and `auth.sessionOptions.store`
 >   are the inert-config warning, since in each the config is never read. It
 >   still runs for the declared form only: a `defineSessionConfig()` is bound by
 >   the `config` array, which `config-unwired` judges. A provider that binds
->   `session` only in `boot()` reads as inert, being past the register stage.
+>   `session` only in `boot()` reads as inert, which is also the runtime verdict:
+>   `AuthServiceProvider.boot()` builds the session middleware before any app
+>   provider boots. A `session-configured-twice` manifest warning (a manager
+>   beside `auth.sessionOptions.store`) is a `sessions-binding` failure for
+>   either form, since the app refuses to boot.
 > - `sessions-config:*` reads each `database` store's `table` (its SQL name)
 >   against the tables the static schema reader names. The key stays the one the
 >   scan builds: the config declaring the store and the export it imports, then
 >   the local identifier, the SQL name and the store's name. A missing named export is a link
->   error that fails the introspection, so that case stays on the scan. What the
->   manifest adds is a table object the schema does not declare (built inline, or
->   imported from outside `db/schema`) and a value that is not a Drizzle table.
->   When the schema reader cannot name every table, a store whose table it does
->   not find is left to the scan. A config the app does not read has no stores in
->   the manifest, so its tables stay on the scan too.
+>   error that fails the introspection, so that case stays on the scan. Only a
+>   SQL name the reader finds is evidence: it reads each root's `db/schema.ts`
+>   and nothing else `drizzle.config` lists, drops a `pgSchema().table()` or a
+>   non-literal table, and names a `pgTableCreator()` table without its prefix.
+>   So a name it does not find keeps the source verdict when the source traces
+>   the table to a schema export, and is otherwise an advisory warning. A value
+>   that is not a Drizzle table fails. A config the app does not read has no
+>   stores in the manifest, so its tables stay on the scan too.
 > - The attachments rules read the engine only when one was configured while the
->   app registered. When the source calls `configureAttachments()` and the
->   manifest has no engine, every rule judges from source and names that reason:
->   a call in a provider's `boot()` is past the register stage, as a `useModel()`
->   in `boot()` was in 2a. A manifest-only failure there would fail `check --ci`
->   on a working app. `attachments-model:*` passes from the manifest when an
+>   app registered. When the source calls `configureAttachments()` inside a
+>   function and the manifest has no engine, every rule judges from source and
+>   names that reason: a call in a provider's `boot()` is past the register
+>   stage, as a `useModel()` in `boot()` was in 2a. A manifest-only failure there
+>   would fail `check --ci` on a working app. When every call sits at module
+>   scope, no `boot()` explains the absence: nothing loads the file while the app
+>   registers, and `attachments-model:*` fails from the manifest. `attachments-model:*` passes from the manifest when an
 >   engine was configured, including one the scan cannot see.
 > - `delivery.mounted` is `Router.hasRoute(routeName)`, a name lookup. The check
 >   also requires that route's controller to be the delivery controller, so an
@@ -537,9 +546,11 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 > - When the manifest judges one config and the source holds others (a second
 >   session config, another `configureAttachments()` call's table or redirect
 >   disks), the source verdicts for the others are kept under their own keys.
->   The delivery mount is app-wide, so it is the manifest's alone. The manifest
->   does not say which config it describes: a verdict goes to the config whose
->   export the schema names as that table, else to the first that declares it.
+>   The delivery mount is app-wide, so an unmounted route is reported for every
+>   config enabling delivery, as the scan does. The manifest does not say which
+>   config it describes: a verdict goes to the config whose export the schema
+>   names as that table or that literally names the disk, else to the one config
+>   there is, and with several it is not given.
 
 ### 6. Enabling refactor: one module per command
 

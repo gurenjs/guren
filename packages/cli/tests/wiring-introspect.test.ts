@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { runBlueprint } from '../src/blueprints'
 import { runCheck, type CheckResult } from '../src/check'
+import { gatingResults } from '../src/check-result'
 import {
   assertWorkspaceBuilt,
   captureWarnings,
@@ -157,7 +158,7 @@ describe('session and attachments wiring read from the introspected app (RFC 002
     expect(source['sessions-binding']).toMatchObject({ status: 'pass', evidence: 'static' })
   })
 
-  test('fails a database store whose table object the schema does not declare, which the scan cannot follow', async () => {
+  test('warns, advisory, on a database store whose table object no db/schema.ts declares, which the scan cannot follow', async () => {
     const dir = await scaffoldApp('table-outside-schema', [], {
       'config/session.ts': `import { type SessionConfig } from '@guren/core'
 import { jsonb, pgTable, text, timestamp } from '@guren/orm/drizzle/pg'
@@ -179,10 +180,70 @@ export const sessionConfig: SessionConfig = {
     })
     const { manifest, source } = await bothWays(dir)
 
-    expect(manifest['sessions-config:config/session.ts:sessions']).toMatchObject({ status: 'fail', evidence: 'manifest', filePath: 'config/session.ts' })
+    expect(manifest['sessions-config:config/session.ts:sessions']).toMatchObject({ status: 'warn', advisory: true, evidence: 'manifest', filePath: 'config/session.ts' })
     expect(manifest['sessions-config:config/session.ts:sessions']!.message).toContain("'legacy_sessions'")
     expect(manifest['sessions-binding']).toMatchObject({ status: 'pass', evidence: 'manifest' })
     expect(source['sessions-config:config/session.ts:sessions']).toBeUndefined()
+  })
+
+  test('keeps the source pass when the reader names a pgTableCreator() table without its prefix', async () => {
+    const schema = `import { index, integer, jsonb, pgTableCreator, serial, text, timestamp } from '@guren/orm/drizzle/pg'
+import type { AttachmentVariantRecord } from '@guren/core'
+
+const pgTable = pgTableCreator((name) => \`app_\${name}\`)
+`
+    const dir = await scaffoldApp('table-creator', ['session', 'attachments'])
+    const scaffolded = await Bun.file(join(dir, 'db/schema.ts')).text()
+    // The scaffolded tables, declared through the prefixing factory instead of drizzle's own.
+    const tables = scaffolded.slice(scaffolded.indexOf('export const users'))
+    await writeWorkspaceFiles(dir, { 'db/schema.ts': `${schema}\n${tables}` })
+    const report = await runCheck({ cwd: dir, introspect: true })
+    const manifest = wiring(report.checks)
+
+    expect(manifest['introspection-unavailable']).toBeUndefined()
+    for (const key of ['sessions-config:config/session.ts:sessions', 'attachments-config:config/attachments.ts']) {
+      expect({ ...manifest[key], key }).toMatchObject({ key, status: 'pass', evidence: 'static' })
+    }
+    expect(gatingResults(report).filter((result) => /^(sessions|attachments)-/.test(result.key))).toEqual([])
+  })
+
+  test('fails a bound session manager beside auth.sessionOptions.store, which the app refuses at boot', async () => {
+    const dir = await scaffoldApp('configured-twice', ['session'])
+    const app = await Bun.file(join(dir, 'src/app.ts')).text()
+    await writeWorkspaceFiles(dir, {
+      'src/app.ts': app
+        .replace("import { createApp } from '@guren/core'", "import { createApp, MemorySessionStore } from '@guren/core'")
+        .replace('auth: {},', 'auth: { sessionOptions: { store: new MemorySessionStore() } },'),
+    })
+    const { manifest } = await bothWays(dir)
+
+    expect(manifest['sessions-binding']).toMatchObject({ status: 'fail', evidence: 'manifest' })
+    expect(manifest['sessions-binding']!.message).toContain('refuses to boot')
+  })
+
+  test('fails a model when a module-scope configureAttachments() lives in a file nothing loads', async () => {
+    const dir = await scaffoldApp('never-loaded', ['attachments'], { 'app/Models/User.ts': ATTACHABLE_MODEL })
+    const app = await Bun.file(join(dir, 'src/app.ts')).text()
+    await writeWorkspaceFiles(dir, {
+      'src/app.ts': app.replace(/import AttachmentsProvider[^\n]*\n/, '').replace(/AttachmentsProvider,? ?/, ''),
+    })
+    const { manifest, source } = await bothWays(dir)
+
+    expect(manifest['attachments-model:app/Models/User.ts']).toMatchObject({ status: 'fail', evidence: 'manifest' })
+    expect(manifest['attachments-model:app/Models/User.ts']!.message).toContain('never loads that module')
+    expect(source['attachments-model:app/Models/User.ts']).toMatchObject({ status: 'pass', evidence: 'static' })
+    expect(manifest['attachments-config:config/attachments.ts']!.message).toContain('never loaded config/attachments.ts')
+  })
+
+  test('does not introspect a --changed run that changed no source, and says why', async () => {
+    const dir = await scaffoldApp('changed-docs-only', ['session'], {
+      'src/main.ts': "import app from './app.js'\nimport './missing-module.js'\n\nexport default app\n",
+    })
+    const checks = wiring((await runCheck({ cwd: dir, introspect: true, changedFiles: new Set(['docs/notes.md']) })).checks)
+
+    expect(checks['introspection-unavailable']).toBeUndefined()
+    expect(checks['sessions-binding']).toMatchObject({ evidence: 'static' })
+    expect(checks['sessions-binding']!.message).toContain('this run changed no source')
   })
 
   test('fails an unmounted delivery route and a redirect disk that cannot presign, from the engine and the storage manager', async () => {

@@ -12,8 +12,7 @@ import type { SessionEntry } from '@guren/server'
 import { resolveSchemaTableBinding, schemaDeclaresSqlTable, type SchemaTableBinding } from './schema-binding'
 import { check, type CheckResult } from './check-result'
 import { appBindsService, readIfExists } from './discovery'
-import type { Introspection } from './introspect'
-import { introspectedSection, judgedFromManifest, judgedFromSource, mergeVerdicts, type IntrospectedSection } from './manifest-section'
+import { introspectedSection, judgedFromManifest, judgedFromSource, mergeVerdicts, type IntrospectedSection, type IntrospectSource } from './manifest-section'
 import type { ParseCache, ParsedFile } from './parse-cache'
 import { resolveAppEntry } from './provider-registrar'
 import type { SchemaTable } from './schema-parser'
@@ -79,7 +78,7 @@ export async function readSessionWiring(
   cwd: string,
   cache: ParseCache,
   files: string[],
-  introspect?: () => Promise<Introspection>,
+  introspect?: IntrospectSource,
 ): Promise<SessionWiring> {
   const sites = await readSessionSites(cwd, cache, files)
   const session = sites.length > 0 ? introspectedSection(introspect, 'session') : Promise.resolve({ status: 'static' as const })
@@ -92,7 +91,7 @@ export async function checkSessionsConfig(options: {
   files: string[]
   schemaTables: SchemaTable[]
   /** The run's introspection, asked for only once a session config is found. */
-  introspect?: () => Promise<Introspection>
+  introspect?: IntrospectSource
   /** {@link readSessionWiring}'s result when the caller started it early; read here otherwise. */
   wiring?: Promise<SessionWiring>
 }): Promise<CheckResult[]> {
@@ -114,6 +113,9 @@ export async function checkSessionsConfig(options: {
   const tables = entry?.source === 'manager'
     ? mergeVerdicts(judgedFromManifest(checkManifestStoreTables(entry, sites, cwd, schemaTables)), judgedFromSource(staticTables))
     : judgedFromSource(staticTables, 'the introspected app binds no session manager, so it never reads this config')
+  // The app refuses to boot with both, whichever form the config takes, so this is reported for either.
+  const twice = session.manifest.warnings.some((warning) => warning.code === 'session-configured-twice')
+  if (twice) return [...tables, ...judgedFromManifest([configuredTwice()])]
   return bindingApplies ? [...tables, ...judgedFromManifest([judgeManifestBinding(entry)])] : tables
 }
 
@@ -159,57 +161,61 @@ function checkStoreTables(site: SessionSite, cwd: string, schemaTables: SchemaTa
 }
 
 /**
- * The `database` stores of the session manager the app binds, by the table object each holds:
- * its SQL name, whichever import or spelling reached it. Keyed like the source reading, on
- * the config that declares the store and the export it names.
+ * The `database` stores of the session manager the app binds, by the table object each holds.
+ * The manifest names that table by SQL name and not by the config that built it, so a verdict
+ * goes to the config whose export the schema names as that table, or to the one config declaring
+ * the store. A SQL name the static schema reader does not find is not evidence: it reads each
+ * root's `db/schema.ts` only, and names a `pgTableCreator()` table without its prefix.
  */
 function checkManifestStoreTables(entry: SessionEntry, sites: SessionSite[], cwd: string, schemaTables: SchemaTable[]): CheckResult[] {
   const results: CheckResult[] = []
 
   for (const [name, store] of Object.entries(entry.stores)) {
     if (store.driver !== 'database') continue
-    // The manifest does not say which config built the manager: among the configs declaring the store,
-    // the one whose export the schema names as this table, else the first.
     const candidates = sites
       .filter((candidate) => readSessionConfig(candidate.config).stores.has(name))
       .map((candidate) => ({ site: candidate, ...storeBinding(candidate, name, cwd, schemaTables) }))
-    const { site, identifier, binding } = candidates.find((candidate) => candidate.binding?.sqlName === store.table)
-      ?? candidates[0]
-      ?? { site: sites[0]!, identifier: undefined, binding: undefined }
-    const key = `sessions-config:${site.relPath}:${binding?.tableName ?? identifier ?? store.table ?? name}`
+    const matched = candidates.find((candidate) => candidate.binding?.sqlName === store.table)
+    const only = candidates.length === 1 ? candidates[0] : undefined
+    const keyOf = ({ site, identifier, binding }: (typeof candidates)[number]) =>
+      `sessions-config:${site.relPath}:${binding?.tableName ?? identifier ?? store.table ?? name}`
 
     if (store.table === undefined) {
+      if (!only) continue
       results.push(
         check(
-          key,
+          keyOf(only),
           TABLE_TITLE,
           'fail',
           `The '${name}' session store uses the database driver, but its \`table\` is not a Drizzle table in the introspected `
             + `app. The store takes the table untyped, so this only fails at runtime, on the first request that writes a session.`,
           TABLE_FIX,
-          site.relPath,
+          only.site.relPath,
         ),
       )
       continue
     }
-    const declared = schemaDeclaresSqlTable(schemaTables, store.table)
+
+    const declared = matched ?? (schemaDeclaresSqlTable(schemaTables, store.table) ? only : undefined)
     if (declared) {
-      results.push(check(key, TABLE_TITLE, 'pass', `The database session store '${name}' binds schema table '${store.table}'.`))
+      results.push(check(keyOf(declared), TABLE_TITLE, 'pass', `The database session store '${name}' binds schema table '${store.table}'.`))
       continue
     }
-    // Unreadable schema names: the source verdict for this key, if any, stands.
-    if (declared === undefined) continue
-    results.push(
-      check(
-        key,
+    // A store whose export the source resolves keeps the source verdict for it.
+    if (!only || only.binding) continue
+    results.push({
+      ...check(
+        keyOf(only),
         TABLE_TITLE,
-        'fail',
-        `The '${name}' session store writes to table '${store.table}', but no schema module declares a table by that name, `
-          + 'so no migration creates it and the first request that writes a session fails.',
-        TABLE_FIX,
-        site.relPath,
+        'warn',
+        `The '${name}' session store writes to table '${store.table}', which the schema reader did not find in any app root's `
+          + 'db/schema.ts. If no schema file drizzle-kit reads declares it, no migration creates it and the first request '
+          + 'that writes a session fails.',
+        'Declare the table in db/schema.ts (`bunx guren add session` adds one), or ignore this if your drizzle.config reads it from another file.',
+        only.site.relPath,
       ),
-    )
+      advisory: true,
+    })
   }
 
   return results
@@ -229,8 +235,8 @@ function judgeManifestBinding(entry: SessionEntry | undefined): CheckResult {
       BINDING_TITLE,
       'warn',
       "A session config exists, but no provider binds 'session': createApp({ auth: { sessionOptions: { store } } }) supplies the "
-        + 'store, so the config is never read.',
-      'Keep one of the two: remove sessionOptions.store and bind the manager from the config, or delete the config.',
+        + 'store, so the config is read only where that store is built from it.',
+      'Bind the manager from the config and drop sessionOptions.store, or delete the config if nothing builds a store from it.',
     )
   }
   const fallback = entry?.source === 'none' ? ' and sessions stay on the in-memory default' : ''
@@ -239,8 +245,20 @@ function judgeManifestBinding(entry: SessionEntry | undefined): CheckResult {
     BINDING_TITLE,
     'warn',
     `A session config exists, but the introspected app binds no 'session' in register(), so the config is never read${fallback}. `
-      + 'A provider that binds it only in boot() is past the stage introspection runs.',
+      + 'Binding it in boot() is too late: the session middleware is built before any app provider boots.',
     BINDING_FIX,
+  )
+}
+
+/** A bound session manager beside `auth.sessionOptions.store`, which `AuthServiceProvider` refuses at boot. */
+function configuredTwice(): CheckResult {
+  return check(
+    BINDING_KEY,
+    BINDING_TITLE,
+    'fail',
+    "The introspected app binds a 'session' manager and also passes createApp({ auth: { sessionOptions: { store } } }). "
+      + 'The app refuses to boot with both.',
+    'Keep one: remove sessionOptions.store and let the manager supply the store, or stop binding the manager.',
   )
 }
 

@@ -110,13 +110,12 @@ export interface SchemaTableBinding {
 }
 
 /**
- * Whether the schema declares a table by its SQL name, as the introspected app reports tables;
- * `undefined` when it does not name one and some table's name is unreadable, which is not evidence.
+ * Whether the schema declares a table by its SQL name, as the introspected app reports tables.
+ * Only `true` is evidence: the static reader reads each root's `db/schema.ts` and nothing
+ * `drizzle.config` adds, and names a `pgTableCreator()` or `pgSchema().table()` table wrongly or not at all.
  */
-export function schemaDeclaresSqlTable(schemaTables: SchemaTable[], sqlName: string): boolean | undefined {
-  if (schemaTables.some((table) => table.tableName === sqlName)) return true
-  const namesReadable = schemaTables.length > 0 && schemaTables.every((table) => table.tableName !== undefined)
-  return namesReadable ? false : undefined
+export function schemaDeclaresSqlTable(schemaTables: SchemaTable[], sqlName: string): boolean {
+  return schemaTables.some((table) => table.tableName === sqlName)
 }
 
 /**

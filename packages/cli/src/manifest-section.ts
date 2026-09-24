@@ -54,15 +54,19 @@ export type IntrospectedSection<T> =
   | { status: 'described'; value: T; manifest: AppManifest }
   | { status: 'static'; reason?: string }
 
+/** The run's introspection, started on first call, or why this run judges from source without one. */
+export type IntrospectSource = (() => Promise<Introspection>) | { skipped: string }
+
 /**
  * The section `key`, asking for the introspection only now, so the check calling this is what
- * starts the child. No thunk (`--no-introspect`, an in-process run) and a failed run give no
+ * starts the child. No source (`--no-introspect`, an in-process run) and a failed run give no
  * reason: `guren check` reports a failure once, as `introspection-unavailable`.
  */
 export async function introspectedSection<K extends ManifestSectionKey>(
-  introspect: (() => Promise<Introspection>) | undefined,
+  introspect: IntrospectSource | undefined,
   key: K,
 ): Promise<IntrospectedSection<AppManifest[K]>> {
+  if (introspect && 'skipped' in introspect) return { status: 'static', reason: introspect.skipped }
   const introspection = await introspect?.()
   if (introspection?.status !== 'ok') return { status: 'static' }
   const section = readManifestSection(introspection.manifest, key)
