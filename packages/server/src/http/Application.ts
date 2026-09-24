@@ -26,6 +26,7 @@ import type { DevBannerOptions } from './dev-banner'
 import { formatHostPort, isWildcardHost } from './host-port'
 import { startViteDevServer, type StartViteDevServerOptions } from './vite-dev-server'
 import { runInRequestScope } from '../support/request-deferrer'
+import { isHotReloadRuntime } from '../hot-reload/hot-disposables'
 import { adoptDefaultApplication } from './default-application'
 import { CONTAINER_CONTEXT_KEY } from './request-container'
 import type { InertiaDocumentOptions, InertiaSsrRenderer } from '../mvc/inertia/InertiaEngine'
@@ -218,6 +219,29 @@ function bunStopTimeoutMs(): number {
 }
 
 /**
+ * How long a `bun --hot` reload waits on the server it replaces. That stop is
+ * forced, and the hot-reload teardown has already server-closed every broadcast
+ * WebSocket, so nothing is draining; on Bun 1.3.x `stop()` then never resolves
+ * (1.4.0 resolves at once), and the default bound cost every reload 5 s.
+ */
+const HOT_RELOAD_STOP_TIMEOUT_MS = 250
+
+/** The bound on one server `stop()`, and whether hitting it is reported. */
+interface StopBound {
+  timeoutMs: number
+  warn: boolean
+}
+
+function defaultStopBound(): StopBound {
+  return { timeoutMs: bunStopTimeoutMs(), warn: true }
+}
+
+/** Silent: on Bun 1.3.x it is hit on every reload, and there is nothing to report. */
+function hotReloadStopBound(): StopBound {
+  return { timeoutMs: HOT_RELOAD_STOP_TIMEOUT_MS, warn: false }
+}
+
+/**
  * A positive integer of milliseconds, or 5000 when unset or unparseable. One
  * parse for both bounds, so they cannot drift apart.
  */
@@ -254,10 +278,11 @@ async function awaitBounded(
   }
 }
 
-/** `stop()` bounded by {@link bunStopTimeoutMs}, warning rather than throwing. */
+/** `stop()` bounded by `bound` ({@link bunStopTimeoutMs} by default), warning rather than throwing. */
 async function stopBunServerBounded(
   server: BunServer,
   closeActiveConnections: boolean,
+  bound: StopBound = defaultStopBound(),
 ): Promise<void> {
   // An async IIFE, not `Promise.resolve(...).catch(...)`: a `stop` that throws
   // synchronously would escape that catch and reject the whole shutdown path.
@@ -269,14 +294,18 @@ async function stopBunServerBounded(
     }
   })()
 
-  await awaitBounded(stopped, bunStopTimeoutMs(), (timeoutMs) => {
+  await awaitBounded(stopped, bound.timeoutMs, (timeoutMs) => {
+    if (!bound.warn) return
     console.warn(
       `Bun server did not stop within ${timeoutMs}ms — no longer waiting on it. In-flight requests may still be draining.`,
     )
   })
 }
 
-async function stopActiveBunServer(closeActiveConnections = false): Promise<void> {
+async function stopActiveBunServer(
+  closeActiveConnections = false,
+  bound?: StopBound,
+): Promise<void> {
   const state = getGlobalState()
   const previous = state.__gurenActiveServer
 
@@ -286,7 +315,7 @@ async function stopActiveBunServer(closeActiveConnections = false): Promise<void
   }
 
   try {
-    await stopBunServerBounded(previous, closeActiveConnections)
+    await stopBunServerBounded(previous, closeActiveConnections, bound)
   } finally {
     releaseActiveBunServer(previous)
   }
@@ -1044,7 +1073,7 @@ export class Application {
     // The retired server is remembered so the check below can tell "already
     // stopped here" from "bound by a concurrent call".
     const supersededServer = getGlobalState().__gurenActiveServer
-    await stopActiveBunServer(true)
+    await stopActiveBunServer(true, isHotReloadRuntime() ? hotReloadStopBound() : undefined)
 
     const { port = 3000, hostname = '0.0.0.0', assetsUrl, vite, portFallback } = options
     const externalAssetsUrl =
