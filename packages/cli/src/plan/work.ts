@@ -6,8 +6,8 @@
  * what cannot be measured is recorded with its reason, never as a zero.
  */
 
-import { createReadStream } from 'node:fs'
-import { lstat, open, realpath, stat } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { open, realpath, stat, type FileHandle } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import { runGit, runGitRaw } from '../changed-files'
@@ -48,29 +48,38 @@ async function isDrizzleSnapshot(realRoot: string, path: string): Promise<boolea
 /**
  * Lines as `git diff --numstat` counts them for an added file: a symlink is one line (its target),
  * and `null` is a binary file or one that is neither a file nor a symlink, or could not be read.
+ * Binary is the NUL probe alone; a tracked file gets git's own decision, which reads attributes.
+ * One open resolves the path, so nothing can swap it between the check and the read; `O_NONBLOCK`
+ * keeps a FIFO from blocking the open, and has no effect on a regular file.
  */
 async function untrackedLines(file: string): Promise<number | null> {
+  let handle: FileHandle
   try {
-    const entry = await lstat(file)
-    if (entry.isSymbolicLink()) return 1
-    if (!entry.isFile()) return null
-    const handle = await open(file, 'r')
-    try {
-      const probe = Buffer.alloc(BINARY_PROBE_BYTES)
-      const { bytesRead } = await handle.read(probe, 0, BINARY_PROBE_BYTES, 0)
-      if (probe.subarray(0, bytesRead).includes(0)) return null
-    } finally {
-      await handle.close()
+    handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ELOOP' ? 1 : null
+  }
+  try {
+    if (!(await handle.stat()).isFile()) return null
+    const probe = Buffer.alloc(BINARY_PROBE_BYTES)
+    let probed = 0
+    while (probed < BINARY_PROBE_BYTES) {
+      const { bytesRead } = await handle.read(probe, probed, BINARY_PROBE_BYTES - probed, probed)
+      if (bytesRead === 0) break
+      probed += bytesRead
     }
+    if (probe.subarray(0, probed).includes(0)) return null
     let lines = 0
     let last: number | undefined
-    for await (const chunk of createReadStream(file) as AsyncIterable<Buffer>) {
+    for await (const chunk of handle.createReadStream({ start: 0, autoClose: false }) as AsyncIterable<Buffer>) {
       for (const byte of chunk) if (byte === 0x0a) lines += 1
       last = chunk[chunk.length - 1]
     }
     return last === undefined || last === 0x0a ? lines : lines + 1
   } catch {
     return null
+  } finally {
+    await handle.close()
   }
 }
 

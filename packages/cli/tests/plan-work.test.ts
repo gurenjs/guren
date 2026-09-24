@@ -119,6 +119,9 @@ describe('measureStepWork', () => {
   test('should count an untracked symlink as one line, as git does its target, and a large file without reading it whole', async () => {
     const { app, plan, start } = await createRepo('symlink-and-large')
     await symlink('a.ts', join(app, 'src/link.ts'))
+    // A link to a directory and a dangling link are one line each too: the target path is what git diffs.
+    await symlink('.', join(app, 'src/dir-link'))
+    await symlink('missing.ts', join(app, 'src/dangling.ts'))
     // Past one stream chunk (64 KiB), with no newline at the end: the last line still counts.
     await writeFile(join(app, 'src/large.ts'), `${'x'.repeat(99)}\n`.repeat(2000) + 'last', 'utf8')
     // A NUL past the 8000-byte probe does not make a file binary, as it does not for git.
@@ -127,6 +130,8 @@ describe('measureStepWork', () => {
     const work = measured(await measureStepWork(app, plan, start))
 
     expect(work.files).toEqual([
+      { path: 'src/dangling.ts', added: 1, removed: 0 },
+      { path: 'src/dir-link', added: 1, removed: 0 },
       { path: 'src/large.ts', added: 2001, removed: 0 },
       { path: 'src/late-nul.ts', added: 2, removed: 0 },
       { path: 'src/link.ts', added: 1, removed: 0 },
