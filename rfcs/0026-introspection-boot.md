@@ -557,6 +557,83 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   table, to every config declaring the store), and one that fits none is
 >   reported under a key naming no file, never dropped.
 
+> **Amended in implementation (Part 2c):**
+>
+> - `parseControllerMethods()` keeps its name-keyed `methods`, `classFiles` and
+>   `collisions` and adds `byExport` (`file#export` to the class, whose action
+>   then keys the body: `file#export.method`; one entry per name the file exports
+>   the class under: its own, `default`, an `export { X as Y }` alias) and
+>   `declarations` (every class, same-named ones included). The file
+>   is POSIX-relative, the form the child writes. `controllerMethodFor()` is the
+>   one lookup: a reference resolved by `identity` reads its own file, and one
+>   the scan cannot place there (the child picked a file that re-exports the
+>   class) falls back to the name, as a `name-only` reference does. A placed class
+>   that declares no such action, or whose file would not read or parse, has no
+>   body, never another class's. A `name-only` reference is evidence too: the
+>   router holds a class that is no export of any controller file the app loaded
+>   (a framework class, or an app class the child found in no export). So a
+>   same-named exported declaration is another class. The route has no body here
+>   (`elsewhere`) when the routes file or the entry declares the name, or when
+>   no same-named declaration is left: one the file does not export (a
+>   controller file routing its own class), or one in a file whose import failed
+>   (`controller-import`). The last of those is read by name. A file whose import
+>   failed holds the routed class only when the app evaluated that module under
+>   another path (a symlink resolved differently), since the app could not have
+>   loaded it otherwise. `collisionsReachedByName()` keeps a
+>   collision only for a class some route reached by name.
+> - `guren audit` reads `manifest.routes` for `validation:*`, `authz:*` and
+>   `agent-annotation:*`. It introspects only when the routes file, loaded first,
+>   registers a route that is unsafe or carries a body (or fails to load, since
+>   the app may still register), never under `--routes`, whose file the manifest
+>   does not describe, and in process only with `introspect: true`. A failed run
+>   is one `introspection-unavailable` warning, which leaves the exit code alone,
+>   and a provider that threw sends the rules back to the routes file: that
+>   provider may have registered an alias the manifest would then call unresolved.
+>   The report carries `routeSource`.
+> - `authz:*` does not pass on authorization alone. `authorizeMiddleware()` stamps
+>   only `authorization`, `Gate.resolveUser()` returns `null` for a guest, and a
+>   policy is called with that `null`, so an authorizing chain with no
+>   `requireAuthenticated()` lets a guest reach a policy that may allow it. It
+>   stays a warning whose message says what the chain checks: `ability`, any or
+>   all of several, an ability decided at request time, or deny-all. The draft's
+>   "unresolved alias" warning splits in two: an alias registered outside the
+>   routes file resolves and stops warning, while a name no alias or group
+>   registers anywhere is its own warning, judged before any guard beside it,
+>   since mounting it throws, and a guard never turns it into a pass. When
+>   something introspection skips could register the name, the warning names it
+>   instead of stating the boot failure as fact: a skipped `options.boot`, which
+>   runs before `mountRoutes()`, or an app provider registered through its
+>   `introspect()` hook (an empty hook, as `cloudflarePlugin`'s, included;
+>   `ConfigServiceProvider` always runs one, hence `source !== 'framework'`). A
+>   provider that threw is not listed: the rules have gone back to the routes
+>   file. The auth-like name match reads alias and group entries only, as the
+>   static path does.
+> - Body validation passes when `schemas.body` is present, `{ unreadable }`
+>   included: the live schema validates whatever its JSON Schema reads as.
+>   `evidence` follows 2a's weakest-fact rule: `manifest` only for a guard's
+>   capability or an enforced body schema, `static` for anything that read a
+>   controller body.
+> - On the manifest path the force-write rule reads every declaration, since no
+>   collision finding covers an unrouted pair any more; a class sharing its name
+>   is keyed with its file.
+> - `agent-route-check.ts` and `entity-context.ts` keep the registered definitions
+>   (moving them to `manifest.routes` is 2d) and take the manifest's references
+>   through `attachControllerRefs()`, matched on method, path, class and action,
+>   since the manifest lists the whole app's routes in its own order, through the
+>   one bridge `withManifestControllerRefs()`, which introspects whenever a route
+>   has a controller and marks a name the routes file or entry declares. The
+>   agent-route rules ask for it whenever an agent route names a controller
+>   (content-activated, like 2b's triggers), so
+>   they agree with `guren audit` on a routed class the manifest places
+>   elsewhere; `guren check` passes its run's introspection.
+>   `generateEntityContext()` takes `introspect: true` and asks only when a route
+>   names a class two files declare; the `guren context` command is left to 2d.
+> - `plan/app-state.ts` stays name-keyed. A plan element names a class and its
+>   module, never a route, and `plan/status.ts` keys action bodies and route
+>   wiring by `Class.action` throughout, so a collision stays `blocked` there on
+>   either path. Lifting it needs module-qualified action keys in RFC 0030's
+>   status reader.
+
 ### 6. Enabling refactor: one module per command
 
 `commands.ts` becomes `packages/cli/src/commands/<name>.ts`, one `defineCommand()`

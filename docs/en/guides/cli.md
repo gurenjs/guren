@@ -334,7 +334,8 @@ and cache store it selects, and whether a provider threw while registering.
 
 A run introspects only when some check needs it: the app declares a deploy
 plugin or the Lambda adapter, has a session config, calls
-`configureAttachments()`, or has a model that mixes in `Attachable(...)`. Each
+`configureAttachments()`, has a model that mixes in `Attachable(...)`, or has
+a route that declares `.agent()` on a controller action. Each
 run introspects at most once, and a `--changed` run that changed no source
 file does not introspect at all. The manifest is read with this environment's
 `.env`, so a store selected by an environment variable is judged at its local
@@ -363,6 +364,55 @@ bunx guren doctor --no-introspect
 
 The deploy builds run the same verdicts, with introspection capped at 10
 seconds, and print one line naming what each was judged from.
+
+`guren audit` reads the introspected app for its route-level rules
+(`validation:*`, `authz:*`, `agent-annotation:*`). It introspects only when the
+routes file registers a route that mutates or carries a body, or fails to load
+on its own (the app may still register it), and never with
+`--routes`, since the manifest describes the app's entry rather than the file
+you named. From the manifest:
+
+- A middleware alias arrives resolved, wherever the app registers it: a route
+  behind an `auth` alias that a provider registers passes `authz:*`, where the
+  routes file loaded on its own reports a guard it does not recognize.
+- A chain that authorizes but never authenticates stays a warning, and the
+  message says what it checks: the ability, any or all of several, or an
+  ability decided at request time. A guest request reaches the gate with a
+  `null` user, and a policy may let it through.
+- A name no alias or group registers anywhere in the app is reported as
+  unresolved. Mounting such a route fails at boot, so the warning comes ahead of
+  any guard beside it, and a guard never passes it. When something introspection
+  skips could register the name (a `createApp({ boot })` callback, or a provider
+  whose `introspect()` hook replaced its `register()`), the message names it.
+- A controller is found by its file and export. Two modules may each declare a
+  `ReportController`, and each route is judged against its own class. When a
+  route's class matches no export of the controller files (a class declared in
+  the routes file, say), an exported class of the same name is not used, and
+  neither is any same-named class while the routes file or the entry declares
+  the name: the route is reported as not analyzable. Otherwise a same-named
+  class a controller file declares without exporting it, or one in a file that
+  failed to import during introspection, is read by name.
+  `controller-name-collision:*` is reported only when such a name fallback
+  meets two files declaring the name, or the class was found through a
+  re-export. The body checks (`validateBody()`, `userOrFail()`) still read the
+  action's source.
+
+`guren check` uses the same lookup for its agent-route rules, so it introspects
+an app whose agent routes name a controller. Raw SQL, secrets, mass assignment
+and CSRF exemptions are judged from source either way.
+
+Route-level findings carry `evidence`: `manifest` when the manifest alone
+decided them (a guard's capability, a body schema the route enforces), `static`
+when they read a controller body or the routes file. The JSON report's
+`routeSource` says which was read, with the reason when it was the routes file.
+A failed introspection adds one `introspection-unavailable` warning, which does
+not change the exit code, and a provider that threw in `register()` sends the
+rules back to the routes file, since that provider may register an alias the
+routes name. `--no-introspect` reads the routes file only:
+
+```bash
+bunx guren audit --no-introspect
+```
 
 ### Agent-exposed routes
 
