@@ -380,6 +380,7 @@ task/entity/model.comment/tests: verified (607 ms)
   failing  [AC-comments-2]
   failing  [AC-comments-3]
   failing  [AC-comments-4]
+  work: 1 file, +38 -0 since 3f1c2a9b0d4e
 
 Recorded in .guren/plans/comments.state.json
 ```
@@ -446,6 +447,10 @@ task/entity/model.comment/data: failed (1383 ms)
 マイグレーションを生成し (`bunx guren make:migration --name create_comments_table`)、コミットしてから検証し直してください。試行はスキーマ全体をマイグレーションのフォルダーと比べるので、計画の外のスキーマ変更でもステップは失敗します。
 
 `plan:verify` は承認のない計画を、何も実行しないうちに拒否します。誰も合意していないハッシュのもとで結果が記録されることはありません。そのうえで、`plan:verify` はアプリケーションを実際に動かします。`bun test` はアプリケーションを起動し、`db:migrate` は設定されたデータベースを開きます。開発用かテスト用のデータベースに向けて実行し、本番には向けないでください。各コマンドは 600 秒を過ぎると `blocked` になり、`--timeout <seconds>` で変えられます。`--step` を省くと全ステップを順に実行し、記録がまだ有効なステップは飛ばします。検証後にファイルが変わったステップは、次に述べるとおり最後に確かめ直します。`--ci` は実行したステップが一つでも verified にならなければ終了コード 1 を返し、`--json` は結果をデータで出します。
+
+### ステップごとのファイル数と行数
+
+記録には、ステップを実装した作業量も残ります。出力では `work:` の行です。`plan:next` がステップに印を付けたときの `HEAD` のコミットから数えた、触ったファイルと追加・削除した行の数で、コミット済みの変更も未コミットの変更も含みます。計画とその記録、`.guren/`、ロックファイル、drizzle-kit のスナップショットは数えず、マイグレーションの SQL は数えます。数値はステップが初めて verified になった実行で確定し、後の確かめ直しでは変わりません。`plan:next` が印を付けていないステップ (`--step` なしの `plan:verify` が実行したものなど) は理由付きの `not measured` になります。開始コミットが rebase で履歴から外れた場合も同じです。`plan:status --json` は `verification.work` にステップ id ごとの数値を載せます。この数値で拒否や待ちが起きることはありません。ステップ幅の既定値を見直す材料として使います。
 
 ### 一ステップ、一コミット
 
