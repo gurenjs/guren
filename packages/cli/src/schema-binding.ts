@@ -102,7 +102,33 @@ export interface SchemaTableBinding {
   /** The exported name the schema is asked for — an alias resolves to what it aliases. */
   tableName: string
   source: string
+  /** The schema module the import lands on: null for the root schema. */
+  schemaModule: string | null
   declared: boolean
+  /** The SQL name the schema gives that export, when it declares one the reader can name. */
+  sqlName?: string
+}
+
+/**
+ * A table the introspected app names by SQL name (RFC 0026 §5): `untyped`, `declared` or an advisory
+ * `unfound`, at the candidates it may belong to (none: report it under a key naming no file).
+ * Only a found name is evidence: the reader sees no other `drizzle.config` schema file and no `pgTableCreator()`
+ * prefix, so candidates whose export the source resolves keep the source verdict (`undefined`).
+ */
+export function attributeManifestTable<C extends { binding?: SchemaTableBinding }>(
+  sqlName: string | undefined,
+  candidates: C[],
+  schemaTables: SchemaTable[],
+): { outcome: 'untyped' | 'declared' | 'unfound'; at: C[] } | undefined {
+  if (sqlName === undefined) return { outcome: 'untyped', at: candidates }
+  const matched = candidates.find((candidate) => candidate.binding?.sqlName === sqlName)
+  if (matched) return { outcome: 'declared', at: [matched] }
+  if (schemaTables.some((table) => table.tableName === sqlName)) {
+    return candidates.length <= 1 ? { outcome: 'declared', at: candidates } : undefined
+  }
+  const unresolved = candidates.filter((candidate) => !candidate.binding)
+  if (candidates.length > 0 && unresolved.length === 0) return undefined
+  return { outcome: 'unfound', at: unresolved }
 }
 
 /**
@@ -125,9 +151,12 @@ export function resolveSchemaTableBinding(options: {
   const schemaModule = schemaModuleFor(cwd, filePath, entry.source)
   if (schemaModule === undefined) return undefined
 
+  const declared = schemaTables.find((table) => table.identifier === entry.imported && table.module === schemaModule)
   return {
     tableName: entry.imported,
     source: entry.source,
-    declared: schemaTables.some((table) => table.identifier === entry.imported && table.module === schemaModule),
+    schemaModule,
+    declared: declared !== undefined,
+    ...(declared?.tableName === undefined ? {} : { sqlName: declared.tableName }),
   }
 }
