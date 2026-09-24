@@ -235,6 +235,104 @@ const pgTable = pgTableCreator((name) => \`app_\${name}\`)
     expect(manifest['attachments-config:config/attachments.ts']!.message).toContain('never loaded config/attachments.ts')
   })
 
+  test('judges a model from source when a provider boot() imports the config dynamically', async () => {
+    const dir = await scaffoldApp('boot-dynamic-import', ['attachments'], {
+      'app/Models/User.ts': ATTACHABLE_MODEL,
+      'app/Providers/AttachmentsProvider.ts': `import { ServiceProvider } from '@guren/core'
+
+export default class AttachmentsProvider extends ServiceProvider {
+  register(): void {}
+
+  async boot(): Promise<void> {
+    await import('../../config/attachments.js')
+  }
+}
+`,
+    })
+    const { manifest } = await bothWays(dir)
+
+    expect(manifest['attachments-model:app/Models/User.ts']).toMatchObject({ status: 'pass', evidence: 'static' })
+    expect(manifest['attachments-model:app/Models/User.ts']!.message).toContain("a call in a provider's boot()")
+  })
+
+  test('warns, advisory, on an attachments table no db/schema.ts declares', async () => {
+    const dir = await scaffoldApp('attachments-table-outside-schema', ['attachments'])
+    const config = await Bun.file(join(dir, 'config/attachments.ts')).text()
+    await writeWorkspaceFiles(dir, {
+      'config/attachments.ts': config
+        .replace("import { attachments } from '../db/schema'", "import { pgTable, text } from '@guren/orm/drizzle/pg'\n\nconst legacyAttachments = pgTable('legacy_attachments', { id: text('id').primaryKey() })")
+        .replace('table: attachments,', 'table: legacyAttachments,'),
+    })
+    const { manifest, source } = await bothWays(dir)
+
+    expect(manifest['attachments-config:config/attachments.ts']).toMatchObject({ status: 'warn', advisory: true, evidence: 'manifest' })
+    expect(manifest['attachments-config:config/attachments.ts']!.message).toContain("'legacy_attachments'")
+    expect(source['attachments-config:config/attachments.ts']).toBeUndefined()
+  })
+
+  test('reports a session table under the store name when no config the source reads declares the store', async () => {
+    const dir = await scaffoldApp('session-store-spread', [], {
+      'config/session.ts': `import { type SessionConfig } from '@guren/core'
+
+const stores = { database: { driver: 'database' as const, table: {} as never } }
+
+export const sessionConfig: SessionConfig = { default: 'database', stores: { ...stores } }
+`,
+      'app/Providers/SessionProvider.ts': SESSION_PROVIDER,
+      'src/app.ts': APP.replace("import registerWebRoutes", "import SessionProvider from '../app/Providers/SessionProvider.js'\nimport registerWebRoutes")
+        .replace('providers: []', 'providers: [SessionProvider]'),
+    })
+    const { manifest } = await bothWays(dir)
+
+    expect(manifest['sessions-config:database']).toMatchObject({ status: 'fail', evidence: 'manifest' })
+    expect(manifest['sessions-config:database']!.filePath).toBeUndefined()
+  })
+
+  test('reports a non-Drizzle session table against every config declaring the store', async () => {
+    const dir = await scaffoldApp('session-two-configs', ['session'])
+    const config = await Bun.file(join(dir, 'config/session.ts')).text()
+    await writeWorkspaceFiles(dir, {
+      'config/session.ts': config.replace("database: { driver: 'database', table: sessions }", "database: { driver: 'database', table: {} as never }"),
+      'config/legacy-session.ts': `import { type SessionConfig } from '@guren/core'
+import { sessions } from '../db/schema'
+
+export const legacySessionConfig: SessionConfig = { default: 'database', stores: { database: { driver: 'database', table: sessions } } }
+`,
+    })
+    const { manifest } = await bothWays(dir)
+
+    const tables = Object.values(manifest).filter((result) => result.key.startsWith('sessions-config:'))
+    expect(tables.map((result) => [result.filePath, result.status]).sort()).toEqual([
+      ['config/legacy-session.ts', 'fail'],
+      ['config/session.ts', 'fail'],
+    ])
+  })
+
+  test('reports an unmounted delivery route under the rule alone when no call the source reads sets delivery', async () => {
+    const dir = await scaffoldApp('delivery-unattributed', ['attachments'], {
+      'routes/web.ts': DEFAULT_ROUTES_FIXTURE,
+      // An options object the scan cannot read, so no literal says which call enables delivery.
+      'config/attachments.ts': `import { configureAttachments } from '@guren/core'
+import { attachments } from '../db/schema'
+
+const options = { table: attachments, storage: () => ({}) as never, disk: 'local', delivery: {} }
+
+export const { Attachment, engine: attachmentEngine } = configureAttachments(options)
+`,
+      'app/Support/legacy-attachments.ts': `import { configureAttachments } from '@guren/core'
+import { attachments } from '../../db/schema.js'
+
+export function configureLegacy(): void {
+  configureAttachments({ table: attachments, storage: () => ({}) as never, disk: 'local' })
+}
+`,
+    })
+    const { manifest } = await bothWays(dir)
+
+    expect(manifest['attachments-delivery']).toMatchObject({ status: 'fail', evidence: 'manifest' })
+    expect(manifest['attachments-delivery']!.filePath).toBeUndefined()
+  })
+
   test('does not introspect a --changed run that changed no source, and says why', async () => {
     const dir = await scaffoldApp('changed-docs-only', ['session'], {
       'src/main.ts': "import app from './app.js'\nimport './missing-module.js'\n\nexport default app\n",

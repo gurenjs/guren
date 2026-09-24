@@ -111,22 +111,24 @@ export interface SchemaTableBinding {
 
 /**
  * A table the introspected app names by SQL name (RFC 0026 §5): `untyped`, `declared` or an advisory
- * `unfound`, at the candidate whose export the schema names so, else the only one; the manifest names no config.
+ * `unfound`, at the candidates it may belong to (none: report it under a key naming no file).
  * Only a found name is evidence: the reader sees no other `drizzle.config` schema file and no `pgTableCreator()`
- * prefix, so a candidate whose export the source resolves keeps the source verdict (`undefined`).
+ * prefix, so candidates whose export the source resolves keep the source verdict (`undefined`).
  */
 export function attributeManifestTable<C extends { binding?: SchemaTableBinding }>(
   sqlName: string | undefined,
   candidates: C[],
   schemaTables: SchemaTable[],
-): { outcome: 'untyped' | 'declared' | 'unfound'; at: C } | undefined {
-  const only = candidates.length === 1 ? candidates[0] : undefined
-  if (sqlName === undefined) return only && { outcome: 'untyped', at: only }
+): { outcome: 'untyped' | 'declared' | 'unfound'; at: C[] } | undefined {
+  if (sqlName === undefined) return { outcome: 'untyped', at: candidates }
   const matched = candidates.find((candidate) => candidate.binding?.sqlName === sqlName)
-  if (matched) return { outcome: 'declared', at: matched }
-  if (!only) return undefined
-  if (schemaTables.some((table) => table.tableName === sqlName)) return { outcome: 'declared', at: only }
-  return only.binding ? undefined : { outcome: 'unfound', at: only }
+  if (matched) return { outcome: 'declared', at: [matched] }
+  if (schemaTables.some((table) => table.tableName === sqlName)) {
+    return candidates.length <= 1 ? { outcome: 'declared', at: candidates } : undefined
+  }
+  const unresolved = candidates.filter((candidate) => !candidate.binding)
+  if (candidates.length > 0 && unresolved.length === 0) return undefined
+  return { outcome: 'unfound', at: unresolved }
 }
 
 /**

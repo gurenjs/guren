@@ -172,44 +172,51 @@ function checkManifestStoreTables(entry: SessionEntry, sites: SessionSite[], cwd
       .map((candidate) => ({ site: candidate, ...storeBinding(candidate, name, cwd, schemaTables) }))
     const attributed = attributeManifestTable(store.table, candidates, schemaTables)
     if (!attributed) continue
-    const { site, identifier, binding } = attributed.at
-    const key = `sessions-config:${site.relPath}:${binding?.tableName ?? identifier ?? store.table ?? name}`
-
-    switch (attributed.outcome) {
-      case 'declared':
-        results.push(check(key, TABLE_TITLE, 'pass', `The database session store '${name}' binds schema table '${store.table}'.`))
-        break
-      case 'untyped':
-        results.push(
-          check(
-            key,
-            TABLE_TITLE,
-            'fail',
-            `The '${name}' session store uses the database driver, but its \`table\` is not a Drizzle table in the introspected `
-              + `app. The store takes the table untyped, so this only fails at runtime, on the first request that writes a session.`,
-            TABLE_FIX,
-            site.relPath,
-          ),
-        )
-        break
-      case 'unfound':
-        results.push(
-          advisory(
-            key,
-            TABLE_TITLE,
-            'warn',
-            `The '${name}' session store writes to table '${store.table}', which the schema reader did not find in any app root's `
-              + 'db/schema.ts. If no schema file drizzle-kit reads declares it, no migration creates it and the first request '
-              + 'that writes a session fails.',
-            'Declare the table in db/schema.ts (`bunx guren add session` adds one), or ignore this if your drizzle.config reads it from another file.',
-            site.relPath,
-          ),
-        )
-        break
+    // No config the source reads declares the store (a spread, a computed key): keyed on the store alone.
+    const targets = attributed.at.length > 0 ? attributed.at : [undefined]
+    for (const target of targets) {
+      const key = target
+        ? `sessions-config:${target.site.relPath}:${target.binding?.tableName ?? target.identifier ?? store.table ?? name}`
+        : `sessions-config:${name}`
+      results.push(storeTableVerdict(attributed.outcome, key, name, store.table, target?.site.relPath))
     }
   }
 
   return results
+}
+
+function storeTableVerdict(
+  outcome: 'untyped' | 'declared' | 'unfound',
+  key: string,
+  name: string,
+  table: string | undefined,
+  relPath: string | undefined,
+): CheckResult {
+  switch (outcome) {
+    case 'declared':
+      return check(key, TABLE_TITLE, 'pass', `The database session store '${name}' binds schema table '${table}'.`)
+    case 'untyped':
+      return check(
+        key,
+        TABLE_TITLE,
+        'fail',
+        `The '${name}' session store uses the database driver, but its \`table\` is not a Drizzle table in the introspected `
+          + `app. The store takes the table untyped, so this only fails at runtime, on the first request that writes a session.`,
+        TABLE_FIX,
+        relPath,
+      )
+    case 'unfound':
+      return advisory(
+        key,
+        TABLE_TITLE,
+        'warn',
+        `The '${name}' session store writes to table '${table}', which the schema reader did not find in any app root's `
+          + 'db/schema.ts. If no schema file drizzle-kit reads declares it, no migration creates it and the first request '
+          + 'that writes a session fails.',
+        'Declare the table in db/schema.ts (`bunx guren add session` adds one), or ignore this if your drizzle.config reads it from another file.',
+        relPath,
+      )
+  }
 }
 
 /**

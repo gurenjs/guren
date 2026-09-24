@@ -320,8 +320,8 @@ provider の外のコードでは `isIntrospecting()` で同じ判定ができ�
 | チェックキー | イントロスペクションの結果から読むもの |
 |--------------|----------------------------------------|
 | `sessions-binding` | `register()` で `session` をバインドする provider があるか。アプリが読まないセッション設定(バインドがない、または `auth.sessionOptions.store` が代わりにストアを渡している)が警告になる。バインドしたマネージャと `auth.sessionOptions.store` の併用はアプリが boot を拒否するので fail になる |
-| `sessions-config:*` | バインドされたセッションマネージャの `database` ストアが持つテーブルの SQL 名。モジュールも含め、各アプリルートの `db/schema.ts` が宣言するテーブルと照合する。スキーマの読み取りで見つからない名前は advisory の警告にとどめ、それもソースからスキーマの export をたどれないテーブルに限る。この読み取りは `drizzle.config` が挙げる他のファイルも `pgTableCreator()` の接頭辞も見ないため |
-| `attachments-model:*`、`attachments-config:*` | アプリの登録中に添付ファイルのエンジンが設定されたか、そのエンジンが書き込むテーブル。テーブルはセッションと同じように照合する。アプリが読み込まないファイルのモジュールスコープで `configureAttachments()` を呼んでいる場合、モデルが fail になる |
+| `sessions-config:*` | バインドされたセッションマネージャの `database` ストアが持つテーブルの SQL 名。モジュールも含め、各アプリルートの `db/schema.ts` が宣言するテーブルと照合する。スキーマの読み取りで見つからない名前は advisory の警告にとどめ、それもソースからスキーマの export をたどれないテーブルに限る。この読み取りは `drizzle.config` が挙げる他のファイルも `pgTableCreator()` の接頭辞も見ない。判定はそのストアを宣言するすべての設定に付く。ソースから読めるどの設定もストアを宣言していない場合は、ファイルを持たない `sessions-config:<store>` のキーで報告する |
+| `attachments-model:*`、`attachments-config:*` | アプリの登録中に添付ファイルのエンジンが設定されたか、そのエンジンが書き込むテーブル。テーブルはセッションと同じように照合し、ファイルを持たないキーは `attachments-config` になる。どの `configureAttachments()` もファイルの読み込み時に必ず実行される位置(関数、分岐、クラスフィールドの外)にあり、どのソースもそのファイルを `import()` で読み込まず、`createApp({ boot })` も省略されていないのに、エンジンが設定されていない場合、モデルが fail になる。アプリが登録中に読み込むものが、そのファイルを import していないため |
 | `attachments-delivery` | エンジンの `delivery` が指すルートが登録されていて、それが `registerAttachmentRoutes()` のルートであるか |
 | `attachments-route-name:*` | そのルート名を持つ登録済みルートの数 |
 | `attachments-serve-redirect:*` | エンジンがリダイレクトで配信するディスクと、storage manager から読んだ各ディスクのドライバ |

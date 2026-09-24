@@ -525,10 +525,13 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   function and the manifest has no engine, every rule judges from source and
 >   names that reason: a call in a provider's `boot()` is past the register
 >   stage, as a `useModel()` in `boot()` was in 2a. A manifest-only failure there
->   would fail `check --ci` on a working app. When every call sits at module
->   scope, no `boot()` explains the absence: nothing loads the file while the app
->   registers, and `attachments-model:*` fails from the manifest. `attachments-model:*` passes from the manifest when an
->   engine was configured, including one the scan cannot see.
+>   would fail `check --ci` on a working app. The model fails from the manifest
+>   only when every call runs whenever its file loads (outside any function,
+>   branch, loop, `try` or class field), no source file imports a site through
+>   `import()` and the manifest carries no `boot-callback-skipped`: then nothing
+>   the app loads while it registers imports the file. `attachments-model:*`
+>   passes from the manifest when an engine was configured, including one the
+>   scan cannot see.
 > - `delivery.mounted` is `Router.hasRoute(routeName)`, a name lookup. The check
 >   also requires that route's controller to be the delivery controller, so an
 >   app route that only carries the name is not the mount. The duplicate-name
@@ -550,7 +553,9 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   config enabling delivery, as the scan does. The manifest does not say which
 >   config it describes: a verdict goes to the config whose export the schema
 >   names as that table or that literally names the disk, else to the one config
->   there is, and with several it is not given.
+>   there is. A verdict that fits several goes to each (a non-Drizzle session
+>   table, to every config declaring the store), and one that fits none is
+>   reported under a key naming no file, never dropped.
 
 ### 6. Enabling refactor: one module per command
 
