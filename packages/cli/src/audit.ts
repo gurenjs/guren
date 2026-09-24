@@ -229,7 +229,7 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   await auditSourceFiles(cwd, findings)
   await auditModels(cwd, findings)
   const csrfExemptionScan = await auditCsrfExemptions(cwd, findings)
-  const aiLocalTools = await auditAiLocalTools(cwd, definitions, controllerMethods, findings)
+  const aiLocalTools = await auditAiLocalTools(cwd, definitions, controllerMethods, findings, cache)
 
   const dependencyScan: DependencyScan = dependencyScanOutput
     ? dependencyFindingsFromOutput(await dependencyScanOutput, findings)
@@ -1016,7 +1016,7 @@ export function renderAuditReport(report: AuditReport): void {
   if (report.failCount === 0 && report.warnCount === 0) {
     consola.success(
       report.ignoredCount > 0
-        ? `No unresolved security findings (${report.ignoredCount} ignored via config/audit.ts).`
+        ? `No unresolved security findings (${report.ignoredCount} ignored).`
         : 'No security findings.',
     )
   }

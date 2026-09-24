@@ -11,7 +11,7 @@ import { classNameFromPath, discoverControllerFiles } from './discovery'
 import { extractClassDeclaration } from './model-parser'
 import { ParseCache } from './parse-cache'
 import { memberKeyName, walk } from './ast-walk'
-import { escapeRegExp } from './utils'
+import { wholeIdentifierPattern } from './utils'
 
 /**
  * Controller action bodies, extracted once and judged by regex afterwards. Lives
@@ -27,8 +27,13 @@ export interface ControllerMethodInfo {
   rawBody: string
   /** Controller file, relative to the project root. */
   filePath: string
-  /** 1-based line of the member's declaration, where a `// guren-audit-ignore` above it is read from. */
+  /** 1-based line of the member's declaration. */
   line: number
+  /**
+   * The comments written above the member, JSDoc included, as Babel attaches
+   * them; where an action-level `// guren-audit-ignore` is read from.
+   */
+  leadingComments: string[]
 }
 
 /**
@@ -199,7 +204,7 @@ export const INERTIA_CALL_PATTERN = controllerMemberCall('inertia')
 /** `this.auth.<method><…typeName…>(`: a record type passed as a type argument of an auth call. */
 export function authTypeArgumentPattern(typeName: string): RegExp {
   const member: ControllerMemberName = 'auth'
-  const name = `(?<![\\w$.])${escapeRegExp(typeName)}(?![\\w$])`
+  const name = wholeIdentifierPattern(typeName).source
   return new RegExp(`\\bthis\\s*\\.\\s*${member}\\s*\\.\\s*\\w+\\s*<[^()]*${name}[^()]*>\\s*\\(`)
 }
 
@@ -350,21 +355,14 @@ export async function parseControllerMethods(
           body: scrubbed.slice(body.start ?? 0, body.end ?? 0),
           rawBody: source.slice(body.start ?? 0, body.end ?? 0),
           filePath: relPath,
-          line: lineAt(source, member.start ?? 0),
+          line: member.loc?.start.line ?? 1,
+          leadingComments: (member.leadingComments ?? []).map((comment) => comment.value.trim()),
         })
       }
     }
   }
 
   return { methods, collisions, unreadableFiles, unparsedFiles, classFiles }
-}
-
-function lineAt(source: string, offset: number): number {
-  let line = 1
-  for (let i = 0; i < offset && i < source.length; i++) {
-    if (source.charCodeAt(i) === 10) line++
-  }
-  return line
 }
 
 /**

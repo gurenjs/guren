@@ -34,7 +34,7 @@ const RULE_CLASSIFICATIONS: Record<string, AuditClassification[]> = {
     owasp('A01', 'Broken Access Control'),
     cwe('CWE-306', 'Missing Authentication for Critical Function'),
   ],
-  authorization: [
+  policy: [
     owasp('A01', 'Broken Access Control'),
     cwe('CWE-862', 'Missing Authorization'),
   ],

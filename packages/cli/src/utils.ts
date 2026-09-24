@@ -467,6 +467,15 @@ export function referencesIdentifier(body: string, name: string): boolean {
   return new RegExp(`\\b${escapeRegExp(name)}\\b`, 'u').test(body)
 }
 
+/**
+ * `name` as a whole identifier that is not a property: `Post` in `Post.find(`
+ * or `[Post, post]`, never in `PostTag` or `this.Post`. Stricter than
+ * {@link referencesIdentifier}, whose `\b` reads `this.Post` as a use.
+ */
+export function wholeIdentifierPattern(name: string): RegExp {
+  return new RegExp(`(?<![\\w$.])${escapeRegExp(name)}(?![\\w$])`)
+}
+
 export const SAFE_MODULE_NAME_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/u
 
 /**

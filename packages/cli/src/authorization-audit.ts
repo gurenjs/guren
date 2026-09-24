@@ -1,21 +1,23 @@
 /**
  * Policy authorization on mutating routes: an action on a non-safe method whose
  * body names a Model the app keeps a policy for must show an authorization
- * decision, or the policy is a file nothing consults. A policy is found by the
- * name `make:policy` writes (`app/Policies/<Model>Policy.ts`, modules included),
- * not by the `gate.policy(Model, Policy)` call that binds it. Advisory: the
- * decision may sit in a service the action calls, which the body scan cannot follow.
+ * decision, or the policy is a file nothing consults. A policy is paired with
+ * its model by the name `make:policy` writes (`app/Policies/<Model>Policy.ts`,
+ * within one app root), not by the `gate.policy(Model, Policy)` call that binds
+ * it. Advisory: a service or helper the action calls is not followed, and the
+ * guest paths the authentication rule skips are skipped here too.
  */
 import { resolve } from 'node:path'
 import type { RouteDefinition } from '@guren/server'
 import type { AuditFinding } from './audit'
 import { AUTHORIZATION_CALL_PATTERN, type ControllerMethodInfo } from './controller-methods'
-import { classNameFromPath, discoverModelFiles, discoverPolicyFiles } from './discovery'
+import { classNameFromPath, discoverPolicyFiles, moduleNameFromRelPath, toPosixRelative } from './discovery'
 import { describeMethod } from './http-methods'
-import { extractClassDeclaration } from './model-parser'
+import { discoverModelClasses } from './model-parser'
 import type { ParseCache } from './parse-cache'
 import { readPolicyAbilities } from './plan/policy-abilities'
-import { escapeRegExp } from './utils'
+import { importsByLocal, specifierBase, withoutExtension } from './schema-binding'
+import { camelCase, escapeRegExp, wholeIdentifierPattern } from './utils'
 
 /**
  * Guest flows (login, registration, password reset), reachable without a
@@ -23,92 +25,106 @@ import { escapeRegExp } from './utils'
  */
 export const GUEST_PATH_PATTERN = /(login|logout|register|signup|sign-up|password|forgot|reset|verification|verify-email)/i
 
+/**
+ * A gate consulted by hand, the form the authorization guide documents beside
+ * `this.authorize()`: `gate.allows(...)` on a `this.make('gate').forUser(user)`.
+ * `forUser` counts because the string the gate is made with is blanked away.
+ */
+const GATE_CALL_PATTERN = /\b[gG]ate\s*\.\s*(?:allows|denies|any|all|none|authorize|inspect|check|forUser)\s*\(/
+
+const AUDIT_IGNORE_MARKER = 'guren-audit-ignore'
+
 const POLICY_SUFFIX = 'Policy'
 
 interface PolicyBinding {
   model: string
   policy: string
-  /** Ability names the policy declares; absent when the file could not be read as a policy. */
-  abilities?: string[]
+  /** Absolute path of the model file, which a controller's imports are resolved against. */
+  modelFile: string
+  /** Absolute path of the policy file. */
+  policyFile: string
+  policyPattern: RegExp
 }
 
-/** A whole identifier, so `Post` is not found inside `PostTag` or `this.Post`. */
-function identifierPattern(name: string): RegExp {
-  return new RegExp(`(?<![\\w$.])${escapeRegExp(name)}(?![\\w$])`)
-}
-
-async function modelNames(cwd: string, cache: ParseCache): Promise<Set<string>> {
-  const names = new Set<string>()
-  for (const filePath of await discoverModelFiles(cwd)) {
-    const parsed = await cache.get(filePath)
-    let declared = false
-    for (const statement of parsed?.ast.program.body ?? []) {
-      const classDecl = extractClassDeclaration(statement)
-      if (!classDecl?.id) continue
-      names.add(classDecl.id.name)
-      declared = true
-    }
-    // A model file that would not parse still names its model: the rule fails
-    // closed on the policy side, so the model side must not drop it.
-    if (!declared) names.add(classNameFromPath(filePath))
-  }
-  return names
-}
-
-/** Model → the policy `<Model>Policy` under an app root's `app/Policies`. */
 async function policyBindings(cwd: string, cache: ParseCache): Promise<PolicyBinding[]> {
   const policyFiles = await discoverPolicyFiles(cwd)
   if (policyFiles.length === 0) return []
 
-  const models = await modelNames(cwd, cache)
+  // Keyed by app root as well as name: `make:adr` and `plan` pair a module's
+  // model with that module's policy, and this rule must not disagree with them.
+  const models = new Map(
+    (await discoverModelClasses(cwd, cache)).map(({ module, className, filePath }) => [`${module ?? ''}/${className}`, filePath]),
+  )
   const bindings: PolicyBinding[] = []
-  for (const filePath of policyFiles) {
-    const policy = classNameFromPath(filePath)
+  for (const policyFile of policyFiles) {
+    const policy = classNameFromPath(policyFile)
     if (!policy.endsWith(POLICY_SUFFIX)) continue
     const model = policy.slice(0, -POLICY_SUFFIX.length)
-    if (!models.has(model)) continue
-
-    const parsed = await cache.get(filePath)
-    const abilities = parsed ? readPolicyAbilities(parsed.ast, policy) : null
-    bindings.push({
-      model,
-      policy,
-      ...(abilities && !('unreadable' in abilities) ? { abilities: abilities.declared } : {}),
-    })
+    const modelFile = models.get(`${moduleNameFromRelPath(toPosixRelative(cwd, policyFile)) ?? ''}/${model}`)
+    if (modelFile === undefined) continue
+    bindings.push({ model, policy, modelFile, policyFile, policyPattern: wholeIdentifierPattern(policy) })
   }
   return bindings
 }
 
-/** `// guren-audit-ignore` on the action's declaration line or the line above it. */
-async function suppressed(cwd: string, cache: ParseCache, info: ControllerMethodInfo): Promise<boolean> {
-  const lines = (await cache.source(resolve(cwd, info.filePath)))?.split('\n') ?? []
-  return [lines[info.line - 1], lines[info.line - 2]].some((text) => text?.includes('guren-audit-ignore'))
+/**
+ * How one controller file may spell each model: the bare class name always
+ * (an import through a barrel resolves to no file), plus what the file imports
+ * the model's module as, so `import { Post as PostModel }`, a default import
+ * and `Models.Post` under `import * as Models` are references too.
+ */
+async function modelPatterns(
+  cwd: string,
+  controllerFile: string,
+  bindings: PolicyBinding[],
+  cache: ParseCache,
+): Promise<Map<PolicyBinding, RegExp[]>> {
+  const patterns = new Map(bindings.map((binding) => [binding, [wholeIdentifierPattern(binding.model)]]))
+  const parsed = await cache.get(controllerFile)
+  if (!parsed) return patterns
+
+  for (const [local, entry] of importsByLocal(parsed.ast.program.body)) {
+    const base = specifierBase(cwd, controllerFile, entry.source)
+    if (base === null) continue
+    for (const binding of bindings) {
+      if (withoutExtension(base) !== withoutExtension(binding.modelFile)) continue
+      if (entry.kind === 'namespace') {
+        patterns.get(binding)!.push(new RegExp(`(?<![\\w$.])${escapeRegExp(local)}\\s*\\.\\s*${escapeRegExp(binding.model)}(?![\\w$])`))
+      } else if (entry.kind === 'default' || entry.imported === binding.model) {
+        patterns.get(binding)!.push(wholeIdentifierPattern(local))
+      }
+    }
+  }
+  return patterns
 }
 
 function describeBindings(bindings: PolicyBinding[]): string {
   return bindings.map((binding) => `${binding.model} (${binding.policy})`).join(', ')
 }
 
-function authorizeSuggestion(controllerKey: string, { model, policy, abilities }: PolicyBinding): string {
-  const instance = model.charAt(0).toLowerCase() + model.slice(1)
-  const declared = abilities === undefined
-    ? `${policy} could not be read as a policy, so its abilities are not listed here`
-    : abilities.length > 0
-      ? `${policy} declares ${abilities.join(', ')}`
-      : `${policy} declares no ability yet`
+async function authorizeSuggestion(
+  controllerKey: string,
+  { model, policy, policyFile }: PolicyBinding,
+  cache: ParseCache,
+): Promise<string> {
+  const parsed = await cache.get(policyFile)
+  const abilities = parsed ? readPolicyAbilities(parsed.ast, policy) : null
+  const declared = abilities && !('unreadable' in abilities)
+    ? `${policy} declares ${abilities.declared.join(', ') || 'no ability yet'}`
+    : `${policy} could not be read as a policy`
   return (
-    `Call await this.authorize('<ability>', [${model}, ${instance}]) in ${controllerKey} before the write `
-    + `(${declared}), or attach authorize()/authorizeResource() middleware to the route. If a service the `
-    + `action calls consults the policy, put // guren-audit-ignore above the action, or ignore the finding by `
-    + `key in config/audit.ts with the reason.`
+    `Call await this.authorize('<ability>', [${model}, ${camelCase(model)}]) in ${controllerKey} before the write `
+    + `(${declared}), or attach authorize()/authorizeResource() middleware to the route. A helper the action `
+    + 'calls is not read: if it authorizes there, say so in a // guren-audit-ignore comment above the action.'
   )
 }
 
 /**
- * One finding per mutating controller route, keyed `authorization:<METHOD> <path>`,
+ * One finding per mutating controller route, keyed `policy:<METHOD> <path>`,
  * once the app has at least one policy; an app with none contributes nothing.
- * Route-level, so `config/audit.ts` is its suppression, and the inline marker
- * on the action is honoured as well since the action is where the fix goes.
+ * Route-level on purpose: the finding carries no `line`, so `config/audit.ts`
+ * ignores it by key (a `line` would make every such entry `unsupported`); a
+ * `// guren-audit-ignore` comment above the action reports it `ignored` instead.
  */
 export async function auditAuthorization(
   cwd: string,
@@ -120,16 +136,16 @@ export async function auditAuthorization(
   if (!definitions) return
   const bindings = await policyBindings(cwd, cache)
   if (bindings.length === 0) return
+  const patternsByFile = new Map<string, Map<PolicyBinding, RegExp[]>>()
 
   for (const route of definitions) {
     const method = route.method.toUpperCase()
     if (describeMethod(method).safe || !route.controller || GUEST_PATH_PATTERN.test(route.path)) continue
 
     const routeLabel = `${method} ${route.path}`
-    const key = `authorization:${routeLabel}`
     const controllerKey = `${route.controller.name}.${route.controller.action}`
-    const push = (status: AuditFinding['status'], message: string, suggestion?: string, filePath?: string) =>
-      findings.push({ key, title: routeLabel, status, message, suggestion, filePath })
+    const push = (status: AuditFinding['status'], message: string, rest: Partial<AuditFinding> = {}) =>
+      findings.push({ key: `policy:${routeLabel}`, title: routeLabel, status, message, ...rest })
 
     // Presence, not derivability, as in the agent-route rule: a `mixed` chain
     // still authorizes, whatever ability it resolves.
@@ -143,35 +159,50 @@ export async function auditAuthorization(
       push(
         'warn',
         `Authorization could not be verified: ${controllerKey} is not among the controller sources the `
-        + `audit reads, and the app keeps a policy for ${describeBindings(bindings)}.`,
-        `Ensure ${controllerKey} is under app/Http/Controllers (or a module's), or attach `
-        + 'authorize()/authorizeResource() middleware to the route so the chain carries the decision.',
+        + `audit reads, and the app keeps ${bindings.length} model polic${bindings.length === 1 ? 'y' : 'ies'}.`,
+        {
+          suggestion: `Ensure ${controllerKey} is under app/Http/Controllers (or a module's), or attach `
+            + 'authorize()/authorizeResource() middleware to the route so the chain carries the decision.',
+        },
       )
       continue
     }
 
-    const touched = bindings.filter((binding) => identifierPattern(binding.model).test(info.body))
+    const controllerFile = resolve(cwd, info.filePath)
+    let patterns = patternsByFile.get(controllerFile)
+    if (!patterns) {
+      patterns = await modelPatterns(cwd, controllerFile, bindings, cache)
+      patternsByFile.set(controllerFile, patterns)
+    }
+    const touched = bindings.filter((binding) => patterns!.get(binding)!.some((pattern) => pattern.test(info.body)))
     if (touched.length === 0) {
-      push('pass', `${controllerKey} references no model the app keeps a policy for.`)
+      push(
+        'pass',
+        `${controllerKey} names no model the app keeps a policy for; a write through a service or a `
+        + 'relationship is not judged.',
+      )
       continue
     }
-
-    const consultsPolicy =
+    if (
       AUTHORIZATION_CALL_PATTERN.test(info.body)
-      || touched.some((binding) => identifierPattern(binding.policy).test(info.body))
-    if (consultsPolicy) {
+      || GATE_CALL_PATTERN.test(info.body)
+      || touched.some((binding) => binding.policyPattern.test(info.body))
+    ) {
       push('pass', `${controllerKey} consults a policy for ${describeBindings(touched)}.`)
       continue
     }
 
-    if (await suppressed(cwd, cache, info)) continue
-    push(
-      'warn',
+    const message =
       `${controllerKey} (${info.filePath}:${info.line}) references ${describeBindings(touched)} on a mutating `
-      + 'route, and neither the middleware chain nor the action body shows an authorization check: every '
-      + 'caller the route admits reaches the write.',
-      authorizeSuggestion(controllerKey, touched[0]!),
-      info.filePath,
-    )
+      + 'route, and neither the middleware chain nor the action body shows an authorization check.'
+    const marker = info.leadingComments.find((comment) => comment.includes(AUDIT_IGNORE_MARKER))
+    if (marker !== undefined) {
+      push('ignored', message, { ignoreReason: marker, filePath: info.filePath })
+      continue
+    }
+    push('warn', message, {
+      suggestion: await authorizeSuggestion(controllerKey, touched[0]!, cache),
+      filePath: info.filePath,
+    })
   }
 }

@@ -203,16 +203,6 @@ API アプリをフルスタック化するときは、先に `@guren/inertia-cl
 | `spec:generate` | `docs/spec/` の導出スペックビュー(ER図・ドメインモデル・画面一覧・モジュールマップ)を再生成 — 詳細は[スペックアンカード開発](./spec-anchored.md) | `bunx guren spec:generate` |
 
 `audit` は失敗(fail)を検出すると非ゼロの終了コードを返します。
-Policy のルールは warn 止まりです。モデルに対する Policy
-(`make:policy` が書く `app/Policies/<Model>Policy.ts`)がひとつでもあると、
-安全でないメソッドのコントローラアクションのうち本体でそのモデルを参照するものに
-`authorization:<METHOD> <path>` の finding が付きます。アクションが
-`this.authorize()` か `this.can()` を呼ぶ、Policy クラスを参照する、
-`authorize()`/`authorizeResource()` ミドルウェアの後ろにある、のいずれかなら pass です。
-スキャンから見える範囲で Policy を参照していなければ、アクション名・Policy 名・修正方法を
-添えて warn します。コントローラのソースが読めなかった場合も pass にはせず warn します。
-Policy のないアプリではこの finding は出ません。呼び出し先のサービスで判定している
-アクションには、その直前の行に `// guren-audit-ignore` を置いてください。
 フラグ無しの `check` は報告するだけですが、各スイートフラグはそのスイートに
 失敗があれば非ゼロで終了します。scaffold された CI ワークフローが回すのは
 後述の `gate` です:
@@ -224,6 +214,18 @@ bunx guren check --docs    # docリンク: OKF frontmatter(type/entities/related
 bunx guren check --spec    # docs/spec/ が再生成結果と一致するか
 bunx guren check --prototype  # prototype ハンドラーのルートに名前付きの fixture エントリがあり、ローダーが配線されているか
 ```
+
+`audit` の Policy ルールは warn 止まりです。モデルに対する Policy
+(`make:policy` が書く `app/Policies/<Model>Policy.ts`、同じアプリルート内で対応付け)が
+ひとつでもあると、安全でないメソッドのコントローラアクションのうち本体でそのモデルを参照する
+ものに `policy:<METHOD> <path>` の finding が付きます。アクションが `this.authorize()` か
+`this.can()` を呼ぶ、gate に問い合わせる、Policy クラスを参照する、
+`authorize()`/`authorizeResource()` ミドルウェアの後ろにある、のいずれかなら pass です。
+スキャンから見える範囲で Policy を参照していなければ、アクション名・Policy 名・修正方法を
+添えて warn します。コントローラのソースが読めなかった場合も pass にはせず warn します。
+アクションが呼ぶヘルパーの中までは追いません。判定が別の場所にあるアクションには、
+その上のコメントに `// guren-audit-ignore` を書いてください。その finding はそのコメントを
+理由として ignored で報告されます。Policy のないアプリではこの finding は出ません。
 
 スイートフラグは併用すると和集合で実行されます。`--changed` はどのスイートも
 main とのマージベースからの変更ファイルに限定します。エージェントハーネスの
@@ -409,7 +411,7 @@ bunx guren doctor --no-introspect
 const apiKey = 'example-not-a-real-key'
 ```
 
-ルートレベル・モデルレベルの findings(`authz:*`、`authorization:*`、`validation:*`、`agent-annotation:*`、`mass-assignment:*`、`hidden-columns:*`)には、コメントを付けられる特定の行が存在しません。これらはルートレジストラを実行し、モデルを検査することで生成されるためです。代わりに `config/audit.ts` で finding の `key`(`--json` の出力からそのままコピーできます)と必須の `reason` を指定して無視します:
+ルートレベル・モデルレベルの findings(`authz:*`、`policy:*`、`validation:*`、`agent-annotation:*`、`mass-assignment:*`、`hidden-columns:*`)には、コメントを付けられる特定の行が存在しません。これらはルートレジストラを実行し、モデルを検査することで生成されるためです(`policy:*` だけは、修正箇所がアクションなので、その上のコメントのマーカーも受け付けます)。代わりに `config/audit.ts` で finding の `key`(`--json` の出力からそのままコピーできます)と必須の `reason` を指定して無視します:
 
 ```ts
 // config/audit.ts

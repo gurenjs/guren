@@ -203,18 +203,7 @@ Validate your app before shipping. These commands are also designed for AI codin
 | `docs:graph` | The OKF docs relation graph: documents, entities, and code paths as nodes, verified relations as edges. `--entity <Model>` or `--path <file>` narrows to a neighborhood — ask "what governs this?" before renaming | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |
 | `spec:generate` | Regenerates the derived spec views in `docs/spec/` (ER diagram, domain model, screens, module map) — see [Spec-Anchored Development](./spec-anchored.md) | `bunx guren spec:generate` |
 
-`audit` exits with a non-zero status when it finds failures. Its policy
-rule only ever warns: once the app keeps a policy for a model
-(`app/Policies/<Model>Policy.ts`, what `make:policy` writes), every
-controller action on a non-safe method whose body names that model gets an
-`authorization:<METHOD> <path>` finding. It passes when the action calls
-`this.authorize()` or `this.can()`, references the policy class, or sits
-behind `authorize()`/`authorizeResource()` middleware. It warns, naming the
-action, the policy and the fix, when nothing the scan can see consults the
-policy, and it warns rather than passes when the controller source is not
-among those the audit reads. An app with no policy gets no such finding.
-Put `// guren-audit-ignore` above an action whose check lives in a service
-it calls. Plain `check` is informational. Its suite flags each exit non-zero on
+`audit` exits with a non-zero status when it finds failures. Plain `check` is informational. Its suite flags each exit non-zero on
 failures in that suite, and `gate` (below) is what the scaffolded CI
 workflow runs:
 
@@ -225,6 +214,20 @@ bunx guren check --docs    # doc links: OKF frontmatter (type/entities/related) 
 bunx guren check --spec    # docs/spec/ views match a fresh regeneration
 bunx guren check --prototype  # routes on the prototype handler have a named fixture entry, and the loaders are wired
 ```
+
+The policy rule of `audit` only ever warns. Once the app keeps a policy
+for a model (`app/Policies/<Model>Policy.ts`, what `make:policy` writes,
+paired within one app root), every controller action on a non-safe method
+whose body names that model gets a `policy:<METHOD> <path>` finding. It
+passes when the action calls `this.authorize()` or `this.can()`, consults
+the gate, references the policy class, or sits behind
+`authorize()`/`authorizeResource()` middleware. It warns, naming the action,
+the policy and the fix, when nothing the scan can see consults the policy,
+and it warns rather than passes when the controller source is not among
+those the audit reads. A helper the action calls is not followed, so put
+`// guren-audit-ignore` in a comment above an action whose check lives
+elsewhere: the finding is then reported as ignored, with that comment as its
+reason. An app with no policy gets no such finding.
 
 Combining suite flags runs their union. `--changed` restricts any of
 them to files changed against the merge base with `main`, the fast
@@ -415,7 +418,7 @@ Suppress a false positive by placing `// guren-audit-ignore` on the flagged line
 const apiKey = 'example-not-a-real-key'
 ```
 
-Route- and model-level findings (`authz:*`, `authorization:*`, `validation:*`, `agent-annotation:*`, `mass-assignment:*`, `hidden-columns:*`) have no single line to attach a comment to: they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead, keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`:
+Route- and model-level findings (`authz:*`, `policy:*`, `validation:*`, `agent-annotation:*`, `mass-assignment:*`, `hidden-columns:*`) have no single line to attach a comment to: they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead (`policy:*` also honours the marker in a comment above the action, since the action is where its fix goes), keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`:
 
 ```ts
 // config/audit.ts
