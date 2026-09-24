@@ -7,21 +7,23 @@ import {
   RESERVED_AGENT_TOOL_NAMES,
 } from '@guren/server'
 import type { AgentRouteMetadata, RouteDefinition } from '@guren/server'
-import { check, type CheckResult } from './check-result'
+import { check, type CheckEvidence, type CheckResult } from './check-result'
 import {
   collisionsReachedByName,
   controllerMethodFor,
+  manifestRouteTargets,
   mutatesRecords,
   parseControllerMethods,
+  routeSourceClasses,
   AUTHORIZE_CALL_PATTERN,
   AUTH_CALL_PATTERN,
   EMPTY_CONTROLLER_SCAN,
   INERTIA_CALL_PATTERN,
   type ControllerMethodInfo,
   type ControllerMethodScan,
-  withManifestControllerRefs,
+  type ControllerTarget,
 } from './controller-methods'
-import type { IntrospectSource } from './manifest-section'
+import { introspectedRoutes, judgedFromManifest, judgedFromSource, type IntrospectSource } from './manifest-section'
 import { fileExists } from './discovery'
 import { describeMethod } from './http-methods'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
@@ -37,10 +39,17 @@ export interface AgentRouteCheckOptions {
   /** Parse cache to read controller sources through, shared so files are not parsed twice. */
   cache?: ParseCache
   /**
-   * The run's introspection (RFC 0026 §5), asked for whenever an agent route names a controller:
-   * the manifest's reference says which class the route dispatches to, as `guren audit` reads it.
+   * The run's introspection (RFC 0026 §5), asked for whenever a definition declares agent metadata:
+   * the introspected app's agent routes are judged instead (a provider's included), each with the
+   * manifest's reference saying which class it dispatches to, as `guren audit` reads it.
    */
   introspect?: IntrospectSource
+}
+
+/** What the rules read of a route: a registered definition, or a manifest entry with its controller as the lookup takes it. */
+type AgentRouteDefinition = Pick<RouteDefinition, 'method' | 'path' | 'name' | 'agent' | 'capabilities' | 'resource'> & {
+  schemas?: { body?: unknown; output?: unknown }
+  controller?: ControllerTarget
 }
 
 /**
@@ -51,7 +60,7 @@ export interface AgentRouteCheckOptions {
 const AGENT_READ_ONLY_METHODS = new Set(['GET', 'QUERY'])
 
 interface AgentRoute {
-  definition: RouteDefinition
+  definition: AgentRouteDefinition
   agent: AgentRouteMetadata
   method: string
   /** The tool's identity: `toolName ?? name`. Undefined when the route has no name. */
@@ -72,7 +81,7 @@ function overridesReadOnly(route: AgentRoute): boolean {
   return route.agent.readOnlyHint === true && !AGENT_READ_ONLY_METHODS.has(route.method)
 }
 
-function describesOutput(definition: RouteDefinition): boolean {
+function describesOutput(definition: AgentRouteDefinition): boolean {
   return Boolean(definition.schemas?.output || definition.resource)
 }
 
@@ -311,7 +320,8 @@ function outputFinding(route: AgentRoute): CheckResult | undefined {
     + 'response hint so the tool description can carry the payload type.'
 
   if (route.methodInfo && INERTIA_CALL_PATTERN.test(route.methodInfo.body)) {
-    return check(
+    return {
+      ...check(
       `agent-route-inertia:${route.keySuffix}`,
       title,
       'warn',
@@ -320,7 +330,9 @@ function outputFinding(route: AgentRoute): CheckResult | undefined {
       + 'pass its component — a shape nothing checks and any UI change can move.',
       suggestion,
       route.methodInfo.filePath,
-    )
+      ),
+      evidence: 'static',
+    }
   }
 
   return check(
@@ -427,7 +439,7 @@ function approvalStoreFinding(
 // therefore left to the PR that lands that derivation.
 
 function toAgentRoute(
-  definition: RouteDefinition,
+  definition: AgentRouteDefinition,
   scan: ControllerMethodScan,
 ): AgentRoute | undefined {
   const { agent } = definition
@@ -482,28 +494,42 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
     }
   }
 
-  let agentDefinitions = definitions.filter((definition) => definition.agent)
+  const fromRoutesFile = definitions.filter((definition) => definition.agent)
+  if (fromRoutesFile.length === 0) return []
+
+  const cache = options.cache ?? new ParseCache()
+  // Started beside the introspection: whichever routes are judged, these name the same controllers.
+  const scanning = fromRoutesFile.some((definition) => definition.controller) ? parseControllerMethods(cwd, cache) : undefined
+  const introspected = await introspectedRoutes(options.introspect)
+  const agentDefinitions: AgentRouteDefinition[] = introspected.status === 'described'
+    ? manifestRouteTargets(
+      introspected.manifest,
+      await routeSourceClasses(cwd, introspected.manifest, resolve(cwd, routesFile), cache),
+    ).filter((route) => route.agent)
+    : fromRoutesFile
+  // The routes file's agent routes may all sit in a module the app never mounts.
   if (agentDefinitions.length === 0) return []
 
   // Skipped when every agent route is an inline handler: no body for any rule to read.
-  const withControllers = agentDefinitions.some((definition) => definition.controller)
-  const [scan, placed] = await Promise.all([
-    withControllers ? parseControllerMethods(cwd, options.cache) : EMPTY_CONTROLLER_SCAN,
-    withManifestControllerRefs(agentDefinitions, options.introspect, { cwd, routesFile: resolve(cwd, routesFile) }),
-  ])
-  agentDefinitions = placed
+  const scan = agentDefinitions.some((definition) => definition.controller)
+    ? await (scanning ?? parseControllerMethods(cwd, cache))
+    : EMPTY_CONTROLLER_SCAN
 
   const routes = agentDefinitions.flatMap((definition) => {
     const route = toAgentRoute(definition, scan)
     return route ? [route] : []
   })
-
+  // A verdict that read a controller body, or looked for one, is the scan's; the rest are the route's.
+  const fromBody = (route: AgentRoute): CheckEvidence | undefined => (route.definition.controller ? 'static' : undefined)
   const results: CheckResult[] = []
+  const push = (result: CheckResult | undefined, evidence?: CheckEvidence): void => {
+    if (result) results.push(evidence ? { ...result, evidence } : result)
+  }
 
   // Reported separately because the per-route could-not-verify message blames
   // the discovery set, not a file that is there and would not open.
   for (const filePath of scan.unreadableFiles) {
-    results.push(
+    push(
       check(
         `agent-route-controller-unreadable:${filePath}`,
         `${filePath} unreadable`,
@@ -513,6 +539,7 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
         `Check the file's permissions and that it still exists, then re-run: bunx guren check`,
         filePath,
       ),
+      'static',
     )
   }
 
@@ -521,7 +548,7 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
   // changes no verdict here and belongs to `guren audit`, and a route the manifest placed by
   // file reads its own class.
   for (const collision of collisionsReachedByName(scan, agentDefinitions.flatMap((definition) => (definition.controller ? [definition.controller] : [])))) {
-    results.push(
+    push(
       check(
         `agent-route-controller-collision:${collision.className}`,
         `${collision.className} name collision`,
@@ -532,6 +559,7 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
         + 'describe the other class.',
         `Rename one of the two ${collision.className} classes, then re-run: bunx guren check`,
       ),
+      'static',
     )
   }
 
@@ -539,46 +567,35 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
 
   // Only asked when a route declares approval — the scan reads every app source.
   if (routes.some((route) => route.agent.approval === 'required')) {
-    const approval = approvalStoreFinding(
-      routes,
-      await scanApprovalConfig(cwd, options.cache ?? new ParseCache()),
-    )
-    if (approval) results.push(approval)
+    push(approvalStoreFinding(routes, await scanApprovalConfig(cwd, cache)), 'static')
   }
 
   for (const route of routes) {
     // At most one naming finding per route, first applicable wins: the four
     // rules describe one defect with one fix, renaming the tool.
-    const nameResult =
-      nameFinding(route) ?? toolNameFinding(route) ?? reservedNameFinding(route) ?? portableNameFinding(route)
-    if (nameResult) results.push(nameResult)
-
-    const authorization = authorizationFinding(route)
-    if (authorization) results.push(authorization)
-
-    const honesty = readOnlyHonestyFinding(route)
-    if (honesty) results.push(honesty)
-
-    const output = outputFinding(route)
-    if (output) results.push(output)
-
-    const input = inputFinding(route)
-    if (input) results.push(input)
+    push(nameFinding(route) ?? toolNameFinding(route) ?? reservedNameFinding(route) ?? portableNameFinding(route))
+    push(authorizationFinding(route), fromBody(route))
+    push(readOnlyHonestyFinding(route), fromBody(route))
+    push(outputFinding(route))
+    push(inputFinding(route))
   }
 
-  if (results.length > 0) return results
+  if (results.length === 0) {
+    push(
+      check(
+        'agent-routes',
+        'Agent routes',
+        'pass',
+        `${routes.length} agent-exposed route${routes.length === 1 ? '' : 's'} checked: every tool name is `
+        + 'legal, portable across clients, unreserved and unique, every non-read-only tool carries '
+        + 'authorization evidence, every declared '
+        + 'readOnlyHint holds against the action, every approval-gated tool has a queue to record into, and '
+        + 'every route declares the schemas a tool is derived from. Nothing here validates the derived tools '
+        + 'themselves, or any behaviour outside the controller bodies this check reads.',
+      ),
+      routes.some((route) => route.definition.controller) ? 'static' : undefined,
+    )
+  }
 
-  return [
-    check(
-      'agent-routes',
-      'Agent routes',
-      'pass',
-      `${routes.length} agent-exposed route${routes.length === 1 ? '' : 's'} checked: every tool name is `
-      + 'legal, portable across clients, unreserved and unique, every non-read-only tool carries '
-      + 'authorization evidence, every declared '
-      + 'readOnlyHint holds against the action, every approval-gated tool has a queue to record into, and '
-      + 'every route declares the schemas a tool is derived from. Nothing here validates the derived tools '
-      + 'themselves, or any behaviour outside the controller bodies this check reads.',
-    ),
-  ]
+  return introspected.status === 'described' ? judgedFromManifest(results) : judgedFromSource(results, introspected.reason)
 }

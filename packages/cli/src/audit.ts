@@ -51,11 +51,13 @@ import {
   routeSourceClasses,
 } from './controller-methods'
 import type { CheckEvidence } from './check-result'
+import { manifestMiddlewareNames } from './app-routes'
 import { introspectApp } from './introspect'
 import {
   INTROSPECTION_UNAVAILABLE_FIX,
   introspectedRoutes,
   introspectionUnavailableMessage,
+  ROUTES_FLAG_NOT_INTROSPECTED,
   skippedRegistrars,
   type IntrospectSource,
 } from './manifest-section'
@@ -576,7 +578,7 @@ function auditedFromManifest(route: ReturnType<typeof manifestRouteTargets>[numb
     hasBodySchema: route.schemas.body !== undefined,
     validatesBody: Boolean(route.validatesBody),
     hasInlineMiddleware: Boolean(route.hasInlineMiddleware),
-    middlewareNames: route.middleware.flatMap((entry) => (entry.kind !== 'inline' && entry.name ? [entry.name] : [])),
+    middlewareNames: manifestMiddlewareNames(route),
     auth: manifestAuthVerdict(route),
   }
 }
@@ -681,7 +683,7 @@ async function auditIntrospectSource(
   definitions: RouteDefinition[] | undefined,
 ): Promise<IntrospectSource | undefined> {
   if (!options.introspect) return undefined
-  if (options.routesFile) return { skipped: '--routes names a routes file, and the introspected app describes its entry' }
+  if (options.routesFile) return { skipped: ROUTES_FLAG_NOT_INTROSPECTED }
   if (!definitions && await isDefinitelyAbsent(cwd, routesFile)) {
     return { skipped: `there is no routes file at ${relative(cwd, routesFile)}, so the app was not introspected` }
   }

@@ -550,6 +550,11 @@ const routeTypesCommand = defineCommand({
       description: 'Runtime page manifest module to write',
       valueHint: '.guren/pages.gen.ts',
     },
+    // Opt-in, unlike check's: the Vite watcher runs codegen on every edit (RFC 0026 §5).
+    introspect: {
+      type: 'boolean',
+      description: 'Take the route set from the introspected app, a provider\'s routes included (RFC 0026).',
+    },
     force: {
       type: 'boolean',
       description: 'Overwrite existing files',
@@ -568,6 +573,7 @@ const routeTypesCommand = defineCommand({
       routesFile: args.routes,
       outputFile: args.out,
       appRoot: args.app,
+      introspect: args.introspect === true,
       ...writerOptions,
     })
     if (pagesOutputPath) consola.success(`Page helpers generated at ${pagesOutputPath}`)
@@ -633,6 +639,7 @@ const codegenCommand = defineCommand({
       routesFile,
       outputFile: args.out,
       appRoot: args.app,
+      introspect: args.introspect === true,
       ...writerOptions,
     })
     const {
@@ -1804,6 +1811,12 @@ const contextCommand = defineCommand({
       valueHint: 'owner/name',
       description: 'Repository bare issue numbers belong to, instead of the origin remote (entity mode only).',
     },
+    // Same shape as check's `introspect` flag below.
+    introspect: {
+      type: 'boolean',
+      default: true,
+      description: 'List routes from the routes file only, without introspecting the app (RFC 0026).',
+    },
   },
   async run({ args }) {
     const cwd = args.app
@@ -1822,6 +1835,7 @@ const contextCommand = defineCommand({
         module: args.module,
         live: args.live,
         repo: args.repo,
+        introspect: args.introspect !== false,
       })
       return
     }
@@ -1830,6 +1844,7 @@ const contextCommand = defineCommand({
       cwd,
       json,
       routesFile,
+      introspect: args.introspect !== false,
     })
   },
 })

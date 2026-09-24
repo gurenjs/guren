@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import type { RouteDefinition } from '@guren/server'
+import type { AppManifest, RouteDefinition, RouteEntry } from '@guren/server'
 import {
   isZod3Schema,
   objectShape,
@@ -9,9 +9,11 @@ import {
   ZOD3_UNSUPPORTED_MESSAGE,
   type ZodSchemaLike,
 } from '@guren/server/internal/zod-compat'
-import { check, type CheckResult } from './check-result'
+import { joinRouteDefinitions } from './app-routes'
+import { check, type CheckEvidence, type CheckResult } from './check-result'
 import { fileExists } from './discovery'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
+import { introspectedRoutes, judgedFromManifest, judgedFromSource, type IntrospectSource } from './manifest-section'
 import { extractPathParamNames } from './utils'
 
 export interface RouteContractCheckOptions {
@@ -20,6 +22,12 @@ export interface RouteContractCheckOptions {
   routesFile?: string
   /** Definitions to check instead of loading them; absent, this loads its own. */
   definitions?: RouteDefinition[]
+  /**
+   * The run's introspection (RFC 0026 §5), asked for once a definition declares a params schema
+   * or a binding: the introspected app's routes are judged instead, the routes file's Zod standing
+   * in for a params schema the manifest cannot render whole.
+   */
+  introspect?: IntrospectSource
 }
 
 /** A params schema describes what arrives in the URL, never what a parse produces. */
@@ -41,9 +49,10 @@ function objectNode(schema: ZodSchemaLike): ZodSchemaLike | undefined {
 
 /**
  * Whether a request may leave this key out without the schema rejecting it. Over-reports
- * on purpose: under-reporting files a real 422 as advice. Currently identical to the JSON
- * Schema walker's `isOptional(schema, 'input')` but deliberately kept apart, so a fix
- * aimed at an OpenAPI document cannot silently reclassify a `guren check` finding.
+ * on purpose: under-reporting files a real 422 as advice. Kept apart from the JSON Schema
+ * walker's `isOptional(schema, 'input')`, whose `required` the manifest path reads instead;
+ * `tests/route-introspect.test.ts` pins the two equal, so a fix aimed at an OpenAPI
+ * document fails there rather than silently reclassifying a finding.
  */
 function permitsOmission(schema: ZodSchemaLike): boolean {
   const def = schema._def ?? {}
@@ -140,7 +149,10 @@ function renameSuggestion(what: string, pathParams: Set<string>): string {
  * path does not have. The reverse direction is harmless and not reported — zod strips
  * undeclared keys, leaving the parameter unvalidated as it is with no schema at all.
  */
-function checkRoute(route: RouteDefinition): CheckResult[] {
+function checkRoute(
+  route: Pick<RouteDefinition, 'method' | 'path' | 'bindings'>,
+  parsed: ParamKeysResult | undefined,
+): CheckResult[] {
   const pathParams = new Set(extractPathParamNames(route.path))
   const results: CheckResult[] = []
   const undeclared = (names: string[]): string =>
@@ -164,11 +176,9 @@ function checkRoute(route: RouteDefinition): CheckResult[] {
     )
   }
 
-  const paramsSchema = route.schemas?.params
-  if (!paramsSchema) return results
+  if (!parsed) return results
 
   const title = `${route.method} ${route.path} params schema`
-  const parsed = readParamKeys(paramsSchema)
   if ('unreadable' in parsed) {
     results.push(
       check(
@@ -222,12 +232,74 @@ function checkRoute(route: RouteDefinition): CheckResult[] {
   return results
 }
 
+/** A registered definition's params keys, read from its Zod; `undefined` when it declares none. */
+function staticParamKeys(definition: RouteDefinition): ParamKeysResult | undefined {
+  return definition.schemas?.params ? readParamKeys(definition.schemas.params) : undefined
+}
+
+/**
+ * A manifest route's params keys from its JSON Schema (RFC 0026 Decision 5): `properties` names
+ * them and `required` gives their severity. `short` says why the rendering may lack keys: not an
+ * object with properties (a nullable object, a bare `z.transform()` or `z.preprocess()`, an
+ * unreadable node), or a `schema-partial` note under it. The walker also drops some keys with no
+ * note (`z.undefined()`), which only the Zod shows.
+ */
+function manifestParamKeys(
+  entry: RouteEntry,
+  schema: NonNullable<RouteEntry['schemas']['params']>,
+  warnings: AppManifest['warnings'],
+): { keys: ParamKey[] } | { short: string } {
+  if ('unreadable' in schema) return { short: schema.unreadable }
+  if (schema.type !== 'object' || !schema.properties) return { short: 'the introspected app renders the params schema as something other than an object with properties' }
+  const route = `${entry.method} ${entry.path}`
+  const partial = warnings.find((warning) =>
+    warning.code === 'schema-partial' && warning.route === route && warning.message.startsWith(`${route} params`))
+  if (partial) return { short: `the introspected app renders the params schema only in part (${partial.message.replace(/\.$/u, '')})` }
+  const required = new Set(schema.required ?? [])
+  return { keys: Object.keys(schema.properties).map((name) => ({ name, omissible: !required.has(name) })) }
+}
+
+const keyNames = (result: { keys: ParamKey[] }): string => result.keys.map((key) => key.name).sort().join('\n')
+
+/**
+ * Which reading judges one manifest route's params: the manifest's, unless the routes file's Zod
+ * for the same route reads keys the rendering lacks, or the rendering is short of the schema;
+ * then the Zod (`static`), and with no Zod the schema is reported unreadable.
+ */
+function manifestParams(
+  entry: RouteEntry,
+  warnings: AppManifest['warnings'],
+  definition: RouteDefinition | undefined,
+): { parsed?: ParamKeysResult; evidence?: CheckEvidence } {
+  const declared = entry.schemas.params
+  if (!declared) return {}
+  const fromManifest = manifestParamKeys(entry, declared, warnings)
+  const fromZod = definition ? staticParamKeys(definition) : undefined
+  if ('short' in fromManifest) {
+    return fromZod
+      ? { parsed: fromZod, evidence: 'static' }
+      : { parsed: { unreadable: `${fromManifest.short.replace(/\.$/u, '')}, and the routes file registers no route to read its Zod from` } }
+  }
+  if (fromZod && !('keys' in fromZod && keyNames(fromZod) === keyNames(fromManifest))) return { parsed: fromZod, evidence: 'static' }
+  return { parsed: fromManifest }
+}
+
+function summary(count: number): CheckResult {
+  return check(
+    'route-contracts',
+    'Route contracts',
+    'pass',
+    `${count} route${count === 1 ? '' : 's'} checked: every params schema key and `
+    + 'model binding names a parameter its path declares.',
+  )
+}
+
 /**
  * Route contract checks: `params` and `bind` keys against the parameters their route path
- * declares (see {@link checkRoute} for why only that direction). Runs against loaded
- * definitions, not the routes file's AST: the registered path is the joined one, and a
- * params schema is usually imported from elsewhere. A clean run still emits one summary
- * pass, so it cannot be mistaken for a run that never happened.
+ * declares (see {@link checkRoute}). Runs against registered definitions, not the AST: the
+ * registered path is the joined one, and a params schema is usually imported from elsewhere.
+ * Introspected, the app's own routes are judged, a provider's included. A clean run still
+ * emits one summary pass, so it cannot be mistaken for a run that never happened.
  */
 export async function checkRouteContracts(options: RouteContractCheckOptions): Promise<CheckResult[]> {
   const { cwd, routesFile = DEFAULT_ROUTES_FILE } = options
@@ -254,16 +326,21 @@ export async function checkRouteContracts(options: RouteContractCheckOptions): P
     }
   }
 
-  const results = definitions.flatMap(checkRoute)
-  if (results.length > 0) return results
+  // Content-activated like RFC 0026 Part 2b: only a params schema or a binding starts the child.
+  const declaresContract = definitions.some((definition) =>
+    definition.schemas?.params || Object.keys(definition.bindings ?? {}).length > 0)
+  const introspected = declaresContract ? await introspectedRoutes(options.introspect) : undefined
 
-  return [
-    check(
-      'route-contracts',
-      'Route contracts',
-      'pass',
-      `${definitions.length} route${definitions.length === 1 ? '' : 's'} checked: every params schema key and `
-      + 'model binding names a parameter its path declares.',
-    ),
-  ]
+  if (introspected?.status === 'described') {
+    const { routes, warnings } = introspected.manifest
+    const joined = joinRouteDefinitions(routes, definitions)
+    const results = routes.flatMap((entry, index) => {
+      const { parsed, evidence } = manifestParams(entry, warnings, joined[index])
+      return checkRoute(entry, parsed).map((result) => (evidence ? { ...result, evidence } : result))
+    })
+    return judgedFromManifest(results.length > 0 ? results : [summary(routes.length)])
+  }
+
+  const results = definitions.flatMap((definition) => checkRoute(definition, staticParamKeys(definition)))
+  return judgedFromSource(results.length > 0 ? results : [summary(definitions.length)], introspected?.reason)
 }

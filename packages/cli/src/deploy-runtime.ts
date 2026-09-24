@@ -18,7 +18,7 @@ import { introspectApp, type Introspection } from './introspect'
 // The runtime warning in the session middleware names the target by the same label.
 import { SERVERLESS_RUNTIME_LABELS } from '@guren/server'
 import type { AppManifest, AuthProviderEntry, DriverMapEntry, SessionEntry } from '@guren/server'
-import { mapSection, readManifestSection, UNVERIFIED_SECTION_FIX, type ManifestSection } from './manifest-section'
+import { describeIntrospectionFailure, mapSection, readManifestSection, UNVERIFIED_SECTION_FIX, type ManifestSection } from './manifest-section'
 
 /**
  * Deploy targets whose runtime invalidates one or more of Guren's Bun-first
@@ -708,7 +708,7 @@ export async function analyzeDeployRuntime(cwd: string, options: DeployRuntimeOp
     unparsedFiles: unparsed,
     ...(introspection?.status === 'ok' ? { manifest: readDeployManifestFacts(introspection.manifest, drivers) } : {}),
     ...(introspection?.status === 'failed'
-      ? { introspectionFailure: `${introspection.reason}: ${introspection.message.split('\n')[0].replace(/\.$/u, '')}` }
+      ? { introspectionFailure: describeIntrospectionFailure(introspection) }
       : {}),
   }
 }

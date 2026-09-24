@@ -331,11 +331,20 @@ and cache store it selects, and whether a provider threw while registering.
 | `attachments-route-name:*` | How many registered routes carry that route name |
 | `attachments-serve-redirect:*` | The disks the engine serves by redirect, with each disk's driver from the storage manager |
 | `attachments-public-disk:*` | The disk the engine writes to. The disk's `root` still comes from source |
+| `route-contract-*` | Every registered route, a provider's or a plugin's included. A params schema's keys come from its JSON Schema (`properties`, and `required` for the severity); where that rendering is short of the schema (a nullable object, a `z.any()` or `z.undefined()` key), the routes file's Zod for the same route decides. A route only the app registers has no Zod: a short rendering is reported unreadable, and a key the rendering drops without a note (`z.undefined()`) goes unseen |
+| `agent-route-*` | Every route that declares `.agent()`, with its controller found by file and export |
+| `prototype-*` | Every named route, so a fixture entry naming a route a provider registers is not an orphan. The `createApp({ prototype })` wiring and the fixture itself are read from source |
 
 A run introspects only when some check needs it: the app declares a deploy
 plugin or the Lambda adapter, has a session config, calls
-`configureAttachments()`, has a model that mixes in `Attachable(...)`, or has
-a route that declares `.agent()` on a controller action. Each
+`configureAttachments()`, has a model that mixes in `Attachable(...)`, or its
+routes file registers a route with a params schema or a binding, a route that
+declares `.agent()`, or a `prototype` route (or the app has a prototype
+fixture). Each rule asks on its own content, so a route only the app registers
+is judged by the route contracts only when the routes file has a params schema
+or a binding, and by the agent-route rules only when it has an agent route. The
+route rules read the routes file under `--routes`, since the manifest
+describes the app's entry. Each
 run introspects at most once, and a `--changed` run that changed no source
 file does not introspect at all. The manifest is read with this environment's
 `.env`, so a store selected by an environment variable is judged at its local
@@ -397,9 +406,8 @@ you named. From the manifest:
   re-export. The body checks (`validateBody()`, `userOrFail()`) still read the
   action's source.
 
-`guren check` uses the same lookup for its agent-route rules, so it introspects
-an app whose agent routes name a controller. Raw SQL, secrets, mass assignment
-and CSRF exemptions are judged from source either way.
+`guren check` uses the same lookup for its agent-route rules. Raw SQL, secrets,
+mass assignment and CSRF exemptions are judged from source either way.
 
 Route-level findings carry `evidence`: `manifest` when the manifest alone
 decided them (a guard's capability, a body schema the route enforces), `static`
@@ -413,6 +421,46 @@ routes name. `--no-introspect` reads the routes file only:
 ```bash
 bunx guren audit --no-introspect
 ```
+
+### Route lists from the introspected app
+
+`guren context` lists the introspected app's routes, a provider's or a plugin's
+included, and leaves out a module under `modules/` that `createApp()` never
+mounts. Schema types are still rendered from the routes file, so a route only
+the app registers is listed without them. `--no-introspect`, or `--routes`,
+lists the routes file's routes. When the app cannot be introspected, the Routes
+section says why in one line (`routesNotIntrospected` in `--json`) and lists
+the routes file's routes. `guren context <Entity>` introspects only when a route
+reaches a controller class that two files declare, and never with `--routes`.
+
+`guren doctor`'s `prototype-routes` counts the introspected app's routes once a
+routes file passes the `prototype` handler.
+
+`guren codegen` reads the routes file unless you pass `--introspect`. The Vite
+plugin runs codegen on every edit, and the default codegen is the reference
+`guren check`, `doctor` and `guren gate` work from. With `--introspect` the app decides
+which routes exist and in which order, and each route is rendered from the
+routes file's Zod. An app whose routes all come from the routes file and its
+modules gets the same files byte for byte, unless two routes share a name and
+`createApp({ modules })` lists the modules in another order than their
+directories sort. A route only the app registers is added without schema types,
+with a warning naming it, and an agent tool on it comes from the manifest; when
+two routes claim one tool name, the one the running app registers first wins,
+as at runtime. The output lasts until the next codegen without the flag, the
+Vite watcher's included. In an app whose agent tools all come from a provider,
+`check` and `doctor` report the `.guren/agents.gen.ts` it wrote as stale, and
+the `guren codegen` they name removes it. When the routes file derives tools of
+its own, they only ask whether the file exists, so the extra tools pass unseen. When the app cannot be introspected, or `--routes` names a
+file other than the one `check` finds as the entry, codegen writes from the
+routes file and says why:
+
+```bash
+bunx guren codegen --introspect
+```
+
+`guren spec:generate` and `check --spec` always read the routes file. The views
+are committed, and `guren gate` regenerates them in process without
+introspecting, so a view written from the manifest would read as drift there.
 
 ### Agent-exposed routes
 
