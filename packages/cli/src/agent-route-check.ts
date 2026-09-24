@@ -9,7 +9,6 @@ import {
 import type { AgentRouteMetadata, RouteDefinition } from '@guren/server'
 import { check, type CheckResult } from './check-result'
 import {
-  attachControllerRefs,
   collisionsReachedByName,
   controllerMethodFor,
   mutatesRecords,
@@ -20,8 +19,9 @@ import {
   INERTIA_CALL_PATTERN,
   type ControllerMethodInfo,
   type ControllerMethodScan,
+  withManifestControllerRefs,
 } from './controller-methods'
-import { introspectedRoutes, type IntrospectSource } from './manifest-section'
+import type { IntrospectSource } from './manifest-section'
 import { fileExists } from './discovery'
 import { describeMethod } from './http-methods'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
@@ -490,11 +490,7 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
     ? await parseControllerMethods(cwd, options.cache)
     : EMPTY_CONTROLLER_SCAN
 
-  const named = (list: RouteDefinition[]) => list.flatMap((definition) => (definition.controller ? [definition.controller] : []))
-  if (collisionsReachedByName(scan, named(agentDefinitions)).length > 0) {
-    const introspected = await introspectedRoutes(options.introspect)
-    if (introspected.status === 'described') agentDefinitions = attachControllerRefs(agentDefinitions, introspected.manifest)
-  }
+  agentDefinitions = await withManifestControllerRefs(agentDefinitions, scan, options.introspect)
 
   const routes = agentDefinitions.flatMap((definition) => {
     const route = toAgentRoute(definition, scan)
@@ -523,7 +519,7 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
   // controllers share it. Narrowed to what agent routes reach by name: any other collision
   // changes no verdict here and belongs to `guren audit`, and a route the manifest placed by
   // file reads its own class.
-  for (const collision of collisionsReachedByName(scan, named(agentDefinitions))) {
+  for (const collision of collisionsReachedByName(scan, agentDefinitions.flatMap((definition) => (definition.controller ? [definition.controller] : [])))) {
     results.push(
       check(
         `agent-route-controller-collision:${collision.className}`,

@@ -24,19 +24,17 @@ import {
   type ModelRelationship,
 } from './model-parser'
 import {
-  attachControllerRefs,
   authTypeArgumentPattern,
   classActionMembers,
-  collisionsReachedByName,
   controllerMethodFor,
   EMPTY_CONTROLLER_SCAN,
   parseControllerMethods,
   type ControllerMethodInfo,
   type ControllerMethodScan,
   type ControllerTarget,
+  withManifestControllerRefs,
 } from './controller-methods'
 import { introspectApp } from './introspect'
-import { introspectedRoutes } from './manifest-section'
 import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
 import { ParseCache } from './parse-cache'
 import { importsByLocal, specifierBase } from './schema-binding'
@@ -397,11 +395,7 @@ export async function generateEntityContext(
     const scan = candidates.some((def) => def.controller && def.controller.name !== controllerName)
       ? await parseControllerMethods(cwd, cache)
       : EMPTY_CONTROLLER_SCAN
-    const named = candidates.flatMap((def) => (def.controller && def.controller.name !== controllerName ? [def.controller] : []))
-    if (options.introspect && collisionsReachedByName(scan, named).length > 0) {
-      const introspected = await introspectedRoutes(() => introspectApp(cwd))
-      if (introspected.status === 'described') candidates = attachControllerRefs(candidates, introspected.manifest)
-    }
+    if (options.introspect) candidates = await withManifestControllerRefs(candidates, scan, () => introspectApp(cwd))
     const modelFile = resolve(cwd, match.relPath)
 
     const referencesModel = async (method: ControllerMethodInfo): Promise<boolean> => {

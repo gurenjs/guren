@@ -560,9 +560,10 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 > **Amended in implementation (Part 2c):**
 >
 > - `parseControllerMethods()` keeps its name-keyed `methods`, `classFiles` and
->   `collisions` and adds `byExport` (`file#export.method`, one entry per name the
->   file exports the class under: its own, `default`, an `export { X as Y }`
->   alias) and `declarations` (every class, same-named ones included). The file
+>   `collisions` and adds `byExport` (`file#export` to the class, whose action
+>   then keys the body: `file#export.method`; one entry per name the file exports
+>   the class under: its own, `default`, an `export { X as Y }` alias) and
+>   `declarations` (every class, same-named ones included). The file
 >   is POSIX-relative, the form the child writes. `controllerMethodFor()` is the
 >   one lookup: a reference resolved by `identity` reads its own file, and one
 >   the scan cannot place there (the child picked a file that re-exports the
@@ -602,8 +603,9 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 > - `agent-route-check.ts` and `entity-context.ts` keep the registered definitions
 >   (moving them to `manifest.routes` is 2d) and take the manifest's references
 >   through `attachControllerRefs()`, matched on method, path, class and action,
->   since the manifest lists the whole app's routes in its own order. They ask
->   for the introspection only when a route names a class two files declare.
+>   since the manifest lists the whole app's routes in its own order, through the
+>   one bridge `withManifestControllerRefs()`, which asks for the introspection
+>   only when a route names a class two files declare.
 >   `guren check` passes its run's introspection; `generateEntityContext()` takes
 >   `introspect: true`, and the `guren context` command is left to 2d.
 > - `plan/app-state.ts` stays name-keyed. A plan element names a class and its

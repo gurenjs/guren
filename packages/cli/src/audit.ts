@@ -1,15 +1,16 @@
 import { resolve, relative } from 'node:path'
-import { access, readFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { consola } from 'consola'
 import {
   collectFiles,
   discoverModelFiles,
   classNameFromPath,
+  isDefinitelyAbsent,
   listModuleNames,
 } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
 import { routesEntryOrDefault } from './route-registrar'
-import type { AppManifest, MiddlewareEntry, RouteDefinition, RouteEntry } from '@guren/server'
+import { deriveAgentTools, type AppManifest, type RouteDefinition, type RouteEntry } from '@guren/server'
 import {
   classifyFindingKey,
   primaryClassificationId,
@@ -41,14 +42,24 @@ import {
   type ControllerNameCollision,
   type ControllerTarget,
 } from './controller-methods'
-import { deriveAgentTools } from '@guren/server'
 import type { CheckEvidence } from './check-result'
 import { introspectApp } from './introspect'
-import { introspectedRoutes, type IntrospectSource } from './manifest-section'
+import {
+  INTROSPECTION_UNAVAILABLE_FIX,
+  introspectedRoutes,
+  introspectionUnavailableMessage,
+  type IntrospectSource,
+} from './manifest-section'
 import { describeMethod } from './http-methods'
 import { parseSchemaTableColumns } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
-import { agentToolActions, auditAiLocalTools, describeLocalTool, type AiLocalToolListing } from './ai-local-tools-audit'
+import {
+  agentToolActions,
+  auditAiLocalTools,
+  describeLocalTool,
+  type AgentToolAction,
+  type AiLocalToolListing,
+} from './ai-local-tools-audit'
 import { auditCsrfExemptions, DECLARE_CALL_PATTERN, type CsrfExemptionScan } from './csrf-exemption-audit'
 
 export type AuditStatus = 'pass' | 'warn' | 'fail' | 'ignored'
@@ -163,7 +174,7 @@ export function authMiddlewareVerdict(
 }
 
 /** A manifest verdict and what it names: the matching aliases, the unresolved names, or the abilities checked. */
-export interface ManifestAuthVerdict {
+interface ManifestAuthVerdict {
   verdict: AuthMiddlewareVerdict
   names: string[]
 }
@@ -173,7 +184,7 @@ export interface ManifestAuthVerdict {
  * groups expanded by the app that registered them. The auth-like name match applies to named
  * aliases and groups only, as on the static path; an inline handler's name is its function's.
  */
-export function manifestAuthVerdict(route: Pick<RouteEntry, 'middleware'>): ManifestAuthVerdict {
+function manifestAuthVerdict(route: Pick<RouteEntry, 'middleware'>): ManifestAuthVerdict {
   const { middleware } = route
   // First: a route naming an unregistered alias does not mount, so no guard beside it protects anything.
   const unresolved = middleware.flatMap((entry) =>
@@ -186,7 +197,7 @@ export function manifestAuthVerdict(route: Pick<RouteEntry, 'middleware'>): Mani
     entry.kind !== 'inline' && entry.name && AUTH_MIDDLEWARE_PATTERN.test(entry.name) ? [entry.name] : [])
   if (named.length > 0) return { verdict: 'unverified-auth-name', names: named }
 
-  const authorizing = middleware.filter((entry: MiddlewareEntry) => entry.capabilities.authorization)
+  const authorizing = middleware.filter((entry) => entry.capabilities.authorization)
   if (authorizing.length > 0) {
     return { verdict: 'authorization-only', names: authorizing.map((entry) => entry.ability ?? '') }
   }
@@ -266,8 +277,17 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   // Kicked off first so the registry round-trip overlaps the local parsing.
   const dependencyScanOutput = options.deps ? startDependencyScan(cwd) : null
 
-  const scan = await parseControllerMethods(cwd)
-  const routes = await loadAuditRoutes(cwd, options)
+  // The source scans read neither the routes nor the controllers, so they run while the
+  // introspection child does; their findings are appended in the order the report has always had.
+  const sourceFindings: AuditFinding[] = []
+  const sourceScans = (async () => {
+    await auditSourceFiles(cwd, sourceFindings)
+    await auditModels(cwd, sourceFindings)
+    return auditCsrfExemptions(cwd, sourceFindings)
+  })()
+  sourceScans.catch(() => {})
+
+  const [scan, routes] = await Promise.all([parseControllerMethods(cwd), loadAuditRoutes(cwd, options)])
   const manifest = routes.manifest
 
   // Reported only where a verdict could have read through the shared name: every
@@ -298,9 +318,8 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
 
   if (routes.analyzed) auditRoutes(routes.audited, scan, manifest, findings)
   auditForceWrites(scan, manifest !== undefined, findings)
-  await auditSourceFiles(cwd, findings)
-  await auditModels(cwd, findings)
-  const csrfExemptionScan = await auditCsrfExemptions(cwd, findings)
+  const csrfExemptionScan = await sourceScans
+  findings.push(...sourceFindings)
   const aiLocalTools = await auditAiLocalTools(cwd, routes.agentActions, scan, findings)
 
   const dependencyScan: DependencyScan = dependencyScanOutput
@@ -553,7 +572,7 @@ interface AuditRoutes {
   /** Why the routes file was read when introspection was asked for. */
   staticReason?: string
   loadFindings: AuditFinding[]
-  agentActions: ReturnType<typeof agentToolActions>
+  agentActions: AgentToolAction[]
 }
 
 /**
@@ -575,7 +594,7 @@ async function loadAuditRoutes(cwd: string, options: RunAuditOptions): Promise<A
   }
 
   const introspect = await auditIntrospectSource(cwd, options, routesFile, definitions)
-  const routes = await introspectedRoutes(introspect.source)
+  const routes = await introspectedRoutes(introspect)
   if (routes.status === 'described') {
     const { manifest } = routes
     return {
@@ -587,9 +606,17 @@ async function loadAuditRoutes(cwd: string, options: RunAuditOptions): Promise<A
     }
   }
 
-  const unavailable = await introspect.failure
-  if (unavailable) loadFindings.push(unavailable)
-  const staticReason = routes.reason ?? introspect.reason
+  const failed = typeof introspect === 'function' ? await introspect() : undefined
+  if (failed?.status === 'failed') {
+    loadFindings.push(finding(
+      'introspection-unavailable',
+      'Introspection',
+      'warn',
+      introspectionUnavailableMessage(failed, 'The route-level checks were judged from the routes file instead.'),
+      INTROSPECTION_UNAVAILABLE_FIX,
+    ))
+  }
+  const staticReason = routes.reason
 
   if (!definitions) {
     loadFindings.push(
@@ -627,46 +654,23 @@ async function loadAuditRoutes(cwd: string, options: RunAuditOptions): Promise<A
   }
 }
 
-interface AuditIntrospection {
-  source?: IntrospectSource
-  /** Why the app was not introspected though it was asked. */
-  reason?: string
-  /** The one finding a failed introspection leaves, resolved once the run settles. */
-  failure: Promise<AuditFinding | undefined>
-}
-
+/** The run's introspection, or why this audit reads the routes file although introspection was asked for. */
 async function auditIntrospectSource(
   cwd: string,
   options: RunAuditOptions,
   routesFile: string,
   definitions: RouteDefinition[] | undefined,
-): Promise<AuditIntrospection> {
-  const none: AuditIntrospection = { failure: Promise.resolve(undefined) }
-  if (!options.introspect) return none
-  if (options.routesFile) return { ...none, reason: '--routes names a routes file, and the introspected app describes its entry' }
-  if (!(await access(routesFile).then(() => true, () => false))) {
-    return { ...none, reason: `there is no routes file at ${relative(cwd, routesFile)}, so the app was not introspected` }
+): Promise<IntrospectSource | undefined> {
+  if (!options.introspect) return undefined
+  if (options.routesFile) return { skipped: '--routes names a routes file, and the introspected app describes its entry' }
+  if (!definitions && await isDefinitelyAbsent(cwd, routesFile)) {
+    return { skipped: `there is no routes file at ${relative(cwd, routesFile)}, so the app was not introspected` }
   }
   // A routes file that would not load may still register through the app, so it does not skip the run.
   if (definitions && !definitions.some(isJudgedRoute)) {
-    return { ...none, reason: 'no route mutates or carries a body, so the app was not introspected' }
+    return { skipped: 'no route mutates or carries a body, so the app was not introspected' }
   }
-
-  const run = introspectApp(cwd)
-  return {
-    source: () => run,
-    failure: run.then((result) => {
-      if (result.status !== 'failed') return undefined
-      const reason = result.message.split('\n')[0]!.replace(/\.?$/u, '.')
-      return finding(
-        'introspection-unavailable',
-        'Introspection',
-        'warn',
-        `The app could not be introspected (${result.reason}): ${reason} The route-level checks were judged from the routes file instead.`,
-        'Run `bunx guren introspect` to see the failure, or pass --no-introspect to skip it.',
-      )
-    }),
-  }
+  return () => introspectApp(cwd)
 }
 
 /** A route the validation or authentication rule judges. */
@@ -689,11 +693,6 @@ function auditRoutes(
 
   for (const route of routes) {
     const judged = findings.length
-    judgeRoute(route)
-    for (const entry of findings.slice(judged)) entry.evidence ??= 'static'
-  }
-
-  function judgeRoute(route: AuditedRoute): void {
     const method = route.method.toUpperCase()
     const { safe, bodyCarrying } = describeMethod(method)
     // No shared skip here on purpose: each phase gates on its own predicate, so
@@ -930,8 +929,9 @@ function auditRoutes(
         )
       }
     }
-  }
 
+    for (const entry of findings.slice(judged)) entry.evidence ??= 'static'
+  }
 }
 
 const SCAN_DIRECTORIES = ['app', 'src', 'routes', 'config']

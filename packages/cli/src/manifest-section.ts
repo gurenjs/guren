@@ -70,12 +70,11 @@ export async function introspectedSection<K extends ManifestSectionKey>(
   introspect: IntrospectSource | undefined,
   key: K,
 ): Promise<IntrospectedSection<AppManifest[K]>> {
-  if (introspect && 'skipped' in introspect) return { status: 'static', reason: introspect.skipped }
-  const introspection = await introspect?.()
-  if (introspection?.status !== 'ok') return { status: 'static' }
-  const section = readManifestSection(introspection.manifest, key)
+  const routes = await introspectedRoutes(introspect)
+  if (routes.status === 'static') return routes
+  const section = readManifestSection(routes.manifest, key)
   return section.status === 'described'
-    ? { status: 'described', value: section.value, manifest: introspection.manifest }
+    ? { status: 'described', value: section.value, manifest: routes.manifest }
     : { status: 'static', reason: section.reason }
 }
 
@@ -92,6 +91,15 @@ export async function introspectedRoutes(
   if (introspection?.status !== 'ok') return { status: 'static' }
   const thrown = thrownProviders(introspection.manifest)
   return thrown ? { status: 'static', reason: thrown } : { status: 'described', manifest: introspection.manifest }
+}
+
+/** The remedy the one `introspection-unavailable` line carries, in `guren check` and `guren audit` alike. */
+export const INTROSPECTION_UNAVAILABLE_FIX = 'Run `bunx guren introspect` to see the failure, or pass --no-introspect to skip it.'
+
+/** That line's message: the failure's first line, then what the command judged instead. */
+export function introspectionUnavailableMessage(failure: Extract<Introspection, { status: 'failed' }>, judgedInstead: string): string {
+  const reason = failure.message.split('\n')[0]!.replace(/\.?$/u, '.')
+  return `The app could not be introspected (${failure.reason}): ${reason} ${judgedInstead}`
 }
 
 /** Results a check judged from source, naming why the manifest was not used when there is a reason. */

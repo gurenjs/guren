@@ -13,6 +13,8 @@ import { classNameFromPath, discoverControllerFiles, toPosixRelative } from './d
 import { extractClassDeclaration } from './model-parser'
 import { ParseCache } from './parse-cache'
 import { memberKeyName, walk } from './ast-walk'
+import { introspectedRoutes, type IntrospectSource } from './manifest-section'
+import { specifierName } from './route-registrar'
 import { escapeRegExp } from './utils'
 
 /**
@@ -56,10 +58,10 @@ export interface ControllerMethodScan {
   /** `ClassName.method` → body. Last file scanned wins on a collision. */
   methods: Map<string, ControllerMethodInfo>
   /**
-   * `file#export.method` → body (RFC 0026 §5), one entry per export name: what a route whose
+   * `file#export` → the class (RFC 0026 §5), one entry per export name: what a route whose
    * `ControllerRef` resolved by identity is judged against, so no collision can reach it.
    */
-  byExport: Map<string, ControllerMethodInfo>
+  byExport: Map<string, ControllerDeclaration>
   /** Every class every controller file declares, in scan order; `methods` keeps only the last of a name. */
   declarations: ControllerDeclaration[]
   /** Every same-named pair. A consumer reports only those a route reached by name ({@link collisionsReachedByName}). */
@@ -321,7 +323,7 @@ export async function parseControllerMethods(
   cache?: ParseCache,
 ): Promise<ControllerMethodScan> {
   const methods = new Map<string, ControllerMethodInfo>()
-  const byExport = new Map<string, ControllerMethodInfo>()
+  const byExport = new Map<string, ControllerDeclaration>()
   const declarations: ControllerDeclaration[] = []
   const collisions: ControllerNameCollision[] = []
   const unreadableFiles: string[] = []
@@ -365,6 +367,7 @@ export async function parseControllerMethods(
       const exportNames = exportNamesOf(node, classDecl)
       const declaration: ControllerDeclaration = { className, file: posixPath, exportNames, methods: new Map() }
       declarations.push(declaration)
+      for (const exportName of exportNames) byExport.set(`${posixPath}#${exportName}`, declaration)
 
       for (const { name, body } of classActionMembers(classDecl)) {
         const info: ControllerMethodInfo = {
@@ -374,7 +377,6 @@ export async function parseControllerMethods(
         }
         declaration.methods.set(name, info)
         methods.set(`${className}.${name}`, info)
-        for (const exportName of exportNames) byExport.set(`${posixPath}#${exportName}.${name}`, info)
       }
     }
   }
@@ -400,8 +402,7 @@ function classExportNames(body: Statement[]): (node: Statement, classDecl: Class
     if (node.type !== 'ExportNamedDeclaration' || node.source) continue
     for (const specifier of node.specifiers) {
       if (specifier.type !== 'ExportSpecifier') continue
-      const exported = specifier.exported.type === 'Identifier' ? specifier.exported.name : specifier.exported.value
-      add(specifier.local.name, exported)
+      add(specifier.local.name, specifierName(specifier.exported))
     }
   }
 
@@ -438,13 +439,10 @@ export interface ControllerMethodLookup {
 export function controllerMethodFor(scan: ControllerMethodScan, controller: ControllerTarget): ControllerMethodLookup {
   const { file, exportName } = controller
   if (controller.resolved === 'identity' && file && exportName) {
-    const info = scan.byExport.get(`${file}#${exportName}.${controller.action}`)
-    if (info) return { info, by: 'identity' }
-    // The class is there and declares no such action (inherited, or missing), or its file would
-    // not read or parse: another class's body is no answer either way.
-    if (scan.declarations.some((declaration) => declaration.file === file && declaration.exportNames.includes(exportName))) {
-      return { info: undefined, by: 'identity' }
-    }
+    // A placed class without the action (inherited, or missing) has no body, nor does one whose
+    // file would not read or parse: another class's body is no answer either way.
+    const declaration = scan.byExport.get(`${file}#${exportName}`)
+    if (declaration) return { info: declaration.methods.get(controller.action), by: 'identity' }
     if ([...scan.unreadableFiles, ...scan.unparsedFiles].some((skipped) => skipped.split(sep).join('/') === file)) {
       return { info: undefined, by: 'identity' }
     }
@@ -457,6 +455,7 @@ export function collisionsReachedByName(
   scan: ControllerMethodScan,
   controllers: Iterable<ControllerTarget>,
 ): ControllerNameCollision[] {
+  if (scan.collisions.length === 0) return []
   const byName = new Set<string>()
   for (const controller of controllers) {
     if (controllerMethodFor(scan, controller).by === 'name') byName.add(controller.name)
@@ -484,6 +483,22 @@ export function attachControllerRefs<T extends { method: string; path: string; c
     const ref = definition.controller && refs.get(routeControllerKey(definition, definition.controller))
     return ref ? { ...definition, controller: ref } : definition
   })
+}
+
+/**
+ * Registered definitions with the manifest's references attached, asking for the introspection
+ * only when a route among `definitions` reaches a class two files declare by name: the one bridge
+ * for consumers that still judge the routes file's definitions.
+ */
+export async function withManifestControllerRefs<T extends { method: string; path: string; controller?: { name: string; action: string } }>(
+  definitions: T[],
+  scan: ControllerMethodScan,
+  introspect: IntrospectSource | undefined,
+): Promise<T[]> {
+  const controllers = definitions.flatMap((definition) => (definition.controller ? [definition.controller] : []))
+  if (collisionsReachedByName(scan, controllers).length === 0) return definitions
+  const introspected = await introspectedRoutes(introspect)
+  return introspected.status === 'described' ? attachControllerRefs(definitions, introspected.manifest) : definitions
 }
 
 function routeControllerKey(route: { method: string; path: string }, controller: { name: string; action: string }): string {
