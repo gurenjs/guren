@@ -24,10 +24,8 @@ export function readManifestSection<K extends ManifestSectionKey>(
   manifest: AppManifest,
   key: K,
 ): ManifestSection<AppManifest[K]> {
-  const thrown = manifest.providers.filter((provider) => provider.register === 'threw').map((provider) => provider.name)
-  if (thrown.length > 0) {
-    return { status: 'unverified', reason: `${thrown.join(', ')} threw in register(), so what it configures is unknown` }
-  }
+  const thrown = thrownProviders(manifest)
+  if (thrown) return { status: 'unverified', reason: thrown }
   // A config left unbound for an env key this environment does not set. Checked before the value:
   // an unbound `session` is still described, as the middleware's `source: 'none'` fallback.
   // A warning with no `key` is an older server's, and may be any section.
@@ -43,6 +41,12 @@ export function readManifestSection<K extends ManifestSectionKey>(
     return { status: 'unverified', reason: `"${key}" is bound, but the introspected app could not describe it` }
   }
   return { status: 'described', value }
+}
+
+/** Why nothing a provider registers can be trusted, or `undefined` when every provider registered. */
+function thrownProviders(manifest: AppManifest): string | undefined {
+  const thrown = manifest.providers.filter((provider) => provider.register === 'threw').map((provider) => provider.name)
+  return thrown.length > 0 ? `${thrown.join(', ')} threw in register(), so what it configures is unknown` : undefined
 }
 
 export function mapSection<T, U>(section: ManifestSection<T>, map: (value: T) => U): ManifestSection<U> {
@@ -73,6 +77,21 @@ export async function introspectedSection<K extends ManifestSectionKey>(
   return section.status === 'described'
     ? { status: 'described', value: section.value, manifest: introspection.manifest }
     : { status: 'static', reason: section.reason }
+}
+
+/**
+ * The introspected app's routes, for a check that judges them (RFC 0026 §5), asked for only now.
+ * A provider that threw falls back to source like a section does: it may have been the one to
+ * register a middleware alias the routes name, which the manifest would then call unresolved.
+ */
+export async function introspectedRoutes(
+  introspect: IntrospectSource | undefined,
+): Promise<{ status: 'described'; manifest: AppManifest } | { status: 'static'; reason?: string }> {
+  if (introspect && 'skipped' in introspect) return { status: 'static', reason: introspect.skipped }
+  const introspection = await introspect?.()
+  if (introspection?.status !== 'ok') return { status: 'static' }
+  const thrown = thrownProviders(introspection.manifest)
+  return thrown ? { status: 'static', reason: thrown } : { status: 'described', manifest: introspection.manifest }
 }
 
 /** Results a check judged from source, naming why the manifest was not used when there is a reason. */

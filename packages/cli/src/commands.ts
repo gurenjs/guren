@@ -2032,6 +2032,12 @@ const auditCommand = defineCommand({
       default: true,
       description: 'Scan dependencies via bun audit (requires registry access). Disable with --no-deps.',
     },
+    // Positive on purpose, so citty's negation lands on this key; `default: true` prints `--no-introspect`.
+    introspect: {
+      type: 'boolean',
+      default: true,
+      description: 'Judge routes from the routes file only, without introspecting the app (RFC 0026).',
+    },
   },
   async run({ args }) {
     const report = await runAudit({
@@ -2039,6 +2045,7 @@ const auditCommand = defineCommand({
       routesFile: args.routes,
       auditConfigFile: args['audit-config'],
       deps: args.deps,
+      introspect: args.introspect !== false,
     })
 
     if (args.json) {

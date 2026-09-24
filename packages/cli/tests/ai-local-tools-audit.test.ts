@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import type { RouteDefinition } from '@guren/core'
-import { auditAiLocalTools, describeLocalTool } from '../src/ai-local-tools-audit'
+import { deriveAgentTools, type RouteDefinition } from '@guren/core'
+import { agentToolActions, auditAiLocalTools, describeLocalTool } from '../src/ai-local-tools-audit'
 import type { AuditFinding } from '../src/audit'
 import { parseControllerMethods } from '../src/controller-methods'
 import { createTempWorkspace, writeWorkspaceFiles, type TempWorkspace } from './helpers'
@@ -60,8 +60,9 @@ afterEach(async () => {
 async function run(files: Record<string, string>, definitions: RouteDefinition[] = ROUTES) {
   await writeWorkspaceFiles(workspace.dir, { ...MODELS, ...files })
   const findings: AuditFinding[] = []
-  const { methods } = await parseControllerMethods(workspace.dir)
-  const listings = await auditAiLocalTools(workspace.dir, definitions, methods, findings)
+  const scan = await parseControllerMethods(workspace.dir)
+  const actions = agentToolActions(deriveAgentTools(definitions).tools, definitions)
+  const listings = await auditAiLocalTools(workspace.dir, actions, scan, findings)
   return { findings, listings }
 }
 

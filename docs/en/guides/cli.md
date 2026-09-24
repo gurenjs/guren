@@ -364,6 +364,43 @@ bunx guren doctor --no-introspect
 The deploy builds run the same verdicts, with introspection capped at 10
 seconds, and print one line naming what each was judged from.
 
+`guren audit` reads the introspected app for its route-level rules
+(`validation:*`, `authz:*`, `agent-annotation:*`). It introspects only when the
+routes file registers a route that mutates or carries a body, and never with
+`--routes`, since the manifest describes the app's entry rather than the file
+you named. From the manifest:
+
+- A middleware alias arrives resolved, wherever the app registers it: a route
+  behind an `auth` alias that a provider registers passes `authz:*`, where the
+  routes file loaded on its own reports a guard it does not recognize.
+- A chain that authorizes but never authenticates stays a warning, and the
+  message names the ability it checks. A guest request reaches the gate with a
+  `null` user, and a policy may let it through.
+- A name no alias or group registers anywhere in the app is reported as
+  unresolved. Mounting such a route fails at boot.
+- A controller is found by its file and export. Two modules may each declare a
+  `ReportController`; each route is judged against its own class, and
+  `controller-name-collision:*` is reported only for a route the manifest could
+  not place, such as a class declared inside the routes file. The body checks
+  (`validateBody()`, `userOrFail()`) still read the action's source.
+
+`guren check` uses the same lookup for its agent-route rules when an agent
+route names a class two files declare. Raw SQL, secrets, mass assignment and
+CSRF exemptions are judged from source either way.
+
+Route-level findings carry `evidence`: `manifest` when the manifest alone
+decided them (a guard's capability, a body schema the route enforces), `static`
+when they read a controller body or the routes file. The JSON report's
+`routeSource` says which was read, with the reason when it was the routes file.
+A failed introspection adds one `introspection-unavailable` warning, which does
+not change the exit code, and a provider that threw in `register()` sends the
+rules back to the routes file, since that provider may register an alias the
+routes name. `--no-introspect` reads the routes file only:
+
+```bash
+bunx guren audit --no-introspect
+```
+
 ### Agent-exposed routes
 
 Routes that declare `.agent()` metadata (see [Routing](./routing.md)) are checked by `check` and treated more strictly by `audit`. The rules run in the normal `check` suite and are content-activated: an app with no agent routes contributes no findings, and no controller is scanned.

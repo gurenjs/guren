@@ -1,5 +1,5 @@
 import { resolve, relative } from 'node:path'
-import { readFile } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import { consola } from 'consola'
 import {
   collectFiles,
@@ -9,7 +9,7 @@ import {
 } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
 import { routesEntryOrDefault } from './route-registrar'
-import type { RouteDefinition } from '@guren/server'
+import type { AppManifest, MiddlewareEntry, RouteDefinition, RouteEntry } from '@guren/server'
 import {
   classifyFindingKey,
   primaryClassificationId,
@@ -29,18 +29,26 @@ import { parseSourceFile } from './parse-cache'
 // produces the bodies, inside the reach of controller-surface.test.ts.
 import {
   accessorCallPattern,
+  collisionsReachedByName,
   controllerMembers,
+  controllerMethodFor,
   mutatesRecords,
   parseControllerMethods,
   AUTH_CALL_PATTERN,
   FORCE_WRITE_PATTERN,
   type ControllerMethodInfo,
+  type ControllerMethodScan,
   type ControllerNameCollision,
+  type ControllerTarget,
 } from './controller-methods'
+import { deriveAgentTools } from '@guren/server'
+import type { CheckEvidence } from './check-result'
+import { introspectApp } from './introspect'
+import { introspectedRoutes, type IntrospectSource } from './manifest-section'
 import { describeMethod } from './http-methods'
 import { parseSchemaTableColumns } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
-import { auditAiLocalTools, describeLocalTool, type AiLocalToolListing } from './ai-local-tools-audit'
+import { agentToolActions, auditAiLocalTools, describeLocalTool, type AiLocalToolListing } from './ai-local-tools-audit'
 import { auditCsrfExemptions, DECLARE_CALL_PATTERN, type CsrfExemptionScan } from './csrf-exemption-audit'
 
 export type AuditStatus = 'pass' | 'warn' | 'fail' | 'ignored'
@@ -57,6 +65,12 @@ export interface AuditFinding {
   ignoreReason?: string
   /** Standard references (OWASP Top 10 / OWASP API Security / CWE) for the rule. */
   classifications?: AuditClassification[]
+  /**
+   * What a route-level verdict rests on (RFC 0026 §5): `manifest` when the introspected app
+   * alone decided it (a middleware capability, an enforced body schema), `static` when a
+   * controller body or the routes file loaded on its own did.
+   */
+  evidence?: CheckEvidence
 }
 
 export interface AuditReport {
@@ -67,6 +81,11 @@ export interface AuditReport {
   failCount: number
   ignoredCount: number
   routesAnalyzed: boolean
+  /**
+   * Where the route-level rules read the routes from: the introspected app, or the routes
+   * file with the reason the manifest was not used (none when introspection was not asked for).
+   */
+  routeSource: { from: 'manifest' } | { from: 'routes-file'; reason?: string }
   /** Present when the dependency scan ran (or was skipped via options). */
   dependencyScan?: DependencyScan
   /** Coverage of the installed-package scan for CSRF exemptions. */
@@ -89,6 +108,12 @@ export interface RunAuditOptions {
    * command enables it unless invoked with --no-deps.
    */
   deps?: boolean
+  /**
+   * Judge the route-level rules against the introspected app (RFC 0026 §5). `guren audit` sets it
+   * unless `--no-introspect`; an in-process caller leaves it off, since the manifest memo would
+   * outlive a long-lived process.
+   */
+  introspect?: boolean
 }
 
 /** Guest flows (login/registration), reachable without authentication. */
@@ -109,6 +134,13 @@ export type AuthMiddlewareVerdict =
   | 'legacy-name-match'
   /** Capabilities are supported, no guard found, but a name looks auth-like. */
   | 'unverified-auth-name'
+  /** Manifest only: a middleware name no alias or group registers anywhere in the app. */
+  | 'unresolved-alias'
+  /**
+   * Manifest only: the chain authorizes but requires no authentication. Not a pass: a guest
+   * request reaches the gate with a null user, and a policy may allow it.
+   */
+  | 'authorization-only'
   /** No authentication middleware detected by any signal. */
   | 'none'
 
@@ -128,6 +160,36 @@ export function authMiddlewareVerdict(
     return nameMatches ? 'legacy-name-match' : 'none'
   }
   return nameMatches ? 'unverified-auth-name' : 'none'
+}
+
+/** A manifest verdict and what it names: the matching aliases, the unresolved names, or the abilities checked. */
+export interface ManifestAuthVerdict {
+  verdict: AuthMiddlewareVerdict
+  names: string[]
+}
+
+/**
+ * The authentication verdict from a route's resolved middleware (RFC 0026 §5), aliases and
+ * groups expanded by the app that registered them. The auth-like name match applies to named
+ * aliases and groups only, as on the static path; an inline handler's name is its function's.
+ */
+export function manifestAuthVerdict(route: Pick<RouteEntry, 'middleware'>): ManifestAuthVerdict {
+  const { middleware } = route
+  if (middleware.some((entry) => entry.capabilities.authentication?.mode === 'required')) return { verdict: 'verified', names: [] }
+
+  const unresolved = middleware.flatMap((entry) =>
+    entry.unresolved ? [entry.name ?? ''] : (entry.unresolvedMembers ?? []))
+  if (unresolved.length > 0) return { verdict: 'unresolved-alias', names: unresolved }
+
+  const named = middleware.flatMap((entry) =>
+    entry.kind !== 'inline' && entry.name && AUTH_MIDDLEWARE_PATTERN.test(entry.name) ? [entry.name] : [])
+  if (named.length > 0) return { verdict: 'unverified-auth-name', names: named }
+
+  const authorizing = middleware.filter((entry: MiddlewareEntry) => entry.capabilities.authorization)
+  if (authorizing.length > 0) {
+    return { verdict: 'authorization-only', names: authorizing.map((entry) => entry.ability ?? '') }
+  }
+  return { verdict: 'none', names: [] }
 }
 
 const VALIDATE_BODY_PATTERN = new RegExp(accessorCallPattern(controllerMembers('body-validation')))
@@ -203,13 +265,22 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   // Kicked off first so the registry round-trip overlaps the local parsing.
   const dependencyScanOutput = options.deps ? startDependencyScan(cwd) : null
 
-  const { methods: controllerMethods, collisions, unreadableFiles } = await parseControllerMethods(cwd)
+  const scan = await parseControllerMethods(cwd)
+  const routes = await loadAuditRoutes(cwd, options)
+  const manifest = routes.manifest
+
+  // Reported only where a verdict could have read through the shared name: every
+  // collision on the routes file's path, and on the manifest's those a name-only
+  // reference reached, since an identity reference reads its own file.
+  const collisions = manifest
+    ? collisionsReachedByName(scan, routes.audited.flatMap((route) => (route.controller ? [route.controller] : [])))
+    : scan.collisions
   for (const collision of collisions) {
     findings.push(controllerCollisionFinding(collision))
   }
   // A controller that would not open is judged against no body at all, which
   // is a pass for every rule below. Reported so it cannot read as one.
-  for (const filePath of unreadableFiles) {
+  for (const filePath of scan.unreadableFiles) {
     findings.push(
       finding(
         `controller-unreadable:${filePath}`,
@@ -222,14 +293,14 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
       ),
     )
   }
+  findings.push(...routes.loadFindings)
 
-  const definitions = await auditRoutes(cwd, options.routesFile, controllerMethods, findings)
-  const routesAnalyzed = definitions !== undefined
-  auditForceWrites(controllerMethods, findings)
+  if (routes.analyzed) auditRoutes(routes.audited, scan, manifest, findings)
+  auditForceWrites(scan, manifest !== undefined, findings)
   await auditSourceFiles(cwd, findings)
   await auditModels(cwd, findings)
   const csrfExemptionScan = await auditCsrfExemptions(cwd, findings)
-  const aiLocalTools = await auditAiLocalTools(cwd, definitions, controllerMethods, findings)
+  const aiLocalTools = await auditAiLocalTools(cwd, routes.agentActions, scan, findings)
 
   const dependencyScan: DependencyScan = dependencyScanOutput
     ? dependencyFindingsFromOutput(await dependencyScanOutput, findings)
@@ -248,7 +319,8 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
     warnCount: findings.filter((f) => f.status === 'warn').length,
     failCount: findings.filter((f) => f.status === 'fail').length,
     ignoredCount: findings.filter((f) => f.status === 'ignored').length,
-    routesAnalyzed,
+    routesAnalyzed: routes.analyzed,
+    routeSource: manifest ? { from: 'manifest' } : { from: 'routes-file', ...(routes.staticReason ? { reason: routes.staticReason } : {}) },
     dependencyScan,
     csrfExemptionScan,
     ...(aiLocalTools ? { aiLocalTools } : {}),
@@ -373,7 +445,7 @@ function applyIgnoreEntries(
  */
 function controllerCollisionFinding(collision: ControllerNameCollision): AuditFinding {
   const { className, previousFile, currentFile } = collision
-  return finding(
+  return withEvidence('static', finding(
     `controller-name-collision:${className}`,
     `${className} name collision`,
     'fail',
@@ -381,7 +453,11 @@ function controllerCollisionFinding(collision: ControllerNameCollision): AuditFi
     + `checks for both controllers are checked against whichever file was scanned last, since routes `
     + `only carry the class name, not its file. Findings for one may silently apply to the other.`,
     `Rename one of the two ${className} classes so controller class names are unique across the app.`,
-  )
+  ))
+}
+
+function withEvidence(evidence: CheckEvidence, entry: AuditFinding): AuditFinding {
+  return { ...entry, evidence }
 }
 
 /**
@@ -390,8 +466,18 @@ function controllerCollisionFinding(collision: ControllerNameCollision): AuditFi
  * mass-assignment protection. Static analysis cannot prove data flow, so this is
  * a review prompt (warn), never a fail.
  */
-function auditForceWrites(controllerMethods: Map<string, ControllerMethodInfo>, findings: AuditFinding[]): void {
-  for (const [methodKey, info] of controllerMethods) {
+function auditForceWrites(scan: ControllerMethodScan, everyDeclaration: boolean, findings: AuditFinding[]): void {
+  // On the manifest path no collision finding covers a class no route reaches by name, so
+  // each declaration is read; a shared name is told apart by its file.
+  const shared = new Set(scan.collisions.map((collision) => collision.className))
+  const methods: Array<[string, ControllerMethodInfo]> = everyDeclaration
+    ? scan.declarations.flatMap((declaration) => [...declaration.methods].map(([name, info]): [string, ControllerMethodInfo] => [
+      shared.has(declaration.className) ? `${declaration.file}#${declaration.className}.${name}` : `${declaration.className}.${name}`,
+      info,
+    ]))
+    : [...scan.methods]
+
+  for (const [methodKey, info] of methods) {
     if (!FORCE_WRITE_PATTERN.test(info.body)) continue
     // Same predicate the route-validation check uses, so the two findings
     // cannot disagree about whether a method validates its body.
@@ -415,35 +501,112 @@ function auditForceWrites(controllerMethods: Map<string, ControllerMethodInfo>, 
   }
 }
 
-async function auditRoutes(
-  cwd: string,
-  routesFile: string | undefined,
-  controllerMethods: Map<string, ControllerMethodInfo>,
-  findings: AuditFinding[],
-): Promise<RouteDefinition[] | undefined> {
-  const resolvedRoutesFile = resolve(cwd, await routesEntryOrDefault(cwd, routesFile))
+/** A route as the route-level rules read it, from the introspected app or the routes file. */
+interface AuditedRoute {
+  method: string
+  path: string
+  controller?: ControllerTarget
+  agent?: RouteDefinition['agent']
+  hasBodySchema: boolean
+  validatesBody: boolean
+  hasInlineMiddleware: boolean
+  /** The static path's alias names, which it matches against /auth/i. */
+  middlewareNames: string[]
+  auth: ManifestAuthVerdict
+}
 
-  let definitions
+function auditedFromDefinition(route: RouteDefinition): AuditedRoute {
+  return {
+    method: route.method,
+    path: route.path,
+    controller: route.controller,
+    agent: route.agent,
+    hasBodySchema: Boolean(route.schemas?.body),
+    validatesBody: Boolean(route.validatesBody),
+    hasInlineMiddleware: Boolean(route.hasInlineMiddleware),
+    middlewareNames: route.middlewareNames ?? [],
+    auth: { verdict: authMiddlewareVerdict(route), names: [] },
+  }
+}
+
+/** A `{ unreadable }` body schema still validates at runtime: only its JSON Schema could not be written. */
+function auditedFromManifest(route: RouteEntry): AuditedRoute {
+  return {
+    method: route.method,
+    path: route.path,
+    controller: route.controller,
+    agent: route.agent,
+    hasBodySchema: route.schemas.body !== undefined,
+    validatesBody: Boolean(route.validatesBody),
+    hasInlineMiddleware: Boolean(route.hasInlineMiddleware),
+    middlewareNames: route.middleware.flatMap((entry) => (entry.kind !== 'inline' && entry.name ? [entry.name] : [])),
+    auth: manifestAuthVerdict(route),
+  }
+}
+
+interface AuditRoutes {
+  analyzed: boolean
+  audited: AuditedRoute[]
+  /** Set when the routes came from the introspected app. */
+  manifest?: AppManifest
+  /** Why the routes file was read when introspection was asked for. */
+  staticReason?: string
+  loadFindings: AuditFinding[]
+  agentActions: ReturnType<typeof agentToolActions>
+}
+
+/**
+ * The routes the route-level rules judge. The routes file is loaded first, since it decides
+ * whether to introspect at all: an app with no mutating or body-carrying route has nothing
+ * the manifest could change. `--routes` keeps the file, which the manifest does not describe.
+ */
+async function loadAuditRoutes(cwd: string, options: RunAuditOptions): Promise<AuditRoutes> {
+  const routesFile = resolve(cwd, await routesEntryOrDefault(cwd, options.routesFile))
+  const loadFindings: AuditFinding[] = []
+
+  let definitions: RouteDefinition[] | undefined
+  let loadError: string | undefined
   const moduleWarnings: string[] = []
   try {
-    definitions = await loadRouteDefinitions(resolvedRoutesFile, cwd, moduleWarnings)
+    definitions = await loadRouteDefinitions(routesFile, cwd, moduleWarnings)
   } catch (error) {
-    findings.push(
+    loadError = error instanceof Error ? error.message : String(error)
+  }
+
+  const introspect = await auditIntrospectSource(cwd, options, routesFile, definitions)
+  const routes = await introspectedRoutes(introspect.source)
+  if (routes.status === 'described') {
+    const { manifest } = routes
+    return {
+      analyzed: true,
+      audited: manifest.routes.map(auditedFromManifest),
+      manifest,
+      loadFindings,
+      agentActions: agentToolActions(manifest.agentTools, manifest.routes),
+    }
+  }
+
+  const unavailable = await introspect.failure
+  if (unavailable) loadFindings.push(unavailable)
+  const staticReason = routes.reason ?? introspect.reason
+
+  if (!definitions) {
+    loadFindings.push(
       finding(
         'routes:load',
         'Route analysis',
         'warn',
-        `Could not load routes (${error instanceof Error ? error.message : String(error)}). Route-level checks skipped.`,
+        `Could not load routes (${loadError}). Route-level checks skipped.`,
         'Ensure the routes entry (routes/web.ts or routes/api.ts) is importable, or pass --routes <file>.',
       ),
     )
-    return undefined
+    return { analyzed: false, audited: [], staticReason, loadFindings, agentActions: [] }
   }
 
   // A module that failed to load leaves its own routes unchecked, which must
   // reach the structured report so `guren audit --json`/CI cannot read a pass.
   for (const [index, message] of moduleWarnings.entries()) {
-    findings.push(
+    loadFindings.push(
       finding(
         `routes:module-load:${index}`,
         'Route analysis',
@@ -454,31 +617,108 @@ async function auditRoutes(
     )
   }
 
-  for (const route of definitions) {
+  return {
+    analyzed: true,
+    audited: definitions.map(auditedFromDefinition),
+    staticReason,
+    loadFindings,
+    agentActions: agentToolActions(deriveAgentTools(definitions).tools, definitions),
+  }
+}
+
+interface AuditIntrospection {
+  source?: IntrospectSource
+  /** Why the app was not introspected though it was asked. */
+  reason?: string
+  /** The one finding a failed introspection leaves, resolved once the run settles. */
+  failure: Promise<AuditFinding | undefined>
+}
+
+async function auditIntrospectSource(
+  cwd: string,
+  options: RunAuditOptions,
+  routesFile: string,
+  definitions: RouteDefinition[] | undefined,
+): Promise<AuditIntrospection> {
+  const none: AuditIntrospection = { failure: Promise.resolve(undefined) }
+  if (!options.introspect) return none
+  if (options.routesFile) return { ...none, reason: '--routes names a routes file, and the introspected app describes its entry' }
+  if (!(await access(routesFile).then(() => true, () => false))) return none
+  // A routes file that would not load may still register through the app, so it does not skip the run.
+  if (definitions && !definitions.some(isJudgedRoute)) {
+    return { ...none, reason: 'no route mutates or carries a body, so the app was not introspected' }
+  }
+
+  const run = introspectApp(cwd)
+  return {
+    source: () => run,
+    failure: run.then((result) => {
+      if (result.status !== 'failed') return undefined
+      const reason = result.message.split('\n')[0]!.replace(/\.?$/u, '.')
+      return finding(
+        'introspection-unavailable',
+        'Introspection',
+        'warn',
+        `The app could not be introspected (${result.reason}): ${reason} The route-level checks were judged from the routes file instead.`,
+        'Run `bunx guren introspect` to see the failure, or pass --no-introspect to skip it.',
+      )
+    }),
+  }
+}
+
+/** A route the validation or authentication rule judges. */
+function isJudgedRoute(route: Pick<RouteDefinition, 'method'>): boolean {
+  const { safe, bodyCarrying } = describeMethod(route.method.toUpperCase())
+  return !safe || bodyCarrying
+}
+
+function auditRoutes(
+  routes: AuditedRoute[],
+  scan: ControllerMethodScan,
+  manifest: AppManifest | undefined,
+  findings: AuditFinding[],
+): void {
+  // A verdict the manifest alone decided is `manifest`; one that read a controller body, or
+  // the routes file loaded on its own, is `static` (the weakest fact it rests on, RFC 0026 §5).
+  const fromManifest: CheckEvidence = manifest ? 'manifest' : 'static'
+  const shared = new Set(scan.collisions.map((collision) => collision.className))
+  const bootSkipped = manifest?.warnings.some((warning) => warning.code === 'boot-callback-skipped') ?? false
+
+  for (const route of routes) {
+    const judged = findings.length
+    judgeRoute(route)
+    for (const entry of findings.slice(judged)) entry.evidence ??= 'static'
+  }
+
+  function judgeRoute(route: AuditedRoute): void {
     const method = route.method.toUpperCase()
     const { safe, bodyCarrying } = describeMethod(method)
     // No shared skip here on purpose: each phase gates on its own predicate, so
     // a later one cannot silently inherit a scope from a mid-loop `continue`.
 
     const routeLabel = `${method} ${route.path}`
+    const lookup = route.controller ? controllerMethodFor(scan, route.controller) : undefined
+    const methodInfo = lookup?.info
+    // A shared class name read by identity says which file, or the message would name either class.
     const controllerKey = route.controller
-      ? `${route.controller.name}.${route.controller.action}`
+      ? `${route.controller.name}.${route.controller.action}${
+        lookup?.by === 'identity' && shared.has(route.controller.name) ? ` (${route.controller.file})` : ''}`
       : undefined
-    const methodInfo = controllerKey ? controllerMethods.get(controllerKey) : undefined
     /** RFC 0016: the route is declared as an agent tool, which tightens rules below. */
     const agentExposed = Boolean(route.agent)
 
     // 1. Input validation on body-carrying routes
     if (bodyCarrying) {
-      const hasRouteSchema = Boolean(route.schemas?.body)
+      const hasRouteSchema = route.hasBodySchema
       // A server that validates a controller action's body schema says so with
       // `validatesBody`; without the flag the schema only types the action.
-      const routeSchemaEnforced = hasRouteSchema && (!route.controller || Boolean(route.validatesBody))
+      const routeSchemaEnforced = hasRouteSchema && (!route.controller || route.validatesBody)
       const hasControllerValidation = methodInfo ? VALIDATE_BODY_PATTERN.test(methodInfo.body) : false
       const readsBody = methodInfo ? BODY_ACCESS_PATTERN.test(methodInfo.body) : false
 
       if (routeSchemaEnforced || hasControllerValidation) {
-        findings.push(
+        findings.push(withEvidence(
+          hasControllerValidation ? 'static' : fromManifest,
           finding(
             `validation:${routeLabel}`,
             routeLabel,
@@ -487,7 +727,7 @@ async function auditRoutes(
               ? `Controller validates body in ${controllerKey}.`
               : 'Body schema validated at route level.',
           ),
-        )
+        ))
       } else if (
         methodInfo &&
         readsBody &&
@@ -558,16 +798,17 @@ async function auditRoutes(
     // 2. Authentication on unsafe (state-changing) routes. Safe body-carrying
     // methods (QUERY) are read routes; guest flows must stay unauthenticated.
     if (!safe && !GUEST_PATH_PATTERN.test(route.path)) {
-      const middlewareNames = route.middlewareNames ?? []
+      const { middlewareNames } = route
       // Capability verdict (RFC 0007). An older server emits no `capabilities`
       // field at all — only then does the name heuristic apply, so mixed-version
-      // apps don't regress.
-      const verdict = authMiddlewareVerdict(route)
+      // apps don't regress. On the manifest path the aliases arrive resolved.
+      const { verdict, names } = route.auth
       const hasAuthMiddleware = verdict === 'verified' || verdict === 'legacy-name-match'
       const hasControllerAuth = methodInfo ? AUTH_CALL_PATTERN.test(methodInfo.body) : false
 
       if (hasAuthMiddleware || hasControllerAuth) {
-        findings.push(
+        findings.push(withEvidence(
+          verdict === 'verified' ? fromManifest : 'static',
           finding(
             `authz:${routeLabel}`,
             routeLabel,
@@ -578,6 +819,20 @@ async function auditRoutes(
                 ? `Protected by middleware: ${middlewareNames.join(', ')}.`
                 : `Controller checks authentication in ${controllerKey}.`,
           ),
+        ))
+      } else if (verdict === 'unresolved-alias') {
+        findings.push(
+          finding(
+            `authz:${routeLabel}`,
+            routeLabel,
+            'warn',
+            `Middleware ${names.map((name) => `'${name}'`).join(', ')} is registered as no alias or group anywhere in the app, `
+            + 'so nothing says what the chain enforces'
+            + (bootSkipped
+              ? ', unless the createApp({ boot }) callback, which introspection does not run, registers it.'
+              : ', and mounting the route fails at boot.'),
+            'Register the alias (router.aliasMiddleware(name, requireAuthenticated())) or remove the name from the route.',
+          ),
         )
       } else if (verdict === 'unverified-auth-name') {
         findings.push(
@@ -585,8 +840,21 @@ async function auditRoutes(
             `authz:${routeLabel}`,
             routeLabel,
             'warn',
-            `Middleware (${middlewareNames.join(', ')}) is named like an auth guard but is not one the framework recognizes.`,
+            `Middleware (${(names.length > 0 ? names : middlewareNames).join(', ')}) is named like an auth guard but is not one the framework recognizes.`,
             UNRECOGNIZED_GUARD_SUGGESTION,
+          ),
+        )
+      } else if (verdict === 'authorization-only') {
+        const abilities = names.every(Boolean) ? names.map((name) => `'${name}'`).join(', ') : undefined
+        findings.push(
+          finding(
+            `authz:${routeLabel}`,
+            routeLabel,
+            'warn',
+            `The chain authorizes (${abilities ? `ability ${abilities}` : 'an ability decided at request time'}) but requires `
+            + 'no authentication: a guest request reaches the gate with a null user, and a policy or gate may allow it.',
+            'Put requireAuthenticated() (the auth alias) ahead of the authorization middleware, or call this.auth.userOrFail() in the controller.',
+            methodInfo?.filePath,
           ),
         )
       } else if (route.hasInlineMiddleware) {
@@ -660,7 +928,6 @@ async function auditRoutes(
     }
   }
 
-  return definitions
 }
 
 const SCAN_DIRECTORIES = ['app', 'src', 'routes', 'config']
@@ -971,6 +1238,10 @@ export function renderAuditReport(report: AuditReport): void {
 
   if (!report.routesAnalyzed) {
     consola.warn('Route-level checks were skipped (routes could not be loaded).')
+  } else if (report.routeSource.from === 'manifest') {
+    consola.info('Route-level checks read the introspected app (middleware aliases resolved, controllers by file).')
+  } else if (report.routeSource.reason) {
+    consola.info(`Route-level checks read the routes file: ${report.routeSource.reason}.`)
   }
   if (report.dependencyScan?.status === 'skipped') {
     consola.info('Dependency scan skipped (--no-deps).')

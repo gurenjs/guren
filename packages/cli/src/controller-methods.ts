@@ -6,8 +6,10 @@ import type {
   ClassProperty,
   Expression,
   File,
+  Statement,
 } from '@babel/types'
-import { classNameFromPath, discoverControllerFiles } from './discovery'
+import type { AppManifest, ControllerRef } from '@guren/server'
+import { classNameFromPath, discoverControllerFiles, toPosixRelative } from './discovery'
 import { extractClassDeclaration } from './model-parser'
 import { ParseCache } from './parse-cache'
 import { memberKeyName, walk } from './ast-walk'
@@ -39,9 +41,28 @@ export interface ControllerNameCollision {
   currentFile: string
 }
 
+/** One controller class as a file declares it, same-named classes in other files included. */
+export interface ControllerDeclaration {
+  className: string
+  /** POSIX-relative to the project root, the form a manifest `ControllerRef.file` takes. */
+  file: string
+  /** Every name the file exports the class under: its own, `default`, an `export { X as Y }` alias. */
+  exportNames: string[]
+  /** Action name → body. */
+  methods: Map<string, ControllerMethodInfo>
+}
+
 export interface ControllerMethodScan {
   /** `ClassName.method` → body. Last file scanned wins on a collision. */
   methods: Map<string, ControllerMethodInfo>
+  /**
+   * `file#export.method` → body (RFC 0026 §5), one entry per export name: what a route whose
+   * `ControllerRef` resolved by identity is judged against, so no collision can reach it.
+   */
+  byExport: Map<string, ControllerMethodInfo>
+  /** Every class every controller file declares, in scan order; `methods` keeps only the last of a name. */
+  declarations: ControllerDeclaration[]
+  /** Every same-named pair. A consumer reports only those a route reached by name ({@link collisionsReachedByName}). */
   collisions: ControllerNameCollision[]
   /**
    * Controller files that could not be read at all. Their actions are absent
@@ -61,6 +82,8 @@ export interface ControllerMethodScan {
  */
 export const EMPTY_CONTROLLER_SCAN: ControllerMethodScan = {
   methods: new Map(),
+  byExport: new Map(),
+  declarations: [],
   collisions: [],
   unreadableFiles: [],
   unparsedFiles: [],
@@ -298,6 +321,8 @@ export async function parseControllerMethods(
   cache?: ParseCache,
 ): Promise<ControllerMethodScan> {
   const methods = new Map<string, ControllerMethodInfo>()
+  const byExport = new Map<string, ControllerMethodInfo>()
+  const declarations: ControllerDeclaration[] = []
   const collisions: ControllerNameCollision[] = []
   const unreadableFiles: string[] = []
   const unparsedFiles: string[] = []
@@ -310,6 +335,7 @@ export async function parseControllerMethods(
 
   for (const filePath of controllerFiles) {
     const relPath = relative(cwd, filePath)
+    const posixPath = toPosixRelative(cwd, filePath)
     const outcome = await parseCache.read(filePath)
 
     if (outcome.status === 'unreadable') {
@@ -323,6 +349,7 @@ export async function parseControllerMethods(
 
     const { source, ast } = outcome
     const scrubbed = blankCommentsAndStrings(source, ast)
+    const exportNamesOf = classExportNames(ast.program.body)
 
     for (const node of ast.program.body) {
       const classDecl = extractClassDeclaration(node)
@@ -335,17 +362,128 @@ export async function parseControllerMethods(
       }
       classFiles.set(className, relPath)
 
+      const exportNames = exportNamesOf(node, classDecl)
+      const declaration: ControllerDeclaration = { className, file: posixPath, exportNames, methods: new Map() }
+      declarations.push(declaration)
+
       for (const { name, body } of classActionMembers(classDecl)) {
-        methods.set(`${className}.${name}`, {
+        const info: ControllerMethodInfo = {
           body: scrubbed.slice(body.start ?? 0, body.end ?? 0),
           rawBody: source.slice(body.start ?? 0, body.end ?? 0),
           filePath: relPath,
-        })
+        }
+        declaration.methods.set(name, info)
+        methods.set(`${className}.${name}`, info)
+        for (const exportName of exportNames) byExport.set(`${posixPath}#${exportName}.${name}`, info)
       }
     }
   }
 
-  return { methods, collisions, unreadableFiles, unparsedFiles, classFiles }
+  return { methods, byExport, declarations, collisions, unreadableFiles, unparsedFiles, classFiles }
+}
+
+/**
+ * The names a file exports each of its classes under, read the way the introspection
+ * child sees them (`Object.entries` of the module): `export class X`, `export default
+ * class`, `export default X` and `export { X as Y }`. A re-export from another file
+ * names that file's class and is left out.
+ */
+function classExportNames(body: Statement[]): (node: Statement, classDecl: ClassDeclaration) => string[] {
+  const aliases = new Map<string, string[]>()
+  const add = (local: string, exported: string): void => {
+    aliases.set(local, [...(aliases.get(local) ?? []), exported])
+  }
+  for (const node of body) {
+    if (node.type === 'ExportDefaultDeclaration' && node.declaration.type === 'Identifier') {
+      add(node.declaration.name, 'default')
+    }
+    if (node.type !== 'ExportNamedDeclaration' || node.source) continue
+    for (const specifier of node.specifiers) {
+      if (specifier.type !== 'ExportSpecifier') continue
+      const exported = specifier.exported.type === 'Identifier' ? specifier.exported.name : specifier.exported.value
+      add(specifier.local.name, exported)
+    }
+  }
+
+  return (node, classDecl) => {
+    const names = classDecl.id ? [...(aliases.get(classDecl.id.name) ?? [])] : []
+    if (node.type === 'ExportDefaultDeclaration') names.push('default')
+    else if (node.type === 'ExportNamedDeclaration' && classDecl.id) names.push(classDecl.id.name)
+    return [...new Set(names)]
+  }
+}
+
+/**
+ * What a route names its action by: a registered definition's `{ name, action }`,
+ * or a manifest `ControllerRef`, which may also carry the class's file and export.
+ */
+export type ControllerTarget = { name: string; action: string } & Partial<Pick<ControllerRef, 'file' | 'exportName' | 'resolved'>>
+
+export interface ControllerMethodLookup {
+  info: ControllerMethodInfo | undefined
+  /**
+   * `identity` when the body was found through the class's file and export, so no
+   * same-named class can stand in for it; `name` when only the class name was
+   * followed, which a collision on that name makes unreliable.
+   */
+  by: 'identity' | 'name'
+}
+
+/**
+ * The one lookup of a route's action body (RFC 0026 §5). A reference resolved by
+ * identity is judged against its own file; one the scan cannot place there (the
+ * child picked a file that re-exports the class) falls back to the class name, as
+ * a `name-only` reference does.
+ */
+export function controllerMethodFor(scan: ControllerMethodScan, controller: ControllerTarget): ControllerMethodLookup {
+  const { file, exportName } = controller
+  if (controller.resolved === 'identity' && file && exportName) {
+    const info = scan.byExport.get(`${file}#${exportName}.${controller.action}`)
+    if (info) return { info, by: 'identity' }
+    // The class is there and declares no such action (inherited, or missing): another class's body is no answer.
+    if (scan.declarations.some((declaration) => declaration.file === file && declaration.exportNames.includes(exportName))) {
+      return { info: undefined, by: 'identity' }
+    }
+  }
+  return { info: scan.methods.get(`${controller.name}.${controller.action}`), by: 'name' }
+}
+
+/** The collisions a verdict could have read through: those on a class some route reached by its name alone. */
+export function collisionsReachedByName(
+  scan: ControllerMethodScan,
+  controllers: Iterable<ControllerTarget>,
+): ControllerNameCollision[] {
+  const byName = new Set<string>()
+  for (const controller of controllers) {
+    if (controllerMethodFor(scan, controller).by === 'name') byName.add(controller.name)
+  }
+  return scan.collisions.filter((collision) => byName.has(collision.className))
+}
+
+/**
+ * Registered definitions with each controller replaced by the manifest's reference
+ * for the same route, matched on method, path, class name and action. The manifest
+ * lists the whole app's routes, which the routes file alone may not, and in its own
+ * order, so a route matched more than once keeps its name-only controller.
+ */
+export function attachControllerRefs<T extends { method: string; path: string; controller?: { name: string; action: string } }>(
+  definitions: T[],
+  manifest: Pick<AppManifest, 'routes'>,
+): T[] {
+  const refs = new Map<string, ControllerRef | null>()
+  for (const route of manifest.routes) {
+    if (!route.controller) continue
+    const key = routeControllerKey(route, route.controller)
+    refs.set(key, refs.has(key) ? null : route.controller)
+  }
+  return definitions.map((definition) => {
+    const ref = definition.controller && refs.get(routeControllerKey(definition, definition.controller))
+    return ref ? { ...definition, controller: ref } : definition
+  })
+}
+
+function routeControllerKey(route: { method: string; path: string }, controller: { name: string; action: string }): string {
+  return `${route.method.toUpperCase()} ${route.path} ${controller.name}.${controller.action}`
 }
 
 /**

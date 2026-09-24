@@ -586,7 +586,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       // authorization rather than merely authentication, and the schemas an
       // agent reads exist. Shares 7.7's gate; content-activated inside.
       checks.push(
-        ...(await checkAgentRoutes({ cwd, routesFile: routeGraphFile, definitions, cache })),
+        ...(await checkAgentRoutes({ cwd, routesFile: routeGraphFile, definitions, cache, introspect: wiringIntrospect })),
       )
     }
 
