@@ -441,13 +441,10 @@ export interface ControllerMethodLookup {
 }
 
 /**
- * The one lookup of a route's action body (RFC 0026 §5). A reference resolved by
- * identity is judged against its own file; one the scan cannot place there (the
- * child picked a file that re-exports the class) falls back to the class name.
- * A `name-only` reference matched no export of any controller file the child
- * imported (it imports them all while an app class is unmatched, and never
- * matches a framework class), so a same-named declaration in one of those is
- * another class: the routed one is declared elsewhere, in the routes file or a package.
+ * The one lookup of a route's action body (RFC 0026 §5): an `identity` reference reads its own file,
+ * one the scan cannot place (a re-export the child picked) follows the name. A `name-only` one matched
+ * no export of a file the child imported (all of them while an app class is unmatched; a framework
+ * class never matches), so a same-named declaration there is another class, declared `elsewhere`.
  */
 export function controllerMethodFor(scan: ControllerMethodScan, controller: ControllerTarget): ControllerMethodLookup {
   const { file, exportName, unimported } = controller
