@@ -1,5 +1,16 @@
 export type CheckStatus = 'pass' | 'warn' | 'fail'
 
+/**
+ * A `guren` command that clears a finding by rewriting generated files only, so it
+ * runs unattended: `guren check --fix` runs it. Attach one only when running it
+ * leaves no decision to a person; everything else stays in `suggestion`.
+ */
+export interface CheckFix {
+  kind: 'command'
+  /** The arguments after `guren`, never a shell string. */
+  args: string[]
+}
+
 export interface CheckResult {
   key: string
   title: string
@@ -14,6 +25,7 @@ export interface CheckResult {
    * such as `check --ci` skip advisory warns.
    */
   advisory?: boolean
+  fix?: CheckFix
 }
 
 export interface CheckReport {
@@ -30,6 +42,15 @@ export interface CheckReport {
    * the route graph was not loaded — two answers a consumer can tell apart.
    */
   agentScopes?: Array<{ agent: string; tools: string[] }>
+  /** What `check --fix` ran before this report was taken; absent on a run without the flag. */
+  fixes?: CheckFixRun[]
+}
+
+export interface CheckFixRun {
+  command: string
+  ok: boolean
+  /** The last lines the command printed, kept only when it failed. */
+  output?: string[]
 }
 
 /**
@@ -74,4 +95,33 @@ export function check(
 /** A warning `check --ci` and `guren gate` do not count. */
 export function advisory(...args: Parameters<typeof check>): CheckResult {
   return { ...check(...args), advisory: true }
+}
+
+export function commandFix(...args: string[]): CheckFix {
+  return { kind: 'command', args }
+}
+
+/** A generator command that reads the route graph, pointed at the routes file the check read. */
+export function routesCommandFix(command: string, routesFile?: string): CheckFix {
+  return routesFile === undefined ? commandFix(command) : commandFix(command, '--routes', routesFile)
+}
+
+/** The fix as a copy-pasteable command line; an argument is quoted only when a shell would split it. */
+export function formatFixCommand(fix: CheckFix): string {
+  const words = fix.args.map((arg) => (/^[\w./@:=-]+$/u.test(arg) ? arg : `'${arg.replace(/'/gu, `'\\''`)}'`))
+  return ['bunx', 'guren', ...words].join(' ')
+}
+
+/**
+ * The distinct fixes a report's findings carry, in report order: every finding one
+ * `codegen` run clears names the same arguments, so the run happens once.
+ */
+export function pendingFixes(report: CheckReport): CheckFix[] {
+  const seen = new Map<string, CheckFix>()
+  for (const result of report.checks) {
+    if (result.status === 'pass' || !result.fix) continue
+    const key = JSON.stringify(result.fix.args)
+    if (!seen.has(key)) seen.set(key, result.fix)
+  }
+  return [...seen.values()]
 }
