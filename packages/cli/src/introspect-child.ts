@@ -11,7 +11,7 @@ import { pathToFileURL } from 'node:url'
 import type { AppManifest, AttachmentsDescription } from '@guren/server'
 
 import { classNameFromPath, discoverControllerFiles, toPosixRelative } from './discovery'
-import { pickDeclaringFile } from './introspect-controller-file'
+import { controllerImportWarning, pickDeclaringFile } from './introspect-controller-file'
 import type { Introspection, IntrospectionFailure } from './introspect'
 import { bootstrapApplication, resolveMainEntry } from './runtime'
 
@@ -140,7 +140,7 @@ async function resolveControllers(
       try {
         mod = (await import(pathToFileURL(file).href)) as Record<string, unknown>
       } catch (error) {
-        manifest.warnings.push({ code: 'controller-import', message: `${toPosixRelative(root, file)} could not be imported: ${messageOf(error)}` })
+        manifest.warnings.push(controllerImportWarning(toPosixRelative(root, file), messageOf(error)))
         continue
       }
       for (const [exportName, value] of Object.entries(mod)) {

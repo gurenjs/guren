@@ -8,9 +8,13 @@
  * guest paths the authentication rule skips are skipped here too.
  */
 import { resolve } from 'node:path'
-import type { RouteDefinition } from '@guren/server'
-import type { AuditFinding } from './audit'
-import { AUTHORIZATION_CALL_PATTERN, type ControllerMethodInfo } from './controller-methods'
+import type { AuditedRoute, AuditFinding } from './audit'
+import type { CheckEvidence } from './check-result'
+import {
+  AUTHORIZATION_CALL_PATTERN,
+  controllerMethodFor,
+  type ControllerMethodScan,
+} from './controller-methods'
 import { classNameFromPath, discoverPolicyFiles, moduleNameFromRelPath, toPosixRelative } from './discovery'
 import { describeMethod } from './http-methods'
 import { discoverModelClasses } from './model-parser'
@@ -125,36 +129,39 @@ async function authorizeSuggestion(
  * Route-level on purpose: the finding carries no `line`, so `config/audit.ts`
  * ignores it by key (a `line` would make every such entry `unsupported`); a
  * `// guren-audit-ignore` comment above the action reports it `ignored` instead.
+ * Only the middleware pass rests on the manifest alone; every other verdict
+ * read a controller body, so its evidence is `static` (RFC 0026 §5).
  */
 export async function auditAuthorization(
   cwd: string,
-  definitions: RouteDefinition[] | undefined,
-  controllerMethods: ReadonlyMap<string, ControllerMethodInfo>,
+  routes: readonly AuditedRoute[],
+  scan: ControllerMethodScan,
+  fromManifest: boolean,
   cache: ParseCache,
   findings: AuditFinding[],
 ): Promise<void> {
-  if (!definitions) return
   const bindings = await policyBindings(cwd, cache)
   if (bindings.length === 0) return
   const patternsByFile = new Map<string, Map<PolicyBinding, RegExp[]>>()
+  const chainEvidence: CheckEvidence = fromManifest ? 'manifest' : 'static'
 
-  for (const route of definitions) {
+  for (const route of routes) {
     const method = route.method.toUpperCase()
     if (describeMethod(method).safe || !route.controller || GUEST_PATH_PATTERN.test(route.path)) continue
 
     const routeLabel = `${method} ${route.path}`
-    const controllerKey = `${route.controller.name}.${route.controller.action}`
     const push = (status: AuditFinding['status'], message: string, rest: Partial<AuditFinding> = {}) =>
-      findings.push({ key: `policy:${routeLabel}`, title: routeLabel, status, message, ...rest })
+      findings.push({ key: `policy:${routeLabel}`, title: routeLabel, status, message, evidence: 'static', ...rest })
 
     // Presence, not derivability, as in the agent-route rule: a `mixed` chain
     // still authorizes, whatever ability it resolves.
-    if (route.capabilities?.authorization) {
-      push('pass', 'Authorized by middleware (verified via middleware capabilities).')
+    if (route.chainAuthorizes) {
+      push('pass', 'Authorized by middleware (verified via middleware capabilities).', { evidence: chainEvidence })
       continue
     }
 
-    const info = controllerMethods.get(controllerKey)
+    const { info, className } = controllerMethodFor(scan, route.controller)
+    const controllerKey = `${className}.${route.controller.action}`
     if (!info) {
       push(
         'warn',

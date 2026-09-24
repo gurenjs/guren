@@ -9,6 +9,8 @@ import {
 import type { AgentRouteMetadata, RouteDefinition } from '@guren/server'
 import { check, type CheckResult } from './check-result'
 import {
+  collisionsReachedByName,
+  controllerMethodFor,
   mutatesRecords,
   parseControllerMethods,
   AUTHORIZE_CALL_PATTERN,
@@ -16,7 +18,10 @@ import {
   EMPTY_CONTROLLER_SCAN,
   INERTIA_CALL_PATTERN,
   type ControllerMethodInfo,
+  type ControllerMethodScan,
+  withManifestControllerRefs,
 } from './controller-methods'
+import type { IntrospectSource } from './manifest-section'
 import { fileExists } from './discovery'
 import { describeMethod } from './http-methods'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
@@ -31,6 +36,11 @@ export interface AgentRouteCheckOptions {
   definitions?: RouteDefinition[]
   /** Parse cache to read controller sources through, shared so files are not parsed twice. */
   cache?: ParseCache
+  /**
+   * The run's introspection (RFC 0026 §5), asked for whenever an agent route names a controller:
+   * the manifest's reference says which class the route dispatches to, as `guren audit` reads it.
+   */
+  introspect?: IntrospectSource
 }
 
 /**
@@ -418,7 +428,7 @@ function approvalStoreFinding(
 
 function toAgentRoute(
   definition: RouteDefinition,
-  controllerMethods: Map<string, ControllerMethodInfo>,
+  scan: ControllerMethodScan,
 ): AgentRoute | undefined {
   const { agent } = definition
   if (!agent) return undefined
@@ -436,7 +446,7 @@ function toAgentRoute(
     label: `${method} ${definition.path}`,
     keySuffix: `${method}:${definition.path}`,
     controllerKey,
-    methodInfo: controllerKey ? controllerMethods.get(controllerKey) : undefined,
+    methodInfo: definition.controller ? controllerMethodFor(scan, definition.controller).info : undefined,
   }
 }
 
@@ -472,16 +482,19 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
     }
   }
 
-  const agentDefinitions = definitions.filter((definition) => definition.agent)
+  let agentDefinitions = definitions.filter((definition) => definition.agent)
   if (agentDefinitions.length === 0) return []
 
   // Skipped when every agent route is an inline handler: no body for any rule to read.
-  const scan = agentDefinitions.some((definition) => definition.controller)
-    ? await parseControllerMethods(cwd, options.cache)
-    : EMPTY_CONTROLLER_SCAN
+  const withControllers = agentDefinitions.some((definition) => definition.controller)
+  const [scan, placed] = await Promise.all([
+    withControllers ? parseControllerMethods(cwd, options.cache) : EMPTY_CONTROLLER_SCAN,
+    withManifestControllerRefs(agentDefinitions, options.introspect, { cwd, routesFile: resolve(cwd, routesFile) }),
+  ])
+  agentDefinitions = placed
 
   const routes = agentDefinitions.flatMap((definition) => {
-    const route = toAgentRoute(definition, scan.methods)
+    const route = toAgentRoute(definition, scan)
     return route ? [route] : []
   })
 
@@ -503,13 +516,11 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
     )
   }
 
-  // Routes carry a class name alone, so two controllers sharing one make every
-  // body-derived verdict unreliable. Narrowed to controllers agent routes name:
-  // any other collision changes no verdict here and belongs to `guren audit`.
-  const agentControllers = new Set(
-    routes.flatMap((route) => (route.definition.controller ? [route.definition.controller.name] : [])),
-  )
-  for (const collision of scan.collisions.filter((c) => agentControllers.has(c.className))) {
+  // A route read by class name alone makes every body-derived verdict unreliable when two
+  // controllers share it. Narrowed to what agent routes reach by name: any other collision
+  // changes no verdict here and belongs to `guren audit`, and a route the manifest placed by
+  // file reads its own class.
+  for (const collision of collisionsReachedByName(scan, agentDefinitions.flatMap((definition) => (definition.controller ? [definition.controller] : [])))) {
     results.push(
       check(
         `agent-route-controller-collision:${collision.className}`,

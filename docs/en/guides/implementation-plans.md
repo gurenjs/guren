@@ -370,6 +370,7 @@ task/entity/model.comment/tests: verified (607 ms)
   failing  [AC-comments-2]
   failing  [AC-comments-3]
   failing  [AC-comments-4]
+  work: 1 file, +38 -0 since 3f1c2a9b0d4e
 
 Recorded in .guren/plans/comments.state.json
 ```
@@ -436,6 +437,10 @@ task/entity/model.comment/data: failed (1383 ms)
 Generate the migration (`bunx guren make:migration --name create_comments_table`), commit it and verify again. The dry run compares the whole schema with the migrations folder, so a schema change outside the plan fails the step too.
 
 `plan:verify` refuses an unapproved plan before it runs anything, so nothing is recorded against a hash nobody agreed to. Past that, it executes your application: `bun test` boots it and `db:migrate` opens the database it is configured for, so run it against a development or test database, never production. Each command may take 600 seconds before it counts as `blocked`; `--timeout <seconds>` changes that. Without `--step` it runs every step in order and skips the ones whose record still holds; steps whose files changed since they verified are re-checked last, as described next. `--ci` exits 1 when a step it ran did not verify, and `--json` prints the report as data.
+
+### Files and lines per step
+
+Each record also carries the work that implemented the step, printed as its `work:` line: the files touched and the lines added and removed since the commit `HEAD` named when `plan:next` marked the step, commits and uncommitted changes alike. The plan and its records, `.guren/`, lockfiles and drizzle-kit snapshots are left out, and a migration's SQL counts. The first run that verifies the step settles the numbers, so a later re-check keeps them. A step `plan:next` did not mark, such as one a whole-plan `plan:verify` ran, reads `not measured` with the reason, and so does a start commit a rebase took out of the history. `plan:status --json` lists the numbers by step id under `verification.work`. Nothing refuses or waits on them: they are what the default step width will be retuned from.
 
 ### One step, one commit
 

@@ -8,10 +8,15 @@
  * by the reviewer reading it, not by this scan.
  */
 import { resolve } from 'node:path'
-import { deriveAgentTools, type RouteDefinition } from '@guren/server'
+import type { DerivedAgentTool } from '@guren/server'
 import { scanAiAgents } from './ai-agent-scan'
 import { inlineAuditIgnore } from './audit-config'
-import { LOCAL_TOOL_WRITE_PATTERN, type ControllerMethodInfo } from './controller-methods'
+import {
+  controllerMethodFor,
+  LOCAL_TOOL_WRITE_PATTERN,
+  type ControllerMethodScan,
+  type ControllerTarget,
+} from './controller-methods'
 import { discoverModelClasses, extractTableIdentifier } from './model-parser'
 import { ParseCache } from './parse-cache'
 import { escapeRegExp } from './utils'
@@ -45,10 +50,28 @@ function tablesReferenced(body: string, tables: ReadonlyMap<string, string>): Se
   return referenced
 }
 
+/** An agent tool and the action its route dispatches to, from the registered definitions or the manifest. */
+export interface AgentToolAction {
+  toolName: string
+  controller?: ControllerTarget
+}
+
+/** Pairs each derived tool with the route it came from, matched on name, method and path. */
+export function agentToolActions(
+  tools: ReadonlyArray<Pick<DerivedAgentTool, 'toolName' | 'routeName' | 'method' | 'path'>>,
+  routes: ReadonlyArray<{ name?: string; method: string; path: string; controller?: ControllerTarget }>,
+): AgentToolAction[] {
+  return tools.map((tool) => {
+    const route = routes.find((candidate) =>
+      candidate.name === tool.routeName && candidate.method.toUpperCase() === tool.method && candidate.path === tool.path)
+    return { toolName: tool.toolName, ...(route?.controller ? { controller: route.controller } : {}) }
+  })
+}
+
 export async function auditAiLocalTools(
   cwd: string,
-  definitions: RouteDefinition[] | undefined,
-  controllerMethods: ReadonlyMap<string, ControllerMethodInfo>,
+  agentActions: ReadonlyArray<AgentToolAction>,
+  scan: ControllerMethodScan,
   findings: AuditFinding[],
   cache: ParseCache = new ParseCache(),
 ): Promise<AiLocalToolListing[] | undefined> {
@@ -92,13 +115,11 @@ export async function auditAiLocalTools(
 
   const tables = await modelTables(cwd, cache)
   const routeTables = new Map<string, string[]>()
-  for (const tool of deriveAgentTools(definitions ?? []).tools) {
-    const route = definitions!.find((candidate) =>
-      candidate.name === tool.routeName && candidate.method.toUpperCase() === tool.method && candidate.path === tool.path)
-    const method = route?.controller && controllerMethods.get(`${route.controller.name}.${route.controller.action}`)
+  for (const { toolName, controller } of agentActions) {
+    const method = controller && controllerMethodFor(scan, controller).info
     if (!method) continue
     for (const table of tablesReferenced(method.body, tables)) {
-      routeTables.set(table, [...(routeTables.get(table) ?? []), tool.toolName])
+      routeTables.set(table, [...(routeTables.get(table) ?? []), toolName])
     }
   }
 

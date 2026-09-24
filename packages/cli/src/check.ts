@@ -63,6 +63,7 @@ import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
 import { runI18nCheck } from './i18n-check'
 import { introspectApp, type Introspection } from './introspect'
+import { INTROSPECTION_UNAVAILABLE_FIX, introspectionUnavailableMessage } from './manifest-section'
 import { checkEnvExample, ENV_EXAMPLE_FILE } from './app-env'
 import { checkConfigWiring } from './config-check'
 import { runSpecCheck } from './spec-check'
@@ -367,14 +368,13 @@ async function checkSchemaAggregateKeys(cwd: string, cache: ParseCache): Promise
 async function introspectionUnavailable(run: Promise<Introspection> | undefined): Promise<CheckResult | undefined> {
   const result = await run
   if (result?.status !== 'failed') return undefined
-  const reason = result.message.split('\n')[0].replace(/\.?$/u, '.')
   return {
     ...check(
       'introspection-unavailable',
       'Introspection',
       'warn',
-      `The app could not be introspected (${result.reason}): ${reason} The checks that read it were judged from source instead.`,
-      'Run `bunx guren introspect` to see the failure, or pass --no-introspect to skip it.',
+      introspectionUnavailableMessage(result, 'The checks that read it were judged from source instead.'),
+      INTROSPECTION_UNAVAILABLE_FIX,
     ),
     advisory: true,
   }
@@ -586,7 +586,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       // authorization rather than merely authentication, and the schemas an
       // agent reads exist. Shares 7.7's gate; content-activated inside.
       checks.push(
-        ...(await checkAgentRoutes({ cwd, routesFile: routeGraphFile, definitions, cache })),
+        ...(await checkAgentRoutes({ cwd, routesFile: routeGraphFile, definitions, cache, introspect: wiringIntrospect })),
       )
     }
 

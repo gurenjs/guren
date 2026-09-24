@@ -24,10 +24,8 @@ export function readManifestSection<K extends ManifestSectionKey>(
   manifest: AppManifest,
   key: K,
 ): ManifestSection<AppManifest[K]> {
-  const thrown = manifest.providers.filter((provider) => provider.register === 'threw').map((provider) => provider.name)
-  if (thrown.length > 0) {
-    return { status: 'unverified', reason: `${thrown.join(', ')} threw in register(), so what it configures is unknown` }
-  }
+  const thrown = thrownProviders(manifest)
+  if (thrown) return { status: 'unverified', reason: thrown }
   // A config left unbound for an env key this environment does not set. Checked before the value:
   // an unbound `session` is still described, as the middleware's `source: 'none'` fallback.
   // A warning with no `key` is an older server's, and may be any section.
@@ -43,6 +41,12 @@ export function readManifestSection<K extends ManifestSectionKey>(
     return { status: 'unverified', reason: `"${key}" is bound, but the introspected app could not describe it` }
   }
   return { status: 'described', value }
+}
+
+/** Why nothing a provider registers can be trusted, or `undefined` when every provider registered. */
+function thrownProviders(manifest: AppManifest): string | undefined {
+  const thrown = manifest.providers.filter((provider) => provider.register === 'threw').map((provider) => provider.name)
+  return thrown.length > 0 ? `${thrown.join(', ')} threw in register(), so what it configures is unknown` : undefined
 }
 
 export function mapSection<T, U>(section: ManifestSection<T>, map: (value: T) => U): ManifestSection<U> {
@@ -66,13 +70,51 @@ export async function introspectedSection<K extends ManifestSectionKey>(
   introspect: IntrospectSource | undefined,
   key: K,
 ): Promise<IntrospectedSection<AppManifest[K]>> {
+  const routes = await introspectedRoutes(introspect)
+  if (routes.status === 'static') return routes
+  const section = readManifestSection(routes.manifest, key)
+  return section.status === 'described'
+    ? { status: 'described', value: section.value, manifest: routes.manifest }
+    : { status: 'static', reason: section.reason }
+}
+
+/**
+ * The introspected app's routes, for a check that judges them (RFC 0026 §5), asked for only now.
+ * A provider that threw falls back to source like a section does: it may have been the one to
+ * register a middleware alias the routes name, which the manifest would then call unresolved.
+ */
+export async function introspectedRoutes(
+  introspect: IntrospectSource | undefined,
+): Promise<{ status: 'described'; manifest: AppManifest } | { status: 'static'; reason?: string }> {
   if (introspect && 'skipped' in introspect) return { status: 'static', reason: introspect.skipped }
   const introspection = await introspect?.()
   if (introspection?.status !== 'ok') return { status: 'static' }
-  const section = readManifestSection(introspection.manifest, key)
-  return section.status === 'described'
-    ? { status: 'described', value: section.value, manifest: introspection.manifest }
-    : { status: 'static', reason: section.reason }
+  const thrown = thrownProviders(introspection.manifest)
+  return thrown ? { status: 'static', reason: thrown } : { status: 'described', manifest: introspection.manifest }
+}
+
+/**
+ * What introspection skipped that could register app state, in words: a `createApp({ boot })`
+ * callback, and each app provider whose `introspect()` hook ran in place of `register()`
+ * (`ConfigServiceProvider` always does, hence the `framework` exclusion). A provider that threw
+ * never reaches here: {@link introspectedRoutes} already judges such an app from source.
+ */
+export function skippedRegistrars(manifest: Pick<AppManifest, 'warnings' | 'providers'>): string[] {
+  return [
+    ...(manifest.warnings.some((warning) => warning.code === 'boot-callback-skipped') ? ['the createApp({ boot }) callback'] : []),
+    ...manifest.providers
+      .filter((provider) => provider.register === 'introspect-hook' && provider.source !== 'framework')
+      .map((provider) => `${provider.name}.register() (its introspect() hook ran instead)`),
+  ]
+}
+
+/** The remedy the one `introspection-unavailable` line carries, in `guren check` and `guren audit` alike. */
+export const INTROSPECTION_UNAVAILABLE_FIX = 'Run `bunx guren introspect` to see the failure, or pass --no-introspect to skip it.'
+
+/** That line's message: the failure's first line, then what the command judged instead. */
+export function introspectionUnavailableMessage(failure: Extract<Introspection, { status: 'failed' }>, judgedInstead: string): string {
+  const reason = failure.message.split('\n')[0]!.replace(/\.?$/u, '.')
+  return `The app could not be introspected (${failure.reason}): ${reason} ${judgedInstead}`
 }
 
 /** Results a check judged from source, naming why the manifest was not used when there is a reason. */

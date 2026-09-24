@@ -3,10 +3,11 @@ import { realpath } from 'node:fs/promises'
 import { resolve, relative, sep } from 'node:path'
 
 /**
- * Runs a git command in `cwd` and returns stdout split into non-empty lines, or
- * `null` if git is unavailable, `cwd` isn't a repo, or the command fails.
+ * Runs a git command in `cwd` and returns its stdout untouched, or `null` if git
+ * is unavailable, `cwd` isn't a repo, or the command fails. For `-z` output,
+ * whose paths a trim or a line split would corrupt.
  */
-export function runGit(cwd: string, args: string[]): Promise<string[] | null> {
+export function runGitRaw(cwd: string, args: string[]): Promise<string | null> {
   return new Promise((resolvePromise) => {
     let proc
     try {
@@ -16,24 +17,28 @@ export function runGit(cwd: string, args: string[]): Promise<string[] | null> {
       return
     }
 
-    let stdout = ''
+    const chunks: Buffer[] = []
     proc.stdout?.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString('utf-8')
+      chunks.push(chunk)
     })
     proc.on('error', () => resolvePromise(null))
     proc.on('close', (code) => {
-      if (code !== 0) {
-        resolvePromise(null)
-        return
-      }
-      resolvePromise(
-        stdout
-          .split('\n')
-          .map((line) => line.trim())
-          .filter((line) => line.length > 0),
-      )
+      resolvePromise(code === 0 ? Buffer.concat(chunks).toString('utf-8') : null)
     })
   })
+}
+
+/**
+ * Runs a git command in `cwd` and returns stdout split into non-empty lines, or
+ * `null` if git is unavailable, `cwd` isn't a repo, or the command fails.
+ */
+export async function runGit(cwd: string, args: string[]): Promise<string[] | null> {
+  const stdout = await runGitRaw(cwd, args)
+  if (stdout === null) return null
+  return stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
 }
 
 /**
