@@ -3,6 +3,8 @@ import { consola } from 'consola'
 import type { DerivedAgentTool, RouteDefinition as ServerRouteDefinition } from '@guren/server'
 import { loadIntrospectedRouteDefinitions } from './app-routes'
 import { introspectApp } from './introspect'
+import { introspectionUnavailableMessage, ROUTES_FLAG_NOT_INTROSPECTED } from './manifest-section'
+import { routesEntryOrDefault } from './route-registrar'
 import { PATH_PARAM_PATTERN, escapeSingleQuoted as escapeSingleQuotes, escapeTemplateLiteral as escapeTemplateSegment, extractPathParamNames, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { CONTRACT_SEGMENTS } from './contract-segments'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
@@ -48,12 +50,14 @@ async function loadCodegenRoutes(routesFile: string, appRoot: string, introspect
   const loadStatic = () => loadRouteDefinitions(routesFile, appRoot)
   if (!introspect) return loadStatic()
 
-  const introspection = introspectApp(appRoot)
-  const { definitions, source } = await loadIntrospectedRouteDefinitions(() => introspection, loadStatic)
+  // The manifest describes the entry's routes, which a file `--routes` names may not be.
+  const entryRoutes = resolve(appRoot, await routesEntryOrDefault(appRoot))
+  const introspection = entryRoutes === routesFile ? () => introspectApp(appRoot) : { skipped: ROUTES_FLAG_NOT_INTROSPECTED }
+  const { definitions, source } = await loadIntrospectedRouteDefinitions(introspection, loadStatic)
   if (source.evidence === 'static') {
-    const run = await introspection
-    const reason = run.status === 'failed' ? `the app could not be introspected (${run.reason}): ${run.message.split('\n')[0]}` : source.reason
-    consola.warn(`Generated from the routes file instead of the introspected app: ${reason ?? 'the introspection was not usable'}.`)
+    consola.warn(source.failure
+      ? introspectionUnavailableMessage(source.failure, 'Generated from the routes file instead.')
+      : `Generated from the routes file instead of the introspected app: ${source.reason ?? 'the introspection was not usable'}.`)
     return definitions
   }
   if (source.unmatched.length === 0) return definitions
@@ -63,12 +67,12 @@ async function loadCodegenRoutes(routesFile: string, appRoot: string, introspect
     + `${source.unmatched.map((route) => `${route.method} ${route.path}`).join(', ')}.`,
   )
   const unmatched = new Set(source.unmatched)
-  const toolFor = (route: { method: string; path: string; name?: string }) => source.manifest.agentTools.find((tool) =>
-    tool.method === route.method.toUpperCase() && tool.path === route.path && tool.routeName === route.name)
+  const toolKey = (method: string, path: string, name: string | undefined) => `${method.toUpperCase()} ${path} ${name ?? ''}`
+  const tools = new Map(source.manifest.agentTools.map((tool) => [toolKey(tool.method, tool.path, tool.routeName), tool]))
   return definitions.map((definition, index) => {
     if (!unmatched.has(source.manifest.routes[index]!)) return definition
     const { agent, ...rest } = definition
-    const tool = agent ? toolFor(definition) : undefined
+    const tool = agent ? tools.get(toolKey(definition.method, definition.path, definition.name)) : undefined
     return tool ? { ...rest, introspectedAgentTool: tool } : rest
   })
 }

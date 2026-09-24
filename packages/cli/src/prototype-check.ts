@@ -13,7 +13,7 @@ import type { RouteDefinition } from '@guren/server'
 import { memberKeyName, objectLiteral, propertyValue, walk, type BabelNode } from './ast-walk'
 import { check, type CheckResult } from './check-result'
 import { fileExists, readIfExists } from './discovery'
-import { introspectedRoutes, judgedFromSource, type IntrospectSource } from './manifest-section'
+import { introspectedRoutes, judgedFromManifest, judgedFromSource, type IntrospectSource } from './manifest-section'
 import { discoverRoutePathFiles } from './route-path-check'
 import type { ParseCache } from './parse-cache'
 import { resolveAppEntry } from './provider-registrar'
@@ -116,9 +116,6 @@ export interface PrototypeCheckOptions {
 /** What the rules read of a route: a registered definition or a manifest entry. */
 type PrototypeRoute = Pick<RouteDefinition, 'method' | 'path' | 'name' | 'prototype' | 'agent'>
 
-/** Findings read from source whichever path supplied the routes: the entry's `createApp()` and the fixture's parse. */
-const SOURCE_FINDINGS = ['prototype-app-wiring', 'prototype-fixture-unreadable']
-
 function describe(route: PrototypeRoute): string {
   return `${route.method.toUpperCase()} ${route.path}${route.name ? ` (${route.name})` : ''}`
 }
@@ -130,12 +127,15 @@ export async function checkPrototypeRoutes(options: PrototypeCheckOptions): Prom
     return judgedFromSource(await checkClientWiringWithoutFixture(cwd))
   }
 
-  const introspected = options.introspect ? await introspectedRoutes(options.introspect) : undefined
-  if (introspected?.status !== 'described') {
-    return judgedFromSource(await judgePrototypeRoutes(options, options.definitions, hasFixture), introspected?.reason)
-  }
-  const results = await judgePrototypeRoutes(options, introspected.manifest.routes, hasFixture)
-  return results.map((result) => ({ ...result, evidence: SOURCE_FINDINGS.includes(result.key) ? 'static' : 'manifest' }))
+  const introspected = await introspectedRoutes(options.introspect)
+  return introspected.status === 'described'
+    ? judgedFromManifest(await judgePrototypeRoutes(options, introspected.manifest.routes, hasFixture))
+    : judgedFromSource(await judgePrototypeRoutes(options, options.definitions, hasFixture), introspected.reason)
+}
+
+/** A finding read from source whichever path supplied the routes: the entry's `createApp()`, the fixture's parse. */
+function fromSource(result: CheckResult): CheckResult {
+  return { ...result, evidence: 'static' }
 }
 
 async function judgePrototypeRoutes(
@@ -177,7 +177,7 @@ async function judgePrototypeRoutes(
   }
 
   if (prototypeRoutes.length > 0) {
-    results.push(await checkAppWiring(cwd, prototypeRoutes))
+    results.push(fromSource(await checkAppWiring(cwd, prototypeRoutes)))
   }
 
   let fixture: FixtureRoutes | null = null
@@ -185,9 +185,9 @@ async function judgePrototypeRoutes(
     const parsed = await cache.get(fixturePath)
     fixture = parsed ? fixtureRoutesFromAst(parsed.ast) : null
     if (!parsed) {
-      results.push(check('prototype-fixture-unreadable', TITLE, 'warn', `${relPath} could not be parsed, so its entries were not checked.`, undefined, relPath))
+      results.push(fromSource(check('prototype-fixture-unreadable', TITLE, 'warn', `${relPath} could not be parsed, so its entries were not checked.`, undefined, relPath)))
     } else if (!fixture) {
-      results.push(
+      results.push(fromSource(
         check(
           'prototype-fixture-unreadable',
           TITLE,
@@ -196,9 +196,9 @@ async function judgePrototypeRoutes(
           'Export `definePrototype({ manifest, routes })` as the default export.',
           relPath,
         ),
-      )
+      ))
     } else if (fixture.unreadable) {
-      results.push(
+      results.push(fromSource(
         check(
           'prototype-fixture-unreadable',
           TITLE,
@@ -207,7 +207,7 @@ async function judgePrototypeRoutes(
           'Declare every route with a literal key so the check and the client can read them.',
           relPath,
         ),
-      )
+      ))
       fixture = null
     }
   } else if (prototypeRoutes.length > 0) {

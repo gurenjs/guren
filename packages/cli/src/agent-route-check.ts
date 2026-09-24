@@ -23,7 +23,7 @@ import {
   type ControllerMethodScan,
   type ControllerTarget,
 } from './controller-methods'
-import { introspectedRoutes, judgedFromSource, type IntrospectSource } from './manifest-section'
+import { introspectedRoutes, judgedFromManifest, judgedFromSource, type IntrospectSource } from './manifest-section'
 import { fileExists } from './discovery'
 import { describeMethod } from './http-methods'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
@@ -320,7 +320,8 @@ function outputFinding(route: AgentRoute): CheckResult | undefined {
     + 'response hint so the tool description can carry the payload type.'
 
   if (route.methodInfo && INERTIA_CALL_PATTERN.test(route.methodInfo.body)) {
-    return check(
+    return {
+      ...check(
       `agent-route-inertia:${route.keySuffix}`,
       title,
       'warn',
@@ -329,7 +330,9 @@ function outputFinding(route: AgentRoute): CheckResult | undefined {
       + 'pass its component — a shape nothing checks and any UI change can move.',
       suggestion,
       route.methodInfo.filePath,
-    )
+      ),
+      evidence: 'static',
+    }
   }
 
   return check(
@@ -491,22 +494,25 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
     }
   }
 
-  if (!definitions.some((definition) => definition.agent)) return []
+  const fromRoutesFile = definitions.filter((definition) => definition.agent)
+  if (fromRoutesFile.length === 0) return []
 
-  const introspected = options.introspect ? await introspectedRoutes(options.introspect) : undefined
   const cache = options.cache ?? new ParseCache()
-  const agentDefinitions: AgentRouteDefinition[] = introspected?.status === 'described'
+  // Started beside the introspection: whichever routes are judged, these name the same controllers.
+  const scanning = fromRoutesFile.some((definition) => definition.controller) ? parseControllerMethods(cwd, cache) : undefined
+  const introspected = await introspectedRoutes(options.introspect)
+  const agentDefinitions: AgentRouteDefinition[] = introspected.status === 'described'
     ? manifestRouteTargets(
       introspected.manifest,
       await routeSourceClasses(cwd, introspected.manifest, resolve(cwd, routesFile), cache),
     ).filter((route) => route.agent)
-    : definitions.filter((definition) => definition.agent)
+    : fromRoutesFile
   // The routes file's agent routes may all sit in a module the app never mounts.
   if (agentDefinitions.length === 0) return []
 
   // Skipped when every agent route is an inline handler: no body for any rule to read.
   const scan = agentDefinitions.some((definition) => definition.controller)
-    ? await parseControllerMethods(cwd, cache)
+    ? await (scanning ?? parseControllerMethods(cwd, cache))
     : EMPTY_CONTROLLER_SCAN
 
   const routes = agentDefinitions.flatMap((definition) => {
@@ -514,10 +520,10 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
     return route ? [route] : []
   })
   // A verdict that read a controller body, or looked for one, is the scan's; the rest are the route's.
-  const fromBody = (route: AgentRoute): CheckEvidence => (route.definition.controller ? 'static' : 'manifest')
-  const tagged: Array<{ result: CheckResult; evidence: CheckEvidence }> = []
-  const push = (result: CheckResult | undefined, evidence: CheckEvidence): void => {
-    if (result) tagged.push({ result, evidence })
+  const fromBody = (route: AgentRoute): CheckEvidence | undefined => (route.definition.controller ? 'static' : undefined)
+  const results: CheckResult[] = []
+  const push = (result: CheckResult | undefined, evidence?: CheckEvidence): void => {
+    if (result) results.push(evidence ? { ...result, evidence } : result)
   }
 
   // Reported separately because the per-route could-not-verify message blames
@@ -557,7 +563,7 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
     )
   }
 
-  for (const duplicate of duplicateFindings(routes)) push(duplicate, 'manifest')
+  results.push(...duplicateFindings(routes))
 
   // Only asked when a route declares approval — the scan reads every app source.
   if (routes.some((route) => route.agent.approval === 'required')) {
@@ -567,15 +573,14 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
   for (const route of routes) {
     // At most one naming finding per route, first applicable wins: the four
     // rules describe one defect with one fix, renaming the tool.
-    push(nameFinding(route) ?? toolNameFinding(route) ?? reservedNameFinding(route) ?? portableNameFinding(route), 'manifest')
+    push(nameFinding(route) ?? toolNameFinding(route) ?? reservedNameFinding(route) ?? portableNameFinding(route))
     push(authorizationFinding(route), fromBody(route))
     push(readOnlyHonestyFinding(route), fromBody(route))
-    const output = outputFinding(route)
-    push(output, output?.key.startsWith('agent-route-inertia:') ? fromBody(route) : 'manifest')
-    push(inputFinding(route), 'manifest')
+    push(outputFinding(route))
+    push(inputFinding(route))
   }
 
-  if (tagged.length === 0) {
+  if (results.length === 0) {
     push(
       check(
         'agent-routes',
@@ -588,11 +593,9 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
         + 'every route declares the schemas a tool is derived from. Nothing here validates the derived tools '
         + 'themselves, or any behaviour outside the controller bodies this check reads.',
       ),
-      routes.some((route) => route.definition.controller) ? 'static' : 'manifest',
+      routes.some((route) => route.definition.controller) ? 'static' : undefined,
     )
   }
 
-  return introspected?.status === 'described'
-    ? tagged.map(({ result, evidence }) => ({ ...result, evidence }))
-    : judgedFromSource(tagged.map(({ result }) => result), introspected?.reason)
+  return introspected.status === 'described' ? judgedFromManifest(results) : judgedFromSource(results, introspected.reason)
 }

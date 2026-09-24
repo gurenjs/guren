@@ -51,6 +51,7 @@ import {
   routeSourceClasses,
 } from './controller-methods'
 import type { CheckEvidence } from './check-result'
+import { manifestMiddlewareNames } from './app-routes'
 import { introspectApp } from './introspect'
 import {
   INTROSPECTION_UNAVAILABLE_FIX,
@@ -577,7 +578,7 @@ function auditedFromManifest(route: ReturnType<typeof manifestRouteTargets>[numb
     hasBodySchema: route.schemas.body !== undefined,
     validatesBody: Boolean(route.validatesBody),
     hasInlineMiddleware: Boolean(route.hasInlineMiddleware),
-    middlewareNames: route.middleware.flatMap((entry) => (entry.kind !== 'inline' && entry.name ? [entry.name] : [])),
+    middlewareNames: manifestMiddlewareNames(route),
     auth: manifestAuthVerdict(route),
   }
 }

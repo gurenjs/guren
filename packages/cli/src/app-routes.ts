@@ -7,7 +7,7 @@
  */
 import type { AppManifest, RouteDefinition, RouteEntry } from '@guren/server'
 
-import { introspectedRoutes, type IntrospectSource } from './manifest-section'
+import { introspectedRoutes, type IntrospectionFailed, type IntrospectSource } from './manifest-section'
 
 type JoinableRoute = Pick<RouteDefinition, 'method' | 'path' | 'name'> & { controller?: { name: string; action: string } }
 
@@ -29,17 +29,16 @@ export function joinRouteDefinitions<T extends JoinableRoute>(
   const byKey = new Map<string, T[]>()
   for (const definition of definitions) {
     const key = routeJoinKey(definition)
-    byKey.set(key, [...(byKey.get(key) ?? []), definition])
+    const group = byKey.get(key)
+    if (group) group.push(definition)
+    else byKey.set(key, [definition])
   }
+  const keys = entries.map(routeJoinKey)
   const entryCounts = new Map<string, number>()
-  for (const entry of entries) {
-    const key = routeJoinKey(entry)
-    entryCounts.set(key, (entryCounts.get(key) ?? 0) + 1)
-  }
+  for (const key of keys) entryCounts.set(key, (entryCounts.get(key) ?? 0) + 1)
 
   const taken = new Map<string, number>()
-  return entries.map((entry) => {
-    const key = routeJoinKey(entry)
+  return keys.map((key) => {
     const candidates = byKey.get(key)
     if (!candidates || candidates.length !== entryCounts.get(key)) return undefined
     const index = taken.get(key) ?? 0
@@ -48,19 +47,24 @@ export function joinRouteDefinitions<T extends JoinableRoute>(
   })
 }
 
+/** The alias and group names a manifest route's chain names, as a registered definition's `middlewareNames`. */
+export function manifestMiddlewareNames(entry: Pick<RouteEntry, 'middleware'>): string[] {
+  return entry.middleware.flatMap((item) => (item.kind !== 'inline' && item.name ? [item.name] : []))
+}
+
 /** A manifest entry in a registered definition's shape, with no schemas: nothing in the manifest is Zod. */
-export function definitionFromEntry(entry: RouteEntry): RouteDefinition {
+function definitionFromEntry(entry: RouteEntry): RouteDefinition {
   const { module, controller, middleware, schemas, ...rest } = entry
   return {
     ...rest,
     ...(controller ? { controller: { name: controller.name, action: controller.action } } : {}),
-    middlewareNames: middleware.flatMap((item) => (item.kind !== 'inline' && item.name !== null ? [item.name] : [])),
+    middlewareNames: manifestMiddlewareNames(entry),
   }
 }
 
 export type IntrospectedRouteSource =
   | { evidence: 'manifest'; manifest: AppManifest; unmatched: RouteEntry[] }
-  | { evidence: 'static'; reason?: string }
+  | { evidence: 'static'; reason?: string; failure?: IntrospectionFailed }
 
 export interface IntrospectedRouteDefinitions {
   definitions: RouteDefinition[]
@@ -80,7 +84,7 @@ export async function loadIntrospectedRouteDefinitions(
 ): Promise<IntrospectedRouteDefinitions> {
   const [introspected, definitions] = await Promise.all([introspectedRoutes(introspect), loadStatic()])
   if (introspected.status === 'static') {
-    return { definitions, source: { evidence: 'static', ...(introspected.reason ? { reason: introspected.reason } : {}) } }
+    return { definitions, source: { evidence: 'static', reason: introspected.reason, failure: introspected.failure } }
   }
 
   const { manifest } = introspected

@@ -85,9 +85,11 @@ export async function introspectedSection<K extends ManifestSectionKey>(
  */
 export async function introspectedRoutes(
   introspect: IntrospectSource | undefined,
-): Promise<{ status: 'described'; manifest: AppManifest } | { status: 'static'; reason?: string }> {
+): Promise<{ status: 'described'; manifest: AppManifest } | { status: 'static'; reason?: string; failure?: IntrospectionFailed }> {
   if (introspect && 'skipped' in introspect) return { status: 'static', reason: introspect.skipped }
   const introspection = await introspect?.()
+  // No `reason` for a failure: `guren check` reports it once; a command with no such line reads `failure`.
+  if (introspection?.status === 'failed') return { status: 'static', failure: introspection }
   if (introspection?.status !== 'ok') return { status: 'static' }
   const thrown = thrownProviders(introspection.manifest)
   return thrown ? { status: 'static', reason: thrown } : { status: 'described', manifest: introspection.manifest }
@@ -114,8 +116,15 @@ export const ROUTES_FLAG_NOT_INTROSPECTED = '--routes names a routes file, and t
 /** The remedy the one `introspection-unavailable` line carries, in `guren check` and `guren audit` alike. */
 export const INTROSPECTION_UNAVAILABLE_FIX = 'Run `bunx guren introspect` to see the failure, or pass --no-introspect to skip it.'
 
+export type IntrospectionFailed = Extract<Introspection, { status: 'failed' }>
+
+/** A failure in one line, `<reason>: <first line of the message>`, for a message or an `evidenceReason`. */
+export function describeIntrospectionFailure(failure: IntrospectionFailed): string {
+  return `${failure.reason}: ${failure.message.split('\n')[0]!.replace(/\.$/u, '')}`
+}
+
 /** That line's message: the failure's first line, then what the command judged instead. */
-export function introspectionUnavailableMessage(failure: Extract<Introspection, { status: 'failed' }>, judgedInstead: string): string {
+export function introspectionUnavailableMessage(failure: IntrospectionFailed, judgedInstead: string): string {
   const reason = failure.message.split('\n')[0]!.replace(/\.?$/u, '.')
   return `The app could not be introspected (${failure.reason}): ${reason} ${judgedInstead}`
 }

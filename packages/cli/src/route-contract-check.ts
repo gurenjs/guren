@@ -13,7 +13,7 @@ import { joinRouteDefinitions } from './app-routes'
 import { check, type CheckEvidence, type CheckResult } from './check-result'
 import { fileExists } from './discovery'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
-import { introspectedRoutes, judgedFromSource, type IntrospectSource } from './manifest-section'
+import { introspectedRoutes, judgedFromManifest, judgedFromSource, type IntrospectSource } from './manifest-section'
 import { extractPathParamNames } from './utils'
 
 export interface RouteContractCheckOptions {
@@ -243,7 +243,7 @@ function staticParamKeys(definition: RouteDefinition): ParamKeysResult | undefin
  * schema: not an object with properties (a nullable or piped object, a transform, an unreadable
  * node), or a `schema-partial` note under it, since the walker drops a property it cannot render.
  */
-function manifestParamKeys(entry: RouteEntry, warnings: AppManifest['warnings']): ParamKeysResult | undefined {
+function manifestParamKeys(entry: RouteEntry, warnings: AppManifest['warnings']): { keys: ParamKey[] } | undefined {
   const schema = entry.schemas.params
   if (!schema || 'unreadable' in schema || schema.type !== 'object' || !schema.properties) return undefined
   const route = `${entry.method} ${entry.path}`
@@ -254,38 +254,25 @@ function manifestParamKeys(entry: RouteEntry, warnings: AppManifest['warnings'])
   return { keys: Object.keys(schema.properties).map((name) => ({ name, omissible: !required.has(name) })) }
 }
 
-function sameKeys(left: ParamKeysResult, right: ParamKeysResult): boolean {
-  if ('unreadable' in left || 'unreadable' in right) return false
-  const names = (result: { keys: ParamKey[] }): string => result.keys.map((key) => key.name).sort().join('\n')
-  return names(left) === names(right)
-}
+const keyNames = (result: { keys: ParamKey[] }): string => result.keys.map((key) => key.name).sort().join('\n')
 
 /**
- * One manifest route's findings. Its keys come from the manifest, unless the routes file's Zod
- * for the same route reads keys the rendering lacks, or the rendering is short of the schema:
- * then the Zod decides (`static`), and with no Zod the schema is reported unreadable.
+ * Which reading judges one manifest route's params: the manifest's, unless the routes file's Zod
+ * for the same route reads keys the rendering lacks, or the rendering is short of the schema;
+ * then the Zod (`static`), and with no Zod the schema is reported unreadable.
  */
-function checkManifestRoute(
+function manifestParams(
   entry: RouteEntry,
   warnings: AppManifest['warnings'],
   definition: RouteDefinition | undefined,
-): CheckResult[] {
+): { parsed?: ParamKeysResult; evidence?: CheckEvidence } {
   const declared = entry.schemas.params
-  const fromZod = definition ? staticParamKeys(definition) : undefined
+  if (!declared) return {}
   const fromManifest = manifestParamKeys(entry, warnings)
-  let parsed: ParamKeysResult | undefined
-  let evidence: CheckEvidence = 'manifest'
-  if (!declared) {
-    parsed = undefined
-  } else if (fromManifest && (!fromZod || sameKeys(fromManifest, fromZod))) {
-    parsed = fromManifest
-  } else if (fromZod) {
-    parsed = fromZod
-    evidence = 'static'
-  } else {
-    parsed = { unreadable: 'unreadable' in declared ? declared.unreadable : 'the introspected app renders the params schema without every key it declares' }
-  }
-  return checkRoute(entry, parsed).map((result) => ({ ...result, evidence }))
+  const fromZod = definition ? staticParamKeys(definition) : undefined
+  if (fromManifest && (!fromZod || ('keys' in fromZod && keyNames(fromZod) === keyNames(fromManifest)))) return { parsed: fromManifest }
+  if (fromZod) return { parsed: fromZod, evidence: 'static' }
+  return { parsed: { unreadable: 'unreadable' in declared ? declared.unreadable : 'the introspected app renders the params schema without every key it declares' } }
 }
 
 function summary(count: number): CheckResult {
@@ -333,14 +320,16 @@ export async function checkRouteContracts(options: RouteContractCheckOptions): P
   // Content-activated like RFC 0026 Part 2b: only a params schema or a binding starts the child.
   const declaresContract = definitions.some((definition) =>
     definition.schemas?.params || Object.keys(definition.bindings ?? {}).length > 0)
-  const introspected = declaresContract && options.introspect ? await introspectedRoutes(options.introspect) : undefined
+  const introspected = declaresContract ? await introspectedRoutes(options.introspect) : undefined
 
   if (introspected?.status === 'described') {
     const { routes, warnings } = introspected.manifest
     const joined = joinRouteDefinitions(routes, definitions)
-    const results = routes.flatMap((entry, index) => checkManifestRoute(entry, warnings, joined[index]))
-    if (results.length > 0) return results
-    return [{ ...summary(routes.length), evidence: 'manifest' }]
+    const results = routes.flatMap((entry, index) => {
+      const { parsed, evidence } = manifestParams(entry, warnings, joined[index])
+      return checkRoute(entry, parsed).map((result) => (evidence ? { ...result, evidence } : result))
+    })
+    return judgedFromManifest(results.length > 0 ? results : [summary(routes.length)])
   }
 
   const results = definitions.flatMap((definition) => checkRoute(definition, staticParamKeys(definition)))

@@ -35,7 +35,7 @@ import { appDeclaresPrototypeRoutes } from './prototype-check'
 import type { RouteDefinition } from '@guren/server'
 import { analyzeDeployRuntime, judgeDeployRuntime } from './deploy-runtime'
 import { introspectApp, type Introspection } from './introspect'
-import { introspectedRoutes } from './manifest-section'
+import { describeIntrospectionFailure, introspectedRoutes } from './manifest-section'
 import type { CheckEvidence } from './check-result'
 import { detectConfigMigrations, undeclaredEnv, type ConfigMigration, type EnvDeclaration } from './config-migration'
 
@@ -385,28 +385,23 @@ async function detectPrototypeRoutes(context: DoctorRuleContext): Promise<Doctor
   // The introspected app's routes when it registers cleanly (RFC 0026 §5), the routes file's otherwise.
   const introspected = await introspectedRoutes(context.introspection)
   let definitions: Array<Pick<RouteDefinition, 'method' | 'path' | 'name' | 'prototype'>>
-  if (introspected.status === 'described') {
-    definitions = introspected.manifest.routes
-  } else {
-    try {
-      definitions = await context.routeGraph()
-    } catch (error) {
-      return createCheck(
-        key,
-        title,
-        'warn',
-        `Routes could not be loaded, so routes on the prototype fixture were not counted: ${error instanceof Error ? error.message : String(error)}`,
-        { manualFix: 'Fix the load error, then run `bunx guren doctor` again.' },
-      )
-    }
+  try {
+    definitions = introspected.status === 'described' ? introspected.manifest.routes : await context.routeGraph()
+  } catch (error) {
+    return createCheck(
+      key,
+      title,
+      'warn',
+      `Routes could not be loaded, so routes on the prototype fixture were not counted: ${error instanceof Error ? error.message : String(error)}`,
+      { manualFix: 'Fix the load error, then run `bunx guren doctor` again.' },
+    )
   }
-  const failure = await context.introspection?.()
-  const reason = failure?.status === 'failed'
-    ? `introspection failed with ${failure.reason}: ${failure.message.split('\n')[0]!.replace(/\.$/u, '')}`
-    : introspected.status === 'static' ? introspected.reason : undefined
   const evidence: Pick<DoctorCheck, 'evidence' | 'evidenceReason'> = introspected.status === 'described'
     ? { evidence: 'manifest' }
-    : { evidence: 'static', ...(reason ? { evidenceReason: reason } : {}) }
+    : {
+      evidence: 'static',
+      evidenceReason: introspected.failure ? `introspection failed with ${describeIntrospectionFailure(introspected.failure)}` : introspected.reason,
+    }
 
   const backlog = definitions.filter((route) => route.prototype)
   if (backlog.length === 0) {
