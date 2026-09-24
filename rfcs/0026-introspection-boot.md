@@ -641,10 +641,12 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >
 > - `route-contract-check`, `agent-route-check` and `prototype-check` judge
 >   `manifest.routes` when `guren check` introspects. Each asks for the run's one
->   introspection only after the routes file shows its content: a params schema
->   or a binding, an agent route, a prototype fixture or a `prototype` route. So
->   a route a provider or plugin registers is judged only beside such a route,
->   and a module in `modules/` that `createApp()` never mounts drops out. A
+>   introspection only after the routes file shows that rule's own content: the
+>   route contracts a params schema or a binding, the agent-route rules an agent
+>   route, the prototype rules a fixture or a `prototype` route. So a route a
+>   provider or plugin registers is judged by a rule only when the routes file
+>   has that rule's content, and a module in `modules/` that `createApp()` never
+>   mounts drops out. A
 >   provider that threw, a failed introspection, and `--routes` (the manifest
 >   describes the entry, as in `guren audit`) send the rules back to the routes
 >   file with `evidence: 'static'`.
@@ -653,17 +655,25 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   `permitsOmission()` stay two functions, and a test registers one route per
 >   wrapper to pin that both paths give every stray key the same severity. The
 >   manifest is not used for a route whose params schema it renders short: not an
->   object with `properties` (a nullable object is `anyOf`, a transform a bare
->   `object`), a `schema-partial` note under it (the walker drops `z.any()`), or
->   keys other than the ones the routes file's Zod declares (it drops
->   `z.undefined()` without a note). The routes file's definition of the same
->   route, joined on method, path, name and controller action, then decides
->   (`static`); a route with no such definition is an unreadable warning, never
->   a pass. That last case rests on the walker's notes, so a `z.undefined()` key
->   on a route only the app registers goes unseen; a server walker that noted
->   the drop would close it. The join leaves a key both sides count differently
->   unmatched, so a provider registering a route identical to one in the routes
->   file (method, path, name and action) sends both to the manifest's reading.
+>   object with `properties` (a nullable object is `anyOf`, and a bare
+>   `z.transform()` or `z.preprocess()` a bare `object`; zod 4's `.transform()`
+>   is a pipe whose input side keeps its properties), a `schema-partial` note
+>   under it, or keys other than the ones the routes file's Zod declares. The
+>   routes file's definition of the same route, joined on method, path, name and
+>   controller action, then decides (`static`). A route with no such definition
+>   and a short rendering is an unreadable warning, never a pass, naming what is
+>   known: the note, or that the schema is not an object with properties. A note
+>   rejects the whole params schema, even one on a nested value
+>   (`z.array(z.any())`) that drops no key.
+>
+>   The walker also drops keys with no note: `z.undefined()`,
+>   `z.undefined().optional()`, a union whose options all render as nothing, a
+>   promise with no inner schema. Only the Zod shows those, so on a route with
+>   no joined definition they go unseen and its other keys are judged. That
+>   covers a route only the app registers, and a routes-file route whose join
+>   key the two sides count differently (a provider registering a route
+>   identical to one in the routes file, by method, path, name and action).
+>   A server walker that noted every drop would close it.
 > - Evidence: a verdict that read or looked for a controller body is `static`
 >   (agent-route authorization, `readOnlyHint` honesty, the Inertia output
 >   finding, the approval-queue scan), and so are `prototype-app-wiring` and an
@@ -681,18 +691,30 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   manifest does not carry. So `--introspect` means: the manifest decides which
 >   routes exist and in which order, and each route the routes file also
 >   registers is rendered from that definition. The two paths write the same
->   bytes exactly when the route sets match: measured on `examples/blog` (29
->   routes) and `web/` (22), the same set in the same order on both, every
->   generated file identical. A route only the manifest has is rendered without
->   schema types, with a warning naming it; an agent tool on it comes from
->   `manifest.agentTools`, unless a routes-file tool already takes its name. A
->   failed introspection, and a `--routes` file other than the one `check` probes
->   as the entry, write from the routes file and say why; a routes file that
->   fails to load fails as before, since its Zod is required.
-> - `planAgentManifest()`, which `check` and `doctor` ask whether
->   `.guren/agents.gen.ts` should exist, stays on the routes file: it is the rule
->   for what codegen writes by default, and a check reading another derivation
->   would ask for a file codegen then deletes.
+>   bytes when the route sets match and come in the same order: measured on
+>   `examples/blog` (29 routes), `web/` (22) and `examples/agents`, every
+>   generated file identical. The generators sort by name and path, and the sort
+>   is stable, so two routes sharing a name keep their input order; the manifest
+>   orders modules as `createApp({ modules })` lists them and the routes file's
+>   load by directory, so such an app can differ there. A route only the
+>   manifest has is rendered without schema types, with a warning naming it; an
+>   agent tool on it comes from `manifest.agentTools`. Tool names are
+>   first-wins, as `deriveAgentTools()` is at runtime, where a provider's routes
+>   register before the routes file's: the generated manifest keeps the tool the
+>   running app exposes, and `guren check` still fails the duplicate. A failed
+>   introspection, and a `--routes` file other than the one `check` probes as
+>   the entry, write from the routes file and say why; a routes file that fails
+>   to load fails as before, since its Zod is required.
+> - `--introspect` output is one-shot. The default codegen (the Vite watcher's,
+>   the gate's, a plain `guren codegen`) is what every comparer reads, and the
+>   next run of it drops the routes only the app registers again.
+>   `planAgentManifest()`, which `check` and `doctor` ask whether
+>   `.guren/agents.gen.ts` should exist, follows the default: in an app whose
+>   agent tools all come from a provider, a file `--introspect` wrote reads as
+>   stale to both, and the `guren codegen` they name removes it. The finding says
+>   so. Reading the manifest there instead would not settle it: `guren gate` and
+>   the edit hook run `runCheck()` without introspecting, so the gate would call
+>   the same file stale while `guren check` passed it.
 > - The spec views stay on the routes file, with no flag. `docs/spec/` is
 >   committed and drift-gated, and `guren gate` and the edit hook run
 >   `runCheck()` in process, which does not introspect (2a). A `spec:generate`
@@ -703,9 +725,13 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   `--no-introspect` or `--routes` reads the routes file. Type strings are still
 >   rendered from the routes file's Zod, so a provider's route is listed with
 >   none, and `controller` keeps its `{ name, action }` shape in `--json`. The
->   dev MCP server's context stays on the routes file. `guren context <Entity>`
->   passes the flag to `generateEntityContext()`, which introspects only when a
->   route reaches a class two files declare (2c).
+>   dev MCP server's context stays on the routes file. When introspection was
+>   asked for and not used (a failure, a provider that threw), the Routes section
+>   says why in one line and `--json` carries it as `routesNotIntrospected`, so
+>   the SessionStart hook, which drops stderr, still shows it.
+>   `guren context <Entity>` passes the flag to `generateEntityContext()`, which
+>   introspects only when a route reaches a class two files declare (2c), and
+>   never with `--routes`.
 > - `guren doctor`'s `prototype-routes` counts the manifest's routes once a
 >   routes file passes the `prototype` handler, with `evidence` and, when it read
 >   the routes file for a reason, `evidenceReason`. Doctor still adds no warning

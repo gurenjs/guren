@@ -173,7 +173,7 @@ async function checkAgentManifest(
         key,
         AGENTS_MANIFEST_FILE,
         'warn',
-        `${AGENTS_MANIFEST_FILE} describes agent tools this app no longer exposes — no route derives one.`,
+        `${AGENTS_MANIFEST_FILE} describes agent tools no route in the routes file derives, so \`guren codegen\` removes it. A file \`guren codegen --introspect\` wrote from routes only the app registers reads the same way: that output lasts until the next codegen without the flag.`,
         `Run: ${codegen} (it removes ${AGENTS_MANIFEST_FILE})`,
       ),
       fix,

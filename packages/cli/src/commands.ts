@@ -1811,7 +1811,7 @@ const contextCommand = defineCommand({
       valueHint: 'owner/name',
       description: 'Repository bare issue numbers belong to, instead of the origin remote (entity mode only).',
     },
-    // Same shape as check's `introspect` flag above.
+    // Same shape as check's `introspect` flag below.
     introspect: {
       type: 'boolean',
       default: true,

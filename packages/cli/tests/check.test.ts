@@ -260,7 +260,7 @@ export function registerWebRoutes(router: Router): void {
 
       const check = agentCheck(report)
       expect(check?.status).toBe('warn')
-      expect(check?.message).toContain('no longer exposes')
+      expect(check?.message).toContain('no route in the routes file derives')
       expect(check?.suggestion).toContain('it removes')
       expect(check?.fix).toEqual({ kind: 'command', args: ['codegen'] })
     })

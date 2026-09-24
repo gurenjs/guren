@@ -134,20 +134,12 @@ export async function generateAgentTypes(
   const appRoot = resolveAppRoot(options)
   const outputFile = resolve(appRoot, options.outputFile ?? AGENTS_MANIFEST_FILE)
 
-  // Returned rather than logged, same contract as `generateDataTypes`.
+  // Returned rather than logged, same contract as `generateDataTypes`. The derivation is first-wins,
+  // as at runtime, and a route with no Zod here (`codegen --introspect`) takes the introspected app's tool.
   const { tools: derived, warnings } = deriveAgentTools(definitions)
-  // `guren codegen --introspect`: a route with no Zod here brings the introspected app's tool.
-  const tools = [...derived]
-  const names = new Set(derived.map((tool) => tool.toolName))
-  for (const { introspectedAgentTool: tool } of definitions) {
-    if (!tool) continue
-    if (names.has(tool.toolName)) {
-      warnings.push(`Agent tool "${tool.toolName}" of ${tool.method} ${tool.path} is left out: a route the routes file registers derives the same name.`)
-      continue
-    }
-    names.add(tool.toolName)
-    tools.push(tool)
-  }
+  const routeKey = (tool: Pick<DerivedAgentTool, 'method' | 'path' | 'routeName'>) => `${tool.method} ${tool.path} ${tool.routeName}`
+  const introspected = new Map(definitions.flatMap(({ introspectedAgentTool: tool }) => (tool ? [[routeKey(tool), tool] as const] : [])))
+  const tools = derived.map((tool) => introspected.get(routeKey(tool)) ?? tool)
 
   if (tools.length === 0) {
     await rm(outputFile, { force: true })

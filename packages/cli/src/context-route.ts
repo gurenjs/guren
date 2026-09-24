@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import type { AgentRouteMetadata, RouteDefinition } from '@guren/server'
 import { loadIntrospectedRouteDefinitions } from './app-routes'
 import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
-import type { IntrospectSource } from './manifest-section'
+import { introspectionUnavailableMessage, type IntrospectSource } from './manifest-section'
 import { schemaToTypeString } from './schema-type-extractor'
 
 /**
@@ -131,12 +131,17 @@ export async function loadContextRoutes(
   routesFile?: string,
   loadErrors?: string[],
   introspect?: IntrospectSource,
+  /** Why the routes file's list stands in for the introspected app's, when `introspect` was given and not used. */
+  fallbackReasons?: string[],
 ): Promise<ContextRoute[]> {
   const target = await resolveRoutesFile(cwd, routesFile)
   if (target.silentlyAbsent) return []
 
   try {
-    const { definitions } = await loadIntrospectedRouteDefinitions(introspect, () => loadRouteDefinitions(resolve(cwd, target.path), cwd))
+    const { definitions, source } = await loadIntrospectedRouteDefinitions(introspect, () => loadRouteDefinitions(resolve(cwd, target.path), cwd))
+    if (introspect && source.evidence === 'static') {
+      fallbackReasons?.push(source.failure ? introspectionUnavailableMessage(source.failure, 'Routes are listed from the routes file.') : `${source.reason ?? 'The app was not introspected'}.`)
+    }
     return definitions.map(routeDefinitionToContextRoute)
   } catch (error) {
     loadErrors?.push(error instanceof Error ? error.message : String(error))

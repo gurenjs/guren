@@ -239,17 +239,19 @@ function staticParamKeys(definition: RouteDefinition): ParamKeysResult | undefin
 
 /**
  * A manifest route's params keys from its JSON Schema (RFC 0026 Decision 5): `properties` names
- * them and `required` gives their severity. Undefined when the rendering may be short of the
- * schema: not an object with properties (a nullable or piped object, a transform, an unreadable
- * node), or a `schema-partial` note under it, since the walker drops a property it cannot render.
+ * them and `required` gives their severity. `short` says why the rendering may lack keys: not an
+ * object with properties (a nullable object, a bare `z.transform()` or `z.preprocess()`, an
+ * unreadable node), or a `schema-partial` note under it. The walker also drops some keys with no
+ * note (`z.undefined()`), which only the Zod shows.
  */
-function manifestParamKeys(entry: RouteEntry, warnings: AppManifest['warnings']): { keys: ParamKey[] } | undefined {
-  const schema = entry.schemas.params
-  if (!schema || 'unreadable' in schema || schema.type !== 'object' || !schema.properties) return undefined
+function manifestParamKeys(entry: RouteEntry, warnings: AppManifest['warnings']): { keys: ParamKey[] } | { short: string } {
+  const schema = entry.schemas.params!
+  if ('unreadable' in schema) return { short: schema.unreadable }
+  if (schema.type !== 'object' || !schema.properties) return { short: 'the introspected app renders the params schema as something other than an object with properties' }
   const route = `${entry.method} ${entry.path}`
-  const partial = (warning: AppManifest['warnings'][number]) =>
-    warning.code === 'schema-partial' && warning.route === route && warning.message.startsWith(`${route} params`)
-  if (warnings.some(partial)) return undefined
+  const partial = warnings.find((warning) =>
+    warning.code === 'schema-partial' && warning.route === route && warning.message.startsWith(`${route} params`))
+  if (partial) return { short: `the introspected app renders the params schema only in part (${partial.message.replace(/\.$/u, '')})` }
   const required = new Set(schema.required ?? [])
   return { keys: Object.keys(schema.properties).map((name) => ({ name, omissible: !required.has(name) })) }
 }
@@ -266,13 +268,16 @@ function manifestParams(
   warnings: AppManifest['warnings'],
   definition: RouteDefinition | undefined,
 ): { parsed?: ParamKeysResult; evidence?: CheckEvidence } {
-  const declared = entry.schemas.params
-  if (!declared) return {}
+  if (!entry.schemas.params) return {}
   const fromManifest = manifestParamKeys(entry, warnings)
   const fromZod = definition ? staticParamKeys(definition) : undefined
-  if (fromManifest && (!fromZod || ('keys' in fromZod && keyNames(fromZod) === keyNames(fromManifest)))) return { parsed: fromManifest }
-  if (fromZod) return { parsed: fromZod, evidence: 'static' }
-  return { parsed: { unreadable: 'unreadable' in declared ? declared.unreadable : 'the introspected app renders the params schema without every key it declares' } }
+  if ('short' in fromManifest) {
+    return fromZod
+      ? { parsed: fromZod, evidence: 'static' }
+      : { parsed: { unreadable: `${fromManifest.short}, and the routes file registers no route to read its Zod from` } }
+  }
+  if (fromZod && !('keys' in fromZod && keyNames(fromZod) === keyNames(fromManifest))) return { parsed: fromZod, evidence: 'static' }
+  return { parsed: fromManifest }
 }
 
 function summary(count: number): CheckResult {

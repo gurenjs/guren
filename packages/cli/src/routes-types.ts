@@ -21,10 +21,7 @@ export type RouteDefinition = {
   path: string
   name?: string
   schemas?: ServerRouteDefinition['schemas']
-  /**
-   * The introspected app's derived tool for an agent route the routes file does not register,
-   * which reaches codegen without Zod (and without `agent`, so nothing derives it twice).
-   */
+  /** The introspected app's derived tool for an agent route the routes file does not register, which reaches codegen without Zod. */
   introspectedAgentTool?: DerivedAgentTool
 }
 
@@ -71,9 +68,8 @@ async function loadCodegenRoutes(routesFile: string, appRoot: string, introspect
   const tools = new Map(source.manifest.agentTools.map((tool) => [toolKey(tool.method, tool.path, tool.routeName), tool]))
   return definitions.map((definition, index) => {
     if (!unmatched.has(source.manifest.routes[index]!)) return definition
-    const { agent, ...rest } = definition
-    const tool = agent ? tools.get(toolKey(definition.method, definition.path, definition.name)) : undefined
-    return tool ? { ...rest, introspectedAgentTool: tool } : rest
+    const tool = definition.agent ? tools.get(toolKey(definition.method, definition.path, definition.name)) : undefined
+    return tool ? { ...definition, introspectedAgentTool: tool } : definition
   })
 }
 

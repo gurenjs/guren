@@ -190,7 +190,7 @@ function createAgentManifestRule(): DoctorRule {
           key,
           AGENTS_MANIFEST_FILE,
           'warn',
-          `${AGENTS_MANIFEST_FILE} describes agent tools this app no longer exposes — no route derives one.`,
+          `${AGENTS_MANIFEST_FILE} describes agent tools no route in the routes file derives, so \`guren codegen\` removes it. A file \`guren codegen --introspect\` wrote from routes only the app registers reads the same way: that output lasts until the next codegen without the flag.`,
           {
             fix: `Run \`guren codegen --force\` to remove ${AGENTS_MANIFEST_FILE}.`,
             manualFix: `Run \`guren codegen --force\` to remove ${AGENTS_MANIFEST_FILE}.`,
