@@ -129,6 +129,7 @@ export const PLAN_COMMAND_CLASSES: Readonly<Record<string, 'generator' | PlanCom
   'config:show': 'environment',
   'storage:link': 'environment',
   deploy: 'deploy',
+  plan: 'plan',
   'plan:render': 'plan',
   'plan:approve': 'plan',
   'plan:status': 'plan',

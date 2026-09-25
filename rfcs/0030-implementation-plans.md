@@ -2373,6 +2373,23 @@ of its own, since the running agent already holds the person's permissions.
 It is the path the guide describes today
 (`docs/en/guides/implementation-plans.md:46`).
 
+**Amended in implementation (2026-09-25), Part 3.** `guren plan --print-prompt`
+embeds no application context. The prompt names the read-only commands the
+running agent runs for it (`guren context --json`, `guren context <Entity>`,
+`guren model:list --format json`, `guren guidelines`) and has it check the
+file with `plan:render --json`, which prints `{ path, checks }`, until no check
+fails. Embedding `guren context --json` would import and introspect the
+application inside a command that otherwise calls nothing, and would need the
+size bound this section asks of the headless producer; the agent already holds
+the person's permissions and can run those commands itself. The prompt is built
+by `buildPlanPrompt()` in `packages/cli/src/plan/prompt.ts`, which the headless
+producer is to call, adding the embedded context and its bound there. Its
+`commands` rule lists the generators from `PLAN_COMMAND_CLASSES`, and it asks
+every `alter` to state its change in the properties `plan:status` reads (the
+reshape in Phasing). The request is optional: without one, the prompt tells the
+agent to ask for it. `guren plan` without `--print-prompt` exits non-zero and
+names it; `guren plan --revise` exits non-zero and names `plan:revise`.
+
 **Two producers, for two situations.** The headless one cannot ask anything:
 `claude -p` has no one to put a question to, which is why questions are data
 (§1) and answers arrive through feedback (§4). It fits a request that is

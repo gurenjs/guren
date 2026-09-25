@@ -43,7 +43,15 @@ The plan, its approvals and its decision log are a different matter: `plan:next`
 
 ## Writing a plan
 
-You write the JSON, or your agent does in the session where you discussed the feature. The command that asks a model for a plan on its own is not available yet (see the end of this page). `plan:render` validates the file against the plan schema and names the field at fault:
+You write the JSON, or your agent does in the session where you discussed the feature. `guren plan --print-prompt` prints what that agent needs: a prompt with your request and the conventions on this page, then the plan's JSON Schema. It calls no model and runs nothing.
+
+```bash
+bunx guren plan "comments on posts, authors can delete their own" --print-prompt
+```
+
+Paste the output into the session, or have the agent run the command itself. The prompt has the agent read the application with `context`, `model:list` and `guidelines`, ask you what it cannot decide, write `docs/plans/<slug>/plan.json`, and run `plan:render --json` until no check fails. Approving stays with you. Without a request, the prompt tells the agent to ask you for one, and `--json` prints the prompt and the schema as one object. Without `--print-prompt`, `guren plan` exits with an error: the form that asks a model for the plan by itself is not available yet (see the end of this page).
+
+`plan:render` validates the file against the plan schema and names the field at fault:
 
 ```text
  ERROR  The plan does not match the plan schema:
@@ -191,7 +199,7 @@ A command passes when it reads `guren <subcommand>` or `bunx guren <subcommand>`
 bunx guren plan:render docs/plans/comments/plan.json
 ```
 
-It writes `docs/plans/comments/plan.html` and prints the path. `-o` writes somewhere else, `--app <dir>` names the application to check against when you run it from another directory, and `--locale ja` opens the page's own labels in Japanese (the page switches between `en` and `ja`; the plan's text is never translated).
+It writes `docs/plans/comments/plan.html` and prints the path. `-o` writes somewhere else, `--app <dir>` names the application to check against when you run it from another directory, and `--locale ja` opens the page's own labels in Japanese (the page switches between `en` and `ja`; the plan's text is never translated). `--json` prints the page's path and every check instead of the path alone, so an agent can read the failing checks without opening the page.
 
 The page is one file with no network access: it opens from disk and can be attached to a review. It has a tab per section, a filter per entity, a "Changes only" toggle that hides `existing` elements, an entity relationship diagram of the plan merged over the current schema, and every id links to the element it names. Failed checks and breaking changes are pinned under "Needs attention". Each element has Approve and Request changes buttons and a comment box, and the footer exports the review as `feedback.json`. No command reads that file yet, and the footer says so: hand `feedback.json` or the copied text to the agent that wrote the plan, or apply the comments to `plan.json` yourself. The two commands it prints are the ones that follow a revision, `plan:render` and `plan:approve`.
 
@@ -695,7 +703,7 @@ Edit the text outside the markers freely: closing a later plan for the same enti
 
 The RFC behind this feature (`rfcs/0030-implementation-plans.md`) describes more than the commands on this page. These parts do not exist yet:
 
-- a `guren plan` command that asks Claude for the plan JSON, and the revision command that applies review feedback to it. Write and edit `plan.json` yourself or in your agent session;
+- a `guren plan` that asks Claude for the plan JSON by itself (`--print-prompt` is the form that exists), and the revision command that applies review feedback to it. Write and edit `plan.json` yourself or in your agent session;
 - keeping plans in GitHub issues instead of `docs/plans/`;
 - a `scaffold` step that runs the generators for you. `plan:next` lists the elements a scaffold would generate and says no generator ships yet, so the step completes on its verify commands; run `make:feature` and trim what the plan does not need.
 
