@@ -464,7 +464,7 @@ export class CommentResource extends Resource<CommentRecord, CommentResourceData
 
 Each policy is written with one method per planned ability, and every method returns `false` until you write its rule, which the method's comment quotes. `app/Providers/CommentPolicyProvider.ts` registers it with the gate in `boot()`, and the command adds that provider to `createApp({ providers })` in `src/app.ts`. `plan:status` reads a policy by its abilities and does not read its registration, so a policy is complete at `present`.
 
-Each controller the step adds holds exactly the planned actions and nothing else. An action validates its `params`, `query` and `body` with the planned validators and authorizes with the planned policy ability, then answers 501:
+Each controller the step adds holds exactly the planned actions and nothing else. An action validates its `params` and `query` with the planned validators, authorizes with the planned policy ability, validates its `body`, then answers 501. A caller the policy denies gets 403 whatever it sent:
 
 ```typescript
 export default class CommentController extends Controller {
@@ -522,7 +522,7 @@ Mount the routes the scaffold step wrote first, with `bunx guren plan:scaffold d
   Written as stubs by plan:scaffold, to finish: validator.comment, controller.comments, action.comments.store, action.comments.destroy, route.comments.store, route.comments.destroy, resource.comment, policy.comment. Each action validates and authorizes as planned and answers 501; write its body and response.
 ```
 
-It imports `registerCommentRoutes` into `routes/web.ts` and calls it first in the registrar there. Being first, an `auth` alias the entry sets replaces the one the routes file sets. `plan:status` then reads the routes and their actions as `wired`, and the validators they use too. What is left is each action's body and response, and what the scaffold listed as a stub or not at all.
+It imports `registerCommentRoutes` into `routes/web.ts` and calls it first in the registrar there. Being first, an `auth` alias the entry sets replaces the one the routes file sets. The mounted routes also register ahead of the entry's own, so a scaffolded path with a parameter, such as `/posts/:id`, can shadow an entry route like `/posts/create`: check the order when the two overlap. `plan:status` then reads the routes and their actions as `wired`, and the validators they use too. What is left is each action's body and response, and what the scaffold listed as a stub or not at all.
 
 It refuses, writing nothing, a draft or a plan no approval names, a step `plan:next` has not marked, a step that holds no scaffolded routes (it names the one that does), a routes file that does not exist or no longer exports its registrar, an application with no `routes/web.ts`, an entry that already imports another binding under the registrar's name, and a file already mounted, whether the entry calls it or another routes file does.
 

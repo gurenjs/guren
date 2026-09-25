@@ -1,14 +1,17 @@
 import type { WriterOptions } from './utils'
-import { escapeSingleQuoted, kebabCase, scaffoldFile } from './utils'
+import { coreImportLine, docComment, escapeSingleQuoted, kebabCase, scaffoldFile } from './utils'
 import { ROUTES_DIR } from './discovery'
 import { singularize } from './inflect'
 
+/** The one middleware alias the scaffolds know the handler of. */
+export const AUTH_ALIAS = 'auth'
+
 /**
- * The one `auth` alias the scaffolds register: bound to a new name, since capturing the
- * return is what puts `'auth'` into the router's type, and the receiver stays usable.
+ * The {@link AUTH_ALIAS} registration the scaffolds write: bound to a new name, since capturing
+ * the return is what puts the alias into the router's type, and the receiver stays usable.
  */
 export function authAliasLine(target: string, receiver: string): string {
-  return `const ${target} = ${receiver}.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))`
+  return `const ${target} = ${receiver}.aliasMiddleware('${AUTH_ALIAS}', requireAuthenticated({ redirectTo: '/login' }))`
 }
 
 /** One route registration: `receiver.method('path', [options, ]handler)` and whatever chains after it. */
@@ -31,10 +34,9 @@ export interface RoutesSourceOptions {
 
 /** A routes file exporting one registrar: `make:route`'s, and the one `plan:scaffold` writes per entity. */
 export function buildRoutesSource(options: RoutesSourceOptions): string {
-  const core = ['Router', ...(options.coreImports ?? [])].join(', ')
-  const comment = options.comment ? `/**\n${options.comment.map((line) => (line ? ` * ${line}` : ' *')).join('\n')}\n */\n` : ''
+  const comment = options.comment ? docComment(options.comment) : ''
   const body = options.body.map((line) => (line ? `  ${line}` : '')).join('\n')
-  return `import { ${core} } from '@guren/core'
+  return `${coreImportLine(['Router', ...(options.coreImports ?? [])])}
 ${options.imports.join('\n')}
 
 ${comment}export function ${options.registrar}(router: Router): void {

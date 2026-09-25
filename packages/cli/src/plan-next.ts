@@ -28,11 +28,12 @@ import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElementSection } from './plan/schema'
 import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress, type PlanStepContext, type PlanStepContextElement } from './plan/step-context'
 import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
-import { planScaffoldCommandLine, planScaffoldCoverage, planScaffoldMounts } from './plan/scaffold'
+import { planScaffoldCommandLine, planScaffoldCoverage, planScaffoldMountCommandLine, planScaffoldMounts } from './plan/scaffold'
 import { derivePlanTasks, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
 import { hashFiles, readPlanWaivers, recordDrift, recordStillHolds, type PlanWaiversRead } from './plan/verification'
 import { readStepStart } from './plan/work'
+import { isRoutesFileMounted } from './routes-check'
 import { pathExists } from './utils'
 
 export const PLAN_NEXT_REPORT_VERSION = 1
@@ -341,9 +342,9 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   const unconfirmed = judged.contexts.get(step.id)?.unconfirmed ?? []
   const record = records[step.id]
   const drifted = record ? recordDrift(record, digest, hashes, log.waived) : []
-  // A slice an older CLI scaffolded has no routes file, so there is nothing to mount or finish.
+  // Named only while there is something to mount: a slice an older CLI scaffolded has no routes file.
   const mount = mountOf(plan, derivation, task, step, planPath)
-  const mounted = mount.mount && (await pathExists(resolve(root, mount.mount.file))) ? mount : {}
+  const mountable = mount && (await pathExists(resolve(root, mount.file))) && !(await isRoutesFileMounted(root, mount.file)) ? { mount } : {}
 
   return {
     ...head,
@@ -361,7 +362,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
       ...(unconfirmed.length > 0 ? { unconfirmed } : {}),
       ...(drifted.length > 0 ? { drifted } : {}),
       ...(step.kind === 'scaffold' ? { scaffold: scaffoldOf(plan, step, planPath) } : {}),
-      ...mounted,
+      ...mountable,
     },
   }
 }
@@ -371,24 +372,23 @@ function scaffoldOf(plan: PlanDraft, step: PlanDerivedStep, planArgument: string
   return { command: planScaffoldCommandLine(planArgument, step.id), writes: emitted, leaves: left.map((element) => element.id) }
 }
 
-function mountOf(plan: PlanDraft, derivation: PlanTaskDerivation, task: PlanDerivedTask, step: PlanDerivedStep, planArgument: string): Pick<PlanNextStep, 'mount'> {
+function mountOf(plan: PlanDraft, derivation: PlanTaskDerivation, task: PlanDerivedTask, step: PlanDerivedStep, planArgument: string): PlanNextStep['mount'] {
   const mount = planScaffoldMounts(plan, derivation).find((candidate) => candidate.httpStep === step.id)
   const scaffold = task.steps.find((candidate) => candidate.id === mount?.scaffoldStep)
-  if (!mount || !scaffold) return {}
+  if (!mount || !scaffold) return undefined
   const written = new Set(planScaffoldCoverage(plan, scaffold).emitted)
   return {
-    mount: {
-      command: `${planScaffoldCommandLine(planArgument, step.id)} --mount`,
-      file: mount.path,
-      scaffolded: step.elementIds.filter((id) => written.has(id)),
-      byHand: step.elementIds.filter((id) => !written.has(id)),
-    },
+    command: planScaffoldMountCommandLine(planArgument, step.id),
+    file: mount.path,
+    scaffolded: step.elementIds.filter((id) => written.has(id)),
+    byHand: step.elementIds.filter((id) => !written.has(id)),
   }
 }
 
+/** The command is spelled with the plan argument the text is formatted for, as the scaffold step's is. */
 function mountLines(step: PlanNextStep, mount: NonNullable<PlanNextStep['mount']>, planArgument: string): string[] {
   return [
-    `Mount the routes the scaffold step wrote first, with \`${planScaffoldCommandLine(planArgument, step.id)} --mount\`, not by hand: it calls ${mount.file} from the entry registrar.`,
+    `Mount the routes the scaffold step wrote first, with \`${planScaffoldMountCommandLine(planArgument, step.id)}\`, not by hand: it calls ${mount.file} from the entry registrar.`,
     ...(mount.scaffolded.length > 0 ? [`  Written as stubs by plan:scaffold, to finish: ${mount.scaffolded.join(', ')}. Each action validates and authorizes as planned and answers 501; write its body and response.`] : []),
     ...(mount.byHand.length > 0 ? [`  Not written by plan:scaffold, to write by hand: ${mount.byHand.join(', ')}.`] : []),
   ]

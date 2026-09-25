@@ -14,7 +14,7 @@ import { buildListenerSource } from '../src/make-listener'
 import { formatPlanScaffold, formatPlanScaffoldMount, planScaffoldFile, planScaffoldMountFile, type PlanScaffoldMountReport, type PlanScaffoldReport } from '../src/plan-scaffold'
 import { parsePlanDocument } from '../src/plan-render'
 import { loadPlanAppState } from '../src/plan/app-state'
-import { emitPlanScaffold, type PlanScaffoldApp, type PlanScaffoldOutput } from '../src/plan/scaffold'
+import { emitPlanScaffold, planScaffoldMounts, type PlanScaffoldApp, type PlanScaffoldOutput } from '../src/plan/scaffold'
 import { PLAN_VERSION } from '../src/plan/schema'
 import { planDigest } from '../src/plan/identity'
 import { writePlanActiveStep, writePlanStepRecord, type PlanStepRecord } from '../src/plan/state'
@@ -931,7 +931,16 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
       expect(await mountRefused(await scaffolded('mount-no-entry', { webRoutes: null }))).toContain('This application has no routes entry (routes/web.ts) to call registerWidgetRoutes from.')
       const bound = await scaffolded('mount-bound')
       await Bun.write(join(bound.dir, 'routes/web.ts'), `import { registerWidgetRoutes } from './legacy.js'\n${WEB_ROUTES}`)
-      expect(await mountRefused(bound)).toContain('routes/web.ts already binds registerWidgetRoutes to another import')
+      expect(await mountRefused(bound)).toContain('routes/web.ts already declares or imports registerWidgetRoutes')
+    })
+
+    // An import of the same name would redeclare it, which does not compile, and the call would reach the local one.
+    test('should refuse an entry declaring a function or const of the registrar’s name', async () => {
+      for (const [name, declaration] of [['mount-local-function', 'function registerWidgetRoutes(): void {}'], ['mount-local-const', 'export const registerWidgetRoutes = (): void => {}']] as const) {
+        const app = await scaffolded(name)
+        await Bun.write(join(app.dir, 'routes/web.ts'), `${WEB_ROUTES}\n${declaration}\n`)
+        expect(await mountRefused(app)).toContain('routes/web.ts already declares or imports registerWidgetRoutes')
+      }
     })
   })
 
@@ -989,6 +998,24 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
 
       // The same file, with no approval naming the plan's hash: nobody approved the scaffold that would write it.
       await rm(join(dir, 'widgets.approvals.json'))
+      expect((await wiring(dir))!.advisory).toBeUndefined()
+    })
+
+    const HAND_WRITTEN = "import type { Router } from '@guren/core'\n\nexport function registerHandRoutes(router: Router): void {\n  router.get('/hand', (c) => c.text('hand'))\n}\n"
+
+    test('should keep the warning for a hand-written file at the scaffold’s path that exports another registrar', async () => {
+      const { dir } = await createApp('check-hand-written', { files: { 'routes/widgets.ts': HAND_WRITTEN } })
+
+      expect(await wiring(dir)).toMatchObject({ status: 'warn' })
+      expect((await wiring(dir))!.advisory).toBeUndefined()
+    })
+
+    test('should keep the warning for a root file at the path of a module entity, which the scaffold refuses', async () => {
+      const document = widgetsPlan()
+      document.models[3]!.module = 'billing'
+      const { dir } = await createApp('check-module-entity', { document: approve(document), files: { 'routes/widgets.ts': HAND_WRITTEN.replaceAll('registerHandRoutes', 'registerWidgetRoutes') } })
+
+      expect(await wiring(dir)).toMatchObject({ status: 'warn' })
       expect((await wiring(dir))!.advisory).toBeUndefined()
     })
 
@@ -1432,6 +1459,31 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     ])
   })
 
+  test('should validate params first and the body only after the policy is asked, so a denied caller gets 403 whatever it sent', () => {
+    const document = widgetsPlan()
+    const store = document.controllers![0]!.actions[1]!
+    store.params = 'validator.widgetQuery'
+    store.authorization.policy = { id: 'policy.widget', ability: 'update' }
+
+    const controller = emitWidgets(document, 'pg').files.find((file) => file.path === 'app/Http/Controllers/WidgetController.ts')!.contents
+    const body = controller.slice(controller.indexOf('async store()'))
+
+    expect(body.slice(0, body.indexOf('throw'))).toBe(`async store(): Promise<Response> {
+    this.validateParams(WidgetListQuerySchema)
+    await this.authorize('update', Widget)
+    await this.validateBody(WidgetPayloadSchema)
+    `)
+  })
+
+  test('should mount no root routes file for a module entity, which the scaffold refuses', () => {
+    const document = widgetsPlan()
+    document.models[3]!.module = 'billing'
+    const plan = parsePlanDocument(approve(document))
+
+    expect(planScaffoldMounts(plan, derivePlanTasks(plan))).toEqual([])
+    expect(planScaffoldMounts(parsePlanDocument(approve(widgetsPlan())), derivePlanTasks(parsePlanDocument(approve(widgetsPlan()))))).toHaveLength(1)
+  })
+
   test('should tag the controller and routes file with the entity document only where it exists, since a tag to none fails guren check', () => {
     const tagged = (output: PlanScaffoldOutput): string[] => output.files.filter((file) => file.contents.includes('@docs')).map((file) => file.path)
     expect(tagged(emitWidgets(widgetsPlan(), 'pg'))).toEqual([])
@@ -1482,11 +1534,13 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
   })
 })
 
-/** An application whose root declares no validator, resource or policy. */
-const NO_CLASSES = { validators: [], resources: [], policies: [] } as const
+/** An application whose root declares no class, schema or entity document. */
+const NO_CLASSES = { validators: [], resources: [], policies: [], controllers: [], sideEffects: {}, modelFiles: {}, validatorFiles: {}, docs: [] } as const
 
-/** The emitter alone, over the fixture schema's tables and models. */
-/** `generates` edits the derived step: a test reaches a step shape derivation does not give by building it. */
+/**
+ * The emitter alone, over the fixture schema's tables and models. `generates` edits the derived
+ * step: a test reaches a step shape derivation does not give by building it.
+ */
 function emitWidgets(document: WidgetsPlan, dialect: SchemaDialect, options: { generates?: (ids: string[]) => string[]; app?: Partial<PlanScaffoldApp> } = {}): PlanScaffoldOutput {
   const plan = parsePlanDocument(approve(document))
   const { step } = findPlanStep(derivePlanTasks(plan), STEP)!

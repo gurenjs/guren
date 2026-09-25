@@ -1,7 +1,7 @@
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { CONTROLLERS_DIR } from './discovery'
 import type { WriterOptions } from './utils'
-import { kebabCase, pagesAccessor, safeModuleName, scaffoldFile, writeRoot } from './utils'
+import { coreImportLine, docComment, kebabCase, pagesAccessor, safeModuleName, scaffoldFile, writeRoot } from './utils'
 
 export interface ControllerActionSource {
   name: string
@@ -26,10 +26,9 @@ export interface ControllerSourceOptions {
 
 /** The controller `make:controller` and `make:feature` write, and `plan:scaffold` with the plan's actions as stubs. */
 export function buildControllerSource(options: ControllerSourceOptions): string {
-  const core = ['Controller', ...(options.coreImports ?? [])].join(', ')
-  const imports = [`import { ${core} } from '@guren/core'`, ...(options.imports ?? [])].join('\n')
+  const imports = [coreImportLine(['Controller', ...(options.coreImports ?? [])]), ...(options.imports ?? [])].join('\n')
   const declarations = (options.declarations ?? []).map((declaration) => `${declaration}\n\n`).join('')
-  const classComment = options.classComment ? `/**\n${options.classComment.map((line) => (line ? ` * ${line}` : ' *')).join('\n')}\n */\n` : ''
+  const classComment = options.classComment ? docComment(options.classComment) : ''
   const actions = options.actions.map((action) => {
     const comment = (action.comment ?? []).map((line) => `  // ${line}\n`).join('')
     return `${comment}  async ${action.name}(): Promise<Response> {\n${action.body}\n  }`

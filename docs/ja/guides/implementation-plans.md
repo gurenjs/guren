@@ -474,7 +474,7 @@ export class CommentResource extends Resource<CommentRecord, CommentResourceData
 
 Policy は計画の ability ごとにメソッドを一つ書きます。どのメソッドも、ルールを書くまで `false` を返します。計画のルールはメソッドのコメントに残します。`app/Providers/CommentPolicyProvider.ts` が `boot()` でその Policy を gate に登録し、コマンドはこのプロバイダーを `src/app.ts` の `createApp({ providers })` に追加します。`plan:status` は Policy を ability で読みます。登録は読まないので、Policy は `present` で完了です。
 
-ステップが追加するコントローラーには、計画したアクションだけを書きます。各アクションは計画の validator で `params`、`query`、`body` を検証し、計画の Policy の ability で認可してから、501 を返します。
+ステップが追加するコントローラーには、計画したアクションだけを書きます。各アクションは計画の validator で `params` と `query` を検証し、計画の Policy の ability で認可し、`body` を検証してから、501 を返します。Policy が拒否した呼び出しは、送った内容によらず 403 になります。
 
 ```typescript
 export default class CommentController extends Controller {
@@ -532,7 +532,7 @@ Mount the routes the scaffold step wrote first, with `bunx guren plan:scaffold d
   Written as stubs by plan:scaffold, to finish: validator.comment, controller.comments, action.comments.store, action.comments.destroy, route.comments.store, route.comments.destroy, resource.comment, policy.comment. Each action validates and authorizes as planned and answers 501; write its body and response.
 ```
 
-`registerCommentRoutes` を `routes/web.ts` に import し、そこの registrar の先頭で呼び出します。先頭なので、エントリーが設定する `auth` の別名が、ルートのファイルの設定より優先されます。これで `plan:status` はルートとそのアクションを `wired` と読み、それらが使う validator も `wired` になります。残るのは各アクションの本体とレスポンス、そして scaffold がスタブにしたか書かなかったものです。
+`registerCommentRoutes` を `routes/web.ts` に import し、そこの registrar の先頭で呼び出します。先頭なので、エントリーが設定する `auth` の別名が、ルートのファイルの設定より優先されます。マウントしたルートはエントリー自身のルートより先に登録されます。そのため `/posts/:id` のようにパラメーターを含む scaffold のパスが、`/posts/create` のようなエントリーのルートを覆うことがあります。重なる場合は順序を確かめてください。これで `plan:status` はルートとそのアクションを `wired` と読み、それらが使う validator も `wired` になります。残るのは各アクションの本体とレスポンス、そして scaffold がスタブにしたか書かなかったものです。
 
 次の場合は何も書かずに拒否します。下書きやどの承認も名指ししていない計画、`plan:next` が印を付けていないステップ、scaffold したルートを持たないステップ (持つステップを示します)、存在しないルートのファイルや registrar を export しなくなったファイル、`routes/web.ts` のないアプリケーション、registrar と同じ名前で別のものを import しているエントリー、すでにマウントされたファイルです。エントリーが直接呼んでいても、別のルートのファイルが呼んでいても、マウント済みと判断します。
 

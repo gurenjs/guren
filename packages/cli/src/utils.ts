@@ -470,6 +470,16 @@ export function relativeImportPath(fromFile: string, toPath: string): string {
   return normalized.startsWith('.') ? normalized : `./${normalized}`
 }
 
+/** A generated doc comment over `lines`, an empty line written as a bare ` *`. */
+export function docComment(lines: readonly string[]): string {
+  return `/**\n${lines.map((line) => (line ? ` * ${line}` : ' *')).join('\n')}\n */\n`
+}
+
+/** The `@guren/core` import a scaffold opens with, the names as written (`type X` included). */
+export function coreImportLine(names: readonly string[]): string {
+  return `import { ${names.join(', ')} } from '@guren/core'`
+}
+
 /** Escapes `value` for literal use inside a `RegExp` source string. */
 export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

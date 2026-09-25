@@ -6,10 +6,8 @@
  * `http` step mounts with `plan:scaffold --mount` (D3). Side-effect classes are `make:*`'s own.
  */
 
-import { posix } from 'node:path'
-
 import { CONTROLLER_MEMBER_KINDS } from '../controller-methods'
-import { CONTROLLERS_DIR, EVENTS_DIR, JOBS_DIR, LISTENERS_DIR, MAIL_DIR, NOTIFICATIONS_DIR, ROUTES_DIR } from '../discovery'
+import { CONTROLLERS_DIR, ROUTES_DIR, SIDE_EFFECT_DIRS } from '../discovery'
 import { collectionSlug } from '../inflect'
 import { buildControllerSource, type ControllerActionSource } from '../make-controller'
 import { buildEventSource } from '../make-event'
@@ -17,15 +15,12 @@ import { buildJobSource } from '../make-job'
 import { buildListenerSource } from '../make-listener'
 import { buildMailSource } from '../make-mail'
 import { buildNotificationSource } from '../make-notification'
-import { authAliasLine, buildRoutesSource, routeCall } from '../make-route'
+import { AUTH_ALIAS, authAliasLine, buildRoutesSource, routeCall } from '../make-route'
 import { quoteString } from '../schema-columns'
-import { isBindingName, isIdentifier, pascalCase, quoteObjectKey } from '../utils'
+import { isBindingName, isIdentifier, pascalCase, quoteObjectKey, relativeImportPath } from '../utils'
 import { entityDocPath } from './close-docs'
 import type { PlanScaffoldUnwritten } from './scaffold-http'
 import type { PlanAction, PlanController, PlanDraft, PlanModel, PlanRoute, PlanSideEffect } from './schema'
-
-/** The one middleware alias a scaffold knows the handler of (`authAliasLine()`); any other name is the http step's. */
-const AUTH_ALIAS = 'auth'
 
 const CONTRACT_FIELDS = ['params', 'query', 'body'] as const
 
@@ -41,21 +36,18 @@ export function controllerFilePath(controller: PlanController): string {
   return `${CONTROLLERS_DIR}/${controller.className}.ts`
 }
 
-const SIDE_EFFECT_DIRS: Record<PlanSideEffect['kind'], string> = {
-  job: JOBS_DIR,
-  event: EVENTS_DIR,
-  listener: LISTENERS_DIR,
-  mail: MAIL_DIR,
-  notification: NOTIFICATIONS_DIR,
-}
-
 const SIDE_EFFECT_SOURCES: Record<PlanSideEffect['kind'], (className: string) => string> = {
   job: buildJobSource,
   event: buildEventSource,
   // The plan's `trigger` is prose, so the listener names no event: make:listener's shape without --event.
-  listener: (className) => buildListenerSource(className),
+  listener: buildListenerSource,
   mail: buildMailSource,
   notification: buildNotificationSource,
+}
+
+/** A class the scaffold names a file after, which discovery reads back by that file name. */
+function classNameRefusal(id: string, name: string, kind: string): string[] {
+  return isBindingName(name) && pascalCase(name) === name ? [] : [`${id} is named "${name}", which is not a PascalCase class name a ${kind} file can be named after.`]
 }
 
 /** `plan:status` finds a side-effect class by its file name in the kind's directory. */
@@ -68,19 +60,13 @@ export function buildPlanSideEffectSource(effect: PlanSideEffect): string {
 }
 
 export function sideEffectRefusals(effect: PlanSideEffect, declared: readonly string[]): string[] {
-  const refusals: string[] = []
-  if (!isBindingName(effect.name) || pascalCase(effect.name) !== effect.name) {
-    refusals.push(`${effect.id} is named "${effect.name}", which is not a PascalCase class name a ${effect.kind} file can be named after.`)
-  }
+  const refusals = classNameRefusal(effect.id, effect.name, effect.kind)
   if (declared.includes(effect.name)) refusals.push(`${effect.id}: the application already declares a ${effect.kind} ${effect.name}.`)
   return refusals
 }
 
 export function controllerRefusals(controller: PlanController, actions: readonly PlanAction[], declared: readonly string[]): string[] {
-  const refusals: string[] = []
-  if (!isBindingName(controller.className) || pascalCase(controller.className) !== controller.className) {
-    refusals.push(`${controller.id} is named "${controller.className}", which is not a PascalCase class name a controller file can be named after.`)
-  }
+  const refusals = classNameRefusal(controller.id, controller.className, 'controller')
   if (declared.includes(controller.className)) refusals.push(`${controller.id}: the application already declares a ${controller.className} controller.`)
   const seen = new Set<string>()
   for (const action of actions) {
@@ -127,8 +113,7 @@ class Imports {
 
 /** The specifier an app file imports another by, with the runtime extension the scaffolds write. */
 export function importSpecifier(from: string, to: string): string {
-  const relative = posix.relative(posix.dirname(from), to).replace(/\.tsx?$/u, '.js')
-  return relative.startsWith('.') ? relative : `./${relative}`
+  return relativeImportPath(from, to).replace(/\.tsx?$/u, '.js')
 }
 
 function oneLine(text: string): string {
@@ -188,19 +173,25 @@ export class PlanHttpEmitter {
    * The planned validators and policy ability run for real, before the 501: a request the plan
    * rejects is rejected already. No response is written, since the readers credit the one named.
    */
-  private action(controller: PlanController, action: PlanAction, imports: Imports): ControllerActionSource {
-    const lines: string[] = []
-    for (const field of CONTRACT_FIELDS) {
-      const id = action[field]
-      if (!id) continue
-      const schema = this.validator(id)
-      if (typeof schema === 'string') {
-        this.leave(action.id, `${field} validator`, schema)
-        continue
-      }
-      const name = imports.add(schema)
-      lines.push(field === 'body' ? `    await this.validateBody(${name})` : `    this.validate${field === 'query' ? 'Query' : 'Params'}(${name})`)
+  private validation(action: PlanAction, field: (typeof CONTRACT_FIELDS)[number], imports: Imports): string[] {
+    const id = action[field]
+    if (!id) return []
+    const schema = this.validator(id)
+    if (typeof schema === 'string') {
+      this.leave(action.id, `${field} validator`, schema)
+      return []
     }
+    const name = imports.add(schema)
+    return [field === 'body' ? `    await this.validateBody(${name})` : `    this.validate${field === 'query' ? 'Query' : 'Params'}(${name})`]
+  }
+
+  /**
+   * The planned validators and policy ability run for real, before the 501: a request the plan
+   * rejects is rejected already. The ability is asked before the body is read, so a caller the
+   * policy denies gets 403 whatever it sent. No response is written: the readers credit the one named.
+   */
+  private action(controller: PlanController, action: PlanAction, imports: Imports): ControllerActionSource {
+    const lines = [...this.validation(action, 'params', imports), ...this.validation(action, 'query', imports)]
     const policy = action.authorization.policy
     if (policy) {
       const planned = this.plan.policies.find((candidate) => candidate.id === policy.id)
@@ -208,11 +199,13 @@ export class PlanHttpEmitter {
       if (typeof model === 'string') this.leave(action.id, 'policy ability', model)
       else lines.push(`    await this.authorize(${quoteString(policy.ability)}, ${imports.add(model)})`)
     }
-    this.leave(action.id, 'response', `the stub answers 501 until the http step writes ${describeResponse(this.plan, action.response)}`)
+    lines.push(...this.validation(action, 'body', imports))
+    const response = describeResponse(this.plan, action.response)
+    this.leave(action.id, 'response', `the stub answers 501 until the http step writes ${response}`)
     lines.push(`    throw HttpException.notImplemented(${quoteString(`${controller.className}.${action.name} is planned and not written yet`)})`)
     return {
       name: action.name,
-      comment: [`Planned response: ${describeResponse(this.plan, action.response)}`, ...action.rules.map((rule) => `Rule: ${oneLine(rule)}`)],
+      comment: [`Planned response: ${response}`, ...action.rules.map((rule) => `Rule: ${oneLine(rule)}`)],
       body: lines.join('\n'),
     }
   }

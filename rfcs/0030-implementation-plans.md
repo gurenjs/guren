@@ -1297,10 +1297,12 @@ validators, resources and policies, and the policy registration settled.
 controllers, routes, their mount, and side effects.
 
 - Each added controller is `app/Http/Controllers/<Class>.ts` with exactly the
-  planned actions. An action validates its `params`, `query` and `body` with
-  the planned validators and authorizes with the planned policy ability
-  (`this.authorize('<ability>', Model)`, the policy's model class), then throws
-  `HttpException.notImplemented()`, a 501. The proposal above is settled as
+  planned actions. An action validates its `params` and `query` with the
+  planned validators, authorizes with the planned policy ability
+  (`this.authorize('<ability>', Model)`, the policy's model class), validates
+  its `body`, then throws `HttpException.notImplemented()`, a 501. Asking the
+  ability before reading the body gives a caller the policy denies 403
+  whatever it sent. The proposal above is settled as
   written: a stub validates with `validateBody(Schema)` and its siblings,
   since `validated('<name>')` is typed from generated route names and does not
   compile while the route is unmounted. An action on an existing controller is
@@ -1332,9 +1334,13 @@ controllers, routes, their mount, and side effects.
   registrar body; an `auth` alias the entry sets is then set after the file's
   and wins at mount. It is approval-gated, must be the marked step, and
   refuses a step holding no scaffolded routes, a file that is missing or no
-  longer exports its registrar, no routes entry, an entry binding the
-  registrar's name, and a file already mounted, judged by `guren check`'s own
-  reach from the entry. `planScaffoldMounts()` is the one rule for the file,
+  longer exports its registrar, no routes entry, an entry declaring or
+  importing the registrar's name, and a file already mounted, judged by
+  `guren check`'s own reach from the entry with no plan read. `plan:next`
+  names the command only while the file exists and is not mounted. A module's
+  slice has no mount, since the scaffold refuses it. The mounted routes
+  register ahead of the entry's own, so a scaffolded path with a parameter can
+  shadow an entry route; that is documented, not changed. `planScaffoldMounts()` is the one rule for the file,
   its registrar and its mounting step, which the scaffold, `--mount`,
   `plan:next` and `guren check` all read.
 - The brief expected the routes to read `present` before the mount. They read
@@ -1348,8 +1354,9 @@ controllers, routes, their mount, and side effects.
   `guren gate`, which the `Stop` hook runs on every stop between the scaffold
   and the `http` step. An unmounted file the scaffold of an approved, unclosed
   plan writes, whose `http` step has no `verified` record at the plan's
-  digest, keeps the warning's key and wording and is advisory
-  (`plan/awaiting-mount.ts`). It reads the plan files, their approvals, the
+  digest, and that exports the registrar the scaffold names, keeps the
+  warning's key and wording and is advisory (`plan/awaiting-mount.ts`, over
+  `plan/open-plan.ts`, the reading `check --plan` shares). It reads the plan files, their approvals, the
   closing documents and the state files only, never `db/schema.ts` or a
   validator file, and only once a project routes file is unmounted. Once the
   step verifies or the plan closes, the warning gates again.

@@ -7,23 +7,19 @@
  * Anything that will not read leaves its files out, so the warning stands.
  */
 
-import { readFile } from 'node:fs/promises'
-import { join, relative, sep } from 'node:path'
-
 import { discoverPlanFiles } from '../plan-check'
-import { readPlanFile } from '../plan-render'
-import { readPlanApprovalStanding } from './approvals'
-import { planDocClosedHash, planDocPath } from './close-docs'
 import { planDigest } from './identity'
-import { planScaffoldMounts } from './scaffold'
+import { readOpenPlan } from './open-plan'
+import { planScaffoldMountCommandLine, planScaffoldMounts } from './scaffold'
 import { planSlug, readPlanState } from './state'
 import { derivePlanTasks } from './tasks'
 
 export interface ScaffoldAwaitingMount {
   /** The plan file, app-relative with POSIX separators. */
   plan: string
-  /** The http step that mounts the file; undefined where no http step holds its routes. */
-  step: string | undefined
+  /** The http step that mounts the file, and the command it runs. */
+  step: string
+  command: string
   registrar: string
 }
 
@@ -38,24 +34,15 @@ export async function scaffoldedRoutesAwaitingMount(appRoot: string): Promise<Ma
 }
 
 async function awaitingIn(appRoot: string, path: string): Promise<Array<[string, ScaffoldAwaitingMount]>> {
-  const { plan } = await readPlanFile(path, appRoot)
-  const standing = await readPlanApprovalStanding(path, plan)
-  if (standing?.state !== 'approved') return []
-  const slug = planSlug(path)
-  let closing: string | undefined
-  try {
-    closing = await readFile(join(appRoot, planDocPath(slug)), 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return []
-  }
-  if (closing !== undefined && planDocClosedHash(closing) === standing.hash) return []
-  const state = await readPlanState(appRoot, slug)
+  const reading = await readOpenPlan(appRoot, path)
+  if (reading.kind !== 'open') return []
+  const { plan, file } = reading.plan
+  const state = await readPlanState(appRoot, planSlug(path))
   if (state.unreadable) return []
   const digest = planDigest(plan)
-  const file = relative(appRoot, path).split(sep).join('/')
   return planScaffoldMounts(plan, derivePlanTasks(plan)).flatMap((mount): Array<[string, ScaffoldAwaitingMount]> => {
-    const record = mount.httpStep ? state.state?.steps[mount.httpStep] : undefined
+    const record = state.state?.steps[mount.httpStep]
     if (record?.outcome === 'verified' && record.planDigest === digest) return []
-    return [[mount.path, { plan: file, step: mount.httpStep, registrar: mount.registrar }]]
+    return [[mount.path, { plan: file, step: mount.httpStep, command: planScaffoldMountCommandLine(file, mount.httpStep), registrar: mount.registrar }]]
   })
 }

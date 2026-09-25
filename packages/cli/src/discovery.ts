@@ -375,6 +375,21 @@ export function discoverNotificationFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, NOTIFICATIONS_DIR)
 }
 
+/** Where each side-effect kind's classes live: `plan:status` reads them there and `plan:scaffold` writes them there. */
+export const SIDE_EFFECT_DIRS = {
+  job: JOBS_DIR,
+  event: EVENTS_DIR,
+  listener: LISTENERS_DIR,
+  mail: MAIL_DIR,
+  notification: NOTIFICATIONS_DIR,
+} as const
+
+export type SideEffectKind = keyof typeof SIDE_EFFECT_DIRS
+
+export function discoverSideEffectFiles(appRoot: string, kind: SideEffectKind): Promise<string[]> {
+  return discoverDir(appRoot, SIDE_EFFECT_DIRS[kind])
+}
+
 /** The directory {@link discoverRoutesFiles} reads, relative to an app root. */
 export const ROUTES_DIR = 'routes'
 

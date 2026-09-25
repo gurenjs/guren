@@ -158,6 +158,16 @@ describe('plan:next', () => {
     })
     expect(text).toContain(`Mount the routes the scaffold step wrote first, with \`bunx guren plan:scaffold comments.plan.json --step ${HTTP} --mount\`, not by hand: it calls routes/comments.ts from the entry registrar.`)
     expect(text).toContain('Each action validates and authorizes as planned and answers 501; write its body and response.')
+
+    // Once the entry calls it, as --mount leaves it, there is nothing left to mount.
+    await writeWorkspaceFiles(app, {
+      'routes/comments.ts': "import type { Router } from '@guren/core'\n\nexport function registerCommentRoutes(router: Router): void {\n  void router\n}\n",
+      'routes/web.ts': "import type { Router } from '@guren/core'\nimport { registerCommentRoutes } from './comments.js'\n\nexport function registerWebRoutes(router: Router): void {\n  registerCommentRoutes(router)\n}\n",
+    })
+    const mounted = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+    expect(mounted.step!.id).toBe(HTTP)
+    expect(mounted.step!.mount).toBeUndefined()
+    expect(formatPlanNext(mounted, 'comments.plan.json')).not.toContain('--mount')
   })
 
   test('should tell a draft to approve before plan:scaffold, which refuses one', async () => {
