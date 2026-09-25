@@ -1,6 +1,5 @@
 ---
-description: Comments — what a comment may carry, the size limits, and the oxlint rules that enforce the mechanical half
-globs:
+paths:
   - "**/*.ts"
   - "**/*.tsx"
   - "**/*.js"

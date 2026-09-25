@@ -333,39 +333,39 @@ const APP_TITLE_TOKEN = '__APP_TITLE__'
 const TOKEN_RE = /__[A-Z][A-Z_]*__/u
 
 interface RuleDoc {
+  /** The body's first `# ` heading: the only description Cursor and Copilot are given. */
   description: string
-  globs: string[]
+  paths: string[]
   /** Everything after the closing `---`. */
   body: string
 }
 
 /**
- * Read a canonical rule file's frontmatter (`description` + `globs` list)
- * via the shared docs-frontmatter parser. The format is framework-authored,
- * so validation is strict on purpose: a rule this cannot read must fail the
- * install (and the test suite) loudly, not ship to Cursor/Copilot with an
- * empty scope.
+ * Read a canonical rule file: `paths` is its only frontmatter key, since Claude Code
+ * reads nothing else from a rule and loads one without `paths` into every session.
+ * Validation is strict on purpose: a rule this cannot read must fail the install
+ * (and the test suite) loudly, not ship to Cursor/Copilot with an empty scope.
  */
 function parseRuleDoc(name: string, content: string): RuleDoc {
   const parsed = parseDocFrontmatter(content)
-  const description = typeof parsed?.data.description === 'string' ? parsed.data.description : ''
-  const globs = Array.isArray(parsed?.data.globs)
-    ? parsed.data.globs.filter((glob): glob is string => typeof glob === 'string')
+  const paths = Array.isArray(parsed?.data.paths)
+    ? parsed.data.paths.filter((path): path is string => typeof path === 'string')
     : []
-  if (!parsed || !description || globs.length === 0) {
-    throw new Error(`Agent harness rule ${name} needs a description and at least one glob`)
+  const description = parsed ? (/^# +(.+?)\s*$/mu.exec(parsed.body)?.[1] ?? '') : ''
+  if (!parsed || !description || paths.length === 0) {
+    throw new Error(`Agent harness rule ${name} needs a \`# \` heading and at least one \`paths\` pattern`)
   }
-  return { description, globs, body: parsed.body }
+  return { description, paths, body: parsed.body }
 }
 
-/** Cursor rule: `.mdc` frontmatter with a comma-joined glob string. */
+/** Cursor rule: `.mdc` frontmatter, where the scope key is `globs` (a comma-joined string). */
 function renderCursorRule(doc: RuleDoc): string {
-  return `---\ndescription: ${doc.description}\nglobs: ${doc.globs.join(',')}\nalwaysApply: false\n---\n${doc.body}`
+  return `---\ndescription: ${doc.description}\nglobs: ${doc.paths.join(',')}\nalwaysApply: false\n---\n${doc.body}`
 }
 
-/** Copilot instructions: `applyTo` carries the comma-joined glob string. */
+/** Copilot instructions: `applyTo` carries the comma-joined patterns. */
 function renderCopilotRule(doc: RuleDoc): string {
-  return `---\ndescription: ${doc.description}\napplyTo: "${doc.globs.join(',')}"\n---\n${doc.body}`
+  return `---\ndescription: ${doc.description}\napplyTo: "${doc.paths.join(',')}"\n---\n${doc.body}`
 }
 
 export function planComponents(

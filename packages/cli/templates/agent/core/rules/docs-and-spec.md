@@ -1,6 +1,5 @@
 ---
-description: Linked docs (ADRs, business context) and generated spec views — how they connect to code and stay verified
-globs:
+paths:
   - "docs/**"
   - "db/schema.ts"
   - "app/Models/**"

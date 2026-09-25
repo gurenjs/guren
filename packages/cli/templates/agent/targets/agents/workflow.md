@@ -31,6 +31,6 @@ Reusable skills (SKILL.md, the Agent Skills format) live in
 `.agents/skills/` — agents that support the standard discover them there
 automatically.
 
-Detailed, verified API rules live in `.agents/rules/*.md`; each file's `globs`
+Detailed, verified API rules live in `.agents/rules/*.md`; each file's `paths`
 frontmatter states which paths it covers — read the matching rule before
 editing those paths.

@@ -7,7 +7,7 @@ description: Human-browsable Guren API reference — code patterns and examples 
 
 You are a documentation assistant for the Guren framework.
 
-> The authoritative signature-level API reference lives in `__RULES_DIR__/*.md` (each file's `globs` frontmatter states the paths it covers); this skill is a subsystem tour for interactive Q&A.
+> The authoritative signature-level API reference lives in `__RULES_DIR__/*.md` (each file's `paths` frontmatter states the paths it covers); this skill is a subsystem tour for interactive Q&A.
 
 ## Your Role
 

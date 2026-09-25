@@ -62,8 +62,7 @@ describe('componentsForTargets', () => {
 
 const FAKE_RULE = [
   '---',
-  'description: Guren testing — TestApp client methods',
-  'globs:',
+  'paths:',
   '  - "tests/**"',
   '  - "app/**"',
   '---',
@@ -193,13 +192,14 @@ describe('planComponents', () => {
     expect(byPath.get('.codex/rules/guren.rules')?.merge).toBeUndefined()
   })
 
-  it('renders cursor rules as guren-prefixed .mdc with comma-joined globs', () => {
+  it('renders cursor rules as guren-prefixed .mdc, mapping paths onto comma-joined globs', () => {
     const byPath = planByPath(['agents', 'cursor'])
 
     const rule = byPath.get('.cursor/rules/guren-testing.mdc')
     expect(rule?.managed).toBe(true)
-    expect(rule?.content).toContain('description: Guren testing — TestApp client methods')
+    expect(rule?.content).toContain('description: Testing')
     expect(rule?.content).toContain('globs: tests/**,app/**')
+    expect(rule?.content).not.toContain('paths:')
     expect(rule?.content).toContain('alwaysApply: false')
     expect(rule?.content).toContain('# Testing')
   })
@@ -209,6 +209,7 @@ describe('planComponents', () => {
 
     const rule = byPath.get('.github/instructions/guren-testing.instructions.md')
     expect(rule?.managed).toBe(true)
+    expect(rule?.content).toContain('description: Testing')
     expect(rule?.content).toContain('applyTo: "tests/**,app/**"')
     expect(rule?.content).toContain('# Testing')
     expect(rule?.content).not.toContain('alwaysApply')
@@ -237,7 +238,15 @@ describe('planComponents', () => {
     const templates = fakeTemplates()
     templates.set('core/rules/testing.md', '# No frontmatter\n')
     expect(() => planComponents(['cursor'], templates, 'My App')).toThrow(
-      'Agent harness rule testing.md needs a description and at least one glob',
+      'Agent harness rule testing.md needs a `# ` heading and at least one `paths` pattern',
+    )
+  })
+
+  it('throws on a rule scoped with `globs`, the key Claude Code never reads', () => {
+    const templates = fakeTemplates()
+    templates.set('core/rules/testing.md', FAKE_RULE.replace('paths:', 'globs:'))
+    expect(() => planComponents(['cursor'], templates, 'My App')).toThrow(
+      'Agent harness rule testing.md needs a `# ` heading and at least one `paths` pattern',
     )
   })
 

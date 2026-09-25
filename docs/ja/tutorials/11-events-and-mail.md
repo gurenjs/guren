@@ -373,8 +373,7 @@ SyncDriver: job class "SendCommentMailJob" is not registered. Call registerJob()
 
 ```md file=.claude/rules/background-work.md
 ---
-description: Events, listeners and jobs — every job is registered, every listener is wired, and the payload is ids
-globs:
+paths:
   - "app/Events/**"
   - "app/Listeners/**"
   - "app/Jobs/**"
