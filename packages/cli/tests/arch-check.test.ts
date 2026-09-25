@@ -926,6 +926,42 @@ export default {
     }
   })
 
+  it('treats a module whose index is index.tsx as its public surface', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-dir-indextsx-')
+    try {
+      await writeFiles(workspace.dir, {
+        'modules/ui/index.tsx': 'export const uiModule = {}',
+        'src/app.ts': `import { uiModule } from '../modules/ui'\nexport const app = uiModule`,
+      })
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      expect(results.map((r) => [r.key, r.status])).toEqual([['arch:module-summary', 'pass']])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('resolves a local package directory through its package.json main', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-dir-package-')
+    try {
+      await writeFiles(workspace.dir, {
+        'guren.arch.ts': `export default { rules: [{ from: 'app/**', disallow: ['packages/shared/**'] }] }`,
+        'packages/shared/package.json': JSON.stringify({ main: 'src/main.ts' }),
+        'packages/shared/src/main.ts': 'export const shared = 1',
+        'app/Service.ts': `import { shared } from '../packages/shared'\nexport const s = shared`,
+      })
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      expect(results.filter((r) => r.filePath === 'app/Service.ts').map((r) => [r.key, r.status])).toEqual([
+        ['arch:app/Service.ts:../packages/shared:packages/shared/**', 'fail'],
+      ])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('treats a module whose descriptor is index.js as its public surface', async () => {
     const workspace = await createTempWorkspace('guren-cli-arch-dir-indexjs-')
     try {

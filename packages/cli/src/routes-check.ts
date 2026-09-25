@@ -1,5 +1,4 @@
-import { stat } from 'node:fs/promises'
-import { extname, isAbsolute, join, relative, resolve } from 'node:path'
+import { isAbsolute, relative, resolve } from 'node:path'
 import type { Statement } from '@babel/types'
 import { memberKeyName, walk } from './ast-walk'
 import { hidesKeys, readModuleDescriptor } from './app-entry'
@@ -13,6 +12,7 @@ import {
   ROUTES_DIR,
   toPosixRelative,
 } from './discovery'
+import { resolveImportPath, RUNTIME_TO_SOURCE_EXTENSION, SOURCE_TO_RUNTIME_EXTENSION, swapExtension } from './import-resolution'
 import type { ParseCache } from './parse-cache'
 import { specifierBase } from './schema-binding'
 import { DEFAULT_ROUTES_FILE, isRegistrarExportName, resolveRoutesEntry, specifierName } from './route-registrar'
@@ -43,33 +43,6 @@ export function affectsRouteWiring(file: string, routesFile?: string): boolean {
 
 /** Stands in for "every export"; safe as a sentinel because `*` is not a legal export name. */
 const EVERY_EXPORT = '*'
-
-/** Extensions a specifier without one may resolve to, in preference order. */
-const RESOLVED_EXTENSIONS = ['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs']
-
-/**
- * Source extension → the runtime extension it is emitted as. Used in both directions:
- * backwards, because apps following Node's ESM rules import the *emitted* path
- * (`routes/web.ts` names `'./auth.js'` for a file on disk called `auth.ts`), so a
- * resolver trying only the specifier as written finds no edges at all; forwards, to
- * print a suggested import line and to recognize an emitted `auth.js` as a build artifact.
- */
-const SOURCE_TO_RUNTIME_EXTENSION: Record<string, string> = {
-  '.ts': '.js',
-  '.tsx': '.jsx',
-  '.mts': '.mjs',
-}
-
-const RUNTIME_TO_SOURCE_EXTENSION: Record<string, string> = Object.fromEntries(
-  Object.entries(SOURCE_TO_RUNTIME_EXTENSION).map(([source, runtime]) => [runtime, source]),
-)
-
-/** `path` with its extension swapped per `map`, or `null` if it isn't in `map`. */
-function swapExtension(path: string, map: Record<string, string>): string | null {
-  const extension = extname(path)
-  const swapped = map[extension]
-  return swapped ? `${path.slice(0, -extension.length)}${swapped}` : null
-}
 
 /** A name a file binds from another file, and the export it came from. */
 interface ImportBinding {
@@ -105,37 +78,6 @@ interface RoutesFileFacts {
   dynamicImports: string[]
   /** Top-level statements minus imports and `... from` re-exports. */
   body: string
-}
-
-async function isFile(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile()
-  } catch {
-    return false
-  }
-}
-
-/**
- * The file `base` names, or `null` when it names nothing on disk. Existence is probed
- * rather than assumed: a specifier resolving nowhere must not create a graph edge, or a
- * typo'd import would read as wiring.
- */
-async function resolveSpecifier(base: string): Promise<string | null> {
-  const source = swapExtension(base, RUNTIME_TO_SOURCE_EXTENSION)
-  const candidates = [
-    // Ahead of the specifier as written, so a TypeScript app that also has a
-    // stale compiled `auth.js` beside `auth.ts` is read from source.
-    ...(source === null ? [] : [source]),
-    base,
-    ...RESOLVED_EXTENSIONS.map((ext) => `${base}${ext}`),
-    ...RESOLVED_EXTENSIONS.map((ext) => join(base, `index${ext}`)),
-  ]
-
-  for (const candidate of candidates) {
-    if (await isFile(candidate)) return candidate
-  }
-
-  return null
 }
 
 /**
@@ -219,7 +161,7 @@ async function readFacts(
   // probe.
   const resolveEdge = async (specifier: string): Promise<string | null> => {
     const base = specifierBase(cwd, filePath, specifier)
-    return base !== null && isInside(boundary, base) ? resolveSpecifier(base) : null
+    return base !== null && isInside(boundary, base) ? resolveImportPath(base) : null
   }
 
   for (const node of parsed.ast.program.body) {
@@ -371,7 +313,7 @@ async function resolveModuleEntry(
 
   const base = specifierBase(cwd, descriptorPath, source)
   if (base === null) return { kind: 'opaque' }
-  const resolved = await resolveSpecifier(base)
+  const resolved = await resolveImportPath(base)
   return resolved === null ? { kind: 'opaque' } : { kind: 'entry', entryPath: resolved }
 }
 
