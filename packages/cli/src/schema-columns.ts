@@ -99,6 +99,17 @@ export const COLUMN_BUILDERS: Record<SchemaDialect, Record<PlanColumnType, Build
 }
 
 /**
+ * The TypeScript type drizzle gives a record's value of each builder above, not null: what
+ * `plan:scaffold` maps a planned resource field onto. Kept beside the builders, since changing
+ * one changes the other; MySQL's `date()` reads back as a `Date` where pg's and SQLite's are text.
+ */
+export const COLUMN_RECORD_TYPES: Record<SchemaDialect, Record<PlanColumnType, string>> = {
+  pg: { string: 'string', text: 'string', integer: 'number', number: 'number', decimal: 'string', boolean: 'boolean', date: 'string', datetime: 'Date', json: 'unknown', uuid: 'string' },
+  mysql: { string: 'string', text: 'string', integer: 'number', number: 'number', decimal: 'string', boolean: 'boolean', date: 'Date', datetime: 'Date', json: 'unknown', uuid: 'string' },
+  sqlite: { string: 'string', text: 'string', integer: 'number', number: 'number', decimal: 'string', boolean: 'boolean', date: 'string', datetime: 'Date', json: 'unknown', uuid: 'string' },
+}
+
+/**
  * MySQL types that take no index without a prefix length: drizzle-kit refuses `unique` on
  * one (`column_unsupported_unique`) and MySQL rejects the key (`ER_BLOB_KEY_WITHOUT_LENGTH`).
  */

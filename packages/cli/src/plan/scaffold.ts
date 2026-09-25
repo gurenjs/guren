@@ -1,6 +1,7 @@
 /**
  * The plan-driven scaffold (RFC 0030 §5): a pure function from a scaffold step, and what the
- * application declares, to the tables and model files `guren plan:scaffold` writes. Every
+ * application declares, to the tables, models, validators, resources, policies and policy
+ * providers `guren plan:scaffold` writes (the last three through `scaffold-http.ts`). Every
  * planned property is written in a form the `plan:status` readers (`plan/status.ts`) read back,
  * so a scaffolded element can verify; a property no reader sees stays `unknown` there, and the
  * output is not bent around it. No pages, no action bodies, nothing the plan does not state.
@@ -12,7 +13,24 @@ import { buildModelSource, type ModelRelationshipSource } from '../make-model'
 import { autoIncrementPrimaryKey, COLUMN_BUILDERS, MYSQL_UNINDEXABLE_TYPES, quoteString, TABLE_FACTORY, type ColumnCode } from '../schema-columns'
 import type { SchemaDialect } from '../schema-parser'
 import { camelCase, isIdentifier, pascalCase, quoteObjectKey } from '../utils'
-import { listPlanElements, type PlanColumn, type PlanDraft, type PlanElementSection, type PlanModel } from './schema'
+import {
+  buildPlanPolicySource,
+  buildPlanResourceSource,
+  buildPlanValidatorSource,
+  buildPolicyProviderSource,
+  httpLeftReasons,
+  isBindingName,
+  policyFilePath,
+  policyProviderName,
+  policyRefusals,
+  PROVIDERS_DIR,
+  resourceFilePath,
+  resourceRefusals,
+  textSourcedValidators,
+  validatorFilePath,
+  type PlanScaffoldUnwritten,
+} from './scaffold-http'
+import { listPlanElements, type PlanColumn, type PlanDraft, type PlanElementSection, type PlanModel, type PlanPolicy, type PlanResource, type PlanValidator } from './schema'
 import type { PlanDerivedStep } from './tasks'
 
 export interface PlanScaffoldApp {
@@ -21,6 +39,11 @@ export interface PlanScaffoldApp {
   tables: ReadonlyArray<{ identifier: string; tableName?: string; module: string | null; columns: readonly string[]; opaqueColumns?: boolean }>
   /** The model classes the application root declares. */
   models: readonly string[]
+  /** The names the root's validator files export. */
+  validators: readonly string[]
+  /** The resource and policy classes the root declares, by file name as discovery names them. */
+  resources: readonly string[]
+  policies: readonly string[]
 }
 
 export interface PlanScaffoldTable {
@@ -33,7 +56,8 @@ export interface PlanScaffoldTable {
 }
 
 export interface PlanScaffoldFile {
-  model: string
+  /** The plan elements the file writes. */
+  elements: string[]
   /** App-relative, POSIX separators. */
   path: string
   contents: string
@@ -44,10 +68,14 @@ export interface PlanScaffoldOutput {
   files: PlanScaffoldFile[]
   /** Element ids written, in document order. */
   emitted: string[]
-  /** The step's `generates` this emitter does not write. */
-  left: Array<{ id: string; section: PlanElementSection }>
+  /** The step's `generates` this emitter does not write, with why where more than its section says it. */
+  left: Array<{ id: string; section: PlanElementSection; reason?: string }>
   /** Planned relationships not written, with why: the agent adds each in a later step. */
   omitted: Array<{ model: string; relationship: string; reason: string }>
+  /** Validator rules written in no form a reader compares, and resource fields written as a stub. */
+  unwritten: PlanScaffoldUnwritten[]
+  /** Providers written under `app/Providers/`, each for the command to register in `createApp()`. */
+  providers: string[]
   /** Why nothing may be written. Non-empty means the output is not to be used. */
   refusals: string[]
 }
@@ -155,6 +183,7 @@ class Emitter {
   private readonly generates: Set<string>
   readonly refusals: string[] = []
   readonly omitted: PlanScaffoldOutput['omitted'] = []
+  readonly unwritten: PlanScaffoldUnwritten[] = []
 
   constructor(
     private readonly plan: PlanDraft,
@@ -383,7 +412,45 @@ class Emitter {
       schemaImports: [...declared.imports],
       typeDeclarations: [...declared.types.values()],
     })
-    return { model: model.id, path: `${MODELS_DIR}/${model.name}.ts`, contents }
+    return { elements: [model.id], path: `${MODELS_DIR}/${model.name}.ts`, contents }
+  }
+
+  private refuseModule(element: { id: string; module?: string }): void {
+    if (element.module) this.refusals.push(`${element.id} sits in module "${element.module}": plan:scaffold writes to the project root only.`)
+  }
+
+  validators(validators: readonly PlanValidator[]): PlanScaffoldFile[] {
+    const model = this.models[0]
+    if (!model || validators.length === 0) return []
+    const names = new Set<string>()
+    for (const validator of validators) {
+      this.refuseModule(validator)
+      if (!isBindingName(validator.name)) this.refusals.push(`${validator.id} is named "${validator.name}", which an exported const cannot be named.`)
+      if (this.app.validators.includes(validator.name)) this.refusals.push(`${validator.id}: a validator file already exports ${validator.name}.`)
+      if (names.has(validator.name)) this.refusals.push(`${validator.id}: another validator of the step is named ${validator.name}.`)
+      names.add(validator.name)
+    }
+    const contents = buildPlanValidatorSource(validators, textSourcedValidators(this.plan), this.unwritten)
+    return [{ elements: validators.map((validator) => validator.id), path: validatorFilePath(model), contents }]
+  }
+
+  resource(resource: PlanResource): PlanScaffoldFile {
+    this.refuseModule(resource)
+    this.refusals.push(...resourceRefusals(resource, this.app.resources))
+    const model = this.emittedModels.get(resource.model)!
+    const contents = buildPlanResourceSource(resource, model, this.columnsOf(model), this.app.dialect, this.unwritten)
+    return { elements: [resource.id], path: resourceFilePath(resource), contents }
+  }
+
+  policy(policy: PlanPolicy): PlanScaffoldFile[] {
+    this.refuseModule(policy)
+    if (!isBindingName(policy.name)) this.refusals.push(`${policy.id} is named "${policy.name}", which a class cannot be named.`)
+    this.refusals.push(...policyRefusals(policy, this.app.policies))
+    const model = this.emittedModels.get(policy.model)!
+    return [
+      { elements: [policy.id], path: policyFilePath(policy), contents: buildPlanPolicySource(policy) },
+      { elements: [policy.id], path: `${PROVIDERS_DIR}/${policyProviderName(policy)}.ts`, contents: buildPolicyProviderSource(policy, model) },
+    ]
   }
 }
 
@@ -392,14 +459,45 @@ export function planScaffoldCommandLine(planArgument: string, stepId: string): s
   return `bunx guren plan:scaffold ${planArgument} --step ${stepId}`
 }
 
+interface Selection {
+  models: PlanModel[]
+  validators: PlanValidator[]
+  resources: PlanResource[]
+  policies: PlanPolicy[]
+  /** Why an element of `generates` is left, where there is more to say than its section. */
+  reasons: Map<string, string>
+}
+
+/**
+ * What a step writes, decided from the plan alone: each added model and its added columns; the
+ * validators, in a file named after the model; and each resource and policy whose model the step
+ * adds, since the files import that model and its record type.
+ */
+function select(plan: PlanDraft, generates: ReadonlySet<string>): Selection {
+  const models = scaffoldedModels(plan, generates)
+  const reasons = httpLeftReasons(plan, generates, models)
+  const written = <T extends { id: string; change: { kind: string } }>(elements: readonly T[]): T[] =>
+    elements.filter((element) => generates.has(element.id) && element.change.kind === 'add' && !reasons.has(element.id))
+  return { models, validators: written(plan.validators), resources: written(plan.resources), policies: written(plan.policies), reasons }
+}
+
 /** Which of a scaffold step's `generates` `plan:scaffold` writes and which it leaves: its report and `plan:next` both say it through here. */
 export function planScaffoldCoverage(plan: PlanDraft, step: Pick<PlanDerivedStep, 'generates'>): Pick<PlanScaffoldOutput, 'emitted' | 'left'> {
   const generates = new Set(step.generates)
-  const written = new Set(scaffoldedModels(plan, generates).flatMap((model) => [model.id, ...scaffoldedColumns(model, generates).map((column) => column.id)]))
+  const selection = select(plan, generates)
+  const written = new Set([
+    ...selection.models.flatMap((model) => [model.id, ...scaffoldedColumns(model, generates).map((column) => column.id)]),
+    ...[...selection.validators, ...selection.resources, ...selection.policies].map((element) => element.id),
+  ])
   const elements = listPlanElements(plan)
   return {
     emitted: elements.filter((element) => written.has(element.id)).map((element) => element.id),
-    left: elements.filter((element) => generates.has(element.id) && !written.has(element.id)),
+    left: elements
+      .filter((element) => generates.has(element.id) && !written.has(element.id))
+      .map((element) => {
+        const reason = selection.reasons.get(element.id)
+        return reason === undefined ? element : { ...element, reason }
+      }),
   }
 }
 
@@ -410,7 +508,21 @@ export function emitPlanScaffold(plan: PlanDraft, step: PlanDerivedStep, app: Pl
     emitter.checkCollisions(model)
     emitter.checkColumns(model)
   }
+  const selection = select(plan, new Set(step.generates))
   const tables = emitter.models.map((model) => emitter.table(model))
-  const files = emitter.models.map((model) => emitter.file(model))
-  return { tables, files, ...planScaffoldCoverage(plan, step), omitted: emitter.omitted, refusals: emitter.refusals }
+  const files = [
+    ...emitter.models.map((model) => emitter.file(model)),
+    ...emitter.validators(selection.validators),
+    ...selection.resources.map((resource) => emitter.resource(resource)),
+    ...selection.policies.flatMap((policy) => emitter.policy(policy)),
+  ]
+  return {
+    tables,
+    files,
+    ...planScaffoldCoverage(plan, step),
+    omitted: emitter.omitted,
+    unwritten: emitter.unwritten,
+    providers: selection.policies.map(policyProviderName),
+    refusals: emitter.refusals,
+  }
 }

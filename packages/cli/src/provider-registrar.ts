@@ -1,6 +1,6 @@
 import { consola } from 'consola'
 import { findFirstExisting } from './discovery'
-import { addEntryWithImport, defaultImportBinding, insertArrayOptionEntry, type EntryWiring } from './patch-helpers'
+import { addEntryWithImport, composeEntryWithImport, defaultImportBinding, insertArrayOptionEntry, type EntryPlan, type EntryWiring } from './patch-helpers'
 import { relativeImportPath } from './utils'
 
 /**
@@ -35,13 +35,31 @@ export async function addArrayOptionRegistration(
   importFor: string | DefaultExportImport,
   isRegistered?: (entries: string[]) => boolean,
 ): Promise<EntryWiring> {
-  return addEntryWithImport(appPath, (content) => {
+  return addEntryWithImport(appPath, arrayOptionEntryPlan(appPath, key, entry, importFor, isRegistered))
+}
+
+function arrayOptionEntryPlan(
+  appPath: string,
+  key: 'providers' | 'config',
+  entry: string,
+  importFor: string | DefaultExportImport,
+  isRegistered?: (entries: string[]) => boolean,
+): (content: string) => EntryPlan {
+  return (content) => {
     const bound = typeof importFor === 'string' ? null : defaultImportBinding(content, appPath, importFor.target)
     return {
       entry: insertArrayOptionEntry(content, key, bound ?? entry, { isRegistered }),
       importStatement: bound === null ? importStatementFor(importFor, appPath) : null,
     }
-  })
+  }
+}
+
+/**
+ * {@link wireAppProvider}'s patch as a pure function of the entry's text, for a caller that
+ * decides every refusal before its first write (`plan:scaffold`). `appPath` is app-relative.
+ */
+export function composeAppProviderRegistration(content: string, appPath: string, providerName: string): { wiring: EntryWiring; content?: string } {
+  return composeEntryWithImport(content, arrayOptionEntryPlan(appPath, 'providers', providerName, scaffoldedProvider(providerName)))
 }
 
 function importStatementFor(importFor: string | DefaultExportImport, appPath: string): string {

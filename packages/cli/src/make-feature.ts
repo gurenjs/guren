@@ -9,6 +9,7 @@ import { factoryFile } from './make-factory'
 import { findMigrationCreatingTable } from './make-migration'
 import { modelFile } from './make-model'
 import { policyFile } from './make-policy'
+import { buildResourceSource } from './make-resource'
 import { testFile } from './make-test'
 import { validatorFile } from './make-validator'
 import { parseAttachString, parseFieldsString, type AttachmentDefinition, type FieldDefinition, type FieldType } from './fields'
@@ -442,31 +443,12 @@ function generateResource(singular: string, fields: FieldDefinition[]): string {
   // The key's type is read off the record rather than declared, as
   // `make:resource` does: `make:feature` leaves the table to the author, and a
   // hard-coded `number` is wrong the moment they reach for a UUID.
-  const dataFields = [
-    `  id: ${singular}Record['id']`,
-    ...fields.map((f) => `  ${f.name}: ${tsFieldType(f)}`),
-  ].join('\n')
-
-  const toArrayFields = [
-    '      id: this.resource.id,',
-    ...fields.map((f) => `      ${f.name}: ${resourceFieldExpression(f)},`),
-  ].join('\n')
-
-  return `import { Resource } from '@guren/core'
-import type { ${singular}Record } from '../../Models/${singular}.js'
-
-export interface ${singular}ResourceData extends Record<string, unknown> {
-${dataFields}
-}
-
-export class ${singular}Resource extends Resource<${singular}Record, ${singular}ResourceData> {
-  toArray(): ${singular}ResourceData {
-    return {
-${toArrayFields}
-    }
-  }
-}
-`
+  return buildResourceSource({
+    className: `${singular}Resource`,
+    modelName: singular,
+    dataFields: [`id: ${singular}Record['id']`, ...fields.map((f) => `${f.name}: ${tsFieldType(f)}`)],
+    toArrayFields: ['id: this.resource.id,', ...fields.map((f) => `${f.name}: ${resourceFieldExpression(f)},`)],
+  })
 }
 
 function generateController(

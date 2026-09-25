@@ -240,7 +240,7 @@ export const planScaffoldCommand = defineCommand({
   meta: {
     name: 'plan:scaffold',
     description:
-      "Write the scaffold step of an approved plan (RFC 0030 §5): each added model's table in db/schema.ts, with every column option and foreign key the plan states, and its model class with the plan's relationships and fillable. Writes no pages and no action bodies, and runs no codegen or migration. The step must be the one plan:next marked. Refuses, with nothing written, a draft, another step kind, a module element, an API-only application, and any target that already exists, a re-run included.",
+      "Write the scaffold step of an approved plan (RFC 0030 §5): each added model's table in db/schema.ts, with every column option and foreign key the plan states, and its model class with the plan's relationships and fillable; the step's validators; each resource and policy of the model, the policy's abilities denying until written, and a provider registering the policy with the gate, added to createApp(). Writes no controllers, routes, pages or action bodies, and runs no codegen or migration. The step must be the one plan:next marked. Refuses, with nothing written, a draft, another step kind, a module element, an API-only application, a provider it cannot register, and any target that already exists, a re-run included.",
   },
   args: {
     plan: {

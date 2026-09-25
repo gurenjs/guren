@@ -1236,6 +1236,59 @@ shipped, and where it stops.
 - `views` are no longer `scaffoldable` in the task derivation (D4), so a scaffold
   step's `generates` names no page.
 
+**Amended in implementation (`plan:scaffold`, second of three changes):**
+validators, resources and policies, and the policy registration settled.
+
+- The step's validators go in one file, `app/Http/Validators/<Model>Validator.ts`
+  after the model the step adds, which is `make:validator`'s path for it, so a
+  prior `make:feature` is refused as a file that exists. A field is written from
+  its planned type, `required` and rules through leaves `plan/field-readers.ts`
+  admits (`z.string()`, `z.number().int()`, `z.iso.date()`, `z.iso.datetime()`,
+  `z.uuid()`, `z.email()`, `z.url()`, `min`/`max` as checks, `.nullable().optional()`
+  for a field that is not required). A validator an action takes its `query` or
+  `params` from gets `z.coerce.number()` and `z.stringbool()`, since those values
+  arrive as text. A prose rule, or a rule that does not fit the type, is not
+  written and is listed. A name a root validator file already exports is
+  refused, since `plan:status` finds a validator by its exported name.
+- A resource is a `Resource` subclass, not `JsonResource`: `guren codegen`
+  discovers a resource only by `export class <Name>Resource extends Resource`,
+  and reads `<Base>ResourceData` as its payload, so a name without the suffix
+  is refused. It is written only when the step adds its model (the file imports
+  the model's record type) and its payload types name nothing the file would
+  import; otherwise it is left to the `http` step with that reason. A field is
+  copied from its column where the column's record type is the planned type
+  (`COLUMN_RECORD_TYPES`, beside the column builders), and a `Date` column is
+  serialized with `toISOString()` for a planned `string`. Any other field calls
+  a stub that throws until it is mapped, and is listed.
+- The policy stub denies: every ability is `(_user: AuthUser | null): boolean`
+  returning `false`, with the planned rule in a comment above it. A stub that
+  allowed would authorize what nobody has written, and one that threw would fail
+  requests the gate answers today. An ability named after a `Policy` member
+  (`before`, `allow`, `deny`, `denyWithStatus`, `denyAsNotFound`) is refused.
+- The proposal above is settled as written: `app/Providers/<Policy>Provider.ts`,
+  one per policy, in the shape of the blog template's `AuthorizationProvider`,
+  whose `boot()` calls `this.container.make('gate').policy(Model, Policy)`. It is
+  registered by `wireAppProvider()`'s patch, factored as
+  `composeAppProviderRegistration()` so the command composes it before the first
+  write and applies it last: `wireAppProvider()` itself writes as it goes and
+  only warns when it cannot register, where a policy left unregistered reads as
+  scaffolded while the gate denies it. No entry, no `createApp()` it can patch,
+  or an entry that already registers the provider is refused.
+- `wired` does not read the registration. `plan/status.ts` gives a policy no
+  mount point, so it completes at `present`, on its abilities (an existence
+  match, which lifts it only through a behaviour); a registration mount would
+  move every approved plan's policies to `wired` and expire their records. A
+  scaffolded validator reads `present` until a route contract or an action body
+  uses it, which the third change's controllers and routes provide.
+- Round trip, as for the tables: every planned validator field property,
+  resource field and policy ability reads `match` except where the readers stop.
+  The judge calls no validated value a `decimal` (a string or a number may hold
+  one), so its type reads `unknown`; a `json` field is a record, a node outside
+  the field reader's allowlist, so its type and `required` read `unknown`; a
+  coerced number takes `null` as 0, so a required number or boolean in a query
+  or params validator leaves `required` `unknown`; an ability's rule is prose.
+  No reader was changed.
+
 A step whose remaining work exceeds a threshold (files touched, elements
 covered) is split, pages by screen group first. The threshold starts at five
 files and is tuned from the metrics in §7.

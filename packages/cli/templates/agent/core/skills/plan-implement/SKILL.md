@@ -51,14 +51,20 @@ it, and do not edit the application back or the plan to make it pass.
   emits. It writes, for each model the step adds:
   - the table in `db/schema.ts`, with every column option and foreign key the
     plan states;
-  - the model class, with the plan's relationships and fillable.
+  - the model class, with the plan's relationships and fillable;
+  - the step's validators, in `app/Http/Validators/<Model>Validator.ts`;
+  - each resource of the model, its payload typed as planned;
+  - each policy of the model, every ability denying until written, and an
+    `app/Providers/<Policy>Provider.ts` registered in `createApp()` that
+    hands the policy to the gate.
 
-  It writes nothing else: the validators, controllers, routes, resources and
-  policies the step lists under "does not write" are the `http` step's, by hand.
-  It runs no codegen and no migration. A relationship it reports as left out is
-  added in the step where what it needs exists; until then `plan:status` reads
-  the model as drifted. It refuses a re-run once the
-  step's files exist, and then `plan:verify` is what is left.
+  The controllers and routes the step lists under "does not write" are the
+  `http` step's, by hand. It runs no codegen and no migration. A relationship
+  it reports as left out is added in the step where what it needs exists; until
+  then `plan:status` reads the model as drifted. It also lists the validator
+  rules it could not write and the resource fields it wrote as a stub that
+  throws: those are `http` work too. It refuses a re-run once the step's files
+  exist, and then `plan:verify` is what is left.
 - **`tests`**: write the behaviours as tests whose titles carry the acceptance id
   literally, `[AC-comments-1] a signed-in user can comment on a post`, and leave
   them failing. The step verifies with `tests:fail`, so a test that already
@@ -66,9 +72,12 @@ it, and do not edit the application back or the plan to make it pass.
 - **`data`**: the schema, migration and model; verified by `db:migrate` and
   `typecheck`. After a scaffold step, what is left is the migration and any
   relationship `plan:scaffold` reported as left out.
-- **`http`**: validators, controllers, routes, resources and policies, until
-  `guren check` passes and the step's behaviours pass. An action is complete only
-  when its route is mounted and validates through the route contract.
+- **`http`**: controllers and routes (and validators, resources and policies
+  when no scaffold step wrote them), until `guren check` passes and the step's
+  behaviours pass. After a scaffold step, write each policy ability's rule in
+  place of its `return false`, map each resource field `plan:scaffold` stubbed,
+  and add the validator rules it listed. An action is complete only when its
+  route is mounted and validates through the route contract.
 - **`pages`**: the Inertia pages; verified by `typecheck` and `guren check`.
 
 Implement only the elements the step lists. An element of a later step is that
