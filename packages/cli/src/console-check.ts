@@ -171,6 +171,12 @@ export async function discoverDeclaredCommandFiles(cwd: string, cache: ParseCach
   })
 }
 
+/** A module's entry file, else the one `make:module` would scaffold. */
+async function moduleEntry(cwd: string, moduleName: string): Promise<string> {
+  const moduleDir = resolve(cwd, 'modules', moduleName)
+  return (await findModuleDescriptor(cwd, moduleDir)) ?? toPosixRelative(cwd, resolve(moduleDir, MODULE_DESCRIPTOR_FILE))
+}
+
 /**
  * Verifies every class under `app/Console/Commands` is referenced by the console
  * entrypoint that would register it — `src/console.ts` for a project command,
@@ -178,12 +184,6 @@ export async function discoverDeclaredCommandFiles(cwd: string, cache: ParseCach
  * the entry's imports, hence `warn`, never `fail`. Not filtered by `--changed`: the
  * outcome turns on the *entrypoint's* content, so filtering by command file would miss it.
  */
-/** A module's entry file, else the one `make:module` would scaffold. */
-async function moduleEntry(cwd: string, moduleName: string): Promise<string> {
-  const moduleDir = resolve(cwd, 'modules', moduleName)
-  return (await findModuleDescriptor(cwd, moduleDir)) ?? toPosixRelative(cwd, resolve(moduleDir, MODULE_DESCRIPTOR_FILE))
-}
-
 export async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): Promise<CheckResult[]> {
   const commandFiles = await discoverDeclaredCommandFiles(cwd, cache)
   if (commandFiles.length === 0) return []

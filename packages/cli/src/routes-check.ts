@@ -374,7 +374,7 @@ export async function checkRouteRegistrarWiring(options: RoutesCheckOptions): Pr
       continue
     }
 
-    const routesEntry = resolution.kind === 'entry' ? resolution.entryPath : await moduleRoutesEntryFile(dir)
+    const routesEntry = resolution.kind === 'entry' ? resolution.entryPath : await moduleRoutesEntryFile(dir, probe)
     const scopeResults = await checkScope(cwd, cache, probe, {
       module,
       // Fallback: the conventional name stands in when none exists, so the
