@@ -510,13 +510,15 @@ Routes that declare `.agent()` metadata (see [Routing](./routing.md)) are checke
 | `agent-route-authorization:*` | The verdict could not be reached: the handler is an inline function, or the controller action is not among the sources the check reads. |
 | `agent-route-controller-collision:*` | Two controller classes share a name and an agent route uses one of them, so a verdict drawn from a controller body may describe the other class. |
 | `agent-route-controller-unreadable:*` | A controller file could not be read at all, so any agent route whose action lives there was checked against no body. |
+| `agent-route-controller-unparsed:*` | A controller file could not be parsed, so any agent route whose action lives there was checked against no body, and a route naming one of its classes may be judged against another file declaring the same class name, with no collision reported. |
 | `route-graph` | The routes file failed to load, so neither the route-contract nor the agent-route checks ran. |
 
-`audit` adds two rules for the same routes:
+`audit` adds these rules for the same routes:
 
 - A body-validation finding that is a warning for an ordinary route becomes a **failure** when the route is agent-exposed, under the same `validation:*` key, so an existing `config/audit.ts` entry keeps applying.
 - `agent-annotation:*` warns when `destructiveHint: false` is declared on an action that deletes, updates, or force-writes records, and also when that claim could not be checked because the action body was unreadable.
 - `controller-unreadable:*` warns when a controller file could not be read, since every rule above saw no body for the actions it declares.
+- `controller-unparsed:*` warns when a controller file was read but could not be parsed. The rules above saw no body for its actions, and a route matched to one of its classes by name alone is judged against another controller file that declares the same class name, with no `controller-name-collision:*` reported.
 
 Suppress a false positive by placing `// guren-audit-ignore` on the flagged line or the line above it:
 

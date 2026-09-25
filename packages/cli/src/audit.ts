@@ -335,6 +335,22 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
       ),
     )
   }
+  // An unparsed file never reaches the class index, so a same-named class in another
+  // file wins every route matched by name, with no controller-name-collision reported.
+  for (const filePath of scan.unparsedFiles) {
+    findings.push(
+      finding(
+        `controller-unparsed:${filePath}`,
+        `${filePath} unparsed`,
+        'warn',
+        `${filePath} could not be parsed, so the validation, authentication, and annotation rules saw no `
+        + 'body for any action it declares. A route matched to one of its classes by name alone is judged '
+        + 'against another controller file declaring the same class name, and no name collision is reported.',
+        `Fix the syntax error in ${filePath}, then re-run: bunx guren audit`,
+        filePath,
+      ),
+    )
+  }
   findings.push(...routes.loadFindings)
 
   if (routes.analyzed) {
