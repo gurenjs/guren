@@ -393,16 +393,17 @@ describe('joinRouteDefinitions', () => {
 
 describe('joinManifestRoutes', () => {
   const entry = (module: string | null) => ({ method: 'GET', path: '/stats', module }) as unknown as RouteEntry
-  const definitions = [{ method: 'GET', path: '/stats', name: undefined }, { method: 'GET', path: '/stats', name: undefined }]
+  const definitions = [{ method: 'GET', path: '/stats', module: 'billing' }, { method: 'GET', path: '/stats', module: 'shop' }]
 
   test('returns the caller\'s definitions, joined within the module each one names', () => {
-    const joined = joinManifestRoutes([entry('shop'), entry('billing')], definitions, ['billing', 'shop'])
+    const joined = joinManifestRoutes([entry('shop'), entry('billing')], definitions)
     expect(joined[0]).toBe(definitions[1]!)
     expect(joined[1]).toBe(definitions[0]!)
   })
 
-  test('refuses module names that do not align with the definitions, rather than joining across modules', () => {
-    expect(() => joinManifestRoutes([entry('shop'), entry('billing')], definitions, [])).toThrow('2 route definition(s) carry 0 module name(s)')
+  test('joins no module route to a definition that names no module', () => {
+    const unnamed = definitions.map(({ module: _module, ...rest }) => rest)
+    expect(joinManifestRoutes([entry('shop'), entry('billing')], unnamed)).toEqual([undefined, undefined])
   })
 })
 

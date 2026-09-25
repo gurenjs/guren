@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { loadRouteDefinitions, resolveRoutesFile } from '../src/load-routes'
+import { loadRouteDefinitions, resolveRoutesFile, withModuleNames } from '../src/load-routes'
 
 // Module fixtures export a plain object shaped like a GurenModule rather than
 // calling `defineModule()` — `resolveGurenModule()` duck-types either — so
@@ -161,11 +161,10 @@ export default {
     )
 
     const provenance: Array<string | null> = []
-    const identities: Array<string | null> = []
-    await loadRouteDefinitions(join(tempDir, 'routes/web.ts'), tempDir, undefined, provenance, identities)
+    const definitions = await loadRouteDefinitions(join(tempDir, 'routes/web.ts'), tempDir, undefined, provenance)
 
     expect(provenance).toEqual([null, 'billing'])
-    expect(identities).toEqual([null, 'Invoicing'])
+    expect(definitions.map((definition) => definition.module)).toEqual([undefined, 'Invoicing'])
   })
 
   it('warns and skips a module directory without an index.ts, without throwing', async () => {
@@ -222,6 +221,19 @@ export const billingModule = {
     const names = definitions.map((d) => d.name).sort()
 
     expect(names).toEqual(['home', 'invoices.index'])
+  })
+})
+
+describe('withModuleNames', () => {
+  it('names the module on a definition an older server left unnamed, from the range its registrar filled', () => {
+    const definitions = [
+      { method: 'GET', path: '/' },
+      { method: 'GET', path: '/invoices' },
+      { method: 'GET', path: '/carts', module: 'Shop' },
+    ]
+
+    expect(withModuleNames(definitions, [{ name: 'Invoicing', start: 1, end: 2 }, { name: 'Shopping', start: 2, end: 3 }]))
+      .toEqual([{ method: 'GET', path: '/' }, { method: 'GET', path: '/invoices', module: 'Invoicing' }, { method: 'GET', path: '/carts', module: 'Shop' }])
   })
 })
 

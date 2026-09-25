@@ -126,19 +126,17 @@ async function loadGurenModule(appRoot: string, moduleName: string, warnings?: s
 }
 
 /**
- * Every app route, module routes mounted through the shared `mountModuleRoutes()` so static
- * analyses see exactly what will serve. `appRoot` is required since `--routes <file>` may point
- * anywhere. Discovery is a directory scan (like `check --arch`), so a module never passed to
- * `createApp()` shows up here without mounting. `moduleProvenance` and `moduleIdentities` get one
- * entry per definition, in order: its directory under `modules/`, its `defineModule()` name, or `null`.
+ * Every app route, module routes mounted through the shared `mountModuleRoutes()` (each carrying
+ * its `defineModule()` name as `module`) so static analyses see exactly what will serve. `appRoot`
+ * is required since `--routes <file>` may point anywhere. Discovery is a directory scan, so a module
+ * never passed to `createApp()` shows up here without mounting. `moduleProvenance` gets one entry
+ * per definition: its directory under `modules/` (not its `defineModule()` name), or `null`.
  */
 export async function loadRouteDefinitions(
   routesFile: string,
   appRoot: string,
   moduleWarnings?: string[],
   moduleProvenance?: Array<string | null>,
-  /** What the manifest's `RouteEntry.module` holds for the same route. */
-  moduleIdentities?: Array<string | null>,
 ): Promise<RouteDefinition[]> {
   const moduleExports = await import(importUrl(routesFile)) as Record<string, unknown>
   const registrar = resolveRegistrar(moduleExports)
@@ -153,7 +151,7 @@ export async function loadRouteDefinitions(
   await registrar(router)
   let definitionCount = router.definitions().length
   moduleProvenance?.push(...Array.from({ length: definitionCount }, () => null))
-  moduleIdentities?.push(...Array.from({ length: definitionCount }, () => null))
+  const mountedModules: MountedModuleRange[] = []
 
   const moduleNames = await listModuleNames(appRoot)
 
@@ -163,24 +161,32 @@ export async function loadRouteDefinitions(
       await mountModuleRoutes(router, gurenModule)
       const mounted = router.definitions().length
       moduleProvenance?.push(...Array.from({ length: mounted - definitionCount }, () => moduleName))
-      moduleIdentities?.push(...Array.from({ length: mounted - definitionCount }, () => gurenModule.name))
+      mountedModules.push({ name: gurenModule.name, start: definitionCount, end: mounted })
       definitionCount = mounted
     }
   }
 
-  return router.definitions()
+  return withModuleNames(router.definitions(), mountedModules)
 }
 
-/** Registered definitions and, index-aligned, each one's `defineModule()` name (`null` for the routes file's own). */
-export interface ModuleTaggedDefinitions {
-  definitions: RouteDefinition[]
-  modules: Array<string | null>
+/** Where one module's routes landed in the registry, `[start, end)`. */
+export interface MountedModuleRange {
+  name: string
+  start: number
+  end: number
 }
 
-/** {@link loadRouteDefinitions} with the module names recorded, for a join to the introspected app. */
-export async function loadRouteDefinitionsWithModules(routesFile: string, appRoot: string): Promise<ModuleTaggedDefinitions> {
-  const modules: Array<string | null> = []
-  return { definitions: await loadRouteDefinitions(routesFile, appRoot, undefined, undefined, modules), modules }
+/**
+ * A `@guren/server` older than 2.27.0 (the CLI's range admits one) mounts module routes without
+ * naming the module on them, so a definition lacking `module` gets the one whose registrar added
+ * it. Removable once the CLI's `@guren/server` floor is 2.27.0.
+ */
+export function withModuleNames(definitions: RouteDefinition[], ranges: readonly MountedModuleRange[]): RouteDefinition[] {
+  return definitions.map((definition, index) => {
+    if (definition.module !== undefined) return definition
+    const range = ranges.find(({ start, end }) => index >= start && index < end)
+    return range ? { ...definition, module: range.name } : definition
+  })
 }
 
 /**

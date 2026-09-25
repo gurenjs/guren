@@ -12,7 +12,7 @@ import {
 import { joinManifestRoutes } from './app-routes'
 import { check, type CheckEvidence, type CheckResult } from './check-result'
 import { fileExists } from './discovery'
-import { DEFAULT_ROUTES_FILE, loadRouteDefinitionsWithModules } from './load-routes'
+import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
 import { introspectedRoutes, judgedFromManifest, judgedFromSource, type IntrospectSource } from './manifest-section'
 import { extractPathParamNames } from './utils'
 
@@ -26,11 +26,9 @@ export type RouteContractCheckOptions = {
    * in for a params schema the manifest cannot render whole.
    */
   introspect?: IntrospectSource
-} & (
-  | { definitions?: undefined; definitionModules?: undefined }
-  /** Definitions to check instead of loading them, with `loadRouteDefinitions()`'s `moduleIdentities`, so the Zod fallback joins within each module. */
-  | { definitions: RouteDefinition[]; definitionModules: readonly (string | null)[] }
-)
+  /** Definitions to check instead of loading them, as `loadRouteDefinitions()` returns them: the Zod fallback joins on their `module`. */
+  definitions?: RouteDefinition[]
+}
 
 /** A params schema describes what arrives in the URL, never what a parse produces. */
 const REQUEST_SIDE = 'input'
@@ -306,14 +304,12 @@ function summary(count: number): CheckResult {
 export async function checkRouteContracts(options: RouteContractCheckOptions): Promise<CheckResult[]> {
   const { cwd, routesFile = DEFAULT_ROUTES_FILE } = options
 
-  let { definitions, definitionModules: modules } = options
-  if (!definitions || !modules) {
+  let { definitions } = options
+  if (!definitions) {
     if (!(await fileExists(cwd, routesFile))) return []
 
     try {
-      const loaded = await loadRouteDefinitionsWithModules(resolve(cwd, routesFile), cwd)
-      definitions = loaded.definitions
-      modules = loaded.modules
+      definitions = await loadRouteDefinitions(resolve(cwd, routesFile), cwd)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       // Reported, never swallowed: silence is indistinguishable from every route matching.
@@ -337,7 +333,7 @@ export async function checkRouteContracts(options: RouteContractCheckOptions): P
 
   if (introspected?.status === 'described') {
     const { routes, warnings } = introspected.manifest
-    const joined = joinManifestRoutes(routes, definitions, modules)
+    const joined = joinManifestRoutes(routes, definitions)
     const results = routes.flatMap((entry, index) => {
       const { parsed, evidence } = manifestParams(entry, warnings, joined[index])
       return checkRoute(entry, parsed).map((result) => (evidence ? { ...result, evidence } : result))
