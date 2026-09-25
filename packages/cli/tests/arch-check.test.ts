@@ -2,8 +2,9 @@ import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { runArchCheck } from '../src/arch-check'
+import type { CheckResult } from '../src/check-result'
 import { ParseCache } from '../src/parse-cache'
-import { createTempWorkspace } from './helpers'
+import { createTempWorkspace, writeWorkspaceFiles } from './helpers'
 
 // Config fixtures export a plain object rather than importing defineArchRules (an identity
 // function the loader doesn't require): a temp workspace cannot resolve back into the package.
@@ -801,6 +802,187 @@ describe('runArchCheck derived module rules (RFC 0002, zero-config)', () => {
       const archSummary = results.find((r) => r.key === 'arch:summary')
       expect(archSummary?.status).toBe('pass')
       expect(archSummary?.message).toContain('Checked 1 file(s)')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
+describe('runArchCheck directory imports', () => {
+  const MODULE_RULE_CONFIG = `
+export default {
+  rules: [{ from: 'app/**', disallow: ['modules/newsletter/**'], includeTypeImports: true }],
+}
+`
+
+  it('reports a directory import by a declared rule exactly as the index import', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-dir-declared-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'guren.arch.ts': MODULE_RULE_CONFIG,
+        'modules/newsletter/index.ts': 'export const newsletterModule = {}',
+        'app/ByDirectory.ts': `import { newsletterModule } from '../modules/newsletter'\nexport const a = newsletterModule`,
+        'app/ByIndex.ts': `import { newsletterModule } from '../modules/newsletter/index'\nexport const b = newsletterModule`,
+      })
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      const byDirectory = results.filter((r) => r.filePath === 'app/ByDirectory.ts')
+      const byIndex = results.filter((r) => r.filePath === 'app/ByIndex.ts')
+      expect(byDirectory.map((r) => r.status)).toEqual(['fail'])
+      expect(byDirectory[0]!.key).toBe('arch:app/ByDirectory.ts:../modules/newsletter:modules/newsletter/**')
+      const verdict = (r: CheckResult) => ({ status: r.status, title: r.title, target: r.key.split(':').at(-1) })
+      expect(byDirectory.map(verdict)).toEqual(byIndex.map(verdict))
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('resolves a type-only directory import through its index.d.ts', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-dir-dts-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'guren.arch.ts': MODULE_RULE_CONFIG,
+        'modules/newsletter/index.d.ts': 'export interface Subscriber { email: string }',
+        'app/Mailer.ts': `import type { Subscriber } from '../modules/newsletter'\nexport type S = Subscriber`,
+      })
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      const found = results.filter((r) => r.filePath === 'app/Mailer.ts')
+      expect(found.map((r) => r.status)).toEqual(['fail'])
+      expect(found[0]!.message).toContain('imports (type-only)')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reports a directory with no index file as unresolved', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-dir-noindex-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'guren.arch.ts': MODULE_RULE_CONFIG,
+        'modules/newsletter/app/Models/Subscriber.ts': 'export class Subscriber {}',
+        'app/Mailer.ts': `import { Subscriber } from '../modules/newsletter/app/Models'\nexport const s = Subscriber`,
+      })
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      const found = results.filter((r) => r.filePath === 'app/Mailer.ts')
+      expect(found.map((r) => [r.key, r.status])).toEqual([
+        ['arch:unresolved:app/Mailer.ts:../modules/newsletter/app/Models', 'warn'],
+      ])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // Such an import does not compile, so the boundary rule has no file to judge.
+  it('leaves a directory with no index to the declared rules, not the module boundary rule', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-dir-noindex-boundary-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'modules/newsletter/index.ts': 'export const newsletterModule = {}',
+        'modules/newsletter/app/Models/Subscriber.ts': 'export class Subscriber {}',
+        'app/Mailer.ts': `import { Subscriber } from '../modules/newsletter/app/Models'\nexport const s = Subscriber`,
+      })
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      expect(results.map((r) => [r.key, r.status])).toEqual([['arch:module-summary', 'pass']])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('judges a directory import by the module boundary rule exactly as the index import', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-dir-boundary-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'modules/newsletter/index.ts': 'export const newsletterModule = {}',
+        'modules/newsletter/app/Models/index.ts': 'export class Subscriber {}',
+        'src/app.ts': `import { newsletterModule } from '../modules/newsletter'\nexport const app = newsletterModule`,
+        'app/ByDirectory.ts': `import { Subscriber } from '../modules/newsletter/app/Models'\nexport const a = Subscriber`,
+        'app/ByIndex.ts': `import { Subscriber } from '../modules/newsletter/app/Models/index'\nexport const b = Subscriber`,
+      })
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      expect(results.filter((r) => r.filePath === 'src/app.ts')).toEqual([])
+      const byDirectory = results.filter((r) => r.filePath === 'app/ByDirectory.ts')
+      const byIndex = results.filter((r) => r.filePath === 'app/ByIndex.ts')
+      expect(byDirectory.map((r) => r.status)).toEqual(['fail'])
+      expect(byIndex.map((r) => r.status)).toEqual(['fail'])
+      expect(byDirectory[0]!.suggestion).toBe(byIndex[0]!.suggestion)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('treats a module whose index is index.tsx as its public surface', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-dir-indextsx-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'modules/ui/index.tsx': 'export const uiModule = {}',
+        'src/app.ts': `import { uiModule } from '../modules/ui'\nexport const app = uiModule`,
+      })
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      expect(results.map((r) => [r.key, r.status])).toEqual([['arch:module-summary', 'pass']])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('keeps a module\'s index as its surface beside a same-named file', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-dir-sibling-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'modules/billing/index.ts': 'export const billingModule = {}',
+        'modules/billing.ts': 'export const stray = 1',
+        'src/app.ts': `import { billingModule } from '../modules/billing/index'\nexport const app = billingModule`,
+      })
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      expect(results.map((r) => [r.key, r.status])).toEqual([['arch:module-summary', 'pass']])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('resolves a local package directory through its package.json main', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-dir-package-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'guren.arch.ts': `export default { rules: [{ from: 'app/**', disallow: ['packages/shared/**'] }] }`,
+        'packages/shared/package.json': JSON.stringify({ main: 'src/main.ts' }),
+        'packages/shared/src/main.ts': 'export const shared = 1',
+        'app/Service.ts': `import { shared } from '../packages/shared'\nexport const s = shared`,
+      })
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      expect(results.filter((r) => r.filePath === 'app/Service.ts').map((r) => [r.key, r.status])).toEqual([
+        ['arch:app/Service.ts:../packages/shared:packages/shared/**', 'fail'],
+      ])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('treats a module whose descriptor is index.js as its public surface', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-dir-indexjs-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'modules/newsletter/index.js': 'export const newsletterModule = {}',
+        'src/app.ts': `import { newsletterModule } from '../modules/newsletter'\nexport const app = newsletterModule`,
+      })
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      expect(results.map((r) => [r.key, r.status])).toEqual([['arch:module-summary', 'pass']])
     } finally {
       await workspace.cleanup()
     }

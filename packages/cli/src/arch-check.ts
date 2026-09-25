@@ -1,5 +1,4 @@
-import { access } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { Statement } from '@babel/types'
 import { check, type CheckResult, type CheckStatus } from './check-result'
 import {
@@ -11,10 +10,12 @@ import {
   IMPORTABLE_EXTENSIONS,
 } from './discovery'
 import { matchesAnyGlob } from './glob-match'
+import { cachedFileProbe, resolveDirectoryImport, resolveImportPath, type FileProbe } from './import-resolution'
 import { literalString, walk } from './ast-walk'
 import { loadArchConfig } from './arch-config'
 import type { ArchLayers, ArchRule, ArchRuleSet } from './arch/index'
 import type { ParseCache } from './parse-cache'
+import { specifierBase } from './schema-binding'
 
 export interface RunArchCheckOptions {
   cwd: string
@@ -51,9 +52,12 @@ export async function runArchCheck(options: RunArchCheckOptions): Promise<CheckR
   const importableFiles = (): Promise<readonly string[]> =>
     (importableFilesPromise ??= collectFiles(cwd, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES))
 
-  const derivedResults = await evaluateDerivedModuleRules(cwd, cache, changedFiles, importableFiles)
+  // Both evaluators resolve the same imports; each path is stat'ed once per run.
+  const probe = cachedFileProbe()
+
+  const derivedResults = await evaluateDerivedModuleRules(cwd, cache, changedFiles, importableFiles, probe)
   const explicitResults = loaded.config
-    ? await evaluateArchRules(cwd, cache, loaded.config, changedFiles, importableFiles)
+    ? await evaluateArchRules(cwd, cache, loaded.config, changedFiles, importableFiles, probe)
     : []
 
   return [...derivedResults, ...explicitResults]
@@ -71,9 +75,26 @@ async function evaluateDerivedModuleRules(
   cache: ParseCache,
   changedFiles: Set<string> | null | undefined,
   importableFiles: () => Promise<readonly string[]>,
+  probe: FileProbe,
 ): Promise<CheckResult[]> {
   const moduleNames = await listModuleNames(cwd)
   if (moduleNames.length === 0) return []
+
+  // A module's public surface is what an import of its directory, or of its `db/schema`,
+  // lands on. Resolved only for a module some import reaches across into.
+  const surfaces = new Map<string, Promise<Set<string>>>()
+  const surfaceOf = (name: string): Promise<Set<string>> => {
+    let surface = surfaces.get(name)
+    if (!surface) {
+      const moduleDir = resolve(cwd, 'modules', name)
+      surface = Promise.all([
+        resolveDirectoryImport(moduleDir, { probe }),
+        resolveImportPath(join(moduleDir, 'db', 'schema'), { probe }),
+      ]).then((files) => new Set(files.flatMap((file) => (file === null ? [] : [toPosixRelative(cwd, file)]))))
+      surfaces.set(name, surface)
+    }
+    return surface
+  }
 
   const results: CheckResult[] = []
   const files = await importableFiles()
@@ -91,7 +112,7 @@ async function evaluateDerivedModuleRules(
 
     filesChecked += 1
     const resolvedImports = await Promise.all(
-      specifiers.map((entry) => resolveImportSpecifier(cwd, absPath, entry.specifier)),
+      specifiers.map((entry) => resolveImportSpecifier(cwd, absPath, entry.specifier, probe)),
     )
     const importerModule = moduleNameFromRelPath(relPath)
 
@@ -100,7 +121,7 @@ async function evaluateDerivedModuleRules(
 
       const targetModule = moduleNameFromRelPath(imp.fileRelPath)
       if (!targetModule || targetModule === importerModule) continue
-      if (isModulePublicSurface(imp.fileRelPath, targetModule)) continue
+      if ((await surfaceOf(targetModule)).has(imp.fileRelPath)) continue
 
       results.push(
         check(
@@ -129,16 +150,13 @@ async function evaluateDerivedModuleRules(
   return results
 }
 
-function isModulePublicSurface(relPath: string, moduleName: string): boolean {
-  return relPath === `modules/${moduleName}/index.ts` || relPath === `modules/${moduleName}/db/schema.ts`
-}
-
 async function evaluateArchRules(
   cwd: string,
   cache: ParseCache,
   config: ArchRuleSet,
   changedFiles: Set<string> | null | undefined,
   importableFiles: () => Promise<readonly string[]>,
+  probe: FileProbe,
 ): Promise<CheckResult[]> {
   const layers = config.layers ?? {}
   const rules = config.rules
@@ -170,7 +188,7 @@ async function evaluateArchRules(
     filesChecked += 1
     const resolvedImports = dedupeResolvedImports(
       await Promise.all(
-        specifiers.map((entry) => resolveImportSpecifier(cwd, absPath, entry.specifier, entry.typeOnly)),
+        specifiers.map((entry) => resolveImportSpecifier(cwd, absPath, entry.specifier, probe, entry.typeOnly)),
       ),
     )
     const fromLabel = classifyLayer(relPath, layers) ?? relPath
@@ -322,63 +340,18 @@ async function resolveImportSpecifier(
   cwd: string,
   importerAbsPath: string,
   specifier: string,
+  probe: FileProbe,
   typeOnly = false,
 ): Promise<ResolvedImport> {
   if (isBareSpecifier(specifier)) {
     return { specifier, typeOnly, kind: 'package', packageName: packageNameFromSpecifier(specifier) }
   }
 
-  const rawTarget = specifier.startsWith('@/')
-    ? resolve(cwd, specifier.slice(2))
-    : resolve(dirname(importerAbsPath), specifier)
-
-  // TS source under NodeNext writes `import './Post.js'` for a file that is
-  // `Post.ts` on disk, so the extension is stripped before candidates are tried.
-  const base = stripKnownExtension(rawTarget)
-
-  const candidates = [
-    rawTarget,
-    `${base}.ts`,
-    `${base}.tsx`,
-    `${base}.mts`,
-    `${base}.js`,
-    `${base}.jsx`,
-    `${base}.mjs`,
-    join(base, 'index.ts'),
-    join(base, 'index.tsx'),
-    join(base, 'index.js'),
-  ]
-  if (typeOnly) {
-    // A declaration file can satisfy only a type-only import — for a runtime
-    // import a lone `.d.ts` on disk really is unresolved.
-    candidates.push(`${base}.d.ts`, join(base, 'index.d.ts'))
-  }
-
-  for (const candidate of candidates) {
-    if (await pathExists(candidate)) {
-      return { specifier, typeOnly, kind: 'file', fileRelPath: toPosixRelative(cwd, candidate) }
-    }
-  }
-
-  return { specifier, typeOnly, kind: 'unresolved' }
-}
-
-const KNOWN_EXTENSIONS = ['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs']
-
-function stripKnownExtension(path: string): string {
-  for (const ext of KNOWN_EXTENSIONS) {
-    if (path.endsWith(ext)) return path.slice(0, -ext.length)
-  }
-  return path
-}
-
-async function pathExists(absPath: string): Promise<boolean> {
-  try {
-    await access(absPath)
-    return true
-  } catch {
-    return false
-  }
+  const target = specifierBase(cwd, importerAbsPath, specifier)
+  const file = target === null ? null : await resolveImportPath(target, { declarations: typeOnly, probe })
+  return file === null
+    ? { specifier, typeOnly, kind: 'unresolved' }
+    : { specifier, typeOnly, kind: 'file', fileRelPath: toPosixRelative(cwd, file) }
 }
 
 interface ExtractedSpecifier {
