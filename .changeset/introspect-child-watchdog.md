@@ -2,4 +2,4 @@
 '@guren/cli': patch
 ---
 
-The introspection child no longer outlives the CLI when the app it loads computes synchronously without yielding. A thread of its own now ends the child once its parent is gone, and past a budget two seconds beyond the parent's timeout, where the stdin watch could not fire under a starved event loop and an orphaned child spun at full CPU until killed by hand.
+The introspection child now ends itself when the CLI that started it is gone, and two seconds past the CLI's introspection timeout. An app that computed synchronously without yielding starved the child's stdin watch, so a child whose CLI had died kept spinning at full CPU until killed by hand.

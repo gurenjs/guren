@@ -4,7 +4,7 @@ import { readFile, rm } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import type { AppManifest } from '@guren/core'
 
-import { CHECK_INTROSPECT_TIMEOUT_MS, introspectApp, introspectRunner, withCapNote, type Introspection, type IntrospectionFailure } from '../src/introspect'
+import { CHECK_INTROSPECT_TIMEOUT_MS, INTROSPECT_CHILD_BUDGET_MARGIN_MS, introspectApp, introspectRunner, withCapNote, type Introspection, type IntrospectionFailure } from '../src/introspect'
 import { bunExecutable, runCaptured } from '../src/subprocess'
 import {
   assertWorkspaceBuilt,
@@ -590,13 +590,27 @@ describe('a child whose app never yields', () => {
     expect(existsSync(resultFile)).toBe(false)
   }, 30_000)
 
+  // Guards the margin's sign: a budget ending before the cap would pre-empt the parent's report.
   test('still reports the timeout itself, its budget running past the cap', async () => {
     const dir = join(root, 'timeout-spin')
     await writeWorkspaceFiles(dir, SPINNING_ENTRY)
 
-    expect(expectFailure(await introspectApp(dir, { timeoutMs: 2000 }), 'timeout')).toContain('2000ms')
+    expect(expectFailure(await introspectApp(dir, { timeoutMs: 4000 }), 'timeout')).toContain('4000ms')
     const pid = Number(await readFile(join(dir, 'child.pid'), 'utf8'))
     await waitFor(() => !isAlive(pid), 5000)
+  }, 30_000)
+
+  test('reports timeout, not crashed, when the budget ends it while the CLI loop is blocked past the cap', async () => {
+    const dir = join(root, 'blocked-parent-spin')
+    await writeWorkspaceFiles(dir, SPINNING_ENTRY)
+    const pidFile = join(dir, 'child.pid')
+
+    const pending = introspectApp(dir, { timeoutMs: 3000, fresh: true })
+    await waitFor(() => existsSync(pidFile))
+    // Past the cap and the child's budget (cap + margin), as a synchronous scan in `guren check` can be.
+    Bun.sleepSync(3000 + INTROSPECT_CHILD_BUDGET_MARGIN_MS + 2000)
+
+    expect(expectFailure(await pending, 'timeout')).toContain('3000ms')
   }, 30_000)
 })
 

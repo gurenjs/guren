@@ -235,10 +235,10 @@ function dieWithParent(): void {
 }
 
 /**
- * The same two deaths from a thread of their own: an app whose module scope or register()
- * computes synchronously starves this thread's loop, so neither stdin's `end` nor a timer
- * here fires, and an orphaned child would spin at full CPU forever. `process.exit` in a
- * worker ends only the worker, hence the signals.
+ * Ends the child when its parent is gone or its budget has passed, from a thread the app cannot
+ * starve: an app whose module scope or register() computes synchronously blocks this thread's
+ * loop, so neither stdin's `end` nor a timer here fires, and an orphaned child would spin at
+ * full CPU forever. `process.exit` in a worker ends only the worker, hence the signals.
  */
 function startWatchdog(): Promise<void> {
   const source = `

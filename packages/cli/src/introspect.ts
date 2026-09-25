@@ -105,17 +105,18 @@ async function runIntrospection(root: string, timeoutMs: number): Promise<Intros
   const resultFile = join(dir, 'result.json')
 
   try {
+    const started = Date.now()
     const run = await runCaptured([bunExecutable(), child, resultFile, String(timeoutMs + INTROSPECT_CHILD_BUDGET_MARGIN_MS)], root, {
       timeoutMs,
       env: { GUREN_INTROSPECT: '1' },
       processGroup: true,
     })
-    if (run.timedOut) {
+    const result = run.timedOut ? undefined : await readResult(resultFile)
+    if (result) return result
+    // A loop blocked past the cap lets the child's budget end it first, and its `close` then settles the run ahead of our timer.
+    if (run.timedOut || Date.now() - started >= timeoutMs) {
       return { status: 'failed', reason: 'timeout', message: await timeoutMessage(`${resultFile}.scanning`, timeoutMs) }
     }
-
-    const result = await readResult(resultFile)
-    if (result) return result
 
     const detail = outputTail(run.stderr).join('\n')
     return {
