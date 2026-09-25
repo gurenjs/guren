@@ -514,6 +514,13 @@ export default createApp({ env, config: [session], auth: {}, routes: registerWeb
       expect({ ...manifest[key], key }).toMatchObject({ key, status: 'warn', evidence: 'none', advisory: true })
       expect(manifest[key]!.message).toContain('BindingProvider threw in register()')
     }
+
+    // No introspection-unavailable line here, so the gate names each verdict it could not vouch for.
+    const gate = await runGate({ cwd: dir, exec: async () => ({ exitCode: 0, stdout: '', stderr: '' }) })
+    const findings = gate.stages.find((stage) => stage.name === 'check')!.findings
+    for (const title of ['Session manager binding (advisory)', 'Attachments delivery route (advisory)']) {
+      expect(findings.find((line) => line.startsWith(`${title}: `))).toContain('BindingProvider threw in register()')
+    }
   })
 
   test('introspects an app with no deploy target once it has a session config, and falls back when that fails', async () => {

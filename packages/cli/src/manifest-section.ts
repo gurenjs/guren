@@ -132,8 +132,8 @@ export function introspectionUnavailableMessage(failure: IntrospectionFailed, ju
   return `The app could not be introspected (${failure.reason}): ${reason} ${judgedInstead}`
 }
 
-/** Why a verdict only the registered app can answer has nothing to read, when no run was asked for. */
-export const NOT_INTROSPECTED_REASON = 'the app was not introspected'
+/** Why a verdict only the registered app can answer has nothing to read: no run, or one that failed and reports itself. */
+export const NOT_INTROSPECTED_REASON = 'no introspected app was available'
 
 /**
  * A verdict only the registered app can answer, with no manifest to vouch for it: an advisory warn,

@@ -62,6 +62,20 @@ export function gatingResults(report: CheckReport): CheckResult[] {
   return report.checks.filter((result) => !result.advisory && result.status !== 'pass')
 }
 
+/**
+ * The advisory results a gate still prints: verdicts only the registered app could answer that no
+ * manifest vouched for (RFC 0026 §5). Without them a missing session binding or delivery mount, which
+ * gate when the app is introspected, would pass a run with no manifest in silence.
+ */
+export function unverifiedResults(report: CheckReport): CheckResult[] {
+  return report.checks.filter((result) => result.evidence === 'none')
+}
+
+/** A finding a gate prints without counting it. */
+export function formatAdvisoryFinding(finding: Parameters<typeof formatFinding>[0]): string {
+  return formatFinding({ ...finding, title: `${finding.title} (advisory)` })
+}
+
 /** One finding as the line a gate or hook feeds back: `title: message [file:line] -> suggestion`. */
 export function formatFinding(finding: {
   title: string

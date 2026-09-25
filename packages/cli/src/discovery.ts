@@ -613,7 +613,6 @@ export async function discoverAppConfigFiles(appRoot: string): Promise<string[]>
   return groups.flat().filter((file) => !/\.test\.[jt]sx?$/.test(file))
 }
 
-
 /**
  * Source files sitting directly in the project root, where deploy entrypoints
  * conventionally live. Its own non-recursive pass because pointing collectFiles

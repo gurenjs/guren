@@ -92,7 +92,7 @@ describe('deploy-runtime verdicts read from the introspected app (RFC 0026 §5)'
 
     const source = byKey((await runCheck({ cwd: dir, introspect: false })).checks)
     expect(source['deploy-password-hashing-unverified']).toMatchObject({ status: 'warn', evidence: 'none', advisory: true })
-    expect(source['deploy-password-hashing-unverified'].message).toContain('the app was not introspected')
+    expect(source['deploy-password-hashing-unverified'].message).toContain('no introspected app was available')
   })
 
   test('reports the same verdicts through doctor, and through checkDeployRuntime() as a deploy build calls it', async () => {

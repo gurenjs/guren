@@ -259,7 +259,8 @@ codegen、typecheck、lint(アプリに `.oxlintrc.json` がある場合)、
 ([イントロスペクションの結果を読むチェック](#イントロスペクションの結果を読むチェック)参照)。
 イントロスペクションは 1 回の実行につき 1 回(上限 10 秒)で、codegen の後に行うため、clone 直後の
 アプリでもエントリを import できます。失敗した場合は、それを求めたステージに advisory の
-1 行を加えるだけで、gate は失敗にしません。
+1 行を加えるだけで、gate は失敗にしません。`-unverified` の結果も、アプリが保証できなかった理由を
+添えて check ステージに advisory の行として表示します。
 
 ```bash
 bunx guren gate            # 全ステージをフルで
@@ -363,7 +364,7 @@ params スキーマかバインディングを持つルート、`.agent()` を�
 アプリから読みます。
 
 イントロスペクションを行うのは `guren check`、`doctor`、`audit`、`gate`、`plan:verify` です。
-編集フック(`check --arch`)と dev MCP サーバの `guren_check` は行わないので、アプリでしか
+上限はどれも 10 秒なので、`check --ci` と gate の判定は一致します。編集フック(`check --arch`)と dev MCP サーバの `guren_check` は行わないので、アプリでしか
 答えられない判定は `-unverified` になります。
 
 これらの結果には、`--json` の出力で `evidence` が付きます。複数の事実を読む判定では、

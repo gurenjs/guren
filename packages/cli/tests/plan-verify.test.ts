@@ -449,6 +449,24 @@ describe('PlanVerifier', () => {
     expect(commandOf(blocked, 'check')).toMatchObject({ status: 'blocked', reason: 'could not run: routes/web.ts threw' })
   })
 
+  test('should pass check over an unverified verdict and still name it, since no manifest vouched for it', async () => {
+    const unverified = checkReport([{
+      key: 'sessions-binding-unverified',
+      title: 'Session manager binding',
+      status: 'warn',
+      message: "whether a registered provider binds 'session' is unverified: BindingProvider threw in register().",
+      advisory: true,
+      evidence: 'none',
+    }])
+
+    const step = await verifier(statusOf(), fakeExec(), { check: async () => unverified }).verify(HTTP)
+
+    expect(commandOf(step, 'check')).toMatchObject({
+      status: 'pass',
+      findings: [expect.stringMatching(/^Session manager binding \(advisory\): .*BindingProvider threw/)],
+    })
+  })
+
   test('should fail the tests command on a behaviour that is not passing, naming its cases', async () => {
     const report = junit([
       { name: '[AC-comments-1] x' },

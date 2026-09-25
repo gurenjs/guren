@@ -15,9 +15,9 @@ import { consola } from 'consola'
 import { runAudit } from './audit'
 import { getChangedFiles, runGit } from './changed-files'
 import { runCheck } from './check'
-import { formatFinding, gatingResults } from './check-result'
+import { formatAdvisoryFinding, formatFinding, gatingResults, unverifiedResults } from './check-result'
 import { capFindings, codegenFallback, OUTPUT_ERROR_PATTERN, outputFindings, outputTail, readScripts, resolveScriptCommand } from './command-output'
-import { advisoryIntrospection, introspectRunner, type Introspection } from './introspect'
+import { checkIntrospection, introspectRunner, type Introspection } from './introspect'
 import { INTROSPECTION_UNAVAILABLE } from './manifest-section'
 import { isLintable, runOxlint } from './lint-run'
 import { bunExecutable, runCaptured, type CapturedExec, type CapturedRun } from './subprocess'
@@ -94,7 +94,7 @@ function introspectionNote(ctx: StageContext, results: ReadonlyArray<{ key: stri
   const found = results.find((result) => result.key === INTROSPECTION_UNAVAILABLE)
   if (!found || ctx.introspectionNoted) return []
   ctx.introspectionNoted = true
-  return [formatFinding({ ...found, title: `${found.title} (advisory)` })]
+  return [formatAdvisoryFinding(found)]
 }
 
 /**
@@ -164,7 +164,10 @@ async function checkStage(ctx: StageContext): Promise<StageOutcome> {
   })
   const failing = gatingResults(report)
   const note = introspectionNote(ctx, report.checks)
-  return { status: failing.length > 0 ? 'fail' : 'pass', findings: [...capFindings(failing.map(formatFinding)), ...note] }
+  return {
+    status: failing.length > 0 ? 'fail' : 'pass',
+    findings: capFindings([...failing.map(formatFinding), ...note, ...unverifiedResults(report).map(formatAdvisoryFinding)]),
+  }
 }
 
 async function auditStage(ctx: StageContext): Promise<StageOutcome> {
@@ -204,7 +207,7 @@ export async function runGate(options: RunGateOptions = {}): Promise<GateReport>
   ])
   // Its own run, not the process memo: the dev MCP server calls the gate for the whole session,
   // and codegen, the stage before check, is what lets a fresh clone's entry import at all.
-  const introspect = introspectRunner(cwd, options.introspect ?? advisoryIntrospection(cwd, { fresh: true }))
+  const introspect = introspectRunner(cwd, options.introspect ?? checkIntrospection(cwd, { fresh: true }))
   const ctx: StageContext = {
     cwd,
     exec: options.exec ?? runCaptured,

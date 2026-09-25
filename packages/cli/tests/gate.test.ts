@@ -288,7 +288,11 @@ export default function registerRoutes(router: any) {
         expect(run.calls()).toBe(1)
         const check = stage(report, 'check')
         expect(check.status).toBe('pass')
-        expect(check.findings).toEqual([expect.stringMatching(/^Introspection \(advisory\): The app could not be introspected \(import\)/)])
+        // The note once, then the verdict the missing manifest left unverified, both advisory.
+        expect(check.findings).toEqual([
+          expect.stringMatching(/^Introspection \(advisory\): The app could not be introspected \(import\)/),
+          expect.stringMatching(/^Session manager binding \(advisory\): .* is unverified: no introspected app was available\./),
+        ])
         expect(stage(report, 'audit').findings.some((finding) => finding.includes('introspected'))).toBe(false)
         expect(report.ok).toBe(true)
       })

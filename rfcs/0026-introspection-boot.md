@@ -762,10 +762,24 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   since the dev MCP server calls the gate for the whole session. codegen is
 >   the gate's first stage, so the entry imports on a fresh clone by the time
 >   check runs. A failed introspection is one `Introspection (advisory)` finding
->   on the stage that met it and never fails the gate. The run is capped at 10 s,
->   the deploy builds' cap (`ADVISORY_INTROSPECT_TIMEOUT_MS`), and a `--changed`
->   run that changed no source file introspects in neither stage, as `guren check`
->   already skipped it. `stopGateFindings()`
+>   on the stage that met it and never fails the gate. Every other `-unverified`
+>   result (`evidence: 'none'`, `unverifiedResults()` in `check-result.ts`) is
+>   printed on the check stage as an advisory line too, and so is it on
+>   `plan:verify`'s check step, which records a step `verified` over it: without a manifest `sessions-binding` and `attachments-delivery:*`,
+>   which gated before, no longer do, and a provider that threw leaves no
+>   `introspection-unavailable` line, so without them a CI run with no `APP_KEY`
+>   would pass a dropped session provider or delivery mount in silence.
+> - One cap, `CHECK_INTROSPECT_TIMEOUT_MS` (10 s), for every command that judges
+>   the app: `guren check`, `audit` and `doctor` (30 s before), the gate,
+>   `plan:verify` and the deploy builds. The gate composes the checks CI runs,
+>   and an app that registers in 10 to 30 s would otherwise fail `check --ci`
+>   and pass the gate, or the reverse. 10 s rather than 30 s because the gate
+>   runs on an agent's every stop; `guren introspect --timeout`, `guren context`
+>   and `codegen --introspect`, which judge nothing, keep 30 s.
+> - A `--changed` run that changed no source file introspects for neither the
+>   route rules nor audit (`runAudit({ changedFiles })` applies the rule
+>   `runCheck()` does). The deploy verdicts still introspect when `package.json`
+>   changed, since a deploy plugin is declared there. `stopGateFindings()`
 >   therefore spawns the child on an agent's stop whenever the app has a rule's
 >   content (a deploy target, a session or attachments config, a mutating
 >   route, an agent route). web and blog introspect in under 0.5 s.
@@ -801,7 +815,8 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   `analyzeDeployRuntime()` and
 >   `judgeDeployRuntime()` are deprecated (`deploy-runtime-analysis`, removed in
 >   3.0.0, a first-use warning), introspect by default like
->   `checkDeployRuntime()`, and keep `DeployRuntimeAnalysis`'s removed signal
+>   `checkDeployRuntime()` (both with a run of their own, `fresh`, since a
+>   long-lived caller must not keep the process memo), and keep `DeployRuntimeAnalysis`'s removed signal
 >   fields as empty arrays; the commands call `readDeployRuntime()` and
 >   `judgeDeployVerdicts()`.
 > - `sessions-check.ts`: `checkBinding()` and its `\bClassName\b` regex over

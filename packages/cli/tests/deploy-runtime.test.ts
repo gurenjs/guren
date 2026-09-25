@@ -1066,7 +1066,7 @@ describe('checkDeployRuntime', () => {
           'deploy-provider-discovery',
         ])
         for (const verdict of verdicts.slice(0, 2)) {
-          expect(verdict).toMatchObject({ status: 'warn', evidence: 'none', evidenceReason: 'the app was not introspected' })
+          expect(verdict).toMatchObject({ status: 'warn', evidence: 'none', evidenceReason: 'no introspected app was available' })
           expect(verdict.fix).toContain('guren introspect')
         }
         expect(verdicts[1]!.message).toContain('whether the session and cache stores are per-process is unverified')

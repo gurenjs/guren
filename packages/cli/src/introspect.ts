@@ -32,15 +32,16 @@ export interface IntrospectOptions {
 export const DEFAULT_INTROSPECT_TIMEOUT_MS = 30_000
 
 /**
- * The cap where the manifest only feeds advice ahead of something else: a deploy build, and the
- * gate an agent's Stop hook runs. A `register()` waiting on a binding this machine lacks must not
- * hold either long; web and examples/blog introspect in under 0.5 s.
+ * The one cap for every command that judges the app: `check`, `audit`, `doctor`, the gate, `plan:verify`
+ * and the deploy builds. One cap, or an app introspecting between two would fail `check --ci` and pass
+ * the gate; short, since the gate runs on an agent's every stop. `guren introspect --timeout` diagnoses a slower app.
  */
-export const ADVISORY_INTROSPECT_TIMEOUT_MS = 10_000
+export const CHECK_INTROSPECT_TIMEOUT_MS = 10_000
 
 /**
  * How an in-process caller of `runCheck()` or `runAudit()` asks for the introspected app: `true`
- * for this process's memoised run, or a run of its own that the caller shares between commands.
+ * for this process's memoised run under {@link CHECK_INTROSPECT_TIMEOUT_MS}, or a run of its own
+ * that the caller shares between commands.
  */
 export type IntrospectOption = boolean | (() => Promise<Introspection>)
 
@@ -48,15 +49,15 @@ export type IntrospectOption = boolean | (() => Promise<Introspection>)
 export function introspectRunner(cwd: string, option: () => Promise<Introspection>): () => Promise<Introspection>
 export function introspectRunner(cwd: string, option: IntrospectOption | undefined): (() => Promise<Introspection>) | undefined
 export function introspectRunner(cwd: string, option: IntrospectOption | undefined): (() => Promise<Introspection>) | undefined {
-  const run = typeof option === 'function' ? option : option ? () => introspectApp(cwd) : undefined
+  const run = typeof option === 'function' ? option : option ? checkIntrospection(cwd) : undefined
   if (!run) return undefined
   let started: Promise<Introspection> | undefined
   return () => (started ??= run())
 }
 
-/** A run capped at {@link ADVISORY_INTROSPECT_TIMEOUT_MS}, for the callers whose manifest only feeds advice. */
-export function advisoryIntrospection(cwd: string, options: Pick<IntrospectOptions, 'fresh'> = {}): () => Promise<Introspection> {
-  return () => introspectApp(cwd, { ...options, timeoutMs: ADVISORY_INTROSPECT_TIMEOUT_MS })
+/** A run capped at {@link CHECK_INTROSPECT_TIMEOUT_MS}, for a command that judges the app. */
+export function checkIntrospection(cwd: string, options: Pick<IntrospectOptions, 'fresh'> = {}): () => Promise<Introspection> {
+  return () => introspectApp(cwd, { ...options, timeoutMs: CHECK_INTROSPECT_TIMEOUT_MS })
 }
 
 /** One run per app root and timeout per CLI process, so a larger `timeoutMs` can retry a timed-out run. */

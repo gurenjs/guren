@@ -14,7 +14,7 @@ import {
 import { parseSourceFile } from './parse-cache'
 import { readDeclaredDependencyNames } from './plugin-manifest'
 import type { CheckEvidence } from './check-result'
-import { advisoryIntrospection, type Introspection } from './introspect'
+import { checkIntrospection, type Introspection } from './introspect'
 // The runtime warning in the session middleware names the target by the same label.
 import { SERVERLESS_RUNTIME_LABELS } from '@guren/server'
 import type { AppManifest, AuthProviderEntry, DriverMapEntry, SessionEntry } from '@guren/server'
@@ -583,7 +583,7 @@ function warnDeprecated(symbol: string): void {
  */
 export async function analyzeDeployRuntime(cwd: string, options: DeployRuntimeOptions = {}): Promise<DeployRuntimeAnalysis> {
   warnDeprecated('analyzeDeployRuntime')
-  const facts = await readDeployRuntime(cwd, { introspect: options.introspect ?? advisoryIntrospection(cwd) })
+  const facts = await readDeployRuntime(cwd, { introspect: options.introspect ?? checkIntrospection(cwd, { fresh: true }) })
   return {
     ...facts,
     bunOnlyHasherSignals: [],
@@ -1036,15 +1036,14 @@ export function judgeDeployRuntime(analysis: DeployRuntimeAnalysis): DeployRunti
 
 /**
  * Scan and judge in one call: what a deploy build runs before the app build.
- * Empty when the app declares no deploy target, so a caller prints nothing
- * for an app this cannot apply to; every verdict is present otherwise, passing
- * ones included, since the build may want to say what it verified. Reads the
- * introspected app unless `options` says otherwise.
+ * Empty when the app declares no deploy target; otherwise every verdict, passing ones included.
+ * Reads the introspected app unless `options` says otherwise, in a run of its own: a
+ * long-lived caller must not keep this process's memo.
  */
 export async function checkDeployRuntime(
   cwd: string,
   options: DeployRuntimeOptions = {},
 ): Promise<DeployRuntimeVerdict[]> {
-  const analysis = await readDeployRuntime(cwd, { introspect: options.introspect ?? advisoryIntrospection(cwd) })
+  const analysis = await readDeployRuntime(cwd, { introspect: options.introspect ?? checkIntrospection(cwd, { fresh: true }) })
   return analysis.targets.length === 0 ? [] : judgeDeployVerdicts(analysis)
 }

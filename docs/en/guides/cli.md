@@ -262,7 +262,9 @@ no `.oxlintrc.json` skips lint. The `check` and `audit` stages read the
 introspected app (see [Checks that read the introspected app](#checks-that-read-the-introspected-app))
 through one introspection per run, capped at 10 seconds, which comes after
 codegen, so a fresh clone's entry imports by then. An introspection that fails adds one
-advisory line to the stage that asked for it and never fails the gate.
+advisory line to the stage that asked for it and never fails the gate. Every
+`-unverified` result is printed on the check stage as an advisory line as
+well, naming why the app could not vouch for it.
 
 ```bash
 bunx guren gate            # every stage, in full
@@ -369,9 +371,10 @@ value. Introspection stops before any provider's `boot()`, so for a
 `configureAttachments()` called inside a function the call's options are read
 from source, and the routes and storage drivers from the app.
 
-`guren check`, `doctor`, `audit`, `gate` and `plan:verify` introspect. The
-edit hook (`check --arch`) and the dev MCP server's `guren_check` do not, so
-there the verdicts only the app can answer are `-unverified`.
+`guren check`, `doctor`, `audit`, `gate` and `plan:verify` introspect, all
+with the same 10-second cap, so `check --ci` and the gate judge an app the same
+way. The edit hook (`check --arch`) and the dev MCP server's `guren_check` do
+not, so there the verdicts only the app can answer are `-unverified`.
 
 Each of these results carries `evidence` in `--json` output. A verdict that reads
 several facts reports the weakest source among them:

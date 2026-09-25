@@ -4,7 +4,7 @@ import { readFile, rm } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import type { AppManifest } from '@guren/core'
 
-import { introspectApp, introspectRunner, type Introspection, type IntrospectionFailure } from '../src/introspect'
+import { CHECK_INTROSPECT_TIMEOUT_MS, introspectApp, introspectRunner, type Introspection, type IntrospectionFailure } from '../src/introspect'
 import {
   assertWorkspaceBuilt,
   CLI_BIN_PATH,
@@ -565,5 +565,14 @@ describe('introspectRunner()', () => {
     expect(calls).toBe(1)
     expect(introspectRunner('/app', false)).toBeUndefined()
     expect(introspectRunner('/app', undefined)).toBeUndefined()
+  })
+
+  test('reads `true` as the memoised run under the cap the gate uses, so check --ci and the gate agree', async () => {
+    const dir = join(root, 'check-cap-missing')
+    const run = introspectRunner(dir, true)!()
+
+    expect(run).toBe(introspectApp(dir, { timeoutMs: CHECK_INTROSPECT_TIMEOUT_MS }))
+    expect(run).not.toBe(introspectApp(dir))
+    await Promise.all([run, introspectApp(dir)])
   })
 })

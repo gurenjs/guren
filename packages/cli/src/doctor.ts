@@ -34,7 +34,7 @@ import { DEFAULT_ROUTES_FILE, loadRouteDefinitions, resolveRoutesFile } from './
 import { appDeclaresPrototypeRoutes } from './prototype-check'
 import type { RouteDefinition } from '@guren/server'
 import { judgeDeployVerdicts, readDeployRuntime } from './deploy-runtime'
-import { introspectApp, type Introspection } from './introspect'
+import { checkIntrospection, type Introspection } from './introspect'
 import { describeIntrospectionFailure, introspectedRoutes } from './manifest-section'
 import type { CheckEvidence } from './check-result'
 import { detectConfigMigrations, undeclaredEnv, type ConfigMigration, type EnvDeclaration } from './config-migration'
@@ -1278,7 +1278,7 @@ function createManifestPlans(cwd: string, options: { introspect?: boolean } = {}
     graph ??= loadRouteDefinitions(resolve(cwd, DEFAULT_ROUTES_FILE), cwd)
     return graph
   }
-  const introspection = options.introspect ? () => introspectApp(cwd) : undefined
+  const introspection = options.introspect ? checkIntrospection(cwd) : undefined
   return {
     pageManifest: planPageManifest(cwd),
     agentManifest: planAgentManifest(cwd, DEFAULT_ROUTES_FILE, routeGraph),

@@ -12,11 +12,10 @@ import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { runCheck } from '../check'
-import { formatFinding, gatingResults, type CheckReport } from '../check-result'
+import { formatAdvisoryFinding, formatFinding, gatingResults, unverifiedResults, type CheckReport } from '../check-result'
 import { capFindings, codegenFallback, OUTPUT_ERROR_PATTERN, outputFindings, outputTail, resolveScriptCommand } from '../command-output'
 import { discoverTestFiles } from '../discovery'
 import { readBracketedTokenFiles } from '../docs-acceptance'
-import { advisoryIntrospection } from '../introspect'
 import { resolveAppDrizzleKit, type AppDrizzleKit } from '../make-migration'
 import { bunExecutable, type CapturedExec, type CapturedRun } from '../subprocess'
 import {
@@ -231,9 +230,7 @@ export class PlanVerifier {
     private readonly options: PlanVerifierOptions,
   ) {
     this.declaredIds = planAcceptanceIds(plan)
-    // The gate's cap: in the Stop hook this runs beside the gate's own introspection.
-    const introspect = advisoryIntrospection(options.root)
-    this.check = options.check ?? (() => runCheck({ cwd: options.root, json: true, introspect }))
+    this.check = options.check ?? (() => runCheck({ cwd: options.root, json: true, introspect: true }))
     this.testFiles = options.testFiles ?? (() => discoverTestFiles(options.root))
     this.drizzleKit = options.drizzleKit ?? (() => resolveAppDrizzleKit(options.root))
     this.now = options.now ?? (() => new Date())
@@ -468,7 +465,8 @@ export class PlanVerifier {
       return { label, status: 'blocked', reason: `could not run: ${reasonOf(error)}`, findings: [] }
     }
     const failing = gatingResults(report)
-    return { label, status: failing.length > 0 ? 'fail' : 'pass', findings: capFindings(failing.map(formatFinding)) }
+    const findings = [...failing.map(formatFinding), ...unverifiedResults(report).map(formatAdvisoryFinding)]
+    return { label, status: failing.length > 0 ? 'fail' : 'pass', findings: capFindings(findings) }
   }
 
   private testKey(step: PlanDerivedStep): string {
