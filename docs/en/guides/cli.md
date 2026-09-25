@@ -247,8 +247,8 @@ skip: an `.oxlintrc.json` with no oxlint installed, a missing
 `typecheck` script, a routes entry that will not load. Only an app with
 no `.oxlintrc.json` skips lint. The `check` and `audit` stages read the
 introspected app (see [Checks that read the introspected app](#checks-that-read-the-introspected-app))
-through one introspection per run, which comes after codegen, so a fresh
-clone's entry imports by then. An introspection that fails adds one
+through one introspection per run, capped at 10 seconds, which comes after
+codegen, so a fresh clone's entry imports by then. An introspection that fails adds one
 advisory line to the stage that asked for it and never fails the gate.
 
 ```bash

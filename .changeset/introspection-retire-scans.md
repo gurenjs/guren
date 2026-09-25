@@ -2,7 +2,7 @@
 '@guren/cli': minor
 ---
 
-`guren gate` reads the introspected app, and the source readings that only stood in for it are gone (RFC 0026 Part 3). The gate's `check` and `audit` stages share one introspection per run, after its codegen stage; one that fails adds an `Introspection (advisory)` line to the stage that asked and never fails the gate. `guren plan:verify` introspects its `check` too. The edit hook and the dev MCP server's `guren_check` still do not, so there the verdicts below are `-unverified`.
+`guren gate` reads the introspected app, and the source readings that only stood in for it are gone (RFC 0026 Part 3). The gate's `check` and `audit` stages share one introspection per run, after its codegen stage and capped at 10 seconds; one that fails adds an `Introspection (advisory)` line to the stage that asked and never fails the gate. `guren plan:verify` introspects its `check` too. The edit hook and the dev MCP server's `guren_check` still do not, so there the verdicts below are `-unverified`.
 
 Verdicts that can change, by check key:
 
