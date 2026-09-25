@@ -9,15 +9,13 @@
 import { MODELS_DIR } from '../discovery'
 import { schemaIdentifierFor } from '../inflect'
 import { buildModelSource, type ModelRelationshipSource } from '../make-model'
-import { autoIncrementPrimaryKey, COLUMN_BUILDERS, quoteSqlName, type ColumnCode } from '../schema-columns'
+import { autoIncrementPrimaryKey, COLUMN_BUILDERS, MYSQL_UNINDEXABLE_TYPES, quoteString, TABLE_FACTORY, type ColumnCode } from '../schema-columns'
 import type { SchemaDialect } from '../schema-parser'
-import { isIdentifier, pascalCase } from '../utils'
+import { camelCase, isIdentifier, pascalCase, quoteObjectKey } from '../utils'
 import { listPlanElements, type PlanColumn, type PlanDraft, type PlanElementSection, type PlanModel } from './schema'
 import type { PlanDerivedStep } from './tasks'
 
-/** What the emitter needs of the application, read by the command and passed in. */
 export interface PlanScaffoldApp {
-  /** The root `db/schema.ts`'s dialect. */
   dialect: SchemaDialect
   /** Every app root's tables; `module` is null for the root's. */
   tables: ReadonlyArray<{ identifier: string; tableName?: string; module: string | null; columns: readonly string[]; opaqueColumns?: boolean }>
@@ -54,13 +52,18 @@ export interface PlanScaffoldOutput {
   refusals: string[]
 }
 
-const TABLE_FACTORY: Record<SchemaDialect, string> = { pg: 'pgTable', mysql: 'mysqlTable', sqlite: 'sqliteTable' }
+type PlanReference = NonNullable<PlanColumn['references']>
+type ReferencingColumn = PlanColumn & { references: PlanReference }
 
 interface TableRef {
   identifier: string
   columns: readonly string[]
   /** Set where a spread or a computed key hides columns, so an absent one is no evidence. */
   opaqueColumns?: boolean
+}
+
+function hasReference(column: PlanColumn): column is ReferencingColumn {
+  return column.references !== undefined
 }
 
 function hasColumn(table: TableRef, name: string): boolean {
@@ -71,12 +74,8 @@ function sqlNameOf(column: PlanColumn): string {
   return column.columnName ?? column.name
 }
 
-function propertyKey(name: string): string {
-  return isIdentifier(name) ? name : quoteSqlName(name)
-}
-
 function tableAccess(name: string): string {
-  return isIdentifier(name) ? `table.${name}` : `table[${quoteSqlName(name)}]`
+  return isIdentifier(name) ? `table.${name}` : `table[${quoteString(name)}]`
 }
 
 function escapeTemplate(text: string): string {
@@ -105,9 +104,8 @@ const STRING_TYPES: ReadonlySet<PlanColumn['type']> = new Set(['string', 'text',
  * string, so `0` on a decimal is `'0'`. A literal the type cannot hold is written as SQL.
  */
 function literalDefault(value: unknown, type: PlanColumn['type']): string | undefined {
-  if (value === null) return 'null'
   if (type === 'json') return JSON.stringify(value)
-  if (STRING_TYPES.has(type)) return typeof value === 'object' ? undefined : quoteSqlName(String(value))
+  if (STRING_TYPES.has(type)) return typeof value === 'object' ? undefined : quoteString(String(value))
   if (type === 'integer' || type === 'number') return typeof value === 'number' ? String(value) : undefined
   if (type === 'boolean') return typeof value === 'boolean' ? String(value) : undefined
   return undefined
@@ -124,14 +122,18 @@ function nowDefault(dialect: SchemaDialect, type: PlanColumn['type']): ColumnCod
   return sqlDefault(type === 'date' ? "(date('now'))" : '(unixepoch())')
 }
 
-function defaultModifier(column: PlanColumn, dialect: SchemaDialect): ColumnCode {
-  const text = (column.default as string).trim()
-  if ((column.type === 'date' || column.type === 'datetime') && /^(now\(\)|current_timestamp(\(\))?)$/i.test(text)) {
+function isNullDefault(text: string): boolean {
+  return /^null$/i.test(text.trim())
+}
+
+function defaultModifier(column: PlanColumn, text: string, dialect: SchemaDialect): ColumnCode {
+  const trimmed = text.trim()
+  if ((column.type === 'date' || column.type === 'datetime') && /^(now\(\)|current_timestamp(\(\))?)$/i.test(trimmed)) {
     return nowDefault(dialect, column.type)
   }
-  const literal = parseLiteral(text)
+  const literal = parseLiteral(trimmed)
   const written = literal ? literalDefault(literal.value, column.type) : undefined
-  return written === undefined ? sqlDefault(text) : { code: `.default(${written})`, imports: [] }
+  return written === undefined ? sqlDefault(trimmed) : { code: `.default(${written})`, imports: [] }
 }
 
 /** A column added to an existing table is an `alter`, which no scaffold writes (§5). */
@@ -202,9 +204,33 @@ class Emitter {
     if (named) this.refusals.push(`${model.id}: ${named.module ? `modules/${named.module}/db/schema.ts` : 'db/schema.ts'} already declares the table ${model.table}.`)
   }
 
+  /** What the dialect or the plan's own values would make a table that does not compile or migrate. */
+  checkColumns(model: PlanModel): void {
+    const columns = this.columnsOf(model)
+    for (const column of columns) {
+      if (column.default !== undefined && isNullDefault(column.default)) {
+        this.refusals.push(`${column.id} plans default ${column.default}: a column without a default is already null when nullable. Drop \`default\` from the plan (plan:revise).`)
+      }
+    }
+    if (this.app.dialect !== 'mysql') return
+    const unindexable = (name: string): PlanColumn | undefined => {
+      const column = columns.find((candidate) => candidate.name === name)
+      return column && MYSQL_UNINDEXABLE_TYPES.has(column.type) ? column : undefined
+    }
+    const fix = 'MySQL indexes a TEXT or JSON column only by a prefix length drizzle does not write, so drizzle-kit refuses the key and MySQL rejects it (ER_BLOB_KEY_WITHOUT_LENGTH). Plan the column as `string` (varchar(255)), or drop the key (plan:revise).'
+    for (const column of columns) {
+      const keys = [column.unique && 'unique', column.index && 'index'].filter(Boolean)
+      if (keys.length > 0 && MYSQL_UNINDEXABLE_TYPES.has(column.type)) this.refusals.push(`${column.id} is a ${column.type} column planned ${keys.join(' and ')}. ${fix}`)
+    }
+    for (const index of model.indexes) {
+      const named = index.columns.flatMap((name) => unindexable(name) ?? [])
+      if (named.length > 0) this.refusals.push(`${model.id}'s index (${index.columns.join(', ')}) covers the ${named.map((column) => `${column.type} column ${column.name}`).join(' and ')}. ${fix}`)
+    }
+  }
+
   /** `undefined` with a refusal recorded when the target is not one this run can point at. */
-  private referenceTarget(model: PlanModel, column: PlanColumn): { model: PlanModel; table: TableRef } | undefined {
-    const reference = column.references as NonNullable<PlanColumn['references']>
+  private referenceTarget(model: PlanModel, column: ReferencingColumn): { model: PlanModel; table: TableRef } | undefined {
+    const reference = column.references
     const target = this.modelsById.get(reference.model)
     const where = `${model.id}.${column.name} references ${reference.model}.${reference.column}`
     if (!target) {
@@ -238,32 +264,32 @@ class Emitter {
 
     const lines = columns.map((column) => {
       const single = column.primaryKey === true && primary.length === 1
-      const base: ColumnCode = single && column.type === 'integer' && !column.references
-        ? autoIncrementPrimaryKey(dialect, sqlNameOf(column))
-        : COLUMN_BUILDERS[dialect][column.type](sqlNameOf(column), column)
-      const parts = [base]
-      if (single && base.code.indexOf('.primaryKey(') === -1) parts.push({ code: '.primaryKey()', imports: [] })
+      const autoIncrement = single && column.type === 'integer' && !column.references
+      const parts: ColumnCode[] = [
+        autoIncrement ? autoIncrementPrimaryKey(dialect, sqlNameOf(column)) : COLUMN_BUILDERS[dialect][column.type](sqlNameOf(column), column),
+      ]
+      if (single && !autoIncrement) parts.push({ code: '.primaryKey()', imports: [] })
       if (!column.nullable && !single) parts.push({ code: '.notNull()', imports: [] })
       if (column.unique) parts.push({ code: '.unique()', imports: [] })
-      if (column.default !== undefined) parts.push(defaultModifier(column, dialect))
-      if (column.references) {
+      if (column.default !== undefined && !isNullDefault(column.default)) parts.push(defaultModifier(column, column.default, dialect))
+      if (hasReference(column)) {
         const target = this.referenceTarget(model, column)
-        const onDelete = column.references.onDelete
+        const { onDelete, column: key } = column.references
         if (target && target.model.id === model.id) {
           // A column cannot reference its own table in its initializer (TS7022), so the key goes to the extra config.
           imports.add('foreignKey')
-          extra.push(`foreignKey({ columns: [${tableAccess(column.name)}], foreignColumns: [${tableAccess(column.references.column)}] })${onDelete ? `.onDelete('${onDelete}')` : ''}`)
+          extra.push(`foreignKey({ columns: [${tableAccess(column.name)}], foreignColumns: [${tableAccess(key)}] })${onDelete ? `.onDelete('${onDelete}')` : ''}`)
         } else if (target) {
           const options = onDelete ? `, { onDelete: '${onDelete}' }` : ''
-          parts.push({ code: `.references(() => ${target.table.identifier}.${column.references.column}${options})`, imports: [] })
+          parts.push({ code: `.references(() => ${target.table.identifier}.${key}${options})`, imports: [] })
         }
       }
       for (const part of parts) for (const name of part.imports) imports.add(name)
       if (column.index) {
         imports.add('index')
-        extra.push(`index('${indexName(model.table, [sqlNameOf(column)], false)}').on(${tableAccess(column.name)})`)
+        extra.push(`index(${quoteString(indexName(model.table, [sqlNameOf(column)], false))}).on(${tableAccess(column.name)})`)
       }
-      return `  ${propertyKey(column.name)}: ${parts.map((part) => part.code).join('')},`
+      return `  ${quoteObjectKey(column.name)}: ${parts.map((part) => part.code).join('')},`
     })
 
     if (primary.length > 1) {
@@ -274,11 +300,11 @@ class Emitter {
       const builder = index.unique ? 'uniqueIndex' : 'index'
       imports.add(builder)
       const names = index.columns.map((name) => sqlNames.get(name) ?? name)
-      extra.push(`${builder}('${indexName(model.table, names, index.unique)}').on(${index.columns.map(tableAccess).join(', ')})`)
+      extra.push(`${builder}(${quoteString(indexName(model.table, names, index.unique))}).on(${index.columns.map(tableAccess).join(', ')})`)
     }
 
     const close = extra.length === 0 ? '})' : `}, (table) => [\n${extra.map((entry) => `  ${entry},`).join('\n')}\n])`
-    const block = `export const ${identifier} = ${TABLE_FACTORY[dialect]}(${quoteSqlName(model.table)}, {\n${lines.join('\n')}\n${close}\n`
+    const block = `export const ${identifier} = ${TABLE_FACTORY[dialect]}(${quoteString(model.table)}, {\n${lines.join('\n')}\n${close}\n`
     return { model: model.id, identifier, block, imports: [...imports].sort() }
   }
 
@@ -294,33 +320,35 @@ class Emitter {
     const targetTable = this.tableOf(target)
     if (!targetTable) return `db/schema.ts does not declare ${target.table} yet`
     const ownColumns = this.columnsOf(model).map((column) => column.name)
-    const pick = (candidates: PlanColumn[], preferred: string): PlanColumn | undefined =>
+    const pick = (candidates: ReferencingColumn[], preferred: string): ReferencingColumn | undefined =>
       candidates.length === 1 ? candidates[0] : candidates.find((column) => column.name === preferred)
+    const referencing = (of: PlanModel, to: PlanModel): ReferencingColumn[] => of.columns.filter(hasReference).filter((column) => column.references.model === to.id)
 
     let args: string[]
     if (planned.type === 'belongsTo') {
-      const key = pick(model.columns.filter((column) => column.references?.model === target.id && ownColumns.includes(column.name)), `${planned.name}Id`)
+      const key = pick(referencing(model, target).filter((column) => ownColumns.includes(column.name)), `${planned.name}Id`)
       if (!key) return `no one column of ${model.name} this run writes references ${target.name}`
-      const owner = (key.references as NonNullable<PlanColumn['references']>).column
+      const owner = key.references.column
       if (!hasColumn(targetTable, owner)) return `${target.table} has no column ${owner}`
       args = [`'${key.name}'`, `'${owner}'`]
     } else if (planned.type === 'belongsToMany') {
       const pivots = this.plan.models.flatMap((pivot) => {
-        const own = pivot.columns.find((column) => column.references?.model === model.id)
-        const other = pivot.columns.find((column) => column.references?.model === target.id && column !== own)
+        const own = referencing(pivot, model)[0]
+        const other = referencing(pivot, target).find((column) => column !== own)
         return own && other ? [{ pivot, own, other }] : []
       })
-      if (pivots.length !== 1) return `${pivots.length === 0 ? 'no' : 'more than one'} model of the plan references both ${model.name} and ${target.name}`
-      const { pivot, own, other } = pivots[0]!
+      const only = pivots.length === 1 ? pivots[0] : undefined
+      if (!only) return `${pivots.length === 0 ? 'no' : 'more than one'} model of the plan references both ${model.name} and ${target.name}`
+      const { pivot, own, other } = only
       const pivotTable = this.tableOf(pivot)
       if (!pivotTable || !hasColumn(pivotTable, own.name) || !hasColumn(pivotTable, other.name)) return `the pivot table ${pivot.table} is not declared with both keys yet`
       declared.imports.add(pivotTable.identifier)
-      args = [pivotTable.identifier, `'${own.name}'`, `'${other.name}'`, `'${own.references!.column}'`, `'${other.references!.column}'`]
+      args = [pivotTable.identifier, `'${own.name}'`, `'${other.name}'`, `'${own.references.column}'`, `'${other.references.column}'`]
     } else {
-      const key = pick(target.columns.filter((column) => column.references?.model === model.id), `${model.name.charAt(0).toLowerCase()}${model.name.slice(1)}Id`)
+      const key = pick(referencing(target, model), `${camelCase(model.name)}Id`)
       if (!key) return `no one column of ${target.name} references ${model.name}`
       if (!hasColumn(targetTable, key.name)) return `${target.table} has no column ${key.name} yet`
-      const local = (key.references as NonNullable<PlanColumn['references']>).column
+      const local = key.references.column
       if (!ownColumns.includes(local)) return `${model.name} has no column ${local}`
       args = [`'${key.name}'`, `'${local}'`]
     }
@@ -330,7 +358,7 @@ class Emitter {
       declared.types.set(recordType, `type ${recordType} = typeof ${targetTable.identifier}.$inferSelect`)
       declared.imports.add(targetTable.identifier)
     }
-    return { name: planned.name, type: planned.type, relatedClass: target.name, recordType, args }
+    return { name: planned.name, type: planned.type, relatedClass: target.name, args }
   }
 
   file(model: PlanModel): PlanScaffoldFile {
@@ -359,7 +387,7 @@ class Emitter {
 }
 
 /** The command `plan:next` names for a scaffold step. */
-export function planScaffoldCommand(planArgument: string, stepId: string): string {
+export function planScaffoldCommandLine(planArgument: string, stepId: string): string {
   return `bunx guren plan:scaffold ${planArgument} --step ${stepId}`
 }
 
@@ -377,7 +405,10 @@ export function planScaffoldCoverage(plan: PlanDraft, step: Pick<PlanDerivedStep
 /** What `plan:scaffold` writes for `step`. Pure: the caller reads the application and writes the result. */
 export function emitPlanScaffold(plan: PlanDraft, step: PlanDerivedStep, app: PlanScaffoldApp): PlanScaffoldOutput {
   const emitter = new Emitter(plan, step, app)
-  for (const model of emitter.models) emitter.checkCollisions(model)
+  for (const model of emitter.models) {
+    emitter.checkCollisions(model)
+    emitter.checkColumns(model)
+  }
   const tables = emitter.models.map((model) => emitter.table(model))
   const files = emitter.models.map((model) => emitter.file(model))
   return { tables, files, ...planScaffoldCoverage(plan, step), omitted: emitter.omitted, refusals: emitter.refusals }

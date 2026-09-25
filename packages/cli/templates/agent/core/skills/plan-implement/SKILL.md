@@ -56,7 +56,8 @@ it, and do not edit the application back or the plan to make it pass.
   It writes nothing else: the validators, controllers, routes, resources and
   policies the step lists under "does not write" are the `http` step's, by hand.
   It runs no codegen and no migration. A relationship it reports as left out is
-  added in the step where what it needs exists. It refuses a re-run once the
+  added in the step where what it needs exists; until then `plan:status` reads
+  the model as drifted. It refuses a re-run once the
   step's files exist, and then `plan:verify` is what is left.
 - **`tests`**: write the behaviours as tests whose titles carry the acceptance id
   literally, `[AC-comments-1] a signed-in user can comment on a post`, and leave

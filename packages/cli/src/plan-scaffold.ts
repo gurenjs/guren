@@ -6,27 +6,26 @@
  * and no migration: those are the step's `plan:verify` and the `data` step's.
  */
 
-import { lstat, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { CliError } from './cli-error'
 import { readIfExists, toPosixRelative } from './discovery'
+import { DIALECT_BARRELS } from './drizzle-specifiers'
 import { discoverModelClasses } from './model-parser'
 import { ParseCache } from './parse-cache'
-import { appendTableToSchema, detectSchemaDialect, ensureMysqlImports, ensurePgImports, ensureSqliteImports } from './patch-helpers'
+import { appendTableToSchema, detectSchemaDialect, ensureNamedImports } from './patch-helpers'
 import { readPlanFile } from './plan-render'
 import { requirePlanApproval } from './plan/approvals'
-import { hasBaseline } from './plan/render'
 import { emitPlanScaffold, type PlanScaffoldOutput } from './plan/scaffold'
 import { planSlug, readPlanState } from './plan/state'
 import { derivePlanTasks, findPlanStep, listPlanSteps } from './plan/tasks'
-import { parseSchemaTables, schemaPathFor, type SchemaDialect } from './schema-parser'
-import { writeScaffoldFiles } from './utils'
+import { parseSchemaTables, schemaPathFor } from './schema-parser'
+import { pathExists, writeScaffoldFiles } from './utils'
 
 export const PLAN_SCAFFOLD_REPORT_VERSION = 1
 
-/** What `--json` prints. */
 export interface PlanScaffoldReport extends Pick<PlanScaffoldOutput, 'emitted' | 'left' | 'omitted'> {
   reportVersion: typeof PLAN_SCAFFOLD_REPORT_VERSION
   plan: { file: string; title: string; hash: string }
@@ -43,22 +42,6 @@ export interface PlanScaffoldFileOptions {
   cwd?: string
 }
 
-const IMPORTS: Record<SchemaDialect, (content: string, needed: string[]) => string> = {
-  pg: ensurePgImports,
-  mysql: ensureMysqlImports,
-  sqlite: ensureSqliteImports,
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await lstat(path)
-    return true
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
-    throw error
-  }
-}
-
 function refuse(lines: string[]): never {
   throw new CliError(`${lines.join('\n')}\nNothing was scaffolded.`)
 }
@@ -66,7 +49,7 @@ function refuse(lines: string[]): never {
 export async function planScaffoldFile(planPath: string, options: PlanScaffoldFileOptions): Promise<PlanScaffoldReport> {
   const { path, plan } = await readPlanFile(planPath, options.cwd)
   const approval = await requirePlanApproval(path, plan, 'nothing is scaffolded from it')
-  if (!approval || !hasBaseline(plan)) {
+  if (!approval) {
     refuse([`${basename(path)} is a draft: plan:scaffold writes code from an approved plan only. Run guren plan:approve ${planPath} first.`])
   }
   const root = options.appRoot
@@ -75,12 +58,12 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
   }
 
   const derivation = derivePlanTasks(plan)
-  const scaffoldSteps = listPlanSteps(derivation).filter(({ step }) => step.kind === 'scaffold').map(({ step }) => step.id)
   const found = findPlanStep(derivation, options.step)
   if (!found || found.step.kind !== 'scaffold') {
+    const scaffoldSteps = listPlanSteps(derivation).filter(({ step }) => step.kind === 'scaffold').map(({ step }) => step.id)
     const own = found?.task.steps.find((step) => step.kind === 'scaffold')
     const hint = own
-      ? `The scaffold step of ${found!.task.id} is ${own.id}.`
+      ? `The scaffold step of ${found?.task.id} is ${own.id}.`
       : scaffoldSteps.length > 0 ? `Its scaffold steps: ${scaffoldSteps.join(', ')}.` : 'The plan has no scaffold step.'
     refuse([`${options.step} is ${found ? `a ${found.step.kind} step` : 'no step of the plan'}, and plan:scaffold writes a scaffold step only. ${hint}`])
   }
@@ -115,7 +98,7 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
     models,
   })
   const inTheWay = []
-  for (const file of output.files) if (await exists(resolve(root, file.path))) inTheWay.push(`${file.path} already exists.`)
+  for (const file of output.files) if (await pathExists(resolve(root, file.path))) inTheWay.push(`${file.path} already exists.`)
   const refusals = [...output.refusals, ...inTheWay]
   if (refusals.length > 0) {
     refuse([
@@ -125,18 +108,39 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
     ])
   }
 
-  let content = IMPORTS[dialect](schema, [...new Set(output.tables.flatMap((table) => table.imports))])
+  let content = ensureNamedImports(schema, DIALECT_BARRELS[dialect], [...new Set(output.tables.flatMap((table) => table.imports))])
   for (const table of output.tables) content = appendTableToSchema(content, table.identifier, table.block).source
 
-  // writeScaffoldFiles checks every path again before its first write; the schema goes last.
-  const created = await writeScaffoldFiles(output.files.map(({ path, contents }) => ({ path, contents })), { cwd: root })
-  if (output.tables.length > 0) await writeFile(resolve(root, schemaPath), content, 'utf8')
+  // The schema first: the model files import its exports. A failure after the first write names
+  // what is on disk, since the refusal a re-run gives would read as a finished step.
+  const written: string[] = []
+  const created: string[] = []
+  try {
+    if (output.tables.length > 0) {
+      await writeFile(resolve(root, schemaPath), content, 'utf8')
+      written.push(schemaPath)
+    }
+    for (const file of output.files) {
+      for (const path of await writeScaffoldFiles([{ path: file.path, contents: file.contents }], { cwd: root })) {
+        const relative = toPosixRelative(root, path)
+        written.push(relative)
+        created.push(relative)
+      }
+    }
+  } catch (error) {
+    if (written.length === 0) throw error
+    throw new CliError(
+      `plan:scaffold stopped part way through ${step.id}: ${error instanceof Error ? error.message : String(error)}\n`
+        + `Already written: ${written.join(', ')}. The step is half scaffolded, and running plan:scaffold again refuses on these files.\n`
+        + 'Fix the cause, restore them (git checkout / git clean on those paths), and run plan:scaffold again.',
+    )
+  }
 
   return {
     reportVersion: PLAN_SCAFFOLD_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: approval.hash },
     step: step.id,
-    created: created.map((file) => toPosixRelative(root, file)),
+    created,
     appended: { file: schemaPath, tables: output.tables.map((table) => table.identifier) },
     emitted: output.emitted,
     left: output.left,
@@ -153,7 +157,7 @@ export function formatPlanScaffold(report: PlanScaffoldReport, planArgument: str
     lines.push('', 'Not written by plan:scaffold; the http step writes these by hand:', ...report.left.map((element) => `  ${element.id} (${element.section})`))
   }
   if (report.omitted.length > 0) {
-    lines.push('', 'Relationships left out of the model, to add once what they need exists:')
+    lines.push('', 'Relationships left out of the model, to add once what they need exists; until then plan:status reads the model as drifted:')
     lines.push(...report.omitted.map((entry) => `  ${entry.model} ${entry.relationship}: ${entry.reason}`))
   }
   lines.push('', `No codegen or migration was run. Next: bunx guren plan:verify ${planArgument} --step ${report.step}, and commit once it is verified.`)

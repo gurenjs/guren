@@ -435,13 +435,14 @@ export const comments = pgTable('comments', {
 ])
 ```
 
-It writes `app/Models/Comment.ts` with the plan's `fillable` and relationships, each keyed by the foreign key the plan states. A relationship whose keys or target do not exist yet, such as a `hasMany` to a model a later task adds, is left out and listed, for the step where they exist. It writes nothing else, and runs neither codegen nor a migration: `plan:verify` runs codegen and the typecheck, and the `data` step generates the migration.
+It writes `app/Models/Comment.ts` with the plan's `fillable` and relationships, each keyed by the foreign key the plan states. A relationship whose keys or target do not exist yet, such as a `hasMany` to a model a later task adds, is left out and listed, for the step where they exist; until it is added, `plan:status` reads the model as `drifted`. It writes nothing else, and runs neither codegen nor a migration: `plan:verify` runs codegen and the typecheck, and the `data` step generates the migration.
 
 Every refusal comes before the first write. It refuses:
 
 - a draft, or a plan no approval names;
 - a step other than a `scaffold` step (it names the task's own), or one `plan:next` has not marked;
 - a model in a module (it writes to the project root only), and an API-only application;
+- on MySQL, a `unique` or index over a `text` or `json` column, which drizzle-kit refuses and MySQL rejects without a prefix length (plan the column as `string`, or drop the key), and a `default` of `null`;
 - any target that already exists: the model file or class, the schema export, or the table name in any application root.
 
 Running it again on a scaffolded step is refused the same way, since its files exist; verify the step instead. `--json` prints the files it created, the tables it appended, the elements it wrote, the ones it left and the relationships it left out.

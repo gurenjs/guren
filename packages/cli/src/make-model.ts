@@ -19,10 +19,8 @@ export type ModelRelationshipType = 'hasOne' | 'hasMany' | 'belongsTo' | 'belong
 export interface ModelRelationshipSource {
   name: string
   type: ModelRelationshipType
-  /** The related class, lazily imported from `./<className>.js` beside the model. */
+  /** The related class, lazily imported from `./<className>.js` beside the model; its record type is `<relatedClass>Record`, the name the parser reads the target by. */
   relatedClass: string
-  /** What the relation's record type is called in the model file: `<relatedClass>Record`, which the parser names the target by. */
-  recordType: string
   /** The call's arguments after the related loader, as source: the pivot for `belongsToMany`, then the keys. */
   args: string[]
 }
@@ -78,7 +76,7 @@ export function buildModelSource(options: ModelSourceOptions): string {
     ? ''
     : [
         '  static override relationTypes: {',
-        ...relationships.map((relationship) => `    ${relationship.name}: ${RELATION_RECORD[relationship.type].type}<${relationship.recordType}>`),
+        ...relationships.map((relationship) => `    ${relationship.name}: ${RELATION_RECORD[relationship.type].type}<${relationship.relatedClass}Record>`),
         '  } = {',
         ...relationships.map((relationship) => `    ${relationship.name}: ${RELATION_RECORD[relationship.type].placeholder},`),
         '  }',

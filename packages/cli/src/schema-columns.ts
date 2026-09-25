@@ -9,6 +9,7 @@
 import type { FieldDefinition, FieldType } from './fields'
 import type { PlanColumn } from './plan/schema'
 import type { SchemaDialect } from './schema-parser'
+import { escapeSingleQuoted } from './utils'
 
 export interface ColumnCode {
   code: string
@@ -17,6 +18,9 @@ export interface ColumnCode {
 }
 
 export type PlanColumnType = PlanColumn['type']
+
+/** The table factory of each dialect; `schema-parser.ts` reads a table's dialect back through it. */
+export const TABLE_FACTORY: Record<SchemaDialect, string> = { pg: 'pgTable', mysql: 'mysqlTable', sqlite: 'sqliteTable' }
 
 /** What a builder takes beyond its SQL name. */
 export interface ColumnSpec {
@@ -27,12 +31,13 @@ export interface ColumnSpec {
 
 type Builder = (sqlName: string, spec: ColumnSpec) => ColumnCode
 
-export function quoteSqlName(name: string): string {
-  return `'${name.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`
+/** `value` as a single-quoted TypeScript string literal. */
+export function quoteString(value: string): string {
+  return `'${escapeSingleQuoted(value)}'`
 }
 
 function call(builder: string, sqlName: string, options?: string): ColumnCode {
-  return { code: `${builder}(${quoteSqlName(sqlName)}${options ? `, ${options}` : ''})`, imports: [builder] }
+  return { code: `${builder}(${quoteString(sqlName)}${options ? `, ${options}` : ''})`, imports: [builder] }
 }
 
 function sized(spec: ColumnSpec): string | undefined {
@@ -43,10 +48,7 @@ function sized(spec: ColumnSpec): string | undefined {
   return entries.length > 0 ? `{ ${entries.join(', ')} }` : undefined
 }
 
-/**
- * `Record<PlanColumnType, …>` so a type without a builder fails to compile: a switch with a
- * `default:` arm is how sqlite once shipped without a `date` case and emitted text for it.
- */
+/** A `Record`, so a plan type without a builder fails to compile rather than falling through to a default. */
 export const COLUMN_BUILDERS: Record<SchemaDialect, Record<PlanColumnType, Builder>> = {
   pg: {
     string: (name) => call('text', name),
@@ -97,9 +99,12 @@ export const COLUMN_BUILDERS: Record<SchemaDialect, Record<PlanColumnType, Build
 }
 
 /**
- * The column type a `--fields` type is written as. A `text` field is `varchar(255)` on
- * MySQL, as the resource blueprint has always written it, where a plan's `text` column is `text`.
+ * MySQL types that take no index without a prefix length: drizzle-kit refuses `unique` on
+ * one (`column_unsupported_unique`) and MySQL rejects the key (`ER_BLOB_KEY_WITHOUT_LENGTH`).
  */
+export const MYSQL_UNINDEXABLE_TYPES: ReadonlySet<PlanColumnType> = new Set(['text', 'json'])
+
+/** The column type a `--fields` type is written as. A `text` field is `varchar(255)` on MySQL, where a plan's `text` column is `text`. */
 function fieldColumnType(dialect: SchemaDialect, type: FieldType): PlanColumnType {
   switch (type) {
     case 'number':

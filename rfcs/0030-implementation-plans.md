@@ -1217,11 +1217,21 @@ shipped, and where it stops.
   that step's measured work and the next `plan:next` accepts the dirty tree as
   the marked step's own.
 - Every refusal comes before the first write: the step kind, the mark, a module,
-  a foreign key to a table not declared yet, and any target that exists (the
-  model file or class, the schema export, the table name in any root). A re-run
-  of a scaffolded step is therefore refused on the targets it wrote, with the
-  application unchanged; what is left for the step is `plan:verify`. It runs no
-  codegen and no migration.
+  a foreign key to a table not declared yet, a MySQL `unique` or index over a
+  `text` or `json` column (drizzle-kit refuses it and MySQL rejects the key
+  without a prefix length), a `default` of `null`, and any target that exists
+  (the model file or class, the schema export, the table name in any root). A
+  re-run of a scaffolded step is therefore refused on the targets it wrote, with
+  the application unchanged; what is left for the step is `plan:verify`. It runs
+  no codegen and no migration.
+- It writes `db/schema.ts` first, since the model files import its exports. A
+  write that fails after the first one names the files already on disk, since a
+  re-run would refuse on them as if the step were done.
+- A relationship left out of the model leaves it `drifted` in `plan:status`
+  until the relationship is added; the report says so beside each one.
+- Like `plan:verify`, it does not consult the freshness hold of §4: `plan:next`
+  is what holds a step whose context went stale, and the command runs only on
+  the step `plan:next` marked.
 - `views` are no longer `scaffoldable` in the task derivation (D4), so a scaffold
   step's `generates` names no page.
 

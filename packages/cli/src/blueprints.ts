@@ -13,15 +13,16 @@ import { channelFile } from './make-channel'
 import { API_ONLY_FEATURE_ALTERNATIVE, buildRouteRegistrationHint, makeFeature } from './make-feature'
 import { parseFieldsString, type FieldDefinition } from './fields'
 import { collectionSlug, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
-import { autoIncrementPrimaryKey, buildFieldColumn } from './schema-columns'
-import { schemaDeclaresTable, schemaPathFor } from './schema-parser'
+import { autoIncrementPrimaryKey, buildFieldColumn, TABLE_FACTORY } from './schema-columns'
+import { schemaDeclaresTable, schemaPathFor, type SchemaDialect } from './schema-parser'
 import { eventFile } from './make-event'
 import { jobFile } from './make-job'
 import { listenerFile } from './make-listener'
 import { mailFile } from './make-mail'
 import { appMailBindings, MAIL_SCAFFOLD, reportKeptMail } from './mail-scaffold'
 import { notificationFile } from './make-notification'
-import { appendTableToSchema, detectSchemaDialect, ensureMysqlImports, ensurePgImports, ensureSqliteImports, insertImport } from './patch-helpers'
+import { appendTableToSchema, detectSchemaDialect, ensureNamedImports, insertImport } from './patch-helpers'
+import { DIALECT_BARRELS } from './drizzle-specifiers'
 import { wireProviders } from './provider-registrar'
 import { DEFAULT_ROUTES_FILE, findRouteRegistrar, wireRouteRegistrar } from './route-registrar'
 import { scaffoldTemplateFile } from './scaffold-templates'
@@ -364,6 +365,13 @@ export async function addResource(options: RunBlueprintOptions): Promise<AddReso
   return { created, kept, schemaUpdated, routesUpdated }
 }
 
+/** Per dialect, the builders the resource table calls besides its columns', and its `createdAt`. */
+const RESOURCE_TABLE: Record<SchemaDialect, { imports: string[]; createdAt: string }> = {
+  sqlite: { imports: ['integer', 'text'], createdAt: "text('created_at').notNull().$defaultFn(() => new Date().toISOString())" },
+  mysql: { imports: ['int', 'timestamp'], createdAt: "timestamp('created_at').defaultNow().notNull()" },
+  pg: { imports: ['serial', 'text', 'timestamp'], createdAt: "timestamp('created_at', { withTimezone: true }).defaultNow().notNull()" },
+}
+
 async function updateResourceSchema(singular: string, fields: FieldDefinition[]): Promise<boolean> {
   const schemaPath = resolve(process.cwd(), schemaPathFor(null))
   let content = await readFile(schemaPath, 'utf8')
@@ -377,35 +385,14 @@ async function updateResourceSchema(singular: string, fields: FieldDefinition[])
   }
 
   const dialect = detectSchemaDialect(content)
+  const columns = fields.map((field) => buildFieldColumn(dialect, field))
+  const factory = TABLE_FACTORY[dialect]
+  const { imports, createdAt } = RESOURCE_TABLE[dialect]
+  content = ensureNamedImports(content, DIALECT_BARRELS[dialect], [...new Set([factory, ...imports, ...columns.flatMap((c) => c.imports)])])
 
-  if (dialect === 'sqlite') {
-    const columns = fields.map((field) => buildFieldColumn('sqlite', field))
-    const imports = [...new Set(['sqliteTable', 'integer', 'text', ...columns.flatMap((c) => c.imports)])]
-    content = ensureSqliteImports(content, imports)
-
-    const fieldLines = fields.map((field, index) => `  ${field.name}: ${columns[index].code},`).join('\n')
-    const schemaBlock = `\nexport const ${schemaIdentifier} = sqliteTable('${tableName}', {\n  id: ${autoIncrementPrimaryKey('sqlite', 'id').code},\n${fieldLines}\n  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),\n})\n`
-
-    content = appendTableToSchema(content, schemaIdentifier, schemaBlock).source
-  } else if (dialect === 'mysql') {
-    const columns = fields.map((field) => buildFieldColumn('mysql', field))
-    const imports = [...new Set(['mysqlTable', 'int', 'timestamp', ...columns.flatMap((c) => c.imports)])]
-    content = ensureMysqlImports(content, imports)
-
-    const fieldLines = fields.map((field, index) => `  ${field.name}: ${columns[index].code},`).join('\n')
-    const schemaBlock = `\nexport const ${schemaIdentifier} = mysqlTable('${tableName}', {\n  id: ${autoIncrementPrimaryKey('mysql', 'id').code},\n${fieldLines}\n  createdAt: timestamp('created_at').defaultNow().notNull(),\n})\n`
-
-    content = appendTableToSchema(content, schemaIdentifier, schemaBlock).source
-  } else {
-    const columns = fields.map((field) => buildFieldColumn('pg', field))
-    const imports = [...new Set(['pgTable', 'serial', 'text', 'timestamp', ...columns.flatMap((c) => c.imports)])]
-    content = ensurePgImports(content, imports)
-
-    const fieldLines = fields.map((field, index) => `  ${field.name}: ${columns[index].code},`).join('\n')
-    const schemaBlock = `\nexport const ${schemaIdentifier} = pgTable('${tableName}', {\n  id: ${autoIncrementPrimaryKey('pg', 'id').code},\n${fieldLines}\n  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),\n})\n`
-
-    content = appendTableToSchema(content, schemaIdentifier, schemaBlock).source
-  }
+  const fieldLines = fields.map((field, index) => `  ${field.name}: ${columns[index].code},`).join('\n')
+  const schemaBlock = `\nexport const ${schemaIdentifier} = ${factory}('${tableName}', {\n  id: ${autoIncrementPrimaryKey(dialect, 'id').code},\n${fieldLines}\n  createdAt: ${createdAt},\n})\n`
+  content = appendTableToSchema(content, schemaIdentifier, schemaBlock).source
 
   await writeFile(schemaPath, content, 'utf8')
   return true

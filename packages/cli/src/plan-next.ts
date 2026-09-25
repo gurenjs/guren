@@ -28,7 +28,7 @@ import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElementSection } from './plan/schema'
 import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress, type PlanStepContext, type PlanStepContextElement } from './plan/step-context'
 import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
-import { planScaffoldCommand, planScaffoldCoverage } from './plan/scaffold'
+import { planScaffoldCommandLine, planScaffoldCoverage } from './plan/scaffold'
 import { derivePlanTasks, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
 import { hashFiles, readPlanWaivers, recordDrift, recordStillHolds, type PlanWaiversRead } from './plan/verification'
@@ -358,7 +358,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
 
 function scaffoldOf(plan: PlanDraft, step: PlanDerivedStep, planArgument: string): NonNullable<PlanNextStep['scaffold']> {
   const { emitted, left } = planScaffoldCoverage(plan, step)
-  return { command: planScaffoldCommand(planArgument, step.id), writes: emitted, leaves: left.map((element) => element.id) }
+  return { command: planScaffoldCommandLine(planArgument, step.id), writes: emitted, leaves: left.map((element) => element.id) }
 }
 
 /** A multi-line text under a line that already carries its first line. */
@@ -422,7 +422,7 @@ function heldLines(report: PlanNextReport, planArgument: string): string[] {
 
 /** plan:scaffold refuses a draft, so a draft's step names the approval first. */
 function scaffoldLines(step: PlanNextStep, scaffold: NonNullable<PlanNextStep['scaffold']>, draft: boolean, planArgument: string): string[] {
-  const command = planScaffoldCommand(planArgument, step.id)
+  const command = planScaffoldCommandLine(planArgument, step.id)
   const lines = draft
     ? [`Approve the plan first (bunx guren plan:approve ${planArgument}): plan:scaffold writes this step from an approved plan only, as`, `  ${command}`]
     : [`Write this step with \`${command}\`, not by hand.`]
