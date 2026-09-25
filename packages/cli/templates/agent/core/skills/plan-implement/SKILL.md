@@ -42,8 +42,7 @@ now, and returns the next step that does not depend on one. A held step is a
 person's decision (undo the change, or revise the plan with `plan:revise` so
 each stale element states what the application holds now, such as an
 `existing` action another commit renamed, and approve the revision): report
-it, and do not edit the
-application back or the plan to make it pass.
+it, and do not edit the application back or the plan to make it pass.
 
 ## What a step asks for
 
@@ -63,8 +62,7 @@ application back or the plan to make it pass.
 Implement only the elements the step lists. An element of a later step is that
 step's work, and `plan:status` will read it as drifted from the plan if it lands
 elsewhere. Do not edit the plan file: a change of design is a revision
-(`plan:revise --edited <copy> --message "<why>"`, as the `plan-write` skill
-describes), not an edit, and the person approves it again.
+through `plan:revise` (see the `plan-write` skill).
 
 ## What `plan:verify` records
 
