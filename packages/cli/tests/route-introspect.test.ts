@@ -2,11 +2,17 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { mkdir, readFile, rm, symlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 
+import type { RouteEntry } from '@guren/server'
+
 import { generateAgentTypes } from '../src/agents-types'
-import { agentToolRouteKey, joinRouteDefinitions } from '../src/app-routes'
+import { agentToolRouteKey, joinManifestRoutes, joinRouteDefinitions } from '../src/app-routes'
 import { runCheck, type CheckResult } from '../src/check'
 import { generateContext, renderContextMarkdown } from '../src/context'
+import { loadContextRoutes } from '../src/context-route'
+import { listModuleNames } from '../src/discovery'
 import { getDoctorRuleEvaluations } from '../src/doctor'
+import { introspectApp } from '../src/introspect'
+import { checkRouteContracts } from '../src/route-contract-check'
 import { generateRouteTypes } from '../src/routes-types'
 import { assertWorkspaceBuilt, captureWarnings, createTempRoot, linkWorkspaceCore, SERVER_DIST_ENTRY, writeWorkspaceFiles } from './helpers'
 
@@ -382,6 +388,102 @@ describe('joinRouteDefinitions', () => {
   test('joins no route whose module the manifest does not list', () => {
     expect(joinRouteDefinitions([{ ...route('GET', '/a'), module: null }], [{ ...route('GET', '/a'), module: 'billing' }], { byModule: true }))
       .toEqual([undefined])
+  })
+})
+
+describe('joinManifestRoutes', () => {
+  const entry = (module: string | null) => ({ method: 'GET', path: '/stats', module }) as unknown as RouteEntry
+  const definitions = [{ method: 'GET', path: '/stats', name: undefined }, { method: 'GET', path: '/stats', name: undefined }]
+
+  test('returns the caller\'s definitions, joined within the module each one names', () => {
+    const joined = joinManifestRoutes([entry('shop'), entry('billing')], definitions, ['billing', 'shop'])
+    expect(joined[0]).toBe(definitions[1]!)
+    expect(joined[1]).toBe(definitions[0]!)
+  })
+
+  test('refuses module names that do not align with the definitions, rather than joining across modules', () => {
+    expect(() => joinManifestRoutes([entry('shop'), entry('billing')], definitions, [])).toThrow('2 route definition(s) carry 0 module name(s)')
+  })
+})
+
+/**
+ * Two unprefixed modules registering one unnamed method, path and action: only shop's declares a
+ * contract, and its params schema renders short (a nullable object), so the routes file's Zod decides.
+ */
+const STATS_MODULE = (name: 'billing' | 'shop') => `import { defineModule } from '@guren/core'
+import { z } from 'zod'
+import StatsController from './app/Http/Controllers/StatsController.js'
+
+export default defineModule({
+  name: '${name}',
+  routes: (router) => {
+    router.get('/stats/:id', ${name === 'shop' ? "{ params: z.object({ id: z.string(), extra: z.string() }).nullable(), query: z.object({ page: z.string() }) }, " : ''}[StatsController, 'show'])
+  },
+})
+`
+
+const STATS_CONTROLLER = `import { Controller } from '@guren/core'
+
+export default class StatsController extends Controller {
+  async show() {
+    return this.json({})
+  }
+}
+`
+
+describe('a route two unprefixed modules share, listed by the app against the directory order', () => {
+  let dir: string
+  let shopIndex: number
+  let billingIndex: number
+
+  beforeAll(async () => {
+    dir = await scaffoldApp('module-order', {
+      'modules/billing/index.ts': STATS_MODULE('billing'),
+      'modules/billing/app/Http/Controllers/StatsController.ts': STATS_CONTROLLER,
+      'modules/shop/index.ts': STATS_MODULE('shop'),
+      'modules/shop/app/Http/Controllers/StatsController.ts': STATS_CONTROLLER,
+    })
+    const [first, second] = (await listModuleNames(dir)).reverse()
+    await writeWorkspaceFiles(dir, {
+      'src/app.ts': APP()
+        .replace("import { registerWebRoutes }", `import ${first} from '../modules/${first}/index.js'\nimport ${second} from '../modules/${second}/index.js'\nimport { registerWebRoutes }`)
+        .replace('providers: [],', `providers: [],\n  modules: [${first}, ${second}],`),
+    })
+    const introspection = await introspectApp(dir)
+    if (introspection.status !== 'ok') throw new Error(`introspection failed: ${JSON.stringify(introspection)}`)
+    const stats = introspection.manifest.routes.flatMap((route, index) => (route.path === '/stats/:id' ? [{ module: route.module, index }] : []))
+    expect(stats.map((route) => route.module)).toEqual([first, second])
+    shopIndex = stats.find((route) => route.module === 'shop')!.index
+    billingIndex = stats.find((route) => route.module === 'billing')!.index
+  })
+
+  test('codegen --introspect hands each module\'s route its own Zod', async () => {
+    const { definitions } = await generateRouteTypes({
+      appRoot: dir,
+      introspect: true,
+      outputFile: 'out/routes.d.ts',
+      runtimeOutputFile: 'out/routes.gen.ts',
+    })
+    expect([shopIndex, billingIndex].map((index) => definitions[index]?.schemas?.query !== undefined)).toEqual([true, false])
+  })
+
+  test('guren context lists each module\'s route with its own schema types', async () => {
+    const routes = await loadContextRoutes(dir, undefined, undefined, () => introspectApp(dir))
+    expect([shopIndex, billingIndex].map((index) => routes[index]?.query)).toEqual(['{ page: string }', undefined])
+  })
+
+  test('the route contract check reads the params Zod of the module the route belongs to', async () => {
+    const stats = (checks: CheckResult[]) => checks.filter((result) => result.key.endsWith(':GET:/stats/:id'))
+    // guren check hands over its loaded definitions; a caller that passes none has the check load its own.
+    for (const results of [
+      stats((await runCheck({ cwd: dir, introspect: true })).checks),
+      stats(await checkRouteContracts({ cwd: dir, introspect: () => introspectApp(dir) })),
+    ]) {
+      expect(results.map(({ key, status, evidence }) => ({ key, status, evidence }))).toEqual([
+        { key: 'route-contract-params:GET:/stats/:id', status: 'fail', evidence: 'static' },
+      ])
+      expect(results[0]?.message).toContain("'extra'")
+    }
   })
 })
 

@@ -14,7 +14,7 @@ function route(overrides: Partial<RouteDefinition> & Pick<RouteDefinition, 'path
 }
 
 async function run(definitions: RouteDefinition[]) {
-  return checkRouteContracts({ cwd: '/nonexistent', definitions })
+  return checkRouteContracts({ cwd: '/nonexistent', definitions, definitionModules: definitions.map(() => null) })
 }
 
 describe('checkRouteContracts', () => {
