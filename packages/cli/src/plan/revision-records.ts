@@ -73,13 +73,21 @@ export async function writePlanRevisionRecord(planPath: string, revision: PlanRe
   const path = join(dir, `${String(next).padStart(RECORD_DIGITS, '0')}.json`)
   const temporary = temporaryBeside(path)
   try {
-    await writeFile(temporary, `${JSON.stringify(revision, null, 2)}\n`, 'utf8')
-    await link(temporary, path)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      throw new CliError(`${path} appeared while this revision was being written, so it is not recorded and the plan was left as it was. Run the command again.`)
+    try {
+      await writeFile(temporary, `${JSON.stringify(revision, null, 2)}\n`, 'utf8')
+    } catch (error) {
+      throw new CliError(`The revision could not be written to ${temporary} (${(error as Error).message}), so it is not recorded and the plan was left as it was.`)
     }
-    throw new CliError(`The revision could not be recorded in ${dir} (${(error as Error).message}), so the plan was left as it was. The record is linked into place, which needs a filesystem that supports hard links.`)
+    try {
+      await link(temporary, path)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        throw new CliError(`${path} appeared while this revision was being written, so it is not recorded and the plan was left as it was. Run the command again.`)
+      }
+      throw new CliError(
+        `The revision could not be linked into place as ${path} (${(error as Error).message}), so the plan was left as it was. The record is linked into place, which needs a filesystem that supports hard links.`,
+      )
+    }
   } finally {
     await rm(temporary, { force: true })
   }
