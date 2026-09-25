@@ -5,11 +5,13 @@ import { CliError } from './cli-error'
 import { appConfiguresAttachments } from './attachments-check'
 import { announceKeptFiles, announceWrittenFiles, camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeRoot, writeScaffoldFiles, writerOptionsFrom, writtenFileMessage, type ScaffoldFileEntry, type WriterOptions } from './utils'
 import { pluralize, schemaIdentifierFor, tableNameFor } from './inflect'
+import { buildControllerSource } from './make-controller'
 import { factoryFile } from './make-factory'
 import { findMigrationCreatingTable } from './make-migration'
 import { modelFile } from './make-model'
 import { policyFile } from './make-policy'
 import { buildResourceSource } from './make-resource'
+import { authAliasLine, routeCall } from './make-route'
 import { testFile } from './make-test'
 import { validatorFile } from './make-validator'
 import { parseAttachString, parseFieldsString, type AttachmentDefinition, type FieldDefinition, type FieldType } from './fields'
@@ -346,19 +348,20 @@ export function buildRouteRegistrationHint(options: {
   const authSuffix = withAuth ? `.middleware('auth')` : ''
   const groupRouter = withAuth ? 'authRouter' : receiver
   const action = (name: string): string => (options.handler === 'prototype' ? 'prototype' : `[${singular}Controller, '${name}']`)
+  const named = (method: string, path: string, name: string): string => `  ${routeCall(routeVar, method, path, action(name), { chain: `.name('${routeName}.${name}')` })}`
+  const guarded = (method: string, path: string, name: string, contract: string): string =>
+    `  ${routeCall(routeVar, method, path, action(name), { contract: `{ name: '${routeName}.${name}'${contract} }`, chain: authSuffix })}`
 
   return [
-    ...(withAuth
-      ? [`const ${groupRouter} = ${receiver}.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))`]
-      : []),
+    ...(withAuth ? [authAliasLine(groupRouter, receiver)] : []),
     `${groupRouter}.group('/${routeName}', (${routeVar}) => {`,
-    `  ${routeVar}.get('/', ${action('index')}).name('${routeName}.index')`,
-    `  ${routeVar}.get('/create', ${action('create')}).name('${routeName}.create')`,
-    `  ${routeVar}.get('/:id', ${action('show')}).name('${routeName}.show')`,
-    `  ${routeVar}.get('/:id/edit', ${action('edit')}).name('${routeName}.edit')`,
-    `  ${routeVar}.post('/', { name: '${routeName}.store', body: ${singular}PayloadSchema }, ${action('store')})${authSuffix}`,
-    `  ${routeVar}.put('/:id', { name: '${routeName}.update', body: ${singular}PayloadSchema }, ${action('update')})${authSuffix}`,
-    `  ${routeVar}.delete('/:id', { name: '${routeName}.destroy' }, ${action('destroy')})${authSuffix}`,
+    named('get', '/', 'index'),
+    named('get', '/create', 'create'),
+    named('get', '/:id', 'show'),
+    named('get', '/:id/edit', 'edit'),
+    guarded('post', '/', 'store', `, body: ${singular}PayloadSchema`),
+    guarded('put', '/:id', 'update', `, body: ${singular}PayloadSchema`),
+    guarded('delete', '/:id', 'destroy', ''),
     `})`,
   ]
 }
@@ -496,17 +499,20 @@ function generateController(
   const destroyPurge = attachments.length > 0
     ? `    await ${singular}.purgeAttachments(${variableName}.id)\n`
     : ''
-  return `import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
-import { pages } from '@/.guren/pages.gen'
-import { ${singular} } from '../../Models/${singular}.js'
-import { ${singular}Resource, type ${singular}ResourceData } from '../Resources/${singular}Resource.js'
-import { ${singular}IdParamSchema, List${collection}QuerySchema } from '../Validators/${singular}Validator.js'
-
-type ${collection}IndexProps = PaginatedPageProps<${singular}ResourceData>
-
-export default class ${singular}Controller extends Controller {
-  async index(): Promise<Response> {
-    const { page } = this.validateQuery(List${collection}QuerySchema)
+  return buildControllerSource({
+    className: `${singular}Controller`,
+    coreImports: ['paginate', 'type PaginatedPageProps'],
+    imports: [
+      `import { pages } from '@/.guren/pages.gen'`,
+      `import { ${singular} } from '../../Models/${singular}.js'`,
+      `import { ${singular}Resource, type ${singular}ResourceData } from '../Resources/${singular}Resource.js'`,
+      `import { ${singular}IdParamSchema, List${collection}QuerySchema } from '../Validators/${singular}Validator.js'`,
+    ],
+    declarations: [`type ${collection}IndexProps = PaginatedPageProps<${singular}ResourceData>`],
+    actions: [
+      {
+        name: 'index',
+        body: `    const { page } = this.validateQuery(List${collection}QuerySchema)
     const result = await ${singular}.paginate({ page, perPage: 10, orderBy: ['id', 'desc'] })
     const paginator = paginate(result, { path: this.request.path ?? '/${routeName}' })
 
@@ -516,52 +522,49 @@ export default class ${singular}Controller extends Controller {
         meta: paginator.meta(),
         links: paginator.links(),
       },
-    } satisfies ${collection}IndexProps)
-  }
-
-  async show(): Promise<Response> {
-    const { id } = this.validateParams(${singular}IdParamSchema)
+    } satisfies ${collection}IndexProps)`,
+      },
+      {
+        name: 'show',
+        body: `    const { id } = this.validateParams(${singular}IdParamSchema)
     const ${variableName} = await ${singular}.findOrFail(id)
 
     return this.inertia(${pagesBase}.Show, {
       ${variableName}: new ${singular}Resource(${variableName}).toJSON(),
-    })
-  }
-
-  async create(): Promise<Response> {
-    return this.inertia(${pagesBase}.New, {})
-  }
-
-  async store(): Promise<Response> {
-${authGuard}${createGuard}    const { body: data } = this.validated('${routeName}.store')
+    })`,
+      },
+      { name: 'create', body: `    return this.inertia(${pagesBase}.New, {})` },
+      {
+        name: 'store',
+        body: `${authGuard}${createGuard}    const { body: data } = this.validated('${routeName}.store')
     const ${variableName} = await ${singular}.create(data)
-${storeAttach}    return this.redirect('${redirectPrefix}/${routeName}/' + ${variableName}?.id)
-  }
-
-  async edit(): Promise<Response> {
-    const { id } = this.validateParams(${singular}IdParamSchema)
+${storeAttach}    return this.redirect('${redirectPrefix}/${routeName}/' + ${variableName}?.id)`,
+      },
+      {
+        name: 'edit',
+        body: `    const { id } = this.validateParams(${singular}IdParamSchema)
     const ${variableName} = await ${singular}.findOrFail(id)
     return this.inertia(${pagesBase}.Edit, {
       ${variableName}: new ${singular}Resource(${variableName}).toJSON(),
       errors: {},
-    })
-  }
-
-  async update(): Promise<Response> {
-${authGuard}    const { id } = this.validateParams(${singular}IdParamSchema)
+    })`,
+      },
+      {
+        name: 'update',
+        body: `${authGuard}    const { id } = this.validateParams(${singular}IdParamSchema)
 ${updateGuard}    const { body: data } = this.validated('${routeName}.update')
     await ${singular}.update({ id }, data)
-    return this.redirect('${redirectPrefix}/${routeName}/' + id)
-  }
-
-  async destroy(): Promise<Response> {
-${authGuard}    const { id } = this.validateParams(${singular}IdParamSchema)
+    return this.redirect('${redirectPrefix}/${routeName}/' + id)`,
+      },
+      {
+        name: 'destroy',
+        body: `${authGuard}    const { id } = this.validateParams(${singular}IdParamSchema)
     const ${variableName} = await ${singular}.findOrFail(id)
 ${destroyGuard}${destroyPurge}    await ${singular}.delete({ id: ${variableName}.id })
-    return this.redirect('${redirectPrefix}/${routeName}')
-  }
-}
-`
+    return this.redirect('${redirectPrefix}/${routeName}')`,
+      },
+    ],
+  })
 }
 
 function generateIndexPage(

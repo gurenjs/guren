@@ -424,8 +424,7 @@ Next: task/entity/model.comment/scaffold
   verify: codegen → typecheck
 
 Write this step with `bunx guren plan:scaffold docs/plans/comments/plan.json --step task/entity/model.comment/scaffold`, not by hand.
-  It writes each added model (table and class), its validators and resources, and each policy with a provider registering it: model.comment, column.comment.id, column.comment.body, column.comment.postId, column.comment.createdAt, validator.comment, resource.comment, policy.comment
-  It does not write controller.comments, action.comments.store, action.comments.destroy, route.comments.store, route.comments.destroy; the http step implements them by hand.
+  It writes each added model (table and class), its validators and resources, each policy with a provider registering it, each added controller with its actions as stubs, the routes to them in a file of their own that the http step mounts, and the side-effect classes: model.comment, column.comment.id, column.comment.body, column.comment.postId, column.comment.createdAt, validator.comment, controller.comments, action.comments.store, action.comments.destroy, route.comments.store, route.comments.destroy, resource.comment, policy.comment
 ```
 
 ```bash
@@ -473,7 +472,42 @@ export class CommentResource extends Resource<CommentRecord, CommentResourceData
 }
 ```
 
-Policy は計画の ability ごとにメソッドを一つ書きます。どのメソッドも、ルールを書くまで `false` を返します。計画のルールはメソッドのコメントに残します。`app/Providers/CommentPolicyProvider.ts` が `boot()` でその Policy を gate に登録し、コマンドはこのプロバイダーを `src/app.ts` の `createApp({ providers })` に追加します。`plan:status` は Policy を ability で読みます。登録は読まないので、Policy は `present` で完了です。validator が `wired` になるのは、ルートの契約かアクションが使ってからで、それは `http` ステップの作業です。
+Policy は計画の ability ごとにメソッドを一つ書きます。どのメソッドも、ルールを書くまで `false` を返します。計画のルールはメソッドのコメントに残します。`app/Providers/CommentPolicyProvider.ts` が `boot()` でその Policy を gate に登録し、コマンドはこのプロバイダーを `src/app.ts` の `createApp({ providers })` に追加します。`plan:status` は Policy を ability で読みます。登録は読まないので、Policy は `present` で完了です。
+
+ステップが追加するコントローラーには、計画したアクションだけを書きます。各アクションは計画の validator で `params`、`query`、`body` を検証し、計画の Policy の ability で認可してから、501 を返します。
+
+```typescript
+export default class CommentController extends Controller {
+  // Planned response: a redirect to /posts/:postId
+  // Rule: The comment's author is the signed-in user.
+  async store(): Promise<Response> {
+    await this.validateBody(CommentPayloadSchema)
+    throw HttpException.notImplemented('CommentController.store is planned and not written yet')
+  }
+
+  // Planned response: a redirect to /posts/:postId
+  async destroy(): Promise<Response> {
+    await this.authorize('delete', Comment)
+    throw HttpException.notImplemented('CommentController.destroy is planned and not written yet')
+  }
+}
+```
+
+検証には `validated('comments.store')` ではなく `validateBody()` を使います。`validated()` の型は生成されたルート名から決まり、`http` ステップがマウントするまでルートは登録されないためです。レスポンスは書きません。`plan:status` は名前を読み取れるレスポンス (Resource、ページ、リダイレクト) を実装済みと数えるので、スタブがそれを書くと完了に見えてしまいます。各アクションのレスポンスは、書き残したものとしてレポートに並びます。
+
+これらのアクションへのルートは専用のファイル `routes/comments.ts` に書きます。メソッド、パス、名前、契約のスキーマ、バインディング、`auth` ミドルウェア、`.agent()` のメタデータは計画のとおりです。
+
+```typescript
+export function registerCommentRoutes(router: Router): void {
+  const authRouter = router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+  authRouter.post('/posts/:postId/comments', { name: 'comments.store', body: CommentPayloadSchema, bind: { postId: Post } }, [CommentController, 'store']).middleware('auth')
+  authRouter.delete('/comments/:id', { name: 'comments.destroy', bind: { id: Comment } }, [CommentController, 'destroy']).middleware('auth')
+}
+```
+
+このファイルはまだどこからも呼ばれないので、ルートは登録されず `planned` と読まれます。マウント済みのルートは `tests` ステップより前に 401 や 422 を返すことがあり、すでに通る振る舞いがあるとそのステップは失敗します。付けるミドルウェアは `auth` だけです。計画にほかの名前があれば一覧で示し、アプリケーションがその名前に割り当てたハンドラーを知っている `http` ステップに任せます。計画が承認済みで閉じておらず、その `http` ステップが未検証のあいだ、`guren check` はマウントされていないこのファイルを advisory として報告します。そのため途中のステップで gate が止まりません。そのステップが検証されるか計画が閉じれば、マウントされていないファイルはふたたび警告になります。
+
+ステップが追加するジョブ、イベント、リスナー、メール、通知は、対応する `make:*` コマンドと同じ形で、計画のクラス名で書きます。`plan:status` はこれらを `present` と読みます。`wired` になるのは何かがディスパッチ、登録、送信してからで、それは `http` ステップの作業です。`docs/entities/Comment.md` がすでにあれば、コントローラーとルートのファイルに `@docs docs/entities/Comment.md` を書きます。まだないドキュメントへのタグは `guren check` で失敗するため、そのときは書きません。
 
 codegen もマイグレーションも実行しません。codegen と型検査は `plan:verify` が、マイグレーションの生成は `data` ステップが担います。
 
@@ -481,13 +515,26 @@ codegen もマイグレーションも実行しません。codegen と型検査�
 
 - 下書き、またはどの承認も名指ししていない計画
 - `scaffold` 以外のステップ (そのタスクの scaffold ステップを示します)、または `plan:next` が印を付けていないステップ
-- モジュールに属するモデル、validator、Resource、Policy (書き込み先はプロジェクトのルートだけです) と、API 専用のアプリケーション
+- モジュールに属するモデル、validator、Resource、Policy、コントローラー、副作用 (書き込み先はプロジェクトのルートだけです) と、API 専用のアプリケーション
 - MySQL で `text` か `json` のカラムに付けたキー (主キー、`unique`、インデックス、MySQL がインデックスを作る外部キー)。drizzle-kit が拒否し、MySQL もプレフィックス長のないキーを拒否します (カラムを `string` にするか、キーを外してください)。値が `null` の `default` も拒否します
-- 名前が `Resource` で終わらない Resource (`guren codegen` が見つけられません) と、`Policy` 自身のメンバー (`before`、`allow`、`deny`) と同じ名前の ability
+- 名前が `Resource` で終わらない Resource (`guren codegen` が見つけられません)、`Policy` 自身のメンバー (`before`、`allow`、`deny`) と同じ名前の ability、`Controller` のメンバー (`redirect`、`json`) と同じ名前のアクション
 - 登録できない Policy プロバイダー。`src/app.ts` も `app.ts` もない場合、書き換えられる `createApp()` の呼び出しがない場合、すでに登録されている場合です
-- すでに存在する書き込み先。モデルのファイルやクラス、スキーマの export、どのアプリケーションルートにあるテーブル名、作るファイル、ほかの validator ファイルが export している validator 名、同じ名前の Resource や Policy のクラスが対象です
+- すでに存在する書き込み先。モデルのファイルやクラス、スキーマの export、どのアプリケーションルートにあるテーブル名、作るファイル、ほかの validator ファイルが export している validator 名、同じ名前の Resource、Policy、コントローラー、副作用のクラスが対象です
 
-scaffold 済みのステップでもう一度実行すると、ファイルがあるので同じように拒否されます。その場合はステップを検証してください。`--json` は、作ったファイル、追記したテーブル、登録したプロバイダー、書いた要素、残した要素、スタブにしたか書かなかったルールとフィールド、書かなかったリレーションを出力します。
+scaffold 済みのステップでもう一度実行すると、ファイルがあるので同じように拒否されます。その場合はステップを検証してください。`--json` は、作ったファイル、追記したテーブル、登録したプロバイダー、マウントせずに残したルートのファイルとそれをマウントするステップ、書いた要素、残した要素、スタブにしたか書かなかったもの、書かなかったリレーションを出力します。
+
+### ルートのマウント: `plan:scaffold --mount`
+
+scaffold が書いたルートを持つ `http` ステップは、まずそのルートをマウントします。コマンドは `plan:next` が示します。
+
+```text
+Mount the routes the scaffold step wrote first, with `bunx guren plan:scaffold docs/plans/comments/plan.json --step task/entity/model.comment/http --mount`, not by hand: it calls routes/comments.ts from the entry registrar.
+  Written as stubs by plan:scaffold, to finish: validator.comment, controller.comments, action.comments.store, action.comments.destroy, route.comments.store, route.comments.destroy, resource.comment, policy.comment. Each action validates and authorizes as planned and answers 501; write its body and response.
+```
+
+`registerCommentRoutes` を `routes/web.ts` に import し、そこの registrar の先頭で呼び出します。先頭なので、エントリーが設定する `auth` の別名が、ルートのファイルの設定より優先されます。これで `plan:status` はルートとそのアクションを `wired` と読み、それらが使う validator も `wired` になります。残るのは各アクションの本体とレスポンス、そして scaffold がスタブにしたか書かなかったものです。
+
+次の場合は何も書かずに拒否します。下書きやどの承認も名指ししていない計画、`plan:next` が印を付けていないステップ、scaffold したルートを持たないステップ (持つステップを示します)、存在しないルートのファイルや registrar を export しなくなったファイル、`routes/web.ts` のないアプリケーション、registrar と同じ名前で別のものを import しているエントリー、すでにマウントされたファイルです。エントリーが直接呼んでいても、別のルートのファイルが呼んでいても、マウント済みと判断します。
 
 ### 結果
 
@@ -825,7 +872,7 @@ Closed 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0. The pla
 
 - 計画の JSON を Claude に単独で書かせる `guren plan` (いまあるのは `--print-prompt` だけです) と、レビューのコメントをリビジョンに変える `plan --revise`。自分で加えた変更は `plan:revise` で記録できます。`plan.json` は自分で、またはエージェントとのセッションで書いてください
 - 計画を `docs/plans/` ではなく GitHub の issue に置く方式
-- スライス全体を書く `plan:scaffold`。いま書くのは追加するモデルのテーブルとクラス、validator、Resource、Policy とそのプロバイダーです。スライスのコントローラーとルートは、引き続き `http` ステップで手で書きます。ページは今後も書きません。計画の props から書いたページは、作った時点で計画と一致してしまうためです
+- `plan:scaffold` によるページの生成。計画が追加するスライスのうちページ以外はすべて書き、アクションの本体とレスポンスは `http` ステップに残します。ページは今後も書きません。計画の props から書いたページは、作った時点で計画と一致してしまうためです
 
 ## 次のステップ
 

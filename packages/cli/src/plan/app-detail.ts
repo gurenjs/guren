@@ -596,7 +596,8 @@ async function policyDetail(root: string, cache: ParseCache): Promise<PlanAppPol
   )
 }
 
-const SIDE_EFFECT_DISCOVERY: Record<PlanAppSideEffectKind, (appRoot: string) => Promise<string[]>> = {
+/** Where each side-effect kind is discovered: `plan:status` reads the classes and `plan:scaffold` checks a name against them here. */
+export const SIDE_EFFECT_DISCOVERY: Record<PlanAppSideEffectKind, (appRoot: string) => Promise<string[]>> = {
   job: discoverJobFiles,
   event: discoverEventFiles,
   listener: discoverListenerFiles,

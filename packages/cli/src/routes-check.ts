@@ -12,10 +12,12 @@ import {
 } from './discovery'
 import { cachedFileProbe, MODULE_ROUTES_FILE, moduleRoutesEntryFile, resolveImportPath, RUNTIME_TO_SOURCE_EXTENSION, type FileProbe, SOURCE_TO_RUNTIME_EXTENSION, swapExtension } from './import-resolution'
 import type { ParseCache } from './parse-cache'
+import { isPlanInput } from './plan-check'
 import { specifierBase } from './schema-binding'
 import { DEFAULT_ROUTES_FILE, isRegistrarExportName, resolveRoutesEntry, specifierName } from './route-registrar'
 import { pascalCase, referencesIdentifier, relativeImportPath } from './utils'
-import { check, type CheckResult } from './check-result'
+import { advisory, check, type CheckResult } from './check-result'
+import type { ScaffoldAwaitingMount } from './plan/awaiting-mount'
 
 /**
  * A path that can move a module scope's answer: its descriptor (where
@@ -25,11 +27,11 @@ import { check, type CheckResult } from './check-result'
 const MODULE_WIRING_PATTERN = /^modules\/[^/]+\/(?:index\.|package\.json$|routes[/.])/u
 
 /**
- * Whether a changed path — POSIX-relative, as `getChangedFiles` reports — could move this
- * check's answer, and so must wake it under `--changed`. Gated as a unit rather than
- * filtered by changed candidate: the edit that unmounts `routes/admin.ts` is usually to
- * `routes/web.ts`. Both halves of each scope count — `modules/billing/routes/foo.ts` does
- * not start with `routes/`, and deleting `routes:` from a descriptor 404s every route.
+ * Whether a changed path (POSIX-relative, as `getChangedFiles` reports) could move this check's
+ * answer, and so must wake it under `--changed`. Gated as a unit: the edit that unmounts
+ * `routes/admin.ts` is usually to `routes/web.ts`. Both halves of each scope count, since deleting
+ * `routes:` from a descriptor 404s every route, and so does a plan input, whose close or approval
+ * moves a scaffolded file's warning in or out.
  */
 export function affectsRouteWiring(file: string, routesFile?: string): boolean {
   return (
@@ -37,6 +39,7 @@ export function affectsRouteWiring(file: string, routesFile?: string): boolean {
     || file.startsWith(`${ROUTES_DIR}/`)
     || file === routesFile
     || MODULE_WIRING_PATTERN.test(file)
+    || isPlanInput(file)
   )
 }
 
@@ -446,6 +449,9 @@ async function checkScope(cwd: string, cache: ParseCache, probe: FileProbe, scop
 
   const mounted = mountedFrom(facts, entryPath, entryFacts)
   const entryBindings = new Set(entryFacts.imports.map((binding) => binding.local))
+  // Only an unmounted project file asks, so an app with every file mounted reads no plan.
+  const unmounted = candidates.some((filePath) => !mounted.has(filePath) && (facts.get(filePath)?.registrarExports.length ?? 0) > 0)
+  const awaiting = module === null && unmounted ? await scaffoldedAwaitingMount(cwd) : new Map<string, ScaffoldAwaitingMount>()
 
   return candidates.flatMap((filePath) => {
     const candidateFacts = facts.get(filePath)
@@ -456,6 +462,8 @@ async function checkScope(cwd: string, cache: ParseCache, probe: FileProbe, scop
     const relPath = toPosixRelative(cwd, filePath)
     const isMounted = mounted.has(filePath)
     const name = candidateFacts.registrarExports.find((exported) => exported !== 'default')
+    const scaffolded = isMounted ? undefined : awaiting.get(relPath)
+    if (scaffolded) return awaitingMountResult(relPath, entryFile, scaffolded)
 
     return check(
       `route-registrar:${relPath}`,
@@ -469,6 +477,32 @@ async function checkScope(cwd: string, cache: ParseCache, probe: FileProbe, scop
       relPath,
     )
   })
+}
+
+/** Read lazily: the plan modules are loaded only once an unmounted project routes file needs them. */
+async function scaffoldedAwaitingMount(cwd: string): Promise<Map<string, ScaffoldAwaitingMount>> {
+  const { scaffoldedRoutesAwaitingMount } = await import('./plan/awaiting-mount')
+  return scaffoldedRoutesAwaitingMount(cwd).catch(() => new Map<string, ScaffoldAwaitingMount>())
+}
+
+/**
+ * A routes file `plan:scaffold` wrote for an open plan, which its http step mounts (RFC 0030 §5,
+ * D3): the same key and wording as the warning, advisory so the gate does not block the steps
+ * before it. Once the plan closes or the http step verifies, the warning is back.
+ */
+function awaitingMountResult(relPath: string, entryFile: string, scaffolded: ScaffoldAwaitingMount): CheckResult {
+  const mount = scaffolded.step
+    ? `bunx guren plan:scaffold ${scaffolded.plan} --step ${scaffolded.step} --mount`
+    : `a call to ${scaffolded.registrar}() from ${entryFile}`
+  return advisory(
+    `route-registrar:${relPath}`,
+    `${relPath} wiring`,
+    'warn',
+    `${relPath} exports a route registrar that nothing reachable from ${entryFile} calls, so its routes are never mounted. `
+    + `plan:scaffold wrote it for ${scaffolded.plan}, whose http step${scaffolded.step ? ` ${scaffolded.step}` : ''} mounts it and is not verified yet, so this is not counted until then.`,
+    `The http step mounts it with ${mount}.`,
+    relPath,
+  )
 }
 
 /**

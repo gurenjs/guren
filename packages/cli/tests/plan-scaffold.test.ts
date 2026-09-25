@@ -4,15 +4,23 @@ import { join, resolve } from 'node:path'
 
 import { runCommand, type CommandDef } from 'citty'
 
+import type { CheckResult } from '../src/check-result'
+import { runCheck } from '../src/check'
 import { builtinSubCommands } from '../src/commands'
-import { formatPlanScaffold, planScaffoldFile, type PlanScaffoldReport } from '../src/plan-scaffold'
+import { runGate, type GateStageResult } from '../src/gate'
+import type { Introspection } from '../src/introspect'
+import { buildJobSource } from '../src/make-job'
+import { buildListenerSource } from '../src/make-listener'
+import { formatPlanScaffold, formatPlanScaffoldMount, planScaffoldFile, planScaffoldMountFile, type PlanScaffoldMountReport, type PlanScaffoldReport } from '../src/plan-scaffold'
 import { parsePlanDocument } from '../src/plan-render'
 import { loadPlanAppState } from '../src/plan/app-state'
-import { emitPlanScaffold, type PlanScaffoldOutput } from '../src/plan/scaffold'
+import { emitPlanScaffold, type PlanScaffoldApp, type PlanScaffoldOutput } from '../src/plan/scaffold'
 import { PLAN_VERSION } from '../src/plan/schema'
-import { writePlanActiveStep } from '../src/plan/state'
+import { planDigest } from '../src/plan/identity'
+import { writePlanActiveStep, writePlanStepRecord, type PlanStepRecord } from '../src/plan/state'
 import { judgePlan, type PlanStatus } from '../src/plan/status'
 import { derivePlanTasks, findPlanStep } from '../src/plan/tasks'
+import { affectsRouteWiring } from '../src/routes-check'
 import { readSchemaTables } from '../src/schema-runtime'
 import type { SchemaDialect } from '../src/schema-parser'
 import { checkTypes, createTempRoot, linkWorkspaceCore, renderedAppCompilerOptions, snapshotTree, TSC_TIMEOUT, writeWorkspaceFiles } from './helpers'
@@ -131,7 +139,6 @@ function widgetsPlan(): WidgetsPlan {
         ],
       },
     ],
-    // Only for the query schema it names: plan:scaffold writes no controller (the third change does).
     controllers: [
       {
         id: 'controller.widget',
@@ -144,11 +151,68 @@ function widgetsPlan(): WidgetsPlan {
             name: 'index',
             query: 'validator.widgetQuery',
             authorization: { middleware: [] },
-            response: { kind: 'json', description: 'The widgets.' },
+            response: { kind: 'resource', resource: 'resource.widget' },
+            rules: [],
+          },
+          {
+            id: 'action.widget.store',
+            change: { kind: 'add' },
+            name: 'store',
+            body: 'validator.widget',
+            authorization: { middleware: ['auth'] },
+            response: { kind: 'redirect', to: '/posts/:postId' },
+            rules: ['The widget belongs to the post\nin the path.'],
+          },
+          {
+            id: 'action.widget.destroy',
+            change: { kind: 'add' },
+            name: 'destroy',
+            authorization: { middleware: ['auth'], policy: { id: 'policy.widget', ability: 'delete' } },
+            response: { kind: 'empty' },
             rules: [],
           },
         ],
       },
+    ],
+    routes: [
+      {
+        id: 'route.widgets.index',
+        change: { kind: 'add' },
+        method: 'GET',
+        path: '/widgets',
+        name: 'widgets.index',
+        action: 'action.widget.index',
+        middleware: [],
+        bind: [],
+        agent: { toolName: 'widgets_index', readOnly: true },
+      },
+      {
+        id: 'route.widgets.store',
+        change: { kind: 'add' },
+        method: 'POST',
+        path: '/posts/:postId/widgets',
+        name: 'widgets.store',
+        action: 'action.widget.store',
+        middleware: ['auth'],
+        bind: [{ param: 'postId', model: 'model.post', key: 'id' }],
+      },
+      {
+        id: 'route.widgets.destroy',
+        change: { kind: 'add' },
+        method: 'DELETE',
+        path: '/widgets/:id',
+        name: 'widgets.destroy',
+        action: 'action.widget.destroy',
+        middleware: ['auth'],
+        bind: [{ param: 'id', model: 'model.widget' }],
+      },
+    ],
+    sideEffects: [
+      { id: 'job.widgetDigest', change: { kind: 'add' }, kind: 'job', name: 'WidgetDigest', trigger: 'Every night.', description: 'Mails each owner a digest of their widgets.' },
+      { id: 'event.widgetPublished', change: { kind: 'add' }, kind: 'event', name: 'WidgetPublished', trigger: 'A widget is stored.', description: 'Announces a new widget.' },
+      { id: 'listener.widgetAudit', change: { kind: 'add' }, kind: 'listener', name: 'WidgetAudit', trigger: 'WidgetPublished.', description: 'Writes an audit row.' },
+      { id: 'mail.widgetShared', change: { kind: 'add' }, kind: 'mail', name: 'WidgetShared', trigger: 'A widget is shared.', description: 'Tells the recipient.' },
+      { id: 'notification.widgetFlagged', change: { kind: 'add' }, kind: 'notification', name: 'WidgetFlagged', trigger: 'A widget is flagged.', description: 'Tells the owner.' },
     ],
     resources: [
       {
@@ -242,12 +306,21 @@ export const widgetTags = sqliteTable('widget_tags', {
 }
 
 const APP_ENTRY = `import { createApp } from '@guren/core'
+import { registerWebRoutes } from '../routes/web.js'
 
 const app = createApp({
+  routes: registerWebRoutes,
   providers: [],
 })
 
 export default app
+`
+
+const WEB_ROUTES = `import type { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/', (c) => c.text('ok')).name('home')
+}
 `
 
 const model = (name: string, table: string): string => `import { defineModel } from '@guren/core'
@@ -301,12 +374,33 @@ const HTTP_READER_LIMITS = [
 
 const HTTP_ELEMENTS = ['validator.widget', 'validator.widgetQuery', 'resource.widget', 'policy.widget']
 
+/**
+ * Where the action reader stops: a stub writes no response, since the reader credits the one it
+ * names (a resource by mention, a page, a redirect) and none has been written. An empty response
+ * has no property. A binding's lookup column is not read.
+ */
+const ACTION_READER_LIMITS = ['action.widget.index response resource', 'action.widget.store response']
+const MOUNTED_READER_LIMITS = [...ACTION_READER_LIMITS, 'route.widgets.store bind postId key']
+
+const ROUTES = ['route.widgets.index', 'route.widgets.store', 'route.widgets.destroy']
+const ACTIONS = ['action.widget.index', 'action.widget.store', 'action.widget.destroy']
+const SIDE_EFFECTS = ['job.widgetDigest', 'event.widgetPublished', 'listener.widgetAudit', 'mail.widgetShared', 'notification.widgetFlagged']
+/** The http part holding the routes, which mounts them: side effects push the step past five files. */
+const MOUNT_STEP = 'task/entity/model.widget/http/1'
+
 const CREATED = [
   'app/Models/Widget.ts',
   'app/Http/Validators/WidgetValidator.ts',
   'app/Http/Resources/WidgetResource.ts',
   'app/Policies/WidgetPolicy.ts',
   'app/Providers/WidgetPolicyProvider.ts',
+  'app/Http/Controllers/WidgetController.ts',
+  'routes/widgets.ts',
+  'app/Jobs/WidgetDigest.ts',
+  'app/Events/WidgetPublished.ts',
+  'app/Listeners/WidgetAudit.ts',
+  'app/Mail/WidgetShared.ts',
+  'app/Notifications/WidgetFlagged.ts',
 ]
 
 /** The document stamped and ready to approve, as `plan:approve` would stamp it against the fixture app. */
@@ -325,6 +419,8 @@ interface AppOptions {
   packageJson?: Record<string, unknown>
   /** Link drizzle, the ORM and core, which only a run of the readers needs; a refusal's tree snapshot skips none of it. */
   link?: boolean
+  /** `routes/web.ts`; `null` writes none. */
+  webRoutes?: null
   /** `src/app.ts`; `null` writes none. */
   entry?: string | null
 }
@@ -337,6 +433,7 @@ async function createApp(name: string, options: AppOptions = {}): Promise<{ dir:
     'package.json': JSON.stringify(options.packageJson ?? { name, type: 'module', dependencies: { '@guren/inertia-client': '*' } }),
     'bunfig.toml': '[install]\nauto = "disable"\n',
     ...(options.entry === null ? {} : { 'src/app.ts': options.entry ?? APP_ENTRY }),
+    ...(options.webRoutes === null ? {} : { 'routes/web.ts': WEB_ROUTES }),
     'db/schema.ts': SCHEMAS[dialect],
     'app/Models/Post.ts': model('Post', 'posts'),
     'app/Models/Tag.ts': model('Tag', 'tags'),
@@ -351,12 +448,32 @@ async function createApp(name: string, options: AppOptions = {}): Promise<{ dir:
   }
   const plan = join(dir, PLAN_FILE)
   if (options.approve !== false && 'baseline' in document) await approvePlanFile(plan)
-  const mark = options.mark === undefined ? STEP : options.mark
-  if (mark !== null) await writePlanActiveStep(dir, 'widgets', { plan: PLAN_FILE, step: mark, startedAt: '2026-09-25T00:00:00.000Z', continuations: 0 })
+  const marked = options.mark === undefined ? STEP : options.mark
+  if (marked !== null) await mark(dir, marked)
   return { dir, plan }
 }
 
 /** `plan:status`'s own reading of the app, the one `plan:verify` judges a step by. */
+/** A verified run of a step, as `plan:verify` records it, against the plan `digest` names. */
+function verifiedRecord(digest: string): PlanStepRecord {
+  return {
+    outcome: 'verified',
+    planDigest: digest,
+    ranAt: '2026-09-25T00:00:00.000Z',
+    durationMs: 1,
+    commands: [],
+    acceptance: [],
+    incomplete: [],
+    waived: [],
+    fingerprint: { files: {}, environment: { runtime: 'bun', platform: 'darwin', arch: 'arm64', hostname: 'test' } },
+  }
+}
+
+/** What `plan:next` writes when it hands a step out. */
+function mark(dir: string, step: string): Promise<string> {
+  return writePlanActiveStep(dir, 'widgets', { plan: PLAN_FILE, step, startedAt: '2026-09-25T00:00:00.000Z', continuations: 0 })
+}
+
 async function statusOf(dir: string, plan: string): Promise<PlanStatus> {
   return judgePlan(parsePlanDocument(JSON.parse(await readFile(plan, 'utf8'))), await loadPlanAppState(dir, { detail: true }))
 }
@@ -389,40 +506,61 @@ describe('plan:scaffold', () => {
   describe('round trip through the plan:status readers', () => {
     const DIALECTS = ['pg', 'mysql', 'sqlite'] as const
     const runs = new Map<SchemaDialect, { dir: string; plan: string; report: PlanScaffoldReport }>()
+    // Bun caches a routes file by path for the process, so a mounted app is one whose routes nothing read before the mount.
+    const mounted = new Map<SchemaDialect, { dir: string; plan: string; report: PlanScaffoldMountReport }>()
 
     beforeAll(async () => {
       for (const dialect of DIALECTS) {
         const { dir, plan } = await createApp(`round-${dialect}`, { dialect, link: true })
         runs.set(dialect, { dir, plan, report: await planScaffoldFile(plan, { appRoot: dir, step: STEP }) })
+        const app = await createApp(`mounted-${dialect}`, { dialect, link: true })
+        await planScaffoldFile(app.plan, { appRoot: app.dir, step: STEP })
+        await mark(app.dir, MOUNT_STEP)
+        mounted.set(dialect, { ...app, report: await planScaffoldMountFile(app.plan, { appRoot: app.dir, step: MOUNT_STEP }) })
       }
     })
 
     for (const dialect of DIALECTS) {
-      test(`should write a ${dialect} table and model every planned property reads back from, bar the readers' own limits`, async () => {
+      test(`should write a ${dialect} table, model, controller and side effects every planned property reads back from, bar the readers' own limits`, async () => {
         const { dir, plan, report } = runs.get(dialect)!
 
         expect(report.created).toEqual(CREATED)
         expect(report.appended).toEqual({ file: 'db/schema.ts', tables: ['widgets'] })
         expect(report.registered).toEqual({ file: 'src/app.ts', providers: ['WidgetPolicyProvider'] })
+        expect(report.unmounted).toEqual({ file: 'routes/widgets.ts', registrar: 'registerWidgetRoutes', step: MOUNT_STEP })
         expect(report.omitted).toEqual([])
+        expect(report.left).toEqual([])
         const widgets = (await readSchemaTables(dir)).tables.find((table) => table.identifier === 'widgets')
         // A static reading would pass for the wrong reason: the runtime one is what plan:verify judges by.
         expect(widgets?.source).toBe('runtime')
         const status = await statusOf(dir, plan)
         const written = status.elements.filter((element) => report.emitted.includes(element.id))
-        expect(written.map((element) => [element.id, element.state])).toEqual(report.emitted.map((id) => [id, 'present']))
-        expect(report.emitted).toEqual(expect.arrayContaining(HTTP_ELEMENTS))
-        expect(unmatched(status, report.emitted).sort()).toEqual([...READER_LIMITS[dialect], ...HTTP_READER_LIMITS].sort())
+        // The route reader reads registered routes, and an unmounted file registers none.
+        expect(written.map((element) => [element.id, element.state])).toEqual(report.emitted.map((id) => [id, ROUTES.includes(id) ? 'planned' : 'present']))
+        expect(report.emitted).toEqual(expect.arrayContaining([...HTTP_ELEMENTS, 'controller.widget', ...ACTIONS, ...ROUTES, ...SIDE_EFFECTS]))
+        expect(unmatched(status, report.emitted).sort()).toEqual([...READER_LIMITS[dialect], ...HTTP_READER_LIMITS, ...ACTION_READER_LIMITS].sort())
+      })
+
+      test(`should read the ${dialect} routes, actions and validators wired once --mount calls the routes file, bar the readers' own limits`, async () => {
+        const { dir, plan, report } = mounted.get(dialect)!
+
+        expect(report.mounted).toEqual({ file: 'routes/widgets.ts', registrar: 'registerWidgetRoutes', entry: 'routes/web.ts' })
+        const status = await statusOf(dir, plan)
+        const wired = [...HTTP_ELEMENTS.slice(0, 2), ...ACTIONS, ...ROUTES]
+        expect(status.elements.filter((element) => wired.includes(element.id)).map((element) => [element.id, element.state])).toEqual(wired.map((id) => [id, 'wired']))
+        expect(unmatched(status, [...ACTIONS, ...ROUTES]).sort()).toEqual(MOUNTED_READER_LIMITS.sort())
+        // A side effect is wired by a dispatch, which is the http step's to write.
+        expect(status.elements.filter((element) => SIDE_EFFECTS.includes(element.id)).map((element) => element.state)).toEqual(SIDE_EFFECTS.map(() => 'present'))
       })
     }
 
-    test('should leave a scaffolded validator present until a route or action uses it, which the http step writes', async () => {
+    test('should leave a scaffolded validator present until its route is mounted, which the http step does', async () => {
       const { dir, plan } = runs.get('pg')!
       const validator = (await statusOf(dir, plan)).elements.find((element) => element.id === 'validator.widget')!
 
       expect(validator.completesAt).toBe('wired')
       expect(validator.state).toBe('present')
-      expect(validator.notes.join(' ')).toContain('no route contract holds it and no action body validates with it')
+      expect(validator.notes.join(' ')).toContain('WidgetController.store validates with it, and no registered route dispatches to WidgetController.store')
     })
 
     // The provider's registration is not read: status gives a policy no mount, so it completes at
@@ -451,11 +589,80 @@ describe('plan:scaffold', () => {
       }
     })
 
-    test('should write output that typechecks, in every dialect', () => {
-      const dirs = DIALECTS.map((dialect) => runs.get(dialect)!.dir)
-      const rootNames = dirs.flatMap((dir) => ['db/schema.ts', 'app/Models/Post.ts', 'app/Models/Tag.ts', 'src/app.ts', ...CREATED].map((file) => join(dir, file)))
+    // An unmounted routes file compiles because the actions validate with validateBody(), not validated('<route name>').
+    test('should write output that typechecks, in every dialect, unmounted and mounted', () => {
+      const dirs = DIALECTS.flatMap((dialect) => [runs.get(dialect)!.dir, mounted.get(dialect)!.dir])
+      const rootNames = dirs.flatMap((dir) => ['db/schema.ts', 'app/Models/Post.ts', 'app/Models/Tag.ts', 'src/app.ts', 'routes/web.ts', ...CREATED].map((file) => join(dir, file)))
       expect(checkTypes(rootNames, renderedAppCompilerOptions(dirs[0]!))).toEqual([])
     }, TSC_TIMEOUT)
+
+    test('should write the pg controller, routes file and mount byte for byte', async () => {
+      const read = (dir: string, file: string): Promise<string> => readFile(join(dir, file), 'utf8')
+      const { dir } = runs.get('pg')!
+      expect(await read(dir, 'app/Http/Controllers/WidgetController.ts')).toMatchInlineSnapshot(`
+        "import { Controller, HttpException } from '@guren/core'
+        import { WidgetListQuerySchema, WidgetPayloadSchema } from '../Validators/WidgetValidator.js'
+        import { Widget } from '../../Models/Widget.js'
+
+        /**
+         * Written by plan:scaffold: each action validates and authorizes as planned, then answers 501 until the http step writes it.
+         */
+        export default class WidgetController extends Controller {
+          // Planned response: the resource WidgetResource
+          async index(): Promise<Response> {
+            this.validateQuery(WidgetListQuerySchema)
+            throw HttpException.notImplemented('WidgetController.index is planned and not written yet')
+          }
+
+          // Planned response: a redirect to /posts/:postId
+          // Rule: The widget belongs to the post in the path.
+          async store(): Promise<Response> {
+            await this.validateBody(WidgetPayloadSchema)
+            throw HttpException.notImplemented('WidgetController.store is planned and not written yet')
+          }
+
+          // Planned response: no content
+          async destroy(): Promise<Response> {
+            await this.authorize('delete', Widget)
+            throw HttpException.notImplemented('WidgetController.destroy is planned and not written yet')
+          }
+        }
+        "
+      `)
+      expect(await read(dir, 'routes/widgets.ts')).toMatchInlineSnapshot(`
+        "import { Router, requireAuthenticated } from '@guren/core'
+        import WidgetController from '../app/Http/Controllers/WidgetController.js'
+        import { WidgetListQuerySchema, WidgetPayloadSchema } from '../app/Http/Validators/WidgetValidator.js'
+        import { Post } from '../app/Models/Post.js'
+        import { Widget } from '../app/Models/Widget.js'
+
+        /**
+         * Written by plan:scaffold and not mounted: the http step mounts it with \`plan:scaffold --mount\`,
+         * which calls it first in the entry registrar, so an auth alias the entry sets replaces the one here.
+         */
+        export function registerWidgetRoutes(router: Router): void {
+          const authRouter = router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+          router.get('/widgets', { name: 'widgets.index', query: WidgetListQuerySchema, agent: { toolName: 'widgets_index', readOnlyHint: true } }, [WidgetController, 'index'])
+          authRouter.post('/posts/:postId/widgets', { name: 'widgets.store', body: WidgetPayloadSchema, bind: { postId: [Post, 'id'] } }, [WidgetController, 'store']).middleware('auth')
+          authRouter.delete('/widgets/:id', { name: 'widgets.destroy', bind: { id: Widget } }, [WidgetController, 'destroy']).middleware('auth')
+        }
+        "
+      `)
+      expect(await read(dir, 'routes/web.ts')).toBe(WEB_ROUTES)
+      expect(await read(mounted.get('pg')!.dir, 'routes/web.ts')).toMatchInlineSnapshot(`
+        "import type { Router } from '@guren/core'
+        import { registerWidgetRoutes } from './widgets.js'
+
+        export function registerWebRoutes(router: Router): void {
+          registerWidgetRoutes(router)
+
+          router.get('/', (c) => c.text('ok')).name('home')
+        }
+        "
+      `)
+      expect(await read(dir, 'app/Jobs/WidgetDigest.ts')).toBe(buildJobSource('WidgetDigest'))
+      expect(await read(dir, 'app/Listeners/WidgetAudit.ts')).toBe(buildListenerSource('WidgetAudit'))
+    })
 
     test('should write the pg table and model byte for byte', async () => {
       const { dir } = runs.get('pg')!
@@ -617,9 +824,11 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
       `)
       expect(await read('src/app.ts')).toMatchInlineSnapshot(`
         "import { createApp } from '@guren/core'
+        import { registerWebRoutes } from '../routes/web.js'
         import WidgetPolicyProvider from '../app/Providers/WidgetPolicyProvider.js'
 
         const app = createApp({
+          routes: registerWebRoutes,
           providers: [WidgetPolicyProvider],
         })
 
@@ -650,6 +859,156 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
 
       expect(await readFile(join(dir, 'db/schema.ts'), 'utf8')).toContain('primaryKey({ columns: [table.boardId, table.noteId] })')
       expect(unmatched(await statusOf(dir, plan), ['model.pin', 'column.pin.boardId', 'column.pin.noteId'])).toEqual([])
+    })
+  })
+
+  describe('--mount from the http step', () => {
+    /** An app whose scaffold step ran, marked at `step` for the mount. */
+    async function scaffolded(name: string, options: AppOptions = {}, step = MOUNT_STEP): Promise<{ dir: string; plan: string }> {
+      const app = await createApp(name, options)
+      await planScaffoldFile(app.plan, { appRoot: app.dir, step: STEP })
+      await mark(app.dir, step)
+      return app
+    }
+
+    async function mountRefused(app: { dir: string; plan: string }, step = MOUNT_STEP): Promise<string> {
+      const before = await snapshotTree(app.dir)
+      const message = await refusal(() => planScaffoldMountFile(app.plan, { appRoot: app.dir, step }))
+      expect(await snapshotTree(app.dir)).toEqual(before)
+      expect(message).toEndWith('Nothing was mounted.')
+      return message
+    }
+
+    test('should call the registrar first in the entry, print what is left, and run through the registered command', async () => {
+      const app = await scaffolded('mount-command')
+      const log = spyOn(console, 'log').mockImplementation(() => {})
+      try {
+        await runCommand(builtinSubCommands['plan:scaffold'] as CommandDef, { rawArgs: [app.plan, '--step', MOUNT_STEP, '--mount', '--app', app.dir, '--json'] })
+        const report = JSON.parse(String(log.mock.calls[0]![0])) as PlanScaffoldMountReport
+        expect(report).toMatchObject({ step: MOUNT_STEP, mounted: { file: 'routes/widgets.ts', registrar: 'registerWidgetRoutes', entry: 'routes/web.ts' } })
+        expect(formatPlanScaffoldMount(report, PLAN_FILE)).toContain(`The controller actions still answer 501: write their bodies and responses, then run\n  bunx guren plan:verify ${PLAN_FILE} --step ${MOUNT_STEP}`)
+      } finally {
+        log.mockRestore()
+      }
+      const entry = await readFile(join(app.dir, 'routes/web.ts'), 'utf8')
+      expect(entry.indexOf('registerWidgetRoutes(router)')).toBeLessThan(entry.indexOf("router.get('/'"))
+    })
+
+    test('should refuse a second mount, reading mounted as guren check reads it', async () => {
+      const app = await scaffolded('mount-twice')
+      await planScaffoldMountFile(app.plan, { appRoot: app.dir, step: MOUNT_STEP })
+      expect(await mountRefused(app)).toContain('routes/widgets.ts is already mounted: routes/web.ts reaches registerWidgetRoutes.')
+    })
+
+    test('should refuse a file another routes file already mounts', async () => {
+      const app = await scaffolded('mount-indirect')
+      await Bun.write(join(app.dir, 'routes/web.ts'), WEB_ROUTES.replace('router.get(', 'registerAllRoutes(router)\n  router.get(').replace("import type { Router } from '@guren/core'", "import type { Router } from '@guren/core'\nimport { registerAllRoutes } from './all.js'"))
+      await Bun.write(join(app.dir, 'routes/all.ts'), "import type { Router } from '@guren/core'\nimport { registerWidgetRoutes } from './widgets.js'\n\nexport function registerAllRoutes(router: Router): void {\n  registerWidgetRoutes(router)\n}\n")
+      expect(await mountRefused(app)).toContain('routes/widgets.ts is already mounted')
+    })
+
+    test('should refuse a step that holds no scaffolded routes, and name the one that does', async () => {
+      const app = await scaffolded('mount-wrong-step', {}, STEP)
+      expect(await mountRefused(app, STEP)).toContain(`${STEP} is a scaffold step that mounts no routes file: --mount runs from the http step holding a scaffolded routes file: ${MOUNT_STEP} (routes/widgets.ts).`)
+      await mark(app.dir, 'task/entity/model.widget/http/2')
+      expect(await mountRefused(app, 'task/entity/model.widget/http/2')).toContain('task/entity/model.widget/http/2 is a http step that mounts no routes file')
+    })
+
+    test('should refuse a step plan:next has not marked, and a draft', async () => {
+      expect(await mountRefused(await scaffolded('mount-unmarked', {}, STEP))).toContain(`${MOUNT_STEP} is not the step plan:next marked (it marked ${STEP}).`)
+      const draft = await createApp('mount-draft', { document: widgetsPlan(), mark: MOUNT_STEP })
+      expect(await mountRefused(draft)).toContain('widgets.plan.json is a draft: plan:scaffold writes code from an approved plan only.')
+    })
+
+    test('should refuse when there is nothing to mount, or the file no longer exports its registrar', async () => {
+      expect(await mountRefused(await createApp('mount-nothing', { mark: MOUNT_STEP }))).toContain(`Nothing to mount: routes/widgets.ts does not exist. plan:scaffold ${join(ROOT, 'mount-nothing', PLAN_FILE)} --step ${STEP} writes it.`)
+      const edited = await scaffolded('mount-edited')
+      await Bun.write(join(edited.dir, 'routes/widgets.ts'), "export function registerRoutes(): void {}\n")
+      expect(await mountRefused(edited)).toContain('routes/widgets.ts no longer exports registerWidgetRoutes, which --mount calls.')
+    })
+
+    test('should refuse an app with no routes entry, and an entry already binding the registrar’s name', async () => {
+      expect(await mountRefused(await scaffolded('mount-no-entry', { webRoutes: null }))).toContain('This application has no routes entry (routes/web.ts) to call registerWidgetRoutes from.')
+      const bound = await scaffolded('mount-bound')
+      await Bun.write(join(bound.dir, 'routes/web.ts'), `import { registerWidgetRoutes } from './legacy.js'\n${WEB_ROUTES}`)
+      expect(await mountRefused(bound)).toContain('routes/web.ts already binds registerWidgetRoutes to another import')
+    })
+  })
+
+  describe('guren check on the routes file the scaffold wrote', () => {
+    const KEY = 'route-registrar:routes/widgets.ts'
+
+    async function wiring(dir: string, key = KEY): Promise<CheckResult | undefined> {
+      return (await runCheck({ cwd: dir, introspect: false })).checks.find((result) => result.key === key)
+    }
+
+    /** What the gate's check stage feeds back: gating findings, and never an advisory one. */
+    async function gateCheck(dir: string): Promise<GateStageResult> {
+      const report = await runGate({ cwd: dir, exec: async () => ({ exitCode: 0, stdout: '', stderr: '' }), introspect: async (): Promise<Introspection> => ({ status: 'failed', reason: 'no-entry', message: 'not introspected in this test' }) })
+      return report.stages.find((stage) => stage.name === 'check')!
+    }
+
+    test('should count an unmounted scaffolded file as advisory while the http step is open, in check and in the gate', async () => {
+      const { dir } = await createApp('check-open')
+      await planScaffoldFile(join(dir, PLAN_FILE), { appRoot: dir, step: STEP })
+
+      const result = await wiring(dir)
+      expect(result).toMatchObject({ status: 'warn', advisory: true })
+      expect(result!.message).toContain(`plan:scaffold wrote it for ${PLAN_FILE}, whose http step ${MOUNT_STEP} mounts it and is not verified yet`)
+      expect(result!.suggestion).toBe(`The http step mounts it with bunx guren plan:scaffold ${PLAN_FILE} --step ${MOUNT_STEP} --mount.`)
+      expect((await gateCheck(dir)).findings.join('\n')).not.toContain('routes/widgets.ts')
+    })
+
+    test('should count it again once the http step verifies, or the plan closes', async () => {
+      const verified = await createApp('check-verified')
+      await planScaffoldFile(verified.plan, { appRoot: verified.dir, step: STEP })
+      const digest = planDigest(parsePlanDocument(JSON.parse(await readFile(verified.plan, 'utf8'))))
+      await writePlanStepRecord(verified.dir, 'widgets', MOUNT_STEP, verifiedRecord(digest))
+      expect(await wiring(verified.dir)).toMatchObject({ status: 'warn' })
+      expect((await wiring(verified.dir))!.advisory).toBeUndefined()
+      expect((await gateCheck(verified.dir)).findings.join('\n')).toContain('routes/widgets.ts wiring')
+
+      // A record of another digest is a plan revised since: the step is open again.
+      await writePlanStepRecord(verified.dir, 'widgets', MOUNT_STEP, verifiedRecord('another'))
+      expect((await wiring(verified.dir))!.advisory).toBe(true)
+
+      const closed = await createApp('check-closed')
+      await planScaffoldFile(closed.plan, { appRoot: closed.dir, step: STEP })
+      const hash = planDigest(parsePlanDocument(JSON.parse(await readFile(closed.plan, 'utf8'))))
+      await Bun.write(join(closed.dir, 'docs/plans/widgets.md'), `---\ntype: plan\nclosed: true\nplan_hash: ${hash}\n---\n\n# Widgets\n`)
+      expect((await wiring(closed.dir))!.advisory).toBeUndefined()
+      expect((await gateCheck(closed.dir)).findings.join('\n')).toContain('routes/widgets.ts wiring')
+    })
+
+    test('should keep the warning for an unmounted file no open plan’s scaffold writes, and for an unapproved plan', async () => {
+      const { dir } = await createApp('check-unrelated')
+      await planScaffoldFile(join(dir, PLAN_FILE), { appRoot: dir, step: STEP })
+      await Bun.write(join(dir, 'routes/admin.ts'), "import type { Router } from '@guren/core'\n\nexport function registerAdminRoutes(router: Router): void {\n  router.get('/admin', (c) => c.text('admin'))\n}\n")
+      expect(await wiring(dir, 'route-registrar:routes/admin.ts')).toMatchObject({ status: 'warn' })
+      expect((await wiring(dir, 'route-registrar:routes/admin.ts'))!.advisory).toBeUndefined()
+
+      // The same file, with no approval naming the plan's hash: nobody approved the scaffold that would write it.
+      await rm(join(dir, 'widgets.approvals.json'))
+      expect((await wiring(dir))!.advisory).toBeUndefined()
+    })
+
+    test('should wake under --changed on a plan input, since closing or approving one moves the verdict', () => {
+      expect(affectsRouteWiring('docs/plans/widgets.md')).toBe(true)
+      expect(affectsRouteWiring('widgets.approvals.json')).toBe(true)
+      expect(affectsRouteWiring('app/Models/Widget.ts')).toBe(false)
+    })
+
+    test('should read no schema or validator file to decide it, as plain check never does', async () => {
+      // Linked, so an import of either file would resolve and run its first line.
+      const { dir } = await createApp('check-cheap', { link: true })
+      await planScaffoldFile(join(dir, PLAN_FILE), { appRoot: dir, step: STEP })
+      const marker = (name: string): string => `await Bun.write(${JSON.stringify(join(dir, `imported-${name}`))}, '1')\n`
+      for (const file of ['db/schema.ts', 'app/Http/Validators/WidgetValidator.ts']) {
+        await Bun.write(join(dir, file), `${marker(file.replaceAll('/', '-'))}${await readFile(join(dir, file), 'utf8')}`)
+      }
+
+      expect((await wiring(dir))!.advisory).toBe(true)
+      expect(await Array.fromAsync(new Bun.Glob('imported-*').scan(dir))).toEqual([])
     })
   })
 
@@ -698,7 +1057,7 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     })
 
     test('should refuse an API-only application', async () => {
-      const message = await refusedWithNothingWritten('api-only', { packageJson: { name: 'api', type: 'module', dependencies: { '@guren/core': '*' } } })
+      const message = await refusedWithNothingWritten('api-only', { packageJson: { name: 'api', type: 'module', dependencies: { '@guren/core': '*' } }, webRoutes: null })
       expect(message).toContain('This application is API-only, so its plans have no scaffold step')
     })
 
@@ -818,6 +1177,29 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
       expect(await refusedWithNothingWritten('already-registered', { entry: registered })).toContain('src/app.ts already registers WidgetPolicyProvider.')
     })
 
+    test('should refuse a controller, side effect or routes file already there, by file and by class', async () => {
+      const message = await refusedWithNothingWritten('http-in-the-way', {
+        files: {
+          'app/Http/Controllers/WidgetController.ts': 'export default class WidgetController {}\n',
+          'app/Jobs/WidgetDigest.ts': 'export class WidgetDigest {}\n',
+          'routes/widgets.ts': 'export function registerWidgetRoutes(): void {}\n',
+        },
+      })
+      expect(message).toContain('controller.widget: the application already declares a WidgetController controller.')
+      expect(message).toContain('job.widgetDigest: the application already declares a job WidgetDigest.')
+      expect(message).toContain('app/Http/Controllers/WidgetController.ts already exists.')
+      expect(message).toContain('routes/widgets.ts already exists.')
+    })
+
+    test('should refuse a controller or side effect in a module', async () => {
+      const document = widgetsPlan()
+      document.controllers![0]!.module = 'billing'
+      document.sideEffects![0]!.module = 'billing'
+      const message = await refusedWithNothingWritten('http-module', { document: approve(document) })
+      expect(message).toContain('controller.widget sits in module "billing": plan:scaffold writes to the project root only.')
+      expect(message).toContain('job.widgetDigest sits in module "billing": plan:scaffold writes to the project root only.')
+    })
+
     test('should refuse a re-run of a scaffolded step on the targets it wrote, leaving them as written', async () => {
       const { dir, plan } = await createApp('rerun')
       await planScaffoldFile(plan, { appRoot: dir, step: STEP })
@@ -891,8 +1273,12 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
       { element: 'validator.widget', detail: 'field rank rule email', reason: 'the email format applies to a string, and the field is planned integer' },
       { element: 'validator.widget', detail: 'field link rule url', reason: 'the field already takes the email format, and a value has one' },
       { element: 'resource.widget', detail: 'field tags', reason: 'Widget has no column tags this step writes, so toArray() throws on it until it is mapped' },
+      { element: 'action.widget.index', detail: 'response', reason: 'the stub answers 501 until the http step writes the resource WidgetResource' },
+      { element: 'action.widget.store', detail: 'response', reason: 'the stub answers 501 until the http step writes a redirect to /posts/:postId' },
+      { element: 'action.widget.destroy', detail: 'response', reason: 'the stub answers 501 until the http step writes no content' },
     ])
     const text = formatPlanScaffold(report, PLAN_FILE)
+    expect(text).toContain(`routes/widgets.ts is not mounted, so its routes answer nothing until the http step ${MOUNT_STEP} runs bunx guren plan:scaffold ${PLAN_FILE} --step ${MOUNT_STEP} --mount.`)
     expect(text).toContain('Registered in src/app.ts: WidgetPolicyProvider')
     expect(text).toContain('Written as a stub or not at all, to finish in the http step:')
     expect(text).toContain('  resource.widget field tags: Widget has no column tags this step writes')
@@ -1002,10 +1388,83 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
       'column.comment.postId',
       'column.comment.createdAt',
       'validator.comment',
+      'controller.comments',
+      'action.comments.store',
+      'action.comments.destroy',
+      'route.comments.store',
+      'route.comments.destroy',
       'resource.comment',
       'policy.comment',
     ])
-    expect(output.left.map((element) => element.section)).toEqual(['controllers', 'actions', 'actions', 'routes', 'routes'])
+    expect(output.left).toEqual([])
+    expect(output.files.map((file) => file.path)).not.toContainEqual(expect.stringContaining('resources/js/pages'))
+  })
+
+  test('should leave an action whose controller exists, and a route to it, to the http step', () => {
+    const document = widgetsPlan()
+    document.controllers!.push({
+      id: 'controller.post',
+      change: { kind: 'existing' },
+      className: 'PostController',
+      actions: [{ id: 'action.post.widgets', change: { kind: 'add' }, name: 'widgets', authorization: { middleware: [] }, response: { kind: 'json', description: 'The post’s widgets.' }, rules: [] }],
+    })
+    document.routes!.push({ id: 'route.posts.widgets', change: { kind: 'add' }, method: 'GET', path: '/posts/:id/widgets', name: 'posts.widgets', action: 'action.post.widgets', middleware: [], bind: [] })
+
+    const output = emitWidgets(document, 'pg', { generates: (ids) => [...ids, 'action.post.widgets', 'route.posts.widgets'] })
+
+    expect(output.refusals).toEqual([])
+    expect(output.left).toEqual([
+      { id: 'action.post.widgets', section: 'actions', reason: 'its controller PostController is not one this step adds, and plan:scaffold writes no action into an existing file' },
+      { id: 'route.posts.widgets', section: 'routes', reason: 'its action action.post.widgets is not one this step writes' },
+    ])
+  })
+
+  test('should refuse an action that would replace a Controller member, and two side effects writing one file', () => {
+    const document = widgetsPlan()
+    document.controllers![0]!.actions[1]!.name = 'redirect'
+    document.sideEffects!.push({ id: 'job.widgetDigest2', change: { kind: 'add' }, kind: 'job', name: 'WidgetDigest', trigger: 'Hourly.', description: 'Again.' })
+
+    const output = emitWidgets(document, 'pg')
+
+    expect(output.refusals).toEqual([
+      'action.widget.store is named "redirect", which would replace Controller\'s own redirect(). Rename the action (plan:revise).',
+      'job.widgetDigest and job.widgetDigest2 would each write app/Jobs/WidgetDigest.ts.',
+    ])
+  })
+
+  test('should tag the controller and routes file with the entity document only where it exists, since a tag to none fails guren check', () => {
+    const tagged = (output: PlanScaffoldOutput): string[] => output.files.filter((file) => file.contents.includes('@docs')).map((file) => file.path)
+    expect(tagged(emitWidgets(widgetsPlan(), 'pg'))).toEqual([])
+
+    const output = emitWidgets(widgetsPlan(), 'pg', { app: { docs: ['docs/entities/Widget.md'] } })
+    expect(tagged(output)).toEqual(['app/Http/Controllers/WidgetController.ts', 'routes/widgets.ts'])
+    expect(output.files.find((file) => file.path === 'routes/widgets.ts')!.contents).toContain(' *\n * @docs docs/entities/Widget.md\n */\nexport function registerWidgetRoutes')
+  })
+
+  test('should list middleware other than auth, a schema the file cannot import, and every response as unwritten', () => {
+    const document = widgetsPlan()
+    document.routes![2]!.middleware.push('verified')
+    document.validators.push({ id: 'validator.widgetFilter', change: { kind: 'add' }, name: 'WidgetFilterSchema', fields: [] })
+    document.controllers![0]!.actions[0]!.params = 'validator.widgetFilter'
+    // An action's authorization middleware applies on its route, though the route lists none.
+    document.controllers![0]!.actions[0]!.authorization.middleware.push('auth')
+
+    // Left out of the step, as if another task wrote it, and no root file exports it.
+    const output = emitWidgets(document, 'pg', { generates: (ids) => ids.filter((id) => id !== 'validator.widgetFilter') })
+    const routes = output.files.find((file) => file.path === 'routes/widgets.ts')!.contents
+
+    expect(output.refusals).toEqual([])
+    expect(output.unwritten.filter((entry) => entry.element.startsWith('action.') || entry.element.startsWith('route.'))).toEqual([
+      { element: 'action.widget.index', detail: 'params validator', reason: 'no root validator file exports WidgetFilterSchema after this step, so the file cannot import it' },
+      { element: 'action.widget.index', detail: 'response', reason: 'the stub answers 501 until the http step writes the resource WidgetResource' },
+      { element: 'action.widget.store', detail: 'response', reason: 'the stub answers 501 until the http step writes a redirect to /posts/:postId' },
+      { element: 'action.widget.destroy', detail: 'response', reason: 'the stub answers 501 until the http step writes no content' },
+      { element: 'route.widgets.index', detail: 'params contract', reason: 'no root validator file exports WidgetFilterSchema after this step, so the file cannot import it' },
+      { element: 'route.widgets.destroy', detail: 'middleware verified', reason: 'plan:scaffold registers only the auth alias; the http step applies verified with the handler the application aliases it to' },
+    ])
+    expect(routes).toContain(".middleware('auth')\n}")
+    expect(routes).toContain("authRouter.get('/widgets', { name: 'widgets.index', query: WidgetListQuerySchema, agent: { toolName: 'widgets_index', readOnlyHint: true } }, [WidgetController, 'index']).middleware('auth')")
+    expect(routes).not.toContain('verified')
   })
 
   test('should print the report as JSON through the registered command', async () => {
@@ -1014,7 +1473,7 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     try {
       await runCommand(builtinSubCommands['plan:scaffold'] as CommandDef, { rawArgs: [plan, '--step', STEP, '--app', dir, '--json'] })
       const report = JSON.parse(String(log.mock.calls[0]![0])) as PlanScaffoldReport
-      expect(Object.keys(report).sort()).toEqual(['appended', 'created', 'emitted', 'left', 'omitted', 'plan', 'registered', 'reportVersion', 'step', 'unwritten'])
+      expect(Object.keys(report).sort()).toEqual(['appended', 'created', 'emitted', 'left', 'omitted', 'plan', 'registered', 'reportVersion', 'step', 'unmounted', 'unwritten'])
       expect(report).toMatchObject({ reportVersion: 1, step: STEP, plan: { file: PLAN_FILE, title: 'Widgets' }, created: CREATED })
       expect(report.plan.hash).toMatch(/^[0-9a-f]{64}$/)
     } finally {
@@ -1027,14 +1486,17 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
 const NO_CLASSES = { validators: [], resources: [], policies: [] } as const
 
 /** The emitter alone, over the fixture schema's tables and models. */
-function emitWidgets(document: WidgetsPlan, dialect: SchemaDialect): PlanScaffoldOutput {
+/** `generates` edits the derived step: a test reaches a step shape derivation does not give by building it. */
+function emitWidgets(document: WidgetsPlan, dialect: SchemaDialect, options: { generates?: (ids: string[]) => string[]; app?: Partial<PlanScaffoldApp> } = {}): PlanScaffoldOutput {
   const plan = parsePlanDocument(approve(document))
   const { step } = findPlanStep(derivePlanTasks(plan), STEP)!
   const tables = ['posts', 'tags'].map((table) => ({ identifier: table, tableName: table, module: null, columns: ['id'] }))
-  return emitPlanScaffold(plan, step, {
+  return emitPlanScaffold(plan, { ...step, generates: options.generates?.(step.generates) ?? step.generates }, {
     ...NO_CLASSES,
     dialect,
     tables: [...tables, { identifier: 'widgetTags', tableName: 'widget_tags', module: null, columns: ['widgetId', 'tagId'] }],
     models: ['Post', 'Tag'],
+    modelFiles: { Post: 'app/Models/Post.ts', Tag: 'app/Models/Tag.ts' },
+    ...options.app,
   })
 }
