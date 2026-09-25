@@ -264,7 +264,9 @@ through one introspection per run, capped at 10 seconds, which comes after
 codegen, so a fresh clone's entry imports by then. An introspection that fails adds one
 advisory line to the stage that asked for it and never fails the gate. Every
 `-unverified` result is printed on the check stage as an advisory line as
-well, naming why the app could not vouch for it.
+well, naming why the app could not vouch for it, except on a `--changed` run
+that changed no source, which does not introspect. `guren plan:verify` prints
+the same lines on its check step.
 
 ```bash
 bunx guren gate            # every stage, in full

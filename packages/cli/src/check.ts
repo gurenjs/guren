@@ -58,12 +58,12 @@ import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
 import { runI18nCheck } from './i18n-check'
 import { introspectRunner, type Introspection, type IntrospectOption } from './introspect'
-import { INTROSPECTION_UNAVAILABLE, INTROSPECTION_UNAVAILABLE_FIX, introspectionUnavailableMessage, ROUTES_FLAG_NOT_INTROSPECTED } from './manifest-section'
+import { INTROSPECTION_UNAVAILABLE, INTROSPECTION_UNAVAILABLE_FIX, introspectionUnavailableMessage, NO_SOURCE_CHANGED_REASON, ROUTES_FLAG_NOT_INTROSPECTED } from './manifest-section'
 import { checkEnvExample, ENV_EXAMPLE_FILE } from './app-env'
 import { checkConfigWiring } from './config-check'
 import { runSpecCheck } from './spec-check'
 import { checkPlans, isPlanInput } from './plan-check'
-import { changesSource, getChangedFiles, NO_SOURCE_CHANGED_REASON } from './changed-files'
+import { changesSource, getChangedFiles } from './changed-files'
 import { check, formatFixCommand, routesCommandFix, type CheckFix, type CheckResult, type CheckReport, type CheckStatus } from './check-result'
 
 export type { CheckStatus, CheckResult, CheckReport }
@@ -734,6 +734,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       ...check(verdict.key, verdict.title, verdict.status, verdict.message, verdict.fix),
       advisory: true,
       evidence: verdict.evidence,
+      ...(verdict.evidenceReason ? { evidenceReason: verdict.evidenceReason } : {}),
     })
   }
 

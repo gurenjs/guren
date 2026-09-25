@@ -436,7 +436,7 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   gate and the dev MCP server read gating results or live for the session,
 >   and `introspectApp()`'s per-process memo would outlive the app it read.
 >   `checkDeployRuntime(cwd)` introspects by default, as the deploy builds call it,
->   capped at 10 s against the command's 30 s, and the build prints one line
+>   capped at 10 s (Part 3 gives every judging command that cap), and the build prints one line
 >   naming each verdict's evidence. Only `deploy-runtime` reads the manifest in
 >   2a, so the deploy target is the introspection trigger; 2b widens it.
 > - A failed introspection adds one advisory `introspection-unavailable` line to
@@ -779,7 +779,12 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   and an app that registers in 10 to 30 s would otherwise fail `check --ci`
 >   and pass the gate, or the reverse. 10 s rather than 30 s because the gate
 >   runs on an agent's every stop; `guren introspect --timeout`, `guren context`
->   and `codegen --introspect`, which judge nothing, keep 30 s.
+>   and `codegen --introspect`, which judge nothing, keep 30 s. A timeout under
+>   the cap says so in its message, so a `guren introspect` that succeeds within
+>   30 s does not read as contradicting it. A `--changed` run that changed no
+>   source prints no `-unverified` lines: it chose not to look. The note and
+>   those lines follow the cap on gating findings, in the gate and `plan:verify`
+>   alike, which also prints the note.
 > - A `--changed` run that changed no source file introspects for neither the
 >   route rules nor audit (`runAudit({ changedFiles })` applies the rule
 >   `runCheck()` does). The deploy verdicts still introspect when `package.json`

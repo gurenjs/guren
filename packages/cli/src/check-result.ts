@@ -20,6 +20,8 @@ export interface CheckResult {
   filePath?: string
   /** Set by the checks that read the manifest; absent on every other check. */
   evidence?: CheckEvidence
+  /** Why the introspected app could not vouch for an `evidence: 'none'` verdict. */
+  evidenceReason?: string
   /**
    * Advice rather than integrity (e.g. test-coverage nudges): exit-code gates
    * such as `check --ci` skip advisory warns.
@@ -60,15 +62,6 @@ export interface CheckFixRun {
  */
 export function gatingResults(report: CheckReport): CheckResult[] {
   return report.checks.filter((result) => !result.advisory && result.status !== 'pass')
-}
-
-/**
- * The advisory results a gate still prints: verdicts only the registered app could answer that no
- * manifest vouched for (RFC 0026 §5). Without them a missing session binding or delivery mount, which
- * gate when the app is introspected, would pass a run with no manifest in silence.
- */
-export function unverifiedResults(report: CheckReport): CheckResult[] {
-  return report.checks.filter((result) => result.evidence === 'none')
 }
 
 /** A finding a gate prints without counting it. */

@@ -12,11 +12,12 @@ import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { runCheck } from '../check'
-import { formatAdvisoryFinding, formatFinding, gatingResults, unverifiedResults, type CheckReport } from '../check-result'
+import { formatAdvisoryFinding, formatFinding, gatingResults, type CheckReport } from '../check-result'
 import { capFindings, codegenFallback, OUTPUT_ERROR_PATTERN, outputFindings, outputTail, resolveScriptCommand } from '../command-output'
 import { discoverTestFiles } from '../discovery'
 import { readBracketedTokenFiles } from '../docs-acceptance'
 import { resolveAppDrizzleKit, type AppDrizzleKit } from '../make-migration'
+import { advisoryCheckResults } from '../manifest-section'
 import { bunExecutable, type CapturedExec, type CapturedRun } from '../subprocess'
 import {
   acceptanceStatus,
@@ -465,8 +466,9 @@ export class PlanVerifier {
       return { label, status: 'blocked', reason: `could not run: ${reasonOf(error)}`, findings: [] }
     }
     const failing = gatingResults(report)
-    const findings = [...failing.map(formatFinding), ...unverifiedResults(report).map(formatAdvisoryFinding)]
-    return { label, status: failing.length > 0 ? 'fail' : 'pass', findings: capFindings(findings) }
+    // After the cap, as in the gate: forty gating findings must not hide why the app went unread.
+    const advisory = advisoryCheckResults(report).map(formatAdvisoryFinding)
+    return { label, status: failing.length > 0 ? 'fail' : 'pass', findings: [...capFindings(failing.map(formatFinding)), ...advisory] }
   }
 
   private testKey(step: PlanDerivedStep): string {

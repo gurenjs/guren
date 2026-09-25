@@ -57,7 +57,16 @@ export function introspectRunner(cwd: string, option: IntrospectOption | undefin
 
 /** A run capped at {@link CHECK_INTROSPECT_TIMEOUT_MS}, for a command that judges the app. */
 export function checkIntrospection(cwd: string, options: Pick<IntrospectOptions, 'fresh'> = {}): () => Promise<Introspection> {
-  return () => introspectApp(cwd, { ...options, timeoutMs: CHECK_INTROSPECT_TIMEOUT_MS })
+  return async () => withCapNote(await introspectApp(cwd, { ...options, timeoutMs: CHECK_INTROSPECT_TIMEOUT_MS }))
+}
+
+/** A timeout under the cap names it, so a `guren introspect` that succeeds within its 30 s reads as no contradiction. */
+export function withCapNote(result: Introspection): Introspection {
+  if (result.status !== 'failed' || result.reason !== 'timeout') return result
+  // Appended to the first line: the readers keep only a failure's first.
+  const [first, ...rest] = result.message.split('\n')
+  const note = `The commands that judge the app cap introspection at ${CHECK_INTROSPECT_TIMEOUT_MS / 1000} s; \`guren introspect\` waits ${DEFAULT_INTROSPECT_TIMEOUT_MS / 1000} s by default.`
+  return { ...result, message: [`${first} ${note}`, ...rest].join('\n') }
 }
 
 /** One run per app root and timeout per CLI process, so a larger `timeoutMs` can retry a timed-out run. */

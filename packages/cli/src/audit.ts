@@ -52,13 +52,14 @@ import {
 } from './controller-methods'
 import type { CheckEvidence } from './check-result'
 import { manifestMiddlewareNames } from './app-routes'
-import { changesSource, NO_SOURCE_CHANGED_REASON } from './changed-files'
+import { changesSource } from './changed-files'
 import { introspectRunner, type IntrospectOption } from './introspect'
 import {
   INTROSPECTION_UNAVAILABLE,
   INTROSPECTION_UNAVAILABLE_FIX,
   introspectedRoutes,
   introspectionUnavailableMessage,
+  NO_SOURCE_CHANGED_REASON,
   ROUTES_FLAG_NOT_INTROSPECTED,
   skippedRegistrars,
   type IntrospectSource,

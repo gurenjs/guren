@@ -15,10 +15,10 @@ import { consola } from 'consola'
 import { runAudit } from './audit'
 import { getChangedFiles, runGit } from './changed-files'
 import { runCheck } from './check'
-import { formatAdvisoryFinding, formatFinding, gatingResults, unverifiedResults } from './check-result'
+import { formatAdvisoryFinding, formatFinding, gatingResults } from './check-result'
 import { capFindings, codegenFallback, OUTPUT_ERROR_PATTERN, outputFindings, outputTail, readScripts, resolveScriptCommand } from './command-output'
 import { checkIntrospection, introspectRunner, type Introspection } from './introspect'
-import { INTROSPECTION_UNAVAILABLE } from './manifest-section'
+import { INTROSPECTION_UNAVAILABLE, unverifiedResults } from './manifest-section'
 import { isLintable, runOxlint } from './lint-run'
 import { bunExecutable, runCaptured, type CapturedExec, type CapturedRun } from './subprocess'
 
@@ -164,9 +164,10 @@ async function checkStage(ctx: StageContext): Promise<StageOutcome> {
   })
   const failing = gatingResults(report)
   const note = introspectionNote(ctx, report.checks)
+  // After the cap, as the audit stage does: forty gating findings must not hide why the app went unread.
   return {
     status: failing.length > 0 ? 'fail' : 'pass',
-    findings: capFindings([...failing.map(formatFinding), ...note, ...unverifiedResults(report).map(formatAdvisoryFinding)]),
+    findings: [...capFindings(failing.map(formatFinding)), ...note, ...unverifiedResults(report).map(formatAdvisoryFinding)],
   }
 }
 

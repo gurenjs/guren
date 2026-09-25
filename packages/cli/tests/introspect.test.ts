@@ -4,7 +4,7 @@ import { readFile, rm } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import type { AppManifest } from '@guren/core'
 
-import { CHECK_INTROSPECT_TIMEOUT_MS, introspectApp, introspectRunner, type Introspection, type IntrospectionFailure } from '../src/introspect'
+import { CHECK_INTROSPECT_TIMEOUT_MS, introspectApp, introspectRunner, withCapNote, type Introspection, type IntrospectionFailure } from '../src/introspect'
 import {
   assertWorkspaceBuilt,
   CLI_BIN_PATH,
@@ -443,10 +443,23 @@ export default createApp({ routes: registerAttachmentRoutes })
     expect(result.manifest.warnings).toContainEqual({ code: 'unhandled-rejection', message: 'stray rejection' })
   }, 30_000)
 
+  test('names the check cap on a timeout under it, on the first line, so a slower `guren introspect` reads as no contradiction', () => {
+    const timedOut = withCapNote({ status: 'failed', reason: 'timeout', message: 'The app did not finish within 10000ms.\nmore' })
+    const crashed = { status: 'failed', reason: 'crashed', message: 'exited' } as const
+
+    expect(timedOut).toMatchObject({
+      reason: 'timeout',
+      message: 'The app did not finish within 10000ms. The commands that judge the app cap introspection at 10 s; `guren introspect` waits 30 s by default.\nmore',
+    })
+    expect(withCapNote(crashed)).toBe(crashed)
+  })
+
   test('reports timeout when a provider never finishes registering, and kills what it spawned', async () => {
     const dir = await app('timeout', { 'src/app.ts': spawningApp(true) })
 
-    expect(expectFailure(await introspectApp(dir, { timeoutMs: 4000 }), 'timeout')).toContain('4000ms')
+    const message = expectFailure(await introspectApp(dir, { timeoutMs: 4000 }), 'timeout')
+    expect(message).toContain('4000ms')
+    expect(message).not.toContain('cap introspection')
     const pid = Number(await readFile(join(dir, 'helper.pid'), 'utf8'))
     await waitFor(() => !isAlive(pid))
   }, 30_000)
@@ -569,10 +582,10 @@ describe('introspectRunner()', () => {
 
   test('reads `true` as the memoised run under the cap the gate uses, so check --ci and the gate agree', async () => {
     const dir = join(root, 'check-cap-missing')
-    const run = introspectRunner(dir, true)!()
+    const run = await introspectRunner(dir, true)!()
 
-    expect(run).toBe(introspectApp(dir, { timeoutMs: CHECK_INTROSPECT_TIMEOUT_MS }))
-    expect(run).not.toBe(introspectApp(dir))
-    await Promise.all([run, introspectApp(dir)])
+    // The same result object is the same memoised child; the 30 s default is another.
+    expect(run).toBe(await introspectApp(dir, { timeoutMs: CHECK_INTROSPECT_TIMEOUT_MS }))
+    expect(run).not.toBe(await introspectApp(dir))
   })
 })

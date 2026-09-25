@@ -438,6 +438,9 @@ describe('@guren/plugin-vercel', () => {
  * `@guren/core` for it to import. The deploy verdicts read the session store from the registered app.
  */
 function writeIntrospectableApp(root: string, app: string): void {
+  // The child imports these packages' dist/, not src/: an unbuilt checkout would read as a failed introspection.
+  const unbuilt = ['core', 'server', 'orm'].map((name) => resolve(import.meta.dir, `../../${name}/dist/index.js`)).filter((file) => !existsSync(file))
+  if (unbuilt.length > 0) throw new Error(`run \`bun run build\` first: the introspection child imports ${unbuilt.join(', ')}`)
   mkdirSync(join(root, 'src'), { recursive: true })
   mkdirSync(join(root, 'node_modules/@guren'), { recursive: true })
   symlinkSync(resolve(import.meta.dir, '../../core'), join(root, 'node_modules/@guren/core'), 'dir')
