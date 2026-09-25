@@ -52,6 +52,8 @@ bunx guren plan "comments on posts, authors can delete their own" --print-prompt
 
 Paste the output into the session, or have the agent run the command itself. The prompt has the agent read the application with `context`, `model:list` and `guidelines`, ask you what it cannot decide, write `docs/plans/<slug>/plan.json`, and run `plan:render --json` until no check fails. Approving stays with you. Without a request, the prompt tells the agent to ask you for one, and `--json` prints the prompt and the schema as one object. Without `--print-prompt`, `guren plan` exits with an error: the form that asks a model for the plan by itself is not available yet (see the end of this page).
 
+In an app whose agent harness is installed (`bunx guren agent:init`, refreshed by `agent:sync`), the `plan-write` skill runs this for you. Ask your agent to plan the feature: it asks you the questions that change the design before writing anything, writes the plan from the prompt, runs `plan:render --json` until no check fails, and tells you where the page is and what is still open. After your review it records your changes with `plan:revise`. It never approves the plan; once you have, the `plan-implement` skill builds it.
+
 `plan:render` validates the file against the plan schema and names the field at fault:
 
 ```text
