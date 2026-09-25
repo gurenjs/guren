@@ -1143,7 +1143,9 @@ writes both). What replaces them:
   behaviour usually needs the record, so it is not predicted to pass.
   `tests:fail` judges each behaviour on its own and needs every case of it to
   fail (`plan/verify.ts:172-183`), so one such behaviour passing is enough for
-  that step never to verify.
+  that step never to verify. The experiment confirmed it (2026-09-25): on a
+  mounted `add resource` route with no table, a guest `POST` got 401 and an
+  authenticated empty one got 422, so the routes stay unmounted until `http`.
 - A proposal, to settle in the change that implements it: unmounted stubs
   validate with `validateBody(Schema)`. `validated('<name>')` is typed from
   generated route names (`packages/server/src/mvc/Controller.ts:479-481`), so
@@ -2818,7 +2820,7 @@ marks what was read and not run.
 |---|---|
 | D1 | No headless `claude -p` producer in Part 3. `--print-prompt` ships; headless waits for the probes that settle Open Questions 2, 10 and 12 (below). |
 | D2 | When headless ships, it runs with `--bare` and an API key, in a checkout of the tracked files at HEAD (§8 amendment, and Alternatives). |
-| D3 | The `http` step mounts the scaffolded routes, pending the mounted-routes experiment (below). |
+| D3 | The `http` step mounts the scaffolded routes, pending the mounted-routes experiment (below). Stands: both tests passed (2026-09-25, below). |
 | D4 | The scaffold emits no pages, and plans carry no layout, which belongs to prototype mode (Open Question 4). |
 | D5 | Scaffolded routes go in a `routes/<entity>.ts` of their own, after the route-file fingerprint fix (#1039). |
 | D6 | A model-free `plan:revise` is in Part 3. `plan --revise` stays the name of the model-calling form (§4 amendment). |
@@ -2836,7 +2838,7 @@ marks what was read and not run.
    per-step work note below reads it.
 4. `plan --print-prompt`, `plan:revise`, and an in-session plan-writing
    harness skill.
-5. The mounted-routes experiment.
+5. The mounted-routes experiment. Run; D3 stands, as the note below records.
 6. `plan:scaffold`, emitting what the §5 amendment lists. No pages.
 7. Optional: test skeletons, and the static "still calls its route" check.
 
@@ -2900,6 +2902,61 @@ npm.
 Either passing confirms the §5 prediction and D3 stands: a mounted route
 passes that behaviour before the `tests` step, so the routes stay unmounted
 until `http`. Both failing reopens D3.
+
+**Amended after the experiment (2026-09-25).** Run at 17836ede on Bun 1.3.14.
+Both tests passed, so D3 stands.
+
+- `bun ../../packages/cli/src/bin.ts add resource Note --fields "body:text"`
+  from `examples/blog`. The command is the one named above. It wrote the
+  controller, model, validator, resource and four pages, appended `notes` to
+  `db/schema.ts`, and inserted the `/notes` group into `routes/web.ts` with
+  `body: NotePayloadSchema` on `notes.store` and no auth middleware. No
+  migration was generated or run.
+- The test file used `TestApp.fromApp(app)` on the blog's `src/app.ts`,
+  primed each request with `withCsrf('/login')` (as the shipped
+  `testing.md` rule tells an agent to), and sent it with `.json()`. It ran
+  alone under
+  `bun test tests/controllers/NoteMountedRoutes.test.ts --reporter=junit`:
+  2 tests, 0 failures.
+- Guest `POST /notes` with `{ body: 'hello' }`: 401,
+  `{"message":"Unauthenticated.","exception":"AuthenticationException"}`,
+  thrown by `userOrFail()` in `NoteController.store`. The action answered,
+  not a middleware, since `add resource` mounts with `withAuth: false`.
+- Authenticated (`actingAs`) `POST /notes` with `{}`: 422,
+  `{"message":"The given data was invalid.","errors":{"body":["Invalid input: expected string, received undefined"]}}`,
+  from the route contract.
+- The same two requests without `Accept: application/json` gave the same
+  statuses. A guest `POST` with `{}` gave 422, so the contract does answer
+  ahead of the action, as step 2 assumed.
+
+Deviations, and why they leave the verdict intact:
+
+- Before `bun run codegen` nothing answered: the file failed at import with
+  `Cannot find module '@/.guren/pages.gen'` from `NoteController.ts`. Every
+  blog controller imports that module, and every `plan:verify` command list
+  opens with `codegen`, so this does not bear on D3. The runs above are
+  after `bun run codegen`.
+- No database: no Postgres was reachable where the run was made. Booting
+  the blog runs its migrations from `configureOrm()` (`database.get()`
+  awaits `migrations.get()`, `packages/orm/src/postgres.ts:157-158`), so the
+  boot failed with `ECONNREFUSED` even with `seedOnBoot` off. For the run,
+  `database` was taken out of `createApp({ config })` in `src/app.ts`, and
+  the test file set `SESSION_DRIVER=cookie` and a fixed `APP_KEY`. The
+  blog's own migrations create `sessions`, and the driver only decides where
+  the session is kept, so the `database` driver would answer these requests
+  alike. A response produced with no connection at all cannot depend on the
+  new table, so both passes carry over to a database migrated up to the
+  blog's existing migrations. Only a failure here would have been
+  inconclusive.
+- `forbidden` was not tested; this is read from `make-feature.ts`, not run.
+  `add resource` writes no policy. The `make:feature --policy` guards read
+  the record for `update` and `delete`
+  (`authorize('update', [Note, await Note.findOrFail(id)])`), which needs
+  the table, as the §5 prediction says. The `store` guard,
+  `authorize('create', Note)`, reads none, so a denying `create` ability
+  would also answer 403 before the table exists.
+
+Nothing from the run is committed; the blog was restored afterwards.
 
 *Probes before the headless producer* (D1). None needs shipped code; a script
 in scratch is enough.
