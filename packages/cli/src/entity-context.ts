@@ -384,10 +384,9 @@ export async function generateEntityContext(
 
     const routesFile = resolve(cwd, target.path)
     const provenance: Array<string | null> = []
-    const moduleIdentities: Array<string | null> = []
     let definitions: Awaited<ReturnType<typeof loadRouteDefinitions>>
     try {
-      definitions = await loadRouteDefinitions(routesFile, cwd, undefined, provenance, moduleIdentities)
+      definitions = await loadRouteDefinitions(routesFile, cwd, undefined, provenance)
     } catch (error) {
       // A routes file that cannot be loaded is not a routes file with nothing
       // in it: rendering both as "No routes reference this entity." makes an
@@ -395,15 +394,14 @@ export async function generateEntityContext(
       return { ...scanned, routesError: error instanceof Error ? error.message : String(error) }
     }
 
-    const inModule = <T>(routes: T[]): T[] => routes.filter((_, index) => !duplicated || provenance[index] === match.module)
-    let candidates = inModule(definitions)
+    let candidates = definitions.filter((_, index) => !duplicated || provenance[index] === match.module)
     const scan = candidates.some((def) => def.controller && def.controller.name !== controllerName)
       ? await parseControllerMethods(cwd, cache)
       : EMPTY_CONTROLLER_SCAN
     const named = candidates.flatMap((def) => (def.controller ? [def.controller] : []))
     // The manifest describes the entry, not a file `--routes` names.
     if (options.introspect && !options.routesFile && collisionsReachedByName(scan, named).length > 0) {
-      candidates = await withManifestControllerRefs(candidates, () => introspectApp(cwd), { cwd, routesFile, modules: inModule(moduleIdentities) })
+      candidates = await withManifestControllerRefs(candidates, () => introspectApp(cwd), { cwd, routesFile })
     }
     const modelFile = resolve(cwd, match.relPath)
 

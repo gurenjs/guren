@@ -64,24 +64,24 @@ export function defineModule(definition: ModuleDefinition): GurenModule {
 }
 
 /**
- * Runs a module's route registrar, applying its `prefix` via `router.group()`.
- * Shared by `Application.mountRoutes()` and the CLI's route loader, so both see
- * the same route set. `router.group()`'s callback is synchronous (prefix
- * pushed, callback run, prefix popped), so route calls made after an `await`
- * inside an async prefixed registrar run with the prefix already popped.
+ * Runs a module's route registrar under its `prefix` and names the module on each route it added.
+ * Shared by `Application.mountRoutes()` and the CLI's route loader, so both see the same route set.
+ * `router.group()`'s callback is synchronous, so route calls made after an `await` inside an
+ * async prefixed registrar run with the prefix already popped (and still carry the module).
  */
 export async function mountModuleRoutes(router: Router, gurenModule: GurenModule): Promise<void> {
   const registrar = gurenModule.routes
   if (!registrar) return
 
-  if (!gurenModule.prefix) {
+  const start = router.routeCount
+  if (gurenModule.prefix) {
+    let pending: void | Promise<void> = undefined
+    router.group(gurenModule.prefix, (grouped) => {
+      pending = registrar(grouped)
+    })
+    await pending
+  } else {
     await registrar(router)
-    return
   }
-
-  let pending: void | Promise<void> = undefined
-  router.group(gurenModule.prefix, (grouped) => {
-    pending = registrar(grouped)
-  })
-  await pending
+  router.assignModule(start, gurenModule.name)
 }

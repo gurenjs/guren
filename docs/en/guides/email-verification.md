@@ -220,6 +220,8 @@ router.get('/profile', [ProfileController, 'show']).middleware(
 )
 ```
 
+An agent tool call (see the [Agent interface](./agent-interface.md)) cannot follow the redirect, so an unverified user calling a tool gets `403` with `{ "message": "Email address is not verified" }` instead.
+
 ## URL Helpers
 
 ### Building Verification URLs

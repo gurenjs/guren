@@ -437,8 +437,8 @@ describe('attachControllerRefs', () => {
     const billing = { ...placed, file: 'modules/billing/app/Http/Controllers/PostController.ts' }
     const definitions = attachControllerRefs(
       [
-        { method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } },
-        { method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } },
+        { method: 'POST', path: '/posts', module: 'billing', controller: { name: 'PostController', action: 'store' } },
+        { method: 'POST', path: '/posts', module: 'blog', controller: { name: 'PostController', action: 'store' } },
       ],
       {
         routes: [
@@ -447,8 +447,6 @@ describe('attachControllerRefs', () => {
         ],
         warnings: [],
       } as never,
-      undefined,
-      ['billing', 'blog'],
     )
     expect(definitions.map((definition) => definition.controller)).toEqual([billing, blog])
   })
@@ -478,15 +476,6 @@ describe('attachControllerRefs', () => {
       new Set(['PostController']),
     )
     expect(definition?.controller as ControllerTarget | undefined).toEqual({ ...nameOnly, unimported: ['app/Http/Controllers/PostController.ts'], inRouteSource: true })
-  })
-
-  it('refuses module names that do not align with the definitions', () => {
-    expect(() => attachControllerRefs(
-      [{ method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } }, { method: 'GET', path: '/posts' }],
-      { routes: [], warnings: [] } as never,
-      undefined,
-      ['billing'],
-    )).toThrow('2 route definition(s) carry 1 module name(s)')
   })
 })
 
