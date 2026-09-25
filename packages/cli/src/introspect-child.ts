@@ -12,7 +12,7 @@ import type { AppManifest, AttachmentsDescription } from '@guren/server'
 
 import { classNameFromPath, discoverControllerFiles, toPosixRelative } from './discovery'
 import { controllerImportWarning, pickDeclaringFile } from './introspect-controller-file'
-import type { Introspection, IntrospectionFailure } from './introspect'
+import { DEFAULT_INTROSPECT_TIMEOUT_MS, INTROSPECT_CHILD_BUDGET_MARGIN_MS, type Introspection, type IntrospectionFailure } from './introspect'
 import { bootstrapApplication, resolveMainEntry } from './runtime'
 
 /** `IntrospectionListenError.code` in `@guren/server`, spelled here: the app may resolve a server older than this CLI's. */
@@ -38,6 +38,8 @@ interface FrameworkModule {
 }
 
 const outFile = process.argv[2]
+/** Past this the child ends itself; the parent passes its own cap plus a margin, so its `timeout` report comes first. */
+const budgetMs = Number(process.argv[3]) || DEFAULT_INTROSPECT_TIMEOUT_MS + INTROSPECT_CHILD_BUDGET_MARGIN_MS
 /** The controller file being imported, beside the result, so the parent can name where a timeout struck. */
 const scanFile = `${outFile}.scanning`
 /** True until the controller scan: only the entry's `listen()` refusal fails the run. */
@@ -232,13 +234,44 @@ function dieWithParent(): void {
   process.stdin.resume()
 }
 
+/**
+ * The same two deaths from a thread of their own: an app whose module scope or register()
+ * computes synchronously starves this thread's loop, so neither stdin's `end` nor a timer
+ * here fires, and an orphaned child would spin at full CPU forever. `process.exit` in a
+ * worker ends only the worker, hence the signals.
+ */
+function startWatchdog(): Promise<void> {
+  const source = `
+    const parent = ${process.ppid}
+    const end = () => {
+      try { process.kill(-process.pid, 'SIGKILL') } catch { process.kill(process.pid, 'SIGKILL') }
+    }
+    setInterval(() => { if (process.ppid !== parent) end() }, 250)
+    setTimeout(end, ${budgetMs})
+    postMessage('ready')
+  `
+  let worker: Worker
+  try {
+    worker = new Worker(URL.createObjectURL(new Blob([source], { type: 'application/javascript' })))
+  } catch {
+    return Promise.resolve()
+  }
+  // Not before the worker runs: an entry that spins at once would never let it start. A worker
+  // that fails leaves only the stdin watch, never a failed run.
+  return new Promise((resolve) => {
+    worker.addEventListener('message', () => resolve(), { once: true })
+    worker.addEventListener('error', () => resolve(), { once: true })
+  })
+}
+
 async function main(): Promise<void> {
   if (!outFile) {
-    console.error('usage: introspect-child <result-file>')
+    console.error('usage: introspect-child <result-file> [budget-ms]')
     process.exit(2)
   }
 
   dieWithParent()
+  await startWatchdog()
   const otherRejections: string[] = []
   // A module-scope `app.listen()` with no await rejects outside any frame we hold;
   // `listenCalls` already says where it was made.
