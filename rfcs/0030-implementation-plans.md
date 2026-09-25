@@ -710,6 +710,56 @@ not need a model.
 hand edit goes through `plan:revise`, which records it as a revision rather
 than a silent edit (Open Question 13).
 
+**Amended in implementation (`plan:revise`).** The model-free command ships as
+`packages/cli/src/plan-revise.ts`, and these are the choices it makes:
+
+- The parent is the plan file as it stands; nothing is read from git. It is
+  accepted as a draft nobody approved, at a hash an approval names, or at the
+  `result` of a revision recorded beside it, so a plan revised once can be
+  revised again before anyone approves it. Anything else is a plan edited in
+  place after approval, and the refusal says to restore it
+  (`git checkout -- <plan>`) and pass the edit as `--edited <copy>`. A draft
+  with approvals beside it, or approvals that will not read, is refused as
+  `readPlanApprovalStanding()` classifies it. The rule catches an accidental
+  edit, not a forger: the records are committed files anyone can write.
+- The change comes as `--ops <file|->`, the `{ "ops": [...] }` document a
+  revising producer emits (each op with its own `reason`), or as
+  `--edited <file|->`, a full copy whose ops `diffPlans()` derives, each with
+  `--message` as its reason and `--reopens`, when given, on all of them. A copy
+  whose baseline differs from the parent's is refused, as is one no op can
+  express: the ops must reproduce the copy's own digest, or writing the copy
+  would miss the record and writing the result would drop the edit. Ops,
+  copies and feedback share the feedback's counting reader and its cap, and at
+  most one of them reads standard input. citty parses `--feedback -` as an
+  empty value and drops the dash, so the command reads it back off the raw
+  arguments (`--feedback=-` parses as written); an empty value is refused.
+- A draft revises too. `createPlanRevision()` hashes a draft with
+  `planDigest()`, the same computation as `planHash()`, parses the result as a
+  draft, and feedback without `planHash` (what the page exports for a draft)
+  is matched without a hash check.
+- Records live in `planRevisionsDir()` (`plan/beside.ts`): `revisions/` beside
+  a `plan.json`, `<slug>.revisions/` beside any other plan, so no record name
+  matches a plan file. Each is `<n>.json`, the next number after every name
+  present, holding exactly `PlanRevisionSchema` so `applyRevision()` reads it
+  back. It is linked into place from a temporary, so none is overwritten. The
+  record is written before the plan: a plan written without one would sit at
+  a hash nothing names. The records are not a verified chain: when the plan
+  write fails after the record, the command says so and the record stays,
+  naming a result the plan never reached; the next run records again from the
+  same parent.
+- The plan file is rewritten to the result, which must read back at the
+  record's `result` before anything is written. An edited copy is written as
+  its author wrote it. Ops are written as the parsed result in the author's
+  key order, leaving out a section the parent omitted that the result still
+  holds at its default.
+- `plan:approve`'s dirty-tree exceptions and the step work measurement leave
+  the revisions directory out, like the other records; `plan:next` counts it
+  as uncommitted, like them, and plan discovery skips it.
+- The report names the new hash, the record, the reopened elements, the
+  answered questions, and the waivers the decision log holds at the parent
+  hash, which the result does not inherit. A plan with a baseline then needs
+  `plan:approve`; the gated commands refuse it until then.
+
 **Freshness.** `baseline.rev` records where the plan was written and gates
 nothing: the implementation's own commits move it on the first step.
 `baseline.contextHash` is scoped, a hash per *referenced* element (each

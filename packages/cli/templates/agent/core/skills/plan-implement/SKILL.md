@@ -62,7 +62,7 @@ application back or the plan to make it pass.
 Implement only the elements the step lists. An element of a later step is that
 step's work, and `plan:status` will read it as drifted from the plan if it lands
 elsewhere. Do not edit the plan file: a change of design is a revision
-(`plan:revise`, when available), not an edit.
+(`plan:revise --edited <copy>`), not an edit.
 
 ## What `plan:verify` records
 

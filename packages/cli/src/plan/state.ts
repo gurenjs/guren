@@ -8,16 +8,18 @@
  * over one slug lose each other's records.
  */
 
-import { createHash } from 'node:crypto'
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 
 import { z } from 'zod'
 
 import { formatSchemaIssues } from '../cli-error'
-import { canonicalJson } from './identity'
-import type { Plan, PlanDraft } from './schema'
+import { planFileStem } from './beside'
+import { planDigest } from './identity'
 import { PLAN_VERIFY_COMMANDS } from './tasks'
+
+// What keys a record, exported beside the records so their readers and tests import one module.
+export { planDigest }
 
 export const PLAN_STATE_VERSION = 1
 
@@ -154,15 +156,7 @@ export interface PlanStateRead {
 export function planSlug(planPath: string): string {
   const name = basename(planPath)
   if (name === 'plan.json') return basename(dirname(planPath))
-  return name.replace(/(\.plan)?\.json$/u, '')
-}
-
-/**
- * The SHA-256 of the parsed plan's canonical bytes. For a plan with a baseline this is
- * its hash (RFC 0030 §4); a draft has no identity, and this is only what keys its records.
- */
-export function planDigest(plan: PlanDraft | Plan): string {
-  return createHash('sha256').update(canonicalJson(plan), 'utf8').digest('hex')
+  return planFileStem(name)
 }
 
 export function planStatePath(appRoot: string, slug: string): string {

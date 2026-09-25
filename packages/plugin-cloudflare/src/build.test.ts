@@ -10,7 +10,7 @@ import {
 } from '@guren/core/internal/deploy-build'
 import { buildCloudflareOutput } from './build'
 
-import { CLIENT_MANIFEST, captureWarnings, scaffoldApp, writeJson } from '../tests/app-fixture'
+import { CLIENT_MANIFEST, captureWarnings, scaffoldApp, writeIntrospectableApp, writeJson } from '../tests/app-fixture'
 
 describe('buildCloudflareOutput', () => {
   let root: string
@@ -785,17 +785,16 @@ describe('buildCloudflareOutput deploy-runtime warnings (RFC 0020 Part 0)', () =
     scaffoldApp(root)
     writeJson(join(root, 'package.json'), {
       name: '@acme/demo-app',
+      type: 'module',
       dependencies: { '@guren/plugin-cloudflare': '^0.7.0' },
     })
-    writeFileSync(
-      join(root, 'src/app.ts'),
-      "import { createApp } from '@guren/core'\nexport default createApp({ auth: { autoSession: true } })\n",
-    )
+    writeIntrospectableApp(root, "import { createApp } from '@guren/core'\nexport default createApp({ auth: { autoSession: true } })\n")
 
     const warnings = await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
 
     expect(warnings).toContain('Cloudflare build: Cloudflare Workers shares no memory')
-    expect(warnings).toContain('DatabaseSessionStore')
+    expect(warnings).toContain('no session store configured, so the session middleware keeps them in per-process memory')
+    expect(warnings).toContain('bunx guren add session')
     // The build still completes: the verdict is advice, not a gate.
     expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
   })
@@ -804,8 +803,10 @@ describe('buildCloudflareOutput deploy-runtime warnings (RFC 0020 Part 0)', () =
     scaffoldApp(root)
     writeJson(join(root, 'package.json'), {
       name: '@acme/demo-app',
+      type: 'module',
       dependencies: { '@guren/plugin-cloudflare': '^0.7.0' },
     })
+    writeIntrospectableApp(root, "import { createApp } from '@guren/core'\nexport default createApp({})\n")
 
     const warnings = await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
 

@@ -1,18 +1,20 @@
 import { Model } from '@guren/orm'
 import type { OAuthStatePayload, OAuthStateStore } from '@guren/server'
-import { isExpired, toDate } from './store-utils.js'
+import { isExpired, toColumnValue, toDate } from './store-utils.js'
 
 /**
  * Database-backed OAuth state store built on the Guren ORM, for serverless, where
- * authorize and callback can land on different instances. Column property names
- * of the `oauth_states` table must be `stateHash` (text primary key), `provider`,
- * `redirectTo`, `expiresAt`, and `binding` (else `authorize({ bindTo })` states come back unbound).
+ * authorize and callback can land on different instances. Column property names of
+ * the `oauth_states` table must be `stateHash` (text primary key), `provider`, `redirectTo`,
+ * `expiresAt` (written as its column declares) and `binding` (else `authorize({ bindTo })` states come back unbound).
  * @example `new DatabaseOAuthStateStore(oauthStates)`
  */
 export class DatabaseOAuthStateStore implements OAuthStateStore {
   private readonly model: typeof Model
+  private readonly table: unknown
 
   constructor(table: unknown) {
+    this.table = table
     this.model = class OAuthStateModel extends Model {
       static override table = table
     }
@@ -23,7 +25,7 @@ export class DatabaseOAuthStateStore implements OAuthStateStore {
       stateHash,
       provider: payload.provider,
       redirectTo: payload.redirectTo ?? null,
-      expiresAt: payload.expiresAt,
+      expiresAt: toColumnValue(this.table, 'expiresAt', payload.expiresAt),
       // Persisted, not derived: an unbound state verifies for any browser.
       binding: payload.binding ?? null,
     })
@@ -80,7 +82,7 @@ export class DatabaseOAuthStateStore implements OAuthStateStore {
    * only keeps the table small.
    */
   async deleteExpired(now: Date = new Date()): Promise<void> {
-    await this.model.where('expiresAt', '<=', now).delete()
+    await this.model.where('expiresAt', '<=', toColumnValue(this.table, 'expiresAt', now)).delete()
   }
 }
 

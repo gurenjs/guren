@@ -1,6 +1,6 @@
 import { Model, type PlainObject } from '@guren/orm'
 import type { ApiToken, ApiTokenStore } from '@guren/server'
-import { decodeJsonColumn, toDate, toOptionalExpiry } from './store-utils.js'
+import { decodeJsonColumn, toColumnValue, toDate, toOptionalExpiry } from './store-utils.js'
 
 export interface DatabaseApiTokenStoreOptions {
   /**
@@ -14,16 +14,19 @@ export interface DatabaseApiTokenStoreOptions {
 }
 
 /**
- * Database-backed API token store built on the Guren ORM. Pass the Drizzle
- * table for your `api_tokens` schema; column property names must match the
- * {@link ApiToken} fields. Configure the ORM before use.
+ * Database-backed API token store built on the Guren ORM. Pass the Drizzle table
+ * for your `api_tokens` schema; column property names must match the {@link ApiToken}
+ * fields, and each timestamp is written as its column declares (timestamp mode,
+ * text as ISO, integer as epoch ms). Configure the ORM before use.
  * @example `new DatabaseApiTokenStore(apiTokens)`
  */
 export class DatabaseApiTokenStore implements ApiTokenStore {
   private readonly model: typeof Model
+  private readonly table: unknown
   private readonly abilitiesMode: 'json' | 'text'
 
   constructor(table: unknown, options: DatabaseApiTokenStoreOptions = {}) {
+    this.table = table
     this.abilitiesMode = options.abilitiesMode ?? 'json'
     this.model = class ApiTokenModel extends Model {
       static override table = table
@@ -35,6 +38,9 @@ export class DatabaseApiTokenStore implements ApiTokenStore {
       ...token,
       abilities:
         this.abilitiesMode === 'text' ? JSON.stringify(token.abilities) : token.abilities,
+      lastUsedAt: this.timestamp('lastUsedAt', token.lastUsedAt),
+      expiresAt: this.timestamp('expiresAt', token.expiresAt),
+      createdAt: this.timestamp('createdAt', token.createdAt),
     })
   }
 
@@ -57,7 +63,7 @@ export class DatabaseApiTokenStore implements ApiTokenStore {
   }
 
   async updateLastUsed(id: string, timestamp: Date): Promise<void> {
-    await this.model.forceUpdate({ id }, { lastUsedAt: timestamp })
+    await this.model.forceUpdate({ id }, { lastUsedAt: this.timestamp('lastUsedAt', timestamp) })
   }
 
   /**
@@ -65,7 +71,11 @@ export class DatabaseApiTokenStore implements ApiTokenStore {
    * them; this only keeps the table small.
    */
   async deleteExpired(now: Date = new Date()): Promise<void> {
-    await this.model.where('expiresAt', '<', now).delete()
+    await this.model.where('expiresAt', '<', this.timestamp('expiresAt', now)).delete()
+  }
+
+  private timestamp(field: 'lastUsedAt' | 'expiresAt' | 'createdAt', value: Date | null) {
+    return toColumnValue(this.table, field, value)
   }
 
   // Not replaceable with `static casts`: cast-based writes would fight drizzle

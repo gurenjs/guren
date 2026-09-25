@@ -9,6 +9,7 @@ import { formatPlanApprove, planApproveFile } from '../plan-approve'
 import { formatPlanStatus, planStatusFile } from '../plan-status'
 import { DEFAULT_VERIFY_TIMEOUT_MS, formatPlanVerify, planVerifyFile } from '../plan-verify'
 import { formatPlanNext, planNextFile } from '../plan-next'
+import { formatPlanRevise, planReviseFile, withStdinDashes } from '../plan-revise'
 import { formatPlanWaive, planWaiveFile } from '../plan-waive'
 import { formatPlanClose, planCloseFile } from '../plan-close'
 import { readAppDefaultLocale } from '../app-locale'
@@ -317,6 +318,65 @@ export const planWaiveCommand = defineCommand({
     const ids = [args.elements, ...args._.slice(2)].filter((id) => id.length > 0)
     const report = await planWaiveFile(args.plan, { elementIds: ids, reason: args.reason, remove: args.remove, app: args.app })
     console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanWaive(report))
+  },
+})
+
+export const planReviseCommand = defineCommand({
+  meta: {
+    name: 'plan:revise',
+    description:
+      "Revise an implementation plan without a model (RFC 0030 §4): the plan file as it stands is the parent, and the change comes as ops (--ops) or as an edited copy whose ops are derived (--edited). Records { parent, ops, result } under the plan's revisions directory, then rewrites the plan to the result. With --feedback, an element the feedback approved changes only with a reopens reason, and an answered question must be removed; comments are not turned into ops. Refuses a plan edited in place after approval.",
+  },
+  args: {
+    plan: {
+      type: 'positional',
+      description: 'Path to the plan JSON file',
+      required: true,
+      valueHint: 'comments.plan.json',
+    },
+    ops: {
+      type: 'string',
+      description: 'A { "ops": [...] } document, each op with its own reason; - reads standard input.',
+      valueHint: 'ops.json',
+    },
+    edited: {
+      type: 'string',
+      description: 'A copy of the plan with the change made in it, baseline unchanged; its ops are derived. - reads standard input.',
+      valueHint: 'comments.edited.json',
+    },
+    feedback: {
+      type: 'string',
+      description: "The feedback the plan page exports (feedback.json); - reads standard input. Its approvals lock elements and its answers must be applied.",
+      valueHint: 'feedback.json',
+    },
+    message: {
+      type: 'string',
+      description: 'With --edited: the reason every derived op records. Required there.',
+      valueHint: 'soft-delete comments instead',
+    },
+    reopens: {
+      type: 'string',
+      description: 'With --edited: why elements the feedback approved change. Every derived op carries it; it counts only on an approved element.',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory: what the reported revision path is relative to. The plan is read from its own path either way.',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Print the report as JSON.',
+      default: false,
+    },
+  },
+  async run({ args, rawArgs }) {
+    const documents = withStdinDashes({ ops: args.ops, edited: args.edited, feedback: args.feedback }, rawArgs)
+    const report = await planReviseFile(args.plan, {
+      ...documents,
+      message: args.message,
+      reopens: args.reopens,
+      app: args.app,
+    })
+    console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanRevise(report, args.plan))
   },
 })
 

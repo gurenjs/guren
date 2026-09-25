@@ -263,6 +263,24 @@ export const apiTokens = pgTable('api_tokens', {
 })
 ```
 
+SQLite では、timestamp のカラムを `text` か `integer(..., { mode: 'timestamp_ms' })` で宣言します。`text` は ISO 文字列を保持する形で、`create-guren-app` が `users.created_at` に使う形と同じです。ストアは各カラムの宣言に合わせて書き込みます。drizzle の timestamp モードのカラムには Date、text カラムには ISO 文字列、モード指定のない integer カラムにはエポックミリ秒です。
+
+```ts
+// db/schema.ts
+import { sqliteTable, text } from '@guren/orm/drizzle/sqlite'
+
+export const apiTokens = sqliteTable('api_tokens', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  hashedToken: text('hashed_token').notNull().unique(),
+  userId: text('user_id').notNull(),
+  abilities: text('abilities', { mode: 'json' }).$type<string[]>().notNull(),
+  lastUsedAt: text('last_used_at'),
+  expiresAt: text('expires_at'),
+  createdAt: text('created_at').notNull(),
+})
+```
+
 `abilities` カラムが `jsonb` ではなく JSON 文字列を保持する text カラムの場合は、`{ abilitiesMode: 'text' }` を渡します。
 
 ```ts

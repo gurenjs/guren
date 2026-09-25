@@ -288,9 +288,9 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
 
   // The state files are git-ignored before the tree is read, and excluded from the reading for a
   // checkout that tracked them before, so neither an earlier run's write nor the mark makes it
-  // dirty; so is the page `plan:render` writes beside the plan, with its temporaries, which the
-  // plan commands write. The plan and its records are not: a waiver steers which step is returned.
-  // Excluded by pathspec, since porcelain paths are relative to the repository root, not to `root`.
+  // dirty; so is the page `plan:render` writes beside the plan, with its temporaries. The plan and
+  // its records, revisions included, are not: a waiver steers which step is returned. Excluded
+  // by pathspec, since porcelain paths are relative to the repository root, not to `root`.
   await ensurePlanStateIgnored(root)
   const [realRoot, realPlan] = await Promise.all([realpath(root), realpath(path)])
   const dirty =

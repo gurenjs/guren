@@ -613,3 +613,20 @@ export async function discoverAppConfigFiles(appRoot: string): Promise<string[]>
   return groups.flat().filter((file) => !/\.test\.[jt]sx?$/.test(file))
 }
 
+/**
+ * Source files sitting directly in the project root, where deploy entrypoints
+ * conventionally live. Its own non-recursive pass because pointing collectFiles
+ * at the root would walk the whole tree.
+ */
+export async function readRootSourceFiles(cwd: string): Promise<string[]> {
+  try {
+    const entries = await readdir(cwd, { withFileTypes: true })
+    return entries
+      .filter((entry) => entry.isFile() && !entry.name.startsWith('.') && !entry.name.endsWith('.d.ts'))
+      .filter((entry) => IMPORTABLE_EXTENSIONS.has(extname(entry.name)))
+      .map((entry) => join(cwd, entry.name))
+  } catch {
+    // An unreadable project root leaves the directory scans as the only input.
+    return []
+  }
+}

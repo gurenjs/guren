@@ -13,21 +13,35 @@ const oauthStates = sqliteTable('oauth_states', {
   binding: text('binding'),
 })
 
+// The SQLite scaffold's timestamp shape: `text('expires_at')` holding an ISO string.
+const oauthStatesIso = sqliteTable('oauth_states_iso', {
+  stateHash: text('state_hash').primaryKey(),
+  provider: text('provider').notNull(),
+  redirectTo: text('redirect_to'),
+  expiresAt: text('expires_at').notNull(),
+  binding: text('binding'),
+})
+
 describe('DatabaseOAuthStateStore', () => {
   let sqlite: Database
   let store: DatabaseOAuthStateStore
 
   beforeEach(() => {
     sqlite = new Database(':memory:')
-    sqlite.exec(`
-      CREATE TABLE oauth_states (
-        state_hash text primary key,
-        provider text not null,
-        redirect_to text,
-        expires_at integer not null,
-        binding text
-      );
-    `)
+    for (const [tableName, expiryType] of [
+      ['oauth_states', 'integer'],
+      ['oauth_states_iso', 'text'],
+    ]) {
+      sqlite.exec(`
+        CREATE TABLE ${tableName} (
+          state_hash text primary key,
+          provider text not null,
+          redirect_to text,
+          expires_at ${expiryType} not null,
+          binding text
+        );
+      `)
+    }
     DrizzleAdapter.configure(drizzle({ client: sqlite }) as never)
     store = new DatabaseOAuthStateStore(oauthStates)
   })
@@ -188,5 +202,25 @@ describe('DatabaseOAuthStateStore', () => {
 
     const liveRow = sqlite.query('SELECT * FROM oauth_states WHERE state_hash = ?').get('live')
     expect(liveRow).not.toBeNull()
+  })
+
+  test('writes an ISO string to a text expiry column and compares against it', async () => {
+    const isoStore = new DatabaseOAuthStateStore(oauthStatesIso)
+    const expiresAt = new Date(Date.now() + 60_000)
+
+    await isoStore.store('hash-iso', { provider: 'github', redirectTo: '/home', expiresAt })
+
+    const raw = sqlite.query('SELECT expires_at FROM oauth_states_iso WHERE state_hash = ?').get('hash-iso') as {
+      expires_at: unknown
+    }
+    expect(raw.expires_at).toBe(expiresAt.toISOString())
+    expect((await isoStore.find('hash-iso'))?.expiresAt).toEqual(expiresAt)
+
+    await isoStore.store('hash-iso-expired', { provider: 'github', expiresAt: new Date(Date.now() - 1000) })
+    await isoStore.deleteExpired()
+    expect(sqlite.query('SELECT state_hash FROM oauth_states_iso').all()).toEqual([{ state_hash: 'hash-iso' }])
+
+    expect((await isoStore.consume('hash-iso'))?.provider).toBe('github')
+    expect(await isoStore.find('hash-iso')).toBeNull()
   })
 })

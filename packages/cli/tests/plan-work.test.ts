@@ -84,6 +84,7 @@ describe('measureStepWork', () => {
       'comments.plan.json': '{"title":"edited"}\n',
       'comments.approvals.json': '{}\n',
       'comments.decisions.json': '{}\n',
+      'comments.revisions/0001.json': '{}\n',
       'comments.plan.html': '<html></html>\n',
       '.guren/pages.gen.ts': 'export const pages = { posts: {} }\n',
       '.guren/plans/.gitignore': 'x\n',

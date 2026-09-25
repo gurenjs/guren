@@ -39,11 +39,6 @@ import { loadRouteDefinitionsWithModules, type ModuleTaggedDefinitions } from '.
 import { DEFAULT_ROUTES_FILE, routesEntryOrDefault } from './route-registrar'
 import type { RouteDefinition } from '@guren/server'
 
-/**
- * Any file that could hold a route's params schema — which is any importable
- * source file, since a schema is usually imported into `routes/` from elsewhere.
- */
-const SOURCE_FILE_PATTERN = /\.(ts|tsx|mts|js|jsx|mjs)$/
 import { checkSchemaTimestamps } from './schema-check'
 import {
   checkAttachableModels,
@@ -62,13 +57,13 @@ import { AGENTS_MANIFEST_FILE, planAgentManifest, STALE_AGENT_MANIFEST_MESSAGE }
 import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
 import { runI18nCheck } from './i18n-check'
-import { introspectApp, type Introspection } from './introspect'
-import { INTROSPECTION_UNAVAILABLE_FIX, introspectionUnavailableMessage, ROUTES_FLAG_NOT_INTROSPECTED } from './manifest-section'
+import { introspectRunner, type Introspection, type IntrospectOption } from './introspect'
+import { INTROSPECTION_UNAVAILABLE, INTROSPECTION_UNAVAILABLE_FIX, introspectionUnavailableMessage, NO_SOURCE_CHANGED_REASON, ROUTES_FLAG_NOT_INTROSPECTED } from './manifest-section'
 import { checkEnvExample, ENV_EXAMPLE_FILE } from './app-env'
 import { checkConfigWiring } from './config-check'
 import { runSpecCheck } from './spec-check'
 import { checkPlans, isPlanInput } from './plan-check'
-import { getChangedFiles } from './changed-files'
+import { changesSource, getChangedFiles } from './changed-files'
 import { check, formatFixCommand, routesCommandFix, type CheckFix, type CheckResult, type CheckReport, type CheckStatus } from './check-result'
 
 export type { CheckStatus, CheckResult, CheckReport }
@@ -123,11 +118,11 @@ export interface RunCheckOptions {
   /** Run the implementation-plan checks (RFC 0030 §8). Advisory, and never part of a run without this flag. */
   plan?: boolean
   /**
-   * Read the introspected app where a check can (RFC 0026 §5). `guren check` sets
-   * it unless `--no-introspect`; an in-process caller (the edit hook, the gate, the
-   * dev MCP) leaves it off, since the manifest memo would outlive a long-lived process.
+   * Read the introspected app where a check can (RFC 0026 §5). `guren check` and `plan:verify`
+   * set it; the gate passes a run it shares with its audit stage. The edit hook and the dev MCP
+   * server leave it off, and their checks with no static path report `-unverified`.
    */
-  introspect?: boolean
+  introspect?: IntrospectOption
 }
 
 /**
@@ -370,10 +365,10 @@ async function introspectionUnavailable(run: Promise<Introspection> | undefined)
   if (result?.status !== 'failed') return undefined
   return {
     ...check(
-      'introspection-unavailable',
+      INTROSPECTION_UNAVAILABLE,
       'Introspection',
       'warn',
-      introspectionUnavailableMessage(result, 'The checks that read it were judged from source instead.'),
+      introspectionUnavailableMessage(result, 'The checks with a source reading were judged from it; the rest report -unverified.'),
       INTROSPECTION_UNAVAILABLE_FIX,
     ),
     advisory: true,
@@ -389,8 +384,8 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   const filterChanged = (files: string[]): string[] =>
     changedFiles ? files.filter((f) => changedFiles.has(toPosixRelative(cwd, f))) : files
   // Whether any changed file could affect what the app's modules evaluate to:
-  // the shared gate for every check that loads the route graph (5.5, 7.7, 8.7).
-  const sourceChanged = !changedFiles || [...changedFiles].some((file) => SOURCE_FILE_PATTERN.test(file))
+  // the shared gate for every check that loads the route graph or executes the app (5.5, 7.7, 8.7).
+  const sourceChanged = changesSource(changedFiles)
 
   // `--arch` / `--docs` / `--spec` select suites; combining them runs the
   // union (never silently nothing). No flag = every suite.
@@ -407,7 +402,8 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   let graph: Awaited<ReturnType<typeof loadRouteGraph>> | undefined
   // One introspection per run, started only by a check that reads the manifest.
   let introspection: Promise<Introspection> | undefined
-  const introspect = options.introspect ? () => (introspection ??= introspectApp(cwd)) : undefined
+  const run = introspectRunner(cwd, options.introspect)
+  const introspect = run ? () => (introspection ??= run()) : undefined
   // The deploy verdicts start before the suites so their introspection child overlaps them,
   // whenever package.json or any source could have moved: the verdict joins the two.
   const deployRuntime =
@@ -418,7 +414,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   deployRuntime?.catch(() => {})
   // The session and attachments rules (8.5-8.7) introspect once they find their config, started here for
   // the same overlap. Gated like 7.7: a run that changed no source must not execute the app.
-  const wiringIntrospect = introspect && !sourceChanged ? { skipped: 'this run changed no source, so the app was not introspected' } : introspect
+  const wiringIntrospect = introspect && !sourceChanged ? { skipped: NO_SOURCE_CHANGED_REASON } : introspect
   // The route rules (7.7, 7.8, 10.6) judge the manifest's routes, which describe the entry, not a file `--routes` names.
   const routeIntrospect = wiringIntrospect && options.routesFile ? { skipped: ROUTES_FLAG_NOT_INTROSPECTED } : wiringIntrospect
   const appConfigFiles = runs('core') ? discoverAppConfigFiles(cwd) : undefined
@@ -518,7 +514,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
 
     // 5.5. The agent manifest cannot ride the loop above: codegen writes it only
     // for apps deriving a tool and *removes* it otherwise (see planAgentManifest).
-    // The graph is loaded once here for 5.5, 7.7, 7.8 and 8.7 — two loads could
+    // The graph is loaded once here for 5.5, 7.7 and 7.8 — two loads could
     // resolve different routes entries and disagree about what the app mounted.
     if (sourceChanged) {
       graph = await loadRouteGraph(cwd, routeGraphFile)
@@ -670,20 +666,13 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     )
 
     // 8.7. Delivery-route wiring (RFC 0015): a `delivery` config with no
-    // registerAttachmentRoutes() route in the loaded definitions, and a
+    // registerAttachmentRoutes() route in the introspected app, and a
     // serve: 'redirect' disk whose driver can never presign. Both are invisible
     // at runtime by design (uniform 404s; a fail-closed downgrade to proxy).
-    // Gated like 7.7, since the wiring half reads the route definitions.
+    // Gated like 7.7, since the mount is a registered route.
     if (sourceChanged) {
       checks.push(
-        ...(await checkAttachmentsDelivery({
-          cwd,
-          cache,
-          files: configFiles,
-          routesFile: routeGraphFile,
-          definitions: graph?.definitions,
-          ...wiring,
-        })),
+        ...(await checkAttachmentsDelivery({ cwd, cache, files: configFiles, ...wiring })),
       )
     }
   }
@@ -744,13 +733,14 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
 
   // 12. Deploy runtime (RFC 0020 Part 0): doctor's three verdicts, for an app
   // declaring a deploy plugin or the Lambda adapter; every other app adds nothing.
-  // Advisory: the manifest is read in this environment, and its static fallback reads
-  // constructions, not intent, so a false positive must not fail a gate.
+  // Advisory: the manifest is read with this environment's `.env`, and the facts it does not
+  // carry are read from constructions, not intent, so a false positive must not fail a gate.
   for (const verdict of (await deployRuntime) ?? []) {
     checks.push({
       ...check(verdict.key, verdict.title, verdict.status, verdict.message, verdict.fix),
       advisory: true,
       evidence: verdict.evidence,
+      ...(verdict.evidenceReason ? { evidenceReason: verdict.evidenceReason } : {}),
     })
   }
 

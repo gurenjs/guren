@@ -21,18 +21,29 @@ const sessionsText = sqliteTable('sessions_text', {
   data: text('data').notNull(),
 })
 
+// The SQLite scaffold's timestamp shape: `text('expires_at')` holding an ISO string.
+const sessionsIso = sqliteTable('sessions_iso', {
+  id: text('id').primaryKey(),
+  expiresAt: text('expires_at').notNull(),
+  data: text('data', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+})
+
 describe('DatabaseSessionStore', () => {
   let sqlite: Database
   let store: DatabaseSessionStore
 
   beforeEach(() => {
     sqlite = new Database(':memory:')
-    for (const tableName of ['sessions', 'sessions_text']) {
+    for (const [tableName, expiryType] of [
+      ['sessions', 'integer'],
+      ['sessions_text', 'integer'],
+      ['sessions_iso', 'text'],
+    ]) {
       sqlite.exec(`
         CREATE TABLE ${tableName} (
           id text primary key,
           data text not null,
-          expires_at integer not null
+          expires_at ${expiryType} not null
         );
       `)
     }
@@ -201,5 +212,29 @@ describe('DatabaseSessionStore', () => {
     )
 
     expect(await textStore.read('bad')).toEqual({})
+  })
+
+  test('should write an ISO string to a text expiry column and compare against it', async () => {
+    const isoStore = new DatabaseSessionStore(sessionsIso)
+    const before = Date.now()
+
+    await isoStore.write('iso-1', { userId: 7 }, 60)
+
+    const raw = sqlite.query('SELECT expires_at FROM sessions_iso WHERE id = ?').get('iso-1') as {
+      expires_at: unknown
+    }
+    expect(typeof raw.expires_at).toBe('string')
+    expect(Date.parse(raw.expires_at as string)).toBeGreaterThanOrEqual(before + 60_000)
+    expect(await isoStore.read('iso-1')).toEqual({ userId: 7 })
+
+    await isoStore.touch('iso-1', 3600)
+    const touched = sqlite.query('SELECT expires_at FROM sessions_iso WHERE id = ?').get('iso-1') as {
+      expires_at: string
+    }
+    expect(Date.parse(touched.expires_at)).toBeGreaterThanOrEqual(before + 3_600_000)
+
+    await isoStore.write('iso-expired', { userId: 8 }, -60)
+    await isoStore.deleteExpired()
+    expect(sqlite.query('SELECT id FROM sessions_iso').all()).toEqual([{ id: 'iso-1' }])
   })
 })
