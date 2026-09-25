@@ -15,6 +15,7 @@ import { ParseCache } from './parse-cache'
 import { memberKeyName, walk } from './ast-walk'
 import { controllerImportFailures } from './introspect-controller-file'
 import { introspectedRoutes, type IntrospectSource } from './manifest-section'
+import { joinRouteDefinitions } from './app-routes'
 import { specifierName } from './route-registrar'
 import { wholeIdentifierPattern } from './utils'
 
@@ -433,6 +434,8 @@ function classExportNames(body: Statement[]): (node: Statement, classDecl: Class
   }
 }
 
+type RefAttachableRoute = { method: string; path: string; name?: string; controller?: { name: string; action: string } }
+
 /**
  * What a route names its action by: a registered definition's `{ name, action }`,
  * or a manifest `ControllerRef`, which may also carry the class's file and export.
@@ -541,24 +544,23 @@ export function collisionsReachedByName(
 }
 
 /**
- * Registered definitions with each controller replaced by the manifest's reference
- * for the same route, matched on method, path, class name and action. The manifest
- * lists the whole app's routes, which the routes file alone may not, and in its own
- * order, so a route matched more than once keeps its name-only controller.
+ * Registered definitions with each controller replaced by the manifest's reference for the same
+ * route, joined as `joinRouteDefinitions()` joins them (method, path, name and action; a key the
+ * two sides count differently keeps its name-only controller).
  */
-export function attachControllerRefs<T extends { method: string; path: string; controller?: { name: string; action: string } }>(
+export function attachControllerRefs<T extends RefAttachableRoute>(
   definitions: T[],
   manifest: Pick<AppManifest, 'routes' | 'warnings'>,
   routeSources?: ReadonlySet<string>,
 ): T[] {
-  const refs = new Map<string, ControllerTarget | null>()
-  for (const route of manifestRouteTargets(manifest, routeSources)) {
-    if (!route.controller) continue
-    const key = routeControllerKey(route, route.controller)
-    refs.set(key, refs.has(key) ? null : route.controller)
-  }
-  return definitions.map((definition) => {
-    const ref = definition.controller && refs.get(routeControllerKey(definition, definition.controller))
+  const targets = manifestRouteTargets(manifest, routeSources)
+  const joined = joinRouteDefinitions(targets, definitions.map(({ method, path, name, controller }, index) => ({ method, path, name, controller, index })))
+  const refs: Array<ControllerTarget | undefined> = []
+  joined.forEach((definition, entry) => {
+    if (definition) refs[definition.index] = targets[entry]?.controller
+  })
+  return definitions.map((definition, index) => {
+    const ref = definition.controller && refs[index]
     return ref ? { ...definition, controller: ref } : definition
   })
 }
@@ -567,7 +569,7 @@ export function attachControllerRefs<T extends { method: string; path: string; c
  * Registered definitions with the manifest's references attached: the one bridge for consumers
  * that still judge the routes file's definitions. Routes without a controller have nothing to attach.
  */
-export async function withManifestControllerRefs<T extends { method: string; path: string; controller?: { name: string; action: string } }>(
+export async function withManifestControllerRefs<T extends RefAttachableRoute>(
   definitions: T[],
   introspect: IntrospectSource | undefined,
   source: { cwd: string; routesFile: string },
@@ -577,10 +579,6 @@ export async function withManifestControllerRefs<T extends { method: string; pat
   if (introspected.status !== 'described') return definitions
   const { manifest } = introspected
   return attachControllerRefs(definitions, manifest, await routeSourceClasses(source.cwd, manifest, source.routesFile))
-}
-
-function routeControllerKey(route: { method: string; path: string }, controller: { name: string; action: string }): string {
-  return `${route.method.toUpperCase()} ${route.path} ${controller.name}.${controller.action}`
 }
 
 /**

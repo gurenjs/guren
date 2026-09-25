@@ -746,8 +746,9 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   and what `plan:*`, `openapi:generate`, `route:list`, `tool:list` and the dev
 >   MCP server read. The join the Part 2d consumers use lives in
 >   `packages/cli/src/app-routes.ts`. Part 2c's `attachControllerRefs()`, which
->   `guren context <Entity>` still reads, joins on method, path and action alone
->   and drops a repeated key; moving it onto the same join is left to a follow-up.
+>   `guren context <Entity>` still reads, joins through the same
+>   `joinRouteDefinitions()`, so a route name tells two routes of one method,
+>   path and action apart, and a key both sides repeat equally pairs nth to nth.
 
 ### 6. Enabling refactor: one module per command
 

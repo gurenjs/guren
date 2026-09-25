@@ -400,6 +400,9 @@ export async function generateEntityContext(
     const named = candidates.flatMap((def) => (def.controller ? [def.controller] : []))
     // The manifest describes the entry, not a file `--routes` names.
     if (options.introspect && !options.routesFile && collisionsReachedByName(scan, named).length > 0) {
+      // A duplicated entity passes its module's routes only: a key another module registers too counts short of the manifest
+      // and joins nothing, where the whole file would pair it by module order, which the CLI (directory
+      // order) and the app (`createApp({ modules })` order) need not share.
       candidates = await withManifestControllerRefs(candidates, () => introspectApp(cwd), { cwd, routesFile: resolve(cwd, target.path) })
     }
     const modelFile = resolve(cwd, match.relPath)

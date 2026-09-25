@@ -15,6 +15,7 @@ import {
   DELETE_CALL_PATTERN,
   FORCE_WRITE_PATTERN,
   INERTIA_CALL_PATTERN,
+  type ControllerTarget,
 } from '../src/controller-methods'
 import { firstClassDeclaration } from '../src/model-parser'
 import { parseSourceFile } from '../src/parse-cache'
@@ -393,12 +394,69 @@ describe('attachControllerRefs', () => {
     expect(definition?.controller).toEqual(placed)
   })
 
-  it('keeps the name when the manifest matches the route more than once', () => {
+  it('keeps the name when the manifest counts the route more often than the routes file', () => {
     const [definition] = attachControllerRefs(
       [{ method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } }],
       { routes: [{ method: 'POST', path: '/posts', controller: placed }, { method: 'POST', path: '/posts', controller: { ...placed, file: 'modules/blog/x.ts' } }], warnings: [] } as never,
     )
     expect(definition?.controller).toEqual({ name: 'PostController', action: 'store' })
+  })
+
+  it('tells two routes of one method, path and action apart by their names', () => {
+    const blog = { ...placed, file: 'modules/blog/app/Http/Controllers/PostController.ts' }
+    const definitions = attachControllerRefs(
+      [
+        { method: 'POST', path: '/posts', name: 'posts.store', controller: { name: 'PostController', action: 'store' } },
+        { method: 'POST', path: '/posts', name: 'blog.posts.store', controller: { name: 'PostController', action: 'store' } },
+      ],
+      {
+        routes: [
+          { method: 'POST', path: '/posts', name: 'blog.posts.store', controller: blog },
+          { method: 'POST', path: '/posts', name: 'posts.store', controller: placed },
+        ],
+        warnings: [],
+      } as never,
+    )
+    expect(definitions.map((definition) => definition.controller)).toEqual([placed, blog])
+  })
+
+  it('pairs a key both sides repeat equally nth to nth', () => {
+    const second = { ...placed, file: 'app/Http/Controllers/Admin/PostController.ts' }
+    const definitions = attachControllerRefs(
+      [
+        { method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } },
+        { method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } },
+      ],
+      { routes: [{ method: 'POST', path: '/posts', controller: placed }, { method: 'POST', path: '/posts', controller: second }], warnings: [] } as never,
+    )
+    expect(definitions.map((definition) => definition.controller)).toEqual([placed, second])
+  })
+
+  it('attaches nothing when the routes file counts the route more often than the manifest', () => {
+    const definitions = attachControllerRefs(
+      [
+        { method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } },
+        { method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } },
+      ],
+      { routes: [{ method: 'POST', path: '/posts', controller: placed }], warnings: [] } as never,
+    )
+    expect(definitions.map((definition) => definition.controller)).toEqual([
+      { name: 'PostController', action: 'store' },
+      { name: 'PostController', action: 'store' },
+    ])
+  })
+
+  it('carries the files a name-only reference may still be declared in', () => {
+    const nameOnly = { name: 'PostController', action: 'store', resolved: 'name-only' as const }
+    const [definition] = attachControllerRefs(
+      [{ method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } }],
+      {
+        routes: [{ method: 'POST', path: '/posts', controller: nameOnly }],
+        warnings: [{ code: 'controller-import', message: 'app/Http/Controllers/PostController.ts could not be imported: boom' }],
+      } as never,
+      new Set(['PostController']),
+    )
+    expect(definition?.controller as ControllerTarget | undefined).toEqual({ ...nameOnly, unimported: ['app/Http/Controllers/PostController.ts'], inRouteSource: true })
   })
 })
 
