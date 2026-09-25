@@ -922,6 +922,27 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     expect(() => new Bun.Transpiler({ loader: 'ts' }).transformSync(resource)).not.toThrow()
   })
 
+  test('should stub a nullable JSON column whose planned type admits no null, rather than cast it', () => {
+    const document = widgetsPlan()
+    document.resources[0]!.fields.find((field) => field.name === 'meta')!.type = 'Record<string, unknown>'
+    const output = emitWidgets(document, 'pg')
+    const resource = output.files.find((file) => file.path === 'app/Http/Resources/WidgetResource.ts')!.contents
+
+    expect(resource).toContain("meta: unmapped('meta'),")
+    expect(output.unwritten).toContainEqual({ element: 'resource.widget', detail: 'field meta', reason: 'the column meta reads back as unknown | null, so toArray() throws on it until it is mapped' })
+  })
+
+  test('should leave a resource whose field type holds a comment, which would swallow the code after it', () => {
+    const document = widgetsPlan()
+    document.resources[0]!.fields.find((field) => field.name === 'meta')!.type = 'Record<string, unknown> | null // settings'
+    const output = emitWidgets(document, 'pg')
+
+    expect(output.left.filter((element) => element.section === 'resources')).toEqual([
+      { id: 'resource.widget', section: 'resources', reason: 'its field type `Record<string, unknown> | null // settings` holds a comment, which would swallow the code written after the type' },
+    ])
+    expect(output.files.map((file) => file.path)).not.toContain('app/Http/Resources/WidgetResource.ts')
+  })
+
   test('should leave a resource whose field type names something the file would have to import', () => {
     const document = widgetsPlan()
     document.resources.push({ id: 'resource.summary', change: { kind: 'add' }, name: 'WidgetSummaryResource', model: 'model.widget', fields: [{ name: 'author', type: 'UserResourceData | null' }] })

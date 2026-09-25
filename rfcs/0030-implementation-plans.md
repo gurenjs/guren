@@ -1260,8 +1260,10 @@ validators, resources and policies, and the policy registration settled.
   reads back as (`COLUMN_RECORD_TYPES`, beside the column builders), so a
   planned `T | null` takes a non-null column; a `Date` column is serialized with
   `toISOString()` for a planned `string`; a JSON column, which reads back as
-  `unknown`, is cast to the planned type as `make:feature` casts it. Any other
-  field calls a stub that throws until it is mapped, and is listed.
+  `unknown`, is cast to the planned type as `make:feature` casts it, when that
+  type admits the column's `null`. A planned type holding a comment is left to
+  the `http` step, since the comment would swallow what the emitter writes after
+  it. Any other field calls a stub that throws until it is mapped, and is listed.
 - The policy stub denies: every ability is `(_user: AuthUser | null): boolean`
   returning `false`, with the planned rule in a comment above it. A stub that
   allowed would authorize what nobody has written, and one that threw would fail

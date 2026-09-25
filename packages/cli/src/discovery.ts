@@ -293,7 +293,7 @@ export function discoverAppSourceFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app')
 }
 
-/** Where `make:provider`, `make:auth` and `plan:scaffold` write providers, and `wireAppProvider()` imports them from. */
+/** Where `make:provider` and `plan:scaffold` write providers, and `wireAppProvider()` imports them from. */
 export const PROVIDERS_DIR = 'app/Providers'
 
 /** Where `make:validator` writes and `plan:status` reads validators. */

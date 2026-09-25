@@ -69,12 +69,14 @@ const GLOBAL_TYPES = new Set(['Array', 'ReadonlyArray', 'Record', 'Date'])
 
 /**
  * Why a planned payload type cannot be written into the resource file as is: it names a type
- * the file would have to import (`UserResourceData`), or it does not parse as one type.
+ * the file would have to import (`UserResourceData`), it does not parse as one type, or it holds
+ * a comment, which would swallow the `,` written after the type in `toArray()`.
  */
 function unwritableType(text: string): string | undefined {
-  const program = parseSourceFile(`type Planned = ${text}\n`, 'payload.ts')?.program
-  const alias = program?.body.length === 1 ? program.body[0] : undefined
+  const file = parseSourceFile(`type Planned = ${text}\n`, 'payload.ts')
+  const alias = file?.program.body.length === 1 ? file.program.body[0] : undefined
   if (alias?.type !== 'TSTypeAliasDeclaration') return `its field type \`${text}\` does not parse as one type`
+  if ((file?.comments?.length ?? 0) > 0) return `its field type \`${text}\` holds a comment, which would swallow the code written after the type`
   let offending: string | undefined
   const walk = (node: { type: string; [key: string]: unknown }): boolean => {
     if (TYPE_KEYWORDS.has(node.type)) return true
@@ -237,7 +239,10 @@ function payloadValue(field: PlanResource['fields'][number], column: PlanColumn 
   const base = COLUMN_RECORD_TYPES[dialect][column.type]
   const access = propertyAccess('this.resource', field.name)
   const admits = (value: string): boolean => planned.includes(value) && (!nullable || planned.includes('null'))
-  if (base === 'unknown') return `${access} as ${field.type}`
+  if (base === 'unknown') {
+    if (nullable && !planned.includes('null')) return undefined
+    return `${access} as ${field.type}`
+  }
   if (admits(base)) return access
   if (base === 'Date' && admits('string')) return nullable ? `${access}?.toISOString() ?? null` : `${access}.toISOString()`
   return undefined

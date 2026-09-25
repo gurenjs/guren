@@ -420,7 +420,10 @@ class Emitter {
     if (element.module) this.refusals.push(`${element.id} sits in module "${element.module}": plan:scaffold writes to the project root only.`)
   }
 
-  /** One file named after the step's model: a step adding two models could name it after either, so it is refused. */
+  /**
+   * One file named after the step's model: a step adding two models could name it after either, so it is refused.
+   * `planScaffoldCoverage()` would still list those validators as written; unreachable while derivation gives each added model its own task.
+   */
   validators(validators: readonly PlanValidator[]): PlanScaffoldFile[] {
     const [model, ...others] = this.models
     if (!model || validators.length === 0) return []
