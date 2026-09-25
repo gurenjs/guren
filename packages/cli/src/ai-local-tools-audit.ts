@@ -10,14 +10,14 @@
 import { resolve } from 'node:path'
 import type { DerivedAgentTool } from '@guren/server'
 import { scanAiAgents } from './ai-agent-scan'
+import { inlineAuditIgnore } from './audit-config'
 import {
   controllerMethodFor,
   LOCAL_TOOL_WRITE_PATTERN,
   type ControllerMethodScan,
   type ControllerTarget,
 } from './controller-methods'
-import { discoverModelFiles } from './discovery'
-import { extractClassDeclaration, extractTableIdentifier } from './model-parser'
+import { discoverModelClasses, extractTableIdentifier } from './model-parser'
 import { ParseCache } from './parse-cache'
 import { escapeRegExp } from './utils'
 import type { AuditFinding } from './audit'
@@ -36,13 +36,8 @@ export interface AiLocalToolListing {
 /** Model class name → the schema table identifier it binds (the class name when unreadable). */
 async function modelTables(cwd: string, cache: ParseCache): Promise<Map<string, string>> {
   const tables = new Map<string, string>()
-  for (const filePath of await discoverModelFiles(cwd)) {
-    const parsed = await cache.get(filePath)
-    for (const statement of parsed?.ast.program.body ?? []) {
-      const classDecl = extractClassDeclaration(statement)
-      if (!classDecl?.id) continue
-      tables.set(classDecl.id.name, extractTableIdentifier(classDecl) ?? classDecl.id.name)
-    }
+  for (const { className, classDecl } of await discoverModelClasses(cwd, cache)) {
+    if (classDecl) tables.set(className, extractTableIdentifier(classDecl) ?? className)
   }
   return tables
 }
@@ -78,16 +73,14 @@ export async function auditAiLocalTools(
   agentActions: ReadonlyArray<AgentToolAction>,
   scan: ControllerMethodScan,
   findings: AuditFinding[],
+  cache: ParseCache = new ParseCache(),
 ): Promise<AiLocalToolListing[] | undefined> {
-  const cache = new ParseCache()
   const agents = await scanAiAgents(cwd, cache)
   if (agents.length === 0) return undefined
 
   // Each finding carries a line, which `config/audit.ts` refuses, so the inline comment is its one suppression.
-  const suppressed = async (relPath: string, line: number): Promise<boolean> => {
-    const lines = (await cache.source(resolve(cwd, relPath)))?.split('\n') ?? []
-    return [lines[line - 1], lines[line - 2]].some((text) => text?.includes('guren-audit-ignore'))
-  }
+  const suppressed = async (relPath: string, line: number): Promise<boolean> =>
+    (await inlineAuditIgnore(cache, resolve(cwd, relPath), line)) !== undefined
   const listings: AiLocalToolListing[] = []
   const writing: Array<{ listing: AiLocalToolListing; body: string }> = []
 
