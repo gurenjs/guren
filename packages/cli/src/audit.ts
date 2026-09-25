@@ -31,7 +31,7 @@ import {
   hasModelConfig,
   resolveModelStringArrayConfig,
 } from './model-parser'
-import { parseSourceFile } from './parse-cache'
+import { ParseCache, parseSourceFile } from './parse-cache'
 // Every pattern naming a `Controller` member lives beside the scan that
 // produces the bodies, inside the reach of controller-surface.test.ts.
 import {
@@ -72,6 +72,7 @@ import {
   type AiLocalToolListing,
 } from './ai-local-tools-audit'
 import { auditCsrfExemptions, DECLARE_CALL_PATTERN, type CsrfExemptionScan } from './csrf-exemption-audit'
+import { auditAuthorization, GUEST_PATH_PATTERN } from './authorization-audit'
 
 export type AuditStatus = 'pass' | 'warn' | 'fail' | 'ignored'
 
@@ -137,9 +138,6 @@ export interface RunAuditOptions {
    */
   introspect?: boolean
 }
-
-/** Guest flows (login/registration), reachable without authentication. */
-const GUEST_PATH_PATTERN = /(login|logout|register|signup|sign-up|password|forgot|reset|verification|verify-email)/i
 
 const WEBHOOK_PATH_PATTERN = /(webhook|callback)/i
 
@@ -306,7 +304,8 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   })()
   sourceScans.catch(() => {})
 
-  const [scan, routes] = await Promise.all([parseControllerMethods(cwd), loadAuditRoutes(cwd, options)])
+  const cache = new ParseCache()
+  const [scan, routes] = await Promise.all([parseControllerMethods(cwd, cache), loadAuditRoutes(cwd, options)])
   const manifest = routes.manifest
 
   // Reported only where a verdict could have read through the shared name: every
@@ -335,11 +334,14 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   }
   findings.push(...routes.loadFindings)
 
-  if (routes.analyzed) auditRoutes(routes.audited, scan, manifest, findings)
+  if (routes.analyzed) {
+    auditRoutes(routes.audited, scan, manifest, findings)
+    await auditAuthorization(cwd, routes.audited, scan, manifest !== undefined, cache, findings)
+  }
   auditForceWrites(scan, manifest !== undefined, findings)
   const csrfExemptionScan = await sourceScans
   findings.push(...sourceFindings)
-  const aiLocalTools = await auditAiLocalTools(cwd, routes.agentActions, scan, findings)
+  const aiLocalTools = await auditAiLocalTools(cwd, routes.agentActions, scan, findings, cache)
 
   const dependencyScan: DependencyScan = dependencyScanOutput
     ? dependencyFindingsFromOutput(await dependencyScanOutput, findings)
@@ -541,10 +543,12 @@ function auditForceWrites(scan: ControllerMethodScan, everyDeclaration: boolean,
 }
 
 /** A route as the route-level rules read it, from the introspected app or the routes file. */
-interface AuditedRoute {
+export interface AuditedRoute {
   method: string
   path: string
   controller?: ControllerTarget
+  /** An `authorization` capability somewhere on the chain, presence only, as the agent-route rule reads it. */
+  chainAuthorizes: boolean
   agent?: RouteDefinition['agent']
   hasBodySchema: boolean
   validatesBody: boolean
@@ -559,6 +563,7 @@ function auditedFromDefinition(route: RouteDefinition): AuditedRoute {
     method: route.method,
     path: route.path,
     controller: route.controller,
+    chainAuthorizes: Boolean(route.capabilities?.authorization),
     agent: route.agent,
     hasBodySchema: Boolean(route.schemas?.body),
     validatesBody: Boolean(route.validatesBody),
@@ -574,6 +579,7 @@ function auditedFromManifest(route: ReturnType<typeof manifestRouteTargets>[numb
     method: route.method,
     path: route.path,
     controller: route.controller,
+    chainAuthorizes: route.middleware.some((entry) => entry.capabilities.authorization !== undefined),
     agent: route.agent,
     hasBodySchema: route.schemas.body !== undefined,
     validatesBody: Boolean(route.validatesBody),
@@ -1313,7 +1319,7 @@ export function renderAuditReport(report: AuditReport): void {
   if (report.failCount === 0 && report.warnCount === 0) {
     consola.success(
       report.ignoredCount > 0
-        ? `No unresolved security findings (${report.ignoredCount} ignored via config/audit.ts).`
+        ? `No unresolved security findings (${report.ignoredCount} ignored).`
         : 'No security findings.',
     )
   }
