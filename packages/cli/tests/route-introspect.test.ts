@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path'
 
 
 import { generateAgentTypes } from '../src/agents-types'
+import { runCodegen } from '../src/codegen'
 import { agentToolRouteKey, joinRouteDefinitions } from '../src/app-routes'
 import { runCheck, type CheckResult } from '../src/check'
 import { generateContext, renderContextMarkdown } from '../src/context'
@@ -543,5 +544,17 @@ describe('guren codegen --introspect', () => {
     const introspected = await codegen(dir, true, 'out-introspect')
     expect(introspected.files).toEqual((await codegen(dir, false, 'out-static')).files)
     expect(introspected.warnings.join('\n')).toContain('could not be introspected (import)')
+  })
+
+  test('the full codegen sequence passes the flag on to the route generator', async () => {
+    const generate = async (name: string, introspect: boolean) => {
+      const dir = await scaffoldApp(name, { 'src/app.ts': APP('HookRouteProvider'), 'app/Providers/HookRouteProvider.ts': HOOK_PROVIDER })
+      await captureWarnings(async () => {
+        for await (const _stage of runCodegen({ appRoot: dir, introspect })) void _stage
+      })
+      return readFile(join(dir, '.guren/routes.gen.ts'), 'utf8')
+    }
+    expect(await generate('codegen-sequence-introspect', true)).toContain("'hooks.show'")
+    expect(await generate('codegen-sequence-static', false)).not.toContain("'hooks.show'")
   })
 })

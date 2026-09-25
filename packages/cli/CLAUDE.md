@@ -60,6 +60,11 @@ Ships the Citty-based CLI (`guren` bin) with generators and database helpers. Ge
   existing modules. Preserve each command's distinct gating rules: plain check
   is observational, check --ci uses gatingResults and refuses --fix, audit gates
   on failures, and gate uses the complete report's ok flag.
+- `src/commands/codegen.ts` owns routes:types, codegen, and openapi:generate
+  arguments and output formatting. `src/codegen.ts` owns the full codegen
+  sequence and passes route/resource definitions to their consumers. Its async
+  iterator yields completed stages so progress remains visible if a later
+  generator fails. Consume it to completion to generate all artifacts.
 - These modules only construct command objects at import time. Resolve cwd,
   environment, and application state inside command execution. Use the local
   `defineCommand` wrapper so repeated flags keep their existing semantics.
