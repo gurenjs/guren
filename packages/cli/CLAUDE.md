@@ -55,6 +55,11 @@ Ships the Citty-based CLI (`guren` bin) with generators and database helpers. Ge
 - `src/commands/tools.ts` owns tool:* and token:issue definitions and argument
   validation. Execution stays in the existing tool/token modules. Preserve the
   tool:dev process-lifetime marker and the local defineCommand wrapper.
+- `src/commands/diagnostics.ts` owns check, audit, and gate argument mapping,
+  output selection, and exit-code decisions. Diagnostic engines remain in their
+  existing modules. Preserve each command's distinct gating rules: plain check
+  is observational, check --ci uses gatingResults and refuses --fix, audit gates
+  on failures, and gate uses the complete report's ok flag.
 - These modules only construct command objects at import time. Resolve cwd,
   environment, and application state inside command execution. Use the local
   `defineCommand` wrapper so repeated flags keep their existing semantics.
