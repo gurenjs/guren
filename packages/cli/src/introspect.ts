@@ -22,9 +22,52 @@ export type Introspection =
 export interface IntrospectOptions {
   /** Wall-clock cap on the child, after which it is killed and the run is `timeout`. */
   timeoutMs?: number
+  /**
+   * Run a new child rather than the process's memoised one: for a caller living longer than
+   * one read of the app (the gate under the dev MCP server), which keeps its own per-run memo.
+   */
+  fresh?: boolean
 }
 
 export const DEFAULT_INTROSPECT_TIMEOUT_MS = 30_000
+
+/**
+ * The one cap for every command that judges the app: `check`, `audit`, `doctor`, the gate, `plan:verify`
+ * and the deploy builds. One cap, or an app introspecting between two would fail `check --ci` and pass
+ * the gate; short, since the gate runs on an agent's every stop. `guren introspect --timeout` diagnoses a slower app.
+ */
+export const CHECK_INTROSPECT_TIMEOUT_MS = 10_000
+
+/**
+ * How an in-process caller of `runCheck()` or `runAudit()` asks for the introspected app: `true`
+ * for this process's memoised run under {@link CHECK_INTROSPECT_TIMEOUT_MS}, or a run of its own
+ * that the caller shares between commands.
+ */
+export type IntrospectOption = boolean | (() => Promise<Introspection>)
+
+/** The run {@link IntrospectOption} names, started at most once however often it is asked, or `undefined` for none. */
+export function introspectRunner(cwd: string, option: () => Promise<Introspection>): () => Promise<Introspection>
+export function introspectRunner(cwd: string, option: IntrospectOption | undefined): (() => Promise<Introspection>) | undefined
+export function introspectRunner(cwd: string, option: IntrospectOption | undefined): (() => Promise<Introspection>) | undefined {
+  const run = typeof option === 'function' ? option : option ? checkIntrospection(cwd) : undefined
+  if (!run) return undefined
+  let started: Promise<Introspection> | undefined
+  return () => (started ??= run())
+}
+
+/** A run capped at {@link CHECK_INTROSPECT_TIMEOUT_MS}, for a command that judges the app. */
+export function checkIntrospection(cwd: string, options: Pick<IntrospectOptions, 'fresh'> = {}): () => Promise<Introspection> {
+  return async () => withCapNote(await introspectApp(cwd, { ...options, timeoutMs: CHECK_INTROSPECT_TIMEOUT_MS }))
+}
+
+/** A timeout under the cap names it, so a `guren introspect` that succeeds within its 30 s reads as no contradiction. */
+export function withCapNote(result: Introspection): Introspection {
+  if (result.status !== 'failed' || result.reason !== 'timeout') return result
+  // Appended to the first line: the readers keep only a failure's first.
+  const [first, ...rest] = result.message.split('\n')
+  const note = `The commands that judge the app cap introspection at ${CHECK_INTROSPECT_TIMEOUT_MS / 1000} s; \`guren introspect\` waits ${DEFAULT_INTROSPECT_TIMEOUT_MS / 1000} s by default.`
+  return { ...result, message: [`${first} ${note}`, ...rest].join('\n') }
+}
 
 /** One run per app root and timeout per CLI process, so a larger `timeoutMs` can retry a timed-out run. */
 const runs = new Map<string, Promise<Introspection>>()
@@ -32,17 +75,22 @@ const runs = new Map<string, Promise<Introspection>>()
 export function introspectApp(cwd: string, options: IntrospectOptions = {}): Promise<Introspection> {
   const root = resolve(cwd)
   const timeoutMs = options.timeoutMs ?? DEFAULT_INTROSPECT_TIMEOUT_MS
+  if (options.fresh) return runOrCrash(root, timeoutMs)
   const key = `${timeoutMs}:${root}`
   let run = runs.get(key)
   if (!run) {
-    run = runIntrospection(root, timeoutMs).catch((error: unknown): Introspection => ({
-      status: 'failed',
-      reason: 'crashed',
-      message: `The introspection process could not run: ${error instanceof Error ? error.message : String(error)}`,
-    }))
+    run = runOrCrash(root, timeoutMs)
     runs.set(key, run)
   }
   return run
+}
+
+function runOrCrash(root: string, timeoutMs: number): Promise<Introspection> {
+  return runIntrospection(root, timeoutMs).catch((error: unknown): Introspection => ({
+    status: 'failed',
+    reason: 'crashed',
+    message: `The introspection process could not run: ${error instanceof Error ? error.message : String(error)}`,
+  }))
 }
 
 async function runIntrospection(root: string, timeoutMs: number): Promise<Introspection> {

@@ -1,28 +1,18 @@
 /**
- * The one rule for reading a `SessionConfig` out of an app's source (RFC 0020),
- * annotated or returned by a `defineSessionConfig()` resolver (RFC 0027 §2).
- * `guren check`'s session rules and the deploy-runtime verdicts both ask about
- * the same object, and a second reading is how one reports a backed store while
- * the other skips the table it binds. The anchor is the type, not the file
- * name or the variable: a cache config keys `default`, `stores` and `driver`
- * identically, and `createSessionManager(config)` carries no literal, since the
- * scaffold passes the config by name across modules.
+ * Finds a `SessionConfig` in an app's source (RFC 0020), annotated or returned by a
+ * `defineSessionConfig()` resolver (RFC 0027 §2), and reads each store's `driver` and
+ * `table` for the schema-binding rule. Which store is selected is the introspected app's
+ * to say (RFC 0026 §5). The anchor is the type, not the file name or the variable: a
+ * cache config keys `stores` and `driver` identically.
  */
 import type { ObjectExpression, Node, Statement } from '@babel/types'
-import { DEFAULT_SESSION_STORE_NAME } from '@guren/server'
 import { literalString, memberKeyName, objectLiteral, propertyValue, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
 
 const SESSION_CONFIG_TYPE = 'SessionConfig'
 const SESSION_DEFINITION_HELPER = 'defineSessionConfig'
 const GUREN_PACKAGE_PREFIX = '@guren/'
 
-export { DEFAULT_SESSION_STORE_NAME }
-
 export interface SessionConfigRead {
-  /** Whether `default:` was written at all; absent means the manager picks {@link DEFAULT_SESSION_STORE_NAME}. */
-  declaresDefault: boolean
-  /** The store `default:` names, when it is readable. */
-  selected: string | undefined
   /** Declared store name → its `driver`, or undefined when the driver is not a literal. */
   stores: Map<string, string | undefined>
   /** Declared store name → the identifier its `table` names, for stores whose `table` is a plain identifier. */
@@ -75,9 +65,7 @@ function declaredSessionConfig(node: BabelNode, locals: Set<string>): ObjectExpr
 
 /**
  * The object a `defineSessionConfig(...)` call's resolver returns (RFC 0027 §2),
- * from an arrow's expression body or a function's `return`. Its `default` reads
- * a declared key (`env.SESSION_DRIVER`), which reads as unresolved rather than
- * as a store.
+ * from an arrow's expression body or a function's `return`.
  */
 function definedSessionConfig(node: BabelNode, helpers: Set<string>): ObjectExpression | undefined {
   const callee = node.callee as BabelNode
@@ -122,17 +110,7 @@ export function sessionConfigsIn(ast: { program: { body: Statement[] } }): Sessi
   return found
 }
 
-/**
- * `default` is read through `??`/`||` so the scaffold's
- * `process.env.SESSION_DRIVER ?? 'database'` resolves to its fallback; an
- * environment that overrides it at runtime is beyond a static read.
- */
-function selectedStore(config: ObjectExpression): { declaresDefault: boolean; selected: string | undefined } {
-  const value = propertyValue(config, 'default')
-  if (value === undefined) return { declaresDefault: false, selected: undefined }
-  return { declaresDefault: true, selected: fallbackString(value) }
-}
-
+/** Read through `??`/`||`, so `process.env.X ?? 'database'` reads as its fallback. */
 function fallbackString(node: Node): string | undefined {
   const unwrapped = unwrapTypeAssertion(node) as BabelNode
   if (unwrapped?.type === 'LogicalExpression' && (unwrapped.operator === '??' || unwrapped.operator === '||')) {
@@ -155,6 +133,6 @@ export function readSessionConfig(config: ObjectExpression): SessionConfigRead {
     if (table?.type === 'Identifier') tables.set(name, table.name as string)
   }
 
-  return { ...selectedStore(config), stores, tables }
+  return { stores, tables }
 }
 

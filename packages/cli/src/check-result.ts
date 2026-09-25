@@ -20,6 +20,8 @@ export interface CheckResult {
   filePath?: string
   /** Set by the checks that read the manifest; absent on every other check. */
   evidence?: CheckEvidence
+  /** Why the introspected app could not vouch for an `evidence: 'none'` verdict. */
+  evidenceReason?: string
   /**
    * Advice rather than integrity (e.g. test-coverage nudges): exit-code gates
    * such as `check --ci` skip advisory warns.
@@ -60,6 +62,11 @@ export interface CheckFixRun {
  */
 export function gatingResults(report: CheckReport): CheckResult[] {
   return report.checks.filter((result) => !result.advisory && result.status !== 'pass')
+}
+
+/** A finding a gate prints without counting it. */
+export function formatAdvisoryFinding(finding: Parameters<typeof formatFinding>[0]): string {
+  return formatFinding({ ...finding, title: `${finding.title} (advisory)` })
 }
 
 /** One finding as the line a gate or hook feeds back: `title: message [file:line] -> suggestion`. */

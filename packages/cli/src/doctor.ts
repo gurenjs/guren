@@ -33,8 +33,8 @@ import { resolveRoutesEntry } from './route-registrar'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions, resolveRoutesFile } from './load-routes'
 import { appDeclaresPrototypeRoutes } from './prototype-check'
 import type { RouteDefinition } from '@guren/server'
-import { analyzeDeployRuntime, judgeDeployRuntime } from './deploy-runtime'
-import { introspectApp, type Introspection } from './introspect'
+import { judgeDeployVerdicts, readDeployRuntime } from './deploy-runtime'
+import { checkIntrospection, type Introspection } from './introspect'
 import { describeIntrospectionFailure, introspectedRoutes } from './manifest-section'
 import type { CheckEvidence } from './check-result'
 import { detectConfigMigrations, undeclaredEnv, type ConfigMigration, type EnvDeclaration } from './config-migration'
@@ -1278,7 +1278,7 @@ function createManifestPlans(cwd: string, options: { introspect?: boolean } = {}
     graph ??= loadRouteDefinitions(resolve(cwd, DEFAULT_ROUTES_FILE), cwd)
     return graph
   }
-  const introspection = options.introspect ? () => introspectApp(cwd) : undefined
+  const introspection = options.introspect ? checkIntrospection(cwd) : undefined
   return {
     pageManifest: planPageManifest(cwd),
     agentManifest: planAgentManifest(cwd, DEFAULT_ROUTES_FILE, routeGraph),
@@ -1311,12 +1311,12 @@ export async function getDoctorRuleEvaluations(
         return { check, autofix } as DoctorRuleEvaluation
       }),
     ),
-    analyzeDeployRuntime(cwd, { introspect: manifestPlans.introspection }),
+    readDeployRuntime(cwd, { introspect: manifestPlans.introspection }),
   ])
 
   // The verdicts are shared with `guren check` and the deploy builds
   // (RFC 0020 Part 0); doctor's only addition is the remediation pair.
-  const deployEvaluations: DoctorRuleEvaluation[] = judgeDeployRuntime(deployAnalysis).map((verdict) => ({
+  const deployEvaluations: DoctorRuleEvaluation[] = judgeDeployVerdicts(deployAnalysis).map((verdict) => ({
     check: {
       ...createCheck(verdict.key, verdict.title, verdict.status, verdict.message, {
         fix: verdict.fix,

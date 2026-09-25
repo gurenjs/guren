@@ -82,3 +82,11 @@ export async function getChangedFiles(cwd: string): Promise<Set<string> | null> 
 
   return result
 }
+
+/** Any file that could hold a route's params schema or change what the app's modules evaluate to. */
+const SOURCE_FILE_PATTERN = /\.(ts|tsx|mts|js|jsx|mjs)$/
+
+/** Whether a run's changed files (null: a full run) could change what the app's modules evaluate to. */
+export function changesSource(changedFiles: ReadonlySet<string> | null | undefined): boolean {
+  return !changedFiles || [...changedFiles].some((file) => SOURCE_FILE_PATTERN.test(file))
+}

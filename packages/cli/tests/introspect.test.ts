@@ -4,7 +4,7 @@ import { readFile, rm } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import type { AppManifest } from '@guren/core'
 
-import { introspectApp, type Introspection, type IntrospectionFailure } from '../src/introspect'
+import { CHECK_INTROSPECT_TIMEOUT_MS, introspectApp, introspectRunner, withCapNote, type Introspection, type IntrospectionFailure } from '../src/introspect'
 import {
   assertWorkspaceBuilt,
   CLI_BIN_PATH,
@@ -388,6 +388,17 @@ export default createApp({ routes: registerAttachmentRoutes })
     await Promise.all([introspectApp(dir), introspectApp(dir, { timeoutMs: 60_000 })])
   })
 
+  test('runs a fresh child outside the memo, neither reading nor filling it', async () => {
+    const dir = join(root, 'fresh-missing')
+
+    const first = introspectApp(dir, { fresh: true })
+    const memoised = introspectApp(dir)
+    expect(first).not.toBe(memoised)
+    expect(introspectApp(dir, { fresh: true })).not.toBe(first)
+    expect(introspectApp(dir)).toBe(memoised)
+    await Promise.all([first, memoised])
+  })
+
   test('reports crashed, never a rejection, when the process cannot be spawned', async () => {
     const message = expectFailure(await introspectApp(join(root, 'does-not-exist')), 'crashed')
 
@@ -432,10 +443,23 @@ export default createApp({ routes: registerAttachmentRoutes })
     expect(result.manifest.warnings).toContainEqual({ code: 'unhandled-rejection', message: 'stray rejection' })
   }, 30_000)
 
+  test('names the check cap on a timeout under it, on the first line, so a slower `guren introspect` reads as no contradiction', () => {
+    const timedOut = withCapNote({ status: 'failed', reason: 'timeout', message: 'The app did not finish within 10000ms.\nmore' })
+    const crashed = { status: 'failed', reason: 'crashed', message: 'exited' } as const
+
+    expect(timedOut).toMatchObject({
+      reason: 'timeout',
+      message: 'The app did not finish within 10000ms. The commands that judge the app cap introspection at 10 s; `guren introspect` waits 30 s by default.\nmore',
+    })
+    expect(withCapNote(crashed)).toBe(crashed)
+  })
+
   test('reports timeout when a provider never finishes registering, and kills what it spawned', async () => {
     const dir = await app('timeout', { 'src/app.ts': spawningApp(true) })
 
-    expect(expectFailure(await introspectApp(dir, { timeoutMs: 4000 }), 'timeout')).toContain('4000ms')
+    const message = expectFailure(await introspectApp(dir, { timeoutMs: 4000 }), 'timeout')
+    expect(message).toContain('4000ms')
+    expect(message).not.toContain('cap introspection')
     const pid = Number(await readFile(join(dir, 'helper.pid'), 'utf8'))
     await waitFor(() => !isAlive(pid))
   }, 30_000)
@@ -541,4 +565,27 @@ describe('guren introspect --json', () => {
     expect(failed.exitCode).toBe(1)
     expect(JSON.parse(failed.stdout)).toMatchObject({ status: 'failed', reason: 'no-entry' })
   }, 60_000)
+})
+
+describe('introspectRunner()', () => {
+  test('starts a caller-supplied run at most once, however often a check asks', async () => {
+    let calls = 0
+    const run = introspectRunner('/app', async (): Promise<Introspection> => (calls++, { status: 'failed', reason: 'import', message: 'x' }))!
+
+    await Promise.all([run(), run()])
+    await run()
+
+    expect(calls).toBe(1)
+    expect(introspectRunner('/app', false)).toBeUndefined()
+    expect(introspectRunner('/app', undefined)).toBeUndefined()
+  })
+
+  test('reads `true` as the memoised run under the cap the gate uses, so check --ci and the gate agree', async () => {
+    const dir = join(root, 'check-cap-missing')
+    const run = await introspectRunner(dir, true)!()
+
+    // The same result object is the same memoised child; the 30 s default is another.
+    expect(run).toBe(await introspectApp(dir, { timeoutMs: CHECK_INTROSPECT_TIMEOUT_MS }))
+    expect(run).not.toBe(await introspectApp(dir))
+  })
 })

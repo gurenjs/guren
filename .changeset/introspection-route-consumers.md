@@ -2,7 +2,7 @@
 '@guren/cli': minor
 ---
 
-`guren check`'s route rules, `guren doctor`'s `prototype-routes` and `guren context` read the introspected app's routes (RFC 0026 Part 2d), so a route a provider or plugin registers is judged and listed, and a module under `modules/` that `createApp()` never mounts is not. `guren check` introspects for each rule only once the routes file shows that rule's content (a params schema or a binding for the route contracts, a route that declares `.agent()` for the agent-route rules, a `prototype` route or a prototype fixture for the prototype rules), never with `--routes`; `--no-introspect`, a failed introspection and a provider that threw in `register()` read the routes file as before. `runCheck()` introspects only with `introspect: true`, so `guren gate` and the edit hook are unchanged.
+`guren check`'s route rules, `guren doctor`'s `prototype-routes` and `guren context` read the introspected app's routes (RFC 0026 Part 2d), so a route a provider or plugin registers is judged and listed, and a module under `modules/` that `createApp()` never mounts is not. `guren check` introspects for each rule only once the routes file shows that rule's content (a params schema or a binding for the route contracts, a route that declares `.agent()` for the agent-route rules, a `prototype` route or a prototype fixture for the prototype rules), never with `--routes`; `--no-introspect`, a failed introspection and a provider that threw in `register()` read the routes file as before. `runCheck()` introspects only when asked: the edit hook does not, and `guren gate` does (Part 3).
 
 Verdicts that can change on the manifest path, by finding key:
 

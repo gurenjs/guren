@@ -9,7 +9,7 @@
  */
 import type { AppManifest } from '@guren/server'
 
-import type { CheckResult } from './check-result'
+import { advisory, type CheckReport, type CheckResult } from './check-result'
 import type { Introspection } from './introspect'
 
 export type ManifestSectionKey = 'auth' | 'session' | 'cache' | 'storage' | 'queue' | 'attachments'
@@ -113,6 +113,9 @@ export function skippedRegistrars(manifest: Pick<AppManifest, 'warnings' | 'prov
 /** Why a command given `--routes` reads that file: the manifest describes the entry's routes, which may not be the file's. */
 export const ROUTES_FLAG_NOT_INTROSPECTED = '--routes names a routes file, and the introspected app describes its entry'
 
+/** The key of the one line a failed introspection leaves, in `guren check`, `guren audit` and the gate's findings alike. */
+export const INTROSPECTION_UNAVAILABLE = 'introspection-unavailable'
+
 /** The remedy the one `introspection-unavailable` line carries, in `guren check` and `guren audit` alike. */
 export const INTROSPECTION_UNAVAILABLE_FIX = 'Run `bunx guren introspect` to see the failure, or pass --no-introspect to skip it.'
 
@@ -127,6 +130,44 @@ export function describeIntrospectionFailure(failure: IntrospectionFailed): stri
 export function introspectionUnavailableMessage(failure: IntrospectionFailed, judgedInstead: string): string {
   const reason = failure.message.split('\n')[0]!.replace(/\.?$/u, '.')
   return `The app could not be introspected (${failure.reason}): ${reason} ${judgedInstead}`
+}
+
+/** Why a `--changed` run that changed no source leaves the app unexecuted. */
+export const NO_SOURCE_CHANGED_REASON = 'this run changed no source, so the app was not introspected'
+
+/** Why a verdict only the registered app can answer has nothing to read: no run, or one that failed and reports itself. */
+export const NOT_INTROSPECTED_REASON = 'no introspected app was available'
+
+/**
+ * A verdict only the registered app can answer, with no manifest to vouch for it: an advisory warn,
+ * `evidence: 'none'`. `subject` is completed by "is unverified: <why>."; no `reason` means no manifest.
+ */
+export function unverifiedResult(
+  key: string,
+  title: string,
+  subject: string,
+  reason: string | undefined,
+  options: { detail?: string; fix?: string; filePath?: string } = {},
+): CheckResult {
+  const evidenceReason = reason ?? NOT_INTROSPECTED_REASON
+  const message = `${subject} is unverified: ${evidenceReason}.${options.detail ? ` ${options.detail}` : ''}`
+  const fix = options.fix ? `${UNVERIFIED_SECTION_FIX} ${options.fix}` : UNVERIFIED_SECTION_FIX
+  return { ...advisory(key, title, 'warn', message, fix, options.filePath), evidence: 'none', evidenceReason }
+}
+
+/**
+ * The advisory results a gate still prints: verdicts only the registered app could answer that no
+ * manifest vouched for (RFC 0026 §5). Without them a missing session binding or delivery mount, which
+ * gate when the app is introspected, would pass a run with no manifest in silence. A `--changed` run
+ * that changed no source chose not to look, so its verdicts are left out.
+ */
+export function unverifiedResults(report: CheckReport): CheckResult[] {
+  return report.checks.filter((result) => result.evidence === 'none' && result.evidenceReason !== NO_SOURCE_CHANGED_REASON)
+}
+
+/** Why the app went unread, then what that left unverified: a check report's lines a gate prints without counting. */
+export function advisoryCheckResults(report: CheckReport): CheckResult[] {
+  return [...report.checks.filter((result) => result.key === INTROSPECTION_UNAVAILABLE), ...unverifiedResults(report)]
 }
 
 /** Results a check judged from source, naming why the manifest was not used when there is a reason. */

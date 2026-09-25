@@ -1,5 +1,5 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 
 /**
  * The minimum app on disk `buildCloudflareOutput` will assemble a worker from.
@@ -144,4 +144,20 @@ export async function captureLogs(run: () => Promise<void>): Promise<string> {
     console.log = original
   }
   return logs.join('\n')
+}
+
+/**
+ * An app the CLI can introspect (RFC 0026): an entry importing `src/app.ts`, and this workspace's
+ * `@guren/core` for it to import. The deploy verdicts read the session store from the registered app.
+ */
+export function writeIntrospectableApp(root: string, app: string): void {
+  // The child imports these packages' dist/, not src/: an unbuilt checkout would read as a failed introspection.
+  const unbuilt = ['core', 'server', 'orm'].map((name) => resolve(import.meta.dir, `../../${name}/dist/index.js`)).filter((file) => !existsSync(file))
+  if (unbuilt.length > 0) throw new Error(`run \`bun run build\` first: the introspection child imports ${unbuilt.join(', ')}`)
+  mkdirSync(join(root, 'src'), { recursive: true })
+  mkdirSync(join(root, 'node_modules/@guren'), { recursive: true })
+  symlinkSync(resolve(import.meta.dir, '../../core'), join(root, 'node_modules/@guren/core'), 'dir')
+  writeFileSync(join(root, 'bunfig.toml'), '[install]\nauto = "disable"\n')
+  writeFileSync(join(root, 'src/main.ts'), "import app from './app.js'\nexport default app\n")
+  writeFileSync(join(root, 'src/app.ts'), app)
 }

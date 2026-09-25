@@ -1,5 +1,16 @@
 # Upgrading Guren
 
+## Unreleased: `analyzeDeployRuntime()` and `judgeDeployRuntime()` are deprecated
+
+The two deploy-runtime functions `@guren/cli` exports carry `@deprecated`
+(`deploy-runtime-analysis`) and warn once per process. They keep working until
+`@guren/cli` 3.0.0. Call `checkDeployRuntime(cwd)`, which returns the same three
+verdicts. The password hashing and store verdicts now come from the introspected
+app, so without it they are `deploy-password-hashing-unverified` and
+`deploy-runtime-stores-unverified` (advisory). The six `DeployRuntimeAnalysis`
+signal arrays for the hasher and the session config are always empty.
+`bunx guren upgrade --check-only` lists the files that import either function.
+
 ## Unreleased: concurrent cache misses share one callback
 
 `remember()` and `rememberForever()` on a store from `cache.store()` run the

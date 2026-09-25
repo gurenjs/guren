@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { runBlueprint } from '../src/blueprints'
 import { runCheck, type CheckResult } from '../src/check'
 import { gatingResults } from '../src/check-result'
+import { runGate, type GateExec } from '../src/gate'
 import {
   assertWorkspaceBuilt,
   captureWarnings,
@@ -113,7 +114,7 @@ afterAll(async () => {
 })
 
 describe('session and attachments wiring read from the introspected app (RFC 0026 §5)', () => {
-  test('agrees with the source reading on a scaffolded app, and says it read the manifest', async () => {
+  test('passes a scaffolded app from the manifest, and leaves what only the app shows unverified without it', async () => {
     const dir = await scaffoldApp('scaffolded', ['session', 'attachments'], { 'app/Models/User.ts': ATTACHABLE_MODEL })
     const { manifest, source } = await bothWays(dir)
 
@@ -126,14 +127,29 @@ describe('session and attachments wiring read from the introspected app (RFC 002
       'sessions-binding',
       'sessions-config:config/session.ts:sessions',
     ])
-    expect(Object.keys(source).sort()).toEqual(Object.keys(manifest).sort())
-
     for (const [key, result] of Object.entries(manifest)) {
-      expect({ key, status: result.status }).toEqual({ key, status: source[key]!.status })
       expect(result.status).toBe('pass')
       // The disk's root is read from source whichever way the disk was found.
       expect({ key, evidence: result.evidence }).toEqual({ key, evidence: key.startsWith('attachments-public-disk:') ? 'static' : 'manifest' })
-      expect({ key, evidence: source[key]!.evidence }).toEqual({ key, evidence: 'static' })
+    }
+
+    // The binding and the mount are registered-app facts; the tables, the model and the disk root are source ones.
+    expect(Object.keys(source).sort()).toEqual([
+      'attachments-config:config/attachments.ts',
+      'attachments-delivery-unverified:config/attachments.ts',
+      'attachments-model:app/Models/User.ts',
+      'attachments-public-disk:config/attachments.ts:local',
+      'sessions-binding-unverified',
+      'sessions-config:config/session.ts:sessions',
+    ])
+    for (const [key, result] of Object.entries(source)) {
+      const unverified = key.includes('-unverified')
+      expect({ key, status: result.status, evidence: result.evidence, advisory: result.advisory ?? false }).toEqual({
+        key,
+        status: unverified ? 'warn' : 'pass',
+        evidence: unverified ? 'none' : 'static',
+        advisory: unverified,
+      })
     }
   })
 
@@ -144,18 +160,17 @@ describe('session and attachments wiring read from the introspected app (RFC 002
     expect(manifest['sessions-binding']).toMatchObject({ status: 'warn', evidence: 'manifest' })
     expect(manifest['sessions-binding']!.message).toContain("binds no 'session' in register()")
     expect(manifest['sessions-binding']!.message).toContain('in-memory default')
-    expect(source['sessions-binding']).toMatchObject({ status: 'warn', evidence: 'static' })
-    expect(source['sessions-binding']!.message).toContain('createApp() does not register it')
+    expect(source['sessions-binding-unverified']).toMatchObject({ status: 'warn', evidence: 'none', advisory: true })
   })
 
-  test('warns on a binding provider the entry imports but never registers, which the scan passed', async () => {
+  test('warns on a binding provider the entry imports but never registers', async () => {
     const dir = await scaffoldApp('imported-not-registered', ['session'], {
       'src/app.ts': `import SessionProvider from '../app/Providers/SessionProvider.js'\n${APP}\nexport { SessionProvider }\n`,
     })
     const { manifest, source } = await bothWays(dir)
 
     expect(manifest['sessions-binding']).toMatchObject({ status: 'warn', evidence: 'manifest' })
-    expect(source['sessions-binding']).toMatchObject({ status: 'pass', evidence: 'static' })
+    expect(source['sessions-binding']).toBeUndefined()
   })
 
   test('warns, advisory, on a database store whose table object no db/schema.ts declares, which the scan cannot follow', async () => {
@@ -219,6 +234,28 @@ const pgTable = pgTableCreator((name) => \`app_\${name}\`)
 
     expect(manifest['sessions-binding']).toMatchObject({ status: 'fail', evidence: 'manifest' })
     expect(manifest['sessions-binding']!.message).toContain('refuses to boot')
+  })
+
+  test('guren gate introspects the app itself, so its check stage fails what only the registered app shows', async () => {
+    const dir = await scaffoldApp('gate-configured-twice', ['session'])
+    const app = await Bun.file(join(dir, 'src/app.ts')).text()
+    const pkg = JSON.parse(await Bun.file(join(dir, 'package.json')).text())
+    await writeWorkspaceFiles(dir, {
+      'src/app.ts': app
+        .replace("import { createApp } from '@guren/core'", "import { createApp, MemorySessionStore } from '@guren/core'")
+        .replace('auth: {},', 'auth: { sessionOptions: { store: new MemorySessionStore() } },'),
+      'package.json': JSON.stringify({ ...pkg, scripts: { codegen: 'guren codegen', typecheck: 'tsc --noEmit', test: 'bun test' } }),
+    })
+    // The script stages are not under test; check and audit run in process against the real child.
+    const exec: GateExec = async () => ({ exitCode: 0, stdout: '', stderr: '' })
+
+    const report = await runGate({ cwd: dir, exec })
+
+    const check = report.stages.find((stage) => stage.name === 'check')!
+    // The faked codegen writes nothing, so the generated-file findings sit beside it.
+    expect(check.status).toBe('fail')
+    expect(check.findings).toContainEqual(expect.stringContaining('refuses to boot'))
+    expect(report.stages.flatMap((stage) => stage.findings).some((finding) => finding.startsWith('Introspection'))).toBe(false)
   })
 
   test('fails a model when a module-scope configureAttachments() lives in a file nothing loads', async () => {
@@ -340,8 +377,9 @@ export function configureLegacy(): void {
     const checks = wiring((await runCheck({ cwd: dir, introspect: true, changedFiles: new Set(['docs/notes.md']) })).checks)
 
     expect(checks['introspection-unavailable']).toBeUndefined()
-    expect(checks['sessions-binding']).toMatchObject({ evidence: 'static' })
-    expect(checks['sessions-binding']!.message).toContain('this run changed no source')
+    expect(checks['sessions-binding-unverified']).toMatchObject({ evidence: 'none', advisory: true })
+    expect(checks['sessions-binding-unverified']!.message).toContain('this run changed no source')
+    expect(checks['sessions-config:config/session.ts:sessions']!.message).toContain('this run changed no source')
   })
 
   test('fails an unmounted delivery route and a redirect disk that cannot presign, from the engine and the storage manager', async () => {
@@ -358,7 +396,8 @@ export function configureLegacy(): void {
 
     for (const key of ['attachments-delivery:config/attachments.ts', 'attachments-serve-redirect:config/attachments.ts:local']) {
       expect({ ...manifest[key], key }).toMatchObject({ key, status: 'fail', evidence: 'manifest' })
-      expect({ ...source[key], key }).toMatchObject({ key, status: 'fail', evidence: 'static' })
+      const unverified = key.replace(':', '-unverified:')
+      expect({ ...source[unverified], key: unverified }).toMatchObject({ key: unverified, status: 'warn', evidence: 'none', advisory: true })
     }
     expect(manifest['attachments-delivery:config/attachments.ts']!.message).toContain("no registerAttachmentRoutes() route named 'attachments.show'")
     expect(manifest['attachments-delivery']).toBeUndefined()
@@ -375,7 +414,7 @@ export function configureLegacy(): void {
     const { manifest, source } = await bothWays(dir)
 
     expect(manifest['attachments-delivery:config/attachments.ts']).toMatchObject({ status: 'fail', evidence: 'manifest' })
-    expect(source['attachments-delivery:config/attachments.ts']).toMatchObject({ status: 'fail', evidence: 'static' })
+    expect(source['attachments-delivery-unverified:config/attachments.ts']).toMatchObject({ status: 'warn', evidence: 'none' })
   })
 
   test('judges a model from source when configureAttachments() runs only in boot(), past what introspection runs', async () => {
@@ -458,7 +497,7 @@ export default createApp({ env, config: [session], auth: {}, routes: registerWeb
     expect(manifest['sessions-binding']).toBeUndefined()
   })
 
-  test('falls back to the scan after a provider threw', async () => {
+  test('judges the tables from source after a provider threw, and cannot vouch for the binding or the mount', async () => {
     const dir = await scaffoldApp('threw', ['session', 'attachments'], { 'app/Providers/BindingProvider.ts': THROWING_PROVIDER })
     const app = await Bun.file(join(dir, 'src/app.ts')).text()
     await writeWorkspaceFiles(dir, {
@@ -467,9 +506,20 @@ export default createApp({ env, config: [session], auth: {}, routes: registerWeb
     const { manifest, source } = await bothWays(dir)
 
     expect(manifest['introspection-unavailable']).toBeUndefined()
-    for (const key of ['sessions-binding', 'sessions-config:config/session.ts:sessions', 'attachments-config:config/attachments.ts', 'attachments-delivery']) {
+    for (const key of ['sessions-config:config/session.ts:sessions', 'attachments-config:config/attachments.ts']) {
       expect({ ...manifest[key], key }).toMatchObject({ key, status: source[key]!.status, evidence: 'static' })
       expect(manifest[key]!.message).toContain('Judged from source: BindingProvider threw in register()')
+    }
+    for (const key of ['sessions-binding-unverified', 'attachments-delivery-unverified:config/attachments.ts']) {
+      expect({ ...manifest[key], key }).toMatchObject({ key, status: 'warn', evidence: 'none', advisory: true })
+      expect(manifest[key]!.message).toContain('BindingProvider threw in register()')
+    }
+
+    // No introspection-unavailable line here, so the gate names each verdict it could not vouch for.
+    const gate = await runGate({ cwd: dir, exec: async () => ({ exitCode: 0, stdout: '', stderr: '' }) })
+    const findings = gate.stages.find((stage) => stage.name === 'check')!.findings
+    for (const title of ['Session manager binding (advisory)', 'Attachments delivery route (advisory)']) {
+      expect(findings.find((line) => line.startsWith(`${title}: `))).toContain('BindingProvider threw in register()')
     }
   })
 
@@ -481,7 +531,7 @@ export default createApp({ env, config: [session], auth: {}, routes: registerWeb
 
     expect(manifest['introspection-unavailable']).toMatchObject({ status: 'warn', advisory: true })
     expect(manifest['introspection-unavailable']!.message).toContain('(import)')
-    expect(manifest['sessions-binding']).toMatchObject({ status: 'pass', evidence: 'static' })
+    expect(manifest['sessions-binding-unverified']).toMatchObject({ status: 'warn', evidence: 'none', advisory: true })
     expect(manifest['sessions-config:config/session.ts:sessions']).toMatchObject({ status: 'pass', evidence: 'static' })
   })
 

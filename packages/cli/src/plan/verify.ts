@@ -12,11 +12,12 @@ import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { runCheck } from '../check'
-import { formatFinding, gatingResults, type CheckReport } from '../check-result'
+import { formatAdvisoryFinding, formatFinding, gatingResults, type CheckReport } from '../check-result'
 import { capFindings, codegenFallback, OUTPUT_ERROR_PATTERN, outputFindings, outputTail, resolveScriptCommand } from '../command-output'
 import { discoverTestFiles } from '../discovery'
 import { readBracketedTokenFiles } from '../docs-acceptance'
 import { resolveAppDrizzleKit, type AppDrizzleKit } from '../make-migration'
+import { advisoryCheckResults } from '../manifest-section'
 import { bunExecutable, type CapturedExec, type CapturedRun } from '../subprocess'
 import {
   acceptanceStatus,
@@ -53,7 +54,10 @@ export interface PlanVerifierOptions {
   scripts: Record<string, string>
   /** Element ids a waiver covers (RFC 0030 §6): left out of every step's judgement, and recorded. */
   waived?: ReadonlySet<string>
-  /** Defaults to `runCheck()` against `root`. */
+  /**
+   * Defaults to an introspecting `runCheck()` against `root`: every verify list opens with a
+   * `codegen` that must pass first, so the entry imports by the time the check runs.
+   */
   check?: () => Promise<CheckReport>
   /** Test files, absolute. Defaults to `discoverTestFiles(root)`. */
   testFiles?: () => Promise<string[]>
@@ -227,7 +231,7 @@ export class PlanVerifier {
     private readonly options: PlanVerifierOptions,
   ) {
     this.declaredIds = planAcceptanceIds(plan)
-    this.check = options.check ?? (() => runCheck({ cwd: options.root, json: true }))
+    this.check = options.check ?? (() => runCheck({ cwd: options.root, json: true, introspect: true }))
     this.testFiles = options.testFiles ?? (() => discoverTestFiles(options.root))
     this.drizzleKit = options.drizzleKit ?? (() => resolveAppDrizzleKit(options.root))
     this.now = options.now ?? (() => new Date())
@@ -462,7 +466,9 @@ export class PlanVerifier {
       return { label, status: 'blocked', reason: `could not run: ${reasonOf(error)}`, findings: [] }
     }
     const failing = gatingResults(report)
-    return { label, status: failing.length > 0 ? 'fail' : 'pass', findings: capFindings(failing.map(formatFinding)) }
+    // After the cap, as in the gate: forty gating findings must not hide why the app went unread.
+    const advisory = advisoryCheckResults(report).map(formatAdvisoryFinding)
+    return { label, status: failing.length > 0 ? 'fail' : 'pass', findings: [...capFindings(failing.map(formatFinding)), ...advisory] }
   }
 
   private testKey(step: PlanDerivedStep): string {

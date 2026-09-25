@@ -218,6 +218,18 @@ describe('guren audit against the introspected app (RFC 0026 §5)', () => {
     expect(manifest['introspection-unavailable']).toBeUndefined()
   })
 
+  test('does not execute the app for a --changed run that changed no source, and says why', async () => {
+    let calls = 0
+    const report = await runAudit({
+      cwd: app,
+      introspect: async () => (calls++, { status: 'failed', reason: 'crashed', message: 'never asked' }),
+      changedFiles: new Set(['docs/notes.md']),
+    })
+
+    expect(calls).toBe(0)
+    expect(report.routeSource).toMatchObject({ from: 'routes-file', reason: expect.stringContaining('changed no source') })
+  })
+
   test('judges each same-named controller against its own file, with no collision to report', () => {
     expect(manifest['controller-name-collision:ReportController']).toBeUndefined()
     expect(manifest['validation:POST /billing/reports']?.status).toBe('pass')

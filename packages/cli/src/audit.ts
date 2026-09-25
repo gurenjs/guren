@@ -52,11 +52,14 @@ import {
 } from './controller-methods'
 import type { CheckEvidence } from './check-result'
 import { manifestMiddlewareNames } from './app-routes'
-import { introspectApp } from './introspect'
+import { changesSource } from './changed-files'
+import { introspectRunner, type IntrospectOption } from './introspect'
 import {
+  INTROSPECTION_UNAVAILABLE,
   INTROSPECTION_UNAVAILABLE_FIX,
   introspectedRoutes,
   introspectionUnavailableMessage,
+  NO_SOURCE_CHANGED_REASON,
   ROUTES_FLAG_NOT_INTROSPECTED,
   skippedRegistrars,
   type IntrospectSource,
@@ -133,10 +136,11 @@ export interface RunAuditOptions {
   deps?: boolean
   /**
    * Judge the route-level rules against the introspected app (RFC 0026 §5). `guren audit` sets it
-   * unless `--no-introspect`; an in-process caller leaves it off, since the manifest memo would
-   * outlive a long-lived process.
+   * unless `--no-introspect`, and the gate passes the run its check stage shares.
    */
-  introspect?: boolean
+  introspect?: IntrospectOption
+  /** A `--changed` run's files: one that changed no source does not execute the app, as in `guren check`. */
+  changedFiles?: ReadonlySet<string> | null
 }
 
 const WEBHOOK_PATH_PATTERN = /(webhook|callback)/i
@@ -653,7 +657,7 @@ async function loadAuditRoutes(cwd: string, options: RunAuditOptions): Promise<A
   if (failed?.status === 'failed') {
     staticReason ??= `the app could not be introspected (${failed.reason})`
     loadFindings.push(finding(
-      'introspection-unavailable',
+      INTROSPECTION_UNAVAILABLE,
       'Introspection',
       'warn',
       introspectionUnavailableMessage(failed, 'The route-level checks were judged from the routes file instead.'),
@@ -706,6 +710,7 @@ async function auditIntrospectSource(
 ): Promise<IntrospectSource | undefined> {
   if (!options.introspect) return undefined
   if (options.routesFile) return { skipped: ROUTES_FLAG_NOT_INTROSPECTED }
+  if (!changesSource(options.changedFiles)) return { skipped: NO_SOURCE_CHANGED_REASON }
   if (!definitions && await isDefinitelyAbsent(cwd, routesFile)) {
     return { skipped: `there is no routes file at ${relative(cwd, routesFile)}, so the app was not introspected` }
   }
@@ -713,7 +718,7 @@ async function auditIntrospectSource(
   if (definitions && !definitions.some(isJudgedRoute)) {
     return { skipped: 'no route mutates or carries a body, so the app was not introspected' }
   }
-  return () => introspectApp(cwd)
+  return introspectRunner(cwd, options.introspect)
 }
 
 /** A route the validation or authentication rule judges. */
