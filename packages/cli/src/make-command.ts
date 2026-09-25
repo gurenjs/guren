@@ -5,6 +5,7 @@ import { camelCase, ensureSuffix, kebabCase, relativeImportPath, resourceName, s
 import { addEntryWithImport, defaultImportBinding, insertArrayArgumentEntry, insertArrayOptionEntry, type EntryPlan, type InsertResult, type RegisteredEntry } from './patch-helpers'
 import { fileExists, readIfExists } from './discovery'
 import { registersCommandsOf } from './console-check'
+import { moduleDescriptorOrScaffold } from './app-entry'
 
 const COMMANDS_DIR = 'app/Console/Commands'
 const CONSOLE_ENTRY = 'src/console.ts'
@@ -90,10 +91,10 @@ async function registerRootCommand(className: string, file: string): Promise<voi
 }
 
 async function registerModuleCommand(className: string, file: string, moduleName: string): Promise<void> {
-  const indexPath = `modules/${moduleName}/index.ts`
+  const { file: indexPath, exists } = await moduleDescriptorOrScaffold(process.cwd(), moduleName)
   const specifier = commandSpecifier(indexPath, file)
 
-  if (!(await fileExists(process.cwd(), indexPath))) {
+  if (!exists) {
     consola.warn(`No ${indexPath} found — ${className} is not registered yet.`)
     consola.info(`Add it to defineModule({ commands: [...] }) in ${indexPath}:`)
     consola.info(`  import ${className} from '${specifier}'`)
@@ -161,7 +162,7 @@ async function printModuleConsoleHopGuidance(moduleName: string): Promise<void> 
   if (consoleSource !== null && registersCommandsOf(consoleSource, [moduleBinding])) return
 
   consola.info(`Register the module's commands with your console kernel in ${CONSOLE_ENTRY}:`)
-  consola.info(`  import { ${moduleBinding} } from '../modules/${moduleName}/index.js'`)
+  consola.info(`  import { ${moduleBinding} } from '../modules/${moduleName}'`)
   consola.info(`  kernel.registerMany(${moduleBinding}.commands)`)
   if (consoleSource === null) {
     consola.info(`Create ${CONSOLE_ENTRY} first if your project predates it.`)

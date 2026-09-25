@@ -6,6 +6,7 @@ import { createTempWorkspace } from './helpers'
 
 let workerOptions: Record<string, unknown> | undefined
 let workerDriver: unknown
+let startWorker: (() => Promise<void>) | undefined
 let fakeDriver: {
   getFailedJobs: ReturnType<typeof mock>
   retryFailedJob: ReturnType<typeof mock>
@@ -26,6 +27,7 @@ await mock.module('../src/queue-deps', () => ({
 
     async start() {
       this.events.workerStarted?.()
+      await startWorker?.()
     }
 
     async stop() {
@@ -51,6 +53,7 @@ beforeEach(() => {
   }
   workerOptions = undefined
   workerDriver = undefined
+  startWorker = undefined
 })
 
 describe('queue helpers', () => {
@@ -125,6 +128,62 @@ describe('queue helpers', () => {
       await workspace.cleanup()
     }
   })
+
+  it('boots a default application before resolving its queue binding', async () => {
+    const workspace = await createTempWorkspace('guren-cli-queue-boot-')
+    try {
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(join(workspace.dir, 'src/main.ts'), `
+        const driver = { name: 'registered-during-boot' }
+        const manager = { driver: () => driver, hasDriver: () => true, getDefaultDriverName: () => 'memory' }
+        export default {
+          listen() {},
+          boot() { this.container = { has: () => true, make: () => manager } },
+        }
+      `)
+      await runQueueWorker({ once: true })
+      expect(workerDriver).toEqual({ name: 'registered-during-boot' })
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not start a worker after application boot fails', async () => {
+    const workspace = await createTempWorkspace('guren-cli-queue-boot-failure-')
+    try {
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(join(workspace.dir, 'src/main.ts'), `export default { listen() {}, boot() { throw new Error('provider failed') } }`)
+      await expect(runQueueWorker({ once: true })).rejects.toThrow('provider failed')
+      expect(workerDriver).toBeUndefined()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  for (const failure of [false, true]) {
+    it(`removes its signal handlers when the worker ${failure ? 'fails' : 'finishes'}`, async () => {
+      const workspace = await createTempWorkspace('guren-cli-queue-lifetime-')
+      const before = { SIGINT: process.listeners('SIGINT'), SIGTERM: process.listeners('SIGTERM') }
+      try {
+        await mkdir(join(workspace.dir, 'src'), { recursive: true })
+        await writeFile(join(workspace.dir, 'src/main.ts'), 'export default { listen() {} }')
+        startWorker = async () => { if (failure) throw new Error('poll failed') }
+        if (failure) await expect(runQueueWorker()).rejects.toThrow('poll failed')
+        else await runQueueWorker({ once: true })
+        expect(process.listeners('SIGINT')).toEqual(before.SIGINT)
+        expect(process.listeners('SIGTERM')).toEqual(before.SIGTERM)
+      } finally {
+        // Also clean up against the pre-fix implementation so a failing regression
+        // cannot leave callbacks pointing at a completed test's worker.
+        for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+          for (const listener of process.listeners(signal)) {
+            if (!before[signal].includes(listener)) process.removeListener(signal, listener)
+          }
+        }
+        await workspace.cleanup()
+      }
+    })
+  }
 
   it('retries failed jobs', async () => {
     const workspace = await createTempWorkspace('guren-cli-queue-retry-')

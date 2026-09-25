@@ -26,7 +26,7 @@ function routeJoinKey(route: JoinableRoute): string {
  * the sides may swap). The nth entry of a key takes its nth definition; a key the two sides count
  * differently matches nothing. The key holds `module`, since the CLI loads modules in directory order
  * and the app in `createApp({ modules })` order; a module the app mounts under another
- * `defineModule()` name than its `modules/<dir>/index.ts` exports joins none of its routes.
+ * `defineModule()` name than its `modules/<dir>` entry exports joins none of its routes.
  */
 export function joinRouteDefinitions<T extends JoinableRoute>(
   entries: readonly JoinableRoute[],

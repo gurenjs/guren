@@ -20,6 +20,10 @@ Ships the Citty-based CLI (`guren` bin) with generators and database helpers. Ge
   - Either way, `tests/scaffold-output.test.ts` renders representative outputs and requires them to parse. Its covered set derives from `builtinSubCommands`, so a new `make:*` command fails that gate until it joins the matrix (new flags still need a matrix entry by hand) or names its reason in `SKIPPED_GENERATORS`.
   - Builder output additionally gets a *compile* gate, with tsconfig.templates.json's own options (`renderedAppCompilerOptions()` in `tests/helpers.ts`), so the static and rendered halves of a scaffold are held to the same bar. `tests/scaffold-builder-typecheck.test.ts` renders make:auth's flag combinations (`--oauth --verify`, plain `--oauth`, `--oauth-only`, and one against a declared env) into a temp app, regenerates `.guren/pages.gen.ts`, and typechecks the render. `tests/make-output-typecheck.test.ts` does the same for every other `make:*`: make:feature per flag combination (`--policy --test` over every field type, `--public --module`, `--attach`), with the routes file an author writes from the printed block and the full route codegen run against it (the rendered app is *imported*, so it links `@guren/core`, `@guren/orm` and `zod` into the temp app), and every single-file generator rendered into one app beside what its output references (make:route its controller, make:resource its model). Its covered set derives from `builtinSubCommands` like the parse gate's. Combos not compiled in either differ only by omission and stay parse-checked.
 - Ensure new commands reuse `toWriterOptions` and shared logging via `consola`
+- Queue commands use `loadBootedApplication()` before resolving the configured
+  queue manager. Worker SIGINT/SIGTERM handlers belong to one worker run and
+  must be removed on completion or failure. App `stop()` only closes HTTP/Vite
+  listeners; it is not a general provider or queue-driver disposal API.
 - Keep `runtime.ts` as the single entry for boot helpers; extend `MaybeApplication` instead of reaching into app internals from commands
 - When touching route type output, regenerate `examples/blog/types/generated/routes.d.ts` to verify compatibility
 - Define every subcommand with `defineCommand()` from `./define-command`, not from `citty`, and wire the root command via `runCli()` from `run-cli.ts` (citty's own `runMain()` reports each failure twice and exits the process itself). The wrapper is what makes a repeated flag worth its last value; importing citty's own `defineCommand` opts a command out of that silently, and the reading sites look identical either way. `tests/define-command.test.ts` gates every entry of `builtinSubCommands` on having gone through the wrapper — but it cannot reach the root command in `bin.ts` (which `runCli()` consumes at module scope) or a plugin command (which owns its own parse, deliberately: see the comment in `plugin-commands.ts`)
@@ -48,6 +52,9 @@ Ships the Citty-based CLI (`guren` bin) with generators and database helpers. Ge
   output. Plan engines stay in their existing modules. Keep application loading
   lazy and specific to each command: impact scans, detailed state, and commands
   that need no application must retain their own loading conditions.
+- `src/commands/tools.ts` owns tool:* and token:issue definitions and argument
+  validation. Execution stays in the existing tool/token modules. Preserve the
+  tool:dev process-lifetime marker and the local defineCommand wrapper.
 - These modules only construct command objects at import time. Resolve cwd,
   environment, and application state inside command execution. Use the local
   `defineCommand` wrapper so repeated flags keep their existing semantics.
