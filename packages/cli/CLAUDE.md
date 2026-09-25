@@ -48,6 +48,9 @@ Ships the Citty-based CLI (`guren` bin) with generators and database helpers. Ge
   output. Plan engines stay in their existing modules. Keep application loading
   lazy and specific to each command: impact scans, detailed state, and commands
   that need no application must retain their own loading conditions.
+- `src/commands/tools.ts` owns tool:* and token:issue definitions and argument
+  validation. Execution stays in the existing tool/token modules. Preserve the
+  tool:dev process-lifetime marker and the local defineCommand wrapper.
 - These modules only construct command objects at import time. Resolve cwd,
   environment, and application state inside command execution. Use the local
   `defineCommand` wrapper so repeated flags keep their existing semantics.
