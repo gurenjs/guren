@@ -1,9 +1,9 @@
 /**
  * Preloaded into a CLI child by `tests/plan-prompt.test.ts`: any process spawn ends the child with
- * exit 97. On Bun 1.3.11 and 1.3.14 every `node:child_process` entry point, named imports included,
- * ends in `Bun.spawn`/`Bun.spawnSync`; the module-object loop covers a runtime where one does not
- * (1.4.x unprobed), and reaches calls through the module object only. It runs in a child because
- * replacing these inside `bun test --isolate` outlived the file and crashed a later file's spawn.
+ * exit 97. Every `node:child_process` entry point ends in `Bun.spawn`/`Bun.spawnSync`; the loop over
+ * the module object is a second net, and cannot reach a named import, which keeps its own binding.
+ * It runs in a child because replacing these inside `bun test --isolate` outlived the file and
+ * crashed a later file's spawn.
  */
 import * as childProcess from 'node:child_process'
 

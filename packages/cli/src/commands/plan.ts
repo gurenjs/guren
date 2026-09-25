@@ -24,12 +24,10 @@ const planArgs = {
   'print-prompt': {
     type: 'boolean',
     description: 'Print the prompt, then the plan JSON Schema (draft-07).',
-    default: false,
   },
   json: {
     type: 'boolean',
     description: 'With --print-prompt, print { prompt, schema } as JSON.',
-    default: false,
   },
   revise: {
     type: 'string',
@@ -53,11 +51,12 @@ export const planCommand = defineCommand({
     if (args.revise !== undefined) {
       throw new CliError('guren plan --revise, which asks a model to revise a plan, is not available yet. Edit the plan, then run guren plan:revise.')
     }
-    // An unquoted request loses every word citty reads as a flag or its value.
     const undeclared = Object.keys(args).filter((name) => !PLAN_DECLARED_ARGS.has(name.replaceAll('-', '').toLowerCase()))
     if (undeclared.length > 0) {
       const flags = undeclared.map((name) => (name.length === 1 ? `-${name}` : `--${name}`)).join(', ')
-      throw new CliError(`guren plan does not take ${flags}. Quote the request so every word of it reaches the prompt: guren plan "<request>" --print-prompt.`)
+      throw new CliError(
+        `guren plan does not take ${flags}; it takes --print-prompt, --json and --revise. An unquoted request whose words start with - is read as flags too, so quote it: guren plan "<request>" --print-prompt.`,
+      )
     }
     if (!args['print-prompt']) {
       throw new CliError(

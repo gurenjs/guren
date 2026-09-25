@@ -148,7 +148,7 @@ export function planGeneratorNames(): string[] {
     .map(([name]) => name)
 }
 
-export const PLAN_COMMAND_FORM ='`guren <subcommand> [args…]` or `bunx guren <subcommand> [args…]`'
+export const PLAN_COMMAND_FORM = '`guren <subcommand> [args…]` or `bunx guren <subcommand> [args…]`'
 
 export type PlanCommandVerdict = { allowed: true; subcommand: string; args: string[] } | { allowed: false; reason: string }
 

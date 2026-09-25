@@ -131,7 +131,23 @@ describe('guren plan', () => {
     const { error, logged } = await refusal(['remove', 'the', '--force', 'flag', '--print-prompt'])
     expect(error).toBeInstanceOf(CliError)
     expect((error as Error).message).toContain('does not take --force')
-    expect((error as Error).message).toContain('Quote the request')
+    expect((error as Error).message).toContain('quote it')
     expect(logged).toEqual([])
+  })
+
+  test('should name the flags it takes when refusing one it does not', async () => {
+    const { error } = await refusal([REQUEST, '--app', '.', '--print-prompt'])
+    expect(error).toBeInstanceOf(CliError)
+    expect((error as Error).message).toContain('does not take --app; it takes --print-prompt, --json and --revise')
+  })
+
+  test('should read the camel-case spelling of --print-prompt', async () => {
+    const log = spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      await runCommand(builtinSubCommands.plan, { rawArgs: [REQUEST, '--printPrompt', '--no-json'] })
+      expect(log.mock.calls.map(([line]) => String(line).split(`\n${PLAN_PROMPT_SCHEMA_DELIMITER}\n`)[0])).toEqual([buildPlanPrompt(REQUEST).prompt])
+    } finally {
+      log.mockRestore()
+    }
   })
 })
