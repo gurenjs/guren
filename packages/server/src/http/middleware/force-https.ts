@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from 'hono'
 import { applyResponseHeaders } from './response-headers'
+import { isDispatchedToolRequest } from '../../internal/dispatched-request'
 
 export interface ForceHttpsOptions {
   /** Seconds. Default: 31536000 (1 year). */
@@ -14,7 +15,8 @@ export interface ForceHttpsOptions {
 
 /**
  * Redirects HTTP to HTTPS and sets Strict-Transport-Security. Equivalent to
- * Rails' `force_ssl`.
+ * Rails' `force_ssl`. An agent tool call the dispatcher re-enters in process
+ * passes through.
  */
 export function createForceHttpsMiddleware(options: ForceHttpsOptions = {}): MiddlewareHandler {
   const {
@@ -33,6 +35,15 @@ export function createForceHttpsMiddleware(options: ForceHttpsOptions = {}): Mid
     const proto = ctx.req.header('x-forwarded-proto') ?? url.protocol.replace(':', '')
 
     if (proto !== 'https') {
+      // An agent tool call re-enters through `app.fetch` on the inbound
+      // origin, `http://` behind a TLS-terminating proxy, and a tool caller
+      // cannot follow a redirect. It never leaves the process, so there is no
+      // transport to upgrade. Judged by object identity, never by a header.
+      if (isDispatchedToolRequest(ctx.req.raw)) {
+        await next()
+        return
+      }
+
       const path = url.pathname + url.search
 
       for (const pattern of exclude) {

@@ -566,6 +566,12 @@ per instance. A global budget still needs a shared store and your app's own
 > request never arrived over a socket, so every MCP caller collapses into that
 > route's shared bucket.
 
+`createForceHttpsMiddleware()` lets a tool call through. The re-entrant request
+is built on the origin the MCP client reached, which is `http://` behind a
+TLS-terminating proxy, and a 301 there would come back to the agent as a
+successful result. Only the request object the dispatcher built is let through,
+so an outside HTTP request that copies its headers is still redirected.
+
 ### Rehearsing a call over MCP
 
 The endpoint adds one tool of its own, `guren_preflight`. It answers whether a

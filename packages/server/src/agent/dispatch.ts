@@ -8,6 +8,7 @@ import type { AgentToolInputSource, DerivedAgentTool } from './derive'
 import type { AgentSurface } from './events'
 import { PATH_PARAM_PATTERN } from '../internal/route-path'
 import { AGENT_PREFLIGHT_HEADER, AGENT_PREFLIGHT_VERDICT_HEADER } from '../internal/agent-preflight'
+import { markDispatchedToolRequest } from '../internal/dispatched-request'
 
 /** How many characters of a non-JSON response body survive into the result. */
 const TEXT_RESPONSE_CAP = 50_000
@@ -198,7 +199,9 @@ export function buildToolRequest(
 
   const qs = query.toString()
   const url = `${origin}${path}${qs ? `?${qs}` : ''}`
-  return { request: new Request(url, { method, headers, body }) }
+  // Marked by identity so force-https can tell this in-process re-entry from
+  // a plain-HTTP request off the wire; a copy of it carries no mark.
+  return { request: markDispatchedToolRequest(new Request(url, { method, headers, body })) }
 }
 
 /**
