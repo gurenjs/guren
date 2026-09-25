@@ -357,7 +357,7 @@ async function resolveImportSpecifier(
   }
 
   // A directory is never the resolved file: `'../modules/billing'` names its index, and
-  // a directory path matches no `modules/billing/**` glob nor any module boundary.
+  // a directory path matches neither a `modules/billing/**` glob nor a module boundary.
   for (const candidate of candidates) {
     if (await isFile(candidate)) {
       return { specifier, typeOnly, kind: 'file', fileRelPath: toPosixRelative(cwd, candidate) }

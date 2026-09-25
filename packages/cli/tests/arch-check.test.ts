@@ -808,8 +808,6 @@ describe('runArchCheck derived module rules (RFC 0002, zero-config)', () => {
   })
 })
 
-// `access()` succeeds on a directory, so `'../modules/newsletter'` resolved to the directory
-// itself, which no `modules/newsletter/**` glob and no module boundary matches.
 describe('runArchCheck directory imports', () => {
   const MODULE_RULE_CONFIG = `
 export default {
@@ -839,7 +837,7 @@ export default {
       const byDirectory = results.filter((r) => r.filePath === 'app/ByDirectory.ts')
       const byIndex = results.filter((r) => r.filePath === 'app/ByIndex.ts')
       expect(byDirectory.map((r) => r.status)).toEqual(['fail'])
-      expect(byDirectory[0]!.key).toBe("arch:app/ByDirectory.ts:../modules/newsletter:modules/newsletter/**")
+      expect(byDirectory[0]!.key).toBe('arch:app/ByDirectory.ts:../modules/newsletter:modules/newsletter/**')
       const verdict = (r: CheckResult) => ({ status: r.status, title: r.title, target: r.key.split(':').at(-1) })
       expect(byDirectory.map(verdict)).toEqual(byIndex.map(verdict))
     } finally {
@@ -881,6 +879,24 @@ export default {
       expect(found.map((r) => [r.key, r.status])).toEqual([
         ['arch:unresolved:app/Mailer.ts:../modules/newsletter/app/Models', 'warn'],
       ])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // Such an import does not compile, so the boundary rule has no file to judge.
+  it('leaves a directory with no index to the declared rules, not the module boundary rule', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-dir-noindex-boundary-')
+    try {
+      await writeFiles(workspace.dir, {
+        'modules/newsletter/index.ts': 'export const newsletterModule = {}',
+        'modules/newsletter/app/Models/Subscriber.ts': 'export class Subscriber {}',
+        'app/Mailer.ts': `import { Subscriber } from '../modules/newsletter/app/Models'\nexport const s = Subscriber`,
+      })
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      expect(results.map((r) => [r.key, r.status])).toEqual([['arch:module-summary', 'pass']])
     } finally {
       await workspace.cleanup()
     }
