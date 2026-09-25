@@ -1,16 +1,16 @@
 /**
  * Generates typed data contracts from JsonResource subclasses.
  *
- * Scans `app/Http/Resources/` at the project root and inside every
- * `modules/<name>/` (RFC 0002), extracts the return type of `toArray()` (or an
- * explicit `interface XxxData`), and emits `data.gen.ts` exporting a `Data`
- * namespace. Copy first, reference second: a payload whose body cannot be
- * copied is emitted as an `import(...)` reference when the file exports it, a
- * fallback that cannot change output already being emitted.
+ * Scans `app/Http/Resources/` at the project root and inside every `modules/<name>/`
+ * (RFC 0002), extracts the return type of `toArray()` (or an explicit `interface XxxData`),
+ * and emits `data.gen.ts` exporting a `Data` namespace. Copy first, reference second: a
+ * payload whose body cannot be copied is emitted as an `import(...)` reference when the
+ * file exports it, a fallback that cannot change output already being emitted. The import
+ * block binds each name once; a copy binding one to a second module takes that reference.
  */
 import { readFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
-import type { File } from '@babel/types'
+import type { File, ImportSpecifier } from '@babel/types'
 import { RESOURCES_DIR, discoverResourceFiles, moduleNameFromRelPath, toPosixRelative } from './discovery'
 import { isIdentifier, pascalCase, relativeImportPath, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { parseSourceFile } from './parse-cache'
@@ -32,6 +32,12 @@ export interface ResourceDefinition {
   rawType: string | null
   /** What a copied body `extends`, which `rawType` leaves out along with the members it adds. */
   heritage?: string
+  /**
+   * `import('…').Name` reference to the payload a copied `rawType` was read from, when the
+   * file exports it: what the copy is swapped for when one of `imports` binds a name the
+   * shared import block already binds to another module ({@link resolveImportBindings}).
+   */
+  reference?: string
   imports: string[]
   /** Module (`modules/<name>/`) the class lives in — `null` at the project root. */
   module: string | null
@@ -75,6 +81,7 @@ export async function generateDataTypes(
   }
 
   resolveEmittableNames(definitions, warnings)
+  resolveImportBindings(definitions, warnings)
 
   const module = buildDataModuleContent(definitions, {
     source: `${resourcesDir} (and modules/*/${resourcesDir})`,
@@ -209,6 +216,104 @@ function resolveEmittableNames(definitions: ResourceDefinition[], warnings: stri
   }
 }
 
+/** One name a type import statement binds, and where from; `imported` is `default` or `*` for those forms. */
+interface ImportBinding {
+  local: string
+  imported: string
+  source: string
+}
+
+interface ParsedTypeImport {
+  statement: string
+  source: string
+  bindings: ImportBinding[]
+}
+
+/**
+ * Binds each imported name once across the shared import block, by *binding* rather than statement
+ * text: `import type { X }` and `import { type X }` (or quotes, a semicolon, a shared list) are two
+ * lines binding one name, a duplicate identifier that takes the whole artifact out of compilation.
+ * Same file order as {@link resolveEmittableNames}; a partly bound statement is re-emitted with the rest.
+ * A name bound to another module cannot be aliased without rewriting the copied body: reference or omit.
+ */
+function resolveImportBindings(definitions: ResourceDefinition[], warnings: string[]): void {
+  const claimed = new Map<string, { binding: ImportBinding; definition: ResourceDefinition }>()
+  const targetOf = (binding: ImportBinding): string => `${binding.imported}\0${binding.source}`
+
+  for (const definition of definitions) {
+    if (definition.dataName === null || definition.imports.length === 0) continue
+    const parsed = definition.imports.map(parseTypeImport)
+
+    const conflicting = parsed.flatMap((item) => item.bindings).find((binding) => {
+      const holder = claimed.get(binding.local)
+      return holder !== undefined && targetOf(holder.binding) !== targetOf(binding)
+    })
+    if (conflicting) {
+      if (definition.reference !== undefined) {
+        definition.rawType = definition.reference
+        definition.imports = []
+        delete definition.heritage
+        continue
+      }
+      const holder = claimed.get(conflicting.local)!
+      warnings.push(
+        `Resource ${definition.className} (${definition.filePath}) imports ${conflicting.local} `
+        + `from '${conflicting.source}', but data.gen.ts already binds that name from `
+        + `'${holder.binding.source}' for ${holder.definition.className} (${holder.definition.filePath}) — `
+        + `omitted from data.gen.ts. Export the payload type so data.gen.ts can reference the `
+        + 'declaration itself, or import it under another name in one of the two files.',
+      )
+      definition.dataName = null
+      continue
+    }
+
+    const kept: string[] = []
+    for (const item of parsed) {
+      const fresh = item.bindings.filter((binding) => !claimed.has(binding.local))
+      for (const binding of fresh) claimed.set(binding.local, { binding, definition })
+      if (fresh.length === item.bindings.length) {
+        kept.push(item.statement)
+      } else if (fresh.length > 0) {
+        kept.push(namedTypeImport(fresh, item.source))
+      }
+    }
+    definition.imports = kept
+  }
+}
+
+/** The bindings of one statement `collectTypeImports` produced; one it cannot read is kept verbatim and claims nothing. */
+function parseTypeImport(statement: string): ParsedTypeImport {
+  const node = parseSourceFile(statement)?.program.body[0]
+  if (node?.type !== 'ImportDeclaration') return { statement, source: '', bindings: [] }
+
+  const source = node.source.value
+  const bindings = node.specifiers.map((specifier): ImportBinding => {
+    const local = specifier.local.name
+    if (specifier.type === 'ImportDefaultSpecifier') return { local, imported: 'default', source }
+    if (specifier.type === 'ImportNamespaceSpecifier') return { local, imported: '*', source }
+    return { local, imported: importedName(specifier.imported), source }
+  })
+  return { statement, source, bindings }
+}
+
+/**
+ * A partly-kept statement, re-emitted in the shape `collectTypeImports` synthesizes.
+ * Named bindings only: a default or namespace import binds one name, so it is kept or
+ * dropped whole and never reaches here.
+ */
+function namedTypeImport(bindings: ImportBinding[], source: string): string {
+  const specifiers = bindings.map((binding) => importSpecifierText(binding.imported, binding.local))
+  return `import type { ${specifiers.join(', ')} } from '${source}'`
+}
+
+function importedName(imported: ImportSpecifier['imported']): string {
+  return imported.type === 'Identifier' ? imported.name : imported.value
+}
+
+function importSpecifierText(imported: string, local: string): string {
+  return imported === local ? imported : `${imported} as ${local}`
+}
+
 async function extractResourceType(
   filePath: string,
   outputDirectory: string,
@@ -256,10 +361,23 @@ async function extractResourceType(
   // file cannot tell it from the real one.
   const masked = maskCommentsAndStrings(source)
 
+  // A copied body keeps the reference it could have been instead, for the case
+  // where its imports cannot share the import block: a reference resolves
+  // inside the resource's own module, so it needs none of them.
+  const copied = (read: Extract<ObjectTypeRead, { kind: 'body' }>): ResourceDefinition => {
+    const reference = readTypeReference(declaredTypes, read.typeName, filePath, outputDirectory)
+    return {
+      ...common,
+      rawType: read.body,
+      ...heritageOf(read),
+      ...(reference.rawType === null ? {} : { reference: reference.rawType }),
+    }
+  }
+
   // Strategy 1: an interface named after the class.
   const named = readObjectType(source, masked, `${baseName}(?:Resource)?Data`)
   if (named.kind === 'body') {
-    return { ...common, rawType: named.body, ...heritageOf(named) }
+    return copied(named)
   }
 
   // Strategy 2: an explicit return type on toArray().
@@ -268,7 +386,7 @@ async function extractResourceType(
     const typeName = returnTypeMatch[1]
     const annotated = readObjectType(source, masked, typeName)
     if (annotated.kind === 'body') {
-      return { ...common, rawType: annotated.body, ...heritageOf(annotated) }
+      return copied(annotated)
     }
 
     if (annotated.kind === 'unreadable') {
@@ -326,7 +444,7 @@ async function extractResourceType(
  * declaration the file *exports* falls back to an import-type reference ({@link readTypeReference}).
  */
 type ObjectTypeRead =
-  | { kind: 'body'; body: string; heritage?: string }
+  | { kind: 'body'; typeName: string; body: string; heritage?: string }
   | { kind: 'none' }
   | { kind: 'unreadable'; typeName: string; reason: string; fix?: string }
 
@@ -430,7 +548,7 @@ function readObjectType(source: string, masked: string, namePattern: string): Ob
 
   // Sliced from the source: the heritage runs up to the brace, and the mask blanks its string literals.
   const written = heritage ? source.slice(openIndex - heritage.length, openIndex) : undefined
-  return { kind: 'body', body: source.slice(openIndex, end), heritage: written?.replace(/^extends\s+/u, '').trim() }
+  return { kind: 'body', typeName, body: source.slice(openIndex, end), heritage: written?.replace(/^extends\s+/u, '').trim() }
 }
 
 function heritageOf(read: { heritage?: string }): Pick<ResourceDefinition, 'heritage'> {
@@ -721,13 +839,7 @@ function collectTypeImports(ast: File | null, source: string): string[] {
     if (typeSpecifiers.length === 0) continue
 
     const imported = typeSpecifiers
-      .map((specifier) => {
-        const importedName = specifier.imported.type === 'Identifier'
-          ? specifier.imported.name
-          : specifier.imported.value
-        const localName = specifier.local.name
-        return importedName === localName ? importedName : `${importedName} as ${localName}`
-      })
+      .map((specifier) => importSpecifierText(importedName(specifier.imported), specifier.local.name))
       .join(', ')
     if (!imported) continue
     imports.push(`import type { ${imported} } from '${node.source.value}'`)
