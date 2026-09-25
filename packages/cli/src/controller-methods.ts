@@ -15,7 +15,7 @@ import { ParseCache } from './parse-cache'
 import { memberKeyName, walk } from './ast-walk'
 import { controllerImportFailures } from './introspect-controller-file'
 import { introspectedRoutes, type IntrospectSource } from './manifest-section'
-import { joinRouteDefinitions, type JoinableRoute } from './app-routes'
+import { joinRouteDefinitions, withDefinitionModules, type JoinableRoute } from './app-routes'
 import { specifierName } from './route-registrar'
 import { wholeIdentifierPattern } from './utils'
 
@@ -553,9 +553,7 @@ export function attachControllerRefs<T extends JoinableRoute>(
   routeSources?: ReadonlySet<string>,
   definitionModules?: readonly (string | null)[],
 ): T[] {
-  const sides = definitionModules
-    ? definitions.map((definition, index) => ({ ...definition, module: definitionModules[index] ?? null }))
-    : definitions
+  const sides = definitionModules ? withDefinitionModules(definitions, definitionModules) : definitions
   const joined = joinRouteDefinitions(sides, manifestRouteTargets(manifest, routeSources), { byModule: definitionModules !== undefined })
   return definitions.map((definition, index) => {
     const ref = definition.controller && joined[index]?.controller

@@ -35,7 +35,7 @@ import { checkAiAgents } from './ai-agent-check'
 import { checkSessionsConfig, readSessionWiring } from './sessions-check'
 import { checkPrototypeRoutes } from './prototype-check'
 import { checkDeployRuntime } from './deploy-runtime'
-import { loadRouteDefinitions } from './load-routes'
+import { loadRouteDefinitionsWithModules, type ModuleTaggedDefinitions } from './load-routes'
 import { DEFAULT_ROUTES_FILE, routesEntryOrDefault } from './route-registrar'
 import type { RouteDefinition } from '@guren/server'
 
@@ -218,12 +218,11 @@ async function checkAgentManifest(
 async function loadRouteGraph(
   cwd: string,
   routesFile: string,
-): Promise<{ definitions?: RouteDefinition[]; modules?: Array<string | null>; error?: string }> {
+): Promise<(ModuleTaggedDefinitions & { error?: undefined }) | { definitions?: undefined; modules?: undefined; error?: string }> {
   if (!(await fileExists(cwd, routesFile))) return {}
 
   try {
-    const modules: Array<string | null> = []
-    return { definitions: await loadRouteDefinitions(resolve(cwd, routesFile), cwd, undefined, undefined, modules), modules }
+    return await loadRouteDefinitionsWithModules(resolve(cwd, routesFile), cwd)
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) }
   }

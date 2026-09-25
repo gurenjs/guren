@@ -12,25 +12,25 @@ import {
 import { joinManifestRoutes } from './app-routes'
 import { check, type CheckEvidence, type CheckResult } from './check-result'
 import { fileExists } from './discovery'
-import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
+import { DEFAULT_ROUTES_FILE, loadRouteDefinitionsWithModules } from './load-routes'
 import { introspectedRoutes, judgedFromManifest, judgedFromSource, type IntrospectSource } from './manifest-section'
 import { extractPathParamNames } from './utils'
 
-export interface RouteContractCheckOptions {
+export type RouteContractCheckOptions = {
   cwd: string
   /** Routes entry file, POSIX-relative to `cwd`. Defaults to `routes/web.ts`. */
   routesFile?: string
-  /** Definitions to check instead of loading them; absent, this loads its own. */
-  definitions?: RouteDefinition[]
-  /** `loadRouteDefinitions()`'s `moduleIdentities` for `definitions`, so the Zod fallback joins within each module. */
-  definitionModules?: readonly (string | null)[]
   /**
    * The run's introspection (RFC 0026 §5), asked for once a definition declares a params schema
    * or a binding: the introspected app's routes are judged instead, the routes file's Zod standing
    * in for a params schema the manifest cannot render whole.
    */
   introspect?: IntrospectSource
-}
+} & (
+  | { definitions?: undefined; definitionModules?: undefined }
+  /** Definitions to check instead of loading them, with `loadRouteDefinitions()`'s `moduleIdentities`, so the Zod fallback joins within each module. */
+  | { definitions: RouteDefinition[]; definitionModules: readonly (string | null)[] }
+)
 
 /** A params schema describes what arrives in the URL, never what a parse produces. */
 const REQUEST_SIDE = 'input'
@@ -306,15 +306,14 @@ function summary(count: number): CheckResult {
 export async function checkRouteContracts(options: RouteContractCheckOptions): Promise<CheckResult[]> {
   const { cwd, routesFile = DEFAULT_ROUTES_FILE } = options
 
-  let definitions = options.definitions
-  let modules = options.definitionModules ?? []
-  if (!definitions) {
+  let { definitions, definitionModules: modules } = options
+  if (!definitions || !modules) {
     if (!(await fileExists(cwd, routesFile))) return []
 
     try {
-      const moduleIdentities: Array<string | null> = []
-      definitions = await loadRouteDefinitions(resolve(cwd, routesFile), cwd, undefined, undefined, moduleIdentities)
-      modules = moduleIdentities
+      const loaded = await loadRouteDefinitionsWithModules(resolve(cwd, routesFile), cwd)
+      definitions = loaded.definitions
+      modules = loaded.modules
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       // Reported, never swallowed: silence is indistinguishable from every route matching.

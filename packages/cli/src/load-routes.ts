@@ -171,6 +171,18 @@ export async function loadRouteDefinitions(
   return router.definitions()
 }
 
+/** Registered definitions and, index-aligned, each one's `defineModule()` name (`null` for the routes file's own). */
+export interface ModuleTaggedDefinitions {
+  definitions: RouteDefinition[]
+  modules: Array<string | null>
+}
+
+/** {@link loadRouteDefinitions} with the module names recorded, for a join to the introspected app. */
+export async function loadRouteDefinitionsWithModules(routesFile: string, appRoot: string): Promise<ModuleTaggedDefinitions> {
+  const modules: Array<string | null> = []
+  return { definitions: await loadRouteDefinitions(routesFile, appRoot, undefined, undefined, modules), modules }
+}
+
 /**
  * The preamble every `route:list`-shaped command shares, so they cannot
  * disagree about which app they describe: `--app` defaults to cwd, `--routes`

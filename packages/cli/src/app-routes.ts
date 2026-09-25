@@ -7,6 +7,7 @@
  */
 import type { AppManifest, RouteDefinition, RouteEntry } from '@guren/server'
 
+import type { ModuleTaggedDefinitions } from './load-routes'
 import { introspectedRoutes, introspectionUnavailableMessage, type IntrospectionFailed, type IntrospectSource } from './manifest-section'
 
 /** What the join reads of a route; `module` is the `defineModule()` name, `null` for the app's own. */
@@ -56,18 +57,32 @@ export function joinRouteDefinitions<T extends JoinableRoute>(
 }
 
 /**
+ * Each definition with its `defineModule()` name, for a join `byModule`. A `modules` of another length
+ * is a caller that lost the alignment, and joining across modules instead would hide it, so it throws.
+ */
+export function withDefinitionModules<T extends JoinableRoute>(
+  definitions: readonly T[],
+  modules: readonly (string | null)[],
+): Array<T & { module: string | null }> {
+  if (modules.length !== definitions.length) {
+    throw new Error(`${definitions.length} route definition(s) carry ${modules.length} module name(s); the two must be index-aligned.`)
+  }
+  return definitions.map((definition, index) => ({ ...definition, module: modules[index] ?? null }))
+}
+
+/**
  * Manifest routes joined to registered definitions within each route's module, `modules` naming each
- * definition's (`loadRouteDefinitions()`'s `moduleIdentities`). A `modules` of another length (a
- * loader that recorded none) joins across modules, as {@link joinRouteDefinitions} does unasked.
+ * definition's (`loadRouteDefinitions()`'s `moduleIdentities`). A module the app mounts under another
+ * `defineModule()` name than its `modules/<dir>/index.ts` exports joins none of its routes.
  */
 export function joinManifestRoutes<T extends JoinableRoute>(
   entries: readonly RouteEntry[],
   definitions: readonly T[],
   modules: readonly (string | null)[],
 ): Array<T | undefined> {
-  if (modules.length !== definitions.length) return joinRouteDefinitions(entries, definitions)
-  const tagged = definitions.map((definition, index) => ({ ...definition, module: modules[index] ?? null, definition }))
-  return joinRouteDefinitions(entries, tagged, { byModule: true }).map((side) => side?.definition)
+  const tagged = withDefinitionModules(definitions, modules)
+  const original = new Map(tagged.map((side, index) => [side, definitions[index]!]))
+  return joinRouteDefinitions(entries, tagged, { byModule: true }).map((side) => side && original.get(side))
 }
 
 /** The alias and group names a manifest route's chain names, as a registered definition's `middlewareNames`. */
@@ -108,11 +123,9 @@ export interface IntrospectedRouteDefinitions {
  */
 export async function loadIntrospectedRouteDefinitions(
   introspect: IntrospectSource | undefined,
-  /** Pushes each definition's `defineModule()` name onto `moduleIdentities`, as `loadRouteDefinitions()` does. */
-  loadStatic: (moduleIdentities: Array<string | null>) => Promise<RouteDefinition[]>,
+  loadStatic: () => Promise<ModuleTaggedDefinitions>,
 ): Promise<IntrospectedRouteDefinitions> {
-  const modules: Array<string | null> = []
-  const [introspected, definitions] = await Promise.all([introspectedRoutes(introspect), loadStatic(modules)])
+  const [introspected, { definitions, modules }] = await Promise.all([introspectedRoutes(introspect), loadStatic()])
   if (introspected.status === 'static') {
     return { definitions, source: { evidence: 'static', reason: introspected.reason, failure: introspected.failure } }
   }

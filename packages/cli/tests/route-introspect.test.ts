@@ -401,8 +401,8 @@ describe('joinManifestRoutes', () => {
     expect(joined[1]).toBe(definitions[0]!)
   })
 
-  test('joins across modules when the loader recorded none', () => {
-    expect(joinManifestRoutes([entry('shop'), entry('billing')], definitions, [])).toEqual([definitions[0], definitions[1]])
+  test('refuses module names that do not align with the definitions, rather than joining across modules', () => {
+    expect(() => joinManifestRoutes([entry('shop'), entry('billing')], definitions, [])).toThrow('2 route definition(s) carry 0 module name(s)')
   })
 })
 

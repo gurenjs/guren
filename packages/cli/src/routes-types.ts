@@ -7,7 +7,7 @@ import { ROUTES_FLAG_NOT_INTROSPECTED } from './manifest-section'
 import { routesEntryOrDefault } from './route-registrar'
 import { PATH_PARAM_PATTERN, escapeSingleQuoted as escapeSingleQuotes, escapeTemplateLiteral as escapeTemplateSegment, extractPathParamNames, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { CONTRACT_SEGMENTS } from './contract-segments'
-import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
+import { DEFAULT_ROUTES_FILE, loadRouteDefinitions, loadRouteDefinitionsWithModules } from './load-routes'
 import {
   DECLARATION_MODULE_AUGMENTATION,
   RUNTIME_TYPE_DEFINITIONS,
@@ -44,13 +44,12 @@ export interface GenerateRouteTypesOptions extends WriterOptions {
  * A failed or unusable introspection falls back to the routes file, saying why.
  */
 async function loadCodegenRoutes(routesFile: string, appRoot: string, introspect: boolean): Promise<RouteDefinition[]> {
-  const loadStatic = (moduleIdentities?: Array<string | null>) => loadRouteDefinitions(routesFile, appRoot, undefined, undefined, moduleIdentities)
-  if (!introspect) return loadStatic()
+  if (!introspect) return loadRouteDefinitions(routesFile, appRoot)
 
   // The manifest describes the entry's routes, which a file `--routes` names may not be.
   const entryRoutes = resolve(appRoot, await routesEntryOrDefault(appRoot))
   const introspection = entryRoutes === routesFile ? () => introspectApp(appRoot) : { skipped: ROUTES_FLAG_NOT_INTROSPECTED }
-  const { definitions, source } = await loadIntrospectedRouteDefinitions(introspection, loadStatic)
+  const { definitions, source } = await loadIntrospectedRouteDefinitions(introspection, () => loadRouteDefinitionsWithModules(routesFile, appRoot))
   if (source.evidence === 'static') {
     consola.warn(routesFileFallbackMessage(source, 'Generated from the routes file instead.'))
     return definitions

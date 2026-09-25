@@ -479,6 +479,15 @@ describe('attachControllerRefs', () => {
     )
     expect(definition?.controller as ControllerTarget | undefined).toEqual({ ...nameOnly, unimported: ['app/Http/Controllers/PostController.ts'], inRouteSource: true })
   })
+
+  it('refuses module names that do not align with the definitions', () => {
+    expect(() => attachControllerRefs(
+      [{ method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } }, { method: 'GET', path: '/posts' }],
+      { routes: [], warnings: [] } as never,
+      undefined,
+      ['billing'],
+    )).toThrow('2 route definition(s) carry 1 module name(s)')
+  })
 })
 
 /**
