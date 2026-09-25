@@ -8,6 +8,7 @@ import {
   toPosixRelative,
   moduleNameFor,
 } from './discovery'
+import { moduleDescriptorOrScaffold } from './app-entry'
 import { memberKeyName, unwrapTypeAssertion, walk } from './ast-walk'
 import { camelCase, escapeRegExp, referencesIdentifier } from './utils'
 import { ParseCache } from './parse-cache'
@@ -20,7 +21,7 @@ const CONSOLE_ENTRY = 'src/console.ts'
  * *outside* the imports. An import alone is not a use: a leftover
  * `import SendDigestCommand from …` next to an emptied `registerMany([])` is the
  * state these checks exist to catch. Re-exports count as body, since for a
- * module's `index.ts` they put a name on its public surface.
+ * module's entry file they put a name on its public surface.
  */
 interface EntrySource {
   /** Top-level statements minus `import` declarations. */
@@ -173,7 +174,7 @@ export async function discoverDeclaredCommandFiles(cwd: string, cache: ParseCach
 /**
  * Verifies every class under `app/Console/Commands` is referenced by the console
  * entrypoint that would register it — `src/console.ts` for a project command,
- * `modules/<name>/index.ts` for a module's. Detection is a name reference outside
+ * the module's entry file for a module's. Detection is a name reference outside
  * the entry's imports, hence `warn`, never `fail`. Not filtered by `--changed`: the
  * outcome turns on the *entrypoint's* content, so filtering by command file would miss it.
  */
@@ -185,12 +186,17 @@ export async function checkConsoleCommandRegistration(cwd: string, cache: ParseC
   // Read at most once, however many modules ask about it.
   let consoleEntry: EntrySource | null | undefined
 
+  const moduleNames = [...new Set(commandFiles.flatMap((filePath) => moduleNameFor(cwd, filePath) ?? []))]
+  const moduleEntries = new Map(await Promise.all(
+    moduleNames.map(async (name) => [name, (await moduleDescriptorOrScaffold(cwd, name)).file] as const),
+  ))
+
   // Grouped by entrypoint so a missing one is reported once, not once per
   // command it would have registered.
   const byEntry = new Map<string, { moduleName: string | null; files: string[] }>()
   for (const filePath of commandFiles) {
     const moduleName = moduleNameFor(cwd, filePath)
-    const entry = moduleName ? `modules/${moduleName}/index.ts` : CONSOLE_ENTRY
+    const entry = moduleName ? moduleEntries.get(moduleName)! : CONSOLE_ENTRY
     const group = byEntry.get(entry) ?? { moduleName, files: [] }
     group.files.push(filePath)
     byEntry.set(entry, group)

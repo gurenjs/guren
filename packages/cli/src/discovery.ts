@@ -401,22 +401,6 @@ export async function discoverModuleRoutesFiles(appRoot: string): Promise<Module
   return scanned.filter((entry) => entry.files.length > 0)
 }
 
-/** Files a module's `defineModule()` descriptor may live in, in probe order. */
-export function moduleDescriptorCandidates(moduleDir: string): string[] {
-  return [`${moduleDir}/index.ts`, `${moduleDir}/index.js`]
-}
-
-/**
- * Files a module may keep its routes registrar in, in probe order. The
- * counterpart to {@link discoverModuleRoutesFiles}, which asks only about a
- * module's `routes/` *directory* and so returns nothing for the scaffolded
- * shape. One list, because a second copy is how one check comes to read
- * `modules/x/routes.mts` while the other does not.
- */
-export function moduleRoutesEntryCandidates(moduleDir: string): string[] {
-  return [`${moduleDir}/routes.ts`, `${moduleDir}/routes.js`, `${moduleDir}/routes/index.ts`, `${moduleDir}/routes/index.js`]
-}
-
 /**
  * Files under the console-command directories. Nothing loads these by scanning
  * at runtime — `ConsoleKernel` registration is explicit — so this is for

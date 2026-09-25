@@ -4,11 +4,10 @@ import {
   discoverModuleRoutesFiles,
   discoverRoutesFiles,
   fileExists,
-  findFirstExisting,
   listModuleNames,
-  moduleRoutesEntryCandidates,
   toPosixRelative,
 } from './discovery'
+import { moduleRoutesEntryFile } from './import-resolution'
 import type { ParseCache } from './parse-cache'
 import { extractPathParamNames, PATH_PARAM_PATTERN } from './utils'
 import { check, type CheckResult } from './check-result'
@@ -101,7 +100,7 @@ function routePathLiterals(program: unknown): RoutePathLiteral[] {
  * Every file this check reads: the project's `routes/`, each module's `routes/`, and each
  * module's single-file `routes.ts` entry — the last is not redundant, since
  * `discoverModuleRoutesFiles` drops a module with no `routes/` *directory*, the shape
- * `make:module` scaffolds. Known gaps, both in `modules/<name>/index.ts`: an inline
+ * `make:module` scaffolds. Known gaps, both in a module's entry file: an inline
  * `defineModule({ routes: (router) => ... })` and `defineModule({ prefix })`.
  */
 export async function discoverRoutePathFiles(cwd: string, routesFile?: string): Promise<string[]> {
@@ -112,13 +111,13 @@ export async function discoverRoutePathFiles(cwd: string, routesFile?: string): 
   ])
 
   const moduleEntries = await Promise.all(
-    moduleNames.map((moduleName) => findFirstExisting(cwd, moduleRoutesEntryCandidates(`modules/${moduleName}`))),
+    moduleNames.map((moduleName) => moduleRoutesEntryFile(resolve(cwd, 'modules', moduleName))),
   )
 
   const files = new Set([
     ...projectFiles,
     ...moduleDirectories.flatMap(({ files: moduleFiles }) => moduleFiles),
-    ...moduleEntries.filter((entry): entry is string => entry !== null).map((entry) => resolve(cwd, entry)),
+    ...moduleEntries.filter((entry): entry is string => entry !== null),
   ])
 
   if (routesFile !== undefined && (await fileExists(cwd, routesFile))) {

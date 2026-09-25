@@ -7,7 +7,8 @@
 import { basename, dirname, resolve, sep } from 'node:path'
 import type { File, Node, ObjectExpression } from '@babel/types'
 import { objectLiteral, propertyValue, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
-import { findFirstExisting, moduleDescriptorCandidates, toPosixRelative } from './discovery'
+import { toPosixRelative } from './discovery'
+import { MODULE_ENTRY_FILE, moduleEntryFile, type FileProbe } from './import-resolution'
 import type { ParseCache } from './parse-cache'
 import { importsByLocal, specifierBase, withoutExtension, type ImportEntry } from './schema-binding'
 
@@ -159,13 +160,28 @@ export interface ModuleDescriptor {
   readonly options: ObjectExpression
 }
 
-/** A module's `modules/<name>/index.*`, relative to `cwd`; null when it has none. */
-export function findModuleDescriptor(cwd: string, moduleDir: string): Promise<string | null> {
-  return findFirstExisting(cwd, moduleDescriptorCandidates(toPosixRelative(cwd, moduleDir)))
+/** A module's entry file ({@link moduleEntryFile}), relative to `cwd`; null when it has none. */
+export async function findModuleDescriptor(cwd: string, moduleDir: string, probe?: FileProbe): Promise<string | null> {
+  const file = await moduleEntryFile(resolve(cwd, moduleDir), probe)
+  return file === null ? null : toPosixRelative(cwd, file)
+}
+
+/** The descriptor `make:module` would scaffold for `moduleName`, relative to the app root. */
+export function scaffoldedModuleDescriptor(moduleName: string): string {
+  return `modules/${moduleName}/${MODULE_ENTRY_FILE}`
+}
+
+/** A module's descriptor relative to `cwd`, else the one `make:module` would scaffold; `exists` tells them apart. */
+export async function moduleDescriptorOrScaffold(
+  cwd: string,
+  moduleName: string,
+): Promise<{ file: string; exists: boolean }> {
+  const found = await findModuleDescriptor(cwd, resolve(cwd, 'modules', moduleName))
+  return found === null ? { file: scaffoldedModuleDescriptor(moduleName), exists: false } : { file: found, exists: true }
 }
 
 /**
- * A module's `modules/<name>/index.*` and the literal its `defineModule()` takes.
+ * A module's entry file and the literal its `defineModule()` takes.
  * `absent` when there is no descriptor file, `unreadable` when it does not parse
  * or holds no `defineModule({ … })` call.
  */
@@ -173,8 +189,9 @@ export async function readModuleDescriptor(
   cwd: string,
   cache: ParseCache,
   moduleDir: string,
+  probe?: FileProbe,
 ): Promise<ModuleDescriptor | 'absent' | 'unreadable'> {
-  const file = await findModuleDescriptor(cwd, moduleDir)
+  const file = await findModuleDescriptor(cwd, moduleDir, probe)
   if (file === null) return 'absent'
   const parsed = await cache.get(resolve(cwd, file))
   const options = parsed ? firstCallOptions(parsed.ast.program, 'defineModule') : null

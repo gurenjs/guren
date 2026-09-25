@@ -723,7 +723,7 @@ export function insertCallOptions(
 /**
  * Adds a top-level option to a single-object-argument call, its value inserted
  * verbatim. `callName` defaults to `createApp`; `'defineModule'` targets a
- * module's `modules/<name>/index.ts` descriptor.
+ * module's descriptor (its entry file).
  */
 export async function addCreateAppOption(
   filePath: string,
