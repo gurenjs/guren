@@ -2,9 +2,10 @@
  * The review feedback the rendered plan exports, read back (RFC 0030 §4).
  *
  * The document is written by the page and carried here by hand, so it is parsed
- * against a schema rather than trusted. No command reads it yet: the revise command
- * that will turn it into model input is RFC 0030 Part 3. `-` reads standard input,
- * which is what the page's "Copy feedback" and a pipe replace the file with.
+ * against a schema rather than trusted. `plan:revise` reads it for its locks and
+ * answers; turning its comments into ops is the model-calling `plan --revise`'s work.
+ * `-` reads standard input, which the page's "Copy feedback" and a pipe replace the file
+ * with. `plan:revise` reads its ops and edited plans through the same counting reader.
  */
 
 import { createReadStream } from 'node:fs'
@@ -56,8 +57,13 @@ export interface ReadPlanFeedbackOptions {
   stdin?: () => AsyncIterable<Uint8Array>
 }
 
-function overSizeMessage(origin: string): string {
-  return `The feedback on ${origin} is over the ${FEEDBACK_MAX_BYTES / 1024 / 1024} MiB limit.`
+export interface ReadJsonWithinLimitOptions extends ReadPlanFeedbackOptions {
+  /** What the document is, as the messages name it: `feedback`, `ops`. */
+  what: string
+}
+
+function overSizeMessage(what: string, origin: string): string {
+  return `The ${what} on ${origin} is over the ${FEEDBACK_MAX_BYTES / 1024 / 1024} MiB limit.`
 }
 
 /**
@@ -67,14 +73,14 @@ function overSizeMessage(origin: string): string {
  * before the open describes whatever the path pointed at then, and a FIFO or a
  * `/proc` file reports none at all.
  */
-async function readWithinLimit(chunks: AsyncIterable<Uint8Array>, origin: string): Promise<string> {
+async function readWithinLimit(chunks: AsyncIterable<Uint8Array>, what: string, origin: string): Promise<string> {
   const decoder = new TextDecoder()
   const parts: string[] = []
   let bytes = 0
 
   for await (const chunk of chunks) {
     bytes += chunk.byteLength
-    if (bytes > FEEDBACK_MAX_BYTES) throw new CliError(overSizeMessage(origin))
+    if (bytes > FEEDBACK_MAX_BYTES) throw new CliError(overSizeMessage(what, origin))
     parts.push(decoder.decode(chunk, { stream: true }))
   }
 
@@ -82,32 +88,39 @@ async function readWithinLimit(chunks: AsyncIterable<Uint8Array>, origin: string
   return parts.join('')
 }
 
-/** The feedback document, or a CliError naming what about it could not be read. */
-export async function readPlanFeedback(source: string, options: ReadPlanFeedbackOptions = {}): Promise<PlanFeedback> {
+/** A JSON document from a file or `-`, under the cap; `raw` is the text as read. Every failure is a CliError. */
+export async function readJsonWithinLimit(
+  source: string,
+  options: ReadJsonWithinLimitOptions,
+): Promise<{ document: unknown; raw: string; origin: string }> {
+  const { what } = options
   const fromStdin = source === FEEDBACK_STDIN
   const origin = fromStdin ? 'standard input' : resolve(options.cwd ?? process.cwd(), source)
 
   let raw: string
   try {
     const chunks = fromStdin ? (options.stdin ?? (() => process.stdin))() : createReadStream(origin)
-    raw = await readWithinLimit(chunks, origin)
+    raw = await readWithinLimit(chunks, what, origin)
   } catch (error) {
-    // The cap is already an answer about the feedback; only a failed read needs one.
+    // The cap is already an answer about the document; only a failed read needs one.
     if (error instanceof CliError) throw error
-    throw new CliError(`Cannot read the feedback on ${origin}: ${(error as Error).message}`)
+    throw new CliError(`Cannot read the ${what} on ${origin}: ${(error as Error).message}`)
   }
 
   // An empty read is the common shape of a pipe whose producer wrote nothing, and
   // `JSON.parse('')` answers it with a position no one can act on.
-  if (raw.trim() === '') throw new CliError(`No feedback arrived on ${origin}.`)
+  if (raw.trim() === '') throw new CliError(`No ${what} arrived on ${origin}.`)
 
-  let document: unknown
   try {
-    document = JSON.parse(raw)
+    return { document: JSON.parse(raw) as unknown, raw, origin }
   } catch (error) {
-    throw new CliError(`The feedback on ${origin} is not valid JSON: ${(error as Error).message}`)
+    throw new CliError(`The ${what} on ${origin} is not valid JSON: ${(error as Error).message}`)
   }
+}
 
+/** The feedback document, or a CliError naming what about it could not be read. */
+export async function readPlanFeedback(source: string, options: ReadPlanFeedbackOptions = {}): Promise<PlanFeedback> {
+  const { document, origin } = await readJsonWithinLimit(source, { ...options, what: 'feedback' })
   const parsed = PlanFeedbackSchema.safeParse(document)
   if (!parsed.success) {
     throw new CliError(

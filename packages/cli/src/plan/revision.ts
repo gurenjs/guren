@@ -6,13 +6,14 @@
  * in its shape: an id cannot change, and a column changes only through an op
  * naming that column. A merge patch would need a second, partial copy of every
  * element schema and a way to say "unset" that closed objects do not have.
+ * A draft revises too: its `parent` and `result` are `planDigest()`, the hash's computation.
  */
 
 import { z } from 'zod'
 
 import { formatSchemaIssues } from '../cli-error'
 import type { PlanFeedback } from './feedback'
-import { canonicalJson, planHash } from './identity'
+import { canonicalJson, planDigest } from './identity'
 import { listPlanReferences } from './references'
 import {
   AcceptanceSchema,
@@ -24,6 +25,7 @@ import {
   PlanColumnSchema,
   PlanCommandSchema,
   PlanControllerSchema,
+  PlanDraftSchema,
   PlanFlowSchema,
   PlanModelSchema,
   PlanPolicySchema,
@@ -36,6 +38,7 @@ import {
   PlanValidatorSchema,
   PlanViewSchema,
   type Plan,
+  type PlanDraft,
   type PlanElementSection,
 } from './schema'
 
@@ -201,12 +204,13 @@ export interface PlanRevisionOptions {
   feedback?: PlanFeedback
 }
 
-export type ApplyRevisionResult =
-  | { ok: true; plan: Plan; hash: string; reopened: PlanReopenedElement[] }
+/** A draft parent yields a draft: `baseline` is out of an op's reach. */
+export type ApplyRevisionResult<P extends PlanDraft = Plan> =
+  | { ok: true; plan: P; hash: string; reopened: PlanReopenedElement[] }
   | PlanRevisionRefusal
 
-export type CreateRevisionResult =
-  | { ok: true; revision: PlanRevision; plan: Plan; reopened: PlanReopenedElement[] }
+export type CreateRevisionResult<P extends PlanDraft = Plan> =
+  | { ok: true; revision: PlanRevision; plan: P; reopened: PlanReopenedElement[] }
   | PlanRevisionRefusal
 
 type Element = Record<string, unknown> & { id: string }
@@ -252,7 +256,7 @@ function planHead(plan: Holder): Holder {
 }
 
 /** Who names whom, read once: target id to the ids of the elements naming it. */
-function referencesTo(plan: Plan): Map<string, Set<string>> {
+function referencesTo(plan: PlanDraft): Map<string, Set<string>> {
   const owners = new Map<string, Set<string>>()
   for (const reference of listPlanReferences(plan)) {
     const named = owners.get(reference.to) ?? new Set<string>()
@@ -267,7 +271,7 @@ function refuse(kind: PlanRevisionRejectionKind, message: string): PlanRevisionR
 }
 
 /** An approved parent was approved with what it holds, so its nested elements are locked with it. */
-function lockedIds(parent: Plan, feedback: PlanFeedback | undefined): { locked: Set<string>; rejections: PlanRevisionRejection[] } {
+function lockedIds(parent: PlanDraft, feedback: PlanFeedback | undefined): { locked: Set<string>; rejections: PlanRevisionRejection[] } {
   const locked = new Set<string>()
   const rejections: PlanRevisionRejection[] = []
   for (const entry of feedback?.elements ?? []) {
@@ -286,14 +290,14 @@ function lockedIds(parent: Plan, feedback: PlanFeedback | undefined): { locked: 
   return { locked, rejections }
 }
 
-function applyOps(
-  parent: Plan,
+function applyOps<P extends PlanDraft>(
+  parent: P,
   parentHash: string,
   ops: ReadonlyArray<PlanRevisionOp>,
   feedback: PlanFeedback | undefined,
   /** The hash a stored revision names. Absent where the revision is being written and has none yet. */
   storedResult?: string,
-): { ok: true; plan: Plan; hash: string; reopened: PlanReopenedElement[] } | PlanRevisionRefusal {
+): ApplyRevisionResult<P> {
   // A lock that names another plan's elements is a lock silently not applied.
   if (feedback?.planHash !== undefined && feedback.planHash !== parentHash) {
     return refuse('feedback-mismatch', `The feedback was given on plan ${feedback.planHash}, not on the parent.`)
@@ -310,7 +314,7 @@ function applyOps(
 
   const { locked, rejections } = lockedIds(parent, feedback)
   // `baseline` is carried over untouched: no op names it, so the hash moves through ops alone.
-  const plan = structuredClone(parent) as Plan & Holder
+  const plan = structuredClone(parent) as PlanDraft & Holder
   const declared = new Set(listPlanElements(parent).map((ref) => ref.id))
   const reopened: PlanReopenedElement[] = []
   const targeted = new Map<string, PlanRevisionOp['op']>()
@@ -430,10 +434,10 @@ function applyOps(
 
   if (rejections.length > 0) return { ok: false, rejections }
 
-  const parsed = PlanSchema.safeParse(plan)
+  const parsed = ('baseline' in parent ? PlanSchema : PlanDraftSchema).safeParse(plan)
   if (!parsed.success) return refuse('invalid-result', formatSchemaIssues(parsed.error))
 
-  const hash = planHash(parsed.data)
+  const hash = planDigest(parsed.data)
   // A record whose ops miss its own `result` is corrupt, and that is the diagnosis, ahead of any account of what the ops do.
   if (storedResult !== undefined && hash !== storedResult) {
     return refuse('result-mismatch', `The ops yield plan ${hash}, not the ${storedResult} the revision names.`)
@@ -442,15 +446,15 @@ function applyOps(
   if (hash === parentHash) {
     return refuse('revision-changes-nothing', 'The ops leave the plan as it was, so there is nothing to revise.')
   }
-  return { ok: true, plan: parsed.data, hash, reopened }
+  return { ok: true, plan: parsed.data as P, hash, reopened }
 }
 
 /** Stamps `parent` and `result` on a producer's ops. `document` is model output, so it is parsed here. */
-export function createPlanRevision(parent: Plan, document: unknown, options: PlanRevisionOptions = {}): CreateRevisionResult {
+export function createPlanRevision<P extends PlanDraft>(parent: P, document: unknown, options: PlanRevisionOptions = {}): CreateRevisionResult<P> {
   const parsed = PlanRevisionOpsSchema.safeParse(document)
   if (!parsed.success) return refuse('invalid-revision', formatSchemaIssues(parsed.error))
 
-  const parentHash = planHash(parent)
+  const parentHash = planDigest(parent)
   const applied = applyOps(parent, parentHash, parsed.data.ops, options.feedback)
   if (!applied.ok) return applied
   const revision = { parent: parentHash, ops: parsed.data.ops, result: applied.hash }
@@ -458,11 +462,11 @@ export function createPlanRevision(parent: Plan, document: unknown, options: Pla
 }
 
 /** The plan a revision yields, or why it is refused. Never mutates `parent`. */
-export function applyRevision(parent: Plan, revision: unknown, options: PlanRevisionOptions = {}): ApplyRevisionResult {
+export function applyRevision<P extends PlanDraft>(parent: P, revision: unknown, options: PlanRevisionOptions = {}): ApplyRevisionResult<P> {
   const parsed = PlanRevisionSchema.safeParse(revision)
   if (!parsed.success) return refuse('invalid-revision', formatSchemaIssues(parsed.error))
 
-  const parentHash = planHash(parent)
+  const parentHash = planDigest(parent)
   if (parsed.data.parent !== parentHash) {
     return refuse('parent-mismatch', `The revision was written against plan ${parsed.data.parent}; this plan is ${parentHash}.`)
   }
@@ -481,8 +485,8 @@ export interface DiffPlansOptions {
  * that changed place is a REMOVE and an ADD. Throws where no op could express the edit.
  * Equal plans yield `[]`, which is below the one op a producer's schema asks for.
  */
-export function diffPlans(parent: Plan, child: Plan, options: DiffPlansOptions): PlanRevisionOp[] {
-  if (canonicalJson(parent.baseline) !== canonicalJson(child.baseline)) {
+export function diffPlans(parent: PlanDraft, child: PlanDraft, options: DiffPlansOptions): PlanRevisionOp[] {
+  if (canonicalJson(baselineOf(parent)) !== canonicalJson(baselineOf(child))) {
     throw new Error('A revision carries `baseline` over unchanged, so no ops express a plan with another one.')
   }
 
@@ -520,6 +524,10 @@ export function diffPlans(parent: Plan, child: Plan, options: DiffPlansOptions):
   for (const section of PLAN_TOP_SECTIONS) diffList(section, parent[section], child[section])
   // Removes first: an element that moved is free to be added again, and every `before` names a kept sibling.
   return z.array(PlanRevisionOpSchema).parse([...removes, ...modifies, ...adds])
+}
+
+function baselineOf(plan: PlanDraft): unknown {
+  return 'baseline' in plan ? plan.baseline : null
 }
 
 /** The ids of a longest common subsequence: the elements that did not move. */

@@ -1,9 +1,9 @@
 /**
- * What a plan keeps beside itself (RFC 0030 §9): its committed decision log and approvals,
- * and the page `plan:render` writes. `docs/plans/<slug>/plan.json` keeps the records as
- * `<record>.json` in its directory; a plan named for its slug keeps `<slug>.<record>.json`,
- * so two plans in one directory do not share one. Also the `git status` exclusions for those
- * files, and who `git config` says is acting, which both records name.
+ * What a plan keeps beside itself (RFC 0030 §9): its committed decision log, approvals and
+ * revisions, and the page `plan:render` writes. `docs/plans/<slug>/plan.json` keeps the records
+ * as `<record>.json` and `revisions/` in its directory; a plan named for its slug keeps
+ * `<slug>.<record>.json` and `<slug>.revisions/`, so two plans in one directory do not share one.
+ * Also the `git status` exclusions for those files, and who `git config` says is acting.
  */
 
 import { chmod, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
@@ -18,7 +18,25 @@ import type { CapturedExec } from '../subprocess'
 export function planSiblingPath(planPath: string, record: 'decisions' | 'approvals'): string {
   const name = basename(planPath)
   if (name === 'plan.json') return join(dirname(planPath), `${record}.json`)
-  return join(dirname(planPath), `${name.replace(/(\.plan)?\.json$/u, '')}.${record}.json`)
+  return join(dirname(planPath), `${planFileStem(name)}.${record}.json`)
+}
+
+/**
+ * The directory `plan:revise` records a plan's revisions in, one `<n>.json` each. Its name never
+ * matches `plan.json` or `*.plan.json`, and plan discovery skips it by {@link isPlanRevisionsDirName}.
+ */
+export function planRevisionsDir(planPath: string): string {
+  const name = basename(planPath)
+  if (name === 'plan.json') return join(dirname(planPath), 'revisions')
+  return join(dirname(planPath), `${planFileStem(name)}.revisions`)
+}
+
+export function isPlanRevisionsDirName(name: string): boolean {
+  return name === 'revisions' || name.endsWith('.revisions')
+}
+
+function planFileStem(name: string): string {
+  return name.replace(/(\.plan)?\.json$/u, '')
 }
 
 /** The page `plan:render` writes when no `--output` is given. */
@@ -28,10 +46,10 @@ export function planOutputPath(planPath: string): string {
 
 /**
  * `git status` pathspecs excluding what the plan commands write beside a plan: its page and,
- * with `records`, the plan itself, its approvals and its decision log, plus a leftover
- * {@link writeFileAtomic} temporary of each. Only `plan:approve`, which writes the records,
- * may pass `records`: they are committed, and a waiver in the log steers `plan:next`.
- * Relative to `root`; both paths must be real, or a symlinked temp directory makes every one miss.
+ * with `records`, the plan, its approvals, decision log and revisions directory, plus a leftover
+ * {@link writeFileAtomic} temporary of each file. `plan:next` never passes `records`: they are
+ * committed, and a waiver in the log steers it. Relative to `root`; both paths must be real,
+ * or a symlinked temp directory makes every one miss.
  */
 export function planBesideExclusions(root: string, planPath: string, options: { records: boolean }): string[] {
   const own = [planOutputPath(planPath), ...(options.records ? [planPath, planSiblingPath(planPath, 'approvals'), planSiblingPath(planPath, 'decisions')] : [])]
@@ -39,12 +57,15 @@ export function planBesideExclusions(root: string, planPath: string, options: { 
     const relative = toPosixRelative(root, file)
     return relative.startsWith('../') ? undefined : relative
   }
-  return own.flatMap((file) => {
+  const files = own.flatMap((file) => {
     const relative = inside(file)
     if (relative === undefined) return []
     const temporary = inside(join(dirname(file), `.${basename(file)}.`))!
     return [`:(exclude,literal)${relative}`, `:(exclude,glob)${globEscape(temporary)}*.tmp`]
   })
+  // A literal pathspec naming a directory excludes everything under it, temporaries included.
+  const revisions = options.records ? inside(planRevisionsDir(planPath)) : undefined
+  return revisions === undefined ? files : [...files, `:(exclude,literal)${revisions}`]
 }
 
 function globEscape(path: string): string {

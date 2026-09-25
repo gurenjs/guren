@@ -14,7 +14,7 @@ import type { CheckResult } from './check-result'
 import { toPosixRelative } from './discovery'
 import type { PlanAppState } from './plan/app-state'
 import type { PlanAppTarget } from './plan/app-targets'
-import type { planSiblingPath } from './plan/beside'
+import { isPlanRevisionsDirName, type planSiblingPath } from './plan/beside'
 import type { Plan } from './plan/schema'
 
 /** Where plans are found: `docs/plans/**` (the §9 layout and `<slug>.plan.json`) and the app root's own `*.plan.json`. */
@@ -41,7 +41,7 @@ export interface PlanDiscovery {
   unreadable: Array<{ dir: string; reason: string }>
 }
 
-/** `revisions/` is skipped: it holds a plan's revision documents (§9), not plans. */
+/** A revisions directory (`revisions/`, `<slug>.revisions/`) is skipped: it holds a plan's revision records (§9), not plans. */
 export async function discoverPlanFiles(appRoot: string): Promise<PlanDiscovery> {
   const discovery: PlanDiscovery = { files: [], unreadable: [] }
   const entries = async (dir: string): Promise<Dirent[]> => {
@@ -60,7 +60,7 @@ export async function discoverPlanFiles(appRoot: string): Promise<PlanDiscovery>
   const walk = async (dir: string): Promise<void> => {
     for (const entry of await entries(dir)) {
       if (entry.isDirectory()) {
-        if (entry.name !== 'revisions') await walk(join(dir, entry.name))
+        if (!isPlanRevisionsDirName(entry.name)) await walk(join(dir, entry.name))
       } else if (entry.isFile() && isPlanFileName(entry.name)) {
         discovery.files.push(join(dir, entry.name))
       }

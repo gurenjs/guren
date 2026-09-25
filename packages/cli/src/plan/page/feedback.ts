@@ -32,12 +32,14 @@ export function mountFeedback({ planHash, planFile }: PlanPagePayload): void {
   words(byId('copy'), 'footer.copy')
   words(byId('export'), 'footer.download')
   words(byId('footer-note'), 'footer.note')
-  words(byId('footer-revise-note'), 'footer.revise')
+  // A `:name` in a dictionary value reads as a placeholder, so the command name comes in as one.
+  words(byId('footer-revise-note'), 'footer.revise', { command: 'plan:revise' })
   words(byId('footer-approve-note'), 'footer.approve')
 
   // `planFile` is already held to a bare name with no shell metacharacter, because
-  // these lines exist to be pasted into a shell. No command reads the feedback yet
-  // (`plan --revise` is RFC 0030 Part 3), so the page names the two that follow a revision.
+  // these lines exist to be pasted into a shell. `plan:revise` also needs the edited
+  // copy, which only the reader can name, so `footer.revise` describes it in words and
+  // the page prints the two commands that follow a revision.
   const plan = planFile || '<plan.json>'
   byId('render-command').textContent = 'bunx guren plan:render ' + plan
   byId('approve-command').textContent = 'bunx guren plan:approve ' + plan

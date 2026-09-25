@@ -27,10 +27,11 @@ A plan is a directory under `docs/plans/`, named by its slug:
 | `docs/plans/comments/plan.json` | The plan | yes |
 | `docs/plans/comments/approvals.json` | The hashes `plan:approve` recorded, with the readings of each `alter` | yes |
 | `docs/plans/comments/decisions.json` | Waivers, written by `plan:waive` | yes |
+| `docs/plans/comments/revisions/0001.json` | Revisions, written by `plan:revise` | yes |
 | `docs/plans/comments/plan.html` | The page `plan:render` writes | no |
 | `.guren/plans/comments.state.json` | Verification results and the marked step | no, it ignores itself |
 
-The slug is the directory name for a file called `plan.json`. Any other name works too: `comments.plan.json` has the slug `comments`, and keeps its records beside it as `comments.approvals.json` and `comments.decisions.json`.
+The slug is the directory name for a file called `plan.json`. Any other name works too: `comments.plan.json` has the slug `comments`, and keeps its records beside it as `comments.approvals.json`, `comments.decisions.json` and `comments.revisions/`.
 
 The rendered page is generated output and belongs out of the repository. `plan:next` ignores it and its temporary file where `plan:render` writes them by default, so it does not have to be ignored for the loop to run, but it should not be committed either. A page written elsewhere with `-o` is an ordinary untracked file, and `plan:next` refuses the tree it sits in. The first pattern covers the `docs/plans/<slug>/` layout, the second a plan named `<slug>.plan.json` anywhere else, such as the application root:
 
@@ -39,7 +40,7 @@ docs/plans/**/*.html
 *.plan.html
 ```
 
-The plan, its approvals and its decision log are a different matter: `plan:next` refuses while one of them is uncommitted, since a waiver decides which step it hands out.
+The plan, its approvals, its decision log and its revisions are a different matter: `plan:next` refuses while one of them is uncommitted, since a waiver decides which step it hands out and a revision belongs in the commit that changes the plan.
 
 ## Writing a plan
 
@@ -201,7 +202,7 @@ bunx guren plan:render docs/plans/comments/plan.json
 
 It writes `docs/plans/comments/plan.html` and prints the path. `-o` writes somewhere else, `--app <dir>` names the application to check against when you run it from another directory, and `--locale ja` opens the page's own labels in Japanese (the page switches between `en` and `ja`; the plan's text is never translated). `--json` prints the page's path and every check instead of the path alone, so an agent can read the failing checks without opening the page.
 
-The page is one file with no network access: it opens from disk and can be attached to a review. It has a tab per section, a filter per entity, a "Changes only" toggle that hides `existing` elements, an entity relationship diagram of the plan merged over the current schema, and every id links to the element it names. Failed checks and breaking changes are pinned under "Needs attention". Each element has Approve and Request changes buttons and a comment box, and the footer exports the review as `feedback.json`. No command reads that file yet, and the footer says so: hand `feedback.json` or the copied text to the agent that wrote the plan, or apply the comments to `plan.json` yourself. The two commands it prints are the ones that follow a revision, `plan:render` and `plan:approve`.
+The page is one file with no network access: it opens from disk and can be attached to a review. It has a tab per section, a filter per entity, a "Changes only" toggle that hides `existing` elements, an entity relationship diagram of the plan merged over the current schema, and every id links to the element it names. Failed checks and breaking changes are pinned under "Needs attention". Each element has Approve and Request changes buttons and a comment box, and the footer exports the review as `feedback.json`. `plan:revise` reads its approvals and answered questions (below); the comments are for you or your agent to apply to a copy of the plan. The two commands it prints are the ones that follow a revision, `plan:render` and `plan:approve`.
 
 The checks run against the application as it is now. They report, among others, a route whose action is not in the plan, a foreign key to a model that exists nowhere, an `add` whose name is already taken, an `existing` or `alter` target that does not exist, a mutating route with authentication and no authorization, a body-carrying route with no validator, and the missing behaviours above. Rendering never fails on a check; `plan:approve` does. On a plan with a baseline, `plan:render` settles the same findings approval does, so a collision the plan's own work explains shows on the page as a passing check rather than a blocking one. Renaming the delete route of the example to a name the blog already uses gives:
 
@@ -316,6 +317,22 @@ Warning, advisory (the approval stands):
 ```
 
 A property that read `unknown` at approval is not counted as held: the warning names it as the only one that can still show the change, which it does only if a reader comes to see it match. An `alter` none of whose properties could be read gets no warning, and `plan:status` reports it `unjudged` as above.
+
+## Revising: `plan:revise`
+
+A plan changes through a revision, before approval and after. `plan:revise` records one without a model. The plan file as it stands is the parent, and the change comes separately: a copy of the plan with the change made in it, or the ops themselves.
+
+```bash
+cp docs/plans/comments/plan.json /tmp/comments.edited.json
+# edit the copy: rename a column, change a type, drop a route
+bunx guren plan:revise docs/plans/comments/plan.json --edited /tmp/comments.edited.json --message "soft-delete comments instead"
+```
+
+The command derives the ops from the difference between the two, one op per element added, changed or removed, each with `--message` as its reason. It writes `{ parent, ops, result }` to `docs/plans/comments/revisions/0001.json` and then replaces `plan.json` with the copy. A plan named `comments.plan.json` keeps its revisions in `comments.revisions/`. `--ops ops.json` takes the ops directly, as a `{ "ops": [...] }` document in which each op carries its own `reason`.
+
+With `--feedback feedback.json` (or `-` for the copied text), the page's review becomes a rule. An element approved there changes only when `--reopens "<reason>"` says why, and a question answered there has to be gone from the revised plan. That is all the command reads from the feedback: the comments stay for you to apply to the copy.
+
+After approval, this is how the plan changes. Editing `plan.json` in place moves its hash to one that no approval or revision names, and `plan:revise` refuses that plan: restore it with `git checkout -- docs/plans/comments/plan.json`, keep the edit in a copy, and pass the copy with `--edited`. A plan revised and not yet approved can be revised again. A revision carries the baseline over unchanged, so `plan:next` and the other gated commands refuse the result until `plan:approve` records it, and a waiver taken against the old hash does not carry over; the command lists those waivers. A draft can be revised the same way before its first approval, or edited directly.
 
 ## Implementing: `plan:next` and `plan:verify`
 
