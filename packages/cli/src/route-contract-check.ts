@@ -9,7 +9,7 @@ import {
   ZOD3_UNSUPPORTED_MESSAGE,
   type ZodSchemaLike,
 } from '@guren/server/internal/zod-compat'
-import { joinRouteDefinitions } from './app-routes'
+import { joinManifestRoutes } from './app-routes'
 import { check, type CheckEvidence, type CheckResult } from './check-result'
 import { fileExists } from './discovery'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
@@ -22,6 +22,8 @@ export interface RouteContractCheckOptions {
   routesFile?: string
   /** Definitions to check instead of loading them; absent, this loads its own. */
   definitions?: RouteDefinition[]
+  /** `loadRouteDefinitions()`'s `moduleIdentities` for `definitions`, so the Zod fallback joins within each module. */
+  definitionModules?: readonly (string | null)[]
   /**
    * The run's introspection (RFC 0026 §5), asked for once a definition declares a params schema
    * or a binding: the introspected app's routes are judged instead, the routes file's Zod standing
@@ -305,11 +307,14 @@ export async function checkRouteContracts(options: RouteContractCheckOptions): P
   const { cwd, routesFile = DEFAULT_ROUTES_FILE } = options
 
   let definitions = options.definitions
+  let modules = options.definitionModules ?? []
   if (!definitions) {
     if (!(await fileExists(cwd, routesFile))) return []
 
     try {
-      definitions = await loadRouteDefinitions(resolve(cwd, routesFile), cwd)
+      const moduleIdentities: Array<string | null> = []
+      definitions = await loadRouteDefinitions(resolve(cwd, routesFile), cwd, undefined, undefined, moduleIdentities)
+      modules = moduleIdentities
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       // Reported, never swallowed: silence is indistinguishable from every route matching.
@@ -333,7 +338,7 @@ export async function checkRouteContracts(options: RouteContractCheckOptions): P
 
   if (introspected?.status === 'described') {
     const { routes, warnings } = introspected.manifest
-    const joined = joinRouteDefinitions(routes, definitions)
+    const joined = joinManifestRoutes(routes, definitions, modules)
     const results = routes.flatMap((entry, index) => {
       const { parsed, evidence } = manifestParams(entry, warnings, joined[index])
       return checkRoute(entry, parsed).map((result) => (evidence ? { ...result, evidence } : result))

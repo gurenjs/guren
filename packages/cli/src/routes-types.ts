@@ -44,7 +44,7 @@ export interface GenerateRouteTypesOptions extends WriterOptions {
  * A failed or unusable introspection falls back to the routes file, saying why.
  */
 async function loadCodegenRoutes(routesFile: string, appRoot: string, introspect: boolean): Promise<RouteDefinition[]> {
-  const loadStatic = () => loadRouteDefinitions(routesFile, appRoot)
+  const loadStatic = (moduleIdentities?: Array<string | null>) => loadRouteDefinitions(routesFile, appRoot, undefined, undefined, moduleIdentities)
   if (!introspect) return loadStatic()
 
   // The manifest describes the entry's routes, which a file `--routes` names may not be.

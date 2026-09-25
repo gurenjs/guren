@@ -218,11 +218,12 @@ async function checkAgentManifest(
 async function loadRouteGraph(
   cwd: string,
   routesFile: string,
-): Promise<{ definitions?: RouteDefinition[]; error?: string }> {
+): Promise<{ definitions?: RouteDefinition[]; modules?: Array<string | null>; error?: string }> {
   if (!(await fileExists(cwd, routesFile))) return {}
 
   try {
-    return { definitions: await loadRouteDefinitions(resolve(cwd, routesFile), cwd) }
+    const modules: Array<string | null> = []
+    return { definitions: await loadRouteDefinitions(resolve(cwd, routesFile), cwd, undefined, undefined, modules), modules }
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) }
   }
@@ -581,7 +582,13 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // rather than 7.5's `routesChanged`. A load failure was already reported at 5.5.
     if (graph?.definitions) {
       const definitions = graph.definitions
-      checks.push(...(await checkRouteContracts({ cwd, routesFile: routeGraphFile, definitions, introspect: routeIntrospect })))
+      checks.push(...(await checkRouteContracts({
+        cwd,
+        routesFile: routeGraphFile,
+        definitions,
+        definitionModules: graph.modules,
+        introspect: routeIntrospect,
+      })))
 
       // 7.8. Check the routes that declare `.agent()` metadata (RFC 0016): the
       // tool name is legal and unique, a non-read-only tool is covered by

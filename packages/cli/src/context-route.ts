@@ -138,7 +138,10 @@ export async function loadContextRoutes(
   if (target.silentlyAbsent) return []
 
   try {
-    const { definitions, source } = await loadIntrospectedRouteDefinitions(introspect, () => loadRouteDefinitions(resolve(cwd, target.path), cwd))
+    const { definitions, source } = await loadIntrospectedRouteDefinitions(
+      introspect,
+      (moduleIdentities) => loadRouteDefinitions(resolve(cwd, target.path), cwd, undefined, undefined, moduleIdentities),
+    )
     if (introspect && source.evidence === 'static') {
       fallbackReasons?.push(routesFileFallbackMessage(source, 'Routes are listed from the routes file.'))
     }

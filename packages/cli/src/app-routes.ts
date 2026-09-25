@@ -55,6 +55,21 @@ export function joinRouteDefinitions<T extends JoinableRoute>(
   })
 }
 
+/**
+ * Manifest routes joined to registered definitions within each route's module, `modules` naming each
+ * definition's (`loadRouteDefinitions()`'s `moduleIdentities`). A `modules` of another length (a
+ * loader that recorded none) joins across modules, as {@link joinRouteDefinitions} does unasked.
+ */
+export function joinManifestRoutes<T extends JoinableRoute>(
+  entries: readonly RouteEntry[],
+  definitions: readonly T[],
+  modules: readonly (string | null)[],
+): Array<T | undefined> {
+  if (modules.length !== definitions.length) return joinRouteDefinitions(entries, definitions)
+  const tagged = definitions.map((definition, index) => ({ ...definition, module: modules[index] ?? null, definition }))
+  return joinRouteDefinitions(entries, tagged, { byModule: true }).map((side) => side?.definition)
+}
+
 /** The alias and group names a manifest route's chain names, as a registered definition's `middlewareNames`. */
 export function manifestMiddlewareNames(entry: Pick<RouteEntry, 'middleware'>): string[] {
   return entry.middleware.flatMap((item) => (item.kind !== 'inline' && item.name ? [item.name] : []))
@@ -93,15 +108,17 @@ export interface IntrospectedRouteDefinitions {
  */
 export async function loadIntrospectedRouteDefinitions(
   introspect: IntrospectSource | undefined,
-  loadStatic: () => Promise<RouteDefinition[]>,
+  /** Pushes each definition's `defineModule()` name onto `moduleIdentities`, as `loadRouteDefinitions()` does. */
+  loadStatic: (moduleIdentities: Array<string | null>) => Promise<RouteDefinition[]>,
 ): Promise<IntrospectedRouteDefinitions> {
-  const [introspected, definitions] = await Promise.all([introspectedRoutes(introspect), loadStatic()])
+  const modules: Array<string | null> = []
+  const [introspected, definitions] = await Promise.all([introspectedRoutes(introspect), loadStatic(modules)])
   if (introspected.status === 'static') {
     return { definitions, source: { evidence: 'static', reason: introspected.reason, failure: introspected.failure } }
   }
 
   const { manifest } = introspected
-  const joined = joinRouteDefinitions(manifest.routes, definitions)
+  const joined = joinManifestRoutes(manifest.routes, definitions, modules)
   const unmatched = manifest.routes.filter((_, index) => !joined[index])
   return {
     definitions: manifest.routes.map((entry, index) => joined[index] ?? definitionFromEntry(entry)),
