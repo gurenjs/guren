@@ -1,32 +1,44 @@
 /**
  * `guren plan:scaffold` (RFC 0030 §5, Part 3 item 6): writes what `plan/scaffold.ts` emits for
- * one scaffold step of an approved plan, the step `plan:next` has marked. Every refusal is
- * decided before the first write, so a refused run leaves the application as it was, and a
- * re-run over a scaffolded step is refused on the targets it already wrote. It runs no codegen
- * and no migration: those are the step's `plan:verify` and the `data` step's.
+ * one scaffold step of an approved plan, the step `plan:next` has marked, and registers each
+ * policy provider in `createApp()`. Every refusal is decided before the first write, so a refused
+ * run leaves the application as it was, and a re-run over a scaffolded step is refused on the
+ * targets it already wrote. It runs no codegen and no migration: those are `plan:verify`'s.
  */
 
+import { readFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { CliError } from './cli-error'
-import { readIfExists, toPosixRelative } from './discovery'
+import {
+  classNameFromPath,
+  discoverPolicyFiles,
+  discoverResourceFiles,
+  discoverValidatorFiles,
+  excludeBarrelFiles,
+  moduleNameFor,
+  readIfExists,
+  toPosixRelative,
+} from './discovery'
 import { DIALECT_BARRELS } from './drizzle-specifiers'
 import { discoverModelClasses } from './model-parser'
 import { ParseCache } from './parse-cache'
 import { appendTableToSchema, detectSchemaDialect, ensureNamedImports } from './patch-helpers'
 import { readPlanFile } from './plan-render'
+import { exportedNames } from './plan/app-detail'
 import { requirePlanApproval } from './plan/approvals'
 import { writeFileAtomic } from './plan/beside'
 import { emitPlanScaffold, type PlanScaffoldOutput } from './plan/scaffold'
 import { planSlug, readPlanState } from './plan/state'
 import { derivePlanTasks, findPlanStep, listPlanSteps } from './plan/tasks'
+import { composeAppProviderRegistration, resolveAppEntry } from './provider-registrar'
 import { parseSchemaTables, schemaPathFor } from './schema-parser'
 import { pathExists, writeScaffoldFiles } from './utils'
 
 export const PLAN_SCAFFOLD_REPORT_VERSION = 1
 
-export interface PlanScaffoldReport extends Pick<PlanScaffoldOutput, 'emitted' | 'left' | 'omitted'> {
+export interface PlanScaffoldReport extends Pick<PlanScaffoldOutput, 'emitted' | 'left' | 'omitted' | 'unwritten'> {
   reportVersion: typeof PLAN_SCAFFOLD_REPORT_VERSION
   plan: { file: string; title: string; hash: string }
   step: string
@@ -34,6 +46,8 @@ export interface PlanScaffoldReport extends Pick<PlanScaffoldOutput, 'emitted' |
   created: string[]
   /** The schema file the tables were appended to, and their exports. */
   appended: { file: string; tables: string[] }
+  /** The app entry the policy providers were registered in; `file` is null when there was none to register. */
+  registered: { file: string | null; providers: string[] }
 }
 
 export interface PlanScaffoldFileOptions {
@@ -84,7 +98,10 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
   if (schema === null) refuse([`plan:scaffold appends tables to ${schemaPath}, which this application does not have.`])
   const dialect = detectSchemaDialect(schema)
   const tables = await parseSchemaTables(root)
-  const models = (await discoverModelClasses(root, new ParseCache())).filter((model) => model.module === null).map((model) => model.className)
+  const cache = new ParseCache()
+  const models = (await discoverModelClasses(root, cache)).filter((model) => model.module === null).map((model) => model.className)
+  const validators = await rootValidatorExports(root, cache)
+  if ('unreadable' in validators) refuse([`plan:scaffold cannot tell which schemas the validator files already export: ${validators.unreadable}.`])
 
   const output = emitPlanScaffold(plan, step, {
     dialect,
@@ -96,10 +113,14 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
       ...(table.opaqueColumns ? { opaqueColumns: true } : {}),
     })),
     models,
+    validators: validators.names,
+    resources: await rootClassNames(root, discoverResourceFiles),
+    policies: await rootClassNames(root, discoverPolicyFiles),
   })
   const inTheWay = []
   for (const file of output.files) if (await pathExists(resolve(root, file.path))) inTheWay.push(`${file.path} already exists.`)
-  const refusals = [...output.refusals, ...inTheWay]
+  const registration = await registerProviders(root, output.providers)
+  const refusals = [...output.refusals, ...inTheWay, ...registration.refusals]
   if (refusals.length > 0) {
     refuse([
       `plan:scaffold cannot write ${step.id}:`,
@@ -111,8 +132,9 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
   let content = ensureNamedImports(schema, DIALECT_BARRELS[dialect], [...new Set(output.tables.flatMap((table) => table.imports))])
   for (const table of output.tables) content = appendTableToSchema(content, table.identifier, table.block).source
 
-  // The schema first: the model files import its exports. A failure after the first write names
-  // what is on disk, since the refusal a re-run gives would read as a finished step.
+  // The schema first: the model files import its exports; the entry last, since it imports the
+  // providers. A failure after the first write names what is on disk, since the refusal a re-run
+  // gives would read as a finished step.
   const written: string[] = []
   const created: string[] = []
   let writing: string | undefined
@@ -130,10 +152,14 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
         created.push(relative)
       }
     }
+    if (registration.entry !== null) {
+      writing = registration.entry
+      await writeFileAtomic(resolve(root, registration.entry), registration.content)
+      written.push(registration.entry)
+    }
   } catch (error) {
     if (written.length === 0) throw error
-    // A `wx` write that fails after opening leaves the file behind, possibly empty.
-    const failing = writing && !written.includes(writing) ? ` ${writing} failed and may exist, part written.` : ''
+    const failing = failedWrite(writing, written, registration, output.providers)
     throw new CliError(
       `plan:scaffold stopped part way through ${step.id}: ${error instanceof Error ? error.message : String(error)}\n`
         + `Already written: ${written.join(', ')}.${failing} The step is half scaffolded, and running plan:scaffold again refuses on these files.\n`
@@ -147,19 +173,79 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
     step: step.id,
     created,
     appended: { file: schemaPath, tables: output.tables.map((table) => table.identifier) },
+    registered: { file: registration.entry, providers: output.providers },
     emitted: output.emitted,
     left: output.left,
     omitted: output.omitted,
+    unwritten: output.unwritten,
   }
+}
+
+/** What the write that threw left behind, for the partial-write message. */
+function failedWrite(writing: string | undefined, written: readonly string[], registration: ProviderRegistration, providers: readonly string[]): string {
+  if (!writing || written.includes(writing)) return ''
+  // The entry is written atomically, so a failure leaves it as it was.
+  if (writing === registration.entry) {
+    return ` ${writing} was left unchanged, so ${providers.join(', ')} ${providers.length === 1 ? 'is' : 'are'} not registered.`
+  }
+  // A `wx` write that fails after opening leaves the file behind, possibly empty.
+  return ` ${writing} failed and may exist, part written.`
+}
+
+/** The names the root's validator files export, which a planned validator must not take: `plan:status` finds a validator by its name. */
+async function rootValidatorExports(root: string, cache: ParseCache): Promise<{ names: string[] } | { unreadable: string }> {
+  const names: string[] = []
+  for (const filePath of excludeBarrelFiles(await discoverValidatorFiles(root))) {
+    if (moduleNameFor(root, filePath) !== null) continue
+    const file = toPosixRelative(root, filePath)
+    const parsed = await cache.get(filePath)
+    const exported = parsed ? exportedNames(parsed.ast, 'this file') : null
+    if (exported === null) return { unreadable: `${file} could not be read for its exports` }
+    names.push(...exported)
+  }
+  return { names }
+}
+
+async function rootClassNames(root: string, discover: (appRoot: string) => Promise<string[]>): Promise<string[]> {
+  const files = excludeBarrelFiles(await discover(root))
+  return files.filter((file) => moduleNameFor(root, file) === null).map(classNameFromPath)
+}
+
+/**
+ * `wireAppProvider()`'s patch of the app entry, composed here before any write: that function
+ * writes as it goes and only warns on a failure, where a policy nothing registers would read
+ * as scaffolded while the gate denies every ability for want of it.
+ */
+type ProviderRegistration = { entry: null; refusals: string[] } | { entry: string; content: string; refusals: string[] }
+
+async function registerProviders(root: string, providers: readonly string[]): Promise<ProviderRegistration> {
+  if (providers.length === 0) return { entry: null, refusals: [] }
+  const entry = await resolveAppEntry(root)
+  if (entry === null) return { entry, refusals: [`${providers.join(', ')} would be registered in createApp(), and this application has neither src/app.ts nor app.ts.`] }
+  let content = await readFile(resolve(root, entry), 'utf8')
+  const refusals: string[] = []
+  for (const provider of providers) {
+    const { wiring, content: patched } = composeAppProviderRegistration(content, entry, provider)
+    if (!wiring.registered) refusals.push(`${provider} cannot be registered in ${entry}: ${wiring.entry.reason}.`)
+    else if (!wiring.entry.modified) refusals.push(`${entry} already registers ${provider}.`)
+    content = patched ?? content
+  }
+  return { entry, content, refusals }
 }
 
 export function formatPlanScaffold(report: PlanScaffoldReport, planArgument: string): string {
   const lines = [`${report.plan.title} (${report.plan.file}): scaffolded ${report.step}`, '']
   if (report.created.length > 0) lines.push('Created:', ...report.created.map((file) => `  ${file}`))
   if (report.appended.tables.length > 0) lines.push(`Appended to ${report.appended.file}: ${report.appended.tables.join(', ')}`)
+  if (report.registered.providers.length > 0) lines.push(`Registered in ${report.registered.file}: ${report.registered.providers.join(', ')}`)
   if (report.emitted.length > 0) lines.push('', `Elements written: ${report.emitted.join(', ')}`)
   if (report.left.length > 0) {
-    lines.push('', 'Not written by plan:scaffold; the http step writes these by hand:', ...report.left.map((element) => `  ${element.id} (${element.section})`))
+    lines.push('', 'Not written by plan:scaffold; the http step writes these by hand:')
+    lines.push(...report.left.map((element) => `  ${element.id} (${element.section})${element.reason ? `: ${element.reason}` : ''}`))
+  }
+  if (report.unwritten.length > 0) {
+    lines.push('', 'Written as a stub or not at all, to finish in the http step:')
+    lines.push(...report.unwritten.map((entry) => `  ${entry.element} ${entry.detail}: ${entry.reason}`))
   }
   if (report.omitted.length > 0) {
     lines.push('', 'Relationships left out of the model, to add once what they need exists; until then plan:status reads the model as drifted:')

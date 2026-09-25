@@ -111,13 +111,13 @@ describe('plan:next', () => {
     const command = `bunx guren plan:scaffold comments.plan.json --step ${SCAFFOLD}`
     expect(report.step!.scaffold).toEqual({
       command: `bunx guren plan:scaffold ${plan} --step ${SCAFFOLD}`,
-      writes: ['model.comment', 'column.comment.id', 'column.comment.body', 'column.comment.postId', 'column.comment.createdAt'],
-      leaves: expect.arrayContaining(['validator.comment', 'controller.comments', 'route.comments.store', 'policy.comment']),
+      writes: ['model.comment', 'column.comment.id', 'column.comment.body', 'column.comment.postId', 'column.comment.createdAt', 'validator.comment', 'resource.comment', 'policy.comment'],
+      leaves: expect.arrayContaining(['controller.comments', 'route.comments.store']),
     })
-    expect(report.step!.scaffold!.leaves).not.toContain('model.comment')
+    expect(report.step!.scaffold!.leaves).not.toContain('policy.comment')
     expect(text).toContain(`Write this step with \`${command}\`, not by hand.`)
-    expect(text).toContain("It writes each added model's table and model class: model.comment, column.comment.id")
-    expect(text).toContain('It does not write validator.comment')
+    expect(text).toContain('It writes each added model (table and class), its validators and resources, and each policy with a provider registering it: model.comment, column.comment.id')
+    expect(text).toContain('It does not write controller.comments')
     expect(text).toContain('the http step implements them by hand.')
     expect(text).not.toContain('No generator')
   })

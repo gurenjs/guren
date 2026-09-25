@@ -356,7 +356,7 @@ bunx guren plan:revise docs/plans/comments/plan.json --edited /tmp/comments.edit
 | `scaffold` | 新しいエンティティの最初の版。`plan:scaffold` が書きます | `codegen`、`typecheck` |
 | `tests` | 受け入れ振る舞いごとのテスト。失敗する状態で書きます | `codegen`、テストが失敗すること |
 | `data` | テーブル、マイグレーション、モデルのリレーションと fillable。scaffold 済みなら、マイグレーションと `plan:scaffold` が書かなかったもの | `codegen`、`db:migrate`、`typecheck` |
-| `http` | validator、コントローラー、ルート、Resource、Policy | `codegen`、`guren check`、テストが通ること |
+| `http` | コントローラーとルート。validator、Resource、Policy も書きます。scaffold 済みなら、`plan:scaffold` がスタブにしたものと書かなかったもの | `codegen`、`guren check`、テストが通ること |
 | `pages` | ページコンポーネント | `codegen`、`typecheck`、`guren check` |
 
 複数のエンティティが共有する作業は `task/foundation` に入ります。ステップの id は `task/entity/model.comment/http` のような形です。`commands`、`data`、`http`、`pages` のステップは、担当する要素が五つを超えるファイルにまたがると複数に分かれ、`task/entity/model.comment/http/1`、`task/entity/model.comment/http/2` のような id になります。`scaffold` と `tests` は分かれません。`--step` に渡す正確な id は `plan:next` が表示します。次のステップを尋ね、実装し、検証し、コミットする。これを繰り返します。
@@ -424,8 +424,8 @@ Next: task/entity/model.comment/scaffold
   verify: codegen → typecheck
 
 Write this step with `bunx guren plan:scaffold docs/plans/comments/plan.json --step task/entity/model.comment/scaffold`, not by hand.
-  It writes each added model's table and model class: model.comment, column.comment.id, column.comment.body, column.comment.postId, column.comment.createdAt
-  It does not write validator.comment, controller.comments, action.comments.store, action.comments.destroy, route.comments.store, route.comments.destroy, resource.comment, policy.comment; the http step implements them by hand.
+  It writes each added model (table and class), its validators and resources, and each policy with a provider registering it: model.comment, column.comment.id, column.comment.body, column.comment.postId, column.comment.createdAt, validator.comment, resource.comment, policy.comment
+  It does not write controller.comments, action.comments.store, action.comments.destroy, route.comments.store, route.comments.destroy; the http step implements them by hand.
 ```
 
 ```bash
@@ -445,17 +445,49 @@ export const comments = pgTable('comments', {
 ])
 ```
 
-`app/Models/Comment.ts` には計画の `fillable` とリレーションを書きます。リレーションのキーは計画に書かれた外部キーから決まります。キーや相手がまだ存在しないリレーション (後のタスクが追加するモデルへの `hasMany` など) は書かずに一覧で示すので、それが揃うステップで追加してください。追加するまで、`plan:status` はそのモデルを `drifted` と読みます。これ以外は書きません。codegen もマイグレーションも実行しません。codegen と型検査は `plan:verify` が、マイグレーションの生成は `data` ステップが担います。
+`app/Models/Comment.ts` には計画の `fillable` とリレーションを書きます。リレーションのキーは計画に書かれた外部キーから決まります。キーや相手がまだ存在しないリレーション (後のタスクが追加するモデルへの `hasMany` など) は書かずに一覧で示すので、それが揃うステップで追加してください。追加するまで、`plan:status` はそのモデルを `drifted` と読みます。
+
+ステップの validator は、モデルの名前を付けた一つのファイル `app/Http/Validators/CommentValidator.ts` にまとめて書きます。validator ごとにスキーマを一つ export します。各フィールドは計画の型、`required`、ルール (`min`、`max`、`email`、`url`、`uuid`) から、`plan:status` が読み返せる形で書きます。
+
+```typescript
+import { z } from 'zod'
+
+export const CommentPayloadSchema = z.object({
+  body: z.string().min(1).max(2000),
+})
+```
+
+アクションが `query` や `params` に使う validator では、数値と真偽値を `z.coerce.number()` と `z.stringbool()` で書きます。これらの値は文字列で届くためです。文章で書かれたルールや、フィールドの型に合わないルール (真偽値への上限など) は書かず、レポートに一覧で示します。
+
+モデルをこのステップで追加する Resource は、計画のペイロード型を持つ `Resource` のサブクラスとして書きます。この型は `guren codegen` が `data.gen.ts` のために読むものです。カラムの読み返しの値がすべて計画の型に収まるフィールドはカラムの値をそのまま使い、計画が `string` とした日時のカラムは `toISOString()` で文字列にします。JSON のカラムは計画の型にキャストします。それ以外のフィールドは、対応付けるまで例外を投げるスタブを呼び、レポートに一覧で示します。
+
+```typescript
+export class CommentResource extends Resource<CommentRecord, CommentResourceData> {
+  toArray(): CommentResourceData {
+    return {
+      id: this.resource.id,
+      body: this.resource.body,
+      createdAt: this.resource.createdAt.toISOString(),
+    }
+  }
+}
+```
+
+Policy は計画の ability ごとにメソッドを一つ書きます。どのメソッドも、ルールを書くまで `false` を返します。計画のルールはメソッドのコメントに残します。`app/Providers/CommentPolicyProvider.ts` が `boot()` でその Policy を gate に登録し、コマンドはこのプロバイダーを `src/app.ts` の `createApp({ providers })` に追加します。`plan:status` は Policy を ability で読みます。登録は読まないので、Policy は `present` で完了です。validator が `wired` になるのは、ルートの契約かアクションが使ってからで、それは `http` ステップの作業です。
+
+codegen もマイグレーションも実行しません。codegen と型検査は `plan:verify` が、マイグレーションの生成は `data` ステップが担います。
 
 拒否はすべて、最初の書き込みより前に決まります。拒否するのは次の場合です。
 
 - 下書き、またはどの承認も名指ししていない計画
 - `scaffold` 以外のステップ (そのタスクの scaffold ステップを示します)、または `plan:next` が印を付けていないステップ
-- モジュールに属するモデル (書き込み先はプロジェクトのルートだけです) と、API 専用のアプリケーション
+- モジュールに属するモデル、validator、Resource、Policy (書き込み先はプロジェクトのルートだけです) と、API 専用のアプリケーション
 - MySQL で `text` か `json` のカラムに付けたキー (主キー、`unique`、インデックス、MySQL がインデックスを作る外部キー)。drizzle-kit が拒否し、MySQL もプレフィックス長のないキーを拒否します (カラムを `string` にするか、キーを外してください)。値が `null` の `default` も拒否します
-- すでに存在する書き込み先。モデルのファイルやクラス、スキーマの export、どのアプリケーションルートにあるテーブル名も対象です
+- 名前が `Resource` で終わらない Resource (`guren codegen` が見つけられません) と、`Policy` 自身のメンバー (`before`、`allow`、`deny`) と同じ名前の ability
+- 登録できない Policy プロバイダー。`src/app.ts` も `app.ts` もない場合、書き換えられる `createApp()` の呼び出しがない場合、すでに登録されている場合です
+- すでに存在する書き込み先。モデルのファイルやクラス、スキーマの export、どのアプリケーションルートにあるテーブル名、作るファイル、ほかの validator ファイルが export している validator 名、同じ名前の Resource や Policy のクラスが対象です
 
-scaffold 済みのステップでもう一度実行すると、ファイルがあるので同じように拒否されます。その場合はステップを検証してください。`--json` は、作ったファイル、追記したテーブル、書いた要素、残した要素、書かなかったリレーションを出力します。
+scaffold 済みのステップでもう一度実行すると、ファイルがあるので同じように拒否されます。その場合はステップを検証してください。`--json` は、作ったファイル、追記したテーブル、登録したプロバイダー、書いた要素、残した要素、スタブにしたか書かなかったルールとフィールド、書かなかったリレーションを出力します。
 
 ### 結果
 
@@ -793,7 +825,7 @@ Closed 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0. The pla
 
 - 計画の JSON を Claude に単独で書かせる `guren plan` (いまあるのは `--print-prompt` だけです) と、レビューのコメントをリビジョンに変える `plan --revise`。自分で加えた変更は `plan:revise` で記録できます。`plan.json` は自分で、またはエージェントとのセッションで書いてください
 - 計画を `docs/plans/` ではなく GitHub の issue に置く方式
-- スライス全体を書く `plan:scaffold`。いま書くのは追加するモデルのテーブルとモデルクラスです。スライスの validator、コントローラー、ルート、Resource、Policy は、引き続き `http` ステップで手で書きます。ページは今後も書きません。計画の props から書いたページは、作った時点で計画と一致してしまうためです
+- スライス全体を書く `plan:scaffold`。いま書くのは追加するモデルのテーブルとクラス、validator、Resource、Policy とそのプロバイダーです。スライスのコントローラーとルートは、引き続き `http` ステップで手で書きます。ページは今後も書きません。計画の props から書いたページは、作った時点で計画と一致してしまうためです
 
 ## 次のステップ
 

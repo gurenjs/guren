@@ -468,7 +468,7 @@ async function pageDetail(root: string, pages: string[] | PlanAppUnreadable): Pr
  * app root it sits in is that file's, not this one's. The runtime export list holds both,
  * which is why {@link registrarExport} asks for `'anywhere'`.
  */
-function exportedNames(ast: File, declaredIn: 'anywhere' | 'this file'): string[] | null {
+export function exportedNames(ast: File, declaredIn: 'anywhere' | 'this file'): string[] | null {
   const names: string[] = []
   for (const node of ast.program.body) {
     if (node.type === 'ExportAllDeclaration') return null

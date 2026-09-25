@@ -22,6 +22,8 @@ import { approvedAgainst, approvePlanFile, loadParsedCommentsPlan, type PlanInpu
 // the copy `@guren/orm` pins, and the barrel the emitted schema imports, as schema-runtime.test.ts does.
 const WORKSPACE_DRIZZLE = resolve(import.meta.dir, '../../orm/node_modules/drizzle-orm')
 const WORKSPACE_ORM = resolve(import.meta.dir, '../../orm')
+// plan:status imports the validator file, which imports zod.
+const WORKSPACE_ZOD = resolve(import.meta.dir, '../node_modules/zod')
 
 const STEP = 'task/entity/model.widget/scaffold'
 const PLAN_FILE = 'widgets.plan.json'
@@ -30,7 +32,10 @@ let ROOT: string
 
 type ModelInput = NonNullable<PlanInput['models']>[number]
 type ColumnInput = ModelInput['columns'][number]
-type WidgetsPlan = PlanInput & { models: ModelInput[] }
+type ValidatorInput = NonNullable<PlanInput['validators']>[number]
+type ResourceInput = NonNullable<PlanInput['resources']>[number]
+type PolicyInput = NonNullable<PlanInput['policies']>[number]
+type WidgetsPlan = PlanInput & { models: ModelInput[]; validators: ValidatorInput[]; resources: ResourceInput[]; policies: PolicyInput[] }
 
 function column(model: string, name: string, type: ColumnInput['type'], fields: Partial<ColumnInput> = {}): ColumnInput {
   return { id: `column.${model}.${name}`, name, change: { kind: 'add' }, type, nullable: false, unique: false, index: false, ...fields }
@@ -94,6 +99,90 @@ function widgetsPlan(): WidgetsPlan {
         fillable: ['title', 'body'],
       },
     ],
+    validators: [
+      {
+        id: 'validator.widget',
+        change: { kind: 'add' },
+        name: 'WidgetPayloadSchema',
+        fields: [
+          { name: 'title', type: 'string', required: true, rules: ['min 1', 'max 120'] },
+          { name: 'body', type: 'text', required: false, rules: ['max 2000'] },
+          { name: 'count', type: 'integer', required: true, rules: ['min 0', 'max 100'] },
+          { name: 'ratio', type: 'number', required: false, rules: ['min 0.5'] },
+          { name: 'price', type: 'decimal', required: true, rules: ['min 0'] },
+          { name: 'active', type: 'boolean', required: true, rules: [] },
+          { name: 'releasedOn', type: 'date', required: false, rules: [] },
+          { name: 'publishedAt', type: 'datetime', required: true, rules: [] },
+          { name: 'meta', type: 'json', required: false, rules: [] },
+          { name: 'token', type: 'uuid', required: true, rules: ['uuid'] },
+          { name: 'contact', type: 'string', required: true, rules: ['email', 'max 255'] },
+          { name: 'site', type: 'string', required: false, rules: ['url'] },
+          { name: 'ref', type: 'string', required: true, rules: ['uuid'] },
+        ],
+      },
+      {
+        id: 'validator.widgetQuery',
+        change: { kind: 'add' },
+        name: 'WidgetListQuerySchema',
+        fields: [
+          { name: 'page', type: 'integer', required: false, rules: ['min 1'] },
+          { name: 'perPage', type: 'integer', required: true, rules: ['max 50'] },
+          { name: 'archived', type: 'boolean', required: false, rules: [] },
+        ],
+      },
+    ],
+    // Only for the query schema it names: plan:scaffold writes no controller (the third change does).
+    controllers: [
+      {
+        id: 'controller.widget',
+        change: { kind: 'add' },
+        className: 'WidgetController',
+        actions: [
+          {
+            id: 'action.widget.index',
+            change: { kind: 'add' },
+            name: 'index',
+            query: 'validator.widgetQuery',
+            authorization: { middleware: [] },
+            response: { kind: 'json', description: 'The widgets.' },
+            rules: [],
+          },
+        ],
+      },
+    ],
+    resources: [
+      {
+        id: 'resource.widget',
+        change: { kind: 'add' },
+        name: 'WidgetResource',
+        model: 'model.widget',
+        fields: [
+          { name: 'id', type: 'number' },
+          { name: 'title', type: 'string' },
+          { name: 'body', type: 'string | null' },
+          { name: 'count', type: 'number | null' },
+          { name: 'meta', type: 'Record<string, unknown> | null' },
+          { name: 'price', type: 'string' },
+          { name: 'active', type: 'boolean' },
+          { name: 'releasedOn', type: 'string | null' },
+          { name: 'publishedAt', type: 'string' },
+          { name: 'token', type: 'string' },
+          { name: 'tags', type: 'string[]' },
+        ],
+      },
+    ],
+    policies: [
+      {
+        id: 'policy.widget',
+        change: { kind: 'add' },
+        name: 'WidgetPolicy',
+        model: 'model.widget',
+        abilities: [
+          { name: 'update', rule: 'The signed-in user owns the widget.' },
+          { name: 'delete', rule: 'Only an admin,\nor the owner.' },
+        ],
+      },
+    ],
   }
 }
 
@@ -152,6 +241,15 @@ export const widgetTags = sqliteTable('widget_tags', {
 `,
 }
 
+const APP_ENTRY = `import { createApp } from '@guren/core'
+
+const app = createApp({
+  providers: [],
+})
+
+export default app
+`
+
 const model = (name: string, table: string): string => `import { defineModel } from '@guren/core'
 import { ${table} } from '../../db/schema.js'
 
@@ -186,6 +284,31 @@ const READER_LIMITS: Record<SchemaDialect, string[]> = {
   ],
 }
 
+/**
+ * Where the validator and policy readers stop, in every dialect. The judge calls no validated
+ * value a `decimal` (a string or a number may hold one); `json` is a record, a node outside the
+ * field reader's zod allowlist; an ability's rule is prose, which nothing compares.
+ */
+const HTTP_READER_LIMITS = [
+  // A query value arrives as text, so it is coerced, and a coerced number takes `null` as 0.
+  'validator.widgetQuery field perPage required',
+  'validator.widget field price type',
+  'validator.widget field meta type',
+  'validator.widget field meta required',
+  'policy.widget ability update rule',
+  'policy.widget ability delete rule',
+]
+
+const HTTP_ELEMENTS = ['validator.widget', 'validator.widgetQuery', 'resource.widget', 'policy.widget']
+
+const CREATED = [
+  'app/Models/Widget.ts',
+  'app/Http/Validators/WidgetValidator.ts',
+  'app/Http/Resources/WidgetResource.ts',
+  'app/Policies/WidgetPolicy.ts',
+  'app/Providers/WidgetPolicyProvider.ts',
+]
+
 /** The document stamped and ready to approve, as `plan:approve` would stamp it against the fixture app. */
 function approve(document: WidgetsPlan): Record<string, unknown> {
   return approvedAgainst(document as unknown as Record<string, unknown>)
@@ -202,6 +325,8 @@ interface AppOptions {
   packageJson?: Record<string, unknown>
   /** Link drizzle, the ORM and core, which only a run of the readers needs; a refusal's tree snapshot skips none of it. */
   link?: boolean
+  /** `src/app.ts`; `null` writes none. */
+  entry?: string | null
 }
 
 async function createApp(name: string, options: AppOptions = {}): Promise<{ dir: string; plan: string }> {
@@ -211,6 +336,7 @@ async function createApp(name: string, options: AppOptions = {}): Promise<{ dir:
   await writeWorkspaceFiles(dir, {
     'package.json': JSON.stringify(options.packageJson ?? { name, type: 'module', dependencies: { '@guren/inertia-client': '*' } }),
     'bunfig.toml': '[install]\nauto = "disable"\n',
+    ...(options.entry === null ? {} : { 'src/app.ts': options.entry ?? APP_ENTRY }),
     'db/schema.ts': SCHEMAS[dialect],
     'app/Models/Post.ts': model('Post', 'posts'),
     'app/Models/Tag.ts': model('Tag', 'tags'),
@@ -221,6 +347,7 @@ async function createApp(name: string, options: AppOptions = {}): Promise<{ dir:
     await linkWorkspaceCore(dir)
     await symlink(WORKSPACE_DRIZZLE, join(dir, 'node_modules', 'drizzle-orm'), 'dir')
     await symlink(WORKSPACE_ORM, join(dir, 'node_modules', '@guren', 'orm'), 'dir')
+    await symlink(WORKSPACE_ZOD, join(dir, 'node_modules', 'zod'), 'dir')
   }
   const plan = join(dir, PLAN_FILE)
   if (options.approve !== false && 'baseline' in document) await approvePlanFile(plan)
@@ -274,8 +401,9 @@ describe('plan:scaffold', () => {
       test(`should write a ${dialect} table and model every planned property reads back from, bar the readers' own limits`, async () => {
         const { dir, plan, report } = runs.get(dialect)!
 
-        expect(report.created).toEqual(['app/Models/Widget.ts'])
+        expect(report.created).toEqual(CREATED)
         expect(report.appended).toEqual({ file: 'db/schema.ts', tables: ['widgets'] })
+        expect(report.registered).toEqual({ file: 'src/app.ts', providers: ['WidgetPolicyProvider'] })
         expect(report.omitted).toEqual([])
         const widgets = (await readSchemaTables(dir)).tables.find((table) => table.identifier === 'widgets')
         // A static reading would pass for the wrong reason: the runtime one is what plan:verify judges by.
@@ -283,13 +411,49 @@ describe('plan:scaffold', () => {
         const status = await statusOf(dir, plan)
         const written = status.elements.filter((element) => report.emitted.includes(element.id))
         expect(written.map((element) => [element.id, element.state])).toEqual(report.emitted.map((id) => [id, 'present']))
-        expect(unmatched(status, report.emitted).sort()).toEqual([...READER_LIMITS[dialect]].sort())
+        expect(report.emitted).toEqual(expect.arrayContaining(HTTP_ELEMENTS))
+        expect(unmatched(status, report.emitted).sort()).toEqual([...READER_LIMITS[dialect], ...HTTP_READER_LIMITS].sort())
       })
     }
 
+    test('should leave a scaffolded validator present until a route or action uses it, which the http step writes', async () => {
+      const { dir, plan } = runs.get('pg')!
+      const validator = (await statusOf(dir, plan)).elements.find((element) => element.id === 'validator.widget')!
+
+      expect(validator.completesAt).toBe('wired')
+      expect(validator.state).toBe('present')
+      expect(validator.notes.join(' ')).toContain('no route contract holds it and no action body validates with it')
+    })
+
+    // The provider's registration is not read: status gives a policy no mount, so it completes at
+    // `present`, and reading one would move every approved plan's policies to `wired`.
+    test('should complete a scaffolded policy at present, on its abilities, whether or not a provider registers it', async () => {
+      const { dir, plan } = runs.get('pg')!
+      const read = async (): Promise<PlanStatus['elements'][number]> => (await statusOf(dir, plan)).elements.find((element) => element.id === 'policy.widget')!
+      const policy = await read()
+
+      expect(policy.completesAt).toBe('present')
+      expect(policy.state).toBe('present')
+      expect(policy.properties.map((property) => [property.property, property.verdict, property.existence === true])).toEqual([
+        ['ability update', 'match', true],
+        ['ability update rule', 'unknown', false],
+        ['ability delete', 'match', true],
+        ['ability delete rule', 'unknown', false],
+      ])
+
+      const entry = join(dir, 'src/app.ts')
+      const registered = await readFile(entry, 'utf8')
+      try {
+        await Bun.write(entry, APP_ENTRY)
+        expect(await read()).toEqual(policy)
+      } finally {
+        await Bun.write(entry, registered)
+      }
+    })
+
     test('should write output that typechecks, in every dialect', () => {
       const dirs = DIALECTS.map((dialect) => runs.get(dialect)!.dir)
-      const rootNames = dirs.flatMap((dir) => ['db/schema.ts', 'app/Models/Widget.ts', 'app/Models/Post.ts', 'app/Models/Tag.ts'].map((file) => join(dir, file)))
+      const rootNames = dirs.flatMap((dir) => ['db/schema.ts', 'app/Models/Post.ts', 'app/Models/Tag.ts', 'src/app.ts', ...CREATED].map((file) => join(dir, file)))
       expect(checkTypes(rootNames, renderedAppCompilerOptions(dirs[0]!))).toEqual([])
     }, TSC_TIMEOUT)
 
@@ -345,6 +509,128 @@ Widget.belongsTo('parent', () => import('./Widget.js').then((module) => module.W
 Widget.hasMany('children', () => import('./Widget.js').then((module) => module.Widget), 'parentId', 'id')
 Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Tag), widgetTags, 'widgetId', 'tagId', 'id', 'id')
 `)
+    })
+
+    test('should write the pg validator, resource, policy, provider and registration byte for byte', async () => {
+      const { dir } = runs.get('pg')!
+      const read = (file: string): Promise<string> => readFile(join(dir, file), 'utf8')
+      expect(await read('app/Http/Validators/WidgetValidator.ts')).toMatchInlineSnapshot(`
+        "import { z } from 'zod'
+
+        export const WidgetPayloadSchema = z.object({
+          title: z.string().min(1).max(120),
+          body: z.string().max(2000).nullable().optional(),
+          count: z.number().int().min(0).max(100),
+          ratio: z.number().min(0.5).nullable().optional(),
+          price: z.number().min(0),
+          active: z.boolean(),
+          releasedOn: z.iso.date().nullable().optional(),
+          publishedAt: z.iso.datetime(),
+          meta: z.record(z.string(), z.any()).nullable().optional(),
+          token: z.uuid(),
+          contact: z.email().max(255),
+          site: z.url().nullable().optional(),
+          ref: z.uuid(),
+        })
+
+        export const WidgetListQuerySchema = z.object({
+          page: z.coerce.number().int().min(1).nullable().optional(),
+          perPage: z.coerce.number().int().max(50),
+          archived: z.stringbool().nullable().optional(),
+        })
+        "
+      `)
+      expect(await read('app/Http/Resources/WidgetResource.ts')).toMatchInlineSnapshot(`
+        "import { Resource } from '@guren/core'
+        import type { WidgetRecord } from '../../Models/Widget.js'
+
+        // plan:scaffold found no column to copy these fields from as they are planned: map each, then remove this.
+        function unmapped(field: string): never {
+          throw new Error(\`WidgetResource.toArray() does not map \${field} yet\`)
+        }
+
+        export interface WidgetResourceData extends Record<string, unknown> {
+          id: number
+          title: string
+          body: string | null
+          count: number | null
+          meta: Record<string, unknown> | null
+          price: string
+          active: boolean
+          releasedOn: string | null
+          publishedAt: string
+          token: string
+          tags: string[]
+        }
+
+        export class WidgetResource extends Resource<WidgetRecord, WidgetResourceData> {
+          toArray(): WidgetResourceData {
+            return {
+              id: this.resource.id,
+              title: this.resource.title,
+              body: this.resource.body,
+              count: this.resource.count,
+              meta: this.resource.meta as Record<string, unknown> | null,
+              price: this.resource.price,
+              active: this.resource.active,
+              releasedOn: this.resource.releasedOn,
+              publishedAt: this.resource.publishedAt.toISOString(),
+              token: this.resource.token,
+              tags: unmapped('tags'),
+            }
+          }
+        }
+        "
+      `)
+      expect(await read('app/Policies/WidgetPolicy.ts')).toMatchInlineSnapshot(`
+        "import { Policy, type AuthUser } from '@guren/core'
+
+        export class WidgetPolicy extends Policy {
+          // Denied until written. Planned: The signed-in user owns the widget.
+          update(_user: AuthUser | null): boolean {
+            return false
+          }
+
+          // Denied until written. Planned: Only an admin, or the owner.
+          delete(_user: AuthUser | null): boolean {
+            return false
+          }
+        }
+        "
+      `)
+      expect(await read('app/Providers/WidgetPolicyProvider.ts')).toMatchInlineSnapshot(`
+        "import { ServiceProvider } from '@guren/core'
+        import { Widget } from '../Models/Widget.js'
+        import { WidgetPolicy } from '../Policies/WidgetPolicy.js'
+
+        /** Registers WidgetPolicy with the gate for Widget records. */
+        export default class WidgetPolicyProvider extends ServiceProvider {
+          register(): void {}
+
+          // The framework's own provider binds the gate during registration, so this
+          // runs in boot(): make('gate') throws before that.
+          boot(): void {
+            this.container.make('gate').policy(Widget, WidgetPolicy)
+          }
+        }
+        "
+      `)
+      expect(await read('src/app.ts')).toMatchInlineSnapshot(`
+        "import { createApp } from '@guren/core'
+        import WidgetPolicyProvider from '../app/Providers/WidgetPolicyProvider.js'
+
+        const app = createApp({
+          providers: [WidgetPolicyProvider],
+        })
+
+        export default app
+        "
+      `)
+    })
+
+    test('should write the mysql resource’s date field through its Date column', async () => {
+      expect(await readFile(join(runs.get('mysql')!.dir, 'app/Http/Resources/WidgetResource.ts'), 'utf8')).toContain('releasedOn: this.resource.releasedOn?.toISOString() ?? null,')
+      expect(await readFile(join(runs.get('sqlite')!.dir, 'app/Http/Resources/WidgetResource.ts'), 'utf8')).toContain('releasedOn: this.resource.releasedOn,')
     })
 
     test('should write a composite primary key each of its columns reads back as in the key', async () => {
@@ -468,6 +754,70 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
       expect(message).toContain('column.widget.note plans default null')
     })
 
+    test('should refuse a validator name another validator file exports, and the file make:validator writes for the model', async () => {
+      const message = await refusedWithNothingWritten('validator-taken', {
+        files: {
+          'app/Http/Validators/SharedValidator.ts': "import { z } from 'zod'\n\nexport const WidgetPayloadSchema = z.object({})\n",
+          'app/Http/Validators/WidgetValidator.ts': "import { z } from 'zod'\n\nexport const WidgetIdParamSchema = z.object({})\n",
+        },
+      })
+      expect(message).toContain('validator.widget: a validator file already exports WidgetPayloadSchema.')
+      expect(message).toContain('app/Http/Validators/WidgetValidator.ts already exists.')
+    })
+
+    test('should refuse a validator file whose exports cannot all be read', async () => {
+      const message = await refusedWithNothingWritten('validator-unreadable', {
+        files: { 'app/Http/Validators/Barrelish.ts': "export * from './Elsewhere'\nexport const x = 1\n" },
+      })
+      expect(message).toContain('plan:scaffold cannot tell which schemas the validator files already export: app/Http/Validators/Barrelish.ts could not be read for its exports.')
+    })
+
+    test('should refuse a resource guren codegen would not discover, and a resource or policy class already declared', async () => {
+      const document = widgetsPlan()
+      document.resources[0]!.name = 'WidgetPayload'
+      const renamed = await refusedWithNothingWritten('resource-name', { document: approve(document) })
+      expect(renamed).toContain('resource.widget is named "WidgetPayload": guren codegen discovers a resource class by a PascalCase name ending in Resource')
+
+      const taken = await refusedWithNothingWritten('classes-taken', {
+        files: {
+          'app/Http/Resources/nested/WidgetResource.ts': 'export class WidgetResource {}\n',
+          'app/Policies/WidgetPolicy.ts': 'export class WidgetPolicy {}\n',
+        },
+      })
+      expect(taken).toContain('resource.widget: the application already declares a WidgetResource resource.')
+      expect(taken).toContain('policy.widget: the application already declares a WidgetPolicy policy.')
+      expect(taken).toContain('app/Policies/WidgetPolicy.ts already exists.')
+    })
+
+    test('should refuse an ability that would replace one of Policy’s own members, or that no method can be named', async () => {
+      const document = widgetsPlan()
+      document.policies[0]!.abilities.push({ name: 'before', rule: 'Admins pass.' }, { name: 'view any', rule: 'Anyone.' }, { name: 'update', rule: 'Again.' })
+      const message = await refusedWithNothingWritten('ability-names', { document: approve(document) })
+      expect(message).toContain('policy.widget\'s ability "before" would replace Policy\'s own before(). Rename the ability (plan:revise).')
+      expect(message).toContain('policy.widget\'s ability "view any" is not a name a method can take')
+      expect(message).toContain('policy.widget plans the ability "update" twice.')
+    })
+
+    test('should refuse a validator, resource or policy in a module, as it refuses a model', async () => {
+      const document = widgetsPlan()
+      document.validators[0]!.module = 'billing'
+      document.resources[0]!.module = 'billing'
+      document.policies[0]!.module = 'billing'
+      const message = await refusedWithNothingWritten('http-module', { document: approve(document) })
+      for (const id of ['validator.widget', 'resource.widget', 'policy.widget']) {
+        expect(message).toContain(`${id} sits in module "billing": plan:scaffold writes to the project root only.`)
+      }
+    })
+
+    test('should refuse a policy provider it cannot register in createApp()', async () => {
+      expect(await refusedWithNothingWritten('no-entry', { entry: null })).toContain(
+        'WidgetPolicyProvider would be registered in createApp(), and this application has neither src/app.ts nor app.ts.',
+      )
+      expect(await refusedWithNothingWritten('no-create-app', { entry: 'export default {}\n' })).toContain('WidgetPolicyProvider cannot be registered in src/app.ts:')
+      const registered = "import { createApp } from '@guren/core'\nimport WidgetPolicyProvider from '../app/Providers/WidgetPolicyProvider.js'\n\nexport default createApp({ providers: [WidgetPolicyProvider] })\n"
+      expect(await refusedWithNothingWritten('already-registered', { entry: registered })).toContain('src/app.ts already registers WidgetPolicyProvider.')
+    })
+
     test('should refuse a re-run of a scaffolded step on the targets it wrote, leaving them as written', async () => {
       const { dir, plan } = await createApp('rerun')
       await planScaffoldFile(plan, { appRoot: dir, step: STEP })
@@ -496,6 +846,113 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     } finally {
       await chmod(join(dir, 'app/Models'), 0o755)
     }
+  })
+
+  // writeFileAtomic writes a temp file beside the entry, which a read-only src/ refuses.
+  test.skipIf(process.getuid?.() === 0)('should name every file already written, and the entry left unchanged, when the registration fails last', async () => {
+    const { dir, plan } = await createApp('partial-entry')
+    await chmod(join(dir, 'src'), 0o555)
+    try {
+      const message = await refusal(() => planScaffoldFile(plan, { appRoot: dir, step: STEP }))
+      expect(message).toContain(`Already written: db/schema.ts, ${CREATED.join(', ')}. src/app.ts was left unchanged, so WidgetPolicyProvider is not registered.`)
+      expect(message).toContain('running plan:scaffold again refuses on these files.')
+      expect(message).not.toContain('part written')
+      expect(await readFile(join(dir, 'src/app.ts'), 'utf8')).toBe(APP_ENTRY)
+    } finally {
+      await chmod(join(dir, 'src'), 0o755)
+    }
+  })
+
+  test('should add a providers array to a createApp() call that has none', async () => {
+    const { dir, plan } = await createApp('no-providers-key', { entry: "import { createApp } from '@guren/core'\n\nexport default createApp({})\n" })
+
+    await planScaffoldFile(plan, { appRoot: dir, step: STEP })
+
+    const entry = await readFile(join(dir, 'src/app.ts'), 'utf8')
+    expect(entry).toContain("import WidgetPolicyProvider from '../app/Providers/WidgetPolicyProvider.js'")
+    expect(entry).toContain('providers: [WidgetPolicyProvider]')
+  })
+
+  test('should list each validator rule and resource field it writes as a stub or not at all', async () => {
+    const document = widgetsPlan()
+    document.validators[0]!.fields.push(
+      { name: 'slug', type: 'string', required: true, rules: ['lowercase letters and dashes'] },
+      { name: 'flag', type: 'boolean', required: true, rules: ['max 1'] },
+      { name: 'rank', type: 'integer', required: true, rules: ['email'] },
+      { name: 'link', type: 'string', required: true, rules: ['email', 'url'] },
+    )
+    const { dir, plan } = await createApp('unwritten', { document: approve(document) })
+
+    const report = await planScaffoldFile(plan, { appRoot: dir, step: STEP })
+
+    expect(report.unwritten).toEqual([
+      { element: 'validator.widget', detail: 'field slug rule lowercase letters and dashes', reason: 'plan:status compares only min, max, email, url and uuid, so the rule is prose to implement' },
+      { element: 'validator.widget', detail: 'field flag rule max 1', reason: "plan:status reads a bound on a string's length or a number's value, not on a boolean" },
+      { element: 'validator.widget', detail: 'field rank rule email', reason: 'the email format applies to a string, and the field is planned integer' },
+      { element: 'validator.widget', detail: 'field link rule url', reason: 'the field already takes the email format, and a value has one' },
+      { element: 'resource.widget', detail: 'field tags', reason: 'Widget has no column tags this step writes, so toArray() throws on it until it is mapped' },
+    ])
+    const text = formatPlanScaffold(report, PLAN_FILE)
+    expect(text).toContain('Registered in src/app.ts: WidgetPolicyProvider')
+    expect(text).toContain('Written as a stub or not at all, to finish in the http step:')
+    expect(text).toContain('  resource.widget field tags: Widget has no column tags this step writes')
+  })
+
+  test('should refuse validators in a step that adds two models, since their file is named after one', () => {
+    const document = widgetsPlan()
+    document.models.push({ id: 'model.gadget', change: { kind: 'add' }, name: 'Gadget', table: 'gadgets', columns: [column('gadget', 'id', 'integer', { primaryKey: true })], relationships: [], fillable: [] })
+    const plan = parsePlanDocument(approve(document))
+    const { step } = findPlanStep(derivePlanTasks(plan), STEP)!
+    // Derivation gives each added model its own task; a step naming two is built here to reach the refusal.
+    const twoModels = { ...step, generates: [...step.generates, 'model.gadget', 'column.gadget.id'] }
+    const output = emitPlanScaffold(plan, twoModels, { ...NO_CLASSES, dialect: 'pg', tables: [], models: ['Post', 'Tag'] })
+
+    expect(output.refusals).toContain(
+      'validator.widget, validator.widgetQuery: the step adds model.widget and model.gadget, and the validator file is named after one model. Write the validators by hand in the http step, or split the models across tasks (plan:revise).',
+    )
+  })
+
+  test('should write a stubbed field whose name holds a line break or a line separator as a valid literal', () => {
+    const document = widgetsPlan()
+    document.resources[0]!.fields.push({ name: 'odd\nname here', type: 'string' })
+    const output = emitWidgets(document, 'pg')
+    const resource = output.files.find((file) => file.path === 'app/Http/Resources/WidgetResource.ts')!.contents
+
+    expect(resource).toContain("'odd\\nname\\u2028here': unmapped('odd\\nname\\u2028here'),")
+    expect(() => new Bun.Transpiler({ loader: 'ts' }).transformSync(resource)).not.toThrow()
+  })
+
+  test('should stub a nullable JSON column whose planned type admits no null, rather than cast it', () => {
+    const document = widgetsPlan()
+    document.resources[0]!.fields.find((field) => field.name === 'meta')!.type = 'Record<string, unknown>'
+    const output = emitWidgets(document, 'pg')
+    const resource = output.files.find((file) => file.path === 'app/Http/Resources/WidgetResource.ts')!.contents
+
+    expect(resource).toContain("meta: unmapped('meta'),")
+    expect(output.unwritten).toContainEqual({ element: 'resource.widget', detail: 'field meta', reason: 'the column meta reads back as unknown | null, so toArray() throws on it until it is mapped' })
+  })
+
+  test('should leave a resource whose field type holds a comment, which would swallow the code after it', () => {
+    const document = widgetsPlan()
+    document.resources[0]!.fields.find((field) => field.name === 'meta')!.type = 'Record<string, unknown> | null // settings'
+    const output = emitWidgets(document, 'pg')
+
+    expect(output.left.filter((element) => element.section === 'resources')).toEqual([
+      { id: 'resource.widget', section: 'resources', reason: 'its field type `Record<string, unknown> | null // settings` holds a comment, which would swallow the code written after the type' },
+    ])
+    expect(output.files.map((file) => file.path)).not.toContain('app/Http/Resources/WidgetResource.ts')
+  })
+
+  test('should leave a resource whose field type names something the file would have to import', () => {
+    const document = widgetsPlan()
+    document.resources.push({ id: 'resource.summary', change: { kind: 'add' }, name: 'WidgetSummaryResource', model: 'model.widget', fields: [{ name: 'author', type: 'UserResourceData | null' }] })
+    const output = emitWidgets(document, 'pg')
+
+    expect(output.refusals).toEqual([])
+    expect(output.left.filter((element) => element.section === 'resources')).toEqual([
+      { id: 'resource.summary', section: 'resources', reason: 'its field type `UserResourceData | null` names UserResourceData, which the resource file would have to import' },
+    ])
+    expect(output.files.map((file) => file.path)).not.toContain('app/Http/Resources/WidgetSummaryResource.ts')
   })
 
   test('should leave out a relationship whose target has no model yet, and say the model reads drifted until it is added', async () => {
@@ -535,11 +992,20 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
   test('should list the step’s generates it does not write, for the http step, and no page', () => {
     const plan = loadParsedCommentsPlan()
     const { step } = findPlanStep(derivePlanTasks(plan), 'task/entity/model.comment/scaffold')!
-    const output = emitPlanScaffold(plan, step, { dialect: 'pg', tables: [{ identifier: 'posts', tableName: 'posts', module: null, columns: ['id'] }], models: ['Post'] })
+    const output = emitPlanScaffold(plan, step, { ...NO_CLASSES, dialect: 'pg', tables: [{ identifier: 'posts', tableName: 'posts', module: null, columns: ['id'] }], models: ['Post'] })
 
     expect(output.refusals).toEqual([])
-    expect(output.emitted).toEqual(['model.comment', 'column.comment.id', 'column.comment.body', 'column.comment.postId', 'column.comment.createdAt'])
-    expect(output.left.map((element) => element.section)).toEqual(['validators', 'controllers', 'actions', 'actions', 'routes', 'routes', 'resources', 'policies'])
+    expect(output.emitted).toEqual([
+      'model.comment',
+      'column.comment.id',
+      'column.comment.body',
+      'column.comment.postId',
+      'column.comment.createdAt',
+      'validator.comment',
+      'resource.comment',
+      'policy.comment',
+    ])
+    expect(output.left.map((element) => element.section)).toEqual(['controllers', 'actions', 'actions', 'routes', 'routes'])
   })
 
   test('should print the report as JSON through the registered command', async () => {
@@ -548,8 +1014,8 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     try {
       await runCommand(builtinSubCommands['plan:scaffold'] as CommandDef, { rawArgs: [plan, '--step', STEP, '--app', dir, '--json'] })
       const report = JSON.parse(String(log.mock.calls[0]![0])) as PlanScaffoldReport
-      expect(Object.keys(report).sort()).toEqual(['appended', 'created', 'emitted', 'left', 'omitted', 'plan', 'reportVersion', 'step'])
-      expect(report).toMatchObject({ reportVersion: 1, step: STEP, plan: { file: PLAN_FILE, title: 'Widgets' }, created: ['app/Models/Widget.ts'] })
+      expect(Object.keys(report).sort()).toEqual(['appended', 'created', 'emitted', 'left', 'omitted', 'plan', 'registered', 'reportVersion', 'step', 'unwritten'])
+      expect(report).toMatchObject({ reportVersion: 1, step: STEP, plan: { file: PLAN_FILE, title: 'Widgets' }, created: CREATED })
       expect(report.plan.hash).toMatch(/^[0-9a-f]{64}$/)
     } finally {
       log.mockRestore()
@@ -557,12 +1023,16 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
   })
 })
 
+/** An application whose root declares no validator, resource or policy. */
+const NO_CLASSES = { validators: [], resources: [], policies: [] } as const
+
 /** The emitter alone, over the fixture schema's tables and models. */
 function emitWidgets(document: WidgetsPlan, dialect: SchemaDialect): PlanScaffoldOutput {
   const plan = parsePlanDocument(approve(document))
   const { step } = findPlanStep(derivePlanTasks(plan), STEP)!
   const tables = ['posts', 'tags'].map((table) => ({ identifier: table, tableName: table, module: null, columns: ['id'] }))
   return emitPlanScaffold(plan, step, {
+    ...NO_CLASSES,
     dialect,
     tables: [...tables, { identifier: 'widgetTags', tableName: 'widget_tags', module: null, columns: ['widgetId', 'tagId'] }],
     models: ['Post', 'Tag'],

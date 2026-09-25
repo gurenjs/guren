@@ -426,7 +426,9 @@ function scaffoldLines(step: PlanNextStep, scaffold: NonNullable<PlanNextStep['s
   const lines = draft
     ? [`Approve the plan first (bunx guren plan:approve ${planArgument}): plan:scaffold writes this step from an approved plan only, as`, `  ${command}`]
     : [`Write this step with \`${command}\`, not by hand.`]
-  if (scaffold.writes.length > 0) lines.push(`  It writes each added model's table and model class: ${scaffold.writes.join(', ')}`)
+  if (scaffold.writes.length > 0) {
+    lines.push(`  It writes each added model (table and class), its validators and resources, and each policy with a provider registering it: ${scaffold.writes.join(', ')}`)
+  }
   if (scaffold.leaves.length > 0) lines.push(`  It does not write ${scaffold.leaves.join(', ')}; the http step implements them by hand.`)
   return lines
 }

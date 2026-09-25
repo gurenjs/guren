@@ -293,8 +293,17 @@ export function discoverAppSourceFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app')
 }
 
+/** Where `make:provider` and `plan:scaffold` write providers, and `wireAppProvider()` imports them from. */
+export const PROVIDERS_DIR = 'app/Providers'
+
+/** Where `make:validator` writes and `plan:status` reads validators. */
+export const VALIDATORS_DIR = 'app/Http/Validators'
+
+/** Where `make:policy` writes and `plan:status` and `guren audit` read policies. */
+export const POLICIES_DIR = 'app/Policies'
+
 export function discoverProviderFiles(appRoot: string): Promise<string[]> {
-  return discoverDir(appRoot, 'app/Providers')
+  return discoverDir(appRoot, PROVIDERS_DIR)
 }
 
 export function discoverControllerFiles(appRoot: string): Promise<string[]> {
@@ -337,11 +346,11 @@ export function discoverListenerFiles(appRoot: string): Promise<string[]> {
 }
 
 export function discoverValidatorFiles(appRoot: string): Promise<string[]> {
-  return discoverDir(appRoot, 'app/Http/Validators')
+  return discoverDir(appRoot, VALIDATORS_DIR)
 }
 
 export function discoverPolicyFiles(appRoot: string): Promise<string[]> {
-  return discoverDir(appRoot, 'app/Policies')
+  return discoverDir(appRoot, POLICIES_DIR)
 }
 
 /** Where `make:mail` writes a mail class and `discoverMailFiles` reads one: one path, so the two cannot drift. */
