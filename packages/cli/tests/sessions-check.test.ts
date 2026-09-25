@@ -90,7 +90,7 @@ describe('guren check sessions wiring (RFC 0020)', () => {
 
     expect(results.some((result) => result.key === 'sessions-binding')).toBe(false)
     expect(binding).toMatchObject({ status: 'warn', advisory: true, evidence: 'none' })
-    expect(binding?.message).toContain('no introspected app was available')
+    expect(binding?.message).toContain('the app was not introspected')
     expect(binding?.suggestion).toContain('guren introspect')
   })
 

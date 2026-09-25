@@ -1,6 +1,6 @@
 /** Framework-level deprecation warnings. */
-import { readdir, readFile } from 'node:fs/promises'
-import { extname, join, relative, resolve } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { relative, resolve } from 'node:path'
 import {
   collectFiles,
   discoverAppConfigFiles,
@@ -10,8 +10,9 @@ import {
   discoverTestFiles,
   IMPORTABLE_EXTENSIONS,
   NON_SOURCE_DIR_NAMES,
+  readRootSourceFiles,
 } from './discovery'
-import { DEPLOY_RUNTIME_ANALYSIS_DEPRECATION } from './deploy-runtime'
+import { DEPLOY_RUNTIME_ANALYSIS_DEPRECATION, DEPLOY_SCAN_DIRS } from './deploy-runtime'
 import { discoverParsedModels, extractClassDeclaration, findStaticClassProperty } from './model-parser'
 import { parseSourceFile } from './parse-cache'
 
@@ -176,14 +177,14 @@ async function globalServiceFiles(cwd: string): Promise<string[]> {
   return [...(await discoverAppConfigFiles(cwd)), ...(await discoverTestFiles(cwd))]
 }
 
-/** App code and the places a predeploy step lives: `bin/`, `scripts/` and the project root. */
+/** What the deploy scan reads, plus `scripts/` and the tests: where a predeploy step calls the CLI. */
 async function deployScriptFiles(cwd: string): Promise<string[]> {
-  const scripts = await Promise.all(['bin', 'scripts'].map((dir) => collectFiles(resolve(cwd, dir), IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES)))
-  const root = await readdir(cwd, { withFileTypes: true }).catch(() => [])
-  const rootFiles = root
-    .filter((entry) => entry.isFile() && !entry.name.endsWith('.d.ts') && IMPORTABLE_EXTENSIONS.has(extname(entry.name)))
-    .map((entry) => join(cwd, entry.name))
-  return [...new Set([...(await globalServiceFiles(cwd)), ...scripts.flat(), ...rootFiles])]
+  const [trees, rootFiles, tests] = await Promise.all([
+    Promise.all([...DEPLOY_SCAN_DIRS, 'scripts'].map((dir) => collectFiles(resolve(cwd, dir), IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES))),
+    readRootSourceFiles(cwd),
+    discoverTestFiles(cwd),
+  ])
+  return [...new Set([...trees.flat(), ...rootFiles, ...tests])]
 }
 
 const detectGlobalServiceImports = (names: Set<string>) => async (cwd: string): Promise<string[]> =>

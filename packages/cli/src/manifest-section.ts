@@ -132,6 +132,9 @@ export function introspectionUnavailableMessage(failure: IntrospectionFailed, ju
   return `The app could not be introspected (${failure.reason}): ${reason} ${judgedInstead}`
 }
 
+/** Why a verdict only the registered app can answer has nothing to read, when no run was asked for. */
+export const NOT_INTROSPECTED_REASON = 'the app was not introspected'
+
 /**
  * A verdict only the registered app can answer, with no manifest to vouch for it: an advisory warn,
  * `evidence: 'none'`. `subject` is completed by "is unverified: <why>."; no `reason` means no manifest.
@@ -143,7 +146,7 @@ export function unverifiedResult(
   reason: string | undefined,
   options: { detail?: string; fix?: string; filePath?: string } = {},
 ): CheckResult {
-  const message = `${subject} is unverified: ${reason ?? 'no introspected app was available'}.${options.detail ? ` ${options.detail}` : ''}`
+  const message = `${subject} is unverified: ${reason ?? NOT_INTROSPECTED_REASON}.${options.detail ? ` ${options.detail}` : ''}`
   const fix = options.fix ? `${UNVERIFIED_SECTION_FIX} ${options.fix}` : UNVERIFIED_SECTION_FIX
   return { ...advisory(key, title, 'warn', message, fix, options.filePath), evidence: 'none' }
 }

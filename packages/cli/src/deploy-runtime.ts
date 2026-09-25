@@ -1,5 +1,5 @@
-import { readFile, readdir } from 'node:fs/promises'
-import { extname, join, resolve } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import type { File } from '@babel/types'
 import { memberKeyName, walk, type BabelNode } from './ast-walk'
 import { resolveSessionDrivers, type SessionDriverRegistry } from './session-drivers'
@@ -9,15 +9,16 @@ import {
   IMPORTABLE_EXTENSIONS,
   NON_SOURCE_DIR_NAMES,
   formatTruncatedList,
+  readRootSourceFiles,
 } from './discovery'
 import { parseSourceFile } from './parse-cache'
 import { readDeclaredDependencyNames } from './plugin-manifest'
 import type { CheckEvidence } from './check-result'
-import { ADVISORY_INTROSPECT_TIMEOUT_MS, introspectApp, type Introspection } from './introspect'
+import { advisoryIntrospection, type Introspection } from './introspect'
 // The runtime warning in the session middleware names the target by the same label.
 import { SERVERLESS_RUNTIME_LABELS } from '@guren/server'
 import type { AppManifest, AuthProviderEntry, DriverMapEntry, SessionEntry } from '@guren/server'
-import { describeIntrospectionFailure, mapSection, readManifestSection, UNVERIFIED_SECTION_FIX, type ManifestSection } from './manifest-section'
+import { describeIntrospectionFailure, mapSection, NOT_INTROSPECTED_REASON, readManifestSection, UNVERIFIED_SECTION_FIX, type ManifestSection } from './manifest-section'
 
 /**
  * Deploy targets whose runtime invalidates one or more of Guren's Bun-first
@@ -179,16 +180,16 @@ export interface DeployRuntimeOptions {
   introspect?: (() => Promise<Introspection>) | false
 }
 
-const DEPLOY_SCAN_DIRS = ['src', 'app', 'config', 'db', 'routes', 'modules', 'bin', 'functions', 'api'] as const
+/** Where deploy code lives: the app's source trees plus the deploy plugins' `functions/` and `api/`. */
+export const DEPLOY_SCAN_DIRS = ['src', 'app', 'config', 'db', 'routes', 'modules', 'bin', 'functions', 'api'] as const
 
 /** Test files are excluded from the scan — see readAppSources. */
 const TEST_FILE_PATTERN = /\.(test|spec)\.[cm]?[jt]sx?$/
 
 // Every signal name is resolved through the file's own `@guren/*` value imports rather
-// than matched bare, so `import { NodeHasher } from './my-own'` cannot satisfy a
-// remediation; aliases and namespace imports resolve to canonical names. Limitations
-// needing scope/dataflow analysis: a local binding shadowing an imported signal name
-// still counts, and an options object built elsewhere and passed to createApp is not seen (its keys are).
+// than matched bare, so `import { DatabaseSessionStore } from './my-own'` cannot satisfy a
+// remediation; aliases and namespace imports resolve to canonical names. A local binding
+// shadowing an imported signal name still counts, which only scope analysis would tell apart.
 
 type SignalKind =
   | 'passwordAuth'
@@ -442,24 +443,6 @@ interface ScannedFile {
 }
 
 /**
- * Source files sitting directly in the project root, where deploy entrypoints
- * conventionally live. Its own non-recursive pass because pointing collectFiles
- * at the root would walk the whole tree.
- */
-async function readRootSourceFiles(cwd: string): Promise<string[]> {
-  try {
-    const entries = await readdir(cwd, { withFileTypes: true })
-    return entries
-      .filter((entry) => entry.isFile() && !entry.name.startsWith('.') && !entry.name.endsWith('.d.ts'))
-      .filter((entry) => IMPORTABLE_EXTENSIONS.has(extname(entry.name)))
-      .map((entry) => join(cwd, entry.name))
-  } catch {
-    // An unreadable project root leaves the directory scans as the only input.
-    return []
-  }
-}
-
-/**
  * Read and signal-scan the app's own source files: DEPLOY_SCAN_DIRS plus any
  * source file in the project root. Test files are excluded — a fixture
  * constructing a backed store would otherwise satisfy the remediation check on
@@ -600,7 +583,7 @@ function warnDeprecated(symbol: string): void {
  */
 export async function analyzeDeployRuntime(cwd: string, options: DeployRuntimeOptions = {}): Promise<DeployRuntimeAnalysis> {
   warnDeprecated('analyzeDeployRuntime')
-  const facts = await readDeployRuntime(cwd, { introspect: options.introspect ?? introspectForDeploy(cwd) })
+  const facts = await readDeployRuntime(cwd, { introspect: options.introspect ?? advisoryIntrospection(cwd) })
   return {
     ...facts,
     bunOnlyHasherSignals: [],
@@ -701,7 +684,7 @@ export interface DeployRuntimeVerdict {
   message: string
   fix?: string
   evidence: CheckEvidence
-  /** Why a verdict that asked for the introspected app was judged from source instead. */
+  /** Why the introspected app could not vouch for an `-unverified` verdict. */
   evidenceReason?: string
 }
 
@@ -726,7 +709,7 @@ const BUN_ONLY_HASHER_FIX = "Drop `hasher: 'argon2'`, or replace `new ScryptHash
  */
 function unverifiedReason<T>(analysis: DeployRuntimeFacts, section: ManifestSection<T> | undefined): string | undefined {
   if (section) return section.status === 'unverified' ? section.reason : undefined
-  return analysis.introspectionFailure ? `introspection failed with ${analysis.introspectionFailure}` : 'the app was not introspected'
+  return analysis.introspectionFailure ? `introspection failed with ${analysis.introspectionFailure}` : NOT_INTROSPECTED_REASON
 }
 
 /**
@@ -882,7 +865,7 @@ function raiseFactorySessionIssues(analysis: DeployRuntimeFacts, raise: RaiseIss
  */
 function raiseManifestSessionIssues(analysis: DeployRuntimeFacts, session: ManifestSession | null, raise: RaiseIssue): void {
   if (session === null) {
-    const manual = analysis.sessionSignals.filter((signal) => signal.symbol === 'createSessionMiddleware')
+    const manual = analysis.sessionSignals
     if (manual.length > 0 && analysis.backedSessionSignals.length === 0 && analysis.sessionDisabledSignals.length === 0) {
       raise(
         `sessions are enabled (${formatSignals(manual)}) with no persistent store: no DatabaseSessionStore or RedisSessionStore is constructed`,
@@ -1051,10 +1034,6 @@ export function judgeDeployRuntime(analysis: DeployRuntimeAnalysis): DeployRunti
   return judgeDeployVerdicts(analysis)
 }
 
-function introspectForDeploy(cwd: string): () => Promise<Introspection> {
-  return () => introspectApp(cwd, { timeoutMs: ADVISORY_INTROSPECT_TIMEOUT_MS })
-}
-
 /**
  * Scan and judge in one call: what a deploy build runs before the app build.
  * Empty when the app declares no deploy target, so a caller prints nothing
@@ -1066,6 +1045,6 @@ export async function checkDeployRuntime(
   cwd: string,
   options: DeployRuntimeOptions = {},
 ): Promise<DeployRuntimeVerdict[]> {
-  const analysis = await readDeployRuntime(cwd, { introspect: options.introspect ?? introspectForDeploy(cwd) })
+  const analysis = await readDeployRuntime(cwd, { introspect: options.introspect ?? advisoryIntrospection(cwd) })
   return analysis.targets.length === 0 ? [] : judgeDeployVerdicts(analysis)
 }

@@ -1311,7 +1311,7 @@ export async function getDoctorRuleEvaluations(
         return { check, autofix } as DoctorRuleEvaluation
       }),
     ),
-    readDeployRuntime(cwd, { introspect: manifestPlans.introspection ?? false }),
+    readDeployRuntime(cwd, { introspect: manifestPlans.introspection }),
   ])
 
   // The verdicts are shared with `guren check` and the deploy builds

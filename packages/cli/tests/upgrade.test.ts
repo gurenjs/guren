@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, mock, spyOn } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { createTempWorkspace, type TempWorkspace } from './helpers'
+import { createTempWorkspace, type TempWorkspace, writeWorkspaceFiles } from './helpers'
 import { upgradeCanary, checkVersionCompatibility } from '../src/upgrade'
 import { findApplicableCodemods, runCodemods, compareVersions, codemods, type Codemod } from '../src/codemods'
 import { checkDeprecations } from '../src/deprecations'
@@ -798,17 +798,14 @@ describe('checkDeprecations', () => {
 
   describe('deploy-runtime-analysis', () => {
     it('reports the deprecated analysis entry points imported from @guren/cli, and not checkDeployRuntime', async () => {
-      const write = async (relativePath: string, contents: string): Promise<void> => {
-        const target = join(workspace.dir, relativePath)
-        await mkdir(dirname(target), { recursive: true })
-        await writeFile(target, contents)
-      }
-      await write('src/predeploy.ts', "import { analyzeDeployRuntime, judgeDeployRuntime as judge } from '@guren/cli'\n")
-      await write('src/deploy.ts', "import { checkDeployRuntime } from '@guren/cli'\nimport { analyzeDeployRuntime } from './local'\n")
-      await write('tests/deploy.test.ts', "import { type DeployRuntimeVerdict, judgeDeployRuntime } from '@guren/cli'\n")
-      await write('scripts/predeploy.ts', "import { analyzeDeployRuntime } from '@guren/cli'\n")
-      await write('bin/check-deploy.ts', "import { judgeDeployRuntime } from '@guren/cli'\n")
-      await write('predeploy.ts', "import { analyzeDeployRuntime } from '@guren/cli'\n")
+      await writeWorkspaceFiles(workspace.dir, {
+        'src/predeploy.ts': "import { analyzeDeployRuntime, judgeDeployRuntime as judge } from '@guren/cli'\n",
+        'src/deploy.ts': "import { checkDeployRuntime } from '@guren/cli'\nimport { analyzeDeployRuntime } from './local'\n",
+        'tests/deploy.test.ts': "import { type DeployRuntimeVerdict, judgeDeployRuntime } from '@guren/cli'\n",
+        'scripts/predeploy.ts': "import { analyzeDeployRuntime } from '@guren/cli'\n",
+        'bin/check-deploy.ts': "import { judgeDeployRuntime } from '@guren/cli'\n",
+        'predeploy.ts': "import { analyzeDeployRuntime } from '@guren/cli'\n",
+      })
 
       const warning = (await checkDeprecations(workspace.dir)).find((entry) => entry.id === 'deploy-runtime-analysis')
       expect((warning?.affectedFiles ?? []).sort()).toEqual(

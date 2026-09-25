@@ -14,10 +14,10 @@ import { join, resolve } from 'node:path'
 import { consola } from 'consola'
 import { runAudit } from './audit'
 import { getChangedFiles, runGit } from './changed-files'
-import { changesSource, runCheck } from './check'
+import { runCheck } from './check'
 import { formatFinding, gatingResults } from './check-result'
 import { capFindings, codegenFallback, OUTPUT_ERROR_PATTERN, outputFindings, outputTail, readScripts, resolveScriptCommand } from './command-output'
-import { ADVISORY_INTROSPECT_TIMEOUT_MS, introspectApp, introspectRunner, type Introspection } from './introspect'
+import { advisoryIntrospection, introspectRunner, type Introspection } from './introspect'
 import { INTROSPECTION_UNAVAILABLE } from './manifest-section'
 import { isLintable, runOxlint } from './lint-run'
 import { bunExecutable, runCaptured, type CapturedExec, type CapturedRun } from './subprocess'
@@ -90,11 +90,11 @@ interface StageContext {
  * A failed introspection as one finding on the stage that met it first. It never fails the
  * stage: the rules it served fell back to source or report `-unverified`, both advisory.
  */
-function introspectionNote(ctx: StageContext, results: ReadonlyArray<{ key: string; title: string; message: string }>): string[] {
+function introspectionNote(ctx: StageContext, results: ReadonlyArray<{ key: string; title: string; message: string; suggestion?: string }>): string[] {
   const found = results.find((result) => result.key === INTROSPECTION_UNAVAILABLE)
   if (!found || ctx.introspectionNoted) return []
   ctx.introspectionNoted = true
-  return [`${found.title} (advisory): ${found.message}`]
+  return [formatFinding({ ...found, title: `${found.title} (advisory)` })]
 }
 
 /**
@@ -168,9 +168,7 @@ async function checkStage(ctx: StageContext): Promise<StageOutcome> {
 }
 
 async function auditStage(ctx: StageContext): Promise<StageOutcome> {
-  // As check does: a run that changed no source does not execute the app again.
-  const introspect = changesSource(ctx.changedFiles) ? ctx.introspect : false
-  const report = await runAudit({ cwd: ctx.cwd, routesFile: ctx.routesFile, deps: ctx.deps, introspect })
+  const report = await runAudit({ cwd: ctx.cwd, routesFile: ctx.routesFile, deps: ctx.deps, introspect: ctx.introspect, changedFiles: ctx.changedFiles })
   const failing = report.findings.filter((finding) => finding.status === 'fail')
   const note = introspectionNote(ctx, report.findings)
   const findings = [...capFindings(failing.map(formatFinding)), ...note]
@@ -206,7 +204,7 @@ export async function runGate(options: RunGateOptions = {}): Promise<GateReport>
   ])
   // Its own run, not the process memo: the dev MCP server calls the gate for the whole session,
   // and codegen, the stage before check, is what lets a fresh clone's entry import at all.
-  const introspect = introspectRunner(cwd, options.introspect ?? (() => introspectApp(cwd, { fresh: true, timeoutMs: ADVISORY_INTROSPECT_TIMEOUT_MS })))!
+  const introspect = introspectRunner(cwd, options.introspect ?? advisoryIntrospection(cwd, { fresh: true }))
   const ctx: StageContext = {
     cwd,
     exec: options.exec ?? runCaptured,

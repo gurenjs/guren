@@ -840,7 +840,7 @@ export async function checkAttachmentsDelivery(options: {
   if (engine.status === 'described') {
     // Mounting is app-wide, so only another config's redirect disks keep their source verdict.
     const manifest = await judgeManifestDelivery(engine.value, engine.manifest, scan, sole(sites), declarations)
-    return mergeVerdicts(manifest, judgedFromSource(await staticRedirectVerdicts(scan, declarations)))
+    return mergeVerdicts(manifest, judgedFromSource(await redirectVerdicts(scan, declarations)))
   }
   if (!registered) return unverifiedDelivery(scan, engine.reason)
 
@@ -859,7 +859,7 @@ export async function checkAttachmentsDelivery(options: {
       if (duplicate) mount.push(duplicate)
     }
   }
-  const redirects = await staticRedirectVerdicts(scan, declarations, manifestDiskDrivers(registered))
+  const redirects = await redirectVerdicts(scan, declarations, manifestDiskDrivers(registered))
   return [...judgedFromManifest(mount), ...judgedFromSource(redirects, engine.reason)]
 }
 
@@ -885,7 +885,7 @@ function unverifiedDelivery(scan: AttachmentsDeliveryScan, reason: string | unde
   ]
 }
 
-async function staticRedirectVerdicts(
+async function redirectVerdicts(
   scan: AttachmentsDeliveryScan,
   declarations: () => Promise<Map<string, StorageDiskDeclaration>>,
   registeredDrivers: Map<string, string> = new Map(),

@@ -45,11 +45,18 @@ export const ADVISORY_INTROSPECT_TIMEOUT_MS = 10_000
 export type IntrospectOption = boolean | (() => Promise<Introspection>)
 
 /** The run {@link IntrospectOption} names, started at most once however often it is asked, or `undefined` for none. */
+export function introspectRunner(cwd: string, option: () => Promise<Introspection>): () => Promise<Introspection>
+export function introspectRunner(cwd: string, option: IntrospectOption | undefined): (() => Promise<Introspection>) | undefined
 export function introspectRunner(cwd: string, option: IntrospectOption | undefined): (() => Promise<Introspection>) | undefined {
   const run = typeof option === 'function' ? option : option ? () => introspectApp(cwd) : undefined
   if (!run) return undefined
   let started: Promise<Introspection> | undefined
   return () => (started ??= run())
+}
+
+/** A run capped at {@link ADVISORY_INTROSPECT_TIMEOUT_MS}, for the callers whose manifest only feeds advice. */
+export function advisoryIntrospection(cwd: string, options: Pick<IntrospectOptions, 'fresh'> = {}): () => Promise<Introspection> {
+  return () => introspectApp(cwd, { ...options, timeoutMs: ADVISORY_INTROSPECT_TIMEOUT_MS })
 }
 
 /** One run per app root and timeout per CLI process, so a larger `timeoutMs` can retry a timed-out run. */
