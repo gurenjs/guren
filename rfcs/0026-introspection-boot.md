@@ -831,11 +831,11 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   Provider discovery, target detection and explicit store constructions stay
 >   on the scan because no manifest section carries them; removing them would
 >   warn every deploy app whose introspection succeeds.
-> - Measured on this branch against `e89f0dec`: `deploy-runtime.ts` 1,229 to
->   1,098 lines, `session-config.ts` 160 to 138, `sessions-check.ts` 289 to 256,
+> - Measured against `9eebeec0`: `deploy-runtime.ts` 1,229 to 1,050 lines,
+>   `session-config.ts` 160 to 138, `sessions-check.ts` 289 to 256,
 >   `attachments-check.ts` 1,018 to 1,006, `tests/deploy-runtime.test.ts` 2,026
->   to 1,518.
-> - Verdicts on the reference apps against main: blog and web report the same
+>   to 1,462; `controller-methods.ts` unchanged (654).
+> - Verdicts on the reference apps against `9eebeec0`: blog and web report the same
 >   keys and statuses through `check`, `check --ci`, `audit`, `doctor` and `gate`.
 >   `examples/agents`, whose `EncryptionServiceProvider` throws without
 >   `APP_KEY`, reports `deploy-password-hashing-unverified` (advisory) where it
