@@ -126,17 +126,19 @@ async function loadGurenModule(appRoot: string, moduleName: string, warnings?: s
 }
 
 /**
- * Every app route, module routes mounted through the shared `mountModuleRoutes()`
- * so static analyses see exactly what will serve. `appRoot` is required since
- * `--routes <file>` may point anywhere. Discovery is a directory scan (like
- * `check --arch`), so a module never passed to `createApp()` shows up here without
- * mounting. `moduleProvenance` gets one entry per definition, in order: module name or `null`.
+ * Every app route, module routes mounted through the shared `mountModuleRoutes()` so static
+ * analyses see exactly what will serve. `appRoot` is required since `--routes <file>` may point
+ * anywhere. Discovery is a directory scan (like `check --arch`), so a module never passed to
+ * `createApp()` shows up here without mounting. `moduleProvenance` and `moduleIdentities` get one
+ * entry per definition, in order: its directory under `modules/`, its `defineModule()` name, or `null`.
  */
 export async function loadRouteDefinitions(
   routesFile: string,
   appRoot: string,
   moduleWarnings?: string[],
   moduleProvenance?: Array<string | null>,
+  /** What the manifest's `RouteEntry.module` holds for the same route. */
+  moduleIdentities?: Array<string | null>,
 ): Promise<RouteDefinition[]> {
   const moduleExports = await import(importUrl(routesFile)) as Record<string, unknown>
   const registrar = resolveRegistrar(moduleExports)
@@ -151,6 +153,7 @@ export async function loadRouteDefinitions(
   await registrar(router)
   let definitionCount = router.definitions().length
   moduleProvenance?.push(...Array.from({ length: definitionCount }, () => null))
+  moduleIdentities?.push(...Array.from({ length: definitionCount }, () => null))
 
   const moduleNames = await listModuleNames(appRoot)
 
@@ -160,6 +163,7 @@ export async function loadRouteDefinitions(
       await mountModuleRoutes(router, gurenModule)
       const mounted = router.definitions().length
       moduleProvenance?.push(...Array.from({ length: mounted - definitionCount }, () => moduleName))
+      moduleIdentities?.push(...Array.from({ length: mounted - definitionCount }, () => gurenModule.name))
       definitionCount = mounted
     }
   }
