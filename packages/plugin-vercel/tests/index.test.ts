@@ -1,5 +1,5 @@
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { DOCUMENT_ASSET_EXTENSIONS, DOCUMENT_ASSET_HEADERS } from '@guren/core/internal/deploy-build'
@@ -433,6 +433,19 @@ describe('@guren/plugin-vercel', () => {
   })
 })
 
+/**
+ * An app the CLI can introspect (RFC 0026): an entry importing `src/app.ts`, and this workspace's
+ * `@guren/core` for it to import. The deploy verdicts read the session store from the registered app.
+ */
+function writeIntrospectableApp(root: string, app: string): void {
+  mkdirSync(join(root, 'src'), { recursive: true })
+  mkdirSync(join(root, 'node_modules/@guren'), { recursive: true })
+  symlinkSync(resolve(import.meta.dir, '../../core'), join(root, 'node_modules/@guren/core'), 'dir')
+  writeFileSync(join(root, 'bunfig.toml'), '[install]\nauto = "disable"\n')
+  writeFileSync(join(root, 'src/main.ts'), "import app from './app.js'\nexport default app\n")
+  writeFileSync(join(root, 'src/app.ts'), app)
+}
+
 describe('buildVercelOutput deploy-runtime warnings (RFC 0020 Part 0)', () => {
   let root: string
 
@@ -448,21 +461,17 @@ describe('buildVercelOutput deploy-runtime warnings (RFC 0020 Part 0)', () => {
     const app = scaffoldApp(root)
     writeFileSync(
       join(root, 'package.json'),
-      JSON.stringify({ name: 'demo-app', dependencies: { '@guren/plugin-vercel': '^0.6.0' } }),
+      JSON.stringify({ name: 'demo-app', type: 'module', dependencies: { '@guren/plugin-vercel': '^0.6.0' } }),
       'utf8',
     )
-    mkdirSync(join(root, 'src'), { recursive: true })
-    writeFileSync(
-      join(root, 'src/app.ts'),
-      "import { createApp } from '@guren/core'\nexport default createApp({ auth: { autoSession: true } })\n",
-      'utf8',
-    )
+    writeIntrospectableApp(root, "import { createApp } from '@guren/core'\nexport default createApp({ auth: { autoSession: true } })\n")
 
     const warnings = await captureWarnings(() => buildVercelOutput(app))
 
     const hazard = warnings.find((line) => line.startsWith('Vercel build: Vercel shares no memory'))
     expect(hazard).toBeDefined()
-    expect(hazard).toContain('DatabaseSessionStore')
+    expect(hazard).toContain('no session store configured, so the session middleware keeps them in per-process memory')
+    expect(hazard).toContain('bunx guren add session')
     expect(existsSync(join(root, '.vercel/output/config.json'))).toBe(true)
   })
 })

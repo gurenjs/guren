@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { buildLambdaOutput } from './build'
 
@@ -463,6 +463,19 @@ describe('buildLambdaOutput', () => {
   })
 })
 
+/**
+ * An app the CLI can introspect (RFC 0026): an entry importing `src/app.ts`, and this workspace's
+ * `@guren/core` for it to import. The deploy verdicts read the session store from the registered app.
+ */
+function writeIntrospectableApp(root: string, app: string): void {
+  mkdirSync(join(root, 'src'), { recursive: true })
+  mkdirSync(join(root, 'node_modules/@guren'), { recursive: true })
+  symlinkSync(resolve(import.meta.dir, '../../core'), join(root, 'node_modules/@guren/core'), 'dir')
+  writeFileSync(join(root, 'bunfig.toml'), '[install]\nauto = "disable"\n')
+  writeFileSync(join(root, 'src/main.ts'), "import app from './app.js'\nexport default app\n")
+  writeFileSync(join(root, 'src/app.ts'), app)
+}
+
 describe('buildLambdaOutput deploy-runtime warnings (RFC 0020 Part 0)', () => {
   let root: string
 
@@ -478,18 +491,17 @@ describe('buildLambdaOutput deploy-runtime warnings (RFC 0020 Part 0)', () => {
     scaffoldApp(root)
     writeJson(join(root, 'package.json'), {
       name: '@acme/demo-app',
+      type: 'module',
       dependencies: { '@guren/plugin-lambda': '^0.5.0' },
     })
-    writeFileSync(
-      join(root, 'src/app.ts'),
-      "import { createApp } from '@guren/core'\nexport default createApp({ auth: { autoSession: true } })\n",
-    )
+    writeIntrospectableApp(root, "import { createApp } from '@guren/core'\nexport default createApp({ auth: { autoSession: true } })\n")
 
     const warnings = await captureWarnings(() => buildLambdaOutput({ rootDir: root, skipAppBuild: true }))
 
     const hazard = warnings.find((line) => line.startsWith('Lambda build: AWS Lambda shares no memory'))
     expect(hazard).toBeDefined()
-    expect(hazard).toContain('DatabaseSessionStore')
+    expect(hazard).toContain('no session store configured, so the session middleware keeps them in per-process memory')
+    expect(hazard).toContain('bunx guren add session')
     expect(existsSync(join(root, '.lambda'))).toBe(true)
   })
 })
