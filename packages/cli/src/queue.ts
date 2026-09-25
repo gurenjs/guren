@@ -1,4 +1,3 @@
-import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import {
   Worker,
@@ -8,7 +7,8 @@ import {
   type QueueManager,
   type WorkerEvents,
 } from './queue-deps'
-import { bootstrapApplication, resolveMainEntry, type MaybeApplication } from './runtime'
+import { loadBootedApplication, type MaybeApplication } from './runtime'
+import { CliError } from './cli-error'
 
 export interface QueueWorkOptions {
   /** Queues to process (comma-separated). @default 'default' */
@@ -73,7 +73,12 @@ export async function runQueueWorker(options: QueueWorkOptions = {}): Promise<vo
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
 
-  await worker.start()
+  try {
+    await worker.start()
+  } finally {
+    process.removeListener('SIGINT', shutdown)
+    process.removeListener('SIGTERM', shutdown)
+  }
 }
 
 export async function listFailedJobs(queue?: string, options: { json?: boolean } = {}): Promise<void> {
@@ -166,29 +171,13 @@ type BoundQueueManager = Pick<QueueManager, 'driver' | 'hasDriver' | 'getDefault
  * hand it to each job.
  */
 async function getConfiguredQueue(): Promise<{ driver: QueueDriver; container: ContainerLike | undefined }> {
-  let entry: string
-  try {
-    entry = await resolveMainEntry()
-  } catch (error) {
-    consola.error(error instanceof Error ? error.message : String(error))
-    process.exit(1)
-  }
-
-  let app: MaybeApplication
-  try {
-    const mod = await import(pathToFileURL(entry).href)
-    app = await bootstrapApplication(mod)
-  } catch (error) {
-    consola.error(`Failed to bootstrap application:`, error)
-    process.exit(1)
-  }
+  const app = await loadBootedApplication()
 
   const container = appContainer(app)
   const manager = container?.has?.('queue') ? (container.make('queue') as BoundQueueManager) : undefined
   const driver = manager?.hasDriver(manager.getDefaultDriverName()) ? manager.driver() : resolveQueueDriver()
   if (!driver) {
-    consola.error('Queue driver not configured. Make sure your application boots a queue manager and activates a driver.')
-    process.exit(1)
+    throw new CliError('Queue driver not configured. Make sure your application boots a queue manager and activates a driver.')
   }
 
   return { driver, container }
