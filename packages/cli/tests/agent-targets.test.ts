@@ -197,8 +197,8 @@ describe('planComponents', () => {
 
     const rule = byPath.get('.cursor/rules/guren-testing.mdc')
     expect(rule?.managed).toBe(true)
-    expect(rule?.content).toContain('description: Testing')
-    expect(rule?.content).toContain('globs: tests/**,app/**')
+    expect(rule?.content).toContain('description: "Testing"')
+    expect(rule?.content).toContain('globs: "tests/**,app/**"')
     expect(rule?.content).not.toContain('paths:')
     expect(rule?.content).toContain('alwaysApply: false')
     expect(rule?.content).toContain('# Testing')
@@ -209,7 +209,7 @@ describe('planComponents', () => {
 
     const rule = byPath.get('.github/instructions/guren-testing.instructions.md')
     expect(rule?.managed).toBe(true)
-    expect(rule?.content).toContain('description: Testing')
+    expect(rule?.content).toContain('description: "Testing"')
     expect(rule?.content).toContain('applyTo: "tests/**,app/**"')
     expect(rule?.content).toContain('# Testing')
     expect(rule?.content).not.toContain('alwaysApply')
@@ -220,7 +220,7 @@ describe('planComponents', () => {
     templates.set('core/rules/testing.md', FAKE_RULE.replaceAll('\n', '\r\n'))
 
     const rule = planByPath(['cursor'], templates).get('.cursor/rules/guren-testing.mdc')
-    expect(rule?.content).toContain('globs: tests/**,app/**')
+    expect(rule?.content).toContain('globs: "tests/**,app/**"')
   })
 
   it('throws when a canonical rule is nested — no claim can reach one', () => {
@@ -238,7 +238,18 @@ describe('planComponents', () => {
     const templates = fakeTemplates()
     templates.set('core/rules/testing.md', '# No frontmatter\n')
     expect(() => planComponents(['cursor'], templates, 'My App')).toThrow(
-      'Agent harness rule testing.md needs a `# ` heading and at least one `paths` pattern',
+      'Agent harness rule testing.md needs a `# ` heading as its first line and at least one `paths` pattern',
+    )
+  })
+
+  it('refuses a heading that is not the first line, so a fenced `# ` comment cannot become the description', () => {
+    const templates = fakeTemplates()
+    templates.set(
+      'core/rules/testing.md',
+      FAKE_RULE.replace('# Testing', '```bash\n# a shell comment\n```\n\n# Testing'),
+    )
+    expect(() => planComponents(['cursor'], templates, 'My App')).toThrow(
+      'Agent harness rule testing.md needs a `# ` heading as its first line and at least one `paths` pattern',
     )
   })
 
@@ -246,7 +257,7 @@ describe('planComponents', () => {
     const templates = fakeTemplates()
     templates.set('core/rules/testing.md', FAKE_RULE.replace('paths:', 'globs:'))
     expect(() => planComponents(['cursor'], templates, 'My App')).toThrow(
-      'Agent harness rule testing.md needs a `# ` heading and at least one `paths` pattern',
+      'Agent harness rule testing.md needs a `# ` heading as its first line and at least one `paths` pattern',
     )
   })
 

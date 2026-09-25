@@ -290,7 +290,7 @@ describe('installAgentHarness', () => {
     expect(result.written).toContain('.cursor/hooks/gate-on-stop.ts')
 
     const rule = await readFile(join(tempDir, '.cursor/rules/guren-testing.mdc'), 'utf8')
-    expect(rule).toContain('globs: tests/**')
+    expect(rule).toContain('globs: "tests/**,modules/*/tests/**"')
     expect(rule).toContain('alwaysApply: false')
     expect(rule).toContain('TestApp')
   })

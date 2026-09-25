@@ -333,7 +333,7 @@ const APP_TITLE_TOKEN = '__APP_TITLE__'
 const TOKEN_RE = /__[A-Z][A-Z_]*__/u
 
 interface RuleDoc {
-  /** The body's first `# ` heading: the only description Cursor and Copilot are given. */
+  /** The heading on the body's first non-blank line: the only description Cursor and Copilot are given. */
   description: string
   paths: string[]
   /** Everything after the closing `---`. */
@@ -351,21 +351,33 @@ function parseRuleDoc(name: string, content: string): RuleDoc {
   const paths = Array.isArray(parsed?.data.paths)
     ? parsed.data.paths.filter((path): path is string => typeof path === 'string')
     : []
-  const description = parsed ? (/^# +(.+?)\s*$/mu.exec(parsed.body)?.[1] ?? '') : ''
+  // Only the first line: a `# ` comment in a code fence must never become the description.
+  const firstLine = parsed?.body.trimStart().split('\n')[0] ?? ''
+  const description = /^# +(.+?)\s*$/u.exec(firstLine)?.[1] ?? ''
   if (!parsed || !description || paths.length === 0) {
-    throw new Error(`Agent harness rule ${name} needs a \`# \` heading and at least one \`paths\` pattern`)
+    throw new Error(
+      `Agent harness rule ${name} needs a \`# \` heading as its first line and at least one \`paths\` pattern`,
+    )
   }
   return { description, paths, body: parsed.body }
 }
 
+/**
+ * A YAML double-quoted scalar. A plain one breaks on a leading `*` (every `**` pattern),
+ * `@` or `&`, and on `: ` or ` #` anywhere; Cursor's own rule writer quotes `globs` the same way.
+ */
+function yamlString(value: string): string {
+  return JSON.stringify(value)
+}
+
 /** Cursor rule: `.mdc` frontmatter, where the scope key is `globs` (a comma-joined string). */
 function renderCursorRule(doc: RuleDoc): string {
-  return `---\ndescription: ${doc.description}\nglobs: ${doc.paths.join(',')}\nalwaysApply: false\n---\n${doc.body}`
+  return `---\ndescription: ${yamlString(doc.description)}\nglobs: ${yamlString(doc.paths.join(','))}\nalwaysApply: false\n---\n${doc.body}`
 }
 
 /** Copilot instructions: `applyTo` carries the comma-joined patterns. */
 function renderCopilotRule(doc: RuleDoc): string {
-  return `---\ndescription: ${doc.description}\napplyTo: "${doc.paths.join(',')}"\n---\n${doc.body}`
+  return `---\ndescription: ${yamlString(doc.description)}\napplyTo: ${yamlString(doc.paths.join(','))}\n---\n${doc.body}`
 }
 
 export function planComponents(

@@ -1,12 +1,16 @@
 import { describe, it, expect } from 'bun:test'
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { parseDocFrontmatter } from '../src/docs-frontmatter'
+import { loadAgentTemplates } from '../src/agent-harness'
+import { planComponents } from '../src/agent-targets'
 
-// `paths` is the only key Claude Code reads from a `.claude/rules/*.md` file; any other key
-// is ignored without an error, and a rule with no `paths` loads into every session.
-// https://code.claude.com/docs/en/memory#rule-frontmatter-reference
 const RULES_DIR = join(import.meta.dir, '../templates/agent/core/rules')
+
+/**
+ * The whole block, not its keys: a block YAML rejects (an indented key, a tab, a `: ` value)
+ * makes Claude Code drop the frontmatter and load the rule as if it had no `paths`.
+ */
+const PATHS_ONLY_FRONTMATTER = /^---\n(paths:\n(?: {2}- "[^"\\\n]+"\n)+)---\n/u
 
 async function readRules(): Promise<Array<[name: string, content: string]>> {
   const names = (await readdir(RULES_DIR)).filter((name) => name.endsWith('.md')).sort()
@@ -15,14 +19,9 @@ async function readRules(): Promise<Array<[name: string, content: string]>> {
   )
 }
 
-/** Top-level keys read off the raw block: the frontmatter parser drops what it does not recognize. */
-function rawFrontmatterKeys(content: string): string[] | null {
-  const block = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/u.exec(content)?.[1]
-  if (block === undefined) return null
-  return block
-    .split(/\r?\n/u)
-    .filter((line) => line.trim() !== '' && !/^\s/u.test(line) && !line.startsWith('#'))
-    .map((line) => line.split(':')[0].trim())
+function frontmatter(content: string): unknown {
+  const block = /^---\n([\s\S]*?)\n---\n/u.exec(content)?.[1]
+  return block === undefined ? undefined : Bun.YAML.parse(block)
 }
 
 describe('agent harness rule templates', () => {
@@ -30,30 +29,46 @@ describe('agent harness rule templates', () => {
     expect((await readRules()).length).toBeGreaterThan(0)
   })
 
-  it('declares `paths` and no other frontmatter key in every rule', async () => {
+  // `paths` is the only key Claude Code reads from a `.claude/rules/*.md` file; any other key
+  // is ignored without an error, and a rule with no `paths` loads into every session.
+  // https://code.claude.com/docs/en/memory#rule-frontmatter-reference
+  it('opens every rule with a `paths`-only block of quoted project-relative patterns', async () => {
     for (const [name, content] of await readRules()) {
-      expect({ name, keys: rawFrontmatterKeys(content) }).toEqual({ name, keys: ['paths'] })
-    }
-  })
-
-  it('gives every rule a non-empty `paths` list of project-relative patterns', async () => {
-    for (const [name, content] of await readRules()) {
-      const paths = parseDocFrontmatter(content)?.data.paths
-      expect({ name, isList: Array.isArray(paths) }).toEqual({ name, isList: true })
-      const patterns = paths as unknown[]
-      expect({ name, count: patterns.length > 0 }).toEqual({ name, count: true })
-      for (const pattern of patterns) {
-        expect({ name, pattern, ok: typeof pattern === 'string' && pattern !== '' }).toEqual({
-          name,
-          pattern,
-          ok: true,
-        })
-        expect({ name, pattern, relative: !/^(?:\/|\.\/|\.\.\/)/u.test(String(pattern)) }).toEqual({
+      const block = PATHS_ONLY_FRONTMATTER.exec(content)?.[1]
+      expect({ name, block: block !== undefined }).toEqual({ name, block: true })
+      const { paths } = frontmatter(content) as { paths: string[] }
+      for (const pattern of paths) {
+        expect({ name, pattern, relative: !/^(?:\/|\.\.?\/)/u.test(pattern) }).toEqual({
           name,
           pattern,
           relative: true,
         })
       }
+    }
+  })
+
+  it('renders Cursor and Copilot frontmatter that parses as YAML to the rule heading and patterns', async () => {
+    const rules = await readRules()
+    const planned = new Map(
+      planComponents(['agents', 'cursor', 'copilot'], await loadAgentTemplates(), 'My App').map((file) => [
+        file.path,
+        file.content,
+      ]),
+    )
+    for (const [name, content] of rules) {
+      const stem = name.replace(/\.md$/u, '')
+      const { paths } = frontmatter(content) as { paths: string[] }
+      const heading = /^---\n[\s\S]*?\n---\n\s*# +(.+?)\s*$/mu.exec(content)?.[1]
+      expect({ name, heading: typeof heading }).toEqual({ name, heading: 'string' })
+
+      expect({ name, cursor: frontmatter(planned.get(`.cursor/rules/guren-${stem}.mdc`) ?? '') }).toEqual({
+        name,
+        cursor: { description: heading, globs: paths.join(','), alwaysApply: false },
+      })
+      expect({
+        name,
+        copilot: frontmatter(planned.get(`.github/instructions/guren-${stem}.instructions.md`) ?? ''),
+      }).toEqual({ name, copilot: { description: heading, applyTo: paths.join(',') } })
     }
   })
 })
