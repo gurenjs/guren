@@ -273,6 +273,24 @@ export const apiTokens = pgTable('api_tokens', {
 })
 ```
 
+On SQLite, declare the timestamp columns as `text` holding ISO strings (the shape `create-guren-app` gives `users.created_at`) or as `integer(..., { mode: 'timestamp_ms' })`. The store writes each column in the form it declares: a Date for a drizzle timestamp-mode column, an ISO string for a text column, epoch milliseconds for an integer column with no mode.
+
+```ts
+// db/schema.ts
+import { sqliteTable, text } from '@guren/orm/drizzle/sqlite'
+
+export const apiTokens = sqliteTable('api_tokens', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  hashedToken: text('hashed_token').notNull().unique(),
+  userId: text('user_id').notNull(),
+  abilities: text('abilities', { mode: 'json' }).$type<string[]>().notNull(),
+  lastUsedAt: text('last_used_at'),
+  expiresAt: text('expires_at'),
+  createdAt: text('created_at').notNull(),
+})
+```
+
 If your `abilities` column is a plain text column holding a JSON string instead of `jsonb`, pass `{ abilitiesMode: 'text' }`:
 
 ```ts
