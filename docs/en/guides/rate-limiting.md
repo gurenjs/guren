@@ -105,7 +105,19 @@ createRateLimitMiddleware({
 ### Full Configuration Example
 
 ```ts
-import { createRateLimitMiddleware, MemoryRateLimitStore } from '@guren/core'
+import { AUTH_CONTEXT_KEY, createRateLimitMiddleware, MemoryRateLimitStore } from '@guren/core'
+import type { AuthContext } from '@guren/core'
+import type { Context } from 'hono'
+
+interface AppUser {
+  id: number
+  role: string
+}
+
+const currentUser = async (ctx: Context) => {
+  const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+  return (await auth?.user<AppUser>()) ?? null
+}
 
 const store = new MemoryRateLimitStore()
 
@@ -118,10 +130,10 @@ const rateLimiter = createRateLimitMiddleware({
   message: 'Rate limit exceeded. Please slow down.',
   statusCode: 429,
 
-  // Key based on authenticated user or IP
+  // Key on the signed-in user, else the client IP
   keyGenerator: async (ctx) => {
-    const user = ctx.get('user')
-    if (user?.id) {
+    const user = await currentUser(ctx)
+    if (user) {
       return `user:${user.id}`
     }
     return ctx.req.header('x-forwarded-for')?.split(',')[0] ?? 'unknown'
@@ -129,7 +141,7 @@ const rateLimiter = createRateLimitMiddleware({
 
   // Skip for admin users
   skip: async (ctx) => {
-    const user = ctx.get('user')
+    const user = await currentUser(ctx)
     return user?.role === 'admin'
   },
 
@@ -306,23 +318,29 @@ router.get('/search', [SearchController, 'search']).middleware(searchLimiter)
 
 ### User-Based Rate Limiting
 
+On bearer-authenticated routes, key on the token `getApiToken(ctx)` returns. Key on `result.userId` instead when all of a user's tokens should share one budget. On session-authenticated routes, read the user from the auth context, as `currentUser()` does in the full configuration example above.
+
 ```ts
-const userRateLimiter = createRateLimitMiddleware({
+import { createBearerTokenMiddleware, createRateLimitMiddleware, getApiToken } from '@guren/core'
+
+const tokenRateLimiter = createRateLimitMiddleware({
   limit: 1000,
   windowMs: 60 * 60 * 1000, // 1 hour
+  keyPrefix: 'token:',
 
-  keyGenerator: async (ctx) => {
-    const user = ctx.get('user')
-    if (!user) {
-      // Fall back to IP for unauthenticated requests
-      return `ip:${ctx.req.header('x-forwarded-for') ?? 'unknown'}`
+  // getApiToken() is null until the bearer middleware has run on this request,
+  // so a limiter mounted ahead of it would put every caller in one bucket.
+  keyGenerator: (ctx) => {
+    const result = getApiToken(ctx)
+    if (!result) {
+      throw new Error('tokenRateLimiter must run after createBearerTokenMiddleware')
     }
-
-    // Different limits per plan
-    const limitMultiplier = user.plan === 'premium' ? 10 : 1
-    return `user:${user.id}:${limitMultiplier}`
+    return result.token.id
   },
 })
+
+app.use('/api/*', createBearerTokenMiddleware({ store: tokenStore }))
+app.use('/api/*', tokenRateLimiter)
 ```
 
 ### Skip Trusted Sources
