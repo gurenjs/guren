@@ -388,6 +388,17 @@ export default createApp({ routes: registerAttachmentRoutes })
     await Promise.all([introspectApp(dir), introspectApp(dir, { timeoutMs: 60_000 })])
   })
 
+  test('runs a fresh child outside the memo, neither reading nor filling it', async () => {
+    const dir = join(root, 'fresh-missing')
+
+    const first = introspectApp(dir, { fresh: true })
+    const memoised = introspectApp(dir)
+    expect(first).not.toBe(memoised)
+    expect(introspectApp(dir, { fresh: true })).not.toBe(first)
+    expect(introspectApp(dir)).toBe(memoised)
+    await Promise.all([first, memoised])
+  })
+
   test('reports crashed, never a rejection, when the process cannot be spawned', async () => {
     const message = expectFailure(await introspectApp(join(root, 'does-not-exist')), 'crashed')
 

@@ -806,9 +806,14 @@ describe('checkDeprecations', () => {
       await write('src/predeploy.ts', "import { analyzeDeployRuntime, judgeDeployRuntime as judge } from '@guren/cli'\n")
       await write('src/deploy.ts', "import { checkDeployRuntime } from '@guren/cli'\nimport { analyzeDeployRuntime } from './local'\n")
       await write('tests/deploy.test.ts', "import { type DeployRuntimeVerdict, judgeDeployRuntime } from '@guren/cli'\n")
+      await write('scripts/predeploy.ts', "import { analyzeDeployRuntime } from '@guren/cli'\n")
+      await write('bin/check-deploy.ts', "import { judgeDeployRuntime } from '@guren/cli'\n")
+      await write('predeploy.ts', "import { analyzeDeployRuntime } from '@guren/cli'\n")
 
       const warning = (await checkDeprecations(workspace.dir)).find((entry) => entry.id === 'deploy-runtime-analysis')
-      expect((warning?.affectedFiles ?? []).sort()).toEqual([join('src', 'predeploy.ts'), join('tests', 'deploy.test.ts')])
+      expect((warning?.affectedFiles ?? []).sort()).toEqual(
+        [join('bin', 'check-deploy.ts'), 'predeploy.ts', join('scripts', 'predeploy.ts'), join('src', 'predeploy.ts'), join('tests', 'deploy.test.ts')].sort(),
+      )
     })
   })
 

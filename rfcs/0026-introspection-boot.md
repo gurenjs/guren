@@ -401,7 +401,7 @@ every check that asks: the same shape as `check.ts`'s `loadRouteGraph()`
 
 | Module | Today | After Part 2 | Part 3 |
 |---|---|---|---|
-| `deploy-runtime.ts` | AST scan (`:156-467`) feeding `judgePasswordHashing`, `judgeRuntimeStores`, `judgeProviderDiscovery` (`:661-822`) | 2a: `requiresBun` of `auth.hasher` and `auth.providers[*]`, the selected session store's `perProcess`, a `memory` cache default. Target detection, provider discovery, OAuth state stores, the queue, explicit `Memory*Store` constructions, `autoSession: false`, a `sessionOptions.store` factory and a `useModel()` in `boot()` stay on the scan | Part 3 removed the hasher half (constructions, `auth.hasher`, an unreadable `createApp()` config) and the `SessionConfig` reading: without a manifest the hashing and store verdicts are `-unverified`. Kept, since the manifest does not carry them: target detection, provider discovery, OAuth state stores, explicit `Memory*` constructions, a hand-mounted `createSessionMiddleware`, `autoSession: false`, the backed stores a `sessionOptions.store` factory could build, and `auth.attempt()`. `checkDeployRuntime(cwd)` kept its signature |
+| `deploy-runtime.ts` | AST scan (`:156-467`) feeding `judgePasswordHashing`, `judgeRuntimeStores`, `judgeProviderDiscovery` (`:661-822`) | 2a: `requiresBun` of `auth.hasher` and `auth.providers[*]`, the selected session store's `perProcess`, a `memory` cache default. Target detection, provider discovery, OAuth state stores, the queue, explicit `Memory*Store` constructions, `autoSession: false`, a `sessionOptions.store` factory and a `useModel()` in `boot()` stay on the scan | Part 3 removed the hasher half (constructions, `auth.hasher`, an unreadable `createApp()` config) and the `SessionConfig` reading: without a manifest the hashing and store verdicts are `-unverified`. Kept, since the manifest does not carry them: target detection, provider discovery, OAuth state stores, explicit `Memory*` constructions, a hand-mounted `createSessionMiddleware`, `autoSession: false`, the backed stores a `sessionOptions.store` factory could build, and the password auth the source shows (`auth.attempt()`, `auth.useModel()`, a `ScryptHasher` construction), which only keeps a manifest with no user provider from passing. `checkDeployRuntime(cwd)` kept its signature |
 | `session-config.ts`, `sessions-check.ts` | AST for `SessionConfig`, regex for the binding provider | 2b: `session.source` for the binding; each `database` store's `table` against the tables the schema reader names | Part 3 removed the binding-provider regex (`sessions-binding-unverified` without a manifest) and the `default` reading. The `SessionConfig` finder and each store's `driver` and `table` stay, for a config the app does not read and a missing named export |
 | `attachments-check.ts` | AST over `configureAttachments()` arguments, route lookup | 2b: `attachments.{table,disk,delivery}`, `delivery.mounted`, the storage section's driver for a redirect disk | Part 3 removed the delivery rules' route load: without a manifest the mount and the redirect disks are `-unverified`, and a call in `boot()` is judged against the registered routes and storage drivers. Argument parsing stays for that call and for the table, whose missing export fails the introspection; the disk's `root` and `Attachable(...)` detection stay source |
 | `controller-methods.ts` | key `ClassName.method`, collisions | 2c: `byExport` and `file#export.method` through `controllerMethodFor()`; a collision is reported only for a class some route reaches by name | Nothing: the name-keyed maps are what a caller that does not introspect reads, and the key `plan:*` judges by |
@@ -790,7 +790,15 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   (`evidence: 'none'`, `evidenceReason` naming why), still listing what the
 >   source shows (OAuth, explicit constructions). No user provider registered
 >   while the source calls `auth.attempt()` is `-unverified` too, where it used
->   to fall back to the scan. `analyzeDeployRuntime()` and
+>   to fall back to the scan, and so is one whose source calls `auth.useModel()`
+>   or constructs a `ScryptHasher`: a provider registered in `boot()` is past
+>   what the manifest sees, and a hasher built there would otherwise pass as
+>   "no password authentication". A `sessionOptions.store` factory the manifest
+>   shows is judged by the backed stores the source constructs, whatever the
+>   `createApp()` options look like, so the `auth`, `autoSession` and
+>   `sessionOptions` keys are no longer read as session signals; only
+>   `autoSession: false` and a hand-mounted `createSessionMiddleware` are.
+>   `analyzeDeployRuntime()` and
 >   `judgeDeployRuntime()` are deprecated (`deploy-runtime-analysis`, removed in
 >   3.0.0, a first-use warning), introspect by default like
 >   `checkDeployRuntime()`, and keep `DeployRuntimeAnalysis`'s removed signal

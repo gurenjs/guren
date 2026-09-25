@@ -88,6 +88,8 @@ function statuses(checks: Record<string, DeployRuntimeVerdict>): Record<string, 
 }
 
 /** An `auth.sessionOptions.store` factory: the one session the manifest leaves to the constructions in source. */
+const SESSION_FACTORY_ISSUE = 'sessions use an auth.sessionOptions.store factory, and no DatabaseSessionStore or RedisSessionStore is constructed'
+
 const FACTORY_SESSION = manifestFixture({
   session: {
     source: 'auth.sessionOptions.store',
@@ -263,28 +265,9 @@ export const app = createApp({ auth: { autoSession: false } })
       const check = (await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores']
 
       expect(check.status).toBe('warn')
-      expect(check.message).toContain('sessions are enabled')
+      expect(check.message).toContain(SESSION_FACTORY_ISSUE)
     })
   })
-
-  // The `auth` key is read off createApp's first argument positionally, and a
-  // transparent assertion around the options object is not the object: without
-  // unwrapping it, an app written this way loses the session signal entirely.
-  it.each([' satisfies Record<string, unknown>', ' as const'])(
-    'reads createApp options written with %s',
-    async (suffix) => {
-      const files = {
-        'src/app.ts': `import { createApp } from '@guren/core'\nexport const app = createApp({ auth: {} }${suffix})\n`,
-      }
-
-      await withApp('guren-stores-wrapped-auth-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-        const check = (await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores']
-
-        expect(check.status).toBe('warn')
-        expect(check.message).toContain('sessions are enabled')
-      })
-    },
-  )
 
   // The `auth: {` match alone cannot see inside the object it opens, so
   // suppression comes from a whole-app check for `autoSession: false` rather
@@ -331,7 +314,7 @@ export const app = createApp({ auth: { autoSession: true, sessionOptions: {} } }
       const check = (await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores']
 
       expect(check.status).toBe('warn')
-      expect(check.message).toContain('sessions are enabled')
+      expect(check.message).toContain(SESSION_FACTORY_ISSUE)
     })
   })
 
@@ -474,7 +457,7 @@ export const app = createApp({ providers: [OAuthServiceProvider] })
       const check = (await deployChecks(dir))['deploy-runtime-stores']
 
       expect(check.status).toBe('warn')
-      expect(check.message).toContain('sessions are enabled')
+      expect(check.message).toContain('sessions are enabled (createSessionMiddleware')
     })
   })
 
@@ -766,15 +749,22 @@ export const doc = 'call new MemoryDriver() to enqueue locally'
     })
   })
 
-  // Both keys are generic enough that another library's config would claim
-  // them; they only count inside a file that imports from Guren.
-  it('ignores session option keys in a file with no Guren import', async () => {
+  it('reads auth.useModel() and a ScryptHasher construction as password auth', async () => {
     const files = {
-      'config/other.ts': `export const cfg = { sessionOptions: { maxAge: 1 }, autoSession: true }\n`,
+      'app/Providers/AuthProvider.ts': `import { ScryptHasher, ServiceProvider, type AuthManager } from '@guren/core'
+import { User } from '../Models/User'
+
+export default class AuthProvider extends ServiceProvider {
+  boot(): void {
+    const auth = this.container.make<AuthManager>('auth')
+    auth.useModel(User, { hasher: new ScryptHasher() })
+  }
+}
+`,
     }
 
-    await withApp('guren-ast-foreign-session-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await readDeployRuntime(dir)).sessionSignals).toEqual([])
+    await withApp('guren-ast-use-model-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await readDeployRuntime(dir)).passwordAuthSignals.map((signal) => signal.symbol).sort()).toEqual(['ScryptHasher', 'auth.useModel'])
     })
   })
 
@@ -810,54 +800,6 @@ export class Custom implements OAuthServiceProvider {}
 
     await withApp('guren-ast-implements-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
       expect((await readDeployRuntime(dir)).oauthSignals).toEqual([])
-    })
-  })
-
-  it('ignores an auth key in a TypeScript type position', async () => {
-    const files = {
-      'src/types.ts': `export interface AppOptions {
-  auth: { autoSession?: boolean }
-}
-`,
-    }
-
-    await withApp('guren-ast-type-pos-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await readDeployRuntime(dir)).sessionSignals).toEqual([])
-    })
-  })
-
-  // The make:auth mail config carries `auth: { user, pass }` for SMTP
-  // credentials, so the auth-key signal is scoped to createApp options.
-  it('does not read SMTP mailer auth config as a session', async () => {
-    const files = {
-      'config/mail.ts': `export const mail = {
-  transport: 'smtp',
-  auth: {
-    user: process.env.SMTP_USER ?? '',
-    pass: process.env.SMTP_PASS ?? '',
-  },
-}
-`,
-    }
-
-    await withApp('guren-ast-smtp-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores'].status).toBe('pass')
-    })
-  })
-
-  it('counts a shorthand auth property in createApp options', async () => {
-    const files = {
-      'src/app.ts': `import { createApp } from '@guren/core'
-const auth = {}
-export const app = createApp({ auth })
-`,
-    }
-
-    await withApp('guren-ast-shorthand-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores']
-
-      expect(check.status).toBe('warn')
-      expect(check.message).toContain('sessions are enabled')
     })
   })
 
@@ -914,7 +856,7 @@ export function build(p: OAuthServiceProvider): typeof OAuthServiceProvider | nu
   it('resolves namespace imports for constructions and calls', async () => {
     const files = {
       'src/app.ts': `import * as guren from '@guren/core'
-export const app = guren.createApp({ auth: {} })
+export const app = guren.createSessionMiddleware({})
 export const oauth = guren.createOAuthManager({})
 export const store = new guren.DatabaseSessionStore(sessions)
 `,
@@ -923,7 +865,7 @@ export const store = new guren.DatabaseSessionStore(sessions)
     await withApp('guren-ast-namespace-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
       const analysis = await readDeployRuntime(dir)
 
-      expect(analysis.sessionSignals.map((s) => s.symbol)).toContain('auth')
+      expect(analysis.sessionSignals.map((s) => s.symbol)).toContain('createSessionMiddleware')
       expect(analysis.oauthSignals.map((s) => s.symbol)).toContain('createOAuthManager')
       expect(analysis.backedSessionSignals.map((s) => s.symbol)).toContain('DatabaseSessionStore')
     })
@@ -944,7 +886,7 @@ export const store = new guren.DatabaseSessionStore(sessions)
       const check = (await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores']
 
       expect(check.status).toBe('warn')
-      expect(check.message).toContain('sessions are enabled')
+      expect(check.message).toContain(SESSION_FACTORY_ISSUE)
       expect(check.message).toContain('could not be read or parsed and were not scanned: src/broken.ts')
     })
   })
@@ -994,7 +936,7 @@ const store = new DatabaseSessionStore(sessions)
       const check = (await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores']
 
       expect(check.status).toBe('warn')
-      expect(check.message).toContain('sessions are enabled')
+      expect(check.message).toContain(SESSION_FACTORY_ISSUE)
     })
   })
 
@@ -1012,7 +954,7 @@ const store = new DatabaseSessionStore(sessions)
 
   it('does not raise a session signal from a test fixture alone', async () => {
     const files = {
-      'src/routes.test.ts': `const app = createApp({ auth: { autoSession: true } })\n`,
+      'src/routes.test.ts': `import { createSessionMiddleware } from '@guren/core'\napp.use('*', createSessionMiddleware({}))\n`,
     }
 
     await withApp('guren-scan-test-signal-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
@@ -1296,7 +1238,7 @@ describe('deploy-runtime verdicts over a manifest (RFC 0026 §5)', () => {
     expect(hashing.message).toContain("user provider 'api': custom")
   })
 
-  it('cannot vouch for hashing when no user provider is registered but the source verifies passwords', () => {
+  it('cannot vouch for hashing when no user provider is registered but the source shows password auth', () => {
     // A useModel() in a provider's boot() is past the register stage the manifest describes.
     const attempt = { symbol: 'auth.attempt', filePath: 'app/Http/Controllers/LoginController.ts', line: 4 }
     const hashing = judge(manifestFixture(), { passwordAuthSignals: [attempt] })['deploy-password-hashing-unverified']
@@ -1468,8 +1410,10 @@ describe('deploy-runtime verdicts over a manifest (RFC 0026 §5)', () => {
       evidence: 'static',
     })
     expect(judge(FACTORY_SESSION, { sessionSignals: [option] })['deploy-runtime-stores']!.message).toContain(
-      'with an auth.sessionOptions.store factory, and no DatabaseSessionStore or RedisSessionStore is constructed',
+      'sessions use an auth.sessionOptions.store factory, and no DatabaseSessionStore or RedisSessionStore is constructed',
     )
+    // A createApp() options object the scan cannot read leaves no session signal; the manifest still shows the factory.
+    expect(judge(FACTORY_SESSION)['deploy-runtime-stores']).toMatchObject({ status: 'warn', evidence: 'static' })
   })
 
   it('warns on a memory cache default, which the source scan never read', () => {

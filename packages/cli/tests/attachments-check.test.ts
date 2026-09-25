@@ -564,7 +564,8 @@ export function register(): unknown {
 
       const results = await runDelivery(workspace.dir, [config, storage], MOUNTED, registered)
 
-      expect(results.find((c) => c.key.startsWith('attachments-serve-redirect:'))?.status).toBe('pass')
+      // The serve mode is the call's option in source, so the verdict's weakest fact is static.
+      expect(results.find((c) => c.key.startsWith('attachments-serve-redirect:'))).toMatchObject({ status: 'pass', evidence: 'static' })
     } finally {
       await workspace.cleanup()
     }

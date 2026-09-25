@@ -43,7 +43,12 @@ import type { RouteDefinition } from '@guren/server'
  * Any file that could hold a route's params schema — which is any importable
  * source file, since a schema is usually imported into `routes/` from elsewhere.
  */
-export const SOURCE_FILE_PATTERN = /\.(ts|tsx|mts|js|jsx|mjs)$/
+const SOURCE_FILE_PATTERN = /\.(ts|tsx|mts|js|jsx|mjs)$/
+
+/** Whether a run's changed files (null: a full run) could change what the app's modules evaluate to. */
+export function changesSource(changedFiles: ReadonlySet<string> | null | undefined): boolean {
+  return !changedFiles || [...changedFiles].some((file) => SOURCE_FILE_PATTERN.test(file))
+}
 import { checkSchemaTimestamps } from './schema-check'
 import {
   checkAttachableModels,
@@ -390,7 +395,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     changedFiles ? files.filter((f) => changedFiles.has(toPosixRelative(cwd, f))) : files
   // Whether any changed file could affect what the app's modules evaluate to:
   // the shared gate for every check that loads the route graph or executes the app (5.5, 7.7, 8.7).
-  const sourceChanged = !changedFiles || [...changedFiles].some((file) => SOURCE_FILE_PATTERN.test(file))
+  const sourceChanged = changesSource(changedFiles)
 
   // `--arch` / `--docs` / `--spec` select suites; combining them runs the
   // union (never silently nothing). No flag = every suite.

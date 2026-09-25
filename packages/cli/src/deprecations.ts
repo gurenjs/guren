@@ -1,12 +1,15 @@
 /** Framework-level deprecation warnings. */
-import { readFile } from 'node:fs/promises'
-import { relative } from 'node:path'
+import { readdir, readFile } from 'node:fs/promises'
+import { extname, join, relative, resolve } from 'node:path'
 import {
+  collectFiles,
   discoverAppConfigFiles,
   discoverAppSourceFiles,
   discoverDbArtifactFiles,
   discoverModelFiles,
   discoverTestFiles,
+  IMPORTABLE_EXTENSIONS,
+  NON_SOURCE_DIR_NAMES,
 } from './discovery'
 import { DEPLOY_RUNTIME_ANALYSIS_DEPRECATION } from './deploy-runtime'
 import { discoverParsedModels, extractClassDeclaration, findStaticClassProperty } from './model-parser'
@@ -173,6 +176,16 @@ async function globalServiceFiles(cwd: string): Promise<string[]> {
   return [...(await discoverAppConfigFiles(cwd)), ...(await discoverTestFiles(cwd))]
 }
 
+/** App code and the places a predeploy step lives: `bin/`, `scripts/` and the project root. */
+async function deployScriptFiles(cwd: string): Promise<string[]> {
+  const scripts = await Promise.all(['bin', 'scripts'].map((dir) => collectFiles(resolve(cwd, dir), IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES)))
+  const root = await readdir(cwd, { withFileTypes: true }).catch(() => [])
+  const rootFiles = root
+    .filter((entry) => entry.isFile() && !entry.name.endsWith('.d.ts') && IMPORTABLE_EXTENSIONS.has(extname(entry.name)))
+    .map((entry) => join(cwd, entry.name))
+  return [...new Set([...(await globalServiceFiles(cwd)), ...scripts.flat(), ...rootFiles])]
+}
+
 const detectGlobalServiceImports = (names: Set<string>) => async (cwd: string): Promise<string[]> =>
   detectGurenImports(cwd, (specifier) => names.has(specifier), await globalServiceFiles(cwd))
 
@@ -294,7 +307,7 @@ export const deprecations: Deprecation[] = [
       detectGurenImports(
         cwd,
         (specifier) => specifier === 'analyzeDeployRuntime' || specifier === 'judgeDeployRuntime',
-        await globalServiceFiles(cwd),
+        await deployScriptFiles(cwd),
         GUREN_CLI_IMPORT,
       ),
   },

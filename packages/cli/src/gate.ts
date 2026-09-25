@@ -14,7 +14,7 @@ import { join, resolve } from 'node:path'
 import { consola } from 'consola'
 import { runAudit } from './audit'
 import { getChangedFiles, runGit } from './changed-files'
-import { runCheck, SOURCE_FILE_PATTERN } from './check'
+import { changesSource, runCheck } from './check'
 import { formatFinding, gatingResults } from './check-result'
 import { capFindings, codegenFallback, OUTPUT_ERROR_PATTERN, outputFindings, outputTail, readScripts, resolveScriptCommand } from './command-output'
 import { ADVISORY_INTROSPECT_TIMEOUT_MS, introspectApp, introspectRunner, type Introspection } from './introspect'
@@ -169,8 +169,7 @@ async function checkStage(ctx: StageContext): Promise<StageOutcome> {
 
 async function auditStage(ctx: StageContext): Promise<StageOutcome> {
   // As check does: a run that changed no source does not execute the app again.
-  const sourceChanged = !ctx.changedFiles || [...ctx.changedFiles].some((file) => SOURCE_FILE_PATTERN.test(file))
-  const introspect = sourceChanged ? ctx.introspect : false
+  const introspect = changesSource(ctx.changedFiles) ? ctx.introspect : false
   const report = await runAudit({ cwd: ctx.cwd, routesFile: ctx.routesFile, deps: ctx.deps, introspect })
   const failing = report.findings.filter((finding) => finding.status === 'fail')
   const note = introspectionNote(ctx, report.findings)

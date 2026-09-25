@@ -1,7 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
-import type { File, Node } from '@babel/types'
-import { memberKeyName, objectLiteral, walk, type BabelNode } from './ast-walk'
+import type { File } from '@babel/types'
+import { memberKeyName, walk, type BabelNode } from './ast-walk'
 import { resolveSessionDrivers, type SessionDriverRegistry } from './session-drivers'
 import {
   collectFiles,
@@ -89,8 +89,12 @@ export interface SourceSignal {
  */
 export interface DeployRuntimeFacts {
   targets: DeployTargetDetection[]
-  /** `auth.attempt(...)` calls: password verification, read when the app registers no user provider. */
+  /**
+   * `auth.attempt(...)`, `auth.useModel(...)` and `new ScryptHasher()`: password auth the source
+   * shows, which keeps a manifest with no user provider from passing the hashing verdict.
+   */
   passwordAuthSignals: SourceSignal[]
+  /** `createSessionMiddleware(...)` calls: a session middleware mounted outside the manager the manifest describes. */
   sessionSignals: SourceSignal[]
   /** `autoSession: false` anywhere in the app — an explicit opt-out. */
   sessionDisabledSignals: SourceSignal[]
@@ -223,6 +227,7 @@ const CONSTRUCTED_SIGNALS: Record<string, SignalKind> = {
   MemoryStore: 'memoryStore',
   MemoryDriver: 'memoryStore',
   AutoDiscovery: 'discovery',
+  ScryptHasher: 'passwordAuth',
 }
 
 /** Framework functions whose call is a signal. */
@@ -241,6 +246,8 @@ const CALLED_SIGNALS: Record<string, SignalKind> = {
 const REFERENCED_SIGNALS: Record<string, SignalKind> = {
   OAuthServiceProvider: 'oauth',
 }
+
+const PASSWORD_AUTH_METHODS = new Set(['attempt', 'useModel'])
 
 /** Only names imported from a Guren package resolve to a signal. */
 const GUREN_PACKAGE_PREFIX = '@guren/'
@@ -295,9 +302,8 @@ function extractSignals(ast: File): ExtractedSignal[] {
   // only, so a same-named export from another package resolves to nothing.
   const gurenNames = new Map<string, string>()
   const gurenNamespaces = new Set<string>()
-  // Type-only imports included. The two signals resolved structurally rather
-  // than through a binding — `auth.attempt()` and the session option keys —
-  // use this to stay inside Guren code.
+  // Type-only imports included. `auth.attempt()` and `auth.useModel()`, resolved structurally
+  // rather than through a binding, use this to stay inside Guren code.
   let importsGuren = false
   for (const statement of ast.program.body) {
     if (statement.type !== 'ImportDeclaration') continue
@@ -382,38 +388,21 @@ function extractSignals(ast: File): ExtractedSignal[] {
         if (name) {
           const kind = CALLED_SIGNALS[name]
           if (kind) emit(kind, name, lineOf(node))
-
-          // An `auth` key in createApp's options enables sessions:
-          // AuthServiceProvider attaches session middleware whenever
-          // `options.auth` is present and autoSession isn't explicitly false.
-          // Scoped to createApp so SMTP-style `auth: { user, pass }` mailer
-          // config does not read as a session.
-          if (name === 'createApp') {
-            // Unlike the generic identifier scan, this positional read has to
-            // unwrap `satisfies`/`as const` itself.
-            const options = objectLiteral((node.arguments as Node[])[0])
-            for (const property of (options?.properties ?? []) as unknown as BabelNode[]) {
-              if (property.type === 'ObjectProperty' && propertyKeyName(property) === 'auth') {
-                emit('session', 'auth', lineOf(property))
-              }
-            }
-          }
         }
 
         if (callee?.type === 'MemberExpression') {
-          // `auth.attempt(...)` is the entry point app code calls to verify a
-          // password. Resolved structurally, not through the import map: `auth`
-          // here is a controller property. Known gap: a registration-only app
-          // that never calls attempt() passes undetected.
+          // `auth.attempt(...)` verifies a password and `auth.useModel(...)` registers the provider
+          // that hashes it. Resolved structurally, not through the import map: `auth` is a
+          // controller property or a local the container resolved.
           const property = callee.property as BabelNode
           const object = callee.object as BabelNode
-          const isAttempt = property?.type === 'Identifier' && property.name === 'attempt'
+          const method = property?.type === 'Identifier' && PASSWORD_AUTH_METHODS.has(property.name as string) ? (property.name as string) : null
           const onAuth =
             (object?.type === 'Identifier' && object.name === 'auth') ||
             (object?.type === 'MemberExpression' &&
               (object.property as BabelNode)?.type === 'Identifier' &&
               (object.property as BabelNode).name === 'auth')
-          if (isAttempt && onAuth && importsGuren) emit('passwordAuth', 'auth.attempt', lineOf(node))
+          if (method && onAuth && importsGuren) emit('passwordAuth', `auth.${method}`, lineOf(node))
         } else if (callee?.type === 'Import') {
           const first = (node.arguments as BabelNode[])[0]
           if (first?.type === 'StringLiteral' && LAMBDA_IMPORT_SOURCES.has(first.value as string)) {
@@ -424,20 +413,11 @@ function extractSignals(ast: File): ExtractedSignal[] {
       }
 
       case 'ObjectProperty': {
-        // autoSession/sessionOptions count wherever they appear, but only in a
-        // file importing from Guren: neither key is distinctive on its own.
-        // `autoSession: false` is the exception — it *suppresses* the warning,
-        // so it is read gate or no gate, since missing an opt-out warns a
-        // correctly-configured app.
-        const keyName = propertyKeyName(node)
-        if (keyName === 'autoSession') {
-          if (importsGuren) emit('session', 'autoSession', lineOf(node))
-          const value = node.value as BabelNode
-          if (value?.type === 'BooleanLiteral' && value.value === false) {
-            emit('sessionDisabled', 'autoSession: false', lineOf(node))
-          }
-        } else if (keyName === 'sessionOptions' && importsGuren) {
-          emit('session', 'sessionOptions', lineOf(node))
+        // Read whether or not the file imports from Guren: `autoSession: false` suppresses the
+        // warning, and missing an opt-out warns a correctly-configured app.
+        const value = node.value as BabelNode
+        if (propertyKeyName(node) === 'autoSession' && value?.type === 'BooleanLiteral' && value.value === false) {
+          emit('sessionDisabled', 'autoSession: false', lineOf(node))
         }
         return
       }
@@ -807,12 +787,12 @@ function formatHashers(hashers: ManifestHasher[]): string {
 
 /**
  * Why hashers the app registered cannot settle the verdict: all scrypt, none a user provider's, yet
- * the source verifies passwords, which a `useModel()` in a provider's `boot()` would explain.
+ * the source shows password auth, which a `useModel()` in a provider's `boot()` would explain.
  */
 function unregisteredProviderReason(analysis: DeployRuntimeFacts, hashers: ManifestHasher[]): string | undefined {
   const settled = hashers.some((entry) => entry.requiresBun !== false || entry.provider !== null)
   if (settled || analysis.passwordAuthSignals.length === 0) return undefined
-  return `the source verifies passwords (${formatSignals(analysis.passwordAuthSignals)}), but the app registers no user provider, which a useModel() in a provider's boot() would explain`
+  return `the source shows password auth (${formatSignals(analysis.passwordAuthSignals)}), but the app registers no user provider, which a useModel() in a provider's boot() would explain`
 }
 
 function judgeManifestHashing(
@@ -889,11 +869,9 @@ type RaiseIssue = (issue: string, fix: string) => void
  * the source constructs a database or Redis store for it.
  */
 function raiseFactorySessionIssues(analysis: DeployRuntimeFacts, raise: RaiseIssue): void {
-  if (analysis.sessionSignals.length > 0 && analysis.backedSessionSignals.length === 0 && analysis.sessionDisabledSignals.length === 0) {
-    raise(
-      `sessions are enabled (${formatSignals(analysis.sessionSignals)}) with an auth.sessionOptions.store factory, and no DatabaseSessionStore or RedisSessionStore is constructed`,
-      BACKED_STORE_FIX,
-    )
+  // The manifest already shows the factory, so a session signal in source is not asked for.
+  if (analysis.backedSessionSignals.length === 0 && analysis.sessionDisabledSignals.length === 0) {
+    raise('sessions use an auth.sessionOptions.store factory, and no DatabaseSessionStore or RedisSessionStore is constructed', BACKED_STORE_FIX)
   }
 }
 
