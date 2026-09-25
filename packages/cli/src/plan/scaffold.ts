@@ -1,0 +1,384 @@
+/**
+ * The plan-driven scaffold (RFC 0030 §5): a pure function from a scaffold step, and what the
+ * application declares, to the tables and model files `guren plan:scaffold` writes. Every
+ * planned property is written in a form the `plan:status` readers (`plan/status.ts`) read back,
+ * so a scaffolded element can verify; a property no reader sees stays `unknown` there, and the
+ * output is not bent around it. No pages, no action bodies, nothing the plan does not state.
+ */
+
+import { MODELS_DIR } from '../discovery'
+import { schemaIdentifierFor } from '../inflect'
+import { buildModelSource, type ModelRelationshipSource } from '../make-model'
+import { autoIncrementPrimaryKey, COLUMN_BUILDERS, quoteSqlName, type ColumnCode } from '../schema-columns'
+import type { SchemaDialect } from '../schema-parser'
+import { isIdentifier, pascalCase } from '../utils'
+import { listPlanElements, type PlanColumn, type PlanDraft, type PlanElementSection, type PlanModel } from './schema'
+import type { PlanDerivedStep } from './tasks'
+
+/** What the emitter needs of the application, read by the command and passed in. */
+export interface PlanScaffoldApp {
+  /** The root `db/schema.ts`'s dialect. */
+  dialect: SchemaDialect
+  /** Every app root's tables; `module` is null for the root's. */
+  tables: ReadonlyArray<{ identifier: string; tableName?: string; module: string | null; columns: readonly string[]; opaqueColumns?: boolean }>
+  /** The model classes the application root declares. */
+  models: readonly string[]
+}
+
+export interface PlanScaffoldTable {
+  model: string
+  identifier: string
+  /** The export, as `appendTableToSchema()` appends it. */
+  block: string
+  /** Builder names the block calls, imported from the dialect's barrel. */
+  imports: string[]
+}
+
+export interface PlanScaffoldFile {
+  model: string
+  /** App-relative, POSIX separators. */
+  path: string
+  contents: string
+}
+
+export interface PlanScaffoldOutput {
+  tables: PlanScaffoldTable[]
+  files: PlanScaffoldFile[]
+  /** Element ids written, in document order. */
+  emitted: string[]
+  /** The step's `generates` this emitter does not write. */
+  left: Array<{ id: string; section: PlanElementSection }>
+  /** Planned relationships not written, with why: the agent adds each in a later step. */
+  omitted: Array<{ model: string; relationship: string; reason: string }>
+  /** Why nothing may be written. Non-empty means the output is not to be used. */
+  refusals: string[]
+}
+
+const TABLE_FACTORY: Record<SchemaDialect, string> = { pg: 'pgTable', mysql: 'mysqlTable', sqlite: 'sqliteTable' }
+
+interface TableRef {
+  identifier: string
+  columns: readonly string[]
+  /** Set where a spread or a computed key hides columns, so an absent one is no evidence. */
+  opaqueColumns?: boolean
+}
+
+function hasColumn(table: TableRef, name: string): boolean {
+  return table.opaqueColumns === true || table.columns.includes(name)
+}
+
+function sqlNameOf(column: PlanColumn): string {
+  return column.columnName ?? column.name
+}
+
+function propertyKey(name: string): string {
+  return isIdentifier(name) ? name : quoteSqlName(name)
+}
+
+function tableAccess(name: string): string {
+  return isIdentifier(name) ? `table.${name}` : `table[${quoteSqlName(name)}]`
+}
+
+function escapeTemplate(text: string): string {
+  return text.replaceAll('\\', '\\\\').replaceAll('`', '\\`').replaceAll('${', '\\${')
+}
+
+function sqlDefault(text: string): ColumnCode {
+  return { code: `.default(sql\`${escapeTemplate(text)}\`)`, imports: ['sql'] }
+}
+
+/** `'draft'`, `"draft"`, or JSON text; anything else is an SQL expression. */
+function parseLiteral(text: string): { value: unknown } | undefined {
+  const quoted = /^'(.*)'$/s.exec(text) ?? /^"(.*)"$/s.exec(text)
+  if (quoted) return { value: quoted[1] }
+  try {
+    return { value: JSON.parse(text) as unknown }
+  } catch {
+    return undefined
+  }
+}
+
+const STRING_TYPES: ReadonlySet<PlanColumn['type']> = new Set(['string', 'text', 'uuid', 'date', 'decimal'])
+
+/**
+ * The plan's default as the column's TypeScript type takes it: drizzle reads a `numeric` as a
+ * string, so `0` on a decimal is `'0'`. A literal the type cannot hold is written as SQL.
+ */
+function literalDefault(value: unknown, type: PlanColumn['type']): string | undefined {
+  if (value === null) return 'null'
+  if (type === 'json') return JSON.stringify(value)
+  if (STRING_TYPES.has(type)) return typeof value === 'object' ? undefined : quoteSqlName(String(value))
+  if (type === 'integer' || type === 'number') return typeof value === 'number' ? String(value) : undefined
+  if (type === 'boolean') return typeof value === 'boolean' ? String(value) : undefined
+  return undefined
+}
+
+/**
+ * `now()` on a date or datetime is the dialect's own: pg's `defaultNow()`; MySQL's
+ * `CURRENT_TIMESTAMP`, which `plan/status.ts` normalizes to `now()` where drizzle's MySQL
+ * `defaultNow()` renders `(now())`, which it compares as text only.
+ */
+function nowDefault(dialect: SchemaDialect, type: PlanColumn['type']): ColumnCode {
+  if (dialect === 'pg') return { code: '.defaultNow()', imports: [] }
+  if (dialect === 'mysql') return sqlDefault(type === 'date' ? '(CURRENT_DATE)' : 'CURRENT_TIMESTAMP')
+  return sqlDefault(type === 'date' ? "(date('now'))" : '(unixepoch())')
+}
+
+function defaultModifier(column: PlanColumn, dialect: SchemaDialect): ColumnCode {
+  const text = (column.default as string).trim()
+  if ((column.type === 'date' || column.type === 'datetime') && /^(now\(\)|current_timestamp(\(\))?)$/i.test(text)) {
+    return nowDefault(dialect, column.type)
+  }
+  const literal = parseLiteral(text)
+  const written = literal ? literalDefault(literal.value, column.type) : undefined
+  return written === undefined ? sqlDefault(text) : { code: `.default(${written})`, imports: [] }
+}
+
+/** A column added to an existing table is an `alter`, which no scaffold writes (§5). */
+function scaffoldedModels(plan: PlanDraft, generates: ReadonlySet<string>): PlanModel[] {
+  return plan.models.filter((model) => generates.has(model.id) && model.change.kind === 'add')
+}
+
+function scaffoldedColumns(model: PlanModel, generates: ReadonlySet<string>): PlanColumn[] {
+  return model.columns.filter((column) => column.change.kind === 'add' && generates.has(column.id))
+}
+
+function indexName(table: string, columns: readonly string[], unique: boolean): string {
+  return `${table}_${columns.join('_')}_${unique ? 'unique' : 'index'}`
+}
+
+class Emitter {
+  private readonly modelsById: Map<string, PlanModel>
+  private readonly emittedModels: Map<string, PlanModel>
+  private readonly generates: Set<string>
+  readonly refusals: string[] = []
+  readonly omitted: PlanScaffoldOutput['omitted'] = []
+
+  constructor(
+    private readonly plan: PlanDraft,
+    step: PlanDerivedStep,
+    private readonly app: PlanScaffoldApp,
+  ) {
+    this.modelsById = new Map(plan.models.map((model) => [model.id, model]))
+    this.generates = new Set(step.generates)
+    this.emittedModels = new Map(scaffoldedModels(plan, this.generates).map((model) => [model.id, model]))
+  }
+
+  get models(): PlanModel[] {
+    return [...this.emittedModels.values()]
+  }
+
+  columnsOf(model: PlanModel): PlanColumn[] {
+    return scaffoldedColumns(model, this.generates)
+  }
+
+  /** The table a model binds after this run: the one emitted, or the root schema's by SQL name. */
+  tableOf(model: PlanModel): TableRef | undefined {
+    if (this.emittedModels.has(model.id)) {
+      return { identifier: schemaIdentifierFor(model.name), columns: this.columnsOf(model).map((column) => column.name) }
+    }
+    const root = this.app.tables.filter((table) => table.module === null)
+    return (
+      root.find((table) => table.tableName === model.table) ?? root.find((table) => table.tableName === undefined && table.identifier === model.table)
+    )
+  }
+
+  /** A model the root declares after this run, which a lazy import can then load. */
+  classExists(model: PlanModel): boolean {
+    return this.emittedModels.has(model.id) || this.app.models.includes(model.name)
+  }
+
+  checkCollisions(model: PlanModel): void {
+    const identifier = schemaIdentifierFor(model.name)
+    if (model.module) this.refusals.push(`${model.id} sits in module "${model.module}": plan:scaffold writes to the project root only.`)
+    if (!isIdentifier(model.name) || pascalCase(model.name) !== model.name) {
+      this.refusals.push(`${model.id} is named "${model.name}", which is not a PascalCase class name a model file can be named after.`)
+    }
+    if (this.app.models.includes(model.name)) this.refusals.push(`${model.id}: the application already declares a ${model.name} model.`)
+    if (this.app.tables.some((table) => table.module === null && table.identifier === identifier)) {
+      this.refusals.push(`${model.id}: db/schema.ts already exports ${identifier}.`)
+    }
+    const named = this.app.tables.find((table) => (table.tableName ?? table.identifier) === model.table)
+    if (named) this.refusals.push(`${model.id}: ${named.module ? `modules/${named.module}/db/schema.ts` : 'db/schema.ts'} already declares the table ${model.table}.`)
+  }
+
+  /** `undefined` with a refusal recorded when the target is not one this run can point at. */
+  private referenceTarget(model: PlanModel, column: PlanColumn): { model: PlanModel; table: TableRef } | undefined {
+    const reference = column.references as NonNullable<PlanColumn['references']>
+    const target = this.modelsById.get(reference.model)
+    const where = `${model.id}.${column.name} references ${reference.model}.${reference.column}`
+    if (!target) {
+      this.refusals.push(`${where}, which the plan does not declare.`)
+      return undefined
+    }
+    if (target.module) {
+      this.refusals.push(`${where}, which sits in module "${target.module}": plan:scaffold writes to the project root only.`)
+      return undefined
+    }
+    const table = this.tableOf(target)
+    if (!table) {
+      this.refusals.push(`${where}, whose table ${target.table} db/schema.ts does not declare yet. Scaffold or migrate the step that adds it first.`)
+      return undefined
+    }
+    if (!hasColumn(table, reference.column)) {
+      this.refusals.push(`${where}, but ${target.table} has no column ${reference.column}.`)
+      return undefined
+    }
+    return { model: target, table }
+  }
+
+  table(model: PlanModel): PlanScaffoldTable {
+    const { dialect } = this.app
+    const identifier = schemaIdentifierFor(model.name)
+    const columns = this.columnsOf(model)
+    const primary = columns.filter((column) => column.primaryKey)
+    const imports = new Set<string>([TABLE_FACTORY[dialect]])
+    const extra: string[] = []
+    const sqlNames = new Map(model.columns.map((column) => [column.name, sqlNameOf(column)]))
+
+    const lines = columns.map((column) => {
+      const single = column.primaryKey === true && primary.length === 1
+      const base: ColumnCode = single && column.type === 'integer' && !column.references
+        ? autoIncrementPrimaryKey(dialect, sqlNameOf(column))
+        : COLUMN_BUILDERS[dialect][column.type](sqlNameOf(column), column)
+      const parts = [base]
+      if (single && base.code.indexOf('.primaryKey(') === -1) parts.push({ code: '.primaryKey()', imports: [] })
+      if (!column.nullable && !single) parts.push({ code: '.notNull()', imports: [] })
+      if (column.unique) parts.push({ code: '.unique()', imports: [] })
+      if (column.default !== undefined) parts.push(defaultModifier(column, dialect))
+      if (column.references) {
+        const target = this.referenceTarget(model, column)
+        const onDelete = column.references.onDelete
+        if (target && target.model.id === model.id) {
+          // A column cannot reference its own table in its initializer (TS7022), so the key goes to the extra config.
+          imports.add('foreignKey')
+          extra.push(`foreignKey({ columns: [${tableAccess(column.name)}], foreignColumns: [${tableAccess(column.references.column)}] })${onDelete ? `.onDelete('${onDelete}')` : ''}`)
+        } else if (target) {
+          const options = onDelete ? `, { onDelete: '${onDelete}' }` : ''
+          parts.push({ code: `.references(() => ${target.table.identifier}.${column.references.column}${options})`, imports: [] })
+        }
+      }
+      for (const part of parts) for (const name of part.imports) imports.add(name)
+      if (column.index) {
+        imports.add('index')
+        extra.push(`index('${indexName(model.table, [sqlNameOf(column)], false)}').on(${tableAccess(column.name)})`)
+      }
+      return `  ${propertyKey(column.name)}: ${parts.map((part) => part.code).join('')},`
+    })
+
+    if (primary.length > 1) {
+      imports.add('primaryKey')
+      extra.push(`primaryKey({ columns: [${primary.map((column) => tableAccess(column.name)).join(', ')}] })`)
+    }
+    for (const index of model.indexes) {
+      const builder = index.unique ? 'uniqueIndex' : 'index'
+      imports.add(builder)
+      const names = index.columns.map((name) => sqlNames.get(name) ?? name)
+      extra.push(`${builder}('${indexName(model.table, names, index.unique)}').on(${index.columns.map(tableAccess).join(', ')})`)
+    }
+
+    const close = extra.length === 0 ? '})' : `}, (table) => [\n${extra.map((entry) => `  ${entry},`).join('\n')}\n])`
+    const block = `export const ${identifier} = ${TABLE_FACTORY[dialect]}(${quoteSqlName(model.table)}, {\n${lines.join('\n')}\n${close}\n`
+    return { model: model.id, identifier, block, imports: [...imports].sort() }
+  }
+
+  /**
+   * The keys a relationship's call takes, from the foreign keys the plan states: a `belongsTo`
+   * from this model's column referencing the target, a `hasOne`/`hasMany` from the target's
+   * referencing this model, a `belongsToMany` through the one model referencing both.
+   */
+  private relationship(model: PlanModel, planned: PlanModel['relationships'][number], declared: { imports: Set<string>; types: Map<string, string> }): ModelRelationshipSource | string {
+    const target = this.modelsById.get(planned.target)
+    if (!target) return `the plan declares no ${planned.target}`
+    if (!this.classExists(target)) return `the application has no ${target.name} model yet`
+    const targetTable = this.tableOf(target)
+    if (!targetTable) return `db/schema.ts does not declare ${target.table} yet`
+    const ownColumns = this.columnsOf(model).map((column) => column.name)
+    const pick = (candidates: PlanColumn[], preferred: string): PlanColumn | undefined =>
+      candidates.length === 1 ? candidates[0] : candidates.find((column) => column.name === preferred)
+
+    let args: string[]
+    if (planned.type === 'belongsTo') {
+      const key = pick(model.columns.filter((column) => column.references?.model === target.id && ownColumns.includes(column.name)), `${planned.name}Id`)
+      if (!key) return `no one column of ${model.name} this run writes references ${target.name}`
+      const owner = (key.references as NonNullable<PlanColumn['references']>).column
+      if (!hasColumn(targetTable, owner)) return `${target.table} has no column ${owner}`
+      args = [`'${key.name}'`, `'${owner}'`]
+    } else if (planned.type === 'belongsToMany') {
+      const pivots = this.plan.models.flatMap((pivot) => {
+        const own = pivot.columns.find((column) => column.references?.model === model.id)
+        const other = pivot.columns.find((column) => column.references?.model === target.id && column !== own)
+        return own && other ? [{ pivot, own, other }] : []
+      })
+      if (pivots.length !== 1) return `${pivots.length === 0 ? 'no' : 'more than one'} model of the plan references both ${model.name} and ${target.name}`
+      const { pivot, own, other } = pivots[0]!
+      const pivotTable = this.tableOf(pivot)
+      if (!pivotTable || !hasColumn(pivotTable, own.name) || !hasColumn(pivotTable, other.name)) return `the pivot table ${pivot.table} is not declared with both keys yet`
+      declared.imports.add(pivotTable.identifier)
+      args = [pivotTable.identifier, `'${own.name}'`, `'${other.name}'`, `'${own.references!.column}'`, `'${other.references!.column}'`]
+    } else {
+      const key = pick(target.columns.filter((column) => column.references?.model === model.id), `${model.name.charAt(0).toLowerCase()}${model.name.slice(1)}Id`)
+      if (!key) return `no one column of ${target.name} references ${model.name}`
+      if (!hasColumn(targetTable, key.name)) return `${target.table} has no column ${key.name} yet`
+      const local = (key.references as NonNullable<PlanColumn['references']>).column
+      if (!ownColumns.includes(local)) return `${model.name} has no column ${local}`
+      args = [`'${key.name}'`, `'${local}'`]
+    }
+
+    const recordType = `${target.name}Record`
+    if (target.id !== model.id && !declared.types.has(recordType)) {
+      declared.types.set(recordType, `type ${recordType} = typeof ${targetTable.identifier}.$inferSelect`)
+      declared.imports.add(targetTable.identifier)
+    }
+    return { name: planned.name, type: planned.type, relatedClass: target.name, recordType, args }
+  }
+
+  file(model: PlanModel): PlanScaffoldFile {
+    const declared = { imports: new Set<string>(), types: new Map<string, string>() }
+    const relationships: ModelRelationshipSource[] = []
+    for (const planned of model.relationships) {
+      const target = this.modelsById.get(planned.target)
+      if (target?.module) {
+        this.refusals.push(`${model.id}'s relationship ${planned.name} targets ${target.id}, which sits in module "${target.module}": plan:scaffold writes to the project root only.`)
+        continue
+      }
+      const written = this.relationship(model, planned, declared)
+      if (typeof written === 'string') this.omitted.push({ model: model.id, relationship: planned.name, reason: written })
+      else relationships.push(written)
+    }
+    const contents = buildModelSource({
+      className: model.name,
+      schemaIdentifier: schemaIdentifierFor(model.name),
+      fillable: model.fillable,
+      relationships,
+      schemaImports: [...declared.imports],
+      typeDeclarations: [...declared.types.values()],
+    })
+    return { model: model.id, path: `${MODELS_DIR}/${model.name}.ts`, contents }
+  }
+}
+
+/** The command `plan:next` names for a scaffold step. */
+export function planScaffoldCommand(planArgument: string, stepId: string): string {
+  return `bunx guren plan:scaffold ${planArgument} --step ${stepId}`
+}
+
+/** Which of a scaffold step's `generates` `plan:scaffold` writes and which it leaves: its report and `plan:next` both say it through here. */
+export function planScaffoldCoverage(plan: PlanDraft, step: Pick<PlanDerivedStep, 'generates'>): Pick<PlanScaffoldOutput, 'emitted' | 'left'> {
+  const generates = new Set(step.generates)
+  const written = new Set(scaffoldedModels(plan, generates).flatMap((model) => [model.id, ...scaffoldedColumns(model, generates).map((column) => column.id)]))
+  const elements = listPlanElements(plan)
+  return {
+    emitted: elements.filter((element) => written.has(element.id)).map((element) => element.id),
+    left: elements.filter((element) => generates.has(element.id) && !written.has(element.id)),
+  }
+}
+
+/** What `plan:scaffold` writes for `step`. Pure: the caller reads the application and writes the result. */
+export function emitPlanScaffold(plan: PlanDraft, step: PlanDerivedStep, app: PlanScaffoldApp): PlanScaffoldOutput {
+  const emitter = new Emitter(plan, step, app)
+  for (const model of emitter.models) emitter.checkCollisions(model)
+  const tables = emitter.models.map((model) => emitter.table(model))
+  const files = emitter.models.map((model) => emitter.file(model))
+  return { tables, files, ...planScaffoldCoverage(plan, step), omitted: emitter.omitted, refusals: emitter.refusals }
+}

@@ -9,6 +9,7 @@ import { formatPlanApprove, planApproveFile } from '../plan-approve'
 import { formatPlanStatus, planStatusFile } from '../plan-status'
 import { DEFAULT_VERIFY_TIMEOUT_MS, formatPlanVerify, planVerifyFile } from '../plan-verify'
 import { formatPlanNext, planNextFile } from '../plan-next'
+import { formatPlanScaffold, planScaffoldFile } from '../plan-scaffold'
 import { formatPlanRevise, planReviseFile, withStdinDashes } from '../plan-revise'
 import { formatPlanWaive, planWaiveFile } from '../plan-waive'
 import { formatPlanClose, planCloseFile } from '../plan-close'
@@ -232,6 +233,42 @@ export const planNextCommand = defineCommand({
     const appRoot = resolve(args.app ?? process.cwd())
     const report = await planNextFile(args.plan, { appRoot })
     console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanNext(report, args.plan))
+  },
+})
+
+export const planScaffoldCommand = defineCommand({
+  meta: {
+    name: 'plan:scaffold',
+    description:
+      "Write the scaffold step of an approved plan (RFC 0030 §5): each added model's table in db/schema.ts, with every column option and foreign key the plan states, and its model class with the plan's relationships and fillable. Writes no pages and no action bodies, and runs no codegen or migration. The step must be the one plan:next marked. Refuses, with nothing written, a draft, another step kind, a module element, an API-only application, and any target that already exists, a re-run included.",
+  },
+  args: {
+    plan: {
+      type: 'positional',
+      description: 'Path to the plan JSON file',
+      required: true,
+      valueHint: 'comments.plan.json',
+    },
+    step: {
+      type: 'string',
+      description: 'The scaffold step id, as plan:next names it.',
+      required: true,
+      valueHint: 'task/entity/model.comment/scaffold',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory: what is read and written, and where the step is marked.',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Print the report as JSON.',
+      default: false,
+    },
+  },
+  async run({ args }) {
+    const appRoot = resolve(args.app ?? process.cwd())
+    const report = await planScaffoldFile(args.plan, { appRoot, step: args.step })
+    console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanScaffold(report, args.plan))
   },
 })
 

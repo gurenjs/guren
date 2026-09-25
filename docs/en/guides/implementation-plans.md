@@ -272,13 +272,13 @@ The first approval writes a `baseline` into the plan: `rev`, the commit the plan
 
 Validators are never hashed: the stamp finds each element's file from its name, and it does not resolve a validator's exported schema symbol to a file. If another section cannot be read, approval refuses and names the elements that would stay unhashed; `--allow-unstamped` approves without them.
 
-The plan's hash identifies it: a SHA-256 of the plan with its baseline. Approvals, verification records and waivers all name it, so a plan edited after approval is a different plan. `plan:next`, `plan:verify`, `plan:waive` and `plan:close` refuse a plan with a baseline whose current hash no approval names:
+The plan's hash identifies it: a SHA-256 of the plan with its baseline. Approvals, verification records and waivers all name it, so a plan edited after approval is a different plan. `plan:next`, `plan:scaffold`, `plan:verify`, `plan:waive` and `plan:close` refuse a plan with a baseline whose current hash no approval names:
 
 ```text
  ERROR  docs/plans/comments/plan.json is not approved at its current hash dc9a6ce3ad173e23290f743293fa0e3495c932b3b2cdf07c0cda8c9b063a5465, so no step of it is handed out: it was edited after approval, or never approved, and what it says now may not be what anyone agreed to. Run guren plan:approve docs/plans/comments/plan.json once the plan says what you mean to build.
 ```
 
-`plan:status` and `plan:render` keep working, since they are how you read the change before approving it. A draft, which has no baseline and so no hash, is still accepted by `plan:next` and `plan:verify`. A draft with approvals recorded beside it is refused like an unapproved plan: deleting `baseline` from an approved plan does not take it out of the gate.
+`plan:status` and `plan:render` keep working, since they are how you read the change before approving it. A draft, which has no baseline and so no hash, is still accepted by `plan:next` and `plan:verify`; `plan:scaffold` refuses one, since it writes code from what someone approved. A draft with approvals recorded beside it is refused like an unapproved plan: deleting `baseline` from an approved plan does not take it out of the gate.
 
 Approving an edited plan again records the new hash and leaves the baseline as it was, so its steps verify again under the new hash. The checks and questions are asked again first, against the application as it is at that moment. The plan's own work does not stand in the way: an element the implementation has already built where the plan leaves it is settled, and the approval says which:
 
@@ -343,9 +343,9 @@ Guren derives the work from the plan, and the order does not depend on a model. 
 | Step | Work | Verified by |
 |---|---|---|
 | `commands` | The plan's `commands`, such as `guren add attachments`, in `task/foundation` | `codegen`, `typecheck` |
-| `scaffold` | The first version of a new entity, through `make:feature` | `codegen`, `typecheck` |
+| `scaffold` | The first version of a new entity, written by `plan:scaffold` | `codegen`, `typecheck` |
 | `tests` | One test per acceptance behaviour, failing | `codegen`, the tests failing |
-| `data` | Table, migration, model relationships and fillable | `codegen`, `db:migrate`, `typecheck` |
+| `data` | Table, migration, model relationships and fillable; after a scaffold, the migration and what `plan:scaffold` left out | `codegen`, `db:migrate`, `typecheck` |
 | `http` | Validators, controllers, routes, resources, policies | `codegen`, `guren check`, the tests passing |
 | `pages` | Page components | `codegen`, `typecheck`, `guren check` |
 
@@ -403,6 +403,48 @@ Recorded in .guren/plans/comments.state.json
 ```
 
 The `tests` step passes only when every behaviour has a test and each one fails: a test that passes before the code exists proves nothing, and a skipped test is not a failing one. `plan:verify` selects the test files whose source carries the step's ids, and runs them with `bun test`. Later steps run the same files and need them to pass. After the verify output it prints the plan's status, described below.
+
+### The scaffold step: `plan:scaffold`
+
+A task that adds its own model starts with a `scaffold` step, and `plan:next` names the command that writes it:
+
+```text
+Next: task/entity/model.comment/scaffold
+  task: entity Comment (task/entity/model.comment)
+  verify: codegen → typecheck
+
+Write this step with `bunx guren plan:scaffold docs/plans/comments/plan.json --step task/entity/model.comment/scaffold`, not by hand.
+  It writes each added model's table and model class: model.comment, column.comment.id, column.comment.body, column.comment.postId, column.comment.createdAt
+  It does not write validator.comment, controller.comments, action.comments.store, action.comments.destroy, route.comments.store, route.comments.destroy, resource.comment, policy.comment; the http step implements them by hand.
+```
+
+```bash
+bunx guren plan:scaffold docs/plans/comments/plan.json --step task/entity/model.comment/scaffold
+```
+
+It appends each added model's table to `db/schema.ts` in the schema's dialect. The table carries every option the plan states for a column (type, nullability, `unique`, `index`, `default`, `columnName`, `withTimezone`, precision and scale, the primary key, the foreign key and its `onDelete`) and the model's multi-column indexes:
+
+```typescript
+export const comments = pgTable('comments', {
+  id: serial('id').primaryKey(),
+  body: text('body').notNull(),
+  postId: integer('post_id').notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('comments_post_id_index').on(table.postId),
+])
+```
+
+It writes `app/Models/Comment.ts` with the plan's `fillable` and relationships, each keyed by the foreign key the plan states. A relationship whose keys or target do not exist yet, such as a `hasMany` to a model a later task adds, is left out and listed, for the step where they exist. It writes nothing else, and runs neither codegen nor a migration: `plan:verify` runs codegen and the typecheck, and the `data` step generates the migration.
+
+Every refusal comes before the first write. It refuses:
+
+- a draft, or a plan no approval names;
+- a step other than a `scaffold` step (it names the task's own), or one `plan:next` has not marked;
+- a model in a module (it writes to the project root only), and an API-only application;
+- any target that already exists: the model file or class, the schema export, or the table name in any application root.
+
+Running it again on a scaffolded step is refused the same way, since its files exist; verify the step instead. `--json` prints the files it created, the tables it appended, the elements it wrote, the ones it left and the relationships it left out.
 
 ### Outcomes
 
@@ -590,7 +632,7 @@ Planned, not checkable:
 For a plan with a baseline, the report ends with its approval: the time and approver when an approval names the current hash, or which commands refuse it when none does:
 
 ```text
-Not approved at this hash: plan:next, plan:verify, plan:waive, plan:close refuse the plan until guren plan:approve records an approval of it.
+Not approved at this hash: plan:next, plan:scaffold, plan:verify, plan:waive, plan:close refuse the plan until guren plan:approve records an approval of it.
 ```
 
 Verification results live in `.guren/plans/`, which git ignores: a result is a fact about one machine. A fresh clone and CI see every element at most `wired` until `plan:verify` has run there.
@@ -724,7 +766,7 @@ The RFC behind this feature (`rfcs/0030-implementation-plans.md`) describes more
 
 - a `guren plan` that asks Claude for the plan JSON by itself (`--print-prompt` is the form that exists), and `plan --revise`, which would turn review comments into a revision (`plan:revise` records a change you make yourself). Write `plan.json` yourself or in your agent session;
 - keeping plans in GitHub issues instead of `docs/plans/`;
-- a `scaffold` step that runs the generators for you. `plan:next` lists the elements a scaffold would generate and says no generator ships yet, so the step completes on its verify commands; run `make:feature` and trim what the plan does not need.
+- a `plan:scaffold` that writes the whole slice. It writes each added model's table and model class; the slice's validators, controllers, routes, resources and policies are still the `http` step's work, by hand. It writes no pages, and will not: a page written from the plan's props would match the plan by construction.
 
 ## Next steps
 

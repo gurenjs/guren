@@ -99,14 +99,36 @@ describe('plan:next', () => {
     expect(again.step!.id).toBe(SCAFFOLD)
   })
 
-  test('should name what a scaffold would generate without claiming a generator writes it', async () => {
+  test('should name plan:scaffold for a scaffold step, with what it writes and what the http step writes by hand', async () => {
+    const approved = approvedAgainst(loadCommentsPlan())
     const { app, plan } = await createApp('scaffold-text')
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approved) })
+    await approvePlanFile(plan)
+
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+    const text = formatPlanNext(report, 'comments.plan.json')
+
+    const command = `bunx guren plan:scaffold comments.plan.json --step ${SCAFFOLD}`
+    expect(report.step!.scaffold).toEqual({
+      command: `bunx guren plan:scaffold ${plan} --step ${SCAFFOLD}`,
+      writes: ['model.comment', 'column.comment.id', 'column.comment.body', 'column.comment.postId', 'column.comment.createdAt'],
+      leaves: expect.arrayContaining(['validator.comment', 'controller.comments', 'route.comments.store', 'policy.comment']),
+    })
+    expect(report.step!.scaffold!.leaves).not.toContain('model.comment')
+    expect(text).toContain(`Write this step with \`${command}\`, not by hand.`)
+    expect(text).toContain("It writes each added model's table and model class: model.comment, column.comment.id")
+    expect(text).toContain('It does not write validator.comment')
+    expect(text).toContain('the http step implements them by hand.')
+    expect(text).not.toContain('No generator')
+  })
+
+  test('should tell a draft to approve before plan:scaffold, which refuses one', async () => {
+    const { app, plan } = await createApp('scaffold-draft')
 
     const text = formatPlanNext(await planNextFile(plan, { appRoot: app, now: NOW }), 'comments.plan.json')
 
-    expect(text).toContain('The elements a scaffold would generate: model.comment')
-    expect(text).toContain('No generator for this step ships yet, so it completes on its verify commands')
-    expect(text).not.toContain('Generates a first version')
+    expect(text).toContain('Approve the plan first (bunx guren plan:approve comments.plan.json): plan:scaffold writes this step from an approved plan only, as')
+    expect(text).not.toContain('Write this step with')
   })
 
   test('should keep two plans in the docs/plans/<slug>/plan.json layout in state files of their own', async () => {
