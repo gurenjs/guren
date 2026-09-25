@@ -1218,8 +1218,9 @@ shipped, and where it stops.
   the marked step's own.
 - Every refusal comes before the first write: the step kind, the mark, a module,
   a foreign key to a table not declared yet, a MySQL key over a `text` or `json`
-  column (primary, unique, index, or the index a foreign key gets) (drizzle-kit refuses it and MySQL rejects the key
-  without a prefix length), a `default` of `null`, and any target that exists
+  column (a primary key, `unique`, an index, or a foreign key, which MySQL
+  indexes), which drizzle-kit refuses and MySQL rejects without a prefix length,
+  a `default` of `null`, and any target that exists
   (the model file or class, the schema export, the table name in any root). A
   re-run of a scaffolded step is therefore refused on the targets it wrote, with
   the application unchanged; what is left for the step is `plan:verify`. It runs

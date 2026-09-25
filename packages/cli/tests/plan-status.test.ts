@@ -841,13 +841,31 @@ describe('judgePlan', () => {
       expect(element.properties.find((property) => property.property === 'primaryKey')).toMatchObject({ verdict: 'unknown', reason: expect.stringContaining('constraints') })
     })
 
-    test('should read a column in a composite primary key as not nullable, which the database makes it', () => {
+    test.each([
+      ['pg', 'match'],
+      ['mysql', 'match'],
+      // SQLite's rowid tables take NULL in a composite key column that declares no `.notNull()`.
+      ['sqlite', 'differ'],
+    ] as const)('should read a %s column in a composite primary key, declared without .notNull(), as nullable: false %s', (dialect, verdict) => {
       const columns = POSTS_TABLE.columns.map((column) => (column.name === 'title' ? { ...column, notNull: false } : column))
-      const table = { ...POSTS_TABLE, columns, constraints: [{ kind: 'primaryKey', columns: ['id', 'title'] }] } as SourcedSchemaTable
+      const table: SourcedSchemaTable = { ...POSTS_TABLE, dialect, columns, constraints: [{ kind: 'primaryKey', columns: ['id', 'title'] }] }
 
       const element = only(judgePlan(withColumn(ADD, { primaryKey: true, nullable: false }), app({ tables: [table, USERS_TABLE] })), 'c')
 
-      expect(element.properties.find((property) => property.property === 'nullable')?.verdict).toBe('match')
+      expect(element.properties.find((property) => property.property === 'nullable')?.verdict).toBe(verdict)
+    })
+
+    test.each([
+      ['pg', 'unknown'],
+      ['sqlite', 'differ'],
+    ] as const)('should read nullable on a %s table whose constraints are hidden, with no .notNull(), as %s', (dialect, verdict) => {
+      const columns = POSTS_TABLE.columns.map((column) => (column.name === 'title' ? { ...column, notNull: false } : column))
+      const table: SourcedSchemaTable = { ...POSTS_TABLE, dialect, columns, constraints: [], opaqueConstraints: true }
+
+      const element = only(judgePlan(withColumn(ADD, { nullable: false }), app({ tables: [table, USERS_TABLE] })), 'c')
+
+      expect(element.properties.find((property) => property.property === 'nullable')?.verdict).toBe(verdict)
+      if (verdict === 'unknown') expect(element.properties.find((property) => property.property === 'nullable')?.reason).toContain('constraints')
     })
 
     test.each([
