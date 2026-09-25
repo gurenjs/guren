@@ -186,7 +186,6 @@ const READER_LIMITS: Record<SchemaDialect, string[]> = {
   ],
 }
 
-
 /** The document stamped and ready to approve, as `plan:approve` would stamp it against the fixture app. */
 function approve(document: WidgetsPlan): Record<string, unknown> {
   return approvedAgainst(document as unknown as Record<string, unknown>)
@@ -444,11 +443,18 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     test('should refuse a MySQL key on a text or json column, which drizzle-kit and MySQL reject, and name the fix', async () => {
       const document = widgetsPlan()
       const widget = document.models[3]!
-      widget.columns.push(column('widget', 'summary', 'text', { unique: true }), column('widget', 'extra', 'json', { index: true }))
+      widget.columns.push(
+        column('widget', 'summary', 'text', { unique: true }),
+        column('widget', 'extra', 'json', { index: true }),
+        column('widget', 'code', 'text', { primaryKey: true }),
+        column('widget', 'postRef', 'text', { references: { model: 'model.post', column: 'id' } }),
+      )
       widget.indexes = [{ columns: ['title', 'summary'], unique: false }]
       const message = await refusedWithNothingWritten('mysql-text-key', { dialect: 'mysql', document: approve(document) })
       expect(message).toContain('column.widget.summary is a text column planned unique.')
       expect(message).toContain('column.widget.extra is a json column planned index.')
+      expect(message).toContain('column.widget.code is a text column planned primary key.')
+      expect(message).toContain('column.widget.postRef is a text column planned foreign key.')
       expect(message).toContain("model.widget's index (title, summary) covers the text column summary.")
       expect(message).toContain('Plan the column as `string` (varchar(255)), or drop the key (plan:revise).')
       // The same plan on pg keys a text column fine.
@@ -484,7 +490,7 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     try {
       const message = await refusal(() => planScaffoldFile(plan, { appRoot: dir, step: STEP }))
       expect(message).toContain(`plan:scaffold stopped part way through ${STEP}:`)
-      expect(message).toContain('Already written: db/schema.ts. The step is half scaffolded')
+      expect(message).toContain('Already written: db/schema.ts. app/Models/Widget.ts failed and may exist, part written. The step is half scaffolded')
       expect(message).not.toContain('Nothing was scaffolded.')
       expect(await readFile(join(dir, 'db/schema.ts'), 'utf8')).toContain("export const widgets = pgTable('widgets'")
     } finally {

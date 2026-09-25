@@ -6,7 +6,6 @@
  * and no migration: those are the step's `plan:verify` and the `data` step's.
  */
 
-import { writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 
 import { isConfirmedApiOnlyApp } from './app-surface'
@@ -18,6 +17,7 @@ import { ParseCache } from './parse-cache'
 import { appendTableToSchema, detectSchemaDialect, ensureNamedImports } from './patch-helpers'
 import { readPlanFile } from './plan-render'
 import { requirePlanApproval } from './plan/approvals'
+import { writeFileAtomic } from './plan/beside'
 import { emitPlanScaffold, type PlanScaffoldOutput } from './plan/scaffold'
 import { planSlug, readPlanState } from './plan/state'
 import { derivePlanTasks, findPlanStep, listPlanSteps } from './plan/tasks'
@@ -115,12 +115,15 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
   // what is on disk, since the refusal a re-run gives would read as a finished step.
   const written: string[] = []
   const created: string[] = []
+  let writing: string | undefined
   try {
     if (output.tables.length > 0) {
-      await writeFile(resolve(root, schemaPath), content, 'utf8')
+      writing = schemaPath
+      await writeFileAtomic(resolve(root, schemaPath), content)
       written.push(schemaPath)
     }
     for (const file of output.files) {
+      writing = file.path
       for (const path of await writeScaffoldFiles([{ path: file.path, contents: file.contents }], { cwd: root })) {
         const relative = toPosixRelative(root, path)
         written.push(relative)
@@ -129,9 +132,11 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
     }
   } catch (error) {
     if (written.length === 0) throw error
+    // A `wx` write that fails after opening leaves the file behind, possibly empty.
+    const failing = writing && !written.includes(writing) ? ` ${writing} failed and may exist, part written.` : ''
     throw new CliError(
       `plan:scaffold stopped part way through ${step.id}: ${error instanceof Error ? error.message : String(error)}\n`
-        + `Already written: ${written.join(', ')}. The step is half scaffolded, and running plan:scaffold again refuses on these files.\n`
+        + `Already written: ${written.join(', ')}.${failing} The step is half scaffolded, and running plan:scaffold again refuses on these files.\n`
         + 'Fix the cause, restore them (git checkout / git clean on those paths), and run plan:scaffold again.',
     )
   }

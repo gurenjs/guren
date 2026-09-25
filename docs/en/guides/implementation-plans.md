@@ -442,7 +442,7 @@ Every refusal comes before the first write. It refuses:
 - a draft, or a plan no approval names;
 - a step other than a `scaffold` step (it names the task's own), or one `plan:next` has not marked;
 - a model in a module (it writes to the project root only), and an API-only application;
-- on MySQL, a `unique` or index over a `text` or `json` column, which drizzle-kit refuses and MySQL rejects without a prefix length (plan the column as `string`, or drop the key), and a `default` of `null`;
+- on MySQL, a key over a `text` or `json` column (a primary key, `unique`, an index, or a foreign key, which MySQL indexes), which drizzle-kit refuses and MySQL rejects without a prefix length (plan the column as `string`, or drop the key), and a `default` of `null`;
 - any target that already exists: the model file or class, the schema export, or the table name in any application root.
 
 Running it again on a scaffolded step is refused the same way, since its files exist; verify the step instead. `--json` prints the files it created, the tables it appended, the elements it wrote, the ones it left and the relationships it left out.

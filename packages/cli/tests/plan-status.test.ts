@@ -831,6 +831,26 @@ describe('judgePlan', () => {
     })
 
     test.each([
+      ['a primary key over columns it cannot name', { constraints: [{ kind: 'primaryKey', columns: [], opaqueColumns: true }] }],
+      ['constraints built where it cannot follow', { constraints: [], opaqueConstraints: true }],
+    ] satisfies Array<[string, Partial<SourcedSchemaTable>]>)('should read a primary key as unknown, not absent, on a table with %s', (_, hidden) => {
+      const table: SourcedSchemaTable = { ...POSTS_TABLE, ...hidden }
+
+      const element = only(judgePlan(withColumn(ADD, { primaryKey: true }), app({ tables: [table, USERS_TABLE] })), 'c')
+
+      expect(element.properties.find((property) => property.property === 'primaryKey')).toMatchObject({ verdict: 'unknown', reason: expect.stringContaining('constraints') })
+    })
+
+    test('should read a column in a composite primary key as not nullable, which the database makes it', () => {
+      const columns = POSTS_TABLE.columns.map((column) => (column.name === 'title' ? { ...column, notNull: false } : column))
+      const table = { ...POSTS_TABLE, columns, constraints: [{ kind: 'primaryKey', columns: ['id', 'title'] }] } as SourcedSchemaTable
+
+      const element = only(judgePlan(withColumn(ADD, { primaryKey: true, nullable: false }), app({ tables: [table, USERS_TABLE] })), 'c')
+
+      expect(element.properties.find((property) => property.property === 'nullable')?.verdict).toBe('match')
+    })
+
+    test.each([
       ['now()', { kind: 'now' }, 'match'],
       ["'draft'", { kind: 'value', text: '"draft"' }, 'match'],
       ["'draft'", { kind: 'value', text: "'live'" }, 'differ'],

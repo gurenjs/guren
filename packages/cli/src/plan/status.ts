@@ -757,12 +757,15 @@ class StatusContext {
     else if (projection.ambiguous.includes(builder)) properties.push(unknown('type', column.type, `"${builder}" may hold a ${column.type} under a mode no reader reports`))
     else properties.push(differ('type', column.type, builder))
 
-    const notNull = actual.notNull || actual.primaryKey
+    // A table has one primary key, so a column is in it when a readable composite key lists it; the database makes every key column NOT NULL.
+    const inCompositeKey = table.constraints.some((constraint) => constraint.kind === 'primaryKey' && !constraint.opaqueColumns && constraint.columns.includes(column.name))
+    const keyHidden = table.opaqueConstraints === true || table.constraints.some((constraint) => constraint.kind === 'primaryKey' && constraint.opaqueColumns)
+    const notNull = actual.notNull || actual.primaryKey || inCompositeKey
     flag('nullable', column.nullable, notNull, !notNull)
     if (column.primaryKey !== undefined) {
-      // A table has one primary key, so a column is in it when a readable composite key lists it.
-      const composite = table.constraints.some((constraint) => constraint.kind === 'primaryKey' && !constraint.opaqueColumns && constraint.columns.includes(column.name))
-      flag('primaryKey', column.primaryKey, actual.primaryKey || composite)
+      const inKey = actual.primaryKey || inCompositeKey
+      if (!inKey && keyHidden) properties.push(unknown('primaryKey', String(column.primaryKey), CONSTRAINTS_HIDDEN))
+      else flag('primaryKey', column.primaryKey, inKey)
     }
 
     const uniqueIndex = hasIndex(table, [column.name], ['unique', 'uniqueIndex'])

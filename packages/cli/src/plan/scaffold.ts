@@ -217,9 +217,10 @@ class Emitter {
       const column = columns.find((candidate) => candidate.name === name)
       return column && MYSQL_UNINDEXABLE_TYPES.has(column.type) ? column : undefined
     }
-    const fix = 'MySQL indexes a TEXT or JSON column only by a prefix length drizzle does not write, so drizzle-kit refuses the key and MySQL rejects it (ER_BLOB_KEY_WITHOUT_LENGTH). Plan the column as `string` (varchar(255)), or drop the key (plan:revise).'
+    const fix = 'MySQL indexes a TEXT or JSON column only by a prefix length drizzle does not write, so drizzle-kit refuses the key and MySQL rejects it (ER_BLOB_KEY_WITHOUT_LENGTH, ER_JSON_USED_AS_KEY). Plan the column as `string` (varchar(255)), or drop the key (plan:revise).'
     for (const column of columns) {
-      const keys = [column.unique && 'unique', column.index && 'index'].filter(Boolean)
+      // A foreign key is keyed too: MySQL creates an index for it.
+      const keys = [column.primaryKey && 'primary key', column.unique && 'unique', column.index && 'index', column.references && 'foreign key'].filter(Boolean)
       if (keys.length > 0 && MYSQL_UNINDEXABLE_TYPES.has(column.type)) this.refusals.push(`${column.id} is a ${column.type} column planned ${keys.join(' and ')}. ${fix}`)
     }
     for (const index of model.indexes) {
@@ -330,7 +331,7 @@ class Emitter {
       if (!key) return `no one column of ${model.name} this run writes references ${target.name}`
       const owner = key.references.column
       if (!hasColumn(targetTable, owner)) return `${target.table} has no column ${owner}`
-      args = [`'${key.name}'`, `'${owner}'`]
+      args = [key.name, owner].map(quoteString)
     } else if (planned.type === 'belongsToMany') {
       const pivots = this.plan.models.flatMap((pivot) => {
         const own = referencing(pivot, model)[0]
@@ -343,14 +344,14 @@ class Emitter {
       const pivotTable = this.tableOf(pivot)
       if (!pivotTable || !hasColumn(pivotTable, own.name) || !hasColumn(pivotTable, other.name)) return `the pivot table ${pivot.table} is not declared with both keys yet`
       declared.imports.add(pivotTable.identifier)
-      args = [pivotTable.identifier, `'${own.name}'`, `'${other.name}'`, `'${own.references.column}'`, `'${other.references.column}'`]
+      args = [pivotTable.identifier, ...[own.name, other.name, own.references.column, other.references.column].map(quoteString)]
     } else {
       const key = pick(referencing(target, model), `${camelCase(model.name)}Id`)
       if (!key) return `no one column of ${target.name} references ${model.name}`
       if (!hasColumn(targetTable, key.name)) return `${target.table} has no column ${key.name} yet`
       const local = key.references.column
       if (!ownColumns.includes(local)) return `${model.name} has no column ${local}`
-      args = [`'${key.name}'`, `'${local}'`]
+      args = [key.name, local].map(quoteString)
     }
 
     const recordType = `${target.name}Record`
