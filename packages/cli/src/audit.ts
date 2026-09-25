@@ -52,7 +52,7 @@ import {
 } from './controller-methods'
 import type { CheckEvidence } from './check-result'
 import { manifestMiddlewareNames } from './app-routes'
-import { introspectApp } from './introspect'
+import { introspectRunner, type IntrospectOption } from './introspect'
 import {
   INTROSPECTION_UNAVAILABLE_FIX,
   introspectedRoutes,
@@ -132,10 +132,9 @@ export interface RunAuditOptions {
   deps?: boolean
   /**
    * Judge the route-level rules against the introspected app (RFC 0026 §5). `guren audit` sets it
-   * unless `--no-introspect`; an in-process caller leaves it off, since the manifest memo would
-   * outlive a long-lived process.
+   * unless `--no-introspect`, and the gate passes the run its check stage shares.
    */
-  introspect?: boolean
+  introspect?: IntrospectOption
 }
 
 /** Guest flows (login/registration), reachable without authentication. */
@@ -691,7 +690,7 @@ async function auditIntrospectSource(
   if (definitions && !definitions.some(isJudgedRoute)) {
     return { skipped: 'no route mutates or carries a body, so the app was not introspected' }
   }
-  return () => introspectApp(cwd)
+  return introspectRunner(cwd, options.introspect)
 }
 
 /** A route the validation or authentication rule judges. */

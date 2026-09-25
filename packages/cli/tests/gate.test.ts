@@ -1,7 +1,8 @@
 import { describe, expect, it, spyOn } from 'bun:test'
 import { consola } from 'consola'
 import { describeGateFailures, GATE_STAGES, renderGateReport, runGate, type GateExec, type GateExecResult, type GateReport } from '../src/gate'
-import { createTempWorkspace, gateAppFiles, initGitRepo, linkOxlint, writeWorkspaceFiles } from './helpers'
+import type { Introspection } from '../src/introspect'
+import { createTempWorkspace, gateAppFiles, initGitRepo, linkOxlint, manifestFixture, PG_SCHEMA_FIXTURE, sessionConfigSource, writeWorkspaceFiles } from './helpers'
 
 const SCRIPTS = { codegen: 'guren codegen', typecheck: 'tsc --noEmit', test: 'bun test' }
 
@@ -222,6 +223,59 @@ describe('runGate', () => {
 
       expect(report.changed).toBe(false)
       expect(report.ok).toBe(true)
+    })
+  })
+
+  describe('reading the introspected app (RFC 0026 §5)', () => {
+    /** A routes file audit judges (a POST) and a session config check judges: both stages ask. */
+    const files = {
+      ...gateAppFiles(SCRIPTS),
+      'routes/web.ts': `class PostController {
+  async store() { return null }
+}
+export default function registerRoutes(router: any) {
+  router.post('/posts', [PostController, 'store'])
+}
+`,
+      'config/session.ts': sessionConfigSource("database: { driver: 'database', table: sessions }"),
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}\nexport const sessions = pgTable('sessions', { id: text('id').primaryKey() })\n`,
+    }
+
+    function counted(result: Introspection): { introspect: () => Promise<Introspection>; calls: () => number } {
+      let calls = 0
+      return { introspect: async () => (calls++, result), calls: () => calls }
+    }
+
+    it('runs one introspection for the check and audit stages, and judges from it', async () => {
+      await withApp('introspect', files, async (dir) => {
+        // A manager beside auth.sessionOptions.store only the registered app shows, and it refuses to boot.
+        const manifest = manifestFixture({
+          session: { source: 'manager', default: 'database', stores: { database: { driver: 'database', table: 'sessions', perProcess: false } } },
+          warnings: [{ code: 'session-configured-twice', message: 'both configure sessions' }],
+        })
+        const run = counted({ status: 'ok', manifest })
+
+        const report = await runGate({ cwd: dir, exec: fakeExec().exec, introspect: run.introspect })
+
+        expect(run.calls()).toBe(1)
+        expect(stage(report, 'check')).toMatchObject({ status: 'fail', findings: [expect.stringContaining('refuses to boot')] })
+        expect(stage(report, 'audit').status).toBe('pass')
+      })
+    })
+
+    it('names a failed introspection once, on the stage that met it, without failing it', async () => {
+      await withApp('introspect-failed', files, async (dir) => {
+        const run = counted({ status: 'failed', reason: 'import', message: 'Could not load src/main.ts.' })
+
+        const report = await runGate({ cwd: dir, exec: fakeExec().exec, introspect: run.introspect })
+
+        expect(run.calls()).toBe(1)
+        const check = stage(report, 'check')
+        expect(check.status).toBe('pass')
+        expect(check.findings).toEqual([expect.stringMatching(/^Introspection \(advisory\): The app could not be introspected \(import\)/)])
+        expect(stage(report, 'audit').findings.some((finding) => finding.includes('introspected'))).toBe(false)
+        expect(report.ok).toBe(true)
+      })
     })
   })
 

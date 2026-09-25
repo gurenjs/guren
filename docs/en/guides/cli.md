@@ -245,7 +245,11 @@ the scaffolded CI workflow runs), reports every stage, and exits
 non-zero if any failed. A stage that *cannot* run is a failure, not a
 skip: an `.oxlintrc.json` with no oxlint installed, a missing
 `typecheck` script, a routes entry that will not load. Only an app with
-no `.oxlintrc.json` skips lint.
+no `.oxlintrc.json` skips lint. The `check` and `audit` stages read the
+introspected app (see [Checks that read the introspected app](#checks-that-read-the-introspected-app))
+through one introspection per run, which comes after codegen, so a fresh
+clone's entry imports by then. An introspection that fails adds one
+advisory line to the stage that asked for it and never fails the gate.
 
 ```bash
 bunx guren gate            # every stage, in full
@@ -348,23 +352,28 @@ describes the app's entry. Each
 run introspects at most once, and a `--changed` run that changed no source
 file does not introspect at all. The manifest is read with this environment's
 `.env`, so a store selected by an environment variable is judged at its local
-value. Introspection stops before any provider's `boot()`, so a
-`configureAttachments()` called inside a function is judged from source.
+value. Introspection stops before any provider's `boot()`, so for a
+`configureAttachments()` called inside a function the call's options are read
+from source, and the routes and storage drivers from the app.
+
+`guren check`, `doctor`, `audit`, `gate` and `plan:verify` introspect. The
+edit hook (`check --arch`) and the dev MCP server's `guren_check` do not, so
+there the verdicts only the app can answer are `-unverified`.
 
 Each of these results carries `evidence` in `--json` output. A verdict that reads
 several facts reports the weakest source among them:
 
 | `evidence` | Meaning |
 |------------|---------|
-| `manifest` | Judged with the introspected app. Facts the manifest does not carry (OAuth state stores, the queue, explicit in-memory constructions) still come from the source scan |
-| `static` | Judged from the source scan: introspection failed or was skipped, the verdict needs nothing the manifest carries (provider discovery, a disk's `root`), or the app could not vouch for what the verdict reads. The last happens when a provider threw in `register()`, a config was left unbound because it reads an unset environment variable, a deferred provider or an undescribable binding supplies the section, or the source calls `configureAttachments()` but no engine was configured while the app registered; the message says which |
-| `none` | The fact has no source to fall back to (whether the cache store is per-process). The key ends in `-unverified` and the result is a warning, never a pass |
+| `manifest` | Judged with the introspected app. Facts the manifest does not carry (OAuth state stores, explicit in-memory constructions) still come from the source scan |
+| `static` | Judged from source because the fact lives there: provider discovery, a disk's `root`, the options of a `configureAttachments()` called inside a function, a session or attachments table the schema must export (a missing export fails the introspection, so the source is the only reader), and a session config the app never reads. The message says why the manifest was not used |
+| `none` | Only the registered app can answer, and no manifest could vouch for it: the app was not introspected, the introspection failed, a provider threw in `register()`, a config was left unbound because it reads an unset environment variable, or a deferred provider or an undescribable binding supplies the section. The key ends in `-unverified` and the result is an advisory warning, never a pass. This covers the deploy hasher and stores, the session binding, and the attachments delivery mount and redirect disks |
 
 When introspection fails, `check` adds one advisory `introspection-unavailable`
-line with the reason, and the verdicts fall back to the source scan. `doctor`
-reports the reason as `evidenceReason` in its JSON, which a run with
-`--no-introspect` leaves out. `--no-introspect` skips introspection and judges
-from source only, which suits an app whose entry does not import yet:
+line with the reason. The verdicts that read the source are judged from it,
+and the rest are `-unverified`. `doctor` reports the reason as
+`evidenceReason` in its JSON. `--no-introspect` skips introspection, which
+suits an app whose entry does not import yet:
 
 ```bash
 bunx guren check --no-introspect

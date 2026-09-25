@@ -4,17 +4,16 @@
  * in-memory default, which works locally and drops every login on a serverless
  * target; a `database` store whose table the schema does not export throws on
  * the first write. Content-activated: an app with no session config contributes
- * nothing, and introspects nothing. Judged from the introspected app's `session`
- * section first (RFC 0026 §5), the source reading being the fallback.
+ * nothing, and introspects nothing. The binding is the introspected app's `session`
+ * section (RFC 0026 §5), `-unverified` without it; a store's table is also read from
+ * source, since a missing export is a link error that fails the introspection.
  */
 import { relative } from 'node:path'
 import type { SessionEntry } from '@guren/server'
 import { attributeManifestTable, resolveSchemaTableBinding, type SchemaTableBinding } from './schema-binding'
 import { advisory, check, type CheckResult } from './check-result'
-import { appBindsService, readIfExists } from './discovery'
-import { introspectedSection, judgedFromManifest, judgedFromSource, mergeVerdicts, type IntrospectedSection, type IntrospectSource } from './manifest-section'
+import { introspectedSection, judgedFromManifest, judgedFromSource, mergeVerdicts, UNVERIFIED_SECTION_FIX, type IntrospectedSection, type IntrospectSource } from './manifest-section'
 import type { ParseCache, ParsedFile } from './parse-cache'
-import { resolveAppEntry } from './provider-registrar'
 import type { SchemaTable } from './schema-parser'
 import { readSessionConfig, sessionConfigsIn, type SessionConfigSite } from './session-config'
 
@@ -29,24 +28,6 @@ export interface SessionSite extends SessionConfigSite {
   filePath: string
   relPath: string
   parsed: ParsedFile
-}
-
-/**
- * Whether a provider that binds `session` is one `createApp()` registers. The
- * binding alone is not enough: a provider file left out of `providers: [...]`
- * never runs, which is the inert-config case this rule exists for. Judged by
- * the entry naming the class, since the array holds identifiers whose import
- * this does not resolve.
- */
-async function bindingProviderIsRegistered(cwd: string, providerFiles: string[]): Promise<boolean> {
-  const appPath = await resolveAppEntry(cwd)
-  const entry = appPath === null ? null : await readIfExists(cwd, appPath)
-  if (entry === null) return false
-
-  return providerFiles.some((filePath) => {
-    const className = filePath.replace(/\\/g, '/').split('/').pop()?.replace(/\.[jt]sx?$/, '')
-    return Boolean(className) && new RegExp(`\\b${className}\\b`).test(entry)
-  })
 }
 
 async function readSessionSites(cwd: string, cache: ParseCache, files: string[]): Promise<SessionSite[]> {
@@ -105,7 +86,7 @@ export async function checkSessionsConfig(options: {
 
   const session = await sessionRead
   if (session.status === 'static') {
-    return judgedFromSource([...staticTables, ...(bindingApplies ? [await checkBinding(cwd)] : [])], session.reason)
+    return [...judgedFromSource(staticTables, session.reason), ...(bindingApplies ? [bindingUnverified(session.reason)] : [])]
   }
 
   // A config the app does not read has no stores in the manifest to judge, so its tables stay on the scan.
@@ -260,30 +241,21 @@ function configuredTwice(): CheckResult {
   )
 }
 
-async function checkBinding(cwd: string): Promise<CheckResult> {
-  const providers = await appBindsService('session', cwd)
-
-  if (providers.length === 0) {
-    return check(
-      BINDING_KEY,
+/**
+ * Whether a provider binds the config is a fact of the registered app: the source can name a
+ * provider that binds `session`, not that `createApp()` runs it.
+ */
+function bindingUnverified(reason: string | undefined): CheckResult {
+  const why = reason ?? 'no introspected app was available'
+  return {
+    ...advisory(
+      `${BINDING_KEY}-unverified`,
       BINDING_TITLE,
       'warn',
-      "A session config exists, but no provider binds 'session', so the config is never read and sessions stay "
-        + 'on the in-memory default — every login lost between requests on Workers, Lambda and Vercel.',
-      BINDING_FIX,
-    )
+      `A session config exists, and whether a registered provider binds 'session' to it is unverified: ${why}. `
+        + 'An unbound config is never read, and sessions stay on the in-memory default.',
+      `${UNVERIFIED_SECTION_FIX} ${BINDING_FIX}`,
+    ),
+    evidence: 'none',
   }
-
-  if (await bindingProviderIsRegistered(cwd, providers)) {
-    return check(BINDING_KEY, BINDING_TITLE, 'pass', "A registered provider binds 'session'.")
-  }
-
-  return check(
-    BINDING_KEY,
-    BINDING_TITLE,
-    'warn',
-    `A provider binds 'session' (${providers.map((file) => relative(cwd, file)).join(', ')}), but createApp() does not `
-      + 'register it, so it never runs and sessions stay on the in-memory default.',
-    'Add the provider to createApp({ providers: [...] }); `bunx guren add session` wires it for you.',
-  )
 }

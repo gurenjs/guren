@@ -401,11 +401,11 @@ every check that asks: the same shape as `check.ts`'s `loadRouteGraph()`
 
 | Module | Today | After Part 2 | Part 3 |
 |---|---|---|---|
-| `deploy-runtime.ts` | AST scan (`:156-467`) feeding `judgePasswordHashing`, `judgeRuntimeStores`, `judgeProviderDiscovery` (`:661-822`) | 2a: `requiresBun` of `auth.hasher` and `auth.providers[*]`, the selected session store's `perProcess`, a `memory` cache default. Target detection, provider discovery, OAuth state stores, the queue, explicit `Memory*Store` constructions, `autoSession: false`, a `sessionOptions.store` factory and a `useModel()` in `boot()` stay on the scan | The hasher, session-store and cache halves of the extractor, once a failed introspection reports those verdicts `-unverified` rather than scanning. The rest stays until the manifest carries it. `checkDeployRuntime(cwd)` keeps its signature, so `@guren/core/internal/deploy-check` (`deploy-check.ts:33-58`) is untouched |
-| `session-config.ts`, `sessions-check.ts` | AST for `SessionConfig`, regex for the binding provider | 2b: `session.source` for the binding; each `database` store's `table` against the tables the schema reader names | The binding-provider regex. The `SessionConfig` reader stays: a config the app does not read, and a missing named export (a link error, which fails the introspection), are judged from source |
-| `attachments-check.ts` | AST over `configureAttachments()` arguments, route lookup | 2b: `attachments.{table,disk,delivery}`, `delivery.mounted`, the storage section's driver for a redirect disk | Argument parsing for a call that runs at register time. A call inside a function (a provider's `boot()`), the disk's `root` and `Attachable(...)` detection stay source |
-| `controller-methods.ts` | key `ClassName.method`, collisions | 2c: `byExport` and `file#export.method` through `controllerMethodFor()`; a collision is reported only for a class some route reaches by name | Nothing: the name-keyed maps are the fallback, and the key `plan:*` judges by |
-| `audit.ts` auth/validation | middleware names + body regex | 2c: resolved `middleware[]` with capabilities and `ability`, `schemas.body` presence; the routes file after a failure or a provider that threw | The routes-file verdicts only if a failed introspection becomes an unverified audit; unchanged scope otherwise |
+| `deploy-runtime.ts` | AST scan (`:156-467`) feeding `judgePasswordHashing`, `judgeRuntimeStores`, `judgeProviderDiscovery` (`:661-822`) | 2a: `requiresBun` of `auth.hasher` and `auth.providers[*]`, the selected session store's `perProcess`, a `memory` cache default. Target detection, provider discovery, OAuth state stores, the queue, explicit `Memory*Store` constructions, `autoSession: false`, a `sessionOptions.store` factory and a `useModel()` in `boot()` stay on the scan | Part 3 removed the hasher half (constructions, `auth.hasher`, an unreadable `createApp()` config) and the `SessionConfig` reading: without a manifest the hashing and store verdicts are `-unverified`. Kept, since the manifest does not carry them: target detection, provider discovery, OAuth state stores, explicit `Memory*` constructions, a hand-mounted `createSessionMiddleware`, `autoSession: false`, the backed stores a `sessionOptions.store` factory could build, and `auth.attempt()`. `checkDeployRuntime(cwd)` kept its signature |
+| `session-config.ts`, `sessions-check.ts` | AST for `SessionConfig`, regex for the binding provider | 2b: `session.source` for the binding; each `database` store's `table` against the tables the schema reader names | Part 3 removed the binding-provider regex (`sessions-binding-unverified` without a manifest) and the `default` reading. The `SessionConfig` finder and each store's `driver` and `table` stay, for a config the app does not read and a missing named export |
+| `attachments-check.ts` | AST over `configureAttachments()` arguments, route lookup | 2b: `attachments.{table,disk,delivery}`, `delivery.mounted`, the storage section's driver for a redirect disk | Part 3 removed the delivery rules' route load: without a manifest the mount and the redirect disks are `-unverified`, and a call in `boot()` is judged against the registered routes and storage drivers. Argument parsing stays for that call and for the table, whose missing export fails the introspection; the disk's `root` and `Attachable(...)` detection stay source |
+| `controller-methods.ts` | key `ClassName.method`, collisions | 2c: `byExport` and `file#export.method` through `controllerMethodFor()`; a collision is reported only for a class some route reaches by name | Nothing: the name-keyed maps are what a caller that does not introspect reads, and the key `plan:*` judges by |
+| `audit.ts` auth/validation | middleware names + body regex | 2c: resolved `middleware[]` with capabilities and `ability`, `schemas.body` presence; the routes file after a failure or a provider that threw | Nothing: a failed introspection leaves the route rules on the routes file, which the audit loads first anyway |
 | `audit.ts` raw SQL, secrets, mass assignment, CSRF exemptions | source and `node_modules` scans (`:656-660`, `csrf-exemption-audit.ts`) | unchanged: body-level and dependency-level facts | unchanged |
 | `route-contract-check`, `agent-route-check`, `prototype-check` | `loadRouteDefinitions()` | 2d: `manifest.routes`, asked for by content. Params keys come from `properties` and their severity from `required`; the routes file's Zod decides where the rendering is short of the schema | Nothing: `load-routes.ts` is the fallback, and a params schema the walker renders short has only its Zod |
 | `agents-types`, `routes-types` (codegen) | `loadRouteDefinitions()` | 2d: the routes file by default. `codegen --introspect` takes the route set from the manifest and each route's Zod from the routes file; `planAgentManifest()` follows codegen's default | Nothing: every renderer reads Zod, and the manifest carries JSON Schema (Decision 5) |
@@ -749,6 +749,78 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   `guren context <Entity>` still reads, joins on method, path and action alone
 >   and drops a repeated key; moving it onto the same join is left to a follow-up.
 
+> **Amended in implementation (Part 3):** the table above records what Part 3
+> removed and what it kept. The last column of the draft read "remove once a
+> failed introspection reports those verdicts `-unverified`"; that is now the
+> rule for every fallback that only ran on failure, while a source reading that
+> supplies a fact the manifest lacks on success stays.
+>
+> - `guren gate` introspects. Its check and audit stages share one run, started
+>   by whichever asks first, through `runCheck({ introspect })` and
+>   `runAudit({ introspect })`, which now take a function as well as `true`.
+>   The run is not the process memo: `introspectApp(cwd, { fresh: true })`,
+>   since the dev MCP server calls the gate for the whole session. codegen is
+>   the gate's first stage, so the entry imports on a fresh clone by the time
+>   check runs. A failed introspection is one `Introspection (advisory)` finding
+>   on the stage that met it and never fails the gate. `stopGateFindings()`
+>   therefore spawns the child on an agent's stop whenever the app has a rule's
+>   content (a deploy target, a session or attachments config, a mutating
+>   route, an agent route). web and blog introspect in under 0.5 s.
+> - `plan:verify` introspects: `runCheck({ introspect: true })`. Every verify
+>   list opens with a `codegen` that must pass before any later command runs
+>   (`PLAN_STEP_VERIFY`, and `stoppedBy` in `plan/verify.ts`), so the check never
+>   runs against an entry that cannot import. It runs in one-shot processes (the
+>   command, the Stop hook), so the process memo is safe there.
+> - The dev MCP server's `guren_check` does not. It answers an agent mid-edit and
+>   is called far more often than the gate, which the same server exposes as
+>   `guren_gate` and which does introspect. The edit hook runs `check --arch`
+>   only and reads no manifest.
+> - `deploy-runtime.ts`: the hasher constructions (`ScryptHasher`, `Hash({
+>   algorithm })`, `NodeHasher`), `createApp({ auth: { hasher } })`, the
+>   unreadable-config signal and the `SessionConfig` driver reading are gone.
+>   Without a manifest, or with a section it cannot vouch for, the verdicts are
+>   `deploy-password-hashing-unverified` and `deploy-runtime-stores-unverified`
+>   (`evidence: 'none'`, `evidenceReason` naming why), still listing what the
+>   source shows (OAuth, explicit constructions). No user provider registered
+>   while the source calls `auth.attempt()` is `-unverified` too, where it used
+>   to fall back to the scan. `analyzeDeployRuntime()` and
+>   `judgeDeployRuntime()` are deprecated (`deploy-runtime-analysis`, removed in
+>   3.0.0, a first-use warning), introspect by default like
+>   `checkDeployRuntime()`, and keep `DeployRuntimeAnalysis`'s removed signal
+>   fields as empty arrays; the commands call `readDeployRuntime()` and
+>   `judgeDeployVerdicts()`.
+> - `sessions-check.ts`: `checkBinding()` and its `\bClassName\b` regex over
+>   the entry are gone; without a manifest the result is `sessions-binding-unverified`,
+>   advisory. The table verdicts stay on source when there is no manifest: a
+>   missing named export is a link error that fails the introspection, so the
+>   scan is the only reader of the defect the rule exists for.
+>   `session-config.ts` no longer reads `default`.
+> - `attachments-check.ts`: the delivery rules no longer load the routes file.
+>   With the engine in the manifest they read it as before; with a manifest but
+>   no engine (a call in `boot()`) the call's options come from source and the
+>   mount and drivers from the registered app (`AttachmentsWiring.registered`);
+>   with no manifest the mount and each redirect disk are
+>   `attachments-delivery-unverified:*` and `attachments-serve-redirect-unverified:*`,
+>   advisory. `configureAttachments()` argument parsing stays for the `boot()`
+>   case and the table rule.
+> - Not changed, against the task list that started Part 3: `controller-methods.ts`
+>   still reports a collision on the static path. There every reference is by
+>   name, so the collision is already the "cannot tell which file" finding, and
+>   renaming it to `-unverified` would change an audit key in a minor.
+>   Provider discovery, target detection and explicit store constructions stay
+>   on the scan because no manifest section carries them; removing them would
+>   warn every deploy app whose introspection succeeds.
+> - Measured on this branch against `e89f0dec`: `deploy-runtime.ts` 1,229 to
+>   1,095 lines, `session-config.ts` 160 to 140, `sessions-check.ts` 289 to 261,
+>   `attachments-check.ts` 1,018 to 1,009, `tests/deploy-runtime.test.ts` 2,026
+>   to 1,525.
+> - Verdicts on the reference apps against main: blog and web report the same
+>   keys and statuses through `check`, `check --ci`, `audit`, `doctor` and `gate`.
+>   `examples/agents`, whose `EncryptionServiceProvider` throws without
+>   `APP_KEY`, reports `deploy-password-hashing-unverified` (advisory) where it
+>   passed from source; `check --ci` exits 1 on main and here, on the same
+>   non-advisory agent-route warning.
+
 ### 6. Enabling refactor: one module per command
 
 `commands.ts` becomes `packages/cli/src/commands/<name>.ts`, one `defineCommand()`
@@ -800,6 +872,11 @@ Referencing `RFC 0026` in each PR:
    shrinks to the judge functions over manifest fixtures; the CLAUDE.md rows for
    `deploy-runtime`, `session-config` and the collision half of
    `controller-methods` are rewritten to point at the manifest.
+
+   **Amended in implementation:** Part 3 is one PR, `@guren/cli` only, and
+   `guren gate` introspecting is part of it (§5, Part 3). The deploy-runtime
+   tests that stay on disk judge the scan's remaining facts beside a manifest
+   fixture; the ones pinning the removed readings went with them.
 
 > **Amended in implementation:** Part 1 landed before the §6 split, which is
 > being done as smaller extractions (`commands/make.ts`, `commands/database.ts`,
@@ -861,6 +938,13 @@ Internal for the most part:
 - No deprecation is introduced, so `deprecations.ts` and `codemods.ts` are
   untouched. Changesets: `@guren/server` minor, `@guren/core` minor,
   `@guren/cli` minor for Part 1; `@guren/cli` minor for Parts 0, 2, 3.
+
+  > **Amended in implementation (Part 3):** one deprecation is introduced.
+  > `analyzeDeployRuntime()` and `judgeDeployRuntime()` from `@guren/cli` are
+  > `deploy-runtime-analysis` in `deprecations.ts` (since 2.28.0, removed in
+  > 3.0.0, replaced by `checkDeployRuntime()`), warn once per process, and keep
+  > working over the introspected app. No codemod: the replacement returns the
+  > verdicts the two calls produced together.
 
 ## Decisions
 

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'bun:test'
+import type { AppManifest } from '@guren/server'
 import { runCheck } from '../src/check'
 import type { CheckResult } from '../src/check-result'
+import type { IntrospectOption } from '../src/introspect'
 import {
   createTempWorkspace,
+  manifestFixture,
   PG_SCHEMA_FIXTURE,
   SESSION_PROVIDER,
   sessionConfigSource,
@@ -31,70 +34,85 @@ const APP_WITHOUT_PROVIDER = `import { createApp } from '@guren/core'
 export default createApp({ auth: {}, providers: [] })
 `
 
+/** The introspected app with the session manager `guren add session` binds. */
+const BOUND = manifestFixture({
+  session: { source: 'manager', default: 'database', stores: { database: { driver: 'database', table: 'sessions', perProcess: false } } },
+})
+
+/** An app whose `createApp({ auth })` attaches the session middleware and nothing binds `session`. */
+const UNBOUND = manifestFixture({
+  session: { source: 'none', default: 'memory', stores: { memory: { driver: 'memory', perProcess: true } } },
+})
+
+function introspected(manifest: AppManifest): IntrospectOption {
+  return async () => ({ status: 'ok', manifest })
+}
+
 /** The session rules' results from a full check run over a throwaway app. */
-async function sessionResults(files: Record<string, string>, run?: (dir: string) => Promise<void>): Promise<CheckResult[]> {
+async function sessionResults(files: Record<string, string>, introspect: IntrospectOption = false): Promise<CheckResult[]> {
   const workspace = await createTempWorkspace('guren-sessions-check-')
   try {
     await writeWorkspaceFiles(workspace.dir, files)
-    await run?.(workspace.dir)
-    const report = await runCheck({ cwd: workspace.dir })
+    const report = await runCheck({ cwd: workspace.dir, introspect })
     return report.checks.filter((result) => result.key.startsWith('sessions-'))
   } finally {
     await workspace.cleanup()
   }
 }
 
+const WIRED = {
+  'db/schema.ts': SCHEMA_WITH_SESSIONS,
+  'config/session.ts': CONFIG,
+  'app/Providers/SessionProvider.ts': SESSION_PROVIDER,
+  'src/app.ts': APP_WITH_PROVIDER,
+}
+
 describe('guren check sessions wiring (RFC 0020)', () => {
-  it('passes a config whose table the schema exports and whose provider is registered', async () => {
-    const results = await sessionResults({
-      'db/schema.ts': SCHEMA_WITH_SESSIONS,
-      'config/session.ts': CONFIG,
-      'app/Providers/SessionProvider.ts': SESSION_PROVIDER,
-      'src/app.ts': APP_WITH_PROVIDER,
-    })
+  it('passes a config whose table the schema exports and which the introspected app binds', async () => {
+    const results = await sessionResults(WIRED, introspected(BOUND))
 
-    expect(results.map((result) => result.status)).toEqual(['pass', 'pass'])
+    expect(results.map((result) => [result.key, result.status, result.evidence])).toEqual([
+      ['sessions-config:config/session.ts:sessions', 'pass', 'manifest'],
+      ['sessions-binding', 'pass', 'manifest'],
+    ])
   })
 
-  it('warns when nothing binds the session manager, so the config is never read', async () => {
-    const results = await sessionResults({
-      'db/schema.ts': SCHEMA_WITH_SESSIONS,
-      'config/session.ts': CONFIG,
-      'src/app.ts': APP_WITHOUT_PROVIDER,
-    })
+  it('warns when the introspected app binds no session manager, so the config is never read', async () => {
+    const results = await sessionResults({ ...WIRED, 'src/app.ts': APP_WITHOUT_PROVIDER }, introspected(UNBOUND))
     const binding = results.find((result) => result.key === 'sessions-binding')
 
     expect(binding?.status).toBe('warn')
-    expect(binding?.message).toContain("no provider binds 'session'")
+    expect(binding?.message).toContain("binds no 'session' in register()")
     expect(binding?.suggestion).toContain('guren add session')
+    // A config the app does not read keeps its table verdict, from source.
+    expect(results.find((result) => result.key.startsWith('sessions-config:'))).toMatchObject({ status: 'pass', evidence: 'static' })
   })
 
-  it('warns when the binding provider exists but createApp never registers it', async () => {
-    const results = await sessionResults({
-      'db/schema.ts': SCHEMA_WITH_SESSIONS,
-      'config/session.ts': CONFIG,
-      'app/Providers/SessionProvider.ts': SESSION_PROVIDER,
-      'src/app.ts': APP_WITHOUT_PROVIDER,
+  it('reports the binding unverified without the introspected app, and keeps it out of the gate', async () => {
+    const results = await sessionResults(WIRED)
+    const binding = results.find((result) => result.key === 'sessions-binding-unverified')
+
+    expect(results.some((result) => result.key === 'sessions-binding')).toBe(false)
+    expect(binding).toMatchObject({ status: 'warn', advisory: true, evidence: 'none' })
+    expect(binding?.message).toContain('no introspected app was available')
+    expect(binding?.suggestion).toContain('guren introspect')
+  })
+
+  it('names why the binding is unverified when a provider threw', async () => {
+    const threw = manifestFixture({
+      providers: [{ name: 'SessionProvider', source: 'options.providers', deferred: false, provides: [], register: 'threw', error: 'no binding' }],
     })
-    const binding = results.find((result) => result.key === 'sessions-binding')
+    const binding = (await sessionResults(WIRED, introspected(threw))).find((result) => result.key === 'sessions-binding-unverified')
 
-    // The file being there is not the question: an unregistered provider never
-    // runs, which is the inert-config case this rule exists for.
-    expect(binding?.status).toBe('warn')
-    expect(binding?.message).toContain('does not register it')
-    expect(binding?.message).toContain('app/Providers/SessionProvider.ts')
+    expect(binding?.message).toContain('SessionProvider threw in register()')
   })
 
+  // A missing named export is a link error that fails the introspection, so the source is all there is.
   it('fails when the database store binds a table no schema exports', async () => {
-    const results = await sessionResults({
-      'db/schema.ts': PG_SCHEMA_FIXTURE,
-      'config/session.ts': CONFIG,
-      'app/Providers/SessionProvider.ts': SESSION_PROVIDER,
-      'src/app.ts': APP_WITH_PROVIDER,
-    })
+    const results = await sessionResults({ ...WIRED, 'db/schema.ts': PG_SCHEMA_FIXTURE })
     const table = results.find((result) => result.key.startsWith('sessions-config:'))
 
-    expect(table?.status).toBe('fail')
+    expect(table).toMatchObject({ status: 'fail', evidence: 'static' })
     expect(table?.message).toContain("binds the database session store to 'sessions'")
     expect(table?.message).toContain('only fails at runtime')
   })
@@ -124,7 +142,7 @@ export default createApp({ auth: {}, config: [session] })
 
   it('reads a config declared with `satisfies`, not only with an annotation', async () => {
     const results = await sessionResults({
-      'db/schema.ts': SCHEMA_WITH_SESSIONS,
+      ...WIRED,
       'config/session.ts': `import { type SessionConfig } from '@guren/core'
 import { sessions } from '../db/schema'
 
@@ -133,34 +151,12 @@ export const sessionConfig = {
   stores: { database: { driver: 'database', table: sessions } },
 } satisfies SessionConfig
 `,
-      'app/Providers/SessionProvider.ts': SESSION_PROVIDER,
-      'src/app.ts': APP_WITH_PROVIDER,
-    })
+    }, introspected(BOUND))
 
     expect(results.map((result) => result.status)).toEqual(['pass', 'pass'])
   })
 
-  it('finds the binding through the passed app root, not the process cwd', async () => {
-    // createTempWorkspace() chdirs into what it makes, so creating a second one
-    // moves the process cwd away from the app under check. runCheck({ cwd }) is
-    // a supported entry point (the MCP server uses it), so the scan must read
-    // the root it was given.
-    const results = await sessionResults(
-      {
-        'db/schema.ts': SCHEMA_WITH_SESSIONS,
-        'config/session.ts': CONFIG,
-        'app/Providers/SessionProvider.ts': SESSION_PROVIDER,
-        'src/app.ts': APP_WITH_PROVIDER,
-      },
-      async () => {
-        await createTempWorkspace('guren-sessions-check-elsewhere-')
-      },
-    )
-
-    expect(results.find((result) => result.key === 'sessions-binding')?.status).toBe('pass')
-  })
-
   it('contributes nothing to an app with no session config', async () => {
-    expect(await sessionResults({ 'db/schema.ts': PG_SCHEMA_FIXTURE })).toEqual([])
+    expect(await sessionResults({ 'db/schema.ts': PG_SCHEMA_FIXTURE }, introspected(BOUND))).toEqual([])
   })
 })

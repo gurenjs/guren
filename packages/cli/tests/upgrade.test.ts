@@ -796,6 +796,22 @@ describe('checkDeprecations', () => {
     })
   })
 
+  describe('deploy-runtime-analysis', () => {
+    it('reports the deprecated analysis entry points imported from @guren/cli, and not checkDeployRuntime', async () => {
+      const write = async (relativePath: string, contents: string): Promise<void> => {
+        const target = join(workspace.dir, relativePath)
+        await mkdir(dirname(target), { recursive: true })
+        await writeFile(target, contents)
+      }
+      await write('src/predeploy.ts', "import { analyzeDeployRuntime, judgeDeployRuntime as judge } from '@guren/cli'\n")
+      await write('src/deploy.ts', "import { checkDeployRuntime } from '@guren/cli'\nimport { analyzeDeployRuntime } from './local'\n")
+      await write('tests/deploy.test.ts', "import { type DeployRuntimeVerdict, judgeDeployRuntime } from '@guren/cli'\n")
+
+      const warning = (await checkDeprecations(workspace.dir)).find((entry) => entry.id === 'deploy-runtime-analysis')
+      expect((warning?.affectedFiles ?? []).sort()).toEqual([join('src', 'predeploy.ts'), join('tests', 'deploy.test.ts')])
+    })
+  })
+
   describe('model-query-raw', () => {
     async function writeFileIn(relativePath: string, contents: string): Promise<void> {
       const target = join(workspace.dir, relativePath)

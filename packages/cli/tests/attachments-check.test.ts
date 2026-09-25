@@ -1,11 +1,12 @@
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { AttachmentDeliveryController, type RouteDefinition } from '@guren/core'
+import { AttachmentDeliveryController } from '@guren/core'
+import type { AppManifest } from '@guren/server'
 import { checkAttachmentsDelivery, checkAttachmentsPublicDisk } from '../src/attachments-check'
 import { runCheck } from '../src/check'
 import { ParseCache } from '../src/parse-cache'
-import { createTempWorkspace } from './helpers'
+import { createTempWorkspace, manifestFixture } from './helpers'
 
 describe('runCheck — configureAttachments table binding', () => {
   const SCHEMA_WITH_ATTACHMENTS = `import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
@@ -327,9 +328,10 @@ export class Clip extends Attachable(defineModel(clips), {
 })
 
 describe('checkAttachmentsDelivery — delivery route wiring (RFC 0015)', () => {
+  type Routes = AppManifest['routes']
   const MOUNTED = [
     { controller: { name: AttachmentDeliveryController.name } },
-  ] as unknown as RouteDefinition[]
+  ] as unknown as Routes
 
   function deliveryConfig(extra = ''): string {
     return `import { configureAttachments } from '@guren/core'
@@ -349,12 +351,23 @@ export const { Attachment } = configureAttachments({
     return filePath
   }
 
+  /**
+   * The rules over an app that registered without running the call (a provider's `boot()`):
+   * the options are read from source, the routes and the storage drivers are `registered`'s.
+   */
   function runDelivery(
     dir: string,
     files: string[],
-    definitions?: RouteDefinition[],
+    routes?: Routes,
+    storage?: AppManifest['storage'],
   ): Promise<Awaited<ReturnType<typeof checkAttachmentsDelivery>>> {
-    return checkAttachmentsDelivery({ cwd: dir, cache: new ParseCache(), files, definitions })
+    const registered = routes ? manifestFixture({ routes, ...(storage ? { storage } : {}) }) : undefined
+    const wiring = Promise.resolve({
+      sites: files.map((file) => file.slice(dir.length + 1)),
+      engine: { status: 'static' as const, reason: 'configureAttachments() runs in boot()' },
+      ...(registered ? { registered } : {}),
+    })
+    return checkAttachmentsDelivery({ cwd: dir, cache: new ParseCache(), files, wiring })
   }
 
   it('passes when delivery is configured and the route is registered', async () => {
@@ -377,23 +390,32 @@ export const { Attachment } = configureAttachments({
 
       const result = results.find((c) => c.key.startsWith('attachments-delivery:'))
       expect(result?.status).toBe('fail')
-      expect(result?.message).toContain('registerAttachmentRoutes')
-      expect(result?.suggestion).toContain('routes/web.ts')
+      expect(result?.message).toContain('the introspected app registers no registerAttachmentRoutes() route')
+      expect(result?.suggestion).toContain('registerAttachmentRoutes(router)')
     } finally {
       await workspace.cleanup()
     }
   })
 
-  it('fails when delivery is configured and the routes entry file does not exist', async () => {
-    const workspace = await createTempWorkspace('guren-cli-delivery-noroutes-')
+  it('reports the mount and a redirect disk unverified without an introspected app, never failing', async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-unverified-')
     try {
-      const file = await writeConfig(workspace.dir, deliveryConfig())
-      // No definitions seam and no routes/web.ts: positive evidence nothing mounted the route.
-      const results = await runDelivery(workspace.dir, [file])
+      const file = await writeConfig(
+        workspace.dir,
+        deliveryConfig(`\n  disks: { vault: { visibility: 'private', serve: 'redirect' } },`),
+      )
+      const storage = await writeConfig(
+        workspace.dir,
+        `export const storageConfig = { disks: { vault: { driver: 'local', root: './storage' } } }`,
+        'config/storage.ts',
+      )
+      const results = await runDelivery(workspace.dir, [file, storage])
 
-      const result = results.find((c) => c.key.startsWith('attachments-delivery:'))
-      expect(result?.status).toBe('fail')
-      expect(result?.message).toContain('does not exist')
+      expect(results.map((c) => [c.key, c.status, c.advisory, c.evidence])).toEqual([
+        ['attachments-delivery-unverified:config/attachments.ts', 'warn', true, 'none'],
+        ['attachments-serve-redirect-unverified:config/attachments.ts:vault', 'warn', true, 'none'],
+      ])
+      expect(results[0]!.message).toContain('configureAttachments() runs in boot()')
     } finally {
       await workspace.cleanup()
     }
@@ -440,37 +462,15 @@ export const { Attachment } = configureAttachments({ table: {} as never, storage
     const workspace = await createTempWorkspace('guren-cli-delivery-name-')
     try {
       const file = await writeConfig(workspace.dir, deliveryConfig())
-      const definitions = [
+      const routes = [
         { name: 'attachments.show', controller: { name: AttachmentDeliveryController.name } },
         { name: 'attachments.show', controller: { name: 'PostController' } },
-      ] as unknown as RouteDefinition[]
-      const results = await runDelivery(workspace.dir, [file], definitions)
+      ] as unknown as Routes
+      const results = await runDelivery(workspace.dir, [file], routes)
 
       const result = results.find((c) => c.key === 'attachments-route-name:attachments.show')
       expect(result?.status).toBe('warn')
       expect(result?.message).toContain('silently')
-    } finally {
-      await workspace.cleanup()
-    }
-  })
-
-  // An API-only app mounts the delivery route in routes/api.ts; a rule judging against
-  // routes/web.ts finds no entry file and fails the app that just mounted it. Runs with
-  // no injected definitions on purpose: injecting them short-circuits the routes lookup.
-  it('does not report an API-only app as having no routes entry', async () => {
-    const workspace = await createTempWorkspace('guren-cli-delivery-api-only-')
-    try {
-      const file = await writeConfig(workspace.dir, deliveryConfig())
-      await writeConfig(workspace.dir, "export function registerApiRoutes(): void {}\n", 'routes/api.ts')
-
-      const results = await runDelivery(workspace.dir, [file])
-
-      // The fixture mounts nothing, so failing is correct; what matters is which file it
-      // was judged against, and an API-only app never has routes/web.ts.
-      const failed = results.find((c) => c.key.startsWith('attachments-delivery:'))
-      expect(failed?.message).toContain('no route registered by registerAttachmentRoutes()')
-      expect(failed?.message).not.toContain('routes/web.ts')
-      expect(failed?.suggestion).toContain('routes/api.ts')
     } finally {
       await workspace.cleanup()
     }
@@ -548,6 +548,28 @@ export function register(): unknown {
     }
   })
 
+  it("judges a redirect disk by the driver the introspected storage manager registered", async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-registered-driver-')
+    try {
+      const config = await writeConfig(
+        workspace.dir,
+        deliveryConfig(`\n  disks: { vault: { visibility: 'private', serve: 'redirect' } },`),
+      )
+      const storage = await writeConfig(
+        workspace.dir,
+        `export const storageConfig = { disks: { vault: { driver: 'local', root: './storage' } } }`,
+        'config/storage.ts',
+      )
+      const registered = { default: 'vault', entries: { vault: { driver: 's3' } } }
+
+      const results = await runDelivery(workspace.dir, [config, storage], MOUNTED, registered)
+
+      expect(results.find((c) => c.key.startsWith('attachments-serve-redirect:'))?.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it("passes serve: 'redirect' on s3, skips unknown drivers and conflicting evidence", async () => {
     const workspace = await createTempWorkspace('guren-cli-delivery-redirect-ok-')
     try {
@@ -595,15 +617,15 @@ export const { Attachment } = configureAttachments({
         'config/storage.ts',
       )
 
+      // Not introspected, so the mount and the driver are the registered app's to show.
       const report = await runCheck({ cwd: workspace.dir })
 
       expect(
-        report.checks.find((c) => c.key.startsWith('attachments-serve-redirect:'))?.status,
-      ).toBe('fail')
-      // No routes entry exists, which is itself the wiring failure.
+        report.checks.find((c) => c.key.startsWith('attachments-serve-redirect-unverified:'))?.status,
+      ).toBe('warn')
       expect(
-        report.checks.find((c) => c.key.startsWith('attachments-delivery:'))?.status,
-      ).toBe('fail')
+        report.checks.find((c) => c.key.startsWith('attachments-delivery-unverified:'))?.status,
+      ).toBe('warn')
     } finally {
       await workspace.cleanup()
     }

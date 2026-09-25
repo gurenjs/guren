@@ -8,6 +8,7 @@ import {
   discoverModelFiles,
   discoverTestFiles,
 } from './discovery'
+import { DEPLOY_RUNTIME_ANALYSIS_DEPRECATION } from './deploy-runtime'
 import { discoverParsedModels, extractClassDeclaration, findStaticClassProperty } from './model-parser'
 import { parseSourceFile } from './parse-cache'
 
@@ -85,6 +86,7 @@ const GUREN_IMPORT = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]@guren\/(?:c
 
 /** `@guren/server/mcp` is a subpath, which `GUREN_IMPORT` deliberately does not match. */
 const GUREN_SERVER_MCP_IMPORT = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]@guren\/server\/mcp['"]/g
+const GUREN_CLI_IMPORT = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]@guren\/cli['"]/g
 
 /**
  * Files importing a specifier `matches` accepts from a Guren package.
@@ -283,6 +285,17 @@ export const deprecations: Deprecation[] = [
         (specifier) => specifier === 'createMcpServer',
         [...(await discoverAppConfigFiles(cwd)), ...(await discoverTestFiles(cwd))],
         GUREN_SERVER_MCP_IMPORT,
+      ),
+  },
+  {
+    ...DEPLOY_RUNTIME_ANALYSIS_DEPRECATION,
+    what: "analyzeDeployRuntime() and judgeDeployRuntime() from '@guren/cli'",
+    detect: async (cwd) =>
+      detectGurenImports(
+        cwd,
+        (specifier) => specifier === 'analyzeDeployRuntime' || specifier === 'judgeDeployRuntime',
+        [...(await discoverAppConfigFiles(cwd)), ...(await discoverTestFiles(cwd))],
+        GUREN_CLI_IMPORT,
       ),
   },
 ]

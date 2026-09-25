@@ -2,6 +2,7 @@
  * `guren gate`: one exit-coded verdict on a change, composed from the checks the
  * scaffolded CI runs, in its order (codegen, typecheck, lint, check --ci, audit,
  * test), so an agent's "done", a pre-commit run, and CI judge by the same rule.
+ * check and audit read the introspected app (RFC 0026 §5) through one run per gate.
  * Every stage runs and reports. A stage that *cannot* run (tool missing, routes
  * unloadable) fails rather than skips: an unavailable check is not a green one.
  * Only an app-declared opt-out (no `.oxlintrc.json`) skips. Subprocess stages go
@@ -16,6 +17,7 @@ import { getChangedFiles, runGit } from './changed-files'
 import { runCheck } from './check'
 import { formatFinding, gatingResults } from './check-result'
 import { capFindings, codegenFallback, OUTPUT_ERROR_PATTERN, outputFindings, outputTail, readScripts, resolveScriptCommand } from './command-output'
+import { introspectApp, type Introspection } from './introspect'
 import { isLintable, runOxlint } from './lint-run'
 import { bunExecutable, runCaptured, type CapturedExec, type CapturedRun } from './subprocess'
 
@@ -64,6 +66,8 @@ export interface RunGateOptions {
   routesFile?: string
   /** Defaults to a real subprocess. */
   exec?: GateExec
+  /** The introspection the check and audit stages share. Defaults to a run of its own for this gate. */
+  introspect?: () => Promise<Introspection>
 }
 
 type StageOutcome = Omit<GateStageResult, 'name' | 'durationMs'>
@@ -75,6 +79,23 @@ interface StageContext {
   changedFiles: Set<string> | null
   routesFile?: string
   deps: boolean
+  /** One introspection per gate run, shared by the check and audit stages (RFC 0026 §5). */
+  introspect: () => Promise<Introspection>
+  /** Whether a stage already reported that the app could not be introspected. */
+  introspectionNoted: boolean
+}
+
+/** The key both `runCheck()` and `runAudit()` report a failed introspection under. */
+const INTROSPECTION_UNAVAILABLE = 'introspection-unavailable'
+
+/**
+ * A failed introspection as one finding on the stage that met it first. It never fails the
+ * stage: the rules it served fell back to source or report `-unverified`, both advisory.
+ */
+function introspectionNote(ctx: StageContext, found: { key: string; title: string; message: string } | undefined): string[] {
+  if (!found || ctx.introspectionNoted) return []
+  ctx.introspectionNoted = true
+  return [`${found.title} (advisory): ${found.message}`]
 }
 
 /**
@@ -140,15 +161,18 @@ async function checkStage(ctx: StageContext): Promise<StageOutcome> {
     routesFile: ctx.routesFile,
     changedFiles: ctx.changedFiles,
     json: true,
+    introspect: ctx.introspect,
   })
   const failing = gatingResults(report)
-  return { status: failing.length > 0 ? 'fail' : 'pass', findings: capFindings(failing.map(formatFinding)) }
+  const note = introspectionNote(ctx, report.checks.find((result) => result.key === INTROSPECTION_UNAVAILABLE))
+  return { status: failing.length > 0 ? 'fail' : 'pass', findings: [...capFindings(failing.map(formatFinding)), ...note] }
 }
 
 async function auditStage(ctx: StageContext): Promise<StageOutcome> {
-  const report = await runAudit({ cwd: ctx.cwd, routesFile: ctx.routesFile, deps: ctx.deps })
+  const report = await runAudit({ cwd: ctx.cwd, routesFile: ctx.routesFile, deps: ctx.deps, introspect: ctx.introspect })
   const failing = report.findings.filter((finding) => finding.status === 'fail')
-  const findings = capFindings(failing.map(formatFinding))
+  const note = introspectionNote(ctx, report.findings.find((finding) => finding.key === INTROSPECTION_UNAVAILABLE))
+  const findings = [...capFindings(failing.map(formatFinding)), ...note]
   const detail = ctx.deps ? 'dependency scan' : undefined
   // The `audit` command only warns here; a gate that passed with the
   // route-level rules never having run would be a vacuous green.
@@ -179,6 +203,10 @@ export async function runGate(options: RunGateOptions = {}): Promise<GateReport>
     options.changed ? getChangedFiles(cwd) : null,
     readScripts(cwd),
   ])
+  // Its own run, not the process memo: the dev MCP server calls the gate for the whole session,
+  // and codegen, the stage before check, is what lets a fresh clone's entry import at all.
+  const introspect = options.introspect ?? (() => introspectApp(cwd, { fresh: true }))
+  let introspection: Promise<Introspection> | undefined
   const ctx: StageContext = {
     cwd,
     exec: options.exec ?? runCaptured,
@@ -186,6 +214,8 @@ export async function runGate(options: RunGateOptions = {}): Promise<GateReport>
     changedFiles,
     routesFile: options.routesFile,
     deps: options.deps ?? false,
+    introspect: () => (introspection ??= introspect()),
+    introspectionNoted: false,
   }
 
   const stages: GateStageResult[] = []

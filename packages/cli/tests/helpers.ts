@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { ConfigDefinition, ConfigDefinitions } from '@guren/core'
+import type { AppManifest } from '@guren/server'
 
 const repoRoot = resolve(import.meta.dir, '../../..')
 
@@ -894,3 +895,28 @@ export const sessionConfig: SessionConfig = {
 `
 }
 
+/** A manifest with nothing but what a test sets: every section absent, every provider registered. */
+export function manifestFixture(overrides: Partial<AppManifest> = {}): AppManifest {
+  return {
+    schemaVersion: 1,
+    generatedAt: '2026-09-24T00:00:00.000Z',
+    entry: { file: 'src/main.ts', root: '/app', stage: 'register' },
+    runtime: { bun: '1.3.14', node: null, platform: 'darwin' },
+    providers: [],
+    modules: [],
+    routes: [],
+    middlewareAliases: {},
+    bindings: ['app', 'auth', 'hono', 'router'],
+    auth: {
+      guards: ['web'],
+      defaultGuard: 'web',
+      hasher: 'DefaultHasher',
+      algorithm: 'scrypt',
+      requiresBun: false,
+      providers: {},
+    },
+    agentTools: [],
+    warnings: [],
+    ...overrides,
+  }
+}

@@ -33,7 +33,7 @@ import { resolveRoutesEntry } from './route-registrar'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions, resolveRoutesFile } from './load-routes'
 import { appDeclaresPrototypeRoutes } from './prototype-check'
 import type { RouteDefinition } from '@guren/server'
-import { analyzeDeployRuntime, judgeDeployRuntime } from './deploy-runtime'
+import { judgeDeployVerdicts, readDeployRuntime } from './deploy-runtime'
 import { introspectApp, type Introspection } from './introspect'
 import { describeIntrospectionFailure, introspectedRoutes } from './manifest-section'
 import type { CheckEvidence } from './check-result'
@@ -1311,12 +1311,12 @@ export async function getDoctorRuleEvaluations(
         return { check, autofix } as DoctorRuleEvaluation
       }),
     ),
-    analyzeDeployRuntime(cwd, { introspect: manifestPlans.introspection }),
+    readDeployRuntime(cwd, { introspect: manifestPlans.introspection ?? false }),
   ])
 
   // The verdicts are shared with `guren check` and the deploy builds
   // (RFC 0020 Part 0); doctor's only addition is the remediation pair.
-  const deployEvaluations: DoctorRuleEvaluation[] = judgeDeployRuntime(deployAnalysis).map((verdict) => ({
+  const deployEvaluations: DoctorRuleEvaluation[] = judgeDeployVerdicts(deployAnalysis).map((verdict) => ({
     check: {
       ...createCheck(verdict.key, verdict.title, verdict.status, verdict.message, {
         fix: verdict.fix,

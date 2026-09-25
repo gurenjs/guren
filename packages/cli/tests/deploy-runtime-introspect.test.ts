@@ -3,7 +3,8 @@ import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { runCheck, type CheckResult } from '../src/check'
-import { analyzeDeployRuntime, checkDeployRuntime } from '../src/deploy-runtime'
+import { gatingResults } from '../src/check-result'
+import { checkDeployRuntime, readDeployRuntime } from '../src/deploy-runtime'
 import { getDoctorRuleEvaluations } from '../src/doctor'
 import { assertWorkspaceBuilt, createTempRoot, linkWorkspaceCore, runCliBinCaptured, SERVER_DIST_ENTRY, writeWorkspaceFiles } from './helpers'
 
@@ -80,7 +81,7 @@ afterAll(async () => {
 })
 
 describe('deploy-runtime verdicts read from the introspected app (RFC 0026 §5)', () => {
-  test('warns on an argon2 hasher from the manifest, as the scan does from source', async () => {
+  test('warns on an argon2 hasher from the manifest, and cannot vouch for it without one', async () => {
     const dir = await cloudflareApp('argon2', { 'src/app.ts': ARGON2_APP })
 
     const manifest = byKey((await runCheck({ cwd: dir, introspect: true })).checks)
@@ -90,8 +91,8 @@ describe('deploy-runtime verdicts read from the introspected app (RFC 0026 §5)'
     expect(manifest['deploy-provider-discovery'].evidence).toBe('static')
 
     const source = byKey((await runCheck({ cwd: dir, introspect: false })).checks)
-    expect(source['deploy-password-hashing']).toMatchObject({ status: 'warn', evidence: 'static' })
-    expect(source['deploy-password-hashing'].message).toContain("auth.hasher: 'argon2' (src/app.ts:3)")
+    expect(source['deploy-password-hashing-unverified']).toMatchObject({ status: 'warn', evidence: 'none', advisory: true })
+    expect(source['deploy-password-hashing-unverified'].message).toContain('the app was not introspected')
   })
 
   test('reports the same verdicts through doctor, and through checkDeployRuntime() as a deploy build calls it', async () => {
@@ -111,10 +112,10 @@ describe('deploy-runtime verdicts read from the introspected app (RFC 0026 §5)'
     }
 
     const { evaluations: source } = await getDoctorRuleEvaluations({ cwd: dir, introspect: false })
-    expect(source.find((evaluation) => evaluation.check.key === 'deploy-password-hashing')?.check.evidence).toBe('static')
+    expect(source.find((evaluation) => evaluation.check.key === 'deploy-password-hashing-unverified')?.check.evidence).toBe('none')
   })
 
-  test('falls back to the scan, and says why once, when the entry does not import', async () => {
+  test('reports the verdicts unverified, and says why once, when the entry does not import', async () => {
     const dir = await cloudflareApp('broken-entry', {
       'src/app.ts': ARGON2_APP,
       'src/main.ts': "import app from './app.js'\nimport './missing-module.js'\n\nexport default app\n",
@@ -123,32 +124,31 @@ describe('deploy-runtime verdicts read from the introspected app (RFC 0026 §5)'
     const checks = byKey((await runCheck({ cwd: dir, introspect: true })).checks)
     expect(checks['introspection-unavailable']).toMatchObject({ status: 'warn', advisory: true })
     expect(checks['introspection-unavailable'].message).toContain('(import)')
-    expect(checks['deploy-password-hashing']).toMatchObject({ status: 'warn', evidence: 'static' })
-    expect(checks['deploy-password-hashing'].message).toContain("auth.hasher: 'argon2'")
+    expect(checks['deploy-password-hashing-unverified']).toMatchObject({ status: 'warn', evidence: 'none', advisory: true })
+    expect(checks['deploy-password-hashing-unverified'].message).toContain('introspection failed with import')
 
     const skipped = byKey((await runCheck({ cwd: dir, introspect: false })).checks)
     expect(skipped['introspection-unavailable']).toBeUndefined()
   })
 
-  test('falls back to the scan after a provider threw, and cannot vouch for the cache', async () => {
+  test('cannot vouch for the hasher or the stores after a provider threw, and keeps it out of the gate', async () => {
     const dir = await cloudflareApp('threw', { 'src/app.ts': THROWING_APP })
 
-    const checks = byKey((await runCheck({ cwd: dir, introspect: true })).checks)
-    expect(checks['deploy-password-hashing']).toMatchObject({ status: 'pass', evidence: 'static', advisory: true })
-    expect(checks['deploy-password-hashing'].message).toContain('Judged from source: AuthProvider threw in register()')
-    expect(checks['deploy-runtime-stores-unverified']).toMatchObject({ status: 'warn', evidence: 'none', advisory: true })
-    expect(checks['deploy-runtime-stores-unverified'].message).toContain('sessions are enabled (auth (src/app.ts:9)) with no persistent store')
-
-    const source = byKey((await runCheck({ cwd: dir, introspect: false })).checks)
-    expect(source['deploy-password-hashing']).toMatchObject({ status: 'pass', evidence: 'static' })
+    const report = await runCheck({ cwd: dir, introspect: true })
+    const checks = byKey(report.checks)
+    for (const key of ['deploy-password-hashing-unverified', 'deploy-runtime-stores-unverified']) {
+      expect(checks[key]).toMatchObject({ status: 'warn', evidence: 'none', advisory: true })
+      expect(checks[key].message).toContain('AuthProvider threw in register()')
+    }
+    expect(gatingResults(report).filter((result) => result.key.startsWith('deploy-'))).toEqual([])
   })
 
-  test('judges a session config left unbound for an unset env key from source, never as absent', async () => {
+  test('never reads a session config left unbound for an unset env key as absent', async () => {
     const dir = await cloudflareApp('unset-env', { 'src/app.ts': UNSET_ENV_APP })
 
-    const stores = byKey((await runCheck({ cwd: dir, introspect: true })).checks)['deploy-runtime-stores']
-    // The scan reads the config's declared stores: `cookie` is shared, so it passes.
-    expect(stores).toMatchObject({ status: 'pass', evidence: 'static' })
+    const stores = byKey((await runCheck({ cwd: dir, introspect: true })).checks)['deploy-runtime-stores-unverified']
+    expect(stores).toMatchObject({ status: 'warn', evidence: 'none' })
+    expect(stores.message).toContain('whether the session store is per-process is unverified')
     expect(stores.message).toContain('RFC26_UNSET_SESSION_DRIVER, which the environment does not set')
     expect(stores.message).not.toContain('no session store configured')
   })
@@ -170,18 +170,18 @@ describe('deploy-runtime verdicts read from the introspected app (RFC 0026 §5)'
     const evidence = async (args: string[]): Promise<string | undefined> => {
       const run = await runCliBinCaptured([...args, '--json'], dir)
       const report = JSON.parse(firstJsonDocument(run.stdout)) as { checks: Array<{ key: string; evidence?: string }> }
-      return report.checks.find((result) => result.key === 'deploy-password-hashing')?.evidence
+      return report.checks.find((result) => result.key.startsWith('deploy-password-hashing'))?.evidence
     }
 
     expect(await evidence(['check'])).toBe('manifest')
-    expect(await evidence(['check', '--no-introspect'])).toBe('static')
-    expect(await evidence(['doctor', '--no-introspect'])).toBe('static')
+    expect(await evidence(['check', '--no-introspect'])).toBe('none')
+    expect(await evidence(['doctor', '--no-introspect'])).toBe('none')
   })
 
   test('does not introspect an app with no deploy target', async () => {
     const dir = await cloudflareApp('no-target', { 'package.json': JSON.stringify({ name: 'no-target', type: 'module' }) })
 
-    const analysis = await analyzeDeployRuntime(dir, {
+    const analysis = await readDeployRuntime(dir, {
       introspect: () => {
         throw new Error('introspected an app with no deploy target')
       },

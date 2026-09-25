@@ -22,9 +22,26 @@ export type Introspection =
 export interface IntrospectOptions {
   /** Wall-clock cap on the child, after which it is killed and the run is `timeout`. */
   timeoutMs?: number
+  /**
+   * Run a new child rather than the process's memoised one: for a caller living longer than
+   * one read of the app (the gate under the dev MCP server), which keeps its own per-run memo.
+   */
+  fresh?: boolean
 }
 
 export const DEFAULT_INTROSPECT_TIMEOUT_MS = 30_000
+
+/**
+ * How an in-process caller of `runCheck()` or `runAudit()` asks for the introspected app: `true`
+ * for this process's memoised run, or a run of its own that the caller shares between commands.
+ */
+export type IntrospectOption = boolean | (() => Promise<Introspection>)
+
+/** The run {@link IntrospectOption} names, or `undefined` for none. */
+export function introspectRunner(cwd: string, option: IntrospectOption | undefined): (() => Promise<Introspection>) | undefined {
+  if (typeof option === 'function') return option
+  return option ? () => introspectApp(cwd) : undefined
+}
 
 /** One run per app root and timeout per CLI process, so a larger `timeoutMs` can retry a timed-out run. */
 const runs = new Map<string, Promise<Introspection>>()
@@ -32,17 +49,22 @@ const runs = new Map<string, Promise<Introspection>>()
 export function introspectApp(cwd: string, options: IntrospectOptions = {}): Promise<Introspection> {
   const root = resolve(cwd)
   const timeoutMs = options.timeoutMs ?? DEFAULT_INTROSPECT_TIMEOUT_MS
+  if (options.fresh) return runOrCrash(root, timeoutMs)
   const key = `${timeoutMs}:${root}`
   let run = runs.get(key)
   if (!run) {
-    run = runIntrospection(root, timeoutMs).catch((error: unknown): Introspection => ({
-      status: 'failed',
-      reason: 'crashed',
-      message: `The introspection process could not run: ${error instanceof Error ? error.message : String(error)}`,
-    }))
+    run = runOrCrash(root, timeoutMs)
     runs.set(key, run)
   }
   return run
+}
+
+function runOrCrash(root: string, timeoutMs: number): Promise<Introspection> {
+  return runIntrospection(root, timeoutMs).catch((error: unknown): Introspection => ({
+    status: 'failed',
+    reason: 'crashed',
+    message: `The introspection process could not run: ${error instanceof Error ? error.message : String(error)}`,
+  }))
 }
 
 async function runIntrospection(root: string, timeoutMs: number): Promise<Introspection> {

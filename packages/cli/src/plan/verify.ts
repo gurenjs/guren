@@ -53,7 +53,10 @@ export interface PlanVerifierOptions {
   scripts: Record<string, string>
   /** Element ids a waiver covers (RFC 0030 §6): left out of every step's judgement, and recorded. */
   waived?: ReadonlySet<string>
-  /** Defaults to `runCheck()` against `root`. */
+  /**
+   * Defaults to an introspecting `runCheck()` against `root`: every verify list opens with a
+   * `codegen` that must pass first, so the entry imports by the time the check runs.
+   */
   check?: () => Promise<CheckReport>
   /** Test files, absolute. Defaults to `discoverTestFiles(root)`. */
   testFiles?: () => Promise<string[]>
@@ -227,7 +230,7 @@ export class PlanVerifier {
     private readonly options: PlanVerifierOptions,
   ) {
     this.declaredIds = planAcceptanceIds(plan)
-    this.check = options.check ?? (() => runCheck({ cwd: options.root, json: true }))
+    this.check = options.check ?? (() => runCheck({ cwd: options.root, json: true, introspect: true }))
     this.testFiles = options.testFiles ?? (() => discoverTestFiles(options.root))
     this.drizzleKit = options.drizzleKit ?? (() => resolveAppDrizzleKit(options.root))
     this.now = options.now ?? (() => new Date())

@@ -1,14 +1,12 @@
 import { readdir, readlink, realpath } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import type { CallExpression, ConditionalExpression, ObjectExpression, ObjectProperty } from '@babel/types'
-import type { AppManifest, AttachmentsEntry, RouteDefinition } from '@guren/server'
+import type { AppManifest, AttachmentsEntry } from '@guren/server'
 import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
 import { advisory, check, type CheckResult } from './check-result'
 import { attributeManifestTable, resolveSchemaTableBinding, specifierBase, withoutExtension, type SchemaTableBinding } from './schema-binding'
-import { discoverAppConfigFiles, fileExists } from './discovery'
-import { loadRouteDefinitions } from './load-routes'
-import { introspectedSection, judgedFromManifest, judgedFromSource, mergeVerdicts, readManifestSection, sole, type IntrospectedSection, type IntrospectSource } from './manifest-section'
-import { routesEntryOrDefault } from './route-registrar'
+import { discoverAppConfigFiles } from './discovery'
+import { introspectedSection, judgedFromManifest, judgedFromSource, mergeVerdicts, readManifestSection, sole, UNVERIFIED_SECTION_FIX, type IntrospectedSection, type IntrospectSource } from './manifest-section'
 import { parseModelSource } from './model-parser'
 import type { ParseCache, ParsedFile } from './parse-cache'
 import { schemaPathFor, type SchemaTable } from './schema-parser'
@@ -357,6 +355,11 @@ export interface AttachmentsWiring {
   sites: string[]
   engine: IntrospectedSection<AttachmentsEntry>
   /**
+   * The introspected app when it registered but configured no engine (a call in a provider's
+   * `boot()`): its routes and storage drivers still hold, while the call's options are the source's.
+   */
+  registered?: AppManifest
+  /**
    * Set when the introspected app configured no engine although every call runs whenever its file loads,
    * no source imports a site dynamically and no `createApp({ boot })` was skipped: nothing the app
    * loads while registering imports those files. A `boot()` reaching one some other way still reads so.
@@ -384,9 +387,10 @@ export async function readAttachmentsWiring(
   const later = calls.some((call) => call.guarded > 0)
     || section.manifest.warnings.some((warning) => warning.code === 'boot-callback-skipped')
     || (await importsDynamically(cwd, cache, files, sites))
-  if (later) return { sites, engine: { status: 'static', reason: NOT_REGISTERED_REASON } }
+  const registered = section.manifest
+  if (later) return { sites, engine: { status: 'static', reason: NOT_REGISTERED_REASON }, registered }
   const neverRanReason = `the introspected app never loaded ${sites.join(', ')} while it registered, so its configureAttachments() never ran`
-  return { sites, engine: { status: 'static', reason: neverRanReason }, neverRan: true }
+  return { sites, engine: { status: 'static', reason: neverRanReason }, registered, neverRan: true }
 }
 
 /** Whether a file imports one of `sites` through `import()`, or through one whose specifier it cannot read. */
@@ -813,28 +817,24 @@ const KNOWN_PRESIGNING_DRIVERS = new Set(['s3'])
 const KNOWN_FILESYSTEM_DRIVERS = new Set(['local'])
 
 /**
- * The RFC 0015 delivery-route wiring rules:
- * 1. `delivery` with no `registerAttachmentRoutes()` route in the *loaded*
- *    definitions (not the AST, which cannot follow helpers) — URLs 404 mutely.
+ * The RFC 0015 delivery-route wiring rules, over the introspected app's routes and storage:
+ * 1. `delivery` with no `registerAttachmentRoutes()` route — URLs 404 mutely.
  * 2. A delivery route name claimed twice — `Router.name()` silently overwrites.
  * 3. `serve: 'redirect'` on a driver that cannot presign — downgrades to proxy with a warning at serve time.
+ * Without an introspected app both are `-unverified`: the mount is a registered route.
  */
 export async function checkAttachmentsDelivery(options: {
   cwd: string
   cache: ParseCache
   /** Candidate config files, from {@link discoverAppConfigFiles}. */
   files: string[]
-  /** Routes entry file, POSIX-relative to `cwd`. */
-  routesFile?: string
-  /** Test seam, like the route-contract check's: definitions to use instead of loading. */
-  definitions?: RouteDefinition[]
   /** The run's introspection, asked for only once a `configureAttachments()` call is found. */
   introspect?: IntrospectSource
   wiring?: Promise<AttachmentsWiring>
 }): Promise<CheckResult[]> {
   const { cwd, cache, files } = options
   const scan = await scanAttachmentsDelivery(cwd, cache, files)
-  const { sites, engine } = await (options.wiring ?? readAttachmentsWiring(cwd, cache, files, options.introspect))
+  const { sites, engine, registered } = await (options.wiring ?? readAttachmentsWiring(cwd, cache, files, options.introspect))
   let disks: Promise<Map<string, StorageDiskDeclaration>> | undefined
   const declarations = () => (disks ??= scanStorageDisks(cache, files))
   if (engine.status === 'described') {
@@ -842,71 +842,62 @@ export async function checkAttachmentsDelivery(options: {
     const manifest = await judgeManifestDelivery(engine.value, engine.manifest, scan, sole(sites), declarations)
     return mergeVerdicts(manifest, judgedFromSource(await staticRedirectVerdicts(scan, declarations)))
   }
+  if (!registered) return unverifiedDelivery(scan, engine.reason)
 
+  // Registered without running the call: the options are the source's, the routes and drivers the app's.
   const results: CheckResult[] = []
-
   if (scan.deliveryConfigs.length > 0) {
-    // The app's own entry, not routes/web.ts: an API-only app mounts the
-    // delivery route in routes/api.ts.
-    const routesFile = await routesEntryOrDefault(cwd, options.routesFile)
-    let definitions = options.definitions
-    let routesEntryMissing = false
-    if (!definitions) {
-      if (await fileExists(cwd, routesFile)) {
-        try {
-          definitions = await loadRouteDefinitions(resolve(cwd, routesFile), cwd)
-        } catch {
-          // An app whose routes cannot load is reported by the route checks;
-          // `definitions` stays undefined and this rule stays quiet.
-        }
-      } else {
-        // No routes entry at all is positive evidence: nothing can have
-        // mounted the route.
-        routesEntryMissing = true
-      }
-    }
-
-    const mounted =
-      definitions?.some(
-        (definition) => definition.controller?.name === ATTACHMENT_DELIVERY_CONTROLLER_NAME,
-      ) ?? false
-
-    if (mounted) {
+    if (registered.routes.some((route) => route.controller?.name === ATTACHMENT_DELIVERY_CONTROLLER_NAME)) {
       results.push(deliveryMounted())
-    } else if (definitions || routesEntryMissing) {
+    } else {
       for (const relPath of scan.deliveryConfigs) {
-        results.push(
-          deliveryUnmounted(
-            relPath,
-            routesEntryMissing
-              ? `the routes entry ${routesFile} does not exist, so nothing can mount the route. `
-              : `no route registered by registerAttachmentRoutes() was found in the loaded route definitions. `,
-            routesFile,
-          ),
-        )
+        results.push(deliveryUnmounted(relPath, 'the introspected app registers no registerAttachmentRoutes() route. '))
       }
     }
-
-    if (definitions) {
-      for (const routeName of scan.routeNames) {
-        const duplicate = duplicateRouteName(routeName, definitions)
-        if (duplicate) results.push(duplicate)
-      }
+    for (const routeName of scan.routeNames) {
+      const duplicate = duplicateRouteName(routeName, registered.routes)
+      if (duplicate) results.push(duplicate)
     }
   }
-
-  results.push(...(await staticRedirectVerdicts(scan, declarations)))
+  results.push(...(await staticRedirectVerdicts(scan, declarations, manifestDiskDrivers(registered))))
   return judgedFromSource(results, engine.reason)
+}
+
+/** The delivery rules with no introspected app: a mount and a disk's driver are the registered app's to show. */
+function unverifiedDelivery(scan: AttachmentsDeliveryScan, reason: string | undefined): CheckResult[] {
+  const why = reason ?? 'no introspected app was available'
+  const unverified = (key: string, title: string, message: string, relPath: string): CheckResult => ({
+    ...advisory(key, title, 'warn', `${message} is unverified: ${why}.`, UNVERIFIED_SECTION_FIX, relPath),
+    evidence: 'none',
+  })
+  return [
+    ...scan.deliveryConfigs.map((relPath) =>
+      unverified(
+        `attachments-delivery-unverified:${relPath}`,
+        'Attachments delivery route',
+        `configureAttachments() in ${relPath} enables delivery, and whether registerAttachmentRoutes() is mounted`,
+        relPath,
+      )),
+    ...scan.redirectDisks.map(({ relPath, disk }) =>
+      unverified(
+        `attachments-serve-redirect-unverified:${relPath}:${disk}`,
+        'Attachments redirect disk',
+        `Disk '${disk}' is configured serve: 'redirect' in ${relPath}, and whether its storage driver can presign`,
+        relPath,
+      )),
+  ]
 }
 
 async function staticRedirectVerdicts(
   scan: AttachmentsDeliveryScan,
   declarations: () => Promise<Map<string, StorageDiskDeclaration>>,
+  registeredDrivers: Map<string, string> = new Map(),
 ): Promise<CheckResult[]> {
   if (scan.redirectDisks.length === 0) return []
   const declared = await declarations()
   // Unreadable (absent or conflicting evidence): skip, never guess.
-  return scan.redirectDisks.flatMap(({ relPath, disk }) => judgeRedirectDisk(relPath, disk, declared.get(disk)?.driver) ?? [])
+  return scan.redirectDisks.flatMap(({ relPath, disk }) =>
+    judgeRedirectDisk(relPath, disk, registeredDrivers.get(disk) ?? declared.get(disk)?.driver) ?? [])
 }
 
 /**
