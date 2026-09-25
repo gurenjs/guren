@@ -75,6 +75,11 @@ export interface DrizzleSelectQuery<TRow> extends PromiseLike<TRow[]> {
 
 export type WhereOperator = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'like' | 'in' | 'not in' | 'is null' | 'is not null'
 
+const VALUELESS_OPERATOR_HELPERS: Readonly<Record<string, 'whereNull' | 'whereNotNull'>> = {
+  'is null': 'whereNull',
+  'is not null': 'whereNotNull',
+}
+
 export interface SimpleCondition {
   type: 'simple'
   field: string
@@ -187,6 +192,7 @@ export class QueryBuilder<
     const field = fieldOrConditions as string
 
     if (arguments.length === 2) {
+      this.refuseOperatorAsValue('where', field, operatorOrValue)
       this.addSimpleCondition(field, Array.isArray(operatorOrValue) ? 'in' : '=', operatorOrValue)
     } else {
       this.addSimpleCondition(field, operatorOrValue as WhereOperator, value)
@@ -221,6 +227,7 @@ export class QueryBuilder<
       const field = fieldOrConditions as string
 
       if (arguments.length === 2) {
+        this.refuseOperatorAsValue('orWhere', field, operatorOrValue)
         orConditions.push({ type: 'simple', field, operator: Array.isArray(operatorOrValue) ? 'in' : '=', value: operatorOrValue })
       } else {
         orConditions.push({ type: 'simple', field, operator: operatorOrValue as WhereOperator, value })
@@ -721,6 +728,22 @@ export class QueryBuilder<
     if (!this.filtersEvaporated()) return
     throw new Error(
       `${this.modelClass.name}: refusing to ${operation} unfiltered — every value in the where clause was undefined.`,
+    )
+  }
+
+  /**
+   * `where(field, 'is null')` type-checks through the `(field, value)` overload on
+   * any string column and compiles to `field = 'is null'`, silently dropping the
+   * NULL rows. A value-taking token (`'like'`) is left alone: it can be real data.
+   */
+  private refuseOperatorAsValue(method: 'where' | 'orWhere', field: string, value: unknown): void {
+    if (typeof value !== 'string' || !Object.hasOwn(VALUELESS_OPERATOR_HELPERS, value)) return
+    const helper = `${VALUELESS_OPERATOR_HELPERS[value]}('${field}')`
+    const threeArgument = `${method}('${field}', '${value}', null)`
+    const fix = method === 'where' ? `Use ${helper} or ${threeArgument}` : `Use ${threeArgument}, the OR form of ${helper}`
+    throw new Error(
+      `${this.modelClass.name}: ${method}('${field}', '${value}') would compare ${field} to the string '${value}'. `
+      + `${fix}; to match that string, write ${method}('${field}', '=', '${value}').`,
     )
   }
 

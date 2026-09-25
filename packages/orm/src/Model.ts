@@ -260,10 +260,13 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   /** A model scope that forwards `trx` to every query and write on it. */
   static inTransaction<T extends typeof Model>(this: T, trx: TransactionHandle): TransactionModelScope<T> {
     const where: TransactionModelScope<T>['where'] = (
-      fieldOrConditions: FieldFor<T> | WhereClauseFor<T> | WhereGroupCallback<TRecordFor<T>>,
-      operatorOrValue?: unknown,
-      value?: unknown,
+      ...args: [
+        fieldOrConditions: FieldFor<T> | WhereClauseFor<T> | WhereGroupCallback<TRecordFor<T>>,
+        operatorOrValue?: unknown,
+        value?: unknown,
+      ]
     ) => {
+      const [fieldOrConditions, operatorOrValue, value] = args
       if (typeof fieldOrConditions === 'function') {
         return this.newQuery({ trx }).where(fieldOrConditions)
       }
@@ -272,7 +275,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
         return this.newQuery({ trx }).where(fieldOrConditions as Partial<Record<keyof TRecordFor<T> & string, unknown>>)
       }
 
-      if (value !== undefined) {
+      // The arity, like `Model.where()`'s: `where(field, 'is null', undefined)` is the operator form.
+      if (args.length === 3) {
         return this.newQuery({ trx }).where(fieldOrConditions as keyof TRecordFor<T> & string, operatorOrValue as WhereOperator, value)
       }
 
@@ -595,7 +599,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       return null
     }
     if (this.hasScopes()) {
-      return this.newQuery(queryOptions).where(key, id as TRecordFor<T>[typeof key]).first()
+      // The object form: an identifier is data, and `where(key, 'is null')` throws.
+      return this.newQuery(queryOptions).where({ [key]: id } as Partial<Record<string, unknown>>).first()
     }
     const table = this.resolveTable()
     const where = { [key]: id } as WhereClauseFor<T>

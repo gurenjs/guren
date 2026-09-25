@@ -16,6 +16,8 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
   \`transaction(async (trx) => ...)\` · \`forceCreate/forceUpdate\` (bypass fillable — never pass request input)
 - Where: \`where({ a: 1, ids: [1, 2] })\` (object = AND, array value = IN) or \`where(field, op, value)\` —
   operators (exact set): \`=\` \`!=\` \`>\` \`<\` \`>=\` \`<=\` \`like\` \`in\` \`not in\` \`is null\` \`is not null\`.
+  NULL: \`whereNull(field)\` / \`whereNotNull(field)\`, or the operator form \`where(field, 'is null', null)\` / \`orWhere(field, 'is null', null)\`;
+  two-argument \`where(field, 'is null')\` would compare to the string \`'is null'\`, so it throws.
   An empty \`in\` array compiles to SQL \`false\` — matches nothing, never throws
 - QueryBuilder chain: \`where / orWhere / whereNull / whereNotNull / whereIn / whereNotIn /
   orderBy(field, 'asc' | 'desc') / limit(n) / offset(n) / with(...relations) / scope(name)\` →
