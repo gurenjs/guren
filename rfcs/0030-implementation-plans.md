@@ -2446,7 +2446,8 @@ runs `guren plan "<request>" --print-prompt` and follows it, adding what the
 prompt cannot say: ask in the client's own way and wait before writing the
 JSON, report the page, open questions and warnings left after
 `plan:render --json`, record review changes with `plan:revise`, and hand an
-approved plan to `plan-implement`. The plan's conventions stay in `buildPlanPrompt()` alone.
+approved plan to `plan-implement`.
+The plan's conventions stay in `buildPlanPrompt()` alone.
 
 **Two producers, for two situations.** The headless one cannot ask anything:
 `claude -p` has no one to put a question to, which is why questions are data

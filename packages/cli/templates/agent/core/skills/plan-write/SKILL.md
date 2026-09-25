@@ -51,8 +51,8 @@ EOF
 - `--feedback -` reads standard input, so feed the pasted JSON in with a
   heredoc as above: your shell is not a terminal the person types into, and a
   bare `-` waits for input that never comes.
-- Remove each question the person answered from the copy, and write the
-  elements its `affects` names under the option they chose; `plan:revise`
+- Apply each answer (the option picked, and any text written) to the elements
+  its `affects` names, then remove the question from the copy; `plan:revise`
   refuses a copy that keeps an answered question.
 - An element the feedback approved is locked unless `--reopens "<why>"` says
   why it changes.
