@@ -8,6 +8,7 @@ import {
   toPosixRelative,
   moduleNameFor,
 } from './discovery'
+import { findModuleDescriptor, MODULE_DESCRIPTOR_FILE } from './app-entry'
 import { memberKeyName, unwrapTypeAssertion, walk } from './ast-walk'
 import { camelCase, escapeRegExp, referencesIdentifier } from './utils'
 import { ParseCache } from './parse-cache'
@@ -20,7 +21,7 @@ const CONSOLE_ENTRY = 'src/console.ts'
  * *outside* the imports. An import alone is not a use: a leftover
  * `import SendDigestCommand from …` next to an emptied `registerMany([])` is the
  * state these checks exist to catch. Re-exports count as body, since for a
- * module's `index.ts` they put a name on its public surface.
+ * module's entry file they put a name on its public surface.
  */
 interface EntrySource {
   /** Top-level statements minus `import` declarations. */
@@ -173,10 +174,16 @@ export async function discoverDeclaredCommandFiles(cwd: string, cache: ParseCach
 /**
  * Verifies every class under `app/Console/Commands` is referenced by the console
  * entrypoint that would register it — `src/console.ts` for a project command,
- * `modules/<name>/index.ts` for a module's. Detection is a name reference outside
+ * the module's entry file for a module's. Detection is a name reference outside
  * the entry's imports, hence `warn`, never `fail`. Not filtered by `--changed`: the
  * outcome turns on the *entrypoint's* content, so filtering by command file would miss it.
  */
+/** A module's entry file, else the one `make:module` would scaffold. */
+async function moduleEntry(cwd: string, moduleName: string): Promise<string> {
+  const moduleDir = resolve(cwd, 'modules', moduleName)
+  return (await findModuleDescriptor(cwd, moduleDir)) ?? toPosixRelative(cwd, resolve(moduleDir, MODULE_DESCRIPTOR_FILE))
+}
+
 export async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): Promise<CheckResult[]> {
   const commandFiles = await discoverDeclaredCommandFiles(cwd, cache)
   if (commandFiles.length === 0) return []
@@ -190,7 +197,7 @@ export async function checkConsoleCommandRegistration(cwd: string, cache: ParseC
   const byEntry = new Map<string, { moduleName: string | null; files: string[] }>()
   for (const filePath of commandFiles) {
     const moduleName = moduleNameFor(cwd, filePath)
-    const entry = moduleName ? `modules/${moduleName}/index.ts` : CONSOLE_ENTRY
+    const entry = moduleName ? await moduleEntry(cwd, moduleName) : CONSOLE_ENTRY
     const group = byEntry.get(entry) ?? { moduleName, files: [] }
     group.files.push(filePath)
     byEntry.set(entry, group)

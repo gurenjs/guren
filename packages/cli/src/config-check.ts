@@ -9,7 +9,7 @@
 import { resolve } from 'node:path'
 import type { Node } from '@babel/types'
 import { propertyValue } from './ast-walk'
-import { createAppOptions, hidesKeys, importedArrayFiles, moduleMountState, readModuleDescriptor } from './app-entry'
+import { createAppOptions, hidesKeys, importedArrayFiles, MODULE_DESCRIPTOR_FILE, moduleMountState, readModuleDescriptor } from './app-entry'
 import { check, type CheckResult } from './check-result'
 import { listAppRoots, moduleNameFromRelPath, toPosixRelative } from './discovery'
 import type { ParseCache } from './parse-cache'
@@ -119,7 +119,7 @@ function judge(entry: ResolvedConfigEntry, read: readonly Lister[], unmounted: r
       fix = `Add the module to createApp({ modules: [...] }) in ${entryPath}.`
     } else if (module !== null) {
       why = `${declares}, but neither its module's defineModule({ config }) nor createApp({ config }) in ${entryPath} lists it.`
-      fix = `Add it to defineModule({ config: [...] }) in ${listings.descriptors.get(module) ?? `modules/${module}/index.ts`}.`
+      fix = `Add it to defineModule({ config: [...] }) in ${listings.descriptors.get(module) ?? `modules/${module}/${MODULE_DESCRIPTOR_FILE}`}.`
     } else {
       why = `${declares}, but ${entryPath} does not list it in createApp({ config }).`
       fix = `Add it to createApp({ config: [...] }) in ${entryPath}.`

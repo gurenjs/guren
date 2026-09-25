@@ -10,7 +10,7 @@ import {
   IMPORTABLE_EXTENSIONS,
 } from './discovery'
 import { matchesAnyGlob } from './glob-match'
-import { cachedFileProbe, resolveDirectoryImport, resolveImportPath, type FileProbe } from './import-resolution'
+import { cachedFileProbe, moduleEntryFile, resolveImportPath, type FileProbe } from './import-resolution'
 import { literalString, walk } from './ast-walk'
 import { loadArchConfig } from './arch-config'
 import type { ArchLayers, ArchRule, ArchRuleSet } from './arch/index'
@@ -88,7 +88,7 @@ async function evaluateDerivedModuleRules(
     if (!surface) {
       const moduleDir = resolve(cwd, 'modules', name)
       surface = Promise.all([
-        resolveDirectoryImport(moduleDir, { probe }),
+        moduleEntryFile(moduleDir, probe),
         resolveImportPath(join(moduleDir, 'db', 'schema'), { probe }),
       ]).then((files) => new Set(files.flatMap((file) => (file === null ? [] : [toPosixRelative(cwd, file)]))))
       surfaces.set(name, surface)

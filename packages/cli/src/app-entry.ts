@@ -7,7 +7,8 @@
 import { basename, dirname, resolve, sep } from 'node:path'
 import type { File, Node, ObjectExpression } from '@babel/types'
 import { objectLiteral, propertyValue, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
-import { findFirstExisting, moduleDescriptorCandidates, toPosixRelative } from './discovery'
+import { toPosixRelative } from './discovery'
+import { moduleEntryFile } from './import-resolution'
 import type { ParseCache } from './parse-cache'
 import { importsByLocal, specifierBase, withoutExtension, type ImportEntry } from './schema-binding'
 
@@ -159,13 +160,17 @@ export interface ModuleDescriptor {
   readonly options: ObjectExpression
 }
 
-/** A module's `modules/<name>/index.*`, relative to `cwd`; null when it has none. */
-export function findModuleDescriptor(cwd: string, moduleDir: string): Promise<string | null> {
-  return findFirstExisting(cwd, moduleDescriptorCandidates(toPosixRelative(cwd, moduleDir)))
+/** The descriptor file `make:module` scaffolds, named as the file to create when a module has none. */
+export const MODULE_DESCRIPTOR_FILE = 'index.ts'
+
+/** A module's entry file ({@link moduleEntryFile}), relative to `cwd`; null when it has none. */
+export async function findModuleDescriptor(cwd: string, moduleDir: string): Promise<string | null> {
+  const file = await moduleEntryFile(resolve(cwd, moduleDir))
+  return file === null ? null : toPosixRelative(cwd, file)
 }
 
 /**
- * A module's `modules/<name>/index.*` and the literal its `defineModule()` takes.
+ * A module's entry file and the literal its `defineModule()` takes.
  * `absent` when there is no descriptor file, `unreadable` when it does not parse
  * or holds no `defineModule({ … })` call.
  */

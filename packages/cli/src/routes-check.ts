@@ -6,13 +6,11 @@ import {
   discoverModuleRoutesFiles,
   discoverRoutesFiles,
   fileExists,
-  findFirstExisting,
   formatTruncatedList,
-  moduleRoutesEntryCandidates,
   ROUTES_DIR,
   toPosixRelative,
 } from './discovery'
-import { cachedFileProbe, resolveImportPath, RUNTIME_TO_SOURCE_EXTENSION, type FileProbe, SOURCE_TO_RUNTIME_EXTENSION, swapExtension } from './import-resolution'
+import { cachedFileProbe, moduleRoutesEntryFile, resolveImportPath, RUNTIME_TO_SOURCE_EXTENSION, type FileProbe, SOURCE_TO_RUNTIME_EXTENSION, swapExtension } from './import-resolution'
 import type { ParseCache } from './parse-cache'
 import { specifierBase } from './schema-binding'
 import { DEFAULT_ROUTES_FILE, isRegistrarExportName, resolveRoutesEntry, specifierName } from './route-registrar'
@@ -21,9 +19,13 @@ import { check, type CheckResult } from './check-result'
 
 /**
  * A path that can move a module scope's answer: its descriptor (where
- * `defineModule({ routes })` names the registrar), its routes entry, or its routes/.
+ * `defineModule({ routes })` names the registrar) or the `package.json` choosing it,
+ * its routes entry, or its routes/.
  */
-const MODULE_WIRING_PATTERN = /^modules\/[^/]+\/(?:index\.|routes[/.])/u
+const MODULE_WIRING_PATTERN = /^modules\/[^/]+\/(?:index\.|package\.json$|routes[/.])/u
+
+/** The routes entry `make:module` scaffolds, named as the file to create when a module has none. */
+const MODULE_ROUTES_FILE = 'routes.ts'
 
 /**
  * Whether a changed path — POSIX-relative, as `getChangedFiles` reports — could move this
@@ -372,15 +374,12 @@ export async function checkRouteRegistrarWiring(options: RoutesCheckOptions): Pr
       continue
     }
 
-    const entries = moduleRoutesEntryCandidates(toPosixRelative(cwd, dir))
+    const routesEntry = resolution.kind === 'entry' ? resolution.entryPath : await moduleRoutesEntryFile(dir)
     const scopeResults = await checkScope(cwd, cache, probe, {
       module,
-      entryFile:
-        resolution.kind === 'entry'
-          ? toPosixRelative(cwd, resolution.entryPath)
-          // Fallback: the conventional name stands in when none exists, so the
-          // warning below names the file to create rather than its absence.
-          : ((await findFirstExisting(cwd, entries)) ?? entries[0]),
+      // Fallback: the conventional name stands in when none exists, so the
+      // warning below names the file to create rather than its absence.
+      entryFile: toPosixRelative(cwd, routesEntry ?? resolve(dir, MODULE_ROUTES_FILE)),
       boundary: resolve(dir, ROUTES_DIR),
       files,
     })

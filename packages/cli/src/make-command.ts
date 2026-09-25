@@ -5,6 +5,7 @@ import { camelCase, ensureSuffix, kebabCase, relativeImportPath, resourceName, s
 import { addEntryWithImport, defaultImportBinding, insertArrayArgumentEntry, insertArrayOptionEntry, type EntryPlan, type InsertResult, type RegisteredEntry } from './patch-helpers'
 import { fileExists, readIfExists } from './discovery'
 import { registersCommandsOf } from './console-check'
+import { findModuleDescriptor, MODULE_DESCRIPTOR_FILE } from './app-entry'
 
 const COMMANDS_DIR = 'app/Console/Commands'
 const CONSOLE_ENTRY = 'src/console.ts'
@@ -90,7 +91,8 @@ async function registerRootCommand(className: string, file: string): Promise<voi
 }
 
 async function registerModuleCommand(className: string, file: string, moduleName: string): Promise<void> {
-  const indexPath = `modules/${moduleName}/index.ts`
+  const moduleDir = `modules/${moduleName}`
+  const indexPath = (await findModuleDescriptor(process.cwd(), moduleDir)) ?? `${moduleDir}/${MODULE_DESCRIPTOR_FILE}`
   const specifier = commandSpecifier(indexPath, file)
 
   if (!(await fileExists(process.cwd(), indexPath))) {

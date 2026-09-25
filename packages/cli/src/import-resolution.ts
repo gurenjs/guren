@@ -85,6 +85,19 @@ export async function resolveDirectoryImport(directory: string, options: Resolve
   return firstFile(indexCandidates(directory, declarations), probe)
 }
 
+/**
+ * The file `import '../modules/<name>'` loads: the one rule for a module's entry, which
+ * holds its `defineModule()` descriptor and is the module's public surface to the arch check.
+ */
+export function moduleEntryFile(moduleDir: string, probe?: FileProbe): Promise<string | null> {
+  return resolveDirectoryImport(moduleDir, { probe })
+}
+
+/** The file a module's `import './routes'` loads: `routes.<ext>`, else the `routes/` directory's entry. */
+export function moduleRoutesEntryFile(moduleDir: string, probe?: FileProbe): Promise<string | null> {
+  return resolveImportPath(join(moduleDir, 'routes'), { probe })
+}
+
 function fileCandidates(target: string, declarations: boolean): string[] {
   const extension = extname(target)
   const stripped = RESOLVED_EXTENSIONS.includes(extension) ? target.slice(0, -extension.length) : target

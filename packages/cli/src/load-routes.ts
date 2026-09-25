@@ -2,7 +2,8 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { Router, mountModuleRoutes, type GurenModule, type RouteDefinition } from '@guren/server'
-import { isDefinitelyAbsent, listModuleNames } from './discovery'
+import { isDefinitelyAbsent, listModuleNames, toPosixRelative } from './discovery'
+import { moduleEntryFile } from './import-resolution'
 import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, routesEntryOrDefault } from './route-registrar'
 
 type RouteRegistrar = (router: Router) => void | Promise<void>
@@ -97,19 +98,24 @@ const ROUTES_MISSING_CONSEQUENCE =
  * than scroll past in a console log.
  */
 async function loadGurenModule(appRoot: string, moduleName: string, warnings?: string[]): Promise<GurenModule | undefined> {
-  const indexPath = resolve(appRoot, 'modules', moduleName, 'index.ts')
-
   const warn = (message: string): void => {
     consola.warn(message)
     warnings?.push(message)
   }
 
+  const entryPath = await moduleEntryFile(resolve(appRoot, 'modules', moduleName))
+  if (entryPath === null) {
+    warn(`modules/${moduleName} has no entry file (index or package.json main) — ${ROUTES_MISSING_CONSEQUENCE}.`)
+    return undefined
+  }
+  const entry = toPosixRelative(appRoot, entryPath)
+
   let moduleExports: Record<string, unknown>
   try {
-    moduleExports = await import(importUrl(indexPath)) as Record<string, unknown>
+    moduleExports = await import(importUrl(entryPath)) as Record<string, unknown>
   } catch (error) {
     warn(
-      `Could not import modules/${moduleName}/index.ts — ${ROUTES_MISSING_CONSEQUENCE}: `
+      `Could not import ${entry} — ${ROUTES_MISSING_CONSEQUENCE}: `
       + `${error instanceof Error ? error.message : String(error)}`,
     )
     return undefined
@@ -118,7 +124,7 @@ async function loadGurenModule(appRoot: string, moduleName: string, warnings?: s
   const gurenModule = resolveGurenModule(moduleExports)
   if (!gurenModule) {
     warn(
-      `modules/${moduleName}/index.ts doesn't export a defineModule() result — ${ROUTES_MISSING_CONSEQUENCE}.`,
+      `${entry} doesn't export a defineModule() result — ${ROUTES_MISSING_CONSEQUENCE}.`,
     )
   }
 

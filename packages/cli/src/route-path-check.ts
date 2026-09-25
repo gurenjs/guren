@@ -4,11 +4,10 @@ import {
   discoverModuleRoutesFiles,
   discoverRoutesFiles,
   fileExists,
-  findFirstExisting,
   listModuleNames,
-  moduleRoutesEntryCandidates,
   toPosixRelative,
 } from './discovery'
+import { moduleRoutesEntryFile } from './import-resolution'
 import type { ParseCache } from './parse-cache'
 import { extractPathParamNames, PATH_PARAM_PATTERN } from './utils'
 import { check, type CheckResult } from './check-result'
@@ -112,13 +111,13 @@ export async function discoverRoutePathFiles(cwd: string, routesFile?: string): 
   ])
 
   const moduleEntries = await Promise.all(
-    moduleNames.map((moduleName) => findFirstExisting(cwd, moduleRoutesEntryCandidates(`modules/${moduleName}`))),
+    moduleNames.map((moduleName) => moduleRoutesEntryFile(resolve(cwd, 'modules', moduleName))),
   )
 
   const files = new Set([
     ...projectFiles,
     ...moduleDirectories.flatMap(({ files: moduleFiles }) => moduleFiles),
-    ...moduleEntries.filter((entry): entry is string => entry !== null).map((entry) => resolve(cwd, entry)),
+    ...moduleEntries.filter((entry): entry is string => entry !== null),
   ])
 
   if (routesFile !== undefined && (await fileExists(cwd, routesFile))) {

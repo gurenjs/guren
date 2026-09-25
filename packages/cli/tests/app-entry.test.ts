@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'bun:test'
-import { resolve } from 'node:path'
-import { createAppListsFile } from '../src/app-entry'
-import { parseSourceFile } from '../src/parse-cache'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { createAppListsFile, findModuleDescriptor, readModuleDescriptor } from '../src/app-entry'
+import { ParseCache, parseSourceFile } from '../src/parse-cache'
 
 const CWD = resolve('/app')
 const ENTRY = resolve(CWD, 'src/app.ts')
@@ -38,5 +40,53 @@ describe('createAppListsFile', () => {
     ['options hidden behind a spread', null, '', '...baseOptions', PROVIDER],
   ] as const)('reads %s as %p', (_name, expected, imports, options, file) => {
     expect(lists(imports, options, file)).toBe(expected)
+  })
+})
+
+describe('readModuleDescriptor', () => {
+  let root: string
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'guren-cli-module-descriptor-'))
+  })
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true })
+  })
+
+  async function writeModule(files: Record<string, string>): Promise<string> {
+    const dir = join(root, 'modules/billing')
+    await mkdir(dir, { recursive: true })
+    for (const [name, content] of Object.entries(files)) {
+      await mkdir(join(dir, name, '..'), { recursive: true })
+      await writeFile(join(dir, name), content)
+    }
+    return dir
+  }
+
+  const DESCRIPTOR = "import { defineModule } from '@guren/core'\n\nexport default defineModule({ name: 'billing' })\n"
+
+  it.each(['index.ts', 'index.tsx', 'index.mts', 'index.jsx', 'index.mjs'])('reads a descriptor kept in %s', async (file) => {
+    const dir = await writeModule({ [file]: DESCRIPTOR })
+
+    const descriptor = await readModuleDescriptor(root, new ParseCache(), dir)
+
+    expect(descriptor).toMatchObject({ file: `modules/billing/${file}` })
+  })
+
+  it('reads the file package.json main names ahead of the index', async () => {
+    const dir = await writeModule({
+      'package.json': JSON.stringify({ main: './src/module.ts' }),
+      'src/module.ts': DESCRIPTOR,
+      'index.ts': 'export {}\n',
+    })
+
+    expect(await findModuleDescriptor(root, dir)).toBe('modules/billing/src/module.ts')
+  })
+
+  it('is absent for a module with no entry file', async () => {
+    const dir = await writeModule({ 'routes.ts': 'export {}\n' })
+
+    expect(await readModuleDescriptor(root, new ParseCache(), dir)).toBe('absent')
   })
 })

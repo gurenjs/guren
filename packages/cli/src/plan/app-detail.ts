@@ -30,13 +30,12 @@ import {
   discoverRoutesFiles,
   discoverValidatorFiles,
   excludeBarrelFiles,
-  findFirstExisting,
   listModuleNames,
   moduleNameFor,
   moduleNameFromRelPath,
-  moduleRoutesEntryCandidates,
   toPosixRelative,
 } from '../discovery'
+import { moduleRoutesEntryFile } from '../import-resolution'
 import { extractInertiaPageRefs, describeInertiaPagePropKeys, resolveInertiaPageFile } from '../inertia-pages'
 import { discoverParsedModels, type ModelRelationship } from '../model-parser'
 import type { PagePropKeys } from '../page-props-extractor'
@@ -569,13 +568,13 @@ async function routeFileDetail(root: string, cache: ParseCache, routesFile: stri
     listModuleNames(root).catch((): string[] => []),
   ])
   const moduleEntries = await Promise.all(
-    moduleNames.map((name) => findFirstExisting(root, moduleRoutesEntryCandidates(`modules/${name}`))),
+    moduleNames.map((name) => moduleRoutesEntryFile(resolve(root, 'modules', name))),
   )
   const files = unique([
     ...(routesFile === undefined ? [] : [routesFile]),
     ...projectFiles.map((file) => toPosixRelative(root, file)),
     ...moduleRoutes.flatMap((module) => module.files.map((file) => toPosixRelative(root, file))),
-    ...moduleEntries.filter((entry): entry is string => entry !== null),
+    ...moduleEntries.filter((entry): entry is string => entry !== null).map((entry) => toPosixRelative(root, entry)),
   ])
 
   const details: PlanAppRouteFile[] = []
