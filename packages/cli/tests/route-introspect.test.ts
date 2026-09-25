@@ -370,6 +370,18 @@ describe('joinRouteDefinitions', () => {
     const index = { ...route('GET', '/p'), controller: { name: 'P', action: 'index' } }
     expect(joinRouteDefinitions([index, show], [show, index])).toEqual([index, show])
   })
+
+  test('joins a key two modules share within its module when the definitions carry theirs', () => {
+    const blog = { ...route('POST', '/posts'), module: 'blog' }
+    const billing = { ...route('POST', '/posts'), module: 'billing' }
+    const definitions = [route('POST', '/posts'), route('POST', '/posts')]
+    expect(joinRouteDefinitions([blog, billing], definitions, ['billing', 'blog'])).toEqual([definitions[1], definitions[0]])
+    expect(joinRouteDefinitions([blog, billing], definitions)).toEqual([definitions[0], definitions[1]])
+  })
+
+  test('joins no route whose module the manifest does not list', () => {
+    expect(joinRouteDefinitions([{ ...route('GET', '/a'), module: null }], [route('GET', '/a')], ['billing'])).toEqual([undefined])
+  })
 })
 
 describe('guren doctor prototype-routes against the introspected app', () => {

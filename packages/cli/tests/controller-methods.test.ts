@@ -432,6 +432,27 @@ describe('attachControllerRefs', () => {
     expect(definitions.map((definition) => definition.controller)).toEqual([placed, second])
   })
 
+  it('pairs a key two modules share within its module, whatever order each side lists modules in', () => {
+    const blog = { ...placed, file: 'modules/blog/app/Http/Controllers/PostController.ts' }
+    const billing = { ...placed, file: 'modules/billing/app/Http/Controllers/PostController.ts' }
+    const definitions = attachControllerRefs(
+      [
+        { method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } },
+        { method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } },
+      ],
+      {
+        routes: [
+          { method: 'POST', path: '/posts', module: 'blog', controller: blog },
+          { method: 'POST', path: '/posts', module: 'billing', controller: billing },
+        ],
+        warnings: [],
+      } as never,
+      undefined,
+      ['billing', 'blog'],
+    )
+    expect(definitions.map((definition) => definition.controller)).toEqual([billing, blog])
+  })
+
   it('attaches nothing when the routes file counts the route more often than the manifest', () => {
     const definitions = attachControllerRefs(
       [

@@ -383,9 +383,10 @@ export async function generateEntityContext(
     if (target.silentlyAbsent) return scanned
 
     const provenance: Array<string | null> = []
+    const moduleIdentities: Array<string | null> = []
     let definitions: Awaited<ReturnType<typeof loadRouteDefinitions>>
     try {
-      definitions = await loadRouteDefinitions(resolve(cwd, target.path), cwd, undefined, provenance)
+      definitions = await loadRouteDefinitions(resolve(cwd, target.path), cwd, undefined, provenance, moduleIdentities)
     } catch (error) {
       // A routes file that cannot be loaded is not a routes file with nothing
       // in it: rendering both as "No routes reference this entity." makes an
@@ -393,17 +394,16 @@ export async function generateEntityContext(
       return { ...scanned, routesError: error instanceof Error ? error.message : String(error) }
     }
 
-    let candidates = definitions.filter((_, index) => !duplicated || provenance[index] === match.module)
+    const inModule = <T>(routes: T[]): T[] => routes.filter((_, index) => !duplicated || provenance[index] === match.module)
+    let candidates = inModule(definitions)
     const scan = candidates.some((def) => def.controller && def.controller.name !== controllerName)
       ? await parseControllerMethods(cwd, cache)
       : EMPTY_CONTROLLER_SCAN
     const named = candidates.flatMap((def) => (def.controller ? [def.controller] : []))
     // The manifest describes the entry, not a file `--routes` names.
     if (options.introspect && !options.routesFile && collisionsReachedByName(scan, named).length > 0) {
-      // A duplicated entity passes its module's routes only: a key another module registers too counts short of the manifest
-      // and joins nothing, where the whole file would pair it by module order, which the CLI (directory
-      // order) and the app (`createApp({ modules })` order) need not share.
-      candidates = await withManifestControllerRefs(candidates, () => introspectApp(cwd), { cwd, routesFile: resolve(cwd, target.path) })
+      const routesFile = resolve(cwd, target.path)
+      candidates = inModule(await withManifestControllerRefs(definitions, () => introspectApp(cwd), { cwd, routesFile, modules: moduleIdentities }))
     }
     const modelFile = resolve(cwd, match.relPath)
 

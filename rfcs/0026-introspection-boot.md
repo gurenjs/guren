@@ -749,6 +749,9 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   `guren context <Entity>` still reads, joins through the same
 >   `joinRouteDefinitions()`, so a route name tells two routes of one method,
 >   path and action apart, and a key both sides repeat equally pairs nth to nth.
+>   It also passes each definition's `defineModule()` name, which the manifest's
+>   `module` holds, so the join pairs within a module: the CLI reads modules in
+>   directory order and the app in `createApp({ modules })` order.
 
 ### 6. Enabling refactor: one module per command
 

@@ -545,16 +545,19 @@ export function collisionsReachedByName(
 
 /**
  * Registered definitions with each controller replaced by the manifest's reference for the same
- * route, joined as `joinRouteDefinitions()` joins them (method, path, name and action; a key the
- * two sides count differently keeps its name-only controller).
+ * route, joined as `joinRouteDefinitions()` joins them (method, path, name and action, within each
+ * module when `definitionModules` is given; a key the two sides count differently keeps its
+ * name-only controller).
  */
 export function attachControllerRefs<T extends RefAttachableRoute>(
   definitions: T[],
   manifest: Pick<AppManifest, 'routes' | 'warnings'>,
   routeSources?: ReadonlySet<string>,
+  definitionModules?: readonly (string | null)[],
 ): T[] {
   const targets = manifestRouteTargets(manifest, routeSources)
-  const joined = joinRouteDefinitions(targets, definitions.map(({ method, path, name, controller }, index) => ({ method, path, name, controller, index })))
+  const projected = definitions.map(({ method, path, name, controller }, index) => ({ method, path, name, controller, index }))
+  const joined = joinRouteDefinitions(targets, projected, definitionModules)
   const refs: Array<ControllerTarget | undefined> = []
   joined.forEach((definition, entry) => {
     if (definition) refs[definition.index] = targets[entry]?.controller
@@ -568,17 +571,18 @@ export function attachControllerRefs<T extends RefAttachableRoute>(
 /**
  * Registered definitions with the manifest's references attached: the one bridge for consumers
  * that still judge the routes file's definitions. Routes without a controller have nothing to attach.
+ * `source.modules` is `loadRouteDefinitions()`'s `moduleIdentities` for these definitions.
  */
 export async function withManifestControllerRefs<T extends RefAttachableRoute>(
   definitions: T[],
   introspect: IntrospectSource | undefined,
-  source: { cwd: string; routesFile: string },
+  source: { cwd: string; routesFile: string; modules?: readonly (string | null)[] },
 ): Promise<T[]> {
   if (!definitions.some((definition) => definition.controller)) return definitions
   const introspected = await introspectedRoutes(introspect)
   if (introspected.status !== 'described') return definitions
   const { manifest } = introspected
-  return attachControllerRefs(definitions, manifest, await routeSourceClasses(source.cwd, manifest, source.routesFile))
+  return attachControllerRefs(definitions, manifest, await routeSourceClasses(source.cwd, manifest, source.routesFile), source.modules)
 }
 
 /**

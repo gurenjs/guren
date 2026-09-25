@@ -11,29 +11,37 @@ import { introspectedRoutes, introspectionUnavailableMessage, type Introspection
 
 type JoinableRoute = Pick<RouteDefinition, 'method' | 'path' | 'name'> & { controller?: { name: string; action: string } }
 
-/** Method, path, name and controller action: method and path alone repeat (the prototype ambiguity rule exists for that). */
-function routeJoinKey(route: JoinableRoute): string {
+/**
+ * Method, path, name and controller action: method and path alone repeat (the prototype ambiguity
+ * rule exists for that). A `module` of `undefined` leaves the module out of the key.
+ */
+function routeJoinKey(route: JoinableRoute, module: string | null | undefined): string {
   const controller = route.controller ? `${route.controller.name}.${route.controller.action}` : null
-  return JSON.stringify([route.method.toUpperCase(), route.path, route.name ?? null, controller])
+  const key = [route.method.toUpperCase(), route.path, route.name ?? null, controller]
+  return JSON.stringify(module === undefined ? key : [module, ...key])
 }
 
 /**
  * The routes file's definition of each manifest entry, index-aligned with `entries`. The nth entry
  * of a key takes the nth definition of it; a key the two sides count differently matches nothing,
- * since pairing them would guess.
+ * since pairing them would guess. Given `definitionModules` (each definition's `defineModule()`
+ * name, `null` for the app's own), a route joins only within its module: the CLI loads modules in
+ * directory order and the app in `createApp({ modules })` order, so a key two modules share would
+ * otherwise pair across them.
  */
 export function joinRouteDefinitions<T extends JoinableRoute>(
-  entries: readonly JoinableRoute[],
+  entries: readonly (JoinableRoute & { module?: string | null })[],
   definitions: readonly T[],
+  definitionModules?: readonly (string | null)[],
 ): Array<T | undefined> {
   const byKey = new Map<string, T[]>()
-  for (const definition of definitions) {
-    const key = routeJoinKey(definition)
+  definitions.forEach((definition, index) => {
+    const key = routeJoinKey(definition, definitionModules ? definitionModules[index] ?? null : undefined)
     const group = byKey.get(key)
     if (group) group.push(definition)
     else byKey.set(key, [definition])
-  }
-  const keys = entries.map(routeJoinKey)
+  })
+  const keys = entries.map((entry) => routeJoinKey(entry, definitionModules ? entry.module ?? null : undefined))
   const entryCounts = new Map<string, number>()
   for (const key of keys) entryCounts.set(key, (entryCounts.get(key) ?? 0) + 1)
 
