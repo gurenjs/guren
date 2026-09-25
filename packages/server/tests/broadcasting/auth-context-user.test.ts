@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { Hono } from 'hono'
 import { createBroadcastManager } from '../../src/broadcasting'
 import { MemoryDriver } from '../../src/broadcasting/drivers'
+import { AuthManager } from '../../src/auth/AuthManager'
 import { setResolvedPrincipal } from '../../src/auth/context'
+import { attachAuthContext } from '../../src/http/middleware/auth'
+import { fakeGuard } from '../support/fake-auth'
 import { Application } from '../../src/http/Application'
 import { resetDefaultApplication } from '../../src/http/default-application'
 
@@ -65,6 +69,39 @@ describe('broadcast middlewares without getUser', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ 'private-users.7': { authorized: true, subscribed: false } })
     expect(seen).toEqual([{ id: 7 }])
+  })
+
+  // The principal slot above short-circuits before any guard; this is the
+  // path a session login takes, through the default guard's user().
+  test('the auth endpoint authorizes the default guard user', async () => {
+    const manager = createBroadcastManager({
+      default: 'memory',
+      drivers: { memory: () => new MemoryDriver() },
+    })
+    manager.privateChannel('users.{id}', (channel, user) => (user as User | undefined)?.id === Number(channel.split('.').pop()))
+
+    const auth = new AuthManager()
+    auth.registerGuard('web', (context) =>
+      fakeGuard({
+        user: async <T>() => {
+          const id = context.ctx.req.header('x-user-id')
+          return (id ? { id: Number(id) } : null) as T
+        },
+      }),
+    )
+    auth.setDefaultGuard('web')
+
+    const app = new Hono()
+    app.use('*', attachAuthContext((ctx) => auth.createAuthContext(ctx)))
+    app.post('/broadcasting/auth', manager.authMiddleware() as never)
+
+    const response = await app.request('/broadcasting/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-user-id': '7' },
+      body: JSON.stringify({ channel: 'private-users.7' }),
+    })
+
+    expect(await response.json()).toEqual({ 'private-users.7': { authorized: true, subscribed: false } })
   })
 
   test('the auth endpoint refuses a guest, passing the authorizer undefined', async () => {
