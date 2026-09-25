@@ -26,15 +26,20 @@ import {
 import {
   authTypeArgumentPattern,
   classActionMembers,
+  collisionsReachedByName,
+  controllerMethodFor,
   EMPTY_CONTROLLER_SCAN,
   parseControllerMethods,
   type ControllerMethodInfo,
   type ControllerMethodScan,
+  type ControllerTarget,
+  withManifestControllerRefs,
 } from './controller-methods'
+import { introspectApp } from './introspect'
 import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
 import { ParseCache } from './parse-cache'
 import { importsByLocal, specifierBase } from './schema-binding'
-import { escapeRegExp } from './utils'
+import { wholeIdentifierPattern } from './utils'
 import { CliError } from './cli-error'
 import {
   routeDefinitionToContextRoute,
@@ -184,6 +189,11 @@ export interface EntityContextOptions {
   repo?: string
   /** How `live` runs `gh`; tests pass a stub, like `gate`'s `exec`. */
   gh?: CapturedExec
+  /**
+   * Introspect the app when a route names a controller class two files declare (RFC 0026 §5),
+   * so the manifest's reference says which body to read. Off by default, as for `runCheck()`.
+   */
+  introspect?: boolean
 }
 
 /**
@@ -293,7 +303,7 @@ function modelImportLocals(cwd: string, controllerFile: string, ast: File, entit
  */
 function actionReferencesModel(body: string, locals: ModelImportLocals): boolean {
   return (
-    locals.classLocals.some((local) => new RegExp(`(?<![\\w$.])${escapeRegExp(local)}(?![\\w$])`).test(body))
+    locals.classLocals.some((local) => wholeIdentifierPattern(local).test(body))
     || locals.typeLocals.some((local) => authTypeArgumentPattern(local).test(body))
   )
 }
@@ -304,11 +314,14 @@ function actionReferencesModel(body: string, locals: ModelImportLocals): boolean
  * registers cannot name the model). A shared class name is unverified even with a
  * body: the route carries only the name. A skipped file is matched by its file name.
  */
-function unverifiedReason(scan: ControllerMethodScan, controller: { name: string; action: string }): string | undefined {
-  if (scan.collisions.some((collision) => collision.className === controller.name)) {
+function unverifiedReason(scan: ControllerMethodScan, controller: ControllerTarget): string | undefined {
+  const lookup = controllerMethodFor(scan, controller)
+  if (lookup.by === 'name' && scan.collisions.some((collision) => collision.className === controller.name)) {
     return `more than one controller class is named ${controller.name}`
   }
-  if (scan.methods.has(`${controller.name}.${controller.action}`)) return undefined
+  if (lookup.info) return undefined
+  if (lookup.by === 'identity') return `${controller.file} declares no ${controller.action} action body (inherited or missing)`
+  if (lookup.by === 'elsewhere') return `${controller.name} is none of the exported classes the controller files declare under that name, so its body was not found`
   const unreadable = scan.unreadableFiles.find((file) => classNameFromPath(file) === controller.name)
   if (unreadable) return `${unreadable} could not be read`
   const unparsed = scan.unparsedFiles.find((file) => classNameFromPath(file) === controller.name)
@@ -380,10 +393,15 @@ export async function generateEntityContext(
       return { ...scanned, routesError: error instanceof Error ? error.message : String(error) }
     }
 
-    const candidates = definitions.filter((_, index) => !duplicated || provenance[index] === match.module)
+    let candidates = definitions.filter((_, index) => !duplicated || provenance[index] === match.module)
     const scan = candidates.some((def) => def.controller && def.controller.name !== controllerName)
       ? await parseControllerMethods(cwd, cache)
       : EMPTY_CONTROLLER_SCAN
+    const named = candidates.flatMap((def) => (def.controller ? [def.controller] : []))
+    // The manifest describes the entry, not a file `--routes` names.
+    if (options.introspect && !options.routesFile && collisionsReachedByName(scan, named).length > 0) {
+      candidates = await withManifestControllerRefs(candidates, () => introspectApp(cwd), { cwd, routesFile: resolve(cwd, target.path) })
+    }
     const modelFile = resolve(cwd, match.relPath)
 
     const referencesModel = async (method: ControllerMethodInfo): Promise<boolean> => {
@@ -408,7 +426,7 @@ export async function generateEntityContext(
         continue
       }
 
-      const method = action ? scan.methods.get(action) : undefined
+      const method = controller ? controllerMethodFor(scan, controller).info : undefined
       const linkedBy: EntityRouteLink | undefined = bound
         ? 'binding'
         : method && (await referencesModel(method)) ? 'reference' : undefined

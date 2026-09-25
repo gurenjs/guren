@@ -26,7 +26,7 @@ import {
   planPageManifest,
   type PageManifestPlan,
 } from './pages-types'
-import { AGENTS_MANIFEST_FILE, planAgentManifest, type AgentManifestPlan } from './agents-types'
+import { AGENTS_MANIFEST_FILE, planAgentManifest, STALE_AGENT_MANIFEST_MESSAGE, type AgentManifestPlan } from './agents-types'
 import { emptyActions } from './controller-methods'
 import { parseSourceFile } from './parse-cache'
 import { resolveRoutesEntry } from './route-registrar'
@@ -35,6 +35,7 @@ import { appDeclaresPrototypeRoutes } from './prototype-check'
 import type { RouteDefinition } from '@guren/server'
 import { analyzeDeployRuntime, judgeDeployRuntime } from './deploy-runtime'
 import { introspectApp, type Introspection } from './introspect'
+import { describeIntrospectionFailure, introspectedRoutes } from './manifest-section'
 import type { CheckEvidence } from './check-result'
 import { detectConfigMigrations, undeclaredEnv, type ConfigMigration, type EnvDeclaration } from './config-migration'
 
@@ -135,6 +136,8 @@ interface DoctorRuleContext {
   agentManifest: Promise<AgentManifestPlan>
   /** See {@link DoctorManifestPlans.routeGraph}. */
   routeGraph: () => Promise<RouteDefinition[]>
+  /** See {@link DoctorManifestPlans.introspection}. */
+  introspection?: () => Promise<Introspection>
 }
 
 interface DoctorRule {
@@ -187,7 +190,7 @@ function createAgentManifestRule(): DoctorRule {
           key,
           AGENTS_MANIFEST_FILE,
           'warn',
-          `${AGENTS_MANIFEST_FILE} describes agent tools this app no longer exposes — no route derives one.`,
+          STALE_AGENT_MANIFEST_MESSAGE,
           {
             fix: `Run \`guren codegen --force\` to remove ${AGENTS_MANIFEST_FILE}.`,
             manualFix: `Run \`guren codegen --force\` to remove ${AGENTS_MANIFEST_FILE}.`,
@@ -379,9 +382,11 @@ async function detectPrototypeRoutes(context: DoctorRuleContext): Promise<Doctor
     return createCheck(key, title, 'pass', 'No route uses the prototype handler.')
   }
 
-  let definitions: RouteDefinition[]
+  // The introspected app's routes when it registers cleanly (RFC 0026 §5), the routes file's otherwise.
+  const introspected = await introspectedRoutes(context.introspection)
+  let definitions: Array<Pick<RouteDefinition, 'method' | 'path' | 'name' | 'prototype'>>
   try {
-    definitions = await context.routeGraph()
+    definitions = introspected.status === 'described' ? introspected.manifest.routes : await context.routeGraph()
   } catch (error) {
     return createCheck(
       key,
@@ -391,14 +396,20 @@ async function detectPrototypeRoutes(context: DoctorRuleContext): Promise<Doctor
       { manualFix: 'Fix the load error, then run `bunx guren doctor` again.' },
     )
   }
+  const evidence: Pick<DoctorCheck, 'evidence' | 'evidenceReason'> = introspected.status === 'described'
+    ? { evidence: 'manifest' }
+    : {
+      evidence: 'static',
+      evidenceReason: introspected.failure ? `introspection failed with ${describeIntrospectionFailure(introspected.failure)}` : introspected.reason,
+    }
 
   const backlog = definitions.filter((route) => route.prototype)
   if (backlog.length === 0) {
-    return createCheck(key, title, 'pass', 'No route answers from the prototype fixture.')
+    return { ...createCheck(key, title, 'pass', 'No route answers from the prototype fixture.'), ...evidence }
   }
 
   const listed = backlog.map((route) => `${route.method} ${route.path}${route.name ? ` (${route.name})` : ''}`).join(', ')
-  return createCheck(
+  return { ...createCheck(
     key,
     title,
     'fail',
@@ -407,7 +418,7 @@ async function detectPrototypeRoutes(context: DoctorRuleContext): Promise<Doctor
       fix: 'Replace each prototype handler with a controller (`bunx guren make:feature <Entity>`), or ship the static build (`bun run build:prototype`) instead of the server.',
       manualFix: 'Replace each prototype handler with a controller, or set GUREN_PROTOTYPE_ROUTES=1 for a deliberately fixture-backed server.',
     },
-  )
+  ), ...evidence }
 }
 
 /**
@@ -1249,11 +1260,15 @@ export interface DoctorManifestPlans {
   agentManifest: Promise<AgentManifestPlan>
   /**
    * The route graph, loaded at most once per run and only by a rule that asks:
-   * the agent plan when the app declares agent routes, the prototype rule when
-   * it passes the `prototype` handler. Rejects with the load error.
+   * the agent plan when the app declares agent routes (codegen's own path, so it
+   * stays on the routes file), the prototype rule when it passes the `prototype`
+   * handler and the app cannot be introspected. Rejects with the load error.
    */
   routeGraph: () => Promise<RouteDefinition[]>
-  /** The introspected app, started only by the deploy-runtime checks once a target is found; absent under `--no-introspect`. */
+  /**
+   * The introspected app, started only by a rule that reads it: the deploy-runtime checks once a
+   * target is found, the prototype rule once a routes file passes the handler. Absent under `--no-introspect`.
+   */
   introspection?: () => Promise<Introspection>
 }
 

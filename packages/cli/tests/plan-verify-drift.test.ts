@@ -10,7 +10,7 @@ import { planDigest, writePlanStepRecord, type PlanStepRecord } from '../src/pla
 import { sha256 } from '../src/plan/verification'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { CLI_BIN_PATH, createTempRoot, writeWorkspaceFiles } from './helpers'
-import { approvePlanFile, createPlanVerifyApp, DRIZZLE_KIT_STUB_FILES, loadApprovedCommentsPlan, PLAN_VERIFY_APP_FILES as APP, waiveForTest } from './plan-fixture'
+import { approvePlanFile, createPlanVerifyApp, DRIZZLE_KIT_STUB_FILES, loadApprovedCommentsPlan, measured, PLAN_VERIFY_APP_FILES as APP, waiveForTest } from './plan-fixture'
 
 let ROOT: string
 
@@ -102,9 +102,10 @@ export function registerWebRoutes(router: Router): void {
 `
 }
 
-function git(dir: string, ...args: string[]): void {
+function git(dir: string, ...args: string[]): string {
   const result = Bun.spawnSync(['git', '-c', 'user.name=Agent', '-c', 'user.email=agent@example.com', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
   if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr.toString()}`)
+  return result.stdout.toString().trim()
 }
 
 /**
@@ -340,6 +341,73 @@ describe('plan:verify re-checks the steps a later step drifted', () => {
     expect(next.step?.id).toBe(COMMENTS_HTTP)
     expect(next.step?.drifted).toEqual(['app/Http/Controllers/CommentController.ts', 'routes/web.ts'])
     expect(formatPlanNext(next, 'comments.plan.json')).toContain(`Re-check it with \`bunx guren plan:verify comments.plan.json --step ${COMMENTS_HTTP}\` rather than re-implementing it`)
+  }, 60_000)
+})
+
+function stepRecord(report: PlanVerifyReport, step: string): PlanStepRecord {
+  return report.steps.find((entry) => entry.stepId === step)!.record
+}
+
+async function storedRecord(app: string, step: string): Promise<PlanStepRecord> {
+  return (JSON.parse(await readFile(join(app, '.guren/plans/comments.state.json'), 'utf8')) as { steps: Record<string, PlanStepRecord> }).steps[step]!
+}
+
+describe('plan:verify records the files and lines a step’s work changed', () => {
+  test('should measure the marked step from where plan:next marked it, over its commits and the work left uncommitted', async () => {
+    const app = await withCommentsVerified('measured')
+    for (const id of planStepIds(derivePlanTasks(parsePlanDocument(splitPlan()))).filter((step) => step !== COMMENTS_HTTP && step !== DELETION_HTTP)) {
+      await writePlanStepRecord(app, 'comments', id, doneRecord())
+    }
+    git(app, 'init', '-q')
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'the comment task')
+    const start = git(app, 'rev-parse', 'HEAD')
+    expect((await planNextFile(join(app, 'comments.plan.json'), { appRoot: app })).step?.id).toBe(DELETION_HTTP)
+
+    await writeFile(join(app, 'routes/web.ts'), routesWithDestroy('store'), 'utf8')
+    git(app, 'commit', '-q', '-am', 'the deletion route')
+    await writeFile(join(app, 'app/Http/Controllers/CommentController.ts'), CONTROLLER_WITH_DESTROY, 'utf8')
+    git(app, 'commit', '-q', '-am', 'the deletion action')
+    await writeWorkspaceFiles(app, { 'tests/deletion.test.ts': DELETION_TESTS })
+
+    const report = verify(app, DELETION_HTTP)
+
+    expect(outcome(report, DELETION_HTTP)).toBe('verified')
+    const work = measured(stepRecord(report, DELETION_HTTP).work)
+    expect(work).toMatchObject({ from: start, settled: true })
+    expect(work.files.map((file) => file.path)).toEqual(['app/Http/Controllers/CommentController.ts', 'routes/web.ts', 'tests/deletion.test.ts'])
+    expect(work.files[2]).toEqual({ path: 'tests/deletion.test.ts', added: 5, removed: 0 })
+    expect(work.added).toBe(work.files.reduce((total, file) => total + (file.added ?? 0), 0))
+    expect((await storedRecord(app, DELETION_HTTP)).work).toEqual(work)
+    // Re-checked beside it, the comment step keeps what it carried: it was verified with no mark on it.
+    expect(report.reverified).toEqual([COMMENTS_HTTP])
+    expect(stepRecord(report, COMMENTS_HTTP).work).toEqual({ measured: false, reason: 'plan:next did not mark this step, so where its work started is not known', settled: true })
+
+    const status = Bun.spawnSync([process.execPath, CLI_BIN_PATH, 'plan:status', join(app, 'comments.plan.json'), '--app', app, '--json'], { cwd: app, stdout: 'pipe', stderr: 'pipe' })
+    expect((JSON.parse(status.stdout.toString()) as PlanStatusReport).verification?.work?.[DELETION_HTTP]).toEqual(work)
+  }, 60_000)
+
+  test('should keep the measurement the step first verified with through a failed re-check and its fix under a fresh mark', async () => {
+    const app = await afterDeletionIsWritten('work-kept', 'destroy')
+    const implemented = { measured: true as const, from: 'a'.repeat(40), files: [{ path: 'routes/web.ts', added: 30, removed: 2 }], added: 30, removed: 2, settled: true }
+    await writePlanStepRecord(app, 'comments', COMMENTS_HTTP, { ...(await storedRecord(app, COMMENTS_HTTP)), work: implemented })
+    const next = await planNextFile(join(app, 'comments.plan.json'), { appRoot: app })
+    expect(next.step?.id).toBe(COMMENTS_HTTP)
+    expect(next.step?.drifted).toBeDefined()
+
+    const failing = verify(app, COMMENTS_HTTP)
+
+    expect(failing.reverified).toEqual([COMMENTS_HTTP])
+    expect(outcome(failing, COMMENTS_HTTP)).toBe('failed')
+    expect((await storedRecord(app, COMMENTS_HTTP)).work).toEqual(implemented)
+
+    // The fix is a one-line diff from the fresh mark, which is not the work that implemented the step.
+    await writeFile(join(app, 'routes/web.ts'), routesWithDestroy('store'), 'utf8')
+    const fixed = verify(app, COMMENTS_HTTP)
+
+    expect(outcome(fixed, COMMENTS_HTTP)).toBe('verified')
+    expect(stepRecord(fixed, COMMENTS_HTTP).work).toEqual(implemented)
+    expect((await storedRecord(app, COMMENTS_HTTP)).work).toEqual(implemented)
   }, 60_000)
 })
 

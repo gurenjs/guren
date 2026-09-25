@@ -13,7 +13,7 @@ import { toPosixRelative } from '../discovery'
 import { planDecisionsPath, planWaiverHash, readPlanDecisions, type PlanDecisions, type PlanWaiver } from './decisions'
 import { behaviourCanReach, behaviourCarriers } from './reach'
 import type { Plan, PlanDraft } from './schema'
-import { planDigest, planSlug, planStatePath, readPlanState, type PlanStepRecord } from './state'
+import { planDigest, planSlug, planStatePath, readPlanState, type PlanStepRecord, type PlanStepWork } from './state'
 import { awaitsVerification, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus, type PlanVerificationHold } from './status'
 import type { PlanTaskDerivation } from './tasks'
 
@@ -47,6 +47,8 @@ export interface PlanVerificationSummary {
   staleWaivers: PlanWaiver[]
   /** Set when a decision log exists and could not be read. */
   decisionsUnreadable?: string
+  /** Files touched and lines changed per step (RFC 0030 §7), by step id; absent when no record carries them. */
+  work?: Record<string, PlanStepWork>
 }
 
 /**
@@ -228,6 +230,7 @@ export async function overlayVerification(
   const unreadable =
     read.unreadable ?? (options.replacedUnreadable ? `${options.replacedUnreadable}; this run replaced it, and its other records are gone` : undefined)
   const log = options.waivers ?? (await readPlanWaivers(planPath, plan))
+  const work = Object.entries(records).flatMap(([stepId, record]) => (record.work ? [[stepId, record.work] as const] : []))
   return {
     status: applyWaivers(applied.status, log.waivers),
     verification: {
@@ -237,6 +240,7 @@ export async function overlayVerification(
       decisionsFile: toPosixRelative(root, planDecisionsPath(planPath)),
       staleWaivers: log.stale,
       ...(log.unreadable ? { decisionsUnreadable: log.unreadable } : {}),
+      ...(work.length > 0 ? { work: Object.fromEntries(work) } : {}),
     },
   }
 }

@@ -13,6 +13,7 @@ import type { RouteDefinition } from '@guren/server'
 import { memberKeyName, objectLiteral, propertyValue, walk, type BabelNode } from './ast-walk'
 import { check, type CheckResult } from './check-result'
 import { fileExists, readIfExists } from './discovery'
+import { introspectedRoutes, judgedFromManifest, judgedFromSource, type IntrospectSource } from './manifest-section'
 import { discoverRoutePathFiles } from './route-path-check'
 import type { ParseCache } from './parse-cache'
 import { resolveAppEntry } from './provider-registrar'
@@ -104,23 +105,49 @@ export interface PrototypeCheckOptions {
   cache: ParseCache
   /** Loaded route definitions; `undefined` when the route graph could not be loaded. */
   definitions?: RouteDefinition[]
+  /**
+   * The run's introspection (RFC 0026 §5), asked for once the app has a fixture or a `prototype`
+   * route: the introspected app's routes are judged instead, so an entry naming a route a provider
+   * registers is no orphan, and a graph the routes file alone could not load still gets checked.
+   */
+  introspect?: IntrospectSource
 }
 
-function describe(route: RouteDefinition): string {
+/** What the rules read of a route: a registered definition or a manifest entry. */
+type PrototypeRoute = Pick<RouteDefinition, 'method' | 'path' | 'name' | 'prototype' | 'agent'>
+
+function describe(route: PrototypeRoute): string {
   return `${route.method.toUpperCase()} ${route.path}${route.name ? ` (${route.name})` : ''}`
 }
 
 export async function checkPrototypeRoutes(options: PrototypeCheckOptions): Promise<CheckResult[]> {
+  const { cwd } = options
+  const hasFixture = await fileExists(cwd, PROTOTYPE_FIXTURE_FILE)
+  if (!hasFixture && !options.definitions?.some((route) => route.prototype)) {
+    return judgedFromSource(await checkClientWiringWithoutFixture(cwd))
+  }
+
+  const introspected = await introspectedRoutes(options.introspect)
+  return introspected.status === 'described'
+    ? judgedFromManifest(await judgePrototypeRoutes(options, introspected.manifest.routes, hasFixture))
+    : judgedFromSource(await judgePrototypeRoutes(options, options.definitions, hasFixture), introspected.reason)
+}
+
+/** A finding read from source whichever path supplied the routes: the entry's `createApp()`, the fixture's parse. */
+function fromSource(result: CheckResult): CheckResult {
+  return { ...result, evidence: 'static' }
+}
+
+async function judgePrototypeRoutes(
+  options: PrototypeCheckOptions,
+  routes: PrototypeRoute[] | undefined,
+  hasFixture: boolean,
+): Promise<CheckResult[]> {
   const { cwd, cache } = options
-  const definitions = options.definitions ?? []
+  const definitions = routes ?? []
   const fixturePath = resolve(cwd, PROTOTYPE_FIXTURE_FILE)
   const relPath = relative(cwd, fixturePath)
-  const hasFixture = await fileExists(cwd, PROTOTYPE_FIXTURE_FILE)
   const prototypeRoutes = definitions.filter((route) => route.prototype)
-
-  if (!hasFixture && prototypeRoutes.length === 0) {
-    return checkClientWiringWithoutFixture(cwd)
-  }
 
   const results: CheckResult[] = []
 
@@ -150,7 +177,7 @@ export async function checkPrototypeRoutes(options: PrototypeCheckOptions): Prom
   }
 
   if (prototypeRoutes.length > 0) {
-    results.push(await checkAppWiring(cwd, prototypeRoutes))
+    results.push(fromSource(await checkAppWiring(cwd, prototypeRoutes)))
   }
 
   let fixture: FixtureRoutes | null = null
@@ -158,9 +185,9 @@ export async function checkPrototypeRoutes(options: PrototypeCheckOptions): Prom
     const parsed = await cache.get(fixturePath)
     fixture = parsed ? fixtureRoutesFromAst(parsed.ast) : null
     if (!parsed) {
-      results.push(check('prototype-fixture-unreadable', TITLE, 'warn', `${relPath} could not be parsed, so its entries were not checked.`, undefined, relPath))
+      results.push(fromSource(check('prototype-fixture-unreadable', TITLE, 'warn', `${relPath} could not be parsed, so its entries were not checked.`, undefined, relPath)))
     } else if (!fixture) {
-      results.push(
+      results.push(fromSource(
         check(
           'prototype-fixture-unreadable',
           TITLE,
@@ -169,9 +196,9 @@ export async function checkPrototypeRoutes(options: PrototypeCheckOptions): Prom
           'Export `definePrototype({ manifest, routes })` as the default export.',
           relPath,
         ),
-      )
+      ))
     } else if (fixture.unreadable) {
-      results.push(
+      results.push(fromSource(
         check(
           'prototype-fixture-unreadable',
           TITLE,
@@ -180,7 +207,7 @@ export async function checkPrototypeRoutes(options: PrototypeCheckOptions): Prom
           'Declare every route with a literal key so the check and the client can read them.',
           relPath,
         ),
-      )
+      ))
       fixture = null
     }
   } else if (prototypeRoutes.length > 0) {
@@ -195,8 +222,8 @@ export async function checkPrototypeRoutes(options: PrototypeCheckOptions): Prom
     )
   }
 
-  if (fixture && options.definitions) {
-    results.push(...checkEntries(fixture, options.definitions, prototypeRoutes, relPath))
+  if (fixture && routes) {
+    results.push(...checkEntries(fixture, routes, prototypeRoutes, relPath))
   } else if (fixture) {
     // Without the graph an orphaned entry is invisible, and silence would read
     // as "every entry names a route".
@@ -224,8 +251,8 @@ export async function checkPrototypeRoutes(options: PrototypeCheckOptions): Prom
 
 function checkEntries(
   fixture: FixtureRoutes,
-  definitions: RouteDefinition[],
-  prototypeRoutes: RouteDefinition[],
+  definitions: PrototypeRoute[],
+  prototypeRoutes: PrototypeRoute[],
   relPath: string,
 ): CheckResult[] {
   const results: CheckResult[] = []
@@ -261,7 +288,7 @@ function checkEntries(
     }
   }
 
-  const seen = new Map<string, RouteDefinition>()
+  const seen = new Map<string, PrototypeRoute>()
   for (const route of definitions) {
     if (!route.name) continue
     const key = `${route.method.toUpperCase()} ${route.path}`
@@ -304,7 +331,7 @@ function checkEntries(
 }
 
 /** `createApp()` must hand the fixture over, or the boot fails on the first prototype route. */
-async function checkAppWiring(cwd: string, prototypeRoutes: RouteDefinition[]): Promise<CheckResult> {
+async function checkAppWiring(cwd: string, prototypeRoutes: PrototypeRoute[]): Promise<CheckResult> {
   const key = 'prototype-app-wiring'
   const appPath = await resolveAppEntry(cwd)
   const entry = appPath === null ? null : await readIfExists(cwd, appPath)

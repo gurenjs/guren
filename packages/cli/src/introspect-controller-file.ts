@@ -1,4 +1,21 @@
+import type { AppManifest } from '@guren/server'
+
 import { classNameFromPath, excludeBarrelFiles } from './discovery'
+
+const IMPORT_FAILED = ' could not be imported: '
+
+/** The `controller-import` warning the child leaves for a controller file whose import threw. */
+export function controllerImportWarning(file: string, reason: string): AppManifest['warnings'][number] {
+  return { code: 'controller-import', message: `${file}${IMPORT_FAILED}${reason}` }
+}
+
+/** The controller files, POSIX-relative, the child could not import: a class there may be the routed one. */
+export function controllerImportFailures(manifest: Pick<AppManifest, 'warnings'>): string[] {
+  return manifest.warnings.flatMap((warning) => {
+    const at = warning.code === 'controller-import' ? warning.message.indexOf(IMPORT_FAILED) : -1
+    return at > 0 ? [warning.message.slice(0, at)] : []
+  })
+}
 
 export interface ControllerExport {
   readonly file: string
