@@ -956,7 +956,7 @@ function deliveryMounted(): CheckResult {
 }
 
 /** Keyed on the config enabling delivery, or on the rule alone when no call the source reads sets it. */
-function deliveryUnmounted(relPath: string | undefined, cause: string, routesFile?: string): CheckResult {
+function deliveryUnmounted(relPath: string | undefined, cause: string): CheckResult {
   return check(
     relPath ? `attachments-delivery:${relPath}` : 'attachments-delivery',
     'Attachments delivery route',
@@ -964,7 +964,7 @@ function deliveryUnmounted(relPath: string | undefined, cause: string, routesFil
     `configureAttachments()${relPath ? ` in ${relPath}` : ''} enables delivery, but ${cause}` +
       `Private attachment URLs would be minted that 404 — and every delivery failure is a uniform ` +
       `404 by design, so nothing at runtime names this cause.`,
-    `Call registerAttachmentRoutes(router) from the route registrar your app mounts${routesFile ? ` (${routesFile})` : ''}, or remove the delivery option.`,
+    'Call registerAttachmentRoutes(router) from the route registrar your app mounts, or remove the delivery option.',
     relPath,
   )
 }

@@ -18,6 +18,7 @@ import { runCheck } from './check'
 import { formatFinding, gatingResults } from './check-result'
 import { capFindings, codegenFallback, OUTPUT_ERROR_PATTERN, outputFindings, outputTail, readScripts, resolveScriptCommand } from './command-output'
 import { introspectApp, type Introspection } from './introspect'
+import { INTROSPECTION_UNAVAILABLE } from './manifest-section'
 import { isLintable, runOxlint } from './lint-run'
 import { bunExecutable, runCaptured, type CapturedExec, type CapturedRun } from './subprocess'
 
@@ -84,9 +85,6 @@ interface StageContext {
   /** Whether a stage already reported that the app could not be introspected. */
   introspectionNoted: boolean
 }
-
-/** The key both `runCheck()` and `runAudit()` report a failed introspection under. */
-const INTROSPECTION_UNAVAILABLE = 'introspection-unavailable'
 
 /**
  * A failed introspection as one finding on the stage that met it first. It never fails the
@@ -206,6 +204,7 @@ export async function runGate(options: RunGateOptions = {}): Promise<GateReport>
   // Its own run, not the process memo: the dev MCP server calls the gate for the whole session,
   // and codegen, the stage before check, is what lets a fresh clone's entry import at all.
   const introspect = options.introspect ?? (() => introspectApp(cwd, { fresh: true }))
+  // Shared by both stages: each wraps what it is given in a memo of its own.
   let introspection: Promise<Introspection> | undefined
   const ctx: StageContext = {
     cwd,

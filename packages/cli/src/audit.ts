@@ -54,6 +54,7 @@ import type { CheckEvidence } from './check-result'
 import { manifestMiddlewareNames } from './app-routes'
 import { introspectRunner, type IntrospectOption } from './introspect'
 import {
+  INTROSPECTION_UNAVAILABLE,
   INTROSPECTION_UNAVAILABLE_FIX,
   introspectedRoutes,
   introspectionUnavailableMessage,
@@ -630,7 +631,7 @@ async function loadAuditRoutes(cwd: string, options: RunAuditOptions): Promise<A
   if (failed?.status === 'failed') {
     staticReason ??= `the app could not be introspected (${failed.reason})`
     loadFindings.push(finding(
-      'introspection-unavailable',
+      INTROSPECTION_UNAVAILABLE,
       'Introspection',
       'warn',
       introspectionUnavailableMessage(failed, 'The route-level checks were judged from the routes file instead.'),

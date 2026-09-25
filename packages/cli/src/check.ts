@@ -63,7 +63,7 @@ import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
 import { runI18nCheck } from './i18n-check'
 import { introspectRunner, type Introspection, type IntrospectOption } from './introspect'
-import { INTROSPECTION_UNAVAILABLE_FIX, introspectionUnavailableMessage, ROUTES_FLAG_NOT_INTROSPECTED } from './manifest-section'
+import { INTROSPECTION_UNAVAILABLE, INTROSPECTION_UNAVAILABLE_FIX, introspectionUnavailableMessage, ROUTES_FLAG_NOT_INTROSPECTED } from './manifest-section'
 import { checkEnvExample, ENV_EXAMPLE_FILE } from './app-env'
 import { checkConfigWiring } from './config-check'
 import { runSpecCheck } from './spec-check'
@@ -370,10 +370,10 @@ async function introspectionUnavailable(run: Promise<Introspection> | undefined)
   if (result?.status !== 'failed') return undefined
   return {
     ...check(
-      'introspection-unavailable',
+      INTROSPECTION_UNAVAILABLE,
       'Introspection',
       'warn',
-      introspectionUnavailableMessage(result, 'The checks that read it were judged from source instead.'),
+      introspectionUnavailableMessage(result, 'The checks with a source reading were judged from it; the rest report -unverified.'),
       INTROSPECTION_UNAVAILABLE_FIX,
     ),
     advisory: true,

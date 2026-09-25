@@ -263,6 +263,22 @@ export default function registerRoutes(router: any) {
       })
     })
 
+    it('names a failed introspection on the audit stage when only the audit asked', async () => {
+      const { 'config/session.ts': _session, ...auditOnly } = files
+      await withApp('introspect-audit-only', auditOnly, async (dir) => {
+        const run = counted({ status: 'failed', reason: 'crashed', message: 'The introspection process exited with code 1.' })
+
+        const report = await runGate({ cwd: dir, exec: fakeExec().exec, introspect: run.introspect })
+
+        expect(run.calls()).toBe(1)
+        expect(stage(report, 'check').findings).toEqual([])
+        expect(stage(report, 'audit')).toMatchObject({
+          status: 'pass',
+          findings: [expect.stringMatching(/^Introspection \(advisory\): The app could not be introspected \(crashed\)/)],
+        })
+      })
+    })
+
     it('names a failed introspection once, on the stage that met it, without failing it', async () => {
       await withApp('introspect-failed', files, async (dir) => {
         const run = counted({ status: 'failed', reason: 'import', message: 'Could not load src/main.ts.' })

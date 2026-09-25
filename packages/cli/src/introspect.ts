@@ -37,10 +37,12 @@ export const DEFAULT_INTROSPECT_TIMEOUT_MS = 30_000
  */
 export type IntrospectOption = boolean | (() => Promise<Introspection>)
 
-/** The run {@link IntrospectOption} names, or `undefined` for none. */
+/** The run {@link IntrospectOption} names, started at most once however often it is asked, or `undefined` for none. */
 export function introspectRunner(cwd: string, option: IntrospectOption | undefined): (() => Promise<Introspection>) | undefined {
-  if (typeof option === 'function') return option
-  return option ? () => introspectApp(cwd) : undefined
+  const run = typeof option === 'function' ? option : option ? () => introspectApp(cwd) : undefined
+  if (!run) return undefined
+  let started: Promise<Introspection> | undefined
+  return () => (started ??= run())
 }
 
 /** One run per app root and timeout per CLI process, so a larger `timeoutMs` can retry a timed-out run. */

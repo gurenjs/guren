@@ -164,9 +164,9 @@ export interface DeployManifestFacts {
 
 export interface DeployRuntimeOptions {
   /**
-   * The app's introspection, asked for only once a deploy target is found, so an
-   * app with none never spawns it. Introspected unless this is `false`, which leaves
-   * the hashing and store verdicts `-unverified`.
+   * The app's introspection, asked for only once a deploy target is found, so an app with
+   * none never spawns it. Without one the hashing and store verdicts are `-unverified`:
+   * `checkDeployRuntime()` introspects unless this is `false`, `readDeployRuntime()` only when given it.
    */
   introspect?: (() => Promise<Introspection>) | false
 }

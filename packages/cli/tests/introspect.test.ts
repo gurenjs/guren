@@ -4,7 +4,7 @@ import { readFile, rm } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import type { AppManifest } from '@guren/core'
 
-import { introspectApp, type Introspection, type IntrospectionFailure } from '../src/introspect'
+import { introspectApp, introspectRunner, type Introspection, type IntrospectionFailure } from '../src/introspect'
 import {
   assertWorkspaceBuilt,
   CLI_BIN_PATH,
@@ -541,4 +541,18 @@ describe('guren introspect --json', () => {
     expect(failed.exitCode).toBe(1)
     expect(JSON.parse(failed.stdout)).toMatchObject({ status: 'failed', reason: 'no-entry' })
   }, 60_000)
+})
+
+describe('introspectRunner()', () => {
+  test('starts a caller-supplied run at most once, however often a check asks', async () => {
+    let calls = 0
+    const run = introspectRunner('/app', async (): Promise<Introspection> => (calls++, { status: 'failed', reason: 'import', message: 'x' }))!
+
+    await Promise.all([run(), run()])
+    await run()
+
+    expect(calls).toBe(1)
+    expect(introspectRunner('/app', false)).toBeUndefined()
+    expect(introspectRunner('/app', undefined)).toBeUndefined()
+  })
 })
