@@ -16,6 +16,7 @@ import { formatFinding, gatingResults, type CheckReport } from '../check-result'
 import { capFindings, codegenFallback, OUTPUT_ERROR_PATTERN, outputFindings, outputTail, resolveScriptCommand } from '../command-output'
 import { discoverTestFiles } from '../discovery'
 import { readBracketedTokenFiles } from '../docs-acceptance'
+import { ADVISORY_INTROSPECT_TIMEOUT_MS, introspectApp } from '../introspect'
 import { resolveAppDrizzleKit, type AppDrizzleKit } from '../make-migration'
 import { bunExecutable, type CapturedExec, type CapturedRun } from '../subprocess'
 import {
@@ -230,7 +231,9 @@ export class PlanVerifier {
     private readonly options: PlanVerifierOptions,
   ) {
     this.declaredIds = planAcceptanceIds(plan)
-    this.check = options.check ?? (() => runCheck({ cwd: options.root, json: true, introspect: true }))
+    // The gate's cap: in the Stop hook this runs beside the gate's own introspection.
+    const introspect = () => introspectApp(options.root, { timeoutMs: ADVISORY_INTROSPECT_TIMEOUT_MS })
+    this.check = options.check ?? (() => runCheck({ cwd: options.root, json: true, introspect }))
     this.testFiles = options.testFiles ?? (() => discoverTestFiles(options.root))
     this.drizzleKit = options.drizzleKit ?? (() => resolveAppDrizzleKit(options.root))
     this.now = options.now ?? (() => new Date())

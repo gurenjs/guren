@@ -806,11 +806,6 @@ function formatHashers(hashers: ManifestHasher[]): string {
 }
 
 /**
- * The hashers the auth manager holds, as the introspected app registered them (RFC 0026 §5),
- * or why that is unverified: no user provider is registered yet the source verifies passwords,
- * and a `useModel()` in a provider's `boot()` is past what the manifest sees.
- */
-/**
  * Why hashers the app registered cannot settle the verdict: all scrypt, none a user provider's, yet
  * the source verifies passwords, which a `useModel()` in a provider's `boot()` would explain.
  */

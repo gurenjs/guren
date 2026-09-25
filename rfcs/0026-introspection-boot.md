@@ -769,11 +769,15 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   therefore spawns the child on an agent's stop whenever the app has a rule's
 >   content (a deploy target, a session or attachments config, a mutating
 >   route, an agent route). web and blog introspect in under 0.5 s.
-> - `plan:verify` introspects: `runCheck({ introspect: true })`. Every verify
->   list opens with a `codegen` that must pass before any later command runs
->   (`PLAN_STEP_VERIFY`, and `stoppedBy` in `plan/verify.ts`), so the check never
->   runs against an entry that cannot import. It runs in one-shot processes (the
->   command, the Stop hook), so the process memo is safe there.
+> - `plan:verify` introspects, through the process memo with the gate's 10 s
+>   cap. Every verify list opens with a `codegen` that must pass before any later
+>   command runs (`PLAN_STEP_VERIFY`, and `stoppedBy` in `plan/verify.ts`), so the
+>   check never runs against an entry that cannot import. It runs in one-shot
+>   processes (the command, the Stop hook), so the memo is safe there; the dev MCP
+>   server never runs `plan:verify`. A Stop hook with a marked plan step therefore
+>   spawns two children, the gate's own run and this one, each capped at 10 s.
+>   Sharing them would need the shipped `gate-on-stop.ts` to pass one run to both,
+>   a template change for one child on the stops of a plan implementation.
 > - The dev MCP server's `guren_check` does not. It answers an agent mid-edit and
 >   is called far more often than the gate, which the same server exposes as
 >   `guren_gate` and which does introspect. The edit hook runs `check --arch`
@@ -808,9 +812,14 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   case and the table rule. The three `-unverified` builders for check results
 >   share `unverifiedResult()` in `manifest-section.ts`.
 > - Not changed, against the task list that started Part 3: `controller-methods.ts`
->   still reports a collision on the static path. There every reference is by
->   name, so the collision is already the "cannot tell which file" finding, and
->   renaming it to `-unverified` would change an audit key in a minor.
+>   still reports every collision on the static path, and `guren audit` still
+>   fails it. There every route reaches its class by name, so a collided class's
+>   `validation:*` and `authz:*` verdicts may be passes read from the other
+>   file's body. The failing collision is what keeps the exit code from passing
+>   on that evidence; an advisory `-unverified` would let `guren audit` and the
+>   gate pass exactly where the rule above forbids a pass on absent evidence. On
+>   the manifest path Part 2c already reports only the collisions a `name-only`
+>   reference reaches.
 >   Provider discovery, target detection and explicit store constructions stay
 >   on the scan because no manifest section carries them; removing them would
 >   warn every deploy app whose introspection succeeds.

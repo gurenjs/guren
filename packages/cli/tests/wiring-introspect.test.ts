@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { runBlueprint } from '../src/blueprints'
 import { runCheck, type CheckResult } from '../src/check'
 import { gatingResults } from '../src/check-result'
+import { runGate, type GateExec } from '../src/gate'
 import {
   assertWorkspaceBuilt,
   captureWarnings,
@@ -233,6 +234,28 @@ const pgTable = pgTableCreator((name) => \`app_\${name}\`)
 
     expect(manifest['sessions-binding']).toMatchObject({ status: 'fail', evidence: 'manifest' })
     expect(manifest['sessions-binding']!.message).toContain('refuses to boot')
+  })
+
+  test('guren gate introspects the app itself, so its check stage fails what only the registered app shows', async () => {
+    const dir = await scaffoldApp('gate-configured-twice', ['session'])
+    const app = await Bun.file(join(dir, 'src/app.ts')).text()
+    const pkg = JSON.parse(await Bun.file(join(dir, 'package.json')).text())
+    await writeWorkspaceFiles(dir, {
+      'src/app.ts': app
+        .replace("import { createApp } from '@guren/core'", "import { createApp, MemorySessionStore } from '@guren/core'")
+        .replace('auth: {},', 'auth: { sessionOptions: { store: new MemorySessionStore() } },'),
+      'package.json': JSON.stringify({ ...pkg, scripts: { codegen: 'guren codegen', typecheck: 'tsc --noEmit', test: 'bun test' } }),
+    })
+    // The script stages are not under test; check and audit run in process against the real child.
+    const exec: GateExec = async () => ({ exitCode: 0, stdout: '', stderr: '' })
+
+    const report = await runGate({ cwd: dir, exec })
+
+    const check = report.stages.find((stage) => stage.name === 'check')!
+    // The faked codegen writes nothing, so the generated-file findings sit beside it.
+    expect(check.status).toBe('fail')
+    expect(check.findings).toContainEqual(expect.stringContaining('refuses to boot'))
+    expect(report.stages.flatMap((stage) => stage.findings).some((finding) => finding.startsWith('Introspection'))).toBe(false)
   })
 
   test('fails a model when a module-scope configureAttachments() lives in a file nothing loads', async () => {
