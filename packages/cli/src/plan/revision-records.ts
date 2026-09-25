@@ -31,13 +31,18 @@ export interface PlanRevisionRecordsRead {
   unreadable: string[]
 }
 
-async function recordNames(dir: string): Promise<{ names: string[]; unreadable?: string }> {
+/**
+ * `names` is every entry spelling a record name, which numbering must step past whatever it is: a
+ * directory or symlink squatting on a number would otherwise make every run hit `EEXIST` on it.
+ * `files` is the regular files among them, the ones read as records.
+ */
+async function recordNames(dir: string): Promise<{ names: string[]; files: string[]; unreadable?: string }> {
   try {
-    const entries = await readdir(dir, { withFileTypes: true })
-    return { names: entries.filter((entry) => entry.isFile() && RECORD_NAME.test(entry.name)).map((entry) => entry.name) }
+    const entries = (await readdir(dir, { withFileTypes: true })).filter((entry) => RECORD_NAME.test(entry.name))
+    return { names: entries.map((entry) => entry.name), files: entries.filter((entry) => entry.isFile()).map((entry) => entry.name) }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { names: [] }
-    return { names: [], unreadable: `${dir} could not be listed: ${(error as Error).message}` }
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { names: [], files: [] }
+    return { names: [], files: [], unreadable: `${dir} could not be listed: ${(error as Error).message}` }
   }
 }
 
@@ -49,7 +54,7 @@ export async function readPlanRevisionRecords(planPath: string): Promise<PlanRev
   const dir = planRevisionsDir(planPath)
   const listed = await recordNames(dir)
   const read: PlanRevisionRecordsRead = { records: [], unreadable: listed.unreadable ? [listed.unreadable] : [] }
-  for (const name of listed.names) {
+  for (const name of listed.files) {
     const path = join(dir, name)
     const record = await readBesideRecord(path, PlanRevisionSchema, 'plan revision')
     if (record.unreadable) read.unreadable.push(record.unreadable)
@@ -60,7 +65,7 @@ export async function readPlanRevisionRecords(planPath: string): Promise<PlanRev
 }
 
 /**
- * Writes `revision` as the next number after every record name present, readable or not, and
+ * Writes `revision` as the next number after every entry spelling a record name, and
  * returns its path. The file appears whole or not at all: it is written to a temporary and
  * linked into place, and `link()` refuses a name that exists where `rename()` would replace it.
  */

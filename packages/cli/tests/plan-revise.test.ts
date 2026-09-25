@@ -270,6 +270,34 @@ describe('plan:revise', () => {
     expect(report.revisionFile).toBe('numbering/comments.revisions/0010.json')
   })
 
+  test('should number past a directory squatting on a record name rather than collide with it', async () => {
+    const plan = await approvedPlan('squatter')
+    await mkdir(join(ROOT, 'squatter/comments.revisions/0001.json'), { recursive: true })
+
+    const report = await revise(plan, { ops: await writeJson('squatter/ops.json', { ops: [ADD_DELETED_AT] }) })
+
+    expect(report.revisionFile).toBe('squatter/comments.revisions/0002.json')
+    expect((await readPlanRevisionRecords(plan)).records.map((record) => record.sequence)).toEqual([2])
+  })
+
+  test.skipIf(process.getuid?.() === 0)('should refuse with the temporary path, no hard-link hint and nothing left, when the record cannot be written', async () => {
+    const plan = await approvedPlan('record-unwritable')
+    const before = await readFile(plan, 'utf8')
+    const dir = planRevisionsDir(plan)
+    await mkdir(dir, { recursive: true })
+    await chmod(dir, 0o555)
+    try {
+      const refusal = revise(plan, { ops: await writeJson('record-unwritable/ops.json', { ops: [ADD_DELETED_AT] }) })
+      await expect(refusal).rejects.toThrow(/could not be written to .*\.tmp /u)
+      await expect(refusal).rejects.not.toThrow(/hard links/u)
+    } finally {
+      await chmod(dir, 0o755)
+    }
+
+    expect(await readdir(dir)).toEqual([])
+    expect(await readFile(plan, 'utf8')).toBe(before)
+  })
+
   test.skipIf(process.getuid?.() === 0)('should name the record and say to run again when the plan write fails after it', async () => {
     const plan = await writeJson('write-fails/docs/plans/comments/plan.json', loadApprovedCommentsPlan())
     await approvePlanFile(plan)
