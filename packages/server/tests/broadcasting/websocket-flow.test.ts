@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 
 import { createBroadcastManager, type BroadcastManager } from '../../src/broadcasting'
 import { MemoryDriver } from '../../src/broadcasting/drivers'
+import { setResolvedPrincipal } from '../../src/auth/context'
 import { Application } from '../../src/http/Application'
 
 /**
@@ -104,6 +105,28 @@ async function roundTrip(socket: WebSocket, frames: Frame[]): Promise<void> {
 }
 
 describe('WebSocket subscription flow', () => {
+  test('authorizes ?channels= as the auth context user when getUser is omitted', async () => {
+    const manager = createManager()
+    manager.privateChannel('users.{id}', (channel, user) => (user as { id: number } | undefined)?.id === Number(channel.split('.').pop()))
+
+    const app = new Application()
+    app.hono.use('*', async (ctx, next) => {
+      const user = userFromHeader(ctx)
+      if (user) setResolvedPrincipal(ctx, { user, id: user.id })
+      await next()
+    })
+    app.router.get('/broadcasting/socket', manager.webSocketMiddleware())
+    await app.boot()
+    const { url } = await app.listen({ port: 0, hostname: '127.0.0.1', vite: false })
+    openApps.push(app)
+
+    const { channels } = await connect(url, {
+      query: '?channels=private-users.7,private-users.8',
+      headers: { 'x-user': '7' },
+    })
+    expect(channels).toEqual(['private-users.7'])
+  })
+
   test('announces the client id and delivers events for public channels requested up front', async () => {
     const manager = createManager()
     manager.channel('announcements', () => true)
