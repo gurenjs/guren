@@ -574,7 +574,7 @@ async function routeFileDetail(root: string, cache: ParseCache, routesFile: stri
     ...(routesFile === undefined ? [] : [routesFile]),
     ...projectFiles.map((file) => toPosixRelative(root, file)),
     ...moduleRoutes.flatMap((module) => module.files.map((file) => toPosixRelative(root, file))),
-    ...moduleEntries.filter((entry): entry is string => entry !== null).map((entry) => toPosixRelative(root, entry)),
+    ...moduleEntries.flatMap((entry) => (entry === null ? [] : [toPosixRelative(root, entry)])),
   ])
 
   const details: PlanAppRouteFile[] = []

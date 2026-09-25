@@ -10,7 +10,7 @@ import {
   ROUTES_DIR,
   toPosixRelative,
 } from './discovery'
-import { cachedFileProbe, moduleRoutesEntryFile, resolveImportPath, RUNTIME_TO_SOURCE_EXTENSION, type FileProbe, SOURCE_TO_RUNTIME_EXTENSION, swapExtension } from './import-resolution'
+import { cachedFileProbe, MODULE_ROUTES_FILE, moduleRoutesEntryFile, resolveImportPath, RUNTIME_TO_SOURCE_EXTENSION, type FileProbe, SOURCE_TO_RUNTIME_EXTENSION, swapExtension } from './import-resolution'
 import type { ParseCache } from './parse-cache'
 import { specifierBase } from './schema-binding'
 import { DEFAULT_ROUTES_FILE, isRegistrarExportName, resolveRoutesEntry, specifierName } from './route-registrar'
@@ -23,9 +23,6 @@ import { check, type CheckResult } from './check-result'
  * its routes entry, or its routes/.
  */
 const MODULE_WIRING_PATTERN = /^modules\/[^/]+\/(?:index\.|package\.json$|routes[/.])/u
-
-/** The routes entry `make:module` scaffolds, named as the file to create when a module has none. */
-const MODULE_ROUTES_FILE = 'routes.ts'
 
 /**
  * Whether a changed path — POSIX-relative, as `getChangedFiles` reports — could move this
@@ -281,7 +278,7 @@ async function resolveModuleEntry(
   probe: FileProbe,
   moduleDir: string,
 ): Promise<ModuleEntryResolution> {
-  const read = await readModuleDescriptor(cwd, cache, moduleDir)
+  const read = await readModuleDescriptor(cwd, cache, moduleDir, probe)
   if (typeof read === 'string') return { kind: 'fallback' }
   const descriptor = read.file
   const descriptorPath = resolve(cwd, descriptor)

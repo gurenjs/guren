@@ -611,7 +611,7 @@ describe('runArchCheck derived module rules (RFC 0002, zero-config)', () => {
       expect(violation).toBeDefined()
       expect(violation!.status).toBe('fail')
       expect(violation!.message).toContain("modules/billing's internals")
-      expect(violation!.suggestion).toContain('modules/billing (its index.ts)')
+      expect(violation!.suggestion).toContain('modules/billing (its entry file)')
     } finally {
       await workspace.cleanup()
     }

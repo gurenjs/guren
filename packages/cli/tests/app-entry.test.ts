@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { createAppListsFile, findModuleDescriptor, readModuleDescriptor } from '../src/app-entry'
+import { createAppListsFile, findModuleDescriptor, moduleDescriptorOrScaffold, readModuleDescriptor } from '../src/app-entry'
 import { ParseCache, parseSourceFile } from '../src/parse-cache'
+import { createTempRoot, writeWorkspaceFiles } from './helpers'
 
 const CWD = resolve('/app')
 const ENTRY = resolve(CWD, 'src/app.ts')
@@ -47,7 +47,7 @@ describe('readModuleDescriptor', () => {
   let root: string
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'guren-cli-module-descriptor-'))
+    root = await createTempRoot('guren-cli-module-descriptor-')
   })
 
   afterEach(async () => {
@@ -55,13 +55,8 @@ describe('readModuleDescriptor', () => {
   })
 
   async function writeModule(files: Record<string, string>): Promise<string> {
-    const dir = join(root, 'modules/billing')
-    await mkdir(dir, { recursive: true })
-    for (const [name, content] of Object.entries(files)) {
-      await mkdir(join(dir, name, '..'), { recursive: true })
-      await writeFile(join(dir, name), content)
-    }
-    return dir
+    await writeWorkspaceFiles(root, Object.fromEntries(Object.entries(files).map(([name, content]) => [`modules/billing/${name}`, content])))
+    return join(root, 'modules/billing')
   }
 
   const DESCRIPTOR = "import { defineModule } from '@guren/core'\n\nexport default defineModule({ name: 'billing' })\n"
@@ -88,5 +83,13 @@ describe('readModuleDescriptor', () => {
     const dir = await writeModule({ 'routes.ts': 'export {}\n' })
 
     expect(await readModuleDescriptor(root, new ParseCache(), dir)).toBe('absent')
+  })
+
+  it('names the scaffolded index.ts only when a module has no entry file', async () => {
+    await writeModule({ 'routes.ts': 'export {}\n' })
+    expect(await moduleDescriptorOrScaffold(root, 'billing')).toEqual({ file: 'modules/billing/index.ts', exists: false })
+
+    await writeModule({ 'index.mts': DESCRIPTOR })
+    expect(await moduleDescriptorOrScaffold(root, 'billing')).toEqual({ file: 'modules/billing/index.mts', exists: true })
   })
 })

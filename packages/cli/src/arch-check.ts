@@ -129,7 +129,7 @@ async function evaluateDerivedModuleRules(
           'Module boundary',
           'fail',
           `${relPath} imports '${imp.specifier}', reaching into modules/${targetModule}'s internals.`,
-          `Import from modules/${targetModule} (its index.ts) or move the shared code into the module's public API.`,
+          `Import from modules/${targetModule} (its entry file) or move the shared code into the module's public API.`,
           relPath,
         ),
       )

@@ -100,7 +100,7 @@ function routePathLiterals(program: unknown): RoutePathLiteral[] {
  * Every file this check reads: the project's `routes/`, each module's `routes/`, and each
  * module's single-file `routes.ts` entry — the last is not redundant, since
  * `discoverModuleRoutesFiles` drops a module with no `routes/` *directory*, the shape
- * `make:module` scaffolds. Known gaps, both in `modules/<name>/index.ts`: an inline
+ * `make:module` scaffolds. Known gaps, both in a module's entry file: an inline
  * `defineModule({ routes: (router) => ... })` and `defineModule({ prefix })`.
  */
 export async function discoverRoutePathFiles(cwd: string, routesFile?: string): Promise<string[]> {

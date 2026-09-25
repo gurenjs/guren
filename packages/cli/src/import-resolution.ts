@@ -85,6 +85,10 @@ export async function resolveDirectoryImport(directory: string, options: Resolve
   return firstFile(indexCandidates(directory, declarations), probe)
 }
 
+/** What `make:module` scaffolds as a module's entry and routes entry, named as the file to create when a module has none. */
+export const MODULE_ENTRY_FILE = 'index.ts'
+export const MODULE_ROUTES_FILE = 'routes.ts'
+
 /**
  * The file `import '../modules/<name>'` loads: the one rule for a module's entry, which
  * holds its `defineModule()` descriptor and is the module's public surface to the arch check.

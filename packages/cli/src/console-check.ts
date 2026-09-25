@@ -8,7 +8,7 @@ import {
   toPosixRelative,
   moduleNameFor,
 } from './discovery'
-import { findModuleDescriptor, MODULE_DESCRIPTOR_FILE } from './app-entry'
+import { moduleDescriptorOrScaffold } from './app-entry'
 import { memberKeyName, unwrapTypeAssertion, walk } from './ast-walk'
 import { camelCase, escapeRegExp, referencesIdentifier } from './utils'
 import { ParseCache } from './parse-cache'
@@ -171,12 +171,6 @@ export async function discoverDeclaredCommandFiles(cwd: string, cache: ParseCach
   })
 }
 
-/** A module's entry file, else the one `make:module` would scaffold. */
-async function moduleEntry(cwd: string, moduleName: string): Promise<string> {
-  const moduleDir = resolve(cwd, 'modules', moduleName)
-  return (await findModuleDescriptor(cwd, moduleDir)) ?? toPosixRelative(cwd, resolve(moduleDir, MODULE_DESCRIPTOR_FILE))
-}
-
 /**
  * Verifies every class under `app/Console/Commands` is referenced by the console
  * entrypoint that would register it — `src/console.ts` for a project command,
@@ -192,12 +186,17 @@ export async function checkConsoleCommandRegistration(cwd: string, cache: ParseC
   // Read at most once, however many modules ask about it.
   let consoleEntry: EntrySource | null | undefined
 
+  const moduleNames = [...new Set(commandFiles.flatMap((filePath) => moduleNameFor(cwd, filePath) ?? []))]
+  const moduleEntries = new Map(await Promise.all(
+    moduleNames.map(async (name) => [name, (await moduleDescriptorOrScaffold(cwd, name)).file] as const),
+  ))
+
   // Grouped by entrypoint so a missing one is reported once, not once per
   // command it would have registered.
   const byEntry = new Map<string, { moduleName: string | null; files: string[] }>()
   for (const filePath of commandFiles) {
     const moduleName = moduleNameFor(cwd, filePath)
-    const entry = moduleName ? await moduleEntry(cwd, moduleName) : CONSOLE_ENTRY
+    const entry = moduleName ? moduleEntries.get(moduleName)! : CONSOLE_ENTRY
     const group = byEntry.get(entry) ?? { moduleName, files: [] }
     group.files.push(filePath)
     byEntry.set(entry, group)
