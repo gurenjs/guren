@@ -6,9 +6,11 @@
  * immediately instead of surfacing later in CI.
  */
 import { existsSync, realpathSync } from 'node:fs'
-import { isAbsolute, relative, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 interface HookInput {
+  /** The session's cwd, which follows the agent's `cd` and a worktree it entered. */
+  cwd?: string
   tool_input?: {
     file_path?: string
   }
@@ -22,15 +24,37 @@ const WATCHED_PATHS = [
   'db/schema.ts',
 ]
 
-let filePath = ''
+let input: HookInput
 try {
-  const input = JSON.parse(await Bun.stdin.text()) as HookInput
-  filePath = input.tool_input?.file_path ?? ''
+  input = JSON.parse(await Bun.stdin.text()) as HookInput
 } catch {
   process.exit(0)
 }
+const filePath = input.tool_input?.file_path ?? ''
+if (filePath === '') {
+  process.exit(0)
+}
 
-/** Both sides resolved: on macOS `process.cwd()` is the real `/private/var/...` while the editor hands over `/var/...`. */
+/**
+ * The app to check: the nearest ancestor of the session cwd holding this script at
+ * its own path, else the script's grandparent (`<app>/.claude/hooks/`). The same
+ * rule as `gate-on-stop.ts`: the cwd follows the agent's `cd` into a subdirectory
+ * or a worktree, and every path below is judged from the app root, never the cwd.
+ */
+function appRoot(cwd: unknown): string {
+  const installed = resolve(import.meta.dir, '../..')
+  const self = relative(installed, import.meta.path)
+  if (typeof cwd === 'string' && isAbsolute(cwd)) {
+    for (let dir = cwd; ; dir = dirname(dir)) {
+      if (existsSync(join(dir, self))) return dir
+      if (dirname(dir) === dir) break
+    }
+  }
+  return installed
+}
+const root = appRoot(input.cwd)
+
+/** Both sides resolved: on macOS a temp dir's real path is `/private/var/...` while the editor hands over `/var/...`. */
 function real(path: string): string {
   try {
     return realpathSync(path)
@@ -41,13 +65,13 @@ function real(path: string): string {
 
 // POSIX separators so the prefix lists below match on Windows too; `relative()`
 // yields an absolute path across drives there, which is outside the project.
-const relPath = relative(real(process.cwd()), real(filePath)).split(sep).join('/')
+const relPath = relative(real(root), real(resolve(filePath))).split(sep).join('/')
 if (relPath === '' || isAbsolute(relPath) || relPath === '..' || relPath.startsWith('../')) {
   process.exit(0)
 }
 
 const wantsCheck = WATCHED_PATHS.some((prefix) => relPath.startsWith(prefix))
-const wantsLint = existsSync('.oxlintrc.json')
+const wantsLint = existsSync(join(root, '.oxlintrc.json'))
 if (!wantsCheck && !wantsLint) {
   process.exit(0)
 }
@@ -69,7 +93,7 @@ if (wantsCheck) {
   // `changed: true` restricts file-scanning checks to what's actually changed,
   // so this stays fast as the app grows; it checks everything outside a git repo.
   // Same rule as `check --ci` and `guren gate`: warns count, advisory checks do not.
-  const gating = cli.gatingResults(await cli.runCheck({ changed: true }))
+  const gating = cli.gatingResults(await cli.runCheck({ cwd: root, changed: true }))
   if (gating.length > 0) {
     findings.push(`guren check found ${gating.length} issue(s):`)
     findings.push(...gating.map((check) => `- ${cli.formatFinding(check)}`))
@@ -79,7 +103,7 @@ if (wantsCheck) {
 // Warnings are reported too: the comment rules are warnings so `bun run lint`
 // stays green, and the agent that just wrote the comment is the one who can fix it.
 if (wantsLint && cli.isLintable(relPath)) {
-  const run = await cli.runOxlint(process.cwd(), [relPath])
+  const run = await cli.runOxlint(root, [relPath])
   if (run.kind === 'not-installed') {
     findings.push('.oxlintrc.json is present but oxlint is not installed: run `bun install`')
   } else {

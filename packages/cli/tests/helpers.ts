@@ -842,9 +842,16 @@ export async function linkWorkspaceCliSource(baseDir: string): Promise<void> {
 export async function runAgentHook(
   template: string,
   installPath: string,
+  /** A function receives the temp app's path, for input naming a directory inside it. */
   input: unknown,
   setup: (dir: string) => void | Promise<void>,
-  options: { subdir?: string; argv?: string[]; after?: (dir: string) => void | Promise<void> } = {},
+  options: {
+    subdir?: string
+    argv?: string[]
+    /** Added to the inherited environment, e.g. the `CLAUDE_PROJECT_DIR` a shipped command expands. */
+    env?: (dir: string) => Record<string, string>
+    after?: (dir: string) => void | Promise<void>
+  } = {},
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const dir = await mkdtemp(join(tmpdir(), 'guren-hook-'))
   try {
@@ -857,7 +864,8 @@ export async function runAgentHook(
     await setup(dir)
     const result = Bun.spawnSync(options.argv ?? [process.execPath, hook], {
       cwd: options.subdir ? join(dir, options.subdir) : dir,
-      stdin: Buffer.from(JSON.stringify(input)),
+      env: options.env ? { ...process.env, ...options.env(dir) } : undefined,
+      stdin: Buffer.from(JSON.stringify(typeof input === 'function' ? (input as (dir: string) => unknown)(dir) : input)),
       stdout: 'pipe',
       stderr: 'pipe',
     })

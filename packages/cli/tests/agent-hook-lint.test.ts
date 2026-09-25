@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { linkOxlint, runAgentHook } from './helpers'
 
@@ -9,6 +9,7 @@ import { linkOxlint, runAgentHook } from './helpers'
 // which is absolute.
 
 const template = resolve(import.meta.dir, '../templates/agent/targets/claude/hooks/check-after-edit.ts')
+const settings = resolve(import.meta.dir, '../templates/agent/targets/claude/settings.json')
 // A built-in rule keeps the test independent of which plugin the app configures.
 const CONFIG = JSON.stringify({ rules: { 'no-debugger': 'warn' } })
 
@@ -83,5 +84,38 @@ describe('check-after-edit hook: oxlint', () => {
       writeFileSync(join(dir, '.guren', 'routes.gen.ts'), FLAGGED_FILE)
     }, '.guren/routes.gen.ts')
     expect(result.exitCode).toBe(0)
+  })
+
+  describe('after the agent cd-ed into a subdirectory', () => {
+    const app = (dir: string) => {
+      writeFileSync(join(dir, '.oxlintrc.json'), CONFIG)
+      writeFileSync(join(dir, 'lib.ts'), FLAGGED_FILE)
+      mkdirSync(join(dir, 'modules', 'foo'), { recursive: true })
+    }
+    const edit = (dir: string) => ({ cwd: join(dir, 'modules', 'foo'), tool_input: { file_path: join(dir, 'lib.ts') } })
+
+    test('judges the edited file from the app root, not the cwd', async () => {
+      const result = await runAgentHook(template, '.claude/hooks/check-after-edit.ts', edit, async (dir) => {
+        await linkOxlint(dir)
+        app(dir)
+      }, { subdir: 'modules/foo' })
+
+      expect(result.exitCode).toBe(2)
+      expect(result.stderr).toContain('After editing lib.ts:')
+      expect(result.stderr).toContain('eslint(no-debugger)')
+    })
+
+    test('the shipped settings.json command reaches the hook through CLAUDE_PROJECT_DIR', async () => {
+      const command = (JSON.parse(readFileSync(settings, 'utf8')) as { hooks: { PostToolUse: Array<{ hooks: Array<{ command: string }> }> } })
+        .hooks.PostToolUse[0]!.hooks[0]!.command
+      const result = await runAgentHook(template, '.claude/hooks/check-after-edit.ts', edit, async (dir) => {
+        await linkOxlint(dir)
+        app(dir)
+      }, { subdir: 'modules/foo', argv: ['bash', '-c', command], env: (dir) => ({ CLAUDE_PROJECT_DIR: dir }) })
+
+      expect(result.stderr).not.toContain('Module not found')
+      expect(result.exitCode).toBe(2)
+      expect(result.stderr).toContain('eslint(no-debugger)')
+    })
   })
 })

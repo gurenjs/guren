@@ -14,7 +14,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bunx guren context 2>/dev/null || true"
+            "command": "cd \"${CLAUDE_PROJECT_DIR}\" && bunx guren context 2>/dev/null || true"
           }
         ]
       }
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .claude/hooks/check-after-edit.ts"
+            "command": "bun \"${CLAUDE_PROJECT_DIR}/.claude/hooks/check-after-edit.ts\""
           }
         ]
       }
@@ -35,7 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .claude/hooks/gate-on-stop.ts",
+            "command": "bun \"${CLAUDE_PROJECT_DIR}/.claude/hooks/gate-on-stop.ts\"",
             "timeout": 300
           }
         ]

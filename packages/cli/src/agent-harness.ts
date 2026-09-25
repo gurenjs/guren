@@ -6,6 +6,7 @@ import process from 'node:process'
 import { fileExists, readIfExists, toPosixRelative } from './discovery'
 import {
   DETECTABLE_COMPONENTS,
+  LEGACY_HOOK_COMMANDS,
   componentsForTargets,
   managedNamespaces,
   normalizeComponents,
@@ -87,6 +88,11 @@ export interface AgentHarnessResult {
    * never merges into them — it reports the snippet to add by hand, and `what` it adds.
    */
   mergeHints: Array<{ path: string; snippet: string; what: string }>
+  /**
+   * Hook commands an earlier harness wrote into a user-owned config that the run left
+   * alone, each with its replacement. Sync never rewrites that file, so the edit is the user's.
+   */
+  legacyHookCommands: Array<{ path: string; from: string; to: string }>
 }
 
 /** `\r\n` → `\n`, for the up-to-date comparison in the write loop. */
@@ -136,6 +142,43 @@ async function scriptsEnableMcp(cwd: string): Promise<boolean> {
   } catch {
     return true
   }
+}
+
+/** Every `command` string under the `hooks` key of a hooks config; nothing when it does not parse. */
+function hookCommands(raw: string): string[] {
+  let config: unknown
+  try {
+    config = JSON.parse(raw)
+  } catch {
+    return []
+  }
+  const commands: string[] = []
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      node.forEach(visit)
+    } else if (node !== null && typeof node === 'object') {
+      for (const [key, value] of Object.entries(node)) {
+        if (key === 'command' && typeof value === 'string') commands.push(value)
+        else visit(value)
+      }
+    }
+  }
+  visit((config as { hooks?: unknown } | null)?.hooks)
+  return commands
+}
+
+/** The shipped legacy hook commands still present in the user-owned configs this run skipped. */
+async function findLegacyHookCommands(
+  cwd: string,
+  skipped: readonly string[],
+): Promise<AgentHarnessResult['legacyHookCommands']> {
+  const found: AgentHarnessResult['legacyHookCommands'] = []
+  for (const path of new Set(LEGACY_HOOK_COMMANDS.map((entry) => entry.path))) {
+    if (!skipped.includes(path)) continue
+    const commands = new Set(hookCommands((await readIfExists(cwd, path).catch(() => null)) ?? ''))
+    found.push(...LEGACY_HOOK_COMMANDS.filter((entry) => entry.path === path && commands.has(entry.from)))
+  }
+  return found
 }
 
 /** Load every file under `templates/agent` keyed by template-relative POSIX path. */
@@ -397,5 +440,6 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
     pruned,
     mcpEndpointNotEnabled: !(await scriptsEnableMcp(cwd)),
     mergeHints,
+    legacyHookCommands: await findLegacyHookCommands(cwd, skipped),
   }
 }

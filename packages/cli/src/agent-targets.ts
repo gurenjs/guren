@@ -46,6 +46,30 @@ const MCP_ENDPOINT_MARKER = '_guren/mcp'
 const STOP_HOOK_MARKER = 'hooks/gate-on-stop.ts'
 
 /**
+ * Hook commands earlier harness versions wrote into the user-owned `.claude/settings.json`,
+ * each with the command the template carries now. Claude Code runs a hook in the session cwd,
+ * which follows the agent's `cd`, so a relative script path stops resolving there. Matched
+ * against whole command values only, so a command the user wrote is never flagged.
+ */
+export const LEGACY_HOOK_COMMANDS: ReadonlyArray<{ path: string; from: string; to: string }> = [
+  {
+    path: '.claude/settings.json',
+    from: 'bunx guren context 2>/dev/null || true',
+    to: 'cd "${CLAUDE_PROJECT_DIR}" && bunx guren context 2>/dev/null || true',
+  },
+  {
+    path: '.claude/settings.json',
+    from: 'bun .claude/hooks/check-after-edit.ts',
+    to: 'bun "${CLAUDE_PROJECT_DIR}/.claude/hooks/check-after-edit.ts"',
+  },
+  {
+    path: '.claude/settings.json',
+    from: 'bun .claude/hooks/gate-on-stop.ts',
+    to: 'bun "${CLAUDE_PROJECT_DIR}/.claude/hooks/gate-on-stop.ts"',
+  },
+]
+
+/**
  * A claim over files the planner owns outright: a match the current plan does not write is
  * a leftover that `agent:sync` reports and `--prune` deletes. `files` claims named top-level
  * files, `pattern` framework-named files in a shared directory, `children` named subdirectories

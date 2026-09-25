@@ -1853,6 +1853,17 @@ function reportAgentHarnessResult(result: AgentHarnessResult): void {
       `${hint.path} already exists, so it was left alone. Add ${hint.what} to it yourself:\n${hint.snippet}`,
     )
   }
+  if (result.legacyHookCommands.length > 0) {
+    // JSON-quoted, so each side pastes into the file as a whole, escaped value.
+    const edits = result.legacyHookCommands.map(
+      (entry) => `  ${JSON.stringify(entry.from)}\n  -> ${JSON.stringify(entry.to)}`,
+    )
+    consola.warn(
+      `${result.legacyHookCommands[0]!.path} runs Guren hooks by a path relative to the session cwd, ` +
+        'which breaks once the agent changes into a subdirectory. The file is yours, so it was left alone; ' +
+        `replace each "command" value:\n${edits.join('\n')}`,
+    )
+  }
   if (result.mcpEndpointNotEnabled) {
     consola.info(
       'The agent MCP config points at the dev server MCP endpoint, which is opt-in. ' +
