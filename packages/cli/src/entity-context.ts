@@ -382,11 +382,12 @@ export async function generateEntityContext(
     const target = await resolveRoutesFile(cwd, options.routesFile)
     if (target.silentlyAbsent) return scanned
 
+    const routesFile = resolve(cwd, target.path)
     const provenance: Array<string | null> = []
     const moduleIdentities: Array<string | null> = []
     let definitions: Awaited<ReturnType<typeof loadRouteDefinitions>>
     try {
-      definitions = await loadRouteDefinitions(resolve(cwd, target.path), cwd, undefined, provenance, moduleIdentities)
+      definitions = await loadRouteDefinitions(routesFile, cwd, undefined, provenance, moduleIdentities)
     } catch (error) {
       // A routes file that cannot be loaded is not a routes file with nothing
       // in it: rendering both as "No routes reference this entity." makes an
@@ -402,8 +403,7 @@ export async function generateEntityContext(
     const named = candidates.flatMap((def) => (def.controller ? [def.controller] : []))
     // The manifest describes the entry, not a file `--routes` names.
     if (options.introspect && !options.routesFile && collisionsReachedByName(scan, named).length > 0) {
-      const routesFile = resolve(cwd, target.path)
-      candidates = inModule(await withManifestControllerRefs(definitions, () => introspectApp(cwd), { cwd, routesFile, modules: moduleIdentities }))
+      candidates = await withManifestControllerRefs(candidates, () => introspectApp(cwd), { cwd, routesFile, modules: inModule(moduleIdentities) })
     }
     const modelFile = resolve(cwd, match.relPath)
 

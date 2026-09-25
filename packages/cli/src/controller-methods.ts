@@ -15,7 +15,7 @@ import { ParseCache } from './parse-cache'
 import { memberKeyName, walk } from './ast-walk'
 import { controllerImportFailures } from './introspect-controller-file'
 import { introspectedRoutes, type IntrospectSource } from './manifest-section'
-import { joinRouteDefinitions } from './app-routes'
+import { joinRouteDefinitions, type JoinableRoute } from './app-routes'
 import { specifierName } from './route-registrar'
 import { wholeIdentifierPattern } from './utils'
 
@@ -434,8 +434,6 @@ function classExportNames(body: Statement[]): (node: Statement, classDecl: Class
   }
 }
 
-type RefAttachableRoute = { method: string; path: string; name?: string; controller?: { name: string; action: string } }
-
 /**
  * What a route names its action by: a registered definition's `{ name, action }`,
  * or a manifest `ControllerRef`, which may also carry the class's file and export.
@@ -549,21 +547,18 @@ export function collisionsReachedByName(
  * module when `definitionModules` is given; a key the two sides count differently keeps its
  * name-only controller).
  */
-export function attachControllerRefs<T extends RefAttachableRoute>(
+export function attachControllerRefs<T extends JoinableRoute>(
   definitions: T[],
   manifest: Pick<AppManifest, 'routes' | 'warnings'>,
   routeSources?: ReadonlySet<string>,
   definitionModules?: readonly (string | null)[],
 ): T[] {
-  const targets = manifestRouteTargets(manifest, routeSources)
-  const projected = definitions.map(({ method, path, name, controller }, index) => ({ method, path, name, controller, index }))
-  const joined = joinRouteDefinitions(targets, projected, definitionModules)
-  const refs: Array<ControllerTarget | undefined> = []
-  joined.forEach((definition, entry) => {
-    if (definition) refs[definition.index] = targets[entry]?.controller
-  })
+  const sides = definitionModules
+    ? definitions.map((definition, index) => ({ ...definition, module: definitionModules[index] ?? null }))
+    : definitions
+  const joined = joinRouteDefinitions(sides, manifestRouteTargets(manifest, routeSources), { byModule: definitionModules !== undefined })
   return definitions.map((definition, index) => {
-    const ref = definition.controller && refs[index]
+    const ref = definition.controller && joined[index]?.controller
     return ref ? { ...definition, controller: ref } : definition
   })
 }
@@ -573,7 +568,7 @@ export function attachControllerRefs<T extends RefAttachableRoute>(
  * that still judge the routes file's definitions. Routes without a controller have nothing to attach.
  * `source.modules` is `loadRouteDefinitions()`'s `moduleIdentities` for these definitions.
  */
-export async function withManifestControllerRefs<T extends RefAttachableRoute>(
+export async function withManifestControllerRefs<T extends JoinableRoute>(
   definitions: T[],
   introspect: IntrospectSource | undefined,
   source: { cwd: string; routesFile: string; modules?: readonly (string | null)[] },
