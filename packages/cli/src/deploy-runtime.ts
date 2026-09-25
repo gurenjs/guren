@@ -13,7 +13,7 @@ import {
 import { parseSourceFile } from './parse-cache'
 import { readDeclaredDependencyNames } from './plugin-manifest'
 import type { CheckEvidence } from './check-result'
-import { introspectApp, type Introspection } from './introspect'
+import { ADVISORY_INTROSPECT_TIMEOUT_MS, introspectApp, type Introspection } from './introspect'
 // The runtime warning in the session middleware names the target by the same label.
 import { SERVERLESS_RUNTIME_LABELS } from '@guren/server'
 import type { AppManifest, AuthProviderEntry, DriverMapEntry, SessionEntry } from '@guren/server'
@@ -87,18 +87,10 @@ export interface SourceSignal {
  * What the deploy verdicts read: the targets and the facts the manifest does not carry from
  * source, the hasher, session store and cache from the introspected app (RFC 0026 §5).
  */
-export interface DeployRuntimeAnalysis {
+export interface DeployRuntimeFacts {
   targets: DeployTargetDetection[]
   /** `auth.attempt(...)` calls: password verification, read when the app registers no user provider. */
   passwordAuthSignals: SourceSignal[]
-  /** @deprecated Always empty: the hasher is read from the introspected app. */
-  bunOnlyHasherSignals: SourceSignal[]
-  /** @deprecated Always empty: the hasher is read from the introspected app. */
-  nodeHasherSignals: SourceSignal[]
-  /** @deprecated Always empty: the hasher is read from the introspected app. */
-  unreadableHasherSignals: SourceSignal[]
-  /** @deprecated Always empty: the hasher is read from the introspected app. */
-  unreadableConfigSignals: SourceSignal[]
   sessionSignals: SourceSignal[]
   /** `autoSession: false` anywhere in the app — an explicit opt-out. */
   sessionDisabledSignals: SourceSignal[]
@@ -110,10 +102,6 @@ export interface DeployRuntimeAnalysis {
   backedOAuthSignals: SourceSignal[]
   /** Explicit `new Memory*Store()` / `new MemoryDriver()` constructions. */
   memoryStoreSignals: SourceSignal[]
-  /** @deprecated Always empty: the session store is read from the introspected app. */
-  unknownSessionDriverSignals: SourceSignal[]
-  /** @deprecated Always empty: the session store is read from the introspected app. */
-  memorySessionDefaultSignals: SourceSignal[]
   /** Explicit use of filesystem-scanning provider discovery. */
   discoverySignals: SourceSignal[]
   /**
@@ -131,6 +119,22 @@ export interface DeployRuntimeAnalysis {
   manifest?: DeployManifestFacts
   /** Why an introspection that was asked for gave no manifest, e.g. `import: Could not load src/main.ts`. */
   introspectionFailure?: string
+}
+
+/** What the deprecated {@link analyzeDeployRuntime} returns: the facts, plus six signal arrays that are always empty. */
+export interface DeployRuntimeAnalysis extends DeployRuntimeFacts {
+  /** @deprecated Always empty: the hasher is read from the introspected app. */
+  bunOnlyHasherSignals: SourceSignal[]
+  /** @deprecated Always empty: the hasher is read from the introspected app. */
+  nodeHasherSignals: SourceSignal[]
+  /** @deprecated Always empty: the hasher is read from the introspected app. */
+  unreadableHasherSignals: SourceSignal[]
+  /** @deprecated Always empty: the hasher is read from the introspected app. */
+  unreadableConfigSignals: SourceSignal[]
+  /** @deprecated Always empty: the session store is read from the introspected app. */
+  unknownSessionDriverSignals: SourceSignal[]
+  /** @deprecated Always empty: the session store is read from the introspected app. */
+  memorySessionDefaultSignals: SourceSignal[]
 }
 
 export type ManifestHasher = Pick<AuthProviderEntry, 'hasher' | 'algorithm' | 'requiresBun'> & {
@@ -558,15 +562,13 @@ function detectDeployTargets(declared: string[], files: ScannedFile[]): DeployTa
  * What the deploy verdicts read: the targets and the facts only the source holds, then the
  * introspected app once a target is found. `guren doctor` and {@link checkDeployRuntime} call it.
  */
-export async function readDeployRuntime(cwd: string, options: DeployRuntimeOptions = {}): Promise<DeployRuntimeAnalysis> {
+export async function readDeployRuntime(cwd: string, options: DeployRuntimeOptions = {}): Promise<DeployRuntimeFacts> {
   const declared = await readDeclaredDependencyNames(cwd)
   // A declared plugin is a target before any file is parsed, so the child overlaps the scan.
   const early = options.introspect && declaresDeployPlugin(declared) ? options.introspect() : undefined
   const { files, unparsed } = await readAppSources(cwd)
   const targets = detectDeployTargets(declared, files)
   const introspection = options.introspect && targets.length > 0 ? await (early ?? options.introspect()) : undefined
-  // Resolving a plugin's session driver reads node_modules, which only the manifest's store needs.
-  const drivers = introspection?.status === 'ok' ? await resolveSessionDrivers(cwd) : undefined
 
   const collect = (kind: SignalKind): SourceSignal[] =>
     files.flatMap((file) =>
@@ -578,21 +580,16 @@ export async function readDeployRuntime(cwd: string, options: DeployRuntimeOptio
   return {
     targets,
     passwordAuthSignals: collect('passwordAuth'),
-    bunOnlyHasherSignals: [],
-    nodeHasherSignals: [],
-    unreadableHasherSignals: [],
-    unreadableConfigSignals: [],
     sessionSignals: collect('session'),
     sessionDisabledSignals: collect('sessionDisabled'),
     oauthSignals: collect('oauth'),
     backedSessionSignals: collect('backedSession'),
     backedOAuthSignals: collect('backedOAuth'),
     memoryStoreSignals: collect('memoryStore'),
-    memorySessionDefaultSignals: [],
-    unknownSessionDriverSignals: [],
     discoverySignals: collect('discovery'),
     unparsedFiles: unparsed,
-    ...(introspection?.status === 'ok' && drivers ? { manifest: readDeployManifestFacts(introspection.manifest, drivers) } : {}),
+    // Resolving a plugin's session driver reads node_modules, which only the manifest's store needs.
+    ...(introspection?.status === 'ok' ? { manifest: readDeployManifestFacts(introspection.manifest, await resolveSessionDrivers(cwd)) } : {}),
     ...(introspection?.status === 'failed'
       ? { introspectionFailure: describeIntrospectionFailure(introspection) }
       : {}),
@@ -623,7 +620,16 @@ function warnDeprecated(symbol: string): void {
  */
 export async function analyzeDeployRuntime(cwd: string, options: DeployRuntimeOptions = {}): Promise<DeployRuntimeAnalysis> {
   warnDeprecated('analyzeDeployRuntime')
-  return readDeployRuntime(cwd, { introspect: options.introspect ?? introspectForDeploy(cwd) })
+  const facts = await readDeployRuntime(cwd, { introspect: options.introspect ?? introspectForDeploy(cwd) })
+  return {
+    ...facts,
+    bunOnlyHasherSignals: [],
+    nodeHasherSignals: [],
+    unreadableHasherSignals: [],
+    unreadableConfigSignals: [],
+    unknownSessionDriverSignals: [],
+    memorySessionDefaultSignals: [],
+  }
 }
 
 export function readDeployManifestFacts(manifest: AppManifest, drivers: SessionDriverRegistry): DeployManifestFacts {
@@ -667,7 +673,7 @@ function perProcessCacheOf(cache: DriverMapEntry): string | null {
 }
 
 /** Caveat appended to a check message when the scan was incomplete. */
-export function formatParseCaveat(analysis: DeployRuntimeAnalysis): string {
+export function formatParseCaveat(analysis: DeployRuntimeFacts): string {
   const { unparsedFiles } = analysis
   if (unparsedFiles.length === 0) return ''
 
@@ -676,7 +682,7 @@ export function formatParseCaveat(analysis: DeployRuntimeAnalysis): string {
 }
 
 /** Targets that lack `Bun.password`, so an explicit `ScryptHasher` breaks. */
-export function bunlessTargets(analysis: DeployRuntimeAnalysis): DeployTargetDetection[] {
+export function bunlessTargets(analysis: DeployRuntimeFacts): DeployTargetDetection[] {
   return analysis.targets.filter((target) => !target.profile.hasBunRuntime)
 }
 
@@ -738,7 +744,7 @@ const BUN_ONLY_HASHER_FIX = "Drop `hasher: 'argon2'`, or replace `new ScryptHash
  * Why the introspected app has no fact for a section: the section's own reason, the failed run,
  * or no run at all. `undefined` when the manifest describes it.
  */
-function unverifiedReason<T>(analysis: DeployRuntimeAnalysis, section: ManifestSection<T> | undefined): string | undefined {
+function unverifiedReason<T>(analysis: DeployRuntimeFacts, section: ManifestSection<T> | undefined): string | undefined {
   if (section) return section.status === 'unverified' ? section.reason : undefined
   return analysis.introspectionFailure ? `introspection failed with ${analysis.introspectionFailure}` : 'the app was not introspected'
 }
@@ -749,7 +755,7 @@ function unverifiedReason<T>(analysis: DeployRuntimeAnalysis, section: ManifestS
  * What breaks is an explicit Bun.password selection (`new ScryptHasher()`, `hasher: 'argon2'`).
  * The hashers are the introspected app's (RFC 0026 §5); without them this is `-unverified`.
  */
-function judgePasswordHashing(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdict {
+function judgePasswordHashing(analysis: DeployRuntimeFacts): DeployRuntimeVerdict {
   const key = 'deploy-password-hashing'
   const title = 'Deploy Password Hashing'
 
@@ -772,11 +778,9 @@ function judgePasswordHashing(analysis: DeployRuntimeAnalysis): DeployRuntimeVer
 
   const labels = formatTargetLabels(bunless)
   const hashers = analysis.manifest?.hashers
-  const judged = hashers?.status === 'described'
-    ? judgeManifestHashing(analysis, hashers.value, labels, caveat)
-    : unverifiedReason(analysis, hashers)!
-  if (typeof judged !== 'string') return judged
-  const reason = judged
+  const described = hashers?.status === 'described' ? hashers.value : undefined
+  const reason = described ? unregisteredProviderReason(analysis, described) : unverifiedReason(analysis, hashers)
+  if (reason === undefined) return judgeManifestHashing(analysis, described!, labels, caveat)
   return {
     ...verdict(
       `${key}-unverified`,
@@ -806,12 +810,22 @@ function formatHashers(hashers: ManifestHasher[]): string {
  * or why that is unverified: no user provider is registered yet the source verifies passwords,
  * and a `useModel()` in a provider's `boot()` is past what the manifest sees.
  */
+/**
+ * Why hashers the app registered cannot settle the verdict: all scrypt, none a user provider's, yet
+ * the source verifies passwords, which a `useModel()` in a provider's `boot()` would explain.
+ */
+function unregisteredProviderReason(analysis: DeployRuntimeFacts, hashers: ManifestHasher[]): string | undefined {
+  const settled = hashers.some((entry) => entry.requiresBun !== false || entry.provider !== null)
+  if (settled || analysis.passwordAuthSignals.length === 0) return undefined
+  return `the source verifies passwords (${formatSignals(analysis.passwordAuthSignals)}), but the app registers no user provider, which a useModel() in a provider's boot() would explain`
+}
+
 function judgeManifestHashing(
-  analysis: DeployRuntimeAnalysis,
+  analysis: DeployRuntimeFacts,
   hashers: ManifestHasher[],
   labels: string,
   caveat: string,
-): DeployRuntimeVerdict | string {
+): DeployRuntimeVerdict {
   const key = 'deploy-password-hashing'
   const title = 'Deploy Password Hashing'
 
@@ -840,9 +854,6 @@ function judgeManifestHashing(
   }
 
   if (hashers.every((entry) => entry.provider === null)) {
-    if (analysis.passwordAuthSignals.length > 0) {
-      return `the source verifies passwords (${formatSignals(analysis.passwordAuthSignals)}), but the app registers no user provider, which a useModel() in a provider's boot() would explain`
-    }
     return verdict(
       key,
       title,
@@ -882,7 +893,7 @@ type RaiseIssue = (issue: string, fix: string) => void
  * An `auth.sessionOptions.store` factory, which the manifest cannot call: judged by whether
  * the source constructs a database or Redis store for it.
  */
-function raiseFactorySessionIssues(analysis: DeployRuntimeAnalysis, raise: RaiseIssue): void {
+function raiseFactorySessionIssues(analysis: DeployRuntimeFacts, raise: RaiseIssue): void {
   if (analysis.sessionSignals.length > 0 && analysis.backedSessionSignals.length === 0 && analysis.sessionDisabledSignals.length === 0) {
     raise(
       `sessions are enabled (${formatSignals(analysis.sessionSignals)}) with an auth.sessionOptions.store factory, and no DatabaseSessionStore or RedisSessionStore is constructed`,
@@ -896,7 +907,7 @@ function raiseFactorySessionIssues(analysis: DeployRuntimeAnalysis, raise: Raise
  * `.env`. A session middleware mounted by hand (`createSessionMiddleware`) is outside
  * the manager, so it stays on the scan.
  */
-function raiseManifestSessionIssues(analysis: DeployRuntimeAnalysis, session: ManifestSession | null, raise: RaiseIssue): void {
+function raiseManifestSessionIssues(analysis: DeployRuntimeFacts, session: ManifestSession | null, raise: RaiseIssue): void {
   if (session === null) {
     const manual = analysis.sessionSignals.filter((signal) => signal.symbol === 'createSessionMiddleware')
     if (manual.length > 0 && analysis.backedSessionSignals.length === 0 && analysis.sessionDisabledSignals.length === 0) {
@@ -942,7 +953,7 @@ function raiseManifestSessionIssues(analysis: DeployRuntimeAnalysis, session: Ma
  * the introspected app's; without them the verdict is `-unverified`, still naming
  * what the source shows (explicit constructions, OAuth state).
  */
-function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdict {
+function judgeRuntimeStores(analysis: DeployRuntimeFacts): DeployRuntimeVerdict {
   const key = 'deploy-runtime-stores'
   const title = 'Deploy Runtime Stores'
 
@@ -955,7 +966,6 @@ function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdi
   const sessionSection = analysis.manifest?.session
   const cacheSection = analysis.manifest?.perProcessCache
   const session = sessionSection?.status === 'described' ? sessionSection.value : undefined
-  const evidence: CheckEvidence = session === undefined || session?.kind === 'scan' ? 'static' : 'manifest'
 
   const labels = formatTargetLabels(analysis.targets)
   const issues: string[] = []
@@ -1013,6 +1023,8 @@ function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdi
     }
   }
 
+  // Past the unverified return the session is described: only a factory is judged by what the source constructs.
+  const evidence: CheckEvidence = session?.kind === 'scan' ? 'static' : 'manifest'
   return issues.length === 0
     ? verdict(key, title, 'pass', `${labels} detected, and no in-memory store defaults were found.${caveat}`, evidence)
     : verdict(key, title, 'warn', `${labels} shares no memory between requests, but ${issues.join('; ')}.${caveat}`, evidence, fixes.join(' '))
@@ -1027,7 +1039,7 @@ const EXPLICIT_PROVIDERS_FIX = 'List providers explicitly in `createApp({ provid
  * provider it finds registers as `app.register`, as an explicit
  * `app.register(X)` does, and the listeners and jobs it finds are not in the manifest.
  */
-function judgeProviderDiscovery(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdict {
+function judgeProviderDiscovery(analysis: DeployRuntimeFacts): DeployRuntimeVerdict {
   const key = 'deploy-provider-discovery'
   const title = 'Deploy Provider Discovery'
 
@@ -1056,7 +1068,7 @@ function judgeProviderDiscovery(analysis: DeployRuntimeAnalysis): DeployRuntimeV
 }
 
 /** The three deploy-runtime verdicts over one analysis, in report order. */
-export function judgeDeployVerdicts(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdict[] {
+export function judgeDeployVerdicts(analysis: DeployRuntimeFacts): DeployRuntimeVerdict[] {
   return [judgePasswordHashing(analysis), judgeRuntimeStores(analysis), judgeProviderDiscovery(analysis)]
 }
 
@@ -1066,15 +1078,8 @@ export function judgeDeployRuntime(analysis: DeployRuntimeAnalysis): DeployRunti
   return judgeDeployVerdicts(analysis)
 }
 
-/**
- * The deploy builds' cap on the introspection child, under `guren introspect`'s 30 s: the
- * verdicts are advice printed before the build, so a `register()` waiting on a binding the
- * build machine lacks must not hold it long. web and examples/blog introspect in under 0.5 s.
- */
-const DEPLOY_INTROSPECT_TIMEOUT_MS = 10_000
-
 function introspectForDeploy(cwd: string): () => Promise<Introspection> {
-  return () => introspectApp(cwd, { timeoutMs: DEPLOY_INTROSPECT_TIMEOUT_MS })
+  return () => introspectApp(cwd, { timeoutMs: ADVISORY_INTROSPECT_TIMEOUT_MS })
 }
 
 /**

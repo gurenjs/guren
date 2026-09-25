@@ -9,11 +9,11 @@ import {
   judgeDeployVerdicts,
   readDeployManifestFacts,
   readDeployRuntime,
-  type DeployRuntimeAnalysis,
+  type DeployRuntimeFacts,
   type DeployRuntimeVerdict,
 } from '../src/deploy-runtime'
 import type { Introspection } from '../src/introspect'
-import { APP_FIXTURE, DEFAULT_ROUTES_FIXTURE, ENV_SCHEMA_FIXTURE, manifestFixture, SQLITE_SCHEMA_FIXTURE } from './helpers'
+import { APP_FIXTURE, DEFAULT_ROUTES_FIXTURE, ENV_SCHEMA_FIXTURE, introspected, manifestFixture, SQLITE_SCHEMA_FIXTURE } from './helpers'
 import { makeAuth } from '../src/make-auth'
 import { runCheck } from '../src/check'
 import { gatingResults } from '../src/check-result'
@@ -72,11 +72,6 @@ async function withApp<T>(
   } finally {
     await workspace.cleanup()
   }
-}
-
-/** An introspection that reports `manifest`, so a test judges the scan beside a known app. */
-function introspected(manifest: AppManifest): () => Promise<Introspection> {
-  return async () => ({ status: 'ok', manifest })
 }
 
 /**
@@ -1243,7 +1238,7 @@ const SCRYPT_USERS = {
 } as const
 
 describe('deploy-runtime verdicts over a manifest (RFC 0026 §5)', () => {
-  let base: DeployRuntimeAnalysis
+  let base: DeployRuntimeFacts
   let workspace: Awaited<ReturnType<typeof createTempWorkspace>>
 
   beforeAll(async () => {
@@ -1259,7 +1254,7 @@ describe('deploy-runtime verdicts over a manifest (RFC 0026 §5)', () => {
 
   function judge(
     manifest: AppManifest,
-    extra: Partial<DeployRuntimeAnalysis> = {},
+    extra: Partial<DeployRuntimeFacts> = {},
     drivers: ReadonlyMap<string, boolean> = BUILT_IN_SESSION_DRIVERS,
   ): Record<string, DeployRuntimeVerdict> {
     const analysis = { ...base, ...extra, manifest: readDeployManifestFacts(manifest, drivers) }

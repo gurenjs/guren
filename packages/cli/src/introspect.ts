@@ -32,6 +32,13 @@ export interface IntrospectOptions {
 export const DEFAULT_INTROSPECT_TIMEOUT_MS = 30_000
 
 /**
+ * The cap where the manifest only feeds advice ahead of something else: a deploy build, and the
+ * gate an agent's Stop hook runs. A `register()` waiting on a binding this machine lacks must not
+ * hold either long; web and examples/blog introspect in under 0.5 s.
+ */
+export const ADVISORY_INTROSPECT_TIMEOUT_MS = 10_000
+
+/**
  * How an in-process caller of `runCheck()` or `runAudit()` asks for the introspected app: `true`
  * for this process's memoised run, or a run of its own that the caller shares between commands.
  */

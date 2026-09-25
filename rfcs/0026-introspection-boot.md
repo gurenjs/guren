@@ -762,7 +762,10 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   since the dev MCP server calls the gate for the whole session. codegen is
 >   the gate's first stage, so the entry imports on a fresh clone by the time
 >   check runs. A failed introspection is one `Introspection (advisory)` finding
->   on the stage that met it and never fails the gate. `stopGateFindings()`
+>   on the stage that met it and never fails the gate. The run is capped at 10 s,
+>   the deploy builds' cap (`ADVISORY_INTROSPECT_TIMEOUT_MS`), and a `--changed`
+>   run that changed no source file introspects in neither stage, as `guren check`
+>   already skipped it. `stopGateFindings()`
 >   therefore spawns the child on an agent's stop whenever the app has a rule's
 >   content (a deploy target, a session or attachments config, a mutating
 >   route, an agent route). web and blog introspect in under 0.5 s.
@@ -802,7 +805,8 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   with no manifest the mount and each redirect disk are
 >   `attachments-delivery-unverified:*` and `attachments-serve-redirect-unverified:*`,
 >   advisory. `configureAttachments()` argument parsing stays for the `boot()`
->   case and the table rule.
+>   case and the table rule. The three `-unverified` builders for check results
+>   share `unverifiedResult()` in `manifest-section.ts`.
 > - Not changed, against the task list that started Part 3: `controller-methods.ts`
 >   still reports a collision on the static path. There every reference is by
 >   name, so the collision is already the "cannot tell which file" finding, and
@@ -811,9 +815,9 @@ absent evidence: `CheckResult` gains `evidence: 'manifest' | 'static' | 'none'`.
 >   on the scan because no manifest section carries them; removing them would
 >   warn every deploy app whose introspection succeeds.
 > - Measured on this branch against `e89f0dec`: `deploy-runtime.ts` 1,229 to
->   1,095 lines, `session-config.ts` 160 to 140, `sessions-check.ts` 289 to 261,
->   `attachments-check.ts` 1,018 to 1,009, `tests/deploy-runtime.test.ts` 2,026
->   to 1,525.
+>   1,098 lines, `session-config.ts` 160 to 138, `sessions-check.ts` 289 to 256,
+>   `attachments-check.ts` 1,018 to 1,006, `tests/deploy-runtime.test.ts` 2,026
+>   to 1,518.
 > - Verdicts on the reference apps against main: blog and web report the same
 >   keys and statuses through `check`, `check --ci`, `audit`, `doctor` and `gate`.
 >   `examples/agents`, whose `EncryptionServiceProvider` throws without

@@ -294,7 +294,7 @@ export const deprecations: Deprecation[] = [
       detectGurenImports(
         cwd,
         (specifier) => specifier === 'analyzeDeployRuntime' || specifier === 'judgeDeployRuntime',
-        [...(await discoverAppConfigFiles(cwd)), ...(await discoverTestFiles(cwd))],
+        await globalServiceFiles(cwd),
         GUREN_CLI_IMPORT,
       ),
   },

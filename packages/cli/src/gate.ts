@@ -14,10 +14,10 @@ import { join, resolve } from 'node:path'
 import { consola } from 'consola'
 import { runAudit } from './audit'
 import { getChangedFiles, runGit } from './changed-files'
-import { runCheck } from './check'
+import { runCheck, SOURCE_FILE_PATTERN } from './check'
 import { formatFinding, gatingResults } from './check-result'
 import { capFindings, codegenFallback, OUTPUT_ERROR_PATTERN, outputFindings, outputTail, readScripts, resolveScriptCommand } from './command-output'
-import { introspectApp, type Introspection } from './introspect'
+import { ADVISORY_INTROSPECT_TIMEOUT_MS, introspectApp, introspectRunner, type Introspection } from './introspect'
 import { INTROSPECTION_UNAVAILABLE } from './manifest-section'
 import { isLintable, runOxlint } from './lint-run'
 import { bunExecutable, runCaptured, type CapturedExec, type CapturedRun } from './subprocess'
@@ -90,7 +90,8 @@ interface StageContext {
  * A failed introspection as one finding on the stage that met it first. It never fails the
  * stage: the rules it served fell back to source or report `-unverified`, both advisory.
  */
-function introspectionNote(ctx: StageContext, found: { key: string; title: string; message: string } | undefined): string[] {
+function introspectionNote(ctx: StageContext, results: ReadonlyArray<{ key: string; title: string; message: string }>): string[] {
+  const found = results.find((result) => result.key === INTROSPECTION_UNAVAILABLE)
   if (!found || ctx.introspectionNoted) return []
   ctx.introspectionNoted = true
   return [`${found.title} (advisory): ${found.message}`]
@@ -162,14 +163,17 @@ async function checkStage(ctx: StageContext): Promise<StageOutcome> {
     introspect: ctx.introspect,
   })
   const failing = gatingResults(report)
-  const note = introspectionNote(ctx, report.checks.find((result) => result.key === INTROSPECTION_UNAVAILABLE))
+  const note = introspectionNote(ctx, report.checks)
   return { status: failing.length > 0 ? 'fail' : 'pass', findings: [...capFindings(failing.map(formatFinding)), ...note] }
 }
 
 async function auditStage(ctx: StageContext): Promise<StageOutcome> {
-  const report = await runAudit({ cwd: ctx.cwd, routesFile: ctx.routesFile, deps: ctx.deps, introspect: ctx.introspect })
+  // As check does: a run that changed no source does not execute the app again.
+  const sourceChanged = !ctx.changedFiles || [...ctx.changedFiles].some((file) => SOURCE_FILE_PATTERN.test(file))
+  const introspect = sourceChanged ? ctx.introspect : false
+  const report = await runAudit({ cwd: ctx.cwd, routesFile: ctx.routesFile, deps: ctx.deps, introspect })
   const failing = report.findings.filter((finding) => finding.status === 'fail')
-  const note = introspectionNote(ctx, report.findings.find((finding) => finding.key === INTROSPECTION_UNAVAILABLE))
+  const note = introspectionNote(ctx, report.findings)
   const findings = [...capFindings(failing.map(formatFinding)), ...note]
   const detail = ctx.deps ? 'dependency scan' : undefined
   // The `audit` command only warns here; a gate that passed with the
@@ -203,9 +207,7 @@ export async function runGate(options: RunGateOptions = {}): Promise<GateReport>
   ])
   // Its own run, not the process memo: the dev MCP server calls the gate for the whole session,
   // and codegen, the stage before check, is what lets a fresh clone's entry import at all.
-  const introspect = options.introspect ?? (() => introspectApp(cwd, { fresh: true }))
-  // Shared by both stages: each wraps what it is given in a memo of its own.
-  let introspection: Promise<Introspection> | undefined
+  const introspect = introspectRunner(cwd, options.introspect ?? (() => introspectApp(cwd, { fresh: true, timeoutMs: ADVISORY_INTROSPECT_TIMEOUT_MS })))!
   const ctx: StageContext = {
     cwd,
     exec: options.exec ?? runCaptured,
@@ -213,7 +215,7 @@ export async function runGate(options: RunGateOptions = {}): Promise<GateReport>
     changedFiles,
     routesFile: options.routesFile,
     deps: options.deps ?? false,
-    introspect: () => (introspection ??= introspect()),
+    introspect,
     introspectionNoted: false,
   }
 

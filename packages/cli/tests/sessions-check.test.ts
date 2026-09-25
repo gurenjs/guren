@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test'
-import type { AppManifest } from '@guren/server'
 import { runCheck } from '../src/check'
 import type { CheckResult } from '../src/check-result'
 import type { IntrospectOption } from '../src/introspect'
 import {
   createTempWorkspace,
+  introspected,
   manifestFixture,
   PG_SCHEMA_FIXTURE,
   SESSION_PROVIDER,
@@ -43,10 +43,6 @@ const BOUND = manifestFixture({
 const UNBOUND = manifestFixture({
   session: { source: 'none', default: 'memory', stores: { memory: { driver: 'memory', perProcess: true } } },
 })
-
-function introspected(manifest: AppManifest): IntrospectOption {
-  return async () => ({ status: 'ok', manifest })
-}
 
 /** The session rules' results from a full check run over a throwaway app. */
 async function sessionResults(files: Record<string, string>, introspect: IntrospectOption = false): Promise<CheckResult[]> {

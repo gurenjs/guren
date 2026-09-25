@@ -6,7 +6,7 @@ import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion, walk,
 import { advisory, check, type CheckResult } from './check-result'
 import { attributeManifestTable, resolveSchemaTableBinding, specifierBase, withoutExtension, type SchemaTableBinding } from './schema-binding'
 import { discoverAppConfigFiles } from './discovery'
-import { introspectedSection, judgedFromManifest, judgedFromSource, mergeVerdicts, readManifestSection, sole, UNVERIFIED_SECTION_FIX, type IntrospectedSection, type IntrospectSource } from './manifest-section'
+import { introspectedSection, judgedFromManifest, judgedFromSource, mergeVerdicts, readManifestSection, sole, unverifiedResult, type IntrospectedSection, type IntrospectSource } from './manifest-section'
 import { parseModelSource } from './model-parser'
 import type { ParseCache, ParsedFile } from './parse-cache'
 import { schemaPathFor, type SchemaTable } from './schema-parser'
@@ -844,46 +844,43 @@ export async function checkAttachmentsDelivery(options: {
   }
   if (!registered) return unverifiedDelivery(scan, engine.reason)
 
-  // Registered without running the call: the options are the source's, the routes and drivers the app's.
-  const results: CheckResult[] = []
+  // Registered without running the call: the mount is the app's routes, a redirect disk the call's options in source.
+  const mount: CheckResult[] = []
   if (scan.deliveryConfigs.length > 0) {
     if (registered.routes.some((route) => route.controller?.name === ATTACHMENT_DELIVERY_CONTROLLER_NAME)) {
-      results.push(deliveryMounted())
+      mount.push(deliveryMounted())
     } else {
       for (const relPath of scan.deliveryConfigs) {
-        results.push(deliveryUnmounted(relPath, 'the introspected app registers no registerAttachmentRoutes() route. '))
+        mount.push(deliveryUnmounted(relPath, 'the introspected app registers no registerAttachmentRoutes() route. '))
       }
     }
     for (const routeName of scan.routeNames) {
       const duplicate = duplicateRouteName(routeName, registered.routes)
-      if (duplicate) results.push(duplicate)
+      if (duplicate) mount.push(duplicate)
     }
   }
-  results.push(...(await staticRedirectVerdicts(scan, declarations, manifestDiskDrivers(registered))))
-  return judgedFromSource(results, engine.reason)
+  const redirects = await staticRedirectVerdicts(scan, declarations, manifestDiskDrivers(registered))
+  return [...judgedFromManifest(mount), ...judgedFromSource(redirects, engine.reason)]
 }
 
 /** The delivery rules with no introspected app: a mount and a disk's driver are the registered app's to show. */
 function unverifiedDelivery(scan: AttachmentsDeliveryScan, reason: string | undefined): CheckResult[] {
-  const why = reason ?? 'no introspected app was available'
-  const unverified = (key: string, title: string, message: string, relPath: string): CheckResult => ({
-    ...advisory(key, title, 'warn', `${message} is unverified: ${why}.`, UNVERIFIED_SECTION_FIX, relPath),
-    evidence: 'none',
-  })
   return [
     ...scan.deliveryConfigs.map((relPath) =>
-      unverified(
+      unverifiedResult(
         `attachments-delivery-unverified:${relPath}`,
         'Attachments delivery route',
         `configureAttachments() in ${relPath} enables delivery, and whether registerAttachmentRoutes() is mounted`,
-        relPath,
+        reason,
+        { filePath: relPath },
       )),
     ...scan.redirectDisks.map(({ relPath, disk }) =>
-      unverified(
+      unverifiedResult(
         `attachments-serve-redirect-unverified:${relPath}:${disk}`,
         'Attachments redirect disk',
         `Disk '${disk}' is configured serve: 'redirect' in ${relPath}, and whether its storage driver can presign`,
-        relPath,
+        reason,
+        { filePath: relPath },
       )),
   ]
 }

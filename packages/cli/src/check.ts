@@ -43,7 +43,7 @@ import type { RouteDefinition } from '@guren/server'
  * Any file that could hold a route's params schema — which is any importable
  * source file, since a schema is usually imported into `routes/` from elsewhere.
  */
-const SOURCE_FILE_PATTERN = /\.(ts|tsx|mts|js|jsx|mjs)$/
+export const SOURCE_FILE_PATTERN = /\.(ts|tsx|mts|js|jsx|mjs)$/
 import { checkSchemaTimestamps } from './schema-check'
 import {
   checkAttachableModels,
@@ -389,7 +389,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   const filterChanged = (files: string[]): string[] =>
     changedFiles ? files.filter((f) => changedFiles.has(toPosixRelative(cwd, f))) : files
   // Whether any changed file could affect what the app's modules evaluate to:
-  // the shared gate for every check that loads the route graph (5.5, 7.7, 8.7).
+  // the shared gate for every check that loads the route graph or executes the app (5.5, 7.7, 8.7).
   const sourceChanged = !changedFiles || [...changedFiles].some((file) => SOURCE_FILE_PATTERN.test(file))
 
   // `--arch` / `--docs` / `--spec` select suites; combining them runs the
@@ -519,7 +519,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
 
     // 5.5. The agent manifest cannot ride the loop above: codegen writes it only
     // for apps deriving a tool and *removes* it otherwise (see planAgentManifest).
-    // The graph is loaded once here for 5.5, 7.7, 7.8 and 8.7 — two loads could
+    // The graph is loaded once here for 5.5, 7.7 and 7.8 — two loads could
     // resolve different routes entries and disagree about what the app mounted.
     if (sourceChanged) {
       graph = await loadRouteGraph(cwd, routeGraphFile)

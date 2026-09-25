@@ -920,3 +920,8 @@ export function manifestFixture(overrides: Partial<AppManifest> = {}): AppManife
     ...overrides,
   }
 }
+
+/** An introspection that reports `manifest`, so a test judges a rule against a known registered app. */
+export function introspected(manifest: AppManifest): () => Promise<{ status: 'ok'; manifest: AppManifest }> {
+  return async () => ({ status: 'ok', manifest })
+}

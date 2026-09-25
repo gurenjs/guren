@@ -9,7 +9,7 @@
  */
 import type { AppManifest } from '@guren/server'
 
-import type { CheckResult } from './check-result'
+import { advisory, type CheckResult } from './check-result'
 import type { Introspection } from './introspect'
 
 export type ManifestSectionKey = 'auth' | 'session' | 'cache' | 'storage' | 'queue' | 'attachments'
@@ -130,6 +130,22 @@ export function describeIntrospectionFailure(failure: IntrospectionFailed): stri
 export function introspectionUnavailableMessage(failure: IntrospectionFailed, judgedInstead: string): string {
   const reason = failure.message.split('\n')[0]!.replace(/\.?$/u, '.')
   return `The app could not be introspected (${failure.reason}): ${reason} ${judgedInstead}`
+}
+
+/**
+ * A verdict only the registered app can answer, with no manifest to vouch for it: an advisory warn,
+ * `evidence: 'none'`. `subject` is completed by "is unverified: <why>."; no `reason` means no manifest.
+ */
+export function unverifiedResult(
+  key: string,
+  title: string,
+  subject: string,
+  reason: string | undefined,
+  options: { detail?: string; fix?: string; filePath?: string } = {},
+): CheckResult {
+  const message = `${subject} is unverified: ${reason ?? 'no introspected app was available'}.${options.detail ? ` ${options.detail}` : ''}`
+  const fix = options.fix ? `${UNVERIFIED_SECTION_FIX} ${options.fix}` : UNVERIFIED_SECTION_FIX
+  return { ...advisory(key, title, 'warn', message, fix, options.filePath), evidence: 'none' }
 }
 
 /** Results a check judged from source, naming why the manifest was not used when there is a reason. */

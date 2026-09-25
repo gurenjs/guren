@@ -12,7 +12,7 @@ import { relative } from 'node:path'
 import type { SessionEntry } from '@guren/server'
 import { attributeManifestTable, resolveSchemaTableBinding, type SchemaTableBinding } from './schema-binding'
 import { advisory, check, type CheckResult } from './check-result'
-import { introspectedSection, judgedFromManifest, judgedFromSource, mergeVerdicts, UNVERIFIED_SECTION_FIX, type IntrospectedSection, type IntrospectSource } from './manifest-section'
+import { introspectedSection, judgedFromManifest, judgedFromSource, mergeVerdicts, unverifiedResult, type IntrospectedSection, type IntrospectSource } from './manifest-section'
 import type { ParseCache, ParsedFile } from './parse-cache'
 import type { SchemaTable } from './schema-parser'
 import { readSessionConfig, sessionConfigsIn, type SessionConfigSite } from './session-config'
@@ -246,16 +246,11 @@ function configuredTwice(): CheckResult {
  * provider that binds `session`, not that `createApp()` runs it.
  */
 function bindingUnverified(reason: string | undefined): CheckResult {
-  const why = reason ?? 'no introspected app was available'
-  return {
-    ...advisory(
-      `${BINDING_KEY}-unverified`,
-      BINDING_TITLE,
-      'warn',
-      `A session config exists, and whether a registered provider binds 'session' to it is unverified: ${why}. `
-        + 'An unbound config is never read, and sessions stay on the in-memory default.',
-      `${UNVERIFIED_SECTION_FIX} ${BINDING_FIX}`,
-    ),
-    evidence: 'none',
-  }
+  return unverifiedResult(
+    `${BINDING_KEY}-unverified`,
+    BINDING_TITLE,
+    "A session config exists, and whether a registered provider binds 'session' to it",
+    reason,
+    { detail: 'An unbound config is never read, and sessions stay on the in-memory default.', fix: BINDING_FIX },
+  )
 }

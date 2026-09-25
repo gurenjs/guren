@@ -65,9 +65,7 @@ function declaredSessionConfig(node: BabelNode, locals: Set<string>): ObjectExpr
 
 /**
  * The object a `defineSessionConfig(...)` call's resolver returns (RFC 0027 §2),
- * from an arrow's expression body or a function's `return`. Its `default` reads
- * a declared key (`env.SESSION_DRIVER`), which reads as unresolved rather than
- * as a store.
+ * from an arrow's expression body or a function's `return`.
  */
 function definedSessionConfig(node: BabelNode, helpers: Set<string>): ObjectExpression | undefined {
   const callee = node.callee as BabelNode
@@ -112,7 +110,7 @@ export function sessionConfigsIn(ast: { program: { body: Statement[] } }): Sessi
   return found
 }
 
-/** Read through `??`/`||`, so `process.env.SESSION_DRIVER ?? 'database'` reads as its fallback. */
+/** Read through `??`/`||`, so `process.env.X ?? 'database'` reads as its fallback. */
 function fallbackString(node: Node): string | undefined {
   const unwrapped = unwrapTypeAssertion(node) as BabelNode
   if (unwrapped?.type === 'LogicalExpression' && (unwrapped.operator === '??' || unwrapped.operator === '||')) {
