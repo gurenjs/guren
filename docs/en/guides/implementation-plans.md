@@ -720,7 +720,7 @@ Edit the text outside the markers freely: closing a later plan for the same enti
 
 The RFC behind this feature (`rfcs/0030-implementation-plans.md`) describes more than the commands on this page. These parts do not exist yet:
 
-- a `guren plan` that asks Claude for the plan JSON by itself (`--print-prompt` is the form that exists), and the revision command that applies review feedback to it. Write and edit `plan.json` yourself or in your agent session;
+- a `guren plan` that asks Claude for the plan JSON by itself (`--print-prompt` is the form that exists), and `plan --revise`, which would turn review comments into a revision (`plan:revise` records a change you make yourself). Write `plan.json` yourself or in your agent session;
 - keeping plans in GitHub issues instead of `docs/plans/`;
 - a `scaffold` step that runs the generators for you. `plan:next` lists the elements a scaffold would generate and says no generator ships yet, so the step completes on its verify commands; run `make:feature` and trim what the plan does not need.
 
