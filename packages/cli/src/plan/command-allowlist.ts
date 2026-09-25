@@ -129,6 +129,7 @@ export const PLAN_COMMAND_CLASSES: Readonly<Record<string, 'generator' | PlanCom
   'config:show': 'environment',
   'storage:link': 'environment',
   deploy: 'deploy',
+  plan: 'plan',
   'plan:render': 'plan',
   'plan:approve': 'plan',
   'plan:status': 'plan',
@@ -139,6 +140,13 @@ export const PLAN_COMMAND_CLASSES: Readonly<Record<string, 'generator' | PlanCom
   'agent:init': 'harness',
   'agent:sync': 'harness',
 })
+
+/** The names `PLAN_COMMAND_CLASSES` allows, in the table's order. */
+export function planGeneratorNames(): string[] {
+  return Object.entries(PLAN_COMMAND_CLASSES)
+    .filter(([, verdict]) => verdict === 'generator')
+    .map(([name]) => name)
+}
 
 export const PLAN_COMMAND_FORM = '`guren <subcommand> [args…]` or `bunx guren <subcommand> [args…]`'
 

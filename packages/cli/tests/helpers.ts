@@ -751,11 +751,13 @@ export async function runCliBin(
 export async function runCliBinCaptured(
   args: string[],
   cwd: string,
+  options: { preload?: string } = {},
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   assertWorkspaceBuilt([SERVER_DIST_ENTRY])
 
   const { NODE_ENV: _testEnv, ...env } = process.env
-  const proc = Bun.spawn(['bun', CLI_BIN_PATH, ...args], {
+  const preload = options.preload ? ['--preload', options.preload] : []
+  const proc = Bun.spawn(['bun', ...preload, CLI_BIN_PATH, ...args], {
     cwd,
     env,
     stdout: 'pipe',
