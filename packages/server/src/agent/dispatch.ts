@@ -200,8 +200,6 @@ export function buildToolRequest(
 
   const qs = query.toString()
   const url = `${origin}${path}${qs ? `?${qs}` : ''}`
-  // Marked by identity so force-https can tell this in-process re-entry from
-  // a plain-HTTP request off the wire; a copy of it carries no mark.
   return { request: markDispatchedToolRequest(new Request(url, { method, headers, body })) }
 }
 

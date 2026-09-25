@@ -149,8 +149,7 @@ export default app
 
 /**
  * The default auth stack behind force-https. `guren tool:call` dispatches on
- * `http://localhost`, so both the tool request and the CSRF priming GET meet
- * the redirect.
+ * `http://localhost`, where a plain GET meets the redirect.
  */
 const MAIN_WITH_FORCE_HTTPS = `import { createApp, createForceHttpsMiddleware } from '@guren/core'
 import { registerWebRoutes } from '../routes/web'
@@ -292,7 +291,7 @@ describe('tool:call', () => {
     expect(result.structuredContent).toEqual({ posts: [] })
   })
 
-  it('primes CSRF across the https redirect so a mutating call reaches the route', async () => {
+  it('primes CSRF on https so a mutating call reaches the route', async () => {
     await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_FORCE_HTTPS)
 
     await runToolCall({ name: 'posts.store', input: '{"title":"Forced"}', appRoot: appDir, json: true })
@@ -637,3 +636,4 @@ describe('dispatchToolCall recording', () => {
     }
   })
 })
+

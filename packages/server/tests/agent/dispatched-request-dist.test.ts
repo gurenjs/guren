@@ -15,10 +15,12 @@ const built = existsSync(`${distDir}/index.js`) && existsSync(`${distDir}/agent/
 
 describe.if(built)('the dispatched-request mark (built entries)', () => {
   test('should let a request built by the agent entry through the root entry\'s force-https', async () => {
-    // Self-referencing imports, so the package's own `exports` map decides
-    // which files these are, the same resolution a consuming app performs.
-    const { buildToolRequest } = await import('@guren/server/agent')
-    const { Router, createForceHttpsMiddleware, deriveAgentTools } = await import('@guren/server')
+    // By file path: in this repo the package name resolves to `src/` through the
+    // root tsconfig `paths`, where one module holds the set whatever rolldown emits.
+    const { buildToolRequest } = (await import(`${distDir}/agent/public.js`)) as typeof import('../../src/agent/public')
+    const { Router, createForceHttpsMiddleware, deriveAgentTools } = (await import(
+      `${distDir}/index.js`
+    )) as typeof import('../../src/index')
 
     const router = new Router()
     router.get('/posts', () => new Response('ok')).name('posts.index').agent({})

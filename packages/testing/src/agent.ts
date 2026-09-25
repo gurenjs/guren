@@ -315,10 +315,9 @@ export class TestAgent {
       )
     }
 
-    // The dispatch headers describe the tool call and win; the `X-Testing-User`
-    // envelope and `withCsrf()`'s `Cookie` + `X-XSRF-TOKEN` fill in beneath them,
-    // or CSRF refuses a mutating call before any policy runs. Set on the built
-    // object: the dispatcher marks it by identity, and force-https redirects a copy.
+    // The dispatch headers win; `X-Testing-User` and `withCsrf()`'s `Cookie` +
+    // `X-XSRF-TOKEN` fill in beneath them, or CSRF refuses a mutating call.
+    // Set on the built object: a copy loses the dispatcher's mark and force-https redirects it.
     for (const [key, value] of Object.entries(bridge.headers())) {
       if (!built.request.headers.has(key)) built.request.headers.set(key, value)
     }

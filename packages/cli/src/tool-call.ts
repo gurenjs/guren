@@ -29,6 +29,12 @@ import { parseUserId } from './token-issue'
 /** Origin the synthesized request is built on — never leaves the process. */
 const DISPATCH_ORIGIN = 'http://localhost'
 
+/**
+ * The CSRF priming GET, on https so force-https answers with the token rather than a 301.
+ * It only collects cookies, and Secure means nothing in process.
+ */
+const PRIMING_URL = `${DISPATCH_ORIGIN.replace(/^http:/, 'https:')}/`
+
 /** The only `--as` prefix there is a principal for. */
 const ACTING_AS_PREFIX = 'user:'
 
@@ -236,11 +242,7 @@ async function primeCsrfHeaders(
 ): Promise<Record<string, string>> {
   let response: Response
   try {
-    response = await fetch(new Request(`${DISPATCH_ORIGIN}/`, { method: 'GET' }))
-    // One same-host hop, as a browser follows it: force-https answers this plain GET
-    // with a 301 to https, and the token is issued on the other side of it.
-    const location = sameHostRedirect(response)
-    if (location) response = await fetch(new Request(location, { method: 'GET' }))
+    response = await fetch(new Request(PRIMING_URL, { method: 'GET' }))
   } catch {
     // The app refused a bare GET. Not this command's problem to diagnose —
     // the dispatch below reports whatever the real call answers.
@@ -269,14 +271,6 @@ async function primeCsrfHeaders(
     Cookie: [...cookies.entries()].map(([name, value]) => `${name}=${value}`).join('; '),
     'X-XSRF-TOKEN': decodeURIComponent(xsrf),
   }
-}
-
-function sameHostRedirect(response: Response): string | undefined {
-  if (response.status < 300 || response.status >= 400) return undefined
-  const location = response.headers.get('Location')
-  if (!location) return undefined
-  const target = new URL(location, `${DISPATCH_ORIGIN}/`)
-  return target.host === new URL(DISPATCH_ORIGIN).host ? target.toString() : undefined
 }
 
 export interface ToolCallResult {
@@ -351,8 +345,7 @@ export async function dispatchToolCall(
     )
   }
 
-  // Headers go on the built object itself: the dispatcher marks it by identity, and a
-  // copy is redirected by force-https like any plain-HTTP request.
+  // Set on the built object: a copy loses the dispatcher's mark and force-https redirects it.
   const request = built.request
   if (options.actingAs !== undefined) {
     request.headers.set('X-Testing-User', testingUserHeader(options.actingAs))

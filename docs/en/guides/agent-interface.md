@@ -434,8 +434,9 @@ success.
 `createForceHttpsMiddleware()` lets a tool call through rather than redirecting
 it to https. The re-entrant request is built on the origin its caller reached:
 `http://` for an MCP endpoint behind a TLS-terminating proxy, and
-`http://localhost` for durable agents and `guren tool:call`. It never leaves
-the process, so there is no transport to upgrade. Unlike the guards above, the
+`http://localhost` for durable agents, `guren tool:call`, `TestApp.agent()` and
+in-process AI agents with no `APP_URL`. It never leaves the process, so there
+is no transport to upgrade. Unlike the guards above, the
 middleware does not read the header: it lets through only the request object
 the dispatcher built, so an outside HTTP request that copies its headers is
 still redirected.

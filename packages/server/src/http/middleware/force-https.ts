@@ -35,27 +35,15 @@ export function createForceHttpsMiddleware(options: ForceHttpsOptions = {}): Mid
     const proto = ctx.req.header('x-forwarded-proto') ?? url.protocol.replace(':', '')
 
     if (proto !== 'https') {
-      // An agent tool call re-enters through `app.fetch` on the inbound
-      // origin, `http://` behind a TLS-terminating proxy, and a tool caller
-      // cannot follow a redirect. It never leaves the process, so there is no
-      // transport to upgrade. Judged by object identity, never by a header.
-      if (isDispatchedToolRequest(ctx.req.raw)) {
+      const path = url.pathname + url.search
+      const excluded = exclude.some((pattern) =>
+        pattern.endsWith('*') ? path.startsWith(pattern.slice(0, -1)) : path === pattern,
+      )
+      // A tool call never leaves the process, so there is no transport to upgrade, and a
+      // tool caller cannot follow a redirect. By identity, never by a header.
+      if (excluded || isDispatchedToolRequest(ctx.req.raw)) {
         await next()
         return
-      }
-
-      const path = url.pathname + url.search
-
-      for (const pattern of exclude) {
-        if (pattern.endsWith('*')) {
-          if (path.startsWith(pattern.slice(0, -1))) {
-            await next()
-            return
-          }
-        } else if (path === pattern) {
-          await next()
-          return
-        }
       }
 
       url.protocol = 'https:'

@@ -56,7 +56,6 @@ describe('mcpPlugin behind force-https', () => {
     const result = await client.callTool({ name: 'posts.index', arguments: {} })
 
     const content = result.content as Array<{ type: string; text: string }>
-    expect(content[0]!.text).not.toContain('301')
     expect(result.isError).toBeUndefined()
     expect(JSON.parse(content[0]!.text)).toEqual({ posts: [{ id: 1 }] })
   })
