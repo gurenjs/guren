@@ -39,7 +39,7 @@ import { introspectApp } from './introspect'
 import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
 import { ParseCache } from './parse-cache'
 import { importsByLocal, specifierBase } from './schema-binding'
-import { escapeRegExp } from './utils'
+import { wholeIdentifierPattern } from './utils'
 import { CliError } from './cli-error'
 import {
   routeDefinitionToContextRoute,
@@ -303,7 +303,7 @@ function modelImportLocals(cwd: string, controllerFile: string, ast: File, entit
  */
 function actionReferencesModel(body: string, locals: ModelImportLocals): boolean {
   return (
-    locals.classLocals.some((local) => new RegExp(`(?<![\\w$.])${escapeRegExp(local)}(?![\\w$])`).test(body))
+    locals.classLocals.some((local) => wholeIdentifierPattern(local).test(body))
     || locals.typeLocals.some((local) => authTypeArgumentPattern(local).test(body))
   )
 }

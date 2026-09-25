@@ -194,7 +194,7 @@ API アプリをフルスタック化するときは、先に `@guren/inertia-cl
 | コマンド | 説明 | 例 |
 |---------|------|-----|
 | `check` | ルート・コントローラ・ページ・モデル間の整合性(`routes/` 配下の各ファイルがエントリのレジストラから、モジュールの `routes/` 配下は各モジュール自身のレジストラから実際に呼ばれているかを含む)に加え、`config/agents.ts` の永続エージェントレジストリ・インプロセスエージェントの `appTools()` の名前とスコープ・deferred props(ページの `Props` が必須として宣言している prop に `defer()` を渡していないか。advisory)・docリンク・スペックビューの鮮度・アーキテクチャ境界を検証 | `bunx guren check --json` |
-| `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定、`hidden` 未登録の機微カラム、リクエストのホストから組み立てられたメール内リンク、アプリまたはインストール済みパッケージが宣言した CSRF 除外、インプロセスエージェントのローカルツールを検査 | `bunx guren audit --json` |
+| `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証/Policy 認可の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定、`hidden` 未登録の機微カラム、リクエストのホストから組み立てられたメール内リンク、アプリまたはインストール済みパッケージが宣言した CSRF 除外、インプロセスエージェントのローカルツールを検査 | `bunx guren audit --json` |
 | `gate` | scaffold された CI が回す検証ステージ(codegen・typecheck・lint・`--ci` 規則の `check`・`audit`・テスト)をまとめて実行し、いずれかが失敗すれば非ゼロ exit。実行できないステージは skip ではなく失敗 | `bunx guren gate --changed` |
 | `introspect` | boot も listen もせずにアプリの provider とルートを登録し、マニフェストを出力。provider ごとの登録結果、解決済みのミドルウェアとコントローラのファイルを含むルート、session・auth・cache・storage・queue・attachments の設定を含む | `bunx guren introspect --json` |
 | `doctor` | プロジェクトの健全性レポート(環境変数・設定・生成ファイル)と次のアクション | `bunx guren doctor --next` |
@@ -214,6 +214,18 @@ bunx guren check --docs    # docリンク: OKF frontmatter(type/entities/related
 bunx guren check --spec    # docs/spec/ が再生成結果と一致するか
 bunx guren check --prototype  # prototype ハンドラーのルートに名前付きの fixture エントリがあり、ローダーが配線されているか
 ```
+
+`audit` の Policy ルールは warn 止まりです。モデルに対する Policy
+(`make:policy` が書く `app/Policies/<Model>Policy.ts`、同じアプリルート内で対応付け)が
+ひとつでもあると、安全でないメソッドのコントローラアクションのうち本体でそのモデルを参照する
+ものに `policy:<METHOD> <path>` の finding が付きます。アクションが `this.authorize()` か
+`this.can()` を呼ぶ、gate に問い合わせる、Policy クラスを参照する、
+`authorize()`/`authorizeResource()` ミドルウェアの後ろにある、のいずれかなら pass です。
+スキャンから見える範囲で Policy を参照していなければ、アクション名・Policy 名・修正方法を
+添えて warn します。コントローラのソースが読めなかった場合も pass にはせず warn します。
+アクションが呼ぶヘルパーの中までは追いません。判定が別の場所にあるアクションには、
+その上のコメントに `// guren-audit-ignore` を書いてください。その finding はそのコメントを
+理由として ignored で報告されます。Policy のないアプリではこの finding は出ません。
 
 スイートフラグは併用すると和集合で実行されます。`--changed` はどのスイートも
 main とのマージベースからの変更ファイルに限定します。エージェントハーネスの
@@ -501,7 +513,7 @@ bunx guren codegen --introspect
 const apiKey = 'example-not-a-real-key'
 ```
 
-ルートレベル・モデルレベルの findings(`authz:*`、`validation:*`、`agent-annotation:*`、`mass-assignment:*`、`hidden-columns:*`)には、コメントを付けられる特定の行が存在しません。これらはルートレジストラを実行し、モデルを検査することで生成されるためです。代わりに `config/audit.ts` で finding の `key`(`--json` の出力からそのままコピーできます)と必須の `reason` を指定して無視します:
+ルートレベル・モデルレベルの findings(`authz:*`、`policy:*`、`validation:*`、`agent-annotation:*`、`mass-assignment:*`、`hidden-columns:*`)には、コメントを付けられる特定の行が存在しません。これらはルートレジストラを実行し、モデルを検査することで生成されるためです(`policy:*` だけは、修正箇所がアクションなので、その上のコメントのマーカーも受け付けます)。代わりに `config/audit.ts` で finding の `key`(`--json` の出力からそのままコピーできます)と必須の `reason` を指定して無視します:
 
 ```ts
 // config/audit.ts

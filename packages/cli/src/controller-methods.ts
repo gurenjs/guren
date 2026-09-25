@@ -16,7 +16,7 @@ import { memberKeyName, walk } from './ast-walk'
 import { controllerImportFailures } from './introspect-controller-file'
 import { introspectedRoutes, type IntrospectSource } from './manifest-section'
 import { specifierName } from './route-registrar'
-import { escapeRegExp } from './utils'
+import { wholeIdentifierPattern } from './utils'
 
 /**
  * Controller action bodies, extracted once and judged by regex afterwards. Lives
@@ -32,6 +32,13 @@ export interface ControllerMethodInfo {
   rawBody: string
   /** Controller file, relative to the project root. */
   filePath: string
+  /** 1-based line of the member's declaration. */
+  line: number
+  /**
+   * The comments written above the member, JSDoc included, as Babel attaches
+   * them; where an action-level `// guren-audit-ignore` is read from.
+   */
+  leadingComments: string[]
 }
 
 /**
@@ -209,13 +216,21 @@ export const AUTH_CALL_PATTERN = new RegExp(
  */
 export const AUTHORIZE_CALL_PATTERN = controllerMemberCall('authorize')
 
+/**
+ * An authorization decision the action shows: `this.authorize(...)` throws and
+ * `this.can(...)` answers, and either proves the policy was consulted. Wider
+ * than {@link AUTHORIZE_CALL_PATTERN} on purpose: the audit's policy rule asks
+ * whether authorization was *considered*, the agent-route rule whether it is *enforced*.
+ */
+export const AUTHORIZATION_CALL_PATTERN = controllerMemberCall('authorize', 'can')
+
 /** An Inertia page response, which carries no JSON schema an agent could read. */
 export const INERTIA_CALL_PATTERN = controllerMemberCall('inertia')
 
 /** `this.auth.<method><…typeName…>(`: a record type passed as a type argument of an auth call. */
 export function authTypeArgumentPattern(typeName: string): RegExp {
   const member: ControllerMemberName = 'auth'
-  const name = `(?<![\\w$.])${escapeRegExp(typeName)}(?![\\w$])`
+  const name = wholeIdentifierPattern(typeName).source
   return new RegExp(`\\bthis\\s*\\.\\s*${member}\\s*\\.\\s*\\w+\\s*<[^()]*${name}[^()]*>\\s*\\(`)
 }
 
@@ -370,11 +385,13 @@ export async function parseControllerMethods(
       declarations.push(declaration)
       for (const exportName of exportNames) byExport.set(`${posixPath}#${exportName}`, declaration)
 
-      for (const { name, body } of classActionMembers(classDecl)) {
+      for (const { member, name, body } of classActionMembers(classDecl)) {
         const info: ControllerMethodInfo = {
           body: scrubbed.slice(body.start ?? 0, body.end ?? 0),
           rawBody: source.slice(body.start ?? 0, body.end ?? 0),
           filePath: relPath,
+          line: member.loc?.start.line ?? 1,
+          leadingComments: (member.leadingComments ?? []).map((comment) => comment.value.trim()),
         }
         declaration.methods.set(name, info)
         methods.set(`${className}.${name}`, info)
