@@ -145,7 +145,14 @@ broadcast.channel('admin.**', isAdmin)             // admin.users, admin.setting
 ### SSE Endpoint
 
 ```ts
-import { Router } from '@guren/core'
+import { AUTH_CONTEXT_KEY, Router } from '@guren/core'
+import type { AuthContext } from '@guren/core'
+import type { Context } from 'hono'
+
+const currentUser = async (ctx: Context) => {
+  const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+  return (await auth?.user()) ?? null
+}
 
 export function registerBroadcastRoutes(router: Router): void {
   router.get('/broadcasting/events', broadcast.sseMiddleware({
@@ -153,14 +160,16 @@ export function registerBroadcastRoutes(router: Router): void {
     retry: 3000,
     // Resolve the connecting user so channels requested up front via
     // ?channels= can be authorized when the stream opens
-    getUser: (ctx) => ctx.get('user'),
+    getUser: (ctx) => currentUser(ctx as Context),
   }))
 
   router.post('/broadcasting/auth', broadcast.authMiddleware({
-    getUser: (ctx) => ctx.get('user'),
+    getUser: (ctx) => currentUser(ctx as Context),
   }))
 }
 ```
+
+`getUser` receives the request context typed as `unknown` and may return a promise. `currentUser()` reads the signed-in user from the auth context, and the examples below reuse it.
 
 The SSE endpoint accepts a `?channels=` query parameter listing channels to subscribe before the stream starts. Each requested channel is authorized against the user returned by `getUser`, so a plain `EventSource` works for public channels with zero extra calls. Private and presence channels are subscribed later through `/broadcasting/auth` (see [Authorizing Channels (Client)](#authorizing-channels-client)).
 
@@ -175,7 +184,7 @@ export function registerBroadcastRoutes(router: Router): void {
   router.get('/broadcasting/socket', broadcast.webSocketMiddleware({
     // The user of the upgrade request authorizes every channel the socket
     // subscribes to, for as long as it stays open
-    getUser: (ctx) => ctx.get('user'),
+    getUser: (ctx) => currentUser(ctx as Context),
   }))
 }
 ```
@@ -223,7 +232,7 @@ CORS does not apply to a WebSocket handshake, and the browser sends the app's co
 
 ```ts
 broadcast.webSocketMiddleware({
-  getUser: (ctx) => ctx.get('user'),
+  getUser: (ctx) => currentUser(ctx as Context),
   allowedOrigins: ['https://app.example.com'],
 })
 ```

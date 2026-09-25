@@ -161,7 +161,7 @@ export function approvedReadings(standing: PlanApprovalStanding | undefined): Pl
 }
 
 /** The commands that refuse a plan no approval names; `plan:status` names them rather than refusing. */
-export const PLAN_APPROVAL_GATED_COMMANDS = ['plan:next', 'plan:verify', 'plan:waive', 'plan:close'] as const
+export const PLAN_APPROVAL_GATED_COMMANDS = ['plan:next', 'plan:scaffold', 'plan:verify', 'plan:waive', 'plan:close'] as const
 
 /**
  * Whether an approval names the plan's current hash. `baseline-removed` is a draft with approvals

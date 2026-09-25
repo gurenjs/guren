@@ -660,6 +660,103 @@ export const users = pgTable('users', {
     })
   }
 
+  // The column builders are shared with plan:scaffold (schema-columns.ts), so the whole
+  // appended table is pinned, imports and nullable columns included.
+  const NULLABLE_FIELDS = ALL_FIELDS.split(',').map((field) => `${field.replace(':', 'Maybe:')}?`).join(',')
+
+  it('appends the same sqlite table, byte for byte', async () => {
+    await seedResourceWorkspace(COLUMN_CASES[0].schema)
+    await runBlueprint('resource', { name: 'Entry', fields: `${ALL_FIELDS},${NULLABLE_FIELDS}` })
+    expect(await readFile('db/schema.ts', 'utf8')).toMatchInlineSnapshot(`
+      "import { sqliteTable, integer, text } from '@guren/orm/drizzle/sqlite'
+
+      export const users = sqliteTable('users', {
+        id: integer('id').primaryKey({ autoIncrement: true }),
+        name: text('name').notNull(),
+      })
+
+      export const entries = sqliteTable('entries', {
+        id: integer('id').primaryKey({ autoIncrement: true }),
+        name: text('name').notNull(),
+        body: text('body').notNull(),
+        count: integer('count').notNull(),
+        active: integer('active', { mode: 'boolean' }).notNull(),
+        publishedAt: integer('published_at', { mode: 'timestamp' }).notNull(),
+        meta: text('meta', { mode: 'json' }).notNull(),
+        nameMaybe: text('name_maybe'),
+        bodyMaybe: text('body_maybe'),
+        countMaybe: integer('count_maybe'),
+        activeMaybe: integer('active_maybe', { mode: 'boolean' }),
+        publishedAtMaybe: integer('published_at_maybe', { mode: 'timestamp' }),
+        metaMaybe: text('meta_maybe', { mode: 'json' }),
+        createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+      })
+      "
+    `)
+  })
+
+  it('appends the same mysql table, byte for byte', async () => {
+    await seedResourceWorkspace(COLUMN_CASES[1].schema)
+    await runBlueprint('resource', { name: 'Entry', fields: `${ALL_FIELDS},${NULLABLE_FIELDS}` })
+    expect(await readFile('db/schema.ts', 'utf8')).toMatchInlineSnapshot(`
+      "import { boolean, int, json, mysqlTable, timestamp, varchar } from '@guren/orm/drizzle/mysql'
+
+      export const users = mysqlTable('users', {
+        id: int('id').primaryKey().autoincrement(),
+        name: varchar('name', { length: 255 }).notNull(),
+      })
+
+      export const entries = mysqlTable('entries', {
+        id: int('id').primaryKey().autoincrement(),
+        name: varchar('name', { length: 255 }).notNull(),
+        body: varchar('body', { length: 255 }).notNull(),
+        count: int('count').notNull(),
+        active: boolean('active').notNull(),
+        publishedAt: timestamp('published_at').notNull(),
+        meta: json('meta').notNull(),
+        nameMaybe: varchar('name_maybe', { length: 255 }),
+        bodyMaybe: varchar('body_maybe', { length: 255 }),
+        countMaybe: int('count_maybe'),
+        activeMaybe: boolean('active_maybe'),
+        publishedAtMaybe: timestamp('published_at_maybe'),
+        metaMaybe: json('meta_maybe'),
+        createdAt: timestamp('created_at').defaultNow().notNull(),
+      })
+      "
+    `)
+  })
+
+  it('appends the same postgres table, byte for byte', async () => {
+    await seedResourceWorkspace(COLUMN_CASES[2].schema)
+    await runBlueprint('resource', { name: 'Entry', fields: `${ALL_FIELDS},${NULLABLE_FIELDS}` })
+    expect(await readFile('db/schema.ts', 'utf8')).toMatchInlineSnapshot(`
+      "import { boolean, integer, jsonb, pgTable, serial, text, timestamp } from '@guren/orm/drizzle/pg'
+
+      export const users = pgTable('users', {
+        id: serial('id').primaryKey(),
+        name: text('name').notNull(),
+      })
+
+      export const entries = pgTable('entries', {
+        id: serial('id').primaryKey(),
+        name: text('name').notNull(),
+        body: text('body').notNull(),
+        count: integer('count').notNull(),
+        active: boolean('active').notNull(),
+        publishedAt: timestamp('published_at', { withTimezone: true }).notNull(),
+        meta: jsonb('meta').notNull(),
+        nameMaybe: text('name_maybe'),
+        bodyMaybe: text('body_maybe'),
+        countMaybe: integer('count_maybe'),
+        activeMaybe: boolean('active_maybe'),
+        publishedAtMaybe: timestamp('published_at_maybe', { withTimezone: true }),
+        metaMaybe: jsonb('meta_maybe'),
+        createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+      })
+      "
+    `)
+  })
+
   it('runs the infrastructure blueprints', async () => {
     await seedAppFile(APP_FIXTURE)
     await mkdir('routes', { recursive: true })

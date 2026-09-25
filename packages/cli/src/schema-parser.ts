@@ -21,6 +21,7 @@ import {
 import { listAppRoots } from './discovery'
 import { importsByLocal, schemaModuleFor } from './schema-binding'
 import { camelCase } from './utils'
+import { TABLE_FACTORY } from './schema-columns'
 import { isDrizzleBuilderSpecifier } from './drizzle-specifiers'
 import { parseSourceFile } from './parse-cache'
 
@@ -33,11 +34,9 @@ export type SchemaDialect = 'sqlite' | 'pg' | 'mysql'
 
 // A Map rather than a Record so a miss types as undefined —
 // `noUncheckedIndexedAccess` is off, and every lookup here is a miss away.
-const TABLE_FACTORIES = new Map<string, SchemaDialect>([
-  ['pgTable', 'pg'],
-  ['sqliteTable', 'sqlite'],
-  ['mysqlTable', 'mysql'],
-])
+const TABLE_FACTORIES = new Map<string, SchemaDialect>(
+  (Object.entries(TABLE_FACTORY) as Array<[SchemaDialect, string]>).map(([dialect, factory]) => [factory, dialect]),
+)
 
 /**
  * Local names the table factories are imported under, covering

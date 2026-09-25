@@ -164,12 +164,12 @@ describe('plan:status', () => {
     const unapproved = await report(plan, app)
     expect(unapproved.approval).toEqual({ state: 'unapproved', hash })
     expect(Object.keys(unapproved).sort()).toEqual(['approval', 'elements', 'freshness', 'plan', 'reportVersion', 'summary', 'verification'])
-    expect(await run(plan, app)).toContain('Not approved at this hash: plan:next, plan:verify, plan:waive, plan:close refuse the plan until guren plan:approve records an approval of it.')
+    expect(await run(plan, app)).toContain('Not approved at this hash: plan:next, plan:scaffold, plan:verify, plan:waive, plan:close refuse the plan until guren plan:approve records an approval of it.')
 
     await writeWorkspaceFiles(ROOT, { 'approval.approvals.json': '{' })
     const unreadable = (await report(plan, app)).approval
     expect(unreadable).toMatchObject({ state: 'unreadable', hash, reason: expect.stringContaining('is not valid JSON') })
-    expect(await run(plan, app)).toContain('Approvals not read, so plan:next, plan:verify, plan:waive, plan:close refuse the plan: ')
+    expect(await run(plan, app)).toContain('Approvals not read, so plan:next, plan:scaffold, plan:verify, plan:waive, plan:close refuse the plan: ')
 
     await rm(join(ROOT, 'approval.approvals.json'))
     await approvePlanFile(plan)

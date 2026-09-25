@@ -135,6 +135,7 @@ export const PLAN_COMMAND_CLASSES: Readonly<Record<string, 'generator' | PlanCom
   'plan:status': 'plan',
   'plan:verify': 'plan',
   'plan:next': 'plan',
+  'plan:scaffold': 'plan',
   'plan:waive': 'plan',
   'plan:revise': 'plan',
   'plan:close': 'plan',
