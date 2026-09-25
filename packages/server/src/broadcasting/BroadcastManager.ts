@@ -16,6 +16,7 @@ import type {
 import { Channel, PrivateChannel, PresenceChannel } from './channels'
 import { MemoryDriver } from './drivers'
 import { claimHotDisposable, isHotReloadRuntime } from '../hot-reload/hot-disposables'
+import { getAuthContext } from '../auth/context'
 import type { Context } from '../http/Application'
 import type { Middleware } from '../http/middleware'
 import { webSocketOriginCheck } from '../http/middleware/websocket-origin'
@@ -38,6 +39,19 @@ function resolveClientUserId(user: unknown): string | number | undefined {
     if (typeof value === 'string' || typeof value === 'number') return value
   }
   return undefined
+}
+
+/**
+ * The user a connection or auth request is authorized as: the app's `getUser`,
+ * else the session user from the auth context. A guest is `undefined` either
+ * way, which is what an unowned stream and a refused private channel key on.
+ */
+async function resolveRequestUser(
+  ctx: Context,
+  getUser: ((ctx: unknown) => unknown | Promise<unknown>) | undefined,
+): Promise<unknown> {
+  if (getUser) return getUser(ctx)
+  return (await getAuthContext(ctx)?.user()) ?? undefined
 }
 
 /** The channels a connection asks for up front, as `?channels=a,b`, each once. */
@@ -265,7 +279,7 @@ export class BroadcastManager {
 
       // Channels requested up front (?channels=a,b) are authorized and
       // subscribed before the stream starts, so a plain EventSource works.
-      const user = options.getUser ? await options.getUser(ctx) : undefined
+      const user = await resolveRequestUser(ctx, options.getUser)
       const authorizedChannels = await this.filterAuthorizedChannels(requestedChannels(ctx), user)
 
       // Resolved out here, not inside `start()`: the client object outlives this
@@ -392,7 +406,7 @@ export class BroadcastManager {
 
       // Held for the socket's lifetime, unlike in `sseMiddleware()`: every later
       // `subscribe` message is authorized against this same user.
-      const user = options.getUser ? await options.getUser(ctx) : undefined
+      const user = await resolveRequestUser(ctx, options.getUser)
       const authorizedChannels = await this.filterAuthorizedChannels(requestedChannels(ctx), user)
       const userId = resolveClientUserId(user)
       let clientId: string | undefined
@@ -475,8 +489,7 @@ export class BroadcastManager {
 
   authMiddleware(options: AuthMiddlewareOptions = {}): Middleware {
     return async (ctx: Context) => {
-      const getUser = options.getUser ?? ((c) => (c as any).auth?.user)
-      const user = await getUser(ctx)
+      const user = await resolveRequestUser(ctx, options.getUser)
 
       const payload = await parseRequestPayload(ctx)
       const channel = typeof payload.channel === 'string' ? payload.channel : undefined

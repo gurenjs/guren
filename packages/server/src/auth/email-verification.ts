@@ -256,7 +256,7 @@ export function isEmailVerified(user: { emailVerifiedAt?: Date | null } | null):
 export function requireVerifiedEmail(options: {
   redirectTo?: string
   // `get` mirrors Hono's own context idiom: the type argument is inferred from
-  // the expected return, so `return ctx.get('user')` type-checks without a cast.
+  // the expected return, so a lookup such as `ctx.get(AUTH_CONTEXT_KEY)` needs no cast.
   getUser?: (ctx: { get: <T = unknown>(key: string) => T }) => Promise<{ emailVerifiedAt?: Date | null } | null>
 } = {}) {
   const { redirectTo = '/verify-email' } = options

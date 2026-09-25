@@ -85,7 +85,8 @@ export interface SSEMiddlewareOptions {
 
   /**
    * Resolves the user from the request context, which authorizes channels
-   * requested via the `?channels=` query parameter.
+   * requested via the `?channels=` query parameter. Defaults to the session
+   * user from the auth context (`getAuthContext(ctx)?.user()`).
    */
   getUser?: (ctx: unknown) => unknown | Promise<unknown>
 }
@@ -95,11 +96,13 @@ export interface WebSocketMiddlewareOptions extends WebSocketOriginOptions {
   /**
    * Resolves the user from the upgrade request. That one user authorizes the
    * `?channels=` query and every `subscribe` message for the socket's lifetime.
+   * Defaults to the session user from the auth context.
    */
   getUser?: (ctx: unknown) => unknown | Promise<unknown>
 }
 
 export interface AuthMiddlewareOptions {
+  /** Resolves the requesting user. Defaults to the session user from the auth context. */
   getUser?: (ctx: unknown) => unknown | Promise<unknown>
 }
 
