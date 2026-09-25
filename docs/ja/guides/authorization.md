@@ -267,8 +267,8 @@ import { type Router, getRequestContainer, AuthorizationException, defineMiddlew
 
 export function authorizeAbility(ability: string) {
   return defineMiddleware(async (ctx, next) => {
-    const user = ctx.get('user') ?? null
     const gate = getRequestContainer(ctx).make('gate')
+    const user = await gate.resolveUser(ctx)
 
     if (await gate.forUser(user).denies(ability)) {
       throw new AuthorizationException()
@@ -283,6 +283,8 @@ export function registerWebRoutes(router: Router): void {
   router.get('/admin', [AdminController, 'index'], authorizeAbility('access-admin'))
 }
 ```
+
+`gate.resolveUser(ctx)` はリクエストの認証コンテキストからログイン中のユーザーを取得します。`createGate()` に `userResolver` を渡している場合は、そちらが優先されます。組み込みの `authorizeMiddleware('access-admin')` も同じ方法でユーザーを解決します。
 
 ## ベストプラクティス
 

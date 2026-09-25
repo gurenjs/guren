@@ -134,7 +134,14 @@ broadcast.channel('admin.**', isAdmin)             // admin.users, admin.setting
 ### SSEエンドポイント
 
 ```ts
-import { Router } from '@guren/core'
+import { AUTH_CONTEXT_KEY, Router } from '@guren/core'
+import type { AuthContext } from '@guren/core'
+import type { Context } from 'hono'
+
+const currentUser = async (ctx: Context) => {
+  const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+  return (await auth?.user()) ?? null
+}
 
 export function registerBroadcastRoutes(router: Router): void {
   router.get('/broadcasting/events', broadcast.sseMiddleware({
@@ -142,14 +149,16 @@ export function registerBroadcastRoutes(router: Router): void {
     retry: 3000,
     // Resolve the connecting user so channels requested up front via
     // ?channels= can be authorized when the stream opens
-    getUser: (ctx) => ctx.get('user'),
+    getUser: (ctx) => currentUser(ctx as Context),
   }))
 
   router.post('/broadcasting/auth', broadcast.authMiddleware({
-    getUser: (ctx) => ctx.get('user'),
+    getUser: (ctx) => currentUser(ctx as Context),
   }))
 }
 ```
+
+`getUser` にはリクエストコンテキストが `unknown` 型で渡され、Promise を返しても構いません。`currentUser()` は認証コンテキストからログイン中のユーザーを取得します。以降の例でも `currentUser()` を使います。
 
 SSE エンドポイントは `?channels=` クエリパラメータを受け取り、指定したチャンネルをストリーム開始前に購読します。リクエストされた各チャンネルは `getUser` が返すユーザーに対して認可されます。そのため、パブリックチャンネルであれば素の `EventSource` だけで、追加のリクエストなしに動きます。プライベート・プレゼンスチャンネルは、後から `/broadcasting/auth` を通じて購読します（[チャンネルの認可（クライアント）](#チャンネルの認可クライアント)を参照）。
 
@@ -164,7 +173,7 @@ export function registerBroadcastRoutes(router: Router): void {
   router.get('/broadcasting/socket', broadcast.webSocketMiddleware({
     // The user of the upgrade request authorizes every channel the socket
     // subscribes to, for as long as it stays open
-    getUser: (ctx) => ctx.get('user'),
+    getUser: (ctx) => currentUser(ctx as Context),
   }))
 }
 ```
@@ -212,7 +221,7 @@ WebSocket のハンドシェイクには CORS が適用されません。ブラ�
 
 ```ts
 broadcast.webSocketMiddleware({
-  getUser: (ctx) => ctx.get('user'),
+  getUser: (ctx) => currentUser(ctx as Context),
   allowedOrigins: ['https://app.example.com'],
 })
 ```
