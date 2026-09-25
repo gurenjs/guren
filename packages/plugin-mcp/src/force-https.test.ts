@@ -16,7 +16,7 @@ import { mcpPlugin } from './plugin'
  * An app mounting force-https behind a TLS-terminating proxy: the proxy speaks
  * plain HTTP to the app and says `X-Forwarded-Proto: https`. The tool call
  * re-enters on the `/mcp` request's own `http://` origin without that header,
- * and before the fix every call came back as a successful `HTTP 301`.
+ * so a redirect there would reach the agent as a successful `HTTP 301`.
  */
 describe('mcpPlugin behind force-https', () => {
   const store = new MemoryApiTokenStore()

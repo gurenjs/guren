@@ -4,7 +4,7 @@ process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { Controller, createApp, Router } from '@guren/core'
+import { Controller, createApp, createForceHttpsMiddleware, Router } from '@guren/core'
 import { TestApp } from './test-app'
 
 /**
@@ -185,6 +185,21 @@ describe('TestApp.agent()', () => {
     // and "this app exposes no tools" are different answers.
     await expect(bare.agent().call('posts.index')).rejects.toThrow(/TestApp\.create\(\{ routes \}\) or/)
     await expect(bare.agent().tools()).rejects.toThrow('no route registry')
+  })
+
+  it('reaches the route in an app that forces https, the user header included', async () => {
+    created.length = 0
+    const application = createApp({ routes })
+    application.use('*', createForceHttpsMiddleware())
+    const app = await TestApp.fromApp(application)
+
+    // The TestApp's own requests are plain HTTP, so a plain GET is redirected;
+    // the tool call is the object the dispatcher built, and is not.
+    await app.get('/posts').assertStatus(301)
+    await app.agent().call('posts.index').assertOk()
+    await app.agent().call('posts.store', { title: 'Forced' }, { as: { id: 3 } }).assertOk()
+
+    expect(created).toEqual([{ title: 'Forced', author: 3 }])
   })
 
   it('builds the request on the app\'s own baseUrl, not the dispatch default', async () => {

@@ -237,6 +237,10 @@ async function primeCsrfHeaders(
   let response: Response
   try {
     response = await fetch(new Request(`${DISPATCH_ORIGIN}/`, { method: 'GET' }))
+    // One same-host hop, as a browser follows it: force-https answers this plain GET
+    // with a 301 to https, and the token is issued on the other side of it.
+    const location = sameHostRedirect(response)
+    if (location) response = await fetch(new Request(location, { method: 'GET' }))
   } catch {
     // The app refused a bare GET. Not this command's problem to diagnose —
     // the dispatch below reports whatever the real call answers.
@@ -265,6 +269,14 @@ async function primeCsrfHeaders(
     Cookie: [...cookies.entries()].map(([name, value]) => `${name}=${value}`).join('; '),
     'X-XSRF-TOKEN': decodeURIComponent(xsrf),
   }
+}
+
+function sameHostRedirect(response: Response): string | undefined {
+  if (response.status < 300 || response.status >= 400) return undefined
+  const location = response.headers.get('Location')
+  if (!location) return undefined
+  const target = new URL(location, `${DISPATCH_ORIGIN}/`)
+  return target.host === new URL(DISPATCH_ORIGIN).host ? target.toString() : undefined
 }
 
 export interface ToolCallResult {
@@ -339,17 +351,18 @@ export async function dispatchToolCall(
     )
   }
 
+  // Headers go on the built object itself: the dispatcher marks it by identity, and a
+  // copy is redirected by force-https like any plain-HTTP request.
   const request = built.request
-  const headers = new Headers(request.headers)
   if (options.actingAs !== undefined) {
-    headers.set('X-Testing-User', testingUserHeader(options.actingAs))
+    request.headers.set('X-Testing-User', testingUserHeader(options.actingAs))
   }
   if (!CSRF_SAFE_METHODS.has(tool.method)) {
     // The tool's own path, so a path-scoped cookie is judged against the
     // request that will actually carry it.
     const primed = await primeCsrfHeaders(fetch, new URL(request.url).pathname)
     for (const [name, value] of Object.entries(primed)) {
-      headers.set(name, value)
+      request.headers.set(name, value)
     }
   }
 
@@ -358,7 +371,7 @@ export async function dispatchToolCall(
   const startedAt = performance.now()
   let outcome: ToolCallOutcome
   try {
-    outcome = await mapToolResponse(tool, await fetch(new Request(request, { headers })))
+    outcome = await mapToolResponse(tool, await fetch(request))
   } catch (error) {
     // Reaching here means the dispatch itself broke, not the route. Still an invocation,
     // recorded before the rethrow with the status an unhandled throw would report — under

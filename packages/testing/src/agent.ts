@@ -315,14 +315,15 @@ export class TestAgent {
       )
     }
 
-    // The app's standing headers underneath, the dispatch's on top: the dispatch
-    // headers describe the tool call and must win, while the `X-Testing-User`
-    // envelope and the `Cookie` + `X-XSRF-TOKEN` pair from `withCsrf()` must
-    // survive, or a mutating call is refused by CSRF before any policy runs.
-    const headers = new Headers(bridge.headers())
-    built.request.headers.forEach((value, key) => headers.set(key, value))
+    // The dispatch headers describe the tool call and win; the `X-Testing-User`
+    // envelope and `withCsrf()`'s `Cookie` + `X-XSRF-TOKEN` fill in beneath them,
+    // or CSRF refuses a mutating call before any policy runs. Set on the built
+    // object: the dispatcher marks it by identity, and force-https redirects a copy.
+    for (const [key, value] of Object.entries(bridge.headers())) {
+      if (!built.request.headers.has(key)) built.request.headers.set(key, value)
+    }
 
-    const response = await bridge.dispatch(new Request(built.request, { headers }))
+    const response = await bridge.dispatch(built.request)
     const outcome = await runtime.mapToolResponse(tool, response.clone())
 
     return new AgentToolResult(tool, outcome, response, runtime.advertisesStructuredOutput)
