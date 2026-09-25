@@ -44,6 +44,10 @@ Ships the Citty-based CLI (`guren` bin) with generators and database helpers. Ge
   `database-command-boundary.test.ts` exercises the CLI in subprocesses with
   inert database hooks, including refusal, dry-run, reset ordering, failures,
   and JSON status/rollback output.
+- `src/commands/plan.ts` owns the seven `plan:*` command definitions and CLI
+  output. Plan engines stay in their existing modules. Keep application loading
+  lazy and specific to each command: impact scans, detailed state, and commands
+  that need no application must retain their own loading conditions.
 - These modules only construct command objects at import time. Resolve cwd,
   environment, and application state inside command execution. Use the local
   `defineCommand` wrapper so repeated flags keep their existing semantics.

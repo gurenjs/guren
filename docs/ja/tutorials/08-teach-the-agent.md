@@ -36,8 +36,7 @@ bunx guren guidelines -o .claude/rules/project-guidelines.md
 
 ```md file=.claude/rules/ownership.md
 ---
-description: Owned records — a record with an owner column is changed only through a policy, and every such action has an owner test and an other-user test
-globs:
+paths:
   - "app/Http/Controllers/**"
   - "app/Policies/**"
   - "routes/**"
@@ -56,7 +55,7 @@ A record that belongs to a user carries the owner's id (`authorId` on posts, `us
 `guren audit` verifies authentication only and stays green when a policy call is missing. The tests in rule 4 are the only check that sees it. Write them before the action.
 ```
 
-仕組みを決めているのは frontmatter です。`globs` はこの rule を適用するファイルを名指しします。エージェントがコントローラー、ポリシー、ルート、テストを編集するときには rule がコンテキストに読み込まれ、ページを編集するときには読み込まれません。本文は、それを読んで行動する相手に向けて書きます。番号付きで、1 項目に義務ひとつ、書くべき呼び出しそのもの、そして最後の行に理由。audit が助けにならない*理由*を知っているエージェントは、緑の audit を許可だとは受け取りにくくなります。
+仕組みを決めているのは frontmatter です。`paths` はこの rule を適用するファイルを名指しします。Claude Code が rule から読むキーは `paths` だけです。エージェントがコントローラー、ポリシー、ルート、テストを編集するときには rule がコンテキストに読み込まれ、ページを編集するときには読み込まれません。本文は、それを読んで行動する相手に向けて書きます。番号付きで、1 項目に義務ひとつ、書くべき呼び出しそのもの、そして最後の行に理由。audit が助けにならない*理由*を知っているエージェントは、緑の audit を許可だとは受け取りにくくなります。
 
 ## 3. skill
 
@@ -492,7 +491,8 @@ git commit -m "feat: add the blogroll"
 ## よくあるつまずき
 
 - **skill が一向に発火しない。** `description` に要求が使った言葉が含まれていません。description はプロンプトと照合されます。実装者の語彙ではなく、依頼者の語彙で書いてください。
-- **rule がページにも読み込まれる。** `app/**` のような glob は rule の主題より広すぎます。義務が当てはまるファイルに glob を絞ってください。広いままだと、rule はエージェントが読み飛ばすノイズになります。
+- **rule がページにも読み込まれる。** `app/**` のようなパターンは rule の主題より広すぎます。義務が当てはまるファイルに `paths` を絞ってください。広いままだと、rule はエージェントが読み飛ばすノイズになります。
+- **rule が毎セッション読み込まれる。** frontmatter が `paths` 以外のキー(`globs`、`applyTo`)で範囲を指定しています。Claude Code はそれ以外のキーをエラーなしで無視し、`paths` のない rule を起動時に読み込みます。
 - **`agent:sync` が自分の rule を上書きした。** sync は同梱する名前にしか触れません。自分のファイルが置き換えられたなら、その名前がフレームワークのファイルと衝突しています。改名してください。
 - **`has a policy` のテストは通るのに 403 のテストが失敗する。** ポリシーファイルは存在しますが、誰も呼んでいません。`ownership-review` が見つけるよう brief されているのは、まさにこの隙間です。走らせてください。
 - **レビュアーが diff に無いファイルの指摘を報告する。** brief には `git diff` と書いてあります。アプリ全体を読んでいるなら brief を締め直してください。subagent はファイルに書かれたとおりのことだけを行います。
