@@ -54,7 +54,7 @@ export function Header({ variant, basePath = '/docs', locales = [] }: HeaderProp
   if (variant === 'home') {
     return (
       <>
-        <header className="sticky top-0 z-50 border-b border-white/10 bg-black/40 backdrop-blur-xl">
+        <header className="sticky top-0 z-50 border-b border-white/10 bg-crimson-950/85 backdrop-blur-xl">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
             <Link href="/" className="flex items-center gap-3 text-white no-underline">
               <img src="/logo.svg" alt="Guren" className="size-9 rounded-xl p-0.5" />

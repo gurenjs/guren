@@ -95,4 +95,6 @@ router.get('/settings', [SettingsController, 'index']).middleware(
 )
 ```
 
+`redirectTo` が効くのはブラウザに対してです。エージェントのツール呼び出し([エージェントインターフェース](./agent-interface.md)を参照)はリダイレクトをたどれないので、どちらのガードも JSON の拒否を返します(`requireAuthenticated` は `401`、`requireGuest` は `403`、`status` を渡した場合はその値)。`redirectTo` と一緒に設定した `responseFactory` もこのときは使いません。
+
 認証モジュールは今後も手を入れていきますが、現状でもこの契約に沿ってカスタムガードを配線できます。

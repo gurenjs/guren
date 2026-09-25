@@ -8,6 +8,8 @@ import type { AgentToolInputSource, DerivedAgentTool } from './derive'
 import type { AgentSurface } from './events'
 import { PATH_PARAM_PATTERN } from '../internal/route-path'
 import { AGENT_PREFLIGHT_HEADER, AGENT_PREFLIGHT_VERDICT_HEADER } from '../internal/agent-preflight'
+import { AGENT_SURFACE_HEADER } from '../internal/agent-request'
+import { markDispatchedToolRequest } from '../internal/dispatched-request'
 
 /** How many characters of a non-JSON response body survive into the result. */
 const TEXT_RESPONSE_CAP = 50_000
@@ -34,10 +36,10 @@ export interface BuildToolRequestOptions {
   preflight?: boolean
   /**
    * Which protocol surface the call arrived on, announced as
-   * `X-Guren-Agent-Surface`; defaults to `'mcp'`. Informational and write-only
-   * here — it borrows the audit trail's vocabulary ({@link AgentSurface}), but
-   * the trail's own `surface` comes from the adapter. Nothing may authorize on
-   * it: any client sets any header it likes.
+   * `X-Guren-Agent-Surface`; defaults to `'mcp'`. The audit trail's own `surface`
+   * comes from the adapter, not from here. The auth guards read its presence to
+   * refuse with JSON rather than a redirect; nothing may authorize on it, since
+   * any client sets any header it likes.
    */
   surface?: AgentSurface
 }
@@ -170,7 +172,7 @@ export function buildToolRequest(
     // without engaging the `X-Inertia` visit protocol and its 409 version
     // negotiation, which a stateless tool call has no version to answer.
     Accept: 'application/json',
-    'X-Guren-Agent-Surface': options.surface ?? 'mcp',
+    [AGENT_SURFACE_HEADER]: options.surface ?? 'mcp',
   })
   if (options.authorization) {
     headers.set('Authorization', options.authorization)
@@ -198,7 +200,7 @@ export function buildToolRequest(
 
   const qs = query.toString()
   const url = `${origin}${path}${qs ? `?${qs}` : ''}`
-  return { request: new Request(url, { method, headers, body }) }
+  return { request: markDispatchedToolRequest(new Request(url, { method, headers, body })) }
 }
 
 /**

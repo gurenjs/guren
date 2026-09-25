@@ -22,14 +22,11 @@ import { createSecurityHeaders, type SecurityHeadersOptions } from './middleware
 import { createHostAuthorizationMiddleware, type HostAuthorizationOptions } from './middleware/host-authorization'
 import { isMcpEndpointEnabled } from '../mcp/endpoint'
 import { isDocsViewerEnabled } from '../docs-viewer/endpoint'
-import {
-  formatHostPort,
-  isWildcardHost,
-  logDevServerBanner,
-  type DevBannerOptions,
-} from './dev-banner'
+import type { DevBannerOptions } from './dev-banner'
+import { formatHostPort, isWildcardHost } from './host-port'
 import { startViteDevServer, type StartViteDevServerOptions } from './vite-dev-server'
 import { runInRequestScope } from '../support/request-deferrer'
+import { isHotReloadRuntime } from '../hot-reload/hot-disposables'
 import { adoptDefaultApplication } from './default-application'
 import { CONTAINER_CONTEXT_KEY } from './request-container'
 import type { InertiaDocumentOptions, InertiaSsrRenderer } from '../mvc/inertia/InertiaEngine'
@@ -37,6 +34,9 @@ import { shareInertiaProps, type SharedInertiaPropsResolver } from '../mvc/inert
 import type { EnvSchema } from '../config/env'
 import type { ConfigDefinition } from '../config/define'
 import { ConfigServiceProvider } from '../providers/ConfigServiceProvider'
+import { IntrospectionListenError, isIntrospecting, runIntrospecting } from '../introspection/flag'
+import type { AppManifest } from '../introspection/types'
+import { buildAppManifest } from '../introspection/manifest'
 
 // Bun is only available at runtime. The declaration keeps TypeScript happy while
 // still allowing consumers to stub or polyfill it when running elsewhere.
@@ -46,6 +46,7 @@ declare const Bun:
       port?: number
       hostname?: string
       fetch: (request: Request, server: BunServer) => Response | Promise<Response>
+      websocket?: unknown
     }): BunServer | undefined
   }
   | undefined
@@ -115,6 +116,29 @@ function resolvePortAttempts(option: boolean | undefined, port: number): number 
 function toConnectableUrl(hostname: string, port: number): string {
   const host = isWildcardHost(hostname) ? (hostname === '::' ? '::1' : '127.0.0.1') : hostname
   return `http://${formatHostPort(host, port)}`
+}
+
+type DevBannerModule = typeof import('./dev-banner')
+
+let devBanner: DevBannerModule | undefined
+
+/**
+ * The banner module brings figlet and chalk, so it is loaded outside production
+ * only. The NODE_ENV test guards the import directly, in plain member access: a
+ * deploy bundle's `--define` folds it to `false` and drops the module. Neither
+ * Bun nor esbuild folds it behind a function call, or beside a runtime value in
+ * `||` (as `shouldLogBanner` has); an `&&` with such a value still folds.
+ */
+async function loadDevBanner(): Promise<DevBannerModule | undefined> {
+  if (typeof process === 'undefined') {
+    return devBanner
+  }
+
+  if (process.env.NODE_ENV !== 'production') {
+    devBanner ??= await import('./dev-banner')
+  }
+
+  return devBanner
 }
 
 function clearManagedViteEnv(): void {
@@ -195,6 +219,33 @@ function bunStopTimeoutMs(): number {
 }
 
 /**
+ * How long a `bun --hot` reload waits on the server it replaces. That stop is
+ * forced, and the hot-reload teardown has already server-closed every broadcast
+ * WebSocket, so nothing is draining; on Bun 1.3.x `stop()` then never resolves
+ * (1.4.0 resolves at once). Quoted in docs/{en,ja}/guides/architecture.md.
+ */
+const HOT_RELOAD_STOP_TIMEOUT_MS = 250
+
+/** The bound on one server `stop()`, and whether hitting it is reported. */
+interface StopBound {
+  timeoutMs: number
+  warn: boolean
+}
+
+function defaultStopBound(): StopBound {
+  return { timeoutMs: bunStopTimeoutMs(), warn: true }
+}
+
+/**
+ * Silent: on Bun 1.3.x it is hit on every reload, and there is nothing to
+ * report. `GUREN_BUN_STOP_TIMEOUT_MS` can only shorten it: it is set for a
+ * production drain, which a reload never is.
+ */
+function hotReloadStopBound(): StopBound {
+  return { timeoutMs: Math.min(bunStopTimeoutMs(), HOT_RELOAD_STOP_TIMEOUT_MS), warn: false }
+}
+
+/**
  * A positive integer of milliseconds, or 5000 when unset or unparseable. One
  * parse for both bounds, so they cannot drift apart.
  */
@@ -231,10 +282,11 @@ async function awaitBounded(
   }
 }
 
-/** `stop()` bounded by {@link bunStopTimeoutMs}, warning rather than throwing. */
+/** `stop()` bounded by `bound` ({@link bunStopTimeoutMs} by default), warning rather than throwing. */
 async function stopBunServerBounded(
   server: BunServer,
   closeActiveConnections: boolean,
+  bound: StopBound = defaultStopBound(),
 ): Promise<void> {
   // An async IIFE, not `Promise.resolve(...).catch(...)`: a `stop` that throws
   // synchronously would escape that catch and reject the whole shutdown path.
@@ -246,14 +298,18 @@ async function stopBunServerBounded(
     }
   })()
 
-  await awaitBounded(stopped, bunStopTimeoutMs(), (timeoutMs) => {
+  await awaitBounded(stopped, bound.timeoutMs, (timeoutMs) => {
+    if (!bound.warn) return
     console.warn(
       `Bun server did not stop within ${timeoutMs}ms — no longer waiting on it. In-flight requests may still be draining.`,
     )
   })
 }
 
-async function stopActiveBunServer(closeActiveConnections = false): Promise<void> {
+async function stopActiveBunServer(
+  closeActiveConnections = false,
+  bound?: StopBound,
+): Promise<void> {
   const state = getGlobalState()
   const previous = state.__gurenActiveServer
 
@@ -263,7 +319,7 @@ async function stopActiveBunServer(closeActiveConnections = false): Promise<void
   }
 
   try {
-    await stopBunServerBounded(previous, closeActiveConnections)
+    await stopBunServerBounded(previous, closeActiveConnections, bound)
   } finally {
     releaseActiveBunServer(previous)
   }
@@ -551,6 +607,8 @@ export class Application {
   readonly configEntries: ReadonlyArray<ConfiguredDefinition>
   private routesRegistered = false
   private bootPromise?: Promise<void>
+  private manifestPromise?: Promise<AppManifest>
+  private bootAttempted = false
 
   constructor(private readonly options: ApplicationOptions = {}) {
     this.configEntries = [
@@ -586,9 +644,11 @@ export class Application {
       shareInertiaProps(options.inertia.share, this.container)
     }
 
+    const framework = { source: 'framework' } as const
+
     // Must stay the first provider registered (RFC 0027 §3).
     if (options.env || this.configEntries.length > 0) {
-      this.providerManager.register(ConfigServiceProvider)
+      this.providerManager.register(ConfigServiceProvider, framework)
     }
 
     // Registered here, before any provider, so requireAuthenticated/requireGuest
@@ -606,19 +666,19 @@ export class Application {
     // app.use() before boot() finds it. The context resolves its session
     // lazily, so running ahead of the session middleware is fine.
     if (this.options.auth) {
-      this.providerManager.register(AuthServiceProvider)
+      this.providerManager.register(AuthServiceProvider, framework)
     } else {
       this.hono.use('*', attachAuthContext((ctx) => this.authManager.createAuthContext(ctx)))
     }
 
-    this.providerManager.register(AuthorizationServiceProvider)
+    this.providerManager.register(AuthorizationServiceProvider, framework)
 
-    // Through the same registerMany() as options.providers, so a module-supplied
-    // Error/Inertia provider subclass overrides the default like a top-level one.
-    const moduleProviders = (this.options.modules ?? []).flatMap((module) => module.providers)
+    // A module-supplied Error/Inertia provider subclass overrides the default
+    // like a top-level one, so both lists count as user providers here.
+    const listedProviders = Array.isArray(this.options.providers) ? this.options.providers : []
     const userProviders = [
-      ...(Array.isArray(this.options.providers) ? this.options.providers : []),
-      ...moduleProviders,
+      ...listedProviders,
+      ...(this.options.modules ?? []).flatMap((module) => module.providers),
     ]
 
     // A user-supplied subclass of a default provider takes ownership of that
@@ -627,23 +687,24 @@ export class Application {
       userProviders.some((provider) => provider === base || provider.prototype instanceof base)
 
     if (this.options.i18n && !hasUserProviderOf(I18nServiceProvider)) {
-      this.providerManager.register(I18nServiceProvider)
+      this.providerManager.register(I18nServiceProvider, framework)
     }
 
     // Before user providers, so a custom ErrorServiceProvider subclass wins via
     // its later hono.onError() call.
     if (!hasUserProviderOf(ErrorServiceProvider)) {
-      this.providerManager.register(ErrorServiceProvider)
+      this.providerManager.register(ErrorServiceProvider, framework)
     }
 
-    if (userProviders.length > 0) {
-      this.providerManager.registerMany(userProviders)
+    this.providerManager.registerMany(listedProviders, { source: 'options.providers' })
+    for (const gurenModule of this.options.modules ?? []) {
+      this.providerManager.registerMany(gurenModule.providers, { source: 'module', module: gurenModule.name })
     }
 
     // After user providers: the first matching exception renderer wins, so a
     // user-registered ValidationException renderer keeps precedence over this.
     if (!hasUserProviderOf(InertiaServiceProvider)) {
-      this.providerManager.register(InertiaServiceProvider)
+      this.providerManager.register(InertiaServiceProvider, framework)
     }
 
     // Publish as the default application: code outside a request (Job.make(),
@@ -719,6 +780,13 @@ export class Application {
   }
 
   async mountRoutes(): Promise<void> {
+    await this.registerRoutes()
+    await this.preparePrototypeRoutes()
+    this.router.mount(this.hono, { container: this.container })
+  }
+
+  /** Runs the registrars once; `introspect()` stops here, since mounting refuses an unregistered alias it reports. */
+  private async registerRoutes(): Promise<void> {
     if (!this.routesRegistered) {
       if (this.options.routes) {
         // Not cleared: routes added directly to app.router before boot() stay.
@@ -731,9 +799,6 @@ export class Application {
 
       this.routesRegistered = true
     }
-
-    await this.preparePrototypeRoutes()
-    this.router.mount(this.hono, { container: this.container })
   }
 
   /**
@@ -796,6 +861,20 @@ export class Application {
    * retries on the partially mounted app rather than starting clean.
    */
   async boot(): Promise<void> {
+    // Degrading here, not only in `introspect()`, covers an entry that boots
+    // at module scope before the CLI ever holds the app (RFC 0026 §2).
+    if (isIntrospecting()) {
+      await this.introspect()
+      return
+    }
+
+    if (this.manifestPromise) {
+      throw new Error(
+        '[guren] This application was introspected: its providers may have run introspect() in place of register(), '
+          + 'so it cannot boot. Construct a new application to serve it.',
+      )
+    }
+
     this.bootPromise ??= this.bootOnce()
 
     try {
@@ -816,7 +895,37 @@ export class Application {
     await this.bootPromise
   }
 
+  /**
+   * Registers providers and routes, then describes the result (RFC 0026 §1).
+   * Never mounts on Hono or runs `createApp({ boot })`, a provider's `boot()`
+   * or `listen()`. Memoised; the application cannot boot afterwards.
+   */
+  async introspect(): Promise<AppManifest> {
+    // A failed boot clears `bootPromise` but may have booted providers and run `createApp({ boot })`.
+    if (this.bootAttempted) {
+      throw new Error('[guren] Cannot introspect an application that has booted: introspection describes the registered, unbooted app.')
+    }
+
+    this.manifestPromise ??= runIntrospecting(() => this.introspectOnce())
+    return this.manifestPromise
+  }
+
+  private async introspectOnce(): Promise<AppManifest> {
+    const providers = await this.providerManager.registerAllForIntrospection()
+    await this.registerRoutes()
+    return buildAppManifest({
+      router: this.router,
+      container: this.container,
+      providers,
+      providerWarnings: this.providerManager.manifestWarnings(),
+      modules: this.options.modules ?? [],
+      authOptions: this.options.auth,
+      hasBootCallback: this.options.boot !== undefined,
+    })
+  }
+
   private async bootOnce(): Promise<void> {
+    this.bootAttempted = true
     if (this.options.hostAuthorization !== undefined && this.hasHttpConfig()) {
       throw new Error(
         '[guren] Host authorization is configured twice: createApp({ hostAuthorization }) and config/http.ts. Keep one.',
@@ -951,16 +1060,21 @@ export class Application {
   }
 
   async listen(options: ApplicationListenOptions = {}): Promise<ListenAddress> {
+    if (isIntrospecting()) {
+      throw new IntrospectionListenError()
+    }
+
     if (!Bun) {
       throw new Error('Bun runtime is required to call Application.listen')
     }
 
-    // Force-close: this only runs when a `bun --hot` reload replaces a previous
-    // `listen()`, which must not wait on the old server's in-flight requests.
+    // Force-close: a `bun --hot` reload replacing a previous `listen()` must not
+    // wait on the old server's in-flight requests, and takes the short bound;
+    // a second `listen()` in any other process (tests) keeps the default one.
     // The retired server is remembered so the check below can tell "already
     // stopped here" from "bound by a concurrent call".
     const supersededServer = getGlobalState().__gurenActiveServer
-    await stopActiveBunServer(true)
+    await stopActiveBunServer(true, isHotReloadRuntime() ? hotReloadStopBound() : undefined)
 
     const { port = 3000, hostname = '0.0.0.0', assetsUrl, vite, portFallback } = options
     const externalAssetsUrl =
@@ -968,6 +1082,22 @@ export class Application {
         ? process.env?.VITE_DEV_SERVER_URL
         : undefined
     let resolvedAssetsUrl = assetsUrl ?? externalAssetsUrl
+
+    const shouldLogBanner =
+      typeof process === 'undefined' ||
+      (process.env.NODE_ENV !== 'production' && process.env?.GUREN_DEV_BANNER !== '0')
+
+    // Before Vite starts, so a failed import leaves no asset server behind, and
+    // before the bind: from publishing the server to returning its address,
+    // `listen()` must not yield, or a concurrent `stop()` lands in between.
+    if (shouldLogBanner) {
+      await loadDevBanner()
+    }
+
+    // Before Vite and the bind, like the banner. It is the handler that hono's
+    // `upgradeWebSocket` hands an upgraded socket to; without it `server.upgrade()`
+    // throws. `hono/bun` reads the `Bun` global at load, so only this path imports it.
+    const { websocket } = await import('hono/bun')
 
     const shouldStartVite =
       vite !== false &&
@@ -1043,8 +1173,10 @@ export class Application {
           port: attemptPort,
           hostname,
           // Bun's convention for reaching the live server from a handler:
-          // middleware reads `ctx.env.server.requestIP()` for the socket peer.
+          // middleware reads `ctx.env.server.requestIP()` for the socket peer,
+          // and `upgradeWebSocket` calls `ctx.env.server.upgrade()`.
           fetch: (request: Request, server: BunServer) => this.fetch(request, { server }),
+          websocket,
         })
         break
       } catch (error) {
@@ -1103,10 +1235,6 @@ export class Application {
     this.boundAddress = address
     setActiveBunServer(server)
     this.registerBunTeardown()
-
-    const shouldLogBanner =
-      typeof process === 'undefined' ||
-      (process.env.NODE_ENV !== 'production' && process.env?.GUREN_DEV_BANNER !== '0')
 
     if (shouldLogBanner) {
       this.logDevServerBanner({
@@ -1187,8 +1315,22 @@ export class Application {
     return this
   }
 
+  /**
+   * Prints the dev server banner. `listen()` loads the banner module first, so it
+   * prints there at once; a call before anything has loaded it prints once the
+   * import settles. The module is never loaded under `NODE_ENV=production`, which
+   * keeps it out of deploy bundles, so a call there prints nothing.
+   */
   logDevServerBanner(options: DevBannerOptions): void {
-    logDevServerBanner(options)
+    if (devBanner) {
+      devBanner.logDevServerBanner(options)
+      return
+    }
+
+    void loadDevBanner().then(
+      (loaded) => loaded?.logDevServerBanner(options),
+      (error: unknown) => console.error('Failed to load the dev server banner:', error),
+    )
   }
 
   /**

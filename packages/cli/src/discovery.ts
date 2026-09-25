@@ -358,6 +358,9 @@ export function discoverNotificationFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, NOTIFICATIONS_DIR)
 }
 
+/** The directory {@link discoverRoutesFiles} reads, relative to an app root. */
+export const ROUTES_DIR = 'routes'
+
 /**
  * Route files under `<appRoot>/routes/`, tests excluded. Scoped to the given root
  * on purpose, unlike the `discover*Files` siblings that fan out over
@@ -366,7 +369,7 @@ export function discoverNotificationFiles(appRoot: string): Promise<string[]> {
  * See {@link discoverModuleRoutesFiles}.
  */
 export function discoverRoutesFiles(appRoot: string): Promise<string[]> {
-  return collectFiles(resolve(appRoot, 'routes'), IMPORTABLE_EXTENSIONS).then((files) =>
+  return collectFiles(resolve(appRoot, ROUTES_DIR), IMPORTABLE_EXTENSIONS).then((files) =>
     files.filter((file) => !TEST_FILE_PATTERN.test(file)),
   )
 }
@@ -396,22 +399,6 @@ export async function discoverModuleRoutesFiles(appRoot: string): Promise<Module
   )
 
   return scanned.filter((entry) => entry.files.length > 0)
-}
-
-/** Files a module's `defineModule()` descriptor may live in, in probe order. */
-export function moduleDescriptorCandidates(moduleDir: string): string[] {
-  return [`${moduleDir}/index.ts`, `${moduleDir}/index.js`]
-}
-
-/**
- * Files a module may keep its routes registrar in, in probe order. The
- * counterpart to {@link discoverModuleRoutesFiles}, which asks only about a
- * module's `routes/` *directory* and so returns nothing for the scaffolded
- * shape. One list, because a second copy is how one check comes to read
- * `modules/x/routes.mts` while the other does not.
- */
-export function moduleRoutesEntryCandidates(moduleDir: string): string[] {
-  return [`${moduleDir}/routes.ts`, `${moduleDir}/routes.js`, `${moduleDir}/routes/index.ts`, `${moduleDir}/routes/index.js`]
 }
 
 /**
@@ -581,7 +568,8 @@ export async function appBindsService(
   )
   const bindingPattern = new RegExp(`\\b(?:instance|singleton|bind)\\(\\s*['"]${escapeRegExp(key)}['"]`)
   const binding: string[] = []
-  for (const filePath of groups.flat()) {
+  // A test's `container.instance(key, fake)` binds nothing the app boots with.
+  for (const filePath of groups.flat().filter((file) => !TEST_FILE_PATTERN.test(file))) {
     const source = await readIfExists(appRoot, filePath)
     if (source && (bindingPattern.test(source) || (options.definitions && callsDefineConfig(source, key)))) binding.push(filePath)
   }
@@ -609,3 +597,20 @@ export async function discoverAppConfigFiles(appRoot: string): Promise<string[]>
   return groups.flat().filter((file) => !/\.test\.[jt]sx?$/.test(file))
 }
 
+/**
+ * Source files sitting directly in the project root, where deploy entrypoints
+ * conventionally live. Its own non-recursive pass because pointing collectFiles
+ * at the root would walk the whole tree.
+ */
+export async function readRootSourceFiles(cwd: string): Promise<string[]> {
+  try {
+    const entries = await readdir(cwd, { withFileTypes: true })
+    return entries
+      .filter((entry) => entry.isFile() && !entry.name.startsWith('.') && !entry.name.endsWith('.d.ts'))
+      .filter((entry) => IMPORTABLE_EXTENSIONS.has(extname(entry.name)))
+      .map((entry) => join(cwd, entry.name))
+  } catch {
+    // An unreadable project root leaves the directory scans as the only input.
+    return []
+  }
+}

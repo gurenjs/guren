@@ -207,9 +207,11 @@ test('lists tasks', async () => {
       const agentManifest = manifestChecks.find(c => c.key === 'manifest:.guren/agents.gen.ts')
       expect(agentManifest?.status).toBe('pass')
       expect(agentManifest?.message).toContain('not applicable')
+      expect(agentManifest?.fix).toBeUndefined()
       const unconditional = manifestChecks.filter(c => c !== agentManifest)
       expect(unconditional.length).toBeGreaterThan(0)
       expect(unconditional.every(c => c.status === 'warn')).toBe(true)
+      expect(unconditional.every(c => c.fix?.args.join(' ') === 'codegen')).toBe(true)
     } finally {
       await workspace.cleanup()
     }
@@ -236,6 +238,7 @@ export function registerWebRoutes(router: Router): void {
       // A bare `guren codegen` reads routes/web.ts, so it would write the
       // manifest from a different route graph and not clear this finding.
       expect(check?.suggestion).toContain('--routes routes/api.ts')
+      expect(check?.fix).toEqual({ kind: 'command', args: ['codegen', '--routes', 'routes/api.ts'] })
     })
 
     it('prints the plain command when no custom routes file is in play', async () => {
@@ -257,8 +260,9 @@ export function registerWebRoutes(router: Router): void {
 
       const check = agentCheck(report)
       expect(check?.status).toBe('warn')
-      expect(check?.message).toContain('no longer exposes')
+      expect(check?.message).toContain('no route in the routes file derives')
       expect(check?.suggestion).toContain('it removes')
+      expect(check?.fix).toEqual({ kind: 'command', args: ['codegen'] })
     })
 
     it('is skipped under --changed when only non-source files changed', async () => {
@@ -1876,6 +1880,36 @@ export const billingModule = defineModule({ name: 'billing', routes: registerBil
 
     expect(statusOf(report, 'modules/billing/routes/invoice.ts')).toBe('pass')
     expect(wiring(report).has('modules/billing/routes/index.ts')).toBe(false)
+  })
+
+  // `import '../modules/billing'` loads `index.tsx`, so that file is the descriptor; a reader
+  // knowing only `index.ts` falls back to the conventional name and misses `routes/index.ts`.
+  it('reads a module descriptor kept in index.tsx', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': PLAIN_ENTRY,
+      'modules/billing/routes.ts': BILLING_ENTRY,
+      'modules/billing/index.tsx': `import { defineModule } from '@guren/core'
+import { registerBillingRoutes } from './routes/index.js'
+
+export const billingModule = defineModule({ name: 'billing', routes: registerBillingRoutes })
+`,
+      'modules/billing/routes/index.ts': BILLING_ROUTES_INDEX,
+      'modules/billing/routes/invoice.ts': MODULE_ROUTE,
+    })
+
+    expect(statusOf(report, 'modules/billing/routes/invoice.ts')).toBe('pass')
+  })
+
+  it('names a routes.tsx entry when no descriptor names one', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': PLAIN_ENTRY,
+      'modules/billing/routes.tsx': BILLING_ENTRY,
+      'modules/billing/routes/invoice.ts': MODULE_ROUTE,
+    })
+
+    const finding = wiring(report).get('modules/billing/routes/invoice.ts')
+    expect(finding?.status).toBe('warn')
+    expect(finding!.message).toContain('modules/billing/routes.tsx')
   })
 
   // The type assertion changes nothing the runtime sees, but reading the call's

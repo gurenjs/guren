@@ -1,5 +1,19 @@
 # @guren/openapi
 
+## 1.4.2
+
+### Patch Changes
+
+- 002d087: A route whose response is declared only by a `resource:` hint now produces a warning in `generateOpenApiDocument()` (and so in `guren openapi:generate` and `mountOpenApiDocs()`). The document still carries no response schema for that route, since a hint cannot be turned into JSON Schema; the warning names the route and suggests declaring `output`.
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+  - @guren/core@1.21.0
+
 ## 1.4.1
 
 ### Patch Changes

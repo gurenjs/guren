@@ -1,7 +1,55 @@
 @import 'tailwindcss';
 
+/* Self-hosted latin subsets, SIL OFL 1.1 (public/fonts/LICENSE-*.txt), the
+   same files the Guren Deck slides use. Only the weights a page renders load. */
+@font-face {
+  font-family: 'Noto Sans JP';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/noto-sans-jp-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Noto Sans JP';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/noto-sans-jp-latin-700-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-700-normal.woff2') format('woff2');
+}
+
 @theme {
   --font-family-display: 'Inter', 'Inter var', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-home: 'Noto Sans JP', system-ui, sans-serif;
+  --font-mono: var(--g-font-mono);
+  /* Only 紅蓮 is set in it; no mincho is self-hostable at that size budget. */
+  --font-mincho: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', 'Noto Serif CJK JP', serif;
+  /* The Guren Deck palette: ink is the code surface, smoke the secondary text
+     on crimson-950 (7.5:1), foam the counter-signal for measured numbers. */
+  --color-ink: var(--g-ink);
+  --color-smoke: #c9a9a9;
+  --color-foam: #9ccfd8;
+  --color-ember: #ff3c28;
   --color-crimson-50: #fff5f5;
   --color-crimson-100: #ffe3e3;
   --color-crimson-200: #ffc9c9;
@@ -25,8 +73,67 @@
   --color-docs-border: var(--docs-border-soft);
   --color-docs-border-strong: var(--docs-border-strong);
   --animate-slide-in-right: slide-in-right 0.3s ease-out both;
-  --animate-cursor-blink: cursor-blink 1s step-end infinite;
   --animate-gradient-shift: gradient-shift 8s ease infinite;
+}
+
+/* The home hero's 紅蓮 waits hidden for BurningName to burn it in. If the
+   script never runs, the fallback shows it anyway; reduced motion shows it
+   at once, which is also what the component then settles on. */
+.guren-name-pending {
+  opacity: 0;
+  animation: guren-name-fallback 0s linear 2.5s forwards;
+}
+
+@keyframes guren-name-fallback {
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guren-name-pending {
+    opacity: 1;
+    animation: none;
+  }
+}
+
+/* ConventionGrid's panels. Each vg-* class's own style is its end state, which
+   the server renders and reduced motion keeps. data-phase="armed" holds a panel
+   at its first frame until it scrolls into view; "play" runs it once. */
+.vg .vg-out { opacity: 0; }
+.vg .vg-dim { opacity: 0.35; }
+.vg .vg-draw { stroke-dasharray: 1; }
+.vg .vg-light {
+  border-color: color-mix(in srgb, var(--color-crimson-400) 55%, transparent);
+  background-color: color-mix(in srgb, var(--color-crimson-900) 35%, transparent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .vg [data-phase] { --vg-ease: cubic-bezier(0.3, 0.7, 0.3, 1); }
+  .vg [data-phase='armed'] { --vg-state: paused; }
+
+  .vg [data-phase] :is(.vg-out, .vg-dim) { animation: vg-fade 0.45s var(--vg-ease) both var(--vg-state, running); }
+  .vg [data-phase] .vg-in { animation: vg-in 0.45s var(--vg-ease) both var(--vg-state, running); }
+  .vg [data-phase] .vg-pop { animation: vg-pop 0.45s var(--vg-ease) both var(--vg-state, running); }
+  .vg [data-phase] .vg-grow { animation: vg-grow 0.45s var(--vg-ease) both var(--vg-state, running); }
+  .vg [data-phase] .vg-draw { animation: vg-draw 0.45s var(--vg-ease) both var(--vg-state, running); }
+  .vg [data-phase] .vg-light { animation: vg-light 0.45s var(--vg-ease) both var(--vg-state, running); }
+  .vg [data-phase] .vg-slide { animation: vg-slide 0.8s var(--vg-ease) both var(--vg-state, running); }
+  .vg [data-phase] .vg-reveal { animation: vg-reveal 0.9s steps(38, end) both var(--vg-state, running); }
+}
+
+@keyframes vg-fade { from { opacity: 1; } }
+@keyframes vg-in { from { opacity: 0; transform: translateY(3px); } }
+@keyframes vg-pop { from { opacity: 0; transform: scale(0.6); } }
+@keyframes vg-grow { from { transform: scaleX(0); } }
+@keyframes vg-draw { from { stroke-dashoffset: 1; } }
+/* inset() cannot interpolate to the initial `none`, so the end is spelled out. */
+@keyframes vg-reveal { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes vg-slide { from { opacity: 0; transform: translateX(-5.5rem); } 25% { opacity: 1; } }
+@keyframes vg-light {
+  from {
+    border-color: color-mix(in srgb, var(--color-crimson-50) 15%, transparent);
+    background-color: transparent;
+    color: color-mix(in srgb, var(--color-smoke) 60%, transparent);
+  }
 }
 
 @keyframes slide-in-right {
@@ -38,10 +145,6 @@
     opacity: 1;
     transform: translateX(0);
   }
-}
-
-@keyframes cursor-blink {
-  50% { opacity: 0; }
 }
 
 @keyframes gradient-shift {
@@ -56,8 +159,8 @@ html {
 /* ─── Guren UI tokens (gurenjs/guren-ui dist/tokens.css) ───
    The design system was derived from these docs themes, so the values match
    what the site already shipped; --docs-* below are aliases kept for the
-   existing markup. Fonts stay on the site's own policy (no self-hosted
-   family is introduced here). */
+   existing markup. The faces these stacks name are self-hosted by the
+   @font-face rules at the top of this file. */
 :root {
   --g-font-mono: 'JetBrains Mono', 'SFMono-Regular', ui-monospace, monospace;
 
@@ -485,10 +588,10 @@ body.docs-theme {
   border-bottom-color: var(--docs-accent-strong);
 }
 
-/* The code surface has no theme: ink in light and dark alike (the same
-   terminal surface CodeBlock.tsx paints), syntax from rose-pine-moon.
+/* The code surface has no theme: ink in light and dark alike (--g-ink, which
+   the home page's code panel paints too), syntax from rose-pine-moon.
    !important beats the theme background shiki inlines on the element. */
-.shiki {
+.docs-content .shiki {
   border-radius: var(--g-r-card);
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 1rem 1.25rem;
@@ -498,7 +601,7 @@ body.docs-theme {
   line-height: 1.5;
 }
 
-.shiki code {
+.docs-content .shiki code {
   font-family: var(--g-font-mono);
 }
 

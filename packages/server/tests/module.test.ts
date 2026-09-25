@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { Application, Controller, createApp, defineModule, ServiceProvider } from '../src'
+import { Application, Controller, createApp, defineModule, mountModuleRoutes, Router, ServiceProvider } from '../src'
 
 class BillingController extends Controller {
   async index() {
@@ -139,5 +139,83 @@ describe('Application module wiring', () => {
 
     const billingModule = defineModule({ name: 'billing', commands: [InvoiceCommand] })
     expect(billingModule.commands).toEqual([InvoiceCommand])
+  })
+})
+
+describe('mountModuleRoutes', () => {
+  const moduleOf = (router: Router) => router.definitions().map((definition) => [definition.path, definition.module])
+
+  it('names the module on each route its registrar added, and none on the app\'s own', async () => {
+    const router = new Router()
+    router.get('/posts', [BillingController, 'index'])
+    await mountModuleRoutes(router, defineModule({
+      name: 'billing',
+      routes: (moduleRouter) => {
+        moduleRouter.get('/invoices', [BillingController, 'index'])
+      },
+    }))
+    await mountModuleRoutes(router, defineModule({
+      name: 'shop',
+      prefix: '/shop',
+      routes: (moduleRouter) => {
+        moduleRouter.group('/carts', (carts) => {
+          carts.get('/', [BillingController, 'index'])
+        })
+      },
+    }))
+
+    expect(moduleOf(router)).toEqual([['/posts', undefined], ['/invoices', 'billing'], ['/shop/carts', 'shop']])
+    expect('module' in router.definitions()[0]!).toBe(false)
+  })
+
+  it('names a route an async registrar adds after an await, once its prefix has popped', async () => {
+    const router = new Router()
+    await mountModuleRoutes(router, defineModule({
+      name: 'billing',
+      prefix: '/billing',
+      routes: async (moduleRouter) => {
+        moduleRouter.get('/before', [BillingController, 'index'])
+        await Promise.resolve()
+        moduleRouter.get('/after', [BillingController, 'index'])
+      },
+    }))
+
+    expect(moduleOf(router)).toEqual([['/billing/before', 'billing'], ['/after', 'billing']])
+  })
+
+  it('names a module a registrar mounts itself after the module createApp() lists', async () => {
+    const router = new Router()
+    const inner = defineModule({
+      name: 'invoices',
+      routes: (moduleRouter) => {
+        moduleRouter.get('/invoices', [BillingController, 'index'])
+      },
+    })
+    await mountModuleRoutes(router, defineModule({
+      name: 'billing',
+      routes: async (moduleRouter) => {
+        moduleRouter.get('/billing', [BillingController, 'index'])
+        await mountModuleRoutes(moduleRouter, inner)
+      },
+    }))
+
+    expect(moduleOf(router)).toEqual([['/billing', 'billing'], ['/invoices', 'billing']])
+  })
+
+  it('carries the name into the manifest for an unprefixed module', async () => {
+    const manifest = await createApp({
+      routes: (router) => {
+        router.get('/posts', [BillingController, 'index'])
+      },
+      modules: [defineModule({
+        name: 'billing',
+        routes: (router) => {
+          router.get('/invoices', [BillingController, 'index'])
+        },
+      })],
+    }).introspect()
+
+    expect(manifest.routes.map((route) => [route.path, route.module])).toEqual([['/posts', null], ['/invoices', 'billing']])
+    expect(manifest.modules[0]?.routeCount).toBe(1)
   })
 })

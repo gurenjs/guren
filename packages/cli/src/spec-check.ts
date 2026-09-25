@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import { readIfExists, directoryExists } from './discovery'
 import { generateSpecArtifacts, SPEC_VIEWS, type SpecViewDescriptor } from './spec-generate'
 import { SPEC_DIR } from './spec-artifact'
-import { check, type CheckResult } from './check-result'
+import { check, formatFixCommand, routesCommandFix, type CheckResult } from './check-result'
 import { escapeRegExp } from './utils'
 
 export interface SpecCheckOptions {
@@ -51,6 +51,8 @@ export async function runSpecCheck(options: SpecCheckOptions): Promise<CheckResu
   if (views.length === 0) return []
 
   const artifacts = await generateSpecArtifacts({ cwd, routesFile }, views)
+  // The views were derived from `routesFile`, so the regeneration has to read the same one.
+  const fix = routesCommandFix('spec:generate', routesFile)
   const results: CheckResult[] = []
 
   for (const artifact of artifacts) {
@@ -67,21 +69,15 @@ export async function runSpecCheck(options: SpecCheckOptions): Promise<CheckResu
     }
 
     const committed = await readIfExists(cwd, specPath)
-    const status = committed === artifact.content ? 'pass' : 'fail'
-    results.push(
-      check(
-        key,
-        specPath,
-        status,
-        committed === null
-          ? `${specPath} is missing.`
-          : status === 'pass'
-            ? `${specPath} matches the code.`
-            : `${specPath} is out of date with the code.`,
-        status === 'pass' ? undefined : 'Run: bunx guren spec:generate',
-        specPath,
-      ),
-    )
+    if (committed === artifact.content) {
+      results.push(check(key, specPath, 'pass', `${specPath} matches the code.`, undefined, specPath))
+      continue
+    }
+    const message = committed === null ? `${specPath} is missing.` : `${specPath} is out of date with the code.`
+    results.push({
+      ...check(key, specPath, 'fail', message, `Run: ${formatFixCommand(fix)}`, specPath),
+      fix,
+    })
   }
 
   return results

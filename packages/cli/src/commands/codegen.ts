@@ -50,6 +50,11 @@ export const routeTypesCommand = defineCommand({
       description: 'Runtime page manifest module to write',
       valueHint: '.guren/pages.gen.ts',
     },
+    // Opt-in, unlike check's: the Vite watcher runs codegen on every edit (RFC 0026 §5).
+    introspect: {
+      type: 'boolean',
+      description: 'Take the route set from the introspected app, a provider\'s routes included (RFC 0026).',
+    },
     force: {
       type: 'boolean',
       description: 'Overwrite existing files',
@@ -68,6 +73,7 @@ export const routeTypesCommand = defineCommand({
       routesFile: args.routes,
       outputFile: args.out,
       appRoot: args.app,
+      introspect: args.introspect === true,
       ...writerOptions,
     })
     if (pagesOutputPath) consola.success(`Page helpers generated at ${pagesOutputPath}`)
@@ -90,6 +96,7 @@ export const codegenCommand = defineCommand({
       outputFile: args.out,
       pagesDir: args.pages,
       pagesOutputFile: args['pages-out'],
+      introspect: args.introspect === true,
     })) {
       switch (result.stage) {
         case 'supporting': {

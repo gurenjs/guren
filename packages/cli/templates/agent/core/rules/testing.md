@@ -1,7 +1,7 @@
 ---
-description: Guren testing (@guren/testing) — TestApp client methods and the full assertion surface
-globs:
+paths:
   - "tests/**"
+  - "modules/*/tests/**"
 ---
 
 # Testing (@guren/testing + bun:test)

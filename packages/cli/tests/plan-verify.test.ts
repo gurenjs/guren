@@ -9,6 +9,7 @@ import { planDigest, planSlug, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, readPla
 import { planHash } from '../src/plan/identity'
 import { judgePlan, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus } from '../src/plan/status'
 import { derivePlanTasks, findPlanStep, planStepIds, type PlanTaskDerivation } from '../src/plan/tasks'
+import { describeCloseBlockers } from '../src/plan/close-remedy'
 import { behaviourReach } from '../src/plan/reach'
 import { applyVerification, applyWaivers, hashFiles, overlayVerification, planWaivers, recordDrift, recordStillHolds, sha256 } from '../src/plan/verification'
 import { PLAN_STATUS_REPORT_VERSION } from '../src/plan-status'
@@ -448,6 +449,33 @@ describe('PlanVerifier', () => {
     expect(commandOf(blocked, 'check')).toMatchObject({ status: 'blocked', reason: 'could not run: routes/web.ts threw' })
   })
 
+  test('should pass check over an unverified verdict and still name it, and why the app went unread', async () => {
+    const unverified = checkReport([{
+      key: 'introspection-unavailable',
+      title: 'Introspection',
+      status: 'warn',
+      message: 'The app could not be introspected (timeout): The app did not finish loading and registering within 10000ms.',
+      advisory: true,
+    }, {
+      key: 'sessions-binding-unverified',
+      title: 'Session manager binding',
+      status: 'warn',
+      message: "whether a registered provider binds 'session' is unverified: BindingProvider threw in register().",
+      advisory: true,
+      evidence: 'none',
+    }])
+
+    const step = await verifier(statusOf(), fakeExec(), { check: async () => unverified }).verify(HTTP)
+
+    expect(commandOf(step, 'check')).toMatchObject({
+      status: 'pass',
+      findings: [
+        expect.stringMatching(/^Introspection \(advisory\): The app could not be introspected \(timeout\)/),
+        expect.stringMatching(/^Session manager binding \(advisory\): .*BindingProvider threw/),
+      ],
+    })
+  })
+
   test('should fail the tests command on a behaviour that is not passing, naming its cases', async () => {
     const report = junit([
       { name: '[AC-comments-1] x' },
@@ -769,6 +797,59 @@ describe('applyVerification', () => {
     // A field's existence alone is not: it says nothing of the planned shape.
     const onKeys = statusOf({ 'resource.comment': { properties: [{ property: 'field body', verdict: 'match', planned: 'declared', actual: 'declared', existence: true }] } })
     expect(elementOf(applyVerification(onKeys, derivation, { [HTTP]: http }, 'digest', hashes, plan).status, 'resource.comment').hold?.kind).toBe('unreached')
+  })
+
+  test('should name the step whose behaviours reach an element, not ask for a behaviour, when that step has no standing run', async () => {
+    const controllerFile = 'app/Http/Controllers/CommentController.ts'
+    const http = record({ fingerprint: { ...FINGERPRINT, files: { [controllerFile]: sha256(FILES[controllerFile]!) } } })
+    const changedHashes = new Map([[controllerFile, 'changed']])
+
+    const drifted = applyVerification(statusOf({ 'controller.comments': { properties: [] } }), derivation, { [HTTP]: http }, 'digest', changedHashes, plan).status
+    const controller = elementOf(drifted, 'controller.comments')
+    expect(controller).toMatchObject({ state: 'present', hold: { kind: 'unreached' } })
+    expect(controller.notes).toEqual([
+      `Verified 2026-09-21T00:00:00.000Z by ${HTTP}, but no planned property of it matched beyond its existence and no verified run of a step whose behaviours reach it (${HTTP}) holds now, so that result is not counted: run plan:verify on that step, or waive it.`,
+    ])
+
+    // Verified by its own step, reached only through another step that never ran.
+    const hashes = await hashFiles(ROOT, DATA_FILES)
+    const unrun = applyVerification(statusOf({ 'model.comment': { properties: [] } }), derivation, { [DATA]: record() }, 'digest', hashes, plan).status
+    const model = elementOf(unrun, 'model.comment')
+    expect(model.hold?.kind).toBe('unreached')
+    expect(model.hold?.note).toContain(`reach it (${HTTP}) holds now`)
+    expect(model.hold?.note).not.toContain('add a behaviour')
+
+    // Two steps carrying the same behaviours: either one's run would lift it.
+    const twice = { ...derivation, tasks: derivation.tasks.map((task) => ({ ...task, steps: task.steps.flatMap((step) => (step.id === HTTP ? [step, { ...step, id: `${HTTP}-again` }] : [step])) })) }
+    const both = elementOf(applyVerification(statusOf({ 'controller.comments': { properties: [] } }), twice, { [HTTP]: http }, 'digest', changedHashes, plan).status, 'controller.comments')
+    expect(both.hold?.note).toEndWith(`reach it (${HTTP}, ${HTTP}-again) holds now, so that result is not counted: run plan:verify on one of those steps, or waive it.`)
+  })
+
+  test('should offer only a waiver for an element whose reaching step has no standing run and that plan:verify cannot fingerprint', () => {
+    const controllerFile = 'app/Http/Controllers/CommentController.ts'
+    const http = record({ fingerprint: { ...FINGERPRINT, files: { [controllerFile]: sha256(FILES[controllerFile]!) } } })
+
+    const { status } = applyVerification(statusOf({ 'controller.comments': { properties: [], files: [] } }), derivation, { [HTTP]: http }, 'digest', new Map([[controllerFile, 'changed']]), plan)
+
+    const controller = elementOf(status, 'controller.comments')
+    expect(controller.hold?.kind).toBe('unreached')
+    expect(controller.hold?.note).toBe(
+      `Verified 2026-09-21T00:00:00.000Z by ${HTTP}, but no planned property of it matched beyond its existence and no verified run of a step whose behaviours reach it (${HTTP}) holds now, and plan:verify cannot fingerprint it, so that result is not counted: waive it.`,
+    )
+    const [blocker] = describeCloseBlockers(plan, derivation, [controller], 'plan.json')
+    expect(blocker?.moves).toStartWith('plan:verify cannot fingerprint it, so no run lifts it: waive it with')
+  })
+
+  test('should send an unjudged element with no file back to the step whose behaviours reach it, since its run needs no file of it', () => {
+    const testFile = 'tests/comments.test.ts'
+    const status = statusOf({ 'action.comments.store': { state: 'unjudged', files: [], properties: [] } })
+    const http = record({ fingerprint: { ...FINGERPRINT, files: { [testFile]: sha256(FILES[testFile]!) } } })
+
+    const { status: held } = applyVerification(status, derivation, { [HTTP]: http }, 'digest', new Map([[testFile, 'changed']]), plan)
+
+    const action = elementOf(held, 'action.comments.store')
+    expect(action.hold?.kind).toBe('unreached')
+    expect(action.hold?.note).toEndWith(`reach it (${HTTP}) holds now, so that result is not counted: run plan:verify on that step, or waive it.`)
   })
 
   test('should reach an element of a split step\u2019s earlier part through the part that runs the behaviours, while its record stands', async () => {

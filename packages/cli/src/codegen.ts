@@ -14,6 +14,7 @@ export interface CodegenOptions {
   outputFile?: string
   pagesDir?: string
   pagesOutputFile?: string
+  introspect?: boolean
 }
 
 // Yield completed stages so the CLI can report progress before a later stage
@@ -65,6 +66,7 @@ export async function* runCodegen(options: CodegenOptions) {
     routesFile,
     outputFile: options.outputFile,
     appRoot: options.appRoot,
+    introspect: options.introspect,
     ...writerOptions,
   })
   const {

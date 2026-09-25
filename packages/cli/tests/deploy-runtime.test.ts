@@ -1,13 +1,23 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
-import { analyzeDeployRuntime, checkDeployRuntime } from '../src/deploy-runtime'
-import { APP_FIXTURE, DEFAULT_ROUTES_FIXTURE, ENV_SCHEMA_FIXTURE, SESSION_PROVIDER, SQLITE_SCHEMA_FIXTURE, sessionConfigSource, writeInstalledPackage } from './helpers'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, spyOn } from 'bun:test'
+import { BUILT_IN_SESSION_DRIVERS, type AppManifest } from '@guren/server'
+import {
+  analyzeDeployRuntime,
+  checkDeployRuntime,
+  judgeDeployRuntime,
+  judgeDeployVerdicts,
+  readDeployManifestFacts,
+  readDeployRuntime,
+  type DeployRuntimeFacts,
+  type DeployRuntimeVerdict,
+} from '../src/deploy-runtime'
+import type { Introspection } from '../src/introspect'
+import { APP_FIXTURE, DEFAULT_ROUTES_FIXTURE, ENV_SCHEMA_FIXTURE, introspected, manifestFixture, SQLITE_SCHEMA_FIXTURE } from './helpers'
 import { makeAuth } from '../src/make-auth'
 import { runCheck } from '../src/check'
 import { gatingResults } from '../src/check-result'
 import { buildJsonOutput, getDoctorRuleEvaluations, runDoctor } from '../src/doctor'
-import type { DoctorCheck, DoctorStatus } from '../src/doctor'
 import { createTempWorkspace } from './helpers'
 
 let consoleLogSpy: ReturnType<typeof spyOn>
@@ -26,8 +36,6 @@ const DEPLOY_CHECK_KEYS = [
   'deploy-runtime-stores',
   'deploy-provider-discovery',
 ] as const
-
-type DeployCheckKey = (typeof DEPLOY_CHECK_KEYS)[number]
 
 /**
  * Write a throwaway app tree. `files` keys are project-relative paths;
@@ -66,29 +74,29 @@ async function withApp<T>(
   }
 }
 
-/** The three deploy checks, keyed for direct assertion. */
-async function deployChecks(cwd: string): Promise<Record<DeployCheckKey, DoctorCheck>> {
-  const { evaluations } = await getDoctorRuleEvaluations({ cwd })
-  const found = {} as Record<DeployCheckKey, DoctorCheck>
-
-  for (const key of DEPLOY_CHECK_KEYS) {
-    const check = evaluations.find((evaluation) => evaluation.check.key === key)?.check
-    if (!check) {
-      throw new Error(`doctor did not emit a "${key}" check`)
-    }
-    found[key] = check
-  }
-
-  return found
+/**
+ * The three deploy verdicts, keyed for direct assertion, over the source in `cwd` and the
+ * introspected app `manifest` describes: by default one registering nothing but the default hasher.
+ */
+async function deployChecks(cwd: string, manifest: AppManifest = manifestFixture()): Promise<Record<string, DeployRuntimeVerdict>> {
+  const analysis = await readDeployRuntime(cwd, { introspect: introspected(manifest) })
+  return Object.fromEntries(judgeDeployVerdicts(analysis).map((verdict) => [verdict.key, verdict]))
 }
 
-function statuses(checks: Record<DeployCheckKey, DoctorCheck>): Record<DeployCheckKey, DoctorStatus> {
-  return {
-    'deploy-password-hashing': checks['deploy-password-hashing'].status,
-    'deploy-runtime-stores': checks['deploy-runtime-stores'].status,
-    'deploy-provider-discovery': checks['deploy-provider-discovery'].status,
-  }
+function statuses(checks: Record<string, DeployRuntimeVerdict>): Record<string, string> {
+  return Object.fromEntries(Object.entries(checks).map(([key, check]) => [key, check.status]))
 }
+
+/** An `auth.sessionOptions.store` factory: the one session the manifest leaves to the constructions in source. */
+const SESSION_FACTORY_ISSUE = 'sessions use an auth.sessionOptions.store factory, and no DatabaseSessionStore or RedisSessionStore is constructed'
+
+const FACTORY_SESSION = manifestFixture({
+  session: {
+    source: 'auth.sessionOptions.store',
+    default: 'sessionOptions.store',
+    stores: { 'sessionOptions.store': { driver: null, perProcess: null } },
+  },
+})
 
 const PASSWORD_LOGIN_CONTROLLER = `import { Controller } from '@guren/core'
 export default class LoginController extends Controller {
@@ -102,18 +110,6 @@ export default class LoginController extends Controller {
  * An OAuth-only app: it subclasses AuthenticatableModel and configures
  * passwordColumn, but never verifies or hashes a password.
  */
-const OAUTH_ONLY_AUTH = `import { AuthenticatableModel, ServiceProvider } from '@guren/core'
-export class User extends AuthenticatableModel {
-}
-export default class AuthProvider extends ServiceProvider {
-  register() {
-    // passwordColumn stays configured so the guard rejects password logins
-    // for hash-less OAuth accounts.
-    auth.useModel(User, { usernameColumn: 'email', passwordColumn: 'passwordHash' })
-  }
-}
-`
-
 const SESSION_APP = `import { createApp } from '@guren/core'
 export const app = createApp({ auth: { autoSession: true } })
 `
@@ -121,7 +117,7 @@ export const app = createApp({ auth: { autoSession: true } })
 describe('deploy target detection', () => {
   it('detects the Cloudflare plugin from package.json dependencies', async () => {
     await withApp('guren-deploy-cf-', {}, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const { targets } = await analyzeDeployRuntime(dir)
+      const { targets } = await readDeployRuntime(dir)
 
       expect(targets).toHaveLength(1)
       expect(targets[0].profile.label).toBe('Cloudflare Workers')
@@ -131,7 +127,7 @@ describe('deploy target detection', () => {
 
   it('detects the Vercel plugin and marks it as a Bun runtime', async () => {
     await withApp('guren-deploy-vercel-', {}, { '@guren/plugin-vercel': '^0.2.0' }, async (dir) => {
-      const { targets } = await analyzeDeployRuntime(dir)
+      const { targets } = await readDeployRuntime(dir)
 
       expect(targets).toHaveLength(1)
       expect(targets[0].profile.label).toBe('Vercel')
@@ -142,7 +138,7 @@ describe('deploy target detection', () => {
 
   it('detects the Lambda plugin from package.json dependencies', async () => {
     await withApp('guren-deploy-lambda-plugin-', {}, { '@guren/plugin-lambda': '^0.1.0' }, async (dir) => {
-      const { targets } = await analyzeDeployRuntime(dir)
+      const { targets } = await readDeployRuntime(dir)
 
       expect(targets).toHaveLength(1)
       expect(targets[0].profile.label).toBe('AWS Lambda')
@@ -158,7 +154,7 @@ describe('deploy target detection', () => {
     }
 
     await withApp('guren-deploy-lambda-both-', files, { '@guren/plugin-lambda': '^0.1.0' }, async (dir) => {
-      const { targets } = await analyzeDeployRuntime(dir)
+      const { targets } = await readDeployRuntime(dir)
 
       expect(targets).toHaveLength(1)
       expect(targets[0].detectedVia).toContain('@guren/plugin-lambda')
@@ -171,7 +167,7 @@ describe('deploy target detection', () => {
     }
 
     await withApp('guren-deploy-lambda-', files, {}, async (dir) => {
-      const { targets } = await analyzeDeployRuntime(dir)
+      const { targets } = await readDeployRuntime(dir)
 
       expect(targets).toHaveLength(1)
       expect(targets[0].profile.label).toBe('AWS Lambda')
@@ -185,7 +181,7 @@ describe('deploy target detection', () => {
     }
 
     await withApp('guren-deploy-lambda-server-', files, {}, async (dir) => {
-      const { targets } = await analyzeDeployRuntime(dir)
+      const { targets } = await readDeployRuntime(dir)
 
       expect(targets.map((target) => target.profile.label)).toEqual(['AWS Lambda'])
     })
@@ -202,7 +198,7 @@ export const handler = createLambdaHandler(app)
     }
 
     await withApp('guren-deploy-lambda-call-', files, {}, async (dir) => {
-      const { targets } = await analyzeDeployRuntime(dir)
+      const { targets } = await readDeployRuntime(dir)
 
       expect(targets.map((target) => target.profile.label)).toEqual(['AWS Lambda'])
     })
@@ -213,7 +209,7 @@ export const handler = createLambdaHandler(app)
     const deps = { '@guren/plugin-cloudflare': '^0.2.0' }
 
     await withApp('guren-deploy-multi-', files, deps, async (dir) => {
-      const { targets } = await analyzeDeployRuntime(dir)
+      const { targets } = await readDeployRuntime(dir)
 
       expect(targets.map((target) => target.profile.label).sort()).toEqual(['AWS Lambda', 'Cloudflare Workers'])
     })
@@ -221,236 +217,12 @@ export const handler = createLambdaHandler(app)
 
   it('reports no target for a plain Bun app', async () => {
     await withApp('guren-deploy-none-', { 'src/app.ts': SESSION_APP }, {}, async (dir) => {
-      expect((await analyzeDeployRuntime(dir)).targets).toEqual([])
+      expect((await readDeployRuntime(dir)).targets).toEqual([])
     })
   })
 })
 
 describe('deploy-password-hashing check', () => {
-  // The default hasher falls back to node:crypto scrypt off Bun, and workerd's
-  // nodejs_compat implements it in full (RFC 0003 §4), so password auth alone
-  // is not a break on a Bun-less target; warning prescribes a needless rehash.
-  it('passes when a Workers app verifies passwords through the default hasher', async () => {
-    const files = { 'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER }
-
-    await withApp('guren-hash-cf-default-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-password-hashing']
-
-      expect(check.status).toBe('pass')
-      expect(check.message).toContain('Cloudflare Workers')
-      expect(check.message).toContain('auth.attempt (app/Http/Controllers/LoginController.ts:4)')
-      expect(check.message).toContain('node:crypto scrypt')
-    })
-  })
-
-  // What does still break: an explicit ScryptHasher writes Argon2id, which
-  // nothing without Bun.password can read back.
-  it('warns when a Workers app constructs ScryptHasher directly', async () => {
-    const files = {
-      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
-      'db/seeders/001_UsersSeeder.ts': `import { ScryptHasher } from '@guren/core'\nconst hasher = new ScryptHasher()\n`,
-    }
-
-    await withApp('guren-hash-cf-warn-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-password-hashing']
-
-      expect(check.status).toBe('warn')
-      expect(check.message).toContain('Cloudflare Workers')
-      expect(check.message).toContain('ScryptHasher (db/seeders/001_UsersSeeder.ts:2)')
-      expect(check.fix).toContain('new Hash()')
-    })
-  })
-
-  it('warns for Lambda as well', async () => {
-    const files = {
-      'lambda.ts': `import { createLambdaHandler } from '@guren/core/lambda'\n`,
-      'db/seeders/001_UsersSeeder.ts': `import { ScryptHasher } from '@guren/core'\nconst hasher = new ScryptHasher()\n`,
-    }
-
-    await withApp('guren-hash-lambda-warn-', files, {}, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-password-hashing']
-
-      expect(check.status).toBe('warn')
-      expect(check.message).toContain('AWS Lambda')
-      expect(check.message).toContain('ScryptHasher')
-    })
-  })
-
-  // The option selects Bun.password without constructing anything, so a
-  // construction-only scan would pass an app that cannot verify a single login.
-  it("warns when a Workers app selects hasher: 'argon2' in createApp()", async () => {
-    const files = {
-      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
-      'src/app.ts': `import { createApp } from '@guren/core'\nexport const app = createApp({\n  auth: { hasher: 'argon2' },\n})\n`,
-    }
-
-    await withApp('guren-hash-cf-option-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-password-hashing']
-
-      expect(check.status).toBe('warn')
-      expect(check.message).toContain("auth.hasher: 'argon2' (src/app.ts:3)")
-      expect(check.fix).toContain("hasher: 'argon2'")
-    })
-  })
-
-  it("passes when createApp() selects hasher: 'scrypt' explicitly", async () => {
-    const files = {
-      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
-      'src/app.ts': `import { createApp } from '@guren/core'\nexport const app = createApp({ auth: { hasher: 'scrypt' } })\n`,
-    }
-
-    await withApp('guren-hash-cf-scrypt-option-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await deployChecks(dir))['deploy-password-hashing'].status).toBe('pass')
-    })
-  })
-
-  // `new Hash({ algorithm: 'argon2' })` is `new Argon2Hasher()` under the name the
-  // docs call remediation, so reading the construction bare would pass it.
-  it("warns when Hash is constructed with algorithm: 'argon2'", async () => {
-    const files = {
-      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
-      'db/seeders/001_UsersSeeder.ts': `import { Hash } from '@guren/core'\nconst hasher = new Hash({ algorithm: 'argon2' })\n`,
-    }
-
-    await withApp('guren-hash-cf-hash-argon2-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-password-hashing']
-
-      expect(check.status).toBe('warn')
-      expect(check.message).toContain("new Hash({ algorithm: 'argon2' })")
-    })
-  })
-
-  it("warns when DefaultHasher is constructed with algorithm: 'argon2'", async () => {
-    const files = {
-      'db/seeders/001_UsersSeeder.ts': `import { DefaultHasher } from '@guren/core'\nconst hasher = new DefaultHasher({ algorithm: 'argon2' })\n`,
-    }
-
-    await withApp('guren-hash-cf-default-argon2-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-password-hashing']
-
-      expect(check.status).toBe('warn')
-      expect(check.message).toContain("new DefaultHasher({ algorithm: 'argon2' })")
-    })
-  })
-
-  it('reports a hasher selected by an expression rather than passing it as scrypt', async () => {
-    const files = {
-      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
-      'src/app.ts':
-        `import { createApp } from '@guren/core'\nimport { hasher } from './hasher'\nexport const app = createApp({\n  auth: { hasher },\n})\n`,
-    }
-
-    await withApp('guren-hash-cf-unreadable-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-password-hashing']
-
-      expect(check.status).toBe('warn')
-      expect(check.message).toContain('auth.hasher: <expression> (src/app.ts:4)')
-      expect(check.message).toContain('cannot read')
-    })
-  })
-
-  it('reports a createApp() config it cannot read where the app hashes passwords', async () => {
-    const files = {
-      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
-      'src/app.ts': `import { createApp } from '@guren/core'\nimport { config } from './config'\nexport const app = createApp(config)\n`,
-    }
-
-    await withApp('guren-hash-cf-unreadable-config-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-password-hashing']
-
-      expect(check.status).toBe('warn')
-      expect(check.message).toContain('createApp(<config>) (src/app.ts:3)')
-    })
-  })
-
-  // An opaque config says nothing about hashing. Warning on one an app that
-  // verifies no password wrote is a warning with no remediation to take.
-  it('passes a createApp() config it cannot read when no password authentication was found', async () => {
-    const files = {
-      'src/app.ts': `import { createApp } from '@guren/core'\nimport { config } from './config'\nexport const app = createApp(config)\n`,
-    }
-
-    await withApp('guren-hash-cf-unreadable-config-no-auth-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-password-hashing']
-
-      expect(check.status).toBe('pass')
-      expect(check.message).toContain('no password authentication was found')
-    })
-  })
-
-  it('warns on the Argon2Hasher alias like on ScryptHasher', async () => {
-    const files = {
-      'db/seeders/001_UsersSeeder.ts': `import { Argon2Hasher } from '@guren/core'\nconst hasher = new Argon2Hasher()\n`,
-    }
-
-    await withApp('guren-hash-cf-alias-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-password-hashing']
-
-      expect(check.status).toBe('warn')
-      expect(check.message).toContain('Argon2Hasher (db/seeders/001_UsersSeeder.ts:2)')
-    })
-  })
-
-  // A bare import is not usage: the check must see the hasher actually
-  // constructed, or a leftover `import { ScryptHasher }` would raise a warning
-  // for a call site that does not exist.
-  it('does not warn when ScryptHasher is imported but never constructed', async () => {
-    const files = {
-      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
-      'db/seeders/001_UsersSeeder.ts': `import { ScryptHasher, Hash } from '@guren/core'\nconst hasher = new Hash()\n`,
-    }
-
-    await withApp('guren-hash-import-only-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-password-hashing']
-
-      expect(check.status).toBe('pass')
-    })
-  })
-
-  // Configuring NodeHasher explicitly is still a correct thing to do, and must
-  // not be reported as a problem.
-  it('passes when NodeHasher is configured explicitly', async () => {
-    const files = {
-      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
-      'app/Models/User.ts': `import { AuthenticatableModel, NodeHasher } from '@guren/core'
-export class User extends AuthenticatableModel {
-  protected static passwordHasher = new NodeHasher()
-}
-`,
-    }
-
-    await withApp('guren-hash-cf-pass-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-password-hashing']
-
-      expect(check.status).toBe('pass')
-    })
-  })
-
-  it('passes for an OAuth-only app with no password authentication', async () => {
-    const files = { 'src/app.ts': SESSION_APP }
-
-    await withApp('guren-hash-oauth-only-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-password-hashing']
-
-      expect(check.status).toBe('pass')
-      expect(check.message).toContain('no password authentication')
-    })
-  })
-
-  // An OAuth-only app keeps AuthenticatableModel and passwordColumn so the
-  // guard can reject password logins for hash-less accounts; reading those as
-  // password auth reports a break that cannot happen.
-  it('does not warn for a passwordless app that still configures passwordColumn', async () => {
-    const files = { 'app/Providers/AuthProvider.ts': OAUTH_ONLY_AUTH }
-
-    await withApp('guren-hash-passwordless-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-password-hashing']
-
-      expect(check.status).toBe('pass')
-      expect(check.message).toContain('no password authentication')
-    })
-  })
-
   it('does not warn on Vercel, whose functions run on Bun', async () => {
     const files = { 'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER }
 
@@ -464,22 +236,6 @@ export class User extends AuthenticatableModel {
 })
 
 describe('deploy-runtime-stores check', () => {
-  it('warns when sessions are enabled with no backed store', async () => {
-    await withApp(
-      'guren-stores-session-',
-      { 'src/app.ts': SESSION_APP },
-      { '@guren/plugin-cloudflare': '^0.2.0' },
-      async (dir) => {
-        const check = (await deployChecks(dir))['deploy-runtime-stores']
-
-        expect(check.status).toBe('warn')
-        expect(check.message).toContain('sessions are enabled')
-        expect(check.message).toContain('DatabaseSessionStore')
-        expect(check.fix).toContain('guren add session')
-      },
-    )
-  })
-
   // autoSession defaults to true (AuthServiceProvider attaches session
   // middleware unless explicitly `false`), so an app that opts out entirely
   // must not be flagged for lacking a backed session store.
@@ -491,7 +247,7 @@ export const app = createApp({ auth: { autoSession: false } })
     }
 
     await withApp('guren-stores-no-session-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-runtime-stores']
+      const check = (await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores']
 
       expect(check.status).toBe('pass')
     })
@@ -506,31 +262,12 @@ export const app = createApp({ auth: { autoSession: false } })
     }
 
     await withApp('guren-stores-bare-auth-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-runtime-stores']
+      const check = (await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores']
 
       expect(check.status).toBe('warn')
-      expect(check.message).toContain('sessions are enabled')
+      expect(check.message).toContain(SESSION_FACTORY_ISSUE)
     })
   })
-
-  // The `auth` key is read off createApp's first argument positionally, and a
-  // transparent assertion around the options object is not the object: without
-  // unwrapping it, an app written this way loses the session signal entirely.
-  it.each([' satisfies Record<string, unknown>', ' as const'])(
-    'reads createApp options written with %s',
-    async (suffix) => {
-      const files = {
-        'src/app.ts': `import { createApp } from '@guren/core'\nexport const app = createApp({ auth: {} }${suffix})\n`,
-      }
-
-      await withApp('guren-stores-wrapped-auth-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-        const check = (await deployChecks(dir))['deploy-runtime-stores']
-
-        expect(check.status).toBe('warn')
-        expect(check.message).toContain('sessions are enabled')
-      })
-    },
-  )
 
   // The `auth: {` match alone cannot see inside the object it opens, so
   // suppression comes from a whole-app check for `autoSession: false` rather
@@ -543,7 +280,7 @@ export const app = createApp({ auth: { autoSession: false } })
     }
 
     await withApp('guren-stores-bare-auth-disabled-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('pass')
+      expect((await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores'].status).toBe('pass')
     })
   })
 
@@ -558,7 +295,7 @@ export const app = createApp({
     }
 
     await withApp('guren-stores-session-ok-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-runtime-stores']
+      const check = (await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores']
 
       expect(check.status).toBe('pass')
     })
@@ -574,10 +311,10 @@ export const app = createApp({ auth: { autoSession: true, sessionOptions: {} } }
     }
 
     await withApp('guren-stores-import-only-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-runtime-stores']
+      const check = (await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores']
 
       expect(check.status).toBe('warn')
-      expect(check.message).toContain('sessions are enabled')
+      expect(check.message).toContain(SESSION_FACTORY_ISSUE)
     })
   })
 
@@ -593,7 +330,7 @@ export const sessionStore = new DatabaseSessionStore(sessions)
     }
 
     await withApp('guren-stores-split-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('pass')
+      expect((await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores'].status).toBe('pass')
     })
   })
 
@@ -608,7 +345,7 @@ export const app = createApp({
     }
 
     await withApp('guren-stores-redis-', files, { '@guren/plugin-vercel': '^0.2.0' }, async (dir) => {
-      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('pass')
+      expect((await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores'].status).toBe('pass')
     })
   })
 
@@ -641,7 +378,7 @@ export const oauth = createOAuthManager({})
     await withApp('guren-stores-make-auth-oauth-', files, { '@guren/plugin-cloudflare': '^0.10.0' }, async (dir) => {
       await makeAuth({ install: true, force: true, oauth: 'github', oauthOnly: true })
 
-      const analysis = await analyzeDeployRuntime(dir)
+      const analysis = await readDeployRuntime(dir)
       expect(analysis.oauthSignals.map((signal) => signal.symbol)).toEqual(['createOAuthManager'])
 
       expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('pass')
@@ -661,7 +398,7 @@ export const oauth = createOAuthManager({})
       await withApp(`guren-stores-oauth-definition-${label}-`, files, { '@guren/plugin-cloudflare': '^0.10.0' }, async (dir) => {
         await makeAuth({ install: true, force: true, oauth: 'github', oauthOnly: true })
 
-        const analysis = await analyzeDeployRuntime(dir)
+        const analysis = await readDeployRuntime(dir)
         expect(analysis.oauthSignals.map((signal) => signal.symbol)).toEqual(['defineOAuthConfig'])
         expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe(status)
       })
@@ -720,7 +457,7 @@ export const app = createApp({ providers: [OAuthServiceProvider] })
       const check = (await deployChecks(dir))['deploy-runtime-stores']
 
       expect(check.status).toBe('warn')
-      expect(check.message).toContain('sessions are enabled')
+      expect(check.message).toContain('sessions are enabled (createSessionMiddleware')
     })
   })
 
@@ -911,9 +648,7 @@ describe('deploy-runtime checks without a deploy target', () => {
 
     await withApp('guren-deploy-no-autofix-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
       const { evaluations } = await getDoctorRuleEvaluations({ cwd: dir })
-      const deployEvaluations = evaluations.filter((evaluation) =>
-        (DEPLOY_CHECK_KEYS as readonly string[]).includes(evaluation.check.key),
-      )
+      const deployEvaluations = evaluations.filter((evaluation) => evaluation.check.key.startsWith('deploy-'))
 
       expect(deployEvaluations).toHaveLength(3)
       for (const evaluation of deployEvaluations) {
@@ -929,24 +664,26 @@ describe('runDoctor integration', () => {
     const files = { 'src/app.ts': SESSION_APP }
 
     await withApp('guren-deploy-report-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      // Not introspected: the session and cache stores are the registered app's to show.
       const report = await runDoctor({ cwd: dir, json: true, next: true })
       const json = buildJsonOutput(report)
       const byKey = new Map(json.checks.map((check) => [check.key, check]))
 
-      for (const key of DEPLOY_CHECK_KEYS) {
-        expect(byKey.has(key)).toBe(true)
-      }
+      expect([...byKey.keys()].filter((key) => key.startsWith('deploy-'))).toEqual([
+        'deploy-password-hashing-unverified',
+        'deploy-runtime-stores-unverified',
+        'deploy-provider-discovery',
+      ])
 
-      // The session default is unaddressed here, so it must reach the operator
-      // as a warning with manual remediation and no autofix offer.
-      const stores = byKey.get('deploy-runtime-stores')
+      // It must reach the operator as a warning with manual remediation and no autofix offer.
+      const stores = byKey.get('deploy-runtime-stores-unverified')
       expect(stores?.status).toBe('warn')
       expect(stores?.canAutofix).toBe(false)
-      expect(stores?.manualFix).toContain('guren add session')
+      expect(stores?.manualFix).toContain('guren introspect')
 
       expect(report.hasWarnings).toBe(true)
-      expect(report.manualChecks.map((check) => check.key)).toContain('deploy-runtime-stores')
-      expect(report.fixableChecks.map((check) => check.key)).not.toContain('deploy-runtime-stores')
+      expect(report.manualChecks.map((check) => check.key)).toContain('deploy-runtime-stores-unverified')
+      expect(report.fixableChecks.map((check) => check.key)).not.toContain('deploy-runtime-stores-unverified')
       expect(json.summary.total).toBe(json.checks.length)
       expect(Array.isArray(json.nextSteps)).toBe(true)
     })
@@ -954,23 +691,6 @@ describe('runDoctor integration', () => {
 })
 
 describe('AST-based matching', () => {
-  // Aliased imports run both ways: an aliased remediation has to count and an
-  // aliased hazard still has to warn.
-  it('recognizes an aliased NodeHasher construction as remediation', async () => {
-    const files = {
-      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
-      'app/Models/User.ts': `import { AuthenticatableModel, NodeHasher as RuntimeHasher } from '@guren/core'
-export class User extends AuthenticatableModel {
-  protected static passwordHasher = new RuntimeHasher()
-}
-`,
-    }
-
-    await withApp('guren-ast-alias-hasher-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await deployChecks(dir))['deploy-password-hashing'].status).toBe('pass')
-    })
-  })
-
   it('still warns on an aliased AutoDiscovery construction', async () => {
     const files = {
       'src/app.ts': `import { AutoDiscovery as Discovery } from '@guren/core'
@@ -991,7 +711,7 @@ export const app = createApp({ auth: { sessionOptions: { store: new SessionStore
     }
 
     await withApp('guren-ast-alias-store-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('pass')
+      expect((await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores'].status).toBe('pass')
     })
   })
 
@@ -1009,7 +729,7 @@ export const app = createApp({
     }
 
     await withApp('guren-ast-multiline-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('pass')
+      expect((await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores'].status).toBe('pass')
     })
   })
 
@@ -1025,19 +745,26 @@ export const doc = 'call new MemoryDriver() to enqueue locally'
     }
 
     await withApp('guren-ast-comments-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await analyzeDeployRuntime(dir)).memoryStoreSignals).toEqual([])
+      expect((await readDeployRuntime(dir)).memoryStoreSignals).toEqual([])
     })
   })
 
-  // Both keys are generic enough that another library's config would claim
-  // them; they only count inside a file that imports from Guren.
-  it('ignores session option keys in a file with no Guren import', async () => {
+  it('reads auth.useModel() and a ScryptHasher construction as password auth', async () => {
     const files = {
-      'config/other.ts': `export const cfg = { sessionOptions: { maxAge: 1 }, autoSession: true }\n`,
+      'app/Providers/AuthProvider.ts': `import { ScryptHasher, ServiceProvider, type AuthManager } from '@guren/core'
+import { User } from '../Models/User'
+
+export default class AuthProvider extends ServiceProvider {
+  boot(): void {
+    const auth = this.container.make<AuthManager>('auth')
+    auth.useModel(User, { hasher: new ScryptHasher() })
+  }
+}
+`,
     }
 
-    await withApp('guren-ast-foreign-session-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await analyzeDeployRuntime(dir)).sessionSignals).toEqual([])
+    await withApp('guren-ast-use-model-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await readDeployRuntime(dir)).passwordAuthSignals.map((signal) => signal.symbol).sort()).toEqual(['ScryptHasher', 'auth.useModel'])
     })
   })
 
@@ -1047,7 +774,7 @@ export const doc = 'call new MemoryDriver() to enqueue locally'
     }
 
     await withApp('guren-ast-foreign-attempt-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await analyzeDeployRuntime(dir)).passwordAuthSignals).toEqual([])
+      expect((await readDeployRuntime(dir)).passwordAuthSignals).toEqual([])
     })
   })
 
@@ -1060,7 +787,7 @@ export const doc = 'call new MemoryDriver() to enqueue locally'
     }
 
     await withApp('guren-ast-ungated-optout-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('pass')
+      expect((await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores'].status).toBe('pass')
     })
   })
 
@@ -1072,68 +799,7 @@ export class Custom implements OAuthServiceProvider {}
     }
 
     await withApp('guren-ast-implements-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await analyzeDeployRuntime(dir)).oauthSignals).toEqual([])
-    })
-  })
-
-  it('ignores an auth key in a TypeScript type position', async () => {
-    const files = {
-      'src/types.ts': `export interface AppOptions {
-  auth: { autoSession?: boolean }
-}
-`,
-    }
-
-    await withApp('guren-ast-type-pos-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await analyzeDeployRuntime(dir)).sessionSignals).toEqual([])
-    })
-  })
-
-  // The make:auth mail config carries `auth: { user, pass }` for SMTP
-  // credentials, so the auth-key signal is scoped to createApp options.
-  it('does not read SMTP mailer auth config as a session', async () => {
-    const files = {
-      'config/mail.ts': `export const mail = {
-  transport: 'smtp',
-  auth: {
-    user: process.env.SMTP_USER ?? '',
-    pass: process.env.SMTP_PASS ?? '',
-  },
-}
-`,
-    }
-
-    await withApp('guren-ast-smtp-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('pass')
-    })
-  })
-
-  it('counts a shorthand auth property in createApp options', async () => {
-    const files = {
-      'src/app.ts': `import { createApp } from '@guren/core'
-const auth = {}
-export const app = createApp({ auth })
-`,
-    }
-
-    await withApp('guren-ast-shorthand-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-runtime-stores']
-
-      expect(check.status).toBe('warn')
-      expect(check.message).toContain('sessions are enabled')
-    })
-  })
-
-  // Resolving names bare makes any same-named export a signal: an unrelated
-  // `ScryptHasher` would report a Workers app as broken and prescribe a rehash.
-  it('does not let a same-named import from another package raise the hasher warning', async () => {
-    const files = {
-      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
-      'app/lib/hash.ts': `import { ScryptHasher } from 'some-other-package'\nexport const h = new ScryptHasher()\n`,
-    }
-
-    await withApp('guren-ast-foreign-hasher-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await deployChecks(dir))['deploy-password-hashing'].status).toBe('pass')
+      expect((await readDeployRuntime(dir)).oauthSignals).toEqual([])
     })
   })
 
@@ -1144,7 +810,7 @@ export const app = createApp({ auth })
     }
 
     await withApp('guren-ast-foreign-store-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('warn')
+      expect((await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores'].status).toBe('warn')
     })
   })
 
@@ -1183,23 +849,23 @@ export function build(p: OAuthServiceProvider): typeof OAuthServiceProvider | nu
     }
 
     await withApp('guren-ast-type-ref-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await analyzeDeployRuntime(dir)).oauthSignals).toEqual([])
+      expect((await readDeployRuntime(dir)).oauthSignals).toEqual([])
     })
   })
 
   it('resolves namespace imports for constructions and calls', async () => {
     const files = {
       'src/app.ts': `import * as guren from '@guren/core'
-export const app = guren.createApp({ auth: {} })
+export const app = guren.createSessionMiddleware({})
 export const oauth = guren.createOAuthManager({})
 export const store = new guren.DatabaseSessionStore(sessions)
 `,
     }
 
     await withApp('guren-ast-namespace-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const analysis = await analyzeDeployRuntime(dir)
+      const analysis = await readDeployRuntime(dir)
 
-      expect(analysis.sessionSignals.map((s) => s.symbol)).toContain('auth')
+      expect(analysis.sessionSignals.map((s) => s.symbol)).toContain('createSessionMiddleware')
       expect(analysis.oauthSignals.map((s) => s.symbol)).toContain('createOAuthManager')
       expect(analysis.backedSessionSignals.map((s) => s.symbol)).toContain('DatabaseSessionStore')
     })
@@ -1212,15 +878,15 @@ export const store = new guren.DatabaseSessionStore(sessions)
     }
 
     await withApp('guren-ast-broken-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const analysis = await analyzeDeployRuntime(dir)
+      const analysis = await readDeployRuntime(dir)
       expect(analysis.unparsedFiles).toEqual(['src/broken.ts'])
 
       // The broken file contributes nothing and the valid one still signals,
       // with the incompleteness disclosed rather than silently absorbed.
-      const check = (await deployChecks(dir))['deploy-runtime-stores']
+      const check = (await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores']
 
       expect(check.status).toBe('warn')
-      expect(check.message).toContain('sessions are enabled')
+      expect(check.message).toContain(SESSION_FACTORY_ISSUE)
       expect(check.message).toContain('could not be read or parsed and were not scanned: src/broken.ts')
     })
   })
@@ -1231,7 +897,7 @@ export const store = new guren.DatabaseSessionStore(sessions)
     const files = { 'lambda.ts': `import { createLambdaHandler } from '@guren/core/lambda'\nexport const = broken {{{` }
 
     await withApp('guren-caveat-no-target-', files, {}, async (dir) => {
-      const analysis = await analyzeDeployRuntime(dir)
+      const analysis = await readDeployRuntime(dir)
       expect(analysis.targets).toEqual([])
       expect(analysis.unparsedFiles).toEqual(['lambda.ts'])
 
@@ -1246,7 +912,7 @@ export const store = new guren.DatabaseSessionStore(sessions)
     const files = { 'src/app.ts': SESSION_APP }
 
     await withApp('guren-ast-clean-scan-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const analysis = await analyzeDeployRuntime(dir)
+      const analysis = await readDeployRuntime(dir)
       expect(analysis.unparsedFiles).toEqual([])
 
       const check = (await deployChecks(dir))['deploy-runtime-stores']
@@ -1267,10 +933,10 @@ const store = new DatabaseSessionStore(sessions)
     }
 
     await withApp('guren-scan-test-mask-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-runtime-stores']
+      const check = (await deployChecks(dir, FACTORY_SESSION))['deploy-runtime-stores']
 
       expect(check.status).toBe('warn')
-      expect(check.message).toContain('sessions are enabled')
+      expect(check.message).toContain(SESSION_FACTORY_ISSUE)
     })
   })
 
@@ -1281,25 +947,25 @@ const store = new DatabaseSessionStore(sessions)
       }
 
       await withApp(`guren-scan-excl-${name}-`, files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-        expect((await analyzeDeployRuntime(dir)).memoryStoreSignals).toEqual([])
+        expect((await readDeployRuntime(dir)).memoryStoreSignals).toEqual([])
       })
     })
   }
 
   it('does not raise a session signal from a test fixture alone', async () => {
     const files = {
-      'src/routes.test.ts': `const app = createApp({ auth: { autoSession: true } })\n`,
+      'src/routes.test.ts': `import { createSessionMiddleware } from '@guren/core'\napp.use('*', createSessionMiddleware({}))\n`,
     }
 
     await withApp('guren-scan-test-signal-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const analysis = await analyzeDeployRuntime(dir)
+      const analysis = await readDeployRuntime(dir)
 
       expect(analysis.sessionSignals).toEqual([])
     })
   })
 })
 
-describe('analyzeDeployRuntime', () => {
+describe('readDeployRuntime', () => {
   // Every entry in DEPLOY_SCAN_DIRS: dropping one would silently stop the
   // whole scan there with no other test failing.
   for (const dir of ['src', 'app', 'config', 'db', 'routes', 'modules', 'bin', 'functions', 'api'] as const) {
@@ -1309,7 +975,7 @@ describe('analyzeDeployRuntime', () => {
       }
 
       await withApp(`guren-deploy-scan-${dir}-`, files, {}, async (workspace) => {
-        const analysis = await analyzeDeployRuntime(workspace)
+        const analysis = await readDeployRuntime(workspace)
 
         expect(analysis.memoryStoreSignals.map((signal) => signal.filePath)).toContain(`${dir}/probe.ts`)
       })
@@ -1320,7 +986,7 @@ describe('analyzeDeployRuntime', () => {
     const files = { 'worker.ts': `import { MemoryStore } from '@guren/core'\nexport const s = new MemoryStore()\n` }
 
     await withApp('guren-deploy-scan-root-', files, {}, async (dir) => {
-      const analysis = await analyzeDeployRuntime(dir)
+      const analysis = await readDeployRuntime(dir)
 
       expect(analysis.memoryStoreSignals.map((signal) => signal.filePath)).toContain('worker.ts')
     })
@@ -1332,7 +998,7 @@ describe('analyzeDeployRuntime', () => {
     }
 
     await withApp('guren-deploy-modules-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const analysis = await analyzeDeployRuntime(dir)
+      const analysis = await readDeployRuntime(dir)
 
       expect(analysis.memoryStoreSignals.map((signal) => signal.filePath)).toContain(
         'modules/billing/index.ts',
@@ -1347,7 +1013,7 @@ describe('analyzeDeployRuntime', () => {
     }
 
     await withApp('guren-deploy-node-modules-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const analysis = await analyzeDeployRuntime(dir)
+      const analysis = await readDeployRuntime(dir)
 
       expect(analysis.memoryStoreSignals).toEqual([])
     })
@@ -1356,259 +1022,8 @@ describe('analyzeDeployRuntime', () => {
 
 // The same verdicts `guren doctor` reports, reached from `guren check` and
 // the deploy builds (RFC 0020 Part 0).
-describe('session config driver reading (RFC 0020)', () => {
-  const cloudflare = { '@guren/plugin-cloudflare': '^0.8.0' }
-  const lambda = { '@guren/plugin-lambda': '^0.5.0' }
-
-  it('reads a scaffolded config as a backed store, so the blueprint does not warn', async () => {
-    const files = {
-      'src/app.ts': SESSION_APP,
-      'app/Providers/SessionProvider.ts': SESSION_PROVIDER,
-      'config/session.ts': sessionConfigSource("database: { driver: 'database', table: sessions }"),
-    }
-
-    await withApp('guren-session-config-backed-', files, cloudflare, async (dir) => {
-      const analysis = await analyzeDeployRuntime(dir)
-      expect(analysis.backedSessionSignals.map((signal) => signal.symbol)).toEqual(["SessionConfig default: 'database'"])
-
-      const check = (await deployChecks(dir))['deploy-runtime-stores']
-      expect(check.status).toBe('pass')
-    })
-  })
-
-  // RFC 0027 §2: the definition's `default` reads a declared key, which no static
-  // read resolves, so the verdict judges every store the scaffolded definition declares.
-  it('reads the scaffolded session config definition as a backed store', async () => {
-    const files = {
-      'src/app.ts': SESSION_APP,
-      'config/session.ts': await readFile(join(import.meta.dir, '../templates/scaffold/session/definition/config/session.ts'), 'utf8'),
-    }
-
-    await withApp('guren-session-definition-backed-', files, cloudflare, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-runtime-stores']
-      expect(check.status).toBe('pass')
-    })
-  })
-
-  it('vouches for a plugin driver its manifest declares persistent', async () => {
-    const files = {
-      'src/app.ts': SESSION_APP,
-      'config/session.ts': sessionConfigSource("dynamodb: { driver: 'dynamodb' }", "'dynamodb'"),
-    }
-
-    await withApp('guren-session-plugin-driver-', files, lambda, async (dir) => {
-      await writeInstalledPackage('@guren/plugin-lambda', {
-        version: '0.0.0',
-        gurenPlugin: { drivers: { session: [{ name: 'dynamodb', persistent: true }] } },
-      }, {}, dir)
-
-      const analysis = await analyzeDeployRuntime(dir)
-      expect(analysis.backedSessionSignals.map((signal) => signal.symbol)).toEqual([
-        "SessionConfig default: 'dynamodb'",
-      ])
-      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('pass')
-    })
-  })
-
-  it('does not vouch for a driver name nothing installed declares', async () => {
-    const files = {
-      'src/app.ts': SESSION_APP,
-      // The same config, with the plugin absent from node_modules: the name
-      // reads identically, and nothing in the install stands behind it.
-      'config/session.ts': sessionConfigSource("dynamodb: { driver: 'dynamodb' }", "'dynamodb'"),
-    }
-
-    await withApp('guren-session-unknown-driver-', files, lambda, async (dir) => {
-      const analysis = await analyzeDeployRuntime(dir)
-
-      expect(analysis.backedSessionSignals).toEqual([])
-      expect(analysis.unknownSessionDriverSignals.map((signal) => signal.symbol)).toEqual([
-        "SessionConfig default: 'dynamodb' (unknown driver: dynamodb)",
-      ])
-
-      const check = (await deployChecks(dir))['deploy-runtime-stores']
-      expect(check.status).toBe('warn')
-      expect(check.message).toContain('cannot vouch for')
-      // The generic "no persistent store" line would be a second, redundant issue.
-      expect(check.message).not.toContain('no persistent store')
-      // And its own remedy: telling an app that registered this driver on
-      // purpose to install a database-backed store instead is wrong advice.
-      expect(check.fix).toContain('gurenPlugin.drivers.session')
-      expect(check.fix).not.toContain('guren add session')
-    })
-  })
-
-  it('reports a misspelled built-in rather than assuming it is backed', async () => {
-    const files = {
-      'src/app.ts': SESSION_APP,
-      'config/session.ts': sessionConfigSource("datbase: { driver: 'datbase', table: sessions }", "'datbase'"),
-    }
-
-    await withApp('guren-session-typo-driver-', files, cloudflare, async (dir) => {
-      const analysis = await analyzeDeployRuntime(dir)
-
-      expect(analysis.backedSessionSignals).toEqual([])
-      expect(analysis.unknownSessionDriverSignals).toHaveLength(1)
-    })
-  })
-
-  it('refuses a manifest that redefines a built-in driver', async () => {
-    const files = {
-      'src/app.ts': SESSION_APP,
-      'config/session.ts': sessionConfigSource("memory: { driver: 'memory' }", "'memory'"),
-    }
-
-    await withApp('guren-session-manifest-override-', files, lambda, async (dir) => {
-      // The framework registers `memory` itself, so a manifest claiming it is
-      // persistent must not make the check vouch for a store that is not there.
-      await writeInstalledPackage('@guren/plugin-lambda', {
-        version: '0.0.0',
-        gurenPlugin: { drivers: { session: [{ name: 'memory', persistent: true }] } },
-      }, {}, dir)
-
-      const analysis = await analyzeDeployRuntime(dir)
-
-      expect(analysis.backedSessionSignals).toEqual([])
-      expect(analysis.memorySessionDefaultSignals).toHaveLength(1)
-    })
-  })
-
-  it('warns when the config selects the memory store', async () => {
-    const files = {
-      'src/app.ts': SESSION_APP,
-      'config/session.ts': sessionConfigSource(
-        "database: { driver: 'database', table: sessions }, memory: { driver: 'memory' }",
-        "process.env.SESSION_DRIVER ?? 'memory'",
-      ),
-    }
-
-    await withApp('guren-session-config-memory-', files, cloudflare, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-runtime-stores']
-
-      expect(check.status).toBe('warn')
-      expect(check.message).toContain('selects the per-process `memory` store')
-      // The generic "no persistent store" line would be a second, redundant issue.
-      expect(check.message).not.toContain('no persistent store')
-      expect(check.fix).toContain('guren add session')
-    })
-  })
-
-  it('accepts an unreadable default when every declared store is persistent', async () => {
-    const files = {
-      'src/app.ts': SESSION_APP,
-      'config/session.ts': sessionConfigSource(
-        "database: { driver: 'database', table: sessions }, redis: { driver: 'redis', client: {} }",
-        'process.env.SESSION_DRIVER!',
-      ),
-    }
-
-    await withApp('guren-session-config-unreadable-', files, cloudflare, async (dir) => {
-      const analysis = await analyzeDeployRuntime(dir)
-      expect(analysis.backedSessionSignals.map((signal) => signal.symbol)).toEqual([
-        'SessionConfig stores: database, redis',
-      ])
-    })
-  })
-
-  it('leaves an unreadable default unsatisfied when a declared store is per-process', async () => {
-    const files = {
-      'src/app.ts': SESSION_APP,
-      'config/session.ts': sessionConfigSource(
-        "database: { driver: 'database', table: sessions }, memory: { driver: 'memory' }",
-        'process.env.SESSION_DRIVER!',
-      ),
-    }
-
-    await withApp('guren-session-config-ambiguous-', files, cloudflare, async (dir) => {
-      const analysis = await analyzeDeployRuntime(dir)
-      expect(analysis.backedSessionSignals).toEqual([])
-      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('warn')
-    })
-  })
-
-  it('reads a config with no default as selecting the per-process store', async () => {
-    const files = {
-      'src/app.ts': SESSION_APP,
-      // SessionManager resolves an absent `default` to 'memory', so this
-      // config runs in process memory without saying so.
-      'config/session.ts': `import { type SessionConfig } from '@guren/core'
-import { sessions } from '../db/schema'
-
-export const sessionConfig: SessionConfig = {
-  stores: { database: { driver: 'database', table: sessions } },
-}
-`,
-    }
-
-    await withApp('guren-session-config-no-default-', files, cloudflare, async (dir) => {
-      const analysis = await analyzeDeployRuntime(dir)
-      expect(analysis.backedSessionSignals).toEqual([])
-
-      const check = (await deployChecks(dir))['deploy-runtime-stores']
-      expect(check.status).toBe('warn')
-      expect(check.message).toContain('selects the per-process `memory` store')
-    })
-  })
-
-  it('does not vouch for an unreadable default when a store driver is not a literal', async () => {
-    const files = {
-      'src/app.ts': SESSION_APP,
-      'config/session.ts': `import { type SessionConfig } from '@guren/core'
-import { sessions } from '../db/schema'
-import { DRIVERS } from './drivers'
-
-export const sessionConfig: SessionConfig = {
-  default: process.env.SESSION_DRIVER!,
-  stores: {
-    database: { driver: 'database', table: sessions },
-    other: { driver: DRIVERS.other },
-  },
-}
-`,
-    }
-
-    await withApp('guren-session-config-opaque-', files, cloudflare, async (dir) => {
-      const analysis = await analyzeDeployRuntime(dir)
-
-      expect(analysis.backedSessionSignals).toEqual([])
-      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('warn')
-    })
-  })
-
-  it('stays quiet about a memory default when autoSession is off', async () => {
-    const files = {
-      'src/app.ts': `import { createApp } from '@guren/core'
-export const app = createApp({ auth: { autoSession: false } })
-`,
-      'config/session.ts': sessionConfigSource("memory: { driver: 'memory' }", "'memory'"),
-    }
-
-    await withApp('guren-session-config-optout-', files, cloudflare, async (dir) => {
-      const check = (await deployChecks(dir))['deploy-runtime-stores']
-
-      expect(check.status).toBe('pass')
-    })
-  })
-
-  it('ignores a cache config, which keys `stores` the same way', async () => {
-    const files = {
-      'src/app.ts': SESSION_APP,
-      'config/cache.ts': `import { type CacheConfig } from '@guren/core'
-
-export const cacheConfig: CacheConfig = {
-  default: 'redis',
-  stores: { redis: { driver: 'redis', client: {} } },
-}
-`,
-    }
-
-    await withApp('guren-session-config-cache-', files, cloudflare, async (dir) => {
-      const analysis = await analyzeDeployRuntime(dir)
-
-      expect(analysis.backedSessionSignals).toEqual([])
-      expect((await deployChecks(dir))['deploy-runtime-stores'].message).toContain('no persistent store')
-    })
-  })
+const UNCONFIGURED_SESSION = manifestFixture({
+  session: { source: 'none', default: 'memory', stores: { memory: { driver: 'memory', perProcess: true } } },
 })
 
 describe('checkDeployRuntime', () => {
@@ -1624,11 +1039,11 @@ describe('checkDeployRuntime', () => {
       { 'src/app.ts': SESSION_APP },
       { '@guren/plugin-cloudflare': '^0.2.0' },
       async (dir) => {
-        const verdicts = await checkDeployRuntime(dir)
+        const verdicts = await checkDeployRuntime(dir, { introspect: introspected(UNCONFIGURED_SESSION) })
 
         expect(verdicts.map((verdict) => verdict.key)).toEqual([...DEPLOY_CHECK_KEYS])
         const stores = verdicts.find((verdict) => verdict.key === 'deploy-runtime-stores')!
-        expect(stores.status).toBe('warn')
+        expect(stores).toMatchObject({ status: 'warn', evidence: 'manifest' })
         expect(stores.fix).toContain('guren add session')
         const hashing = verdicts.find((verdict) => verdict.key === 'deploy-password-hashing')!
         expect(hashing.status).toBe('pass')
@@ -1637,21 +1052,73 @@ describe('checkDeployRuntime', () => {
     )
   })
 
+  it('reports the hashing and store verdicts unverified without the introspected app, never judged from source', async () => {
+    await withApp(
+      'guren-deploy-check-no-introspect-',
+      { 'src/app.ts': SESSION_APP, 'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER },
+      { '@guren/plugin-cloudflare': '^0.2.0' },
+      async (dir) => {
+        const verdicts = await checkDeployRuntime(dir, { introspect: false })
+
+        expect(verdicts.map((verdict) => verdict.key)).toEqual([
+          'deploy-password-hashing-unverified',
+          'deploy-runtime-stores-unverified',
+          'deploy-provider-discovery',
+        ])
+        for (const verdict of verdicts.slice(0, 2)) {
+          expect(verdict).toMatchObject({ status: 'warn', evidence: 'none', evidenceReason: 'no introspected app was available' })
+          expect(verdict.fix).toContain('guren introspect')
+        }
+        expect(verdicts[1]!.message).toContain('whether the session and cache stores are per-process is unverified')
+      },
+    )
+  })
+
+  it('names a failed introspection as the reason', async () => {
+    await withApp('guren-deploy-check-failed-', { 'src/app.ts': SESSION_APP }, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const failed = async (): Promise<Introspection> => ({ status: 'failed', reason: 'import', message: 'Could not load src/main.ts.\nstack' })
+      const [hashing, stores] = await checkDeployRuntime(dir, { introspect: failed })
+
+      expect(hashing!.evidenceReason).toBe('introspection failed with import: Could not load src/main.ts')
+      expect(stores!.message).toContain('unverified: introspection failed with import: Could not load src/main.ts')
+    })
+  })
+
   it('matches what guren doctor reports for the same app', async () => {
     await withApp(
       'guren-deploy-check-parity-',
       { 'src/app.ts': SESSION_APP },
       { '@guren/plugin-cloudflare': '^0.2.0' },
       async (dir) => {
-        const doctor = await deployChecks(dir)
-        for (const verdict of await checkDeployRuntime(dir)) {
-          // Doctor's side is the wider status type, so it is the subject.
-          expect(doctor[verdict.key].status).toBe(verdict.status)
-          expect(doctor[verdict.key].message).toBe(verdict.message)
-          expect(doctor[verdict.key].fix).toBe(verdict.fix)
+        const { evaluations } = await getDoctorRuleEvaluations({ cwd: dir })
+        const doctor = new Map(evaluations.map(({ check }) => [check.key, check]))
+        for (const verdict of await checkDeployRuntime(dir, { introspect: false })) {
+          expect(doctor.get(verdict.key)).toMatchObject({ status: verdict.status, message: verdict.message })
         }
       },
     )
+  })
+})
+
+describe('deprecated analysis entry points', () => {
+  it('warn once and judge as checkDeployRuntime does', async () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await withApp('guren-deploy-deprecated-', { 'src/app.ts': SESSION_APP }, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+        const analysis = await analyzeDeployRuntime(dir, { introspect: introspected(UNCONFIGURED_SESSION) })
+        await analyzeDeployRuntime(dir, { introspect: false })
+        const verdicts = judgeDeployRuntime(analysis)
+
+        expect(verdicts).toEqual(await checkDeployRuntime(dir, { introspect: introspected(UNCONFIGURED_SESSION) }))
+        expect(analysis.bunOnlyHasherSignals).toEqual([])
+        const warnings = warn.mock.calls.map(([message]) => String(message))
+        expect(warnings.filter((message) => message.includes('analyzeDeployRuntime() is deprecated'))).toHaveLength(1)
+        expect(warnings.filter((message) => message.includes('judgeDeployRuntime() is deprecated'))).toHaveLength(1)
+        expect(warnings[0]).toContain('[guren] Deprecation (deploy-runtime-analysis)')
+      })
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
 
@@ -1662,17 +1129,26 @@ describe('guren check deploy-runtime verdicts', () => {
       { 'src/app.ts': SESSION_APP },
       { '@guren/plugin-cloudflare': '^0.2.0' },
       async (dir) => {
-        const report = await runCheck({ cwd: dir })
+        const report = await runCheck({ cwd: dir, introspect: introspected(UNCONFIGURED_SESSION) })
         const stores = report.checks.find((result) => result.key === 'deploy-runtime-stores')
 
-        expect(stores).toBeDefined()
-        expect(stores!.status).toBe('warn')
-        expect(stores!.advisory).toBe(true)
-        expect(stores!.message).toContain('sessions are enabled')
+        expect(stores).toMatchObject({ status: 'warn', advisory: true, evidence: 'manifest' })
+        expect(stores!.message).toContain('no session store configured')
         expect(stores!.suggestion).toContain('guren add session')
         expect(gatingResults(report).map((result) => result.key)).not.toContain('deploy-runtime-stores')
       },
     )
+  })
+
+  it('keeps the unverified verdicts of a run that does not introspect out of the gate', async () => {
+    await withApp('guren-check-deploy-in-process-', { 'src/app.ts': SESSION_APP }, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const report = await runCheck({ cwd: dir })
+      const unverified = report.checks.filter((result) => result.key.endsWith('-unverified'))
+
+      expect(unverified.map((result) => result.key)).toEqual(['deploy-password-hashing-unverified', 'deploy-runtime-stores-unverified'])
+      for (const result of unverified) expect(result).toMatchObject({ status: 'warn', advisory: true, evidence: 'none' })
+      expect(gatingResults(report).filter((result) => result.key.startsWith('deploy-'))).toEqual([])
+    })
   })
 
   it('emits no deploy verdict for an app with no deploy target', async () => {
@@ -1690,11 +1166,297 @@ describe('guren check deploy-runtime verdicts', () => {
       { '@guren/plugin-cloudflare': '^0.2.0' },
       async (dir) => {
         const manifestOnly = await runCheck({ cwd: dir, changedFiles: new Set(['package.json']) })
-        expect(manifestOnly.checks.some((result) => result.key === 'deploy-runtime-stores')).toBe(true)
+        expect(manifestOnly.checks.some((result) => result.key.startsWith('deploy-runtime-stores'))).toBe(true)
 
         const unrelated = await runCheck({ cwd: dir, changedFiles: new Set(['README.md']) })
         expect(unrelated.checks.some((result) => result.key.startsWith('deploy-'))).toBe(false)
       },
     )
+  })
+})
+
+const SCRYPT_USERS = {
+  users: { kind: 'model', model: 'User', hasher: 'DefaultHasher', algorithm: 'scrypt', requiresBun: false },
+} as const
+
+describe('deploy-runtime verdicts over a manifest (RFC 0026 §5)', () => {
+  let base: DeployRuntimeFacts
+  let workspace: Awaited<ReturnType<typeof createTempWorkspace>>
+
+  beforeAll(async () => {
+    // The static half (targets, OAuth, explicit constructions) of a Cloudflare app with nothing in it.
+    workspace = await createTempWorkspace('guren-deploy-manifest-')
+    await writeApp(workspace.dir, { 'src/app.ts': 'export {}\n' }, { '@guren/plugin-cloudflare': '^0.2.0' })
+    base = await readDeployRuntime(workspace.dir)
+  })
+
+  afterAll(async () => {
+    await workspace.cleanup()
+  })
+
+  function judge(
+    manifest: AppManifest,
+    extra: Partial<DeployRuntimeFacts> = {},
+    drivers: ReadonlyMap<string, boolean> = BUILT_IN_SESSION_DRIVERS,
+  ): Record<string, DeployRuntimeVerdict> {
+    const analysis = { ...base, ...extra, manifest: readDeployManifestFacts(manifest, drivers) }
+    return Object.fromEntries(judgeDeployVerdicts(analysis).map((verdict) => [verdict.key, verdict]))
+  }
+
+  it('passes password hashing on the hashers the auth manager holds, even with no auth.attempt() in source', () => {
+    const hashing = judge(manifestFixture({ auth: { ...manifestFixture().auth!, providers: { ...SCRYPT_USERS } } }))['deploy-password-hashing']
+
+    expect(hashing.status).toBe('pass')
+    expect(hashing.evidence).toBe('manifest')
+    expect(hashing.message).toContain("user provider 'users': DefaultHasher (scrypt)")
+  })
+
+  it('warns on a Bun-only hasher the app registers', () => {
+    const hashing = judge(
+      manifestFixture({
+        auth: {
+          ...manifestFixture().auth!,
+          providers: { users: { kind: 'model', model: 'User', hasher: 'ScryptHasher', algorithm: 'argon2', requiresBun: true } },
+        },
+      }),
+    )['deploy-password-hashing']
+
+    expect(hashing.status).toBe('warn')
+    expect(hashing.message).toContain("a Bun-only hasher is registered (user provider 'users': ScryptHasher (argon2))")
+    expect(hashing.fix).toContain("Drop `hasher: 'argon2'`")
+  })
+
+  it('never passes a hasher whose format the manifest cannot tell', () => {
+    const hashing = judge(
+      manifestFixture({
+        auth: { ...manifestFixture().auth!, providers: { api: { kind: 'custom', hasher: null, algorithm: null, requiresBun: null } } },
+      }),
+    )['deploy-password-hashing']
+
+    expect(hashing.status).toBe('warn')
+    expect(hashing.evidence).toBe('manifest')
+    expect(hashing.message).toContain("user provider 'api': custom")
+  })
+
+  it('cannot vouch for hashing when no user provider is registered but the source shows password auth', () => {
+    // A useModel() in a provider's boot() is past the register stage the manifest describes.
+    const attempt = { symbol: 'auth.attempt', filePath: 'app/Http/Controllers/LoginController.ts', line: 4 }
+    const hashing = judge(manifestFixture(), { passwordAuthSignals: [attempt] })['deploy-password-hashing-unverified']
+
+    expect(hashing).toMatchObject({ status: 'warn', evidence: 'none' })
+    expect(hashing!.message).toContain('auth.attempt (app/Http/Controllers/LoginController.ts:4)')
+    expect(hashing!.evidenceReason).toContain("a useModel() in a provider's boot()")
+    expect(judge(manifestFixture())['deploy-password-hashing']).toMatchObject({ status: 'pass', evidence: 'manifest' })
+  })
+
+  it('reports hashing and the stores unverified after a provider threw, still naming what the source shows', () => {
+    const threw = manifestFixture({
+      providers: [{ name: 'AuthProvider', source: 'options.providers', deferred: false, provides: [], register: 'threw', error: 'no binding' }],
+    })
+    const verdicts = judge(threw, { oauthSignals: [{ symbol: 'OAuthServiceProvider', filePath: 'src/app.ts', line: 4 }] })
+
+    expect(Object.keys(verdicts)).toEqual(['deploy-password-hashing-unverified', 'deploy-runtime-stores-unverified', 'deploy-provider-discovery'])
+    expect(verdicts['deploy-password-hashing-unverified']).toMatchObject({ status: 'warn', evidence: 'none' })
+    expect(verdicts['deploy-password-hashing-unverified']!.evidenceReason).toContain('AuthProvider threw in register()')
+
+    const stores = verdicts['deploy-runtime-stores-unverified']!
+    expect(stores).toMatchObject({ status: 'warn', evidence: 'none' })
+    // One reason for both stores, stated once.
+    expect(stores.message).toContain('whether the session and cache stores are per-process is unverified: AuthProvider threw in register(), so what it configures is unknown;')
+    expect(stores.message).toContain('beyond that, OAuth is configured (OAuthServiceProvider (src/app.ts:4))')
+    expect(stores.fix).toContain('DatabaseOAuthStateStore')
+    expect(verdicts['deploy-provider-discovery']!.evidence).toBe('static')
+  })
+
+  it('cannot vouch for a session a deferred provider supplies, or one bound without describe()', () => {
+    const deferred = judge(
+      manifestFixture({
+        providers: [{ name: 'SessionProvider', source: 'options.providers', deferred: true, provides: ['session'], register: 'skipped' }],
+      }),
+    )['deploy-runtime-stores-unverified']
+    expect(deferred).toMatchObject({ status: 'warn', evidence: 'none' })
+    expect(deferred!.message).toContain('whether the session store is per-process is unverified: "session" is supplied by the deferred SessionProvider')
+
+    const opaque = judge(manifestFixture({ bindings: ['app', 'auth', 'session'] }))['deploy-runtime-stores-unverified']
+    expect(opaque!.message).toContain('"session" is bound, but the introspected app could not describe it')
+  })
+
+  it('never reads a config left unbound for an unset env key as absent (RFC 0027 config-unverified)', () => {
+    const unset = (key?: string): AppManifest =>
+      manifestFixture({
+        warnings: [
+          {
+            code: 'config-unverified',
+            message: 'the "session" config reads SESSION_DRIVER, which the environment does not set; it was left unbound.',
+            provider: 'ConfigServiceProvider',
+            ...(key === undefined ? {} : { key }),
+          },
+        ],
+      })
+
+    const session = judge(unset('session'))['deploy-runtime-stores-unverified']
+    expect(session).toMatchObject({ status: 'warn', evidence: 'none' })
+    expect(session!.message).toContain('whether the session store is per-process is unverified')
+    expect(session!.message).toContain('reads SESSION_DRIVER, which the environment does not set')
+
+    const cache = judge(unset('cache'))
+    expect(cache['deploy-runtime-stores-unverified']!.message).toContain('whether the cache store is per-process is unverified')
+    // Another key's warning says nothing about these sections.
+    expect(judge(unset('mail'))['deploy-runtime-stores']).toMatchObject({ status: 'pass', evidence: 'manifest' })
+    // An older server's warning names no key, so it may be any section.
+    expect(judge(unset())['deploy-runtime-stores-unverified']).toBeDefined()
+  })
+
+  it('warns on a per-process session default and passes a shared one', () => {
+    const session = (store: string): AppManifest['session'] => ({
+      source: 'manager',
+      default: store,
+      stores: {
+        memory: { driver: 'memory', perProcess: true },
+        database: { driver: 'database', table: 'sessions', perProcess: false },
+      },
+    })
+
+    const memory = judge(manifestFixture({ session: session('memory') }))['deploy-runtime-stores']
+    expect(memory.status).toBe('warn')
+    expect(memory.message).toContain("the 'memory' session store (driver `memory`) in this environment, which is per-process")
+
+    const database = judge(manifestFixture({ session: session('database') }))['deploy-runtime-stores']
+    expect(database).toMatchObject({ status: 'pass', evidence: 'manifest' })
+  })
+
+  it('warns on sessions with no store configured', () => {
+    const stores = judge(
+      manifestFixture({ session: { source: 'none', default: 'memory', stores: { memory: { driver: 'memory', perProcess: true } } } }),
+    )['deploy-runtime-stores']
+
+    expect(stores.status).toBe('warn')
+    expect(stores.message).toContain('no session store configured')
+  })
+
+  it("reads a plugin's session driver from its installed manifest, and cannot vouch for an undeclared one", () => {
+    const kv = manifestFixture({ session: { source: 'manager', default: 'kv', stores: { kv: { driver: 'kv', perProcess: null } } } })
+
+    expect(judge(kv, {}, new Map([...BUILT_IN_SESSION_DRIVERS, ['kv', true]]))['deploy-runtime-stores'].status).toBe('pass')
+    const unknown = judge(kv)['deploy-runtime-stores']
+    expect(unknown.status).toBe('warn')
+    expect(unknown.fix).toContain('gurenPlugin.drivers.session')
+  })
+
+  it('cannot vouch for a SessionStore of the app’s own passed as auth.sessionOptions.store', () => {
+    const stores = judge(
+      manifestFixture({
+        session: {
+          source: 'auth.sessionOptions.store',
+          default: 'sessionOptions.store',
+          stores: { 'sessionOptions.store': { driver: 'KvSessionStore', perProcess: null } },
+        },
+      }),
+    )['deploy-runtime-stores']
+
+    expect(stores.status).toBe('warn')
+    expect(stores.message).toContain('auth.sessionOptions.store (KvSessionStore), a store class this check cannot vouch for')
+    // A store class is not a driver name, so no plugin manifest can vouch for it.
+    expect(stores.fix).not.toContain('gurenPlugin')
+    expect(
+      judge(
+        manifestFixture({
+          session: {
+            source: 'auth.sessionOptions.store',
+            default: 'sessionOptions.store',
+            stores: { 'sessionOptions.store': { driver: 'KvSessionStore', perProcess: null } },
+          },
+        }),
+        {},
+        new Map([...BUILT_IN_SESSION_DRIVERS, ['KvSessionStore', true]]),
+      )['deploy-runtime-stores'].status,
+    ).toBe('warn')
+  })
+
+  it('names a default that no store declares as the misconfiguration it is', () => {
+    const stores = judge(
+      manifestFixture({ session: { source: 'manager', default: 'redis', stores: { memory: { driver: 'memory', perProcess: true } } } }),
+    )['deploy-runtime-stores']
+
+    expect(stores.message).toContain("the session config's `default` names 'redis', a store it does not declare")
+    expect(stores.fix).toContain('Declare the store under `stores`')
+  })
+
+  it('keeps a hand-mounted createSessionMiddleware on the scan when the manifest has no session', () => {
+    const manual = { symbol: 'createSessionMiddleware', filePath: 'src/app.ts', line: 8 }
+
+    const unbacked = judge(manifestFixture(), { sessionSignals: [manual] })['deploy-runtime-stores']
+    expect(unbacked.status).toBe('warn')
+    expect(unbacked.message).toContain('sessions are enabled (createSessionMiddleware (src/app.ts:8)) with no persistent store')
+
+    const backed = { symbol: 'DatabaseSessionStore', filePath: 'src/app.ts', line: 7 }
+    expect(judge(manifestFixture(), { sessionSignals: [manual], backedSessionSignals: [backed] })['deploy-runtime-stores'].status).toBe('pass')
+  })
+
+  it('honours autoSession: false beside a per-process session in the manifest', () => {
+    const memory = manifestFixture({ session: { source: 'manager', default: 'memory', stores: { memory: { driver: 'memory', perProcess: true } } } })
+    const disabled = { symbol: 'autoSession: false', filePath: 'src/app.ts', line: 4 }
+
+    expect(judge(memory)['deploy-runtime-stores'].status).toBe('warn')
+    expect(judge(memory, { sessionDisabledSignals: [disabled] })['deploy-runtime-stores']).toMatchObject({ status: 'pass', evidence: 'manifest' })
+  })
+
+  it('judges an auth.sessionOptions.store factory by the stores the source constructs', () => {
+    const backed = { symbol: 'DatabaseSessionStore', filePath: 'src/app.ts', line: 5 }
+    const option = { symbol: 'sessionOptions', filePath: 'src/app.ts', line: 5 }
+
+    expect(judge(FACTORY_SESSION, { sessionSignals: [option], backedSessionSignals: [backed] })['deploy-runtime-stores']).toMatchObject({
+      status: 'pass',
+      evidence: 'static',
+    })
+    expect(judge(FACTORY_SESSION, { sessionSignals: [option] })['deploy-runtime-stores']!.message).toContain(
+      'sessions use an auth.sessionOptions.store factory, and no DatabaseSessionStore or RedisSessionStore is constructed',
+    )
+    // A createApp() options object the scan cannot read leaves no session signal; the manifest still shows the factory.
+    expect(judge(FACTORY_SESSION)['deploy-runtime-stores']).toMatchObject({ status: 'warn', evidence: 'static' })
+  })
+
+  it('warns on a memory cache default, which the source scan never read', () => {
+    const cache = (driver: string): AppManifest['cache'] => ({ default: 'main', entries: { main: { driver } } })
+
+    expect(judge(manifestFixture({ cache: cache('memory') }))['deploy-runtime-stores'].message).toContain(
+      "the cache uses the 'main' cache store (driver `memory`)",
+    )
+    expect(judge(manifestFixture({ cache: cache('redis') }))['deploy-runtime-stores'].status).toBe('pass')
+  })
+
+  it('lets the manifest, not a MemorySessionStore construction, name the session store', () => {
+    const signal = { symbol: 'MemorySessionStore', filePath: 'tests/support/session.ts', line: 3 }
+    const shared = manifestFixture({
+      session: { source: 'manager', default: 'database', stores: { database: { driver: 'database', perProcess: false } } },
+    })
+
+    expect(judge(shared, { memoryStoreSignals: [signal] })['deploy-runtime-stores'].status).toBe('pass')
+    // With no session in the manifest, the construction is all there is to go on.
+    expect(judge(manifestFixture(), { memoryStoreSignals: [signal] })['deploy-runtime-stores'].status).toBe('warn')
+  })
+
+  it('keeps OAuth state and explicit memory constructions on the scan, which the manifest does not carry', () => {
+    const stores = judge(manifestFixture(), {
+      oauthSignals: [{ symbol: 'OAuthServiceProvider', filePath: 'src/app.ts', line: 4 }],
+      memoryStoreSignals: [{ symbol: 'MemoryRateLimitStore', filePath: 'app/limit.ts', line: 9 }],
+    })['deploy-runtime-stores']
+
+    expect(stores.status).toBe('warn')
+    expect(stores.message).toContain('MemoryRateLimitStore (app/limit.ts:9)')
+    expect(stores.message).toContain('OAuth is configured')
+    expect(stores.evidence).toBe('manifest')
+  })
+
+  it('judges provider discovery from source, since a discovered provider registers as app.register', () => {
+    const discovery = judge(
+      manifestFixture({
+        providers: [{ name: 'MailProvider', source: 'app.register', deferred: false, provides: [], register: 'ran' }],
+      }),
+      { discoverySignals: [{ symbol: 'AutoDiscovery', filePath: 'src/app.ts', line: 7 }] },
+    )['deploy-provider-discovery']
+
+    expect(discovery).toMatchObject({ status: 'warn', evidence: 'static' })
+    expect(judge(manifestFixture())['deploy-provider-discovery'].status).toBe('pass')
   })
 })

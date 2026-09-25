@@ -19,6 +19,29 @@ export type {
   ListenAddress,
   ServiceProviderConstructor,
 } from './http/Application'
+// Introspection boot (RFC 0026). A provider prefers `introspect()` in place of `register()`;
+// `isIntrospecting()` is for a check inside `register()`, true in the CLI child and during `app.introspect()`.
+export { isIntrospecting } from './introspection/flag'
+export type {
+  AppManifest,
+  AttachmentsDescription,
+  AttachmentsEntry,
+  AuthEntry,
+  AuthProviderEntry,
+  ControllerRef,
+  DriverMapEntry,
+  JsonSchema,
+  ManifestWarning,
+  MiddlewareEntry,
+  ModuleEntry,
+  ProviderEntry,
+  ProviderRegisterOutcome,
+  ProviderSource,
+  RouteEntry,
+  RouteSchemaEntry,
+  SessionEntry,
+  SessionStoreEntry,
+} from './introspection/types'
 export { parseRequestPayload, formatValidationErrors } from './http/request'
 export { Controller } from './mvc/Controller'
 export type { InertiaResponse, InferInertiaProps, ControllerInertiaProps, AuthPayload } from './mvc/Controller'
@@ -387,6 +410,8 @@ export {
   createHostAuthorizationMiddleware,
   // CORS
   createCorsMiddleware,
+  // WebSocket origin
+  createWebSocketOriginGuard,
   // Redirect safety
   createRedirectSafetyMiddleware,
   isSafeRedirectUrl,
@@ -439,6 +464,8 @@ export type {
   HostAuthorizationOptions,
   // CORS types
   CorsOptions,
+  // WebSocket origin types
+  WebSocketOriginOptions,
   // Redirect safety types
   RedirectSafetyOptions,
   // Force HTTPS types
@@ -863,6 +890,7 @@ export type {
   BroadcastDriverFactory,
   ChannelRegistration,
   SSEMiddlewareOptions,
+  WebSocketMiddlewareOptions,
   AuthMiddlewareOptions,
   BroadcastableEvent,
   MemoryDriverOptions as BroadcastMemoryDriverOptions,

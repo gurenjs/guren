@@ -147,6 +147,21 @@ behind and a table appended for routes that were never registered. Use
 it prints the route block to paste and tells you which schema file to add the
 table to.
 
+Both commands also look for every file they would write before writing the first
+one. When some are already there (a model you wrote by hand, say), the command
+lists each of them and writes nothing, and `add resource` leaves `db/schema.ts` and
+`routes/web.ts` unpatched. `--force` overwrites every file on that list, your own
+among them. A file that only `--test`, `--factory` or `--policy` adds is marked
+with its flag, and dropping the flag gets past it. Promoting a prototype keeps the
+pages and validator the prototype run wrote, so those never count.
+
+Every other command that writes several files refuses the same way before its first
+write: `make:auth`, `make:module`, `make:ai-agent` (where `--test` is the flag),
+`deploy`, and the `add` blueprints, their sample event, job or mailable included. A
+single-file `make:*` command refuses in the same words. The blueprints meant to be
+re-run to repair a partial install (`add session`, `add cache`, `add schedule`,
+`add ai`, `add prototype`) keep the files already there and write the rest instead.
+
 ## Core Commands
 
 | Command | Description | Example |
@@ -180,15 +195,15 @@ Validate your app before shipping. These commands are also designed for AI codin
 | Command | Description | Example |
 |---------|-------------|---------|
 | `check` | Validate integrity across routes, controllers, pages, and models — including whether every file in `routes/` is actually reached from your entry registrar (and every file in a module's `routes/` from that module's own registrar) — plus the durable-agent registry in `config/agents.ts`, in-process agents' `appTools()` names and scopes, deferred Inertia props (a `defer()` passed for a prop the page's `Props` declares as required, advisory), doc links, spec-view freshness, architecture boundaries, and (for an app that declares a deploy plugin or the Lambda adapter) the deploy-runtime verdicts `guren doctor` reports, as advisory results | `bunx guren check --json` |
-| `audit` | Security audit: missing input validation or authentication on mutating routes, raw SQL with interpolation, hardcoded credentials, disabled security defaults, mass-assignment configuration, sensitive columns not listed in `hidden`, emailed links built from the request host, CSRF exemptions declared by the app or by an installed package, and in-process agents' local tools | `bunx guren audit --json` |
+| `audit` | Security audit: missing input validation, authentication or policy authorization on mutating routes, raw SQL with interpolation, hardcoded credentials, disabled security defaults, mass-assignment configuration, sensitive columns not listed in `hidden`, emailed links built from the request host, CSRF exemptions declared by the app or by an installed package, and in-process agents' local tools | `bunx guren audit --json` |
 | `gate` | Every verification stage the scaffolded CI runs — codegen, typecheck, lint, `check` (the `--ci` rule), `audit`, tests — reported together; exits non-zero if any stage fails, and a stage that cannot run fails rather than skips | `bunx guren gate --changed` |
+| `introspect` | Registers the app's providers and routes without booting or listening, then prints the manifest: providers and how each registered, routes with resolved middleware and controller files, and the session, auth, cache, storage, queue and attachments configuration | `bunx guren introspect --json` |
 | `doctor` | Project health report (env, config, generated files) with actionable next steps | `bunx guren doctor --next` |
 | `context [Entity]` | Project context map — or, with an entity name, everything about one model: table, relationships, `fillable`/`hidden`/`visible`/`casts`, routes with schemas (matched by `<Entity>Controller`, a `bind` naming the model, or an action body that uses it), pages with Props, resource, policy, linked docs and issues (`--module` disambiguates, `"app"` = project root; `--live` asks `gh` for issue state, `--repo owner/name` overrides the origin remote) | `bunx guren context User --json` |
 | `docs:graph` | The OKF docs relation graph: documents, entities, and code paths as nodes, verified relations as edges. `--entity <Model>` or `--path <file>` narrows to a neighborhood — ask "what governs this?" before renaming | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |
 | `spec:generate` | Regenerates the derived spec views in `docs/spec/` (ER diagram, domain model, screens, module map) — see [Spec-Anchored Development](./spec-anchored.md) | `bunx guren spec:generate` |
 
-`audit` exits with a non-zero status when it finds failures. Plain
-`check` is informational. Its suite flags each exit non-zero on
+`audit` exits with a non-zero status when it finds failures. Plain `check` is informational. Its suite flags each exit non-zero on
 failures in that suite, and `gate` (below) is what the scaffolded CI
 workflow runs:
 
@@ -200,9 +215,41 @@ bunx guren check --spec    # docs/spec/ views match a fresh regeneration
 bunx guren check --prototype  # routes on the prototype handler have a named fixture entry, and the loaders are wired
 ```
 
+The policy rule of `audit` only ever warns. Once the app keeps a policy
+for a model (`app/Policies/<Model>Policy.ts`, what `make:policy` writes,
+paired within one app root), every controller action on a non-safe method
+whose body names that model gets a `policy:<METHOD> <path>` finding. It
+passes when the action calls `this.authorize()` or `this.can()`, consults
+the gate, references the policy class, or sits behind
+`authorize()`/`authorizeResource()` middleware. It warns, naming the action,
+the policy and the fix, when nothing the scan can see consults the policy,
+and it warns rather than passes when the controller source is not among
+those the audit reads. A helper the action calls is not followed, so put
+`// guren-audit-ignore` in a comment above an action whose check lives
+elsewhere: the finding is then reported as ignored, with that comment as its
+reason. An app with no policy gets no such finding.
+
 Combining suite flags runs their union. `--changed` restricts any of
 them to files changed against the merge base with `main`, the fast
 path the agent-harness edit hook uses.
+
+Some findings clear by regenerating files: a missing `.guren/*.gen.ts`
+manifest (`guren codegen`) and a drifted `docs/spec/` view
+(`guren spec:generate`). `check --json` gives each of these a `fix`
+field, `{ "kind": "command", "args": ["codegen"] }`, holding the
+arguments after `guren`. `--fix` runs every distinct fix once, then
+checks again and reports that second run, with what it ran under
+`fixes`. It exits non-zero when one of the commands fails, or exits 0
+while the findings it was meant to clear are still reported. `--fix`
+is refused under `--ci`: a gate that regenerated the drift it checks
+for would always pass, so run it locally and commit what it writes. A
+finding that needs a code change or a decision has no `fix`, only the
+`suggestion` text.
+
+```bash
+bunx guren check --fix          # regenerate what the findings name, then check again
+bunx guren check --spec --fix   # the same, limited to the spec views
+```
 
 `gate` is the one command that answers "is this change done?". It runs
 codegen, typecheck, lint (when the app has an `.oxlintrc.json`),
@@ -211,7 +258,15 @@ the scaffolded CI workflow runs), reports every stage, and exits
 non-zero if any failed. A stage that *cannot* run is a failure, not a
 skip: an `.oxlintrc.json` with no oxlint installed, a missing
 `typecheck` script, a routes entry that will not load. Only an app with
-no `.oxlintrc.json` skips lint.
+no `.oxlintrc.json` skips lint. The `check` and `audit` stages read the
+introspected app (see [Checks that read the introspected app](#checks-that-read-the-introspected-app))
+through one introspection per run, capped at 10 seconds, which comes after
+codegen, so a fresh clone's entry imports by then. An introspection that fails adds one
+advisory line to the stage that asked for it and never fails the gate. Every
+`-unverified` result is printed on the check stage as an advisory line as
+well, naming why the app could not vouch for it, except on a `--changed` run
+that changed no source, which does not introspect. `guren plan:verify` prints
+the same lines on its check step.
 
 ```bash
 bunx guren gate            # every stage, in full
@@ -227,6 +282,212 @@ the MCP server exposes it as `guren_gate`, and `AGENTS.md` tells other agents
 to run it before declaring a change done.
 
 Routes wrapped in named middleware (for example `router.middleware('auth').group(...)`) are recognized as protected. Guest flows such as `/login` and `/register` are excluded from authentication checks.
+
+### Introspecting the registered app
+
+`guren introspect` answers from the application itself rather than from its
+source text. It starts a child process with `GUREN_INTROSPECT=1`, imports
+`src/main.ts`, registers every provider and every route, and stops there.
+Routes are not mounted, and provider `boot()` methods, the `createApp({ boot })`
+callback and `listen()` never run, so no port is bound and the scaffold's
+`defineDatabaseConfig()` definition, which connects in its `boot`, does not
+connect. Code that connects at module scope or in `register()` still runs. The
+child loads `.env` from the app root, as `guren dev` does, and a variable set in
+your shell wins over it. With `--app`, the current directory's `.env` files are
+loaded into the CLI as well and reach the child the same way, so they also win
+over the app's.
+
+```bash
+bunx guren introspect                 # providers, routes, services and warnings as tables
+bunx guren introspect --json          # the manifest, for tools
+bunx guren introspect --timeout 60    # allow a slow register() up to 60 seconds (default 30)
+bunx guren introspect --app ../api    # introspect another app root
+```
+
+Each provider is reported with how it registered: `ran`, `introspect-hook`
+(it defines `introspect()`, which runs in place of `register()`), `threw` (the
+message is kept and the other providers still register), or `skipped` for a
+deferred provider. A provider whose `register()` opens a connection or reads a
+runtime binding can define `introspect()` to bind only what the manifest
+describes:
+
+```ts
+import { ServiceProvider } from '@guren/core'
+import Redis from 'ioredis'
+
+export class RedisProvider extends ServiceProvider {
+  register(): void {
+    // Connects as soon as it is constructed.
+    this.container.instance('redis', new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379'))
+  }
+
+  introspect(): void {
+    // The manifest does not describe 'redis', so nothing needs binding here.
+  }
+}
+```
+
+`isIntrospecting()` is the same check for code outside a provider. Under the
+flag `app.boot()` stops after registration and `app.listen()` throws, so an
+entry that calls `listen()` while it is imported fails with a pointer to the
+`bin/serve.ts` shape. On failure `--json` prints `{ "status": "failed",
+"reason", "message" }` and the command exits 1. The reason is one of
+`no-entry`, `import`, `timeout`, `crashed` or `old-server` (an installed
+`@guren/core` from before introspection, detected before the entry is
+imported).
+
+### Checks that read the introspected app
+
+`guren check` and `guren doctor` judge the deploy-runtime verdicts from the
+introspected app first: the hashers the auth manager holds, the session store
+and cache store it selects, and whether a provider threw while registering.
+`guren check` reads it for the session and attachments wiring too:
+
+| Check keys | Read from the introspected app |
+|------------|--------------------------------|
+| `sessions-binding` | Whether a provider binds `session` in `register()`. A session config the app never reads (no binding, or `auth.sessionOptions.store` supplying the store instead) is the warning; a bound manager beside `auth.sessionOptions.store`, which the app refuses at boot, is a failure |
+| `sessions-config:*` | The table each `database` store of the bound session manager holds, by its SQL name, against the tables every app root's `db/schema.ts` declares, module schemas included. A name the schema reader does not find is only an advisory warning, and only for a table the source cannot trace to a schema export: the reader sees neither the other files `drizzle.config` lists nor a `pgTableCreator()` prefix. A verdict goes to every config declaring the store, or, when none the source reads declares it, under `sessions-config:<store>` with no file |
+| `attachments-model:*`, `attachments-config:*` | Whether an attachments engine was configured while the app registered, and the table it writes to, read like the session tables, with `attachments-config` as the key naming no file. When every `configureAttachments()` runs whenever its file loads (not in a function, branch or class field), no source imports that file with `import()`, no `createApp({ boot })` was skipped, and the app still configured no engine, the model fails: nothing the app loads while it registers imports that file |
+| `attachments-delivery` | Whether the route the engine's `delivery` names is registered, and registered by `registerAttachmentRoutes()` |
+| `attachments-route-name:*` | How many registered routes carry that route name |
+| `attachments-serve-redirect:*` | The disks the engine serves by redirect, with each disk's driver from the storage manager |
+| `attachments-public-disk:*` | The disk the engine writes to. The disk's `root` still comes from source |
+| `route-contract-*` | Every registered route, a provider's or a plugin's included. A params schema's keys come from its JSON Schema (`properties`, and `required` for the severity); where that rendering is short of the schema (a nullable object, a `z.any()` or `z.undefined()` key), the routes file's Zod for the same route decides. A route only the app registers has no Zod: a short rendering is reported unreadable, and a key the rendering drops without a note (`z.undefined()`) goes unseen |
+| `agent-route-*` | Every route that declares `.agent()`, with its controller found by file and export |
+| `prototype-*` | Every named route, so a fixture entry naming a route a provider registers is not an orphan. The `createApp({ prototype })` wiring and the fixture itself are read from source |
+
+A run introspects only when some check needs it: the app declares a deploy
+plugin or the Lambda adapter, has a session config, calls
+`configureAttachments()`, has a model that mixes in `Attachable(...)`, or its
+routes file registers a route with a params schema or a binding, a route that
+declares `.agent()`, or a `prototype` route (or the app has a prototype
+fixture). Each rule asks on its own content, so a route only the app registers
+is judged by the route contracts only when the routes file has a params schema
+or a binding, and by the agent-route rules only when it has an agent route. The
+route rules read the routes file under `--routes`, since the manifest
+describes the app's entry. Each
+run introspects at most once, and a `--changed` run that changed no source
+file does not introspect at all. The manifest is read with this environment's
+`.env`, so a store selected by an environment variable is judged at its local
+value. Introspection stops before any provider's `boot()`, so for a
+`configureAttachments()` called inside a function the call's options are read
+from source, and the routes and storage drivers from the app.
+
+`guren check`, `doctor`, `audit`, `gate` and `plan:verify` introspect, all
+with the same 10-second cap, so `check --ci` and the gate judge an app the same
+way. The edit hook (`check --arch`) and the dev MCP server's `guren_check` do
+not, so there the verdicts only the app can answer are `-unverified`.
+
+Each of these results carries `evidence` in `--json` output. A verdict that reads
+several facts reports the weakest source among them:
+
+| `evidence` | Meaning |
+|------------|---------|
+| `manifest` | Judged with the introspected app. Facts the manifest does not carry (OAuth state stores, explicit in-memory constructions) still come from the source scan |
+| `static` | Judged from source because the fact lives there: provider discovery, a disk's `root`, the options of a `configureAttachments()` called inside a function, a session or attachments table the schema must export (a missing export fails the introspection, so the source is the only reader), and a session config the app never reads. The message says why the manifest was not used |
+| `none` | Only the registered app can answer, and no manifest could vouch for it: the app was not introspected, the introspection failed, a provider threw in `register()`, a config was left unbound because it reads an unset environment variable, or a deferred provider or an undescribable binding supplies the section. The key ends in `-unverified` and the result is an advisory warning, never a pass. This covers the deploy hasher and stores, the session binding, and the attachments delivery mount and redirect disks |
+
+When introspection fails, `check` adds one advisory `introspection-unavailable`
+line with the reason. The verdicts that read the source are judged from it,
+and the rest are `-unverified`. `doctor` reports the reason as
+`evidenceReason` in its JSON. `--no-introspect` skips introspection, which
+suits an app whose entry does not import yet:
+
+```bash
+bunx guren check --no-introspect
+bunx guren doctor --no-introspect
+```
+
+The deploy builds run the same verdicts, with introspection capped at 10
+seconds, and print one line naming what each was judged from.
+
+`guren audit` reads the introspected app for its route-level rules
+(`validation:*`, `authz:*`, `agent-annotation:*`). It introspects only when the
+routes file registers a route that mutates or carries a body, or fails to load
+on its own (the app may still register it), and never with
+`--routes`, since the manifest describes the app's entry rather than the file
+you named. From the manifest:
+
+- A middleware alias arrives resolved, wherever the app registers it: a route
+  behind an `auth` alias that a provider registers passes `authz:*`, where the
+  routes file loaded on its own reports a guard it does not recognize.
+- A chain that authorizes but never authenticates stays a warning, and the
+  message says what it checks: the ability, any or all of several, or an
+  ability decided at request time. A guest request reaches the gate with a
+  `null` user, and a policy may let it through.
+- A name no alias or group registers anywhere in the app is reported as
+  unresolved. Mounting such a route fails at boot, so the warning comes ahead of
+  any guard beside it, and a guard never passes it. When something introspection
+  skips could register the name (a `createApp({ boot })` callback, or a provider
+  whose `introspect()` hook replaced its `register()`), the message names it.
+- A controller is found by its file and export. Two modules may each declare a
+  `ReportController`, and each route is judged against its own class. When a
+  route's class matches no export of the controller files (a class declared in
+  the routes file, say), an exported class of the same name is not used, and
+  neither is any same-named class while the routes file or the entry declares
+  the name: the route is reported as not analyzable. Otherwise a same-named
+  class a controller file declares without exporting it, or one in a file that
+  failed to import during introspection, is read by name.
+  `controller-name-collision:*` is reported only when such a name fallback
+  meets two files declaring the name, or the class was found through a
+  re-export. The body checks (`validateBody()`, `userOrFail()`) still read the
+  action's source.
+
+`guren check` uses the same lookup for its agent-route rules. Raw SQL, secrets,
+mass assignment and CSRF exemptions are judged from source either way.
+
+Route-level findings carry `evidence`: `manifest` when the manifest alone
+decided them (a guard's capability, a body schema the route enforces), `static`
+when they read a controller body or the routes file. The JSON report's
+`routeSource` says which was read, with the reason when it was the routes file.
+A failed introspection adds one `introspection-unavailable` warning, which does
+not change the exit code, and a provider that threw in `register()` sends the
+rules back to the routes file, since that provider may register an alias the
+routes name. `--no-introspect` reads the routes file only:
+
+```bash
+bunx guren audit --no-introspect
+```
+
+### Route lists from the introspected app
+
+`guren context` lists the introspected app's routes, a provider's or a plugin's
+included, and leaves out a module under `modules/` that `createApp()` never
+mounts. Schema types are still rendered from the routes file, so a route only
+the app registers is listed without them. `--no-introspect`, or `--routes`,
+lists the routes file's routes. When the app cannot be introspected, the Routes
+section says why in one line (`routesNotIntrospected` in `--json`) and lists
+the routes file's routes. `guren context <Entity>` introspects only when a route
+reaches a controller class that two files declare, and never with `--routes`.
+
+`guren doctor`'s `prototype-routes` counts the introspected app's routes once a
+routes file passes the `prototype` handler.
+
+`guren codegen` reads the routes file unless you pass `--introspect`. The Vite
+plugin runs codegen on every edit, and the default codegen is the reference
+`guren check`, `doctor` and `guren gate` work from. With `--introspect` the app decides
+which routes exist and in which order, and each route is rendered from the
+routes file's Zod. An app whose routes all come from the routes file and its
+modules gets the same files byte for byte, unless two routes share a name and
+`createApp({ modules })` lists the modules in another order than their
+directories sort. A route only the app registers is added without schema types,
+with a warning naming it, and an agent tool on it comes from the manifest; when
+two routes claim one tool name, the one the running app registers first wins,
+as at runtime. The output lasts until the next codegen without the flag, the
+Vite watcher's included. In an app whose agent tools all come from a provider,
+`check` and `doctor` report the `.guren/agents.gen.ts` it wrote as stale, and
+the `guren codegen` they name removes it. When the routes file derives tools of
+its own, they only ask whether the file exists, so the extra tools pass unseen. When the app cannot be introspected, or `--routes` names a
+file other than the one `check` finds as the entry, codegen writes from the
+routes file and says why:
+
+```bash
+bunx guren codegen --introspect
+```
+
+`guren spec:generate` and `check --spec` always read the routes file. The views
+are committed, and `guren gate` regenerates them in process without
+introspecting, so a view written from the manifest would read as drift there.
 
 ### Agent-exposed routes
 
@@ -254,13 +515,15 @@ Routes that declare `.agent()` metadata (see [Routing](./routing.md)) are checke
 | `agent-route-authorization:*` | The verdict could not be reached: the handler is an inline function, or the controller action is not among the sources the check reads. |
 | `agent-route-controller-collision:*` | Two controller classes share a name and an agent route uses one of them, so a verdict drawn from a controller body may describe the other class. |
 | `agent-route-controller-unreadable:*` | A controller file could not be read at all, so any agent route whose action lives there was checked against no body. |
+| `agent-route-controller-unparsed:*` | A controller file could not be parsed, so any agent route whose action lives there was checked against no body, and a route naming one of its classes may be judged against another file declaring the same class name, with no collision reported. |
 | `route-graph` | The routes file failed to load, so neither the route-contract nor the agent-route checks ran. |
 
-`audit` adds two rules for the same routes:
+`audit` adds these rules for the same routes:
 
 - A body-validation finding that is a warning for an ordinary route becomes a **failure** when the route is agent-exposed, under the same `validation:*` key, so an existing `config/audit.ts` entry keeps applying.
 - `agent-annotation:*` warns when `destructiveHint: false` is declared on an action that deletes, updates, or force-writes records, and also when that claim could not be checked because the action body was unreadable.
 - `controller-unreadable:*` warns when a controller file could not be read, since every rule above saw no body for the actions it declares.
+- `controller-unparsed:*` warns when a controller file was read but could not be parsed. The rules above saw no body for its actions, and a route matched to one of its classes by name alone is judged against another controller file that declares the same class name, with no `controller-name-collision:*` reported.
 
 Suppress a false positive by placing `// guren-audit-ignore` on the flagged line or the line above it:
 
@@ -269,7 +532,7 @@ Suppress a false positive by placing `// guren-audit-ignore` on the flagged line
 const apiKey = 'example-not-a-real-key'
 ```
 
-Route- and model-level findings (`authz:*`, `validation:*`, `agent-annotation:*`, `mass-assignment:*`, `hidden-columns:*`) have no single line to attach a comment to: they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead, keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`:
+Route- and model-level findings (`authz:*`, `policy:*`, `validation:*`, `agent-annotation:*`, `mass-assignment:*`, `hidden-columns:*`) have no single line to attach a comment to: they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead (`policy:*` also honours the marker in a comment above the action, since the action is where its fix goes), keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`:
 
 ```ts
 // config/audit.ts
@@ -425,7 +688,7 @@ Install it at user scope: these skills are for the step *before* a project exist
 
 Framework-managed files (rules, skills, subagents, hooks) *are* overwritten by `agent:sync`, which is its job, so keep project-specific rules in files of your own instead of appending to the shipped ones. The sync makes every overwrite visible: files that already match the latest version are skipped, and any file that held different contents is called out as replaced. Run `agent:sync --dry-run` first to see what a sync would write, replace, or prune without changing anything. `agent:init` accepts `--dry-run` too, as the preview for `--force`.
 
-When a framework rule or skill is renamed or removed in a release, the old copies stay behind in every root that received them, and Cursor and Copilot keep auto-loading stale `.cursor/rules/guren-*.mdc` / `.github/instructions/guren-*.instructions.md` files. `agent:sync` lists any files in the framework-managed locations that are no longer part of the harness; `agent:sync --prune` deletes them. Everything is claimed **by name**: the rules roots (`.claude/rules/`, `.agents/rules/`) only for the rule filenames the harness ships or used to ship, the native rules only for the `guren-` prefix, and the skills roots (`.claude/skills/`, `.agents/skills/`) only for the skill directories the harness ships or used to ship. So a rules file of your own next to the shipped ones (in a subdirectory too), or a skill you added yourself (or one `npx skills add` and Agent Plugins clients install into those same directories), is never listed and never deleted, as long as its name is not one the harness itself ships: `dev-workflow`, `db-manage`, `scaffold`, `feature`, `guren-api`, `plugin-authoring`, `agent-interface`, `ai-agent`, `github-projects` for skills, the rule filenames listed in your entry document for rules (compared ignoring case), and **any** `guren-`prefixed file for Cursor and Copilot, where the claim is the prefix rather than a list of names. Keep your own Cursor/Copilot rules under a different prefix, and review the report before `--prune`: a file of your own under a claimed name is the one case it removes.
+When a framework rule or skill is renamed or removed in a release, the old copies stay behind in every root that received them, and Cursor and Copilot keep auto-loading stale `.cursor/rules/guren-*.mdc` / `.github/instructions/guren-*.instructions.md` files. `agent:sync` lists any files in the framework-managed locations that are no longer part of the harness; `agent:sync --prune` deletes them. Everything is claimed **by name**: the rules roots (`.claude/rules/`, `.agents/rules/`) only for the rule filenames the harness ships or used to ship, the native rules only for the `guren-` prefix, and the skills roots (`.claude/skills/`, `.agents/skills/`) only for the skill directories the harness ships or used to ship. So a rules file of your own next to the shipped ones (in a subdirectory too), or a skill you added yourself (or one `npx skills add` and Agent Plugins clients install into those same directories), is never listed and never deleted, as long as its name is not one the harness itself ships: `dev-workflow`, `db-manage`, `scaffold`, `feature`, `guren-api`, `plugin-authoring`, `agent-interface`, `ai-agent`, `github-projects`, `plan-write`, `plan-implement` for skills, the rule filenames listed in your entry document for rules (compared ignoring case), and **any** `guren-`prefixed file for Cursor and Copilot, where the claim is the prefix rather than a list of names. Keep your own Cursor/Copilot rules under a different prefix, and review the report before `--prune`: a file of your own under a claimed name is the one case it removes.
 
 ## Deployment Recipes
 
@@ -445,7 +708,7 @@ bunx guren deploy --target railway
 bunx guren deploy --target all --app my-app --port 4000
 ```
 
-Supported targets are `docker`, `fly`, `railway`, and `all`. The command stops when a file it would write already exists; pass `--force` to overwrite it.
+Supported targets are `docker`, `fly`, `railway`, and `all`. When a file it would write already exists, the command lists every such file and writes none; pass `--force` to overwrite them.
 
 Vercel and AWS Lambda use plugins, installed with `bunx guren plugin @guren/plugin-vercel` and `bunx guren plugin @guren/plugin-lambda`, and `--target vercel` is rejected. [Deployment](./deployment.md) walks through both.
 

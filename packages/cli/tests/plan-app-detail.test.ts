@@ -142,7 +142,11 @@ describe('loadPlanAppState({ detail: true })', () => {
   test('should call the entry registrar and a listed module mounted', async () => {
     const detail = await detailOf('mounted', { 'src/app.ts': entry('{ routes: registerWebRoutes, modules: [billing] }') })
 
-    expect(detail.mounts).toEqual({ entry: 'mounted', modules: { billing: 'mounted' } })
+    expect(detail.mounts).toEqual({
+      entry: 'mounted',
+      modules: { billing: 'mounted' },
+      files: { entry: ['src/app.ts'], descriptors: { billing: 'modules/billing/index.ts' } },
+    })
     expect(detail.routes).toMatchObject([
       { name: 'posts.index', action: 'PostController.index', module: null },
       { name: 'posts.store', action: 'PostController.store', module: null },

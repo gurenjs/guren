@@ -6,6 +6,7 @@ import {
   Listener,
 } from '../../src/events'
 import { resetWarnOnce } from '../../src/support/warn-once'
+import { settleWithin } from '../support/deadline'
 
 class TestEvent extends Event {
   constructor(public readonly message: string) {
@@ -17,6 +18,12 @@ class AnotherEvent extends Event {
   constructor(public readonly value: number) {
     super()
   }
+}
+
+// A timer fires only after every queued microtask has run, so a promise that
+// did not wait for anything has settled by the time this resolves.
+function nextMacrotask(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 describe('Event', () => {
@@ -142,24 +149,42 @@ describe('EventManager', () => {
 
   describe('emitParallel()', () => {
     it('calls listeners in parallel', async () => {
-      const startTime = Date.now()
       const calls: number[] = []
+      const gated = (id: number) => {
+        const started = Promise.withResolvers<void>()
+        const release = Promise.withResolvers<void>()
+        events.on(TestEvent, async () => {
+          started.resolve()
+          await release.promise
+          calls.push(id)
+        })
+        return { started: started.promise, release: release.resolve }
+      }
+      const first = gated(1)
+      const second = gated(2)
 
-      events.on(TestEvent, async () => {
-        await new Promise((r) => setTimeout(r, 50))
-        calls.push(1)
-      })
-      events.on(TestEvent, async () => {
-        await new Promise((r) => setTimeout(r, 50))
-        calls.push(2)
+      let settled = false
+      const emitted = events.emitParallel(new TestEvent('test')).then(() => {
+        settled = true
       })
 
-      await events.emitParallel(new TestEvent('test'))
-      const duration = Date.now() - startTime
+      // Neither listener finishes before the test releases it, so a sequential
+      // dispatch never starts the second, whichever order it runs them in.
+      await settleWithin(
+        Promise.all([first.started, second.started]),
+        1_000,
+        'emitParallel did not start the second listener while the first was running',
+      )
+
+      await nextMacrotask()
+      expect(settled).toBe(false)
+      first.release()
+      await nextMacrotask()
+      expect(settled).toBe(false)
+      second.release()
+      await emitted
 
       expect(calls).toHaveLength(2)
-      // Should complete in ~50ms, not ~100ms (parallel)
-      expect(duration).toBeLessThan(100)
     })
   })
 

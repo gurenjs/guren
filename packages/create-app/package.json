@@ -1,6 +1,6 @@
 {
   "name": "create-guren-app",
-  "version": "1.17.1",
+  "version": "1.17.2",
   "description": "Scaffold a Guren app: a Bun-first fullstack TypeScript framework with Laravel-style conventions, Inertia.js + React, Drizzle ORM, and an agent harness for Claude Code and other coding agents.",
   "keywords": [
     "guren",

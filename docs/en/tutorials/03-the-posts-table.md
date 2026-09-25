@@ -71,7 +71,7 @@ export class Post extends defineModel(posts, { fillable: ['title', 'body'] }) {
 
 That is the whole model, and it is deliberately thin. `defineModel(posts)` gives the class `find`, `findOrFail`, `all`, `create`, `update`, `delete`, `paginate` and a query builder, all typed from the table: `PostRecord` has exactly the four columns above, and you never write that type by hand.
 
-`fillable` is the one line that is about safety rather than convenience. `Post.create(data)` will only write the keys listed here; an `id` or a `createdAt` smuggled into `data` is dropped. In chapter 4 you pass validated request bodies to `create`, and this is what keeps a client from setting fields the form never offered. `guren audit` checks for it.
+`fillable` is the one line that is about safety rather than convenience. `Post.create(data)` writes only the keys listed here. An `id` smuggled into `data` is stripped without a word; any other key, a `createdAt` for instance, makes `create` throw a `MassAssignmentException` and write nothing. In chapter 4 you pass validated request bodies to `create`, and this is what keeps a client from setting fields the form never offered. `guren audit` checks for it.
 
 ## 3. The specification
 

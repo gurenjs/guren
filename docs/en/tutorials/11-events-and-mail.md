@@ -373,8 +373,7 @@ This is exactly the situation chapter 8 was about: a project invariant the frame
 
 ```md file=.claude/rules/background-work.md
 ---
-description: Events, listeners and jobs — every job is registered, every listener is wired, and the payload is ids
-globs:
+paths:
   - "app/Events/**"
   - "app/Listeners/**"
   - "app/Jobs/**"

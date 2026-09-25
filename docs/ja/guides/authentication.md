@@ -25,6 +25,8 @@ bunx guren make:auth --install
 3. `routes/web.ts` で `registerAuthRoutes(router)` を接続
 4. `db/schema.ts` にパスワードや remember トークンのカラムを追加
 
+`guren add mail` や独自のプロバイダーでメールをすでに設定しているアプリでは、その設定をそのまま使います。この場合 `make:auth` は `config/mail.ts` を生成せず、メール関連の登録も行いません。リセットメールは既存の設定を通じて送信されます。`make:auth` の後に `guren add mail` を実行した場合も、auth が書いた設定は残り、サンプルの Mailable だけが追加されます。
+
 スキャフォルド後は以下を実行するだけです。
 
 ```bash
@@ -425,6 +427,7 @@ OAuth 専用のサインアップなど、パスワードなしでアカウン�
 
 ```ts
 import { pages } from '@/.guren/pages.gen'
+import type { UserRecord } from '@/app/Models/User'
 
 export default class DashboardController extends Controller {
   async index() {
@@ -433,7 +436,7 @@ export default class DashboardController extends Controller {
   }
 
   async store() {
-    const user = await this.auth.userOrFail()  // 未認証なら 401 をスロー
+    const user = await this.auth.userOrFail<UserRecord>()  // 未認証なら 401 をスロー
     // user は non-null が保証される
     await Post.create({ authorId: user.id, ...data })
     return this.redirect('/posts')

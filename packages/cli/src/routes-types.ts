@@ -1,5 +1,10 @@
 import { relative, resolve } from 'node:path'
-import type { RouteDefinition as ServerRouteDefinition } from '@guren/server'
+import { consola } from 'consola'
+import type { DerivedAgentTool, RouteDefinition as ServerRouteDefinition } from '@guren/server'
+import { agentToolRouteKey, loadIntrospectedRouteDefinitions, routesFileFallbackMessage } from './app-routes'
+import { introspectApp } from './introspect'
+import { ROUTES_FLAG_NOT_INTROSPECTED } from './manifest-section'
+import { routesEntryOrDefault } from './route-registrar'
 import { PATH_PARAM_PATTERN, escapeSingleQuoted as escapeSingleQuotes, escapeTemplateLiteral as escapeTemplateSegment, extractPathParamNames, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { CONTRACT_SEGMENTS } from './contract-segments'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
@@ -16,6 +21,8 @@ export type RouteDefinition = {
   path: string
   name?: string
   schemas?: ServerRouteDefinition['schemas']
+  /** The introspected app's derived tool for an agent route the routes file does not register, which reaches codegen without Zod. */
+  introspectedAgentTool?: DerivedAgentTool
 }
 
 export interface GenerateRouteTypesOptions extends WriterOptions {
@@ -23,6 +30,45 @@ export interface GenerateRouteTypesOptions extends WriterOptions {
   outputFile?: string
   runtimeOutputFile?: string
   appRoot?: string
+  /**
+   * Take the route set from the introspected app (RFC 0026 §5), each route keeping the routes
+   * file's Zod where it registers one: `guren codegen --introspect`. Off by default: the Vite
+   * watcher runs codegen on every edit, and a generated file must not depend on the path that wrote it.
+   */
+  introspect?: boolean
+}
+
+/**
+ * The routes codegen renders. Introspected, a route the routes file does not register (a
+ * provider's) is rendered without schema types, and an agent tool on it is the manifest's.
+ * A failed or unusable introspection falls back to the routes file, saying why.
+ */
+async function loadCodegenRoutes(routesFile: string, appRoot: string, introspect: boolean): Promise<RouteDefinition[]> {
+  if (!introspect) return loadRouteDefinitions(routesFile, appRoot)
+
+  // The manifest describes the entry's routes, which a file `--routes` names may not be.
+  const entryRoutes = resolve(appRoot, await routesEntryOrDefault(appRoot))
+  const introspection = entryRoutes === routesFile ? () => introspectApp(appRoot) : { skipped: ROUTES_FLAG_NOT_INTROSPECTED }
+  const { definitions, source } = await loadIntrospectedRouteDefinitions(introspection, () => loadRouteDefinitions(routesFile, appRoot))
+  if (source.evidence === 'static') {
+    consola.warn(routesFileFallbackMessage(source, 'Generated from the routes file instead.'))
+    return definitions
+  }
+  if (source.unmatched.length === 0) return definitions
+
+  consola.warn(
+    `${source.unmatched.length} route(s) are registered outside the routes file, so their schemas are not rendered: `
+    + `${source.unmatched.map((route) => `${route.method} ${route.path}`).join(', ')}.`,
+  )
+  const unmatched = new Set(source.unmatched)
+  const tools = new Map(source.manifest.agentTools.map((tool) => [agentToolRouteKey(tool.method, tool.path, tool.routeName, tool.toolName), tool]))
+  // An unmatched route keeps `agent`, so codegen derives a schema-less tool from it and then takes this
+  // one in its place; the manifest's tools are plain JSON, which every field of a derived tool survives.
+  return definitions.map((definition, index) => {
+    if (!unmatched.has(source.manifest.routes[index]!)) return definition
+    const tool = tools.get(agentToolRouteKey(definition.method, definition.path, definition.name, definition.agent?.toolName))
+    return tool ? { ...definition, introspectedAgentTool: tool } : definition
+  })
 }
 
 const DEFAULT_OUTPUT_FILE = 'types/generated/routes.d.ts'
@@ -35,7 +81,7 @@ export async function generateRouteTypes(
   const routesFile = resolve(appRoot, options.routesFile ?? DEFAULT_ROUTES_FILE)
   const outputFile = resolve(appRoot, options.outputFile ?? DEFAULT_OUTPUT_FILE)
   const runtimeOutputFile = resolve(appRoot, options.runtimeOutputFile ?? DEFAULT_RUNTIME_OUTPUT_FILE)
-  const definitions = await loadRouteDefinitions(routesFile, appRoot)
+  const definitions = await loadCodegenRoutes(routesFile, appRoot, options.introspect === true)
 
   if (definitions.length === 0) {
     throw new Error('No routes were registered. Ensure your routes file exports a route registrar and registers routes with the provided router.')

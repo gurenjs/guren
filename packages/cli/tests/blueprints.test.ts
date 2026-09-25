@@ -1,4 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
+import { runCommand, type CommandDef } from 'citty'
 import { existsSync } from 'node:fs'
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -15,12 +16,14 @@ import {
   PROVIDERLESS_APP_FIXTURE,
   SQLITE_SCHEMA_FIXTURE,
   REGISTRAR_LESS_ROUTES_FIXTURE,
+  captureConsolaLines,
   captureWarnings,
   createTempWorkspace,
   readApiOnlyTemplateFile,
   readShippedSchemaFile,
   seedApiOnlyApp,
   seedShippedApiOnlyApp,
+  snapshotTree,
   ENV_SCHEMA_FIXTURE,
   linkWorkspaceCore,
   linkWorkspacePackage,
@@ -30,6 +33,8 @@ import {
 import { checkEnvExample } from '../src/app-env'
 import { loadResolvedConfig } from '../src/resolved-config'
 import { addResource, listBlueprints, runBlueprint } from '../src/blueprints'
+import { CliError } from '../src/cli-error'
+import { builtinSubCommands } from '../src/commands'
 import { runCheck } from '../src/check'
 
 /** Materialize an app file for the provider-wiring patches to target. */
@@ -301,6 +306,36 @@ export default registerWebRoutes
     expect(await readFile('db/schema.ts', 'utf8')).toBe(schemaAfterFirst)
   })
 
+  // A promotion keeps the prototype's validator and pages; `add resource` passes
+  // announce: false, so the command is what reports them, after the written files.
+  it('announces the prototype files a promotion kept after the files it wrote', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+    await writeWorkspaceFiles(workspace.dir, {
+      'resources/js/types/Post.ts': 'export interface PostData extends Record<string, unknown> { id: number }\n',
+      'app/Http/Validators/PostValidator.ts': 'export {}\n',
+      'resources/js/pages/posts/Index.tsx': 'export default function Index() { return null }\n',
+      // Present, so ensureGurenUiTokens stays quiet: it announces its own write.
+      'resources/css/guren.css': '',
+    })
+
+    const lines = await captureConsolaLines(['info', 'success'], () =>
+      runCommand(builtinSubCommands.add as CommandDef<never>, { rawArgs: ['resource', 'Post'] }))
+
+    const created = [
+      'app/Http/Resources/PostResource.ts',
+      'app/Http/Controllers/PostController.ts',
+      'resources/js/pages/posts/Show.tsx',
+      'resources/js/pages/posts/New.tsx',
+      'resources/js/pages/posts/Edit.tsx',
+      'app/Models/Post.ts',
+    ]
+    const kept = ['app/Http/Validators/PostValidator.ts', 'resources/js/pages/posts/Index.tsx']
+    expect(lines.filter((line) => /^(success: Created |info: Kept )/u.test(line))).toEqual([
+      ...created.map((path) => `success: Created ${resolve(process.cwd(), path)}`),
+      ...kept.map((path) => `info: Kept ${resolve(process.cwd(), path)} (pass --force to regenerate it)`),
+    ])
+  })
+
   // A text match on `export const posts = pgTable(` misses this shape; appending a
   // second `posts` export leaves a schema that does not compile.
   it('leaves a table alone that the schema declares with different formatting', async () => {
@@ -457,6 +492,24 @@ export default function registerWebRoutes(appRouter: Router): void {
   // but the table appended to the app's `db/schema.ts` survives. Every reason a
   // patch can fail therefore has to be settled before the first write.
   describe('resource blueprint preflight', () => {
+    // makeFeature refuses before its first write, and runs before either patch:
+    // the table and the route group cannot be taken back once the scaffold stops.
+    it('refuses over a hand-written model and leaves the app byte-identical', async () => {
+      await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+      await writeWorkspaceFiles(workspace.dir, { 'app/Models/Comment.ts': 'export class Comment {}\n' })
+      const before = await snapshotTree(workspace.dir)
+
+      await expect(runCommand(builtinSubCommands.add as CommandDef<never>, {
+        rawArgs: ['resource', 'comments', '--fields', 'body:text'],
+      })).rejects.toThrow([
+        'Scaffolding Comment would overwrite a file that already exists:',
+        '  app/Models/Comment.ts',
+        'Nothing was scaffolded. Pick another name, or pass --force to overwrite it.',
+      ].join('\n'))
+
+      expect(await snapshotTree(workspace.dir)).toEqual(before)
+    })
+
     it('refuses an app with no routes/web.ts, naming the file it wanted', async () => {
       await mkdir('db', { recursive: true })
       await writeFile('db/schema.ts', PG_SCHEMA_FIXTURE)
@@ -606,6 +659,103 @@ export const users = pgTable('users', {
       }
     })
   }
+
+  // The column builders are shared with plan:scaffold (schema-columns.ts), so the whole
+  // appended table is pinned, imports and nullable columns included.
+  const NULLABLE_FIELDS = ALL_FIELDS.split(',').map((field) => `${field.replace(':', 'Maybe:')}?`).join(',')
+
+  it('appends the same sqlite table, byte for byte', async () => {
+    await seedResourceWorkspace(COLUMN_CASES[0].schema)
+    await runBlueprint('resource', { name: 'Entry', fields: `${ALL_FIELDS},${NULLABLE_FIELDS}` })
+    expect(await readFile('db/schema.ts', 'utf8')).toMatchInlineSnapshot(`
+      "import { sqliteTable, integer, text } from '@guren/orm/drizzle/sqlite'
+
+      export const users = sqliteTable('users', {
+        id: integer('id').primaryKey({ autoIncrement: true }),
+        name: text('name').notNull(),
+      })
+
+      export const entries = sqliteTable('entries', {
+        id: integer('id').primaryKey({ autoIncrement: true }),
+        name: text('name').notNull(),
+        body: text('body').notNull(),
+        count: integer('count').notNull(),
+        active: integer('active', { mode: 'boolean' }).notNull(),
+        publishedAt: integer('published_at', { mode: 'timestamp' }).notNull(),
+        meta: text('meta', { mode: 'json' }).notNull(),
+        nameMaybe: text('name_maybe'),
+        bodyMaybe: text('body_maybe'),
+        countMaybe: integer('count_maybe'),
+        activeMaybe: integer('active_maybe', { mode: 'boolean' }),
+        publishedAtMaybe: integer('published_at_maybe', { mode: 'timestamp' }),
+        metaMaybe: text('meta_maybe', { mode: 'json' }),
+        createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+      })
+      "
+    `)
+  })
+
+  it('appends the same mysql table, byte for byte', async () => {
+    await seedResourceWorkspace(COLUMN_CASES[1].schema)
+    await runBlueprint('resource', { name: 'Entry', fields: `${ALL_FIELDS},${NULLABLE_FIELDS}` })
+    expect(await readFile('db/schema.ts', 'utf8')).toMatchInlineSnapshot(`
+      "import { boolean, int, json, mysqlTable, timestamp, varchar } from '@guren/orm/drizzle/mysql'
+
+      export const users = mysqlTable('users', {
+        id: int('id').primaryKey().autoincrement(),
+        name: varchar('name', { length: 255 }).notNull(),
+      })
+
+      export const entries = mysqlTable('entries', {
+        id: int('id').primaryKey().autoincrement(),
+        name: varchar('name', { length: 255 }).notNull(),
+        body: varchar('body', { length: 255 }).notNull(),
+        count: int('count').notNull(),
+        active: boolean('active').notNull(),
+        publishedAt: timestamp('published_at').notNull(),
+        meta: json('meta').notNull(),
+        nameMaybe: varchar('name_maybe', { length: 255 }),
+        bodyMaybe: varchar('body_maybe', { length: 255 }),
+        countMaybe: int('count_maybe'),
+        activeMaybe: boolean('active_maybe'),
+        publishedAtMaybe: timestamp('published_at_maybe'),
+        metaMaybe: json('meta_maybe'),
+        createdAt: timestamp('created_at').defaultNow().notNull(),
+      })
+      "
+    `)
+  })
+
+  it('appends the same postgres table, byte for byte', async () => {
+    await seedResourceWorkspace(COLUMN_CASES[2].schema)
+    await runBlueprint('resource', { name: 'Entry', fields: `${ALL_FIELDS},${NULLABLE_FIELDS}` })
+    expect(await readFile('db/schema.ts', 'utf8')).toMatchInlineSnapshot(`
+      "import { boolean, integer, jsonb, pgTable, serial, text, timestamp } from '@guren/orm/drizzle/pg'
+
+      export const users = pgTable('users', {
+        id: serial('id').primaryKey(),
+        name: text('name').notNull(),
+      })
+
+      export const entries = pgTable('entries', {
+        id: serial('id').primaryKey(),
+        name: text('name').notNull(),
+        body: text('body').notNull(),
+        count: integer('count').notNull(),
+        active: boolean('active').notNull(),
+        publishedAt: timestamp('published_at', { withTimezone: true }).notNull(),
+        meta: jsonb('meta').notNull(),
+        nameMaybe: text('name_maybe'),
+        bodyMaybe: text('body_maybe'),
+        countMaybe: integer('count_maybe'),
+        activeMaybe: boolean('active_maybe'),
+        publishedAtMaybe: timestamp('published_at_maybe', { withTimezone: true }),
+        metaMaybe: jsonb('meta_maybe'),
+        createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+      })
+      "
+    `)
+  })
 
   it('runs the infrastructure blueprints', async () => {
     await seedAppFile(APP_FIXTURE)
@@ -1231,5 +1381,49 @@ describe('oauth blueprint output', () => {
     const routes = await readFile('routes/oauth.ts', 'utf8')
     expect(routes).toContain("[OAuthController, 'redirectToProvider']")
     expect(routes).not.toContain("[OAuthController, 'redirect']")
+  })
+})
+
+// Every blueprint writes its files in one batch, so a file in the way refuses the
+// whole command: the sample event, job or mailable included, and before any wiring.
+describe('blueprints over a file that already exists', () => {
+  let workspace: TempWorkspace
+
+  beforeEach(async () => {
+    workspace = await createTempWorkspace('guren-cli-blueprint-existing-')
+  })
+
+  afterEach(async () => {
+    await workspace.cleanup()
+  })
+
+  it.each<{ blueprint: string; inTheWay: string[]; seed?: Record<string, string> }>([
+    { blueprint: 'events', inTheWay: ['app/Providers/EventProvider.ts'] },
+    { blueprint: 'mail', inTheWay: ['app/Providers/MailProvider.ts'] },
+    { blueprint: 'queue', inTheWay: ['app/Providers/QueueProvider.ts'] },
+    { blueprint: 'notifications', inTheWay: ['app/Providers/NotificationProvider.ts'] },
+    { blueprint: 'broadcasting', inTheWay: ['app/Providers/BroadcastProvider.ts'] },
+    { blueprint: 'storage', inTheWay: ['app/Services/FileStorage.ts'] },
+    { blueprint: 'attachments', inTheWay: ['app/Services/FileStorage.ts'] },
+    { blueprint: 'admin', inTheWay: ['routes/admin.ts'] },
+    { blueprint: 'oauth', inTheWay: ['routes/oauth.ts'], seed: { 'db/schema.ts': PG_SCHEMA_FIXTURE } },
+    { blueprint: 'auth', inTheWay: ['app/Models/User.ts', 'routes/auth.ts'], seed: { 'db/schema.ts': PG_SCHEMA_FIXTURE } },
+  ])('refuses $blueprint whole, naming what is in the way and writing nothing', async ({ blueprint, inTheWay, seed }) => {
+    await writeWorkspaceFiles(workspace.dir, {
+      'src/app.ts': APP_FIXTURE,
+      'routes/web.ts': DEFAULT_ROUTES_FIXTURE,
+      ...seed,
+      ...Object.fromEntries(inTheWay.map((path) => [path, 'export {}\n'])),
+    })
+    const before = await snapshotTree(workspace.dir)
+
+    const error = await runBlueprint(blueprint).catch((reason: unknown) => reason)
+
+    // scaffold-files.test.ts pins the wording; this pins which files are listed and that no name or flag is offered.
+    expect(error).toBeInstanceOf(CliError)
+    const lines = (error as CliError).message.split('\n')
+    expect(lines.slice(1, -1)).toEqual(inTheWay.map((path) => `  ${path}`))
+    expect(lines.at(-1)).toStartWith('Nothing was scaffolded. Pass --force to overwrite')
+    expect(await snapshotTree(workspace.dir)).toEqual(before)
   })
 })

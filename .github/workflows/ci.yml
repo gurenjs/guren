@@ -120,9 +120,8 @@ jobs:
       - name: Core-first audit
         run: bun run audit:core-first
 
-      # `guren` is not on npm: `bunx guren` in a workspace manifest 404s
-      # whenever the local .bin link is missing. Template trees are exempt —
-      # scaffolded apps install @guren/cli from npm and get a real bin.
+      # Why workspace code must not call `bunx guren`: see the header of
+      # scripts/smoke/workspace-scripts-audit.ts.
       - name: Workspace scripts audit
         run: bun run audit:workspace-scripts
 
@@ -269,6 +268,11 @@ jobs:
       # links, …), not just --spec above. RFC 0002 Part 1 is dogfooded here.
       - name: Guren integrity check (blog example)
         run: cd examples/blog && bun ../../packages/cli/src/bin.ts check
+
+      # RFC 0026: the registered, unbooted app must produce a manifest. The table
+      # form keeps the log short, and a failure prints its reason there.
+      - name: Introspection manifest (blog example)
+        run: cd examples/blog && bun ../../packages/cli/src/bin.ts introspect
 
       - name: Build example apps
         run: |
@@ -534,6 +538,9 @@ jobs:
       # This is the one place the module boundary check runs in CI.
       - name: Guren integrity check
         run: cd web && bun ../packages/cli/src/bin.ts check
+
+      - name: Introspection manifest
+        run: cd web && bun ../packages/cli/src/bin.ts introspect
 
       - name: Run tests
         run: bun run --cwd web test

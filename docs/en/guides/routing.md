@@ -331,10 +331,12 @@ The `params`, `query` and `body` schemas are checked before the handler runs, fo
 The action reads what the schemas parsed with `this.validated()`, passing its own route name:
 
 ```ts
+import type { UserRecord } from '@/app/Models/User'
+
 export default class PostsController extends Controller {
   async store() {
     const { body } = this.validated('posts.store')
-    const user = await this.auth.userOrFail()
+    const user = await this.auth.userOrFail<UserRecord>()
     const post = await Post.create({ ...body, authorId: user.id })
     return this.redirect(`/posts/${post.id}`)
   }

@@ -29,9 +29,10 @@ const NOW = () => new Date('2026-09-21T10:00:00.000Z')
 
 let ROOT: string
 
-function git(dir: string, ...args: string[]): void {
+function git(dir: string, ...args: string[]): string {
   const result = Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
   if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr.toString()}`)
+  return result.stdout.toString().trim()
 }
 
 /** A record that stands: verified against this plan at the hash `lib.ts` has in the app. */
@@ -86,7 +87,8 @@ describe('plan:next', () => {
     expect(report.step).toMatchObject({ id: SCAFFOLD, kind: 'scaffold', taskId: 'task/entity/model.comment', task: { kind: 'entity', name: 'Comment' }, verify: ['codegen', 'typecheck'], elements: [] })
     expect(report.step!.generates).toContain('model.comment')
     expect(report.stateFile).toBe('.guren/plans/comments.state.json')
-    expect((await readState(app)).active).toEqual({ plan: 'comments.plan.json', step: SCAFFOLD, startedAt: '2026-09-21T10:00:00.000Z', continuations: 0 })
+    // Outside a repository git reads no HEAD: `null`, which a mark from before the field (no key) is told apart from.
+    expect((await readState(app)).active).toEqual({ plan: 'comments.plan.json', step: SCAFFOLD, startedAt: '2026-09-21T10:00:00.000Z', continuations: 0, from: null })
     // The mark's `.gitignore` ignores itself, so a plan loop leaves no untracked file behind; one that does not gains the line.
     expect(await readFile(join(app, '.guren/plans/.gitignore'), 'utf8')).toBe('*.state.json\n.gitignore\n')
     await writeFile(join(app, '.guren/plans/.gitignore'), '*.state.json\nnotes/', 'utf8')
@@ -97,14 +99,36 @@ describe('plan:next', () => {
     expect(again.step!.id).toBe(SCAFFOLD)
   })
 
-  test('should name what a scaffold would generate without claiming a generator writes it', async () => {
+  test('should name plan:scaffold for a scaffold step, with what it writes and what the http step writes by hand', async () => {
+    const approved = approvedAgainst(loadCommentsPlan())
     const { app, plan } = await createApp('scaffold-text')
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approved) })
+    await approvePlanFile(plan)
+
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+    const text = formatPlanNext(report, 'comments.plan.json')
+
+    const command = `bunx guren plan:scaffold comments.plan.json --step ${SCAFFOLD}`
+    expect(report.step!.scaffold).toEqual({
+      command: `bunx guren plan:scaffold ${plan} --step ${SCAFFOLD}`,
+      writes: ['model.comment', 'column.comment.id', 'column.comment.body', 'column.comment.postId', 'column.comment.createdAt'],
+      leaves: expect.arrayContaining(['validator.comment', 'controller.comments', 'route.comments.store', 'policy.comment']),
+    })
+    expect(report.step!.scaffold!.leaves).not.toContain('model.comment')
+    expect(text).toContain(`Write this step with \`${command}\`, not by hand.`)
+    expect(text).toContain("It writes each added model's table and model class: model.comment, column.comment.id")
+    expect(text).toContain('It does not write validator.comment')
+    expect(text).toContain('the http step implements them by hand.')
+    expect(text).not.toContain('No generator')
+  })
+
+  test('should tell a draft to approve before plan:scaffold, which refuses one', async () => {
+    const { app, plan } = await createApp('scaffold-draft')
 
     const text = formatPlanNext(await planNextFile(plan, { appRoot: app, now: NOW }), 'comments.plan.json')
 
-    expect(text).toContain('The elements a scaffold would generate: model.comment')
-    expect(text).toContain('No generator for this step ships yet, so it completes on its verify commands')
-    expect(text).not.toContain('Generates a first version')
+    expect(text).toContain('Approve the plan first (bunx guren plan:approve comments.plan.json): plan:scaffold writes this step from an approved plan only, as')
+    expect(text).not.toContain('Write this step with')
   })
 
   test('should keep two plans in the docs/plans/<slug>/plan.json layout in state files of their own', async () => {
@@ -300,6 +324,32 @@ describe('plan:next', () => {
     expect(text).toContain('  bunx guren plan:waive comments.plan.json <element-id> --reason "<why>"')
     // The mark it wrote is a fresh one, so the next run is a plain step.
     expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.stalled).toBeUndefined()
+  })
+
+  test('should mark a step at the commit HEAD names, keep that start when the stalled step is marked again, and start the next step at its own', async () => {
+    const { app, plan } = await createApp('started')
+    git(app, 'init', '-q')
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'init')
+    const start = git(app, 'rev-parse', 'HEAD')
+
+    await planNextFile(plan, { appRoot: app, now: NOW })
+    expect((await readState(app)).active).toEqual({ plan: 'comments.plan.json', step: SCAFFOLD, startedAt: '2026-09-21T10:00:00.000Z', continuations: 0, from: start })
+
+    // The step's first session committed part of its work, then the hook gave up on it.
+    await writeFile(join(app, 'lib.ts'), 'export const a = 2\n', 'utf8')
+    git(app, 'commit', '-q', '-am', 'the step, part one')
+    const marked = (await readState(app)).active!
+    await writeState(app, { active: { ...marked, continuations: 3, stalled: { at: 't', reason: '3 continuations on this step' } } })
+
+    const again = await planNextFile(plan, { appRoot: app, now: NOW })
+    expect(again.step!.stalled).toBeDefined()
+    expect((await readState(app)).active).toEqual({ plan: 'comments.plan.json', step: SCAFFOLD, startedAt: '2026-09-21T10:00:00.000Z', continuations: 0, from: start })
+
+    await writeState(app, { steps: { [SCAFFOLD]: await holding(app) }, active: (await readState(app)).active })
+    expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.id).toBe(TESTS)
+    expect((await readState(app)).active!.from).toBe(git(app, 'rev-parse', 'HEAD'))
+    expect(git(app, 'rev-parse', 'HEAD')).not.toBe(start)
   })
 
   test('should keep the mark of a step it returns again, continuations included', async () => {

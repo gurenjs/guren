@@ -32,24 +32,20 @@ import { checkRouteContracts } from './route-contract-check'
 import { checkAgentRoutes } from './agent-route-check'
 import { checkDeferredProps } from './deferred-props-check'
 import { checkAiAgents } from './ai-agent-check'
-import { checkSessionsConfig } from './sessions-check'
+import { checkSessionsConfig, readSessionWiring } from './sessions-check'
 import { checkPrototypeRoutes } from './prototype-check'
 import { checkDeployRuntime } from './deploy-runtime'
 import { loadRouteDefinitions } from './load-routes'
-import { routesEntryOrDefault } from './route-registrar'
+import { DEFAULT_ROUTES_FILE, routesEntryOrDefault } from './route-registrar'
 import type { RouteDefinition } from '@guren/server'
 
-/**
- * Any file that could hold a route's params schema — which is any importable
- * source file, since a schema is usually imported into `routes/` from elsewhere.
- */
-const SOURCE_FILE_PATTERN = /\.(ts|tsx|mts|js|jsx|mjs)$/
 import { checkSchemaTimestamps } from './schema-check'
 import {
   checkAttachableModels,
   checkAttachmentsConfig,
   checkAttachmentsDelivery,
   checkAttachmentsPublicDisk,
+  readAttachmentsWiring,
 } from './attachments-check'
 import { checkAgentsConfig, type AgentsConfigExpansion } from './agents-config-check'
 import { declaredTableIdentifiers, findSchemaAggregate, moduleSchemaAggregateName, moduleSchemaSpecifier, parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
@@ -57,16 +53,18 @@ import { reExportedSchemaModules } from './schema-binding'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { describePageManifestSuppression, PAGES_MANIFEST_FILE, planPageManifest } from './pages-types'
-import { AGENTS_MANIFEST_FILE, planAgentManifest } from './agents-types'
+import { AGENTS_MANIFEST_FILE, planAgentManifest, STALE_AGENT_MANIFEST_MESSAGE } from './agents-types'
 import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
 import { runI18nCheck } from './i18n-check'
+import { introspectRunner, type Introspection, type IntrospectOption } from './introspect'
+import { INTROSPECTION_UNAVAILABLE, INTROSPECTION_UNAVAILABLE_FIX, introspectionUnavailableMessage, NO_SOURCE_CHANGED_REASON, ROUTES_FLAG_NOT_INTROSPECTED } from './manifest-section'
 import { checkEnvExample, ENV_EXAMPLE_FILE } from './app-env'
 import { checkConfigWiring } from './config-check'
 import { runSpecCheck } from './spec-check'
 import { checkPlans, isPlanInput } from './plan-check'
-import { getChangedFiles } from './changed-files'
-import { check, type CheckResult, type CheckReport, type CheckStatus } from './check-result'
+import { changesSource, getChangedFiles } from './changed-files'
+import { check, formatFixCommand, routesCommandFix, type CheckFix, type CheckResult, type CheckReport, type CheckStatus } from './check-result'
 
 export type { CheckStatus, CheckResult, CheckReport }
 
@@ -119,20 +117,22 @@ export interface RunCheckOptions {
   env?: boolean
   /** Run the implementation-plan checks (RFC 0030 §8). Advisory, and never part of a run without this flag. */
   plan?: boolean
+  /**
+   * Read the introspected app where a check can (RFC 0026 §5). `guren check` and `plan:verify`
+   * set it; the gate passes a run it shares with its audit stage. The edit hook and the dev MCP
+   * server leave it off, and their checks with no static path report `-unverified`.
+   */
+  introspect?: IntrospectOption
 }
 
 /**
  * The `guren codegen` invocation that regenerates the artifacts *this* check
- * read — carrying `--routes` when the caller passed one. Without it, a
- * `guren check --routes routes/api.ts` prints a remedy that reads the codegen
- * default instead, and writes or deletes the manifest from the wrong graph.
+ * read — carrying `--routes` for any entry other than codegen's default. Without
+ * it, the remedy reads routes/web.ts instead, and writes or deletes the manifest
+ * from the wrong graph (or, on an API-only app, skips it and exits 0).
  */
-function codegenCommandFor(routesFile?: string): string {
-  if (routesFile === undefined) return 'bunx guren codegen'
-  // Quoted only when it would not survive a shell word-split, so the ordinary
-  // `routes/api.ts` stays copy-pasteable as written.
-  const argument = /^[\w./@-]+$/u.test(routesFile) ? routesFile : `'${routesFile.replace(/'/gu, `'\\''`)}'`
-  return `bunx guren codegen --routes ${argument}`
+function codegenFix(routesFile?: string): CheckFix {
+  return routesCommandFix('codegen', routesFile)
 }
 
 /**
@@ -148,7 +148,8 @@ async function checkAgentManifest(
 ): Promise<CheckResult> {
   const key = `manifest:${AGENTS_MANIFEST_FILE}`
   const plan = await planAgentManifest(cwd, routesFile, definitions)
-  const codegen = codegenCommandFor(routesFile)
+  const fix = codegenFix(routesFile)
+  const codegen = formatFixCommand(fix)
 
   if (plan.reason === 'unreadable') {
     return check(
@@ -162,13 +163,16 @@ async function checkAgentManifest(
   }
 
   if (plan.staleManifest) {
-    return check(
-      key,
-      AGENTS_MANIFEST_FILE,
-      'warn',
-      `${AGENTS_MANIFEST_FILE} describes agent tools this app no longer exposes — no route derives one.`,
-      `Run: ${codegen} (it removes ${AGENTS_MANIFEST_FILE})`,
-    )
+    return {
+      ...check(
+        key,
+        AGENTS_MANIFEST_FILE,
+        'warn',
+        STALE_AGENT_MANIFEST_MESSAGE,
+        `Run: ${codegen} (it removes ${AGENTS_MANIFEST_FILE})`,
+      ),
+      fix,
+    }
   }
 
   if (plan.reason === 'no-tools') {
@@ -181,15 +185,24 @@ async function checkAgentManifest(
   }
 
   const present = await fileExists(cwd, AGENTS_MANIFEST_FILE)
-  return check(
-    key,
-    AGENTS_MANIFEST_FILE,
-    present ? 'pass' : 'warn',
-    present
-      ? `${AGENTS_MANIFEST_FILE} is present (${plan.toolCount} ${plan.toolCount === 1 ? 'tool' : 'tools'}).`
-      : `${AGENTS_MANIFEST_FILE} is missing; ${plan.toolCount} ${plan.toolCount === 1 ? 'route derives' : 'routes derive'} an agent tool.`,
-    present ? undefined : `Run: ${codegen}`,
-  )
+  if (present) {
+    return check(
+      key,
+      AGENTS_MANIFEST_FILE,
+      'pass',
+      `${AGENTS_MANIFEST_FILE} is present (${plan.toolCount} ${plan.toolCount === 1 ? 'tool' : 'tools'}).`,
+    )
+  }
+  return {
+    ...check(
+      key,
+      AGENTS_MANIFEST_FILE,
+      'warn',
+      `${AGENTS_MANIFEST_FILE} is missing; ${plan.toolCount} ${plan.toolCount === 1 ? 'route derives' : 'routes derive'} an agent tool.`,
+      `Run: ${codegen}`,
+    ),
+    fix,
+  }
 }
 
 /**
@@ -200,7 +213,7 @@ async function checkAgentManifest(
 async function loadRouteGraph(
   cwd: string,
   routesFile: string,
-): Promise<{ definitions?: RouteDefinition[]; error?: string }> {
+): Promise<{ definitions: RouteDefinition[]; error?: undefined } | { definitions?: undefined; error?: string }> {
   if (!(await fileExists(cwd, routesFile))) return {}
 
   try {
@@ -343,6 +356,25 @@ async function checkSchemaAggregateKeys(cwd: string, cache: ParseCache): Promise
   return results
 }
 
+/**
+ * The one line a failed introspection leaves in the report (RFC 0026 §5), whichever
+ * check started it: those checks fell back to source and say so in `evidence`.
+ */
+async function introspectionUnavailable(run: Promise<Introspection> | undefined): Promise<CheckResult | undefined> {
+  const result = await run
+  if (result?.status !== 'failed') return undefined
+  return {
+    ...check(
+      INTROSPECTION_UNAVAILABLE,
+      'Introspection',
+      'warn',
+      introspectionUnavailableMessage(result, 'The checks with a source reading were judged from it; the rest report -unverified.'),
+      INTROSPECTION_UNAVAILABLE_FIX,
+    ),
+    advisory: true,
+  }
+}
+
 export async function runCheck(options: RunCheckOptions = {}): Promise<CheckReport> {
   const cwd = resolve(options.cwd ?? process.cwd())
   const checks: CheckResult[] = []
@@ -352,8 +384,8 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   const filterChanged = (files: string[]): string[] =>
     changedFiles ? files.filter((f) => changedFiles.has(toPosixRelative(cwd, f))) : files
   // Whether any changed file could affect what the app's modules evaluate to:
-  // the shared gate for every check that loads the route graph (5.5, 7.7, 8.7).
-  const sourceChanged = !changedFiles || [...changedFiles].some((file) => SOURCE_FILE_PATTERN.test(file))
+  // the shared gate for every check that loads the route graph or executes the app (5.5, 7.7, 8.7).
+  const sourceChanged = changesSource(changedFiles)
 
   // `--arch` / `--docs` / `--spec` select suites; combining them runs the
   // union (never silently nothing). No flag = every suite.
@@ -368,6 +400,28 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   // Loaded once by the core suite and reused by the prototype suite, which
   // loads it itself only when running alone.
   let graph: Awaited<ReturnType<typeof loadRouteGraph>> | undefined
+  // One introspection per run, started only by a check that reads the manifest.
+  let introspection: Promise<Introspection> | undefined
+  const run = introspectRunner(cwd, options.introspect)
+  const introspect = run ? () => (introspection ??= run()) : undefined
+  // The deploy verdicts start before the suites so their introspection child overlaps them,
+  // whenever package.json or any source could have moved: the verdict joins the two.
+  const deployRuntime =
+    runs('core') && (sourceChanged || changedFiles?.has('package.json'))
+      ? checkDeployRuntime(cwd, { introspect: introspect ?? false })
+      : undefined
+  // Awaited at step 12; until then a rejection must not surface as unhandled.
+  deployRuntime?.catch(() => {})
+  // The session and attachments rules (8.5-8.7) introspect once they find their config, started here for
+  // the same overlap. Gated like 7.7: a run that changed no source must not execute the app.
+  const wiringIntrospect = introspect && !sourceChanged ? { skipped: NO_SOURCE_CHANGED_REASON } : introspect
+  // The route rules (7.7, 7.8, 10.6) judge the manifest's routes, which describe the entry, not a file `--routes` names.
+  const routeIntrospect = wiringIntrospect && options.routesFile ? { skipped: ROUTES_FLAG_NOT_INTROSPECTED } : wiringIntrospect
+  const appConfigFiles = runs('core') ? discoverAppConfigFiles(cwd) : undefined
+  const sessionWiring = appConfigFiles?.then((files) => readSessionWiring(cwd, cache, files, wiringIntrospect))
+  const attachmentsWiring = appConfigFiles?.then((files) => readAttachmentsWiring(cwd, cache, files, wiringIntrospect))
+  sessionWiring?.catch(() => {})
+  attachmentsWiring?.catch(() => {})
 
   if (runs('core')) {
     // 1. Check controllers for empty methods. The unfiltered list is kept for
@@ -442,25 +496,26 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       ...(pagesPlan.reason === 'pages' ? [PAGES_MANIFEST_FILE] : []),
       '.guren/data.gen.ts',
     ]
+    // The entry is probed: the API-only template ships routes/api.ts only. codegen
+    // itself defaults to routes/web.ts, so its fix has to name any other entry.
+    const routeGraphFile = await routesEntryOrDefault(cwd, options.routesFile)
+    const codegenRoutes = options.routesFile ?? (routeGraphFile === DEFAULT_ROUTES_FILE ? undefined : routeGraphFile)
+    const manifestFix = codegenFix(codegenRoutes)
     for (const manifest of manifests) {
-      const exists = await fileExists(cwd, manifest)
-      checks.push(
-        check(
-          `manifest:${manifest}`,
-          manifest,
-          exists ? 'pass' : 'warn',
-          exists ? `${manifest} is present.` : `${manifest} is missing.`,
-          exists ? undefined : 'Run: bunx guren codegen',
-        ),
-      )
+      if (await fileExists(cwd, manifest)) {
+        checks.push(check(`manifest:${manifest}`, manifest, 'pass', `${manifest} is present.`))
+        continue
+      }
+      checks.push({
+        ...check(`manifest:${manifest}`, manifest, 'warn', `${manifest} is missing.`, `Run: ${formatFixCommand(manifestFix)}`),
+        fix: manifestFix,
+      })
     }
 
     // 5.5. The agent manifest cannot ride the loop above: codegen writes it only
     // for apps deriving a tool and *removes* it otherwise (see planAgentManifest).
-    // The graph is loaded once here for 5.5, 7.7, 7.8 and 8.7 — two loads could
+    // The graph is loaded once here for 5.5, 7.7 and 7.8 — two loads could
     // resolve different routes entries and disagree about what the app mounted.
-    // The entry is probed: the API-only template ships routes/api.ts only.
-    const routeGraphFile = await routesEntryOrDefault(cwd, options.routesFile)
     if (sourceChanged) {
       graph = await loadRouteGraph(cwd, routeGraphFile)
       if (graph.error) {
@@ -476,7 +531,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
           ),
         )
       } else {
-        checks.push(await checkAgentManifest(cwd, options.routesFile, graph.definitions))
+        checks.push(await checkAgentManifest(cwd, codegenRoutes, graph.definitions))
       }
     }
 
@@ -522,14 +577,19 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // rather than 7.5's `routesChanged`. A load failure was already reported at 5.5.
     if (graph?.definitions) {
       const definitions = graph.definitions
-      checks.push(...(await checkRouteContracts({ cwd, routesFile: routeGraphFile, definitions })))
+      checks.push(...(await checkRouteContracts({
+        cwd,
+        routesFile: routeGraphFile,
+        definitions,
+        introspect: routeIntrospect,
+      })))
 
       // 7.8. Check the routes that declare `.agent()` metadata (RFC 0016): the
       // tool name is legal and unique, a non-read-only tool is covered by
       // authorization rather than merely authentication, and the schemas an
       // agent reads exist. Shares 7.7's gate; content-activated inside.
       checks.push(
-        ...(await checkAgentRoutes({ cwd, routesFile: routeGraphFile, definitions, cache })),
+        ...(await checkAgentRoutes({ cwd, routesFile: routeGraphFile, definitions, cache, introspect: routeIntrospect })),
       )
     }
 
@@ -570,15 +630,14 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // 0013); the layer takes it untyped, so a renamed export only fails on the
     // first attach. Not changed-filtered: the failure originates in db/schema.ts,
     // so filtering by the config file would hide the rename this exists for.
-    const appConfigFiles = await discoverAppConfigFiles(cwd)
-    checks.push(
-      ...(await checkAttachmentsConfig({ cwd, cache, files: appConfigFiles, schemaTables })),
-    )
+    const configFiles = (await appConfigFiles) ?? []
+    const wiring = { introspect: wiringIntrospect, wiring: attachmentsWiring }
+    checks.push(...(await checkAttachmentsConfig({ cwd, cache, files: configFiles, schemaTables, ...wiring })))
 
     // 8.6. The prior question: a model mixing in Attachable(...) in an app with
     // no configureAttachments() call at all. Same runtime-only failure as 8.5.
     checks.push(
-      ...(await checkAttachableModels({ cwd, cache, files: allModelFiles, configFiles: appConfigFiles })),
+      ...(await checkAttachableModels({ cwd, cache, files: allModelFiles, configFiles, ...wiring })),
     )
 
     // 8.6b. Session wiring (RFC 0020 §2): a `database` store bound to a table
@@ -586,7 +645,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // the same config/src/app scan the attachments rules use. Not
     // changed-filtered: the config and its provider are different files.
     checks.push(
-      ...(await checkSessionsConfig({ cwd, cache, files: appConfigFiles, schemaTables })),
+      ...(await checkSessionsConfig({ cwd, cache, files: configFiles, schemaTables, introspect: wiringIntrospect, wiring: sessionWiring })),
     )
 
     // 8.6c. Config wiring (RFC 0027 §6): a config/<key>.ts definition the entry's
@@ -602,23 +661,17 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // changed-filtered: the two halves of the finding live in different files
     // (the config names the disk, the storage provider roots it).
     checks.push(
-      ...(await checkAttachmentsPublicDisk({ cwd, cache, files: appConfigFiles })),
+      ...(await checkAttachmentsPublicDisk({ cwd, cache, files: configFiles, ...wiring })),
     )
 
     // 8.7. Delivery-route wiring (RFC 0015): a `delivery` config with no
-    // registerAttachmentRoutes() route in the loaded definitions, and a
+    // registerAttachmentRoutes() route in the introspected app, and a
     // serve: 'redirect' disk whose driver can never presign. Both are invisible
     // at runtime by design (uniform 404s; a fail-closed downgrade to proxy).
-    // Gated like 7.7, since the wiring half reads the route definitions.
+    // Gated like 7.7, since the mount is a registered route.
     if (sourceChanged) {
       checks.push(
-        ...(await checkAttachmentsDelivery({
-          cwd,
-          cache,
-          files: appConfigFiles,
-          routesFile: routeGraphFile,
-          definitions: graph?.definitions,
-        })),
+        ...(await checkAttachmentsDelivery({ cwd, cache, files: configFiles, ...wiring })),
       )
     }
   }
@@ -662,7 +715,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     if (!graph && !runs('core')) {
       graph = await loadRouteGraph(cwd, await routesEntryOrDefault(cwd, options.routesFile))
     }
-    checks.push(...(await checkPrototypeRoutes({ cwd, cache, definitions: graph?.definitions })))
+    checks.push(...(await checkPrototypeRoutes({ cwd, cache, definitions: graph?.definitions, introspect: routeIntrospect })))
   }
 
   // Implementation plans (RFC 0030 §8), only when asked for: judging a plan imports
@@ -679,20 +732,19 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
 
   // 12. Deploy runtime (RFC 0020 Part 0): doctor's three verdicts, for an app
   // declaring a deploy plugin or the Lambda adapter; every other app adds nothing.
-  // Advisory: the scan reads constructions, not intent (a custom `SessionStore`
-  // passed as `store:` reads as unbacked), and a false positive must not fail a gate.
-  // Runs whenever package.json or any source could have moved: the verdict joins the two.
-  if (runs('core')) {
-    const manifestChanged = !changedFiles || changedFiles.has('package.json')
-    if (sourceChanged || manifestChanged) {
-      for (const verdict of await checkDeployRuntime(cwd)) {
-        checks.push({
-          ...check(verdict.key, verdict.title, verdict.status, verdict.message, verdict.fix),
-          advisory: true,
-        })
-      }
-    }
+  // Advisory: the manifest is read with this environment's `.env`, and the facts it does not
+  // carry are read from constructions, not intent, so a false positive must not fail a gate.
+  for (const verdict of (await deployRuntime) ?? []) {
+    checks.push({
+      ...check(verdict.key, verdict.title, verdict.status, verdict.message, verdict.fix),
+      advisory: true,
+      evidence: verdict.evidence,
+      ...(verdict.evidenceReason ? { evidenceReason: verdict.evidenceReason } : {}),
+    })
   }
+
+  const unavailable = await introspectionUnavailable(introspection)
+  if (unavailable) checks.push(unavailable)
 
   // Every checker treats an unparsable file as contributing nothing, which is
   // indistinguishable from a file with nothing wrong. Reported once here, after
@@ -913,6 +965,15 @@ async function checkInertiaPages(
 export function renderCheckReport(report: CheckReport): void {
   consola.box(`Guren integrity check for ${report.cwd}`)
 
+  for (const run of report.fixes ?? []) {
+    if (run.ok) {
+      consola.success(`[fixed] ${run.command}`)
+      continue
+    }
+    consola.error(`[fix failed] ${run.command}`)
+    for (const line of run.output ?? []) consola.info(`       ${line}`)
+  }
+
   for (const c of report.checks) {
     const prefix = c.status === 'pass' ? '[ok]' : c.status === 'warn' ? '[warn]' : '[fail]'
     const log = c.status === 'pass' ? consola.success : c.status === 'warn' ? consola.warn : consola.error
@@ -924,4 +985,8 @@ export function renderCheckReport(report: CheckReport): void {
 
   console.log('')
   console.log(`Results: ${report.passCount} passed, ${report.warnCount} warnings, ${report.failCount} failures`)
+  const fixable = report.checks.filter((result) => result.status !== 'pass' && result.fix).length
+  if (report.fixes === undefined && fixable > 0) {
+    console.log(`${fixable === 1 ? 'One finding clears' : `${fixable} findings clear`} by regenerating files: run this check again with --fix.`)
+  }
 }

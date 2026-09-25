@@ -1,6 +1,17 @@
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { findFirstLoadable } from './discovery'
+import type { ParseCache } from './parse-cache'
+
+/**
+ * The `// guren-audit-ignore` marker on `line` (1-based) of `filePath` or the line
+ * above it, as the marker line reads, for the rules whose finding anchors on a
+ * declaration the cache already holds. `undefined` when neither line carries it.
+ */
+export async function inlineAuditIgnore(cache: ParseCache, filePath: string, line: number): Promise<string | undefined> {
+  const lines = (await cache.source(filePath))?.split('\n') ?? []
+  return [lines[line - 1], lines[line - 2]].find((text) => text?.includes('guren-audit-ignore'))?.trim()
+}
 
 export interface AuditIgnoreEntry {
   /** Must match `AuditFinding.key` exactly (no globs). */

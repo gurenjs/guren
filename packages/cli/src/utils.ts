@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep as pathSep } from 'node:path'
 import { consola } from 'consola'
 import { CliError } from './cli-error'
@@ -97,15 +97,14 @@ export function writeRoot(options: WriterOptions): string {
   return resolveAppRoot(options)
 }
 
-/** `writeFileSafe` for generated scaffolds: containment-checked. */
+/** A batch of one, so a single-file generator refuses an existing file as a batch does. */
 export async function writeScaffoldFile(
   relativePath: string,
   contents: string,
   options: WriterOptions = {},
 ): Promise<string> {
-  const cwd = writeRoot(options)
-  assertScaffoldPath(relativePath, cwd)
-  return writeFileSafe(relativePath, contents, { ...options, cwd })
+  const [written] = await writeScaffoldFiles([{ path: relativePath, contents }], options)
+  return written!
 }
 
 export async function writeFileSafe(relativePath: string, contents: string, options: WriterOptions = {}): Promise<string> {
@@ -135,6 +134,13 @@ export function writtenFileMessage(file: string, overwritten: readonly string[])
 export function announceWrittenFiles(files: readonly string[], overwritten: readonly string[]): void {
   for (const file of files) {
     consola.success(writtenFileMessage(file, overwritten))
+  }
+}
+
+/** For the files a scaffold found in place and left as they were, printed after the written ones. */
+export function announceKeptFiles(files: readonly string[]): void {
+  for (const file of files) {
+    consola.info(`Kept ${file} (pass --force to regenerate it)`)
   }
 }
 
@@ -218,15 +224,22 @@ export function assertCwdUnsupported(options: WriterOptions, command: string): v
 export interface ScaffoldFileEntry {
   path: string
   contents: string
+  /** The option that added the file; a refusal offers dropping it. */
+  flag?: string
 }
 
-/** Local to avoid a cycle: discovery.ts imports from this module. */
-async function pathExists(path: string): Promise<boolean> {
+/**
+ * `lstat`, not `access`: a `wx` write refuses a dangling symlink, so a probe that followed
+ * it would pass a path the write then stops on. A probe that cannot answer throws, so the
+ * batch stops before its first write. Here rather than in discovery.ts, which imports this module.
+ */
+export async function pathExists(path: string): Promise<boolean> {
   try {
-    await access(path)
+    await lstat(path)
     return true
-  } catch {
-    return false
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
   }
 }
 
@@ -236,9 +249,16 @@ export type ScaffoldFilesOptions = WriterOptions & {
    * re-run repairs whatever is missing. Ignored under `force`.
    */
   skipExisting?: boolean
+  /** The name the command was given (`Comment`), which a refusal names and offers to change. */
+  subject?: string
 }
 
-/** `writeScaffoldFile` over a batch — every path is checked before any write. */
+/**
+ * `writeFileSafe` for generated scaffolds. Before the first write every path is checked for
+ * containment, then, unless `force`, for existence: an existing file is skipped under
+ * `skipExisting` and otherwise refuses the whole batch. `wx` on each write still stops
+ * one that appears after the probe.
+ */
 export async function writeScaffoldFiles(
   entries: ScaffoldFileEntry[],
   options: ScaffoldFilesOptions = {},
@@ -249,13 +269,17 @@ export async function writeScaffoldFiles(
     assertScaffoldPath(entry.path, cwd)
   }
 
+  const existing: ScaffoldFileEntry[] = []
   const pending: ScaffoldFileEntry[] = []
   for (const entry of entries) {
-    if (options.skipExisting && !options.force && (await pathExists(resolve(cwd, entry.path)))) {
-      consola.info(`${entry.path} already exists — left unchanged (use --force to overwrite).`)
-    } else {
-      pending.push(entry)
-    }
+    if (!options.force && (await pathExists(resolve(cwd, entry.path)))) existing.push(entry)
+    else pending.push(entry)
+  }
+  if (existing.length > 0 && !options.skipExisting) {
+    throw existingTargetsError(existing, options.subject)
+  }
+  for (const entry of existing) {
+    consola.info(`${entry.path} already exists — left unchanged (use --force to overwrite).`)
   }
 
   const created: string[] = []
@@ -267,15 +291,38 @@ export async function writeScaffoldFiles(
   return created
 }
 
-export async function scaffoldFile(name: string, config: ScaffoldConfig, options: WriterOptions = {}): Promise<string> {
+/** Names every file in the way, because `--force` overwrites all of them, hand-written ones included. */
+function existingTargetsError(existing: readonly ScaffoldFileEntry[], subject: string | undefined): CliError {
+  const one = existing.length === 1
+  const force = `pass --force to overwrite ${one ? 'it' : 'them'}`
+  const ways = [
+    // Dropping a flag is only a way out when every file in the way came from one.
+    ...(existing.every((entry) => entry.flag) ? [`drop ${[...new Set(existing.map((entry) => entry.flag))].join(' and ')}`] : []),
+    ...(subject ? ['pick another name'] : []),
+  ]
+  const remedy = ways.length > 0 ? `${ways.join(', ')}, or ${force}` : force
+  return new CliError([
+    `Scaffolding ${subject ? `${subject} ` : ''}would overwrite ${one ? 'a file that already exists' : `${existing.length} files that already exist`}:`,
+    ...existing.map((entry) => `  ${entry.path}${entry.flag ? ` (${entry.flag})` : ''}`),
+    `Nothing was scaffolded. ${remedy.charAt(0).toUpperCase()}${remedy.slice(1)}.`,
+  ].join('\n'))
+}
+
+/** What `scaffoldFile` writes, for a caller writing it in a `writeScaffoldFiles` batch. */
+export function scaffoldFileEntry(name: string, config: ScaffoldConfig, options: WriterOptions = {}): ScaffoldFileEntry {
   const { className, fileName } = resourceName(name)
   const normalizedName = config.suffix ? ensureSuffix(className, config.suffix) : className
   const baseName = config.fileName ? config.fileName({ rawName: name, className, fileName, normalizedName }) : normalizedName
   const extension = config.extension ?? 'ts'
   const dir = options.root ? `modules/${safeModuleName(options.root)}/${config.dir}` : config.dir
-  const filePath = extension ? `${dir}/${baseName}.${extension}` : `${dir}/${baseName}`
+  const path = extension ? `${dir}/${baseName}.${extension}` : `${dir}/${baseName}`
   const contents = config.template({ rawName: name, className, fileName, normalizedName })
-  return writeScaffoldFile(filePath, contents, options)
+  return { path, contents }
+}
+
+export async function scaffoldFile(name: string, config: ScaffoldConfig, options: WriterOptions = {}): Promise<string> {
+  const { path, contents } = scaffoldFileEntry(name, config, options)
+  return writeScaffoldFile(path, contents, options)
 }
 
 export function pascalCase(value: string): string {
@@ -418,6 +465,15 @@ export function escapeRegExp(value: string): string {
  */
 export function referencesIdentifier(body: string, name: string): boolean {
   return new RegExp(`\\b${escapeRegExp(name)}\\b`, 'u').test(body)
+}
+
+/**
+ * `name` as a whole identifier that is not a property: `Post` in `Post.find(`
+ * or `[Post, post]`, never in `PostTag` or `this.Post`. Stricter than
+ * {@link referencesIdentifier}, whose `\b` reads `this.Post` as a use.
+ */
+export function wholeIdentifierPattern(name: string): RegExp {
+  return new RegExp(`(?<![\\w$.])${escapeRegExp(name)}(?![\\w$])`)
 }
 
 export const SAFE_MODULE_NAME_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/u

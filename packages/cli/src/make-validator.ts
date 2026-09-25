@@ -1,5 +1,5 @@
-import type { WriterOptions } from './utils'
-import { scaffoldFile } from './utils'
+import type { ScaffoldFileEntry, WriterOptions } from './utils'
+import { scaffoldFileEntry, writeScaffoldFile } from './utils'
 import { pluralize } from './inflect'
 import type { FieldDefinition, FieldType } from './fields'
 
@@ -13,15 +13,20 @@ export interface MakeValidatorOptions extends WriterOptions {
   fields?: FieldDefinition[]
 }
 
-/**
- * `make:feature` calls this rather than emitting its own copy, so the schema
- * names its controller imports and the ones written here cannot drift apart.
- */
 export async function makeValidator(name: string, options: MakeValidatorOptions = {}): Promise<string> {
-  return scaffoldFile(name, {
+  const { path, contents } = validatorFile(name, options)
+  return writeScaffoldFile(path, contents, options)
+}
+
+/**
+ * `make:feature` builds its validator here rather than emitting its own copy, so the
+ * schema names its controller imports and the ones `make:validator` writes cannot drift apart.
+ */
+export function validatorFile(name: string, options: MakeValidatorOptions = {}): ScaffoldFileEntry {
+  return scaffoldFileEntry(name, {
     dir: VALIDATOR_DIR,
     suffix: 'Validator',
-    // `scaffoldFile` appends the suffix; schema names are built from the bare
+    // `scaffoldFileEntry` appends the suffix; schema names are built from the bare
     // entity, so strip it back off as the sibling scaffolders do.
     template: ({ normalizedName }) => generateValidator(normalizedName.replace(/Validator$/u, ''), options.fields ?? []),
   }, options)

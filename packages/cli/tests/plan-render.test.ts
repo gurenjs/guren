@@ -188,9 +188,9 @@ describe('the plan file name the page prints in a command', () => {
 
     expect(page.byId('render-command').textContent).toBe('bunx guren plan:render comments.plan.json')
     expect(page.byId('approve-command').textContent).toBe('bunx guren plan:approve comments.plan.json')
-    // Nothing reads feedback.json yet (`plan --revise` is RFC 0030 Part 3), so the page does not print it.
+    // The model-calling `plan --revise` is deferred, so the page names the model-free plan:revise only.
     expect(page.byId('footer').textContent).not.toContain('--revise')
-    expect(page.byId('footer-revise-note').textContent).toContain('No command reads the feedback yet')
+    expect(page.byId('footer-revise-note').textContent).toContain('plan:revise records a change')
   })
 
   test('should print a stand-in where no safe name was given', () => {

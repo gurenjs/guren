@@ -11,6 +11,7 @@ export type {
   BroadcastDriverFactory,
   ChannelRegistration,
   SSEMiddlewareOptions,
+  WebSocketMiddlewareOptions,
   AuthMiddlewareOptions,
   BroadcastableEvent,
 } from './types'

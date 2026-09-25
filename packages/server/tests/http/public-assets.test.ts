@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
+import { getMimeType } from 'hono/utils/mime'
 import { Application } from '../../src'
-import { DEFAULT_ROOT_PUBLIC_ASSET_EXTENSIONS, registerRootPublicAssets } from '../../src/http/public-assets'
+import { DEFAULT_CONTENT_TYPES, DEFAULT_ROOT_PUBLIC_ASSET_EXTENSIONS, registerRootPublicAssets } from '../../src/http/public-assets'
 import { useAssetFixture } from './asset-fixture'
 
 // Real files rather than a stubbed `Bun.file`: containment is a filesystem
@@ -114,6 +115,40 @@ describe('registerRootPublicAssets serving opt-in script and style assets', () =
 
     expect(response.status).toBe(200)
     expect(response.headers.get('Content-Type')).toContain('text/css')
+  })
+})
+
+// Workers Static Assets serve public/fonts/ in production, so dev and preview
+// must too, or a self-hosted @font-face works only once deployed.
+describe('registerRootPublicAssets serving self-hosted fonts', () => {
+  const fixture = useAssetFixture('guren-public-assets-fonts-')
+
+  it.each([
+    ['inter.woff2', 'font/woff2'],
+    ['inter.woff', 'font/woff'],
+    ['inter.ttf', 'font/ttf'],
+    ['inter.otf', 'font/otf'],
+  ])('serves public/fonts/%s as %s with the default config', async (file, contentType) => {
+    await fixture.write(`public/fonts/${file}`, 'font bytes')
+    const app = new Application()
+    registerRootPublicAssets(app, fixture.path('public'))
+
+    const response = await app.fetch(new Request(`http://example.com/fonts/${file}`))
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Content-Type')).toBe(contentType)
+    expect(response.headers.get('Content-Disposition')).toBeNull()
+  })
+})
+
+// `/fonts/x.woff2` is typed by this table and `/public/fonts/x.woff2` by Hono's.
+// Media types only: Hono adds `charset=utf-8` to SVG, which this table leaves to
+// the file's XML declaration.
+describe('DEFAULT_CONTENT_TYPES', () => {
+  const mediaType = (contentType: string | undefined) => contentType?.split(';', 1)[0]!.trim()
+
+  it.each(Object.entries(DEFAULT_CONTENT_TYPES))('types %s as serveStatic does under /public/', (extension, contentType) => {
+    expect(mediaType(contentType)).toBe(mediaType(getMimeType(`file${extension}`)))
   })
 })
 

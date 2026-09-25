@@ -15,6 +15,9 @@ export interface PluginDefinition<TConfig = void> {
   /** Called after all providers have registered. */
   boot?(container: Container, config: TConfig): void | Promise<void>
 
+  /** Called in place of `register` under introspection (RFC 0026 §2); see `ServiceProvider.introspect`. */
+  introspect?(container: Container, config: TConfig): void | Promise<void>
+
   /** Defer instantiation until one of `provides` is resolved. */
   deferred?: boolean
 
@@ -52,7 +55,18 @@ export function definePlugin<TConfig = void>(
       }
     }
 
-    Object.defineProperty(ConfiguredPluginProvider, 'name', { value: className })
-    return ConfiguredPluginProvider
+    // A subclass only when the hook exists: a method that is always present
+    // would stop every plugin without one from running `register()`.
+    const introspect = definition.introspect
+    const Provider = introspect === undefined
+      ? ConfiguredPluginProvider
+      : class extends ConfiguredPluginProvider {
+          override introspect(): void | Promise<void> {
+            return introspect(this.container, config)
+          }
+        }
+
+    Object.defineProperty(Provider, 'name', { value: className })
+    return Provider
   }
 }

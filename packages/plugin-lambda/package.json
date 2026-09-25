@@ -1,6 +1,6 @@
 {
   "name": "@guren/plugin-lambda",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Deploy a Guren application to AWS Lambda on the Node.js runtime, with a CDK construct for the infrastructure.",
   "keywords": [
     "guren",
@@ -66,7 +66,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^1.20.1",
+    "@guren/core": "^1.21.0",
     "citty": "^0.1.6"
   },
   "peerDependencies": {

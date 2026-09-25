@@ -1,5 +1,83 @@
 # @guren/example-agents
 
+## 0.1.15
+
+### Patch Changes
+
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [0fdf11f]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+  - @guren/cli@2.27.0
+  - @guren/plugin-ai@0.4.0
+  - @guren/core@1.21.0
+  - @guren/plugin-cloudflare@0.12.2
+  - @guren/testing@1.14.0
+  - @guren/orm@2.12.0
+  - @guren/plugin-agents@0.2.5
+
 ## 0.1.14
 
 ### Patch Changes

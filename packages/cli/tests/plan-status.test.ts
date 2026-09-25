@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { PlanAppDetail, PlanAppRouteDetail } from '../src/plan/app-detail'
+import type { PlanAppActionDetail, PlanAppDetail, PlanAppRouteDetail } from '../src/plan/app-detail'
 import type { PlanAppState } from '../src/plan/app-state'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import {
@@ -71,13 +71,15 @@ const USERS_TABLE: SourcedSchemaTable = {
 const NO_FIELDS = { fields: {} }
 const UNIMPORTED_FIELDS = { unreadable: 'app/Http/Validators/PostValidator.ts would not import (it threw)' }
 
+const MOUNT_FILES = { entry: ['src/app.ts'], descriptors: {} }
+
 function detail(overrides: Partial<PlanAppDetail> = {}): PlanAppDetail {
   return {
     routes: [
       { name: 'posts.index', method: 'GET', path: '/posts', action: 'PostController.index', middleware: [], hasInlineMiddleware: false, bindings: {}, module: null, file: 'routes/web.ts', contractSchemas: [] },
       { name: 'posts.show', method: 'GET', path: '/posts/:id', action: 'PostController.show', middleware: ['auth'], hasInlineMiddleware: false, bindings: { id: 'Post' }, module: null, file: 'routes/web.ts', contractSchemas: [] },
     ],
-    mounts: { entry: 'mounted', modules: {} },
+    mounts: { entry: 'mounted', modules: {}, files: MOUNT_FILES },
     tables: [POSTS_TABLE, USERS_TABLE],
     models: [
       { className: 'Post', module: null, file: 'app/Models/Post.ts', table: 'posts', relationships: [{ name: 'author', type: 'belongsTo', relatedModel: 'User' }], fillable: ['title'] },
@@ -230,7 +232,7 @@ const CASES: Case[] = [
     plan: validator(ADD),
     app: app({
       routes: [contractRoute('billing')],
-      mounts: { entry: 'mounted', modules: { billing: { unconfirmed: 'createApp() in src/app.ts lists no modules' } } },
+      mounts: { entry: 'mounted', modules: { billing: { unconfirmed: 'createApp() in src/app.ts lists no modules' } }, files: MOUNT_FILES },
     }),
     id: 'val',
     state: 'present',
@@ -407,7 +409,7 @@ const CASES: Case[] = [
   {
     name: 'an added route whose registrar createApp() is not seen to take',
     plan: route(ADD),
-    app: app({ mounts: { entry: { unconfirmed: 'createApp() passes no routes' }, modules: {} } }),
+    app: app({ mounts: { entry: { unconfirmed: 'createApp() passes no routes' }, modules: {}, files: MOUNT_FILES } }),
     id: 'r',
     state: 'present',
   },
@@ -786,7 +788,7 @@ describe('judgePlan', () => {
     test('should name the route whose contract holds it when that route is not mounted', () => {
       const unmounted = app({
         routes: [contractRoute('billing')],
-        mounts: { entry: 'mounted', modules: { billing: { unconfirmed: 'createApp() in src/app.ts lists no modules' } } },
+        mounts: { entry: 'mounted', modules: { billing: { unconfirmed: 'createApp() in src/app.ts lists no modules' } }, files: MOUNT_FILES },
       })
 
       expect(only(judgePlan(validator(ADD), unmounted), 'val').notes).toEqual([
@@ -818,6 +820,55 @@ describe('judgePlan', () => {
     })
 
     test.each([
+      [['id', 'title'], 'match'],
+      [['id', 'authorId'], 'differ'],
+    ] as const)('should read a column in the composite primary key %j by membership, as %s', (columns, verdict) => {
+      const table = { ...POSTS_TABLE, constraints: [{ kind: 'primaryKey', columns: [...columns] }] } as SourcedSchemaTable
+
+      const element = only(judgePlan(withColumn(ADD, { primaryKey: true }), app({ tables: [table, USERS_TABLE] })), 'c')
+
+      expect(element.properties.find((property) => property.property === 'primaryKey')?.verdict).toBe(verdict)
+    })
+
+    test.each([
+      ['a primary key over columns it cannot name', { constraints: [{ kind: 'primaryKey', columns: [], opaqueColumns: true }] }],
+      ['constraints built where it cannot follow', { constraints: [], opaqueConstraints: true }],
+    ] satisfies Array<[string, Partial<SourcedSchemaTable>]>)('should read a primary key as unknown, not absent, on a table with %s', (_, hidden) => {
+      const table: SourcedSchemaTable = { ...POSTS_TABLE, ...hidden }
+
+      const element = only(judgePlan(withColumn(ADD, { primaryKey: true }), app({ tables: [table, USERS_TABLE] })), 'c')
+
+      expect(element.properties.find((property) => property.property === 'primaryKey')).toMatchObject({ verdict: 'unknown', reason: expect.stringContaining('constraints') })
+    })
+
+    test.each([
+      ['pg', 'match'],
+      ['mysql', 'match'],
+      // SQLite's rowid tables take NULL in a composite key column that declares no `.notNull()`.
+      ['sqlite', 'differ'],
+    ] as const)('should read a %s column in a composite primary key, declared without .notNull(), as nullable: false %s', (dialect, verdict) => {
+      const columns = POSTS_TABLE.columns.map((column) => (column.name === 'title' ? { ...column, notNull: false } : column))
+      const table: SourcedSchemaTable = { ...POSTS_TABLE, dialect, columns, constraints: [{ kind: 'primaryKey', columns: ['id', 'title'] }] }
+
+      const element = only(judgePlan(withColumn(ADD, { primaryKey: true, nullable: false }), app({ tables: [table, USERS_TABLE] })), 'c')
+
+      expect(element.properties.find((property) => property.property === 'nullable')?.verdict).toBe(verdict)
+    })
+
+    test.each([
+      ['pg', 'unknown'],
+      ['sqlite', 'differ'],
+    ] as const)('should read nullable on a %s table whose constraints are hidden, with no .notNull(), as %s', (dialect, verdict) => {
+      const columns = POSTS_TABLE.columns.map((column) => (column.name === 'title' ? { ...column, notNull: false } : column))
+      const table: SourcedSchemaTable = { ...POSTS_TABLE, dialect, columns, constraints: [], opaqueConstraints: true }
+
+      const element = only(judgePlan(withColumn(ADD, { nullable: false }), app({ tables: [table, USERS_TABLE] })), 'c')
+
+      expect(element.properties.find((property) => property.property === 'nullable')?.verdict).toBe(verdict)
+      if (verdict === 'unknown') expect(element.properties.find((property) => property.property === 'nullable')?.reason).toContain('constraints')
+    })
+
+    test.each([
       ['now()', { kind: 'now' }, 'match'],
       ["'draft'", { kind: 'value', text: '"draft"' }, 'match'],
       ["'draft'", { kind: 'value', text: "'live'" }, 'differ'],
@@ -839,8 +890,8 @@ describe('judgePlan', () => {
         controllers: [controller(EXISTING, [action(EXISTING)], 'InvoiceController')],
         routes: [{ id: 'r', change: ADD, method: 'GET', path: '/billing/invoices', name: 'invoices.index', action: 'a', middleware: [], bind: [] }],
       })
-      const mounted = app({ routes, mounts: { entry: 'mounted', modules: { billing: 'mounted' } } })
-      const unlisted = app({ routes, mounts: { entry: 'mounted', modules: { billing: { unconfirmed: 'createApp({ modules }) does not list modules/billing' } } } })
+      const mounted = app({ routes, mounts: { entry: 'mounted', modules: { billing: 'mounted' }, files: MOUNT_FILES } })
+      const unlisted = app({ routes, mounts: { entry: 'mounted', modules: { billing: { unconfirmed: 'createApp({ modules }) does not list modules/billing' } }, files: MOUNT_FILES } })
 
       expect(only(judgePlan(document, mounted), 'r').state).toBe('wired')
       expect(only(judgePlan(document, unlisted), 'r')).toMatchObject({ state: 'present', notes: [expect.stringContaining('modules/billing')] })
@@ -941,14 +992,109 @@ describe('judgePlan', () => {
         c: ['db/schema.ts'],
         val: ['app/Http/Validators/PostValidator.ts'],
         ctl: ['app/Http/Controllers/PostController.ts'],
-        a: ['app/Http/Controllers/PostController.ts'],
-        r: ['routes/web.ts'],
-        v: ['resources/js/pages/posts/Index.tsx'],
+        a: ['app/Http/Controllers/PostController.ts', 'routes/web.ts', 'src/app.ts'],
+        r: ['routes/web.ts', 'src/app.ts'],
+        v: ['resources/js/pages/posts/Index.tsx', 'app/Http/Controllers/PostController.ts', 'routes/web.ts', 'src/app.ts'],
         res: ['app/Http/Resources/PostResource.ts'],
         pol: ['app/Policies/PostPolicy.ts'],
         job: ['app/Jobs/SendDigest.ts'],
       })
       expect(only(judgePlan(route(ADD, { name: 'posts.missing' }), app()), 'r').files).toEqual([])
+    })
+
+    test('should name every routes file that may declare a route or shadow it: its scope for an entry route, all of them for a module\'s', () => {
+      const routeFiles = [
+        'routes/web.ts',
+        'routes/comments.ts',
+        'routes/admin/users.ts',
+        'modules/billing/routes.ts',
+        'modules/billing/routes/invoices.ts',
+        'modules/shop/routes.ts',
+      ].map((file) => ({ file, identifiers: [] }))
+      const [index] = detail().routes as PlanAppRouteDetail[]
+      const routeIn = (module: string | null): PlanAppRouteDetail => ({ ...index!, module })
+      // No mount files, so only the routes files are asked about.
+      const mounts = { entry: 'mounted' as const, modules: {}, files: { entry: [], descriptors: {} } }
+      const filesOf = (overrides: Partial<PlanAppDetail>): string[] => only(judgePlan(route(EXISTING), app({ mounts, ...overrides })), 'r').files
+
+      expect(filesOf({ routeFiles, routes: [routeIn(null)] })).toEqual(['routes/web.ts', 'routes/comments.ts', 'routes/admin/users.ts'])
+      // The entry's routes and another module's register before a module's, and either may shadow it.
+      expect(filesOf({ routeFiles, routes: [routeIn('billing')] })).toEqual([
+        'modules/billing/routes.ts',
+        'modules/billing/routes/invoices.ts',
+        'routes/web.ts',
+        'routes/comments.ts',
+        'routes/admin/users.ts',
+        'modules/shop/routes.ts',
+      ])
+      // The entry file did not parse, so the detail skipped it; the route still names it.
+      expect(filesOf({ routeFiles: routeFiles.slice(1), routes: [routeIn(null)] })).toEqual(['routes/web.ts', 'routes/comments.ts', 'routes/admin/users.ts'])
+      // No entry file was loaded: the project's `routes/` files alone.
+      expect(filesOf({ routeFiles: routeFiles.slice(1), routes: [{ ...index!, module: null, file: undefined }] })).toEqual(['routes/comments.ts', 'routes/admin/users.ts'])
+    })
+
+    test('should name the files a mount was read from for a route, per scope', () => {
+      const files = { entry: ['src/app.ts'], descriptors: { billing: 'modules/billing/index.ts' } }
+      const routeFiles = ['routes/web.ts', 'modules/billing/routes.ts'].map((file) => ({ file, identifiers: [] }))
+      const [index] = detail().routes as PlanAppRouteDetail[]
+      const filesOf = (module: string | null): string[] =>
+        only(judgePlan(route(EXISTING), app({ routeFiles, routes: [{ ...index!, module }], mounts: { entry: 'mounted', modules: { billing: 'mounted' }, files } })), 'r').files
+
+      expect(filesOf(null)).toEqual(['routes/web.ts', 'src/app.ts'])
+      expect(filesOf('billing')).toEqual(['modules/billing/routes.ts', 'routes/web.ts', 'src/app.ts', 'modules/billing/index.ts'])
+    })
+
+    test('should name the routes an action is wired through, so rewiring its route expires its record', () => {
+      const status = judgePlan(plan({ controllers: [controller(EXISTING, [action(EXISTING)])] }), app())
+
+      expect(only(status, 'a').files).toEqual(['app/Http/Controllers/PostController.ts', 'routes/web.ts', 'src/app.ts'])
+      // The controller itself has no mount point, so it rests on its file alone.
+      expect(only(status, 'ctl').files).toEqual(['app/Http/Controllers/PostController.ts'])
+    })
+
+    test('should name every routes file for an action when the routes did not read', () => {
+      const routeFiles = ['routes/web.ts', 'routes/comments.ts'].map((file) => ({ file, identifiers: [] }))
+      const status = judgePlan(plan({ controllers: [controller(EXISTING, [action(EXISTING)])] }), app({ routes: UNREADABLE, routeFiles }))
+
+      expect(only(status, 'a').files).toEqual(['app/Http/Controllers/PostController.ts', 'routes/web.ts', 'routes/comments.ts', 'src/app.ts'])
+    })
+
+    test('should name the controllers returning a page and their routes, since the page is wired through them', () => {
+      const status = judgePlan(view(EXISTING, { page: 'posts/Show' }), app())
+
+      expect(only(status, 'v').files).toEqual(['resources/js/pages/posts/Show.tsx', 'app/Http/Controllers/PostController.ts', 'routes/web.ts', 'src/app.ts'])
+    })
+
+    test('should name the actions validating with a validator and the routes whose contract holds it', () => {
+      const validators = [{ id: 'val', change: EXISTING, name: 'PostPayloadSchema', fields: [] }]
+      const [index, show] = detail().routes as PlanAppRouteDetail[]
+      const [indexAction, showAction] = detail().actions as PlanAppActionDetail[]
+      const judged = (overrides: Partial<PlanAppDetail>): string[] => only(judgePlan(plan({ validators }), app(overrides)), 'val').files
+
+      const inBody = judged({
+        actions: [indexAction!, { ...showAction!, file: 'app/Http/Controllers/PostShowController.ts', validates: ['PostPayloadSchema'] }],
+        routes: [index!, { ...show!, file: 'routes/web.ts' }],
+      })
+      expect(inBody).toEqual(['app/Http/Validators/PostValidator.ts', 'app/Http/Controllers/PostShowController.ts', 'routes/web.ts', 'src/app.ts'])
+
+      const inContract = judged({
+        routes: [index!, { ...show!, module: 'billing', contractSchemas: ['PostPayloadSchema'] }],
+        routeFiles: ['routes/web.ts', 'modules/billing/routes.ts'].map((file) => ({ file, identifiers: [] })),
+      })
+      expect(inContract).toEqual(['app/Http/Validators/PostValidator.ts', 'routes/web.ts', 'modules/billing/routes.ts', 'src/app.ts'])
+    })
+
+    test('should name the files using a side effect, since removing the last use is what unwires it', () => {
+      const sideEffects = { job: [{ className: 'SendDigest', module: null, file: 'app/Jobs/SendDigest.ts', usedIn: ['app/Http/Controllers/PostController.ts'], unprovenIn: [], mentionedIn: ['routes/web.ts'] }], event: [], listener: [], mail: [], notification: [] }
+      const status = judgePlan(plan({ sideEffects: [{ id: 'job', change: EXISTING, kind: 'job', name: 'SendDigest', trigger: 't', description: 'd' }] }), app({ sideEffects }))
+
+      expect(only(status, 'job').files).toEqual(['app/Jobs/SendDigest.ts', 'app/Http/Controllers/PostController.ts'])
+    })
+
+    test('should fingerprint nothing of an element no reader found a file of, whatever wires it', () => {
+      const pages = [{ id: 'posts/Show', props: { status: 'undeclared' as const } }]
+
+      expect(only(judgePlan(view(EXISTING, { page: 'posts/Show' }), app({ pages })), 'v').files).toEqual([])
     })
   })
 })

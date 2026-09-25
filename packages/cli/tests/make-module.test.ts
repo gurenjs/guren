@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { makeModule } from '../src/make-module'
 import { runCheck } from '../src/check'
-import { captureWarnings, checkTypes, createTempWorkspace, PG_SCHEMA_FIXTURE, renderedAppCompilerOptions, TSC_TIMEOUT, writeWorkspaceFiles } from './helpers'
+import { APP_FIXTURE, captureWarnings, checkTypes, createTempWorkspace, PG_SCHEMA_FIXTURE, renderedAppCompilerOptions, snapshotTree, TSC_TIMEOUT, writeWorkspaceFiles } from './helpers'
 
 describe('makeModule', () => {
   it('scaffolds index.ts, routes.ts, and db/schema.ts', async () => {
@@ -26,6 +26,27 @@ describe('makeModule', () => {
 
       const schema = await readFile(join(workspace.dir, 'modules/billing/db/schema.ts'), 'utf8')
       expect(schema).toContain("Define this module's Drizzle tables")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('refuses a module whose files are partly there, leaving the schema and the app entry unpatched', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-module-existing-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'modules/billing/routes.ts': 'export {}\n',
+        'db/schema.ts': PG_SCHEMA_FIXTURE,
+        'src/app.ts': APP_FIXTURE,
+      })
+      const before = await snapshotTree(workspace.dir)
+
+      await expect(makeModule('billing')).rejects.toThrow([
+        'Scaffolding modules/billing would overwrite a file that already exists:',
+        '  modules/billing/routes.ts',
+        'Nothing was scaffolded. Pick another name, or pass --force to overwrite it.',
+      ].join('\n'))
+      expect(await snapshotTree(workspace.dir)).toEqual(before)
     } finally {
       await workspace.cleanup()
     }
