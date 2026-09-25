@@ -684,6 +684,42 @@ export class InvoiceController extends Controller {
 
       expect(keys(results).some((key) => key.startsWith('agent-route-controller-collision:'))).toBe(false)
     })
+
+    // An unparsed file never reaches the class index, so the same-named class in the other
+    // file wins with no collision to say so.
+    it('warns on a controller file that does not parse', async () => {
+      await writeWorkspaceFiles(tempDir, {
+        'app/Http/Controllers/PostController.ts': 'export default class X {\n  async store( {\n',
+        'modules/blog/app/Http/Controllers/PostController.ts': `
+import { Controller } from '@guren/core'
+
+export class PostController extends Controller {
+  async destroy() { return this.noContent() }
+}
+`,
+      })
+
+      const results = await run(
+        [
+          route({
+            method: 'DELETE',
+            path: '/posts/:id',
+            name: 'posts_destroy',
+            agent: {},
+            controller: { name: 'PostController', action: 'destroy' },
+            schemas: OUTPUT,
+          }),
+        ],
+        tempDir,
+      )
+
+      const unparsed = results.find((result) => result.key === 'agent-route-controller-unparsed:app/Http/Controllers/PostController.ts')
+      expect(unparsed?.status).toBe('warn')
+      expect(unparsed?.evidence).toBe('static')
+      expect(unparsed?.message).toContain('could not be parsed')
+      expect(unparsed?.message).toContain('no collision reported')
+      expect(keys(results).some((key) => key.startsWith('agent-route-controller-collision:'))).toBe(false)
+    })
   })
 
   // The metadata only reaches a definition through the real Router (route options, a chained

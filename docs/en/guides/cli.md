@@ -488,6 +488,7 @@ Routes that declare `.agent()` metadata (see [Routing](./routing.md)) are checke
 | `agent-route-authorization:*` | The verdict could not be reached: the handler is an inline function, or the controller action is not among the sources the check reads. |
 | `agent-route-controller-collision:*` | Two controller classes share a name and an agent route uses one of them, so a verdict drawn from a controller body may describe the other class. |
 | `agent-route-controller-unreadable:*` | A controller file could not be read at all, so any agent route whose action lives there was checked against no body. |
+| `agent-route-controller-unparsed:*` | A controller file could not be parsed, so any agent route whose action lives there was checked against no body, and a route naming one of its classes may be judged against another file declaring the same class name, with no collision reported. |
 | `route-graph` | The routes file failed to load, so neither the route-contract nor the agent-route checks ran. |
 
 `audit` adds two rules for the same routes:
