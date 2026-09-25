@@ -599,7 +599,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       return null
     }
     if (this.hasScopes()) {
-      return this.newQuery(queryOptions).where(key, id as TRecordFor<T>[typeof key]).first()
+      // The object form: an identifier is data, and `where(key, 'is null')` throws.
+      return this.newQuery(queryOptions).where({ [key]: id } as Partial<Record<string, unknown>>).first()
     }
     const table = this.resolveTable()
     const where = { [key]: id } as WhereClauseFor<T>

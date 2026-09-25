@@ -73,8 +73,9 @@ await Post.where((q) => q.where('title', 'like', p).orWhere('excerpt', 'like', p
 Operators (exact set): `=` `!=` `>` `<` `>=` `<=` `like` `in` `not in` `is null` `is not null`
 
 `is null` / `is not null` still take the third argument: two arguments are
-`where(field, value)`, so `where('publishedAt', 'is null')` means `= 'is null'`
-and throws, naming `whereNull()` / `whereNotNull()`.
+`where(field, value)`, so `where('publishedAt', 'is null')` would compare to the
+string `'is null'` and throws, naming `whereNull()` / `whereNotNull()`. Pass free-text
+input as `where(field, '=', input)`, which never reads it as an operator.
 
 An empty `in` array compiles to SQL `false` — the query matches nothing and never throws,
 so guarding `if (ids.length === 0)` before a `where in` is optional, not required.

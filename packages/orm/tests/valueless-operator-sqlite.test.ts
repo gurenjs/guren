@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test'
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { Model } from '../src/Model'
+import { ModelNotFoundException } from '../src/ModelNotFoundException'
+import { SoftDeletes } from '../src/SoftDeletes'
 import { useSqlite } from './sqlite-fixture'
 
 // `where(field, 'is null')` type-checks through the `(field, value)` overload on a
@@ -21,10 +23,17 @@ describe('valueless where operators on the real bun:sqlite driver', () => {
     INSERT INTO posts (title, deleted_at) VALUES
       ('live', NULL),
       ('gone', '2026-01-01T00:00:00Z'),
-      ('literal', 'is null');
+      ('literal', 'is null'),
+      ('like', 'like'),
+      ('is null', NULL);
   `)
 
   class Post extends Model<PostRecord> {
+    static override table = postsTable
+  }
+
+  // Scoped, so find() runs through the query builder rather than findUnique.
+  class SoftPost extends SoftDeletes(Model<PostRecord>) {
     static override table = postsTable
   }
 
@@ -60,14 +69,14 @@ describe('valueless where operators on the real bun:sqlite driver', () => {
   })
 
   it('should match NULL rows with the three-argument operator form', async () => {
-    expect(titles(await Post.where('deletedAt', 'is null', null).get())).toEqual(['live'])
-    expect(titles(await Post.where('deletedAt', 'is not null', null).get())).toEqual(['gone', 'literal'])
-    expect(titles(await Post.where('title', 'gone').orWhere('deletedAt', 'is null', null).get())).toEqual(['gone', 'live'])
+    expect(titles(await Post.where('deletedAt', 'is null', null).get())).toEqual(['is null', 'live'])
+    expect(titles(await Post.where('deletedAt', 'is not null', null).get())).toEqual(['gone', 'like', 'literal'])
+    expect(titles(await Post.where('title', 'gone').orWhere('deletedAt', 'is null', null).get())).toEqual(['gone', 'is null', 'live'])
   })
 
   it('should read the three-argument form with an undefined value in a transaction scope', async () => {
     const rows = await Post.transaction(async (_trx, txPost) => txPost.where('deletedAt', 'is null', undefined).get())
-    expect(titles(rows)).toEqual(['live'])
+    expect(titles(rows)).toEqual(['is null', 'live'])
   })
 
   it('should match the string itself through the "=" operator', async () => {
@@ -75,6 +84,12 @@ describe('valueless where operators on the real bun:sqlite driver', () => {
   })
 
   it('should leave a value-taking operator token alone as a value', async () => {
-    expect(await Post.where('deletedAt', 'like').get()).toEqual([])
+    expect(titles(await Post.where('deletedAt', 'like').get())).toEqual(['like'])
+  })
+
+  it('should find by an identifier equal to a valueless operator on a scoped model', async () => {
+    expect((await SoftPost.find('is null', 'title'))?.title).toBe('is null')
+    expect((await SoftPost.findOrFail('is null', 'title')).title).toBe('is null')
+    await expect(SoftPost.findOrFail('is not null', 'title')).rejects.toBeInstanceOf(ModelNotFoundException)
   })
 })
