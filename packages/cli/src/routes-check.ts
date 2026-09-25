@@ -12,7 +12,7 @@ import {
   ROUTES_DIR,
   toPosixRelative,
 } from './discovery'
-import { resolveImportPath, RUNTIME_TO_SOURCE_EXTENSION, SOURCE_TO_RUNTIME_EXTENSION, swapExtension } from './import-resolution'
+import { cachedFileProbe, resolveImportPath, RUNTIME_TO_SOURCE_EXTENSION, type FileProbe, SOURCE_TO_RUNTIME_EXTENSION, swapExtension } from './import-resolution'
 import type { ParseCache } from './parse-cache'
 import { specifierBase } from './schema-binding'
 import { DEFAULT_ROUTES_FILE, isRegistrarExportName, resolveRoutesEntry, specifierName } from './route-registrar'
@@ -147,6 +147,7 @@ async function dynamicImportTargets(
 async function readFacts(
   cwd: string,
   cache: ParseCache,
+  probe: FileProbe,
   filePath: string,
   boundary: string,
 ): Promise<RoutesFileFacts | null> {
@@ -156,13 +157,13 @@ async function readFacts(
   const facts: RoutesFileFacts = { registrarExports: [], imports: [], reexports: [], dynamicImports: [], body: '' }
   const bodyNodes: Statement[] = []
 
-  // Only an edge landing inside the scope's boundary can change an answer, so a
-  // specifier outside it is ruled out before any filesystem probe. The landing file
-  // is checked too: a directory's `package.json` entry may point out of it.
+  // Only an edge landing inside the scope's boundary can change an answer. The
+  // specifier's own path is checked first to skip the probes; a directory's
+  // `package.json` `main` can still land outside, so the landing file is checked too.
   const resolveEdge = async (specifier: string): Promise<string | null> => {
     const base = specifierBase(cwd, filePath, specifier)
     if (base === null || !isInside(boundary, base)) return null
-    const resolved = await resolveImportPath(base)
+    const resolved = await resolveImportPath(base, { probe })
     return resolved !== null && isInside(boundary, resolved) ? resolved : null
   }
 
@@ -275,6 +276,7 @@ type ModuleEntryResolution =
 async function resolveModuleEntry(
   cwd: string,
   cache: ParseCache,
+  probe: FileProbe,
   moduleDir: string,
 ): Promise<ModuleEntryResolution> {
   const read = await readModuleDescriptor(cwd, cache, moduleDir)
@@ -315,7 +317,7 @@ async function resolveModuleEntry(
 
   const base = specifierBase(cwd, descriptorPath, source)
   if (base === null) return { kind: 'opaque' }
-  const resolved = await resolveImportPath(base)
+  const resolved = await resolveImportPath(base, { probe })
   return resolved === null ? { kind: 'opaque' } : { kind: 'entry', entryPath: resolved }
 }
 
@@ -348,12 +350,14 @@ function unwiredModuleResult(cwd: string, module: string, descriptor: string, fi
  */
 export async function checkRouteRegistrarWiring(options: RoutesCheckOptions): Promise<CheckResult[]> {
   const { cwd, cache } = options
+  // One per run: the scopes resolve overlapping imports, and nothing is written meanwhile.
+  const probe = cachedFileProbe()
 
   // An explicit `--routes` is honoured even when it names a file that doesn't exist —
   // reporting that is the point. Otherwise probe, per ROUTES_ENTRY_CANDIDATES.
   const entryFile = options.routesFile ?? (await resolveRoutesEntry(cwd)) ?? DEFAULT_ROUTES_FILE
 
-  const results = await checkScope(cwd, cache, {
+  const results = await checkScope(cwd, cache, probe, {
     module: null,
     entryFile,
     boundary: resolve(cwd, ROUTES_DIR),
@@ -361,7 +365,7 @@ export async function checkRouteRegistrarWiring(options: RoutesCheckOptions): Pr
   })
 
   for (const { module, dir, files } of await discoverModuleRoutesFiles(cwd)) {
-    const resolution = await resolveModuleEntry(cwd, cache, dir)
+    const resolution = await resolveModuleEntry(cwd, cache, probe, dir)
     if (resolution.kind === 'opaque') continue
     if (resolution.kind === 'unwired') {
       results.push(unwiredModuleResult(cwd, module, resolution.descriptor, files))
@@ -369,7 +373,7 @@ export async function checkRouteRegistrarWiring(options: RoutesCheckOptions): Pr
     }
 
     const entries = moduleRoutesEntryCandidates(toPosixRelative(cwd, dir))
-    const scopeResults = await checkScope(cwd, cache, {
+    const scopeResults = await checkScope(cwd, cache, probe, {
       module,
       entryFile:
         resolution.kind === 'entry'
@@ -387,7 +391,7 @@ export async function checkRouteRegistrarWiring(options: RoutesCheckOptions): Pr
 }
 
 /** {@link checkRouteRegistrarWiring} for one scope — see {@link WiringScope}. */
-async function checkScope(cwd: string, cache: ParseCache, scope: WiringScope): Promise<CheckResult[]> {
+async function checkScope(cwd: string, cache: ParseCache, probe: FileProbe, scope: WiringScope): Promise<CheckResult[]> {
   const { entryFile, module } = scope
   const entryPath = resolve(cwd, entryFile)
 
@@ -423,7 +427,7 @@ async function checkScope(cwd: string, cache: ParseCache, scope: WiringScope): P
 
   const facts = new Map<string, RoutesFileFacts>()
   for (const filePath of [entryPath, ...candidates]) {
-    const read = await readFacts(cwd, cache, filePath, scope.boundary)
+    const read = await readFacts(cwd, cache, probe, filePath, scope.boundary)
     if (read) facts.set(filePath, read)
   }
 

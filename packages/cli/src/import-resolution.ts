@@ -56,7 +56,7 @@ export function cachedFileProbe(): FileProbe {
   }
 }
 
-export interface ResolveImportOptions {
+interface ResolveImportOptions {
   /** A type-only import may land on a `.d.ts`; a runtime import may not. */
   declarations?: boolean
   probe?: FileProbe
@@ -67,61 +67,62 @@ export interface ResolveImportOptions {
  * is the specifier joined to its importer, before any extension guessing.
  */
 export async function resolveImportPath(target: string, options: ResolveImportOptions = {}): Promise<string | null> {
-  const probe = options.probe ?? isFile
-  const declarations = options.declarations ?? false
+  const { declarations = false, probe = isFile } = options
+  return (await firstFile(fileCandidates(target, declarations), probe)) ?? resolveDirectoryImport(target, options)
+}
 
-  const found = await firstFile(fileCandidates(target, declarations), probe)
-  if (found !== null) return found
-
-  // A directory's `package.json` entry wins over its index, as in Node, TypeScript and
-  // bundlers; `module` is the bundlers' field, read ahead of `main` as they read it.
-  const entry = await packageEntry(target, declarations, probe)
-  const entryFile = entry === null
-    ? null
-    : await firstFile([...fileCandidates(entry, declarations), ...indexCandidates(entry, declarations)], probe)
-  return entryFile ?? firstFile(indexCandidates(target, declarations), probe)
+/**
+ * The file an import of `directory` as a directory lands on: its `package.json` entry,
+ * then its index. Bun and TypeScript read `main` ahead of the index, and neither reads
+ * `module` or `exports` for a relative import; TypeScript tries `types`/`typings` first.
+ */
+export async function resolveDirectoryImport(directory: string, options: ResolveImportOptions = {}): Promise<string | null> {
+  const { declarations = false, probe = isFile } = options
+  for (const entry of await packageEntries(directory, declarations, probe)) {
+    const file = await firstFile([...fileCandidates(entry, declarations), ...indexCandidates(entry, declarations)], probe)
+    if (file !== null) return file
+  }
+  return firstFile(indexCandidates(directory, declarations), probe)
 }
 
 function fileCandidates(target: string, declarations: boolean): string[] {
-  const stripped = stripResolvedExtension(target)
-  const source = swapExtension(target, RUNTIME_TO_SOURCE_EXTENSION)
+  const extension = extname(target)
+  const stripped = RESOLVED_EXTENSIONS.includes(extension) ? target.slice(0, -extension.length) : target
+  const source = RUNTIME_TO_SOURCE_EXTENSION[extension]
   return [
-    // Ahead of the specifier as written, so a stale compiled `auth.js` beside `auth.ts`
-    // is never what gets judged.
-    ...(source === null ? [] : [source]),
-    target,
-    ...RESOLVED_EXTENSIONS.map((ext) => `${target}${ext}`),
-    ...(stripped === target ? [] : RESOLVED_EXTENSIONS.map((ext) => `${stripped}${ext}`)),
-    ...(declarations ? [`${stripped}.d.ts`] : []),
+    ...new Set([
+      // Ahead of the specifier as written, so a stale compiled `auth.js` beside `auth.ts`
+      // is never what gets judged.
+      ...(source === undefined ? [] : [`${stripped}${source}`]),
+      target,
+      ...RESOLVED_EXTENSIONS.map((ext) => `${stripped}${ext}`),
+      ...(declarations ? [`${stripped}.d.ts`] : []),
+    ]),
   ]
 }
 
-function indexCandidates(target: string, declarations: boolean): string[] {
-  const stripped = stripResolvedExtension(target)
-  const directories = stripped === target ? [target] : [target, stripped]
-  return directories.flatMap((directory) => [
+function indexCandidates(directory: string, declarations: boolean): string[] {
+  return [
     ...RESOLVED_EXTENSIONS.map((ext) => join(directory, `index${ext}`)),
     ...(declarations ? [join(directory, 'index.d.ts')] : []),
-  ])
+  ]
 }
 
-/** The path `package.json` names as the directory's entry; `exports` maps are not followed. */
-async function packageEntry(directory: string, declarations: boolean, probe: FileProbe): Promise<string | null> {
+async function packageEntries(directory: string, declarations: boolean, probe: FileProbe): Promise<string[]> {
   const manifestPath = join(directory, 'package.json')
-  if (!(await probe(manifestPath))) return null
+  if (!(await probe(manifestPath))) return []
   let manifest: unknown
   try {
     manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
   } catch {
-    return null
+    return []
   }
-  if (typeof manifest !== 'object' || manifest === null) return null
-  const fields = declarations ? ['types', 'typings', 'module', 'main'] : ['module', 'main']
-  for (const field of fields) {
+  if (typeof manifest !== 'object' || manifest === null) return []
+  const fields = declarations ? ['types', 'typings', 'main'] : ['main']
+  return fields.flatMap((field) => {
     const value = (manifest as Record<string, unknown>)[field]
-    if (typeof value === 'string' && value !== '') return resolve(directory, value)
-  }
-  return null
+    return typeof value === 'string' && value !== '' ? [resolve(directory, value)] : []
+  })
 }
 
 async function firstFile(candidates: readonly string[], probe: FileProbe): Promise<string | null> {
@@ -129,9 +130,4 @@ async function firstFile(candidates: readonly string[], probe: FileProbe): Promi
     if (await probe(candidate)) return candidate
   }
   return null
-}
-
-function stripResolvedExtension(path: string): string {
-  const extension = extname(path)
-  return RESOLVED_EXTENSIONS.includes(extension) ? path.slice(0, -extension.length) : path
 }

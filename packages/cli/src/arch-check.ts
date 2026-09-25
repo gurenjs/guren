@@ -1,4 +1,4 @@
-import { dirname, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { Statement } from '@babel/types'
 import { check, type CheckResult, type CheckStatus } from './check-result'
 import {
@@ -10,11 +10,12 @@ import {
   IMPORTABLE_EXTENSIONS,
 } from './discovery'
 import { matchesAnyGlob } from './glob-match'
-import { cachedFileProbe, resolveImportPath, type FileProbe } from './import-resolution'
+import { cachedFileProbe, resolveDirectoryImport, resolveImportPath, type FileProbe } from './import-resolution'
 import { literalString, walk } from './ast-walk'
 import { loadArchConfig } from './arch-config'
 import type { ArchLayers, ArchRule, ArchRuleSet } from './arch/index'
 import type { ParseCache } from './parse-cache'
+import { specifierBase } from './schema-binding'
 
 export interface RunArchCheckOptions {
   cwd: string
@@ -79,18 +80,21 @@ async function evaluateDerivedModuleRules(
   const moduleNames = await listModuleNames(cwd)
   if (moduleNames.length === 0) return []
 
-  // A module's public surface is whatever an import of its directory lands on, so the
-  // rule can never call `'../modules/billing'` itself a reach into internals.
-  const surfaces = new Map(
-    await Promise.all(
-      moduleNames.map(async (name): Promise<[string, Set<string>]> => {
-        const entry = await resolveImportPath(resolve(cwd, 'modules', name), { probe })
-        const surface = new Set([`modules/${name}/db/schema.ts`])
-        if (entry !== null) surface.add(toPosixRelative(cwd, entry))
-        return [name, surface]
-      }),
-    ),
-  )
+  // A module's public surface is what an import of its directory, or of its `db/schema`,
+  // lands on. Resolved only for a module some import reaches across into.
+  const surfaces = new Map<string, Promise<Set<string>>>()
+  const surfaceOf = (name: string): Promise<Set<string>> => {
+    let surface = surfaces.get(name)
+    if (!surface) {
+      const moduleDir = resolve(cwd, 'modules', name)
+      surface = Promise.all([
+        resolveDirectoryImport(moduleDir, { probe }),
+        resolveImportPath(join(moduleDir, 'db', 'schema'), { probe }),
+      ]).then((files) => new Set(files.flatMap((file) => (file === null ? [] : [toPosixRelative(cwd, file)]))))
+      surfaces.set(name, surface)
+    }
+    return surface
+  }
 
   const results: CheckResult[] = []
   const files = await importableFiles()
@@ -117,7 +121,7 @@ async function evaluateDerivedModuleRules(
 
       const targetModule = moduleNameFromRelPath(imp.fileRelPath)
       if (!targetModule || targetModule === importerModule) continue
-      if (surfaces.get(targetModule)?.has(imp.fileRelPath)) continue
+      if ((await surfaceOf(targetModule)).has(imp.fileRelPath)) continue
 
       results.push(
         check(
@@ -343,11 +347,8 @@ async function resolveImportSpecifier(
     return { specifier, typeOnly, kind: 'package', packageName: packageNameFromSpecifier(specifier) }
   }
 
-  const target = specifier.startsWith('@/')
-    ? resolve(cwd, specifier.slice(2))
-    : resolve(dirname(importerAbsPath), specifier)
-
-  const file = await resolveImportPath(target, { declarations: typeOnly, probe })
+  const target = specifierBase(cwd, importerAbsPath, specifier)
+  const file = target === null ? null : await resolveImportPath(target, { declarations: typeOnly, probe })
   return file === null
     ? { specifier, typeOnly, kind: 'unresolved' }
     : { specifier, typeOnly, kind: 'file', fileRelPath: toPosixRelative(cwd, file) }
