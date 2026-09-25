@@ -1,6 +1,6 @@
 import { Model, type PlainObject } from '@guren/orm'
 import type { SessionData, SessionStore } from '@guren/server'
-import { decodeJsonColumn, isExpired } from './store-utils.js'
+import { decodeJsonColumn, isExpired, toColumnValue } from './store-utils.js'
 
 export interface DatabaseSessionStoreOptions {
   /**
@@ -17,14 +17,16 @@ export interface DatabaseSessionStoreOptions {
  * Database-backed session store built on the Guren ORM, the serverless default
  * (no Redis on Lambda, Vercel, or Workers; reads are strongly consistent). Column
  * property names of the `sessions` table must be `id` (text primary key), `data`,
- * and `expiresAt`. Values must be JSON-serializable, unlike `MemorySessionStore`:
- * Dates return as ISO strings, `undefined` properties drop, `bigint` throws.
+ * and `expiresAt`, written as its column declares (timestamp mode, text or integer).
+ * Values must be JSON-serializable, unlike `MemorySessionStore`: Dates return as ISO strings, `undefined` drops, `bigint` throws.
  */
 export class DatabaseSessionStore implements SessionStore {
   private readonly model: typeof Model
+  private readonly table: unknown
   private readonly dataMode: 'json' | 'text'
 
   constructor(table: unknown, options: DatabaseSessionStoreOptions = {}) {
+    this.table = table
     this.dataMode = options.dataMode ?? 'json'
     this.model = class SessionModel extends Model {
       static override table = table
@@ -86,7 +88,7 @@ export class DatabaseSessionStore implements SessionStore {
   async touch(id: string, ttlSeconds: number): Promise<void> {
     await this.model
       .where({ id })
-      .where('expiresAt', '>', new Date())
+      .where('expiresAt', '>', this.expiresAt(new Date()))
       .forceUpdate({ expiresAt: this.expiryDate(ttlSeconds) })
   }
 
@@ -95,14 +97,18 @@ export class DatabaseSessionStore implements SessionStore {
    * missing; this only keeps the table small.
    */
   async deleteExpired(now: Date = new Date()): Promise<void> {
-    await this.model.where('expiresAt', '<=', now).delete()
+    await this.model.where('expiresAt', '<=', this.expiresAt(now)).delete()
   }
 
   private deserialize(record: PlainObject): SessionData {
     return decodeJsonColumn<SessionData>(record.data, {})
   }
 
-  private expiryDate(ttlSeconds: number): Date {
-    return new Date(Date.now() + ttlSeconds * 1000)
+  private expiryDate(ttlSeconds: number) {
+    return this.expiresAt(new Date(Date.now() + ttlSeconds * 1000))
+  }
+
+  private expiresAt(value: Date) {
+    return toColumnValue(this.table, 'expiresAt', value)
   }
 }

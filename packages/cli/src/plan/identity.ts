@@ -8,7 +8,7 @@
 
 import { createHash } from 'node:crypto'
 
-import type { Plan } from './schema'
+import type { Plan, PlanDraft } from './schema'
 
 export class PlanCanonicalizationError extends Error {
   constructor(path: string, reason: string) {
@@ -32,6 +32,14 @@ export function canonicalJson(value: unknown): string {
  * A draft has no identity, since the baseline it lacks is part of what is approved.
  */
 export function planHash(plan: Plan): string {
+  return planDigest(plan)
+}
+
+/**
+ * The same computation over a plan or a draft. For a plan with a baseline this is its hash;
+ * a draft has no identity, and this is only what keys its records and its revisions.
+ */
+export function planDigest(plan: PlanDraft | Plan): string {
   return createHash('sha256').update(canonicalJson(plan), 'utf8').digest('hex')
 }
 
