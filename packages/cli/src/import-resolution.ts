@@ -72,7 +72,8 @@ export async function resolveImportPath(target: string, options: ResolveImportOp
   const found = await firstFile(fileCandidates(target, declarations), probe)
   if (found !== null) return found
 
-  // A directory's `package.json` entry wins over its index, as in Node and TypeScript.
+  // A directory's `package.json` entry wins over its index, as in Node, TypeScript and
+  // bundlers; `module` is the bundlers' field, read ahead of `main` as they read it.
   const entry = await packageEntry(target, declarations)
   const entryFile = entry === null ? null : await firstFile(fileCandidates(entry, declarations), probe)
   return entryFile ?? firstFile(indexCandidates(target, declarations), probe)
