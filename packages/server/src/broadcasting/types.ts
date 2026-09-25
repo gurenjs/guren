@@ -86,7 +86,7 @@ export interface SSEMiddlewareOptions {
   /**
    * Resolves the user from the request context, which authorizes channels
    * requested via the `?channels=` query parameter. Defaults to the session
-   * user from the auth context (`getAuthContext(ctx)?.user()`).
+   * user, from the auth context under `AUTH_CONTEXT_KEY`.
    */
   getUser?: (ctx: unknown) => unknown | Promise<unknown>
 }
