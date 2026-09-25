@@ -1,4 +1,5 @@
 import { getAuthContext } from './context'
+import { isAgentToolRequest } from '../internal/agent-request'
 import { generateId, buildTokenUrl, parseTokenUrl } from './utils'
 import { readSignedTokenClaims } from './signed-token'
 import { MessageSigner } from '../encryption/MessageSigner'
@@ -259,7 +260,14 @@ export function requireVerifiedEmail(options: {
 } = {}) {
   const { redirectTo = '/verify-email' } = options
 
-  return async (ctx: { get: <T = unknown>(key: string) => T; redirect: (url: string) => Response }, next: () => Promise<void>) => {
+  return async (
+    ctx: {
+      get: <T = unknown>(key: string) => T
+      redirect: (url: string) => Response
+      req?: { header(name: string): string | undefined }
+    },
+    next: () => Promise<void>,
+  ) => {
     const getUser = options.getUser ?? (async (c: { get: <T = unknown>(key: string) => T }) => {
       const auth = getAuthContext(c)
       return (await auth?.user<{ emailVerifiedAt?: Date | null }>()) ?? null
@@ -268,6 +276,14 @@ export function requireVerifiedEmail(options: {
     const user = await getUser(ctx)
 
     if (!isEmailVerified(user)) {
+      // A tool caller cannot follow a redirect, and the dispatcher maps a 3xx
+      // to a success result.
+      if (isAgentToolRequest(ctx)) {
+        return new Response(JSON.stringify({ message: 'Email address is not verified' }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        })
+      }
       return ctx.redirect(redirectTo)
     }
 

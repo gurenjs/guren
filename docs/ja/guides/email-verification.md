@@ -220,6 +220,8 @@ router.get('/profile', [ProfileController, 'show']).middleware(
 )
 ```
 
+エージェントのツール呼び出し([エージェントインターフェース](./agent-interface.md)を参照)はリダイレクトをたどれません。未確認のユーザーがツールを呼ぶと、代わりに `403` と `{ "message": "Email address is not verified" }` が返ります。
+
 ## URLヘルパー
 
 ### 確認URLの構築

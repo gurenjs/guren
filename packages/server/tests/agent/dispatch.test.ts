@@ -3,6 +3,9 @@ import { z } from 'zod'
 import { Router } from '../../src/mvc/Router'
 import { deriveAgentTools, type DerivedAgentTool } from '../../src/agent/derive'
 import { advertisesStructuredOutput, buildToolRequest, mapToolResponse } from '../../src/agent/dispatch'
+import { createApp } from '../../src/http/Application'
+import { attachAuthContext, requireAuthenticated, requireGuest } from '../../src/http/middleware/auth'
+import { createMockAuthContext } from '@guren/testing'
 
 function toolFor(register: (router: Router) => void, name: string): DerivedAgentTool {
   const router = new Router()
@@ -310,5 +313,76 @@ describe('mapToolResponse structured-output reconciliation', () => {
     expect(outcome.isError).toBeUndefined()
     expect(outcome.structuredContent).toBeUndefined()
     expect(JSON.parse(outcome.content[0]!.text)).toEqual([1, 2])
+  })
+})
+
+/**
+ * A redirect from an auth middleware is a refusal a tool caller cannot follow
+ * (RFC 0016 §3.4), so it must reach the agent as an error result. Driven through
+ * a booted application: the refusal's shape is decided by the middleware, and
+ * only the real wiring shows the dispatcher's marker reaching it.
+ */
+describe('auth refusals on a tool call', () => {
+  async function dispatch(register: (router: Router) => void, name: string, args: Record<string, unknown> = {}) {
+    const app = createApp({ routes: register })
+    await app.boot()
+    const { tools } = deriveAgentTools(app.router.definitions())
+    const tool = tools.find((candidate) => candidate.toolName === name)!
+    const built = buildToolRequest(tool, args)
+    if (!('request' in built)) throw new Error('request not built')
+    const response = await app.fetch(built.request)
+    return { app, outcome: await mapToolResponse(tool, response) }
+  }
+
+  const guarded = (router: Router) => {
+    router.middleware(requireAuthenticated({ redirectTo: '/login' })).group((auth) => {
+      auth.get('/secret', () => Response.json({ secret: true })).name('secret.show').agent({})
+    })
+  }
+
+  test('should come back as a 401 error result, not a redirect', async () => {
+    const { outcome } = await dispatch(guarded, 'secret.show')
+
+    expect(outcome.status).toBe(401)
+    expect(outcome.isError).toBe(true)
+    expect(JSON.parse(outcome.content[0]!.text)).toEqual({ message: 'Unauthorized' })
+  })
+
+  test('should still redirect a browser request to the same route', async () => {
+    const { app } = await dispatch(guarded, 'secret.show')
+
+    const response = await app.fetch(new Request('http://localhost/secret'))
+
+    expect(response.status).toBe(302)
+    expect(response.headers.get('Location')).toBe('/login')
+  })
+
+  test('should come back as a 403 error result from a guest-only route', async () => {
+    const { outcome } = await dispatch((router) => {
+      router
+        .middleware(
+          attachAuthContext(() => createMockAuthContext({ isAuthenticated: true })),
+          requireGuest({ redirectTo: '/dashboard' }),
+        )
+        .group((guest) => {
+          guest.get('/login-form', () => Response.json({ form: true })).name('login.show').agent({})
+        })
+    }, 'login.show')
+
+    expect(outcome.status).toBe(403)
+    expect(outcome.isError).toBe(true)
+  })
+
+  test('should keep a redirect the handler itself answers as a success', async () => {
+    const { outcome } = await dispatch((router) => {
+      router
+        .post('/posts', () => new Response(null, { status: 303, headers: { Location: '/posts/1' } }))
+        .name('posts.store')
+        .agent({})
+    }, 'posts.store')
+
+    expect(outcome.status).toBe(303)
+    expect(outcome.isError).toBeUndefined()
+    expect(outcome.content[0]!.text).toBe('HTTP 303 (Location: /posts/1)')
   })
 })

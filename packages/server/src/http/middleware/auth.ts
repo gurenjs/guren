@@ -3,6 +3,7 @@ import type { Authenticatable, AuthContext } from '../../auth/types'
 import { AUTH_CONTEXT_KEY, getAuthContext } from '../../auth/context'
 import { jsonResponse } from './index'
 import { stampCapabilities } from './capabilities'
+import { isAgentToolRequest } from '../../internal/agent-request'
 export type { AuthContext } from '../../auth/types'
 
 export interface RequireAuthOptions {
@@ -80,11 +81,13 @@ export function requireAuthenticated(options: RequireAuthOptions = {}): Middlewa
     }
 
     if (!(await auth.check())) {
-      if (redirectTo) {
+      // A tool caller cannot follow a redirect, and the dispatcher maps a 3xx
+      // to a success result; `responseFactory` is skipped since it may redirect too.
+      if (redirectTo && !isAgentToolRequest(ctx)) {
         return ctx.redirect(redirectTo)
       }
 
-      if (responseFactory) {
+      if (responseFactory && !redirectTo) {
         return responseFactory()
       }
 
@@ -106,11 +109,11 @@ export function requireGuest(options: RequireAuthOptions = {}): MiddlewareHandle
     }
 
     if (!(await auth.guest())) {
-      if (redirectTo) {
+      if (redirectTo && !isAgentToolRequest(ctx)) {
         return ctx.redirect(redirectTo)
       }
 
-      if (responseFactory) {
+      if (responseFactory && !redirectTo) {
         return responseFactory()
       }
 
