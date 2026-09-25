@@ -15,33 +15,31 @@ export type JoinableRoute = Pick<RouteDefinition, 'method' | 'path' | 'name'> & 
   module?: string | null
 }
 
-/** Method, path, name and controller action: method and path alone repeat (the prototype ambiguity rule exists for that). */
-function routeJoinKey(route: JoinableRoute, byModule: boolean): string {
+/** Module, method, path, name and controller action: method and path alone repeat (the prototype ambiguity rule exists for that). */
+function routeJoinKey(route: JoinableRoute): string {
   const controller = route.controller ? `${route.controller.name}.${route.controller.action}` : null
-  const key = [route.method.toUpperCase(), route.path, route.name ?? null, controller]
-  return JSON.stringify(byModule ? [route.module ?? null, ...key] : key)
+  return JSON.stringify([route.module ?? null, route.method.toUpperCase(), route.path, route.name ?? null, controller])
 }
 
 /**
- * The routes file's definition of each manifest entry, index-aligned with `entries` (the rule is
- * symmetric, so the two sides may swap). The nth entry of a key takes the nth definition of it; a key
- * the two sides count differently matches nothing. `byModule` keys on each side's `module` too: the
- * CLI loads modules in directory order and the app in `createApp({ modules })` order, so a key two
- * modules share would otherwise pair across them.
+ * The routes file's definition of each manifest entry, index-aligned with `entries` (symmetric, so
+ * the sides may swap). The nth entry of a key takes its nth definition; a key the two sides count
+ * differently matches nothing. The key holds `module`, since the CLI loads modules in directory order
+ * and the app in `createApp({ modules })` order; a module the app mounts under another
+ * `defineModule()` name than its `modules/<dir>/index.ts` exports joins none of its routes.
  */
 export function joinRouteDefinitions<T extends JoinableRoute>(
   entries: readonly JoinableRoute[],
   definitions: readonly T[],
-  { byModule = false }: { byModule?: boolean } = {},
 ): Array<T | undefined> {
   const byKey = new Map<string, T[]>()
   for (const definition of definitions) {
-    const key = routeJoinKey(definition, byModule)
+    const key = routeJoinKey(definition)
     const group = byKey.get(key)
     if (group) group.push(definition)
     else byKey.set(key, [definition])
   }
-  const keys = entries.map((entry) => routeJoinKey(entry, byModule))
+  const keys = entries.map(routeJoinKey)
   const entryCounts = new Map<string, number>()
   for (const key of keys) entryCounts.set(key, (entryCounts.get(key) ?? 0) + 1)
 
@@ -53,18 +51,6 @@ export function joinRouteDefinitions<T extends JoinableRoute>(
     taken.set(key, index + 1)
     return candidates[index]
   })
-}
-
-/**
- * Manifest routes joined to registered definitions within each route's module (the `module` both
- * carry). A module the app mounts under another `defineModule()` name than its
- * `modules/<dir>/index.ts` exports joins none of its routes.
- */
-export function joinManifestRoutes<T extends JoinableRoute>(
-  entries: readonly RouteEntry[],
-  definitions: readonly T[],
-): Array<T | undefined> {
-  return joinRouteDefinitions(entries, definitions, { byModule: true })
 }
 
 /** The alias and group names a manifest route's chain names, as a registered definition's `middlewareNames`. */
@@ -114,7 +100,7 @@ export async function loadIntrospectedRouteDefinitions(
   }
 
   const { manifest } = introspected
-  const joined = joinManifestRoutes(manifest.routes, definitions)
+  const joined = joinRouteDefinitions(manifest.routes, definitions)
   const unmatched = manifest.routes.filter((_, index) => !joined[index])
   return {
     definitions: manifest.routes.map((entry, index) => joined[index] ?? definitionFromEntry(entry)),

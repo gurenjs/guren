@@ -2,10 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { mkdir, readFile, rm, symlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 
-import type { RouteEntry } from '@guren/server'
 
 import { generateAgentTypes } from '../src/agents-types'
-import { agentToolRouteKey, joinManifestRoutes, joinRouteDefinitions } from '../src/app-routes'
+import { agentToolRouteKey, joinRouteDefinitions } from '../src/app-routes'
 import { runCheck, type CheckResult } from '../src/check'
 import { generateContext, renderContextMarkdown } from '../src/context'
 import { loadContextRoutes } from '../src/context-route'
@@ -377,33 +376,18 @@ describe('joinRouteDefinitions', () => {
     expect(joinRouteDefinitions([index, show], [show, index])).toEqual([index, show])
   })
 
-  test('joins a key two modules share within its module when the definitions carry theirs', () => {
+  test('joins a key two modules share within its module, whatever order each side lists them in', () => {
     const blog = { ...route('POST', '/posts'), module: 'blog' }
     const billing = { ...route('POST', '/posts'), module: 'billing' }
     const definitions = [{ ...route('POST', '/posts'), module: 'billing' }, { ...route('POST', '/posts'), module: 'blog' }]
-    expect(joinRouteDefinitions([blog, billing], definitions, { byModule: true })).toEqual([definitions[1], definitions[0]])
-    expect(joinRouteDefinitions([blog, billing], definitions)).toEqual([definitions[0], definitions[1]])
+    expect(joinRouteDefinitions([blog, billing], definitions)).toEqual([definitions[1], definitions[0]])
   })
 
-  test('joins no route whose module the manifest does not list', () => {
-    expect(joinRouteDefinitions([{ ...route('GET', '/a'), module: null }], [{ ...route('GET', '/a'), module: 'billing' }], { byModule: true }))
+  test('joins no module route to a definition that names no module, nor the reverse', () => {
+    expect(joinRouteDefinitions([{ ...route('GET', '/a'), module: null }], [{ ...route('GET', '/a'), module: 'billing' }]))
       .toEqual([undefined])
-  })
-})
-
-describe('joinManifestRoutes', () => {
-  const entry = (module: string | null) => ({ method: 'GET', path: '/stats', module }) as unknown as RouteEntry
-  const definitions = [{ method: 'GET', path: '/stats', module: 'billing' }, { method: 'GET', path: '/stats', module: 'shop' }]
-
-  test('returns the caller\'s definitions, joined within the module each one names', () => {
-    const joined = joinManifestRoutes([entry('shop'), entry('billing')], definitions)
-    expect(joined[0]).toBe(definitions[1]!)
-    expect(joined[1]).toBe(definitions[0]!)
-  })
-
-  test('joins no module route to a definition that names no module', () => {
-    const unnamed = definitions.map(({ module: _module, ...rest }) => rest)
-    expect(joinManifestRoutes([entry('shop'), entry('billing')], unnamed)).toEqual([undefined, undefined])
+    expect(joinRouteDefinitions([{ ...route('GET', '/a'), module: 'billing' }], [route('GET', '/a')]))
+      .toEqual([undefined])
   })
 })
 

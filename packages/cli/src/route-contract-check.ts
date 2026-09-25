@@ -9,7 +9,7 @@ import {
   ZOD3_UNSUPPORTED_MESSAGE,
   type ZodSchemaLike,
 } from '@guren/server/internal/zod-compat'
-import { joinManifestRoutes } from './app-routes'
+import { joinRouteDefinitions } from './app-routes'
 import { check, type CheckEvidence, type CheckResult } from './check-result'
 import { fileExists } from './discovery'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
@@ -333,7 +333,7 @@ export async function checkRouteContracts(options: RouteContractCheckOptions): P
 
   if (introspected?.status === 'described') {
     const { routes, warnings } = introspected.manifest
-    const joined = joinManifestRoutes(routes, definitions)
+    const joined = joinRouteDefinitions(routes, definitions)
     const results = routes.flatMap((entry, index) => {
       const { parsed, evidence } = manifestParams(entry, warnings, joined[index])
       return checkRoute(entry, parsed).map((result) => (evidence ? { ...result, evidence } : result))

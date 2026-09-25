@@ -551,7 +551,7 @@ export function attachControllerRefs<T extends JoinableRoute>(
   manifest: Pick<AppManifest, 'routes' | 'warnings'>,
   routeSources?: ReadonlySet<string>,
 ): T[] {
-  const joined = joinRouteDefinitions(definitions, manifestRouteTargets(manifest, routeSources), { byModule: true })
+  const joined = joinRouteDefinitions(definitions, manifestRouteTargets(manifest, routeSources))
   return definitions.map((definition, index) => {
     const ref = definition.controller && joined[index]?.controller
     return ref ? { ...definition, controller: ref } : definition

@@ -764,7 +764,7 @@ export class Router<in M extends string = never> {
    * @internal
    */
   assignModule(start: number, module: string): void {
-    for (const route of this.registry.slice(start)) route.module = module
+    for (let index = start; index < this.registry.length; index++) this.registry[index]!.module = module
   }
 
   /**

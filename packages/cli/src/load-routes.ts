@@ -148,44 +148,36 @@ export async function loadRouteDefinitions(
   }
 
   const router = new Router()
+  // `routeCount` is absent from a `@guren/server` older than 2.27.0, which the CLI's range admits.
+  const countRoutes = (): number => (router as { routeCount?: number }).routeCount ?? router.definitions().length
   await registrar(router)
-  let definitionCount = router.definitions().length
+  let definitionCount = countRoutes()
   moduleProvenance?.push(...Array.from({ length: definitionCount }, () => null))
-  const mountedModules: MountedModuleRange[] = []
+  const moduleNames: Array<string | null> = Array.from({ length: definitionCount }, () => null)
 
-  const moduleNames = await listModuleNames(appRoot)
-
-  for (const moduleName of moduleNames) {
-    const gurenModule = await loadGurenModule(appRoot, moduleName, moduleWarnings)
+  for (const directory of await listModuleNames(appRoot)) {
+    const gurenModule = await loadGurenModule(appRoot, directory, moduleWarnings)
     if (gurenModule) {
       await mountModuleRoutes(router, gurenModule)
-      const mounted = router.definitions().length
-      moduleProvenance?.push(...Array.from({ length: mounted - definitionCount }, () => moduleName))
-      mountedModules.push({ name: gurenModule.name, start: definitionCount, end: mounted })
+      const mounted = countRoutes()
+      moduleProvenance?.push(...Array.from({ length: mounted - definitionCount }, () => directory))
+      moduleNames.push(...Array.from({ length: mounted - definitionCount }, () => gurenModule.name))
       definitionCount = mounted
     }
   }
 
-  return withModuleNames(router.definitions(), mountedModules)
-}
-
-/** Where one module's routes landed in the registry, `[start, end)`. */
-export interface MountedModuleRange {
-  name: string
-  start: number
-  end: number
+  return withModuleNames(router.definitions(), moduleNames)
 }
 
 /**
  * A `@guren/server` older than 2.27.0 (the CLI's range admits one) mounts module routes without
- * naming the module on them, so a definition lacking `module` gets the one whose registrar added
- * it. Removable once the CLI's `@guren/server` floor is 2.27.0.
+ * naming the module on them, so a definition lacking `module` takes its entry in `names`, the
+ * module each route was mounted by. Removable once the CLI's `@guren/server` floor is 2.27.0.
  */
-export function withModuleNames(definitions: RouteDefinition[], ranges: readonly MountedModuleRange[]): RouteDefinition[] {
+export function withModuleNames(definitions: RouteDefinition[], names: ReadonlyArray<string | null>): RouteDefinition[] {
   return definitions.map((definition, index) => {
-    if (definition.module !== undefined) return definition
-    const range = ranges.find(({ start, end }) => index >= start && index < end)
-    return range ? { ...definition, module: range.name } : definition
+    const name = names[index]
+    return definition.module === undefined && name ? { ...definition, module: name } : definition
   })
 }
 

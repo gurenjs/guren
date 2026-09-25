@@ -225,14 +225,14 @@ export const billingModule = {
 })
 
 describe('withModuleNames', () => {
-  it('names the module on a definition an older server left unnamed, from the range its registrar filled', () => {
+  it('names the module on a definition an older server left unnamed, keeping one the server named', () => {
     const definitions = [
       { method: 'GET', path: '/' },
       { method: 'GET', path: '/invoices' },
       { method: 'GET', path: '/carts', module: 'Shop' },
     ]
 
-    expect(withModuleNames(definitions, [{ name: 'Invoicing', start: 1, end: 2 }, { name: 'Shopping', start: 2, end: 3 }]))
+    expect(withModuleNames(definitions, [null, 'Invoicing', 'Shopping']))
       .toEqual([{ method: 'GET', path: '/' }, { method: 'GET', path: '/invoices', module: 'Invoicing' }, { method: 'GET', path: '/carts', module: 'Shop' }])
   })
 })
