@@ -72,6 +72,23 @@ describe('resolveImportPath', () => {
     }
   })
 
+  it('reads the bundler module field ahead of main, and follows an entry naming a directory', async () => {
+    const workspace = await createTempWorkspace('guren-cli-resolve-package-fields-')
+    try {
+      await writeFiles(workspace.dir, {
+        'esm/package.json': JSON.stringify({ module: './esm.js', main: './cjs.js' }),
+        'esm/esm.js': 'export {}',
+        'esm/cjs.js': 'export {}',
+        'dir/package.json': JSON.stringify({ main: 'src' }),
+        'dir/src/index.ts': 'export {}',
+      })
+      expect(await resolveImportPath(join(workspace.dir, 'esm'))).toBe(join(workspace.dir, 'esm/esm.js'))
+      expect(await resolveImportPath(join(workspace.dir, 'dir'))).toBe(join(workspace.dir, 'dir/src/index.ts'))
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('accepts a declaration file only for a type-only import', async () => {
     const workspace = await createTempWorkspace('guren-cli-resolve-dts-')
     try {

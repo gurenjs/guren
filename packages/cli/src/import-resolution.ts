@@ -6,9 +6,10 @@
 
 import { readFile, stat } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
+import { IMPORTABLE_EXTENSIONS } from './discovery'
 
-/** Extensions a specifier without one may resolve to, in preference order. */
-export const RESOLVED_EXTENSIONS = ['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs']
+/** Extensions a specifier without one may resolve to; the set's insertion order is the preference. */
+const RESOLVED_EXTENSIONS = [...IMPORTABLE_EXTENSIONS]
 
 /**
  * Source extension → the runtime extension it is emitted as. Apps following Node's ESM
@@ -32,7 +33,7 @@ export function swapExtension(path: string, map: Record<string, string>): string
   return swapped ? `${path.slice(0, -extension.length)}${swapped}` : null
 }
 
-export async function isFile(path: string): Promise<boolean> {
+async function isFile(path: string): Promise<boolean> {
   try {
     return (await stat(path)).isFile()
   } catch {
@@ -74,8 +75,10 @@ export async function resolveImportPath(target: string, options: ResolveImportOp
 
   // A directory's `package.json` entry wins over its index, as in Node, TypeScript and
   // bundlers; `module` is the bundlers' field, read ahead of `main` as they read it.
-  const entry = await packageEntry(target, declarations)
-  const entryFile = entry === null ? null : await firstFile(fileCandidates(entry, declarations), probe)
+  const entry = await packageEntry(target, declarations, probe)
+  const entryFile = entry === null
+    ? null
+    : await firstFile([...fileCandidates(entry, declarations), ...indexCandidates(entry, declarations)], probe)
   return entryFile ?? firstFile(indexCandidates(target, declarations), probe)
 }
 
@@ -103,10 +106,12 @@ function indexCandidates(target: string, declarations: boolean): string[] {
 }
 
 /** The path `package.json` names as the directory's entry; `exports` maps are not followed. */
-async function packageEntry(directory: string, declarations: boolean): Promise<string | null> {
+async function packageEntry(directory: string, declarations: boolean, probe: FileProbe): Promise<string | null> {
+  const manifestPath = join(directory, 'package.json')
+  if (!(await probe(manifestPath))) return null
   let manifest: unknown
   try {
-    manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
+    manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
   } catch {
     return null
   }

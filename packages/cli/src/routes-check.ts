@@ -156,12 +156,14 @@ async function readFacts(
   const facts: RoutesFileFacts = { registrarExports: [], imports: [], reexports: [], dynamicImports: [], body: '' }
   const bodyNodes: Statement[] = []
 
-  // Only an edge landing inside the scope's boundary can change an answer, so
-  // everything else is ruled out by string comparison before any filesystem
-  // probe.
+  // Only an edge landing inside the scope's boundary can change an answer, so a
+  // specifier outside it is ruled out before any filesystem probe. The landing file
+  // is checked too: a directory's `package.json` entry may point out of it.
   const resolveEdge = async (specifier: string): Promise<string | null> => {
     const base = specifierBase(cwd, filePath, specifier)
-    return base !== null && isInside(boundary, base) ? resolveImportPath(base) : null
+    if (base === null || !isInside(boundary, base)) return null
+    const resolved = await resolveImportPath(base)
+    return resolved !== null && isInside(boundary, resolved) ? resolved : null
   }
 
   for (const node of parsed.ast.program.body) {
