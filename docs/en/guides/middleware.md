@@ -169,6 +169,8 @@ router.middleware('auth').group((auth) => {
 })
 ```
 
+`redirectTo` applies to browsers. An agent tool call (see the [Agent interface](./agent-interface.md)) cannot follow a redirect, so both guards answer it with their JSON refusal instead (`401` from `requireAuthenticated`, `403` from `requireGuest`, or the `status` you pass), and skip a `responseFactory` set beside `redirectTo`.
+
 ### CSRF Protection
 
 The CSRF middleware validates tokens on state-changing requests (POST, PUT, PATCH, DELETE):

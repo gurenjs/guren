@@ -7,7 +7,6 @@
  */
 import type { AppManifest, RouteDefinition, RouteEntry } from '@guren/server'
 
-import type { ModuleTaggedDefinitions } from './load-routes'
 import { introspectedRoutes, introspectionUnavailableMessage, type IntrospectionFailed, type IntrospectSource } from './manifest-section'
 
 /** What the join reads of a route; `module` is the `defineModule()` name, `null` for the app's own. */
@@ -16,33 +15,31 @@ export type JoinableRoute = Pick<RouteDefinition, 'method' | 'path' | 'name'> & 
   module?: string | null
 }
 
-/** Method, path, name and controller action: method and path alone repeat (the prototype ambiguity rule exists for that). */
-function routeJoinKey(route: JoinableRoute, byModule: boolean): string {
+/** Module, method, path, name and controller action: method and path alone repeat (the prototype ambiguity rule exists for that). */
+function routeJoinKey(route: JoinableRoute): string {
   const controller = route.controller ? `${route.controller.name}.${route.controller.action}` : null
-  const key = [route.method.toUpperCase(), route.path, route.name ?? null, controller]
-  return JSON.stringify(byModule ? [route.module ?? null, ...key] : key)
+  return JSON.stringify([route.module ?? null, route.method.toUpperCase(), route.path, route.name ?? null, controller])
 }
 
 /**
- * The routes file's definition of each manifest entry, index-aligned with `entries` (the rule is
- * symmetric, so the two sides may swap). The nth entry of a key takes the nth definition of it; a key
- * the two sides count differently matches nothing. `byModule` keys on each side's `module` too: the
- * CLI loads modules in directory order and the app in `createApp({ modules })` order, so a key two
- * modules share would otherwise pair across them.
+ * The routes file's definition of each manifest entry, index-aligned with `entries` (symmetric, so
+ * the sides may swap). The nth entry of a key takes its nth definition; a key the two sides count
+ * differently matches nothing. The key holds `module`, since the CLI loads modules in directory order
+ * and the app in `createApp({ modules })` order; a module the app mounts under another
+ * `defineModule()` name than its `modules/<dir>/index.ts` exports joins none of its routes.
  */
 export function joinRouteDefinitions<T extends JoinableRoute>(
   entries: readonly JoinableRoute[],
   definitions: readonly T[],
-  { byModule = false }: { byModule?: boolean } = {},
 ): Array<T | undefined> {
   const byKey = new Map<string, T[]>()
   for (const definition of definitions) {
-    const key = routeJoinKey(definition, byModule)
+    const key = routeJoinKey(definition)
     const group = byKey.get(key)
     if (group) group.push(definition)
     else byKey.set(key, [definition])
   }
-  const keys = entries.map((entry) => routeJoinKey(entry, byModule))
+  const keys = entries.map(routeJoinKey)
   const entryCounts = new Map<string, number>()
   for (const key of keys) entryCounts.set(key, (entryCounts.get(key) ?? 0) + 1)
 
@@ -54,35 +51,6 @@ export function joinRouteDefinitions<T extends JoinableRoute>(
     taken.set(key, index + 1)
     return candidates[index]
   })
-}
-
-/**
- * Each definition with its `defineModule()` name, for a join `byModule`. A `modules` of another length
- * is a caller that lost the alignment, and joining across modules instead would hide it, so it throws.
- */
-export function withDefinitionModules<T extends JoinableRoute>(
-  definitions: readonly T[],
-  modules: readonly (string | null)[],
-): Array<T & { module: string | null }> {
-  if (modules.length !== definitions.length) {
-    throw new Error(`${definitions.length} route definition(s) carry ${modules.length} module name(s); the two must be index-aligned.`)
-  }
-  return definitions.map((definition, index) => ({ ...definition, module: modules[index] ?? null }))
-}
-
-/**
- * Manifest routes joined to registered definitions within each route's module, `modules` naming each
- * definition's (`loadRouteDefinitions()`'s `moduleIdentities`). A module the app mounts under another
- * `defineModule()` name than its `modules/<dir>/index.ts` exports joins none of its routes.
- */
-export function joinManifestRoutes<T extends JoinableRoute>(
-  entries: readonly RouteEntry[],
-  definitions: readonly T[],
-  modules: readonly (string | null)[],
-): Array<T | undefined> {
-  const tagged = withDefinitionModules(definitions, modules)
-  const original = new Map(tagged.map((side, index) => [side, definitions[index]!]))
-  return joinRouteDefinitions(entries, tagged, { byModule: true }).map((side) => side && original.get(side))
 }
 
 /** The alias and group names a manifest route's chain names, as a registered definition's `middlewareNames`. */
@@ -100,6 +68,7 @@ function definitionFromEntry(entry: RouteEntry): RouteDefinition {
   const { module, controller, middleware, schemas, ...rest } = entry
   return {
     ...rest,
+    ...(module === null ? {} : { module }),
     ...(controller ? { controller: { name: controller.name, action: controller.action } } : {}),
     middlewareNames: manifestMiddlewareNames(entry),
   }
@@ -123,15 +92,15 @@ export interface IntrospectedRouteDefinitions {
  */
 export async function loadIntrospectedRouteDefinitions(
   introspect: IntrospectSource | undefined,
-  loadStatic: () => Promise<ModuleTaggedDefinitions>,
+  loadStatic: () => Promise<RouteDefinition[]>,
 ): Promise<IntrospectedRouteDefinitions> {
-  const [introspected, { definitions, modules }] = await Promise.all([introspectedRoutes(introspect), loadStatic()])
+  const [introspected, definitions] = await Promise.all([introspectedRoutes(introspect), loadStatic()])
   if (introspected.status === 'static') {
     return { definitions, source: { evidence: 'static', reason: introspected.reason, failure: introspected.failure } }
   }
 
   const { manifest } = introspected
-  const joined = joinManifestRoutes(manifest.routes, definitions, modules)
+  const joined = joinRouteDefinitions(manifest.routes, definitions)
   const unmatched = manifest.routes.filter((_, index) => !joined[index])
   return {
     definitions: manifest.routes.map((entry, index) => joined[index] ?? definitionFromEntry(entry)),

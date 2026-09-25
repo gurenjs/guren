@@ -3,7 +3,8 @@
  * **object identity** like the principal seam in `agent-principal.ts`: a
  * request that crosses a socket arrives as a new object and carries nothing,
  * so seeing the mark means the request was handed to `app.fetch` in this
- * process. Not the `X-Guren-Agent-Surface` header, which any client can send.
+ * process. Not `isAgentToolRequest()` in `agent-request.ts`, whose header any
+ * client can send: that one only picks the shape of a refusal.
  * Not exported from the package index.
  */
 const dispatched = new WeakSet<Request>()

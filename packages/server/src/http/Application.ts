@@ -36,7 +36,7 @@ import type { ConfigDefinition } from '../config/define'
 import { ConfigServiceProvider } from '../providers/ConfigServiceProvider'
 import { IntrospectionListenError, isIntrospecting, runIntrospecting } from '../introspection/flag'
 import type { AppManifest } from '../introspection/types'
-import { buildAppManifest, type ModuleRouteRange } from '../introspection/manifest'
+import { buildAppManifest } from '../introspection/manifest'
 
 // Bun is only available at runtime. The declaration keeps TypeScript happy while
 // still allowing consumers to stub or polyfill it when running elsewhere.
@@ -609,7 +609,6 @@ export class Application {
   private bootPromise?: Promise<void>
   private manifestPromise?: Promise<AppManifest>
   private bootAttempted = false
-  private readonly moduleRouteRanges: ModuleRouteRange[] = []
 
   constructor(private readonly options: ApplicationOptions = {}) {
     this.configEntries = [
@@ -795,9 +794,7 @@ export class Application {
       }
 
       for (const gurenModule of this.options.modules ?? []) {
-        const start = this.router.routeCount
         await mountModuleRoutes(this.router, gurenModule)
-        this.moduleRouteRanges.push({ module: gurenModule.name, start, end: this.router.routeCount })
       }
 
       this.routesRegistered = true
@@ -922,7 +919,6 @@ export class Application {
       providers,
       providerWarnings: this.providerManager.manifestWarnings(),
       modules: this.options.modules ?? [],
-      moduleRouteRanges: this.moduleRouteRanges,
       authOptions: this.options.auth,
       hasBootCallback: this.options.boot !== undefined,
     })

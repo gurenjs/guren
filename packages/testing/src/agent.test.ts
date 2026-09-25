@@ -4,7 +4,7 @@ process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { Controller, createApp, createForceHttpsMiddleware, Router } from '@guren/core'
+import { Controller, createApp, createForceHttpsMiddleware, requireAuthenticated, Router } from '@guren/core'
 import { TestApp } from './test-app'
 
 /**
@@ -135,6 +135,26 @@ describe('TestApp.agent()', () => {
     const result = await app.agent().call('secret.show')
     result.assertDenied()
     expect(result.status).toBe(401)
+  })
+
+  it('reports a login redirect from requireAuthenticated as a 401 error result', async () => {
+    // A GET route, so CSRF cannot answer 403 first and let assertDenied() pass
+    // on the wrong refusal.
+    const app = await TestApp.create({
+      routes: (router: Router) => {
+        router.middleware(requireAuthenticated({ redirectTo: '/login' })).group((auth) => {
+          auth.get('/dashboard', () => Response.json({ ok: true })).name('dashboard.show').agent({})
+        })
+      },
+    })
+
+    const result = await app.agent().call('dashboard.show')
+
+    expect(result.status).toBe(401)
+    expect(result.isError).toBe(true)
+    expect(() => result.assertOk()).toThrow()
+
+    await app.agent().call('dashboard.show', {}, { as: { id: 1 } }).assertOk()
   })
 
   it('answers a preflight with a verdict, leaving the handler unrun', async () => {
