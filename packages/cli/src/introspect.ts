@@ -31,6 +31,9 @@ export interface IntrospectOptions {
 
 export const DEFAULT_INTROSPECT_TIMEOUT_MS = 30_000
 
+/** How far past the parent's cap the child's own budget runs, so a live parent always reports the `timeout`. */
+export const INTROSPECT_CHILD_BUDGET_MARGIN_MS = 2_000
+
 /**
  * The one cap for every command that judges the app: `check`, `audit`, `doctor`, the gate, `plan:verify`
  * and the deploy builds. One cap, or an app introspecting between two would fail `check --ci` and pass
@@ -102,17 +105,18 @@ async function runIntrospection(root: string, timeoutMs: number): Promise<Intros
   const resultFile = join(dir, 'result.json')
 
   try {
-    const run = await runCaptured([bunExecutable(), child, resultFile], root, {
+    const started = Date.now()
+    const run = await runCaptured([bunExecutable(), child, resultFile, String(timeoutMs + INTROSPECT_CHILD_BUDGET_MARGIN_MS)], root, {
       timeoutMs,
       env: { GUREN_INTROSPECT: '1' },
       processGroup: true,
     })
-    if (run.timedOut) {
+    const result = run.timedOut ? undefined : await readResult(resultFile)
+    if (result) return result
+    // A loop blocked past the cap lets the child's budget end it first, and its `close` then settles the run ahead of our timer.
+    if (run.timedOut || Date.now() - started >= timeoutMs) {
       return { status: 'failed', reason: 'timeout', message: await timeoutMessage(`${resultFile}.scanning`, timeoutMs) }
     }
-
-    const result = await readResult(resultFile)
-    if (result) return result
 
     const detail = outputTail(run.stderr).join('\n')
     return {
