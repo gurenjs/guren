@@ -290,10 +290,13 @@ export function registerWebRoutes(baseRouter: Router): void {
 
 ### Middleware
 ```typescript
-import { defineMiddleware } from '@guren/core'
+import { AUTH_CONTEXT_KEY, defineMiddleware } from '@guren/core'
+import type { AuthContext } from '@guren/core'
 
+// The session user lives behind the auth context; nothing sets a 'user' key.
 export const requireAuth = defineMiddleware(async (c, next) => {
-  if (!c.get('user')) {
+  const auth = c.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+  if (!(await auth?.check())) {
     return c.redirect('/login')
   }
   await next()
