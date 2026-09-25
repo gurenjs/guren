@@ -1134,13 +1134,15 @@ writes both). What replaces them:
   editing a `routes/<x>.ts` the entry registrar calls does not drift a
   verified step.
 - The scaffold writes the routes file and does not mount it. The `http` step
-  mounts it with one `wireRouteRegistrar()` call. This is pending the
-  mounted-routes experiment in the Part 3 note under Phasing. The prediction
+  mounts it with one `wireRouteRegistrar()` call. ~~This is pending the
+  mounted-routes experiment in the Part 3 note under Phasing.~~ The
+  prediction, which that experiment confirmed (Part 3 note under Phasing),
   is that a mounted route whose auth middleware, `userOrFail()` or contract
   validation answers 401, a redirect or 422 before any table exists can pass
   the slice's `unauthenticated` or `validation` behaviour before the `tests`
   step, which runs after `scaffold` (`plan/tasks.ts:786-818`). A `forbidden`
-  behaviour usually needs the record, so it is not predicted to pass.
+  behaviour usually needs the record, so it is not predicted to pass. The
+  exception is a policy's `create` guard, which reads no record.
   `tests:fail` judges each behaviour on its own and needs every case of it to
   fail (`plan/verify.ts:172-183`), so one such behaviour passing is enough for
   that step never to verify.
@@ -2827,7 +2829,7 @@ marks what was read and not run.
 |---|---|
 | D1 | No headless `claude -p` producer in Part 3. `--print-prompt` ships; headless waits for the probes that settle Open Questions 2, 10 and 12 (below). |
 | D2 | When headless ships, it runs with `--bare` and an API key, in a checkout of the tracked files at HEAD (§8 amendment, and Alternatives). |
-| D3 | The `http` step mounts the scaffolded routes, pending the mounted-routes experiment (below). |
+| D3 | The `http` step mounts the scaffolded routes~~, pending the mounted-routes experiment (below)~~. |
 | D4 | The scaffold emits no pages, and plans carry no layout, which belongs to prototype mode (Open Question 4). |
 | D5 | Scaffolded routes go in a `routes/<entity>.ts` of their own, after the route-file fingerprint fix (#1039). |
 | D6 | A model-free `plan:revise` is in Part 3. `plan --revise` stays the name of the model-calling form (§4 amendment). |
@@ -2845,7 +2847,7 @@ marks what was read and not run.
    per-step work note below reads it.
 4. `plan --print-prompt`, `plan:revise`, and an in-session plan-writing
    harness skill.
-5. The mounted-routes experiment.
+5. The mounted-routes experiment. Run; the note below records it.
 6. `plan:scaffold`, emitting what the §5 amendment lists. No pages.
 7. Optional: test skeletons, and the static "still calls its route" check.
 
@@ -2909,6 +2911,29 @@ npm.
 Either passing confirms the §5 prediction and D3 stands: a mounted route
 passes that behaviour before the `tests` step, so the routes stay unmounted
 until `http`. Both failing reopens D3.
+
+**Amended after the experiment (2026-09-25).** Run at 17836ede on Bun 1.3.14.
+Both tests passed, so D3 stands.
+
+`guren add resource Note --fields "body:text"` in `examples/blog` appended
+`notes` to `db/schema.ts` and mounted a `/notes` group in `routes/web.ts`,
+with `body: NotePayloadSchema` on `notes.store` and no auth middleware. No
+migration was generated or run. A guest `POST /notes` with a valid body got
+401 from `userOrFail()` in `NoteController.store`. An authenticated `POST`
+with `{}` got 422 from the route contract, answered before the action ran,
+so the result does not rest on how `actingAs` resolves the user. Without
+`Accept: application/json` both statuses were the same, and a guest `POST`
+with `{}` got 422 as well.
+
+- `codegen` ran first: without `.guren/pages.gen.ts` the controller does not
+  import. Every `plan:verify` command list opens with it too.
+- No database was reachable. The run left `database` out of
+  `createApp({ config })` and used the `cookie` session driver. A response
+  given with no connection cannot depend on the missing table, so both
+  passes hold for a database migrated up to the blog's own migrations.
+- `forbidden` was not run. A policy's `create` guard,
+  `authorize('create', Note)`, reads no record; `update` and `delete` need
+  one, as §5 predicts.
 
 *Probes before the headless producer* (D1). None needs shipped code; a script
 in scratch is enough.
