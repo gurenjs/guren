@@ -86,7 +86,7 @@ export type JsonSchema = JsonSchemaObject
 
 export type RouteSchemaEntry = JsonSchema | { unreadable: string }
 
-export type RouteEntry = Omit<RouteDefinition, 'schemas' | 'controller' | 'middlewareNames'> & {
+export type RouteEntry = Omit<RouteDefinition, 'schemas' | 'controller' | 'middlewareNames' | 'module'> & {
   module: string | null
   controller?: ControllerRef
   /** In the order `mount()` runs them: named, then group-scoped inline, then route-local inline. */

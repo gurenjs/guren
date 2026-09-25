@@ -238,6 +238,7 @@ interface RegisteredRoute {
   openapi?: RouteOpenApiMetadata
   bindings?: Map<string, ModelBinding>
   agent?: AgentRouteMetadata
+  module?: string
   /** Registered with the `prototype` handler (RFC 0021): answered from the fixture until a controller replaces it. */
   prototype?: true
 }
@@ -284,6 +285,8 @@ export interface RouteDefinition {
   agent?: AgentRouteMetadata
   /** Still on its fixture (RFC 0021): registered with the `prototype` handler rather than a controller. */
   prototype?: true
+  /** The `defineModule()` name of the module whose registrar added the route (the outer one, when modules nest). Absent: the app's own route. */
+  module?: string
   summary?: string
   description?: string
   tags?: string[]
@@ -726,12 +729,13 @@ export class Router<in M extends string = never> {
   }
 
   definitions(): RouteDefinition[] {
-    return this.registry.map(({ method, path, name, schemas, resource, openapi, routeMiddlewareNames, middlewares, scopedMiddlewares, handler, bindings, agent, prototype }) => ({
+    return this.registry.map(({ method, path, name, schemas, resource, openapi, routeMiddlewareNames, middlewares, scopedMiddlewares, handler, bindings, agent, prototype, module }) => ({
       method,
       path,
       name,
       schemas,
       prototype,
+      ...(module === undefined ? {} : { module }),
       resource: serializeResourceHint(resource),
       agent: agent ? cloneAgentMetadata(agent) : undefined,
       middlewareNames: [...routeMiddlewareNames],
@@ -751,6 +755,16 @@ export class Router<in M extends string = never> {
   /** How many routes are registered, without building {@link definitions}. */
   get routeCount(): number {
     return this.registry.length
+  }
+
+  /**
+   * Records `module` on every route registered from index `start` on. `mountModuleRoutes()` calls
+   * it once the registrar settled, so a route an async registrar adds after an `await` counts, and a
+   * module a registrar mounts itself is named after the outer one, which `manifest.modules` lists.
+   * @internal
+   */
+  assignModule(start: number, module: string): void {
+    for (let index = start; index < this.registry.length; index++) this.registry[index]!.module = module
   }
 
   /**

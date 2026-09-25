@@ -19,20 +19,12 @@ import type {
   SessionEntry,
 } from './types'
 
-/** Where each module's routes landed in the registry, `[start, end)`. */
-export interface ModuleRouteRange {
-  readonly module: string
-  readonly start: number
-  readonly end: number
-}
-
 interface ManifestSources {
   readonly router: Router
   readonly container: Container
   readonly providers: ProviderEntry[]
   readonly providerWarnings: ManifestWarning[]
   readonly modules: ReadonlyArray<GurenModule>
-  readonly moduleRouteRanges: ReadonlyArray<ModuleRouteRange>
   readonly authOptions?: AuthPluginOptions
   readonly hasBootCallback: boolean
 }
@@ -51,7 +43,7 @@ export function buildAppManifest(sources: ManifestSources): AppManifest {
 
   const definitions = sources.router.definitions()
   const { aliases, routes: chains } = sources.router.describeMiddleware()
-  const routes = describeRoutes(sources, definitions, chains, warnings)
+  const routes = describeRoutes(definitions, chains, warnings)
   const middlewareAliases: Record<string, MiddlewareEntry> = {}
   for (const [name, entry] of Object.entries(aliases)) middlewareAliases[name] = withAbility(entry)
 
@@ -109,20 +101,16 @@ export function buildAppManifest(sources: ManifestSources): AppManifest {
 }
 
 function describeRoutes(
-  sources: ManifestSources,
   definitions: RouteDefinition[],
   chains: MiddlewareEntry[][],
   warnings: ManifestWarning[],
 ): RouteEntry[] {
-  const moduleAt = (index: number): string | null =>
-    sources.moduleRouteRanges.find((range) => index >= range.start && index < range.end)?.module ?? null
-
   return definitions.map((definition, index) => {
-    const { schemas, controller, middlewareNames, ...rest } = definition
+    const { schemas, controller, middlewareNames, module, ...rest } = definition
     const label = `${definition.method} ${definition.path}`
     const entry: RouteEntry = {
       ...rest,
-      module: moduleAt(index),
+      module: module ?? null,
       middleware: (chains[index] ?? []).map((middleware) => withAbility(middleware, definition.method)),
       schemas: {},
     }
