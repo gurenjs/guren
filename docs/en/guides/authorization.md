@@ -266,8 +266,8 @@ import { type Router, getRequestContainer, AuthorizationException, defineMiddlew
 
 export function authorizeAbility(ability: string) {
   return defineMiddleware(async (ctx, next) => {
-    const user = ctx.get('user') ?? null
     const gate = getRequestContainer(ctx).make('gate')
+    const user = await gate.resolveUser(ctx)
 
     if (await gate.forUser(user).denies(ability)) {
       throw new AuthorizationException()
@@ -282,6 +282,8 @@ export function registerWebRoutes(router: Router): void {
   router.get('/admin', [AdminController, 'index'], authorizeAbility('access-admin'))
 }
 ```
+
+`gate.resolveUser(ctx)` reads the signed-in user from the request's auth context. A `userResolver` passed to `createGate()` takes precedence. The built-in `authorizeMiddleware('access-admin')` resolves the user the same way.
 
 ## Best Practices
 

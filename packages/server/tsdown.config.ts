@@ -4,7 +4,8 @@ import { tsdownPreset } from '../../scripts/tsdown-preset'
 
 // rolldown shares chunks between entries, and this package depends on that: the
 // job registry, mail manager and queue driver are module-level state, so a copy
-// per entry would make registerJob via the root entry invisible to ./queue.
+// per entry would make registerJob via the root entry invisible to ./queue. So
+// is the dispatcher's request mark (tests/agent/dispatched-request-dist.test.ts).
 export default defineConfig({
   ...tsdownPreset,
   entry: [

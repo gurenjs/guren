@@ -1882,6 +1882,36 @@ export const billingModule = defineModule({ name: 'billing', routes: registerBil
     expect(wiring(report).has('modules/billing/routes/index.ts')).toBe(false)
   })
 
+  // `import '../modules/billing'` loads `index.tsx`, so that file is the descriptor; a reader
+  // knowing only `index.ts` falls back to the conventional name and misses `routes/index.ts`.
+  it('reads a module descriptor kept in index.tsx', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': PLAIN_ENTRY,
+      'modules/billing/routes.ts': BILLING_ENTRY,
+      'modules/billing/index.tsx': `import { defineModule } from '@guren/core'
+import { registerBillingRoutes } from './routes/index.js'
+
+export const billingModule = defineModule({ name: 'billing', routes: registerBillingRoutes })
+`,
+      'modules/billing/routes/index.ts': BILLING_ROUTES_INDEX,
+      'modules/billing/routes/invoice.ts': MODULE_ROUTE,
+    })
+
+    expect(statusOf(report, 'modules/billing/routes/invoice.ts')).toBe('pass')
+  })
+
+  it('names a routes.tsx entry when no descriptor names one', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': PLAIN_ENTRY,
+      'modules/billing/routes.tsx': BILLING_ENTRY,
+      'modules/billing/routes/invoice.ts': MODULE_ROUTE,
+    })
+
+    const finding = wiring(report).get('modules/billing/routes/invoice.ts')
+    expect(finding?.status).toBe('warn')
+    expect(finding!.message).toContain('modules/billing/routes.tsx')
+  })
+
   // The type assertion changes nothing the runtime sees, but reading the call's
   // argument without unwrapping it makes the descriptor invisible and falls
   // back to the conventional `routes.ts`. Silent by construction: "cannot read

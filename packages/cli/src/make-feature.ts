@@ -23,7 +23,9 @@ import {
   prototypeTypesPath,
   prototypeTypesSpecifier,
 } from './make-feature-prototype'
-import { fileExists } from './discovery'
+import { fileExists, toPosixRelative } from './discovery'
+import { moduleDescriptorOrScaffold } from './app-entry'
+import { MODULE_ROUTES_FILE, moduleRoutesEntryFile } from './import-resolution'
 
 /**
  * The alternative the API-only refusal names, shared with the resource
@@ -225,7 +227,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   announceKeptFiles(kept)
 
   const schemaPath = schemaPathFor(moduleName)
-  const routesPath = moduleName ? `modules/${moduleName}/routes.ts` : 'routes/web.ts'
+  const routesPath = moduleName ? await moduleRoutesPath(appRoot, moduleName) : 'routes/web.ts'
   const controllerImportPath = moduleName ? './app/Http/Controllers' : '../app/Http/Controllers'
   const validatorImportPath = moduleName ? './app/Http/Validators' : '../app/Http/Validators'
   const declaredTable = await findDeclaredTable(appRoot, schemaIdentifierFor(singular), moduleName ?? null)
@@ -283,10 +285,16 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     consola.info('')
     consola.info(`  Note: the generated redirects assume this module keeps its default`)
     consola.info(`  \`prefix: '/${moduleName}'\` from \`make:module\` — update ${singular}Controller.ts`)
-    consola.info(`  if you changed modules/${moduleName}/index.ts's prefix.`)
+    consola.info(`  if you changed ${(await moduleDescriptorOrScaffold(appRoot, moduleName)).file}'s prefix.`)
   }
 
   return created
+}
+
+/** A module's routes entry relative to `appRoot`, else the one `make:module` scaffolds. */
+async function moduleRoutesPath(appRoot: string, moduleName: string): Promise<string> {
+  const moduleDir = resolve(appRoot, 'modules', moduleName)
+  return toPosixRelative(appRoot, (await moduleRoutesEntryFile(moduleDir)) ?? resolve(moduleDir, MODULE_ROUTES_FILE))
 }
 
 async function existingFiles(appRoot: string, files: readonly ScaffoldFileEntry[]): Promise<ScaffoldFileEntry[]> {

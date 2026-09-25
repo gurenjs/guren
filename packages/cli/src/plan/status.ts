@@ -757,11 +757,18 @@ class StatusContext {
     else if (projection.ambiguous.includes(builder)) properties.push(unknown('type', column.type, `"${builder}" may hold a ${column.type} under a mode no reader reports`))
     else properties.push(differ('type', column.type, builder))
 
-    const notNull = actual.notNull || actual.primaryKey
-    flag('nullable', column.nullable, notNull, !notNull)
+    // A table has one primary key, so a column is in it when a readable composite key lists it. pg and MySQL make
+    // every key column NOT NULL; SQLite's rowid tables accept NULL there, and drizzle-kit writes only `.notNull()`.
+    const inCompositeKey = table.constraints.some((constraint) => constraint.kind === 'primaryKey' && !constraint.opaqueColumns && constraint.columns.includes(column.name))
+    const keyHidden = table.opaqueConstraints === true || table.constraints.some((constraint) => constraint.kind === 'primaryKey' && constraint.opaqueColumns)
+    const keyForcesNotNull = table.dialect !== 'sqlite'
+    const notNull = actual.notNull || actual.primaryKey || (keyForcesNotNull && inCompositeKey)
+    if (!notNull && keyForcesNotNull && keyHidden && !hidden) properties.push(unknown('nullable', String(column.nullable), CONSTRAINTS_HIDDEN))
+    else flag('nullable', column.nullable, notNull, !notNull)
     if (column.primaryKey !== undefined) {
-      const composite = hasIndex(table, [column.name], ['primaryKey'])
-      flag('primaryKey', column.primaryKey, actual.primaryKey || composite === true)
+      const inKey = actual.primaryKey || inCompositeKey
+      if (!inKey && keyHidden) properties.push(unknown('primaryKey', String(column.primaryKey), CONSTRAINTS_HIDDEN))
+      else flag('primaryKey', column.primaryKey, inKey)
     }
 
     const uniqueIndex = hasIndex(table, [column.name], ['unique', 'uniqueIndex'])

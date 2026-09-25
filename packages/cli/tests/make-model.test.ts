@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtemp, rm, readFile, access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { makeModel } from '../src/make-model'
+import { makeModel, modelFile } from '../src/make-model'
 
 describe('makeModel', () => {
   let tempDir: string
@@ -50,6 +50,39 @@ describe('makeModel', () => {
     const result = await makeModel('Comment')
 
     expect(result).toContain('app/Models/Comment.ts')
+  })
+
+  // The template is shared with plan:scaffold's model emitter, so its plain output is pinned whole.
+  it('writes the plain model byte for byte', async () => {
+    const content = await readFile(await makeModel('Post'), 'utf8')
+    expect(content).toMatchInlineSnapshot(`
+      "import { defineModel } from '@guren/core'
+      import { posts } from '../../db/schema.js'
+
+      export type PostRecord = typeof posts.$inferSelect
+      export type NewPostRecord = typeof posts.$inferInsert
+
+      export class Post extends defineModel(posts) {
+      }
+      "
+    `)
+  })
+
+  it('writes the attachable model byte for byte', () => {
+    expect(modelFile('Post', { attachments: [{ name: 'cover', kind: 'one' }, { name: 'images', kind: 'many' }] }).contents).toMatchInlineSnapshot(`
+      "import { Attachable, defineModel, hasManyAttached, hasOneAttached } from '@guren/core'
+      import { posts } from '../../db/schema.js'
+
+      export type PostRecord = typeof posts.$inferSelect
+      export type NewPostRecord = typeof posts.$inferInsert
+
+      export class Post extends Attachable(defineModel(posts), {
+        cover: hasOneAttached({ image: 'require' }),
+        images: hasManyAttached({ image: 'require' }),
+      }) {
+      }
+      "
+    `)
   })
 
   it('generates pluralized schema identifier', async () => {

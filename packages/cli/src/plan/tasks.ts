@@ -48,7 +48,7 @@ export interface PlanDerivedStep {
   kind: PlanStepKind
   /** The elements this step completes. Empty for `scaffold` and `tests`, which complete on their commands. */
   elementIds: string[]
-  /** `scaffold` only: the added elements a scaffold would generate. No generator ships yet (RFC 0030 Part 3). */
+  /** `scaffold` only: the added elements a scaffold writes the first version of; `planScaffoldCoverage()` in `scaffold.ts` says which of them `plan:scaffold` writes today. */
   generates: string[]
   /** On `tests`, which writes their skeletons, and on the step that must see them pass. */
   acceptanceIds: string[]
@@ -115,7 +115,7 @@ export function planElementParents(plan: PlanDraft): Map<string, string> {
 }
 
 export interface DerivePlanTasksOptions {
-  /** `PlanAppState.apiOnly`: `make:feature` refuses such an app, so no slice is scaffolded. */
+  /** `PlanAppState.apiOnly`: whether such an app gets a scaffold step is open (§5), so no slice is scaffolded. */
   apiOnly?: boolean
   /** Files a step may touch before it is split. */
   splitThreshold?: number
@@ -127,8 +127,8 @@ const STEP_ORDER = ['commands', 'data', 'http', 'pages'] as const
 type WorkStep = (typeof STEP_ORDER)[number]
 
 /**
- * Which step completes an element of each section, and whether a scaffold (`make:feature` and
- * the Part 3 emitters) would write its first version. Total over the sections, so a new one fails
+ * Which step completes an element of each section, and whether a scaffold (`plan:scaffold`, RFC
+ * 0030 §5) writes its first version. Total over the sections, so a new one fails
  * the type check here until it is given a step or a reason to have none.
  */
 export const PLAN_SECTION_STEP: Record<PlanElementSection, { step: WorkStep; scaffoldable: boolean } | null> = {
@@ -142,7 +142,8 @@ export const PLAN_SECTION_STEP: Record<PlanElementSection, { step: WorkStep; sca
   policies: { step: 'http', scaffoldable: true },
   // No generator writes a job, an event or a mail from a plan.
   sideEffects: { step: 'http', scaffoldable: false },
-  views: { step: 'pages', scaffoldable: true },
+  // Pages are not emitted (Part 3 D4): a page written with the plan's props would match by construction.
+  views: { step: 'pages', scaffoldable: false },
   commands: { step: 'commands', scaffoldable: false },
   // A flow describes the elements above and is no file of its own.
   flows: null,
@@ -783,7 +784,7 @@ function stepsOf(
     ...fields,
   })
 
-  // `make:feature` writes a new entity and refuses an existing one, so only a slice that adds its own model is scaffolded.
+  // The scaffold writes a new entity's first version and never an existing one's, so only a slice that adds its own model is scaffolded.
   const model = task.title.kind === 'entity' ? modelById.get(task.title.model) : undefined
   const scaffolded = !apiOnly && model?.change.kind === 'add' && task.elements.some((element) => element.id === model.id)
   if (scaffolded) {

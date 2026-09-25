@@ -303,6 +303,9 @@ describe('GUREN_API_DIGEST', () => {
   const tokensByRuleFile: Record<string, string[]> = {
     'orm-models.md': [
       '`=` `!=` `>` `<` `>=` `<=` `like` `in` `not in` `is null` `is not null`',
+      'whereNull(field)',
+      'whereNotNull(field)',
+      "'is null', null)",
       "belongsToMany(name, related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey = 'id', relatedKey = 'id')",
       "hasManyThrough(name, related, through, firstKey, secondKey, localKey = 'id', secondLocalKey = 'id')",
       'paginate(result, { path?, query?, fragment? })',
