@@ -271,9 +271,7 @@ describe('plan:scaffold', () => {
       })
     }
 
-    // The reader matches a primary key on one column only, so a composite key reads `differ`
-    // on each of its columns whatever is written: a pivot's key columns cannot verify.
-    test('should write a composite primary key the reader reads as differ, column by column', async () => {
+    test('should write a composite primary key each of its columns reads back as in the key', async () => {
       const document = widgetsPlan()
       document.models = [{
         id: 'model.pin',
@@ -291,7 +289,7 @@ describe('plan:scaffold', () => {
       expect(await readFile(join(dir, 'db/schema.ts'), 'utf8')).toContain('primaryKey({ columns: [table.boardId, table.noteId] })')
       const status = judgePlan(parsePlanDocument(JSON.parse(await readFile(plan, 'utf8'))), await loadPlanAppState(dir, { detail: true }))
       const off = status.elements.flatMap((element) => element.properties.filter((property) => property.verdict !== 'match').map((property) => `${element.id} ${property.property} ${property.verdict}`))
-      expect(off).toEqual(['column.pin.boardId primaryKey differ', 'column.pin.noteId primaryKey differ'])
+      expect(off).toEqual([])
     })
 
     test('should write output that typechecks, in every dialect', () => {

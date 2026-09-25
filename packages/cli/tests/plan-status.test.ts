@@ -820,6 +820,17 @@ describe('judgePlan', () => {
     })
 
     test.each([
+      [['id', 'title'], 'match'],
+      [['id', 'authorId'], 'differ'],
+    ] as const)('should read a column in the composite primary key %j by membership, as %s', (columns, verdict) => {
+      const table = { ...POSTS_TABLE, constraints: [{ kind: 'primaryKey', columns: [...columns] }] } as SourcedSchemaTable
+
+      const element = only(judgePlan(withColumn(ADD, { primaryKey: true }), app({ tables: [table, USERS_TABLE] })), 'c')
+
+      expect(element.properties.find((property) => property.property === 'primaryKey')?.verdict).toBe(verdict)
+    })
+
+    test.each([
       ['now()', { kind: 'now' }, 'match'],
       ["'draft'", { kind: 'value', text: '"draft"' }, 'match'],
       ["'draft'", { kind: 'value', text: "'live'" }, 'differ'],

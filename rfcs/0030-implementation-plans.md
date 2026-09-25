@@ -1204,10 +1204,9 @@ shipped, and where it stops.
   `numeric`, `withTimezone` and a `unixepoch()` default are unread. MySQL's
   `now()` default is written `CURRENT_TIMESTAMP`, which the readers normalize,
   where drizzle's `defaultNow()` renders `(now())`, which they compare as text.
-  A composite primary key is written as `primaryKey({ columns })` and reads
-  `differ` on each of its columns: the reader matches a primary key over one
-  column only, so a pivot's key columns cannot verify until it reads composite
-  keys. No emitted table has been migrated against a database in these tests;
+  A composite primary key is written as `primaryKey({ columns })`, and
+  `plan/status.ts` reads a column as in the key when a readable composite key
+  lists it (a table has one), so a pivot's key columns verify. No emitted table has been migrated against a database in these tests;
   they prove the readers and `tsc` accept the output.
 - The project root only: an element carrying `module`, or a foreign key or
   relationship whose target carries one, is refused. An API-only application is

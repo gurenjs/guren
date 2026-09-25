@@ -760,8 +760,9 @@ class StatusContext {
     const notNull = actual.notNull || actual.primaryKey
     flag('nullable', column.nullable, notNull, !notNull)
     if (column.primaryKey !== undefined) {
-      const composite = hasIndex(table, [column.name], ['primaryKey'])
-      flag('primaryKey', column.primaryKey, actual.primaryKey || composite === true)
+      // A table has one primary key, so a column is in it when a readable composite key lists it.
+      const composite = table.constraints.some((constraint) => constraint.kind === 'primaryKey' && !constraint.opaqueColumns && constraint.columns.includes(column.name))
+      flag('primaryKey', column.primaryKey, actual.primaryKey || composite)
     }
 
     const uniqueIndex = hasIndex(table, [column.name], ['unique', 'uniqueIndex'])
