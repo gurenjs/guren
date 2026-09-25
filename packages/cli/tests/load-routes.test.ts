@@ -143,6 +143,31 @@ export const ${name}Module = {
     expect(names).toEqual(['billing.index', 'inventory.index'])
   })
 
+  it('records each definition\'s module directory and its defineModule() name apart', async () => {
+    await writeFile(join(tempDir, 'routes/web.ts'), `import type { Router } from '@guren/core'\n\nexport function registerWebRoutes(router: Router): void {\n  router.get('/', () => new Response('ok'))\n}\n`)
+    await mkdir(join(tempDir, 'modules/billing'), { recursive: true })
+    await writeFile(
+      join(tempDir, 'modules/billing/index.ts'),
+      `import type { Router } from '@guren/core'
+
+export default {
+  name: 'Invoicing',
+  providers: [],
+  routes: (router: Router) => {
+    router.get('/invoices', () => new Response('ok'))
+  },
+}
+`,
+    )
+
+    const provenance: Array<string | null> = []
+    const identities: Array<string | null> = []
+    await loadRouteDefinitions(join(tempDir, 'routes/web.ts'), tempDir, undefined, provenance, identities)
+
+    expect(provenance).toEqual([null, 'billing'])
+    expect(identities).toEqual([null, 'Invoicing'])
+  })
+
   it('warns and skips a module directory without an index.ts, without throwing', async () => {
     await writeFile(join(tempDir, 'routes/web.ts'), `import type { Router } from '@guren/core'\n\nexport function registerWebRoutes(_router: Router): void {}\n`)
 

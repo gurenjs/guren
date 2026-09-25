@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 
 import { runAudit, type AuditFinding, type AuditReport } from '../src/audit'
 import { runCheck } from '../src/check'
+import { listModuleNames } from '../src/discovery'
 import { generateEntityContext } from '../src/entity-context'
 import { introspectApp } from '../src/introspect'
 import { controllerImportFailures } from '../src/introspect-controller-file'
@@ -551,5 +552,33 @@ describe('the other controller-body consumers on the manifest path', () => {
     }
     expect(await statsRoutes(true)).toEqual({ linked: ['/billing/stats'], unverified: [] })
     expect(await statsRoutes(false)).toEqual({ linked: [], unverified: ['/billing/stats', '/shop/stats'] })
+  })
+
+  test('guren context pairs a route two modules share within its module, whatever order the app lists them in', async () => {
+    const unprefixed = (name: string, inline: boolean) => `import { defineModule } from '@guren/core'
+import StatsController from './app/Http/Controllers/StatsController.js'
+
+export default defineModule({
+  name: '${name}',
+  routes: (router) => {
+    router.get('/stats', [StatsController, 'index']${inline ? ', async (_c, next) => { await next() }' : ''})
+  },
+})
+`
+    const dir = await scaffoldApp('unprefixed-modules', {
+      'modules/billing/index.ts': unprefixed('billing', false),
+      'modules/shop/index.ts': unprefixed('shop', true),
+    })
+    // The app lists its modules against the order the CLI reads their directories in.
+    const [first, second] = (await listModuleNames(dir)).reverse()
+    await writeWorkspaceFiles(dir, {
+      'src/app.ts': APP_TS.replace('modules: [billing, shop]', `modules: [${first}, ${second}]`),
+    })
+
+    const context = await generateEntityContext('User', { cwd: dir, introspect: true })
+    const stats = context.routes.filter((route) => route.path === '/stats')
+    expect(stats.map((route) => ({ file: (route.controller as { file?: string }).file, inline: route.hasInlineMiddleware ?? false }))).toEqual([
+      { file: 'modules/billing/app/Http/Controllers/StatsController.ts', inline: false },
+    ])
   })
 })
