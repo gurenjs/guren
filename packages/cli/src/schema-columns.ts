@@ -103,10 +103,23 @@ export const COLUMN_BUILDERS: Record<SchemaDialect, Record<PlanColumnType, Build
  * `plan:scaffold` maps a planned resource field onto. Kept beside the builders, since changing
  * one changes the other; MySQL's `date()` reads back as a `Date` where pg's and SQLite's are text.
  */
+const RECORD_TYPES: Record<PlanColumnType, string> = {
+  string: 'string',
+  text: 'string',
+  integer: 'number',
+  number: 'number',
+  decimal: 'string',
+  boolean: 'boolean',
+  date: 'string',
+  datetime: 'Date',
+  json: 'unknown',
+  uuid: 'string',
+}
+
 export const COLUMN_RECORD_TYPES: Record<SchemaDialect, Record<PlanColumnType, string>> = {
-  pg: { string: 'string', text: 'string', integer: 'number', number: 'number', decimal: 'string', boolean: 'boolean', date: 'string', datetime: 'Date', json: 'unknown', uuid: 'string' },
-  mysql: { string: 'string', text: 'string', integer: 'number', number: 'number', decimal: 'string', boolean: 'boolean', date: 'Date', datetime: 'Date', json: 'unknown', uuid: 'string' },
-  sqlite: { string: 'string', text: 'string', integer: 'number', number: 'number', decimal: 'string', boolean: 'boolean', date: 'string', datetime: 'Date', json: 'unknown', uuid: 'string' },
+  pg: RECORD_TYPES,
+  mysql: { ...RECORD_TYPES, date: 'Date' },
+  sqlite: RECORD_TYPES,
 }
 
 /**

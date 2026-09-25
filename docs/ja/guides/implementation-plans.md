@@ -459,7 +459,7 @@ export const CommentPayloadSchema = z.object({
 
 アクションが `query` や `params` に使う validator では、数値と真偽値を `z.coerce.number()` と `z.stringbool()` で書きます。これらの値は文字列で届くためです。文章で書かれたルールや、フィールドの型に合わないルール (真偽値への上限など) は書かず、レポートに一覧で示します。
 
-モデルをこのステップで追加する Resource は、計画のペイロード型を持つ `Resource` のサブクラスとして書きます。この型は `guren codegen` が `data.gen.ts` のために読むものです。カラムの読み返しの型が計画の型と同じフィールドはカラムの値をそのまま使い、計画が `string` とした日時のカラムは `toISOString()` で文字列にします。それ以外のフィールドは、対応付けるまで例外を投げるスタブを呼び、レポートに一覧で示します。
+モデルをこのステップで追加する Resource は、計画のペイロード型を持つ `Resource` のサブクラスとして書きます。この型は `guren codegen` が `data.gen.ts` のために読むものです。カラムの読み返しの値がすべて計画の型に収まるフィールドはカラムの値をそのまま使い、計画が `string` とした日時のカラムは `toISOString()` で文字列にします。JSON のカラムは計画の型にキャストします。それ以外のフィールドは、対応付けるまで例外を投げるスタブを呼び、レポートに一覧で示します。
 
 ```typescript
 export class CommentResource extends Resource<CommentRecord, CommentResourceData> {

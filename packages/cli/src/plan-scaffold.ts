@@ -6,6 +6,7 @@
  * targets it already wrote. It runs no codegen and no migration: those are `plan:verify`'s.
  */
 
+import { readFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 
 import { isConfirmedApiOnlyApp } from './app-surface'
@@ -16,7 +17,7 @@ import {
   discoverResourceFiles,
   discoverValidatorFiles,
   excludeBarrelFiles,
-  moduleNameFromRelPath,
+  moduleNameFor,
   readIfExists,
   toPosixRelative,
 } from './discovery'
@@ -151,15 +152,14 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
         created.push(relative)
       }
     }
-    if (registration.entry && registration.content !== undefined) {
+    if (registration.entry !== null) {
       writing = registration.entry
       await writeFileAtomic(resolve(root, registration.entry), registration.content)
       written.push(registration.entry)
     }
   } catch (error) {
     if (written.length === 0) throw error
-    // A `wx` write that fails after opening leaves the file behind, possibly empty.
-    const failing = writing && !written.includes(writing) ? ` ${writing} failed and may exist, part written.` : ''
+    const failing = failedWrite(writing, written, registration, output.providers)
     throw new CliError(
       `plan:scaffold stopped part way through ${step.id}: ${error instanceof Error ? error.message : String(error)}\n`
         + `Already written: ${written.join(', ')}.${failing} The step is half scaffolded, and running plan:scaffold again refuses on these files.\n`
@@ -181,12 +181,23 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
   }
 }
 
+/** What the write that threw left behind, for the partial-write message. */
+function failedWrite(writing: string | undefined, written: readonly string[], registration: ProviderRegistration, providers: readonly string[]): string {
+  if (!writing || written.includes(writing)) return ''
+  // The entry is written atomically, so a failure leaves it as it was.
+  if (writing === registration.entry) {
+    return ` ${writing} was left unchanged, so ${providers.join(', ')} ${providers.length === 1 ? 'is' : 'are'} not registered.`
+  }
+  // A `wx` write that fails after opening leaves the file behind, possibly empty.
+  return ` ${writing} failed and may exist, part written.`
+}
+
 /** The names the root's validator files export, which a planned validator must not take: `plan:status` finds a validator by its name. */
 async function rootValidatorExports(root: string, cache: ParseCache): Promise<{ names: string[] } | { unreadable: string }> {
   const names: string[] = []
   for (const filePath of excludeBarrelFiles(await discoverValidatorFiles(root))) {
+    if (moduleNameFor(root, filePath) !== null) continue
     const file = toPosixRelative(root, filePath)
-    if (moduleNameFromRelPath(file) !== null) continue
     const parsed = await cache.get(filePath)
     const exported = parsed ? exportedNames(parsed.ast, 'this file') : null
     if (exported === null) return { unreadable: `${file} could not be read for its exports` }
@@ -197,7 +208,7 @@ async function rootValidatorExports(root: string, cache: ParseCache): Promise<{ 
 
 async function rootClassNames(root: string, discover: (appRoot: string) => Promise<string[]>): Promise<string[]> {
   const files = excludeBarrelFiles(await discover(root))
-  return files.filter((file) => moduleNameFromRelPath(toPosixRelative(root, file)) === null).map(classNameFromPath)
+  return files.filter((file) => moduleNameFor(root, file) === null).map(classNameFromPath)
 }
 
 /**
@@ -205,11 +216,13 @@ async function rootClassNames(root: string, discover: (appRoot: string) => Promi
  * writes as it goes and only warns on a failure, where a policy nothing registers would read
  * as scaffolded while the gate denies every ability for want of it.
  */
-async function registerProviders(root: string, providers: readonly string[]): Promise<{ entry: string | null; content?: string; refusals: string[] }> {
+type ProviderRegistration = { entry: null; refusals: string[] } | { entry: string; content: string; refusals: string[] }
+
+async function registerProviders(root: string, providers: readonly string[]): Promise<ProviderRegistration> {
   if (providers.length === 0) return { entry: null, refusals: [] }
   const entry = await resolveAppEntry(root)
   if (entry === null) return { entry, refusals: [`${providers.join(', ')} would be registered in createApp(), and this application has neither src/app.ts nor app.ts.`] }
-  let content = (await readIfExists(root, entry)) ?? ''
+  let content = await readFile(resolve(root, entry), 'utf8')
   const refusals: string[] = []
   for (const provider of providers) {
     const { wiring, content: patched } = composeAppProviderRegistration(content, entry, provider)

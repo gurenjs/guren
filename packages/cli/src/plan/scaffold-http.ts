@@ -5,15 +5,15 @@
  * codegen` copies it, a policy's abilities as methods of a class extending `Policy`.
  */
 
-import { buildPolicySource, POLICY_DIR } from '../make-policy'
+import { POLICIES_DIR, PROVIDERS_DIR, RESOURCES_DIR, VALIDATORS_DIR } from '../discovery'
+import { buildPolicySource } from '../make-policy'
 import { buildResourceSource } from '../make-resource'
-import { VALIDATOR_DIR, ZOD_IMPORT, zodObjectExport } from '../make-validator'
-import { RESOURCES_DIR } from '../discovery'
+import { ZOD_IMPORT, zodObjectExport } from '../make-validator'
 import { parseSourceFile } from '../parse-cache'
-import { COLUMN_RECORD_TYPES } from '../schema-columns'
+import { COLUMN_RECORD_TYPES, quoteString } from '../schema-columns'
 import type { SchemaDialect } from '../schema-parser'
-import { isIdentifier, quoteObjectKey } from '../utils'
-import { BOUND_RULE, FORMAT_RULES, sameSet, unionMembers } from './field-status'
+import { isBindingName, isIdentifier, propertyAccess, quoteObjectKey } from '../utils'
+import { BOUND_RULE, FORMAT_RULES, unionMembers } from './field-status'
 import type { PlanColumn, PlanDraft, PlanModel, PlanPolicy, PlanResource, PlanValidator } from './schema'
 
 /** A planned property written in no form a reader compares, or as a stub: the http step finishes it. */
@@ -23,24 +23,27 @@ export interface PlanScaffoldUnwritten {
   reason: string
 }
 
-export const PROVIDERS_DIR = 'app/Providers'
+/** A step's added validators, resources and policies, before any is left to the http step. */
+export interface PlanScaffoldAdded {
+  validators: PlanValidator[]
+  resources: PlanResource[]
+  policies: PlanPolicy[]
+}
 
-/** Why each of a step's `generates` in these sections is left to the http step, where it is not written. */
-export function httpLeftReasons(plan: PlanDraft, generates: ReadonlySet<string>, models: readonly PlanModel[]): Map<string, string> {
+/** Why each added element is left to the http step, where it is not written. */
+export function httpLeftReasons(added: PlanScaffoldAdded, models: readonly PlanModel[]): Map<string, string> {
   const reasons = new Map<string, string>()
   const modelIds = new Set(models.map((model) => model.id))
-  const added = <T extends { id: string; change: { kind: string } }>(elements: readonly T[]): T[] =>
-    elements.filter((element) => generates.has(element.id) && element.change.kind === 'add')
   if (models.length === 0) {
-    for (const validator of added(plan.validators)) reasons.set(validator.id, 'the step adds no model to name its validator file after')
+    for (const validator of added.validators) reasons.set(validator.id, 'the step adds no model to name its validator file after')
   }
   const onModel = (model: string): string | undefined =>
     modelIds.has(model) ? undefined : `its model ${model} is not one this step adds, so the model's record type is not known to exist`
-  for (const resource of added(plan.resources)) {
+  for (const resource of added.resources) {
     const why = onModel(resource.model) ?? resource.fields.map((field) => unwritableType(field.type)).find((reason) => reason !== undefined)
     if (why) reasons.set(resource.id, why)
   }
-  for (const policy of added(plan.policies)) {
+  for (const policy of added.policies) {
     const why = onModel(policy.model)
     if (why) reasons.set(policy.id, why)
   }
@@ -72,7 +75,7 @@ function unwritableType(text: string): string | undefined {
   const program = parseSourceFile(`type Planned = ${text}\n`, 'payload.ts')?.program
   const alias = program?.body.length === 1 ? program.body[0] : undefined
   if (alias?.type !== 'TSTypeAliasDeclaration') return `its field type \`${text}\` does not parse as one type`
-  const named: string[] = []
+  let offending: string | undefined
   const walk = (node: { type: string; [key: string]: unknown }): boolean => {
     if (TYPE_KEYWORDS.has(node.type)) return true
     if (node.type === 'TSUnionType') return (node.types as Array<typeof node>).every(walk)
@@ -82,26 +85,14 @@ function unwritableType(text: string): string | undefined {
       const name = node.typeName as { type: string; name?: string }
       const params = (node.typeParameters as { params: Array<typeof node> } | undefined)?.params ?? []
       if (name.type === 'Identifier' && GLOBAL_TYPES.has(name.name!)) return params.every(walk)
-      named.push(name.name ?? 'a qualified name')
+      offending = name.name ?? 'a qualified name'
       return false
     }
-    named.push(`a ${node.type.replace(/^TS/u, '')}`)
+    offending = `a ${node.type.replace(/^TS/u, '')}`
     return false
   }
   if (walk(alias.typeAnnotation as unknown as { type: string })) return undefined
-  return `its field type \`${text}\` names ${named[0]}, which the resource file would have to import`
-}
-
-/** Class and file names a JS reserved word cannot take: `export const delete = …` does not parse. */
-const RESERVED_WORDS = new Set([
-  'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'enum', 'export',
-  'extends', 'false', 'finally', 'for', 'function', 'if', 'implements', 'import', 'in', 'instanceof', 'interface', 'let', 'new', 'null',
-  'package', 'private', 'protected', 'public', 'return', 'static', 'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof', 'var',
-  'void', 'while', 'with', 'yield',
-])
-
-export function isBindingName(name: string): boolean {
-  return isIdentifier(name) && !RESERVED_WORDS.has(name)
+  return `its field type \`${text}\` names ${offending}, which the resource file would have to import`
 }
 
 /** `Policy`'s own members: an ability of one of these names replaces the hook or the helper. */
@@ -109,6 +100,7 @@ const POLICY_MEMBERS = new Set(['constructor', 'before', 'allow', 'deny', 'denyW
 
 export function policyRefusals(policy: PlanPolicy, declared: readonly string[]): string[] {
   const refusals: string[] = []
+  if (!isBindingName(policy.name)) refusals.push(`${policy.id} is named "${policy.name}", which a class cannot be named.`)
   if (declared.includes(policy.name)) refusals.push(`${policy.id}: the application already declares a ${policy.name} policy.`)
   const seen = new Set<string>()
   for (const { name } of policy.abilities) {
@@ -131,11 +123,30 @@ export function resourceRefusals(resource: PlanResource, declared: readonly stri
 
 /** The validator file of a step: `make:validator`'s path for the model, so a prior `make:feature` is refused as a file that exists. */
 export function validatorFilePath(model: PlanModel): string {
-  return `${VALIDATOR_DIR}/${model.name}Validator.ts`
+  return `${VALIDATORS_DIR}/${model.name}Validator.ts`
 }
 
-const STRING_TYPES: ReadonlySet<PlanColumn['type']> = new Set(['string', 'text', 'uuid'])
-const BOUNDED_TYPES: ReadonlySet<PlanColumn['type']> = new Set(['string', 'text', 'uuid', 'integer', 'number', 'decimal'])
+export function resourceFilePath(resource: PlanResource): string {
+  return `${RESOURCES_DIR}/${resource.name}.ts`
+}
+
+export function policyFilePath(policy: PlanPolicy): string {
+  return `${POLICIES_DIR}/${policy.name}.ts`
+}
+
+/** The provider that registers a policy with the gate, named after it. */
+export function policyProviderName(policy: PlanPolicy): string {
+  return `${policy.name}Provider`
+}
+
+export function providerFilePath(policy: PlanPolicy): string {
+  return `${PROVIDERS_DIR}/${policyProviderName(policy)}.ts`
+}
+
+/** Types a format rule (`email`, `url`, `uuid`) applies to. */
+const FORMATTABLE_TYPES: ReadonlySet<PlanColumn['type']> = new Set(['string', 'text', 'uuid'])
+/** Types a `min`/`max` bounds: a string's length, a number's value. */
+const BOUNDED_TYPES: ReadonlySet<PlanColumn['type']> = new Set([...FORMATTABLE_TYPES, 'integer', 'number', 'decimal'])
 const FORMAT_LEAVES: Record<string, string> = { email: 'z.email()', uri: 'z.url()', uuid: 'z.uuid()' }
 
 /**
@@ -173,6 +184,12 @@ export function textSourcedValidators(plan: PlanDraft): Set<string> {
   return new Set(plan.controllers.flatMap((controller) => controller.actions.flatMap((action) => [action.query, action.params].filter((id): id is string => id !== undefined))))
 }
 
+function leafOf(field: PlanValidator['fields'][number], format: string | undefined, textSourced: boolean): string {
+  if (format && field.type !== 'uuid') return FORMAT_LEAVES[format]!
+  if (textSourced) return TEXT_SOURCED_LEAVES[field.type] ?? TYPE_LEAVES[field.type]
+  return TYPE_LEAVES[field.type]
+}
+
 /** One field's zod expression, and each planned rule it does not write. */
 function validatorField(validator: PlanValidator, field: PlanValidator['fields'][number], textSourced: boolean, unwritten: PlanScaffoldUnwritten[]): string {
   const leave = (rule: string, reason: string): void => {
@@ -185,7 +202,7 @@ function validatorField(validator: PlanValidator, field: PlanValidator['fields']
     const named = FORMAT_RULES[text.toLowerCase()]
     const bound = BOUND_RULE.exec(text)
     if (named) {
-      if (!STRING_TYPES.has(field.type)) leave(rule, `the ${text} format applies to a string, and the field is planned ${field.type}`)
+      if (!FORMATTABLE_TYPES.has(field.type)) leave(rule, `the ${text} format applies to a string, and the field is planned ${field.type}`)
       else if (field.type === 'uuid' && named !== 'uuid') leave(rule, `a uuid field is already validated as one, and a value has one format`)
       else if (format !== undefined && format !== named) leave(rule, `the field already takes the ${format} format, and a value has one`)
       else format = named
@@ -196,8 +213,7 @@ function validatorField(validator: PlanValidator, field: PlanValidator['fields']
       leave(rule, 'plan:status compares only min, max, email, url and uuid, so the rule is prose to implement')
     }
   }
-  const leaf = format && field.type !== 'uuid' ? FORMAT_LEAVES[format]! : ((textSourced ? TEXT_SOURCED_LEAVES[field.type] : undefined) ?? TYPE_LEAVES[field.type])
-  return `${leaf}${bounds.join('')}${field.required ? '' : '.nullable().optional()'}`
+  return `${leafOf(field, format, textSourced)}${bounds.join('')}${field.required ? '' : '.nullable().optional()'}`
 }
 
 export function buildPlanValidatorSource(validators: readonly PlanValidator[], textSourced: ReadonlySet<string>, unwritten: PlanScaffoldUnwritten[]): string {
@@ -210,22 +226,29 @@ export function buildPlanValidatorSource(validators: readonly PlanValidator[], t
   return [ZOD_IMPORT, ...exports].join('\n')
 }
 
-function member(object: string, name: string): string {
-  return isIdentifier(name) ? `${object}.${name}` : `${object}[${quoteObjectKey(name)}]`
-}
-
 /**
- * A payload field copied off the model's record where the column's record type is the planned
- * one, or a `Date` column serialized to the planned `string`; `undefined` where it is neither.
+ * A payload field copied off the model's record where the planned type admits every value the
+ * column reads back as; a `Date` serialized where it admits a `string`; a JSON column, which
+ * reads back as `unknown`, cast to the planned type as `make:feature` casts it. `undefined` otherwise.
  */
 function payloadValue(field: PlanResource['fields'][number], column: PlanColumn | undefined, nullable: boolean, dialect: SchemaDialect): string | undefined {
   const planned = unionMembers(field.type)
   if (!column || !planned) return undefined
   const base = COLUMN_RECORD_TYPES[dialect][column.type]
-  const access = member('this.resource', field.name)
-  if (sameSet(planned, nullable ? [base, 'null'] : [base])) return access
-  if (base === 'Date' && sameSet(planned, nullable ? ['string', 'null'] : ['string'])) return nullable ? `${access}?.toISOString() ?? null` : `${access}.toISOString()`
+  const access = propertyAccess('this.resource', field.name)
+  const admits = (value: string): boolean => planned.includes(value) && (!nullable || planned.includes('null'))
+  if (base === 'unknown') return `${access} as ${field.type}`
+  if (admits(base)) return access
+  if (base === 'Date' && admits('string')) return nullable ? `${access}?.toISOString() ?? null` : `${access}.toISOString()`
   return undefined
+}
+
+function unmappedDeclaration(className: string): string {
+  return `// plan:scaffold found no column to copy these fields from as they are planned: map each, then remove this.
+function unmapped(field: string): never {
+  throw new Error(\`${className}.toArray() does not map \${field} yet\`)
+}
+`
 }
 
 export function buildPlanResourceSource(
@@ -236,6 +259,7 @@ export function buildPlanResourceSource(
   unwritten: PlanScaffoldUnwritten[],
 ): string {
   const primary = columns.filter((column) => column.primaryKey)
+  let stubbed = false
   const values = resource.fields.map((field) => {
     const column = columns.find((candidate) => candidate.name === field.name)
     // A single-column primary key is not null whatever the plan says (`scaffold.ts` writes no `.notNull()` on it).
@@ -244,28 +268,16 @@ export function buildPlanResourceSource(
     if (value !== undefined) return value
     const reads = column ? `the column ${column.name} reads back as ${COLUMN_RECORD_TYPES[dialect][column.type]}${nullable ? ' | null' : ''}` : `${model.name} has no column ${field.name} this step writes`
     unwritten.push({ element: resource.id, detail: `field ${field.name}`, reason: `${reads}, so toArray() throws on it until it is mapped` })
-    return `unmapped('${field.name.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}')`
+    stubbed = true
+    return `unmapped(${quoteString(field.name)})`
   })
-  const stubbed = values.some((value) => value.startsWith('unmapped('))
   return buildResourceSource({
     className: resource.name,
     modelName: model.name,
     dataFields: resource.fields.map((field) => `${quoteObjectKey(field.name)}: ${field.type}`),
     toArrayFields: resource.fields.map((field, index) => `${quoteObjectKey(field.name)}: ${values[index]},`),
-    ...(stubbed
-      ? {
-          declarations: `// plan:scaffold found no column to copy these fields from as they are planned: map each, then remove this.
-function unmapped(field: string): never {
-  throw new Error(\`${resource.name}.toArray() does not map \${field} yet\`)
-}
-`,
-        }
-      : {}),
+    ...(stubbed ? { declarations: unmappedDeclaration(resource.name) } : {}),
   })
-}
-
-export function resourceFilePath(resource: PlanResource): string {
-  return `${RESOURCES_DIR}/${resource.name}.ts`
 }
 
 /** Every ability denies until it is written: a stub that allowed would authorize what nobody has implemented. */
@@ -278,15 +290,6 @@ export function buildPlanPolicySource(policy: PlanPolicy): string {
       body: 'return false',
     })),
   })
-}
-
-export function policyFilePath(policy: PlanPolicy): string {
-  return `${POLICY_DIR}/${policy.name}.ts`
-}
-
-/** The provider that registers a policy with the gate, named after it. */
-export function policyProviderName(policy: PlanPolicy): string {
-  return `${policy.name}Provider`
 }
 
 /** The shape of the blog template's `AuthorizationProvider`, one per policy so each is registered and removed alone. */

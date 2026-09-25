@@ -22,6 +22,7 @@ import {
   isDefinitelyAbsent,
   listAppRoots,
   MODELS_DIR,
+  POLICIES_DIR,
   moduleNameFor,
   RESOURCES_DIR,
   type AppRoot,
@@ -39,7 +40,6 @@ import { loadPlanImpactSources } from './impact-sources'
 import { ParseCache } from '../parse-cache'
 import { isUnreadable, type PlanAppUnreadable } from './unreadable'
 
-const POLICIES_DIR = 'app/Policies'
 const CONTROLLERS_DIR = 'app/Http/Controllers'
 
 export { isUnreadable, type PlanAppUnreadable }

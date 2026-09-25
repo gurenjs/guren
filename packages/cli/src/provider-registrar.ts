@@ -1,5 +1,5 @@
 import { consola } from 'consola'
-import { findFirstExisting } from './discovery'
+import { findFirstExisting, PROVIDERS_DIR } from './discovery'
 import { addEntryWithImport, composeEntryWithImport, defaultImportBinding, insertArrayOptionEntry, type EntryPlan, type EntryWiring } from './patch-helpers'
 import { relativeImportPath } from './utils'
 
@@ -169,5 +169,5 @@ export async function wireProviders(
 }
 
 function scaffoldedProvider(providerName: string): DefaultExportImport {
-  return { local: providerName, target: `app/Providers/${providerName}` }
+  return { local: providerName, target: `${PROVIDERS_DIR}/${providerName}` }
 }

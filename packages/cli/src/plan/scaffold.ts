@@ -12,22 +12,22 @@ import { schemaIdentifierFor } from '../inflect'
 import { buildModelSource, type ModelRelationshipSource } from '../make-model'
 import { autoIncrementPrimaryKey, COLUMN_BUILDERS, MYSQL_UNINDEXABLE_TYPES, quoteString, TABLE_FACTORY, type ColumnCode } from '../schema-columns'
 import type { SchemaDialect } from '../schema-parser'
-import { camelCase, isIdentifier, pascalCase, quoteObjectKey } from '../utils'
+import { camelCase, isBindingName, isIdentifier, pascalCase, propertyAccess, quoteObjectKey } from '../utils'
 import {
   buildPlanPolicySource,
   buildPlanResourceSource,
   buildPlanValidatorSource,
   buildPolicyProviderSource,
   httpLeftReasons,
-  isBindingName,
   policyFilePath,
   policyProviderName,
   policyRefusals,
-  PROVIDERS_DIR,
+  providerFilePath,
   resourceFilePath,
   resourceRefusals,
   textSourcedValidators,
   validatorFilePath,
+  type PlanScaffoldAdded,
   type PlanScaffoldUnwritten,
 } from './scaffold-http'
 import { listPlanElements, type PlanColumn, type PlanDraft, type PlanElementSection, type PlanModel, type PlanPolicy, type PlanResource, type PlanValidator } from './schema'
@@ -103,7 +103,7 @@ function sqlNameOf(column: PlanColumn): string {
 }
 
 function tableAccess(name: string): string {
-  return isIdentifier(name) ? `table.${name}` : `table[${quoteString(name)}]`
+  return propertyAccess('table', name)
 }
 
 function escapeTemplate(text: string): string {
@@ -187,12 +187,13 @@ class Emitter {
 
   constructor(
     private readonly plan: PlanDraft,
-    step: PlanDerivedStep,
+    generates: Set<string>,
+    models: readonly PlanModel[],
     private readonly app: PlanScaffoldApp,
   ) {
     this.modelsById = new Map(plan.models.map((model) => [model.id, model]))
-    this.generates = new Set(step.generates)
-    this.emittedModels = new Map(scaffoldedModels(plan, this.generates).map((model) => [model.id, model]))
+    this.generates = generates
+    this.emittedModels = new Map(models.map((model) => [model.id, model]))
   }
 
   get models(): PlanModel[] {
@@ -221,7 +222,7 @@ class Emitter {
 
   checkCollisions(model: PlanModel): void {
     const identifier = schemaIdentifierFor(model.name)
-    if (model.module) this.refusals.push(`${model.id} sits in module "${model.module}": plan:scaffold writes to the project root only.`)
+    this.refuseModule(model)
     if (!isIdentifier(model.name) || pascalCase(model.name) !== model.name) {
       this.refusals.push(`${model.id} is named "${model.name}", which is not a PascalCase class name a model file can be named after.`)
     }
@@ -419,9 +420,15 @@ class Emitter {
     if (element.module) this.refusals.push(`${element.id} sits in module "${element.module}": plan:scaffold writes to the project root only.`)
   }
 
+  /** One file named after the step's model: a step adding two models could name it after either, so it is refused. */
   validators(validators: readonly PlanValidator[]): PlanScaffoldFile[] {
-    const model = this.models[0]
+    const [model, ...others] = this.models
     if (!model || validators.length === 0) return []
+    if (others.length > 0) {
+      this.refusals.push(
+        `${validators.map((validator) => validator.id).join(', ')}: the step adds ${this.models.map((added) => added.id).join(' and ')}, and the validator file is named after one model. Write the validators by hand in the http step, or split the models across tasks (plan:revise).`,
+      )
+    }
     const names = new Set<string>()
     for (const validator of validators) {
       this.refuseModule(validator)
@@ -444,12 +451,11 @@ class Emitter {
 
   policy(policy: PlanPolicy): PlanScaffoldFile[] {
     this.refuseModule(policy)
-    if (!isBindingName(policy.name)) this.refusals.push(`${policy.id} is named "${policy.name}", which a class cannot be named.`)
     this.refusals.push(...policyRefusals(policy, this.app.policies))
     const model = this.emittedModels.get(policy.model)!
     return [
       { elements: [policy.id], path: policyFilePath(policy), contents: buildPlanPolicySource(policy) },
-      { elements: [policy.id], path: `${PROVIDERS_DIR}/${policyProviderName(policy)}.ts`, contents: buildPolicyProviderSource(policy, model) },
+      { elements: [policy.id], path: providerFilePath(policy), contents: buildPolicyProviderSource(policy, model) },
     ]
   }
 }
@@ -459,11 +465,8 @@ export function planScaffoldCommandLine(planArgument: string, stepId: string): s
   return `bunx guren plan:scaffold ${planArgument} --step ${stepId}`
 }
 
-interface Selection {
+interface Selection extends PlanScaffoldAdded {
   models: PlanModel[]
-  validators: PlanValidator[]
-  resources: PlanResource[]
-  policies: PlanPolicy[]
   /** Why an element of `generates` is left, where there is more to say than its section. */
   reasons: Map<string, string>
 }
@@ -475,16 +478,15 @@ interface Selection {
  */
 function select(plan: PlanDraft, generates: ReadonlySet<string>): Selection {
   const models = scaffoldedModels(plan, generates)
-  const reasons = httpLeftReasons(plan, generates, models)
-  const written = <T extends { id: string; change: { kind: string } }>(elements: readonly T[]): T[] =>
-    elements.filter((element) => generates.has(element.id) && element.change.kind === 'add' && !reasons.has(element.id))
-  return { models, validators: written(plan.validators), resources: written(plan.resources), policies: written(plan.policies), reasons }
+  const addedIn = <T extends { id: string; change: { kind: string } }>(elements: readonly T[]): T[] =>
+    elements.filter((element) => generates.has(element.id) && element.change.kind === 'add')
+  const added: PlanScaffoldAdded = { validators: addedIn(plan.validators), resources: addedIn(plan.resources), policies: addedIn(plan.policies) }
+  const reasons = httpLeftReasons(added, models)
+  const kept = <T extends { id: string }>(elements: T[]): T[] => elements.filter((element) => !reasons.has(element.id))
+  return { models, validators: kept(added.validators), resources: kept(added.resources), policies: kept(added.policies), reasons }
 }
 
-/** Which of a scaffold step's `generates` `plan:scaffold` writes and which it leaves: its report and `plan:next` both say it through here. */
-export function planScaffoldCoverage(plan: PlanDraft, step: Pick<PlanDerivedStep, 'generates'>): Pick<PlanScaffoldOutput, 'emitted' | 'left'> {
-  const generates = new Set(step.generates)
-  const selection = select(plan, generates)
+function coverageOf(plan: PlanDraft, generates: ReadonlySet<string>, selection: Selection): Pick<PlanScaffoldOutput, 'emitted' | 'left'> {
   const written = new Set([
     ...selection.models.flatMap((model) => [model.id, ...scaffoldedColumns(model, generates).map((column) => column.id)]),
     ...[...selection.validators, ...selection.resources, ...selection.policies].map((element) => element.id),
@@ -501,14 +503,21 @@ export function planScaffoldCoverage(plan: PlanDraft, step: Pick<PlanDerivedStep
   }
 }
 
+/** Which of a scaffold step's `generates` `plan:scaffold` writes and which it leaves: its report and `plan:next` both say it through here. */
+export function planScaffoldCoverage(plan: PlanDraft, step: Pick<PlanDerivedStep, 'generates'>): Pick<PlanScaffoldOutput, 'emitted' | 'left'> {
+  const generates = new Set(step.generates)
+  return coverageOf(plan, generates, select(plan, generates))
+}
+
 /** What `plan:scaffold` writes for `step`. Pure: the caller reads the application and writes the result. */
 export function emitPlanScaffold(plan: PlanDraft, step: PlanDerivedStep, app: PlanScaffoldApp): PlanScaffoldOutput {
-  const emitter = new Emitter(plan, step, app)
+  const generates = new Set(step.generates)
+  const selection = select(plan, generates)
+  const emitter = new Emitter(plan, generates, selection.models, app)
   for (const model of emitter.models) {
     emitter.checkCollisions(model)
     emitter.checkColumns(model)
   }
-  const selection = select(plan, new Set(step.generates))
   const tables = emitter.models.map((model) => emitter.table(model))
   const files = [
     ...emitter.models.map((model) => emitter.file(model)),
@@ -519,7 +528,7 @@ export function emitPlanScaffold(plan: PlanDraft, step: PlanDerivedStep, app: Pl
   return {
     tables,
     files,
-    ...planScaffoldCoverage(plan, step),
+    ...coverageOf(plan, generates, selection),
     omitted: emitter.omitted,
     unwritten: emitter.unwritten,
     providers: selection.policies.map(policyProviderName),

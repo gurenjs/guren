@@ -1,7 +1,6 @@
+import { PROVIDERS_DIR } from './discovery'
 import type { WriterOptions } from './utils'
 import { scaffoldFile } from './utils'
-
-const PROVIDERS_DIR = 'app/Providers'
 
 function providerTemplate(className: string): string {
   return `import { ServiceProvider } from '@guren/core'

@@ -160,7 +160,8 @@ function widgetsPlan(): WidgetsPlan {
           { name: 'id', type: 'number' },
           { name: 'title', type: 'string' },
           { name: 'body', type: 'string | null' },
-          { name: 'count', type: 'number' },
+          { name: 'count', type: 'number | null' },
+          { name: 'meta', type: 'Record<string, unknown> | null' },
           { name: 'price', type: 'string' },
           { name: 'active', type: 'boolean' },
           { name: 'releasedOn', type: 'string | null' },
@@ -552,7 +553,8 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
           id: number
           title: string
           body: string | null
-          count: number
+          count: number | null
+          meta: Record<string, unknown> | null
           price: string
           active: boolean
           releasedOn: string | null
@@ -568,6 +570,7 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
               title: this.resource.title,
               body: this.resource.body,
               count: this.resource.count,
+              meta: this.resource.meta as Record<string, unknown> | null,
               price: this.resource.price,
               active: this.resource.active,
               releasedOn: this.resource.releasedOn,
@@ -846,12 +849,15 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
   })
 
   // writeFileAtomic writes a temp file beside the entry, which a read-only src/ refuses.
-  test.skipIf(process.getuid?.() === 0)('should name every file already written when the entry registration fails last', async () => {
+  test.skipIf(process.getuid?.() === 0)('should name every file already written, and the entry left unchanged, when the registration fails last', async () => {
     const { dir, plan } = await createApp('partial-entry')
     await chmod(join(dir, 'src'), 0o555)
     try {
       const message = await refusal(() => planScaffoldFile(plan, { appRoot: dir, step: STEP }))
-      expect(message).toContain(`Already written: db/schema.ts, ${CREATED.join(', ')}. src/app.ts failed and may exist, part written.`)
+      expect(message).toContain(`Already written: db/schema.ts, ${CREATED.join(', ')}. src/app.ts was left unchanged, so WidgetPolicyProvider is not registered.`)
+      expect(message).toContain('running plan:scaffold again refuses on these files.')
+      expect(message).not.toContain('part written')
+      expect(await readFile(join(dir, 'src/app.ts'), 'utf8')).toBe(APP_ENTRY)
     } finally {
       await chmod(join(dir, 'src'), 0o755)
     }
@@ -890,6 +896,30 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     expect(text).toContain('Registered in src/app.ts: WidgetPolicyProvider')
     expect(text).toContain('Written as a stub or not at all, to finish in the http step:')
     expect(text).toContain('  resource.widget field tags: Widget has no column tags this step writes')
+  })
+
+  test('should refuse validators in a step that adds two models, since their file is named after one', () => {
+    const document = widgetsPlan()
+    document.models.push({ id: 'model.gadget', change: { kind: 'add' }, name: 'Gadget', table: 'gadgets', columns: [column('gadget', 'id', 'integer', { primaryKey: true })], relationships: [], fillable: [] })
+    const plan = parsePlanDocument(approve(document))
+    const { step } = findPlanStep(derivePlanTasks(plan), STEP)!
+    // Derivation gives each added model its own task; a step naming two is built here to reach the refusal.
+    const twoModels = { ...step, generates: [...step.generates, 'model.gadget', 'column.gadget.id'] }
+    const output = emitPlanScaffold(plan, twoModels, { ...NO_CLASSES, dialect: 'pg', tables: [], models: ['Post', 'Tag'] })
+
+    expect(output.refusals).toContain(
+      'validator.widget, validator.widgetQuery: the step adds model.widget and model.gadget, and the validator file is named after one model. Write the validators by hand in the http step, or split the models across tasks (plan:revise).',
+    )
+  })
+
+  test('should write a stubbed field whose name holds a line break or a line separator as a valid literal', () => {
+    const document = widgetsPlan()
+    document.resources[0]!.fields.push({ name: 'odd\nname here', type: 'string' })
+    const output = emitWidgets(document, 'pg')
+    const resource = output.files.find((file) => file.path === 'app/Http/Resources/WidgetResource.ts')!.contents
+
+    expect(resource).toContain("'odd\\nname\\u2028here': unmapped('odd\\nname\\u2028here'),")
+    expect(() => new Bun.Transpiler({ loader: 'ts' }).transformSync(resource)).not.toThrow()
   })
 
   test('should leave a resource whose field type names something the file would have to import', () => {

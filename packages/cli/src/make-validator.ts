@@ -2,8 +2,8 @@ import type { ScaffoldFileEntry, WriterOptions } from './utils'
 import { scaffoldFileEntry, writeScaffoldFile } from './utils'
 import { pluralize } from './inflect'
 import type { FieldDefinition, FieldType } from './fields'
+import { VALIDATORS_DIR } from './discovery'
 
-export const VALIDATOR_DIR = 'app/Http/Validators'
 
 export interface MakeValidatorOptions extends WriterOptions {
   /**
@@ -24,7 +24,7 @@ export async function makeValidator(name: string, options: MakeValidatorOptions 
  */
 export function validatorFile(name: string, options: MakeValidatorOptions = {}): ScaffoldFileEntry {
   return scaffoldFileEntry(name, {
-    dir: VALIDATOR_DIR,
+    dir: VALIDATORS_DIR,
     suffix: 'Validator',
     // `scaffoldFileEntry` appends the suffix; schema names are built from the bare
     // entity, so strip it back off as the sibling scaffolders do.

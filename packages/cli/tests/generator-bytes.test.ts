@@ -9,8 +9,7 @@ import { makeResource } from '../src/make-resource'
 import { makeValidator } from '../src/make-validator'
 import { parseFieldsString } from '../src/fields'
 
-// plan:scaffold writes through the same templates, factored out of these generators;
-// these pin what the generators themselves write, byte for byte.
+// These generators share their shells with plan:scaffold; this pins what the generators write.
 describe('validator, resource and policy generators', () => {
   let dir: string
 
@@ -130,31 +129,9 @@ describe('validator, resource and policy generators', () => {
     `)
   })
 
-  it('should write make:feature’s validator, resource and policy, byte for byte', async () => {
+  // make:feature's validator and policy come from make:validator's and make:policy's builders, pinned above.
+  it('should write make:feature’s resource, byte for byte', async () => {
     await makeFeature('Post', { cwd: dir, fields: 'title:string,body:text?,views:number,draft:boolean,publishedAt:date?,meta:json?', withPolicy: true })
-    expect(await read('app/Http/Validators/PostValidator.ts')).toMatchInlineSnapshot(`
-      "import { z } from 'zod'
-
-      export const PostIdParamSchema = z.object({
-        id: z.coerce.number().int().positive(),
-      })
-
-      export const ListPostsQuerySchema = z.object({
-        page: z.coerce.number().int().min(1).default(1),
-      })
-
-      export const PostPayloadSchema = z.object({
-        title: z.string().trim().min(1),
-        body: z.string().trim().min(1).nullable().optional(),
-        views: z.coerce.number(),
-        draft: z.boolean(),
-        publishedAt: z.coerce.date().nullable().optional(),
-        meta: z.record(z.string(), z.any()).nullable().optional(),
-      })
-
-      export type PostPayload = z.infer<typeof PostPayloadSchema>
-      "
-    `)
     expect(await read('app/Http/Resources/PostResource.ts')).toMatchInlineSnapshot(`
       "import { Resource } from '@guren/core'
       import type { PostRecord } from '../../Models/Post.js'
@@ -180,36 +157,6 @@ describe('validator, resource and policy generators', () => {
             publishedAt: this.resource.publishedAt == null ? null : new Date(this.resource.publishedAt).toISOString(),
             meta: (this.resource.meta as Record<string, unknown> | null) ?? null,
           }
-        }
-      }
-      "
-    `)
-    expect(await read('app/Policies/PostPolicy.ts')).toMatchInlineSnapshot(`
-      "import { Policy, type AuthUser } from '@guren/core'
-
-      interface PostLike {
-        userId?: string | number
-      }
-
-      export class PostPolicy extends Policy {
-        viewAny(_user: AuthUser | null): boolean {
-          return true
-        }
-
-        view(_user: AuthUser | null, _post: PostLike): boolean {
-          return true
-        }
-
-        create(user: AuthUser | null): boolean {
-          return user !== null
-        }
-
-        update(user: AuthUser | null, post: PostLike): boolean {
-          return user !== null && user.id === post.userId
-        }
-
-        delete(user: AuthUser | null, post: PostLike): boolean {
-          return user !== null && user.id === post.userId
         }
       }
       "

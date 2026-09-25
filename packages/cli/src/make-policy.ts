@@ -1,7 +1,6 @@
+import { POLICIES_DIR } from './discovery'
 import type { ScaffoldFileEntry, WriterOptions } from './utils'
 import { scaffoldFileEntry, writeScaffoldFile } from './utils'
-
-export const POLICY_DIR = 'app/Policies'
 
 export interface PolicyAbilitySource {
   /** A line comment above the method, without the slashes. */
@@ -12,14 +11,14 @@ export interface PolicyAbilitySource {
 }
 
 /** The policy source `make:policy` and `plan:scaffold` write: `plan/policy-abilities.ts` reads each ability as a method of a class extending `Policy`. */
-export function buildPolicySource(options: { className: string; preamble?: string; abilities: readonly PolicyAbilitySource[] }): string {
+export function buildPolicySource(options: { className: string; declarations?: string; abilities: readonly PolicyAbilitySource[] }): string {
   const methods = options.abilities.map((ability) => {
     const comment = ability.comment === undefined ? '' : `  // ${ability.comment}\n`
     return `${comment}  ${ability.signature}: boolean {\n    ${ability.body}\n  }\n`
   })
   return `import { Policy, type AuthUser } from '@guren/core'
 
-${options.preamble ? `${options.preamble}\n` : ''}export class ${options.className} extends Policy {
+${options.declarations ? `${options.declarations}\n` : ''}export class ${options.className} extends Policy {
 ${methods.join('\n')}}
 `
 }
@@ -30,7 +29,7 @@ function policyTemplate(className: string): string {
 
   return buildPolicySource({
     className,
-    preamble: `interface ${modelName}Like {\n  userId?: string | number\n}\n`,
+    declarations: `interface ${modelName}Like {\n  userId?: string | number\n}\n`,
     abilities: [
       { signature: 'viewAny(_user: AuthUser | null)', body: 'return true' },
       { signature: `view(_user: AuthUser | null, _${variableName}: ${modelName}Like)`, body: 'return true' },
@@ -48,7 +47,7 @@ export async function makePolicy(name: string, options: WriterOptions = {}): Pro
 
 export function policyFile(name: string, options: WriterOptions = {}): ScaffoldFileEntry {
   return scaffoldFileEntry(name, {
-    dir: POLICY_DIR,
+    dir: POLICIES_DIR,
     suffix: 'Policy',
     template: ({ normalizedName }) => policyTemplate(normalizedName),
   }, options)

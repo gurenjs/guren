@@ -379,6 +379,25 @@ export function isIdentifier(value: string): boolean {
   return IDENTIFIER_RE.test(value)
 }
 
+/** `object.key`, or `object['key']` for a key that is no identifier. */
+export function propertyAccess(object: string, key: string): string {
+  return isIdentifier(key) ? `${object}.${key}` : `${object}['${escapeSingleQuoted(key)}']`
+}
+
+/** Names `isIdentifier` accepts that still cannot be bound with `const`, `class` or a parameter. */
+const RESERVED_WORDS = new Set([
+  'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete',
+  'do', 'else', 'enum', 'export', 'extends', 'false', 'finally', 'for', 'function', 'if',
+  'implements', 'import', 'in', 'instanceof', 'interface', 'let', 'new', 'null', 'package',
+  'private', 'protected', 'public', 'return', 'static', 'super', 'switch', 'this', 'throw',
+  'true', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield',
+])
+
+/** Whether `value` can be declared as a binding (`const`, `class`) in generated code. */
+export function isBindingName(value: string): boolean {
+  return isIdentifier(value) && !RESERVED_WORDS.has(value)
+}
+
 /**
  * A property key for a generated object or type literal: bare when it is a valid
  * identifier, single-quoted otherwise. Shared by the codegen emitters, like

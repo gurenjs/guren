@@ -1256,10 +1256,12 @@ validators, resources and policies, and the policy registration settled.
   is refused. It is written only when the step adds its model (the file imports
   the model's record type) and its payload types name nothing the file would
   import; otherwise it is left to the `http` step with that reason. A field is
-  copied from its column where the column's record type is the planned type
-  (`COLUMN_RECORD_TYPES`, beside the column builders), and a `Date` column is
-  serialized with `toISOString()` for a planned `string`. Any other field calls
-  a stub that throws until it is mapped, and is listed.
+  copied from its column where the planned type admits every value the column
+  reads back as (`COLUMN_RECORD_TYPES`, beside the column builders), so a
+  planned `T | null` takes a non-null column; a `Date` column is serialized with
+  `toISOString()` for a planned `string`; a JSON column, which reads back as
+  `unknown`, is cast to the planned type as `make:feature` casts it. Any other
+  field calls a stub that throws until it is mapped, and is listed.
 - The policy stub denies: every ability is `(_user: AuthUser | null): boolean`
   returning `false`, with the planned rule in a comment above it. A stub that
   allowed would authorize what nobody has written, and one that threw would fail

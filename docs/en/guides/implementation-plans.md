@@ -449,7 +449,7 @@ export const CommentPayloadSchema = z.object({
 
 A validator an action takes its `query` or `params` from gets `z.coerce.number()` and `z.stringbool()` for numbers and booleans, since those values arrive as text. A rule written in prose, or one that does not fit the field's type (a bound on a boolean), is not written, and the report lists it.
 
-Each resource whose model the step adds is written as a `Resource` subclass with the planned payload type, which `guren codegen` reads for `data.gen.ts`. A field is copied from the model's column when the column reads back as the planned type, and a date-time column is serialized with `toISOString()` for a planned `string`. Any other field calls a stub that throws until you map it, and the report lists it:
+Each resource whose model the step adds is written as a `Resource` subclass with the planned payload type, which `guren codegen` reads for `data.gen.ts`. A field is copied from the model's column when the planned type admits every value the column reads back as, a date-time column is serialized with `toISOString()` for a planned `string`, and a JSON column is cast to the planned type. Any other field calls a stub that throws until you map it, and the report lists it:
 
 ```typescript
 export class CommentResource extends Resource<CommentRecord, CommentResourceData> {
