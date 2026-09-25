@@ -1,4 +1,4 @@
-import { access } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import type { Statement } from '@babel/types'
 import { check, type CheckResult, type CheckStatus } from './check-result'
@@ -6,6 +6,7 @@ import {
   collectFiles,
   toPosixRelative,
   listModuleNames,
+  moduleDescriptorCandidates,
   moduleNameFromRelPath,
   NON_SOURCE_DIR_NAMES,
   IMPORTABLE_EXTENSIONS,
@@ -130,7 +131,8 @@ async function evaluateDerivedModuleRules(
 }
 
 function isModulePublicSurface(relPath: string, moduleName: string): boolean {
-  return relPath === `modules/${moduleName}/index.ts` || relPath === `modules/${moduleName}/db/schema.ts`
+  const moduleDir = `modules/${moduleName}`
+  return moduleDescriptorCandidates(moduleDir).includes(relPath) || relPath === `${moduleDir}/db/schema.ts`
 }
 
 async function evaluateArchRules(
@@ -354,8 +356,10 @@ async function resolveImportSpecifier(
     candidates.push(`${base}.d.ts`, join(base, 'index.d.ts'))
   }
 
+  // A directory is never the resolved file: `'../modules/billing'` names its index, and
+  // a directory path matches no `modules/billing/**` glob nor any module boundary.
   for (const candidate of candidates) {
-    if (await pathExists(candidate)) {
+    if (await isFile(candidate)) {
       return { specifier, typeOnly, kind: 'file', fileRelPath: toPosixRelative(cwd, candidate) }
     }
   }
@@ -372,10 +376,9 @@ function stripKnownExtension(path: string): string {
   return path
 }
 
-async function pathExists(absPath: string): Promise<boolean> {
+async function isFile(absPath: string): Promise<boolean> {
   try {
-    await access(absPath)
-    return true
+    return (await stat(absPath)).isFile()
   } catch {
     return false
   }
