@@ -2440,6 +2440,22 @@ reshape in Phasing). The request is optional: without one, the prompt tells the
 agent to ask for it. `guren plan` without `--print-prompt` exits non-zero and
 names it; `guren plan --revise` exits non-zero and names `plan:revise`.
 
+**Amended in implementation (the `plan-write` skill), Part 3.** The in-session
+harness skill is `plan-write`
+(`packages/cli/templates/agent/core/skills/plan-write/SKILL.md`), which
+`agent:init` installs and `agent:sync` refreshes beside `plan-implement`. It
+has the running agent decide first whether the change needs a plan at all, ask
+the person the questions that change the design before any JSON exists, then
+run `guren plan "<request>" --print-prompt` and follow it, and loop on
+`plan:render --json` until no check fails. It reports the page, the open
+questions and the warnings it left. Before the first review it edits the plan
+in place. After a review it applies the exported feedback and the person's
+changes to a copy kept outside the repository and records them with
+`plan:revise --edited <copy> --message … --feedback …`. After approval,
+`plan:revise` is the only way the plan changes. It never runs `plan:approve`,
+and hands an approved plan to `plan-implement`. The skill restates none of the
+prompt's conventions, so `buildPlanPrompt()` stays the one source for them.
+
 **Two producers, for two situations.** The headless one cannot ask anything:
 `claude -p` has no one to put a question to, which is why questions are data
 (§1) and answers arrive through feedback (§4). It fits a request that is

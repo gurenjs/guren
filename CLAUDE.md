@@ -554,7 +554,8 @@ Available AI-powered skills that Claude can use automatically:
 | `rfc-authoring` | "write an RFC", "propose a breaking change" | Draft an RFC per `contributing/rfc-process.md` |
 
 Only these two. The application-facing skills (`guren-api`, `scaffold`,
-`feature`, `db-manage`, `plugin-authoring`) live in the harness template under
+`feature`, `db-manage`, `plugin-authoring`, `plan-write`, `plan-implement`, and
+the rest) live in the harness template under
 `packages/cli/templates/agent/core/skills/` and ship to scaffolded apps, where
 `bunx guren` resolves and framework sources do not. For framework API questions
 here, read `docs/en/guides/` and `packages/*/src` directly.

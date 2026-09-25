@@ -69,7 +69,7 @@ added to `.claude/skills/` or `.agents/skills/`, are never touched unless they
 sit under a name the harness itself ships — the claim is by name, so avoid the
 canonical skill names (`dev-workflow`, `db-manage`, `scaffold`, `feature`,
 `guren-api`, `plugin-authoring`, `agent-interface`, `ai-agent`,
-`github-projects`) and the shipped rule
+`github-projects`, `plan-write`, `plan-implement`) and the shipped rule
 filenames for your own.
 
 ## The loop the harness expects

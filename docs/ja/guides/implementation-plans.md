@@ -52,6 +52,8 @@ bunx guren plan "comments on posts, authors can delete their own" --print-prompt
 
 出力をセッションに貼るか、エージェント自身にコマンドを実行させてください。プロンプトはエージェントに次の順で進めるよう指示します。`context`、`model:list`、`guidelines` でアプリケーションを読み、決められないことを尋ね、`docs/plans/<slug>/plan.json` を書き、失敗する検査がなくなるまで `plan:render --json` を実行します。承認は自分で行います。依頼を省くと、プロンプトは依頼を尋ねるようエージェントに指示します。`--json` はプロンプトとスキーマを一つのオブジェクトで出します。`--print-prompt` なしの `guren plan` はエラーで終わります。モデルに計画を単独で書かせる形はまだありません (このページの最後を参照)。
 
+エージェントハーネスを入れたアプリ (`bunx guren agent:init` で導入し、`agent:sync` で更新) では、`plan-write` スキルがこの流れを進めます。エージェントに機能の計画を頼むと、書き始める前に設計を左右する点を質問します。答えを受けてプロンプトから計画を書き、失敗する検査がなくなるまで `plan:render --json` を実行します。最後にページの場所と未決の点を伝えます。レビュー後の変更は `plan:revise` で記録します。承認はしません。承認した計画は `plan-implement` スキルが実装します。
+
 `plan:render` はファイルを計画のスキーマで検証し、誤りのあるフィールドを示します。
 
 ```text
