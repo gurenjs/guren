@@ -324,15 +324,18 @@ describe('mapToolResponse structured-output reconciliation', () => {
  * only the real wiring shows the dispatcher's marker reaching it.
  */
 describe('auth refusals on a tool call', () => {
-  async function dispatch(register: (router: Router) => void, name: string, args: Record<string, unknown> = {}) {
+  async function boot(register: (router: Router) => void) {
     const app = createApp({ routes: register })
     await app.boot()
-    const { tools } = deriveAgentTools(app.router.definitions())
-    const tool = tools.find((candidate) => candidate.toolName === name)!
-    const built = buildToolRequest(tool, args)
+    return app
+  }
+
+  async function dispatch(register: (router: Router) => void, name: string, options: { preflight?: boolean } = {}) {
+    const app = await boot(register)
+    const tool = deriveAgentTools(app.router.definitions()).tools.find((candidate) => candidate.toolName === name)!
+    const built = buildToolRequest(tool, {}, options)
     if (!('request' in built)) throw new Error('request not built')
-    const response = await app.fetch(built.request)
-    return { app, outcome: await mapToolResponse(tool, response) }
+    return { outcome: await mapToolResponse(tool, await app.fetch(built.request)) }
   }
 
   const guarded = (router: Router) => {
@@ -349,8 +352,16 @@ describe('auth refusals on a tool call', () => {
     expect(JSON.parse(outcome.content[0]!.text)).toEqual({ message: 'Unauthorized' })
   })
 
+  test('should come back as a 401 error result from a preflight', async () => {
+    const { outcome } = await dispatch(guarded, 'secret.show', { preflight: true })
+
+    expect(outcome.status).toBe(401)
+    expect(outcome.isError).toBe(true)
+    expect(outcome.preflightVerdict).toBeUndefined()
+  })
+
   test('should still redirect a browser request to the same route', async () => {
-    const { app } = await dispatch(guarded, 'secret.show')
+    const app = await boot(guarded)
 
     const response = await app.fetch(new Request('http://localhost/secret'))
 

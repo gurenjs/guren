@@ -421,8 +421,8 @@ route answers with something that cannot fill it (a 204, a redirect, a JSON
 array, a non-JSON body) comes back as an error result naming the mismatch,
 rather than a success the client would reject after the route has already run.
 
-A refusal never reaches a tool as a redirect. `requireAuthenticated`,
-`requireGuest` and `requireVerifiedEmail` recognize the request the dispatcher
+The framework's auth guards never answer a tool with a redirect.
+`requireAuthenticated`, `requireGuest` and `requireVerifiedEmail` recognize the request the dispatcher
 builds (it carries `X-Guren-Agent-Surface`) and, where a browser would be sent
 to their `redirectTo`, answer JSON instead: `401` for no user, `403` for a
 signed-in user on a guest-only route or an unverified address. The call comes

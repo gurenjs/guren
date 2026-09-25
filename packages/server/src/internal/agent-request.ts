@@ -11,7 +11,7 @@
 /** Request header naming the protocol surface a tool call arrived on. */
 export const AGENT_SURFACE_HEADER = 'X-Guren-Agent-Surface'
 
-interface HeaderReader {
+export interface HeaderReader {
   req?: { header(name: string): string | undefined }
 }
 
