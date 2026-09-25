@@ -743,7 +743,10 @@ than a silent edit (Open Question 13).
   present, holding exactly `PlanRevisionSchema` so `applyRevision()` reads it
   back. It is linked into place from a temporary, so none is overwritten. The
   record is written before the plan: a plan written without one would sit at
-  a hash nothing names.
+  a hash nothing names. The records are not a verified chain: when the plan
+  write fails after the record, the command says so and the record stays,
+  naming a result the plan never reached; the next run records again from the
+  same parent.
 - The plan file is rewritten to the result, which must read back at the
   record's `result` before anything is written. An edited copy is written as
   its author wrote it. Ops are written as the parsed result in the author's

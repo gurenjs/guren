@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from 'bun:test'
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { runCommand } from 'citty'
@@ -270,14 +270,22 @@ describe('plan:revise', () => {
     expect(report.revisionFile).toBe('numbering/comments.revisions/0010.json')
   })
 
-  test('should keep revisions under revisions/ in the §9 layout', async () => {
-    const plan = await writeJson('layout/docs/plans/comments/plan.json', loadApprovedCommentsPlan())
+  test.skipIf(process.getuid?.() === 0)('should name the record and say to run again when the plan write fails after it', async () => {
+    const plan = await writeJson('write-fails/docs/plans/comments/plan.json', loadApprovedCommentsPlan())
     await approvePlanFile(plan)
+    const ops = await writeJson('write-fails/ops.json', { ops: [ADD_DELETED_AT] })
+    const before = await readFile(plan, 'utf8')
+    await mkdir(planRevisionsDir(plan), { recursive: true })
+    // The records directory stays writable; the plan's own directory, where its temporary goes, does not.
+    await chmod(join(plan, '..'), 0o555)
+    try {
+      await expect(revise(plan, { ops })).rejects.toThrow(/recorded in .*revisions\/0001\.json, but .* could not be written .*run the command again/su)
+    } finally {
+      await chmod(join(plan, '..'), 0o755)
+    }
 
-    await revise(plan, { ops: await writeJson('layout/ops.json', { ops: [ADD_DELETED_AT] }) })
-
+    expect(await readFile(plan, 'utf8')).toBe(before)
     expect(await readdir(planRevisionsDir(plan))).toEqual(['0001.json'])
-    expect(planRevisionsDir(plan)).toBe(join(ROOT, 'layout/docs/plans/comments/revisions'))
   })
 })
 

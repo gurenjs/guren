@@ -3,13 +3,15 @@
  * numbered in the order they were written, in the directory `planRevisionsDir()` names. They are
  * committed beside the plan, and each is exactly `PlanRevisionSchema`, so `applyRevision()` reads
  * one back. A record is never rewritten: a second writer of the same number is refused.
+ * The records are not a verified chain: a record whose result the plan never reached (the plan
+ * write after it failed) stays where it is, and the next run records again from the same parent.
  */
 
 import { link, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { join } from 'node:path'
 
 import { CliError } from '../cli-error'
-import { planRevisionsDir, readBesideRecord } from './beside'
+import { planRevisionsDir, readBesideRecord, temporaryBeside } from './beside'
 import { PlanRevisionSchema, type PlanRevision } from './revision'
 
 const RECORD_NAME = /^(\d+)\.json$/u
@@ -69,7 +71,7 @@ export async function writePlanRevisionRecord(planPath: string, revision: PlanRe
   if (listed.unreadable) throw new CliError(`${listed.unreadable}\nThe revision is not recorded, so the plan was left as it was.`)
   const next = Math.max(0, ...listed.names.map(sequenceOf)) + 1
   const path = join(dir, `${String(next).padStart(RECORD_DIGITS, '0')}.json`)
-  const temporary = join(dir, `.${basename(path)}.${process.pid}.${Date.now()}.tmp`)
+  const temporary = temporaryBeside(path)
   try {
     await writeFile(temporary, `${JSON.stringify(revision, null, 2)}\n`, 'utf8')
     await link(temporary, path)
@@ -77,7 +79,7 @@ export async function writePlanRevisionRecord(planPath: string, revision: PlanRe
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
       throw new CliError(`${path} appeared while this revision was being written, so it is not recorded and the plan was left as it was. Run the command again.`)
     }
-    throw error
+    throw new CliError(`The revision could not be recorded in ${dir} (${(error as Error).message}), so the plan was left as it was. The record is linked into place, which needs a filesystem that supports hard links.`)
   } finally {
     await rm(temporary, { force: true })
   }

@@ -488,3 +488,13 @@ function isJsonText(text: string): boolean {
 export function hasBaseline(document: unknown): document is Plan {
   return typeof document === 'object' && document !== null && 'baseline' in document
 }
+
+/** A document carrying a `baseline` is held to `PlanSchema`, so a malformed baseline is reported rather than dropped. */
+export function planSchemaFor(document: unknown): typeof PlanSchema | typeof PlanDraftSchema {
+  return hasBaseline(document) ? PlanSchema : PlanDraftSchema
+}
+
+/** A draft's is `null`, which canonicalizes where `undefined` would throw. */
+export function planBaseline(plan: PlanDraft | Plan): Plan['baseline'] | null {
+  return hasBaseline(plan) ? plan.baseline : null
+}

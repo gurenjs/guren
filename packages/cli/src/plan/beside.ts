@@ -16,9 +16,7 @@ import { toPosixRelative } from '../discovery'
 import type { CapturedExec } from '../subprocess'
 
 export function planSiblingPath(planPath: string, record: 'decisions' | 'approvals'): string {
-  const name = basename(planPath)
-  if (name === 'plan.json') return join(dirname(planPath), `${record}.json`)
-  return join(dirname(planPath), `${planFileStem(name)}.${record}.json`)
+  return besidePlan(planPath, `${record}.json`)
 }
 
 /**
@@ -26,17 +24,27 @@ export function planSiblingPath(planPath: string, record: 'decisions' | 'approva
  * matches `plan.json` or `*.plan.json`, and plan discovery skips it by {@link isPlanRevisionsDirName}.
  */
 export function planRevisionsDir(planPath: string): string {
-  const name = basename(planPath)
-  if (name === 'plan.json') return join(dirname(planPath), 'revisions')
-  return join(dirname(planPath), `${planFileStem(name)}.revisions`)
+  return besidePlan(planPath, 'revisions')
 }
 
 export function isPlanRevisionsDirName(name: string): boolean {
   return name === 'revisions' || name.endsWith('.revisions')
 }
 
-function planFileStem(name: string): string {
+/** `comments.plan.json` and `comments.json` are both `comments`: the slug of a plan not named `plan.json`. */
+export function planFileStem(name: string): string {
   return name.replace(/(\.plan)?\.json$/u, '')
+}
+
+/** `name` beside a `plan.json`, `<stem>.<name>` beside any other plan. */
+function besidePlan(planPath: string, name: string): string {
+  const file = basename(planPath)
+  return join(dirname(planPath), file === 'plan.json' ? name : `${planFileStem(file)}.${name}`)
+}
+
+/** A hidden temporary beside `target`. The `*.tmp` pathspecs of {@link planBesideExclusions} match this shape. */
+export function temporaryBeside(target: string): string {
+  return join(dirname(target), `.${basename(target)}.${process.pid}.${Date.now()}.tmp`)
 }
 
 /** The page `plan:render` writes when no `--output` is given. */
@@ -128,7 +136,7 @@ export async function writeFileAtomic(path: string, content: string): Promise<vo
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
-  const temporary = join(dirname(target), `.${basename(target)}.${process.pid}.${Date.now()}.tmp`)
+  const temporary = temporaryBeside(target)
   try {
     await writeFile(temporary, content, 'utf8')
     if (mode !== undefined) await chmod(temporary, mode)

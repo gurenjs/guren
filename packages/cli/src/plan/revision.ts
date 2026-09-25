@@ -25,14 +25,15 @@ import {
   PlanColumnSchema,
   PlanCommandSchema,
   PlanControllerSchema,
-  PlanDraftSchema,
   PlanFlowSchema,
   PlanModelSchema,
   PlanPolicySchema,
   PlanQuestionSchema,
+  planBaseline,
   PlanResourceSchema,
   PlanRouteSchema,
   PlanSchema,
+  planSchemaFor,
   PlanSideEffectSchema,
   PlanTaskIntentSchema,
   PlanValidatorSchema,
@@ -434,7 +435,7 @@ function applyOps<P extends PlanDraft>(
 
   if (rejections.length > 0) return { ok: false, rejections }
 
-  const parsed = ('baseline' in parent ? PlanSchema : PlanDraftSchema).safeParse(plan)
+  const parsed = planSchemaFor(parent).safeParse(plan)
   if (!parsed.success) return refuse('invalid-result', formatSchemaIssues(parsed.error))
 
   const hash = planDigest(parsed.data)
@@ -486,7 +487,7 @@ export interface DiffPlansOptions {
  * Equal plans yield `[]`, which is below the one op a producer's schema asks for.
  */
 export function diffPlans(parent: PlanDraft, child: PlanDraft, options: DiffPlansOptions): PlanRevisionOp[] {
-  if (canonicalJson(baselineOf(parent)) !== canonicalJson(baselineOf(child))) {
+  if (canonicalJson(planBaseline(parent)) !== canonicalJson(planBaseline(child))) {
     throw new Error('A revision carries `baseline` over unchanged, so no ops express a plan with another one.')
   }
 
@@ -524,10 +525,6 @@ export function diffPlans(parent: PlanDraft, child: PlanDraft, options: DiffPlan
   for (const section of PLAN_TOP_SECTIONS) diffList(section, parent[section], child[section])
   // Removes first: an element that moved is free to be added again, and every `before` names a kept sibling.
   return z.array(PlanRevisionOpSchema).parse([...removes, ...modifies, ...adds])
-}
-
-function baselineOf(plan: PlanDraft): unknown {
-  return 'baseline' in plan ? plan.baseline : null
 }
 
 /** The ids of a longest common subsequence: the elements that did not move. */

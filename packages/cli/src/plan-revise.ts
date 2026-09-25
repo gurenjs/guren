@@ -17,10 +17,9 @@ import { writeFileAtomic } from './plan/beside'
 import { readPlanDecisions } from './plan/decisions'
 import { FEEDBACK_STDIN, readJsonWithinLimit, readPlanFeedback } from './plan/feedback'
 import { canonicalJson, planDigest } from './plan/identity'
-import { hasBaseline } from './plan/render'
 import { readPlanRevisionRecords, writePlanRevisionRecord } from './plan/revision-records'
 import { createPlanRevision, diffPlans, type PlanReopenedElement, type PlanRevisionRejection, type PlanRevisionOp } from './plan/revision'
-import { PlanDraftSchema, PlanSchema, type Plan, type PlanDraft } from './plan/schema'
+import { hasBaseline, planBaseline, PlanDraftSchema, planSchemaFor, type Plan, type PlanDraft } from './plan/schema'
 
 export const PLAN_REVISE_REPORT_VERSION = 1
 
@@ -63,17 +62,19 @@ export interface PlanReviseFileOptions {
 
 const DOCUMENT_FLAGS = ['ops', 'edited', 'feedback'] as const
 
+export type PlanReviseDocumentFlags = Partial<Record<(typeof DOCUMENT_FLAGS)[number], string>>
+
 /**
  * citty parses `--ops -` as `--ops ''` and drops the `-`, so the dash is read back off the raw
  * arguments: the last spelling of the flag decides, as the parsed value does. `--ops=-` parses.
  */
-export function withStdinDashes<T extends Partial<Record<(typeof DOCUMENT_FLAGS)[number], string>>>(args: T, rawArgs: readonly string[]): T {
+export function withStdinDashes(args: PlanReviseDocumentFlags, rawArgs: readonly string[]): PlanReviseDocumentFlags {
   const recovered = { ...args }
   for (const flag of DOCUMENT_FLAGS) {
     if (recovered[flag] !== '') continue
     const spellings = rawArgs.map((token, index) => (token === `--${flag}` || token.startsWith(`--${flag}=`) ? index : -1))
     const at = Math.max(...spellings)
-    if (rawArgs[at] === `--${flag}` && rawArgs[at + 1] === FEEDBACK_STDIN) recovered[flag] = FEEDBACK_STDIN as T[typeof flag]
+    if (rawArgs[at] === `--${flag}` && rawArgs[at + 1] === FEEDBACK_STDIN) recovered[flag] = FEEDBACK_STDIN
   }
   return recovered
 }
@@ -123,6 +124,7 @@ async function requireRevisableParent(path: string, plan: PlanDraft | Plan): Pro
   )
 }
 
+/** Any stat failure answers no: the read that follows reports it as a CliError, where `plan-render.ts`'s copy would throw it raw. */
 async function isSameFile(a: string, b: string): Promise<boolean> {
   try {
     const [left, right] = await Promise.all([stat(a), stat(b)])
@@ -132,26 +134,22 @@ async function isSameFile(a: string, b: string): Promise<boolean> {
   }
 }
 
-function baselineOf(plan: PlanDraft | Plan): unknown {
-  return hasBaseline(plan) ? plan.baseline : null
-}
-
-function schemaFor(parent: PlanDraft | Plan): typeof PlanSchema | typeof PlanDraftSchema {
-  return hasBaseline(parent) ? PlanSchema : PlanDraftSchema
-}
-
-async function readEditedPlan(parentPath: string, parent: PlanDraft | Plan, options: PlanReviseFileOptions): Promise<{ child: PlanDraft | Plan; raw: string }> {
-  const source = options.edited as string
-  const cwd = options.cwd ?? process.cwd()
+async function readEditedPlan(
+  parentPath: string,
+  parent: PlanDraft | Plan,
+  source: string,
+  cwd: string,
+  stdin: PlanReviseFileOptions['stdin'],
+): Promise<{ child: PlanDraft | Plan; raw: string }> {
   if (source !== FEEDBACK_STDIN && (await isSameFile(resolve(cwd, source), parentPath))) {
     throw new CliError(
       `--edited names ${parentPath} itself, which is the parent. Keep the edit in a copy, restore the plan (git checkout -- ${parentPath} if it was committed), and pass the copy as --edited.`,
     )
   }
-  const { document, raw, origin } = await readJsonWithinLimit(source, { what: 'edited plan', cwd, stdin: options.stdin })
-  const parsed = (hasBaseline(document) ? PlanSchema : PlanDraftSchema).safeParse(document)
+  const { document, raw, origin } = await readJsonWithinLimit(source, { what: 'edited plan', cwd, stdin })
+  const parsed = planSchemaFor(document).safeParse(document)
   if (!parsed.success) throw new CliError(`The edited plan on ${origin} does not match the plan schema:\n${formatSchemaIssues(parsed.error)}`)
-  if (canonicalJson(baselineOf(parsed.data)) !== canonicalJson(baselineOf(parent))) {
+  if (canonicalJson(planBaseline(parsed.data)) !== canonicalJson(planBaseline(parent))) {
     throw new CliError(
       `The edited plan on ${origin} has ${hasBaseline(parsed.data) ? 'a different baseline' : 'no baseline'} from ${parentPath}${hasBaseline(parent) ? '' : ', which is a draft'}. A revision carries the baseline over unchanged; copy the plan with its baseline as it stands and edit the copy.`,
     )
@@ -209,7 +207,7 @@ export async function planReviseFile(planPath: string, options: PlanReviseFileOp
   if (options.ops !== undefined) {
     opsDocument = (await readJsonWithinLimit(options.ops, { what: 'ops', cwd, stdin: options.stdin })).document
   } else {
-    edited = await readEditedPlan(path, plan, options)
+    edited = await readEditedPlan(path, plan, options.edited as string, cwd, options.stdin)
     let ops: PlanRevisionOp[]
     try {
       ops = diffPlans(plan, edited.child, { reason: options.message as string, ...(options.reopens === undefined ? {} : { reopens: options.reopens }) })
@@ -225,22 +223,24 @@ export async function planReviseFile(planPath: string, options: PlanReviseFileOp
     throw new CliError(`The revision of ${path} is refused, and nothing was written:\n${describeRejections(created.rejections, edited !== undefined)}`)
   }
   const { revision } = created
-  // A field no op reaches would change the edited plan's hash and yield no op: writing the copy would miss the record, writing the result would drop the edit.
-  if (edited && planDigest(edited.child) !== revision.result) {
-    throw new CliError(
-      `The ops derived from the edited plan yield ${revision.result}, not the edited plan's own ${planDigest(edited.child)}, so nothing was written. Pass the change as --ops instead.`,
-    )
-  }
-
+  // For a copy this is also where an edit no op expresses would show: writing it would miss the record, writing the result would drop the edit.
   const content = edited ? edited.raw : `${JSON.stringify(revisedDocument(document, created.plan), null, 2)}\n`
-  const reread = schemaFor(plan).safeParse(JSON.parse(content))
+  const reread = planSchemaFor(plan).safeParse(JSON.parse(content))
   if (!reread.success || planDigest(reread.data) !== revision.result) {
-    throw new Error(`plan:revise would write a plan that does not read back as ${revision.result}; nothing was written.`)
+    throw new Error(
+      `plan:revise would write a plan that does not read back as ${revision.result}; nothing was written.${edited ? ' Pass the change as --ops instead.' : ''}`,
+    )
   }
 
   // The record first: a plan written without one would sit at a hash nothing names, and the next revise would refuse it.
   const recordPath = await writePlanRevisionRecord(path, revision)
-  await writeFileAtomic(path, content)
+  try {
+    await writeFileAtomic(path, content)
+  } catch (error) {
+    throw new CliError(
+      `The revision was recorded in ${recordPath}, but ${path} could not be written (${(error as Error).message}), so the plan is still at ${revision.parent}. Leave the record, which names a result the plan never reached, and run the command again.`,
+    )
+  }
 
   const decisions = await readPlanDecisions(path)
   const waiversLeft = (decisions.decisions?.waivers ?? []).filter((waiver) => waiver.planHash === revision.parent).map((waiver) => waiver.elementId)

@@ -32,7 +32,7 @@ export function canonicalJson(value: unknown): string {
  * A draft has no identity, since the baseline it lacks is part of what is approved.
  */
 export function planHash(plan: Plan): string {
-  return createHash('sha256').update(canonicalJson(plan), 'utf8').digest('hex')
+  return planDigest(plan)
 }
 
 /**
