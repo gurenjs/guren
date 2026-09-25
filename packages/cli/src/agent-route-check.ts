@@ -543,6 +543,24 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
     )
   }
 
+  // An unparsed file declares no class to the scan, so a same-named class elsewhere wins
+  // unopposed and no collision below can name it.
+  for (const filePath of scan.unparsedFiles) {
+    push(
+      check(
+        `agent-route-controller-unparsed:${filePath}`,
+        `${filePath} unparsed`,
+        'warn',
+        `${filePath} could not be parsed, so any agent route whose action lives there was checked against `
+        + 'no body, and a route naming one of its classes may be judged against another file declaring '
+        + 'the same class name, with no collision reported.',
+        'Fix the syntax error, then re-run: bunx guren check',
+        filePath,
+      ),
+      'static',
+    )
+  }
+
   // A route read by class name alone makes every body-derived verdict unreliable when two
   // controllers share it. Narrowed to what agent routes reach by name: any other collision
   // changes no verdict here and belongs to `guren audit`, and a route the manifest placed by
