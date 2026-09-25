@@ -71,15 +71,23 @@ router.post('/login', [AuthController, 'login'], validateRequest(schema))
 
 ### `validateRequestWith(schemaFactory)`
 
-リクエストコンテキストに応じてスキーマを組み立てたい場合に使います。
+リクエストコンテキストに応じてスキーマを組み立てたい場合に使います。スキーマを返す関数は同期的に呼ばれるため、その中でログイン中のユーザーを await できません。必要な値は、`resolveIsAdmin` のように手前のミドルウェアで解決しておきます。
 
 ```ts
-import { Router, validateRequestWith } from '@guren/core'
+import { AUTH_CONTEXT_KEY, Router, defineMiddleware, validateRequestWith } from '@guren/core'
+import type { AuthContext } from '@guren/core'
+
+const resolveIsAdmin = defineMiddleware(async (ctx, next) => {
+  const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+  const user = await auth?.user<{ role: string }>()
+  ctx.set('isAdmin', user?.role === 'admin')
+  await next()
+})
 
 const router = new Router()
 
-router.put('/users/:id', [UserController, 'update'], validateRequestWith((ctx) => {
-  const isAdmin = ctx.get('user')?.role === 'admin'
+router.put('/users/:id', [UserController, 'update'], resolveIsAdmin, validateRequestWith((ctx) => {
+  const isAdmin = ctx.get('isAdmin') === true
 
   return z.object({
     name: z.string().min(1),
