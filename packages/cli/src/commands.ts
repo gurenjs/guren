@@ -32,7 +32,7 @@ import {
 import { ATTACH_ARG, FIELDS_ARG, toWriterOptions } from './commands/scaffold-options'
 import { migrateCommand, seedCommand, resetCommand, freshCommand, rollbackCommand, statusCommand } from './commands/database'
 import { introspectCommand } from './commands/introspect'
-import { planRenderCommand, planStatusCommand, planVerifyCommand, planNextCommand, planApproveCommand, planWaiveCommand, planCloseCommand } from './commands/plan'
+import { planCommand, planRenderCommand, planStatusCommand, planVerifyCommand, planNextCommand, planApproveCommand, planWaiveCommand, planCloseCommand } from './commands/plan'
 import { assertDestructiveCommandAllowed } from './commands/destructive-guard'
 import { defineCommand, keepsProcessAlive } from './define-command'
 import { UsageError } from './run-cli'
@@ -2503,6 +2503,7 @@ export const builtinSubCommands = {
   'make:validator': makeValidatorCommand,
   'spec:generate': specGenerateCommand,
   'docs:graph': docsGraphCommand,
+  plan: planCommand,
   'plan:render': planRenderCommand,
   'plan:approve': planApproveCommand,
   'plan:status': planStatusCommand,

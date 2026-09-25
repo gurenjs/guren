@@ -12,6 +12,61 @@ import { formatPlanNext, planNextFile } from '../plan-next'
 import { formatPlanWaive, planWaiveFile } from '../plan-waive'
 import { formatPlanClose, planCloseFile } from '../plan-close'
 import { readAppDefaultLocale } from '../app-locale'
+import { buildPlanPrompt, formatPlanPrompt } from '../plan/prompt'
+
+const planArgs = {
+  request: {
+    type: 'positional',
+    description: 'The change to plan, in your words. Without it, the prompt tells the agent to ask for one.',
+    required: false,
+    valueHint: '"comments on posts, authors can delete their own"',
+  },
+  'print-prompt': {
+    type: 'boolean',
+    description: 'Print the prompt, then the plan JSON Schema (draft-07).',
+  },
+  json: {
+    type: 'boolean',
+    description: 'With --print-prompt, print { prompt, schema } as JSON.',
+  },
+  revise: {
+    type: 'string',
+    description: 'Not available yet: revising a plan through a model. Edit the plan and run plan:revise.',
+    valueHint: 'comments',
+  },
+} as const
+
+// Dashes and case erased, as citty resolves a spelling to a declared name.
+const PLAN_DECLARED_ARGS = new Set(['_', ...Object.keys(planArgs)].map((name) => name.replaceAll('-', '').toLowerCase()))
+
+export const planCommand = defineCommand({
+  meta: {
+    name: 'plan',
+    description:
+      'Print the prompt and the JSON Schema an agent writes an implementation plan from (RFC 0030 §8), with --print-prompt. Calls no model and spawns nothing: the agent reading the prompt writes the plan and checks it with plan:render. Asking a model directly is not available yet.',
+  },
+  args: planArgs,
+  async run({ args }) {
+    // `revise` is a string flag, so a bare `--revise` arrives as '' and still refuses.
+    if (args.revise !== undefined) {
+      throw new CliError('guren plan --revise, which asks a model to revise a plan, is not available yet. Edit the plan, then run guren plan:revise.')
+    }
+    const undeclared = Object.keys(args).filter((name) => !PLAN_DECLARED_ARGS.has(name.replaceAll('-', '').toLowerCase()))
+    if (undeclared.length > 0) {
+      const flags = undeclared.map((name) => (name.length === 1 ? `-${name}` : `--${name}`)).join(', ')
+      throw new CliError(
+        `guren plan does not take ${flags}; it takes --print-prompt, --json and --revise. An unquoted request whose words start with - is read as flags too, so quote it: guren plan "<request>" --print-prompt.`,
+      )
+    }
+    if (!args['print-prompt']) {
+      throw new CliError(
+        'guren plan cannot ask a model for a plan yet (RFC 0030 §8). Run guren plan --print-prompt "<request>" and give its output to the agent in your session, which writes the plan and checks it with guren plan:render.',
+      )
+    }
+    const built = buildPlanPrompt(args._.join(' '))
+    console.log(args.json ? JSON.stringify(built, null, 2) : formatPlanPrompt(built))
+  },
+})
 
 export const planRenderCommand = defineCommand({
   meta: {
@@ -41,6 +96,11 @@ export const planRenderCommand = defineCommand({
         "The language the page's own labels open in (en or ja); the page can switch between them. Defaults to the plan's locale, then the application's, then en.",
       valueHint: 'ja',
     },
+    json: {
+      type: 'boolean',
+      description: 'Print { path, checks } as JSON: every check the page shows, so an agent can fix the failing ones without opening it.',
+      default: false,
+    },
   },
   async run({ args }) {
     // The application the plan is checked against, which the plan file need not sit
@@ -55,7 +115,7 @@ export const planRenderCommand = defineCommand({
       appLocale: () => readAppDefaultLocale(appRoot),
     })
 
-    console.log(rendered.path)
+    console.log(args.json ? JSON.stringify(rendered, null, 2) : rendered.path)
   },
 })
 
