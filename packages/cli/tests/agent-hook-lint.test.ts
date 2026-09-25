@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { linkOxlint, runAgentHook } from './helpers'
+import { linkOxlint, runAgentHook, shippedHookCommand } from './helpers'
 
 // The oxlint half of the edit hook (see runAgentHook for how it is driven). The
 // edited files sit outside the watched paths, so `guren check` never runs here;
@@ -9,7 +9,6 @@ import { linkOxlint, runAgentHook } from './helpers'
 // which is absolute.
 
 const template = resolve(import.meta.dir, '../templates/agent/targets/claude/hooks/check-after-edit.ts')
-const settings = resolve(import.meta.dir, '../templates/agent/targets/claude/settings.json')
 // A built-in rule keeps the test independent of which plugin the app configures.
 const CONFIG = JSON.stringify({ rules: { 'no-debugger': 'warn' } })
 
@@ -87,35 +86,45 @@ describe('check-after-edit hook: oxlint', () => {
   })
 
   describe('after the agent cd-ed into a subdirectory', () => {
-    const app = (dir: string) => {
+    const app = async (dir: string) => {
+      await linkOxlint(dir)
       writeFileSync(join(dir, '.oxlintrc.json'), CONFIG)
-      writeFileSync(join(dir, 'lib.ts'), FLAGGED_FILE)
       mkdirSync(join(dir, 'modules', 'foo'), { recursive: true })
+      writeFileSync(join(dir, 'modules', 'foo', 'lib.ts'), FLAGGED_FILE)
     }
-    const edit = (dir: string) => ({ cwd: join(dir, 'modules', 'foo'), tool_input: { file_path: join(dir, 'lib.ts') } })
+    const edit = { tool_input: { file_path: 'lib.ts' } }
+    const run = (options: Parameters<typeof runAgentHook>[4]) =>
+      runAgentHook(template, '.claude/hooks/check-after-edit.ts', edit, app, { subdir: 'modules/foo', ...options })
 
     test('judges the edited file from the app root, not the cwd', async () => {
-      const result = await runAgentHook(template, '.claude/hooks/check-after-edit.ts', edit, async (dir) => {
-        await linkOxlint(dir)
-        app(dir)
-      }, { subdir: 'modules/foo' })
+      const result = await run({})
 
       expect(result.exitCode).toBe(2)
-      expect(result.stderr).toContain('After editing lib.ts:')
+      expect(result.stderr).toContain('After editing modules/foo/lib.ts:')
       expect(result.stderr).toContain('eslint(no-debugger)')
     })
 
     test('the shipped settings.json command reaches the hook through CLAUDE_PROJECT_DIR', async () => {
-      const command = (JSON.parse(readFileSync(settings, 'utf8')) as { hooks: { PostToolUse: Array<{ hooks: Array<{ command: string }> }> } })
-        .hooks.PostToolUse[0]!.hooks[0]!.command
-      const result = await runAgentHook(template, '.claude/hooks/check-after-edit.ts', edit, async (dir) => {
-        await linkOxlint(dir)
-        app(dir)
-      }, { subdir: 'modules/foo', argv: ['bash', '-c', command], env: (dir) => ({ CLAUDE_PROJECT_DIR: dir }) })
+      const command = await shippedHookCommand('targets/claude/settings.json', 'PostToolUse')
+      const result = await run({ argv: ['bash', '-c', command], env: (dir) => ({ CLAUDE_PROJECT_DIR: dir }) })
 
       expect(result.stderr).not.toContain('Module not found')
       expect(result.exitCode).toBe(2)
       expect(result.stderr).toContain('eslint(no-debugger)')
+    })
+
+    // Claude Code keeps CLAUDE_PROJECT_DIR at the original checkout after it enters a worktree,
+    // and the session cwd (here `/`) need not be anywhere near the edited file.
+    test("judges a worktree's file from the worktree, running the project's copy", async () => {
+      const result = await runAgentHook(template, '.claude/hooks/check-after-edit.ts', { ...edit, cwd: '/' }, async (dir) => {
+        const worktree = join(dir, '.claude', 'worktrees', 'x')
+        mkdirSync(join(worktree, '.claude', 'hooks'), { recursive: true })
+        writeFileSync(join(worktree, '.claude', 'hooks', 'check-after-edit.ts'), readFileSync(template, 'utf8'))
+        await app(worktree)
+      }, { subdir: '.claude/worktrees/x/modules/foo' })
+
+      expect(result.exitCode).toBe(2)
+      expect(result.stderr).toContain('After editing modules/foo/lib.ts:')
     })
   })
 })

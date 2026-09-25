@@ -1853,13 +1853,14 @@ function reportAgentHarnessResult(result: AgentHarnessResult): void {
       `${hint.path} already exists, so it was left alone. Add ${hint.what} to it yourself:\n${hint.snippet}`,
     )
   }
-  if (result.legacyHookCommands.length > 0) {
+  for (const path of new Set(result.legacyHookCommands.map((entry) => entry.path))) {
+    // Every sync, unlike the init-only merge hints: these hooks fail, they are not merely absent.
     // JSON-quoted, so each side pastes into the file as a whole, escaped value.
-    const edits = result.legacyHookCommands.map(
-      (entry) => `  ${JSON.stringify(entry.from)}\n  -> ${JSON.stringify(entry.to)}`,
-    )
+    const edits = result.legacyHookCommands
+      .filter((entry) => entry.path === path)
+      .map((entry) => `  ${JSON.stringify(entry.from)}\n  -> ${JSON.stringify(entry.to)}`)
     consola.warn(
-      `${result.legacyHookCommands[0]!.path} runs Guren hooks by a path relative to the session cwd, ` +
+      `${path} runs Guren hooks from the session cwd, ` +
         'which breaks once the agent changes into a subdirectory. The file is yours, so it was left alone; ' +
         `replace each "command" value:\n${edits.join('\n')}`,
     )

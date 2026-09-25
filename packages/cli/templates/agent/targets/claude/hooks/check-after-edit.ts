@@ -9,8 +9,6 @@ import { existsSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 interface HookInput {
-  /** The session's cwd, which follows the agent's `cd` and a worktree it entered. */
-  cwd?: string
   tool_input?: {
     file_path?: string
   }
@@ -36,23 +34,21 @@ if (filePath === '') {
 }
 
 /**
- * The app to check: the nearest ancestor of the session cwd holding this script at
- * its own path, else the script's grandparent (`<app>/.claude/hooks/`). The same
- * rule as `gate-on-stop.ts`: the cwd follows the agent's `cd` into a subdirectory
- * or a worktree, and every path below is judged from the app root, never the cwd.
+ * The app to check: the nearest ancestor of the edited file holding this script at its
+ * own path, else the script's grandparent (`<app>/.claude/hooks/`). The command runs the
+ * project dir's copy while the file may sit in a worktree Claude entered, and every path
+ * below is judged from the app root, never from the cwd, which follows the agent's `cd`.
  */
-function appRoot(cwd: unknown): string {
+function appRoot(file: string): string {
   const installed = resolve(import.meta.dir, '../..')
   const self = relative(installed, import.meta.path)
-  if (typeof cwd === 'string' && isAbsolute(cwd)) {
-    for (let dir = cwd; ; dir = dirname(dir)) {
-      if (existsSync(join(dir, self))) return dir
-      if (dirname(dir) === dir) break
-    }
+  for (let dir = dirname(file); ; dir = dirname(dir)) {
+    if (existsSync(join(dir, self))) return dir
+    if (dirname(dir) === dir) return installed
   }
-  return installed
 }
-const root = appRoot(input.cwd)
+const editedFile = resolve(filePath)
+const root = appRoot(editedFile)
 
 /** Both sides resolved: on macOS a temp dir's real path is `/private/var/...` while the editor hands over `/var/...`. */
 function real(path: string): string {
@@ -65,7 +61,7 @@ function real(path: string): string {
 
 // POSIX separators so the prefix lists below match on Windows too; `relative()`
 // yields an absolute path across drives there, which is outside the project.
-const relPath = relative(real(root), real(resolve(filePath))).split(sep).join('/')
+const relPath = relative(real(root), real(editedFile)).split(sep).join('/')
 if (relPath === '' || isAbsolute(relPath) || relPath === '..' || relPath.startsWith('../')) {
   process.exit(0)
 }

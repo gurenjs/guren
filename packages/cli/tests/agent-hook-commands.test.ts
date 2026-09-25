@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { installAgentHarness, loadAgentTemplates } from '../src/agent-harness'
-import { AGENT_TARGETS, LEGACY_HOOK_COMMANDS, componentsForTargets, planComponents } from '../src/agent-targets'
+import { hookCommands, installAgentHarness, loadAgentTemplates } from '../src/agent-harness'
+import { AGENT_TARGETS, LEGACY_CLAUDE_HOOK_COMMANDS, componentsForTargets, planComponents } from '../src/agent-targets'
 
 // Claude Code runs a hook command in the session cwd, which follows the agent's `cd`,
 // so a command naming `.claude/…` or `.codex/…` relative to it stops resolving there.
@@ -12,20 +12,12 @@ import { AGENT_TARGETS, LEGACY_HOOK_COMMANDS, componentsForTargets, planComponen
 const HOOK_CONFIGS = ['.claude/settings.json', '.codex/hooks.json', '.cursor/hooks.json']
 const RELATIVE_HARNESS_PATH = /(?:^|[\s"'])(?:\.\/)?\.(?:claude|codex)\//u
 
-function commandsIn(config: unknown): string[] {
-  if (Array.isArray(config)) return config.flatMap(commandsIn)
-  if (config === null || typeof config !== 'object') return []
-  return Object.entries(config).flatMap(([key, value]) =>
-    key === 'command' && typeof value === 'string' ? [value] : commandsIn(value),
-  )
-}
-
 async function shippedCommands(): Promise<Map<string, string[]>> {
   const plan = planComponents(componentsForTargets([...AGENT_TARGETS]), await loadAgentTemplates(), 'App')
   const commands = new Map<string, string[]>()
   for (const file of plan) {
     if (HOOK_CONFIGS.includes(file.path)) {
-      commands.set(file.path, commandsIn((JSON.parse(file.content) as { hooks?: unknown }).hooks))
+      commands.set(file.path, hookCommands((JSON.parse(file.content) as { hooks?: unknown }).hooks))
     }
   }
   return commands
@@ -52,10 +44,10 @@ describe('shipped hook commands', () => {
   })
 
   test('each legacy command maps to a command the template ships', async () => {
-    const commands = await shippedCommands()
-    for (const entry of LEGACY_HOOK_COMMANDS) {
-      expect(commands.get(entry.path)).toContain(entry.to)
-      expect(commands.get(entry.path)).not.toContain(entry.from)
+    const commands = (await shippedCommands()).get('.claude/settings.json')
+    for (const entry of LEGACY_CLAUDE_HOOK_COMMANDS) {
+      expect(commands).toContain(entry.to)
+      expect(commands).not.toContain(entry.from)
     }
   })
 })
@@ -94,7 +86,7 @@ describe('legacy hook commands in an existing .claude/settings.json', () => {
     const result = await installAgentHarness({ cwd: dir, mode: 'sync' })
 
     expect(result.skipped).toContain('.claude/settings.json')
-    expect(result.legacyHookCommands).toEqual([...LEGACY_HOOK_COMMANDS])
+    expect(result.legacyHookCommands).toEqual(LEGACY_CLAUDE_HOOK_COMMANDS.map((entry) => ({ path: '.claude/settings.json', ...entry })))
     expect(await readFile(join(dir, '.claude/settings.json'), 'utf8')).toBe(before)
   })
 
@@ -106,7 +98,7 @@ describe('legacy hook commands in an existing .claude/settings.json', () => {
 
   test('the replacement, pasted in, clears the report', async () => {
     let text = JSON.stringify(legacySettings, null, 2)
-    for (const entry of LEGACY_HOOK_COMMANDS) text = text.replace(JSON.stringify(entry.from), JSON.stringify(entry.to))
+    for (const entry of LEGACY_CLAUDE_HOOK_COMMANDS) text = text.replace(JSON.stringify(entry.from), JSON.stringify(entry.to))
     await writeSettings(JSON.parse(text))
 
     expect((await installAgentHarness({ cwd: dir, mode: 'sync' })).legacyHookCommands).toEqual([])

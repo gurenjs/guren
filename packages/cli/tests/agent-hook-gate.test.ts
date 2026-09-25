@@ -1,17 +1,15 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { PLAN_STATE_VERSION, type PlanState } from '../src/plan/state'
-import { gateAppFiles, initGitRepo, runAgentHook, writeWorkspaceFiles } from './helpers'
+import { gateAppFiles, initGitRepo, runAgentHook, shippedHookCommand, writeWorkspaceFiles } from './helpers'
 import { HTTP_STEP, writePlanVerifyApp } from './plan-fixture'
 
 // The real gate runs against the temp app (see runAgentHook); its stage rules
 // are covered by gate.test.ts. `true`/`false` stand in for the subprocess stages.
 
 const template = resolve(import.meta.dir, '../templates/agent/core/hooks/gate-on-stop.ts')
-const codexConfig = resolve(import.meta.dir, '../templates/agent/targets/codex/hooks.json')
-const claudeSettings = resolve(import.meta.dir, '../templates/agent/targets/claude/settings.json')
 
 const ACTIVE = { stop_hook_active: false }
 
@@ -130,8 +128,7 @@ describe('gate-on-stop hook (Claude Code / Codex contract)', () => {
   })
 
   test("the shipped Codex command finds the app's .codex/ upward from a subdirectory", async () => {
-    const command = (JSON.parse(readFileSync(codexConfig, 'utf8')) as { hooks: { Stop: Array<{ hooks: Array<{ command: string }> }> } })
-      .hooks.Stop[0]!.hooks[0]!.command
+    const command = await shippedHookCommand('targets/codex/hooks.json', 'Stop')
     const result = await runAgentHook(
       template,
       '.codex/hooks/gate-on-stop.ts',
@@ -148,12 +145,11 @@ describe('gate-on-stop hook (Claude Code / Codex contract)', () => {
   })
 
   test('the shipped Claude Code command gates the app from a subdirectory the agent cd-ed into', async () => {
-    const command = (JSON.parse(readFileSync(claudeSettings, 'utf8')) as { hooks: { Stop: Array<{ hooks: Array<{ command: string }> }> } })
-      .hooks.Stop[0]!.hooks[0]!.command
+    const command = await shippedHookCommand('targets/claude/settings.json', 'Stop')
     const result = await runAgentHook(
       template,
       '.claude/hooks/gate-on-stop.ts',
-      (dir: string) => ({ ...ACTIVE, cwd: join(dir, 'app/Http') }),
+      ACTIVE,
       async (dir) => {
         initGitRepo(dir)
         await failingApp(dir)
@@ -172,7 +168,7 @@ describe('gate-on-stop hook (Claude Code / Codex contract)', () => {
     const result = await runAgentHook(
       template,
       '.claude/hooks/gate-on-stop.ts',
-      (dir: string) => ({ ...ACTIVE, cwd: join(dir, '.claude/worktrees/x/app') }),
+      ACTIVE,
       async (dir) => {
         await writeFile(join(dir, '.gitignore'), '.claude/worktrees/\nnode_modules/\n')
         git(dir, 'init', '-q')

@@ -6,7 +6,6 @@ import process from 'node:process'
 import { fileExists, readIfExists, toPosixRelative } from './discovery'
 import {
   DETECTABLE_COMPONENTS,
-  LEGACY_HOOK_COMMANDS,
   componentsForTargets,
   managedNamespaces,
   normalizeComponents,
@@ -144,41 +143,27 @@ async function scriptsEnableMcp(cwd: string): Promise<boolean> {
   }
 }
 
-/** Every `command` string under the `hooks` key of a hooks config; nothing when it does not parse. */
-function hookCommands(raw: string): string[] {
+/** Every `command` string in a hooks config value, at any depth. */
+export function hookCommands(config: unknown): string[] {
+  if (Array.isArray(config)) return config.flatMap(hookCommands)
+  if (config === null || typeof config !== 'object') return []
+  return Object.entries(config).flatMap(([key, value]) =>
+    key === 'command' && typeof value === 'string' ? [value] : hookCommands(value),
+  )
+}
+
+/** The superseded commands `file` still carries in `current`; nothing when it does not parse. */
+function supersededCommands(file: PlannedFile, current: string): AgentHarnessResult['legacyHookCommands'] {
+  const superseded = file.merge?.supersedes ?? []
+  if (superseded.length === 0) return []
   let config: unknown
   try {
-    config = JSON.parse(raw)
+    config = JSON.parse(current)
   } catch {
     return []
   }
-  const commands: string[] = []
-  const visit = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      node.forEach(visit)
-    } else if (node !== null && typeof node === 'object') {
-      for (const [key, value] of Object.entries(node)) {
-        if (key === 'command' && typeof value === 'string') commands.push(value)
-        else visit(value)
-      }
-    }
-  }
-  visit((config as { hooks?: unknown } | null)?.hooks)
-  return commands
-}
-
-/** The shipped legacy hook commands still present in the user-owned configs this run skipped. */
-async function findLegacyHookCommands(
-  cwd: string,
-  skipped: readonly string[],
-): Promise<AgentHarnessResult['legacyHookCommands']> {
-  const found: AgentHarnessResult['legacyHookCommands'] = []
-  for (const path of new Set(LEGACY_HOOK_COMMANDS.map((entry) => entry.path))) {
-    if (!skipped.includes(path)) continue
-    const commands = new Set(hookCommands((await readIfExists(cwd, path).catch(() => null)) ?? ''))
-    found.push(...LEGACY_HOOK_COMMANDS.filter((entry) => entry.path === path && commands.has(entry.from)))
-  }
-  return found
+  const commands = new Set(hookCommands((config as { hooks?: unknown } | null)?.hooks))
+  return superseded.filter((entry) => commands.has(entry.from)).map((entry) => ({ path: file.path, ...entry }))
 }
 
 /** Load every file under `templates/agent` keyed by template-relative POSIX path. */
@@ -360,6 +345,7 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
   const unchanged: string[] = []
   const skipped: string[] = []
   const mergeHints: AgentHarnessResult['mergeHints'] = []
+  const legacyHookCommands: AgentHarnessResult['legacyHookCommands'] = []
 
   const plan = planComponents(components, templates, appTitle)
   for (const file of plan) {
@@ -371,13 +357,14 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
     const overwrite = force || (mode === 'sync' && file.managed)
     if (exists && !overwrite) {
       skipped.push(file.path)
-      // Onboarding guidance, not a recurring nag: sync stays quiet about a
-      // config the user has decided to keep without the Guren endpoint.
-      if (file.merge && mode === 'init') {
-        const current = (await readIfExists(cwd, file.path)) ?? ''
-        if (!current.includes(file.merge.marker)) {
+      if (file.merge) {
+        const current = (await readIfExists(cwd, file.path).catch(() => null)) ?? ''
+        // Onboarding guidance, not a recurring nag: sync stays quiet about a
+        // config the user has decided to keep without the Guren endpoint.
+        if (mode === 'init' && !current.includes(file.merge.marker)) {
           mergeHints.push({ path: file.path, snippet: file.content, what: file.merge.hint })
         }
+        legacyHookCommands.push(...supersededCommands(file, current))
       }
       continue
     }
@@ -440,6 +427,6 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
     pruned,
     mcpEndpointNotEnabled: !(await scriptsEnableMcp(cwd)),
     mergeHints,
-    legacyHookCommands: await findLegacyHookCommands(cwd, skipped),
+    legacyHookCommands,
   }
 }
