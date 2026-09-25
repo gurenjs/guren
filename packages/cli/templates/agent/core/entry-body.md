@@ -172,4 +172,4 @@ Full client and assertion reference: `__RULES_DIR__/testing.md`.
 | `routes/web.ts` | Web route definitions |
 | `app/Providers/` | Service providers |
 | `resources/js/pages/` | React page components |
-| `__RULES_DIR__/` | Verified API rules (each file's `globs` frontmatter states the covered paths) |
+| `__RULES_DIR__/` | Verified API rules (each file's `paths` frontmatter states the covered paths) |

@@ -219,14 +219,16 @@ bun test
 
 ```markdown
 ---
-description: Guren routing & codegen — RouteContractOptions, schema binding, the Zod→ApiRoutes matrix, middleware
-globs:
+paths:
   - "routes/**"
   - "app/Http/Validators/**"
+  - "modules/*/routes.ts"
+  - "modules/*/routes/**"
+  - "modules/*/app/Http/Validators/**"
 ---
 ```
 
-肝は `globs` の行です。この rule が読み込まれるのは、エージェントが `routes/` 配下のファイルを編集するときだけです。`controllers-http.md` は `app/Http/**` に対して同じように働きます。だからエージェントが `routes/web.ts` を開いた時点で、`router.get(...)` の正確な形、options オブジェクト、`.name()` が、このバージョンのフレームワークで検証済みの内容として、必要なタイミングで手渡されます。正しい定義が目の前にあるので、記憶を頼りにルート API をでっち上げることもありません。さらにファイルを保存すると `PostToolUse` hook が `guren check` を走らせ、存在しないコントローラーメソッドを指すルートがあれば報告します。
+肝は `paths` のリストです。この rule が読み込まれるのは、エージェントが `routes/` 配下(またはモジュールのルート)のファイルを扱うときだけです。`controllers-http.md` は `app/Http/**` に対して同じように働きます。だからエージェントが `routes/web.ts` を開いた時点で、`router.get(...)` の正確な形、options オブジェクト、`.name()` が、このバージョンのフレームワークで検証済みの内容として、必要なタイミングで手渡されます。正しい定義が目の前にあるので、記憶を頼りにルート API をでっち上げることもありません。さらにファイルを保存すると `PostToolUse` hook が `guren check` を走らせ、存在しないコントローラーメソッドを指すルートがあれば報告します。
 
 **手元にエージェントが無い場合は、** 3 ファイルです。(エージェントは `bunx guren make:controller Contact` から始めるかもしれません。これは `pages.contact.Index` をレンダリングするコントローラーの骨組みを書きます。その習慣については第 3 章で扱います。)
 
