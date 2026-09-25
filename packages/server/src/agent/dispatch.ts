@@ -35,11 +35,10 @@ export interface BuildToolRequestOptions {
   preflight?: boolean
   /**
    * Which protocol surface the call arrived on, announced as
-   * `X-Guren-Agent-Surface`; defaults to `'mcp'`. It borrows the audit trail's
-   * vocabulary ({@link AgentSurface}), but the trail's own `surface` comes from
-   * the adapter. The auth middlewares read its presence to refuse with JSON
-   * rather than a redirect; nothing may authorize on it, since any client sets
-   * any header it likes.
+   * `X-Guren-Agent-Surface`; defaults to `'mcp'`. The audit trail's own `surface`
+   * comes from the adapter, not from here. The auth guards read its presence to
+   * refuse with JSON rather than a redirect; nothing may authorize on it, since
+   * any client sets any header it likes.
    */
   surface?: AgentSurface
 }
