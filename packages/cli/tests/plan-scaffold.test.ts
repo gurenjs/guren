@@ -942,6 +942,26 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
         expect(await mountRefused(app)).toContain('routes/web.ts already declares or imports registerWidgetRoutes')
       }
     })
+
+    test('should refuse an entry whose default export is a function or class of the registrar’s name', async () => {
+      for (const [name, declaration] of [['mount-default-function', 'export default function registerWidgetRoutes(): void {}'], ['mount-default-class', 'export default class registerWidgetRoutes {}']] as const) {
+        const app = await scaffolded(name)
+        await Bun.write(join(app.dir, 'routes/web.ts'), `${WEB_ROUTES}\n${declaration}\n`)
+        expect(await mountRefused(app)).toContain('routes/web.ts already declares or imports registerWidgetRoutes')
+      }
+    })
+
+    test('should refuse an entry binding the registrar’s name by destructuring', async () => {
+      for (const [name, declaration] of [
+        ['mount-destructured-object', 'const { registerWidgetRoutes } = { registerWidgetRoutes: (): void => {} }'],
+        ['mount-destructured-array', 'const [registerWidgetRoutes] = [(): void => {}]'],
+        ['mount-destructured-nested', 'const { routes: [{ fn: registerWidgetRoutes = (): void => {} }] } = { routes: [{ fn: undefined }] }'],
+      ] as const) {
+        const app = await scaffolded(name)
+        await Bun.write(join(app.dir, 'routes/web.ts'), `${WEB_ROUTES}\n${declaration}\n`)
+        expect(await mountRefused(app)).toContain('routes/web.ts already declares or imports registerWidgetRoutes')
+      }
+    })
   })
 
   describe('guren check on the routes file the scaffold wrote', () => {

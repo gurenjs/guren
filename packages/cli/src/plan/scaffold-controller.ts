@@ -169,10 +169,7 @@ export class PlanHttpEmitter {
     return this.symbols.docs.has(doc) ? ['', `@docs ${doc}`] : []
   }
 
-  /**
-   * The planned validators and policy ability run for real, before the 501: a request the plan
-   * rejects is rejected already. No response is written, since the readers credit the one named.
-   */
+  /** A validator the plan names but the file cannot import is listed as unwritten, never emitted. */
   private validation(action: PlanAction, field: (typeof CONTRACT_FIELDS)[number], imports: Imports): string[] {
     const id = action[field]
     if (!id) return []

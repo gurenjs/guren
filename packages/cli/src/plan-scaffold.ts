@@ -9,7 +9,7 @@
 
 import { readFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
-import type { File } from '@babel/types'
+import type { File, Node } from '@babel/types'
 
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { CliError } from './cli-error'
@@ -375,14 +375,25 @@ export async function planScaffoldMountFile(planPath: string, options: PlanScaff
 function topLevelBindings(ast: File): Set<string> {
   const names = new Set<string>()
   for (const node of ast.program.body) {
-    const declaration = node.type === 'ExportNamedDeclaration' ? node.declaration : node
+    const declaration = node.type === 'ExportNamedDeclaration' || node.type === 'ExportDefaultDeclaration' ? node.declaration : node
     if (declaration?.type === 'ImportDeclaration') for (const specifier of declaration.specifiers) names.add(specifier.local.name)
     else if ((declaration?.type === 'FunctionDeclaration' || declaration?.type === 'ClassDeclaration') && declaration.id) names.add(declaration.id.name)
     else if (declaration?.type === 'VariableDeclaration') {
-      for (const declarator of declaration.declarations) if (declarator.id.type === 'Identifier') names.add(declarator.id.name)
+      for (const declarator of declaration.declarations) addPatternNames(declarator.id, names)
     }
   }
   return names
+}
+
+/** The names a declaration's pattern binds, destructured ones included. */
+function addPatternNames(pattern: Node | null, names: Set<string>): void {
+  if (pattern?.type === 'Identifier') names.add(pattern.name)
+  else if (pattern?.type === 'AssignmentPattern') addPatternNames(pattern.left, names)
+  else if (pattern?.type === 'RestElement') addPatternNames(pattern.argument, names)
+  else if (pattern?.type === 'ArrayPattern') for (const element of pattern.elements) addPatternNames(element, names)
+  else if (pattern?.type === 'ObjectPattern') {
+    for (const property of pattern.properties) addPatternNames(property.type === 'RestElement' ? property : property.value, names)
+  }
 }
 
 function unmountedRoutes(plan: Plan, derivation: PlanTaskDerivation, stepId: string, created: readonly string[]): PlanScaffoldReport['unmounted'] {

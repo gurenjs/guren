@@ -509,7 +509,10 @@ function awaitingMountResult(relPath: string, entryFile: string, scaffolded: Sca
   )
 }
 
-/** Whether a project routes file is reached from the entry registrar, by this check's own reach; no plan is read. */
+/**
+ * Whether a project routes file is reached from the entry registrar, by this check's own reach; no plan is read.
+ * Judged against the default entry, not a `--routes` override: `--mount` and `plan:next` take none.
+ */
 export async function isRoutesFileMounted(cwd: string, relPath: string): Promise<boolean> {
   const results = await checkRouteRegistrarWiring({ cwd, cache: new ParseCache(), plans: false })
   return results.some((result) => result.key === `route-registrar:${relPath}` && result.status === 'pass')
