@@ -231,9 +231,9 @@ export interface ScaffoldFileEntry {
 /**
  * `lstat`, not `access`: a `wx` write refuses a dangling symlink, so a probe that followed
  * it would pass a path the write then stops on. A probe that cannot answer throws, so the
- * batch stops before its first write. Local to avoid a cycle: discovery.ts imports this module.
+ * batch stops before its first write. Here rather than in discovery.ts, which imports this module.
  */
-async function pathExists(path: string): Promise<boolean> {
+export async function pathExists(path: string): Promise<boolean> {
   try {
     await lstat(path)
     return true

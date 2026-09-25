@@ -1172,6 +1172,70 @@ on `make:feature` being the writer. The plan-driven emitter above writes no
 pages, so whether an API-only slice now gets a scaffold step is open; until it
 is decided, task derivation keeps leaving it out.
 
+**Amended in implementation (`plan:scaffold`, first of three changes):** what
+shipped, and where it stops.
+
+- `guren plan:scaffold <plan> --step <id>` writes the tables and the models, and
+  nothing else yet. Per model the step adds, it appends the table to the root
+  `db/schema.ts` through `appendTableToSchema()`, in the schema's dialect. The
+  table carries every column option `plan/status.ts` compares (type, nullable,
+  unique, index, default, `columnName`, `withTimezone`, precision and scale, the
+  primary key, the foreign key and its `onDelete`) and the model's multi-column
+  indexes. The model file is `app/Models/<Name>.ts`, with `fillable` and the
+  relationships, keyed by the foreign keys the plan states. A relationship whose
+  target or keys do not exist yet (a `hasMany` to a model a later task adds) is
+  left out and listed. The second change adds validators, resources and
+  policies; the third adds the controller stubs and the routes file (D5), which
+  the `http` step mounts (D3). `plan:next` and the harness skill say what the
+  command writes today and that the `http` step writes the rest by hand.
+- The emitters live in `packages/cli/src/plan/scaffold.ts`, a pure function from
+  the step and the facts the command reads (the dialect, every root's tables, the
+  root's model classes). `planScaffoldCoverage()` there is the one rule for which
+  of a step's `generates` it writes, which its report and `plan:next` share. The
+  column builders are factored out of the resource blueprint into
+  `packages/cli/src/schema-columns.ts`, which `guren add resource` now writes
+  through, byte for byte as before. The model template of `make:model` gained
+  `fillable` and relationships (`buildModelSource()`), with its output unchanged.
+- Round trip: emitted into a real application and read back by `plan:status`'s
+  own readers, every planned property reads `match` except where no reader
+  looks. `references.onDelete` is unread in every dialect. On MySQL, a `uuid`
+  column (`varchar`) and `withTimezone` are unread. SQLite's moded
+  `integer`/`text` columns (boolean, date, datetime, json, uuid), its sizeless
+  `numeric`, `withTimezone` and a `unixepoch()` default are unread. MySQL's
+  `now()` default is written `CURRENT_TIMESTAMP`, which the readers normalize,
+  where drizzle's `defaultNow()` renders `(now())`, which they compare as text.
+  A composite primary key is written as `primaryKey({ columns })`, and
+  `plan/status.ts` reads a column as in the key when a readable composite key
+  lists it (a table has one), so a pivot's key columns verify. No emitted table has been migrated against a database in these tests;
+  they prove the readers and `tsc` accept the output.
+- The project root only: an element carrying `module`, or a foreign key or
+  relationship whose target carries one, is refused. An API-only application is
+  refused, as derivation gives it no scaffold step. A draft is refused too, where
+  `plan:next` accepts one: `plan:scaffold` writes code, and a draft is what
+  nobody approved. `plan:next` tells a draft to approve first.
+- The step must be the one `plan:next` marked, so what the command writes is
+  that step's measured work and the next `plan:next` accepts the dirty tree as
+  the marked step's own.
+- Every refusal comes before the first write: the step kind, the mark, a module,
+  a foreign key to a table not declared yet, a MySQL key over a `text` or `json`
+  column (a primary key, `unique`, an index, or a foreign key, which MySQL
+  indexes), which drizzle-kit refuses and MySQL rejects without a prefix length,
+  a `default` of `null`, and any target that exists
+  (the model file or class, the schema export, the table name in any root). A
+  re-run of a scaffolded step is therefore refused on the targets it wrote, with
+  the application unchanged; what is left for the step is `plan:verify`. It runs
+  no codegen and no migration.
+- It writes `db/schema.ts` first, since the model files import its exports. A
+  write that fails after the first one names the files already on disk, since a
+  re-run would refuse on them as if the step were done.
+- A relationship left out of the model leaves it `drifted` in `plan:status`
+  until the relationship is added; the report says so beside each one.
+- Like `plan:verify`, it does not consult the freshness hold of §4: `plan:next`
+  is what holds a step whose context went stale, and the command runs only on
+  the step `plan:next` marked.
+- `views` are no longer `scaffoldable` in the task derivation (D4), so a scaffold
+  step's `generates` names no page.
+
 A step whose remaining work exceeds a threshold (files touched, elements
 covered) is split, pages by screen group first. The threshold starts at five
 files and is tuned from the metrics in §7.

@@ -820,6 +820,55 @@ describe('judgePlan', () => {
     })
 
     test.each([
+      [['id', 'title'], 'match'],
+      [['id', 'authorId'], 'differ'],
+    ] as const)('should read a column in the composite primary key %j by membership, as %s', (columns, verdict) => {
+      const table = { ...POSTS_TABLE, constraints: [{ kind: 'primaryKey', columns: [...columns] }] } as SourcedSchemaTable
+
+      const element = only(judgePlan(withColumn(ADD, { primaryKey: true }), app({ tables: [table, USERS_TABLE] })), 'c')
+
+      expect(element.properties.find((property) => property.property === 'primaryKey')?.verdict).toBe(verdict)
+    })
+
+    test.each([
+      ['a primary key over columns it cannot name', { constraints: [{ kind: 'primaryKey', columns: [], opaqueColumns: true }] }],
+      ['constraints built where it cannot follow', { constraints: [], opaqueConstraints: true }],
+    ] satisfies Array<[string, Partial<SourcedSchemaTable>]>)('should read a primary key as unknown, not absent, on a table with %s', (_, hidden) => {
+      const table: SourcedSchemaTable = { ...POSTS_TABLE, ...hidden }
+
+      const element = only(judgePlan(withColumn(ADD, { primaryKey: true }), app({ tables: [table, USERS_TABLE] })), 'c')
+
+      expect(element.properties.find((property) => property.property === 'primaryKey')).toMatchObject({ verdict: 'unknown', reason: expect.stringContaining('constraints') })
+    })
+
+    test.each([
+      ['pg', 'match'],
+      ['mysql', 'match'],
+      // SQLite's rowid tables take NULL in a composite key column that declares no `.notNull()`.
+      ['sqlite', 'differ'],
+    ] as const)('should read a %s column in a composite primary key, declared without .notNull(), as nullable: false %s', (dialect, verdict) => {
+      const columns = POSTS_TABLE.columns.map((column) => (column.name === 'title' ? { ...column, notNull: false } : column))
+      const table: SourcedSchemaTable = { ...POSTS_TABLE, dialect, columns, constraints: [{ kind: 'primaryKey', columns: ['id', 'title'] }] }
+
+      const element = only(judgePlan(withColumn(ADD, { primaryKey: true, nullable: false }), app({ tables: [table, USERS_TABLE] })), 'c')
+
+      expect(element.properties.find((property) => property.property === 'nullable')?.verdict).toBe(verdict)
+    })
+
+    test.each([
+      ['pg', 'unknown'],
+      ['sqlite', 'differ'],
+    ] as const)('should read nullable on a %s table whose constraints are hidden, with no .notNull(), as %s', (dialect, verdict) => {
+      const columns = POSTS_TABLE.columns.map((column) => (column.name === 'title' ? { ...column, notNull: false } : column))
+      const table: SourcedSchemaTable = { ...POSTS_TABLE, dialect, columns, constraints: [], opaqueConstraints: true }
+
+      const element = only(judgePlan(withColumn(ADD, { nullable: false }), app({ tables: [table, USERS_TABLE] })), 'c')
+
+      expect(element.properties.find((property) => property.property === 'nullable')?.verdict).toBe(verdict)
+      if (verdict === 'unknown') expect(element.properties.find((property) => property.property === 'nullable')?.reason).toContain('constraints')
+    })
+
+    test.each([
       ['now()', { kind: 'now' }, 'match'],
       ["'draft'", { kind: 'value', text: '"draft"' }, 'match'],
       ["'draft'", { kind: 'value', text: "'live'" }, 'differ'],
