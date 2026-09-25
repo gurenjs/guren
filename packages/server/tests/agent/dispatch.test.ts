@@ -5,6 +5,7 @@ import { deriveAgentTools, type DerivedAgentTool } from '../../src/agent/derive'
 import { advertisesStructuredOutput, buildToolRequest, mapToolResponse } from '../../src/agent/dispatch'
 import { createApp } from '../../src/http/Application'
 import { attachAuthContext, requireAuthenticated, requireGuest } from '../../src/http/middleware/auth'
+import { requireVerifiedEmail } from '../../src/auth/email-verification'
 import { createMockAuthContext } from '@guren/testing'
 
 function toolFor(register: (router: Router) => void, name: string): DerivedAgentTool {
@@ -368,6 +369,17 @@ describe('auth refusals on a tool call', () => {
           guest.get('/login-form', () => Response.json({ form: true })).name('login.show').agent({})
         })
     }, 'login.show')
+
+    expect(outcome.status).toBe(403)
+    expect(outcome.isError).toBe(true)
+  })
+
+  test('should come back as a 403 error result for an unverified address', async () => {
+    const { outcome } = await dispatch((router) => {
+      router.middleware(requireVerifiedEmail({ getUser: async () => ({ emailVerifiedAt: null }) })).group((verified) => {
+        verified.get('/billing', () => Response.json({ plan: 'pro' })).name('billing.show').agent({})
+      })
+    }, 'billing.show')
 
     expect(outcome.status).toBe(403)
     expect(outcome.isError).toBe(true)

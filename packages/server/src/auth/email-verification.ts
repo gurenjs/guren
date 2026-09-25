@@ -276,8 +276,7 @@ export function requireVerifiedEmail(options: {
     const user = await getUser(ctx)
 
     if (!isEmailVerified(user)) {
-      // A tool caller cannot follow a redirect, and the dispatcher maps a 3xx
-      // to a success result.
+      // Same rule as requireAuthenticated: see internal/agent-request.ts.
       if (isAgentToolRequest(ctx)) {
         return new Response(JSON.stringify({ message: 'Email address is not verified' }), {
           status: 403,
