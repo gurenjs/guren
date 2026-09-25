@@ -303,6 +303,9 @@ describe('GUREN_API_DIGEST', () => {
   const tokensByRuleFile: Record<string, string[]> = {
     'orm-models.md': [
       '`=` `!=` `>` `<` `>=` `<=` `like` `in` `not in` `is null` `is not null`',
+      'whereNull(field)',
+      'whereNotNull(field)',
+      "'is null', null)",
       "belongsToMany(name, related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey = 'id', relatedKey = 'id')",
       "hasManyThrough(name, related, through, firstKey, secondKey, localKey = 'id', secondLocalKey = 'id')",
       'paginate(result, { path?, query?, fragment? })',
@@ -355,6 +358,8 @@ describe('GUREN_API_DIGEST', () => {
   for (const [guideFile, tokens] of Object.entries({
     'health-checks.md': ['createHealthManager', 'health.middleware(', 'DatabaseCheck(db,'],
     'authentication.md': ['createRedirectSafetyMiddleware', 'allowedHosts'],
+    'api-tokens.md': ['createBearerTokenMiddleware', 'DatabaseApiTokenStore', 'deleteExpired()', "abilitiesMode: 'text'", 'getApiToken(ctx)'],
+    'rate-limiting.md': ['createRateLimitMiddleware', 'keyGenerator', 'trustProxy: true', 'keyPrefix'],
   })) {
     it(`stays in sync with the docs/en/guides/${guideFile} guide`, async () => {
       const guideText = await readFile(new URL(`../../../docs/en/guides/${guideFile}`, import.meta.url), 'utf8')

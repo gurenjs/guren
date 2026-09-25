@@ -12,9 +12,9 @@ import type { PlanAppState } from './plan/app-state'
 import { planOutputPath, writeFileAtomic } from './plan/beside'
 import { isPlanLocale, matchPlanLocale, PLAN_LOCALES, type PlanLocale } from './plan/locales'
 import { planChangesExisting, planImpact } from './plan/impact'
-import { hasBaseline, renderPlanHtml } from './plan/render'
+import { renderPlanHtml } from './plan/render'
 import { settleBuiltFindings, validatePlan, type PlanCheckResult } from './plan/validate'
-import { PlanDraftSchema, PlanSchema, type Plan, type PlanDraft } from './plan/schema'
+import { planSchemaFor, type Plan, type PlanDraft } from './plan/schema'
 
 export interface RenderPlanFileOptions {
   /**
@@ -45,7 +45,7 @@ export interface RenderedPlanFile {
  * identity; anything else is a draft.
  */
 export function parsePlanDocument(document: unknown): PlanDraft | Plan {
-  const parsed = (hasBaseline(document) ? PlanSchema : PlanDraftSchema).safeParse(document)
+  const parsed = planSchemaFor(document).safeParse(document)
   if (parsed.success) return parsed.data
   throw new CliError(`The plan does not match the plan schema:\n${formatSchemaIssues(parsed.error)}`)
 }

@@ -2,6 +2,7 @@ import { consola } from 'consola'
 import { defineCommand } from '../define-command'
 import { CHECK_SUITES, ciSuiteConflict, runCheck, renderCheckReport } from '../check'
 import { gatingResults } from '../check-result'
+import { recheckInChild, runCheckFixes, settleFixRuns } from '../check-fix'
 import { runAudit, renderAuditReport } from '../audit'
 import { runGate, renderGateReport } from '../gate'
 
@@ -55,9 +56,19 @@ export const checkCommand = defineCommand({
       type: 'boolean',
       description: 'Restrict file-scanning checks to files changed vs. the merge base with main.',
     },
+    // Positive on purpose, so citty's negation lands on this key; `default: true` prints `--no-introspect`.
+    introspect: {
+      type: 'boolean',
+      default: true,
+      description: 'Judge from source only, without introspecting the app (RFC 0026).',
+    },
     ci: {
       type: 'boolean',
       description: 'Exit non-zero when any check fails or warns (runs the full suite; for CI gates).',
+    },
+    fix: {
+      type: 'boolean',
+      description: 'Run the guren command each finding names as its fix (codegen, spec:generate: generated files only), then check again.',
     },
   },
   async run({ args }) {
@@ -69,12 +80,18 @@ export const checkCommand = defineCommand({
       process.exitCode = 1
       return
     }
+    if (args.ci && args.fix) {
+      consola.error('--fix regenerates the files a --ci gate exists to catch drifting. Run guren check --fix locally and commit what it writes.')
+      process.exitCode = 1
+      return
+    }
 
-    const report = await runCheck({
+    const options = {
       cwd: args.app,
       json: Boolean(args.json),
       routesFile: args.routes,
       arch: Boolean(args.arch),
+      introspect: args.introspect !== false,
       docs: Boolean(args.docs),
       spec: Boolean(args.spec),
       i18n: Boolean(args.i18n),
@@ -82,7 +99,17 @@ export const checkCommand = defineCommand({
       env: Boolean(args.env),
       plan: Boolean(args.plan),
       changed: Boolean(args.changed),
-    })
+    }
+    let report = await runCheck(options)
+    if (args.fix) {
+      let fixes = await runCheckFixes(report)
+      if (fixes.length > 0) {
+        report = (await recheckInChild(options, report.cwd)) ?? (await runCheck(options))
+        fixes = settleFixRuns(fixes, report)
+      }
+      report.fixes = fixes
+      if (fixes.some((run) => !run.ok)) process.exitCode = 1
+    }
 
     if (args.json) {
       console.log(JSON.stringify(report, null, 2))
@@ -177,6 +204,12 @@ export const auditCommand = defineCommand({
       default: true,
       description: 'Scan dependencies via bun audit (requires registry access). Disable with --no-deps.',
     },
+    // Same shape as check's `introspect` flag above.
+    introspect: {
+      type: 'boolean',
+      default: true,
+      description: 'Judge routes from the routes file only, without introspecting the app (RFC 0026).',
+    },
   },
   async run({ args }) {
     const report = await runAudit({
@@ -184,6 +217,7 @@ export const auditCommand = defineCommand({
       routesFile: args.routes,
       auditConfigFile: args['audit-config'],
       deps: args.deps,
+      introspect: args.introspect !== false,
     })
 
     if (args.json) {

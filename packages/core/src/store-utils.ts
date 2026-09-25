@@ -24,3 +24,32 @@ export function decodeJsonColumn<T>(value: unknown, fallback: T): T {
   }
   return (value ?? fallback) as T
 }
+
+/** Drizzle's public column facts: the same `dataType` the ORM's `columnKind()` reads, plus the declared SQL type. */
+interface ColumnShape {
+  dataType?: unknown
+  getSQLType?: () => string
+}
+
+/** `timestamp with time zone`, `timestamp(3)`, `datetime`, `date`, `time`: every driver binds a Date to these itself. */
+const TEMPORAL_SQL_TYPE = /^(?:timestamp|datetime|date|time)\b/i
+
+/**
+ * A Date as the column declares it: temporal columns take the Date (drizzle and
+ * the pg/mysql drivers encode it), text takes the ISO string the SQLite scaffold's
+ * `$defaultFn` writes, integer takes epoch ms (`timestamp_ms`, what `toDate` reads).
+ * bun:sqlite cannot bind a Date, and a where clause binding one matches no row.
+ * `dataType` is split the way the ORM's `columnKind()` splits it (1.x: `number int53`).
+ */
+export function toColumnValue<T>(table: unknown, field: string, value: T): T | string | number | bigint {
+  if (!(value instanceof Date)) return value
+  const column = (table as Record<string, ColumnShape | undefined> | null)?.[field]
+  if (!column || typeof column !== 'object') return value
+  const sqlType = typeof column.getSQLType === 'function' ? column.getSQLType() : ''
+  if (TEMPORAL_SQL_TYPE.test(sqlType)) return value
+  const kind = typeof column.dataType === 'string' ? column.dataType.split(' ')[0] : ''
+  if (kind === 'string') return value.toISOString()
+  if (kind === 'number') return value.getTime()
+  if (kind === 'bigint') return BigInt(value.getTime())
+  return value
+}

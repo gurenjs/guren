@@ -8,16 +8,18 @@
  * over one slug lose each other's records.
  */
 
-import { createHash } from 'node:crypto'
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 
 import { z } from 'zod'
 
 import { formatSchemaIssues } from '../cli-error'
-import { canonicalJson } from './identity'
-import type { Plan, PlanDraft } from './schema'
+import { planFileStem } from './beside'
+import { planDigest } from './identity'
 import { PLAN_VERIFY_COMMANDS } from './tasks'
+
+// What keys a record, exported beside the records so their readers and tests import one module.
+export { planDigest }
 
 export const PLAN_STATE_VERSION = 1
 
@@ -47,6 +49,32 @@ const PlanFingerprintSchema = z.object({
   }),
 })
 
+const PlanStepWorkFileSchema = z.object({
+  /** App-relative, POSIX separators. */
+  path: z.string(),
+  /** `null` for a binary file, which `git diff --numstat` prints as `-`. */
+  added: z.number().int().nonnegative().nullable(),
+  removed: z.number().int().nonnegative().nullable(),
+})
+
+/**
+ * Files touched and lines changed by the work that implemented a step (RFC 0030 §7), from the
+ * commit the step's mark names to the working tree. `settled` once a run of the step verified:
+ * later runs, a drift re-check among them, carry it unchanged. See `plan/work.ts`.
+ */
+export const PlanStepWorkSchema = z.discriminatedUnion('measured', [
+  z.object({
+    measured: z.literal(true),
+    from: z.string(),
+    files: z.array(PlanStepWorkFileSchema),
+    /** Summed over the text files. */
+    added: z.number().int().nonnegative(),
+    removed: z.number().int().nonnegative(),
+    settled: z.boolean(),
+  }),
+  z.object({ measured: z.literal(false), reason: z.string(), settled: z.boolean() }),
+])
+
 export const PlanStepRecordSchema = z.object({
   outcome: z.enum(['verified', 'failed', 'blocked', 'incomplete']),
   /** {@link planDigest} of the plan the step was verified against. */
@@ -63,6 +91,8 @@ export const PlanStepRecordSchema = z.object({
    */
   waived: z.array(z.string()).default([]),
   fingerprint: PlanFingerprintSchema,
+  /** Absent on a record written before the field existed. */
+  work: PlanStepWorkSchema.optional(),
 })
 
 const PlanStallSchema = z.object({
@@ -84,6 +114,11 @@ const PlanActiveStepSchema = z.object({
   plan: z.string(),
   step: z.string(),
   startedAt: z.string(),
+  /**
+   * The commit HEAD named when the step was first marked, kept when it is marked again. `null`
+   * where git could not read HEAD; absent on a mark written before the field existed.
+   */
+  from: z.string().nullable().optional(),
   /** Stops the hook has blocked on this step since it was marked. */
   continuations: z.number().int().nonnegative(),
   /** A digest of the record the last continuation was blocked on; the same one again is no progress. */
@@ -100,6 +135,8 @@ export const PlanStateSchema = z.object({
 export type PlanCommandRecord = z.infer<typeof PlanCommandRecordSchema>
 export type PlanFingerprint = z.infer<typeof PlanFingerprintSchema>
 export type PlanStepRecord = z.infer<typeof PlanStepRecordSchema>
+export type PlanStepWork = z.infer<typeof PlanStepWorkSchema>
+export type PlanStepWorkFile = z.infer<typeof PlanStepWorkFileSchema>
 export type PlanStall = z.infer<typeof PlanStallSchema>
 export type PlanActiveStep = z.infer<typeof PlanActiveStepSchema>
 export type PlanState = z.infer<typeof PlanStateSchema>
@@ -119,15 +156,7 @@ export interface PlanStateRead {
 export function planSlug(planPath: string): string {
   const name = basename(planPath)
   if (name === 'plan.json') return basename(dirname(planPath))
-  return name.replace(/(\.plan)?\.json$/u, '')
-}
-
-/**
- * The SHA-256 of the parsed plan's canonical bytes. For a plan with a baseline this is
- * its hash (RFC 0030 §4); a draft has no identity, and this is only what keys its records.
- */
-export function planDigest(plan: PlanDraft | Plan): string {
-  return createHash('sha256').update(canonicalJson(plan), 'utf8').digest('hex')
+  return planFileStem(name)
 }
 
 export function planStatePath(appRoot: string, slug: string): string {

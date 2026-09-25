@@ -2,12 +2,13 @@
 // quietly stopped covering a package would surface a release late — how
 // `@guren/testing` went missing from two of the three lists. These run fast.
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   assertLocalGurenDependencies,
   collectLocalPackages,
+  distDifferences,
   vendorLocalPackages,
   type DependencyManifest,
 } from './local-packages'
@@ -90,6 +91,74 @@ describe('assertLocalGurenDependencies', () => {
         await assertLocalGurenDependencies(appDir, 'The app')
       },
     )
+  })
+})
+
+describe('distDifferences', () => {
+  async function withTrees(
+    source: Record<string, string>,
+    installed: Record<string, string>,
+    body: (sourceDir: string, installedDir: string) => Promise<void>,
+  ): Promise<void> {
+    const root = await mkdtemp(join(tmpdir(), 'guren-dist-diff-'))
+    try {
+      for (const [dir, files] of [['source', source], ['installed', installed]] as const) {
+        for (const [file, content] of Object.entries(files)) {
+          const path = join(root, dir, 'dist', file)
+          await mkdir(dirname(path), { recursive: true })
+          await writeFile(path, content, 'utf8')
+        }
+      }
+      await body(join(root, 'source'), join(root, 'installed'))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }
+
+  test('reports nothing for a byte-identical copy', async () => {
+    const files = { 'index.js': 'export const a = 1\n', 'sub/x.d.ts': 'export {}\n' }
+    await withTrees(files, files, async (sourceDir, installedDir) => {
+      expect(await distDifferences(sourceDir, installedDir)).toEqual([])
+    })
+  })
+
+  // The shape of a published copy between releases: same version, other bytes.
+  test('names changed, missing and extra files', async () => {
+    await withTrees(
+      { 'index.js': 'export const a = 2\n', 'sub/x.d.ts': 'export {}\n' },
+      { 'index.js': 'export const a = 1\n', 'old.js': '\n' },
+      async (sourceDir, installedDir) => {
+        expect(await distDifferences(sourceDir, installedDir)).toEqual([
+          'dist/index.js differs',
+          'dist/old.js is not in this checkout\'s build',
+          'dist/sub/x.d.ts missing',
+        ])
+      },
+    )
+  })
+
+  test('reports every file missing when the installed copy has no dist/', async () => {
+    await withTrees({ 'index.js': '\n', 'sub/x.d.ts': '\n' }, {}, async (sourceDir, installedDir) => {
+      expect(await distDifferences(sourceDir, installedDir)).toEqual([
+        'dist/index.js missing',
+        'dist/sub/x.d.ts missing',
+      ])
+    })
+  })
+
+  test('reads a symlink to the checkout file as that file', async () => {
+    await withTrees({ 'index.js': 'export {}\n' }, {}, async (sourceDir, installedDir) => {
+      await mkdir(join(installedDir, 'dist'), { recursive: true })
+      await symlink(join(sourceDir, 'dist/index.js'), join(installedDir, 'dist/index.js'))
+      expect(await distDifferences(sourceDir, installedDir)).toEqual([])
+    })
+  })
+
+  // An unbuilt checkout must not read as a clean comparison, or as the copy's fault.
+  test('throws when this checkout has no dist/', async () => {
+    await withTrees({}, { 'index.js': '\n' }, async (sourceDir, installedDir) => {
+      await expect(distDifferences(sourceDir, installedDir)).rejects.toThrow(/ENOENT/)
+    })
   })
 })
 

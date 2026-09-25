@@ -4,7 +4,7 @@ import type { AuthorizeOptions, AuthorizeResourceOptions } from './types'
 import { Gate, resolveGate, denialToException } from './Gate'
 import { tryGetRequestContainer } from '../http/request-container'
 import { AuthorizationException } from '../errors'
-import { stampCapabilities } from '../http/middleware/capabilities'
+import { stampCapabilities, type MiddlewareCapabilities } from '../http/middleware/capabilities'
 
 /** The gate of the app serving `ctx` (RFC 0023 §2); the ambient one on a bare Hono app. */
 function gateFor(ctx: Context): Gate {
@@ -113,6 +113,25 @@ const RESOURCE_ABILITY_BY_METHOD: Record<string, string> = {
  */
 export function resourceAbilityForMethod(method: string): string | undefined {
   return RESOURCE_ABILITY_BY_METHOD[method.toUpperCase()]
+}
+
+/**
+ * The ability an authorization stamp checks when it says so unambiguously,
+ * else undefined, meaning undetermined. A resource check resolves through the
+ * verb map, so only with the route's method. The one rule for agent tools and
+ * the introspection manifest (RFC 0016 §4, RFC 0026 §3). Internal contract (RFC 0007).
+ */
+export function derivableAbility(
+  authorization: MiddlewareCapabilities['authorization'],
+  method?: string,
+): string | undefined {
+  if (!authorization) return undefined
+  if (authorization.resource) {
+    if (!authorization.resource.fromMethodMap || method === undefined) return undefined
+    if (authorization.abilities.length > 0 || authorization.mode !== 'all') return undefined
+    return resourceAbilityForMethod(method)
+  }
+  return authorization.abilities.length === 1 && authorization.mode === 'all' ? authorization.abilities[0] : undefined
 }
 
 /**

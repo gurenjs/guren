@@ -1,137 +1,117 @@
 import { Link } from '@inertiajs/react'
-import { useState } from 'react'
+import { Fragment, useState, type KeyboardEvent, type ReactNode } from 'react'
 interface Props {
   codeExamples: Record<string, string>
 }
 import { GITHUB_URL, OWN_REPO_LINK_REL, SITE_DESCRIPTION, SITE_TITLE } from '../../../config/site.js'
-import { CodeBlock } from '../components/CodeBlock.js'
-import { FeatureCard } from '../components/FeatureCard.js'
+import { BurningName } from '../components/BurningName.js'
+import { ConventionGrid } from '../components/ConventionGrid.js'
 import { Footer } from '../components/Footer.js'
 import { Header } from '../components/Header.js'
+import { FunctionIcon, GithubIcon, GlobeIcon, LayersIcon, ServerIcon } from '../components/icons.js'
+import { InlineCode } from '../components/InlineCode.js'
 import { Seo } from '../components/Seo.js'
 import { softwareJsonLd, websiteJsonLd } from '../lib/structured-data.js'
-import {
-  ArrowRightIcon,
-  BoltIcon,
-  BookOpenIcon,
-  CodeBracketIcon,
-  CubeIcon,
-  RocketIcon,
-  ShieldCheckIcon,
-  TerminalIcon,
-} from '../components/icons.js'
 
-const features = [
-  {
-    icon: <BookOpenIcon className="size-5" />,
-    title: 'Controllers you already know',
-    body: 'validateBody() throws a 422, findOrFail() a 404, auth.userOrFail() a 401. Write the happy path — the framework answers for the rest.',
-  },
-  {
-    icon: <ShieldCheckIcon className="size-5" />,
-    title: 'Types from route to React',
-    body: 'Codegen turns routes, page props, and the API client into compile-time contracts. Rename a route and the build fails — not your users.',
-  },
-  {
-    icon: <CubeIcon className="size-5" />,
-    title: 'Drizzle models, Eloquent manners',
-    body: "Post.where('published', true).get() rides on Drizzle ORM. Models when you want conventions, raw SQL when you don't.",
-  },
-  {
-    icon: <BoltIcon className="size-5" />,
-    title: 'No API layer to babysit',
-    body: 'Inertia.js hands controller props straight to your React components. One repo, one deploy, zero REST/GraphQL glue.',
-  },
-  {
-    icon: <RocketIcon className="size-5" />,
-    title: 'Batteries actually included',
-    body: 'Auth, queues, mail, cache, events, scheduling, storage, i18n — first-party subsystems, not a shopping list of npm packages.',
-  },
-  {
-    icon: <TerminalIcon className="size-5" />,
-    title: 'Agents are first-class users',
-    body: 'guren context maps your app, guren check verifies route–controller–page wiring, guren audit gates security. Your agent reads the same docs you do — every page is served as Markdown.',
-  },
+const agentCommands = [
+  { command: 'guren context User', detail: 'Everything about one entity' },
+  { command: 'guren spec:generate', detail: 'ER, domain and screen views from code' },
+  { command: 'guren check', detail: 'Wiring, doc links, spec drift' },
+  { command: 'guren audit', detail: 'Validation, auth, secrets' },
 ]
 
-interface BenchmarkBar {
-  name: string
-  ratio: number
-  display: string
-  accent: boolean
-}
-
-interface Benchmark {
-  value: string
-  label: string
-  detail: string
-  bars: BenchmarkBar[]
-}
-
-const benchmarks: Benchmark[] = [
-  {
-    value: '2.3×',
-    label: 'SSR throughput',
-    detail: 'Full Inertia SSR pages, same app on a Node.js MVC framework',
-    bars: [
-      { name: 'Guren', ratio: 2.3, display: '2.3×', accent: true },
-      { name: 'Node', ratio: 1, display: '1×', accent: false },
-    ],
-  },
-  {
-    value: '3.5×',
-    label: 'JSON API throughput',
-    detail: 'The plain JSON path, same-app comparison',
-    bars: [
-      { name: 'Guren', ratio: 3.5, display: '3.5×', accent: true },
-      { name: 'Node', ratio: 1, display: '1×', accent: false },
-    ],
-  },
-  {
-    value: '1.8×',
-    label: 'Faster cold starts',
-    detail: 'Process start to first response',
-    bars: [
-      { name: 'Guren', ratio: 1.8, display: '1.8×', accent: true },
-      { name: 'Node', ratio: 1, display: '1×', accent: false },
-    ],
-  },
+const benchmarks = [
+  { ratio: 2.3, label: 'SSR throughput' },
+  { ratio: 3.5, label: 'JSON API throughput' },
+  { ratio: 1.8, label: 'Faster cold starts' },
 ]
 
 // Agents on Guren, 2026-08-18: 20 tasks × 3 models × {bare, shipped} × 3 trials.
 // First two tiles are the Sonnet 5 column of results/RESULTS.md in
 // gurenjs/agents-on-guren; the third counts all 180 runs per condition.
-const agentBenchmarkStats = [
+const agentBenchmarkStats: Array<{ value: string; versus?: string; label: string }> = [
   { value: '−28%', label: 'turns with the harness (Sonnet 5, 60 runs each)' },
   { value: '−25%', label: 'cost, at 60/60 vs 58/60 runs passed' },
-  { value: '119 vs 15', label: 'runs that ran guren check, harness vs bare (180 each)' },
+  { value: '119', versus: '15', label: 'runs that ran guren check, harness vs bare (180 each)' },
 ]
 
 const deployTargets = [
   {
     name: 'Bun server',
-    detail: 'Self-host on any VPS or container. The runtime you develop on is the one that serves production.',
+    Icon: ServerIcon,
+    detail: 'Any VPS or container, on the runtime you develop on.',
     href: '/docs/guides/deployment',
+    command: 'bunx guren deploy --target docker',
   },
   {
     name: 'Cloudflare Workers',
-    detail: 'Workers + D1 at the edge, on the free plan if you like. This site is a Guren app running there.',
+    Icon: GlobeIcon,
+    detail: 'Workers and D1 at the edge. This site runs there.',
     href: '/docs/guides/cloudflare',
+    command: 'bunx guren plugin @guren/plugin-cloudflare',
   },
   {
     name: 'Vercel',
-    detail: "One plugin scaffolds the build — and it runs on Vercel's Bun runtime, so the engine travels with you.",
-    href: '/docs/guides/deployment',
+    Icon: LayersIcon,
+    detail: "Runs on Vercel's Bun runtime.",
+    href: '/docs/guides/deployment#vercel-serverless',
+    command: 'bunx guren plugin @guren/plugin-vercel',
   },
   {
     name: 'AWS Lambda',
-    detail: 'A handler adapter and Node-compatible defaults take the same app serverless.',
+    Icon: FunctionIcon,
+    detail: 'A handler adapter with Node-compatible defaults.',
     href: '/docs/guides/serverless',
+    command: 'bunx guren plugin @guren/plugin-lambda',
   },
 ]
 
 const TAB_KEYS = ['Routes', 'Controller', 'Model', 'View'] as const
 type TabKey = (typeof TAB_KEYS)[number]
+
+const TAB_FILES: Record<TabKey, string> = {
+  Routes: 'routes/web.ts',
+  Controller: 'app/Http/Controllers/PostController.ts',
+  Model: 'app/Models/Post.ts',
+  View: 'resources/js/pages/posts/Index.tsx',
+}
+
+/** The logo's flame gradient cut to a short bar: the page's one structural mark. */
+function Tick() {
+  return <span aria-hidden className="block h-[3px] w-8 bg-gradient-to-r from-ember to-crimson-700" />
+}
+
+function SectionHeading({ children }: { children: ReactNode }) {
+  return (
+    <>
+      <Tick />
+      <h2 className="mt-5 text-balance text-[2rem] font-bold leading-[1.1] tracking-[-0.025em] text-crimson-50 md:text-[2.5rem]">
+        {children}
+      </h2>
+    </>
+  )
+}
+
+function Lead({ children }: { children: ReactNode }) {
+  return <p className="mt-5 max-w-[34rem] text-[1.0625rem] leading-[1.65] text-smoke">{children}</p>
+}
+
+function TextLink({ href, external, children }: { href: string; external?: boolean; children: ReactNode }) {
+  const className =
+    'font-semibold text-crimson-300 underline decoration-crimson-300/40 underline-offset-4 transition hover:decoration-crimson-300'
+  return external ? (
+    <a href={href} target="_blank" rel={OWN_REPO_LINK_REL} className={className}>
+      {children}
+    </a>
+  ) : (
+    <Link href={href} className={className}>
+      {children}
+    </Link>
+  )
+}
+
+const PRIMARY_BUTTON =
+  'inline-flex items-center rounded-md bg-crimson-600 px-6 py-3 font-bold text-crimson-50 transition hover:bg-crimson-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crimson-300'
 
 function CopyCommand({ command }: { command: string }) {
   const [copied, setCopied] = useState(false)
@@ -150,20 +130,47 @@ function CopyCommand({ command }: { command: string }) {
     <button
       type="button"
       onClick={copy}
-      className="group inline-flex items-center gap-3 rounded-lg border border-white/15 bg-black/40 px-5 py-3 font-mono text-sm text-white/90 transition hover:border-crimson-400/60"
+      className="group inline-flex max-w-full items-center gap-2 rounded-md border border-white/15 bg-ink px-4 py-3 text-left font-mono text-[13px] text-crimson-50 transition hover:border-crimson-300/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crimson-300 sm:gap-3 sm:text-sm"
       aria-label={`Copy command: ${command}`}
     >
       <span className="select-none text-crimson-400">$</span>
-      {command}
-      <span className="select-none text-xs text-white/40 transition group-hover:text-white/70">
+      {/* Break between words only: the hyphens in create-guren-app are line-break opportunities. */}
+      <span className="min-w-0">
+        {command.split(' ').map((word, i) => (
+          <Fragment key={i}>
+            {i > 0 && ' '}
+            <span className="whitespace-nowrap">{word}</span>
+          </Fragment>
+        ))}
+      </span>
+      <span className="select-none text-xs text-smoke/70 transition group-hover:text-smoke">
         {copied ? 'copied' : 'copy'}
       </span>
     </button>
   )
 }
 
+function HeroName() {
+  return (
+    <figure aria-hidden className="hidden flex-col items-center lg:flex">
+      <BurningName />
+      <figcaption className="mt-6 text-sm text-smoke">gu·ren, crimson lotus</figcaption>
+    </figure>
+  )
+}
+
 export default function Home({ codeExamples }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>('Routes')
+
+  // Arrow keys move between the tabs, as the ARIA tabs pattern expects.
+  const moveTab = (event: KeyboardEvent<HTMLDivElement>) => {
+    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key]
+    if (!step) return
+    event.preventDefault()
+    const next = TAB_KEYS[(TAB_KEYS.indexOf(activeTab) + step + TAB_KEYS.length) % TAB_KEYS.length]!
+    setActiveTab(next)
+    document.getElementById(`loop-tab-${next}`)?.focus()
+  }
 
   return (
     <>
@@ -173,355 +180,309 @@ export default function Home({ codeExamples }: Props) {
         path="/"
         jsonLd={[websiteJsonLd(), softwareJsonLd()]}
       />
-      <div className="min-h-dvh bg-[radial-gradient(circle_at_10%_20%,rgba(255,190,190,.25),transparent_55%),radial-gradient(circle_at_85%_15%,rgba(183,28,28,.12),transparent_45%),#0f0a0a] text-crimson-50">
+      <div className="min-h-dvh bg-crimson-950 font-home text-crimson-50 antialiased">
         <Header variant="home" />
 
-        <section className="relative overflow-hidden px-6 py-20 md:py-32">
+        <section className="relative overflow-hidden border-b border-white/10">
           <div
             aria-hidden
-            className="pointer-events-none absolute -right-32 -top-32 h-[500px] w-[500px] rounded-full bg-[radial-gradient(circle,rgba(183,28,28,.2),transparent_65%)]"
+            className="pointer-events-none absolute inset-0 bg-[radial-gradient(52%_70%_at_82%_40%,rgba(255,60,40,.22),transparent_72%)]"
           />
-          {/* 紅蓮 — the framework's namesake, set vertically like a hanging scroll */}
-          <span
-            aria-hidden
-            className="pointer-events-none absolute right-[6%] top-1/2 hidden h-[23rem] -translate-y-1/2 select-none text-[10rem] font-bold leading-none text-crimson-500/[0.09] lg:block"
-            style={{ writingMode: 'vertical-rl', fontFamily: '"Hiragino Mincho ProN", "Yu Mincho", serif' }}
-          >
-            紅蓮
-          </span>
-          <div className="relative mx-auto max-w-5xl">
-            <p className="text-sm font-medium tracking-wide text-crimson-300">
-              <span style={{ fontFamily: '"Hiragino Mincho ProN", "Yu Mincho", serif' }}>紅蓮</span>
-              <span className="mx-2 text-crimson-300/50">·</span>
-              <span className="font-mono">/gu·ren/</span>
-              <span className="mx-2 text-crimson-300/50">·</span>
-              crimson lotus
-            </p>
-            <h1 className="mt-5 text-4xl font-extrabold leading-[1.1] tracking-tight text-white sm:text-5xl md:text-6xl">
-              The{' '}
-              <span className="bg-gradient-to-r from-crimson-400 to-crimson-600 bg-clip-text text-transparent">
-                Bun-first
-              </span>{' '}
-              fullstack TypeScript framework.
-            </h1>
-            <p className="mt-6 max-w-2xl text-lg leading-relaxed text-white/70 md:text-xl">
-              Develop on Bun. Deploy to Bun, AWS Lambda, Vercel, or Cloudflare Workers. Your
-              coding agent works from the same map you do: Laravel-style conventions, type
-              safety from the route definition to the React component, and mechanical checks
-              that verify the work. Secure by default, agent-ready by default.
-            </p>
-            <div className="mt-10 flex flex-wrap items-center gap-4">
-              <Link
-                href="/docs/guides/getting-started"
-                className="inline-flex items-center gap-2 rounded-full bg-crimson-500 px-8 py-3.5 font-semibold text-white shadow-lg shadow-crimson-500/30 transition hover:-translate-y-0.5 hover:bg-crimson-600 hover:shadow-xl hover:shadow-crimson-500/40"
-              >
-                Get started
-                <ArrowRightIcon className="size-4" />
-              </Link>
-              <CopyCommand command="bunx create-guren-app my-app" />
+          <div className="relative mx-auto grid grid-cols-1 max-w-6xl gap-12 px-6 pb-20 pt-14 md:pb-28 md:pt-24 lg:grid-cols-[1fr_auto] lg:items-center lg:gap-24">
+            <div>
+              <p className="flex items-baseline gap-3 text-sm text-smoke lg:hidden">
+                <span lang="ja" className="font-mincho text-2xl font-bold text-crimson-400">
+                  紅蓮
+                </span>
+                gu·ren, crimson lotus
+              </p>
+              <h1 className="mt-6 max-w-[19ch] text-balance text-[2.6rem] font-bold leading-[1.04] tracking-[-0.035em] text-crimson-50 sm:text-6xl lg:mt-0 lg:text-[4.5rem]">
+                The <span className="whitespace-nowrap">Bun-first</span> fullstack TypeScript framework.
+              </h1>
+              <p className="mt-7 max-w-[36rem] text-lg leading-[1.65] text-smoke">
+                Laravel-style conventions, types from the route to the React component, and checks
+                your coding agent runs on its own work. Develop on Bun, deploy to Bun, AWS Lambda,
+                Vercel or Cloudflare Workers.
+              </p>
+              <div className="mt-10 flex flex-wrap items-center gap-3">
+                <Link href="/docs/guides/getting-started" className={PRIMARY_BUTTON}>
+                  Get started
+                </Link>
+                <CopyCommand command="bunx create-guren-app my-app" />
+              </div>
             </div>
+            <HeroName />
           </div>
         </section>
 
-        <section className="px-6 py-20">
-          <div className="mx-auto grid max-w-5xl grid-cols-1 items-start gap-12 lg:grid-cols-2">
+        <section className="border-b border-white/10">
+          <div className="mx-auto grid grid-cols-1 max-w-6xl gap-12 px-6 py-20 md:py-28 lg:grid-cols-[minmax(0,4fr)_minmax(0,7fr)] lg:gap-16">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-crimson-400">The shape of a Guren app</p>
-              <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">
-                Route to React, <br className="hidden sm:block" />one loop
-              </h2>
-              <p className="mt-4 text-base leading-relaxed text-white/60">
-                A route points at a controller. The controller validates input, queries a model,
-                and returns an Inertia page — and the React component receives those exact props,
-                type-checked. No serializers, no resolvers, no hand-written API client.
-              </p>
-              <CodeBlock
-                lines={[
-                  '$ bunx create-guren-app my-app',
-                  '$ cd my-app',
-                  '$ bun run dev',
-                ]}
-                title="Terminal"
-              />
-            </div>
-            <div className="rounded-xl border border-white/10 bg-[#1a1212]">
-              <div className="flex overflow-x-auto border-b border-white/10">
-                {TAB_KEYS.map((tab) => (
-                  <button
-                    key={tab}
-                    type="button"
-                    onClick={() => setActiveTab(tab)}
-                    className={`shrink-0 px-4 py-3 text-sm font-medium transition sm:px-5 ${
-                      activeTab === tab
-                        ? 'border-b-2 border-crimson-500 text-crimson-300'
-                        : 'text-white/50 hover:text-white/80'
-                    }`}
-                  >
-                    {tab}
-                  </button>
-                ))}
+              <SectionHeading>Route to React, one loop</SectionHeading>
+              <Lead>
+                A route points at a controller, and the controller&apos;s props reach the React
+                component type-checked. There is no API client to write.
+              </Lead>
+              <div role="tablist" aria-label="Files in the loop" onKeyDown={moveTab} className="relative mt-10">
+                <span aria-hidden className="absolute bottom-5 left-[5px] top-5 w-px bg-white/15" />
+                {TAB_KEYS.map((tab) => {
+                  const active = activeTab === tab
+                  return (
+                    <button
+                      key={tab}
+                      id={`loop-tab-${tab}`}
+                      type="button"
+                      role="tab"
+                      tabIndex={active ? 0 : -1}
+                      aria-selected={active}
+                      aria-controls="loop-panel"
+                      onClick={() => setActiveTab(tab)}
+                      className="group relative flex w-full items-start gap-4 py-2.5 text-left focus-visible:outline-2 focus-visible:outline-crimson-300"
+                    >
+                      <span
+                        aria-hidden
+                        className={`relative mt-[7px] size-[11px] shrink-0 rounded-full border-2 transition ${
+                          active ? 'border-ember bg-ember' : 'border-crimson-50/40 bg-crimson-950 group-hover:border-crimson-50/70'
+                        }`}
+                      />
+                      <span className="min-w-0">
+                        <span className={`block font-bold transition ${active ? 'text-crimson-50' : 'text-smoke group-hover:text-crimson-50'}`}>
+                          {tab}
+                        </span>
+                        <span className={`block truncate font-mono text-xs transition ${active ? 'text-crimson-300' : 'text-smoke/70'}`}>
+                          {TAB_FILES[tab]}
+                        </span>
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
-              <div className="overflow-x-auto p-5 [&_.shiki]:!border-0 [&_.shiki]:!bg-transparent [&_.shiki]:!p-0 [&_.shiki]:!m-0">
+            </div>
+            <div
+              id="loop-panel"
+              role="tabpanel"
+              aria-labelledby={`loop-tab-${activeTab}`}
+              className="min-w-0 self-start overflow-hidden rounded-md border border-white/10 bg-ink"
+            >
+              <p className="border-b border-white/10 px-5 py-3 font-mono text-xs text-smoke">{TAB_FILES[activeTab]}</p>
+              <div className="overflow-x-auto p-5 text-[12.5px] leading-[1.7] [font-variant-ligatures:none] [&_.shiki]:!bg-transparent">
                 <div dangerouslySetInnerHTML={{ __html: codeExamples[activeTab] ?? '' }} />
               </div>
             </div>
           </div>
         </section>
 
-        <section className="border-t border-white/10 px-6 py-20">
-          <div className="mx-auto grid max-w-5xl grid-cols-1 items-start gap-12 lg:grid-cols-2">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-crimson-400">Agent-native</p>
-              <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">
-                Built for AI coding agents
-              </h2>
-              <p className="mt-3 font-mono text-sm tracking-wide text-crimson-300/90">
-                derived where possible · declared where not · checked always
-              </p>
-              <p className="mt-4 text-base leading-relaxed text-white/60">
-                One command hands an agent everything your project knows about an entity — or
-                the whole map, verified API signatures included. The spec keeps itself honest:
-                ER, domain, and screen views regenerate from code, decision records link to the
-                models they govern, and CI gates catch broken links and drift. Mechanical gates
-                catch mistakes before you read the diff.
-              </p>
-              <CodeBlock
-                lines={[
-                  '$ bunx guren context User    # one entity: model, routes, pages, linked docs',
-                  '$ bunx guren spec:generate   # ER, domain, screens — derived from code',
-                  '$ bunx guren check           # wiring, doc links, spec freshness',
-                  '$ bunx guren audit           # validation, auth, secrets',
-                ]}
-                title="Terminal"
-              />
-              <p className="mt-4 text-sm leading-relaxed text-white/50">
-                None of this is aspirational: it is measured. <em>Agents on Guren</em> runs 20
-                bug, security and feature tasks with hidden acceptance tests across three models,
-                with and without the harness <code className="text-white/70">agent:init</code>{' '}
-                installs — 360 runs, each one's patch, logs and verdict published.
-              </p>
-              <dl className="mt-4 grid grid-cols-3 gap-3">
+        <section className="border-b border-white/10">
+          <div className="mx-auto max-w-6xl px-6 py-20 md:py-28">
+            <div className="grid grid-cols-1 items-start gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-16">
+              <div>
+                <SectionHeading>Built for AI coding agents</SectionHeading>
+                <p className="mt-4 font-mono text-sm text-crimson-300">
+                  derived where possible, declared where not, checked always
+                </p>
+                <Lead>
+                  Your agent reads what the project knows from the code itself, and CI fails when
+                  the wiring, docs or spec drift.
+                </Lead>
+                <dl className="mt-8 border-b border-white/10">
+                  {agentCommands.map((c) => (
+                    <div key={c.command} className="grid grid-cols-1 gap-1 border-t border-white/10 py-3 sm:grid-cols-[12.5rem_1fr] sm:gap-4">
+                      <dt className="font-mono text-sm text-crimson-50">
+                        <span className="select-none text-smoke/60">$ </span>
+                        {c.command}
+                      </dt>
+                      <dd className="text-sm text-smoke">{c.detail}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+              <figure>
+                <a
+                  href="/_guren/docs"
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Open the blog example's docs graph in the Guren docs viewer"
+                  className="block overflow-hidden rounded-md border border-white/10 bg-ink p-1.5 transition hover:border-crimson-300/40"
+                >
+                  <img
+                    src="/docs-graph.png"
+                    alt="The Guren docs viewer rendering a blog app's knowledge graph: decision records, generated spec views, model entities, and source files connected by verified links"
+                    width={1440}
+                    height={900}
+                    loading="lazy"
+                    className="w-full rounded-[3px]"
+                  />
+                </a>
+                <figcaption className="mt-4 text-sm leading-relaxed text-smoke">
+                  The blog example&apos;s docs graph. Your app gets the same view at{' '}
+                  <InlineCode>/_guren/docs</InlineCode>.
+                </figcaption>
+              </figure>
+            </div>
+
+            <div className="mt-16 grid grid-cols-1 gap-10 border-t border-white/10 pt-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16">
+              <div>
+                <p className="max-w-[34rem] text-[0.9375rem] leading-[1.65] text-smoke">
+                  Measured on 360 runs of 20 tasks across three models, with and without the
+                  harness.
+                </p>
+                <p className="mt-4 text-sm">
+                  <TextLink href="https://github.com/gurenjs/agents-on-guren" external>
+                    Benchmark report, tasks &amp; raw data
+                  </TextLink>
+                </p>
+              </div>
+              <dl className="grid grid-cols-1 gap-6 sm:grid-cols-3 sm:gap-0">
                 {agentBenchmarkStats.map((s) => (
-                  <div key={s.label} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3 text-center">
-                    <dt className="order-2 mt-1 text-[11px] leading-snug text-white/50">{s.label}</dt>
-                    <dd className="order-1 bg-gradient-to-r from-crimson-300 to-crimson-500 bg-clip-text text-2xl font-extrabold text-transparent">
+                  <div key={s.label} className="flex flex-col sm:border-l sm:border-white/10 sm:px-6 sm:first:border-l-0 sm:first:pl-0">
+                    <dt className="order-2 mt-2 text-sm leading-snug text-smoke">{s.label}</dt>
+                    <dd className="order-1 text-[2.75rem] font-bold leading-none tracking-[-0.03em] text-foam tabular-nums">
                       {s.value}
+                      {s.versus && (
+                        <>
+                          <span className="mx-1.5 text-lg font-normal text-smoke">vs</span>
+                          {s.versus}
+                        </>
+                      )}
                     </dd>
                   </div>
                 ))}
               </dl>
-              <a
-                href="https://github.com/gurenjs/agents-on-guren"
-                target="_blank"
-                rel={OWN_REPO_LINK_REL}
-                className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-crimson-300 transition hover:text-crimson-200"
-              >
-                Benchmark report, tasks &amp; raw data
-                <ArrowRightIcon className="size-3.5" />
-              </a>
-            </div>
-            <figure>
-              <a
-                href="/_guren/docs"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Open the blog example's docs graph in the Guren docs viewer"
-                className="block overflow-hidden rounded-xl border border-white/10 bg-white/[0.03] p-2 transition hover:border-crimson-400/40"
-              >
-                <img
-                  src="/docs-graph.png"
-                  alt="The Guren docs viewer rendering a blog app's knowledge graph: decision records, generated spec views, model entities, and source files connected by verified links"
-                  width={1440}
-                  height={900}
-                  loading="lazy"
-                  className="w-full rounded-lg"
-                />
-              </a>
-              <figcaption className="mt-3 text-sm leading-relaxed text-white/50">
-                Your app&apos;s knowledge graph, drawn from the blog example&apos;s real docs —
-                plain markdown ADRs that declare the entities they govern in{' '}
-                <code className="text-white/70">frontmatter</code>, and link to the code and
-                to each other in the body.{' '}
-                <span className="text-white/70">Open the example&apos;s graph</span> — the same
-                screen your own docs get at <code className="text-crimson-300/90">/_guren/docs</code>{' '}
-                while you develop; broken links fail{' '}
-                <code className="text-white/70">guren check --docs</code> in CI.
-              </figcaption>
-            </figure>
-          </div>
-        </section>
-
-        <section className="border-t border-white/10 px-6 py-20">
-          <div className="mx-auto max-w-5xl">
-            <div className="mb-12 text-center">
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-crimson-400">Why Guren</p>
-              <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">
-                Conventions you know. Types you didn&apos;t have.
-              </h2>
-            </div>
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-              {features.map((f) => (
-                <FeatureCard key={f.title} icon={f.icon} title={f.title} body={f.body} />
-              ))}
             </div>
           </div>
         </section>
 
-        <section className="border-t border-white/10 px-6 py-20">
-          <div className="mx-auto max-w-5xl">
-            <div className="mb-12 text-center">
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-crimson-400">Measured, not promised</p>
-              <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">
-                Fast where it counts
-              </h2>
-              <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-white/60">
-                The same spec app on Guren and on the equivalent Node.js MVC stack, self-hosted and
-                benchmarked under identical conditions. The app code is held constant, so the gap is Bun itself —
-                and that is the point: keep the Laravel-style architecture, change the engine.
-                Every number is reproducible with one command.
-              </p>
-            </div>
-            <div className="grid gap-5 sm:grid-cols-3">
-              {benchmarks.map((b) => {
-                const maxRatio = Math.max(...b.bars.map((bar) => bar.ratio))
-                return (
-                  <div
-                    key={b.label}
-                    className="rounded-xl border border-white/10 bg-white/[0.03] p-6"
-                  >
-                    <p className="bg-gradient-to-r from-crimson-300 to-crimson-500 bg-clip-text text-center text-4xl font-extrabold text-transparent">
-                      {b.value}
-                    </p>
-                    <p className="mt-2 text-center text-sm font-semibold text-white">{b.label}</p>
-                    <div className="mt-4 space-y-1.5">
-                      {b.bars.map((bar) => (
-                        <div key={bar.name} className="flex items-center gap-2" title={`${bar.name}: ${bar.display}`}>
-                          <span className="w-11 shrink-0 text-[10px] font-medium text-white/50">
-                            {bar.name}
-                          </span>
-                          <div className="flex flex-1 items-center gap-1.5">
-                            <div
-                              className={`h-2.5 shrink-0 rounded-r ${bar.accent ? 'bg-crimson-500' : 'bg-[#6b6363]'}`}
-                              style={{ width: `calc((100% - 34px) * ${(bar.ratio / maxRatio).toFixed(4)})` }}
-                            />
-                            <span className="shrink-0 text-[10px] text-white/70">{bar.display}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="mt-3 text-center text-xs leading-relaxed text-white/50">{b.detail}</p>
-                  </div>
-                )
-              })}
-            </div>
-            <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm">
-              <a
-                href="https://github.com/gurenjs/framework-comparison/blob/main/BENCHMARK.md"
-                target="_blank"
-                rel={OWN_REPO_LINK_REL}
-                className="inline-flex items-center gap-1.5 font-semibold text-crimson-300 transition hover:text-crimson-200"
-              >
-                Methodology &amp; reproduction
-                <ArrowRightIcon className="size-3.5" />
-              </a>
-              <Link
-                href="/docs/guides/why-guren"
-                className="inline-flex items-center gap-1.5 font-semibold text-crimson-300 transition hover:text-crimson-200"
-              >
-                Read the full comparison
-                <ArrowRightIcon className="size-3.5" />
-              </Link>
-            </div>
+        <section className="border-b border-white/10">
+          <div className="mx-auto max-w-6xl px-6 py-20 md:py-28">
+            <SectionHeading>Conventions you know. Types you didn&apos;t have.</SectionHeading>
+            <ConventionGrid />
           </div>
         </section>
 
-        <section className="border-t border-white/10 px-6 py-20">
-          <div className="mx-auto max-w-5xl">
-            <div className="mb-12 text-center">
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-crimson-400">Bun-first, deploy anywhere</p>
-              <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">
-                Develop on Bun. Ship where you want.
-              </h2>
-              <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-white/60">
-                Bun is the development experience — one toolchain for the dev server, tests, and
-                codegen. Deployment is an adapter: pick a target, install the plugin, ship the
-                same app.
-              </p>
-            </div>
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-              {deployTargets.map((t) => (
-                <Link
-                  key={t.name}
-                  href={t.href}
-                  className="group rounded-xl border border-white/10 bg-white/[0.03] p-6 transition hover:border-crimson-400/40 hover:bg-white/[0.05]"
-                >
-                  <p className="font-semibold text-white">{t.name}</p>
-                  <p className="mt-2 text-sm leading-relaxed text-white/55">{t.detail}</p>
-                  <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-crimson-300 transition group-hover:text-crimson-200">
-                    Deployment guide
-                    <ArrowRightIcon className="size-3.5" />
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="border-y border-white/10 bg-white/[0.02] px-6 py-14">
-          <div className="mx-auto flex max-w-4xl flex-col items-center gap-6 text-center md:flex-row md:gap-10 md:text-left">
-            <span
-              className="h-40 select-none text-7xl font-bold leading-none text-crimson-400/80"
-              style={{ writingMode: 'vertical-rl', fontFamily: '"Hiragino Mincho ProN", "Yu Mincho", serif' }}
-              lang="ja"
-            >
-              紅蓮
-            </span>
+        <section className="border-b border-white/10">
+          <div className="mx-auto grid grid-cols-1 max-w-6xl gap-12 px-6 py-20 md:py-28 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16">
             <div>
-              <p className="text-lg leading-relaxed text-white/80">
-                <em className="font-semibold not-italic text-white">Guren</em> (紅蓮) is Japanese for
-                &ldquo;crimson lotus&rdquo; — the color of a blazing flame.
+              <SectionHeading>Fast where it counts</SectionHeading>
+              <Lead>
+                The same app on Guren and on a Node.js MVC framework, under identical conditions.
+                The code is held constant, so the difference is Bun.
+              </Lead>
+              <p className="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-sm">
+                <TextLink href="https://github.com/gurenjs/framework-comparison/blob/main/BENCHMARK.md" external>
+                  Methodology &amp; reproduction
+                </TextLink>
+                <TextLink href="/docs/guides/why-guren">Read the full comparison</TextLink>
               </p>
-              <p className="mt-3 text-base leading-relaxed text-white/55">
-                It is also a nod to where the framework comes from: Laravel&apos;s conventions,
-                re-grown in TypeScript soil. Same flower, different pond.
-              </p>
+            </div>
+            <div className="lg:pt-12">
+              {benchmarks.map((b) => (
+                <div
+                  key={b.label}
+                  className="grid grid-cols-1 gap-x-6 gap-y-3 border-t border-white/10 py-6 last:border-b sm:grid-cols-[6.5rem_1fr]"
+                >
+                  <p className="text-[2.75rem] font-bold leading-none tracking-[-0.03em] text-foam tabular-nums">
+                    {b.ratio}
+                    <span className="ml-0.5 text-[0.6em] font-normal">×</span>
+                  </p>
+                  <div>
+                    <p className="font-bold text-crimson-50">{b.label}</p>
+                    <div aria-hidden className="mt-4 space-y-1.5">
+                      <div className="flex items-center gap-3">
+                        <span className="h-2 flex-1 rounded-r-sm bg-gradient-to-r from-crimson-700 to-ember" />
+                        <span className="w-12 shrink-0 font-mono text-xs text-crimson-50">Guren</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="flex-1">
+                          <span
+                            className="block h-2 rounded-r-sm bg-crimson-50/25"
+                            style={{ width: `${(100 / b.ratio).toFixed(2)}%` }}
+                          />
+                        </span>
+                        <span className="w-12 shrink-0 font-mono text-xs text-smoke">Node</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </section>
 
-        <section className="relative overflow-hidden px-6 py-24">
+        <section className="border-b border-white/10">
+          <div className="mx-auto max-w-6xl px-6 py-20 md:py-28">
+            <SectionHeading>Develop on Bun. Ship where you want.</SectionHeading>
+            <Lead>
+              Pick a target, add its plugin, ship the same app.
+            </Lead>
+            <ul className="mt-12 border-b border-white/10">
+              {deployTargets.map((t) => (
+                <li key={t.name} className="border-t border-white/10">
+                  <Link
+                    href={t.href}
+                    className="group grid grid-cols-1 gap-x-8 gap-y-1 py-5 transition hover:bg-white/[0.03] sm:grid-cols-[13rem_1fr_auto] sm:items-baseline sm:px-3"
+                  >
+                    <span className="flex items-center gap-3 font-bold text-crimson-50">
+                      <t.Icon aria-hidden className="size-6 shrink-0 text-crimson-300" />
+                      {t.name}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[0.9375rem] leading-relaxed text-smoke">{t.detail}</span>
+                      <code className="mt-2 block truncate font-mono text-[13px] text-crimson-50">
+                        <span className="select-none text-smoke/60">$ </span>
+                        {t.command}
+                      </code>
+                    </span>
+                    <span className="text-sm font-semibold text-smoke transition group-hover:text-crimson-300">
+                      Guide
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+
+        <section className="relative overflow-hidden">
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(183,28,28,.15),transparent_70%)]"
+            className="pointer-events-none absolute inset-0 bg-[radial-gradient(50%_80%_at_20%_100%,rgba(255,60,40,.18),transparent_70%)]"
           />
-          <div className="relative mx-auto max-w-2xl text-center">
-            <h2 className="text-3xl font-bold text-white md:text-4xl">
-              Your first app is one command away
-            </h2>
-            <p className="mt-4 text-lg text-white/60">
-              Guren is stable at v1.0. SQLite by default — no Docker, no config, no boilerplate.
-            </p>
-            <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-              <CopyCommand command="bunx create-guren-app my-app" />
+          <div className="relative mx-auto grid grid-cols-1 max-w-6xl gap-14 px-6 py-24 md:py-32 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-end lg:gap-20">
+            <div>
+              <h2 className="text-balance text-[2.25rem] font-bold leading-[1.08] tracking-[-0.03em] text-crimson-50 md:text-[3.25rem]">
+                Your first app is one command away
+              </h2>
+              <p className="mt-5 text-lg text-smoke">
+                Guren v2 is stable. New apps start on SQLite with nothing to set up.
+              </p>
+              <div className="mt-9">
+                <CopyCommand command="bunx create-guren-app my-app" />
+              </div>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Link href="/docs/guides/getting-started" className={PRIMARY_BUTTON}>
+                  Read the quickstart
+                </Link>
+                <a
+                  href={GITHUB_URL}
+                  target="_blank"
+                  rel={OWN_REPO_LINK_REL}
+                  className="inline-flex items-center gap-2 rounded-md border border-white/25 px-6 py-3 font-bold text-crimson-50 transition hover:border-white/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crimson-300"
+                >
+                  <GithubIcon className="size-4" />
+                  View on GitHub
+                </a>
+              </div>
             </div>
-            <div className="mt-6 flex flex-wrap justify-center gap-4">
-              <Link
-                href="/docs/guides/getting-started"
-                className="inline-flex items-center gap-2 rounded-full bg-crimson-500 px-8 py-3.5 font-semibold text-white shadow-lg shadow-crimson-500/30 transition hover:-translate-y-0.5 hover:bg-crimson-600"
-              >
-                Read the quickstart
-                <ArrowRightIcon className="size-4" />
-              </Link>
-              <a
-                href={GITHUB_URL}
-                target="_blank"
-                rel={OWN_REPO_LINK_REL}
-                className="inline-flex items-center gap-2 rounded-full border border-white/30 px-8 py-3.5 font-semibold text-white/90 transition hover:border-white/50 hover:text-white"
-              >
-                <CodeBracketIcon className="size-4" />
-                View on GitHub
-              </a>
-            </div>
+            <aside className="border-l-2 border-crimson-700 pl-6 text-[0.9375rem] leading-[1.7] text-smoke">
+              <p>
+                <em className="font-bold not-italic text-crimson-50">Guren</em> (
+                <span lang="ja" className="font-mincho text-crimson-300">
+                  紅蓮
+                </span>
+) means &ldquo;crimson lotus&rdquo;: Laravel&apos;s conventions, re-grown in
+                TypeScript. Same flower, different pond.
+              </p>
+            </aside>
           </div>
         </section>
 

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { loadRouteDefinitions, resolveRoutesFile } from '../src/load-routes'
+import { loadRouteDefinitions, resolveRoutesFile, withModuleNames } from '../src/load-routes'
 
 // Module fixtures export a plain object shaped like a GurenModule rather than
 // calling `defineModule()` — `resolveGurenModule()` duck-types either — so
@@ -143,15 +143,78 @@ export const ${name}Module = {
     expect(names).toEqual(['billing.index', 'inventory.index'])
   })
 
-  it('warns and skips a module directory without an index.ts, without throwing', async () => {
+  it('records each definition\'s module directory and its defineModule() name apart', async () => {
+    await writeFile(join(tempDir, 'routes/web.ts'), `import type { Router } from '@guren/core'\n\nexport function registerWebRoutes(router: Router): void {\n  router.get('/', () => new Response('ok'))\n}\n`)
+    await mkdir(join(tempDir, 'modules/billing'), { recursive: true })
+    await writeFile(
+      join(tempDir, 'modules/billing/index.ts'),
+      `import type { Router } from '@guren/core'
+
+export default {
+  name: 'Invoicing',
+  providers: [],
+  routes: (router: Router) => {
+    router.get('/invoices', () => new Response('ok'))
+  },
+}
+`,
+    )
+
+    const provenance: Array<string | null> = []
+    const definitions = await loadRouteDefinitions(join(tempDir, 'routes/web.ts'), tempDir, undefined, provenance)
+
+    expect(provenance).toEqual([null, 'billing'])
+    expect(definitions.map((definition) => definition.module)).toEqual([undefined, 'Invoicing'])
+  })
+
+  it('loads a module whose entry is index.tsx', async () => {
+    await writeFile(join(tempDir, 'routes/web.ts'), `import type { Router } from '@guren/core'\n\nexport function registerWebRoutes(_router: Router): void {}\n`)
+    await mkdir(join(tempDir, 'modules/health'), { recursive: true })
+    await writeFile(
+      join(tempDir, 'modules/health/index.tsx'),
+      `import type { Router } from '@guren/core'
+
+export const healthModule = {
+  name: 'health',
+  providers: [],
+  routes: (router: Router) => {
+    router.get('/health', () => new Response('ok')).name('health.check')
+  },
+}
+`,
+    )
+    const warnings: string[] = []
+
+    const definitions = await loadRouteDefinitions(join(tempDir, 'routes/web.ts'), tempDir, warnings)
+
+    expect(warnings).toEqual([])
+    expect(definitions.map((definition) => definition.name)).toEqual(['health.check'])
+  })
+
+  it('names the file it resolved when the module entry exports no module', async () => {
+    await writeFile(join(tempDir, 'routes/web.ts'), `import type { Router } from '@guren/core'\n\nexport function registerWebRoutes(_router: Router): void {}\n`)
+    await mkdir(join(tempDir, 'modules/broken'), { recursive: true })
+    await writeFile(join(tempDir, 'modules/broken/index.mts'), `export const notAModule = { hello: 'world' }\n`)
+    const warnings: string[] = []
+
+    await loadRouteDefinitions(join(tempDir, 'routes/web.ts'), tempDir, warnings)
+
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toStartWith("modules/broken/index.mts doesn't export a defineModule() result")
+  })
+
+  it('warns and skips a module directory without an entry file, without throwing', async () => {
     await writeFile(join(tempDir, 'routes/web.ts'), `import type { Router } from '@guren/core'\n\nexport function registerWebRoutes(_router: Router): void {}\n`)
 
     await mkdir(join(tempDir, 'modules/incomplete'), { recursive: true })
     await writeFile(join(tempDir, 'modules/incomplete/.gitkeep'), '')
+    const warnings: string[] = []
 
-    const definitions = await loadRouteDefinitions(join(tempDir, 'routes/web.ts'), tempDir)
+    const definitions = await loadRouteDefinitions(join(tempDir, 'routes/web.ts'), tempDir, warnings)
 
     expect(definitions).toEqual([])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toStartWith('modules/incomplete has no entry file (index or package.json main)')
   })
 
   it('warns and skips a module index.ts that does not export a GurenModule shape', async () => {
@@ -197,6 +260,19 @@ export const billingModule = {
     const names = definitions.map((d) => d.name).sort()
 
     expect(names).toEqual(['home', 'invoices.index'])
+  })
+})
+
+describe('withModuleNames', () => {
+  it('names the module on a definition an older server left unnamed, keeping one the server named', () => {
+    const definitions = [
+      { method: 'GET', path: '/' },
+      { method: 'GET', path: '/invoices' },
+      { method: 'GET', path: '/carts', module: 'Shop' },
+    ]
+
+    expect(withModuleNames(definitions, [null, 'Invoicing', 'Shopping']))
+      .toEqual([{ method: 'GET', path: '/' }, { method: 'GET', path: '/invoices', module: 'Invoicing' }, { method: 'GET', path: '/carts', module: 'Shop' }])
   })
 })
 

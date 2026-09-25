@@ -8,7 +8,7 @@ Guren provides a broadcasting system for real-time event broadcasting to connect
 - **Channel** – A named conduit for broadcasting events. Channels can be public, private, or presence.
 - **BroadcastDriver** – Backend for event distribution (Memory or Redis).
 - **SSE (Server-Sent Events)** – Built-in support for pushing events to browser clients.
-- **WebSocket Clients** – Built-in lifecycle helpers for registering socket clients and subscribing them to channels.
+- **WebSockets** – A socket endpoint on the same channels, plus lifecycle helpers for custom socket routes.
 
 ## Channel Types
 
@@ -145,7 +145,14 @@ broadcast.channel('admin.**', isAdmin)             // admin.users, admin.setting
 ### SSE Endpoint
 
 ```ts
-import { Router } from '@guren/core'
+import { AUTH_CONTEXT_KEY, Router } from '@guren/core'
+import type { AuthContext } from '@guren/core'
+import type { Context } from 'hono'
+
+const currentUser = async (ctx: Context) => {
+  const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+  return (await auth?.user()) ?? null
+}
 
 export function registerBroadcastRoutes(router: Router): void {
   router.get('/broadcasting/events', broadcast.sseMiddleware({
@@ -153,36 +160,113 @@ export function registerBroadcastRoutes(router: Router): void {
     retry: 3000,
     // Resolve the connecting user so channels requested up front via
     // ?channels= can be authorized when the stream opens
-    getUser: (ctx) => ctx.get('user'),
+    getUser: (ctx) => currentUser(ctx as Context),
   }))
 
   router.post('/broadcasting/auth', broadcast.authMiddleware({
-    getUser: (ctx) => ctx.get('user'),
+    getUser: (ctx) => currentUser(ctx as Context),
   }))
 }
 ```
+
+`getUser` receives the request context typed as `unknown` and may return a promise. `currentUser()` reads the signed-in user from the auth context, and the examples below reuse it.
 
 The SSE endpoint accepts a `?channels=` query parameter listing channels to subscribe before the stream starts. Each requested channel is authorized against the user returned by `getUser`, so a plain `EventSource` works for public channels with zero extra calls. Private and presence channels are subscribed later through `/broadcasting/auth` (see [Authorizing Channels (Client)](#authorizing-channels-client)).
 
 ## WebSocket Foundation
 
-Guren now includes WebSocket client lifecycle helpers on `BroadcastManager`.  
-You can register a socket client, subscribe it to channels, and reuse the same broadcast events used by SSE.
+`broadcast.webSocketMiddleware()` is the WebSocket counterpart of the SSE endpoint. Mount it on a GET route and the request is upgraded to a socket that carries the same broadcast events, through the same channel authorizers and drivers:
+
+```ts
+import { Router } from '@guren/core'
+
+export function registerBroadcastRoutes(router: Router): void {
+  router.get('/broadcasting/socket', broadcast.webSocketMiddleware({
+    // The user of the upgrade request authorizes every channel the socket
+    // subscribes to, for as long as it stays open
+    getUser: (ctx) => currentUser(ctx as Context),
+  }))
+}
+```
+
+The upgrade needs a Bun server, which `app.listen()` provides: it hands `Bun.serve` the WebSocket handler that `upgradeWebSocket` from `hono/bun` relies on. On a runtime that cannot upgrade (`app.fetch()` on Node, Workers, Lambda) the route answers 501.
+
+Every frame is JSON. The server sends `{ event, data }`, starting with a `connected` event that carries the `clientId` and the channels subscribed from `?channels=`. The client subscribes and unsubscribes by sending `{ action, channel }`. Each message is authorized like a `POST /broadcasting/auth` request and answered with a `subscription` event:
+
+```ts
+const socket = new WebSocket(
+  `${location.origin.replace(/^http/, 'ws')}/broadcasting/socket?channels=announcements`
+)
+
+socket.addEventListener('open', () => {
+  socket.send(JSON.stringify({ action: 'subscribe', channel: 'private-orders.123' }))
+})
+
+socket.addEventListener('message', (e) => {
+  const { event, data } = JSON.parse(e.data)
+  if (event === 'subscription') {
+    // e.g. { channel: 'private-orders.123', authorized: true, subscribed: true }
+    console.log('Subscription:', data)
+  } else if (event === 'OrderUpdated') {
+    console.log('Order updated:', data)
+  }
+})
+
+// Later
+socket.send(JSON.stringify({ action: 'unsubscribe', channel: 'private-orders.123' }))
+```
+
+Messages are handled in the order they arrive. A refused channel is answered with `authorized: false` and delivers nothing. A socket with more than 32 messages waiting for an answer is closed with code 1008, and a message over 4 KB is ignored. The `clientId` from `connected` also works with `POST /broadcasting/auth`.
+
+The socket keeps the user it opened with, so signing out does not close it. Remove that user's clients when they sign out or lose access:
+
+```ts
+for (const client of broadcast.getWebSocketClients()) {
+  if (client.userId === user.id) broadcast.removeWebSocketClient(client.id)
+}
+```
+
+### Origin check
+
+CORS does not apply to a WebSocket handshake, and the browser sends the app's cookies with one opened from any site. A page elsewhere could therefore open a socket as the signed-in user (Cross-Site WebSocket Hijacking). The route refuses with 403 a handshake whose `Origin` names a host other than the request's own. When a proxy in front of the app rewrites `Host`, list the public origin:
+
+```ts
+broadcast.webSocketMiddleware({
+  getUser: (ctx) => currentUser(ctx as Context),
+  allowedOrigins: ['https://app.example.com'],
+})
+```
+
+A handshake with no `Origin` comes from outside a browser and carries none of the user's cookies. It passes the check and still has to authorize its channels like any other socket. The check compares hosts and ignores the scheme, because TLS usually ends at the proxy, so a plain-HTTP page on the same host passes; HSTS is what keeps pages on HTTPS. An `allowedOrigins` entry matches its scheme exactly.
+
+### Custom socket routes
+
+The lower-level helpers remain for a route with its own protocol. `subscribeWebSocketClient()` does not authorize, like `subscribeClient()` for SSE: pass it a channel the server chose, and run a channel the client named through `broadcast.authorize()` first. Registering the client with the user's id lets `POST /broadcasting/auth` attach channels to it, for that user only. In the socket's open handler:
 
 ```ts
 const clientId = broadcast.registerWebSocketClient({
-  send: (event, data) => socket.send(JSON.stringify({ event, data })),
-  close: () => socket.close(),
+  userId: user.id,
+  send: (event, data) => ws.send(JSON.stringify({ event, data })),
+  close: () => ws.close(),
 })
 
-broadcast.subscribeWebSocketClient(clientId, 'notifications')
+if (await broadcast.authorize(channel, user)) {
+  broadcast.subscribeWebSocketClient(clientId, channel)
+}
 
-// Later
-broadcast.unsubscribeWebSocketClient(clientId, 'notifications')
+// When the socket closes
 broadcast.removeWebSocketClient(clientId)
 ```
 
-These APIs provide the server-side foundation so a Bun WebSocket upgrade route can plug into the existing channel/driver system.
+Put `createWebSocketOriginGuard()` in front of such a route for the same `Origin` check; it takes the same `allowedOrigins`:
+
+```ts
+import { createWebSocketOriginGuard } from '@guren/core'
+
+router.get('/socket', socketHandler, createWebSocketOriginGuard())
+```
+
+`broadcast.disconnectAll()` closes WebSocket clients as well as SSE streams.
 
 ### Typed channel codegen
 
@@ -272,7 +356,7 @@ eventSource.onerror = (error) => {
 
 ### Authorizing Channels (Client)
 
-Private and presence channels are subscribed through `POST /broadcasting/auth`. A single request with `{ clientId, channel }` both authorizes the channel for the current user and subscribes your SSE connection to it. The response reports both results per channel:
+Private and presence channels are subscribed through `POST /broadcasting/auth`. A single request with `{ clientId, channel }` both authorizes the channel for the current user and subscribes your SSE connection (or WebSocket) to it. The response reports both results per channel:
 
 ```ts
 async function subscribeToPrivateChannel(channel: string) {

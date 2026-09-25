@@ -145,6 +145,22 @@ API アプリをフルスタック化するときは、先に `@guren/inertia-cl
 を使ってください。貼り付け用のルートブロックを出力し、テーブル定義を追記すべきスキーマ
 ファイルも案内します。
 
+どちらのコマンドも、最初のファイルを書く前に、書き出す予定のファイルをすべて確かめます。
+手書きのモデルなど既存のファイルがあれば、該当するものをすべて一覧にして中断し、
+何も書き込みません。`add resource` の場合は `db/schema.ts` と `routes/web.ts` も
+変更しません。`--force` を付けると一覧のファイルはすべて上書きされ、手書きの
+ファイルも対象になります。`--test`・`--factory`・`--policy` だけが追加するファイルには
+一覧でそのフラグが併記され、フラグを外せば回避できます。プロトタイプの昇格では、
+プロトタイプ実行で書いたページとバリデータを残すので、これらは既存ファイルとして
+数えません。
+
+複数のファイルを書き出すほかのコマンドも、最初の書き込みの前に同じ確認をして中断します。
+対象は `make:auth`、`make:module`、`make:ai-agent`(`--test` がフラグにあたります)、
+`deploy`、そして `add` の各ブループリントで、サンプルのイベント・ジョブ・Mailable も
+含みます。ファイルを1つだけ書く `make:*` コマンドも同じ文言で中断します。途中まで
+入ったものを再実行で補うためのブループリント(`add session`、`add cache`、`add schedule`、
+`add ai`、`add prototype`)は、既存のファイルを残して残りだけを書きます。
+
 ## 主要コマンド
 
 | コマンド | 説明 | 例 |
@@ -178,8 +194,9 @@ API アプリをフルスタック化するときは、先に `@guren/inertia-cl
 | コマンド | 説明 | 例 |
 |---------|------|-----|
 | `check` | ルート・コントローラ・ページ・モデル間の整合性(`routes/` 配下の各ファイルがエントリのレジストラから、モジュールの `routes/` 配下は各モジュール自身のレジストラから実際に呼ばれているかを含む)に加え、`config/agents.ts` の永続エージェントレジストリ・インプロセスエージェントの `appTools()` の名前とスコープ・deferred props(ページの `Props` が必須として宣言している prop に `defer()` を渡していないか。advisory)・docリンク・スペックビューの鮮度・アーキテクチャ境界を検証 | `bunx guren check --json` |
-| `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定、`hidden` 未登録の機微カラム、リクエストのホストから組み立てられたメール内リンク、アプリまたはインストール済みパッケージが宣言した CSRF 除外、インプロセスエージェントのローカルツールを検査 | `bunx guren audit --json` |
+| `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証/Policy 認可の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定、`hidden` 未登録の機微カラム、リクエストのホストから組み立てられたメール内リンク、アプリまたはインストール済みパッケージが宣言した CSRF 除外、インプロセスエージェントのローカルツールを検査 | `bunx guren audit --json` |
 | `gate` | scaffold された CI が回す検証ステージ(codegen・typecheck・lint・`--ci` 規則の `check`・`audit`・テスト)をまとめて実行し、いずれかが失敗すれば非ゼロ exit。実行できないステージは skip ではなく失敗 | `bunx guren gate --changed` |
+| `introspect` | boot も listen もせずにアプリの provider とルートを登録し、マニフェストを出力。provider ごとの登録結果、解決済みのミドルウェアとコントローラのファイルを含むルート、session・auth・cache・storage・queue・attachments の設定を含む | `bunx guren introspect --json` |
 | `doctor` | プロジェクトの健全性レポート(環境変数・設定・生成ファイル)と次のアクション | `bunx guren doctor --next` |
 | `context [Entity]` | プロジェクトコンテキストマップ。エンティティ名を渡すと1モデルのすべて — テーブル・リレーション・`fillable`/`hidden`/`visible`/`casts`・スキーマ付きルート(`<Entity>Controller`、モデルを指す `bind`、モデルを使うアクション本体のいずれかで対応付け)・Props付きページ・Resource・Policy・紐付きdocsとIssue — を出力(同名モデルは `--module` で解決、`"app"` はプロジェクトルート。`--live` で `gh` にIssueの状態を問い合わせ、`--repo owner/name` でoriginリモートを上書き) | `bunx guren context User --json` |
 | `docs:graph` | OKF docsのリレーショングラフ。文書・エンティティ・コードパスがノード、検証済みリレーションがエッジ。`--entity <Model>` / `--path <file>` で近傍に絞り、リネーム前に「これを統べるdocsはどれか」を照会 | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |
@@ -198,9 +215,38 @@ bunx guren check --spec    # docs/spec/ が再生成結果と一致するか
 bunx guren check --prototype  # prototype ハンドラーのルートに名前付きの fixture エントリがあり、ローダーが配線されているか
 ```
 
+`audit` の Policy ルールは warn 止まりです。モデルに対する Policy
+(`make:policy` が書く `app/Policies/<Model>Policy.ts`、同じアプリルート内で対応付け)が
+ひとつでもあると、安全でないメソッドのコントローラアクションのうち本体でそのモデルを参照する
+ものに `policy:<METHOD> <path>` の finding が付きます。アクションが `this.authorize()` か
+`this.can()` を呼ぶ、gate に問い合わせる、Policy クラスを参照する、
+`authorize()`/`authorizeResource()` ミドルウェアの後ろにある、のいずれかなら pass です。
+スキャンから見える範囲で Policy を参照していなければ、アクション名・Policy 名・修正方法を
+添えて warn します。コントローラのソースが読めなかった場合も pass にはせず warn します。
+アクションが呼ぶヘルパーの中までは追いません。判定が別の場所にあるアクションには、
+その上のコメントに `// guren-audit-ignore` を書いてください。その finding はそのコメントを
+理由として ignored で報告されます。Policy のないアプリではこの finding は出ません。
+
 スイートフラグは併用すると和集合で実行されます。`--changed` はどのスイートも
 main とのマージベースからの変更ファイルに限定します。エージェントハーネスの
 edit hook が使う高速パスです。
+
+ファイルを再生成すれば消える指摘もあります。`.guren/*.gen.ts` マニフェストの
+欠落(`guren codegen`)と、`docs/spec/` のビューのずれ(`guren spec:generate`)です。
+`check --json` はこれらの指摘に `fix` フィールドを付けます。中身は
+`{ "kind": "command", "args": ["codegen"] }` のような `guren` 以降の引数です。
+`--fix` は重複を除いた fix を一度ずつ実行し、もう一度チェックして2回目の結果を
+報告します。実行したコマンドは `fixes` に入ります。どれかが失敗したとき、
+または正常終了しても消すはずの指摘が残ったときは、非ゼロで終了します。
+`--ci` と `--fix` は同時に指定できません。ゲートがずれを自分で再生成すると
+常に通ってしまうためです。`--fix` は手元で実行し、書き換わったファイルを
+コミットしてください。コードの変更や判断が要る指摘には `fix` がなく、
+`suggestion` の文章だけが付きます。
+
+```bash
+bunx guren check --fix          # 指摘が示すファイルを再生成して、もう一度チェック
+bunx guren check --spec --fix   # 同じことをスペックビューに限って行う
+```
 
 `gate` は「この変更は完了か」に一つの exit code で答えるコマンドです。
 codegen、typecheck、lint(アプリに `.oxlintrc.json` がある場合)、
@@ -209,7 +255,13 @@ codegen、typecheck、lint(アプリに `.oxlintrc.json` がある場合)、
 非ゼロで終了します。実行*できない*ステージは skip ではなく失敗です。`.oxlintrc.json`
 があるのに oxlint が入っていない、`typecheck` スクリプトが無い、routes エントリ
 が読み込めない、といった場合です。lint を skip するのは `.oxlintrc.json` の無い
-アプリだけです。
+アプリだけです。`check` と `audit` のステージはイントロスペクションの結果を読みます
+([イントロスペクションの結果を読むチェック](#イントロスペクションの結果を読むチェック)参照)。
+イントロスペクションは 1 回の実行につき 1 回(上限 10 秒)で、codegen の後に行うため、clone 直後の
+アプリでもエントリを import できます。失敗した場合は、それを求めたステージに advisory の
+1 行を加えるだけで、gate は失敗にしません。`-unverified` の結果も、アプリが保証できなかった理由を
+添えて check ステージに advisory の行として表示します。ソースを変えていない `--changed` の実行は
+イントロスペクションを行わないので表示しません。`guren plan:verify` も check のステップに同じ行を表示します。
 
 ```bash
 bunx guren gate            # 全ステージをフルで
@@ -225,6 +277,202 @@ MCP サーバは `guren_gate` ツールとして公開します。それ以外�
 完了を宣言する前に実行するよう `AGENTS.md` が指示します。
 
 名前付きミドルウェアで保護されたルート(例: `router.middleware('auth').group(...)`)は保護済みと認識されます。`/login` や `/register` などのゲストフローは認証チェックの対象外です。
+
+### 登録済みアプリのイントロスペクション
+
+`guren introspect` はアプリ自身から答えを得ます。ソースコードの文面は読みません。
+`GUREN_INTROSPECT=1` を付けた子プロセスで `src/main.ts` を import し、すべての
+provider とすべてのルートを登録したところで止まります。ルートはマウントしません。
+provider の `boot()`、`createApp({ boot })` のコールバック、`listen()` は実行されないので、
+ポートは使わず、`boot` で接続する scaffold の `defineDatabaseConfig()` の定義も接続しません。
+モジュールスコープや `register()` で接続するコードは実行されます。子プロセスは
+`guren dev` と同じくアプリのルートにある `.env` を読み込み、シェルで設定された
+変数はそれより優先されます。`--app` を使う場合は、カレントディレクトリの `.env`
+ファイルも CLI に読み込まれて同じ経路で子プロセスに渡るため、これもアプリの
+`.env` より優先されます。
+
+```bash
+bunx guren introspect                 # provider・ルート・サービス・警告を表で表示
+bunx guren introspect --json          # ツール向けのマニフェスト
+bunx guren introspect --timeout 60    # 遅い register() を 60 秒まで待つ(既定は 30 秒)
+bunx guren introspect --app ../api    # 別のアプリのルートを調べる
+```
+
+provider にはそれぞれ登録の結果が付きます。`ran`、`introspect-hook`(`introspect()`
+を定義していて、`register()` の代わりにそれが実行された)、`threw`(メッセージが
+残り、他の provider の登録は続く)、deferred provider の `skipped` のいずれかです。
+`register()` で接続を開いたり実行時のバインディングを読んだりする provider は、
+`introspect()` を定義してマニフェストに必要なものだけをバインドできます。
+
+```ts
+import { ServiceProvider } from '@guren/core'
+import Redis from 'ioredis'
+
+export class RedisProvider extends ServiceProvider {
+  register(): void {
+    // Connects as soon as it is constructed.
+    this.container.instance('redis', new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379'))
+  }
+
+  introspect(): void {
+    // The manifest does not describe 'redis', so nothing needs binding here.
+  }
+}
+```
+
+provider の外のコードでは `isIntrospecting()` で同じ判定ができます。フラグの下では
+`app.boot()` が登録の後で止まり、`app.listen()` は例外を投げます。そのため import 中に
+`listen()` を呼ぶエントリは、`bin/serve.ts` の形を案内するメッセージとともに失敗します。
+失敗すると `--json` は `{ "status": "failed", "reason", "message" }` を出力し、終了コードは
+1 になります。reason は `no-entry`、`import`、`timeout`、`crashed`、`old-server`
+のいずれかです。`old-server` は introspection に対応する前の `@guren/core` が
+インストールされている場合で、エントリを import する前に検出します。
+
+### イントロスペクションの結果を読むチェック
+
+`guren check` と `guren doctor` は、デプロイ実行環境の判定をまずイントロスペクションの
+結果から行います。対象は auth manager が持つハッシャー、選ばれているセッションストアと
+キャッシュストア、登録中に例外を投げた provider の有無です。`guren check` はセッションと
+添付ファイルの配線もこの結果から判定します。
+
+| チェックキー | イントロスペクションの結果から読むもの |
+|--------------|----------------------------------------|
+| `sessions-binding` | `register()` で `session` をバインドする provider があるか。アプリが読まないセッション設定(バインドがない、または `auth.sessionOptions.store` が代わりにストアを渡している)が警告になる。バインドしたマネージャと `auth.sessionOptions.store` の併用はアプリが boot を拒否するので fail になる |
+| `sessions-config:*` | バインドされたセッションマネージャの `database` ストアが持つテーブルの SQL 名。モジュールも含め、各アプリルートの `db/schema.ts` が宣言するテーブルと照合する。スキーマの読み取りで見つからない名前は advisory の警告にとどめ、それもソースからスキーマの export をたどれないテーブルに限る。この読み取りは `drizzle.config` が挙げる他のファイルも `pgTableCreator()` の接頭辞も見ない。判定はそのストアを宣言するすべての設定に付く。ソースから読めるどの設定もストアを宣言していない場合は、ファイルを持たない `sessions-config:<store>` のキーで報告する |
+| `attachments-model:*`、`attachments-config:*` | アプリの登録中に添付ファイルのエンジンが設定されたか、そのエンジンが書き込むテーブル。テーブルはセッションと同じように照合し、ファイルを持たないキーは `attachments-config` になる。どの `configureAttachments()` もファイルの読み込み時に必ず実行される位置(関数、分岐、クラスフィールドの外)にあり、どのソースもそのファイルを `import()` で読み込まず、`createApp({ boot })` も省略されていないのに、エンジンが設定されていない場合、モデルが fail になる。アプリが登録中に読み込むものが、そのファイルを import していないため |
+| `attachments-delivery` | エンジンの `delivery` が指すルートが登録されていて、それが `registerAttachmentRoutes()` のルートであるか |
+| `attachments-route-name:*` | そのルート名を持つ登録済みルートの数 |
+| `attachments-serve-redirect:*` | エンジンがリダイレクトで配信するディスクと、storage manager から読んだ各ディスクのドライバ |
+| `attachments-public-disk:*` | エンジンが書き込むディスク。ディスクの `root` はソースから読む |
+| `route-contract-*` | provider やプラグインが登録したものも含む、登録済みのすべてのルート。params スキーマのキーは JSON Schema の `properties` から読み、fail か warn かは `required` で決まる。JSON Schema がスキーマを表しきれない場合(nullable なオブジェクト、`z.any()` や `z.undefined()` のキー)は、同じルートをルートファイルの Zod で判定する。アプリだけが登録するルートには Zod がないので、表しきれない場合は読めないものとして報告し、注記なしに落ちたキー(`z.undefined()`)は見えない |
+| `agent-route-*` | `.agent()` を宣言したすべてのルート。コントローラはファイルと export で特定する |
+| `prototype-*` | 名前付きのすべてのルート。provider が登録するルートを指すフィクスチャのエントリは孤立扱いにならない。`createApp({ prototype })` の配線とフィクスチャ自体はソースから読む |
+
+イントロスペクションは、それを必要とするチェックがあるときだけ行います。デプロイプラグインか
+Lambda アダプタを宣言したアプリ、セッション設定があるアプリ、`configureAttachments()` を
+呼ぶアプリ、`Attachable(...)` を mixin するモデルがあるアプリが対象です。ルートファイルが
+params スキーマかバインディングを持つルート、`.agent()` を宣言したルート、`prototype`
+ルートのいずれかを登録するアプリと、プロトタイプのフィクスチャがあるアプリも対象です。
+各ルールは自分の対象があるときだけイントロスペクションを求めます。そのため、アプリだけが登録する
+ルートを route-contract が判定するのはルートファイルに params スキーマかバインディングがある場合、
+エージェントルートのルールが判定するのはルートファイルにエージェントルートがある場合だけです。`--routes` を
+付けた場合、ルートのルールはルートファイルを読みます。マニフェストが表すのはアプリの
+エントリだからです。1 回の実行につき
+最大 1 回で、ソースファイルを変更していない `--changed` の実行では行いません。マニフェストは
+実行環境の `.env` を読み込んだ状態で作られるので、環境変数で選ぶストアはローカルの値で
+判定されます。イントロスペクションは provider の `boot()` より前で止まります。そのため、関数の中で呼ぶ
+`configureAttachments()` は、呼び出しのオプションをソースから、ルートとストレージのドライバを
+アプリから読みます。
+
+イントロスペクションを行うのは `guren check`、`doctor`、`audit`、`gate`、`plan:verify` です。
+上限はどれも 10 秒なので、`check --ci` と gate の判定は一致します。編集フック(`check --arch`)と dev MCP サーバの `guren_check` は行わないので、アプリでしか
+答えられない判定は `-unverified` になります。
+
+これらの結果には、`--json` の出力で `evidence` が付きます。複数の事実を読む判定では、
+そのうち最も弱い根拠を示します。
+
+| `evidence` | 意味 |
+|------------|------|
+| `manifest` | イントロスペクションの結果を使って判定した。マニフェストにない事実(OAuth の state ストア、明示的に生成したインメモリストア)はソースの走査で補う |
+| `static` | 事実がソースにあるので、ソースから判定した。provider の自動検出、ディスクの `root`、関数の中で呼ぶ `configureAttachments()` のオプション、スキーマが export すべきセッションや添付ファイルのテーブル、アプリが読まないセッション設定が該当する。テーブルの export が無いとイントロスペクション自体が失敗するため、読めるのはソースだけになる。マニフェストを使わなかった理由はメッセージに書かれる |
+| `none` | アプリでしか答えられず、それを保証するマニフェストがない。アプリをイントロスペクションしなかった場合、失敗した場合、`register()` で例外を投げた provider がある場合、未設定の環境変数を読む設定がバインドされなかった場合、deferred provider か自身を説明できないバインディングがそのセクションを提供する場合が該当する。キーの末尾は `-unverified` で、結果は advisory の警告になり、pass にはならない。デプロイのハッシャーとストア、セッションのバインド、添付ファイルの配信ルートとリダイレクトのディスクが対象 |
+
+イントロスペクションが失敗すると、`check` は理由を書いた advisory の
+`introspection-unavailable` を 1 行加えます。ソースを読む判定はソースから行い、
+それ以外は `-unverified` になります。`doctor` は理由を JSON の `evidenceReason` に入れます。
+`--no-introspect` を付けるとイントロスペクションを行いません。エントリがまだ import
+できないアプリで使います。
+
+```bash
+bunx guren check --no-introspect
+bunx guren doctor --no-introspect
+```
+
+デプロイ時のビルドも同じ判定を行います。イントロスペクションの上限は 10 秒で、
+各判定の根拠を 1 行で表示します。
+
+`guren audit` は、ルート単位のルール(`validation:*`、`authz:*`、`agent-annotation:*`)を
+イントロスペクションの結果で判定します。イントロスペクションを行うのは、ルートファイルが
+変更系かボディを持つルートを登録している場合と、ルートファイル単体では読み込めない場合
+(アプリとしては登録できることがある)だけです。`--routes` を付けた場合は行いません。
+マニフェストが表すのはアプリのエントリで、指定したファイルではないためです。マニフェストでは
+次のように判定が変わります。
+
+- ミドルウェアの alias は、アプリのどこで登録したものでも解決済みで届きます。provider が
+  登録する `auth` alias の後ろにあるルートは `authz:*` が pass になります。ルートファイルだけを
+  読み込むと、認識できないガードとして報告されます。
+- 認可はするが認証をしないチェーンは警告のままで、メッセージに確認する内容が入ります。
+  1 つの ability、複数の ability のいずれかかすべて、リクエスト時に決まる ability の
+  いずれかです。ゲストのリクエストは `null` ユーザーのままゲートに届き、ポリシーが通す
+  こともあります。
+- アプリのどこにも alias や group として登録されていない名前は、未解決として報告します。
+  そのルートは boot 時のマウントで失敗するため、同じチェーンのガードより先に判定し、
+  ガードがあっても pass にはしません。イントロスペクションが実行しないものがその名前を
+  登録しうる場合(`createApp({ boot })` のコールバック、`register()` の代わりに
+  `introspect()` フックを実行した provider)は、メッセージにそれを書きます。
+- コントローラはファイルと export で特定します。2 つのモジュールがそれぞれ `ReportController`
+  を宣言していても、各ルートは自分のクラスで判定されます。ルートのクラスがコントローラの
+  ファイルのどの export とも一致しない場合(ルートファイルの中で宣言したクラスなど)、同じ
+  名前の export されたクラスのボディは使いません。ルートファイルかエントリがその名前の
+  クラスを宣言している場合も同じで、ルートは解析できないものとして報告します。それ以外では、
+  コントローラのファイルが export せずに宣言した同名のクラスか、イントロスペクション中に
+  import が失敗したファイルのクラスを名前で読みます。`controller-name-collision:*` は、この
+  名前による読み取りで 2 つのファイルが同じ名前を宣言している場合と、クラスが再 export を
+  通して見つかった場合に限って報告します。ボディの検査
+  (`validateBody()`、`userOrFail()`)は引き続きアクションのソースを読みます。
+
+`guren check` のエージェント公開ルートのルールも同じ方法でコントローラを特定します。生 SQL、
+認証情報、mass assignment、CSRF 除外は、どちらの場合もソースから判定します。
+
+ルート単位の finding には `evidence` が付きます。マニフェストだけで決まった判定
+(ガードの capability、ルートが強制するボディスキーマ)は `manifest`、コントローラの
+ボディかルートファイルを読んだ判定は `static` です。JSON の `routeSource` は読んだものを示し、
+ルートファイルを読んだ場合はその理由も入ります。イントロスペクションが失敗すると
+`introspection-unavailable` の警告を 1 件加えますが、終了コードは変わりません。
+`register()` で例外を投げた provider があれば、ルールはルートファイルの判定に戻ります。
+その provider が、ルートの使う alias を登録するものかもしれないためです。
+`--no-introspect` を付けるとルートファイルだけを読みます。
+
+```bash
+bunx guren audit --no-introspect
+```
+
+### イントロスペクションの結果から読むルート一覧
+
+`guren context` は、イントロスペクションで得たアプリのルートを一覧にします。provider や
+プラグインが登録したルートも含み、`createApp()` がマウントしない `modules/` 配下の
+モジュールは含みません。スキーマの型は引き続きルートファイルから描画するので、アプリだけが
+登録するルートには型が付きません。`--no-introspect` か `--routes` を付けると、ルートファイルの
+ルートを一覧にします。アプリをイントロスペクションできない場合は、Routes の節にその理由を
+1 行で書き(`--json` では `routesNotIntrospected`)、ルートファイルのルートを一覧にします。
+`guren context <Entity>` がイントロスペクションを行うのは、2 つのファイルが宣言するコントローラ
+クラスにルートが届く場合だけで、`--routes` を付けた場合は行いません。
+
+`guren doctor` の `prototype-routes` は、ルートファイルが `prototype` ハンドラを使っている
+場合に、イントロスペクションで得たルートを数えます。
+
+`guren codegen` は、`--introspect` を付けない限りルートファイルを読みます。Vite プラグインは
+編集のたびに codegen を実行し、`guren check`、`doctor`、`guren gate` は既定の codegen の出力を
+基準にするためです。`--introspect` を付けると、どのルートがどの順で存在するかはアプリが決め、
+各ルートはルートファイルの Zod から描画します。すべてのルートがルートファイルとそのモジュールから
+来るアプリでは、生成物がバイト単位で一致します。ただし、同じ名前のルートが 2 つあり、
+`createApp({ modules })` のモジュールの並びがディレクトリの並びと違う場合は例外です。
+アプリだけが登録するルートはスキーマの型なしで加わり、そのルートを挙げた警告が出ます。
+そのルートのエージェントツールはマニフェストから取ります。2 つのルートが同じツール名を持つ場合は、
+実行時と同じく、アプリが先に登録したほうを残します。この出力は、フラグなしの次の codegen
+(Vite の監視を含む)までしか残りません。エージェントツールがすべて provider から来るアプリでは、
+`check` と `doctor` が書き出された `.guren/agents.gen.ts` を古いものとして報告し、案内される
+`guren codegen` がそれを削除します。ルートファイル自身もツールを導出するアプリでは、両者は
+ファイルがあるかどうかしか見ないため、追加されたツールは何も報告されません。アプリをイントロスペクションできない場合と、`--routes` が `check` の見つける
+エントリとは別のファイルを指す場合は、理由を表示してルートファイルから生成します。
+
+```bash
+bunx guren codegen --introspect
+```
+
+`guren spec:generate` と `check --spec` は常にルートファイルを読みます。ビューはコミットされ、
+`guren gate` はイントロスペクションなしにプロセス内で再生成するため、マニフェストから書いた
+ビューはそこで差分として報告されてしまいます。
 
 ### エージェントに公開したルート
 
@@ -252,13 +500,15 @@ MCP サーバは `guren_gate` ツールとして公開します。それ以外�
 | `agent-route-authorization:*` | 判定に到達できなかった。ハンドラがインライン関数であるか、コントローラアクションが check の読み取る対象に含まれていない場合です。 |
 | `agent-route-controller-collision:*` | 同名のコントローラクラスが2つあり、その一方をエージェント公開ルートが使っている。コントローラ本体から導いた判定が、もう一方のクラスを指している可能性があります。 |
 | `agent-route-controller-unreadable:*` | コントローラのファイルを読み取れなかった。そこに定義されたアクションを持つエージェント公開ルートは、本体を一切参照せずに検査されたことになります。 |
+| `agent-route-controller-unparsed:*` | コントローラのファイルを構文解析できなかった。そこに定義されたアクションを持つエージェント公開ルートは、本体を参照せずに検査されています。そのファイルのクラス名を指すルートは、同名のクラスを宣言する別のファイルと照合されることがあり、このとき名前の衝突は報告されません。 |
 | `route-graph` | ルートファイルの読み込みに失敗したため、ルート契約チェックとエージェントルートチェックのどちらも実行されませんでした。 |
 
-`audit` は同じルートに対して2つのルールを追加します。
+`audit` は同じルートに対して次のルールを追加します。
 
 - 通常のルートでは warning になるボディ検証の finding が、エージェント公開ルートでは **failure** になります。key は `validation:*` のままなので、既存の `config/audit.ts` のエントリはそのまま効きます。
 - `agent-annotation:*` は、レコードを削除・更新・force-write するアクションに `destructiveHint: false` が宣言されている場合と、アクション本体を読み取れずその宣言を検査できなかった場合に warn します。
 - `controller-unreadable:*` は、コントローラのファイルを読み取れなかった場合に warn します。そこに定義されたアクションについては、上記のルールがどれも本体を参照できていないためです。
+- `controller-unparsed:*` は、コントローラのファイルを読み込めたものの構文解析できなかった場合に warn します。そのファイルのアクションは上記のルールから本体が見えません。さらに、クラス名だけでそのファイルのクラスに対応づけられたルートは、同名のクラスを宣言する別のコントローラファイルの本体で判定され、`controller-name-collision:*` も出ません。
 
 誤検出は、対象行またはその直前の行に `// guren-audit-ignore` を置くことで抑制できます:
 
@@ -267,7 +517,7 @@ MCP サーバは `guren_gate` ツールとして公開します。それ以外�
 const apiKey = 'example-not-a-real-key'
 ```
 
-ルートレベル・モデルレベルの findings(`authz:*`、`validation:*`、`agent-annotation:*`、`mass-assignment:*`、`hidden-columns:*`)には、コメントを付けられる特定の行が存在しません。これらはルートレジストラを実行し、モデルを検査することで生成されるためです。代わりに `config/audit.ts` で finding の `key`(`--json` の出力からそのままコピーできます)と必須の `reason` を指定して無視します:
+ルートレベル・モデルレベルの findings(`authz:*`、`policy:*`、`validation:*`、`agent-annotation:*`、`mass-assignment:*`、`hidden-columns:*`)には、コメントを付けられる特定の行が存在しません。これらはルートレジストラを実行し、モデルを検査することで生成されるためです(`policy:*` だけは、修正箇所がアクションなので、その上のコメントのマーカーも受け付けます)。代わりに `config/audit.ts` で finding の `key`(`--json` の出力からそのままコピーできます)と必須の `reason` を指定して無視します:
 
 ```ts
 // config/audit.ts
@@ -423,7 +673,7 @@ npx skills add gurenjs/agent-skills
 
 フレームワーク管理ファイル(rules・skills・サブエージェント・hooks)は `agent:sync` が上書きします。それがこのコマンドの役割なので、プロジェクト固有のルールは配布ファイルに追記せず、自分のファイルとして別名で置いてください。上書きは必ず画面に出ます。最新版と一致しているファイルはスキップされ、内容が異なっていたファイルは「置き換えた」として明示されます。`agent:sync --dry-run` を先に実行すると、何が書き込まれ・置き換えられ・削除候補になるかを、ファイルを一切変更せずに確認できます。`agent:init` も `--dry-run` を受け付けます(`--force` のプレビューとして使えます)。
 
-リリースでフレームワークのルールやスキルが改名・削除されると、旧ファイルは配布先の全ルートに残り続けます。特に Cursor・Copilot は古い `.cursor/rules/guren-*.mdc` / `.github/instructions/guren-*.instructions.md` を glob で読み込み続けます。`agent:sync` はフレームワーク管理の場所で現行ハーネスに含まれないファイルを一覧表示し、`agent:sync --prune` を付けるとそれらを削除します。対象は常に**名前**で判定します。rules のルート(`.claude/rules/`、`.agents/rules/`)はハーネスが配布している(または過去に配布した)ルールのファイル名だけ、ネイティブルールは `guren-` プレフィックスだけ、skills のルート(`.claude/skills/`、`.agents/skills/`)はハーネスが配布している(または過去に配布した)スキルディレクトリだけです。配布ルールの隣(サブディレクトリを含む)に置いた自作のルールファイルや、自分で追加したスキル(`npx skills add` や Agent Plugins クライアントが同じディレクトリに入れたものを含む)は、一覧にも出ず削除もされません。例外はハーネス自身が配布している名前と衝突した場合だけです。スキルなら `dev-workflow`・`db-manage`・`scaffold`・`feature`・`guren-api`・`plugin-authoring`・`agent-interface`・`ai-agent`・`github-projects`、ルールならエントリードキュメントに載っているファイル名(大文字小文字は区別しません)、そして Cursor・Copilot では名前の一覧ではなくプレフィックス判定なので `guren-` で始まるファイル**すべて**です。Cursor/Copilot の自作ルールは別のプレフィックスにしておき、`--prune` の前には一覧を確認してください。
+リリースでフレームワークのルールやスキルが改名・削除されると、旧ファイルは配布先の全ルートに残り続けます。特に Cursor・Copilot は古い `.cursor/rules/guren-*.mdc` / `.github/instructions/guren-*.instructions.md` を glob で読み込み続けます。`agent:sync` はフレームワーク管理の場所で現行ハーネスに含まれないファイルを一覧表示し、`agent:sync --prune` を付けるとそれらを削除します。対象は常に**名前**で判定します。rules のルート(`.claude/rules/`、`.agents/rules/`)はハーネスが配布している(または過去に配布した)ルールのファイル名だけ、ネイティブルールは `guren-` プレフィックスだけ、skills のルート(`.claude/skills/`、`.agents/skills/`)はハーネスが配布している(または過去に配布した)スキルディレクトリだけです。配布ルールの隣(サブディレクトリを含む)に置いた自作のルールファイルや、自分で追加したスキル(`npx skills add` や Agent Plugins クライアントが同じディレクトリに入れたものを含む)は、一覧にも出ず削除もされません。例外はハーネス自身が配布している名前と衝突した場合だけです。スキルなら `dev-workflow`・`db-manage`・`scaffold`・`feature`・`guren-api`・`plugin-authoring`・`agent-interface`・`ai-agent`・`github-projects`・`plan-write`・`plan-implement`、ルールならエントリードキュメントに載っているファイル名(大文字小文字は区別しません)、そして Cursor・Copilot では名前の一覧ではなくプレフィックス判定なので `guren-` で始まるファイル**すべて**です。Cursor/Copilot の自作ルールは別のプレフィックスにしておき、`--prune` の前には一覧を確認してください。
 
 ## デプロイレシピ生成
 
@@ -443,7 +693,7 @@ bunx guren deploy --target railway
 bunx guren deploy --target all --app my-app --port 4000
 ```
 
-`--target` は `docker` / `fly` / `railway` / `all` をサポートします。書き出すファイルがすでにあるとコマンドは止まります。上書きするときは `--force` を付けてください。
+`--target` は `docker` / `fly` / `railway` / `all` をサポートします。書き出すファイルがすでにあると、コマンドは該当するファイルをすべて一覧にして、どれも書き込みません。上書きするときは `--force` を付けてください。
 
 Vercel と AWS Lambda にはプラグインを使います。Vercel は `bunx guren plugin @guren/plugin-vercel`、AWS Lambda は `bunx guren plugin @guren/plugin-lambda` で導入します。`--target vercel` はエラーになります。どちらの手順も[デプロイ](./deployment.md)で説明しています。
 

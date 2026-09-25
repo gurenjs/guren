@@ -397,7 +397,7 @@ export default class PostController extends Controller {
 }
 ```
 
-ここでの `forceCreate` は意図的な選択なので、少し立ち止まる価値があります。モデルの `fillable` は `title` と `body` を挙げていて、`authorId` はそこにありません。リクエストが投稿の著者を名乗れてはいけないからです。そのため `Post.create(data)` は `authorId` を捨ててしまいます。`forceCreate` はそのフィルターを迂回しますが、ここでは安全です。渡すオブジェクトの中に、検査を経ずリクエストから来た値がひとつも無いからです。`data` はバリデーターを通っていて、`author.id` はセッションから来ています。ルールは「forceCreate を使うな」ではなく、「サーバーが選んだ値にだけ使う」です。
+ここでの `forceCreate` は意図的な選択なので、少し立ち止まる価値があります。モデルの `fillable` は `title` と `body` を挙げていて、`authorId` はそこにありません。リクエストが投稿の著者を名乗れてはいけないからです。そのため `Post.create({ ...data, authorId: author.id })` は、`authorId` を名指しした `MassAssignmentException` をスローします。`forceCreate` はそのフィルターを迂回しますが、ここでは安全です。渡すオブジェクトの中に、検査を経ずリクエストから来た値がひとつも無いからです。`data` はバリデーターを通っていて、`author.id` はセッションから来ています。ルールは「forceCreate を使うな」ではなく、「サーバーが選んだ値にだけ使う」です。
 
 ```bash run
 bun test
@@ -919,7 +919,7 @@ bun run db:status
 - **`.middleware('auth')` がコンパイルできない。** `aliasMiddleware()` はその名前を知っている新しいルーター型を返しますが、その結果を受け取っていません。上のファイルのようにチェーンして代入してください。
 - **サインイン済みのテストが `/login` にリダイレクトされる。** `actingAs()` は `withCsrf()` より前でなければなりません。用意のためのリクエストも認証済みである必要があります。どちらも新しいクライアントを返すので、代入し直してください。
 - **`db:migrate` が「NOT NULL constraint failed」で失敗する。** まだ著者の無い投稿があります。先に `bun scripts/backfill-post-authors.ts` を実行してください。順序こそが第 3 節の要点です。
-- **保存された投稿の `authorId` が `null`。** `store` が `Post.create` を使い、`fillable` が著者を落としました。サーバーが選んだ値で `forceCreate` を使ってください。
+- **`store` が `MassAssignmentException` で 500 を返す。** `store` が `Post.create` に `authorId` を渡しましたが、`fillable` はそれを挙げていません。サーバーが選んだ値で `forceCreate` を使ってください。
 - **一覧の著者がすべて「unknown」になる。** `IN` クエリに渡した id の型が違うか、map のキーがユーザーの id 以外です。`authors` を一度ログに出してください。著者ごとに 1 エントリあるはずです。
 
 ## 演習

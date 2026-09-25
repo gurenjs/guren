@@ -91,6 +91,10 @@ export {
   type CorsOptions,
 } from './cors'
 export {
+  createWebSocketOriginGuard,
+  type WebSocketOriginOptions,
+} from './websocket-origin'
+export {
   createRedirectSafetyMiddleware,
   isSafeRedirectUrl,
   type RedirectSafetyOptions,

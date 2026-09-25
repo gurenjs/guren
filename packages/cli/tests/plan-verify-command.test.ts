@@ -13,7 +13,7 @@ import { formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
 import { planWaiveFile } from '../src/plan-waive'
 import { HELD_STEP_REMEDY } from '../src/plan/step-context'
 import { loadPlanAppState } from '../src/plan/app-state'
-import { planDigest, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, type PlanStepRecord } from '../src/plan/state'
+import { planDigest, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, type PlanStepRecord, type PlanStepWork } from '../src/plan/state'
 import { stampContextHash } from '../src/plan/freshness'
 import { sha256 } from '../src/plan/verification'
 import { createTempRoot, writeWorkspaceFiles } from './helpers'
@@ -98,14 +98,19 @@ describe('plan:verify', () => {
     // The plan's destroy action, route, resource and policy are not written, so the step cannot verify.
     expect(record.outcome).toBe('incomplete')
     expect(record.incomplete).toEqual(expect.arrayContaining(['action.comments.destroy: planned', 'route.comments.destroy: planned', 'resource.comment: planned', 'policy.comment: planned']))
-    // The store route is drifted, so nothing of it would be lifted and its file is not fingerprinted.
+    // The store route is drifted and not fingerprinted as itself; its routes file and the entry are, as what the store action's `wired` rests on.
     expect(Object.keys(record.fingerprint.files)).toEqual([
       'app/Http/Controllers/CommentController.ts',
       'app/Http/Validators/CommentValidator.ts',
+      'routes/web.ts',
+      'src/app.ts',
       'tests/comments.test.ts',
     ])
     expect(record.fingerprint.files['app/Http/Controllers/CommentController.ts']).toBe(sha256(APP['app/Http/Controllers/CommentController.ts']!))
-    expect(result.verification).toEqual({ stateFile: '.guren/plans/http.state.json', staleSteps: [], decisionsFile: '../http.decisions.json', staleWaivers: [] })
+    // No plan:next marked the step, so where its work started is not known, and the record says so rather than counting zero.
+    const unmarked: PlanStepWork = { measured: false, reason: 'plan:next did not mark this step, so where its work started is not known', settled: false }
+    expect(record.work).toEqual(unmarked)
+    expect(result.verification).toEqual({ stateFile: '.guren/plans/http.state.json', staleSteps: [], decisionsFile: '../http.decisions.json', staleWaivers: [], work: { [HTTP]: unmarked } })
     expect(result.skipped).toEqual([])
 
     const state = JSON.parse(await readFile(join(app, '.guren/plans/http.state.json'), 'utf8')) as { stateVersion: number; steps: Record<string, PlanStepRecord> }

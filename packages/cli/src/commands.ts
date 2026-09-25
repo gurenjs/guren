@@ -7,7 +7,6 @@
  * Nothing here runs at import beyond building the command objects. Keep it that
  * way: a top-level `await` or `process.*` read would run for every importer.
  */
-import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { showUsage } from 'citty'
@@ -32,6 +31,9 @@ import {
 } from './commands/make'
 import { ATTACH_ARG, FIELDS_ARG, toWriterOptions } from './commands/scaffold-options'
 import { migrateCommand, seedCommand, resetCommand, freshCommand, rollbackCommand, statusCommand } from './commands/database'
+import { introspectCommand } from './commands/introspect'
+import { planCommand, planRenderCommand, planStatusCommand, planVerifyCommand, planNextCommand, planScaffoldCommand, planApproveCommand, planWaiveCommand, planReviseCommand, planCloseCommand } from './commands/plan'
+import { toolListCommand, toolInspectCommand, toolCallCommand, toolLogCommand, tokenIssueCommand, toolDevCommand } from './commands/tools'
 import { assertDestructiveCommandAllowed } from './commands/destructive-guard'
 import { checkCommand, auditCommand, gateCommand } from './commands/diagnostics'
 import { defineCommand, keepsProcessAlive } from './define-command'
@@ -44,17 +46,7 @@ import { parseNumericArg, runAiEval } from './ai-eval'
 import { isRepoSlug } from './issue-refs'
 import { writeSpecArtifacts } from './spec-generate'
 import { buildDocsGraphReport, renderDocsGraphMarkdown } from './docs-graph'
-import { renderPlanFile } from './plan-render'
-import { loadPlanAppState } from './plan/app-state'
-import { planChangesExisting } from './plan/impact'
-import { planHasAlter } from './plan/status'
-import { formatPlanApprove, planApproveFile } from './plan-approve'
-import { formatPlanStatus, planStatusFile } from './plan-status'
-import { DEFAULT_VERIFY_TIMEOUT_MS, formatPlanVerify, planVerifyFile } from './plan-verify'
-import { formatPlanNext, planNextFile } from './plan-next'
-import { formatPlanWaive, planWaiveFile } from './plan-waive'
-import { formatPlanClose, planCloseFile } from './plan-close'
-import { announceWrittenFiles, type WriterOptions } from './utils'
+import { announceKeptFiles, announceWrittenFiles, type WriterOptions } from './utils'
 import { generateRouteTypes } from './routes-types'
 import { describePageManifestSuppression, generatePageTypes, type PageManifestPlan } from './pages-types'
 import { generateTranslationTypes } from './i18n-types'
@@ -68,11 +60,6 @@ import { consoleCommand } from './console'
 import { bootstrapApplication, resolveMainEntry, type MaybeApplication } from './runtime'
 import { runQueueWorker, listFailedJobs, retryFailedJob, retryAllFailedJobs, flushFailedJobs } from './queue'
 import { displayRoutes } from './route-list'
-import { displayToolInspection, displayTools } from './tool-list'
-import { runToolCall } from './tool-call'
-import { runToolLog } from './tool-log'
-import { runTokenIssue } from './token-issue'
-import { runToolDev } from './tool-dev'
 import { cacheConfig, clearConfigCache, showConfigCacheInfo } from './config-cache'
 import { createStorageLink, removeStorageLink } from './storage-link'
 import { listScheduledTasks, runScheduledTasks } from './schedule'
@@ -85,8 +72,6 @@ import { displayModels } from './model-list'
 import { displayContext } from './context'
 import { displayEntityContext } from './entity-context'
 import { ENV_EXAMPLE_FILE, ENV_SCHEMA_FILE, loadEnvSchema, writeEnvExample } from './app-env'
-import { readAppDefaultLocale } from './app-locale'
-import { CliError } from './cli-error'
 import { generateGuidelines } from './guidelines'
 import { installAgentHarness, type AgentHarnessResult } from './agent-harness'
 import { AGENT_TARGETS, parseTargetList, type AgentTarget } from './agent-targets'
@@ -109,288 +94,6 @@ const specGenerateCommand = defineCommand({
   },
   async run({ args }) {
     await writeSpecArtifacts({ cwd: args.app, routesFile: args.routes })
-  },
-})
-
-const planRenderCommand = defineCommand({
-  meta: {
-    name: 'plan:render',
-    description: 'Render an implementation plan as one self-contained interactive HTML file (RFC 0030).',
-  },
-  args: {
-    plan: {
-      type: 'positional',
-      description: 'Path to the plan JSON file',
-      required: true,
-      valueHint: 'comments.plan.json',
-    },
-    output: {
-      type: 'string',
-      description: 'Where to write the HTML. Defaults to the plan path with a .html extension.',
-      alias: 'o',
-      valueHint: 'plan.html',
-    },
-    app: {
-      type: 'string',
-      description: 'Application root directory.',
-    },
-    locale: {
-      type: 'string',
-      description:
-        "The language the page's own labels open in (en or ja); the page can switch between them. Defaults to the plan's locale, then the application's, then en.",
-      valueHint: 'ja',
-    },
-  },
-  async run({ args }) {
-    // The application the plan is checked against, which the plan file need not sit
-    // in: a plan is reviewed from wherever it was written. Scanned only once the plan
-    // itself has parsed.
-    const appRoot = args.app ?? process.cwd()
-    const rendered = await renderPlanFile(args.plan, {
-      output: args.output,
-      // Impact scans the whole application, which only a plan changing something existing needs.
-      app: (plan) => loadPlanAppState(appRoot, { impact: planChangesExisting(plan) }),
-      locale: args.locale,
-      appLocale: () => readAppDefaultLocale(appRoot),
-    })
-
-    console.log(rendered.path)
-  },
-})
-
-const planStatusCommand = defineCommand({
-  meta: {
-    name: 'plan:status',
-    description:
-      'Report which elements of an implementation plan exist in the code (RFC 0030), and whether an approval names the plan\'s current hash. Observational: it exits 0 whatever the status, unapproved included, and non-zero only when the plan cannot be read.',
-  },
-  args: {
-    plan: {
-      type: 'positional',
-      description: 'Path to the plan JSON file',
-      required: true,
-      valueHint: 'comments.plan.json',
-    },
-    app: {
-      type: 'string',
-      description: 'Application root directory.',
-    },
-    json: {
-      type: 'boolean',
-      description: 'Print the report as JSON.',
-      default: false,
-    },
-  },
-  async run({ args }) {
-    const appRoot = resolve(args.app ?? process.cwd())
-    const report = await planStatusFile(args.plan, { app: () => loadPlanAppState(appRoot, { detail: true }), appRoot })
-    console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanStatus(report))
-  },
-})
-
-const planVerifyCommand = defineCommand({
-  meta: {
-    name: 'plan:verify',
-    description:
-      "Run a plan step's verify commands and tests against the application and record the result under .guren/plans/ (RFC 0030). Executes: bun test boots the app and db:migrate opens the database. Refuses, before running anything, a plan with a baseline whose current hash no approval names (run plan:approve). Exits non-zero only when the plan cannot be read or is refused, or with --ci when a step did not verify.",
-  },
-  args: {
-    plan: {
-      type: 'positional',
-      description: 'Path to the plan JSON file',
-      required: true,
-      valueHint: 'comments.plan.json',
-    },
-    step: {
-      type: 'string',
-      description: 'One derived step id, as plan:next names it or a whole-plan plan:verify reports it. Every step, in task order, when absent.',
-      valueHint: 'task/entity/model.comment/http',
-    },
-    app: {
-      type: 'string',
-      description: 'Application root directory: where the commands run and the state is written.',
-    },
-    timeout: {
-      type: 'string',
-      description: `Seconds each command may take before it is reported as blocked. Default ${DEFAULT_VERIFY_TIMEOUT_MS / 1000}.`,
-      valueHint: '600',
-    },
-    ci: {
-      type: 'boolean',
-      description: 'Exit 1 when a step this run covered did not verify.',
-      default: false,
-    },
-    json: {
-      type: 'boolean',
-      description: 'Print the report as JSON.',
-      default: false,
-    },
-  },
-  async run({ args }) {
-    const appRoot = resolve(args.app ?? process.cwd())
-    const seconds = args.timeout === undefined ? undefined : Number(args.timeout)
-    if (seconds !== undefined && !(Number.isFinite(seconds) && seconds > 0)) {
-      throw new CliError(`--timeout takes a positive number of seconds, not "${args.timeout}"`)
-    }
-    const report = await planVerifyFile(args.plan, {
-      app: () => loadPlanAppState(appRoot, { detail: true }),
-      appRoot,
-      step: args.step,
-      timeoutMs: seconds === undefined ? undefined : seconds * 1000,
-    })
-    console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanVerify(report))
-    if (args.ci && report.steps.some((step) => step.record.outcome !== 'verified')) process.exitCode = 1
-  },
-})
-
-const planNextCommand = defineCommand({
-  meta: {
-    name: 'plan:next',
-    description:
-      'Print the next step of a plan to implement (RFC 0030 §7) with what it covers: its elements, behaviours and verify commands, never the whole plan. Marks the step under .guren/plans/ so the harness Stop hook verifies it on every stop. Spawns no command; for an approved plan it reads the app (importing the routes file) and skips the steps whose context went stale since approval, naming what changed. Refuses a plan with a baseline whose current hash no approval names (run plan:approve), and a working tree with uncommitted changes unless they are the marked step\'s own.',
-  },
-  args: {
-    plan: {
-      type: 'positional',
-      description: 'Path to the plan JSON file',
-      required: true,
-      valueHint: 'comments.plan.json',
-    },
-    app: {
-      type: 'string',
-      description: 'Application root directory: where the state is read and the step is marked.',
-    },
-    json: {
-      type: 'boolean',
-      description: 'Print the report as JSON.',
-      default: false,
-    },
-  },
-  async run({ args }) {
-    const appRoot = resolve(args.app ?? process.cwd())
-    const report = await planNextFile(args.plan, { appRoot })
-    console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanNext(report, args.plan))
-  },
-})
-
-const planApproveCommand = defineCommand({
-  meta: {
-    name: 'plan:approve',
-    description:
-      "Approve an implementation plan (RFC 0030 §4): stamp a draft's baseline into the plan file once, and record the approval of its hash beside the plan. Refuses while a check fails, a question is open, or the tree is dirty.",
-  },
-  args: {
-    plan: {
-      type: 'positional',
-      description: 'Path to the plan JSON file',
-      required: true,
-      valueHint: 'comments.plan.json',
-    },
-    app: {
-      type: 'string',
-      description: 'Application root directory: what the plan is checked and stamped against, and where git is asked for HEAD.',
-    },
-    'allow-unstamped': {
-      type: 'boolean',
-      description: 'Approve although a section other than validators could not be read, leaving its elements without a context hash.',
-      default: false,
-    },
-    json: {
-      type: 'boolean',
-      description: 'Print the report as JSON.',
-      default: false,
-    },
-  },
-  async run({ args }) {
-    const appRoot = resolve(args.app ?? process.cwd())
-    const report = await planApproveFile(args.plan, {
-      app: (plan) => loadPlanAppState(appRoot, { detail: planHasAlter(plan) }),
-      appRoot,
-      allowUnstamped: args['allow-unstamped'],
-    })
-    console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanApprove(report))
-  },
-})
-
-const planWaiveCommand = defineCommand({
-  meta: {
-    name: 'plan:waive',
-    description:
-      "Accept elements of an approved plan incomplete, with a reason, in the decision log beside the plan (RFC 0030 §6). The log is committed; a waiver names the plan's hash, so a revision does not inherit it. Loads no application, and runs nothing but `git config` to name who waived. Refuses a draft and a plan whose current hash no approval names; --remove asks neither.",
-  },
-  args: {
-    plan: {
-      type: 'positional',
-      description: 'Path to the plan JSON file',
-      required: true,
-      valueHint: 'comments.plan.json',
-    },
-    elements: {
-      type: 'positional',
-      description: 'One or more element ids the plan declares (plan:status lists them).',
-      required: true,
-      valueHint: 'view.comments.index',
-    },
-    reason: {
-      type: 'string',
-      description: 'Why the element is accepted incomplete. Required unless --remove is given.',
-      valueHint: 'the redesign lands in the next plan',
-    },
-    remove: {
-      type: 'boolean',
-      description: 'Delete the waivers of the named elements instead of writing them. Asks nothing of the plan, so a revision can withdraw a waiver of an element it dropped.',
-      default: false,
-    },
-    app: {
-      type: 'string',
-      description: 'Application root directory: what the reported decision-log path is relative to. The plan is read from its own path either way.',
-    },
-    json: {
-      type: 'boolean',
-      description: 'Print the report as JSON.',
-      default: false,
-    },
-  },
-  async run({ args }) {
-    // citty collects the trailing positionals in `_`, with the first two bound above.
-    const ids = [args.elements, ...args._.slice(2)].filter((id) => id.length > 0)
-    const report = await planWaiveFile(args.plan, { elementIds: ids, reason: args.reason, remove: args.remove, app: args.app })
-    console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanWaive(report))
-  },
-})
-
-const planCloseCommand = defineCommand({
-  meta: {
-    name: 'plan:close',
-    description:
-      "Close an approved implementation plan whose every element is verified or waived (RFC 0030 §7): write its doc node to docs/plans/<slug>.md and a marker-fenced draft block per section of each touched entity's docs/entities/<Entity>.md, never rewriting text outside the markers. Deletes nothing: the plan, its approvals and its decision log stay committed. Refuses an unapproved plan and names every element still open.",
-  },
-  args: {
-    plan: {
-      type: 'positional',
-      description: 'Path to the plan JSON file',
-      required: true,
-      valueHint: 'comments.plan.json',
-    },
-    app: {
-      type: 'string',
-      description: 'Application root directory: what the plan is judged against and where the documents are written.',
-    },
-    'dry-run': {
-      type: 'boolean',
-      description: 'Print what would be written, and write nothing.',
-      default: false,
-    },
-    json: {
-      type: 'boolean',
-      description: 'Print the report as JSON.',
-      default: false,
-    },
-  },
-  async run({ args }) {
-    const appRoot = resolve(args.app ?? process.cwd())
-    const report = await planCloseFile(args.plan, { app: () => loadPlanAppState(appRoot, { detail: true }), appRoot, dryRun: args['dry-run'] })
-    console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanClose(report))
   },
 })
 
@@ -545,6 +248,11 @@ const routeTypesCommand = defineCommand({
       description: 'Runtime page manifest module to write',
       valueHint: '.guren/pages.gen.ts',
     },
+    // Opt-in, unlike check's: the Vite watcher runs codegen on every edit (RFC 0026 §5).
+    introspect: {
+      type: 'boolean',
+      description: 'Take the route set from the introspected app, a provider\'s routes included (RFC 0026).',
+    },
     force: {
       type: 'boolean',
       description: 'Overwrite existing files',
@@ -563,6 +271,7 @@ const routeTypesCommand = defineCommand({
       routesFile: args.routes,
       outputFile: args.out,
       appRoot: args.app,
+      introspect: args.introspect === true,
       ...writerOptions,
     })
     if (pagesOutputPath) consola.success(`Page helpers generated at ${pagesOutputPath}`)
@@ -628,6 +337,7 @@ const codegenCommand = defineCommand({
       routesFile,
       outputFile: args.out,
       appRoot: args.app,
+      introspect: args.introspect === true,
       ...writerOptions,
     })
     const {
@@ -949,328 +659,6 @@ const routeListCommand = defineCommand({
 // Both commands derive live from the route graph rather than reading
 // `.guren/agents.gen.ts`, so a stale manifest cannot answer for what an agent
 // would actually see.
-const toolListCommand = defineCommand({
-  meta: {
-    name: 'tool:list',
-    description: 'List the agent tools this application exposes (RFC 0016).',
-  },
-  args: {
-    routes: {
-      type: 'string',
-      description: 'Path to the routes entry file',
-      valueHint: 'routes/web.ts',
-    },
-    app: {
-      type: 'string',
-      description: 'Application root directory',
-    },
-    json: {
-      type: 'boolean',
-      description: 'Output the derived tools as JSON',
-    },
-  },
-  async run({ args }) {
-    await displayTools({ routesFile: args.routes, appRoot: args.app, json: args.json })
-  },
-})
-
-const toolInspectCommand = defineCommand({
-  meta: {
-    name: 'tool:inspect',
-    description: 'Show one agent tool as it is derived: input, output, authorization, annotations.',
-  },
-  args: {
-    name: {
-      type: 'positional',
-      description: 'Tool name (defaults to the route name)',
-      required: true,
-    },
-    routes: {
-      type: 'string',
-      description: 'Path to the routes entry file',
-      valueHint: 'routes/web.ts',
-    },
-    app: {
-      type: 'string',
-      description: 'Application root directory',
-    },
-    json: {
-      type: 'boolean',
-      description: 'Output the derived tool as JSON',
-    },
-  },
-  async run({ args }) {
-    await displayToolInspection(args.name, {
-      routesFile: args.routes,
-      appRoot: args.app,
-      json: args.json,
-    })
-  },
-})
-
-const toolCallCommand = defineCommand({
-  meta: {
-    name: 'tool:call',
-    description: 'Invoke one agent tool against this application, the way an agent would (RFC 0016).',
-  },
-  args: {
-    name: {
-      type: 'positional',
-      description: 'Tool name, as tool:list prints it',
-      required: true,
-    },
-    input: {
-      type: 'string',
-      description: 'Tool arguments as a JSON object',
-      valueHint: '{"title":"Hello"}',
-    },
-    as: {
-      type: 'string',
-      description:
-        'Authenticate as a user (user:42). Development only: sets GUREN_TESTING=1 for this process, '
-        + 'which makes the app accept an injected user instead of a real credential',
-      valueHint: 'user:42',
-    },
-    preflight: {
-      type: 'boolean',
-      description: 'Ask for a verdict instead of an execution — the handler does not run',
-    },
-    // No `--routes`: this command dispatches into the booted application, so its
-    // tools come from the graph that app actually serves — see `tool-call.ts`.
-    app: {
-      type: 'string',
-      description: 'Application root directory',
-    },
-    json: {
-      type: 'boolean',
-      description: 'Output the call result as JSON',
-    },
-  },
-  async run({ args }) {
-    await runToolCall({
-      name: args.name,
-      input: args.input,
-      as: args.as,
-      preflight: Boolean(args.preflight),
-      appRoot: args.app,
-      json: Boolean(args.json),
-    })
-  },
-})
-
-// Reads the trail the MCP plugin's `audit` sink writes. Boots nothing: an audit
-// trail has to be readable when the application it records is not startable.
-const toolLogCommand = defineCommand({
-  meta: {
-    name: 'tool:log',
-    description: 'Read this application\'s agent audit trail (RFC 0016).',
-  },
-  args: {
-    file: {
-      type: 'string',
-      description: 'Base path of the audit trail; dated files sit beside it',
-      valueHint: 'storage/logs/agent-audit.log',
-    },
-    tail: {
-      type: 'boolean',
-      alias: 'f',
-      description: 'Follow the trail as records arrive, across the midnight rollover',
-    },
-    tool: {
-      type: 'string',
-      description: 'Only records for this tool',
-      valueHint: 'posts.store',
-    },
-    surface: {
-      type: 'string',
-      description: 'Only records from this surface (mcp, dev-mcp, cli, webmcp, durable, in-process)',
-      valueHint: 'mcp',
-    },
-    denied: {
-      type: 'boolean',
-      description: 'Only denials',
-    },
-    since: {
-      type: 'string',
-      description: 'Only records newer than this duration ago',
-      valueHint: '30m',
-    },
-    number: {
-      type: 'string',
-      alias: 'n',
-      description: 'How many records to show (default 50)',
-      valueHint: '50',
-    },
-    app: {
-      type: 'string',
-      description: 'Application root directory',
-    },
-    json: {
-      type: 'boolean',
-      description: 'Output one raw record per line, for piping',
-    },
-  },
-  async run({ args }) {
-    const rawNumber = args.number
-    await runToolLog({
-      file: args.file,
-      tail: Boolean(args.tail),
-      tool: args.tool,
-      surface: args.surface,
-      denied: Boolean(args.denied),
-      since: args.since,
-      limit: rawNumber === undefined ? undefined : parseRecordCount(rawNumber),
-      appRoot: args.app,
-      json: Boolean(args.json),
-    })
-  },
-})
-
-/**
- * Read `-n` as a count. A `string` arg rather than citty's `number`: citty hands
- * `--number abc` across as `NaN`, every comparison against it is false, and the
- * empty listing reads as "no agent calls happened".
- */
-function parseRecordCount(raw: string): number {
-  const count = Number(raw)
-  if (!Number.isInteger(count) || count < 1) {
-    throw new Error(`-n must be a positive whole number of records — received "${raw}".`)
-  }
-  return count
-}
-
-// `token:` is its own namespace: this one writes into the application's store,
-// so unlike its `tool:` neighbours it boots the app.
-const tokenIssueCommand = defineCommand({
-  meta: {
-    name: 'token:issue',
-    description: 'Issue an API token scoped to this application\'s agent tools (RFC 0016).',
-  },
-  args: {
-    name: {
-      type: 'string',
-      description: 'Human-readable token name',
-      required: true,
-    },
-    user: {
-      type: 'string',
-      description: 'User ID the token authenticates as',
-      required: true,
-    },
-    tools: {
-      type: 'string',
-      description: 'Comma-separated tool scopes (tools:read, posts.*, posts.store, tools:*)',
-      required: true,
-    },
-    'read-only': {
-      type: 'boolean',
-      description: 'Grant only read-only tools, stored as concrete tool: entries',
-    },
-    expires: {
-      type: 'string',
-      description: 'Expiry as 30d, 12h or 45m (omit to issue a non-expiring token)',
-    },
-    'allow-unmatched': {
-      type: 'boolean',
-      description: 'Accept a scope matching no current tool, granting it to tools added later',
-    },
-    yes: {
-      type: 'boolean',
-      description: 'Confirm a tools:* grant',
-    },
-    routes: {
-      type: 'string',
-      description: 'Path to the routes entry file',
-      valueHint: 'routes/web.ts',
-    },
-    app: {
-      type: 'string',
-      description: 'Application root directory',
-    },
-    json: {
-      type: 'boolean',
-      description: 'Output the issued token as JSON',
-    },
-  },
-  async run({ args }) {
-    // What last-wins buys here, on a command that mints credentials:
-    // `--yes=false --yes=false` would authorize a `tools:*` grant the user
-    // twice declined (`define-command.ts`).
-    const name = args.name
-    const user = args.user
-    const tools = args.tools
-    if (name === undefined || user === undefined || tools === undefined) {
-      throw new Error('token:issue requires --name, --user and --tools.')
-    }
-
-    await runTokenIssue({
-      name,
-      user,
-      tools,
-      readOnly: Boolean(args['read-only']),
-      allowUnmatched: Boolean(args['allow-unmatched']),
-      yes: Boolean(args.yes),
-      expires: args.expires,
-      routesFile: args.routes,
-      appRoot: args.app,
-      json: Boolean(args.json),
-    })
-  },
-})
-
-// This command *is* the server: it ends when the developer stops it, which is
-// when the token stops existing.
-const toolDevCommand = keepsProcessAlive(defineCommand({
-  meta: {
-    name: 'tool:dev',
-    description: 'Serve this application\'s agent tools locally with a throwaway token (RFC 0016).',
-  },
-  args: {
-    as: {
-      type: 'string',
-      description: 'User ID tool calls authenticate as (default: a placeholder matching no record)',
-    },
-    path: {
-      type: 'string',
-      description: 'Endpoint path, if the app mounted the MCP plugin somewhere other than /mcp',
-      valueHint: '/mcp',
-    },
-    port: {
-      type: 'string',
-      description: 'Port to listen on (default 3333)',
-    },
-    host: {
-      type: 'string',
-      description: 'Hostname to bind (default 127.0.0.1)',
-    },
-    app: {
-      type: 'string',
-      description: 'Application root directory',
-    },
-  },
-  async run({ args }) {
-    // Decimal digits and nothing else: `parseInt` stops at the first non-digit
-    // so `3333abc` would bind 3333, and `Number` turns `--port=`, `0x10` and
-    // `1e3` into real ports nobody asked for.
-    const rawPort = args.port
-    const port = rawPort === undefined ? undefined : Number(rawPort)
-    if (
-      rawPort !== undefined
-      && (!/^\d+$/u.test(rawPort.trim()) || port === undefined || port > 65535)
-    ) {
-      throw new Error(`Invalid --port value "${rawPort}". Use a port number between 0 and 65535.`)
-    }
-
-    await runToolDev({
-      as: args.as,
-      path: args.path,
-      port,
-      hostname: args.host,
-      appRoot: args.app,
-    })
-  },
-}))
-
 const configCacheCommand = defineCommand({
   meta: {
     name: 'config:cache',
@@ -1684,11 +1072,18 @@ const doctorCommand = defineCommand({
       type: 'boolean',
       description: 'Show actionable next steps for the project.',
     },
+    // Positive on purpose, so citty's negation lands on this key; `default: true` prints `--no-introspect`.
+    introspect: {
+      type: 'boolean',
+      default: true,
+      description: 'Judge from source only, without introspecting the app (RFC 0026).',
+    },
   },
   async run({ args }) {
     const report = await runDoctor({
       json: Boolean(args.json),
       next: Boolean(args.next),
+      introspect: args.introspect !== false,
     })
 
     if (args.json) {
@@ -1792,6 +1187,12 @@ const contextCommand = defineCommand({
       valueHint: 'owner/name',
       description: 'Repository bare issue numbers belong to, instead of the origin remote (entity mode only).',
     },
+    // Same shape as check's `introspect` flag in commands/diagnostics.ts.
+    introspect: {
+      type: 'boolean',
+      default: true,
+      description: 'List routes from the routes file only, without introspecting the app (RFC 0026).',
+    },
   },
   async run({ args }) {
     const cwd = args.app
@@ -1810,6 +1211,7 @@ const contextCommand = defineCommand({
         module: args.module,
         live: args.live,
         repo: args.repo,
+        introspect: args.introspect !== false,
       })
       return
     }
@@ -1818,6 +1220,7 @@ const contextCommand = defineCommand({
       cwd,
       json,
       routesFile,
+      introspect: args.introspect !== false,
     })
   },
 })
@@ -2112,7 +1515,7 @@ const addResourceCommand = defineCommand({
   },
   async run({ args }) {
     const overwritten: string[] = []
-    const { created, schemaUpdated, routesUpdated } = await addResource({
+    const { created, kept, schemaUpdated, routesUpdated } = await addResource({
       name: String(args.name),
       fields: typeof args.fields === 'string' ? args.fields : undefined,
       attach: typeof args.attach === 'string' ? args.attach : undefined,
@@ -2122,6 +1525,7 @@ const addResourceCommand = defineCommand({
     })
 
     announceWrittenFiles(created, overwritten)
+    announceKeptFiles(kept)
 
     consola.info('')
     consola.info(schemaUpdated
@@ -2543,12 +1947,15 @@ export const builtinSubCommands = {
   'make:validator': makeValidatorCommand,
   'spec:generate': specGenerateCommand,
   'docs:graph': docsGraphCommand,
+  plan: planCommand,
   'plan:render': planRenderCommand,
   'plan:approve': planApproveCommand,
   'plan:status': planStatusCommand,
   'plan:verify': planVerifyCommand,
   'plan:next': planNextCommand,
+  'plan:scaffold': planScaffoldCommand,
   'plan:waive': planWaiveCommand,
+  'plan:revise': planReviseCommand,
   'plan:close': planCloseCommand,
   'make:auth': makeAuthCommand,
   'make:agent': makeAgentCommand,
@@ -2605,6 +2012,7 @@ export const builtinSubCommands = {
   dev: devCommand,
   'model:list': modelListCommand,
   context: contextCommand,
+  introspect: introspectCommand,
   check: checkCommand,
   audit: auditCommand,
   gate: gateCommand,

@@ -2,12 +2,17 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { jsonb, pgTable, text as pgText, timestamp } from 'drizzle-orm/pg-core'
 import {
   DatabaseApiTokenStore,
   DrizzleAdapter,
+  Model,
   createApiToken,
   tokenCan,
   verifyApiToken,
+  type ORMAdapterAdvanced,
+  type PlainObject,
+  type WhereCondition,
 } from '../src/index'
 
 const baseColumns = {
@@ -31,13 +36,101 @@ const apiTokensText = sqliteTable('api_tokens_text', {
   abilities: text('abilities').notNull(),
 })
 
+const identityColumns = {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  hashedToken: text('hashed_token').notNull().unique(),
+  userId: text('user_id').notNull(),
+  abilities: text('abilities', { mode: 'json' }).$type<string[]>().notNull(),
+}
+
+// The SQLite scaffold's timestamp shape: `text('created_at')` holding an ISO string.
+const apiTokensIso = sqliteTable('api_tokens_iso', {
+  ...identityColumns,
+  lastUsedAt: text('last_used_at'),
+  expiresAt: text('expires_at'),
+  createdAt: text('created_at')
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+})
+
+// Integer columns with no drizzle mode: nothing maps a Date for them.
+const apiTokensEpoch = sqliteTable('api_tokens_epoch', {
+  ...identityColumns,
+  lastUsedAt: integer('last_used_at'),
+  expiresAt: integer('expires_at'),
+  createdAt: integer('created_at').notNull(),
+})
+
+const pgIdentityColumns = {
+  id: pgText('id').primaryKey(),
+  name: pgText('name').notNull(),
+  hashedToken: pgText('hashed_token').notNull().unique(),
+  userId: pgText('user_id').notNull(),
+  abilities: jsonb('abilities').$type<string[]>().notNull(),
+}
+
+// The guide's Postgres schema.
+const pgApiTokens = pgTable('api_tokens', {
+  ...pgIdentityColumns,
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+const pgApiTokensText = pgTable('api_tokens_text', {
+  ...pgIdentityColumns,
+  lastUsedAt: pgText('last_used_at'),
+  expiresAt: pgText('expires_at'),
+  createdAt: pgText('created_at').notNull(),
+})
+
+/** Records what the store hands the ORM, for a dialect no test database runs here. */
+function capturingAdapter() {
+  const writes: PlainObject[] = []
+  const conditions: WhereCondition[] = []
+  const adapter: ORMAdapterAdvanced = {
+    async findMany() {
+      return []
+    },
+    async findUnique() {
+      return null
+    },
+    async create(_table, data) {
+      writes.push(data)
+      return data as never
+    },
+    async update(_table, _where, data) {
+      writes.push(data)
+      return data as never
+    },
+    async delete() {
+      return 0
+    },
+    async deleteAdvanced(_table, deleteConditions) {
+      conditions.push(...deleteConditions)
+      return 0
+    },
+  }
+  return { adapter, writes, conditions }
+}
+
+function simpleConditionValue(condition: WhereCondition | undefined): unknown {
+  return condition?.type === 'simple' ? condition.value : undefined
+}
+
 describe('DatabaseApiTokenStore', () => {
   let sqlite: Database
   let store: DatabaseApiTokenStore
 
   beforeEach(() => {
     sqlite = new Database(':memory:')
-    for (const tableName of ['api_tokens', 'api_tokens_text']) {
+    for (const [tableName, timestampType] of [
+      ['api_tokens', 'integer'],
+      ['api_tokens_text', 'integer'],
+      ['api_tokens_iso', 'text'],
+      ['api_tokens_epoch', 'integer'],
+    ]) {
       sqlite.exec(`
         CREATE TABLE ${tableName} (
           id text primary key,
@@ -45,9 +138,9 @@ describe('DatabaseApiTokenStore', () => {
           hashed_token text not null unique,
           user_id text not null,
           abilities text not null,
-          last_used_at integer,
-          expires_at integer,
-          created_at integer not null
+          last_used_at ${timestampType},
+          expires_at ${timestampType},
+          created_at ${timestampType} not null
         );
       `)
     }
@@ -205,5 +298,121 @@ describe('DatabaseApiTokenStore', () => {
 
     expect(token!.abilities).toEqual([])
     expect(tokenCan(token!, 'posts:delete')).toBe(false)
+  })
+
+  describe('timestamp columns', () => {
+    const rawTimestamps = (table: string, id: string) =>
+      sqlite.query(`SELECT created_at, expires_at, last_used_at FROM ${table} WHERE id = ?`).get(id) as {
+        created_at: unknown
+        expires_at: unknown
+        last_used_at: unknown
+      }
+
+    test('passes Dates through to timestamp-mode columns', async () => {
+      const { token } = await createApiToken(store, {
+        name: 'Timestamp Mode',
+        userId: 'user-1',
+        expiresIn: 60_000,
+      })
+
+      const raw = rawTimestamps('api_tokens', token.id)
+      expect(raw.created_at).toBe(token.createdAt.getTime())
+      expect(raw.expires_at).toBe(token.expiresAt!.getTime())
+    })
+
+    test('writes ISO strings to text columns, the SQLite scaffold shape, and reads them back as Dates', async () => {
+      const isoStore = new DatabaseApiTokenStore(apiTokensIso)
+
+      const { plainTextToken, token } = await createApiToken(isoStore, {
+        name: 'Text Columns',
+        userId: 'user-1',
+        expiresIn: 60_000,
+      })
+
+      const raw = rawTimestamps('api_tokens_iso', token.id)
+      expect(raw.created_at).toBe(token.createdAt.toISOString())
+      expect(raw.expires_at).toBe(token.expiresAt!.toISOString())
+      expect(raw.last_used_at).toBeNull()
+
+      const result = await verifyApiToken(plainTextToken, isoStore)
+      expect(result).not.toBeNull()
+      expect(result!.token.createdAt).toEqual(token.createdAt)
+      expect(result!.token.expiresAt).toEqual(token.expiresAt)
+
+      const [stored] = await isoStore.findByUserId('user-1')
+      expect(stored!.lastUsedAt).toBeInstanceOf(Date)
+      expect(rawTimestamps('api_tokens_iso', token.id).last_used_at).toBe(stored!.lastUsedAt!.toISOString())
+    })
+
+    test('deleteExpired prunes expired rows held in text columns', async () => {
+      const isoStore = new DatabaseApiTokenStore(apiTokensIso)
+      await createApiToken(isoStore, { name: 'Expired', userId: 'user-1', expiresIn: -1000 })
+      await createApiToken(isoStore, { name: 'Live', userId: 'user-1', expiresIn: 60_000 })
+      await createApiToken(isoStore, { name: 'Forever', userId: 'user-1' })
+
+      await isoStore.deleteExpired()
+
+      const names = (await isoStore.findByUserId('user-1')).map((token) => token.name).sort()
+      expect(names).toEqual(['Forever', 'Live'])
+    })
+
+    test('writes epoch milliseconds to integer columns with no drizzle mode', async () => {
+      const epochStore = new DatabaseApiTokenStore(apiTokensEpoch)
+
+      const { plainTextToken, token } = await createApiToken(epochStore, {
+        name: 'Epoch Columns',
+        userId: 'user-1',
+        expiresIn: 60_000,
+      })
+
+      const raw = rawTimestamps('api_tokens_epoch', token.id)
+      expect(raw.created_at).toBe(token.createdAt.getTime())
+      expect(raw.expires_at).toBe(token.expiresAt!.getTime())
+
+      const result = await verifyApiToken(plainTextToken, epochStore)
+      expect(result!.token.createdAt).toEqual(token.createdAt)
+      expect(typeof rawTimestamps('api_tokens_epoch', token.id).last_used_at).toBe('number')
+
+      await createApiToken(epochStore, { name: 'Expired', userId: 'user-2', expiresIn: -1000 })
+      await epochStore.deleteExpired()
+      expect(await epochStore.findByUserId('user-2')).toHaveLength(0)
+    })
+
+    test('hands Dates to Postgres timestamp columns and ISO strings to Postgres text columns', async () => {
+      const { adapter, writes, conditions } = capturingAdapter()
+      const previous = Model.getAdapter()
+      Model.useAdapter(adapter)
+      try {
+        const usedAt = new Date('2026-01-02T03:04:05.678Z')
+        const now = new Date('2026-02-03T04:05:06.789Z')
+
+        const dateStore = new DatabaseApiTokenStore(pgApiTokens)
+        const { token } = await createApiToken(dateStore, { name: 'A', userId: 'user-1', expiresIn: 60_000 })
+        await dateStore.updateLastUsed(token.id, usedAt)
+        await dateStore.deleteExpired(now)
+
+        expect(writes[0]!.createdAt).toBe(token.createdAt)
+        expect(writes[0]!.expiresAt).toBe(token.expiresAt)
+        expect(writes[0]!.lastUsedAt).toBeNull()
+        expect(writes[1]!.lastUsedAt).toBe(usedAt)
+        expect(simpleConditionValue(conditions[0])).toBe(now)
+
+        writes.length = 0
+        conditions.length = 0
+
+        const textStore = new DatabaseApiTokenStore(pgApiTokensText)
+        const created = await createApiToken(textStore, { name: 'B', userId: 'user-1', expiresIn: 60_000 })
+        await textStore.updateLastUsed(created.token.id, usedAt)
+        await textStore.deleteExpired(now)
+
+        expect(writes[0]!.createdAt).toBe(created.token.createdAt.toISOString())
+        expect(writes[0]!.expiresAt).toBe(created.token.expiresAt!.toISOString())
+        expect(writes[0]!.lastUsedAt).toBeNull()
+        expect(writes[1]!.lastUsedAt).toBe(usedAt.toISOString())
+        expect(simpleConditionValue(conditions[0])).toBe(now.toISOString())
+      } finally {
+        Model.useAdapter(previous)
+      }
+    })
   })
 })

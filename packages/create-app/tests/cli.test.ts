@@ -363,8 +363,31 @@ describe('create-guren-app CLI', () => {
       })
 
       expect(logged(logMock, 'bunx guren add auth')).toBe(true)
-      expect(logged(logMock, 'bunx guren add resource posts')).toBe(true)
+      expect(logMock.mock.calls.map((call) => call.join(' '))).toContain('  bunx guren add resource posts --fields "title:string,body:text"')
       expect(logged(logMock, 'make:controller')).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('suggests a resource the blog template does not already ship', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-blog-features-')
+    try {
+      logMock.mockClear()
+      await capturedCommand.run({
+        args: {
+          target: join(workspace.dir, 'blog-app'),
+          force: false,
+          mode: 'spa',
+          auth: false,
+          blueprint: 'blog',
+          db: 'sqlite',
+          install: false,
+        },
+      })
+
+      expect(logged(logMock, 'bunx guren add resource tags')).toBe(true)
+      expect(logged(logMock, 'add resource posts')).toBe(false)
     } finally {
       await workspace.cleanup()
     }

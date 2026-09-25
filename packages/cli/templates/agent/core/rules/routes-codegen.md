@@ -1,8 +1,10 @@
 ---
-description: Guren routing & codegen — RouteContractOptions, schema binding, the Zod→ApiRoutes matrix, middleware
-globs:
+paths:
   - "routes/**"
   - "app/Http/Validators/**"
+  - "modules/*/routes.ts"
+  - "modules/*/routes/**"
+  - "modules/*/app/Http/Validators/**"
 ---
 
 # Routes & Codegen

@@ -2,8 +2,8 @@ import { readFile } from 'node:fs/promises'
 import type { Statement, Expression, ClassDeclaration, ClassBody, ClassProperty, CallExpression, Node, ObjectProperty, TSPropertySignature } from '@babel/types'
 import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion } from './ast-walk'
 import { extractDocsTags } from './docs-index'
-import { discoverModelFiles, toPosixRelative, moduleNameFromRelPath } from './discovery'
-import { parseSourceFile } from './parse-cache'
+import { classNameFromPath, discoverModelFiles, toPosixRelative, moduleNameFromRelPath } from './discovery'
+import { parseSourceFile, type ParseCache } from './parse-cache'
 
 const RELATION_METHODS = ['belongsTo', 'hasMany', 'hasOne', 'belongsToMany', 'hasManyThrough', 'morphMany', 'morphTo'] as const
 const RELATION_METHOD_SET: ReadonlySet<string> = new Set(RELATION_METHODS)
@@ -83,6 +83,38 @@ export async function discoverParsedModels(cwd: string): Promise<DiscoveredModel
     const relPath = toPosixRelative(cwd, files[index])
     return [{ info, relPath, module: moduleNameFromRelPath(relPath) }]
   })
+}
+
+export interface ModelClass {
+  /** Absolute path of the model file. */
+  filePath: string
+  /** Module the model lives in, or null for the app root. */
+  module: string | null
+  className: string
+  /** Null when the file parses to no named class: the name then comes from the file. */
+  classDecl: ClassDeclaration | null
+}
+
+/**
+ * Every named class of every model file through the run's parse cache, plus a
+ * name-only entry for a file that declares none, so a model that will not parse
+ * still names itself to a rule that fails closed on it.
+ */
+export async function discoverModelClasses(cwd: string, cache: ParseCache): Promise<ModelClass[]> {
+  const classes: ModelClass[] = []
+  for (const filePath of await discoverModelFiles(cwd)) {
+    const module = moduleNameFromRelPath(toPosixRelative(cwd, filePath))
+    const parsed = await cache.get(filePath)
+    const declared = (parsed?.ast.program.body ?? [])
+      .map((statement) => extractClassDeclaration(statement))
+      .filter((classDecl): classDecl is ClassDeclaration & { id: { name: string } } => Boolean(classDecl?.id))
+    if (declared.length === 0) {
+      classes.push({ filePath, module, className: classNameFromPath(filePath), classDecl: null })
+      continue
+    }
+    for (const classDecl of declared) classes.push({ filePath, module, className: classDecl.id.name, classDecl })
+  }
+  return classes
 }
 
 export function parseModelSource(source: string, filePath: string): ModelInfo | null {

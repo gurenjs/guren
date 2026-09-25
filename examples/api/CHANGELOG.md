@@ -1,5 +1,80 @@
 # @guren/example-api
 
+## 0.1.47
+
+### Patch Changes
+
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [0fdf11f]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+  - @guren/cli@2.27.0
+  - @guren/core@1.21.0
+  - @guren/testing@1.14.0
+  - @guren/orm@2.12.0
+  - @guren/openapi@1.4.2
+
 ## 0.1.46
 
 ### Patch Changes

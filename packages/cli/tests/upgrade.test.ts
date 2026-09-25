@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, mock, spyOn } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { createTempWorkspace, type TempWorkspace } from './helpers'
+import { createTempWorkspace, type TempWorkspace, writeWorkspaceFiles } from './helpers'
 import { upgradeCanary, checkVersionCompatibility } from '../src/upgrade'
 import { findApplicableCodemods, runCodemods, compareVersions, codemods, type Codemod } from '../src/codemods'
 import { checkDeprecations } from '../src/deprecations'
@@ -793,6 +793,24 @@ describe('checkDeprecations', () => {
       )
 
       expect(filesFor(await checkDeprecations(workspace.dir))).toEqual([])
+    })
+  })
+
+  describe('deploy-runtime-analysis', () => {
+    it('reports the deprecated analysis entry points imported from @guren/cli, and not checkDeployRuntime', async () => {
+      await writeWorkspaceFiles(workspace.dir, {
+        'src/predeploy.ts': "import { analyzeDeployRuntime, judgeDeployRuntime as judge } from '@guren/cli'\n",
+        'src/deploy.ts': "import { checkDeployRuntime } from '@guren/cli'\nimport { analyzeDeployRuntime } from './local'\n",
+        'tests/deploy.test.ts': "import { type DeployRuntimeVerdict, judgeDeployRuntime } from '@guren/cli'\n",
+        'scripts/predeploy.ts': "import { analyzeDeployRuntime } from '@guren/cli'\n",
+        'bin/check-deploy.ts': "import { judgeDeployRuntime } from '@guren/cli'\n",
+        'predeploy.ts': "import { analyzeDeployRuntime } from '@guren/cli'\n",
+      })
+
+      const warning = (await checkDeprecations(workspace.dir)).find((entry) => entry.id === 'deploy-runtime-analysis')
+      expect((warning?.affectedFiles ?? []).sort()).toEqual(
+        [join('bin', 'check-deploy.ts'), 'predeploy.ts', join('scripts', 'predeploy.ts'), join('src', 'predeploy.ts'), join('tests', 'deploy.test.ts')].sort(),
+      )
     })
   })
 

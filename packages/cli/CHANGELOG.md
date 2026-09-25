@@ -1,5 +1,310 @@
 # @guren/cli
 
+## 2.27.0
+
+### Minor Changes
+
+- 002d087: `guren check`'s config wiring reads `defineModule({ config })` (RFC 0002). A definition under `modules/<name>/config/` that no array lists is reported as `config-unwired` with its module's descriptor as the place to list it, a module's list counts as wiring only while `createApp({ modules })` lists that module, and a key two read arrays define is a `config-duplicate-key` failure, which the boot would refuse. For a module `createApp({ modules })` mounts or may mount, a config array this cannot read whole (not a literal, a spread in the descriptor, a descriptor that is not a `defineModule({ … })` call, or a `createApp({ modules })` it cannot trace, including options spread where `modules` may hide) reports nothing for the whole app, as an unreadable root array already did, since such an array may list any file. A computed key now counts like a spread in `createApp({ … })` and in a module descriptor: it may be `modules`, `config` or `routes`, so the config wiring and the module route-registrar check report nothing rather than reading the key as absent. A definition in an unmounted module whose descriptor cannot be read is reported with mounting the module as the fix.
+- 002d087: `guren check --plan` (RFC 0030 §8) reports approved, unclosed implementation plans whose elements `plan:status` calls drifted, two such plans that change the same model, table, column, controller, action, route, endpoint or page, two plans sharing a slug, and a draft with approvals beside it (a plan that lost its baseline). Plans are found as the app root's `*.plan.json` and `plan.json` / `*.plan.json` under `docs/plans/`; a plan, approvals file or directory that will not read is reported, including an unreadable approvals file beside a draft. It runs only under `--plan`, since judging a plan imports the app's `db/schema.ts` and every validator file; plain `guren check`, `check --ci` and `guren gate` are unchanged. Every result is advisory, so `check --plan` exits 0.
+- 002d087: `guren make:feature --factory` writes a model factory in `db/factories` beside the model, the same file `make:factory` generates. The `withFactory` option of `makeFeature()` was declared but never read, so passing it changed nothing; it now writes the factory.
+- 002d087: `guren make:module` keeps a root schema object complete. When `db/schema.ts` keeps an aggregate for drizzle (`export const schema = { … }`), the module's `db/schema.ts` gets its own (`export const billingSchema = {}`) and the root object spreads it. `guren check` now reports a module table the root object neither lists nor spreads, which it used to pass in silence, and no longer loses the root object when it spreads a module aggregate or lists a table imported from a module. The module re-export check reads `export … from` statements instead of any mention of the module's path, so an `import` alone no longer counts as the re-export. A module's object is identified by the root object spreading it, so the scaffolded one needs no `typeof`. An app that ran `make:module` before this release and keeps a root `schema` object now gets a warning per module table until it spreads the module's aggregate or imports and lists those tables by name. A type-only `export type … from` is not a re-export of the module's tables; a named value re-export of any of them is taken as re-exporting the module. `make:module` leaves the root object alone when it already binds the module aggregate's name, and `export * as name from` is not a re-export of the module's tables.
+- 002d087: `guren plan:next`, `plan:verify` and `plan:waive` refuse a plan that carries a baseline when no approval beside it names its current hash (RFC 0030 §4): a plan edited after it was approved, or one nobody approved. The refusal names the hash and says to run `guren plan:approve`. An approvals file that will not read refuses too, and so does a draft with approvals beside it, so deleting `baseline` does not get past the check. Other drafts keep their behaviour, and `plan:waive --remove` still withdraws a waiver whatever the plan says. The Stop hook no longer verifies such a plan: it lets the stop through and records the step as stalled, which `plan:next` drops once the plan is approved. `plan:status` reports `approval` (approved, unapproved, baseline-removed or unreadable) and still exits 0. `plan:close` refuses through the same check.
+- 002d087: `guren plan:approve <plan>` approves an implementation plan (RFC 0030 §4). It refuses while a reference check fails, a question is still open, or the working tree has uncommitted changes other than the plan and its own records. A section of the application other than validators that cannot be read also refuses, since its elements would never get a context hash, unless `--allow-unstamped` is passed. A draft has its `baseline` stamped once and written into the plan file: `rev` is the application's `HEAD` (outside a git repository, or before the first commit, the command refuses) and `contextHash` holds one hash per element the reference checks judge by name. A plan that already carries a baseline, as a revision carries its parent's, is never restamped. The approval, `{ hash, approvedAt, approvedBy }`, is recorded beside the plan in `approvals.json` next to a `docs/plans/<slug>/plan.json` and in `<slug>.approvals.json` next to any other plan; approving the same hash again writes nothing. `plan:status` now reports, for a plan with a baseline, whether each element is fresh (at its stamp, or where the plan's own work leaves it), stale, unstamped or unjudged, and names the elements that depend on a stale one.
+- 002d087: Add `guren plan:close`, the end of the RFC 0030 loop. It refuses a plan whose
+  current hash nobody approved, and one with an element that is neither verified
+  nor waived, judged the way `plan:status` reports it. A closed plan leaves
+  `docs/plans/<slug>.md`, an OKF document naming the entities it touched, and a
+  draft block per section of each entity's `docs/entities/<Entity>.md`: purpose,
+  rules citing the acceptance ids that verify them, waivers, non-goals and a
+  history link. The blocks sit between `<!-- guren:plan … -->` markers, so a
+  second close rewrites only them, and nothing outside the markers is touched. The
+  plan file, its approvals and its decision log stay where they are. `--dry-run`
+  prints what would be written.
+
+  `guren docs:graph` now draws each acceptance id as a `test` node that
+  `verifies` the documents citing it as `(AC-comments-4)` and the entity its id
+  names, and the docs viewer shows them. `guren check --docs` warns on a citation
+  no test title carries, on a test id its entity's documents never cite, and on a
+  Rules item in an entity document that cites no id. The three are advisory, so
+  `check --ci` and `guren gate` do not fail on them.
+
+- 002d087: `guren plan:render` shows Impact (RFC 0030 §2) on every card that changes something the application already has: the routes, `ApiRoutes` entries, agent tools, relationships, resources, policies, controller actions and tests hanging off it, and, for a column, the controllers, resources and pages that read it on the model's records. The column reads come from a new static scan that follows a record from a query on the model class, `this.model()`, `this.resource` or a record type annotation, counts the column names a query spells and the columns `create`/`update` write, and never reads a comment or a string. Impact is labelled a lower bound: an empty list means nothing was found, and a reader that could not look says so. An altered route or action whose application route publishes an agent tool is now flagged breaking even when the plan does not declare the tool.
+- 002d087: Add `guren plan:next <plan> [--app <dir>] [--json]` (RFC 0030 §7), the front of
+  the implementation loop: the first step in task order whose record under
+  `.guren/plans/` does not stand, printed with the elements it completes, the
+  acceptance behaviours it writes or must see pass, and its verify commands, never
+  the whole plan. It runs nothing and loads no application. It refuses a working
+  tree with uncommitted changes unless they are the marked step's own, since one
+  step is one commit, and it marks the step in the state file
+  (`active: { plan, step, startedAt, continuations }`), clearing the mark once every
+  step is verified. The `.gitignore` written beside the state now ignores itself,
+  so a verify leaves the tree as clean as it found it.
+
+  The harness Stop hook (`gate-on-stop.ts`, delivered by `agent:sync`) now verifies
+  the marked step after the gate, on every stop, and blocks the stop while the step
+  is not verified: up to three continuations, then it gives up and says why. It
+  gives up at once when the step or an element it owns is `blocked` (the
+  environment's verdict), and on a stop that follows a blocked one when nothing
+  about the step's record changed. The stall is recorded on the mark with the
+  reason and the last output, and sticks until the next `plan:next` reports it and
+  returns the step again with a fresh mark. Cursor gets the findings as a follow-up
+  message, bounded by its `loop_count`, and a stall on stderr.
+
+  The harness gains the `plan-implement` skill: `plan:next` → implement exactly
+  that step → `plan:verify --step` → one commit, with what each step kind asks
+  for, what a stall means, and the `code-review` subagent at the end of a task.
+  `planStopHookFindings()` and `MAX_STEP_CONTINUATIONS` are exported for the hooks.
+
+- 002d087: `guren plan:render` writes a page that speaks `en` and `ja`. Both dictionaries are
+  embedded in the file, so the page switches between them with no request, and
+  remembers the choice. `--locale <en|ja>` picks the language it opens in; without
+  it the plan's `locale` decides, then the application's `createApp({ i18n })`
+  fallback, then `en`.
+
+  Only the page's own words are translated: section names, labels, review controls
+  and the sentence frames around plan data (`{actor} が {route} を呼ぶ`). Plan text,
+  check results and the column fact line (`pk`, `null`, `references`) stay as
+  written. `<html lang>` follows the plan, and every translated element carries the
+  `lang` of the language it is in.
+
+  `planBreakingChanges()` results name their reason as a dictionary key (`reasonKey`,
+  `reasonValues`) in place of an English sentence, which is how the page words a
+  breaking change in either language.
+
+- 002d087: `guren plan:render` now runs the RFC 0030 §2 checks it renders. The command reads
+  the application state through the scanners the other commands use, validates the
+  plan against it, and hands the results to the page, so the pinned "needs
+  attention" block and the per-element check rows carry real findings instead of
+  being empty. A failing check never stops the render: the page is where someone
+  reads what is wrong with the plan. A section the scanners could not read (an app
+  with no `db/schema.ts`, an unreadable routes file) still renders, carrying the
+  warning that says so.
+
+  `--app <dir>` names the application root the checks are read from, spelled as
+  `spec:generate` and `docs:graph` spell it. The plan file itself stays resolved
+  against the working directory: `--app` is the application, and a plan may be
+  reviewed from wherever it was written.
+
+  The command's own duplicate-id warning is gone. The same rule is one of the §2
+  checks, which reports it beside the element on the page, so the finding now has
+  one spelling rather than two.
+
+  The page's feedback document has a reader for the revise command a later release
+  adds; nothing calls it yet. It takes a file or standard input, and at most 5 MiB,
+  counted as the document arrives, which is far above a feedback document and low
+  enough to stop a log or a binary piped in by mistake.
+
+- 002d087: Add `guren plan:render <plan.json> [-o <file>]` (RFC 0030 §3): an implementation
+  plan rendered as one self-contained HTML file, written beside the plan. The page
+  opens from disk and makes no request of any kind — no CDN, no fonts, no Mermaid,
+  and a `default-src 'none'` content security policy that allows only its own
+  inline style and script. It shows the questions the plan could not decide as a
+  form with the assumed answer preselected, a tab per section with a per-entity
+  filter and a "changes only" toggle, an ER diagram drawn from the plan's own
+  models and foreign keys, acceptance behaviours as Given / When / Then, failed
+  checks and breaking changes pinned to the top, and an approve / request-changes
+  toggle per element whose "Export feedback" button downloads `feedback.json`.
+
+  Every string in a plan is model output, so the page treats all of it as hostile:
+  the data travels as a JSON block with `<`, `>`, `&`, U+2028 and U+2029 escaped as
+  `\uXXXX`, and the template writes it with `textContent` only. No plan string ever
+  becomes an `href`, and in-page anchors are built from ids the schema validated.
+
+  The command has no producer yet, so it is undocumented until one exists.
+
+- 002d087: For a plan with a baseline, `guren plan:next` now holds the steps whose context went stale since approval (RFC 0030 §4). A step that owns a stale element, whose own elements and behaviours name one, or that owns a column or action of a stale model or controller is listed under `held`, with the element, how the step depends on it and what the reference checks say against the application now; the steps after it in its task, or in a task waiting for it, are listed as waiting. It returns the first step that is neither. When every step left is held or waiting it returns no step, says a person decides, and still exits 0; the mark is cleared unless it carries a stall on a held or waiting step, which stays for the next run to report. Reading the application imports the routes file; a draft is never read, and an unstamped or unjudged element, or an application that cannot be read, holds nothing. What the marked step owns is its own work in progress and holds no step, stalled or not. The Stop hook gives up on the marked step when its context has gone stale, and records the stall on the mark for `plan:next` to report. `plan:verify` reports the baseline's freshness and the stale context of the steps it ran (`staleContext` in `--json`) without changing their outcome. `plan:status` now also names the elements that reference an unstamped or unjudged element.
+- 002d087: Add `guren plan:status <plan> [--app <dir>] [--json]` (RFC 0030 §6), the static
+  half of plan status. It compares an implementation plan with the code and reports
+  one state per element (`planned`, `present`, `wired`, `drifted`, `unjudged`,
+  `blocked`) with a `match` / `differ` / `unknown` verdict per planned property.
+  Like `check` and `doctor` it imports the routes file, and it reads `db/schema.ts`
+  through the runtime reader with the static reader as fallback; it boots nothing,
+  runs no test and needs no database.
+
+  A property no reader can see is `unknown`: it never counts towards `present`,
+  never satisfies a `drop`, and is listed per element as "planned, not checkable".
+  `wired` needs evidence that the application mounts what the CLI loaded, read from
+  `createApp({ routes, modules })` in the app entry; without it the element stays
+  `present` with the reason. For a validator the evidence must be a use rather than
+  a mention — `this.validateBody/Query/Params(` in a mounted action, or a mounted
+  route whose _registered_ contract schema is the exported symbol itself, matched by
+  object identity — since an identifier can be named by a leftover import, in a type
+  position, in an object nobody passes or in a branch nothing reaches. A planned
+  `body` / `params` / `query` validator on an action is read the same way, so an
+  action whose only planned property is a validator its body merely mentions is
+  `unjudged` rather than `wired`. An element's optional `module` is compared in both directions, so
+  a same-named element in another app root neither satisfies it nor is satisfied by
+  it. The command exits 0 for any computed status and non-zero only when the plan
+  cannot be read or does not match the schema.
+
+  `judgePlan()` in `src/plan/status.ts` is the pure judge; `verified` and `waived`
+  are part of its state type and are left for `plan:verify` and `plan:waive`.
+
+- 002d087: `guren plan:render` lists, under a changed route, action or model, the `TestApp` requests in the existing tests that reach its routes (RFC 0030 §2). The requests are read statically from each test file and matched against the route graph. A request whose path is built at runtime, or made on what an imported helper returns, is named instead of guessed. An altered or dropped route that no `TestApp` request reaches gets a note saying so. Tests named after the model or the route's controller are listed beside them, labelled as matched by file name.
+- 002d087: Add `guren plan:verify <plan> [--step <id>] [--app <dir>] [--timeout <s>] [--ci] [--json]`
+  (RFC 0030 §6), the executing half of plan status. For one derived step, or every
+  step in task order, it runs the step's verify commands (`codegen`, `typecheck`,
+  `db:migrate`, `guren check`, and the tests) and records the result under
+  `.guren/plans/<slug>.state.json`, which it git-ignores through a `.gitignore`
+  written beside it: a verification is a fact about one environment, and a fresh
+  clone sees every element as at most `wired` until it has run there.
+
+  Every step's verify list now opens with `codegen`, so a step verified on its own
+  does not fail on a fresh clone's missing `.guren/*.gen.ts`; once `codegen` has not
+  passed, the rest of the list is not run. A whole-plan run leaves alone a step
+  whose record still stands and reports it as skipped; the record is git-ignored,
+  so that is the incremental loop's, and a fresh checkout reports the `tests` step
+  `failed` once the implementation exists. Tests are `bun test
+--reporter=junit` on the files whose source carries the step's acceptance ids,
+  selected by file and never by `-t`; `tests` passes when every behaviour passes and
+  the run exits 0, `tests:fail` when every behaviour has a case and each case
+  failed. What cannot run here is `blocked`, never a failed implementation: a script
+  `package.json` lacks, a tool the shell cannot find, a command that timed out, a
+  migration whose output names an unreachable database, a check that threw. A step
+  is `verified` when every command passed and every element it owns is at the state
+  its kind completes at (`wired` where it has a mount point, `present` otherwise and
+  for a `drop`, or `unjudged`); one with a passing run and an element still
+  `planned` is `incomplete`, listing them.
+
+  Each record carries a fingerprint: the SHA-256 of every file the readers found
+  the step's elements in, plus the test files, and the environment it ran in.
+  `plan:status` now lays the records over its result: an element of a verified step
+  is `verified` while every fingerprinted file still hashes the same and `drifted`
+  once one does not, naming the file; an element that exists in files none of
+  which the record covers is not lifted, since that result could never expire,
+  while a `drop` lifts on the step alone and an `unjudged` element only from a step
+  with behaviours, and a record from
+  another plan or revision is reported as stale and lifts nothing. For that, every
+  element in the status report carries `files` and `completesAt`, and the summary
+  counts all eight states.
+
+- 002d087: `guren plan:waive <plan> <element-id>... --reason "<text>"` accepts elements of an approved plan incomplete (RFC 0030 §6). The waiver goes into a decision log beside the plan, committed with it: `decisions.json` next to a `docs/plans/<slug>/plan.json`, `<slug>.decisions.json` next to any other plan. It names the plan's hash, so a revision inherits none of them. `plan:status` reports a waived element as `waived` unless its step already verified it, `plan:verify` leaves it out of the step's judgement, and the implementation loop moves past a stall that a person has accepted. `plan:next` lists a step's waived elements apart from the ones it must implement, and it and the Stop hook report a log they could not read rather than judging silently as if no waiver were taken. `--remove` deletes a waiver by element id alone, so a revision can withdraw one whose element it dropped, and the step that rested on it is verified again rather than skipped.
+- 002d087: `parseSchemaTables()` reads more of a Drizzle schema (groundwork for RFC 0030).
+  `SchemaColumn` gains `unique`, `default` (the database default as written,
+  never evaluated: `value`, `sql`, `now` or `random`) and `runtimeDefault` (the
+  source text of a `$defaultFn()` / `$default()` argument).
+  `SchemaTable` gains `constraints`, read from the factory's extra-config
+  callback in both its array and object forms: `index`, `uniqueIndex`, `unique`,
+  `primaryKey`, `foreignKey` and `check`, each with its name and column property
+  names. What the parser cannot follow is marked instead of reading as absent:
+  `opaqueBuilder` on a column whose chain does not start at a builder imported
+  from drizzle, `opaqueColumns` on a table whose columns carry a spread or a
+  computed key, `opaqueConstraints` on an extra config built elsewhere, and
+  `opaqueColumns` / `opaqueName` on a constraint written with expressions.
+  A column or a table declaration wrapped in `as` / `satisfies` is now read
+  instead of skipped, so the ER spec view shows such a column's real type.
+
+### Patch Changes
+
+- 002d087: `guren add ai` installs `ai@^7.0.106`, the first release with `experimental_evaluate`, which `@guren/plugin-ai`'s evaluation models need.
+- 002d087: Consume password reset and email verification tokens atomically before invoking application updates. Replace tokens per normalized email atomically so concurrent reissuance leaves only one valid token. Memory and Redis stores implement the new operations; custom stores must implement `replace` and `consume` to use the issuance and completion helpers. Failed updates require a new token.
+
+  Generate password reset controllers that use the atomic completion helper. The helper only requires a provider's credential lookup, allowing applications to use their existing record types.
+
+- 002d087: Guren is now tested on Bun 1.4.2 as its primary runtime; Bun 1.3.14 keeps a non-blocking CI lane. `guren doctor`'s Bun check and `guren upgrade`'s compatibility warning now judge against the oldest line CI still runs (1.3), not against 1.1.0 and 1.0.0: Bun 1.0 to 1.2 reads as a warning ("tested on Bun >= 1.3.0 only"), so `guren doctor --strict` exits non-zero there.
+- 002d087: `guren check` warns when a controller passes `defer()` in `this.inertia()` for a prop the page's `Props` declares as required (no `?`, no `| undefined`): the controller may pass a deferred value for any prop, so the call typechecks while the initial visit hands the component `undefined`. The props literal is read by AST; a spread, a non-literal props argument in an action that calls `defer()`, and a `Props` the reader cannot close are reported unverifiable rather than passed. Advisory, so `check --ci` and `gate` never fail on it.
+- 0fdf11f: Separate database command definitions and result reporting from the builtin registry, preserving production protection, dry-run behavior, and reset sequencing.
+
+  `db:reset --json` and `db:fresh --json` no longer print "Dropping all tables..." to stdout ahead of the JSON result, and the production refusal of `db:seed`, `db:reset`, `db:fresh`, `queue:retry` and `queue:flush` now reports through the CLI's error path instead of exiting from inside the command.
+
+- 002d087: Every one-shot command now ends the process when it finishes, after stdout and stderr are flushed. Commands that import app code (`plan:status`, `plan:render`, `plan:verify`, `check`, `audit`, `context`, `route:list`, `tool:list`, `doctor`) used to print their output and then never exit when a routes or schema module left a timer or client open at import, such as a module-level `new MemoryRateLimitStore()`. `dev`, `tool:dev` and `console` keep running as before, and a plugin's command that succeeds is left to end on its own. Because the exit now waits for output to be written, a stdout pipe that nobody reads keeps the command waiting where it used to lose the output past 64 KB.
+- 002d087: Separate generator command definitions from the builtin registry while preserving command order, options, help text, and execution behavior.
+- 002d087: `make:exception` now rejects a `--status` that is not an HTTP error code (400–599) instead of writing `super(NaN, message)`, and `make:test` reports an unknown `--runner` as a usage error instead of exiting the process from inside the command.
+- 002d087: The static schema reader now recognises column and constraint builders imported from `@guren/orm/drizzle/pg`, `/mysql`, `/sqlite` and the mixed `@guren/orm/drizzle` barrel, the imports every scaffolded app uses. It used to trust only `drizzle-orm/*` imports, so in a scaffolded app every column read as an unknown builder: the runtime schema reader could not attach the builder name to any column (`guren plan:status` judged column types from the SQL type alone), its static fallback reported column types and modifiers as unknown, and indexes and unique constraints in a table's extra config were not read.
+- 002d087: `guren codegen` reads a parenthesized object alias (`export type PostResourceData = ({ id: number })`) as the object type it is, instead of refusing it as "not a plain object type". A body composed after the parentheses (`({ … }) & Other`, `({ … })[]`) is still refused with the existing reason.
+- 002d087: The harness `code-review` agent runs on `opus` at `effort: high` instead of `sonnet`. `agent:sync` replaces `.claude/agents/code-review.md`, a local edit to it included, and lists it as replaced; `agent:sync --dry-run` shows that first.
+- 002d087: List only the page component extensions the client can render. `guren context`,
+  `spec:generate` and `plan:status` no longer report a `.ts` or `.js` file under
+  `resources/js/pages/` as a page: the scaffolded client entry globs that directory
+  for `.tsx`, and codegen registers `.tsx` and `.jsx` in `.guren/pages.gen.ts`, so
+  such a file is not a page the app can load. An app that keeps such a file and
+  commits `docs/spec/` should re-run `guren spec:generate`: until then
+  `guren check --spec`, `check --ci` and `guren gate` report `screens.md` as out of
+  date.
+- 002d087: `make:command` now reads the result of the import patch it applies after registering the command: when the import cannot be added, it prints the reason and the import line to add by hand instead of reporting the command as registered over a file that names an identifier it never imports. A new `guren/no-discarded-patch-result` rule in `@guren/cli/oxlint` reports a call to a `PatchResult`-returning helper whose result is discarded.
+- 002d087: `make:command` now registers the command and adds its import in one write, through a new `addEntryWithImport()` in the patch helpers that `addArrayOptionRegistration()` shares: an entry that cannot be placed leaves the file untouched, and an entry already listed gets a missing import restored. The `guren/no-discarded-patch-result` rule also covers the helpers returning an `EntryWiring`.
+- 002d087: `make:job` and `make:notification` pin the name a job or notification is stored under, as `make:event` already does. A new job declares `static override jobName = '<ClassName>'`. A new notification extends `Notification` and overrides `get type()` to return its class name on that class alone, so a class a bundler renames still resolves from queued messages and stored records. The pin equals the class name that was the default, so nothing already queued or stored changes key; a subclass, which inherits the getter, resolves by its own class name as before instead of taking its parent's key. Existing jobs and notifications are unaffected: only files scaffolded from now on carry the pin.
+
+  The notification scaffold was a plain class, so `notifications.send()` and `registerNotification()` rejected it at compile time. It now extends `Notification`. Its `toMail()` returns `text` instead of `body`, a field `NotificationMailMessage` does not have, which the mail channel dropped. Its `toDatabase()` returns the data alone, since the database channel already records `type` beside it.
+
+- 002d087: `guren make:migration` runs the drizzle-kit the application installs, found in its `node_modules` or a parent's, instead of `bun x drizzle-kit`, which fell through to npm's copy when the app had no `.bin` link. With none installed it stops and asks for `bun install`. drizzle-kit now runs under Bun, so a `drizzle.config.json` loads where Node refused to import it. The scaffolders that generate a migration (`guren add session`, `add oauth`, `add ai`, `make:auth`) find a hoisted drizzle-kit the same way, where they used to look only in the current directory's `node_modules`.
+- 002d087: Compile every `make:*` generator's output in the test suite, and fix the three defects that gate found: `make:factory` now imports its model's record type and types the factory over it (`Factory<PostRecord>`, whose `definition()` returns the record's attributes) instead of naming a `Post` it never imported; `make:module`'s empty `db/schema.ts` is a module (`export {}`), so the root schema's `export *` no longer fails typecheck until the first table lands; `make:controller` passes the page title through the Inertia render options rather than as a prop the `make:view` page does not declare.
+- 002d087: Tighten the acceptance-behaviour reader (RFC 0030 §6): `planAcceptanceIds()` returns distinct ids again, each behaviour of a case naming two ids gets its own record, an undeclared id is cut short before it reaches a display channel, and the XML subset reader takes every limit from its caller and raises a junit-vocabulary failure under its own error type.
+- 002d087: Add the acceptance-behaviour aggregation `plan:verify` will read (RFC 0030 §6): one status per behaviour from a `bun test --reporter=junit` report, with a strict reader that reports anything it cannot read as blocked.
+- 002d087: `plan:status` no longer completes an `alter` on a planned property the application already held when the plan was approved. `plan:approve` records how each planned property of every `alter` read (on the approval entry, carried over to later approvals of the same baseline), and a match counts only against a reading that was a `differ` or `unknown`. An approval with no readings, such as one recorded before this release, leaves the `alter` `unjudged` until `guren plan:approve` is run again, which records the missing readings on the existing entry.
+- 002d087: Draw a plan's flows on the `plan:render` page (RFC 0030 §3). A "Flows" tab holds
+  one card per flow, with the graph drawn as inline SVG from the placement
+  `layoutPlanFlows()` computed: a box per step with its kind, an arrow per edge with
+  its label, an `async` edge dashed, and an edge that closes a cycle routed in a lane
+  of its own under the grid. A forward edge that a box stands in the way of takes a
+  lane over the grid instead, and a label cut to fit keeps its whole text as the tip.
+  A step that names a plan element links to that element's card; a step looping to itself is reported by the checks and not drawn.
+  Flows print as a section, follow the "changes only" filter, and scroll inside
+  their card on a narrow screen. Labels are written as text and the only link a flow
+  produces is an in-page anchor built from a schema-validated id.
+- 002d087: The plan commands no longer point at commands that do not exist yet. The rendered plan page tells a reviewer to hand `feedback.json` to the agent that wrote the plan, or to apply the comments by hand, and then to run `plan:render` and `plan:approve`, instead of printing a `guren plan --revise` command. `plan:next` says which elements a scaffold would generate without claiming a generator writes them, and its advice for a held step names what works today: undo the change, or edit the plan so it states what the application holds now and approve it. A stall's advice says to edit the plan rather than to revise it. `plan:verify --step` no longer says `plan:render` lists step ids.
+
+  `plan:next` no longer refuses to run because of the page `plan:render` writes beside the plan. The plan, its approvals and its decision log still count as uncommitted changes: they are committed records, and a waiver in the log changes which step `plan:next` returns.
+
+- 002d087: The plan page `guren plan:render` writes is now built from TypeScript modules typed against the plan schema, bundled into the same single self-contained file. The page refuses a plan whose `planVersion` it was not built for and says so, instead of drawing the fields it happens to understand.
+- 002d087: `guren plan:approve` re-approves an edited plan whose own elements are already built. On a plan that carries a baseline, a collision or an absence no longer refuses on an element that was stamped at the state the plan starts it from and that the application now reads exactly as the plan leaves it (an added name that exists, a renamed or dropped name that is gone); the report lists those elements as `builtByPlan`, and `plan:render` shows the same findings as passes. A collision the plan did not build still refuses: its table declared by another app root, a revision turning an existing element into an add of that name, or an add retargeted onto a name the application already had. `plan:status --json` carries the difference as `basis` on a fresh verdict; the text output is unchanged. A draft is judged as before.
+- 002d087: Read plan references from one table, and judge `guren plan:render`'s checks per app root.
+
+  `plan/references.ts` now holds every place a plan element names another by id. The §2
+  reference checks, the task derivation and a revision's dangling-name rule all read it,
+  and a test holds the table to the plan schema's id-typed fields, so a reference added
+  to the schema cannot go unchecked in one of the three.
+
+  The checks against the application now read the app root a plan element names with
+  `module`: a same-named model, controller, action, validator, resource or policy in
+  another root no longer satisfies an `existing` nor collides with an `add`, and the
+  finding names the root. A table name still collides across every root, since each
+  module's schema is re-exported from the project's own `db/schema.ts` and lands in one
+  migration set. Pages keep being judged by their id, since a module's pages sit in the
+  project's own `resources/js/pages` under the module's name. An element's `module` must
+  be a non-empty string: `""` never named an app root, and a plan carrying one now fails
+  to parse. An `existing`, `alter`, `rename` or `drop` table the plan's own root does not
+  declare is left unjudged, with its columns, rather than judged against another root's.
+
+- 002d087: `plan:close` and `plan:next` send an element no behaviour can reach (a column, a command, a job, event, listener, mail or notification) to `plan:waive` alone, and no longer suggest adding a behaviour for it; the unreached note and an unjudged `alter`'s reason in `plan:status` say the same. A model `alter` that adds a relationship now completes on it: the relationship's type and target are read under the same keys before and after the work, so the reading taken at approval counts. An approval recorded by an earlier CLI holds the relationship under one combined key: run `plan:approve` again before writing the relationship, since after it the `alter` needs a behaviour or a waiver. An element lifted to `verified`, `drifted` or `waived` no longer carries the reason it was unjudged, and a match with no reading at approval no longer tells you to run `plan:approve`, which would record it as already held; that advice now appears on a planned property that still differs, where a re-approval before the work helps.
+- 002d087: Plan revisions, the model-free core (RFC 0030 §4). `plan/revision.ts` defines a revision as `{ parent, ops, result }`, the ops schema a revising producer is held to, and `applyRevision()`, which rejects a revision whose ops do not reproduce `result`, leave the plan as it was, touch an approved element without `reopens`, or keep a question the feedback answered. A revision that reproduces neither its `result` nor a plan different from its parent is refused under two kinds, so a consumer can tell the operation at fault from a revision that changes nothing. `diffPlans()` computes the ops for a plan edited by hand. No command uses it yet.
+- 002d087: `guren plan:status` no longer calls a route `wired` while a route registered before it, with the same method or `ALL`, answers every request its path matches (a planned `GET /comments/new` after `GET /comments/:id`). The route, and an action or validator only it reaches, stays `present` with a note naming the earlier route and the registrar that declared it, so `plan:verify` cannot verify it. A comparison the path matcher cannot make (a constraint or a `*`), two modules' routes, and a module's route while another module failed to load are reported unconfirmed rather than passed.
+
+  `guren plan:close` now prints, under each element it refuses, the command that moves it: `plan:verify <plan> --step <id>` for the step that verifies it, fixing the code first where it is below its completion state, or `plan:waive <plan> <id> --reason` where no `plan:verify` run can lift it (no step verifies it, nothing of it can be fingerprinted, or no step's behaviour reaches an element none of whose planned properties matched). `guren plan:next`, once every step is verified, lists the same lines; its JSON `unverified` entries carry `moves` beside an optional `holds`.
+
+- 002d087: `guren plan:status` now judges a planned validator's and resource's fields instead of reporting them as having no reader. A validator's fields are read from the exported schema: whether it declares the key, and, when every node from the export to the field is one whose meaning the reader models and means the same on every zod 4 release (a plain object; `optional`, `nullable`, `default`, `prefault` or `.required()` over a primitive or a `z.coerce.*`), the validated value's type, whether a client must send it, and `min`/`max`/`email`/`url`/`uuid` rules. Any other node (a transform, a refinement, a catch, a union, a pipe around the object) leaves those `unknown`, and a pipe such as `.pipe(z.email())` or, from zod 4.1, `z.stringbool()` is read for its type only. A match on a key's existence alone does not let `plan:verify` lift the element without a behaviour reaching it. A resource's fields are read from the payload type `guren codegen` reads. Every command that reads the plan's status (`plan:status`, `plan:verify`, `plan:next`, `plan:close`, `plan:approve` for a plan with an `alter`, `guren check --plan`, the Stop hook) now imports every validator file, not only when a route carries a contract schema.
+- 002d087: `guren plan:status` judges three cases the RFC 0030 Part 2 measurements found wrong. An added element whose every planned property has no reader (a resource's fields, a policy's abilities) and which has no mount point reads `unjudged` rather than `present`. A planned `params` / `query` / `body` validator that a readable action body does not validate with, and no route contract holds, is a `differ` that keeps the action at `present`, never `wired`. And an element none of whose planned properties matched is lifted to `verified` only while a verified behaviour reaches it through the plan's references, so a listener nothing registers no longer reads `verified` on behaviours that never touch it.
+
+  A plan with side effects or commands, or with another element that plans no property and that no behaviour reaches, now needs a waiver or a behaviour that reaches it before `guren plan:close` accepts it. A validate call on a chained or built schema (`this.validateBody(PostSchema.partial())`, `this.validateBody(z.object(...))`) names no exported validator, so it reads as a `differ` too. `plan:close` prints what holds each element it refuses, and `plan:next`, once every step is verified, reads the application with detail once to list the elements `plan:close` would still refuse.
+
+  An element no verified behaviour reaches now reports that missing behaviour and stays `present`, even when one of its files changed since, where it used to read `drifted`.
+
+- 002d087: `guren plan:status` reads a policy's planned abilities (`match` when the class declares the member, `differ` when it does not, `unknown` where the class may hold it unread) and judges a side effect `wired` when the application's source dispatches, registers or sends it. Mail and notification classes are discovered (`app/Mail`, `app/Notifications`) instead of reading `unjudged`. A side effect now completes at `wired`, so `plan:verify` reports its step `incomplete` while nothing uses the class; it still closes only on a behaviour or a waiver, and so does a policy whose abilities match only by name.
+- 002d087: Add the deterministic task derivation for implementation plans (RFC 0030 §5): tasks, steps, their order and verify commands as a pure function of a plan.
+- 002d087: `guren plan:verify` re-checks a step whose verified record an edit to a shared file (a routes file, the schema, a controller) left drifted, instead of `plan:next` handing it out as work. `--step <id>` re-checks the drifted steps before it once the step itself verifies; a whole-plan run re-checks the drifted steps once every other step it ran verified. Each re-check is recorded verified again or failed with what broke. The re-checks stop at the first that runs commands and does not verify (a static re-check runs nothing, so its failure does not stop the rest), and a blocked re-check leaves the drifted record for a later run. A drifted `tests:fail` step is re-checked without a run: it stays verified while one test file still carries each behaviour's id, and a failed static re-check is reported and left drifted. The Stop hook does this on every stop that verifies the marked step, without spending a continuation, and names an earlier step the change broke, could not re-check, or left for the next run. `plan:next` tells a drifted step to be re-checked with `plan:verify --step` rather than re-implemented. A data step's `db:migrate` now first asks the application's own drizzle-kit (`generate --explain`) whether the migrations cover the schema: uncovered changes fail the step, and a drizzle-kit that cannot answer blocks it.
+- 002d087: Isolate concurrent container scopes and make Redis queue transitions atomic. Fence stale reservations and renew active leases while handlers run. Jobs can pass `this.signal` to cancellable I/O; timeouts request cancellation and retries wait for the handler to settle. A handler that completes after its timeout is acknowledged rather than retried, a failed lease renewal is retried at the next heartbeat, and a lease another worker took is reported per job without stopping the worker. `SqsDriver` renews message visibility while a job runs (`visibilityTimeout` option) and `SqsAdapter.changeMessageVisibility` may resolve `false` for an expired receipt. Worker lifecycle state is reset after driver failures.
+
+  Remove the CLI's runtime dependency on the core facade by sharing registration conventions below both packages. Document queue delivery guarantees, mass-assignment boundaries and the supported runtime baseline.
+
+- 002d087: Model relationships are read from the call that registers them. A relationship only its `relationTypes` annotation still names no longer counts as declared, so `guren plan:status` reports a deleted `Post.hasMany(...)` as not declared, and the kind comes from the call rather than from the annotation. Calls in a `static {}` block of the class (`this.hasMany(...)`) are now read, and a `BelongsToRequiredRecord<...>` annotation names its target model like `BelongsToRecord<...>`.
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+- Updated dependencies [002d087]
+  - @guren/server@2.26.0
+  - @guren/orm@2.12.0
+
 ## 2.26.0
 
 ### Minor Changes

@@ -13,17 +13,31 @@ import { MemoryStore } from './stores/MemoryStore'
 import { RedisStore } from './stores/RedisStore'
 import { FileStore } from './stores/FileStore'
 import { TaggedCache } from './TaggedCache'
+import { pendingComputationsFor, type PendingComputations } from './pending-computations'
 import { claimHotDisposable, isHotReloadRuntime } from '../hot-reload/hot-disposables'
+import { describeDriverMap } from '../introspection/driver-map'
+import type { DriverMapEntry } from '../introspection/types'
 
-/** Adds tag support to any cache store. */
+/**
+ * Adds tag support to any cache store, and shares one `remember` callback
+ * between the callers that miss the same key with the same TTL at once. A hit
+ * is read on its own, so hits get what `get` returns. A write to a key forgets
+ * its running computation, so a later miss does not join one that started
+ * before the write.
+ */
 class TaggableCacheStoreWrapper implements TaggableCacheStore {
-  constructor(private readonly store: CacheStore) {}
+  private readonly pending: PendingComputations
+
+  constructor(private readonly store: CacheStore) {
+    this.pending = pendingComputationsFor(store)
+  }
 
   get<T>(key: string): Promise<T | null> {
     return this.store.get<T>(key)
   }
 
   set<T>(key: string, value: T, ttl?: number): Promise<void> {
+    this.pending.forget(key)
     return this.store.set(key, value, ttl)
   }
 
@@ -32,10 +46,12 @@ class TaggableCacheStoreWrapper implements TaggableCacheStore {
   }
 
   delete(key: string): Promise<boolean> {
+    this.pending.forget(key)
     return this.store.delete(key)
   }
 
   clear(): Promise<void> {
+    this.pending.forgetAll()
     return this.store.clear()
   }
 
@@ -48,11 +64,17 @@ class TaggableCacheStoreWrapper implements TaggableCacheStore {
   }
 
   remember<T>(key: string, ttl: number, callback: () => Promise<T>): Promise<T> {
-    return this.store.remember(key, ttl, callback)
+    return this.rememberOnMiss(key, ttl, () => this.store.remember(key, ttl, callback))
   }
 
   rememberForever<T>(key: string, callback: () => Promise<T>): Promise<T> {
-    return this.store.rememberForever(key, callback)
+    return this.rememberOnMiss(key, undefined, () => this.store.rememberForever(key, callback))
+  }
+
+  private async rememberOnMiss<T>(key: string, ttl: number | undefined, remember: () => Promise<T>): Promise<T> {
+    const cached = await this.store.get<T>(key)
+    if (cached !== null) return cached
+    return this.pending.run(key, ttl, remember)
   }
 
   getMany<T>(keys: string[]): Promise<Map<string, T | null>> {
@@ -60,10 +82,12 @@ class TaggableCacheStoreWrapper implements TaggableCacheStore {
   }
 
   setMany<T>(items: Map<string, T>, ttl?: number): Promise<void> {
+    for (const key of items.keys()) this.pending.forget(key)
     return this.store.setMany(items, ttl)
   }
 
   deleteMany(keys: string[]): Promise<number> {
+    for (const key of keys) this.pending.forget(key)
     return this.store.deleteMany(keys)
   }
 
@@ -81,6 +105,8 @@ export class CacheManager {
   private readonly defaultStoreName: string
   private readonly storeFactories: Map<string, CacheStoreFactory> = new Map()
   private readonly resolvedStores: Map<string, TaggableCacheStore> = new Map()
+  /** The configured driver per store, keyed like `storeFactories`; null for a bare `registerStore()` factory. */
+  private readonly storeDrivers: Map<string, string | null> = new Map()
   /**
    * Where this manager was built, for identifying its stores across hot reloads.
    * Captured here rather than in `store()` because stores resolve lazily, from
@@ -103,6 +129,7 @@ export class CacheManager {
 
     if (!this.storeFactories.has(this.defaultStoreName) && this.defaultStoreName === 'memory') {
       this.storeFactories.set('memory', () => new MemoryStore())
+      this.storeDrivers.set('memory', 'memory')
     }
   }
 
@@ -134,6 +161,7 @@ export class CacheManager {
     }
 
     this.storeFactories.set(name, () => factory(options))
+    this.storeDrivers.set(name, driver)
   }
 
   /** Returns the default store if no name is given. */
@@ -174,6 +202,7 @@ export class CacheManager {
 
   registerStore(name: string, factory: CacheStoreFactory): void {
     this.storeFactories.set(name, factory)
+    this.storeDrivers.set(name, null)
     this.resolvedStores.delete(name)
   }
 
@@ -191,6 +220,11 @@ export class CacheManager {
 
   getStoreNames(): string[] {
     return Array.from(this.storeFactories.keys())
+  }
+
+  /** The declared stores and the default, building none of them (RFC 0026 §1). */
+  describe(): DriverMapEntry {
+    return describeDriverMap(this.defaultStoreName, this.storeDrivers)
   }
 }
 

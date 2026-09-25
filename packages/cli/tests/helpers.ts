@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { ConfigDefinition, ConfigDefinitions } from '@guren/core'
+import type { AppManifest } from '@guren/server'
 
 const repoRoot = resolve(import.meta.dir, '../../..')
 
@@ -518,6 +519,20 @@ export async function writeWorkspaceFiles(
 }
 
 /**
+ * Every entry under `dir` with its contents, directories included: a writer
+ * that fails after its `mkdir` still changes the tree, so a refusal that
+ * promises to leave the app as it was is held to the directories too.
+ */
+export async function snapshotTree(dir: string): Promise<Record<string, string | null>> {
+  const tree: Record<string, string | null> = {}
+  for (const entry of await readdir(dir, { withFileTypes: true, recursive: true })) {
+    const path = join(entry.parentPath, entry.name)
+    tree[relative(dir, path)] = entry.isDirectory() ? null : await readFile(path, 'utf8')
+  }
+  return tree
+}
+
+/**
  * Known hazard, deliberately left in place: the `process.chdir()` below is
  * global state in Bun's shared test process, so an overrunning test can chdir
  * and `rm -rf` out from under whichever test started meanwhile. The workspace
@@ -736,11 +751,13 @@ export async function runCliBin(
 export async function runCliBinCaptured(
   args: string[],
   cwd: string,
+  options: { preload?: string } = {},
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   assertWorkspaceBuilt([SERVER_DIST_ENTRY])
 
   const { NODE_ENV: _testEnv, ...env } = process.env
-  const proc = Bun.spawn(['bun', CLI_BIN_PATH, ...args], {
+  const preload = options.preload ? ['--preload', options.preload] : []
+  const proc = Bun.spawn(['bun', ...preload, CLI_BIN_PATH, ...args], {
     cwd,
     env,
     stdout: 'pipe',
@@ -880,3 +897,33 @@ export const sessionConfig: SessionConfig = {
 `
 }
 
+/** A manifest with nothing but what a test sets: every section absent, every provider registered. */
+export function manifestFixture(overrides: Partial<AppManifest> = {}): AppManifest {
+  return {
+    schemaVersion: 1,
+    generatedAt: '2026-09-24T00:00:00.000Z',
+    entry: { file: 'src/main.ts', root: '/app', stage: 'register' },
+    runtime: { bun: '1.3.14', node: null, platform: 'darwin' },
+    providers: [],
+    modules: [],
+    routes: [],
+    middlewareAliases: {},
+    bindings: ['app', 'auth', 'hono', 'router'],
+    auth: {
+      guards: ['web'],
+      defaultGuard: 'web',
+      hasher: 'DefaultHasher',
+      algorithm: 'scrypt',
+      requiresBun: false,
+      providers: {},
+    },
+    agentTools: [],
+    warnings: [],
+    ...overrides,
+  }
+}
+
+/** An introspection that reports `manifest`, so a test judges a rule against a known registered app. */
+export function introspected(manifest: AppManifest): () => Promise<{ status: 'ok'; manifest: AppManifest }> {
+  return async () => ({ status: 'ok', manifest })
+}

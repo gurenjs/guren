@@ -69,7 +69,7 @@ added to `.claude/skills/` or `.agents/skills/`, are never touched unless they
 sit under a name the harness itself ships — the claim is by name, so avoid the
 canonical skill names (`dev-workflow`, `db-manage`, `scaffold`, `feature`,
 `guren-api`, `plugin-authoring`, `agent-interface`, `ai-agent`,
-`github-projects`) and the shipped rule
+`github-projects`, `plan-write`, `plan-implement`) and the shipped rule
 filenames for your own.
 
 ## The loop the harness expects
@@ -95,5 +95,5 @@ Once installed, the entry document describes the same loop for the app; the
 Claude harness automates all three steps with hooks (the gate runs when a
 turn ends with uncommitted changes), Cursor and Codex get the same stop hook,
 and the others are told in `AGENTS.md` to run the gate themselves. Read the installed rules in `.claude/rules/` or `.agents/rules/`
-— each file's `globs` frontmatter says which paths it covers — before
+— each file's `paths` frontmatter says which paths it covers — before
 editing those paths.

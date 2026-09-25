@@ -1,8 +1,13 @@
 import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { join, relative, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import process from 'node:process'
 import { upgradeCanary } from '../../packages/cli/src/upgrade'
-import { assertLocalGurenDependencies, collectLocalPackages } from './local-packages'
+import {
+  assertSingleInstalledCopies,
+  ensureBuiltPackages,
+  rewriteAppDependencies,
+  vendorLocalPackages,
+} from './local-packages'
 
 const repoRoot = resolve(import.meta.dir, '../..')
 const appFixture = resolve(repoRoot, 'examples/blog')
@@ -28,35 +33,6 @@ async function run(cmd: string[], cwd: string): Promise<void> {
   if (exitCode !== 0) {
     throw new Error(`Command failed with exit code ${exitCode}: ${cmd.join(' ')}`)
   }
-}
-
-async function rewriteManifestToLocalFiles(appDir: string): Promise<void> {
-  const packageJsonPath = join(appDir, 'package.json')
-  const manifest = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
-    dependencies?: Record<string, string>
-    devDependencies?: Record<string, string>
-  }
-
-  const localPackages = await collectLocalPackages()
-
-  for (const field of ['dependencies', 'devDependencies'] as const) {
-    const dependencies = manifest[field]
-    if (!dependencies) {
-      continue
-    }
-
-    for (const pkg of localPackages) {
-      if (dependencies[pkg.name]) {
-        dependencies[pkg.name] = `file:${relative(appDir, pkg.sourceDir)}`
-      }
-    }
-  }
-
-  await writeFile(packageJsonPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
-
-  // `upgrade` has just rewritten every @guren/* range to a fixture version no
-  // registry has, so fail here by name rather than at `bun install`.
-  await assertLocalGurenDependencies(appDir, 'The upgraded fixture app')
 }
 
 async function degradeFixtureApp(appDir: string): Promise<void> {
@@ -94,6 +70,7 @@ async function degradeFixtureApp(appDir: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  await ensureBuiltPackages()
   const tempRoot = await mkdtemp(tempRootBase)
   const appDir = join(tempRoot, 'blog')
 
@@ -112,8 +89,14 @@ async function main(): Promise<void> {
       install: true,
       installRunner: async (cwd) => {
         installInvoked = true
-        await rewriteManifestToLocalFiles(cwd)
+        // Tarballs, as smoke:starter installs them: a `file:` directory brings its own
+        // `@guren/*` ranges, which resolve from npm and fail outright once a version bump
+        // names a release npm does not have yet. `upgrade` has just written such a range
+        // (FIXTURE_VERSION) to every @guren/* entry; the rewrite fails on any it misses.
+        const roots = await vendorLocalPackages(join(cwd, '.guren-vendor'))
+        await rewriteAppDependencies(cwd, roots, 'The upgraded fixture app')
         await run(['bun', 'install'], cwd)
+        await assertSingleInstalledCopies(cwd)
       },
     })
 
@@ -133,9 +116,8 @@ async function main(): Promise<void> {
     }
     assert(tsconfig.include?.includes('.guren/**/*'), 'upgrade-existing-app smoke expected tsconfig to include .guren/**/* after upgrade.')
 
-    // Not `bunx guren`: `guren` is not on npm, so that spelling only works
-    // while the temp app's node_modules/.bin link happens to exist and 404s
-    // the moment it does not. Run the CLI source, as fresh-app.ts does.
+    // Not `bunx guren`: without the temp app's .bin link it runs the npm
+    // placeholder, which exits 1. Run the CLI source, as fresh-app.ts does.
     await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'codegen', '--force'], appDir)
     await run(['bun', 'run', 'typecheck'], appDir)
     await run(['bun', 'run', 'build'], appDir)

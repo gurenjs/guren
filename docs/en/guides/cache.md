@@ -96,6 +96,20 @@ const settings = await cache.store().rememberForever('app:settings', async () =>
 })
 ```
 
+### Concurrent Misses
+
+When several calls in one process miss the same key with the same TTL at the same time, the callback runs once and every one of those callers gets its outcome: the same object, or the same error. A callback that throws caches nothing, so the next call runs it again. Hits are not shared: each concurrent hit gets what `get()` returns.
+
+This applies to `remember` and `rememberForever` on a store from `cache.store()`, including stores added with `registerStore()`, and on tagged caches, including one you build with `new TaggedCache(store, tags)`. Only calls through the same store instance share a callback: two `CacheManager`s, or two store names that point at one Redis, each run their own. A store you construct and call directly, such as `new MemoryStore()` or `new FileStore(...)`, does not share callbacks.
+
+Sharing stops at the process boundary (the isolate, on Cloudflare Workers). Two servers that miss the same key at once each run the callback.
+
+- Callers that missed together share one object, so treat the result as read-only: a change made by one caller is visible to the others. Copy it first (`structuredClone(posts)`) if you need to modify it. The memory store returns the stored object itself on every hit as well, so there a change also alters the cached value.
+- The callback runs on behalf of every caller that joins it, so keep it independent of the request that started it. Do not pass that request's `AbortSignal`, and do not read request state such as the signed-in user or the locale unless the key includes it. A failure caused by the first caller's request, such as an abort, reaches every caller that joined.
+- Calls with different TTLs do not share a callback, and `rememberForever` counts as a TTL of its own. Each callback stores its result with its own caller's TTL, and the one that finishes last overwrites the others: a `remember(key, 60, ...)` that finishes after a `rememberForever` leaves an entry that expires in 60 seconds.
+- A call that arrives 10 seconds or more after the running callback started runs its own callback instead of waiting. Callers already waiting stay with the first callback, so give slow I/O inside a callback its own timeout.
+- Writing the key through the same store instance (`set`, `delete`, `setMany`, `deleteMany`, `clear`, or a tagged cache's `set` and `delete`) makes later misses start a new callback instead of joining one that began before the write. The running callback is not cancelled: it still stores its result when it finishes, which can replace the value the write stored.
+
 ## Configuration
 
 `bunx guren add cache` writes `config/cache.ts`, declares `CACHE_STORE` in `config/env.ts`, and adds the definition to `createApp({ config })`:
@@ -207,9 +221,9 @@ Apps that configure the cache in a service provider keep working; see [Apps with
 
 ## Tagged Cache
 
-Counters preserve their original expiration when incremented or decremented. File counters use filesystem locks shared by store instances and processes, with atomic file replacement. A lock wait exceeding five seconds throws; remove an abandoned `.lock` directory only after confirming its writer has stopped.
+Counters preserve their original expiration when incremented or decremented. On the file store, `add()`, `increment()` and `decrement()` take a filesystem lock that store instances and processes share. A lock one writer has held for five seconds is treated as abandoned by a crashed process and taken over, so a key never stays locked. A writer still running at that point (a suspended process, a stalled disk) then runs alongside the one that took its lock over, and one of their updates can be lost. Keep counters that several processes update, and that must not lose an update, on the Redis store.
 
-Custom stores used with tags must implement atomic `add(key, value): Promise<boolean>`: insert without expiration only when the key is absent, and return whether insertion succeeded. Built-in stores implement this operation.
+Custom stores used with tags must implement atomic `add(key, value): Promise<boolean>`: insert without expiration only when the key is absent, and return whether insertion succeeded. Built-in stores implement this operation; the file store's `add()` is not atomic across a lock takeover.
 
 Tags allow you to group related cache items for easy invalidation:
 

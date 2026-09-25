@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'bun:test'
-import { chmod, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { chmod, mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
+  attachControllerRefs,
   blankCommentsAndStrings,
   classActionMembers,
+  collisionsReachedByName,
+  controllerMethodFor,
   mutatesRecords,
   parseControllerMethods,
   AUTHORIZE_CALL_PATTERN,
@@ -12,10 +15,11 @@ import {
   DELETE_CALL_PATTERN,
   FORCE_WRITE_PATTERN,
   INERTIA_CALL_PATTERN,
+  type ControllerTarget,
 } from '../src/controller-methods'
 import { firstClassDeclaration } from '../src/model-parser'
 import { parseSourceFile } from '../src/parse-cache'
-import { writeWorkspaceFiles } from './helpers'
+import { CAN_DENY_FILE_READS, writeWorkspaceFiles } from './helpers'
 
 function scrub(source: string): string {
   const ast = parseSourceFile(source, 'test.ts')
@@ -197,7 +201,7 @@ export class PostController extends Controller {
 
   // A file that will not open must not reject the whole promise and take the
   // check/audit run down with it.
-  it('reports an unreadable controller instead of rejecting', async () => {
+  it.skipIf(!CAN_DENY_FILE_READS)('reports an unreadable controller instead of rejecting', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'guren-controller-methods-unreadable-'))
     try {
       await writeWorkspaceFiles(dir, {
@@ -213,8 +217,6 @@ export class PostController extends Controller {
       // failing read is to make a discovered file unopenable.
       const controller = join(dir, 'app/Http/Controllers/PostController.ts')
       await chmod(controller, 0o000)
-      const stillReadable = await readFile(controller, 'utf8').then(() => true, () => false)
-      if (stillReadable) return // running as root: the mode says nothing
 
       const { methods, unreadableFiles } = await parseControllerMethods(dir)
 
@@ -251,6 +253,229 @@ export class PostController extends Controller {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+/** The manifest half of the scan (RFC 0026 §5): the keys a `ControllerRef` resolved by identity is looked up by. */
+describe('identity lookup', () => {
+  const ref = (file: string, exportName: string, action = 'store') =>
+    ({ name: 'PostController', action, file, exportName, resolved: 'identity' as const })
+
+  async function scan(files: Record<string, string>) {
+    const dir = await mkdtemp(join(tmpdir(), 'guren-controller-methods-identity-'))
+    try {
+      await writeWorkspaceFiles(dir, files)
+      return await parseControllerMethods(dir)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  const body = (marker: string) => `import { Controller } from '@guren/core'
+
+class PostController extends Controller {
+  async store() { return this.json('${marker}') }
+}
+
+export { PostController, PostController as Posts }
+export default PostController
+`
+
+  it('keys every name a file exports the class under, and reads a same-named class from its own file', async () => {
+    const result = await scan({
+      'app/Http/Controllers/PostController.ts': body('root'),
+      'modules/blog/app/Http/Controllers/PostController.ts': `import { Controller } from '@guren/core'
+
+export default class PostController extends Controller {
+  async store() { return this.json('blog') }
+}
+`,
+    })
+    const root = 'app/Http/Controllers/PostController.ts'
+    const blog = 'modules/blog/app/Http/Controllers/PostController.ts'
+
+    for (const exportName of ['PostController', 'Posts', 'default']) {
+      expect(controllerMethodFor(result, ref(root, exportName))).toMatchObject({ by: 'identity', info: { filePath: root } })
+    }
+    expect(controllerMethodFor(result, ref(blog, 'default'))).toMatchObject({ by: 'identity', info: { filePath: blog } })
+    expect(controllerMethodFor(result, ref(blog, 'PostController')).by).toBe('name')
+  })
+
+  it('answers no body for an action the placed class does not declare, rather than another class\'s', async () => {
+    const result = await scan({
+      'app/Http/Controllers/PostController.ts': body('root'),
+      'modules/blog/app/Http/Controllers/PostController.ts': `import { Controller } from '@guren/core'
+
+export class PostController extends Controller {
+  async destroy() { return this.noContent() }
+}
+`,
+    })
+    expect(controllerMethodFor(result, ref('modules/blog/app/Http/Controllers/PostController.ts', 'PostController'))).toMatchObject({ by: 'identity', info: undefined })
+  })
+
+  it('answers no body for a placed class whose file did not parse, rather than a same-named class\'s', async () => {
+    const result = await scan({
+      'app/Http/Controllers/PostController.ts': body('root'),
+      'modules/blog/app/Http/Controllers/PostController.ts': 'export default class PostController {',
+    })
+    expect(result.collisions).toEqual([])
+    expect(controllerMethodFor(result, ref('modules/blog/app/Http/Controllers/PostController.ts', 'default'))).toMatchObject({ by: 'identity', info: undefined })
+  })
+
+  it('gives a name-only reference no body when every same-named declaration is a class the child imported', async () => {
+    const result = await scan({ 'app/Http/Controllers/PostController.ts': body('root') })
+    const nameOnly = { name: 'PostController', action: 'store', file: null, exportName: null, resolved: 'name-only' as const }
+
+    expect(controllerMethodFor(result, { ...nameOnly, unimported: [] })).toMatchObject({ by: 'elsewhere', info: undefined })
+    expect(controllerMethodFor(result, { ...nameOnly, unimported: ['app/Http/Controllers/PostController.ts'] }).by).toBe('name')
+    // A definition the routes file registered carries no manifest evidence either way.
+    expect(controllerMethodFor(result, { name: 'PostController', action: 'store' }).by).toBe('name')
+  })
+
+  it('reads an unexported same-named class by name, since the child can never match one', async () => {
+    const result = await scan({
+      'app/Http/Controllers/NoteController.ts': `import { Controller } from '@guren/core'
+
+class NoteController extends Controller {
+  async store() { return this.json('colocated') }
+}
+`,
+    })
+    const nameOnly = { name: 'NoteController', action: 'store', file: null, exportName: null, resolved: 'name-only' as const, unimported: [] }
+    expect(controllerMethodFor(result, nameOnly)).toMatchObject({ by: 'name', info: { filePath: 'app/Http/Controllers/NoteController.ts' } })
+  })
+
+  it('reads a name-only reference the routes file or entry declares as elsewhere, even beside an unexported class', async () => {
+    const result = await scan({
+      'app/Http/Controllers/NoteController.ts': "import { Controller } from '@guren/core'\n\nclass NoteController extends Controller {\n  async store() { return this.json('x') }\n}\n",
+    })
+    const nameOnly = { name: 'NoteController', action: 'store', file: null, exportName: null, resolved: 'name-only' as const, unimported: [] }
+    expect(controllerMethodFor(result, { ...nameOnly, inRouteSource: true })).toMatchObject({ by: 'elsewhere', info: undefined })
+  })
+
+  it('counts a type-only export as no export of the class', async () => {
+    const result = await scan({
+      'app/Http/Controllers/NoteController.ts': "import { Controller } from '@guren/core'\n\nclass NoteController extends Controller {\n  async store() { return this.json('x') }\n}\n\nexport type { NoteController }\nexport { type NoteController as Notes }\n",
+    })
+    expect(result.declarations[0]?.exportNames).toEqual([])
+  })
+
+  it('follows the name only to a declaration that could be the routed class, not to a last-scanned exported one', async () => {
+    const result = await scan({
+      'app/Http/Controllers/A.ts': body('failed-import'),
+      'app/Http/Controllers/B.ts': body('imported'),
+    })
+    const nameOnly = { name: 'PostController', action: 'store', file: null, exportName: null, resolved: 'name-only' as const }
+    for (const unimported of [['app/Http/Controllers/A.ts'], ['app/Http/Controllers/B.ts']]) {
+      expect(controllerMethodFor(result, { ...nameOnly, unimported }).info?.filePath).toBe(unimported[0])
+    }
+  })
+
+  it('reports a collision only for a class some route reached by its name alone', async () => {
+    const result = await scan({
+      'app/Http/Controllers/PostController.ts': body('root'),
+      'modules/blog/app/Http/Controllers/PostController.ts': body('blog'),
+    })
+    const placed = [ref('app/Http/Controllers/PostController.ts', 'default')]
+    expect(collisionsReachedByName(result, placed)).toEqual([])
+    expect(collisionsReachedByName(result, [...placed, { name: 'PostController', action: 'store' }])).toHaveLength(1)
+  })
+})
+
+describe('attachControllerRefs', () => {
+  const placed = { name: 'PostController', action: 'store', file: 'app/Http/Controllers/PostController.ts', exportName: 'default', resolved: 'identity' as const }
+
+  it('gives a registered definition the manifest\'s reference for the same route', () => {
+    const [definition] = attachControllerRefs(
+      [{ method: 'post', path: '/posts', controller: { name: 'PostController', action: 'store' } }],
+      { routes: [{ method: 'POST', path: '/posts', controller: placed }], warnings: [] } as never,
+    )
+    expect(definition?.controller).toEqual(placed)
+  })
+
+  it('keeps the name when the manifest counts the route more often than the routes file', () => {
+    const [definition] = attachControllerRefs(
+      [{ method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } }],
+      { routes: [{ method: 'POST', path: '/posts', controller: placed }, { method: 'POST', path: '/posts', controller: { ...placed, file: 'modules/blog/x.ts' } }], warnings: [] } as never,
+    )
+    expect(definition?.controller).toEqual({ name: 'PostController', action: 'store' })
+  })
+
+  it('tells two routes of one method, path and action apart by their names', () => {
+    const blog = { ...placed, file: 'modules/blog/app/Http/Controllers/PostController.ts' }
+    const definitions = attachControllerRefs(
+      [
+        { method: 'POST', path: '/posts', name: 'posts.store', controller: { name: 'PostController', action: 'store' } },
+        { method: 'POST', path: '/posts', name: 'blog.posts.store', controller: { name: 'PostController', action: 'store' } },
+      ],
+      {
+        routes: [
+          { method: 'POST', path: '/posts', name: 'blog.posts.store', controller: blog },
+          { method: 'POST', path: '/posts', name: 'posts.store', controller: placed },
+        ],
+        warnings: [],
+      } as never,
+    )
+    expect(definitions.map((definition) => definition.controller)).toEqual([placed, blog])
+  })
+
+  it('pairs a key both sides repeat equally nth to nth', () => {
+    const second = { ...placed, file: 'app/Http/Controllers/Admin/PostController.ts' }
+    const definitions = attachControllerRefs(
+      [
+        { method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } },
+        { method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } },
+      ],
+      { routes: [{ method: 'POST', path: '/posts', controller: placed }, { method: 'POST', path: '/posts', controller: second }], warnings: [] } as never,
+    )
+    expect(definitions.map((definition) => definition.controller)).toEqual([placed, second])
+  })
+
+  it('pairs a key two modules share within its module, whatever order each side lists modules in', () => {
+    const blog = { ...placed, file: 'modules/blog/app/Http/Controllers/PostController.ts' }
+    const billing = { ...placed, file: 'modules/billing/app/Http/Controllers/PostController.ts' }
+    const definitions = attachControllerRefs(
+      [
+        { method: 'POST', path: '/posts', module: 'billing', controller: { name: 'PostController', action: 'store' } },
+        { method: 'POST', path: '/posts', module: 'blog', controller: { name: 'PostController', action: 'store' } },
+      ],
+      {
+        routes: [
+          { method: 'POST', path: '/posts', module: 'blog', controller: blog },
+          { method: 'POST', path: '/posts', module: 'billing', controller: billing },
+        ],
+        warnings: [],
+      } as never,
+    )
+    expect(definitions.map((definition) => definition.controller)).toEqual([billing, blog])
+  })
+
+  it('attaches nothing when the routes file counts the route more often than the manifest', () => {
+    const definitions = attachControllerRefs(
+      [
+        { method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } },
+        { method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } },
+      ],
+      { routes: [{ method: 'POST', path: '/posts', controller: placed }], warnings: [] } as never,
+    )
+    expect(definitions.map((definition) => definition.controller)).toEqual([
+      { name: 'PostController', action: 'store' },
+      { name: 'PostController', action: 'store' },
+    ])
+  })
+
+  it('carries the files a name-only reference may still be declared in', () => {
+    const nameOnly = { name: 'PostController', action: 'store', resolved: 'name-only' as const }
+    const [definition] = attachControllerRefs(
+      [{ method: 'POST', path: '/posts', controller: { name: 'PostController', action: 'store' } }],
+      {
+        routes: [{ method: 'POST', path: '/posts', controller: nameOnly }],
+        warnings: [{ code: 'controller-import', message: 'app/Http/Controllers/PostController.ts could not be imported: boom' }],
+      } as never,
+      new Set(['PostController']),
+    )
+    expect(definition?.controller as ControllerTarget | undefined).toEqual({ ...nameOnly, unimported: ['app/Http/Controllers/PostController.ts'], inRouteSource: true })
   })
 })
 

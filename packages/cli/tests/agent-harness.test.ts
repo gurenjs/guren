@@ -118,6 +118,29 @@ describe('installAgentHarness', () => {
     expect(result.unchanged).not.toContain('.claude/rules/orm-models.md')
   })
 
+  it('sync replaces a rule scoped with the `globs` key Claude Code ignores', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['claude', 'codex'] })
+    const rules = ['.agents/rules/testing.md', '.claude/rules/testing.md']
+    for (const rule of rules) {
+      const current = await readFile(join(tempDir, rule), 'utf8')
+      expect(current.startsWith('---\npaths:\n')).toBe(true)
+      await writeFile(
+        join(tempDir, rule),
+        current.replace('---\npaths:\n', '---\ndescription: Guren testing\nglobs:\n'),
+        'utf8',
+      )
+    }
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
+
+    expect(result.replaced).toEqual(rules)
+    for (const rule of rules) {
+      const synced = await readFile(join(tempDir, rule), 'utf8')
+      expect(synced.startsWith('---\npaths:\n')).toBe(true)
+      expect(synced).not.toContain('globs:')
+    }
+  })
+
   it('sync recreating a deleted managed file is a write, not a replacement', async () => {
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
     await rm(join(tempDir, '.claude/rules/orm-models.md'))
@@ -267,7 +290,7 @@ describe('installAgentHarness', () => {
     expect(result.written).toContain('.cursor/hooks/gate-on-stop.ts')
 
     const rule = await readFile(join(tempDir, '.cursor/rules/guren-testing.mdc'), 'utf8')
-    expect(rule).toContain('globs: tests/**')
+    expect(rule).toContain('globs: "tests/**,modules/*/tests/**"')
     expect(rule).toContain('alwaysApply: false')
     expect(rule).toContain('TestApp')
   })
@@ -282,7 +305,7 @@ describe('installAgentHarness', () => {
       join(tempDir, '.github/instructions/guren-orm-models.instructions.md'),
       'utf8',
     )
-    expect(rule).toContain('applyTo: "app/Models/**,db/**"')
+    expect(rule).toContain('applyTo: "app/Models/**,db/**,modules/*/app/Models/**,modules/*/db/**"')
     expect(rule).toContain('defineModel')
   })
 

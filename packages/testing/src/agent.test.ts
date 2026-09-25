@@ -4,7 +4,7 @@ process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { Controller, createApp, Router } from '@guren/core'
+import { Controller, createApp, createForceHttpsMiddleware, requireAuthenticated, Router } from '@guren/core'
 import { TestApp } from './test-app'
 
 /**
@@ -137,6 +137,26 @@ describe('TestApp.agent()', () => {
     expect(result.status).toBe(401)
   })
 
+  it('reports a login redirect from requireAuthenticated as a 401 error result', async () => {
+    // A GET route, so CSRF cannot answer 403 first and let assertDenied() pass
+    // on the wrong refusal.
+    const app = await TestApp.create({
+      routes: (router: Router) => {
+        router.middleware(requireAuthenticated({ redirectTo: '/login' })).group((auth) => {
+          auth.get('/dashboard', () => Response.json({ ok: true })).name('dashboard.show').agent({})
+        })
+      },
+    })
+
+    const result = await app.agent().call('dashboard.show')
+
+    expect(result.status).toBe(401)
+    expect(result.isError).toBe(true)
+    expect(() => result.assertOk()).toThrow()
+
+    await app.agent().call('dashboard.show', {}, { as: { id: 1 } }).assertOk()
+  })
+
   it('answers a preflight with a verdict, leaving the handler unrun', async () => {
     const app = await freshApp()
 
@@ -185,6 +205,21 @@ describe('TestApp.agent()', () => {
     // and "this app exposes no tools" are different answers.
     await expect(bare.agent().call('posts.index')).rejects.toThrow(/TestApp\.create\(\{ routes \}\) or/)
     await expect(bare.agent().tools()).rejects.toThrow('no route registry')
+  })
+
+  it('reaches the route in an app that forces https, the user header included', async () => {
+    created.length = 0
+    const application = createApp({ routes })
+    application.use('*', createForceHttpsMiddleware())
+    const app = await TestApp.fromApp(application)
+
+    // The TestApp's own requests are plain HTTP, so a plain GET is redirected;
+    // the tool call is the object the dispatcher built, and is not.
+    await app.get('/posts').assertStatus(301)
+    await app.agent().call('posts.index').assertOk()
+    await app.agent().call('posts.store', { title: 'Forced' }, { as: { id: 3 } }).assertOk()
+
+    expect(created).toEqual([{ title: 'Forced', author: 3 }])
   })
 
   it('builds the request on the app\'s own baseUrl, not the dispatch default', async () => {

@@ -1,4 +1,4 @@
-import { relative } from 'node:path'
+import { relative, resolve, sep } from 'node:path'
 import type {
   BlockStatement,
   ClassDeclaration,
@@ -6,12 +6,18 @@ import type {
   ClassProperty,
   Expression,
   File,
+  Statement,
 } from '@babel/types'
-import { classNameFromPath, discoverControllerFiles } from './discovery'
+import type { AppManifest, ControllerRef, RouteEntry } from '@guren/server'
+import { classNameFromPath, discoverControllerFiles, toPosixRelative } from './discovery'
 import { extractClassDeclaration } from './model-parser'
 import { ParseCache } from './parse-cache'
 import { memberKeyName, walk } from './ast-walk'
-import { escapeRegExp } from './utils'
+import { controllerImportFailures } from './introspect-controller-file'
+import { introspectedRoutes, type IntrospectSource } from './manifest-section'
+import { joinRouteDefinitions, type JoinableRoute } from './app-routes'
+import { specifierName } from './route-registrar'
+import { wholeIdentifierPattern } from './utils'
 
 /**
  * Controller action bodies, extracted once and judged by regex afterwards. Lives
@@ -27,6 +33,13 @@ export interface ControllerMethodInfo {
   rawBody: string
   /** Controller file, relative to the project root. */
   filePath: string
+  /** 1-based line of the member's declaration. */
+  line: number
+  /**
+   * The comments written above the member, JSDoc included, as Babel attaches
+   * them; where an action-level `// guren-audit-ignore` is read from.
+   */
+  leadingComments: string[]
 }
 
 /**
@@ -39,9 +52,28 @@ export interface ControllerNameCollision {
   currentFile: string
 }
 
+/** One controller class as a file declares it, same-named classes in other files included. */
+export interface ControllerDeclaration {
+  className: string
+  /** POSIX-relative to the project root, the form a manifest `ControllerRef.file` takes. */
+  file: string
+  /** Every name the file exports the class under: its own, `default`, an `export { X as Y }` alias. */
+  exportNames: string[]
+  /** Action name → body. */
+  methods: Map<string, ControllerMethodInfo>
+}
+
 export interface ControllerMethodScan {
   /** `ClassName.method` → body. Last file scanned wins on a collision. */
   methods: Map<string, ControllerMethodInfo>
+  /**
+   * `file#export` → the class (RFC 0026 §5), one entry per export name: what a route whose
+   * `ControllerRef` resolved by identity is judged against, so no collision can reach it.
+   */
+  byExport: Map<string, ControllerDeclaration>
+  /** Every class every controller file declares, in scan order; `methods` keeps only the last of a name. */
+  declarations: ControllerDeclaration[]
+  /** Every same-named pair. A consumer reports only those a route reached by name ({@link collisionsReachedByName}). */
   collisions: ControllerNameCollision[]
   /**
    * Controller files that could not be read at all. Their actions are absent
@@ -61,6 +93,8 @@ export interface ControllerMethodScan {
  */
 export const EMPTY_CONTROLLER_SCAN: ControllerMethodScan = {
   methods: new Map(),
+  byExport: new Map(),
+  declarations: [],
   collisions: [],
   unreadableFiles: [],
   unparsedFiles: [],
@@ -183,13 +217,21 @@ export const AUTH_CALL_PATTERN = new RegExp(
  */
 export const AUTHORIZE_CALL_PATTERN = controllerMemberCall('authorize')
 
+/**
+ * An authorization decision the action shows: `this.authorize(...)` throws and
+ * `this.can(...)` answers, and either proves the policy was consulted. Wider
+ * than {@link AUTHORIZE_CALL_PATTERN} on purpose: the audit's policy rule asks
+ * whether authorization was *considered*, the agent-route rule whether it is *enforced*.
+ */
+export const AUTHORIZATION_CALL_PATTERN = controllerMemberCall('authorize', 'can')
+
 /** An Inertia page response, which carries no JSON schema an agent could read. */
 export const INERTIA_CALL_PATTERN = controllerMemberCall('inertia')
 
 /** `this.auth.<method><…typeName…>(`: a record type passed as a type argument of an auth call. */
 export function authTypeArgumentPattern(typeName: string): RegExp {
   const member: ControllerMemberName = 'auth'
-  const name = `(?<![\\w$.])${escapeRegExp(typeName)}(?![\\w$])`
+  const name = wholeIdentifierPattern(typeName).source
   return new RegExp(`\\bthis\\s*\\.\\s*${member}\\s*\\.\\s*\\w+\\s*<[^()]*${name}[^()]*>\\s*\\(`)
 }
 
@@ -298,6 +340,8 @@ export async function parseControllerMethods(
   cache?: ParseCache,
 ): Promise<ControllerMethodScan> {
   const methods = new Map<string, ControllerMethodInfo>()
+  const byExport = new Map<string, ControllerDeclaration>()
+  const declarations: ControllerDeclaration[] = []
   const collisions: ControllerNameCollision[] = []
   const unreadableFiles: string[] = []
   const unparsedFiles: string[] = []
@@ -310,6 +354,7 @@ export async function parseControllerMethods(
 
   for (const filePath of controllerFiles) {
     const relPath = relative(cwd, filePath)
+    const posixPath = toPosixRelative(cwd, filePath)
     const outcome = await parseCache.read(filePath)
 
     if (outcome.status === 'unreadable') {
@@ -323,6 +368,7 @@ export async function parseControllerMethods(
 
     const { source, ast } = outcome
     const scrubbed = blankCommentsAndStrings(source, ast)
+    const exportNamesOf = classExportNames(ast.program.body)
 
     for (const node of ast.program.body) {
       const classDecl = extractClassDeclaration(node)
@@ -335,17 +381,197 @@ export async function parseControllerMethods(
       }
       classFiles.set(className, relPath)
 
-      for (const { name, body } of classActionMembers(classDecl)) {
-        methods.set(`${className}.${name}`, {
+      const exportNames = exportNamesOf(node, classDecl)
+      const declaration: ControllerDeclaration = { className, file: posixPath, exportNames, methods: new Map() }
+      declarations.push(declaration)
+      for (const exportName of exportNames) byExport.set(`${posixPath}#${exportName}`, declaration)
+
+      for (const { member, name, body } of classActionMembers(classDecl)) {
+        const info: ControllerMethodInfo = {
           body: scrubbed.slice(body.start ?? 0, body.end ?? 0),
           rawBody: source.slice(body.start ?? 0, body.end ?? 0),
           filePath: relPath,
-        })
+          line: member.loc?.start.line ?? 1,
+          leadingComments: (member.leadingComments ?? []).map((comment) => comment.value.trim()),
+        }
+        declaration.methods.set(name, info)
+        methods.set(`${className}.${name}`, info)
       }
     }
   }
 
-  return { methods, collisions, unreadableFiles, unparsedFiles, classFiles }
+  return { methods, byExport, declarations, collisions, unreadableFiles, unparsedFiles, classFiles }
+}
+
+/**
+ * The names a file exports each of its classes under, read the way the introspection
+ * child sees them (`Object.entries` of the module): `export class X`, `export default
+ * class`, `export default X` and `export { X as Y }`. A re-export from another file
+ * names that file's class and is left out.
+ */
+function classExportNames(body: Statement[]): (node: Statement, classDecl: ClassDeclaration) => string[] {
+  const aliases = new Map<string, string[]>()
+  const add = (local: string, exported: string): void => {
+    aliases.set(local, [...(aliases.get(local) ?? []), exported])
+  }
+  for (const node of body) {
+    if (node.type === 'ExportDefaultDeclaration' && node.declaration.type === 'Identifier') {
+      add(node.declaration.name, 'default')
+    }
+    // A type-only export (`export type { X }`, `export { type X }`) exports no runtime class.
+    if (node.type !== 'ExportNamedDeclaration' || node.source || node.exportKind === 'type') continue
+    for (const specifier of node.specifiers) {
+      if (specifier.type !== 'ExportSpecifier' || specifier.exportKind === 'type') continue
+      add(specifier.local.name, specifierName(specifier.exported))
+    }
+  }
+
+  return (node, classDecl) => {
+    const names = classDecl.id ? [...(aliases.get(classDecl.id.name) ?? [])] : []
+    if (node.type === 'ExportDefaultDeclaration') names.push('default')
+    else if (node.type === 'ExportNamedDeclaration' && classDecl.id) names.push(classDecl.id.name)
+    return [...new Set(names)]
+  }
+}
+
+/**
+ * What a route names its action by: a registered definition's `{ name, action }`,
+ * or a manifest `ControllerRef`, which may also carry the class's file and export.
+ */
+export type ControllerTarget = { name: string; action: string } & Partial<Pick<ControllerRef, 'file' | 'exportName' | 'resolved'>> & {
+  /**
+   * On a manifest's reference only: the controller files the introspection child could not
+   * import (`controller-import`), where a class it left `name-only` may still be declared.
+   */
+  unimported?: readonly string[]
+  /** On a manifest's `name-only` reference only: the routes file or the app entry declares a class of this name. */
+  inRouteSource?: boolean
+}
+
+export interface ControllerMethodLookup {
+  info: ControllerMethodInfo | undefined
+  /**
+   * `identity` when the body was found through the class's file and export, so no
+   * same-named class can stand in for it; `elsewhere` when the manifest shows the routed
+   * class is none of the scanned declarations of its name, so it has no body here;
+   * `name` when only the class name was followed, which a collision makes unreliable.
+   */
+  by: 'identity' | 'elsewhere' | 'name'
+  /** The class as the scan names it: an anonymous default export by its file, not as `default`. */
+  className: string
+}
+
+/**
+ * The one lookup of a route's action body (RFC 0026 §5): an `identity` reference reads its own file,
+ * one the scan cannot place (a re-export the child picked) follows the name. A `name-only` one is no
+ * export of a controller file the app loaded: it is `elsewhere` (no body) when the routes file or the
+ * entry declares its name, else read from an unexported same-named declaration or one in a file whose
+ * import failed, else `elsewhere`.
+ */
+export function controllerMethodFor(scan: ControllerMethodScan, controller: ControllerTarget): ControllerMethodLookup {
+  const { file, exportName, unimported } = controller
+  if (controller.resolved === 'identity' && file && exportName) {
+    // A placed class without the action (inherited, or missing) has no body, nor does one whose
+    // file would not read or parse: another class's body is no answer either way.
+    const declaration = scan.byExport.get(`${file}#${exportName}`)
+    if (declaration) return { info: declaration.methods.get(controller.action), by: 'identity', className: declaration.className }
+    if ([...scan.unreadableFiles, ...scan.unparsedFiles].some((skipped) => skipped.split(sep).join('/') === file)) {
+      return { info: undefined, by: 'identity', className: controller.name }
+    }
+  }
+  if (controller.resolved === 'name-only' && unimported) {
+    const sameName = scan.declarations.filter((declaration) => declaration.className === controller.name)
+    if (controller.inRouteSource && sameName.length > 0) return { info: undefined, by: 'elsewhere', className: controller.name }
+    const candidate = sameName.filter((declaration) =>
+      declaration.exportNames.length === 0 || unimported.includes(declaration.file)).at(-1)
+    if (candidate) return { info: candidate.methods.get(controller.action), by: 'name', className: controller.name }
+    if (sameName.length > 0) return { info: undefined, by: 'elsewhere', className: controller.name }
+  }
+  return { info: scan.methods.get(`${controller.name}.${controller.action}`), by: 'name', className: controller.name }
+}
+
+/**
+ * The manifest's routes with each controller as the lookup takes it: a `name-only` reference
+ * carries the files the child could not import, where its class may still be declared.
+ */
+export function manifestRouteTargets(
+  manifest: Pick<AppManifest, 'routes' | 'warnings'>,
+  routeSourceClasses: ReadonlySet<string> = new Set(),
+): Array<RouteEntry & { controller?: ControllerTarget }> {
+  const unimported = controllerImportFailures(manifest)
+  return manifest.routes.map((route) => route.controller?.resolved === 'name-only'
+    ? { ...route, controller: { ...route.controller, unimported, inRouteSource: routeSourceClasses.has(route.controller.name) } }
+    : route)
+}
+
+/**
+ * Class names the routes file and the app entry declare, anywhere in the file: a routed class
+ * declared there is the likelier one when a controller file declares the same name unexported.
+ * An unreadable file contributes none.
+ */
+export async function routeSourceClasses(
+  cwd: string,
+  manifest: Pick<AppManifest, 'entry'>,
+  routesFile: string,
+  cache: ParseCache = new ParseCache(),
+): Promise<Set<string>> {
+  const names = new Set<string>()
+  for (const file of [routesFile, manifest.entry.file]) {
+    if (!file) continue
+    const outcome = await cache.read(resolve(cwd, file))
+    if (outcome.status !== 'parsed') continue
+    walk(outcome.ast.program, (node) => {
+      const id = node.type === 'ClassDeclaration' ? (node as { id?: { name: string } | null }).id : null
+      if (id) names.add(id.name)
+    })
+  }
+  return names
+}
+
+/** The collisions a verdict could have read through: those on a class some route reached by its name alone. */
+export function collisionsReachedByName(
+  scan: ControllerMethodScan,
+  controllers: Iterable<ControllerTarget>,
+): ControllerNameCollision[] {
+  if (scan.collisions.length === 0) return []
+  const byName = new Set<string>()
+  for (const controller of controllers) {
+    if (controllerMethodFor(scan, controller).by === 'name') byName.add(controller.name)
+  }
+  return scan.collisions.filter((collision) => byName.has(collision.className))
+}
+
+/**
+ * Registered definitions with each controller replaced by the manifest's reference for the same
+ * route, joined as `joinRouteDefinitions()` joins them (module, method, path, name and action; a
+ * key the two sides count differently keeps its name-only controller).
+ */
+export function attachControllerRefs<T extends JoinableRoute>(
+  definitions: T[],
+  manifest: Pick<AppManifest, 'routes' | 'warnings'>,
+  routeSources?: ReadonlySet<string>,
+): T[] {
+  const joined = joinRouteDefinitions(definitions, manifestRouteTargets(manifest, routeSources))
+  return definitions.map((definition, index) => {
+    const ref = definition.controller && joined[index]?.controller
+    return ref ? { ...definition, controller: ref } : definition
+  })
+}
+
+/**
+ * Registered definitions with the manifest's references attached: the one bridge for consumers
+ * that still judge the routes file's definitions. Routes without a controller have nothing to attach.
+ */
+export async function withManifestControllerRefs<T extends JoinableRoute>(
+  definitions: T[],
+  introspect: IntrospectSource | undefined,
+  source: { cwd: string; routesFile: string },
+): Promise<T[]> {
+  if (!definitions.some((definition) => definition.controller)) return definitions
+  const introspected = await introspectedRoutes(introspect)
+  if (introspected.status !== 'described') return definitions
+  const { manifest } = introspected
+  return attachControllerRefs(definitions, manifest, await routeSourceClasses(source.cwd, manifest, source.routesFile))
 }
 
 /**

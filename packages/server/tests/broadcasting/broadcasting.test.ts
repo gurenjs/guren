@@ -859,6 +859,27 @@ describe('BroadcastManager', () => {
       expect(received).toHaveLength(1)
       expect(received[0].event).toBe('Before')
     })
+
+    it('should close websocket clients and release their driver subscriptions on disconnectAll', () => {
+      const driver = manager.driver() as MemoryDriver
+      const closed: string[] = []
+      const first = manager.registerWebSocketClient({ send: () => {}, close: () => closed.push('first') })
+      const second = manager.registerWebSocketClient({
+        send: () => {},
+        close: () => {
+          closed.push('second')
+          throw new Error('socket already gone')
+        },
+      })
+      manager.subscribeWebSocketClient(first, 'ws.a')
+      manager.subscribeWebSocketClient(second, 'ws.b')
+
+      manager.disconnectAll()
+
+      expect(closed.sort()).toEqual(['first', 'second'])
+      expect(manager.getWebSocketClients()).toEqual([])
+      expect(driver.getChannels()).toEqual([])
+    })
   })
 })
 

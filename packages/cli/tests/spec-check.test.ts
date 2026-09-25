@@ -78,6 +78,23 @@ export class Post extends defineModel(posts) {}
 
     expect(er?.status).toBe('fail')
     expect(er?.suggestion).toContain('spec:generate')
+    expect(er?.fix).toEqual({ kind: 'command', args: ['spec:generate'] })
+  })
+
+  it('names the routes file the views were derived from in the fix', async () => {
+    await rm(join(workspace.dir, 'docs/spec/er.md'))
+
+    const results = await runSpecCheck({ cwd: workspace.dir, routesFile: 'routes/api.ts' })
+    const er = results.find((r) => r.key === 'spec-drift:er.md')
+
+    expect(er?.fix).toEqual({ kind: 'command', args: ['spec:generate', '--routes', 'routes/api.ts'] })
+    expect(er?.suggestion).toBe('Run: bunx guren spec:generate --routes routes/api.ts')
+  })
+
+  it('carries no fix on a view that matches', async () => {
+    const results = await runSpecCheck({ cwd: workspace.dir })
+
+    expect(results.every((r) => r.status === 'pass' && r.fix === undefined)).toBe(true)
   })
 
   it('fails when a committed view is missing', async () => {

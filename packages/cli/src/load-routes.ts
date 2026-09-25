@@ -2,7 +2,8 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { Router, mountModuleRoutes, type GurenModule, type RouteDefinition } from '@guren/server'
-import { isDefinitelyAbsent, listModuleNames } from './discovery'
+import { isDefinitelyAbsent, listModuleNames, toPosixRelative } from './discovery'
+import { moduleEntryFile } from './import-resolution'
 import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, routesEntryOrDefault } from './route-registrar'
 
 type RouteRegistrar = (router: Router) => void | Promise<void>
@@ -97,19 +98,24 @@ const ROUTES_MISSING_CONSEQUENCE =
  * than scroll past in a console log.
  */
 async function loadGurenModule(appRoot: string, moduleName: string, warnings?: string[]): Promise<GurenModule | undefined> {
-  const indexPath = resolve(appRoot, 'modules', moduleName, 'index.ts')
-
   const warn = (message: string): void => {
     consola.warn(message)
     warnings?.push(message)
   }
 
+  const entryPath = await moduleEntryFile(resolve(appRoot, 'modules', moduleName))
+  if (entryPath === null) {
+    warn(`modules/${moduleName} has no entry file (index or package.json main) — ${ROUTES_MISSING_CONSEQUENCE}.`)
+    return undefined
+  }
+  const entry = toPosixRelative(appRoot, entryPath)
+
   let moduleExports: Record<string, unknown>
   try {
-    moduleExports = await import(importUrl(indexPath)) as Record<string, unknown>
+    moduleExports = await import(importUrl(entryPath)) as Record<string, unknown>
   } catch (error) {
     warn(
-      `Could not import modules/${moduleName}/index.ts — ${ROUTES_MISSING_CONSEQUENCE}: `
+      `Could not import ${entry} — ${ROUTES_MISSING_CONSEQUENCE}: `
       + `${error instanceof Error ? error.message : String(error)}`,
     )
     return undefined
@@ -118,7 +124,7 @@ async function loadGurenModule(appRoot: string, moduleName: string, warnings?: s
   const gurenModule = resolveGurenModule(moduleExports)
   if (!gurenModule) {
     warn(
-      `modules/${moduleName}/index.ts doesn't export a defineModule() result — ${ROUTES_MISSING_CONSEQUENCE}.`,
+      `${entry} doesn't export a defineModule() result — ${ROUTES_MISSING_CONSEQUENCE}.`,
     )
   }
 
@@ -126,11 +132,11 @@ async function loadGurenModule(appRoot: string, moduleName: string, warnings?: s
 }
 
 /**
- * Every app route, module routes mounted through the shared `mountModuleRoutes()`
- * so static analyses see exactly what will serve. `appRoot` is required since
- * `--routes <file>` may point anywhere. Discovery is a directory scan (like
- * `check --arch`), so a module never passed to `createApp()` shows up here without
- * mounting. `moduleProvenance` gets one entry per definition, in order: module name or `null`.
+ * Every app route, module routes mounted through the shared `mountModuleRoutes()` (each carrying
+ * its `defineModule()` name as `module`) so static analyses see exactly what will serve. `appRoot`
+ * is required since `--routes <file>` may point anywhere. Discovery is a directory scan, so a module
+ * never passed to `createApp()` shows up here without mounting. `moduleProvenance` gets one entry
+ * per definition: its directory under `modules/` (not its `defineModule()` name), or `null`.
  */
 export async function loadRouteDefinitions(
   routesFile: string,
@@ -148,23 +154,37 @@ export async function loadRouteDefinitions(
   }
 
   const router = new Router()
+  // `routeCount` is absent from a `@guren/server` older than 2.27.0, which the CLI's range admits.
+  const countRoutes = (): number => (router as { routeCount?: number }).routeCount ?? router.definitions().length
   await registrar(router)
-  let definitionCount = router.definitions().length
+  let definitionCount = countRoutes()
   moduleProvenance?.push(...Array.from({ length: definitionCount }, () => null))
+  const moduleNames: Array<string | null> = Array.from({ length: definitionCount }, () => null)
 
-  const moduleNames = await listModuleNames(appRoot)
-
-  for (const moduleName of moduleNames) {
-    const gurenModule = await loadGurenModule(appRoot, moduleName, moduleWarnings)
+  for (const directory of await listModuleNames(appRoot)) {
+    const gurenModule = await loadGurenModule(appRoot, directory, moduleWarnings)
     if (gurenModule) {
       await mountModuleRoutes(router, gurenModule)
-      const mounted = router.definitions().length
-      moduleProvenance?.push(...Array.from({ length: mounted - definitionCount }, () => moduleName))
+      const mounted = countRoutes()
+      moduleProvenance?.push(...Array.from({ length: mounted - definitionCount }, () => directory))
+      moduleNames.push(...Array.from({ length: mounted - definitionCount }, () => gurenModule.name))
       definitionCount = mounted
     }
   }
 
-  return router.definitions()
+  return withModuleNames(router.definitions(), moduleNames)
+}
+
+/**
+ * A `@guren/server` older than 2.27.0 (the CLI's range admits one) mounts module routes without
+ * naming the module on them, so a definition lacking `module` takes its entry in `names`, the
+ * module each route was mounted by. Removable once the CLI's `@guren/server` floor is 2.27.0.
+ */
+export function withModuleNames(definitions: RouteDefinition[], names: ReadonlyArray<string | null>): RouteDefinition[] {
+  return definitions.map((definition, index) => {
+    const name = names[index]
+    return definition.module === undefined && name ? { ...definition, module: name } : definition
+  })
 }
 
 /**

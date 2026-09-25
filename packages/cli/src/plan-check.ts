@@ -1,8 +1,9 @@
 /**
- * `guren check --plan` (RFC 0030 §8): approved plans with `drifted` elements, and two open
- * plans that change the same application target. Advisory throughout, so it never sets an
- * exit code, and it runs only under `--plan`: judging a plan imports `db/schema.ts` and every
- * validator file, which plain `check` never does. An app with no plan file reads nothing else.
+ * `guren check --plan` (RFC 0030 §8): approved plans with `drifted` elements or a command the
+ * allowlist refuses, and two open plans that change the same application target. Advisory
+ * throughout, so it never sets an exit code, and it runs only under `--plan`: judging a plan
+ * imports `db/schema.ts` and every validator file, which plain `check` never does. An app with
+ * no plan file reads nothing else.
  */
 
 import type { Dirent } from 'node:fs'
@@ -13,7 +14,7 @@ import type { CheckResult } from './check-result'
 import { toPosixRelative } from './discovery'
 import type { PlanAppState } from './plan/app-state'
 import type { PlanAppTarget } from './plan/app-targets'
-import type { planSiblingPath } from './plan/beside'
+import { isPlanRevisionsDirName, type planSiblingPath } from './plan/beside'
 import type { Plan } from './plan/schema'
 
 /** Where plans are found: `docs/plans/**` (the §9 layout and `<slug>.plan.json`) and the app root's own `*.plan.json`. */
@@ -40,7 +41,7 @@ export interface PlanDiscovery {
   unreadable: Array<{ dir: string; reason: string }>
 }
 
-/** `revisions/` is skipped: it holds a plan's revision documents (§9), not plans. */
+/** A revisions directory (`revisions/`, `<slug>.revisions/`) is skipped: it holds a plan's revision records (§9), not plans. */
 export async function discoverPlanFiles(appRoot: string): Promise<PlanDiscovery> {
   const discovery: PlanDiscovery = { files: [], unreadable: [] }
   const entries = async (dir: string): Promise<Dirent[]> => {
@@ -59,7 +60,7 @@ export async function discoverPlanFiles(appRoot: string): Promise<PlanDiscovery>
   const walk = async (dir: string): Promise<void> => {
     for (const entry of await entries(dir)) {
       if (entry.isDirectory()) {
-        if (entry.name !== 'revisions') await walk(join(dir, entry.name))
+        if (!isPlanRevisionsDirName(entry.name)) await walk(join(dir, entry.name))
       } else if (entry.isFile() && isPlanFileName(entry.name)) {
         discovery.files.push(join(dir, entry.name))
       }
@@ -71,7 +72,7 @@ export async function discoverPlanFiles(appRoot: string): Promise<PlanDiscovery>
 }
 
 async function loadModules() {
-  const [render, approvals, state, closeDocs, targets, status, appState] = await Promise.all([
+  const [render, approvals, state, closeDocs, targets, status, appState, allowlist] = await Promise.all([
     import('./plan-render'),
     import('./plan/approvals'),
     import('./plan/state'),
@@ -79,6 +80,7 @@ async function loadModules() {
     import('./plan/app-targets'),
     import('./plan-status'),
     import('./plan/app-state'),
+    import('./plan/command-allowlist'),
   ])
   return {
     readPlanFile: render.readPlanFile,
@@ -90,6 +92,7 @@ async function loadModules() {
     listPlanAppTargets: targets.listPlanAppTargets,
     planStatusFile: status.planStatusFile,
     loadPlanAppState: appState.loadPlanAppState,
+    refusedPlanCommands: allowlist.refusedPlanCommands,
   }
 }
 
@@ -291,6 +294,20 @@ export async function checkPlans(options: PlanCheckOptions): Promise<CheckResult
   }
 
   if (open.length === 0) return results
+  // An approval that predates the allowlist never ran it, and plan:next refuses such a plan.
+  for (const plan of open) {
+    for (const { id, quoted, reason } of m.refusedPlanCommands(plan.plan.commands)) {
+      results.push({
+        key: `plan:command:${plan.file}:${id}`,
+        title: 'Approved plan carries a refused command',
+        status: 'warn',
+        message: `${plan.file}: ${id} (${quoted}) is refused: ${reason}. plan:next hands out no step of this plan while it stays.`,
+        suggestion: `Replace or remove the command, then run guren plan:approve ${plan.file} again.`,
+        filePath: plan.file,
+        advisory: true,
+      })
+    }
+  }
   let app: Promise<PlanAppState> | undefined
   const loadApp = (): Promise<PlanAppState> => (app ??= m.loadPlanAppState(appRoot, { detail: true, routesFile: options.routesFile }))
   for (const plan of open) {

@@ -219,14 +219,16 @@ While it works, watch for the harness lever of this chapter. The agent's context
 
 ```markdown
 ---
-description: Guren routing & codegen — RouteContractOptions, schema binding, the Zod→ApiRoutes matrix, middleware
-globs:
+paths:
   - "routes/**"
   - "app/Http/Validators/**"
+  - "modules/*/routes.ts"
+  - "modules/*/routes/**"
+  - "modules/*/app/Http/Validators/**"
 ---
 ```
 
-The `globs` line is the point: the rule is loaded when the agent edits a file under `routes/`, and not before. `controllers-http.md` does the same for `app/Http/**`. So when the agent opens `routes/web.ts`, it is handed the exact shape of `router.get(...)`, the options object, and `.name()`, verified against this version of the framework, at the moment it needs them. It cannot invent a route API from memory because the real one is in front of it. And when it saves the file, the `PostToolUse` hook runs `guren check`, which would report a route pointing at a controller method that does not exist.
+The `paths` list is the point: the rule is loaded when the agent works on a file under `routes/` (or a module's routes), and not before. `controllers-http.md` does the same for `app/Http/**`. So when the agent opens `routes/web.ts`, it is handed the exact shape of `router.get(...)`, the options object, and `.name()`, verified against this version of the framework, at the moment it needs them. It cannot invent a route API from memory because the real one is in front of it. And when it saves the file, the `PostToolUse` hook runs `guren check`, which would report a route pointing at a controller method that does not exist.
 
 **No agent handy?** Three files. (An agent may well start with `bunx guren make:controller Contact`, which writes a controller skeleton that already renders `pages.contact.Index`; chapter 3 is about that habit.)
 

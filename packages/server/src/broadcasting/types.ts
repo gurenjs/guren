@@ -1,3 +1,5 @@
+import type { WebSocketOriginOptions } from '../http/middleware/websocket-origin'
+
 export interface BroadcastEvent {
   channel: string
   event: string
@@ -83,12 +85,24 @@ export interface SSEMiddlewareOptions {
 
   /**
    * Resolves the user from the request context, which authorizes channels
-   * requested via the `?channels=` query parameter.
+   * requested via the `?channels=` query parameter. Defaults to the session
+   * user, from the auth context under `AUTH_CONTEXT_KEY`.
+   */
+  getUser?: (ctx: unknown) => unknown | Promise<unknown>
+}
+
+/** `allowedOrigins` is the `createWebSocketOriginGuard()` option; any other browser `Origin` gets 403. */
+export interface WebSocketMiddlewareOptions extends WebSocketOriginOptions {
+  /**
+   * Resolves the user from the upgrade request. That one user authorizes the
+   * `?channels=` query and every `subscribe` message for the socket's lifetime.
+   * Defaults to the session user from the auth context.
    */
   getUser?: (ctx: unknown) => unknown | Promise<unknown>
 }
 
 export interface AuthMiddlewareOptions {
+  /** Resolves the requesting user. Defaults to the session user from the auth context. */
   getUser?: (ctx: unknown) => unknown | Promise<unknown>
 }
 

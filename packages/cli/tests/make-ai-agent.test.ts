@@ -7,6 +7,7 @@ import {
   checkTypes,
   createTempWorkspace,
   linkWorkspaceCore,
+  snapshotTree,
   templateCompilerOptions,
   writeWorkspaceFiles,
   type TempWorkspace,
@@ -138,6 +139,44 @@ describe('guren make:ai-agent', () => {
 
     expect(files).toEqual([resolve('elsewhere/app/Ai/Agents/Triager.ts'), resolve('elsewhere/tests/Ai/Triager.test.ts')])
     expect(await readFile(resolve('elsewhere/tests/Ai/Triager.test.ts'), 'utf8')).toContain("from 'vitest'")
+  })
+
+  it.each<{ name: string; seed: string[]; message: string[] }>([
+    {
+      name: 'the test --test adds',
+      seed: ['tests/Ai/Triager.test.ts'],
+      message: [
+        'Scaffolding Triager would overwrite a file that already exists:',
+        '  tests/Ai/Triager.test.ts (--test)',
+        'Nothing was scaffolded. Drop --test, pick another name, or pass --force to overwrite it.',
+      ],
+    },
+    {
+      name: 'the agent and its test',
+      seed: ['app/Ai/Agents/Triager.ts', 'tests/Ai/Triager.test.ts'],
+      message: [
+        'Scaffolding Triager would overwrite 2 files that already exist:',
+        '  app/Ai/Agents/Triager.ts',
+        '  tests/Ai/Triager.test.ts (--test)',
+        'Nothing was scaffolded. Pick another name, or pass --force to overwrite them.',
+      ],
+    },
+  ])('refuses over $name and writes neither file', async ({ seed, message }) => {
+    await writeWorkspaceFiles(process.cwd(), Object.fromEntries(seed.map((path) => [path, '// mine\n'])))
+    const before = await snapshotTree(workspace.dir)
+
+    await expect(makeAiAgent('Triager', { test: true })).rejects.toThrow(message.join('\n'))
+    expect(await snapshotTree(workspace.dir)).toEqual(before)
+  })
+
+  it('overwrites the agent and its test under --force', async () => {
+    await writeWorkspaceFiles(process.cwd(), { 'app/Ai/Agents/Triager.ts': '// mine\n', 'tests/Ai/Triager.test.ts': '// mine\n' })
+    const overwritten: string[] = []
+
+    const { files } = await makeAiAgent('Triager', { test: true, force: true, overwritten })
+
+    expect(overwritten).toEqual(files)
+    expect(await readFile(resolve('app/Ai/Agents/Triager.ts'), 'utf8')).toContain('export class Triager extends Agent {')
   })
 
   it('writes the test for the runner the app uses', async () => {

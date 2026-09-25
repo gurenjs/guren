@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
-import { assertCwdUnsupported, kebabCase, writeScaffoldFiles, type WriterOptions } from './utils'
+import { assertCwdUnsupported, kebabCase, writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
 
 export type DeployTarget = 'docker' | 'fly' | 'railway' | 'all'
 
@@ -143,12 +143,10 @@ function railwayJsonTemplate(): string {
 `
 }
 
-type DeployFile = { path: string; contents: string }
-
-function filesForTarget(target: DeployTarget, appName: string, port: number): DeployFile[] {
-  const dockerFile: DeployFile = { path: 'Dockerfile', contents: dockerfileTemplate(port) }
-  const flyFile: DeployFile = { path: 'fly.toml', contents: flyTomlTemplate(appName, port) }
-  const railwayFile: DeployFile = { path: 'railway.json', contents: railwayJsonTemplate() }
+function filesForTarget(target: DeployTarget, appName: string, port: number): ScaffoldFileEntry[] {
+  const dockerFile: ScaffoldFileEntry = { path: 'Dockerfile', contents: dockerfileTemplate(port) }
+  const flyFile: ScaffoldFileEntry = { path: 'fly.toml', contents: flyTomlTemplate(appName, port) }
+  const railwayFile: ScaffoldFileEntry = { path: 'railway.json', contents: railwayJsonTemplate() }
   switch (target) {
     case 'docker':
       return [dockerFile]

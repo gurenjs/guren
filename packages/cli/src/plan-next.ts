@@ -21,15 +21,18 @@ import { loadPlanAppState, type PlanAppState } from './plan/app-state'
 import { requirePlanApproval, type PlanApprovedStanding } from './plan/approvals'
 import { planBesideExclusions } from './plan/beside'
 import { describeCloseBlockers, formatCloseBlocker, type CloseBlocker } from './plan/close-remedy'
+import { PLAN_COMMAND_FORM, refusedPlanCommands } from './plan/command-allowlist'
 import { planDecisionsPath, type PlanWaiver } from './plan/decisions'
 import { judgeFreshness } from './plan/freshness'
 import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElementSection } from './plan/schema'
 import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress, type PlanStepContext, type PlanStepContextElement } from './plan/step-context'
 import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
+import { planScaffoldCommandLine, planScaffoldCoverage } from './plan/scaffold'
 import { derivePlanTasks, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
 import { hashFiles, readPlanWaivers, recordDrift, recordStillHolds, type PlanWaiversRead } from './plan/verification'
+import { readStepStart } from './plan/work'
 
 export const PLAN_NEXT_REPORT_VERSION = 1
 
@@ -55,6 +58,8 @@ export interface PlanNextStep extends Pick<PlanDerivedStep, 'id' | 'kind' | 'ver
   unconfirmed?: PlanStepContextElement[]
   /** Set where the step was verified and only these fingerprinted files changed since: it is re-checked, not re-implemented. */
   drifted?: string[]
+  /** A scaffold step's: the command that writes it, the `generates` it writes, and those the `http` step writes by hand. */
+  scaffold?: { command: string; writes: string[]; leaves: string[] }
 }
 
 export interface PlanNextStaleElement extends PlanStepContextElement {
@@ -182,10 +187,22 @@ async function unverifiedElements(
   }
 }
 
+/** The step hands a plan's commands to the implementing agent as written, so one the allowlist refuses stops the whole plan (§8). */
+function refuseDisallowedCommands(path: string, plan: PlanDraft): void {
+  const refused = refusedPlanCommands(plan.commands).map(({ id, quoted, reason }) => `  ${id}: ${quoted} is refused: ${reason}`)
+  if (refused.length === 0) return
+  throw new CliError(
+    `${basename(path)} carries commands the implementing agent would run as written, so no step of it is handed out:\n${refused.join('\n')}\n`
+      + `A plan's commands are ${PLAN_COMMAND_FORM} naming a generator; fix them in the plan (plan:render shows each finding), and approve it again if it was approved.`,
+  )
+}
+
 export async function planNextFile(planPath: string, options: PlanNextFileOptions): Promise<PlanNextReport> {
   const { path, plan } = await readPlanFile(planPath, options.cwd)
   // Before the tree is read or a step marked: an unapproved plan hands out no work, whatever else is wrong.
   const approval = await requirePlanApproval(path, plan, 'no step of it is handed out')
+  // A draft passes the gate above without §2 having run, and an approval may predate the allowlist.
+  refuseDisallowedCommands(path, plan)
   const root = options.appRoot
   const derivation = derivePlanTasks(plan, { apiOnly: await isConfirmedApiOnlyApp(root).catch(() => false) })
   const digest = planDigest(plan)
@@ -274,9 +291,9 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
 
   // The state files are git-ignored before the tree is read, and excluded from the reading for a
   // checkout that tracked them before, so neither an earlier run's write nor the mark makes it
-  // dirty; so is the page `plan:render` writes beside the plan, with its temporaries, which the
-  // plan commands write. The plan and its records are not: a waiver steers which step is returned.
-  // Excluded by pathspec, since porcelain paths are relative to the repository root, not to `root`.
+  // dirty; so is the page `plan:render` writes beside the plan, with its temporaries. The plan and
+  // its records, revisions included, are not: a waiver steers which step is returned. Excluded
+  // by pathspec, since porcelain paths are relative to the repository root, not to `root`.
   await ensurePlanStateIgnored(root)
   const [realRoot, realPlan] = await Promise.all([realpath(root), realpath(path)])
   const dirty =
@@ -305,11 +322,14 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   const behaviours = new Set(step.acceptanceIds)
   // A stall is what the last session ended on: reported once, then the hook is asked again.
   const resumed = previous && previous.step === step.id && !previous.stalled && !answered ? previous : undefined
+  // The step's work is measured from here (plan/work.ts), so marking the same step again keeps where it started.
+  const from = previous?.step === step.id ? previous.from : ((await readStepStart(realRoot)) ?? null)
   const active: PlanActiveStep = resumed ?? {
     plan: toPosixRelative(root, path),
     step: step.id,
     startedAt: (options.now ?? (() => new Date()))().toISOString(),
     continuations: 0,
+    ...(from !== undefined ? { from } : {}),
   }
   await writePlanActiveStep(root, slug, active)
   const unconfirmed = judged.contexts.get(step.id)?.unconfirmed ?? []
@@ -331,8 +351,14 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
       ...stallOf(step.id),
       ...(unconfirmed.length > 0 ? { unconfirmed } : {}),
       ...(drifted.length > 0 ? { drifted } : {}),
+      ...(step.kind === 'scaffold' ? { scaffold: scaffoldOf(plan, step, planPath) } : {}),
     },
   }
+}
+
+function scaffoldOf(plan: PlanDraft, step: PlanDerivedStep, planArgument: string): NonNullable<PlanNextStep['scaffold']> {
+  const { emitted, left } = planScaffoldCoverage(plan, step)
+  return { command: planScaffoldCommandLine(planArgument, step.id), writes: emitted, leaves: left.map((element) => element.id) }
 }
 
 /** A multi-line text under a line that already carries its first line. */
@@ -394,6 +420,17 @@ function heldLines(report: PlanNextReport, planArgument: string): string[] {
   return lines
 }
 
+/** plan:scaffold refuses a draft, so a draft's step names the approval first. */
+function scaffoldLines(step: PlanNextStep, scaffold: NonNullable<PlanNextStep['scaffold']>, draft: boolean, planArgument: string): string[] {
+  const command = planScaffoldCommandLine(planArgument, step.id)
+  const lines = draft
+    ? [`Approve the plan first (bunx guren plan:approve ${planArgument}): plan:scaffold writes this step from an approved plan only, as`, `  ${command}`]
+    : [`Write this step with \`${command}\`, not by hand.`]
+  if (scaffold.writes.length > 0) lines.push(`  It writes each added model's table and model class: ${scaffold.writes.join(', ')}`)
+  if (scaffold.leaves.length > 0) lines.push(`  It does not write ${scaffold.leaves.join(', ')}; the http step implements them by hand.`)
+  return lines
+}
+
 export function formatPlanNext(report: PlanNextReport, planArgument: string): string {
   const lines = [`${report.plan.title} (${report.plan.file})`, '']
   if (report.verified.length > 0) lines.push(`Verified: ${report.verified.join(', ')}`, '')
@@ -425,12 +462,8 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     if (waived.length > 0) {
       lines.push('', 'Waived, not to be implemented:', ...waived, '  The step verifies without them; a waiver is the person\u2019s decision, not yours to take or to undo.')
     }
-    if (step.generates.length > 0) {
-      lines.push(
-        '',
-        `The elements a scaffold would generate: ${step.generates.join(', ')}`,
-        '  No generator for this step ships yet, so it completes on its verify commands; the steps after it implement these elements.',
-      )
+    if (step.scaffold) {
+      lines.push('', ...scaffoldLines(step, step.scaffold, report.plan.hash === null, planArgument))
     }
     if (step.acceptance.length > 0) {
       lines.push('', `Behaviours${step.kind === 'tests' ? ' to write, as test titles `[<id>] <description>`, failing' : ' that must pass'}:`)

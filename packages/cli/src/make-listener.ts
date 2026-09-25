@@ -1,5 +1,5 @@
-import type { WriterOptions } from './utils'
-import { resourceName, scaffoldFile } from './utils'
+import type { ScaffoldFileEntry, WriterOptions } from './utils'
+import { resourceName, scaffoldFileEntry, writeScaffoldFile } from './utils'
 
 const LISTENERS_DIR = 'app/Listeners'
 
@@ -38,12 +38,17 @@ export interface MakeListenerOptions extends WriterOptions {
 }
 
 export async function makeListener(name: string, options: MakeListenerOptions = {}): Promise<string> {
+  const { path, contents } = listenerFile(name, options)
+  return writeScaffoldFile(path, contents, options)
+}
+
+export function listenerFile(name: string, options: MakeListenerOptions = {}): ScaffoldFileEntry {
   let eventClassName: string | undefined
   if (options.event) {
     eventClassName = resourceName(options.event).className
   }
 
-  return scaffoldFile(name, {
+  return scaffoldFileEntry(name, {
     dir: LISTENERS_DIR,
     suffix: 'Listener',
     template: ({ normalizedName }) => listenerTemplate(normalizedName, eventClassName),

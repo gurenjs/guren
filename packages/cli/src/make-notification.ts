@@ -1,6 +1,6 @@
 import { NOTIFICATIONS_DIR } from './discovery'
-import type { WriterOptions } from './utils'
-import { scaffoldFile } from './utils'
+import type { ScaffoldFileEntry, WriterOptions } from './utils'
+import { scaffoldFileEntry, writeScaffoldFile } from './utils'
 
 function notificationTemplate(className: string): string {
   return `import { Notification, type NotificationMailMessage } from '@guren/core'
@@ -44,7 +44,12 @@ export class ${className} extends Notification {
 }
 
 export async function makeNotification(name: string, options: WriterOptions = {}): Promise<string> {
-  return scaffoldFile(name, {
+  const { path, contents } = notificationFile(name, options)
+  return writeScaffoldFile(path, contents, options)
+}
+
+export function notificationFile(name: string, options: WriterOptions = {}): ScaffoldFileEntry {
+  return scaffoldFileEntry(name, {
     dir: NOTIFICATIONS_DIR,
     suffix: 'Notification',
     template: ({ normalizedName }) => notificationTemplate(normalizedName),

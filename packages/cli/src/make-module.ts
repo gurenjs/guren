@@ -4,6 +4,7 @@ import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { addImport, addToArrayOption, composeEntryWithImport, insertImport, PATCH_REASONS, spreadModuleIntoSchema } from './patch-helpers'
 import { readIfExists } from './discovery'
+import { MODULE_ENTRY_FILE, MODULE_ROUTES_FILE } from './import-resolution'
 import { moduleSchemaAggregateName, moduleSchemaSpecifier, schemaPathFor } from './schema-parser'
 import { APP_ENTRY_CANDIDATES, resolveAppEntry } from './provider-registrar'
 
@@ -61,11 +62,11 @@ export {}
 
   const filesCreated = await writeScaffoldFiles(
     [
-      { path: `${moduleDir}/index.ts`, contents: indexContents },
-      { path: `${moduleDir}/routes.ts`, contents: routesContents },
+      { path: `${moduleDir}/${MODULE_ENTRY_FILE}`, contents: indexContents },
+      { path: `${moduleDir}/${MODULE_ROUTES_FILE}`, contents: routesContents },
       { path: `${moduleDir}/db/schema.ts`, contents: schemaContents },
     ],
-    options,
+    { ...options, subject: moduleDir },
   )
 
   await patchRootSchema(moduleName, rootSchema, keepsAggregate ? aggregate : null)

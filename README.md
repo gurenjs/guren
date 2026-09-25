@@ -102,7 +102,8 @@ The same spec app on Guren and on an equivalent Node.js MVC stack, self-hosted a
 import { Controller } from '@guren/core'
 import { z } from 'zod'
 import { pages } from '@/.guren/pages.gen'
-import { Post } from '../Models/Post'
+import { Post } from '@/app/Models/Post'
+import type { UserRecord } from '@/app/Models/User'
 
 const PostSchema = z.object({
   title: z.string().min(1),
@@ -117,7 +118,7 @@ export class PostController extends Controller {
 
   async store() {
     const data = await this.validateBody(PostSchema)
-    const user = await this.auth.userOrFail()
+    const user = await this.auth.userOrFail<UserRecord>()
     await Post.create({ ...data, authorId: user.id })
     return this.redirect('/posts')
   }

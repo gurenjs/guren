@@ -458,6 +458,13 @@ export function listPlanElementEntries(plan: PlanDraft): PlanElementEntry[] {
   return refs
 }
 
+/** In document order. */
+export function listPlanAlterIds(plan: PlanDraft): string[] {
+  return listPlanElementEntries(plan)
+    .filter(({ element }) => (element as { change?: PlanChange }).change?.kind === 'alter')
+    .map(({ id }) => id)
+}
+
 export function findDuplicatePlanIds(plan: PlanDraft): string[] {
   const seen = new Set<string>()
   const duplicates = new Set<string>()
@@ -480,4 +487,14 @@ function isJsonText(text: string): boolean {
 /** Whether a document is a full `Plan` rather than a draft. The CLI picks its schema by it. */
 export function hasBaseline(document: unknown): document is Plan {
   return typeof document === 'object' && document !== null && 'baseline' in document
+}
+
+/** A document carrying a `baseline` is held to `PlanSchema`, so a malformed baseline is reported rather than dropped. */
+export function planSchemaFor(document: unknown): typeof PlanSchema | typeof PlanDraftSchema {
+  return hasBaseline(document) ? PlanSchema : PlanDraftSchema
+}
+
+/** A draft's is `null`, which canonicalizes where `undefined` would throw. */
+export function planBaseline(plan: PlanDraft | Plan): Plan['baseline'] | null {
+  return hasBaseline(plan) ? plan.baseline : null
 }
