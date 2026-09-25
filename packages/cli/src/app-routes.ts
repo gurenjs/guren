@@ -23,11 +23,10 @@ function routeJoinKey(route: JoinableRoute, module: string | null | undefined): 
 
 /**
  * The routes file's definition of each manifest entry, index-aligned with `entries`. The nth entry
- * of a key takes the nth definition of it; a key the two sides count differently matches nothing,
- * since pairing them would guess. Given `definitionModules` (each definition's `defineModule()`
- * name, `null` for the app's own), a route joins only within its module: the CLI loads modules in
- * directory order and the app in `createApp({ modules })` order, so a key two modules share would
- * otherwise pair across them.
+ * of a key takes the nth definition of it; a key the two sides count differently matches nothing.
+ * Given `definitionModules` (each definition's `defineModule()` name, `null` for the app's own), a
+ * route joins only within its module: the CLI loads modules in directory order and the app in
+ * `createApp({ modules })` order, so a key two modules share would otherwise pair across them.
  */
 export function joinRouteDefinitions<T extends JoinableRoute>(
   entries: readonly (JoinableRoute & { module?: string | null })[],
