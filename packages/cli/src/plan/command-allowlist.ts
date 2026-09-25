@@ -141,7 +141,14 @@ export const PLAN_COMMAND_CLASSES: Readonly<Record<string, 'generator' | PlanCom
   'agent:sync': 'harness',
 })
 
-export const PLAN_COMMAND_FORM = '`guren <subcommand> [args…]` or `bunx guren <subcommand> [args…]`'
+/** The names `PLAN_COMMAND_CLASSES` allows, in the table's order. */
+export function planGeneratorNames(): string[] {
+  return Object.entries(PLAN_COMMAND_CLASSES)
+    .filter(([, verdict]) => verdict === 'generator')
+    .map(([name]) => name)
+}
+
+export const PLAN_COMMAND_FORM ='`guren <subcommand> [args…]` or `bunx guren <subcommand> [args…]`'
 
 export type PlanCommandVerdict = { allowed: true; subcommand: string; args: string[] } | { allowed: false; reason: string }
 
