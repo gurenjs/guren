@@ -9,6 +9,7 @@ import type { AgentSurface } from './events'
 import { PATH_PARAM_PATTERN } from '../internal/route-path'
 import { AGENT_PREFLIGHT_HEADER, AGENT_PREFLIGHT_VERDICT_HEADER } from '../internal/agent-preflight'
 import { AGENT_SURFACE_HEADER } from '../internal/agent-request'
+import { markDispatchedToolRequest } from '../internal/dispatched-request'
 
 /** How many characters of a non-JSON response body survive into the result. */
 const TEXT_RESPONSE_CAP = 50_000
@@ -199,7 +200,7 @@ export function buildToolRequest(
 
   const qs = query.toString()
   const url = `${origin}${path}${qs ? `?${qs}` : ''}`
-  return { request: new Request(url, { method, headers, body }) }
+  return { request: markDispatchedToolRequest(new Request(url, { method, headers, body })) }
 }
 
 /**
