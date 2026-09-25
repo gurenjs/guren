@@ -27,10 +27,11 @@ flowchart LR
 | `docs/plans/comments/plan.json` | 計画そのもの | する |
 | `docs/plans/comments/approvals.json` | `plan:approve` が記録したハッシュと、`alter` ごとの読み取り | する |
 | `docs/plans/comments/decisions.json` | `plan:waive` が書く waiver | する |
+| `docs/plans/comments/revisions/0001.json` | `plan:revise` が書くリビジョン | する |
 | `docs/plans/comments/plan.html` | `plan:render` が書くページ | しない |
 | `.guren/plans/comments.state.json` | 検証結果と、いま取り組んでいるステップの印 | しない (自身を ignore します) |
 
-ファイル名が `plan.json` なら、slug はディレクトリ名です。別の名前でも構いません。`comments.plan.json` の slug は `comments` で、記録はその隣に `comments.approvals.json` と `comments.decisions.json` として置かれます。
+ファイル名が `plan.json` なら、slug はディレクトリ名です。別の名前でも構いません。`comments.plan.json` の slug は `comments` で、記録はその隣に `comments.approvals.json`、`comments.decisions.json`、`comments.revisions/` として置かれます。
 
 描画したページは生成物なので、リポジトリには入れません。`plan:next` は `plan:render` が既定の場所に書いたページとその一時ファイルを無視するため、ループを回すだけなら ignore は要りませんが、コミットするものでもありません。`-o` で別の場所に書いたページはただの未追跡ファイルなので、そのツリーは `plan:next` に拒否されます。一つ目のパターンは `docs/plans/<slug>/` の配置に、二つ目はアプリケーションのルートなどに置いた `<slug>.plan.json` に対応します。
 
@@ -39,7 +40,7 @@ docs/plans/**/*.html
 *.plan.html
 ```
 
-計画そのものと承認・決定ログは別です。waiver はどのステップを渡すかを左右するので、`plan:next` はこの三つのいずれかが未コミットなら拒否します。
+計画そのものと承認・決定ログ・リビジョンは別です。waiver はどのステップを渡すかを左右し、リビジョンは計画を変えるコミットに含めるものです。そのため `plan:next` は、これらのいずれかが未コミットなら拒否します。
 
 ## 計画を書く
 
@@ -201,7 +202,7 @@ bunx guren plan:render docs/plans/comments/plan.json
 
 `docs/plans/comments/plan.html` を書き、そのパスを表示します。`-o` で出力先を変えられます。別のディレクトリから実行するときは、`--app <dir>` で検査対象のアプリケーションを指定します。`--locale ja` を付けると、ページ自身のラベルが日本語で開きます。ページ上で `en` と `ja` を切り替えられますが、計画の本文は翻訳しません。`--json` を付けると、ページのパスとすべての検査を一つの JSON で出します。エージェントはページを開かずに失敗した検査を読めます。
 
-ページは一つのファイルで、ネットワークにはアクセスしません。ディスクから直接開けるので、レビュー依頼にそのまま添付できます。以下のラベルは `--locale ja` で開いたときの表記です。セクションごとのタブ、エンティティのフィルター、`existing` の要素を隠す「変更のみ」の切り替えがあります。現在のスキーマに計画を重ねた ER 図も描かれ、id はすべて参照先の要素へのリンクです。失敗した検査と互換性を壊す変更は「確認が必要な項目」に固定表示されます。要素ごとに「承認」と「修正を依頼」のボタン、コメント欄があり、レビュー結果はフッターから `feedback.json` として書き出せます。このファイルを読むコマンドはまだなく、フッターにもそう書かれています。`feedback.json` かコピーしたテキストを計画を書いたエージェントに渡すか、コメントを自分で `plan.json` に反映してください。フッターが表示するのは、計画を直したあとに実行する `plan:render` と `plan:approve` の二つです。
+ページは一つのファイルで、ネットワークにはアクセスしません。ディスクから直接開けるので、レビュー依頼にそのまま添付できます。以下のラベルは `--locale ja` で開いたときの表記です。セクションごとのタブ、エンティティのフィルター、`existing` の要素を隠す「変更のみ」の切り替えがあります。現在のスキーマに計画を重ねた ER 図も描かれ、id はすべて参照先の要素へのリンクです。失敗した検査と互換性を壊す変更は「確認が必要な項目」に固定表示されます。要素ごとに「承認」と「修正を依頼」のボタン、コメント欄があり、レビュー結果はフッターから `feedback.json` として書き出せます。`plan:revise` はこのファイルから承認と回答を読みます (後述)。コメントの内容は、自分かエージェントが計画のコピーに反映します。フッターが表示するのは、計画を直したあとに実行する `plan:render` と `plan:approve` の二つです。
 
 検査は、いまのアプリケーションに対して走ります。報告する内容の例は次のとおりです。
 
@@ -326,6 +327,22 @@ Warning, advisory (the approval stands):
 ```
 
 承認時に `unknown` だった性質は、一致していたとは数えません。警告はその性質を、まだ変更を示せる唯一のものとして挙げます。示せるのは、読み取れるようになってから一致したときだけです。読める性質が一つもない `alter` には警告を出さず、`plan:status` が前述のとおり `unjudged` と報告します。
+
+## 改訂: `plan:revise`
+
+計画は承認の前も後も、リビジョンとして変更します。`plan:revise` はモデルを呼ばずにリビジョンを記録します。親は現在の計画ファイルそのものです。変更は別に渡します。変更を加えた計画のコピーか、ops そのものです。
+
+```bash
+cp docs/plans/comments/plan.json /tmp/comments.edited.json
+# edit the copy: rename a column, change a type, drop a route
+bunx guren plan:revise docs/plans/comments/plan.json --edited /tmp/comments.edited.json --message "soft-delete comments instead"
+```
+
+コマンドは二つの差分から ops を求めます。追加・変更・削除した要素ごとに一つの op になり、どの op も `--message` を理由に持ちます。`{ parent, ops, result }` を `docs/plans/comments/revisions/0001.json` に書き、そのあと `plan.json` をコピーで置き換えます。`comments.plan.json` という名前の計画では、リビジョンは `comments.revisions/` に置かれます。`--ops ops.json` を使うと ops を直接渡せます。`{ "ops": [...] }` の形の文書で、op ごとに `reason` を書きます。
+
+`--feedback feedback.json` を付けると、ページでのレビューが規則として効きます (コピーしたテキストなら `-` を渡します)。そこで承認した要素は、`--reopens "<reason>"` で理由を示したときだけ変更できます。そこで回答した質問は、改訂後の計画から消えている必要があります。フィードバックから読むのはこの二つだけで、コメントの内容はコピーに自分で反映します。
+
+承認後の計画は、この方法で変更します。`plan.json` をその場で編集すると、ハッシュはどの承認にもリビジョンにもないものに変わり、`plan:revise` はその計画を拒否します。`git checkout -- docs/plans/comments/plan.json` で元に戻し、編集はコピーに移して `--edited` で渡してください。改訂して承認前の計画は、続けて改訂できます。リビジョンは baseline をそのまま引き継ぐので、結果は `plan:approve` で承認するまで `plan:next` などのコマンドに拒否されます。古いハッシュに対して取った waiver も引き継がれません。コマンドはその waiver を一覧にします。最初の承認前の draft も同じ方法で改訂できますが、直接編集しても構いません。
 
 ## 実装: `plan:next` と `plan:verify`
 
@@ -729,7 +746,7 @@ Closed 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0. The pla
 
 この機能の元になった RFC (`rfcs/0030-implementation-plans.md`) には、このページのコマンドより先の部分も書かれています。次のものはまだありません。
 
-- 計画の JSON を Claude に単独で書かせる `guren plan` (いまあるのは `--print-prompt` だけです) と、レビューのフィードバックを計画に反映する改訂コマンド。`plan.json` は自分で、またはエージェントとのセッションで書き、編集してください
+- 計画の JSON を Claude に単独で書かせる `guren plan` (いまあるのは `--print-prompt` だけです) と、レビューのコメントをリビジョンに変える `plan --revise`。自分で加えた変更は `plan:revise` で記録できます。`plan.json` は自分で、またはエージェントとのセッションで書いてください
 - 計画を `docs/plans/` ではなく GitHub の issue に置く方式
 - 生成コマンドを代わりに実行する `scaffold` ステップ。`plan:next` は scaffold が作るはずの要素を並べ、生成コマンドはまだない、ステップは検証コマンドだけで完了すると伝えます。`make:feature` を実行し、計画に要らないものを削ってください
 

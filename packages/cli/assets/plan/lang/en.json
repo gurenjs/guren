@@ -27,7 +27,7 @@
   "footer.copy": "Copy feedback",
   "footer.download": "Download feedback.json",
   "footer.note": "Comment on any element from the mark in its heading. This page never writes to the project and makes no network request.",
-  "footer.revise": "No command reads the feedback yet. Hand feedback.json, or the copied text, to the agent that wrote the plan, or apply the comments to the plan by hand. Then render the plan again:",
+  "footer.revise": "{command} records a change to the plan as a revision and checks it against this feedback: an element approved here changes only with a reason (--reopens), and an answered question must be removed. Make the change in a copy of the plan, then pass the copy with --edited and the feedback with --feedback (- reads the copied text). It does not turn comments into changes. Then render the plan again:",
   "footer.approve": "Once the plan says what you mean to build, approve it:",
   "footer.copied": "Copied. Paste it to the agent that wrote the plan.",
   "footer.clipboardRefused": "The browser refused the clipboard. Use Download instead.",
