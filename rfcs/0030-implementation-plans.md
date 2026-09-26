@@ -1396,10 +1396,170 @@ proof: a test can satisfy all three and still assert nothing that matters.
 What they rule out is the cheap failure, a test emptied or rewritten until it
 passes, and the task-end reviewer (§7) reads the tests for the rest.
 
-**Amended after re-review (2026-09-23), Part 3:** no skeleton emitter ships,
-and the static "still calls its route" check is not implemented. Both are the
-optional last item of Part 3; `packages/cli/src/test-requests.ts`, which reads
-the requests a test file makes, is what the check would rest on.
+**Amended after re-review (2026-09-23), Part 3:** ~~no skeleton emitter ships,
+and the static "still calls its route" check is not implemented~~ (both ship:
+the skeletons as item 7a and the check as item 7b, the two amendments below).
+Both are the optional last item of Part 3; `packages/cli/src/test-requests.ts`,
+which reads the requests a test file makes, is what the check rests on.
+
+**Amended in implementation (`plan:scaffold` on a `tests` step, Part 3 item
+7a):** the skeletons ship; the static check is item 7b's. `plan:scaffold <plan>
+--step <task>/tests` writes them through `plan/scaffold-tests.ts`, pure like
+the other emitters.
+
+- One file per plan and task, `tests/plans/<plan slug>/<name>.test.ts`, the
+  name the entity's collection (`comments`), a story's intent id, a cross
+  task's model ids or `foundation`. The harness testing rule puts tests under
+  `tests/`; a directory per plan keeps a second plan on the same entity from
+  colliding with the first's file, which a re-run refuses on.
+- Each behaviour is one `test('[<id>] <description>')`. Prose written into the
+  file (the description, `given`, the actor) has its brackets turned into
+  parentheses, so the file carries no id but its own: another bracketed id in
+  it would be selected by that behaviour's step and counted by the drift
+  re-check. What the plan spells as data (a request body, a `has`/`missing`
+  value, an `errors` key, a redirect target, a page name) is written as it
+  is, so the emitted file is scanned with `bracketedTokens()` and an
+  acceptance id other than the step's own refuses the step, nothing written.
+- The request is the route's method and path, each parameter a whole-segment
+  interpolation (`` `/posts/${postId}/comments` ``), which `test-requests.ts`
+  resolves to the route. The `input` is the body, or the query string for a
+  `GET`. The receiver is `client()`, a function in the file annotated to
+  return `Promise<TestApp>`, which the scan counts as a `TestApp`. A parameter
+  with a constraint (`:id{[0-9]+}`) reads as `unknown` to Impact, since a
+  runtime value may fail it; the 7b check below reads it as reaching the route,
+  so the skeleton needs no workaround.
+- `client()` imports the app entry (`src/app.ts` or `app.ts`, whose default
+  export must exist, or the step is refused) and boots it with
+  `TestApp.fromApp()` on first use inside a test, never at module level or in
+  `beforeAll`: a file that throws while loading is absent from the junit report
+  and a throwing `beforeAll` becomes one `(unnamed)` case, either of which
+  reads every behaviour as `pending`. A boot that throws is rethrown as
+  `Application boot failed: <message>` (`SKELETON_BOOT_FAILED` in
+  `plan/acceptance-status.ts`). Bun's junit report carries no failure message
+  (`<failure type="AssertionError" />`, measured on 1.3.14), so `tests:fail`
+  reads Bun's own `error: Application boot failed:` line from the run's output,
+  and one such line records the command `blocked`: the boot is shared, so every
+  case that reaches `client()` fails on it while the cases that throw at
+  `given()` first never reach the application, and "every failed case" would
+  let that mix verify. It primes CSRF with `withCsrf()` (after `actingAs()`),
+  and falls back to the unprimed client only on the exact message
+  `withCsrf()` throws for the default path when no `XSRF-TOKEN` was issued,
+  which the CSRF middleware issues on every safe request: its absence means no
+  CSRF is mounted, as in an application created without `auth`. The two
+  spellings are kept in sync by a test that reads `packages/testing`'s source.
+- What the plan states only in prose is a `given()` call that throws: each
+  `given` line, the actor, and each path parameter's value. Only `auth` or an
+  `auth:*` middleware on the route or its action, a policy, or a `forbidden`
+  behaviour implies a signed-in actor, and `unauthenticated` never does; a
+  guard under another middleware name gets no actor, and its test fails on the
+  401 or redirect until one is set up. A throw is a failed case, never a skipped one,
+  so `tests:fail` counts it; `test.todo` and `test.skip` would not.
+- The expectations are written out where `TestApp` can assert them:
+  `assertStatus`, `assertRedirect` (a path sharing the route's parameters
+  reuses their values), `assertInertia` on the view's page with the receiver's
+  `.json()` (`Accept: application/json`, which `renderInertia()`, the path
+  `Controller.inertia()` takes, answers with the page as JSON; `X-Inertia`
+  would meet its version check, a 409 when the asset version resolves in tests
+  and the request sends none), and `errors` as the keys of the JSON body's
+  `errors`. `TestApp` has no
+  database helper bound to the application's connection, so a `database` row is
+  a query through the model, `expect(await Comment.where({ … }).first())`, for
+  a table a plan model declares, whose class the root has, with each value one
+  its planned column type compares with as a literal (a string, integer,
+  number or boolean column, or `null` on a nullable one). Anything else, and an
+  expected `404`, which a route that does not exist yet answers too, is an
+  `unwritten()` call that throws, listed in the report. A case with no
+  assertion that a missing route would fail gets one as well, so every case
+  fails before its implementation. The header says setting up and cleaning up
+  rows is the agent's: a row another test left can make a `has` or `missing`
+  pass or fail whatever the implementation does.
+- Two holes stay open. (a) A behaviour on an `existing`, `alter` or `rename`
+  route (a rename usually keeps the path) with no `given()` or `unwritten()`
+  call may pass at once, the route answering as the plan expects already; the
+  report lists it (`mayPassNow`) so the agent knows why
+  `tests:fail` refuses the step, and nothing is refused. (b) A behaviour on an
+  added route whose path an existing route already answers (a parameter or
+  wildcard route registered first) reaches that route, not a 404, and may pass
+  too; it is neither listed nor refused, since telling it needs the registered
+  routes, which the scaffold does not load.
+- The file compiles: the helpers, `expect` and each model import are written
+  only when used, and a test renders it beside the scaffold step's output and
+  typechecks it. Refused before the write, like the other scaffold writes: the
+  file existing (a re-run), a step id another test file already carries
+  (`plan:verify` would find it in two files), no default export to boot, an
+  unmarked step, and a draft or unapproved plan. An API-only application has
+  no `scaffold` step but gets its `tests` step's skeletons, which read no model
+  it lacks.
+- Measured through `plan:verify --step` on the comments fixture plus one
+  behaviour with no `given` and no parameter, scaffolded into a temp app and
+  unmounted: every case fails, the four with setup at `given()` and the
+  guest's on the route's 404, and the step verifies. Turning one test into
+  `test.skip` fails the step, and mounting the routes with `--mount` makes the
+  guest's case pass, which fails it too.
+  An application whose `src/app.ts` throws at boot records the step
+  `blocked`.
+- Not verified: an application that mounts CSRF with its cookie turned off,
+  where the fallback does not apply and `client()` throws. The `.json()` path
+  for `inertia` is read from the engine's source, not run against an
+  application with a resolved asset version.
+
+**Amended in implementation (the "still calls its route" check, Part 3 item
+7b).** The check ships, in `packages/cli/src/plan/behaviour-requests.ts` over
+`scanTestCaseRequests()` in `test-requests.ts`. It applies to every test, not
+only to generated ones: `plan:verify` cannot tell a skeleton from a test an
+agent wrote, and the tamper it detects is the same.
+
+- Where it runs: inside the `tests` and `tests:fail` commands, on the files
+  those commands select, before `bun test` is spawned (a failure is decided,
+  so nothing runs), and in `recheckTests()`, where a drifted `tests:fail` step
+  re-checked without a run must still request its routes: a test rewritten to
+  request nothing keeps failing, so the run it verified on says nothing about
+  it now. `plan:status`, `guren check` and the gate do not run it, so their
+  cost is unchanged.
+- The route is the plan's: the behaviour's `route` resolved in `plan.routes`,
+  its method and full path (the path `plan:status` compares with the
+  registered one) and its `agent.toolName`. A request reaches it through
+  `testCoverage()` and `mayReach()`, the matcher Impact uses. `AcceptanceSchema`
+  requires `route`, so no behaviour is exempt; a route id the plan does not
+  declare (a draft) is unreadable, never a pass.
+- Per case, as the junit report reads a title: a `test`, `it` or `describe`
+  (and `.only`, `.each(…)(…)` and the rest of the chain, and aliases imported
+  from `bun:test`) whose literal title carries the id, including a `describe`
+  whose cases do. Its requests are those in its callback and in every
+  same-file function it calls by name, transitively, matched by name like the
+  receivers. Hooks outside a carrying `describe` are not followed (one inside
+  it is in its callback): the request is the behaviour's action, and a
+  `beforeEach` is its `given`. Some carrying case must request the route. A
+  `test.todo` carrying the id has no body, and the miss names it so.
+- A whole path segment filled at runtime reaches a constrained parameter
+  (`` `/comments/${id}` `` against `/comments/:id{[0-9]+}`), in this check
+  only (`routePathMatches()`'s `runtimeFillsConstraints`; Impact still reads
+  it as uncertain). A skeleton cannot spell a literal for an arbitrary
+  constraint, and whether the value passes it is the run's to find, as a 404.
+  A literal segment the constraint rejects stays a miss. Where one runtime
+  segment does not fit (a constraint spanning `/`, `:path{.+}`, with more
+  segments after it), the comparison stays uncertain, so it reads as
+  unreadable, never as a miss.
+- Three verdicts per behaviour. Reached. Unreadable when nothing reached it and
+  a carrying case holds an unresolved request `mayReach()` allows (including
+  one on what a same-file function returns when nothing annotates it
+  `TestApp`, `localReceiver`, whose remedy is that annotation), a request
+  the route pattern cannot be compared with, or a call handing the `TestApp`
+  (or its agent) to a function the file does not define, or a carrying file
+  did not parse or holds a test whose title is not all literal. A miss
+  otherwise, naming what each carrying case requests instead, or that the id
+  sits in no test title at all. Both fail the command (and the step), with
+  distinct reasons: `blocked` is the environment's and this is the test's
+  shape, and passing an unreadable request would let `app.get(path)` lift the
+  step's elements. The finding never says the route is uncovered, only that
+  this reading cannot tell, and it asks for the request to be spelled in the
+  test. There is no waiver for a behaviour, so a suite built on imported
+  helpers has to make each behaviour's request visible in its case.
+- Tamper detection, not proof: a request the file spells passes whether or
+  not it runs, and a request made entirely inside an imported helper the case
+  hands nothing reads as a miss.
+- `plan:next` says the rule under a `tests` step's behaviours, and the harness
+  skill repeats it.
 
 For `alter` / `rename` / `drop` there is no scaffold. Those steps are agent
 edits, and the narrow step width matters most there.
@@ -1968,9 +2128,11 @@ migration).** Two defects the loop hit once a plan had more than one task.
   whole-plan run, `--step` on it, or as an earlier step): `tests:fail` cannot
   pass once the implementation exists, and its red run was observed when it
   verified. It stays `verified` while one test file still carries each of its
-  behaviours' ids as a bracketed token, which a comment carries as well as a
-  test title (a gap the run itself would catch). One carried by no file or by
-  several is reported, and the record is left drifted rather than replaced: a
+  behaviours' ids as a bracketed token and a test case titled with each id
+  still requests the behaviour's route (the §5 amendment on the "still calls
+  its route" check), which closes the gap a token in a comment left. One
+  carried by no file or by several, or whose tests no longer request its
+  route, is reported, and the record is left drifted rather than replaced: a
   recorded failure would send the next run to `tests:fail`, which cannot pass
   then. `plan:next` and the `Stop` hook reach it through `plan:verify --step`,
   so all four agree.
@@ -3053,6 +3215,8 @@ marks what was read and not run.
 5. The mounted-routes experiment. Run; the note below records it.
 6. `plan:scaffold`, emitting what the §5 amendment lists. No pages.
 7. Optional: test skeletons, and the static "still calls its route" check.
+   Implemented: the skeletons (7a, `plan:scaffold` on a `tests` step) and the
+   check (7b, in `plan:verify`), as the two §5 amendments read them.
 
 Deferred: the headless producer, `--ask`, the headless `plan --revise`, page
 emission, the characterization step, and retuning the step width.

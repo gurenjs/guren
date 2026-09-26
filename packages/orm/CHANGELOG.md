@@ -1,5 +1,21 @@
 # @guren/orm
 
+## 2.13.0
+
+### Minor Changes
+
+- 122e175: `Model.create()` and `Model.update()` take a `set` option for columns the server chooses, such as an owner: `Post.create(data, { set: { authorId: user.id } })` (RFC 0031). `data` is filtered by `fillable` as before. The `set` columns skip it, and must not be listed in it. That rule also refuses request data spread into `set`. The same rules refuse a `set` on a model without `fillable`, an `id` or a denied column in `set`, and a key in both `data` and `set`. Every refusal is a `MassAssignmentException` with the existing `denied` or `not-fillable` reason. The transaction scope's `create` and `update` take the option too, and `ModelSetOptions` is exported from `@guren/orm` and `@guren/core`.
+
+  Calls without `set` keep their signatures and behaviour. The `not-fillable` message now points at `set` for a value the server chooses, instead of at `forceCreate()`.
+
+### Patch Changes
+
+- 9cd5e44: `where(field, 'is null')` and `where(field, 'is not null')` (two arguments, so the value form) now throw instead of compiling to `field = 'is null'`. The call type-checks (on any column from `Model.where()`, on string columns from a builder), and it silently dropped every NULL row. The error names `whereNull()` / `whereNotNull()` and the three-argument form `where(field, 'is null', null)`; `orWhere()` and the `where()` of a transaction scope behave the same. A value equal to a value-taking operator (`'like'`, `'in'`) is still read as a value.
+
+  The throw also reaches a two-argument call whose value comes from input: `Post.where('title', input)` with `input === 'is null'` used to match that title and now throws. Pass such input as `where('title', '=', input)`. It ships as a patch because the typed call it targets never returned what it read as; `find()` / `findOrFail()` on a scoped model are unaffected, since they now filter through the object form.
+
+  The transaction scope's `where()` now tells the operator form from the value form by argument count, as `Model.where()` does: a wrapper that always forwards three arguments, `where(f, v, undefined)`, has `v` read as the operator.
+
 ## 2.12.0
 
 ### Minor Changes

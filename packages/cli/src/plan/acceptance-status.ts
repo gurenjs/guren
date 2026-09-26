@@ -18,6 +18,12 @@ export const JUNIT_MAX_DEPTH = 64
 // A bracketed token no behaviour declares is an error only under this prefix: `[GET]` is not a mistyped id.
 const ACCEPTANCE_ID_PREFIX = 'AC-'
 
+/**
+ * What a `plan:scaffold` test skeleton's `client()` throws when the application does not boot:
+ * `tests:fail` reads a run where a case failed with it as the environment's, never as a red run.
+ */
+export const SKELETON_BOOT_FAILED = 'Application boot failed:'
+
 /** An acceptance id by shape alone, the one grammar `plan:verify` and the docs checks read ids with. */
 export function isAcceptanceId(token: string): boolean {
   return token.startsWith(ACCEPTANCE_ID_PREFIX) && ID_PATTERN.test(token)

@@ -344,7 +344,7 @@ Guren derives the work from the plan, and the order does not depend on a model. 
 |---|---|---|
 | `commands` | The plan's `commands`, such as `guren add attachments`, in `task/foundation` | `codegen`, `typecheck` |
 | `scaffold` | The first version of a new entity, written by `plan:scaffold` | `codegen`, `typecheck` |
-| `tests` | One test per acceptance behaviour, failing | `codegen`, the tests failing |
+| `tests` | One test per acceptance behaviour, written as a skeleton by `plan:scaffold`, failing | `codegen`, the tests failing |
 | `data` | Table, migration, model relationships and fillable; after a scaffold, the migration and what `plan:scaffold` left out | `codegen`, `db:migrate`, `typecheck` |
 | `http` | Controllers and routes; validators, resources and policies, or after a scaffold, what `plan:scaffold` left as a stub or unwritten | `codegen`, `guren check`, the tests passing |
 | `pages` | Page components | `codegen`, `typecheck`, `guren check` |
@@ -364,15 +364,20 @@ Next: task/entity/model.comment/tests
   task: entity Comment (task/entity/model.comment)
   verify: codegen → tests:fail
 
+Write this step’s test skeletons with `bunx guren plan:scaffold docs/plans/comments/plan.json --step task/entity/model.comment/tests`, not by hand, then fill them in.
+  It writes one TestApp test per behaviour (AC-comments-1, AC-comments-2, AC-comments-3, AC-comments-4), with its request and the expectations the plan states, into one file.
+  Each fails at a given() call until the setup it names is written (records, the signed-in actor, path parameters); replace every call, and keep each title’s id and its request.
+
 Behaviours to write, as test titles `[<id>] <description>`, failing:
   [AC-comments-1] A signed-in user can comment on a post.
-      success; actor user; route route.comments.store; given a post exists; expect status 303; comments has 1 row(s)
+      success; actor user; route route.comments.store; given a post exists; expect status 302; comments has 1 row(s)
   [AC-comments-2] An empty comment is rejected.
       validation; actor user; route route.comments.store; given a post exists; expect status 422; errors on body
   [AC-comments-3] A guest cannot comment.
       unauthenticated; actor guest; route route.comments.store; given a post exists; expect redirect /login
   [AC-comments-4] A user cannot delete someone else's comment.
       forbidden; actor user; route route.comments.destroy; given a comment written by another user exists; expect status 403
+  Each test requests its route through a TestApp, in its body or a function of its file it calls: plan:verify reads the requests before it runs them.
 
 Implement this step only, then run `bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/tests` and commit once it is verified.
 Marked in .guren/plans/comments.state.json
@@ -382,7 +387,7 @@ Marked in .guren/plans/comments.state.json
 
 ```text
  ERROR  The working tree under /app has uncommitted changes (paths relative to the repository root), and one step is one commit. Commit or discard them first:
-  ?? tests/comments.test.ts
+  ?? tests/plans/comments/comments.test.ts
 ```
 
 ```bash
@@ -392,7 +397,7 @@ bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.co
 ```text
 task/entity/model.comment/tests: verified (607 ms)
   pass     codegen     bun run codegen
-  pass     tests:fail  bun test tests/comments.test.ts
+  pass     tests:fail  bun test tests/plans/comments/comments.test.ts
   failing  [AC-comments-1]
   failing  [AC-comments-2]
   failing  [AC-comments-3]
@@ -403,6 +408,10 @@ Recorded in .guren/plans/comments.state.json
 ```
 
 The `tests` step passes only when every behaviour has a test and each one fails: a test that passes before the code exists proves nothing, and a skipped test is not a failing one. `plan:verify` selects the test files whose source carries the step's ids, and runs them with `bun test`. Later steps run the same files and need them to pass. After the verify output it prints the plan's status, described below.
+
+Before it runs the tests, `plan:verify` reads each behaviour's tests for a `TestApp` request to the route the behaviour names. Some `test`, `it` or `describe` whose title carries the id must request that method and path (or call the route's agent tool), in its own body or in a function of the same file it calls. A path segment filled whole at runtime, `` `/comments/${id}` ``, counts for a parameter, a constrained one included. A test that requests another route, or none, fails the command with what it requests instead, and `bun test` does not run.
+
+A request this reading cannot resolve fails the command too, with its own reason: a path the file does not spell, a request on what an imported helper returns, a request on what a function of the same file returns when nothing annotates it `TestApp` or `Promise<TestApp>`, a `TestApp` handed to a function from another file, or a title built at runtime. The check fails closed because a test rewritten that way would otherwise verify the step, and the finding asks for the request to be spelled in the test (or the helper annotated). It is tamper detection, not proof: a request the file spells passes whether or not it runs.
 
 ### The scaffold step: `plan:scaffold`
 
@@ -504,7 +513,7 @@ It runs neither codegen nor a migration: `plan:verify` runs codegen and the type
 Every refusal comes before the first write. It refuses:
 
 - a draft, or a plan no approval names;
-- a step other than a `scaffold` step (it names the task's own), or one `plan:next` has not marked;
+- a step other than a `scaffold` or `tests` step (it names the task's own scaffold step), or one `plan:next` has not marked;
 - a model, validator, resource, policy, controller or side effect in a module (it writes to the project root only), and an API-only application;
 - on MySQL, a key over a `text` or `json` column (a primary key, `unique`, an index, or a foreign key, which MySQL indexes), which drizzle-kit refuses and MySQL rejects without a prefix length (plan the column as `string`, or drop the key), and a `default` of `null`;
 - a resource whose name does not end in `Resource`, which `guren codegen` would not discover, a policy ability named after one of `Policy`'s own members (`before`, `allow`, `deny`), and an action named after one of `Controller`'s (`redirect`, `json`);
@@ -525,6 +534,31 @@ Mount the routes the scaffold step wrote first, with `bunx guren plan:scaffold d
 It imports `registerCommentRoutes` into `routes/web.ts` and calls it first in the registrar there. Being first, an `auth` alias the entry sets replaces the one the routes file sets. The mounted routes also register ahead of the entry's own, so a scaffolded path with a parameter, such as `/posts/:id`, can shadow an entry route like `/posts/create`: check the order when the two overlap. `plan:status` then reads the routes and their actions as `wired`, and the validators they use too. What is left is each action's body and response, and what the scaffold listed as a stub or not at all.
 
 It refuses, writing nothing, a draft or a plan no approval names, a step `plan:next` has not marked, a step that holds no scaffolded routes (it names the one that does), a routes file that does not exist or no longer exports its registrar, an application with no `routes/web.ts`, an entry that already imports another binding under the registrar's name, and a file already mounted, whether the entry calls it or another routes file does.
+
+### Test skeletons: `plan:scaffold` on a tests step
+
+The `tests` step is written by the same command. `plan:scaffold <plan> --step <task>/tests` writes one file, `tests/plans/<plan>/<collection>.test.ts` (for the comments plan, `tests/plans/comments/comments.test.ts`), with one `TestApp` test per behaviour of the step:
+
+```ts
+test('[AC-comments-1] A signed-in user can comment on a post.', async () => {
+  given('a post exists')
+  const actor = given<object>('the actor: user')
+  const postId = given<number | string>('the :postId parameter')
+  await (await client(actor)).post(`/posts/${postId}/comments`, { body: 'Nice post' }).assertStatus(302)
+  expect(await Comment.where({ body: 'Nice post' }).first()).not.toBeNull()
+})
+```
+
+- The title starts with the behaviour's id, which is how `plan:verify` selects the file. A bracket in the plan's prose is written as a parenthesis, so the file carries no other id.
+- The request is the one its route names: the method, the path with each parameter as a whole-segment interpolation, and the `input` as the body (as the query string for a `GET`).
+- The expectations are the plan's: `status`, `redirect` (a parameter it shares with the route reuses the route's value), `inertia` (the request asks for JSON, which returns the page without Inertia's version check), `errors` (read from the JSON body), and a `database` row as a query through the model, for a table whose model the root declares and a value the plan's column type can compare with. Setting up those rows and cleaning them up is yours: a row another test left behind can make the expectation pass or fail whatever the code does.
+- The setup the plan states in prose, the signed-in actor where the route requires one, and each path parameter are `given()` calls, which throw. An expectation the skeleton cannot write is an `unwritten()` call, which throws too, and so is an expected 404, which a route that does not exist yet answers as well. The report and the output list each one.
+- `client()` imports `src/app.ts` and boots it with `TestApp.fromApp()` inside the test, so a boot that fails fails each test by name rather than the file. It primes CSRF with `withCsrf()` when the application mounts it; an application that mounts CSRF with `cookie: false` is not handled.
+- Only `auth` or `auth:*` middleware, a policy, or a `forbidden` behaviour gets a signed-in actor.
+
+Before the implementation exists every test fails, either at a `given()` call or on the route that is not mounted yet, and none is skipped, so the step verifies as `tests:fail` asks. When the application does not boot, `plan:verify` records the step `blocked`, since no test reached its route. Two cases can pass before any code is written, and `tests:fail` then fails the step: a behaviour on a route that exists already with nothing to set up, which the report lists as may pass now, and a behaviour on a new route whose path an existing route already answers, which nothing lists. Replace each `given()` and `unwritten()` call with the setup or assertion it names. Do not turn a test into `test.skip` or `test.todo`: a skipped case is not a run, and the step fails on it. Keep each title's id and each request, since the later steps run the same file and need it to pass.
+
+It refuses, writing nothing, a draft or a plan no approval names, a step `plan:next` has not marked, a file that already exists (a re-run), a behaviour another test file already carries (`plan:verify` would find it in two files), a request body or expected value holding another behaviour's id, and an application whose `src/app.ts` or `app.ts` has no default export to boot. An API-only application has a `tests` step like any other, and gets its skeletons, although it has no `scaffold` step. A route parameter with a constraint (`:id{[0-9]+}`) is a limit of the static reading: a runtime value may fail the constraint, so the request is read as uncertain rather than as reaching the route.
 
 ### Outcomes
 
@@ -605,7 +639,7 @@ The elements verified only through a behaviour of `http` (its controller and pol
 
 `plan:verify --step` re-checks such steps. Once the given step verifies, the same run re-checks the earlier steps whose files changed, in task order, stopping at the first one that runs commands and does not verify. Each outcome is recorded (a `failed` one names what broke) and listed under "Re-checked"; `plan:next` then returns the earliest step left unverified, usually the one that failed. A re-check that comes out `blocked` is left for a later run. While the given step does not verify, the earlier records are left alone and listed as left for a later run, since the commands the steps share would fail them too.
 
-A `tests` step is re-checked without running anything, because its tests pass once the code exists: it stays verified while exactly one test file carries each of its behaviour ids, and otherwise the run names the behaviour and leaves the step drifted.
+A `tests` step is re-checked without running anything, because its tests pass once the code exists: it stays verified while exactly one test file carries each of its behaviour ids and each behaviour's tests still request its route, read as above, and otherwise the run names the behaviour and leaves the step drifted.
 
 `plan:next` runs nothing, so when the next step has drifted, it prints the re-check command:
 

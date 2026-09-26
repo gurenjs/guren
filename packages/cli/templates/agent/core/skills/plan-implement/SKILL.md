@@ -72,10 +72,22 @@ it, and do not edit the application back or the plan to make it pass.
   too. `guren check` reports the unmounted routes file as advisory until the
   `http` step that mounts it is verified. It refuses a re-run once the step's
   files exist, and then `plan:verify` is what is left.
-- **`tests`**: write the behaviours as tests whose titles carry the acceptance id
-  literally, `[AC-comments-1] a signed-in user can comment on a post`, and leave
-  them failing. The step verifies with `tests:fail`, so a test that already
-  passes, or is skipped, fails the step.
+- **`tests`**: run the command `plan:next` names,
+  `bunx guren plan:scaffold <plan> --step <id>`. It writes one `TestApp` test
+  per behaviour in `tests/plans/<plan>/<collection>.test.ts`, titled with the
+  acceptance id literally (`[AC-comments-1] a signed-in user can comment on a
+  post`), with the request its route names and the expectations the plan
+  states. Replace each `given()` call (the setup, the signed-in actor, a path
+  parameter) and each `unwritten()` call with what it names, keep every
+  title's id and request, and leave the tests failing. The step verifies with
+  `tests:fail`, so a test that already passes, or is skipped (`test.skip`,
+  `test.todo`), fails the step. Each test must still request its behaviour's
+  route through a `TestApp`, with a path it spells, in its own body or a
+  function of the same file it calls: `plan:verify` reads the requests before
+  it runs the tests, and fails one that requests another route, nothing, or
+  something it cannot read (a path the file does not spell, a request made by
+  a helper imported from another file, or one on what a helper of the same
+  file returns when nothing annotates its return type as `TestApp`).
 - **`data`**: the schema, migration and model; verified by `db:migrate` and
   `typecheck`. After a scaffold step, what is left is the migration and any
   relationship `plan:scaffold` reported as left out.
