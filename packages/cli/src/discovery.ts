@@ -306,8 +306,10 @@ export function discoverProviderFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, PROVIDERS_DIR)
 }
 
+export const CONTROLLERS_DIR = 'app/Http/Controllers'
+
 export function discoverControllerFiles(appRoot: string): Promise<string[]> {
-  return discoverDir(appRoot, 'app/Http/Controllers')
+  return discoverDir(appRoot, CONTROLLERS_DIR)
 }
 
 /**
@@ -329,20 +331,26 @@ export function discoverResourceFiles(appRoot: string, subDir: string = RESOURCE
   return discoverDir(appRoot, subDir)
 }
 
+export const EVENTS_DIR = 'app/Events'
+
 export function discoverEventFiles(appRoot: string): Promise<string[]> {
-  return discoverDir(appRoot, 'app/Events')
+  return discoverDir(appRoot, EVENTS_DIR)
 }
 
+export const JOBS_DIR = 'app/Jobs'
+
 export function discoverJobFiles(appRoot: string): Promise<string[]> {
-  return discoverDir(appRoot, 'app/Jobs')
+  return discoverDir(appRoot, JOBS_DIR)
 }
 
 export function discoverMiddlewareFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app/Http/middleware')
 }
 
+export const LISTENERS_DIR = 'app/Listeners'
+
 export function discoverListenerFiles(appRoot: string): Promise<string[]> {
-  return discoverDir(appRoot, 'app/Listeners')
+  return discoverDir(appRoot, LISTENERS_DIR)
 }
 
 export function discoverValidatorFiles(appRoot: string): Promise<string[]> {
@@ -365,6 +373,21 @@ export const NOTIFICATIONS_DIR = 'app/Notifications'
 
 export function discoverNotificationFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, NOTIFICATIONS_DIR)
+}
+
+/** Where each side-effect kind's classes live: `plan:status` reads them there and `plan:scaffold` writes them there. */
+export const SIDE_EFFECT_DIRS = {
+  job: JOBS_DIR,
+  event: EVENTS_DIR,
+  listener: LISTENERS_DIR,
+  mail: MAIL_DIR,
+  notification: NOTIFICATIONS_DIR,
+} as const
+
+export type SideEffectKind = keyof typeof SIDE_EFFECT_DIRS
+
+export function discoverSideEffectFiles(appRoot: string, kind: SideEffectKind): Promise<string[]> {
+  return discoverDir(appRoot, SIDE_EFFECT_DIRS[kind])
 }
 
 /** The directory {@link discoverRoutesFiles} reads, relative to an app root. */

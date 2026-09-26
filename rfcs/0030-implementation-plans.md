@@ -1293,6 +1293,88 @@ validators, resources and policies, and the policy registration settled.
   or params validator leaves `required` `unknown`; an ability's rule is prose.
   No reader was changed.
 
+**Amended in implementation (`plan:scaffold`, third of three changes):**
+controllers, routes, their mount, and side effects.
+
+- Each added controller is `app/Http/Controllers/<Class>.ts` with exactly the
+  planned actions. An action validates its `params` and `query` with the
+  planned validators, authorizes with the planned policy ability
+  (`this.authorize('<ability>', Model)`, the policy's model class), validates
+  its `body`, then throws `HttpException.notImplemented()`, a 501. Asking the
+  ability before reading the body gives a caller the policy denies 403
+  whatever it sent. The proposal above is settled as
+  written: a stub validates with `validateBody(Schema)` and its siblings,
+  since `validated('<name>')` is typed from generated route names and does not
+  compile while the route is unmounted. An action on an existing controller is
+  left to the `http` step, since the scaffold writes no action into an
+  existing file; so is an action named after a `Controller` member, which is
+  refused.
+- No response is written. `plan/status.ts` credits a Resource by mention, a
+  page by the id `this.inertia()` names, and a redirect by the call, so a stub
+  naming one would read `match` with nothing behind it. Every action's
+  response is listed as unwritten, and the round trip pins `response` and
+  `response resource` as reader limits. A validator or model the file cannot
+  import (a validator another task adds, a model the root lacks) is listed
+  rather than guessed.
+- The routes to those actions go in `routes/<collection>.ts`, exporting
+  `register<Model>Routes`, one registrar per slice as D5 says, with each route's
+  method, path, name, contract schemas (the action's validators), bindings
+  (with the lookup column where the plan names one) and `.agent()` metadata.
+  An action's own `authorization.middleware` is applied on its route as well.
+  `auth` is the only middleware applied, aliased in the file the way
+  `make:feature`'s route block aliases it; a registrar typed `Router<'auth'>`
+  would not compile at the mount site, which passes the registrar's
+  unaliased parameter. Any other name is listed for the `http` step, which
+  knows the handler the application aliases it to.
+- The file is not mounted, and D3 is carried by a command: the `http` step (or
+  part) whose elements hold those routes runs `plan:scaffold <plan> --step
+  <id> --mount`, which `plan:next` names for it. It composes
+  `wireRouteRegistrar()`'s patch as `composeRouteRegistrarCall()`, so every
+  refusal comes first, and writes the entry atomically, the call first in the
+  registrar body; an `auth` alias the entry sets is then set after the file's
+  and wins at mount. It is approval-gated, must be the marked step, and
+  refuses a step holding no scaffolded routes, a file that is missing or no
+  longer exports its registrar, no routes entry, an entry declaring or
+  importing the registrar's name, and a file already mounted, judged by
+  `guren check`'s own reach from the entry with no plan read. `plan:next`
+  names the command only while the file exists and is not mounted. A module's
+  slice has no mount, since the scaffold refuses it. The mounted routes
+  register ahead of the entry's own, so a scaffolded path with a parameter can
+  shadow an entry route; that is documented, not changed. `planScaffoldMounts()` is the one rule for the file,
+  its registrar and its mounting step, which the scaffold, `--mount`,
+  `plan:next` and `guren check` all read.
+- The brief expected the routes to read `present` before the mount. They read
+  `planned`: `plan:status` reads a route from the definitions the entry
+  registrar registers, and an unmounted file registers none. Reading unmounted
+  route files would change route existence, and with it every approved plan's
+  freshness stamps. So before `--mount` the actions read `present` and the
+  routes `planned`; after it the routes, their actions and the validators they
+  use read `wired`. A binding's lookup column is unread.
+- `guren check` warns on an unmounted `routes/*.ts`, and that warning fails
+  `guren gate`, which the `Stop` hook runs on every stop between the scaffold
+  and the `http` step. An unmounted file the scaffold of an approved, unclosed
+  plan writes, whose `http` step has no `verified` record at the plan's
+  digest, and that exports the registrar the scaffold names, keeps the
+  warning's key and wording and is advisory (`plan/awaiting-mount.ts`, over
+  `plan/open-plan.ts`, the reading `check --plan` shares). It reads the plan files, their approvals, the
+  closing documents and the state files only, never `db/schema.ts` or a
+  validator file, and only once a project routes file is unmounted. Once the
+  step verifies or the plan closes, the warning gates again.
+- Side effects are `scaffoldable` in the task derivation now. Each is written
+  by the `make:job`, `make:event`, `make:listener` (with no event, since
+  `trigger` is prose), `make:mail` and `make:notification` builders under the
+  plan's class name, which is what `plan:status` finds one by. It reads
+  `present`; `wired` needs a dispatch, a registration or a send, which is the
+  `http` step's.
+- `@docs docs/entities/<Model>.md` goes on the controller and the routes file
+  only where that document exists: `guren check` fails a tag to a missing
+  file, and `plan:close` writes the document at the end. The model file
+  carries none, and no test file is written (the skeletons are item 7).
+- The shells are factored, their output pinned byte for byte first:
+  `buildControllerSource()` from `make:controller` and `make:feature`,
+  `buildRoutesSource()`, `routeCall()` and `authAliasLine()` from `make:route`
+  and `make:feature`'s route block, and the five side-effect builders.
+
 A step whose remaining work exceeds a threshold (files touched, elements
 covered) is split, pages by screen group first. The threshold starts at five
 files and is tuned from the metrics in §7.

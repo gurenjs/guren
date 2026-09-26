@@ -1,10 +1,10 @@
 /**
  * The plan-driven scaffold (RFC 0030 §5): a pure function from a scaffold step, and what the
- * application declares, to the tables, models, validators, resources, policies and policy
- * providers `guren plan:scaffold` writes (the last three through `scaffold-http.ts`). Every
- * planned property is written in a form the `plan:status` readers (`plan/status.ts`) read back,
- * so a scaffolded element can verify; a property no reader sees stays `unknown` there, and the
- * output is not bent around it. No pages, no action bodies, nothing the plan does not state.
+ * application declares, to what `guren plan:scaffold` writes: tables and models here, validators,
+ * resources and policies through `scaffold-http.ts`, controllers, routes and side effects through
+ * `scaffold-controller.ts`. Every planned property is written in a form the `plan:status` readers
+ * (`plan/status.ts`) read back, or listed as unwritten; a property no reader sees stays `unknown`
+ * there, and the output is not bent around it. No pages, no action bodies, nothing the plan does not state.
  */
 
 import { MODELS_DIR } from '../discovery'
@@ -30,8 +30,31 @@ import {
   type PlanScaffoldAdded,
   type PlanScaffoldUnwritten,
 } from './scaffold-http'
-import { listPlanElements, type PlanColumn, type PlanDraft, type PlanElementSection, type PlanModel, type PlanPolicy, type PlanResource, type PlanValidator } from './schema'
-import type { PlanDerivedStep } from './tasks'
+import {
+  buildPlanSideEffectSource,
+  controllerFilePath,
+  controllerRefusals,
+  PlanHttpEmitter,
+  scaffoldRoutesFile,
+  sideEffectFilePath,
+  sideEffectRefusals,
+  type PlanScaffoldSymbols,
+} from './scaffold-controller'
+import {
+  listPlanElements,
+  type PlanAction,
+  type PlanColumn,
+  type PlanController,
+  type PlanDraft,
+  type PlanElementSection,
+  type PlanModel,
+  type PlanPolicy,
+  type PlanResource,
+  type PlanRoute,
+  type PlanSideEffect,
+  type PlanValidator,
+} from './schema'
+import type { PlanDerivedStep, PlanTaskDerivation } from './tasks'
 
 export interface PlanScaffoldApp {
   dialect: SchemaDialect
@@ -44,6 +67,14 @@ export interface PlanScaffoldApp {
   /** The resource and policy classes the root declares, by file name as discovery names them. */
   resources: readonly string[]
   policies: readonly string[]
+  /** The controller classes the root declares, and its side-effect classes per kind, by file name. */
+  controllers: readonly string[]
+  sideEffects: Partial<Record<PlanSideEffect['kind'], readonly string[]>>
+  /** App-relative files declaring a root model class or exporting a root validator, by name: what a controller or routes file imports. */
+  modelFiles: Readonly<Record<string, string>>
+  validatorFiles: Readonly<Record<string, string>>
+  /** Entity documents that exist (`docs/entities/<Name>.md`), which a `@docs` tag may name without failing `guren check`. */
+  docs: readonly string[]
 }
 
 export interface PlanScaffoldTable {
@@ -461,6 +492,51 @@ class Emitter {
       { elements: [policy.id], path: providerFilePath(policy), contents: buildPolicyProviderSource(policy, model) },
     ]
   }
+
+  /** What a controller or routes file may import after this run: the root's classes and schemas, and what the run writes. */
+  private symbols(validators: readonly PlanValidator[]): PlanScaffoldSymbols {
+    const models = new Map(Object.entries(this.app.modelFiles))
+    for (const model of this.models) models.set(model.name, `${MODELS_DIR}/${model.name}.ts`)
+    const schemas = new Map(Object.entries(this.app.validatorFiles))
+    const [model] = this.models
+    if (model) for (const validator of validators) schemas.set(validator.name, validatorFilePath(model))
+    return { models, validators: schemas, docs: new Set(this.app.docs) }
+  }
+
+  /** The controllers, and one routes file named after the model the step adds, as the validator file is. */
+  http(selection: Selection): PlanScaffoldFile[] {
+    const [model, ...others] = this.models
+    if (!model || (selection.controllers.length === 0 && selection.routes.length === 0)) return []
+    const emitter = new PlanHttpEmitter(this.plan, this.symbols(selection.validators), this.unwritten)
+    const files: PlanScaffoldFile[] = selection.controllers.map(({ controller, actions }) => {
+      this.refuseModule(controller)
+      this.refusals.push(...controllerRefusals(controller, actions, this.app.controllers))
+      return { elements: [controller.id, ...actions.map((action) => action.id)], path: controllerFilePath(controller), contents: emitter.controller(controller, actions, model) }
+    })
+    if (selection.routes.length > 0) {
+      if (others.length > 0) {
+        this.refusals.push(`${selection.routes.map((route) => route.id).join(', ')}: the step adds ${this.models.map((added) => added.id).join(' and ')}, and the routes file is named after one model. Split the models across tasks (plan:revise).`)
+      }
+      files.push({ elements: selection.routes.map((route) => route.id), path: scaffoldRoutesFile(model).path, contents: emitter.routes(model, selection.routes) })
+    }
+    return files
+  }
+
+  sideEffect(effect: PlanSideEffect): PlanScaffoldFile {
+    this.refuseModule(effect)
+    this.refusals.push(...sideEffectRefusals(effect, this.app.sideEffects[effect.kind] ?? []))
+    return { elements: [effect.id], path: sideEffectFilePath(effect), contents: buildPlanSideEffectSource(effect) }
+  }
+
+  /** Two elements writing one file (two side effects of a kind by one name) would have the second write refused half way. */
+  checkPaths(files: readonly PlanScaffoldFile[]): void {
+    const seen = new Map<string, string[]>()
+    for (const file of files) {
+      const earlier = seen.get(file.path)
+      if (earlier) this.refusals.push(`${[...earlier, ...file.elements].join(' and ')} would each write ${file.path}.`)
+      seen.set(file.path, [...(earlier ?? []), ...file.elements])
+    }
+  }
 }
 
 /** The command `plan:next` names for a scaffold step. */
@@ -468,16 +544,26 @@ export function planScaffoldCommandLine(planArgument: string, stepId: string): s
   return `bunx guren plan:scaffold ${planArgument} --step ${stepId}`
 }
 
+/** The command `plan:next` and `guren check` name for the http step that mounts a scaffolded routes file. */
+export function planScaffoldMountCommandLine(planArgument: string, stepId: string): string {
+  return `${planScaffoldCommandLine(planArgument, stepId)} --mount`
+}
+
 interface Selection extends PlanScaffoldAdded {
   models: PlanModel[]
+  /** Each added controller the step writes, with the added actions it holds. */
+  controllers: Array<{ controller: PlanController; actions: PlanAction[] }>
+  routes: PlanRoute[]
+  sideEffects: PlanSideEffect[]
   /** Why an element of `generates` is left, where there is more to say than its section. */
   reasons: Map<string, string>
 }
 
 /**
  * What a step writes, decided from the plan alone: each added model and its added columns; the
- * validators, in a file named after the model; and each resource and policy whose model the step
- * adds, since the files import that model and its record type.
+ * validators, in a file named after the model; each resource and policy whose model the step
+ * adds, since the files import that model and its record type; each added controller with its
+ * added actions; the routes to those actions, in one file named after the model; the side effects.
  */
 function select(plan: PlanDraft, generates: ReadonlySet<string>): Selection {
   const models = scaffoldedModels(plan, generates)
@@ -486,13 +572,38 @@ function select(plan: PlanDraft, generates: ReadonlySet<string>): Selection {
   const added: PlanScaffoldAdded = { validators: addedIn(plan.validators), resources: addedIn(plan.resources), policies: addedIn(plan.policies) }
   const reasons = httpLeftReasons(added, models)
   const kept = <T extends { id: string }>(elements: T[]): T[] => elements.filter((element) => !reasons.has(element.id))
-  return { models, validators: kept(added.validators), resources: kept(added.resources), policies: kept(added.policies), reasons }
+
+  const controllers = addedIn(plan.controllers).map((controller) => ({ controller, actions: addedIn(controller.actions) }))
+  const written = new Set(controllers.flatMap(({ actions }) => actions.map((action) => action.id)))
+  for (const controller of plan.controllers) {
+    if (controllers.some((selected) => selected.controller.id === controller.id)) continue
+    for (const action of addedIn(controller.actions)) {
+      reasons.set(action.id, `its controller ${controller.className} is not one this step adds, and plan:scaffold writes no action into an existing file`)
+    }
+  }
+  const routes = addedIn(plan.routes).filter((route) => {
+    if (written.has(route.action)) return true
+    reasons.set(route.id, `its action ${route.action} is not one this step writes`)
+    return false
+  })
+  return {
+    models,
+    validators: kept(added.validators),
+    resources: kept(added.resources),
+    policies: kept(added.policies),
+    controllers,
+    routes,
+    sideEffects: addedIn(plan.sideEffects),
+    reasons,
+  }
 }
 
 function coverageOf(plan: PlanDraft, generates: ReadonlySet<string>, selection: Selection): Pick<PlanScaffoldOutput, 'emitted' | 'left'> {
   const written = new Set([
     ...selection.models.flatMap((model) => [model.id, ...scaffoldedColumns(model, generates).map((column) => column.id)]),
     ...[...selection.validators, ...selection.resources, ...selection.policies].map((element) => element.id),
+    ...selection.controllers.flatMap(({ controller, actions }) => [controller.id, ...actions.map((action) => action.id)]),
+    ...[...selection.routes, ...selection.sideEffects].map((element) => element.id),
   ])
   const elements = listPlanElements(plan)
   return {
@@ -512,6 +623,31 @@ export function planScaffoldCoverage(plan: PlanDraft, step: Pick<PlanDerivedStep
   return coverageOf(plan, generates, select(plan, generates))
 }
 
+/** A routes file a scaffold step writes, and the http step that mounts it: the step, or part, holding those routes. */
+export interface PlanScaffoldMount {
+  task: string
+  scaffoldStep: string
+  httpStep: string
+  path: string
+  registrar: string
+  routes: string[]
+}
+
+/** Every routes file the plan's scaffold steps write: what `--mount`, `plan:next` and `guren check` read the scaffold's routes by. */
+export function planScaffoldMounts(plan: PlanDraft, derivation: PlanTaskDerivation): PlanScaffoldMount[] {
+  return derivation.tasks.flatMap((task) => {
+    const scaffold = task.steps.find((step) => step.kind === 'scaffold')
+    const title = task.title
+    const model = title.kind === 'entity' ? plan.models.find((candidate) => candidate.id === title.model) : undefined
+    // A module's slice is refused by the scaffold, which writes to the project root only.
+    if (!scaffold || !model || model.module) return []
+    const routes = select(plan, new Set(scaffold.generates)).routes.map((route) => route.id)
+    // Derivation gives every route of a task to one of its http steps.
+    const http = task.steps.find((step) => step.kind === 'http' && step.elementIds.some((id) => routes.includes(id)))
+    return http ? [{ task: task.id, scaffoldStep: scaffold.id, httpStep: http.id, ...scaffoldRoutesFile(model), routes }] : []
+  })
+}
+
 /** What `plan:scaffold` writes for `step`. Pure: the caller reads the application and writes the result. */
 export function emitPlanScaffold(plan: PlanDraft, step: PlanDerivedStep, app: PlanScaffoldApp): PlanScaffoldOutput {
   const generates = new Set(step.generates)
@@ -527,7 +663,10 @@ export function emitPlanScaffold(plan: PlanDraft, step: PlanDerivedStep, app: Pl
     ...emitter.validators(selection.validators),
     ...selection.resources.map((resource) => emitter.resource(resource)),
     ...selection.policies.flatMap((policy) => emitter.policy(policy)),
+    ...emitter.http(selection),
+    ...selection.sideEffects.map((effect) => emitter.sideEffect(effect)),
   ]
+  emitter.checkPaths(files)
   return {
     tables,
     files,

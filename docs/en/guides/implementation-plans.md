@@ -414,8 +414,7 @@ Next: task/entity/model.comment/scaffold
   verify: codegen → typecheck
 
 Write this step with `bunx guren plan:scaffold docs/plans/comments/plan.json --step task/entity/model.comment/scaffold`, not by hand.
-  It writes each added model (table and class), its validators and resources, and each policy with a provider registering it: model.comment, column.comment.id, column.comment.body, column.comment.postId, column.comment.createdAt, validator.comment, resource.comment, policy.comment
-  It does not write controller.comments, action.comments.store, action.comments.destroy, route.comments.store, route.comments.destroy; the http step implements them by hand.
+  It writes each added model (table and class), its validators and resources, each policy with a provider registering it, each added controller with its actions as stubs, the routes to them in a file of their own that the http step mounts, and the side-effect classes: model.comment, column.comment.id, column.comment.body, column.comment.postId, column.comment.createdAt, validator.comment, controller.comments, action.comments.store, action.comments.destroy, route.comments.store, route.comments.destroy, resource.comment, policy.comment
 ```
 
 ```bash
@@ -463,7 +462,42 @@ export class CommentResource extends Resource<CommentRecord, CommentResourceData
 }
 ```
 
-Each policy is written with one method per planned ability, and every method returns `false` until you write its rule, which the method's comment quotes. `app/Providers/CommentPolicyProvider.ts` registers it with the gate in `boot()`, and the command adds that provider to `createApp({ providers })` in `src/app.ts`. `plan:status` reads a policy by its abilities and does not read its registration, so a policy is complete at `present`; a validator is `wired` only once a route contract or an action uses it, which is the `http` step's work.
+Each policy is written with one method per planned ability, and every method returns `false` until you write its rule, which the method's comment quotes. `app/Providers/CommentPolicyProvider.ts` registers it with the gate in `boot()`, and the command adds that provider to `createApp({ providers })` in `src/app.ts`. `plan:status` reads a policy by its abilities and does not read its registration, so a policy is complete at `present`.
+
+Each controller the step adds holds exactly the planned actions and nothing else. An action validates its `params` and `query` with the planned validators, authorizes with the planned policy ability, validates its `body`, then answers 501. A caller the policy denies gets 403 whatever it sent:
+
+```typescript
+export default class CommentController extends Controller {
+  // Planned response: a redirect to /posts/:postId
+  // Rule: The comment's author is the signed-in user.
+  async store(): Promise<Response> {
+    await this.validateBody(CommentPayloadSchema)
+    throw HttpException.notImplemented('CommentController.store is planned and not written yet')
+  }
+
+  // Planned response: a redirect to /posts/:postId
+  async destroy(): Promise<Response> {
+    await this.authorize('delete', Comment)
+    throw HttpException.notImplemented('CommentController.destroy is planned and not written yet')
+  }
+}
+```
+
+It validates with `validateBody()` rather than `validated('comments.store')`, since `validated()` is typed from the generated route names, and the route is not registered until the `http` step mounts it. No response is written: `plan:status` credits a response it can name (a resource, a page, a redirect), so a stub that named one would read as done. The report lists every action's response as left to write.
+
+The routes to those actions go in a file of their own, `routes/comments.ts`, with each route's method, path, name, contract schemas, bindings, `auth` middleware and `.agent()` metadata as planned:
+
+```typescript
+export function registerCommentRoutes(router: Router): void {
+  const authRouter = router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+  authRouter.post('/posts/:postId/comments', { name: 'comments.store', body: CommentPayloadSchema, bind: { postId: Post } }, [CommentController, 'store']).middleware('auth')
+  authRouter.delete('/comments/:id', { name: 'comments.destroy', bind: { id: Comment } }, [CommentController, 'destroy']).middleware('auth')
+}
+```
+
+Nothing calls the file yet, so its routes are not registered and read as `planned`: a mounted route would answer 401 or 422 before the `tests` step, and a behaviour that already passes fails that step. `auth` is the only middleware it applies; any other name the plan gives is listed for the `http` step, which knows the handler the application aliases it to. `guren check` reports the unmounted file as advisory while the plan is approved and not closed and its `http` step is not verified, so the gate does not block the steps in between. Once that step verifies or the plan closes, an unmounted file is a warning again.
+
+Each job, event, listener, mail and notification the step adds is written as the matching `make:*` command writes it, under the plan's class name. `plan:status` reads one as `present`; it is `wired` once something dispatches, registers or sends it, which is the `http` step's work. Where `docs/entities/Comment.md` already exists, the controller and the routes file carry `@docs docs/entities/Comment.md`; a tag to a document that does not exist yet would fail `guren check`.
 
 It runs neither codegen nor a migration: `plan:verify` runs codegen and the typecheck, and the `data` step generates the migration.
 
@@ -471,13 +505,26 @@ Every refusal comes before the first write. It refuses:
 
 - a draft, or a plan no approval names;
 - a step other than a `scaffold` step (it names the task's own), or one `plan:next` has not marked;
-- a model, validator, resource or policy in a module (it writes to the project root only), and an API-only application;
+- a model, validator, resource, policy, controller or side effect in a module (it writes to the project root only), and an API-only application;
 - on MySQL, a key over a `text` or `json` column (a primary key, `unique`, an index, or a foreign key, which MySQL indexes), which drizzle-kit refuses and MySQL rejects without a prefix length (plan the column as `string`, or drop the key), and a `default` of `null`;
-- a resource whose name does not end in `Resource`, which `guren codegen` would not discover, and a policy ability named after one of `Policy`'s own members (`before`, `allow`, `deny`);
+- a resource whose name does not end in `Resource`, which `guren codegen` would not discover, a policy ability named after one of `Policy`'s own members (`before`, `allow`, `deny`), and an action named after one of `Controller`'s (`redirect`, `json`);
 - a policy provider it cannot register: no `src/app.ts` or `app.ts`, no `createApp()` call it can patch, or one that already registers it;
-- any target that already exists: the model file or class, the schema export, the table name in any application root, a file it would create, a validator name another validator file exports, and a resource or policy class of the same name.
+- any target that already exists: the model file or class, the schema export, the table name in any application root, a file it would create, a validator name another validator file exports, and a resource, policy, controller or side-effect class of the same name.
 
-Running it again on a scaffolded step is refused the same way, since its files exist; verify the step instead. `--json` prints the files it created, the tables it appended, the providers it registered, the elements it wrote, the ones it left, the rules and fields it wrote as a stub or not at all, and the relationships it left out.
+Running it again on a scaffolded step is refused the same way, since its files exist; verify the step instead. `--json` prints the files it created, the tables it appended, the providers it registered, the routes file it left unmounted and the step that mounts it, the elements it wrote, the ones it left, what it wrote as a stub or not at all, and the relationships it left out.
+
+### Mounting the routes: `plan:scaffold --mount`
+
+The `http` step holding the routes a scaffold wrote starts by mounting them, and `plan:next` names the command:
+
+```text
+Mount the routes the scaffold step wrote first, with `bunx guren plan:scaffold docs/plans/comments/plan.json --step task/entity/model.comment/http --mount`, not by hand: it calls routes/comments.ts from the entry registrar.
+  Written as stubs by plan:scaffold, to finish: validator.comment, controller.comments, action.comments.store, action.comments.destroy, route.comments.store, route.comments.destroy, resource.comment, policy.comment. Each action validates and authorizes as planned and answers 501; write its body and response.
+```
+
+It imports `registerCommentRoutes` into `routes/web.ts` and calls it first in the registrar there. Being first, an `auth` alias the entry sets replaces the one the routes file sets. The mounted routes also register ahead of the entry's own, so a scaffolded path with a parameter, such as `/posts/:id`, can shadow an entry route like `/posts/create`: check the order when the two overlap. `plan:status` then reads the routes and their actions as `wired`, and the validators they use too. What is left is each action's body and response, and what the scaffold listed as a stub or not at all.
+
+It refuses, writing nothing, a draft or a plan no approval names, a step `plan:next` has not marked, a step that holds no scaffolded routes (it names the one that does), a routes file that does not exist or no longer exports its registrar, an application with no `routes/web.ts`, an entry that already imports another binding under the registrar's name, and a file already mounted, whether the entry calls it or another routes file does.
 
 ### Outcomes
 
@@ -799,7 +846,7 @@ The RFC behind this feature (`rfcs/0030-implementation-plans.md`) describes more
 
 - a `guren plan` that asks Claude for the plan JSON by itself (`--print-prompt` is the form that exists), and `plan --revise`, which would turn review comments into a revision (`plan:revise` records a change you make yourself). Write `plan.json` yourself or in your agent session;
 - keeping plans in GitHub issues instead of `docs/plans/`;
-- a `plan:scaffold` that writes the whole slice. It writes each added model's table and class, the validators, the resources and the policies with their providers; the slice's controllers and routes are still the `http` step's work, by hand. It writes no pages, and will not: a page written from the plan's props would match the plan by construction.
+- pages from `plan:scaffold`. It writes every other element of a slice the plan adds, with the action bodies and responses left for the `http` step. It will not write pages: a page written from the plan's props would match the plan by construction.
 
 ## Next steps
 

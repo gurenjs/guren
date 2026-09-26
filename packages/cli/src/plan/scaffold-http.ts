@@ -231,7 +231,8 @@ export function buildPlanValidatorSource(validators: readonly PlanValidator[], t
 /**
  * A payload field copied off the model's record where the planned type admits every value the
  * column reads back as; a `Date` serialized where it admits a `string`; a JSON column, which
- * reads back as `unknown`, cast to the planned type as `make:feature` casts it. `undefined` otherwise.
+ * reads back as `unknown`, cast to the planned type as `make:feature` casts it, unless the column
+ * is nullable and the planned type omits `null`. `undefined` otherwise, which the caller stubs.
  */
 function payloadValue(field: PlanResource['fields'][number], column: PlanColumn | undefined, nullable: boolean, dialect: SchemaDialect): string | undefined {
   const planned = unionMembers(field.type)

@@ -56,15 +56,22 @@ it, and do not edit the application back or the plan to make it pass.
   - each resource of the model, its payload typed as planned;
   - each policy of the model, every ability denying until written, and an
     `app/Providers/<Policy>Provider.ts` registered in `createApp()` that
-    hands the policy to the gate.
+    hands the policy to the gate;
+  - each added controller, with exactly the planned actions: each validates
+    and authorizes as planned, then answers 501;
+  - the routes to those actions in `routes/<collection>.ts`, which is not
+    mounted yet;
+  - the side-effect classes (jobs, events, listeners, mails, notifications).
 
-  The controllers and routes the step lists under "does not write" are the
-  `http` step's, by hand. It runs no codegen and no migration. A relationship
+  Anything the step lists under "does not write" is the `http` step's, by hand.
+  It runs no codegen and no migration. A relationship
   it reports as left out is added in the step where what it needs exists; until
-  then `plan:status` reads the model as drifted. It also lists the validator
-  rules it could not write and the resource fields it wrote as a stub that
-  throws: those are `http` work too. It refuses a re-run once the step's files
-  exist, and then `plan:verify` is what is left.
+  then `plan:status` reads the model as drifted. It also lists what it wrote as
+  a stub or not at all: validator rules, resource fields that throw, every
+  action's response, and middleware other than `auth`. Those are `http` work
+  too. `guren check` reports the unmounted routes file as advisory until the
+  `http` step that mounts it is verified. It refuses a re-run once the step's
+  files exist, and then `plan:verify` is what is left.
 - **`tests`**: write the behaviours as tests whose titles carry the acceptance id
   literally, `[AC-comments-1] a signed-in user can comment on a post`, and leave
   them failing. The step verifies with `tests:fail`, so a test that already
@@ -74,10 +81,14 @@ it, and do not edit the application back or the plan to make it pass.
   relationship `plan:scaffold` reported as left out.
 - **`http`**: controllers and routes (and validators, resources and policies
   when no scaffold step wrote them), until `guren check` passes and the step's
-  behaviours pass. After a scaffold step, write each policy ability's rule in
-  place of its `return false`, map each resource field `plan:scaffold` stubbed,
-  and add the validator rules it listed. An action is complete only when its
-  route is mounted and validates through the route contract.
+  behaviours pass. After a scaffold step, first run the command `plan:next`
+  names, `bunx guren plan:scaffold <plan> --step <id> --mount`, which calls the
+  scaffolded routes file from the entry registrar; do not mount it by hand.
+  Then replace each action's 501 with its body and planned response, write
+  each policy ability's rule in place of its `return false`, map each resource
+  field `plan:scaffold` stubbed, and add the validator rules and middleware it
+  listed. An action is complete only when its route is mounted and validates
+  through the route contract.
 - **`pages`**: the Inertia pages; verified by `typecheck` and `guren check`.
 
 Implement only the elements the step lists. An element of a later step is that

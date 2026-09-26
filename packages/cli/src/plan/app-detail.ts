@@ -18,22 +18,20 @@ import type { ContextRoute } from '../context-route'
 import { accessorCallPattern, blankCommentsAndStrings, type ControllerMemberName, type ControllerMethodScan } from '../controller-methods'
 import {
   classNameFromPath,
-  discoverEventFiles,
-  discoverJobFiles,
-  discoverListenerFiles,
-  discoverMailFiles,
   discoverModelFiles,
   discoverModuleRoutesFiles,
-  discoverNotificationFiles,
   discoverPolicyFiles,
   discoverResourceFiles,
   discoverRoutesFiles,
+  discoverSideEffectFiles,
   discoverValidatorFiles,
   excludeBarrelFiles,
   listModuleNames,
   moduleNameFor,
   moduleNameFromRelPath,
+  SIDE_EFFECT_DIRS,
   toPosixRelative,
+  type SideEffectKind,
 } from '../discovery'
 import { moduleRoutesEntryFile } from '../import-resolution'
 import { extractInertiaPageRefs, describeInertiaPagePropKeys, resolveInertiaPageFile } from '../inertia-pages'
@@ -147,7 +145,7 @@ export interface PlanAppPolicyDetail extends PlanAppClassDetail {
   abilities: PlanAppPolicyAbilities | PlanAppUnreadable
 }
 
-export type PlanAppSideEffectKind = 'job' | 'event' | 'listener' | 'mail' | 'notification'
+export type PlanAppSideEffectKind = SideEffectKind
 
 /** A side-effect class and where the application's source uses it (`side-effect-uses.ts`). */
 export interface PlanAppSideEffectDetail extends PlanAppClassDetail {
@@ -596,17 +594,9 @@ async function policyDetail(root: string, cache: ParseCache): Promise<PlanAppPol
   )
 }
 
-const SIDE_EFFECT_DISCOVERY: Record<PlanAppSideEffectKind, (appRoot: string) => Promise<string[]>> = {
-  job: discoverJobFiles,
-  event: discoverEventFiles,
-  listener: discoverListenerFiles,
-  mail: discoverMailFiles,
-  notification: discoverNotificationFiles,
-}
-
 async function sideEffectDetail(root: string, cache: ParseCache): Promise<Pick<PlanAppDetail, 'sideEffects' | 'sideEffectUsesUnread'>> {
-  const kinds = Object.keys(SIDE_EFFECT_DISCOVERY) as PlanAppSideEffectKind[]
-  const classes = await Promise.all(kinds.map(async (kind) => [kind, await classDetail(root, SIDE_EFFECT_DISCOVERY[kind])] as const))
+  const kinds = Object.keys(SIDE_EFFECT_DIRS) as PlanAppSideEffectKind[]
+  const classes = await Promise.all(kinds.map(async (kind) => [kind, await classDetail(root, (appRoot) => discoverSideEffectFiles(appRoot, kind))] as const))
   const targets = classes.flatMap(([kind, entries]) => entries.map((entry) => ({ ...entry, kind })))
   const read = await scanSideEffectUses(root, cache, targets).catch((error: unknown) => ({ unreadable: reasonOf(error) }))
   const uses = 'unreadable' in read ? undefined : read.byFile

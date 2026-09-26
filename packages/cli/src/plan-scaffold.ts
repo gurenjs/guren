@@ -1,38 +1,49 @@
 /**
  * `guren plan:scaffold` (RFC 0030 §5, Part 3 item 6): writes what `plan/scaffold.ts` emits for
  * one scaffold step of an approved plan, the step `plan:next` has marked, and registers each
- * policy provider in `createApp()`. Every refusal is decided before the first write, so a refused
- * run leaves the application as it was, and a re-run over a scaffolded step is refused on the
- * targets it already wrote. It runs no codegen and no migration: those are `plan:verify`'s.
+ * policy provider in `createApp()`; with `--mount`, from the http step, it calls the routes file
+ * that scaffold wrote from the entry registrar. Every refusal is decided before the first write,
+ * so a refused run leaves the application as it was, and a re-run over a scaffolded step is
+ * refused on the targets it already wrote. It runs no codegen and no migration: those are `plan:verify`'s.
  */
 
 import { readFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
+import type { File, Node } from '@babel/types'
 
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { CliError } from './cli-error'
 import {
   classNameFromPath,
+  discoverControllerFiles,
   discoverPolicyFiles,
   discoverResourceFiles,
+  discoverSideEffectFiles,
   discoverValidatorFiles,
   excludeBarrelFiles,
   moduleNameFor,
   readIfExists,
+  SIDE_EFFECT_DIRS,
   toPosixRelative,
+  type SideEffectKind,
 } from './discovery'
 import { DIALECT_BARRELS } from './drizzle-specifiers'
 import { discoverModelClasses } from './model-parser'
-import { ParseCache } from './parse-cache'
+import { parseSourceFile, ParseCache } from './parse-cache'
 import { appendTableToSchema, detectSchemaDialect, ensureNamedImports } from './patch-helpers'
 import { readPlanFile } from './plan-render'
 import { exportedNames } from './plan/app-detail'
 import { requirePlanApproval } from './plan/approvals'
 import { writeFileAtomic } from './plan/beside'
-import { emitPlanScaffold, type PlanScaffoldOutput } from './plan/scaffold'
+import { entityDocPath } from './plan/close-docs'
+import { emitPlanScaffold, planScaffoldMountCommandLine, planScaffoldMounts, type PlanScaffoldMount, type PlanScaffoldOutput } from './plan/scaffold'
+import { importSpecifier } from './plan/scaffold-controller'
+import type { Plan } from './plan/schema'
 import { planSlug, readPlanState } from './plan/state'
-import { derivePlanTasks, findPlanStep, listPlanSteps } from './plan/tasks'
+import { derivePlanTasks, findPlanStep, listPlanSteps, type PlanTaskDerivation } from './plan/tasks'
 import { composeAppProviderRegistration, resolveAppEntry } from './provider-registrar'
+import { composeRouteRegistrarCall, resolveRoutesEntry } from './route-registrar'
+import { isRoutesFileMounted } from './routes-check'
 import { parseSchemaTables, schemaPathFor } from './schema-parser'
 import { pathExists, writeScaffoldFiles } from './utils'
 
@@ -48,6 +59,8 @@ export interface PlanScaffoldReport extends Pick<PlanScaffoldOutput, 'emitted' |
   appended: { file: string; tables: string[] }
   /** The app entry the policy providers were registered in; `file` is null when there was none to register. */
   registered: { file: string | null; providers: string[] }
+  /** The routes file written unmounted, and the http step that mounts it with `--mount`; null when the step writes none. */
+  unmounted: { file: string; registrar: string; step: string } | null
 }
 
 export interface PlanScaffoldFileOptions {
@@ -56,42 +69,75 @@ export interface PlanScaffoldFileOptions {
   cwd?: string
 }
 
-function refuse(lines: string[]): never {
-  throw new CliError(`${lines.join('\n')}\nNothing was scaffolded.`)
+/** How a refusal of each form ends, and what the approval gate says of an unapproved plan. */
+interface Outcome {
+  refused: string
+  approval: string
+}
+
+const SCAFFOLD: Outcome = { refused: 'Nothing was scaffolded.', approval: 'nothing is scaffolded from it' }
+const MOUNT: Outcome = { refused: 'Nothing was mounted.', approval: 'nothing is mounted from it' }
+
+function refuse(lines: string[], outcome: Outcome = SCAFFOLD): never {
+  throw new CliError(`${lines.join('\n')}\n${outcome.refused}`)
+}
+
+function refuseMount(lines: string[]): never {
+  refuse(lines, MOUNT)
+}
+
+/** The approval gate, and the refusal of an API-only application, which derivation gives no scaffold step. */
+async function approvedPlan(planPath: string, options: PlanScaffoldFileOptions, outcome: Outcome): Promise<{ path: string; plan: Plan; hash: string }> {
+  const { path, plan } = await readPlanFile(planPath, options.cwd)
+  const approval = await requirePlanApproval(path, plan, outcome.approval)
+  if (!approval) {
+    refuse([`${basename(path)} is a draft: plan:scaffold writes code from an approved plan only. Run guren plan:approve ${planPath} first.`], outcome)
+  }
+  if (await isConfirmedApiOnlyApp(options.appRoot).catch(() => false)) {
+    refuse(['This application is API-only, so its plans have no scaffold step: plan:scaffold writes a model for an application that renders Inertia pages.'], outcome)
+  }
+  return { path, plan: plan as Plan, hash: approval.hash }
+}
+
+/** One step is one commit, measured from where plan:next marked it (plan/work.ts), and plan:next accepts a dirty tree only as the marked step's own work. */
+async function requireMark(root: string, path: string, planPath: string, stepId: string, outcome: Outcome): Promise<void> {
+  const active = (await readPlanState(root, planSlug(path))).state?.active
+  if (active?.step === stepId) return
+  refuse([
+    `${stepId} is not the step plan:next marked${active ? ` (it marked ${active.step})` : ''}. Run guren plan:next ${planPath} first:`,
+    '  it marks the step, so what plan:scaffold writes counts as that step’s work.',
+  ], outcome)
+}
+
+/** Where to go instead of a step that is no scaffold step: its `--mount` form, the task's own scaffold step, or the plan's. */
+function scaffoldStepHint(plan: Plan, derivation: PlanTaskDerivation, planPath: string, stepId: string, found: ReturnType<typeof findPlanStep>): string {
+  if (planScaffoldMounts(plan, derivation).some((mount) => mount.httpStep === stepId)) {
+    return `To mount the routes its scaffold step wrote, run ${planScaffoldMountCommandLine(planPath, stepId)}.`
+  }
+  const own = found?.task.steps.find((step) => step.kind === 'scaffold')
+  if (own) return `The scaffold step of ${found?.task.id} is ${own.id}.`
+  const scaffoldSteps = listPlanSteps(derivation).filter(({ step }) => step.kind === 'scaffold').map(({ step }) => step.id)
+  return scaffoldSteps.length > 0 ? `Its scaffold steps: ${scaffoldSteps.join(', ')}.` : 'The plan has no scaffold step.'
+}
+
+/** The root entity documents that exist, which a `@docs` tag may name without failing `guren check`. */
+async function existingEntityDocs(root: string, plan: Plan): Promise<string[]> {
+  const docs = plan.models.filter((model) => !model.module).map(entityDocPath)
+  const exists = await Promise.all(docs.map((doc) => pathExists(resolve(root, doc))))
+  return docs.filter((_, index) => exists[index])
 }
 
 export async function planScaffoldFile(planPath: string, options: PlanScaffoldFileOptions): Promise<PlanScaffoldReport> {
-  const { path, plan } = await readPlanFile(planPath, options.cwd)
-  const approval = await requirePlanApproval(path, plan, 'nothing is scaffolded from it')
-  if (!approval) {
-    refuse([`${basename(path)} is a draft: plan:scaffold writes code from an approved plan only. Run guren plan:approve ${planPath} first.`])
-  }
+  const { path, plan, hash } = await approvedPlan(planPath, options, SCAFFOLD)
   const root = options.appRoot
-  if (await isConfirmedApiOnlyApp(root).catch(() => false)) {
-    refuse(['This application is API-only, so its plans have no scaffold step: plan:scaffold writes a model for an application that renders Inertia pages.'])
-  }
 
   const derivation = derivePlanTasks(plan)
   const found = findPlanStep(derivation, options.step)
   if (!found || found.step.kind !== 'scaffold') {
-    const scaffoldSteps = listPlanSteps(derivation).filter(({ step }) => step.kind === 'scaffold').map(({ step }) => step.id)
-    const own = found?.task.steps.find((step) => step.kind === 'scaffold')
-    const hint = own
-      ? `The scaffold step of ${found?.task.id} is ${own.id}.`
-      : scaffoldSteps.length > 0 ? `Its scaffold steps: ${scaffoldSteps.join(', ')}.` : 'The plan has no scaffold step.'
-    refuse([`${options.step} is ${found ? `a ${found.step.kind} step` : 'no step of the plan'}, and plan:scaffold writes a scaffold step only. ${hint}`])
+    refuse([`${options.step} is ${found ? `a ${found.step.kind} step` : 'no step of the plan'}, and plan:scaffold writes a scaffold step only. ${scaffoldStepHint(plan, derivation, planPath, options.step, found)}`])
   }
   const { step } = found
-
-  // One step is one commit, measured from where plan:next marked it (plan/work.ts), and
-  // plan:next accepts a dirty tree only as the marked step's own work.
-  const active = (await readPlanState(root, planSlug(path))).state?.active
-  if (active?.step !== step.id) {
-    refuse([
-      `${step.id} is not the step plan:next marked${active ? ` (it marked ${active.step})` : ''}. Run guren plan:next ${planPath} first:`,
-      '  it marks the step, so what plan:scaffold writes counts as that step’s work.',
-    ])
-  }
+  await requireMark(root, path, planPath, step.id, SCAFFOLD)
 
   const schemaPath = schemaPathFor(null)
   const schema = await readIfExists(root, schemaPath)
@@ -99,7 +145,7 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
   const dialect = detectSchemaDialect(schema)
   const tables = await parseSchemaTables(root)
   const cache = new ParseCache()
-  const models = (await discoverModelClasses(root, cache)).filter((model) => model.module === null).map((model) => model.className)
+  const models = (await discoverModelClasses(root, cache)).filter((model) => model.module === null)
   const validators = await rootValidatorExports(root, cache)
   if ('unreadable' in validators) refuse([`plan:scaffold cannot tell which schemas the validator files already export: ${validators.unreadable}.`])
 
@@ -112,10 +158,17 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
       columns: table.columns.map((column) => column.name),
       ...(table.opaqueColumns ? { opaqueColumns: true } : {}),
     })),
-    models,
-    validators: validators.names,
+    models: models.map((model) => model.className),
+    validators: Object.keys(validators.files),
     resources: await rootClassNames(root, discoverResourceFiles),
     policies: await rootClassNames(root, discoverPolicyFiles),
+    controllers: await rootClassNames(root, discoverControllerFiles),
+    sideEffects: Object.fromEntries(
+      await Promise.all((Object.keys(SIDE_EFFECT_DIRS) as SideEffectKind[]).map(async (kind) => [kind, await rootClassNames(root, (appRoot) => discoverSideEffectFiles(appRoot, kind))] as const)),
+    ),
+    modelFiles: Object.fromEntries(models.map((model) => [model.className, toPosixRelative(root, model.filePath)])),
+    validatorFiles: validators.files,
+    docs: await existingEntityDocs(root, plan),
   })
   const inTheWay = []
   for (const file of output.files) if (await pathExists(resolve(root, file.path))) inTheWay.push(`${file.path} already exists.`)
@@ -169,11 +222,12 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
 
   return {
     reportVersion: PLAN_SCAFFOLD_REPORT_VERSION,
-    plan: { file: basename(path), title: plan.title, hash: approval.hash },
+    plan: { file: basename(path), title: plan.title, hash },
     step: step.id,
     created,
     appended: { file: schemaPath, tables: output.tables.map((table) => table.identifier) },
     registered: { file: registration.entry, providers: output.providers },
+    unmounted: unmountedRoutes(plan, derivation, step.id, created),
     emitted: output.emitted,
     left: output.left,
     omitted: output.omitted,
@@ -192,18 +246,21 @@ function failedWrite(writing: string | undefined, written: readonly string[], re
   return ` ${writing} failed and may exist, part written.`
 }
 
-/** The names the root's validator files export, which a planned validator must not take: `plan:status` finds a validator by its name. */
-async function rootValidatorExports(root: string, cache: ParseCache): Promise<{ names: string[] } | { unreadable: string }> {
-  const names: string[] = []
+/**
+ * The names the root's validator files export, with the file each is in: a planned validator must
+ * not take one (`plan:status` finds a validator by its name), and a controller imports one from there.
+ */
+async function rootValidatorExports(root: string, cache: ParseCache): Promise<{ files: Record<string, string> } | { unreadable: string }> {
+  const files: Record<string, string> = {}
   for (const filePath of excludeBarrelFiles(await discoverValidatorFiles(root))) {
     if (moduleNameFor(root, filePath) !== null) continue
     const file = toPosixRelative(root, filePath)
     const parsed = await cache.get(filePath)
     const exported = parsed ? exportedNames(parsed.ast, 'this file') : null
     if (exported === null) return { unreadable: `${file} could not be read for its exports` }
-    names.push(...exported)
+    for (const name of exported) files[name] ??= file
   }
-  return { names }
+  return { files }
 }
 
 async function rootClassNames(root: string, discover: (appRoot: string) => Promise<string[]>): Promise<string[]> {
@@ -251,6 +308,111 @@ export function formatPlanScaffold(report: PlanScaffoldReport, planArgument: str
     lines.push('', 'Relationships left out of the model, to add once what they need exists; until then plan:status reads the model as drifted:')
     lines.push(...report.omitted.map((entry) => `  ${entry.model} ${entry.relationship}: ${entry.reason}`))
   }
+  if (report.unmounted) {
+    const { file, step } = report.unmounted
+    lines.push('', `${file} is not mounted, so its routes answer nothing until the http step ${step} runs ${planScaffoldMountCommandLine(planArgument, step)}.`)
+  }
   lines.push('', `No codegen or migration was run. Next: bunx guren plan:verify ${planArgument} --step ${report.step}, and commit once it is verified.`)
   return lines.join('\n')
+}
+
+export interface PlanScaffoldMountReport {
+  reportVersion: typeof PLAN_SCAFFOLD_REPORT_VERSION
+  plan: { file: string; title: string; hash: string }
+  step: string
+  /** The routes file the scaffold step wrote, the registrar it exports, and the entry registrar that now calls it first. */
+  mounted: { file: string; registrar: string; entry: string }
+}
+
+/**
+ * `plan:scaffold --mount` from the http step (D3): one `wireRouteRegistrar()` call, composed as
+ * `composeRouteRegistrarCall()` so every refusal comes first, and the entry written atomically.
+ * Mounted is `guren check`'s own reach from the entry, so a file another routes file calls is refused.
+ */
+export async function planScaffoldMountFile(planPath: string, options: PlanScaffoldFileOptions): Promise<PlanScaffoldMountReport> {
+  const { path, plan, hash } = await approvedPlan(planPath, options, MOUNT)
+  const root = options.appRoot
+  const derivation = derivePlanTasks(plan)
+  const found = findPlanStep(derivation, options.step)
+  const mounts = planScaffoldMounts(plan, derivation)
+  const mount = mounts.find((candidate) => candidate.httpStep === options.step)
+  if (!found || !mount) {
+    refuseMount([`${options.step} is ${found ? `a ${found.step.kind} step` : 'no step of the plan'} that mounts no routes file: ${describeMounts(mounts)}`])
+  }
+  await requireMark(root, path, planPath, options.step, MOUNT)
+
+  const content = await readIfExists(root, mount.path)
+  if (content === null) {
+    refuseMount([`Nothing to mount: ${mount.path} does not exist. plan:scaffold ${planPath} --step ${mount.scaffoldStep} writes it.`])
+  }
+  const parsed = parseSourceFile(content, mount.path)
+  const exported = parsed ? exportedNames(parsed, 'anywhere') : null
+  if (!exported?.includes(mount.registrar)) {
+    refuseMount([`${mount.path} ${parsed ? `no longer exports ${mount.registrar}` : 'does not parse'}, which --mount calls. Restore it (git checkout ${mount.path}) or mount it by hand.`])
+  }
+  const entry = await resolveRoutesEntry(root)
+  if (entry === null) refuseMount([`This application has no routes entry (routes/web.ts) to call ${mount.registrar} from.`])
+
+  if (await isRoutesFileMounted(root, mount.path)) refuseMount([`${mount.path} is already mounted: ${entry} reaches ${mount.registrar}.`])
+  const entryContent = await readFile(resolve(root, entry), 'utf8')
+  const entryAst = parseSourceFile(entryContent, entry)
+  if (entryAst && topLevelBindings(entryAst).has(mount.registrar)) {
+    refuseMount([`${entry} already declares or imports ${mount.registrar}, so the call --mount adds would not reach ${mount.path}. Mount it by hand under an alias.`])
+  }
+  const composed = composeRouteRegistrarCall(entryContent, entry, mount.registrar, `import { ${mount.registrar} } from '${importSpecifier(entry, mount.path)}'`)
+  if (composed.content === undefined) refuseMount([`${mount.registrar} cannot be called from ${entry}: ${composed.reason}.`])
+
+  await writeFileAtomic(resolve(root, entry), composed.content)
+  return {
+    reportVersion: PLAN_SCAFFOLD_REPORT_VERSION,
+    plan: { file: basename(path), title: plan.title, hash },
+    step: options.step,
+    mounted: { file: mount.path, registrar: mount.registrar, entry },
+  }
+}
+
+/** Names a module's top-level scope binds: an import, a function, a class or a variable of the same name shadows the one `--mount` imports. */
+function topLevelBindings(ast: File): Set<string> {
+  const names = new Set<string>()
+  for (const node of ast.program.body) {
+    const declaration = node.type === 'ExportNamedDeclaration' || node.type === 'ExportDefaultDeclaration' ? node.declaration : node
+    if (declaration?.type === 'ImportDeclaration') for (const specifier of declaration.specifiers) names.add(specifier.local.name)
+    else if ((declaration?.type === 'FunctionDeclaration' || declaration?.type === 'ClassDeclaration') && declaration.id) names.add(declaration.id.name)
+    else if (declaration?.type === 'VariableDeclaration') {
+      for (const declarator of declaration.declarations) addPatternNames(declarator.id, names)
+    }
+  }
+  return names
+}
+
+/** The names a declaration's pattern binds, destructured ones included. */
+function addPatternNames(pattern: Node | null, names: Set<string>): void {
+  if (pattern?.type === 'Identifier') names.add(pattern.name)
+  else if (pattern?.type === 'AssignmentPattern') addPatternNames(pattern.left, names)
+  else if (pattern?.type === 'RestElement') addPatternNames(pattern.argument, names)
+  else if (pattern?.type === 'ArrayPattern') for (const element of pattern.elements) addPatternNames(element, names)
+  else if (pattern?.type === 'ObjectPattern') {
+    for (const property of pattern.properties) addPatternNames(property.type === 'RestElement' ? property : property.value, names)
+  }
+}
+
+function unmountedRoutes(plan: Plan, derivation: PlanTaskDerivation, stepId: string, created: readonly string[]): PlanScaffoldReport['unmounted'] {
+  const mount = planScaffoldMounts(plan, derivation).find((candidate) => candidate.scaffoldStep === stepId)
+  return mount && created.includes(mount.path) ? { file: mount.path, registrar: mount.registrar, step: mount.httpStep } : null
+}
+
+function describeMounts(mounts: readonly PlanScaffoldMount[]): string {
+  if (mounts.length === 0) return 'the plan’s scaffold steps write no routes file.'
+  return `--mount runs from the http step holding a scaffolded routes file: ${mounts.map((mount) => `${mount.httpStep} (${mount.path})`).join(', ')}.`
+}
+
+export function formatPlanScaffoldMount(report: PlanScaffoldMountReport, planArgument: string): string {
+  const { file, registrar, entry } = report.mounted
+  return [
+    `${report.plan.title} (${report.plan.file}): mounted ${file} for ${report.step}`,
+    '',
+    `${entry} now calls ${registrar}() first, so its routes are registered.`,
+    'The controller actions still answer 501: write their bodies and responses, then run',
+    `  bunx guren plan:verify ${planArgument} --step ${report.step}, and commit once it is verified.`,
+  ].join('\n')
 }

@@ -111,15 +111,63 @@ describe('plan:next', () => {
     const command = `bunx guren plan:scaffold comments.plan.json --step ${SCAFFOLD}`
     expect(report.step!.scaffold).toEqual({
       command: `bunx guren plan:scaffold ${plan} --step ${SCAFFOLD}`,
-      writes: ['model.comment', 'column.comment.id', 'column.comment.body', 'column.comment.postId', 'column.comment.createdAt', 'validator.comment', 'resource.comment', 'policy.comment'],
-      leaves: expect.arrayContaining(['controller.comments', 'route.comments.store']),
+      writes: [
+        'model.comment',
+        'column.comment.id',
+        'column.comment.body',
+        'column.comment.postId',
+        'column.comment.createdAt',
+        'validator.comment',
+        'controller.comments',
+        'action.comments.store',
+        'action.comments.destroy',
+        'route.comments.store',
+        'route.comments.destroy',
+        'resource.comment',
+        'policy.comment',
+      ],
+      leaves: [],
     })
-    expect(report.step!.scaffold!.leaves).not.toContain('policy.comment')
     expect(text).toContain(`Write this step with \`${command}\`, not by hand.`)
-    expect(text).toContain('It writes each added model (table and class), its validators and resources, and each policy with a provider registering it: model.comment, column.comment.id')
-    expect(text).toContain('It does not write controller.comments')
-    expect(text).toContain('the http step implements them by hand.')
+    expect(text).toContain('It writes each added model (table and class), its validators and resources, each policy with a provider registering it, each added controller with its actions as stubs, the routes to them in a file of their own that the http step mounts, and the side-effect classes: model.comment, column.comment.id')
+    expect(text).not.toContain('It does not write')
     expect(text).not.toContain('No generator')
+    expect(report.step!.mount).toBeUndefined()
+  })
+
+  test('should name --mount for the http step holding the routes the scaffold wrote, and what it left to write', async () => {
+    const approved = approvedAgainst(loadCommentsPlan())
+    const { app, plan } = await createApp('mount-text')
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approved) })
+    await approvePlanFile(plan)
+    const record = { ...(await holding(app)), planDigest: planDigest(parsePlanDocument(approved)) }
+    await writeState(app, { steps: { [SCAFFOLD]: record, [TESTS]: record, [DATA]: record } })
+
+    // A slice scaffolded with no routes file (an older CLI's) has nothing to mount.
+    expect((await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })).step!.mount).toBeUndefined()
+    await writeWorkspaceFiles(app, { 'routes/comments.ts': 'export function registerCommentRoutes(): void {}\n' })
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+    const text = formatPlanNext(report, 'comments.plan.json')
+
+    expect(report.step!.id).toBe(HTTP)
+    expect(report.step!.mount).toEqual({
+      command: `bunx guren plan:scaffold ${plan} --step ${HTTP} --mount`,
+      file: 'routes/comments.ts',
+      scaffolded: ['validator.comment', 'controller.comments', 'action.comments.store', 'action.comments.destroy', 'route.comments.store', 'route.comments.destroy', 'resource.comment', 'policy.comment'],
+      byHand: [],
+    })
+    expect(text).toContain(`Mount the routes the scaffold step wrote first, with \`bunx guren plan:scaffold comments.plan.json --step ${HTTP} --mount\`, not by hand: it calls routes/comments.ts from the entry registrar.`)
+    expect(text).toContain('Each action validates and authorizes as planned and answers 501; write its body and response.')
+
+    // Once the entry calls it, as --mount leaves it, there is nothing left to mount.
+    await writeWorkspaceFiles(app, {
+      'routes/comments.ts': "import type { Router } from '@guren/core'\n\nexport function registerCommentRoutes(router: Router): void {\n  void router\n}\n",
+      'routes/web.ts': "import type { Router } from '@guren/core'\nimport { registerCommentRoutes } from './comments.js'\n\nexport function registerWebRoutes(router: Router): void {\n  registerCommentRoutes(router)\n}\n",
+    })
+    const mounted = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+    expect(mounted.step!.id).toBe(HTTP)
+    expect(mounted.step!.mount).toBeUndefined()
+    expect(formatPlanNext(mounted, 'comments.plan.json')).not.toContain('--mount')
   })
 
   test('should tell a draft to approve before plan:scaffold, which refuses one', async () => {

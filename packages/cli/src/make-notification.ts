@@ -2,7 +2,8 @@ import { NOTIFICATIONS_DIR } from './discovery'
 import type { ScaffoldFileEntry, WriterOptions } from './utils'
 import { scaffoldFileEntry, writeScaffoldFile } from './utils'
 
-function notificationTemplate(className: string): string {
+/** The notification `make:notification` writes, and `plan:scaffold` under the plan's class name. */
+export function buildNotificationSource(className: string): string {
   return `import { Notification, type NotificationMailMessage } from '@guren/core'
 
 export class ${className} extends Notification {
@@ -52,6 +53,6 @@ export function notificationFile(name: string, options: WriterOptions = {}): Sca
   return scaffoldFileEntry(name, {
     dir: NOTIFICATIONS_DIR,
     suffix: 'Notification',
-    template: ({ normalizedName }) => notificationTemplate(normalizedName),
+    template: ({ normalizedName }) => buildNotificationSource(normalizedName),
   }, options)
 }

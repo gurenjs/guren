@@ -1,9 +1,9 @@
+import { LISTENERS_DIR } from './discovery'
 import type { ScaffoldFileEntry, WriterOptions } from './utils'
 import { resourceName, scaffoldFileEntry, writeScaffoldFile } from './utils'
 
-const LISTENERS_DIR = 'app/Listeners'
-
-function listenerTemplate(className: string, eventName?: string): string {
+/** The listener `make:listener` writes, and `plan:scaffold` under the plan's class name, with no event. */
+export function buildListenerSource(className: string, eventName?: string): string {
   const eventImport = eventName
     ? `import { ${eventName} } from '../Events/${eventName}'`
     : '// import { YourEvent } from \'../Events/YourEvent\''
@@ -51,6 +51,6 @@ export function listenerFile(name: string, options: MakeListenerOptions = {}): S
   return scaffoldFileEntry(name, {
     dir: LISTENERS_DIR,
     suffix: 'Listener',
-    template: ({ normalizedName }) => listenerTemplate(normalizedName, eventClassName),
+    template: ({ normalizedName }) => buildListenerSource(normalizedName, eventClassName),
   }, options)
 }
