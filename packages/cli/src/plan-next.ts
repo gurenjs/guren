@@ -519,6 +519,9 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
         lines.push(`  [${behaviour.id}] ${behaviour.description}`)
         lines.push(`      ${behaviour.kind}; actor ${behaviour.actor}; route ${behaviour.route}${behaviour.given.length ? `; given ${behaviour.given.join(', ')}` : ''}; expect ${describeExpectation(behaviour)}`)
       }
+      if (step.kind === 'tests') {
+        lines.push('  Each test requests its route through a TestApp, in its body or a function of its file it calls: plan:verify reads the requests before it runs them.')
+      }
     }
     if (step.stalled) {
       lines.push(

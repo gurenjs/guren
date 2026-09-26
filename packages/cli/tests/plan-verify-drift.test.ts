@@ -10,7 +10,7 @@ import { planDigest, writePlanStepRecord, type PlanStepRecord } from '../src/pla
 import { sha256 } from '../src/plan/verification'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { CLI_BIN_PATH, createTempRoot, writeWorkspaceFiles } from './helpers'
-import { approvePlanFile, createPlanVerifyApp, DRIZZLE_KIT_STUB_FILES, loadApprovedCommentsPlan, measured, PLAN_VERIFY_APP_FILES as APP, waiveForTest } from './plan-fixture'
+import { approvePlanFile, createPlanVerifyApp, DRIZZLE_KIT_STUB_FILES, loadApprovedCommentsPlan, measured, PLAN_VERIFY_APP_FILES as APP, requestsRoute, TEST_APP_TYPE_IMPORT, waiveForTest } from './plan-fixture'
 
 let ROOT: string
 
@@ -51,25 +51,29 @@ function splitPlan(): Record<string, unknown> {
 /** The store route's behaviour, as the comment task's tests see it: the route dispatches to `store`. */
 const COMMENT_TESTS = `import { readFileSync } from 'node:fs'
 import { describe, expect, test } from 'bun:test'
-
+${TEST_APP_TYPE_IMPORT}
 const routes = readFileSync(new URL('../routes/web.ts', import.meta.url), 'utf8')
 
 describe('comments', () => {
   test('[AC-comments-1] a signed-in user can comment on a post', () => {
+    ${requestsRoute('AC-comments-1')}
     expect(routes).toContain("router.post('/posts/:postId/comments', [CommentController, 'store'])")
   })
   test('[AC-comments-2] an empty body is rejected', () => {
+    ${requestsRoute('AC-comments-2')}
     expect(1).toBe(1)
   })
   test('[AC-comments-3] a guest is redirected', () => {
+    ${requestsRoute('AC-comments-3')}
     expect(1).toBe(1)
   })
 })
 `
 
 const DELETION_TESTS = `import { expect, test } from 'bun:test'
-
+${TEST_APP_TYPE_IMPORT}
 test('[AC-comments-4] the author can delete', () => {
+  ${requestsRoute('AC-comments-4')}
   expect(1).toBe(1)
 })
 `
@@ -376,7 +380,7 @@ describe('plan:verify records the files and lines a step’s work changed', () =
     const work = measured(stepRecord(report, DELETION_HTTP).work)
     expect(work).toMatchObject({ from: start, settled: true })
     expect(work.files.map((file) => file.path)).toEqual(['app/Http/Controllers/CommentController.ts', 'routes/web.ts', 'tests/deletion.test.ts'])
-    expect(work.files[2]).toEqual({ path: 'tests/deletion.test.ts', added: 5, removed: 0 })
+    expect(work.files[2]).toEqual({ path: 'tests/deletion.test.ts', added: 7, removed: 0 })
     expect(work.added).toBe(work.files.reduce((total, file) => total + (file.added ?? 0), 0))
     expect((await storedRecord(app, DELETION_HTTP)).work).toEqual(work)
     // Re-checked beside it, the comment step keeps what it carried: it was verified with no mark on it.

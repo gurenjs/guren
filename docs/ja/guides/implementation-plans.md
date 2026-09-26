@@ -387,6 +387,7 @@ Behaviours to write, as test titles `[<id>] <description>`, failing:
       unauthenticated; actor guest; route route.comments.store; given a post exists; expect redirect /login
   [AC-comments-4] A user cannot delete someone else's comment.
       forbidden; actor user; route route.comments.destroy; given a comment written by another user exists; expect status 403
+  Each test requests its route through a TestApp, in its body or a function of its file it calls: plan:verify reads the requests before it runs them.
 
 Implement this step only, then run `bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/tests` and commit once it is verified.
 Marked in .guren/plans/comments.state.json
@@ -417,6 +418,10 @@ Recorded in .guren/plans/comments.state.json
 ```
 
 `tests` ステップが通るのは、すべての振る舞いにテストがあり、その全部が失敗したときだけです。コードより先に通ってしまうテストは何も証明しませんし、skip したテストは失敗に数えません。`plan:verify` はステップの id がソースに書かれたテストファイルを選び、`bun test` で実行します。後のステップも同じファイルを実行し、今度は通ることを求めます。検証結果のあとには計画の状態が続きます。読み方は後で説明します。
+
+`plan:verify` はテストを実行する前に、各振る舞いのテストが振る舞いの指すルートへ `TestApp` でリクエストしているかを読みます。タイトルに id を含む `test`、`it`、`describe` のどれかが、そのメソッドとパスへリクエストするか、ルートの agent tool を呼ぶ必要があります。リクエストは本体か、本体から呼ぶ同じファイルの関数に書きます。`` `/comments/${id}` `` のようにセグメント全体を実行時の値で埋めたものは、制約付きのパラメーターにも届くと数えます。別のルートへリクエストするテストや、何もリクエストしないテストがあると、代わりに何をリクエストしているかを示してコマンドが失敗し、`bun test` は実行しません。
+
+この読み取りで解決できないリクエストも、別の理由でコマンドを失敗させます。ファイルに書かれていないパス、import したヘルパーの戻り値へのリクエスト、`TestApp` や `Promise<TestApp>` の注釈がない同じファイルの関数の戻り値へのリクエスト、別ファイルの関数に渡した `TestApp`、実行時に組み立てたタイトルがこれに当たります。そう書き換えたテストでステップが検証を通らないよう、この判定は安全側に倒しています。指摘はリクエストをテストに直接書くか、ヘルパーに注釈を付けるよう求めます。これは改ざんの検出で、証明ではありません。ファイルに書かれたリクエストは、実行されるかどうかに関係なく通ります。
 
 ### scaffold ステップ: `plan:scaffold`
 
@@ -644,7 +649,7 @@ Routes
 
 こうしたステップは `plan:verify --step` が確かめ直します。指定したステップが verified になると、同じ実行の中で、ファイルが変わった前のステップをタスク順に確かめ直します。コマンドを実行するステップが verified にならなかったところで止まります。結果はそれぞれ記録され (`failed` なら壊れた箇所を添えます)、レポートの「Re-checked」の下に並びます。そのあと `plan:next` は、verified でない最初のステップを返します。たいていは失敗したステップです。確かめ直しが `blocked` になったステップは、後の実行に回します。指定したステップが verified にならなければ、前のステップの記録には手を付けず、後の実行に回したステップとして示します。ステップ間で共有するコマンドが失敗している以上、確かめ直しても同じ理由で失敗するからです。
 
-`tests` ステップは何も実行せずに確かめ直します。コードができたあとではテストが通ってしまうからです。各振る舞いの id を書いたテストファイルがちょうど一つずつあれば、verified のままです。そうでなければ、該当する振る舞いを示し、ステップを drifted のまま残します。
+`tests` ステップは何も実行せずに確かめ直します。コードができたあとではテストが通ってしまうからです。各振る舞いの id を書いたテストファイルがちょうど一つずつあり、各振る舞いのテストが上と同じ読み方でまだそのルートへリクエストしていれば、verified のままです。そうでなければ、該当する振る舞いを示し、ステップを drifted のまま残します。
 
 `plan:next` は何も実行しないので、次のステップが drifted なら、確かめ直すよう伝えます。
 

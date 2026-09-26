@@ -583,6 +583,7 @@ describe('plan:next', () => {
       expect(text).toContain(`Next: ${TESTS}\n  task: entity Comment (task/entity/model.comment)\n  verify: codegen → tests:fail`)
       expect(text).toContain('Behaviours to write, as test titles `[<id>] <description>`, failing:\n  [AC-comments-1] ')
       expect(text).toMatch(/ {6}\w+; actor .*; route route\.comments\.store; .*expect /)
+      expect(text).toContain('\n  Each test requests its route through a TestApp, in its body or a function of its file it calls: plan:verify reads the requests before it runs them.\n')
       expect(text).toContain(`Implement this step only, then run \`bunx guren plan:verify ${plan} --step ${TESTS}\` and commit once it is verified.`)
       expect(text).toContain('Marked in .guren/plans/comments.state.json')
       expect(json.reportVersion).toBe(1)

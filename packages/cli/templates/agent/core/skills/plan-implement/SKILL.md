@@ -81,7 +81,13 @@ it, and do not edit the application back or the plan to make it pass.
   parameter) and each `unwritten()` call with what it names, keep every
   title's id and request, and leave the tests failing. The step verifies with
   `tests:fail`, so a test that already passes, or is skipped (`test.skip`,
-  `test.todo`), fails the step.
+  `test.todo`), fails the step. Each test must still request its behaviour's
+  route through a `TestApp`, with a path it spells, in its own body or a
+  function of the same file it calls: `plan:verify` reads the requests before
+  it runs the tests, and fails one that requests another route, nothing, or
+  something it cannot read (a path the file does not spell, a request made by
+  a helper imported from another file, or one on what a helper of the same
+  file returns when nothing annotates its return type as `TestApp`).
 - **`data`**: the schema, migration and model; verified by `db:migrate` and
   `typecheck`. After a scaffold step, what is left is the migration and any
   relationship `plan:scaffold` reported as left out.
