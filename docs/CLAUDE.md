@@ -83,6 +83,23 @@
   chapter that ends with an uncommitted file, which is the only check that the
   course's "every chapter ends with a commit" is true
 
+## The Agent Course (`agent-course/NN-*.md`)
+
+- A second course on the same fence grammar, run by `bun run smoke:agent-course`
+  (`GUREN_TUTORIAL_THROUGH` and `GUREN_KEEP_SMOKE_DIR` work as for the tutorial)
+  and audited by `audit:tutorial-blocks` alongside it
+- The reader directs an agent through RFC 0030 plans; the prose teaches decisions
+  (answer, review, approve, accept a step, resolve a held step), so every chapter
+  gives its checks as a short table instead of code to type
+- Every agent beat is a blockquote prompt followed by **Without an agent**
+  fallback blocks. The fallbacks follow one reference plan per plan chapter
+  (2 and 6), and chapters 2 and 6 tell a reader with their own plan how to rejoin
+- Long fallback files sit inside `<details>`, so the page shows the decision and
+  folds the code
+- Outputs quoted in prose (a held step, an approval warning, a check's message)
+  describe current CLI behaviour; after changing that behaviour, run the smoke and
+  reread the chapter that quotes it, since the smoke checks exit codes, not prose
+
 ## Maintenance Checklist
 - After editing, run `rg` on `docs/` for disallowed terms (`packages/core`, `citty`, `consola`, etc.)
 - Keep Quick Start and Getting Started aligned whenever the scaffold workflow changes
