@@ -29,7 +29,7 @@ import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElement
 import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress, type PlanStepContext, type PlanStepContextElement } from './plan/step-context'
 import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
 import { planScaffoldCommandLine, planScaffoldCoverage, planScaffoldMountCommandLine, planScaffoldMounts } from './plan/scaffold'
-import { derivePlanTasks, listPlanSteps, planLaterRelationships, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
+import { derivePlanTasks, listPlanSteps, planLaterRelationships, type PlanDerivedStep, type PlanLaterRelationship, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
 import { hashFiles, readPlanWaivers, recordDrift, recordStillHolds, type PlanWaiversRead } from './plan/verification'
 import { readStepStart } from './plan/work'
@@ -47,6 +47,14 @@ export interface PlanNextElement {
   waived?: { reason: string; at: string; by?: string }
 }
 
+/** A relationship by the plan's ids: the declaring model, its name and type, and its target. */
+export interface PlanNextRelationship {
+  model: string
+  name: string
+  type: PlanLaterRelationship['relationship']['type']
+  target: string
+}
+
 export interface PlanNextStep extends Pick<PlanDerivedStep, 'id' | 'kind' | 'verify' | 'generates' | 'part'> {
   taskId: string
   task: PlanTaskTitle
@@ -56,7 +64,7 @@ export interface PlanNextStep extends Pick<PlanDerivedStep, 'id' | 'kind' | 'ver
    * Relationships an earlier task's model declares that wait on this step's work (RFC 0030 §5,
    * Order): written in the declaring model's file, judged here.
    */
-  relationships?: Array<{ model: string; name: string; type: string; target: string }>
+  relationships?: PlanNextRelationship[]
   /** The behaviours the step writes or must see pass. */
   acceptance: PlanAcceptance[]
   /** Where the Stop hook gave up on this step; cleared by this call, so the next run of the loop is asked again. */
@@ -151,7 +159,7 @@ function sectionItems(plan: PlanDraft, section: PlanElementSection): ReadonlyArr
 function relationshipsOf(plan: PlanDraft, derivation: PlanTaskDerivation, stepId: string): Pick<PlanNextStep, 'relationships'> {
   const relationships = planLaterRelationships(plan, derivation)
     .filter((later) => later.stepId === stepId)
-    .map((later) => ({ model: later.model.id, name: later.relationship.name, type: later.relationship.type, target: later.target.id }))
+    .map((later) => ({ model: later.model.id, name: later.relationship.name, type: later.relationship.type, target: later.relationship.target }))
   return relationships.length > 0 ? { relationships } : {}
 }
 

@@ -10,6 +10,7 @@
 
 import { collectionName, collectionSlug } from '../inflect'
 import { listPlanReferences, type PlanReference, type PlanReferenceField } from './references'
+import { planRelationshipKeys } from './relationship-keys'
 import { listPlanElements, type PlanChange, type PlanDraft, type PlanElementSection, type PlanModel } from './schema'
 
 export type PlanStepKind = 'commands' | 'scaffold' | 'tests' | 'data' | 'http' | 'pages'
@@ -118,7 +119,6 @@ export interface PlanLaterRelationship {
   /** The model declaring the relationship. */
   model: PlanModel
   relationship: PlanModel['relationships'][number]
-  target: PlanModel
   /** The model whose step completes the relationship: its target, or a `belongsToMany`'s pivot. */
   judgedWith: PlanModel
   /** The step owning `judgedWith`. */
@@ -127,29 +127,19 @@ export interface PlanLaterRelationship {
 
 /**
  * The models a relationship waits for: its target while the target's class does not exist yet, and
- * the model holding its keys while the plan adds them. `undefined` when the plan states no keys for
- * it or it names a dropped model, which keeps it on the declaring model, as the scaffold omits it.
+ * the model holding its keys while the plan adds them. None when the plan states no keys for it or
+ * it names a dropped model, which keeps it on the declaring model, as the scaffold omits it.
  */
-function relationshipNeeds(plan: PlanDraft, model: PlanModel, relationship: PlanModel['relationships'][number], target: PlanModel): PlanModel[] | undefined {
-  const referencing = (of: PlanModel, to: PlanModel) => of.columns.filter((column) => column.references?.model === to.id)
+function relationshipNeeds(plan: PlanDraft, model: PlanModel, relationship: PlanModel['relationships'][number], target: PlanModel): PlanModel[] {
+  const keys = planRelationshipKeys(plan, model, relationship, target)
+  if (typeof keys === 'string' || target.change.kind === 'drop') return []
   const pending = (of: PlanModel) => of.change.kind === 'add' || of.change.kind === 'rename'
-  const added = (columns: PlanModel['columns']) => columns.some((column) => column.change.kind !== 'existing')
-  if (target.change.kind === 'drop') return undefined
   const needs = pending(target) ? [target] : []
-  if (relationship.type === 'belongsTo') return referencing(model, target).length > 0 ? needs : undefined
-  if (relationship.type === 'hasOne' || relationship.type === 'hasMany') {
-    const keys = referencing(target, model)
-    if (keys.length === 0) return undefined
-    return added(keys) ? [...needs, target] : needs
-  }
-  const pivots = plan.models.flatMap((pivot) => {
-    const own = referencing(pivot, model)
-    const other = referencing(pivot, target).filter((column) => column !== own[0])
-    return own.length > 0 && other.length > 0 ? [{ pivot, keys: [own[0]!, ...other] }] : []
-  })
-  const only = pivots.length === 1 ? pivots[0] : undefined
-  if (!only || only.pivot.change.kind === 'drop') return undefined
-  return pending(only.pivot) || added(only.keys) ? [...needs, only.pivot] : needs
+  if (keys.type === 'belongsTo') return needs
+  if (keys.type !== 'belongsToMany') return keys.key.change.kind === 'existing' ? needs : [...needs, target]
+  if (keys.pivot.change.kind === 'drop') return []
+  const addsKey = keys.own.change.kind !== 'existing' || keys.other.change.kind !== 'existing'
+  return pending(keys.pivot) || addsKey ? [...needs, keys.pivot] : needs
 }
 
 /**
@@ -170,13 +160,13 @@ export function planLaterRelationships(plan: PlanDraft, derivation: PlanTaskDeri
     if (!own) continue
     for (const relationship of model.relationships) {
       const target = modelById.get(relationship.target)
-      const needs = target && relationshipNeeds(plan, model, relationship, target)
-      let latest: { with: PlanModel; index: number; stepId: string } | undefined
-      for (const needed of needs ?? []) {
+      if (!target) continue
+      let latest: { judgedWith: PlanModel; index: number; stepId: string } | undefined
+      for (const needed of relationshipNeeds(plan, model, relationship, target)) {
         const theirs = taskOf.get(needed.id)
-        if (theirs && theirs.index > (latest?.index ?? own.index)) latest = { with: needed, ...theirs }
+        if (theirs && theirs.index > (latest?.index ?? own.index)) latest = { judgedWith: needed, ...theirs }
       }
-      if (target && latest) later.push({ model, relationship, target, judgedWith: latest.with, stepId: latest.stepId })
+      if (latest) later.push({ model, relationship, judgedWith: latest.judgedWith, stepId: latest.stepId })
     }
   }
   return later

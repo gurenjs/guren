@@ -42,7 +42,7 @@ import {
   type PlanSideEffect,
   type PlanView,
 } from './schema'
-import { derivePlanTasks, planLaterRelationships, type PlanLaterRelationship } from './tasks'
+import { derivePlanTasks, planLaterRelationships, type PlanLaterRelationship, type PlanTaskDerivation } from './tasks'
 
 /** Every state of RFC 0030 §6. `plan:status` sets the ones in {@link PlanStatusState}. */
 export type PlanElementState = 'planned' | 'present' | 'wired' | 'verified' | 'drifted' | 'unjudged' | 'blocked' | 'waived'
@@ -426,8 +426,8 @@ const NO_DETAIL: PlanAppUnreadable = { unreadable: 'the application state was lo
  * recorded none, absent where none stands. A match with no reading never counts towards an
  * `alter`'s completion.
  */
-export function judgePlan(plan: PlanDraft, app: PlanAppState, readings?: readonly PlanPropertyReading[]): PlanStatus {
-  return judgeWith(plan, app, creditAlter(readings))
+export function judgePlan(plan: PlanDraft, app: PlanAppState, readings?: readonly PlanPropertyReading[], derivation?: PlanTaskDerivation): PlanStatus {
+  return judgeWith(plan, app, creditAlter(readings), derivation)
 }
 
 /**
@@ -447,8 +447,9 @@ export function planHasAlter(plan: PlanDraft): boolean {
   return listPlanAlterIds(plan).length > 0
 }
 
-function judgeWith(plan: PlanDraft, app: PlanAppState, credit: AlterCredit): PlanStatus {
-  const context = new StatusContext(plan, app, credit)
+/** `derivation` orders the relationships a later task completes; the caller's, where it has one. */
+function judgeWith(plan: PlanDraft, app: PlanAppState, credit: AlterCredit, derivation = derivePlanTasks(plan)): PlanStatus {
+  const context = new StatusContext(plan, app, credit, planLaterRelationships(plan, derivation))
   const elements: PlanElementStatus[] = [
     ...plan.models.flatMap((model) => [context.model(model), ...model.columns.map((column) => context.column(model, column))]),
     ...plan.validators.map((validator) => context.validator(validator)),
@@ -544,14 +545,15 @@ class StatusContext {
   private readonly viewsById: Map<string, PlanView>
   private readonly namesById: Map<string, string>
   private readonly reachable: ReadonlySet<string>
-  /** Relationships a later task completes, by declaring model id, then by the id of the model they are judged with. */
-  private readonly deferred: Map<string, PlanLaterRelationship[]>
-  private readonly inbound: Map<string, PlanLaterRelationship[]>
+  /** Relationships a later task completes, by the relationship, then by the id of the model they are judged with. */
+  private readonly deferred: Map<PlanModel['relationships'][number], PlanLaterRelationship>
+  private readonly inbound = new Map<string, PlanLaterRelationship[]>()
 
   constructor(
     private readonly plan: PlanDraft,
     private readonly app: PlanAppState,
     private readonly credit: AlterCredit,
+    later: readonly PlanLaterRelationship[],
   ) {
     this.reachable = behaviourCanReach(plan)
     this.detail = app.detail
@@ -561,11 +563,11 @@ class StatusContext {
     )
     this.viewsById = new Map(plan.views.map((view) => [view.id, view]))
     this.namesById = new Map([...plan.validators, ...plan.resources, ...plan.policies].map((element) => [element.id, element.name]))
-    this.deferred = new Map()
-    this.inbound = new Map()
-    for (const later of planLaterRelationships(plan, derivePlanTasks(plan))) {
-      this.deferred.set(later.model.id, [...(this.deferred.get(later.model.id) ?? []), later])
-      this.inbound.set(later.judgedWith.id, [...(this.inbound.get(later.judgedWith.id) ?? []), later])
+    this.deferred = new Map(later.map((entry) => [entry.relationship, entry]))
+    for (const entry of later) {
+      const bucket = this.inbound.get(entry.judgedWith.id)
+      if (bucket) bucket.push(entry)
+      else this.inbound.set(entry.judgedWith.id, [entry])
     }
   }
 
@@ -651,7 +653,7 @@ class StatusContext {
   }
 
   model(model: PlanModel): PlanElementStatus {
-    const deferred = this.deferred.get(model.id) ?? []
+    const deferred = model.relationships.flatMap((relationship) => this.deferred.get(relationship) ?? [])
     return this.conclude({
       id: model.id,
       section: 'models',
@@ -677,9 +679,8 @@ class StatusContext {
     const properties: PlanPropertyStatus[] = []
     const models = this.section('models')
     const tables = this.section('tables')
-    const actual = isUnreadable(models)
-      ? undefined
-      : models.find((candidate) => candidate.className === model.name && candidate.module === (model.module ?? null))
+    const classes = isUnreadable(models) ? undefined : models
+    const actual = findClass(classes, model.name, model.module)
     const whyNoModel = isUnreadable(models) ? `the models could not be read (${models.unreadable})` : 'the model class did not parse'
 
     if (model.change.kind !== 'alter' || model.tableRenamedFrom) {
@@ -698,15 +699,12 @@ class StatusContext {
       else properties.push(match(property, model.tableRenamedFrom, 'absent'))
     }
 
-    const deferred = new Set((this.deferred.get(model.id) ?? []).map((later) => later.relationship))
     for (const relationship of model.relationships) {
-      if (!deferred.has(relationship)) properties.push(...this.relationshipProperties(`relationship ${relationship.name}`, relationship, actual, whyNoModel))
+      if (!this.deferred.has(relationship)) properties.push(...this.relationshipProperties(`relationship ${relationship.name}`, relationship, actual, whyNoModel))
     }
     for (const later of this.inbound.get(model.id) ?? []) {
-      const declaring = isUnreadable(models)
-        ? undefined
-        : models.find((candidate) => candidate.className === later.model.name && candidate.module === (later.model.module ?? null))
-      const whyNoDeclaring = isUnreadable(models) ? whyNoModel : `the model class ${later.model.name} declaring it was not found or did not parse`
+      const declaring = findClass(classes, later.model.name, later.model.module)
+      const whyNoDeclaring = classes ? `the model class ${later.model.name} declaring it was not found or did not parse` : whyNoModel
       // A module's model is prefixed, since approval readings are keyed on the property name.
       const owner = later.model.module ? `${later.model.module}/${later.model.name}` : later.model.name
       properties.push(...this.relationshipProperties(`relationship ${owner}.${later.relationship.name}`, later.relationship, declaring, whyNoDeclaring))
