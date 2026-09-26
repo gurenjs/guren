@@ -88,6 +88,11 @@ it, and do not edit the application back or the plan to make it pass.
   something it cannot read (a path the file does not spell, a request made by
   a helper imported from another file, or one on what a helper of the same
   file returns when nothing annotates its return type as `TestApp`).
+  A verified run records each behaviour as seen failing, keyed on its test as
+  the plan states it (everything but the description, with the route's method
+  and path). That observation is kept: once the implementation exists no run
+  can make it again, so a later `plan:verify` of the step does not ask a
+  behaviour it covers to fail again.
 - **`data`**: the schema, migration and model; verified by `db:migrate` and
   `typecheck`. After a scaffold step, what is left is the migration and any
   relationship `plan:scaffold` reported as left out.
@@ -118,12 +123,34 @@ a script the app lacks, a database that is unreachable, a timeout. It is not a
 failure of the implementation, and it is not yours to route around: say what is
 blocked and stop.
 
+## After a revision
+
+An approved revision gives the plan a new hash, and no record of the parent
+hash counts under it, so every step comes back. `plan:next` says so for a step
+verified against an earlier hash: re-check it with `plan:verify --step <id>`
+before implementing anything, or run `plan:verify` without `--step` once for
+the whole plan. Implement only what that run reports against the revised plan.
+
+A `tests` step verifies again without a run for each behaviour whose test the
+revision left as it was, since it was seen failing before its implementation.
+A behaviour the revision changed (its expectation, input, setup, actor or
+route; not its description) has to be seen failing again: update its test to
+the revised plan first, and it fails against the code that implements the old
+one. Its `http` step then asks for the new implementation.
+
+A `tests` step has no such record when it was verified by a CLI older than
+this rule, or when its test passed before it ever failed. Its behaviours
+already pass, so it cannot verify: the Stop hook gives up on it at once, and
+`plan:next` keeps returning it. It owns no element, so `plan:close` does not
+wait for it. Report it and leave the close to the person.
+
 ## The Stop hook
 
 While a step is marked, the `Stop` hook verifies it whenever you end a turn and
 sends you back while it is not verified, up to three times. It gives up, and
 says why, when something the step names went stale since approval, when the
-step or one of its elements is blocked, when nothing changed
+step or one of its elements is blocked, when a `tests` step's behaviours
+already pass and no record saw them fail, when nothing changed
 since the last continuation, or after the third continuation. The step is then
 recorded as stalled and `plan:next` returns it again, with the reason.
 

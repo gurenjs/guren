@@ -7,7 +7,7 @@ import { parsePlanDocument } from '../src/plan-render'
 import type { PlanStatusReport } from '../src/plan-status'
 import type { PlanVerifyReport } from '../src/plan-verify'
 import { planDigest, writePlanStepRecord, type PlanStepRecord } from '../src/plan/state'
-import { sha256 } from '../src/plan/verification'
+import { behaviourShape, sha256 } from '../src/plan/verification'
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { CLI_BIN_PATH, createTempRoot, writeWorkspaceFiles } from './helpers'
 import { approvePlanFile, createPlanVerifyApp, DRIZZLE_KIT_STUB_FILES, loadApprovedCommentsPlan, measured, PLAN_VERIFY_APP_FILES as APP, requestsRoute, TEST_APP_TYPE_IMPORT, waiveForTest } from './plan-fixture'
@@ -546,4 +546,47 @@ describe('plan:verify fingerprints the files an element\'s wired verdict rests o
     expect(next.step?.id).toBe(COMMENTS_PAGES)
     expect(next.step?.drifted).toEqual(['app/Http/Controllers/PostController.ts'])
   }, 60_000)
+})
+
+describe('plan:verify carries a tests step\'s red runs to a revised plan', () => {
+  /** The comment task's tests step recorded under a parent plan hash, with its red runs or, as an older CLI wrote it, without. */
+  async function revisedApp(name: string, red: boolean): Promise<string> {
+    const app = await createPlanVerifyApp(join(ROOT, name), {
+      ...APP,
+      ...DRIZZLE_KIT_STUB_FILES,
+      '.gitignore': 'node_modules\n',
+      'tests/comments.test.ts': COMMENT_TESTS,
+      'comments.plan.json': JSON.stringify(splitPlan()),
+    })
+    await approvePlanFile(join(app, 'comments.plan.json'))
+    const plan = parsePlanDocument(splitPlan())
+    const acceptance = ['AC-comments-1', 'AC-comments-2', 'AC-comments-3'].map((id) => ({
+      id,
+      status: 'failing' as const,
+      ...(red ? { red: { shape: behaviourShape(plan, id)!, ranAt: '2026-09-22T00:00:00.000Z' } } : {}),
+    }))
+    await writePlanStepRecord(app, 'comments', COMMENTS_TESTS, { ...doneRecord(), planDigest: 'a'.repeat(64), acceptance })
+    return app
+  }
+
+  function testsFail(report: PlanVerifyReport): PlanStepRecord['commands'][number] | undefined {
+    return report.steps.find((entry) => entry.stepId === COMMENTS_TESTS)?.record.commands.find((command) => command.command === 'tests:fail')
+  }
+
+  test('should verify the tests step on the red runs its record carries, where a record without them fails on tests that pass', async () => {
+    const carried = verify(await revisedApp('red-carried', true), COMMENTS_TESTS)
+    const lost = verify(await revisedApp('red-lost', false), COMMENTS_TESTS)
+
+    expect(outcome(carried, COMMENTS_TESTS)).toBe('verified')
+    expect(testsFail(carried)).toMatchObject({ status: 'pass', label: 'not run: every behaviour was seen failing before its implementation existed' })
+    expect(outcome(lost, COMMENTS_TESTS)).toBe('failed')
+    expect(testsFail(lost)?.findings.join('\n')).toContain('[AC-comments-1] must fail before its implementation exists')
+  }, 60_000)
+
+  test('should carry them in a whole-plan run', async () => {
+    const report = verifyAll(await revisedApp('red-carried-all', true))
+
+    expect(outcome(report, COMMENTS_TESTS)).toBe('verified')
+    expect(testsFail(report)?.label).toBe('not run: every behaviour was seen failing before its implementation existed')
+  }, 120_000)
 })

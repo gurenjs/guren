@@ -11,7 +11,7 @@ import { judgePlan, summarize, type PlanElementState, type PlanElementStatus, ty
 import { derivePlanTasks, findPlanStep, planStepIds, type PlanTaskDerivation } from '../src/plan/tasks'
 import { describeCloseBlockers } from '../src/plan/close-remedy'
 import { behaviourReach } from '../src/plan/reach'
-import { applyVerification, applyWaivers, hashFiles, overlayVerification, planWaivers, recordDrift, recordStillHolds, sha256 } from '../src/plan/verification'
+import { applyVerification, applyWaivers, behaviourShape, carriedRedRuns, hashFiles, overlayVerification, planWaivers, recordDrift, recordStillHolds, sha256 } from '../src/plan/verification'
 import { PLAN_STATUS_REPORT_VERSION } from '../src/plan-status'
 import { formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
 import { acceptanceTestFiles, PlanVerifier, type PlanStepVerification, type PlanVerifierOptions } from '../src/plan/verify'
@@ -137,8 +137,8 @@ function checkReport(checks: CheckReport['checks']): CheckReport {
   return { cwd: ROOT, checks, passCount: 0, warnCount: 0, failCount: checks.length }
 }
 
-function verifier(status: PlanStatus, fake: Pick<FakeExec, 'exec'>, overrides: Partial<PlanVerifierOptions> = {}): PlanVerifier {
-  return new PlanVerifier(plan, derivation, {
+function verifier(status: PlanStatus, fake: Pick<FakeExec, 'exec'>, overrides: Partial<PlanVerifierOptions> = {}, target?: PlanDraft): PlanVerifier {
+  return new PlanVerifier(target ?? plan, target ? derivePlanTasks(target) : derivation, {
     root: ROOT,
     planDigest: 'digest',
     status: async () => status,
@@ -611,6 +611,86 @@ describe('PlanVerifier', () => {
     expect(commandOf(onePassed, 'tests:fail')).toMatchObject({ status: 'fail', reason: 'a behaviour is not failing', findings: ['[AC-comments-1] must fail before its implementation exists: passed "[AC-comments-1] x"'] })
     expect(commandOf(oneSkipped, 'tests:fail')).toMatchObject({ status: 'fail', findings: ['[AC-comments-1] must fail before its implementation exists: skipped "[AC-comments-1] x"'] })
     expect(commandOf(oneMissing, 'tests:fail')).toMatchObject({ status: 'fail', findings: ['[AC-comments-1] has no test'] })
+  })
+
+  describe('red runs carried to a revised plan', () => {
+    const SEEN = '2026-09-20T00:00:00.000Z'
+    const behaviourOf = (target: PlanDraft, id: string) => target.tasks.flatMap((task) => task.acceptance).find((behaviour) => behaviour.id === id)!
+    const redOf = (id: string, target: PlanDraft = plan) => ({ shape: behaviourShape(target, id)!, ranAt: SEEN })
+    /** The tests step verified against the parent plan, every behaviour seen failing there. */
+    const parentRecord = (): Record<string, PlanStepRecord> => ({
+      [TESTS]: record({ planDigest: 'parent', acceptance: IDS.map((id) => ({ id, status: 'failing' as const, red: redOf(id) })) }),
+    })
+    /** The plan with AC-comments-2 expecting another status, which its test has to be written against. */
+    const restated = (): PlanDraft => {
+      const target = structuredClone(plan)
+      behaviourOf(target, 'AC-comments-2').expect.status = 418
+      return target
+    }
+
+    test('should key a behaviour on what its test is written from, never on its description', () => {
+      const reworded = structuredClone(plan)
+      behaviourOf(reworded, 'AC-comments-1').description = 'a member of the site can leave a comment'
+      const moved = structuredClone(plan)
+      const route = moved.routes.find((candidate) => candidate.id === behaviourOf(moved, 'AC-comments-1').route)!
+      route.path = `${route.path}/new`
+
+      expect(behaviourShape(reworded, 'AC-comments-1')).toBe(behaviourShape(plan, 'AC-comments-1'))
+      expect(behaviourShape(restated(), 'AC-comments-2')).not.toBe(behaviourShape(plan, 'AC-comments-2'))
+      expect(behaviourShape(moved, 'AC-comments-1')).not.toBe(behaviourShape(plan, 'AC-comments-1'))
+      expect(behaviourShape(plan, 'AC-comments-99')).toBeUndefined()
+      expect([...carriedRedRuns(Object.values(parentRecord()), restated(), IDS).keys()]).toEqual(['AC-comments-1', 'AC-comments-3', 'AC-comments-4'])
+      expect(carriedRedRuns([], plan, IDS).size).toBe(0)
+      // Keyed on the behaviour, not the step: a revision may move a behaviour to another task's tests step.
+      expect([...carriedRedRuns([record(), parentRecord()[TESTS]!], plan, ['AC-comments-2']).keys()]).toEqual(['AC-comments-2'])
+    })
+
+    test('should verify a tests step every behaviour of which was seen failing under the parent plan, without running bun test', async () => {
+      const fake = fakeExec({}, PASSING)
+
+      const step = await verifier(statusOf(), fake, { previous: parentRecord() }).verify(TESTS)
+
+      expect(step.record.outcome).toBe('verified')
+      expect(commandOf(step, 'tests:fail')).toMatchObject({ status: 'pass', label: 'not run: every behaviour was seen failing before its implementation existed' })
+      expect(fake.calls.some((command) => command[1] === 'test')).toBe(false)
+      expect(step.record.acceptance).toEqual(IDS.map((id) => ({ id, status: 'failing', red: redOf(id) })))
+    })
+
+    test('should ask only the behaviour the revision changed to fail, and keep the red runs of the others through a failed run', async () => {
+      const target = restated()
+      const report = junit(IDS.map((id) => ({ name: `[${id}] x`, ...(id === 'AC-comments-2' ? { inner: '<failure/>' } : {}) })))
+
+      const red = await verifier(statusOf(), fakeExec({ test: { exitCode: 1 } }, report), { previous: parentRecord() }, target).verify(TESTS)
+      const green = await verifier(statusOf(), fakeExec({}, PASSING), { previous: parentRecord() }, target).verify(TESTS)
+
+      expect(red.record.outcome).toBe('verified')
+      expect(commandOf(red, 'tests:fail').reason).toBe('[AC-comments-1], [AC-comments-3], [AC-comments-4] seen failing before, at the test the plan still states, so not asked to fail again')
+      expect(red.record.acceptance[1]).toEqual({ id: 'AC-comments-2', status: 'failing', red: { shape: behaviourShape(target, 'AC-comments-2')!, ranAt: '2026-09-21T00:00:00.000Z' } })
+      expect(green.record.outcome).toBe('failed')
+      expect(commandOf(green, 'tests:fail').findings).toEqual(['[AC-comments-2] must fail before its implementation exists: passed "[AC-comments-2] x"'])
+      expect(green.record.acceptance.filter((behaviour) => behaviour.red).map((behaviour) => behaviour.id)).toEqual(['AC-comments-1', 'AC-comments-3', 'AC-comments-4'])
+    })
+
+    test('should record the red runs a verified tests:fail run saw, and none from one that failed', async () => {
+      const verified = await verifier(statusOf(), fakeExec({ test: { exitCode: 1 } }, FAILING)).verify(TESTS)
+      const onePassed = await verifier(statusOf(), fakeExec({ test: { exitCode: 1 } }, junit([{ name: '[AC-comments-1] x' }, ...IDS.slice(1).map((id) => ({ name: `[${id}] x`, inner: '<failure/>' }))]))).verify(TESTS)
+
+      expect(verified.record.acceptance).toEqual(IDS.map((id) => ({ id, status: 'failing', red: { shape: behaviourShape(plan, id)!, ranAt: '2026-09-21T00:00:00.000Z' } })))
+      expect(onePassed.record.acceptance.some((behaviour) => behaviour.red !== undefined)).toBe(false)
+    })
+
+    test('should fail a carried step whose test files no longer carry a behaviour, still without running bun test', async () => {
+      await withTests({ 'tests/comments.test.ts': commentTests(IDS), 'tests/more.test.ts': commentTests(['AC-comments-3']) }, async (root) => {
+        const fake = fakeExec({}, PASSING)
+        const files = ['tests/comments.test.ts', 'tests/more.test.ts'].map((file) => join(root, file))
+
+        const step = await verifier(statusOf(), fake, { root, previous: parentRecord(), testFiles: async () => files }).verify(TESTS)
+
+        expect(step.record.outcome).toBe('failed')
+        expect(commandOf(step, 'tests:fail').findings).toEqual(['[AC-comments-3] is carried by tests/comments.test.ts and tests/more.test.ts'])
+        expect(fake.calls.some((command) => command[1] === 'test')).toBe(false)
+      })
+    })
   })
 
   test('should run a command once per verifier and reuse the result across steps', async () => {
