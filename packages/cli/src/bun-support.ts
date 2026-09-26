@@ -4,4 +4,4 @@
  * it to the oldest entry of ci.yml's `bun-version` matrix, so dropping that
  * lane moves this floor in the same PR.
  */
-export const OLDEST_TESTED_BUN = '1.3.0'
+export const OLDEST_TESTED_BUN = '1.4.0'

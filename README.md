@@ -159,7 +159,7 @@ const post = await Post.findOrFail(1)
 
 ## Requirements
 
-- [Bun](https://bun.sh/) v1.4.2 (the primary supported version; CI also runs 1.3.14 in a non-blocking lane)
+- [Bun](https://bun.sh/) v1.4.2 (the supported version; 1.3.x is best-effort and not tested in CI)
 - Docker only if you want the bundled PostgreSQL or MySQL container. SQLite is the default and needs nothing.
 
 ---
