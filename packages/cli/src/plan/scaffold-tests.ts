@@ -38,7 +38,7 @@ export interface PlanTestsOutput {
 export const PLAN_TESTS_CSRF_ABSENT = 'withCsrf(): GET / did not set an XSRF-TOKEN cookie.'
 
 /** Names the file declares itself, which a parameter or a model import must not take. */
-const FILE_NAMES: ReadonlySet<string> = new Set(['describe', 'expect', 'test', 'TestApp', 'booted', 'client', 'given', 'unwritten', 'actor', 'response', 'body'])
+const FILE_NAMES: ReadonlySet<string> = new Set(['beforeAll', 'describe', 'expect', 'test', 'TestApp', 'booted', 'ready', 'client', 'given', 'unwritten', 'actor', 'response', 'body'])
 
 /** A file name from a plan id or slug: what a path segment may hold on every platform. */
 function fileSegment(text: string): string {
@@ -319,7 +319,7 @@ class TestsEmitter {
   }
 
   source(planFile: string, stepId: string, describeName: string, tests: readonly string[]): string {
-    const testImports = ['describe', ...(this.usesExpect ? ['expect'] : []), 'test']
+    const testImports = ['beforeAll', 'describe', ...(this.usesExpect ? ['expect'] : []), 'test']
     const imports = [
       `import { ${testImports.join(', ')} } from 'bun:test'`,
       "import { TestApp } from '@guren/testing'",
@@ -329,19 +329,26 @@ class TestsEmitter {
       [
         `// Written by plan:scaffold from ${prose(planFile)} (${stepId}). Keep each title's id and the request`,
         '// it makes: plan:verify finds a behaviour by its id, and each test fails until its implementation exists.',
-        '// Setting up rows and cleaning them up is yours: a row left by another test can make a database',
-        '// expectation pass or fail whatever the implementation does.',
+        '// Rows are yours to set up and clean up: a row another test left can pass or fail a database expectation.',
+        '// The beforeAll below boots the application, so the database is configured before any hook you add;',
+        '// open a beforeEach with `await ready()` so a boot that fails still fails each test under its own name.',
         'let booted: Promise<TestApp> | undefined',
       ].join('\n'),
       [
-        '/** The application, booted inside a test so a boot that fails fails each test by name; primed for CSRF where it is mounted. */',
-        'async function client(actor?: object): Promise<TestApp> {',
+        '/** The booted application; once a boot fails, every call rejects with that failure. */',
+        'function ready(): Promise<TestApp> {',
         `  booted ??= import('${importSpecifier(this.path, this.app.entry)}')`,
         '    .then(({ default: app }) => TestApp.fromApp(app))',
         '    .catch((error: unknown) => {',
         `      throw new Error(\`${SKELETON_BOOT_FAILED} \${error instanceof Error ? error.message : String(error)}\`, { cause: error })`,
         '    })',
-        '  const http = actor === undefined ? await booted : (await booted).actingAs(actor)',
+        '  return booted',
+        '}',
+      ].join('\n'),
+      [
+        '/** The application, acting as `actor` when given; primed for CSRF where it is mounted. */',
+        'async function client(actor?: object): Promise<TestApp> {',
+        '  const http = actor === undefined ? await ready() : (await ready()).actingAs(actor)',
         '  try {',
         '    return await http.withCsrf()',
         '  } catch (error) {',
@@ -350,6 +357,12 @@ class TestsEmitter {
         '    throw error',
         '  }',
         '}',
+      ].join('\n'),
+      [
+        '// A beforeAll that throws fails as one unnamed case; the rejection kept in `booted` fails each test by name.',
+        'beforeAll(async () => {',
+        '  await ready().catch(() => undefined)',
+        '})',
       ].join('\n'),
       ...(this.usesGiven
         ? ["/** Setup the plan states in prose: replace each call with that setup, or the test fails here. */\nfunction given<T = void>(setup: string): T {\n  throw new Error(`Write this setup first: ${setup}`)\n}"]
