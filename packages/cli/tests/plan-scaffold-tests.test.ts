@@ -309,16 +309,30 @@ describe('plan:scaffold on a tests step', () => {
     expect(emitted(inRow as unknown as Json).refusals).toEqual([])
   })
 
-  test('should list a behaviour on an existing route with nothing to set up, whose test may pass before any implementation', () => {
-    const document = guestIndexPlan() as { routes: Array<{ id: string; change: Json }> }
-    document.routes.find((route) => route.id === 'route.comments.index')!.change = { kind: 'existing' }
-    expect(emitted(document as unknown as Json).mayPassNow).toEqual(['AC-comments-5'])
+  test('should list a behaviour on a route the application has, with nothing to set up, whose test may pass before any implementation', () => {
+    for (const change of [{ kind: 'existing' }, { kind: 'alter' }, { kind: 'rename', from: 'comments.list' }]) {
+      const document = guestIndexPlan() as { routes: Array<{ id: string; change: Json }> }
+      document.routes.find((route) => route.id === 'route.comments.index')!.change = change
+      expect(emitted(document as unknown as Json).mayPassNow).toEqual(['AC-comments-5'])
+    }
     expect(emitted().mayPassNow).toEqual([])
+  })
+
+  // An unwritten() call throws like a given() one, so the test cannot pass at once.
+  test('should not list a behaviour on an existing route whose expectation is written as an unwritten() call', () => {
+    const document = guestIndexPlan() as { routes: Array<{ id: string; change: Json }>; tasks: Array<{ acceptance: Array<{ id: string; expect: Json }> }> }
+    document.routes.find((route) => route.id === 'route.comments.index')!.change = { kind: 'existing' }
+    document.tasks[0]!.acceptance.find((behaviour) => behaviour.id === 'AC-comments-5')!.expect = { status: 404 }
+    const output = emitted(document as unknown as Json)
+    expect(output.unwritten.map((entry) => entry.element)).toEqual(['AC-comments-5'])
+    expect(output.mayPassNow).toEqual([])
   })
 
   test('should match the exact message withCsrf() throws when no CSRF middleware issued a token', async () => {
     const source = await readFile(TESTING_SOURCE, 'utf8')
     expect(source).toContain('`withCsrf(): GET ${path} did not set an XSRF-TOKEN cookie. `')
+    // The constant spells the default path, which client() relies on by calling withCsrf() with none.
+    expect(source).toContain("async withCsrf(path = '/'): Promise<TestApp> {")
     expect(PLAN_TESTS_CSRF_ABSENT).toBe('withCsrf(): GET / did not set an XSRF-TOKEN cookie.')
   })
 

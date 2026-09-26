@@ -28,7 +28,7 @@ export interface PlanTestsOutput {
   file: PlanScaffoldFile
   /** Expectations written as an `unwritten()` call, which the agent writes by hand. */
   unwritten: PlanScaffoldUnwritten[]
-  /** Behaviours on an existing route with nothing to set up, whose test may already pass, which `tests:fail` refuses. */
+  /** Behaviours on a route the application has, with no `given()` or `unwritten()` call, whose test may already pass, which `tests:fail` refuses. */
   mayPassNow: string[]
   /** Why nothing may be written. Non-empty means the output is not to be used. */
   refusals: string[]
@@ -172,6 +172,8 @@ class TestsEmitter {
   private usesGiven = false
   private usesUnwritten = false
   private usesExpect = false
+  /** Whether the behaviour being written has a `given()` or `unwritten()` call, either of which fails its test. */
+  private placeholder = false
 
   constructor(
     private readonly plan: PlanDraft,
@@ -184,11 +186,13 @@ class TestsEmitter {
   private leave(behaviour: PlanAcceptance, detail: string, reason: string, lines: string[]): void {
     this.unwritten.push({ element: behaviour.id, detail, reason })
     this.usesUnwritten = true
+    this.placeholder = true
     lines.push(`    unwritten(${quoteString(prose(`${detail}: ${reason}`))})`)
   }
 
   private given(prompt: string, binding?: { name: string; type: string }): string {
     this.usesGiven = true
+    this.placeholder = true
     const call = `given${binding ? `<${binding.type}>` : ''}(${quoteString(prose(prompt))})`
     return binding ? `    const ${binding.name} = ${call}` : `    ${call}`
   }
@@ -248,6 +252,7 @@ class TestsEmitter {
   test(behaviour: PlanAcceptance): string {
     const title = quoteString(`[${behaviour.id}] ${prose(behaviour.description)}`)
     const lines: string[] = []
+    this.placeholder = false
     const route = this.plan.routes.find((candidate) => candidate.id === behaviour.route)
     if (!route) {
       // §2 refuses a behaviour naming no route before approval; this guards a plan no check has read.
@@ -262,7 +267,6 @@ class TestsEmitter {
     const safe = route.method === 'GET'
     const url = path.request(route.path, safe ? queryString(behaviour.input) : '')
     for (const param of path.params) lines.push(this.given(`the :${param.label} parameter`, { name: param.variable, type: 'number | string' }))
-    if ((route.change.kind === 'existing' || route.change.kind === 'alter') && lines.length === 0) this.mayPassNow.push(behaviour.id)
 
     const body = !safe && behaviour.input?.length ? `, ${literal(Object.fromEntries(behaviour.input.map(({ name, json }) => [name, parseJson(json)])))}` : ''
     const view = behaviour.expect.inertia === undefined ? undefined : this.plan.views.find((candidate) => candidate.id === behaviour.expect.inertia)
@@ -309,6 +313,8 @@ class TestsEmitter {
     } else if (!failsUnrouted) {
       this.leave(behaviour, 'expect', 'nothing written here fails against a route that does not exist yet, so assert what the behaviour changes', lines)
     }
+    // A route the application already has (renamed ones usually keep their path) may answer as the plan expects today.
+    if (route.change.kind !== 'add' && route.change.kind !== 'drop' && !this.placeholder) this.mayPassNow.push(behaviour.id)
     return `  test(${title}, async () => {\n${lines.join('\n')}\n  })`
   }
 

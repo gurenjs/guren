@@ -1471,9 +1471,10 @@ the other emitters.
   fails before its implementation. The header says setting up and cleaning up
   rows is the agent's: a row another test left can make a `has` or `missing`
   pass or fail whatever the implementation does.
-- Two holes stay open. (a) A behaviour on an `existing` or `alter` route with
-  nothing to set up may pass at once, the route answering as the plan expects
-  already; the report lists it (`mayPassNow`) so the agent knows why
+- Two holes stay open. (a) A behaviour on an `existing`, `alter` or `rename`
+  route (a rename usually keeps the path) with no `given()` or `unwritten()`
+  call may pass at once, the route answering as the plan expects already; the
+  report lists it (`mayPassNow`) so the agent knows why
   `tests:fail` refuses the step, and nothing is refused. (b) A behaviour on an
   added route whose path an existing route already answers (a parameter or
   wildcard route registered first) reaches that route, not a 404, and may pass
