@@ -9,18 +9,18 @@ import { parsePlanDocument } from '../src/plan-render'
 import { formatPlanScaffold, planScaffoldFile, planScaffoldMountFile, type PlanScaffoldReport } from '../src/plan-scaffold'
 import type { PlanVerifyReport } from '../src/plan-verify'
 import { ParseCache } from '../src/parse-cache'
-import { emitPlanTests, type PlanTestsApp } from '../src/plan/scaffold-tests'
+import { emitPlanTests, PLAN_TESTS_CSRF_ABSENT, type PlanTestsApp } from '../src/plan/scaffold-tests'
 import { writePlanActiveStep } from '../src/plan/state'
 import { derivePlanTasks, findPlanStep } from '../src/plan/tasks'
 import { acceptanceTestFiles } from '../src/plan/verify'
 import { scanTestRequests, testCoverage } from '../src/test-requests'
 import { checkTypes, createTempRoot, linkWorkspaceCore, linkWorkspacePackage, snapshotTree, templateCompilerOptions, TSC_TIMEOUT, writeWorkspaceFiles } from './helpers'
-import { approvedAgainst, approvePlanFile, loadCommentsPlan, PLAN_APP_FILES } from './plan-fixture'
+import { approvedAgainst, approvePlanFile, loadCommentsPlan, PLAN_APP_FILES, refusal } from './plan-fixture'
 
 const WORKSPACE_DRIZZLE = resolve(import.meta.dir, '../../orm/node_modules/drizzle-orm')
-const WORKSPACE_ORM = resolve(import.meta.dir, '../../orm')
 const WORKSPACE_ZOD = resolve(import.meta.dir, '../node_modules/zod')
 const TESTING_TYPES = resolve(import.meta.dir, '../../testing/dist/index.d.ts')
+const TESTING_SOURCE = resolve(import.meta.dir, '../../testing/src/test-app.ts')
 
 const PLAN_FILE = 'comments.plan.json'
 const TASK = 'task/entity/model.comment'
@@ -88,7 +88,7 @@ async function createApp(name: string, options: { document?: Json; files?: Recor
     await linkWorkspaceCore(dir)
     await linkWorkspacePackage('testing', dir)
     await symlink(WORKSPACE_DRIZZLE, join(dir, 'node_modules', 'drizzle-orm'), 'dir')
-    await symlink(WORKSPACE_ORM, join(dir, 'node_modules', '@guren', 'orm'), 'dir')
+    await linkWorkspacePackage('orm', dir)
     await symlink(WORKSPACE_ZOD, join(dir, 'node_modules', 'zod'), 'dir')
   }
   const plan = join(dir, PLAN_FILE)
@@ -108,15 +108,6 @@ async function scaffolded(name: string, options: Parameters<typeof createApp>[1]
   await mark(app.dir, TESTS)
   const report = await planScaffoldFile(app.plan, { appRoot: app.dir, step: TESTS })
   return { ...app, report }
-}
-
-async function refusal(work: () => Promise<unknown>): Promise<string> {
-  try {
-    await work()
-  } catch (error) {
-    return (error as Error).message
-  }
-  throw new Error('the run was not refused')
 }
 
 function emitted(document: Json = approvedAgainst(guestIndexPlan()), app: Partial<PlanTestsApp> = {}): ReturnType<typeof emitPlanTests> {
@@ -162,17 +153,23 @@ describe('plan:scaffold on a tests step', () => {
 
       // Written by plan:scaffold from comments.plan.json (task/entity/model.comment/tests). Keep each title's id and the request
       // it makes: plan:verify finds a behaviour by its id, and each test fails until its implementation exists.
+      // Setting up rows and cleaning them up is yours: a row left by another test can make a database
+      // expectation pass or fail whatever the implementation does.
       let booted: Promise<TestApp> | undefined
 
       /** The application, booted inside a test so a boot that fails fails each test by name; primed for CSRF where it is mounted. */
       async function client(actor?: object): Promise<TestApp> {
-        booted ??= import('../../../src/app.js').then(({ default: app }) => TestApp.fromApp(app))
+        booted ??= import('../../../src/app.js')
+          .then(({ default: app }) => TestApp.fromApp(app))
+          .catch((error: unknown) => {
+            throw new Error(\`Application boot failed: \${error instanceof Error ? error.message : String(error)}\`, { cause: error })
+          })
         const http = actor === undefined ? await booted : (await booted).actingAs(actor)
         try {
           return await http.withCsrf()
         } catch (error) {
-          // CSRF middleware issues XSRF-TOKEN on every safe request, so its absence means there is none to prime.
-          if (error instanceof Error && error.message.includes('XSRF-TOKEN')) return http
+          // For an application with no CSRF middleware, which issues no XSRF-TOKEN; one mounting it with \`cookie: false\` is not handled.
+          if (error instanceof Error && error.message.startsWith('withCsrf(): GET / did not set an XSRF-TOKEN cookie.')) return http
           throw error
         }
       }
@@ -231,7 +228,11 @@ describe('plan:scaffold on a tests step', () => {
   })
 
   test('should spell every request so the static scan reads it back to its behaviour’s route', async () => {
-    const document = approvedAgainst(guestIndexPlan())
+    // An Inertia expectation adds `.json()` to the receiver, a builder the scan follows.
+    const withPage = guestIndexPlan() as { tasks: Array<{ acceptance: Json[] }> }
+    withPage.tasks[0]!.acceptance.push({ id: 'AC-comments-6', description: 'A signed-in user sees the post page.', kind: 'success', actor: 'user', route: 'route.comments.index', given: [], expect: { inertia: 'view.posts.show' } })
+    const document = approvedAgainst(withPage as unknown as Json)
+    expect(emitted(document).file.contents).toContain("await (await client(actor)).json().get('/comments').assertInertia('posts/Show')")
     const plan = parsePlanDocument(document)
     const dir = join(ROOT, 'requests')
     await writeWorkspaceFiles(dir, { [TEST_FILE]: emitted(document).file.contents })
@@ -291,6 +292,36 @@ describe('plan:scaffold on a tests step', () => {
     expect([...contents.matchAll(/\[AC-[^\]]+\]/g)].map(([token]) => token)).toEqual(IDS.map((id) => `[${id}]`))
   })
 
+  test('should refuse a request body or a database value carrying another behaviour’s id, which plan:verify would select the file by', () => {
+    const inBody = guestIndexPlan() as { tasks: Array<{ acceptance: Array<{ input?: Json[]; expect: Json }> }> }
+    inBody.tasks[0]!.acceptance[0]!.input = [{ name: 'body', json: '"see [AC-billing-1]"' }]
+    expect(emitted(inBody as unknown as Json).refusals).toEqual([
+      `[AC-billing-1] would be carried by ${TEST_FILE}, which is not a behaviour of this step; plan:verify needs each behaviour in one test file.`,
+    ])
+
+    const inRow = guestIndexPlan() as { tasks: Array<{ acceptance: Array<{ expect: Json }> }> }
+    inRow.tasks[0]!.acceptance[0]!.expect = { status: 302, database: [{ table: 'comments', has: [{ name: 'body', json: '"[AC-comments-9]"' }] }] }
+    expect(emitted(inRow as unknown as Json).refusals).toEqual([
+      `[AC-comments-9] would be carried by ${TEST_FILE}, which is not a behaviour of this step; plan:verify needs each behaviour in one test file.`,
+    ])
+    // One of the step's own ids in a value is no refusal: the file carries it already.
+    inRow.tasks[0]!.acceptance[0]!.expect = { status: 302, database: [{ table: 'comments', has: [{ name: 'body', json: '"[AC-comments-2]"' }] }] }
+    expect(emitted(inRow as unknown as Json).refusals).toEqual([])
+  })
+
+  test('should list a behaviour on an existing route with nothing to set up, whose test may pass before any implementation', () => {
+    const document = guestIndexPlan() as { routes: Array<{ id: string; change: Json }> }
+    document.routes.find((route) => route.id === 'route.comments.index')!.change = { kind: 'existing' }
+    expect(emitted(document as unknown as Json).mayPassNow).toEqual(['AC-comments-5'])
+    expect(emitted().mayPassNow).toEqual([])
+  })
+
+  test('should match the exact message withCsrf() throws when no CSRF middleware issued a token', async () => {
+    const source = await readFile(TESTING_SOURCE, 'utf8')
+    expect(source).toContain('`withCsrf(): GET ${path} did not set an XSRF-TOKEN cookie. `')
+    expect(PLAN_TESTS_CSRF_ABSENT).toBe('withCsrf(): GET / did not set an XSRF-TOKEN cookie.')
+  })
+
   test('should write output that typechecks beside the files the scaffold step wrote', async () => {
     const { dir, report } = await scaffolded('typecheck')
     expect(report.created).toEqual([TEST_FILE])
@@ -338,6 +369,16 @@ describe('plan:scaffold on a tests step', () => {
       const result = await verifyTests(plan, dir)
       expect(testsCommand(result)).toMatchObject({ status: 'fail', reason: 'a behaviour is not failing' })
       expect(testsCommand(result).findings.join('\n')).toContain('[AC-comments-1] must fail before its implementation exists: skipped')
+    }, 60_000)
+
+    // Boot is shared, so every case that reaches client() fails on it while the others fail at given(): one is enough.
+    test('should record blocked when the application does not boot, rather than a red run', async () => {
+      const { dir, plan } = await scaffolded('boot-fails')
+      await writeFile(join(dir, 'src/app.ts'), APP_ENTRY.replace('  providers: [],', "  providers: [],\n  boot: () => {\n    throw new Error('database is not configured')\n  },"))
+
+      const result = await verifyTests(plan, dir)
+      expect(testsCommand(result)).toMatchObject({ status: 'blocked', reason: 'the application did not boot, so a case failed without reaching its route' })
+      expect(result.steps[0]!.record.outcome).toBe('blocked')
     }, 60_000)
 
     // The guest's case has nothing to fill, so once its route answers it passes, which tests:fail refuses.
@@ -402,7 +443,8 @@ describe('plan:scaffold on a tests step', () => {
   })
 
   test('should report what it wrote, what is left, and the verify run next', async () => {
-    const { report } = await scaffolded('report')
+    const { report } = await scaffolded('report', { link: false })
+    expect(Object.keys(report).sort()).toEqual(['created', 'emitted', 'kind', 'mayPassNow', 'plan', 'reportVersion', 'step', 'unwritten'])
     const text = formatPlanScaffold(report, PLAN_FILE)
     expect(text).toContain(`Created:\n  ${TEST_FILE}`)
     expect(text).toContain(`One test per behaviour: ${IDS.map((id) => `[${id}]`).join(', ')}`)

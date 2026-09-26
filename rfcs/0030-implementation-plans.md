@@ -1415,7 +1415,10 @@ the other emitters.
   file (the description, `given`, the actor) has its brackets turned into
   parentheses, so the file carries no id but its own: another bracketed id in
   it would be selected by that behaviour's step and counted by the drift
-  re-check.
+  re-check. What the plan spells as data (a request body, a `has`/`missing`
+  value, an `errors` key, a redirect target, a page name) is written as it
+  is, so the emitted file is scanned with `bracketedTokens()` and an
+  acceptance id other than the step's own refuses the step, nothing written.
 - The request is the route's method and path, each parameter a whole-segment
   interpolation (`` `/posts/${postId}/comments` ``), which `test-requests.ts`
   resolves to the route. The `input` is the body, or the query string for a
@@ -1428,20 +1431,35 @@ the other emitters.
   `TestApp.fromApp()` on first use inside a test, never at module level or in
   `beforeAll`: a file that throws while loading is absent from the junit report
   and a throwing `beforeAll` becomes one `(unnamed)` case, either of which
-  reads every behaviour as `pending`. It primes CSRF with `withCsrf()`
-  (after `actingAs()`), and falls back to the unprimed client only on the
-  error `withCsrf()` throws for a missing `XSRF-TOKEN`, which the CSRF
-  middleware issues on every safe request: its absence means no CSRF is
-  mounted, as in an application created without `auth`.
+  reads every behaviour as `pending`. A boot that throws is rethrown as
+  `Application boot failed: <message>` (`SKELETON_BOOT_FAILED` in
+  `plan/acceptance-status.ts`). Bun's junit report carries no failure message
+  (`<failure type="AssertionError" />`, measured on 1.3.14), so `tests:fail`
+  reads Bun's own `error: Application boot failed:` line from the run's output,
+  and one such line records the command `blocked`: the boot is shared, so every
+  case that reaches `client()` fails on it while the cases that throw at
+  `given()` first never reach the application, and "every failed case" would
+  let that mix verify. It primes CSRF with `withCsrf()` (after `actingAs()`),
+  and falls back to the unprimed client only on the exact message
+  `withCsrf()` throws for the default path when no `XSRF-TOKEN` was issued,
+  which the CSRF middleware issues on every safe request: its absence means no
+  CSRF is mounted, as in an application created without `auth`. The two
+  spellings are kept in sync by a test that reads `packages/testing`'s source.
 - What the plan states only in prose is a `given()` call that throws: each
-  `given` line, the actor where the route or action names `auth`, carries a
-  policy, or the behaviour is `forbidden` (never for `unauthenticated`), and
-  each path parameter's value. A throw is a failed case, never a skipped one,
+  `given` line, the actor, and each path parameter's value. Only `auth` or an
+  `auth:*` middleware on the route or its action, a policy, or a `forbidden`
+  behaviour implies a signed-in actor, and `unauthenticated` never does; a
+  guard under another middleware name gets no actor, and its test fails on the
+  401 or redirect until one is set up. A throw is a failed case, never a skipped one,
   so `tests:fail` counts it; `test.todo` and `test.skip` would not.
 - The expectations are written out where `TestApp` can assert them:
   `assertStatus`, `assertRedirect` (a path sharing the route's parameters
-  reuses their values), `assertInertia` on the view's page with `X-Inertia`
-  sent, and `errors` as the keys of the JSON body's `errors`. `TestApp` has no
+  reuses their values), `assertInertia` on the view's page with the receiver's
+  `.json()` (`Accept: application/json`, which `renderInertia()`, the path
+  `Controller.inertia()` takes, answers with the page as JSON; `X-Inertia`
+  would meet its version check, a 409 when the asset version resolves in tests
+  and the request sends none), and `errors` as the keys of the JSON body's
+  `errors`. `TestApp` has no
   database helper bound to the application's connection, so a `database` row is
   a query through the model, `expect(await Comment.where({ … }).first())`, for
   a table a plan model declares, whose class the root has, with each value one
@@ -1450,7 +1468,17 @@ the other emitters.
   expected `404`, which a route that does not exist yet answers too, is an
   `unwritten()` call that throws, listed in the report. A case with no
   assertion that a missing route would fail gets one as well, so every case
-  fails before its implementation.
+  fails before its implementation. The header says setting up and cleaning up
+  rows is the agent's: a row another test left can make a `has` or `missing`
+  pass or fail whatever the implementation does.
+- Two holes stay open. (a) A behaviour on an `existing` or `alter` route with
+  nothing to set up may pass at once, the route answering as the plan expects
+  already; the report lists it (`mayPassNow`) so the agent knows why
+  `tests:fail` refuses the step, and nothing is refused. (b) A behaviour on an
+  added route whose path an existing route already answers (a parameter or
+  wildcard route registered first) reaches that route, not a 404, and may pass
+  too; it is neither listed nor refused, since telling it needs the registered
+  routes, which the scaffold does not load.
 - The file compiles: the helpers, `expect` and each model import are written
   only when used, and a test renders it beside the scaffold step's output and
   typechecks it. Refused before the write, like the other scaffold writes: the
@@ -1465,11 +1493,12 @@ the other emitters.
   guest's on the route's 404, and the step verifies. Turning one test into
   `test.skip` fails the step, and mounting the routes with `--mount` makes the
   guest's case pass, which fails it too.
-- Not verified: an `inertia` expectation against an application whose Inertia
-  asset version resolves in tests, which answers an `X-Inertia` visit without
-  the matching `X-Inertia-Version` with 409; and an application that mounts
-  CSRF with its cookie turned off, where the fallback leaves mutating requests
-  unprimed.
+  An application whose `src/app.ts` throws at boot records the step
+  `blocked`.
+- Not verified: an application that mounts CSRF with its cookie turned off,
+  where the fallback does not apply and `client()` throws. The `.json()` path
+  for `inertia` is read from the engine's source, not run against an
+  application with a resolved asset version.
 
 For `alter` / `rename` / `drop` there is no scaffold. Those steps are agent
 edits, and the narrow step width matters most there.

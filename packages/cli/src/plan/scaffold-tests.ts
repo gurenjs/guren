@@ -9,7 +9,8 @@
 
 import { collectionSlug } from '../inflect'
 import { quoteString } from '../schema-columns'
-import { isBindingName, PATH_PARAM_PATTERN, quoteObjectKey } from '../utils'
+import { escapeTemplateLiteral, isBindingName, PATH_PARAM_PATTERN, quoteObjectKey } from '../utils'
+import { bracketedTokens, isAcceptanceId, SKELETON_BOOT_FAILED } from './acceptance-status'
 import { importSpecifier } from './scaffold-controller'
 import type { PlanScaffoldFile } from './scaffold'
 import type { PlanScaffoldUnwritten } from './scaffold-http'
@@ -27,9 +28,14 @@ export interface PlanTestsOutput {
   file: PlanScaffoldFile
   /** Expectations written as an `unwritten()` call, which the agent writes by hand. */
   unwritten: PlanScaffoldUnwritten[]
+  /** Behaviours on an existing route with nothing to set up, whose test may already pass, which `tests:fail` refuses. */
+  mayPassNow: string[]
   /** Why nothing may be written. Non-empty means the output is not to be used. */
   refusals: string[]
 }
+
+// Must match the message `withCsrf()` throws in packages/testing/src/test-app.ts for the default path.
+export const PLAN_TESTS_CSRF_ABSENT = 'withCsrf(): GET / did not set an XSRF-TOKEN cookie.'
 
 /** Names the file declares itself, which a parameter or a model import must not take. */
 const FILE_NAMES: ReadonlySet<string> = new Set(['describe', 'expect', 'test', 'TestApp', 'booted', 'client', 'given', 'unwritten', 'actor', 'response', 'body'])
@@ -52,8 +58,8 @@ function taskFileName(task: PlanDerivedTask): string {
   }
 }
 
-/** Where a task's skeletons go: one file per plan and task, so a second plan on the same entity writes a file of its own. */
-export function planTestsFilePath(slug: string, task: PlanDerivedTask): string {
+/** One file per plan and task, so a second plan on the same entity writes a file of its own. */
+function planTestsFilePath(slug: string, task: PlanDerivedTask): string {
   return `tests/plans/${fileSegment(slug)}/${taskFileName(task)}.test.ts`
 }
 
@@ -63,10 +69,6 @@ export function planTestsFilePath(slug: string, task: PlanDerivedTask): string {
  */
 function prose(text: string): string {
   return text.replace(/\[/gu, '(').replace(/\]/gu, ')').replace(/\s+/gu, ' ').trim()
-}
-
-function templateText(text: string): string {
-  return text.replace(/[\\`]/gu, '\\$&').replace(/\$\{/gu, '\\${')
 }
 
 /** A JSON value as a TypeScript expression. */
@@ -93,61 +95,56 @@ function queryString(input: PlanAcceptance['input']): string {
   return `?${pairs.join('&')}`
 }
 
-interface PathParam {
-  label: string
-  variable: string
-}
+// A bare `*` segment takes any value, which the test has to choose like a parameter's.
+const WILDCARD_SEGMENT = /(?<=^|\/)\*(?=\/|$)/u
 
 /** A route path as code, each parameter a whole-segment interpolation, which is what `test-requests.ts` reads as filling it. */
 class RequestPath {
-  readonly params: PathParam[] = []
+  readonly params: Array<{ label: string; variable: string }> = []
 
   constructor(private readonly taken: ReadonlySet<string>) {}
+
+  /** The route's own path: every parameter gets a variable. */
+  request(path: string, suffix: string): string {
+    return this.render(path, suffix, (label) => this.variable(label))!
+  }
+
+  /** A path that may use only the route's parameters; `null` when it names another, whose value only the implementation knows. */
+  redirect(path: string): string | null {
+    return this.render(path, '', (label) => this.params.find((param) => param.label === label)?.variable ?? null)
+  }
 
   private variable(label: string): string {
     const known = this.params.find((param) => param.label === label)
     if (known) return known.variable
-    const base = isBindingName(label) && !this.taken.has(label) ? label : `param${this.params.length + 1}`
-    this.params.push({ label, variable: base })
-    return base
+    const variable = isBindingName(label) && !this.taken.has(label) ? label : `param${this.params.length + 1}`
+    this.params.push({ label, variable })
+    return variable
   }
 
-  /** `null` for a path naming a parameter the route does not declare, which only the route can fill. */
-  code(path: string, suffix = '', declared?: ReadonlySet<string>): string | null {
+  private render(path: string, suffix: string, fill: (label: string) => string | null): string | null {
     const pieces: string[] = []
     let last = 0
-    let dynamic = false
-    for (const match of path.matchAll(PATH_PARAM_PATTERN)) {
-      const [token, boundary] = match
-      const label = match[2]!.replace(/\*$/u, '')
-      if (declared && !declared.has(label)) return null
-      pieces.push(templateText(path.slice(last, match.index) + boundary), `\${${this.variable(label)}}`)
-      last = match.index + token.length
-      dynamic = true
+    for (const { 0: token, 1: boundary, 2: name, index } of path.matchAll(PATH_PARAM_PATTERN)) {
+      const variable = fill(name!.replace(/\*$/u, ''))
+      if (variable === null) return null
+      pieces.push(escapeTemplateLiteral(path.slice(last, index) + boundary), `\${${variable}}`)
+      last = index + token.length
     }
-    let rest = path.slice(last)
-    // A bare `*` segment takes any value, which the test has to choose like a parameter's.
-    if (/(^|\/)\*(?=\/|$)/u.test(rest) && !declared) {
-      rest = rest.replace(/(^|\/)\*(?=\/|$)/gu, (_, slash: string) => `${slash}\u0000`)
-      const [head, ...tail] = templateText(rest).split('\u0000')
-      pieces.push(head!, ...tail.flatMap((piece) => [`\${${this.variable('wildcard')}}`, piece]))
-      dynamic = true
-    } else {
-      pieces.push(templateText(rest))
+    const [head, ...afterWildcards] = path.slice(last).split(WILDCARD_SEGMENT)
+    pieces.push(escapeTemplateLiteral(head!))
+    for (const rest of afterWildcards) {
+      const variable = fill('wildcard')
+      if (variable === null) return null
+      pieces.push(`\${${variable}}`, escapeTemplateLiteral(rest))
     }
-    if (!dynamic) return quoteString(path + suffix)
-    return `\`${pieces.join('')}${templateText(suffix)}\``
+    if (pieces.length === 1) return quoteString(path + suffix)
+    return `\`${pieces.join('')}${escapeTemplateLiteral(suffix)}\``
   }
 }
 
-interface Written {
-  lines: string[]
-  /** An assertion a 404 from a route that does not exist yet would fail, so the case cannot pass before the implementation. */
-  failsUnrouted: boolean
-}
-
-/** A has/missing value the where clause can take, typed as the model record types the column. */
-function whereValue(column: PlanColumn, value: unknown): boolean {
+/** Whether a has/missing value is a literal the model's record types the column as. */
+function comparesWith(column: PlanColumn, value: unknown): boolean {
   if (value === null) return column.nullable
   switch (column.type) {
     case 'string':
@@ -168,17 +165,21 @@ function whereValue(column: PlanColumn, value: unknown): boolean {
 
 class TestsEmitter {
   readonly unwritten: PlanScaffoldUnwritten[] = []
+  readonly mayPassNow: string[] = []
   readonly refusals: string[] = []
   readonly models = new Map<string, string>()
-  usesGiven = false
-  usesUnwritten = false
-  usesExpect = false
+  private readonly taken: ReadonlySet<string>
+  private usesGiven = false
+  private usesUnwritten = false
+  private usesExpect = false
 
   constructor(
     private readonly plan: PlanDraft,
     private readonly path: string,
     private readonly app: PlanTestsApp,
-  ) {}
+  ) {
+    this.taken = new Set([...FILE_NAMES, ...plan.models.map((model) => model.name)])
+  }
 
   private leave(behaviour: PlanAcceptance, detail: string, reason: string, lines: string[]): void {
     this.unwritten.push({ element: behaviour.id, detail, reason })
@@ -186,6 +187,13 @@ class TestsEmitter {
     lines.push(`    unwritten(${quoteString(prose(`${detail}: ${reason}`))})`)
   }
 
+  private given(prompt: string, binding?: { name: string; type: string }): string {
+    this.usesGiven = true
+    const call = `given${binding ? `<${binding.type}>` : ''}(${quoteString(prose(prompt))})`
+    return binding ? `    const ${binding.name} = ${call}` : `    ${call}`
+  }
+
+  /** Only `auth` / `auth:*` middleware, a policy, or a `forbidden` behaviour implies a signed-in actor; `unauthenticated` never does. */
   private needsUser(behaviour: PlanAcceptance, route: PlanRoute): boolean {
     if (behaviour.kind === 'unauthenticated') return false
     const action = this.plan.controllers.flatMap((controller) => controller.actions).find((candidate) => candidate.id === route.action)
@@ -193,7 +201,7 @@ class TestsEmitter {
     return behaviour.kind === 'forbidden' || action?.authorization.policy !== undefined || middleware.some((name) => name === 'auth' || name.startsWith('auth:'))
   }
 
-  /** The model class a database row is read through, imported from the root; `undefined` when the row cannot be. */
+  /** The model class a database row is read through, imported from the root; a reason when the row cannot be. */
   private modelFor(table: string): { model: PlanModel; reason?: undefined } | { model?: undefined; reason: string } {
     const model = this.plan.models.find((candidate) => candidate.table === table)
     if (!model) return { reason: `no model of the plan declares the table ${table}` }
@@ -205,6 +213,7 @@ class TestsEmitter {
     return { model }
   }
 
+  /** Whether a `has` row was written, which a route that does not exist yet cannot satisfy. */
   private databaseRow(behaviour: PlanAcceptance, row: NonNullable<PlanAcceptance['expect']['database']>[number], lines: string[]): boolean {
     let failsUnrouted = false
     for (const [side, values] of [['has', row.has], ['missing', row.missing]] as const) {
@@ -222,7 +231,7 @@ class TestsEmitter {
         const column = model.columns.find((candidate) => candidate.name === value.name || candidate.columnName === value.name)
         const parsed = parseJson(value.json)
         if (!column) reason ??= `${value.name} is no column the plan declares on ${model.name}`
-        else if (!whereValue(column, parsed)) reason ??= `${value.json} is no literal a ${column.type}${column.nullable ? ' (nullable)' : ''} column compares with`
+        else if (!comparesWith(column, parsed)) reason ??= `${value.json} is no literal a ${column.type}${column.nullable ? ' (nullable)' : ''} column compares with`
         else conditions.push(`${quoteObjectKey(column.name)}: ${literal(parsed)}`)
       }
       if (reason !== undefined) {
@@ -241,44 +250,45 @@ class TestsEmitter {
     const lines: string[] = []
     const route = this.plan.routes.find((candidate) => candidate.id === behaviour.route)
     if (!route) {
+      // §2 refuses a behaviour naming no route before approval; this guards a plan no check has read.
       this.refusals.push(`${behaviour.id} names the route ${behaviour.route}, which the plan does not declare.`)
       return ''
     }
 
-    for (const setup of behaviour.given) lines.push(`    given(${quoteString(prose(setup))})`)
+    for (const setup of behaviour.given) lines.push(this.given(setup))
     const user = this.needsUser(behaviour, route)
-    if (user) lines.push(`    const actor = given<object>(${quoteString(`the actor: ${prose(behaviour.actor)}`)})`)
-
-    const taken = new Set([...FILE_NAMES, ...this.models.keys(), ...this.plan.models.map((model) => model.name)])
-    const path = new RequestPath(taken)
+    if (user) lines.push(this.given(`the actor: ${behaviour.actor}`, { name: 'actor', type: 'object' }))
+    const path = new RequestPath(this.taken)
     const safe = route.method === 'GET'
-    const url = path.code(route.path, safe ? queryString(behaviour.input) : '')!
-    for (const param of path.params) lines.push(`    const ${param.variable} = given<number | string>(${quoteString(`the :${param.label} parameter`)})`)
-    if (path.params.length > 0 || behaviour.given.length > 0 || user) this.usesGiven = true
+    const url = path.request(route.path, safe ? queryString(behaviour.input) : '')
+    for (const param of path.params) lines.push(this.given(`the :${param.label} parameter`, { name: param.variable, type: 'number | string' }))
+    if ((route.change.kind === 'existing' || route.change.kind === 'alter') && lines.length === 0) this.mayPassNow.push(behaviour.id)
 
     const body = !safe && behaviour.input?.length ? `, ${literal(Object.fromEntries(behaviour.input.map(({ name, json }) => [name, parseJson(json)])))}` : ''
     const view = behaviour.expect.inertia === undefined ? undefined : this.plan.views.find((candidate) => candidate.id === behaviour.expect.inertia)
-    const receiver = `(await client(${user ? 'actor' : ''}))${view ? ".withHeaders({ 'X-Inertia': 'true' })" : ''}`
+    // Accept: application/json takes the page as JSON through the same renderer, without the X-Inertia version check's 409.
+    const receiver = `(await client(${user ? 'actor' : ''}))${view ? '.json()' : ''}`
     const chain: string[] = []
-    const written: Written = { lines: [], failsUnrouted: false }
+    const after: string[] = []
+    let failsUnrouted = false
     const { status, redirect, errors } = behaviour.expect
     if (status !== undefined) {
       chain.push(`.assertStatus(${status})`)
-      if (status !== 404) written.failsUnrouted = true
+      failsUnrouted = status !== 404
     }
     if (redirect !== undefined) {
-      const target = path.code(redirect, '', new Set(path.params.map((param) => param.label)))
-      if (target === null) this.leave(behaviour, `redirect ${redirect}`, 'it names a parameter the route does not, whose value only the implementation knows', written.lines)
+      const target = path.redirect(redirect)
+      if (target === null) this.leave(behaviour, `redirect ${redirect}`, 'it names a parameter the route does not, whose value only the implementation knows', after)
       else {
         chain.push(`.assertRedirect(${target})`)
-        written.failsUnrouted = true
+        failsUnrouted = true
       }
     }
     if (behaviour.expect.inertia !== undefined) {
       if (view) {
         chain.push(`.assertInertia(${quoteString(view.page)})`)
-        written.failsUnrouted = true
-      } else this.leave(behaviour, `inertia ${behaviour.expect.inertia}`, 'the plan declares no such view', written.lines)
+        failsUnrouted = true
+      } else this.leave(behaviour, `inertia ${behaviour.expect.inertia}`, 'the plan declares no such view', after)
     }
     const request = `${receiver}.${route.method.toLowerCase()}(${url}${body})${chain.join('')}`
     if (errors?.length) {
@@ -286,17 +296,17 @@ class TestsEmitter {
       lines.push(`    const response = await ${request}`)
       lines.push('    const body = await response.json<{ errors?: Record<string, unknown> }>()')
       lines.push(`    expect(Object.keys(body.errors ?? {})).toEqual(expect.arrayContaining([${errors.map((field) => quoteString(field)).join(', ')}]))`)
-      written.failsUnrouted = true
+      failsUnrouted = true
     } else {
       lines.push(`    await ${request}`)
     }
-    lines.push(...written.lines)
+    lines.push(...after)
     for (const row of behaviour.expect.database ?? []) {
-      if (this.databaseRow(behaviour, row, lines)) written.failsUnrouted = true
+      if (this.databaseRow(behaviour, row, lines)) failsUnrouted = true
     }
     if (status === 404) {
       this.leave(behaviour, 'status 404', 'a route that does not exist yet answers 404 as well, so assert what tells the two apart', lines)
-    } else if (!written.failsUnrouted) {
+    } else if (!failsUnrouted) {
       this.leave(behaviour, 'expect', 'nothing written here fails against a route that does not exist yet, so assert what the behaviour changes', lines)
     }
     return `  test(${title}, async () => {\n${lines.join('\n')}\n  })`
@@ -313,18 +323,24 @@ class TestsEmitter {
       [
         `// Written by plan:scaffold from ${prose(planFile)} (${stepId}). Keep each title's id and the request`,
         '// it makes: plan:verify finds a behaviour by its id, and each test fails until its implementation exists.',
+        '// Setting up rows and cleaning them up is yours: a row left by another test can make a database',
+        '// expectation pass or fail whatever the implementation does.',
         'let booted: Promise<TestApp> | undefined',
       ].join('\n'),
       [
         '/** The application, booted inside a test so a boot that fails fails each test by name; primed for CSRF where it is mounted. */',
         'async function client(actor?: object): Promise<TestApp> {',
-        `  booted ??= import('${importSpecifier(this.path, this.app.entry)}').then(({ default: app }) => TestApp.fromApp(app))`,
+        `  booted ??= import('${importSpecifier(this.path, this.app.entry)}')`,
+        '    .then(({ default: app }) => TestApp.fromApp(app))',
+        '    .catch((error: unknown) => {',
+        `      throw new Error(\`${SKELETON_BOOT_FAILED} \${error instanceof Error ? error.message : String(error)}\`, { cause: error })`,
+        '    })',
         '  const http = actor === undefined ? await booted : (await booted).actingAs(actor)',
         '  try {',
         '    return await http.withCsrf()',
         '  } catch (error) {',
-        '    // CSRF middleware issues XSRF-TOKEN on every safe request, so its absence means there is none to prime.',
-        "    if (error instanceof Error && error.message.includes('XSRF-TOKEN')) return http",
+        '    // For an application with no CSRF middleware, which issues no XSRF-TOKEN; one mounting it with `cookie: false` is not handled.',
+        `    if (error instanceof Error && error.message.startsWith(${quoteString(PLAN_TESTS_CSRF_ABSENT)})) return http`,
         '    throw error',
         '  }',
         '}',
@@ -345,7 +361,6 @@ function describeTask(plan: PlanDraft, task: PlanDerivedTask): string {
     case 'foundation':
       return `${plan.title}: foundation`
     case 'entity':
-      return task.title.name
     case 'story':
       return task.title.name
     case 'cross':
@@ -360,9 +375,14 @@ export function emitPlanTests(plan: PlanDraft, task: PlanDerivedTask, step: Plan
   const wanted = new Set(step.acceptanceIds)
   const behaviours = plan.tasks.flatMap((intent) => intent.acceptance).filter((behaviour) => wanted.has(behaviour.id))
   const tests = behaviours.map((behaviour) => emitter.test(behaviour))
+  const contents = emitter.source(context.planFile, step.id, describeTask(plan, task), tests)
+  // A body, a database value, an error key or a page name is written as the plan spells it, and plan:verify would select the file by an id in it.
+  const foreign = [...new Set(bracketedTokens(contents).filter((token) => isAcceptanceId(token) && !wanted.has(token)))]
+  for (const id of foreign) emitter.refusals.push(`[${id}] would be carried by ${path}, which is not a behaviour of this step; plan:verify needs each behaviour in one test file.`)
   return {
-    file: { elements: behaviours.map((behaviour) => behaviour.id), path, contents: emitter.source(context.planFile, step.id, describeTask(plan, task), tests) },
+    file: { elements: behaviours.map((behaviour) => behaviour.id), path, contents },
     unwritten: emitter.unwritten,
+    mayPassNow: emitter.mayPassNow,
     refusals: emitter.refusals,
   }
 }

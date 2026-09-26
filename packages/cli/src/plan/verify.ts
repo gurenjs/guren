@@ -22,6 +22,7 @@ import { bunExecutable, type CapturedExec, type CapturedRun } from '../subproces
 import {
   acceptanceStatus,
   planAcceptanceIds,
+  SKELETON_BOOT_FAILED,
   type AcceptanceBehaviourStatus,
   type AcceptanceError,
   type AcceptanceReport,
@@ -527,6 +528,10 @@ export class PlanVerifier {
       return { label, status: 'fail', reason: 'the test report names behaviours the plan does not, or one behaviour in several files', findings: capFindings(report.errors.map(describeAcceptanceError)) }
     }
 
+    // The junit report carries no failure message, so the boot failure is read from Bun's own `error:` line.
+    if (command === 'tests:fail' && `${result.stdout}\n${result.stderr}`.split('\n').some((line) => line.startsWith(`error: ${SKELETON_BOOT_FAILED}`))) {
+      return { label, status: 'blocked', reason: 'the application did not boot, so a case failed without reaching its route', findings: tail }
+    }
     const findings = command === 'tests' ? notPassing(ids, report.behaviours) : notFailing(ids, report.behaviours)
     if (findings.length > 0) {
       return { label, status: 'fail', reason: command === 'tests' ? 'a behaviour is not passing' : 'a behaviour is not failing', findings: capFindings(findings) }

@@ -361,16 +361,17 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
       ...stallOf(step.id),
       ...(unconfirmed.length > 0 ? { unconfirmed } : {}),
       ...(drifted.length > 0 ? { drifted } : {}),
-      ...(step.kind === 'scaffold' ? { scaffold: scaffoldOf(plan, step, planPath) } : {}),
-      ...(step.kind === 'tests' ? { scaffold: { command: planScaffoldCommandLine(planPath, step.id), writes: [...step.acceptanceIds], leaves: [] } } : {}),
+      ...(step.kind === 'scaffold' || step.kind === 'tests' ? { scaffold: scaffoldOf(plan, step, planPath) } : {}),
       ...mountable,
     },
   }
 }
 
 function scaffoldOf(plan: PlanDraft, step: PlanDerivedStep, planArgument: string): NonNullable<PlanNextStep['scaffold']> {
+  const command = planScaffoldCommandLine(planArgument, step.id)
+  if (step.kind === 'tests') return { command, writes: [...step.acceptanceIds], leaves: [] }
   const { emitted, left } = planScaffoldCoverage(plan, step)
-  return { command: planScaffoldCommandLine(planArgument, step.id), writes: emitted, leaves: left.map((element) => element.id) }
+  return { command, writes: emitted, leaves: left.map((element) => element.id) }
 }
 
 function mountOf(plan: PlanDraft, derivation: PlanTaskDerivation, task: PlanDerivedTask, step: PlanDerivedStep, planArgument: string): PlanNextStep['mount'] {
@@ -459,7 +460,7 @@ function scaffoldLines(step: PlanNextStep, scaffold: NonNullable<PlanNextStep['s
   const command = planScaffoldCommandLine(planArgument, step.id)
   const lines = draft
     ? [`Approve the plan first (bunx guren plan:approve ${planArgument}): plan:scaffold writes this step from an approved plan only, as`, `  ${command}`]
-    : [step.kind === 'tests' ? `Write this step’s test skeletons with \`${command}\`, not by hand, then fill them in.` : `Write this step with \`${command}\`, not by hand.`]
+    : [step.kind === 'tests' ? `Write this step\u2019s test skeletons with \`${command}\`, not by hand, then fill them in.` : `Write this step with \`${command}\`, not by hand.`]
   if (step.kind === 'tests') {
     lines.push(
       `  It writes one TestApp test per behaviour (${scaffold.writes.join(', ')}), with its request and the expectations the plan states, into one file.`,

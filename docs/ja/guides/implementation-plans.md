@@ -380,7 +380,7 @@ Write this step’s test skeletons with `bunx guren plan:scaffold docs/plans/com
 
 Behaviours to write, as test titles `[<id>] <description>`, failing:
   [AC-comments-1] A signed-in user can comment on a post.
-      success; actor user; route route.comments.store; given a post exists; expect status 303; comments has 1 row(s)
+      success; actor user; route route.comments.store; given a post exists; expect status 302; comments has 1 row(s)
   [AC-comments-2] An empty comment is rejected.
       validation; actor user; route route.comments.store; given a post exists; expect status 422; errors on body
   [AC-comments-3] A guest cannot comment.
@@ -556,13 +556,14 @@ test('[AC-comments-1] A signed-in user can comment on a post.', async () => {
 
 - タイトルは振る舞いの id で始まり、`plan:verify` はこの id でファイルを選びます。計画の文中にある角括弧は丸括弧にして書くので、ファイルがほかの id を持つことはありません。
 - リクエストはルートが示すものです。メソッド、パラメーターをセグメント全体の埋め込みにしたパス、ボディにした `input` (`GET` ならクエリ文字列) を書きます。
-- 期待値は計画のものです。`status`、`redirect` (ルートと共通のパラメーターはルートの値を使います)、`inertia` (リクエストに `X-Inertia` を付けます)、`errors` (JSON のボディから読みます)、`database` の行を書きます。行はモデルを通したクエリで、ルートにモデルがあり、計画のカラムの型と比べられる値のときに書きます。
+- 期待値は計画のものです。`status`、`redirect` (ルートと共通のパラメーターはルートの値を使います)、`inertia` (JSON を求めるリクエストにし、Inertia のバージョン確認を通らずにページを受け取ります)、`errors` (JSON のボディから読みます)、`database` の行を書きます。行はモデルを通したクエリで、ルートにモデルがあり、計画のカラムの型と比べられる値のときに書きます。行の準備と後片付けは実装する側の作業です。ほかのテストが残した行があると、実装に関係なく期待値が通ったり失敗したりします。
 - 計画が文章で書いた前提、ルートが求めるときのサインイン済みのアクター、パスの各パラメーターは `given()` の呼び出しになり、呼ぶと例外を投げます。雛形に書けない期待値は `unwritten()` の呼び出しになり、これも例外を投げます。期待する 404 も同じ扱いです。まだないルートも 404 を返すからです。どれもレポートと出力に一覧で示します。
-- `client()` はテストの中で `src/app.ts` を import し、`TestApp.fromApp()` で起動します。起動に失敗してもファイル全体ではなく、各テストが名前付きで失敗します。アプリケーションが CSRF をマウントしていれば、`withCsrf()` で準備します。
+- `client()` はテストの中で `src/app.ts` を import し、`TestApp.fromApp()` で起動します。起動に失敗してもファイル全体ではなく、各テストが名前付きで失敗します。アプリケーションが CSRF をマウントしていれば、`withCsrf()` で準備します。`cookie: false` で CSRF をマウントしたアプリケーションには対応していません。
+- サインイン済みのアクターを用意するのは、`auth` か `auth:*` のミドルウェア、Policy、`forbidden` の振る舞いのときだけです。
 
-実装より前は、どのテストも `given()` の呼び出しか、まだマウントされていないルートで失敗します。skip されるテストはないので、`tests:fail` の条件どおりにステップを検証できます。`given()` と `unwritten()` の呼び出しは、それぞれが示す前提やアサーションに置き換えてください。テストを `test.skip` や `test.todo` に変えないでください。skip したケースは実行に数えられず、ステップはそこで失敗します。後のステップも同じファイルを実行して通ることを求めるので、タイトルの id とリクエストは残してください。
+実装より前は、どのテストも `given()` の呼び出しか、まだマウントされていないルートで失敗します。skip されるテストはないので、`tests:fail` の条件どおりにステップを検証できます。アプリケーションが起動しないときは、どのテストもルートに届いていないので、`plan:verify` はステップを `blocked` と記録します。コードを書く前に通ってしまう場合が二つあり、そのときは `tests:fail` でステップが失敗します。一つは既存のルートで準備するものがない振る舞いで、レポートに一覧で示します。もう一つは、新しいルートのパスに既存のルートがすでに応答する振る舞いで、こちらは一覧に出ません。`given()` と `unwritten()` の呼び出しは、それぞれが示す前提やアサーションに置き換えてください。テストを `test.skip` や `test.todo` に変えないでください。skip したケースは実行に数えられず、ステップはそこで失敗します。後のステップも同じファイルを実行して通ることを求めるので、タイトルの id とリクエストは残してください。
 
-次の場合は何も書かずに拒否します。下書きや承認のない計画、`plan:next` が印を付けていないステップ、すでにあるファイル (再実行)、ほかのテストファイルがすでに持っている振る舞い (`plan:verify` が二つのファイルで見つけてしまいます)、起動できる default export が `src/app.ts` にも `app.ts` にもないアプリケーションです。API 専用のアプリケーションには `scaffold` ステップがありませんが、`tests` ステップはほかと同じようにあり、雛形も書けます。制約付きのルートパラメーター (`:id{[0-9]+}`) は静的な読み取りの限界です。実行時の値が制約を満たすとは限らないので、そのリクエストはルートに届くとは読まず、不確かとして扱います。
+次の場合は何も書かずに拒否します。下書きや承認のない計画、`plan:next` が印を付けていないステップ、すでにあるファイル (再実行)、ほかのテストファイルがすでに持っている振る舞い (`plan:verify` が二つのファイルで見つけてしまいます)、ほかの振る舞いの id を含むリクエストのボディや期待値、起動できる default export が `src/app.ts` にも `app.ts` にもないアプリケーションです。API 専用のアプリケーションには `scaffold` ステップがありませんが、`tests` ステップはほかと同じようにあり、雛形も書けます。制約付きのルートパラメーター (`:id{[0-9]+}`) は静的な読み取りの限界です。実行時の値が制約を満たすとは限らないので、そのリクエストはルートに届くとは読まず、不確かとして扱います。
 
 ### 結果
 
