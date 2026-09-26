@@ -24,6 +24,10 @@ Ships the Citty-based CLI (`guren` bin) with generators and database helpers. Ge
   queue manager. Worker SIGINT/SIGTERM handlers belong to one worker run and
   must be removed on completion or failure. App `stop()` only closes HTTP/Vite
   listeners; it is not a general provider or queue-driver disposal API.
+- `loadApplication()` loads the entry and resolves its application without
+  choosing a boot policy. dev delegates boot to listen; console warns and
+  continues after boot failures; loadBootedApplication propagates them.
+  Startup and queue retry failures must throw to runCli, not exit internally.
 - Keep `runtime.ts` as the single entry for boot helpers; extend `MaybeApplication` instead of reaching into app internals from commands
 - When touching route type output, regenerate `examples/blog/types/generated/routes.d.ts` to verify compatibility
 - Define every subcommand with `defineCommand()` from `./define-command`, not from `citty`, and wire the root command via `runCli()` from `run-cli.ts` (citty's own `runMain()` reports each failure twice and exits the process itself). The wrapper is what makes a repeated flag worth its last value; importing citty's own `defineCommand` opts a command out of that silently, and the reading sites look identical either way. `tests/define-command.test.ts` gates every entry of `builtinSubCommands` on having gone through the wrapper — but it cannot reach the root command in `bin.ts` (which `runCli()` consumes at module scope) or a plugin command (which owns its own parse, deliberately: see the comment in `plugin-commands.ts`)

@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { createTempWorkspace } from './helpers'
 import {
   bootstrapApplication,
+  loadApplication,
+  loadBootedApplication,
   ensureApplicationBooted,
   importFirstAvailableApplicationModule,
   resolveMainEntry,
@@ -45,6 +47,36 @@ describe('runtime helpers', () => {
     await ensureApplicationBooted(app, moduleExports)
     expect(app.boot).not.toHaveBeenCalled()
   })
+
+  it('leaves a default application boot to its caller, while the live loader propagates failure', async () => {
+    const workspace = await createTempWorkspace('guren-runtime-boot-policy-')
+    try {
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(join(workspace.dir, 'src/main.ts'), `export default { listen() {}, boot() { throw new Error('boot failed') } }`)
+      const loaded = await loadApplication(workspace.dir)
+      expect(loaded.entry).toBe(join(workspace.dir, 'src/main.ts'))
+      expect(loaded.moduleExports.default).toBe(loaded.app)
+      await expect(loadBootedApplication(workspace.dir)).rejects.toThrow('boot failed')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  for (const hook of ['ready', 'bootstrap']) {
+    it(`does not boot again after the module's ${hook} hook`, async () => {
+      const workspace = await createTempWorkspace('guren-runtime-ready-policy-')
+      try {
+        await mkdir(join(workspace.dir, 'src'), { recursive: true })
+        await writeFile(join(workspace.dir, 'src/main.ts'), `
+          const app = { listen() {}, boot() { throw new Error('booted twice') } }
+          ${hook === 'ready' ? 'export const ready = Promise.resolve(app)' : 'export const bootstrap = async () => app'}
+        `)
+        expect((await loadBootedApplication(workspace.dir)).listen).toBeTypeOf('function')
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+  }
 
   it('imports the first available application module', async () => {
     const workspace = await createTempWorkspace('guren-cli-runtime-import-')
