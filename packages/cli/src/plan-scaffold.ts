@@ -32,16 +32,16 @@ import { readBracketedTokenFiles } from './docs-acceptance'
 import { DIALECT_BARRELS } from './drizzle-specifiers'
 import { discoverModelClasses } from './model-parser'
 import { parseSourceFile, ParseCache } from './parse-cache'
-import { appendTableToSchema, detectSchemaDialect, ensureNamedImports, type SchemaDialect } from './patch-helpers'
+import { appendTableToSchema, detectSchemaDialect, ensureNamedImports } from './patch-helpers'
 import { readPlanFile } from './plan-render'
 import { exportedNames } from './plan/app-detail'
 import { requirePlanApproval } from './plan/approvals'
 import { writeFileAtomic } from './plan/beside'
 import { entityDocPath } from './plan/close-docs'
-import { emitPlanScaffold, planScaffoldMountCommandLine, planScaffoldMounts, type PlanScaffoldApp, type PlanScaffoldMount, type PlanScaffoldOutput } from './plan/scaffold'
+import { emitPlanScaffold, planScaffoldFilePaths, planScaffoldMountCommandLine, planScaffoldMounts, type PlanScaffoldMount, type PlanScaffoldOutput } from './plan/scaffold'
 import { importSpecifier } from './plan/scaffold-controller'
 import { emitPlanTests, planTestsFilePath, type PlanTestsOutput } from './plan/scaffold-tests'
-import type { Plan } from './plan/schema'
+import type { Plan, PlanDraft } from './plan/schema'
 import { planSlug, readPlanState } from './plan/state'
 import { derivePlanTasks, findPlanStep, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation } from './plan/tasks'
 import { composeAppProviderRegistration, resolveAppEntry } from './provider-registrar'
@@ -149,51 +149,14 @@ async function rootModelFiles(root: string, cache: ParseCache): Promise<Record<s
   return Object.fromEntries(models.map((model) => [model.className, toPosixRelative(root, model.filePath)]))
 }
 
-/** The root entity documents that exist, which a `@docs` tag may name without failing `guren check`. */
-async function existingEntityDocs(root: string, plan: Plan): Promise<string[]> {
-  const docs = plan.models.filter((model) => !model.module).map(entityDocPath)
-  const exists = await Promise.all(docs.map((doc) => pathExists(resolve(root, doc))))
-  return docs.filter((_, index) => exists[index])
-}
-
-/** What the scaffold emitter reads of the root: the schema it appends to, and every name a target may collide with. */
-async function readScaffoldApp(root: string, plan: Plan): Promise<{ schemaPath: string; schema: string; dialect: SchemaDialect; app: PlanScaffoldApp }> {
-  const schemaPath = schemaPathFor(null)
-  const schema = await readIfExists(root, schemaPath)
-  if (schema === null) refuse([`plan:scaffold appends tables to ${schemaPath}, which this application does not have.`])
-  const dialect = detectSchemaDialect(schema)
-  const tables = await parseSchemaTables(root)
-  const cache = new ParseCache()
-  const modelFiles = await rootModelFiles(root, cache)
-  const validators = await rootValidatorExports(root, cache)
-  if ('unreadable' in validators) refuse([`plan:scaffold cannot tell which schemas the validator files already export: ${validators.unreadable}.`])
-  const app: PlanScaffoldApp = {
-    dialect,
-    tables: tables.map((table) => ({
-      identifier: table.identifier,
-      ...(table.tableName !== undefined ? { tableName: table.tableName } : {}),
-      module: table.module,
-      columns: table.columns.map((column) => column.name),
-      ...(table.opaqueColumns ? { opaqueColumns: true } : {}),
-    })),
-    models: Object.keys(modelFiles),
-    validators: Object.keys(validators.files),
-    resources: await rootClassNames(root, discoverResourceFiles),
-    policies: await rootClassNames(root, discoverPolicyFiles),
-    controllers: await rootClassNames(root, discoverControllerFiles),
-    sideEffects: Object.fromEntries(
-      await Promise.all((Object.keys(SIDE_EFFECT_DIRS) as SideEffectKind[]).map(async (kind) => [kind, await rootClassNames(root, (appRoot) => discoverSideEffectFiles(appRoot, kind))] as const)),
-    ),
-    modelFiles,
-    validatorFiles: validators.files,
-    docs: await existingEntityDocs(root, plan),
-  }
-  return { schemaPath, schema, dialect, app }
-}
-
 async function filesOnDisk(root: string, paths: readonly string[]): Promise<string[]> {
   const exists = await Promise.all(paths.map((path) => pathExists(resolve(root, path))))
   return paths.filter((_, index) => exists[index])
+}
+
+/** The root entity documents that exist, which a `@docs` tag may name without failing `guren check`. */
+async function existingEntityDocs(root: string, plan: Plan): Promise<string[]> {
+  return filesOnDisk(root, plan.models.filter((model) => !model.module).map(entityDocPath))
 }
 
 /** The test files carrying each of the step's acceptance ids: plan:verify selects a behaviour's file by its id. */
@@ -201,19 +164,27 @@ async function carriedAcceptanceIds(root: string, step: PlanDerivedStep): Promis
   return readBracketedTokenFiles(root, await discoverTestFiles(root), (token) => step.acceptanceIds.includes(token))
 }
 
+export interface PlanScaffoldTargets {
+  /** What plan:scaffold refuses on: the files it would write, and for a tests step the test files carrying its ids. */
+  existing: string[]
+  /** What it would write and nothing holds yet: a scaffold step's files, a tests step's ids no test file carries. */
+  missing: string[]
+}
+
 /**
- * The targets of a scaffold or tests step already on disk, by the checks plan:scaffold refuses on:
- * the files it would write, and for a tests step the test files carrying its ids. plan:next reads
- * it to tell a step built before a revision from one to scaffold; a read that fails throws.
+ * A scaffold or tests step's targets on disk, by the checks plan:scaffold refuses on, which is why
+ * plan:next names no plan:scaffold once one exists. Reads no application: the plan names the files.
  */
-export async function planScaffoldTargetsOnDisk(root: string, path: string, plan: Plan, task: PlanDerivedTask, step: PlanDerivedStep): Promise<string[]> {
-  if (step.kind === 'tests') {
-    const carriers = [...(await carriedAcceptanceIds(root, step)).values()].flat()
-    return [...new Set([...(await filesOnDisk(root, [planTestsFilePath(planSlug(path), task)])), ...carriers])]
+export async function planScaffoldTargets(root: string, path: string, plan: PlanDraft, task: PlanDerivedTask, step: PlanDerivedStep): Promise<PlanScaffoldTargets> {
+  if (step.kind === 'scaffold') {
+    const files = planScaffoldFilePaths(plan, step)
+    const existing = await filesOnDisk(root, files)
+    return { existing, missing: files.filter((file) => !existing.includes(file)) }
   }
-  if (step.kind !== 'scaffold') return []
-  const { app } = await readScaffoldApp(root, plan)
-  return filesOnDisk(root, emitPlanScaffold(plan, step, app).files.map((file) => file.path))
+  if (step.kind !== 'tests') return { existing: [], missing: [] }
+  const carried = await carriedAcceptanceIds(root, step)
+  const existing = [...new Set([...(await filesOnDisk(root, [planTestsFilePath(planSlug(path), task)])), ...[...carried.values()].flat()])]
+  return { existing, missing: step.acceptanceIds.filter((id) => !carried.has(id)) }
 }
 
 export async function planScaffoldFile(planPath: string, options: PlanScaffoldFileOptions): Promise<PlanScaffoldReport> {
@@ -233,8 +204,37 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
   const { step } = found
   await requireMark(root, path, planPath, step.id, SCAFFOLD)
 
-  const { schemaPath, schema, dialect, app } = await readScaffoldApp(root, plan)
-  const output = emitPlanScaffold(plan, step, app)
+  const schemaPath = schemaPathFor(null)
+  const schema = await readIfExists(root, schemaPath)
+  if (schema === null) refuse([`plan:scaffold appends tables to ${schemaPath}, which this application does not have.`])
+  const dialect = detectSchemaDialect(schema)
+  const tables = await parseSchemaTables(root)
+  const cache = new ParseCache()
+  const modelFiles = await rootModelFiles(root, cache)
+  const validators = await rootValidatorExports(root, cache)
+  if ('unreadable' in validators) refuse([`plan:scaffold cannot tell which schemas the validator files already export: ${validators.unreadable}.`])
+
+  const output = emitPlanScaffold(plan, step, {
+    dialect,
+    tables: tables.map((table) => ({
+      identifier: table.identifier,
+      ...(table.tableName !== undefined ? { tableName: table.tableName } : {}),
+      module: table.module,
+      columns: table.columns.map((column) => column.name),
+      ...(table.opaqueColumns ? { opaqueColumns: true } : {}),
+    })),
+    models: Object.keys(modelFiles),
+    validators: Object.keys(validators.files),
+    resources: await rootClassNames(root, discoverResourceFiles),
+    policies: await rootClassNames(root, discoverPolicyFiles),
+    controllers: await rootClassNames(root, discoverControllerFiles),
+    sideEffects: Object.fromEntries(
+      await Promise.all((Object.keys(SIDE_EFFECT_DIRS) as SideEffectKind[]).map(async (kind) => [kind, await rootClassNames(root, (appRoot) => discoverSideEffectFiles(appRoot, kind))] as const)),
+    ),
+    modelFiles,
+    validatorFiles: validators.files,
+    docs: await existingEntityDocs(root, plan),
+  })
   const inTheWay = (await filesOnDisk(root, output.files.map((file) => file.path))).map((file) => `${file} already exists.`)
   const registration = await registerProviders(root, output.providers)
   refuseStep(step.id, [...output.refusals, ...inTheWay, ...registration.refusals], 'If this step was scaffolded before, it has nothing left to write: run guren plan:verify for it.')

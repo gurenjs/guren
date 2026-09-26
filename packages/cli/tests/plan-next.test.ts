@@ -171,7 +171,7 @@ describe('plan:next', () => {
     expect(text).not.toContain('Implement this step only')
   })
 
-  test('should name a scaffold step built under an earlier revision as one to verify, since plan:scaffold refuses its targets', async () => {
+  test('should name a scaffold step built under an earlier plan as one to verify, since plan:scaffold refuses its targets', async () => {
     const approved = approvedAgainst(loadCommentsPlan())
     const { app, plan } = await createApp('built-earlier')
     await writeWorkspaceFiles(app, { ...PLAN_APP_WITH_COMMENTS, 'comments.plan.json': JSON.stringify(approved) })
@@ -185,19 +185,53 @@ describe('plan:next', () => {
 
     expect(report.step!.id).toBe(SCAFFOLD)
     expect(report.step!.verifiedAt).toBeUndefined()
-    expect(report.step!.builtEarlier).toEqual({ planHash: parent, outcome: 'incomplete', existing: ['app/Models/Comment.ts'] })
-    expect(text).toContain(`Built under an earlier revision of the plan (recorded incomplete against plan hash ${parent.slice(0, 12)}): app/Models/Comment.ts is already on disk, so plan:scaffold has nothing to write for it.`)
-    expect(text).toContain(`Re-check it with \`bunx guren plan:verify comments.plan.json --step ${SCAFFOLD}\` only`)
+    expect(report.step!.scaffold).toBeUndefined()
+    expect(report.step!.scaffolded).toMatchObject({ existing: ['app/Models/Comment.ts'], earlier: { planHash: parent, outcome: 'incomplete' } })
+    expect(report.step!.scaffolded!.missing).toContain('app/Http/Validators/CommentValidator.ts')
+    expect(text).toContain(
+      `Built under an earlier version of the plan (recorded incomplete against plan hash ${parent.slice(0, 12)}): app/Models/Comment.ts is on disk, and plan:scaffold writes nothing for a step any of whose targets exist.`,
+    )
+    expect(text).toContain('Not there yet, to write by hand: ')
+    expect(text).toContain(`Run \`bunx guren plan:verify comments.plan.json --step ${SCAFFOLD}\` rather than plan:scaffold`)
     expect(text).not.toContain('Write this step with')
-    expect(text).not.toContain('Implement this step only')
     // The target plan:next names is the one plan:scaffold refuses on.
     await expect(planScaffoldFile(plan, { appRoot: app, step: SCAFFOLD })).rejects.toThrow('app/Models/Comment.ts already exists.')
 
-    // The same record with the targets gone leaves the step to scaffold.
+    // With no record at all the files still say it was scaffolded, since plan:scaffold refuses them all the same.
+    await writeState(app, { steps: {} })
+    const unrecorded = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+    expect(unrecorded.step!.scaffolded).toMatchObject({ existing: ['app/Models/Comment.ts'] })
+    expect(unrecorded.step!.scaffolded!.earlier).toBeUndefined()
+    expect(formatPlanNext(unrecorded, 'comments.plan.json')).toContain('Scaffolded already: app/Models/Comment.ts is on disk')
+
+    // With the targets gone the step is one to scaffold.
     await rm(join(app, 'app/Models/Comment.ts'))
     const fresh = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
-    expect(fresh.step!.builtEarlier).toBeUndefined()
+    expect(fresh.step!.scaffolded).toBeUndefined()
     expect(formatPlanNext(fresh, 'comments.plan.json')).toContain(`Write this step with \`bunx guren plan:scaffold comments.plan.json --step ${SCAFFOLD}\`, not by hand.`)
+  })
+
+  test('should name a tests step whose ids a test file carries as one to verify, listing the ids none carries', async () => {
+    const approved = approvedAgainst(loadCommentsPlan())
+    const { app, plan } = await createApp('tests-carried')
+    await writeWorkspaceFiles(app, {
+      'comments.plan.json': JSON.stringify(approved),
+      'tests/comments.test.ts': "import { test } from 'bun:test'\n\ntest('[AC-comments-1] lists', () => {})\ntest('[AC-comments-2] stores', () => {})\n",
+    })
+    await approvePlanFile(plan)
+    await writeState(app, { steps: { [SCAFFOLD]: { ...(await holding(app)), planDigest: planDigest(parsePlanDocument(approved)) } } })
+
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+    const text = formatPlanNext(report, 'comments.plan.json')
+
+    expect(report.step!.id).toBe(TESTS)
+    expect(report.step!.scaffold).toBeUndefined()
+    expect(report.step!.scaffolded).toEqual({ existing: ['tests/comments.test.ts'], missing: ['AC-comments-3', 'AC-comments-4'] })
+    expect(text).toContain('Scaffolded already: tests/comments.test.ts is on disk')
+    expect(text).toContain('Not there yet, to write by hand: AC-comments-3, AC-comments-4.')
+    expect(text).toContain('Behaviours its tests carry:')
+    expect(text).not.toContain('test skeletons')
+    expect(text).not.toContain('as test titles')
   })
 
   test('should name --mount for the http step holding the routes the scaffold wrote, and what it left to write', async () => {

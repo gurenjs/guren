@@ -2,4 +2,4 @@
 "@guren/cli": patch
 ---
 
-`plan:next` no longer tells you to run `plan:scaffold` for a step that was already scaffolded under an earlier revision of the plan. When a `scaffold` or `tests` step's record names an earlier plan hash and the files `plan:scaffold` would write are already on disk, `plan:next` reports the step as built under an earlier revision (`builtEarlier` in `--json`) and points only to `plan:verify --step`. It no longer names the `plan:scaffold` command, which would refuse those files.
+`plan:next` no longer names `plan:scaffold` for a `scaffold` or `tests` step whose targets are already on disk, which `plan:scaffold` refuses. It reports the step as scaffolded (`scaffolded` in `--json`, in place of `scaffold`), lists what is still missing to write by hand, names the earlier plan hash when the step was built under an earlier version of the plan (after a revision), and points to `plan:verify --step`. The files are the ones the plan names, so nothing of the application is read for it.
