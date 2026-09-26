@@ -5,7 +5,7 @@
 | Runtime | Versions | Status |
 |---------|----------|--------|
 | Bun     | 1.4.x    | Supported (CI-tested, primary) |
-| Bun     | 1.3.x    | Previous (non-blocking CI lane) |
+| Bun     | 1.3.x    | Best-effort (not tested in CI) |
 | Node.js | 22.x     | Lambda only (via `createLambdaHandler`) |
 
 ## Database
@@ -38,6 +38,6 @@
 
 ## CI Coverage
 
-- Every PR: Bun 1.4.x (gating) and 1.3.x (non-blocking), each with Redis, PostgreSQL and MySQL services for the integration tests
+- Every PR: Bun 1.4.x, with Redis, PostgreSQL and MySQL services for the integration tests
 - Nightly: Bun 1.4.x only, running the PR suite plus full runtime smoke tests against a real database, security audits, and an end-to-end scaffold-to-build check
 - Release: Full validation before publish

@@ -13,84 +13,13 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build-and-test:
+  # Everything that does not depend on the Bun version or on a database:
+  # typecheck, lint, the audits and the example builds. Split from
+  # build-and-test so its shards start on the tests straight away.
+  checks:
     runs-on: ubuntu-latest
-    # Trial lanes report but never block a PR: they soak the next Bun line or
-    # keep the previous one visible, and a red one is data rather than a merge
-    # decision. `trial: true` lives on the matrix entry, not on a version
-    # literal, so promoting a trial version to primary cannot silently flip
-    # which lane gates.
-    continue-on-error: ${{ matrix.trial == true }}
-    # Measured ceiling for a healthy lane is 5m00s (1.3.14) / 4m42s (1.4.0)
-    # across 30 runs, cache misses included, so this is an anti-wedge
-    # backstop rather than an assertion about how fast the job ought to be.
-    # The per-step cap on `Run tests` below is the one that fires first for
-    # the known wedge; this one covers everything else in the job.
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        # The first entry is the supported version every other workflow pins
-        # (scripts/workflow-bun-version.test.ts enforces that); later entries
-        # are trial lanes, either the next Bun line soaking until it is
-        # promoted to first or the previous primary kept until it is dropped.
-        bun-version: ['1.4.2', '1.3.14']
-        include:
-          # Do not hand this lane `bun test --parallel`: it wedges this suite
-          # on the Linux runners as well as on macOS ARM64 — 2 green in 15
-          # pushes, the reds either publish-agent-catalog.test.ts at exactly
-          # the timeout or `Run tests` hanging to its cap. oven-sh/bun#34069
-          # (spawnSync loses a child exit, a worker then spins at 100% CPU) is
-          # open as of 1.4.2.
-          - bun-version: '1.4.2'
-            redis: true
-          - bun-version: '1.3.14'
-            redis: true
-            trial: true
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: guren
-          POSTGRES_PASSWORD: guren
-          POSTGRES_DB: guren
-        ports:
-          - 54322:5432
-        options: >-
-          --health-cmd "pg_isready -U guren"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-      mysql:
-        image: mysql:8.4
-        env:
-          MYSQL_ROOT_PASSWORD: guren
-          MYSQL_USER: guren
-          MYSQL_PASSWORD: guren
-          MYSQL_DATABASE: guren
-        ports:
-          - 33306:3306
-        options: >-
-          --health-cmd "mysqladmin ping -h127.0.0.1 -uguren -pguren"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
+    timeout-minutes: 20
     env:
-      REDIS_URL: redis://localhost:6379
-      # Drives the ORM's MySQL integration test, which creates its own database.
-      MYSQL_URL: mysql://root:guren@localhost:33306/guren
-      # Same for the Postgres integration test — it creates its own database
-      # rather than resetting the one a scaffolded app would point DATABASE_URL at.
-      POSTGRES_URL: postgres://guren:guren@localhost:54322/guren
       APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
     steps:
@@ -105,8 +34,6 @@ jobs:
       # The cache key and its stale-dist rationale live in the action.
       - name: Set up Bun and build packages
         uses: ./.github/actions/setup-and-build
-        with:
-          bun-version: ${{ matrix.bun-version }}
 
       - name: Generate route types
         run: bun run build:routes
@@ -287,18 +214,109 @@ jobs:
       - name: Bundle budget audit
         run: bun run audit:bundle-budgets
 
+  build-and-test:
+    runs-on: ubuntu-latest
+    # Trial lanes report but never block a PR: they soak the next Bun line
+    # before it is promoted, and a red one is data rather than a merge
+    # decision. `trial: true` lives on a matrix `include` entry, not on a
+    # version literal, so promoting a trial version to primary cannot
+    # silently flip which lane gates.
+    continue-on-error: ${{ matrix.trial == true }}
+    # An anti-wedge backstop, not an assertion about how fast a shard ought
+    # to be. The per-step cap on `Run tests` below fires first for the known
+    # wedge; this one covers everything else in the job.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # The first entry is the supported version every other workflow pins
+        # (scripts/workflow-bun-version.test.ts enforces that); a later entry
+        # is a trial lane for the next Bun line.
+        #
+        # Do not hand a lane `bun test --parallel`: it wedges this suite on the
+        # Linux runners as well as on macOS ARM64. oven-sh/bun#34069 (spawnSync
+        # loses a child exit, a worker then spins at 100% CPU) is open as of
+        # 1.4.2. `--shard` splits the files across jobs instead.
+        bun-version: ['1.4.2']
+        # The shard count is repeated in `Run tests`; keep the two in step.
+        shard: [1, 2, 3]
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: guren
+          POSTGRES_PASSWORD: guren
+          POSTGRES_DB: guren
+        ports:
+          - 54322:5432
+        options: >-
+          --health-cmd "pg_isready -U guren"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: guren
+          MYSQL_USER: guren
+          MYSQL_PASSWORD: guren
+          MYSQL_DATABASE: guren
+        ports:
+          - 33306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h127.0.0.1 -uguren -pguren"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      REDIS_URL: redis://localhost:6379
+      # Drives the ORM's MySQL integration test, which creates its own database.
+      MYSQL_URL: mysql://root:guren@localhost:33306/guren
+      # Same for the Postgres integration test — it creates its own database
+      # rather than resetting the one a scaffolded app would point DATABASE_URL at.
+      POSTGRES_URL: postgres://guren:guren@localhost:54322/guren
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Bun and build packages
+        uses: ./.github/actions/setup-and-build
+        with:
+          bun-version: ${{ matrix.bun-version }}
+
+      - name: Generate route types
+        run: bun run build:routes
+
       # Capped as well as the job because this is the step a wedged runner
       # hangs in: oven-sh/bun#34069 held it in_progress for 11-57 minutes on
       # four runs in one day. A *step* timeout fails the step, which the job's
       # continue-on-error then masks on a trial lane — the documented path;
       # whether a *job* timeout is reported as a failure or a cancellation is
       # not something the documentation settles.
-      # Measured 2m16s at worst against a 15m cap.
       - name: Run tests
         timeout-minutes: 15
-        run: bun run test
+        run: bun run ./scripts/test-packages.ts -- --shard=${{ matrix.shard }}/3
+
+      # The runs below are small, so each lands on one shard rather than all.
+      - name: Example app tests
+        if: matrix.shard == 1
+        run: bun run test:examples
 
       - name: Testing package tests (vitest)
+        if: matrix.shard == 2
         run: bun run test:testing
 
       # The durable agent runtime's workerd lane. Its own runner (vitest 4 +
@@ -308,6 +326,7 @@ jobs:
       # pieces it covers (an alarm waking an agent, a Durable Object's identity
       # as the principal) are exactly the ones a mock cannot exercise.
       - name: Durable agent tests (workerd)
+        if: matrix.shard == 3
         run: bun run test:agents
 
   # Scaffolding smokes, split from build-and-test so the unit-test critical
@@ -405,9 +424,13 @@ jobs:
     runs-on: ubuntu-latest
     # No redis service — verifies all tests gracefully skip when Redis is
     # unavailable. Typecheck is deliberately absent: it is environment-
-    # independent and already covered by build-and-test.
-    # Measured max 2m54s.
+    # independent and already covered by the checks job.
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Sharded like build-and-test, whose comment says why not --parallel.
+        shard: [1, 2, 3]
     env:
       APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
     steps:
@@ -417,7 +440,7 @@ jobs:
       - name: Generate route types
         run: bun run build:routes
       - name: Run tests (no Redis)
-        run: bun run test:bun
+        run: bun run ./scripts/test-packages.ts -- --shard=${{ matrix.shard }}/3
 
   e2e:
     runs-on: ubuntu-latest
