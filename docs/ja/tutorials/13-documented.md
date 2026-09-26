@@ -454,6 +454,52 @@ YAML の書き方には注意してください。実際によく引っかかる
 1. ブランチを切って `db/schema.ts` に列を足し、`bunx guren gate` を実行してください。4 つのビューのうち、コードと合わなくなったのはどれで、合ったままなのはどれですか。合ったままのビューについて、各ビューが何を読んでいるかから理由を説明してください。終わったら、ブランチだけでなく編集内容も破棄してください。
 2. このアプリには、まだ記録されていない決定があります。タグの正規化をモデルではなくバリデーターで行っている点です。これを ADR に書いて `Post` にリンクし、`bunx guren check --docs` を通してください。そのうえで、コードを読むだけでは分からず、このファイルを読んで初めて分かることは何かを答えてください。
 
+<details>
+<summary>演習 1: ヒントと答えの例</summary>
+
+第 1 節の表で、各ビューが何を読んでいるかから考えてください。ブランチで列を 1 つ追加し(たとえば `posts` に `wordCount: integer('word_count')`)、ゲートを実行してから、どちらも破棄します。未コミットの編集は切り替え先のブランチにも付いてくるので、`git switch -` より先に `git restore .` を実行します。
+
+```bash
+git switch -c try-a-column
+bunx guren gate
+git restore .
+git switch -
+git branch -D try-a-column
+```
+
+check のステージは `docs/spec/er.md` が古いと報告します。このビューが各テーブルの列を一覧にしているからです。`domain.md` が読むのはモデルのクラスとリレーションで、列はどちらでもありません。`screens.md` が読むルート、コントローラー、ページは変わっていません。`modules.md` が読むのは import の行で、列を足しても import は増えません。(第 2 節の表が `db/schema.ts` に `modules.md` を挙げているのは、そのファイルの編集で import が変わることがあるからです。すべての編集で変わるわけではありません。)マイグレーションを作っていなければ、test のステージも失敗するはずです。モデルが、テスト用データベースにない列を読みにいくからです。
+
+</details>
+
+<details>
+<summary>演習 2: ヒントと答えの例</summary>
+
+`make:adr` は、指定したエンティティのコントローラー、Resource、Policy を `related` に入れますが、バリデーターは入れません。これは自分で足します。
+
+```bash
+bunx guren make:adr "Tags are normalised in the validator" --entity Post --by "human:you"
+```
+
+`docs/adr/` にできたファイルの `related` に `app/Http/Validators/PostValidator.ts` を足し、本文を書きます。たとえば次のようになります。
+
+```md
+## Decision
+
+`PostPayloadSchema` turns the `tags` field into a lower-cased, trimmed,
+de-duplicated list before the controller sees it. `Tag` and `PostTag` store
+names as they are given.
+
+## Consequences
+
+Every request that writes tags follows the same rule, and the rule sits beside
+the other post rules. Code that creates a `Tag` directly (a seeder, a console
+command) skips it and has to normalise the name itself.
+```
+
+`Post` と `related` のパスがすべて存在すれば、`bunx guren check --docs` は通ります。このファイルから将来の読者が得るのは、コードには表れない部分です。置き場所を意図して選んだことと、このルールが及ばない経路がどこかです。ほかの決定や書き方もあり得ます。
+
+</details>
+
 ## 次へ
 
 [第 14 章: 本番](./14-production.md) が最後の章です。再起動しても消えないセッション、レート制限、`NODE_ENV=production` で変わること、そしてこのアプリがまだ本番に耐えられない点の一覧を扱います。

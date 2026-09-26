@@ -565,6 +565,26 @@ The generated controller differs from yours in three ways worth noticing: it val
 1. Open the `migration.sql` your migration wrote. Which columns did drizzle-kit make `NOT NULL`, and where in `db/schema.ts` did that come from? On a branch, make `body` nullable and run `bun run db:make` without applying it; read the SQL it produces, then throw it away the way the comparison above does: `git switch main`, `git reset --hard`, `git clean -fd`. Deleting the branch on its own leaves the migration folder on disk, and the next `bun run dev` applies it.
 2. `Post.findOrFail(id)` answers a missing row with a 404. Nothing in `PostController` catches it. Find the piece that turns the exception into a response, and say what `Post.find(id)` would have produced instead.
 
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Put each column's line in `migration.sql` beside its line in `db/schema.ts`.
+
+`title`, `body` and `created_at` in `posts` are `NOT NULL`, and so are `name`, `email` and `created_at` in `users`, each because its column calls `.notNull()`. Two details are worth noticing. `id` is `integer PRIMARY KEY AUTOINCREMENT` with no `NOT NULL`: an integer primary key in SQLite cannot be null anyway, and drizzle-kit leaves the keyword out. `created_at` has `NOT NULL` but no `DEFAULT`, because `$defaultFn` runs in the app when the model inserts a row; a row inserted with raw SQL and no `created_at` is refused.
+
+With `body` nullable, `db:make` writes no `ALTER COLUMN`. It rebuilds the table: a `__new_posts` table in which `body` has no `NOT NULL`, an `INSERT … SELECT` that copies the rows from `posts`, `DROP TABLE posts`, and a rename of `__new_posts` to `posts`. You will meet the same sequence again in chapters 5 and 6, and chapter 6's second exercise asks why SQLite needs it.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+The controller does not do the lookup; the `posts.show` route does, through `bind: { id: Post }`. Follow the exception from there, then read [Error Handling](../guides/error-handling.md).
+
+Route model binding calls `Post.findOrFail(id)`. On a missing row it throws `ModelNotFoundException`, which carries a status of 404. Nothing catches it on the way, so it reaches the app's `ExceptionHandler`, which answers with the status the exception carries: an error page or a JSON body, depending on the caller and on debug mode. `Post.find(id)` returns `null` instead of throwing. With `const post = await Post.find(id)` in `show`, TypeScript would flag `post` as possibly null at `post.id`. Ignore that, and a missing row becomes a `TypeError` and a 500, not a 404. To get the 404 back you would check for `null` and throw, which is what `findOrFail` already does.
+
+</details>
+
 ## Next
 
 [Chapter 4: Validation and Resources](./04-validation-and-resources.md) moves the schema into a validator file with a route contract, shows validation errors on the form, introduces the resource layer, and hands editing, deleting and pagination to the agent.

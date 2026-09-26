@@ -415,6 +415,24 @@ git commit -m "docs: approve the registrations plan"
 1. 計画のコピーから `AC-registrations-7` を削除してアプリの外に保存し、`--app .` と、出力先をアプリの外にした `-o` を付けて描画してください。どの要素で、どの検査が失敗しますか。
 2. `docs/plans/registrations/approvals.json` を開き、`view.meetups.show` の `readings` を確認してください。`differ` (不一致) と読まれた prop と、`match` (一致) と読まれた prop はそれぞれどれですか。また、ループがあとでこの計画の成果として確認できるのはどちらですか。
 
+<details>
+<summary>演習 1: ヒントと答えの例</summary>
+
+`alter` のうち、Guren がコードから読み取れるものを何も変えない要素を探してください。4 節の承認時の警告に出てきた要素です。
+
+`action.meetups.show` で `plan:acceptance` の検査が失敗します。アクションを `alter` で変更するのに、そのルートを指す振る舞いが 1 つもない、という内容です。このアクションのルートは `route.meetups.show` だけで、それをリクエストする振る舞いは `AC-registrations-7` だけでした。コピーと描画したページをアプリの外に置くのは、`plan:approve` と `plan:next` が、アプリのルート以下にある未追跡のファイルを未コミットの作業として扱うためです。
+
+</details>
+
+<details>
+<summary>演習 2: ヒントと答えの例</summary>
+
+読み取り結果は承認の項目の `readings.properties` にあり、1 件ごとに `element`、`property`、`verdict` を持ちます。ページの prop は、`Props` インターフェースに宣言された名前で読み取られます。
+
+`differ` と読まれたのは `prop registrationId` です。承認の時点で `Show.tsx` が宣言していたのは `meetup` だけでした。`match` と読まれたのは `prop meetup` です。ページの `actions` と `states` は `unknown` です。ページが何を描画するかは、どの仕組みも読み取らないからです。あとでこの計画の成果として数えられるのは `registrationId` だけです。`alter` の一致が数えられるのは、承認時に `differ` か `unknown` と記録されたプロパティに限られます。`meetup` は作業を始める前から一致していたので、あとで一致していても、この計画の成果とは言えません。
+
+</details>
+
 ## 次へ
 
 [第 7 章: 実装中にアプリが変わったとき](./07-when-the-application-moves.md) では、同僚が並行してコードを変更する中で、この計画を実装します。

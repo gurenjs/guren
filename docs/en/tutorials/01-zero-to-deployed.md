@@ -473,6 +473,24 @@ Nothing below is needed by a later chapter. Where an exercise changes a file, do
 1. The workflow the scaffold wrote runs `bunx guren gate --deps`, and you have been running `bunx guren gate`. Run the longer one. What does `--deps` add, and what would it do on a machine with no network?
 2. Run `bunx guren doctor --next`. Pick one thing it reports and say what changing it would buy you. Some of its suggestions are for a production app you have not built yet; say which.
 
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Read the Gate step in `.github/workflows/ci.yml` and the comment above it, then compare the audit line the gate prints with and without the flag.
+
+`--deps` adds a dependency scan to the audit stage. It runs `bun audit` against the npm advisory database, and the stage line reads `audit + dependency scan`. A high or critical advisory fails the stage; a lower one is only a warning. The scan needs the npm registry. With no network it cannot run, and that is reported as a warning, not a failure. The gate prints only failing findings, so `gate --deps` still goes green on that machine without having scanned anything. To see the warning, run `bunx guren audit`, which scans dependencies by default (`--no-deps` turns the scan off). That is why the workflow's comment tells you to drop `--deps` on a runner that cannot reach the registry.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+The report has two parts: the checks, each marked ok, warn or fail with a Fix line under anything that is not ok, and, because of `--next`, a numbered "Next steps" list.
+
+One answer: the next steps include "Run the security audit", which doctor suggests whenever the app has a controller. Running `bunx guren audit` buys you a list of mutating routes that lack validation or authentication. This app has none yet, but from chapter 3 on it will, and the gate runs the same audit. The production ones are the checks whose titles start with "Deploy" (password hashing, runtime stores, provider discovery). They judge an app that declares a deploy plugin or the Lambda adapter, and on this app they pass because it declares neither. They start to matter when the app is deployed to a serverless host. Your report may list other items, and other answers are possible.
+
+</details>
+
 ## Next
 
 [Chapter 2: One Request, by Hand](./02-one-request-by-hand.md) builds a route, a controller and a page from blank files, with a test in front, and then hands the second page to the agent.

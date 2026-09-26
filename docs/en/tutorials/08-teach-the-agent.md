@@ -506,6 +506,44 @@ git commit -m "feat: add the blogroll"
 1. Write a second rule for a convention this app has that no check enforces. One candidate: every page component declares a `Props` interface, because `spec:generate` reads it in chapter 13. Keep it under twenty lines and say in the rule why no command can see it.
 2. Run `bunx guren agent:sync --dry-run`. Which files would it replace, and which does it leave alone? The line between those two answers is the line between the framework's harness and yours.
 
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Open `.claude/rules/project-guidelines.md` first: anything `guren guidelines` already derives does not belong in the rule. Then scope `paths` to the files where the convention applies, here the page components. One possible rule, saved as `.claude/rules/page-props.md`:
+
+```md
+---
+paths:
+  - "resources/js/pages/**"
+---
+
+# Page props
+
+Every page component declares `interface Props` (or `type Props`) and annotates
+its default export with it: `export default function Show({ post }: Props)`.
+
+`bun run codegen` copies that type into `.guren/pages.gen.ts`, where
+`this.inertia()` checks a controller's props against it, and `spec:generate`
+quotes it in `docs/spec/screens.md`.
+
+No command asks for the declaration: codegen also accepts a type written inline
+on the default export's parameter, and `guren check` does not look for `Props`.
+Only this rule states the convention.
+```
+
+Other rules work as well. What matters is a narrow `paths` list and a last paragraph that says why no check covers it.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+`agent:sync` sorts every file it plans into two kinds: managed files, which it ships under names it owns and refreshes, and user-owned files, which it writes only when they are missing.
+
+On a current harness it writes nothing. The managed files (the six rules in `.claude/rules/`, the skill directories it ships under `.claude/skills/`, `code-review.md` and `test-writer.md` in `.claude/agents/`, and the two hooks in `.claude/hooks/`) are counted in one "already up to date" line. A managed file whose contents differ from the framework's template is listed under "Would write", with a warning that the sync would replace it. `.claude/settings.json`, `.mcp.json` and `CLAUDE.md` are reported as skipped, because they are yours once written. `ownership.md`, `project-guidelines.md`, `owned-resource/` and `ownership-review.md` do not appear at all: the sync only looks at the names it ships. So the framework's harness is exactly that list of names, and everything else under `.claude/` is yours.
+
+</details>
+
 ## Next
 
 [Chapter 9: Relationships](./09-relationships.md) replaces the hand-rolled author lookup with `belongsTo` and `hasMany`, adds comments, and hands the agent a many-to-many: tags.

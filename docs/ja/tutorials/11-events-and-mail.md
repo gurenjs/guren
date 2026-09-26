@@ -54,7 +54,7 @@ bunx guren add mail
 次のファイルには目を通しておいてください。うち 2 つは、このあと編集します。
 
 - `app/Providers/EventProvider.ts` はリスナークラスを `events.listen()` に渡し、クラスで指定したイベントを購読させます。この結び付けはコード 1 行で明示していて、`app/Listeners/` を走査してリスナーを自動で見つける仕組みはありません。
-- `config/queue.ts` はキューマネージャーを組み立て、`app/Providers/JobsProvider.ts` はジョブクラスごとに `registerJob()` を呼びます。config のドライバーの行を見てください。`QUEUE_CONNECTION=sync` では、ディスパッチされたジョブが**ディスパッチしたプロセスの中で、その場で**実行されます。`memory` では、ジョブはキューに積まれ、ワーカーが取り出して実行します。`guren add queue` は `.env` に `sync` を書き込んでいます。
+- `config/queue.ts` はキューマネージャーを組み立て、`app/Providers/JobsProvider.ts` はジョブクラスごとに `registerJob()` を呼びます。config のドライバーの行を見てください。`QUEUE_CONNECTION=sync` では、ディスパッチされたジョブが**ディスパッチしたプロセスの中で、その場で**実行されます。`memory` では、ジョブはそのプロセス自身のメモリにあるキューに積まれ、同じプロセスで動くワーカーが取り出して実行します。`guren add queue` は `.env` に `sync` を書き込んでいます。
 - `config/mail.ts` はメールマネージャーを組み立てます。同じく `.env` に書き込まれた `MAIL_MAILER=log` の設定では、メールは送信されず、送る予定の内容がサーバーの出力に表示されます。外部サービスへの登録は要らず、誤って本当に配信してしまう心配もありません。
 
 サンプル(`OrderPlaced`、`SendOrderReceiptListener`、`ProcessWelcomeSequenceJob`、`WelcomeEmailMail`)は、各ファイルの形を確認できるように置かれています。4 つとも第 3 節で置き換えます。
@@ -783,12 +783,44 @@ git commit -m "feat: mail commenters when a post is published"
 - **キューをフェイクにしたテストで `manager.getDefaultDriverName is not a function` が出て、リクエストが 500 を返す。** `fakeQueue()` を `queue` に直接バインドしています。このキーに入るのは `QueueManager` で、フェイクはドライバーです。`fakeMail()` を `mail` にバインドしたときと同じ間違いです。`createQueueManager()` のファクトリーからドライバーを返し、そのマネージャーをバインドしてください。
 - **テストの出力に `[guren] Deprecation (global-service-setters): setQueueDriver() is deprecated` が出る。** ドライバーを直接固定しているテストが残っています。第 2 節と同じように、`app.container.fake('queue', …)` でマネージャーをバインドしてください。ドライバーを固定するこの方法は 3.0.0 で削除されます。
 - **`fakeMail()` で `mail` を直接フェイクにしたテストが例外を投げる。** `Mail.send()` は `manager.transport(name)` を呼びますが、フェイクはマネージャーではなくトランスポートです。フェイクを本物の `MailManager` に登録し、そのマネージャーをバインドしてください。
-- **キューがあるのに、メールがリクエストの中で送られる。** `QUEUE_CONNECTION=sync` が設計どおりに動いている状態です。`memory` に変えて `bunx guren queue:work` を実行すると、ワーカーがキューを処理するようになります。
+- **キューがあるのに、メールがリクエストの中で送られる。** `QUEUE_CONNECTION=sync` が設計どおりに動いている状態です。ワーカーがキューを処理するのは、別のプロセスからも読める場所にジョブを置くドライバー(本番なら Redis や SQS)を使ったときだけです。`memory` がそれに当たらない理由は、演習 1 で確かめます。
 
 ## 演習
 
 1. `.env` の `QUEUE_CONNECTION` を `memory` にしてサーバーを再起動し、コメントを投稿してください。メールは出ません。続いて別のターミナルで `bunx guren queue:work --once` を実行しても、やはり何も起きません。その理由を説明してから、値を元に戻してください。この答えが、`memory` が開発用のドライバーで、デプロイには向かない理由です。
 2. `CommentPosted` に、ログを出すだけのリスナーを `priority` を高くしてもう 1 つ登録してください。どちらが先に実行されますか。次に、先に実行されるほうで例外を投げるようにして、もう一方のリスナーとリクエストがどうなるかを答えてください。
+
+<details>
+<summary>演習 1: ヒントと答えの例</summary>
+
+ドライバーごとにジョブがどこに保存されるか、`queue:work` がどのプロセスから読むかを考えてください。`config/queue.ts` は `memory` を `new MemoryDriver()` に対応させています。
+
+`MemoryDriver` は、作成したプロセスのメモリにジョブを保持します。コメントのリクエストはサーバーのプロセスで実行されるので、ジョブはサーバーのキューに入ります。そのプロセスにはキューを処理するものがありません。`bunx guren queue:work --once` は新しいプロセスでアプリを起動するので、そこにあるのは空のメモリキューです。ジョブが見つからず、`--once` はキューが空になった時点で終了します。ジョブは次にサーバーを再起動するまでサーバーのメモリに残り、再起動すると消えます。デプロイ先の Web プロセスとワーカーは別のプロセスで、別のマシンであることも多いので、キューは両者の外に置く必要があります。Redis や SQS です。最後に `QUEUE_CONNECTION=sync` に戻してください。
+
+</details>
+
+<details>
+<summary>演習 2: ヒントと答えの例</summary>
+
+`events.listen()` はリスナークラスから `priority` を読み、`emit()` はリスナーを優先度の高い順に 1 つずつ await します。`app/Providers/EventProvider.ts` で `events.listen(LogCommentListener)` として登録する、ログを出すだけのリスナーの例です。
+
+```ts
+import { Listener } from '@guren/core'
+import { CommentPosted } from '../Events/CommentPosted.js'
+
+export class LogCommentListener extends Listener<CommentPosted> {
+  static override event = CommentPosted
+  static override priority = 10
+
+  handle(event: CommentPosted): void {
+    console.log(`comment ${event.commentId} posted`)
+  }
+}
+```
+
+先に実行されるのはこちらです。`SendCommentMailListener` の優先度は既定の 0 で、10 のほうが高いからです。このリスナーの `handle` で例外を投げると、エラーはその場で `emit()` を抜けます。`SendCommentMailListener` は実行されず、ジョブもメールも発生しません。`CommentController` の `store` は `emit()` を await しているので、リクエストはリダイレクトされず、エラーハンドラーが返す 500 で終わります。コメント自体は保存されています。`emit()` より前に `forceCreate` が実行されているからです。リスナーに `failed()` を定義しておくと、エラーが伝わる前にそれが呼ばれます。
+
+</details>
 
 ## 次へ
 

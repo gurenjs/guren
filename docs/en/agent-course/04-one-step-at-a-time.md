@@ -509,6 +509,26 @@ Sign up at `/register`, then open `/meetups`.
 1. On a branch, change the policy to `return true` and run `plan:verify` for the http step. Which behaviours fail? Then switch back without committing.
 2. Run `bunx guren plan:status docs/plans/meetups/plan.json --json` and find the entry for `policy.meetup`. What does it list under `files`, and why would a change to one of them mark it `drifted`?
 
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+The `auth` middleware redirects a guest before the policy runs, and the organizer is let in either way. Only the behaviours where a signed-in user who is *not* the organizer must be refused depend on the policy.
+
+Two fail: `AC-meetups-4` (the `PUT` on someone else's meetup answers 303, not 403) and `AC-meetups-9` (their edit form answers 200, not 403). The other ten pass. This is the mirror image of the scaffold's `return false`: the `forbidden` behaviours catch a policy that lets everyone in, and the organizer's `success` behaviours catch one that lets nobody in.
+
+To go back, first discard the edit with `git restore app/Policies/MeetupPolicy.ts`, since an uncommitted change follows you across `git switch`. Then switch back. The failed run replaced the http step's record under `.guren/plans/`, which git ignores, so on your main branch run `bunx guren plan:verify docs/plans/meetups/plan.json --step task/entity/model.meetup/http` once more. Otherwise `plan:close` in chapter 5 refuses.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+`files` lists the files the element was found in. When the step that owns the element verifies, `plan:verify` records a hash of each of those files under `.guren/plans/`.
+
+For `policy.meetup`, it lists the policy's own file, `app/Policies/MeetupPolicy.ts`. The http step owns the policy and recorded that file's hash when it verified. Change the file, and the hash no longer matches: the "verified" result describes code that is gone. So the element reads `drifted` until `plan:verify` runs the http step again.
+
+</details>
+
 ## Next
 
 [Chapter 5: Close the Plan](./05-close-the-plan.md) turns the finished plan into documentation that stays with the code.

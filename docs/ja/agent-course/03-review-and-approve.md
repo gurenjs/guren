@@ -138,6 +138,24 @@ git commit -m "docs: approve the meetups plan"
 1. 承認済みの `plan.json` の単語を 1 つ書き換えてから `bunx guren plan:next docs/plans/meetups/plan.json` を実行し、拒否されたときのメッセージを読んでください。読み終えたら、`git checkout docs/plans/meetups/plan.json` でファイルを元に戻します。
 2. `approvals.json` を開いてみてください。第 6 章で承認する計画では、承認ファイルに `readings` というフィールドも加わりますが、このファイルにはありません。2 本目の計画にはあって、この計画には 1 つもないものは何でしょうか。
 
+<details>
+<summary>演習 1: ヒントと答えの例</summary>
+
+振る舞いの `description` のように、文字列の中の単語を書き換えてください。JSON として読めなくなると、別のエラーになります。
+
+`plan:next` は、アプリを読んだりステップに印を付けたりする前に拒否します。メッセージは、計画が現在のハッシュでは承認されていないので、どのステップも渡さないと伝えます。承認後に編集されたか、一度も承認されていないか、のどちらかだという説明が続きます。最後に、計画が作りたいものを正しく表すようになったら `guren plan:approve` を実行するよう案内します。`approvals.json` の承認は計画全体のハッシュを指しているので、単語 1 つの変更でも一致しなくなります。`git checkout` で戻せば、ハッシュはまた一致します。
+
+</details>
+
+<details>
+<summary>演習 2: ヒントと答えの例</summary>
+
+`readings` は、`alter` の要素について、計画したプロパティが承認の時点でどう読めたかを記録したものです。
+
+この計画には `alter` の要素がありません。`existing` の `model.user` とその `id` カラムを除けば、すべて `add` です。読むものがないので、承認に残るのはハッシュと日時、それに git に名前が設定されていれば承認した人だけです。参加登録の計画は `Meetup`、`MeetupResource`、`meetups/Show`、`MeetupController.show` を `alter` で変更するので、承認に `readings` も加わります。
+
+</details>
+
 ## 次へ
 
 [第 4 章: 1 ステップずつ](./04-one-step-at-a-time.md) では、承認した計画をエージェントに渡し、5 つのステップが 1 つずつ検証されながら進んでいく流れを追います。

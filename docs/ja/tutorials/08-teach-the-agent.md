@@ -506,6 +506,44 @@ git commit -m "feat: add the blogroll"
 1. このアプリで守っているのに、どのチェックも強制していない約束事を 1 つ選び、ルールをもう 1 つ書いてください。たとえば「すべてのページコンポーネントは `Props` インターフェースを宣言する」が候補になります。第 13 章の `spec:generate` がこれを読むからです。20 行以内に収め、どのコマンドからも見えない理由をルール本文に書いてください。
 2. `bunx guren agent:sync --dry-run` を実行してください。置き換えられるのはどのファイルで、触れられないのはどのファイルですか。その 2 つを分ける線が、フレームワークのハーネスと読者のハーネスの境目です。
 
+<details>
+<summary>演習 1: ヒントと答えの例</summary>
+
+まず `.claude/rules/project-guidelines.md` を開いてください。`guren guidelines` がすでに導き出している内容は、ルールに書く必要がありません。次に、約束事が当てはまるファイル(ここではページコンポーネント)に `paths` を絞ります。`.claude/rules/page-props.md` として保存するルールの一例です。
+
+```md
+---
+paths:
+  - "resources/js/pages/**"
+---
+
+# Page props
+
+Every page component declares `interface Props` (or `type Props`) and annotates
+its default export with it: `export default function Show({ post }: Props)`.
+
+`bun run codegen` copies that type into `.guren/pages.gen.ts`, where
+`this.inertia()` checks a controller's props against it, and `spec:generate`
+quotes it in `docs/spec/screens.md`.
+
+No command asks for the declaration: codegen also accepts a type written inline
+on the default export's parameter, and `guren check` does not look for `Props`.
+Only this rule states the convention.
+```
+
+ほかのルールでもかまいません。大事なのは、`paths` を狭く保つことと、どのチェックもこの約束事を見ない理由を最後の段落に書くことです。
+
+</details>
+
+<details>
+<summary>演習 2: ヒントと答えの例</summary>
+
+`agent:sync` は、書き込む予定のファイルを 2 種類に分けます。フレームワークが自分の名前で配布し、同期のたびに更新する管理対象のファイルと、存在しないときにだけ書く利用者のファイルです。
+
+ハーネスが最新なら、何も書き込みません。管理対象のファイル(`.claude/rules/` の 6 つのルール、`.claude/skills/` に配布されるスキルのディレクトリ、`.claude/agents/` の `code-review.md` と `test-writer.md`、`.claude/hooks/` の 2 つのフック)は、「already up to date」の 1 行にまとめて数えられます。フレームワークのテンプレートと内容が違う管理対象のファイルがあれば「Would write」に並び、置き換えるという警告が出ます。`.claude/settings.json`、`.mcp.json`、`CLAUDE.md` はスキップされたと報告されます。一度書いたあとは読者のファイルだからです。`ownership.md`、`project-guidelines.md`、`owned-resource/`、`ownership-review.md` はどこにも出てきません。同期が見るのは、自分が配布する名前だけです。フレームワークのハーネスはその名前の一覧そのもので、`.claude/` にあるそれ以外のファイルは読者のものです。
+
+</details>
+
 ## 次へ
 
 [第 9 章: リレーションシップ](./09-relationships.md) では、手作りの著者検索を `belongsTo` と `hasMany` に置き換え、コメント機能を追加します。そのあと、多対多のタグ付けをエージェントに任せます。

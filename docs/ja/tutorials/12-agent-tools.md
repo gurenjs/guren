@@ -939,6 +939,37 @@ app.auth.useTokens(new DatabaseApiTokenStore(apiTokens))
 1. `posts.publish` に `agent: { readOnlyHint: true }` を足して、`bunx guren check --ci` を実行してください。指摘を読んだら、ヒントを消してください。間違った注釈が、ポリシーの欠落と同じくらい重く扱われるのはなぜでしょうか。
 2. どの投稿にも無い id を指定して、`TestApp.agent()` から `posts_show` を呼んでください。エージェントは何を受け取りますか。同じ URL にブラウザでアクセスした場合と比べ、その差のうちどこがフレームワークによるもので、どこがアプリのコードによるものかを答えてください。
 
+<details>
+<summary>演習 1: ヒントと答えの例</summary>
+
+ヒントは `routes/web.ts` にあるルートの `.agent()` 呼び出しに書きます。
+
+```ts
+.agent({ toolName: 'posts_publish', description: 'Publish a draft post. Only the post\'s author may call it.', readOnlyHint: true })
+```
+
+`guren check --ci` は `posts.publish` のツールで失敗します。ルートは `readOnlyHint: true` を宣言しているのに、アクションがレコードを書き換えているからです。チェックは `publish` の本体を読んで `Post.forceUpdate` を見つけ、advisory ではない警告を出します。`--ci` が失敗するにはそれで十分です。この注釈がポリシーと同じくらい重く扱われるのは、2 つの役目を持つからです。クライアントはこれを「人の確認なしに呼んでよい」と読みます。また、第 4 節で見た認可のルールからツールを外すのもこの注釈です。`authorize` を呼んでいないルートに間違った注釈を付けると、あの失敗が出なくなります。そのため、注釈自体もポリシーと同じ基準で確かめられます。
+
+</details>
+
+<details>
+<summary>演習 2: ヒントと答えの例</summary>
+
+エージェント側は `Accept: application/json` を送り、`show` は `Post.findWithOrFail` で投稿を読み込みます。結果を確かめるテストの例です。
+
+```ts
+const result = await http.agent().call('posts_show', { id: 999 })
+expect(result.isError).toBe(true)
+expect(result.status).toBe(404)
+console.log(result.text)
+```
+
+エージェントが受け取るのはエラーの結果です。`isError` が true、ステータスは 404 で、テキストはエラーレスポンスの JSON 本文です。その `message` は `Post not found for id=999` になります。`bun test` ではハンドラーが詳細を出すので、本文には `exception` と `stack` も入ります。`bun run preview` で HTML を求めるブラウザには、同じメッセージの素の HTML の 404 ページが返ります。本番以外では、ブラウザにも同じ JSON が返ります。
+
+フレームワークによる部分は、404 というステータス(`findWithOrFail` が投げる例外が持っています)、リクエストの `Accept` ヘッダーによる JSON と HTML の切り替え、本番以外での詳細の表示、4xx や 5xx の応答を MCP のエラー結果に変換する処理です。アプリのコードによる部分は、`show` で `findWithOrFail` を使っていること(`find` で探して応答を自分で決める書き方もあります)と、投稿が見つからないときに専用のページを用意するかどうかです。
+
+</details>
+
 ## 次へ
 
 [第 13 章: 古びないドキュメント](./13-documented.md) では、アプリに自分自身を説明させます。生成される ER 図とドメインのビュー、エージェントがエンティティに触れる前に読むドキュメント、そしてどちらかがコードと食い違ったときに失敗するゲートを扱います。

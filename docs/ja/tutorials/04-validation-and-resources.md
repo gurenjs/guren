@@ -863,8 +863,35 @@ git commit -m "feat: complete the posts CRUD with pagination"
 
 ## 演習
 
-1. ブランチを切り、`PostPayloadSchema` に「空白だけのタイトルは認めない」というルールを 1 つ追加してください。先に失敗するテストを書き、それから通します。このルールが最初からあったとしたら、既存のテストのうちどれがこの問題に気づいていたでしょうか。
+1. `PostPayloadSchema` は、空白だけのタイトルをすでに拒否します。ブランチを切り、`title` のルールのうちそれを担っている部分を探して外してください。そのうえで、外した状態では失敗し、元に戻すと通るテストを書きます。既存のテストの中に、ルールが外れたことに気づくものはあったでしょうか。
 2. `PostResource.toArray()` から `body` を消して `bun test` を実行してください。いくつかのテストは失敗しますが、ページ自体は表示されます。この違いから、リソースの契約が実際にはどこで検査されているのかを考えてみてください。
+
+<details>
+<summary>演習 1: ヒントと答えの例</summary>
+
+`app/Http/Validators/PostValidator.ts` の `title` の行を読んでください。`.trim()` が `.min(1)` より先に実行されるので、`'   '` は `''` になり、「Title is required」で失敗します。`.trim()` を外してから、空白だけのタイトルでテストを書きます。
+
+```ts
+it('rejects a title of only spaces', async () => {
+  await http
+    .post('/posts', { title: '   ', body: 'Some body' })
+    .assertStatus(422)
+    .assertJsonPath('errors.title.0', 'Title is required')
+})
+```
+
+`.trim()` がないと空白は `.min(1)` を通ってしまい、投稿が保存されてリクエストはリダイレクトされるので、テストは失敗します。`.trim()` を戻せば通ります。ルールが外れたことに気づく既存のテストは、ありません。「rejects an empty post with a message per field」が送るのは `''` で、これは `.trim()` の有無にかかわらず `.min(1)` で失敗します。つまりこのテストは、ルールがあってもなくても通ります。新しいテストを残す価値があるのはそのためです。
+
+</details>
+
+<details>
+<summary>演習 2: ヒントと答えの例</summary>
+
+`bun test` は TypeScript を型検査せずに実行します。`bun run typecheck` も実行して、結果を比べてください。
+
+失敗するのは、レスポンスの中に本文を探すテストです。「shows one post」と「serves the edit form with the post in it」がそれに当たります。一覧のテストはタイトルしか見ないので通ります。ページが表示されるのは、実行時に props を検査するものがないからです。`post.body` は `undefined` になり、React はそこに何も描画しません。契約を検査しているのはコンパイル時です。`toArray()` は `body` を必須とする `PostResourceData` を返すと宣言しているので、`bun run typecheck` は `app/Http/Resources/PostResource.ts` で失敗します。インターフェースからも `body` を消すと、今度は `post.body` を読んでいるページの側で失敗します。ゲートはテストより先に typecheck を実行するので、そこで止まっていたはずです。
+
+</details>
 
 ## 次へ
 

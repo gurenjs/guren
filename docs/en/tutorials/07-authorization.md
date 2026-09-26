@@ -940,6 +940,24 @@ git commit -m "feat: let authors publish and unpublish their posts"
 1. Delete the `await this.authorize('update', [Post, post])` line from `update` and run `bun test`. Count the failures, then restore the line. That count is what the policy is worth, and it is the number `guren audit` would not have given you.
 2. `this.can()` returns a boolean; `this.authorize()` throws. The page uses one and the action uses the other. What would a reader see if the two disagreed, and which of the two is the one that keeps the record safe?
 
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Look for the test in `tests/PostController.test.ts` that sends an `update` from someone who is not the author.
+
+With the chapter's own tests, one fails: "refuses to update a post for anyone else". Without the line, Grace's `PUT` goes through and redirects instead of answering 403, and the title changes. Every other test still passes, the author's own update included, because the policy only ever said no to people who are not the author. If the test-writer in section 5 added tests about updates, the count can be higher. `guren audit` is not entirely silent either: once `app/Policies/PostPolicy.ts` exists, it warns about a mutating action that uses `Post` with no authorization call. The warning is advisory, so the gate stays green, and it cannot say who gets in. The failing test says exactly that.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+Look at which ability each one asks for. In `show`, `canManage` is `this.can('update', …)`, but the buttons it reveals run `destroy`, `publish` and `unpublish`, which ask for `delete` and `publish`.
+
+If the page says yes and the action says no, the reader sees the buttons, clicks one, and the request comes back 403. If the page says no and the action says yes, the buttons are hidden, but a request sent by hand still goes through. Today `update`, `delete` and `publish` in `PostPolicy` give the same answer, so the two agree. Change `delete` alone and the Delete button starts to mislead in one of those two ways. `this.authorize()` in the action is what keeps the record safe: it runs on every request, whatever the page showed. `this.can()` only decides what to draw.
+
+</details>
+
 ## Next
 
 [Chapter 8: Teach the Agent Your Project](./08-teach-the-agent.md) turns "the agent forgot" into a rule it reads every time, a skill it follows on request, and a reviewer with your brief, and then proves them on a resource the agent builds unprompted.

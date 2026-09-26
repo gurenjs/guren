@@ -54,7 +54,7 @@ Each one wrote a sample of its kind plus what runs it, and registered that in `s
 These are worth reading, because two of them are files you are about to edit:
 
 - `app/Providers/EventProvider.ts` hands a listener class to `events.listen()`, which subscribes it to the event the class names. That connection is a line of code, not a convention: nothing scans `app/Listeners/` looking for work.
-- `config/queue.ts` builds the queue manager, and `app/Providers/JobsProvider.ts` calls `registerJob()` for each job class. Note the driver line in the config: `QUEUE_CONNECTION=sync` runs a dispatched job **inline, in the dispatching process**; `memory` puts it in a queue a worker drains. `guren add queue` wrote `sync` into your `.env`.
+- `config/queue.ts` builds the queue manager, and `app/Providers/JobsProvider.ts` calls `registerJob()` for each job class. Note the driver line in the config: `QUEUE_CONNECTION=sync` runs a dispatched job **inline, in the dispatching process**; `memory` puts it in a queue held in that process's own memory, for a worker running in the same process. `guren add queue` wrote `sync` into your `.env`.
 - `config/mail.ts` builds the mail manager. `MAIL_MAILER=log`, also already in your `.env`, prints outgoing mail to the server output instead of sending it. Nothing to sign up for, and nothing to accidentally deliver.
 
 The samples (`OrderPlaced`, `SendOrderReceiptListener`, `ProcessWelcomeSequenceJob`, `WelcomeEmailMail`) exist so you can see the shape of each file. You will replace all four in section 3.
@@ -783,12 +783,44 @@ git commit -m "feat: mail commenters when a post is published"
 - **`manager.getDefaultDriverName is not a function`, and the request answers 500, in a test that fakes the queue.** `fakeQueue()` was bound as `queue` directly. That key holds a `QueueManager`, and the fake is a driver, the same mistake as binding `fakeMail()` as `mail`. Return its driver from a `createQueueManager()` factory and bind the manager.
 - **`[guren] Deprecation (global-service-setters): setQueueDriver() is deprecated` in the test output.** A test still pins the driver. Bind a manager with `app.container.fake('queue', …)` as section 2 does; the pin is removed in 3.0.0.
 - **A test faking `mail` with `fakeMail()` directly throws.** `Mail.send()` calls `manager.transport(name)`, and the fake is a transport, not a manager. Register it on a real `MailManager` and bind that.
-- **The mail is sent during the request even though there is a queue.** That is `QUEUE_CONNECTION=sync` working as designed. Set it to `memory` and run `bunx guren queue:work` to watch a worker drain the queue instead.
+- **The mail is sent during the request even though there is a queue.** That is `QUEUE_CONNECTION=sync` working as designed. A worker drains the queue only when the driver stores jobs where a second process can read them, such as Redis or SQS in production; exercise 1 shows why `memory` is not one.
 
 ## Exercises
 
 1. Set `QUEUE_CONNECTION=memory` in `.env`, restart the server, and post a comment. No mail appears. Now run `bunx guren queue:work --once` in a second terminal: still nothing. Explain why, then put the value back. The answer is the reason `memory` is a development driver and not a deployment one.
 2. Register a second listener on `CommentPosted` with a higher `priority` that only logs. Which one runs first? Now make the first one throw, and say what happens to the second and to the request.
+
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Ask where the job is stored under each driver, and which process `queue:work` reads from. `config/queue.ts` maps `memory` to `new MemoryDriver()`.
+
+A `MemoryDriver` keeps its jobs in the memory of the process that created it. The comment request runs in the server process, so the job lands in the server's queue, and nothing in that process drains it. `bunx guren queue:work --once` boots the app in a new process with a new, empty memory queue, finds no job, and exits, because `--once` stops when the queue is empty. The job stays in the server's memory until the next restart, and then it is gone. A deployed web process and its worker are separate processes, often on separate machines, so the queue has to live outside both: Redis or SQS. Put `QUEUE_CONNECTION=sync` back.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+`events.listen()` reads `priority` from the listener class, and `emit()` awaits the listeners one at a time, highest priority first. A logging listener, wired with `events.listen(LogCommentListener)` in `app/Providers/EventProvider.ts`:
+
+```ts
+import { Listener } from '@guren/core'
+import { CommentPosted } from '../Events/CommentPosted.js'
+
+export class LogCommentListener extends Listener<CommentPosted> {
+  static override event = CommentPosted
+  static override priority = 10
+
+  handle(event: CommentPosted): void {
+    console.log(`comment ${event.commentId} posted`)
+  }
+}
+```
+
+It runs first: 10 is higher than the default 0 that `SendCommentMailListener` keeps. Make its `handle` throw, and the error leaves `emit()` at once, so `SendCommentMailListener` never runs and no job or mail follows. `store` in `CommentController` awaits `emit()`, so the request fails with a 500 from the error handler instead of the redirect. The comment itself is saved, because `forceCreate` ran before `emit()`. A listener that defines `failed()` has it called before the error propagates.
+
+</details>
 
 ## Next
 

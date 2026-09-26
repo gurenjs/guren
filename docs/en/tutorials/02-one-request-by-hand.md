@@ -341,6 +341,28 @@ git commit -m "feat: add the contact page"
 1. `/health` is an inline handler, not a controller. On a branch, add a second inline route that answers with the current time, and say what you lose by writing a route this way rather than as a controller action.
 2. `this.inertia(pages.about.Index, …)` takes a page from generated code, not a string. Change it to a page that does not exist and read the TypeScript error. That error is the whole argument for `pages.*`; put it back.
 
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Compare what the `/health` handler receives (`c`, the request context) with what a controller action reaches through `this`.
+
+```ts
+router.get('/time', (c) => c.json({ now: new Date().toISOString() }))
+```
+
+What you lose is everything a controller gives you through `this`: `this.inertia()` for a page, `this.validateBody()` and its siblings, `this.auth`, `this.authorize()`, `this.t()`. An inline handler has to do all of that by hand with the context. The tooling sees less too. `guren audit` looks inside a controller action for a `validateBody()` call, and an inline function has no action to read, so a mutating inline route needs a `body` schema on the route itself. For a one-line answer like `/health` none of this matters. For anything bigger, write a controller.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+In `app/Http/Controllers/AboutController.ts`, change `pages.about.Index` to `pages.about.Missing` and run `bun run typecheck`.
+
+TypeScript reports that the property `Missing` does not exist on the type of `pages.about` (error TS2339), on the controller line, before any request is made. `pages` in `.guren/pages.gen.ts` is generated from the files under `resources/js/pages/`, so a page with no file has no name to reference. `this.inertia()` also accepts a plain string, but a misspelled string compiles and fails only when the page is rendered. Put `pages.about.Index` back.
+
+</details>
+
 ## Next
 
 [Chapter 3: The Posts Table](./03-the-posts-table.md) adds the first database table, a model, and the two pages that read it, then hands the create form to the agent.

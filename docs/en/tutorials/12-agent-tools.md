@@ -939,6 +939,37 @@ Until the plugin is installed there is no `/mcp` route, yet a POST to it answers
 1. Add `agent: { readOnlyHint: true }` to `posts.publish` and run `bunx guren check --ci`. Read the finding, then remove the hint. Why is a wrong annotation treated as seriously as a missing policy?
 2. Call `posts_show` through `TestApp.agent()` with an id no post has. What does the agent receive? Compare it with what a browser gets at the same URL, and say which parts of the difference are the framework's doing and which are yours.
 
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+The hint goes into the route's `.agent()` call in `routes/web.ts`:
+
+```ts
+.agent({ toolName: 'posts_publish', description: 'Publish a draft post. Only the post\'s author may call it.', readOnlyHint: true })
+```
+
+`guren check --ci` fails on the `posts.publish` tool: the route declares `readOnlyHint: true`, but its action force-writes records. The check reads the body of `publish`, finds `Post.forceUpdate`, and reports a warning that is not advisory, which is enough for `--ci` to fail. The hint is treated as seriously as a policy because it does two jobs. A client reads it as "safe to call unattended", and it is what exempts a tool from the authorization rule you saw in section 4. A wrong hint on a route with no `authorize` call would silence that failure, so the claim itself has to pass the same bar.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+The agent surface sends `Accept: application/json`, and `show` loads the post with `Post.findWithOrFail`. A test to look at the result:
+
+```ts
+const result = await http.agent().call('posts_show', { id: 999 })
+expect(result.isError).toBe(true)
+expect(result.status).toBe(404)
+console.log(result.text)
+```
+
+The agent receives an error result: `isError` is true, the status is 404, and the text is the JSON body of the error response, whose `message` is `Post not found for id=999`. Under `bun test` the handler shows details, so the body also carries `exception` and `stack`. A browser that asks for HTML under `bun run preview` gets the plain HTML 404 page with the same message; outside production the handler answers it with the same JSON instead.
+
+The framework's part: the 404 (`findWithOrFail` throws an exception that carries it), the choice of JSON or HTML from the request's `Accept` header, the details outside production, and the mapping of any 4xx or 5xx response to an MCP error result. Yours: using `findWithOrFail` in `show` at all, rather than `find` and an answer of your own, and whether a missing post gets a page of its own.
+
+</details>
+
 ## Next
 
 [Chapter 13: Documentation That Cannot Go Stale](./13-documented.md) makes the app describe itself: generated ER and domain views, docs an agent reads before it touches an entity, and a gate that fails when either drifts from the code.

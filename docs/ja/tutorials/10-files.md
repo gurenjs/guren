@@ -1463,6 +1463,26 @@ git commit -m "feat: add a gallery to posts"
 1. テキストファイルを `cover.png` に改名してアップロードしてください。アプリは何を返しますか。それを決めているのは `Post` のどの行ですか。次に、本物の PNG を `cover.txt` に改名してアップロードし、両者の違いを一文で説明してください。
 2. カバー画像の付いた投稿を削除してから、`bun run console attachments:prune --dry-run` を実行してください。何も報告されないはずです。このコマンドが何かを見つけるのは、`destroy` でどんな問題が起きたときですか。
 
+<details>
+<summary>演習 1: ヒントと答えの例</summary>
+
+`app/Models/Post.ts` で `Post` が `cover` をどう宣言しているかを見てください。
+
+`cover.png` に改名したテキストファイルは、`cover` のバリデーションエラー「The file must be an image.」で拒否されます。決めているのは `cover: hasOneAttached({ image: 'require' })` の行です。`'require'` のとき、`attach()` はアップロードの先頭のバイト列に画像のシグネチャがあるかを調べ、ファイル名やブラウザが申告した型は判定に使いません。そのため、`cover.txt` に改名した本物の PNG は受け付けられ、`cover.txt` という名前のまま、コンテンツタイプ `image/png` で保存されます。一文で言えば、attachments レイヤーはファイルの種類を中身のバイト列で判断し、名前は見ません。
+
+新規投稿のフォームからアップロードした場合、`attach()` がファイルを拒否する前に `store` が投稿を保存しています。そのため、カバー画像のない投稿が残ります。
+
+</details>
+
+<details>
+<summary>演習 2: ヒントと答えの例</summary>
+
+コマンドが何を比べているかを確認してください。添付ファイルの各行の `attachableType` を `config/attachments.ts` の `Model.morphMap` で解決し、持ち主のレコードを探しています。
+
+`attachments:prune` が報告するのは、持ち主がもう存在しない行です。`destroy` は `Post.delete(...)` の前に `Post.purgeAttachments(post.id)` を呼ぶので、そうした行は残りません。このコマンドが何かを見つけるのは、purge を通らずに投稿が消えたときです。たとえば `destroy` からこの呼び出しを消した場合や、purge を呼ばない別の経路(コンソールコマンド、スクリプト、別のアクション)で投稿を削除した場合です。`--objects` を付けると、どの行からも参照されていない `attachments/` 以下の保存ファイルも探します。`Model.morphMap` に載っていないモデルの行は、スキップしたと報告されるだけで削除はされません。
+
+</details>
+
 ## 次へ
 
 [第 11 章: イベントとメール](./11-events-and-mail.md) では、誰かがコメントしたときに投稿の著者へ知らせる仕組みを作ります。イベント、リスナー、キューに積むジョブ、メールを使い、コメントした全員への一斉送信はエージェントに任せます。

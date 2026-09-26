@@ -509,6 +509,26 @@ bun run dev
 1. ブランチを切って Policy を `return true` に書き換え、http ステップの `plan:verify` を実行してください。どの振る舞いが失敗しますか。確かめたら、コミットせずに元に戻します。
 2. `bunx guren plan:status docs/plans/meetups/plan.json --json` を実行し、`policy.meetup` の項目を探してください。`files` には何が並んでいますか。また、そのファイルを変更すると `drifted` になるのはなぜでしょうか。
 
+<details>
+<summary>演習 1: ヒントと答えの例</summary>
+
+ゲストは Policy が動く前に `auth` ミドルウェアでリダイレクトされます。主催者はどちらの Policy でも通ります。Policy の中身で結果が変わるのは、サインインしていても主催者ではないユーザーを拒否するべき振る舞いだけです。
+
+失敗するのは 2 つです。`AC-meetups-4` (他人の勉強会への `PUT` に、期待した 403 の代わりに 303 が返る) と、`AC-meetups-9` (他人の勉強会の編集フォームに、403 の代わりに 200 が返る) です。残りの 10 個は通ります。scaffold が書く `return false` とちょうど逆の関係です。全員を通す Policy は `forbidden` の振る舞いが見つけ、誰も通さない Policy は主催者の `success` の振る舞いが見つけます。
+
+元に戻すときは、まず `git restore app/Policies/MeetupPolicy.ts` で変更を捨ててください。コミットしていない変更は `git switch` で切り替えた先にもついてきます。そのあと元のブランチに戻ります。失敗した実行で、`.guren/plans/` にある http ステップの記録が上書きされています。このディレクトリは git の管理外なので、元のブランチで `bunx guren plan:verify docs/plans/meetups/plan.json --step task/entity/model.meetup/http` をもう一度実行してください。実行しないと、第 5 章の `plan:close` が拒否されます。
+
+</details>
+
+<details>
+<summary>演習 2: ヒントと答えの例</summary>
+
+`files` には、その要素が見つかったファイルが並びます。要素を担当するステップが検証されると、`plan:verify` はこれらのファイルのハッシュを `.guren/plans/` に記録します。
+
+`policy.meetup` の `files` には、Policy 自身のファイル `app/Policies/MeetupPolicy.ts` が並びます。Policy を担当するのは http ステップで、検証の時点でこのファイルのハッシュを記録しています。ファイルを変更するとハッシュが一致しなくなり、「検証済み」という結果は、もう存在しないコードについての結果になります。そのため、http ステップを `plan:verify` でもう一度検証するまで、この要素は `drifted` と表示されます。
+
+</details>
+
 ## 次へ
 
 [第 5 章: 計画をクローズする](./05-close-the-plan.md) では、完了した計画を、コードと一緒に残るドキュメントに書き出します。

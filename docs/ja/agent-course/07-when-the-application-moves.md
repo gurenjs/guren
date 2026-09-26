@@ -478,7 +478,7 @@ bunx guren plan:waive docs/plans/<slug>/plan.json <element-id> --reason "Ships w
 ## ここまでの状態
 
 - 参加登録を実装して検証を通し、計画をクローズしてドキュメントに残しました。
-- 保留になったステップを計画の改訂で解決し、その理由は `revisions/0001.json` に残っています。
+- 保留になったステップを計画の改訂で解決し、その理由は `revisions/0002.json` に残っています。
 
 ## よくあるつまずき
 
@@ -488,7 +488,25 @@ bunx guren plan:waive docs/plans/<slug>/plan.json <element-id> --reason "Ships w
 ## 演習
 
 1. ブランチを切って、計画を改訂する代わりに同僚のコミットを revert し、`plan:next` を実行してください。ステップはまだ保留のままですか。
-2. `docs/plans/registrations/revisions/0001.json` を読んでください。1 年後にレビューする人が、計画が `meetups.detail` を指している理由を知りたいとき、どのフィールドを見ればよいでしょうか。
+2. `docs/plans/registrations/revisions/0002.json` を読んでください。1 年後にレビューする人が、計画が `meetups.detail` を指している理由を知りたいとき、どのフィールドを見ればよいでしょうか。
+
+<details>
+<summary>演習 1: ヒントと答えの例</summary>
+
+計画を改訂する前、3 節の時点で試してください。要素が依存しているもののハッシュが、承認時の記録とも、計画どおりに実装した後の状態とも一致しないあいだ、ステップは保留になります。
+
+保留は解けます。`git revert` でルート名が `meetups.show` に戻り、`route.meetups.show` のハッシュが第 6 章の承認時の記録と一致するので、`plan:next` は http ステップを返します。3 節の表の「変更を戻す」にあたります。`plan:next` が印を書く `.guren/plans/` は git の管理外なので、元のブランチに戻っても印はそのまま残ります。元のブランチでは、3 節と同じようにステップがまた保留になります。
+
+</details>
+
+<details>
+<summary>演習 2: ヒントと答えの例</summary>
+
+改訂の記録には、変更前と変更後の計画のハッシュである `parent` と `result`、変更内容の `ops` が入っています。`ops` の各操作には、その変更をした理由が付いています。
+
+見るのは、`route.meetups.show` を変更する操作の `reason` です。**Without an agent** のブロックで進めた場合は「A teammate renamed the route to meetups.detail.」と書かれていて、この操作は `revisions/0002.json` にあります。`0001.json` は、第 6 章で `Q-full` に答えた最初の改訂です。エージェントで進めた場合、`reason` にはエージェントが `plan:revise` に渡したメッセージが入り、番号も変わることがあります。`route.meetups.show` を変更している記録を探してください。
+
+</details>
 
 ## 次へ
 
