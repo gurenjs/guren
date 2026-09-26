@@ -20,6 +20,7 @@ import { describeDependency, type PlanStepContextElement } from './plan/step-con
 import { listPlanStates, planDigest, planSlug, writePlanActiveStep, type PlanActiveStep, type PlanStepRecord } from './plan/state'
 import { derivePlanTasks, findPlanStep, type PlanTaskDerivation } from './plan/tasks'
 import { hashFiles, readPlanWaivers, recordStands, recordStillHolds, sha256 } from './plan/verification'
+import { acceptanceKey } from './plan/verify'
 
 /** Stops the hook blocks on one step before it gives up. */
 export const MAX_STEP_CONTINUATIONS = 3
@@ -111,13 +112,14 @@ async function unobservableRedRuns(
   stepId: string,
   run: PlanStepRecord,
 ): Promise<UnobservableRedRuns | undefined> {
+  if (run.outcome !== 'failed') return undefined
   const found = findPlanStep(derivation, stepId)
   if (!found?.step.verify.includes('tests:fail')) return undefined
-  const seen = new Set((records[stepId]?.acceptance ?? []).filter((behaviour) => behaviour.red !== undefined).map((behaviour) => behaviour.id))
+  const seen = new Set(Object.values(records).flatMap((record) => record.acceptance.filter((behaviour) => behaviour.red !== undefined).map((behaviour) => behaviour.id)))
   const ids = run.acceptance.filter((behaviour) => behaviour.status === 'passing' && behaviour.red === undefined && !seen.has(behaviour.id)).map((behaviour) => behaviour.id)
   if (ids.length === 0) return undefined
-  const key = (list: readonly string[]): string => [...list].sort().join('\0')
-  const later = found.task.steps.find((step) => step.id !== stepId && step.verify.includes('tests') && key(step.acceptanceIds) === key(found.step.acceptanceIds))
+  const key = acceptanceKey(found.step.acceptanceIds)
+  const later = found.task.steps.find((step) => step.id !== stepId && step.verify.includes('tests') && acceptanceKey(step.acceptanceIds) === key)
   const record = later && records[later.id]
   if (!later || !record || record.outcome !== 'verified') return undefined
   // Its own digest: after a revision the implementing step is re-verified later in task order than this one.

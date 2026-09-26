@@ -210,6 +210,11 @@ function carrierFindings(ids: readonly string[], carriers: ReadonlyMap<string, r
   return { missing, findings: [...missing.map((id) => `[${id}] is carried by no test file`), ...doubled] }
 }
 
+/** One key per set of acceptance ids, whatever their order: what a test run and the steps sharing it are keyed by. */
+export function acceptanceKey(ids: readonly string[]): string {
+  return [...ids].sort().join('\0')
+}
+
 function memoized<T>(store: Map<string, Promise<T>>, key: string, create: () => Promise<T>): Promise<T> {
   let pending = store.get(key)
   if (!pending) {
@@ -244,6 +249,7 @@ export class PlanVerifier {
   private readonly selections = new Map<string, Promise<TestSelection>>()
   private readonly outcomes = new Map<string, Promise<TestOutcome>>()
   private readonly requestChecks = new Map<string, Promise<ReturnType<typeof behaviourRequestFailure>>>()
+  private readonly redRuns = new Map<string, Map<string, PlanRedRun>>()
   private readonly declaredIds: string[]
   private readonly check: () => Promise<CheckReport>
   private readonly testFiles: () => Promise<string[]>
@@ -506,13 +512,18 @@ export class PlanVerifier {
   }
 
   private testKey(step: PlanDerivedStep): string {
-    return [...step.acceptanceIds].sort().join('\0')
+    return acceptanceKey(step.acceptanceIds)
   }
 
-  /** A `tests:fail` step's behaviours whose red run its previous record carries to this plan; none for any other step. */
+  /** A `tests:fail` step's behaviours whose red run a previous record carries to this plan; none for any other step. */
   private carried(step: PlanDerivedStep): Map<string, PlanRedRun> {
     if (!step.verify.includes('tests:fail')) return new Map()
-    return carriedRedRuns(this.options.previous?.[step.id], this.plan, step.acceptanceIds)
+    let carried = this.redRuns.get(step.id)
+    if (!carried) {
+      carried = carriedRedRuns(Object.values(this.options.previous ?? {}), this.plan, step.acceptanceIds)
+      this.redRuns.set(step.id, carried)
+    }
+    return carried
   }
 
   private selection(step: PlanDerivedStep): Promise<TestSelection> {

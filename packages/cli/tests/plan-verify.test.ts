@@ -639,8 +639,10 @@ describe('PlanVerifier', () => {
       expect(behaviourShape(restated(), 'AC-comments-2')).not.toBe(behaviourShape(plan, 'AC-comments-2'))
       expect(behaviourShape(moved, 'AC-comments-1')).not.toBe(behaviourShape(plan, 'AC-comments-1'))
       expect(behaviourShape(plan, 'AC-comments-99')).toBeUndefined()
-      expect([...carriedRedRuns(parentRecord()[TESTS], restated(), IDS).keys()]).toEqual(['AC-comments-1', 'AC-comments-3', 'AC-comments-4'])
-      expect(carriedRedRuns(undefined, plan, IDS).size).toBe(0)
+      expect([...carriedRedRuns(Object.values(parentRecord()), restated(), IDS).keys()]).toEqual(['AC-comments-1', 'AC-comments-3', 'AC-comments-4'])
+      expect(carriedRedRuns([], plan, IDS).size).toBe(0)
+      // Keyed on the behaviour, not the step: a revision may move a behaviour to another task's tests step.
+      expect([...carriedRedRuns([record(), parentRecord()[TESTS]!], plan, ['AC-comments-2']).keys()]).toEqual(['AC-comments-2'])
     })
 
     test('should verify a tests step every behaviour of which was seen failing under the parent plan, without running bun test', async () => {

@@ -297,16 +297,21 @@ export function behaviourShape(plan: PlanDraft | Plan, id: string): string | und
 }
 
 /**
- * The behaviours of `ids` whose red run `record` (the step's own) carries to `plan`: seen failing in
- * a verified `tests:fail` run at the shape the plan states now, whatever plan hash that run named.
- * Once the implementation exists the run cannot be repeated, so a revision that leaves a behaviour's
- * test as it was keeps the observation, and one that changes it asks for a new one.
+ * The behaviours of `ids` whose red run one of `records` carries to `plan`: seen failing in a
+ * verified `tests:fail` run at the shape the plan states now, whatever plan hash or step that run
+ * named (a revision may move a behaviour to another task). Once the implementation exists the run
+ * cannot be repeated, so a revision leaving a behaviour's test as it was keeps the observation.
  */
-export function carriedRedRuns(record: PlanStepRecord | undefined, plan: PlanDraft | Plan, ids: readonly string[]): Map<string, PlanRedRun> {
+export function carriedRedRuns(records: Iterable<PlanStepRecord>, plan: PlanDraft | Plan, ids: readonly string[]): Map<string, PlanRedRun> {
+  const seen = new Map<string, PlanRedRun[]>()
+  for (const record of records) {
+    for (const { id, red } of record.acceptance) if (red) seen.set(id, [...(seen.get(id) ?? []), red])
+  }
   const carried = new Map<string, PlanRedRun>()
   for (const id of ids) {
-    const red = record?.acceptance.find((behaviour) => behaviour.id === id)?.red
-    if (red && red.shape === behaviourShape(plan, id)) carried.set(id, red)
+    const shape = behaviourShape(plan, id)
+    const red = seen.get(id)?.find((candidate) => candidate.shape === shape)
+    if (red) carried.set(id, red)
   }
   return carried
 }

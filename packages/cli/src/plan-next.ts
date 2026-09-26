@@ -515,7 +515,8 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     if (waived.length > 0) {
       lines.push('', 'Waived, not to be implemented:', ...waived, '  The step verifies without them; a waiver is the person\u2019s decision, not yours to take or to undo.')
     }
-    if (step.scaffold) {
+    // A step verified before the revision was scaffolded then, and plan:scaffold refuses targets that exist.
+    if (step.scaffold && !step.verifiedAt) {
       lines.push('', ...scaffoldLines(step, step.scaffold, report.plan.hash === null, planArgument))
     }
     // A draft is never scaffolded (plan:scaffold refuses it), so it has nothing to mount.
