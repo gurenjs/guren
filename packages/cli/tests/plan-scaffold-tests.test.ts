@@ -9,6 +9,7 @@ import { parsePlanDocument } from '../src/plan-render'
 import { formatPlanScaffold, planScaffoldFile, planScaffoldMountFile, type PlanScaffoldReport } from '../src/plan-scaffold'
 import type { PlanVerifyReport } from '../src/plan-verify'
 import { ParseCache } from '../src/parse-cache'
+import { readBehaviourRequests } from '../src/plan/behaviour-requests'
 import { emitPlanTests, PLAN_TESTS_CSRF_ABSENT, type PlanTestsApp } from '../src/plan/scaffold-tests'
 import { writePlanActiveStep } from '../src/plan/state'
 import { derivePlanTasks, findPlanStep } from '../src/plan/tasks'
@@ -262,6 +263,20 @@ describe('plan:scaffold on a tests step', () => {
     const coverage = testCoverage(scan, [{ method: 'DELETE', path: '/comments/:id{[0-9]+}' }])
     expect(coverage.byRoute.size).toBe(0)
     expect(coverage.uncertainByRoute.get(0)?.map((site) => site.text)).toEqual(['DELETE /comments/${…}'])
+  })
+
+  test('should write skeletons plan:verify’s route check reads back with no finding, a constrained parameter included', async () => {
+    const constrained = guestIndexPlan() as { routes: Array<{ id: string; path: string }> }
+    constrained.routes.find((route) => route.id === 'route.comments.destroy')!.path = '/comments/:id{[0-9]+}'
+    for (const [name, document] of [['round-trip', guestIndexPlan()], ['round-trip-constrained', constrained as unknown as Json]] as const) {
+      const approved = approvedAgainst(document)
+      const plan = parsePlanDocument(approved)
+      const dir = join(ROOT, name)
+      await writeWorkspaceFiles(dir, { [TEST_FILE]: emitted(approved).file.contents })
+      const carriers = new Map(IDS.map((id) => [id, [TEST_FILE]]))
+
+      expect(await readBehaviourRequests(dir, plan, IDS, { files: [TEST_FILE], carriers })).toEqual({ misses: [], unreadable: [] })
+    }
   })
 
   test('should write an expectation it cannot type as a failing unwritten() call, and one a missing route would satisfy as well', () => {
