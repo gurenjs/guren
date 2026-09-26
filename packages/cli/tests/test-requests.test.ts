@@ -131,6 +131,70 @@ await http.get('/odd/1')
   })
 })
 
+describe('testCoverage in registration order', () => {
+  type RegisteredTestRoute = TestRequestRoute & { module: string | null }
+  const MEETUPS: RegisteredTestRoute[] = [
+    { method: 'GET', path: '/meetups/create', module: null },
+    { method: 'GET', path: '/meetups/:id', module: null },
+  ]
+  const SOURCE = `${IMPORT}
+const http = await TestApp.fromApp(app)
+await http.get('/meetups/create')
+await http.get('/meetups/1')
+`
+
+  /** Per request, `route` for each one it reaches and `route?reason` for each it may reach. */
+  function answered(result: TestRequestScan, routes: RegisteredTestRoute[], modulesIncomplete = false): string[] {
+    const coverage = testCoverage(result, routes, { registered: { provenance: routes.map((route) => route.module), modulesIncomplete } })
+    const label = (index: number): string => `${routes[index]!.method} ${routes[index]!.path}`
+    return result.requests.map((request) => {
+      const at = (site: { file: string; line: number }): boolean => site.file === request.file && site.line === request.line
+      const hits = [...coverage.byRoute].filter(([, sites]) => sites.some(at)).map(([index]) => label(index))
+      const maybe = [...coverage.uncertainByRoute].flatMap(([index, sites]) => sites.filter(at).map((site) => `${label(index)}?${site.reason}`))
+      return `${request.text} -> ${[...hits, ...maybe].join(' | ') || 'none'}`
+    })
+  }
+
+  test('should give a request only to the route registered first of the two its path matches', async () => {
+    const result = await scanOne(SOURCE)
+    expect(answered(result, MEETUPS)).toEqual(['GET /meetups/create -> GET /meetups/create', 'GET /meetups/1 -> GET /meetups/:id'])
+    expect(answered(result, [MEETUPS[1]!, MEETUPS[0]!])).toEqual(['GET /meetups/create -> GET /meetups/:id', 'GET /meetups/1 -> GET /meetups/:id'])
+  })
+
+  test('should list every matching route when the routes carry no registration order', async () => {
+    const result = await scanOne(SOURCE)
+    expect(reached(result, MEETUPS)).toEqual(['GET /meetups/create -> GET /meetups/create | GET /meetups/:id', 'GET /meetups/1 -> GET /meetups/:id'])
+  })
+
+  test("should put the entry registrar's routes first and leave two modules' routes unordered", async () => {
+    const result = await scanOne(SOURCE)
+    const entryFirst: RegisteredTestRoute[] = [{ ...MEETUPS[1]!, module: 'events' }, MEETUPS[0]!]
+    expect(answered(result, entryFirst)).toEqual(['GET /meetups/create -> GET /meetups/create', 'GET /meetups/1 -> GET /meetups/:id'])
+    const twoModules: RegisteredTestRoute[] = [{ ...MEETUPS[0]!, module: 'events' }, { ...MEETUPS[1]!, module: 'calendar' }]
+    expect(answered(result, twoModules)).toEqual([
+      'GET /meetups/create -> GET /meetups/create?routeOrder | GET /meetups/:id?routeOrder',
+      'GET /meetups/1 -> GET /meetups/:id',
+    ])
+    expect(answered(result, entryFirst, true)).toEqual(['GET /meetups/create -> GET /meetups/create', 'GET /meetups/1 -> GET /meetups/:id?routeOrder'])
+  })
+
+  test('should let an earlier ALL route answer, and an earlier route it cannot judge leave the later one uncertain', async () => {
+    const result = await scanOne(SOURCE)
+    expect(answered(result, [{ method: 'ALL', path: '/meetups/*', module: null }, ...MEETUPS])).toEqual([
+      'GET /meetups/create -> ALL /meetups/*',
+      'GET /meetups/1 -> ALL /meetups/*',
+    ])
+    const runtime = await scanOne(`${IMPORT}
+const http = await TestApp.fromApp(app)
+const id = 1
+await http.get(\`/meetups/\${id}\`)
+`)
+    expect(answered(runtime, [{ method: 'GET', path: '/meetups/:id{[0-9]+}', module: null }, { method: 'GET', path: '/meetups/:slug', module: null }])).toEqual([
+      'GET /meetups/${…} -> GET /meetups/:id{[0-9]+}?routePattern | GET /meetups/:slug?routeOrder',
+    ])
+  })
+})
+
 describe('scanTestRequests on receivers', () => {
   test('should follow an import alias, a builder chain, a function returning one, and withCsrf', async () => {
     const result = await scanOne(`import { TestApp as App } from '@guren/testing'

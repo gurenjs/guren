@@ -32,6 +32,7 @@ const UNRESOLVED: Record<UnresolvedReason, string> = {
   unknownReceiver: 'a request on what an imported helper returns',
   localReceiver: 'a request on what a function of the file returns with no `TestApp` return type: annotate it `TestApp` or `Promise<TestApp>`',
   routePattern: 'a route pattern this reader cannot compare',
+  routeOrder: 'a route registered before it that may answer first',
 }
 
 function describeRoute(route: TestRequestRoute): string {
@@ -62,7 +63,7 @@ export function judgeBehaviourRequests(plan: BehaviourPlan, ids: readonly string
 
     const unread = new Set<string>()
     cases.forEach((entry, index) => {
-      for (const request of coverages[index]!.uncertainByRoute.get(0) ?? []) unread.add(`${request.file}:${request.line} ${request.text} (${UNRESOLVED.routePattern})`)
+      for (const request of coverages[index]!.uncertainByRoute.get(0) ?? []) unread.add(`${request.file}:${request.line} ${request.text} (${UNRESOLVED[request.reason]})`)
       for (const request of entry.unresolved) if (mayReach(request, route)) unread.add(`${request.file}:${request.line} ${request.text} (${UNRESOLVED[request.reason]})`)
       for (const site of entry.handedOff) unread.add(`${site.file}:${site.line} hands the TestApp to ${site.text}`)
     })
