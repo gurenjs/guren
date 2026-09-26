@@ -28,12 +28,14 @@ import {
   makeLangCommand,
   makeFeatureCommand,
 } from './commands/make'
-import { ATTACH_ARG, FIELDS_ARG, toWriterOptions } from './commands/scaffold-options'
+import { ATTACH_ARG, FIELDS_ARG } from './commands/scaffold-options'
+import { routeTypesCommand, codegenCommand, openApiGenerateCommand } from './commands/codegen'
 import { migrateCommand, seedCommand, resetCommand, freshCommand, rollbackCommand, statusCommand } from './commands/database'
 import { introspectCommand } from './commands/introspect'
 import { planCommand, planRenderCommand, planStatusCommand, planVerifyCommand, planNextCommand, planScaffoldCommand, planApproveCommand, planWaiveCommand, planReviseCommand, planCloseCommand } from './commands/plan'
 import { toolListCommand, toolInspectCommand, toolCallCommand, toolLogCommand, tokenIssueCommand, toolDevCommand } from './commands/tools'
 import { assertDestructiveCommandAllowed } from './commands/destructive-guard'
+import { checkCommand, auditCommand, gateCommand } from './commands/diagnostics'
 import { defineCommand, keepsProcessAlive } from './define-command'
 import { UsageError } from './run-cli'
 import { newCommand } from './new-command'
@@ -44,16 +46,7 @@ import { parseNumericArg, runAiEval } from './ai-eval'
 import { isRepoSlug } from './issue-refs'
 import { writeSpecArtifacts } from './spec-generate'
 import { buildDocsGraphReport, renderDocsGraphMarkdown } from './docs-graph'
-import { announceKeptFiles, announceWrittenFiles, type WriterOptions } from './utils'
-import { generateRouteTypes } from './routes-types'
-import { describePageManifestSuppression, generatePageTypes, type PageManifestPlan } from './pages-types'
-import { generateTranslationTypes } from './i18n-types'
-import { generateDataTypes } from './data-types'
-import { generateAttachmentTypes } from './attachments-types'
-import { generateApiClientTypes } from './api-client-types'
-import { generateAgentTypes } from './agents-types'
-import { generateOpenApiSpec } from './openapi-generate'
-import { generateChannelTypes } from './channel-types'
+import { announceKeptFiles, announceWrittenFiles } from './utils'
 import { consoleCommand } from './console'
 import { loadApplication } from './runtime'
 import { runQueueWorker, listFailedJobs, retryFailedJob, retryAllFailedJobs, flushFailedJobs } from './queue'
@@ -69,12 +62,7 @@ import { installPlugin } from './plugin'
 import { displayModels } from './model-list'
 import { displayContext } from './context'
 import { displayEntityContext } from './entity-context'
-import { CHECK_SUITES, ciSuiteConflict, runCheck, renderCheckReport } from './check'
 import { ENV_EXAMPLE_FILE, ENV_SCHEMA_FILE, loadEnvSchema, writeEnvExample } from './app-env'
-import { gatingResults } from './check-result'
-import { recheckInChild, runCheckFixes, settleFixRuns } from './check-fix'
-import { runAudit, renderAuditReport } from './audit'
-import { runGate, renderGateReport } from './gate'
 import { generateGuidelines } from './guidelines'
 import { installAgentHarness, type AgentHarnessResult } from './agent-harness'
 import { AGENT_TARGETS, parseTargetList, type AgentTarget } from './agent-targets'
@@ -204,254 +192,6 @@ const aiEvalCommand = defineCommand({
     })
     // A case that produced nothing scorable is a run the caller must see fail.
     if (result.failures.length > 0) process.exitCode = 1
-  },
-})
-
-/**
- * Says out loud that page components were found and deliberately not compiled
- * into a manifest: silently, a fullstack app misread as API-only would lose
- * `.guren/pages.gen.ts` with nothing on screen to explain it. `guren check` and
- * `guren doctor` report the same state for an unwatched run.
- */
-function reportSuppressedPageManifest(plan: PageManifestPlan): void {
-  const suppressed = describePageManifestSuppression(plan)
-  if (!suppressed) return
-
-  consola.warn(`${suppressed.message} ${suppressed.fix}`)
-}
-
-const routeTypesCommand = defineCommand({
-  meta: {
-    name: 'routes:types',
-    description: 'Generate TypeScript route declarations for client-side helpers.',
-  },
-  args: {
-    routes: {
-      type: 'string',
-      description: 'Path to the routes entry file',
-      valueHint: 'routes/web.ts',
-    },
-    out: {
-      type: 'string',
-      description: 'Declaration file to write',
-      valueHint: 'types/generated/routes.d.ts',
-    },
-    app: {
-      type: 'string',
-      description: 'Application root directory to resolve paths from',
-      valueHint: '.',
-    },
-    pages: {
-      type: 'string',
-      description: 'Frontend pages directory to scan for page contracts',
-      valueHint: 'resources/js/pages',
-    },
-    'pages-out': {
-      type: 'string',
-      description: 'Runtime page manifest module to write',
-      valueHint: '.guren/pages.gen.ts',
-    },
-    // Opt-in, unlike check's: the Vite watcher runs codegen on every edit (RFC 0026 §5).
-    introspect: {
-      type: 'boolean',
-      description: 'Take the route set from the introspected app, a provider\'s routes included (RFC 0026).',
-    },
-    force: {
-      type: 'boolean',
-      description: 'Overwrite existing files',
-      alias: 'f',
-    },
-  },
-  async run({ args }) {
-    const writerOptions = toWriterOptions(args)
-    const { outputPath: pagesOutputPath, plan: pagesPlan } = await generatePageTypes({
-      appRoot: args.app,
-      pagesDir: args.pages,
-      outputFile: args['pages-out'],
-      ...writerOptions,
-    })
-    const { outputPath, runtimeOutputPath } = await generateRouteTypes({
-      routesFile: args.routes,
-      outputFile: args.out,
-      appRoot: args.app,
-      introspect: args.introspect === true,
-      ...writerOptions,
-    })
-    if (pagesOutputPath) consola.success(`Page helpers generated at ${pagesOutputPath}`)
-    reportSuppressedPageManifest(pagesPlan)
-    consola.success(`Route types generated at ${outputPath}`)
-    consola.success(`Route helpers generated at ${runtimeOutputPath}`)
-  },
-})
-
-const codegenCommand = defineCommand({
-  meta: {
-    name: 'codegen',
-    description: 'Generate framework artifacts such as route declarations and runtime route helpers.',
-  },
-  args: routeTypesCommand.args,
-  async run({ args }) {
-    // codegen's outputs are entirely generated artifacts, safe to overwrite by
-    // default — including custom --out/--pages-out destinations. --force is
-    // accepted for backward compatibility but is a no-op.
-    const writerOptions: WriterOptions = { ...toWriterOptions(args), force: true }
-    // These three read disjoint inputs (pages, lang/, app/Models) and write
-    // disjoint artifacts, so they run concurrently.
-    const [
-      { outputPath: pagesOutputPath, plan: pagesPlan },
-      { outputPath: translationsOutputPath, keyCount },
-      { outputPath: attachmentsOutputPath, models: attachableModels, warnings: attachmentWarnings },
-    ] = await Promise.all([
-      generatePageTypes({
-        appRoot: args.app,
-        pagesDir: args.pages,
-        outputFile: args['pages-out'],
-        extractProps: true,
-        ...writerOptions,
-      }),
-      generateTranslationTypes({ appRoot: args.app, ...writerOptions }),
-      generateAttachmentTypes({ appRoot: args.app, ...writerOptions }),
-    ])
-    if (pagesOutputPath) consola.success(`Page helpers generated at ${pagesOutputPath}`)
-    reportSuppressedPageManifest(pagesPlan)
-    if (translationsOutputPath) {
-      consola.success(`Translation keys generated at ${translationsOutputPath} (${keyCount} keys)`)
-    }
-    for (const warning of attachmentWarnings) {
-      consola.warn(warning)
-    }
-    if (attachmentsOutputPath) {
-      consola.success(
-        `Attachment types generated at ${attachmentsOutputPath} (${attachableModels.length} ${attachableModels.length === 1 ? 'model' : 'models'})`,
-      )
-    }
-
-    // Route/API artifacts default to routes/web.ts; skip only when no routes file exists.
-    const { existsSync } = await import('node:fs')
-    const { resolve: resolvePath } = await import('node:path')
-    const routesFile = args.routes ?? 'routes/web.ts'
-    const appRoot = args.app ?? process.cwd()
-    if (!existsSync(resolvePath(appRoot, routesFile))) {
-      consola.warn(`Routes file ${routesFile} not found — skipped route, data, channel, and API client generation.`)
-      return
-    }
-
-    const { outputPath, runtimeOutputPath, definitions } = await generateRouteTypes({
-      routesFile,
-      outputFile: args.out,
-      appRoot: args.app,
-      introspect: args.introspect === true,
-      ...writerOptions,
-    })
-    const {
-      outputPath: dataOutputPath,
-      definitions: resourceDefinitions,
-      warnings: dataWarnings,
-    } = await generateDataTypes({
-      appRoot: args.app,
-      ...writerOptions,
-    })
-    for (const warning of dataWarnings) {
-      consola.warn(warning)
-    }
-    const { outputPath: channelOutputPath } = await generateChannelTypes({
-      appRoot: args.app,
-      ...writerOptions,
-    })
-    // Agent tools sit between data and the API client: they consume the Resource
-    // definitions the data generator produced, and the `Data` import they emit
-    // resolves against the sibling data.gen.ts.
-    const {
-      outputPath: agentsOutputPath,
-      tools: agentTools,
-      warnings: agentWarnings,
-    } = await generateAgentTypes(definitions, {
-      appRoot: args.app,
-      resources: resourceDefinitions,
-      ...writerOptions,
-    })
-    for (const warning of agentWarnings) {
-      consola.warn(warning)
-    }
-    const { outputPath: apiClientOutputPath, warnings: apiClientWarnings } = await generateApiClientTypes(
-      definitions,
-      { appRoot: args.app, resources: resourceDefinitions, ...writerOptions },
-    )
-    for (const warning of apiClientWarnings) {
-      consola.warn(warning)
-    }
-    consola.success(`Route types generated at ${outputPath}`)
-    consola.success(`Route helpers generated at ${runtimeOutputPath}`)
-    consola.success(`Data types generated at ${dataOutputPath}`)
-    consola.success(`Channel types generated at ${channelOutputPath}`)
-    if (agentsOutputPath) {
-      consola.success(
-        `Agent tools generated at ${agentsOutputPath} (${agentTools.length} ${agentTools.length === 1 ? 'tool' : 'tools'})`,
-      )
-    }
-    consola.success(`API client generated at ${apiClientOutputPath}`)
-  },
-})
-
-const openApiGenerateCommand = defineCommand({
-  meta: {
-    name: 'openapi:generate',
-    description: 'Generate an OpenAPI 3.1 document using the optional @guren/openapi plugin.',
-  },
-  args: {
-    routes: {
-      type: 'string',
-      description: 'Path to the route registration file',
-      default: 'routes/web.ts',
-    },
-    app: {
-      type: 'string',
-      description: 'Application root directory',
-      default: process.cwd(),
-    },
-    out: {
-      type: 'string',
-      description: 'Path to the generated OpenAPI document',
-      default: '.guren/openapi.gen.json',
-    },
-    title: {
-      type: 'string',
-      description: 'OpenAPI document title. Defaults to package.json name or "Guren API".',
-    },
-    version: {
-      type: 'string',
-      description: 'OpenAPI document version. Defaults to package.json version or 1.0.0.',
-    },
-    description: {
-      type: 'string',
-      description: 'OpenAPI document description. Defaults to package.json description.',
-    },
-    server: {
-      type: 'string',
-      description: 'Server URL to include in the generated OpenAPI document.',
-    },
-    force: {
-      type: 'boolean',
-      description: 'Overwrite existing files',
-      alias: 'f',
-    },
-  },
-  async run({ args }) {
-    const { outputPath, warnings } = await generateOpenApiSpec({
-      routesFile: args.routes,
-      appRoot: args.app,
-      outputFile: args.out,
-      title: args.title,
-      version: args.version,
-      description: args.description,
-      server: args.server,
-      force: Boolean(args.force),
-    })
-
-    consola.success(`OpenAPI document generated at ${outputPath}`)
-    for (const warning of warnings) {
-      consola.warn(warning)
-    }
   },
 })
 
@@ -1163,7 +903,7 @@ const contextCommand = defineCommand({
       valueHint: 'owner/name',
       description: 'Repository bare issue numbers belong to, instead of the origin remote (entity mode only).',
     },
-    // Same shape as check's `introspect` flag below.
+    // Same shape as check's `introspect` flag in commands/diagnostics.ts.
     introspect: {
       type: 'boolean',
       default: true,
@@ -1198,232 +938,6 @@ const contextCommand = defineCommand({
       routesFile,
       introspect: args.introspect !== false,
     })
-  },
-})
-
-const checkCommand = defineCommand({
-  meta: {
-    name: 'check',
-    description: 'Validate integrity across routes, controllers, pages, and models.',
-  },
-  args: {
-    json: {
-      type: 'boolean',
-      description: 'Output as JSON.',
-    },
-    routes: {
-      type: 'string',
-      description: 'Path to routes entry file.',
-    },
-    app: {
-      type: 'string',
-      description: 'Application root directory.',
-    },
-    arch: {
-      type: 'boolean',
-      description: 'Run only architecture boundary checks (guren.arch.ts). Fast path for edit hooks.',
-    },
-    docs: {
-      type: 'boolean',
-      description: 'Run only doc-link checks (docs/ frontmatter + @docs tags).',
-    },
-    spec: {
-      type: 'boolean',
-      description: 'Run only spec drift checks (docs/spec/ vs regenerated views).',
-    },
-    i18n: {
-      type: 'boolean',
-      description: 'Run only translation catalog checks (lang/<locale> key and placeholder parity).',
-    },
-    prototype: {
-      type: 'boolean',
-      description: 'Run only prototype wiring checks (RFC 0021): fixture entries against the route graph.',
-    },
-    env: {
-      type: 'boolean',
-      description: 'Run only the check that .env.example lists the keys config/env.ts declares (RFC 0027).',
-    },
-    plan: {
-      type: 'boolean',
-      description: 'Run the implementation-plan checks (RFC 0030), which no other run includes: approved plans with drifted elements, and open plans changing the same element. Imports db/schema.ts and the validator files. Advisory: never sets the exit code.',
-    },
-    changed: {
-      type: 'boolean',
-      description: 'Restrict file-scanning checks to files changed vs. the merge base with main.',
-    },
-    // Positive on purpose, so citty's negation lands on this key; `default: true` prints `--no-introspect`.
-    introspect: {
-      type: 'boolean',
-      default: true,
-      description: 'Judge from source only, without introspecting the app (RFC 0026).',
-    },
-    ci: {
-      type: 'boolean',
-      description: 'Exit non-zero when any check fails or warns (runs the full suite; for CI gates).',
-    },
-    fix: {
-      type: 'boolean',
-      description: 'Run the guren command each finding names as its fix (codegen, spec:generate: generated files only), then check again.',
-    },
-  },
-  async run({ args }) {
-    // --ci promises a full-suite gate; letting a suite flag narrow the run
-    // underneath it would report success while docs/spec/core went unchecked.
-    const suiteFlags = CHECK_SUITES.filter((suite) => args[suite])
-    if (args.ci && suiteFlags.length > 0) {
-      consola.error(ciSuiteConflict(suiteFlags))
-      process.exitCode = 1
-      return
-    }
-    if (args.ci && args.fix) {
-      consola.error('--fix regenerates the files a --ci gate exists to catch drifting. Run guren check --fix locally and commit what it writes.')
-      process.exitCode = 1
-      return
-    }
-
-    const options = {
-      cwd: args.app,
-      json: Boolean(args.json),
-      routesFile: args.routes,
-      arch: Boolean(args.arch),
-      introspect: args.introspect !== false,
-      docs: Boolean(args.docs),
-      spec: Boolean(args.spec),
-      i18n: Boolean(args.i18n),
-      prototype: Boolean(args.prototype),
-      env: Boolean(args.env),
-      plan: Boolean(args.plan),
-      changed: Boolean(args.changed),
-    }
-    let report = await runCheck(options)
-    if (args.fix) {
-      let fixes = await runCheckFixes(report)
-      if (fixes.length > 0) {
-        report = (await recheckInChild(options, report.cwd)) ?? (await runCheck(options))
-        fixes = settleFixRuns(fixes, report)
-      }
-      report.fixes = fixes
-      if (fixes.some((run) => !run.ok)) process.exitCode = 1
-    }
-
-    if (args.json) {
-      console.log(JSON.stringify(report, null, 2))
-    } else {
-      renderCheckReport(report)
-    }
-
-    // Only the suite flags and the opt-in `--ci` gate on exit code. Plain
-    // `guren check` has never set one, and changing that on a v1.0-stable
-    // command is a breaking change reserved for a major release.
-    if (suiteFlags.length > 0 && report.failCount > 0) {
-      process.exitCode = 1
-    }
-    if (args.ci && gatingResults(report).length > 0) {
-      process.exitCode = 1
-    }
-  },
-})
-
-const gateCommand = defineCommand({
-  meta: {
-    name: 'gate',
-    description:
-      'Run every verification stage the CI runs (codegen, typecheck, lint, check, audit, test) and exit non-zero if any fails.',
-  },
-  args: {
-    json: {
-      type: 'boolean',
-      description: 'Output as JSON.',
-    },
-    changed: {
-      type: 'boolean',
-      description: 'Narrow check and lint to files changed vs. the merge base with main (typecheck, audit, and test still run in full).',
-    },
-    deps: {
-      type: 'boolean',
-      description: 'Scan dependencies in the audit stage via bun audit (requires registry access).',
-    },
-    routes: {
-      type: 'string',
-      description: 'Path to routes entry file.',
-    },
-    app: {
-      type: 'string',
-      description: 'Application root directory.',
-    },
-  },
-  async run({ args }) {
-    const report = await runGate({
-      cwd: args.app,
-      changed: args.changed,
-      deps: args.deps,
-      routesFile: args.routes,
-    })
-
-    if (args.json) {
-      console.log(JSON.stringify(report, null, 2))
-    } else {
-      renderGateReport(report)
-    }
-
-    if (!report.ok) {
-      process.exitCode = 1
-    }
-  },
-})
-
-const auditCommand = defineCommand({
-  meta: {
-    name: 'audit',
-    description: 'Run a security audit: validation, authentication, raw SQL, secrets, mass assignment, dependency vulnerabilities.',
-  },
-  args: {
-    json: {
-      type: 'boolean',
-      description: 'Output as JSON.',
-    },
-    routes: {
-      type: 'string',
-      description: 'Path to routes entry file.',
-    },
-    app: {
-      type: 'string',
-      description: 'Application root directory.',
-    },
-    'audit-config': {
-      type: 'string',
-      description: 'Path to the ignore config (defaults to config/audit.{ts,js,mjs}).',
-    },
-    deps: {
-      type: 'boolean',
-      default: true,
-      description: 'Scan dependencies via bun audit (requires registry access). Disable with --no-deps.',
-    },
-    // Same shape as check's `introspect` flag above.
-    introspect: {
-      type: 'boolean',
-      default: true,
-      description: 'Judge routes from the routes file only, without introspecting the app (RFC 0026).',
-    },
-  },
-  async run({ args }) {
-    const report = await runAudit({
-      cwd: args.app,
-      routesFile: args.routes,
-      auditConfigFile: args['audit-config'],
-      deps: args.deps,
-      introspect: args.introspect !== false,
-    })
-
-    if (args.json) {
-      console.log(JSON.stringify(report, null, 2))
-    } else {
-      renderAuditReport(report)
-    }
-
-    if (report.failCount > 0) {
-      process.exitCode = 1
-    }
   },
 })
 
@@ -1497,6 +1011,18 @@ function reportAgentHarnessResult(result: AgentHarnessResult): void {
   for (const hint of result.mergeHints) {
     consola.info(
       `${hint.path} already exists, so it was left alone. Add ${hint.what} to it yourself:\n${hint.snippet}`,
+    )
+  }
+  for (const path of new Set(result.legacyHookCommands.map((entry) => entry.path))) {
+    // Every sync, unlike the init-only merge hints: these hooks fail, they are not merely absent.
+    // JSON-quoted, so each side pastes into the file as a whole, escaped value.
+    const edits = result.legacyHookCommands
+      .filter((entry) => entry.path === path)
+      .map((entry) => `  ${JSON.stringify(entry.from)}\n  -> ${JSON.stringify(entry.to)}`)
+    consola.warn(
+      `${path} runs Guren hooks from the session cwd, ` +
+        'which breaks once the agent changes into a subdirectory. The file is yours, so it was left alone; ' +
+        `replace each "command" value:\n${edits.join('\n')}`,
     )
   }
   if (result.mcpEndpointNotEnabled) {

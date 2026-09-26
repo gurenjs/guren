@@ -7,7 +7,7 @@
  */
 
 import type { Dirent } from 'node:fs'
-import { readdir, readFile } from 'node:fs/promises'
+import { readdir } from 'node:fs/promises'
 import { join, posix, sep } from 'node:path'
 
 import type { CheckResult } from './check-result'
@@ -15,7 +15,7 @@ import { toPosixRelative } from './discovery'
 import type { PlanAppState } from './plan/app-state'
 import type { PlanAppTarget } from './plan/app-targets'
 import { isPlanRevisionsDirName, type planSiblingPath } from './plan/beside'
-import type { Plan } from './plan/schema'
+import type { OpenPlan } from './plan/open-plan'
 
 /** Where plans are found: `docs/plans/**` (the §9 layout and `<slug>.plan.json`) and the app root's own `*.plan.json`. */
 export const PLAN_DIR = 'docs/plans'
@@ -72,23 +72,17 @@ export async function discoverPlanFiles(appRoot: string): Promise<PlanDiscovery>
 }
 
 async function loadModules() {
-  const [render, approvals, state, closeDocs, targets, status, appState, allowlist] = await Promise.all([
-    import('./plan-render'),
-    import('./plan/approvals'),
+  const [openPlan, state, targets, status, appState, allowlist] = await Promise.all([
+    import('./plan/open-plan'),
     import('./plan/state'),
-    import('./plan/close-docs'),
     import('./plan/app-targets'),
     import('./plan-status'),
     import('./plan/app-state'),
     import('./plan/command-allowlist'),
   ])
   return {
-    readPlanFile: render.readPlanFile,
-    readPlanApprovalStanding: approvals.readPlanApprovalStanding,
-    describeUnapproved: approvals.describeUnapproved,
+    readOpenPlan: openPlan.readOpenPlan,
     planSlug: state.planSlug,
-    planDocPath: closeDocs.planDocPath,
-    planDocClosedHash: closeDocs.planDocClosedHash,
     listPlanAppTargets: targets.listPlanAppTargets,
     planStatusFile: status.planStatusFile,
     loadPlanAppState: appState.loadPlanAppState,
@@ -97,45 +91,6 @@ async function loadModules() {
 }
 
 type Modules = Awaited<ReturnType<typeof loadModules>>
-
-interface OpenPlan {
-  path: string
-  file: string
-  plan: Plan
-}
-
-/**
- * Skipped: a draft nobody approved, a plan changed since its approval, or one `plan:close` closed
- * at its current hash. A draft with approvals beside it lost its baseline, which is reported.
- */
-type Classified = { kind: 'open'; plan: OpenPlan } | { kind: 'skipped' } | { kind: 'unreadable' | 'baseline-removed'; reason: string }
-
-async function classify(m: Modules, appRoot: string, path: string, file: string): Promise<Classified> {
-  let plan: Awaited<ReturnType<Modules['readPlanFile']>>['plan']
-  try {
-    plan = (await m.readPlanFile(path, appRoot)).plan
-  } catch (error) {
-    return { kind: 'unreadable', reason: (error as Error).message }
-  }
-  // The approval rule every gated plan command reads (RFC 0030 §4), so the two cannot disagree.
-  const standing = await m.readPlanApprovalStanding(path, plan)
-  if (standing === undefined || standing.state === 'unapproved') return { kind: 'skipped' }
-  if (standing.state === 'unreadable') return { kind: 'unreadable', reason: standing.reason }
-  if (standing.state === 'baseline-removed') return { kind: 'baseline-removed', reason: m.describeUnapproved(file, standing, 'it is not checked') }
-  const hash = standing.hash
-
-  const doc = join(appRoot, m.planDocPath(m.planSlug(path)))
-  let source: string | undefined
-  try {
-    source = await readFile(doc, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return { kind: 'unreadable', reason: `${doc} could not be read: ${(error as Error).message}` }
-  }
-  // A revision approved after the close carries another hash, and is open work again.
-  if (source !== undefined && m.planDocClosedHash(source) === hash) return { kind: 'skipped' }
-  // Only a plan with a baseline has the hash an `approved` standing names.
-  return { kind: 'open', plan: { path, file, plan: plan as Plan } }
-}
 
 type ClaimKind = PlanAppTarget['kind'] | 'parent'
 
@@ -264,7 +219,7 @@ export async function checkPlans(options: PlanCheckOptions): Promise<CheckResult
     const file = toPosixRelative(appRoot, path)
     const slug = m.planSlug(path)
     slugs.set(slug, [...(slugs.get(slug) ?? []), file])
-    const classified = await classify(m, appRoot, path, file)
+    const classified = await m.readOpenPlan(appRoot, path)
     if (classified.kind === 'open') open.push(classified.plan)
     else if (classified.kind === 'unreadable') results.push(unreadable(file, `${file} was not checked: ${classified.reason}`, 'Fix the file so guren plan:status can read it.'))
     else if (classified.kind === 'baseline-removed') {

@@ -46,6 +46,27 @@ const MCP_ENDPOINT_MARKER = '_guren/mcp'
 const STOP_HOOK_MARKER = 'hooks/gate-on-stop.ts'
 
 /**
+ * Hook commands earlier harness versions wrote into the user-owned `.claude/settings.json`,
+ * each with the command the template carries now. Claude Code runs a hook in the session cwd,
+ * which follows the agent's `cd`, so a relative script path stops resolving there. Matched
+ * against whole command values only, so a command the user wrote is never flagged.
+ */
+export const LEGACY_CLAUDE_HOOK_COMMANDS: ReadonlyArray<{ from: string; to: string }> = [
+  {
+    from: 'bunx guren context 2>/dev/null || true',
+    to: 'cd "${CLAUDE_PROJECT_DIR}" && bunx guren context 2>/dev/null || true',
+  },
+  {
+    from: 'bun .claude/hooks/check-after-edit.ts',
+    to: 'bun "${CLAUDE_PROJECT_DIR}/.claude/hooks/check-after-edit.ts"',
+  },
+  {
+    from: 'bun .claude/hooks/gate-on-stop.ts',
+    to: 'bun "${CLAUDE_PROJECT_DIR}/.claude/hooks/gate-on-stop.ts"',
+  },
+]
+
+/**
  * A claim over files the planner owns outright: a match the current plan does not write is
  * a leftover that `agent:sync` reports and `--prune` deletes. `files` claims named top-level
  * files, `pattern` framework-named files in a shared directory, `children` named subdirectories
@@ -250,6 +271,8 @@ export interface PlannedFile {
     marker: string
     /** What the snippet adds, for the merge-by-hand message. */
     hint: string
+    /** Hook commands an earlier template wrote here, reported with their replacement while the file keeps them. */
+    supersedes?: ReadonlyArray<{ from: string; to: string }>
   }
 }
 
@@ -430,13 +453,19 @@ export function planComponents(
     )
 
   /** A user-owned config the harness only seeds: merge-hinted when it already exists without `marker`. */
-  const addUserConfig = (path: string, templatePath: string, marker: string, hint: string): void => {
+  const addUserConfig = (
+    path: string,
+    templatePath: string,
+    marker: string,
+    hint: string,
+    supersedes?: ReadonlyArray<{ from: string; to: string }>,
+  ): void => {
     const content = get(templatePath)
     // A seed without its own marker would turn every merge hint for it into a no-op.
     if (!content.includes(marker)) {
       throw new Error(`Agent harness template ${templatePath} does not contain its merge marker "${marker}"`)
     }
-    add({ path, content, managed: false, merge: { marker, hint } })
+    add({ path, content, managed: false, merge: { marker, hint, supersedes } })
   }
   const addMcpConfig = (path: string, templatePath: string): void =>
     addUserConfig(path, templatePath, MCP_ENDPOINT_MARKER, 'the Guren MCP server')
@@ -485,6 +514,7 @@ export function planComponents(
       'targets/claude/settings.json',
       STOP_HOOK_MARKER,
       'the Guren hooks (the edit check and the `guren gate` stop hook)',
+      LEGACY_CLAUDE_HOOK_COMMANDS,
     )
     addTree('targets/claude/agents/', '.claude/agents')
     addTree('targets/claude/hooks/', '.claude/hooks')

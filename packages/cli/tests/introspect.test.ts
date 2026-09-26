@@ -4,7 +4,8 @@ import { readFile, rm } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import type { AppManifest } from '@guren/core'
 
-import { CHECK_INTROSPECT_TIMEOUT_MS, introspectApp, introspectRunner, withCapNote, type Introspection, type IntrospectionFailure } from '../src/introspect'
+import { CHECK_INTROSPECT_TIMEOUT_MS, INTROSPECT_CHILD_BUDGET_MARGIN_MS, introspectApp, introspectRunner, withCapNote, type Introspection, type IntrospectionFailure } from '../src/introspect'
+import { bunExecutable, runCaptured } from '../src/subprocess'
 import {
   assertWorkspaceBuilt,
   CLI_BIN_PATH,
@@ -543,6 +544,73 @@ describe('what a register() spawned', () => {
     await cli.exited
 
     await waitFor(() => !isAlive(pid))
+  }, 30_000)
+})
+
+/** An entry that records the child's pid and then computes forever, starving the child's event loop. */
+const SPINNING_ENTRY = {
+  ...fakeCore('export class Application { async introspect() {} }\n'),
+  'src/main.ts': "import { writeFileSync } from 'node:fs'\nwriteFileSync('child.pid', String(process.pid))\nwhile (true) {}\nexport default {}\n",
+}
+
+describe('a child whose app never yields', () => {
+  test('exits on its own once the CLI dies by SIGKILL', async () => {
+    const dir = join(root, 'orphan-spin')
+    await writeWorkspaceFiles(dir, SPINNING_ENTRY)
+    const cli = Bun.spawn(['bun', CLI_BIN_PATH, 'introspect', '--timeout', '60'], { cwd: dir, stdout: 'ignore', stderr: 'ignore' })
+    const pidFile = join(dir, 'child.pid')
+    await waitFor(() => existsSync(pidFile))
+    const pid = Number(await readFile(pidFile, 'utf8'))
+
+    cli.kill('SIGKILL')
+    await cli.exited
+
+    try {
+      await waitFor(() => !isAlive(pid), 5000)
+    } finally {
+      if (isAlive(pid)) process.kill(pid, 'SIGKILL')
+    }
+  }, 30_000)
+
+  test('ends itself past its budget while the CLI still holds it, reporting nothing', async () => {
+    const dir = join(root, 'budget-spin')
+    await writeWorkspaceFiles(dir, SPINNING_ENTRY)
+    const resultFile = join(dir, 'result.json')
+    const started = Date.now()
+
+    const run = await runCaptured(
+      [bunExecutable(), join(repoRoot, 'packages/cli/src/introspect-child.ts'), resultFile, '1500'],
+      dir,
+      { timeoutMs: 20_000, env: { GUREN_INTROSPECT: '1' }, processGroup: true },
+    )
+
+    expect(run.timedOut).toBeUndefined()
+    expect(run.exitCode).not.toBe(0)
+    expect(Date.now() - started).toBeLessThan(10_000)
+    expect(existsSync(resultFile)).toBe(false)
+  }, 30_000)
+
+  // Guards the margin's sign: a budget ending before the cap would pre-empt the parent's report.
+  test('still reports the timeout itself, its budget running past the cap', async () => {
+    const dir = join(root, 'timeout-spin')
+    await writeWorkspaceFiles(dir, SPINNING_ENTRY)
+
+    expect(expectFailure(await introspectApp(dir, { timeoutMs: 4000 }), 'timeout')).toContain('4000ms')
+    const pid = Number(await readFile(join(dir, 'child.pid'), 'utf8'))
+    await waitFor(() => !isAlive(pid), 5000)
+  }, 30_000)
+
+  test('reports timeout, not crashed, when the budget ends it while the CLI loop is blocked past the cap', async () => {
+    const dir = join(root, 'blocked-parent-spin')
+    await writeWorkspaceFiles(dir, SPINNING_ENTRY)
+    const pidFile = join(dir, 'child.pid')
+
+    const pending = introspectApp(dir, { timeoutMs: 3000, fresh: true })
+    await waitFor(() => existsSync(pidFile))
+    // Past the cap and the child's budget (cap + margin), as a synchronous scan in `guren check` can be.
+    Bun.sleepSync(3000 + INTROSPECT_CHILD_BUDGET_MARGIN_MS + 2000)
+
+    expect(expectFailure(await pending, 'timeout')).toContain('3000ms')
   }, 30_000)
 })
 
