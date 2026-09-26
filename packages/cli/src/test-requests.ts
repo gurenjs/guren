@@ -210,7 +210,9 @@ function collectReceivers(ast: File, local: ReadonlySet<string>): Receivers {
     if (isTestApp(value, receivers)) return addTo(receivers.names, name)
     if (isAgent(value, receivers)) return addTo(receivers.agents, name)
     const reason = foreignReason(value, receivers)
-    if (reason === undefined || receivers.foreign.get(name) === reason) return false
+    const current = receivers.foreign.get(name)
+    // Names match across scopes, so two bindings of one name must only escalate, never trade places, or the loop never settles.
+    if (reason === undefined || current === reason || current === 'unknownReceiver') return false
     receivers.foreign.set(name, reason)
     return true
   }
@@ -580,6 +582,7 @@ export interface RoutePathMatchOptions {
   /**
    * Read a runtime segment at a constrained parameter as filling it, one segment. For a caller
    * asking whether a request names the route, not whether its value passes: an unmatched value 404s.
+   * Where one segment does not fit, the answer stays `unknown`, never `none`.
    */
   runtimeFillsConstraints?: boolean
 }
@@ -600,7 +603,11 @@ function matchFrom(patterns: readonly PatternSegment[], pi: number, segments: re
   if ('runtime' in segment) {
     if (!pattern.param) return 'none'
     // A runtime value may fail the constraint, or span `/` and take the segments after it.
-    return constraint === undefined || options.runtimeFillsConstraints ? matchFrom(patterns, pi + 1, segments, si + 1, options) : 'unknown'
+    if (constraint === undefined) return matchFrom(patterns, pi + 1, segments, si + 1, options)
+    if (!options.runtimeFillsConstraints) return 'unknown'
+    // Filling one segment is the reading asked for; a constraint spanning `/` may take more, which stays unknown.
+    const filled = matchFrom(patterns, pi + 1, segments, si + 1, options)
+    return filled === 'none' ? 'unknown' : filled
   }
   let result: Match = 'none'
   const settles = (match: Match): boolean => {

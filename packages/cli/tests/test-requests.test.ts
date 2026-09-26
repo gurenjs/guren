@@ -216,6 +216,40 @@ await (await typed()).get('/posts')
     expect(result.unresolved.map((request) => `${request.line} ${request.reason} ${request.method}`)).toEqual(['11 localReceiver POST'])
   })
 
+  // The receiver loop is synchronous, so a test timeout cannot stop it: the scan runs in a child killed after 10 s.
+  test('should settle when one name is bound to an imported helper and an unannotated local one, reporting the imported reason', async () => {
+    counter += 1
+    const dir = join(ROOT, `app-${counter}`)
+    await writeWorkspaceFiles(dir, {
+      'tests/a.test.ts': `${IMPORT}import { makeClient } from './helpers'
+async function signedIn() {
+  return TestApp.fromApp(app)
+}
+describe('one', () => {
+  test('a', async () => {
+    const http = await makeClient()
+    await http.get('/posts')
+  })
+})
+describe('two', () => {
+  test('b', async () => {
+    const http = await signedIn()
+    await http.get('/posts')
+  })
+})
+`,
+      'scan.ts': `import { ParseCache } from ${JSON.stringify(fileURLToPath(new URL('../src/parse-cache.ts', import.meta.url)))}
+import { scanTestRequests } from ${JSON.stringify(fileURLToPath(new URL('../src/test-requests.ts', import.meta.url)))}
+const scan = await scanTestRequests(${JSON.stringify(dir)}, [${JSON.stringify(join(dir, 'tests/a.test.ts'))}], new ParseCache())
+console.log(JSON.stringify(scan.unresolved.map((request) => request.line + ' ' + request.reason)))
+`,
+    })
+    const run = Bun.spawnSync([process.execPath, join(dir, 'scan.ts')], { cwd: dir, stdout: 'pipe', stderr: 'pipe', timeout: 10_000 })
+
+    expect(run.exitCode).toBe(0)
+    expect(JSON.parse(run.stdout.toString())).toEqual(['10 unknownReceiver', '16 unknownReceiver'])
+  }, 20_000)
+
   test('should map agent().call() to the route publishing the tool', async () => {
     const result = await scanOne(`${IMPORT}
 const http = await TestApp.fromApp(app)
@@ -273,6 +307,7 @@ describe('routePathMatches', () => {
     expect(routePathMatches('/posts/:id{[0-9]+}', runtime)).toBe('unknown')
     expect(routePathMatches('/posts/:id{[0-9]+}', runtime, fills)).toBe('match')
     expect(routePathMatches('/posts/:id{[0-9]+}', [{ literal: 'posts' }, { literal: 'abc' }], fills)).toBe('none')
+    expect(routePathMatches('/files/:path{.+}', [{ literal: 'files' }, { runtime: true }, { runtime: true }], fills)).toBe('unknown')
   })
 
   test('should answer unknown, never none, where a runtime segment meets a constraint or its span', () => {

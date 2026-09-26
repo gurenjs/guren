@@ -122,7 +122,8 @@ export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Prom
     input.cache,
   )
 
-  const requests = await scanTestRequests(root, testFiles, input.cache)
+  // Directory listing order differs between file systems; sorted, Impact lists requests the same on each.
+  const requests = await scanTestRequests(root, [...testFiles].sort(), input.cache)
   const routes = impactRoutes(input, requests)
 
   return {

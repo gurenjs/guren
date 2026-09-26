@@ -1536,7 +1536,10 @@ agent wrote, and the tamper it detects is the same.
   only (`routePathMatches()`'s `runtimeFillsConstraints`; Impact still reads
   it as uncertain). A skeleton cannot spell a literal for an arbitrary
   constraint, and whether the value passes it is the run's to find, as a 404.
-  A literal segment the constraint rejects stays a miss.
+  A literal segment the constraint rejects stays a miss. Where one runtime
+  segment does not fit (a constraint spanning `/`, `:path{.+}`, with more
+  segments after it), the comparison stays uncertain, so it reads as
+  unreadable, never as a miss.
 - Three verdicts per behaviour. Reached. Unreadable when nothing reached it and
   a carrying case holds an unresolved request `mayReach()` allows (including
   one on what a same-file function returns when nothing annotates it
