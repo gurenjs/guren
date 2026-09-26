@@ -687,7 +687,7 @@ export const makeFeatureCommand = defineCommand({
     force: FORCE_ARG,
     test: {
       type: 'boolean',
-      description: 'Also generate a test file.',
+      description: 'Also generate a controller test in tests/controllers/ (as make:test --controller).',
     },
     factory: {
       type: 'boolean',
