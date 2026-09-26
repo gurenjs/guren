@@ -496,7 +496,8 @@ export async function runToolCall(options: ToolCallOptions): Promise<void> {
     printReport(result)
   }
 
-  // Dispatch can succeed while the tool returns an error such as HTTP 422.
+  // Dispatch can succeed while the tool returns an error such as HTTP 422; marked rather
+  // than thrown, so the body above still prints.
   if (result.outcome.isError) {
     markCommandFailed()
   }

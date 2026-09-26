@@ -4,7 +4,7 @@ const commandStatus = new AsyncLocalStorage<{ failed: boolean }>()
 
 /**
  * Records a diagnostic failure without interrupting report generation.
- * Direct callers outside runCli retain the helpers' process exit-code behavior.
+ * Outside runCli it falls back to setting `process.exitCode`.
  */
 export function markCommandFailed(): void {
   const status = commandStatus.getStore()
