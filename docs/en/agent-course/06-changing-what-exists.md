@@ -343,7 +343,7 @@ An `alter` says what changes in properties Guren can read back from the code: `M
 
 Every `alter` card has an **Impact** list: the code the scanners found depending on that element.
 
-![The MeetupResource card on the review page, marked alter. Its Impact list names the index, show and edit actions of MeetupController, their routes and ApiRoutes entries, the test requests reaching them, and the meetups/Edit, Index and Show pages. Below it, the planned fields end with seatsLeft: number](../../images/agent-course-impact.png)
+![The MeetupResource card on the review page, marked alter. Its Impact list names the index, show and edit actions of MeetupController, their routes and ApiRoutes entries, the test requests reaching index and edit, and the meetups/Edit, Index and Show pages. Below it, the planned fields end with seatsLeft: number](../../images/agent-course-impact.png)
 
 Read it as a question: **does the plan account for each of these?** Here, `MeetupResource` gains `seatsLeft`, and the resource is used by `index`, `show` and `edit`. Each of them has to give the resource a registration count, or `seatsLeft` breaks on the list and edit pages. The plan changes only `show`; the other two are the agent's to notice in the http step, and yours to check in its commit.
 

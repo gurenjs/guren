@@ -343,7 +343,7 @@ bunx guren plan:render docs/plans/registrations/plan.json
 
 `alter` のカードにはどれも **Impact** の一覧があります。その要素に依存しているとスキャナが見つけたコードです。
 
-![レビューページの MeetupResource のカード。alter の印があります。Impact の一覧には MeetupController の index、show、edit のアクション、それぞれのルートと ApiRoutes のエントリ、そこに届くテストのリクエスト、meetups/Edit、Index、Show のページが並びます。その下の計画されたフィールドは seatsLeft: number で終わります](../../images/agent-course-impact.png)
+![レビューページの MeetupResource のカード。alter の印があります。Impact の一覧には MeetupController の index、show、edit のアクション、それぞれのルートと ApiRoutes のエントリ、index と edit に届くテストのリクエスト、meetups/Edit、Index、Show のページが並びます。その下の計画されたフィールドは seatsLeft: number で終わります](../../images/agent-course-impact.png)
 
 これは問いとして読みます。**計画はこの 1 つずつに対応しているか。** ここでは `MeetupResource` に `seatsLeft` が増え、その Resource を `index`、`show`、`edit` が使います。3 つとも Resource に登録数を渡さないと、一覧ページと編集ページで `seatsLeft` が壊れます。計画が変えるのは `show` だけです。残りの 2 つは、http ステップでエージェントが気づくべきもので、そのコミットで自分が確かめるものです。
 
