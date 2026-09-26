@@ -5,7 +5,7 @@
  * the server exposes a single whole-bundle route with no path parameters and
  * therefore no traversal surface.
  */
-import { readFile } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { parseDocFrontmatter } from './docs-frontmatter'
@@ -15,7 +15,13 @@ import { describeIssue, type IssueLink } from './issue-refs'
 import { resolveOriginRepo } from './github'
 import { resolveDocLink } from './docs-check'
 import { loadDocsGraph, type DocsGraphEdge, type DocsGraphNode } from './docs-graph'
-import { renderDocHtml } from './docs-render'
+import { escapeHtml, renderDocHtml } from './docs-render'
+import type { AcceptanceTestRef } from './docs-acceptance'
+import { planDocClosedHash, planDocPath, readPlanBlocks } from './plan/close-docs'
+import { discoverPlanFiles } from './plan-check'
+import { planOutputPath } from './plan/beside'
+import { planSlug } from './plan/state'
+import { toPosixRelative } from './discovery'
 
 export type DocTrustTier = 'unverified' | 'machine-confirmed' | 'human-reviewed'
 
@@ -50,7 +56,12 @@ export interface DocsViewerDoc {
   trustTier: DocTrustTier
   /** Outlinks for `issues:` (RFC 0018). */
   issues: IssueLink[]
-  /** Rendered body; the leading H1 is dropped (the panel header carries the title). */
+  /** The plan hash a doc `plan:close` wrote says it closed at (RFC 0030 §7). */
+  closedPlanHash?: string
+  /**
+   * Rendered body; the leading H1 is dropped (the panel header carries the title), and each
+   * block `plan:close` fenced is a `<section class="plan-block">` naming its plan.
+   */
   html: string
 }
 
@@ -58,6 +69,43 @@ export interface DocsViewerData {
   nodes: DocsGraphNode[]
   edges: DocsGraphEdge[]
   docs: DocsViewerDoc[]
+  /** The test files carrying each acceptance id, for the `test` nodes' panel. */
+  tests: AcceptanceTestRef[]
+  /** Plans whose page `plan:render` wrote beside them, served at `plans/<slug>`. */
+  planPages: DocsViewerPlanPage[]
+}
+
+export interface DocsViewerPlanPage {
+  slug: string
+  /** App-relative POSIX paths of the plan file and its rendered page. */
+  plan: string
+  page: string
+}
+
+/**
+ * Each discovered plan whose page exists where `plan:render` writes it by default; a page
+ * written elsewhere with `-o` is not found. The first plan of a slug two plans share wins.
+ */
+async function findPlanPages(cwd: string): Promise<Array<DocsViewerPlanPage & { absolute: string }>> {
+  const { files } = await discoverPlanFiles(cwd)
+  const pages: Array<DocsViewerPlanPage & { absolute: string }> = []
+  for (const file of files) {
+    const slug = planSlug(file)
+    const absolute = planOutputPath(file)
+    if (pages.some((page) => page.slug === slug)) continue
+    const exists = await access(absolute).then(() => true, () => false)
+    if (exists) pages.push({ slug, plan: toPosixRelative(cwd, file), page: toPosixRelative(cwd, absolute), absolute })
+  }
+  return pages
+}
+
+/**
+ * The rendered page of the plan named `slug`, or `undefined`. The slug is looked up among the
+ * discovered plans, never joined into a path, so a request cannot reach another file.
+ */
+export async function docsViewerPlanPage(cwd: string, slug: string): Promise<string | undefined> {
+  const page = (await findPlanPages(cwd)).find((entry) => entry.slug === slug)
+  return page ? readFile(page.absolute, 'utf-8') : undefined
 }
 
 /** Both match one character, so neither can backtrack the way a quantifier can. */
@@ -137,10 +185,36 @@ function resolveViewerLink(docPath: string, target: string): string {
   return resolveDocLink(docPath, local) ?? target
 }
 
+/**
+ * The body as HTML, each `guren:plan` block framed and labelled with the plan doc it came from.
+ * Markers `plan:close` would refuse to rewrite leave the body rendered as it is, markers unseen.
+ */
+function renderViewerBody(docPath: string, body: string): string {
+  const render = (text: string): string =>
+    renderDocHtml(text, { resolveLink: (target) => resolveViewerLink(docPath, target) })
+  const read = readPlanBlocks(body)
+  if (!read || read.blocks.length === 0) return render(body)
+
+  const parts: string[] = []
+  let from = 0
+  for (const block of read.blocks) {
+    parts.push(render(read.lines.slice(from, block.open).join('\n')))
+    const label =
+      `<p class="plan-block-label">plan <a class="md-link" data-target="${escapeHtml(planDocPath(block.slug))}">`
+      + `${escapeHtml(block.slug)}</a> <code>${escapeHtml(block.hash.slice(0, 12))}</code></p>`
+    const inner = render(read.lines.slice(block.open + 1, block.close).join('\n'))
+    parts.push(`<section class="plan-block">${label}\n${inner}</section>`)
+    from = block.close + 1
+  }
+  parts.push(render(read.lines.slice(from).join('\n')))
+  return parts.filter((part) => part !== '').join('\n')
+}
+
 export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> {
   const {
     refs,
     checks,
+    tests,
     graph: { nodes, edges },
   } = await loadDocsGraph(cwd)
   const staleDocs = new Set(
@@ -170,14 +244,16 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
         stale: staleDocs.has(ref.path),
         trustTier: docTrustTier(ref),
         issues: ref.issues.map((issue) => describeIssue(issue, originRepo)),
+        closedPlanHash: planDocClosedHash(source),
         // Links carry the app-root path they resolve to, so the viewer
         // navigates by map lookup instead of re-deriving the rules client-side.
-        html: renderDocHtml(body, { resolveLink: (target) => resolveViewerLink(ref.path, target) }),
+        html: renderViewerBody(ref.path, body),
       }
     }),
   )
 
-  return { nodes, edges, docs }
+  const planPages = (await findPlanPages(cwd)).map(({ slug, plan, page }) => ({ slug, plan, page }))
+  return { nodes, edges, docs, tests, planPages }
 }
 
 /**

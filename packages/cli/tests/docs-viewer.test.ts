@@ -1,7 +1,7 @@
 import { mkdir, writeFile, access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { buildDocsViewerData, docTrustTier, docsViewerAssetPath } from '../src/docs-viewer'
+import { buildDocsViewerData, docTrustTier, docsViewerAssetPath, docsViewerPlanPage } from '../src/docs-viewer'
 import { createTempWorkspace } from './helpers'
 
 describe('docTrustTier', () => {
@@ -171,6 +171,90 @@ Superseded by [the second](/adr/0002-second.md#context) and see
       expect(first.html).toContain('data-target="docs/adr/0002-second.md"')
       expect(first.html).toContain('data-target="https://example.com"')
       expect(data.nodes.some((node) => node.id === 'docs/adr/0002-second.md')).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
+describe('buildDocsViewerData and closed plans', () => {
+  it('frames each plan:close block, reads the closing hash, and lists the carrying test files', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-viewer-plans-')
+    try {
+      const dir = workspace.dir
+      await mkdir(join(dir, 'docs/entities'), { recursive: true })
+      await mkdir(join(dir, 'docs/plans/comments'), { recursive: true })
+      await mkdir(join(dir, 'tests'), { recursive: true })
+      await writeFile(join(dir, 'package.json'), '{}', 'utf8')
+      await writeFile(
+        join(dir, 'docs/plans/comments.md'),
+        '---\ntype: plan\nentities: [Comment]\nclosed: true\nplan_hash: abcdef0123456789abcdef\n---\n\n# Comments\n\n- Authors delete their own (AC-comments-1)\n',
+        'utf8',
+      )
+      await writeFile(
+        join(dir, 'docs/entities/Comment.md'),
+        [
+          '---',
+          'type: entity',
+          'entities: [Comment]',
+          '---',
+          '',
+          '# Comment',
+          '',
+          '## Rules',
+          '',
+          'Written by hand.',
+          '',
+          '<!-- guren:plan comments abcdef0123456789abcdef rules -->',
+          '- Authors delete their own (AC-comments-1)',
+          '<!-- /guren:plan comments rules -->',
+          '',
+        ].join('\n'),
+        'utf8',
+      )
+      await writeFile(join(dir, 'tests/comments.test.ts'), "test('[AC-comments-1] authors delete', () => {})\n", 'utf8')
+      await writeFile(join(dir, 'docs/plans/comments/plan.json'), '{}', 'utf8')
+      await writeFile(join(dir, 'docs/plans/comments/plan.html'), '<title>Comments plan</title>', 'utf8')
+
+      const data = await buildDocsViewerData(dir)
+
+      const entity = data.docs.find((doc) => doc.path === 'docs/entities/Comment.md')!
+      expect(entity.html).toContain('<p>Written by hand.</p>')
+      expect(entity.html).toContain('<section class="plan-block">')
+      expect(entity.html).toContain('data-target="docs/plans/comments.md">comments</a> <code>abcdef012345</code>')
+      expect(entity.html).not.toContain('guren:plan')
+      expect(entity.closedPlanHash).toBeUndefined()
+
+      const plan = data.docs.find((doc) => doc.path === 'docs/plans/comments.md')!
+      expect(plan.closedPlanHash).toBe('abcdef0123456789abcdef')
+      expect(data.tests).toEqual([{ id: 'AC-comments-1', files: ['tests/comments.test.ts'] }])
+      expect(data.planPages).toEqual([
+        { slug: 'comments', plan: 'docs/plans/comments/plan.json', page: 'docs/plans/comments/plan.html' },
+      ])
+      expect(await docsViewerPlanPage(dir, 'comments')).toContain('Comments plan')
+      expect(await docsViewerPlanPage(dir, '../package.json')).toBeUndefined()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('renders a body whose markers plan:close could not rewrite as it would any other', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-viewer-plan-broken-')
+    try {
+      const dir = workspace.dir
+      await mkdir(join(dir, 'docs/entities'), { recursive: true })
+      await writeFile(join(dir, 'package.json'), '{}', 'utf8')
+      await writeFile(
+        join(dir, 'docs/entities/Comment.md'),
+        '---\ntype: entity\n---\n\n# Comment\n\n<!-- guren:plan comments abc rules -->\n\n- Never closed.\n',
+        'utf8',
+      )
+
+      const data = await buildDocsViewerData(dir)
+
+      expect(data.docs[0].html).not.toContain('plan-block')
+      expect(data.docs[0].html).toContain('<li>Never closed.</li>')
+      expect(data.planPages).toEqual([])
     } finally {
       await workspace.cleanup()
     }

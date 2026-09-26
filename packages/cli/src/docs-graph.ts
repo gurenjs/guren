@@ -155,6 +155,8 @@ export function buildDocsGraph(refs: DocRef[], checks: CheckResult[], tests: Acc
 export interface LoadedDocsGraph {
   refs: DocRef[]
   checks: CheckResult[]
+  /** Empty unless some doc cites an id: the test tree is read only then. */
+  tests: AcceptanceTestRef[]
   graph: DocsGraph
 }
 
@@ -163,7 +165,8 @@ export async function loadDocsGraph(cwd: string): Promise<LoadedDocsGraph> {
   const refs = await scanDocs(cwd)
   const tests = acceptanceTestsLoader(cwd, refs)
   const checks = await runDocsCheck({ cwd, refs, tests })
-  return { refs, checks, graph: buildDocsGraph(refs, checks, await tests()) }
+  const carried = await tests()
+  return { refs, checks, tests: carried, graph: buildDocsGraph(refs, checks, carried) }
 }
 
 export interface DocsGraphReportOptions {

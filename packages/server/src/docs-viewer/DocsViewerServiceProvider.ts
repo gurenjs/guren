@@ -12,6 +12,8 @@ import { createDocsViewerAccessGuard, DOCS_VIEWER_PATH, isDocsViewerEnabled } fr
 interface DocsViewerCliApi {
   buildDocsViewerData(cwd: string): Promise<unknown>
   docsViewerAssetPath(): string
+  /** Absent before `@guren/cli` served plan pages; the route then answers 404. */
+  docsViewerPlanPage?(cwd: string, slug: string): Promise<string | undefined>
 }
 
 /**
@@ -75,6 +77,15 @@ export class DocsViewerServiceProvider extends ServiceProvider {
         return ctx.body(null, 304, { ETag: etag })
       }
       return ctx.body(body, 200, { 'Content-Type': 'application/json', ETag: etag })
+    })
+
+    // Read on every request, so a page `plan:render` rewrites shows at the next reload.
+    hono.get(`${DOCS_VIEWER_PATH}/plans/:slug`, async (ctx) => {
+      const page = await cli.docsViewerPlanPage?.(cwd, ctx.req.param('slug'))
+      if (page === undefined) {
+        return ctx.json({ message: 'No rendered page for this plan (bunx guren plan:render <plan>)' }, 404)
+      }
+      return ctx.html(page)
     })
 
     // Mermaid is resolved from the *app's* node_modules rather than shipped in

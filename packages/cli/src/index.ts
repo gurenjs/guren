@@ -102,8 +102,10 @@ export {
 export {
   buildDocsViewerData,
   docsViewerAssetPath,
+  docsViewerPlanPage,
   type DocsViewerData,
   type DocsViewerDoc,
+  type DocsViewerPlanPage,
   type DocTrustTier,
 } from './docs-viewer'
 export {
