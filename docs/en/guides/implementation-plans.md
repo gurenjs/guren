@@ -481,6 +481,7 @@ Each controller the step adds holds exactly the planned actions and nothing else
 export default class CommentController extends Controller {
   // Planned response: a redirect to /posts/:postId
   // Rule: The comment's author is the signed-in user.
+  // postId is not fillable: write it with Comment.create(data, { set: { postId } }) (RFC 0031)
   async store(): Promise<Response> {
     await this.validateBody(CommentPayloadSchema)
     throw HttpException.notImplemented('CommentController.store is planned and not written yet')
@@ -488,11 +489,14 @@ export default class CommentController extends Controller {
 
   // Planned response: a redirect to /posts/:postId
   async destroy(): Promise<Response> {
-    await this.authorize('delete', Comment)
+    const comment = this.model(Comment)
+    await this.authorize('delete', [Comment, comment])
     throw HttpException.notImplemented('CommentController.destroy is planned and not written yet')
   }
 }
 ```
+
+The ability is asked of a record in the `[Model, record]` form, because an ORM record carries no class the gate could find the policy by. For any ability but `viewAny` and `create`, which a policy asks without a record, where every route to the action binds one record of the policy's model, the stub reads it with `this.model()` and passes the tuple. Otherwise it passes the bare class, and for a record ability (`view`, `update`, `delete` and the like) the comment above the action names the tuple to pass once the action loads the record. An action a `POST` route takes a body to lists, in the same comment, the foreign keys an added model's `fillable` leaves out: `create()` refuses them in its data, so they go through `set` (RFC 0031).
 
 It validates with `validateBody()` rather than `validated('comments.store')`, since `validated()` is typed from the generated route names, and the route is not registered until the `http` step mounts it. No response is written: `plan:status` credits a response it can name (a resource, a page, a redirect), so a stub that named one would read as done. The report lists every action's response as left to write.
 

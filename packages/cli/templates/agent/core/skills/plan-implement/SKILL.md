@@ -104,8 +104,10 @@ it, and do not edit the application back or the plan to make it pass.
   Then replace each action's 501 with its body and planned response, write
   each policy ability's rule in place of its `return false`, map each resource
   field `plan:scaffold` stubbed, and add the validator rules and middleware it
-  listed. An action is complete only when its route is mounted and validates
-  through the route contract.
+  listed. Keep an `authorize()` call's `[Model, record]` form (a bare ORM
+  record resolves no policy), and pass the foreign keys an action's comment
+  lists through `create(data, { set })`. An action is complete only when its
+  route is mounted and validates through the route contract.
 - **`pages`**: the Inertia pages; verified by `typecheck` and `guren check`.
 
 Implement only the elements the step lists. An element of a later step is that
