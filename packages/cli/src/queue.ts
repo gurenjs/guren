@@ -123,8 +123,7 @@ export async function retryFailedJob(jobId: string): Promise<void> {
     await driver.retryFailedJob(jobId)
     consola.success(`Job ${jobId} has been pushed back to the queue.`)
   } catch (error) {
-    consola.error(`Failed to retry job: ${error instanceof Error ? error.message : String(error)}`)
-    process.exit(1)
+    throw new CliError(`Failed to retry job: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
