@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { consola } from 'consola'
 import { CliError } from '../src/cli-error'
 import { makeFeature, buildRouteRegistrationHint, type MakeFeatureOptions } from '../src/make-feature'
+import { hasControllerTest } from '../src/discovery'
 import { findMigrationCreatingTable } from '../src/make-migration'
 import { generateDataTypes } from '../src/data-types'
 import { parseAttachString, parseFieldsString } from '../src/fields'
@@ -705,11 +706,11 @@ describe('makeFeature over files that already exist', () => {
     {
       name: 'only the file --test adds',
       singular: 'Comment',
-      seed: { 'tests/Comment.test.ts': "import { it } from 'bun:test'\n" },
+      seed: { 'tests/controllers/CommentController.test.ts': "import { it } from 'bun:test'\n" },
       options: { fields: 'body:text', withTest: true, withFactory: true },
       message: [
         'Scaffolding Comment would overwrite a file that already exists:',
-        '  tests/Comment.test.ts (--test)',
+        '  tests/controllers/CommentController.test.ts (--test)',
         'Nothing was scaffolded. Drop --test, pick another name, or pass --force to overwrite it.',
       ],
     },
@@ -780,8 +781,19 @@ describe('makeFeature over files that already exist', () => {
       'app/Models/Comment.ts',
       'db/factories/CommentFactory.ts',
       'app/Policies/CommentPolicy.ts',
-      'tests/Comment.test.ts',
+      'tests/controllers/CommentController.test.ts',
     ])
+  })
+
+  // The file --test writes is the one `guren check`/`doctor` accept; the two sides drifted apart once.
+  it.each([
+    { name: 'the app', options: {}, controller: 'app/Http/Controllers/CommentController.ts' },
+    { name: 'a module (--module)', options: { root: 'billing' }, controller: 'modules/billing/app/Http/Controllers/CommentController.ts' },
+  ])('writes a test the controller-test check finds, in $name', async ({ options, controller }) => {
+    await makeFeature('Comment', { fields: 'body:text', withTest: true, ...options, cwd: dir, announce: false })
+
+    expect(existsSync(join(dir, controller))).toBe(true)
+    expect(await hasControllerTest(dir, join(dir, controller))).toBe(true)
   })
 })
 
