@@ -55,11 +55,11 @@ A record that belongs to a user carries the owner's id (`authorId` on posts, `us
 `guren audit` verifies authentication only and stays green when a policy call is missing. The tests in rule 4 are the only check that sees it. Write them before the action.
 ```
 
-The frontmatter is the mechanism. `paths` names the files this rule applies to, and it is the only key Claude Code reads from a rule; when the agent edits a controller, a policy, a route or a test, the rule is loaded into its context, and when it edits a page it is not. The body is written for a reader who will act on it: numbered, one obligation per item, the exact call to make, and the reason the last line gives, because an agent that knows *why* the audit cannot help is less likely to treat a green audit as permission.
+The frontmatter is the mechanism. `paths` names the files this rule applies to, and it is the only key Claude Code reads from a rule; when the agent edits a controller, a policy, a route or a test, the rule is loaded into its context, and when it edits a page it is not. The body is written for a reader who will act on it: numbered, one obligation per item, the exact call to make, and the reason the last line gives, because an agent that knows *why* the audit cannot help is less likely to treat a green audit as permission. Claude Code's documentation lists how rules load under [path-specific rules](https://code.claude.com/docs/en/memory#path-specific-rules).
 
 ## 3. The skill
 
-A rule says what must be true. A skill says how to get there, and the agent reaches for it when the task matches its description. Create `.claude/skills/owned-resource/SKILL.md`:
+A rule says what must be true. A skill says how to get there, and the agent reaches for it when the task matches its description ([Claude Code: skills](https://code.claude.com/docs/en/skills)). Create `.claude/skills/owned-resource/SKILL.md`:
 
 ```md file=.claude/skills/owned-resource/SKILL.md
 ---
@@ -85,7 +85,7 @@ Two things to notice. The `description` is what the agent matches a request agai
 
 ## 4. The reviewer
 
-A subagent is an agent with its own brief and its own context, invoked by the main one. `code-review` has a general brief. This one has yours. Create `.claude/agents/ownership-review.md`:
+A subagent is an agent with its own brief and its own context, invoked by the main one ([Claude Code: subagents](https://code.claude.com/docs/en/sub-agents)). `code-review` has a general brief. This one has yours. Create `.claude/agents/ownership-review.md`:
 
 ```md file=.claude/agents/ownership-review.md
 ---
@@ -215,11 +215,15 @@ The whole file fails to load: there is no `Link` model. Red enough.
 
 The prompt, deliberately bare:
 
-> Add a blogroll: a Link resource with a title and a URL that a signed-in user creates and owns. Full CRUD at `/links`. `tests/LinkController.test.ts` describes it; make it pass.
+```text
+Add a blogroll: a Link resource with a title and a URL that a signed-in user creates and owns. Full CRUD at `/links`. `tests/LinkController.test.ts` describes it; make it pass.
+```
 
 No policy, no owner column, no tests are mentioned. Now watch what reads the prompt before the agent acts on it. "Creates and owns" should match the `owned-resource` skill's description; if it does, the transcript shows the agent reading `SKILL.md` and then working down the list. When it opens the controller, `ownership.md` loads on the glob. When it says it is done, ask:
 
-> Use the ownership-review subagent to review the uncommitted changes.
+```text
+Use the ownership-review subagent to review the uncommitted changes.
+```
 
 and read its list. The outcomes to distinguish:
 

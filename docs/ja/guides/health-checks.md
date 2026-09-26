@@ -71,9 +71,9 @@ health.register(new MemoryCheck({
 ```
 
 メモリチェックはヒープ使用量に基づいてステータスを返します。
-- **healthy**: しきい値未満
-- **degraded**: しきい値以上、危険値未満
-- **unhealthy**: 危険しきい値以上
+- **healthy**（正常）: しきい値未満
+- **degraded**（機能低下）: しきい値以上、危険値未満
+- **unhealthy**（異常）: 危険しきい値以上
 
 ### キャッシュチェック
 
@@ -89,7 +89,7 @@ health.register(new CacheCheck(cache.store(), {
 }))
 ```
 
-旧来の `get` / `put` / `forget` を持つオブジェクトはコンストラクタの型に合わなくなり、実行時にはチェックが unhealthy を返します。呼び出すメソッドがそこに無いためです。`StorageCheck` も同様に `StorageDriver` を受け取り、その `put` は保存先のパスを返す必要があります。
+旧来の `get` / `put` / `forget` を持つオブジェクトはコンストラクタの型に合わなくなり、実行時にはチェックが `unhealthy` を返します。呼び出すメソッドがそこに無いためです。`StorageCheck` も同様に `StorageDriver` を受け取り、その `put` は保存先のパスを返す必要があります。
 
 ### ストレージチェック
 
@@ -201,8 +201,8 @@ health.register(check, {
 
 ### クリティカル vs 非クリティカルチェック
 
-- **クリティカルチェック**: unhealthy になると、全体のステータスも「unhealthy」になります
-- **非クリティカルチェック**: unhealthy になると、全体のステータスは「degraded」になります
+- **クリティカルチェック**: 異常（`unhealthy`）になると、全体のステータスも `unhealthy` になります
+- **非クリティカルチェック**: 異常になると、全体のステータスは `degraded`（機能低下）になります
 
 ```typescript
 // データベースはクリティカル - なしではアプリが動作しない
@@ -404,4 +404,4 @@ router.get('/health/ready', health.middleware({
 3. **チェックは速く終わらせる** - タイムアウトを適切に設定し、時間のかかるチェックは避ける
 4. **メタデータを添える** - 関連するメトリクスがあるとデバッグが楽になります
 5. **オーケストレーターから使う** - Kubernetes や Docker はコンテナの健全性判定にこのエンドポイントを使えます
-6. **degraded を監視する** - unhealthy に落ちる前に、degraded の段階でアラートを出します
+6. **機能低下（degraded）を監視する** - 異常（unhealthy）に落ちる前に、機能低下の段階でアラートを出します

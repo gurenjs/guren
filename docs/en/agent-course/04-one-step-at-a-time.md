@@ -29,7 +29,11 @@ flowchart LR
 
 ## 2. Start the agent
 
-> Implement docs/plans/meetups/plan.json with the plan-implement skill. One commit per step. Stop when plan:next says every step is verified.
+Send this prompt to the Claude Code session:
+
+```text
+Implement docs/plans/meetups/plan.json with the plan-implement skill. One commit per step. Stop when plan:next says every step is verified.
+```
 
 The agent now runs the loop by itself. When it tries to end its turn early, the Stop hook from chapter 1 verifies the marked step and sends the agent back if the step is not verified.
 

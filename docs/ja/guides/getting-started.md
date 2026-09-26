@@ -51,7 +51,7 @@ bun run dev
 
 ### 4. プロジェクトの知識グラフを見る
 
-開発サーバーを動かしたまま [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs) を開いてください。新規アプリには `docs/adr/` 配下にシード ADR が含まれており、Docs Graph では文書ノードとして表示されます。プロジェクトが育つにつれて、エンティティ、コードパス、生成スペックとの関係も加わります。文書をクリックすると、frontmatter、trust 情報、リンクの検証結果、Markdown 本文を読めます。
+開発サーバーを動かしたまま [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs) を開いてください。新規アプリには `docs/adr/` 配下にシード ADR が含まれており、Docs Graph では文書ノードとして表示されます。プロジェクトが育つにつれて、エンティティ、コードパス、生成スペックとの関係も加わります。文書をクリックすると、frontmatter、信頼度の情報、リンクの検証結果、Markdown 本文を読めます。
 
 ![ローカルの Docs Graph ビューアー。文書・スペック・コードのノードが線で結ばれ、左上に concepts と relations の件数、ノード種別の絞り込みが並んでいる](../../images/docs-graph.png)
 

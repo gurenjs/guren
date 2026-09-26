@@ -203,6 +203,8 @@ The rest of `.claude/` is read on demand rather than at start:
 - **`agents/`** are two subagents with their own briefs: `code-review` and `test-writer`.
 - **`.mcp.json`** points the agent at the dev MCP endpoint the `dev` script mounted, so it can query the running app.
 
+Each piece is a Claude Code feature with its own page in Claude Code's documentation: [hooks](https://code.claude.com/docs/en/hooks) (and the [hooks guide](https://code.claude.com/docs/en/hooks-guide)), [`CLAUDE.md` and rules](https://code.claude.com/docs/en/memory), [skills](https://code.claude.com/docs/en/skills), [subagents](https://code.claude.com/docs/en/sub-agents), and [MCP](https://code.claude.com/docs/en/mcp). Read them when you want the details of a piece beyond what Guren puts in it.
+
 Each later chapter puts one of these to work, and chapter 8 has you write your own. For now, the two hooks are what you are about to watch.
 
 ## 6. Your first change, by hand
@@ -361,13 +363,17 @@ git commit -m "feat: add a tagline to the home page"
 
 Now the same kind of change, done by an agent, with you watching the hooks. Start your agent inside `guren-blog` (for Claude Code, that is `claude`). Because of the `SessionStart` hook, its first message already carries the project map you printed in step 5. Ask it:
 
-> Explain this project: what does `bunx guren context` report, which hook runs when you edit `routes/web.ts`, and which one runs when you end a turn with uncommitted changes?
+```text
+Explain this project: what does `bunx guren context` report, which hook runs when you edit `routes/web.ts`, and which one runs when you end a turn with uncommitted changes?
+```
 
 Read the answer against `.claude/settings.json`. It should name all three hooks and what each runs. If it does not mention `guren gate`, it has not read `CLAUDE.md`; that is worth knowing about your agent before you hand it work.
 
 Then hand it work:
 
-> Move the tagline text out of `HomeController` into `lang/en/messages.json` as `messages.tagline`, and read it through `this.t()` like the welcome message. Keep the tests unchanged and green.
+```text
+Move the tagline text out of `HomeController` into `lang/en/messages.json` as `messages.tagline`, and read it through `this.t()` like the welcome message. Keep the tests unchanged and green.
+```
 
 Watch for two things in the transcript:
 

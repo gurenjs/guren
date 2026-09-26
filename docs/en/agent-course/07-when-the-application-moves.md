@@ -11,7 +11,11 @@ A plan is approved against the app as it was at one commit. Real work does not s
 
 ## 1. Start the build
 
-> Implement docs/plans/registrations/plan.json with the plan-implement skill. One commit per step.
+Send this prompt to the Claude Code session:
+
+```text
+Implement docs/plans/registrations/plan.json with the plan-implement skill. One commit per step.
+```
 
 The first three steps go as in chapter 4. The data step is the one to read closely: it is where `Meetup` gains its `registrations` relationship, the `alter` from chapter 6.
 
@@ -216,7 +220,11 @@ The rename is a reasonable change, so the plan follows it.
 
 ## 4. Revise and approve again
 
-> A teammate renamed the route meetups.show to meetups.detail. Revise docs/plans/registrations/plan.json with plan:revise so route.meetups.show names meetups.detail, keeping its id.
+Send this prompt to the Claude Code session:
+
+```text
+A teammate renamed the route meetups.show to meetups.detail. Revise docs/plans/registrations/plan.json with plan:revise so route.meetups.show names meetups.detail, keeping its id.
+```
 
 The element keeps its id, `route.meetups.show`: ids are how everything else in the plan, and every record, refers to it. Only the name changes.
 
@@ -256,7 +264,11 @@ With an agent, `plan-implement` does this on its own when you tell it to continu
 
 ## 5. Finish the build
 
-> Continue implementing docs/plans/registrations/plan.json.
+Send this prompt to the Claude Code session:
+
+```text
+Continue implementing docs/plans/registrations/plan.json.
+```
 
 The http step is the one where Impact from chapter 6 pays off. `MeetupResource` now needs a registration count, and `index`, `show` and `edit` all build it.
 

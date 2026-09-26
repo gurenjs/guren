@@ -29,14 +29,16 @@ export function mountFeedback({ planHash, planFile }: PlanPagePayload): void {
     exportStatus.textContent = ''
   })
 
+  words(byId('copy-prompt'), 'footer.copyPrompt')
   words(byId('copy'), 'footer.copy')
   words(byId('export'), 'footer.download')
-  words(byId('footer-note'), 'footer.note')
   // `comparePlanDictionaries()` refuses a value spelling `:name` (`extractPlaceholders()` counts it), so the command comes in as `{command}`.
+  words(byId('footer-prompt-note'), 'footer.promptNote', { command: 'plan:revise' })
+  words(byId('footer-note'), 'footer.note')
   words(byId('footer-revise-note'), 'footer.revise', { command: 'plan:revise' })
   words(byId('footer-approve-note'), 'footer.approve')
 
-  // `planFile` is already held to a bare name with no shell metacharacter, because
+  // `planFile` is already held to a relative path with no shell metacharacter, because
   // these lines exist to be pasted into a shell. `plan:revise` also needs the edited
   // copy, which only the reader can name, so `footer.revise` describes it in words and
   // the page prints the two commands that follow a revision.
@@ -44,14 +46,19 @@ export function mountFeedback({ planHash, planFile }: PlanPagePayload): void {
   byId('render-command').textContent = 'bunx guren plan:render ' + plan
   byId('approve-command').textContent = 'bunx guren plan:approve ' + plan
 
-  byId('copy').addEventListener('click', () => {
-    // Clipboard, not the network: `file://` is a secure context, and no policy
-    // directive governs it. A refusal (permission, or an older engine) says so.
-    window.navigator.clipboard.writeText(feedbackJson(planHash)).then(
-      () => say('footer.copied'),
+  // Clipboard, not the network: `file://` is a secure context, and no policy
+  // directive governs it. A refusal (permission, or an older engine) says so.
+  const copy = (text: string, copied: string): void => {
+    window.navigator.clipboard.writeText(text).then(
+      () => say(copied),
       () => say('footer.clipboardRefused'),
     )
+  }
+  // The prompt is in the page's current locale, so the agent answers in the reader's language.
+  byId('copy-prompt').addEventListener('click', () => {
+    copy(`${t('footer.prompt', { plan })}\n\n\`\`\`json\n${feedbackJson(planHash)}\n\`\`\`\n`, 'footer.promptCopied')
   })
+  byId('copy').addEventListener('click', () => copy(feedbackJson(planHash), 'footer.copied'))
 
   byId('export').addEventListener('click', () => {
     const blob = new Blob([feedbackJson(planHash)], { type: 'application/json' })

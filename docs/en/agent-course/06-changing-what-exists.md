@@ -10,7 +10,11 @@ The first plan only added things. Registrations cannot: a meetup has to learn ab
 
 ## 1. Ask for the plan
 
-> Plan registrations with the plan-write skill: a signed-in user registers for a meetup and can cancel their own registration. A meetup never takes more registrations than its capacity, and its page shows the seats left.
+Send this prompt to the Claude Code session:
+
+```text
+Plan registrations with the plan-write skill: a signed-in user registers for a meetup and can cancel their own registration. A meetup never takes more registrations than its capacity, and its page shows the seats left.
+```
 
 The agent reads `docs/entities/Meetup.md` from chapter 5 as part of `guren context Meetup`, so it knows the existing rules before it plans against them. Leave one question open this time: what happens when someone registers for a full meetup.
 
@@ -360,9 +364,11 @@ This plan changes no column, so it needs no data migration. Chapter 2's checklis
 
 ## 4. Answer and approve
 
-Answer the question the same way as in chapter 3: pick **refuse** on the page, copy the feedback, and hand it over.
+Answer the question the same way as in chapter 3: pick **refuse** on the page, click **Copy prompt for the agent**, and paste the prompt into the Claude Code session. Add this below it before you send it:
 
-> Apply my review of docs/plans/registrations/plan.json with plan:revise: a full meetup refuses the registration; a waitlist is a later change. Keep both warnings on registrations.store, since any signed-in user may register and the request has no body.
+```text
+A full meetup refuses the registration; a waitlist is a later change. Keep both warnings on registrations.store, since any signed-in user may register and the request has no body.
+```
 
 **Without an agent:**
 

@@ -22,13 +22,17 @@ For this plan:
 
 1. Under **Can guests browse meetups?**, keep **yes** selected and write "Yes, browsing is public." in the answer box.
 2. On `route.meetups.store`, leave the policy warning alone. It is a choice you made in chapter 2.
-3. Click **Copy feedback** at the bottom of the page.
+3. Click **Copy prompt for the agent** at the bottom of the page.
+
+Picking an answer on the page does not change `plan.json`, and neither does anything else you do there: `plan:approve` still finds the question open until the agent applies your review. The button copies a prompt that names the plan, asks the agent to apply the review with the `plan-write` skill, and carries the page's feedback.
 
 ## 2. Hand the review to the agent
 
-> Apply my review of docs/plans/meetups/plan.json with plan:revise. Add a behaviour for each acceptance warning on the page: unauthenticated for meetups.create and meetups.update, forbidden for meetups.edit, validation for meetups.update. Also add a success behaviour for the organizer opening meetups.edit. Keep the meetups.store warning, since any signed-in user may organize a meetup. Here is the page's feedback:
->
-> *(paste the copied feedback here)*
+Paste the copied prompt into the Claude Code session. The page cannot know about the missing behaviours from chapter 2, so add this below the pasted prompt before you send it:
+
+```text
+Also add a behaviour for each acceptance warning on the page: unauthenticated for meetups.create and meetups.update, forbidden for meetups.edit, validation for meetups.update. Add a success behaviour for the organizer opening meetups.edit. Keep the meetups.store warning, since any signed-in user may organize a meetup.
+```
 
 The `plan-write` skill edits a copy of the plan outside the repository, then runs `bunx guren plan:revise` with the copy and your feedback. `plan:revise` refuses the copy if it still holds a question you answered, and it records each change with its reason in `docs/plans/meetups/revisions/0001.json`.
 

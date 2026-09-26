@@ -1,41 +1,45 @@
 # 第 3 章: レビューと承認
 
-第 2 章は、未決の質問 1 つと足りない振る舞い 5 つの一覧で終わりました。この章ではそのレビューをエージェントに渡し、変更を確かめ、計画を承認します。承認は、ループの中で自分だけが行うステップです。
+第 2 章の終わりには、未決の質問が 1 つと足りない振る舞いが 5 つという、直すものの一覧が残りました。この章では、このレビュー結果をエージェントに渡して計画を直してもらい、変更を確かめてから承認します。ループの中で、承認だけは読者が自分で行うステップです。
 
 **この章で学ぶこと:**
 
-- レビューページでの判断が、エージェントの使えるフィードバックになる仕組み
-- `plan:revise` が記録するものと、リビジョンに理由を付ける理由
-- 承認で固まるものと、承認前のチェック表
+- レビューページでの判断を、エージェントが反映できるフィードバックにする方法
+- `plan:revise` が記録する内容と、改訂のたびに理由を残す意味
+- 承認によって固定されるものと、承認の前に確かめるチェック表
 
 ## 1. ページでレビューする
 
-`docs/plans/meetups/plan.html` をもう一度開きます。ページ上の 3 種類の入力がフィードバックになります。
+`docs/plans/meetups/plan.html` をもう一度開きます。このページで行う次の 3 種類の操作が、エージェントへのフィードバックになります。
 
 | ページでの操作 | フィードバックでの意味 |
 |---|---|
-| 質問の選択肢を選ぶ | 回答。計画から質問を消す必要があります |
-| 要素の **Approve** | ロック。以後その要素は、理由を付けたときだけ変更できます |
-| **Request changes** とコメント | エージェントが読むメモ。強制力はありません |
+| 質問の選択肢を選ぶ | 回答になります。計画からはその質問を消す必要があります |
+| 要素の **Approve** | ロックになります。以後その要素は、理由を明記した場合にしか変更できません |
+| **Request changes** とコメント | エージェントが読むメモになります。強制力はありません |
 
-この計画では次のようにします。
+この計画では、次のように操作します。
 
-1. **Can guests browse meetups?** で **yes** を選んだままにし、回答欄に「Yes, browsing is public.」と書きます。
-2. `route.meetups.store` の policy の警告はそのままにします。第 2 章で決めた選択です。
-3. ページ下部の **Copy feedback** を押します。
+1. **Can guests browse meetups?** では **yes** が選ばれた状態のまま、回答欄に「Yes, browsing is public.」と入力します。
+2. `route.meetups.store` の policy の警告は、第 2 章で意図した選択と判断したので、そのままにします。
+3. ページ下部の **Copy prompt for the agent** を押します(`--locale ja` で描画したページでは「エージェントへの依頼文をコピー」)。
+
+ページで回答を選んだり要素を承認したりしても、それだけでは `plan.json` は変わりません。エージェントがレビューを反映するまでは、`plan:approve` も質問が未回答のままだとして承認を拒否します。このボタンは、計画のパスと「plan-write スキルでレビューを反映してほしい」という依頼に、ページのフィードバックを付けた依頼文をまとめてコピーします。
 
 ## 2. レビューをエージェントに渡す
 
-> docs/plans/meetups/plan.json に私のレビューを plan:revise で反映してください。ページの受け入れ振る舞いの警告ごとに振る舞いを足してください。meetups.create と meetups.update には unauthenticated、meetups.edit には forbidden、meetups.update には validation です。さらに、主催者が meetups.edit を開ける success の振る舞いも足してください。meetups.store の警告は残します。サインインしたユーザーなら誰でも主催できるからです。ページのフィードバックは次のとおりです。
->
-> *(コピーしたフィードバックをここに貼る)*
+コピーした依頼文を Claude Code のセッションに貼り付けます。第 2 章で見つけた足りない振る舞いはページからは伝わらないので、送る前に、貼り付けた依頼文の下へ次の文を書き足してください。
 
-`plan-write` スキルは、リポジトリの外に計画のコピーを作って編集し、そのコピーとフィードバックを渡して `bunx guren plan:revise` を実行します。回答済みの質問がコピーに残っていれば `plan:revise` は拒否します。変更はそれぞれ理由とともに `docs/plans/meetups/revisions/0001.json` に記録されます。
+```text
+あわせて、ページの受け入れ振る舞いの警告ごとに振る舞いを足してください。meetups.create と meetups.update には unauthenticated、meetups.edit には forbidden、meetups.update には validation です。主催者が meetups.edit を開ける success の振る舞いも足してください。meetups.store の警告は残してください。サインインしたユーザーなら誰でも主催できるからです。
+```
 
-**エージェントなしの場合:** 変更を操作 (op) として渡します。op はそれぞれ理由を持ちます。
+エージェントは `plan-write` スキルの手順に従い、リポジトリの外に作った計画のコピーを編集してから、そのコピーとフィードバックを渡して `bunx guren plan:revise` を実行します。回答済みの質問がコピーに残っていると、`plan:revise` はそのコピーを受け付けません。受け付けた変更は、1 つずつ理由を添えて `docs/plans/meetups/revisions/0001.json` に記録されます。
+
+**エージェントなしの場合:** 変更を操作 (op) の形で渡します。op にはそれぞれ理由を書きます。
 
 <details>
-<summary>振る舞い 5 つの追加と回答済みの質問を渡す plan:revise</summary>
+<summary>振る舞い 5 つの追加と質問への回答を反映する plan:revise</summary>
 
 ```bash run fallback
 bunx guren plan:revise docs/plans/meetups/plan.json --ops - <<'EOF'
@@ -63,15 +67,15 @@ EOF
 bunx guren plan:render docs/plans/meetups/plan.json
 ```
 
-ブラウザで再読み込みします。**Needs attention** に残る警告は、残すと決めた `meetups.store` の policy の警告 1 件だけです。**Tasks & acceptance** には振る舞いが 12 件並びます。
+ブラウザでページを再読み込みすると、**Needs attention** の警告は、残すと決めた `meetups.store` の policy の警告 1 件だけになっています。**Tasks & acceptance** には振る舞いが 12 件並びます。
 
-リビジョンはデータとしてディスクにあるので、エージェントが何をしたか正確に読めます。
+改訂の内容はデータとしてファイルに残っているので、エージェントが何をしたのかを正確に確認できます。
 
 ```bash run
 cat docs/plans/meetups/revisions/0001.json
 ```
 
-op はそれぞれ要素と変更の理由を持ちます。半年後に「なぜ計画に AC-meetups-9 があるのか」と聞かれても、答えはリポジトリにあります。
+各 op には、対象の要素と変更の理由が書かれています。半年後に「なぜ計画に AC-meetups-9 があるのか」と聞かれても、リポジトリを見れば答えが分かります。
 
 改訂した計画をコミットします。
 
@@ -84,14 +88,14 @@ git commit -m "docs: apply the review to the meetups plan"
 
 | 確かめること | 見る場所 |
 |---|---|
-| `fail` の検査がない | Needs attention |
+| 失敗 (`fail`) の検査がない | Needs attention |
 | 未決の質問がない | 質問 (セクションが消えている) |
-| 残った `warn` はすべて、説明できる選択 | Needs attention |
-| 守りたいルールはすべて振る舞いになっている | Tasks & acceptance |
-| policy の後ろのルートすべてに、通してよいユーザーの `success` 振る舞いがある | Tasks & acceptance |
-| ツリーがきれい | `git status` |
+| 残った警告 (`warn`) がすべて、理由を説明できる選択である | Needs attention |
+| 守りたいルールがすべて振る舞いになっている | Tasks & acceptance |
+| policy で守られたルートのすべてに、許可されるユーザーの `success` 振る舞いがある | Tasks & acceptance |
+| 作業ツリーに未コミットの変更がない | `git status` |
 
-`plan:approve` が強制するのは最初の 2 つと最後の 1 つです。間の 3 つは自分で確かめます。
+このうち最初の 2 つと最後の 1 つが満たされていなければ、`plan:approve` は承認を拒否します。間の 3 つは自分で確かめてください。
 
 ## 5. 承認する
 
@@ -99,16 +103,16 @@ git commit -m "docs: apply the review to the meetups plan"
 bunx guren plan:approve docs/plans/meetups/plan.json
 ```
 
-承認は 2 つのことをします。
+承認すると、次の 2 つが行われます。
 
 ```mermaid
 flowchart LR
-  Plan["plan.json"] -- "baseline を刻む:<br/>コミット + 要素ごとのハッシュ" --> Stamped["baseline 付きの plan.json"]
+  Plan["plan.json"] -- "基準点を刻む:<br/>コミット + 要素ごとのハッシュ" --> Stamped["基準点付きの plan.json"]
   Stamped -- "計画のハッシュを記録" --> Approvals["approvals.json"]
 ```
 
-- **baseline** は、コミットと、要素ごとにアプリが持っていたもののハッシュを記録します。何のためにあるかは第 7 章で分かります。承認の後でアプリが動いたことに気づくためです。
-- **承認** は計画のハッシュを `docs/plans/meetups/approvals.json` に記録します。計画を実装するコマンドはすべてこれを確かめます。承認の後で `plan.json` を編集すると、誰かが承認し直すまで実装は止まります。
+- **基準点 (baseline)** には、承認時点のコミットと、要素ごとにアプリがその時点で持っていた内容のハッシュが記録されます。承認の後でアプリが変わったことに気づくための仕組みで、実際の使われ方は第 7 章で見ます。
+- **承認** では、計画のハッシュが `docs/plans/meetups/approvals.json` に記録されます。計画を実装するコマンドはどれもこのハッシュを確認するため、承認後に `plan.json` を編集すると、誰かが承認し直すまで実装が進まなくなります。
 
 両方をコミットします。
 
@@ -117,23 +121,23 @@ git add docs/plans
 git commit -m "docs: approve the meetups plan"
 ```
 
-## いまいる場所
+## ここまでの状態
 
-- 振る舞いが 12 件あり、未決の質問のない承認済みの計画。
-- `revisions/0001.json`。レビューをデータとして残したものです。
-- `approvals.json`。実装のコマンドが確かめます。
+- 振る舞いが 12 件あり、未決の質問もない計画が承認されています。
+- `revisions/0001.json` に、レビューの内容がデータとして残っています。
+- `approvals.json` ができました。実装のコマンドは、このファイルで承認を確かめます。
 
 ## よくあるつまずき
 
-- **`plan:approve` がツリーが汚れていると言う。** 先に改訂した計画をコミットしてください。エージェントがアプリのルートに残したファイル (計画のコピー、`feedback.json`) も数えられます。リポジトリの外へ移してください。
-- **回答済みの質問が残っているため `plan:revise` が拒否する。** コピーの `questions` にまだ質問があります。答えは `assumptions` に書きます。
-- **フィードバックで承認した要素が変わると `plan:revise` が言う。** その要素で **Approve** を押しています。変更が誤りか、`--reopens "<理由>"` が必要です。
+- **`plan:approve` に、作業ツリーが汚れていると言われる。** 先に改訂した計画をコミットしてください。エージェントがアプリのルートに残したファイル (計画のコピーや `feedback.json`) も未コミットの変更として数えられるので、リポジトリの外へ移します。
+- **回答済みの質問が残っているため `plan:revise` が拒否する。** コピーの `questions` に質問が残ったままです。答えは `assumptions` に書いてください。
+- **フィードバックで承認した要素が変更されると `plan:revise` に言われる。** その要素でページの **Approve** を押しています。変更そのものが誤っているか、そうでなければ `--reopens "<理由>"` で理由を示す必要があります。
 
 ## 演習
 
-1. 承認済みの `plan.json` の単語を 1 つ書き換えて、`bunx guren plan:next docs/plans/meetups/plan.json` を実行してください。拒否のメッセージを読んだら、`git checkout docs/plans/meetups/plan.json` で元に戻します。
-2. `approvals.json` を読んでください。第 6 章で承認する計画の承認ファイルには `readings` というフィールドも付きますが、このファイルにはありません。2 本目の計画にはあって、この計画にないものは何でしょう。
+1. 承認済みの `plan.json` の単語を 1 つ書き換えてから `bunx guren plan:next docs/plans/meetups/plan.json` を実行し、拒否されたときのメッセージを読んでください。読み終えたら、`git checkout docs/plans/meetups/plan.json` でファイルを元に戻します。
+2. `approvals.json` を開いてみてください。第 6 章で承認する計画では、承認ファイルに `readings` というフィールドも加わりますが、このファイルにはありません。2 本目の計画にはあって、この計画には 1 つもないものは何でしょうか。
 
 ## 次へ
 
-[第 4 章: 1 ステップずつ](./04-one-step-at-a-time.md) では、承認した計画をエージェントに渡し、検証される 5 つのステップを追います。
+[第 4 章: 1 ステップずつ](./04-one-step-at-a-time.md) では、承認した計画をエージェントに渡し、5 つのステップが 1 つずつ検証されながら進んでいく流れを追います。

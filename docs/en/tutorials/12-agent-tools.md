@@ -662,7 +662,11 @@ Three red, with no accidental green this time, and the reason is worth knowing. 
 
 ## 6. Delegate it
 
-> Expose the comment routes as agent tools. `comments.store` and `comments.destroy` should be callable by an agent as `comments_store` and `comments_destroy`, follow the same pattern `posts.publish` uses (a `toolName`, a `params` schema, a `body` schema where the action takes one, an `output` schema, and a JSON answer for a tool call while the browser keeps its redirect), and keep the policies they already have. `tests/AgentComments.test.ts` describes them; make it pass.
+Send this prompt to your agent:
+
+```text
+Expose the comment routes as agent tools. `comments.store` and `comments.destroy` should be callable by an agent as `comments_store` and `comments_destroy`, follow the same pattern `posts.publish` uses (a `toolName`, a `params` schema, a `body` schema where the action takes one, an `output` schema, and a JSON answer for a tool call while the browser keeps its redirect), and keep the policies they already have. `tests/AgentComments.test.ts` describes them; make it pass.
+```
 
 The prompt says nothing about authorization, and it does not have to. Two things are watching now: the ownership rule from chapter 8, and `guren check --ci`, which will fail the build outright if the agent exposes `comments.destroy` without a policy call. Read the diff for the `output` schemas, then run the check.
 

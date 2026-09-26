@@ -614,7 +614,9 @@ Three red. The first of them, `posts.authorId.notNull`, is a test of the schema 
 
 Ask your agent:
 
-> Every post now has an author (`scripts/backfill-post-authors.ts` has run). Make `authorId` on the `posts` table NOT NULL with a new migration, and show each post's author name on the posts list and the post page. Load the authors for a page of posts in one query, not one per post, and keep `PostResource` the one place a post's shape is defined. `tests/PostController.test.ts` describes all of it; make it pass.
+```text
+Every post now has an author (`scripts/backfill-post-authors.ts` has run). Make `authorId` on the `posts` table NOT NULL with a new migration, and show each post's author name on the posts list and the post page. Load the authors for a page of posts in one query, not one per post, and keep `PostResource` the one place a post's shape is defined. `tests/PostController.test.ts` describes all of it; make it pass.
+```
 
 This is the first time the agent touches your database, and this chapter's harness lever is the **`db-manage` skill** in `.claude/skills/db-manage/`. Read it before the agent does. It tells the agent how migrations are generated, applied and inspected in this app (`make:migration`, `db:migrate`, `db:status`), that they are forward-only, and it carries safety rules: a destructive operation (`db:reset`, `db:fresh`) is never run without confirming with you first, showing what it would affect and warning about the data loss. Watch whether the agent generates a migration and applies it, or asks you about a reset. The skill exists so that the difference is not left to the model's mood.
 

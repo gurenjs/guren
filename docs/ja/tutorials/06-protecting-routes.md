@@ -1,24 +1,24 @@
 # 第 6 章: ルートを保護する
 
-ブログにユーザーはできましたが、そのユーザーを確認する場所がまだどこにもありません。ゲストは相変わらず投稿を書き、編集し、削除できますし、`guren audit` は第 3 章からずっとそう指摘し続けています。この章では投稿の変更をログインの壁の内側に置き、すでにある行を失わないマイグレーションですべての投稿に著者を与えます。そのあとマイグレーションをひとつエージェントに任せ、`db-manage` スキルがどう安全を保つかを確認します。最後に、いまなら読めるようになった `bunx guren add auth` の出力を眺めます。
+ブログにユーザーはできましたが、サインインしているかどうかを確かめている箇所はまだありません。ゲストでも投稿を書き、編集し、削除できてしまい、`guren audit` も第 3 章からずっとそれを指摘しています。この章では、投稿の変更操作をログインの壁で囲ってサインインしたユーザーだけが行えるようにし、既存の行を失わないマイグレーションですべての投稿に著者を設定します。そのあとマイグレーションを 1 つエージェントに任せ、`db-manage` スキルがどのように安全を保つかを確認します。最後に、いまなら読めるようになった `bunx guren add auth` の出力を見ていきます。
 
 **この章で学ぶこと:**
 
-- `requireAuthenticated` と `requireGuest` の働きと、ミドルウェアのエイリアスとグループがルートを読みやすく保つ仕組み
-- `guren audit` が `requireAuthenticated` を信頼し、名前に「auth」が付いた自作ミドルウェアを信頼しない理由
-- すでに行があるテーブルに必須列を足す方法: nullable で追加、埋める、それから not null
-- `forceCreate` と `forceUpdate` の用途と、`authorId` を fillable にしてはいけない理由
-- スキルによって、データベースに対するエージェントの振る舞いがどう変わるか
+- `requireAuthenticated` と `requireGuest` の働きと、ミドルウェアのエイリアスとグループでルートを読みやすく保つ方法
+- `guren audit` が `requireAuthenticated` は信頼し、名前に「auth」を含む自作のミドルウェアは信頼しない理由
+- 行が入っているテーブルに必須列を追加する手順: nullable で追加し、値を埋めてから not null にする
+- `forceCreate` と `forceUpdate` の用途と、`authorId` を fillable にしない理由
+- スキルを置くと、エージェントによるデータベースの扱い方がどう変わるか
 
-開発サーバーが動いていなければ起動します。
+開発サーバーを起動していなければ、起動しておきます。
 
 ```bash run background
 bun run dev
 ```
 
-## 1. 壁を仕様化する
+## 1. ログインの壁のテストを先に書く
 
-ルートに手を付ける前に、テストファイルを 3 つ変えます。まず投稿です。変更系リクエストはすべて Ada として行い、ゲストが何を受け取るかは新しいテスト 2 つで述べます。
+ルートを変える前に、テストファイルを 3 つ書き換えます。まずは投稿のテストです。変更系のリクエストはすべて Ada としてサインインした状態で送り、ゲストのときに何が返るかは新しく追加する 2 つのテストで確かめます。
 
 ```ts file=tests/PostController.test.ts
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test'
@@ -149,7 +149,7 @@ describe('PostController', () => {
 })
 ```
 
-プロフィールページは 401 を返すのをやめ、壁に加わります。
+プロフィールページは 401 を返す代わりに、ほかのページと同じく壁の内側に入れます。
 
 ```ts file=tests/ProfileController.test.ts
 import { beforeAll, beforeEach, describe, it } from 'bun:test'
@@ -182,7 +182,7 @@ describe('ProfileController', () => {
 })
 ```
 
-そしてログインページには逆向きのルールが加わります。サインイン済みのユーザーには用が無いページです。
+ログインページには逆向きのルールを加えます。サインイン済みのユーザーがこのページを開く必要はないからです。
 
 ```ts file=tests/LoginController.test.ts
 import { beforeAll, beforeEach, describe, it } from 'bun:test'
@@ -237,11 +237,11 @@ describe('LoginController', () => {
 bun test
 ```
 
-赤が 5 つです。ゲストのリダイレクト、サインイン済みユーザーの `/login` からのリダイレクト、そしてまだ存在しない、保存された投稿の著者です。`POST /posts` に対するゲストのテストの形に注目してください。CSRF は認証より先に検査されるので、他と同じように CSRF トークンを用意したうえで、何も保存されなかったことを assert しています。リダイレクトを確かめるだけでは、壁が持ちこたえた証明になりません。
+5 つのテストが失敗します。ゲストのリダイレクト、サインイン済みユーザーを `/login` からリダイレクトするテスト、そして保存した投稿の著者(まだ存在しません)を確かめるテストです。`POST /posts` に対するゲストのテストの書き方に注目してください。CSRF は認証より先に検査されるので、ほかのテストと同じように CSRF トークンを用意し、そのうえで何も保存されなかったことを assert しています。リダイレクトされたことを確かめるだけでは、壁が破られていないことの証明にならないからです。
 
-## 2. エイリアス 2 つ、グループ 2 つ
+## 2. 2 つのエイリアスと 2 つのグループ
 
-`routes/web.ts` を置き換えます。
+`routes/web.ts` を次の内容に置き換えます。
 
 ```ts file=routes/web.ts
 import { Router, requireAuthenticated, requireGuest } from '@guren/core'
@@ -293,11 +293,11 @@ export function registerWebRoutes(baseRouter: Router): void {
 }
 ```
 
-- `requireAuthenticated({ redirectTo: '/login' })` は、セッションにユーザーがいるかどうかをガードに尋ね、いなければリダイレクトします。`redirectTo` が無ければ 401 を返します。API が欲しいのはこちらで、第 5 章のプロフィールページもこの形でした。
-- `requireGuest({ redirectTo: '/' })` はその鏡像で、サインアウト状態でしか意味を持たないページのためのものです。
-- `aliasMiddleware` がそれぞれに名前を与え、`router.middleware('auth').group(...)` が中のすべてに適用します。ファイルを上から下へ読むと壁が見えます。公開、ゲスト専用、サインイン専用、また公開。順序が守るべきルールは第 3 章から変わっていません。`/posts/create` は `/posts/:id` より前です。
+- `requireAuthenticated({ redirectTo: '/login' })` は、セッションにユーザーがいるかどうかをガードに問い合わせ、いなければリダイレクトします。`redirectTo` を省くと 401 を返します。API ではこちらが適していて、第 5 章のプロフィールページもこの形でした。
+- `requireGuest({ redirectTo: '/' })` はその逆で、サインアウトした状態でしか意味の無いページに使います。
+- `aliasMiddleware` でそれぞれに名前を付け、`router.middleware('auth').group(...)` でグループ内のすべてのルートに適用します。ファイルを上から読んでいくと、公開、ゲスト専用、サインイン専用、また公開、という壁の配置がそのまま見えます。ルートの順序について守るべきルールは第 3 章から変わらず、`/posts/create` を `/posts/:id` より前に置くことだけです。
 
-次に著者です。まずスキーマを置き換えます。`authorId` は `users` を参照し、今のところ意図的に **nullable** です。
+次は著者です。まずスキーマを置き換えます。`authorId` は `users` を参照する列で、いまはあえて **nullable** にしています。
 
 ```ts file=db/schema.ts
 import { sqliteTable, integer, text } from '@guren/orm/drizzle/sqlite'
@@ -328,7 +328,7 @@ bun run db:make add_author_to_posts
 bun run db:migrate
 ```
 
-そして `store` に、誰が書いたかを記録させます。
+続いて、`store` で投稿の著者を記録するようにします。
 
 ```ts file=app/Http/Controllers/PostController.ts
 import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
@@ -397,23 +397,23 @@ export default class PostController extends Controller {
 }
 ```
 
-ここでの `forceCreate` は意図的な選択なので、少し立ち止まる価値があります。モデルの `fillable` は `title` と `body` を挙げていて、`authorId` はそこにありません。リクエストが投稿の著者を名乗れてはいけないからです。そのため `Post.create({ ...data, authorId: author.id })` は、`authorId` を名指しした `MassAssignmentException` をスローします。`forceCreate` はそのフィルターを迂回しますが、ここでは安全です。渡すオブジェクトの中に、検査を経ずリクエストから来た値がひとつも無いからです。`data` はバリデーターを通っていて、`author.id` はセッションから来ています。ルールは「forceCreate を使うな」ではなく、「サーバーが選んだ値にだけ使う」です。
+ここで `forceCreate` を使っているのは意図的な選択なので、少し詳しく見ておきます。モデルの `fillable` には `title` と `body` だけがあり、`authorId` は含まれていません。投稿の著者をリクエスト側から指定できてはいけないからです。そのため `Post.create({ ...data, authorId: author.id })` と書くと、`authorId` を名指しした `MassAssignmentException` が投げられます。`forceCreate` はこのフィルターを迂回しますが、ここでは問題ありません。渡すオブジェクトには、リクエストから検査を経ずに来た値が 1 つも含まれていないからです。`data` はバリデーターを通過したもので、`author.id` はセッションから取り出したものです。`forceCreate` そのものを避ける必要はなく、サーバーが決めた値にだけ使えばよい、と覚えておいてください。
 
 ```bash run
 bun test
 ```
 
-緑です。では audit を見てみましょう。
+テストが通りました。続いて audit の結果を見てみます。
 
 ```bash run
 bunx guren audit
 ```
 
-認証についての 3 つの警告が消えました。レポートに出るのは対応が必要なものだけなので、何に置き換わったかは `bunx guren audit --json` で確かめます。それらのルートはどれも「Protected by an authentication guard (verified via middleware capabilities)」として合格しています。この最後の言い回しが重要です。`requireAuthenticated` にはフレームワークが刻印したマーカーが付いていて、`audit` が信頼するのは名前ではなくそのマーカーです。自前の `requireLogin` ミドルウェアを書いて `auth` というエイリアスを付けた場合、audit はそのミドルウェアがガード*のような名前*なだけで認識できるものではないと言い、警告を出し続けます。それが正しい答えです。人間であれ機械であれ、レビュアーは名前を見ただけでは、その関数が何かを検査しているかどうか分かりません。
+認証に関する 3 つの警告が消えました。レポートには対応が必要なものしか出ないので、代わりにどう判定されたかは `bunx guren audit --json` で確かめます。どのルートも「Protected by an authentication guard (verified via middleware capabilities)」として合格しています。括弧内の言い回しに意味があります。`requireAuthenticated` にはフレームワークが付けたマーカーがあり、`audit` は名前ではなくこのマーカーを見て判定します。自作の `requireLogin` ミドルウェアに `auth` というエイリアスを付けた場合、audit は、ガード*のような名前*ではあるものの認識できるガードではないと判断し、警告を出し続けます。この判断は正しいものです。人間でも機械でも、レビュアーは名前だけを見て、その関数が本当に何かを検査しているかを見分けられません。
 
-警告はひとつ残りますが、これは間違いではありません。`[warn] [API3] PostController.store force write`、つまりボディをバリデートしたうえで `forceCreate` を呼んでいるメソッドについての警告です。この形のアクションはすべてこの警告を受け取ります。この章でも、これ以降の章でも同じです。
+警告が 1 つ残っていますが、これは誤りではありません。`[warn] [API3] PostController.store force write` は、ボディをバリデートしたうえで `forceCreate` を呼んでいるメソッドに出る警告です。この形のアクションには、この章でもこれ以降の章でも必ずこの警告が出ます。
 
-これは判決ではなくレビューの促しです。`audit` に見えるのは、バリデート済みの入力が `forceCreate` に届くところまでです。データを追って、そのバリデーターが `fillable` の代わりに許可リストの役を果たしていると確かめることはできません。それは上であなたが下した判断で、いまも成り立っています。だからこの警告は、上がるのが正しく、あなたが受け入れるのも正しいのです。同じ理由で、これが失敗になることはありません。下の `guren gate` はこの警告を抱えたまま通ります。消す工夫をするのではなく、読んで判断してください。次の force write は、本当に生のボディを通してしまったものかもしれません。
+この警告は判定ではなく、レビューを促すためのものです。`audit` に分かるのは、バリデート済みの入力が `forceCreate` に渡っていることまでです。データの流れを追って、そのバリデーターが `fillable` の代わりに許可リストの役割を果たしているかまでは確かめられません。そこは上の説明で読者自身が判断したところで、その判断はいまも成り立っています。したがって、この警告が出るのは正しく、それを受け入れるのも正しい対応です。同じ理由で、この警告が失敗扱いになることはなく、下の `guren gate` もこの警告を残したまま通ります。警告が出たら、消す方法を探すのではなく、内容を読んで判断してください。次に出る force write の警告は、本当に生のボディをそのまま渡してしまったものかもしれません。
 
 ```bash run
 bunx guren gate
@@ -424,11 +424,11 @@ git add -A
 git commit -m "feat: protect post mutations and record each post's author"
 ```
 
-## 3. すでにある行
+## 3. 著者のいない既存の行
 
-`authorId` は nullable で、開発用データベースには第 3 章と第 4 章で書いた著者無しの投稿があります。今この列を必須にすると、それらの行で失敗します。よくある回避策、つまりデータベースを落として最初からやり直す方法はデータを捨てるので、アプリを一度デプロイしたあとには使えません。実データを保ったまま進めるマイグレーションは 3 段階です。列を nullable で足し(済み)、埋め、それから必須にします。
+`authorId` は nullable で、開発用データベースには第 3 章と第 4 章で書いた、著者のいない投稿が残っています。この状態で列を必須にすると、それらの行でマイグレーションが失敗します。よくある回避策はデータベースを削除して最初からやり直すことですが、データが失われるので、アプリを一度デプロイしたあとには使えません。実データを残したままマイグレーションするには、列を nullable で追加し(これは済んでいます)、値を埋めてから必須にする、という 3 段階で進めます。
 
-埋める作業はマイグレーションではなくスクリプトで行います。孤児になった投稿を誰のものにするか、というマイグレーションが独断で決めるべきでない判断が入るからです。ここでは、誰もサインインできない「Legacy author」アカウントのものにします。
+値を埋める作業(バックフィル)は、マイグレーションではなくスクリプトで行います。著者のいない投稿を誰のものにするかは、マイグレーションが勝手に決めてよいことではないからです。ここでは、誰もサインインできない「Legacy author」というアカウントに割り当てます。
 
 ```ts file=scripts/backfill-post-authors.ts
 import app from '../src/app.js'
@@ -458,13 +458,13 @@ console.log(`Assigned ${orphans.length} post(s) to ${legacy.name} (#${legacy.id}
 bun scripts/backfill-post-authors.ts
 ```
 
-`forceUpdate` を使う理由は `forceCreate` と同じです。`authorId` は fillable ではなく、この値はこのスクリプトが選んだものです。パスワードにランダムな UUID を使うのは、有効なハッシュを持ちながら誰もパスワードを知らないアカウントにするためです。
+`forceUpdate` を使う理由は `forceCreate` と同じで、`authorId` は fillable ではなく、値はこのスクリプトが決めたものだからです。パスワードにはランダムな UUID を使っているので、このアカウントは有効なハッシュを持ちながら、そのパスワードを誰も知りません。
 
-列を必須にするのが次のスライスで、それはエージェントの仕事です。
+列を必須にする作業は、このあとエージェントに任せます。
 
-## 4. 制約と名前を仕様化する
+## 4. 著者の制約と表示のテストを先に書く
 
-ブログの読者にまだ見えていないものが 2 つあります。すべての投稿に著者がいること、そしてその著者が誰かです。投稿のテストファイルを置き換えます。テストで作る投稿はすべて著者を名指しし、新しいテストを 3 つ足します。スキーマが `authorId` を not null と宣言していること、そして一覧とページが著者名を表示することです。
+ブログの読者には、まだ 2 つのことが見えていません。すべての投稿に著者がいることと、その著者が誰かです。投稿のテストファイルを次の内容に置き換えます。テストで作る投稿にはすべて著者を指定し、新しいテストを 3 つ追加しています。スキーマで `authorId` が not null と宣言されていることを確かめるテストと、一覧ページと投稿ページに著者名が表示されることを確かめるテストです。
 
 ```ts file=tests/PostController.test.ts
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test'
@@ -608,17 +608,19 @@ describe('PostController', () => {
 bun test
 ```
 
-赤が 3 つです。最初の `posts.authorId.notNull` はスキーマそのもののテストです。Drizzle の列オブジェクトは自分の制約を知っているので、「投稿には著者がいる」という決定をデータベース無しで固定できます。
+3 つのテストが失敗します。1 つ目の `posts.authorId.notNull` は、スキーマそのものを検査するテストです。Drizzle の列オブジェクトは自身の制約を保持しているので、「投稿には必ず著者がいる」という決定を、データベースを使わずにテストで固定できます。
 
-## 5. 委ねる
+## 5. エージェントに任せる
 
-エージェントに頼みます。
+エージェントに次のプロンプトを送ります。
 
-> Every post now has an author (`scripts/backfill-post-authors.ts` has run). Make `authorId` on the `posts` table NOT NULL with a new migration, and show each post's author name on the posts list and the post page. Load the authors for a page of posts in one query, not one per post, and keep `PostResource` the one place a post's shape is defined. `tests/PostController.test.ts` describes all of it; make it pass.
+```text
+Every post now has an author (`scripts/backfill-post-authors.ts` has run). Make `authorId` on the `posts` table NOT NULL with a new migration, and show each post's author name on the posts list and the post page. Load the authors for a page of posts in one query, not one per post, and keep `PostResource` the one place a post's shape is defined. `tests/PostController.test.ts` describes all of it; make it pass.
+```
 
-エージェントがデータベースに触れるのはこれが初めてです。この章のハーネス要素は `.claude/skills/db-manage/` の **`db-manage` スキル**なので、エージェントより先に読んでおいてください。このアプリでマイグレーションをどう生成・適用・確認するか(`make:migration`、`db:migrate`、`db:status`)、それらが前進専用であること、そして安全ルールが書かれています。安全ルールとは、破壊的な操作(`db:reset`、`db:fresh`)は影響範囲を示してデータ損失を警告し、確認を取ってからでなければ実行しない、というものです。エージェントがマイグレーションを生成して適用するか、それともリセットの可否を尋ねてくるかを見ていてください。スキルは、その違いをモデルの気分任せにしないために置いてあります。
+エージェントがデータベースを扱うのは、これが初めてです。この章で紹介するハーネスの仕組みは `.claude/skills/db-manage/` にある **`db-manage` スキル**なので、エージェントより先に読んでおいてください。このスキルには、このアプリでのマイグレーションの生成・適用・確認の方法(`make:migration`、`db:migrate`、`db:status`)と、マイグレーションが前進専用であることが書かれています。安全のためのルールもあり、破壊的な操作(`db:reset`、`db:fresh`)は、影響範囲を示してデータが失われることを警告し、利用者に確認を取ってからでなければ実行しないと定めています。エージェントがマイグレーションを生成して適用するのか、それともリセットしてよいかを尋ねてくるのかを見ていてください。どちらになるかをモデルの気まぐれに任せないために、このスキルがあります。
 
-**手元にエージェントが無い場合は、** まずスキーマが一語増え、次にマイグレーション、最後にコードです。
+**手元にエージェントが無い場合は、** まずスキーマに 1 語追加し、次にマイグレーションを作り、最後にコードを書きます。
 
 ```ts file=db/schema.ts fallback
 import { sqliteTable, integer, text } from '@guren/orm/drizzle/sqlite'
@@ -649,7 +651,7 @@ bun run db:make require_post_authors
 bun run db:migrate
 ```
 
-リソースが著者を知るようになります。著者レコードを伴うかもしれない投稿を受け取り、著者の id と名前だけを送ります。
+リソースで著者を扱えるようにします。著者のレコードが付いているかもしれない投稿を受け取り、著者については id と名前だけを出力します。
 
 ```ts file=app/Http/Resources/PostResource.ts fallback
 import { Resource } from '@guren/core'
@@ -755,9 +757,9 @@ export default class PostController extends Controller {
 }
 ```
 
-配列を渡した `User.where({ id: ids })` は `IN` クエリです。著者が何人いようと、投稿 1 ページ分で往復 1 回で済みます。第 9 章では `authorsOf` がリレーションシップと `with('author')` に置き換わり、より少ないコードで同じことをします。そのとき走るクエリは、これと同じものです。
+`User.where({ id: ids })` に配列を渡すと `IN` クエリになります。著者が何人いても、1 ページ分の投稿に対してデータベースとの往復は 1 回で済みます。第 9 章では `authorsOf` をリレーションシップと `with('author')` に置き換え、より少ないコードで同じことを実現します。そのとき実行されるクエリも、これと同じです。
 
-2 つのページが名前をレンダリングします。
+2 つのページで著者名を表示します。
 
 ```tsx file=resources/js/pages/posts/Index.tsx fallback
 import { Head, Link } from '@inertiajs/react'
@@ -862,15 +864,15 @@ bun run codegen
 bun test
 ```
 
-rubric は次のとおりです。
+確認項目は次のとおりです。
 
-- `db/migrations/` の下に新しいマイグレーションフォルダがあり、`bun run db:status` が適用済みと表示する。トランスクリプトに `db:reset` も `db:fresh` も無い。エージェントがそれを提案したなら先に確認を取ったはずで、それはスキルが働いた証拠であり、答えは「いいえ」だった。
-- `authorId` はスキーマで `notNull()` になっており、相変わらず `fillable` には入っていない。
-- 一覧は著者を `IN` クエリ 1 回で読み込んでいる。map の中の `User.find` ではない。
-- `PostResource` は相変わらず投稿の形が書かれた唯一の場所で、出力する著者は id と名前であって、ユーザーレコードではない。
-- 14 件のテストがすべて緑。
+- `db/migrations/` の下に新しいマイグレーションのフォルダがあり、`bun run db:status` で適用済みと表示される。トランスクリプトに `db:reset` も `db:fresh` も無い。エージェントがどちらかを提案していたなら、実行前に確認を求めてきたはずで(スキルが機能している証拠)、その答えは「いいえ」だった。
+- `authorId` がスキーマで `notNull()` になっていて、`fillable` には含まれていないまま。
+- 一覧は著者を 1 回の `IN` クエリで読み込んでいる。map の中で `User.find` を呼んでいない。
+- 投稿の形を書いている場所は相変わらず `PostResource` だけで、出力する著者は id と名前だけ(ユーザーレコードそのものではない)。
+- 14 件のテストがすべて通る。
 
-**チェックポイント:** [http://localhost:3333/posts](http://localhost:3333/posts) の投稿一覧で、この章より前に書いた投稿には「by Legacy author」、これから書く投稿にはあなたの名前が付きます。
+**チェックポイント:** [http://localhost:3333/posts](http://localhost:3333/posts) の投稿一覧で、この章より前に書いた投稿には「by Legacy author」、これから書く投稿には自分の名前が表示されます。
 
 ![投稿一覧。「Posts」の見出しと New post ボタン、そしてカードが 2 枚。各カードにタイトル、「by Ada」の署名、本文の書き出しが並ぶ。](../../images/tutorial-posts-index.png)
 
@@ -883,9 +885,9 @@ git add -A
 git commit -m "feat: require an author on every post and show it"
 ```
 
-## `add auth` なら何をくれていたか
+## `add auth` を使っていたら生成されたもの
 
-セッション、ガード、ハッシュ、CSRF トークン、ログインの壁がそれぞれ何なのかは、自分で組んだので分かっています。ジェネレーターを見るのはこのタイミングです。先に `bun run dev` をそのターミナルで Ctrl-C で止めてから、使い捨てのブランチで試します。
+セッション、ガード、ハッシュ、CSRF トークン、ログインの壁は、どれも自分で組み立てたので、それぞれが何をするものか分かっているはずです。ジェネレーターの出力を見るには、ちょうどよい時期です。まず `bun run dev` を実行しているターミナルで Ctrl-C を押してサーバーを止め、あとで捨てるブランチの上で試します。
 
 ```bash manual
 git switch -c scratch/add-auth
@@ -899,34 +901,34 @@ git branch -D scratch/add-auth
 bun run db:status
 ```
 
-サーバーを先に止めるのは、`add auth` が `src/app.ts` を書き換え、動いている dev サーバーがその変更でリロードするからです。リロードでアプリが起動し、`add auth` が書いたばかりのマイグレーションを適用して、デモユーザーのシーダーも実行します。差分を読むより前の出来事です。データベースに入ったものを git のコマンドで取り出すことはできません。
+サーバーを先に止めるのには理由があります。`add auth` は `src/app.ts` を書き換えるので、dev サーバーが動いていると、その変更をきっかけにリロードが走ります。リロードでアプリが起動すると、`add auth` が書いたばかりのマイグレーションが適用され、デモユーザーのシーダーも実行されます。差分を読む前にそこまで進んでしまい、データベースに入ったものは git のコマンドでは取り消せません。
 
-`reset` と `clean` も行儀の話ではありません。`git switch main` と `git branch -D` が動かすのは参照だけで、どちらもコミットしていない作業を元には戻しません。省けば `add auth` が書いたものは、`db/migrations/` の下のマイグレーションフォルダも含めて `main` の作業ツリーに残り、次の起動で適用されます。8 章あとの第 14 章では `sessions` テーブルを自分で作るので、そのマイグレーションがすでにあるテーブルの上で失敗します。
+`reset` と `clean` も、単なる後片付けではありません。`git switch main` と `git branch -D` は参照を動かすだけで、コミットしていない作業はどちらを使っても元に戻りません。この 2 つを省くと、`add auth` が書いたファイルが `db/migrations/` の下のマイグレーションフォルダも含めて `main` の作業ツリーに残り、次の起動時に適用されてしまいます。8 章先の第 14 章では `sessions` テーブルを自分で作るので、そのときのマイグレーションが、すでに存在するテーブルにぶつかって失敗します。
 
-`git clean` のあとにも、ファイルがひとつ意図どおり残ります。`.env` は git の管理対象外で、`add auth` はその末尾にブロックを 2 つ追記しています。メールの送信方法についてのコメントで始まり `MAIL_MAILER` と `SMTP_*` を設定するブロックと、`config/session.ts` についてのコメントで始まり `SESSION_DRIVER` を設定するブロックです。どちらも削除してください。そのうえで `db:status` がすべてのマイグレーションを applied と表示し、orphaned がひとつも無ければ元どおりです。orphaned が出た場合は、止める前にサーバーがリロードしています。`bun run db:reset` で手元のマイグレーションからデータベースを作り直せますが、行はすべて消えます。`bun run dev` をもう一度起動します。
+`git clean` を実行しても、`.env` だけは意図どおり残ります。`.env` は git の管理対象外で、`add auth` はその末尾に 2 つのブロックを追記しています。メールの送信方法についてのコメントで始まり `MAIL_MAILER` と `SMTP_*` を設定するブロックと、`config/session.ts` についてのコメントで始まり `SESSION_DRIVER` を設定するブロックです。どちらも削除してください。そのあと `db:status` で、すべてのマイグレーションが `applied`(適用済み)と表示され、`orphaned`(孤立)が 1 つも無ければ元どおりです。`orphaned` が出た場合は、サーバーを止める前にリロードが走っています。`bun run db:reset` を実行すると手元のマイグレーションからデータベースを作り直せますが、行はすべて消えます。最後に `bun run dev` をもう一度起動します。
 
-`git diff` でなく `git status` を使うのは、`add auth` が既存のファイルを変えるだけでなく新しいファイルも作り、`main` との diff には未追跡の新しいファイルが出てこないからです。一覧の大半は、自分で書いたものと同じ形です。モデル、プロバイダー、2 つのコントローラー、バリデーター。残りは書かなかった部分です。パスワードを忘れたとき用のページとリセット用のページ、それをつなぐメール、「ログイン状態を保持する」トークン、デモユーザーのシーダー、ダッシュボード。メールアドレスの確認は含まれません。それを加えるジェネレーターは `bunx guren make:auth --verify` です。これ以降、コースでそのどれかが必要になったらジェネレーターを使います。そのとき生成されたものは、もう読めるはずです。
+`add auth` は既存のファイルを変更するだけでなく、新しいファイルも作ります。`main` との `git diff` には未追跡の新しいファイルが表示されないので、`git status` を使います。一覧の大半は、モデル、プロバイダー、2 つのコントローラー、バリデーターといった、自分で書いたものと同じ形のファイルです。残りは自分では書かなかったもので、パスワードを忘れたときのページとリセット用のページ、その 2 つをつなぐメール、「ログイン状態を保持する」トークン、デモユーザーのシーダー、ダッシュボードがあります。メールアドレスの確認機能は含まれておらず、それを追加するジェネレーターは `bunx guren make:auth --verify` です。これ以降、このコースでこれらの機能が必要になったときはジェネレーターを使います。生成されたコードも、いまなら読めるはずです。
 
-## いまいる場所
+## ここまでの状態
 
-- 投稿の変更、プロフィール、ログアウトは `requireAuthenticated` の内側に、ログインと登録のページは `requireGuest` の内側に。
-- 読める audit。認証の警告には答え、force write の警告は意図どおりとして受け入れ、それが名前ではなくフレームワークのガードを信頼する理由も分かった状態。
-- 行をひとつも失わずに足した、すべての投稿の著者。nullable、埋める、必須。
-- `db-manage` スキルのルールの下で行われた、エージェントの最初のマイグレーション。
+- 投稿の変更、プロフィール、ログアウトは `requireAuthenticated` で、ログインと登録のページは `requireGuest` で守られています。
+- audit の結果を読めるようになりました。認証の警告には対応し、force write の警告は意図して受け入れています。audit が名前ではなくフレームワークのガードを信頼する理由も分かっています。
+- nullable で追加し、値を埋め、必須にするという手順で、行を 1 つも失わずにすべての投稿に著者を設定しました。
+- エージェントの最初のマイグレーションを、`db-manage` スキルのルールに沿って実行しました。
 
 ## よくあるつまずき
 
-- **`.middleware('auth')` がコンパイルできない。** `aliasMiddleware()` はその名前を知っている新しいルーター型を返しますが、その結果を受け取っていません。上のファイルのようにチェーンして代入してください。
-- **サインイン済みのテストが `/login` にリダイレクトされる。** `actingAs()` は `withCsrf()` より前でなければなりません。用意のためのリクエストも認証済みである必要があります。どちらも新しいクライアントを返すので、代入し直してください。
-- **`db:migrate` が「NOT NULL constraint failed」で失敗する。** まだ著者の無い投稿があります。先に `bun scripts/backfill-post-authors.ts` を実行してください。順序こそが第 3 節の要点です。
-- **`store` が `MassAssignmentException` で 500 を返す。** `store` が `Post.create` に `authorId` を渡しましたが、`fillable` はそれを挙げていません。サーバーが選んだ値で `forceCreate` を使ってください。
-- **一覧の著者がすべて「unknown」になる。** `IN` クエリに渡した id の型が違うか、map のキーがユーザーの id 以外です。`authors` を一度ログに出してください。著者ごとに 1 エントリあるはずです。
+- **`.middleware('auth')` がコンパイルできない。** `aliasMiddleware()` はその名前を知っている新しいルーター型を返しますが、その戻り値を受け取っていません。上のファイルのように、チェーンして変数に代入してください。
+- **サインイン済みのテストが `/login` にリダイレクトされる。** `actingAs()` は `withCsrf()` より前に呼ぶ必要があります。トークンを用意するリクエストも認証済みでなければならないからです。どちらも新しいクライアントを返すので、戻り値を代入し直してください。
+- **`db:migrate` が「NOT NULL constraint failed」で失敗する。** 著者のいない投稿がまだ残っています。先に `bun scripts/backfill-post-authors.ts` を実行してください。第 3 節の手順は、この順序で進めることに意味があります。
+- **`store` が `MassAssignmentException` で 500 を返す。** `store` が `Post.create` に `authorId` を渡していますが、`fillable` には含まれていません。サーバーが決めた値には `forceCreate` を使ってください。
+- **一覧の著者がすべて「unknown」になる。** `IN` クエリに渡した id の型が違うか、map のキーがユーザーの id になっていません。`authors` を一度ログに出してみてください。著者ごとに 1 件ずつ入っているはずです。
 
 ## 演習
 
-1. `/posts/create` を開いたゲストは `/login` にリダイレクトされます。では `/posts` に POST したゲストはどうなりますか。推測する前にテストを書いて確かめてください。そのうえで、その挙動が望ましいかどうかを答えてください。
-2. backfill のスクリプトは `authorId` の無い行を埋めました。ブランチを切って列をもう一度 nullable に戻し、適用せずに `bun run db:make` を走らせてください。SQL を読んでください。SQLite が列の変更ではなくテーブルの作り直しを選ぶのはなぜですか。終わったら `git branch -D` だけで済ませず、`git reset --hard` と `git clean -fd` で元に戻してください。
+1. `/posts/create` を開いたゲストは `/login` にリダイレクトされます。では、`/posts` に POST したゲストはどうなるでしょうか。推測する前にテストを書いて確かめ、そのうえで、その挙動が望ましいものかどうかを考えてください。
+2. 埋め戻しのスクリプトで、`authorId` が空だった行に値を入れました。ブランチを切って列を nullable に戻し、適用はせずに `bun run db:make` を実行してください。生成された SQL を読み、SQLite が列の変更ではなくテーブルの作り直しを選ぶ理由を考えてください。終わったら `git branch -D` だけで済ませず、`git reset --hard` と `git clean -fd` で元に戻してください。
 
 ## 次へ
 
-[第 7 章: 認可、そしてゲートに見えないもの](./07-authorization.md) では、ポリシーで編集と削除を著者だけのものにし、それから認可に触れないままエージェントに機能を頼み、あなたの安全装置のどれが気づくかを見ます。
+[第 7 章: 認可と、ゲートが見逃すもの](./07-authorization.md) では、ポリシーを使って投稿の編集と削除を著者だけに許可します。そのあと認可には触れずにエージェントへ機能を頼み、用意してきた安全装置のうちどれがそれに気づくかを確かめます。
