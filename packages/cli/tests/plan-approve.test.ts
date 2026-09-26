@@ -102,7 +102,9 @@ describe('guren plan:approve', () => {
       approval: { hash, approvedBy: 'Approver <approver@example.com>' },
       alreadyApproved: false,
     })
-    expect(report.stamped!.unstamped.map((entry) => entry.id)).toContain('validator.comment')
+    // A validator is read by its exported schema symbol, so it is hashed like any other element.
+    expect(Object.keys(contextHash)).toContain('validator.comment')
+    expect(report.stamped!.unstamped).toEqual([])
     expect((await readPlanApprovals(plan)).value!.approvals).toEqual([report.approval])
   })
 
@@ -160,7 +162,7 @@ describe('guren plan:approve', () => {
     expect(await readFile(plan, 'utf8')).toBe(before)
   })
 
-  test('should refuse while a section other than validators cannot be read, unless told to approve without it', async () => {
+  test('should refuse while a section cannot be read, unless told to approve without it', async () => {
     const { app, plan } = await createApp('unstamped', answeredPlan())
     const before = await readFile(plan, 'utf8')
     const unread = planAppState({ tables: { unreadable: 'db/schema.ts declared no table this parser could read' } })
@@ -171,7 +173,18 @@ describe('guren plan:approve', () => {
     expect(await readFile(plan, 'utf8')).toBe(before)
 
     const report = await planApproveFile(plan, { app: unread, appRoot: app, allowUnstamped: true, now: NOW })
-    expect(report.stamped!.unstamped.map((entry) => entry.id)).toEqual(expect.arrayContaining(['model.post', 'column.post.id', 'validator.comment']))
+    const unstamped = report.stamped!.unstamped.map((entry) => entry.id)
+    expect(unstamped).toEqual(expect.arrayContaining(['model.post', 'column.post.id']))
+    expect(unstamped).not.toContain('validator.comment')
+  })
+
+  test('should refuse while the validators cannot be read, as for any other section', async () => {
+    const { app, plan } = await createApp('unstamped-validators', answeredPlan())
+    const unread = planAppState({ validators: { unreadable: 'app/Http/Validators/PostValidator.ts could not be read for its exported schemas' } })
+
+    await expect(planApproveFile(plan, { app: unread, appRoot: app })).rejects.toThrow(
+      /The application's validators could not be read[\s\S]*  validator\.comment: [\s\S]*PostValidator\.ts[\s\S]*--allow-unstamped/,
+    )
   })
 
   test('should take --allow-unstamped on the command line', async () => {
@@ -316,6 +329,51 @@ describe('guren plan:approve after implementation starts', () => {
     expect(rendered.checks.find((result) => result.elementId === 'policy.post')).toMatchObject({ key: 'plan:app-missing', status: 'pass', message: expect.stringMatching(/^Built by this plan: the name is gone because the plan removed it/) })
   })
 
+  test('should settle an added validator once its file exports the planned schema symbol', async () => {
+    const { app, plan } = await createApp('reapprove-validator', answeredPlan())
+    await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
+    await writeWorkspaceFiles(app, { 'app/Http/Validators/CommentValidator.ts': 'export const CommentPayloadSchema = {}\n' })
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'validator')
+    await editGoal(plan)
+
+    const report = await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
+    expect(report.builtByPlan).toEqual(['validator.comment'])
+  })
+
+  test('should warn rather than refuse on a built validator a baseline stamped before validators were read', async () => {
+    const { app, plan } = await createApp('reapprove-legacy-validator', answeredPlan())
+    // Such a baseline holds a hash for every element but the validators.
+    const legacy = async () => ({ ...(await loadPlanAppState(app)), validators: { unreadable: 'validators were not read' } })
+    await planApproveFile(plan, { app: legacy, appRoot: app, allowUnstamped: true, now: NOW })
+    const { baseline } = JSON.parse(await readFile(plan, 'utf8')) as { baseline: { contextHash: Record<string, string> } }
+    expect(baseline.contextHash).not.toHaveProperty('validator.comment')
+    await writeWorkspaceFiles(app, { 'app/Http/Validators/CommentValidator.ts': 'export const CommentPayloadSchema = {}\n' })
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'validator')
+    await editGoal(plan)
+
+    const report = await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
+    expect(report.builtByPlan ?? []).toEqual([])
+    const { checks } = await renderPlanFile(plan, { app: () => loadPlanAppState(app), output: join(app, 'page.html') })
+    expect(checks.filter((result) => result.elementId === 'validator.comment' && result.status !== 'pass')).toEqual([
+      expect.objectContaining({ key: 'plan:app-unjudged', status: 'warn', message: expect.stringContaining('stamped before validators were read') }),
+    ])
+  })
+
+  test('should still refuse a validator a revision adds under a name the application already exports', async () => {
+    const { app, plan } = await createApp('reapprove-validator-collision', answeredPlan())
+    await writeWorkspaceFiles(app, { 'app/Http/Validators/PostValidator.ts': 'export const PostPayloadSchema = {}\n' })
+    git(app, 'add', '-A')
+    git(app, 'commit', '-q', '-m', 'post validator')
+    await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
+    await editPlan(plan, (revised) => {
+      ;(revised as unknown as { validators: Array<Record<string, unknown>> }).validators[0]!.name = 'PostPayloadSchema'
+    })
+
+    await expect(planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app })).rejects.toThrow(/validator\.comment: The validator "PostPayloadSchema" already exists/)
+  })
+
   test('should settle an added route once it is registered under its name at its planned endpoint', async () => {
     const { app, plan } = await createApp('reapprove-route', reshapingPlan())
     await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
@@ -421,7 +479,10 @@ describe('plan:status freshness', () => {
     const text = formatPlanStatus(moved)
     expect(text).toContain('Against the approved baseline: fresh ')
     expect(text).toContain('  stale  column.post.id: What the scanners read for it changed since approval, to neither what was stamped nor what the plan leaves.')
-    expect(text).toContain('  unjudged: validator.comment')
+    expect(text).not.toContain('  unjudged:')
+
+    const unreadValidators = await planStatusFile(plan, { app: planAppState({ validators: { unreadable: 'a validator file did not parse' } }), appRoot: app })
+    expect(formatPlanStatus(unreadValidators)).toContain('  unjudged: validator.comment')
   })
 })
 

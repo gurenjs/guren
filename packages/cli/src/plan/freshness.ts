@@ -36,7 +36,8 @@ export interface PlanElementFreshness {
   reason?: string
   /**
    * On a `fresh` that does not match its stamp: `built` when the stamp is the state the plan
-   * starts this element from, so the change is the plan's own work; `end` otherwise.
+   * starts this element from, so the change is the plan's own work; `end` otherwise. On an
+   * `unstamped` element, `end` when the application reads as the plan leaves it.
    */
   basis?: 'end' | 'built'
   /** On every verdict but `fresh`: the elements naming this one (`listPlanReferences()`), whose steps depend on it. */
@@ -272,7 +273,8 @@ export function judgeFreshness(plan: PlanDraft & { baseline: { contextHash: Reco
     if ('unreadable' in now) return { ...base, verdict: 'unjudged', reason: now.unreadable }
     const before = Object.hasOwn(stamped, id) ? stamped[id] : undefined
     if (before === undefined) {
-      return { ...base, verdict: 'unstamped', reason: 'No context was stamped for it: a revision named it after approval, or its section could not be read then.' }
+      const reason = 'No context was stamped for it: a revision named it after approval, or its section could not be read then.'
+      return { ...base, verdict: 'unstamped', reason, ...(now.hash === now.end ? { basis: 'end' as const } : {}) }
     }
     if (before === now.hash) return { ...base, verdict: 'fresh' }
     if (now.hash === now.end) {

@@ -495,25 +495,46 @@ interface ValidatorRead {
   symbols: SchemaSymbols
 }
 
+/** One validator file's exported schema symbols, read without importing it. */
+export interface PlanAppValidatorExports {
+  filePath: string
+  /** App-relative, POSIX separators. */
+  file: string
+  module: PlanAppScope
+  names: string[]
+}
+
 /**
- * Validators by exported symbol, with the fields each holds and the identity of the
- * objects, which answers "is this the schema a route registered". Both need the file
- * imported; one that would not import leaves its own symbols unmatchable and their
- * fields unread, never the section unreadable. Barrels are excluded as for models: a
- * re-export belongs to the file that declares it.
+ * The exported schema symbols of every validator file, by AST: the names a plan gives its
+ * validators. The §2 checks read these, and {@link validatorDetail} imports the same files
+ * for their fields, so the two cannot disagree about which validators exist. Barrels are
+ * excluded as for models: a re-export belongs to the file that declares it.
  */
-async function validatorDetail(root: string, cache: ParseCache, contracts: Set<object>): Promise<ValidatorRead> {
-  const files = excludeBarrelFiles(await discoverValidatorFiles(root))
-  const symbols: SchemaSymbols = new Map()
-  const validators: PlanAppValidatorDetail[] = []
-  for (const filePath of files) {
+export async function readValidatorExports(root: string, cache: ParseCache): Promise<PlanAppValidatorExports[] | PlanAppUnreadable> {
+  const read: PlanAppValidatorExports[] = []
+  for (const filePath of excludeBarrelFiles(await discoverValidatorFiles(root))) {
     const file = toPosixRelative(root, filePath)
     const parsed = await cache.get(filePath)
     const names = parsed ? exportedNames(parsed.ast, 'this file') : null
     // One unread file makes every absent name unprovable, as with the controller scan.
-    if (names === null) return { validators: { unreadable: `${file} could not be read for its exported schemas` }, symbols }
-    const module = moduleNameFromRelPath(file)
-    const exported = names.filter((name) => name !== 'default')
+    if (names === null) return { unreadable: `${file} could not be read for its exported schemas` }
+    read.push({ filePath, file, module: moduleNameFromRelPath(file), names: names.filter((name) => name !== 'default') })
+  }
+  return read
+}
+
+/**
+ * Validators by exported symbol, with the fields each holds and the identity of the
+ * objects, which answers "is this the schema a route registered". Both need the file
+ * imported; one that would not import leaves its own symbols unmatchable and their
+ * fields unread, never the section unreadable.
+ */
+async function validatorDetail(root: string, cache: ParseCache, contracts: Set<object>): Promise<ValidatorRead> {
+  const symbols: SchemaSymbols = new Map()
+  const exports = await readValidatorExports(root, cache)
+  if (!Array.isArray(exports)) return { validators: exports, symbols }
+  const validators: PlanAppValidatorDetail[] = []
+  for (const { filePath, file, module, names: exported } of exports) {
     const imported = await importValidatorFile(filePath)
     if (typeof imported === 'string') {
       const fields = { unreadable: `${file} would not import (${imported})` }

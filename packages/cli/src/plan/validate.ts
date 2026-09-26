@@ -26,7 +26,7 @@ import {
 } from './app-state'
 import { actionTargets, columnTargets, endpointKey, NAMED_APP_SECTIONS, namedTargets, routeTarget, tableTarget, type PlanAppTarget } from './app-targets'
 import { PLAN_COMMAND_FORM, refusedPlanCommands } from './command-allowlist'
-import { judgeFreshness } from './freshness'
+import { judgeFreshness, type PlanElementFreshness } from './freshness'
 import { listPlanReferences } from './references'
 import {
   findDuplicatePlanIds,
@@ -82,15 +82,39 @@ const APP_FACT_FINDINGS: ReadonlySet<string> = new Set(['plan:app-collision', 'p
  */
 export function settleBuiltFindings(plan: PlanDraft | Plan, app: PlanAppState, checks: PlanCheckResult[]): { checks: PlanCheckResult[]; built: string[] } {
   if (!hasBaseline(plan)) return { checks, built: [] }
-  const builtIds = new Set(judgeFreshness(plan, app).elements.filter((element) => element.basis === 'built').map((element) => element.id))
+  const elements = judgeFreshness(plan, app).elements
+  const builtIds = new Set(elements.filter((element) => element.verdict === 'fresh' && element.basis === 'built').map((element) => element.id))
+  const unstampedValidators = unstampedValidatorsAtEnd(plan, elements)
   const built = new Set<string>()
   const settled = checks.map((result) => {
-    if (result.status !== 'fail' || !APP_FACT_FINDINGS.has(result.key) || result.elementId === undefined || !builtIds.has(result.elementId)) return result
+    if (result.status !== 'fail' || !APP_FACT_FINDINGS.has(result.key) || result.elementId === undefined) return result
+    if (unstampedValidators.has(result.elementId)) {
+      return { ...result, key: 'plan:app-unjudged', status: 'warn' as const, message: `${result.message} ${UNSTAMPED_VALIDATOR_NOTE}` }
+    }
+    if (!builtIds.has(result.elementId)) return result
     built.add(result.elementId)
     const fact = result.key === 'plan:app-collision' ? 'the name is already there because the plan put it there' : 'the name is gone because the plan removed it'
     return { ...result, status: 'pass' as const, message: `Built by this plan: ${fact}, and the application reads as the plan leaves this element.` }
   })
   return { checks: settled, built: [...built] }
+}
+
+const UNSTAMPED_VALIDATOR_NOTE =
+  'The baseline was stamped before validators were read and holds no hash for it, so whether this plan built it cannot be told; the application reads as the plan leaves it.'
+
+/**
+ * Validators of a baseline that stamps none of the plan's validators, which is every baseline
+ * stamped before `loadPlanAppState()` read them, and that the application reads as the plan
+ * leaves them. Their finding is a warning rather than a pass: the plan's own work and someone
+ * else's same-named export look alike. `plan:scaffold` still refuses to write over an export.
+ */
+function unstampedValidatorsAtEnd(plan: Plan, elements: ReadonlyArray<PlanElementFreshness>): Set<string> {
+  if (plan.validators.some((validator) => Object.hasOwn(plan.baseline.contextHash, validator.id))) return new Set()
+  return new Set(
+    elements
+      .filter((element) => element.section === 'validators' && element.verdict === 'unstamped' && element.basis === 'end')
+      .map((element) => element.id),
+  )
 }
 
 export function validatePlan(plan: PlanDraft, app: PlanAppState): PlanCheckResult[] {
