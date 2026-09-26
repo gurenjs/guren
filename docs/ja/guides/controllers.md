@@ -1,9 +1,9 @@
 # コントローラーガイド
 
-コントローラーは、受信した HTTP リクエストを処理し、モデルを通じてデータを取得し、Inertia や JSON ペイロードでレスポンスを返す役割を担います。すべてのコントローラーは `app/Http/Controllers/` に配置し、フレームワークの `Controller` 基底クラスを継承します。このガイドでは、コントローラーと `routes/web.ts` で定義されるルートとの接続方法も説明します。
+コントローラーは HTTP リクエストを受け取り、モデルを通してデータを取得して、Inertia のページや JSON でレスポンスを返します。コントローラーはすべて `app/Http/Controllers/` に置き、フレームワークの `Controller` 基底クラスを継承します。このガイドでは、`routes/web.ts` で定義したルートとコントローラーをつなぐ方法も説明します。
 
 ## ルーティングの基本
-ルートは `routes/web.ts` で registrar を export して登録します。コントローラーをインポートして、HTTP メソッドとパスにマッピングしましょう。
+ルートは、`routes/web.ts` から export した registrar の中で登録します。コントローラーを import し、HTTP メソッドとパスに割り当ててください。
 
 ```ts
 // routes/web.ts
@@ -17,22 +17,22 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
-- 各ルートはパスと `[コントローラークラス, 'メソッド名']` のタプルを受け取ります。
-- `router.group('/posts', (posts) => { ... })` でプレフィックスとミドルウェアを共有できます。
-- `src/app.ts` で `createApp({ routes: registerWebRoutes })` に渡すことで、起動時にルートが登録されます。
+- 各ルートには、パスと `[コントローラークラス, 'メソッド名']` のタプルを渡します。
+- `router.group('/posts', (posts) => { ... })` を使うと、複数のルートでプレフィックスとミドルウェアを共有できます。
+- registrar を `src/app.ts` で `createApp({ routes: registerWebRoutes })` に渡すと、起動時にルートが登録されます。
 
-より複雑な構成の場合は、追加のルートファイル（例: `routes/api.ts`）を作成し、同様に `src/app.ts` で合成できます。
+構成が複雑になってきたら、`routes/api.ts` のようにルートファイルを増やし、同じように `src/app.ts` でまとめて登録できます。
 
-グループ、ミドルウェア、インラインハンドラーの詳細は[ルーティングガイド](./routing.md)をご覧ください。
+グループ、ミドルウェア、インラインハンドラーの詳細は[ルーティングガイド](./routing.md)を参照してください。
 
 ## コントローラーの作成
-CLI を使ってコントローラーファイルをスキャフォールドできます。
+コントローラーのファイルは CLI で雛形生成できます。
 
 ```bash
 bunx guren make:controller PostsController
 ```
 
-ジェネレーターは `PostsController.ts` を `app/Http/Controllers/` に配置し、最小限のクラス定義を生成します。手動で作成することもできます。その場合は、`Controller` を継承するクラスをデフォルトエクスポートしてください。
+このコマンドを実行すると、最小限のクラス定義を書いた `PostsController.ts` が `app/Http/Controllers/` にできます。手で作っても構いません。その場合は、`Controller` を継承したクラスを default export してください。
 
 ```ts
 // app/Http/Controllers/PostsController.ts
@@ -69,7 +69,7 @@ export default class PostsController extends Controller {
 
 ## 依存性注入
 
-コントローラーは `static inject` を使ったコンストラクタベースの依存性注入をサポートしています。コントローラーが必要とするコンテナキーを宣言すると、Guren がインスタンス化時に自動的に解決します。
+コントローラーでは、`static inject` を使ってコンストラクタに依存を注入できます。必要なサービスのコンテナキーを宣言しておくと、Guren がコントローラーを生成するときに自動で解決して渡します。
 
 ```ts
 import { Controller } from '@guren/core'
@@ -105,10 +105,10 @@ export default class PostsController extends Controller {
 }
 ```
 
-`inject` に `as const` を付けることで型が保たれます。配列内の各文字列は、サービスコンテナに登録されたキーに対応します。
+`inject` に `as const` を付けると、型の情報が失われません。配列の各文字列は、サービスコンテナに登録したキーに対応します。
 
 ## ルート登録
-コントローラーは `routes/web.ts` の registrar からルートに接続します。
+コントローラーとルートは、`routes/web.ts` の registrar の中で結び付けます。
 
 ```ts
 import { Router } from '@guren/core'
@@ -120,15 +120,15 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
-`[Controller, 'method']` のタプルが、どのクラスをインスタンス化してどのメソッドを呼ぶかを決めます。メソッドは非同期でもかまいません。
+`[Controller, 'method']` のタプルで、リクエストごとにどのクラスを生成してどのメソッドを呼ぶかが決まります。メソッドは非同期でも構いません。
 
 ## リクエストへのアクセス
-- `this.ctx` で Hono コンテキスト全体にアクセスできます。ヘッダーやレスポンスヘルパーも含まれます。
-- `this.request` で基底の `Request` オブジェクトを取得できます。
+- `this.ctx` で Hono のコンテキスト全体を扱えます。ヘッダーやレスポンスのヘルパーもここから使えます。
+- `this.request` で元の `Request` オブジェクトを取得できます。
 
 ### 入力ヘルパー
 
-コントローラーには、リクエスト入力を読み取るための便利なメソッドが用意されています。
+コントローラーには、リクエストの入力を読むためのメソッドが用意されています。
 
 ```ts
 // 単一の入力値を読み取る（JSON ボディまたはフォームデータから）
@@ -146,21 +146,21 @@ if (await this.has('email')) {
 }
 ```
 
-これらのヘルパーは JSON とフォームエンコードの両方のリクエストボディで動作します。ボディを読み取るメソッド（`input`、`only`、`except`、`has`）はリクエストボディを非同期でパースするため `await` が必要です。`query` メソッドは URL クエリパラメータから読み取るため同期的です。
+これらのヘルパーは、JSON とフォームエンコードのどちらのリクエストボディでも使えます。ボディを読むメソッド（`input`、`only`、`except`、`has`）はリクエストボディを非同期でパースするので、`await` が必要です。`query` メソッドは URL のクエリパラメータを読むだけなので、同期的に値を返します。
 
 ## レスポンスの返却
 
 | ヘルパー | 用途 |
 |--------|---------|
-| `this.inertia(component, props, options?)` | `resources/js/pages/<component>.tsx` を使って Inertia ページをレンダリングします。`Promise<Response>` を返すため、コントローラーアクションは `async` にして `return` で直接返してください。 |
-| `this.view(component, props, options?)` | `app/View/` のコンポーネントをサーバーレンダリング HTML として返します。公開・読み取り中心のページ向けです。詳細は[サーバーレンダリングビュー](./views.md)を参照してください。 |
+| `this.inertia(component, props, options?)` | `resources/js/pages/<component>.tsx` で Inertia ページを描画します。`Promise<Response>` を返すので、コントローラーのアクションは `async` にして、戻り値をそのまま `return` してください。 |
+| `this.view(component, props, options?)` | `app/View/` のコンポーネントを、サーバーで描画した HTML として返します。公開ページや閲覧が中心のページに向いています。詳細は[サーバーレンダリングビュー](./views.md)を参照してください。 |
 | `this.json(data, init?)` | ステータス 200 で JSON を返します。 |
 | `this.created(data)` | ステータス 201 で JSON を返します。 |
 | `this.accepted(data)` | ステータス 202 で JSON を返します。 |
 | `this.noContent()` | 空の 204 レスポンスを返します。 |
-| `this.redirect(url, status?)` | 別の場所にリダイレクトします（デフォルトステータス 302）。 |
+| `this.redirect(url, status?)` | 別の URL へリダイレクトします（ステータスの既定値は 302）。 |
 
-`this.inertia()` は Inertia ページの `url` にクエリ文字列を含むリクエストパス（例: `/posts?page=2`）を設定します。クライアント側の `usePage().url` はこの値を返します。上書きしたい場合のみ `url` オプションを渡してください。
+`this.inertia()` は、Inertia ページの `url` に、クエリ文字列を含むリクエストパス（例: `/posts?page=2`）を設定します。クライアント側で `usePage().url` が返すのはこの値です。別の値にしたいときだけ、`url` オプションを渡してください。
 
 ### レスポンスヘルパーの例
 
@@ -186,13 +186,13 @@ export default class PostsController extends Controller {
 }
 ```
 
-各コントローラーメソッドからこれらのヘルパーのいずれかを返してください。カスタムヘッダーが必要な場合は、`return this.ctx.newResponse(body, init)` で `Response` を手動作成できます。
+コントローラーの各メソッドからは、これらのヘルパーのどれかを返してください。独自のヘッダーを付けたい場合は、`return this.ctx.newResponse(body, init)` で `Response` を自分で組み立てられます。
 
 ## バリデーション
 
 ### ルートコントラクト（推奨）
 
-ルートが `params`、`query`、`body` のスキーマを宣言していれば、フレームワークがアクションの実行前にリクエストを検証し、失敗時は 422 を返します。アクションは検証をやり直さず、パース済みの値を読みます。
+ルートに `params`、`query`、`body` のスキーマを宣言しておくと、アクションが実行される前にフレームワークがリクエストを検証し、失敗すれば 422 を返します。アクションの中で検証をやり直す必要はなく、パース済みの値を読むだけで済みます。
 
 ```ts
 // routes/web.ts
@@ -208,11 +208,11 @@ export default class PostsController extends Controller {
 }
 ```
 
-`this.validated(routeName)` は、スキーマがパースした `{ params, query, body }` を返します。`guren codegen` の実行後はルートコントラクトから型が付きます。詳しくは[検証済み入力の読み取り](./routing.md#検証済み入力の読み取り)を参照してください。
+`this.validated(routeName)` は、スキーマでパースした `{ params, query, body }` を返します。`guren codegen` を実行した後は、ルートコントラクトをもとに型が付きます。詳しくは[検証済み入力の読み取り](./routing.md#検証済み入力の読み取り)を参照してください。
 
 ### Zod スキーマヘルパー
 
-コントラクトを持たないルートでは、コントローラー内で `validateBody`、`validateQuery`、`validateParams` を使うのが最もシンプルです。`safeParse()` メソッドを持つ任意のスキーマ（Zod、Valibot など）を受け取り、失敗時に `ValidationException`（422）をスローします。
+コントラクトの無いルートでは、コントローラーの中で `validateBody`、`validateQuery`、`validateParams` を使うのがいちばん簡単です。これらは `safeParse()` メソッドを持つスキーマ（Zod、Valibot など）なら何でも受け取り、検証に失敗すると `ValidationException`（422）を投げます。
 
 ```ts
 import { Controller } from '@guren/core'
@@ -255,15 +255,15 @@ export default class PostsController extends Controller {
 
 | ヘルパー | 入力元 | 非同期 |
 |--------|--------|--------|
-| `this.validateBody(schema)` | リクエストボディ（JSON / フォーム） | Yes |
-| `this.validateQuery(schema)` | URL クエリパラメータ | No |
-| `this.validateParams(schema)` | ルートパラメータ（`:id` など） | No |
+| `this.validateBody(schema)` | リクエストボディ（JSON / フォーム） | はい |
+| `this.validateQuery(schema)` | URL クエリパラメータ | いいえ |
+| `this.validateParams(schema)` | ルートパラメータ（`:id` など） | いいえ |
 
-いずれも失敗時に `ValidationException`（HTTP 422）をスローし、`ExceptionHandler` が自動でレンダリングします。
+3 つとも、失敗すると `ValidationException`（HTTP 422）を投げます。この例外は `ExceptionHandler` が自動でレスポンスに変換します。
 
 ### FormRequest 互換レイヤー
 
-新規コードでは schema-first を推奨します。既存コードの移行やクラスベースの認可が必要な場合のみ `FormRequest` を使います。
+新しく書くコードでは、スキーマを先に定義する書き方をおすすめします。`FormRequest` を使うのは、既存コードを移行するときや、クラスで認可を書きたいときだけにしてください。
 
 ```ts
 async store() {
@@ -274,15 +274,15 @@ async store() {
 }
 ```
 
-バリデーションが失敗すると、エラー詳細を含む 422 レスポンスが自動的に返されます。`authorize()` メソッドが `false` を返した場合は、403 レスポンスが返されます。
+バリデーションに失敗すると、エラーの詳細を含む 422 レスポンスが自動で返ります。`authorize()` メソッドが `false` を返した場合は、403 レスポンスが返ります。
 
-FormRequest クラスとバリデーションルールの定義については、[バリデーションガイド](./validation.md)をご覧ください。新規実装ではルートコントラクトと `this.validated()`、コントラクトの無いルートでは `validateBody()` / `validateQuery()` / `validateParams()` を優先してください。
+FormRequest クラスとバリデーションルールの書き方は、[バリデーションガイド](./validation.md)を参照してください。新しく実装するときは、ルートコントラクトと `this.validated()` を使い、コントラクトの無いルートでは `validateBody()` / `validateQuery()` / `validateParams()` を使ってください。
 
 ## メソッド間でのデータ共有
-コントローラーはリクエストごとにインスタンス化されるため、あるメソッドでインスタンスフィールドを設定して、ヘルパーメソッドで再利用できます。全ページ共通のデータ（例: ユーザー情報）については、Inertia の共有プロパティやミドルウェアの利用を検討してください。
+コントローラーはリクエストごとに生成されるので、あるメソッドでインスタンスのフィールドに値を入れ、別のヘルパーメソッドでそれを使い回せます。ログイン中のユーザー情報のように全ページで使うデータは、Inertia の共有プロパティかミドルウェアで渡すことを検討してください。
 
 ## Inertia 共有プロパティ
-`shareInertiaProps()` を使って、すべての Inertia レスポンスにアプリケーション全体のデータを注入できます。サービスプロバイダー（`bunx guren make:provider` で生成）の `boot()` から呼ぶのが定位置です。
+`shareInertiaProps()` を使うと、アプリケーション全体で使うデータをすべての Inertia レスポンスに含められます。呼び出す場所は、サービスプロバイダー（`bunx guren make:provider` で生成）の `boot()` が適しています。
 
 ```ts
 // app/Providers/AppInfoProvider.ts
@@ -298,16 +298,16 @@ export default class AppInfoProvider extends ServiceProvider {
 ```
 
 > [!NOTE]
-> リクエストのロケールと翻訳カタログは、`createApp({ i18n })` でアプリを作成していれば自動的に共有されます（[i18nガイド](./i18n.md)を参照してください）。ここでロケール検出を手書きする必要はありません。
+> `createApp({ i18n })` でアプリを作っていれば、リクエストのロケールと翻訳カタログは自動で共有されます（[i18nガイド](./i18n.md)を参照してください）。ここでロケールの検出処理を書く必要はありません。
 
-先に登録されたリゾルバーの props にマージされるので、複数のプロバイダーがそれぞれ共有 props を足しても互いを壊しません。
+渡した props は、先に登録されたリゾルバーの props に重ねてマージされます。そのため、複数のプロバイダーがそれぞれ共有 props を追加しても、互いの値を消してしまうことはありません。
 
-`this.container` を渡すと、その props はそのアプリケーションだけに閉じます。省略するとプロセス全体で共有されるため、同一プロセスで起動した 2 つ目のアプリケーション（テストスイートや暖機済みのサーバーレス環境）にも渡ってしまいます。
+`this.container` を渡すと、その props はそのアプリケーションの中だけで使われます。省略するとプロセス全体で共有されるので、同じプロセスで起動した 2 つ目のアプリケーション（テストスイートや、起動済みのまま再利用されるサーバーレス環境）にも渡ってしまいます。
 
 > [!NOTE]
-> 認証ユーザー（`auth.user`）の共有は `bunx guren add auth` が生成する `AuthProvider` が既に登録済みです。自分で登録し直す必要はありません（詳細は[認証ガイド](./authentication.md)を参照してください）。
+> ログイン中のユーザー（`auth.user`）は、`bunx guren add auth` が生成する `AuthProvider` がすでに共有しています。自分で登録し直す必要はありません（詳細は[認証ガイド](./authentication.md)を参照してください）。
 
-エクスポートされた `InertiaSharedProps` インターフェースを拡張して、コントローラーと React ページ全体でプロパティの型を維持しましょう。
+export されている `InertiaSharedProps` インターフェースを拡張しておくと、コントローラーでも React ページでも共有プロパティに型が付きます。
 
 ```ts
 // types/inertia.d.ts
@@ -320,10 +320,10 @@ declare module '@guren/core' {
 }
 ```
 
-コンポーネントのプロパティ型が必要な場合は、`InferInertiaProps<ReturnType<Controller['action']>>` でアクションプロパティと共有プロパティの両方を含む型を取得できます。
+コンポーネントの props の型が必要なときは、`InferInertiaProps<ReturnType<Controller['action']>>` を使うと、アクションが渡す props と共有プロパティの両方を含む型が得られます。
 
 ## コントローラーのテスト
-- `TestApp` を使うと、Fluent アサーションで HTTP レベルのテストを書けます。
+- `TestApp` を使うと、アサーションをメソッドチェーンでつなげて HTTP レベルのテストを書けます。
 
 ```ts
 import { TestApp } from '@guren/testing'
@@ -334,14 +334,14 @@ await app.post('/posts', { title: 'New' }).assertStatus(201)
 await app.actingAs(user).get('/dashboard').assertStatus(200)
 ```
 
-- ユニットレベルのテストでは、必要な依存関係を構築し、メソッド呼び出し前に `setContext(ctx)` を呼んでから、コントローラーメソッドを直接実行できます。
-- エンドツーエンドのカバレッジには、実行中のアプリケーションに `fetch` またはお好みの HTTP クライアントでアクセスし、レスポンスをアサートしてください。
+- ユニットテストでは、必要な依存を用意し、`setContext(ctx)` を呼んでから、コントローラーのメソッドを直接実行できます。
+- エンドツーエンドで確かめたい場合は、起動中のアプリケーションに `fetch` や好みの HTTP クライアントでリクエストを送り、レスポンスを検証してください。
 
-コントローラーはビジネスロジックをモデルやサービスに委譲することでスリムに保てます。アプリケーションの各部分をつなぎ合わせるオーケストレーション層として扱いましょう。
+ビジネスロジックをモデルやサービスに任せれば、コントローラーは小さく保てます。コントローラーは、アプリケーションの各部分を呼び出してつなぐ層として扱ってください。
 
 ## Model ヘルパー vs Drizzle RQB（並列比較）
 
-どちらのアクセスパターンもサポートされています。素早い CRUD にはモデルヘルパーを使い、結合・集約・ドライバー固有の機能が必要な場合は Drizzle のリレーショナルクエリビルダーに切り替えてください。
+データアクセスの書き方はどちらも使えます。手早く CRUD を書くならモデルヘルパーを使い、結合や集計、ドライバー固有の機能が必要になったら Drizzle のリレーショナルクエリビルダーに切り替えてください。
 
 ```ts
 // モデルファースト: 簡潔で一貫性がある
@@ -414,7 +414,7 @@ export default class PostsController extends Controller {
 
 ### SSR オプション
 
-SSR バンドルが利用可能な場合、Guren はサーバーサイドでページを自動的にレンダリングします。`ssr` オプションを渡すことで、レスポンスごとにこの動作を無効化またはカスタマイズできます。
+SSR バンドルがあれば、Guren はページを自動でサーバー側で描画します。`ssr` オプションを渡すと、この動作をレスポンスごとに無効にしたり、変更したりできます。
 
 ```ts
 return this.inertia(pages.posts.Index, props, {
@@ -424,4 +424,4 @@ return this.inertia(pages.posts.Index, props, {
 })
 ```
 
-高度なユースケースでは、`ssr.render` でカスタムレンダラーを指定できます。ページペイロードを受け取り、`renderInertiaServer()` などのユーティリティに処理を委譲できます。
+さらに細かく制御したい場合は、`ssr.render` に独自のレンダラーを指定できます。レンダラーはページのペイロードを受け取るので、`renderInertiaServer()` などのユーティリティに処理を任せられます。

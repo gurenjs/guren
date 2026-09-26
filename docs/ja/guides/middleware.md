@@ -1,6 +1,6 @@
 # ミドルウェアガイド
 
-Guren のルートとアプリケーションは Hono のミドルウェアモデルをそのまま使いながら、よく使うケースでは Laravel 風に書けるようにしています。登録方法は 2 つあり、`Application` インスタンスにグローバル登録するか、ルート DSL で個別に付与します。
+Guren のルートとアプリケーションは Hono のミドルウェアの仕組みをそのまま使っており、よく使う処理は Laravel に近い書き方で登録できます。登録のしかたは、`Application` インスタンスにグローバルに登録する方法と、ルート DSL でルートごとに付ける方法の 2 つです。
 
 ## グローバルミドルウェア
 
@@ -19,7 +19,7 @@ const app = createApp()
 app.use('*', requestTimer)
 ```
 
-グローバルミドルウェアはルートがマウントされる前に実行されます。プロバイダーは `register()` フック内で `context.app.use()` を使ってミドルウェアを登録できます。
+グローバルミドルウェアは、ルートがマウントされる前に実行されます。プロバイダーから登録する場合は、`register()` フックの中で `context.app.use()` を呼びます。
 
 ## ルートミドルウェア
 
@@ -35,9 +35,9 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
-ルートミドルウェアは対象のエンドポイント（またはグループ内の全エンドポイント）だけに適用されます。
+ルートミドルウェアは、付けたエンドポイントだけに適用されます。グループに付けた場合は、そのグループ内の全エンドポイントが対象です。
 
-`.middleware()` にはハンドラー関数・登録済みのエイリアス名・その両方を混ぜて渡せます。解決は記述順ではなく種別ごとに行われ、そのルートのチェーンに含まれる名前付きミドルウェアがすべて、ハンドラー関数より先に実行されます。これは1回の呼び出し内だけでなく、グループをまたいでも同じです。外側グループのインラインハンドラーは、内側グループの名前付きミドルウェアより**後**に実行されます（記述の見た目とは逆になります）。相対的な実行順が重要な場合は、すべてエイリアスに統一してください。
+`.middleware()` には、ハンドラー関数と登録済みのエイリアス名のどちらも渡せ、両方を混ぜても構いません。ただし実行順は書いた位置ではなく種類で決まり、ルートのチェーンにある名前付きミドルウェアがすべて、ハンドラー関数より先に実行されます。この規則は 1 回の呼び出しの中だけでなく、グループをまたいでも同じです。そのため、外側のグループに書いたインラインハンドラーは、内側のグループの名前付きミドルウェアより**後**に実行され、見た目の順とは逆になります。実行の前後関係が問題になる場合は、すべてエイリアスでそろえてください。
 
 ```mermaid
 flowchart LR
@@ -60,17 +60,17 @@ flowchart LR
   Written --> Actual
 ```
 
-最後の 2 段は `.middleware()` では制御できません。ルートに紐づけたスキーマの検証は必ずミドルウェアをすべて通ったあと、アクションの直前に走ります。
+図の最後の 2 段は、`.middleware()` では順番を動かせません。ルートに紐づけたスキーマは、ミドルウェアがすべて終わったあと、アクションの直前に必ず検証されます。
 
-また、`guren audit` が名前で報告できるのはエイリアスだけです。フレームワークが認識するガード（`requireAuthenticated()` と `requireGuest()`）はどちらの渡し方でも検出されますが、それ以外のミドルウェアはエイリアス登録しない限り audit からは見えません。
+エイリアスには、`guren audit` の報告に名前が出るという利点もあります。フレームワークが認識するガード（`requireAuthenticated()` と `requireGuest()`）はどちらの渡し方でも検出されますが、それ以外のミドルウェアはエイリアスとして登録しないと audit には見えません。
 
 ## ビルトインヘルパー
 
 ### `defineMiddleware`
-Hono のミドルウェアに、Guren が期待する型を付けるためのユーティリティ。
+Hono のミドルウェアに、Guren が想定する型を付けるためのユーティリティです。
 
 ### `createSessionMiddleware`
-セッションオブジェクトをリクエストコンテキストへ付与するファクトリ。既定ではメモリストア（`MemorySessionStore`）を使い、署名付きクッキーで永続化します。
+リクエストコンテキストにセッションオブジェクトを付けるファクトリです。既定ではセッションをメモリストア（`MemorySessionStore`）に保存し、署名付きクッキーで引き継ぎます。
 
 ```ts
 import { createSessionMiddleware } from '@guren/core'
@@ -78,13 +78,13 @@ import { createSessionMiddleware } from '@guren/core'
 app.use('*', createSessionMiddleware())
 ```
 
-各リクエストは `ctx.get('guren:session')` または `getSessionFromContext(ctx)` でセッションにアクセスできます。
+各リクエストの中では、`ctx.get('guren:session')` か `getSessionFromContext(ctx)` でセッションを取り出せます。
 
-`store` には `SessionStore` そのものか、それを返す関数を渡せます。関数はリクエストごとに呼ばれるので（構築が重いなら自分でメモ化してください。`SessionManager` はメモ化します）、ランタイムのバインディング（Workers）や接続（Redis）が要るストアを起動時に組み立てずに済みます。複数のストアを宣言して環境ごとに選ぶには、[認証](./authentication.md#sessionmanager-でストアを選ぶ)ガイドの `SessionManager` を参照してください。
+`store` には `SessionStore` そのものか、それを返す関数を渡します。関数はリクエストのたびに呼ばれるので、ランタイムのバインディング（Workers）や接続（Redis）が必要なストアを起動時に組み立てずに済みます。組み立てが重い場合は自分でメモ化してください（`SessionManager` はメモ化します）。複数のストアを宣言して環境ごとに切り替えたい場合は、[認証](./authentication.md#sessionmanager-でストアを選ぶ)ガイドの `SessionManager` を参照してください。
 
 ### 認証ガード
 
-`requireAuthenticated` と `requireGuest` は、認証コンテキストがパイプラインの手前でアタッチ済みであることを前提とした薄いラッパーです。`attachAuthContext` と組み合わせて使ってください。ガードの実装はそちらが保持します。
+`requireAuthenticated` と `requireGuest` は薄いラッパーで、パイプラインのもっと手前で認証コンテキストが付けられていることを前提にしています。ガードの実装は `attachAuthContext` が保持するので、この 2 つと組み合わせて使ってください。
 
 ```ts
 import { attachAuthContext, requireAuthenticated } from '@guren/core'
@@ -95,6 +95,6 @@ router.get('/settings', [SettingsController, 'index']).middleware(
 )
 ```
 
-`redirectTo` が効くのはブラウザに対してです。エージェントのツール呼び出し([エージェントインターフェース](./agent-interface.md)を参照)はリダイレクトをたどれないので、どちらのガードも JSON の拒否を返します(`requireAuthenticated` は `401`、`requireGuest` は `403`、`status` を渡した場合はその値)。`redirectTo` と一緒に設定した `responseFactory` もこのときは使いません。
+`redirectTo` が効くのはブラウザからのリクエストだけです。エージェントのツール呼び出し（[エージェントインターフェース](./agent-interface.md)を参照）はリダイレクトをたどれないため、どちらのガードも JSON で拒否を返します。ステータスは `requireAuthenticated` が `401`、`requireGuest` が `403` で、`status` を渡した場合はその値です。このとき、`redirectTo` と一緒に設定した `responseFactory` も使われません。
 
-認証モジュールは今後も手を入れていきますが、現状でもこの契約に沿ってカスタムガードを配線できます。
+認証モジュールは今後も手を入れていきますが、今の時点でもこの契約に沿えばカスタムガードを組み込めます。

@@ -1,16 +1,16 @@
 # 認可
 
-認可は、認証済みユーザーが実行できる操作を制御する仕組みです。Guren の認可は、Laravel に着想を得たポリシーベースの設計になっています。
+認可は、認証済みのユーザーにどの操作を許すかを決める仕組みです。Guren の認可は、Laravel を参考にしたポリシーベースの設計になっています。
 
-認可ゲートはアプリの起動時に自動で作られ、コンテナに `gate` として束縛されます。サービスプロバイダからは `this.container.make('gate')` で取得し、アビリティの定義やポリシーの登録を行います。手動のセットアップは要りません。
+認可ゲートはアプリの起動時に自動で作られ、コンテナに `gate` として束縛されます。サービスプロバイダからは `this.container.make('gate')` で取り出して、ability を定義したりポリシーを登録したりします。手動でセットアップする必要はありません。
 
 ## ゲート
 
-ゲートは、そのユーザーが特定のアクションを実行してよいかを判断する小さなクロージャです。
+ゲートは、ユーザーが特定のアクションを実行してよいかを判定する小さなクロージャです。
 
 ### ゲートの定義
 
-サービスプロバイダの `boot()` でゲートを定義します。ゲートを作るのはフレームワーク側のプロバイダの登録処理なので、それより前に `make('gate')` を呼ぶと例外になります:
+ゲートはサービスプロバイダの `boot()` で定義します。ゲート自体はフレームワーク側のプロバイダが登録処理の中で作るので、それより前に `make('gate')` を呼ぶと例外になります。
 
 ```typescript
 import { ServiceProvider } from '@guren/core'
@@ -38,11 +38,11 @@ export default class AuthorizationProvider extends ServiceProvider {
 }
 ```
 
-このプロバイダは `createApp({ providers })` に登録してください。
+作ったプロバイダは `createApp({ providers })` に登録してください。
 
 ### ゲートの使用
 
-コントローラには `this.authorize()` と `this.can()` があり、現在のユーザーの束縛まで済ませてくれます:
+コントローラでは `this.authorize()` と `this.can()` が使えます。どちらも現在のユーザーの束縛まで済ませてくれます。
 
 ```typescript
 // 拒否時は AuthorizationException (403) をスロー
@@ -52,7 +52,7 @@ await this.authorize('update-post', post)
 const canView = await this.can('view-dashboard')
 ```
 
-それ以外の場所では、呼び出し元が持つコンテナからゲートを解決します。ジョブやコマンドなら `this.make('gate')`、プロバイダなら `this.container.make('gate')`、ミドルウェアなら `getRequestContainer(ctx).make('gate')` です。そのうえで `forUser()` でユーザーを束縛します:
+コントローラ以外では、呼び出し元が持っているコンテナからゲートを取り出します。ジョブやコマンドなら `this.make('gate')`、プロバイダなら `this.container.make('gate')`、ミドルウェアなら `getRequestContainer(ctx).make('gate')` です。取り出したら、`forUser()` でユーザーを束縛します。
 
 ```typescript
 const gate = this.make('gate').forUser(user)
@@ -73,7 +73,7 @@ await gate.authorize('update-post', post)
 
 ### Beforeコールバック
 
-すべてのゲートチェックの前に実行されるコールバックを、同じ `boot()` で登録します:
+すべてのゲートチェックの前に実行するコールバックは、同じ `boot()` の中で登録します。
 
 ```typescript
 gate.before((user, ability) => {
@@ -87,7 +87,7 @@ gate.before((user, ability) => {
 
 ### Afterコールバック
 
-すべてのゲートチェックの後に実行されるコールバックを登録します:
+すべてのゲートチェックの後に実行するコールバックも登録できます。
 
 ```typescript
 gate.after((user, ability, result) => {
@@ -98,17 +98,17 @@ gate.after((user, ability, result) => {
 
 ## ポリシー
 
-ポリシーは、特定のモデルやリソースを軸に認可ロジックを整理する仕組みです。
+ポリシーを使うと、認可のロジックを特定のモデルやリソースごとにまとめられます。
 
 ### ポリシーの作成
 
-CLI でポリシーをスキャフォールドできます:
+ポリシーの雛形は CLI で生成できます。
 
 ```bash
 bunx guren make:policy Post
 ```
 
-手書きする場合:
+手で書く場合は次のようになります。
 
 ```typescript
 import { Policy, type AuthUser } from '@guren/core'
@@ -154,7 +154,7 @@ export class PostPolicy extends Policy {
 
 ### ポリシーの登録
 
-同じ `boot()` でゲートにポリシーを登録します:
+ポリシーも同じ `boot()` の中で、ゲートに登録します。
 
 ```typescript
 // モデルクラスで登録
@@ -166,7 +166,7 @@ gate.policy('post', PostPolicy)
 
 ### ポリシーの使用
 
-ORM のクエリはコンストラクタ情報を持たないプレーンなオブジェクトを返すため、ポリシーを解決するにはモデルクラスをレコードと一緒に渡します:
+ORM のクエリが返すのは、コンストラクタの情報を持たないプレーンなオブジェクトです。そのため、ポリシーを解決させるには、レコードと一緒にモデルクラスも渡します。
 
 ```typescript
 const gate = this.make('gate').forUser(user)
@@ -185,19 +185,19 @@ const canDelete = await gate.allows('delete', ['post', post])
 await gate.authorize('update', [Post, post])
 ```
 
-クラスインスタンス(`new` で生成したオブジェクト)はタプルなしで自動的にポリシーが解決されます:
+クラスのインスタンス(`new` で作ったオブジェクト)であれば、タプルにしなくてもポリシーが自動で解決されます。
 
 ```typescript
 const canView = await gate.allows('view', somePostInstance)
 ```
 
-タプルにせずに渡したプレーンなレコードでは、ポリシーが見つかりません。その ability の gate も定義されていなければ、チェックは拒否せずに `Error` を投げます。メッセージには ability 名と `[Model, record]` への直し方が入ります。レコードの持ち主本人が理由のわからない 403 を受け取る代わりに、誤りが 500 として表に出ます。`before()` コールバックと、その ability に定義した gate には、プレーンなレコードがそのまま渡ります。ポリシーのないクラスのインスタンスと、ポリシーのないモデルのタプルは拒否されます。
+プレーンなレコードをタプルにせずに渡すと、ポリシーは見つかりません。その ability のゲートも定義されていなければ、チェックは拒否を返さずに `Error` を投げます。エラーメッセージには ability 名と、`[Model, record]` に直すよう促す内容が入ります。レコードの持ち主本人が理由のわからない 403 を受け取るのではなく、誤りが 500 として表に出るようにするためです。`before()` コールバックと、その ability に定義したゲートには、プレーンなレコードがそのまま渡ります。ポリシーのないクラスのインスタンスや、ポリシーのないモデルのタプルを渡した場合は拒否になります。
 
-`gate.any()` と、配列を渡した `authorizeMiddleware()` は ability を順に確認します。プレーンなレコードは、何も解決できない最初の ability で例外になり、後ろの ability が許可する場合でも止まります。ここでもタプルを渡してください。`authorizeMiddleware()` や `authorizeResourceMiddleware()` に渡す `modelResolver` も、レコードではなく `[Model, record]` を返します。
+`gate.any()` と、配列を渡した `authorizeMiddleware()` は、ability を先頭から順に確認します。プレーンなレコードを渡すと、何も解決できなかった最初の ability で例外になり、後ろの ability が許可する場合でもそこで止まります。こちらでもタプルを渡してください。`authorizeMiddleware()` や `authorizeResourceMiddleware()` に渡す `modelResolver` も、レコードではなく `[Model, record]` を返すようにします。
 
 ### ポリシーメソッド
 
-ポリシーは以下の標準メソッドをサポートします:
+ポリシーで使える標準のメソッドは次のとおりです。
 
 | メソッド | 説明 |
 |---------|------|
@@ -211,7 +211,7 @@ const canView = await gate.allows('view', somePostInstance)
 
 ### Beforeメソッド
 
-`before` メソッドを追加すると、すべてのポリシーチェックの前に割り込めます:
+`before` メソッドを定義すると、そのポリシーのすべてのチェックより先に判定を差し込めます。
 
 ```typescript
 export class PostPolicy extends Policy {
@@ -227,7 +227,7 @@ export class PostPolicy extends Policy {
 
 ## コントローラー統合
 
-コントローラーには `authorize()` と `can()` ヘルパーが組み込まれています。現在のユーザーは認証コンテキストから自動的に解決されます(ゲストは `null`):
+コントローラーには `authorize()` と `can()` のヘルパーが組み込まれています。現在のユーザーは認証コンテキストから自動で解決され、ゲストの場合は `null` になります。
 
 ```typescript
 import { Controller } from '@guren/core'
@@ -260,11 +260,11 @@ export default class PostController extends Controller {
 }
 ```
 
-> **Tip:** `bunx guren make:feature Post --policy` を使うと、ポリシーの生成と `store`/`update`/`destroy` への `authorize()` 呼び出しの組み込みまで自動で行われます。
+> **Tip:** `bunx guren make:feature Post --policy` を実行すると、ポリシーの生成に加えて、`store`/`update`/`destroy` への `authorize()` の呼び出しまで自動で組み込まれます。
 
 ## ミドルウェア
 
-ルートレベルのチェック用に認可ミドルウェアを作成できます:
+ルート単位でチェックしたい場合は、認可用のミドルウェアを作ります。
 
 ```typescript
 import { type Router, getRequestContainer, AuthorizationException, defineMiddleware } from '@guren/core'
@@ -288,19 +288,19 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
-`gate.resolveUser(ctx)` はリクエストの認証コンテキストからログイン中のユーザーを取得します。`createGate()` に `userResolver` を渡している場合は、そちらが優先されます。組み込みの `authorizeMiddleware('access-admin')` も同じ方法でユーザーを解決します。
+`gate.resolveUser(ctx)` は、リクエストの認証コンテキストからログイン中のユーザーを取り出します。`createGate()` に `userResolver` を渡している場合は、そちらが優先されます。組み込みの `authorizeMiddleware('access-admin')` も、同じ方法でユーザーを解決します。
 
 ## ベストプラクティス
 
-1. **モデル固有のロジックにはポリシーを使う** - 認可をモデル単位で整理できます。
-2. **ゲートは小さく保つ** - 特定のモデルに紐づかないアビリティ向けです。
-3. **重いチェックはキャッシュする** - 認可にデータベースクエリが要るならキャッシュを検討します。
-4. **before コールバックは控えめに** - 多用するとデバッグが難しくなります。
-5. **認可をテストする** - ゲートとポリシーのテストを書きます。
+1. **モデル固有のロジックにはポリシーを使う。** 認可をモデルごとに整理できます。
+2. **ゲートは小さく保つ。** ゲートは、特定のモデルに結び付かない ability に使います。
+3. **重いチェックはキャッシュする。** 認可にデータベースのクエリが必要なら、キャッシュを検討してください。
+4. **before コールバックは控えめに使う。** 多用するとデバッグが難しくなります。
+5. **認可をテストする。** ゲートとポリシーのテストを書いてください。
 
 ## 認可のテスト
 
-グローバルインスタンスに依存せず、テストごとに新しい `Gate` を生成します:
+グローバルなインスタンスに頼らず、テストごとに新しい `Gate` を作ります。
 
 ```typescript
 import { describe, it, expect, beforeEach } from 'bun:test'

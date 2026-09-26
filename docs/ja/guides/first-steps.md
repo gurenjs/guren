@@ -1,16 +1,16 @@
 # ファーストステップ: 1 つのリクエストを辿る 10 分ツアー
 
-このツアーでは、`GET /posts` という 1 つのリクエストが Guren アプリのすべてのレイヤーを通っていく様子を追いかけます。通る先は、ルート、コントローラー、バリデーション、モデル、リソース、Inertia ページ、そしてテストです。全体像を頭に入れるために読んでください。各ストップには、より深く学べるガイドへのリンクがあります。
+このツアーでは、`GET /posts` という 1 つのリクエストを追いかけながら、Guren アプリのレイヤーを順に見ていきます。ルート、コントローラー、バリデーション、モデル、リソース、Inertia ページを通り、最後にテストで確かめます。全体像をつかむためのページなので、細部は各所に置いたガイドへのリンクからたどってください。
 
-前提として、動いているアプリ（[はじめる](./getting-started.md) 参照）に、次のコマンドで posts リソースが生成されているものとします。
+動いているアプリ（[はじめる](./getting-started.md) 参照）に、次のコマンドで posts リソースを生成してあるものとします。
 
 ```bash
 bunx guren add resource posts --fields "title:string,body:text,published:boolean"
 ```
 
-自分の手で一歩ずつ作りたい方は、代わりに [Guren チュートリアル](../tutorials/00-overview.md) をどうぞ。同じ内容をハンズオンでカバーし、その先まで続きます。
+手を動かしながら一歩ずつ作りたい場合は、代わりに [Guren チュートリアル](../tutorials/00-overview.md) に進んでください。同じ内容をハンズオンで扱い、さらにその先まで続きます。
 
-まずは全体像です。`GET /posts` は次の順にレイヤーを通り、ブラウザーに HTML が返ります。
+まず全体の流れです。`GET /posts` は次の順にレイヤーを通り、最後にブラウザーへ HTML が返ります。
 
 ```mermaid
 flowchart TD
@@ -30,11 +30,11 @@ flowchart TD
   Page -- "レンダリング結果" --> Browser
 ```
 
-以降は、この図の各ストップを 1 つずつ見ていきます。
+ここから、図の番号順に 1 つずつ見ていきます。
 
 ## 1. ルート
 
-すべてのリクエストは `routes/web.ts` から始まります。ここで registrar が URL をコントローラーのアクションにマッピングします。
+リクエストはすべて `routes/web.ts` から始まります。このファイルの registrar が、URL とコントローラーのアクションを対応づけます。
 
 ```ts
 import { Router } from '@guren/core'
@@ -46,11 +46,11 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
-`GET /posts` は 1 行目にマッチするため、Guren は `PostController.index` にディスパッチします。グループ、ミドルウェア、名前付きルートもすべてここに書きます。詳しくは [ルーティングガイド](./routing.md) を参照してください。
+`GET /posts` は 1 行目にマッチするので、Guren は `PostController.index` を呼び出します。グループ、ミドルウェア、名前付きルートもこのファイルに書きます。詳しくは [ルーティングガイド](./routing.md) を参照してください。
 
 ## 2. コントローラー
 
-`app/Http/Controllers/PostController.ts` がリクエストを処理します。
+リクエストを処理するのは `app/Http/Controllers/PostController.ts` です。
 
 ```ts
 import { Controller } from '@guren/core'
@@ -71,11 +71,11 @@ export default class PostController extends Controller {
 }
 ```
 
-ここでは 3 つのことが起きています: 入力のバリデーション、データの取得、ページのレンダリングです。コントローラーの全機能は [コントローラーガイド](./controllers.md) を参照してください。
+このアクションは、入力の検証、データの取得、ページのレンダリングの 3 つを順に行っています。コントローラーでできることの全体は [コントローラーガイド](./controllers.md) にまとめてあります。
 
 ## 3. バリデーション
 
-`this.validateQuery(schema)` はクエリ文字列を Zod スキーマでパースし、不正な入力には自動的に 422 を投げます。エラーハンドリングを手書きする必要はありません。
+`this.validateQuery(schema)` はクエリ文字列を Zod スキーマでパースし、入力が不正なら自動で 422 を返す例外を投げます。エラー処理を自分で書く必要はありません。
 
 ```ts
 import { z } from 'zod'
@@ -85,11 +85,11 @@ export const ListPostsQuerySchema = z.object({
 })
 ```
 
-`validateBody` と `validateParams` も、リクエストボディとルートパラメータに対して同じように動きます。詳しくは [バリデーションガイド](./validation.md) を参照してください。
+リクエストボディには `validateBody`、ルートパラメータには `validateParams` があり、どちらも同じように使えます。詳しくは [バリデーションガイド](./validation.md) を参照してください。
 
 ## 4. モデル
 
-`app/Models/Post.ts` は、クラスを `db/schema.ts` の Drizzle テーブルに結びつけます。
+`app/Models/Post.ts` は、クラスと `db/schema.ts` の Drizzle テーブルを結びつけます。
 
 ```ts
 import { defineModel } from '@guren/core'
@@ -98,11 +98,11 @@ import { posts } from '@/db/schema'
 export class Post extends defineModel(posts) {}
 ```
 
-クエリは Laravel のように読めます: `Post.find(1)`、`Post.findOrFail(1)`（404 を投げます）、`Post.where('published', true).get()`。カラムの型はスキーマからすべての結果へと流れます。詳しくは [データベースガイド](./database.md) を参照してください。
+クエリは Laravel と同じ感覚で書けます。`Post.find(1)`、`Post.findOrFail(1)`（見つからなければ 404 を投げます）、`Post.where('published', true).get()` といった具合です。カラムの型はスキーマから引き継がれ、どのクエリ結果にも付きます。詳しくは [データベースガイド](./database.md) を参照してください。
 
 ## 5. リソース
 
-`app/Http/Resources/PostResource.ts` は、サーバーから外に出るデータを決めます。内部カラムがうっかり漏れることはありません。
+`app/Http/Resources/PostResource.ts` で、サーバーの外に出すデータを決めます。ここに書いたカラムしか出ていかないので、内部用のカラムをうっかり返してしまうことはありません。
 
 ```ts
 import { Resource } from '@guren/core'
@@ -119,7 +119,7 @@ export class PostResource extends Resource<Post> {
 
 ## 6. Inertia ページ
 
-`this.inertia(pages.posts.Index, props)` は `resources/js/pages/posts/Index.tsx` をレンダリングします。コントローラーの props を直接受け取る、ごく普通の React コンポーネントです。間に API レイヤーはありません。
+`this.inertia(pages.posts.Index, props)` を呼ぶと、`resources/js/pages/posts/Index.tsx` がレンダリングされます。中身はコントローラーの props をそのまま受け取るふつうの React コンポーネントで、間に API レイヤーは挟まりません。
 
 ```tsx
 import type { PageProps } from '@guren/inertia-client/contracts'
@@ -138,15 +138,15 @@ export default function PostsIndex({ data }: Props) {
 }
 ```
 
-`bunx guren add resource` が生成する一覧ページは、もう少し作り込まれた見た目で届きます。
+`bunx guren add resource` が生成する一覧ページは、これより少し作り込んだ見た目になっています。
 
 ![/posts の一覧ページ。「Posts」という見出しと New Post ボタン、投稿 3 件がタイトルと本文抜粋のカードで並び、下にページ番号 1 のページネーションがある](../../images/posts-index.png)
 
-codegen は各ページの `Props` を `.guren/pages.gen.ts` に抽出するため、コントローラーが誤った形の props を渡すとコンパイルエラーになります。カラムをリネームすれば、スキーマからブラウザまで、すべてのレイヤーを TypeScript が指摘してくれます。詳しくは [フロントエンドガイド](./frontend.md) を参照してください。
+codegen が各ページの `Props` を `.guren/pages.gen.ts` に書き出すので、コントローラーが形の違う props を渡すとコンパイルエラーになります。カラム名を変えたときも、スキーマからブラウザまでの各レイヤーで直すべき箇所を TypeScript が教えてくれます。詳しくは [フロントエンドガイド](./frontend.md) を参照してください。
 
 ## 7. テスト
 
-`TestApp` を使えば、起動済みアプリに実際のリクエストを通すことで、この経路全体が動くことを証明できます。
+`TestApp` を使うと、起動したアプリに実際のリクエストを送り、ここまでの経路が端から端まで動くことを確かめられます。
 
 ```ts
 import { test } from 'bun:test'
@@ -158,30 +158,30 @@ test('lists posts', async () => {
 })
 ```
 
-fluent なアサーション、`actingAs`、データベースヘルパーについては [テストガイド](./testing.md) を参照してください。
+メソッドチェーンで書けるアサーション、`actingAs`、データベース用のヘルパーは [テストガイド](./testing.md) で紹介しています。
 
 ## 8. プロジェクト知識
 
-ここまでのリクエスト経路はアプリが何をするかを説明します。プロジェクト知識は、なぜその設計なのかを記録し、全体像を最新に保ちます。`bunx guren spec:generate` はコードから ER、ドメイン、画面、モジュールのビューを導出します。`bunx guren make:adr` で作る ADR は、その決定が対象とするエンティティとコードパスを宣言し、`bunx guren check --docs` がその関係を検証します。
+ここまでのリクエスト経路が表すのは、アプリが何をするかです。プロジェクト知識には、なぜその設計にしたのかを記録し、全体像を最新の状態に保ちます。`bunx guren spec:generate` を実行すると、コードから ER、ドメイン、画面、モジュールのビューが生成されます。`bunx guren make:adr` で作る ADR には、その決定が関わるエンティティとコードパスを書いておき、`bunx guren check --docs` でその対応が正しいかを検証します。
 
-`bun run dev` の実行中に [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs) を開くと、それらの文書、エンティティ、コードパスを一つのインタラクティブな Docs Graph として閲覧できます。
+`bun run dev` を実行した状態で [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs) を開くと、これらの文書とエンティティ、コードパスを 1 つのインタラクティブな Docs Graph として見られます。
 
-![Docs Graph。スペックビューと ADR のノードが、schema.ts・Models・routes・Controllers・pages といったコードのノードと線で結ばれている](../../images/docs-graph.png)Docs Graph は上のリクエスト経路を置き換えるものではなく、その周囲に設計理由と生成ビューを結び付けます。ワークフロー全体は [スペックアンカード開発](./spec-anchored.md) を参照してください。
+![Docs Graph。スペックビューと ADR のノードが、schema.ts・Models・routes・Controllers・pages といったコードのノードと線で結ばれている](../../images/docs-graph.png)Docs Graph は上のリクエスト経路の代わりになるものではありません。経路のまわりに、設計の理由と生成したビューを結びつけるものです。ワークフロー全体は [スペックアンカード開発](./spec-anchored.md) を参照してください。
 
 ## メンタルモデル
 
-Guren アプリのすべての機能は、この同じ経路を通ります。
+Guren アプリの機能は、どれもこの同じ経路を通ります。
 
-- **routes** が URL をコントローラーにマッピングし
-- **validators** が入力をパースし
-- **models** がデータアクセスを記述し
-- **resources** が出力の形を決め
-- **pages** が props を定義し
-- **controllers** がそれらすべてを組み立てます
+- **routes** が URL をコントローラーに対応づける
+- **validators** が入力をパースする
+- **models** がデータアクセスを表す
+- **resources** が出力の形を決める
+- **pages** が props を定義する
+- **controllers** がこれらをまとめて動かす
 
-この実行時の経路の周囲では、**プロジェクト知識** が生成スペックと人間の意思決定を、それらが説明するコードへ結び付け、関係が有効なままかを検証します。
+この実行時の経路のまわりでは、**プロジェクト知識** が生成したスペックと人が下した判断を、それぞれが説明するコードに結びつけ、その対応が崩れていないかを検証します。
 
-機能を追加するときは、経路全体を一度に雛形生成し、マニフェストを更新します。
+機能を追加するときは、経路全体の雛形を一度に生成してから、マニフェストを更新します。
 
 ```bash
 bunx guren add resource comments --fields "body:text,postId:integer"
@@ -190,4 +190,4 @@ bun run codegen
 
 ## 次のステップ
 
-本格的に作り始める準備はできましたか？ **[Guren チュートリアル](../tutorials/00-overview.md)** では、投稿、ユーザー、認可、アップロード、メール、エージェントのツールをハンズオンで作っていきます。見慣れない用語があったら [用語集](./glossary.md) で確認してください。
+本格的に作り始めるなら、**[Guren チュートリアル](../tutorials/00-overview.md)** に進んでください。投稿、ユーザー、認可、アップロード、メール、エージェント用のツールを、手を動かしながら作っていきます。わからない用語が出てきたら [用語集](./glossary.md) で確認してください。
