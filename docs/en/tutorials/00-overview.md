@@ -79,4 +79,4 @@ Every command and file in these chapters is executed by the framework's own CI a
 This edition is verified against `create-guren-app` 1.17 and Guren 2.28. If your scaffold prints a newer version, the chapters most likely still hold; if a step disagrees with what you see, the [CLI reference](../guides/cli.md) has the current command surface.
 
 > [!TIP]
-> Want the ten-minute version first? [Getting Started](../guides/getting-started.md) scaffolds an app and shows one request end to end. Come back here when you want the whole thing.
+> Want the ten-minute version first? [Getting Started](../guides/getting-started.md) scaffolds an app and shows one request end to end. Come back here when you want the whole thing. If you would rather direct an agent than write the code yourself, [Building with an Agent](../agent-course/00-overview.md) takes a meetup app through two implementation plans.

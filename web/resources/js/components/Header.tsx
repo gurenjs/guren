@@ -64,6 +64,7 @@ export function Header({ variant, basePath = '/docs', locales = [] }: HeaderProp
               <nav className="hidden items-center gap-6 text-sm font-medium text-white/80 md:flex">
                 <Link href="/docs" className="transition hover:text-white">Docs</Link>
                 <Link href="/docs/tutorials/00-overview" className="transition hover:text-white">Tutorials</Link>
+                <Link href="/docs/agent-course/00-overview" className="transition hover:text-white">Agent Course</Link>
                 <a
                   href="https://github.com/gurenjs/guren"
                   target="_blank"
@@ -108,6 +109,7 @@ export function Header({ variant, basePath = '/docs', locales = [] }: HeaderProp
             <nav className="hidden items-center gap-6 text-[0.95rem] font-medium md:flex">
               <Link href={basePath} className="text-docs-text no-underline transition hover:text-docs-accent">Guides</Link>
               <Link href={`${basePath}/tutorials/00-overview`} className="text-docs-text no-underline transition hover:text-docs-accent">Tutorials</Link>
+              <Link href={`${basePath}/agent-course/00-overview`} className="text-docs-text no-underline transition hover:text-docs-accent">Agent Course</Link>
               <a
                 href="https://github.com/gurenjs/guren"
                 target="_blank"

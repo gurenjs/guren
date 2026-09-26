@@ -22,6 +22,7 @@ export const Header: FC = () => (
         <nav class="hidden items-center gap-6 text-[0.95rem] font-medium md:flex">
           <a href="/docs" class="text-docs-text no-underline transition hover:text-docs-accent">Guides</a>
           <a href="/docs/tutorials/00-overview" class="text-docs-text no-underline transition hover:text-docs-accent">Tutorials</a>
+          <a href="/docs/agent-course/00-overview" class="text-docs-text no-underline transition hover:text-docs-accent">Agent Course</a>
           <a
             href={GITHUB_URL}
             target="_blank"
@@ -52,6 +53,7 @@ export const Header: FC = () => (
             <a href="/" class="rounded-md px-3 py-2 text-docs-text no-underline transition hover:text-docs-accent">Home</a>
             <a href="/docs" class="rounded-md px-3 py-2 text-docs-text no-underline transition hover:text-docs-accent">Guides</a>
             <a href="/docs/tutorials/00-overview" class="rounded-md px-3 py-2 text-docs-text no-underline transition hover:text-docs-accent">Tutorials</a>
+            <a href="/docs/agent-course/00-overview" class="rounded-md px-3 py-2 text-docs-text no-underline transition hover:text-docs-accent">Agent Course</a>
             <a
               href={GITHUB_URL}
               target="_blank"

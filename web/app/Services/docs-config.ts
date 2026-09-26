@@ -133,6 +133,26 @@ const TUTORIAL_SECTIONS: readonly DocSectionConfig[] = [
   },
 ]
 
+// The agent course: two implementation plans (RFC 0030) taken from request to close.
+const AGENT_COURSE_SECTIONS: readonly DocSectionConfig[] = [
+  {
+    title: { en: 'Start here', ja: 'はじめに' },
+    slugs: ['00-overview', '01-setup'],
+  },
+  {
+    title: { en: 'The first plan', ja: '1 本目の計画' },
+    slugs: ['02-the-first-plan', '03-review-and-approve', '04-one-step-at-a-time', '05-close-the-plan'],
+  },
+  {
+    title: { en: 'The second plan', ja: '2 本目の計画' },
+    slugs: ['06-changing-what-exists', '07-when-the-application-moves'],
+  },
+  {
+    title: { en: 'In a team', ja: 'チームで' },
+    slugs: ['08-plans-in-ci'],
+  },
+]
+
 /**
  * Slugs the course absorbed, and the chapter that now covers each. `DocsService`
  * has no memory of a retired file, so without this a bookmark 404s; the site
@@ -146,6 +166,7 @@ export const DOC_REDIRECTS: Readonly<Record<DocCategory, Readonly<Record<string,
     authentication: '05-users-and-passwords',
     relationships: '09-relationships',
   },
+  'agent-course': {},
 }
 
 const OTHER_SECTION_TITLE: Record<DocLocale, string> = { en: 'Other', ja: 'その他' }
@@ -162,6 +183,12 @@ const DOC_CATEGORY_CONFIG = {
     dir: 'tutorials',
     sections: TUTORIAL_SECTIONS,
     order: TUTORIAL_SECTIONS.flatMap((section) => section.slugs),
+  },
+  'agent-course': {
+    title: { en: 'Agent Course', ja: 'エージェントと作る' },
+    dir: 'agent-course',
+    sections: AGENT_COURSE_SECTIONS,
+    order: AGENT_COURSE_SECTIONS.flatMap((section) => section.slugs),
   },
 } as const
 

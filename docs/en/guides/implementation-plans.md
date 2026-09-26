@@ -4,6 +4,8 @@ An implementation plan is a design document for a change, written as JSON before
 
 A plan is worth writing when a change spans a table, several routes and a page, and the design is cheaper to correct than the diff. If you can describe the diff in one sentence, skip the plan.
 
+For a walkthrough, [Building with an Agent](../agent-course/00-overview.md) takes two plans from request to close with Claude Code, with a checklist for each decision along the way.
+
 ```mermaid
 flowchart LR
   Write["plan.json<br/>written by you or your agent"]

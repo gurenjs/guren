@@ -60,6 +60,7 @@ export function Footer({ variant }: FooterProps) {
             <Link href="/docs" className="no-underline transition hover:text-white">Documentation</Link>
             <Link href="/docs/guides/getting-started" className="no-underline transition hover:text-white">Getting Started</Link>
             <Link href="/docs/tutorials/00-overview" className="no-underline transition hover:text-white">Tutorials</Link>
+            <Link href="/docs/agent-course/00-overview" className="no-underline transition hover:text-white">Agent Course</Link>
             <Link href="/blog" className="no-underline transition hover:text-white">Blog</Link>
             <a href="/blog/rss.xml" className="no-underline transition hover:text-white">RSS</a>
             <a href="/llms.txt" className="no-underline transition hover:text-white">llms.txt</a>
