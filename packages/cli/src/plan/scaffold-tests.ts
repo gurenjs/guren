@@ -330,8 +330,8 @@ class TestsEmitter {
         `// Written by plan:scaffold from ${prose(planFile)} (${stepId}). Keep each title's id and the request`,
         '// it makes: plan:verify finds a behaviour by its id, and each test fails until its implementation exists.',
         '// Rows are yours to set up and clean up: a row another test left can pass or fail a database expectation.',
-        '// The beforeAll below boots the application, so the database is configured before any hook you add;',
-        '// open a beforeEach with `await ready()` so a boot that fails still fails each test under its own name.',
+        '// The beforeAll below boots the application before any hook or setup of yours runs; open a hook of your',
+        '// own with `await ready()`, so a boot that fails is what each test reports rather than a database error.',
         'let booted: Promise<TestApp> | undefined',
       ].join('\n'),
       [
@@ -359,10 +359,13 @@ class TestsEmitter {
         '}',
       ].join('\n'),
       [
-        '// A beforeAll that throws fails as one unnamed case; the rejection kept in `booted` fails each test by name.',
+        '// A beforeAll that throws fails as one unnamed case, so the failure is printed for plan:verify and kept in',
+        "// `booted` for each test to rethrow by name. Bun's hook timeout defaults to 5 s, shorter than some boots.",
         'beforeAll(async () => {',
-        '  await ready().catch(() => undefined)',
-        '})',
+        '  await ready().catch((error: unknown) => {',
+        '    console.error(`error: ${error instanceof Error ? error.message : String(error)}`)',
+        '  })',
+        '}, 120_000)',
       ].join('\n'),
       ...(this.usesGiven
         ? ["/** Setup the plan states in prose: replace each call with that setup, or the test fails here. */\nfunction given<T = void>(setup: string): T {\n  throw new Error(`Write this setup first: ${setup}`)\n}"]
