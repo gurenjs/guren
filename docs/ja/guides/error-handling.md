@@ -1,6 +1,6 @@
 # エラーハンドリング
 
-Guren のエラーハンドリングは、グローバルエラーハンドラーからコントローラーでの例外キャッチまで複数の層に分かれています。Hono のエラーハンドリング機構を土台にしており、ユーザーに見せるエラーは自由にカスタマイズできます。
+Guren のエラー処理は、グローバルエラーハンドラーからコントローラー内での例外のキャッチまで、いくつかの層に分かれています。土台は Hono のエラー処理の仕組みで、ユーザーに見せるエラーは自由にカスタマイズできます。
 
 ## グローバルエラーハンドラー
 
@@ -37,7 +37,7 @@ app.hono.onError((error, ctx) => {
 
 ## HTTP 例外
 
-`HTTPException` をスローして特定の HTTP ステータスコードを返せます。
+`HTTPException` を投げると、任意の HTTP ステータスコードでレスポンスを返せます。
 
 ```ts
 import { HTTPException } from 'hono/http-exception'
@@ -56,7 +56,7 @@ router.get('/posts/:id', async (ctx) => {
 })
 ```
 
-よく使う HTTP 例外の例です。
+よく使う HTTP 例外を並べておきます。
 
 ```ts
 // 400 Bad Request
@@ -83,7 +83,7 @@ throw new HTTPException(500, { message: 'サーバーエラー' })
 
 ## Not Found ハンドラー
 
-404 レスポンスをカスタマイズできます。
+`notFound` を使うと、404 のレスポンスを差し替えられます。
 
 ```ts
 app.hono.notFound((ctx) => {
@@ -99,7 +99,7 @@ app.hono.notFound((ctx) => {
 
 ## コントローラーでのエラーハンドリング
 
-`validateBody`/`validateQuery`/`validateParams`、`findOrFail`、`userOrFail` を使えば、ほとんどのエラー処理は自動で行われ、try-catch を書く必要はありません。
+`validateBody`/`validateQuery`/`validateParams`、`findOrFail`、`userOrFail` を使えば、エラー処理のほとんどはフレームワークに任せられるので、try-catch を書く必要はありません。
 
 ```ts
 import { Controller } from '@guren/core'
@@ -127,7 +127,7 @@ export default class PostController extends Controller {
 }
 ```
 
-スローされた例外は `ExceptionHandler` がすべてキャッチし、自動でレンダリングします。try-catch を書くのは、そのコントローラーメソッドの中で独自のエラー復旧処理が必要なときだけにしてください。
+投げられた例外はすべて `ExceptionHandler` が受け止め、レスポンスに変換します。try-catch は、コントローラーのメソッド内で独自の復旧処理が必要な場合にだけ書いてください。
 
 ## バリデーションエラー
 
@@ -150,7 +150,7 @@ if (!result.success) {
 }
 ```
 
-フォールバックメッセージ付きの例です。
+第 2 引数には、フォールバックのメッセージを渡せます。
 
 ```ts
 const errors = formatValidationErrors(result.error, '入力内容を確認してください')
@@ -158,7 +158,7 @@ const errors = formatValidationErrors(result.error, '入力内容を確認して
 
 ## エラーミドルウェア
 
-再利用可能なエラーハンドリングミドルウェアを作成できます。
+エラー処理をミドルウェアにしておけば、いろいろな場所で使い回せます。
 
 ```ts
 import { defineMiddleware } from '@guren/core'
@@ -188,7 +188,7 @@ app.use('*', errorHandler)
 
 ## Inertia エラーページ
 
-Inertia アプリケーションではエラーコンポーネントをレンダリングします。
+Inertia のアプリでは、エラー用のコンポーネントを表示します。
 
 ```ts
 // Inertia 用グローバルエラーハンドラー
@@ -214,7 +214,7 @@ app.hono.onError(async (error, ctx) => {
 })
 ```
 
-React エラーコンポーネントの例です。
+エラー用の React コンポーネントは、たとえば次のように書きます。
 
 ```tsx
 // resources/pages/Error.tsx
@@ -239,7 +239,7 @@ export default function Error({ status, message }: { status: number; message: st
 
 ## データベースエラー
 
-`Model.findOrFail()` を使えば、手動の null チェックは不要です。見つからない場合は `ModelNotFoundException`（404）が自動的にスローされます。
+`Model.findOrFail()` を使えば、null チェックを自分で書く必要はありません。レコードが見つからないと、`ModelNotFoundException`（404）が自動で投げられます。
 
 ```ts
 import { PostResource } from '@/app/Http/Resources/PostResource'
@@ -264,7 +264,7 @@ async show(): Promise<Response> {
 
 ## 組み込み例外クラス
 
-よくある HTTP エラー向けに、型付きの例外クラスが用意されています。
+よくある HTTP エラーには、型付きの例外クラスを用意しています。
 
 ```ts
 import {
@@ -295,11 +295,11 @@ throw new AuthorizationException('この投稿を編集する権限がありま�
 
 ### Duck-typed `statusCode`
 
-`ExceptionHandler` は `HttpException` のサブクラスに限らず、数値の `statusCode` プロパティを持つエラーであれば扱えます。そのため `@guren/core` から export される `ModelNotFoundException`（`statusCode: 404` を持つ）は、追加の設定なしに 404 レスポンスとしてレンダリングされます。`statusCode >= 500` のエラーは、本番環境ではメッセージが隠され、"Internal Server Error" に置き換わります。
+`ExceptionHandler` は、`HttpException` のサブクラスに限らず、数値の `statusCode` プロパティを持つエラーならどれでも処理できます。たとえば `@guren/core` が export している `ModelNotFoundException` は `statusCode: 404` を持っているので、設定を足さなくても 404 のレスポンスになります。`statusCode >= 500` のエラーは、本番環境ではメッセージを伏せて "Internal Server Error" に置き換えます。
 
 ## 非同期エラーバウンダリ
 
-非同期操作をエラーバウンダリでラップできます。
+非同期の処理は、エラーバウンダリで包めます。
 
 ```ts
 async function withErrorBoundary<T>(
@@ -325,7 +325,7 @@ const posts = await withErrorBoundary(
 
 ## 開発環境 vs 本番環境
 
-環境に応じてエラー出力をカスタマイズします。
+エラーの出し方は、環境によって変えます。
 
 ```ts
 app.hono.onError((error, ctx) => {
@@ -350,7 +350,7 @@ app.hono.onError((error, ctx) => {
 
 ### デバッグページ
 
-開発環境では、Guren はスタックトレースやリクエスト情報を含む詳細なデバッグページを自動的に表示します。`createApp()` の `debug` オプションで制御できます。
+開発環境では、スタックトレースやリクエスト情報を載せた詳しいデバッグページが自動で表示されます。表示するかどうかは、`createApp()` の `debug` オプションで切り替えます。
 
 ```ts
 import { createApp } from '@guren/core'
@@ -360,19 +360,19 @@ const app = createApp({
 })
 ```
 
-デバッグページには以下の情報が含まれます。
+デバッグページには次の情報が載ります。
 - エラーメッセージとスタックトレース
 - リクエスト情報（メソッド、パス、ヘッダー）
 - 登録済みのミドルウェアとルート
 - 環境変数（機密情報は自動でマスク）
 
-本番環境では `debug: false`（デフォルト）を設定し、内部情報の漏洩を防いでください。
+本番環境では `debug: false`（デフォルト）にして、内部の情報が外に漏れないようにしてください。
 
 ## ベストプラクティス
 
-1. **非同期エラーは必ずキャッチする** - 未処理の Promise rejection はサーバーをクラッシュさせる可能性がある
-2. **コンテキスト付きでログを記録** - リクエスト ID、ユーザー ID、関連データを含める
-3. **適切なステータスコードを使用** - クライアントエラーは 4xx、サーバーエラーは 5xx
-4. **機密データを公開しない** - 本番環境ではスタックトレースや内部詳細を隠す
-5. **分かりやすいメッセージを返す** - 技術的なエラーは平易な言葉に置き換える
-6. **エラーを監視** - 本番環境ではエラー追跡サービスを使用
+1. **非同期エラーは必ずキャッチする。** 処理されない Promise の rejection は、サーバーを落とすことがあります。
+2. **ログには文脈を添える。** リクエスト ID、ユーザー ID、関係するデータを一緒に記録します。
+3. **ステータスコードを正しく使い分ける。** クライアント側のエラーは 4xx、サーバー側のエラーは 5xx です。
+4. **機密データを見せない。** 本番環境では、スタックトレースや内部の詳細を隠します。
+5. **わかりやすいメッセージを返す。** 技術的なエラーは、平易な言葉に言い換えます。
+6. **エラーを監視する。** 本番環境では、エラー追跡サービスを使います。

@@ -1,8 +1,8 @@
 # CSRF 保護
 
-CSRF（Cross-Site Request Forgery）保護は、悪意のあるウェブサイトが認証済みユーザーになりすましてフォームを送信するのを防ぎます。Guren には、セッションと連携する CSRF ミドルウェアが組み込まれています。
+CSRF（Cross-Site Request Forgery）は、悪意のあるサイトが認証済みユーザーになりすましてフォームを送信する攻撃です。Guren にはセッションと連携する CSRF ミドルウェアが組み込まれており、これを使って防ぎます。
 
-トークンは 2 つのリクエストにまたがって働きます。フォームを表示する GET で発行され、送信する POST で照合されます。
+トークンは 2 つのリクエストにまたがって使われます。フォームを表示する GET のときに発行し、フォームを送信する POST のときに照合します。
 
 ```mermaid
 sequenceDiagram
@@ -27,7 +27,7 @@ sequenceDiagram
 
 ## セットアップ
 
-アプリケーションにミドルウェアを追加して CSRF 保護を有効にします。
+CSRF 保護を有効にするには、アプリケーションにミドルウェアを追加します。
 
 ```ts
 // src/app.ts
@@ -40,18 +40,16 @@ app.use('*', createSessionMiddleware())
 app.use('*', createCsrfMiddleware())
 ```
 
-ミドルウェアは自動的に以下を行います。
-- セッションごとにトークンを生成（ゲストにはステートレスな double-submit トークン）
-- 状態を変更するリクエスト（POST、PUT、PATCH、DELETE）でトークンを検証
-- 安全なメソッド（GET、HEAD、OPTIONS、QUERY）は検証なしで許可。QUERY（RFC 10008）は仕様上安全なメソッドなので、QUERY ハンドラーは読み取り専用に保ってください。トークンを要求したい場合は `methods` オプションに `'QUERY'` を追加します
+追加したミドルウェアは、次の処理を自動で行います。
+- セッションごとにトークンを生成する（ゲストにはステートレスな double-submit トークンを生成する）
+- 状態を変更するリクエスト（POST、PUT、PATCH、DELETE）でトークンを検証する
+- 安全なメソッド（GET、HEAD、OPTIONS、QUERY）は検証せずに通す。QUERY（RFC 10008）は仕様上安全なメソッドなので、QUERY のハンドラーは読み取り専用にしてください。QUERY でもトークンを要求したい場合は、`methods` オプションに `'QUERY'` を加えます
 
 ## フォームにトークンを含める
 
-ネイティブの `<form method="post">` には、トークンを `_token` フィールドとして含めてくだ
-さい。含めないと Guren が 403 で拒否します。Inertia アプリなら `useForm()` と
-`<Link method="post">` が自動で送信します（[Inertia.js との統合](#inertiajs-との統合)を参照）。
+ネイティブの `<form method="post">` では、トークンを `_token` フィールドとして送ってください。トークンがないと Guren は 403 で拒否します。Inertia アプリでは `useForm()` と `<Link method="post">` が自動でトークンを送ります（[Inertia.js との統合](#inertiajs-との統合)を参照）。
 
-hidden input フィールドは `csrfField()` ヘルパーで生成します。
+hidden の input フィールドは `csrfField()` ヘルパーで生成できます。
 
 ```ts
 // コントローラー内
@@ -67,7 +65,7 @@ export default class FormController extends Controller {
 }
 ```
 
-フロントエンドのフォーム（React の例）です。
+フロントエンド側のフォームは次のようになります（React の例）。
 
 ```tsx
 function CreateForm({ csrfToken }: { csrfToken: string }) {
@@ -81,7 +79,7 @@ function CreateForm({ csrfToken }: { csrfToken: string }) {
 }
 ```
 
-または hidden フィールドを直接生成することもできます。
+hidden フィールドを直接生成しても構いません。
 
 ```ts
 const hiddenField = csrfField(ctx)
@@ -90,7 +88,7 @@ const hiddenField = csrfField(ctx)
 
 ## AJAX リクエスト
 
-JavaScript/AJAX リクエストの場合、ヘッダーにトークンを含めます。
+JavaScript から送る AJAX リクエストでは、トークンをヘッダーに入れます。
 
 ```ts
 // ミドルウェアが JavaScript から読める XSRF-TOKEN Cookie を設定します
@@ -108,19 +106,15 @@ fetch('/api/posts', {
 })
 ```
 
-Axios（つまり Inertia.js）はこれを自動で行うため、上記のコードが必要なのは素の
-`fetch` を使う場合だけです。
+Axios（したがって Inertia.js も）はこの処理を自動で行います。上のコードが必要になるのは、素の `fetch` を使う場合だけです。
 
-ミドルウェアは次の 3 か所からこの順にトークンを受け取ります。
+ミドルウェアは、次の 3 か所を上から順に見てトークンを探します。
 
 1. `X-CSRF-TOKEN` ヘッダー
 2. `XSRF-TOKEN` Cookie から読み取られた `X-XSRF-TOKEN` ヘッダー
 3. urlencoded・multipart・JSON いずれかのリクエストボディの `_token` フィールド
 
-これらの名前は変更できません。Cookie を無効化する場合（後述の `cookie: false`）は、
-`getCsrfToken(ctx)` でトークンをページへ渡し、`X-CSRF-TOKEN` ヘッダーで送信してください。
-ただしこれはセッション認証済みのフローに限ります。ゲストのトークンは Cookie と照合して
-検証されるため、Cookie なしでは成立しません。
+これらの名前は変更できません。Cookie を無効にした場合（後述の `cookie: false`）は、`getCsrfToken(ctx)` でトークンをページに渡し、`X-CSRF-TOKEN` ヘッダーで送り返してください。ただし、この方法が使えるのはセッション認証済みのフローだけです。ゲストのトークンは Cookie と照合して検証するので、Cookie がないと成り立ちません。
 
 ## 設定オプション
 
@@ -136,17 +130,17 @@ createCsrfMiddleware({
 })
 ```
 
-残りのオプションは通常変更する必要がありません。
+残りのオプションは、ふつうは変える必要がありません。
 
 | オプション | デフォルト | 用途 |
 |--------|---------|------|
 | `methods` | `['POST', 'PUT', 'PATCH', 'DELETE']` | トークンを要求する HTTP メソッド |
-| `cookie` | `true` | 安全なリクエストと成功した更新系リクエストで `XSRF-TOKEN` Cookie を発行する |
-| `cookieOptions` | `{ path: '/', sameSite: 'Lax' }` | Cookie 属性。`secure` は `NODE_ENV` が `production` のとき、および `process` が無いランタイムで有効 |
+| `cookie` | `true` | 安全なリクエストと、成功した更新系リクエストで `XSRF-TOKEN` Cookie を発行する |
+| `cookieOptions` | `{ path: '/', sameSite: 'Lax' }` | Cookie の属性。`secure` は、`NODE_ENV` が `production` のときと、`process` がないランタイムで有効になる |
 
 ## ルートの除外
 
-一部のルート（Webhook エンドポイントなど）は CSRF 検証をスキップする必要があります。
+Webhook のエンドポイントなど、CSRF 検証を通さないルートは `exclude` に並べます。
 
 ```ts
 createCsrfMiddleware({
@@ -160,7 +154,7 @@ createCsrfMiddleware({
 
 ## 手動トークン検証
 
-カスタム検証ロジックには `verifyCsrfToken()` を使用します。
+独自の検証ロジックを書くときは `verifyCsrfToken()` を使います。
 
 ```ts
 import { verifyCsrfToken, getCsrfToken } from '@guren/core'
@@ -181,11 +175,11 @@ export function registerWebRoutes(router: Router): void {
 
 ## トークンの再生成
 
-セッションに紐づくトークンはセッション ID に追随するため、以下の場合に変わります。
-- セッションが最初に永続化されたとき（作成直後のセッションはまだトークンの拠り所になりません）
-- `session.regenerate()` が呼び出されたとき（ログイン後に推奨）
+セッションに紐づくトークンはセッション ID に合わせて変わるので、次のタイミングで新しくなります。
+- セッションが初めて永続化されたとき（作成したばかりのセッションには、まだトークンを紐づけられません）
+- `session.regenerate()` を呼んだとき（ログイン後に呼ぶことを推奨します）
 
-ゲストのトークンはセッション ID を持たず、セッションが生まれるまで再利用されます。
+ゲストのトークンはセッション ID を持たないので、セッションができるまで同じものを使い続けます。
 
 ```ts
 // ログイン成功後
@@ -196,28 +190,25 @@ await session.regenerate()
 
 ## セキュリティベストプラクティス
 
-1. **常に HTTPS を使用** - HTTP ではトークンが傍受される可能性あり
-2. **ログイン後に再生成** - セッション固定攻撃を防止
-3. **URL にトークンを公開しない** - POST ボディまたはヘッダーを使用
-4. **セキュアな Cookie フラグを設定** - セッション Cookie はセッションミドルウェアが処理し、`XSRF-TOKEN` Cookie は `cookieOptions` に従います
+1. **常に HTTPS を使う**: HTTP ではトークンを傍受されるおそれがあります
+2. **ログイン後にトークンを再生成する**: セッション固定攻撃を防げます
+3. **トークンを URL に含めない**: POST のボディかヘッダーで送ります
+4. **Cookie に secure 系のフラグを付ける**: セッション Cookie はセッションミドルウェアが扱い、`XSRF-TOKEN` Cookie は `cookieOptions` の設定に従います
 
 ## Inertia.js との統合
 
-Inertia.js を使用する場合、CSRF は Cookie を通じて自動的に処理されます。Axios/fetch の設定に credentials を含めてください。
+Inertia.js を使う場合、CSRF は Cookie を通じて自動で処理されます。Axios や fetch の設定で credentials を送るようにしておいてください。
 
 ```ts
 // resources/js/app.tsx
 axios.defaults.withCredentials = true
 ```
 
-Inertia は自動的に `XSRF-TOKEN` Cookie を読み取り、リクエストに含めます。
+Inertia は `XSRF-TOKEN` Cookie を自動で読み取り、リクエストに付けて送ります。
 
 ### ネイティブフォームではなく Inertia 経由で送信する
 
-対象となるのは、Inertia が Axios 経由で送るリクエストだけです。ネイティブの
-`<form method="post">` は通常のブラウザ遷移として送信され、`X-XSRF-TOKEN` ヘッダーが
-付きません。そのため、フォーム自身が `_token` hidden フィールドを持っていない限り
-Guren は 403 で拒否します。
+ただし、自動で処理されるのは Inertia が Axios で送るリクエストに限られます。ネイティブの `<form method="post">` は通常のブラウザー遷移として送信されるので、`X-XSRF-TOKEN` ヘッダーが付きません。フォーム自体に `_token` の hidden フィールドがなければ、Guren は 403 で拒否します。
 
 Inertia のページでは `useForm()` を使ってください。
 
@@ -235,5 +226,4 @@ function LogoutButton() {
 }
 ```
 
-単純なアクションリンクなら `<Link href="/logout" method="post" as="button">` でも構い
-ません。ネイティブフォームは、意図的にフルページ遷移をさせたい場合にだけ使ってください。
+単純なアクションのリンクなら、`<Link href="/logout" method="post" as="button">` でも構いません。ネイティブフォームは、あえてページ全体を遷移させたいときだけ使ってください。

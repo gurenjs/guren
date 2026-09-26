@@ -1,6 +1,6 @@
 # サーバーレスデプロイ（AWS Lambda）
 
-Guren は AWS Lambda の Node.js ランタイム上で動作します。公式プラグイン `@guren/plugin-lambda` がバンドルを担当し、CDK コンストラクトが HTTP・キュー・スケジュールタスク・CLI コマンド・静的アセットまでフルスタックをプロビジョニングします。
+Guren は AWS Lambda の Node.js ランタイムで動きます。バンドルは公式プラグイン `@guren/plugin-lambda` が受け持ち、HTTP、キュー、スケジュールタスク、CLI コマンド、静的アセットまでの一式は CDK コンストラクトがプロビジョニングします。
 
 ## セットアップ
 
@@ -9,7 +9,7 @@ bunx guren plugin @guren/plugin-lambda
 bun add @guren/plugin-lambda
 ```
 
-インストールすると `src/app.ts` に `lambdaPlugin()` が登録され、`src/lambda.ts` がスキャフォールドされます。このモジュールの export がそのまま Lambda ハンドラーになります:
+インストールすると、`src/app.ts` に `lambdaPlugin()` が登録され、`src/lambda.ts` の雛形が生成されます。このモジュールの export がそのまま Lambda のハンドラーになります。
 
 ```typescript
 // src/lambda.ts（スキャフォールド）
@@ -26,7 +26,7 @@ export const http = createLambdaHandler(app)
 export const queue = createSqsHandler()
 ```
 
-アプリにスケジューラーやコンソールカーネルを定義したら、スキャフォールド内のコメントアウトされた `schedule` / `console` export を有効化してください。
+アプリにスケジューラーやコンソールカーネルを定義したら、雛形の中でコメントアウトされている `schedule` / `console` の export を有効にしてください。
 
 ## ビルド
 
@@ -34,35 +34,35 @@ export const queue = createSqsHandler()
 bunx guren lambda:build
 ```
 
-このコマンドはまず `guren doctor` と同じデプロイランタイムチェックを走らせます(インメモリのセッション/OAuth ストア、[Bun でしか読めないパスワードハッシャー](/docs/guides/authentication#パスワードハッシャー)、ファイルシステムからのプロバイダ探索に当たると警告します。ビルドは止めません。どれもローカルでは動き、Lambda では壊れるものです)。そのあとアプリの `build` スクリプトを実行し、`.lambda/` ディレクトリを組み立てます:
+このコマンドは、最初に `guren doctor` と同じデプロイランタイムのチェックを実行します。インメモリのセッション/OAuth ストア、[Bun でしか読めないパスワードハッシャー](/docs/guides/authentication#パスワードハッシャー)、ファイルシステムからのプロバイダ探索が見つかると警告を出しますが、ビルドは止めません(どれもローカルでは動き、Lambda では動かなくなるものです)。続いてアプリの `build` スクリプトを実行し、`.lambda/` ディレクトリを組み立てます。
 
 | パス | 内容 |
 |------|------|
-| `function/` | 自己完結の ESM バンドル（`handler.js`）+ SSR バンドル + Drizzle マイグレーション — これを関数コードとしてデプロイ |
-| `assets/` | S3 用にステージングされた `public/`。ビルド済みアセットは `/assets/` と `/public/assets/` の両方にミラー |
-| `env.json` | 関数が必要とする環境変数 — 同じ値がバンドルにもデフォルトとして焼き込まれます |
+| `function/` | 自己完結した ESM バンドル（`handler.js`）、SSR バンドル、Drizzle のマイグレーション。これを関数のコードとしてデプロイします |
+| `assets/` | S3 に置くためにステージングした `public/`。ビルド済みのアセットは `/assets/` と `/public/assets/` の両方に置かれます |
+| `env.json` | 関数が必要とする環境変数。同じ値がデフォルトとしてバンドルにも埋め込まれます |
 
-ハンドラー識別子はバンドルに対応します: `handler.http`、`handler.queue`、`handler.schedule`、`handler.console`。
+ハンドラーの識別子はバンドルに合わせて `handler.http`、`handler.queue`、`handler.schedule`、`handler.console` になります。
 
-`process.env.NODE_ENV` はバンドル時に `"production"` に固定されます。バンドラーがこの値をインライン化するため、実行時の設定だけでは開発モードのバンドルを直せません。Inertia のアセット位置（`GUREN_INERTIA_ENTRY`、`GUREN_INERTIA_STYLES`、SSR エントリ）もデフォルトとして焼き込まれますが、関数の実際の環境変数が常に優先されます。
+`process.env.NODE_ENV` はバンドル時に `"production"` に固定されます。バンドラーがこの値をコードに埋め込むので、開発モードでバンドルしてしまったものを実行時の設定だけで直すことはできません。Inertia のアセットの場所（`GUREN_INERTIA_ENTRY`、`GUREN_INERTIA_STYLES`、SSR のエントリ）もデフォルトとして埋め込まれますが、関数に実際に設定した環境変数のほうが常に優先されます。
 
-`--zip` を渡すと直接アップロード用の `function.zip` も生成されます。CDK はディレクトリを自動でアーカイブするため不要です。
+`--zip` を渡すと、直接アップロードするための `function.zip` も作られます。CDK はディレクトリを自分でアーカイブするので、CDK を使う場合は不要です。
 
 ## ハンドラー
 
 ### HTTP — `createLambdaHandler(app)`
 
-アプリの fetch ハンドラーを API Gateway v1/v2 と ALB 向けにラップします。ルート・コントローラー・ミドルウェアはサーバー構成と同一に動作します。
+アプリの fetch ハンドラーを、API Gateway v1/v2 と ALB から呼べるようにラップします。ルート、コントローラー、ミドルウェアは、サーバーで動かす場合とまったく同じように動きます。
 
 ### キュー — `createSqsHandler()`
 
-SQS メッセージを Guren のジョブとして処理します。Lambda のイベントソースマッピングで `ReportBatchItemFailures` を有効にしてください。同梱の CDK コンストラクトでは設定済みです。標準キューのバッチは並行実行し、失敗したレコードを返します。ARN が `.fifo` で終わる FIFO キューは順番に実行し、最初の失敗以降は未処理レコードも含めて返して順序を保ちます。
+SQS のメッセージを Guren のジョブとして処理します。Lambda のイベントソースマッピングでは `ReportBatchItemFailures` を有効にしてください（同梱の CDK コンストラクトでは設定済みです）。標準キューのバッチは並行して実行し、失敗したレコードを個別に返します。ARN が `.fifo` で終わる FIFO キューは 1 件ずつ順番に実行し、失敗が出たらそのレコードと未処理のレコードをすべて返して、SQS が順序を保てるようにします。
 
-試行回数は、ジョブ本文の既存回数に AWS の `ApproximateReceiveCount` を加えた値です。正の受信回数がないレコードは失敗として返します。`maxAttempts` に達した試行が失敗すると、キューワーカーと同じく、その試行のエラーで `failed()` を 1 回だけ呼びます。それ以降の配信では `handle()` も `failed()` も実行しません。最終失敗も `batchItemFailures` に残すため、キューのリドライブポリシーでデッドレターキューへ移動します。ポリシーは別途設定してください。`maxAttempts` 自体はメッセージの削除やデッドレターキューの作成を行いません。
+試行回数は、ジョブ本文に記録済みの回数に AWS の `ApproximateReceiveCount` を足した値です。受信回数が正の値でないレコードは失敗として返します。`maxAttempts` に達した試行が失敗すると、キューワーカーと同じく、その試行のエラーを渡して `failed()` を 1 回だけ呼びます。それ以降に配信されたときは、`handle()` も `failed()` も実行しません。最終的に失敗したメッセージも `batchItemFailures` に残るので、キューのリドライブポリシーによってデッドレターキューへ移されます。このポリシーは自分で設定してください。`maxAttempts` はメッセージを削除せず、デッドレターキューも作りません。
 
-`handle()` は、再配信で複数回呼ばれても問題が起きないように実装してください。上限は AWS の配信回数に適用され、FIFO で前のレコードが失敗して未処理のまま返したレコードの受信回数も含みます。そのため、一度も実行されないまま上限に達するレコードがありえます。この場合は `failed()` を呼ばず、デッドレターキューへ移動します。この挙動を考慮してキューの `maxReceiveCount` を設定してください。リドライブの上限が低いと、`maxAttempts` に達して `failed()` を呼ぶ前にジョブが移動する場合があります。実行して失敗したレコードは、ジョブ名・試行回数・エラーを JSON でログに出力します。FIFO バッチが途中で止まったときは、未処理のまま返したレコードもログに残します。
+`handle()` は、再配信によって何度呼ばれても問題が起きないように実装してください。上限は AWS が配信した回数で数えるので、FIFO で前のレコードが失敗して未処理のまま返されたレコードの受信回数も含まれます。そのため、一度も実行されないまま上限に達するレコードも出てきます。そうしたレコードは `failed()` を通らずにデッドレターキューへ移ります。キューの `maxReceiveCount` は、この挙動を踏まえて設定してください。リドライブの上限が低いと、`maxAttempts` に達して `failed()` が呼ばれる前にジョブが移されることがあります。実行して失敗したレコードは、ジョブ名、試行回数、エラーを JSON でログに出します。FIFO のバッチが途中で止まったときは、未処理のまま返したレコードもログに残ります。
 
-SQS ドライバは `guren add queue` が生成する `config/queue.ts` で設定し、`createApp({ config })` に加えます:
+SQS ドライバは、`guren add queue` が生成する `config/queue.ts` で設定し、`createApp({ config })` に加えます。
 
 ```typescript
 // config/queue.ts
@@ -84,27 +84,27 @@ export default defineQueueConfig((env) => ({
 }))
 ```
 
-`SQS_QUEUE_URL` と `SQS_EMAILS_QUEUE_URL` は `config/env.ts` で宣言してください（[設定](./configuration.md) を参照）。宣言しておけば、値を設定し忘れた関数は最初のディスパッチではなくブート時に失敗します。キュー をサービスプロバイダで設定しているアプリもそのまま動きます。[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
+`SQS_QUEUE_URL` と `SQS_EMAILS_QUEUE_URL` は `config/env.ts` で宣言してください（[設定](./configuration.md) を参照）。宣言しておけば、値を設定し忘れた関数は、最初にジョブをディスパッチしたときではなく起動の時点で失敗します。キューをサービスプロバイダで設定しているアプリも、そのまま動きます。詳しくは [サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
 
-ジョブのディスパッチはサーバー上と同じです（`await SendEmailJob.dispatch({ to: 'user@example.com' })`）。`SqsDriver` がジョブを SQS にシリアライズし、Lambda ハンドラーがデシリアライズして実行します。
+ジョブのディスパッチはサーバーで動かす場合と同じで、`await SendEmailJob.dispatch({ to: 'user@example.com' })` のように書きます。`SqsDriver` がジョブをシリアライズして SQS に送り、Lambda のハンドラーがそれをデシリアライズして実行します。
 
 ### SQS を通常のワーカーで処理する
 
-`guren queue:work` は `SqsDriver` 経由で SQS を処理します。標準アダプターは `ApproximateReceiveCount` を取得し、再配信やワーカー再起動後も試行回数を引き継ぎます。成功したジョブと `maxAttempts` に達したジョブは SQS から削除するため、ワーカーに `sqs:DeleteMessage` 権限が必要です。失敗記録はプロセスのメモリに保存します。再起動後も記録が必要な場合は、監視や永続化するエラー記録をアプリ側に用意してください。最終失敗時の削除では SQS のデッドレターキューに移動しません。
+`guren queue:work` でも、`SqsDriver` を通して SQS のジョブを処理できます。標準のアダプターは `ApproximateReceiveCount` を取得するので、再配信やワーカーの再起動があっても試行回数が引き継がれます。成功したジョブと `maxAttempts` に達したジョブは SQS から削除するため、ワーカーには `sqs:DeleteMessage` の権限が必要です。失敗の記録はプロセスのメモリに置かれるので、再起動後も残したい場合は、アプリ側で監視や永続的なエラー記録を用意してください。最終的に失敗したジョブは削除され、SQS のデッドレターキューには移りません。
 
-通常のワーカーで独自アダプターを使う場合は、`deleteMessage({ queueUrl, receiptHandle })` を実装し、`receiveMessage()` から SQS の `ApproximateReceiveCount` に基づく `receiveCount` を返してください。どちらかを省いたアダプターは警告を1回出し、従来どおりに動きます。削除したジョブはキューに残り、試行回数は再配信のたびにメッセージ本文の値から数え直します。ジョブの送信だけに使うアダプターでは、どちらも不要です。`MessageSystemAttributeNames` は、このパラメーターを持つ `@aws-sdk/client-sqs`（3.577.0 以降）でのみ API に届きます。それより古いクライアントも同じ警告の経路に入ります。Lambda のイベントソース経由では、引き続き `createSqsHandler()` と AWS のバッチ処理結果を使います。
+通常のワーカーで独自のアダプターを使う場合は、`deleteMessage({ queueUrl, receiptHandle })` を実装し、`receiveMessage()` から SQS の `ApproximateReceiveCount` に基づく `receiveCount` を返してください。どちらかが欠けたアダプターは警告を 1 回出し、以前と同じ動きになります。つまり、処理を終えたジョブがキューに残り、試行回数は再配信のたびにメッセージ本文の値から数え直しになります。ジョブの送信だけに使うアダプターなら、どちらも不要です。`MessageSystemAttributeNames` が API に届くのは、このパラメーターに対応した `@aws-sdk/client-sqs`（3.577.0 以降）を使っている場合だけで、それより古いクライアントでは同じ警告が出ます。Lambda のイベントソースから処理する場合は、これまでどおり `createSqsHandler()` と AWS のバッチ処理結果の仕組みを使います。
 
 ### スケジュール — `createScheduleHandler(scheduler)`
 
-EventBridge から呼び出されたときに実行予定のタスクを処理します。`rate(1 minute)` の EventBridge ルールでこのハンドラーをトリガーしてください。既存の `Scheduler` とタスク定義は変更なしで動作します。
+EventBridge から呼び出されたときに、実行時刻を迎えたタスクを処理します。このハンドラーは `rate(1 minute)` の EventBridge ルールで起動してください。既存の `Scheduler` とタスク定義は、変更せずにそのまま動きます。
 
 ### コンソール — `createConsoleHandler(kernel)`
 
-アプリの `ConsoleKernel`（`src/console.ts` が `kernel` としてエクスポートするもの）に登録したコマンドを実行します。コマンドの定義と登録については [コンソールコマンドガイド](./console.md) を参照してください。
+アプリの `ConsoleKernel`（`src/console.ts` が `kernel` として export しているもの）に登録したコマンドを実行します。コマンドの定義と登録の方法は [コンソールコマンドガイド](./console.md) を参照してください。
 
-スキャフォールドされた `src/lambda.ts` の `console` export のコメントを外すとハンドラが有効になります。
+雛形の `src/lambda.ts` で `console` の export のコメントを外すと、ハンドラが有効になります。
 
-カーネルに組み込みコマンドはありません。マイグレーション用のコマンドが必要になるのは Data API アダプタだけです（`getDatabase()` が意図的に未適用のマイグレーションを実行しないため。他のアダプタは初回利用時に適用します）。このトレードオフと `migrateOnStart` については [Aurora Serverless の項](./database.md#aurora-serverlessaws-data-apiサポート) を参照してください。いずれにせよ、帯域外で実行すればリクエストパスからレイテンシを外せます。
+カーネルには組み込みのコマンドがありません。マイグレーション用のコマンドが必要になるのは Data API アダプタを使う場合だけです（Data API アダプタの `getDatabase()` は、未適用のマイグレーションを意図的に実行しません。ほかのアダプタは初回利用時に適用します）。このトレードオフと `migrateOnStart` については [Aurora Serverless の項](./database.md#aurora-serverlessaws-data-apiサポート) を参照してください。どのアダプタでも、マイグレーションを別に実行しておけば、その待ち時間がリクエストの処理にかかりません。
 
 ```bash
 bunx guren make:command Migrate --command db:migrate
@@ -125,7 +125,7 @@ export default class MigrateCommand extends Command {
 }
 ```
 
-`make:command` が `src/console.ts` への登録行を出力します。そのうえで AWS CLI から呼び出します:
+`make:command` を実行すると、`src/console.ts` に書く登録行が表示されます。登録したら、AWS CLI から呼び出します。
 
 ```bash
 aws lambda invoke --function-name my-app-console \
@@ -133,17 +133,17 @@ aws lambda invoke --function-name my-app-console \
   --payload '{"command": "db:migrate"}' response.json
 ```
 
-成功時は `{ exitCode: 0 }`、失敗時は `{ exitCode: 1 }` を返します。
+成功すると `{ exitCode: 0 }`、失敗すると `{ exitCode: 1 }` が返ります。
 
 ## サーバーサイドレンダリング
 
-SSR は追加設定なしで Lambda 上で動作します。`lambda:build` が Vite の SSR バンドルを関数ディレクトリにコピーし、その場所をバンドルに焼き込みます。サーバーは最初の Inertia レンダリング時にレンダラーをロードします。SSR ビルドがないアプリは CSR のみの関数になります。どちらの場合もフラグは不要です。
+SSR は、追加の設定なしで Lambda 上で動きます。`lambda:build` が Vite の SSR バンドルを関数のディレクトリにコピーし、その場所をバンドルに埋め込むので、サーバーは最初に Inertia でレンダリングするときにレンダラーを読み込みます。SSR のビルドがないアプリは CSR だけの関数になります。どちらの場合もフラグは要りません。
 
 ## データベース
 
 ### Aurora Serverless v2 + RDS Data API（推奨）
 
-Data API は HTTP ベースです: コネクションプールも RDS Proxy も不要で、関数を VPC 内に配置する必要もありません。`createAwsDataApiDatabase` を使います:
+Data API は HTTP で通信するので、コネクションプールも RDS Proxy も要らず、関数を VPC に置く必要もありません。使うのは `createAwsDataApiDatabase` です。
 
 ```typescript
 // config/database.ts
@@ -158,13 +158,13 @@ const database = createAwsDataApiDatabase({
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
 ```
 
-ドライバも合わせてインストールしてください（`bun add @aws-sdk/client-rds-data`）。関数にはクラスターへの `rds-data` アクションとシークレットへの `secretsmanager:GetSecretValue` が必要です。後述の CDK コンストラクトの `dataApi` オプションが、その両方を配線します。認証は関数の IAM ロールを使用します。`drizzle-kit generate`/`push` には `drizzle.config.ts` で `driver: 'aws-data-api'` を設定します。
+ドライバも一緒にインストールしてください（`bun add @aws-sdk/client-rds-data`）。関数には、クラスターに対する `rds-data` のアクションと、シークレットに対する `secretsmanager:GetSecretValue` の権限が必要です。後述する CDK コンストラクトの `dataApi` オプションを使えば、どちらも設定されます。認証には関数の IAM ロールを使います。`drizzle-kit generate`/`push` を使うときは、`drizzle.config.ts` で `driver: 'aws-data-api'` を設定します。
 
 ファクトリの詳細は[データベースガイド](./database.md)を参照してください。
 
 ### 従来の RDS + RDS Proxy
 
-関数を VPC 内で動かす場合は `createPostgresDatabase` が RDS に対して動作します。接続は RDS Proxy 経由にし、プリペアドステートメントは無効化してください。プロキシのセッションピニングを引き起こします:
+関数を VPC 内で動かすなら、`createPostgresDatabase` で RDS に接続できます。接続は RDS Proxy を経由させ、プリペアドステートメントは無効にしてください。有効のままだと、プロキシでセッションピニングが起きます。
 
 ```typescript
 // config/database.ts
@@ -178,20 +178,13 @@ const database = createPostgresDatabase({
 })
 ```
 
-このリゾルバは、アプリのブート時には検証済みの環境変数を受け取ります。アプリの外から `guren db:migrate` が呼ぶときは、スキーマを自分で解析します（[データベース接続](./configuration.md#データベース接続)）。
+このリゾルバは、アプリの起動時には検証済みの環境変数を受け取ります。アプリの外から `guren db:migrate` に呼ばれたときは、自分でスキーマを解析します（[データベース接続](./configuration.md#データベース接続)）。
 
 ### 使うクライアントだけがバンドルされる
 
-ORM は各ダイアレクトのクライアントを動的 import で読み込みますが、バンドラーは
-その分岐が実行されうるかに関係なく import をたどります。そのため何もしなければ、
-Postgres アプリが、選んでもいない `mysql2` の解決に失敗してビルドできません。
-ビルドは `config/database.ts` がどのファクトリを呼んでいるかを読み取り、それ以外の
-ダイアレクトのクライアントを、到達したら例外を投げるスタブに差し替えます。
+ORM は各ダイアレクトのクライアントを動的 import で読み込みますが、バンドラーはその分岐が実際に通るかどうかに関係なく import をたどります。そのため何も手を打たないと、Postgres のアプリが、選んでもいない `mysql2` を解決できずにビルドに失敗します。そこでビルドは、`config/database.ts` がどのファクトリを呼んでいるかを読み取り、ほかのダイアレクトのクライアントを、到達したら例外を投げるスタブに差し替えています。
 
-読み取るのは `config/database.ts`（または `db/config.ts`）だけなので、別の場所で
-2 つ目の接続を開いているアプリは、使うデータベースを明示してください。再 export や
-別モジュール経由など、ファクトリ名が config に現れない書き方をしている場合も同様
-です（ビルドは「判別できなかった」と報告して何もスタブ化しません）:
+読み取るのは `config/database.ts`（または `db/config.ts`）だけです。別の場所で 2 つ目の接続を開いているアプリでは、使うデータベースを明示してください。再 export や別モジュールを経由するなど、config にファクトリの名前が現れない書き方をしている場合も同じです（この場合、ビルドは「判別できなかった」と報告し、何もスタブにしません）。
 
 ```bash
 bunx guren lambda:build --database postgres,sqlite
@@ -199,7 +192,7 @@ bunx guren lambda:build --database postgres,sqlite
 
 ## ランタイム検出
 
-ランタイムに応じてサービスを条件付きで設定できます:
+実行中のランタイムに応じて、サービスの設定を切り替えられます。
 
 ```typescript
 import { isLambda, getLambdaContext } from '@guren/core/lambda'
@@ -216,14 +209,14 @@ if (isLambda()) {
 
 ## パスワードハッシュ
 
-デフォルトのハッシャーはどのランタイムでも `node:crypto` の scrypt を書きます。ローカルの Bun で投入したカラムは Lambda でもそのまま検証できます。新規アプリでは設定不要です。
+デフォルトのハッシャーは、どのランタイムでも `node:crypto` の scrypt でハッシュを書き込みます。ローカルの Bun で投入したカラムも、Lambda でそのまま検証できます。新しいアプリなら設定は要りません。
 
 > [!WARNING]
-> Argon2id で書かれた行は `Bun.password` のある環境でしか検証できません。`hasher: 'argon2'` を選んだアプリと、scrypt が既定になる前のリリースが投入したカラムが該当します。移行の手順は[パスワードハッシャー](/docs/guides/authentication#パスワードハッシャー)にあります。Lambda へ移す前に済ませてください。
+> Argon2id で書かれた行は、`Bun.password` がある環境でしか検証できません。`hasher: 'argon2'` を選んだアプリと、scrypt が既定になる前のリリースで投入したカラムがこれにあたります。移行の手順は[パスワードハッシャー](/docs/guides/authentication#パスワードハッシャー)で説明しています。Lambda に移す前に済ませてください。
 
 ## ロギング
 
-Lambda は `stderr` を自動的に CloudWatch へ送ります。JSON 形式のコンソールロギングを使ってください:
+Lambda は `stderr` を自動で CloudWatch に送ります。ログはコンソールに JSON 形式で出すようにしてください。
 
 ```typescript
 import { LogManager } from '@guren/core'
@@ -238,17 +231,17 @@ const log = new LogManager({
 
 ## 静的アセット
 
-Lambda は静的ファイルの配信に向きません。`lambda:build` が `public/` を `.lambda/assets` にステージングし、CDK コンストラクト（後述）が S3 バケットと CloudFront ディストリビューションをプロビジョニングします（デフォルトオリジンはアプリ）。バケットへルーティングされるのは `/public/*` と、`.lambda/assets` 直下の各エントリ（`/robots.txt` など）です。ビルド済みのクライアントアセットは `/public/assets/` から配信されます。
+Lambda は静的ファイルの配信には向いていません。`lambda:build` が `public/` を S3 向けに `.lambda/assets` へステージングし、CDK コンストラクト（後述）が S3 バケットと、その前に置く CloudFront ディストリビューションをプロビジョニングします（デフォルトのオリジンはアプリです）。バケットへ振り分けられるのは `/public/*` と、`.lambda/assets` の直下にある各エントリ（`/robots.txt` など）です。ビルド済みのクライアントアセットは `/public/assets/` から配信されます。
 
-このディストリビューションは関数より先にファイルに応答するため、フレームワーク自身が `public/` を配信するときのガードはここでは動きません。コンストラクトはアセット向けビヘイビアに viewer-response の CloudFront Function を付けてこれを復元します: ブラウザがドキュメントとして描画する形式 (`.html`、`.htm`、`.svg`、`.xhtml`、`.xml`) には、階層の深さや拡張子の大文字小文字によらず `Content-Disposition: attachment` と `X-Content-Type-Options: nosniff` が付きます。画像、スクリプト、スタイルシート、フォントはそのままで、デフォルトビヘイビア (つまりアプリ) も自分のヘッダーのままです。
+これらのファイルには関数より先にディストリビューションが応答するので、フレームワークが自分で `public/` を配信するときに効かせているガードは働きません。そこでコンストラクトは、アセット向けのビヘイビアに viewer-response の CloudFront Function を付けて、同じガードを掛け直しています。ブラウザがドキュメントとして描画する形式 (`.html`、`.htm`、`.svg`、`.xhtml`、`.xml`) には、どの階層にあっても、拡張子が大文字でも小文字でも、`Content-Disposition: attachment` と `X-Content-Type-Options: nosniff` が付きます。画像、スクリプト、スタイルシート、フォントには手を加えず、デフォルトのビヘイビア (つまりアプリ) のヘッダーもアプリが返すままです。
 
-手動でアセットをデプロイする場合は、`.lambda/assets` をバケットに同期し、関数の `GUREN_INERTIA_ENTRY` / `GUREN_INERTIA_STYLES` に CDN の URL を設定してください（値は `.lambda/env.json` に一覧されています）。ただし上記のドキュメント向けルールはステージング済みディレクトリではなく CDK コンストラクトに付属するため、自前のディストリビューションでは `public/` の `.svg` がアプリのオリジン上でインラインに描画されます。
+アセットを手動でデプロイする場合は、`.lambda/assets` をバケットに同期し、関数の `GUREN_INERTIA_ENTRY` / `GUREN_INERTIA_STYLES` に CDN の URL を設定してください（設定する値は `.lambda/env.json` に載っています）。ただし、上で説明したドキュメント向けのルールは、ステージングしたディレクトリではなく CDK コンストラクトに含まれています。自前で用意したディストリビューションでは、`public/` の `.svg` がアプリのオリジン上でインラインに描画されます。
 
 ## 設定上の注意
 
 ### サービスプロバイダ
 
-バンドルには走査できるディレクトリがありません。アプリが登録するものはすべて `createApp()` に書きます。サービスは config 定義として `config` に、まだ残っているプロバイダは `providers` に並べます:
+バンドルには走査できるディレクトリがないので、アプリが登録するものはすべて `createApp()` に書きます。サービスは config 定義として `config` に、まだ残っているプロバイダは `providers` に並べてください。
 
 ```typescript
 const app = createApp({
@@ -261,31 +254,31 @@ const app = createApp({
 
 ### マイグレーションとシード
 
-スキャフォールドされた `config/database.ts` は、ローカル開発の利便性としてブート時にシードを実行し（`seedOnBoot: process.env.NODE_ENV !== 'production'`）、本番ではスキップします。このガードはそのまま残してください。Lambda はコールドスタートのたびにアプリをブートするため、ブート時シードは本番データに対して繰り返し実行されてしまいます。
+雛形の `config/database.ts` は、ローカル開発の手間を省くために起動時にシードを実行し（`seedOnBoot: process.env.NODE_ENV !== 'production'`）、本番ではスキップします。このガードは外さないでください。Lambda はコールドスタートのたびにアプリを起動するので、起動時のシードが本番データに対して何度も実行されてしまいます。
 
-**マイグレーションは関数に同梱されます。** `lambda:build` が `db/migrations/` をバンドルの隣にコピーするため、`db:migrate` コンソールコマンドでその場で適用できます。コマンド定義と呼び出し方は [コンソールハンドラ `createConsoleHandler(kernel)`](#コンソール--createconsolehandlerkernel) を参照してください。
+**マイグレーションは関数に同梱されます。** `lambda:build` が `db/migrations/` をバンドルの隣にコピーするので、`db:migrate` のコンソールコマンドを使えばその場で適用できます。コマンドの定義と呼び出し方は [コンソールハンドラ `createConsoleHandler(kernel)`](#コンソール--createconsolehandlerkernel) を参照してください。
 
-**シーダーは関数内では実行できません。** シーダーはスキーマや `@guren/core` を import する通常の `.ts` モジュールです。一方、デプロイされる関数は `node_modules` も TypeScript ローダーも持たない自己完結バンドルなので、Node.js ランタイムはこれらを読み込めません。プロジェクトのソースがある環境からシードしてください:
+**シーダーは関数の中では実行できません。** シーダーはスキーマや `@guren/core` を import するふつうの `.ts` モジュールですが、デプロイされる関数は `node_modules` も TypeScript のローダーも持たない自己完結したバンドルなので、Node.js のランタイムはシーダーを読み込めません。シードは、プロジェクトのソースがある環境から実行してください。
 
 ```bash
 DATABASE_URL='<本番の接続文字列>' bunx guren db:seed --force
 ```
 
-手動適用ではなくリリースに同梱したいデータセットは、マイグレーションとして表現すれば関数と一緒に配布されます。
+手動で適用するのではなくリリースに含めたいデータは、マイグレーションとして書いておけば関数と一緒に配布されます。
 
 ### ストレージとファイルシステム
 
-Lambda のファイルシステムは `/tmp`（512 MB、一時的）を除いて読み取り専用です。`/tmp` は一時キャッシュのみに使い、永続ストレージには `S3Driver` 経由で S3 を使ってください。
+Lambda のファイルシステムは、`/tmp`（512 MB、一時的）を除いて読み取り専用です。`/tmp` は一時的なキャッシュにだけ使い、永続的なストレージには `S3Driver` を通して S3 を使ってください。
 
 ### セッションとキャッシュ
 
-インメモリストアは呼び出しごとに失われるため、セッションには Lambda の呼び出しをまたいで生存するバックエンドが必要です。
+インメモリのストアは呼び出しのたびに失われるので、セッションには Lambda の呼び出しをまたいでデータが残るバックエンドが必要です。
 
-`bunx guren add session` を実行し、`config/session.ts` でストアを選んでください。多くのアプリには `database` が推奨デフォルトです: アプリが既に接続しているデータベースにセッションを永続化するため追加のインフラが不要で、`createScheduleHandler` からスケジュールした `sessions:prune` がテーブルを小さく保ちます。
+`bunx guren add session` を実行し、`config/session.ts` でストアを選んでください。たいていのアプリには `database` をおすすめします。アプリがすでに接続しているデータベースにセッションを保存するので追加のインフラは要らず、`createScheduleHandler` でスケジュールした `sessions:prune` がテーブルを小さく保ってくれます。
 
 ### DynamoDB
 
-セッションの書き込み負荷をプライマリ DB から逃したい場合、`@guren/plugin-lambda` が `dynamodb` ドライバを追加します:
+セッションの頻繁な書き込みをプライマリの DB から逃がしたい場合は、`@guren/plugin-lambda` が追加する `dynamodb` ドライバを使えます。
 
 ```bash
 bun add @aws-sdk/client-dynamodb
@@ -305,7 +298,7 @@ export default defineSessionConfig((env) => ({
 }))
 ```
 
-`config/session.ts` はストアに名前を付けられますが、ドライバの登録まではできません。バインドされたマネージャへのドライバ追加は、プロバイダの `register()` で行います:
+`config/session.ts` ではストアに名前を付けられますが、ドライバの登録まではできません。バインドされたマネージャへのドライバの追加は、プロバイダの `register()` で行います。
 
 ```typescript
 // app/Providers/SessionDriversProvider.ts
@@ -319,31 +312,31 @@ export default class SessionDriversProvider extends ServiceProvider {
 }
 ```
 
-`session` を `createApp({ config })` に、このプロバイダを `providers` に加え、関数に `SESSION_DRIVER=dynamodb` を設定します。定義はどのプロバイダの登録よりも先にバインドされ、セッションマネージャはストアを遅延して解決します。そのため、デフォルトストアのドライバが存在するかをブート時に確かめる時点で、ドライバは登録済みです。`boot()` で登録すると、この確認に間に合いません。
+`session` を `createApp({ config })` に、このプロバイダを `providers` に加え、関数に `SESSION_DRIVER=dynamodb` を設定します。定義はどのプロバイダの登録よりも先にバインドされ、セッションマネージャはストアを必要になった時点で解決します。そのため、デフォルトのストアのドライバが存在するかを起動時に確かめる時点では、ドライバはもう登録されています。`boot()` で登録すると、この確認に間に合いません。
 
-テーブル名は `DYNAMODB_SESSIONS_TABLE` から読みます。CDK コンストラクトの `sessionsTable` が全関数に設定するもので、ストア設定に `table` を渡せば自分で指定できます。登録が import の副作用ではなく関数呼び出しなのは、未使用 import を落とすバンドラがドライバごと落とすのを防ぐためです。
+テーブル名は `DYNAMODB_SESSIONS_TABLE` から読みます。この変数は CDK コンストラクトの `sessionsTable` がすべての関数に設定します。自分で指定したい場合は、ストアの設定に `table` を渡してください。登録を import の副作用ではなく関数呼び出しにしているのは、使われていない import を削除するバンドラーに、ドライバまで一緒に削除されないようにするためです。
 
-テーブルには文字列のパーティションキー `id` と、`expires_at` に対する TTL が必要です。読み取りは強い整合性で行うため、ログイン時に書いたセッションは直後のリダイレクトで必ず読めます。DynamoDB の TTL は期限ちょうどではなく 48 時間以内に削除するので、ストア自身も過ぎた `expires_at` を存在しないものとして扱います: TTL は掃除係であって時計ではありません。DynamoDB のアイテム上限は 400 KB なので、セッションには id だけを入れてください。
+テーブルには、文字列のパーティションキー `id` と、`expires_at` に対する TTL の設定が必要です。読み取りは強い整合性で行うので、ログイン時に書き込んだセッションは、その直後のリダイレクトで確実に読めます。DynamoDB の TTL は期限が来た瞬間ではなく 48 時間以内にアイテムを削除するため、ストア自身も `expires_at` を過ぎたセッションは存在しないものとして扱います。TTL はあくまで後片付けの仕組みで、期限の判定には使っていません。DynamoDB のアイテムは 400 KB までなので、セッションには id だけを入れてください。
 
-`redis` ドライバ（ElastiCache）も引き続き選べます。キャッシュには Redis や DynamoDB が有効です（下のインフラ表を参照してください）。
+`redis` ドライバ（ElastiCache）も引き続き選べます。キャッシュには Redis や DynamoDB が向いています（下のインフラの表を参照してください）。
 
 ## インフラ推奨構成
 
 | 項目 | 推奨 |
 |------|------|
 | **HTTP トリガー** | API Gateway v2（HTTP API）または ALB |
-| **データベース** | Aurora Serverless v2 + Data API（`createAwsDataApiDatabase`）— または RDS + RDS Proxy |
-| **セッション** | `database` ドライバ（追加インフラ不要）— セッション負荷が高い場合は `dynamodb`（コンストラクトの `sessionsTable`）や `redis`（ElastiCache） |
-| **キャッシュ** | `RedisCacheStore` 経由の Redis（`@guren/core/redis` にはセッション/レート制限/API トークンストアも同梱）、一時キャッシュなら `/tmp` + `FileStore` |
+| **データベース** | Aurora Serverless v2 + Data API（`createAwsDataApiDatabase`）、または RDS + RDS Proxy |
+| **セッション** | `database` ドライバ（追加のインフラ不要）。セッションの負荷が高い場合は `dynamodb`（コンストラクトの `sessionsTable`）や `redis`（ElastiCache） |
+| **キャッシュ** | `RedisCacheStore` を使った Redis（`@guren/core/redis` にはセッション、レート制限、API トークンのストアも入っています）。一時的なキャッシュなら `/tmp` + `FileStore` |
 | **キュー** | SQS（`SqsDriver` + `createSqsHandler()`） |
 | **スケジューリング** | EventBridge + `createScheduleHandler()` |
-| **CLI コマンド** | 専用 Lambda + `createConsoleHandler()` |
+| **CLI コマンド** | 専用の Lambda + `createConsoleHandler()` |
 | **静的アセット** | CloudFront + S3（CDK コンストラクトがプロビジョニング） |
 | **ロギング** | CloudWatch（stderr、JSON 形式） |
 
 ## CDK でデプロイ
 
-プラグインは全トポロジーを配線する CDK コンストラクトを同梱しています。HTTP API、デッドレターキューと部分バッチ失敗対応のキューワーカー、EventBridge ルール、コンソール関数、そしてアセット用の CloudFront + S3 です:
+プラグインには、構成全体をまとめて組み立てる CDK コンストラクトが入っています。HTTP API、デッドレターキューと部分的なバッチ失敗に対応したキューワーカー、EventBridge ルール、コンソール用の関数、アセット用の CloudFront + S3 がこれで揃います。
 
 ```bash
 bun add aws-cdk-lib constructs
@@ -375,7 +368,7 @@ new GurenLambdaApp(stack, 'App', {
 })
 ```
 
-各サブリソースはプロパティ（`httpFunction`、`queue`、`distribution` など）として公開されており、カスタムドメインの接続・IAM 権限の追加・関数ごとのメモリ調整といったカスタマイズができます。そのままデプロイできる完全な CDK アプリは[デプロイレシピ](https://github.com/gurenjs/guren/tree/main/examples/deploy/serverless)にあります。
+各サブリソースはプロパティ（`httpFunction`、`queue`、`distribution` など）として公開されているので、カスタムドメインをつないだり、IAM 権限を足したり、関数ごとにメモリを調整したりできます。そのままデプロイできる CDK アプリの全体は[デプロイレシピ](https://github.com/gurenjs/guren/tree/main/examples/deploy/serverless)にあります。
 
 ```bash
 bunx guren lambda:build
@@ -383,6 +376,6 @@ bunx cdk deploy
 ```
 
 > [!WARNING]
-> `lambda:build` を自前のバンドラーに置き換える場合は、識別子マングリングを無効にしてください。Guren はキュー投入されたジョブ（既定でクラス名となる wire name）、永続化された通知の種別、HTTP 例外の名前といった永続レコードにクラス名を保存するため、マングルすると前回のデプロイが書き込んだレコードを解決できなくなります。`bun build` では `--minify` ではなく `--minify-whitespace --minify-syntax --keep-names` を指定してください。`register(class SendWelcomeMail extends Job {})` のような名前付きクラス式の名前は構文の minify で消えるため、`--keep-names` で残します。`esbuild` では `keepNames: true` を指定してください。`minify: true` と併用してもすべての名前が残り、`minifyIdentifiers: false` だけでは同じ名前が失われます。`tsdown` / `rolldown` では `mangle: false` だけでは足りません(compress が1箇所でしか使われないクラスを無名クラス式にインライン化し、`name` が `""` になります)。`minify: true` ではなく `minify: { compress: { keepNames: { class: true, function: true } }, mangle: false }` を指定します。Bun では `--keep-names` / `minify.keepNames` を付けても `--minify` は安全になりません。Bun 1.3.14 と 1.4.2 のどちらでも、識別子の minify を有効にするとクラス名はマングルされます。別のモジュールが同じトップレベル名を宣言している場合も、Bun はクラス名を変えます。2 つの `OrderShipped` の片方が `OrderShipped2` になり、どちらになるかは import の順で決まります。これを防ぐフラグはないため、クラス名を分けるか、下記のとおり名前を固定してください。`keepNames` を設定する `@guren/plugin-lambda` のリリースに更新すれば、`lambda:build` がこれらをすべて行い、ジョブ・イベント・通知・エージェント・モデルの名前が変わるときは警告します。名前が変わったモデルはクラス名を変えてください。添付ファイルとポリモーフィック関連はバンドル後の名前で保存しますが、`Model.morphMap` はその名前を知りません。
+> `lambda:build` の代わりに自前のバンドラーを使う場合は、識別子のマングリングを無効にしてください。Guren は永続的なレコードにクラス名を保存しています。キューに入れたジョブには wire name（既定はクラス名）が、永続化した通知には通知の種別が、HTTP 例外には例外自身の名前が入ります。マングルしたビルドでは、前回のデプロイが書き込んだレコードを解決できなくなります。`bun build` では `--minify` ではなく `--minify-whitespace --minify-syntax --keep-names` を指定してください。`register(class SendWelcomeMail extends Job {})` のような名前付きクラス式の名前は構文の minify で消えてしまうため、`--keep-names` で残します。`esbuild` では `keepNames: true` を指定してください。`minify: true` と一緒に使ってもすべての名前が残ります。`minifyIdentifiers: false` だけでは、Bun の構文の minify と同じ名前が失われます。`tsdown` / `rolldown` では `mangle: false` だけでは足りません(compress が 1 か所でしか使われないクラスを無名のクラス式としてインライン化するので、`name` が `""` になります)。`minify: true` の代わりに `minify: { compress: { keepNames: { class: true, function: true } }, mangle: false }` を指定します。Bun では、`--keep-names` / `minify.keepNames` を付けても `--minify` は安全になりません。Bun 1.3.14 と 1.4.2 のどちらでも、識別子の minify を有効にするとクラス名がマングルされます。また、別のモジュールが同じトップレベルの名前を宣言していると、Bun はクラス名を変えます。2 つある `OrderShipped` の片方が `OrderShipped2` になり、どちらが変わるかは import の順で決まります。これを防ぐフラグはないので、クラス名を分けるか、後述の方法で名前を固定してください。`keepNames` を設定する `@guren/plugin-lambda` のリリースに更新すれば、`lambda:build` がここまでの対策をすべて行い、ジョブ・イベント・通知・エージェント・モデルの名前が変わるときは警告を出します。名前が変わったモデルは、クラス名を変更してください。添付ファイルとポリモーフィック関連はバンドル後の名前で保存されますが、`Model.morphMap` はその名前を知らないためです。
 >
-> どうしてもマングルする場合は、すべてのジョブに `jobName` を、すべての通知に明示的な `type` を宣言し、永続レコード上の識別子をクラス名から切り離す必要があります（[ジョブ名を固定する](./queue.md#ジョブ名を固定する) を参照）。どちらも未宣言ならクラス名が既定値になり、例外名は常にクラス名から導出されます。識別子を保持するほうが安全な既定であることに変わりはありません。
+> どうしてもマングルする場合は、すべてのジョブに `jobName` を、すべての通知に明示的な `type` を宣言し、永続レコードに残る識別子をクラス名から切り離してください（[ジョブ名を固定する](./queue.md#ジョブ名を固定する) を参照）。どちらも宣言しなければクラス名が既定値になり、例外の名前は常にクラス名から決まります。識別子をそのまま残しておくほうが安全であることに変わりはありません。
