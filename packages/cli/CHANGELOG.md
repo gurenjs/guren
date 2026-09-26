@@ -1,5 +1,17 @@
 # @guren/cli
 
+## 2.28.2
+
+### Patch Changes
+
+- fb4a825: `guren plan:render`'s Impact hangs a test request off the route that answers it, not off every route whose path matches: with `GET /meetups/create` registered before `GET /meetups/:id`, a `get('/meetups/create')` is no longer listed as reaching `meetups.show`. The order is the one `plan:status` reads a shadowed route by (the entry registrar's routes, then each module's); where two modules' order or an earlier route's pattern leaves it open, the request is listed under a note of its own as one that may reach the route.
+- dd43a73: Typecheck a plan's `http` step. `plan:verify` now runs `codegen`, `typecheck`, `guren check` and then the tests on a task's last `http` step, so a controller that calls a model method with the wrong arguments no longer verifies while its behaviours pass. Earlier parts of a split `http` step do not typecheck, since one may import what a later part writes. `plan:next` lists the added pages an `http` step's actions render (`pageStubs`), to be created there as stubs so `.guren/pages.gen.ts` names them. An app with no `typecheck` script now has that step blocked, as its `data` and `pages` steps already were. The tests run only on the step the behaviours are judged at: an `http` step with no acceptance behaviours (an earlier part of a split step, or a task with none) no longer lists a `tests` command, which printed `pass tests bun test` without running anything.
+- 03c9d35: A plan whose added parent model declares a relationship to a model a later task adds (a `hasMany` to a child listed after it) no longer stalls at the parent's `data` step. `plan:status` judges a relationship that waits on a later task's work (its target's class, the target's foreign key, or a `belongsToMany` pivot) on the model it waits on, as `relationship <Model>.<name>`, at the step owning that model, and notes on the parent where it is judged. `plan:scaffold` names that step beside the relationship it leaves out (`judgedAt`), and `plan:next` lists the relationship under the target's step.
+- 5104192: `plan:next` no longer names `plan:scaffold` for a `scaffold` or `tests` step whose targets are already on disk, which `plan:scaffold` refuses. It reports the step as scaffolded (`scaffolded` in `--json`, in place of `scaffold`), lists what is still missing to write by hand, names the earlier plan hash when the step was built under an earlier version of the plan (after a revision), and points to `plan:verify --step`. The files are the ones the plan names, so nothing of the application is read for it.
+- 4508765: `plan:scaffold` test skeletons boot the application in a `beforeAll`, through a new `ready()` helper, instead of lazily in the first `client()` call. A `beforeEach` that creates or clears rows now runs against a configured database rather than failing every case with `DrizzleAdapter: database has not been configured`. The hook waits up to 120 seconds for the boot, past Bun's 5-second default. A boot that fails is printed there rather than thrown, so `plan:verify` records the step `blocked` whatever the implementer's hooks do, and each test still fails by name with it.
+- Updated dependencies [37271b7]
+  - @guren/server@2.28.1
+
 ## 2.28.1
 
 ### Patch Changes
