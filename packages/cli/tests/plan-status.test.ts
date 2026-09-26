@@ -1097,4 +1097,96 @@ describe('judgePlan', () => {
       expect(only(judgePlan(view(EXISTING, { page: 'posts/Show' }), app({ pages })), 'v').files).toEqual([])
     })
   })
+
+  describe('a relationship whose target a later task adds', () => {
+    const COMMENTS_TABLE: SourcedSchemaTable = {
+      ...USERS_TABLE,
+      identifier: 'comments',
+      tableName: 'comments',
+      columns: [
+        { name: 'id', columnName: 'id', type: 'serial', sqlType: 'serial', notNull: true, primaryKey: true, unique: false },
+        { name: 'postId', columnName: 'post_id', type: 'integer', sqlType: 'integer', notNull: true, primaryKey: false, unique: false, references: { table: 'posts', column: 'id' } },
+      ],
+    }
+    const parentAndChild = plan({
+      models: [
+        model(ADD, { relationships: [{ name: 'comments', type: 'hasMany', target: 'k' }] }),
+        {
+          id: 'k',
+          change: ADD,
+          name: 'Comment',
+          table: 'comments',
+          columns: [column(ADD, { id: 'kc', name: 'postId', type: 'integer', references: { model: 'm', column: 'id' } })],
+          relationships: [{ name: 'post', type: 'belongsTo', target: 'm' }],
+          fillable: [],
+        },
+      ],
+    })
+    const post = (relationships: Array<{ name: string; type: 'hasMany'; relatedModel: string }>) => ({
+      className: 'Post',
+      module: null,
+      file: 'app/Models/Post.ts',
+      table: 'posts',
+      relationships,
+      fillable: ['title'],
+    })
+    const comment = { className: 'Comment', module: null, file: 'app/Models/Comment.ts', table: 'comments', relationships: [{ name: 'post', type: 'belongsTo' as const, relatedModel: 'Post' }], fillable: null }
+    const USER = { className: 'User', module: null, file: 'app/Models/User.ts', table: 'users', relationships: [], fillable: null }
+
+    test('should complete the parent without it while the target does not exist, and say where it is judged', () => {
+      const status = judgePlan(parentAndChild, app())
+      const parent = only(status, 'm')
+
+      expect(parent.state).toBe('present')
+      expect(parent.properties.map((property) => property.property)).toEqual(['table'])
+      expect(parent.notes).toEqual(['Relationship comments waits on work a later task does: it is judged with k, in task/entity/k/data.'])
+      expect(only(status, 'k').state).toBe('planned')
+    })
+
+    test('should judge it with the target, in the declaring model\u2019s file, once the target exists', () => {
+      const tables = [POSTS_TABLE, USERS_TABLE, COMMENTS_TABLE]
+      const built = { models: ['Post', 'User', 'Comment'] }
+      const undeclared = only(judgePlan(parentAndChild, app({ tables, models: [post([]), comment, USER] }, built)), 'k')
+
+      expect(undeclared.state).toBe('drifted')
+      expect(undeclared.properties.filter((property) => property.verdict !== 'match')).toEqual([
+        { property: 'relationship Post.comments', verdict: 'differ', planned: 'hasMany', actual: 'not declared' },
+        { property: 'relationship Post.comments target', verdict: 'differ', planned: 'Comment', actual: 'not declared' },
+      ])
+      expect(undeclared.files).toEqual(['app/Models/Comment.ts', 'app/Models/Post.ts'])
+
+      const declared = judgePlan(parentAndChild, app({ tables, models: [post([{ name: 'comments', type: 'hasMany', relatedModel: 'Comment' }]), comment, USER] }, built))
+      expect(only(declared, 'k').state).toBe('present')
+      expect(only(declared, 'k').properties.map((property) => property.property)).toEqual([
+        'table',
+        'relationship post',
+        'relationship post target',
+        'relationship Post.comments',
+        'relationship Post.comments target',
+      ])
+      expect(only(declared, 'm').properties.map((property) => property.property)).toEqual(['table'])
+    })
+
+    test('should keep a relationship to an existing model or one of an earlier task on the model declaring it', () => {
+      const toExisting = plan({
+        models: [
+          model(ADD, { relationships: [{ name: 'author', type: 'belongsTo', target: 'u' }] }),
+          { id: 'u', change: EXISTING, name: 'User', table: 'users', columns: [], relationships: [], fillable: [] },
+        ],
+      })
+
+      expect(only(judgePlan(toExisting, app()), 'm').properties.map((property) => property.property)).toEqual(['table', 'relationship author', 'relationship author target'])
+      expect(only(judgePlan(parentAndChild, app()), 'm').notes).toHaveLength(1)
+    })
+
+    test('should key a module model\u2019s relationship with its module, so two roots\u2019 classes of one name stay apart', () => {
+      const document = plan({
+        models: parentAndChild.models.map((entry) => (entry.id === 'm' ? { ...entry, module: 'blog' } : entry)),
+      })
+      const built = app({ tables: [POSTS_TABLE, USERS_TABLE, COMMENTS_TABLE], models: [post([]), comment, USER] }, { models: ['Post', 'User', 'Comment'] })
+      const properties = only(judgePlan(document, built), 'k').properties.map((property) => property.property)
+
+      expect(properties).toContain('relationship blog/Post.comments')
+    })
+  })
 })

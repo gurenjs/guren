@@ -117,7 +117,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   // One app load answers both: the status after codegen, and freshness for a plan with a baseline.
   let judged: Promise<{ status: PlanStatus; freshness?: PlanFreshness }> | undefined
   const judge = () =>
-    (judged ??= loadApp().then((loadedApp) => ({ status: judgePlan(plan, loadedApp, readings), ...(hasBaseline(plan) ? { freshness: judgeFreshness(plan, loadedApp) } : {}) })))
+    (judged ??= loadApp().then((loadedApp) => ({ status: judgePlan(plan, loadedApp, readings, derivation), ...(hasBaseline(plan) ? { freshness: judgeFreshness(plan, loadedApp) } : {}) })))
   const verifier = new PlanVerifier(plan, derivation, {
     root,
     planDigest: digest,

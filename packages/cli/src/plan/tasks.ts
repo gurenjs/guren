@@ -10,6 +10,7 @@
 
 import { collectionName, collectionSlug } from '../inflect'
 import { listPlanReferences, type PlanReference, type PlanReferenceField } from './references'
+import { planRelationshipKeys } from './relationship-keys'
 import { listPlanElements, type PlanChange, type PlanDraft, type PlanElementSection, type PlanModel } from './schema'
 
 export type PlanStepKind = 'commands' | 'scaffold' | 'tests' | 'data' | 'http' | 'pages'
@@ -115,6 +116,63 @@ export function planElementParents(plan: PlanDraft): Map<string, string> {
   for (const model of plan.models) for (const column of model.columns) parents.set(column.id, model.id)
   for (const controller of plan.controllers) for (const action of controller.actions) parents.set(action.id, controller.id)
   return parents
+}
+
+export interface PlanLaterRelationship {
+  /** The model declaring the relationship. */
+  model: PlanModel
+  relationship: PlanModel['relationships'][number]
+  /** The model whose step completes the relationship: its target, or a `belongsToMany`'s pivot. */
+  judgedWith: PlanModel
+  /** The step owning `judgedWith`. */
+  stepId: string
+}
+
+/**
+ * The models a relationship waits for: its target while the target's class does not exist yet, and
+ * the model holding its keys while the plan adds them. None when the plan states no keys for it or
+ * it names a dropped model, which keeps it on the declaring model, as the scaffold omits it.
+ */
+function relationshipNeeds(plan: PlanDraft, model: PlanModel, relationship: PlanModel['relationships'][number], target: PlanModel): PlanModel[] {
+  const keys = planRelationshipKeys(plan, model, relationship, target)
+  if (typeof keys === 'string' || target.change.kind === 'drop') return []
+  const pending = (of: PlanModel) => of.change.kind === 'add' || of.change.kind === 'rename'
+  const needs = pending(target) ? [target] : []
+  if (keys.type === 'belongsTo') return needs
+  if (keys.type !== 'belongsToMany') return keys.key.change.kind === 'existing' ? needs : [...needs, target]
+  if (keys.pivot.change.kind === 'drop') return []
+  const addsKey = keys.own.change.kind !== 'existing' || keys.other.change.kind !== 'existing'
+  return pending(keys.pivot) || addsKey ? [...needs, keys.pivot] : needs
+}
+
+/**
+ * The relationships a later task completes (RFC 0030 §5, Order): relationships order nothing, so a
+ * parent's `hasMany` may name a child, or a pivot's keys, that its own step cannot see yet. Each
+ * completes at the step owning the latest model it waits for, in the declaring model's file.
+ * Task order is the derivation's.
+ */
+export function planLaterRelationships(plan: PlanDraft, derivation: PlanTaskDerivation): PlanLaterRelationship[] {
+  const taskOf = new Map<string, { index: number; stepId: string }>()
+  derivation.tasks.forEach((task, index) => {
+    for (const step of task.steps) for (const id of step.elementIds) taskOf.set(id, { index, stepId: step.id })
+  })
+  const modelById = new Map(plan.models.map((model) => [model.id, model]))
+  const later: PlanLaterRelationship[] = []
+  for (const model of plan.models) {
+    const own = model.change.kind === 'drop' ? undefined : taskOf.get(model.id)
+    if (!own) continue
+    for (const relationship of model.relationships) {
+      const target = modelById.get(relationship.target)
+      if (!target) continue
+      let latest: { judgedWith: PlanModel; index: number; stepId: string } | undefined
+      for (const needed of relationshipNeeds(plan, model, relationship, target)) {
+        const theirs = taskOf.get(needed.id)
+        if (theirs && theirs.index > (latest?.index ?? own.index)) latest = { judgedWith: needed, ...theirs }
+      }
+      if (latest) later.push({ model, relationship, judgedWith: latest.judgedWith, stepId: latest.stepId })
+    }
+  }
+  return later
 }
 
 export interface DerivePlanTasksOptions {

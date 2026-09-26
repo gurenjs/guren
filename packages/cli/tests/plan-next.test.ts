@@ -320,6 +320,28 @@ describe('plan:next', () => {
     expect((await planNextFile(plan, { appRoot: app, now: NOW })).step!.id).toBe(SCAFFOLD)
   })
 
+  test('should hand the step owning a later task\u2019s model the relationships earlier models declare to it', async () => {
+    const document = loadCommentsPlan() as { models: Array<{ id: string; change: unknown; columns: Array<{ change: unknown }> }> }
+    // An added Post anchors its own task, which Comment's foreign key orders first.
+    const post = document.models.find((model) => model.id === 'model.post')!
+    post.change = { kind: 'add' }
+    for (const column of post.columns) column.change = { kind: 'add' }
+    const { app, plan } = await createApp('later-relationship')
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(document) })
+    const parsed = parsePlanDocument(document)
+    const steps = planStepIds(derivePlanTasks(parsed))
+    const data = 'task/entity/model.comment/data'
+    const record = { ...(await holding(app)), planDigest: planDigest(parsed) }
+    await writeState(app, { steps: Object.fromEntries(steps.slice(0, steps.indexOf(data)).map((id) => [id, record])) })
+
+    const report = await planNextFile(plan, { appRoot: app, now: NOW })
+
+    expect(report.step!.id).toBe(data)
+    expect(report.step!.relationships).toEqual([{ model: 'model.post', name: 'comments', type: 'hasMany', target: 'model.comment' }])
+    expect(formatPlanNext(report, 'comments.plan.json')).toContain('Relationships of earlier models the step completes, declared in those models\u2019 files:\n  model.post comments (hasMany model.comment)')
+    expect(report.verified).toContain('task/entity/model.post/data')
+  })
+
   test('should name the added pages an http step\u2019s actions render, to be written as stubs before its typecheck', async () => {
     const { app, plan } = await createApp('page-stubs')
     const document = loadCommentsPlan() as { controllers: Array<{ actions: Array<{ id: string; response: unknown }> }>; views: unknown[] }

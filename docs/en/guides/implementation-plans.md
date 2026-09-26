@@ -446,7 +446,7 @@ export const comments = pgTable('comments', {
 ])
 ```
 
-It writes `app/Models/Comment.ts` with the plan's `fillable` and relationships, each keyed by the foreign key the plan states. A relationship whose keys or target do not exist yet, such as a `hasMany` to a model a later task adds, is left out and listed, for the step where they exist; until it is added, `plan:status` reads the model as `drifted`.
+It writes `app/Models/Comment.ts` with the plan's `fillable` and relationships, each keyed by the foreign key the plan states. A relationship whose keys or target do not exist yet is left out and listed, for the step where they exist. When it waits on a later task's work, such as a `hasMany` to a child the next task adds, the list names the step that owns that work (the later task's `data` step, or one of its parts): the relationship is judged there, as a property of the model it waits on, and written in the declaring model's file; `plan:next` lists it under that step. Any other relationship left out makes `plan:status` read the model as `drifted` until it is added.
 
 The step's validators go in one file named after the model, `app/Http/Validators/CommentValidator.ts`, one exported schema per validator. Each field is written from its planned type, `required` and rules (`min`, `max`, `email`, `url`, `uuid`), in the form `plan:status` reads back:
 

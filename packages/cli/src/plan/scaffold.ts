@@ -12,7 +12,7 @@ import { schemaIdentifierFor } from '../inflect'
 import { buildModelSource, type ModelRelationshipSource } from '../make-model'
 import { autoIncrementPrimaryKey, COLUMN_BUILDERS, MYSQL_UNINDEXABLE_TYPES, quoteString, TABLE_FACTORY, type ColumnCode } from '../schema-columns'
 import type { SchemaDialect } from '../schema-parser'
-import { camelCase, isBindingName, isIdentifier, pascalCase, propertyAccess, quoteObjectKey } from '../utils'
+import { isBindingName, isIdentifier, pascalCase, propertyAccess, quoteObjectKey } from '../utils'
 import {
   buildPlanPolicySource,
   buildPlanResourceSource,
@@ -54,6 +54,7 @@ import {
   type PlanSideEffect,
   type PlanValidator,
 } from './schema'
+import { hasReference, planRelationshipKeys, type ReferencingColumn } from './relationship-keys'
 import type { PlanDerivedStep, PlanTaskDerivation } from './tasks'
 
 export interface PlanScaffoldApp {
@@ -111,18 +112,11 @@ export interface PlanScaffoldOutput {
   refusals: string[]
 }
 
-type PlanReference = NonNullable<PlanColumn['references']>
-type ReferencingColumn = PlanColumn & { references: PlanReference }
-
 interface TableRef {
   identifier: string
   columns: readonly string[]
   /** Set where a spread or a computed key hides columns, so an absent one is no evidence. */
   opaqueColumns?: boolean
-}
-
-function hasReference(column: PlanColumn): column is ReferencingColumn {
-  return column.references !== undefined
 }
 
 function hasColumn(table: TableRef, name: string): boolean {
@@ -370,11 +364,7 @@ class Emitter {
     return { model: model.id, identifier, block, imports: [...imports].sort() }
   }
 
-  /**
-   * The keys a relationship's call takes, from the foreign keys the plan states: a `belongsTo`
-   * from this model's column referencing the target, a `hasOne`/`hasMany` from the target's
-   * referencing this model, a `belongsToMany` through the one model referencing both.
-   */
+  /** The keys a relationship's call takes, from the foreign keys the plan states (`planRelationshipKeys()`). */
   private relationship(model: PlanModel, planned: PlanModel['relationships'][number], declared: { imports: Set<string>; types: Map<string, string> }): ModelRelationshipSource | string {
     const target = this.modelsById.get(planned.target)
     if (!target) return `the plan declares no ${planned.target}`
@@ -382,33 +372,22 @@ class Emitter {
     const targetTable = this.tableOf(target)
     if (!targetTable) return `db/schema.ts does not declare ${target.table} yet`
     const ownColumns = this.columnsOf(model).map((column) => column.name)
-    const pick = (candidates: ReferencingColumn[], preferred: string): ReferencingColumn | undefined =>
-      candidates.length === 1 ? candidates[0] : candidates.find((column) => column.name === preferred)
-    const referencing = (of: PlanModel, to: PlanModel): ReferencingColumn[] => of.columns.filter(hasReference).filter((column) => column.references.model === to.id)
+    const keys = planRelationshipKeys(this.plan, model, planned, target, new Set(ownColumns))
+    if (typeof keys === 'string') return keys
 
     let args: string[]
-    if (planned.type === 'belongsTo') {
-      const key = pick(referencing(model, target).filter((column) => ownColumns.includes(column.name)), `${planned.name}Id`)
-      if (!key) return `no one column of ${model.name} this run writes references ${target.name}`
-      const owner = key.references.column
+    if (keys.type === 'belongsTo') {
+      const owner = keys.key.references.column
       if (!hasColumn(targetTable, owner)) return `${target.table} has no column ${owner}`
-      args = [key.name, owner].map(quoteString)
-    } else if (planned.type === 'belongsToMany') {
-      const pivots = this.plan.models.flatMap((pivot) => {
-        const own = referencing(pivot, model)[0]
-        const other = referencing(pivot, target).find((column) => column !== own)
-        return own && other ? [{ pivot, own, other }] : []
-      })
-      const only = pivots.length === 1 ? pivots[0] : undefined
-      if (!only) return `${pivots.length === 0 ? 'no' : 'more than one'} model of the plan references both ${model.name} and ${target.name}`
-      const { pivot, own, other } = only
+      args = [keys.key.name, owner].map(quoteString)
+    } else if (keys.type === 'belongsToMany') {
+      const { pivot, own, other } = keys
       const pivotTable = this.tableOf(pivot)
       if (!pivotTable || !hasColumn(pivotTable, own.name) || !hasColumn(pivotTable, other.name)) return `the pivot table ${pivot.table} is not declared with both keys yet`
       declared.imports.add(pivotTable.identifier)
       args = [pivotTable.identifier, ...[own.name, other.name, own.references.column, other.references.column].map(quoteString)]
     } else {
-      const key = pick(referencing(target, model), `${camelCase(model.name)}Id`)
-      if (!key) return `no one column of ${target.name} references ${model.name}`
+      const { key } = keys
       if (!hasColumn(targetTable, key.name)) return `${target.table} has no column ${key.name} yet`
       const local = key.references.column
       if (!ownColumns.includes(local)) return `${model.name} has no column ${local}`

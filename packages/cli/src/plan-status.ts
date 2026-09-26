@@ -63,14 +63,15 @@ export async function planStatusFile(planPath: string, options: PlanStatusFileOp
   const { path, plan } = options.read ?? (await readPlanFile(planPath, options.cwd))
   const app = typeof options.app === 'function' ? await options.app() : options.app
   const approval = 'approval' in options ? options.approval : await readPlanApprovalStanding(path, plan)
-  const status = judgePlan(plan, app, approvedReadings(approval))
+  const derivation = derivePlanTasks(plan, { apiOnly: app.apiOnly })
+  const status = judgePlan(plan, app, approvedReadings(approval), derivation)
   const head = {
     reportVersion: PLAN_STATUS_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: approval?.hash ?? (hasBaseline(plan) ? planHash(plan) : null) },
   } satisfies Pick<PlanStatusReport, 'reportVersion' | 'plan'>
   const judged = { ...(hasBaseline(plan) ? { freshness: judgeFreshness(plan, app) } : {}), ...(approval ? { approval } : {}) }
   if (options.appRoot === undefined) return { ...head, ...status, ...judged }
-  const overlaid = await overlayVerification(options.appRoot, path, plan, status, derivePlanTasks(plan, { apiOnly: app.apiOnly }), { waivers: options.waivers })
+  const overlaid = await overlayVerification(options.appRoot, path, plan, status, derivation, { waivers: options.waivers })
   return { ...head, ...overlaid.status, verification: overlaid.verification, ...judged }
 }
 

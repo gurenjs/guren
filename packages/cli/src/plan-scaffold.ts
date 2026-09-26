@@ -42,7 +42,7 @@ import { importSpecifier } from './plan/scaffold-controller'
 import { emitPlanTests, planTestsFilePath, type PlanTestsOutput } from './plan/scaffold-tests'
 import type { Plan, PlanDraft } from './plan/schema'
 import { planSlug, readPlanState } from './plan/state'
-import { derivePlanTasks, findPlanStep, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation } from './plan/tasks'
+import { derivePlanTasks, findPlanStep, listPlanSteps, planLaterRelationships, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation } from './plan/tasks'
 import { isUnreadable } from './plan/unreadable'
 import { composeAppProviderRegistration, resolveAppEntry } from './provider-registrar'
 import { composeRouteRegistrarCall, resolveRoutesEntry } from './route-registrar'
@@ -65,8 +65,13 @@ export interface PlanScaffoldTestsReport extends PlanScaffoldReportBase, Pick<Pl
   kind: 'tests'
 }
 
-export interface PlanScaffoldStepReport extends PlanScaffoldReportBase, Pick<PlanScaffoldOutput, 'left' | 'omitted'> {
+export interface PlanScaffoldStepReport extends PlanScaffoldReportBase, Pick<PlanScaffoldOutput, 'left'> {
   kind: 'scaffold'
+  /**
+   * Relationships left out of the models. `judgedAt` is the later step whose work the relationship waits
+   * on, which judges it (RFC 0030 §5, Order); without it, plan:status reads the model as drifted until it is added.
+   */
+  omitted: Array<PlanScaffoldOutput['omitted'][number] & { judgedAt?: string }>
   /** The schema file the tables were appended to, and their exports. */
   appended: { file: string; tables: string[] }
   /** The app entry the policy providers were registered in; `file` is null when there was none to register. */
@@ -288,7 +293,7 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
     unmounted: unmountedRoutes(plan, derivation, step.id, created),
     emitted: output.emitted,
     left: output.left,
-    omitted: output.omitted,
+    omitted: judgedLater(plan, derivation, output.omitted),
     unwritten: output.unwritten,
   }
 }
@@ -422,8 +427,13 @@ export function formatPlanScaffold(report: PlanScaffoldReport, planArgument: str
     lines.push(...report.unwritten.map((entry) => `  ${entry.element} ${entry.detail}: ${entry.reason}`))
   }
   if (report.omitted.length > 0) {
-    lines.push('', 'Relationships left out of the model, to add once what they need exists; until then plan:status reads the model as drifted:')
-    lines.push(...report.omitted.map((entry) => `  ${entry.model} ${entry.relationship}: ${entry.reason}`))
+    lines.push('', 'Relationships left out of the model, to add once what they need exists:')
+    lines.push(
+      ...report.omitted.map(
+        (entry) =>
+          `  ${entry.model} ${entry.relationship}: ${entry.reason}; ${entry.judgedAt ? `add it in ${entry.judgedAt}, which judges it` : 'plan:status reads the model as drifted until it is added'}`,
+      ),
+    )
   }
   if (report.unmounted) {
     const { file, step } = report.unmounted
@@ -512,6 +522,14 @@ function addPatternNames(pattern: Node | null, names: Set<string>): void {
   else if (pattern?.type === 'ObjectPattern') {
     for (const property of pattern.properties) addPatternNames(property.type === 'RestElement' ? property : property.value, names)
   }
+}
+
+function judgedLater(plan: Plan, derivation: PlanTaskDerivation, omitted: PlanScaffoldOutput['omitted']): PlanScaffoldStepReport['omitted'] {
+  const later = planLaterRelationships(plan, derivation)
+  return omitted.map((entry) => {
+    const found = later.find((candidate) => candidate.model.id === entry.model && candidate.relationship.name === entry.relationship)
+    return found ? { ...entry, judgedAt: found.stepId } : entry
+  })
 }
 
 function unmountedRoutes(plan: Plan, derivation: PlanTaskDerivation, stepId: string, created: readonly string[]): PlanScaffoldStepReport['unmounted'] {
