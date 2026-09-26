@@ -78,9 +78,13 @@ import { User, type UserRecord } from '../../../app/Models/User.js'
 
 let booted: Promise<TestApp> | undefined
 
-async function client(actor?: object): Promise<TestApp> {
+function ready(): Promise<TestApp> {
   booted ??= import('../../../src/app.js').then(({ default: app }) => TestApp.fromApp(app))
-  const http = actor === undefined ? await booted : (await booted).actingAs(actor)
+  return booted
+}
+
+async function client(actor?: object): Promise<TestApp> {
+  const http = actor === undefined ? await ready() : (await ready()).actingAs(actor)
   return http.withCsrf()
 }
 
@@ -92,7 +96,7 @@ function meetupBy(organizer: UserRecord) {
 }
 
 beforeEach(async () => {
-  await client()
+  await ready()
   await resetDatabase()
   ada = await User.create({ name: 'Ada', email: 'ada@example.com', password: 'correct horse battery' })
   grace = await User.create({ name: 'Grace', email: 'grace@example.com', password: 'correct horse battery' })
@@ -453,7 +457,7 @@ git show --stat HEAD
 | http | `this.authorize('update', [Meetup, meetup])` passes the **record**, not just the class. `organizerId` comes from `this.auth`, never from the request. The policy compares ids |
 | pages | Nothing, usually. The commands are the check |
 
-The http row carries the rule most worth your attention. The scaffold writes `this.authorize('update', Meetup)`, with the class and no record, because the stub has no record yet. Left that way, the policy gets no meetup, denies everyone, and the organizer cannot edit their own meetup. Every `forbidden` test still passes. Only `AC-meetups-7` and `AC-meetups-12`, the organizer's own success behaviours, fail on it. That is row 5 of the checklist in chapter 2, paying off.
+The http row carries the rule most worth your attention. The scaffold writes a policy whose `update` returns `false` until someone writes the rule. An agent that fills in the controller and forgets the policy leaves a feature nobody can edit, and every `forbidden` test still passes, since refusing everyone refuses the wrong user too. Only `AC-meetups-7` and `AC-meetups-12`, the organizer's own success behaviours, fail on it. That is row 5 of the checklist in chapter 2, paying off.
 
 ## 5. Where the plan stands
 
@@ -491,9 +495,9 @@ Sign up at `/register`, then open `/meetups`.
 
 ## Common trip-ups
 
-- **Every test fails with "database has not been configured".** The setup in `beforeEach` touches the database before the app has booted. The test skeleton boots it lazily in `client()`; call `await client()` first, as the reference test does.
+- **Every test fails with "database has not been configured".** A `beforeEach` of your own touched the database before the app booted. Start it with `await ready()`, as the skeleton's header comment says and the reference test does.
 - **`plan:next` refuses because the tree is dirty.** A step was left uncommitted. Commit it, or discard it, before asking for the next one.
-- **The http step fails on `AC-meetups-7` or `AC-meetups-12` with a 403.** The controller still passes `Meetup` alone to `this.authorize`. See the http row above.
+- **The http step fails on `AC-meetups-7` or `AC-meetups-12` with a 403.** The policy still returns `false`, or the controller passes `Meetup` alone to `this.authorize` instead of `[Meetup, meetup]`. See the http row above.
 - **The agent keeps retrying the same step.** After three blocked stops, the Stop hook records the step as stalled with the reason, and lets the agent stop. `plan:next` shows the stall. Read the reason before telling the agent to go on.
 
 ## Exercises

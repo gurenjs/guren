@@ -429,7 +429,7 @@ open docs/plans/meetups/plan.html
 
 ページはネットワークにアクセスしないので、そのままレビュー依頼に添付できます。
 
-![Meetups 計画のレビューページの上部。目標、非目標、前提の下に「Needs attention」パネルがあり、警告が 6 件並んでいます。validator を読めないという警告が 1 件、meetups.store に policy がないという警告が 1 件、ある種類の受け入れ振る舞いがないルートについての警告が 4 件です](../../images/agent-course-needs-attention.png)
+![Meetups 計画のレビューページの「Needs attention」パネル。警告が 5 件並んでいます。meetups.store に policy がないという警告が 1 件、ある種類の受け入れ振る舞いがないルートについての警告が 4 件です](../../images/agent-course-needs-attention.png)
 
 ## 4. この順番で読む
 
@@ -451,7 +451,6 @@ open docs/plans/meetups/plan.html
 
 | 警告 | 判断 |
 |---|---|
-| The application's validators could not be read | 想定内です。Guren はまだ計画の validator を既存のファイルと照合しないので、validator を持つ計画にはいつも出ます |
 | `meetups.store` に policy がない | 選択です。サインインしたユーザーなら誰でも勉強会を主催できます。このままにします |
 | `meetups.create` と `meetups.update` に `unauthenticated`、`meetups.edit` に `forbidden`、`meetups.update` に `validation` の振る舞いがない | 誤りです。テストのないルールです |
 

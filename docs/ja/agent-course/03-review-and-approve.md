@@ -63,7 +63,7 @@ EOF
 bunx guren plan:render docs/plans/meetups/plan.json
 ```
 
-ブラウザで再読み込みします。**Needs attention** に残る警告は 2 件です。どの計画にも出る validator の警告と、残すと決めた `meetups.store` の policy の警告です。**Tasks & acceptance** には振る舞いが 12 件並びます。
+ブラウザで再読み込みします。**Needs attention** に残る警告は、残すと決めた `meetups.store` の policy の警告 1 件だけです。**Tasks & acceptance** には振る舞いが 12 件並びます。
 
 リビジョンはデータとしてディスクにあるので、エージェントが何をしたか正確に読めます。
 

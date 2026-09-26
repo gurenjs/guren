@@ -40,9 +40,13 @@ import { User, type UserRecord } from '../../../app/Models/User.js'
 
 let booted: Promise<TestApp> | undefined
 
-async function client(actor?: object): Promise<TestApp> {
+function ready(): Promise<TestApp> {
   booted ??= import('../../../src/app.js').then(({ default: app }) => TestApp.fromApp(app))
-  const http = actor === undefined ? await booted : (await booted).actingAs(actor)
+  return booted
+}
+
+async function client(actor?: object): Promise<TestApp> {
+  const http = actor === undefined ? await ready() : (await ready()).actingAs(actor)
   return http.withCsrf()
 }
 
@@ -63,7 +67,7 @@ function count() {
 }
 
 beforeEach(async () => {
-  await client()
+  await ready()
   await resetDatabase()
   ada = await User.create({ name: 'Ada', email: 'ada@example.com', password: 'correct horse battery' })
   grace = await User.create({ name: 'Grace', email: 'grace@example.com', password: 'correct horse battery' })
@@ -467,7 +471,6 @@ The waiver goes to `decisions.json` beside the plan and is committed. It names t
 ## Common trip-ups
 
 - **The agent "fixes" a held step by renaming the route back.** That undoes a teammate's work without asking. Tell it which option you chose.
-- **`plan:next` names a step you already built and says to run `plan:scaffold`.** After a revision the old records no longer stand. `plan:scaffold` refuses the second run and says to verify instead; do that.
 - **`plan:next` refuses because `.guren/*.gen.ts` changed.** A commit changed routes without running codegen. Run `bunx guren codegen` and commit the generated files.
 
 ## Exercises

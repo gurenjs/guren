@@ -63,7 +63,7 @@ Render the page again:
 bunx guren plan:render docs/plans/meetups/plan.json
 ```
 
-Reload it in the browser. **Needs attention** now holds two warnings: the validator one, which every plan shows, and the `meetups.store` policy one you kept. **Tasks & acceptance** lists twelve behaviours.
+Reload it in the browser. **Needs attention** now holds one warning: the `meetups.store` policy one you kept. **Tasks & acceptance** lists twelve behaviours.
 
 The revision is on disk as data, so you can read exactly what the agent did:
 

@@ -78,9 +78,13 @@ import { User, type UserRecord } from '../../../app/Models/User.js'
 
 let booted: Promise<TestApp> | undefined
 
-async function client(actor?: object): Promise<TestApp> {
+function ready(): Promise<TestApp> {
   booted ??= import('../../../src/app.js').then(({ default: app }) => TestApp.fromApp(app))
-  const http = actor === undefined ? await booted : (await booted).actingAs(actor)
+  return booted
+}
+
+async function client(actor?: object): Promise<TestApp> {
+  const http = actor === undefined ? await ready() : (await ready()).actingAs(actor)
   return http.withCsrf()
 }
 
@@ -92,7 +96,7 @@ function meetupBy(organizer: UserRecord) {
 }
 
 beforeEach(async () => {
-  await client()
+  await ready()
   await resetDatabase()
   ada = await User.create({ name: 'Ada', email: 'ada@example.com', password: 'correct horse battery' })
   grace = await User.create({ name: 'Grace', email: 'grace@example.com', password: 'correct horse battery' })
@@ -453,7 +457,7 @@ git show --stat HEAD
 | http | `this.authorize('update', [Meetup, meetup])` がクラスだけでなく **レコード** を渡している。`organizerId` はリクエストではなく `this.auth` から来る。Policy が id を比べている |
 | pages | 普通は特にありません。コマンドが確かめます |
 
-いちばん注意したいのは http の行です。scaffold はスタブの時点でレコードを持たないので、`this.authorize('update', Meetup)` とクラスだけを渡すコードを書きます。このままだと Policy は勉強会を受け取れずに全員を拒否し、主催者も自分の勉強会を編集できません。それでも `forbidden` のテストはすべて通ります。失敗するのは、主催者自身の success 振る舞いである `AC-meetups-7` と `AC-meetups-12` だけです。第 2 章のチェック表の 5 行目が効くのはここです。
+いちばん注意したいのは http の行です。scaffold が書く Policy の `update` は、誰かがルールを書くまで `false` を返します。エージェントがコントローラーだけ書いて Policy を忘れると、誰も編集できない機能ができます。それでも `forbidden` のテストはすべて通ります。全員を拒否すれば、拒否すべきユーザーも拒否されるからです。失敗するのは、主催者自身の success 振る舞いである `AC-meetups-7` と `AC-meetups-12` だけです。第 2 章のチェック表の 5 行目が効くのはここです。
 
 ## 5. 計画の現在地
 
@@ -491,9 +495,9 @@ bun run dev
 
 ## よくあるつまずき
 
-- **すべてのテストが "database has not been configured" で失敗する。** `beforeEach` のセットアップが、アプリの起動前にデータベースに触れています。テストの雛形は `client()` の中で遅れてアプリを起動するので、参照用のテストのように最初に `await client()` を呼んでください。
+- **すべてのテストが "database has not been configured" で失敗する。** 自分で書いた `beforeEach` が、アプリの起動前にデータベースに触れています。雛形の冒頭のコメントと参照用のテストのとおり、最初に `await ready()` を呼んでください。
 - **ツリーが汚れているので `plan:next` が拒否する。** ステップが未コミットのままです。次を頼む前にコミットするか、破棄してください。
-- **http ステップが `AC-meetups-7` か `AC-meetups-12` の 403 で失敗する。** コントローラーがまだ `Meetup` だけを `this.authorize` に渡しています。上の http の行を見てください。
+- **http ステップが `AC-meetups-7` か `AC-meetups-12` の 403 で失敗する。** Policy がまだ `false` を返しているか、コントローラーが `[Meetup, meetup]` ではなく `Meetup` だけを `this.authorize` に渡しています。上の http の行を見てください。
 - **エージェントが同じステップを繰り返す。** 止めるのを 3 回阻まれると、Stop hook はステップを理由付きで stalled と記録し、エージェントを止めます。`plan:next` がその stall を示します。続けるよう伝える前に理由を読んでください。
 
 ## 演習

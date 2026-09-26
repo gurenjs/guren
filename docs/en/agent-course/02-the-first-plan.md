@@ -429,7 +429,7 @@ open docs/plans/meetups/plan.html
 
 The page makes no network requests, so you can attach it to a review as it is.
 
-![The top of the review page for the Meetups plan: the goals, non-goals and assumptions, then a "Needs attention" panel listing six warnings, one about unreadable validators, one about meetups.store having no policy, and four about routes with no acceptance behaviour of some kind](../../images/agent-course-needs-attention.png)
+![The "Needs attention" panel of the review page for the Meetups plan, listing five warnings: one about meetups.store having no policy and four about routes with no acceptance behaviour of some kind](../../images/agent-course-needs-attention.png)
 
 ## 4. Read it in this order
 
@@ -451,7 +451,6 @@ For this plan, the warnings say:
 
 | Warning | Verdict |
 |---|---|
-| The application's validators could not be read | Expected. Guren does not match plan validators to existing files yet, so this appears on every plan with a validator |
 | `meetups.store` names no policy | A choice: any signed-in user may organize a meetup. Keep it |
 | `meetups.create` / `meetups.update` have no `unauthenticated` behaviour, `meetups.edit` no `forbidden`, `meetups.update` no `validation` | Mistakes. These are rules with no test yet |
 

@@ -40,9 +40,13 @@ import { User, type UserRecord } from '../../../app/Models/User.js'
 
 let booted: Promise<TestApp> | undefined
 
-async function client(actor?: object): Promise<TestApp> {
+function ready(): Promise<TestApp> {
   booted ??= import('../../../src/app.js').then(({ default: app }) => TestApp.fromApp(app))
-  const http = actor === undefined ? await booted : (await booted).actingAs(actor)
+  return booted
+}
+
+async function client(actor?: object): Promise<TestApp> {
+  const http = actor === undefined ? await ready() : (await ready()).actingAs(actor)
   return http.withCsrf()
 }
 
@@ -63,7 +67,7 @@ function count() {
 }
 
 beforeEach(async () => {
-  await client()
+  await ready()
   await resetDatabase()
   ada = await User.create({ name: 'Ada', email: 'ada@example.com', password: 'correct horse battery' })
   grace = await User.create({ name: 'Grace', email: 'grace@example.com', password: 'correct horse battery' })
@@ -467,7 +471,6 @@ waiver は計画の隣の `decisions.json` に書かれ、コミットされま�
 ## よくあるつまずき
 
 - **エージェントがルート名を元に戻して held を「直す」。** 同僚の作業を断りなく取り消しています。どちらの選択肢を選んだか、エージェントに伝えてください。
-- **`plan:next` が実装済みのステップを返し、`plan:scaffold` を実行するよう言う。** 改訂の後は古い記録が無効になります。`plan:scaffold` は 2 回目を拒否し、代わりに検証するよう言うので、それに従ってください。
 - **`.guren/*.gen.ts` が変わったので `plan:next` が拒否する。** codegen を実行せずにルートを変えたコミットがあります。`bunx guren codegen` を実行し、生成ファイルをコミットしてください。
 
 ## 演習
