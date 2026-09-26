@@ -1,8 +1,10 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import {
   collectFiles,
+  FileDiscoveryError,
+  listModuleNames,
   classNameFromPath,
   excludeBarrelFiles,
   discoverTestFiles,
@@ -59,6 +61,41 @@ describe('collectFiles', () => {
       const files = await collectFiles(join(workspace.dir, 'src'))
 
       expect(files).toHaveLength(1)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('rejects a file where a directory is required, preserving the filesystem cause', async () => {
+    const workspace = await createTempWorkspace('guren-discovery-not-directory-')
+    try {
+      const path = join(workspace.dir, 'modules')
+      await writeFile(path, 'not a directory')
+      await expect(collectFiles(path)).rejects.toMatchObject({
+        name: 'FileDiscoveryError', directory: path, cause: { code: 'ENOTDIR' },
+      })
+      await expect(listModuleNames(workspace.dir)).rejects.toBeInstanceOf(FileDiscoveryError)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('rejects a dangling directory symlink instead of treating it as absent', async () => {
+    const workspace = await createTempWorkspace('guren-discovery-dangling-')
+    try {
+      const path = join(workspace.dir, 'modules')
+      await symlink(join(workspace.dir, 'missing'), path, 'junction')
+      await expect(collectFiles(path)).rejects.toBeInstanceOf(FileDiscoveryError)
+      await expect(listModuleNames(workspace.dir)).rejects.toBeInstanceOf(FileDiscoveryError)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('allows an absent optional modules directory', async () => {
+    const workspace = await createTempWorkspace('guren-discovery-no-modules-')
+    try {
+      expect(await listModuleNames(workspace.dir)).toEqual([])
     } finally {
       await workspace.cleanup()
     }
