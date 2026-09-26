@@ -1042,9 +1042,9 @@ decides a task, so `tasks.ts` fixes it:
   reference, foreign keys first among them; an `existing` target is already
   there. Tables are dropped child first. Relationships order nothing: a
   `hasMany` mirrors the foreign key pointing back and would close a cycle with
-  it. So a relationship whose target a later task works on completes at the
-  step owning that target, not its own model's (§6, Completion), and
-  `plan:next` lists it there. A real cycle (mutual foreign keys) is cut at its first member in document
+  it. So a relationship that waits on a later task's work (its target's class,
+  or keys that task adds) completes at the step owning that work, not its own
+  model's (§6, Completion), and `plan:next` lists it there. A real cycle (mutual foreign keys) is cut at its first member in document
   order, which stops waiting, and reported; a self-reference is not one.
   Document order breaks every tie.
 - **Hints** are `<task> before <task>` or `<task> after <task>`, a task being a
@@ -1232,8 +1232,8 @@ shipped, and where it stops.
   re-run would refuse on them as if the step were done.
 - A relationship left out of the model leaves it `drifted` in `plan:status`
   until the relationship is added; the report says so beside each one. One
-  whose target a later task works on is the exception (§6, Completion): the
-  report names that task's step (`judgedAt`), which judges it.
+  that waits on a later task's work is the exception (§6, Completion): the
+  report names the step that judges it (`judgedAt`).
 - Like `plan:verify`, it does not consult the freshness hold of §4: `plan:next`
   is what holds a step whose context went stale, and the command runs only on
   the step `plan:next` marked.
@@ -1818,16 +1818,22 @@ for some of them:
 A step is complete when every element it covers is. A task is complete when
 its steps are.
 
-A relationship whose target model a later task works on (§5, Order) is judged
-with that target, as its property `relationship <Model>.<name>`, and not with
-the model declaring it: the declaring model's step comes first and cannot
-reference a class that does not exist yet, so judging it there would hold that
-step forever. The declaring model carries a note naming the step instead, and
-the target's `files` include the declaring model's file, so removing the
-relationship later expires the target's record. `planLaterRelationships()` in
-`plan/tasks.ts` is the one rule for which relationships move, by the
-derivation's task order; `plan:status`, `plan:scaffold` and `plan:next` all
-read it. `blocked` completes nothing and is reported as such: it is an
+A relationship that waits on a later task's work (§5, Order) is judged with the
+latest model it waits on, as that model's property `relationship
+<Model>.<name>` (`<module>/<Model>` for a module's), and not with the model
+declaring it. It waits on its target while the target's class does not exist
+yet (an `add` or `rename`), and on the model holding its keys while the plan
+adds them: the target's foreign key for a `hasOne`/`hasMany`, the pivot for a
+`belongsToMany`. The declaring model's step comes first and cannot write it, so
+judging it there would hold that step forever. A relationship whose keys the
+plan does not state, or that names a dropped model, stays on the declaring
+model, as the scaffold leaves it out there too. The declaring model carries a
+note naming the step instead, and the judging model's `files` include the
+declaring model's file, so removing the relationship later expires that
+record; writing it drifts the declaring step's record, which `plan:verify`
+re-checks in the same run. `planLaterRelationships()` in `plan/tasks.ts` is the
+one rule for which relationships move, by the derivation's task order;
+`plan:status`, `plan:scaffold` and `plan:next` all read it. `blocked` completes nothing and is reported as such: it is an
 environment problem to fix, not a state to wait out. Existing tests may be
 edited only where the plan lists them under Impact.
 

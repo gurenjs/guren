@@ -544,7 +544,7 @@ class StatusContext {
   private readonly viewsById: Map<string, PlanView>
   private readonly namesById: Map<string, string>
   private readonly reachable: ReadonlySet<string>
-  /** Relationships a later task completes, by declaring model id, then by the target model id they are judged under. */
+  /** Relationships a later task completes, by declaring model id, then by the id of the model they are judged with. */
   private readonly deferred: Map<string, PlanLaterRelationship[]>
   private readonly inbound: Map<string, PlanLaterRelationship[]>
 
@@ -565,7 +565,7 @@ class StatusContext {
     this.inbound = new Map()
     for (const later of planLaterRelationships(plan, derivePlanTasks(plan))) {
       this.deferred.set(later.model.id, [...(this.deferred.get(later.model.id) ?? []), later])
-      this.inbound.set(later.target.id, [...(this.inbound.get(later.target.id) ?? []), later])
+      this.inbound.set(later.judgedWith.id, [...(this.inbound.get(later.judgedWith.id) ?? []), later])
     }
   }
 
@@ -668,7 +668,7 @@ class StatusContext {
         return unique([...classFiles(classes, model.name, model.module), ...declaring])
       },
       notes: deferred.map(
-        (later) => `Relationship ${later.relationship.name} targets ${later.target.name}, which a later task works on: it is judged with ${later.target.id}, in ${later.stepId}.`,
+        (later) => `Relationship ${later.relationship.name} waits on work a later task does: it is judged with ${later.judgedWith.id}, in ${later.stepId}.`,
       ),
     })
   }
@@ -707,7 +707,9 @@ class StatusContext {
         ? undefined
         : models.find((candidate) => candidate.className === later.model.name && candidate.module === (later.model.module ?? null))
       const whyNoDeclaring = isUnreadable(models) ? whyNoModel : `the model class ${later.model.name} declaring it was not found or did not parse`
-      properties.push(...this.relationshipProperties(`relationship ${later.model.name}.${later.relationship.name}`, later.relationship, declaring, whyNoDeclaring))
+      // A module's model is prefixed, since approval readings are keyed on the property name.
+      const owner = later.model.module ? `${later.model.module}/${later.model.name}` : later.model.name
+      properties.push(...this.relationshipProperties(`relationship ${owner}.${later.relationship.name}`, later.relationship, declaring, whyNoDeclaring))
     }
 
     for (const name of model.fillable) {

@@ -1413,7 +1413,7 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     const widget = (await statusOf(dir, plan)).elements.find((element) => element.id === 'model.widget')
     expect(widget?.state).toBe('present')
     expect(widget?.properties.map((property) => property.property)).not.toContain('relationship gadgets')
-    expect(widget?.notes).toContain('Relationship gadgets targets Gadget, which a later task works on: it is judged with model.gadget, in task/entity/model.gadget/data.')
+    expect(widget?.notes).toContain('Relationship gadgets waits on work a later task does: it is judged with model.gadget, in task/entity/model.gadget/data.')
   })
 
   test('should write a string default with a line break or a line separator as a valid literal', () => {

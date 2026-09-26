@@ -119,14 +119,44 @@ export interface PlanLaterRelationship {
   model: PlanModel
   relationship: PlanModel['relationships'][number]
   target: PlanModel
-  /** The step owning `target`, which completes the relationship. */
+  /** The model whose step completes the relationship: its target, or a `belongsToMany`'s pivot. */
+  judgedWith: PlanModel
+  /** The step owning `judgedWith`. */
   stepId: string
 }
 
 /**
- * The relationships whose target a later task works on (RFC 0030 §5, Order): relationships order
- * nothing, so a parent's `hasMany` may name a child its own step cannot see yet. Each completes at
- * the step owning its target, in the declaring model's file. Task order is the derivation's.
+ * The models a relationship waits for: its target while the target's class does not exist yet, and
+ * the model holding its keys while the plan adds them. `undefined` when the plan states no keys for
+ * it or it names a dropped model, which keeps it on the declaring model, as the scaffold omits it.
+ */
+function relationshipNeeds(plan: PlanDraft, model: PlanModel, relationship: PlanModel['relationships'][number], target: PlanModel): PlanModel[] | undefined {
+  const referencing = (of: PlanModel, to: PlanModel) => of.columns.filter((column) => column.references?.model === to.id)
+  const pending = (of: PlanModel) => of.change.kind === 'add' || of.change.kind === 'rename'
+  const added = (columns: PlanModel['columns']) => columns.some((column) => column.change.kind !== 'existing')
+  if (target.change.kind === 'drop') return undefined
+  const needs = pending(target) ? [target] : []
+  if (relationship.type === 'belongsTo') return referencing(model, target).length > 0 ? needs : undefined
+  if (relationship.type === 'hasOne' || relationship.type === 'hasMany') {
+    const keys = referencing(target, model)
+    if (keys.length === 0) return undefined
+    return added(keys) ? [...needs, target] : needs
+  }
+  const pivots = plan.models.flatMap((pivot) => {
+    const own = referencing(pivot, model)
+    const other = referencing(pivot, target).filter((column) => column !== own[0])
+    return own.length > 0 && other.length > 0 ? [{ pivot, keys: [own[0]!, ...other] }] : []
+  })
+  const only = pivots.length === 1 ? pivots[0] : undefined
+  if (!only || only.pivot.change.kind === 'drop') return undefined
+  return pending(only.pivot) || added(only.keys) ? [...needs, only.pivot] : needs
+}
+
+/**
+ * The relationships a later task completes (RFC 0030 §5, Order): relationships order nothing, so a
+ * parent's `hasMany` may name a child, or a pivot's keys, that its own step cannot see yet. Each
+ * completes at the step owning the latest model it waits for, in the declaring model's file.
+ * Task order is the derivation's.
  */
 export function planLaterRelationships(plan: PlanDraft, derivation: PlanTaskDerivation): PlanLaterRelationship[] {
   const taskOf = new Map<string, { index: number; stepId: string }>()
@@ -140,9 +170,13 @@ export function planLaterRelationships(plan: PlanDraft, derivation: PlanTaskDeri
     if (!own) continue
     for (const relationship of model.relationships) {
       const target = modelById.get(relationship.target)
-      // A dropped model has no properties judged, so a relationship naming one stays where it was declared.
-      const theirs = target && target.change.kind !== 'drop' ? taskOf.get(target.id) : undefined
-      if (target && theirs && theirs.index > own.index) later.push({ model, relationship, target, stepId: theirs.stepId })
+      const needs = target && relationshipNeeds(plan, model, relationship, target)
+      let latest: { with: PlanModel; index: number; stepId: string } | undefined
+      for (const needed of needs ?? []) {
+        const theirs = taskOf.get(needed.id)
+        if (theirs && theirs.index > (latest?.index ?? own.index)) latest = { with: needed, ...theirs }
+      }
+      if (target && latest) later.push({ model, relationship, target, judgedWith: latest.with, stepId: latest.stepId })
     }
   }
   return later

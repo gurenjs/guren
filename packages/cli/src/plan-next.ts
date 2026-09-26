@@ -53,8 +53,8 @@ export interface PlanNextStep extends Pick<PlanDerivedStep, 'id' | 'kind' | 'ver
   /** The elements the step completes. */
   elements: PlanNextElement[]
   /**
-   * Relationships an earlier task's model declares to a model this step completes (RFC 0030 §5,
-   * Order): written in the declaring model's file, judged with the target here.
+   * Relationships an earlier task's model declares that wait on this step's work (RFC 0030 §5,
+   * Order): written in the declaring model's file, judged here.
    */
   relationships?: Array<{ model: string; name: string; type: string; target: string }>
   /** The behaviours the step writes or must see pass. */

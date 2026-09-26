@@ -68,8 +68,8 @@ export interface PlanScaffoldTestsReport extends PlanScaffoldReportBase, Pick<Pl
 export interface PlanScaffoldStepReport extends PlanScaffoldReportBase, Pick<PlanScaffoldOutput, 'left'> {
   kind: 'scaffold'
   /**
-   * Relationships left out of the models. `judgedAt` is the step of a later task that works on the
-   * target and judges the relationship (RFC 0030 §5, Order); without it, plan:status reads the model as drifted until it is added.
+   * Relationships left out of the models. `judgedAt` is the later step whose work the relationship waits
+   * on, which judges it (RFC 0030 §5, Order); without it, plan:status reads the model as drifted until it is added.
    */
   omitted: Array<PlanScaffoldOutput['omitted'][number] & { judgedAt?: string }>
   /** The schema file the tables were appended to, and their exports. */

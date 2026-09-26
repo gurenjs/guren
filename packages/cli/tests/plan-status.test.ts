@@ -1116,7 +1116,7 @@ describe('judgePlan', () => {
           change: ADD,
           name: 'Comment',
           table: 'comments',
-          columns: [],
+          columns: [column(ADD, { id: 'kc', name: 'postId', type: 'integer', references: { model: 'm', column: 'id' } })],
           relationships: [{ name: 'post', type: 'belongsTo', target: 'm' }],
           fillable: [],
         },
@@ -1139,7 +1139,7 @@ describe('judgePlan', () => {
 
       expect(parent.state).toBe('present')
       expect(parent.properties.map((property) => property.property)).toEqual(['table'])
-      expect(parent.notes).toEqual(['Relationship comments targets Comment, which a later task works on: it is judged with k, in task/entity/k/data.'])
+      expect(parent.notes).toEqual(['Relationship comments waits on work a later task does: it is judged with k, in task/entity/k/data.'])
       expect(only(status, 'k').state).toBe('planned')
     })
 
@@ -1177,6 +1177,16 @@ describe('judgePlan', () => {
 
       expect(only(judgePlan(toExisting, app()), 'm').properties.map((property) => property.property)).toEqual(['table', 'relationship author', 'relationship author target'])
       expect(only(judgePlan(parentAndChild, app()), 'm').notes).toHaveLength(1)
+    })
+
+    test('should key a module model\u2019s relationship with its module, so two roots\u2019 classes of one name stay apart', () => {
+      const document = plan({
+        models: parentAndChild.models.map((entry) => (entry.id === 'm' ? { ...entry, module: 'blog' } : entry)),
+      })
+      const built = app({ tables: [POSTS_TABLE, USERS_TABLE, COMMENTS_TABLE], models: [post([]), comment, USER] }, { models: ['Post', 'User', 'Comment'] })
+      const properties = only(judgePlan(document, built), 'k').properties.map((property) => property.property)
+
+      expect(properties).toContain('relationship blog/Post.comments')
     })
   })
 })
