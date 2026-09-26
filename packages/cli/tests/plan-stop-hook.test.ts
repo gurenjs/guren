@@ -109,6 +109,22 @@ describe('judgeStopHook', () => {
     expect(judgeStopHook(active({ continuations: MAX_STEP_CONTINUATIONS }), record(), [], true)).toMatchObject({ kind: 'stalled', reason: `${MAX_STEP_CONTINUATIONS} continuations on this step` })
   })
 
+  test('should give up on a tests step whose behaviours pass under the step that implements them, unless a red run is on record', () => {
+    const passed = record({
+      outcome: 'failed',
+      commands: [{ command: 'tests:fail', label: 'bun test tests/comments.test.ts', status: 'fail', durationMs: 1, reason: 'a behaviour is not failing', findings: [] }],
+      incomplete: [],
+    })
+    const seenRed = record({ ...passed, acceptance: [{ id: 'AC-comments-1', status: 'passing', red: { shape: 's', ranAt: '2026-09-20T00:00:00.000Z' } }] })
+
+    expect(judgeStopHook(active({ step: TESTS }), passed, [], false, [], HTTP)).toMatchObject({
+      kind: 'stalled',
+      reason: `[AC-comments-1] already pass, verified by ${HTTP} at this plan hash, and no record of the step saw them fail before their implementation, so tests:fail cannot be satisfied; plan:close does not wait for this step`,
+    })
+    expect(judgeStopHook(active({ step: TESTS }), passed, [], false)).toMatchObject({ kind: 'continue' })
+    expect(judgeStopHook(active({ step: TESTS }), seenRed, [], false, [], HTTP)).toMatchObject({ kind: 'continue' })
+  })
+
   test('should give up on stale context before anything else, and still let a verified step through', () => {
     const stale = [{ id: 'model.post', owned: false, through: ['route.comments.store'], within: [] }]
     expect(judgeStopHook(active(), record(), [], false, stale)).toMatchObject({
@@ -173,6 +189,22 @@ describe('planStopHookFindings', () => {
       ].join('\n'),
     )
     expect((await readState(app)).active).toEqual(active({ continuations: 1, lastSignature: recordSignature(incomplete) }))
+  })
+
+  test('should stall a tests step at once when the http step verified its behaviours at this plan hash and no red run is on record', async () => {
+    const http = record({ outcome: 'verified', incomplete: [] })
+    const app = await createApp('red-run-lost', { steps: { [HTTP]: http }, active: active({ step: TESTS }) })
+    const failed = record({
+      outcome: 'failed',
+      commands: [{ command: 'tests:fail', label: 'bun test tests/comments.test.ts', status: 'fail', durationMs: 1, reason: 'a behaviour is not failing', findings: [] }],
+      incomplete: [],
+    })
+
+    const verdict = await planStopHookFindings(app, { stopHookActive: false }, { verify: async () => report(TESTS, failed), now: NOW })
+
+    expect(verdict.block).toBe(false)
+    expect(verdict.message).toContain(`plan:verify on stop (comments.plan.json, ${TESTS}): giving up, [AC-comments-1] already pass, verified by ${HTTP} at this plan hash`)
+    expect((await readState(app)).active!.stalled!.reason).toEndWith('plan:close does not wait for this step')
   })
 
   test('should give up, say why, and record the stall with the last output', async () => {

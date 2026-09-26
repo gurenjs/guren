@@ -11,9 +11,10 @@ import { resolve } from 'node:path'
 
 import { toPosixRelative } from '../discovery'
 import { planDecisionsPath, planWaiverHash, readPlanDecisions, type PlanDecisions, type PlanWaiver } from './decisions'
+import { canonicalJson } from './identity'
 import { behaviourCanReach, behaviourCarriers } from './reach'
 import type { Plan, PlanDraft } from './schema'
-import { planDigest, planSlug, planStatePath, readPlanState, type PlanStepRecord, type PlanStepWork } from './state'
+import { planDigest, planSlug, planStatePath, readPlanState, type PlanRedRun, type PlanStepRecord, type PlanStepWork } from './state'
 import { awaitsVerification, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus, type PlanVerificationHold } from './status'
 import type { PlanTaskDerivation } from './tasks'
 
@@ -272,6 +273,42 @@ export function recordStillHolds(record: PlanStepRecord, digest: string, hashes:
 export function recordDrift(record: PlanStepRecord, digest: string, hashes: ReadonlyMap<string, string | null>, waived: ReadonlySet<string> = new Set()): string[] {
   if (record.outcome !== 'verified' || record.planDigest !== digest || !record.waived.every((id) => waived.has(id))) return []
   return changedFiles(record, hashes)
+}
+
+/**
+ * A behaviour as its test is written from: every field but its description, with the route and the
+ * expected page read through to what a test spells (method and path, page and module). A red run
+ * seen for one shape says nothing of another. `undefined` for an id the plan does not declare.
+ */
+export function behaviourShape(plan: PlanDraft | Plan, id: string): string | undefined {
+  const behaviour = plan.tasks.flatMap((task) => task.acceptance).find((candidate) => candidate.id === id)
+  if (!behaviour) return undefined
+  const { description: _description, route: routeId, expect, ...rest } = behaviour
+  const route = plan.routes.find((candidate) => candidate.id === routeId)
+  const view = expect.inertia === undefined ? undefined : plan.views.find((candidate) => candidate.id === expect.inertia)
+  const page = view ? { page: view.page, ...(view.module === undefined ? {} : { module: view.module }) } : expect.inertia
+  return sha256(
+    canonicalJson({
+      ...rest,
+      route: route ? { method: route.method, path: route.path } : routeId,
+      expect: { ...expect, ...(page === undefined ? {} : { inertia: page }) },
+    }),
+  )
+}
+
+/**
+ * The behaviours of `ids` whose red run `record` (the step's own) carries to `plan`: seen failing in
+ * a verified `tests:fail` run at the shape the plan states now, whatever plan hash that run named.
+ * Once the implementation exists the run cannot be repeated, so a revision that leaves a behaviour's
+ * test as it was keeps the observation, and one that changes it asks for a new one.
+ */
+export function carriedRedRuns(record: PlanStepRecord | undefined, plan: PlanDraft | Plan, ids: readonly string[]): Map<string, PlanRedRun> {
+  const carried = new Map<string, PlanRedRun>()
+  for (const id of ids) {
+    const red = record?.acceptance.find((behaviour) => behaviour.id === id)?.red
+    if (red && red.shape === behaviourShape(plan, id)) carried.set(id, red)
+  }
+  return carried
 }
 
 /** Verified against this plan digest, every fingerprinted file hashing as it did: what a record must be to count at all. */

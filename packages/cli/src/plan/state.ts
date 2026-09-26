@@ -75,6 +75,13 @@ export const PlanStepWorkSchema = z.discriminatedUnion('measured', [
   z.object({ measured: z.literal(false), reason: z.string(), settled: z.boolean() }),
 ])
 
+/**
+ * A behaviour's test seen failing in a verified `tests:fail` run, before its implementation existed,
+ * at `shape` (`behaviourShape()`). No later run can see it again, so a record of the step carries it
+ * forward, across revisions that leave the shape as it was. See `carriedRedRuns()`.
+ */
+const PlanRedRunSchema = z.object({ shape: z.string(), ranAt: z.string() })
+
 export const PlanStepRecordSchema = z.object({
   outcome: z.enum(['verified', 'failed', 'blocked', 'incomplete']),
   /** {@link planDigest} of the plan the step was verified against. */
@@ -82,7 +89,7 @@ export const PlanStepRecordSchema = z.object({
   ranAt: z.string(),
   durationMs: z.number().int().nonnegative(),
   commands: z.array(PlanCommandRecordSchema),
-  acceptance: z.array(z.object({ id: z.string(), status: z.enum(['pending', 'failing', 'passing']) })),
+  acceptance: z.array(z.object({ id: z.string(), status: z.enum(['pending', 'failing', 'passing']), red: PlanRedRunSchema.optional() })),
   /** Elements the step owns that were not at their completion state, `id: state`; empty when a command failed or was blocked. */
   incomplete: z.array(z.string()),
   /**
@@ -134,6 +141,7 @@ export const PlanStateSchema = z.object({
 
 export type PlanCommandRecord = z.infer<typeof PlanCommandRecordSchema>
 export type PlanFingerprint = z.infer<typeof PlanFingerprintSchema>
+export type PlanRedRun = z.infer<typeof PlanRedRunSchema>
 export type PlanStepRecord = z.infer<typeof PlanStepRecordSchema>
 export type PlanStepWork = z.infer<typeof PlanStepWorkSchema>
 export type PlanStepWorkFile = z.infer<typeof PlanStepWorkFileSchema>

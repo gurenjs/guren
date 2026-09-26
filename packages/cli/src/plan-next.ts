@@ -60,6 +60,11 @@ export interface PlanNextStep extends Pick<PlanDerivedStep, 'id' | 'kind' | 'ver
   unconfirmed?: PlanStepContextElement[]
   /** Set where the step was verified and only these fingerprinted files changed since: it is re-checked, not re-implemented. */
   drifted?: string[]
+  /**
+   * The plan hash the step was verified against, where that is not this one: after a revision,
+   * the step is re-checked with `plan:verify` before anything is implemented.
+   */
+  verifiedAt?: string
   /** A scaffold step's: the command that writes it, the `generates` it writes, and those the `http` step writes by hand. A tests step's `writes` are its behaviours, one test skeleton each. */
   scaffold?: { command: string; writes: string[]; leaves: string[] }
   /**
@@ -342,6 +347,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   const unconfirmed = judged.contexts.get(step.id)?.unconfirmed ?? []
   const record = records[step.id]
   const drifted = record ? recordDrift(record, digest, hashes, log.waived) : []
+  const verifiedAt = record?.outcome === 'verified' && record.planDigest !== digest ? record.planDigest : undefined
   // Named only while there is something to mount: a slice an older CLI scaffolded has no routes file.
   const mount = mountOf(plan, derivation, task, step, planPath)
   const mountable = mount && (await pathExists(resolve(root, mount.file))) && !(await isRoutesFileMounted(root, mount.file)) ? { mount } : {}
@@ -361,6 +367,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
       ...stallOf(step.id),
       ...(unconfirmed.length > 0 ? { unconfirmed } : {}),
       ...(drifted.length > 0 ? { drifted } : {}),
+      ...(verifiedAt === undefined ? {} : { verifiedAt }),
       ...(step.kind === 'scaffold' || step.kind === 'tests' ? { scaffold: scaffoldOf(plan, step, planPath) } : {}),
       ...mountable,
     },
@@ -539,6 +546,12 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     const verify = `bunx guren plan:verify ${planArgument} --step ${step.id}`
     if (step.drifted) {
       lines.push('', `Verified before; files it was verified at have changed since: ${step.drifted.join(', ')}.`, `Re-check it with \`${verify}\` rather than re-implementing it, fix only what that run reports, and commit once it is verified.`)
+    } else if (step.verifiedAt) {
+      lines.push(
+        '',
+        `Verified against plan hash ${step.verifiedAt.slice(0, 12)}, before the plan changed to this one.`,
+        `Re-check it with \`${verify}\` before implementing anything: implement only what that run reports against the revised plan, and commit once it is verified.`,
+      )
     } else {
       lines.push('', `Implement this step only, then run \`${verify}\` and commit once it is verified.`)
     }

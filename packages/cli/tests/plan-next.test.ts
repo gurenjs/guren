@@ -152,6 +152,24 @@ describe('plan:next', () => {
     expect(text).not.toContain('It writes each added model')
   })
 
+  test('should name a step verified against another plan hash as one to re-check before implementing', async () => {
+    const approved = approvedAgainst(loadCommentsPlan())
+    const { app, plan } = await createApp('revised-text')
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approved) })
+    await approvePlanFile(plan)
+    const parent = 'a'.repeat(64)
+    await writeState(app, { steps: { [SCAFFOLD]: { ...(await holding(app)), planDigest: parent } } })
+
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+    const text = formatPlanNext(report, 'comments.plan.json')
+
+    expect(report.step!.id).toBe(SCAFFOLD)
+    expect(report.step!.verifiedAt).toBe(parent)
+    expect(text).toContain(`Verified against plan hash ${parent.slice(0, 12)}, before the plan changed to this one.`)
+    expect(text).toContain(`Re-check it with \`bunx guren plan:verify comments.plan.json --step ${SCAFFOLD}\` before implementing anything`)
+    expect(text).not.toContain('Implement this step only')
+  })
+
   test('should name --mount for the http step holding the routes the scaffold wrote, and what it left to write', async () => {
     const approved = approvedAgainst(loadCommentsPlan())
     const { app, plan } = await createApp('mount-text')

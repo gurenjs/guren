@@ -1,11 +1,10 @@
 /**
- * The plan half of the harness Stop hook (RFC 0030 §7): verify the step `plan:next` marked
- * and block the stop while it is not, giving up where a continuation cannot help: no approval
- * names the plan's hash, what the step depends on went stale since approval (§4), the step or
- * an element it owns is `blocked`, the record is the one the last continuation was blocked on,
- * or three continuations. A stall is recorded in state and sticks until the next `plan:next`.
- * `verify` is the seam the unit tests fake; the shipped hooks run `plan:verify`, whose report
- * carries the stale context, judged on the app it reads after `codegen`.
+ * The plan half of the harness Stop hook (RFC 0030 §7): verify the step `plan:next` marked and
+ * block the stop while it is not, giving up where a continuation cannot help: no approval names
+ * the plan's hash, the step's context went stale since approval (§4), the step or an element it
+ * owns is `blocked`, a `tests` step's behaviours already pass with no red run on record, the
+ * record repeats the last blocked one, or three continuations. A stall sticks until `plan:next`.
+ * `verify` is the seam the unit tests fake; the shipped hooks run `plan:verify`.
  */
 
 import { resolve } from 'node:path'
@@ -18,7 +17,7 @@ import { loadPlanAppState } from './plan/app-state'
 import { describeUnapproved, readPlanApprovalStanding } from './plan/approvals'
 import { describeDependency, type PlanStepContextElement } from './plan/step-context'
 import { listPlanStates, planDigest, planSlug, writePlanActiveStep, type PlanActiveStep, type PlanStepRecord } from './plan/state'
-import { derivePlanTasks, findPlanStep } from './plan/tasks'
+import { derivePlanTasks, findPlanStep, type PlanTaskDerivation } from './plan/tasks'
 import { hashFiles, readPlanWaivers, recordStillHolds, sha256 } from './plan/verification'
 
 /** Stops the hook blocks on one step before it gives up. */
@@ -58,7 +57,8 @@ export function recordSignature(record: PlanStepRecord): string {
 /**
  * Pure: whether the stop is blocked, let through as verified, or given up on, and why. `stale`
  * is the step's stale context: the plan does not describe the application there, so no
- * continuation can finish the step against it.
+ * continuation can finish the step against it. `implementedBy` is the step that verified a
+ * `tests:fail` step's behaviours passing at this plan hash, which leaves no red run to see.
  */
 export function judgeStopHook(
   active: PlanActiveStep,
@@ -66,12 +66,21 @@ export function judgeStopHook(
   blockedElements: ReadonlyArray<{ id: string; reason?: string }>,
   stopHookActive: boolean,
   stale: ReadonlyArray<Pick<PlanStepContextElement, 'id' | 'owned' | 'through' | 'within'>> = [],
+  implementedBy?: string,
 ): StopHookJudgement {
   if (record.outcome === 'verified') return { kind: 'verified' }
   const signature = recordSignature(record)
   const stalled = (reason: string): StopHookJudgement => ({ kind: 'stalled', reason, signature })
   if (stale.length > 0) {
     return stalled(`what the step depends on changed since the plan was approved (${stale.map((element) => `${element.id}, ${describeDependency(element)}`).join('; ')})`)
+  }
+  if (implementedBy !== undefined && record.outcome === 'failed') {
+    const passing = record.acceptance.filter((behaviour) => behaviour.status === 'passing' && behaviour.red === undefined).map((behaviour) => `[${behaviour.id}]`)
+    if (passing.length > 0) {
+      return stalled(
+        `${passing.join(', ')} already pass, verified by ${implementedBy} at this plan hash, and no record of the step saw them fail before their implementation, so tests:fail cannot be satisfied; plan:close does not wait for this step`,
+      )
+    }
   }
   if (record.outcome === 'blocked') {
     const reasons = record.commands.filter((command) => command.status === 'blocked').map((command) => `${command.command}: ${command.reason ?? 'blocked'}`)
@@ -83,6 +92,24 @@ export function judgeStopHook(
   if (stopHookActive && active.lastSignature === signature) return stalled('nothing about the step changed since the last continuation')
   if (active.continuations >= MAX_STEP_CONTINUATIONS) return stalled(`${MAX_STEP_CONTINUATIONS} continuations on this step`)
   return { kind: 'continue', signature }
+}
+
+/** For a `tests:fail` step, the later step of its task that runs the same behaviours as `tests`, when its record stands. */
+async function implementingStep(
+  appRoot: string,
+  records: Readonly<Record<string, PlanStepRecord>>,
+  digest: string,
+  waived: ReadonlySet<string>,
+  derivation: PlanTaskDerivation,
+  stepId: string,
+): Promise<string | undefined> {
+  const found = findPlanStep(derivation, stepId)
+  if (!found?.step.verify.includes('tests:fail')) return undefined
+  const ids = [...found.step.acceptanceIds].sort().join('\0')
+  const later = found.task.steps.find((step) => step.id !== stepId && step.verify.includes('tests') && [...step.acceptanceIds].sort().join('\0') === ids)
+  const record = later && records[later.id]
+  if (!later || !record) return undefined
+  return recordStillHolds(record, digest, await hashFiles(appRoot, Object.keys(record.fingerprint.files)), waived) ? later.id : undefined
 }
 
 function defaultVerify(planPath: string, appRoot: string, stepId: string): Promise<PlanVerifyReport> {
@@ -148,7 +175,7 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
   const owned = new Set(step.elementIds)
   const blockedElements = report.elements.filter((element) => owned.has(element.id) && element.state === 'blocked')
   const stale = report.staleContext?.find((context) => context.stepId === active.step)?.stale ?? []
-  const judgement = judgeStopHook(active, verification.record, blockedElements, stopHookActive, stale)
+  const judgement = judgeStopHook(active, verification.record, blockedElements, stopHookActive, stale, await implementingStep(appRoot, records, digest, log.waived, derivation, active.step))
   if (judgement.kind === 'verified') {
     // Earlier steps are not this step's continuation: plan:next returns them once this one is done.
     const pending = new Set(report.recheckPending)
