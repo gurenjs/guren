@@ -627,6 +627,13 @@ export function planScaffoldMounts(plan: PlanDraft, derivation: PlanTaskDerivati
   })
 }
 
+const NO_APP: PlanScaffoldApp = { dialect: 'pg', tables: [], models: [], validators: [], resources: [], policies: [], controllers: [], sideEffects: {}, modelFiles: {}, validatorFiles: {}, docs: [] }
+
+/** The files `plan:scaffold` writes for `step`. The plan alone names them: the application changes their contents and the refusals, never which files. */
+export function planScaffoldFilePaths(plan: PlanDraft, step: PlanDerivedStep): string[] {
+  return emitPlanScaffold(plan, step, NO_APP).files.map((file) => file.path)
+}
+
 /** What `plan:scaffold` writes for `step`. Pure: the caller reads the application and writes the result. */
 export function emitPlanScaffold(plan: PlanDraft, step: PlanDerivedStep, app: PlanScaffoldApp): PlanScaffoldOutput {
   const generates = new Set(step.generates)
