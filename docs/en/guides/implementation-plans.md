@@ -35,7 +35,7 @@ A plan is a directory under `docs/plans/`, named by its slug:
 
 The slug is the directory name for a file called `plan.json`. Any other name works too: `comments.plan.json` has the slug `comments`, and keeps its records beside it as `comments.approvals.json`, `comments.decisions.json` and `comments.revisions/`.
 
-The rendered page is generated output and belongs out of the repository. `plan:next` ignores it and its temporary file where `plan:render` writes them by default, so it does not have to be ignored for the loop to run, but it should not be committed either. A page written elsewhere with `-o` is an ordinary untracked file, and `plan:next` refuses the tree it sits in. The first pattern covers the `docs/plans/<slug>/` layout, the second a plan named `<slug>.plan.json` anywhere else, such as the application root:
+The rendered page is generated output and belongs out of the repository. `plan:next` ignores it and its temporary file where `plan:render` writes them by default, so it does not have to be ignored for the loop to run, but it should not be committed either. A page written elsewhere with `-o` is an ordinary untracked file, and `plan:next` refuses the tree it sits in. An app scaffolded by `create-guren-app` already ignores both default locations; an older app adds the two patterns to its `.gitignore`. The first covers the `docs/plans/<slug>/` layout, the second a plan named `<slug>.plan.json` anywhere else, such as the application root:
 
 ```text
 docs/plans/**/*.html

@@ -70,17 +70,9 @@ flowchart LR
 
 The gate is the one you ran in section 1. You will not configure any of this. It is why "the agent says it's done" and "it is done" come close to meaning the same thing.
 
-## 3. Keep rendered plans out of git
+Claude Code's own documentation covers each part: [CLAUDE.md](https://code.claude.com/docs/en/memory), [skills](https://code.claude.com/docs/en/skills), and [hooks](https://code.claude.com/docs/en/hooks), including the [`Stop`](https://code.claude.com/docs/en/hooks#stop) and [`SessionStart`](https://code.claude.com/docs/en/hooks#sessionstart) events this course relies on.
 
-Each plan gets a review page, `plan.html`, rendered from `plan.json` whenever you ask. It is generated, so it stays out of the repository:
-
-```bash run
-printf 'docs/plans/**/*.html\n' >> .gitignore
-git add .gitignore
-git commit -m "chore: ignore rendered plan pages"
-```
-
-## 4. Start the agent
+## 3. Start the agent
 
 Open a second terminal in `guren-meetups` and start Claude Code:
 
@@ -88,13 +80,12 @@ Open a second terminal in `guren-meetups` and start Claude Code:
 claude
 ```
 
-Leave it open. From chapter 2 on, the prompts shown as quotes go there.
+Leave it open. From chapter 2 on, each prompt appears in a code block introduced as a prompt for Claude Code; paste it into this session and send it.
 
 ## Where you are
 
 - A scaffolded app with sign-in, committed.
 - A harness the agent reads, with the two plan skills and the Stop hook.
-- Rendered plan pages ignored by git.
 
 ## Common trip-ups
 

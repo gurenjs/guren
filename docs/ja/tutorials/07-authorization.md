@@ -1,13 +1,13 @@
 # 第 7 章: 認可、そしてゲートに見えないもの
 
-第 6 章で作ったのは壁でした。投稿を変えるにはサインインが要ります。ただ、扉はまだありません。サインイン済みのユーザーなら誰でも、誰の投稿でも編集や削除ができます。この違いが**認証**(誰であるか)と**認可**(何を許されているか)です。この章では後者をポリシーとして手で組みます。そして、この章だけの意図的な仕掛けがあります。認可に一言も触れないままエージェントに機能を委ね、それが抜けたときにどの安全装置が気づくのかを確かめます。
+第 6 章では、投稿を変更するにはサインインが必要という壁を作りました。ただ、扉はまだありません。サインインさえしていれば、誰でも他人の投稿を編集したり削除したりできます。これが**認証**(誰であるか)と**認可**(何を許されているか)の違いです。この章では、認可をポリシーとして手で組みます。そのうえで、ほかの章ではやらないことをあえて試します。認可には一言も触れずにエージェントへ機能を任せ、認可が抜けたときにどの安全装置が気づくのかを確かめます。
 
 **この章で学ぶこと:**
 
 - ポリシーの役割と登録の仕方、`this.authorize()` がポリシーをどう使うか
-- 誰でも呼べるルートでも `guren audit` と `guren check` が緑になる理由と、それがテストに対して持つ意味
-- 仕様を書くテストと、カバーを広げる test-writer の違い
-- ハーネスの 2 つ目の subagent `test-writer` の用途と、その限界
+- 誰でも呼べるルートがあっても `guren audit` と `guren check` が通ってしまう理由と、それがテストの書き方に与える意味
+- 仕様を決めるテストと、カバレッジを広げる test-writer の違い
+- ハーネスの 2 つ目のサブエージェント `test-writer` の用途と、その限界
 
 開発サーバーが動いていなければ起動します。
 
@@ -17,7 +17,7 @@ bun run dev
 
 ## 1. 扉を仕様化する
 
-ユーザーを 2 人にして、テストを 3 つ足します。Grace は Ada の投稿を読めるだけで、それ以外は何もできない、という内容です。`tests/PostController.test.ts` を置き換えます。
+ユーザーを 2 人に増やし、テストを 3 つ追加します。Grace が Ada の投稿に対してできるのは読むことだけ、という仕様です。`tests/PostController.test.ts` を次の内容に置き換えてください。
 
 ```ts file=tests/PostController.test.ts
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test'
@@ -186,17 +186,17 @@ describe('PostController', () => {
 bun test
 ```
 
-赤が 3 つ。サインイン済みの Grace は壁を越えて Ada の投稿を編集も削除もでき、アプリはそれをそのまま受け入れました。
+3 件のテストが失敗します。サインイン済みの Grace は壁の内側にいるので、Ada の投稿を編集も削除もでき、アプリはそれを何の疑いもなく受け付けてしまいました。
 
 ## 2. ポリシー
 
-Guren では認可のルールを**ポリシー**に置きます。モデルごとにクラスがひとつ、能力ごとにメソッドがひとつあり、ユーザーとレコードを受け取って true か false を返します。骨組みを生成しましょう。
+Guren では、認可のルールを**ポリシー**に書きます。ポリシーはモデルごとに 1 つのクラスで、ability ごとに 1 つのメソッドを持ち、各メソッドはユーザーとレコードを受け取って true か false を返します。まず骨組みを生成します。
 
 ```bash run
 bunx guren make:policy Post
 ```
 
-骨組みは所有者の列を `userId` と決め打ちしていますが、このアプリでは `authorId` です。`app/Policies/PostPolicy.ts` を置き換えます。
+生成された骨組みは所有者の列を `userId` と想定していますが、このアプリでは `authorId` です。`app/Policies/PostPolicy.ts` を次の内容に置き換えてください。
 
 ```ts file=app/Policies/PostPolicy.ts
 import { Policy, type AuthUser } from '@guren/core'
@@ -225,9 +225,9 @@ export class PostPolicy extends Policy {
 }
 ```
 
-どのメソッドもユーザー(ゲストなら `null`)を受け取って判断します。HTTP の知識はここには一切なく、コンソールコマンドやキューのジョブから呼んでも同じ答えが返ります。クラスにまとめるのはそのためです。「編集できるのは著者だけ」というルールは一箇所にだけ書かれ、どこからでも問い合わせられます。
+どのメソッドも、ユーザー(ゲストなら `null`)を受け取って可否を判断します。ここには HTTP に関わるコードが一切ないので、コンソールコマンドやキューのジョブから呼んでも同じ答えが返ります。ルールをクラスにまとめておく理由はここにあり、「編集できるのは著者だけ」というルールを 1 か所に書けば、どこからでも問い合わせられます。
 
-ポリシーはモデルに対して登録する必要があります。置き場所は認証まわりの配線と同じ `AuthProvider` です。
+ポリシーは、対応するモデルと結びつけて登録します。登録は、認証まわりの設定と同じ `AuthProvider` で行います。
 
 ```ts file=app/Providers/AuthProvider.ts
 import { ServiceProvider, shareInertiaProps, AUTH_CONTEXT_KEY } from '@guren/core'
@@ -258,7 +258,7 @@ export default class AuthProvider extends ServiceProvider {
 }
 ```
 
-では実際に問い合わせます。コントローラーの 3 つのアクションが 1 行ずつ増えます。
+あとはコントローラーからポリシーに問い合わせるだけです。3 つのアクションに 1 行ずつ追加します。
 
 ```ts file=app/Http/Controllers/PostController.ts
 import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
@@ -338,31 +338,31 @@ export default class PostController extends Controller {
 }
 ```
 
-`this.authorize('update', [Post, post])` は `Post` に登録されたポリシーを探し、その `update` を現在のユーザーとレコードで呼び、答えが「いいえ」なら 403 を throw します。タプルで渡すのにも理由があります。データベースから読み込んだレコードは自分のクラスを持たない素のオブジェクトなので、ゲートがポリシーを引けるようにモデルクラスを添えて渡す必要があります。
+`this.authorize('update', [Post, post])` は、`Post` に登録されたポリシーを探して、現在のユーザーとレコードを引数にその `update` を呼び、答えが false なら 403 の例外を投げます。レコードをタプルで渡しているのには理由があります。データベースから読み込んだレコードはクラスを持たない素のオブジェクトなので、ゲートがポリシーを見つけられるよう、モデルクラスを一緒に渡す必要があります。
 
 ```bash run
 bun test
 ```
 
-緑になりました。Grace は編集フォーム、更新、削除のいずれでも 403 を受け取り、Ada は受け取りません。
+今度はすべて通ります。Grace は編集フォーム、更新、削除のどれでも 403 を受け取り、Ada は受け取りません。
 
 ## 3. ゲートに見えないもの
 
-次は audit です。
+次に audit を実行します。
 
 ```bash run
 bunx guren audit
 ```
 
-`bunx guren audit --json` で見ると、投稿のルートはすべて「Protected by an authentication guard」です。ポリシーを書く前とまったく同じ結果です。`bunx guren check` も前後で同じように通ります。どちらのツールも、1 時間前に Grace が Ada の投稿を編集できたことを知りません。そもそも探していないからです。`audit` が見るのは、変更系ルートが*何らかの*ユーザーを要求しているかどうか。`check` が見るのは、配線が整合しているかどうかです。*この*ユーザーが*この*レコードに触れてよいかはアプリケーション固有のルールで、教えない限り静的ツールには分かりません。
+`bunx guren audit --json` で見ると、投稿のルートはすべて「Protected by an authentication guard」と判定されていて、ポリシーを書く前とまったく同じ結果です。`bunx guren check` も、ポリシーの前後で変わらず通ります。どちらのツールも、ついさっきまで Grace が Ada の投稿を編集できたことには気づいていません。そもそも、そこを調べていないからです。`audit` が確かめるのは、変更系のルートが*何らかの*ユーザーを要求しているかどうかで、`check` が確かめるのは配線に矛盾がないかどうかです。*この*ユーザーが*この*レコードに触れてよいかはアプリケーション固有のルールなので、教えない限り静的なツールには判断できません。
 
-ここから 3 つのことが導かれます。コースの残りはこの上に立っています。
+ここから 3 つのことが言えます。この先の章はすべて、この 3 点を前提に進みます。
 
-1. **ゲートが緑でも、アプリが安全とは限りません。** 緑が意味するのは、ゲートが検査の仕方を知っている項目をすべて通過した、ということだけです。
-2. **403 のテストは、そのルールを知っているリポジトリ内で唯一のものです。** 第 1 節で、ポリシーができる前に書きました。「Grace が Ada の投稿を編集できる」を、ただの事実からテストの失敗に変えたのはこのテストです。
-3. **第 2 拍はこのためにあります。** 変更を委ねる前に書くテストは、エージェントがしたことの記録ではありません。意図したとおりかどうかを映す唯一の安全装置であり、エージェントや audit、check がルールを理解しているかどうかに関係なく働きます。
+1. **ゲートが通っても、アプリが安全とは限りません。** ゲートが通ったというのは、ゲートが検査できる項目をすべて満たしたというだけです。
+2. **リポジトリの中でこのルールを知っているのは、403 を確かめるテストだけです。** このテストは、第 1 節でポリシーを作る前に書きました。「Grace が Ada の投稿を編集できる」という事実を、テストの失敗として表に出したのはこのテストです。
+3. **4 拍子の第 2 拍(先に失敗するテストを書く段階)は、このためにあります。** 変更を任せる前に書くテストは、エージェントがしたことの記録ではありません。読者の意図どおりかどうかを確かめられる唯一の安全装置で、エージェントや audit、check がルールを理解しているかどうかに関係なく働きます。
 
-コミットして、3 つ目の点をエージェントで試しましょう。
+ここでコミットし、3 つ目の点をエージェントで試してみます。
 
 ```bash run
 bunx guren gate
@@ -375,7 +375,7 @@ git commit -m "feat: let only the author edit or delete a post"
 
 ## 4. 公開を仕様化する
 
-投稿は下書きのままにもできます。テストは 3 つ。著者は公開と非公開ができ、他のユーザーはできず、ゲストはサインインへ送られる、という内容です。テストファイルを置き換えます。
+投稿を下書きのままにしておけるようにします。追加するテストは 3 つで、著者は公開と非公開を切り替えられる、他のユーザーは切り替えられない、ゲストはサインインページへ送られる、という内容です。テストファイルを次の内容に置き換えてください。
 
 ```ts file=tests/PostController.test.ts
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test'
@@ -569,22 +569,24 @@ describe('PostController', () => {
 bun test
 ```
 
-赤が 3 つ、すべて 404 です。どちらのルートもまだ存在しません。`publishedAt` も列になっていないので、typecheck ならこのファイルを拒否します。`bun test` は typecheck をしないため、ゲートは両方を走らせます。これで問題ありません。テストが仕様であり、仕様にはスキーマも含まれます。
+3 件とも 404 で失敗します。どちらのルートもまだないからです。`publishedAt` もまだ列として存在しないので、typecheck にかければこのファイルはエラーになります。`bun test` は typecheck をしないため、ゲートでは両方を実行しています。この状態で問題ありません。テストは仕様そのもので、その仕様にはスキーマも含まれます。
 
 ## 5. その言葉を使わずに委ねる
 
-送る前にプロンプトを読んでください。誰が公開できるかについては何も書いていません。
+エージェントに次のプロンプトを送ります。送る前に一度読んでみてください。誰が公開できるかについては、何も書いていません。
 
-> Add publishing to posts. Give the `posts` table a nullable `publishedAt` text column with a new migration. `POST /posts/:id/publish`, named `posts.publish`, sets it to the current time; `POST /posts/:id/unpublish`, named `posts.unpublish`, clears it; both redirect back to the post. The post page shows "Draft" or "Published" with the date, and a button for whichever action applies. Add `publishedAt` to `PostResource`. `tests/PostController.test.ts` describes it; make it pass.
+```text
+Add publishing to posts. Give the `posts` table a nullable `publishedAt` text column with a new migration. `POST /posts/:id/publish`, named `posts.publish`, sets it to the current time; `POST /posts/:id/unpublish`, named `posts.unpublish`, clears it; both redirect back to the post. The post page shows "Draft" or "Published" with the date, and a button for whichever action applies. Add `publishedAt` to `PostResource`. `tests/PostController.test.ts` describes it; make it pass.
+```
 
-そのうえで、次のどちらになるかを確認してください。
+送ったら、次のどちらになるかを見守ってください。
 
-- **エージェントが `authorize` の呼び出しとポリシーの `publish` 能力を足す。** 何かがそう仕向けたはずです。コントローラーを開いたときに読み込まれた `controllers-http.md` の rule か、新しいアクションの隣にある既存の 2 つの `authorize` 呼び出しか、「refuses to let anyone else publish」という名前のテストです。望ましい結果なので、どれだったかを記録しておいてください。第 8 章は、これを偶然任せにしないための章です。
-- **エージェントが忘れる。** `PostToolUse` hook が `guren check` を走らせて緑。Stop hook が `guren gate` を走らせると audit は緑ですが、テストのステージが「refuses to let anyone else publish a post」の 1 件で失敗し、停止がブロックされます。エージェントはその失敗を読んで呼び出しを足します。こうなる理由は、第 4 節で書いたテストだけです。
+- **エージェントが `authorize` の呼び出しと、ポリシーの `publish` ability を追加する。** 何かがエージェントをそう導いたはずです。候補は、コントローラーを開いたときに読み込まれた `controllers-http.md` のルール、新しいアクションのすぐ隣にある既存の 2 つの `authorize` 呼び出し、「refuses to let anyone else publish」という名前のテストのどれかです。望ましい結果なので、どれが効いたのかを控えておいてください。第 8 章では、これを偶然に任せない方法を扱います。
+- **エージェントが認可を忘れる。** `PostToolUse` hook が `guren check` を実行しますが、結果は成功です。Stop hook が `guren gate` を実行すると、audit も通ります。そのあとテストの段階で「refuses to let anyone else publish a post」の 1 件が失敗し、ターンの終了が止められます。エージェントはその失敗を読んで `authorize` の呼び出しを追加します。この流れになるのは、第 4 節でテストを書いておいたからにほかなりません。
 
-どちらになったとしても、この節の要点は後者の分岐にあります。そこではハーネスの他のすべてが緑だからです。
+どちらになったとしても、この節で押さえてほしいのは後者のほうです。そこでは、テスト以外のハーネスがすべて成功を返しています。
 
-**手元にエージェントが無い場合は、** まずスキーマに列をひとつ足します。
+**手元にエージェントがない場合は、** まずスキーマに列を 1 つ追加します。
 
 ```ts file=db/schema.ts fallback
 import { sqliteTable, integer, text } from '@guren/orm/drizzle/sqlite'
@@ -616,7 +618,7 @@ bun run db:make add_published_at_to_posts
 bun run db:migrate
 ```
 
-ポリシーに能力をひとつ足します。ルールは編集と同じです。
+ポリシーに ability を 1 つ追加します。ルールは編集と同じです。
 
 ```ts file=app/Policies/PostPolicy.ts fallback
 import { Policy, type AuthUser } from '@guren/core'
@@ -742,7 +744,7 @@ export default class PostController extends Controller {
 }
 ```
 
-`show` は現在の閲覧者に対するポリシーの答えを `canManage` として一緒に送ります。これで、どのみち 403 になる相手にはページ側でボタンを隠せます。隠すのはあくまで気配りで、ルールを決めているのは各アクションの `authorize` 呼び出しです。
+`show` では、いま見ている人に対するポリシーの答えも `canManage` として渡しています。こうしておくと、押しても 403 になるだけの人にはページ側でボタンを隠せます。ボタンを隠すのはあくまで親切のためで、ルールそのものは各アクションの `authorize` 呼び出しが決めています。
 
 ```ts file=routes/web.ts fallback
 import { Router, requireAuthenticated, requireGuest } from '@guren/core'
@@ -891,21 +893,23 @@ bun run codegen
 bun test
 ```
 
-rubric は次のとおりです。今回は最初の行がすべての要点です。
+確認項目は次のとおりです。今回は 1 項目めがこの章の要点そのものです。
 
-- `publish` と `unpublish` は `this.authorize('publish', [Post, post])` を呼び、`PostPolicy` には著者にだけ true を返す `publish` メソッドがある。エージェントが自力でそこに至ったなら、導いたのは rule か隣のコード。ゲートが停止をブロックして至ったなら、導いたのは自分で書いたテスト。
-- `publishedAt` は `forceUpdate` で設定されている。fillable ではないし、今後もそうならない。
-- 両方のルートは `auth` グループの中にあり、ゲストはポリシーが参照される前にリダイレクトされる。
-- ページはリソースから `publishedAt` を読み、ボタンは閲覧者についての推測ではなくポリシーの答えによって隠されている。
-- 20 件のテストがすべて緑。
+- `publish` と `unpublish` が `this.authorize('publish', [Post, post])` を呼び、`PostPolicy` に著者にだけ true を返す `publish` メソッドがある。エージェントが自分でここにたどり着いたのなら、導いたのはルールか隣のコードです。ゲートにターンの終了を止められてたどり着いたのなら、導いたのは読者が書いたテストです。
+- `publishedAt` は `forceUpdate` で設定している。fillable には含めず、今後も含めない。
+- どちらのルートも `auth` グループの中にあり、ゲストはポリシーに問い合わせる前にリダイレクトされる。
+- ページは `publishedAt` をリソースから読み、ボタンを隠すかどうかは閲覧者についての推測ではなくポリシーの答えで決めている。
+- 20 件のテストがすべて通る。
 
-**チェックポイント:** サインインして自分の投稿を開き、公開してみてください。プライベートウィンドウで別のユーザーとしてサインインすると、ボタンは表示されません。その状態で URL に手で POST すると 403 が返ります。
+**チェックポイント:** サインインして自分の投稿を開き、公開してみてください。プライベートウィンドウで別のユーザーとしてサインインすると、ボタンは表示されません。それでもその URL に手で POST すれば、403 が返ってきます。
 
-この章のハーネス要素は、もうひとつの subagent である **`test-writer`** (`.claude/agents/test-writer.md`) です。機能ができたので試してみましょう。
+この章で使うハーネスの仕組みは、もう 1 つのサブエージェント **`test-writer`** (`.claude/agents/test-writer.md`) です。機能ができあがったので、試してみます。エージェントに次のプロンプトを送ります。
 
-> Use the test-writer subagent to add tests for publishing and unpublishing posts.
+```text
+Use the test-writer subagent to add tests for publishing and unpublishing posts.
+```
 
-書かれたテストを第 4 節と比べてください。おそらく自分が書いたよりも多くのケースを覆っていて、出来もいいはずです。ただし認可に関するテストがあれば、そこを読んでください。test-writer は目の前のコードからテストを導くので、`authorize` 呼び出しの無いコードが出荷されていたら、誰でも公開できるという状態をそのまま記録し、そのテストは通っていました。既にあるもののカバレッジを広げることはできますが、何があるべきかまでは言えません。そこが第 2 拍であり、担当は自分のままです。
+書かれたテストを第 4 節のテストと比べてください。読者が書いたものより多くのケースを扱っていて、テストとしての出来もよいはずです。ただ、認可に関するテストがあれば、そこはよく読んでください。test-writer は目の前のコードからテストを組み立てます。もし `authorize` の呼び出しがないままコードが出荷されていたら、誰でも公開できるという状態をそのままテストに書き、そのテストは通っていたはずです。test-writer は、いまあるコードのカバレッジを広げることはできても、本来どうあるべきかは判断できません。それを決めるのが第 2 拍で、ここは読者が受け持ち続けます。
 
 ```bash run
 bunx guren gate
@@ -916,26 +920,26 @@ git add -A
 git commit -m "feat: let authors publish and unpublish their posts"
 ```
 
-## いまいる場所
+## ここまでの状態
 
-- 投稿のポリシー。ゲートに登録され、5 つのアクションから参照される。
-- すべてのテストに 2 人のユーザーがいて、2 人を隔てる 403 がある。
-- 認可のバグに対して `audit` と `check` は緑になるが、委ねる前に書いたテストは緑にならない、という知識。
-- 認可に触れないプロンプトで委ねた公開機能と、何がその抜けを捕まえたかの記録。
+- 投稿のポリシーができ、ゲートに登録されて 5 つのアクションから使われています。
+- どのテストにも 2 人のユーザーが登場し、他人の操作は 403 で拒否されます。
+- 認可のバグがあっても `audit` と `check` は通ってしまい、任せる前に書いたテストだけが失敗して気づかせてくれることを確認しました。
+- 認可に触れないプロンプトで公開機能をエージェントに任せ、その抜けを何が見つけたかを記録しました。
 
 ## よくあるつまずき
 
-- **`this.authorize('update', post)` が「no policy」で throw する。** タプルが抜けています。データベースのレコードにクラスはありません。`[Post, post]` を渡してください。
-- **著者からのリクエストまで 403 になる。** `user.id` と `post.authorId` の型か値が一致していません。ポリシーの中で一度両方をログに出してください。文字列と数値を比べているのがよくある原因です。
-- **ポリシーが無視される。** 登録されていません。プロバイダーの `register()` ではなく `boot()` で `this.container.make('gate').policy(Post, PostPolicy)` を呼びます。ゲートを束縛するのは登録処理なので、それより前に `make('gate')` を呼ぶと例外になります。
-- **`publishedAt` を足した後、テストファイルがコンパイルできない。** 列ができるまではそれが正しい状態です。マイグレーション後もまだ失敗するなら、codegen かスキーマの import が古くなっています。
-- **`test-writer` が、他人でも公開できるというテストを書いた。** subagent のバグではありません。目の前のコードをテストした結果で、そのコードが実際に許していたということです。
+- **`this.authorize('update', post)` が「no policy」で例外を投げる。** タプルになっていません。データベースから読んだレコードはクラスを持たないので、`[Post, post]` の形で渡してください。
+- **著者本人のリクエストまで 403 になる。** `user.id` と `post.authorId` の型か値が一致していません。ポリシーの中で両方を一度ログに出してみてください。文字列と数値を比べていることがよくある原因です。
+- **ポリシーが無視される。** 登録されていません。`this.container.make('gate').policy(Post, PostPolicy)` は、プロバイダーの `register()` ではなく `boot()` で呼びます。ゲートは登録処理の中で束縛されるので、`boot()` より前に `make('gate')` を呼ぶと例外になります。
+- **`publishedAt` を追加したあと、テストファイルがコンパイルできない。** 列ができるまではそれで正しい状態です。マイグレーションのあとも失敗するなら、codegen の結果かスキーマの import が古くなっています。
+- **`test-writer` が、他人でも公開できるというテストを書いた。** サブエージェントの不具合ではありません。コードが実際に他人の公開を許していて、テストはその動きをそのまま確かめただけです。
 
 ## 演習
 
-1. `update` から `await this.authorize('update', [Post, post])` の行を消して `bun test` を走らせてください。失敗の数を数えてから、行を元に戻します。その数がこのポリシーの価値であり、`guren audit` が教えてくれなかった数字です。
-2. `this.can()` は真偽値を返し、`this.authorize()` は例外を投げます。ページは前者を、アクションは後者を使っています。この 2 つが食い違ったら読者には何が見えますか。そして、レコードを守っているのはどちらですか。
+1. `update` から `await this.authorize('update', [Post, post])` の行を削除し、`bun test` を実行してください。失敗したテストの数を数えたら、行を元に戻します。その数がこのポリシーの価値で、`guren audit` では得られなかった数字です。
+2. `this.can()` は真偽値を返し、`this.authorize()` は例外を投げます。ページでは前者を、アクションでは後者を使っています。この 2 つの答えが食い違ったら、閲覧者の画面には何が表示されますか。また、レコードを守っているのはどちらですか。
 
 ## 次へ
 
-[第 8 章: エージェントに自分のプロジェクトを教える](./08-teach-the-agent.md) では、「エージェントが忘れた」という状況を、毎回読まれる rule、必要なときに従われる skill、こちらの brief を持つレビュアーへと変えます。そのうえで、指示なしにエージェントが作るリソースでその効果を確かめます。
+[第 8 章: エージェントに自分のプロジェクトを教える](./08-teach-the-agent.md) では、「エージェントが忘れた」という事態を防ぐ仕組みを作ります。毎回読まれるルール、依頼に合わせて従うスキル、読者の指示書を持つレビュアーの 3 つです。そのうえで、エージェントが指示なしで作るリソースを使って、その効果を確かめます。

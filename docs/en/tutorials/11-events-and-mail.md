@@ -470,7 +470,11 @@ One red. The second test is green already, and not for a good reason: nothing se
 
 ## 6. Delegate it
 
-> When a post is published, mail everyone who commented on it. Emit a `PostPublished` event from `publish` in `PostController`, wire a listener in `EventProvider` that dispatches a `NotifyCommentersJob`, and send a `PostPublishedMail` to each distinct commenter, skipping the post's author. `tests/PostPublishedMail.test.ts` describes it; make it pass.
+Send this prompt to your agent:
+
+```text
+When a post is published, mail everyone who commented on it. Emit a `PostPublished` event from `publish` in `PostController`, wire a listener in `EventProvider` that dispatches a `NotifyCommentersJob`, and send a `PostPublishedMail` to each distinct commenter, skipping the post's author. `tests/PostPublishedMail.test.ts` describes it; make it pass.
+```
 
 The prompt does not mention `registerJob`, and it does not need to: the rule you wrote in section 4 is scoped to `app/Jobs/**` and `app/Providers/JobsProvider.ts`, so the agent reads it before it writes either. That is the whole experiment. Check the diff for the registration line before you check anything else.
 

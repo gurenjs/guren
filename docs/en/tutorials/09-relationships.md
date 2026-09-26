@@ -1098,7 +1098,9 @@ Two red: `findWithOrFail` throws because `Post` has no relation called `tags`. R
 
 Ask your agent:
 
-> Add tags to posts as a many-to-many. Tables `tags` (unique `name`) and `post_tags` (`postId`, `tagId`, composite primary key, cascade on delete) with a migration; models `Tag` and `PostTag`; a `tags` relation on `Post` declared with `belongsToMany` through the `postTags` table and typed in `relationTypes`. The post forms get a `tags` text field: a comma-separated list, lower-cased, trimmed, de-duplicated, empty allowed. `store` and `update` replace the post's tags with the list, creating tag rows that do not exist yet; the post page shows the tag names; `PostResource` carries `tags` as names. `tests/PostController.test.ts` describes it; make it pass.
+```text
+Add tags to posts as a many-to-many. Tables `tags` (unique `name`) and `post_tags` (`postId`, `tagId`, composite primary key, cascade on delete) with a migration; models `Tag` and `PostTag`; a `tags` relation on `Post` declared with `belongsToMany` through the `postTags` table and typed in `relationTypes`. The post forms get a `tags` text field: a comma-separated list, lower-cased, trimmed, de-duplicated, empty allowed. `store` and `update` replace the post's tags with the list, creating tag rows that do not exist yet; the post page shows the tag names; `PostResource` carries `tags` as names. `tests/PostController.test.ts` describes it; make it pass.
+```
 
 The harness lever here is the **`orm-models.md` rule** and the API digest that `guren context` puts in front of the agent at session start. Both say, in as many words, that there is no `attach()`, `detach()` or `sync()` in Guren: a pivot table is a model, and you write to it with `create` and `delete` like any other. An agent that has worked with other ORMs has those methods in its memory, and would happily write `post.tags().sync(ids)`. Watch whether yours reaches for a `PostTag` model instead. If it does, the rule and the digest are why.
 

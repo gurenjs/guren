@@ -1,19 +1,23 @@
 # 第 7 章: アプリが動いたとき
 
-計画は、ある 1 つのコミットの時点のアプリに対して承認されます。実際の開発はそのコミットで止まりません。同僚がリファクタリングをマージし、計画が頼っていた名前が消えることがあります。この章では参加登録の計画を実装し、その途中でそれを起こします。そして、合わなくなった設計の上にエージェントが作り続けるのを Guren がどう止めるかを見ます。
+計画は、特定のコミットの時点のアプリを前提に承認されます。しかし実際の開発はそこで止まらず、同僚がリファクタリングをマージして、計画が前提にしていた名前が消えることもあります。この章では参加登録の計画を実装しながら、途中でわざとそうした変更を起こします。そして、設計が合わなくなったまま作業を続けようとするエージェントを、Guren がどう止めるかを確認します。
 
 **この章で学ぶこと:**
 
-- **held** のステップとは何か。エージェントが自分で解決できない理由
-- 2 つの出口。変更を戻すか、計画を改訂するか
-- 改訂が、verified 済みのステップに与える影響
-- waiver の役割
+- 保留 (`held`) になったステップの意味と、エージェントだけでは解決できない理由
+- 解決のための 2 つの選択肢 (変更を戻すか、計画を改訂するか)
+- 計画の改訂が、検証済みのステップに与える影響
+- 免除 (waiver) の役割
 
 ## 1. 実装を始める
 
-> docs/plans/registrations/plan.json を plan-implement スキルで実装してください。1 ステップにつき 1 コミットです。
+Claude Code のセッションに、次のプロンプトを送ります。
 
-最初の 3 ステップは第 4 章と同じように進みます。よく読みたいのは data ステップです。第 6 章の `alter` として、`Meetup` に `registrations` のリレーションが入るのはここです。
+```text
+docs/plans/registrations/plan.json を plan-implement スキルで実装してください。1 ステップにつき 1 コミットです。
+```
+
+最初の 3 ステップは第 4 章と同じように進みます。中でも data ステップのコミットは丁寧に読んでください。第 6 章で `alter` として計画した `registrations` のリレーションが、このステップで `Meetup` に加わります。
 
 **エージェントなしの場合:**
 
@@ -28,7 +32,7 @@ bunx guren plan:scaffold docs/plans/registrations/plan.json --step task/entity/m
 ```
 
 <details>
-<summary>セットアップを書いた tests/plans/registrations/registrations.test.ts</summary>
+<summary>tests/plans/registrations/registrations.test.ts (セットアップ記入済み)</summary>
 
 ```ts file=tests/plans/registrations/registrations.test.ts fallback
 import { beforeEach, describe, expect, test } from 'bun:test'
@@ -138,7 +142,7 @@ bunx guren plan:next docs/plans/registrations/plan.json
 ```
 
 <details>
-<summary>registrations のリレーションを足した app/Models/Meetup.ts</summary>
+<summary>app/Models/Meetup.ts (registrations のリレーションを追加)</summary>
 
 ```ts file=app/Models/Meetup.ts fallback
 import { defineModel, type BelongsToRecord, type HasManyRecord } from '@guren/core'
@@ -176,7 +180,7 @@ git commit -m "feat(registrations): migration [task/entity/model.registration/da
 
 ## 2. 同僚のコミット
 
-エージェントが作業している間に、同僚が勉強会ページのルート名を `meetups.show` から `meetups.detail` に変えます。同僚の役として、そのコミットを自分で作ります。
+エージェントが作業している間に、同僚が勉強会ページのルート名を `meetups.show` から `meetups.detail` に変えた、という想定です。同僚の役になって、次のコミットを作ってください。
 
 ```bash run
 sed -i.bak "s/name: 'meetups.show'/name: 'meetups.detail'/" routes/meetups.ts
@@ -186,7 +190,7 @@ git add -A
 git commit -m "refactor: rename the meetup page route"
 ```
 
-何も壊れていません。アプリは動き、テストも通ります。ただし計画は `meetups.show` を名指ししていて、`AC-registrations-7` はそのルートにリクエストします。
+アプリは問題なく動き、テストも通るので、何も壊れてはいません。ただし計画は `meetups.show` という名前でルートを指していて、`AC-registrations-7` もそのルートにリクエストを送ります。
 
 ## 3. ステップが held になる
 
@@ -203,22 +207,26 @@ Held, since what they depend on changed after the plan was approved:
       fail  The route name "meetups.show" was not found in this application, …
 ```
 
-第 3 章の baseline がここで働きます。承認時、Guren は要素ごとにアプリが持っていたもののハッシュを取りました。いま取り直すと、`route.meetups.show` のハッシュは承認時の状態とも、計画自身が作るはずの状態とも一致しません。なので、それに依存するステップは **held** になり、そのステップを待つステップもすべて止まります。
+第 3 章で説明した基準点 (baseline) の仕組みが、ここで働いています。Guren は承認時に、要素ごとにアプリ側の状態のハッシュを取っています。いま取り直すと、`route.meetups.show` のハッシュは承認時の状態とも、計画どおりに実装した後の状態とも一致しません。そのため、この要素に依存するステップは **保留** になり、そのステップを待つステップもすべて止まります。
 
-エージェントにも同じ出力が届きます。`plan-implement` スキルは、直さずに止まって報告するよう指示しています。どちらの直し方も設計の判断だからです。
+エージェントにも同じ出力が届きます。ただし、どちらの直し方を選ぶかは設計上の判断なので、`plan-implement` スキルはエージェントに、自分で直さずに作業を止めて報告するよう指示しています。
 
 | 選択肢 | 選ぶとき | すること |
 |---|---|---|
-| 変更を戻す | 同僚のコミットのほうが誤り | コミットを revert すると、ステップは held でなくなります |
-| 計画を改訂する | 変更が正しく、計画が追随すべき | アプリがいま持っているものを名指すよう計画を直し、承認し直します |
+| 変更を戻す | 同僚のコミットが間違っている | コミットを revert します。ステップの保留が解けます |
+| 計画を改訂する | 変更は正しく、計画をそれに合わせるべき | アプリの現在の状態を指すように計画を直し、承認し直します |
 
-名前の変更はもっともなので、計画を追随させます。
+今回の改名は妥当な変更なので、計画のほうを合わせます。
 
 ## 4. 改訂して承認し直す
 
-> 同僚がルート meetups.show を meetups.detail に改名しました。docs/plans/registrations/plan.json を plan:revise で改訂し、route.meetups.show が meetups.detail を名指すようにしてください。id はそのままにします。
+Claude Code のセッションに、次のプロンプトを送ります。
 
-要素の id `route.meetups.show` は変えません。計画のほかの部分も、すべての記録も、この id で要素を指すからです。変わるのは名前だけです。
+```text
+同僚がルート meetups.show を meetups.detail に改名しました。docs/plans/registrations/plan.json を plan:revise で改訂し、route.meetups.show が meetups.detail を名指すようにしてください。id はそのままにします。
+```
+
+計画のほかの部分や各種の記録はこの id で要素を指しているので、要素の id `route.meetups.show` は変えず、名前だけを変えます。
 
 **エージェントなしの場合:**
 
@@ -240,11 +248,11 @@ git add docs/plans
 git commit -m "docs: approve the revised registrations plan"
 ```
 
-baseline は第 6 章で刻んだもののままです。承認し直しても新しいハッシュを記録するだけで、計画が今日書かれたかのようには扱いません。
+基準点は第 6 章で記録したものから変わりません。承認し直すと新しいハッシュが記録されますが、計画を今日書いたものとして扱い直すわけではありません。
 
 ### verified 済みのステップ
 
-検証の記録は、実行時の計画のハッシュを名指しします。改訂でハッシュが変わったので、終わっている 3 つのステップには有効な記録がなくなりました。コードは変わっていないので、検証し直すだけです。
+検証の記録には、検証を実行したときの計画のハッシュが入っています。改訂でハッシュが変わったため、完了済みの 3 つのステップの記録は無効になりました。コードは変わっていないので、検証し直すだけで済みます。
 
 ```bash run fallback
 bunx guren plan:verify docs/plans/registrations/plan.json --step task/entity/model.registration/scaffold
@@ -252,13 +260,17 @@ bunx guren plan:verify docs/plans/registrations/plan.json --step task/entity/mod
 bunx guren plan:verify docs/plans/registrations/plan.json --step task/entity/model.registration/data
 ```
 
-エージェントがいれば、続けるよう伝えたときに `plan-implement` がこれを自分で行います。
+エージェントに任せている場合は、作業の続きを指示すれば `plan-implement` スキルがこの再検証も行います。
 
 ## 5. 実装を終える
 
-> docs/plans/registrations/plan.json の実装を続けてください。
+Claude Code のセッションに、次のプロンプトを送ります。
 
-第 6 章の Impact が生きるのは http ステップです。`MeetupResource` は登録数を必要とするようになり、`index`、`show`、`edit` のすべてがそれを組み立てます。
+```text
+docs/plans/registrations/plan.json の実装を続けてください。
+```
+
+第 6 章で読んだ Impact は、http ステップで役に立ちます。`MeetupResource` が登録数を必要とするようになり、この Resource は `index`、`show`、`edit` のすべてで組み立てられています。
 
 **エージェントなしの場合:**
 
@@ -431,14 +443,14 @@ bunx guren plan:next docs/plans/registrations/plan.json
 bunx guren plan:verify docs/plans/registrations/plan.json --step task/entity/model.meetup/http
 ```
 
-最後のステップ `task/entity/model.meetup/http` は `MeetupController.show` のものです。承認時に警告が出た `alter` です。このステップ自体はコードを足しません。確認の決め手は、このアクションに届く `AC-registrations-7` です。
+最後のステップ `task/entity/model.meetup/http` は、承認時に警告が出た `alter`、つまり `MeetupController.show` のステップです。このステップではコードを追加せず、`AC-registrations-7` がこのアクションに到達することで確認が済みます。
 
-http のコミットは第 4 章のチェック表で読み、この計画のために次の 2 行を足します。
+http ステップのコミットは第 4 章のチェック表で確認し、この計画ではさらに次の 2 行を加えます。
 
 | 確かめること | 理由 |
 |---|---|
-| `store` が登録を書く前に登録数を数えている | 「満席なら行を書かない」はルールで、それを確かめるのは `AC-registrations-2` だけです |
-| `MeetupResource` を組み立てるアクションすべてが登録数を渡している | Impact が `index`、`show`、`edit` を挙げていました |
+| `store` が登録を書く前に登録数を数えている | 「満席なら行を書かない」というルールを確かめるテストは、`AC-registrations-2` しかありません |
+| `MeetupResource` を組み立てるアクションすべてが登録数を渡している | Impact に `index`、`show`、`edit` が挙がっていました |
 
 ## 6. クローズする
 
@@ -451,33 +463,33 @@ git commit -m "docs: close the registrations plan"
 
 ![「Bun night」の勉強会ページ。開始日時、「20 of 20 seats left」、赤い Register ボタン、Edit のリンクが並んでいます](../../images/agent-course-meetup-page.png)
 
-`docs/entities/Registration.md` が新しくできます。`docs/entities/Meetup.md` にはこの計画の履歴の行が増え、1 本目の計画が書いたブロックはそのまま残ります。
+`docs/entities/Registration.md` が新しく作られます。`docs/entities/Meetup.md` にはこの計画の履歴が 1 行追加され、1 本目の計画で書かれたブロックはそのまま残ります。
 
 ## 足りないまま受け入れるとき: waiver
 
-要素を仕上げないほうがよい場合もあります。計画では通知を約束していたが、来月に出すと決めた、といった場合です。`plan:close` は拒否するので、計画を書き換える代わりに、その判断を記録します。
+計画では通知を送ることにしていたものの、リリースを来月に回すと決めた場合のように、要素をあえて仕上げないこともあります。そのままでは `plan:close` が拒否するので、計画を書き換えるのではなく、その判断を記録します。
 
 ```bash manual
 bunx guren plan:waive docs/plans/<slug>/plan.json <element-id> --reason "Ships with the mail plan next month"
 ```
 
-waiver は計画の隣の `decisions.json` に書かれ、コミットされます。計画のハッシュを名指しするので、後のリビジョンには引き継がれません。`plan:close` は waiver ごとに `make:adr` のコマンドを表示するので、判断はアーキテクチャの決定の置き場所にも残ります。このコースでは使いませんでした。waiver は承認と同じく、人がする判断です。
+免除の記録は計画と同じディレクトリの `decisions.json` に書き込まれ、コミットされます。記録には計画のハッシュが入っているので、後の改訂版には引き継がれません。また `plan:close` は免除ごとに `make:adr` のコマンドを表示するので、判断はアーキテクチャの決定を記録する場所にも残ります。この講座では免除を使いませんでしたが、免除も承認と同じく人が下す判断です。
 
-## いまいる場所
+## ここまでの状態
 
-- 参加登録を実装し、verified にし、クローズして、ドキュメントにしました。
-- held のステップを計画の改訂で解決しました。理由は `revisions/0001.json` に残っています。
+- 参加登録を実装して検証を通し、計画をクローズしてドキュメントに残しました。
+- 保留になったステップを計画の改訂で解決し、その理由は `revisions/0001.json` に残っています。
 
 ## よくあるつまずき
 
-- **エージェントがルート名を元に戻して held を「直す」。** 同僚の作業を断りなく取り消しています。どちらの選択肢を選んだか、エージェントに伝えてください。
-- **`.guren/*.gen.ts` が変わったので `plan:next` が拒否する。** codegen を実行せずにルートを変えたコミットがあります。`bunx guren codegen` を実行し、生成ファイルをコミットしてください。
+- **エージェントがルート名を元に戻して保留を「直す」。** これでは同僚の作業を断りなく取り消すことになります。どちらの選択肢を選んだかを、エージェントに伝えてください。
+- **`.guren/*.gen.ts` が変わったので `plan:next` が拒否する。** codegen を実行しないままルートを変更したコミットがあります。`bunx guren codegen` を実行し、生成ファイルをコミットしてください。
 
 ## 演習
 
-1. ブランチを切り、計画を改訂する代わりに同僚のコミットを revert して、`plan:next` を実行してください。ステップはまだ held ですか。
-2. `docs/plans/registrations/revisions/0001.json` を読んでください。1 年後のレビュアーに、計画が `meetups.detail` を名指す理由を伝えるのはどのフィールドですか。
+1. ブランチを切って、計画を改訂する代わりに同僚のコミットを revert し、`plan:next` を実行してください。ステップはまだ保留のままですか。
+2. `docs/plans/registrations/revisions/0001.json` を読んでください。1 年後にレビューする人が、計画が `meetups.detail` を指している理由を知りたいとき、どのフィールドを見ればよいでしょうか。
 
 ## 次へ
 
-[第 8 章: CI の中の計画](./08-plans-in-ci.md) では、手で実行した検査をプルリクエストごとに走らせます。
+[第 8 章: CI の中の計画](./08-plans-in-ci.md) では、ここまで手で実行してきた検査を、プルリクエストのたびに実行するようにします。

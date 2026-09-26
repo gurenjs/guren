@@ -91,8 +91,11 @@
 - The reader directs an agent through RFC 0030 plans; the prose teaches decisions
   (answer, review, approve, accept a step, resolve a held step), so every chapter
   gives its checks as a short table instead of code to type
-- Every agent beat is a blockquote prompt followed by **Without an agent**
-  fallback blocks. The fallbacks follow one reference plan per plan chapter
+- Every agent beat is a prompt followed by **Without an agent** fallback
+  blocks. The prompt sits in a plain ` ```text ` fence with no attribute (so
+  the smoke never runs it, and the site gives it a Copy button), after a
+  sentence that says where to send it; a blockquote read as a citation, and
+  readers did not know it was theirs to send. Both courses follow this. The fallbacks follow one reference plan per plan chapter
   (2 and 6), and chapters 2 and 6 tell a reader with their own plan how to rejoin
 - Long fallback files sit inside `<details>`, so the page shows the decision and
   folds the code

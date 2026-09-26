@@ -35,7 +35,7 @@ createMarkdownRenderer({
 
 ## サニタイズ
 
-markdown記法だけでも`javascript:`や`data:`のURLは`href`や`src`に入り込めるため、生HTMLのエスケープだけでは不十分です。デフォルトの`sanitize: true`では、レンダリング結果は返される前に`sanitize-html`のallowlistを通過します。
+markdown記法だけでも`javascript:`や`data:`のURLは`href`や`src`に入り込めるため、生HTMLのエスケープだけでは不十分です。デフォルトの`sanitize: true`では、レンダリング結果は返される前に`sanitize-html`の許可リスト（allowlist）を通過します。
 
 - 構造タグのみ許可。`<script>`のような生HTMLはエスケープされます。黙って消えることはありません
 - `href`/`src`は`http`、`https`、`mailto`に限定。プロトコル相対URL（`//host/path`）は拒否されます
@@ -44,7 +44,7 @@ markdown記法だけでも`javascript:`や`data:`のURLは`href`や`src`に入�
 
 結果は`dangerouslySetInnerHTML`で安全に注入できます。
 
-allowlistの拡張はコールバックで行います。デフォルト値を受け取り、使用するオプションを返します:
+許可リストの拡張はコールバックで行います。デフォルト値を受け取り、使用するオプションを返します:
 
 ```ts
 createMarkdownRenderer({
@@ -115,7 +115,7 @@ const renderer = createMarkdownRenderer({
 })
 ```
 
-これはfine-grainedな`shiki/core`ハイライタを構築します。列挙した文法だけを読み込み、oniguruma WASMの代わりにJavaScript正規表現エンジンを使います。出力はデュアルテーマで、ライトパレットはインライン、ダークパレットは`--shiki-dark`カスタムプロパティに載ります。未ロード言語のフェンスは例外を投げずプレーンテキストにフォールバックします。
+これは必要な部分だけを読み込む（fine-grainedな）`shiki/core`ハイライタを構築します。列挙した文法だけを読み込み、oniguruma WASMの代わりにJavaScript正規表現エンジンを使います。出力はデュアルテーマで、ライトパレットはインライン、ダークパレットは`--shiki-dark`カスタムプロパティに載ります。未ロード言語のフェンスは例外を投げずプレーンテキストにフォールバックします。
 
 ### Cloudflare Workersでは
 

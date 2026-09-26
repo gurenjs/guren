@@ -1,18 +1,18 @@
 # 第 5 章: ユーザーとパスワード
 
-ここまではすべて匿名でした。この章でブログにユーザーを追加します。用意するのは、パスワードハッシュを持つテーブル、ハッシュの仕方を知っているモデル、セッションとそれに付いてくる CSRF 保護、そして手で組む登録・ログイン・ログアウトです。そのあとプロフィールページをテストで仕様化してエージェントに委ね、モデルに触れる前にエージェントが `guren context User` から何を受け取るのかを確認します。
+ここまでのブログには、誰が操作しているかという区別がありませんでした。この章でユーザーを追加します。用意するのは、パスワードハッシュを保存するテーブル、ハッシュ化を受け持つモデル、セッションとそれに伴う CSRF 保護、そして手で組み立てる登録・ログイン・ログアウトです。そのあとプロフィールページをテストで仕様にしてエージェントに任せ、エージェントがモデルに手を付ける前に `guren context User` から何を受け取るのかも確認します。
 
-Guren はこの一式をコマンド 1 つでインストールできます。それでも一度は自分で組みます。第 6 章でそのコマンドの出力を読んだときに、どの行が何のためにあるかが分かるようにするためです。
+この一式は Guren のコマンド 1 つでまとめてインストールできますが、ここでは一度自分で組み立てます。そうしておけば、第 6 章でそのコマンドの出力を読むときに、各行が何のためにあるのかが分かります。
 
 **この章で学ぶこと:**
 
-- セッションを有効にすると変わること: cookie、ストア、そしてすべての変更系リクエストへの CSRF 保護
-- パスワードの保存のされ方(パスワードそのものは保存しない)と、ハッシュを行う場所
-- `this.auth.attempt()`、`login()`、`logout()`、`userOrFail()` の働きと、ガードとは何か
-- 第 4 章で書いたテストが壊れる理由と、テストが CSRF トークンを用意する方法
-- `guren context User` のエンティティバンドルと、プロジェクト全体の地図との違い
+- セッションを有効にすると加わるもの: cookie、ストア、すべての変更系リクエストに対する CSRF 保護
+- パスワードをどう保存するか(パスワードそのものは保存しない)と、ハッシュ化をどこで行うか
+- `this.auth.attempt()`、`login()`、`logout()`、`userOrFail()` の働きと、ガードの役割
+- 第 4 章で書いたテストが失敗するようになる理由と、テストで CSRF トークンを用意する方法
+- `guren context User` で得られるエンティティ単位のバンドルと、プロジェクト全体の地図との違い
 
-開発サーバーが動いていなければ起動します。
+開発サーバーを起動していなければ、起動しておきます。
 
 ```bash run background
 bun run dev
@@ -20,7 +20,7 @@ bun run dev
 
 ## 1. users テーブルを本物にする
 
-雛形には名前、メール、タイムスタンプを持つ `users` テーブルが入っていました。サインインできるユーザーには、あと 2 つ足りません。パスワードハッシュの置き場所と、2 つのアカウントで共有できないメールアドレスです。`db/schema.ts` を置き換えます。
+雛形の `users` テーブルには、名前、メールアドレス、タイムスタンプの列しかありません。サインインできるようにするには、パスワードハッシュを保存する列と、アカウント間で重複できないメールアドレスの 2 つが必要です。`db/schema.ts` を次の内容に置き換えます。
 
 ```ts file=db/schema.ts
 import { sqliteTable, integer, text } from '@guren/orm/drizzle/sqlite'
@@ -42,7 +42,7 @@ export const posts = sqliteTable('posts', {
 })
 ```
 
-列名は `passwordHash` で、この名前こそが要点です。データベースはパスワードそのものを保持しません。保持するのは、遅くてソルト付きのハッシュ関数にパスワードを通した出力だけです。`rememberToken` は「ログイン状態を保持する」cookie の秘密で、ほとんどのセッションでは使わないので nullable にしてあります。
+列名を `passwordHash` にしているのには意味があります。データベースにはパスワードそのものを保存せず、ソルト付きの低速なハッシュ関数にパスワードを通した結果だけを保存します。`rememberToken` は「ログイン状態を保持する」cookie に使う秘密の値で、ほとんどのセッションでは使わないため nullable にしています。
 
 ```bash run
 bun run db:make add_passwords_to_users
@@ -52,11 +52,11 @@ bun run db:make add_passwords_to_users
 bun run db:migrate
 ```
 
-新しいマイグレーションを開いてみてください。まず列ごとに 1 つずつ、2 つの `ALTER TABLE users ADD` 文があり、そのあとでテーブルを組み直しています。新しい形のテーブルを作り、行をコピーし、古いものを落とし、名前を付け替える、という手順です。最初の `ALTER` はデフォルト値の無い `NOT NULL` 列を足しますが、SQLite がこれを受け付けるのは行の無いテーブルだけです。`users` テーブルにはまだ行が無いので、マイグレーション全体がそのまま適用されます。第 6 章では中身のあるテーブルを変更し、そこで drizzle-kit が書くのは組み直しだけです。
+生成されたマイグレーションを開いてみてください。先頭に列ごとの `ALTER TABLE users ADD` 文が 2 つあり、そのうえでテーブルを作り直しています。新しい形のテーブルを作り、行をコピーし、古いテーブルを削除してから名前を付け替える、という手順です。最初の `ALTER` はデフォルト値の無い `NOT NULL` 列を追加しますが、SQLite がこれを受け付けるのは行が 1 つも無いテーブルに限られます。`users` テーブルにはまだ行が無いので、マイグレーションは最後まで適用されます。第 6 章ではデータの入ったテーブルを変更しますが、そのとき drizzle-kit が書くのはテーブルの作り直しだけです。
 
 ## 2. ハッシュするモデル
 
-`app/Models/User.ts` を作ります。
+`app/Models/User.ts` を作成します。
 
 ```ts file=app/Models/User.ts
 import { AuthenticatableModel, defineModel } from '@guren/core'
@@ -75,15 +75,15 @@ export class User extends defineModel(users, {
 }
 ```
 
-オプションは 3 つ、それぞれ仕事はひとつです。
+指定しているオプションは 3 つで、それぞれが 1 つの役割を持っています。
 
-- **`base: AuthenticatableModel`** が、これをただの行ではなくユーザーにします。仮想フィールド `password` が足され、`User.create({ name, email, password: 'secret' })` はパスワードをハッシュして結果を `passwordHash` に保存します。この章のコントローラーはどれもハッシュ関数を呼びません。ハッシュはモデルの仕事です。
-- **`optionalOnCreate` / `requireOnCreate`** は create のペイロードの型をそれに合わせます。`password` は渡さなければならず、`passwordHash` は渡せません。
-- **`hidden`** は、ハッシュと remember トークンをシリアライズの対象から外します。認証コンテキストがページに渡すユーザーオブジェクトも対象です。第 4 章では、リソース層が `passwordHash` をブラウザに届かせないと約束しました。これは同じ扉に付ける 2 つ目の鍵です。
+- **`base: AuthenticatableModel`** を指定すると、このモデルはただの行ではなくユーザーとして扱われます。仮想フィールド `password` が追加され、`User.create({ name, email, password: 'secret' })` と書けばパスワードがハッシュ化されて `passwordHash` に保存されます。ハッシュ化はモデルが受け持つので、この章のコントローラーはどれもハッシュ関数を呼びません。
+- **`optionalOnCreate` / `requireOnCreate`** で、create に渡すペイロードの型をこれに合わせます。`password` は必須になり、`passwordHash` は渡せなくなります。
+- **`hidden`** に挙げたハッシュと remember トークンは、どのシリアライズ結果にも含まれなくなります。認証コンテキストがページに渡すユーザーオブジェクトも例外ではありません。第 4 章では、`passwordHash` がブラウザに届かないようリソース層で防ぐと説明しました。`hidden` は、同じ扉に付ける 2 つ目の鍵にあたります。
 
 ## 3. セッションと、モデルを指名するプロバイダー
 
-セッションは、リクエストが誰のものかをサーバーが覚えておくための仕組みです。id を持つ cookie と、その id が指す中身を持つストアからできています。`createApp` が `auth` オプションを受け取ると、Guren はセッションミドルウェアと、それに伴う CSRF 保護をマウントします。認証システムはさらに、どのモデルがユーザーを保持し、どの列を照合するかを知る必要があります。それを教えるのがアプリ側のプロバイダーです。`app/Providers/AuthProvider.ts` を作ります。
+セッションは、どのリクエストが誰から来たものかをサーバーが覚えておく仕組みで、id を入れた cookie と、その id に対応するデータを持つストアからなります。`createApp` に `auth` オプションを渡すと、Guren はセッションミドルウェアと、それに伴う CSRF 保護をマウントします。このほか認証の仕組みには、どのモデルがユーザーを表し、どの列で照合するかを教える必要があります。その役目を持つのが、アプリ内に置くプロバイダーです。`app/Providers/AuthProvider.ts` を作成します。
 
 ```ts file=app/Providers/AuthProvider.ts
 import { ServiceProvider, shareInertiaProps, AUTH_CONTEXT_KEY } from '@guren/core'
@@ -110,9 +110,9 @@ export default class AuthProvider extends ServiceProvider {
 }
 ```
 
-`useModel` は `web` という名前の**ガード**を登録します。ガードは、リクエストを渡されればセッションを読んで「これは誰か」に答え、資格情報を渡されればハッシュを比較して「これは正しいか」に答えます。`shareInertiaProps` はすべてのページの props に `auth.user` を足すので、どのコンポーネントからでも誰かがサインインしているかを確かめられます。ゲストなら `null` で、`hidden` のおかげでハッシュが混ざることはありません。
+`useModel` は `web` という名前の**ガード**を登録します。ガードは、リクエストを受け取るとセッションを読んで相手が誰かを判定し、資格情報を受け取るとハッシュを比較して正しいかどうかを判定します。`shareInertiaProps` はすべてのページの props に `auth.user` を追加するので、どのコンポーネントからでもサインイン中のユーザーがいるかを確認できます。ゲストの場合は `null` になり、`hidden` を指定しているのでハッシュが含まれることはありません。
 
-では有効にします。`src/app.ts` を置き換えます。
+これを有効にするため、`src/app.ts` を次の内容に置き換えます。
 
 ```ts file=src/app.ts
 // Every zod schema built after this import parses through a compiled fast
@@ -153,7 +153,7 @@ const app = createApp({
 export default app
 ```
 
-変わったのは、`AuthProvider` の import、`providers` の `AuthProvider`、それに `auth: {}` とその上のコメントです。テストを走らせます。
+変更点は、`AuthProvider` の import、`providers` への `AuthProvider` の追加、そして `auth: {}` とその上のコメントです。テストを実行します。
 
 ```bash run expect-fail
 bun test
@@ -161,11 +161,11 @@ bun test
 
 ## 4. セッションが壊したもの、それが正しい理由
 
-フォームを送信するテストがすべて 403「CSRF token mismatch」で赤になりました。投稿まわりは何も変えていません。変わったのはアプリがセッションを持つようになったことで、セッションを持つアプリはそれを守る必要があります。
+フォームを送信するテストが、すべて 403「CSRF token mismatch」で失敗するようになりました。投稿まわりのコードは何も変えていません。アプリがセッションを持つようになり、そのセッションを守る必要が出てきたためです。
 
-クロスサイトリクエストフォージェリは、他のサイトのページがブラウザにこのアプリへフォームを送らせる攻撃です。ブラウザはセッション cookie を付けて送るので、アプリ側では利用者が意図したリクエストと区別が付きません。防御は、アプリが cookie に入れたトークンを、すべての `POST`、`PUT`、`PATCH`、`DELETE` でヘッダーかフォームフィールドとして返させることです。他のサイトはその cookie を読めないので、トークンを用意できません。Inertia のフォームはこれを自動で行います。`form.post()` が `XSRF-TOKEN` cookie を `X-XSRF-TOKEN` ヘッダーに写すので、ブラウザ側では何も起きていないように見えていたわけです。
+クロスサイトリクエストフォージェリ(CSRF)は、別のサイトのページから、利用者のブラウザにこのアプリへのフォームを送信させる攻撃です。ブラウザはセッション cookie を付けて送信するので、アプリ側では利用者が意図したリクエストと見分けが付きません。そこでアプリは cookie にトークンを入れておき、`POST`、`PUT`、`PATCH`、`DELETE` のたびに、そのトークンをヘッダーかフォームフィールドで送り返すよう求めます。別のサイトからはこの cookie を読めないので、トークンを用意できません。Inertia のフォームはこの処理を自動で行います。`form.post()` が `XSRF-TOKEN` cookie の値を `X-XSRF-TOKEN` ヘッダーに写すので、ブラウザで操作している分には何も問題が起きませんでした。
 
-テストはブラウザではないので、こちらは気づきます。`TestApp` にはそのための `withCsrf()` があります。`GET` を 1 回行い、渡された cookie とトークンを保持し、以降のすべてのリクエストにそれらを付けて送るクライアントを返します。`tests/PostController.test.ts` を置き換えます。変更点は、変更系リクエストが `csrf` を経由することだけです。
+一方、テストはブラウザではないので、この変化で失敗します。`TestApp` には、この場面のための `withCsrf()` があります。`withCsrf()` は `GET` を 1 回送って受け取った cookie とトークンを保持し、以降のすべてのリクエストにそれらを付けて送るクライアントを返します。`tests/PostController.test.ts` を次の内容に置き換えます。変更点は、変更系のリクエストを `csrf` 経由で送るようにしたことだけです。
 
 ```ts file=tests/PostController.test.ts
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test'
@@ -286,7 +286,7 @@ describe('PostController', () => {
 bun test
 ```
 
-再び緑です。ここをチェックポイントとしてコミットしておきましょう。これ自体がひとつのまとまった変更です。
+テストがまた通るようになりました。これだけでも 1 つのまとまった変更なので、ここで一度コミットしておきます。
 
 ```bash run
 bunx guren gate
@@ -299,7 +299,7 @@ git commit -m "feat: add the user model, sessions, and CSRF protection"
 
 ## 5. 登録とログインを仕様化する
 
-コントローラーは 2 つです。作る前に仕様化します。まずは登録から。
+作るコントローラーは 2 つで、どちらも先にテストで仕様にします。まずは登録です。
 
 ```ts file=tests/RegisterController.test.ts
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test'
@@ -350,7 +350,7 @@ describe('RegisterController', () => {
 })
 ```
 
-そしてログインとログアウトです。
+続いてログインとログアウトです。
 
 ```ts file=tests/LoginController.test.ts
 import { beforeAll, beforeEach, describe, it } from 'bun:test'
@@ -396,17 +396,17 @@ describe('LoginController', () => {
 })
 ```
 
-登録のテストが何を検査しているかに注目してください。パスワードが保存されたことではなく、保存され*なかった*こと、そして代わりに長い何かが保存されたことです。この章でテストに守ってほしい性質をひとつ挙げるなら、これです。最後のテストの `actingAs(user)` はサインイン済みセッションの代わりで、第 6 章と第 7 章でよく使います。
+登録のテストで検査している内容に注目してください。確かめているのは、パスワードがそのままでは保存され*なかった*ことと、代わりに長い文字列が保存されたことです。この章でテストに守らせたい性質を 1 つだけ選ぶなら、これになります。最後のテストの `actingAs(user)` はサインイン済みのセッションの代わりになるもので、第 6 章と第 7 章でよく使います。
 
 ```bash run expect-fail
 bun test
 ```
 
-赤が 7 つ、すべて 404 です。
+7 つのテストが失敗し、どれも 404 です。
 
 ## 6. 登録とログインを、手で
 
-まずバリデーターです。メールは検査と保存の前に小文字化されるので、`Ada@Example.com` と `ada@example.com` はひとつのアカウントになります。
+まずバリデーターを書きます。メールアドレスは検査と保存の前に小文字に変換するので、`Ada@Example.com` と `ada@example.com` は同じアカウントとして扱われます。
 
 ```ts file=app/Http/Validators/RegisterValidator.ts
 import { z } from 'zod'
@@ -437,7 +437,7 @@ export const LoginSchema = z.object({
 export type LoginInput = z.infer<typeof LoginSchema>
 ```
 
-登録コントローラーです。目を引くのは書かれていない部分で、ここにハッシュ処理はありません。モデルが行うからです。
+次は登録コントローラーです。ハッシュ化はモデルが行うので、ここにはハッシュ化の処理がありません。
 
 ```ts file=app/Http/Controllers/Auth/RegisterController.ts
 import { Controller } from '@guren/core'
@@ -460,9 +460,9 @@ export default class RegisterController extends Controller {
 }
 ```
 
-`this.auth.login(user)` はユーザーの id をセッションに書き、セッション id を回転させます。サインイン前に存在したセッションをサインイン後に再利用できないようにするためです。このリクエスト以降、その cookie を持つどのリクエストでも `this.auth.user()` は Ada を返します。
+`this.auth.login(user)` はユーザーの id をセッションに書き込み、セッション id を新しいものに入れ替えます。サインイン前から存在したセッションを、サインイン後に使い回されないようにするためです。以降は、この cookie を持つリクエストであれば `this.auth.user()` が Ada を返します。
 
-ログインコントローラーです。
+続いてログインコントローラーです。
 
 ```ts file=app/Http/Controllers/Auth/LoginController.ts
 import { Controller, ValidationException } from '@guren/core'
@@ -493,9 +493,9 @@ export default class LoginController extends Controller {
 }
 ```
 
-`attempt()` はメールでユーザーを探し、保存されたハッシュと照らしてパスワードを検証し、成功すれば `login()` と同じことをします。失敗したときは、メールが存在したかどうかに関わらず同じ時間をかけるので、攻撃者は所要時間から両者を区別できません。失敗は「パスワードが違う」とも「そんなユーザーはいない」とも言わず、ひとつのメッセージのバリデーションエラーとして報告されます。理由は同じです。`logout()` はユーザーを忘れ、`invalidate()` はセッションそのものを捨てます。
+`attempt()` はメールアドレスでユーザーを探し、保存されているハッシュと照合してパスワードを検証し、成功すれば `login()` と同じ処理を行います。失敗した場合は、メールアドレスが登録済みかどうかに関わらず同じ時間をかけるので、攻撃者は応答時間から両者を見分けられません。同じ理由で、失敗は「パスワードが違う」とも「そのユーザーはいない」とも伝えず、メッセージが 1 つだけのバリデーションエラーとして返します。`logout()` はサインイン中のユーザーを忘れ、`invalidate()` はセッションそのものを破棄します。
 
-ページは 2 つです。フォームが拒否されたときに Guren が埋める `errors` prop を使います。「Invalid credentials.」を運ぶのがこの prop です。
+ページは 2 つ用意します。どちらも、フォームが拒否されたときに Guren が値を入れる `errors` prop を使います。「Invalid credentials.」もこの prop で渡されます。
 
 ```tsx file=resources/js/pages/auth/Register.tsx
 import { Head, Link, useForm } from '@inertiajs/react'
@@ -629,7 +629,7 @@ export default function Login({ errors = {} }: Props) {
 }
 ```
 
-そしてルートです。`/logout` は意図的に `POST` です。状態を変える `GET` は、誰かにクリックさせられるリンクになってしまいます。
+最後にルートです。`/logout` はあえて `POST` にしています。状態を変える `GET` があると、第三者がそれをリンクにして利用者にクリックさせられるからです。
 
 ```ts file=routes/web.ts
 import { Router } from '@guren/core'
@@ -680,7 +680,7 @@ bun test
 
 ![サインインページ。「Sign in」の見出しが付いたカードに Email と Password の入力欄、赤い Sign in ボタン、そして「No account yet? Sign up」のリンク。](../../images/tutorial-sign-in.png)
 
-緑です。**チェックポイント:** [http://localhost:3333/register](http://localhost:3333/register) を開いてアカウントを作ると、サインイン済みの状態でホームページに着きます。まだそれを示す表示は何もありませんが。`/login` で間違ったパスワードを試すと「Invalid credentials.」です。ここで、自分では組んでいないものが 2 つ動いています。セッション cookie と、フォームが送った CSRF トークンです。どちらも `auth: {}` に付いてきました。
+テストが通りました。**チェックポイント:** [http://localhost:3333/register](http://localhost:3333/register) を開いてアカウントを作ると、サインインした状態でホームページに移動します。ただし、画面にはまだそれを示す表示がありません。`/login` で間違ったパスワードを入力すると「Invalid credentials.」と表示されます。このとき、自分では組み立てていない仕組みが 2 つ動いています。セッション cookie と、フォームが送信した CSRF トークンで、どちらも `auth: {}` を指定しただけで有効になったものです。
 
 ```bash run
 bunx guren gate
@@ -693,7 +693,7 @@ git commit -m "feat: add registration, login, and logout"
 
 ## 7. プロフィールページを仕様化する
 
-サインイン済みユーザーが見るものと、出口です。仕様は次のとおりです。
+サインインしたユーザーが見るページと、そこからログアウトする手段を用意します。仕様は次のとおりです。
 
 ```ts file=tests/ProfileController.test.ts
 import { beforeAll, beforeEach, describe, it } from 'bun:test'
@@ -730,23 +730,25 @@ describe('ProfileController', () => {
 bun test
 ```
 
-赤が 2 つです。2 つ目のテストは、`/profile` を求めるゲストにはリダイレクトではなく 401 を返す、という決定を固定しています。第 6 章では保護領域全体でログインページへのリダイレクトに変えますが、ページ 1 枚ならコントローラーが自分で拒否できます。
+2 つのテストが失敗します。2 つ目のテストは、ゲストが `/profile` を開いたら 401 を返す(リダイレクトはしない)という決定を固定するものです。第 6 章では保護する範囲全体をログインページへのリダイレクトに切り替えますが、ページが 1 枚だけならコントローラー自身で拒否できます。
 
 ## 8. 委ねる
 
-エージェントに頼みます。
+エージェントに次のプロンプトを送ります。
 
-> Add a `/profile` page named `profile` for the signed-in user. `ProfileController.show` gets the user with `this.auth.userOrFail()`, which answers 401 to a guest, and sends the name and email to `resources/js/pages/profile/Show.tsx` through a `UserResource` (id, name, email; never the password hash). The page shows both and has a "Log out" button that posts to `/logout` through an Inertia `Link` with `method="post"`. `tests/ProfileController.test.ts` describes it; make it pass.
+```text
+Add a `/profile` page named `profile` for the signed-in user. `ProfileController.show` gets the user with `this.auth.userOrFail()`, which answers 401 to a guest, and sends the name and email to `resources/js/pages/profile/Show.tsx` through a `UserResource` (id, name, email; never the password hash). The page shows both and has a "Log out" button that posts to `/logout` through an Inertia `Link` with `method="post"`. `tests/ProfileController.test.ts` describes it; make it pass.
+```
 
-この章のハーネス要素は **`guren context User`** です。第 1 章では、セッション開始時にエージェントが受け取るプロジェクト全体の地図を見ました。ひとつのエンティティに触れる前には、地図の代わりにそのエンティティのバンドルを取り寄せます。
+この章で紹介するハーネスの仕組みは **`guren context User`** です。第 1 章では、エージェントがセッションの開始時に受け取るプロジェクト全体の地図を見ました。特定のエンティティに手を付ける前には、全体の地図の代わりに、そのエンティティに絞ったバンドルを取得できます。
 
 ```bash run
 bunx guren context User
 ```
 
-モデル、列、`hidden` の一覧、アクションがそのモデルを使うルート、そのアクションが描画するページ、それを統べる docs が 1 画面に収まります。今の時点で該当するルートは `POST /register` だけです。`RegisterController.store` が `User.create()` を呼んでいるためです。ログインとログアウトは `this.auth` 経由でユーザーに触れ、`User` を名指ししないので一覧に出ません。`ProfileController.show` ができると、`userOrFail<UserRecord>()` によって `/profile` とそのページもバンドルに加わります。雛形の rule はエンティティに手を付ける前にこれを実行するようエージェントへ指示しているので、トランスクリプトの中で探してみてください。バンドルを読んだエージェントは、リソースを書く前から `passwordHash` が hidden であること、`User` が `AuthenticatableModel` であることを知っています。
+モデル、列、`hidden` の一覧、このモデルを使うアクションのルート、そのアクションが描画するページ、このモデルについて定めた docs が 1 画面にまとまって表示されます。現時点で該当するルートは `POST /register` だけで、これは `RegisterController.store` が `User.create()` を呼んでいるためです。ログインとログアウトは `this.auth` を通してユーザーを扱い、`User` を直接参照しないので一覧には出てきません。`ProfileController.show` ができると、`userOrFail<UserRecord>()` を通じて `/profile` とそのページもバンドルに加わります。雛形のルールには、エンティティに関わる作業の前にこのコマンドを実行するよう書かれているので、エージェントのトランスクリプトで探してみてください。バンドルを読んだエージェントは、リソースを書く前の時点で、`passwordHash` が hidden であることも `User` が `AuthenticatableModel` であることも把握しています。
 
-**手元にエージェントが無い場合は、** 4 ファイルです。
+**手元にエージェントが無い場合は、** 次の 4 ファイルを書きます。
 
 ```ts file=app/Http/Resources/UserResource.ts fallback
 import { Resource } from '@guren/core'
@@ -866,14 +868,14 @@ bun run codegen
 bun test
 ```
 
-rubric は次のとおりです。
+確認項目は次のとおりです。
 
-- コントローラーは `this.auth.userOrFail()` を使っている。`this.auth.user()` と手動の null チェックではない。`guren audit` は前者を認証チェックとして認識し、後者は認識しない。
-- ページは `UserResource` を受け取り、リソースに `passwordHash` は無い。すでに 2 つの層がそれを隠しているので、rubric で問うのは、エージェントがその層を迂回しなかったかどうか。
-- 「Log out」は `POST` で、CSRF トークンが一緒に運ばれるよう Inertia の `Link` 経由で送られる。素の `<form method="post">` なら 403 で拒否される。
-- 2 つのテストが緑で、それ以前のすべてのテストも緑のまま。
+- コントローラーが `this.auth.userOrFail()` を使っている(`this.auth.user()` と手動の null チェックではない)。`guren audit` は前者を認証チェックとして認識するが、後者は認識しない。
+- ページが `UserResource` を受け取り、そのリソースに `passwordHash` が含まれていない。ハッシュはすでに 2 つの層で隠されているので、ここで確かめるのは、エージェントがそれらの層を迂回していないかどうか。
+- 「Log out」は `POST` で、CSRF トークンが一緒に送られるよう Inertia の `Link` から送信している。素の `<form method="post">` では 403 で拒否される。
+- 2 つのテストが通り、それ以前のテストもすべて通ったままになっている。
 
-**チェックポイント:** サインインした状態で [http://localhost:3333/profile](http://localhost:3333/profile) を開き、ログアウトします。`/profile` をリロードすると 401 です。
+**チェックポイント:** サインインした状態で [http://localhost:3333/profile](http://localhost:3333/profile) を開き、ログアウトします。そのあと `/profile` を再読み込みすると 401 になります。
 
 ```bash run
 bunx guren gate
@@ -883,33 +885,33 @@ bunx guren gate
 bunx guren audit
 ```
 
-audit は以前より静かです。`POST /register`、`/login`、`/logout` はゲスト向けのフローとして認識され、認証は要求されません。投稿ルートの警告 3 件は残っていて、これは第 6 章で消します。
+audit の警告は以前より減っています。`POST /register`、`/login`、`/logout` はゲスト向けのフローとして認識され、認証を求められません。投稿ルートの警告 3 件はまだ残っていますが、これは第 6 章で解消します。
 
 ```bash run
 git add -A
 git commit -m "feat: add the profile page"
 ```
 
-## いまいる場所
+## ここまでの状態
 
-- ハッシュと一意なメールを持つ `users` テーブル。テーブルの組み直しでマイグレーション済み。
-- 作成時にハッシュし、出ていくときにハッシュを隠すモデル。
-- インメモリストアのセッション、すべての変更系リクエストへの CSRF 保護、トークンの用意の仕方を知っているテスト。
-- 手で組んだ登録・ログイン・ログアウトと、重要な性質ひとつを固定するテスト。
-- 自分で仕様化し、エージェントが作ったプロフィールページ。
+- `users` テーブルにハッシュの列と一意なメールアドレスの列があり、テーブルを作り直す形でマイグレーションしました。
+- 作成時にパスワードをハッシュ化し、外に出すときはハッシュを隠すモデルがあります。
+- インメモリストアのセッションと、すべての変更系リクエストに対する CSRF 保護が有効で、テストでも CSRF トークンを用意できるようになっています。
+- 登録・ログイン・ログアウトを手で組み立て、最も重要な性質をテストで固定しました。
+- プロフィールページを自分で仕様にし、エージェントが実装しました。
 
 ## よくあるつまずき
 
-- **`auth: {}` を足したらすべてのフォームのテストが 403 で失敗する。** それが第 4 節の話です。変更系リクエストには CSRF トークンが要るようになりました。`withCsrf()` で用意し、返されたクライアント経由で送ってください。
-- **`withCsrf()` が「did not set an XSRF-TOKEN cookie」で throw する。** `createApp` に `auth` が無いか、用意のための GET パスがアプリで配信されていません。ページを返すパスを渡してください。
-- **同じメールで 2 回登録すると 500 になる。** 一意制約が仕事をしていて、その上で先に検査するものが無い状態です。第 6 章でチェックを足します。それまではデータベースエラーですが、アカウントが 2 つできるよりはましです。
-- **`this.auth` が「requires the auth middleware」で throw する。** `AuthProvider` が `providers` に無いか、`auth: {}` が抜けています。両方必要です。片方がセッションをマウントし、もう片方がモデルを指名します。
-- **サインインしていたのに、いつのまにかログアウトしている。** `bun run dev` はサーバーを `bun --hot` で動かしますが、`auth: {}` が用意するセッションはメモリ上にあるので、ホットリロードのたびに消えます。サインインし直してください。第 14 章でセッションをデータベースに移すまでは、これが正常な挙動です。
-- **ログインのテストで `actingAs()` が常に成功する。** `attempt()` を含む認証コンテキスト全体をスタブに置き換えるからです。ユーザー*として振る舞う*ために使うものなので、サインインそのもののテストには使わないでください。
+- **`auth: {}` を足したらすべてのフォームのテストが 403 で失敗する。** 第 4 節で説明したとおり、変更系のリクエストには CSRF トークンが必要になりました。`withCsrf()` でトークンを用意し、返されたクライアントからリクエストを送ってください。
+- **`withCsrf()` が「did not set an XSRF-TOKEN cookie」で例外を投げる。** `createApp` に `auth` が指定されていないか、トークンの用意に使う GET のパスにアプリが応答していません。ページを返すパスを渡してください。
+- **同じメールアドレスで 2 回登録すると 500 になる。** 一意制約は働いていますが、その手前で重複を確かめる処理がありません。第 6 章でそのチェックを追加します。それまではデータベースのエラーになりますが、同じメールアドレスのアカウントが 2 つできるよりはましです。
+- **`this.auth` が「requires the auth middleware」で例外を投げる。** `providers` に `AuthProvider` が無いか、`auth: {}` が抜けています。セッションをマウントするのが `auth: {}`、モデルを指定するのが `AuthProvider` なので、両方とも必要です。
+- **サインインしていたのに、いつのまにかログアウトしている。** `bun run dev` はサーバーを `bun --hot` で動かしており、`auth: {}` で有効になるセッションはメモリ上にあるので、ホットリロードのたびに消えます。サインインし直してください。第 14 章でセッションをデータベースに移すまでは、これが通常の動作です。
+- **ログインのテストで `actingAs()` が常に成功する。** `actingAs()` は `attempt()` を含む認証コンテキスト全体をスタブに置き換えます。ユーザー*として操作する*ためのものなので、サインイン自体のテストには使わないでください。
 
 ## 演習
 
-1. パスワードのハッシュ化は意図的に遅くしてあります。時間を測ってみてください。
+1. パスワードのハッシュ化は、わざと遅くしてあります。かかる時間を計ってみてください。
 
 ```ts
 import { Hash } from '@guren/core'
@@ -919,9 +921,9 @@ await Hash.make('correct horse battery')
 console.log(performance.now() - started, 'ms')
 ```
 
-   そのうえで、1 回の試行にこれだけかかるのに、なぜログインのルートに第 14 章のレート制限が必要なのかを答えてください。
-2. `actingAs()` はログインの流れを飛ばすので、流れ自体はテストできません。`/login` に間違ったパスワードを送り、訪問者が見るメッセージを検証するテストを書いてください。そのメッセージはどこから来ていますか。そしてなぜ、パスワード違いと未登録のメールアドレスで同じ文言なのですか。
+      そのうえで、1 回の試行にこれだけ時間がかかるにもかかわらず、第 14 章で追加するレート制限がログインのルートに必要な理由を説明してください。
+2. `actingAs()` はログインの処理を飛ばすので、その処理自体はテストできません。`/login` に間違ったパスワードを送り、訪問者に表示されるメッセージを検証するテストを書いてください。そのメッセージはどこから来ているでしょうか。また、パスワードの間違いと未登録のメールアドレスで同じ文言になっているのはなぜでしょうか。
 
 ## 次へ
 
-[第 6 章: ルートを保護する](./06-protecting-routes.md) では、`requireAuthenticated` で投稿の変更をログインの壁の内側に置き、実データを壊さないマイグレーションですべての投稿に著者を与え、あなたが組んだものと `bunx guren add auth` が生成するものを比較します。
+[第 6 章: ルートを保護する](./06-protecting-routes.md) では、`requireAuthenticated` を使って投稿の変更をサインインしたユーザーだけに許し、既存のデータを残したままマイグレーションしてすべての投稿に著者を設定します。最後に、自分で組み立てたものと `bunx guren add auth` が生成するものを比べます。

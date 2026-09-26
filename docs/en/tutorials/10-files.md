@@ -883,7 +883,9 @@ Two red: `images` is not a collection `Post` declares.
 
 Ask your agent:
 
-> Add a gallery to posts: a `hasManyAttached` collection named `images` (images only) on `Post`. The new-post form accepts several files under `images`, `store` attaches each one, the post page shows them, and `DELETE /posts/:id/images/:attachment`, named `posts.images.destroy`, removes one image for the post's author. Load the gallery with `withAttachments` and expose it through `PostResource`. `tests/PostAttachments.test.ts` describes it; make it pass.
+```text
+Add a gallery to posts: a `hasManyAttached` collection named `images` (images only) on `Post`. The new-post form accepts several files under `images`, `store` attaches each one, the post page shows them, and `DELETE /posts/:id/images/:attachment`, named `posts.images.destroy`, removes one image for the post's author. Load the gallery with `withAttachments` and expose it through `PostResource`. `tests/PostAttachments.test.ts` describes it; make it pass.
+```
 
 This is the same shape as the cover, one level up: `this.files('images')` instead of `this.file('cover')`, an array instead of a nullable, and `detach` with an attachment id instead of a replacing `attach`. The interesting part of the rubric is the delete route: it must find the attachment by the id in the URL *and* only within this post's collection, so a valid attachment id from someone else's post is refused. `detach(post.id, 'images', attachmentId)` does exactly that; a hand-rolled delete by attachment id alone would not.
 

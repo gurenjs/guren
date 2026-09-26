@@ -26,9 +26,13 @@ For this plan:
 
 ## 2. Hand the review to the agent
 
-> Apply my review of docs/plans/meetups/plan.json with plan:revise. Add a behaviour for each acceptance warning on the page: unauthenticated for meetups.create and meetups.update, forbidden for meetups.edit, validation for meetups.update. Also add a success behaviour for the organizer opening meetups.edit. Keep the meetups.store warning, since any signed-in user may organize a meetup. Here is the page's feedback:
->
-> *(paste the copied feedback here)*
+Send this prompt to the Claude Code session:
+
+```text
+Apply my review of docs/plans/meetups/plan.json with plan:revise. Add a behaviour for each acceptance warning on the page: unauthenticated for meetups.create and meetups.update, forbidden for meetups.edit, validation for meetups.update. Also add a success behaviour for the organizer opening meetups.edit. Keep the meetups.store warning, since any signed-in user may organize a meetup. Here is the page's feedback:
+
+<paste the copied feedback here>
+```
 
 The `plan-write` skill edits a copy of the plan outside the repository, then runs `bunx guren plan:revise` with the copy and your feedback. `plan:revise` refuses the copy if it still holds a question you answered, and it records each change with its reason in `docs/plans/meetups/revisions/0001.json`.
 

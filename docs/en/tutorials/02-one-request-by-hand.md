@@ -213,7 +213,9 @@ One thing to know before you hand it over. In the test runner, a page is not ren
 
 Ask your agent, inside `guren-blog`:
 
-> Add a `/contact` page the way `/about` was built: a `ContactController` with an `index` action that sends `title: 'Contact'` and `email: 'hello@guren-blog.test'` as props, a page at `resources/js/pages/contact/Index.tsx` that shows the title as a heading and the email as a mailto link, and a route named `contact` in `routes/web.ts`. `tests/ContactController.test.ts` already describes it; make it pass.
+```text
+Add a `/contact` page the way `/about` was built: a `ContactController` with an `index` action that sends `title: 'Contact'` and `email: 'hello@guren-blog.test'` as props, a page at `resources/js/pages/contact/Index.tsx` that shows the title as a heading and the email as a mailto link, and a route named `contact` in `routes/web.ts`. `tests/ContactController.test.ts` already describes it; make it pass.
+```
 
 While it works, watch for the harness lever of this chapter. The agent's context does not hold every rule at once. `.claude/rules/routes-codegen.md` starts like this:
 

@@ -12,7 +12,9 @@ A plan is the design of a change, written as JSON before any code exists. In thi
 
 In the Claude Code session from chapter 1, send this:
 
-> Plan this feature with the plan-write skill: signed-in users organize meetups, each with a title, a start time and a capacity, and they can edit the meetups they organize. Nobody registers for a meetup yet; that comes in a later plan.
+```text
+Plan this feature with the plan-write skill: signed-in users organize meetups, each with a title, a start time and a capacity, and they can edit the meetups they organize. Nobody registers for a meetup yet; that comes in a later plan.
+```
 
 The request says **what** and **who**. It leaves out routes, tables and pages on purpose: those are the agent's first draft, and the review page is where you correct them.
 

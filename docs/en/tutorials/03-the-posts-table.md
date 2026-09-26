@@ -361,7 +361,9 @@ Two red, three green. Notice the order problem the second new test is about to c
 
 Ask your agent:
 
-> Add the create form for posts. `GET /posts/create`, named `posts.create`, renders `resources/js/pages/posts/New.tsx` with a title input and a body textarea that submit to `POST /posts`, named `posts.store`. The `store` action validates `title` and `body` as non-empty strings with zod, creates the post, and redirects to its page. Register `/posts/create` before `/posts/:id`. `tests/PostController.test.ts` describes the behaviour; make it pass.
+```text
+Add the create form for posts. `GET /posts/create`, named `posts.create`, renders `resources/js/pages/posts/New.tsx` with a title input and a body textarea that submit to `POST /posts`, named `posts.store`. The `store` action validates `title` and `body` as non-empty strings with zod, creates the post, and redirects to its page. Register `/posts/create` before `/posts/:id`. `tests/PostController.test.ts` describes the behaviour; make it pass.
+```
 
 This chapter's harness lever is the **`scaffold` skill** in `.claude/skills/scaffold/`. It tells the agent which `bunx guren make:*` generators exist and when to reach for them instead of typing a file from memory: `make:view posts/New` for the page skeleton, `make:validator Post` for a Zod schema file. Watch whether your agent uses one. Either outcome is acceptable here, but a generator's output is the framework's idiom, verified, and an agent that reaches for it has less room to be wrong.
 

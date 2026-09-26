@@ -575,7 +575,9 @@ Three red, all 404s: neither route exists. Typecheck would refuse the file as we
 
 Read the prompt before you send it. It says nothing about who may publish:
 
-> Add publishing to posts. Give the `posts` table a nullable `publishedAt` text column with a new migration. `POST /posts/:id/publish`, named `posts.publish`, sets it to the current time; `POST /posts/:id/unpublish`, named `posts.unpublish`, clears it; both redirect back to the post. The post page shows "Draft" or "Published" with the date, and a button for whichever action applies. Add `publishedAt` to `PostResource`. `tests/PostController.test.ts` describes it; make it pass.
+```text
+Add publishing to posts. Give the `posts` table a nullable `publishedAt` text column with a new migration. `POST /posts/:id/publish`, named `posts.publish`, sets it to the current time; `POST /posts/:id/unpublish`, named `posts.unpublish`, clears it; both redirect back to the post. The post page shows "Draft" or "Published" with the date, and a button for whichever action applies. Add `publishedAt` to `PostResource`. `tests/PostController.test.ts` describes it; make it pass.
+```
 
 Then watch which of these happens:
 
@@ -903,7 +905,9 @@ The rubric, and this time the first line is the whole point:
 
 This chapter's harness lever is the other subagent, **`test-writer`** in `.claude/agents/test-writer.md`. Now that the feature exists, try it:
 
-> Use the test-writer subagent to add tests for publishing and unpublishing posts.
+```text
+Use the test-writer subagent to add tests for publishing and unpublishing posts.
+```
 
 Compare what it writes with section 4. It will cover more cases than you did, and its tests will be good tests. But read the ones about authorization, if there are any: a test-writer derives tests from the code in front of it, so if the code had shipped without the `authorize` call, its tests would have documented that anyone can publish, and passed. It widens coverage of what exists. It cannot say what should exist. That is beat 2, and it stays yours.
 

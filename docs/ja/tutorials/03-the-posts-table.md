@@ -1,14 +1,14 @@
 # 第 3 章: posts テーブル
 
-ブログには投稿が必要で、投稿にはその置き場所が必要です。この章では最初のテーブルを定義し、マイグレーションを生成して適用し、テーブルを読むモデルを書き、投稿を表示する 2 つのページを作ります。そのあと作成フォームをテストで仕様化してエージェントに委ね、`scaffold` スキルがエージェントを手書きではなくジェネレーターへ向かわせる動きを確認します。
+ブログには投稿が必要で、投稿にはそれを保存する場所が必要です。この章では最初のテーブルを定義し、マイグレーションを生成して適用したうえで、テーブルを読むモデルと、投稿を表示する 2 つのページを作ります。そのあと作成フォームをテストで仕様化してエージェントに任せ、`scaffold` スキルのおかげでエージェントがファイルを手で書かずにジェネレーターを使う流れを確認します。
 
 **この章で学ぶこと:**
 
-- テーブルは `db/schema.ts` に一度だけ宣言され、マイグレーションもモデルの型もそこから導出されること
-- `bun run db:make` と `bun run db:migrate` の役割と、テスト用データベースが用意される仕組み
-- モデルがテーブルの上に足すもの: `create`、`all`、`findOrFail`、そして `fillable` によるマスアサインメント保護
-- ルートモデルバインディング: ルートの `bind: { id: Post }`、コントローラーの `this.model(Post)`、そして自分では書かない 404
-- 本物のデータベースに対してコントローラーをテストし、テストごとにリセットする方法
+- テーブルは `db/schema.ts` で一度だけ宣言し、マイグレーションもモデルの型もそこから導き出されること
+- `bun run db:make` と `bun run db:migrate` の役割と、テスト用データベースがどう用意されるか
+- モデルがテーブルに加えるもの: `create`、`all`、`findOrFail`、`fillable` によるマスアサインメント対策
+- ルートモデルバインディング: ルートの `bind: { id: Post }`、コントローラーの `this.model(Post)`、自分で書かなくても返る 404
+- 実際のデータベースに対してコントローラーをテストし、テストごとにリセットする方法
 
 開発サーバーが動いていなければ起動します。
 
@@ -18,7 +18,7 @@ bun run dev
 
 ## 1. テーブル
 
-投稿の形に関するすべては `db/schema.ts` に一度だけ書きます。雛形にはすでに `users` テーブルがあります(第 5 章で使います)。その下に `posts` を足します。
+投稿の形に関することは、すべて `db/schema.ts` に一度だけ書きます。雛形にはすでに `users` テーブルがあります(第 5 章で使います)。その下に `posts` を追加します。
 
 ```ts file=db/schema.ts
 import { sqliteTable, integer, text } from '@guren/orm/drizzle/sqlite'
@@ -38,25 +38,25 @@ export const posts = sqliteTable('posts', {
 })
 ```
 
-列は 4 つです。自動採番の id、タイトル、本文、そして自動で埋まる作成時刻。`notNull()` は単なるヒントではなく、データベース側の制約です。アプリケーションコードが何をしようと、タイトルの無い行は SQLite が拒否します。
+列は 4 つで、自動採番の id、タイトル、本文、自動で入る作成日時です。`notNull()` はデータベース側の制約として働きます。単なる目印ではないので、アプリケーションのコードがどうであれ、タイトルの無い行は SQLite が受け付けません。
 
-スキーマは TypeScript ですが、データベースは TypeScript を読みません。読むのは SQL で、その SQL は生成します。
+スキーマは TypeScript で書きますが、データベースは TypeScript を読めません。データベースが読むのは SQL で、その SQL は次のコマンドで生成します。
 
 ```bash run
 bun run db:make create_posts_table
 ```
 
-`db:make` は `db/schema.ts` を `db/migrations/` にある既存のマイグレーションすべてと突き合わせ、差を埋める SQL を書き出します。これは最初のマイグレーションなので、両方のテーブルを作ります。`db/migrations/` 配下にできた新しいフォルダを開いてみてください。中身は読みやすい `migration.sql` ですが、これを手で編集することはありません。適用しましょう。
+`db:make` は、`db/schema.ts` と `db/migrations/` にある既存のマイグレーションをすべて突き合わせ、差分を埋める SQL を書き出します。今回は最初のマイグレーションなので、両方のテーブルを作る SQL になります。`db/migrations/` の下にできた新しいフォルダを開いてみてください。中には読みやすい `migration.sql` が入っていますが、このファイルを手で編集することはありません。マイグレーションを適用します。
 
 ```bash run
 bun run db:migrate
 ```
 
-いま実行されたのは、開発用データベース `./data/guren.db` に対してです。テストは別のファイル `./data/guren.test.db` を使います。Guren はデータベースを最初に開いたときに未適用のマイグレーションを適用するので、テストスイート側にマイグレーションの手順は要りません。
+いま適用した先は、開発用データベース `./data/guren.db` です。テストでは別のファイル `./data/guren.test.db` を使います。Guren はどちらのデータベースでも、最初に開いたときに未適用のマイグレーションを適用するので、テストスイートのためにマイグレーションを実行する手順は要りません。
 
 ## 2. モデル
 
-テーブルは行の形を決めます。モデルは、アプリの他の部分がその行を扱うための窓口です。`app/Models/Post.ts` を作ります。
+テーブルは行の形を決め、モデルはアプリのほかの部分からその行を扱うための窓口になります。`app/Models/Post.ts` を作ります。
 
 ```ts file=app/Models/Post.ts
 import { defineModel } from '@guren/core'
@@ -69,13 +69,13 @@ export class Post extends defineModel(posts, { fillable: ['title', 'body'] }) {
 }
 ```
 
-モデルはこれだけで、意図的に薄くしています。`defineModel(posts)` はクラスに `find`、`findOrFail`、`all`、`create`、`update`、`delete`、`paginate` とクエリビルダーを持たせます。いずれもテーブルから型が付きます。`PostRecord` は上の 4 列そのもので、この型を手で書くことはありません。
+モデルはこれだけで、あえて薄くしています。`defineModel(posts)` によって、クラスに `find`、`findOrFail`、`all`、`create`、`update`、`delete`、`paginate` とクエリビルダーが備わり、どれもテーブル定義から型が付きます。`PostRecord` は上の 4 列とまったく同じ型で、この型を手で書く必要はありません。
 
-`fillable` は利便性のためではなく、安全のための 1 行です。`Post.create(data)` はここに挙げたキーだけを書き込みます。`data` に紛れ込んだ `id` は黙って取り除かれますが、それ以外のキー、たとえば `createdAt` があると `create` は `MassAssignmentException` をスローし、何も書き込みません。第 4 章ではバリデーション済みのリクエストボディを `create` に渡しますが、フォームが差し出していないフィールドをクライアントに設定させないのがこの 1 行です。`guren audit` もここを検査します。
+`fillable` の 1 行は、便利さのためではなく安全のための設定です。`Post.create(data)` は、ここに挙げたキーだけを書き込みます。`data` に紛れ込んだ `id` は何も言わずに取り除かれますが、それ以外のキー(たとえば `createdAt`)が含まれていると、`create` は `MassAssignmentException` を投げ、何も書き込みません。第 4 章ではバリデーション済みのリクエストボディを `create` に渡しますが、そのときもこの 1 行があるので、フォームに無いフィールドをクライアントが勝手に設定することはできません。`guren audit` もこの設定があるかを検査します。
 
 ## 3. 仕様
 
-ページは 2 つ、`/posts` の一覧と `/posts/:id` の個別表示です。作る前に、何をするかを書きます。
+ページは 2 つで、`/posts` の一覧と `/posts/:id` の個別表示です。作る前に、それぞれが何をするかをテストに書きます。
 
 ```ts file=tests/PostController.test.ts
 import { beforeAll, beforeEach, describe, it } from 'bun:test'
@@ -121,13 +121,13 @@ describe('PostController', () => {
 })
 ```
 
-このテストには新しい点が 2 つあります。ひとつは `resetDatabase()` で、各テストの前にテスト用データベースの全テーブルを落とし、マイグレーションを適用し直します。おかげで各テストは空の状態から始まり、必要な行だけを作れます。もうひとつは、テストがモデル経由の `Post.create(...)` で行を作っていることです。アプリと同じやり方です。
+このテストには新しい点が 2 つあります。1 つ目は `resetDatabase()` です。各テストの前に実行され、テスト用データベースの全テーブルを削除してマイグレーションを適用し直すので、各テストは空の状態から始まり、必要な行だけを作れます。2 つ目は、テストが行をモデル経由の `Post.create(...)` で作っていることで、これはアプリと同じ方法です。
 
 ```bash run expect-fail
 bun test
 ```
 
-新しい失敗は 2 つ、どちらも 404 です。そして 3 つ目のテストは最初から緑です。この 3 つ目は一度立ち止まる価値があります。`/posts/999` が 404 を返してほしいのは投稿が存在しないからですが、いまは*ルート*が存在しないから 404 になっています。ルートができて初めて、このテストは書かれたとおりのことを証明しはじめます。ここからは、テストが書いたとおりのものを作っていきます。
+新しく失敗するテストが 2 つあり、どちらも 404 です。3 つ目のテストは最初から通っています。この 3 つ目は少し立ち止まって考えてみてください。`/posts/999` は投稿が存在しないから 404 を返すはずのテストですが、いまは*ルート*が存在しないせいで 404 になっています。ルートができて初めて、このテストは書かれた目的どおりのことを確かめられるようになります。では、テストが示すものを作っていきます。
 
 ## 4. コントローラーとルート
 
@@ -157,9 +157,9 @@ export default class PostController extends Controller {
 }
 ```
 
-`index` はすべての投稿を新しい順に読み、各行をページが必要とする 3 つのフィールドに写します。この写し替えは無駄な作業ではありません。ページに届くのは、送ると決めたフィールドだけになります。第 4 章では、この写し替えにきちんとした置き場所を与えます。
+`index` はすべての投稿を新しい順に読み込み、各行をページに必要な 3 つのフィールドに変換します。この変換は無駄な手間ではなく、これによってページには送ると決めたフィールドだけが届きます。第 4 章では、この変換処理にふさわしい置き場所を用意します。
 
-`show` には検索の処理がありません。検索はルート側の担当です。`routes/web.ts` を置き換えます。
+`show` には検索処理がありません。検索はルートの側で行います。`routes/web.ts` を置き換えます。
 
 ```ts file=routes/web.ts
 import { Router } from '@guren/core'
@@ -184,13 +184,13 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
-- `router.group('/posts', ...)` は中のすべてのルートにプレフィックスを付けるので、`'/:id'` は `/posts/:id` です。
-- `bind: { id: Post }` が**ルートモデルバインディング**です。アクションが走る前に Guren がパスパラメータで `Post.findOrFail(id)` を呼び、レコードをコントローラーに渡します。コントローラーでは `this.model(Post)` がそれを `PostRecord` 型で返します。該当する投稿が無ければ `findOrFail` が throw し、レスポンスは 404 になります。3 つ目のテストが書かれたとおりの理由で緑になるのはこのためで、そのためのコードは 1 行も書いていません。
-- ルートにオプションがあるときは options オブジェクトが第 2 引数です。`.name()` はどちらの書き方でも使えます。
+- `router.group('/posts', ...)` は、中のすべてのルートの先頭にパスを付けます。そのため `'/:id'` は `/posts/:id` になります。
+- `bind: { id: Post }` が**ルートモデルバインディング**です。アクションが実行される前に、Guren がパスパラメータを使って `Post.findOrFail(id)` を呼び、見つかったレコードをコントローラーに渡します。コントローラーでは、`this.model(Post)` がそのレコードを `PostRecord` 型で返します。該当する投稿が無ければ `findOrFail` が例外を投げ、レスポンスは 404 になります。これで 3 つ目のテストは、書かれた目的どおりの理由で通るようになりました。そのためのコードは 1 行も書いていません。
+- ルートにオプションがある場合は、options オブジェクトを第 2 引数に渡します。`.name()` はどちらの場合も使えます。
 
 ## 5. ページ
 
-コンポーネントは 2 つです。まずは一覧から。
+コンポーネントは 2 つです。まず一覧ページです。
 
 ```tsx file=resources/js/pages/posts/Index.tsx
 import { Head, Link } from '@inertiajs/react'
@@ -234,9 +234,9 @@ export default function PostsIndex({ posts }: Props) {
 }
 ```
 
-`route('posts.show', { id: post.id })` は `.guren/routes.gen.ts` の型付きルートヘルパーです。すべてのルート名と、それぞれが受け取るパラメータを把握しています。`route('posts.shwo', ...)` のような打ち間違いや `id` の欠落はコンパイルエラーになります。`PostSummary` インターフェースはページ内のローカルな型ですが、codegen は `Props` と一緒にこれも拾います。
+`route('posts.show', { id: post.id })` は、`.guren/routes.gen.ts` にある型付きのルートヘルパーです。すべてのルート名と、それぞれが受け取るパラメータを知っているので、`route('posts.shwo', ...)` のような打ち間違いや `id` の渡し忘れはコンパイルエラーになります。`PostSummary` インターフェースはページの中だけで使う型ですが、codegen は `Props` と一緒にこれも読み取ります。
 
-そして個別ページです。
+続いて個別ページです。
 
 ```tsx file=resources/js/pages/posts/Show.tsx
 import { Head, Link } from '@inertiajs/react'
@@ -270,7 +270,7 @@ export default function PostShow({ post }: Props) {
 }
 ```
 
-マニフェストを再生成してから、仕様を走らせます。
+マニフェストを再生成してから、仕様のテストを実行します。
 
 ```bash run
 bun run codegen
@@ -280,7 +280,7 @@ bun run codegen
 bun test
 ```
 
-緑になりました。**チェックポイント:** [http://localhost:3333/posts](http://localhost:3333/posts) を開きます。表示は「No posts yet.」です。ブラウザから投稿を書く手段はまだありません。それが次のスライスです。ここまでをゲートに通してコミットします。
+テストが通りました。**チェックポイント:** [http://localhost:3333/posts](http://localhost:3333/posts) を開くと、「No posts yet.」と表示されます。ブラウザから投稿を書く手段はまだなく、それを次のスライスで作ります。ここまでの変更をゲートに通して、コミットします。
 
 ```bash run
 bunx guren gate
@@ -293,7 +293,7 @@ git commit -m "feat: add the posts table, model, and read pages"
 
 ## 6. 作成フォームを仕様化する
 
-テストをさらに 2 つ足します。フォームが表示されること、送信すると投稿が作られてそのページへリダイレクトされることです。テストファイルを置き換えます。
+テストをさらに 2 つ追加します。フォームが表示されることと、フォームを送信すると投稿が作られ、その投稿のページにリダイレクトされることです。テストファイルを置き換えます。
 
 ```ts file=tests/PostController.test.ts
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test'
@@ -355,17 +355,19 @@ describe('PostController', () => {
 bun test
 ```
 
-赤が 2 つ、緑が 3 つです。2 つ目の新しいテストが引き当てようとしている順序の問題に注意してください。`/posts/create` は `/posts/:id` より*前に*登録する必要があります。そうしないとルーターは `create` という id の投稿を探しに行き、404 を返します。
+赤が 2 つ、緑が 3 つです。2 つ目の新しいテストで問題になる、ルートの順序に注意してください。`/posts/create` は `/posts/:id` より*前に*登録する必要があります。そうしないと、ルーターは id が `create` の投稿を探しに行き、404 を返してしまいます。
 
 ## 7. 委ねる
 
-エージェントに頼みます。
+エージェントに次のプロンプトを送ります。
 
-> Add the create form for posts. `GET /posts/create`, named `posts.create`, renders `resources/js/pages/posts/New.tsx` with a title input and a body textarea that submit to `POST /posts`, named `posts.store`. The `store` action validates `title` and `body` as non-empty strings with zod, creates the post, and redirects to its page. Register `/posts/create` before `/posts/:id`. `tests/PostController.test.ts` describes the behaviour; make it pass.
+```text
+Add the create form for posts. `GET /posts/create`, named `posts.create`, renders `resources/js/pages/posts/New.tsx` with a title input and a body textarea that submit to `POST /posts`, named `posts.store`. The `store` action validates `title` and `body` as non-empty strings with zod, creates the post, and redirects to its page. Register `/posts/create` before `/posts/:id`. `tests/PostController.test.ts` describes the behaviour; make it pass.
+```
 
-この章のハーネス要素は `.claude/skills/scaffold/` の **`scaffold` スキル**です。どの `bunx guren make:*` ジェネレーターが用意されていて、記憶を頼りにファイルを書く代わりにいつそれを使うべきかを、エージェントに教えます。ページの骨組みには `make:view posts/New`、Zod スキーマファイルには `make:validator Post` を使います。エージェントがこれらを使うかどうか見ていてください。どちらの結果でも構いませんが、ジェネレーターの出力は検証済みのフレームワークの書き方なので、それを使うエージェントほど間違える余地が小さくなります。
+この章で扱うハーネスの仕組みは、`.claude/skills/scaffold/` にある **`scaffold` スキル**です。このスキルは、どんな `bunx guren make:*` ジェネレーターがあり、記憶を頼りにファイルを書く代わりにいつそれを使えばよいかを、エージェントに教えます。たとえば、ページの骨組みには `make:view posts/New`、Zod スキーマのファイルには `make:validator Post` を使います。エージェントがジェネレーターを使うかどうかを見ていてください。どちらの結果でも構いませんが、ジェネレーターの出力はフレームワークの検証済みの書き方なので、ジェネレーターを使うエージェントほど間違える余地が小さくなります。
 
-**手元にエージェントが無い場合は、** 3 ファイルです。コントローラーにはアクションが 2 つ増えます。
+**手元にエージェントが無い場合は、** 次の 3 ファイルを書きます。コントローラーにはアクションが 2 つ増えます。
 
 ```ts file=app/Http/Controllers/PostController.ts fallback
 import { Controller } from '@guren/core'
@@ -481,9 +483,9 @@ export default function NewPost() {
 }
 ```
 
-このページは Inertia の `useForm` を使います。フィールドの値を保持し、`form.post()` で送信してリダイレクトに追従します。サーバーが送信を拒否した場合、メッセージは `form.errors` に入ります。ページ側はまだそれを表示していません。表示するのは第 4 章です。
+このページでは Inertia の `useForm` を使っています。`useForm` はフィールドの値を保持し、`form.post()` で送信してリダイレクト先に移動します。サーバーが送信を拒否した場合は、エラーメッセージが `form.errors` に入ります。このページではまだそれを表示していませんが、表示は第 4 章で扱います。
 
-再生成して仕様を走らせます。
+マニフェストを再生成して、仕様のテストを実行します。
 
 ```bash run
 bun run codegen
@@ -493,27 +495,27 @@ bun run codegen
 bun test
 ```
 
-rubric は次のとおりです。
+確認項目は次のとおりです。
 
-- `routes/web.ts` は `/create` を `/:id` より前に登録し、`POST /posts` は `posts.store` と名付けられている。
-- `store` はスキーマ付きで `this.validateBody()` を呼び、それ以外の方法でリクエストボディを読んでいない。`guren audit` はバリデーション無しのボディ読み取りでゲートを落とすので、これはスタイルの話ではない。
-- `store` はバリデーション済みのデータだけを `Post.create()` に渡し、レンダリングではなくリダイレクトしている。
-- ページは `useForm` と `route('posts.store')` で送信し、URL をハードコードしていない。
-- 5 件のテストがすべて緑。
+- `routes/web.ts` が `/create` を `/:id` より前に登録していて、`POST /posts` に `posts.store` という名前が付いている。
+- `store` がスキーマを渡して `this.validateBody()` を呼んでいて、それ以外の方法でリクエストボディを読んでいない。`guren audit` は、バリデーションせずにボディを読むコードがあるとゲートを失敗させるので、これは書き方の好みの問題ではない。
+- `store` はバリデーション済みのデータだけを `Post.create()` に渡し、ページをレンダリングせずにリダイレクトしている。
+- ページは `useForm` と `route('posts.store')` で送信していて、URL を直接書いていない。
+- 5 件のテストがすべて通る。
 
-**チェックポイント:** [http://localhost:3333/posts/create](http://localhost:3333/posts/create) で投稿を書きます。その投稿のページに着き、一覧では先頭に表示されます。
+**チェックポイント:** [http://localhost:3333/posts/create](http://localhost:3333/posts/create) で投稿を書いてみます。送信するとその投稿のページに移動し、一覧でも先頭に表示されます。
 
 ```bash run
 bunx guren gate
 ```
 
-ゲートは緑ですが、`gate` が報告するのは失敗だけです。先に進む前に、audit を単体で実行してください。
+ゲートは通りましたが、`gate` が報告するのは失敗だけです。先に進む前に、audit を単独で実行してください。
 
 ```bash run
 bunx guren audit
 ```
 
-`POST /posts` に認証チェックが無い、つまり誰でも投稿を作れる、という警告が出ます。この警告は audit もゲートも落としませんし、指摘としては正しいものです。いまはそのままにしておきましょう。対処するのは第 6 章で、それまでこのブログには認証すべきユーザーがいません。
+`POST /posts` に認証チェックが無い、つまり誰でも投稿を作れる、という警告が出ます。この警告で audit やゲートが失敗することはありませんが、指摘の内容は正しいものです。いまはこのままにしておきます。このブログにはまだ認証するユーザーがいないので、対処は第 6 章で行います。
 
 ```bash run
 git add -A
@@ -522,7 +524,7 @@ git commit -m "feat: add the new post form"
 
 ## ジェネレーターならこうしていた
 
-この章と次の章で作るものは、すべて `bunx guren add resource` がコマンド 1 つで書いてくれます。スキーマのテーブル定義、モデル、バリデーター、リソース、7 アクションのコントローラー、ルート、4 つのページ。マイグレーションはこれまでどおり `bun run db:make` で生成します。それでも手で作ったのは、その出力を読めるようになるためです。第 5 章からはジェネレーターを使います。今すぐ比較したい場合は、使い捨てのブランチでどうぞ。
+この章と次の章で作るものは、すべて `bunx guren add resource` のコマンド 1 つで生成できます。スキーマのテーブル定義、モデル、バリデーター、リソース、7 つのアクションを持つコントローラー、ルート、4 つのページです。マイグレーションはこれまでどおり `bun run db:make` で生成します。ここまで手で作ってきたので、ジェネレーターの出力を読んで理解できるはずです。第 5 章からは、そのうえでジェネレーターを使っていきます。今すぐ比べてみたい場合は、あとで捨てるブランチで試してください。
 
 ```bash manual
 git switch -c scratch/add-resource
@@ -535,13 +537,13 @@ git clean -fd
 git branch -D scratch/add-resource
 ```
 
-`git switch main` と `git branch -D` が動かすのは参照だけで、どちらもコミットしていない作業を元には戻しません。`reset` と `clean` を省くと、ジェネレーターが書いたものはすべて `main` の作業ツリーに残ります。`-n` の空実行があるのは、消す前にその一覧を読むためです。`git diff` でなく `git status` を使うのは、ジェネレーターが新しく作ったファイルは未追跡で、diff には出てこないからです。
+`git switch main` と `git branch -D` は参照を動かすだけで、どちらを実行してもコミットしていない作業は元に戻りません。`reset` と `clean` を省くと、ジェネレーターが書いたファイルはすべて `main` の作業ツリーに残ります。消す前に対象の一覧を確認できるよう、先に `-n` で空実行します。また、ジェネレーターが新しく作ったファイルは未追跡で diff には表示されないため、`git diff` ではなく `git status` で確認します。
 
-コードより先に一覧を読んでください。`db/schema.ts` と `routes/web.ts` は一覧にありません。スキーマはすでに `posts` をエクスポートしており、ルートも `/posts` を登録済みなので、コマンドはどちらにも手を付けず、生成すべきマイグレーションもありません。それ以外のファイルは `--force` によって上書きされています。`app/Models/Post.ts` もその 1 つで、生成されたモデルには `fillable` がありません。そのブランチで `bunx guren audit` を実行すると一括代入の警告が出るのはこのためです。
+コードを読む前に、まずファイルの一覧を見てください。`db/schema.ts` と `routes/web.ts` は一覧にありません。スキーマはすでに `posts` をエクスポートしていて、ルートも `/posts` を登録済みなので、コマンドはどちらのファイルも変更せず、生成すべきマイグレーションもありません。それ以外のファイルは、`--force` を付けたので上書きされています。`app/Models/Post.ts` もその 1 つで、生成されたモデルには `fillable` がありません。そのため、このブランチで `bunx guren audit` を実行すると、マスアサインメントの警告が出ます。
 
-生成されたコントローラーは、いま書いたものと 3 か所違います。1 つ目は `:id` パラメータをモデルにバインドせずスキーマで検証していること、2 つ目は `index` がページネーションしていること、3 つ目は `store`、`update`、`destroy` が `this.auth.userOrFail()` から始まることです。1 つ目と 2 つ目は第 4 章、3 つ目は第 6 章で扱います。`edit`、`update`、`destroy` アクションと `Edit.tsx` ページも生成されますが、このブランチではどこからも到達できません。手付かずのルートファイルには、それらのルートが 1 つも登録されていないからです。
+生成されたコントローラーは、この章で書いたものと 3 か所違います。1 つ目は `:id` パラメータをモデルにバインドせずスキーマで検証している点、2 つ目は `index` がページネーションしている点、3 つ目は `store`、`update`、`destroy` が `this.auth.userOrFail()` から始まる点です。1 つ目と 2 つ目は第 4 章、3 つ目は第 6 章で扱います。`edit`、`update`、`destroy` アクションと `Edit.tsx` ページも生成されますが、このブランチではどこからもアクセスできません。ルートファイルは変更されていないので、これらのルートが 1 つも登録されていないからです。
 
-## いまいる場所
+## ここまでの状態
 
 - `posts` テーブル、そのマイグレーション、`fillable` 付きのモデル。
 - 本物の行を読む一覧ページと個別ページ、そしてルーターが提供する 404。
@@ -551,18 +553,18 @@ git branch -D scratch/add-resource
 
 ## よくあるつまずき
 
-- **`db:make` が「No schema changes」と言う。** 最後のマイグレーション以降スキーマファイルが変わっていないか、別のファイルを編集しています。`db/schema.ts` から `posts` が export されているか確認してください。
-- **テストが「no such table: posts」で失敗する。** テスト用データベースは初回利用時に作られ、そのときにマイグレーションされます。前回の実行が中途半端にマイグレーションされた `data/guren.test.db` を残していたら、ファイルを削除してテストをやり直してください。
-- **新しいページのレイアウトが崩れ、`bun run dev` のログに `Unable to locate Inertia page "posts/New" in the generated page manifest.` が出る。** 開発サーバーを動かしたままページファイルを追加すると、ページマニフェストと生成された Tailwind の CSS が古いまま固まることがあります。codegen は正常に走っていて `.guren/pages.gen.ts` は最新、ということも起こります。ハードリロードでは直りません。`bun run dev` を再起動してください。
-- **`/posts/create` が 404 を返す。** `/posts/:id` より後に登録されています。順序が大事です。ルートは上から順に照合されます。
-- **`guren audit` が「Request body is read without validation」で失敗する。** store アクションが `validateBody()` 以外の方法でボディを読んでいます。スキーマを使ってください。
-- **`this.model(Post)` が「No model binding found」で throw する。** そのパラメータに対する `bind` オプションがルートにありません。バインディングはルートに宣言するもので、コントローラーから推測されることはありません。
+- **`db:make` が「No schema changes」と言う。** 前回のマイグレーション以降、スキーマファイルが変わっていないか、別のファイルを編集しています。`db/schema.ts` から `posts` が export されているか確認してください。
+- **テストが「no such table: posts」で失敗する。** テスト用データベースは初めて使うときに作られ、そのときにマイグレーションが適用されます。前回の実行で途中までしかマイグレーションされていない `data/guren.test.db` が残っている場合は、ファイルを削除してテストをやり直してください。
+- **新しいページのレイアウトが崩れ、`bun run dev` のログに `Unable to locate Inertia page "posts/New" in the generated page manifest.` が出る。** 開発サーバーを動かしたままページファイルを追加すると、ページマニフェストと生成済みの Tailwind の CSS が古いまま残ることがあります。codegen が正常に実行されていて、`.guren/pages.gen.ts` が最新でも起こります。ハードリロードでは直らないので、`bun run dev` を再起動してください。
+- **`/posts/create` が 404 を返す。** `/posts/:id` より後に登録されています。ルートは上から順に照合されるので、順序が大事です。
+- **`guren audit` が「Request body is read without validation」で失敗する。** store アクションが `validateBody()` 以外の方法でボディを読んでいます。スキーマを使って読んでください。
+- **`this.model(Post)` が「No model binding found」で例外を投げる。** そのパラメータに対応する `bind` オプションがルートにありません。バインディングはルートで宣言するもので、コントローラーから推測されることはありません。
 
 ## 演習
 
-1. マイグレーションが書いた `migration.sql` を開いてください。drizzle-kit が `NOT NULL` にした列はどれで、それは `db/schema.ts` のどこから来ていますか。ブランチを切って `body` を nullable にし、適用せずに `bun run db:make` だけ走らせて、生成される SQL を読んでください。そのあとは上の比較と同じ手順で捨てます。`git switch main`、`git reset --hard`、`git clean -fd` です。ブランチを消すだけではマイグレーションフォルダがディスクに残り、次の `bun run dev` がそれを適用します。
-2. `Post.findOrFail(id)` は行が無ければ 404 を返しますが、`PostController` ではそれを捕まえていません。例外をレスポンスに変換している場所を探してください。そのうえで、`Post.find(id)` だった場合に何が起きたかを答えてください。
+1. マイグレーションで生成された `migration.sql` を開いてください。drizzle-kit が `NOT NULL` にした列はどれで、それは `db/schema.ts` のどこに由来していますか。ブランチを切って `body` を nullable にし、適用はせずに `bun run db:make` だけを実行して、生成される SQL を読んでください。読み終えたら、上の比較と同じ手順(`git switch main`、`git reset --hard`、`git clean -fd`)で変更を捨てます。ブランチを消すだけではマイグレーションのフォルダがディスクに残り、次の `bun run dev` で適用されてしまいます。
+2. `Post.findOrFail(id)` は行が無ければ 404 を返しますが、`PostController` ではその例外を捕まえていません。例外をレスポンスに変換している部分を探してください。そのうえで、`Post.find(id)` を使っていた場合はどうなっていたかを答えてください。
 
 ## 次へ
 
-[第 4 章: バリデーションとリソース](./04-validation-and-resources.md) では、スキーマをルート契約付きのバリデーターファイルへ移し、フォームにバリデーションエラーを表示し、リソース層を導入して、編集・削除・ページネーションをエージェントに委ねます。
+[第 4 章: バリデーションとリソース](./04-validation-and-resources.md) では、スキーマをルート契約付きのバリデーターファイルに移し、フォームにバリデーションエラーを表示し、リソース層を導入したうえで、編集・削除・ページネーションをエージェントに任せます。

@@ -535,11 +535,15 @@ Five red. Read them once more before delegating: they say the edit page carries 
 
 Ask your agent:
 
-> Complete the posts CRUD. Add `edit`, `update` and `destroy` actions to `PostController` using route model binding like `show`, and register `GET /posts/:id/edit` (`posts.edit`), `PUT /posts/:id` (`posts.update`, with `body: PostPayloadSchema`) and `DELETE /posts/:id` (`posts.destroy`). Add `resources/js/pages/posts/Edit.tsx` as a form like `New.tsx` that submits with `form.put`, and give `Show.tsx` an Edit link and a Delete button. Paginate `index` at ten posts per page with `Post.paginate` and the `paginate` helper, validating `?page=` with a `ListPostsQuerySchema` in the validator, and render the page links in `Index.tsx`. Use `PostResource` for every post sent to a page. `tests/PostController.test.ts` describes all of it; make it pass.
+```text
+Complete the posts CRUD. Add `edit`, `update` and `destroy` actions to `PostController` using route model binding like `show`, and register `GET /posts/:id/edit` (`posts.edit`), `PUT /posts/:id` (`posts.update`, with `body: PostPayloadSchema`) and `DELETE /posts/:id` (`posts.destroy`). Add `resources/js/pages/posts/Edit.tsx` as a form like `New.tsx` that submits with `form.put`, and give `Show.tsx` an Edit link and a Delete button. Paginate `index` at ten posts per page with `Post.paginate` and the `paginate` helper, validating `?page=` with a `ListPostsQuerySchema` in the validator, and render the page links in `Index.tsx`. Use `PostResource` for every post sent to a page. `tests/PostController.test.ts` describes all of it; make it pass.
+```
 
 This is the biggest slice so far, which makes it the right place for this chapter's harness lever: the **`code-review` subagent** in `.claude/agents/code-review.md`. A subagent is an agent with its own brief and its own context, invoked by the main agent; this one's brief is a Guren code review. It runs `guren check` and `guren audit` first, then reads the diff for what neither of them settles. When your agent reports done, before you run the rubric yourself, ask:
 
-> Use the code-review subagent to review the uncommitted changes.
+```text
+Use the code-review subagent to review the uncommitted changes.
+```
 
 Read what comes back beside your own rubric below. A second reader with a fixed brief catches a different set of things than a first reader in the middle of the work, and it costs you one sentence. In chapter 8 you will write that brief yourself.
 

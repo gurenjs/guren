@@ -287,7 +287,11 @@ Red: there is no `docs/context/posts.md`.
 
 ## 6. Delegate it
 
-> Write `docs/context/posts.md`, a context document for the `Post` model, in the shape of `docs/context/comments.md`. Cover what a post is, who may change it, what publishing means, and how cover images and the gallery are stored and served. Also record the storage decision as an ADR with `bunx guren make:adr`, and link the two. `tests/Documentation.test.ts` and `bunx guren check --docs` both have to pass.
+Send this prompt to your agent:
+
+```text
+Write `docs/context/posts.md`, a context document for the `Post` model, in the shape of `docs/context/comments.md`. Cover what a post is, who may change it, what publishing means, and how cover images and the gallery are stored and served. Also record the storage decision as an ADR with `bunx guren make:adr`, and link the two. `tests/Documentation.test.ts` and `bunx guren check --docs` both have to pass.
+```
 
 This is the chapter's harness lever, and it works in the direction you have not seen yet. Every other chapter put a rule in front of the agent before it wrote code. Here the agent has to *read* your app to write anything true, and the two commands it has for that are the two you just ran: `guren context Post` tells it what a post touches, and `docs:graph` tells it what is already documented. An agent that writes a plausible document without reading either will get the details wrong, and the details are checkable.
 

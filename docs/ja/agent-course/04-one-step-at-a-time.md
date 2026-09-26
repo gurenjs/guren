@@ -1,23 +1,23 @@
 # 第 4 章: 1 ステップずつ
 
-計画は承認されました。この章ではエージェントがそれを実装します。Guren が計画をステップに分け、エージェントは 1 つ取り、実装し、検証を受け、コミットします。自分の役目は、次のコミットが来る前に各コミットを読むことです。
+承認した計画を、この章でエージェントに実装してもらいます。Guren が計画をステップに分け、エージェントはステップを 1 つずつ実装して、検証が通ったらコミットします。読者は、次のコミットが届く前にそれぞれのコミットを読んでいきます。
 
 **この章で学ぶこと:**
 
-- 計画がステップになる仕組みと、ステップの種類ごとに書かれるもの
-- verified の意味と、それを決めるのは誰か
+- 計画がステップに分かれる仕組みと、ステップの種類ごとに書かれるもの
+- 検証済み (`verified`) の意味と、それを判定する主体
 - ステップごとのコミットで確かめること
 
 ## 1. ステップ
 
-ステップは Guren が計画から導きます。誰も書きません。この計画はエンティティが 1 つなので、5 ステップのタスクが 1 つできます。
+ステップは人が書くものではなく、Guren が計画から自動で組み立てます。この計画はエンティティが 1 つなので、5 つのステップからなるタスクが 1 つできます。
 
 ```mermaid
 flowchart LR
-  S["scaffold<br/>生成されるコード"] --> T["tests<br/>振る舞いごとの赤いテスト"] --> D["data<br/>マイグレーション"] --> H["http<br/>アクション、policy、ページ"] --> P["pages<br/>typecheck、check"]
+  S["scaffold<br/>生成されるコード"] --> T["tests<br/>振る舞いごとの失敗するテスト"] --> D["data<br/>マイグレーション"] --> H["http<br/>アクション、policy、ページ"] --> P["pages<br/>typecheck、check"]
 ```
 
-どのステップも同じループを回します。
+どのステップも、次の流れを繰り返します。
 
 ```mermaid
 flowchart LR
@@ -25,25 +25,29 @@ flowchart LR
   Commit --> Next
 ```
 
-`plan:verify` はステップのコマンド (codegen、typecheck、`guren check`、マイグレーション、テスト) を実行し、結果を `.guren/plans/` に記録します。このディレクトリは git の対象外です。コマンドが通り、ステップが担う計画の要素がコードの中に実装済みとして読めたとき、ステップは **verified** になります。エージェントの意見は判定に入りません。
+`plan:verify` を実行すると、そのステップのコマンド (codegen、typecheck、`guren check`、マイグレーション、テスト) が走り、結果が `.guren/plans/` に記録されます。このディレクトリは git の管理対象外です。コマンドがすべて通り、ステップが受け持つ計画の要素がコード上で実装済みと読み取れれば、そのステップは **検証済み** になります。判定にエージェントの意見は使われません。
 
 ## 2. エージェントを動かす
 
-> docs/plans/meetups/plan.json を plan-implement スキルで実装してください。1 ステップにつき 1 コミットです。plan:next がすべてのステップが verified だと言ったら止まってください。
+Claude Code のセッションに、次のプロンプトを送ります。
 
-エージェントはここからループを自分で回します。途中でターンを終えようとすると、第 1 章の Stop hook が印の付いたステップを検証し、verified でなければエージェントを差し戻します。
+```text
+docs/plans/meetups/plan.json を plan-implement スキルで実装してください。1 ステップにつき 1 コミットです。plan:next がすべてのステップが verified だと言ったら止まってください。
+```
 
-作業の間、自分のターミナルで追いかけます。
+ここから先は、エージェントがこの流れを自分で繰り返します。途中でターンを終えようとすると、第 1 章の Stop hook が印の付いたステップを検証し、通らなければエージェントに差し戻します。
+
+エージェントが作業している間は、手元のターミナルで進み具合を追いかけます。
 
 ```bash manual
 git log --oneline
 ```
 
-各コミットはステップ名を角括弧で含みます。4 節のチェック表を使って、届いたものから読んでください。
+コミットメッセージには、角括弧で囲んだステップ名が入ります。コミットが届いたら、4 節のチェック表を見ながら順に読んでください。
 
 ## 3. ステップを 1 つずつ
 
-この節は各ステップが何を生むかを示します。エージェントがいれば読むだけです。いなければ各ブロックを実行します。
+この節では、各ステップで何ができるかを見ていきます。エージェントに任せている場合は読むだけで構いません。任せていない場合は、各ブロックを順に実行してください。
 
 ### scaffold
 
@@ -55,7 +59,7 @@ git add -A
 git commit -m "feat(meetups): scaffold [task/entity/model.meetup/scaffold]"
 ```
 
-`plan:scaffold` は、計画だけで決まるコードを書きます。`db/schema.ts` の `meetups` テーブル、`Meetup` モデル、validator、Resource、すべてを拒否する Policy、アクションが 501 を返すコントローラー、まだ mount されていない `routes/meetups.ts` です。これらはエージェントも含めて誰も手で書きません。
+`plan:scaffold` は、計画の内容だけで決まるコードを書き出します。`db/schema.ts` の `meetups` テーブル、`Meetup` モデル、validator、Resource、すべてを拒否する Policy、どのアクションも 501 を返すコントローラー、それにまだマウントしていない `routes/meetups.ts` です。これらのファイルは、エージェントも含めて誰も手では書きません。
 
 ### tests
 
@@ -64,7 +68,7 @@ bunx guren plan:next docs/plans/meetups/plan.json
 bunx guren plan:scaffold docs/plans/meetups/plan.json --step task/entity/model.meetup/tests
 ```
 
-これが `tests/plans/meetups/meetups.test.ts` を書きます。振る舞いごとに 1 テストで、タイトルは `[AC-meetups-1] …` の形、リクエストはすでに書かれています。書けないのはセットアップ、つまり振る舞いが前提とする行とサインインしたユーザーです。各テストはそのセットアップを名指しする `given('…')` の呼び出しで止まるので、そこを埋めるのがこのステップの作業です。
+このコマンドで `tests/plans/meetups/meetups.test.ts` ができます。振る舞いごとに 1 つのテストがあり、タイトルは `[AC-meetups-1] …` の形で、リクエストもすでに書かれています。ただし、振る舞いが前提とするデータベースの行やサインイン済みのユーザーといったセットアップは生成できません。各テストは、必要なセットアップを示す `given('…')` の呼び出しで止まっているので、そこを埋めていくのがこのステップの作業です。
 
 <details>
 <summary>セットアップを書いた tests/plans/meetups/meetups.test.ts</summary>
@@ -177,7 +181,7 @@ git add -A
 git commit -m "test(meetups): acceptance tests [task/entity/model.meetup/tests]"
 ```
 
-このステップは、すべてのテストが **失敗する** ときに verified になります。コードより先に通るテストは何も証明しません。
+このステップは、すべてのテストが **失敗する** ことを確かめて検証済みになります。コードを書く前から通ってしまうテストでは、何も確かめられないからです。
 
 ### data
 
@@ -189,18 +193,18 @@ git add -A
 git commit -m "feat(meetups): migration [task/entity/model.meetup/data]"
 ```
 
-`db:make` は scaffold ステップが書いたテーブルからマイグレーションを生成し、`plan:verify` がそれを適用します。
+`db:make` で scaffold ステップが書いたテーブルからマイグレーションを生成し、`plan:verify` の中でそれが適用されます。
 
 ### http
 
-ルートファイルの mount は手ではなくコマンドで行います。
+ルートファイルは、手で書き足さずにコマンドでマウントします。
 
 ```bash run fallback
 bunx guren plan:next docs/plans/meetups/plan.json
 bunx guren plan:scaffold docs/plans/meetups/plan.json --step task/entity/model.meetup/http --mount
 ```
 
-そのあとスタブを本物のコードにします。書く量がいちばん多いのはこのステップです。
+続いて、スタブを実際のコードに置き換えます。コードを書く量は、このステップがいちばん多くなります。
 
 <details>
 <summary>app/Http/Controllers/MeetupController.ts</summary>
@@ -430,11 +434,11 @@ git add -A
 git commit -m "feat(meetups): controller, policy, pages [task/entity/model.meetup/http]"
 ```
 
-このステップは、すべての振る舞いのテストが **通る** ときに verified になります。
+このステップは、すべての振る舞いのテストが **通る** と検証済みになります。
 
 ### pages
 
-存在しないページはコントローラーが描画できないので、ページは http ステップの時点で必要でした。このステップはページだけを typecheck と `guren check` で確かめます。
+コントローラーは存在しないページを描画できないので、ページは http ステップの時点ですでに必要でした。このステップでは、ページを独立したステップとして typecheck と `guren check` で確かめます。
 
 ```bash run fallback
 bunx guren plan:next docs/plans/meetups/plan.json
@@ -443,7 +447,7 @@ bunx guren plan:verify docs/plans/meetups/plan.json --step task/entity/model.mee
 
 ## 4. コミットを 1 つずつ読む
 
-verified はテストが通ったという意味です。テストが正しいことを確かめているか、コードが計画どおりのことだけをしているかまでは保証しません。そこは自分の仕事で、1 ステップ 1 コミットにしておくと読む量が小さく保てます。
+検証済みになっても、わかるのはテストが通ったことだけです。テストが確かめるべきことを確かめているか、コードが計画にあることだけをしているかは、読者がコミットを読んで判断します。1 ステップを 1 コミットにしているので、一度に読む量は少なくて済みます。
 
 ```bash manual
 git show --stat HEAD
@@ -451,13 +455,13 @@ git show --stat HEAD
 
 | ステップ | 確かめること |
 |---|---|
-| scaffold | 生成されたファイルだけが入っている。エージェントが手で書き換えていない |
-| tests | どのタイトルにも `[AC-…]` の id が残っている。セットアップは振る舞いの `given` が言うものだけを作る |
-| data | マイグレーションは `meetups` を作るだけで、ほかに触れていない |
-| http | `this.authorize('update', [Meetup, meetup])` がクラスだけでなく **レコード** を渡している。`organizerId` はリクエストではなく `this.auth` から来る。Policy が id を比べている |
-| pages | 普通は特にありません。コマンドが確かめます |
+| scaffold | 生成されたファイルだけが入っていて、エージェントが手で書き換えた箇所がない |
+| tests | どのタイトルにも `[AC-…]` の id が残っている。セットアップが、振る舞いの `given` に書かれたものだけを作っている |
+| data | マイグレーションが `meetups` を作るだけで、ほかのテーブルに触れていない |
+| http | `this.authorize('update', [Meetup, meetup])` にクラスだけでなく **レコード** も渡している。`organizerId` をリクエストからではなく `this.auth` から取っている。Policy が id を比較している |
+| pages | 通常は特にない。コマンドの結果で確認できる |
 
-いちばん注意したいのは http の行です。scaffold が書く Policy の `update` は、誰かがルールを書くまで `false` を返します。エージェントがコントローラーだけ書いて Policy を忘れると、誰も編集できない機能ができます。それでも `forbidden` のテストはすべて通ります。全員を拒否すれば、拒否すべきユーザーも拒否されるからです。失敗するのは、主催者自身の success 振る舞いである `AC-meetups-7` と `AC-meetups-12` だけです。第 2 章のチェック表の 5 行目が効くのはここです。
+表の中では、http の行を特に注意して読んでください。scaffold が書く Policy の `update` は、誰かがルールを書くまで `false` を返します。エージェントがコントローラーだけを書いて Policy を書き忘れると、誰も編集できない機能ができあがります。全員を拒否すれば拒否すべきユーザーも拒否されるので、この状態でも `forbidden` のテストはすべて通ります。主催者自身の `success` の振る舞いである `AC-meetups-7` と `AC-meetups-12` の 2 つだけが失敗します。第 2 章のチェック表の 5 行目で確かめた点が、ここで役に立ちます。
 
 ## 5. 計画の現在地
 
@@ -465,21 +469,21 @@ git show --stat HEAD
 bunx guren plan:next docs/plans/meetups/plan.json
 ```
 
-「Every step is verified.」と出ます。要素ごとに見るには次を実行します。
+「Every step is verified.」と表示されます。要素ごとの状態は次のコマンドで確認できます。
 
 ```bash run
 bunx guren plan:status docs/plans/meetups/plan.json
 ```
 
-計画が追加した要素はすべて `verified` です。計画どおりにコードの中に見つかり、記録がまだ有効なステップが担っています。参照するだけの `User` と `users.id` は `present` です。要素の検証に使ったファイルを変えると、ステップを検証し直すまでその要素は `drifted` になります。
+計画で追加した要素は、どれも `verified` になっています。計画どおりの形でコードの中に見つかり、検証結果がまだ有効なステップに含まれている、という意味です。計画から参照しているだけの `User` と `users.id` は、コードに存在することを示す `present` です。要素の検証に使ったファイルを変更すると、その要素は検証後に変更された (`drifted`) 状態になり、ステップを検証し直すまで戻りません。
 
-アプリを起動して、できたものを見ます。
+アプリを起動して、できあがったものを見てみましょう。
 
 ```bash run background
 bun run dev
 ```
 
-`/register` でサインアップしてから `/meetups` を開きます。
+`/register` でサインアップしてから、`/meetups` を開いてください。
 
 ![ブラウザの Meetups 一覧ページ。「Meetups」の見出しと「New meetup」のリンクがあり、2026-10-20 で 20 席の「Bun night」と、2026-11-02 で 12 席の「Inertia study group」の 2 件が並んでいます](../../images/agent-course-meetups-index.png)
 
@@ -487,24 +491,24 @@ bun run dev
 # Press Ctrl-C in the terminal running bun run dev.
 ```
 
-## いまいる場所
+## ここまでの状態
 
-- verified のステップが 5 つと、何かを書いた 4 ステップのそれぞれのコミット。
-- 自分ではタイプしていない勉強会の機能と、自分で仕様を決めた 12 件の通るテスト。
-- すべてのステップが verified で、クローズできる計画。
+- 5 つのステップがすべて検証済みになり、ファイルを書いた 4 つのステップはそれぞれコミットされています。
+- コードを手で打たずに勉強会の機能ができ、仕様を決めた 12 件のテストもすべて通っています。
+- すべてのステップが検証済みになり、計画はクローズできる状態です。
 
 ## よくあるつまずき
 
-- **すべてのテストが "database has not been configured" で失敗する。** 自分で書いた `beforeEach` が、アプリの起動前にデータベースに触れています。雛形の冒頭のコメントと参照用のテストのとおり、最初に `await ready()` を呼んでください。
-- **ツリーが汚れているので `plan:next` が拒否する。** ステップが未コミットのままです。次を頼む前にコミットするか、破棄してください。
-- **http ステップが `AC-meetups-7` か `AC-meetups-12` の 403 で失敗する。** Policy がまだ `false` を返しているか、コントローラーが `[Meetup, meetup]` ではなく `Meetup` だけを `this.authorize` に渡しています。上の http の行を見てください。
-- **エージェントが同じステップを繰り返す。** 止めるのを 3 回阻まれると、Stop hook はステップを理由付きで stalled と記録し、エージェントを止めます。`plan:next` がその stall を示します。続けるよう伝える前に理由を読んでください。
+- **すべてのテストが "database has not been configured" で失敗する。** 読者が書き足した `beforeEach` が、アプリの起動前にデータベースに触れています。雛形の冒頭のコメントと参照用のテストにあるとおり、最初に `await ready()` を呼んでください。
+- **作業ツリーに未コミットの変更があり、`plan:next` が拒否する。** 前のステップがコミットされていません。次のステップを頼む前に、コミットするか破棄してください。
+- **http ステップが `AC-meetups-7` か `AC-meetups-12` の 403 で失敗する。** Policy がまだ `false` を返しているか、コントローラーが `this.authorize` に `[Meetup, meetup]` ではなく `Meetup` だけを渡しています。上のチェック表の http の行を見てください。
+- **エージェントが同じステップを繰り返す。** ターンを終えようとして 3 回差し戻されると、Stop hook はそのステップを理由とともに行き詰まり (`stalled`) として記録し、エージェントが止まれるようにします。行き詰まりは `plan:next` に表示されるので、続けるよう指示する前に理由を読んでください。
 
 ## 演習
 
-1. ブランチを切って Policy を `return true` に変え、http ステップの `plan:verify` を実行してください。どの振る舞いが失敗しますか。確かめたらコミットせずに戻します。
-2. `bunx guren plan:status docs/plans/meetups/plan.json --json` を実行し、`policy.meetup` の項目を探してください。`files` に何が並んでいますか。そのファイルを変えると `drifted` になるのはなぜですか。
+1. ブランチを切って Policy を `return true` に書き換え、http ステップの `plan:verify` を実行してください。どの振る舞いが失敗しますか。確かめたら、コミットせずに元に戻します。
+2. `bunx guren plan:status docs/plans/meetups/plan.json --json` を実行し、`policy.meetup` の項目を探してください。`files` には何が並んでいますか。また、そのファイルを変更すると `drifted` になるのはなぜでしょうか。
 
 ## 次へ
 
-[第 5 章: 計画をクローズする](./05-close-the-plan.md) では、終わった計画を、コードと一緒に残るドキュメントにします。
+[第 5 章: 計画をクローズする](./05-close-the-plan.md) では、完了した計画を、コードと一緒に残るドキュメントに書き出します。
