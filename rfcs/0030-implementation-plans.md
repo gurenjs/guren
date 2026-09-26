@@ -1042,7 +1042,9 @@ decides a task, so `tasks.ts` fixes it:
   reference, foreign keys first among them; an `existing` target is already
   there. Tables are dropped child first. Relationships order nothing: a
   `hasMany` mirrors the foreign key pointing back and would close a cycle with
-  it. A real cycle (mutual foreign keys) is cut at its first member in document
+  it. So a relationship whose target a later task works on completes at the
+  step owning that target, not its own model's (§6, Completion), and
+  `plan:next` lists it there. A real cycle (mutual foreign keys) is cut at its first member in document
   order, which stops waiting, and reported; a self-reference is not one.
   Document order breaks every tie.
 - **Hints** are `<task> before <task>` or `<task> after <task>`, a task being a
@@ -1229,7 +1231,9 @@ shipped, and where it stops.
   write that fails after the first one names the files already on disk, since a
   re-run would refuse on them as if the step were done.
 - A relationship left out of the model leaves it `drifted` in `plan:status`
-  until the relationship is added; the report says so beside each one.
+  until the relationship is added; the report says so beside each one. One
+  whose target a later task works on is the exception (§6, Completion): the
+  report names that task's step (`judgedAt`), which judges it.
 - Like `plan:verify`, it does not consult the freshness hold of §4: `plan:next`
   is what holds a step whose context went stale, and the command runs only on
   the step `plan:next` marked.
@@ -1812,7 +1816,18 @@ for some of them:
 | any | `waived` |
 
 A step is complete when every element it covers is. A task is complete when
-its steps are. `blocked` completes nothing and is reported as such: it is an
+its steps are.
+
+A relationship whose target model a later task works on (§5, Order) is judged
+with that target, as its property `relationship <Model>.<name>`, and not with
+the model declaring it: the declaring model's step comes first and cannot
+reference a class that does not exist yet, so judging it there would hold that
+step forever. The declaring model carries a note naming the step instead, and
+the target's `files` include the declaring model's file, so removing the
+relationship later expires the target's record. `planLaterRelationships()` in
+`plan/tasks.ts` is the one rule for which relationships move, by the
+derivation's task order; `plan:status`, `plan:scaffold` and `plan:next` all
+read it. `blocked` completes nothing and is reported as such: it is an
 environment problem to fix, not a state to wait out. Existing tests may be
 edited only where the plan lists them under Impact.
 

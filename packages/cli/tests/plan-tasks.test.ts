@@ -4,6 +4,7 @@ import {
   derivePlanTasks,
   FOUNDATION_TASK_ID,
   parsePlanHint,
+  planLaterRelationships,
   PLAN_SECTION_STEP,
   type DerivePlanTasksOptions,
   type PlanDerivedStep,
@@ -882,5 +883,31 @@ describe('derivePlanTasks', () => {
 
       expect(after).toEqual(before)
     })
+  })
+})
+
+describe('planLaterRelationships', () => {
+  function later(models: ModelInput[]): string[][] {
+    const plan = planFrom({ models })
+    return planLaterRelationships(plan, derivePlanTasks(plan)).map((entry) => [entry.model.id, entry.relationship.name, entry.target.id, entry.stepId])
+  }
+
+  test('should send a hasMany to a model a later task adds to the step owning that model', () => {
+    const meetup = { ...model('Meetup'), relationships: [{ name: 'registrations', type: 'hasMany' as const, target: 'model.registration' }] }
+    const registration = { ...model('Registration', ['meetup']), relationships: [{ name: 'meetup', type: 'belongsTo' as const, target: 'model.meetup' }] }
+
+    expect(later([meetup, registration])).toEqual([['model.meetup', 'registrations', 'model.registration', 'task/entity/model.registration/data']])
+  })
+
+  test('should leave a relationship to an earlier task, the same task, an existing model or a dropped one where it is declared', () => {
+    const user = model('User', [], { kind: 'existing' })
+    const self = { ...model('Node'), relationships: [{ name: 'children', type: 'hasMany' as const, target: 'model.node' }] }
+    const toExisting = { ...model('Post'), relationships: [{ name: 'author', type: 'belongsTo' as const, target: 'model.user' }] }
+    const toDropped = { ...model('Tag'), relationships: [{ name: 'legacy', type: 'hasMany' as const, target: 'model.legacy' }] }
+    const legacy = model('Legacy', [], { kind: 'drop', reason: 'unused' })
+    const fromDropped = { ...model('Old', [], { kind: 'drop', reason: 'unused' }), relationships: [{ name: 'tags', type: 'hasMany' as const, target: 'model.tag' }] }
+
+    expect(later([user, self, toExisting, toDropped, legacy])).toEqual([])
+    expect(later([fromDropped, { ...model('Tag') }])).toEqual([])
   })
 })

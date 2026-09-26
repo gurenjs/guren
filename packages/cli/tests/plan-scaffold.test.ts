@@ -1388,7 +1388,7 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     expect(output.files.map((file) => file.path)).not.toContain('app/Http/Resources/WidgetSummaryResource.ts')
   })
 
-  test('should leave out a relationship whose target has no model yet, and say the model reads drifted until it is added', async () => {
+  test('should leave out a relationship whose target a later task adds, and name the step that judges it', async () => {
     const document = widgetsPlan()
     document.models[3]!.relationships.push({ name: 'gadgets', type: 'hasMany', target: 'model.gadget' })
     document.models.push({
@@ -1404,12 +1404,16 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
 
     const report = await scaffoldStep(plan, dir)
 
-    expect(report.omitted).toEqual([{ model: 'model.widget', relationship: 'gadgets', reason: 'the application has no Gadget model yet' }])
+    expect(report.omitted).toEqual([
+      { model: 'model.widget', relationship: 'gadgets', reason: 'the application has no Gadget model yet', judgedAt: 'task/entity/model.gadget/data' },
+    ])
     expect(await readFile(join(dir, 'app/Models/Widget.ts'), 'utf8')).not.toContain("'gadgets'")
     const text = formatPlanScaffold(report, PLAN_FILE)
-    expect(text).toContain('until then plan:status reads the model as drifted:')
-    expect(text).toContain('  model.widget gadgets: the application has no Gadget model yet')
-    expect((await statusOf(dir, plan)).elements.find((element) => element.id === 'model.widget')?.state).toBe('drifted')
+    expect(text).toContain('  model.widget gadgets: the application has no Gadget model yet; add it in task/entity/model.gadget/data, which judges it')
+    const widget = (await statusOf(dir, plan)).elements.find((element) => element.id === 'model.widget')
+    expect(widget?.state).toBe('present')
+    expect(widget?.properties.map((property) => property.property)).not.toContain('relationship gadgets')
+    expect(widget?.notes).toContain('Relationship gadgets targets Gadget, which a later task works on: it is judged with model.gadget, in task/entity/model.gadget/data.')
   })
 
   test('should write a string default with a line break or a line separator as a valid literal', () => {

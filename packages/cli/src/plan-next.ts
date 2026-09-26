@@ -29,7 +29,7 @@ import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElement
 import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress, type PlanStepContext, type PlanStepContextElement } from './plan/step-context'
 import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
 import { planScaffoldCommandLine, planScaffoldCoverage, planScaffoldMountCommandLine, planScaffoldMounts } from './plan/scaffold'
-import { derivePlanTasks, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
+import { derivePlanTasks, listPlanSteps, planLaterRelationships, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
 import { hashFiles, readPlanWaivers, recordDrift, recordStillHolds, type PlanWaiversRead } from './plan/verification'
 import { readStepStart } from './plan/work'
@@ -52,6 +52,11 @@ export interface PlanNextStep extends Pick<PlanDerivedStep, 'id' | 'kind' | 'ver
   task: PlanTaskTitle
   /** The elements the step completes. */
   elements: PlanNextElement[]
+  /**
+   * Relationships an earlier task's model declares to a model this step completes (RFC 0030 §5,
+   * Order): written in the declaring model's file, judged with the target here.
+   */
+  relationships?: Array<{ model: string; name: string; type: string; target: string }>
   /** The behaviours the step writes or must see pass. */
   acceptance: PlanAcceptance[]
   /** Where the Stop hook gave up on this step; cleared by this call, so the next run of the loop is asked again. */
@@ -141,6 +146,13 @@ function sectionItems(plan: PlanDraft, section: PlanElementSection): ReadonlyArr
     default:
       return plan[section]
   }
+}
+
+function relationshipsOf(plan: PlanDraft, derivation: PlanTaskDerivation, stepId: string): Pick<PlanNextStep, 'relationships'> {
+  const relationships = planLaterRelationships(plan, derivation)
+    .filter((later) => later.stepId === stepId)
+    .map((later) => ({ model: later.model.id, name: later.relationship.name, type: later.relationship.type, target: later.target.id }))
+  return relationships.length > 0 ? { relationships } : {}
 }
 
 function elementsOf(plan: PlanDraft, ids: readonly string[], waivers: ReadonlyMap<string, PlanWaiver>): PlanNextElement[] {
@@ -363,6 +375,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
       taskId: task.id,
       task: task.title,
       elements: elementsOf(plan, step.elementIds, log.waivers),
+      ...relationshipsOf(plan, derivation, step.id),
       acceptance: plan.tasks.flatMap((intent) => intent.acceptance).filter((behaviour) => behaviours.has(behaviour.id)),
       ...stallOf(step.id),
       ...(unconfirmed.length > 0 ? { unconfirmed } : {}),
@@ -511,6 +524,10 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     if (toImplement.length > 0) {
       lines.push('', 'Elements the step completes:')
       for (const element of toImplement) lines.push(`  ${element.id} (${element.section})`)
+    }
+    if (step.relationships) {
+      lines.push('', 'Relationships of earlier models the step completes, declared in those models\u2019 files:')
+      for (const relationship of step.relationships) lines.push(`  ${relationship.model} ${relationship.name} (${relationship.type} ${relationship.target})`)
     }
     if (waived.length > 0) {
       lines.push('', 'Waived, not to be implemented:', ...waived, '  The step verifies without them; a waiver is the person\u2019s decision, not yours to take or to undo.')

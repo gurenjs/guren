@@ -42,6 +42,7 @@ import {
   type PlanSideEffect,
   type PlanView,
 } from './schema'
+import { derivePlanTasks, planLaterRelationships, type PlanLaterRelationship } from './tasks'
 
 /** Every state of RFC 0030 §6. `plan:status` sets the ones in {@link PlanStatusState}. */
 export type PlanElementState = 'planned' | 'present' | 'wired' | 'verified' | 'drifted' | 'unjudged' | 'blocked' | 'waived'
@@ -543,6 +544,9 @@ class StatusContext {
   private readonly viewsById: Map<string, PlanView>
   private readonly namesById: Map<string, string>
   private readonly reachable: ReadonlySet<string>
+  /** Relationships a later task completes, by declaring model id, then by the target model id they are judged under. */
+  private readonly deferred: Map<string, PlanLaterRelationship[]>
+  private readonly inbound: Map<string, PlanLaterRelationship[]>
 
   constructor(
     private readonly plan: PlanDraft,
@@ -557,6 +561,12 @@ class StatusContext {
     )
     this.viewsById = new Map(plan.views.map((view) => [view.id, view]))
     this.namesById = new Map([...plan.validators, ...plan.resources, ...plan.policies].map((element) => [element.id, element.name]))
+    this.deferred = new Map()
+    this.inbound = new Map()
+    for (const later of planLaterRelationships(plan, derivePlanTasks(plan))) {
+      this.deferred.set(later.model.id, [...(this.deferred.get(later.model.id) ?? []), later])
+      this.inbound.set(later.target.id, [...(this.inbound.get(later.target.id) ?? []), later])
+    }
   }
 
   private conclude(judgement: Judgement): PlanElementStatus {
@@ -641,6 +651,7 @@ class StatusContext {
   }
 
   model(model: PlanModel): PlanElementStatus {
+    const deferred = this.deferred.get(model.id) ?? []
     return this.conclude({
       id: model.id,
       section: 'models',
@@ -649,10 +660,16 @@ class StatusContext {
       exists: this.modelExistence(model.name, model.module),
       previous: previousOf(model.change, (from) => this.modelExistence(from, model.module)),
       properties: () => this.modelProperties(model),
+      // The declaring models' files hold the relationships judged here, so a change to one expires the record.
       files: () => {
         const models = this.section('models')
-        return classFiles(isUnreadable(models) ? undefined : models, model.name, model.module)
+        const classes = isUnreadable(models) ? undefined : models
+        const declaring = (this.inbound.get(model.id) ?? []).flatMap((later) => classFiles(classes, later.model.name, later.model.module))
+        return unique([...classFiles(classes, model.name, model.module), ...declaring])
       },
+      notes: deferred.map(
+        (later) => `Relationship ${later.relationship.name} targets ${later.target.name}, which a later task works on: it is judged with ${later.target.id}, in ${later.stepId}.`,
+      ),
     })
   }
 
@@ -681,22 +698,16 @@ class StatusContext {
       else properties.push(match(property, model.tableRenamedFrom, 'absent'))
     }
 
+    const deferred = new Set((this.deferred.get(model.id) ?? []).map((later) => later.relationship))
     for (const relationship of model.relationships) {
-      const property = `relationship ${relationship.name}`
-      const target = this.modelsById.get(relationship.target)?.name ?? relationship.target
-      // Two properties, under the same keys whatever is read, since an alter's reading at approval is
-      // keyed on them: a target written as a lazy import is one the parser cannot name, and that
-      // must not hide a relationship whose name and type it did read.
-      const targetProperty = `${property} target`
-      const found = actual?.relationships.find((candidate) => candidate.name === relationship.name)
-      if (!actual) properties.push(unknown(property, relationship.type, whyNoModel), unknown(targetProperty, target, whyNoModel))
-      else if (!found) properties.push(differ(property, relationship.type, 'not declared'), differ(targetProperty, target, 'not declared'))
-      else {
-        properties.push(
-          compare(property, relationship.type, found.type, ''),
-          compare(targetProperty, target, found.relatedModel, 'the related model is not written as a class the parser can name'),
-        )
-      }
+      if (!deferred.has(relationship)) properties.push(...this.relationshipProperties(`relationship ${relationship.name}`, relationship, actual, whyNoModel))
+    }
+    for (const later of this.inbound.get(model.id) ?? []) {
+      const declaring = isUnreadable(models)
+        ? undefined
+        : models.find((candidate) => candidate.className === later.model.name && candidate.module === (later.model.module ?? null))
+      const whyNoDeclaring = isUnreadable(models) ? whyNoModel : `the model class ${later.model.name} declaring it was not found or did not parse`
+      properties.push(...this.relationshipProperties(`relationship ${later.model.name}.${later.relationship.name}`, later.relationship, declaring, whyNoDeclaring))
     }
 
     for (const name of model.fillable) {
@@ -716,6 +727,28 @@ class StatusContext {
       properties.push(found === undefined ? unknown(property, 'declared', CONSTRAINTS_HIDDEN) : found ? match(property, 'declared') : differ(property, 'declared', 'not declared'))
     }
     return properties
+  }
+
+  /**
+   * Two properties, under the same keys whatever is read, since an alter's reading at approval is
+   * keyed on them: a target written as a lazy import is one the parser cannot name, and that
+   * must not hide a relationship whose name and type it did read.
+   */
+  private relationshipProperties(
+    property: string,
+    relationship: PlanModel['relationships'][number],
+    actual: { relationships: ReadonlyArray<{ name: string; type: string; relatedModel?: string }> } | undefined,
+    whyNoModel: string,
+  ): PlanPropertyStatus[] {
+    const target = this.modelsById.get(relationship.target)?.name ?? relationship.target
+    const targetProperty = `${property} target`
+    const found = actual?.relationships.find((candidate) => candidate.name === relationship.name)
+    if (!actual) return [unknown(property, relationship.type, whyNoModel), unknown(targetProperty, target, whyNoModel)]
+    if (!found) return [differ(property, relationship.type, 'not declared'), differ(targetProperty, target, 'not declared')]
+    return [
+      compare(property, relationship.type, found.type, ''),
+      compare(targetProperty, target, found.relatedModel, 'the related model is not written as a class the parser can name'),
+    ]
   }
 
   column(model: PlanModel, column: PlanColumn): PlanElementStatus {

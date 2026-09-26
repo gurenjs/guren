@@ -95,7 +95,10 @@ it, and do not edit the application back or the plan to make it pass.
   behaviour it covers to fail again.
 - **`data`**: the schema, migration and model; verified by `db:migrate` and
   `typecheck`. After a scaffold step, what is left is the migration and any
-  relationship `plan:scaffold` reported as left out.
+  relationship `plan:scaffold` reported as left out. One it reported with a
+  later step (`judgedAt`) belongs to that step: `plan:next` lists it there,
+  under the relationships of earlier models the step completes, and you write
+  it in the declaring model's file then.
 - **`http`**: controllers and routes (and validators, resources and policies
   when no scaffold step wrote them), until `guren check` passes and the step's
   behaviours pass. After a scaffold step, first run the command `plan:next`

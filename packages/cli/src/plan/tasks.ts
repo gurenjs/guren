@@ -114,6 +114,40 @@ export function planElementParents(plan: PlanDraft): Map<string, string> {
   return parents
 }
 
+export interface PlanLaterRelationship {
+  /** The model declaring the relationship. */
+  model: PlanModel
+  relationship: PlanModel['relationships'][number]
+  target: PlanModel
+  /** The step owning `target`, which completes the relationship. */
+  stepId: string
+}
+
+/**
+ * The relationships whose target a later task works on (RFC 0030 §5, Order): relationships order
+ * nothing, so a parent's `hasMany` may name a child its own step cannot see yet. Each completes at
+ * the step owning its target, in the declaring model's file. Task order is the derivation's.
+ */
+export function planLaterRelationships(plan: PlanDraft, derivation: PlanTaskDerivation): PlanLaterRelationship[] {
+  const taskOf = new Map<string, { index: number; stepId: string }>()
+  derivation.tasks.forEach((task, index) => {
+    for (const step of task.steps) for (const id of step.elementIds) taskOf.set(id, { index, stepId: step.id })
+  })
+  const modelById = new Map(plan.models.map((model) => [model.id, model]))
+  const later: PlanLaterRelationship[] = []
+  for (const model of plan.models) {
+    const own = model.change.kind === 'drop' ? undefined : taskOf.get(model.id)
+    if (!own) continue
+    for (const relationship of model.relationships) {
+      const target = modelById.get(relationship.target)
+      // A dropped model has no properties judged, so a relationship naming one stays where it was declared.
+      const theirs = target && target.change.kind !== 'drop' ? taskOf.get(target.id) : undefined
+      if (target && theirs && theirs.index > own.index) later.push({ model, relationship, target, stepId: theirs.stepId })
+    }
+  }
+  return later
+}
+
 export interface DerivePlanTasksOptions {
   /** `PlanAppState.apiOnly`: whether such an app gets a scaffold step is open (§5), so no slice is scaffolded. */
   apiOnly?: boolean
