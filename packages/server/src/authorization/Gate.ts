@@ -54,6 +54,18 @@ function toAuthorizationResponse(value: unknown): AuthorizationResponse {
   return value === true ? Response.allow() : Response.deny()
 }
 
+/**
+ * An object literal or null-prototype object, the shape of an ORM record. A class
+ * instance or a tuple is not one, so an unresolved one still denies.
+ */
+function isPlainRecord(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
 /** Honours `denyWithStatus()` / `denyAsNotFound()` so a policy can hide a record as a 404. */
 export function denialToException(response: AuthorizationResponse): Error {
   const message = response.message ?? 'This action is unauthorized.'
@@ -218,6 +230,12 @@ export class Gate {
       return this.settle(user, ability, toAuthorizationResponse(result), args)
     }
 
+    if (isPlainRecord(model)) {
+      throw new Error(
+        `No policy resolved for a plain record in the "${ability}" check; pass [Model, record] so the gate can find the model's policy, or define a gate for "${ability}".`
+      )
+    }
+
     return this.settle(user, ability, Response.deny(), args)
   }
 
@@ -233,8 +251,9 @@ export class Gate {
 
   /**
    * The subject may be a class instance (policy resolved via its constructor)
-   * or a `[ModelClass, record]` / `['key', record]` tuple — the tuple form is
-   * required for plain ORM records, which carry no constructor information.
+   * or a `[ModelClass, record]` / `['key', record]` tuple. ORM records are plain
+   * objects with no constructor information, so they need the tuple: a plain
+   * record reaching no policy and no gate throws in `checkResponse()`.
    */
   protected async checkPolicy(
     ability: string,

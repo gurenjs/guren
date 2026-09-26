@@ -614,6 +614,7 @@ describe('plan:scaffold', () => {
 
           // Planned response: a redirect to /posts/:postId
           // Rule: The widget belongs to the post in the path.
+          // postId, parentId are not fillable: write them with Widget.create(data, { set: { postId, parentId } }) (RFC 0031)
           async store(): Promise<Response> {
             await this.validateBody(WidgetPayloadSchema)
             throw HttpException.notImplemented('WidgetController.store is planned and not written yet')
@@ -621,7 +622,8 @@ describe('plan:scaffold', () => {
 
           // Planned response: no content
           async destroy(): Promise<Response> {
-            await this.authorize('delete', Widget)
+            const widget = this.model(Widget)
+            await this.authorize('delete', [Widget, widget])
             throw HttpException.notImplemented('WidgetController.destroy is planned and not written yet')
           }
         }
@@ -1491,6 +1493,18 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     await this.authorize('update', Widget)
     await this.validateBody(WidgetPayloadSchema)
     `)
+  })
+
+  // The gate resolves a policy for an ORM record only from [Model, record], so a stub that
+  // authorizes a record ability against the bare class must say so where the record is loaded.
+  test('should name the [Model, record] form above a record ability no route binds a record for', () => {
+    const document = widgetsPlan()
+    document.controllers![0]!.actions[1]!.authorization.policy = { id: 'policy.widget', ability: 'update' }
+
+    const controller = emitWidgets(document, 'pg').files.find((file) => file.path === 'app/Http/Controllers/WidgetController.ts')!.contents
+
+    expect(controller).toContain('  // update is asked of one Widget: once the action loads it, pass [Widget, widget], since the bare class reaches the policy with no record\n')
+    expect(controller).toContain("    const widget = this.model(Widget)\n    await this.authorize('delete', [Widget, widget])\n")
   })
 
   test('should mount no root routes file for a module entity, which the scaffold refuses', () => {

@@ -17,12 +17,15 @@ import { buildMailSource } from '../make-mail'
 import { buildNotificationSource } from '../make-notification'
 import { AUTH_ALIAS, authAliasLine, buildRoutesSource, routeCall } from '../make-route'
 import { quoteString } from '../schema-columns'
-import { isBindingName, isIdentifier, pascalCase, quoteObjectKey, relativeImportPath } from '../utils'
+import { camelCase, isBindingName, isIdentifier, pascalCase, quoteObjectKey, relativeImportPath } from '../utils'
 import { entityDocPath } from './close-docs'
 import type { PlanScaffoldUnwritten } from './scaffold-http'
 import type { PlanAction, PlanController, PlanDraft, PlanModel, PlanRoute, PlanSideEffect } from './schema'
 
 const CONTRACT_FIELDS = ['params', 'query', 'body'] as const
+
+/** Abilities asked of one record, which the gate resolves only from `[Model, record]`: an ORM record carries no class. */
+const RECORD_ABILITIES: ReadonlySet<string> = new Set(['view', 'show', 'update', 'edit', 'delete', 'destroy', 'restore', 'forceDelete'])
 
 /** `Controller`'s own members, which an action of the same name would replace. */
 const CONTROLLER_MEMBERS: ReadonlySet<string> = new Set(['constructor', ...Object.keys(CONTROLLER_MEMBER_KINDS)])
@@ -120,6 +123,13 @@ function oneLine(text: string): string {
   return text.replace(/\s+/gu, ' ').trim()
 }
 
+/** The model's foreign keys a payload cannot fill, which `create()` refuses unless they come through `set`. */
+function unfillableForeignKeys(model: PlanModel): string[] {
+  return model.columns
+    .filter((column) => column.references && !column.primaryKey && column.change.kind !== 'drop' && !model.fillable.includes(column.name))
+    .map((column) => column.name)
+}
+
 function describeResponse(plan: PlanDraft, response: PlanAction['response']): string {
   const named = (id: string): string => {
     const element = [...plan.views.map((view) => ({ id: view.id, name: view.page })), ...plan.resources].find((candidate) => candidate.id === id)
@@ -187,22 +197,42 @@ export class PlanHttpEmitter {
    * rejects is rejected already. The ability is asked before the body is read, so a caller the
    * policy denies gets 403 whatever it sent. No response is written: the readers credit the one named.
    */
-  private action(controller: PlanController, action: PlanAction, imports: Imports): ControllerActionSource {
+  private action(controller: PlanController, action: PlanAction, model: PlanModel, imports: Imports): ControllerActionSource {
     const lines = [...this.validation(action, 'params', imports), ...this.validation(action, 'query', imports)]
+    const notes: string[] = []
+    const routes = this.plan.routes.filter((route) => route.action === action.id)
     const policy = action.authorization.policy
     if (policy) {
       const planned = this.plan.policies.find((candidate) => candidate.id === policy.id)
-      const model = planned ? this.model(planned.model) : `the plan declares no ${policy.id}`
-      if (typeof model === 'string') this.leave(action.id, 'policy ability', model)
-      else lines.push(`    await this.authorize(${quoteString(policy.ability)}, ${imports.add(model)})`)
+      const subject = planned ? this.model(planned.model) : `the plan declares no ${policy.id}`
+      if (typeof subject === 'string') this.leave(action.id, 'policy ability', subject)
+      else {
+        const name = imports.add(subject)
+        const ability = quoteString(policy.ability)
+        const record = isBindingName(camelCase(name)) ? camelCase(name) : 'record'
+        // this.model() throws on a route that binds no record of the class, so every route must bind exactly one.
+        if (routes.length > 0 && routes.every((route) => route.bind.filter((binding) => binding.model === planned!.model).length === 1)) {
+          lines.push(`    const ${record} = this.model(${name})`, `    await this.authorize(${ability}, [${name}, ${record}])`)
+        } else {
+          lines.push(`    await this.authorize(${ability}, ${name})`)
+          if (RECORD_ABILITIES.has(policy.ability)) {
+            notes.push(`${policy.ability} is asked of one ${name}: once the action loads it, pass [${name}, ${record}], since the bare class reaches the policy with no record`)
+          }
+        }
+      }
     }
     lines.push(...this.validation(action, 'body', imports))
+    const serverSet = action.body && routes.some((route) => route.method === 'POST') ? unfillableForeignKeys(model) : []
+    if (serverSet.length > 0) {
+      const keys = serverSet.join(', ')
+      notes.push(`${keys} ${serverSet.length === 1 ? 'is' : 'are'} not fillable: write ${serverSet.length === 1 ? 'it' : 'them'} with ${model.name}.create(data, { set: { ${keys} } }) (RFC 0031)`)
+    }
     const response = describeResponse(this.plan, action.response)
     this.leave(action.id, 'response', `the stub answers 501 until the http step writes ${response}`)
     lines.push(`    throw HttpException.notImplemented(${quoteString(`${controller.className}.${action.name} is planned and not written yet`)})`)
     return {
       name: action.name,
-      comment: [`Planned response: ${response}`, ...action.rules.map((rule) => `Rule: ${oneLine(rule)}`)],
+      comment: [`Planned response: ${response}`, ...action.rules.map((rule) => `Rule: ${oneLine(rule)}`), ...notes],
       body: lines.join('\n'),
     }
   }
@@ -210,7 +240,7 @@ export class PlanHttpEmitter {
   controller(controller: PlanController, actions: readonly PlanAction[], model: PlanModel): string {
     const path = controllerFilePath(controller)
     const imports = new Imports(path)
-    const sources = actions.map((action) => this.action(controller, action, imports))
+    const sources = actions.map((action) => this.action(controller, action, model, imports))
     return buildControllerSource({
       className: controller.className,
       coreImports: sources.length > 0 ? ['HttpException'] : [],

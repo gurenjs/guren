@@ -191,6 +191,10 @@ await gate.authorize('update', [Post, post])
 const canView = await gate.allows('view', somePostInstance)
 ```
 
+タプルにせずに渡したプレーンなレコードでは、ポリシーが見つかりません。その ability の gate も定義されていなければ、チェックは拒否せずに `Error` を投げます。メッセージには ability 名と `[Model, record]` への直し方が入ります。レコードの持ち主本人が理由のわからない 403 を受け取る代わりに、誤りが 500 として表に出ます。`before()` コールバックと、その ability に定義した gate には、プレーンなレコードがそのまま渡ります。ポリシーのないクラスのインスタンスと、ポリシーのないモデルのタプルは拒否されます。
+
+`gate.any()` と、配列を渡した `authorizeMiddleware()` は ability を順に確認します。プレーンなレコードは、何も解決できない最初の ability で例外になり、後ろの ability が許可する場合でも止まります。ここでもタプルを渡してください。
+
 ### ポリシーメソッド
 
 ポリシーは以下の標準メソッドをサポートします:
