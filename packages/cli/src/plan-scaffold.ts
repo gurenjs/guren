@@ -32,18 +32,18 @@ import { readBracketedTokenFiles } from './docs-acceptance'
 import { DIALECT_BARRELS } from './drizzle-specifiers'
 import { discoverModelClasses } from './model-parser'
 import { parseSourceFile, ParseCache } from './parse-cache'
-import { appendTableToSchema, detectSchemaDialect, ensureNamedImports } from './patch-helpers'
+import { appendTableToSchema, detectSchemaDialect, ensureNamedImports, type SchemaDialect } from './patch-helpers'
 import { readPlanFile } from './plan-render'
 import { exportedNames } from './plan/app-detail'
 import { requirePlanApproval } from './plan/approvals'
 import { writeFileAtomic } from './plan/beside'
 import { entityDocPath } from './plan/close-docs'
-import { emitPlanScaffold, planScaffoldMountCommandLine, planScaffoldMounts, type PlanScaffoldMount, type PlanScaffoldOutput } from './plan/scaffold'
+import { emitPlanScaffold, planScaffoldMountCommandLine, planScaffoldMounts, type PlanScaffoldApp, type PlanScaffoldMount, type PlanScaffoldOutput } from './plan/scaffold'
 import { importSpecifier } from './plan/scaffold-controller'
-import { emitPlanTests, type PlanTestsOutput } from './plan/scaffold-tests'
+import { emitPlanTests, planTestsFilePath, type PlanTestsOutput } from './plan/scaffold-tests'
 import type { Plan } from './plan/schema'
 import { planSlug, readPlanState } from './plan/state'
-import { derivePlanTasks, findPlanStep, listPlanSteps, type PlanTaskDerivation } from './plan/tasks'
+import { derivePlanTasks, findPlanStep, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation } from './plan/tasks'
 import { composeAppProviderRegistration, resolveAppEntry } from './provider-registrar'
 import { composeRouteRegistrarCall, resolveRoutesEntry } from './route-registrar'
 import { isRoutesFileMounted } from './routes-check'
@@ -156,23 +156,8 @@ async function existingEntityDocs(root: string, plan: Plan): Promise<string[]> {
   return docs.filter((_, index) => exists[index])
 }
 
-export async function planScaffoldFile(planPath: string, options: PlanScaffoldFileOptions): Promise<PlanScaffoldReport> {
-  const { path, plan, hash } = await approvedPlan(planPath, options, SCAFFOLD)
-  const root = options.appRoot
-
-  const derivation = derivePlanTasks(plan)
-  const found = findPlanStep(derivation, options.step)
-  if (found?.step.kind === 'tests') {
-    await requireMark(root, path, planPath, found.step.id, SCAFFOLD)
-    return planScaffoldTests({ root, path, plan, hash }, found)
-  }
-  if (await isApiOnly(root)) refuse([API_ONLY])
-  if (!found || found.step.kind !== 'scaffold') {
-    refuse([`${options.step} is ${found ? `a ${found.step.kind} step` : 'no step of the plan'}, and plan:scaffold writes a scaffold or tests step only. ${scaffoldStepHint(plan, derivation, planPath, options.step, found)}`])
-  }
-  const { step } = found
-  await requireMark(root, path, planPath, step.id, SCAFFOLD)
-
+/** What the scaffold emitter reads of the root: the schema it appends to, and every name a target may collide with. */
+async function readScaffoldApp(root: string, plan: Plan): Promise<{ schemaPath: string; schema: string; dialect: SchemaDialect; app: PlanScaffoldApp }> {
   const schemaPath = schemaPathFor(null)
   const schema = await readIfExists(root, schemaPath)
   if (schema === null) refuse([`plan:scaffold appends tables to ${schemaPath}, which this application does not have.`])
@@ -182,8 +167,7 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
   const modelFiles = await rootModelFiles(root, cache)
   const validators = await rootValidatorExports(root, cache)
   if ('unreadable' in validators) refuse([`plan:scaffold cannot tell which schemas the validator files already export: ${validators.unreadable}.`])
-
-  const output = emitPlanScaffold(plan, step, {
+  const app: PlanScaffoldApp = {
     dialect,
     tables: tables.map((table) => ({
       identifier: table.identifier,
@@ -203,9 +187,55 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
     modelFiles,
     validatorFiles: validators.files,
     docs: await existingEntityDocs(root, plan),
-  })
-  const inTheWay = []
-  for (const file of output.files) if (await pathExists(resolve(root, file.path))) inTheWay.push(`${file.path} already exists.`)
+  }
+  return { schemaPath, schema, dialect, app }
+}
+
+async function filesOnDisk(root: string, paths: readonly string[]): Promise<string[]> {
+  const exists = await Promise.all(paths.map((path) => pathExists(resolve(root, path))))
+  return paths.filter((_, index) => exists[index])
+}
+
+/** The test files carrying each of the step's acceptance ids: plan:verify selects a behaviour's file by its id. */
+async function carriedAcceptanceIds(root: string, step: PlanDerivedStep): Promise<Map<string, string[]>> {
+  return readBracketedTokenFiles(root, await discoverTestFiles(root), (token) => step.acceptanceIds.includes(token))
+}
+
+/**
+ * The targets of a scaffold or tests step already on disk, by the checks plan:scaffold refuses on:
+ * the files it would write, and for a tests step the test files carrying its ids. plan:next reads
+ * it to tell a step built before a revision from one to scaffold; a read that fails throws.
+ */
+export async function planScaffoldTargetsOnDisk(root: string, path: string, plan: Plan, task: PlanDerivedTask, step: PlanDerivedStep): Promise<string[]> {
+  if (step.kind === 'tests') {
+    const carriers = [...(await carriedAcceptanceIds(root, step)).values()].flat()
+    return [...new Set([...(await filesOnDisk(root, [planTestsFilePath(planSlug(path), task)])), ...carriers])]
+  }
+  if (step.kind !== 'scaffold') return []
+  const { app } = await readScaffoldApp(root, plan)
+  return filesOnDisk(root, emitPlanScaffold(plan, step, app).files.map((file) => file.path))
+}
+
+export async function planScaffoldFile(planPath: string, options: PlanScaffoldFileOptions): Promise<PlanScaffoldReport> {
+  const { path, plan, hash } = await approvedPlan(planPath, options, SCAFFOLD)
+  const root = options.appRoot
+
+  const derivation = derivePlanTasks(plan)
+  const found = findPlanStep(derivation, options.step)
+  if (found?.step.kind === 'tests') {
+    await requireMark(root, path, planPath, found.step.id, SCAFFOLD)
+    return planScaffoldTests({ root, path, plan, hash }, found)
+  }
+  if (await isApiOnly(root)) refuse([API_ONLY])
+  if (!found || found.step.kind !== 'scaffold') {
+    refuse([`${options.step} is ${found ? `a ${found.step.kind} step` : 'no step of the plan'}, and plan:scaffold writes a scaffold or tests step only. ${scaffoldStepHint(plan, derivation, planPath, options.step, found)}`])
+  }
+  const { step } = found
+  await requireMark(root, path, planPath, step.id, SCAFFOLD)
+
+  const { schemaPath, schema, dialect, app } = await readScaffoldApp(root, plan)
+  const output = emitPlanScaffold(plan, step, app)
+  const inTheWay = (await filesOnDisk(root, output.files.map((file) => file.path))).map((file) => `${file} already exists.`)
   const registration = await registerProviders(root, output.providers)
   refuseStep(step.id, [...output.refusals, ...inTheWay, ...registration.refusals], 'If this step was scaffolded before, it has nothing left to write: run guren plan:verify for it.')
 
@@ -290,7 +320,7 @@ async function planScaffoldTests(
   })
   refusals.push(...output.refusals)
   if (await pathExists(resolve(root, output.file.path))) refusals.push(`${output.file.path} already exists.`)
-  const carried = await readBracketedTokenFiles(root, await discoverTestFiles(root), (token) => step.acceptanceIds.includes(token))
+  const carried = await carriedAcceptanceIds(root, step)
   for (const [id, files] of carried) refusals.push(`[${id}] is already carried by ${files.join(', ')}; plan:verify needs each behaviour in one test file.`)
   refuseStep(step.id, refusals, 'If this step was scaffolded before, write its tests there and run guren plan:verify for it.')
 

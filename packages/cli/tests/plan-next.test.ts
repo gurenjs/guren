@@ -9,6 +9,7 @@ import { builtinSubCommands } from '../src/commands'
 import { planApproveFile } from '../src/plan-approve'
 import { formatPlanNext, planNextFile, type PlanNextReport } from '../src/plan-next'
 import { parsePlanDocument } from '../src/plan-render'
+import { planScaffoldFile } from '../src/plan-scaffold'
 import { planWaiveFile } from '../src/plan-waive'
 import type { PlanAppState } from '../src/plan/app-state'
 import { MAX_STEP_CONTINUATIONS as MAX_CONTINUATIONS } from '../src/plan-stop-hook'
@@ -17,7 +18,7 @@ import { planDigest, PLAN_STATE_VERSION, type PlanState, type PlanStepRecord } f
 import { derivePlanTasks, planStepIds } from '../src/plan/tasks'
 import { sha256 } from '../src/plan/verification'
 import { writeWorkspaceFiles } from './helpers'
-import { approvedAgainst, approvePlanFile, loadCommentsPlan, PLAN_APP_FILES, planAppState, type PlanAppStateInput } from './plan-fixture'
+import { approvedAgainst, approvePlanFile, loadCommentsPlan, PLAN_APP_FILES, PLAN_APP_WITH_COMMENTS, planAppState, type PlanAppStateInput } from './plan-fixture'
 
 // A draft never has the application read, so an app here is a directory with a plan; an approved
 // plan is handed the application as `app`, or read from a committed one on disk.
@@ -168,6 +169,35 @@ describe('plan:next', () => {
     expect(text).toContain(`Verified against plan hash ${parent.slice(0, 12)}, before the plan changed to this one.`)
     expect(text).toContain(`Re-check it with \`bunx guren plan:verify comments.plan.json --step ${SCAFFOLD}\` before implementing anything`)
     expect(text).not.toContain('Implement this step only')
+  })
+
+  test('should name a scaffold step built under an earlier revision as one to verify, since plan:scaffold refuses its targets', async () => {
+    const approved = approvedAgainst(loadCommentsPlan())
+    const { app, plan } = await createApp('built-earlier')
+    await writeWorkspaceFiles(app, { ...PLAN_APP_WITH_COMMENTS, 'comments.plan.json': JSON.stringify(approved) })
+    await approvePlanFile(plan)
+    const parent = 'a'.repeat(64)
+    // Not verified before the revision, so only the targets on disk tell the step was scaffolded.
+    await writeState(app, { steps: { [SCAFFOLD]: { ...(await holding(app)), outcome: 'incomplete', planDigest: parent } } })
+
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+    const text = formatPlanNext(report, 'comments.plan.json')
+
+    expect(report.step!.id).toBe(SCAFFOLD)
+    expect(report.step!.verifiedAt).toBeUndefined()
+    expect(report.step!.builtEarlier).toEqual({ planHash: parent, outcome: 'incomplete', existing: ['app/Models/Comment.ts'] })
+    expect(text).toContain(`Built under an earlier revision of the plan (recorded incomplete against plan hash ${parent.slice(0, 12)}): app/Models/Comment.ts is already on disk, so plan:scaffold has nothing to write for it.`)
+    expect(text).toContain(`Re-check it with \`bunx guren plan:verify comments.plan.json --step ${SCAFFOLD}\` only`)
+    expect(text).not.toContain('Write this step with')
+    expect(text).not.toContain('Implement this step only')
+    // The target plan:next names is the one plan:scaffold refuses on.
+    await expect(planScaffoldFile(plan, { appRoot: app, step: SCAFFOLD })).rejects.toThrow('app/Models/Comment.ts already exists.')
+
+    // The same record with the targets gone leaves the step to scaffold.
+    await rm(join(app, 'app/Models/Comment.ts'))
+    const fresh = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+    expect(fresh.step!.builtEarlier).toBeUndefined()
+    expect(formatPlanNext(fresh, 'comments.plan.json')).toContain(`Write this step with \`bunx guren plan:scaffold comments.plan.json --step ${SCAFFOLD}\`, not by hand.`)
   })
 
   test('should name --mount for the http step holding the routes the scaffold wrote, and what it left to write', async () => {
