@@ -7,11 +7,14 @@
  * Then, while `guren plan:next` has marked a plan step, verify it and block until it
  * is verified or the hook gives up (RFC 0030 §7), which it says on stderr.
  */
-import { resolve } from 'node:path'
+import { existsSync } from 'node:fs'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 interface HookInput {
   /** Sent by every host speaking this contract; `true` once a Stop hook already blocked this stop. */
   stop_hook_active?: boolean
+  /** The session's cwd, which follows the agent's `cd` and a worktree it entered. */
+  cwd?: string
 }
 
 let input: HookInput
@@ -36,10 +39,25 @@ try {
   process.exit(2)
 }
 
-// The app root is this script's grandparent (`<app>/.claude/hooks/`,
-// `<app>/.codex/hooks/`): Codex runs hooks in the session cwd, which may be a
-// subdirectory, and a monorepo app is not the git root.
-const root = resolve(import.meta.dir, '../..')
+/**
+ * The app to gate: the nearest ancestor of the session cwd holding this script at
+ * its own path, else the script's grandparent (`<app>/.claude/hooks/`, `.codex/hooks/`).
+ * Claude Code runs the project dir's copy while the cwd may be a subdirectory or a
+ * worktree it entered, whose tree is the one to judge; a monorepo app is not the git root.
+ */
+function appRoot(cwd: unknown): string {
+  const installed = resolve(import.meta.dir, '../..')
+  const self = relative(installed, import.meta.path)
+  if (typeof cwd === 'string' && isAbsolute(cwd)) {
+    for (let dir = cwd; ; dir = dirname(dir)) {
+      if (existsSync(join(dir, self))) return dir
+      if (dirname(dir) === dir) break
+    }
+  }
+  return installed
+}
+
+const root = appRoot(input.cwd)
 
 // The gate blocks once per stop; the plan step counts its own continuations in state.
 if (!input.stop_hook_active) {

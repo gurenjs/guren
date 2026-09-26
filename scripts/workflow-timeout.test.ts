@@ -56,7 +56,7 @@ describe('workflow job timeouts', () => {
   })
 })
 
-describe("CI's trial lane", () => {
+describe("CI's Run tests step", () => {
   it('caps the test step, not only the job', () => {
     /*
      * `continue-on-error` is documented to mask a job that *fails*, and a

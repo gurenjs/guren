@@ -224,34 +224,43 @@ export async function addRouteRegistrarCall(
   functionName: string,
   importStatement: string,
 ): Promise<PatchResult> {
-  const absolutePath = resolve(process.cwd(), filePath)
   const content = await readIfExists(process.cwd(), filePath)
 
   if (content === null) {
     return { modified: false, reason: PATCH_REASONS.fileNotFound }
   }
 
+  const composed = composeRouteRegistrarCall(content, filePath, functionName, importStatement)
+  if (composed.content === undefined) return { modified: false, reason: composed.reason }
+
+  await writeFile(resolve(process.cwd(), filePath), composed.content, 'utf8')
+  return { modified: true }
+}
+
+/** Why a patch was not composed, or the patched file. */
+export type ComposedPatch = { content: string; reason?: undefined } | { content?: undefined; reason: string }
+
+/**
+ * {@link addRouteRegistrarCall}'s patch as a pure function of the file's text, so a command can
+ * decide every refusal before it writes anything. The call goes first in the registrar body.
+ */
+export function composeRouteRegistrarCall(content: string, filePath: string, functionName: string, importStatement: string): ComposedPatch {
   const ast = parseSourceFile(content, filePath)
 
   if (ast === null) {
-    return { modified: false, reason: 'Could not parse the file' }
+    return { reason: 'Could not parse the file' }
   }
 
   if (callsFunction(ast, functionName)) {
     // The call is there; the import may still be missing if someone removed it.
     const withImport = insertImport(content, importStatement)
-    if (withImport === null) {
-      return { modified: false, reason: 'Already registered' }
-    }
-
-    await writeFile(absolutePath, withImport, 'utf8')
-    return { modified: true }
+    return withImport === null ? { reason: 'Already registered' } : { content: withImport }
   }
 
   const registrar = registrarIn(ast)
 
   if (registrar === null) {
-    return { modified: false, reason: 'Could not find a route registrar' }
+    return { reason: 'Could not find a route registrar' }
   }
 
   // The trailing newline keeps the call from absorbing whatever comment the
@@ -261,8 +270,7 @@ export async function addRouteRegistrarCall(
     + `\n  ${functionName}(${registrar.parameterName})\n`
     + content.slice(registrar.bodyStart)
 
-  await writeFile(absolutePath, insertImport(called, importStatement) ?? called, 'utf8')
-  return { modified: true }
+  return { content: insertImport(called, importStatement) ?? called }
 }
 
 /**

@@ -167,15 +167,54 @@ export default {
     expect(definitions.map((definition) => definition.module)).toEqual([undefined, 'Invoicing'])
   })
 
-  it('warns and skips a module directory without an index.ts, without throwing', async () => {
+  it('loads a module whose entry is index.tsx', async () => {
+    await writeFile(join(tempDir, 'routes/web.ts'), `import type { Router } from '@guren/core'\n\nexport function registerWebRoutes(_router: Router): void {}\n`)
+    await mkdir(join(tempDir, 'modules/health'), { recursive: true })
+    await writeFile(
+      join(tempDir, 'modules/health/index.tsx'),
+      `import type { Router } from '@guren/core'
+
+export const healthModule = {
+  name: 'health',
+  providers: [],
+  routes: (router: Router) => {
+    router.get('/health', () => new Response('ok')).name('health.check')
+  },
+}
+`,
+    )
+    const warnings: string[] = []
+
+    const definitions = await loadRouteDefinitions(join(tempDir, 'routes/web.ts'), tempDir, warnings)
+
+    expect(warnings).toEqual([])
+    expect(definitions.map((definition) => definition.name)).toEqual(['health.check'])
+  })
+
+  it('names the file it resolved when the module entry exports no module', async () => {
+    await writeFile(join(tempDir, 'routes/web.ts'), `import type { Router } from '@guren/core'\n\nexport function registerWebRoutes(_router: Router): void {}\n`)
+    await mkdir(join(tempDir, 'modules/broken'), { recursive: true })
+    await writeFile(join(tempDir, 'modules/broken/index.mts'), `export const notAModule = { hello: 'world' }\n`)
+    const warnings: string[] = []
+
+    await loadRouteDefinitions(join(tempDir, 'routes/web.ts'), tempDir, warnings)
+
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toStartWith("modules/broken/index.mts doesn't export a defineModule() result")
+  })
+
+  it('warns and skips a module directory without an entry file, without throwing', async () => {
     await writeFile(join(tempDir, 'routes/web.ts'), `import type { Router } from '@guren/core'\n\nexport function registerWebRoutes(_router: Router): void {}\n`)
 
     await mkdir(join(tempDir, 'modules/incomplete'), { recursive: true })
     await writeFile(join(tempDir, 'modules/incomplete/.gitkeep'), '')
+    const warnings: string[] = []
 
-    const definitions = await loadRouteDefinitions(join(tempDir, 'routes/web.ts'), tempDir)
+    const definitions = await loadRouteDefinitions(join(tempDir, 'routes/web.ts'), tempDir, warnings)
 
     expect(definitions).toEqual([])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toStartWith('modules/incomplete has no entry file (index or package.json main)')
   })
 
   it('warns and skips a module index.ts that does not export a GurenModule shape', async () => {

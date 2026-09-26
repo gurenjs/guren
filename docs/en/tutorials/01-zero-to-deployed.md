@@ -169,16 +169,16 @@ Open `.claude/settings.json`. The part that matters is the three hooks:
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "bunx guren context 2>/dev/null || true" }] }
+      { "hooks": [{ "type": "command", "command": "cd \"${CLAUDE_PROJECT_DIR}\" && bunx guren context 2>/dev/null || true" }] }
     ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write|MultiEdit",
-        "hooks": [{ "type": "command", "command": "bun .claude/hooks/check-after-edit.ts" }]
+        "hooks": [{ "type": "command", "command": "bun \"${CLAUDE_PROJECT_DIR}/.claude/hooks/check-after-edit.ts\"" }]
       }
     ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "bun .claude/hooks/gate-on-stop.ts", "timeout": 300 }] }
+      { "hooks": [{ "type": "command", "command": "bun \"${CLAUDE_PROJECT_DIR}/.claude/hooks/gate-on-stop.ts\"", "timeout": 300 }] }
     ]
   }
 }
@@ -187,6 +187,8 @@ Open `.claude/settings.json`. The part that matters is the three hooks:
 - **`SessionStart`** injects the output of `bunx guren context` into the agent's context before its first turn: a map of every model, route, controller and page, ending with a digest of the framework's API signatures. The agent starts knowing what the project is, without reading `node_modules`.
 - **`PostToolUse`** runs after every file edit. If the file is a route, controller, model, schema or page, `.claude/hooks/check-after-edit.ts` runs `guren check` and hands any findings straight back to the agent, so the fix happens in the same turn.
 - **`Stop`** runs when the agent tries to end a turn with uncommitted changes. `.claude/hooks/gate-on-stop.ts` runs `guren gate`; if any stage fails, the stop is blocked once and the findings come back. The agent cannot declare a change done while the gate is red.
+
+Claude Code runs a hook in the session's current directory, which moves whenever the agent runs `cd`. Each command therefore starts from `${CLAUDE_PROJECT_DIR}`, the directory the session opened in.
 
 See what the agent sees:
 

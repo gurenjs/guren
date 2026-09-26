@@ -461,6 +461,35 @@ kernel.registerMany(billingModule.commands)`,
     }
   })
 
+  it('checks a module command against a descriptor kept in index.tsx', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-module-tsx-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing/app/Console/Commands'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/billing/app/Console/Commands/InvoiceCommand.ts'),
+        COMMAND_SOURCE.replace(/SendDigestCommand/g, 'InvoiceCommand'),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'modules/billing/index.tsx'),
+        `import { defineModule } from '@guren/core'
+import InvoiceCommand from './app/Console/Commands/InvoiceCommand.js'
+
+export const billingModule = defineModule({ name: 'billing', commands: [InvoiceCommand] })`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const commandCheck = report.checks.find(c => c.key === 'console-command:billing/InvoiceCommand')
+      expect(commandCheck?.status).toBe('pass')
+      expect(commandCheck!.message).toContain('modules/billing/index.tsx')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it("does not credit one module's registration to another", async () => {
     const workspace = await createTempWorkspace('guren-cli-check-console-two-modules-')
 

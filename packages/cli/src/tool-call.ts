@@ -23,6 +23,7 @@ import {
   type RouteDefinition,
   type ToolCallOutcome,
 } from '@guren/server'
+import { markCommandFailed } from './command-status'
 import { loadBootedApplication, type MaybeApplication } from './runtime'
 import { parseUserId } from './token-issue'
 
@@ -495,11 +496,10 @@ export async function runToolCall(options: ToolCallOptions): Promise<void> {
     printReport(result)
   }
 
-  // The dispatch succeeded; the call failed. A script asking "did this tool work" must
-  // not read a 422 as success, so the status sets the exit code — set, not thrown, so the
-  // body still prints.
+  // Dispatch can succeed while the tool returns an error such as HTTP 422; marked rather
+  // than thrown, so the body above still prints.
   if (result.outcome.isError) {
-    process.exitCode = 1
+    markCommandFailed()
   }
 }
 

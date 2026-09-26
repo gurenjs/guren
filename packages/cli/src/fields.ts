@@ -6,7 +6,7 @@
  * composes `make:validator`, so a definition owned by either would be a cycle.
  */
 
-import { isIdentifier } from './utils'
+import { isBindingName, isIdentifier } from './utils'
 
 export const FIELD_TYPES = ['string', 'number', 'boolean', 'text', 'date', 'json'] as const
 
@@ -65,20 +65,6 @@ export interface AttachmentDefinition {
 }
 
 /**
- * Names `isIdentifier` accepts that still cannot be bound with `const`, which
- * is what a hasOne collection becomes in the generated store action. Field
- * names deliberately skip this list: they only ever appear as object keys and
- * property accesses, where reserved words are legal.
- */
-const RESERVED_WORDS = new Set([
-  'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete',
-  'do', 'else', 'enum', 'export', 'extends', 'false', 'finally', 'for', 'function', 'if',
-  'implements', 'import', 'in', 'instanceof', 'interface', 'let', 'new', 'null', 'package',
-  'private', 'protected', 'public', 'return', 'static', 'super', 'switch', 'this', 'throw',
-  'true', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield',
-])
-
-/**
  * `--attach "cover:one,images:many"`, mirroring `--fields`' shape; an omitted
  * kind defaults to `one`, and the empty string means "no attachments".
  * Duplicates are rejected here, unlike in `parseFieldsString`: a repeated
@@ -104,7 +90,9 @@ export function parseAttachString(attachStr: string): AttachmentDefinition[] {
       throw new Error(`Invalid attachment name "${name}". Use a valid identifier, e.g. "coverImage".`)
     }
 
-    if (RESERVED_WORDS.has(name)) {
+    // A hasOne collection becomes a `const` in the generated store action. Field names skip
+    // this check: they are only ever object keys and property accesses, where reserved words are legal.
+    if (!isBindingName(name)) {
       throw new Error(
         `Invalid attachment name "${name}": a reserved word cannot be bound as the variable the `
         + `generated store action needs. Pick another name.`,

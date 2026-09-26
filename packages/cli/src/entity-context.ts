@@ -35,6 +35,7 @@ import {
   type ControllerTarget,
   withManifestControllerRefs,
 } from './controller-methods'
+import { markCommandFailed } from './command-status'
 import { introspectApp } from './introspect'
 import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
 import { ParseCache } from './parse-cache'
@@ -842,7 +843,7 @@ export async function displayEntityContext(
   } catch (error) {
     if (error instanceof EntityResolutionError) {
       consola.error(error.message)
-      process.exitCode = 1
+      markCommandFailed()
       return
     }
     throw error

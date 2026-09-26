@@ -1236,6 +1236,145 @@ shipped, and where it stops.
 - `views` are no longer `scaffoldable` in the task derivation (D4), so a scaffold
   step's `generates` names no page.
 
+**Amended in implementation (`plan:scaffold`, second of three changes):**
+validators, resources and policies, and the policy registration settled.
+
+- The step's validators go in one file, `app/Http/Validators/<Model>Validator.ts`
+  after the model the step adds, which is `make:validator`'s path for it, so a
+  prior `make:feature` is refused as a file that exists. A field is written from
+  its planned type, `required` and rules through leaves `plan/field-readers.ts`
+  admits (`z.string()`, `z.number().int()`, `z.iso.date()`, `z.iso.datetime()`,
+  `z.uuid()`, `z.email()`, `z.url()`, `min`/`max` as checks, `.nullable().optional()`
+  for a field that is not required). A validator an action takes its `query` or
+  `params` from gets `z.coerce.number()` and `z.stringbool()`, since those values
+  arrive as text. A prose rule, or a rule that does not fit the type, is not
+  written and is listed. A name a root validator file already exports is
+  refused, since `plan:status` finds a validator by its exported name.
+- A resource is a `Resource` subclass, not `JsonResource`: `guren codegen`
+  discovers a resource only by `export class <Name>Resource extends Resource`,
+  and reads `<Base>ResourceData` as its payload, so a name without the suffix
+  is refused. It is written only when the step adds its model (the file imports
+  the model's record type) and its payload types name nothing the file would
+  import; otherwise it is left to the `http` step with that reason. A field is
+  copied from its column where the planned type admits every value the column
+  reads back as (`COLUMN_RECORD_TYPES`, beside the column builders), so a
+  planned `T | null` takes a non-null column; a `Date` column is serialized with
+  `toISOString()` for a planned `string`; a JSON column, which reads back as
+  `unknown`, is cast to the planned type as `make:feature` casts it, when that
+  type admits the column's `null`. A planned type holding a comment is left to
+  the `http` step, since the comment would swallow what the emitter writes after
+  it. Any other field calls a stub that throws until it is mapped, and is listed.
+- The policy stub denies: every ability is `(_user: AuthUser | null): boolean`
+  returning `false`, with the planned rule in a comment above it. A stub that
+  allowed would authorize what nobody has written, and one that threw would fail
+  requests the gate answers today. An ability named after a `Policy` member
+  (`before`, `allow`, `deny`, `denyWithStatus`, `denyAsNotFound`) is refused.
+- The proposal above is settled as written: `app/Providers/<Policy>Provider.ts`,
+  one per policy, in the shape of the blog template's `AuthorizationProvider`,
+  whose `boot()` calls `this.container.make('gate').policy(Model, Policy)`. It is
+  registered by `wireAppProvider()`'s patch, factored as
+  `composeAppProviderRegistration()` so the command composes it before the first
+  write and applies it last: `wireAppProvider()` itself writes as it goes and
+  only warns when it cannot register, where a policy left unregistered reads as
+  scaffolded while the gate denies it. No entry, no `createApp()` it can patch,
+  or an entry that already registers the provider is refused.
+- `wired` does not read the registration. `plan/status.ts` gives a policy no
+  mount point, so it completes at `present`, on its abilities (an existence
+  match, which lifts it only through a behaviour); a registration mount would
+  move every approved plan's policies to `wired` and expire their records. A
+  scaffolded validator reads `present` until a route contract or an action body
+  uses it, which the third change's controllers and routes provide.
+- Round trip, as for the tables: every planned validator field property,
+  resource field and policy ability reads `match` except where the readers stop.
+  The judge calls no validated value a `decimal` (a string or a number may hold
+  one), so its type reads `unknown`; a `json` field is a record, a node outside
+  the field reader's allowlist, so its type and `required` read `unknown`; a
+  coerced number takes `null` as 0, so a required number or boolean in a query
+  or params validator leaves `required` `unknown`; an ability's rule is prose.
+  No reader was changed.
+
+**Amended in implementation (`plan:scaffold`, third of three changes):**
+controllers, routes, their mount, and side effects.
+
+- Each added controller is `app/Http/Controllers/<Class>.ts` with exactly the
+  planned actions. An action validates its `params` and `query` with the
+  planned validators, authorizes with the planned policy ability
+  (`this.authorize('<ability>', Model)`, the policy's model class), validates
+  its `body`, then throws `HttpException.notImplemented()`, a 501. Asking the
+  ability before reading the body gives a caller the policy denies 403
+  whatever it sent. The proposal above is settled as
+  written: a stub validates with `validateBody(Schema)` and its siblings,
+  since `validated('<name>')` is typed from generated route names and does not
+  compile while the route is unmounted. An action on an existing controller is
+  left to the `http` step, since the scaffold writes no action into an
+  existing file; so is an action named after a `Controller` member, which is
+  refused.
+- No response is written. `plan/status.ts` credits a Resource by mention, a
+  page by the id `this.inertia()` names, and a redirect by the call, so a stub
+  naming one would read `match` with nothing behind it. Every action's
+  response is listed as unwritten, and the round trip pins `response` and
+  `response resource` as reader limits. A validator or model the file cannot
+  import (a validator another task adds, a model the root lacks) is listed
+  rather than guessed.
+- The routes to those actions go in `routes/<collection>.ts`, exporting
+  `register<Model>Routes`, one registrar per slice as D5 says, with each route's
+  method, path, name, contract schemas (the action's validators), bindings
+  (with the lookup column where the plan names one) and `.agent()` metadata.
+  An action's own `authorization.middleware` is applied on its route as well.
+  `auth` is the only middleware applied, aliased in the file the way
+  `make:feature`'s route block aliases it; a registrar typed `Router<'auth'>`
+  would not compile at the mount site, which passes the registrar's
+  unaliased parameter. Any other name is listed for the `http` step, which
+  knows the handler the application aliases it to.
+- The file is not mounted, and D3 is carried by a command: the `http` step (or
+  part) whose elements hold those routes runs `plan:scaffold <plan> --step
+  <id> --mount`, which `plan:next` names for it. It composes
+  `wireRouteRegistrar()`'s patch as `composeRouteRegistrarCall()`, so every
+  refusal comes first, and writes the entry atomically, the call first in the
+  registrar body; an `auth` alias the entry sets is then set after the file's
+  and wins at mount. It is approval-gated, must be the marked step, and
+  refuses a step holding no scaffolded routes, a file that is missing or no
+  longer exports its registrar, no routes entry, an entry declaring or
+  importing the registrar's name, and a file already mounted, judged by
+  `guren check`'s own reach from the entry with no plan read. `plan:next`
+  names the command only while the file exists and is not mounted. A module's
+  slice has no mount, since the scaffold refuses it. The mounted routes
+  register ahead of the entry's own, so a scaffolded path with a parameter can
+  shadow an entry route; that is documented, not changed. `planScaffoldMounts()` is the one rule for the file,
+  its registrar and its mounting step, which the scaffold, `--mount`,
+  `plan:next` and `guren check` all read.
+- The brief expected the routes to read `present` before the mount. They read
+  `planned`: `plan:status` reads a route from the definitions the entry
+  registrar registers, and an unmounted file registers none. Reading unmounted
+  route files would change route existence, and with it every approved plan's
+  freshness stamps. So before `--mount` the actions read `present` and the
+  routes `planned`; after it the routes, their actions and the validators they
+  use read `wired`. A binding's lookup column is unread.
+- `guren check` warns on an unmounted `routes/*.ts`, and that warning fails
+  `guren gate`, which the `Stop` hook runs on every stop between the scaffold
+  and the `http` step. An unmounted file the scaffold of an approved, unclosed
+  plan writes, whose `http` step has no `verified` record at the plan's
+  digest, and that exports the registrar the scaffold names, keeps the
+  warning's key and wording and is advisory (`plan/awaiting-mount.ts`, over
+  `plan/open-plan.ts`, the reading `check --plan` shares). It reads the plan files, their approvals, the
+  closing documents and the state files only, never `db/schema.ts` or a
+  validator file, and only once a project routes file is unmounted. Once the
+  step verifies or the plan closes, the warning gates again.
+- Side effects are `scaffoldable` in the task derivation now. Each is written
+  by the `make:job`, `make:event`, `make:listener` (with no event, since
+  `trigger` is prose), `make:mail` and `make:notification` builders under the
+  plan's class name, which is what `plan:status` finds one by. It reads
+  `present`; `wired` needs a dispatch, a registration or a send, which is the
+  `http` step's.
+- `@docs docs/entities/<Model>.md` goes on the controller and the routes file
+  only where that document exists: `guren check` fails a tag to a missing
+  file, and `plan:close` writes the document at the end. The model file
+  carries none, and no test file is written (the skeletons are item 7).
+- The shells are factored, their output pinned byte for byte first:
+  `buildControllerSource()` from `make:controller` and `make:feature`,
+  `buildRoutesSource()`, `routeCall()` and `authAliasLine()` from `make:route`
+  and `make:feature`'s route block, and the five side-effect builders.
+
 A step whose remaining work exceeds a threshold (files touched, elements
 covered) is split, pages by screen group first. The threshold starts at five
 files and is tuned from the metrics in §7.
@@ -1257,10 +1396,170 @@ proof: a test can satisfy all three and still assert nothing that matters.
 What they rule out is the cheap failure, a test emptied or rewritten until it
 passes, and the task-end reviewer (§7) reads the tests for the rest.
 
-**Amended after re-review (2026-09-23), Part 3:** no skeleton emitter ships,
-and the static "still calls its route" check is not implemented. Both are the
-optional last item of Part 3; `packages/cli/src/test-requests.ts`, which reads
-the requests a test file makes, is what the check would rest on.
+**Amended after re-review (2026-09-23), Part 3:** ~~no skeleton emitter ships,
+and the static "still calls its route" check is not implemented~~ (both ship:
+the skeletons as item 7a and the check as item 7b, the two amendments below).
+Both are the optional last item of Part 3; `packages/cli/src/test-requests.ts`,
+which reads the requests a test file makes, is what the check rests on.
+
+**Amended in implementation (`plan:scaffold` on a `tests` step, Part 3 item
+7a):** the skeletons ship; the static check is item 7b's. `plan:scaffold <plan>
+--step <task>/tests` writes them through `plan/scaffold-tests.ts`, pure like
+the other emitters.
+
+- One file per plan and task, `tests/plans/<plan slug>/<name>.test.ts`, the
+  name the entity's collection (`comments`), a story's intent id, a cross
+  task's model ids or `foundation`. The harness testing rule puts tests under
+  `tests/`; a directory per plan keeps a second plan on the same entity from
+  colliding with the first's file, which a re-run refuses on.
+- Each behaviour is one `test('[<id>] <description>')`. Prose written into the
+  file (the description, `given`, the actor) has its brackets turned into
+  parentheses, so the file carries no id but its own: another bracketed id in
+  it would be selected by that behaviour's step and counted by the drift
+  re-check. What the plan spells as data (a request body, a `has`/`missing`
+  value, an `errors` key, a redirect target, a page name) is written as it
+  is, so the emitted file is scanned with `bracketedTokens()` and an
+  acceptance id other than the step's own refuses the step, nothing written.
+- The request is the route's method and path, each parameter a whole-segment
+  interpolation (`` `/posts/${postId}/comments` ``), which `test-requests.ts`
+  resolves to the route. The `input` is the body, or the query string for a
+  `GET`. The receiver is `client()`, a function in the file annotated to
+  return `Promise<TestApp>`, which the scan counts as a `TestApp`. A parameter
+  with a constraint (`:id{[0-9]+}`) reads as `unknown` to Impact, since a
+  runtime value may fail it; the 7b check below reads it as reaching the route,
+  so the skeleton needs no workaround.
+- `client()` imports the app entry (`src/app.ts` or `app.ts`, whose default
+  export must exist, or the step is refused) and boots it with
+  `TestApp.fromApp()` on first use inside a test, never at module level or in
+  `beforeAll`: a file that throws while loading is absent from the junit report
+  and a throwing `beforeAll` becomes one `(unnamed)` case, either of which
+  reads every behaviour as `pending`. A boot that throws is rethrown as
+  `Application boot failed: <message>` (`SKELETON_BOOT_FAILED` in
+  `plan/acceptance-status.ts`). Bun's junit report carries no failure message
+  (`<failure type="AssertionError" />`, measured on 1.3.14), so `tests:fail`
+  reads Bun's own `error: Application boot failed:` line from the run's output,
+  and one such line records the command `blocked`: the boot is shared, so every
+  case that reaches `client()` fails on it while the cases that throw at
+  `given()` first never reach the application, and "every failed case" would
+  let that mix verify. It primes CSRF with `withCsrf()` (after `actingAs()`),
+  and falls back to the unprimed client only on the exact message
+  `withCsrf()` throws for the default path when no `XSRF-TOKEN` was issued,
+  which the CSRF middleware issues on every safe request: its absence means no
+  CSRF is mounted, as in an application created without `auth`. The two
+  spellings are kept in sync by a test that reads `packages/testing`'s source.
+- What the plan states only in prose is a `given()` call that throws: each
+  `given` line, the actor, and each path parameter's value. Only `auth` or an
+  `auth:*` middleware on the route or its action, a policy, or a `forbidden`
+  behaviour implies a signed-in actor, and `unauthenticated` never does; a
+  guard under another middleware name gets no actor, and its test fails on the
+  401 or redirect until one is set up. A throw is a failed case, never a skipped one,
+  so `tests:fail` counts it; `test.todo` and `test.skip` would not.
+- The expectations are written out where `TestApp` can assert them:
+  `assertStatus`, `assertRedirect` (a path sharing the route's parameters
+  reuses their values), `assertInertia` on the view's page with the receiver's
+  `.json()` (`Accept: application/json`, which `renderInertia()`, the path
+  `Controller.inertia()` takes, answers with the page as JSON; `X-Inertia`
+  would meet its version check, a 409 when the asset version resolves in tests
+  and the request sends none), and `errors` as the keys of the JSON body's
+  `errors`. `TestApp` has no
+  database helper bound to the application's connection, so a `database` row is
+  a query through the model, `expect(await Comment.where({ … }).first())`, for
+  a table a plan model declares, whose class the root has, with each value one
+  its planned column type compares with as a literal (a string, integer,
+  number or boolean column, or `null` on a nullable one). Anything else, and an
+  expected `404`, which a route that does not exist yet answers too, is an
+  `unwritten()` call that throws, listed in the report. A case with no
+  assertion that a missing route would fail gets one as well, so every case
+  fails before its implementation. The header says setting up and cleaning up
+  rows is the agent's: a row another test left can make a `has` or `missing`
+  pass or fail whatever the implementation does.
+- Two holes stay open. (a) A behaviour on an `existing`, `alter` or `rename`
+  route (a rename usually keeps the path) with no `given()` or `unwritten()`
+  call may pass at once, the route answering as the plan expects already; the
+  report lists it (`mayPassNow`) so the agent knows why
+  `tests:fail` refuses the step, and nothing is refused. (b) A behaviour on an
+  added route whose path an existing route already answers (a parameter or
+  wildcard route registered first) reaches that route, not a 404, and may pass
+  too; it is neither listed nor refused, since telling it needs the registered
+  routes, which the scaffold does not load.
+- The file compiles: the helpers, `expect` and each model import are written
+  only when used, and a test renders it beside the scaffold step's output and
+  typechecks it. Refused before the write, like the other scaffold writes: the
+  file existing (a re-run), a step id another test file already carries
+  (`plan:verify` would find it in two files), no default export to boot, an
+  unmarked step, and a draft or unapproved plan. An API-only application has
+  no `scaffold` step but gets its `tests` step's skeletons, which read no model
+  it lacks.
+- Measured through `plan:verify --step` on the comments fixture plus one
+  behaviour with no `given` and no parameter, scaffolded into a temp app and
+  unmounted: every case fails, the four with setup at `given()` and the
+  guest's on the route's 404, and the step verifies. Turning one test into
+  `test.skip` fails the step, and mounting the routes with `--mount` makes the
+  guest's case pass, which fails it too.
+  An application whose `src/app.ts` throws at boot records the step
+  `blocked`.
+- Not verified: an application that mounts CSRF with its cookie turned off,
+  where the fallback does not apply and `client()` throws. The `.json()` path
+  for `inertia` is read from the engine's source, not run against an
+  application with a resolved asset version.
+
+**Amended in implementation (the "still calls its route" check, Part 3 item
+7b).** The check ships, in `packages/cli/src/plan/behaviour-requests.ts` over
+`scanTestCaseRequests()` in `test-requests.ts`. It applies to every test, not
+only to generated ones: `plan:verify` cannot tell a skeleton from a test an
+agent wrote, and the tamper it detects is the same.
+
+- Where it runs: inside the `tests` and `tests:fail` commands, on the files
+  those commands select, before `bun test` is spawned (a failure is decided,
+  so nothing runs), and in `recheckTests()`, where a drifted `tests:fail` step
+  re-checked without a run must still request its routes: a test rewritten to
+  request nothing keeps failing, so the run it verified on says nothing about
+  it now. `plan:status`, `guren check` and the gate do not run it, so their
+  cost is unchanged.
+- The route is the plan's: the behaviour's `route` resolved in `plan.routes`,
+  its method and full path (the path `plan:status` compares with the
+  registered one) and its `agent.toolName`. A request reaches it through
+  `testCoverage()` and `mayReach()`, the matcher Impact uses. `AcceptanceSchema`
+  requires `route`, so no behaviour is exempt; a route id the plan does not
+  declare (a draft) is unreadable, never a pass.
+- Per case, as the junit report reads a title: a `test`, `it` or `describe`
+  (and `.only`, `.each(…)(…)` and the rest of the chain, and aliases imported
+  from `bun:test`) whose literal title carries the id, including a `describe`
+  whose cases do. Its requests are those in its callback and in every
+  same-file function it calls by name, transitively, matched by name like the
+  receivers. Hooks outside a carrying `describe` are not followed (one inside
+  it is in its callback): the request is the behaviour's action, and a
+  `beforeEach` is its `given`. Some carrying case must request the route. A
+  `test.todo` carrying the id has no body, and the miss names it so.
+- A whole path segment filled at runtime reaches a constrained parameter
+  (`` `/comments/${id}` `` against `/comments/:id{[0-9]+}`), in this check
+  only (`routePathMatches()`'s `runtimeFillsConstraints`; Impact still reads
+  it as uncertain). A skeleton cannot spell a literal for an arbitrary
+  constraint, and whether the value passes it is the run's to find, as a 404.
+  A literal segment the constraint rejects stays a miss. Where one runtime
+  segment does not fit (a constraint spanning `/`, `:path{.+}`, with more
+  segments after it), the comparison stays uncertain, so it reads as
+  unreadable, never as a miss.
+- Three verdicts per behaviour. Reached. Unreadable when nothing reached it and
+  a carrying case holds an unresolved request `mayReach()` allows (including
+  one on what a same-file function returns when nothing annotates it
+  `TestApp`, `localReceiver`, whose remedy is that annotation), a request
+  the route pattern cannot be compared with, or a call handing the `TestApp`
+  (or its agent) to a function the file does not define, or a carrying file
+  did not parse or holds a test whose title is not all literal. A miss
+  otherwise, naming what each carrying case requests instead, or that the id
+  sits in no test title at all. Both fail the command (and the step), with
+  distinct reasons: `blocked` is the environment's and this is the test's
+  shape, and passing an unreadable request would let `app.get(path)` lift the
+  step's elements. The finding never says the route is uncovered, only that
+  this reading cannot tell, and it asks for the request to be spelled in the
+  test. There is no waiver for a behaviour, so a suite built on imported
+  helpers has to make each behaviour's request visible in its case.
+- Tamper detection, not proof: a request the file spells passes whether or
+  not it runs, and a request made entirely inside an imported helper the case
+  hands nothing reads as a miss.
+- `plan:next` says the rule under a `tests` step's behaviours, and the harness
+  skill repeats it.
 
 For `alter` / `rename` / `drop` there is no scaffold. Those steps are agent
 edits, and the narrow step width matters most there.
@@ -1829,9 +2128,11 @@ migration).** Two defects the loop hit once a plan had more than one task.
   whole-plan run, `--step` on it, or as an earlier step): `tests:fail` cannot
   pass once the implementation exists, and its red run was observed when it
   verified. It stays `verified` while one test file still carries each of its
-  behaviours' ids as a bracketed token, which a comment carries as well as a
-  test title (a gap the run itself would catch). One carried by no file or by
-  several is reported, and the record is left drifted rather than replaced: a
+  behaviours' ids as a bracketed token and a test case titled with each id
+  still requests the behaviour's route (the §5 amendment on the "still calls
+  its route" check), which closes the gap a token in a comment left. One
+  carried by no file or by several, or whose tests no longer request its
+  route, is reported, and the record is left drifted rather than replaced: a
   recorded failure would send the next run to `tests:fail`, which cannot pass
   then. `plan:next` and the `Stop` hook reach it through `plan:verify --step`,
   so all four agree.
@@ -2914,6 +3215,8 @@ marks what was read and not run.
 5. The mounted-routes experiment. Run; the note below records it.
 6. `plan:scaffold`, emitting what the §5 amendment lists. No pages.
 7. Optional: test skeletons, and the static "still calls its route" check.
+   Implemented: the skeletons (7a, `plan:scaffold` on a `tests` step) and the
+   check (7b, in `plan:verify`), as the two §5 amendments read them.
 
 Deferred: the headless producer, `--ask`, the headless `plan --revise`, page
 emission, the characterization step, and retuning the step width.

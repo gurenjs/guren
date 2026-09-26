@@ -9,7 +9,7 @@
  */
 
 import { realpath } from 'node:fs/promises'
-import { basename } from 'node:path'
+import { basename, resolve } from 'node:path'
 
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { runGit } from './changed-files'
@@ -28,11 +28,13 @@ import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElementSection } from './plan/schema'
 import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress, type PlanStepContext, type PlanStepContextElement } from './plan/step-context'
 import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
-import { planScaffoldCommandLine, planScaffoldCoverage } from './plan/scaffold'
+import { planScaffoldCommandLine, planScaffoldCoverage, planScaffoldMountCommandLine, planScaffoldMounts } from './plan/scaffold'
 import { derivePlanTasks, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
 import { hashFiles, readPlanWaivers, recordDrift, recordStillHolds, type PlanWaiversRead } from './plan/verification'
 import { readStepStart } from './plan/work'
+import { isRoutesFileMounted } from './routes-check'
+import { pathExists } from './utils'
 
 export const PLAN_NEXT_REPORT_VERSION = 1
 
@@ -58,8 +60,13 @@ export interface PlanNextStep extends Pick<PlanDerivedStep, 'id' | 'kind' | 'ver
   unconfirmed?: PlanStepContextElement[]
   /** Set where the step was verified and only these fingerprinted files changed since: it is re-checked, not re-implemented. */
   drifted?: string[]
-  /** A scaffold step's: the command that writes it, the `generates` it writes, and those the `http` step writes by hand. */
+  /** A scaffold step's: the command that writes it, the `generates` it writes, and those the `http` step writes by hand. A tests step's `writes` are its behaviours, one test skeleton each. */
   scaffold?: { command: string; writes: string[]; leaves: string[] }
+  /**
+   * The http step holding the routes a scaffold step wrote: the command that mounts their file,
+   * the step's elements that scaffold wrote as stubs, and those it left to write by hand.
+   */
+  mount?: { command: string; file: string; scaffolded: string[]; byHand: string[] }
 }
 
 export interface PlanNextStaleElement extends PlanStepContextElement {
@@ -335,6 +342,9 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   const unconfirmed = judged.contexts.get(step.id)?.unconfirmed ?? []
   const record = records[step.id]
   const drifted = record ? recordDrift(record, digest, hashes, log.waived) : []
+  // Named only while there is something to mount: a slice an older CLI scaffolded has no routes file.
+  const mount = mountOf(plan, derivation, task, step, planPath)
+  const mountable = mount && (await pathExists(resolve(root, mount.file))) && !(await isRoutesFileMounted(root, mount.file)) ? { mount } : {}
 
   return {
     ...head,
@@ -351,14 +361,39 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
       ...stallOf(step.id),
       ...(unconfirmed.length > 0 ? { unconfirmed } : {}),
       ...(drifted.length > 0 ? { drifted } : {}),
-      ...(step.kind === 'scaffold' ? { scaffold: scaffoldOf(plan, step, planPath) } : {}),
+      ...(step.kind === 'scaffold' || step.kind === 'tests' ? { scaffold: scaffoldOf(plan, step, planPath) } : {}),
+      ...mountable,
     },
   }
 }
 
 function scaffoldOf(plan: PlanDraft, step: PlanDerivedStep, planArgument: string): NonNullable<PlanNextStep['scaffold']> {
+  const command = planScaffoldCommandLine(planArgument, step.id)
+  if (step.kind === 'tests') return { command, writes: [...step.acceptanceIds], leaves: [] }
   const { emitted, left } = planScaffoldCoverage(plan, step)
-  return { command: planScaffoldCommandLine(planArgument, step.id), writes: emitted, leaves: left.map((element) => element.id) }
+  return { command, writes: emitted, leaves: left.map((element) => element.id) }
+}
+
+function mountOf(plan: PlanDraft, derivation: PlanTaskDerivation, task: PlanDerivedTask, step: PlanDerivedStep, planArgument: string): PlanNextStep['mount'] {
+  const mount = planScaffoldMounts(plan, derivation).find((candidate) => candidate.httpStep === step.id)
+  const scaffold = task.steps.find((candidate) => candidate.id === mount?.scaffoldStep)
+  if (!mount || !scaffold) return undefined
+  const written = new Set(planScaffoldCoverage(plan, scaffold).emitted)
+  return {
+    command: planScaffoldMountCommandLine(planArgument, step.id),
+    file: mount.path,
+    scaffolded: step.elementIds.filter((id) => written.has(id)),
+    byHand: step.elementIds.filter((id) => !written.has(id)),
+  }
+}
+
+/** The command is spelled with the plan argument the text is formatted for, as the scaffold step's is. */
+function mountLines(step: PlanNextStep, mount: NonNullable<PlanNextStep['mount']>, planArgument: string): string[] {
+  return [
+    `Mount the routes the scaffold step wrote first, with \`${planScaffoldMountCommandLine(planArgument, step.id)}\`, not by hand: it calls ${mount.file} from the entry registrar.`,
+    ...(mount.scaffolded.length > 0 ? [`  Written as stubs by plan:scaffold, to finish: ${mount.scaffolded.join(', ')}. Each action validates and authorizes as planned and answers 501; write its body and response.`] : []),
+    ...(mount.byHand.length > 0 ? [`  Not written by plan:scaffold, to write by hand: ${mount.byHand.join(', ')}.`] : []),
+  ]
 }
 
 /** A multi-line text under a line that already carries its first line. */
@@ -425,8 +460,19 @@ function scaffoldLines(step: PlanNextStep, scaffold: NonNullable<PlanNextStep['s
   const command = planScaffoldCommandLine(planArgument, step.id)
   const lines = draft
     ? [`Approve the plan first (bunx guren plan:approve ${planArgument}): plan:scaffold writes this step from an approved plan only, as`, `  ${command}`]
-    : [`Write this step with \`${command}\`, not by hand.`]
-  if (scaffold.writes.length > 0) lines.push(`  It writes each added model's table and model class: ${scaffold.writes.join(', ')}`)
+    : [step.kind === 'tests' ? `Write this step\u2019s test skeletons with \`${command}\`, not by hand, then fill them in.` : `Write this step with \`${command}\`, not by hand.`]
+  if (step.kind === 'tests') {
+    lines.push(
+      `  It writes one TestApp test per behaviour (${scaffold.writes.join(', ')}), with its request and the expectations the plan states, into one file.`,
+      '  Each fails at a given() call until the setup it names is written (records, the signed-in actor, path parameters); replace every call, and keep each title\u2019s id and its request.',
+    )
+    return lines
+  }
+  if (scaffold.writes.length > 0) {
+    lines.push(
+      `  It writes each added model (table and class), its validators and resources, each policy with a provider registering it, each added controller with its actions as stubs, the routes to them in a file of their own that the http step mounts, and the side-effect classes: ${scaffold.writes.join(', ')}`,
+    )
+  }
   if (scaffold.leaves.length > 0) lines.push(`  It does not write ${scaffold.leaves.join(', ')}; the http step implements them by hand.`)
   return lines
 }
@@ -465,11 +511,16 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     if (step.scaffold) {
       lines.push('', ...scaffoldLines(step, step.scaffold, report.plan.hash === null, planArgument))
     }
+    // A draft is never scaffolded (plan:scaffold refuses it), so it has nothing to mount.
+    if (step.mount && report.plan.hash !== null) lines.push('', ...mountLines(step, step.mount, planArgument))
     if (step.acceptance.length > 0) {
       lines.push('', `Behaviours${step.kind === 'tests' ? ' to write, as test titles `[<id>] <description>`, failing' : ' that must pass'}:`)
       for (const behaviour of step.acceptance) {
         lines.push(`  [${behaviour.id}] ${behaviour.description}`)
         lines.push(`      ${behaviour.kind}; actor ${behaviour.actor}; route ${behaviour.route}${behaviour.given.length ? `; given ${behaviour.given.join(', ')}` : ''}; expect ${describeExpectation(behaviour)}`)
+      }
+      if (step.kind === 'tests') {
+        lines.push('  Each test requests its route through a TestApp, in its body or a function of its file it calls: plan:verify reads the requests before it runs them.')
       }
     }
     if (step.stalled) {

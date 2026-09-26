@@ -1,6 +1,7 @@
 import { consola } from 'consola'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { markCommandFailed } from './command-status'
 import { isDefinitelyAbsent } from './discovery'
 import { createScheduler, matchesCron, parseCron, toTimezone, type ParsedCron, type Scheduler } from '@guren/server'
 
@@ -307,14 +308,14 @@ function reportEmptyKernel(kernel: KernelLoad, json: boolean): void {
   switch (kernel.kind) {
     case 'not-found':
       consola.error(`No schedule kernel at ${kernel.path}.`)
-      process.exitCode = 1
+      markCommandFailed()
       return
 
     case 'failed':
       consola.error(
         [`Failed to load the schedule kernel at ${kernel.path}:`, ...kernel.reasons.map((reason) => `  ${reason}`)].join('\n'),
       )
-      process.exitCode = 1
+      markCommandFailed()
       return
 
     case 'unrecognized':
@@ -326,7 +327,7 @@ function reportEmptyKernel(kernel: KernelLoad, json: boolean): void {
           '  named `register…Schedules(scheduler: Scheduler)`. Either may be the default export.',
         ].join('\n'),
       )
-      process.exitCode = 1
+      markCommandFailed()
       return
 
     case 'loaded':
@@ -479,6 +480,6 @@ export async function runScheduledTasks(options: ScheduleRunOptions = {}): Promi
   }
 
   if (failures > 0) {
-    process.exitCode = 1
+    markCommandFailed()
   }
 }

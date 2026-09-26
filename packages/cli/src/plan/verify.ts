@@ -22,10 +22,12 @@ import { bunExecutable, type CapturedExec, type CapturedRun } from '../subproces
 import {
   acceptanceStatus,
   planAcceptanceIds,
+  SKELETON_BOOT_FAILED,
   type AcceptanceBehaviourStatus,
   type AcceptanceError,
   type AcceptanceReport,
 } from './acceptance-status'
+import { behaviourRequestFailure, readBehaviourRequests } from './behaviour-requests'
 import type { Plan, PlanDraft } from './schema'
 import type { PlanCommandRecord, PlanFingerprint, PlanStepRecord } from './state'
 import { awaitsVerification, type PlanElementStatus, type PlanStatus } from './status'
@@ -137,12 +139,19 @@ function currentEnvironment(): PlanFingerprint['environment'] {
   }
 }
 
+/** Each of `ids` → the test files, app-relative, whose source carries it as a literal bracketed token. */
+async function acceptanceCarriers(root: string, files: readonly string[], ids: readonly string[]): Promise<Map<string, string[]>> {
+  const wanted = new Set(ids)
+  return wanted.size === 0 ? new Map() : readBracketedTokenFiles(root, files, (token) => wanted.has(token))
+}
+
+function carrierFiles(carriers: ReadonlyMap<string, readonly string[]>): string[] {
+  return [...new Set([...carriers.values()].flat())].sort()
+}
+
 /** The test files, app-relative, whose source carries any of `ids` as a literal bracketed token. */
 export async function acceptanceTestFiles(root: string, files: readonly string[], ids: readonly string[]): Promise<string[]> {
-  const wanted = new Set(ids)
-  if (wanted.size === 0) return []
-  const byId = await readBracketedTokenFiles(root, files, (token) => wanted.has(token))
-  return [...new Set([...byId.values()].flat())].sort()
+  return carrierFiles(await acceptanceCarriers(root, files, ids))
 }
 
 /** A failed command leaves the implementation something to fix whatever else was blocked, so it names the outcome. */
@@ -198,6 +207,8 @@ function memoized<T>(store: Map<string, Promise<T>>, key: string, create: () => 
 interface TestSelection {
   /** App-relative, sorted: what `bun test` is given. */
   files: string[]
+  /** Each acceptance id of the step → the files carrying it, which `files` is the union of. */
+  carriers: Map<string, string[]>
   label: string
 }
 
@@ -217,6 +228,7 @@ export class PlanVerifier {
   private readonly commands = new Map<string, Promise<PlanCommandRecord>>()
   private readonly selections = new Map<string, Promise<TestSelection>>()
   private readonly outcomes = new Map<string, Promise<TestOutcome>>()
+  private readonly requestChecks = new Map<string, Promise<ReturnType<typeof behaviourRequestFailure>>>()
   private readonly declaredIds: string[]
   private readonly check: () => Promise<CheckReport>
   private readonly testFiles: () => Promise<string[]>
@@ -226,7 +238,7 @@ export class PlanVerifier {
   private testFilesPromise: Promise<string[]> | undefined
 
   constructor(
-    plan: PlanDraft | Plan,
+    private readonly plan: PlanDraft | Plan,
     private readonly derivation: PlanTaskDerivation,
     private readonly options: PlanVerifierOptions,
   ) {
@@ -265,28 +277,30 @@ export class PlanVerifier {
   /**
    * A `tests:fail` step whose verified record drifted, judged without a run: `tests:fail` cannot
    * pass once the implementation exists, and its red run was observed when it verified. It stays
-   * verified while one test file still carries each behaviour's id as a bracketed token, which a
-   * comment carries as well as a test title: a gap the run itself would catch, accepted here.
+   * verified while one test file still carries each behaviour's id as a bracketed token and a
+   * case titled with the id still requests the behaviour's route, as {@link requestCheck} reads it.
    */
   async recheckTests(stepId: string, previous: PlanStepRecord): Promise<PlanStepVerification> {
     const found = findPlanStep(this.derivation, stepId)
     if (!found) throw new Error(`no step ${stepId} is derived from this plan`)
     const started = performance.now()
     const ranAt = this.now().toISOString()
-    const { files } = await this.selection(found.step)
-    const wanted = new Set(found.step.acceptanceIds)
-    const carriers = await readBracketedTokenFiles(this.options.root, files.map((file) => join(this.options.root, file)), (token) => wanted.has(token))
+    const { files, carriers } = await this.selection(found.step)
     const missing = found.step.acceptanceIds.filter((id) => !carriers.has(id))
-    const findings = [
+    const carried = [
       ...missing.map((id) => `[${id}] is carried by no test file`),
       ...[...carriers].filter(([, carrying]) => carrying.length > 1).map(([id, carrying]) => `[${id}] is carried by ${carrying.join(' and ')}`),
     ]
+    // A test rewritten to request nothing still fails, so the red run it verified on proves nothing about it now.
+    const requests = await this.requestCheck(found.step)
+    const findings = [...carried, ...capFindings(requests?.findings ?? [])]
+    const reason = carried.length > 0 ? 'the test files no longer carry the behaviours the step saw fail' : requests?.reason
     const command: PlanCommandRecord = {
       command: 'tests:fail',
       label: 'not run: a re-check that one test file still carries each behaviour',
       status: findings.length > 0 ? 'fail' : 'pass',
       durationMs: 0,
-      ...(findings.length > 0 ? { reason: 'the test files no longer carry the behaviours the step saw fail' } : {}),
+      ...(reason === undefined ? {} : { reason }),
       findings,
     }
     return {
@@ -481,8 +495,15 @@ export class PlanVerifier {
 
   private async selectTests(step: PlanDerivedStep): Promise<TestSelection> {
     this.testFilesPromise ??= this.testFiles().catch((): string[] => [])
-    const files = await acceptanceTestFiles(this.options.root, await this.testFilesPromise, step.acceptanceIds)
-    return { files, label: `bun test ${files.join(' ')}`.trimEnd() }
+    const carriers = await acceptanceCarriers(this.options.root, await this.testFilesPromise, step.acceptanceIds)
+    const files = carrierFiles(carriers)
+    return { files, carriers, label: `bun test ${files.join(' ')}`.trimEnd() }
+  }
+
+  /** Whether each behaviour's test still requests its route, read once per test-file set: `undefined` when all do. */
+  private requestCheck(step: PlanDerivedStep): Promise<ReturnType<typeof behaviourRequestFailure>> {
+    return memoized(this.requestChecks, this.testKey(step), async () =>
+      behaviourRequestFailure(await readBehaviourRequests(this.options.root, this.plan, step.acceptanceIds, await this.selection(step))))
   }
 
   /** The one run over the step's files, memoized as a promise so two commands on one key share it. */
@@ -518,6 +539,9 @@ export class PlanVerifier {
     if (files.length === 0) {
       return { label: 'bun test', status: 'fail', reason: `no test file carries ${ids.map((id) => `[${id}]`).join(', ')} as a literal token`, findings: [] }
     }
+    // Before the run: a test emptied until it fails, or until it passes, is what this catches, and no run can.
+    const requests = await this.requestCheck(step)
+    if (requests) return { label: `not run: the requests ${files.join(', ')} makes were read`, status: 'fail', reason: requests.reason, findings: capFindings(requests.findings) }
 
     const { label, result, report } = await this.outcome(step)
     if (!report) return this.timedOut(label)
@@ -527,6 +551,10 @@ export class PlanVerifier {
       return { label, status: 'fail', reason: 'the test report names behaviours the plan does not, or one behaviour in several files', findings: capFindings(report.errors.map(describeAcceptanceError)) }
     }
 
+    // The junit report carries no failure message, so the boot failure is read from Bun's own `error:` line.
+    if (command === 'tests:fail' && `${result.stdout}\n${result.stderr}`.split('\n').some((line) => line.startsWith(`error: ${SKELETON_BOOT_FAILED}`))) {
+      return { label, status: 'blocked', reason: 'the application did not boot, so a case failed without reaching its route', findings: tail }
+    }
     const findings = command === 'tests' ? notPassing(ids, report.behaviours) : notFailing(ids, report.behaviours)
     if (findings.length > 0) {
       return { label, status: 'fail', reason: command === 'tests' ? 'a behaviour is not passing' : 'a behaviour is not failing', findings: capFindings(findings) }

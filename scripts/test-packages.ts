@@ -17,10 +17,15 @@ import { collectPackages, parseArgs, repoRoot, selectPackages } from './workspac
 // survives a `test` script being reworded; a regex over it would not.
 const nonBunTestPackages = new Set(['@guren/testing'])
 
-// `bun <file>` (unlike `bun run`) swallows one *leading* `--` before argv, so a
-// direct invocation needs two: `bun scripts/test-packages.ts -- -- --parallel`.
+// `bun <file>` and `bun run <file>` both swallow one *leading* `--` before argv,
+// so a flag forwarded with no selector ahead of it needs two:
+// `bun scripts/test-packages.ts -- -- --parallel`. CI's `--shard=i/n` is an own
+// flag for that reason.
+const SHARD_FLAG = /^--shard=\d+\/\d+$/
+const argv = process.argv.slice(2)
+const shard = argv.filter((arg) => SHARD_FLAG.test(arg))
 const { flags, positionals: selectors, forwarded } = parseArgs(
-  process.argv.slice(2),
+  argv.filter((arg) => !SHARD_FLAG.test(arg)),
   ['list'],
 )
 const listOnly = flags.list
@@ -90,6 +95,7 @@ const testArgs = [
   cwdGuard,
   '--preload',
   fetchGuard,
+  ...shard,
   ...forwarded,
   ...(await Promise.all(targets.map(testPathFor))),
   ...guardTests,

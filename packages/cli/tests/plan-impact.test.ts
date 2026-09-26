@@ -510,6 +510,8 @@ describe('loadPlanAppState({ impact: true })', () => {
     await linkWorkspaceCore(workspace.dir)
     await writeWorkspaceFiles(workspace.dir, {
       ...PLAN_VERIFY_APP_FILES,
+      // The fixture's acceptance tests request comments.store too; this case reads one file's requests.
+      'tests/comments.test.ts': '',
       'tests/comments-http.test.ts': `import { TestApp } from '@guren/testing'
 import app from '../src/app'
 

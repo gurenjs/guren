@@ -18,25 +18,22 @@ import type { ContextRoute } from '../context-route'
 import { accessorCallPattern, blankCommentsAndStrings, type ControllerMemberName, type ControllerMethodScan } from '../controller-methods'
 import {
   classNameFromPath,
-  discoverEventFiles,
-  discoverJobFiles,
-  discoverListenerFiles,
-  discoverMailFiles,
   discoverModelFiles,
   discoverModuleRoutesFiles,
-  discoverNotificationFiles,
   discoverPolicyFiles,
   discoverResourceFiles,
   discoverRoutesFiles,
+  discoverSideEffectFiles,
   discoverValidatorFiles,
   excludeBarrelFiles,
-  findFirstExisting,
   listModuleNames,
   moduleNameFor,
   moduleNameFromRelPath,
-  moduleRoutesEntryCandidates,
+  SIDE_EFFECT_DIRS,
   toPosixRelative,
+  type SideEffectKind,
 } from '../discovery'
+import { moduleRoutesEntryFile } from '../import-resolution'
 import { extractInertiaPageRefs, describeInertiaPagePropKeys, resolveInertiaPageFile } from '../inertia-pages'
 import { discoverParsedModels, type ModelRelationship } from '../model-parser'
 import type { PagePropKeys } from '../page-props-extractor'
@@ -148,7 +145,7 @@ export interface PlanAppPolicyDetail extends PlanAppClassDetail {
   abilities: PlanAppPolicyAbilities | PlanAppUnreadable
 }
 
-export type PlanAppSideEffectKind = 'job' | 'event' | 'listener' | 'mail' | 'notification'
+export type PlanAppSideEffectKind = SideEffectKind
 
 /** A side-effect class and where the application's source uses it (`side-effect-uses.ts`). */
 export interface PlanAppSideEffectDetail extends PlanAppClassDetail {
@@ -469,7 +466,7 @@ async function pageDetail(root: string, pages: string[] | PlanAppUnreadable): Pr
  * app root it sits in is that file's, not this one's. The runtime export list holds both,
  * which is why {@link registrarExport} asks for `'anywhere'`.
  */
-function exportedNames(ast: File, declaredIn: 'anywhere' | 'this file'): string[] | null {
+export function exportedNames(ast: File, declaredIn: 'anywhere' | 'this file'): string[] | null {
   const names: string[] = []
   for (const node of ast.program.body) {
     if (node.type === 'ExportAllDeclaration') return null
@@ -569,13 +566,13 @@ async function routeFileDetail(root: string, cache: ParseCache, routesFile: stri
     listModuleNames(root).catch((): string[] => []),
   ])
   const moduleEntries = await Promise.all(
-    moduleNames.map((name) => findFirstExisting(root, moduleRoutesEntryCandidates(`modules/${name}`))),
+    moduleNames.map((name) => moduleRoutesEntryFile(resolve(root, 'modules', name))),
   )
   const files = unique([
     ...(routesFile === undefined ? [] : [routesFile]),
     ...projectFiles.map((file) => toPosixRelative(root, file)),
     ...moduleRoutes.flatMap((module) => module.files.map((file) => toPosixRelative(root, file))),
-    ...moduleEntries.filter((entry): entry is string => entry !== null),
+    ...moduleEntries.flatMap((entry) => (entry === null ? [] : [toPosixRelative(root, entry)])),
   ])
 
   const details: PlanAppRouteFile[] = []
@@ -597,17 +594,9 @@ async function policyDetail(root: string, cache: ParseCache): Promise<PlanAppPol
   )
 }
 
-const SIDE_EFFECT_DISCOVERY: Record<PlanAppSideEffectKind, (appRoot: string) => Promise<string[]>> = {
-  job: discoverJobFiles,
-  event: discoverEventFiles,
-  listener: discoverListenerFiles,
-  mail: discoverMailFiles,
-  notification: discoverNotificationFiles,
-}
-
 async function sideEffectDetail(root: string, cache: ParseCache): Promise<Pick<PlanAppDetail, 'sideEffects' | 'sideEffectUsesUnread'>> {
-  const kinds = Object.keys(SIDE_EFFECT_DISCOVERY) as PlanAppSideEffectKind[]
-  const classes = await Promise.all(kinds.map(async (kind) => [kind, await classDetail(root, SIDE_EFFECT_DISCOVERY[kind])] as const))
+  const kinds = Object.keys(SIDE_EFFECT_DIRS) as PlanAppSideEffectKind[]
+  const classes = await Promise.all(kinds.map(async (kind) => [kind, await classDetail(root, (appRoot) => discoverSideEffectFiles(appRoot, kind))] as const))
   const targets = classes.flatMap(([kind, entries]) => entries.map((entry) => ({ ...entry, kind })))
   const read = await scanSideEffectUses(root, cache, targets).catch((error: unknown) => ({ unreadable: reasonOf(error) }))
   const uses = 'unreadable' in read ? undefined : read.byFile

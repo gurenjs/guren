@@ -81,9 +81,7 @@ describe('guren exits after a command that imported app code holding a handle op
     expect(JSON.stringify(JSON.parse(run.stdout))).toContain('posts.index')
   }, TEST_TIMEOUT_MS)
 
-  it('keeps the exit code a command set through process.exitCode', async () => {
-    // `check --ci` loads the routes for its full suite and reports the arch violation by
-    // setting process.exitCode, not by throwing, so runCli itself returns 0.
+  it('exits with the failed diagnostic result returned by runCli', async () => {
     const run = await runBin(['check', '--ci', '--app', app], app)
 
     expect(run).toMatchObject({ killed: false, exitCode: 1 })

@@ -140,8 +140,7 @@ export const PLAN_SECTION_STEP: Record<PlanElementSection, { step: WorkStep; sca
   routes: { step: 'http', scaffoldable: true },
   resources: { step: 'http', scaffoldable: true },
   policies: { step: 'http', scaffoldable: true },
-  // No generator writes a job, an event or a mail from a plan.
-  sideEffects: { step: 'http', scaffoldable: false },
+  sideEffects: { step: 'http', scaffoldable: true },
   // Pages are not emitted (Part 3 D4): a page written with the plan's props would match by construction.
   views: { step: 'pages', scaffoldable: false },
   commands: { step: 'commands', scaffoldable: false },

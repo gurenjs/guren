@@ -2,7 +2,7 @@
  * `smoke:tutorial` (RFC 0019 §3): the tutorial chapters under docs/en/tutorials/
  * are the script. Each chapter's `run` blocks execute, `file=` blocks are
  * written, `manual` blocks are skipped, and every chapter ends with `guren gate`
- * and `bun run build` on the app the reader would have. The one substitution:
+ * (unless its own gate passed on the same app) and `bun run build`. The one substitution:
  * `bunx create-guren-app` becomes this checkout's scaffolder with the app's
  * `@guren/*` ranges rewritten to local builds, the same vendoring
  * `smoke:starter` uses. Everything else runs as written.
@@ -42,6 +42,8 @@ interface Session {
   appDir: string | null
   env: Record<string, string>
   background: Background[]
+  /** `appSnapshot()` when a chapter's own `bunx guren gate` last passed; the chapter-end gate skips an unchanged app. */
+  gatedSnapshot: string | null
 }
 
 function log(message: string): void {
@@ -355,8 +357,26 @@ async function applyBlock(session: Session, block: ExecutableBlock, chapter: str
         return
       }
       await runShell(session, block)
+      if (block.mode === 'normal' && block.body.trim() === 'bunx guren gate' && session.cwd === session.appDir) {
+        session.gatedSnapshot = await appSnapshot(session)
+      }
     }
   }
+}
+
+/**
+ * The app as the gate sees it: the tree of every tracked and untracked file git
+ * does not ignore, written through a scratch index so the app's own index is
+ * untouched, plus `.env`, which the scaffold ignores and the gate still reads.
+ */
+async function appSnapshot(session: Session): Promise<string> {
+  const appDir = session.appDir!
+  const env = { ...session.env, GIT_INDEX_FILE: join(session.tempRoot, 'snapshot.index') }
+  await rm(env.GIT_INDEX_FILE, { force: true })
+  await capture(['git', 'add', '-A'], appDir, env)
+  const tree = (await capture(['git', 'write-tree'], appDir, env)).trim()
+  const dotEnv = await readFile(join(appDir, '.env'), 'utf8').catch(() => '')
+  return `${tree}\n${Bun.hash(dotEnv)}`
 }
 
 async function runChapter(session: Session, name: string): Promise<void> {
@@ -379,7 +399,14 @@ async function runChapter(session: Session, name: string): Promise<void> {
     return
   }
   log(`Chapter ${name}: gate and build`)
-  await run(['bun', CLI_BIN, 'gate'], session.appDir, session.env)
+  if (session.gatedSnapshot !== null && session.gatedSnapshot === (await appSnapshot(session))) {
+    console.log(`\nThe chapter's own \`bunx guren gate\` passed on this same app; not gating it twice.`)
+  } else {
+    // The app's installed CLI, as `bunx guren` resolves it: the checkout's
+    // CLI_BIN loads a second @guren/orm beside the app's vendored one.
+    await run(['bun', join(session.appDir, 'node_modules/.bin/guren'), 'gate'], session.appDir, session.env)
+  }
+  session.gatedSnapshot = null
   await run(['bun', 'run', 'build'], session.appDir, session.env)
   await tagChapter(session, name)
 }
@@ -421,6 +448,7 @@ async function main(): Promise<void> {
     cwd: workspace,
     appDir: null,
     background: [],
+    gatedSnapshot: null,
     env: {
       ...(process.env as Record<string, string>),
       TMPDIR: runtimeTempDir,
