@@ -4,6 +4,8 @@
 
 計画を書く価値があるのは、テーブルとルートとページにまたがる変更のように、差分を直すより設計を直すほうが安く済む場合です。差分を一文で説明できる変更なら、計画は要りません。
 
+通しで体験するには [エージェントと作る](../agent-course/00-overview.md) を読んでください。Claude Code と 2 本の計画を依頼からクローズまで進め、途中の判断ごとにチェック表があります。
+
 ```mermaid
 flowchart LR
   Write["plan.json<br/>written by you or your agent"]

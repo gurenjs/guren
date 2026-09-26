@@ -43,14 +43,14 @@ const HERO_COPY = {
     eyebrow: 'Documentation',
     titleTop: 'Learn Guren,',
     titleAccent: 'end to end.',
-    lead: 'Guides for every subsystem — routing, models, auth, queues — and tutorials that build a working app. Every page starts with code you can run.',
+    lead: 'Guides for every subsystem — routing, models, auth, queues — and two courses that build a working app: one by hand, one by directing a coding agent. Every page starts with code you can run.',
     empty: 'No documentation in this section yet.',
   },
   ja: {
     eyebrow: 'ドキュメント',
     titleTop: 'Guren を、',
     titleAccent: '最初から最後まで。',
-    lead: 'ルーティング、モデル、認証、キューまで全サブシステムのガイドと、動くアプリを作るチュートリアル。どのページも実行できるコードから始まります。',
+    lead: 'ルーティング、モデル、認証、キューまで全サブシステムのガイドと、動くアプリを作る 2 つのコース。1 つは自分で書き、もう 1 つはコーディングエージェントに任せます。どのページも実行できるコードから始まります。',
     empty: 'このセクションのドキュメントはまだありません。',
   },
 } as const

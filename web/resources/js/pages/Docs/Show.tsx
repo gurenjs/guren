@@ -209,7 +209,7 @@ function useTableOfContents(doc: DocPage | null) {
 }
 
 export default function DocsShow({ categories, doc, active, locale, locales = [], basePath }: Props) {
-  const docLabel = doc?.category === 'tutorials' ? 'Tutorial' : 'Guide'
+  const docLabel = doc?.category === 'tutorials' ? 'Tutorial' : doc?.category === 'agent-course' ? 'Agent Course' : 'Guide'
   const docPath = doc ? `${basePath}/${doc.category}/${doc.slug}` : basePath
   const nav = buildPrevNext(categories, active, basePath)
   const toc = useTableOfContents(doc)
