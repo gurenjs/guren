@@ -22,7 +22,7 @@ export type PlanVerifyCommand = (typeof PLAN_VERIFY_COMMANDS)[number]
 /**
  * Every list opens with `codegen`: typecheck, check and the tests read `.guren/*.gen.ts`,
  * which a fresh clone lacks, and a step verified on its own must not fail for that.
- * `tests` is in no list: `stepsOf()` appends it to the step the behaviours are judged at.
+ * `tests` is in no list: `stepsOf()` adds it to the step the behaviours are judged at.
  */
 export const PLAN_STEP_VERIFY: Record<PlanStepKind, readonly PlanVerifyCommand[]> = {
   commands: ['codegen', 'typecheck'],

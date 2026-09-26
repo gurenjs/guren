@@ -721,7 +721,7 @@ describe('PlanVerifier', () => {
     expect(formatPlanStepRecord(first, step.record).join('\n')).not.toContain('bun test')
   })
 
-  test('should say a tests command on a step with no behaviour did not run, rather than print a pass for bun test', async () => {
+  test('should block a tests command on a step with no behaviour rather than run or pass it', async () => {
     const split = derivePlanTasks(plan, { splitThreshold: 3 })
     const first = 'task/entity/model.comment/http/1'
     findPlanStep(split, first)?.step.verify.push('tests')
@@ -729,7 +729,8 @@ describe('PlanVerifier', () => {
 
     const step = await verifier(statusOf(), fake, {}, undefined, split).verify(first)
 
-    expect(commandOf(step, 'tests')).toMatchObject({ status: 'pass', label: 'not run: the step has no acceptance behaviours' })
+    expect(step.record.outcome).toBe('blocked')
+    expect(commandOf(step, 'tests')).toMatchObject({ status: 'blocked', reason: 'could not run: tests runs for a step with acceptance behaviours' })
     expect(fake.calls.some((call) => call[1] === 'test')).toBe(false)
   })
 
