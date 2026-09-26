@@ -188,6 +188,7 @@ export async function loadPlanAppState(
       routes: routes.routes,
       definitions: routes.definitions,
       provenance: routes.provenance,
+      moduleWarnings: routes.moduleWarnings,
       controllers: controllersDir ? { unreadable: controllersDir } : controllers.scan,
       sections: { models, resources, policies, pages, ...(testsDir ? { tests: { unreadable: testsDir } } : {}) },
     })
