@@ -1083,12 +1083,12 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
 
     test('should refuse another step kind and name the task’s scaffold step', async () => {
       const message = await refusedWithNothingWritten('wrong-kind', { mark: 'task/entity/model.widget/data' }, 'task/entity/model.widget/data')
-      expect(message).toContain('task/entity/model.widget/data is a data step, and plan:scaffold writes a scaffold step only. The scaffold step of task/entity/model.widget is task/entity/model.widget/scaffold.')
+      expect(message).toContain('task/entity/model.widget/data is a data step, and plan:scaffold writes a scaffold or tests step only. The scaffold step of task/entity/model.widget is task/entity/model.widget/scaffold.')
     })
 
     test('should refuse a step the plan does not derive and list its scaffold steps', async () => {
       const message = await refusedWithNothingWritten('no-step', { mark: 'task/entity/model.gadget/scaffold' }, 'task/entity/model.gadget/scaffold')
-      expect(message).toContain(`task/entity/model.gadget/scaffold is no step of the plan, and plan:scaffold writes a scaffold step only. Its scaffold steps: ${STEP}.`)
+      expect(message).toContain(`task/entity/model.gadget/scaffold is no step of the plan, and plan:scaffold writes a scaffold or tests step only. Its scaffold steps: ${STEP}.`)
     })
 
     test('should refuse a step plan:next has not marked, so the writes count as that step’s work', async () => {
@@ -1545,8 +1545,8 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     try {
       await runCommand(builtinSubCommands['plan:scaffold'] as CommandDef, { rawArgs: [plan, '--step', STEP, '--app', dir, '--json'] })
       const report = JSON.parse(String(log.mock.calls[0]![0])) as PlanScaffoldReport
-      expect(Object.keys(report).sort()).toEqual(['appended', 'created', 'emitted', 'left', 'omitted', 'plan', 'registered', 'reportVersion', 'step', 'unmounted', 'unwritten'])
-      expect(report).toMatchObject({ reportVersion: 1, step: STEP, plan: { file: PLAN_FILE, title: 'Widgets' }, created: CREATED })
+      expect(Object.keys(report).sort()).toEqual(['appended', 'created', 'emitted', 'kind', 'left', 'omitted', 'plan', 'registered', 'reportVersion', 'step', 'unmounted', 'unwritten'])
+      expect(report).toMatchObject({ reportVersion: 1, step: STEP, kind: 'scaffold', plan: { file: PLAN_FILE, title: 'Widgets' }, created: CREATED })
       expect(report.plan.hash).toMatch(/^[0-9a-f]{64}$/)
     } finally {
       log.mockRestore()

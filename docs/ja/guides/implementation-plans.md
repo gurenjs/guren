@@ -354,7 +354,7 @@ bunx guren plan:revise docs/plans/comments/plan.json --edited /tmp/comments.edit
 |---|---|---|
 | `commands` | 計画の `commands` (`guren add attachments` など)。`task/foundation` に入ります | `codegen`、`typecheck` |
 | `scaffold` | 新しいエンティティの最初の版。`plan:scaffold` が書きます | `codegen`、`typecheck` |
-| `tests` | 受け入れ振る舞いごとのテスト。失敗する状態で書きます | `codegen`、テストが失敗すること |
+| `tests` | 受け入れ振る舞いごとのテスト。`plan:scaffold` が雛形を書き、失敗する状態にします | `codegen`、テストが失敗すること |
 | `data` | テーブル、マイグレーション、モデルのリレーションと fillable。scaffold 済みなら、マイグレーションと `plan:scaffold` が書かなかったもの | `codegen`、`db:migrate`、`typecheck` |
 | `http` | コントローラーとルート。validator、Resource、Policy も書きます。scaffold 済みなら、`plan:scaffold` がスタブにしたものと書かなかったもの | `codegen`、`guren check`、テストが通ること |
 | `pages` | ページコンポーネント | `codegen`、`typecheck`、`guren check` |
@@ -374,6 +374,10 @@ Next: task/entity/model.comment/tests
   task: entity Comment (task/entity/model.comment)
   verify: codegen → tests:fail
 
+Write this step’s test skeletons with `bunx guren plan:scaffold docs/plans/comments/plan.json --step task/entity/model.comment/tests`, not by hand, then fill them in.
+  It writes one TestApp test per behaviour (AC-comments-1, AC-comments-2, AC-comments-3, AC-comments-4), with its request and the expectations the plan states, into one file.
+  Each fails at a given() call until the setup it names is written (records, the signed-in actor, path parameters); replace every call, and keep each title’s id and its request.
+
 Behaviours to write, as test titles `[<id>] <description>`, failing:
   [AC-comments-1] A signed-in user can comment on a post.
       success; actor user; route route.comments.store; given a post exists; expect status 303; comments has 1 row(s)
@@ -392,7 +396,7 @@ Marked in .guren/plans/comments.state.json
 
 ```text
  ERROR  The working tree under /app has uncommitted changes (paths relative to the repository root), and one step is one commit. Commit or discard them first:
-  ?? tests/comments.test.ts
+  ?? tests/plans/comments/comments.test.ts
 ```
 
 ```bash
@@ -402,7 +406,7 @@ bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.co
 ```text
 task/entity/model.comment/tests: verified (607 ms)
   pass     codegen     bun run codegen
-  pass     tests:fail  bun test tests/comments.test.ts
+  pass     tests:fail  bun test tests/plans/comments/comments.test.ts
   failing  [AC-comments-1]
   failing  [AC-comments-2]
   failing  [AC-comments-3]
@@ -514,7 +518,7 @@ codegen もマイグレーションも実行しません。codegen と型検査�
 拒否はすべて、最初の書き込みより前に決まります。拒否するのは次の場合です。
 
 - 下書き、またはどの承認も名指ししていない計画
-- `scaffold` 以外のステップ (そのタスクの scaffold ステップを示します)、または `plan:next` が印を付けていないステップ
+- `scaffold` と `tests` 以外のステップ (そのタスクの scaffold ステップを示します)、または `plan:next` が印を付けていないステップ
 - モジュールに属するモデル、validator、Resource、Policy、コントローラー、副作用 (書き込み先はプロジェクトのルートだけです) と、API 専用のアプリケーション
 - MySQL で `text` か `json` のカラムに付けたキー (主キー、`unique`、インデックス、MySQL がインデックスを作る外部キー)。drizzle-kit が拒否し、MySQL もプレフィックス長のないキーを拒否します (カラムを `string` にするか、キーを外してください)。値が `null` の `default` も拒否します
 - 名前が `Resource` で終わらない Resource (`guren codegen` が見つけられません)、`Policy` 自身のメンバー (`before`、`allow`、`deny`) と同じ名前の ability、`Controller` のメンバー (`redirect`、`json`) と同じ名前のアクション
@@ -535,6 +539,30 @@ Mount the routes the scaffold step wrote first, with `bunx guren plan:scaffold d
 `registerCommentRoutes` を `routes/web.ts` に import し、そこの registrar の先頭で呼び出します。先頭なので、エントリーが設定する `auth` の別名が、ルートのファイルの設定より優先されます。マウントしたルートはエントリー自身のルートより先に登録されます。そのため `/posts/:id` のようにパラメーターを含む scaffold のパスが、`/posts/create` のようなエントリーのルートを覆うことがあります。重なる場合は順序を確かめてください。これで `plan:status` はルートとそのアクションを `wired` と読み、それらが使う validator も `wired` になります。残るのは各アクションの本体とレスポンス、そして scaffold がスタブにしたか書かなかったものです。
 
 次の場合は何も書かずに拒否します。下書きやどの承認も名指ししていない計画、`plan:next` が印を付けていないステップ、scaffold したルートを持たないステップ (持つステップを示します)、存在しないルートのファイルや registrar を export しなくなったファイル、`routes/web.ts` のないアプリケーション、registrar と同じ名前で別のものを import しているエントリー、すでにマウントされたファイルです。エントリーが直接呼んでいても、別のルートのファイルが呼んでいても、マウント済みと判断します。
+
+### テストの雛形: tests ステップの `plan:scaffold`
+
+`tests` ステップも同じコマンドで書きます。`plan:scaffold <plan> --step <task>/tests` は `tests/plans/<plan>/<collection>.test.ts` を一つ書きます (comments の計画なら `tests/plans/comments/comments.test.ts`)。中身はステップの振る舞いごとに一つの `TestApp` テストです。
+
+```ts
+test('[AC-comments-1] A signed-in user can comment on a post.', async () => {
+  given('a post exists')
+  const actor = given<object>('the actor: user')
+  const postId = given<number | string>('the :postId parameter')
+  await (await client(actor)).post(`/posts/${postId}/comments`, { body: 'Nice post' }).assertStatus(302)
+  expect(await Comment.where({ body: 'Nice post' }).first()).not.toBeNull()
+})
+```
+
+- タイトルは振る舞いの id で始まり、`plan:verify` はこの id でファイルを選びます。計画の文中にある角括弧は丸括弧にして書くので、ファイルがほかの id を持つことはありません。
+- リクエストはルートが示すものです。メソッド、パラメーターをセグメント全体の埋め込みにしたパス、ボディにした `input` (`GET` ならクエリ文字列) を書きます。
+- 期待値は計画のものです。`status`、`redirect` (ルートと共通のパラメーターはルートの値を使います)、`inertia` (リクエストに `X-Inertia` を付けます)、`errors` (JSON のボディから読みます)、`database` の行を書きます。行はモデルを通したクエリで、ルートにモデルがあり、計画のカラムの型と比べられる値のときに書きます。
+- 計画が文章で書いた前提、ルートが求めるときのサインイン済みのアクター、パスの各パラメーターは `given()` の呼び出しになり、呼ぶと例外を投げます。雛形に書けない期待値は `unwritten()` の呼び出しになり、これも例外を投げます。期待する 404 も同じ扱いです。まだないルートも 404 を返すからです。どれもレポートと出力に一覧で示します。
+- `client()` はテストの中で `src/app.ts` を import し、`TestApp.fromApp()` で起動します。起動に失敗してもファイル全体ではなく、各テストが名前付きで失敗します。アプリケーションが CSRF をマウントしていれば、`withCsrf()` で準備します。
+
+実装より前は、どのテストも `given()` の呼び出しか、まだマウントされていないルートで失敗します。skip されるテストはないので、`tests:fail` の条件どおりにステップを検証できます。`given()` と `unwritten()` の呼び出しは、それぞれが示す前提やアサーションに置き換えてください。テストを `test.skip` や `test.todo` に変えないでください。skip したケースは実行に数えられず、ステップはそこで失敗します。後のステップも同じファイルを実行して通ることを求めるので、タイトルの id とリクエストは残してください。
+
+次の場合は何も書かずに拒否します。下書きや承認のない計画、`plan:next` が印を付けていないステップ、すでにあるファイル (再実行)、ほかのテストファイルがすでに持っている振る舞い (`plan:verify` が二つのファイルで見つけてしまいます)、起動できる default export が `src/app.ts` にも `app.ts` にもないアプリケーションです。API 専用のアプリケーションには `scaffold` ステップがありませんが、`tests` ステップはほかと同じようにあり、雛形も書けます。制約付きのルートパラメーター (`:id{[0-9]+}`) は静的な読み取りの限界です。実行時の値が制約を満たすとは限らないので、そのリクエストはルートに届くとは読まず、不確かとして扱います。
 
 ### 結果
 

@@ -1401,6 +1401,76 @@ and the static "still calls its route" check is not implemented. Both are the
 optional last item of Part 3; `packages/cli/src/test-requests.ts`, which reads
 the requests a test file makes, is what the check would rest on.
 
+**Amended in implementation (`plan:scaffold` on a `tests` step, Part 3 item
+7a):** the skeletons ship; the static check is item 7b's. `plan:scaffold <plan>
+--step <task>/tests` writes them through `plan/scaffold-tests.ts`, pure like
+the other emitters.
+
+- One file per plan and task, `tests/plans/<plan slug>/<name>.test.ts`, the
+  name the entity's collection (`comments`), a story's intent id, a cross
+  task's model ids or `foundation`. The harness testing rule puts tests under
+  `tests/`; a directory per plan keeps a second plan on the same entity from
+  colliding with the first's file, which a re-run refuses on.
+- Each behaviour is one `test('[<id>] <description>')`. Prose written into the
+  file (the description, `given`, the actor) has its brackets turned into
+  parentheses, so the file carries no id but its own: another bracketed id in
+  it would be selected by that behaviour's step and counted by the drift
+  re-check.
+- The request is the route's method and path, each parameter a whole-segment
+  interpolation (`` `/posts/${postId}/comments` ``), which `test-requests.ts`
+  resolves to the route. The `input` is the body, or the query string for a
+  `GET`. The receiver is `client()`, a function in the file annotated to
+  return `Promise<TestApp>`, which the scan counts as a `TestApp`. A parameter
+  with a constraint (`:id{[0-9]+}`) reads as `unknown` there, since a runtime
+  value may fail it: a limit of the scan the skeleton does not work around.
+- `client()` imports the app entry (`src/app.ts` or `app.ts`, whose default
+  export must exist, or the step is refused) and boots it with
+  `TestApp.fromApp()` on first use inside a test, never at module level or in
+  `beforeAll`: a file that throws while loading is absent from the junit report
+  and a throwing `beforeAll` becomes one `(unnamed)` case, either of which
+  reads every behaviour as `pending`. It primes CSRF with `withCsrf()`
+  (after `actingAs()`), and falls back to the unprimed client only on the
+  error `withCsrf()` throws for a missing `XSRF-TOKEN`, which the CSRF
+  middleware issues on every safe request: its absence means no CSRF is
+  mounted, as in an application created without `auth`.
+- What the plan states only in prose is a `given()` call that throws: each
+  `given` line, the actor where the route or action names `auth`, carries a
+  policy, or the behaviour is `forbidden` (never for `unauthenticated`), and
+  each path parameter's value. A throw is a failed case, never a skipped one,
+  so `tests:fail` counts it; `test.todo` and `test.skip` would not.
+- The expectations are written out where `TestApp` can assert them:
+  `assertStatus`, `assertRedirect` (a path sharing the route's parameters
+  reuses their values), `assertInertia` on the view's page with `X-Inertia`
+  sent, and `errors` as the keys of the JSON body's `errors`. `TestApp` has no
+  database helper bound to the application's connection, so a `database` row is
+  a query through the model, `expect(await Comment.where({ … }).first())`, for
+  a table a plan model declares, whose class the root has, with each value one
+  its planned column type compares with as a literal (a string, integer,
+  number or boolean column, or `null` on a nullable one). Anything else, and an
+  expected `404`, which a route that does not exist yet answers too, is an
+  `unwritten()` call that throws, listed in the report. A case with no
+  assertion that a missing route would fail gets one as well, so every case
+  fails before its implementation.
+- The file compiles: the helpers, `expect` and each model import are written
+  only when used, and a test renders it beside the scaffold step's output and
+  typechecks it. Refused before the write, like the other scaffold writes: the
+  file existing (a re-run), a step id another test file already carries
+  (`plan:verify` would find it in two files), no default export to boot, an
+  unmarked step, and a draft or unapproved plan. An API-only application has
+  no `scaffold` step but gets its `tests` step's skeletons, which read no model
+  it lacks.
+- Measured through `plan:verify --step` on the comments fixture plus one
+  behaviour with no `given` and no parameter, scaffolded into a temp app and
+  unmounted: every case fails, the four with setup at `given()` and the
+  guest's on the route's 404, and the step verifies. Turning one test into
+  `test.skip` fails the step, and mounting the routes with `--mount` makes the
+  guest's case pass, which fails it too.
+- Not verified: an `inertia` expectation against an application whose Inertia
+  asset version resolves in tests, which answers an `X-Inertia` visit without
+  the matching `X-Inertia-Version` with 409; and an application that mounts
+  CSRF with its cookie turned off, where the fallback leaves mutating requests
+  unprimed.
+
 For `alter` / `rename` / `drop` there is no scaffold. Those steps are agent
 edits, and the narrow step width matters most there.
 

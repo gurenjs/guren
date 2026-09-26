@@ -60,7 +60,7 @@ export interface PlanNextStep extends Pick<PlanDerivedStep, 'id' | 'kind' | 'ver
   unconfirmed?: PlanStepContextElement[]
   /** Set where the step was verified and only these fingerprinted files changed since: it is re-checked, not re-implemented. */
   drifted?: string[]
-  /** A scaffold step's: the command that writes it, the `generates` it writes, and those the `http` step writes by hand. */
+  /** A scaffold step's: the command that writes it, the `generates` it writes, and those the `http` step writes by hand. A tests step's `writes` are its behaviours, one test skeleton each. */
   scaffold?: { command: string; writes: string[]; leaves: string[] }
   /**
    * The http step holding the routes a scaffold step wrote: the command that mounts their file,
@@ -362,6 +362,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
       ...(unconfirmed.length > 0 ? { unconfirmed } : {}),
       ...(drifted.length > 0 ? { drifted } : {}),
       ...(step.kind === 'scaffold' ? { scaffold: scaffoldOf(plan, step, planPath) } : {}),
+      ...(step.kind === 'tests' ? { scaffold: { command: planScaffoldCommandLine(planPath, step.id), writes: [...step.acceptanceIds], leaves: [] } } : {}),
       ...mountable,
     },
   }
@@ -458,7 +459,14 @@ function scaffoldLines(step: PlanNextStep, scaffold: NonNullable<PlanNextStep['s
   const command = planScaffoldCommandLine(planArgument, step.id)
   const lines = draft
     ? [`Approve the plan first (bunx guren plan:approve ${planArgument}): plan:scaffold writes this step from an approved plan only, as`, `  ${command}`]
-    : [`Write this step with \`${command}\`, not by hand.`]
+    : [step.kind === 'tests' ? `Write this step’s test skeletons with \`${command}\`, not by hand, then fill them in.` : `Write this step with \`${command}\`, not by hand.`]
+  if (step.kind === 'tests') {
+    lines.push(
+      `  It writes one TestApp test per behaviour (${scaffold.writes.join(', ')}), with its request and the expectations the plan states, into one file.`,
+      '  Each fails at a given() call until the setup it names is written (records, the signed-in actor, path parameters); replace every call, and keep each title\u2019s id and its request.',
+    )
+    return lines
+  }
   if (scaffold.writes.length > 0) {
     lines.push(
       `  It writes each added model (table and class), its validators and resources, each policy with a provider registering it, each added controller with its actions as stubs, the routes to them in a file of their own that the http step mounts, and the side-effect classes: ${scaffold.writes.join(', ')}`,
