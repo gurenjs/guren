@@ -308,7 +308,7 @@ jobs:
       # not something the documentation settles.
       - name: Run tests
         timeout-minutes: 15
-        run: bun run ./scripts/test-packages.ts -- --shard=${{ matrix.shard }}/3
+        run: bun run ./scripts/test-packages.ts --shard=${{ matrix.shard }}/3
 
       # The runs below are small, so each lands on one shard rather than all.
       - name: Example app tests
@@ -440,7 +440,7 @@ jobs:
       - name: Generate route types
         run: bun run build:routes
       - name: Run tests (no Redis)
-        run: bun run ./scripts/test-packages.ts -- --shard=${{ matrix.shard }}/3
+        run: bun run ./scripts/test-packages.ts --shard=${{ matrix.shard }}/3
 
   e2e:
     runs-on: ubuntu-latest
