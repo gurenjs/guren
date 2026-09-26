@@ -24,12 +24,16 @@
   "filter.changesOnly": "Changes only",
   "filter.count": "{shown} of {total} elements shown",
 
+  "footer.copyPrompt": "Copy prompt for the agent",
+  "footer.prompt": "Revise {plan} from my review with the plan-write skill. Here is the review page's feedback:",
+  "footer.promptNote": "Choosing an answer or approving an element here does not change the plan file. Copy the prompt and send it to the agent that wrote the plan, which applies your review with {command}.",
+  "footer.promptCopied": "Copied. Paste it into the agent's session and send it.",
   "footer.copy": "Copy feedback",
   "footer.download": "Download feedback.json",
   "footer.note": "Comment on any element from the mark in its heading. This page never writes to the project and makes no network request.",
   "footer.revise": "{command} records a change to the plan as a revision and checks it against this feedback: an element approved here changes only with a reason (--reopens), and an answered question must be removed. Make the change in a copy of the plan, then pass the copy with --edited and the feedback with --feedback (- reads the copied text). It does not turn comments into changes. Then render the plan again:",
   "footer.approve": "Once the plan says what you mean to build, approve it:",
-  "footer.copied": "Copied. Paste it to the agent that wrote the plan.",
+  "footer.copied": "Copied the feedback JSON.",
   "footer.clipboardRefused": "The browser refused the clipboard. Use Download instead.",
   "footer.downloaded": "Downloaded feedback.json.",
 

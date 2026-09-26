@@ -22,16 +22,16 @@
 
 1. **Can guests browse meetups?** では **yes** が選ばれた状態のまま、回答欄に「Yes, browsing is public.」と入力します。
 2. `route.meetups.store` の policy の警告は、第 2 章で意図した選択と判断したので、そのままにします。
-3. ページ下部の **Copy feedback** を押します。
+3. ページ下部の **Copy prompt for the agent** を押します(`--locale ja` で描画したページでは「エージェントへの依頼文をコピー」)。
+
+ページで回答を選んだり要素を承認したりしても、それだけでは `plan.json` は変わりません。エージェントがレビューを反映するまでは、`plan:approve` も質問が未回答のままだとして承認を拒否します。このボタンは、計画のパスと「plan-write スキルでレビューを反映してほしい」という依頼に、ページのフィードバックを付けた依頼文をまとめてコピーします。
 
 ## 2. レビューをエージェントに渡す
 
-Claude Code のセッションに、次のプロンプトを送ります。
+コピーした依頼文を Claude Code のセッションに貼り付けます。第 2 章で見つけた足りない振る舞いはページからは伝わらないので、送る前に、貼り付けた依頼文の下へ次の文を書き足してください。
 
 ```text
-docs/plans/meetups/plan.json に私のレビューを plan:revise で反映してください。ページの受け入れ振る舞いの警告ごとに振る舞いを足してください。meetups.create と meetups.update には unauthenticated、meetups.edit には forbidden、meetups.update には validation です。さらに、主催者が meetups.edit を開ける success の振る舞いも足してください。meetups.store の警告は残します。サインインしたユーザーなら誰でも主催できるからです。ページのフィードバックは次のとおりです。
-
-<コピーしたフィードバックをここに貼る>
+あわせて、ページの受け入れ振る舞いの警告ごとに振る舞いを足してください。meetups.create と meetups.update には unauthenticated、meetups.edit には forbidden、meetups.update には validation です。主催者が meetups.edit を開ける success の振る舞いも足してください。meetups.store の警告は残してください。サインインしたユーザーなら誰でも主催できるからです。
 ```
 
 エージェントは `plan-write` スキルの手順に従い、リポジトリの外に作った計画のコピーを編集してから、そのコピーとフィードバックを渡して `bunx guren plan:revise` を実行します。回答済みの質問がコピーに残っていると、`plan:revise` はそのコピーを受け付けません。受け付けた変更は、1 つずつ理由を添えて `docs/plans/meetups/revisions/0001.json` に記録されます。
@@ -123,9 +123,9 @@ git commit -m "docs: approve the meetups plan"
 
 ## ここまでの状態
 
-- 振る舞いが 12 件あり、未決の質問のない承認済みの計画。
-- `revisions/0001.json`。レビューをデータとして残したものです。
-- `approvals.json`。実装のコマンドが確かめます。
+- 振る舞いが 12 件あり、未決の質問もない計画が承認されています。
+- `revisions/0001.json` に、レビューの内容がデータとして残っています。
+- `approvals.json` ができました。実装のコマンドは、このファイルで承認を確かめます。
 
 ## よくあるつまずき
 

@@ -364,10 +364,10 @@ This plan changes no column, so it needs no data migration. Chapter 2's checklis
 
 ## 4. Answer and approve
 
-Answer the question the same way as in chapter 3: pick **refuse** on the page, copy the feedback, and hand it over.
+Answer the question the same way as in chapter 3: pick **refuse** on the page, click **Copy prompt for the agent**, and paste the prompt into the Claude Code session. Add this below it before you send it:
 
 ```text
-Apply my review of docs/plans/registrations/plan.json with plan:revise: a full meetup refuses the registration; a waitlist is a later change. Keep both warnings on registrations.store, since any signed-in user may register and the request has no body.
+A full meetup refuses the registration; a waitlist is a later change. Keep both warnings on registrations.store, since any signed-in user may register and the request has no body.
 ```
 
 **Without an agent:**

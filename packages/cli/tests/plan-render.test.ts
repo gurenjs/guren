@@ -161,6 +161,10 @@ describe('the plan file name the page prints in a command', () => {
     expect(payloadOf({ plan: draft(), planFile: 'comments.plan.json' }).planFile).toBe('comments.plan.json')
   })
 
+  test('should carry a relative path of plain names through', () => {
+    expect(payloadOf({ plan: draft(), planFile: 'docs/plans/comments/plan.json' }).planFile).toBe('docs/plans/comments/plan.json')
+  })
+
   test('should be absent when none is given', () => {
     expect(payloadOf({ plan: draft() }).planFile).toBeNull()
   })
@@ -174,6 +178,10 @@ describe('the plan file name the page prints in a command', () => {
     'plan".json',
     'plan .json',
     '../secrets.json',
+    'docs/../../secrets.json',
+    'docs/.hidden/plan.json',
+    'docs//plan.json',
+    'docs/plans/',
     '/etc/passwd',
     '-rf',
     '',
@@ -197,6 +205,35 @@ describe('the plan file name the page prints in a command', () => {
     const page = openPlanPage(renderPlanHtml({ plan: draft(), planFile: 'plan.json; rm -rf ~' }))
 
     expect(page.byId('render-command').textContent).toBe('bunx guren plan:render <plan.json>')
+  })
+})
+
+describe('the prompt the page copies for the agent', () => {
+  test('should name the plan and carry the same feedback the feedback button copies', () => {
+    const page = openPlanPage(renderPlanHtml({ plan: draft(), planFile: 'docs/plans/comments/plan.json', uiLocale: 'en' }))
+
+    page.byId('copy').click()
+    page.byId('copy-prompt').click()
+
+    const [feedback, prompt] = page.clipboard
+    expect(prompt).toStartWith('Revise docs/plans/comments/plan.json from my review with the plan-write skill.')
+    expect(prompt).toContain('```json\n' + feedback + '\n```')
+    expect(JSON.parse(feedback!)).toHaveProperty('answers')
+  })
+
+  test('should speak the locale the page is showing', () => {
+    const page = openPlanPage(renderPlanHtml({ plan: draft(), planFile: 'docs/plans/comments/plan.json', uiLocale: 'ja' }))
+
+    page.byId('copy-prompt').click()
+
+    expect(page.clipboard[0]).toStartWith('docs/plans/comments/plan.json に私のレビューを plan-write スキルで反映してください。')
+  })
+
+  test('should tell the reader that answering on the page alone changes nothing', () => {
+    const page = openPlanPage(renderPlanHtml({ plan: draft(), uiLocale: 'en' }))
+
+    expect(page.byId('footer-prompt-note').textContent).toContain('does not change the plan file')
+    expect(page.byId('footer-prompt-note').textContent).toContain('plan:revise')
   })
 })
 
