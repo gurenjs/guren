@@ -981,7 +981,7 @@ behaviours. Guren supplies the breakdown and the order, in
    | scaffold | deterministic, no model (see below) | codegen, then `typecheck` |
    | tests | skeletons generated from `acceptance[]` (no model); the agent fills `given` setup and what `expect` cannot express | codegen, then every generated test runs and fails |
    | data | what the scaffold's table cannot express, migration, model relationships | codegen, `db:migrate`, `typecheck` |
-   | http | validator, resource, policy, controller, routes | codegen, `guren check`, the slice's tests |
+   | http | validator, resource, policy, controller, routes | codegen, `typecheck`, `guren check`, the slice's tests |
    | pages | page components | codegen, `typecheck`, `guren check` |
 
 3. **Cross-entity tasks** (a dashboard) depend on every slice they read.
@@ -1030,7 +1030,18 @@ decides a task, so `tasks.ts` fixes it:
   intent's acceptance goes to that slice: on `tests`, and on the step where the
   behaviours must pass, which is the last `http` step, or the task's last step
   when it has none. That step's verify always includes the tests, so a slice
-  of `data` or `pages` alone still runs them. A task with behaviours and no
+  of `data` or `pages` alone still runs them, and no other step's does: an
+  earlier `http` part, or an `http` step of a task with no behaviours, has no
+  test file to select, and `bun test` given none runs the whole suite, a result
+  that says nothing about the step. `http` typechecks as `data` and `pages` do:
+  without it, a controller the tests pass through could call a model method
+  with the wrong argument types (`Meetup.update(id, data)`, whose first
+  argument is a where clause) and verify, leaving the error to the `pages`
+  step or `guren gate`. The cost falls on an action rendering a page the
+  `pages` step writes: the page's file has to exist at the `http` step, since
+  `pages.gen.ts` lacks it until then. An action a behaviour requests needed
+  that already, as the request reads `pages.<name>` at runtime; one no
+  behaviour requests gains the requirement. A task with behaviours and no
   work has the `tests` step only, run after the tasks it waits for and
   verified by the tests *passing*: failing first is tamper detection, which
   means something only where an implementation step comes after the tests.

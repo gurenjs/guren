@@ -257,7 +257,7 @@ describe('derivePlanTasks', () => {
               { id: `${slice}/scaffold`, kind: 'scaffold', elementIds: [], generates: ['model.comment', ...columns, ...http], acceptanceIds: [], verify: ['codegen', 'typecheck'] },
               { id: `${slice}/tests`, kind: 'tests', elementIds: [], generates: [], acceptanceIds: behaviours, verify: ['codegen', 'tests:fail'] },
               { id: `${slice}/data`, kind: 'data', elementIds: ['model.post', 'model.comment', ...columns], generates: [], acceptanceIds: [], verify: ['codegen', 'db:migrate', 'typecheck'] },
-              { id: `${slice}/http`, kind: 'http', elementIds: http, generates: [], acceptanceIds: behaviours, verify: ['codegen', 'check', 'tests'] },
+              { id: `${slice}/http`, kind: 'http', elementIds: http, generates: [], acceptanceIds: behaviours, verify: ['codegen', 'typecheck', 'check', 'tests'] },
               { id: `${slice}/pages`, kind: 'pages', elementIds: ['view.posts.show'], generates: [], acceptanceIds: [], verify: ['codegen', 'typecheck', 'check'] },
             ],
           },
@@ -328,7 +328,7 @@ describe('derivePlanTasks', () => {
       expect(foundation.dependsOn).toEqual([])
       expect(foundation.steps.map((step) => [step.kind, step.elementIds, step.verify])).toEqual([
         ['commands', ['command.attachments'], ['codegen', 'typecheck']],
-        ['http', ['validator.page'], ['codegen', 'check', 'tests']],
+        ['http', ['validator.page'], ['codegen', 'typecheck', 'check']],
       ])
       for (const other of result.tasks.slice(1)) expect(other.dependsOn, other.id).toContain(FOUNDATION_TASK_ID)
       expect(result.notes).toEqual([])
@@ -639,8 +639,20 @@ describe('derivePlanTasks', () => {
           const expected = derived.steps.some((step) => step.kind === 'tests') && derived.steps.some((step) => step.elementIds.length > 0) ? 1 : 0
           expect(judged.length, derived.id).toBe(expected)
           for (const step of judged) expect(step.verify, step.id).toContain('tests')
+          for (const step of derived.steps) if (step.acceptanceIds.length === 0) expect(step.verify, step.id).not.toContain('tests')
         }
       }
+    })
+
+    test('should typecheck every http step, and run no tests on one that carries no behaviour', () => {
+      const http = [derive(), derive(busyPlan), derive(undefined, { splitThreshold: 1 })]
+        .flatMap((result) => result.tasks.flatMap((derived) => derived.steps))
+        .filter((step) => step.kind === 'http')
+      for (const step of http) {
+        expect(step.verify, step.id).toEqual(step.acceptanceIds.length > 0 ? ['codegen', 'typecheck', 'check', 'tests'] : ['codegen', 'typecheck', 'check'])
+      }
+      expect(http.some((step) => step.acceptanceIds.length === 0)).toBe(true)
+      expect(http.some((step) => step.acceptanceIds.length > 0)).toBe(true)
     })
 
     test('should not add the tests to a step that carries no behaviour', () => {

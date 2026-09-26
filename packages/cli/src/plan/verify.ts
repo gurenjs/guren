@@ -568,7 +568,8 @@ export class PlanVerifier {
    */
   private async tests(command: 'tests' | 'tests:fail', step: PlanDerivedStep): Promise<CommandOutcome> {
     const ids = step.acceptanceIds
-    if (ids.length === 0) return { label: 'bun test', status: 'pass', reason: 'the step has no acceptance behaviours', findings: [] }
+    // Never `bun test` with no file: that runs the whole suite, whose result says nothing about this step.
+    if (ids.length === 0) return { label: 'not run: the step has no acceptance behaviours', status: 'pass', findings: [] }
     const { files, carriers } = await this.selection(step)
     if (files.length === 0) {
       return { label: 'bun test', status: 'fail', reason: `no test file carries ${ids.map((id) => `[${id}]`).join(', ')} as a literal token`, findings: [] }

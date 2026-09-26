@@ -358,7 +358,7 @@ bunx guren plan:revise docs/plans/comments/plan.json --edited /tmp/comments.edit
 | `scaffold` | 新しいエンティティの最初の版。`plan:scaffold` が書きます | `codegen`、`typecheck` |
 | `tests` | 受け入れ振る舞いごとのテスト。`plan:scaffold` が雛形を書き、失敗する状態にします | `codegen`、テストが失敗すること |
 | `data` | テーブル、マイグレーション、モデルのリレーションと fillable。scaffold 済みなら、マイグレーションと `plan:scaffold` が書かなかったもの | `codegen`、`db:migrate`、`typecheck` |
-| `http` | コントローラーとルート。validator、Resource、Policy も書きます。scaffold 済みなら、`plan:scaffold` がスタブにしたものと書かなかったもの | `codegen`、`guren check`、テストが通ること |
+| `http` | コントローラーとルート。validator、Resource、Policy も書きます。scaffold 済みなら、`plan:scaffold` がスタブにしたものと書かなかったもの | `codegen`、`typecheck`、`guren check`、テストが通ること (振る舞いを判定するステップのみ) |
 | `pages` | ページコンポーネント | `codegen`、`typecheck`、`guren check` |
 
 複数のエンティティが共有する作業は `task/foundation` に入ります。ステップの id は `task/entity/model.comment/http` のような形です。`commands`、`data`、`http`、`pages` のステップは、担当する要素が五つを超えるファイルにまたがると複数に分かれ、`task/entity/model.comment/http/1`、`task/entity/model.comment/http/2` のような id になります。`scaffold` と `tests` は分かれません。`--step` に渡す正確な id は `plan:next` が表示します。次のステップを尋ね、実装し、検証し、コミットする。これを繰り返します。
