@@ -33,7 +33,7 @@ cat docs/entities/Meetup.md
 
 `plan:close` が書く内容は、すべて `<!-- guren:plan meetups … -->` のマーカーの間に入ります。マーカーの外に読者が書き足した文章は、そのまま残ります。後で `Meetup` に手を入れる計画があっても、その計画は自分のブロックしか書き換えません。
 
-## 2. つながりを検査する
+## 2. ドキュメントとテストのつながりを検査する
 
 ```bash run
 bunx guren check --docs
@@ -41,7 +41,7 @@ bunx guren check --docs
 
 `check --docs` は、ドキュメント中の `(AC-…)` ごとに、同じ id を持つテストがあるかを調べます。テストのタイトルを変えたりテストを削除したりすると、そのルールは裏付けるテストがないものとして報告されます。
 
-## 3. 次のエージェントに見えるもの
+## 3. 次のエージェントが読むもの
 
 ```bash run
 bunx guren context Meetup
@@ -76,4 +76,4 @@ git commit -m "docs: close the meetups plan"
 
 ## 次へ
 
-[第 6 章: 既存を変える計画](./06-changing-what-exists.md) では、いま作った勉強会に手を入れる機能として、参加登録を計画します。
+[第 6 章: 既存のコードを変える計画](./06-changing-what-exists.md) では、いま作った勉強会に手を入れる機能として、参加登録を計画します。

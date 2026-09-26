@@ -16,7 +16,7 @@
 bun run dev
 ```
 
-## 1. まずテスト: 人が書くメッセージ
+## 1. まずテストを書く: 人が書くようなエラーメッセージ
 
 いまの `POST /posts` に空のフォームを送ると、スキーマで弾かれはしますが、エラーの文言は Zod の既定のままです。まず、どんな文言にしたいかをテストに書きます。`tests/PostController.test.ts` にテストを 1 つ追加してください。
 
@@ -408,7 +408,7 @@ git add -A
 git commit -m "feat: validate posts with messages and shape them with a resource"
 ```
 
-## 5. CRUD の残りを仕様化する
+## 5. CRUD の残りのテストを先に書く
 
 残りは編集、更新、削除と、10 件ずつのページネーションです。テストファイルを次の内容に置き換えます。
 
@@ -529,9 +529,9 @@ describe('PostController', () => {
 bun test
 ```
 
-5 つのテストが失敗します。エージェントに任せる前に、テストをもう一度読んでおいてください。編集ページに投稿が渡ること、更新と削除のあとは利用者が期待するページへリダイレクトすること、不正な値での更新は作成と同じ形で失敗すること、11 件目の投稿は 2 ページ目に回ること。このスライスの仕様は、これで出そろっています。
+5 つのテストが失敗します。エージェントに任せる前に、テストをもう一度読んでおいてください。編集ページに投稿が渡ること、更新と削除のあとは利用者が期待するページへリダイレクトすること、不正な値での更新は作成と同じ形で失敗すること、11 件目の投稿は 2 ページ目に回ること。この部分の仕様は、これで出そろっています。
 
-## 6. 委ねる
+## 6. エージェントに任せる
 
 エージェントに次のプロンプトを送ります。
 
@@ -539,7 +539,7 @@ bun test
 Complete the posts CRUD. Add `edit`, `update` and `destroy` actions to `PostController` using route model binding like `show`, and register `GET /posts/:id/edit` (`posts.edit`), `PUT /posts/:id` (`posts.update`, with `body: PostPayloadSchema`) and `DELETE /posts/:id` (`posts.destroy`). Add `resources/js/pages/posts/Edit.tsx` as a form like `New.tsx` that submits with `form.put`, and give `Show.tsx` an Edit link and a Delete button. Paginate `index` at ten posts per page with `Post.paginate` and the `paginate` helper, validating `?page=` with a `ListPostsQuerySchema` in the validator, and render the page links in `Index.tsx`. Use `PostResource` for every post sent to a page. `tests/PostController.test.ts` describes all of it; make it pass.
 ```
 
-ここまでで最も大きなスライスなので、この章で紹介するハーネスの仕組みを使います。`.claude/agents/code-review.md` にある **`code-review` サブエージェント**です。サブエージェントは、専用の指示書と独立したコンテキストを持つエージェントで、メインのエージェントから呼び出して使います。このサブエージェントの指示書には Guren のコードレビューの手順が書かれています。まず `guren check` と `guren audit` を実行し、そのうえで 2 つのコマンドでは判断できない点を差分から読み取ります。
+エージェントに任せる作業としてはここまでで最も大きいので、この章で紹介するハーネスの仕組みを使います。`.claude/agents/code-review.md` にある **`code-review` サブエージェント**です。サブエージェントは、専用の指示書と独立したコンテキストを持つエージェントで、メインのエージェントから呼び出して使います。このサブエージェントの指示書には Guren のコードレビューの手順が書かれています。まず `guren check` と `guren audit` を実行し、そのうえで 2 つのコマンドでは判断できない点を差分から読み取ります。
 
 エージェントが完了を報告したら、下の確認項目を自分で確かめる前に、エージェントに次のプロンプトを送ります。
 
@@ -850,7 +850,7 @@ git commit -m "feat: complete the posts CRUD with pagination"
 
 - 人が読めるメッセージを持つバリデーターファイルがあり、ルートに結び付けてコントローラーから使い、フォームの型にもなっています。
 - 投稿の見え方を決めるリソースと、それに追随する `Data.Post` 型があります。
-- CRUD 一式とページネーションを 11 件のテストで仕様にし、エージェントが実装して、サブエージェントと自分でレビューしました。
+- CRUD 一式とページネーションを 11 件のテストで仕様にし、エージェントが実装して、サブエージェントと読者自身でレビューしました。
 - audit の警告 3 件を、意図して残しています。
 
 ## よくあるつまずき

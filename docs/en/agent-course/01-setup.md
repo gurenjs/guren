@@ -80,7 +80,7 @@ Open a second terminal in `guren-meetups` and start Claude Code:
 claude
 ```
 
-Leave it open. From chapter 2 on, each prompt appears in a code block introduced as a prompt for Claude Code; paste it into this session and send it.
+Leave it open. From chapter 2 on, what you send the agent appears in a code block: copy it into this session and send it.
 
 ## Where you are
 

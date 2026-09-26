@@ -112,7 +112,7 @@ const TUTORIAL_SECTIONS: readonly DocSectionConfig[] = [
     slugs: ['05-users-and-passwords', '06-protecting-routes', '07-authorization'],
   },
   {
-    title: { en: 'Your harness', ja: 'あなたのハーネス' },
+    title: { en: 'Your harness', ja: 'ハーネスを育てる' },
     slugs: ['08-teach-the-agent'],
   },
   {
@@ -128,7 +128,7 @@ const TUTORIAL_SECTIONS: readonly DocSectionConfig[] = [
     slugs: ['14-production'],
   },
   {
-    title: { en: 'The other way round', ja: '逆順で' },
+    title: { en: 'The other way round', ja: 'プロトタイプから作る' },
     slugs: ['15-prototype-first'],
   },
 ]
