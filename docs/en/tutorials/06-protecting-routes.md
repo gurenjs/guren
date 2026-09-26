@@ -929,6 +929,24 @@ One file survives `git clean` on purpose: `.env` is ignored, and `add auth` appe
 1. A guest who opens `/posts/create` is redirected to `/login`. What happens to a guest who POSTs to `/posts`? Write the test and find out before you guess; then say whether that answer is the one you want.
 2. The backfill script filled `authorId` on rows that had none. On a branch, make the column nullable again and run `bun run db:make` without applying it. Read the SQL. Why does SQLite rebuild the table instead of altering the column? Undo it with `git reset --hard` and `git clean -fd`, not with `git branch -D` alone.
 
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Section 1's `tests/PostController.test.ts` already has "sends a guest to the login page instead of storing". Read it beside `requireAuthenticated({ redirectTo: '/login' })` in `routes/web.ts`.
+
+The guest gets the same redirect to `/login` as for the form, and nothing is stored: the middleware answers before the action runs, whatever the method. CSRF runs before authentication, so a guest POST without a token is refused with a 403 before it even reaches the wall; that is why the test primes a token with `withCsrf()`. Whether the redirect is what you want depends on who is calling. For a person in a browser it is reasonable, although the form they filled in is lost and `LoginController` always sends them to `/` afterwards. A JSON client would rather get a 401, which is what `requireAuthenticated()` answers without `redirectTo`. Other answers are possible.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+Compare the SQL with what chapter 5 section 1 said about the `users` migration, and ask what SQLite's `ALTER TABLE` can change.
+
+The SQL rebuilds `posts`. It turns foreign-key enforcement off, creates `__new_posts` with `author_id` nullable, copies every row across with `INSERT … SELECT`, drops `posts`, renames `__new_posts` to `posts`, and turns foreign keys back on. SQLite's `ALTER TABLE` can rename a table and add, rename or drop a column, but it cannot change the definition of a column that exists, and `NOT NULL` is part of that definition. The only way to change it is to build the table again in the new shape and copy the rows, and the copy is why no row is lost. Postgres, where chapter 14 takes the app, changes it in place with `ALTER COLUMN … DROP NOT NULL`.
+
+</details>
+
 ## Next
 
 [Chapter 7: Authorization, and What the Gate Cannot See](./07-authorization.md) makes editing and deleting an author-only affair with a policy, then asks the agent for a feature without mentioning authorization, and shows you which of your safeguards notices.

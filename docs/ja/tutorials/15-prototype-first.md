@@ -764,6 +764,49 @@ fixture は残っていて、`bun run build:prototype` も引き続き使えま�
 1. fixture の `shared.auth.user` は Ada になっています。ブランチを切ってこれを `null` にし、`bun run dev:prototype` を実行して `/announcements/create` を開いてください。ページは表示されます。サーバーなら表示されない理由と、プロトタイプでも同じ挙動にするには fixture のどこにゲストのチェックを入れればよいかを説明してください。
 2. ブランチを切って、`definePrototype()` に自作のページを指す `notFoundPage` を追加し、プロトタイプで `/announcements/99` を開いてください。次に、そのページコンポーネントを削除して `bun run typecheck` を実行してください。何がこの誤りを検出しましたか。同じ誤りをコントローラーでした場合も、同じ段階で検出されたでしょうか。
 
+<details>
+<summary>演習 1: ヒントと答えの例</summary>
+
+`routes/web.ts` で `/announcements/create` がどこに登録されているかを探し、ブラウザで実行されるものと比べてください。
+
+このルートは `router.middleware('auth')` のグループにあります。サーバーでは `prototype` ハンドラーより先に `requireAuthenticated({ redirectTo: '/login' })` が実行され、ゲストを `/login` に送ります。ブラウザではミドルウェアが実行されません。プロトタイプがユーザーについて知っているのは fixture の `shared` だけです。ハンドラーは `shared` を受け取るので、チェックはエントリー自体に入れます。
+
+```ts
+'announcements.create': ({ shared, page, redirect }) =>
+  shared.auth.user ? page(pages.announcements.New, {}) : redirect('login'),
+```
+
+`auth` グループのほかのエントリー(`edit`、`store`、`update`、`destroy`)にも同じチェックが必要です。`login` には fixture のエントリーがないので、ログインページを表示するエントリーを足すまでは、リダイレクトすると見つからないときのダイアログが開きます。
+
+</details>
+
+<details>
+<summary>演習 2: ヒントと答えの例</summary>
+
+`notFoundPage` には `{ status, message }` が props として渡ります。そのためのページ `resources/js/pages/errors/NotFound.tsx` の例です。
+
+```tsx
+interface Props {
+  status: number
+  message: string
+}
+
+export default function NotFound({ status, message }: Props) {
+  return (
+    <main>
+      <h1>{status}</h1>
+      <p>{message}</p>
+    </main>
+  )
+}
+```
+
+`bun run codegen` のあとで、`definePrototype()` に `notFoundPage: pages.errors.NotFound,` を足します。`/announcements/99` を開くと `announcements.show` のエントリーが `notFound()` を返し、プロトタイプはこのページを 200 で表示します。
+
+`bun run typecheck` の中身は、現在の `.guren/pages.gen.ts` に対する `tsc --noEmit` です。このファイルを誰も再生成していなければ `pages.errors.NotFound` は残っていて、型チェックは通ります。`bun run dev:prototype` の実行中なら、ページのファイルを削除したときに Vite が codegen をやり直します。そうでなければ `bun run codegen` か、型チェックの前に codegen を実行する `bunx guren gate` を実行してください。すると `tsc` が fixture の `notFoundPage` の行で失敗します。検出したのは、再生成されたページのマニフェストに対する型チェックです。コントローラーの `this.inertia(pages.errors.NotFound, …)` も同じ段階で失敗します。`guren check` は `pages.*` の参照を型チェックに任せていて、自分で確かめるのは文字列で書いたページ名だけです。
+
+</details>
+
 ## あらためて、おわりに
 
 これがこのコースで作る最後の機能で、いつもとは逆の順序で作りました。月曜に顧客がクリックできるリンクを渡し、水曜にはその裏にバックエンドを実装し、その間に顧客が見た画面は一切書き直していません。この章で省いた内容は[プロトタイプファーストガイド](../guides/prototype-first.md)にあります。ホストごとの設定、サブパスでのビルド、favicon のためのシェルの差し替え、ブラウザのランタイムでは再現されない挙動の一覧などです。

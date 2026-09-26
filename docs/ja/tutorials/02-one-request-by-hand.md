@@ -341,6 +341,28 @@ git commit -m "feat: add the contact page"
 1. `/health` はコントローラーを使わないインラインのハンドラーです。ブランチを切って、現在時刻を返すインラインのルートをもう 1 本追加してください。そのうえで、コントローラーのアクションではなくこの書き方を選ぶと何を失うかを答えてください。
 2. `this.inertia(pages.about.Index, …)` は、ページを文字列ではなく生成されたコードから受け取ります。存在しないページ名に書き換えて、TypeScript のエラーを読んでください。このエラーを出せることが、`pages.*` を使う理由のすべてです。読んだら元に戻してください。
 
+<details>
+<summary>演習 1: ヒントと答えの例</summary>
+
+`/health` のハンドラーが受け取るもの(リクエストのコンテキストである `c`)と、コントローラーのアクションが `this` から使えるものを比べてください。
+
+```ts
+router.get('/time', (c) => c.json({ now: new Date().toISOString() }))
+```
+
+失うのは、コントローラーが `this` で渡してくれるものすべてです。ページを返す `this.inertia()`、`this.validateBody()` とその仲間、`this.auth`、`this.authorize()`、`this.t()` がそれに当たります。インラインのハンドラーでは、これらをすべてコンテキストを使って自分で書くことになります。ツールから見えるものも減ります。`guren audit` はコントローラーのアクションの中に `validateBody()` の呼び出しがあるかを確かめますが、インラインの関数には読むべきアクションがありません。そのため、更新系のインラインのルートには、ルート自体に `body` のスキーマが必要です。`/health` のような 1 行の応答なら、どれも問題になりません。それより大きいものはコントローラーで書いてください。
+
+</details>
+
+<details>
+<summary>演習 2: ヒントと答えの例</summary>
+
+`app/Http/Controllers/AboutController.ts` の `pages.about.Index` を `pages.about.Missing` に書き換えて、`bun run typecheck` を実行してください。
+
+TypeScript は、`pages.about` の型に `Missing` というプロパティは存在しない、というエラー(TS2339)をコントローラーの行に出します。リクエストを送る前の時点です。`.guren/pages.gen.ts` の `pages` は `resources/js/pages/` の下のファイルから生成されるので、ファイルのないページには参照できる名前がありません。`this.inertia()` はただの文字列も受け付けますが、綴りを間違えた文字列はコンパイルを通り、ページを描画するときに初めて失敗します。確かめたら `pages.about.Index` に戻してください。
+
+</details>
+
 ## 次へ
 
 [第 3 章: posts テーブル](./03-the-posts-table.md) では、最初のデータベーステーブルとモデル、そのテーブルを読む 2 つのページを追加し、作成フォームをエージェントに任せます。

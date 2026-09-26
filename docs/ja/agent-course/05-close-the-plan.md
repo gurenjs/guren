@@ -74,6 +74,24 @@ git commit -m "docs: close the meetups plan"
 1. `docs/entities/Meetup.md` の `## Purpose` の下、マーカーの外側に自分で段落を書き足してください。もう一度 `plan:close` を実行し、その段落が消えずに残ることを確かめます。
 2. `bunx guren docs:graph --entity Meetup` を実行してください。エンティティのドキュメントには、どんな種類のノードがつながっていますか。
 
+<details>
+<summary>演習 1: ヒントと答えの例</summary>
+
+`plan:close` は、自分が書いたブロックを計画の slug とセクションで探し、マーカーに挟まれた行だけを書き換えます。
+
+段落は残ります。段落は `<!-- guren:plan meetups … purpose -->` のブロックの上か下 (マーカーの外側) に書いてください。2 回目の実行のあとで `git diff docs/entities/Meetup.md` を見ると、差分は自分の段落だけです。ブロックは前回とまったく同じ内容で書き直されるからです。確かめたら、段落をコミットするか、ファイルを元に戻してください。第 6 章の `plan:approve` は、作業ツリーがクリーンでないと実行できません。
+
+</details>
+
+<details>
+<summary>演習 2: ヒントと答えの例</summary>
+
+`--entity Meetup` は、エンティティのノード `Meetup` から 1 段階でつながるノードを表示します。
+
+つながるのはドキュメントとテストです。`docs/entities/Meetup.md` と `docs/plans/meetups.md` は、どちらも frontmatter で `Meetup` を挙げているので、`governs` でつながります。`AC-meetups-N` の各テストは、id の `meetups` の部分がエンティティを指すので、`verifies` でつながります。コードのノードがつながるのはドキュメントで、エンティティには直接つながらないため、ここには出てきません。ドキュメント側から見るときは `--path docs/entities/Meetup.md` を使います。frontmatter で `Meetup` を挙げているドキュメントがほかにあれば、それも表示されます。
+
+</details>
+
 ## 次へ
 
 [第 6 章: 既存のコードを変える計画](./06-changing-what-exists.md) では、いま作った勉強会に手を入れる機能として、参加登録を計画します。

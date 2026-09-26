@@ -565,6 +565,26 @@ git branch -D scratch/add-resource
 1. マイグレーションで生成された `migration.sql` を開いてください。drizzle-kit が `NOT NULL` にした列はどれで、それは `db/schema.ts` のどこに由来していますか。ブランチを切って `body` を nullable にし、適用はせずに `bun run db:make` だけを実行して、生成される SQL を読んでください。読み終えたら、上の比較と同じ手順(`git switch main`、`git reset --hard`、`git clean -fd`)で変更を捨てます。ブランチを消すだけではマイグレーションのフォルダがディスクに残り、次の `bun run dev` で適用されてしまいます。
 2. `Post.findOrFail(id)` は行が無ければ 404 を返しますが、`PostController` ではその例外を捕まえていません。例外をレスポンスに変換している部分を探してください。そのうえで、`Post.find(id)` を使っていた場合はどうなっていたかを答えてください。
 
+<details>
+<summary>演習 1: ヒントと答えの例</summary>
+
+`migration.sql` の各列の行を、`db/schema.ts` の対応する行と並べて見てください。
+
+`posts` の `title`、`body`、`created_at` と、`users` の `name`、`email`、`created_at` が `NOT NULL` です。どれも、その列で `.notNull()` を呼んでいるからです。細かい点が 2 つあります。`id` は `integer PRIMARY KEY AUTOINCREMENT` で、`NOT NULL` が付いていません。SQLite の整数の主キーはもともと null になり得ないので、drizzle-kit はこのキーワードを省きます。`created_at` には `NOT NULL` があっても `DEFAULT` がありません。`$defaultFn` は、モデルが行を挿入するときにアプリの中で実行されるからです。生の SQL で `created_at` を指定せずに挿入すると拒否されます。
+
+`body` を nullable にしても、`db:make` は `ALTER COLUMN` を書きません。代わりにテーブルを作り直します。`body` に `NOT NULL` のない `__new_posts` テーブルを作り、`INSERT … SELECT` で `posts` から行をコピーし、`DROP TABLE posts` のあと `__new_posts` を `posts` に名前を変えます。同じ手順は第 5 章と第 6 章でも出てきます。SQLite にこれが必要な理由は、第 6 章の演習 2 で扱います。
+
+</details>
+
+<details>
+<summary>演習 2: ヒントと答えの例</summary>
+
+行を探しているのはコントローラーではなく、`bind: { id: Post }` を持つ `posts.show` のルートです。そこから例外の行き先をたどり、[エラーハンドリング](../guides/error-handling.md)を読んでください。
+
+ルートモデルバインディングは `Post.findOrFail(id)` を呼びます。行がなければ、ステータス 404 を持つ `ModelNotFoundException` を投げます。途中で捕まえるものはないので、例外はアプリの `ExceptionHandler` まで届き、例外が持つステータスで応答します。応答はエラーページか JSON で、呼び出し元とデバッグモードの設定によって変わります。`Post.find(id)` は例外を投げず、`null` を返します。`show` で `const post = await Post.find(id)` と書くと、TypeScript は `post.id` の箇所で `post` が null かもしれないと指摘します。それを無視すると、行がないときは 404 ではなく `TypeError` による 500 になります。404 に戻すには `null` を確かめて自分で例外を投げる必要があり、それは `findOrFail` がすでにしていることです。
+
+</details>
+
 ## 次へ
 
 [第 4 章: バリデーションとリソース](./04-validation-and-resources.md) では、スキーマをルート契約付きのバリデーターファイルに移し、フォームにバリデーションエラーを表示し、リソース層を導入したうえで、編集・削除・ページネーションをエージェントに任せます。

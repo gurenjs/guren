@@ -138,6 +138,24 @@ git commit -m "docs: approve the meetups plan"
 1. Edit one word in the approved `plan.json` and run `bunx guren plan:next docs/plans/meetups/plan.json`. Read the refusal, then restore the file with `git checkout docs/plans/meetups/plan.json`.
 2. Read `approvals.json`. When you approve the plan in chapter 6, its approvals file also gets a `readings` field, which this one lacks. What does this plan have none of that the second plan will?
 
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Change a word inside a string, such as a behaviour's `description`, so the file is still valid JSON. A file that no longer parses gets a different error.
+
+`plan:next` refuses before it reads the app or marks a step. The message says the plan is not approved at its current hash, so no step of it is handed out: it was edited after approval, or never approved. It ends by telling you to run `guren plan:approve` once the plan says what you mean to build. The approval in `approvals.json` names a hash of the whole plan, so one changed word is enough. After `git checkout`, the hash matches again.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+`readings` records how each planned property of an `alter` element read at the moment of approval.
+
+This plan has no `alter` element. Everything is `add`, except `model.user` and its `id` column, which are `existing`. With nothing to read, its approval holds only the hash, the time and, when git knows your name, who approved. The registrations plan alters `Meetup`, `MeetupResource`, `meetups/Show` and `MeetupController.show`, so its approval also gets `readings`.
+
+</details>
+
 ## Next
 
 [Chapter 4: One Step at a Time](./04-one-step-at-a-time.md) hands the approved plan to the agent and follows it through five verified steps.

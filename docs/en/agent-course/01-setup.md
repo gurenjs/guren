@@ -97,6 +97,24 @@ Leave it open. From chapter 2 on, what you send the agent appears in a code bloc
 1. Open `.claude/skills/plan-write/SKILL.md`. Find the one command it tells the agent never to run, and the reason it gives.
 2. Run `bunx guren context`. This is what the `SessionStart` hook injects into every agent session. Which of its sections would you read first before planning a change?
 
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Read the opening paragraph, before the numbered steps.
+
+The command is `plan:approve`. The skill says approving is the person's decision, made after reading the review page. Its last section names the command only to say that you, not the agent, will run it.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+The output has one `##` section per kind of thing: Stack, Models, Routes and Pages, then Controllers, Policies and the other kinds the app has, and an API digest at the end.
+
+One good answer is **Routes**. Its table gives each route's method, path, name and controller action, the same names a plan uses, so a change that reuses or collides with an existing name shows up there first. **Models** comes next, for the tables and relationships the change will point at. Other answers work too: for a change that is mostly UI, **Pages** is a fair place to start.
+
+</details>
+
 ## Next
 
 [Chapter 2: The First Plan](./02-the-first-plan.md) asks the agent for a plan and shows you how to read what comes back.

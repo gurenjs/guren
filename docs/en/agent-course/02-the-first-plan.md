@@ -492,8 +492,26 @@ git commit -m "docs: draft the meetups plan"
 
 ## Exercises
 
-1. Filter the review page to one entity with the **Entity** menu, then turn on **Changes only**. What disappears, and why is that the view you want for a plan that mostly adds?
+1. Leave the **Entity** menu on **All** and turn on **Changes only**. What disappears, and why is that the view you want for a plan that mostly adds?
 2. Pick one behaviour in **Tasks & acceptance** and write, in one sentence, the test it will become. Chapter 4 shows the real one.
+
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+The **Entity** menu takes each element's entity from the task that covers it, and a model no task covers belongs to the entity of its own name. **Changes only** hides the elements whose change is `existing`.
+
+This plan has two `existing` elements, `model.user` and its `id` column, and exactly those two disappear; the "… of … elements shown" count drops by two. (Both belong to the entity `User`, so choosing **Meetup** in the **Entity** menu hides them too.) What remains is everything the plan creates, which is what you are reviewing; an `existing` element is only a point the design attaches to. Questions sit above the tabs and are never filtered.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+A behaviour already names its route, its actor, the setup in `given`, and the result in `expect`. The test says the same thing in code.
+
+For `AC-meetups-4`: "Signed in as a user who does not organize the meetup, send `PUT /meetups/:id` with a valid body, and expect 403." Chapter 4's test does exactly this: Grace organizes the meetup, and Ada gets 403.
+
+</details>
 
 ## Next
 

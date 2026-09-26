@@ -415,6 +415,24 @@ git commit -m "docs: approve the registrations plan"
 1. Remove `AC-registrations-7` from a copy of the plan, save it outside the app, and render it with `--app .` and `-o` to a file outside the app too. Which check fails, and on which element?
 2. In `docs/plans/registrations/approvals.json`, read the `readings` for `view.meetups.show`. Which prop reads `differ` and which `match`, and which of the two can the loop later confirm as this plan's work?
 
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Look for the one `alter` that changes nothing Guren can read back from the code. The approval warning in section 4 names it.
+
+A `plan:acceptance` check fails on `action.meetups.show`: the action is altered, but no acceptance behaviour names any of its routes. Its only route is `route.meetups.show`, and `AC-registrations-7` was the only behaviour that requested it. The copy and the page stay outside the app because `plan:approve` and `plan:next` count any untracked file under the app root as uncommitted work.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+The readings sit on the approval entry, under `readings.properties`, each with `element`, `property` and `verdict`. A page's props are read by name from its `Props` interface.
+
+`prop registrationId` reads `differ`, since `Show.tsx` declared only `meetup` at approval, and `prop meetup` reads `match`. The page's `actions` and `states` read `unknown`, because nothing reads what a page renders. Only `registrationId` can later count as this plan's work: a match on an `alter` counts only for a property its approval recorded as `differ` or `unknown`. `meetup` matched before any work began, so a match later proves nothing about this plan.
+
+</details>
+
 ## Next
 
 [Chapter 7: When the Application Moves](./07-when-the-application-moves.md) builds this plan while a teammate changes the code underneath it.

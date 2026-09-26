@@ -929,6 +929,24 @@ bun run db:status
 1. `/posts/create` を開いたゲストは `/login` にリダイレクトされます。では、`/posts` に POST したゲストはどうなるでしょうか。推測する前にテストを書いて確かめ、そのうえで、その挙動が望ましいものかどうかを考えてください。
 2. 埋め戻しのスクリプトで、`authorId` が空だった行に値を入れました。ブランチを切って列を nullable に戻し、適用はせずに `bun run db:make` を実行してください。生成された SQL を読み、SQLite が列の変更ではなくテーブルの作り直しを選ぶ理由を考えてください。終わったら `git branch -D` だけで済ませず、`git reset --hard` と `git clean -fd` で元に戻してください。
 
+<details>
+<summary>演習 1: ヒントと答えの例</summary>
+
+第 1 節の `tests/PostController.test.ts` には、すでに「sends a guest to the login page instead of storing」があります。`routes/web.ts` の `requireAuthenticated({ redirectTo: '/login' })` と並べて読んでください。
+
+ゲストはフォームを開いたときと同じく `/login` にリダイレクトされ、何も保存されません。ミドルウェアはメソッドにかかわらず、アクションより先に応答するからです。CSRF の検査は認証より先に実行されるので、トークンを持たないゲストの POST は、ログインの壁に届く前に 403 で拒否されます。テストが `withCsrf()` でトークンを用意しているのはこのためです。このリダイレクトが望ましいかどうかは、呼び出し元によって変わります。ブラウザを使う人にとっては妥当ですが、入力したフォームの内容は失われ、ログインしたあとは `LoginController` が常に `/` へ送ります。JSON のクライアントなら 401 のほうが扱いやすく、`redirectTo` を付けない `requireAuthenticated()` はそう応答します。ほかの答えもあり得ます。
+
+</details>
+
+<details>
+<summary>演習 2: ヒントと答えの例</summary>
+
+生成された SQL を、第 5 章第 1 節の `users` のマイグレーションの説明と比べてください。そのうえで、SQLite の `ALTER TABLE` で何を変えられるかを考えます。
+
+SQL は `posts` を作り直しています。外部キーの検査を止め、`author_id` を nullable にした `__new_posts` を作り、`INSERT … SELECT` ですべての行をコピーし、`posts` を削除し、`__new_posts` を `posts` に名前を変えてから、外部キーの検査を戻します。SQLite の `ALTER TABLE` でできるのは、テーブル名の変更と、列の追加、名前の変更、削除です。既存の列の定義は変えられず、`NOT NULL` はその定義の一部です。変えるには新しい形でテーブルを作り直して行をコピーするしかなく、行が失われないのはこのコピーのおかげです。第 14 章でアプリを移す Postgres では、`ALTER COLUMN … DROP NOT NULL` でその場で変更できます。
+
+</details>
+
 ## 次へ
 
 [第 7 章: 認可と、ゲートが見逃すもの](./07-authorization.md) では、ポリシーを使って投稿の編集と削除を著者だけに許可します。そのあと認可には触れずにエージェントへ機能を頼み、用意してきた安全装置のうちどれがそれに気づくかを確かめます。

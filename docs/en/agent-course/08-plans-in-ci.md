@@ -23,8 +23,10 @@ So a closed plan stays enforced after it closes. Its rules live in the entity do
 
 A plan that is approved but not closed is a design someone is building. Two things can go wrong while it is open, and neither shows up in the gate:
 
-- the application moves under it, as in chapter 7
+- a file a verified step recorded changes afterwards, so the step's elements read `drifted`
 - a second open plan changes the same model, controller or table
+
+A change like chapter 7's rename is a different case: the elements it touches go stale rather than drifted, and `plan:next` holds the step, which is where you saw it.
 
 `bunx guren check --plan` reports both, for every open plan in the repository:
 
@@ -67,7 +69,7 @@ jobs:
         run: bunx guren check --plan
 ```
 
-`check --plan` is advisory on purpose. An open plan drifting is a decision for the plan's owner (undo or revise, as in chapter 7), not a reason to block someone else's pull request.
+`check --plan` is advisory on purpose. An open plan drifting is a decision for the plan's owner (re-check the step with `plan:verify --step`, undo the change, or revise the plan), not a reason to block someone else's pull request.
 
 ## 3. A plan in a pull request
 
@@ -108,6 +110,35 @@ git commit -m "ci: report open plans"
 
 1. Write a draft plan for deleting a meetup, approve it, and change `MeetupController` in a separate commit. What does `bunx guren check --plan` report now?
 2. Look back over the course. Which decisions did you make that no command could have made for you? List them; that list is the job the agent does not take.
+
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+`check --plan` looks at every approved plan that is not closed. It warns when an element of one reads `drifted` in `plan:status`, when two open plans change the same target, or when a plan carries a command the allowlist refuses.
+
+For a plan nobody has started building, most likely nothing. Its elements read `planned` or `present`, not `drifted`: an element drifts when it exists and some planned property differs while others match, or when a verified step's files changed since. When a drift does show, it is an "Approved plan drifted" warning naming the element ids, and the command still exits 0. A change in the code the plan depends on is caught elsewhere: `plan:next` compares the baseline and holds the steps that depend on what moved, as in chapter 7. `bunx guren plan:status <plan> --json` shows the state of each element.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+Go through the chapters and note each point where the text says the choice is yours.
+
+One possible list:
+
+- Which questions to answer up front, and the answers (guests can browse; a full meetup refuses)
+- Which warnings are choices (`meetups.store` without a policy) and which are mistakes
+- Which behaviours to add, including the allowed user's `success` behaviour on every route behind a policy
+- Approving each plan
+- Reading each step's commit: the record passed to `authorize`, where `organizerId` comes from
+- Whether each consumer in Impact is covered
+- Undoing the teammate's commit or revising the plan when a step was held
+- Whether to accept less than the plan, with a waiver
+
+Other lists are fine too. What they share is that each item decides what the software should do, and the commands only check that the code does what was decided.
+
+</details>
 
 ## Next
 

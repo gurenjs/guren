@@ -917,12 +917,40 @@ git commit -m "feat: add the profile page"
 import { Hash } from '@guren/core'
 
 const started = performance.now()
-await Hash.make('correct horse battery')
+await new Hash().hash('correct horse battery')
 console.log(performance.now() - started, 'ms')
 ```
 
       そのうえで、1 回の試行にこれだけ時間がかかるにもかかわらず、第 14 章で追加するレート制限がログインのルートに必要な理由を説明してください。
 2. `actingAs()` はログインの処理を飛ばすので、その処理自体はテストできません。`/login` に間違ったパスワードを送り、訪問者に表示されるメッセージを検証するテストを書いてください。そのメッセージはどこから来ているでしょうか。また、パスワードの間違いと未登録のメールアドレスで同じ文言になっているのはなぜでしょうか。
+
+<details>
+<summary>演習 1: ヒントと答えの例</summary>
+
+コードをアプリのルートにファイルとして保存し(たとえば `hash-time.ts`)、`bun hash-time.ts` で実行してください。終わったらファイルは消します。`bun test` の中では実行しないでください。テストの実行中は、テストを速く保つためにハッシュ化のコストがずっと低い設定に切り替わるので、測った数字に意味がなくなります。
+
+ハッシュが遅くても、抑えられるのは 1 回の試行の速さで、届く試行の数ではありません。攻撃者は多数の接続から並行して試行を送れます。試行のたびにサーバーはハッシュ化にその時間を使うので、間違ったパスワードを大量に送られると、送る側よりサーバーのほうがずっと大きな負担を負います。第 14 章のレート制限は、1 つのクライアントが一定時間内に `/login` へ送れる試行の数に上限を設けます。これはハッシュ化にはできないことです。
+
+</details>
+
+<details>
+<summary>演習 2: ヒントと答えの例</summary>
+
+第 5 節の `tests/LoginController.test.ts` には、すでに「rejects the wrong password with a message」があります。これを読んでから、登録されていないメールアドレス用の対になるテストを書いてください。
+
+```ts
+it('rejects an unknown email with the same message', async () => {
+  const csrf = await http.withCsrf('/login')
+  await csrf
+    .post('/login', { email: 'nobody@example.com', password: 'correct horse battery' })
+    .assertStatus(422)
+    .assertJsonPath('errors.message.0', 'Invalid credentials.')
+})
+```
+
+メッセージは `LoginController.store` から来ています。`this.auth.attempt()` が false を返すと、アクションは `ValidationException.withMessages({ message: 'Invalid credentials.' })` を投げ、ログインページはそれを `errors.message` から表示します。`attempt()` はどちらの場合も false を返すだけで、どちらだったかは伝えません。アクションの側も尋ねません。メッセージを 2 種類に分けると、メールアドレスの一覧を持つ人に、どのアドレスがこのブログにアカウントを持っているかを教えることになります。
+
+</details>
 
 ## 次へ
 

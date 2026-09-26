@@ -756,6 +756,49 @@ The fixture is still there, and `bun run build:prototype` still works: the custo
 1. The fixture's `shared.auth.user` is Ada. On a branch, set it to `null`, run `bun run dev:prototype`, and open `/announcements/create`. It renders. Say why the server would not have, and where in the fixture a guest check would have to go to make the prototype honest about it.
 2. On a branch, add a `notFoundPage` to `definePrototype()` pointing at a page of your own, and open `/announcements/99` in the prototype. Then remove the page component and run `bun run typecheck`. What caught it, and would the same mistake in a controller have been caught in the same place?
 
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Find where `/announcements/create` is registered in `routes/web.ts`, and compare that with what runs in the browser.
+
+The route sits in the `router.middleware('auth')` group, so on the server `requireAuthenticated({ redirectTo: '/login' })` runs before the `prototype` handler and sends a guest to `/login`. In the browser no middleware runs: the fixture's `shared` is all the prototype knows about the user. A handler receives `shared`, so the check goes into the entry itself:
+
+```ts
+'announcements.create': ({ shared, page, redirect }) =>
+  shared.auth.user ? page(pages.announcements.New, {}) : redirect('login'),
+```
+
+The same check belongs in every entry of the `auth` group (`edit`, `store`, `update`, `destroy`). `login` has no fixture entry, so the redirect opens the not-found dialog until you add an entry that renders the login page.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+`notFoundPage` receives `{ status, message }` as props. A page for it, `resources/js/pages/errors/NotFound.tsx`:
+
+```tsx
+interface Props {
+  status: number
+  message: string
+}
+
+export default function NotFound({ status, message }: Props) {
+  return (
+    <main>
+      <h1>{status}</h1>
+      <p>{message}</p>
+    </main>
+  )
+}
+```
+
+After `bun run codegen`, add `notFoundPage: pages.errors.NotFound,` to `definePrototype()`. `/announcements/99` then reaches `notFound()` in the `announcements.show` entry, and the prototype renders your page as a 200.
+
+`bun run typecheck` is `tsc --noEmit` against `.guren/pages.gen.ts` as it stands. If nothing regenerated that file, `pages.errors.NotFound` is still in it and the typecheck passes. While `bun run dev:prototype` runs, Vite reruns codegen when a page file is deleted; otherwise run `bun run codegen`, or `bunx guren gate`, which runs codegen before the typecheck. Then `tsc` fails in the fixture at `notFoundPage`. The typechecker caught it, against the regenerated page manifest. A controller's `this.inertia(pages.errors.NotFound, …)` would fail in the same place: `guren check` leaves `pages.*` references to the typechecker and only checks page names written as strings.
+
+</details>
+
 ## The end, again
 
 That was the course's last feature, built the other way round: a link the customer could click on Monday, a backend behind it on Wednesday, and nothing the customer saw rewritten in between. The [Prototype First guide](../guides/prototype-first.md) has the parts this chapter left out: the per-host settings, subpath builds, the shell override for a favicon, and the full list of what the browser runtime does not reproduce.
