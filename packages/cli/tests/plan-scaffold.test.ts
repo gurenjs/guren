@@ -1175,7 +1175,17 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
       const message = await refusedWithNothingWritten('validator-unreadable', {
         files: { 'app/Http/Validators/Barrelish.ts': "export * from './Elsewhere'\nexport const x = 1\n" },
       })
-      expect(message).toContain('plan:scaffold cannot tell which schemas the validator files already export: app/Http/Validators/Barrelish.ts could not be read for its exports.')
+      expect(message).toContain('plan:scaffold cannot tell which schemas the validator files already export: app/Http/Validators/Barrelish.ts could not be read for its exported schemas.')
+    })
+
+    test('should read only the root\'s validator files, so a module file it cannot read refuses nothing', async () => {
+      const { dir, plan } = await createApp('validator-module-unreadable', {
+        files: { 'modules/billing/index.ts': 'export default {}\n', 'modules/billing/app/Http/Validators/Barrelish.ts': "export * from './Elsewhere'\n" },
+      })
+
+      await planScaffoldFile(plan, { appRoot: dir, step: STEP })
+
+      expect(await readFile(join(dir, 'app/Http/Validators/WidgetValidator.ts'), 'utf8')).toContain('export const WidgetPayloadSchema')
     })
 
     test('should refuse a resource guren codegen would not discover, and a resource or policy class already declared', async () => {

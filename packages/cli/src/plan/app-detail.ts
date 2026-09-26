@@ -205,6 +205,8 @@ export interface PlanAppDetailInput {
   controllers: ControllerMethodScan | PlanAppUnreadable
   pages: string[] | PlanAppUnreadable
   models: PlanAppUnreadable | undefined
+  /** {@link readValidatorExports} as the §2 checks read it, so both judge one reading. */
+  validators: PlanAppValidatorExports[] | PlanAppUnreadable
 }
 
 const IDENTIFIER_PATTERN = /[A-Za-z_$][\w$]*/g
@@ -245,7 +247,7 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
     tableDetail(root),
     modelDetail(root, input.models),
     pageDetail(root, input.pages),
-    validatorDetail(root, cache, contractSchemaObjects(input.definitions)),
+    validatorDetail(input.validators, contractSchemaObjects(input.definitions)),
     classDetail(root, discoverResourceFiles),
     readResourcePayloads(root),
     policyDetail(root, cache),
@@ -495,36 +497,67 @@ interface ValidatorRead {
   symbols: SchemaSymbols
 }
 
+/** One validator file's exported schema symbols, read without importing it. */
+export interface PlanAppValidatorExports {
+  filePath: string
+  /** App-relative, POSIX separators. */
+  file: string
+  module: PlanAppScope
+  names: string[]
+}
+
+/**
+ * The exported schema symbols of every validator file, by AST: the names a plan gives its
+ * validators. The §2 checks read these, and {@link validatorDetail} imports the same files
+ * for their fields, so the two cannot disagree about which validators exist. Barrels are
+ * excluded as for models: a re-export belongs to the file that declares it.
+ */
+export async function readValidatorExports(
+  root: string,
+  cache: ParseCache,
+  /** The project root's files only, so a module file that will not read cannot refuse it. */
+  rootOnly = false,
+): Promise<PlanAppValidatorExports[] | PlanAppUnreadable> {
+  const files = excludeBarrelFiles(await discoverValidatorFiles(root))
+    .map((filePath) => {
+      const file = toPosixRelative(root, filePath)
+      return { filePath, file, module: moduleNameFromRelPath(file) }
+    })
+    .filter(({ module }) => !rootOnly || module === null)
+  const parsed = await Promise.all(files.map(({ filePath }) => cache.get(filePath)))
+  const read: PlanAppValidatorExports[] = []
+  for (const [index, entry] of files.entries()) {
+    const ast = parsed[index]?.ast
+    const names = ast ? exportedNames(ast, 'this file') : null
+    // One unread file makes every absent name unprovable, as with the controller scan.
+    if (names === null) return { unreadable: `${entry.file} could not be read for its exported schemas` }
+    read.push({ ...entry, names: names.filter((name) => name !== 'default') })
+  }
+  return read
+}
+
 /**
  * Validators by exported symbol, with the fields each holds and the identity of the
  * objects, which answers "is this the schema a route registered". Both need the file
  * imported; one that would not import leaves its own symbols unmatchable and their
- * fields unread, never the section unreadable. Barrels are excluded as for models: a
- * re-export belongs to the file that declares it.
+ * fields unread, never the section unreadable.
  */
-async function validatorDetail(root: string, cache: ParseCache, contracts: Set<object>): Promise<ValidatorRead> {
-  const files = excludeBarrelFiles(await discoverValidatorFiles(root))
+async function validatorDetail(exports: PlanAppValidatorExports[] | PlanAppUnreadable, contracts: Set<object>): Promise<ValidatorRead> {
   const symbols: SchemaSymbols = new Map()
+  if (!Array.isArray(exports)) return { validators: exports, symbols }
   const validators: PlanAppValidatorDetail[] = []
-  for (const filePath of files) {
-    const file = toPosixRelative(root, filePath)
-    const parsed = await cache.get(filePath)
-    const names = parsed ? exportedNames(parsed.ast, 'this file') : null
-    // One unread file makes every absent name unprovable, as with the controller scan.
-    if (names === null) return { validators: { unreadable: `${file} could not be read for its exported schemas` }, symbols }
-    const module = moduleNameFromRelPath(file)
-    const exported = names.filter((name) => name !== 'default')
+  for (const { filePath, file, module, names } of exports) {
     const imported = await importValidatorFile(filePath)
     if (typeof imported === 'string') {
       const fields = { unreadable: `${file} would not import (${imported})` }
-      validators.push(...exported.map((name) => ({ name, file, module, unimported: imported, fields })))
+      validators.push(...names.map((name) => ({ name, file, module, unimported: imported, fields })))
       continue
     }
     for (const [name, value] of Object.entries(imported)) {
       if (value === null || typeof value !== 'object' || !contracts.has(value)) continue
       symbols.set(value, [...(symbols.get(value) ?? []), name])
     }
-    validators.push(...exported.map((name) => ({ name, file, module, fields: readSchemaFields(name, imported[name]) })))
+    validators.push(...names.map((name) => ({ name, file, module, fields: readSchemaFields(name, imported[name]) })))
   }
   return { validators, symbols }
 }

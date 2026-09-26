@@ -302,7 +302,7 @@ export const planApproveCommand = defineCommand({
     },
     'allow-unstamped': {
       type: 'boolean',
-      description: 'Approve although a section other than validators could not be read, leaving its elements without a context hash.',
+      description: 'Approve although a section of the application could not be read, leaving its elements without a context hash.',
       default: false,
     },
     json: {

@@ -54,7 +54,6 @@ describe('plan:render', () => {
     const findings = (await renderedChecks()).filter((result) => result.status !== 'pass')
     expect(findings.map((finding) => `${finding.status} ${finding.key} ${finding.elementId ?? ''}`).sort()).toEqual([
       'warn plan:acceptance route.comments.destroy',
-      'warn plan:app-unreadable ',
       'warn plan:route-authorization route.comments.store',
     ])
   })

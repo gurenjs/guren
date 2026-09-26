@@ -136,8 +136,8 @@ describe('plan:verify', () => {
         stepId: HTTP,
         taskId: 'task/entity/model.comment',
         stale: [expect.objectContaining({ id: 'model.post', owned: false, through: ['route.comments.store'], within: [] })],
-        // Validators are never read, so the one the step owns is unconfirmed and holds nothing.
-        unconfirmed: [expect.objectContaining({ id: 'validator.comment', verdict: 'unjudged', owned: true })],
+        // The validator the step adds is read by its exported symbol: written where the plan leaves it, it is fresh.
+        unconfirmed: [],
       },
     ])
     const text = formatPlanVerify(result)

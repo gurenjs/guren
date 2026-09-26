@@ -50,13 +50,12 @@ describe('validatePlan', () => {
     expect(failures(results)).toEqual([])
   })
 
-  test('should raise exactly the fixture\'s three warnings', () => {
+  test('should raise exactly the fixture\'s two warnings', () => {
     const warns = validatePlan(plan(), appState()).filter((result) => result.status === 'warn')
 
     // Sorted: the order is an artifact of the call sequence in validatePlan, not a contract.
     expect(warns.map((warn) => `${warn.key} ${warn.elementId ?? ''}`).sort()).toEqual([
       'plan:acceptance route.comments.destroy',
-      'plan:app-unreadable ',
       'plan:route-authorization route.comments.store',
     ])
   })
@@ -220,10 +219,41 @@ describe('validatePlan', () => {
     expect(unreadableMessages(results).some((message) => message.includes('did not parse'))).toBe(true)
   })
 
-  test('should treat a validator section a caller supplies as readable', () => {
+  test('should fail an added validator whose schema symbol the application already exports', () => {
     const results = validatePlan(plan(), appState({ validators: ['CommentPayloadSchema'] }))
 
     expectResult(results, 'plan:app-collision', 'validator.comment', 'fail')
+  })
+
+  test('should warn, never fail, on an existing validator the validator files do not export, and pass one they do', () => {
+    const draft = plan()
+    draft.validators[0].change = { kind: 'existing' }
+
+    // A schema declared in a controller, or re-exported from elsewhere, is one the reading cannot see.
+    const unseen = expectResult(validatePlan(draft, appState({ validators: [] })), 'plan:app-unjudged', 'validator.comment', 'warn')
+    expect(unseen.message).toContain('The validator "CommentPayloadSchema" was not found in the project root')
+    expect(unseen.message).toContain('a schema declared or re-exported elsewhere is not seen')
+    const found = validatePlan(draft, appState({ validators: ['CommentPayloadSchema'] }))
+    expect(find(found, 'plan:app-unjudged', 'validator.comment')).toBeUndefined()
+  })
+
+  test('should judge a validator in the app root the plan names', () => {
+    const draft = plan()
+    draft.validators[0].change = { kind: 'existing' }
+
+    const results = validatePlan(draft, appState({ validators: [{ name: 'CommentPayloadSchema', module: 'billing' }] }))
+
+    const unseen = expectResult(results, 'plan:app-unjudged', 'validator.comment', 'warn')
+    expect(unseen.message).toContain('This application declares one in modules/billing.')
+  })
+
+  test('should warn once, naming why, when the validators could not be read', () => {
+    const results = validatePlan(plan(), appState({ validators: { unreadable: 'app/Http/Validators/X.ts could not be read for its exported schemas' } }))
+
+    expect(find(results, 'plan:app-collision', 'validator.comment')).toBeUndefined()
+    expect(unreadableMessages(results)).toEqual([
+      "The application's validators could not be read (app/Http/Validators/X.ts could not be read for its exported schemas), so the plan's validators were neither confirmed nor refuted.",
+    ])
   })
 
   test('should count an authentication middleware guren audit would count', () => {

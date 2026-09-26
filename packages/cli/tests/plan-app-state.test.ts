@@ -143,9 +143,70 @@ describe('loadPlanAppState', () => {
     expect(isUnreadable(state.routes)).toBe(true)
   })
 
-  test('should always report validators as unreadable', async () => {
+  test('should read validators by the schema symbols their files export, tagged with their app root', async () => {
+    await writeWorkspaceFiles(cwd, {
+      'app/Http/Validators/PostValidator.ts': [
+        "import { z } from 'zod'",
+        'export const PostPayloadSchema = z.object({ title: z.string() })',
+        'const PostIdParams = z.object({ id: z.coerce.number() })',
+        'export { PostIdParams as PostParamsSchema }',
+        "export { SharedSchema } from '../../shared'",
+        'export default PostPayloadSchema',
+        '',
+      ].join('\n'),
+      'app/Http/Validators/index.ts': "export * from './PostValidator'\n",
+      'modules/billing/index.ts': 'export default {}\n',
+      'modules/billing/app/Http/Validators/InvoiceValidator.ts': 'export const InvoicePayloadSchema = {}\n',
+    })
+
+    const state = await loadPlanAppState(cwd)
+
+    // A plan names a validator by its exported symbol: a file name, a default export, a barrel
+    // and a re-export declared elsewhere name none.
+    expect(state.validators).toEqual([
+      { name: 'InvoicePayloadSchema', module: 'billing' },
+      { name: 'PostParamsSchema', module: null },
+      { name: 'PostPayloadSchema', module: null },
+    ])
+  })
+
+  test('should read an app with no validator directory as having no validator', async () => {
+    const state = await loadPlanAppState(cwd)
+
+    expect(state.validators).toEqual([])
+  })
+
+  test('should report validators as unreadable when a validator file hides its exports', async () => {
+    await writeWorkspaceFiles(cwd, {
+      'app/Http/Validators/PostValidator.ts': 'export const PostPayloadSchema = {}\n',
+      'app/Http/Validators/SharedValidator.ts': "export * from '../../shared'\n",
+    })
+
+    const state = await loadPlanAppState(cwd)
+
+    // Any name the star export carries could be the one a plan names, so no absence is provable.
+    expect(state.validators).toEqual({ unreadable: 'app/Http/Validators/SharedValidator.ts could not be read for its exported schemas' })
+  })
+
+  test('should report validators as unreadable when a validator file does not parse', async () => {
+    await writeWorkspaceFiles(cwd, { 'app/Http/Validators/PostValidator.ts': 'export const PostPayloadSchema = {{{\n' })
+
     const state = await loadPlanAppState(cwd)
 
     expect(isUnreadable(state.validators)).toBe(true)
+  })
+
+  test('should read validators as the detail loader does, so plan:render and plan:status agree', async () => {
+    await writeWorkspaceFiles(cwd, {
+      'app/Http/Validators/PostValidator.ts': 'export const PostPayloadSchema = {}\nexport const PostQuerySchema = {}\n',
+    })
+
+    const state = await loadPlanAppState(cwd, { detail: true })
+
+    const detail = state.detail!.validators
+    expect(isUnreadable(detail)).toBe(false)
+    expect(state.validators).toEqual(
+      (detail as Array<{ name: string; module: string | null }>).map(({ name, module }) => ({ name, module })).sort((a, b) => a.name.localeCompare(b.name)),
+    )
   })
 })
