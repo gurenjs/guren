@@ -147,6 +147,19 @@ app.use(createCsrfMiddleware({ cookieOptions: { path: '/admin' } }))
 export default app
 `
 
+/**
+ * The default auth stack behind force-https. `guren tool:call` dispatches on
+ * `http://localhost`, where a plain GET meets the redirect.
+ */
+const MAIN_WITH_FORCE_HTTPS = `import { createApp, createForceHttpsMiddleware } from '@guren/core'
+import { registerWebRoutes } from '../routes/web'
+
+const app = createApp({ routes: registerWebRoutes, auth: {} })
+app.use('*', createForceHttpsMiddleware())
+
+export default app
+`
+
 describe('tool:call', () => {
   let workspace: TempWorkspace
   let appDir: string
@@ -262,6 +275,26 @@ describe('tool:call', () => {
     // the CSRF middleware refuses it unless the command performs the same
     // token round-trip a browser performs.
     await runToolCall({ name: 'posts.store', input: '{"title":"With auth"}', appRoot: appDir, json: true })
+
+    const result = payload()
+    expect(result.status).toBe(201)
+    expect(result.isError).toBe(false)
+  })
+
+  it('runs a read tool in an app that forces https rather than reporting the redirect', async () => {
+    await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_FORCE_HTTPS)
+
+    await runToolCall({ name: 'posts.index', appRoot: appDir, json: true })
+
+    const result = payload()
+    expect(result.status).toBe(200)
+    expect(result.structuredContent).toEqual({ posts: [] })
+  })
+
+  it('primes CSRF on https so a mutating call reaches the route', async () => {
+    await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_FORCE_HTTPS)
+
+    await runToolCall({ name: 'posts.store', input: '{"title":"Forced"}', appRoot: appDir, json: true })
 
     const result = payload()
     expect(result.status).toBe(201)
@@ -603,3 +636,4 @@ describe('dispatchToolCall recording', () => {
     }
   })
 })
+

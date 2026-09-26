@@ -105,7 +105,19 @@ createRateLimitMiddleware({
 ### 完全な設定例
 
 ```ts
-import { createRateLimitMiddleware, MemoryRateLimitStore } from '@guren/core'
+import { AUTH_CONTEXT_KEY, createRateLimitMiddleware, MemoryRateLimitStore } from '@guren/core'
+import type { AuthContext } from '@guren/core'
+import type { Context } from 'hono'
+
+interface AppUser {
+  id: number
+  role: string
+}
+
+const currentUser = async (ctx: Context) => {
+  const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+  return (await auth?.user<AppUser>()) ?? null
+}
 
 const store = new MemoryRateLimitStore()
 
@@ -118,10 +130,10 @@ const rateLimiter = createRateLimitMiddleware({
   message: 'レート制限を超過しました。しばらくしてからお試しください。',
   statusCode: 429,
 
-  // 認証済みユーザーまたはIPに基づくキー
+  // ログイン中のユーザー、いなければクライアントIPに基づくキー
   keyGenerator: async (ctx) => {
-    const user = ctx.get('user')
-    if (user?.id) {
+    const user = await currentUser(ctx)
+    if (user) {
       return `user:${user.id}`
     }
     return ctx.req.header('x-forwarded-for')?.split(',')[0] ?? 'unknown'
@@ -129,7 +141,7 @@ const rateLimiter = createRateLimitMiddleware({
 
   // 管理者ユーザーはスキップ
   skip: async (ctx) => {
-    const user = ctx.get('user')
+    const user = await currentUser(ctx)
     return user?.role === 'admin'
   },
 
@@ -306,23 +318,29 @@ router.get('/search', [SearchController, 'search']).middleware(searchLimiter)
 
 ### ユーザーベースのレート制限
 
+Bearerトークンで認証するルートでは、`getApiToken(ctx)` が返すトークンの ID をキーにします。ユーザーが持つ複数のトークンで1つの上限を共有したい場合は、`result.userId` をキーにしてください。セッション認証のルートでは、上の完全な設定例にある `currentUser()` のように認証コンテキストからユーザーを取得します。
+
 ```ts
-const userRateLimiter = createRateLimitMiddleware({
+import { createBearerTokenMiddleware, createRateLimitMiddleware, getApiToken } from '@guren/core'
+
+const tokenRateLimiter = createRateLimitMiddleware({
   limit: 1000,
   windowMs: 60 * 60 * 1000, // 1時間
+  keyPrefix: 'token:',
 
-  keyGenerator: async (ctx) => {
-    const user = ctx.get('user')
-    if (!user) {
-      // 未認証リクエストはIPにフォールバック
-      return `ip:${ctx.req.header('x-forwarded-for') ?? 'unknown'}`
+  // getApiToken() はBearerトークンミドルウェアの実行前は null を返すため、
+  // その前にマウントするとすべての呼び出し元が同じバケットに入ります。
+  keyGenerator: (ctx) => {
+    const result = getApiToken(ctx)
+    if (!result) {
+      throw new Error('tokenRateLimiter must run after createBearerTokenMiddleware')
     }
-
-    // プランごとに異なる制限
-    const limitMultiplier = user.plan === 'premium' ? 10 : 1
-    return `user:${user.id}:${limitMultiplier}`
+    return result.token.id
   },
 })
+
+app.use('/api/*', createBearerTokenMiddleware({ store: tokenStore }))
+app.use('/api/*', tokenRateLimiter)
 ```
 
 ### 信頼されたソースをスキップ

@@ -46,6 +46,27 @@ const MCP_ENDPOINT_MARKER = '_guren/mcp'
 const STOP_HOOK_MARKER = 'hooks/gate-on-stop.ts'
 
 /**
+ * Hook commands earlier harness versions wrote into the user-owned `.claude/settings.json`,
+ * each with the command the template carries now. Claude Code runs a hook in the session cwd,
+ * which follows the agent's `cd`, so a relative script path stops resolving there. Matched
+ * against whole command values only, so a command the user wrote is never flagged.
+ */
+export const LEGACY_CLAUDE_HOOK_COMMANDS: ReadonlyArray<{ from: string; to: string }> = [
+  {
+    from: 'bunx guren context 2>/dev/null || true',
+    to: 'cd "${CLAUDE_PROJECT_DIR}" && bunx guren context 2>/dev/null || true',
+  },
+  {
+    from: 'bun .claude/hooks/check-after-edit.ts',
+    to: 'bun "${CLAUDE_PROJECT_DIR}/.claude/hooks/check-after-edit.ts"',
+  },
+  {
+    from: 'bun .claude/hooks/gate-on-stop.ts',
+    to: 'bun "${CLAUDE_PROJECT_DIR}/.claude/hooks/gate-on-stop.ts"',
+  },
+]
+
+/**
  * A claim over files the planner owns outright: a match the current plan does not write is
  * a leftover that `agent:sync` reports and `--prune` deletes. `files` claims named top-level
  * files, `pattern` framework-named files in a shared directory, `children` named subdirectories
@@ -250,6 +271,8 @@ export interface PlannedFile {
     marker: string
     /** What the snippet adds, for the merge-by-hand message. */
     hint: string
+    /** Hook commands an earlier template wrote here, reported with their replacement while the file keeps them. */
+    supersedes?: ReadonlyArray<{ from: string; to: string }>
   }
 }
 
@@ -333,39 +356,51 @@ const APP_TITLE_TOKEN = '__APP_TITLE__'
 const TOKEN_RE = /__[A-Z][A-Z_]*__/u
 
 interface RuleDoc {
+  /** The heading on the body's first non-blank line: the only description Cursor and Copilot are given. */
   description: string
-  globs: string[]
+  paths: string[]
   /** Everything after the closing `---`. */
   body: string
 }
 
 /**
- * Read a canonical rule file's frontmatter (`description` + `globs` list)
- * via the shared docs-frontmatter parser. The format is framework-authored,
- * so validation is strict on purpose: a rule this cannot read must fail the
- * install (and the test suite) loudly, not ship to Cursor/Copilot with an
- * empty scope.
+ * Read a canonical rule file: `paths` is its only frontmatter key, since Claude Code
+ * reads nothing else from a rule and loads one without `paths` into every session.
+ * Validation is strict on purpose: a rule this cannot read must fail the install
+ * (and the test suite) loudly, not ship to Cursor/Copilot with an empty scope.
  */
 function parseRuleDoc(name: string, content: string): RuleDoc {
   const parsed = parseDocFrontmatter(content)
-  const description = typeof parsed?.data.description === 'string' ? parsed.data.description : ''
-  const globs = Array.isArray(parsed?.data.globs)
-    ? parsed.data.globs.filter((glob): glob is string => typeof glob === 'string')
+  const paths = Array.isArray(parsed?.data.paths)
+    ? parsed.data.paths.filter((path): path is string => typeof path === 'string')
     : []
-  if (!parsed || !description || globs.length === 0) {
-    throw new Error(`Agent harness rule ${name} needs a description and at least one glob`)
+  // Only the first line: a `# ` comment in a code fence must never become the description.
+  const firstLine = parsed?.body.trimStart().split('\n')[0] ?? ''
+  const description = /^# +(.+?)\s*$/u.exec(firstLine)?.[1] ?? ''
+  if (!parsed || !description || paths.length === 0) {
+    throw new Error(
+      `Agent harness rule ${name} needs a \`# \` heading as its first line and at least one \`paths\` pattern`,
+    )
   }
-  return { description, globs, body: parsed.body }
+  return { description, paths, body: parsed.body }
 }
 
-/** Cursor rule: `.mdc` frontmatter with a comma-joined glob string. */
+/**
+ * A YAML double-quoted scalar. A plain one breaks on a leading `*` (every `**` pattern),
+ * `@` or `&`, and on `: ` or ` #` anywhere; Cursor's own rule writer quotes `globs` the same way.
+ */
+function yamlString(value: string): string {
+  return JSON.stringify(value)
+}
+
+/** Cursor rule: `.mdc` frontmatter, where the scope key is `globs` (a comma-joined string). */
 function renderCursorRule(doc: RuleDoc): string {
-  return `---\ndescription: ${doc.description}\nglobs: ${doc.globs.join(',')}\nalwaysApply: false\n---\n${doc.body}`
+  return `---\ndescription: ${yamlString(doc.description)}\nglobs: ${yamlString(doc.paths.join(','))}\nalwaysApply: false\n---\n${doc.body}`
 }
 
-/** Copilot instructions: `applyTo` carries the comma-joined glob string. */
+/** Copilot instructions: `applyTo` carries the comma-joined patterns. */
 function renderCopilotRule(doc: RuleDoc): string {
-  return `---\ndescription: ${doc.description}\napplyTo: "${doc.globs.join(',')}"\n---\n${doc.body}`
+  return `---\ndescription: ${yamlString(doc.description)}\napplyTo: ${yamlString(doc.paths.join(','))}\n---\n${doc.body}`
 }
 
 export function planComponents(
@@ -418,13 +453,19 @@ export function planComponents(
     )
 
   /** A user-owned config the harness only seeds: merge-hinted when it already exists without `marker`. */
-  const addUserConfig = (path: string, templatePath: string, marker: string, hint: string): void => {
+  const addUserConfig = (
+    path: string,
+    templatePath: string,
+    marker: string,
+    hint: string,
+    supersedes?: ReadonlyArray<{ from: string; to: string }>,
+  ): void => {
     const content = get(templatePath)
     // A seed without its own marker would turn every merge hint for it into a no-op.
     if (!content.includes(marker)) {
       throw new Error(`Agent harness template ${templatePath} does not contain its merge marker "${marker}"`)
     }
-    add({ path, content, managed: false, merge: { marker, hint } })
+    add({ path, content, managed: false, merge: { marker, hint, supersedes } })
   }
   const addMcpConfig = (path: string, templatePath: string): void =>
     addUserConfig(path, templatePath, MCP_ENDPOINT_MARKER, 'the Guren MCP server')
@@ -473,6 +514,7 @@ export function planComponents(
       'targets/claude/settings.json',
       STOP_HOOK_MARKER,
       'the Guren hooks (the edit check and the `guren gate` stop hook)',
+      LEGACY_CLAUDE_HOOK_COMMANDS,
     )
     addTree('targets/claude/agents/', '.claude/agents')
     addTree('targets/claude/hooks/', '.claude/hooks')

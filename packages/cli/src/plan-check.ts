@@ -1,20 +1,21 @@
 /**
- * `guren check --plan` (RFC 0030 §8): approved plans with `drifted` elements, and two open
- * plans that change the same application target. Advisory throughout, so it never sets an
- * exit code, and it runs only under `--plan`: judging a plan imports `db/schema.ts` and every
- * validator file, which plain `check` never does. An app with no plan file reads nothing else.
+ * `guren check --plan` (RFC 0030 §8): approved plans with `drifted` elements or a command the
+ * allowlist refuses, and two open plans that change the same application target. Advisory
+ * throughout, so it never sets an exit code, and it runs only under `--plan`: judging a plan
+ * imports `db/schema.ts` and every validator file, which plain `check` never does. An app with
+ * no plan file reads nothing else.
  */
 
 import type { Dirent } from 'node:fs'
-import { readdir, readFile } from 'node:fs/promises'
+import { readdir } from 'node:fs/promises'
 import { join, posix, sep } from 'node:path'
 
 import type { CheckResult } from './check-result'
 import { toPosixRelative } from './discovery'
 import type { PlanAppState } from './plan/app-state'
 import type { PlanAppTarget } from './plan/app-targets'
-import type { planSiblingPath } from './plan/beside'
-import type { Plan } from './plan/schema'
+import { isPlanRevisionsDirName, type planSiblingPath } from './plan/beside'
+import type { OpenPlan } from './plan/open-plan'
 
 /** Where plans are found: `docs/plans/**` (the §9 layout and `<slug>.plan.json`) and the app root's own `*.plan.json`. */
 export const PLAN_DIR = 'docs/plans'
@@ -40,7 +41,7 @@ export interface PlanDiscovery {
   unreadable: Array<{ dir: string; reason: string }>
 }
 
-/** `revisions/` is skipped: it holds a plan's revision documents (§9), not plans. */
+/** A revisions directory (`revisions/`, `<slug>.revisions/`) is skipped: it holds a plan's revision records (§9), not plans. */
 export async function discoverPlanFiles(appRoot: string): Promise<PlanDiscovery> {
   const discovery: PlanDiscovery = { files: [], unreadable: [] }
   const entries = async (dir: string): Promise<Dirent[]> => {
@@ -59,7 +60,7 @@ export async function discoverPlanFiles(appRoot: string): Promise<PlanDiscovery>
   const walk = async (dir: string): Promise<void> => {
     for (const entry of await entries(dir)) {
       if (entry.isDirectory()) {
-        if (entry.name !== 'revisions') await walk(join(dir, entry.name))
+        if (!isPlanRevisionsDirName(entry.name)) await walk(join(dir, entry.name))
       } else if (entry.isFile() && isPlanFileName(entry.name)) {
         discovery.files.push(join(dir, entry.name))
       }
@@ -71,68 +72,25 @@ export async function discoverPlanFiles(appRoot: string): Promise<PlanDiscovery>
 }
 
 async function loadModules() {
-  const [render, approvals, state, closeDocs, targets, status, appState] = await Promise.all([
-    import('./plan-render'),
-    import('./plan/approvals'),
+  const [openPlan, state, targets, status, appState, allowlist] = await Promise.all([
+    import('./plan/open-plan'),
     import('./plan/state'),
-    import('./plan/close-docs'),
     import('./plan/app-targets'),
     import('./plan-status'),
     import('./plan/app-state'),
+    import('./plan/command-allowlist'),
   ])
   return {
-    readPlanFile: render.readPlanFile,
-    readPlanApprovalStanding: approvals.readPlanApprovalStanding,
-    describeUnapproved: approvals.describeUnapproved,
+    readOpenPlan: openPlan.readOpenPlan,
     planSlug: state.planSlug,
-    planDocPath: closeDocs.planDocPath,
-    planDocClosedHash: closeDocs.planDocClosedHash,
     listPlanAppTargets: targets.listPlanAppTargets,
     planStatusFile: status.planStatusFile,
     loadPlanAppState: appState.loadPlanAppState,
+    refusedPlanCommands: allowlist.refusedPlanCommands,
   }
 }
 
 type Modules = Awaited<ReturnType<typeof loadModules>>
-
-interface OpenPlan {
-  path: string
-  file: string
-  plan: Plan
-}
-
-/**
- * Skipped: a draft nobody approved, a plan changed since its approval, or one `plan:close` closed
- * at its current hash. A draft with approvals beside it lost its baseline, which is reported.
- */
-type Classified = { kind: 'open'; plan: OpenPlan } | { kind: 'skipped' } | { kind: 'unreadable' | 'baseline-removed'; reason: string }
-
-async function classify(m: Modules, appRoot: string, path: string, file: string): Promise<Classified> {
-  let plan: Awaited<ReturnType<Modules['readPlanFile']>>['plan']
-  try {
-    plan = (await m.readPlanFile(path, appRoot)).plan
-  } catch (error) {
-    return { kind: 'unreadable', reason: (error as Error).message }
-  }
-  // The approval rule every gated plan command reads (RFC 0030 §4), so the two cannot disagree.
-  const standing = await m.readPlanApprovalStanding(path, plan)
-  if (standing === undefined || standing.state === 'unapproved') return { kind: 'skipped' }
-  if (standing.state === 'unreadable') return { kind: 'unreadable', reason: standing.reason }
-  if (standing.state === 'baseline-removed') return { kind: 'baseline-removed', reason: m.describeUnapproved(file, standing, 'it is not checked') }
-  const hash = standing.hash
-
-  const doc = join(appRoot, m.planDocPath(m.planSlug(path)))
-  let source: string | undefined
-  try {
-    source = await readFile(doc, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return { kind: 'unreadable', reason: `${doc} could not be read: ${(error as Error).message}` }
-  }
-  // A revision approved after the close carries another hash, and is open work again.
-  if (source !== undefined && m.planDocClosedHash(source) === hash) return { kind: 'skipped' }
-  // Only a plan with a baseline has the hash an `approved` standing names.
-  return { kind: 'open', plan: { path, file, plan: plan as Plan } }
-}
 
 type ClaimKind = PlanAppTarget['kind'] | 'parent'
 
@@ -261,7 +219,7 @@ export async function checkPlans(options: PlanCheckOptions): Promise<CheckResult
     const file = toPosixRelative(appRoot, path)
     const slug = m.planSlug(path)
     slugs.set(slug, [...(slugs.get(slug) ?? []), file])
-    const classified = await classify(m, appRoot, path, file)
+    const classified = await m.readOpenPlan(appRoot, path)
     if (classified.kind === 'open') open.push(classified.plan)
     else if (classified.kind === 'unreadable') results.push(unreadable(file, `${file} was not checked: ${classified.reason}`, 'Fix the file so guren plan:status can read it.'))
     else if (classified.kind === 'baseline-removed') {
@@ -291,6 +249,20 @@ export async function checkPlans(options: PlanCheckOptions): Promise<CheckResult
   }
 
   if (open.length === 0) return results
+  // An approval that predates the allowlist never ran it, and plan:next refuses such a plan.
+  for (const plan of open) {
+    for (const { id, quoted, reason } of m.refusedPlanCommands(plan.plan.commands)) {
+      results.push({
+        key: `plan:command:${plan.file}:${id}`,
+        title: 'Approved plan carries a refused command',
+        status: 'warn',
+        message: `${plan.file}: ${id} (${quoted}) is refused: ${reason}. plan:next hands out no step of this plan while it stays.`,
+        suggestion: `Replace or remove the command, then run guren plan:approve ${plan.file} again.`,
+        filePath: plan.file,
+        advisory: true,
+      })
+    }
+  }
   let app: Promise<PlanAppState> | undefined
   const loadApp = (): Promise<PlanAppState> => (app ??= m.loadPlanAppState(appRoot, { detail: true, routesFile: options.routesFile }))
   for (const plan of open) {

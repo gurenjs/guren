@@ -27,7 +27,7 @@
   "footer.copy": "フィードバックをコピー",
   "footer.download": "feedback.json をダウンロード",
   "footer.note": "各要素の見出しにある印からコメントを付けられます。このページはプロジェクトに何も書き込まず、ネットワークにも接続しません。",
-  "footer.revise": "フィードバックを読み込むコマンドはまだありません。feedback.json かコピーした内容をプランを書いたエージェントに渡すか、コメントを手でプランに反映してください。反映したら、プランのページを作り直します。",
+  "footer.revise": "{command} はプランへの変更をリビジョンとして記録し、このフィードバックと照合します。ここで承認した要素は理由 (--reopens) を付けたときだけ変更でき、回答した質問はプランから削除する必要があります。プランのコピーを編集し、コピーを --edited、フィードバックを --feedback で渡してください (- を渡すとコピーした内容を標準入力から読みます)。コメントを変更に置き換える処理はしません。反映したら、プランのページを作り直します。",
   "footer.approve": "作りたいものをプランが表すようになったら、承認します。",
   "footer.copied": "コピーしました。プランを書いたエージェントに貼り付けてください。",
   "footer.clipboardRefused": "ブラウザがクリップボードへの書き込みを拒否しました。ダウンロードを使ってください。",
@@ -196,6 +196,7 @@
   "impact.unreadableFiles": "次のファイルは読めなかったため、そこでの参照は含まれていません: {files}",
   "impact.testRequests.unresolved": "TestApp のリクエスト {count} 件はルートと照合できなかったため、ここに届くテストが漏れている可能性があります: {requests}",
   "impact.testRequests.uncertain": "TestApp のリクエスト {count} 件はこのルートに届く可能性がありますが、パラメータの制約を静的に確かめられませんでした: {requests}",
+  "impact.testRequests.order": "TestApp のリクエスト {count} 件はこのルートのパスに一致しますが、それより前に登録されたルートが応答する可能性があります: {requests}",
   "impact.testRequests.unparsed": "次のテストファイルは解析できなかったため、リクエストを読んでいません: {files}",
   "impact.testRequests.noneReach": "既存テストの TestApp リクエストは、上のルートのどれにも届いていません。"
 }

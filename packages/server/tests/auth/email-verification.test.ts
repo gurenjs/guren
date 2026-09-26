@@ -10,6 +10,7 @@ import {
   MemoryEmailVerificationStore,
   type EmailVerificationToken,
 } from '../../src/auth/email-verification'
+import { AGENT_SURFACE_HEADER } from '../../src/internal/agent-request'
 
 process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 delete process.env.APP_PREVIOUS_KEYS
@@ -397,6 +398,26 @@ describe('requireVerifiedEmail', () => {
 
     expect(next).not.toHaveBeenCalled()
     expect(ctx.redirect).toHaveBeenCalledWith('/verify-email')
+  })
+
+  it('answers an agent tool call with 403 JSON instead of redirecting', async () => {
+    const middleware = requireVerifiedEmail({
+      getUser: async () => ({ emailVerifiedAt: null }),
+    })
+
+    const next = vi.fn()
+    const ctx = {
+      get: vi.fn(),
+      redirect: vi.fn().mockReturnValue(new Response()),
+      req: { header: (name: string) => (name === AGENT_SURFACE_HEADER ? 'mcp' : undefined) },
+    }
+
+    const response = await middleware(ctx, next)
+
+    expect(next).not.toHaveBeenCalled()
+    expect(ctx.redirect).not.toHaveBeenCalled()
+    expect(response?.status).toBe(403)
+    expect(await response?.json()).toEqual({ message: 'Email address is not verified' })
   })
 
   it('uses custom redirect URL', async () => {

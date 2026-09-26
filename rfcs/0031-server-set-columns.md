@@ -140,6 +140,32 @@ static update<T extends typeof Model, S extends SetFor<T>>(
   happens inside one `if (options.set)` branch; the path without `set` passes
   `writeOptions` through untouched.
 
+**Amended in implementation:** five changes to the types above.
+
+- `defineModel`'s create type carries an index signature (a plain `Model` base
+  adds `PlainObject`), and `Omit` collapses the named columns into it.
+  `CreateDataFor` uses a key-remapping omit instead, and the settable keys are
+  the create type's named keys. With `Omit`, `data` lost its required columns as
+  soon as `set` was used.
+- An inferred `S` gets no excess-property check, so `SetFor` alone rejects
+  neither `id` nor a misspelt column. `set` is typed
+  `S & { [K in Exclude<keyof S, SettableKey<T>>]: never }`, where `SettableKey`
+  is the create type's named keys without `id`. A model whose create type names
+  no key (no `createType`) still accepts any.
+- `S` is constrained to `PlainObject` rather than `SetFor<T>`: with `T` inferred
+  in the same call, that constraint widened an enum column's literal. The value
+  check moved into the `set` type, which is intersected with the create type's
+  own value types. That also rejects `undefined` for a required column taken out
+  of `data` (`{ set: { authorId: user?.id } }`), which the partial `SetFor`
+  admitted.
+- The `set` overload comes first and the unchanged signature last. `.bind`,
+  `.call` and `Parameters<>` read the last overload, so they still see the
+  signature they always did.
+- That signature's options become `ModelWriteOptions & { set?: never }`.
+  `ModelWriteOptions` has only optional properties, so an options object held
+  in a variable with `trx` beside `set` matched it and skipped every check
+  above. No call without `set` is affected.
+
 ### 2. The rules, in the one input step
 
 RFC 0006 made `filterFillable` the framework's single input-protection step and
@@ -187,6 +213,14 @@ The `not-fillable` remediation names `set`, and the closing negative covers
 > Post.create(data, { set: { authorId } }). Never pass request input to
 > forceCreate/forceUpdate or spread it into set.`
 
+**Amended in implementation:** the constructor takes a `set` option
+(`'no-fillable' | 'id' | 'fillable' | 'conflict'`) naming the section 2 rule
+that refused the fields. It changes only the message, and the exception gains
+no property. Steps 1 and 2 throw with `reason: 'not-fillable'`. The
+`not-fillable` remediation names both methods ("name it in the set option of
+Post.create() or Post.update(): { set: { authorId } }"), since the refusal also
+comes from `update()` and from `QueryBuilder.update()`.
+
 ### 4. `guren audit`
 
 RFC 0006's mitigation (c) is unchanged: a method that validates a body and
@@ -199,6 +233,13 @@ to accept it.
 `set` needs no audit finding of its own. Step 4 refuses a spread of fillable
 data into `set` at runtime, which is where RFC 0006 put the authoritative
 checks, and it does so whatever shape the call has in the source.
+
+**Amended in implementation:** step 4 refuses the spread only when it carries
+a fillable key. A create schema's required fields always put one there. An
+update body that names no fillable field passes, and so does any non-fillable
+key a `.passthrough()` schema kept in it: `update(where, {}, { set: { ...data,
+authorId } })` then writes that key. The literal form is left as a follow-up
+below.
 
 `set` keys are judged; `set` values are not. A key written under a column name
 is a choice the author made, which is what mass assignment protection is about.
@@ -250,6 +291,10 @@ Left for follow-ups, each small and independent of this design:
 - **A declared group of server-owned columns**, which is RFC 0006's Open
   Question 4 (public `deniedFields()`). It would let a model refuse an owner
   column in `data` even on a path that does not use `set`.
+- **A spread inside a `set` literal.** Step 4 misses one that carries no
+  fillable key (section 4). A `guren audit` warning on `set: { ...x }` would
+  cover the literal form. An options object passed by variable stays out of
+  its reach, which is why Alternatives Considered rejects it as the only guard.
 
 ## Alternatives Considered
 

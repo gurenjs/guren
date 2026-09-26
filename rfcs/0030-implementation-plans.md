@@ -611,6 +611,18 @@ approval names `result`, and the current plan is the head of the approved
 chain. A decision taken during implementation that contradicts the plan is a
 revision too; it is never a silent edit.
 
+**Amended after re-review (2026-09-23), Part 3.** The command above is the
+model-calling form, and it keeps the name `plan --revise`. It waits with the
+headless producer (§8). Part 3 ships a model-free `plan:revise` first. It
+takes ops from a file or standard input, or an edited plan whose ops
+`diffPlans()` derives (`packages/cli/src/plan/revision.ts:484`). It stamps
+them through `createPlanRevision()` and writes the revision under
+`revisions/`. Given feedback, it applies the two rules below, the lock and the
+answered question, which `createPlanRevision()` already enforces. It does not
+turn a reviewer's comments into ops; that is the model's work. It gives the
+page's exported feedback its first reader (`plan/feedback.ts:5-6` says none
+exists yet). It is also the command the `plan-implement` skill already names.
+
 The producer is asked for `ops`, against a revision schema, and never for a
 whole plan. A model that re-emits the document can change a part nobody was
 looking at; one that emits operations cannot touch an id without saying so.
@@ -693,6 +705,60 @@ before the open is a race between the check and the read.
 Before approval, editing `plan.json` by hand is as legitimate as a revision:
 it is a JSON file, and `plan:render` re-validates it. Renaming a column does
 not need a model.
+
+**Amended after re-review (2026-09-23), Part 3:** after approval, the same
+hand edit goes through `plan:revise`, which records it as a revision rather
+than a silent edit (Open Question 13).
+
+**Amended in implementation (`plan:revise`).** The model-free command ships as
+`packages/cli/src/plan-revise.ts`, and these are the choices it makes:
+
+- The parent is the plan file as it stands; nothing is read from git. It is
+  accepted as a draft nobody approved, at a hash an approval names, or at the
+  `result` of a revision recorded beside it, so a plan revised once can be
+  revised again before anyone approves it. Anything else is a plan edited in
+  place after approval, and the refusal says to restore it
+  (`git checkout -- <plan>`) and pass the edit as `--edited <copy>`. A draft
+  with approvals beside it, or approvals that will not read, is refused as
+  `readPlanApprovalStanding()` classifies it. The rule catches an accidental
+  edit, not a forger: the records are committed files anyone can write.
+- The change comes as `--ops <file|->`, the `{ "ops": [...] }` document a
+  revising producer emits (each op with its own `reason`), or as
+  `--edited <file|->`, a full copy whose ops `diffPlans()` derives, each with
+  `--message` as its reason and `--reopens`, when given, on all of them. A copy
+  whose baseline differs from the parent's is refused, as is one no op can
+  express: the ops must reproduce the copy's own digest, or writing the copy
+  would miss the record and writing the result would drop the edit. Ops,
+  copies and feedback share the feedback's counting reader and its cap, and at
+  most one of them reads standard input. citty parses `--feedback -` as an
+  empty value and drops the dash, so the command reads it back off the raw
+  arguments (`--feedback=-` parses as written); an empty value is refused.
+- A draft revises too. `createPlanRevision()` hashes a draft with
+  `planDigest()`, the same computation as `planHash()`, parses the result as a
+  draft, and feedback without `planHash` (what the page exports for a draft)
+  is matched without a hash check.
+- Records live in `planRevisionsDir()` (`plan/beside.ts`): `revisions/` beside
+  a `plan.json`, `<slug>.revisions/` beside any other plan, so no record name
+  matches a plan file. Each is `<n>.json`, the next number after every name
+  present, holding exactly `PlanRevisionSchema` so `applyRevision()` reads it
+  back. It is linked into place from a temporary, so none is overwritten. The
+  record is written before the plan: a plan written without one would sit at
+  a hash nothing names. The records are not a verified chain: when the plan
+  write fails after the record, the command says so and the record stays,
+  naming a result the plan never reached; the next run records again from the
+  same parent.
+- The plan file is rewritten to the result, which must read back at the
+  record's `result` before anything is written. An edited copy is written as
+  its author wrote it. Ops are written as the parsed result in the author's
+  key order, leaving out a section the parent omitted that the result still
+  holds at its default.
+- `plan:approve`'s dirty-tree exceptions and the step work measurement leave
+  the revisions directory out, like the other records; `plan:next` counts it
+  as uncommitted, like them, and plan discovery skips it.
+- The report names the new hash, the record, the reopened elements, the
+  answered questions, and the waivers the decision log holds at the parent
+  hash, which the result does not inherit. A plan with a baseline then needs
+  `plan:approve`; the gated commands refuse it until then.
 
 **Freshness.** `baseline.rev` records where the plan was written and gates
 nothing: the implementation's own commits move it on the first step.
@@ -915,7 +981,7 @@ behaviours. Guren supplies the breakdown and the order, in
    | scaffold | deterministic, no model (see below) | codegen, then `typecheck` |
    | tests | skeletons generated from `acceptance[]` (no model); the agent fills `given` setup and what `expect` cannot express | codegen, then every generated test runs and fails |
    | data | what the scaffold's table cannot express, migration, model relationships | codegen, `db:migrate`, `typecheck` |
-   | http | validator, resource, policy, controller, routes | codegen, `guren check`, the slice's tests |
+   | http | validator, resource, policy, controller, routes | codegen, `typecheck` (last `http` step only), `guren check`, the slice's tests |
    | pages | page components | codegen, `typecheck`, `guren check` |
 
 3. **Cross-entity tasks** (a dashboard) depend on every slice they read.
@@ -964,7 +1030,21 @@ decides a task, so `tasks.ts` fixes it:
   intent's acceptance goes to that slice: on `tests`, and on the step where the
   behaviours must pass, which is the last `http` step, or the task's last step
   when it has none. That step's verify always includes the tests, so a slice
-  of `data` or `pages` alone still runs them. A task with behaviours and no
+  of `data` or `pages` alone still runs them, and no other step's does: an
+  earlier `http` part, or an `http` step of a task with no behaviours, has no
+  test file to select, and `bun test` given none runs the whole suite, a result
+  that says nothing about the step. A task's last `http` step typechecks, as
+  `data` and `pages` do: without it, a controller the tests pass through could
+  call a model method with the wrong argument types (`Meetup.update(id, data)`,
+  whose first argument is a where clause) and verify, leaving the error to the
+  `pages` step or `guren gate`. Earlier parts do not, since parts are packed in
+  document order and one may import a resource or job a later part writes; the
+  last part's run covers their files. The cost falls on an action rendering a
+  page the `pages` step adds: `pages.gen.ts` names the page only once its file
+  exists. An action a behaviour requests needed that already, as the request
+  reads `pages.<name>` at runtime. `plan:next` lists those pages on the `http`
+  step (`pageStubs`), to be created there as stubs with a default export and
+  the plan's `Props`, which the `pages` step completes. A task with behaviours and no
   work has the `tests` step only, run after the tasks it waits for and
   verified by the tests *passing*: failing first is tamper detection, which
   means something only where an implementation step comes after the tests.
@@ -976,7 +1056,9 @@ decides a task, so `tasks.ts` fixes it:
   reference, foreign keys first among them; an `existing` target is already
   there. Tables are dropped child first. Relationships order nothing: a
   `hasMany` mirrors the foreign key pointing back and would close a cycle with
-  it. A real cycle (mutual foreign keys) is cut at its first member in document
+  it. So a relationship that waits on a later task's work (its target's class,
+  or keys that task adds) completes at the step owning that work, not its own
+  model's (§6, Completion), and `plan:next` lists it there. A real cycle (mutual foreign keys) is cut at its first member in document
   order, which stops waiting, and reported; a self-reference is not one.
   Document order breaks every tie.
 - **Hints** are `<task> before <task>` or `<task> after <task>`, a task being a
@@ -1019,8 +1101,76 @@ writer the CLI already has:
 | policy registration | no writer exists: `wireAppProvider()` registers a provider with `createApp()`, and nothing edits a provider's `boot()`. Part 3 adds one, or this stays the agent's first edit in the `http` step |
 | `.guren/*.gen.ts` | `guren codegen` |
 
-Routes go in their own file because the existing patch mounts a registrar
-call and does not insert route lines into `routes/web.ts`.
+~~Routes go in their own file because the existing patch mounts a registrar
+call and does not insert route lines into `routes/web.ts`.~~
+
+**Amended after re-review (2026-09-23), Part 3.** Stale here: the premise
+struck above; the "Next steps" account of what `make:feature` leaves undone;
+the table's first and fourth rows; and, in the next paragraph, the generated
+pages and the relationships and fillable left to the agent (the emitter below
+writes both). What replaces them:
+
+- `guren add resource` predates this RFC and already writes two of the three
+  wirings the table says are missing. It runs `makeFeature` and appends a
+  per-dialect table through `appendTableToSchema()`. It also inserts the CRUD
+  route group into `routes/web.ts`
+  (`packages/cli/src/blueprints.ts:389-426, 428-473, 526-566`). Its limits: the
+  six `--fields` types (`fields.ts:11`, against the plan's ten at
+  `plan/schema.ts:54-65`), no default, unique, index or foreign key, the
+  project root only, and routes registered without the auth middleware
+  (`withAuth: false`, `blueprints.ts:548`).
+- `make:feature` is not the scaffold's writer, and neither is `add resource`.
+  Both write a fixed CRUD surface whatever the plan says: seven actions
+  (`make-feature.ts:491-600`), four pages (`:155-167`) and seven routes
+  (`buildRouteRegistrationHint`, `:354-382`). `add resource` also mounts the
+  routes. The endpoints the plan does not declare are unapproved, and no
+  status reading or §2 check sees them.
+- The scaffold is a plan-driven emitter, a pure function from plan to files.
+  `guren plan:scaffold <plan> --step <id>` writes them, and `plan:next` names
+  that command for a scaffold step. The emitter reuses the per-dialect column
+  builders, `appendTableToSchema()`, the model and policy templates,
+  `wireAppProvider()` and `wireRouteRegistrar()`, factored rather than called
+  whole.
+- What it emits, per element: the table with every column option the plan
+  states and its foreign keys; the model with relationships and fillable;
+  validators; resources; the policy class and a registration provider; the
+  controller with exactly the planned actions as stubs; the routes file;
+  side-effect classes; and `@docs` tags. No pages, no action bodies and no
+  CRUD extras.
+- Policy registration needs no `boot()` patcher. A proposal, to settle in the
+  change that implements it: a per-entity
+  `app/Providers/<Entity>PolicyProvider.ts` in the shape of the blog
+  template's `AuthorizationProvider.ts`. Its `boot()` calls
+  `this.container.make('gate').policy(Model, Policy)`, and `wireAppProvider()`
+  registers it (`provider-registrar.ts:125-127`).
+- The routes go in a `routes/<entity>.ts` of their own, after #1039. At
+  2a784c4d an entry route is fingerprinted as the entry routes file alone
+  (`plan/app-detail.ts:295`). `routeFileDetail()` already lists every project
+  routes file (`plan/app-detail.ts:555-569`). Predicted from that code:
+  editing a `routes/<x>.ts` the entry registrar calls does not drift a
+  verified step.
+- The scaffold writes the routes file and does not mount it. The `http` step
+  mounts it with one `wireRouteRegistrar()` call. ~~This is pending the
+  mounted-routes experiment in the Part 3 note under Phasing.~~ The
+  prediction, which that experiment confirmed (Part 3 note under Phasing),
+  is that a mounted route whose auth middleware, `userOrFail()` or contract
+  validation answers 401, a redirect or 422 before any table exists can pass
+  the slice's `unauthenticated` or `validation` behaviour before the `tests`
+  step, which runs after `scaffold` (`plan/tasks.ts:786-818`). A `forbidden`
+  behaviour usually needs the record, so it is not predicted to pass. The
+  exception is a policy's `create` guard, which reads no record.
+  `tests:fail` judges each behaviour on its own and needs every case of it to
+  fail (`plan/verify.ts:172-183`), so one such behaviour passing is enough for
+  that step never to verify.
+- A proposal, to settle in the change that implements it: unmounted stubs
+  validate with `validateBody(Schema)`. `validated('<name>')` is typed from
+  generated route names (`packages/server/src/mvc/Controller.ts:479-481`), so
+  it would not typecheck while the route is unmounted.
+- Pages are not emitted. A page written with the plan's `Props` makes every
+  readable property of its view match by construction
+  (`plan/status.ts:1075-1091`). The `pages` step would then verify it on a
+  typecheck while its form, actions and states, which nothing reads, are
+  unwritten. Layout stays with prototype mode (Open Question 4).
 
 The migration is not generated here: `db:make` needs drizzle-kit and
 `db:migrate` a database, which makes it the `data` step's and `plan:verify`'s
@@ -1033,9 +1183,225 @@ An API-only application gets no scaffold step: `make:feature` refuses one
 `make:controller` and `make:validator` plus agent steps, and `views` must be
 empty in its plans (a §2 check).
 
+**Amended after re-review (2026-09-23), Part 3:** the reason given here rests
+on `make:feature` being the writer. The plan-driven emitter above writes no
+pages, so whether an API-only slice now gets a scaffold step is open; until it
+is decided, task derivation keeps leaving it out.
+
+**Amended in implementation (`plan:scaffold`, first of three changes):** what
+shipped, and where it stops.
+
+- `guren plan:scaffold <plan> --step <id>` writes the tables and the models, and
+  nothing else yet. Per model the step adds, it appends the table to the root
+  `db/schema.ts` through `appendTableToSchema()`, in the schema's dialect. The
+  table carries every column option `plan/status.ts` compares (type, nullable,
+  unique, index, default, `columnName`, `withTimezone`, precision and scale, the
+  primary key, the foreign key and its `onDelete`) and the model's multi-column
+  indexes. The model file is `app/Models/<Name>.ts`, with `fillable` and the
+  relationships, keyed by the foreign keys the plan states. A relationship whose
+  target or keys do not exist yet (a `hasMany` to a model a later task adds) is
+  left out and listed. The second change adds validators, resources and
+  policies; the third adds the controller stubs and the routes file (D5), which
+  the `http` step mounts (D3). `plan:next` and the harness skill say what the
+  command writes today and that the `http` step writes the rest by hand.
+- The emitters live in `packages/cli/src/plan/scaffold.ts`, a pure function from
+  the step and the facts the command reads (the dialect, every root's tables, the
+  root's model classes). `planScaffoldCoverage()` there is the one rule for which
+  of a step's `generates` it writes, which its report and `plan:next` share. The
+  column builders are factored out of the resource blueprint into
+  `packages/cli/src/schema-columns.ts`, which `guren add resource` now writes
+  through, byte for byte as before. The model template of `make:model` gained
+  `fillable` and relationships (`buildModelSource()`), with its output unchanged.
+- Round trip: emitted into a real application and read back by `plan:status`'s
+  own readers, every planned property reads `match` except where no reader
+  looks. `references.onDelete` is unread in every dialect. On MySQL, a `uuid`
+  column (`varchar`) and `withTimezone` are unread. SQLite's moded
+  `integer`/`text` columns (boolean, date, datetime, json, uuid), its sizeless
+  `numeric`, `withTimezone` and a `unixepoch()` default are unread. MySQL's
+  `now()` default is written `CURRENT_TIMESTAMP`, which the readers normalize,
+  where drizzle's `defaultNow()` renders `(now())`, which they compare as text.
+  A composite primary key is written as `primaryKey({ columns })`, and
+  `plan/status.ts` reads a column as in the key when a readable composite key
+  lists it (a table has one), so a pivot's key columns verify. No emitted table has been migrated against a database in these tests;
+  they prove the readers and `tsc` accept the output.
+- The project root only: an element carrying `module`, or a foreign key or
+  relationship whose target carries one, is refused. An API-only application is
+  refused, as derivation gives it no scaffold step. A draft is refused too, where
+  `plan:next` accepts one: `plan:scaffold` writes code, and a draft is what
+  nobody approved. `plan:next` tells a draft to approve first.
+- The step must be the one `plan:next` marked, so what the command writes is
+  that step's measured work and the next `plan:next` accepts the dirty tree as
+  the marked step's own.
+- Every refusal comes before the first write: the step kind, the mark, a module,
+  a foreign key to a table not declared yet, a MySQL key over a `text` or `json`
+  column (a primary key, `unique`, an index, or a foreign key, which MySQL
+  indexes), which drizzle-kit refuses and MySQL rejects without a prefix length,
+  a `default` of `null`, and any target that exists
+  (the model file or class, the schema export, the table name in any root). A
+  re-run of a scaffolded step is therefore refused on the targets it wrote, with
+  the application unchanged; what is left for the step is `plan:verify`. It runs
+  no codegen and no migration.
+- It writes `db/schema.ts` first, since the model files import its exports. A
+  write that fails after the first one names the files already on disk, since a
+  re-run would refuse on them as if the step were done.
+- A relationship left out of the model leaves it `drifted` in `plan:status`
+  until the relationship is added; the report says so beside each one. One
+  that waits on a later task's work is the exception (§6, Completion): the
+  report names the step that judges it (`judgedAt`).
+- Like `plan:verify`, it does not consult the freshness hold of §4: `plan:next`
+  is what holds a step whose context went stale, and the command runs only on
+  the step `plan:next` marked.
+- `views` are no longer `scaffoldable` in the task derivation (D4), so a scaffold
+  step's `generates` names no page.
+
+**Amended in implementation (`plan:scaffold`, second of three changes):**
+validators, resources and policies, and the policy registration settled.
+
+- The step's validators go in one file, `app/Http/Validators/<Model>Validator.ts`
+  after the model the step adds, which is `make:validator`'s path for it, so a
+  prior `make:feature` is refused as a file that exists. A field is written from
+  its planned type, `required` and rules through leaves `plan/field-readers.ts`
+  admits (`z.string()`, `z.number().int()`, `z.iso.date()`, `z.iso.datetime()`,
+  `z.uuid()`, `z.email()`, `z.url()`, `min`/`max` as checks, `.nullable().optional()`
+  for a field that is not required). A validator an action takes its `query` or
+  `params` from gets `z.coerce.number()` and `z.stringbool()`, since those values
+  arrive as text. A prose rule, or a rule that does not fit the type, is not
+  written and is listed. A name a root validator file already exports is
+  refused, since `plan:status` finds a validator by its exported name.
+- A resource is a `Resource` subclass, not `JsonResource`: `guren codegen`
+  discovers a resource only by `export class <Name>Resource extends Resource`,
+  and reads `<Base>ResourceData` as its payload, so a name without the suffix
+  is refused. It is written only when the step adds its model (the file imports
+  the model's record type) and its payload types name nothing the file would
+  import; otherwise it is left to the `http` step with that reason. A field is
+  copied from its column where the planned type admits every value the column
+  reads back as (`COLUMN_RECORD_TYPES`, beside the column builders), so a
+  planned `T | null` takes a non-null column; a `Date` column is serialized with
+  `toISOString()` for a planned `string`; a JSON column, which reads back as
+  `unknown`, is cast to the planned type as `make:feature` casts it, when that
+  type admits the column's `null`. A planned type holding a comment is left to
+  the `http` step, since the comment would swallow what the emitter writes after
+  it. Any other field calls a stub that throws until it is mapped, and is listed.
+- The policy stub denies: every ability is `(_user: AuthUser | null): boolean`
+  returning `false`, with the planned rule in a comment above it. A stub that
+  allowed would authorize what nobody has written, and one that threw would fail
+  requests the gate answers today. An ability named after a `Policy` member
+  (`before`, `allow`, `deny`, `denyWithStatus`, `denyAsNotFound`) is refused.
+- The proposal above is settled as written: `app/Providers/<Policy>Provider.ts`,
+  one per policy, in the shape of the blog template's `AuthorizationProvider`,
+  whose `boot()` calls `this.container.make('gate').policy(Model, Policy)`. It is
+  registered by `wireAppProvider()`'s patch, factored as
+  `composeAppProviderRegistration()` so the command composes it before the first
+  write and applies it last: `wireAppProvider()` itself writes as it goes and
+  only warns when it cannot register, where a policy left unregistered reads as
+  scaffolded while the gate denies it. No entry, no `createApp()` it can patch,
+  or an entry that already registers the provider is refused.
+- `wired` does not read the registration. `plan/status.ts` gives a policy no
+  mount point, so it completes at `present`, on its abilities (an existence
+  match, which lifts it only through a behaviour); a registration mount would
+  move every approved plan's policies to `wired` and expire their records. A
+  scaffolded validator reads `present` until a route contract or an action body
+  uses it, which the third change's controllers and routes provide.
+- Round trip, as for the tables: every planned validator field property,
+  resource field and policy ability reads `match` except where the readers stop.
+  The judge calls no validated value a `decimal` (a string or a number may hold
+  one), so its type reads `unknown`; a `json` field is a record, a node outside
+  the field reader's allowlist, so its type and `required` read `unknown`; a
+  coerced number takes `null` as 0, so a required number or boolean in a query
+  or params validator leaves `required` `unknown`; an ability's rule is prose.
+  No reader was changed.
+
+**Amended in implementation (`plan:scaffold`, third of three changes):**
+controllers, routes, their mount, and side effects.
+
+- Each added controller is `app/Http/Controllers/<Class>.ts` with exactly the
+  planned actions. An action validates its `params` and `query` with the
+  planned validators, authorizes with the planned policy ability
+  (`this.authorize('<ability>', Model)`, the policy's model class), validates
+  its `body`, then throws `HttpException.notImplemented()`, a 501. Asking the
+  ability before reading the body gives a caller the policy denies 403
+  whatever it sent. The proposal above is settled as
+  written: a stub validates with `validateBody(Schema)` and its siblings,
+  since `validated('<name>')` is typed from generated route names and does not
+  compile while the route is unmounted. An action on an existing controller is
+  left to the `http` step, since the scaffold writes no action into an
+  existing file; so is an action named after a `Controller` member, which is
+  refused.
+- No response is written. `plan/status.ts` credits a Resource by mention, a
+  page by the id `this.inertia()` names, and a redirect by the call, so a stub
+  naming one would read `match` with nothing behind it. Every action's
+  response is listed as unwritten, and the round trip pins `response` and
+  `response resource` as reader limits. A validator or model the file cannot
+  import (a validator another task adds, a model the root lacks) is listed
+  rather than guessed.
+- The routes to those actions go in `routes/<collection>.ts`, exporting
+  `register<Model>Routes`, one registrar per slice as D5 says, with each route's
+  method, path, name, contract schemas (the action's validators), bindings
+  (with the lookup column where the plan names one) and `.agent()` metadata.
+  An action's own `authorization.middleware` is applied on its route as well.
+  `auth` is the only middleware applied, aliased in the file the way
+  `make:feature`'s route block aliases it; a registrar typed `Router<'auth'>`
+  would not compile at the mount site, which passes the registrar's
+  unaliased parameter. Any other name is listed for the `http` step, which
+  knows the handler the application aliases it to.
+- The file is not mounted, and D3 is carried by a command: the `http` step (or
+  part) whose elements hold those routes runs `plan:scaffold <plan> --step
+  <id> --mount`, which `plan:next` names for it. It composes
+  `wireRouteRegistrar()`'s patch as `composeRouteRegistrarCall()`, so every
+  refusal comes first, and writes the entry atomically, the call first in the
+  registrar body; an `auth` alias the entry sets is then set after the file's
+  and wins at mount. It is approval-gated, must be the marked step, and
+  refuses a step holding no scaffolded routes, a file that is missing or no
+  longer exports its registrar, no routes entry, an entry declaring or
+  importing the registrar's name, and a file already mounted, judged by
+  `guren check`'s own reach from the entry with no plan read. `plan:next`
+  names the command only while the file exists and is not mounted. A module's
+  slice has no mount, since the scaffold refuses it. The mounted routes
+  register ahead of the entry's own, so a scaffolded path with a parameter can
+  shadow an entry route; that is documented, not changed. `planScaffoldMounts()` is the one rule for the file,
+  its registrar and its mounting step, which the scaffold, `--mount`,
+  `plan:next` and `guren check` all read.
+- The brief expected the routes to read `present` before the mount. They read
+  `planned`: `plan:status` reads a route from the definitions the entry
+  registrar registers, and an unmounted file registers none. Reading unmounted
+  route files would change route existence, and with it every approved plan's
+  freshness stamps. So before `--mount` the actions read `present` and the
+  routes `planned`; after it the routes, their actions and the validators they
+  use read `wired`. A binding's lookup column is unread.
+- `guren check` warns on an unmounted `routes/*.ts`, and that warning fails
+  `guren gate`, which the `Stop` hook runs on every stop between the scaffold
+  and the `http` step. An unmounted file the scaffold of an approved, unclosed
+  plan writes, whose `http` step has no `verified` record at the plan's
+  digest, and that exports the registrar the scaffold names, keeps the
+  warning's key and wording and is advisory (`plan/awaiting-mount.ts`, over
+  `plan/open-plan.ts`, the reading `check --plan` shares). It reads the plan files, their approvals, the
+  closing documents and the state files only, never `db/schema.ts` or a
+  validator file, and only once a project routes file is unmounted. Once the
+  step verifies or the plan closes, the warning gates again.
+- Side effects are `scaffoldable` in the task derivation now. Each is written
+  by the `make:job`, `make:event`, `make:listener` (with no event, since
+  `trigger` is prose), `make:mail` and `make:notification` builders under the
+  plan's class name, which is what `plan:status` finds one by. It reads
+  `present`; `wired` needs a dispatch, a registration or a send, which is the
+  `http` step's.
+- `@docs docs/entities/<Model>.md` goes on the controller and the routes file
+  only where that document exists: `guren check` fails a tag to a missing
+  file, and `plan:close` writes the document at the end. The model file
+  carries none, and no test file is written (the skeletons are item 7).
+- The shells are factored, their output pinned byte for byte first:
+  `buildControllerSource()` from `make:controller` and `make:feature`,
+  `buildRoutesSource()`, `routeCall()` and `authAliasLine()` from `make:route`
+  and `make:feature`'s route block, and the five side-effect builders.
+
 A step whose remaining work exceeds a threshold (files touched, elements
 covered) is split, pages by screen group first. The threshold starts at five
 files and is tuned from the metrics in §7.
+
+**Amended after re-review (2026-09-23), Part 3:** those metrics are not
+recorded yet (a step record in `plan/state.ts` holds fingerprints, not the
+files touched or lines changed). Part 3 records them, and the threshold stays
+at five files until they exist (Open Question 3). They are recorded now (the
+per-step work note under Phasing); the threshold waits for enough plans.
 
 **Test skeletons are generated the same way.** Each acceptance behaviour
 becomes one `TestApp` test whose title starts with its id
@@ -1047,6 +1413,171 @@ step is verified without turning `drifted`. These are tamper detection, not
 proof: a test can satisfy all three and still assert nothing that matters.
 What they rule out is the cheap failure, a test emptied or rewritten until it
 passes, and the task-end reviewer (§7) reads the tests for the rest.
+
+**Amended after re-review (2026-09-23), Part 3:** ~~no skeleton emitter ships,
+and the static "still calls its route" check is not implemented~~ (both ship:
+the skeletons as item 7a and the check as item 7b, the two amendments below).
+Both are the optional last item of Part 3; `packages/cli/src/test-requests.ts`,
+which reads the requests a test file makes, is what the check rests on.
+
+**Amended in implementation (`plan:scaffold` on a `tests` step, Part 3 item
+7a):** the skeletons ship; the static check is item 7b's. `plan:scaffold <plan>
+--step <task>/tests` writes them through `plan/scaffold-tests.ts`, pure like
+the other emitters.
+
+- One file per plan and task, `tests/plans/<plan slug>/<name>.test.ts`, the
+  name the entity's collection (`comments`), a story's intent id, a cross
+  task's model ids or `foundation`. The harness testing rule puts tests under
+  `tests/`; a directory per plan keeps a second plan on the same entity from
+  colliding with the first's file, which a re-run refuses on.
+- Each behaviour is one `test('[<id>] <description>')`. Prose written into the
+  file (the description, `given`, the actor) has its brackets turned into
+  parentheses, so the file carries no id but its own: another bracketed id in
+  it would be selected by that behaviour's step and counted by the drift
+  re-check. What the plan spells as data (a request body, a `has`/`missing`
+  value, an `errors` key, a redirect target, a page name) is written as it
+  is, so the emitted file is scanned with `bracketedTokens()` and an
+  acceptance id other than the step's own refuses the step, nothing written.
+- The request is the route's method and path, each parameter a whole-segment
+  interpolation (`` `/posts/${postId}/comments` ``), which `test-requests.ts`
+  resolves to the route. The `input` is the body, or the query string for a
+  `GET`. The receiver is `client()`, a function in the file annotated to
+  return `Promise<TestApp>`, which the scan counts as a `TestApp`. A parameter
+  with a constraint (`:id{[0-9]+}`) reads as `unknown` to Impact, since a
+  runtime value may fail it; the 7b check below reads it as reaching the route,
+  so the skeleton needs no workaround.
+- `client()` imports the app entry (`src/app.ts` or `app.ts`, whose default
+  export must exist, or the step is refused) and boots it with
+  `TestApp.fromApp()` on first use inside a test, never at module level or in
+  `beforeAll`: a file that throws while loading is absent from the junit report
+  and a throwing `beforeAll` becomes one `(unnamed)` case, either of which
+  reads every behaviour as `pending`. A boot that throws is rethrown as
+  `Application boot failed: <message>` (`SKELETON_BOOT_FAILED` in
+  `plan/acceptance-status.ts`). Bun's junit report carries no failure message
+  (`<failure type="AssertionError" />`, measured on 1.3.14), so `tests:fail`
+  reads Bun's own `error: Application boot failed:` line from the run's output,
+  and one such line records the command `blocked`: the boot is shared, so every
+  case that reaches `client()` fails on it while the cases that throw at
+  `given()` first never reach the application, and "every failed case" would
+  let that mix verify. It primes CSRF with `withCsrf()` (after `actingAs()`),
+  and falls back to the unprimed client only on the exact message
+  `withCsrf()` throws for the default path when no `XSRF-TOKEN` was issued,
+  which the CSRF middleware issues on every safe request: its absence means no
+  CSRF is mounted, as in an application created without `auth`. The two
+  spellings are kept in sync by a test that reads `packages/testing`'s source.
+- What the plan states only in prose is a `given()` call that throws: each
+  `given` line, the actor, and each path parameter's value. Only `auth` or an
+  `auth:*` middleware on the route or its action, a policy, or a `forbidden`
+  behaviour implies a signed-in actor, and `unauthenticated` never does; a
+  guard under another middleware name gets no actor, and its test fails on the
+  401 or redirect until one is set up. A throw is a failed case, never a skipped one,
+  so `tests:fail` counts it; `test.todo` and `test.skip` would not.
+- The expectations are written out where `TestApp` can assert them:
+  `assertStatus`, `assertRedirect` (a path sharing the route's parameters
+  reuses their values), `assertInertia` on the view's page with the receiver's
+  `.json()` (`Accept: application/json`, which `renderInertia()`, the path
+  `Controller.inertia()` takes, answers with the page as JSON; `X-Inertia`
+  would meet its version check, a 409 when the asset version resolves in tests
+  and the request sends none), and `errors` as the keys of the JSON body's
+  `errors`. `TestApp` has no
+  database helper bound to the application's connection, so a `database` row is
+  a query through the model, `expect(await Comment.where({ … }).first())`, for
+  a table a plan model declares, whose class the root has, with each value one
+  its planned column type compares with as a literal (a string, integer,
+  number or boolean column, or `null` on a nullable one). Anything else, and an
+  expected `404`, which a route that does not exist yet answers too, is an
+  `unwritten()` call that throws, listed in the report. A case with no
+  assertion that a missing route would fail gets one as well, so every case
+  fails before its implementation. The header says setting up and cleaning up
+  rows is the agent's: a row another test left can make a `has` or `missing`
+  pass or fail whatever the implementation does.
+- Two holes stay open. (a) A behaviour on an `existing`, `alter` or `rename`
+  route (a rename usually keeps the path) with no `given()` or `unwritten()`
+  call may pass at once, the route answering as the plan expects already; the
+  report lists it (`mayPassNow`) so the agent knows why
+  `tests:fail` refuses the step, and nothing is refused. (b) A behaviour on an
+  added route whose path an existing route already answers (a parameter or
+  wildcard route registered first) reaches that route, not a 404, and may pass
+  too; it is neither listed nor refused, since telling it needs the registered
+  routes, which the scaffold does not load.
+- The file compiles: the helpers, `expect` and each model import are written
+  only when used, and a test renders it beside the scaffold step's output and
+  typechecks it. Refused before the write, like the other scaffold writes: the
+  file existing (a re-run), a step id another test file already carries
+  (`plan:verify` would find it in two files), no default export to boot, an
+  unmarked step, and a draft or unapproved plan. An API-only application has
+  no `scaffold` step but gets its `tests` step's skeletons, which read no model
+  it lacks.
+- Measured through `plan:verify --step` on the comments fixture plus one
+  behaviour with no `given` and no parameter, scaffolded into a temp app and
+  unmounted: every case fails, the four with setup at `given()` and the
+  guest's on the route's 404, and the step verifies. Turning one test into
+  `test.skip` fails the step, and mounting the routes with `--mount` makes the
+  guest's case pass, which fails it too.
+  An application whose `src/app.ts` throws at boot records the step
+  `blocked`.
+- Not verified: an application that mounts CSRF with its cookie turned off,
+  where the fallback does not apply and `client()` throws. The `.json()` path
+  for `inertia` is read from the engine's source, not run against an
+  application with a resolved asset version.
+
+**Amended in implementation (the "still calls its route" check, Part 3 item
+7b).** The check ships, in `packages/cli/src/plan/behaviour-requests.ts` over
+`scanTestCaseRequests()` in `test-requests.ts`. It applies to every test, not
+only to generated ones: `plan:verify` cannot tell a skeleton from a test an
+agent wrote, and the tamper it detects is the same.
+
+- Where it runs: inside the `tests` and `tests:fail` commands, on the files
+  those commands select, before `bun test` is spawned (a failure is decided,
+  so nothing runs), and in `recheckTests()`, where a drifted `tests:fail` step
+  re-checked without a run must still request its routes: a test rewritten to
+  request nothing keeps failing, so the run it verified on says nothing about
+  it now. `plan:status`, `guren check` and the gate do not run it, so their
+  cost is unchanged.
+- The route is the plan's: the behaviour's `route` resolved in `plan.routes`,
+  its method and full path (the path `plan:status` compares with the
+  registered one) and its `agent.toolName`. A request reaches it through
+  `testCoverage()` and `mayReach()`, the matcher Impact uses. `AcceptanceSchema`
+  requires `route`, so no behaviour is exempt; a route id the plan does not
+  declare (a draft) is unreadable, never a pass.
+- Per case, as the junit report reads a title: a `test`, `it` or `describe`
+  (and `.only`, `.each(…)(…)` and the rest of the chain, and aliases imported
+  from `bun:test`) whose literal title carries the id, including a `describe`
+  whose cases do. Its requests are those in its callback and in every
+  same-file function it calls by name, transitively, matched by name like the
+  receivers. Hooks outside a carrying `describe` are not followed (one inside
+  it is in its callback): the request is the behaviour's action, and a
+  `beforeEach` is its `given`. Some carrying case must request the route. A
+  `test.todo` carrying the id has no body, and the miss names it so.
+- A whole path segment filled at runtime reaches a constrained parameter
+  (`` `/comments/${id}` `` against `/comments/:id{[0-9]+}`), in this check
+  only (`routePathMatches()`'s `runtimeFillsConstraints`; Impact still reads
+  it as uncertain). A skeleton cannot spell a literal for an arbitrary
+  constraint, and whether the value passes it is the run's to find, as a 404.
+  A literal segment the constraint rejects stays a miss. Where one runtime
+  segment does not fit (a constraint spanning `/`, `:path{.+}`, with more
+  segments after it), the comparison stays uncertain, so it reads as
+  unreadable, never as a miss.
+- Three verdicts per behaviour. Reached. Unreadable when nothing reached it and
+  a carrying case holds an unresolved request `mayReach()` allows (including
+  one on what a same-file function returns when nothing annotates it
+  `TestApp`, `localReceiver`, whose remedy is that annotation), a request
+  the route pattern cannot be compared with, or a call handing the `TestApp`
+  (or its agent) to a function the file does not define, or a carrying file
+  did not parse or holds a test whose title is not all literal. A miss
+  otherwise, naming what each carrying case requests instead, or that the id
+  sits in no test title at all. Both fail the command (and the step), with
+  distinct reasons: `blocked` is the environment's and this is the test's
+  shape, and passing an unreadable request would let `app.get(path)` lift the
+  step's elements. The finding never says the route is uncovered, only that
+  this reading cannot tell, and it asks for the request to be spelled in the
+  test. There is no waiver for a behaviour, so a suite built on imported
+  helpers has to make each behaviour's request visible in its case.
+- Tamper detection, not proof: a request the file spells passes whether or
+  not it runs, and a request made entirely inside an imported helper the case
+  hands nothing reads as a miss.
+- `plan:next` says the rule under a `tests` step's behaviours, and the harness
+  skill repeats it.
 
 For `alter` / `rename` / `drop` there is no scaffold. Those steps are agent
 edits, and the narrow step width matters most there.
@@ -1299,7 +1830,24 @@ for some of them:
 | any | `waived` |
 
 A step is complete when every element it covers is. A task is complete when
-its steps are. `blocked` completes nothing and is reported as such: it is an
+its steps are.
+
+A relationship that waits on a later task's work (§5, Order) is judged with the
+latest model it waits on, as that model's property `relationship
+<Model>.<name>` (`<module>/<Model>` for a module's), and not with the model
+declaring it. It waits on its target while the target's class does not exist
+yet (an `add` or `rename`), and on the model holding its keys while the plan
+adds them: the target's foreign key for a `hasOne`/`hasMany`, the pivot for a
+`belongsToMany`. The declaring model's step comes first and cannot write it, so
+judging it there would hold that step forever. A relationship whose keys the
+plan does not state, or that names a dropped model, stays on the declaring
+model, as the scaffold leaves it out there too. The declaring model carries a
+note naming the step instead, and the judging model's `files` include the
+declaring model's file, so removing the relationship later expires that
+record; writing it drifts the declaring step's record, which `plan:verify`
+re-checks in the same run. `planLaterRelationships()` in `plan/tasks.ts` is the
+one rule for which relationships move, by the derivation's task order;
+`plan:status`, `plan:scaffold` and `plan:next` all read it. `blocked` completes nothing and is reported as such: it is an
 environment problem to fix, not a state to wait out. Existing tests may be
 edited only where the plan lists them under Impact.
 
@@ -1368,10 +1916,18 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
   invocation, and `tests` and `tests:fail` judge the same run.
 - The fingerprint is the SHA-256 of every file the status readers found the
   step's elements in (a model's file, the controller's for an action, the
-  schema file for a column, the entry routes file for an entry route and every
-  routes file of a module for a module's, the page component, a validator's
-  file) plus the selected test files, and the environment (`runtime`,
-  `platform`, `arch`, `hostname`). A file that cannot be read at verify time is
+  schema file for a column, the entry routes file and every file under the
+  project's `routes/` for an entry route and every routes file of the
+  application for a module's (nothing says which file declared it, and the
+  entry's and another module's routes may shadow it), the page component, a
+  validator's file), plus, for an element with a mount point, the files its
+  `wired` rests on: the entry `createApp()` is read from and a module's
+  descriptor, the routes dispatching to an action, the actions returning a page
+  or validating with a validator, and those actions' routes, the routes whose
+  contract holds a validator, and the files using a side effect. An element no
+  reader found a file of stays unfingerprinted whatever wires it. The
+  fingerprint also holds the selected test files and the environment
+  (`runtime`, `platform`, `arch`, `hostname`). A file that cannot be read at verify time is
   recorded as `null`, which never matches. The environment is recorded and
   shown, and not compared: a machine is not a reason to call an element drifted.
 - The state file is `.guren/plans/<slug>.state.json` under the application
@@ -1402,8 +1958,9 @@ text above left room (`packages/cli/src/plan/verify.ts`, `state.ts`).
   the readers say, with a note. For that the status report carries each
   element's `files` and `completesAt`, and its summary counts all eight states.
 - Of the per-step metrics of §7, the state carries `durationMs` per command
-  and per step and the `Stop` hook's continuations; `total_cost_usd`, files
-  touched and lines changed are not recorded yet. `--ci` exits 1 when a step
+  and per step, the `Stop` hook's continuations, and files touched and lines
+  changed (the per-step work note under Phasing); `total_cost_usd` is not
+  recorded yet. `--ci` exits 1 when a step
   the run covered did not verify.
 - The `.gitignore` written beside the state ignores itself as well, so a
   verify leaves the working tree as clean as it found it, which `plan:next`
@@ -1557,9 +2114,20 @@ matched when the plan was approved says nothing about the change. What shipped
   not import at approval and can now). A later approval does not replace it
   with what it reads then: an `unknown` also precedes real work (an action
   that returned JSON before it rendered the planned page), and a re-approval
-  in the middle of that work would stop crediting it. The §2 warning on an `alter` whose
-  readable properties all held at approval, which the producer row of Part 2
-  asks for, is not part of this change.
+  in the middle of that work would stop crediting it.
+- The warning the producer row of Part 2 asks for came later: `plan:approve`
+  approves and warns when an `alter` has a readable reading and every one is a
+  `match` (`heldAlters` in its report). It is not a §2 check. A §2 check reads
+  the application as it is now, and a re-approval after the work reads a built
+  property as a `match` too, so `heldAlters()` in `plan/approvals.ts` judges
+  the approval entry's readings for the properties the `alter` reads now, or
+  all of its recorded ones where it cannot be read or is not found. An
+  `unknown` is not held, and the warning names it as what can still show the
+  change. An `alter` with no readable reading gets none: its readings cannot
+  tell a property no reader sees from one a failed import hid, and a model or
+  controller whose change lies in its columns or actions plans no property of
+  its own. `plan:render` reads no approval, and `plan:status` reports the
+  element `unjudged` with the same remedy.
 
 **Amended in implementation (drift re-verification, and a data step's
 migration).** Two defects the loop hit once a plan had more than one task.
@@ -1595,9 +2163,11 @@ migration).** Two defects the loop hit once a plan had more than one task.
   whole-plan run, `--step` on it, or as an earlier step): `tests:fail` cannot
   pass once the implementation exists, and its red run was observed when it
   verified. It stays `verified` while one test file still carries each of its
-  behaviours' ids as a bracketed token, which a comment carries as well as a
-  test title (a gap the run itself would catch). One carried by no file or by
-  several is reported, and the record is left drifted rather than replaced: a
+  behaviours' ids as a bracketed token and a test case titled with each id
+  still requests the behaviour's route (the §5 amendment on the "still calls
+  its route" check), which closes the gap a token in a comment left. One
+  carried by no file or by several, or whose tests no longer request its
+  route, is reported, and the record is left drifted rather than replaced: a
   recorded failure would send the next run to `tests:fail`, which cannot pass
   then. `plan:next` and the `Stop` hook reach it through `plan:verify --step`,
   so all four agree.
@@ -2182,10 +2752,104 @@ an issue; and the output is only ever data. No plan string is executed: the
 `commands` section is matched against an allowlist of `guren` subcommands,
 and verify commands come from the step table in §5, never from the plan.
 
+**Amended after re-review (2026-09-23), Part 3.** The headless producer is
+not in Part 3. It waits for the probes that answer Open Questions 2, 10 and
+12, whose procedures are in the Part 3 note under Phasing. When it ships, the
+command line and the confinement paragraph above change as follows, from the
+Claude Code docs as read on 2026-09-23:
+
+- **Auth.** `--bare` reads no OAuth credentials and no keychain. It needs
+  `ANTHROPIC_API_KEY`, or an `apiKeyHelper` passed in `--settings`
+  (https://code.claude.com/docs/en/headless#start-faster-with-bare-mode). The
+  producer runs under `--bare` with an API key, which the same page calls the
+  recommended mode for scripted calls. It does not reuse the subscription
+  login (see Alternatives).
+- **Where it runs.** In a checkout of the tracked files at HEAD (for
+  instance a detached `git worktree add` in a temporary directory), not in the
+  working tree. The checkout is read at HEAD, so uncommitted work is not in
+  what the producer sees, and gitignored files are absent.
+- **Deny rules are not enough on their own.** Read rules reach Grep and Glob
+  only as a "best-effort attempt"
+  (https://code.claude.com/docs/en/permissions#read-and-edit). Glob does not
+  respect `.gitignore` by default
+  (https://code.claude.com/docs/en/tools-reference#glob-tool-behavior). So
+  "whatever `.gitignore` excludes" is not one `--disallowedTools` pattern.
+  The tracked-files checkout is what removes gitignored secrets. Deny rules
+  on `.env*` and key files stay, for secrets that are tracked.
+- **The `env` block.** Under `--bare` the project settings' `env` block still
+  applies
+  (https://code.claude.com/docs/en/permissions#what-runs-before-you-trust-a-folder).
+  The checkout keeps a tracked `.claude/settings.json`, so its `env` still
+  reaches the producer. That stays open under Open Question 10.
+- **Pinned mode and caps.** `--permission-mode dontAsk`: the flag overrides a
+  `defaultMode` from settings, and `dontAsk` denies whatever would prompt, a
+  read outside the working directory included. Also `--permission-prompts
+  none` (Claude Code v2.1.259 or later), `--max-budget-usd` and `--max-turns`
+  (https://code.claude.com/docs/en/cli-reference#cli-flags,
+  https://code.claude.com/docs/en/permissions#permission-system). A proposal,
+  to settle in the change that ships the producer: `--no-session-persistence`
+  on a first draft, and not on the first call of an `--ask` pair, which has
+  to be resumable.
+- **Schema size.** `--json-schema` is validated as draft-07, with retries on
+  mismatch (https://code.claude.com/docs/en/agent-sdk/structured-outputs).
+  The API's constrained decoding caps a request at 24 optional parameters and
+  16 union-typed ones. It answers a schema past its internal limits with a
+  400 "Schema is too complex for compilation"
+  (https://platform.claude.com/docs/en/build-with-claude/structured-outputs#schema-complexity-limits).
+  Counted at 2a784c4d with a walker that approximates the API's counting,
+  `planDraftJsonSchema()` has 56 optional and 14 union-typed properties, and
+  `planRevisionOpsJsonSchema()` 150 and 32. The pages read do not say whether
+  `claude --json-schema` goes through constrained decoding, so this is not
+  asserted. The Open Question 2 probe settles it.
+- ~~**The `commands` allowlist is not implemented.**~~ The allowlist is a §2
+  check (`plan:command`, a failure) in `packages/cli/src/plan/command-allowlist.ts`.
+  A command passes as `guren <subcommand>` or `bunx guren <subcommand>`, with
+  arguments in a closed character set and `'`/`"` quoting, naming no
+  absolute path and no `..` segment, and a subcommand
+  the table classifies as a generator: `make:*` except `make:migration`,
+  `lang:publish`, and `add <blueprint>` except `add plugin`. A registry
+  command the table does not list is refused, and a test fails until it is
+  classified. `PlanCommandSchema` still takes a string, so a plan with a
+  refused command parses and shows the finding. `plan:next` refuses such a
+  plan before it marks a step, drafts included, since a draft never passes
+  `plan:approve`. `check --plan` warns on an approved one.
+
 `guren plan --print-prompt` writes the prompt and the schema to stdout and
 calls nothing, for any other agent, and for a Claude Code session already in
 progress, where the harness skill has the running agent write the JSON and
 call `plan:render` rather than nesting a second `claude`.
+
+**Amended after re-review (2026-09-23), Part 3:** this is the producer Part 3
+ships, with an in-session plan-writing harness skill. It needs no confinement
+of its own, since the running agent already holds the person's permissions.
+It is the path the guide describes today
+(`docs/en/guides/implementation-plans.md:46`).
+
+**Amended in implementation (2026-09-25), Part 3.** `guren plan --print-prompt`
+embeds no application context. The prompt names the read-only commands the
+running agent runs for it (`guren context --json`, `guren context <Entity>`,
+`guren model:list --format json`, `guren guidelines`) and has it check the
+file with `plan:render --json`, which prints `{ path, checks }`, until no check
+fails. Embedding `guren context --json` would import and introspect the
+application inside a command that otherwise calls nothing, and would need the
+size bound this section asks of the headless producer; the agent already holds
+the person's permissions and can run those commands itself. The prompt is built
+by `buildPlanPrompt()` in `packages/cli/src/plan/prompt.ts`, which the headless
+producer is to call, adding the embedded context and its bound there. Its
+`commands` rule lists the generators from `PLAN_COMMAND_CLASSES`, and it asks
+every `alter` to state its change in the properties `plan:status` reads (the
+reshape in Phasing). The request is optional: without one, the prompt tells the
+agent to ask for it. `guren plan` without `--print-prompt` exits non-zero and
+names it; `guren plan --revise` exits non-zero and names `plan:revise`.
+
+**Amended in implementation (the `plan-write` skill), Part 3.** The in-session
+skill is `plan-write`, which `agent:init` installs beside `plan-implement`. It
+runs `guren plan "<request>" --print-prompt` and follows it, adding what the
+prompt cannot say: ask in the client's own way and wait before writing the
+JSON, report the page, open questions and warnings left after
+`plan:render --json`, record review changes with `plan:revise`, and hand an
+approved plan to `plan-implement`.
+The plan's conventions stay in `buildPlanPrompt()` alone.
 
 **Two producers, for two situations.** The headless one cannot ask anything:
 `claude -p` has no one to put a question to, which is why questions are data
@@ -2207,6 +2871,16 @@ leaves a structural choice open. The second call resumes the first
 Every producer call, first draft, `--ask` and each revise, records its
 `total_cost_usd` in state, so the price of a plan is the sum of its rounds and
 visible as such.
+
+**Amended after re-review (2026-09-23), Part 3:** `--ask` is deferred with the
+headless producer. When it returns, a round's cost is not its own
+`total_cost_usd`. A run continued with `--resume` reports the conversation's
+whole total, earlier runs included (https://code.claude.com/docs/en/headless,
+the paragraph on `total_cost_usd`). Summing the rounds would count the first
+call of an `--ask` pair twice, so the second call's cost is its total less the
+first's. The cap differs the other way: `--max-budget-usd` does not count
+totals restored from earlier runs
+(https://code.claude.com/docs/en/cli-reference#cli-flags).
 
 **Amended after acceptance (2026-09-19), the served mode.** Besides the file,
 the page can be served by the development server, the way the `_guren/docs`
@@ -2355,6 +3029,10 @@ reshapes or drops them.
    **Amended in implementation:** a minimal `plan:approve` (stamping the
    baseline and recording the approval, §4) shipped ahead of Part 3 with the
    freshness comparison, which needed a writer of `contextHash`.
+   **Amended after re-review (2026-09-23):** Part 3 is re-scoped. The
+   headless `claude -p` producer leaves it, and a model-free `plan:revise`,
+   two §2 checks and per-step metrics join it; the order is in the Part 3
+   note below.
 4. **Part 4**: `plan:next`, the harness skill and `Stop` hook, metrics (§7),
    `plan:waive`, `plan:close`.
 5. **Part 5**: the `github` store (§9), `guren check --plan`, the guide.
@@ -2512,10 +3190,178 @@ not started:
 | Item | Call | On what |
 |---|---|---|
 | scaffold emitters (§5) | proceed | 0 false verdicts at completion on the kinds a scaffold writes (models, columns, actions, routes), at 0% to 6% unknown |
-| `claude -p` producer, `--print-prompt` (§8) | reshape | the prompt asks every `alter` to state its change in readable properties, and §2 warns on an `alter` whose readable properties all held at approval; an `alter` in prose alone is cause 1 |
+| `claude -p` producer, `--print-prompt` (§8) | reshape | the prompt asks every `alter` to state its change in readable properties, and ~~§2~~ `plan:approve` warns (§6 amendment on readings) on an `alter` whose readable properties all held at approval; an `alter` in prose alone is cause 1 |
 | `guren check --plan` (§9) | proceed | a single reading of the rules above serves it |
 | `github` store (§9) | defer | nothing measured here bears on it; it waits for a user |
 | the guide | proceed; update when the §6 rules land | the guide describes today's rules, which the changes above alter |
+
+**Amended after re-review (2026-09-23), Part 3.** Part 3 was re-read against
+the code before it started (`origin/main` at 2a784c4d), and the maintainer
+took the decisions below. Code claims were read from that tree; "predicted"
+marks what was read and not run.
+
+*What moved since the table above.*
+
+- The "proceed" on scaffold emitters covered four kinds: models, columns,
+  actions and routes. The §5 writer table also named validators, resources,
+  policies and pages. Validators and resources have had field readers since
+  #987. Policy abilities are read since #988, as existence only, so a policy
+  completes only where a behaviour reaches it (`restsOnReach()`,
+  `packages/cli/src/plan/verification.ts:58-60`). Emitting those three is safe.
+  Pages are not emitted (§5 amendment).
+- The reshape's warning, on an `alter` whose readable properties all held
+  at approval, is implemented in `plan:approve` from the approval entry's
+  readings, and is not a §2 check (§6 amendment on readings).
+- The `commands` allowlist of §8 is implemented as a §2 check (§8 amendment).
+- Files touched and lines changed per step are not recorded, so neither the
+  step width (Open Question 3) nor what a scaffold saves can be judged yet.
+- Re-approving a plan mid-build settles the plan's own built elements
+  (#968), so approval after a scaffold step no longer refuses.
+- `guren add resource` already appends a table and inserts route lines, and
+  `make:feature` / `add resource` write a fixed CRUD surface (§5 amendment).
+- Route fingerprints fail open for a `routes/<x>.ts` the entry registrar
+  calls, predicted from the code (§5 amendment). #1039 is the fix. It is a
+  Part 2 defect and lands regardless of the rest.
+
+*Decisions (maintainer, 2026-09-23).*
+
+| # | Decision |
+|---|---|
+| D1 | No headless `claude -p` producer in Part 3. `--print-prompt` ships; headless waits for the probes that settle Open Questions 2, 10 and 12 (below). |
+| D2 | When headless ships, it runs with `--bare` and an API key, in a checkout of the tracked files at HEAD (§8 amendment, and Alternatives). |
+| D3 | The `http` step mounts the scaffolded routes~~, pending the mounted-routes experiment (below)~~. |
+| D4 | The scaffold emits no pages, and plans carry no layout, which belongs to prototype mode (Open Question 4). |
+| D5 | Scaffolded routes go in a `routes/<entity>.ts` of their own, after the route-file fingerprint fix (#1039). |
+| D6 | A model-free `plan:revise` is in Part 3. `plan --revise` stays the name of the model-calling form (§4 amendment). |
+| OQ3 | Five files, until the per-step metrics exist. |
+| OQ13 | No editing in the page; `plan:revise` from an edited plan covers it. |
+
+*Scope and order.*
+
+1. The route-file fingerprint fix (#1039).
+2. The `commands` allowlist, a §2 check (§8 amendment), and a warning for
+   an `alter` whose properties all held at approval, which `plan:approve`
+   computes from the approval readings and is not a §2 check (§6 amendment
+   on readings).
+3. Files touched and lines changed, recorded per step. Implemented, as the
+   per-step work note below reads it.
+4. `plan --print-prompt`, `plan:revise`, and an in-session plan-writing
+   harness skill.
+5. The mounted-routes experiment. Run; the note below records it.
+6. `plan:scaffold`, emitting what the §5 amendment lists. No pages.
+7. Optional: test skeletons, and the static "still calls its route" check.
+   Implemented: the skeletons (7a, `plan:scaffold` on a `tests` step) and the
+   check (7b, in `plan:verify`), as the two §5 amendments read them.
+
+Deferred: the headless producer, `--ask`, the headless `plan --revise`, page
+emission, the characterization step, and retuning the step width.
+
+*Per-step work* (item 3). `plan:verify` records on each step record a `work`
+entry, `packages/cli/src/plan/work.ts`. It is a measurement: nothing refuses
+or blocks on it.
+
+- The step starts at the commit `HEAD` names when `plan:next` first marks it,
+  kept on the mark as `from` (`null` where git could not read `HEAD`).
+  Marking the same step again (resumed, after a stall or an approval stall)
+  keeps it. `plan:next` refuses a dirty tree for a new step, so that commit
+  holds none of the step's work.
+- A run of the marked step measures `git diff --numstat -z --no-renames` from
+  there to the working tree, plus untracked files, under the application
+  root. Several commits and uncommitted work count alike; a rename counts as
+  a removed file and an added one, and an untracked symlink as one line, as
+  git counts a tracked one.
+- The first run that verifies the step settles the measurement. Every later
+  record carries it: a drift re-check under a fresh mark, a failed re-check
+  and its fix, the `Stop` hook, `--step` again. Work after that run is not
+  counted.
+- A revision that sends a settled step back as new work does not re-measure
+  it, so a step the revision widened is undercounted. That is deliberate:
+  the datum the step width is tuned from is the work of implementing the
+  step as first planned, and a second measurement would mix a revision's
+  delta into it.
+- Excluded: the plan, its approvals, decision log and rendered page;
+  `.guren/`, which holds codegen output and this state; lockfiles; and
+  drizzle-kit snapshots. A migration's SQL counts.
+- Not measured, with the reason and never a zero: a step no mark names (a
+  whole-plan run, `--step` while another step is marked), a mark whose
+  `HEAD` git could not read (no git, no commit), a mark written before marks
+  carried `from`, and a start that is not in the repository or no longer an
+  ancestor of `HEAD`. The baseline's `rev` is no fallback for a
+  first step: the plan and approval commits land after it.
+- It stays in the state file, as §7 says. That file is per machine, which
+  suits a default retuned by whoever runs the loop, and `from` names the
+  commit the numbers can be recomputed from. `plan:close` copies nothing of
+  it into the committed docs. An older CLI that rewrites the state file
+  drops `from` and `work`, since its schema does not know them.
+- Reported as a `work:` line per step by `plan:verify` and the `Stop` hook,
+  in the record under `--json`, and by step id under `verification.work` in
+  `plan:status --json`.
+
+*The mounted-routes experiment* (D3). It runs on `examples/blog` or a
+scratch copy inside the repository. Outside it, `@guren/*` could resolve from
+npm.
+
+1. `guren add resource <Entity> --fields "body:text"` for an entity the blog
+   does not have, with no migration run.
+2. One `TestApp` test: a guest `POST` to the new collection with a *valid*
+   body, expecting 401 or a redirect. With an empty body the contract's 422
+   could answer first and hide the result.
+3. A second: an authenticated `POST` with an empty body, expecting 422.
+4. Run only that file under `bun test --reporter=junit`; the blog's own suite
+   is written for Vitest (Part 2 measurements above).
+
+Either passing confirms the §5 prediction and D3 stands: a mounted route
+passes that behaviour before the `tests` step, so the routes stay unmounted
+until `http`. Both failing reopens D3.
+
+**Amended after the experiment (2026-09-25).** Run at 17836ede on Bun 1.3.14.
+Both tests passed, so D3 stands.
+
+`guren add resource Note --fields "body:text"` in `examples/blog` appended
+`notes` to `db/schema.ts` and mounted a `/notes` group in `routes/web.ts`,
+with `body: NotePayloadSchema` on `notes.store` and no auth middleware. No
+migration was generated or run. A guest `POST /notes` with a valid body got
+401 from `userOrFail()` in `NoteController.store`. An authenticated `POST`
+with `{}` got 422 from the route contract, answered before the action ran,
+so the result does not rest on how `actingAs` resolves the user. Without
+`Accept: application/json` both statuses were the same, and a guest `POST`
+with `{}` got 422 as well.
+
+- `codegen` ran first: without `.guren/pages.gen.ts` the controller does not
+  import. Every `plan:verify` command list opens with it too.
+- No database was reachable. The run left `database` out of
+  `createApp({ config })` and used the `cookie` session driver. A response
+  given with no connection cannot depend on the missing table, so both
+  passes hold for a database migrated up to the blog's own migrations.
+- `forbidden` was not run. A policy's `create` guard,
+  `authorize('create', Note)`, reads no record; `update` and `delete` need
+  one, as §5 predicts.
+
+*Probes before the headless producer* (D1). None needs shipped code; a script
+in scratch is enough.
+
+- **Open Question 2, one call or two.** Three requests, the Part 2 fixtures:
+  blog comments, scheduled publishing, and the checklists plan for kadai,
+  which lives outside the repository. Ten calls each with the exact producer
+  flags, `--tools Read,Grep,Glob` included, since restricting tools may
+  change how structured output is delivered. Record the result subtype, whether
+  `PlanSchema` parses the output again, the §2 failures, `total_cost_usd` and
+  the duration. Repeat once with the ops schema. A 400 on the first call
+  answers the constrained-decoding question at once.
+- **Open Question 10, confinement.** Plant a tracked `.env.sample` holding
+  one canary and a gitignored `.env` holding another, make the tracked-files
+  checkout, and prompt the producer to quote both, the working tree's `.env`
+  by absolute path included. Grep the output for either canary. Repeat asking
+  for them through Grep and Glob patterns. Keep `--tools Read,Grep,Glob` on
+  every run: on macOS, Linux and WSL the default tool set leaves out Glob and
+  Grep, and `--tools` brings back the ones it names
+  (https://code.claude.com/docs/en/tools-reference#glob-tool-behavior).
+- **Open Question 12, `--resume` under `--bare`.** Run `claude --bare -p …
+  --output-format json` and keep its `session_id`, then `claude --bare -p …
+  --resume <id> --json-schema …`. Check that the second call succeeds and that
+  its `total_cost_usd` includes the first. The pages read say `--resume`
+  works in print mode (https://code.claude.com/docs/en/headless#continue-conversations)
+  and do not say whether bare mode persists the session.
 
 Identity comes first and status second, before any model is called: they are
 what the rest stands on, and both can be tested without one.
@@ -2549,13 +3395,19 @@ Spec Kit verify extension). Verification that runs second is verification
 someone can skip. Deriving status makes the false claim impossible to record.
 
 **The Anthropic API or the Agent SDK instead of `claude -p`.** Either adds a
-key to manage and a dependency to the CLI. `claude -p` reuses the login and the
-read-only tools the user already has, and the producer boundary keeps the
+key to manage and a dependency to the CLI. ~~`claude -p` reuses the login and the
+read-only tools the user already has,~~ and the producer boundary keeps the
 choice reversible.
 
+**Amended after re-review (2026-09-23):** under `--bare` the producer needs
+an API key as the API would (§8 amendment, D2). What is left of the argument
+is that `claude -p` adds no dependency to the CLI and brings its read-only
+tools.
+
 **Generate code straight from the plan, with no agent.** The scaffold step
-does this for what `make:feature` covers. Past that, the plan's business rules
-are prose, and generating from prose is the agent's job.
+does this for ~~what `make:feature` covers~~ the elements whose shape the plan
+states in full (amended after re-review, 2026-09-23; see §5). Past that, the
+plan's business rules are prose, and generating from prose is the agent's job.
 
 **Parallel slices in worktrees.** Rejected for now on the evidence in Prior
 art, and because three to six sequential tasks is what a typical feature
@@ -2586,11 +3438,18 @@ code and never from an earlier plan.
    reliably, or does generation split into an outline call and per-entity detail
    calls with `--resume`? Decided by the measured rate of
    `error_max_structured_output_retries`.
+   **Open, with a probe (2026-09-23):** see the §8 amendment and the Part 3
+   probes under Phasing.
 3. **Step width.** Five files is a starting guess. The published number
    describes bug fixing in unfamiliar repositories, which this is not.
-4. **View detail.** Fields, actions and states are in. Should a plan also carry
+   **Held (2026-09-23):** five files stays until Part 3 records files touched
+   and lines changed per step; the width is retuned from those numbers. They
+   are recorded now (Part 3, item 3); the retuning waits for enough plans.
+4. ~~**View detail.** Fields, actions and states are in. Should a plan also carry
    layout (a wireframe-level description), or does that belong to prototype
-   mode (RFC 0021), with a plan able to request `make:feature --prototype`?
+   mode (RFC 0021), with a plan able to request `make:feature --prototype`?~~
+   **Resolved (2026-09-23):** plans carry no layout; layout belongs to
+   prototype mode. The scaffold emits no pages either (§5 amendment).
 5. **Test protection.** `drifted` on a verified test file is detection. Is a
    `PreToolUse` hook that denies the edit outright worth its false positives?
 6. **Issue body limits.** The size at which a plan must spill into sub-issues
@@ -2625,6 +3484,9 @@ code and never from an earlier plan.
     `--bare` headless mode. That has to be tested, not assumed; if they do not
     hold, the producer needs an OS-level sandbox or a copy of the tree with the
     excluded paths removed.
+    **Open, with a probe (2026-09-23):** the producer is to run in a checkout
+    of the tracked files at HEAD, the second remedy above. See the §8
+    amendment and the Part 3 probes under Phasing.
 11. **GitHub approval provenance.** `author_association` plus an unedited
     comment is the strongest signal the issue API offers, and it still trusts
     every collaborator equally. Is that enough, or does the `github` store keep
@@ -2632,7 +3494,12 @@ code and never from an earlier plan.
 12. **`--resume` under `--bare`.** `--ask` assumes the second call can resume
     the first one's session in scripted mode. If it cannot, the second call is
     a fresh one carrying the questions and answers, at the cost of re-reading.
-13. **Editing in the page.** Feedback is comments today. Simple edits (rename a
+    **Open, with a probe (2026-09-23):** `--ask` is deferred with the headless
+    producer. See the §8 amendment and the Part 3 probes under Phasing.
+13. ~~**Editing in the page.** Feedback is comments today. Simple edits (rename a
     column, change a type, drop a route) could be made in the page and
     exported as `ops` directly, with no model call. Worth the template's added
-    weight, or is editing `plan.json` by hand enough?
+    weight, or is editing `plan.json` by hand enough?~~
+    **Resolved (2026-09-23):** no editing in the page. A plan edited by hand
+    becomes a revision through the model-free `plan:revise`, which derives its
+    ops with `diffPlans()` (§4 amendment).

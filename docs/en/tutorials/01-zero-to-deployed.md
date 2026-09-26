@@ -169,16 +169,16 @@ Open `.claude/settings.json`. The part that matters is the three hooks:
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "bunx guren context 2>/dev/null || true" }] }
+      { "hooks": [{ "type": "command", "command": "cd \"${CLAUDE_PROJECT_DIR}\" && bunx guren context 2>/dev/null || true" }] }
     ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write|MultiEdit",
-        "hooks": [{ "type": "command", "command": "bun .claude/hooks/check-after-edit.ts" }]
+        "hooks": [{ "type": "command", "command": "bun \"${CLAUDE_PROJECT_DIR}/.claude/hooks/check-after-edit.ts\"" }]
       }
     ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "bun .claude/hooks/gate-on-stop.ts", "timeout": 300 }] }
+      { "hooks": [{ "type": "command", "command": "bun \"${CLAUDE_PROJECT_DIR}/.claude/hooks/gate-on-stop.ts\"", "timeout": 300 }] }
     ]
   }
 }
@@ -188,6 +188,8 @@ Open `.claude/settings.json`. The part that matters is the three hooks:
 - **`PostToolUse`** runs after every file edit. If the file is a route, controller, model, schema or page, `.claude/hooks/check-after-edit.ts` runs `guren check` and hands any findings straight back to the agent, so the fix happens in the same turn.
 - **`Stop`** runs when the agent tries to end a turn with uncommitted changes. `.claude/hooks/gate-on-stop.ts` runs `guren gate`; if any stage fails, the stop is blocked once and the findings come back. The agent cannot declare a change done while the gate is red.
 
+Claude Code runs a hook in the session's current directory, which moves whenever the agent runs `cd`. Each command therefore starts from `${CLAUDE_PROJECT_DIR}`, the directory the session opened in.
+
 See what the agent sees:
 
 ```bash run
@@ -196,8 +198,8 @@ bunx guren context
 
 The rest of `.claude/` is read on demand rather than at start:
 
-- **`rules/`** hold verified API rules for one area each (`orm-models.md`, `controllers-http.md`, `routes-codegen.md`, `testing.md`, `docs-and-spec.md`, `comments.md`). Each declares the file globs it applies to, so the agent loads `routes-codegen.md` when it edits a route and not before.
-- **`skills/`** are procedures the agent follows on request: `scaffold` (reach for `bunx guren make:*` instead of typing a file), `feature`, `db-manage`, `guren-api`, `agent-interface`, `ai-agent`, `plugin-authoring`, `dev-workflow`, `github-projects`.
+- **`rules/`** hold verified API rules for one area each (`orm-models.md`, `controllers-http.md`, `routes-codegen.md`, `testing.md`, `docs-and-spec.md`, `comments.md`). Each names the files it applies to in its `paths` frontmatter, so the agent loads `routes-codegen.md` when it edits a route and not before.
+- **`skills/`** are procedures the agent follows on request, such as `scaffold` (reach for `bunx guren make:*` instead of typing a file), `feature`, `db-manage`, `dev-workflow` and `plan-write`.
 - **`agents/`** are two subagents with their own briefs: `code-review` and `test-writer`.
 - **`.mcp.json`** points the agent at the dev MCP endpoint the `dev` script mounted, so it can query the running app.
 

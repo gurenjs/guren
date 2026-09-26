@@ -1,13 +1,18 @@
 /** Framework-level deprecation warnings. */
 import { readFile } from 'node:fs/promises'
-import { relative } from 'node:path'
+import { relative, resolve } from 'node:path'
 import {
+  collectFiles,
   discoverAppConfigFiles,
   discoverAppSourceFiles,
   discoverDbArtifactFiles,
   discoverModelFiles,
   discoverTestFiles,
+  IMPORTABLE_EXTENSIONS,
+  NON_SOURCE_DIR_NAMES,
+  readRootSourceFiles,
 } from './discovery'
+import { DEPLOY_RUNTIME_ANALYSIS_DEPRECATION, DEPLOY_SCAN_DIRS } from './deploy-runtime'
 import { discoverParsedModels, extractClassDeclaration, findStaticClassProperty } from './model-parser'
 import { parseSourceFile } from './parse-cache'
 
@@ -85,6 +90,7 @@ const GUREN_IMPORT = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]@guren\/(?:c
 
 /** `@guren/server/mcp` is a subpath, which `GUREN_IMPORT` deliberately does not match. */
 const GUREN_SERVER_MCP_IMPORT = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]@guren\/server\/mcp['"]/g
+const GUREN_CLI_IMPORT = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]@guren\/cli['"]/g
 
 /**
  * Files importing a specifier `matches` accepts from a Guren package.
@@ -169,6 +175,16 @@ const GLOBAL_SERVICE_GETTERS = new Set([
  */
 async function globalServiceFiles(cwd: string): Promise<string[]> {
   return [...(await discoverAppConfigFiles(cwd)), ...(await discoverTestFiles(cwd))]
+}
+
+/** What the deploy scan reads, plus `scripts/` and the tests: where a predeploy step calls the CLI. */
+async function deployScriptFiles(cwd: string): Promise<string[]> {
+  const [trees, rootFiles, tests] = await Promise.all([
+    Promise.all([...DEPLOY_SCAN_DIRS, 'scripts'].map((dir) => collectFiles(resolve(cwd, dir), IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES))),
+    readRootSourceFiles(cwd),
+    discoverTestFiles(cwd),
+  ])
+  return [...new Set([...trees.flat(), ...rootFiles, ...tests])]
 }
 
 const detectGlobalServiceImports = (names: Set<string>) => async (cwd: string): Promise<string[]> =>
@@ -283,6 +299,17 @@ export const deprecations: Deprecation[] = [
         (specifier) => specifier === 'createMcpServer',
         [...(await discoverAppConfigFiles(cwd)), ...(await discoverTestFiles(cwd))],
         GUREN_SERVER_MCP_IMPORT,
+      ),
+  },
+  {
+    ...DEPLOY_RUNTIME_ANALYSIS_DEPRECATION,
+    what: "analyzeDeployRuntime() and judgeDeployRuntime() from '@guren/cli'",
+    detect: async (cwd) =>
+      detectGurenImports(
+        cwd,
+        (specifier) => specifier === 'analyzeDeployRuntime' || specifier === 'judgeDeployRuntime',
+        await deployScriptFiles(cwd),
+        GUREN_CLI_IMPORT,
       ),
   },
 ]

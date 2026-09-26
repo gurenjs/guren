@@ -69,7 +69,10 @@ bun run build
 bun run test
 bunx guren gate                    # every CI stage (codegen, typecheck, lint, check, audit, test); exit 0 = done
 
-# Implementation plans (a *.plan.json approved for this app; the plan-implement skill runs the loop)
+# Implementation plans (the plan-write skill writes and revises one; plan-implement builds an approved one)
+bunx guren plan "<request>" --print-prompt   # the prompt and JSON Schema to write docs/plans/<slug>/plan.json from
+bunx guren plan:render <plan> --json         # check the plan against the app and write its review page; fix every failing check
+bunx guren plan:revise <plan> --edited <copy> --message "<why>"  # record a change to the plan (--feedback for the page's review)
 bunx guren plan:next <plan>                  # the next step to implement, with its elements, behaviours and verify commands
 bunx guren plan:verify <plan> --step <id>    # run the step's verify commands and tests, record the verdict under .guren/plans/
 bunx guren plan:status <plan>                # which plan elements exist in the code, and which are verified
@@ -172,4 +175,4 @@ Full client and assertion reference: `__RULES_DIR__/testing.md`.
 | `routes/web.ts` | Web route definitions |
 | `app/Providers/` | Service providers |
 | `resources/js/pages/` | React page components |
-| `__RULES_DIR__/` | Verified API rules (each file's `globs` frontmatter states the covered paths) |
+| `__RULES_DIR__/` | Verified API rules (each file's `paths` frontmatter states the covered paths) |

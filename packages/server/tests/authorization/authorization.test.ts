@@ -345,11 +345,52 @@ describe('Policy', () => {
     expect(await otherGate.allows('update', [Post, plainRecord])).toBe(false)
   })
 
-  test('plain record without tuple cannot resolve a policy (denied)', async () => {
+  // A silent deny here is a 403 for the record's own owner, with nothing naming the missing tuple.
+  test('throws for a plain record that resolves no policy and no gate', async () => {
     const plainRecord = { id: 1, authorId: 5, published: true }
     const authorGate = gate.forUser({ id: 5, role: 'user' } as TestUser)
 
-    expect(await authorGate.allows('update', plainRecord)).toBe(false)
+    await expect(authorGate.allows('update', plainRecord)).rejects.toThrow(
+      'No policy resolved for a plain record in the "update" check; pass [Model, record]'
+    )
+    // A 403 would read as a denial; the error must surface as the misuse it is.
+    const error = await authorGate.authorize('update', plainRecord).catch((thrown: unknown) => thrown)
+    expect(error).toBeInstanceOf(Error)
+    expect(error).not.toBeInstanceOf(AuthorizationException)
+  })
+
+  test('throws for a null-prototype record, which has no constructor either', async () => {
+    const record = Object.assign(Object.create(null) as Record<string, unknown>, { id: 1, authorId: 5 })
+
+    await expect(gate.forUser({ id: 5, role: 'user' } as TestUser).allows('update', record)).rejects.toThrow('[Model, record]')
+  })
+
+  test('passes a plain record to a gate defined for the ability', async () => {
+    gate.define('update-post', (user, post: { authorId: number }) => (user as TestUser | null)?.id === post.authorId)
+    const plainRecord = { id: 1, authorId: 5 }
+
+    expect(await gate.forUser({ id: 5, role: 'user' } as TestUser).allows('update-post', plainRecord)).toBe(true)
+    expect(await gate.forUser({ id: 6, role: 'user' } as TestUser).allows('update-post', plainRecord)).toBe(false)
+  })
+
+  test('lets a gate before callback answer for a plain record', async () => {
+    gate.before((user) => ((user as TestUser | null)?.role === 'admin' ? true : undefined))
+
+    expect(await gate.forUser({ id: 1, role: 'admin' } as TestUser).allows('update', { id: 1, authorId: 5 })).toBe(true)
+  })
+
+  test('still denies a class instance whose class has no policy', async () => {
+    class Draft {
+      constructor(public authorId: number) {}
+    }
+
+    expect(await gate.forUser({ id: 5, role: 'user' } as TestUser).allows('update', new Draft(5))).toBe(false)
+  })
+
+  test('still denies a [ModelClass, record] tuple whose model has no policy', async () => {
+    class Draft {}
+
+    expect(await gate.forUser({ id: 5, role: 'user' } as TestUser).allows('update', [Draft, { authorId: 5 }])).toBe(false)
   })
 
   test('resolves policy via bare model class for record-less abilities', async () => {

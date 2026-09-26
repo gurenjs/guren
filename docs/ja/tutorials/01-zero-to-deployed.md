@@ -169,16 +169,16 @@ bunx guren gate
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "bunx guren context 2>/dev/null || true" }] }
+      { "hooks": [{ "type": "command", "command": "cd \"${CLAUDE_PROJECT_DIR}\" && bunx guren context 2>/dev/null || true" }] }
     ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write|MultiEdit",
-        "hooks": [{ "type": "command", "command": "bun .claude/hooks/check-after-edit.ts" }]
+        "hooks": [{ "type": "command", "command": "bun \"${CLAUDE_PROJECT_DIR}/.claude/hooks/check-after-edit.ts\"" }]
       }
     ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "bun .claude/hooks/gate-on-stop.ts", "timeout": 300 }] }
+      { "hooks": [{ "type": "command", "command": "bun \"${CLAUDE_PROJECT_DIR}/.claude/hooks/gate-on-stop.ts\"", "timeout": 300 }] }
     ]
   }
 }
@@ -188,6 +188,8 @@ bunx guren gate
 - **`PostToolUse`** はファイル編集のたびに走ります。そのファイルがルート、コントローラー、モデル、スキーマ、ページのいずれかなら、`.claude/hooks/check-after-edit.ts` が `guren check` を実行し、指摘をそのままエージェントに返します。修正は同じターンの中で起こります。
 - **`Stop`** は、エージェントが未コミットの変更を残したままターンを終えようとしたときに走ります。`.claude/hooks/gate-on-stop.ts` が `guren gate` を実行し、どれかのステージが失敗すれば停止は一度ブロックされ、指摘が返ってきます。ゲートが赤いうちは、エージェントは変更を完了と宣言できません。
 
+Claude Code は hook をセッションの現在のディレクトリで実行し、そのディレクトリはエージェントが `cd` するたびに移ります。そこでどのコマンドも、セッションを開いたディレクトリを指す `${CLAUDE_PROJECT_DIR}` から始めています。
+
 エージェントに見えているものを確認しましょう。
 
 ```bash run
@@ -196,8 +198,8 @@ bunx guren context
 
 `.claude/` の残りは、開始時ではなく必要になったときに読まれます。
 
-- **`rules/`** には領域ごとに検証済みの API ルールがあります(`orm-models.md`、`controllers-http.md`、`routes-codegen.md`、`testing.md`、`docs-and-spec.md`、`comments.md`)。それぞれが適用対象のファイル glob を宣言しているので、エージェントはルートを編集するときに `routes-codegen.md` を読み込み、それまでは読みません。
-- **`skills/`** はエージェントが求めに応じて従う手順です。`scaffold`(ファイルを手打ちせず `bunx guren make:*` に手を伸ばす)、`feature`、`db-manage`、`guren-api`、`agent-interface`、`ai-agent`、`plugin-authoring`、`dev-workflow`、`github-projects`。
+- **`rules/`** には領域ごとに検証済みの API ルールがあります(`orm-models.md`、`controllers-http.md`、`routes-codegen.md`、`testing.md`、`docs-and-spec.md`、`comments.md`)。それぞれが frontmatter の `paths` で適用対象のファイルを宣言しているので、エージェントはルートを編集するときに `routes-codegen.md` を読み込み、それまでは読みません。
+- **`skills/`** はエージェントが求めに応じて従う手順です。`scaffold`(ファイルを手打ちせず `bunx guren make:*` に手を伸ばす)、`feature`、`db-manage`、`dev-workflow`、`plan-write` などがあります。
 - **`agents/`** は独自の brief を持つ 2 つの subagent、`code-review` と `test-writer` です。
 - **`.mcp.json`** は `dev` スクリプトがマウントした開発用 MCP エンドポイントをエージェントに指し示し、動いているアプリに問い合わせられるようにします。
 

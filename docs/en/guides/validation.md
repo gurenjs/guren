@@ -154,15 +154,23 @@ By default, validation errors return a 422 response with error details.
 
 ### `validateRequestWith(schemaFactory)`
 
-For dynamic schemas based on request context:
+Use it when the schema depends on the request context. The factory runs synchronously, so it cannot await the signed-in user; resolve what it needs in a middleware mounted before it, as `resolveIsAdmin` does here:
 
 ```ts
-import { Router, validateRequestWith } from '@guren/core'
+import { AUTH_CONTEXT_KEY, Router, defineMiddleware, validateRequestWith } from '@guren/core'
+import type { AuthContext } from '@guren/core'
+
+const resolveIsAdmin = defineMiddleware(async (ctx, next) => {
+  const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+  const user = await auth?.user<{ role: string }>()
+  ctx.set('isAdmin', user?.role === 'admin')
+  await next()
+})
 
 const router = new Router()
 
-router.put('/users/:id', [UserController, 'update'], validateRequestWith((ctx) => {
-  const isAdmin = ctx.get('user')?.role === 'admin'
+router.put('/users/:id', [UserController, 'update'], resolveIsAdmin, validateRequestWith((ctx) => {
+  const isAdmin = ctx.get('isAdmin') === true
 
   return z.object({
     name: z.string().min(1),

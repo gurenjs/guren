@@ -36,8 +36,7 @@ What the code cannot say is *why* `PostPolicy` exists and that every owned recor
 
 ```md file=.claude/rules/ownership.md
 ---
-description: Owned records — a record with an owner column is changed only through a policy, and every such action has an owner test and an other-user test
-globs:
+paths:
   - "app/Http/Controllers/**"
   - "app/Policies/**"
   - "routes/**"
@@ -56,7 +55,7 @@ A record that belongs to a user carries the owner's id (`authorId` on posts, `us
 `guren audit` verifies authentication only and stays green when a policy call is missing. The tests in rule 4 are the only check that sees it. Write them before the action.
 ```
 
-The frontmatter is the mechanism. `globs` names the files this rule applies to; when the agent edits a controller, a policy, a route or a test, the rule is loaded into its context, and when it edits a page it is not. The body is written for a reader who will act on it: numbered, one obligation per item, the exact call to make, and the reason the last line gives, because an agent that knows *why* the audit cannot help is less likely to treat a green audit as permission.
+The frontmatter is the mechanism. `paths` names the files this rule applies to, and it is the only key Claude Code reads from a rule; when the agent edits a controller, a policy, a route or a test, the rule is loaded into its context, and when it edits a page it is not. The body is written for a reader who will act on it: numbered, one obligation per item, the exact call to make, and the reason the last line gives, because an agent that knows *why* the audit cannot help is less likely to treat a green audit as permission.
 
 ## 3. The skill
 
@@ -492,7 +491,8 @@ git commit -m "feat: add the blogroll"
 ## Common trip-ups
 
 - **The skill never triggers.** Its `description` does not contain the words the request used. Descriptions are matched against the prompt; write them in the requester's vocabulary, not the implementer's.
-- **The rule loads for pages too.** A glob like `app/**` is wider than the rule's subject. Narrow the globs to the files where the obligation applies, or the rule becomes noise the agent learns to skim.
+- **The rule loads for pages too.** A pattern like `app/**` is wider than the rule's subject. Narrow `paths` to the files where the obligation applies, or the rule becomes noise the agent learns to skim.
+- **The rule loads in every session.** Its frontmatter scopes it with a key other than `paths` (`globs`, `applyTo`). Claude Code ignores any other key without an error and loads a rule that has no `paths` at launch.
 - **`agent:sync` overwrote my rule.** It only touches the names it ships. If a file of yours was replaced, its name collided with a framework file; rename yours.
 - **The `has a policy` test passes but the 403 tests fail.** A policy file exists and nobody calls it. That is the exact gap `ownership-review` is briefed to find; run it.
 - **The reviewer reports findings in files the diff did not touch.** Its brief says `git diff`; if it read the whole app, tighten the brief. A subagent does what its file says, no more and no less.

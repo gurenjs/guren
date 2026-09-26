@@ -239,7 +239,9 @@ Three things worth knowing:
 - **`{ as: user }` is `actingAs(user)`,** the `X-Testing-User` envelope. There
   is no token here, so `assertDenied()` means "the application refused": its
   authentication or its policies. Bearer scopes belong to the MCP endpoint and
-  are not reachable from a test.
+  are not reachable from a test. A call without `{ as }` to a route behind
+  `requireAuthenticated({ redirectTo: '/login' })` answers `401`, not the
+  redirect.
 - **Mount CSRF or skip it, deliberately.** A dispatched tool call carries no
   cookie and no bearer, so an app created with `auth` refuses a mutating call
   with `403` before any policy is consulted, which `assertDenied()` cannot tell
@@ -418,6 +420,26 @@ One rule overrides that table: a tool advertising an object output schema whose
 route answers with something that cannot fill it (a 204, a redirect, a JSON
 array, a non-JSON body) comes back as an error result naming the mismatch,
 rather than a success the client would reject after the route has already run.
+
+The framework's auth guards never answer a tool with a redirect.
+`requireAuthenticated`, `requireGuest` and `requireVerifiedEmail` recognize the request the dispatcher
+builds (it carries `X-Guren-Agent-Surface`) and, where a browser would be sent
+to their `redirectTo`, answer JSON instead: `401` for no user, `403` for a
+signed-in user on a guest-only route or an unverified address. The call comes
+back as an error result rather than a success naming `/login`. The header only
+chooses the refusal's shape and grants nothing. A redirect the handler itself
+returns, such as `store` answering `this.redirect('/posts')`, is still a
+success.
+
+`createForceHttpsMiddleware()` lets a tool call through rather than redirecting
+it to https. The re-entrant request is built on the origin its caller reached:
+`http://` for an MCP endpoint behind a TLS-terminating proxy, and
+`http://localhost` for durable agents, `guren tool:call`, `TestApp.agent()` and
+in-process AI agents with no `APP_URL`. It never leaves the process, so there
+is no transport to upgrade. Unlike the guards above, the
+middleware does not read the header: it lets through only the request object
+the dispatcher built, so an outside HTTP request that copies its headers is
+still redirected.
 
 An action answering with `this.inertia(...)` returns whatever the page happens
 to pass its component, a shape nothing checks and any UI change can move.

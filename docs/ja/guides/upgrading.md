@@ -1,5 +1,16 @@
 # Guren アップグレードガイド
 
+## 未リリース: `analyzeDeployRuntime()` と `judgeDeployRuntime()` を非推奨に
+
+`@guren/cli` がエクスポートするデプロイ実行環境の2関数に `@deprecated`
+(`deploy-runtime-analysis`)を付け、プロセスごとに1回警告を出します。
+`@guren/cli` 3.0.0 までは動作します。代わりに `checkDeployRuntime(cwd)` を呼んでください。
+同じ3つの判定を返します。パスワードハッシュとストアの判定は introspect したアプリから
+読むため、それがない場合は `deploy-password-hashing-unverified` と
+`deploy-runtime-stores-unverified`(advisory)になります。`DeployRuntimeAnalysis` のうち
+ハッシャーとセッション設定の6つのシグナル配列は常に空です。
+どちらかを import しているファイルは `bunx guren upgrade --check-only` で一覧できます。
+
 ## 未リリース: キャッシュの同時ミスでコールバックを共有
 
 `cache.store()` で取得したストアの `remember()` と `rememberForever()` は、

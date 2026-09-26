@@ -23,9 +23,11 @@ import {
   type PlanAppState,
   type PlanAppTable,
   type PlanAppUnreadable,
+  VALIDATORS_ARE_A_LOWER_BOUND,
 } from './app-state'
 import { actionTargets, columnTargets, endpointKey, NAMED_APP_SECTIONS, namedTargets, routeTarget, tableTarget, type PlanAppTarget } from './app-targets'
-import { judgeFreshness } from './freshness'
+import { PLAN_COMMAND_FORM, refusedPlanCommands } from './command-allowlist'
+import { elementsAtPlannedEnd, judgeFreshness } from './freshness'
 import { listPlanReferences } from './references'
 import {
   findDuplicatePlanIds,
@@ -77,14 +79,20 @@ const APP_FACT_FINDINGS: ReadonlySet<string> = new Set(['plan:app-collision', 'p
 /**
  * The findings with the plan's own finished work settled: on a plan with a baseline, an
  * app-fact finding on an element freshness calls `built` (stamped at the state the plan
- * starts it from, read now as the plan leaves it) becomes a `pass`. A draft has no stamp.
+ * starts it from, read now as the plan leaves it) becomes a `pass`, and one on a validator
+ * {@link unstampedValidatorsAtEnd} names becomes a warning. A draft has no stamp.
  */
 export function settleBuiltFindings(plan: PlanDraft | Plan, app: PlanAppState, checks: PlanCheckResult[]): { checks: PlanCheckResult[]; built: string[] } {
   if (!hasBaseline(plan)) return { checks, built: [] }
   const builtIds = new Set(judgeFreshness(plan, app).elements.filter((element) => element.basis === 'built').map((element) => element.id))
+  const unstampedValidators = unstampedValidatorsAtEnd(plan, app)
   const built = new Set<string>()
   const settled = checks.map((result) => {
-    if (result.status !== 'fail' || !APP_FACT_FINDINGS.has(result.key) || result.elementId === undefined || !builtIds.has(result.elementId)) return result
+    if (result.status !== 'fail' || !APP_FACT_FINDINGS.has(result.key) || result.elementId === undefined) return result
+    if (unstampedValidators.has(result.elementId)) {
+      return { ...result, key: 'plan:app-unjudged', status: 'warn' as const, message: `${result.message} ${UNSTAMPED_VALIDATOR_NOTE}` }
+    }
+    if (!builtIds.has(result.elementId)) return result
     built.add(result.elementId)
     const fact = result.key === 'plan:app-collision' ? 'the name is already there because the plan put it there' : 'the name is gone because the plan removed it'
     return { ...result, status: 'pass' as const, message: `Built by this plan: ${fact}, and the application reads as the plan leaves this element.` }
@@ -92,11 +100,28 @@ export function settleBuiltFindings(plan: PlanDraft | Plan, app: PlanAppState, c
   return { checks: settled, built: [...built] }
 }
 
+const UNSTAMPED_VALIDATOR_NOTE =
+  "The baseline holds a hash for none of this plan's validators, so whether this plan built this one cannot be told; the application reads as the plan leaves it."
+
+/**
+ * Validators the application reads as the plan leaves them, on a baseline stamping none of the
+ * plan's validators: every baseline stamped before validators were read is one. Their finding is
+ * a warning rather than a pass, since the plan's own work and someone else's same-named export
+ * look alike there; `plan:scaffold` still refuses to write over an export.
+ */
+function unstampedValidatorsAtEnd(plan: Plan, app: PlanAppState): Set<string> {
+  const stamped = plan.baseline.contextHash
+  if (plan.validators.length === 0 || plan.validators.some((validator) => Object.hasOwn(stamped, validator.id))) return new Set()
+  const atEnd = elementsAtPlannedEnd(plan, app)
+  return new Set(plan.validators.filter((validator) => atEnd.has(validator.id)).map((validator) => validator.id))
+}
+
 export function validatePlan(plan: PlanDraft, app: PlanAppState): PlanCheckResult[] {
   const results: PlanCheckResult[] = []
   const index = indexPlan(plan)
 
   checkDuplicateIds(plan, results)
+  checkCommands(plan, results)
   checkInternalReferences(plan, index, results)
   checkChangeConsistency(plan, results)
   checkAgainstApp(plan, app, results)
@@ -149,6 +174,7 @@ function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
 /** The heading each key is grouped under; the renderer groups on `title`. */
 const TITLES: Record<string, string> = {
   'plan:duplicate-id': 'Plan element ids',
+  'plan:command': 'Plan commands',
   'plan:reference': 'Plan references',
   'plan:change-consistency': 'Plan change consistency',
   'plan:app-collision': 'Plan against the application',
@@ -181,6 +207,19 @@ function checkDuplicateIds(plan: PlanDraft, results: PlanCheckResult[]): void {
       finding('plan:duplicate-id', 'fail', `The id "${id}" is declared by more than one element.`, {
         elementId: id,
         suggestion: 'Ids share one namespace, since a revision addresses an element by id alone.',
+      }),
+    )
+  }
+}
+
+/** `plan:next` hands a command to the implementing agent as written, so only the allowlist's forms pass (§8). */
+function checkCommands(plan: PlanDraft, results: PlanCheckResult[]): void {
+  for (const { id, quoted, reason } of refusedPlanCommands(plan.commands)) {
+    results.push(
+      finding('plan:command', 'fail', `The command ${quoted} is refused: ${reason}.`, {
+        elementId: id,
+        section: 'commands',
+        suggestion: `A plan's commands are ${PLAN_COMMAND_FORM} naming a generator (make:*, add <blueprint>); other work belongs to a step.`,
       }),
     )
   }
@@ -473,7 +512,8 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
         const { names, ...placement } = target.perRoot
           ? inRoot(entries, target.module)
           : { names: appNames(entries), root: undefined, elsewhere: undefined }
-        checkTarget({ ...target, ...placement }, names, results)
+        const unconfirmedBecause = appSection === 'validators' ? VALIDATORS_ARE_A_LOWER_BOUND : undefined
+        checkTarget({ ...target, ...placement, unconfirmedBecause }, names, results)
       }
     })
   }

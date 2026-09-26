@@ -231,9 +231,9 @@ export interface ScaffoldFileEntry {
 /**
  * `lstat`, not `access`: a `wx` write refuses a dangling symlink, so a probe that followed
  * it would pass a path the write then stops on. A probe that cannot answer throws, so the
- * batch stops before its first write. Local to avoid a cycle: discovery.ts imports this module.
+ * batch stops before its first write. Here rather than in discovery.ts, which imports this module.
  */
-async function pathExists(path: string): Promise<boolean> {
+export async function pathExists(path: string): Promise<boolean> {
   try {
     await lstat(path)
     return true
@@ -379,6 +379,25 @@ export function isIdentifier(value: string): boolean {
   return IDENTIFIER_RE.test(value)
 }
 
+/** `object.key`, or `object['key']` for a key that is no identifier. */
+export function propertyAccess(object: string, key: string): string {
+  return isIdentifier(key) ? `${object}.${key}` : `${object}['${escapeSingleQuoted(key)}']`
+}
+
+/** Names `isIdentifier` accepts that still cannot be bound with `const`, `class` or a parameter. */
+const RESERVED_WORDS = new Set([
+  'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete',
+  'do', 'else', 'enum', 'export', 'extends', 'false', 'finally', 'for', 'function', 'if',
+  'implements', 'import', 'in', 'instanceof', 'interface', 'let', 'new', 'null', 'package',
+  'private', 'protected', 'public', 'return', 'static', 'super', 'switch', 'this', 'throw',
+  'true', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield',
+])
+
+/** Whether `value` can be declared as a binding (`const`, `class`) in generated code. */
+export function isBindingName(value: string): boolean {
+  return isIdentifier(value) && !RESERVED_WORDS.has(value)
+}
+
 /**
  * A property key for a generated object or type literal: bare when it is a valid
  * identifier, single-quoted otherwise. Shared by the codegen emitters, like
@@ -451,6 +470,16 @@ export function relativeImportPath(fromFile: string, toPath: string): string {
   return normalized.startsWith('.') ? normalized : `./${normalized}`
 }
 
+/** A generated doc comment over `lines`, an empty line written as a bare ` *`. */
+export function docComment(lines: readonly string[]): string {
+  return `/**\n${lines.map((line) => (line ? ` * ${line}` : ' *')).join('\n')}\n */\n`
+}
+
+/** The `@guren/core` import a scaffold opens with, the names as written (`type X` included). */
+export function coreImportLine(names: readonly string[]): string {
+  return `import { ${names.join(', ')} } from '@guren/core'`
+}
+
 /** Escapes `value` for literal use inside a `RegExp` source string. */
 export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -465,6 +494,15 @@ export function escapeRegExp(value: string): string {
  */
 export function referencesIdentifier(body: string, name: string): boolean {
   return new RegExp(`\\b${escapeRegExp(name)}\\b`, 'u').test(body)
+}
+
+/**
+ * `name` as a whole identifier that is not a property: `Post` in `Post.find(`
+ * or `[Post, post]`, never in `PostTag` or `this.Post`. Stricter than
+ * {@link referencesIdentifier}, whose `\b` reads `this.Post` as a use.
+ */
+export function wholeIdentifierPattern(name: string): RegExp {
+  return new RegExp(`(?<![\\w$.])${escapeRegExp(name)}(?![\\w$])`)
 }
 
 export const SAFE_MODULE_NAME_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/u

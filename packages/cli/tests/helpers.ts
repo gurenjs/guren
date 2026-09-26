@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { ConfigDefinition, ConfigDefinitions } from '@guren/core'
+import type { AppManifest } from '@guren/server'
 
 const repoRoot = resolve(import.meta.dir, '../../..')
 
@@ -750,11 +751,13 @@ export async function runCliBin(
 export async function runCliBinCaptured(
   args: string[],
   cwd: string,
+  options: { preload?: string } = {},
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   assertWorkspaceBuilt([SERVER_DIST_ENTRY])
 
   const { NODE_ENV: _testEnv, ...env } = process.env
-  const proc = Bun.spawn(['bun', CLI_BIN_PATH, ...args], {
+  const preload = options.preload ? ['--preload', options.preload] : []
+  const proc = Bun.spawn(['bun', ...preload, CLI_BIN_PATH, ...args], {
     cwd,
     env,
     stdout: 'pipe',
@@ -839,9 +842,16 @@ export async function linkWorkspaceCliSource(baseDir: string): Promise<void> {
 export async function runAgentHook(
   template: string,
   installPath: string,
+  /** An object gets the spawn directory as `cwd` unless it names one, as Claude Code and Codex send. */
   input: unknown,
   setup: (dir: string) => void | Promise<void>,
-  options: { subdir?: string; argv?: string[]; after?: (dir: string) => void | Promise<void> } = {},
+  options: {
+    subdir?: string
+    argv?: string[]
+    /** Added to the inherited environment, e.g. the `CLAUDE_PROJECT_DIR` a shipped command expands. */
+    env?: (dir: string) => Record<string, string>
+    after?: (dir: string) => void | Promise<void>
+  } = {},
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const dir = await mkdtemp(join(tmpdir(), 'guren-hook-'))
   try {
@@ -852,9 +862,12 @@ export async function runAgentHook(
     await mkdir(dirname(hook), { recursive: true })
     await writeFile(hook, await readFile(template, 'utf8'))
     await setup(dir)
+    const cwd = options.subdir ? join(dir, options.subdir) : dir
+    const payload = input !== null && typeof input === 'object' && !Array.isArray(input) ? { cwd, ...input } : input
     const result = Bun.spawnSync(options.argv ?? [process.execPath, hook], {
-      cwd: options.subdir ? join(dir, options.subdir) : dir,
-      stdin: Buffer.from(JSON.stringify(input)),
+      cwd,
+      env: options.env ? { ...process.env, ...options.env(dir) } : undefined,
+      stdin: Buffer.from(JSON.stringify(payload)),
       stdout: 'pipe',
       stderr: 'pipe',
     })
@@ -863,6 +876,14 @@ export async function runAgentHook(
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+}
+
+/** The `command` of the first hook a shipped hooks config registers for `event`. */
+export async function shippedHookCommand(templatePath: string, event: string): Promise<string> {
+  const config = JSON.parse(await readFile(resolve(import.meta.dir, '../templates/agent', templatePath), 'utf8')) as {
+    hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>
+  }
+  return config.hooks[event]![0]!.hooks[0]!.command
 }
 
 /** `git init` in `dir`, so untracked files are its changed set. */
@@ -894,3 +915,33 @@ export const sessionConfig: SessionConfig = {
 `
 }
 
+/** A manifest with nothing but what a test sets: every section absent, every provider registered. */
+export function manifestFixture(overrides: Partial<AppManifest> = {}): AppManifest {
+  return {
+    schemaVersion: 1,
+    generatedAt: '2026-09-24T00:00:00.000Z',
+    entry: { file: 'src/main.ts', root: '/app', stage: 'register' },
+    runtime: { bun: '1.3.14', node: null, platform: 'darwin' },
+    providers: [],
+    modules: [],
+    routes: [],
+    middlewareAliases: {},
+    bindings: ['app', 'auth', 'hono', 'router'],
+    auth: {
+      guards: ['web'],
+      defaultGuard: 'web',
+      hasher: 'DefaultHasher',
+      algorithm: 'scrypt',
+      requiresBun: false,
+      providers: {},
+    },
+    agentTools: [],
+    warnings: [],
+    ...overrides,
+  }
+}
+
+/** An introspection that reports `manifest`, so a test judges a rule against a known registered app. */
+export function introspected(manifest: AppManifest): () => Promise<{ status: 'ok'; manifest: AppManifest }> {
+  return async () => ({ status: 'ok', manifest })
+}

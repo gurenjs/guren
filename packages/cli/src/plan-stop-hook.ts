@@ -1,11 +1,11 @@
 /**
- * The plan half of the harness Stop hook (RFC 0030 §7): verify the step `plan:next` marked
- * and block the stop while it is not, giving up where a continuation cannot help: no approval
- * names the plan's hash, what the step depends on went stale since approval (§4), the step or
- * an element it owns is `blocked`, the record is the one the last continuation was blocked on,
- * or three continuations. A stall is recorded in state and sticks until the next `plan:next`.
- * `verify` is the seam the unit tests fake; the shipped hooks run `plan:verify`, whose report
- * carries the stale context, judged on the app it reads after `codegen`.
+ * The plan half of the harness Stop hook (RFC 0030 §7): verify the step `plan:next` marked and
+ * block the stop while it is not, giving up where a continuation cannot help: no approval names
+ * the plan's hash, the step's context went stale since approval (§4), the step or an element it
+ * owns is `blocked`, a `tests` step's behaviours pass with no red run ever recorded, the record
+ * repeats the last blocked one, or three continuations. A stall sticks until `plan:next`. `verify`
+ * is the seam the unit tests fake; the shipped hooks run `plan:verify`, whose report carries the
+ * stale context, judged on the app it reads after `codegen`.
  */
 
 import { resolve } from 'node:path'
@@ -18,8 +18,9 @@ import { loadPlanAppState } from './plan/app-state'
 import { describeUnapproved, readPlanApprovalStanding } from './plan/approvals'
 import { describeDependency, type PlanStepContextElement } from './plan/step-context'
 import { listPlanStates, planDigest, planSlug, writePlanActiveStep, type PlanActiveStep, type PlanStepRecord } from './plan/state'
-import { derivePlanTasks, findPlanStep } from './plan/tasks'
-import { hashFiles, readPlanWaivers, recordStillHolds, sha256 } from './plan/verification'
+import { derivePlanTasks, findPlanStep, type PlanTaskDerivation } from './plan/tasks'
+import { changedFiles, hashFiles, readPlanWaivers, recordedRedRuns, recordStillHolds, sha256 } from './plan/verification'
+import { acceptanceKey } from './plan/verify'
 
 /** Stops the hook blocks on one step before it gives up. */
 export const MAX_STEP_CONTINUATIONS = 3
@@ -55,10 +56,17 @@ export function recordSignature(record: PlanStepRecord): string {
   )
 }
 
+/** A `tests:fail` step's behaviours that pass under an implementation some step verified, with no red run ever recorded. */
+export interface UnobservableRedRuns {
+  /** The step whose verified record, its files unchanged, holds the implementation. */
+  implementedBy: string
+  ids: string[]
+}
+
 /**
  * Pure: whether the stop is blocked, let through as verified, or given up on, and why. `stale`
  * is the step's stale context: the plan does not describe the application there, so no
- * continuation can finish the step against it.
+ * continuation can finish the step against it. Nor can one make `unobservable` fail again.
  */
 export function judgeStopHook(
   active: PlanActiveStep,
@@ -66,12 +74,18 @@ export function judgeStopHook(
   blockedElements: ReadonlyArray<{ id: string; reason?: string }>,
   stopHookActive: boolean,
   stale: ReadonlyArray<Pick<PlanStepContextElement, 'id' | 'owned' | 'through' | 'within'>> = [],
+  unobservable?: UnobservableRedRuns,
 ): StopHookJudgement {
   if (record.outcome === 'verified') return { kind: 'verified' }
   const signature = recordSignature(record)
   const stalled = (reason: string): StopHookJudgement => ({ kind: 'stalled', reason, signature })
   if (stale.length > 0) {
     return stalled(`what the step depends on changed since the plan was approved (${stale.map((element) => `${element.id}, ${describeDependency(element)}`).join('; ')})`)
+  }
+  if (unobservable?.ids.length && record.outcome === 'failed') {
+    return stalled(
+      `${unobservable.ids.map((id) => `[${id}]`).join(', ')} already pass under the implementation ${unobservable.implementedBy} verified, and no record of the step saw them fail before it existed, so tests:fail cannot be satisfied; plan:close does not wait for this step`,
+    )
   }
   if (record.outcome === 'blocked') {
     const reasons = record.commands.filter((command) => command.status === 'blocked').map((command) => `${command.command}: ${command.reason ?? 'blocked'}`)
@@ -83,6 +97,33 @@ export function judgeStopHook(
   if (stopHookActive && active.lastSignature === signature) return stalled('nothing about the step changed since the last continuation')
   if (active.continuations >= MAX_STEP_CONTINUATIONS) return stalled(`${MAX_STEP_CONTINUATIONS} continuations on this step`)
   return { kind: 'continue', signature }
+}
+
+/**
+ * For a `tests:fail` step: its behaviours passing in `run` with no red run on record, before it
+ * or in it, and the later step of its task that runs them as `tests`, verified with its files
+ * unchanged at any plan hash. A behaviour whose earlier red run a revision's change left behind is
+ * not one: its test, rewritten to the revised plan, fails against that implementation.
+ */
+async function unobservableRedRuns(
+  appRoot: string,
+  records: Readonly<Record<string, PlanStepRecord>>,
+  derivation: PlanTaskDerivation,
+  stepId: string,
+  run: PlanStepRecord,
+): Promise<UnobservableRedRuns | undefined> {
+  if (run.outcome !== 'failed') return undefined
+  const found = findPlanStep(derivation, stepId)
+  if (!found?.step.verify.includes('tests:fail')) return undefined
+  const seen = recordedRedRuns(Object.values(records))
+  const ids = run.acceptance.filter((behaviour) => behaviour.status === 'passing' && behaviour.red === undefined && !seen.has(behaviour.id)).map((behaviour) => behaviour.id)
+  if (ids.length === 0) return undefined
+  const key = acceptanceKey(found.step.acceptanceIds)
+  const later = found.task.steps.find((step) => step.id !== stepId && step.verify.includes('tests') && acceptanceKey(step.acceptanceIds) === key)
+  const record = later && records[later.id]
+  if (!later || !record || record.outcome !== 'verified') return undefined
+  const changed = changedFiles(record, await hashFiles(appRoot, Object.keys(record.fingerprint.files)))
+  return changed.length === 0 ? { implementedBy: later.id, ids } : undefined
 }
 
 function defaultVerify(planPath: string, appRoot: string, stepId: string): Promise<PlanVerifyReport> {
@@ -148,7 +189,8 @@ async function verifyActiveStep(appRoot: string, slug: string, records: Readonly
   const owned = new Set(step.elementIds)
   const blockedElements = report.elements.filter((element) => owned.has(element.id) && element.state === 'blocked')
   const stale = report.staleContext?.find((context) => context.stepId === active.step)?.stale ?? []
-  const judgement = judgeStopHook(active, verification.record, blockedElements, stopHookActive, stale)
+  const unobservable = await unobservableRedRuns(appRoot, records, derivation, active.step, verification.record)
+  const judgement = judgeStopHook(active, verification.record, blockedElements, stopHookActive, stale, unobservable)
   if (judgement.kind === 'verified') {
     // Earlier steps are not this step's continuation: plan:next returns them once this one is done.
     const pending = new Set(report.recheckPending)

@@ -27,10 +27,11 @@ flowchart LR
 | `docs/plans/comments/plan.json` | 計画そのもの | する |
 | `docs/plans/comments/approvals.json` | `plan:approve` が記録したハッシュと、`alter` ごとの読み取り | する |
 | `docs/plans/comments/decisions.json` | `plan:waive` が書く waiver | する |
+| `docs/plans/comments/revisions/0001.json` | `plan:revise` が書くリビジョン | する |
 | `docs/plans/comments/plan.html` | `plan:render` が書くページ | しない |
 | `.guren/plans/comments.state.json` | 検証結果と、いま取り組んでいるステップの印 | しない (自身を ignore します) |
 
-ファイル名が `plan.json` なら、slug はディレクトリ名です。別の名前でも構いません。`comments.plan.json` の slug は `comments` で、記録はその隣に `comments.approvals.json` と `comments.decisions.json` として置かれます。
+ファイル名が `plan.json` なら、slug はディレクトリ名です。別の名前でも構いません。`comments.plan.json` の slug は `comments` で、記録はその隣に `comments.approvals.json`、`comments.decisions.json`、`comments.revisions/` として置かれます。
 
 描画したページは生成物なので、リポジトリには入れません。`plan:next` は `plan:render` が既定の場所に書いたページとその一時ファイルを無視するため、ループを回すだけなら ignore は要りませんが、コミットするものでもありません。`-o` で別の場所に書いたページはただの未追跡ファイルなので、そのツリーは `plan:next` に拒否されます。一つ目のパターンは `docs/plans/<slug>/` の配置に、二つ目はアプリケーションのルートなどに置いた `<slug>.plan.json` に対応します。
 
@@ -39,11 +40,21 @@ docs/plans/**/*.html
 *.plan.html
 ```
 
-計画そのものと承認・決定ログは別です。waiver はどのステップを渡すかを左右するので、`plan:next` はこの三つのいずれかが未コミットなら拒否します。
+計画そのものと承認・決定ログ・リビジョンは別です。waiver はどのステップを渡すかを左右し、リビジョンは計画を変えるコミットに含めるものです。そのため `plan:next` は、これらのいずれかが未コミットなら拒否します。
 
 ## 計画を書く
 
-JSON を書くのは自分か、機能について話し合ったセッションのエージェントです。モデルに計画を単独で書かせるコマンドはまだありません (このページの最後を参照)。`plan:render` はファイルを計画のスキーマで検証し、誤りのあるフィールドを示します。
+JSON を書くのは自分か、機能について話し合ったセッションのエージェントです。そのエージェントに渡すものは `guren plan --print-prompt` が表示します。依頼とこのページの規約を載せたプロンプトに続けて、計画の JSON Schema を出します。モデルは呼ばず、何も実行しません。
+
+```bash
+bunx guren plan "comments on posts, authors can delete their own" --print-prompt
+```
+
+出力をセッションに貼るか、エージェント自身にコマンドを実行させてください。プロンプトはエージェントに次の順で進めるよう指示します。`context`、`model:list`、`guidelines` でアプリケーションを読み、決められないことを尋ね、`docs/plans/<slug>/plan.json` を書き、失敗する検査がなくなるまで `plan:render --json` を実行します。承認は自分で行います。依頼を省くと、プロンプトは依頼を尋ねるようエージェントに指示します。`--json` はプロンプトとスキーマを一つのオブジェクトで出します。`--print-prompt` なしの `guren plan` はエラーで終わります。モデルに計画を単独で書かせる形はまだありません (このページの最後を参照)。
+
+エージェントハーネスを入れたアプリ (`bunx guren agent:init` で導入し、`agent:sync` で更新) では、`plan-write` スキルがこの流れを進めます。エージェントに機能の計画を頼むと、書き始める前に設計を左右する点を質問します。答えを受けてプロンプトから計画を書き、失敗する検査がなくなるまで `plan:render --json` を実行します。最後にページの場所と未決の点を伝えます。レビュー後の変更は `plan:revise` で記録します。承認はしません。承認した計画は `plan-implement` スキルが実装します。
+
+`plan:render` はファイルを計画のスキーマで検証し、誤りのあるフィールドを示します。
 
 ```text
  ERROR  The plan does not match the plan schema:
@@ -175,15 +186,25 @@ Guren は GET 以外のリクエストへのリダイレクトを 303 で返し�
 
 質問が残っている計画は承認できません。答えは計画を編集して反映します。答えに沿って要素を直し、質問を消し、決めたことを `assumptions` に残してください。承認前の計画は、`plan.json` を直接編集して変えるのが普通のやり方です。
 
+### コマンド
+
+計画の `commands` は `plan:next` が実装エージェントに渡し、エージェントは書かれたとおりに実行します。そのため、どのコマンドも Guren のジェネレーターでなければなりません。
+
+```json
+{ "id": "command.attachments", "command": "guren add attachments", "reason": "Comments take images." }
+```
+
+通るのは `guren <subcommand>` か `bunx guren <subcommand>` の形で、サブコマンドが `make:migration` 以外の `make:*`、`lang:publish`、`add plugin` 以外の `add <blueprint>` のいずれかであるコマンドです。引数に使えるのは文字、数字、`_-.,:/=@+%` です。空白を含む値は一重引用符か二重引用符で囲みます (`--fields "title:string,body:text?"`)。シェルの演算子、`$`、バックスラッシュ、閉じていない引用符があると検査は失敗します。絶対パスの引数や、`..` でアプリケーションの外へ出る引数も失敗します (`--path /etc`、`--app=../other`)。この検査が制限するのはシェルの構文とジェネレーターの書き込み先で、`--force` などジェネレーターごとの他のフラグは判断しません。これ以外のコマンドも失敗します。`bun run db:migrate` は計画からではなく、`data` ステップの検証コマンドとして実行されます。この検査が失敗している間は `plan:approve` が拒否します。こうしたコマンドを持つ計画には、下書きでも承認済みでも、`plan:next` はステップを渡しません。
+
 ## 描画と検査: `plan:render`
 
 ```bash
 bunx guren plan:render docs/plans/comments/plan.json
 ```
 
-`docs/plans/comments/plan.html` を書き、そのパスを表示します。`-o` で出力先を変えられます。別のディレクトリから実行するときは、`--app <dir>` で検査対象のアプリケーションを指定します。`--locale ja` を付けると、ページ自身のラベルが日本語で開きます。ページ上で `en` と `ja` を切り替えられますが、計画の本文は翻訳しません。
+`docs/plans/comments/plan.html` を書き、そのパスを表示します。`-o` で出力先を変えられます。別のディレクトリから実行するときは、`--app <dir>` で検査対象のアプリケーションを指定します。`--locale ja` を付けると、ページ自身のラベルが日本語で開きます。ページ上で `en` と `ja` を切り替えられますが、計画の本文は翻訳しません。`--json` を付けると、ページのパスとすべての検査を一つの JSON で出します。エージェントはページを開かずに失敗した検査を読めます。
 
-ページは一つのファイルで、ネットワークにはアクセスしません。ディスクから直接開けるので、レビュー依頼にそのまま添付できます。以下のラベルは `--locale ja` で開いたときの表記です。セクションごとのタブ、エンティティのフィルター、`existing` の要素を隠す「変更のみ」の切り替えがあります。現在のスキーマに計画を重ねた ER 図も描かれ、id はすべて参照先の要素へのリンクです。失敗した検査と互換性を壊す変更は「確認が必要な項目」に固定表示されます。要素ごとに「承認」と「修正を依頼」のボタン、コメント欄があり、レビュー結果はフッターから `feedback.json` として書き出せます。このファイルを読むコマンドはまだなく、フッターにもそう書かれています。`feedback.json` かコピーしたテキストを計画を書いたエージェントに渡すか、コメントを自分で `plan.json` に反映してください。フッターが表示するのは、計画を直したあとに実行する `plan:render` と `plan:approve` の二つです。
+ページは一つのファイルで、ネットワークにはアクセスしません。ディスクから直接開けるので、レビュー依頼にそのまま添付できます。以下のラベルは `--locale ja` で開いたときの表記です。セクションごとのタブ、エンティティのフィルター、`existing` の要素を隠す「変更のみ」の切り替えがあります。現在のスキーマに計画を重ねた ER 図も描かれ、id はすべて参照先の要素へのリンクです。失敗した検査と互換性を壊す変更は「確認が必要な項目」に固定表示されます。要素ごとに「承認」と「修正を依頼」のボタン、コメント欄があり、レビュー結果はフッターから `feedback.json` として書き出せます。`plan:revise` はこのファイルから承認と回答を読みます (後述)。コメントの内容は、自分かエージェントが計画のコピーに反映します。フッターが表示するのは、計画を直したあとに実行する `plan:render` と `plan:approve` の二つです。
 
 検査は、いまのアプリケーションに対して走ります。報告する内容の例は次のとおりです。
 
@@ -252,22 +273,23 @@ bunx guren plan:approve docs/plans/comments/plan.json
 ```text
 Comments on posts (plan.json)
 
-Stamped the baseline at 0c871a5b9dc25587d33ae3d6bb6c3befe2c7e6a2: 13 element(s) hashed.
-Not hashed, since their section could not be read: validator.comment
+Stamped the baseline at 0c871a5b9dc25587d33ae3d6bb6c3befe2c7e6a2: 14 element(s) hashed.
 Approved 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0, recorded in docs/plans/comments/approvals.json.
 ```
 
 最初の承認で、計画に `baseline` が書き込まれます。`rev` は計画を書いた時点のコミットです。`contextHash` は参照している要素ごとに、アプリケーションがいま持っている形をハッシュにしたものです。コミットのないリポジトリや、未コミットの変更がある作業ツリーを拒否するのはこのためです (計画自身のファイルは除きます)。承認の記録は計画の中ではなく、隣の `approvals.json` に書かれます。両方をコミットしてください。
 
-validator はハッシュを取りません。baseline を刻むときは要素の名前からファイルをたどりますが、validator の名前 (export されたスキーマのシンボル) からはファイルをたどらないためです。それ以外のセクションが読めなかった場合、承認は拒否され、ハッシュのないまま残る要素が示されます。`--allow-unstamped` を付けると、それらを除いて承認します。
+validator は export されたスキーマのシンボルで探します。`app/Http/Validators/` のファイルを import せずに読み、export 名を集めます。どのファイルも宣言・export していない名前は、失敗ではなく警告になります。コントローラー内のスキーマや、別の場所からの再 export は読めないためです。セクションを読めなかった場合 (そこに構文解析できないファイルや `export *` で export するファイルがある場合など)、承認は拒否され、ハッシュのないまま残る要素が示されます。`--allow-unstamped` を付けると、それらを除いて承認します。
 
-計画を識別するのはハッシュです。baseline を含めた計画の SHA-256 で、承認も検証の記録も waiver もこのハッシュを名指しします。承認後に編集した計画は別の計画です。baseline を持つ計画の現在のハッシュをどの承認も名指ししていなければ、`plan:next`、`plan:verify`、`plan:waive`、`plan:close` はその計画を拒否します。
+validator を読む前に承認した計画は、validator のハッシュを持っていません。validator を書いたあとで再承認すると、その名前は衝突ではなく `plan:app-unjudged` の警告になります。計画自身が書いたものかどうかを baseline から判断できないためです。
+
+計画を識別するのはハッシュです。baseline を含めた計画の SHA-256 で、承認も検証の記録も waiver もこのハッシュを名指しします。承認後に編集した計画は別の計画です。baseline を持つ計画の現在のハッシュをどの承認も名指ししていなければ、`plan:next`、`plan:scaffold`、`plan:verify`、`plan:waive`、`plan:close` はその計画を拒否します。
 
 ```text
  ERROR  docs/plans/comments/plan.json is not approved at its current hash dc9a6ce3ad173e23290f743293fa0e3495c932b3b2cdf07c0cda8c9b063a5465, so no step of it is handed out: it was edited after approval, or never approved, and what it says now may not be what anyone agreed to. Run guren plan:approve docs/plans/comments/plan.json once the plan says what you mean to build.
 ```
 
-`plan:status` と `plan:render` は拒否しません。承認する前に変更を読むためのコマンドだからです。baseline のない下書きにはハッシュがないので、`plan:next` と `plan:verify` は下書きをこれまでどおり受け付けます。ただし隣に承認の記録がある下書きは、未承認の計画と同じく拒否されます。承認済みの計画から `baseline` を消しても、この確認からは逃れられません。
+`plan:status` と `plan:render` は拒否しません。承認する前に変更を読むためのコマンドだからです。baseline のない下書きにはハッシュがないので、`plan:next` と `plan:verify` は下書きをこれまでどおり受け付けます。`plan:scaffold` は承認された計画からコードを書くので、下書きは拒否します。ただし隣に承認の記録がある下書きは、未承認の計画と同じく拒否されます。承認済みの計画から `baseline` を消しても、この確認からは逃れられません。
 
 編集した計画をもう一度承認すると、新しいハッシュが記録され、baseline はそのまま残ります。各ステップの検証は新しいハッシュのもとでやり直しです。承認の前には検査と質問の確認がもう一度走り、その時点のアプリケーションと突き合わされます。計画自身の作業は妨げになりません。実装が計画どおりに作り終えた要素は検査から差し引かれ、どれを差し引いたかが承認時に表示されます。
 
@@ -300,6 +322,33 @@ Already approved at 2026-09-22T10:16:20.673Z; recorded the readings it lacked in
 
 実装のあとに読み取ると性質はすでに一致しているので、承認し直しても役に立ちません。一致した性質のどれにも読み取りがない `alter` は `unjudged` になり、注記はその要素に届く振る舞いで検証するよう示します。ステップが検証を通ったあとは、waive する道を示す注記が加わります。カラムのように振る舞いが届かない要素には、waiver だけが示されます。
 
+読める性質がすべて承認時にすでに一致していた `alter` は、性質では完了しません。`plan:approve` はそうした計画も承認し、要素と性質を挙げて警告します。`--json` では `heldAlters` に並びます。警告は承認の項目の読み取りから判定します。同じハッシュを承認し直すと同じ警告が出ます。同じ baseline のもとで実装のあとに承認し直した場合は、実装で変えた性質については警告しません。次の例は、`view.posts.show` がページですでに宣言済みの `post` prop を書き直しただけの計画です。
+
+```text
+Warning, advisory (the approval stands):
+  view.posts.show (posts/Show): every readable planned property already held at approval (prop post); none shows the change, so plan:status reports it unjudged. State the change in a property the application does not hold yet and approve the plan again, or expect that it completes only through a verified behaviour that reaches it, or by a waiver.
+```
+
+承認時に `unknown` だった性質は、一致していたとは数えません。警告はその性質を、まだ変更を示せる唯一のものとして挙げます。示せるのは、読み取れるようになってから一致したときだけです。読める性質が一つもない `alter` には警告を出さず、`plan:status` が前述のとおり `unjudged` と報告します。
+
+## 改訂: `plan:revise`
+
+計画は承認の前も後も、リビジョンとして変更します。`plan:revise` はモデルを呼ばずにリビジョンを記録します。親は現在の計画ファイルそのものです。変更は別に渡します。変更を加えた計画のコピーか、ops そのものです。
+
+```bash
+cp docs/plans/comments/plan.json /tmp/comments.edited.json
+# edit the copy: rename a column, change a type, drop a route
+bunx guren plan:revise docs/plans/comments/plan.json --edited /tmp/comments.edited.json --message "soft-delete comments instead"
+```
+
+コマンドは二つの差分から ops を求めます。追加・変更・削除した要素ごとに一つの op になり、どの op も `--message` を理由に持ちます。`{ parent, ops, result }` を `docs/plans/comments/revisions/0001.json` に書き、そのあと `plan.json` をコピーで置き換えます。`comments.plan.json` という名前の計画では、リビジョンは `comments.revisions/` に置かれます。`--ops ops.json` を使うと ops を直接渡せます。`{ "ops": [...] }` の形の文書で、op ごとに `reason` を書きます。
+
+`--feedback feedback.json` を付けると、ページでのレビューが規則として効きます (コピーしたテキストなら `-` を渡します)。そこで承認した要素は、`--reopens "<reason>"` で理由を示したときだけ変更できます。そこで回答した質問は、改訂後の計画から消えている必要があります。フィードバックから読むのはこの二つだけで、コメントの内容はコピーに自分で反映します。
+
+承認後の計画は、この方法で変更します。`plan.json` をその場で編集すると、ハッシュはどの承認にもリビジョンにもないものに変わり、`plan:revise` はその計画を拒否します。`git checkout -- docs/plans/comments/plan.json` で元に戻し、編集はコピーに移して `--edited` で渡してください。改訂して承認前の計画は、続けて改訂できます。リビジョンは baseline をそのまま引き継ぐので、結果は `plan:approve` で承認するまで `plan:next` などのコマンドに拒否されます。古いハッシュに対して取った waiver も引き継がれません。コマンドはその waiver を一覧にします。最初の承認前の draft も同じ方法で改訂できますが、直接編集しても構いません。
+
+実装済みの計画を改訂すると、すべてのステップが戻ってきます。古いハッシュの記録は新しいハッシュでは数えられないためです。`plan:next` は以前のハッシュで検証済みのステップを再確認の対象として示します。ファイルがすでにある `scaffold` や `tests` のステップは以前の版の計画で作られたものとして示し、`plan:verify --step` を案内します。`plan:scaffold` は書き込み先が一つでもあるステップを拒否するためです。まだないものは、手で書く対象として一覧にします。`--step` なしの `plan:verify` は計画全体を一度に再確認します。単純に再実行できないのは `tests` ステップだけです。コードができた後は振る舞いが通るのに、`tests:fail` は失敗を求めます。そこでこのステップの検証済みの実行は、振る舞いごとに失敗を確認したことを記録します。記録のキーは計画が述べるテストの形で、description 以外のすべてのフィールドに、ルートのメソッドとパス、期待するページを加えたものです。後の実行は、改訂がテストに触れなかった振る舞いについてこの記録を引き継ぎます。失敗を改めて求めるのは変わった振る舞いだけで、古い計画で実装したコードに対して失敗させます。この記録を持たない `tests` ステップ (この規則より古い CLI で検証したもの) は、振る舞いが通るようになると検証できません。Stop hook はすぐに打ち切ります。このステップは要素を持たないので、`plan:close` はこのステップを待ちません。
+
 ## 実装: `plan:next` と `plan:verify`
 
 作業の分解と順序は、モデルではなく Guren が計画から導きます。計画が足したり変えたりするエンティティごとにタスクができ、タスクは外部キーの順に並びます。ステップは六種類あり、各タスクには作業のある種類だけが入ります。
@@ -307,13 +356,13 @@ Already approved at 2026-09-22T10:16:20.673Z; recorded the readings it lacked in
 | ステップ | 作業 | 検証 |
 |---|---|---|
 | `commands` | 計画の `commands` (`guren add attachments` など)。`task/foundation` に入ります | `codegen`、`typecheck` |
-| `scaffold` | 新しいエンティティの最初の版。`make:feature` で作ります | `codegen`、`typecheck` |
-| `tests` | 受け入れ振る舞いごとのテスト。失敗する状態で書きます | `codegen`、テストが失敗すること |
-| `data` | テーブル、マイグレーション、モデルのリレーションと fillable | `codegen`、`db:migrate`、`typecheck` |
-| `http` | validator、コントローラー、ルート、Resource、Policy | `codegen`、`guren check`、テストが通ること |
+| `scaffold` | 新しいエンティティの最初の版。`plan:scaffold` が書きます | `codegen`、`typecheck` |
+| `tests` | 受け入れ振る舞いごとのテスト。`plan:scaffold` が雛形を書き、失敗する状態にします | `codegen`、テストが失敗すること |
+| `data` | テーブル、マイグレーション、モデルのリレーションと fillable。scaffold 済みなら、マイグレーションと `plan:scaffold` が書かなかったもの | `codegen`、`db:migrate`、`typecheck` |
+| `http` | コントローラーとルート。validator、Resource、Policy も書きます。scaffold 済みなら、`plan:scaffold` がスタブにしたものと書かなかったもの | `codegen`、`typecheck`、`guren check`、テストが通ること |
 | `pages` | ページコンポーネント | `codegen`、`typecheck`、`guren check` |
 
-複数のエンティティが共有する作業は `task/foundation` に入ります。ステップの id は `task/entity/model.comment/http` のような形です。`commands`、`data`、`http`、`pages` のステップは、担当する要素が五つを超えるファイルにまたがると複数に分かれ、`task/entity/model.comment/http/1`、`task/entity/model.comment/http/2` のような id になります。`scaffold` と `tests` は分かれません。`--step` に渡す正確な id は `plan:next` が表示します。次のステップを尋ね、実装し、検証し、コミットする。これを繰り返します。
+テストはタスクごとに一つのステップ、振る舞いを判定するステップでだけ実行されます。最後の `http` ステップで、`http` がなければタスクの最後のステップなので、`data` や `pages` で実行されることもあります。分割された `http` の前半を含め、ほかのステップはテストを実行しません。`typecheck` を実行するのはタスクの最後の `http` ステップだけです。前半のパートが、後半のパートで書く Resource やジョブを import することがあるためです。`http` のアクションが描画するページのうち `pages` ステップで追加するものは、ファイルができるまで `.guren/pages.gen.ts` に載りません。`plan:next` はそのページを `http` ステップと一緒に表示します。default export と計画の `Props` だけを持つスタブをこのステップで作り、残りは `pages` ステップで書きます。複数のエンティティが共有する作業は `task/foundation` に入ります。ステップの id は `task/entity/model.comment/http` のような形です。`commands`、`data`、`http`、`pages` のステップは、担当する要素が五つを超えるファイルにまたがると複数に分かれ、`task/entity/model.comment/http/1`、`task/entity/model.comment/http/2` のような id になります。`scaffold` と `tests` は分かれません。`--step` に渡す正確な id は `plan:next` が表示します。次のステップを尋ね、実装し、検証し、コミットする。これを繰り返します。
 
 ```bash
 bunx guren plan:next docs/plans/comments/plan.json
@@ -328,15 +377,20 @@ Next: task/entity/model.comment/tests
   task: entity Comment (task/entity/model.comment)
   verify: codegen → tests:fail
 
+Write this step’s test skeletons with `bunx guren plan:scaffold docs/plans/comments/plan.json --step task/entity/model.comment/tests`, not by hand, then fill them in.
+  It writes one TestApp test per behaviour (AC-comments-1, AC-comments-2, AC-comments-3, AC-comments-4), with its request and the expectations the plan states, into one file.
+  Each fails at a given() call until the setup it names is written (records, the signed-in actor, path parameters); replace every call, and keep each title’s id and its request.
+
 Behaviours to write, as test titles `[<id>] <description>`, failing:
   [AC-comments-1] A signed-in user can comment on a post.
-      success; actor user; route route.comments.store; given a post exists; expect status 303; comments has 1 row(s)
+      success; actor user; route route.comments.store; given a post exists; expect status 302; comments has 1 row(s)
   [AC-comments-2] An empty comment is rejected.
       validation; actor user; route route.comments.store; given a post exists; expect status 422; errors on body
   [AC-comments-3] A guest cannot comment.
       unauthenticated; actor guest; route route.comments.store; given a post exists; expect redirect /login
   [AC-comments-4] A user cannot delete someone else's comment.
       forbidden; actor user; route route.comments.destroy; given a comment written by another user exists; expect status 403
+  Each test requests its route through a TestApp, in its body or a function of its file it calls: plan:verify reads the requests before it runs them.
 
 Implement this step only, then run `bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/tests` and commit once it is verified.
 Marked in .guren/plans/comments.state.json
@@ -346,7 +400,7 @@ Marked in .guren/plans/comments.state.json
 
 ```text
  ERROR  The working tree under /app has uncommitted changes (paths relative to the repository root), and one step is one commit. Commit or discard them first:
-  ?? tests/comments.test.ts
+  ?? tests/plans/comments/comments.test.ts
 ```
 
 ```bash
@@ -356,16 +410,173 @@ bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.co
 ```text
 task/entity/model.comment/tests: verified (607 ms)
   pass     codegen     bun run codegen
-  pass     tests:fail  bun test tests/comments.test.ts
+  pass     tests:fail  bun test tests/plans/comments/comments.test.ts
   failing  [AC-comments-1]
   failing  [AC-comments-2]
   failing  [AC-comments-3]
   failing  [AC-comments-4]
+  work: 1 file, +38 -0 since 3f1c2a9b0d4e
 
 Recorded in .guren/plans/comments.state.json
 ```
 
 `tests` ステップが通るのは、すべての振る舞いにテストがあり、その全部が失敗したときだけです。コードより先に通ってしまうテストは何も証明しませんし、skip したテストは失敗に数えません。`plan:verify` はステップの id がソースに書かれたテストファイルを選び、`bun test` で実行します。後のステップも同じファイルを実行し、今度は通ることを求めます。検証結果のあとには計画の状態が続きます。読み方は後で説明します。
+
+`plan:verify` はテストを実行する前に、各振る舞いのテストが振る舞いの指すルートへ `TestApp` でリクエストしているかを読みます。タイトルに id を含む `test`、`it`、`describe` のどれかが、そのメソッドとパスへリクエストするか、ルートの agent tool を呼ぶ必要があります。リクエストは本体か、本体から呼ぶ同じファイルの関数に書きます。`` `/comments/${id}` `` のようにセグメント全体を実行時の値で埋めたものは、制約付きのパラメーターにも届くと数えます。別のルートへリクエストするテストや、何もリクエストしないテストがあると、代わりに何をリクエストしているかを示してコマンドが失敗し、`bun test` は実行しません。
+
+この読み取りで解決できないリクエストも、別の理由でコマンドを失敗させます。ファイルに書かれていないパス、import したヘルパーの戻り値へのリクエスト、`TestApp` や `Promise<TestApp>` の注釈がない同じファイルの関数の戻り値へのリクエスト、別ファイルの関数に渡した `TestApp`、実行時に組み立てたタイトルがこれに当たります。そう書き換えたテストでステップが検証を通らないよう、この判定は安全側に倒しています。指摘はリクエストをテストに直接書くか、ヘルパーに注釈を付けるよう求めます。これは改ざんの検出で、証明ではありません。ファイルに書かれたリクエストは、実行されるかどうかに関係なく通ります。
+
+### scaffold ステップ: `plan:scaffold`
+
+自分のモデルを追加するタスクは `scaffold` ステップから始まり、`plan:next` がそれを書くコマンドを示します。
+
+```text
+Next: task/entity/model.comment/scaffold
+  task: entity Comment (task/entity/model.comment)
+  verify: codegen → typecheck
+
+Write this step with `bunx guren plan:scaffold docs/plans/comments/plan.json --step task/entity/model.comment/scaffold`, not by hand.
+  It writes each added model (table and class), its validators and resources, each policy with a provider registering it, each added controller with its actions as stubs, the routes to them in a file of their own that the http step mounts, and the side-effect classes: model.comment, column.comment.id, column.comment.body, column.comment.postId, column.comment.createdAt, validator.comment, controller.comments, action.comments.store, action.comments.destroy, route.comments.store, route.comments.destroy, resource.comment, policy.comment
+```
+
+```bash
+bunx guren plan:scaffold docs/plans/comments/plan.json --step task/entity/model.comment/scaffold
+```
+
+追加する各モデルのテーブルを、スキーマの方言で `db/schema.ts` に追記します。テーブルには、計画がカラムに書いたオプションがすべて入ります。型、null 許容、`unique`、`index`、`default`、`columnName`、`withTimezone`、精度とスケール、主キー、外部キーとその `onDelete` です。モデルの複数カラムのインデックスも入ります。
+
+```typescript
+export const comments = pgTable('comments', {
+  id: serial('id').primaryKey(),
+  body: text('body').notNull(),
+  postId: integer('post_id').notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('comments_post_id_index').on(table.postId),
+])
+```
+
+`app/Models/Comment.ts` には計画の `fillable` とリレーションを書きます。リレーションのキーは計画に書かれた外部キーから決まります。キーや相手がまだ存在しないリレーションは書かずに一覧で示すので、それが揃うステップで追加してください。後のタスクの作業を待つリレーション (次のタスクが追加する子への `hasMany` など) では、一覧はその作業を持つステップ (後のタスクの `data` ステップか、その分割の一つ) を示します。リレーションはそのステップで、待っているモデルの性質として判定されます。書く場所は宣言する側のモデルのファイルです。`plan:next` もそのステップでこのリレーションを挙げます。それ以外のリレーションを書かずにおくと、追加するまで `plan:status` はそのモデルを `drifted` と読みます。
+
+ステップの validator は、モデルの名前を付けた一つのファイル `app/Http/Validators/CommentValidator.ts` にまとめて書きます。validator ごとにスキーマを一つ export します。各フィールドは計画の型、`required`、ルール (`min`、`max`、`email`、`url`、`uuid`) から、`plan:status` が読み返せる形で書きます。
+
+```typescript
+import { z } from 'zod'
+
+export const CommentPayloadSchema = z.object({
+  body: z.string().min(1).max(2000),
+})
+```
+
+アクションが `query` や `params` に使う validator では、数値と真偽値を `z.coerce.number()` と `z.stringbool()` で書きます。これらの値は文字列で届くためです。文章で書かれたルールや、フィールドの型に合わないルール (真偽値への上限など) は書かず、レポートに一覧で示します。
+
+モデルをこのステップで追加する Resource は、計画のペイロード型を持つ `Resource` のサブクラスとして書きます。この型は `guren codegen` が `data.gen.ts` のために読むものです。カラムの読み返しの値がすべて計画の型に収まるフィールドはカラムの値をそのまま使い、計画が `string` とした日時のカラムは `toISOString()` で文字列にします。JSON のカラムは計画の型にキャストします。それ以外のフィールドは、対応付けるまで例外を投げるスタブを呼び、レポートに一覧で示します。
+
+```typescript
+export class CommentResource extends Resource<CommentRecord, CommentResourceData> {
+  toArray(): CommentResourceData {
+    return {
+      id: this.resource.id,
+      body: this.resource.body,
+      createdAt: this.resource.createdAt.toISOString(),
+    }
+  }
+}
+```
+
+Policy は計画の ability ごとにメソッドを一つ書きます。どのメソッドも、ルールを書くまで `false` を返します。計画のルールはメソッドのコメントに残します。`app/Providers/CommentPolicyProvider.ts` が `boot()` でその Policy を gate に登録し、コマンドはこのプロバイダーを `src/app.ts` の `createApp({ providers })` に追加します。`plan:status` は Policy を ability で読みます。登録は読まないので、Policy は `present` で完了です。
+
+ステップが追加するコントローラーには、計画したアクションだけを書きます。各アクションは計画の validator で `params` と `query` を検証し、計画の Policy の ability で認可し、`body` を検証してから、501 を返します。Policy が拒否した呼び出しは、送った内容によらず 403 になります。
+
+```typescript
+export default class CommentController extends Controller {
+  // Planned response: a redirect to /posts/:postId
+  // Rule: The comment's author is the signed-in user.
+  // postId is not fillable: write it with Comment.create(data, { set: { postId } }) (RFC 0031)
+  async store(): Promise<Response> {
+    await this.validateBody(CommentPayloadSchema)
+    throw HttpException.notImplemented('CommentController.store is planned and not written yet')
+  }
+
+  // Planned response: a redirect to /posts/:postId
+  async destroy(): Promise<Response> {
+    const comment = this.model(Comment)
+    await this.authorize('delete', [Comment, comment])
+    throw HttpException.notImplemented('CommentController.destroy is planned and not written yet')
+  }
+}
+```
+
+ability はレコードに対して `[Model, record]` の形で確認します。ORM のレコードはクラスを持たず、gate がそこから Policy を探せないためです。レコードなしで確認する `viewAny` と `create` を除き、アクションへのルートがすべて Policy のモデルのレコードを一つバインドしていれば、スタブは `this.model()` でそのレコードを取り出してタプルを渡します。そうでなければクラスだけを渡します。レコード単位の ability (`view`、`update`、`delete` など) では、レコードを読み込んだあとで渡すタプルをアクションの上のコメントに示します。`POST` ルートが本文を受け取るアクションでは、同じコメントに、計画が追加するモデルの `fillable` から外れた外部キーを並べます。`create()` はそれらを data に含めると拒否するので、`set` で渡します (RFC 0031)。
+
+検証には `validated('comments.store')` ではなく `validateBody()` を使います。`validated()` の型は生成されたルート名から決まり、`http` ステップがマウントするまでルートは登録されないためです。レスポンスは書きません。`plan:status` は名前を読み取れるレスポンス (Resource、ページ、リダイレクト) を実装済みと数えるので、スタブがそれを書くと完了に見えてしまいます。各アクションのレスポンスは、書き残したものとしてレポートに並びます。
+
+これらのアクションへのルートは専用のファイル `routes/comments.ts` に書きます。メソッド、パス、名前、契約のスキーマ、バインディング、`auth` ミドルウェア、`.agent()` のメタデータは計画のとおりです。
+
+```typescript
+export function registerCommentRoutes(router: Router): void {
+  const authRouter = router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+  authRouter.post('/posts/:postId/comments', { name: 'comments.store', body: CommentPayloadSchema, bind: { postId: Post } }, [CommentController, 'store']).middleware('auth')
+  authRouter.delete('/comments/:id', { name: 'comments.destroy', bind: { id: Comment } }, [CommentController, 'destroy']).middleware('auth')
+}
+```
+
+このファイルはまだどこからも呼ばれないので、ルートは登録されず `planned` と読まれます。マウント済みのルートは `tests` ステップより前に 401 や 422 を返すことがあり、すでに通る振る舞いがあるとそのステップは失敗します。付けるミドルウェアは `auth` だけです。計画にほかの名前があれば一覧で示し、アプリケーションがその名前に割り当てたハンドラーを知っている `http` ステップに任せます。計画が承認済みで閉じておらず、その `http` ステップが未検証のあいだ、`guren check` はマウントされていないこのファイルを advisory として報告します。そのため途中のステップで gate が止まりません。そのステップが検証されるか計画が閉じれば、マウントされていないファイルはふたたび警告になります。
+
+ステップが追加するジョブ、イベント、リスナー、メール、通知は、対応する `make:*` コマンドと同じ形で、計画のクラス名で書きます。`plan:status` はこれらを `present` と読みます。`wired` になるのは何かがディスパッチ、登録、送信してからで、それは `http` ステップの作業です。`docs/entities/Comment.md` がすでにあれば、コントローラーとルートのファイルに `@docs docs/entities/Comment.md` を書きます。まだないドキュメントへのタグは `guren check` で失敗するため、そのときは書きません。
+
+codegen もマイグレーションも実行しません。codegen と型検査は `plan:verify` が、マイグレーションの生成は `data` ステップが担います。
+
+拒否はすべて、最初の書き込みより前に決まります。拒否するのは次の場合です。
+
+- 下書き、またはどの承認も名指ししていない計画
+- `scaffold` と `tests` 以外のステップ (そのタスクの scaffold ステップを示します)、または `plan:next` が印を付けていないステップ
+- モジュールに属するモデル、validator、Resource、Policy、コントローラー、副作用 (書き込み先はプロジェクトのルートだけです) と、API 専用のアプリケーション
+- MySQL で `text` か `json` のカラムに付けたキー (主キー、`unique`、インデックス、MySQL がインデックスを作る外部キー)。drizzle-kit が拒否し、MySQL もプレフィックス長のないキーを拒否します (カラムを `string` にするか、キーを外してください)。値が `null` の `default` も拒否します
+- 名前が `Resource` で終わらない Resource (`guren codegen` が見つけられません)、`Policy` 自身のメンバー (`before`、`allow`、`deny`) と同じ名前の ability、`Controller` のメンバー (`redirect`、`json`) と同じ名前のアクション
+- 登録できない Policy プロバイダー。`src/app.ts` も `app.ts` もない場合、書き換えられる `createApp()` の呼び出しがない場合、すでに登録されている場合です
+- すでに存在する書き込み先。モデルのファイルやクラス、スキーマの export、どのアプリケーションルートにあるテーブル名、作るファイル、ほかの validator ファイルが export している validator 名、同じ名前の Resource、Policy、コントローラー、副作用のクラスが対象です
+
+scaffold 済みのステップでもう一度実行すると、ファイルがあるので同じように拒否されます。その場合はステップを検証してください。`--json` は、作ったファイル、追記したテーブル、登録したプロバイダー、マウントせずに残したルートのファイルとそれをマウントするステップ、書いた要素、残した要素、スタブにしたか書かなかったもの、書かなかったリレーションを出力します。
+
+### ルートのマウント: `plan:scaffold --mount`
+
+scaffold が書いたルートを持つ `http` ステップは、まずそのルートをマウントします。コマンドは `plan:next` が示します。
+
+```text
+Mount the routes the scaffold step wrote first, with `bunx guren plan:scaffold docs/plans/comments/plan.json --step task/entity/model.comment/http --mount`, not by hand: it calls routes/comments.ts from the entry registrar.
+  Written as stubs by plan:scaffold, to finish: validator.comment, controller.comments, action.comments.store, action.comments.destroy, route.comments.store, route.comments.destroy, resource.comment, policy.comment. Each action validates and authorizes as planned and answers 501; write its body and response.
+```
+
+`registerCommentRoutes` を `routes/web.ts` に import し、そこの registrar の先頭で呼び出します。先頭なので、エントリーが設定する `auth` の別名が、ルートのファイルの設定より優先されます。マウントしたルートはエントリー自身のルートより先に登録されます。そのため `/posts/:id` のようにパラメーターを含む scaffold のパスが、`/posts/create` のようなエントリーのルートを覆うことがあります。重なる場合は順序を確かめてください。これで `plan:status` はルートとそのアクションを `wired` と読み、それらが使う validator も `wired` になります。残るのは各アクションの本体とレスポンス、そして scaffold がスタブにしたか書かなかったものです。
+
+次の場合は何も書かずに拒否します。下書きやどの承認も名指ししていない計画、`plan:next` が印を付けていないステップ、scaffold したルートを持たないステップ (持つステップを示します)、存在しないルートのファイルや registrar を export しなくなったファイル、`routes/web.ts` のないアプリケーション、registrar と同じ名前で別のものを import しているエントリー、すでにマウントされたファイルです。エントリーが直接呼んでいても、別のルートのファイルが呼んでいても、マウント済みと判断します。
+
+### テストの雛形: tests ステップの `plan:scaffold`
+
+`tests` ステップも同じコマンドで書きます。`plan:scaffold <plan> --step <task>/tests` は `tests/plans/<plan>/<collection>.test.ts` を一つ書きます (comments の計画なら `tests/plans/comments/comments.test.ts`)。中身はステップの振る舞いごとに一つの `TestApp` テストです。
+
+```ts
+test('[AC-comments-1] A signed-in user can comment on a post.', async () => {
+  given('a post exists')
+  const actor = given<object>('the actor: user')
+  const postId = given<number | string>('the :postId parameter')
+  await (await client(actor)).post(`/posts/${postId}/comments`, { body: 'Nice post' }).assertStatus(302)
+  expect(await Comment.where({ body: 'Nice post' }).first()).not.toBeNull()
+})
+```
+
+- タイトルは振る舞いの id で始まり、`plan:verify` はこの id でファイルを選びます。計画の文中にある角括弧は丸括弧にして書くので、ファイルがほかの id を持つことはありません。
+- リクエストはルートが示すものです。メソッド、パラメーターをセグメント全体の埋め込みにしたパス、ボディにした `input` (`GET` ならクエリ文字列) を書きます。
+- 期待値は計画のものです。`status`、`redirect` (ルートと共通のパラメーターはルートの値を使います)、`inertia` (JSON を求めるリクエストにし、Inertia のバージョン確認を通らずにページを受け取ります)、`errors` (JSON のボディから読みます)、`database` の行を書きます。行はモデルを通したクエリで、ルートにモデルがあり、計画のカラムの型と比べられる値のときに書きます。行の準備と後片付けは実装する側の作業です。ほかのテストが残した行があると、実装に関係なく期待値が通ったり失敗したりします。
+- 計画が文章で書いた前提、ルートが求めるときのサインイン済みのアクター、パスの各パラメーターは `given()` の呼び出しになり、呼ぶと例外を投げます。雛形に書けない期待値は `unwritten()` の呼び出しになり、これも例外を投げます。期待する 404 も同じ扱いです。まだないルートも 404 を返すからです。どれもレポートと出力に一覧で示します。
+- `ready()` は `src/app.ts` を import し、`TestApp.fromApp()` で一度だけ起動します。ファイルの `beforeAll` がこれを呼ぶので、行の作成や削除のために追加する `beforeEach` より先に ORM が設定されます。Bun のフックの既定の制限時間は 5 秒ですが、起動は 120 秒まで待ちます。起動の失敗は `beforeAll` では投げずに出力するので、追加したフックに関係なく `plan:verify` はステップを `blocked` と記録します。`ready()` か `client()` を呼んだ各テストは、その失敗で名前付きで失敗します。追加するフックは `await ready()` から始めてください。各テストが報告するのがデータベースエラーではなく起動の失敗になります。
+- `client()` は起動済みのアプリケーションを返します。アクターを渡せばそのアクターとして振る舞います。アプリケーションが CSRF をマウントしていれば、`withCsrf()` で準備します。`cookie: false` で CSRF をマウントしたアプリケーションには対応していません。
+- サインイン済みのアクターを用意するのは、`auth` か `auth:*` のミドルウェア、Policy、`forbidden` の振る舞いのときだけです。
+
+実装より前は、どのテストも `given()` の呼び出しか、まだマウントされていないルートで失敗します。skip されるテストはないので、`tests:fail` の条件どおりにステップを検証できます。アプリケーションが起動しないときは、どのテストもルートに届いていないので、`plan:verify` はステップを `blocked` と記録します。コードを書く前に通ってしまう場合が二つあり、そのときは `tests:fail` でステップが失敗します。一つは既存のルートで準備するものがない振る舞いで、レポートに一覧で示します。もう一つは、新しいルートのパスに既存のルートがすでに応答する振る舞いで、こちらは一覧に出ません。`given()` と `unwritten()` の呼び出しは、それぞれが示す前提やアサーションに置き換えてください。テストを `test.skip` や `test.todo` に変えないでください。skip したケースは実行に数えられず、ステップはそこで失敗します。後のステップも同じファイルを実行して通ることを求めるので、タイトルの id とリクエストは残してください。
+
+次の場合は何も書かずに拒否します。下書きや承認のない計画、`plan:next` が印を付けていないステップ、すでにあるファイル (再実行)、ほかのテストファイルがすでに持っている振る舞い (`plan:verify` が二つのファイルで見つけてしまいます)、ほかの振る舞いの id を含むリクエストのボディや期待値、起動できる default export が `src/app.ts` にも `app.ts` にもないアプリケーションです。API 専用のアプリケーションには `scaffold` ステップがありませんが、`tests` ステップはほかと同じようにあり、雛形も書けます。制約付きのルートパラメーター (`:id{[0-9]+}`) は静的な読み取りの限界です。実行時の値が制約を満たすとは限らないので、そのリクエストはルートに届くとは読まず、不確かとして扱います。
 
 ### 結果
 
@@ -428,9 +639,13 @@ task/entity/model.comment/data: failed (1383 ms)
 
 `plan:verify` は承認のない計画を、何も実行しないうちに拒否します。誰も合意していないハッシュのもとで結果が記録されることはありません。そのうえで、`plan:verify` はアプリケーションを実際に動かします。`bun test` はアプリケーションを起動し、`db:migrate` は設定されたデータベースを開きます。開発用かテスト用のデータベースに向けて実行し、本番には向けないでください。各コマンドは 600 秒を過ぎると `blocked` になり、`--timeout <seconds>` で変えられます。`--step` を省くと全ステップを順に実行し、記録がまだ有効なステップは飛ばします。検証後にファイルが変わったステップは、次に述べるとおり最後に確かめ直します。`--ci` は実行したステップが一つでも verified にならなければ終了コード 1 を返し、`--json` は結果をデータで出します。
 
+### ステップごとのファイル数と行数
+
+記録には、ステップを実装した作業量も残ります。出力では `work:` の行です。`plan:next` がステップに印を付けたときの `HEAD` のコミットから数えた、触ったファイルと追加・削除した行の数で、コミット済みの変更も未コミットの変更も含みます。計画とその記録、`.guren/`、ロックファイル、drizzle-kit のスナップショットは数えず、マイグレーションの SQL は数えます。数値はステップが初めて verified になった実行で確定し、後の確かめ直しでは変わりません。`plan:next` が印を付けていないステップ (`--step` なしの `plan:verify` が実行したものなど) は理由付きの `not measured` になります。開始コミットが rebase で履歴から外れた場合も同じです。`plan:status --json` は `verification.work` にステップ id ごとの数値を載せます。この数値で拒否や待ちが起きることはありません。ステップ幅の既定値を見直す材料として使います。
+
 ### 一ステップ、一コミット
 
-変更はステップが挙げる要素だけにとどめ、verified になったらコミットしてください。検証を通ったステップは、担当する要素が入っているファイルとテストファイルの指紋を記録します。そのどれかが変わると、ステップの要素は `drifted` になります。後のステップがそうしたファイルに書き込むのは珍しくありません。`routes/web.ts` の既存ルートの隣に足すルート、`db/schema.ts` のテーブル、Resource のフィールドなどです。例のコピーで、`pages` ステップのあとのコミットが `CommentResource.ts` にフィールドを足しました。このファイルは `http` ステップが検証したものなので、`http` の要素の大半が drifted になりました。
+変更はステップが挙げる要素だけにとどめ、verified になったらコミットしてください。検証を通ったステップは、担当する要素が入っているファイル、要素を取り付けるファイル (アクションに振り分けるルート、ページを返すコントローラー)、テストファイルの指紋を記録します。そのどれかが変わると、ステップの要素は `drifted` になります。後のステップがそうしたファイルに書き込むのは珍しくありません。`routes/web.ts` の既存ルートの隣に足すルート、`db/schema.ts` のテーブル、Resource のフィールドなどです。例のコピーで、`pages` ステップのあとのコミットが `CommentResource.ts` にフィールドを足しました。このファイルは `http` ステップが検証したものなので、`http` の要素の大半が drifted になりました。
 
 ```text
 Routes
@@ -442,7 +657,7 @@ Routes
 
 こうしたステップは `plan:verify --step` が確かめ直します。指定したステップが verified になると、同じ実行の中で、ファイルが変わった前のステップをタスク順に確かめ直します。コマンドを実行するステップが verified にならなかったところで止まります。結果はそれぞれ記録され (`failed` なら壊れた箇所を添えます)、レポートの「Re-checked」の下に並びます。そのあと `plan:next` は、verified でない最初のステップを返します。たいていは失敗したステップです。確かめ直しが `blocked` になったステップは、後の実行に回します。指定したステップが verified にならなければ、前のステップの記録には手を付けず、後の実行に回したステップとして示します。ステップ間で共有するコマンドが失敗している以上、確かめ直しても同じ理由で失敗するからです。
 
-`tests` ステップは何も実行せずに確かめ直します。コードができたあとではテストが通ってしまうからです。各振る舞いの id を書いたテストファイルがちょうど一つずつあれば、verified のままです。そうでなければ、該当する振る舞いを示し、ステップを drifted のまま残します。
+`tests` ステップは何も実行せずに確かめ直します。コードができたあとではテストが通ってしまうからです。各振る舞いの id を書いたテストファイルがちょうど一つずつあり、各振る舞いのテストが上と同じ読み方でまだそのルートへリクエストしていれば、verified のままです。そうでなければ、該当する振る舞いを示し、ステップを drifted のまま残します。
 
 `plan:next` は何も実行しないので、次のステップが drifted なら、確かめ直すよう伝えます。
 
@@ -556,7 +771,7 @@ Planned, not checkable:
 baseline を持つ計画では、レポートの最後に承認の状態が出ます。現在のハッシュを名指しする承認があればその日時と承認者、なければ拒否するコマンドの一覧です。
 
 ```text
-Not approved at this hash: plan:next, plan:verify, plan:waive, plan:close refuse the plan until guren plan:approve records an approval of it.
+Not approved at this hash: plan:next, plan:scaffold, plan:verify, plan:waive, plan:close refuse the plan until guren plan:approve records an approval of it.
 ```
 
 検証結果は git が無視する `.guren/plans/` に置かれます。検証結果は一台のマシンについての事実だからです。新しく clone したリポジトリや CI では、そこで `plan:verify` を実行するまで、どの要素も `wired` までにとどまります。
@@ -566,11 +781,10 @@ Not approved at this hash: plan:next, plan:verify, plan:waive, plan:close refuse
 承認済みの計画では、`plan:status` は参照している要素を承認時のハッシュとも比べます。
 
 ```text
-Against the approved baseline: fresh 13, stale 0, unstamped 0, unjudged 1
-  unjudged: validator.comment
+Against the approved baseline: fresh 14, stale 0, unstamped 0, unjudged 0
 ```
 
-アプリケーションが承認時の形か、計画が目指す形を保っている間、その要素は `fresh` です (どちらなのかは `--json` の `basis` に出ます)。ほかの変更で別の形に動くと `stale` になります。`unstamped` はハッシュがない要素で、承認時にセクションを読めなかったものです。`unjudged` はいま読めない要素です。validator はハッシュを取らないので (「承認」の節を参照してください)、常に `unjudged` になります。そのため validator を宣言した計画には上の行が必ず出ます。参照している要素に触れないコミットなら、計画は fresh のままです。
+アプリケーションが承認時の形か、計画が目指す形を保っている間、その要素は `fresh` です (どちらなのかは `--json` の `basis` に出ます)。ほかの変更で別の形に動くと `stale` になります。`unstamped` はハッシュがない要素です。承認時にセクションを読めなかったもの、改訂であとから加わったもの、validator を読む前に承認した計画の validator が該当します。`unjudged` はいま読めない要素です。どちらも要約行の下に id が並びます。参照している要素に触れないコミットなら、計画は fresh のままです。
 
 stale になった要素は、それに依存するステップをすべて保留にします。例のコピーで、実装を始める前に別のコミットが `comments.store` というルートを登録したときの出力です。
 
@@ -597,7 +811,7 @@ A held step is a person’s decision: undo the change that moved it, or edit the
 bunx guren check --plan
 ```
 
-`check --plan` は、開いている計画をまとめて調べます。対象はアプリケーションのルートにある `*.plan.json` と、`docs/plans/` の下の `plan.json` と `*.plan.json` です。開いているとは、現在のハッシュで承認されていて、まだ閉じていないことを指します。報告するのは、`drifted` の要素を持つ計画と、同じ要素を変更する二つの計画です。同じかどうかは id ではなく、アプリケーションの中で何を変えるかで判断します。例の途中で、`posts.excerpt` を改名する二つ目の計画を承認したときの出力です。
+`check --plan` は、開いている計画をまとめて調べます。対象はアプリケーションのルートにある `*.plan.json` と、`docs/plans/` の下の `plan.json` と `*.plan.json` です。開いているとは、現在のハッシュで承認されていて、まだ閉じていないことを指します。報告するのは、`drifted` の要素を持つ計画、上の検査で拒否されるコマンドを持つ計画 (その検査ができる前に承認されたもの)、同じ要素を変更する二つの計画です。同じかどうかは id ではなく、アプリケーションの中で何を変えるかで判断します。例の途中で、`posts.excerpt` を改名する二つ目の計画を承認したときの出力です。
 
 ```text
  WARN  [warn] Approved plan drifted: docs/plans/comments/plan.json has 2 drifted element(s): model.comment, resource.comment.
@@ -697,9 +911,9 @@ Closed 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0. The pla
 
 この機能の元になった RFC (`rfcs/0030-implementation-plans.md`) には、このページのコマンドより先の部分も書かれています。次のものはまだありません。
 
-- 計画の JSON を Claude に書かせる `guren plan` コマンドと、レビューのフィードバックを計画に反映する改訂コマンド。`plan.json` は自分で、またはエージェントとのセッションで書き、編集してください
+- 計画の JSON を Claude に単独で書かせる `guren plan` (いまあるのは `--print-prompt` だけです) と、レビューのコメントをリビジョンに変える `plan --revise`。自分で加えた変更は `plan:revise` で記録できます。`plan.json` は自分で、またはエージェントとのセッションで書いてください
 - 計画を `docs/plans/` ではなく GitHub の issue に置く方式
-- 生成コマンドを代わりに実行する `scaffold` ステップ。`plan:next` は scaffold が作るはずの要素を並べ、生成コマンドはまだない、ステップは検証コマンドだけで完了すると伝えます。`make:feature` を実行し、計画に要らないものを削ってください
+- `plan:scaffold` によるページの生成。計画が追加するスライスのうちページ以外はすべて書き、アクションの本体とレスポンスは `http` ステップに残します。ページは今後も書きません。計画の props から書いたページは、作った時点で計画と一致してしまうためです
 
 ## 次のステップ
 

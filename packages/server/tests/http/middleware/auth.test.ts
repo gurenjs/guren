@@ -7,7 +7,10 @@ import {
   requireGuest,
   type AuthContext,
 } from '../../../src/http/middleware/auth'
+import { AGENT_SURFACE_HEADER } from '../../../src/internal/agent-request'
 import { createMockAuthContext } from '@guren/testing'
+
+const toolCall = { headers: { [AGENT_SURFACE_HEADER]: 'mcp' } }
 
 describe('attachAuthContext', () => {
   it('attaches auth context to the request', async () => {
@@ -87,6 +90,55 @@ describe('requireAuthenticated', () => {
 
     expect(res.status).toBe(302)
     expect(res.headers.get('location')).toBe('/login')
+  })
+
+  it('answers an agent tool call with 401 JSON instead of redirecting', async () => {
+    const app = new Hono()
+    const mockAuth = createMockAuthContext({ isAuthenticated: false })
+
+    app.use(attachAuthContext(() => mockAuth))
+    app.use('/protected/*', requireAuthenticated({ redirectTo: '/login' }))
+    app.get('/protected/resource', (c) => c.text('secret data'))
+
+    const res = await app.request('/protected/resource', toolCall)
+
+    expect(res.status).toBe(401)
+    expect(res.headers.get('location')).toBeNull()
+    expect(await res.json()).toEqual({ message: 'Unauthorized' })
+  })
+
+  it('skips a responseFactory set beside redirectTo for an agent tool call', async () => {
+    const app = new Hono()
+    const mockAuth = createMockAuthContext({ isAuthenticated: false })
+
+    app.use(attachAuthContext(() => mockAuth))
+    app.use(
+      '/protected/*',
+      requireAuthenticated({
+        redirectTo: '/login',
+        responseFactory: () => new Response(null, { status: 302, headers: { Location: '/elsewhere' } }),
+      }),
+    )
+    app.get('/protected/resource', (c) => c.text('secret data'))
+
+    const res = await app.request('/protected/resource', toolCall)
+
+    expect(res.status).toBe(401)
+    expect(res.headers.get('location')).toBeNull()
+  })
+
+  it('keeps a responseFactory without redirectTo for an agent tool call', async () => {
+    const app = new Hono()
+    const mockAuth = createMockAuthContext({ isAuthenticated: false })
+
+    app.use(attachAuthContext(() => mockAuth))
+    app.use('/protected/*', requireAuthenticated({ responseFactory: () => new Response('custom', { status: 418 }) }))
+    app.get('/protected/resource', (c) => c.text('secret data'))
+
+    const res = await app.request('/protected/resource', toolCall)
+
+    expect(res.status).toBe(418)
+    expect(await res.text()).toBe('custom')
   })
 
   it('uses custom status code when provided', async () => {
@@ -186,6 +238,21 @@ describe('requireGuest', () => {
 
     expect(res.status).toBe(302)
     expect(res.headers.get('location')).toBe('/dashboard')
+  })
+
+  it('answers an agent tool call with 403 JSON instead of redirecting', async () => {
+    const app = new Hono()
+    const mockAuth = createMockAuthContext({ isAuthenticated: true })
+
+    app.use(attachAuthContext(() => mockAuth))
+    app.use('/login', requireGuest({ redirectTo: '/dashboard' }))
+    app.get('/login', (c) => c.text('login form'))
+
+    const res = await app.request('/login', toolCall)
+
+    expect(res.status).toBe(403)
+    expect(res.headers.get('location')).toBeNull()
+    expect(await res.json()).toEqual({ message: 'Already authenticated' })
   })
 
   it('uses custom status code when provided', async () => {

@@ -11,16 +11,18 @@ import { fileExists, readIfExists } from './discovery'
 import { makeAuth } from './make-auth'
 import { channelFile } from './make-channel'
 import { API_ONLY_FEATURE_ALTERNATIVE, buildRouteRegistrationHint, makeFeature } from './make-feature'
-import { parseFieldsString, type FieldDefinition, type FieldType } from './fields'
+import { parseFieldsString, type FieldDefinition } from './fields'
 import { collectionSlug, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
-import { schemaDeclaresTable, schemaPathFor } from './schema-parser'
+import { autoIncrementPrimaryKey, buildFieldColumn, TABLE_FACTORY } from './schema-columns'
+import { schemaDeclaresTable, schemaPathFor, type SchemaDialect } from './schema-parser'
 import { eventFile } from './make-event'
 import { jobFile } from './make-job'
 import { listenerFile } from './make-listener'
 import { mailFile } from './make-mail'
-import { MAIL_SCAFFOLD } from './mail-scaffold'
+import { appMailBindings, MAIL_SCAFFOLD, reportKeptMail } from './mail-scaffold'
 import { notificationFile } from './make-notification'
-import { appendTableToSchema, detectSchemaDialect, ensureMysqlImports, ensurePgImports, ensureSqliteImports, insertImport } from './patch-helpers'
+import { appendTableToSchema, detectSchemaDialect, ensureNamedImports, insertImport } from './patch-helpers'
+import { DIALECT_BARRELS } from './drizzle-specifiers'
 import { wireProviders } from './provider-registrar'
 import { DEFAULT_ROUTES_FILE, findRouteRegistrar, wireRouteRegistrar } from './route-registrar'
 import { scaffoldTemplateFile } from './scaffold-templates'
@@ -193,7 +195,14 @@ export default registerAdminRoutes
     description: 'Install mail infrastructure with a transport switchable via MAIL_MAILER and a sample mailable.',
     run: async (options) => {
       const writerOptions = blueprintWriterOptions(options)
-      return installServiceScaffold(MAIL_SCAFFOLD, writerOptions, [mailFile('WelcomeEmail', writerOptions)])
+      const existingMail = await appMailBindings()
+      const mailable = mailFile('WelcomeEmail', writerOptions)
+      if (existingMail.length > 0) {
+        const created = await writeScaffoldFiles([mailable], writerOptions)
+        await reportKeptMail(existingMail, 'only the sample mailable was written')
+        return created
+      }
+      return installServiceScaffold(MAIL_SCAFFOLD, writerOptions, [mailable])
     },
   },
   queue: {
@@ -307,67 +316,6 @@ STORAGE_DISK=local
   },
 }
 
-interface ColumnCode {
-  code: string
-  imports: string[]
-}
-
-/**
- * Per-dialect column builders, keyed by field type. `Record<FieldType, …>` so a
- * missing key fails to compile — a switch with a `default:` arm is how sqlite
- * shipped without a `date` case and quietly emitted text for it.
- */
-type ColumnMapping = Record<FieldType, (name: string, notNull: string) => ColumnCode>
-
-const SQLITE_COLUMNS: ColumnMapping = {
-  string: (name, notNull) => ({ code: `text('${name}')${notNull}`, imports: ['text'] }),
-  text: (name, notNull) => ({ code: `text('${name}')${notNull}`, imports: ['text'] }),
-  number: (name, notNull) => ({ code: `integer('${name}')${notNull}`, imports: ['integer'] }),
-  boolean: (name, notNull) => ({ code: `integer('${name}', { mode: 'boolean' })${notNull}`, imports: ['integer'] }),
-  // Timestamp mode keeps the record type a `Date`, matching pg/mysql — a bare
-  // text column would reject the `Date` that `z.coerce.date()` produces.
-  date: (name, notNull) => ({ code: `integer('${name}', { mode: 'timestamp' })${notNull}`, imports: ['integer'] }),
-  json: (name, notNull) => ({ code: `text('${name}', { mode: 'json' })${notNull}`, imports: ['text'] }),
-}
-
-const PG_COLUMNS: ColumnMapping = {
-  string: (name, notNull) => ({ code: `text('${name}')${notNull}`, imports: ['text'] }),
-  text: (name, notNull) => ({ code: `text('${name}')${notNull}`, imports: ['text'] }),
-  number: (name, notNull) => ({ code: `integer('${name}')${notNull}`, imports: ['integer'] }),
-  boolean: (name, notNull) => ({ code: `boolean('${name}')${notNull}`, imports: ['boolean'] }),
-  // `timestamptz`, not `timestamp`. Drizzle writes `Date.toISOString()`, so
-  // `timestamp without time zone` drops the offset: drizzle reads it back as UTC
-  // and stays self-consistent, but psql and any other client see a different
-  // instant.
-  date: (name, notNull) => ({ code: `timestamp('${name}', { withTimezone: true })${notNull}`, imports: ['timestamp'] }),
-  json: (name, notNull) => ({ code: `jsonb('${name}')${notNull}`, imports: ['jsonb'] }),
-}
-
-const MYSQL_COLUMNS: ColumnMapping = {
-  string: (name, notNull) => ({ code: `varchar('${name}', { length: 255 })${notNull}`, imports: ['varchar'] }),
-  text: (name, notNull) => ({ code: `varchar('${name}', { length: 255 })${notNull}`, imports: ['varchar'] }),
-  number: (name, notNull) => ({ code: `int('${name}')${notNull}`, imports: ['int'] }),
-  boolean: (name, notNull) => ({ code: `boolean('${name}')${notNull}`, imports: ['boolean'] }),
-  // Bare `timestamp` on purpose — MySQL has no `timestamptz`, and its TIMESTAMP
-  // is already stored as UTC and converted per session, so it round-trips the
-  // instant. `datetime` is the one that would drop the offset here.
-  date: (name, notNull) => ({ code: `timestamp('${name}')${notNull}`, imports: ['timestamp'] }),
-  json: (name, notNull) => ({ code: `json('${name}')${notNull}`, imports: ['json'] }),
-}
-
-function buildColumn(mapping: ColumnMapping, field: FieldDefinition): ColumnCode {
-  return mapping[field.type](snakeCase(field.name), field.nullable ? '' : '.notNull()')
-}
-
-/**
- * Column name for a field. Deliberately separate from `tableNameFor()`, which
- * goes through `kebabCase()` and collapses `[_\s]+` to one separator: a field
- * name is taken verbatim from the user and `__dunder__` must survive intact.
- */
-function snakeCase(value: string): string {
-  return value.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
-}
-
 export interface AddResourceResult {
   created: string[]
   /** The prototype's validator and pages a promotion left as they were. */
@@ -417,6 +365,13 @@ export async function addResource(options: RunBlueprintOptions): Promise<AddReso
   return { created, kept, schemaUpdated, routesUpdated }
 }
 
+/** Per dialect, the builders the resource table calls besides its columns', and its `createdAt`. */
+const RESOURCE_TABLE: Record<SchemaDialect, { imports: string[]; createdAt: string }> = {
+  sqlite: { imports: ['integer', 'text'], createdAt: "text('created_at').notNull().$defaultFn(() => new Date().toISOString())" },
+  mysql: { imports: ['int', 'timestamp'], createdAt: "timestamp('created_at').defaultNow().notNull()" },
+  pg: { imports: ['serial', 'text', 'timestamp'], createdAt: "timestamp('created_at', { withTimezone: true }).defaultNow().notNull()" },
+}
+
 async function updateResourceSchema(singular: string, fields: FieldDefinition[]): Promise<boolean> {
   const schemaPath = resolve(process.cwd(), schemaPathFor(null))
   let content = await readFile(schemaPath, 'utf8')
@@ -430,35 +385,14 @@ async function updateResourceSchema(singular: string, fields: FieldDefinition[])
   }
 
   const dialect = detectSchemaDialect(content)
+  const columns = fields.map((field) => buildFieldColumn(dialect, field))
+  const factory = TABLE_FACTORY[dialect]
+  const { imports, createdAt } = RESOURCE_TABLE[dialect]
+  content = ensureNamedImports(content, DIALECT_BARRELS[dialect], [...new Set([factory, ...imports, ...columns.flatMap((c) => c.imports)])])
 
-  if (dialect === 'sqlite') {
-    const columns = fields.map((field) => buildColumn(SQLITE_COLUMNS, field))
-    const imports = [...new Set(['sqliteTable', 'integer', 'text', ...columns.flatMap((c) => c.imports)])]
-    content = ensureSqliteImports(content, imports)
-
-    const fieldLines = fields.map((field, index) => `  ${field.name}: ${columns[index].code},`).join('\n')
-    const schemaBlock = `\nexport const ${schemaIdentifier} = sqliteTable('${tableName}', {\n  id: integer('id').primaryKey({ autoIncrement: true }),\n${fieldLines}\n  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),\n})\n`
-
-    content = appendTableToSchema(content, schemaIdentifier, schemaBlock).source
-  } else if (dialect === 'mysql') {
-    const columns = fields.map((field) => buildColumn(MYSQL_COLUMNS, field))
-    const imports = [...new Set(['mysqlTable', 'int', 'timestamp', ...columns.flatMap((c) => c.imports)])]
-    content = ensureMysqlImports(content, imports)
-
-    const fieldLines = fields.map((field, index) => `  ${field.name}: ${columns[index].code},`).join('\n')
-    const schemaBlock = `\nexport const ${schemaIdentifier} = mysqlTable('${tableName}', {\n  id: int('id').primaryKey().autoincrement(),\n${fieldLines}\n  createdAt: timestamp('created_at').defaultNow().notNull(),\n})\n`
-
-    content = appendTableToSchema(content, schemaIdentifier, schemaBlock).source
-  } else {
-    const columns = fields.map((field) => buildColumn(PG_COLUMNS, field))
-    const imports = [...new Set(['pgTable', 'serial', 'text', 'timestamp', ...columns.flatMap((c) => c.imports)])]
-    content = ensurePgImports(content, imports)
-
-    const fieldLines = fields.map((field, index) => `  ${field.name}: ${columns[index].code},`).join('\n')
-    const schemaBlock = `\nexport const ${schemaIdentifier} = pgTable('${tableName}', {\n  id: serial('id').primaryKey(),\n${fieldLines}\n  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),\n})\n`
-
-    content = appendTableToSchema(content, schemaIdentifier, schemaBlock).source
-  }
+  const fieldLines = fields.map((field, index) => `  ${field.name}: ${columns[index].code},`).join('\n')
+  const schemaBlock = `\nexport const ${schemaIdentifier} = ${factory}('${tableName}', {\n  id: ${autoIncrementPrimaryKey(dialect, 'id').code},\n${fieldLines}\n  createdAt: ${createdAt},\n})\n`
+  content = appendTableToSchema(content, schemaIdentifier, schemaBlock).source
 
   await writeFile(schemaPath, content, 'utf8')
   return true

@@ -116,9 +116,8 @@ async function main(): Promise<void> {
     }
     assert(tsconfig.include?.includes('.guren/**/*'), 'upgrade-existing-app smoke expected tsconfig to include .guren/**/* after upgrade.')
 
-    // Not `bunx guren`: `guren` is not on npm, so that spelling only works
-    // while the temp app's node_modules/.bin link happens to exist and 404s
-    // the moment it does not. Run the CLI source, as fresh-app.ts does.
+    // Not `bunx guren`: without the temp app's .bin link it runs the npm
+    // placeholder, which exits 1. Run the CLI source, as fresh-app.ts does.
     await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'codegen', '--force'], appDir)
     await run(['bun', 'run', 'typecheck'], appDir)
     await run(['bun', 'run', 'build'], appDir)

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -54,7 +54,6 @@ describe('plan:render', () => {
     const findings = (await renderedChecks()).filter((result) => result.status !== 'pass')
     expect(findings.map((finding) => `${finding.status} ${finding.key} ${finding.elementId ?? ''}`).sort()).toEqual([
       'warn plan:acceptance route.comments.destroy',
-      'warn plan:app-unreadable ',
       'warn plan:route-authorization route.comments.store',
     ])
   })
@@ -81,6 +80,23 @@ describe('plan:render', () => {
     const duplicates = (await renderedChecks()).filter((result) => result.key === 'plan:duplicate-id')
     expect(duplicates).toHaveLength(1)
     expect(duplicates[0]).toMatchObject({ elementId: 'model.post', status: 'fail' })
+  })
+
+  test('should print the page path and the checks it carries under --json', async () => {
+    const lines: string[] = []
+    const log = spyOn(console, 'log').mockImplementation((line: unknown) => {
+      lines.push(String(line))
+    })
+    try {
+      await runCommand(builtinSubCommands['plan:render'], { rawArgs: ['comments.plan.json', '--app', APP_DIR, '--json'] })
+    } finally {
+      log.mockRestore()
+    }
+
+    const printed = JSON.parse(lines.join('\n')) as { path: string; checks: PlanCheckResult[] }
+    expect(printed.path.endsWith('comments.plan.html')).toBe(true)
+    expect(printed.checks).toEqual(await renderedChecks())
+    expect(printed.checks.some((result) => result.status === 'warn')).toBe(true)
   })
 
   test('should scan the root --app names while the plan stays where the shell points', async () => {

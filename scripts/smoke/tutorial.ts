@@ -1,8 +1,8 @@
 /**
- * `smoke:tutorial` (RFC 0019 §3): the tutorial chapters under docs/en/tutorials/
- * are the script. Each chapter's `run` blocks execute, `file=` blocks are
+ * `smoke:tutorial [course]` (RFC 0019 §3): the chapters under docs/en/<course>/
+ * (`tutorials` by default, or `agent-course`) are the script. Each chapter's `run` blocks execute, `file=` blocks are
  * written, `manual` blocks are skipped, and every chapter ends with `guren gate`
- * and `bun run build` on the app the reader would have. The one substitution:
+ * (unless its own gate passed on the same app) and `bun run build`. The one substitution:
  * `bunx create-guren-app` becomes this checkout's scaffolder with the app's
  * `@guren/*` ranges rewritten to local builds, the same vendoring
  * `smoke:starter` uses. Everything else runs as written.
@@ -15,7 +15,9 @@ import { assertSingleInstalledCopies, ensureBuiltPackages, rewriteAppDependencie
 import {
   cdTarget,
   chapterFiles,
+  COURSES,
   executableBlocks,
+  isCourse,
   parseScaffoldCommand,
   parseTutorialBlocks,
   type ExecutableBlock,
@@ -26,6 +28,8 @@ const repoRoot = resolve(import.meta.dir, '../..')
 const CLI_BIN = resolve(repoRoot, 'packages/cli/src/bin.ts')
 const CREATE_APP = resolve(repoRoot, 'packages/create-app/src/cli.ts')
 const BANNER_TIMEOUT_MS = 90_000
+const COURSE = process.argv[2] ?? 'tutorials'
+if (!isCourse(COURSE)) throw new Error(`Unknown course "${COURSE}"; expected one of ${COURSES.join(', ')}.`)
 
 interface Background {
   block: RunBlock
@@ -42,6 +46,8 @@ interface Session {
   appDir: string | null
   env: Record<string, string>
   background: Background[]
+  /** `appSnapshot()` when a chapter's own `bunx guren gate` last passed; the chapter-end gate skips an unchanged app. */
+  gatedSnapshot: string | null
 }
 
 function log(message: string): void {
@@ -355,12 +361,30 @@ async function applyBlock(session: Session, block: ExecutableBlock, chapter: str
         return
       }
       await runShell(session, block)
+      if (block.mode === 'normal' && block.body.trim() === 'bunx guren gate' && session.cwd === session.appDir) {
+        session.gatedSnapshot = await appSnapshot(session)
+      }
     }
   }
 }
 
+/**
+ * The app as the gate sees it: the tree of every tracked and untracked file git
+ * does not ignore, written through a scratch index so the app's own index is
+ * untouched, plus `.env`, which the scaffold ignores and the gate still reads.
+ */
+async function appSnapshot(session: Session): Promise<string> {
+  const appDir = session.appDir!
+  const env = { ...session.env, GIT_INDEX_FILE: join(session.tempRoot, 'snapshot.index') }
+  await rm(env.GIT_INDEX_FILE, { force: true })
+  await capture(['git', 'add', '-A'], appDir, env)
+  const tree = (await capture(['git', 'write-tree'], appDir, env)).trim()
+  const dotEnv = await readFile(join(appDir, '.env'), 'utf8').catch(() => '')
+  return `${tree}\n${Bun.hash(dotEnv)}`
+}
+
 async function runChapter(session: Session, name: string): Promise<void> {
-  const file = join('docs/en/tutorials', name)
+  const file = join('docs/en', COURSE, name)
   const chapter = parseTutorialBlocks(await readFile(join(repoRoot, file), 'utf8'), file)
   if (chapter.issues.length > 0) {
     throw new Error(`${file} does not parse; run audit:tutorial-blocks:\n${chapter.issues.map((issue) => `  line ${issue.line}: ${issue.message}`).join('\n')}`)
@@ -379,7 +403,14 @@ async function runChapter(session: Session, name: string): Promise<void> {
     return
   }
   log(`Chapter ${name}: gate and build`)
-  await run(['bun', CLI_BIN, 'gate'], session.appDir, session.env)
+  if (session.gatedSnapshot !== null && session.gatedSnapshot === (await appSnapshot(session))) {
+    console.log(`\nThe chapter's own \`bunx guren gate\` passed on this same app; not gating it twice.`)
+  } else {
+    // The app's installed CLI, as `bunx guren` resolves it: the checkout's
+    // CLI_BIN loads a second @guren/orm beside the app's vendored one.
+    await run(['bun', join(session.appDir, 'node_modules/.bin/guren'), 'gate'], session.appDir, session.env)
+  }
+  session.gatedSnapshot = null
   await run(['bun', 'run', 'build'], session.appDir, session.env)
   await tagChapter(session, name)
 }
@@ -403,9 +434,9 @@ async function tagChapter(session: Session, name: string): Promise<void> {
 async function main(): Promise<void> {
   await ensureBuiltPackages()
   const through = process.env.GUREN_TUTORIAL_THROUGH
-  const names = (await chapterFiles(join(repoRoot, 'docs/en/tutorials')))
+  const names = (await chapterFiles(join(repoRoot, 'docs/en', COURSE)))
     .filter((name) => !through || name.slice(0, 2) <= through)
-  if (names.length === 0) throw new Error('No chapters found under docs/en/tutorials (files named NN-<slug>.md).')
+  if (names.length === 0) throw new Error(`No chapters found under docs/en/${COURSE} (files named NN-<slug>.md).`)
 
   const tempRoot = await mkdtemp(join(tmpdir(), 'guren-tutorial-'))
   tempRootForLog = tempRoot
@@ -421,6 +452,7 @@ async function main(): Promise<void> {
     cwd: workspace,
     appDir: null,
     background: [],
+    gatedSnapshot: null,
     env: {
       ...(process.env as Record<string, string>),
       TMPDIR: runtimeTempDir,

@@ -95,7 +95,7 @@ export async function bootstrapApplication(mod: Record<string, unknown>): Promis
     try {
       results.push(await ready)
     } catch (error) {
-      throw new Error(`Application ready() promise rejected: ${String(error)}`)
+      throw new Error(`Application ready() promise rejected: ${String(error)}`, { cause: error })
     }
   }
 
@@ -118,25 +118,32 @@ export async function bootstrapApplication(mod: Record<string, unknown>): Promis
   throw new Error('Application entry must export a default or ready/bootstrap that yields an object with a listen() method.')
 }
 
-/**
- * Resolve the app's entry, import it, bootstrap it, and boot it — the block every command
- * that must reach a *live* application performs. `boot()` failures are rethrown, not
- * warned about: a provider that failed after auth registered leaves a store that *looks*
- * configured, so a token minted against it lands in an app that never finished booting.
- */
-export async function loadBootedApplication(appRoot?: string): Promise<MaybeApplication> {
+/** Load the entry and resolve its application without choosing a boot policy. */
+export async function loadApplication(appRoot?: string): Promise<{
+  entry: string
+  moduleExports: Record<string, unknown>
+  app: MaybeApplication
+}> {
   const entry = await resolveMainEntry(appRoot)
-
   let moduleExports: Record<string, unknown>
   try {
     moduleExports = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
   } catch (error) {
     throw new Error(
       `Failed to import application entry (${entry}): ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     )
   }
+  const app = await bootstrapApplication(moduleExports)
+  return { entry, moduleExports, app }
+}
 
-  const app: MaybeApplication = await bootstrapApplication(moduleExports)
+/**
+ * Load and boot a live application. Boot failures propagate: a partially configured
+ * provider must not be used to issue credentials or execute application commands.
+ */
+export async function loadBootedApplication(appRoot?: string): Promise<MaybeApplication> {
+  const { app, moduleExports } = await loadApplication(appRoot)
   await ensureApplicationBooted(app, moduleExports, { rethrow: true })
   return app
 }

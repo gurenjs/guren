@@ -9,27 +9,33 @@
  */
 
 import { realpath } from 'node:fs/promises'
-import { basename } from 'node:path'
+import { basename, resolve } from 'node:path'
 
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { runGit } from './changed-files'
 import { CliError } from './cli-error'
 import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
+import { planScaffoldTargets, type PlanScaffoldTargets } from './plan-scaffold'
 import { planStatusFile } from './plan-status'
 import { loadPlanAppState, type PlanAppState } from './plan/app-state'
 import { requirePlanApproval, type PlanApprovedStanding } from './plan/approvals'
 import { planBesideExclusions } from './plan/beside'
 import { describeCloseBlockers, formatCloseBlocker, type CloseBlocker } from './plan/close-remedy'
+import { PLAN_COMMAND_FORM, refusedPlanCommands } from './plan/command-allowlist'
 import { planDecisionsPath, type PlanWaiver } from './plan/decisions'
 import { judgeFreshness } from './plan/freshness'
 import { hasBaseline } from './plan/render'
 import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElementSection } from './plan/schema'
 import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress, type PlanStepContext, type PlanStepContextElement } from './plan/step-context'
-import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall } from './plan/state'
-import { derivePlanTasks, listPlanSteps, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
+import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall, type PlanStepRecord } from './plan/state'
+import { planScaffoldCommandLine, planScaffoldCoverage, planScaffoldMountCommandLine, planScaffoldMounts } from './plan/scaffold'
+import { derivePlanTasks, listPlanSteps, planLaterRelationships, type PlanDerivedStep, type PlanLaterRelationship, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
 import { hashFiles, readPlanWaivers, recordDrift, recordStillHolds, type PlanWaiversRead } from './plan/verification'
+import { readStepStart } from './plan/work'
+import { isRoutesFileMounted } from './routes-check'
+import { pathExists } from './utils'
 
 export const PLAN_NEXT_REPORT_VERSION = 1
 
@@ -42,11 +48,24 @@ export interface PlanNextElement {
   waived?: { reason: string; at: string; by?: string }
 }
 
+/** A relationship by the plan's ids: the declaring model, its name and type, and its target. */
+export interface PlanNextRelationship {
+  model: string
+  name: string
+  type: PlanLaterRelationship['relationship']['type']
+  target: string
+}
+
 export interface PlanNextStep extends Pick<PlanDerivedStep, 'id' | 'kind' | 'verify' | 'generates' | 'part'> {
   taskId: string
   task: PlanTaskTitle
   /** The elements the step completes. */
   elements: PlanNextElement[]
+  /**
+   * Relationships an earlier task's model declares that wait on this step's work (RFC 0030 §5,
+   * Order): written in the declaring model's file, judged here.
+   */
+  relationships?: PlanNextRelationship[]
   /** The behaviours the step writes or must see pass. */
   acceptance: PlanAcceptance[]
   /** Where the Stop hook gave up on this step; cleared by this call, so the next run of the loop is asked again. */
@@ -55,6 +74,29 @@ export interface PlanNextStep extends Pick<PlanDerivedStep, 'id' | 'kind' | 'ver
   unconfirmed?: PlanStepContextElement[]
   /** Set where the step was verified and only these fingerprinted files changed since: it is re-checked, not re-implemented. */
   drifted?: string[]
+  /**
+   * The plan hash the step was verified against, where that is not this one: after a revision,
+   * the step is re-checked with `plan:verify` before anything is implemented.
+   */
+  verifiedAt?: string
+  /**
+   * A scaffold or tests step of an approved plan with targets on disk, which plan:scaffold refuses:
+   * `plan:verify` is what it needs, and `missing` is written by hand. `earlier` is its record where
+   * that names another plan hash: built under an earlier version of the plan. Leaves out `scaffold`.
+   */
+  scaffolded?: PlanScaffoldTargets & { earlier?: { planHash: string; outcome: PlanStepRecord['outcome'] } }
+  /** A scaffold step's: the command that writes it, the `generates` it writes, and those the `http` step writes by hand. A tests step's `writes` are its behaviours, one test skeleton each. */
+  scaffold?: { command: string; writes: string[]; leaves: string[] }
+  /**
+   * The http step holding the routes a scaffold step wrote: the command that mounts their file,
+   * the step's elements that scaffold wrote as stubs, and those it left to write by hand.
+   */
+  mount?: { command: string; file: string; scaffolded: string[]; byHand: string[] }
+  /**
+   * An http step's: the added or renamed views its actions render. `pages.gen.ts` names a page only once
+   * its file exists, and the task's last http step typechecks, so each is written here as a stub the pages step completes.
+   */
+  pageStubs?: Array<{ view: string; page: string }>
 }
 
 export interface PlanNextStaleElement extends PlanStepContextElement {
@@ -126,6 +168,13 @@ function sectionItems(plan: PlanDraft, section: PlanElementSection): ReadonlyArr
   }
 }
 
+function relationshipsOf(plan: PlanDraft, derivation: PlanTaskDerivation, stepId: string): Pick<PlanNextStep, 'relationships'> {
+  const relationships = planLaterRelationships(plan, derivation)
+    .filter((later) => later.stepId === stepId)
+    .map((later) => ({ model: later.model.id, name: later.relationship.name, type: later.relationship.type, target: later.relationship.target }))
+  return relationships.length > 0 ? { relationships } : {}
+}
+
 function elementsOf(plan: PlanDraft, ids: readonly string[], waivers: ReadonlyMap<string, PlanWaiver>): PlanNextElement[] {
   const wanted = new Set(ids)
   const found: PlanNextElement[] = []
@@ -182,10 +231,39 @@ async function unverifiedElements(
   }
 }
 
+/**
+ * A draft is never scaffolded (plan:scaffold refuses it). A scan that throws leaves the step one to
+ * scaffold, and plan:scaffold's own refusal then names the way on.
+ */
+async function scaffoldedAlready(
+  root: string,
+  path: string,
+  plan: PlanDraft,
+  next: { task: PlanDerivedTask; step: PlanDerivedStep },
+  earlier: PlanStepRecord | undefined,
+): Promise<PlanNextStep['scaffolded']> {
+  if (!hasBaseline(plan)) return undefined
+  const targets = await planScaffoldTargets(root, path, plan, next.task, next.step).catch(() => undefined)
+  if (!targets || targets.existing.length === 0) return undefined
+  return { ...targets, ...(earlier ? { earlier: { planHash: earlier.planDigest, outcome: earlier.outcome } } : {}) }
+}
+
+/** The step hands a plan's commands to the implementing agent as written, so one the allowlist refuses stops the whole plan (§8). */
+function refuseDisallowedCommands(path: string, plan: PlanDraft): void {
+  const refused = refusedPlanCommands(plan.commands).map(({ id, quoted, reason }) => `  ${id}: ${quoted} is refused: ${reason}`)
+  if (refused.length === 0) return
+  throw new CliError(
+    `${basename(path)} carries commands the implementing agent would run as written, so no step of it is handed out:\n${refused.join('\n')}\n`
+      + `A plan's commands are ${PLAN_COMMAND_FORM} naming a generator; fix them in the plan (plan:render shows each finding), and approve it again if it was approved.`,
+  )
+}
+
 export async function planNextFile(planPath: string, options: PlanNextFileOptions): Promise<PlanNextReport> {
   const { path, plan } = await readPlanFile(planPath, options.cwd)
   // Before the tree is read or a step marked: an unapproved plan hands out no work, whatever else is wrong.
   const approval = await requirePlanApproval(path, plan, 'no step of it is handed out')
+  // A draft passes the gate above without §2 having run, and an approval may predate the allowlist.
+  refuseDisallowedCommands(path, plan)
   const root = options.appRoot
   const derivation = derivePlanTasks(plan, { apiOnly: await isConfirmedApiOnlyApp(root).catch(() => false) })
   const digest = planDigest(plan)
@@ -274,9 +352,9 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
 
   // The state files are git-ignored before the tree is read, and excluded from the reading for a
   // checkout that tracked them before, so neither an earlier run's write nor the mark makes it
-  // dirty; so is the page `plan:render` writes beside the plan, with its temporaries, which the
-  // plan commands write. The plan and its records are not: a waiver steers which step is returned.
-  // Excluded by pathspec, since porcelain paths are relative to the repository root, not to `root`.
+  // dirty; so is the page `plan:render` writes beside the plan, with its temporaries. The plan and
+  // its records, revisions included, are not: a waiver steers which step is returned. Excluded
+  // by pathspec, since porcelain paths are relative to the repository root, not to `root`.
   await ensurePlanStateIgnored(root)
   const [realRoot, realPlan] = await Promise.all([realpath(root), realpath(path)])
   const dirty =
@@ -305,16 +383,25 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   const behaviours = new Set(step.acceptanceIds)
   // A stall is what the last session ended on: reported once, then the hook is asked again.
   const resumed = previous && previous.step === step.id && !previous.stalled && !answered ? previous : undefined
+  // The step's work is measured from here (plan/work.ts), so marking the same step again keeps where it started.
+  const from = previous?.step === step.id ? previous.from : ((await readStepStart(realRoot)) ?? null)
   const active: PlanActiveStep = resumed ?? {
     plan: toPosixRelative(root, path),
     step: step.id,
     startedAt: (options.now ?? (() => new Date()))().toISOString(),
     continuations: 0,
+    ...(from !== undefined ? { from } : {}),
   }
   await writePlanActiveStep(root, slug, active)
   const unconfirmed = judged.contexts.get(step.id)?.unconfirmed ?? []
   const record = records[step.id]
   const drifted = record ? recordDrift(record, digest, hashes, log.waived) : []
+  const earlier = record && record.planDigest !== digest ? record : undefined
+  const verifiedAt = earlier?.outcome === 'verified' ? earlier.planDigest : undefined
+  const scaffolded = await scaffoldedAlready(root, path, plan, next, earlier)
+  // Named only while there is something to mount: a slice an older CLI scaffolded has no routes file.
+  const mount = mountOf(plan, derivation, task, step, planPath)
+  const mountable = mount && (await pathExists(resolve(root, mount.file))) && !(await isRoutesFileMounted(root, mount.file)) ? { mount } : {}
 
   return {
     ...head,
@@ -327,12 +414,61 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
       taskId: task.id,
       task: task.title,
       elements: elementsOf(plan, step.elementIds, log.waivers),
+      ...relationshipsOf(plan, derivation, step.id),
       acceptance: plan.tasks.flatMap((intent) => intent.acceptance).filter((behaviour) => behaviours.has(behaviour.id)),
       ...stallOf(step.id),
       ...(unconfirmed.length > 0 ? { unconfirmed } : {}),
       ...(drifted.length > 0 ? { drifted } : {}),
+      ...(verifiedAt === undefined ? {} : { verifiedAt }),
+      ...(scaffolded ? { scaffolded } : step.kind === 'scaffold' || step.kind === 'tests' ? { scaffold: scaffoldOf(plan, step, planPath) } : {}),
+      ...mountable,
+      ...pageStubsOf(plan, step),
     },
   }
+}
+
+function pageStubsOf(plan: PlanDraft, step: PlanDerivedStep): Pick<PlanNextStep, 'pageStubs'> {
+  if (step.kind !== 'http') return {}
+  const owned = new Set(step.elementIds)
+  const views = new Set<string>()
+  for (const controller of plan.controllers) {
+    for (const action of controller.actions) {
+      if (owned.has(action.id) && action.response.kind === 'inertia') views.add(action.response.view)
+    }
+  }
+  const pageStubs = plan.views
+    .filter((view) => views.has(view.id) && (view.change.kind === 'add' || view.change.kind === 'rename'))
+    .map((view) => ({ view: view.id, page: view.page }))
+  return pageStubs.length > 0 ? { pageStubs } : {}
+}
+
+function scaffoldOf(plan: PlanDraft, step: PlanDerivedStep, planArgument: string): NonNullable<PlanNextStep['scaffold']> {
+  const command = planScaffoldCommandLine(planArgument, step.id)
+  if (step.kind === 'tests') return { command, writes: [...step.acceptanceIds], leaves: [] }
+  const { emitted, left } = planScaffoldCoverage(plan, step)
+  return { command, writes: emitted, leaves: left.map((element) => element.id) }
+}
+
+function mountOf(plan: PlanDraft, derivation: PlanTaskDerivation, task: PlanDerivedTask, step: PlanDerivedStep, planArgument: string): PlanNextStep['mount'] {
+  const mount = planScaffoldMounts(plan, derivation).find((candidate) => candidate.httpStep === step.id)
+  const scaffold = task.steps.find((candidate) => candidate.id === mount?.scaffoldStep)
+  if (!mount || !scaffold) return undefined
+  const written = new Set(planScaffoldCoverage(plan, scaffold).emitted)
+  return {
+    command: planScaffoldMountCommandLine(planArgument, step.id),
+    file: mount.path,
+    scaffolded: step.elementIds.filter((id) => written.has(id)),
+    byHand: step.elementIds.filter((id) => !written.has(id)),
+  }
+}
+
+/** The command is spelled with the plan argument the text is formatted for, as the scaffold step's is. */
+function mountLines(step: PlanNextStep, mount: NonNullable<PlanNextStep['mount']>, planArgument: string): string[] {
+  return [
+    `Mount the routes the scaffold step wrote first, with \`${planScaffoldMountCommandLine(planArgument, step.id)}\`, not by hand: it calls ${mount.file} from the entry registrar.`,
+    ...(mount.scaffolded.length > 0 ? [`  Written as stubs by plan:scaffold, to finish: ${mount.scaffolded.join(', ')}. Each action validates and authorizes as planned and answers 501; write its body and response.`] : []),
+    ...(mount.byHand.length > 0 ? [`  Not written by plan:scaffold, to write by hand: ${mount.byHand.join(', ')}.`] : []),
+  ]
 }
 
 /** A multi-line text under a line that already carries its first line. */
@@ -394,6 +530,28 @@ function heldLines(report: PlanNextReport, planArgument: string): string[] {
   return lines
 }
 
+/** plan:scaffold refuses a draft, so a draft's step names the approval first. */
+function scaffoldLines(step: PlanNextStep, scaffold: NonNullable<PlanNextStep['scaffold']>, draft: boolean, planArgument: string): string[] {
+  const command = planScaffoldCommandLine(planArgument, step.id)
+  const lines = draft
+    ? [`Approve the plan first (bunx guren plan:approve ${planArgument}): plan:scaffold writes this step from an approved plan only, as`, `  ${command}`]
+    : [step.kind === 'tests' ? `Write this step\u2019s test skeletons with \`${command}\`, not by hand, then fill them in.` : `Write this step with \`${command}\`, not by hand.`]
+  if (step.kind === 'tests') {
+    lines.push(
+      `  It writes one TestApp test per behaviour (${scaffold.writes.join(', ')}), with its request and the expectations the plan states, into one file.`,
+      '  Each fails at a given() call until the setup it names is written (records, the signed-in actor, path parameters); replace every call, and keep each title\u2019s id and its request.',
+    )
+    return lines
+  }
+  if (scaffold.writes.length > 0) {
+    lines.push(
+      `  It writes each added model (table and class), its validators and resources, each policy with a provider registering it, each added controller with its actions as stubs, the routes to them in a file of their own that the http step mounts, and the side-effect classes: ${scaffold.writes.join(', ')}`,
+    )
+  }
+  if (scaffold.leaves.length > 0) lines.push(`  It does not write ${scaffold.leaves.join(', ')}; the http step implements them by hand.`)
+  return lines
+}
+
 export function formatPlanNext(report: PlanNextReport, planArgument: string): string {
   const lines = [`${report.plan.title} (${report.plan.file})`, '']
   if (report.verified.length > 0) lines.push(`Verified: ${report.verified.join(', ')}`, '')
@@ -422,21 +580,35 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
       lines.push('', 'Elements the step completes:')
       for (const element of toImplement) lines.push(`  ${element.id} (${element.section})`)
     }
+    if (step.relationships) {
+      lines.push('', 'Relationships of earlier models the step completes, declared in those models\u2019 files:')
+      for (const relationship of step.relationships) lines.push(`  ${relationship.model} ${relationship.name} (${relationship.type} ${relationship.target})`)
+    }
     if (waived.length > 0) {
       lines.push('', 'Waived, not to be implemented:', ...waived, '  The step verifies without them; a waiver is the person\u2019s decision, not yours to take or to undo.')
     }
-    if (step.generates.length > 0) {
+    // A step verified before the revision was scaffolded then, and plan:scaffold refuses targets that exist.
+    if (step.scaffold && !step.verifiedAt) {
+      lines.push('', ...scaffoldLines(step, step.scaffold, report.plan.hash === null, planArgument))
+    }
+    // A draft is never scaffolded (plan:scaffold refuses it), so it has nothing to mount.
+    if (step.mount && report.plan.hash !== null) lines.push('', ...mountLines(step, step.mount, planArgument))
+    if (step.pageStubs) {
       lines.push(
         '',
-        `The elements a scaffold would generate: ${step.generates.join(', ')}`,
-        '  No generator for this step ships yet, so it completes on its verify commands; the steps after it implement these elements.',
+        'Pages its actions render, which the pages step writes: create each now as a stub with a default export and the plan\u2019s Props, so codegen names it in .guren/pages.gen.ts and the typecheck passes. Leave the rest of the page to the pages step.',
+        ...step.pageStubs.map((stub) => `  ${stub.page} (${stub.view})`),
       )
     }
     if (step.acceptance.length > 0) {
-      lines.push('', `Behaviours${step.kind === 'tests' ? ' to write, as test titles `[<id>] <description>`, failing' : ' that must pass'}:`)
+      const heading = step.kind !== 'tests' ? ' that must pass' : step.scaffolded ? ' its tests carry' : ' to write, as test titles `[<id>] <description>`, failing'
+      lines.push('', `Behaviours${heading}:`)
       for (const behaviour of step.acceptance) {
         lines.push(`  [${behaviour.id}] ${behaviour.description}`)
         lines.push(`      ${behaviour.kind}; actor ${behaviour.actor}; route ${behaviour.route}${behaviour.given.length ? `; given ${behaviour.given.join(', ')}` : ''}; expect ${describeExpectation(behaviour)}`)
+      }
+      if (step.kind === 'tests') {
+        lines.push('  Each test requests its route through a TestApp, in its body or a function of its file it calls: plan:verify reads the requests before it runs them.')
       }
     }
     if (step.stalled) {
@@ -455,6 +627,21 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     const verify = `bunx guren plan:verify ${planArgument} --step ${step.id}`
     if (step.drifted) {
       lines.push('', `Verified before; files it was verified at have changed since: ${step.drifted.join(', ')}.`, `Re-check it with \`${verify}\` rather than re-implementing it, fix only what that run reports, and commit once it is verified.`)
+    } else if (step.scaffolded) {
+      const { existing, missing, earlier } = step.scaffolded
+      const built = earlier ? `Built under an earlier version of the plan (recorded ${earlier.outcome} against plan hash ${earlier.planHash.slice(0, 12)})` : 'Scaffolded already'
+      lines.push(
+        '',
+        `${built}: ${existing.join(', ')} ${existing.length === 1 ? 'is' : 'are'} on disk, and plan:scaffold writes nothing for a step any of whose targets exist.`,
+        ...(missing.length > 0 ? [`Not there yet, to write by hand: ${missing.join(', ')}.`] : []),
+        `Run \`${verify}\` rather than plan:scaffold: implement only what that run reports, and commit once it is verified.`,
+      )
+    } else if (step.verifiedAt) {
+      lines.push(
+        '',
+        `Verified against plan hash ${step.verifiedAt.slice(0, 12)}, before the plan changed to this one.`,
+        `Re-check it with \`${verify}\` before implementing anything: implement only what that run reports against the revised plan, and commit once it is verified.`,
+      )
     } else {
       lines.push('', `Implement this step only, then run \`${verify}\` and commit once it is verified.`)
     }

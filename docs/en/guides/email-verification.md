@@ -200,7 +200,8 @@ if (!isEmailVerified(null)) {
 ### Require Verified Email Middleware
 
 ```ts
-import { Router, requireVerifiedEmail } from '@guren/core'
+import { AUTH_CONTEXT_KEY, Router, requireVerifiedEmail } from '@guren/core'
+import type { AuthContext } from '@guren/core'
 
 const router = new Router()
 
@@ -209,16 +210,21 @@ router.get('/dashboard', [DashboardController, 'index']).middleware(
   requireVerifiedEmail({ redirectTo: '/email/verify' })
 )
 
-// Custom user getter
+// Check the user of another guard
 router.get('/profile', [ProfileController, 'show']).middleware(
   requireVerifiedEmail({
     redirectTo: '/verify-email',
     getUser: async (ctx) => {
-      return ctx.get('user')
+      const auth = ctx.get<AuthContext | undefined>(AUTH_CONTEXT_KEY)
+      return (await auth?.guard('api').user<{ emailVerifiedAt: Date | null }>()) ?? null
     },
   })
 )
 ```
+
+Without `getUser`, the middleware checks the user the auth context resolves for the request. Pass `getUser` to read the user from somewhere else, such as an `api` guard registered with `auth.registerGuard('api', factory)` (see [Authentication](./authentication.md)).
+
+An agent tool call (see the [Agent interface](./agent-interface.md)) cannot follow the redirect, so an unverified user calling a tool gets `403` with `{ "message": "Email address is not verified" }` instead.
 
 ## URL Helpers
 

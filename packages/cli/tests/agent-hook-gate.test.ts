@@ -1,16 +1,15 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync, writeFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { writeFileSync } from 'node:fs'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { PLAN_STATE_VERSION, type PlanState } from '../src/plan/state'
-import { gateAppFiles, initGitRepo, runAgentHook, writeWorkspaceFiles } from './helpers'
+import { gateAppFiles, initGitRepo, runAgentHook, shippedHookCommand, writeWorkspaceFiles } from './helpers'
 import { HTTP_STEP, writePlanVerifyApp } from './plan-fixture'
 
 // The real gate runs against the temp app (see runAgentHook); its stage rules
 // are covered by gate.test.ts. `true`/`false` stand in for the subprocess stages.
 
 const template = resolve(import.meta.dir, '../templates/agent/core/hooks/gate-on-stop.ts')
-const codexConfig = resolve(import.meta.dir, '../templates/agent/targets/codex/hooks.json')
 
 const ACTIVE = { stop_hook_active: false }
 
@@ -129,8 +128,7 @@ describe('gate-on-stop hook (Claude Code / Codex contract)', () => {
   })
 
   test("the shipped Codex command finds the app's .codex/ upward from a subdirectory", async () => {
-    const command = (JSON.parse(readFileSync(codexConfig, 'utf8')) as { hooks: { Stop: Array<{ hooks: Array<{ command: string }> }> } })
-      .hooks.Stop[0]!.hooks[0]!.command
+    const command = await shippedHookCommand('targets/codex/hooks.json', 'Stop')
     const result = await runAgentHook(
       template,
       '.codex/hooks/gate-on-stop.ts',
@@ -140,6 +138,50 @@ describe('gate-on-stop hook (Claude Code / Codex contract)', () => {
         await failingApp(dir)
       },
       { subdir: 'app/Http', argv: ['sh', '-c', command] },
+    )
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toContain('guren gate: typecheck failed')
+  })
+
+  test('the shipped Claude Code command gates the app from a subdirectory the agent cd-ed into', async () => {
+    const command = await shippedHookCommand('targets/claude/settings.json', 'Stop')
+    const result = await runAgentHook(
+      template,
+      '.claude/hooks/gate-on-stop.ts',
+      ACTIVE,
+      async (dir) => {
+        initGitRepo(dir)
+        await failingApp(dir)
+      },
+      { subdir: 'app/Http', argv: ['bash', '-c', command], env: (dir) => ({ CLAUDE_PROJECT_DIR: dir }) },
+    )
+
+    expect(result.stderr).not.toContain('Module not found')
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toContain('guren gate: typecheck failed')
+  })
+
+  // CLAUDE_PROJECT_DIR stays at the session's start after Claude enters a worktree,
+  // so the project's copy runs while the input cwd names the worktree.
+  test('gates the worktree the session cwd is in, not the project the script was run from', async () => {
+    const result = await runAgentHook(
+      template,
+      '.claude/hooks/gate-on-stop.ts',
+      ACTIVE,
+      async (dir) => {
+        await writeFile(join(dir, '.gitignore'), '.claude/worktrees/\nnode_modules/\n')
+        git(dir, 'init', '-q')
+        git(dir, 'add', '-A')
+        git(dir, 'commit', '-q', '-m', 'init')
+        const worktree = join(dir, '.claude/worktrees/x')
+        await mkdir(join(worktree, '.claude/hooks'), { recursive: true })
+        await writeFile(join(worktree, '.claude/hooks/gate-on-stop.ts'), await readFile(template, 'utf8'))
+        initGitRepo(worktree)
+        await failingApp(worktree)
+        await mkdir(join(worktree, 'app'), { recursive: true })
+      },
+      { subdir: '.claude/worktrees/x/app' },
     )
 
     expect(result.exitCode).toBe(2)

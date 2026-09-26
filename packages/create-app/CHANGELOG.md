@@ -1,5 +1,26 @@
 # create-guren-app
 
+## 1.17.4
+
+### Patch Changes
+
+- Ship template dependency ranges for this release
+
+  The scaffold's `@guren/*` ranges are generated from the workspace versions,
+  and this release moves `@guren/cli`, `@guren/core`.
+  `changeset publish` only uploads packages whose own version moved, so
+  without this bump the updated ranges would sit in the repo and never reach
+  anyone running `create-guren-app`.
+
+  No behaviour change; the scaffolded app just resolves the versions released
+  alongside it.
+
+## 1.17.3
+
+### Patch Changes
+
+- f125138: `--blueprint blog` now suggests `bunx guren add resource tags --fields "name:string"` under "Add features:" instead of `add resource posts`. The blog template already ships Post, so `add resource posts` stopped at the existing `PostValidator.ts` and wrote nothing, and the `--force` it suggested would have replaced the template's own Post files with generic ones. The default and worker blueprints still suggest `add resource posts`.
+
 ## 1.17.2
 
 ### Patch Changes

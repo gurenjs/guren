@@ -1,8 +1,9 @@
 ---
-description: Guren ORM models — model definition, queries, relations, pagination, mass assignment
-globs:
+paths:
   - "app/Models/**"
   - "db/**"
+  - "modules/*/app/Models/**"
+  - "modules/*/db/**"
 ---
 
 # ORM Models
@@ -58,6 +59,8 @@ denies the hash and remember-token columns from mass assignment entirely; `force
 await Post.where({ status: 'active', authorId: 1 }).get()  // object form = AND
 await Post.where({ id: [1, 2, 3] }).get()                  // array value = IN
 await Post.where('views', '>', 100).orWhere('featured', true).get()
+await Post.whereNull('publishedAt').get()                  // IS NULL; whereNotNull() for IS NOT NULL
+await Post.where('publishedAt', 'is null', null).get()     // same, operator form; orWhere takes it too
 
 // Callback form groups conditions in parentheses — required when an OR
 // chain must sit next to AND filters, or the ANDs get OR'd away:
@@ -68,6 +71,11 @@ await Post.where((q) => q.where('title', 'like', p).orWhere('excerpt', 'like', p
 ```
 
 Operators (exact set): `=` `!=` `>` `<` `>=` `<=` `like` `in` `not in` `is null` `is not null`
+
+`is null` / `is not null` still take the third argument: two arguments are
+`where(field, value)`, so `where('publishedAt', 'is null')` would compare to the
+string `'is null'` and throws, naming `whereNull()` / `whereNotNull()`. Pass free-text
+input as `where(field, '=', input)`, which never reads it as an operator.
 
 An empty `in` array compiles to SQL `false` — the query matches nothing and never throws,
 so guarding `if (ids.length === 0)` before a `where in` is optional, not required.

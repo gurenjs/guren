@@ -13,7 +13,7 @@ import { formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
 import { planWaiveFile } from '../src/plan-waive'
 import { HELD_STEP_REMEDY } from '../src/plan/step-context'
 import { loadPlanAppState } from '../src/plan/app-state'
-import { planDigest, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, type PlanStepRecord } from '../src/plan/state'
+import { planDigest, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, type PlanStepRecord, type PlanStepWork } from '../src/plan/state'
 import { stampContextHash } from '../src/plan/freshness'
 import { sha256 } from '../src/plan/verification'
 import { createTempRoot, writeWorkspaceFiles } from './helpers'
@@ -91,6 +91,7 @@ describe('plan:verify', () => {
     const { record } = step!
     expect(record.commands.map((command) => [command.command, command.status, command.label])).toEqual([
       ['codegen', 'pass', 'bun run codegen'],
+      ['typecheck', 'pass', 'bun run typecheck'],
       ['check', 'pass', 'guren check'],
       ['tests', 'pass', 'bun test tests/comments.test.ts'],
     ])
@@ -98,14 +99,19 @@ describe('plan:verify', () => {
     // The plan's destroy action, route, resource and policy are not written, so the step cannot verify.
     expect(record.outcome).toBe('incomplete')
     expect(record.incomplete).toEqual(expect.arrayContaining(['action.comments.destroy: planned', 'route.comments.destroy: planned', 'resource.comment: planned', 'policy.comment: planned']))
-    // The store route is drifted, so nothing of it would be lifted and its file is not fingerprinted.
+    // The store route is drifted and not fingerprinted as itself; its routes file and the entry are, as what the store action's `wired` rests on.
     expect(Object.keys(record.fingerprint.files)).toEqual([
       'app/Http/Controllers/CommentController.ts',
       'app/Http/Validators/CommentValidator.ts',
+      'routes/web.ts',
+      'src/app.ts',
       'tests/comments.test.ts',
     ])
     expect(record.fingerprint.files['app/Http/Controllers/CommentController.ts']).toBe(sha256(APP['app/Http/Controllers/CommentController.ts']!))
-    expect(result.verification).toEqual({ stateFile: '.guren/plans/http.state.json', staleSteps: [], decisionsFile: '../http.decisions.json', staleWaivers: [] })
+    // No plan:next marked the step, so where its work started is not known, and the record says so rather than counting zero.
+    const unmarked: PlanStepWork = { measured: false, reason: 'plan:next did not mark this step, so where its work started is not known', settled: false }
+    expect(record.work).toEqual(unmarked)
+    expect(result.verification).toEqual({ stateFile: '.guren/plans/http.state.json', staleSteps: [], decisionsFile: '../http.decisions.json', staleWaivers: [], work: { [HTTP]: unmarked } })
     expect(result.skipped).toEqual([])
 
     const state = JSON.parse(await readFile(join(app, '.guren/plans/http.state.json'), 'utf8')) as { stateVersion: number; steps: Record<string, PlanStepRecord> }
@@ -130,8 +136,8 @@ describe('plan:verify', () => {
         stepId: HTTP,
         taskId: 'task/entity/model.comment',
         stale: [expect.objectContaining({ id: 'model.post', owned: false, through: ['route.comments.store'], within: [] })],
-        // Validators are never read, so the one the step owns is unconfirmed and holds nothing.
-        unconfirmed: [expect.objectContaining({ id: 'validator.comment', verdict: 'unjudged', owned: true })],
+        // The validator the step adds is read by its exported symbol: written where the plan leaves it, it is fresh.
+        unconfirmed: [],
       },
     ])
     const text = formatPlanVerify(result)
@@ -324,7 +330,7 @@ export class CommentController extends Controller {
 
     const result = await verify(plan, app, '--step', HTTP)
 
-    expect(result.steps[0]!.record.commands.map((command) => [command.command, command.status])).toEqual([['codegen', 'pass'], ['check', 'pass'], ['tests', 'pass']])
+    expect(result.steps[0]!.record.commands.map((command) => [command.command, command.status])).toEqual([['codegen', 'pass'], ['typecheck', 'pass'], ['check', 'pass'], ['tests', 'pass']])
     expect(states(result)).toMatchObject({ 'action.comments.store': 'wired', 'route.comments.store': 'drifted', 'validator.comment': 'wired' })
   })
 
@@ -355,7 +361,7 @@ export class CommentController extends Controller {
     const output = await run('plan:verify', plan, app, '--step', HTTP, '--ci')
 
     expect(process.exitCode).toBe(1)
-    expect(output).toMatch(new RegExp(`^${HTTP}: incomplete \\(\\d+ ms\\)\n  pass     codegen     bun run codegen\n  pass     check       guren check\n`))
+    expect(output).toMatch(new RegExp(`^${HTTP}: incomplete \\(\\d+ ms\\)\n  pass     codegen     bun run codegen\n  pass     typecheck   bun run typecheck\n  pass     check       guren check\n`))
     expect(output).toContain('  passing  [AC-comments-1]')
     expect(output).toContain('  not at its completion state: action.comments.destroy: planned')
     expect(output).toContain('Recorded in .guren/plans/ci.state.json')

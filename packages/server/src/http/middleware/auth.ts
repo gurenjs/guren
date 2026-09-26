@@ -3,6 +3,7 @@ import type { Authenticatable, AuthContext } from '../../auth/types'
 import { AUTH_CONTEXT_KEY, getAuthContext } from '../../auth/context'
 import { jsonResponse } from './index'
 import { stampCapabilities } from './capabilities'
+import { isAgentToolRequest } from '../../internal/agent-request'
 export type { AuthContext } from '../../auth/types'
 
 export interface RequireAuthOptions {
@@ -69,8 +70,17 @@ export function attachAuthContext(contextFactory: (ctx: Context) => AuthContext)
   }
 }
 
+function refuse(ctx: Context, options: RequireAuthOptions, status: number, message: string): Response {
+  if (options.redirectTo) {
+    // A tool caller cannot follow a redirect, and the dispatcher maps a 3xx to
+    // a success result; `responseFactory` is skipped, since it may redirect too.
+    return isAgentToolRequest(ctx) ? jsonResponse({ message }, status) : ctx.redirect(options.redirectTo)
+  }
+  return options.responseFactory ? options.responseFactory() : jsonResponse({ message }, status)
+}
+
 export function requireAuthenticated(options: RequireAuthOptions = {}): MiddlewareHandler {
-  const { redirectTo, status = 401, responseFactory } = options
+  const { status = 401 } = options
 
   return stampCapabilities(async (ctx, next) => {
     const auth = getAuthContext(ctx)
@@ -80,15 +90,7 @@ export function requireAuthenticated(options: RequireAuthOptions = {}): Middlewa
     }
 
     if (!(await auth.check())) {
-      if (redirectTo) {
-        return ctx.redirect(redirectTo)
-      }
-
-      if (responseFactory) {
-        return responseFactory()
-      }
-
-      return jsonResponse({ message: 'Unauthorized' }, status)
+      return refuse(ctx, options, status, 'Unauthorized')
     }
 
     await next()
@@ -96,7 +98,7 @@ export function requireAuthenticated(options: RequireAuthOptions = {}): Middlewa
 }
 
 export function requireGuest(options: RequireAuthOptions = {}): MiddlewareHandler {
-  const { redirectTo, status = 403, responseFactory } = options
+  const { status = 403 } = options
 
   return stampCapabilities(async (ctx, next) => {
     const auth = getAuthContext(ctx)
@@ -106,15 +108,7 @@ export function requireGuest(options: RequireAuthOptions = {}): MiddlewareHandle
     }
 
     if (!(await auth.guest())) {
-      if (redirectTo) {
-        return ctx.redirect(redirectTo)
-      }
-
-      if (responseFactory) {
-        return responseFactory()
-      }
-
-      return jsonResponse({ message: 'Already authenticated' }, status)
+      return refuse(ctx, options, status, 'Already authenticated')
     }
 
     await next()

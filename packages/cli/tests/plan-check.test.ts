@@ -147,6 +147,7 @@ describe('guren check --plan', () => {
         'docs/plans/status/revisions/1.plan.json': '{}',
         'docs/plans/tags.plan.json': '{}',
         'docs/plans/tags.approvals.json': '{}',
+        'docs/plans/tags.revisions/1.plan.json': '{}',
         'docs/plans/comments.md': '# closed',
         'notes.json': '{}',
       })

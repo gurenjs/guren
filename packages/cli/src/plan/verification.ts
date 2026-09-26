@@ -11,9 +11,10 @@ import { resolve } from 'node:path'
 
 import { toPosixRelative } from '../discovery'
 import { planDecisionsPath, planWaiverHash, readPlanDecisions, type PlanDecisions, type PlanWaiver } from './decisions'
+import { canonicalJson } from './identity'
 import { behaviourCanReach, behaviourCarriers } from './reach'
 import type { Plan, PlanDraft } from './schema'
-import { planDigest, planSlug, planStatePath, readPlanState, type PlanStepRecord } from './state'
+import { planDigest, planSlug, planStatePath, readPlanState, type PlanRedRun, type PlanStepRecord, type PlanStepWork } from './state'
 import { awaitsVerification, summarize, type PlanElementState, type PlanElementStatus, type PlanStatus, type PlanVerificationHold } from './status'
 import type { PlanTaskDerivation } from './tasks'
 
@@ -47,6 +48,8 @@ export interface PlanVerificationSummary {
   staleWaivers: PlanWaiver[]
   /** Set when a decision log exists and could not be read. */
   decisionsUnreadable?: string
+  /** Files touched and lines changed per step (RFC 0030 §7), by step id; absent when no record carries them. */
+  work?: Record<string, PlanStepWork>
 }
 
 /**
@@ -228,6 +231,7 @@ export async function overlayVerification(
   const unreadable =
     read.unreadable ?? (options.replacedUnreadable ? `${options.replacedUnreadable}; this run replaced it, and its other records are gone` : undefined)
   const log = options.waivers ?? (await readPlanWaivers(planPath, plan))
+  const work = Object.entries(records).flatMap(([stepId, record]) => (record.work ? [[stepId, record.work] as const] : []))
   return {
     status: applyWaivers(applied.status, log.waivers),
     verification: {
@@ -237,12 +241,13 @@ export async function overlayVerification(
       decisionsFile: toPosixRelative(root, planDecisionsPath(planPath)),
       staleWaivers: log.stale,
       ...(log.unreadable ? { decisionsUnreadable: log.unreadable } : {}),
+      ...(work.length > 0 ? { work: Object.fromEntries(work) } : {}),
     },
   }
 }
 
 /** Fingerprinted files whose hash differs from the record's; one recorded unreadable never matches. */
-function changedFiles(record: PlanStepRecord, hashes: ReadonlyMap<string, string | null>): string[] {
+export function changedFiles(record: PlanStepRecord, hashes: ReadonlyMap<string, string | null>): string[] {
   return Object.entries(record.fingerprint.files)
     .filter(([file, hash]) => hash === null || hashes.get(file) !== hash)
     .map(([file]) => file)
@@ -268,6 +273,58 @@ export function recordStillHolds(record: PlanStepRecord, digest: string, hashes:
 export function recordDrift(record: PlanStepRecord, digest: string, hashes: ReadonlyMap<string, string | null>, waived: ReadonlySet<string> = new Set()): string[] {
   if (record.outcome !== 'verified' || record.planDigest !== digest || !record.waived.every((id) => waived.has(id))) return []
   return changedFiles(record, hashes)
+}
+
+/**
+ * A behaviour as its test is written from: every field but its description, with the route and the
+ * expected page read through to what a test spells (method and path, page and module). A red run
+ * seen for one shape says nothing of another. `undefined` for an id the plan does not declare.
+ */
+export function behaviourShape(plan: PlanDraft | Plan, id: string): string | undefined {
+  const behaviour = plan.tasks.flatMap((task) => task.acceptance).find((candidate) => candidate.id === id)
+  if (!behaviour) return undefined
+  const { description: _description, route: routeId, expect, ...rest } = behaviour
+  const route = plan.routes.find((candidate) => candidate.id === routeId)
+  const view = expect.inertia === undefined ? undefined : plan.views.find((candidate) => candidate.id === expect.inertia)
+  const page = view ? { page: view.page, ...(view.module === undefined ? {} : { module: view.module }) } : expect.inertia
+  return sha256(
+    canonicalJson({
+      ...rest,
+      route: route ? { method: route.method, path: route.path } : routeId,
+      expect: { ...expect, ...(page === undefined ? {} : { inertia: page }) },
+    }),
+  )
+}
+
+/**
+ * The behaviours of `ids` whose red run one of `records` carries to `plan`: seen failing in a
+ * verified `tests:fail` run at the shape the plan states now, whatever plan hash or step that run
+ * named (a revision may move a behaviour to another task). Once the implementation exists the run
+ * cannot be repeated, so a revision leaving a behaviour's test as it was keeps the observation.
+ */
+export function carriedRedRuns(records: Iterable<PlanStepRecord>, plan: PlanDraft | Plan, ids: readonly string[]): Map<string, PlanRedRun> {
+  const recorded = recordedRedRuns(records)
+  const carried = new Map<string, PlanRedRun>()
+  for (const id of ids) {
+    const shape = behaviourShape(plan, id)
+    const red = recorded.get(id)?.find((candidate) => candidate.shape === shape)
+    if (red) carried.set(id, red)
+  }
+  return carried
+}
+
+/** Every red run `records` hold, by behaviour id, whatever shape it was seen at. */
+export function recordedRedRuns(records: Iterable<PlanStepRecord>): Map<string, PlanRedRun[]> {
+  const recorded = new Map<string, PlanRedRun[]>()
+  for (const record of records) {
+    for (const { id, red } of record.acceptance) {
+      if (!red) continue
+      const runs = recorded.get(id)
+      if (runs) runs.push(red)
+      else recorded.set(id, [red])
+    }
+  }
+  return recorded
 }
 
 /** Verified against this plan digest, every fingerprinted file hashing as it did: what a record must be to count at all. */

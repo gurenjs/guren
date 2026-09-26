@@ -2,6 +2,9 @@ import { describe, test, expect } from 'bun:test'
 import { Hono } from 'hono'
 import { createForceHttpsMiddleware } from './force-https'
 import { createSecurityHeaders } from './security-headers'
+import { Router } from '../../mvc/Router'
+import { deriveAgentTools } from '../../agent/derive'
+import { buildToolRequest } from '../../agent/dispatch'
 
 describe('createForceHttpsMiddleware', () => {
   test('should redirect HTTP to HTTPS', async () => {
@@ -126,5 +129,51 @@ describe('createForceHttpsMiddleware precedence over createSecurityHeaders', () 
     const res = await app.request('https://example.com/raw')
 
     expect(res.headers.get('Strict-Transport-Security')).toBe('max-age=999999')
+  })
+})
+
+/**
+ * A tool call re-enters through `app.fetch` on the inbound origin, which is
+ * `http://` behind a TLS-terminating proxy and always for `guren tool:call`
+ * and durable agents. A 301 there reads as a successful tool result.
+ */
+describe('createForceHttpsMiddleware and agent tool calls', () => {
+  function toolRequest(origin: string): Request {
+    const router = new Router()
+    router.get('/posts', () => new Response('ok')).name('posts.index').agent({})
+    const tool = deriveAgentTools(router.definitions()).tools[0]!
+    const built = buildToolRequest(tool, {}, { origin })
+    if (!('request' in built)) throw new Error('the tool request did not build')
+    return built.request
+  }
+
+  function forcedApp(): Hono {
+    const app = new Hono()
+    app.use('*', createForceHttpsMiddleware())
+    app.get('/posts', (c) => c.text('ok'))
+    return app
+  }
+
+  test('should pass a request the dispatcher built on an http origin', async () => {
+    const res = await forcedApp().fetch(toolRequest('http://app.example'))
+
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('ok')
+  })
+
+  test('should redirect an off-the-wire request that sends the agent surface header', async () => {
+    const res = await forcedApp().request('http://app.example/posts', {
+      headers: { 'X-Guren-Agent-Surface': 'mcp', Accept: 'application/json' },
+    })
+
+    expect(res.status).toBe(301)
+    expect(res.headers.get('Location')).toBe('https://app.example/posts')
+  })
+
+  test('should redirect a copy of a dispatched request, which carries every header but not the mark', async () => {
+    const copy = new Request(toolRequest('http://app.example'))
+    const res = await forcedApp().fetch(copy)
+
+    expect(res.status).toBe(301)
   })
 })

@@ -27,10 +27,11 @@ A plan is a directory under `docs/plans/`, named by its slug:
 | `docs/plans/comments/plan.json` | The plan | yes |
 | `docs/plans/comments/approvals.json` | The hashes `plan:approve` recorded, with the readings of each `alter` | yes |
 | `docs/plans/comments/decisions.json` | Waivers, written by `plan:waive` | yes |
+| `docs/plans/comments/revisions/0001.json` | Revisions, written by `plan:revise` | yes |
 | `docs/plans/comments/plan.html` | The page `plan:render` writes | no |
 | `.guren/plans/comments.state.json` | Verification results and the marked step | no, it ignores itself |
 
-The slug is the directory name for a file called `plan.json`. Any other name works too: `comments.plan.json` has the slug `comments`, and keeps its records beside it as `comments.approvals.json` and `comments.decisions.json`.
+The slug is the directory name for a file called `plan.json`. Any other name works too: `comments.plan.json` has the slug `comments`, and keeps its records beside it as `comments.approvals.json`, `comments.decisions.json` and `comments.revisions/`.
 
 The rendered page is generated output and belongs out of the repository. `plan:next` ignores it and its temporary file where `plan:render` writes them by default, so it does not have to be ignored for the loop to run, but it should not be committed either. A page written elsewhere with `-o` is an ordinary untracked file, and `plan:next` refuses the tree it sits in. The first pattern covers the `docs/plans/<slug>/` layout, the second a plan named `<slug>.plan.json` anywhere else, such as the application root:
 
@@ -39,11 +40,21 @@ docs/plans/**/*.html
 *.plan.html
 ```
 
-The plan, its approvals and its decision log are a different matter: `plan:next` refuses while one of them is uncommitted, since a waiver decides which step it hands out.
+The plan, its approvals, its decision log and its revisions are a different matter: `plan:next` refuses while one of them is uncommitted, since a waiver decides which step it hands out and a revision belongs in the commit that changes the plan.
 
 ## Writing a plan
 
-You write the JSON, or your agent does in the session where you discussed the feature. The command that asks a model for a plan on its own is not available yet (see the end of this page). `plan:render` validates the file against the plan schema and names the field at fault:
+You write the JSON, or your agent does in the session where you discussed the feature. `guren plan --print-prompt` prints what that agent needs: a prompt with your request and the conventions on this page, then the plan's JSON Schema. It calls no model and runs nothing.
+
+```bash
+bunx guren plan "comments on posts, authors can delete their own" --print-prompt
+```
+
+Paste the output into the session, or have the agent run the command itself. The prompt has the agent read the application with `context`, `model:list` and `guidelines`, ask you what it cannot decide, write `docs/plans/<slug>/plan.json`, and run `plan:render --json` until no check fails. Approving stays with you. Without a request, the prompt tells the agent to ask you for one, and `--json` prints the prompt and the schema as one object. Without `--print-prompt`, `guren plan` exits with an error: the form that asks a model for the plan by itself is not available yet (see the end of this page).
+
+In an app whose agent harness is installed (`bunx guren agent:init`, refreshed by `agent:sync`), the `plan-write` skill runs this for you. Ask your agent to plan the feature: it asks you the questions that change the design before writing anything, writes the plan from the prompt, runs `plan:render --json` until no check fails, and tells you where the page is and what is still open. After your review it records your changes with `plan:revise`. It never approves the plan; once you have, the `plan-implement` skill builds it.
+
+`plan:render` validates the file against the plan schema and names the field at fault:
 
 ```text
  ERROR  The plan does not match the plan schema:
@@ -175,15 +186,25 @@ A question is a decision the author could not make alone, with the options, the 
 
 A plan with an open question cannot be approved. Answer it by editing the plan: apply the answer, remove the question, and record the decision under `assumptions`. Before approval, editing `plan.json` by hand is the normal way to change it.
 
+### Commands
+
+`plan:next` hands a plan's `commands` to the implementing agent, which runs them as written. Each one therefore has to be a Guren generator:
+
+```json
+{ "id": "command.attachments", "command": "guren add attachments", "reason": "Comments take images." }
+```
+
+A command passes when it reads `guren <subcommand>` or `bunx guren <subcommand>` and the subcommand is a `make:*` generator other than `make:migration`, `lang:publish`, or `add <blueprint>` other than `add plugin`. Arguments may hold letters, digits and `_-.,:/=@+%`, with single or double quotes around a value that has spaces (`--fields "title:string,body:text?"`). A shell operator, `$`, a backslash or an unclosed quote fails the check, and so does an argument that is an absolute path or climbs out with `..` (`--path /etc`, `--app=../other`). The check bounds shell syntax and where a generator may write; it does not judge each generator's other flags, such as `--force`. Every other command fails too: `bun run db:migrate` runs as the `data` step's verify command, not from the plan. `plan:approve` refuses while this check fails, and `plan:next` hands out no step of a plan that carries such a command, draft or not.
+
 ## Rendering and checking: `plan:render`
 
 ```bash
 bunx guren plan:render docs/plans/comments/plan.json
 ```
 
-It writes `docs/plans/comments/plan.html` and prints the path. `-o` writes somewhere else, `--app <dir>` names the application to check against when you run it from another directory, and `--locale ja` opens the page's own labels in Japanese (the page switches between `en` and `ja`; the plan's text is never translated).
+It writes `docs/plans/comments/plan.html` and prints the path. `-o` writes somewhere else, `--app <dir>` names the application to check against when you run it from another directory, and `--locale ja` opens the page's own labels in Japanese (the page switches between `en` and `ja`; the plan's text is never translated). `--json` prints the page's path and every check instead of the path alone, so an agent can read the failing checks without opening the page.
 
-The page is one file with no network access: it opens from disk and can be attached to a review. It has a tab per section, a filter per entity, a "Changes only" toggle that hides `existing` elements, an entity relationship diagram of the plan merged over the current schema, and every id links to the element it names. Failed checks and breaking changes are pinned under "Needs attention". Each element has Approve and Request changes buttons and a comment box, and the footer exports the review as `feedback.json`. No command reads that file yet, and the footer says so: hand `feedback.json` or the copied text to the agent that wrote the plan, or apply the comments to `plan.json` yourself. The two commands it prints are the ones that follow a revision, `plan:render` and `plan:approve`.
+The page is one file with no network access: it opens from disk and can be attached to a review. It has a tab per section, a filter per entity, a "Changes only" toggle that hides `existing` elements, an entity relationship diagram of the plan merged over the current schema, and every id links to the element it names. Failed checks and breaking changes are pinned under "Needs attention". Each element has Approve and Request changes buttons and a comment box, and the footer exports the review as `feedback.json`. `plan:revise` reads its approvals and answered questions (below); the comments are for you or your agent to apply to a copy of the plan. The two commands it prints are the ones that follow a revision, `plan:render` and `plan:approve`.
 
 The checks run against the application as it is now. They report, among others, a route whose action is not in the plan, a foreign key to a model that exists nowhere, an `add` whose name is already taken, an `existing` or `alter` target that does not exist, a mutating route with authentication and no authorization, a body-carrying route with no validator, and the missing behaviours above. Rendering never fails on a check; `plan:approve` does. On a plan with a baseline, `plan:render` settles the same findings approval does, so a collision the plan's own work explains shows on the page as a passing check rather than a blocking one. Renaming the delete route of the example to a name the blog already uses gives:
 
@@ -242,22 +263,23 @@ bunx guren plan:approve docs/plans/comments/plan.json
 ```text
 Comments on posts (plan.json)
 
-Stamped the baseline at 0c871a5b9dc25587d33ae3d6bb6c3befe2c7e6a2: 13 element(s) hashed.
-Not hashed, since their section could not be read: validator.comment
+Stamped the baseline at 0c871a5b9dc25587d33ae3d6bb6c3befe2c7e6a2: 14 element(s) hashed.
 Approved 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0, recorded in docs/plans/comments/approvals.json.
 ```
 
 The first approval writes a `baseline` into the plan: `rev`, the commit the plan was written against, and `contextHash`, a hash per referenced element of what the application holds for it today. That is why it refuses a repository with no commit and a working tree with uncommitted changes (the plan's own files excepted). The approval itself goes to `approvals.json`, beside the plan and never inside it. Commit both.
 
-Validators are never hashed: the stamp finds each element's file from its name, and it does not resolve a validator's exported schema symbol to a file. If another section cannot be read, approval refuses and names the elements that would stay unhashed; `--allow-unstamped` approves without them.
+A validator is found by its exported schema symbol, read from the files under `app/Http/Validators/` without importing them. A name none of those files declares and exports is a warning rather than a failure, since a schema kept in a controller or re-exported from elsewhere is not seen. If a section cannot be read (a file there that does not parse, or one exporting through `export *`), approval refuses and names the elements that would stay unhashed; `--allow-unstamped` approves without them.
 
-The plan's hash identifies it: a SHA-256 of the plan with its baseline. Approvals, verification records and waivers all name it, so a plan edited after approval is a different plan. `plan:next`, `plan:verify`, `plan:waive` and `plan:close` refuse a plan with a baseline whose current hash no approval names:
+A plan approved before validators were read has no hash for them. Re-approving it after its validator was written reports the name as a `plan:app-unjudged` warning instead of a collision: the baseline cannot show whether the plan wrote it.
+
+The plan's hash identifies it: a SHA-256 of the plan with its baseline. Approvals, verification records and waivers all name it, so a plan edited after approval is a different plan. `plan:next`, `plan:scaffold`, `plan:verify`, `plan:waive` and `plan:close` refuse a plan with a baseline whose current hash no approval names:
 
 ```text
  ERROR  docs/plans/comments/plan.json is not approved at its current hash dc9a6ce3ad173e23290f743293fa0e3495c932b3b2cdf07c0cda8c9b063a5465, so no step of it is handed out: it was edited after approval, or never approved, and what it says now may not be what anyone agreed to. Run guren plan:approve docs/plans/comments/plan.json once the plan says what you mean to build.
 ```
 
-`plan:status` and `plan:render` keep working, since they are how you read the change before approving it. A draft, which has no baseline and so no hash, is still accepted by `plan:next` and `plan:verify`. A draft with approvals recorded beside it is refused like an unapproved plan: deleting `baseline` from an approved plan does not take it out of the gate.
+`plan:status` and `plan:render` keep working, since they are how you read the change before approving it. A draft, which has no baseline and so no hash, is still accepted by `plan:next` and `plan:verify`; `plan:scaffold` refuses one, since it writes code from what someone approved. A draft with approvals recorded beside it is refused like an unapproved plan: deleting `baseline` from an approved plan does not take it out of the gate.
 
 Approving an edited plan again records the new hash and leaves the baseline as it was, so its steps verify again under the new hash. The checks and questions are asked again first, against the application as it is at that moment. The plan's own work does not stand in the way: an element the implementation has already built where the plan leaves it is settled, and the approval says which:
 
@@ -290,6 +312,33 @@ Already approved at 2026-09-22T10:16:20.673Z; recorded the readings it lacked in
 
 After the work, a reading would find the property already held, so approving again cannot help. An `alter` whose matches all lack a reading reads `unjudged`, and its note says to verify the change through a behaviour that reaches it; once its step has verified, a second note adds the waiver. For an element no behaviour can reach, such as a column, the note names only the waiver.
 
+An `alter` whose readable planned properties all held at approval cannot complete on them. `plan:approve` still approves it, and warns, naming the element and the properties; `--json` lists them under `heldAlters`. The warning is judged on the readings of the approval entry, so approving the same hash again repeats it, and a re-approval after the work, under the same baseline, does not raise it for a property the work changed. For a plan whose `view.posts.show` only restates the `post` prop the page already declares:
+
+```text
+Warning, advisory (the approval stands):
+  view.posts.show (posts/Show): every readable planned property already held at approval (prop post); none shows the change, so plan:status reports it unjudged. State the change in a property the application does not hold yet and approve the plan again, or expect that it completes only through a verified behaviour that reaches it, or by a waiver.
+```
+
+A property that read `unknown` at approval is not counted as held: the warning names it as the only one that can still show the change, which it does only if a reader comes to see it match. An `alter` none of whose properties could be read gets no warning, and `plan:status` reports it `unjudged` as above.
+
+## Revising: `plan:revise`
+
+A plan changes through a revision, before approval and after. `plan:revise` records one without a model. The plan file as it stands is the parent, and the change comes separately: a copy of the plan with the change made in it, or the ops themselves.
+
+```bash
+cp docs/plans/comments/plan.json /tmp/comments.edited.json
+# edit the copy: rename a column, change a type, drop a route
+bunx guren plan:revise docs/plans/comments/plan.json --edited /tmp/comments.edited.json --message "soft-delete comments instead"
+```
+
+The command derives the ops from the difference between the two, one op per element added, changed or removed, each with `--message` as its reason. It writes `{ parent, ops, result }` to `docs/plans/comments/revisions/0001.json` and then replaces `plan.json` with the copy. A plan named `comments.plan.json` keeps its revisions in `comments.revisions/`. `--ops ops.json` takes the ops directly, as a `{ "ops": [...] }` document in which each op carries its own `reason`.
+
+With `--feedback feedback.json` (or `-` for the copied text), the page's review becomes a rule. An element approved there changes only when `--reopens "<reason>"` says why, and a question answered there has to be gone from the revised plan. That is all the command reads from the feedback: the comments stay for you to apply to the copy.
+
+After approval, this is how the plan changes. Editing `plan.json` in place moves its hash to one that no approval or revision names, and `plan:revise` refuses that plan: restore it with `git checkout -- docs/plans/comments/plan.json`, keep the edit in a copy, and pass the copy with `--edited`. A plan revised and not yet approved can be revised again. A revision carries the baseline over unchanged, so `plan:next` and the other gated commands refuse the result until `plan:approve` records it, and a waiver taken against the old hash does not carry over; the command lists those waivers. A draft can be revised the same way before its first approval, or edited directly.
+
+Revising a plan that is already implemented brings every step back, since no record of the old hash counts under the new one. `plan:next` marks a step verified against an earlier hash as one to re-check. It names a `scaffold` or `tests` step whose files are already on disk as built under an earlier version of the plan. `plan:scaffold` refuses a step any of whose files exist, so `plan:next` points to `plan:verify --step` and lists what is still missing, to write by hand. `plan:verify` without `--step` re-checks the whole plan in one run. The `tests` step is the one that cannot simply run again: its behaviours pass once the code exists, and `tests:fail` asks them to fail. A verified run of that step therefore records each behaviour as seen failing, keyed on its test as the plan states it (everything but the description, with the route's method and path and the expected page). A later run carries that record for every behaviour whose test the revision left alone, and asks only a changed one to fail again, against the code the old plan was implemented with. A `tests` step with no such record (verified by a CLI older than this rule) cannot verify once its behaviours pass. The Stop hook gives up on it at once, and since the step owns no element, `plan:close` does not wait for it.
+
 ## Implementing: `plan:next` and `plan:verify`
 
 Guren derives the work from the plan, and the order does not depend on a model. Every entity the plan adds or changes is a task, ordered by foreign keys, and there are six kinds of step, and a task gets only those it has work for:
@@ -297,13 +346,13 @@ Guren derives the work from the plan, and the order does not depend on a model. 
 | Step | Work | Verified by |
 |---|---|---|
 | `commands` | The plan's `commands`, such as `guren add attachments`, in `task/foundation` | `codegen`, `typecheck` |
-| `scaffold` | The first version of a new entity, through `make:feature` | `codegen`, `typecheck` |
-| `tests` | One test per acceptance behaviour, failing | `codegen`, the tests failing |
-| `data` | Table, migration, model relationships and fillable | `codegen`, `db:migrate`, `typecheck` |
-| `http` | Validators, controllers, routes, resources, policies | `codegen`, `guren check`, the tests passing |
+| `scaffold` | The first version of a new entity, written by `plan:scaffold` | `codegen`, `typecheck` |
+| `tests` | One test per acceptance behaviour, written as a skeleton by `plan:scaffold`, failing | `codegen`, the tests failing |
+| `data` | Table, migration, model relationships and fillable; after a scaffold, the migration and what `plan:scaffold` left out | `codegen`, `db:migrate`, `typecheck` |
+| `http` | Controllers and routes; validators, resources and policies, or after a scaffold, what `plan:scaffold` left as a stub or unwritten | `codegen`, `typecheck`, `guren check`, the tests passing |
 | `pages` | Page components | `codegen`, `typecheck`, `guren check` |
 
-Work shared by several entities goes to a `task/foundation` task. Step ids read `task/entity/model.comment/http`. A `commands`, `data`, `http` or `pages` step whose elements span more than five files is split into parts with ids such as `task/entity/model.comment/http/1` and `task/entity/model.comment/http/2`; `scaffold` and `tests` are never split. `plan:next` prints the exact id to pass to `--step`. The loop is: ask for the next step, implement it, verify it, commit.
+The tests run on one step per task, the one its behaviours are judged at: the last `http` step, or the task's last step when it has none, so a `data` or `pages` step can run them too. Any other step, an earlier part of a split `http` step included, runs no tests. Only the task's last `http` step runs `typecheck`, since an earlier part may import a resource or job a later part writes. A page an `http` action renders that the `pages` step adds is not in `.guren/pages.gen.ts` until its file exists, so `plan:next` lists it with the `http` step: create it there as a stub with a default export and the plan's `Props`, and write the rest in the `pages` step. Work shared by several entities goes to a `task/foundation` task. Step ids read `task/entity/model.comment/http`. A `commands`, `data`, `http` or `pages` step whose elements span more than five files is split into parts with ids such as `task/entity/model.comment/http/1` and `task/entity/model.comment/http/2`; `scaffold` and `tests` are never split. `plan:next` prints the exact id to pass to `--step`. The loop is: ask for the next step, implement it, verify it, commit.
 
 ```bash
 bunx guren plan:next docs/plans/comments/plan.json
@@ -318,15 +367,20 @@ Next: task/entity/model.comment/tests
   task: entity Comment (task/entity/model.comment)
   verify: codegen → tests:fail
 
+Write this step’s test skeletons with `bunx guren plan:scaffold docs/plans/comments/plan.json --step task/entity/model.comment/tests`, not by hand, then fill them in.
+  It writes one TestApp test per behaviour (AC-comments-1, AC-comments-2, AC-comments-3, AC-comments-4), with its request and the expectations the plan states, into one file.
+  Each fails at a given() call until the setup it names is written (records, the signed-in actor, path parameters); replace every call, and keep each title’s id and its request.
+
 Behaviours to write, as test titles `[<id>] <description>`, failing:
   [AC-comments-1] A signed-in user can comment on a post.
-      success; actor user; route route.comments.store; given a post exists; expect status 303; comments has 1 row(s)
+      success; actor user; route route.comments.store; given a post exists; expect status 302; comments has 1 row(s)
   [AC-comments-2] An empty comment is rejected.
       validation; actor user; route route.comments.store; given a post exists; expect status 422; errors on body
   [AC-comments-3] A guest cannot comment.
       unauthenticated; actor guest; route route.comments.store; given a post exists; expect redirect /login
   [AC-comments-4] A user cannot delete someone else's comment.
       forbidden; actor user; route route.comments.destroy; given a comment written by another user exists; expect status 403
+  Each test requests its route through a TestApp, in its body or a function of its file it calls: plan:verify reads the requests before it runs them.
 
 Implement this step only, then run `bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/tests` and commit once it is verified.
 Marked in .guren/plans/comments.state.json
@@ -336,7 +390,7 @@ Marked in .guren/plans/comments.state.json
 
 ```text
  ERROR  The working tree under /app has uncommitted changes (paths relative to the repository root), and one step is one commit. Commit or discard them first:
-  ?? tests/comments.test.ts
+  ?? tests/plans/comments/comments.test.ts
 ```
 
 ```bash
@@ -346,16 +400,173 @@ bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.co
 ```text
 task/entity/model.comment/tests: verified (607 ms)
   pass     codegen     bun run codegen
-  pass     tests:fail  bun test tests/comments.test.ts
+  pass     tests:fail  bun test tests/plans/comments/comments.test.ts
   failing  [AC-comments-1]
   failing  [AC-comments-2]
   failing  [AC-comments-3]
   failing  [AC-comments-4]
+  work: 1 file, +38 -0 since 3f1c2a9b0d4e
 
 Recorded in .guren/plans/comments.state.json
 ```
 
 The `tests` step passes only when every behaviour has a test and each one fails: a test that passes before the code exists proves nothing, and a skipped test is not a failing one. `plan:verify` selects the test files whose source carries the step's ids, and runs them with `bun test`. Later steps run the same files and need them to pass. After the verify output it prints the plan's status, described below.
+
+Before it runs the tests, `plan:verify` reads each behaviour's tests for a `TestApp` request to the route the behaviour names. Some `test`, `it` or `describe` whose title carries the id must request that method and path (or call the route's agent tool), in its own body or in a function of the same file it calls. A path segment filled whole at runtime, `` `/comments/${id}` ``, counts for a parameter, a constrained one included. A test that requests another route, or none, fails the command with what it requests instead, and `bun test` does not run.
+
+A request this reading cannot resolve fails the command too, with its own reason: a path the file does not spell, a request on what an imported helper returns, a request on what a function of the same file returns when nothing annotates it `TestApp` or `Promise<TestApp>`, a `TestApp` handed to a function from another file, or a title built at runtime. The check fails closed because a test rewritten that way would otherwise verify the step, and the finding asks for the request to be spelled in the test (or the helper annotated). It is tamper detection, not proof: a request the file spells passes whether or not it runs.
+
+### The scaffold step: `plan:scaffold`
+
+A task that adds its own model starts with a `scaffold` step, and `plan:next` names the command that writes it:
+
+```text
+Next: task/entity/model.comment/scaffold
+  task: entity Comment (task/entity/model.comment)
+  verify: codegen → typecheck
+
+Write this step with `bunx guren plan:scaffold docs/plans/comments/plan.json --step task/entity/model.comment/scaffold`, not by hand.
+  It writes each added model (table and class), its validators and resources, each policy with a provider registering it, each added controller with its actions as stubs, the routes to them in a file of their own that the http step mounts, and the side-effect classes: model.comment, column.comment.id, column.comment.body, column.comment.postId, column.comment.createdAt, validator.comment, controller.comments, action.comments.store, action.comments.destroy, route.comments.store, route.comments.destroy, resource.comment, policy.comment
+```
+
+```bash
+bunx guren plan:scaffold docs/plans/comments/plan.json --step task/entity/model.comment/scaffold
+```
+
+It appends each added model's table to `db/schema.ts` in the schema's dialect. The table carries every option the plan states for a column (type, nullability, `unique`, `index`, `default`, `columnName`, `withTimezone`, precision and scale, the primary key, the foreign key and its `onDelete`) and the model's multi-column indexes:
+
+```typescript
+export const comments = pgTable('comments', {
+  id: serial('id').primaryKey(),
+  body: text('body').notNull(),
+  postId: integer('post_id').notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('comments_post_id_index').on(table.postId),
+])
+```
+
+It writes `app/Models/Comment.ts` with the plan's `fillable` and relationships, each keyed by the foreign key the plan states. A relationship whose keys or target do not exist yet is left out and listed, for the step where they exist. When it waits on a later task's work, such as a `hasMany` to a child the next task adds, the list names the step that owns that work (the later task's `data` step, or one of its parts): the relationship is judged there, as a property of the model it waits on, and written in the declaring model's file; `plan:next` lists it under that step. Any other relationship left out makes `plan:status` read the model as `drifted` until it is added.
+
+The step's validators go in one file named after the model, `app/Http/Validators/CommentValidator.ts`, one exported schema per validator. Each field is written from its planned type, `required` and rules (`min`, `max`, `email`, `url`, `uuid`), in the form `plan:status` reads back:
+
+```typescript
+import { z } from 'zod'
+
+export const CommentPayloadSchema = z.object({
+  body: z.string().min(1).max(2000),
+})
+```
+
+A validator an action takes its `query` or `params` from gets `z.coerce.number()` and `z.stringbool()` for numbers and booleans, since those values arrive as text. A rule written in prose, or one that does not fit the field's type (a bound on a boolean), is not written, and the report lists it.
+
+Each resource whose model the step adds is written as a `Resource` subclass with the planned payload type, which `guren codegen` reads for `data.gen.ts`. A field is copied from the model's column when the planned type admits every value the column reads back as, a date-time column is serialized with `toISOString()` for a planned `string`, and a JSON column is cast to the planned type. Any other field calls a stub that throws until you map it, and the report lists it:
+
+```typescript
+export class CommentResource extends Resource<CommentRecord, CommentResourceData> {
+  toArray(): CommentResourceData {
+    return {
+      id: this.resource.id,
+      body: this.resource.body,
+      createdAt: this.resource.createdAt.toISOString(),
+    }
+  }
+}
+```
+
+Each policy is written with one method per planned ability, and every method returns `false` until you write its rule, which the method's comment quotes. `app/Providers/CommentPolicyProvider.ts` registers it with the gate in `boot()`, and the command adds that provider to `createApp({ providers })` in `src/app.ts`. `plan:status` reads a policy by its abilities and does not read its registration, so a policy is complete at `present`.
+
+Each controller the step adds holds exactly the planned actions and nothing else. An action validates its `params` and `query` with the planned validators, authorizes with the planned policy ability, validates its `body`, then answers 501. A caller the policy denies gets 403 whatever it sent:
+
+```typescript
+export default class CommentController extends Controller {
+  // Planned response: a redirect to /posts/:postId
+  // Rule: The comment's author is the signed-in user.
+  // postId is not fillable: write it with Comment.create(data, { set: { postId } }) (RFC 0031)
+  async store(): Promise<Response> {
+    await this.validateBody(CommentPayloadSchema)
+    throw HttpException.notImplemented('CommentController.store is planned and not written yet')
+  }
+
+  // Planned response: a redirect to /posts/:postId
+  async destroy(): Promise<Response> {
+    const comment = this.model(Comment)
+    await this.authorize('delete', [Comment, comment])
+    throw HttpException.notImplemented('CommentController.destroy is planned and not written yet')
+  }
+}
+```
+
+The ability is asked of a record in the `[Model, record]` form, because an ORM record carries no class the gate could find the policy by. For any ability but `viewAny` and `create`, which a policy asks without a record, where every route to the action binds one record of the policy's model, the stub reads it with `this.model()` and passes the tuple. Otherwise it passes the bare class, and for a record ability (`view`, `update`, `delete` and the like) the comment above the action names the tuple to pass once the action loads the record. An action a `POST` route takes a body to lists, in the same comment, the foreign keys an added model's `fillable` leaves out: `create()` refuses them in its data, so they go through `set` (RFC 0031).
+
+It validates with `validateBody()` rather than `validated('comments.store')`, since `validated()` is typed from the generated route names, and the route is not registered until the `http` step mounts it. No response is written: `plan:status` credits a response it can name (a resource, a page, a redirect), so a stub that named one would read as done. The report lists every action's response as left to write.
+
+The routes to those actions go in a file of their own, `routes/comments.ts`, with each route's method, path, name, contract schemas, bindings, `auth` middleware and `.agent()` metadata as planned:
+
+```typescript
+export function registerCommentRoutes(router: Router): void {
+  const authRouter = router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+  authRouter.post('/posts/:postId/comments', { name: 'comments.store', body: CommentPayloadSchema, bind: { postId: Post } }, [CommentController, 'store']).middleware('auth')
+  authRouter.delete('/comments/:id', { name: 'comments.destroy', bind: { id: Comment } }, [CommentController, 'destroy']).middleware('auth')
+}
+```
+
+Nothing calls the file yet, so its routes are not registered and read as `planned`: a mounted route would answer 401 or 422 before the `tests` step, and a behaviour that already passes fails that step. `auth` is the only middleware it applies; any other name the plan gives is listed for the `http` step, which knows the handler the application aliases it to. `guren check` reports the unmounted file as advisory while the plan is approved and not closed and its `http` step is not verified, so the gate does not block the steps in between. Once that step verifies or the plan closes, an unmounted file is a warning again.
+
+Each job, event, listener, mail and notification the step adds is written as the matching `make:*` command writes it, under the plan's class name. `plan:status` reads one as `present`; it is `wired` once something dispatches, registers or sends it, which is the `http` step's work. Where `docs/entities/Comment.md` already exists, the controller and the routes file carry `@docs docs/entities/Comment.md`; a tag to a document that does not exist yet would fail `guren check`.
+
+It runs neither codegen nor a migration: `plan:verify` runs codegen and the typecheck, and the `data` step generates the migration.
+
+Every refusal comes before the first write. It refuses:
+
+- a draft, or a plan no approval names;
+- a step other than a `scaffold` or `tests` step (it names the task's own scaffold step), or one `plan:next` has not marked;
+- a model, validator, resource, policy, controller or side effect in a module (it writes to the project root only), and an API-only application;
+- on MySQL, a key over a `text` or `json` column (a primary key, `unique`, an index, or a foreign key, which MySQL indexes), which drizzle-kit refuses and MySQL rejects without a prefix length (plan the column as `string`, or drop the key), and a `default` of `null`;
+- a resource whose name does not end in `Resource`, which `guren codegen` would not discover, a policy ability named after one of `Policy`'s own members (`before`, `allow`, `deny`), and an action named after one of `Controller`'s (`redirect`, `json`);
+- a policy provider it cannot register: no `src/app.ts` or `app.ts`, no `createApp()` call it can patch, or one that already registers it;
+- any target that already exists: the model file or class, the schema export, the table name in any application root, a file it would create, a validator name another validator file exports, and a resource, policy, controller or side-effect class of the same name.
+
+Running it again on a scaffolded step is refused the same way, since its files exist; verify the step instead. `--json` prints the files it created, the tables it appended, the providers it registered, the routes file it left unmounted and the step that mounts it, the elements it wrote, the ones it left, what it wrote as a stub or not at all, and the relationships it left out.
+
+### Mounting the routes: `plan:scaffold --mount`
+
+The `http` step holding the routes a scaffold wrote starts by mounting them, and `plan:next` names the command:
+
+```text
+Mount the routes the scaffold step wrote first, with `bunx guren plan:scaffold docs/plans/comments/plan.json --step task/entity/model.comment/http --mount`, not by hand: it calls routes/comments.ts from the entry registrar.
+  Written as stubs by plan:scaffold, to finish: validator.comment, controller.comments, action.comments.store, action.comments.destroy, route.comments.store, route.comments.destroy, resource.comment, policy.comment. Each action validates and authorizes as planned and answers 501; write its body and response.
+```
+
+It imports `registerCommentRoutes` into `routes/web.ts` and calls it first in the registrar there. Being first, an `auth` alias the entry sets replaces the one the routes file sets. The mounted routes also register ahead of the entry's own, so a scaffolded path with a parameter, such as `/posts/:id`, can shadow an entry route like `/posts/create`: check the order when the two overlap. `plan:status` then reads the routes and their actions as `wired`, and the validators they use too. What is left is each action's body and response, and what the scaffold listed as a stub or not at all.
+
+It refuses, writing nothing, a draft or a plan no approval names, a step `plan:next` has not marked, a step that holds no scaffolded routes (it names the one that does), a routes file that does not exist or no longer exports its registrar, an application with no `routes/web.ts`, an entry that already imports another binding under the registrar's name, and a file already mounted, whether the entry calls it or another routes file does.
+
+### Test skeletons: `plan:scaffold` on a tests step
+
+The `tests` step is written by the same command. `plan:scaffold <plan> --step <task>/tests` writes one file, `tests/plans/<plan>/<collection>.test.ts` (for the comments plan, `tests/plans/comments/comments.test.ts`), with one `TestApp` test per behaviour of the step:
+
+```ts
+test('[AC-comments-1] A signed-in user can comment on a post.', async () => {
+  given('a post exists')
+  const actor = given<object>('the actor: user')
+  const postId = given<number | string>('the :postId parameter')
+  await (await client(actor)).post(`/posts/${postId}/comments`, { body: 'Nice post' }).assertStatus(302)
+  expect(await Comment.where({ body: 'Nice post' }).first()).not.toBeNull()
+})
+```
+
+- The title starts with the behaviour's id, which is how `plan:verify` selects the file. A bracket in the plan's prose is written as a parenthesis, so the file carries no other id.
+- The request is the one its route names: the method, the path with each parameter as a whole-segment interpolation, and the `input` as the body (as the query string for a `GET`).
+- The expectations are the plan's: `status`, `redirect` (a parameter it shares with the route reuses the route's value), `inertia` (the request asks for JSON, which returns the page without Inertia's version check), `errors` (read from the JSON body), and a `database` row as a query through the model, for a table whose model the root declares and a value the plan's column type can compare with. Setting up those rows and cleaning them up is yours: a row another test left behind can make the expectation pass or fail whatever the code does.
+- The setup the plan states in prose, the signed-in actor where the route requires one, and each path parameter are `given()` calls, which throw. An expectation the skeleton cannot write is an `unwritten()` call, which throws too, and so is an expected 404, which a route that does not exist yet answers as well. The report and the output list each one.
+- `ready()` imports `src/app.ts` and boots it once with `TestApp.fromApp()`. The file's `beforeAll` calls it, so the ORM is configured before any `beforeEach` you add to create or clear rows. It waits up to 120 seconds, past Bun's 5-second hook default. A boot that fails is printed there rather than thrown, so `plan:verify` records the step `blocked` whatever your hooks do, and each test that calls `ready()` or `client()` fails by name with it. Open a hook of your own with `await ready()`, so the boot failure, not a database error, is what each test reports.
+- `client()` returns the booted application, acting as the actor when given one, and primes CSRF with `withCsrf()` when the application mounts it; an application that mounts CSRF with `cookie: false` is not handled.
+- Only `auth` or `auth:*` middleware, a policy, or a `forbidden` behaviour gets a signed-in actor.
+
+Before the implementation exists every test fails, either at a `given()` call or on the route that is not mounted yet, and none is skipped, so the step verifies as `tests:fail` asks. When the application does not boot, `plan:verify` records the step `blocked`, since no test reached its route. Two cases can pass before any code is written, and `tests:fail` then fails the step: a behaviour on a route that exists already with nothing to set up, which the report lists as may pass now, and a behaviour on a new route whose path an existing route already answers, which nothing lists. Replace each `given()` and `unwritten()` call with the setup or assertion it names. Do not turn a test into `test.skip` or `test.todo`: a skipped case is not a run, and the step fails on it. Keep each title's id and each request, since the later steps run the same file and need it to pass.
+
+It refuses, writing nothing, a draft or a plan no approval names, a step `plan:next` has not marked, a file that already exists (a re-run), a behaviour another test file already carries (`plan:verify` would find it in two files), a request body or expected value holding another behaviour's id, and an application whose `src/app.ts` or `app.ts` has no default export to boot. An API-only application has a `tests` step like any other, and gets its skeletons, although it has no `scaffold` step. A route parameter with a constraint (`:id{[0-9]+}`) is a limit of the static reading: a runtime value may fail the constraint, so the request is read as uncertain rather than as reaching the route.
 
 ### Outcomes
 
@@ -418,9 +629,13 @@ Generate the migration (`bunx guren make:migration --name create_comments_table`
 
 `plan:verify` refuses an unapproved plan before it runs anything, so nothing is recorded against a hash nobody agreed to. Past that, it executes your application: `bun test` boots it and `db:migrate` opens the database it is configured for, so run it against a development or test database, never production. Each command may take 600 seconds before it counts as `blocked`; `--timeout <seconds>` changes that. Without `--step` it runs every step in order and skips the ones whose record still holds; steps whose files changed since they verified are re-checked last, as described next. `--ci` exits 1 when a step it ran did not verify, and `--json` prints the report as data.
 
+### Files and lines per step
+
+Each record also carries the work that implemented the step, printed as its `work:` line: the files touched and the lines added and removed since the commit `HEAD` named when `plan:next` marked the step, commits and uncommitted changes alike. The plan and its records, `.guren/`, lockfiles and drizzle-kit snapshots are left out, and a migration's SQL counts. The first run that verifies the step settles the numbers, so a later re-check keeps them. A step `plan:next` did not mark, such as one a whole-plan `plan:verify` ran, reads `not measured` with the reason, and so does a start commit a rebase took out of the history. `plan:status --json` lists the numbers by step id under `verification.work`. Nothing refuses or waits on them: they are what the default step width will be retuned from.
+
 ### One step, one commit
 
-Change only the elements a step lists, and commit it once it verifies. A verified step records a fingerprint of the files that hold its elements and of its test files. When one of them changes, the step's elements read `drifted`. A later step often has good reason to write into such a file: a route beside an earlier one in `routes/web.ts`, a table in `db/schema.ts`, a field on a resource. In a copy of the example, a commit after the `pages` step added a field to `CommentResource.ts`, a file the `http` step had verified, so most elements of `http` drifted:
+Change only the elements a step lists, and commit it once it verifies. A verified step records a fingerprint of the files that hold its elements, of the files that wire them (the routes dispatching to an action, the controller returning a page), and of its test files. When one of them changes, the step's elements read `drifted`. A later step often has good reason to write into such a file: a route beside an earlier one in `routes/web.ts`, a table in `db/schema.ts`, a field on a resource. In a copy of the example, a commit after the `pages` step added a field to `CommentResource.ts`, a file the `http` step had verified, so most elements of `http` drifted:
 
 ```text
 Routes
@@ -432,7 +647,7 @@ The elements verified only through a behaviour of `http` (its controller and pol
 
 `plan:verify --step` re-checks such steps. Once the given step verifies, the same run re-checks the earlier steps whose files changed, in task order, stopping at the first one that runs commands and does not verify. Each outcome is recorded (a `failed` one names what broke) and listed under "Re-checked"; `plan:next` then returns the earliest step left unverified, usually the one that failed. A re-check that comes out `blocked` is left for a later run. While the given step does not verify, the earlier records are left alone and listed as left for a later run, since the commands the steps share would fail them too.
 
-A `tests` step is re-checked without running anything, because its tests pass once the code exists: it stays verified while exactly one test file carries each of its behaviour ids, and otherwise the run names the behaviour and leaves the step drifted.
+A `tests` step is re-checked without running anything, because its tests pass once the code exists: it stays verified while exactly one test file carries each of its behaviour ids and each behaviour's tests still request its route, read as above, and otherwise the run names the behaviour and leaves the step drifted.
 
 `plan:next` runs nothing, so when the next step has drifted, it prints the re-check command:
 
@@ -539,7 +754,7 @@ Planned, not checkable:
 For a plan with a baseline, the report ends with its approval: the time and approver when an approval names the current hash, or which commands refuse it when none does:
 
 ```text
-Not approved at this hash: plan:next, plan:verify, plan:waive, plan:close refuse the plan until guren plan:approve records an approval of it.
+Not approved at this hash: plan:next, plan:scaffold, plan:verify, plan:waive, plan:close refuse the plan until guren plan:approve records an approval of it.
 ```
 
 Verification results live in `.guren/plans/`, which git ignores: a result is a fact about one machine. A fresh clone and CI see every element at most `wired` until `plan:verify` has run there.
@@ -549,11 +764,10 @@ Verification results live in `.guren/plans/`, which git ignores: a result is a f
 For an approved plan, `plan:status` also compares each referenced element with the hash stamped at approval:
 
 ```text
-Against the approved baseline: fresh 13, stale 0, unstamped 0, unjudged 1
-  unjudged: validator.comment
+Against the approved baseline: fresh 14, stale 0, unstamped 0, unjudged 0
 ```
 
-An element is `fresh` while the application holds what was stamped, or what the plan says it will hold (`--json` says which under `basis`). It is `stale` when another change moved it somewhere else. `unstamped` has no hash (its section was unreadable at approval), and `unjudged` cannot be read now. Validators always read `unjudged` (they are never hashed, see Approving), so the line above appears in any plan that declares a validator. A commit elsewhere that did not touch a referenced element leaves the plan fresh.
+An element is `fresh` while the application holds what was stamped, or what the plan says it will hold (`--json` says which under `basis`). It is `stale` when another change moved it somewhere else. `unstamped` has no hash (its section was unreadable at approval, a revision named it later, or, for a validator, the plan was approved before validators were read), and `unjudged` cannot be read now; each is listed by id under the summary line. A commit elsewhere that did not touch a referenced element leaves the plan fresh.
 
 A stale element holds every step that depends on it. In a copy of the example, another commit registered a `comments.store` route before the implementation started:
 
@@ -580,7 +794,7 @@ Freshness counts the edited plan's end state, so the stale element turns fresh o
 bunx guren check --plan
 ```
 
-`check --plan` looks at every open plan at once. A plan is found at the application root as `*.plan.json`, and under `docs/plans/` as `plan.json` or `*.plan.json`. Open means approved at its current hash and not closed. It reports an open plan with `drifted` elements, and two open plans that change the same element, matched by what they change in the application rather than by id. Midway through the example, with a second approved plan renaming `posts.excerpt`:
+`check --plan` looks at every open plan at once. A plan is found at the application root as `*.plan.json`, and under `docs/plans/` as `plan.json` or `*.plan.json`. Open means approved at its current hash and not closed. It reports an open plan with `drifted` elements or with a command the check above refuses (one approved before that check existed), and two open plans that change the same element, matched by what they change in the application rather than by id. Midway through the example, with a second approved plan renaming `posts.excerpt`:
 
 ```text
  WARN  [warn] Approved plan drifted: docs/plans/comments/plan.json has 2 drifted element(s): model.comment, resource.comment.
@@ -671,9 +885,9 @@ Edit the text outside the markers freely: closing a later plan for the same enti
 
 The RFC behind this feature (`rfcs/0030-implementation-plans.md`) describes more than the commands on this page. These parts do not exist yet:
 
-- a `guren plan` command that asks Claude for the plan JSON, and the revision command that applies review feedback to it. Write and edit `plan.json` yourself or in your agent session;
+- a `guren plan` that asks Claude for the plan JSON by itself (`--print-prompt` is the form that exists), and `plan --revise`, which would turn review comments into a revision (`plan:revise` records a change you make yourself). Write `plan.json` yourself or in your agent session;
 - keeping plans in GitHub issues instead of `docs/plans/`;
-- a `scaffold` step that runs the generators for you. `plan:next` lists the elements a scaffold would generate and says no generator ships yet, so the step completes on its verify commands; run `make:feature` and trim what the plan does not need.
+- pages from `plan:scaffold`. It writes every other element of a slice the plan adds, with the action bodies and responses left for the `http` step. It will not write pages: a page written from the plan's props would match the plan by construction.
 
 ## Next steps
 

@@ -7,11 +7,10 @@ import { consola } from 'consola'
 import { defineCommand, keepsProcessAlive } from '../define-command'
 import { parse } from '@babel/parser'
 import {
-  bootstrapApplication,
+  loadApplication,
   ensureApplicationBooted,
   importFirstAvailableApplicationModule,
   isRecord,
-  resolveMainEntry,
   type MaybeApplication,
 } from '../runtime'
 
@@ -390,34 +389,9 @@ export const consoleCommand = keepsProcessAlive(defineCommand({
     description: 'Start an interactive Guren console.',
   },
   async run() {
-    let entry: string
-    try {
-      entry = await resolveMainEntry()
-    } catch (error) {
-      consola.error(error instanceof Error ? error.message : String(error))
-      process.exit(1)
-      return
-    }
+    const { entry, app, moduleExports } = await loadApplication()
 
-    let mod: Record<string, unknown>
-    try {
-      mod = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
-    } catch (error) {
-      consola.error(`Failed to import application entry (${entry}):`, error)
-      process.exit(1)
-      return
-    }
-
-    let app: MaybeApplication
-    try {
-      app = await bootstrapApplication(mod)
-    } catch (error) {
-      consola.error(error instanceof Error ? error.message : String(error))
-      process.exit(1)
-      return
-    }
-
-    await ensureApplicationBooted(app, mod)
+    await ensureApplicationBooted(app, moduleExports)
 
     consola.info('Booted application. Launching console (press Ctrl+D to exit)...')
 

@@ -18,7 +18,7 @@ import { readPlanApprovals, recordPlanApproval, requireReadableApprovals } from 
 import { stampContextHash } from '../src/plan/freshness'
 import { planHash } from '../src/plan/identity'
 import { hasBaseline } from '../src/plan/render'
-import { PLAN_STATE_VERSION, type PlanActiveStep } from '../src/plan/state'
+import { PLAN_STATE_VERSION, type PlanActiveStep, type PlanStepWork } from '../src/plan/state'
 import { PlanSchema, type Plan, type PlanDraft, type PlanDraftSchema } from '../src/plan/schema'
 import type { PlanPagePayload } from '../src/plan/render'
 import { FOUNDATION_TASK_ID, type PlanTaskDerivation } from '../src/plan/tasks'
@@ -105,7 +105,7 @@ export function planAppState(overrides: PlanAppStateInput = {}): PlanAppState {
     resources: names(resources ?? ['PostResource']),
     policies: names(policies ?? ['PostPolicy']),
     pages: names(pages ?? ['posts/Index', 'posts/Show']),
-    validators: names(validators ?? { unreadable: 'validators are named by exported symbol' }),
+    validators: names(validators ?? []),
     routes: [
       { name: 'posts.index', method: 'GET', path: '/posts' },
       { name: 'posts.show', method: 'GET', path: '/posts/:id' },
@@ -119,7 +119,7 @@ export function planAppState(overrides: PlanAppStateInput = {}): PlanAppState {
 /**
  * The same application on disk, for the tests that go through the command and its
  * scanners. It does not derive from {@link planAppState}; the command test asserting
- * the fixture's three warnings is what holds the two together.
+ * the fixture's two warnings is what holds the two together.
  * It declares no routes file, so the route section reads as an application with no
  * routes rather than as one nobody could read, which would be a second warning.
  */
@@ -279,6 +279,24 @@ export const comments = pgTable('comments', {
 })
 `
 
+/** The route each comments behaviour names, as a `TestApp` request: `plan:verify` reads these before it runs a test. */
+const COMMENT_ROUTE_REQUESTS: Record<string, string> = {
+  'AC-comments-1': "app.post('/posts/1/comments', { body: 'hi' })",
+  'AC-comments-2': "app.post('/posts/1/comments', { body: '' })",
+  'AC-comments-3': "app.post('/posts/1/comments', { body: 'hi' })",
+  'AC-comments-4': "app.delete('/comments/1')",
+}
+
+/** Heads a test file whose cases use {@link requestsRoute}; a type import, so the fixture apps need no `@guren/testing`. */
+export const TEST_APP_TYPE_IMPORT = "import type { TestApp } from '@guren/testing'\n"
+
+/** A statement requesting the route a comments behaviour names, never run. */
+export function requestsRoute(id: string): string {
+  const request = COMMENT_ROUTE_REQUESTS[id]
+  if (!request) throw new Error(`no route request for ${id}`)
+  return `void ((app: TestApp) => ${request})`
+}
+
 /**
  * The comments half of the plan written far enough for its `http` step to run, with every
  * script a no-op: the `plan:verify` command and the Stop hook tests run the real `bun test` on it.
@@ -333,18 +351,22 @@ import { registerWebRoutes } from '../routes/web.js'
 export default createApp({ routes: registerWebRoutes })
 `,
   'tests/comments.test.ts': `import { describe, expect, test } from 'bun:test'
-
+${TEST_APP_TYPE_IMPORT}
 describe('comments', () => {
   test('[AC-comments-1] a signed-in user can comment on a post', () => {
+    ${requestsRoute('AC-comments-1')}
     expect(1).toBe(1)
   })
   test('[AC-comments-2] a guest is redirected', () => {
+    ${requestsRoute('AC-comments-2')}
     expect(1).toBe(1)
   })
   test('[AC-comments-3] an empty body is rejected', () => {
+    ${requestsRoute('AC-comments-3')}
     expect(1).toBe(1)
   })
   test('[AC-comments-4] the author can delete', () => {
+    ${requestsRoute('AC-comments-4')}
     expect(1).toBe(1)
   })
 })
@@ -395,4 +417,21 @@ export async function waiveForTest(planPath: string, elementIds: string[]): Prom
     now: () => new Date('2026-09-23T12:00:00.000Z'),
     exec: async () => ({ exitCode: 1, stdout: '', stderr: '' }),
   })
+}
+
+/** The measured half of a step's `work`, or a throw naming why it was not measured. */
+export function measured<T extends Pick<PlanStepWork, 'measured'> & { reason?: string }>(work: T | undefined): Extract<T, { measured: true }> {
+  if (!work) throw new Error('no work recorded')
+  if (!work.measured) throw new Error(`not measured: ${work.reason}`)
+  return work as Extract<T, { measured: true }>
+}
+
+/** The message a command refused with; a run that was not refused fails the test. */
+export async function refusal(work: () => Promise<unknown>): Promise<string> {
+  try {
+    await work()
+  } catch (error) {
+    return (error as Error).message
+  }
+  throw new Error('the run was not refused')
 }

@@ -26,14 +26,17 @@ import {
   planPageManifest,
   type PageManifestPlan,
 } from './pages-types'
-import { AGENTS_MANIFEST_FILE, planAgentManifest, type AgentManifestPlan } from './agents-types'
+import { AGENTS_MANIFEST_FILE, planAgentManifest, STALE_AGENT_MANIFEST_MESSAGE, type AgentManifestPlan } from './agents-types'
 import { emptyActions } from './controller-methods'
 import { parseSourceFile } from './parse-cache'
 import { resolveRoutesEntry } from './route-registrar'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions, resolveRoutesFile } from './load-routes'
 import { appDeclaresPrototypeRoutes } from './prototype-check'
 import type { RouteDefinition } from '@guren/server'
-import { analyzeDeployRuntime, judgeDeployRuntime } from './deploy-runtime'
+import { judgeDeployVerdicts, readDeployRuntime } from './deploy-runtime'
+import { checkIntrospection, type Introspection } from './introspect'
+import { describeIntrospectionFailure, introspectedRoutes } from './manifest-section'
+import type { CheckEvidence } from './check-result'
 import { detectConfigMigrations, undeclaredEnv, type ConfigMigration, type EnvDeclaration } from './config-migration'
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail'
@@ -46,6 +49,10 @@ export interface DoctorCheck {
   fix?: string
   canAutofix?: boolean
   manualFix?: string
+  /** Set by the checks that read the introspected app (RFC 0026 §5). */
+  evidence?: CheckEvidence
+  /** Why such a check was judged from source, which `--no-introspect` leaves unset. */
+  evidenceReason?: string
 }
 
 export interface NextStep {
@@ -73,6 +80,8 @@ export interface RunDoctorOptions {
   cwd?: string
   json?: boolean
   next?: boolean
+  /** Read the introspected app for the deploy-runtime checks (RFC 0026 §5); `guren doctor` sets it unless `--no-introspect`. */
+  introspect?: boolean
 }
 
 export interface DoctorAutofix {
@@ -109,6 +118,8 @@ export interface DoctorJsonOutput {
     fix: string | null
     canAutofix: boolean
     manualFix: string | null
+    evidence?: CheckEvidence
+    evidenceReason?: string
   }>
   nextSteps: NextStep[] | null
   recommendedCommands: string[]
@@ -125,6 +136,8 @@ interface DoctorRuleContext {
   agentManifest: Promise<AgentManifestPlan>
   /** See {@link DoctorManifestPlans.routeGraph}. */
   routeGraph: () => Promise<RouteDefinition[]>
+  /** See {@link DoctorManifestPlans.introspection}. */
+  introspection?: () => Promise<Introspection>
 }
 
 interface DoctorRule {
@@ -177,7 +190,7 @@ function createAgentManifestRule(): DoctorRule {
           key,
           AGENTS_MANIFEST_FILE,
           'warn',
-          `${AGENTS_MANIFEST_FILE} describes agent tools this app no longer exposes — no route derives one.`,
+          STALE_AGENT_MANIFEST_MESSAGE,
           {
             fix: `Run \`guren codegen --force\` to remove ${AGENTS_MANIFEST_FILE}.`,
             manualFix: `Run \`guren codegen --force\` to remove ${AGENTS_MANIFEST_FILE}.`,
@@ -369,9 +382,11 @@ async function detectPrototypeRoutes(context: DoctorRuleContext): Promise<Doctor
     return createCheck(key, title, 'pass', 'No route uses the prototype handler.')
   }
 
-  let definitions: RouteDefinition[]
+  // The introspected app's routes when it registers cleanly (RFC 0026 §5), the routes file's otherwise.
+  const introspected = await introspectedRoutes(context.introspection)
+  let definitions: Array<Pick<RouteDefinition, 'method' | 'path' | 'name' | 'prototype'>>
   try {
-    definitions = await context.routeGraph()
+    definitions = introspected.status === 'described' ? introspected.manifest.routes : await context.routeGraph()
   } catch (error) {
     return createCheck(
       key,
@@ -381,14 +396,20 @@ async function detectPrototypeRoutes(context: DoctorRuleContext): Promise<Doctor
       { manualFix: 'Fix the load error, then run `bunx guren doctor` again.' },
     )
   }
+  const evidence: Pick<DoctorCheck, 'evidence' | 'evidenceReason'> = introspected.status === 'described'
+    ? { evidence: 'manifest' }
+    : {
+      evidence: 'static',
+      evidenceReason: introspected.failure ? `introspection failed with ${describeIntrospectionFailure(introspected.failure)}` : introspected.reason,
+    }
 
   const backlog = definitions.filter((route) => route.prototype)
   if (backlog.length === 0) {
-    return createCheck(key, title, 'pass', 'No route answers from the prototype fixture.')
+    return { ...createCheck(key, title, 'pass', 'No route answers from the prototype fixture.'), ...evidence }
   }
 
   const listed = backlog.map((route) => `${route.method} ${route.path}${route.name ? ` (${route.name})` : ''}`).join(', ')
-  return createCheck(
+  return { ...createCheck(
     key,
     title,
     'fail',
@@ -397,7 +418,7 @@ async function detectPrototypeRoutes(context: DoctorRuleContext): Promise<Doctor
       fix: 'Replace each prototype handler with a controller (`bunx guren make:feature <Entity>`), or ship the static build (`bun run build:prototype`) instead of the server.',
       manualFix: 'Replace each prototype handler with a controller, or set GUREN_PROTOTYPE_ROUTES=1 for a deliberately fixture-backed server.',
     },
-  )
+  ), ...evidence }
 }
 
 /**
@@ -1239,30 +1260,43 @@ export interface DoctorManifestPlans {
   agentManifest: Promise<AgentManifestPlan>
   /**
    * The route graph, loaded at most once per run and only by a rule that asks:
-   * the agent plan when the app declares agent routes, the prototype rule when
-   * it passes the `prototype` handler. Rejects with the load error.
+   * the agent plan when the app declares agent routes (codegen's own path, so it
+   * stays on the routes file), the prototype rule when it passes the `prototype`
+   * handler and the app cannot be introspected. Rejects with the load error.
    */
   routeGraph: () => Promise<RouteDefinition[]>
+  /**
+   * The introspected app, started only by a rule that reads it: the deploy-runtime checks once a
+   * target is found, the prototype rule once a routes file passes the handler. Absent under `--no-introspect`.
+   */
+  introspection?: () => Promise<Introspection>
 }
 
-function createManifestPlans(cwd: string): DoctorManifestPlans {
+function createManifestPlans(cwd: string, options: { introspect?: boolean } = {}): DoctorManifestPlans {
   let graph: Promise<RouteDefinition[]> | undefined
   const routeGraph = () => {
     graph ??= loadRouteDefinitions(resolve(cwd, DEFAULT_ROUTES_FILE), cwd)
     return graph
   }
-  return { pageManifest: planPageManifest(cwd), agentManifest: planAgentManifest(cwd, DEFAULT_ROUTES_FILE, routeGraph), routeGraph }
+  const introspection = options.introspect ? checkIntrospection(cwd) : undefined
+  return {
+    pageManifest: planPageManifest(cwd),
+    agentManifest: planAgentManifest(cwd, DEFAULT_ROUTES_FILE, routeGraph),
+    routeGraph,
+    introspection,
+  }
 }
 
 export async function getDoctorRuleEvaluations(
-  options: { cwd?: string } = {},
+  options: { cwd?: string; introspect?: boolean } = {},
   plans?: DoctorManifestPlans,
 ): Promise<{
   cwd: string
   evaluations: DoctorRuleEvaluation[]
 }> {
   const cwd = resolve(options.cwd ?? process.cwd())
-  const context: DoctorRuleContext = { cwd, ...(plans ?? createManifestPlans(cwd)) }
+  const manifestPlans = plans ?? createManifestPlans(cwd, options)
+  const context: DoctorRuleContext = { cwd, ...manifestPlans }
 
   // The deploy-runtime checks share one filesystem scan, computed here rather
   // than through the DoctorRule interface: they need no autofix and no context
@@ -1277,16 +1311,20 @@ export async function getDoctorRuleEvaluations(
         return { check, autofix } as DoctorRuleEvaluation
       }),
     ),
-    analyzeDeployRuntime(cwd),
+    readDeployRuntime(cwd, { introspect: manifestPlans.introspection }),
   ])
 
   // The verdicts are shared with `guren check` and the deploy builds
   // (RFC 0020 Part 0); doctor's only addition is the remediation pair.
-  const deployEvaluations: DoctorRuleEvaluation[] = judgeDeployRuntime(deployAnalysis).map((verdict) => ({
-    check: createCheck(verdict.key, verdict.title, verdict.status, verdict.message, {
-      fix: verdict.fix,
-      manualFix: verdict.fix,
-    }),
+  const deployEvaluations: DoctorRuleEvaluation[] = judgeDeployVerdicts(deployAnalysis).map((verdict) => ({
+    check: {
+      ...createCheck(verdict.key, verdict.title, verdict.status, verdict.message, {
+        fix: verdict.fix,
+        manualFix: verdict.fix,
+      }),
+      evidence: verdict.evidence,
+      ...(verdict.evidenceReason ? { evidenceReason: verdict.evidenceReason } : {}),
+    },
     autofix: null,
   }))
 
@@ -1296,7 +1334,7 @@ export async function getDoctorRuleEvaluations(
 export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorReport> {
   // One memo for the whole run: the rules and `--next` both read these plans,
   // and the agent one can evaluate the app's module graph.
-  const plans = createManifestPlans(resolve(options.cwd ?? process.cwd()))
+  const plans = createManifestPlans(resolve(options.cwd ?? process.cwd()), options)
   const { cwd, evaluations } = await getDoctorRuleEvaluations({ cwd: options.cwd }, plans)
   const checks = evaluations.map((evaluation) => evaluation.check)
   const fixableChecks = checks.filter((check) => check.status !== 'pass' && Boolean(check.canAutofix))
@@ -1352,6 +1390,8 @@ export function buildJsonOutput(report: DoctorReport): DoctorJsonOutput {
       fix: c.fix ?? null,
       canAutofix: c.canAutofix ?? false,
       manualFix: c.manualFix ?? null,
+      ...(c.evidence ? { evidence: c.evidence } : {}),
+      ...(c.evidenceReason ? { evidenceReason: c.evidenceReason } : {}),
     })),
     nextSteps: report.nextSteps ?? null,
     recommendedCommands: report.recommendedCommands,

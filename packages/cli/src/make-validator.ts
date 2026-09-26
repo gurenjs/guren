@@ -2,8 +2,8 @@ import type { ScaffoldFileEntry, WriterOptions } from './utils'
 import { scaffoldFileEntry, writeScaffoldFile } from './utils'
 import { pluralize } from './inflect'
 import type { FieldDefinition, FieldType } from './fields'
+import { VALIDATORS_DIR } from './discovery'
 
-const VALIDATOR_DIR = 'app/Http/Validators'
 
 export interface MakeValidatorOptions extends WriterOptions {
   /**
@@ -24,7 +24,7 @@ export async function makeValidator(name: string, options: MakeValidatorOptions 
  */
 export function validatorFile(name: string, options: MakeValidatorOptions = {}): ScaffoldFileEntry {
   return scaffoldFileEntry(name, {
-    dir: VALIDATOR_DIR,
+    dir: VALIDATORS_DIR,
     suffix: 'Validator',
     // `scaffoldFileEntry` appends the suffix; schema names are built from the bare
     // entity, so strip it back off as the sibling scaffolders do.
@@ -58,23 +58,21 @@ function zodFieldType(field: FieldDefinition): string {
 function generateValidator(singular: string, fields: FieldDefinition[]): string {
   const collection = pluralize(singular)
   const fieldSchemas = fields.length > 0
-    ? fields.map((f) => `  ${f.name}: ${zodFieldType(f)},`).join('\n')
-    : '  // Add one entry per column, e.g. title: z.string().trim().min(1),'
+    ? fields.map((f) => `${f.name}: ${zodFieldType(f)},`)
+    : ['// Add one entry per column, e.g. title: z.string().trim().min(1),']
 
-  return `import { z } from 'zod'
-
-export const ${singular}IdParamSchema = z.object({
-  id: z.coerce.number().int().positive(),
-})
-
-export const List${collection}QuerySchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-})
-
-export const ${singular}PayloadSchema = z.object({
-${fieldSchemas}
-})
-
+  return `${ZOD_IMPORT}
+${zodObjectExport(`${singular}IdParamSchema`, ['id: z.coerce.number().int().positive(),'])}
+${zodObjectExport(`List${collection}QuerySchema`, ['page: z.coerce.number().int().min(1).default(1),'])}
+${zodObjectExport(`${singular}PayloadSchema`, fieldSchemas)}
 export type ${singular}Payload = z.infer<typeof ${singular}PayloadSchema>
 `
+}
+
+/** The first line of every validator file `make:validator` and `plan:scaffold` write, and the blank line after it. */
+export const ZOD_IMPORT = "import { z } from 'zod'\n"
+
+/** One exported `z.object()` schema and the blank line after it; `entries` are lines of its shape, unindented. */
+export function zodObjectExport(name: string, entries: readonly string[]): string {
+  return `export const ${name} = z.object({\n${entries.map((entry) => `  ${entry}\n`).join('')}})\n`
 }

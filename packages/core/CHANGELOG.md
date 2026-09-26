@@ -1,5 +1,110 @@
 # @guren/core
 
+## 1.23.0
+
+### Minor Changes
+
+- 94b3e11: `Gate` now throws when a plain record resolves no policy and no gate. `this.authorize('delete', comment)` with an ORM record (an object literal or a null-prototype object, which carries no class the gate can find a policy by) used to deny with a generic 403, so the record's own owner was refused with nothing naming the cause. When no gate is defined for the ability either, the check now throws an `Error` naming the ability and the fix: pass `[Model, record]`, or define a gate for the ability.
+
+  What still works as before: a `before()` callback that answers, a gate defined for the ability (`gate.define('update-post', (user, post) => …)` receives the plain record), a bare class (`authorize('create', Comment)`), and the tuple forms. A class instance whose class has no policy, and a tuple whose model has none, are still denied.
+
+  This is a behaviour change for code that relied on the silent denial, including `can()` / `allows()`, which now throw rather than return `false` for such a record. `gate.any()` and `authorizeMiddleware()` given an array check abilities in order, so a plain record throws at the first ability that resolves nothing, even where a later ability (an `admin` gate, say) would have allowed the request. Pass `[Model, record]` in those calls. The throw also skips `after()` callbacks, which see no result for such a check.
+
+### Patch Changes
+
+- Updated dependencies [1885f09]
+- Updated dependencies [38509b6]
+- Updated dependencies [94b3e11]
+- Updated dependencies [97ca4ad]
+- Updated dependencies [94b3e11]
+- Updated dependencies [32d76b4]
+  - @guren/cli@2.28.1
+  - @guren/server@2.28.0
+
+## 1.22.0
+
+### Minor Changes
+
+- da3686f: The broadcasting middlewares resolve the session user from the auth context when `getUser` is omitted. `authMiddleware()` fell back to reading an `auth` property the request context never has, so without `getUser` every private and presence channel was refused at `POST /broadcasting/auth`; it now asks the auth context under `AUTH_CONTEXT_KEY` for its `user()`, as `requireVerifiedEmail()` does. `sseMiddleware()` and `webSocketMiddleware()`, which authorized as a guest without `getUser`, use the same default. A guest is still `undefined` to channel authorizers, and a `getUser` you pass is used as before.
+
+  With the default, an SSE stream or WebSocket opened by a signed-in user is owned by that user, so `/broadcasting/auth` attaches a channel to it only for a requester with the same id. An app that passes `getUser` to `authMiddleware()` alone and returns a different id shape there (`{ sub: '5' }` beside a user record's `{ id: 5 }`) sees `subscribed: false`; pass the same `getUser` to the stream middleware. `@guren/core` re-exports the change.
+
+- 4097977: Re-exports RFC 0026's introspection API from `@guren/server`: `isIntrospecting()`, and `AppManifest` with its entry types.
+- 203d25d: Adds `describeActiveAttachmentEngine()` and `AttachmentEngine.describe()`, which report the configured attachments table, disks and delivery route without touching a disk. An engine bound in a provider's `register()` becomes the introspection manifest's `attachments` section (RFC 0026).
+- 122e175: `Model.create()` and `Model.update()` take a `set` option for columns the server chooses, such as an owner: `Post.create(data, { set: { authorId: user.id } })` (RFC 0031). `data` is filtered by `fillable` as before. The `set` columns skip it, and must not be listed in it. That rule also refuses request data spread into `set`. The same rules refuse a `set` on a model without `fillable`, an `id` or a denied column in `set`, and a key in both `data` and `set`. Every refusal is a `MassAssignmentException` with the existing `denied` or `not-fillable` reason. The transaction scope's `create` and `update` take the option too, and `ModelSetOptions` is exported from `@guren/orm` and `@guren/core`.
+
+  Calls without `set` keep their signatures and behaviour. The `not-fillable` message now points at `set` for a value the server chooses, instead of at `forceCreate()`.
+
+### Patch Changes
+
+- 0ebdf79: `DatabaseApiTokenStore`, `DatabaseSessionStore` and `DatabaseOAuthStateStore` write each timestamp the way its column declares it: a Date for a drizzle timestamp-mode column, an ISO string for a text column, epoch milliseconds for an integer column with no mode. An `api_tokens` table declared with `text('created_at')`, the shape the SQLite scaffold gives `users`, made `createApiToken` throw at bind time (bun:sqlite cannot bind a Date) and surface as a 500, and `deleteExpired()` on such a table matched no row.
+- c549bca: The deploy builds' runtime check (`@guren/core/internal/deploy-check`) now judges from the introspected app where `@guren/cli` can introspect it, and reports the hashing and store verdicts unverified otherwise (RFC 0026 Parts 2a and 3). Before the warnings it prints one line naming what each verdict was judged from, with the reason when the app could not be read. It still only warns.
+- Updated dependencies [3d2d39b]
+- Updated dependencies [4ce01ae]
+- Updated dependencies [9eebeec]
+- Updated dependencies [16fca2e]
+- Updated dependencies [9cd5e44]
+- Updated dependencies [81054e0]
+- Updated dependencies [1b85e80]
+- Updated dependencies [96c7592]
+- Updated dependencies [b6f5d44]
+- Updated dependencies [356c147]
+- Updated dependencies [5355104]
+- Updated dependencies [3ca4ed7]
+- Updated dependencies [9b47c77]
+- Updated dependencies [da3686f]
+- Updated dependencies [2a784c4]
+- Updated dependencies [cd37480]
+- Updated dependencies [14e98c6]
+- Updated dependencies [cb35986]
+- Updated dependencies [3a09114]
+- Updated dependencies [d1882bb]
+- Updated dependencies [0c58c15]
+- Updated dependencies [f3a4b6f]
+- Updated dependencies [8e635ef]
+- Updated dependencies [cb49e13]
+- Updated dependencies [3cdb312]
+- Updated dependencies [4fac4c3]
+- Updated dependencies [e08047c]
+- Updated dependencies [d1b6d1a]
+- Updated dependencies [a01f75e]
+- Updated dependencies [0c22361]
+- Updated dependencies [3d5760a]
+- Updated dependencies [548d833]
+- Updated dependencies [4097977]
+- Updated dependencies [c549bca]
+- Updated dependencies [c549bca]
+- Updated dependencies [203d25d]
+- Updated dependencies [17836ed]
+- Updated dependencies [e89f0de]
+- Updated dependencies [4877a1c]
+- Updated dependencies [94c6966]
+- Updated dependencies [02704dc]
+- Updated dependencies [02fca62]
+- Updated dependencies [122e175]
+- Updated dependencies [9cd5e44]
+- Updated dependencies [74b5bd4]
+- Updated dependencies [52cc8fa]
+- Updated dependencies [da12a1d]
+- Updated dependencies [1f6de30]
+- Updated dependencies [1c83249]
+- Updated dependencies [9d79b44]
+- Updated dependencies [8a1e18f]
+- Updated dependencies [b59ab29]
+- Updated dependencies [e13c8b3]
+- Updated dependencies [5b4411e]
+- Updated dependencies [43523fa]
+- Updated dependencies [3858844]
+- Updated dependencies [0a99f92]
+- Updated dependencies [4ef63b3]
+- Updated dependencies [a17e68b]
+- Updated dependencies [f3a4b6f]
+- Updated dependencies [5d8aa8e]
+- Updated dependencies [7251c60]
+  - @guren/cli@2.28.0
+  - @guren/server@2.27.0
+  - @guren/orm@2.13.0
+
 ## 1.21.0
 
 ### Minor Changes

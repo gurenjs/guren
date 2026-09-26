@@ -7,6 +7,7 @@
  */
 
 import { CONTRACT_SEGMENTS } from '../contract-segments'
+import { ROUTES_DIR } from '../discovery'
 import type { SchemaColumnDefault, SchemaConstraint } from '../schema-parser'
 import type { RuntimeSchemaColumn, SourcedSchemaTable } from '../schema-runtime'
 import type {
@@ -14,6 +15,7 @@ import type {
   PlanAppClassDetail,
   PlanAppDetail,
   PlanAppMount,
+  PlanAppMounts,
   PlanAppPolicyDetail,
   PlanAppRouteDetail,
   PlanAppSideEffectDetail,
@@ -25,7 +27,7 @@ import { resourceFieldProperties, validatorFieldProperties } from './field-statu
 import { differ, existenceMatch, match, unknown, type PlanPropertyStatus, type PlanPropertyVerdict } from './property-status'
 import { behaviourCanReach } from './reach'
 import {
-  listPlanElementEntries,
+  listPlanAlterIds,
   type PlanAction,
   type PlanChange,
   type PlanColumn,
@@ -40,6 +42,7 @@ import {
   type PlanSideEffect,
   type PlanView,
 } from './schema'
+import { derivePlanTasks, planLaterRelationships, type PlanLaterRelationship, type PlanTaskDerivation } from './tasks'
 
 /** Every state of RFC 0030 §6. `plan:status` sets the ones in {@link PlanStatusState}. */
 export type PlanElementState = 'planned' | 'present' | 'wired' | 'verified' | 'drifted' | 'unjudged' | 'blocked' | 'waived'
@@ -80,7 +83,7 @@ export interface PlanElementStatus<S extends PlanElementState = PlanStatusState>
    * `wired` for a kind with a mount point, `present` for the rest and for a `drop`.
    */
   completesAt: 'present' | 'wired'
-  /** App-relative files the readers found the element in; what `plan:verify` fingerprints. Empty until it exists. */
+  /** App-relative files the readers found the element in, and those its `wired` rests on; what `plan:verify` fingerprints. Empty until it exists. */
   files: string[]
   /** Set by the verification overlay when a verified step did not lift the element: why, and the note that says so. */
   hold?: { kind: PlanVerificationHold; note: string }
@@ -134,8 +137,11 @@ interface Judgement {
   previous?: Existence
   /** Compared only once the element exists. */
   properties?: () => PlanPropertyStatus[]
-  /** Asked only of an element that is `present`; absent for a kind with no mount point. */
-  mount?: () => PlanAppMount
+  /**
+   * Absent for a kind with no mount point. `verdict` is asked only of an element that is `present`;
+   * `files`, what the verdict rests on, joins the element's own so a change that unwires it expires its record.
+   */
+  mount?: { verdict: () => PlanAppMount; files: () => string[] }
   /** Asked only once the element exists. */
   files?: () => string[]
   /** No reader exists for this kind of element at all. */
@@ -237,7 +243,7 @@ function conclude(judgement: Judgement, credit: AlterCredit, reachable: Readonly
     change: change.kind,
     label,
     completesAt: change.kind !== 'drop' && judgement.mount ? ('wired' as const) : ('present' as const),
-    files: exists === 'yes' ? (judgement.files?.() ?? []) : [],
+    files: exists === 'yes' ? withWiring(judgement.files?.() ?? [], judgement.mount?.files) : [],
   }
   const notes = [...(judgement.notes ?? [])]
   const done = (state: PlanStatusState, extra: Partial<PlanElementStatus> = {}): PlanElementStatus => ({
@@ -296,7 +302,7 @@ function conclude(judgement: Judgement, credit: AlterCredit, reachable: Readonly
     return result('present')
   }
   if (!judgement.mount) return result('present')
-  const mount = judgement.mount()
+  const mount = judgement.mount.verdict()
   if (mount === 'mounted') return result('wired')
   notes.push(`Not confirmed as wired: ${mount.unconfirmed}.`)
   return result('present')
@@ -346,6 +352,17 @@ function existsInScope<T extends { module: string | null }>(
 /** The discovered class matching a name in the plan's app root. */
 function findClass<T extends { className: string; module: string | null }>(classes: ReadonlyArray<T> | undefined, name: string, module: string | undefined): T | undefined {
   return classes?.find((entry) => entry.className === name && entry.module === (module ?? null))
+}
+
+const NO_MOUNT_FILES: PlanAppMounts['files'] = { entry: [], descriptors: {} }
+
+function unique(values: Iterable<string>): string[] {
+  return [...new Set(values)]
+}
+
+/** An element no reader found a file of stays unfingerprinted: wiring alone never lifts one. */
+function withWiring(own: string[], wiring: (() => string[]) | undefined): string[] {
+  return own.length === 0 || !wiring ? own : unique([...own, ...wiring()])
 }
 
 /** The file of the discovered class matching a name in the plan's app root, as a list for `files`. */
@@ -409,8 +426,8 @@ const NO_DETAIL: PlanAppUnreadable = { unreadable: 'the application state was lo
  * recorded none, absent where none stands. A match with no reading never counts towards an
  * `alter`'s completion.
  */
-export function judgePlan(plan: PlanDraft, app: PlanAppState, readings?: readonly PlanPropertyReading[]): PlanStatus {
-  return judgeWith(plan, app, creditAlter(readings))
+export function judgePlan(plan: PlanDraft, app: PlanAppState, readings?: readonly PlanPropertyReading[], derivation?: PlanTaskDerivation): PlanStatus {
+  return judgeWith(plan, app, creditAlter(readings), derivation)
 }
 
 /**
@@ -427,11 +444,12 @@ export function readAlterProperties(plan: PlanDraft, app: PlanAppState): PlanPro
 
 /** Whether the plan alters anything: its properties are read through the detail, which imports db/schema.ts and the validators. */
 export function planHasAlter(plan: PlanDraft): boolean {
-  return listPlanElementEntries(plan).some(({ element }) => (element as { change?: PlanChange }).change?.kind === 'alter')
+  return listPlanAlterIds(plan).length > 0
 }
 
-function judgeWith(plan: PlanDraft, app: PlanAppState, credit: AlterCredit): PlanStatus {
-  const context = new StatusContext(plan, app, credit)
+/** `derivation` orders the relationships a later task completes; the caller's, where it has one. */
+function judgeWith(plan: PlanDraft, app: PlanAppState, credit: AlterCredit, derivation = derivePlanTasks(plan)): PlanStatus {
+  const context = new StatusContext(plan, app, credit, planLaterRelationships(plan, derivation))
   const elements: PlanElementStatus[] = [
     ...plan.models.flatMap((model) => [context.model(model), ...model.columns.map((column) => context.column(model, column))]),
     ...plan.validators.map((validator) => context.validator(validator)),
@@ -527,11 +545,15 @@ class StatusContext {
   private readonly viewsById: Map<string, PlanView>
   private readonly namesById: Map<string, string>
   private readonly reachable: ReadonlySet<string>
+  /** Relationships a later task completes, by the relationship, then by the id of the model they are judged with. */
+  private readonly deferred: Map<PlanModel['relationships'][number], PlanLaterRelationship>
+  private readonly inbound = new Map<string, PlanLaterRelationship[]>()
 
   constructor(
     private readonly plan: PlanDraft,
     private readonly app: PlanAppState,
     private readonly credit: AlterCredit,
+    later: readonly PlanLaterRelationship[],
   ) {
     this.reachable = behaviourCanReach(plan)
     this.detail = app.detail
@@ -541,6 +563,12 @@ class StatusContext {
     )
     this.viewsById = new Map(plan.views.map((view) => [view.id, view]))
     this.namesById = new Map([...plan.validators, ...plan.resources, ...plan.policies].map((element) => [element.id, element.name]))
+    this.deferred = new Map(later.map((entry) => [entry.relationship, entry]))
+    for (const entry of later) {
+      const bucket = this.inbound.get(entry.judgedWith.id)
+      if (bucket) bucket.push(entry)
+      else this.inbound.set(entry.judgedWith.id, [entry])
+    }
   }
 
   private conclude(judgement: Judgement): PlanElementStatus {
@@ -565,7 +593,7 @@ class StatusContext {
     names: PlanAppNames,
     noun: PlanNoun,
     classes: T[] | undefined,
-    judge: { properties?: (found: T | undefined) => PlanPropertyStatus[]; mount?: (found: T) => PlanAppMount },
+    judge: { properties?: (found: T | undefined) => PlanPropertyStatus[]; mount?: { verdict: (found: T) => PlanAppMount; files: (found: T) => string[] } },
   ): PlanElementStatus {
     const { properties, mount } = judge
     const find = (name: string): Existence =>
@@ -579,7 +607,7 @@ class StatusContext {
       exists: find(element.name),
       previous: previousOf(element.change, find),
       properties: properties && (() => properties(found())),
-      mount: mount && (() => mount(found()!)),
+      mount: mount && { verdict: () => mount.verdict(found()!), files: () => mount.files(found()!) },
       files: () => classFiles(classes, element.name, element.module),
     })
   }
@@ -625,6 +653,7 @@ class StatusContext {
   }
 
   model(model: PlanModel): PlanElementStatus {
+    const deferred = model.relationships.flatMap((relationship) => this.deferred.get(relationship) ?? [])
     return this.conclude({
       id: model.id,
       section: 'models',
@@ -633,10 +662,16 @@ class StatusContext {
       exists: this.modelExistence(model.name, model.module),
       previous: previousOf(model.change, (from) => this.modelExistence(from, model.module)),
       properties: () => this.modelProperties(model),
+      // The declaring models' files hold the relationships judged here, so a change to one expires the record.
       files: () => {
         const models = this.section('models')
-        return classFiles(isUnreadable(models) ? undefined : models, model.name, model.module)
+        const classes = isUnreadable(models) ? undefined : models
+        const declaring = (this.inbound.get(model.id) ?? []).flatMap((later) => classFiles(classes, later.model.name, later.model.module))
+        return unique([...classFiles(classes, model.name, model.module), ...declaring])
       },
+      notes: deferred.map(
+        (later) => `Relationship ${later.relationship.name} waits on work a later task does: it is judged with ${later.judgedWith.id}, in ${later.stepId}.`,
+      ),
     })
   }
 
@@ -644,9 +679,8 @@ class StatusContext {
     const properties: PlanPropertyStatus[] = []
     const models = this.section('models')
     const tables = this.section('tables')
-    const actual = isUnreadable(models)
-      ? undefined
-      : models.find((candidate) => candidate.className === model.name && candidate.module === (model.module ?? null))
+    const classes = isUnreadable(models) ? undefined : models
+    const actual = findClass(classes, model.name, model.module)
     const whyNoModel = isUnreadable(models) ? `the models could not be read (${models.unreadable})` : 'the model class did not parse'
 
     if (model.change.kind !== 'alter' || model.tableRenamedFrom) {
@@ -666,21 +700,14 @@ class StatusContext {
     }
 
     for (const relationship of model.relationships) {
-      const property = `relationship ${relationship.name}`
-      const target = this.modelsById.get(relationship.target)?.name ?? relationship.target
-      // Two properties, under the same keys whatever is read, since an alter's reading at approval is
-      // keyed on them: a target written as a lazy import is one the parser cannot name, and that
-      // must not hide a relationship whose name and type it did read.
-      const targetProperty = `${property} target`
-      const found = actual?.relationships.find((candidate) => candidate.name === relationship.name)
-      if (!actual) properties.push(unknown(property, relationship.type, whyNoModel), unknown(targetProperty, target, whyNoModel))
-      else if (!found) properties.push(differ(property, relationship.type, 'not declared'), differ(targetProperty, target, 'not declared'))
-      else {
-        properties.push(
-          compare(property, relationship.type, found.type, ''),
-          compare(targetProperty, target, found.relatedModel, 'the related model is not written as a class the parser can name'),
-        )
-      }
+      if (!this.deferred.has(relationship)) properties.push(...this.relationshipProperties(`relationship ${relationship.name}`, relationship, actual, whyNoModel))
+    }
+    for (const later of this.inbound.get(model.id) ?? []) {
+      const declaring = findClass(classes, later.model.name, later.model.module)
+      const whyNoDeclaring = classes ? `the model class ${later.model.name} declaring it was not found or did not parse` : whyNoModel
+      // A module's model is prefixed, since approval readings are keyed on the property name.
+      const owner = later.model.module ? `${later.model.module}/${later.model.name}` : later.model.name
+      properties.push(...this.relationshipProperties(`relationship ${owner}.${later.relationship.name}`, later.relationship, declaring, whyNoDeclaring))
     }
 
     for (const name of model.fillable) {
@@ -700,6 +727,28 @@ class StatusContext {
       properties.push(found === undefined ? unknown(property, 'declared', CONSTRAINTS_HIDDEN) : found ? match(property, 'declared') : differ(property, 'declared', 'not declared'))
     }
     return properties
+  }
+
+  /**
+   * Two properties, under the same keys whatever is read, since an alter's reading at approval is
+   * keyed on them: a target written as a lazy import is one the parser cannot name, and that
+   * must not hide a relationship whose name and type it did read.
+   */
+  private relationshipProperties(
+    property: string,
+    relationship: PlanModel['relationships'][number],
+    actual: { relationships: ReadonlyArray<{ name: string; type: string; relatedModel?: string }> } | undefined,
+    whyNoModel: string,
+  ): PlanPropertyStatus[] {
+    const target = this.modelsById.get(relationship.target)?.name ?? relationship.target
+    const targetProperty = `${property} target`
+    const found = actual?.relationships.find((candidate) => candidate.name === relationship.name)
+    if (!actual) return [unknown(property, relationship.type, whyNoModel), unknown(targetProperty, target, whyNoModel)]
+    if (!found) return [differ(property, relationship.type, 'not declared'), differ(targetProperty, target, 'not declared')]
+    return [
+      compare(property, relationship.type, found.type, ''),
+      compare(targetProperty, target, found.relatedModel, 'the related model is not written as a class the parser can name'),
+    ]
   }
 
   column(model: PlanModel, column: PlanColumn): PlanElementStatus {
@@ -741,11 +790,18 @@ class StatusContext {
     else if (projection.ambiguous.includes(builder)) properties.push(unknown('type', column.type, `"${builder}" may hold a ${column.type} under a mode no reader reports`))
     else properties.push(differ('type', column.type, builder))
 
-    const notNull = actual.notNull || actual.primaryKey
-    flag('nullable', column.nullable, notNull, !notNull)
+    // A table has one primary key, so a column is in it when a readable composite key lists it. pg and MySQL make
+    // every key column NOT NULL; SQLite's rowid tables accept NULL there, and drizzle-kit writes only `.notNull()`.
+    const inCompositeKey = table.constraints.some((constraint) => constraint.kind === 'primaryKey' && !constraint.opaqueColumns && constraint.columns.includes(column.name))
+    const keyHidden = table.opaqueConstraints === true || table.constraints.some((constraint) => constraint.kind === 'primaryKey' && constraint.opaqueColumns)
+    const keyForcesNotNull = table.dialect !== 'sqlite'
+    const notNull = actual.notNull || actual.primaryKey || (keyForcesNotNull && inCompositeKey)
+    if (!notNull && keyForcesNotNull && keyHidden && !hidden) properties.push(unknown('nullable', String(column.nullable), CONSTRAINTS_HIDDEN))
+    else flag('nullable', column.nullable, notNull, !notNull)
     if (column.primaryKey !== undefined) {
-      const composite = hasIndex(table, [column.name], ['primaryKey'])
-      flag('primaryKey', column.primaryKey, actual.primaryKey || composite === true)
+      const inKey = actual.primaryKey || inCompositeKey
+      if (!inKey && keyHidden) properties.push(unknown('primaryKey', String(column.primaryKey), CONSTRAINTS_HIDDEN))
+      else flag('primaryKey', column.primaryKey, inKey)
     }
 
     const uniqueIndex = hasIndex(table, [column.name], ['unique', 'uniqueIndex'])
@@ -820,7 +876,7 @@ class StatusContext {
       exists: find(validator.name),
       previous: previousOf(validator.change, find),
       properties: () => validatorFieldProperties(validator.fields, found?.fields ?? { unreadable: isUnreadable(validators) ? validators.unreadable : 'the validator was not read' }),
-      mount: () => this.referenceMount(validator.name, found),
+      mount: { verdict: () => this.referenceMount(validator.name, found), files: () => this.referenceWiringFiles(validator.name) },
       files: () => (found ? [found.file] : []),
     })
   }
@@ -866,7 +922,7 @@ class StatusContext {
       exists: find(action.name),
       previous: previousOf(action.change, find),
       properties: () => this.actionProperties(action, key),
-      mount: () => this.actionMount(key),
+      mount: { verdict: () => this.actionMount(key), files: () => this.actionWiringFiles(key) },
       files: () => this.controllerFiles(controller.className, controller.module),
     })
   }
@@ -952,31 +1008,28 @@ class StatusContext {
    */
   private referenceMount(symbol: string, validator: PlanAppValidatorDetail | undefined): PlanAppMount {
     if (!this.detail) return { unconfirmed: NO_DETAIL.unreadable }
-    const actions = this.section('actions')
-    const routes = this.section('routes')
     const reasons: string[] = []
-    const mentions: string[] = []
 
-    for (const action of isUnreadable(actions) ? [] : actions) {
-      if (!action.validates.includes(symbol)) {
-        if (action.identifiers.includes(symbol)) mentions.push(`${action.key} mentions it without validating with it`)
-        continue
-      }
+    for (const action of this.validatingWith(symbol)) {
       const mount = this.actionMount(action.key)
       if (mount === 'mounted') return 'mounted'
       reasons.push(`${action.key} validates with it, and ${mount.unconfirmed}`)
     }
 
-    for (const route of isUnreadable(routes) ? [] : routes) {
-      if (!contractHolds(route, symbol)) continue
+    for (const route of this.contractsHolding(symbol)) {
       const mount = this.routeMount(route)
       if (mount === 'mounted') return 'mounted'
       reasons.push(`the contract of ${route.name ?? `${route.method} ${route.path}`} holds it, and ${mount.unconfirmed}`)
     }
 
-    for (const file of this.detail.routeFiles) {
-      if (file.identifiers.includes(symbol)) mentions.push(`${file.file} mentions it, and no registered route contract holds it`)
-    }
+    const mentions = [
+      ...this.readActions()
+        .filter((action) => !action.validates.includes(symbol) && action.identifiers.includes(symbol))
+        .map((action) => `${action.key} mentions it without validating with it`),
+      ...this.detail.routeFiles
+        .filter((file) => file.identifiers.includes(symbol))
+        .map((file) => `${file.file} mentions it, and no registered route contract holds it`),
+    ]
 
     if (reasons.length > 0) return { unconfirmed: reasons[0]! }
     if (validator?.unimported) {
@@ -1003,16 +1056,82 @@ class StatusContext {
       exists: find(route.name),
       previous: previousOf(route.change, find),
       properties: () => this.routeProperties(route, actual()),
-      mount: () => this.routeMount(actual()),
+      mount: { verdict: () => this.routeMount(actual()), files: () => this.routeWiringFiles(actual()) },
       files: () => this.routeFiles(actual()),
     })
   }
 
-  /** The entry file for an entry route; every routes file of its module for a module's, since nothing says which declared it. */
+  /**
+   * Every routes file of the route's scope, since nothing says which declared it: for an entry
+   * route the entry file and the project's `routes/` files (the scope `routes-check.ts` reads),
+   * every routes file of its module for a module's route. The entry file is kept even when it did not parse.
+   */
   private routeFiles(route: PlanAppRouteDetail): string[] {
-    if (route.module === null) return route.file === undefined ? [] : [route.file]
+    const files = this.allRouteFiles()
+    if (route.module === null) {
+      const project = files.filter((file) => file.startsWith(`${ROUTES_DIR}/`))
+      return route.file === undefined ? project : unique([route.file, ...project])
+    }
     const prefix = `modules/${route.module}/`
-    return (this.detail?.routeFiles ?? []).map((entry) => entry.file).filter((file) => file.startsWith(prefix))
+    return files.filter((file) => file.startsWith(prefix))
+  }
+
+  private allRouteFiles(): string[] {
+    return (this.detail?.routeFiles ?? []).map((entry) => entry.file)
+  }
+
+  /** The actions that read; none when they did not, which the mount verdicts report on their own. */
+  private readActions(): PlanAppActionDetail[] {
+    const actions = this.section('actions')
+    return isUnreadable(actions) ? [] : actions
+  }
+
+  private validatingWith(symbol: string): PlanAppActionDetail[] {
+    return this.readActions().filter((action) => action.validates.includes(symbol))
+  }
+
+  private contractsHolding(symbol: string): PlanAppRouteDetail[] {
+    const routes = this.section('routes')
+    return isUnreadable(routes) ? [] : routes.filter((route) => contractHolds(route, symbol))
+  }
+
+  private returning(page: string): PlanAppActionDetail[] {
+    return this.readActions().filter((action) => action.pages.includes(page))
+  }
+
+  /**
+   * What a route's `wired` rests on: the files its mount was read from, and the routes files that may
+   * declare it or a route registered before it. A module's route takes every routes file, since the
+   * entry's and another module's may shadow it; an entry route's register first.
+   */
+  private routeWiringFiles(route: PlanAppRouteDetail): string[] {
+    const { entry, descriptors } = this.detail?.mounts.files ?? NO_MOUNT_FILES
+    if (route.module === null) return [...this.routeFiles(route), ...entry]
+    const descriptor = descriptors[route.module]
+    return [...this.allRouteFiles(), ...entry, ...(descriptor ? [descriptor] : [])]
+  }
+
+  /** What an action's `wired` rests on: every route dispatching to it, or every routes file when the routes did not read. */
+  private actionWiringFiles(key: string): string[] {
+    const routes = this.routesTo(key)
+    if (!isUnreadable(routes)) return routes.flatMap((route) => this.routeWiringFiles(route))
+    return [...this.allRouteFiles(), ...(this.detail?.mounts.files.entry ?? [])]
+  }
+
+  /** An element wired through an action rests on the action's body, in its controller, and on the action's own wiring. */
+  private throughActionFiles(action: PlanAppActionDetail): string[] {
+    return [action.file, ...this.actionWiringFiles(action.key)]
+  }
+
+  private referenceWiringFiles(symbol: string): string[] {
+    return [
+      ...this.validatingWith(symbol).flatMap((action) => this.throughActionFiles(action)),
+      ...this.contractsHolding(symbol).flatMap((route) => this.routeWiringFiles(route)),
+    ]
+  }
+
+  private viewWiringFiles(page: string): string[] {
+    return this.returning(page).flatMap((action) => this.throughActionFiles(action))
   }
 
   private routeProperties(route: PlanRoute, actual: PlanAppRouteDetail): PlanPropertyStatus[] {
@@ -1063,7 +1182,7 @@ class StatusContext {
       exists: find(view.page),
       previous: previousOf(view.change, find),
       properties: () => this.viewProperties(view),
-      mount: () => this.viewMount(view.page),
+      mount: { verdict: () => this.viewMount(view.page), files: () => this.viewWiringFiles(view.page) },
       files: () => {
         const pages = this.section('pages')
         const file = isUnreadable(pages) ? undefined : pages.find((candidate) => candidate.id === view.page)?.file
@@ -1093,7 +1212,7 @@ class StatusContext {
   private viewMount(page: string): PlanAppMount {
     const actions = this.section('actions')
     if (isUnreadable(actions)) return { unconfirmed: `the controller actions could not be read (${actions.unreadable})` }
-    const returning = actions.filter((action) => action.pages.includes(page))
+    const returning = this.returning(page)
     if (returning.length === 0) return { unconfirmed: 'no controller action returns this page' }
     const mounts = returning.map((action) => this.actionMount(action.key))
     return mounts.includes('mounted') ? 'mounted' : { unconfirmed: `${returning[0]!.key} returns it, and ${(mounts[0] as { unconfirmed: string }).unconfirmed}` }
@@ -1125,7 +1244,8 @@ class StatusContext {
     const classes = this.detail?.sideEffects[effect.kind]
     const names: PlanAppNames = classes ? classes.map((entry) => ({ name: entry.className, module: entry.module })) : NO_DETAIL
     return this.named('sideEffects', effect, names, { plural: `${effect.kind} classes`, singular: effect.kind }, classes, {
-      mount: (found) => this.sideEffectMount(effect, found),
+      // Removing the last use is what unwires it, and a use sits in the file that makes it.
+      mount: { verdict: (found) => this.sideEffectMount(effect, found), files: (found) => found.usedIn },
     })
   }
 

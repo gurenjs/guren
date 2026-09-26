@@ -918,3 +918,195 @@ describe('generateDataTypes reads a type body by brace depth', () => {
     ])
   })
 })
+
+/**
+ * The import block is shared by every resource, and a name it binds twice is
+ * a duplicate identifier that takes the whole artifact out of compilation.
+ * Each case is compiled: dropping or re-emitting an import is only right if
+ * tsc still resolves every name the copied bodies use.
+ */
+describe('generateDataTypes binds each imported name once', () => {
+  let appRoot: string
+
+  beforeEach(async () => {
+    appRoot = await mkdtemp(join(tmpdir(), 'guren-cli-data-types-imports-'))
+  })
+
+  afterEach(async () => {
+    await rm(appRoot, { recursive: true, force: true })
+  })
+
+  const POST_MODEL =
+    'export interface PostRecord { id: number; title: string }\n'
+    + 'export interface PostAuthorSummary { id: number; name: string }\n'
+
+  // Self-contained on purpose (no @guren/core import): tsc follows the
+  // generated imports into these files, so everything they import must resolve.
+  const importingResource = (
+    className: string,
+    importLine: string,
+    fields: string,
+    { exported = true }: { exported?: boolean } = {},
+  ): string =>
+    `${importLine}\n\n`
+    + 'declare class Resource<T> { constructor(resource: T) }\n\n'
+    + `${exported ? 'export ' : ''}interface ${className}Data extends Record<string, unknown> {\n`
+    + `  ${fields}\n}\n\n`
+    + `export class ${className} extends Resource<Record<string, unknown>> {\n`
+    + `  toArray(): ${className}Data {\n    return {} as never\n  }\n}\n`
+
+  const compiles = (outputPath: string) =>
+    checkTypes([outputPath], {
+      strict: true,
+      noEmit: true,
+      skipLibCheck: true,
+      target: 'ES2022',
+      module: 'ESNext',
+      moduleResolution: 'bundler',
+      types: [],
+    })
+
+  const importLines = async () =>
+    (await readFile(join(appRoot, '.guren/data.gen.ts'), 'utf8'))
+      .split('\n')
+      .filter((line) => line.startsWith('import '))
+
+  it(
+    'keeps the first import of a name and drops a later one in another statement shape',
+    async () => {
+      await writeWorkspaceFiles(appRoot, {
+        'app/Models/Post.ts': POST_MODEL,
+        // The two statements read as different text and bind the same name:
+        // deduplicated by text, both are emitted and tsc reports TS2300.
+        'app/Http/Resources/ApiPostResource.ts': importingResource(
+          'ApiPostResource',
+          "import { type PostRecord } from '../../Models/Post.js'",
+          "id: PostRecord['id']",
+        ),
+        'app/Http/Resources/PostResource.ts': importingResource(
+          'PostResource',
+          'import type { PostRecord } from "../../Models/Post.js";',
+          "title: PostRecord['title']",
+        ),
+      })
+
+      const { outputPath, definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+      expect(warnings).toEqual([])
+      expect(definitions.map((d) => [d.dataName, d.imports])).toEqual([
+        ['ApiPost', ["import type { PostRecord } from '../app/Models/Post.js'"]],
+        ['Post', []],
+      ])
+      expect(await importLines()).toEqual(["import type { PostRecord } from '../app/Models/Post.js'"])
+      expect(compiles(outputPath)).toEqual([])
+    },
+    TSC_TIMEOUT,
+  )
+
+  it(
+    're-emits the names of a partly bound statement and keeps a kept one as written',
+    async () => {
+      await writeWorkspaceFiles(appRoot, {
+        'app/Models/Post.ts': POST_MODEL,
+        'app/Http/Resources/ApiPostResource.ts': importingResource(
+          'ApiPostResource',
+          'import type { PostRecord } from "../../Models/Post.js"',
+          "id: PostRecord['id']",
+        ),
+        'app/Http/Resources/PostResource.ts': importingResource(
+          'PostResource',
+          "import type { PostRecord, PostAuthorSummary } from '../../Models/Post.js'",
+          "title: PostRecord['title']\n  author: PostAuthorSummary",
+        ),
+      })
+
+      const { outputPath, definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+      expect(warnings).toEqual([])
+      // The first statement is copied verbatim, double quotes included: what an
+      // app already generates must not change under it. The second keeps only
+      // the name the block does not bind yet.
+      expect(definitions.map((d) => d.imports)).toEqual([
+        ['import type { PostRecord } from "../app/Models/Post.js"'],
+        ["import type { PostAuthorSummary } from '../app/Models/Post.js'"],
+      ])
+      expect(await importLines()).toEqual([
+        "import type { PostAuthorSummary } from '../app/Models/Post.js'",
+        'import type { PostRecord } from "../app/Models/Post.js"',
+      ])
+      expect(compiles(outputPath)).toEqual([])
+    },
+    TSC_TIMEOUT,
+  )
+
+  it(
+    'references the exported payload of a resource binding a name to a second module',
+    async () => {
+      await writeWorkspaceFiles(appRoot, {
+        'app/Models/Post.ts': POST_MODEL,
+        'app/Models/index.ts': "export type { PostRecord, PostAuthorSummary } from './Post.js'\n",
+        'app/Http/Resources/ApiPostResource.ts': importingResource(
+          'ApiPostResource',
+          "import type { PostRecord } from '../../Models/index.js'",
+          "id: PostRecord['id']",
+        ),
+        // Same name, another module: an alias would need the copied body
+        // rewritten, so the copy gives way to the reference an uncopyable body
+        // takes, which resolves inside the resource's own module.
+        'app/Http/Resources/PostResource.ts': importingResource(
+          'PostResource',
+          "import type { PostRecord } from '../../Models/Post.js'",
+          "title: PostRecord['title']",
+        ),
+      })
+
+      const { outputPath, definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+      expect(warnings).toEqual([])
+      expect(definitions.map((d) => [d.dataName, d.rawType, d.imports, d.heritage])).toEqual([
+        ['ApiPost', "{\n  id: PostRecord['id']\n}", ["import type { PostRecord } from '../app/Models/index.js'"], 'Record<string, unknown>'],
+        ['Post', "import('../app/Http/Resources/PostResource').PostResourceData", [], undefined],
+      ])
+      expect(await importLines()).toEqual(["import type { PostRecord } from '../app/Models/index.js'"])
+      expect(compiles(outputPath)).toEqual([])
+    },
+    TSC_TIMEOUT,
+  )
+
+  it(
+    'omits and warns on such a resource when its payload is not exported',
+    async () => {
+      await writeWorkspaceFiles(appRoot, {
+        'app/Models/Post.ts': POST_MODEL,
+        'app/Models/index.ts': "export type { PostRecord, PostAuthorSummary } from './Post.js'\n",
+        'app/Http/Resources/ApiPostResource.ts': importingResource(
+          'ApiPostResource',
+          "import type { PostRecord } from '../../Models/index.js'",
+          "id: PostRecord['id']",
+        ),
+        'app/Http/Resources/PostResource.ts': importingResource(
+          'PostResource',
+          "import type { PostRecord } from '../../Models/Post.js'",
+          "title: PostRecord['title']",
+          { exported: false },
+        ),
+      })
+
+      const { outputPath, definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+      expect(warnings).toEqual([
+        "Resource PostResource (app/Http/Resources/PostResource.ts) imports PostRecord from '../app/Models/Post.js', "
+        + "but data.gen.ts already binds that name from '../app/Models/index.js' for ApiPostResource "
+        + '(app/Http/Resources/ApiPostResource.ts) — omitted from data.gen.ts. Export the payload type so '
+        + 'data.gen.ts can reference the declaration itself, or import it under another name in one of the two files.',
+      ])
+      expect(definitions.map((d) => [d.className, d.dataName])).toEqual([
+        ['ApiPostResource', 'ApiPost'],
+        ['PostResource', null],
+      ])
+      expect(await importLines()).toEqual(["import type { PostRecord } from '../app/Models/index.js'"])
+      expect(compiles(outputPath)).toEqual([])
+    },
+    TSC_TIMEOUT,
+  )
+})

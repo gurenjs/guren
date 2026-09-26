@@ -22,8 +22,10 @@ import {
   isDefinitelyAbsent,
   listAppRoots,
   MODELS_DIR,
+  POLICIES_DIR,
   moduleNameFor,
   RESOURCES_DIR,
+  VALIDATORS_DIR,
   type AppRoot,
 } from '../discovery'
 import { routeDefinitionToContextRoute, type ContextRoute } from '../context-route'
@@ -33,13 +35,12 @@ import { parseModelFile } from '../model-parser'
 import { parseSchemaTables, schemaPathFor } from '../schema-parser'
 import { isConfirmedApiOnlyApp } from '../app-surface'
 import { loadRouteDefinitions, resolveRoutesFile } from '../load-routes'
-import { loadPlanAppDetail, type PlanAppDetail } from './app-detail'
+import { loadPlanAppDetail, readValidatorExports, type PlanAppDetail, type PlanAppValidatorExports } from './app-detail'
 import type { PlanImpactSources } from './impact'
 import { loadPlanImpactSources } from './impact-sources'
 import { ParseCache } from '../parse-cache'
 import { isUnreadable, type PlanAppUnreadable } from './unreadable'
 
-const POLICIES_DIR = 'app/Policies'
 const CONTROLLERS_DIR = 'app/Http/Controllers'
 
 export { isUnreadable, type PlanAppUnreadable }
@@ -95,6 +96,10 @@ export function declaresTable(table: PlanAppTable, name: string): boolean {
 export const COLUMNS_ARE_A_LOWER_BOUND =
   "The schema parser reports a table's columns as a lower bound: a spread column goes unreported."
 
+/** Why a validator name absent from the section is unconfirmed rather than missing, stated once as above. */
+export const VALIDATORS_ARE_A_LOWER_BOUND =
+  `Validators are read from what the files under ${VALIDATORS_DIR}/ declare and export; a schema declared or re-exported elsewhere is not seen.`
+
 export interface PlanAppRoute {
   name?: string
   method: string
@@ -116,11 +121,7 @@ export interface PlanAppState {
    * the entry's own root is `null` throughout.
    */
   pages: PlanAppNames
-  /**
-   * Always `unreadable` from {@link loadPlanAppState}: a plan names a validator by
-   * its exported schema symbol and the discoverer yields file basenames, so the two
-   * do not compare. Validators are held by the internal reference checks instead.
-   */
+  /** Exported schema symbols of the validator files, which is how a plan names a validator. */
   validators: PlanAppNames
   routes: PlanAppRoute[] | PlanAppUnreadable
   tables: PlanAppTable[] | PlanAppUnreadable
@@ -134,9 +135,6 @@ export interface PlanAppState {
   /** What Impact reads (RFC 0030 §2); present only when the loader was asked for it. */
   impact?: PlanImpactSources
 }
-
-const VALIDATOR_SECTION_REASON =
-  'a plan names a validator by its exported schema symbol, which no scanner resolves from a file name'
 
 /**
  * Builds {@link PlanAppState} from a project directory: the only filesystem-facing
@@ -155,14 +153,15 @@ export async function loadPlanAppState(
   const root = resolve(cwd)
   const roots = await listAppRoots(root).catch((): AppRoot[] => [])
 
-  // One cache for the controller scan and Impact's column scan, which parse the same files.
+  // One cache for the controller, validator and Impact column scans, which parse the same files.
   const cache = new ParseCache()
-  const [apiOnly, models, resources, policies, pages, routes, controllers, tables] = await Promise.all([
+  const [apiOnly, models, resources, policies, pages, validators, routes, controllers, tables] = await Promise.all([
     isConfirmedApiOnlyApp(root).catch(() => false),
     modelSection(root, roots),
     classSection(root, roots, RESOURCES_DIR, discoverResourceFiles),
     classSection(root, roots, POLICIES_DIR, discoverPolicyFiles),
     pageSection(root),
+    validatorSections(root, roots, cache),
     routeSection(root, options.routesFile),
     controllerSections(root, cache),
     tableSection(root, roots),
@@ -175,7 +174,7 @@ export async function loadPlanAppState(
     resources,
     policies,
     pages,
-    validators: { unreadable: VALIDATOR_SECTION_REASON },
+    validators: validators.names,
     routes: isUnreadable(routes.routes) ? routes.routes : routes.routes.map(({ name, method, path }) => ({ name, method, path })),
     tables,
     apiOnly,
@@ -189,6 +188,7 @@ export async function loadPlanAppState(
       routes: routes.routes,
       definitions: routes.definitions,
       provenance: routes.provenance,
+      moduleWarnings: routes.moduleWarnings,
       controllers: controllersDir ? { unreadable: controllersDir } : controllers.scan,
       sections: { models, resources, policies, pages, ...(testsDir ? { tests: { unreadable: testsDir } } : {}) },
     })
@@ -205,6 +205,7 @@ export async function loadPlanAppState(
     controllers: controllers.scan,
     pages: isUnreadable(pages) ? pages : appNames(pages),
     models: isUnreadable(models) ? models : undefined,
+    validators: validators.exports,
   })
   return { ...state, detail }
 }
@@ -256,6 +257,18 @@ async function classSection(
   return excludeBarrelFiles(files)
     .map((file) => ({ name: classNameFromPath(file), module: moduleNameFor(cwd, file) }))
     .sort(byName)
+}
+
+/** The names the §2 checks judge, and the reading `plan:status`'s detail imports the same files from. */
+async function validatorSections(
+  cwd: string,
+  roots: ReadonlyArray<AppRoot>,
+  cache: ParseCache,
+): Promise<{ names: PlanAppNames; exports: PlanAppValidatorExports[] | PlanAppUnreadable }> {
+  const [probe, exports] = await Promise.all([probeDirectory(roots, VALIDATORS_DIR), readValidatorExports(cwd, cache)])
+  if (probe) return { names: { unreadable: probe }, exports }
+  if (isUnreadable(exports)) return { names: exports, exports }
+  return { names: exports.flatMap(({ module, names }) => names.map((name) => ({ name, module }))).sort(byName), exports }
 }
 
 async function pageSection(cwd: string): Promise<PlanAppNames> {

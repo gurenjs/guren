@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from 'hono'
 import { applyResponseHeaders } from './response-headers'
+import { isDispatchedToolRequest } from '../../internal/dispatched-request'
 
 export interface ForceHttpsOptions {
   /** Seconds. Default: 31536000 (1 year). */
@@ -14,7 +15,8 @@ export interface ForceHttpsOptions {
 
 /**
  * Redirects HTTP to HTTPS and sets Strict-Transport-Security. Equivalent to
- * Rails' `force_ssl`.
+ * Rails' `force_ssl`. An agent tool call the dispatcher re-enters in process
+ * passes through.
  */
 export function createForceHttpsMiddleware(options: ForceHttpsOptions = {}): MiddlewareHandler {
   const {
@@ -34,17 +36,14 @@ export function createForceHttpsMiddleware(options: ForceHttpsOptions = {}): Mid
 
     if (proto !== 'https') {
       const path = url.pathname + url.search
-
-      for (const pattern of exclude) {
-        if (pattern.endsWith('*')) {
-          if (path.startsWith(pattern.slice(0, -1))) {
-            await next()
-            return
-          }
-        } else if (path === pattern) {
-          await next()
-          return
-        }
+      const excluded = exclude.some((pattern) =>
+        pattern.endsWith('*') ? path.startsWith(pattern.slice(0, -1)) : path === pattern,
+      )
+      // A tool call never leaves the process, so there is no transport to upgrade, and a
+      // tool caller cannot follow a redirect. By identity, never by a header.
+      if (excluded || isDispatchedToolRequest(ctx.req.raw)) {
+        await next()
+        return
       }
 
       url.protocol = 'https:'

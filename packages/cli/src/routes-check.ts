@@ -1,5 +1,4 @@
-import { stat } from 'node:fs/promises'
-import { extname, isAbsolute, join, relative, resolve } from 'node:path'
+import { isAbsolute, relative, resolve } from 'node:path'
 import type { Statement } from '@babel/types'
 import { memberKeyName, walk } from './ast-walk'
 import { hidesKeys, readModuleDescriptor } from './app-entry'
@@ -7,32 +6,32 @@ import {
   discoverModuleRoutesFiles,
   discoverRoutesFiles,
   fileExists,
-  findFirstExisting,
   formatTruncatedList,
-  moduleRoutesEntryCandidates,
+  ROUTES_DIR,
   toPosixRelative,
 } from './discovery'
-import type { ParseCache } from './parse-cache'
+import { cachedFileProbe, MODULE_ROUTES_FILE, moduleRoutesEntryFile, resolveImportPath, RUNTIME_TO_SOURCE_EXTENSION, type FileProbe, SOURCE_TO_RUNTIME_EXTENSION, swapExtension } from './import-resolution'
+import { ParseCache } from './parse-cache'
+import { isPlanInput } from './plan-check'
 import { specifierBase } from './schema-binding'
 import { DEFAULT_ROUTES_FILE, isRegistrarExportName, resolveRoutesEntry, specifierName } from './route-registrar'
 import { pascalCase, referencesIdentifier, relativeImportPath } from './utils'
-import { check, type CheckResult } from './check-result'
-
-/** The directory whose files this check asks about, per scope. */
-const ROUTES_DIR = 'routes'
+import { advisory, check, type CheckResult } from './check-result'
+import type { ScaffoldAwaitingMount } from './plan/awaiting-mount'
 
 /**
  * A path that can move a module scope's answer: its descriptor (where
- * `defineModule({ routes })` names the registrar), its routes entry, or its routes/.
+ * `defineModule({ routes })` names the registrar) or the `package.json` choosing it,
+ * its routes entry, or its routes/.
  */
-const MODULE_WIRING_PATTERN = /^modules\/[^/]+\/(?:index\.|routes[/.])/u
+const MODULE_WIRING_PATTERN = /^modules\/[^/]+\/(?:index\.|package\.json$|routes[/.])/u
 
 /**
- * Whether a changed path — POSIX-relative, as `getChangedFiles` reports — could move this
- * check's answer, and so must wake it under `--changed`. Gated as a unit rather than
- * filtered by changed candidate: the edit that unmounts `routes/admin.ts` is usually to
- * `routes/web.ts`. Both halves of each scope count — `modules/billing/routes/foo.ts` does
- * not start with `routes/`, and deleting `routes:` from a descriptor 404s every route.
+ * Whether a changed path (POSIX-relative, as `getChangedFiles` reports) could move this check's
+ * answer, and so must wake it under `--changed`. Gated as a unit: the edit that unmounts
+ * `routes/admin.ts` is usually to `routes/web.ts`. Both halves of each scope count, since deleting
+ * `routes:` from a descriptor 404s every route, and so does a plan input, whose close or approval
+ * moves a scaffolded file's warning in or out.
  */
 export function affectsRouteWiring(file: string, routesFile?: string): boolean {
   return (
@@ -40,38 +39,12 @@ export function affectsRouteWiring(file: string, routesFile?: string): boolean {
     || file.startsWith(`${ROUTES_DIR}/`)
     || file === routesFile
     || MODULE_WIRING_PATTERN.test(file)
+    || isPlanInput(file)
   )
 }
 
 /** Stands in for "every export"; safe as a sentinel because `*` is not a legal export name. */
 const EVERY_EXPORT = '*'
-
-/** Extensions a specifier without one may resolve to, in preference order. */
-const RESOLVED_EXTENSIONS = ['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs']
-
-/**
- * Source extension → the runtime extension it is emitted as. Used in both directions:
- * backwards, because apps following Node's ESM rules import the *emitted* path
- * (`routes/web.ts` names `'./auth.js'` for a file on disk called `auth.ts`), so a
- * resolver trying only the specifier as written finds no edges at all; forwards, to
- * print a suggested import line and to recognize an emitted `auth.js` as a build artifact.
- */
-const SOURCE_TO_RUNTIME_EXTENSION: Record<string, string> = {
-  '.ts': '.js',
-  '.tsx': '.jsx',
-  '.mts': '.mjs',
-}
-
-const RUNTIME_TO_SOURCE_EXTENSION: Record<string, string> = Object.fromEntries(
-  Object.entries(SOURCE_TO_RUNTIME_EXTENSION).map(([source, runtime]) => [runtime, source]),
-)
-
-/** `path` with its extension swapped per `map`, or `null` if it isn't in `map`. */
-function swapExtension(path: string, map: Record<string, string>): string | null {
-  const extension = extname(path)
-  const swapped = map[extension]
-  return swapped ? `${path.slice(0, -extension.length)}${swapped}` : null
-}
 
 /** A name a file binds from another file, and the export it came from. */
 interface ImportBinding {
@@ -107,37 +80,6 @@ interface RoutesFileFacts {
   dynamicImports: string[]
   /** Top-level statements minus imports and `... from` re-exports. */
   body: string
-}
-
-async function isFile(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile()
-  } catch {
-    return false
-  }
-}
-
-/**
- * The file `base` names, or `null` when it names nothing on disk. Existence is probed
- * rather than assumed: a specifier resolving nowhere must not create a graph edge, or a
- * typo'd import would read as wiring.
- */
-async function resolveSpecifier(base: string): Promise<string | null> {
-  const source = swapExtension(base, RUNTIME_TO_SOURCE_EXTENSION)
-  const candidates = [
-    // Ahead of the specifier as written, so a TypeScript app that also has a
-    // stale compiled `auth.js` beside `auth.ts` is read from source.
-    ...(source === null ? [] : [source]),
-    base,
-    ...RESOLVED_EXTENSIONS.map((ext) => `${base}${ext}`),
-    ...RESOLVED_EXTENSIONS.map((ext) => join(base, `index${ext}`)),
-  ]
-
-  for (const candidate of candidates) {
-    if (await isFile(candidate)) return candidate
-  }
-
-  return null
 }
 
 /**
@@ -207,6 +149,7 @@ async function dynamicImportTargets(
 async function readFacts(
   cwd: string,
   cache: ParseCache,
+  probe: FileProbe,
   filePath: string,
   boundary: string,
 ): Promise<RoutesFileFacts | null> {
@@ -216,12 +159,14 @@ async function readFacts(
   const facts: RoutesFileFacts = { registrarExports: [], imports: [], reexports: [], dynamicImports: [], body: '' }
   const bodyNodes: Statement[] = []
 
-  // Only an edge landing inside the scope's boundary can change an answer, so
-  // everything else is ruled out by string comparison before any filesystem
-  // probe.
+  // Only an edge landing inside the scope's boundary can change an answer. The
+  // specifier's own path is checked first to skip the probes; a directory's
+  // `package.json` `main` can still land outside, so the landing file is checked too.
   const resolveEdge = async (specifier: string): Promise<string | null> => {
     const base = specifierBase(cwd, filePath, specifier)
-    return base !== null && isInside(boundary, base) ? resolveSpecifier(base) : null
+    if (base === null || !isInside(boundary, base)) return null
+    const resolved = await resolveImportPath(base, { probe })
+    return resolved !== null && isInside(boundary, resolved) ? resolved : null
   }
 
   for (const node of parsed.ast.program.body) {
@@ -289,6 +234,8 @@ export interface RoutesCheckOptions {
    * {@link ROUTES_ENTRY_CANDIDATES}. Project scope only — a module's entry is its own file.
    */
   routesFile?: string
+  /** `false` reads no plan, so an unmounted file a plan's scaffold wrote warns like any other: for callers asking only whether a file is mounted. */
+  plans?: boolean
 }
 
 /**
@@ -310,6 +257,8 @@ interface WiringScope {
   boundary: string
   /** Absolute paths of every routes file this scope asks about. */
   files: string[]
+  /** Whether an unmounted file is looked up among the scaffolded ones an open plan's http step mounts. */
+  plans: boolean
 }
 
 /** How a module names its routes registrar, read from its descriptor. */
@@ -333,9 +282,10 @@ type ModuleEntryResolution =
 async function resolveModuleEntry(
   cwd: string,
   cache: ParseCache,
+  probe: FileProbe,
   moduleDir: string,
 ): Promise<ModuleEntryResolution> {
-  const read = await readModuleDescriptor(cwd, cache, moduleDir)
+  const read = await readModuleDescriptor(cwd, cache, moduleDir, probe)
   if (typeof read === 'string') return { kind: 'fallback' }
   const descriptor = read.file
   const descriptorPath = resolve(cwd, descriptor)
@@ -373,7 +323,7 @@ async function resolveModuleEntry(
 
   const base = specifierBase(cwd, descriptorPath, source)
   if (base === null) return { kind: 'opaque' }
-  const resolved = await resolveSpecifier(base)
+  const resolved = await resolveImportPath(base, { probe })
   return resolved === null ? { kind: 'opaque' } : { kind: 'entry', entryPath: resolved }
 }
 
@@ -406,37 +356,38 @@ function unwiredModuleResult(cwd: string, module: string, descriptor: string, fi
  */
 export async function checkRouteRegistrarWiring(options: RoutesCheckOptions): Promise<CheckResult[]> {
   const { cwd, cache } = options
+  // One per run: the scopes resolve overlapping imports, and nothing is written meanwhile.
+  const probe = cachedFileProbe()
 
   // An explicit `--routes` is honoured even when it names a file that doesn't exist —
   // reporting that is the point. Otherwise probe, per ROUTES_ENTRY_CANDIDATES.
   const entryFile = options.routesFile ?? (await resolveRoutesEntry(cwd)) ?? DEFAULT_ROUTES_FILE
 
-  const results = await checkScope(cwd, cache, {
+  const results = await checkScope(cwd, cache, probe, {
     module: null,
     entryFile,
     boundary: resolve(cwd, ROUTES_DIR),
     files: await discoverRoutesFiles(cwd),
+    plans: options.plans !== false,
   })
 
   for (const { module, dir, files } of await discoverModuleRoutesFiles(cwd)) {
-    const resolution = await resolveModuleEntry(cwd, cache, dir)
+    const resolution = await resolveModuleEntry(cwd, cache, probe, dir)
     if (resolution.kind === 'opaque') continue
     if (resolution.kind === 'unwired') {
       results.push(unwiredModuleResult(cwd, module, resolution.descriptor, files))
       continue
     }
 
-    const entries = moduleRoutesEntryCandidates(toPosixRelative(cwd, dir))
-    const scopeResults = await checkScope(cwd, cache, {
+    const routesEntry = resolution.kind === 'entry' ? resolution.entryPath : await moduleRoutesEntryFile(dir, probe)
+    const scopeResults = await checkScope(cwd, cache, probe, {
       module,
-      entryFile:
-        resolution.kind === 'entry'
-          ? toPosixRelative(cwd, resolution.entryPath)
-          // Fallback: the conventional name stands in when none exists, so the
-          // warning below names the file to create rather than its absence.
-          : ((await findFirstExisting(cwd, entries)) ?? entries[0]),
+      // Fallback: the conventional name stands in when none exists, so the
+      // warning below names the file to create rather than its absence.
+      entryFile: toPosixRelative(cwd, routesEntry ?? resolve(dir, MODULE_ROUTES_FILE)),
       boundary: resolve(dir, ROUTES_DIR),
       files,
+      plans: false,
     })
     results.push(...scopeResults)
   }
@@ -445,7 +396,7 @@ export async function checkRouteRegistrarWiring(options: RoutesCheckOptions): Pr
 }
 
 /** {@link checkRouteRegistrarWiring} for one scope — see {@link WiringScope}. */
-async function checkScope(cwd: string, cache: ParseCache, scope: WiringScope): Promise<CheckResult[]> {
+async function checkScope(cwd: string, cache: ParseCache, probe: FileProbe, scope: WiringScope): Promise<CheckResult[]> {
   const { entryFile, module } = scope
   const entryPath = resolve(cwd, entryFile)
 
@@ -481,7 +432,7 @@ async function checkScope(cwd: string, cache: ParseCache, scope: WiringScope): P
 
   const facts = new Map<string, RoutesFileFacts>()
   for (const filePath of [entryPath, ...candidates]) {
-    const read = await readFacts(cwd, cache, filePath, scope.boundary)
+    const read = await readFacts(cwd, cache, probe, filePath, scope.boundary)
     if (read) facts.set(filePath, read)
   }
 
@@ -504,6 +455,9 @@ async function checkScope(cwd: string, cache: ParseCache, scope: WiringScope): P
 
   const mounted = mountedFrom(facts, entryPath, entryFacts)
   const entryBindings = new Set(entryFacts.imports.map((binding) => binding.local))
+  // Only an unmounted project file asks, so an app with every file mounted reads no plan.
+  const unmounted = candidates.some((filePath) => !mounted.has(filePath) && (facts.get(filePath)?.registrarExports.length ?? 0) > 0)
+  const awaiting = scope.plans && unmounted ? await scaffoldedAwaitingMount(cwd) : new Map<string, ScaffoldAwaitingMount>()
 
   return candidates.flatMap((filePath) => {
     const candidateFacts = facts.get(filePath)
@@ -514,6 +468,9 @@ async function checkScope(cwd: string, cache: ParseCache, scope: WiringScope): P
     const relPath = toPosixRelative(cwd, filePath)
     const isMounted = mounted.has(filePath)
     const name = candidateFacts.registrarExports.find((exported) => exported !== 'default')
+    // By path and registrar, as --mount judges it: a hand-written file at that path is not the scaffold's.
+    const scaffolded = isMounted ? undefined : awaiting.get(relPath)
+    if (scaffolded && candidateFacts.registrarExports.includes(scaffolded.registrar)) return awaitingMountResult(relPath, entryFile, scaffolded)
 
     return check(
       `route-registrar:${relPath}`,
@@ -527,6 +484,38 @@ async function checkScope(cwd: string, cache: ParseCache, scope: WiringScope): P
       relPath,
     )
   })
+}
+
+/** Read lazily: the plan modules are loaded only once an unmounted project routes file needs them. */
+async function scaffoldedAwaitingMount(cwd: string): Promise<Map<string, ScaffoldAwaitingMount>> {
+  const { scaffoldedRoutesAwaitingMount } = await import('./plan/awaiting-mount')
+  return scaffoldedRoutesAwaitingMount(cwd).catch(() => new Map<string, ScaffoldAwaitingMount>())
+}
+
+/**
+ * A routes file `plan:scaffold` wrote for an open plan, which its http step mounts (RFC 0030 §5,
+ * D3): the same key and wording as the warning, advisory so the gate does not block the steps
+ * before it. Once the plan closes or the http step verifies, the warning is back.
+ */
+function awaitingMountResult(relPath: string, entryFile: string, scaffolded: ScaffoldAwaitingMount): CheckResult {
+  return advisory(
+    `route-registrar:${relPath}`,
+    `${relPath} wiring`,
+    'warn',
+    `${relPath} exports a route registrar that nothing reachable from ${entryFile} calls, so its routes are never mounted. `
+    + `plan:scaffold wrote it for ${scaffolded.plan}, whose http step ${scaffolded.step} mounts it and is not verified yet, so this is not counted until then.`,
+    `The http step mounts it with ${scaffolded.command}.`,
+    relPath,
+  )
+}
+
+/**
+ * Whether a project routes file is reached from the entry registrar, by this check's own reach; no plan is read.
+ * Judged against the default entry, not a `--routes` override: `--mount` and `plan:next` take none.
+ */
+export async function isRoutesFileMounted(cwd: string, relPath: string): Promise<boolean> {
+  const results = await checkRouteRegistrarWiring({ cwd, cache: new ParseCache(), plans: false })
+  return results.some((result) => result.key === `route-registrar:${relPath}` && result.status === 'pass')
 }
 
 /**

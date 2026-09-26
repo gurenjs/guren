@@ -12,31 +12,28 @@ import type { RouteDefinition } from '@guren/server'
 import type { File, Node, Statement } from '@babel/types'
 
 import { memberKeyName, unwrapTypeAssertion, propertyValue, topLevelDeclaration } from '../ast-walk'
-import { createAppOptions, hidesKeys, moduleMountState } from '../app-entry'
+import { createAppOptions, findModuleDescriptor, hidesKeys, moduleMountState } from '../app-entry'
 import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { ContextRoute } from '../context-route'
 import { accessorCallPattern, blankCommentsAndStrings, type ControllerMemberName, type ControllerMethodScan } from '../controller-methods'
 import {
   classNameFromPath,
-  discoverEventFiles,
-  discoverJobFiles,
-  discoverListenerFiles,
-  discoverMailFiles,
   discoverModelFiles,
   discoverModuleRoutesFiles,
-  discoverNotificationFiles,
   discoverPolicyFiles,
   discoverResourceFiles,
   discoverRoutesFiles,
+  discoverSideEffectFiles,
   discoverValidatorFiles,
   excludeBarrelFiles,
-  findFirstExisting,
   listModuleNames,
   moduleNameFor,
   moduleNameFromRelPath,
-  moduleRoutesEntryCandidates,
+  SIDE_EFFECT_DIRS,
   toPosixRelative,
+  type SideEffectKind,
 } from '../discovery'
+import { moduleRoutesEntryFile } from '../import-resolution'
 import { extractInertiaPageRefs, describeInertiaPagePropKeys, resolveInertiaPageFile } from '../inertia-pages'
 import { discoverParsedModels, type ModelRelationship } from '../model-parser'
 import type { PagePropKeys } from '../page-props-extractor'
@@ -45,7 +42,7 @@ import { resolveAppEntry } from '../provider-registrar'
 import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, specifierName } from '../route-registrar'
 import { importsByLocal, specifierBase, withoutExtension } from '../schema-binding'
 import { readSchemaTables, withImportTimeout, type SourcedSchemaTable } from '../schema-runtime'
-import { routePathCovers } from '../test-requests'
+import { answersMethod, registeredBefore, routePathCovers } from '../test-requests'
 import type { PlanAppScope, PlanAppUnreadable } from './app-state'
 import { readResourcePayloads, readSchemaFields, type PlanAppResourcePayload, type PlanAppSchemaFields } from './field-readers'
 import { readPolicyAbilities, type PlanAppPolicyAbilities } from './policy-abilities'
@@ -148,7 +145,7 @@ export interface PlanAppPolicyDetail extends PlanAppClassDetail {
   abilities: PlanAppPolicyAbilities | PlanAppUnreadable
 }
 
-export type PlanAppSideEffectKind = 'job' | 'event' | 'listener' | 'mail' | 'notification'
+export type PlanAppSideEffectKind = SideEffectKind
 
 /** A side-effect class and where the application's source uses it (`side-effect-uses.ts`). */
 export interface PlanAppSideEffectDetail extends PlanAppClassDetail {
@@ -160,11 +157,21 @@ export interface PlanAppSideEffectDetail extends PlanAppClassDetail {
   mentionedIn: string[]
 }
 
+export interface PlanAppMounts {
+  entry: PlanAppMount
+  modules: Record<string, PlanAppMount>
+  /**
+   * Part of what `wired` rests on: the entry `createApp()` is read from, and per module its
+   * descriptor, which names the registrar the CLI loads though no verdict here reads it.
+   */
+  files: { entry: string[]; descriptors: Record<string, string> }
+}
+
 export interface PlanAppDetail {
   routes: PlanAppRouteDetail[] | PlanAppUnreadable
   /** Set when a module's routes did not load, which leaves `routes` a lower bound. */
   routesIncomplete?: string
-  mounts: { entry: PlanAppMount; modules: Record<string, PlanAppMount> }
+  mounts: PlanAppMounts
   tables: SourcedSchemaTable[] | PlanAppUnreadable
   models: PlanAppModelDetail[] | PlanAppUnreadable
   /** Files under a models directory that yielded no model class, app-relative. */
@@ -198,6 +205,8 @@ export interface PlanAppDetailInput {
   controllers: ControllerMethodScan | PlanAppUnreadable
   pages: string[] | PlanAppUnreadable
   models: PlanAppUnreadable | undefined
+  /** {@link readValidatorExports} as the §2 checks read it, so both judge one reading. */
+  validators: PlanAppValidatorExports[] | PlanAppUnreadable
 }
 
 const IDENTIFIER_PATTERN = /[A-Za-z_$][\w$]*/g
@@ -238,7 +247,7 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
     tableDetail(root),
     modelDetail(root, input.models),
     pageDetail(root, input.pages),
-    validatorDetail(root, cache, contractSchemaObjects(input.definitions)),
+    validatorDetail(input.validators, contractSchemaObjects(input.definitions)),
     classDetail(root, discoverResourceFiles),
     readResourcePayloads(root),
     policyDetail(root, cache),
@@ -300,14 +309,14 @@ function routeDetail(input: PlanAppDetailInput, symbols: SchemaSymbols): PlanApp
 }
 
 /**
- * Hono hands a request to the first registered route that matches it, in `mountRoutes()`'s
- * order: the entry registrar's routes, then each module's in `createApp({ modules })` order.
- * The CLI loads modules in directory order instead, so two modules' routes are compared both
- * ways and never settled. The routes a provider registers are not in the definitions.
+ * Hono hands a request to the first registered route that matches it, in the order
+ * {@link registeredBefore} reads: two modules' routes are compared both ways and never
+ * settled. The routes a provider registers are not in the definitions.
  */
 function shadowing(input: PlanAppDetailInput, routes: ContextRoute[], index: number): Exclude<PlanAppMount, 'mounted'> | undefined {
   const route = routes[index]!
   const scope = input.provenance[index] ?? null
+  const later = { index, module: scope }
   const routeMethod = route.method.toUpperCase()
   const self = `${routeMethod} ${route.path}`
   const site = (candidate: ContextRoute, otherScope: string | null): string =>
@@ -316,12 +325,11 @@ function shadowing(input: PlanAppDetailInput, routes: ContextRoute[], index: num
   // A later definite shadow outranks an earlier uncertain one, so the scan does not stop at the first.
   for (let other = 0; other < routes.length; other += 1) {
     const candidate = routes[other]!
+    if (!answersMethod(candidate.method, routeMethod)) continue
     const otherScope = input.provenance[other] ?? null
-    const sameScope = otherScope === scope
-    const acrossModules = !sameScope && scope !== null && otherScope !== null
-    const before = sameScope ? other < index : acrossModules || otherScope === null
-    const method = candidate.method.toUpperCase()
-    if (!before || (method !== routeMethod && method !== 'ALL')) continue
+    const before = registeredBefore({ index: other, module: otherScope }, later)
+    if (before === false) continue
+    const acrossModules = before === undefined
     const covers = routePathCovers(candidate.path, route.path)
     if (covers === 'none') continue
     if (covers === 'match' && !acrossModules) {
@@ -459,7 +467,7 @@ async function pageDetail(root: string, pages: string[] | PlanAppUnreadable): Pr
  * app root it sits in is that file's, not this one's. The runtime export list holds both,
  * which is why {@link registrarExport} asks for `'anywhere'`.
  */
-function exportedNames(ast: File, declaredIn: 'anywhere' | 'this file'): string[] | null {
+export function exportedNames(ast: File, declaredIn: 'anywhere' | 'this file'): string[] | null {
   const names: string[] = []
   for (const node of ast.program.body) {
     if (node.type === 'ExportAllDeclaration') return null
@@ -488,36 +496,67 @@ interface ValidatorRead {
   symbols: SchemaSymbols
 }
 
+/** One validator file's exported schema symbols, read without importing it. */
+export interface PlanAppValidatorExports {
+  filePath: string
+  /** App-relative, POSIX separators. */
+  file: string
+  module: PlanAppScope
+  names: string[]
+}
+
+/**
+ * The exported schema symbols of every validator file, by AST: the names a plan gives its
+ * validators. The §2 checks read these, and {@link validatorDetail} imports the same files
+ * for their fields, so the two cannot disagree about which validators exist. Barrels are
+ * excluded as for models: a re-export belongs to the file that declares it.
+ */
+export async function readValidatorExports(
+  root: string,
+  cache: ParseCache,
+  /** The project root's files only, so a module file that will not read cannot refuse it. */
+  rootOnly = false,
+): Promise<PlanAppValidatorExports[] | PlanAppUnreadable> {
+  const files = excludeBarrelFiles(await discoverValidatorFiles(root))
+    .map((filePath) => {
+      const file = toPosixRelative(root, filePath)
+      return { filePath, file, module: moduleNameFromRelPath(file) }
+    })
+    .filter(({ module }) => !rootOnly || module === null)
+  const parsed = await Promise.all(files.map(({ filePath }) => cache.get(filePath)))
+  const read: PlanAppValidatorExports[] = []
+  for (const [index, entry] of files.entries()) {
+    const ast = parsed[index]?.ast
+    const names = ast ? exportedNames(ast, 'this file') : null
+    // One unread file makes every absent name unprovable, as with the controller scan.
+    if (names === null) return { unreadable: `${entry.file} could not be read for its exported schemas` }
+    read.push({ ...entry, names: names.filter((name) => name !== 'default') })
+  }
+  return read
+}
+
 /**
  * Validators by exported symbol, with the fields each holds and the identity of the
  * objects, which answers "is this the schema a route registered". Both need the file
  * imported; one that would not import leaves its own symbols unmatchable and their
- * fields unread, never the section unreadable. Barrels are excluded as for models: a
- * re-export belongs to the file that declares it.
+ * fields unread, never the section unreadable.
  */
-async function validatorDetail(root: string, cache: ParseCache, contracts: Set<object>): Promise<ValidatorRead> {
-  const files = excludeBarrelFiles(await discoverValidatorFiles(root))
+async function validatorDetail(exports: PlanAppValidatorExports[] | PlanAppUnreadable, contracts: Set<object>): Promise<ValidatorRead> {
   const symbols: SchemaSymbols = new Map()
+  if (!Array.isArray(exports)) return { validators: exports, symbols }
   const validators: PlanAppValidatorDetail[] = []
-  for (const filePath of files) {
-    const file = toPosixRelative(root, filePath)
-    const parsed = await cache.get(filePath)
-    const names = parsed ? exportedNames(parsed.ast, 'this file') : null
-    // One unread file makes every absent name unprovable, as with the controller scan.
-    if (names === null) return { validators: { unreadable: `${file} could not be read for its exported schemas` }, symbols }
-    const module = moduleNameFromRelPath(file)
-    const exported = names.filter((name) => name !== 'default')
+  for (const { filePath, file, module, names } of exports) {
     const imported = await importValidatorFile(filePath)
     if (typeof imported === 'string') {
       const fields = { unreadable: `${file} would not import (${imported})` }
-      validators.push(...exported.map((name) => ({ name, file, module, unimported: imported, fields })))
+      validators.push(...names.map((name) => ({ name, file, module, unimported: imported, fields })))
       continue
     }
     for (const [name, value] of Object.entries(imported)) {
       if (value === null || typeof value !== 'object' || !contracts.has(value)) continue
       symbols.set(value, [...(symbols.get(value) ?? []), name])
     }
-    validators.push(...exported.map((name) => ({ name, file, module, fields: readSchemaFields(name, imported[name]) })))
+    validators.push(...names.map((name) => ({ name, file, module, fields: readSchemaFields(name, imported[name]) })))
   }
   return { validators, symbols }
 }
@@ -559,13 +598,13 @@ async function routeFileDetail(root: string, cache: ParseCache, routesFile: stri
     listModuleNames(root).catch((): string[] => []),
   ])
   const moduleEntries = await Promise.all(
-    moduleNames.map((name) => findFirstExisting(root, moduleRoutesEntryCandidates(`modules/${name}`))),
+    moduleNames.map((name) => moduleRoutesEntryFile(resolve(root, 'modules', name))),
   )
   const files = unique([
     ...(routesFile === undefined ? [] : [routesFile]),
     ...projectFiles.map((file) => toPosixRelative(root, file)),
     ...moduleRoutes.flatMap((module) => module.files.map((file) => toPosixRelative(root, file))),
-    ...moduleEntries.filter((entry): entry is string => entry !== null),
+    ...moduleEntries.flatMap((entry) => (entry === null ? [] : [toPosixRelative(root, entry)])),
   ])
 
   const details: PlanAppRouteFile[] = []
@@ -587,17 +626,9 @@ async function policyDetail(root: string, cache: ParseCache): Promise<PlanAppPol
   )
 }
 
-const SIDE_EFFECT_DISCOVERY: Record<PlanAppSideEffectKind, (appRoot: string) => Promise<string[]>> = {
-  job: discoverJobFiles,
-  event: discoverEventFiles,
-  listener: discoverListenerFiles,
-  mail: discoverMailFiles,
-  notification: discoverNotificationFiles,
-}
-
 async function sideEffectDetail(root: string, cache: ParseCache): Promise<Pick<PlanAppDetail, 'sideEffects' | 'sideEffectUsesUnread'>> {
-  const kinds = Object.keys(SIDE_EFFECT_DISCOVERY) as PlanAppSideEffectKind[]
-  const classes = await Promise.all(kinds.map(async (kind) => [kind, await classDetail(root, SIDE_EFFECT_DISCOVERY[kind])] as const))
+  const kinds = Object.keys(SIDE_EFFECT_DIRS) as PlanAppSideEffectKind[]
+  const classes = await Promise.all(kinds.map(async (kind) => [kind, await classDetail(root, (appRoot) => discoverSideEffectFiles(appRoot, kind))] as const))
   const targets = classes.flatMap(([kind, entries]) => entries.map((entry) => ({ ...entry, kind })))
   const read = await scanSideEffectUses(root, cache, targets).catch((error: unknown) => ({ unreadable: reasonOf(error) }))
   const uses = 'unreadable' in read ? undefined : read.byFile
@@ -631,14 +662,22 @@ function registrarExport(ast: File): string | null {
  * executing the entry registrar and from a directory scan of `modules/`, neither of
  * which asks the application; this reads the entry's `routes` and `modules` options.
  */
-async function mountDetail(root: string, cache: ParseCache, input: PlanAppDetailInput): Promise<PlanAppDetail['mounts']> {
+async function mountDetail(root: string, cache: ParseCache, input: PlanAppDetailInput): Promise<PlanAppMounts> {
   const modules = unique(input.provenance.filter((name): name is string => name !== null))
-  const all = (mount: PlanAppMount): PlanAppDetail['mounts'] => ({
+  const [entryPath, descriptors] = await Promise.all([
+    resolveAppEntry(root),
+    Promise.all(modules.map((name) => findModuleDescriptor(root, resolve(root, 'modules', name)))),
+  ])
+  const files: PlanAppMounts['files'] = {
+    entry: entryPath === null ? [] : [entryPath],
+    descriptors: Object.fromEntries(modules.flatMap((name, index) => (descriptors[index] ? [[name, descriptors[index]]] : []))),
+  }
+  const all = (mount: PlanAppMount): PlanAppMounts => ({
     entry: mount,
     modules: Object.fromEntries(modules.map((name) => [name, mount])),
+    files,
   })
 
-  const entryPath = await resolveAppEntry(root)
   if (entryPath === null) return all({ unconfirmed: 'the application has no src/app.ts or app.ts to read createApp() from' })
   const parsed = await cache.get(resolve(root, entryPath))
   const options = parsed ? createAppOptions(parsed.ast.program) : null
@@ -658,6 +697,7 @@ async function mountDetail(root: string, cache: ParseCache, input: PlanAppDetail
   return {
     entry: await entryMount(),
     modules: Object.fromEntries(modules.map((name) => [name, moduleMount(name)])),
+    files,
   }
 
   async function entryMount(): Promise<PlanAppMount> {

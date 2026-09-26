@@ -4,12 +4,14 @@ import {
   derivePlanTasks,
   FOUNDATION_TASK_ID,
   parsePlanHint,
+  planLaterRelationships,
   PLAN_SECTION_STEP,
   type DerivePlanTasksOptions,
   type PlanDerivedStep,
   type PlanDerivedTask,
   type PlanStepKind,
   type PlanTaskDerivation,
+  type PlanVerifyCommand,
 } from '../src/plan/tasks'
 import { foundationViolations, loadCommentsPlanInput, type PlanInput } from './plan-fixture'
 
@@ -257,7 +259,7 @@ describe('derivePlanTasks', () => {
               { id: `${slice}/scaffold`, kind: 'scaffold', elementIds: [], generates: ['model.comment', ...columns, ...http], acceptanceIds: [], verify: ['codegen', 'typecheck'] },
               { id: `${slice}/tests`, kind: 'tests', elementIds: [], generates: [], acceptanceIds: behaviours, verify: ['codegen', 'tests:fail'] },
               { id: `${slice}/data`, kind: 'data', elementIds: ['model.post', 'model.comment', ...columns], generates: [], acceptanceIds: [], verify: ['codegen', 'db:migrate', 'typecheck'] },
-              { id: `${slice}/http`, kind: 'http', elementIds: http, generates: [], acceptanceIds: behaviours, verify: ['codegen', 'check', 'tests'] },
+              { id: `${slice}/http`, kind: 'http', elementIds: http, generates: [], acceptanceIds: behaviours, verify: ['codegen', 'typecheck', 'check', 'tests'] },
               { id: `${slice}/pages`, kind: 'pages', elementIds: ['view.posts.show'], generates: [], acceptanceIds: [], verify: ['codegen', 'typecheck', 'check'] },
             ],
           },
@@ -328,7 +330,7 @@ describe('derivePlanTasks', () => {
       expect(foundation.dependsOn).toEqual([])
       expect(foundation.steps.map((step) => [step.kind, step.elementIds, step.verify])).toEqual([
         ['commands', ['command.attachments'], ['codegen', 'typecheck']],
-        ['http', ['validator.page'], ['codegen', 'check', 'tests']],
+        ['http', ['validator.page'], ['codegen', 'typecheck', 'check']],
       ])
       for (const other of result.tasks.slice(1)) expect(other.dependsOn, other.id).toContain(FOUNDATION_TASK_ID)
       expect(result.notes).toEqual([])
@@ -639,8 +641,24 @@ describe('derivePlanTasks', () => {
           const expected = derived.steps.some((step) => step.kind === 'tests') && derived.steps.some((step) => step.elementIds.length > 0) ? 1 : 0
           expect(judged.length, derived.id).toBe(expected)
           for (const step of judged) expect(step.verify, step.id).toContain('tests')
+          for (const step of derived.steps) if (step.acceptanceIds.length === 0) expect(step.verify, step.id).not.toContain('tests')
         }
       }
+    })
+
+    test('should typecheck a task\u2019s last http step only, and run no tests on one that carries no behaviour', () => {
+      const tasks = [derive(), derive(busyPlan), derive(undefined, { splitThreshold: 1 })].flatMap((result) => result.tasks)
+      const http = tasks.flatMap((derived) => {
+        const steps = derived.steps.filter((step) => step.kind === 'http')
+        return steps.map((step) => ({ step, last: step === steps.at(-1) }))
+      })
+      for (const { step, last } of http) {
+        const tests: PlanVerifyCommand[] = step.acceptanceIds.length > 0 ? ['tests'] : []
+        expect(step.verify, step.id).toEqual([...(last ? ['codegen', 'typecheck', 'check'] : ['codegen', 'check']), ...tests] as PlanVerifyCommand[])
+      }
+      expect(http.some(({ last }) => !last)).toBe(true)
+      expect(http.some(({ step, last }) => last && step.acceptanceIds.length === 0)).toBe(true)
+      expect(http.some(({ step }) => step.acceptanceIds.length > 0)).toBe(true)
     })
 
     test('should not add the tests to a step that carries no behaviour', () => {
@@ -882,5 +900,58 @@ describe('derivePlanTasks', () => {
 
       expect(after).toEqual(before)
     })
+  })
+})
+
+describe('planLaterRelationships', () => {
+  function later(models: ModelInput[]): string[][] {
+    const plan = planFrom({ models })
+    return planLaterRelationships(plan, derivePlanTasks(plan)).map((entry) => [entry.model.id, entry.relationship.name, entry.judgedWith.id, entry.stepId])
+  }
+
+  test('should send a hasMany to a model a later task adds to the step owning that model', () => {
+    const meetup = { ...model('Meetup'), relationships: [{ name: 'registrations', type: 'hasMany' as const, target: 'model.registration' }] }
+    const registration = { ...model('Registration', ['meetup']), relationships: [{ name: 'meetup', type: 'belongsTo' as const, target: 'model.meetup' }] }
+
+    expect(later([meetup, registration])).toEqual([['model.meetup', 'registrations', 'model.registration', 'task/entity/model.registration/data']])
+  })
+
+  test('should leave a relationship to an earlier task, the same task, an existing model or a dropped one where it is declared', () => {
+    const user = model('User', [], { kind: 'existing' })
+    const self = { ...model('Node'), relationships: [{ name: 'children', type: 'hasMany' as const, target: 'model.node' }] }
+    const toExisting = { ...model('Post'), relationships: [{ name: 'author', type: 'belongsTo' as const, target: 'model.user' }] }
+    const toDropped = { ...model('Tag'), relationships: [{ name: 'legacy', type: 'hasMany' as const, target: 'model.legacy' }] }
+    const legacy = model('Legacy', [], { kind: 'drop', reason: 'unused' })
+    const fromDropped = { ...model('Old', [], { kind: 'drop', reason: 'unused' }), relationships: [{ name: 'tags', type: 'hasMany' as const, target: 'model.tag' }] }
+
+    expect(later([user, self, toExisting, toDropped, legacy])).toEqual([])
+    expect(later([fromDropped, { ...model('Tag') }])).toEqual([])
+  })
+
+  test('should leave a relationship whose keys the plan does not state where it is declared', () => {
+    const meetup = { ...model('Meetup'), relationships: [{ name: 'registrations', type: 'hasMany' as const, target: 'model.registration' }] }
+
+    expect(later([meetup, model('Registration')])).toEqual([])
+  })
+
+  test('should keep a relationship to an altered model whose keys exist, and move one whose key the later task adds', () => {
+    const post = { ...model('Post'), relationships: [{ name: 'comments', type: 'hasMany' as const, target: 'model.comment' }] }
+    const existingKey = model('Comment', ['post'], { kind: 'alter' })
+    for (const column of existingKey.columns) column.change = { kind: 'existing' }
+    const addedKey = model('Comment', [], { kind: 'alter' })
+    addedKey.columns.push({ ...model('Comment', ['post']).columns[1]! })
+
+    expect(later([post, existingKey])).toEqual([])
+    expect(later([post, addedKey])).toEqual([['model.post', 'comments', 'model.comment', 'task/entity/model.comment/data']])
+  })
+
+  test('should send a belongsToMany to the step owning its pivot when a later task adds the pivot', () => {
+    const post = { ...model('Post'), relationships: [{ name: 'tags', type: 'belongsToMany' as const, target: 'model.tag' }] }
+    const tag = { ...model('Tag'), relationships: [{ name: 'posts', type: 'belongsToMany' as const, target: 'model.post' }] }
+
+    expect(later([post, tag, model('PostTag', ['post', 'tag'])])).toEqual([
+      ['model.post', 'tags', 'model.posttag', 'task/entity/model.posttag/data'],
+      ['model.tag', 'posts', 'model.posttag', 'task/entity/model.posttag/data'],
+    ])
   })
 })

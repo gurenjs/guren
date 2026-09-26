@@ -15,6 +15,8 @@ import { FileStore } from './stores/FileStore'
 import { TaggedCache } from './TaggedCache'
 import { pendingComputationsFor, type PendingComputations } from './pending-computations'
 import { claimHotDisposable, isHotReloadRuntime } from '../hot-reload/hot-disposables'
+import { describeDriverMap } from '../introspection/driver-map'
+import type { DriverMapEntry } from '../introspection/types'
 
 /**
  * Adds tag support to any cache store, and shares one `remember` callback
@@ -103,6 +105,8 @@ export class CacheManager {
   private readonly defaultStoreName: string
   private readonly storeFactories: Map<string, CacheStoreFactory> = new Map()
   private readonly resolvedStores: Map<string, TaggableCacheStore> = new Map()
+  /** The configured driver per store, keyed like `storeFactories`; null for a bare `registerStore()` factory. */
+  private readonly storeDrivers: Map<string, string | null> = new Map()
   /**
    * Where this manager was built, for identifying its stores across hot reloads.
    * Captured here rather than in `store()` because stores resolve lazily, from
@@ -125,6 +129,7 @@ export class CacheManager {
 
     if (!this.storeFactories.has(this.defaultStoreName) && this.defaultStoreName === 'memory') {
       this.storeFactories.set('memory', () => new MemoryStore())
+      this.storeDrivers.set('memory', 'memory')
     }
   }
 
@@ -156,6 +161,7 @@ export class CacheManager {
     }
 
     this.storeFactories.set(name, () => factory(options))
+    this.storeDrivers.set(name, driver)
   }
 
   /** Returns the default store if no name is given. */
@@ -196,6 +202,7 @@ export class CacheManager {
 
   registerStore(name: string, factory: CacheStoreFactory): void {
     this.storeFactories.set(name, factory)
+    this.storeDrivers.set(name, null)
     this.resolvedStores.delete(name)
   }
 
@@ -213,6 +220,11 @@ export class CacheManager {
 
   getStoreNames(): string[] {
     return Array.from(this.storeFactories.keys())
+  }
+
+  /** The declared stores and the default, building none of them (RFC 0026 §1). */
+  describe(): DriverMapEntry {
+    return describeDriverMap(this.defaultStoreName, this.storeDrivers)
   }
 }
 

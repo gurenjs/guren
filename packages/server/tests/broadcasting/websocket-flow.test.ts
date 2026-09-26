@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 
 import { createBroadcastManager, type BroadcastManager } from '../../src/broadcasting'
 import { MemoryDriver } from '../../src/broadcasting/drivers'
+import { setResolvedPrincipal } from '../../src/auth/context'
 import { Application } from '../../src/http/Application'
 
 /**
@@ -19,6 +20,7 @@ interface Frame {
 const openApps: Application[] = []
 const openSockets: WebSocket[] = []
 const originalBanner = process.env.GUREN_DEV_BANNER
+const originalStopTimeout = process.env.GUREN_BUN_STOP_TIMEOUT_MS
 
 beforeEach(() => {
   process.env.GUREN_DEV_BANNER = '0'
@@ -31,6 +33,8 @@ afterEach(async () => {
   }
   if (originalBanner === undefined) delete process.env.GUREN_DEV_BANNER
   else process.env.GUREN_DEV_BANNER = originalBanner
+  if (originalStopTimeout === undefined) delete process.env.GUREN_BUN_STOP_TIMEOUT_MS
+  else process.env.GUREN_BUN_STOP_TIMEOUT_MS = originalStopTimeout
 })
 
 function createManager(): BroadcastManager {
@@ -101,6 +105,28 @@ async function roundTrip(socket: WebSocket, frames: Frame[]): Promise<void> {
 }
 
 describe('WebSocket subscription flow', () => {
+  test('authorizes ?channels= as the auth context user when getUser is omitted', async () => {
+    const manager = createManager()
+    manager.privateChannel('users.{id}', (channel, user) => (user as { id: number } | undefined)?.id === Number(channel.split('.').pop()))
+
+    const app = new Application()
+    app.hono.use('*', async (ctx, next) => {
+      const user = userFromHeader(ctx)
+      if (user) setResolvedPrincipal(ctx, { user, id: user.id })
+      await next()
+    })
+    app.router.get('/broadcasting/socket', manager.webSocketMiddleware())
+    await app.boot()
+    const { url } = await app.listen({ port: 0, hostname: '127.0.0.1', vite: false })
+    openApps.push(app)
+
+    const { channels } = await connect(url, {
+      query: '?channels=private-users.7,private-users.8',
+      headers: { 'x-user': '7' },
+    })
+    expect(channels).toEqual(['private-users.7'])
+  })
+
   test('announces the client id and delivers events for public channels requested up front', async () => {
     const manager = createManager()
     manager.channel('announcements', () => true)
@@ -236,6 +262,11 @@ describe('WebSocket subscription flow', () => {
       return true
     })
     const url = await serve(manager)
+    // On Bun 1.3.x, `server.stop()` never resolves once the server itself closed
+    // a WebSocket (a client-initiated close is fine; 1.4.0 resolves at once), so
+    // the default 5 s bound races the hook's 5 s timeout. The socket is already
+    // closed, so nothing is left to drain: give the wait up quickly.
+    process.env.GUREN_BUN_STOP_TIMEOUT_MS = '100'
 
     const { socket, clientId } = await connect(url)
     const closed = new Promise<number>((resolve) => {

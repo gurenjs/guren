@@ -107,8 +107,8 @@ function compareBoolean(property: string, planned: boolean, actual: boolean, sai
 }
 
 /** `min 1`, `max: 2000`, `max(2000)`: a bound whose keyword the field's family decides. */
-const BOUND_RULE = /^(min|max)\s*[:=(]?\s*(-?\d+(?:\.\d+)?)\s*\)?$/iu
-const FORMAT_RULES: Record<string, string> = { email: 'email', url: 'uri', uri: 'uri', uuid: 'uuid' }
+export const BOUND_RULE = /^(min|max)\s*[:=(]?\s*(-?\d+(?:\.\d+)?)\s*\)?$/iu
+export const FORMAT_RULES: Record<string, string> = { email: 'email', url: 'uri', uri: 'uri', uuid: 'uuid' }
 
 type BoundKeyword = 'minLength' | 'maxLength' | 'minimum' | 'maximum' | 'exclusiveMinimum' | 'exclusiveMaximum' | 'minItems' | 'maxItems'
 
@@ -258,7 +258,7 @@ function typeTokens(type: string): string[] | undefined {
 }
 
 /** Top-level union members with `undefined` dropped, or `undefined` for a type this cannot split. */
-function unionMembers(type: string): string[] | undefined {
+export function unionMembers(type: string): string[] | undefined {
   const tokens = typeTokens(type)
   if (!tokens) return undefined
   const members: string[][] = [[]]
@@ -274,7 +274,7 @@ function unionMembers(type: string): string[] | undefined {
   return depth === 0 && kept.length > 0 ? kept : undefined
 }
 
-function sameSet(left: string[], right: string[]): boolean {
+export function sameSet(left: string[], right: string[]): boolean {
   const a = new Set(left)
   const b = new Set(right)
   return a.size === b.size && [...a].every((entry) => b.has(entry))

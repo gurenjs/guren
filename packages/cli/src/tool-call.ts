@@ -23,11 +23,18 @@ import {
   type RouteDefinition,
   type ToolCallOutcome,
 } from '@guren/server'
+import { markCommandFailed } from './command-status'
 import { loadBootedApplication, type MaybeApplication } from './runtime'
 import { parseUserId } from './token-issue'
 
 /** Origin the synthesized request is built on — never leaves the process. */
 const DISPATCH_ORIGIN = 'http://localhost'
+
+/**
+ * The CSRF priming GET, on https so force-https answers with the token rather than a 301.
+ * It only collects cookies, and Secure means nothing in process.
+ */
+const PRIMING_URL = `${DISPATCH_ORIGIN.replace(/^http:/, 'https:')}/`
 
 /** The only `--as` prefix there is a principal for. */
 const ACTING_AS_PREFIX = 'user:'
@@ -236,7 +243,7 @@ async function primeCsrfHeaders(
 ): Promise<Record<string, string>> {
   let response: Response
   try {
-    response = await fetch(new Request(`${DISPATCH_ORIGIN}/`, { method: 'GET' }))
+    response = await fetch(new Request(PRIMING_URL, { method: 'GET' }))
   } catch {
     // The app refused a bare GET. Not this command's problem to diagnose —
     // the dispatch below reports whatever the real call answers.
@@ -339,17 +346,17 @@ export async function dispatchToolCall(
     )
   }
 
+  // Set on the built object: a copy loses the dispatcher's mark and force-https redirects it.
   const request = built.request
-  const headers = new Headers(request.headers)
   if (options.actingAs !== undefined) {
-    headers.set('X-Testing-User', testingUserHeader(options.actingAs))
+    request.headers.set('X-Testing-User', testingUserHeader(options.actingAs))
   }
   if (!CSRF_SAFE_METHODS.has(tool.method)) {
     // The tool's own path, so a path-scoped cookie is judged against the
     // request that will actually carry it.
     const primed = await primeCsrfHeaders(fetch, new URL(request.url).pathname)
     for (const [name, value] of Object.entries(primed)) {
-      headers.set(name, value)
+      request.headers.set(name, value)
     }
   }
 
@@ -358,7 +365,7 @@ export async function dispatchToolCall(
   const startedAt = performance.now()
   let outcome: ToolCallOutcome
   try {
-    outcome = await mapToolResponse(tool, await fetch(new Request(request, { headers })))
+    outcome = await mapToolResponse(tool, await fetch(request))
   } catch (error) {
     // Reaching here means the dispatch itself broke, not the route. Still an invocation,
     // recorded before the rethrow with the status an unhandled throw would report — under
@@ -489,11 +496,10 @@ export async function runToolCall(options: ToolCallOptions): Promise<void> {
     printReport(result)
   }
 
-  // The dispatch succeeded; the call failed. A script asking "did this tool work" must
-  // not read a 422 as success, so the status sets the exit code — set, not thrown, so the
-  // body still prints.
+  // Dispatch can succeed while the tool returns an error such as HTTP 422; marked rather
+  // than thrown, so the body above still prints.
   if (result.outcome.isError) {
-    process.exitCode = 1
+    markCommandFailed()
   }
 }
 

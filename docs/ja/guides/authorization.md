@@ -191,6 +191,10 @@ await gate.authorize('update', [Post, post])
 const canView = await gate.allows('view', somePostInstance)
 ```
 
+タプルにせずに渡したプレーンなレコードでは、ポリシーが見つかりません。その ability の gate も定義されていなければ、チェックは拒否せずに `Error` を投げます。メッセージには ability 名と `[Model, record]` への直し方が入ります。レコードの持ち主本人が理由のわからない 403 を受け取る代わりに、誤りが 500 として表に出ます。`before()` コールバックと、その ability に定義した gate には、プレーンなレコードがそのまま渡ります。ポリシーのないクラスのインスタンスと、ポリシーのないモデルのタプルは拒否されます。
+
+`gate.any()` と、配列を渡した `authorizeMiddleware()` は ability を順に確認します。プレーンなレコードは、何も解決できない最初の ability で例外になり、後ろの ability が許可する場合でも止まります。ここでもタプルを渡してください。`authorizeMiddleware()` や `authorizeResourceMiddleware()` に渡す `modelResolver` も、レコードではなく `[Model, record]` を返します。
+
 ### ポリシーメソッド
 
 ポリシーは以下の標準メソッドをサポートします:
@@ -267,8 +271,8 @@ import { type Router, getRequestContainer, AuthorizationException, defineMiddlew
 
 export function authorizeAbility(ability: string) {
   return defineMiddleware(async (ctx, next) => {
-    const user = ctx.get('user') ?? null
     const gate = getRequestContainer(ctx).make('gate')
+    const user = await gate.resolveUser(ctx)
 
     if (await gate.forUser(user).denies(ability)) {
       throw new AuthorizationException()
@@ -283,6 +287,8 @@ export function registerWebRoutes(router: Router): void {
   router.get('/admin', [AdminController, 'index'], authorizeAbility('access-admin'))
 }
 ```
+
+`gate.resolveUser(ctx)` はリクエストの認証コンテキストからログイン中のユーザーを取得します。`createGate()` に `userResolver` を渡している場合は、そちらが優先されます。組み込みの `authorizeMiddleware('access-admin')` も同じ方法でユーザーを解決します。
 
 ## ベストプラクティス
 

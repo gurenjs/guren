@@ -180,7 +180,7 @@ const featureCombos: FeatureCombo[] = [
     singular: 'Post',
     fields: ALL_FIELDS,
     options: { withPolicy: true, withTest: true, withFactory: true },
-    expectedWrites: ['app/Policies/PostPolicy.ts', 'tests/Post.test.ts', 'db/factories/PostFactory.ts', 'app/Http/Controllers/PostController.ts'],
+    expectedWrites: ['app/Policies/PostPolicy.ts', 'tests/controllers/PostController.test.ts', 'db/factories/PostFactory.ts', 'app/Http/Controllers/PostController.ts'],
   },
   {
     label: 'public, with a factory, in a module',

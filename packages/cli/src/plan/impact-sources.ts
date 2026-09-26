@@ -30,6 +30,8 @@ export interface PlanImpactSourcesInput {
   definitions: RouteDefinition[] | undefined
   /** Per route: the module whose registrar declared it, or `null`. */
   provenance: ReadonlyArray<string | null>
+  /** Modules whose routes did not load, any of which may register ahead of a module's route. */
+  moduleWarnings: readonly string[]
   controllers: ControllerMethodScan | PlanAppUnreadable
   /** The §2 sections, whose `unreadable` verdicts carry over. */
   sections: { models: PlanAppNames; resources: PlanAppNames; policies: PlanAppNames; pages: PlanAppNames; tests?: PlanAppUnreadable }
@@ -59,7 +61,7 @@ function impactRoutes(input: PlanImpactSourcesInput, requests: TestRequestScan):
       ...(toolName !== undefined ? { toolName } : {}),
     }
   })
-  const coverage = testCoverage(requests, routes)
+  const coverage = testCoverage(requests, routes, { registered: { provenance: input.provenance, modulesIncomplete: input.moduleWarnings.length > 0 } })
   for (const [index, tests] of coverage.byRoute) routes[index]!.tests = tests
   for (const [index, tests] of coverage.uncertainByRoute) routes[index]!.uncertainTests = tests
   return { routes, unresolved: coverage.unresolved }
@@ -122,7 +124,8 @@ export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Prom
     input.cache,
   )
 
-  const requests = await scanTestRequests(root, testFiles, input.cache)
+  // Directory listing order differs between file systems; sorted, Impact lists requests the same on each.
+  const requests = await scanTestRequests(root, [...testFiles].sort(), input.cache)
   const routes = impactRoutes(input, requests)
 
   return {

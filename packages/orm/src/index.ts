@@ -17,6 +17,7 @@ export type {
   ModelPaginationMeta,
   ORMAdapter,
   ModelQueryOptions,
+  ModelSetOptions,
   TransactionHandle,
   TransactionModelScope,
   CastType,

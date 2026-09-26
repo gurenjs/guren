@@ -200,7 +200,8 @@ if (!isEmailVerified(null)) {
 ### メール確認必須ミドルウェア
 
 ```ts
-import { Router, requireVerifiedEmail } from '@guren/core'
+import { AUTH_CONTEXT_KEY, Router, requireVerifiedEmail } from '@guren/core'
+import type { AuthContext } from '@guren/core'
 
 const router = new Router()
 
@@ -209,16 +210,21 @@ router.get('/dashboard', [DashboardController, 'index']).middleware(
   requireVerifiedEmail({ redirectTo: '/email/verify' })
 )
 
-// カスタムユーザー取得
+// 別のガードのユーザーを確認
 router.get('/profile', [ProfileController, 'show']).middleware(
   requireVerifiedEmail({
     redirectTo: '/verify-email',
     getUser: async (ctx) => {
-      return ctx.get('user')
+      const auth = ctx.get<AuthContext | undefined>(AUTH_CONTEXT_KEY)
+      return (await auth?.guard('api').user<{ emailVerifiedAt: Date | null }>()) ?? null
     },
   })
 )
 ```
+
+`getUser` を省略すると、リクエストの認証コンテキストが解決したユーザーを確認します。`auth.registerGuard('api', factory)` で登録した `api` ガードなど、別の場所からユーザーを取得したい場合に `getUser` を渡します（[認証](./authentication.md)を参照）。
+
+エージェントのツール呼び出し([エージェントインターフェース](./agent-interface.md)を参照)はリダイレクトをたどれません。未確認のユーザーがツールを呼ぶと、代わりに `403` と `{ "message": "Email address is not verified" }` が返ります。
 
 ## URLヘルパー
 

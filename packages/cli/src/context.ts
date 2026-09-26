@@ -18,6 +18,7 @@ import { discoverDeclaredCommandFiles } from './console-check'
 import { ParseCache } from './parse-cache'
 import { parseModelFile, type ModelInfo } from './model-parser'
 import { loadContextRoutes, escapeMarkdownTableCell, type ContextRoute } from './context-route'
+import { introspectApp } from './introspect'
 import { listInertiaPageIds } from './inertia-pages'
 import { readInstalledVersion } from './plugin-manifest'
 
@@ -27,6 +28,8 @@ export interface ProjectContext {
   routes: ContextRoute[]
   /** Why `routes` is empty, when it is empty because the load failed. */
   routesError?: string
+  /** Why the routes are the routes file's although introspection was asked for (RFC 0026 §5). */
+  routesNotIntrospected?: string
   pages: string[]
   controllers: string[]
   resources: string[]
@@ -43,6 +46,11 @@ export interface ContextOptions {
   cwd?: string
   json?: boolean
   routesFile?: string
+  /**
+   * List the introspected app's routes (RFC 0026 §5), a provider's included. `guren context` sets it
+   * unless `--no-introspect`; `routesFile` turns it off, since the manifest describes the entry.
+   */
+  introspect?: boolean
 }
 
 /**
@@ -86,6 +94,7 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
   }
 
   const routeLoadErrors: string[] = []
+  const routeFallbacks: string[] = []
 
   const [
     framework,
@@ -104,7 +113,7 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
   ] = await Promise.all([
     resolveFrameworkVersion(cwd),
     collectModels(),
-    loadContextRoutes(cwd, options.routesFile, routeLoadErrors),
+    loadContextRoutes(cwd, options.routesFile, routeLoadErrors, options.introspect && !options.routesFile ? () => introspectApp(cwd) : undefined, routeFallbacks),
     listInertiaPageIds(cwd),
     toNames(discoverControllerFiles),
     toNames(discoverResourceFiles),
@@ -126,6 +135,7 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
     models,
     routes,
     routesError: routeLoadErrors[0],
+    routesNotIntrospected: routeFallbacks[0],
     pages,
     controllers,
     resources,
@@ -172,6 +182,7 @@ export function renderContextMarkdown(ctx: ProjectContext): string {
   }
 
   lines.push(`## Routes (${ctx.routes.length})`)
+  if (ctx.routesNotIntrospected) lines.push(`Not introspected: ${ctx.routesNotIntrospected}`)
   if (ctx.routes.length > 0) {
     lines.push('| Method | Path | Name | Controller |')
     lines.push('|--------|------|------|------------|')

@@ -1,7 +1,8 @@
 import { describe, expect, it, spyOn } from 'bun:test'
 import { consola } from 'consola'
 import { describeGateFailures, GATE_STAGES, renderGateReport, runGate, type GateExec, type GateExecResult, type GateReport } from '../src/gate'
-import { createTempWorkspace, gateAppFiles, initGitRepo, linkOxlint, writeWorkspaceFiles } from './helpers'
+import type { Introspection } from '../src/introspect'
+import { createTempWorkspace, gateAppFiles, initGitRepo, linkOxlint, manifestFixture, PG_SCHEMA_FIXTURE, sessionConfigSource, writeWorkspaceFiles } from './helpers'
 
 const SCRIPTS = { codegen: 'guren codegen', typecheck: 'tsc --noEmit', test: 'bun test' }
 
@@ -222,6 +223,114 @@ describe('runGate', () => {
 
       expect(report.changed).toBe(false)
       expect(report.ok).toBe(true)
+    })
+  })
+
+  describe('reading the introspected app (RFC 0026 §5)', () => {
+    /** A routes file audit judges (a POST) and a session config check judges: both stages ask. */
+    const files = {
+      ...gateAppFiles(SCRIPTS),
+      'routes/web.ts': `class PostController {
+  async store() { return null }
+}
+export default function registerRoutes(router: any) {
+  router.post('/posts', [PostController, 'store'])
+}
+`,
+      'config/session.ts': sessionConfigSource("database: { driver: 'database', table: sessions }"),
+      'db/schema.ts': `${PG_SCHEMA_FIXTURE}\nexport const sessions = pgTable('sessions', { id: text('id').primaryKey() })\n`,
+    }
+
+    function counted(result: Introspection): { introspect: () => Promise<Introspection>; calls: () => number } {
+      let calls = 0
+      return { introspect: async () => (calls++, result), calls: () => calls }
+    }
+
+    it('runs one introspection for the check and audit stages, and judges from it', async () => {
+      await withApp('introspect', files, async (dir) => {
+        // A manager beside auth.sessionOptions.store only the registered app shows, and it refuses to boot.
+        const manifest = manifestFixture({
+          session: { source: 'manager', default: 'database', stores: { database: { driver: 'database', table: 'sessions', perProcess: false } } },
+          warnings: [{ code: 'session-configured-twice', message: 'both configure sessions' }],
+        })
+        const run = counted({ status: 'ok', manifest })
+
+        const report = await runGate({ cwd: dir, exec: fakeExec().exec, introspect: run.introspect })
+
+        expect(run.calls()).toBe(1)
+        expect(stage(report, 'check')).toMatchObject({ status: 'fail', findings: [expect.stringContaining('refuses to boot')] })
+        expect(stage(report, 'audit').status).toBe('pass')
+      })
+    })
+
+    it('names a failed introspection on the audit stage when only the audit asked', async () => {
+      const { 'config/session.ts': _session, ...auditOnly } = files
+      await withApp('introspect-audit-only', auditOnly, async (dir) => {
+        const run = counted({ status: 'failed', reason: 'crashed', message: 'The introspection process exited with code 1.' })
+
+        const report = await runGate({ cwd: dir, exec: fakeExec().exec, introspect: run.introspect })
+
+        expect(run.calls()).toBe(1)
+        expect(stage(report, 'check').findings).toEqual([])
+        expect(stage(report, 'audit')).toMatchObject({
+          status: 'pass',
+          findings: [expect.stringMatching(/^Introspection \(advisory\): The app could not be introspected \(crashed\)/)],
+        })
+      })
+    })
+
+    it('names a failed introspection once, on the stage that met it, without failing it', async () => {
+      await withApp('introspect-failed', files, async (dir) => {
+        const run = counted({ status: 'failed', reason: 'import', message: 'Could not load src/main.ts.' })
+
+        const report = await runGate({ cwd: dir, exec: fakeExec().exec, introspect: run.introspect })
+
+        expect(run.calls()).toBe(1)
+        const check = stage(report, 'check')
+        expect(check.status).toBe('pass')
+        // The note once, then the verdict the missing manifest left unverified, both advisory.
+        expect(check.findings).toEqual([
+          expect.stringMatching(/^Introspection \(advisory\): The app could not be introspected \(import\)/),
+          expect.stringMatching(/^Session manager binding \(advisory\): .* is unverified: no introspected app was available\./),
+        ])
+        expect(stage(report, 'audit').findings.some((finding) => finding.includes('introspected'))).toBe(false)
+        expect(report.ok).toBe(true)
+      })
+    })
+
+    it('keeps the note and the unverified lines past the cap on gating findings', async () => {
+      // Forty-one `:name*` paths, each its own gating finding, fill the cap on their own.
+      const routes = Array.from({ length: 41 }, (_, i) => `  router.get('/p${i}/:rest*', () => null)`).join('\n')
+      await withApp('introspect-capped', { ...files, 'routes/web.ts': `export default function registerRoutes(router: any) {\n${routes}\n}\n` }, async (dir) => {
+        const run = counted({ status: 'failed', reason: 'import', message: 'Could not load src/main.ts.' })
+
+        const check = stage(await runGate({ cwd: dir, exec: fakeExec().exec, introspect: run.introspect }), 'check')
+
+        expect(check.status).toBe('fail')
+        expect(check.findings.some((finding) => finding.startsWith('... and '))).toBe(true)
+        expect(check.findings.slice(-2)).toEqual([
+          expect.stringMatching(/^Introspection \(advisory\): /),
+          expect.stringMatching(/^Session manager binding \(advisory\): /),
+        ])
+      })
+    })
+
+    it('prints no unverified line for a --changed run that changed no source, which chose not to look', async () => {
+      await withApp('introspect-changed-docs', files, async (dir) => {
+        initGitRepo(dir)
+        for (const args of [['add', '-A'], ['commit', '-qm', 'base', '--no-verify', '--no-gpg-sign']]) {
+          const git = Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: dir, stderr: 'pipe' })
+          if (git.exitCode !== 0) throw new Error(`git ${args[0]} failed: ${git.stderr.toString()}`)
+        }
+        await writeWorkspaceFiles(dir, { 'README.md': 'docs only\n' })
+        const run = counted({ status: 'failed', reason: 'import', message: 'never asked' })
+
+        const report = await runGate({ cwd: dir, changed: true, exec: fakeExec().exec, introspect: run.introspect })
+
+        expect(report.changed).toBe(true)
+        expect(run.calls()).toBe(0)
+        expect(stage(report, 'check').findings.filter((finding) => finding.includes('(advisory)'))).toEqual([])
+      })
     })
   })
 

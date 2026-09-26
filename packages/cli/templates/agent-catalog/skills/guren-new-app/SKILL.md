@@ -34,10 +34,9 @@ Confirm there is no Guren app here: no `package.json` with a `@guren/core`
 dependency in this directory or a parent. If there is one, stop and use the
 `guren-harness` skill instead.
 
-**Do not run `bunx guren …` before the app exists.** The `guren` package is
-not on npm; `bunx guren` resolves only through an app's local `@guren/cli`.
-Outside an app it fails, and outside an app there is nothing for it to
-introspect anyway.
+**Do not run `bunx guren …` before the app exists.** The `guren` package on
+npm is a placeholder that only prints how to create an app and exits 1; the
+real command comes from an app's local `@guren/cli`.
 
 ## Scaffold
 

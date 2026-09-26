@@ -1,9 +1,9 @@
+import { JOBS_DIR } from './discovery'
 import type { ScaffoldFileEntry, WriterOptions } from './utils'
 import { scaffoldFileEntry, writeScaffoldFile } from './utils'
 
-const JOBS_DIR = 'app/Jobs'
-
-function jobTemplate(className: string): string {
+/** The job `make:job` writes, and `plan:scaffold` under the plan's class name. */
+export function buildJobSource(className: string): string {
   return `import { Job } from '@guren/core'
 
 export interface ${className}Payload {
@@ -36,6 +36,6 @@ export function jobFile(name: string, options: WriterOptions = {}): ScaffoldFile
   return scaffoldFileEntry(name, {
     dir: JOBS_DIR,
     suffix: 'Job',
-    template: ({ normalizedName }) => jobTemplate(normalizedName),
+    template: ({ normalizedName }) => buildJobSource(normalizedName),
   }, options)
 }
