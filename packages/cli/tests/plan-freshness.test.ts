@@ -86,9 +86,16 @@ describe('stampContextHash', () => {
     expect(contextHash['model.post']).toBeUndefined()
     expect(contextHash['column.post.id']).toBeUndefined()
     expect(unstamped).toContainEqual({ id: 'model.post', sections: ['tables'], reason: "the application's tables could not be read (schema threw)" })
-    // Validators are never readable: no scanner resolves an exported schema symbol.
-    expect(unstamped.map((entry) => entry.id)).toContain('validator.comment')
+    expect(unstamped.map((entry) => entry.id)).not.toContain('validator.comment')
+    expect(contextHash['validator.comment']).toBeDefined()
     expect(contextHash['controller.comments']).toBeDefined()
+
+    const { unstamped: unreadValidators } = stampContextHash(plan, planAppState({ validators: { unreadable: 'a validator file did not parse' } }))
+    expect(unreadValidators).toContainEqual({
+      id: 'validator.comment',
+      sections: ['validators'],
+      reason: "the application's validators could not be read (a validator file did not parse)",
+    })
   })
 
   test('should stamp exactly the elements the reference checks judge against the application by name', () => {
@@ -124,7 +131,7 @@ describe('judgeFreshness', () => {
     expect(freshness.summary.stale).toBe(0)
     expect(freshness.summary.unstamped).toBe(0)
     expect(verdictOf(freshness, 'model.post')).toEqual({ id: 'model.post', section: 'models', change: 'alter', verdict: 'fresh' })
-    expect(verdictOf(freshness, 'validator.comment').verdict).toBe('unjudged')
+    expect(verdictOf(freshness, 'validator.comment').verdict).toBe('fresh')
   })
 
   test('should mark a referenced element stale when what the scanners read for it changed, and name what depends on it', () => {

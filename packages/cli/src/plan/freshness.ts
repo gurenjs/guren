@@ -249,6 +249,14 @@ function elementContexts(plan: PlanDraft, app: PlanAppState): ElementContext[] {
   }))
 }
 
+/**
+ * The elements the application reads exactly as the plan leaves them, whatever was stamped:
+ * the evidence `settleBuiltFindings()` has for an element no stamp covers.
+ */
+export function elementsAtPlannedEnd(plan: PlanDraft, app: PlanAppState): Set<string> {
+  return new Set(elementContexts(plan, app).flatMap(({ id, now }) => ('hash' in now && now.hash === now.end ? [id] : [])))
+}
+
 /** What `plan:approve` writes into `baseline.contextHash` for a draft. */
 export function stampContextHash(plan: PlanDraft, app: PlanAppState): PlanContextStamp {
   const contextHash: Record<string, string> = {}

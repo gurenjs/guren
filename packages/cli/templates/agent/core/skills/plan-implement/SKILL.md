@@ -79,8 +79,11 @@ it, and do not edit the application back or the plan to make it pass.
   post`), with the request its route names and the expectations the plan
   states. Replace each `given()` call (the setup, the signed-in actor, a path
   parameter) and each `unwritten()` call with what it names, keep every
-  title's id and request, and leave the tests failing. The step verifies with
-  `tests:fail`, so a test that already passes, or is skipped (`test.skip`,
+  title's id and request, and leave the tests failing. The file's `beforeAll`
+  boots the app, so a `beforeEach` that creates or clears rows runs against a
+  configured database; open it with `await ready()`, so a failed boot, not a
+  database error, is what each test reports.
+  The step verifies with `tests:fail`, so a test that already passes, or is skipped (`test.skip`,
   `test.todo`), fails the step. Each test must still request its behaviour's
   route through a `TestApp`, with a path it spells, in its own body or a
   function of the same file it calls: `plan:verify` reads the requests before
@@ -88,9 +91,17 @@ it, and do not edit the application back or the plan to make it pass.
   something it cannot read (a path the file does not spell, a request made by
   a helper imported from another file, or one on what a helper of the same
   file returns when nothing annotates its return type as `TestApp`).
+  A verified run records each behaviour as seen failing, keyed on its test as
+  the plan states it (everything but the description, with the route's method
+  and path). That observation is kept: once the implementation exists no run
+  can make it again, so a later `plan:verify` of the step does not ask a
+  behaviour it covers to fail again.
 - **`data`**: the schema, migration and model; verified by `db:migrate` and
   `typecheck`. After a scaffold step, what is left is the migration and any
-  relationship `plan:scaffold` reported as left out.
+  relationship `plan:scaffold` reported as left out. One it reported with a
+  later step (`judgedAt`) belongs to that step: `plan:next` lists it there,
+  under the relationships of earlier models the step completes, and you write
+  it in the declaring model's file then.
 - **`http`**: controllers and routes (and validators, resources and policies
   when no scaffold step wrote them), until `guren check` passes and the step's
   behaviours pass. After a scaffold step, first run the command `plan:next`
@@ -99,12 +110,18 @@ it, and do not edit the application back or the plan to make it pass.
   Then replace each action's 501 with its body and planned response, write
   each policy ability's rule in place of its `return false`, map each resource
   field `plan:scaffold` stubbed, and add the validator rules and middleware it
-  listed. An action is complete only when its route is mounted and validates
-  through the route contract.
+  listed. Keep an `authorize()` call's `[Model, record]` form (a bare ORM
+  record resolves no policy), and pass the foreign keys an action's comment
+  lists through `create(data, { set })`. An action is complete only when its
+  route is mounted and validates through the route contract. A task's last
+  `http` step also runs `typecheck`, over earlier parts too. A page an action
+  renders that the `pages` step adds is not in `.guren/pages.gen.ts` until its
+  file exists, so `plan:next` lists those pages: create each as a stub with a
+  default export and the plan's `Props`, and leave the rest to `pages`.
 - **`pages`**: the Inertia pages; verified by `typecheck` and `guren check`.
 
-Implement only the elements the step lists. An element of a later step is that
-step's work, and `plan:status` will read it as drifted from the plan if it lands
+Implement only the elements the step lists, and the page stubs `plan:next`
+names for an `http` step. An element of a later step is that step's work, and `plan:status` will read it as drifted from the plan if it lands
 elsewhere. Do not edit the plan file: a change of design is a revision
 through `plan:revise` (see the `plan-write` skill).
 
@@ -116,12 +133,34 @@ a script the app lacks, a database that is unreachable, a timeout. It is not a
 failure of the implementation, and it is not yours to route around: say what is
 blocked and stop.
 
+## After a revision
+
+An approved revision gives the plan a new hash, and no record of the parent
+hash counts under it, so every step comes back. `plan:next` says so for a step
+verified against an earlier hash: re-check it with `plan:verify --step <id>`
+before implementing anything, or run `plan:verify` without `--step` once for
+the whole plan. Implement only what that run reports against the revised plan.
+
+A `tests` step verifies again without a run for each behaviour whose test the
+revision left as it was, since it was seen failing before its implementation.
+A behaviour the revision changed (its expectation, input, setup, actor or
+route; not its description) has to be seen failing again: update its test to
+the revised plan first, and it fails against the code that implements the old
+one. Its `http` step then asks for the new implementation.
+
+A `tests` step has no such record when it was verified by a CLI older than
+this rule, or when its test passed before it ever failed. Its behaviours
+already pass, so it cannot verify: the Stop hook gives up on it at once, and
+`plan:next` keeps returning it. It owns no element, so `plan:close` does not
+wait for it. Report it and leave the close to the person.
+
 ## The Stop hook
 
 While a step is marked, the `Stop` hook verifies it whenever you end a turn and
 sends you back while it is not verified, up to three times. It gives up, and
 says why, when something the step names went stale since approval, when the
-step or one of its elements is blocked, when nothing changed
+step or one of its elements is blocked, when a `tests` step's behaviours
+already pass and no record saw them fail, when nothing changed
 since the last continuation, or after the third continuation. The step is then
 recorded as stalled and `plan:next` returns it again, with the reason.
 

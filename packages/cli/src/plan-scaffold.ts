@@ -20,7 +20,6 @@ import {
   discoverResourceFiles,
   discoverSideEffectFiles,
   discoverTestFiles,
-  discoverValidatorFiles,
   excludeBarrelFiles,
   moduleNameFor,
   readIfExists,
@@ -34,16 +33,17 @@ import { discoverModelClasses } from './model-parser'
 import { parseSourceFile, ParseCache } from './parse-cache'
 import { appendTableToSchema, detectSchemaDialect, ensureNamedImports } from './patch-helpers'
 import { readPlanFile } from './plan-render'
-import { exportedNames } from './plan/app-detail'
+import { exportedNames, readValidatorExports } from './plan/app-detail'
 import { requirePlanApproval } from './plan/approvals'
 import { writeFileAtomic } from './plan/beside'
 import { entityDocPath } from './plan/close-docs'
-import { emitPlanScaffold, planScaffoldMountCommandLine, planScaffoldMounts, type PlanScaffoldMount, type PlanScaffoldOutput } from './plan/scaffold'
+import { emitPlanScaffold, planScaffoldFilePaths, planScaffoldMountCommandLine, planScaffoldMounts, type PlanScaffoldMount, type PlanScaffoldOutput } from './plan/scaffold'
 import { importSpecifier } from './plan/scaffold-controller'
-import { emitPlanTests, type PlanTestsOutput } from './plan/scaffold-tests'
-import type { Plan } from './plan/schema'
+import { emitPlanTests, planTestsFilePath, type PlanTestsOutput } from './plan/scaffold-tests'
+import type { Plan, PlanDraft } from './plan/schema'
 import { planSlug, readPlanState } from './plan/state'
-import { derivePlanTasks, findPlanStep, listPlanSteps, type PlanTaskDerivation } from './plan/tasks'
+import { derivePlanTasks, findPlanStep, listPlanSteps, planLaterRelationships, type PlanDerivedStep, type PlanDerivedTask, type PlanTaskDerivation } from './plan/tasks'
+import { isUnreadable } from './plan/unreadable'
 import { composeAppProviderRegistration, resolveAppEntry } from './provider-registrar'
 import { composeRouteRegistrarCall, resolveRoutesEntry } from './route-registrar'
 import { isRoutesFileMounted } from './routes-check'
@@ -65,8 +65,13 @@ export interface PlanScaffoldTestsReport extends PlanScaffoldReportBase, Pick<Pl
   kind: 'tests'
 }
 
-export interface PlanScaffoldStepReport extends PlanScaffoldReportBase, Pick<PlanScaffoldOutput, 'left' | 'omitted'> {
+export interface PlanScaffoldStepReport extends PlanScaffoldReportBase, Pick<PlanScaffoldOutput, 'left'> {
   kind: 'scaffold'
+  /**
+   * Relationships left out of the models. `judgedAt` is the later step whose work the relationship waits
+   * on, which judges it (RFC 0030 §5, Order); without it, plan:status reads the model as drifted until it is added.
+   */
+  omitted: Array<PlanScaffoldOutput['omitted'][number] & { judgedAt?: string }>
   /** The schema file the tables were appended to, and their exports. */
   appended: { file: string; tables: string[] }
   /** The app entry the policy providers were registered in; `file` is null when there was none to register. */
@@ -149,11 +154,42 @@ async function rootModelFiles(root: string, cache: ParseCache): Promise<Record<s
   return Object.fromEntries(models.map((model) => [model.className, toPosixRelative(root, model.filePath)]))
 }
 
+async function filesOnDisk(root: string, paths: readonly string[]): Promise<string[]> {
+  const exists = await Promise.all(paths.map((path) => pathExists(resolve(root, path))))
+  return paths.filter((_, index) => exists[index])
+}
+
 /** The root entity documents that exist, which a `@docs` tag may name without failing `guren check`. */
 async function existingEntityDocs(root: string, plan: Plan): Promise<string[]> {
-  const docs = plan.models.filter((model) => !model.module).map(entityDocPath)
-  const exists = await Promise.all(docs.map((doc) => pathExists(resolve(root, doc))))
-  return docs.filter((_, index) => exists[index])
+  return filesOnDisk(root, plan.models.filter((model) => !model.module).map(entityDocPath))
+}
+
+/** The test files carrying each of the step's acceptance ids: plan:verify selects a behaviour's file by its id. */
+async function carriedAcceptanceIds(root: string, step: PlanDerivedStep): Promise<Map<string, string[]>> {
+  return readBracketedTokenFiles(root, await discoverTestFiles(root), (token) => step.acceptanceIds.includes(token))
+}
+
+export interface PlanScaffoldTargets {
+  /** What plan:scaffold refuses on: the files it would write, and for a tests step the test files carrying its ids. */
+  existing: string[]
+  /** What it would write and nothing holds yet: a scaffold step's files, a tests step's ids no test file carries. */
+  missing: string[]
+}
+
+/**
+ * A scaffold or tests step's targets on disk, by the checks plan:scaffold refuses on, which is why
+ * plan:next names no plan:scaffold once one exists. Reads no application: the plan names the files.
+ */
+export async function planScaffoldTargets(root: string, path: string, plan: PlanDraft, task: PlanDerivedTask, step: PlanDerivedStep): Promise<PlanScaffoldTargets> {
+  if (step.kind === 'scaffold') {
+    const files = planScaffoldFilePaths(plan, step)
+    const existing = await filesOnDisk(root, files)
+    return { existing, missing: files.filter((file) => !existing.includes(file)) }
+  }
+  if (step.kind !== 'tests') return { existing: [], missing: [] }
+  const carried = await carriedAcceptanceIds(root, step)
+  const existing = [...new Set([...(await filesOnDisk(root, [planTestsFilePath(planSlug(path), task)])), ...[...carried.values()].flat()])]
+  return { existing, missing: step.acceptanceIds.filter((id) => !carried.has(id)) }
 }
 
 export async function planScaffoldFile(planPath: string, options: PlanScaffoldFileOptions): Promise<PlanScaffoldReport> {
@@ -204,8 +240,7 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
     validatorFiles: validators.files,
     docs: await existingEntityDocs(root, plan),
   })
-  const inTheWay = []
-  for (const file of output.files) if (await pathExists(resolve(root, file.path))) inTheWay.push(`${file.path} already exists.`)
+  const inTheWay = (await filesOnDisk(root, output.files.map((file) => file.path))).map((file) => `${file} already exists.`)
   const registration = await registerProviders(root, output.providers)
   refuseStep(step.id, [...output.refusals, ...inTheWay, ...registration.refusals], 'If this step was scaffolded before, it has nothing left to write: run guren plan:verify for it.')
 
@@ -258,7 +293,7 @@ export async function planScaffoldFile(planPath: string, options: PlanScaffoldFi
     unmounted: unmountedRoutes(plan, derivation, step.id, created),
     emitted: output.emitted,
     left: output.left,
-    omitted: output.omitted,
+    omitted: judgedLater(plan, derivation, output.omitted),
     unwritten: output.unwritten,
   }
 }
@@ -290,7 +325,7 @@ async function planScaffoldTests(
   })
   refusals.push(...output.refusals)
   if (await pathExists(resolve(root, output.file.path))) refusals.push(`${output.file.path} already exists.`)
-  const carried = await readBracketedTokenFiles(root, await discoverTestFiles(root), (token) => step.acceptanceIds.includes(token))
+  const carried = await carriedAcceptanceIds(root, step)
   for (const [id, files] of carried) refusals.push(`[${id}] is already carried by ${files.join(', ')}; plan:verify needs each behaviour in one test file.`)
   refuseStep(step.id, refusals, 'If this step was scaffolded before, write its tests there and run guren plan:verify for it.')
 
@@ -323,15 +358,10 @@ function failedWrite(writing: string | undefined, written: readonly string[], re
  * not take one (`plan:status` finds a validator by its name), and a controller imports one from there.
  */
 async function rootValidatorExports(root: string, cache: ParseCache): Promise<{ files: Record<string, string> } | { unreadable: string }> {
+  const exports = await readValidatorExports(root, cache, true)
+  if (isUnreadable(exports)) return exports
   const files: Record<string, string> = {}
-  for (const filePath of excludeBarrelFiles(await discoverValidatorFiles(root))) {
-    if (moduleNameFor(root, filePath) !== null) continue
-    const file = toPosixRelative(root, filePath)
-    const parsed = await cache.get(filePath)
-    const exported = parsed ? exportedNames(parsed.ast, 'this file') : null
-    if (exported === null) return { unreadable: `${file} could not be read for its exports` }
-    for (const name of exported) files[name] ??= file
-  }
+  for (const { file, names } of exports) for (const name of names) files[name] ??= file
   return { files }
 }
 
@@ -397,8 +427,13 @@ export function formatPlanScaffold(report: PlanScaffoldReport, planArgument: str
     lines.push(...report.unwritten.map((entry) => `  ${entry.element} ${entry.detail}: ${entry.reason}`))
   }
   if (report.omitted.length > 0) {
-    lines.push('', 'Relationships left out of the model, to add once what they need exists; until then plan:status reads the model as drifted:')
-    lines.push(...report.omitted.map((entry) => `  ${entry.model} ${entry.relationship}: ${entry.reason}`))
+    lines.push('', 'Relationships left out of the model, to add once what they need exists:')
+    lines.push(
+      ...report.omitted.map(
+        (entry) =>
+          `  ${entry.model} ${entry.relationship}: ${entry.reason}; ${entry.judgedAt ? `add it in ${entry.judgedAt}, which judges it` : 'plan:status reads the model as drifted until it is added'}`,
+      ),
+    )
   }
   if (report.unmounted) {
     const { file, step } = report.unmounted
@@ -487,6 +522,14 @@ function addPatternNames(pattern: Node | null, names: Set<string>): void {
   else if (pattern?.type === 'ObjectPattern') {
     for (const property of pattern.properties) addPatternNames(property.type === 'RestElement' ? property : property.value, names)
   }
+}
+
+function judgedLater(plan: Plan, derivation: PlanTaskDerivation, omitted: PlanScaffoldOutput['omitted']): PlanScaffoldStepReport['omitted'] {
+  const later = planLaterRelationships(plan, derivation)
+  return omitted.map((entry) => {
+    const found = later.find((candidate) => candidate.model.id === entry.model && candidate.relationship.name === entry.relationship)
+    return found ? { ...entry, judgedAt: found.stepId } : entry
+  })
 }
 
 function unmountedRoutes(plan: Plan, derivation: PlanTaskDerivation, stepId: string, created: readonly string[]): PlanScaffoldStepReport['unmounted'] {

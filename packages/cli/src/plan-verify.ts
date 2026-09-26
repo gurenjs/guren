@@ -93,9 +93,9 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   const hashes = await hashFiles(root, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
   const drifted = (id: string): boolean => records[id] !== undefined && recordDrift(records[id], digest, hashes, log.waived).length > 0
   if (options.step === undefined) {
-    // A whole-plan run redoes nothing that stands: the `tests` step must fail before its
-    // implementation and cannot pass again once the `http` step has made the tests pass.
-    // The record lives in this checkout only, so a fresh one has nothing to keep.
+    // A whole-plan run redoes nothing that stands. The record lives in this checkout only, so a
+    // fresh one has nothing to keep; a `tests` step run again under a revision passes on the red
+    // runs its record carries (`carriedRedRuns()`), and without one it cannot pass once implemented.
     stepIds = planStepIds(derivation).filter((id) => {
       const record = records[id]
       if (record && recordStillHolds(record, digest, hashes, log.waived)) {
@@ -117,7 +117,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   // One app load answers both: the status after codegen, and freshness for a plan with a baseline.
   let judged: Promise<{ status: PlanStatus; freshness?: PlanFreshness }> | undefined
   const judge = () =>
-    (judged ??= loadApp().then((loadedApp) => ({ status: judgePlan(plan, loadedApp, readings), ...(hasBaseline(plan) ? { freshness: judgeFreshness(plan, loadedApp) } : {}) })))
+    (judged ??= loadApp().then((loadedApp) => ({ status: judgePlan(plan, loadedApp, readings, derivation), ...(hasBaseline(plan) ? { freshness: judgeFreshness(plan, loadedApp) } : {}) })))
   const verifier = new PlanVerifier(plan, derivation, {
     root,
     planDigest: digest,
@@ -126,6 +126,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
     timeoutMs: options.timeoutMs ?? DEFAULT_VERIFY_TIMEOUT_MS,
     scripts: await readScripts(root),
     waived: log.waived,
+    previous: records,
   })
   const steps: PlanStepVerification[] = []
   const reverified: string[] = []

@@ -305,7 +305,7 @@ export function createDevMcpServer(options: CreateDevMcpServerOptions): McpServe
           .string()
           .optional()
           .describe('Comma-separated field definitions (e.g., "title:string,body:text,published:boolean")'),
-        withTest: z.boolean().default(false).describe('Generate test file'),
+        withTest: z.boolean().default(false).describe('Generate a controller test in tests/controllers/'),
         force: z.boolean().default(false).describe('Overwrite existing files'),
       }),
     },

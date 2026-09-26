@@ -981,7 +981,7 @@ behaviours. Guren supplies the breakdown and the order, in
    | scaffold | deterministic, no model (see below) | codegen, then `typecheck` |
    | tests | skeletons generated from `acceptance[]` (no model); the agent fills `given` setup and what `expect` cannot express | codegen, then every generated test runs and fails |
    | data | what the scaffold's table cannot express, migration, model relationships | codegen, `db:migrate`, `typecheck` |
-   | http | validator, resource, policy, controller, routes | codegen, `guren check`, the slice's tests |
+   | http | validator, resource, policy, controller, routes | codegen, `typecheck` (last `http` step only), `guren check`, the slice's tests |
    | pages | page components | codegen, `typecheck`, `guren check` |
 
 3. **Cross-entity tasks** (a dashboard) depend on every slice they read.
@@ -1030,7 +1030,21 @@ decides a task, so `tasks.ts` fixes it:
   intent's acceptance goes to that slice: on `tests`, and on the step where the
   behaviours must pass, which is the last `http` step, or the task's last step
   when it has none. That step's verify always includes the tests, so a slice
-  of `data` or `pages` alone still runs them. A task with behaviours and no
+  of `data` or `pages` alone still runs them, and no other step's does: an
+  earlier `http` part, or an `http` step of a task with no behaviours, has no
+  test file to select, and `bun test` given none runs the whole suite, a result
+  that says nothing about the step. A task's last `http` step typechecks, as
+  `data` and `pages` do: without it, a controller the tests pass through could
+  call a model method with the wrong argument types (`Meetup.update(id, data)`,
+  whose first argument is a where clause) and verify, leaving the error to the
+  `pages` step or `guren gate`. Earlier parts do not, since parts are packed in
+  document order and one may import a resource or job a later part writes; the
+  last part's run covers their files. The cost falls on an action rendering a
+  page the `pages` step adds: `pages.gen.ts` names the page only once its file
+  exists. An action a behaviour requests needed that already, as the request
+  reads `pages.<name>` at runtime. `plan:next` lists those pages on the `http`
+  step (`pageStubs`), to be created there as stubs with a default export and
+  the plan's `Props`, which the `pages` step completes. A task with behaviours and no
   work has the `tests` step only, run after the tasks it waits for and
   verified by the tests *passing*: failing first is tamper detection, which
   means something only where an implementation step comes after the tests.
@@ -1042,7 +1056,9 @@ decides a task, so `tasks.ts` fixes it:
   reference, foreign keys first among them; an `existing` target is already
   there. Tables are dropped child first. Relationships order nothing: a
   `hasMany` mirrors the foreign key pointing back and would close a cycle with
-  it. A real cycle (mutual foreign keys) is cut at its first member in document
+  it. So a relationship that waits on a later task's work (its target's class,
+  or keys that task adds) completes at the step owning that work, not its own
+  model's (§6, Completion), and `plan:next` lists it there. A real cycle (mutual foreign keys) is cut at its first member in document
   order, which stops waiting, and reported; a self-reference is not one.
   Document order breaks every tie.
 - **Hints** are `<task> before <task>` or `<task> after <task>`, a task being a
@@ -1229,7 +1245,9 @@ shipped, and where it stops.
   write that fails after the first one names the files already on disk, since a
   re-run would refuse on them as if the step were done.
 - A relationship left out of the model leaves it `drifted` in `plan:status`
-  until the relationship is added; the report says so beside each one.
+  until the relationship is added; the report says so beside each one. One
+  that waits on a later task's work is the exception (§6, Completion): the
+  report names the step that judges it (`judgedAt`).
 - Like `plan:verify`, it does not consult the freshness hold of §4: `plan:next`
   is what holds a step whose context went stale, and the command runs only on
   the step `plan:next` marked.
@@ -1812,7 +1830,24 @@ for some of them:
 | any | `waived` |
 
 A step is complete when every element it covers is. A task is complete when
-its steps are. `blocked` completes nothing and is reported as such: it is an
+its steps are.
+
+A relationship that waits on a later task's work (§5, Order) is judged with the
+latest model it waits on, as that model's property `relationship
+<Model>.<name>` (`<module>/<Model>` for a module's), and not with the model
+declaring it. It waits on its target while the target's class does not exist
+yet (an `add` or `rename`), and on the model holding its keys while the plan
+adds them: the target's foreign key for a `hasOne`/`hasMany`, the pivot for a
+`belongsToMany`. The declaring model's step comes first and cannot write it, so
+judging it there would hold that step forever. A relationship whose keys the
+plan does not state, or that names a dropped model, stays on the declaring
+model, as the scaffold leaves it out there too. The declaring model carries a
+note naming the step instead, and the judging model's `files` include the
+declaring model's file, so removing the relationship later expires that
+record; writing it drifts the declaring step's record, which `plan:verify`
+re-checks in the same run. `planLaterRelationships()` in `plan/tasks.ts` is the
+one rule for which relationships move, by the derivation's task order;
+`plan:status`, `plan:scaffold` and `plan:next` all read it. `blocked` completes nothing and is reported as such: it is an
 environment problem to fix, not a state to wait out. Existing tests may be
 edited only where the plan lists them under Impact.
 

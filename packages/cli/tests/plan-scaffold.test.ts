@@ -614,6 +614,7 @@ describe('plan:scaffold', () => {
 
           // Planned response: a redirect to /posts/:postId
           // Rule: The widget belongs to the post in the path.
+          // postId, parentId are not fillable: write them with Widget.create(data, { set: { postId, parentId } }) (RFC 0031)
           async store(): Promise<Response> {
             await this.validateBody(WidgetPayloadSchema)
             throw HttpException.notImplemented('WidgetController.store is planned and not written yet')
@@ -621,7 +622,8 @@ describe('plan:scaffold', () => {
 
           // Planned response: no content
           async destroy(): Promise<Response> {
-            await this.authorize('delete', Widget)
+            const widget = this.model(Widget)
+            await this.authorize('delete', [Widget, widget])
             throw HttpException.notImplemented('WidgetController.destroy is planned and not written yet')
           }
         }
@@ -1173,7 +1175,17 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
       const message = await refusedWithNothingWritten('validator-unreadable', {
         files: { 'app/Http/Validators/Barrelish.ts': "export * from './Elsewhere'\nexport const x = 1\n" },
       })
-      expect(message).toContain('plan:scaffold cannot tell which schemas the validator files already export: app/Http/Validators/Barrelish.ts could not be read for its exports.')
+      expect(message).toContain('plan:scaffold cannot tell which schemas the validator files already export: app/Http/Validators/Barrelish.ts could not be read for its exported schemas.')
+    })
+
+    test('should read only the root\'s validator files, so a module file it cannot read refuses nothing', async () => {
+      const { dir, plan } = await createApp('validator-module-unreadable', {
+        files: { 'modules/billing/index.ts': 'export default {}\n', 'modules/billing/app/Http/Validators/Barrelish.ts': "export * from './Elsewhere'\n" },
+      })
+
+      await planScaffoldFile(plan, { appRoot: dir, step: STEP })
+
+      expect(await readFile(join(dir, 'app/Http/Validators/WidgetValidator.ts'), 'utf8')).toContain('export const WidgetPayloadSchema')
     })
 
     test('should refuse a resource guren codegen would not discover, and a resource or policy class already declared', async () => {
@@ -1386,7 +1398,7 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     expect(output.files.map((file) => file.path)).not.toContain('app/Http/Resources/WidgetSummaryResource.ts')
   })
 
-  test('should leave out a relationship whose target has no model yet, and say the model reads drifted until it is added', async () => {
+  test('should leave out a relationship whose target a later task adds, and name the step that judges it', async () => {
     const document = widgetsPlan()
     document.models[3]!.relationships.push({ name: 'gadgets', type: 'hasMany', target: 'model.gadget' })
     document.models.push({
@@ -1402,12 +1414,16 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
 
     const report = await scaffoldStep(plan, dir)
 
-    expect(report.omitted).toEqual([{ model: 'model.widget', relationship: 'gadgets', reason: 'the application has no Gadget model yet' }])
+    expect(report.omitted).toEqual([
+      { model: 'model.widget', relationship: 'gadgets', reason: 'the application has no Gadget model yet', judgedAt: 'task/entity/model.gadget/data' },
+    ])
     expect(await readFile(join(dir, 'app/Models/Widget.ts'), 'utf8')).not.toContain("'gadgets'")
     const text = formatPlanScaffold(report, PLAN_FILE)
-    expect(text).toContain('until then plan:status reads the model as drifted:')
-    expect(text).toContain('  model.widget gadgets: the application has no Gadget model yet')
-    expect((await statusOf(dir, plan)).elements.find((element) => element.id === 'model.widget')?.state).toBe('drifted')
+    expect(text).toContain('  model.widget gadgets: the application has no Gadget model yet; add it in task/entity/model.gadget/data, which judges it')
+    const widget = (await statusOf(dir, plan)).elements.find((element) => element.id === 'model.widget')
+    expect(widget?.state).toBe('present')
+    expect(widget?.properties.map((property) => property.property)).not.toContain('relationship gadgets')
+    expect(widget?.notes).toContain('Relationship gadgets waits on work a later task does: it is judged with model.gadget, in task/entity/model.gadget/data.')
   })
 
   test('should write a string default with a line break or a line separator as a valid literal', () => {
@@ -1491,6 +1507,18 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     await this.authorize('update', Widget)
     await this.validateBody(WidgetPayloadSchema)
     `)
+  })
+
+  // The gate resolves a policy for an ORM record only from [Model, record], so a stub that
+  // authorizes a record ability against the bare class must say so where the record is loaded.
+  test('should name the [Model, record] form above a record ability no route binds a record for', () => {
+    const document = widgetsPlan()
+    document.controllers![0]!.actions[1]!.authorization.policy = { id: 'policy.widget', ability: 'update' }
+
+    const controller = emitWidgets(document, 'pg').files.find((file) => file.path === 'app/Http/Controllers/WidgetController.ts')!.contents
+
+    expect(controller).toContain('  // update is asked of one Widget: once the action loads it, pass [Widget, widget], since the bare class reaches the policy with no record\n')
+    expect(controller).toContain("    const widget = this.model(Widget)\n    await this.authorize('delete', [Widget, widget])\n")
   })
 
   test('should mount no root routes file for a module entity, which the scaffold refuses', () => {

@@ -210,7 +210,8 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     modelFile(singular, { ...writerOptions, attachments }),
     ...(options.withFactory ? [{ ...factoryFile(singular, writerOptions), flag: '--factory' }] : []),
     ...(withPolicy ? [{ ...policyFile(singular, writerOptions), flag: '--policy' }] : []),
-    ...(options.withTest ? [{ ...(await testFile(singular, writerOptions)), flag: '--test' }] : []),
+    // `controller: true` is the path `guren check`/`doctor` look for (`controllerTestCandidates()`).
+    ...(options.withTest ? [{ ...(await testFile(singular, { ...writerOptions, controller: true })), flag: '--test' }] : []),
   ]
   // At promotion the validator and pages are the prototype run's, possibly hand-edited since.
   const keptFiles = promoting && !options.force ? await existingFiles(appRoot, [validator, ...pageFiles]) : []
