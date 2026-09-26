@@ -1397,9 +1397,55 @@ What they rule out is the cheap failure, a test emptied or rewritten until it
 passes, and the task-end reviewer (§7) reads the tests for the rest.
 
 **Amended after re-review (2026-09-23), Part 3:** no skeleton emitter ships,
-and the static "still calls its route" check is not implemented. Both are the
+~~and the static "still calls its route" check is not implemented~~ (the check
+ships: the amendment below). Both are the
 optional last item of Part 3; `packages/cli/src/test-requests.ts`, which reads
 the requests a test file makes, is what the check would rest on.
+
+**Amended in implementation (the "still calls its route" check).** The check
+ships, in `packages/cli/src/plan/behaviour-requests.ts` over
+`scanTestCaseRequests()` in `test-requests.ts`. It applies to every test, not
+only to generated ones: `plan:verify` cannot tell a skeleton from a test an
+agent wrote, and the tamper it detects is the same.
+
+- Where it runs: inside the `tests` and `tests:fail` commands, on the files
+  those commands select, before `bun test` is spawned (a failure is decided,
+  so nothing runs), and in `recheckTests()`, where a drifted `tests:fail` step
+  re-checked without a run must still request its routes: a test rewritten to
+  request nothing keeps failing, so the run it verified on says nothing about
+  it now. `plan:status`, `guren check` and the gate do not run it, so their
+  cost is unchanged.
+- The route is the plan's: the behaviour's `route` resolved in `plan.routes`,
+  its method and full path (the path `plan:status` compares with the
+  registered one) and its `agent.toolName`. A request reaches it through
+  `testCoverage()` and `mayReach()`, the matcher Impact uses. `AcceptanceSchema`
+  requires `route`, so no behaviour is exempt; a route id the plan does not
+  declare (a draft) is unreadable, never a pass.
+- Per case, as the junit report reads a title: a `test`, `it` or `describe`
+  (and `.only`, `.each(…)(…)` and the rest of the chain, and aliases imported
+  from `bun:test`) whose literal title carries the id, including a `describe`
+  whose cases do. Its requests are those in its callback and in every
+  same-file function it calls by name, transitively, matched by name like the
+  receivers. Hooks are not followed: the request is the behaviour's action, and
+  a `beforeEach` is its `given`. Some carrying case must request the route.
+- Three verdicts per behaviour. Reached. Unreadable when nothing reached it and
+  a carrying case holds an unresolved request `mayReach()` allows, a request
+  the route pattern cannot be compared with, or a call handing the `TestApp`
+  (or its agent) to a function the file does not define, or a carrying file
+  did not parse or holds a test whose title is not all literal. A miss
+  otherwise, naming what each carrying case requests instead, or that the id
+  sits in no test title at all. Both fail the command (and the step), with
+  distinct reasons: `blocked` is the environment's and this is the test's
+  shape, and passing an unreadable request would let `app.get(path)` lift the
+  step's elements. The finding never says the route is uncovered, only that
+  this reading cannot tell, and it asks for the request to be spelled in the
+  test. There is no waiver for a behaviour, so a suite built on imported
+  helpers has to make each behaviour's request visible in its case.
+- Tamper detection, not proof: a request the file spells passes whether or
+  not it runs, and a request made entirely inside an imported helper the case
+  hands nothing reads as a miss.
+- `plan:next` says the rule under a `tests` step's behaviours, and the harness
+  skill repeats it.
 
 For `alter` / `rename` / `drop` there is no scaffold. Those steps are agent
 edits, and the narrow step width matters most there.

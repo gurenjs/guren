@@ -373,6 +373,7 @@ Behaviours to write, as test titles `[<id>] <description>`, failing:
       unauthenticated; actor guest; route route.comments.store; given a post exists; expect redirect /login
   [AC-comments-4] A user cannot delete someone else's comment.
       forbidden; actor user; route route.comments.destroy; given a comment written by another user exists; expect status 403
+  Each test requests its route through a TestApp, in its body or a function of its file it calls: plan:verify reads the requests before it runs them.
 
 Implement this step only, then run `bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/tests` and commit once it is verified.
 Marked in .guren/plans/comments.state.json
@@ -402,7 +403,7 @@ task/entity/model.comment/tests: verified (607 ms)
 Recorded in .guren/plans/comments.state.json
 ```
 
-The `tests` step passes only when every behaviour has a test and each one fails: a test that passes before the code exists proves nothing, and a skipped test is not a failing one. `plan:verify` selects the test files whose source carries the step's ids, and runs them with `bun test`. Later steps run the same files and need them to pass. After the verify output it prints the plan's status, described below.
+The `tests` step passes only when every behaviour has a test and each one fails: a test that passes before the code exists proves nothing, and a skipped test is not a failing one. `plan:verify` selects the test files whose source carries the step's ids, and runs them with `bun test`. Later steps run the same files and need them to pass. Before it runs them, it reads each behaviour's tests for a `TestApp` request to the route the behaviour names: some `test`, `it` or `describe` whose title carries the id must request that method and path (or call the route's agent tool), in its own body or in a function of the same file it calls. A test that requests another route, or none, fails the command with what it requests instead, and `bun test` does not run. So does one whose request this reading cannot resolve (a path the file does not spell, a request on what an imported helper returns, a `TestApp` handed to a function from another file, a title built at runtime): the check fails closed, since a test rewritten that way would otherwise verify the step, and the finding asks for the request to be spelled in the test. It is tamper detection, not proof: a request the file spells passes whether or not it runs. After the verify output it prints the plan's status, described below.
 
 ### The scaffold step: `plan:scaffold`
 
@@ -605,7 +606,7 @@ The elements verified only through a behaviour of `http` (its controller and pol
 
 `plan:verify --step` re-checks such steps. Once the given step verifies, the same run re-checks the earlier steps whose files changed, in task order, stopping at the first one that runs commands and does not verify. Each outcome is recorded (a `failed` one names what broke) and listed under "Re-checked"; `plan:next` then returns the earliest step left unverified, usually the one that failed. A re-check that comes out `blocked` is left for a later run. While the given step does not verify, the earlier records are left alone and listed as left for a later run, since the commands the steps share would fail them too.
 
-A `tests` step is re-checked without running anything, because its tests pass once the code exists: it stays verified while exactly one test file carries each of its behaviour ids, and otherwise the run names the behaviour and leaves the step drifted.
+A `tests` step is re-checked without running anything, because its tests pass once the code exists: it stays verified while exactly one test file carries each of its behaviour ids and each behaviour's tests still request its route, read as above, and otherwise the run names the behaviour and leaves the step drifted.
 
 `plan:next` runs nothing, so when the next step has drifted, it prints the re-check command:
 

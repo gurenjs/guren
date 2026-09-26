@@ -279,6 +279,24 @@ export const comments = pgTable('comments', {
 })
 `
 
+/** The route each comments behaviour names, as a `TestApp` request: `plan:verify` reads these before it runs a test. */
+const COMMENT_ROUTE_REQUESTS: Record<string, string> = {
+  'AC-comments-1': "app.post('/posts/1/comments', { body: 'hi' })",
+  'AC-comments-2': "app.post('/posts/1/comments', { body: '' })",
+  'AC-comments-3': "app.post('/posts/1/comments', { body: 'hi' })",
+  'AC-comments-4': "app.delete('/comments/1')",
+}
+
+/** Heads a test file whose cases use {@link requestsRoute}; a type import, so the fixture apps need no `@guren/testing`. */
+export const TEST_APP_TYPE_IMPORT = "import type { TestApp } from '@guren/testing'\n"
+
+/** A statement requesting the route a comments behaviour names, never run. */
+export function requestsRoute(id: string): string {
+  const request = COMMENT_ROUTE_REQUESTS[id]
+  if (!request) throw new Error(`no route request for ${id}`)
+  return `void ((app: TestApp) => ${request})`
+}
+
 /**
  * The comments half of the plan written far enough for its `http` step to run, with every
  * script a no-op: the `plan:verify` command and the Stop hook tests run the real `bun test` on it.
@@ -333,18 +351,22 @@ import { registerWebRoutes } from '../routes/web.js'
 export default createApp({ routes: registerWebRoutes })
 `,
   'tests/comments.test.ts': `import { describe, expect, test } from 'bun:test'
-
+${TEST_APP_TYPE_IMPORT}
 describe('comments', () => {
   test('[AC-comments-1] a signed-in user can comment on a post', () => {
+    ${requestsRoute('AC-comments-1')}
     expect(1).toBe(1)
   })
   test('[AC-comments-2] a guest is redirected', () => {
+    ${requestsRoute('AC-comments-2')}
     expect(1).toBe(1)
   })
   test('[AC-comments-3] an empty body is rejected', () => {
+    ${requestsRoute('AC-comments-3')}
     expect(1).toBe(1)
   })
   test('[AC-comments-4] the author can delete', () => {
+    ${requestsRoute('AC-comments-4')}
     expect(1).toBe(1)
   })
 })

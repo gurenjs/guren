@@ -17,7 +17,7 @@ import { formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
 import { acceptanceTestFiles, PlanVerifier, type PlanStepVerification, type PlanVerifierOptions } from '../src/plan/verify'
 import type { CapturedExec, CapturedRun } from '../src/subprocess'
 import type { PlanWaiver } from '../src/plan/decisions'
-import { loadCommentsPlan, loadParsedCommentsPlan, planAppState } from './plan-fixture'
+import { loadCommentsPlan, loadParsedCommentsPlan, planAppState, requestsRoute, TEST_APP_TYPE_IMPORT } from './plan-fixture'
 
 const HTTP = 'task/entity/model.comment/http'
 const DATA = 'task/entity/model.comment/data'
@@ -33,7 +33,7 @@ const FILES: Record<string, string> = {
   'app/Models/Comment.ts': 'export class Comment {}\n',
   'app/Http/Controllers/CommentController.ts': 'export class CommentController {}\n',
   'db/schema.ts': 'export const comments = {}\n',
-  'tests/comments.test.ts': "test('[AC-comments-1] a signed-in user can comment', () => {})\ntest('[AC-comments-2] x', () => {})\ntest('[AC-comments-3] x', () => {})\ntest('[AC-comments-4] x', () => {})\n",
+  'tests/comments.test.ts': `${TEST_APP_TYPE_IMPORT}${IDS.map((id) => `test('[${id}] x', () => { ${requestsRoute(id)} })\n`).join('')}`,
   'tests/posts.test.ts': "test('[AC-posts-10] unrelated', () => {})\n",
 }
 
@@ -322,7 +322,7 @@ describe('PlanVerifier', () => {
   })
 
   describe('recheckTests', () => {
-    const titles = (ids: string[]): string => ids.map((id) => `test('[${id}] x', () => {})\n`).join('')
+    const titles = (ids: string[]): string => `${TEST_APP_TYPE_IMPORT}${ids.map((id) => `test('[${id}] x', () => { ${requestsRoute(id)} })\n`).join('')}`
 
     test('should keep a drifted tests step verified while one file carries each id, and name a lost or doubled one', async () => {
       const root = await mkdtemp(join(tmpdir(), 'guren-plan-recheck-'))
@@ -351,6 +351,71 @@ describe('PlanVerifier', () => {
       } finally {
         await rm(root, { recursive: true, force: true })
       }
+    })
+
+    test('should fail the re-check of a test rewritten to request nothing, which still fails as tests:fail saw', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'guren-plan-recheck-'))
+      try {
+        await mkdir(join(root, 'tests'), { recursive: true })
+        const emptied = titles(IDS).replace(requestsRoute('AC-comments-4'), "expect('the author').toBe('deleted')")
+        await writeFile(join(root, 'tests/comments.test.ts'), emptied, 'utf8')
+        const previous = record({ acceptance: IDS.map((id) => ({ id, status: 'failing' as const })) })
+
+        const step = await verifier(statusOf(), fakeExec(), { root, testFiles: async () => [join(root, 'tests/comments.test.ts')] }).recheckTests(TESTS, previous)
+
+        expect(step.record.outcome).toBe('failed')
+        expect(step.record.commands[0]).toMatchObject({
+          status: 'fail',
+          reason: 'a behaviour\'s test does not request the route the behaviour names',
+          findings: ['[AC-comments-4] no test carrying it requests DELETE /comments/:id: tests/comments.test.ts:5 requests nothing'],
+        })
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    })
+  })
+
+  describe('whether each behaviour\'s test still requests its route', () => {
+    async function withTests(source: string, run: (root: string) => Promise<void>): Promise<void> {
+      const root = await mkdtemp(join(tmpdir(), 'guren-plan-requests-'))
+      try {
+        await mkdir(join(root, 'tests'), { recursive: true })
+        await writeFile(join(root, 'tests/comments.test.ts'), source, 'utf8')
+        await run(root)
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    }
+    const cases = (request: (id: string) => string): string => `${TEST_APP_TYPE_IMPORT}${IDS.map((id) => `test('[${id}] x', () => { ${request(id)} })\n`).join('')}`
+
+    test('should fail tests:fail on a test requesting another route, without running bun test', async () => {
+      const source = cases((id) => (id === 'AC-comments-2' ? "void ((app: TestApp) => app.get('/posts/1'))" : requestsRoute(id)))
+      await withTests(source, async (root) => {
+        const fake = fakeExec({}, FAILING)
+        const step = await verifier(statusOf(), fake, { root, testFiles: async () => [join(root, 'tests/comments.test.ts')] }).verify(TESTS)
+
+        expect(step.record.outcome).toBe('failed')
+        expect(commandOf(step, 'tests:fail')).toMatchObject({
+          status: 'fail',
+          label: 'not run: the requests tests/comments.test.ts makes were read',
+          findings: ['[AC-comments-2] no test carrying it requests POST /posts/:postId/comments: tests/comments.test.ts:3 requests GET /posts/1'],
+        })
+        expect(fake.calls.some((command) => command[1] === 'test')).toBe(false)
+      })
+    })
+
+    test('should fail the http step\'s tests on a request this check cannot read, rather than let the step verify', async () => {
+      const source = `import { signedIn } from './helpers'\n${cases((id) => (id === 'AC-comments-1' ? "void (async () => (await signedIn()).post('/posts/1/comments', {}))" : requestsRoute(id)))}`
+      await withTests(source, async (root) => {
+        const step = await verifier(statusOf(), fakeExec(), { root, testFiles: async () => [join(root, 'tests/comments.test.ts')] }).verify(HTTP)
+
+        expect(step.record.outcome).toBe('failed')
+        expect(commandOf(step, 'tests')).toMatchObject({
+          status: 'fail',
+          reason: 'a behaviour\'s test requests its route in a way this check cannot read: spell the request in the test',
+          findings: ['[AC-comments-1] cannot tell whether its test requests POST /posts/:postId/comments: tests/comments.test.ts:3 POST /posts/1/comments (a request on what an imported helper returns)'],
+        })
+      })
     })
   })
 

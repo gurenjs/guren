@@ -12,6 +12,7 @@ import type { File } from '@babel/types'
 import { literalString, memberKeyName, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
 import { toPosixRelative } from './discovery'
 import type { ParseCache } from './parse-cache'
+import { bracketedTokens } from './plan/acceptance-status'
 import { importedLocals, importedNamespaces } from './plugin-calls'
 import { PATH_PARAM_PATTERN } from './utils'
 
@@ -264,34 +265,66 @@ function startsLikePath(parts: readonly PathPart[] | null): boolean {
   return typeof first === 'string' && (first.startsWith('/') || /^https?:\/\//u.test(first))
 }
 
-function scanFile(ast: File, file: string, scan: TestRequestScan): void {
+type ScannedCall =
+  | { kind: 'request'; request: TestRequest }
+  | { kind: 'unresolved'; request: UnresolvedTestRequest }
+  /** A call handing a `TestApp` (or its agent) to code the file may not show, which could request anything. */
+  | { kind: 'handoff'; site: TestRequestSite; callee?: string }
+
+function calleeText(callee: BabelNode): string | undefined {
+  if (callee.type === 'Identifier') return callee.name as string
+  if (callee.type !== 'MemberExpression' && callee.type !== 'OptionalMemberExpression') return undefined
+  const object = calleeText(callee.object as BabelNode)
+  const name = memberKeyName({ computed: Boolean(callee.computed), key: callee.property as never })
+  return object === undefined || name === undefined ? undefined : `${object}.${name}`
+}
+
+function scanFile(ast: File, file: string, sink: (node: BabelNode, call: ScannedCall) => void): void {
   const receivers = collectReceivers(ast)
   const constants = stringConstants(ast)
 
   walk(ast.program, (node) => {
-    const member = calleeMember(node)
-    if (!member) return
+    if (node.type !== 'CallExpression') return
     const args = node.arguments as BabelNode[]
-    const { line } = member
-    const primes = member.name === 'withCsrf'
-    const method = primes ? 'GET' : REQUEST_METHODS[member.name]
-    if (method !== undefined && (args.length > 0 || primes)) {
-      const parts = args.length === 0 ? ['/'] : pathParts(args[0], constants)
-      const text = parts === null ? `${method} <runtime>` : describePath(method, parts)
-      if (isTestApp(member.object, receivers)) {
-        const segments = parts === null ? 'dynamicPath' : pathSegments(parts)
-        if (typeof segments === 'string') scan.unresolved.push({ file, line, text, reason: segments, method })
-        else scan.requests.push({ file, line, text, target: { kind: 'path', method, segments } })
-      } else if (startsLikePath(parts) && isForeign(member.object, receivers)) {
-        scan.unresolved.push({ file, line, text, reason: 'unknownReceiver', method })
-      }
-    } else if (member.name === 'call' && args.length > 0 && isAgent(member.object, receivers)) {
-      const name = literalString(args[0])
-      const text = `agent().call(${name === null ? '<runtime>' : `'${name}'`})`
-      if (name === null) scan.unresolved.push({ file, line, text, reason: 'dynamicPath' })
-      else scan.requests.push({ file, line, text, target: { kind: 'tool', name } })
+    const member = calleeMember(node)
+    if (member) scanRequest(node, member, args, file, receivers, constants, sink)
+    if (member && (isTestApp(member.object, receivers) || isAgent(member.object, receivers))) return
+    if (args.some((arg) => isTestApp(arg, receivers) || isAgent(arg, receivers))) {
+      const callee = calleeText(node.callee as BabelNode)
+      const line = node.loc?.start.line ?? 0
+      sink(node, { kind: 'handoff', site: { file, line, text: `${callee ?? '<expression>'}(…)` }, ...(callee === undefined ? {} : { callee }) })
     }
   })
+}
+
+function scanRequest(
+  node: BabelNode,
+  member: { object: BabelNode; name: string; line: number },
+  args: BabelNode[],
+  file: string,
+  receivers: Receivers,
+  constants: ReadonlyMap<string, string>,
+  sink: (node: BabelNode, call: ScannedCall) => void,
+): void {
+  const { line } = member
+  const primes = member.name === 'withCsrf'
+  const method = primes ? 'GET' : REQUEST_METHODS[member.name]
+  if (method !== undefined && (args.length > 0 || primes)) {
+    const parts = args.length === 0 ? ['/'] : pathParts(args[0], constants)
+    const text = parts === null ? `${method} <runtime>` : describePath(method, parts)
+    if (isTestApp(member.object, receivers)) {
+      const segments = parts === null ? 'dynamicPath' : pathSegments(parts)
+      if (typeof segments === 'string') sink(node, { kind: 'unresolved', request: { file, line, text, reason: segments, method } })
+      else sink(node, { kind: 'request', request: { file, line, text, target: { kind: 'path', method, segments } } })
+    } else if (startsLikePath(parts) && isForeign(member.object, receivers)) {
+      sink(node, { kind: 'unresolved', request: { file, line, text, reason: 'unknownReceiver', method } })
+    }
+  } else if (member.name === 'call' && args.length > 0 && isAgent(member.object, receivers)) {
+    const name = literalString(args[0])
+    const text = `agent().call(${name === null ? '<runtime>' : `'${name}'`})`
+    if (name === null) sink(node, { kind: 'unresolved', request: { file, line, text, reason: 'dynamicPath' } })
+    else sink(node, { kind: 'request', request: { file, line, text, target: { kind: 'tool', name } } })
+  }
 }
 
 /** Every `TestApp` request the given test files spell. `files` are absolute. */
@@ -305,9 +338,159 @@ export async function scanTestRequests(root: string, files: readonly string[], c
       if (outcome.status === 'unreadable' || outcome.source.includes('TestApp')) scan.unparsed.push(file)
       continue
     }
-    scanFile(outcome.ast, file, scan)
+    scanFile(outcome.ast, file, (_node, call) => {
+      if (call.kind === 'request') scan.requests.push(call.request)
+      else if (call.kind === 'unresolved') scan.unresolved.push(call.request)
+    })
   }
   return scan
+}
+
+/** The requests a test case makes, for the ids its title or an enclosing `describe`'s carries. */
+export interface TestCaseRequests extends TestRequestScan {
+  file: string
+  line: number
+  title: string
+  /** Calls in the case handing a `TestApp` to code the file does not define, which may request anything. */
+  handedOff: TestRequestSite[]
+}
+
+export interface TestCaseScan {
+  /** Per accepted token, every `test`/`it`/`describe` whose literal title carries it. */
+  cases: Map<string, TestCaseRequests[]>
+  /** Test calls whose title is not all literal, so a token may hide in it. */
+  opaqueTitles: TestRequestSite[]
+  /** Files that did not parse, so no case of theirs was read. */
+  unparsed: string[]
+}
+
+const TEST_CALLEES = ['test', 'it', 'describe'] as const
+const RUNNER = 'bun:test'
+
+/** `test`, `test.only`, `test.each(rows)`, `it.if(c)`: the identifier a test call chain starts from. */
+function chainRoot(callee: BabelNode): string | undefined {
+  let node = callee
+  for (;;) {
+    if (node.type === 'Identifier') return node.name as string
+    if (node.type === 'MemberExpression' || node.type === 'OptionalMemberExpression') node = node.object as BabelNode
+    else if (node.type === 'CallExpression') node = node.callee as BabelNode
+    else return undefined
+  }
+}
+
+/** A title's text with each non-literal part as {@link HOLE}, so a token spanning one can be dropped. */
+function titleText(value: unknown): string | null {
+  const node = unwrapTypeAssertion(value as BabelNode)
+  const literal = literalString(node)
+  if (literal !== null) return literal
+  if (node?.type !== 'TemplateLiteral') return null
+  return (node.quasis as Array<{ value: { cooked?: string | null } }>).map((quasi) => quasi.value.cooked ?? '').join(HOLE)
+}
+
+interface Range {
+  start: number
+  end: number
+}
+
+function rangeOf(node: BabelNode): Range | undefined {
+  return typeof node.start === 'number' && typeof node.end === 'number' ? { start: node.start, end: node.end } : undefined
+}
+
+function isFunction(node: BabelNode | undefined | null): node is BabelNode {
+  return node?.type === 'ArrowFunctionExpression' || node?.type === 'FunctionExpression'
+}
+
+/** Same-file functions by name, matched by name as the receivers are, not by scope. */
+function localFunctions(ast: File): Map<string, Range[]> {
+  const functions = new Map<string, Range[]>()
+  const add = (name: string, node: BabelNode): void => {
+    const range = rangeOf(node)
+    if (range) functions.set(name, [...(functions.get(name) ?? []), range])
+  }
+  walk(ast.program, (node) => {
+    if (node.type === 'FunctionDeclaration' && node.id) add((node.id as BabelNode).name as string, node)
+    else if (node.type === 'VariableDeclarator' && (node.id as BabelNode).type === 'Identifier' && isFunction(node.init as BabelNode | null)) {
+      add((node.id as BabelNode).name as string, node.init as BabelNode)
+    }
+  })
+  return functions
+}
+
+function within(ranges: readonly Range[], node: BabelNode): boolean {
+  const start = node.start
+  return typeof start === 'number' && ranges.some((range) => start >= range.start && start < range.end)
+}
+
+/** A case's body and, transitively, every same-file function called by name from inside it. */
+function caseRanges(body: Range, functions: ReadonlyMap<string, Range[]>, calls: ReadonlyArray<{ node: BabelNode; name: string }>): Range[] {
+  const ranges = [body]
+  const followed = new Set<string>()
+  for (let grew = true; grew;) {
+    grew = false
+    for (const { node, name } of calls) {
+      if (followed.has(name) || !within(ranges, node)) continue
+      followed.add(name)
+      ranges.push(...(functions.get(name) ?? []))
+      grew = true
+    }
+  }
+  return ranges
+}
+
+/**
+ * The `TestApp` requests each test case makes, for the tokens `accept` takes. A case carries a
+ * token its literal title or an enclosing `describe`'s holds, as the junit report reads it, and
+ * makes the requests in its body and in the same-file functions it calls by name. `files` are absolute.
+ */
+export async function scanTestCaseRequests(root: string, files: readonly string[], cache: ParseCache, accept: (token: string) => boolean): Promise<TestCaseScan> {
+  const scan: TestCaseScan = { cases: new Map(), opaqueTitles: [], unparsed: [] }
+  for (const absolute of files) {
+    const file = toPosixRelative(root, absolute)
+    const outcome = await cache.read(absolute)
+    if (outcome.status !== 'parsed') {
+      scan.unparsed.push(file)
+      continue
+    }
+    scanCases(outcome.ast, file, accept, scan)
+  }
+  return scan
+}
+
+function scanCases(ast: File, file: string, accept: (token: string) => boolean, scan: TestCaseScan): void {
+  const runner = new Set<string>(TEST_CALLEES)
+  for (const name of TEST_CALLEES) for (const local of importedLocals(ast, { specifier: RUNNER, exportName: name })) runner.add(local)
+  const functions = localFunctions(ast)
+  const found: Array<{ node: BabelNode; call: ScannedCall }> = []
+  scanFile(ast, file, (node, call) => found.push({ node, call }))
+  const calls: Array<{ node: BabelNode; name: string }> = []
+  walk(ast.program, (node) => {
+    const callee = node.type === 'CallExpression' ? (node.callee as BabelNode) : undefined
+    if (callee?.type === 'Identifier' && functions.has(callee.name as string)) calls.push({ node, name: callee.name as string })
+  })
+
+  walk(ast.program, (node) => {
+    if (node.type !== 'CallExpression') return
+    const args = node.arguments as BabelNode[]
+    const body = args.slice(1).find(isFunction)
+    const root = chainRoot(node.callee as BabelNode)
+    if (!body || root === undefined || !runner.has(root)) return
+    const line = node.loc?.start.line ?? 0
+    const text = titleText(args[0])
+    const shown = text?.replaceAll(HOLE, '${…}') ?? '<runtime>'
+    if (text === null || text.includes(HOLE)) scan.opaqueTitles.push({ file, line, text: shown })
+    const tokens = new Set((text === null ? [] : bracketedTokens(text)).filter((token) => !token.includes(HOLE) && accept(token)))
+    const range = rangeOf(body)
+    if (tokens.size === 0 || !range) return
+    const ranges = caseRanges(range, functions, calls)
+    const entry: TestCaseRequests = { file, line, title: shown, requests: [], unresolved: [], unparsed: [], handedOff: [] }
+    for (const { node: site, call } of found) {
+      if (!within(ranges, site)) continue
+      if (call.kind === 'request') entry.requests.push(call.request)
+      else if (call.kind === 'unresolved') entry.unresolved.push(call.request)
+      else if (call.callee === undefined || !functions.has(call.callee)) entry.handedOff.push(call.site)
+    }
+    for (const token of tokens) scan.cases.set(token, [...(scan.cases.get(token) ?? []), entry])
+  })
 }
 
 type Match = 'match' | 'none' | 'unknown'

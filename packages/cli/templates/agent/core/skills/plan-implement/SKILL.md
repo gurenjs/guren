@@ -75,7 +75,12 @@ it, and do not edit the application back or the plan to make it pass.
 - **`tests`**: write the behaviours as tests whose titles carry the acceptance id
   literally, `[AC-comments-1] a signed-in user can comment on a post`, and leave
   them failing. The step verifies with `tests:fail`, so a test that already
-  passes, or is skipped, fails the step.
+  passes, or is skipped, fails the step. Each test requests its behaviour's
+  route through a `TestApp`, with a path it spells, in its own body or a
+  function of the same file it calls: `plan:verify` reads the requests before
+  it runs the tests, and fails one that requests another route, nothing, or
+  something it cannot read (a path the file does not spell, a request made by
+  a helper imported from another file).
 - **`data`**: the schema, migration and model; verified by `db:migrate` and
   `typecheck`. After a scaffold step, what is left is the migration and any
   relationship `plan:scaffold` reported as left out.

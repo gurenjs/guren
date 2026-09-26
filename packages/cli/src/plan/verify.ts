@@ -18,7 +18,9 @@ import { discoverTestFiles } from '../discovery'
 import { readBracketedTokenFiles } from '../docs-acceptance'
 import { resolveAppDrizzleKit, type AppDrizzleKit } from '../make-migration'
 import { advisoryCheckResults } from '../manifest-section'
+import { ParseCache } from '../parse-cache'
 import { bunExecutable, type CapturedExec, type CapturedRun } from '../subprocess'
+import { scanTestCaseRequests } from '../test-requests'
 import {
   acceptanceStatus,
   planAcceptanceIds,
@@ -26,6 +28,7 @@ import {
   type AcceptanceError,
   type AcceptanceReport,
 } from './acceptance-status'
+import { behaviourRequestFailure, judgeBehaviourRequests, type BehaviourRequestFindings } from './behaviour-requests'
 import type { Plan, PlanDraft } from './schema'
 import type { PlanCommandRecord, PlanFingerprint, PlanStepRecord } from './state'
 import { awaitsVerification, type PlanElementStatus, type PlanStatus } from './status'
@@ -217,6 +220,7 @@ export class PlanVerifier {
   private readonly commands = new Map<string, Promise<PlanCommandRecord>>()
   private readonly selections = new Map<string, Promise<TestSelection>>()
   private readonly outcomes = new Map<string, Promise<TestOutcome>>()
+  private readonly requestChecks = new Map<string, Promise<BehaviourRequestFindings>>()
   private readonly declaredIds: string[]
   private readonly check: () => Promise<CheckReport>
   private readonly testFiles: () => Promise<string[]>
@@ -226,7 +230,7 @@ export class PlanVerifier {
   private testFilesPromise: Promise<string[]> | undefined
 
   constructor(
-    plan: PlanDraft | Plan,
+    private readonly plan: PlanDraft | Plan,
     private readonly derivation: PlanTaskDerivation,
     private readonly options: PlanVerifierOptions,
   ) {
@@ -277,16 +281,20 @@ export class PlanVerifier {
     const wanted = new Set(found.step.acceptanceIds)
     const carriers = await readBracketedTokenFiles(this.options.root, files.map((file) => join(this.options.root, file)), (token) => wanted.has(token))
     const missing = found.step.acceptanceIds.filter((id) => !carriers.has(id))
-    const findings = [
+    const carried = [
       ...missing.map((id) => `[${id}] is carried by no test file`),
       ...[...carriers].filter(([, carrying]) => carrying.length > 1).map(([id, carrying]) => `[${id}] is carried by ${carrying.join(' and ')}`),
     ]
+    // A test rewritten to request nothing still fails, so the red run it verified on proves nothing about it now.
+    const requests = behaviourRequestFailure(await this.requestCheck(found.step, files))
+    const findings = [...carried, ...(requests?.findings ?? [])]
+    const reason = carried.length > 0 ? 'the test files no longer carry the behaviours the step saw fail' : requests?.reason
     const command: PlanCommandRecord = {
       command: 'tests:fail',
       label: 'not run: a re-check that one test file still carries each behaviour',
       status: findings.length > 0 ? 'fail' : 'pass',
       durationMs: 0,
-      ...(findings.length > 0 ? { reason: 'the test files no longer carry the behaviours the step saw fail' } : {}),
+      ...(reason === undefined ? {} : { reason }),
       findings,
     }
     return {
@@ -485,6 +493,19 @@ export class PlanVerifier {
     return { files, label: `bun test ${files.join(' ')}`.trimEnd() }
   }
 
+  /** Whether each behaviour's test still requests its route, read once per test-file set. */
+  private requestCheck(step: PlanDerivedStep, files: readonly string[]): Promise<BehaviourRequestFindings> {
+    return memoized(this.requestChecks, this.testKey(step), async () => {
+      const wanted = new Set(step.acceptanceIds)
+      const absolute = files.map((file) => join(this.options.root, file))
+      const [carriers, scan] = await Promise.all([
+        readBracketedTokenFiles(this.options.root, absolute, (token) => wanted.has(token)),
+        scanTestCaseRequests(this.options.root, absolute, new ParseCache(), (token) => wanted.has(token)),
+      ])
+      return judgeBehaviourRequests(this.plan, step.acceptanceIds, scan, carriers)
+    })
+  }
+
   /** The one run over the step's files, memoized as a promise so two commands on one key share it. */
   private outcome(step: PlanDerivedStep): Promise<TestOutcome> {
     return memoized(this.outcomes, this.testKey(step), () => this.selection(step).then((selection) => this.runTests(selection)))
@@ -518,6 +539,9 @@ export class PlanVerifier {
     if (files.length === 0) {
       return { label: 'bun test', status: 'fail', reason: `no test file carries ${ids.map((id) => `[${id}]`).join(', ')} as a literal token`, findings: [] }
     }
+    // Before the run: a test emptied until it fails, or until it passes, is what this catches, and no run can.
+    const requests = behaviourRequestFailure(await this.requestCheck(step, files))
+    if (requests) return { label: `not run: the requests ${files.join(', ')} makes were read`, status: 'fail', reason: requests.reason, findings: capFindings(requests.findings) }
 
     const { label, result, report } = await this.outcome(step)
     if (!report) return this.timedOut(label)
