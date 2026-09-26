@@ -716,7 +716,7 @@ describe('PlanVerifier', () => {
     const step = await verifier(statusOf(), fake, {}, undefined, split).verify(first)
 
     expect(step.record.outcome).toBe('verified')
-    expect(commandsOf(step)).toEqual({ codegen: 'pass', typecheck: 'pass', check: 'pass' })
+    expect(commandsOf(step)).toEqual({ codegen: 'pass', check: 'pass' })
     expect(fake.calls.some((call) => call[1] === 'test')).toBe(false)
     expect(formatPlanStepRecord(first, step.record).join('\n')).not.toContain('bun test')
   })

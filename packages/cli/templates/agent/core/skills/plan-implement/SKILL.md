@@ -107,11 +107,15 @@ it, and do not edit the application back or the plan to make it pass.
   listed. Keep an `authorize()` call's `[Model, record]` form (a bare ORM
   record resolves no policy), and pass the foreign keys an action's comment
   lists through `create(data, { set })`. An action is complete only when its
-  route is mounted and validates through the route contract.
+  route is mounted and validates through the route contract. A task's last
+  `http` step also runs `typecheck`, over earlier parts too. A page an action
+  renders that the `pages` step adds is not in `.guren/pages.gen.ts` until its
+  file exists, so `plan:next` lists those pages: create each as a stub with a
+  default export and the plan's `Props`, and leave the rest to `pages`.
 - **`pages`**: the Inertia pages; verified by `typecheck` and `guren check`.
 
-Implement only the elements the step lists. An element of a later step is that
-step's work, and `plan:status` will read it as drifted from the plan if it lands
+Implement only the elements the step lists, and the page stubs `plan:next`
+names for an `http` step. An element of a later step is that step's work, and `plan:status` will read it as drifted from the plan if it lands
 elsewhere. Do not edit the plan file: a change of design is a revision
 through `plan:revise` (see the `plan-write` skill).
 

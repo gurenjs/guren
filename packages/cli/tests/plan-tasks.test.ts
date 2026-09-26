@@ -10,6 +10,7 @@ import {
   type PlanDerivedTask,
   type PlanStepKind,
   type PlanTaskDerivation,
+  type PlanVerifyCommand,
 } from '../src/plan/tasks'
 import { foundationViolations, loadCommentsPlanInput, type PlanInput } from './plan-fixture'
 
@@ -644,15 +645,19 @@ describe('derivePlanTasks', () => {
       }
     })
 
-    test('should typecheck every http step, and run no tests on one that carries no behaviour', () => {
-      const http = [derive(), derive(busyPlan), derive(undefined, { splitThreshold: 1 })]
-        .flatMap((result) => result.tasks.flatMap((derived) => derived.steps))
-        .filter((step) => step.kind === 'http')
-      for (const step of http) {
-        expect(step.verify, step.id).toEqual(step.acceptanceIds.length > 0 ? ['codegen', 'typecheck', 'check', 'tests'] : ['codegen', 'typecheck', 'check'])
+    test('should typecheck a task\u2019s last http step only, and run no tests on one that carries no behaviour', () => {
+      const tasks = [derive(), derive(busyPlan), derive(undefined, { splitThreshold: 1 })].flatMap((result) => result.tasks)
+      const http = tasks.flatMap((derived) => {
+        const steps = derived.steps.filter((step) => step.kind === 'http')
+        return steps.map((step) => ({ step, last: step === steps.at(-1) }))
+      })
+      for (const { step, last } of http) {
+        const tests: PlanVerifyCommand[] = step.acceptanceIds.length > 0 ? ['tests'] : []
+        expect(step.verify, step.id).toEqual([...(last ? ['codegen', 'typecheck', 'check'] : ['codegen', 'check']), ...tests] as PlanVerifyCommand[])
       }
-      expect(http.some((step) => step.acceptanceIds.length === 0)).toBe(true)
-      expect(http.some((step) => step.acceptanceIds.length > 0)).toBe(true)
+      expect(http.some(({ last }) => !last)).toBe(true)
+      expect(http.some(({ step, last }) => last && step.acceptanceIds.length === 0)).toBe(true)
+      expect(http.some(({ step }) => step.acceptanceIds.length > 0)).toBe(true)
     })
 
     test('should not add the tests to a step that carries no behaviour', () => {
