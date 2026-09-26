@@ -19,8 +19,8 @@ export const JUNIT_MAX_DEPTH = 64
 const ACCEPTANCE_ID_PREFIX = 'AC-'
 
 /**
- * What a `plan:scaffold` test skeleton's `client()` throws when the application does not boot:
- * `tests:fail` reads a run where a case failed with it as the environment's, never as a red run.
+ * What a `plan:scaffold` test skeleton's `ready()` throws, and its `beforeAll` prints, when the application
+ * does not boot: `tests:fail` reads a run whose output carries it as the environment's, never as a red run.
  */
 export const SKELETON_BOOT_FAILED = 'Application boot failed:'
 

@@ -249,6 +249,7 @@ describe('plan:next', () => {
     )
     expect(report.step!.elements.find((element) => element.id === 'route.comments.store')!.element).toMatchObject({ id: 'route.comments.store', method: 'POST' })
     expect(report.step!.acceptance.map((behaviour) => behaviour.id)).toEqual(['AC-comments-1', 'AC-comments-2', 'AC-comments-3', 'AC-comments-4'])
+    expect(report.step!.pageStubs).toBeUndefined()
 
     // A record of another plan, or one whose file changed, does not hold.
     await writeFile(join(app, 'lib.ts'), 'export const a = 2\n', 'utf8')
@@ -275,6 +276,27 @@ describe('plan:next', () => {
     expect(report.step!.relationships).toEqual([{ model: 'model.post', name: 'comments', type: 'hasMany', target: 'model.comment' }])
     expect(formatPlanNext(report, 'comments.plan.json')).toContain('Relationships of earlier models the step completes, declared in those models\u2019 files:\n  model.post comments (hasMany model.comment)')
     expect(report.verified).toContain('task/entity/model.post/data')
+  })
+
+  test('should name the added pages an http step\u2019s actions render, to be written as stubs before its typecheck', async () => {
+    const { app, plan } = await createApp('page-stubs')
+    const document = loadCommentsPlan() as { controllers: Array<{ actions: Array<{ id: string; response: unknown }> }>; views: unknown[] }
+    for (const action of document.controllers[0]!.actions) {
+      action.response = { kind: 'inertia', view: action.id === 'action.comments.destroy' ? 'view.comments.gone' : 'view.posts.show' }
+    }
+    document.views.push({ id: 'view.comments.gone', change: { kind: 'add' }, page: 'comments/Gone', purpose: 'Confirm a deletion.', props: [], actions: [], states: {} })
+    await writeFile(plan, JSON.stringify(document), 'utf8')
+    const record = { ...(await holding(app)), planDigest: planDigest(parsePlanDocument(document)) }
+    await writeState(app, { steps: { [SCAFFOLD]: record, [TESTS]: record, [DATA]: record } })
+
+    const report = await planNextFile(plan, { appRoot: app, now: NOW })
+
+    expect(report.step!.id).toBe(HTTP)
+    expect(report.step!.verify).toEqual(['codegen', 'typecheck', 'check', 'tests'])
+    // posts/Show is altered, so the page exists already and pages.gen.ts names it.
+    expect(report.step!.pageStubs).toEqual([{ view: 'view.comments.gone', page: 'comments/Gone' }])
+    expect(formatPlanNext(report, 'comments.plan.json')).toContain('create each now as a stub with a default export and the plan\u2019s Props')
+    expect(formatPlanNext(report, 'comments.plan.json')).toContain('  comments/Gone (view.comments.gone)')
   })
 
   test('should count a step done on a verified record that fingerprints nothing, as a scaffold step or a drop leaves, and name it when the plan is done', async () => {

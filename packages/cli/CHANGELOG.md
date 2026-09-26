@@ -1,5 +1,17 @@
 # @guren/cli
 
+## 2.28.1
+
+### Patch Changes
+
+- 1885f09: Return diagnostic failures from runCli without terminating the caller or leaking command status between invocations. Preserve report output and standalone CLI exit codes.
+- 38509b6: `guren doctor` and `guren upgrade` now warn on a Bun older than 1.4.0. CI no longer runs a Bun 1.3.x lane, so 1.3.x is best-effort: it may keep working, but nothing tests it.
+- 97ca4ad: `make:feature --test` writes its test to `tests/controllers/<Name>Controller.test.ts` (in a module, `modules/<name>/tests/controllers/`), the file `make:test --controller` writes and `guren check` / `guren doctor` look for. It used to write `tests/<Name>.test.ts`, so a freshly scaffolded feature was reported as having no controller test.
+- 94b3e11: `plan:scaffold` controller stubs ask a policy ability of the record the route binds: when every route to the action binds one record of the policy's model, the stub writes `const comment = this.model(Comment)` and `this.authorize('delete', [Comment, comment])`, the form the gate resolves a policy from. Otherwise it keeps the bare class, and for a record ability (`view`, `update`, `delete` and the like) the comment above the action names the tuple to pass once the action loads the record. An action a `POST` route sends a body to also lists, in its comment, the foreign keys outside an added model's `fillable`, which `create()` refuses in its data and which go through `Model.create(data, { set: { … } })` (RFC 0031).
+- 32d76b4: Keep a plan's `tests` step verifiable after a revision. A verified `tests:fail` run now records each behaviour as seen failing, keyed on its test as the plan states it (everything but the description), and a later `plan:verify` carries that record to a revised plan for every behaviour whose test the revision left alone, instead of asking an implemented behaviour to fail again. The Stop hook gives up at once on a `tests` step whose behaviours already pass with no such record, and `plan:next` marks a step verified against an earlier plan hash as one to re-check with `plan:verify` before implementing it.
+- Updated dependencies [94b3e11]
+  - @guren/server@2.28.0
+
 ## 2.28.0
 
 ### Minor Changes

@@ -13,7 +13,7 @@ import { describeCloseBlockers } from '../src/plan/close-remedy'
 import { behaviourReach } from '../src/plan/reach'
 import { applyVerification, applyWaivers, behaviourShape, carriedRedRuns, hashFiles, overlayVerification, planWaivers, recordDrift, recordStillHolds, sha256 } from '../src/plan/verification'
 import { PLAN_STATUS_REPORT_VERSION } from '../src/plan-status'
-import { formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
+import { formatPlanStepRecord, formatPlanVerify, type PlanVerifyReport } from '../src/plan-verify'
 import { acceptanceTestFiles, PlanVerifier, type PlanStepVerification, type PlanVerifierOptions } from '../src/plan/verify'
 import type { CapturedExec, CapturedRun } from '../src/subprocess'
 import type { PlanWaiver } from '../src/plan/decisions'
@@ -137,8 +137,8 @@ function checkReport(checks: CheckReport['checks']): CheckReport {
   return { cwd: ROOT, checks, passCount: 0, warnCount: 0, failCount: checks.length }
 }
 
-function verifier(status: PlanStatus, fake: Pick<FakeExec, 'exec'>, overrides: Partial<PlanVerifierOptions> = {}, target?: PlanDraft): PlanVerifier {
-  return new PlanVerifier(target ?? plan, target ? derivePlanTasks(target) : derivation, {
+function verifier(status: PlanStatus, fake: Pick<FakeExec, 'exec'>, overrides: Partial<PlanVerifierOptions> = {}, target?: PlanDraft, derived?: PlanTaskDerivation): PlanVerifier {
+  return new PlanVerifier(target ?? plan, derived ?? (target ? derivePlanTasks(target) : derivation), {
     root: ROOT,
     planDigest: 'digest',
     status: async () => status,
@@ -186,7 +186,7 @@ describe('PlanVerifier', () => {
 
     expect(step.record.outcome).toBe('verified')
     expect(step.taskId).toBe('task/entity/model.comment')
-    expect(commandsOf(step)).toEqual({ codegen: 'pass', check: 'pass', tests: 'pass' })
+    expect(commandsOf(step)).toEqual({ codegen: 'pass', typecheck: 'pass', check: 'pass', tests: 'pass' })
     expect(step.record.acceptance).toEqual(IDS.map((id) => ({ id, status: 'passing' })))
     expect(step.record.incomplete).toEqual([])
     expect(step.record.planDigest).toBe('digest')
@@ -484,6 +484,7 @@ describe('PlanVerifier', () => {
     expect(step.record.outcome).toBe('failed')
     expect(step.record.commands.map((command) => [command.command, command.status, command.label, command.reason])).toEqual([
       ['codegen', 'fail', 'bun run codegen', '`bun run codegen` exited 1'],
+      ['typecheck', 'blocked', 'not run', '`bun run codegen` did not pass, so this did not run'],
       ['check', 'blocked', 'not run', '`bun run codegen` did not pass, so this did not run'],
       ['tests', 'blocked', 'not run', '`bun run codegen` did not pass, so this did not run'],
     ])
@@ -691,6 +692,46 @@ describe('PlanVerifier', () => {
         expect(fake.calls.some((command) => command[1] === 'test')).toBe(false)
       })
     })
+  })
+
+  test('should fail an http step on a compiler error while its behaviours pass', async () => {
+    const error = "app/Http/Controllers/CommentController.ts(12,28): error TS2345: Argument of type 'number' is not assignable to parameter of type 'WhereClause'."
+    const fake = fakeExec({ 'run typecheck': { exitCode: 2, stdout: `${error}\nFound 1 error.\n` } })
+
+    const step = await verifier(statusOf(), fake).verify(HTTP)
+
+    expect(step.record.outcome).toBe('failed')
+    expect(commandsOf(step)).toEqual({ codegen: 'pass', typecheck: 'fail', check: 'pass', tests: 'pass' })
+    expect(commandOf(step, 'typecheck').findings).toEqual([error])
+    expect(step.record.acceptance).toEqual(IDS.map((id) => ({ id, status: 'passing' })))
+  })
+
+  test('should run no bun test for a step that carries no behaviour, whatever the suite would say', async () => {
+    const split = derivePlanTasks(plan, { splitThreshold: 3 })
+    const first = 'task/entity/model.comment/http/1'
+    expect(findPlanStep(split, first)?.step.acceptanceIds).toEqual([])
+    const suite = junit([{ name: 'unrelated', file: 'tests/posts.test.ts', inner: '<failure message="no"/>' }])
+    const fake = fakeExec({ test: { exitCode: 1 } }, suite)
+
+    const step = await verifier(statusOf(), fake, {}, undefined, split).verify(first)
+
+    expect(step.record.outcome).toBe('verified')
+    expect(commandsOf(step)).toEqual({ codegen: 'pass', check: 'pass' })
+    expect(fake.calls.some((call) => call[1] === 'test')).toBe(false)
+    expect(formatPlanStepRecord(first, step.record).join('\n')).not.toContain('bun test')
+  })
+
+  test('should block a tests command on a step with no behaviour rather than run or pass it', async () => {
+    const split = derivePlanTasks(plan, { splitThreshold: 3 })
+    const first = 'task/entity/model.comment/http/1'
+    findPlanStep(split, first)?.step.verify.push('tests')
+    const fake = fakeExec({ test: { exitCode: 1 } })
+
+    const step = await verifier(statusOf(), fake, {}, undefined, split).verify(first)
+
+    expect(step.record.outcome).toBe('blocked')
+    expect(commandOf(step, 'tests')).toMatchObject({ status: 'blocked', reason: 'could not run: tests runs for a step with acceptance behaviours' })
+    expect(fake.calls.some((call) => call[1] === 'test')).toBe(false)
   })
 
   test('should run a command once per verifier and reuse the result across steps', async () => {

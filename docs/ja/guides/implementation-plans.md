@@ -358,10 +358,10 @@ bunx guren plan:revise docs/plans/comments/plan.json --edited /tmp/comments.edit
 | `scaffold` | 新しいエンティティの最初の版。`plan:scaffold` が書きます | `codegen`、`typecheck` |
 | `tests` | 受け入れ振る舞いごとのテスト。`plan:scaffold` が雛形を書き、失敗する状態にします | `codegen`、テストが失敗すること |
 | `data` | テーブル、マイグレーション、モデルのリレーションと fillable。scaffold 済みなら、マイグレーションと `plan:scaffold` が書かなかったもの | `codegen`、`db:migrate`、`typecheck` |
-| `http` | コントローラーとルート。validator、Resource、Policy も書きます。scaffold 済みなら、`plan:scaffold` がスタブにしたものと書かなかったもの | `codegen`、`guren check`、テストが通ること |
+| `http` | コントローラーとルート。validator、Resource、Policy も書きます。scaffold 済みなら、`plan:scaffold` がスタブにしたものと書かなかったもの | `codegen`、`typecheck`、`guren check`、テストが通ること |
 | `pages` | ページコンポーネント | `codegen`、`typecheck`、`guren check` |
 
-複数のエンティティが共有する作業は `task/foundation` に入ります。ステップの id は `task/entity/model.comment/http` のような形です。`commands`、`data`、`http`、`pages` のステップは、担当する要素が五つを超えるファイルにまたがると複数に分かれ、`task/entity/model.comment/http/1`、`task/entity/model.comment/http/2` のような id になります。`scaffold` と `tests` は分かれません。`--step` に渡す正確な id は `plan:next` が表示します。次のステップを尋ね、実装し、検証し、コミットする。これを繰り返します。
+テストはタスクごとに一つのステップ、振る舞いを判定するステップでだけ実行されます。最後の `http` ステップで、`http` がなければタスクの最後のステップなので、`data` や `pages` で実行されることもあります。分割された `http` の前半を含め、ほかのステップはテストを実行しません。`typecheck` を実行するのはタスクの最後の `http` ステップだけです。前半のパートが、後半のパートで書く Resource やジョブを import することがあるためです。`http` のアクションが描画するページのうち `pages` ステップで追加するものは、ファイルができるまで `.guren/pages.gen.ts` に載りません。`plan:next` はそのページを `http` ステップと一緒に表示します。default export と計画の `Props` だけを持つスタブをこのステップで作り、残りは `pages` ステップで書きます。複数のエンティティが共有する作業は `task/foundation` に入ります。ステップの id は `task/entity/model.comment/http` のような形です。`commands`、`data`、`http`、`pages` のステップは、担当する要素が五つを超えるファイルにまたがると複数に分かれ、`task/entity/model.comment/http/1`、`task/entity/model.comment/http/2` のような id になります。`scaffold` と `tests` は分かれません。`--step` に渡す正確な id は `plan:next` が表示します。次のステップを尋ね、実装し、検証し、コミットする。これを繰り返します。
 
 ```bash
 bunx guren plan:next docs/plans/comments/plan.json
@@ -569,7 +569,8 @@ test('[AC-comments-1] A signed-in user can comment on a post.', async () => {
 - リクエストはルートが示すものです。メソッド、パラメーターをセグメント全体の埋め込みにしたパス、ボディにした `input` (`GET` ならクエリ文字列) を書きます。
 - 期待値は計画のものです。`status`、`redirect` (ルートと共通のパラメーターはルートの値を使います)、`inertia` (JSON を求めるリクエストにし、Inertia のバージョン確認を通らずにページを受け取ります)、`errors` (JSON のボディから読みます)、`database` の行を書きます。行はモデルを通したクエリで、ルートにモデルがあり、計画のカラムの型と比べられる値のときに書きます。行の準備と後片付けは実装する側の作業です。ほかのテストが残した行があると、実装に関係なく期待値が通ったり失敗したりします。
 - 計画が文章で書いた前提、ルートが求めるときのサインイン済みのアクター、パスの各パラメーターは `given()` の呼び出しになり、呼ぶと例外を投げます。雛形に書けない期待値は `unwritten()` の呼び出しになり、これも例外を投げます。期待する 404 も同じ扱いです。まだないルートも 404 を返すからです。どれもレポートと出力に一覧で示します。
-- `client()` はテストの中で `src/app.ts` を import し、`TestApp.fromApp()` で起動します。起動に失敗してもファイル全体ではなく、各テストが名前付きで失敗します。アプリケーションが CSRF をマウントしていれば、`withCsrf()` で準備します。`cookie: false` で CSRF をマウントしたアプリケーションには対応していません。
+- `ready()` は `src/app.ts` を import し、`TestApp.fromApp()` で一度だけ起動します。ファイルの `beforeAll` がこれを呼ぶので、行の作成や削除のために追加する `beforeEach` より先に ORM が設定されます。Bun のフックの既定の制限時間は 5 秒ですが、起動は 120 秒まで待ちます。起動の失敗は `beforeAll` では投げずに出力するので、追加したフックに関係なく `plan:verify` はステップを `blocked` と記録します。`ready()` か `client()` を呼んだ各テストは、その失敗で名前付きで失敗します。追加するフックは `await ready()` から始めてください。各テストが報告するのがデータベースエラーではなく起動の失敗になります。
+- `client()` は起動済みのアプリケーションを返します。アクターを渡せばそのアクターとして振る舞います。アプリケーションが CSRF をマウントしていれば、`withCsrf()` で準備します。`cookie: false` で CSRF をマウントしたアプリケーションには対応していません。
 - サインイン済みのアクターを用意するのは、`auth` か `auth:*` のミドルウェア、Policy、`forbidden` の振る舞いのときだけです。
 
 実装より前は、どのテストも `given()` の呼び出しか、まだマウントされていないルートで失敗します。skip されるテストはないので、`tests:fail` の条件どおりにステップを検証できます。アプリケーションが起動しないときは、どのテストもルートに届いていないので、`plan:verify` はステップを `blocked` と記録します。コードを書く前に通ってしまう場合が二つあり、そのときは `tests:fail` でステップが失敗します。一つは既存のルートで準備するものがない振る舞いで、レポートに一覧で示します。もう一つは、新しいルートのパスに既存のルートがすでに応答する振る舞いで、こちらは一覧に出ません。`given()` と `unwritten()` の呼び出しは、それぞれが示す前提やアサーションに置き換えてください。テストを `test.skip` や `test.todo` に変えないでください。skip したケースは実行に数えられず、ステップはそこで失敗します。後のステップも同じファイルを実行して通ることを求めるので、タイトルの id とリクエストは残してください。
