@@ -59,7 +59,7 @@ function taskFileName(task: PlanDerivedTask): string {
 }
 
 /** One file per plan and task, so a second plan on the same entity writes a file of its own. */
-function planTestsFilePath(slug: string, task: PlanDerivedTask): string {
+export function planTestsFilePath(slug: string, task: PlanDerivedTask): string {
   return `tests/plans/${fileSegment(slug)}/${taskFileName(task)}.test.ts`
 }
 
