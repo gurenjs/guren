@@ -225,7 +225,7 @@ export class Controller {
     await this.#resolveGate().forUser(await this.gateUser()).authorize(ability, ...args)
   }
 
-  /** Check an ability without throwing: `await this.can('update', [Post, post])`. */
+  /** Check an ability, answering a denial with `false` rather than a 403: `await this.can('update', [Post, post])`. */
   protected async can(ability: string, ...args: unknown[]): Promise<boolean> {
     return this.#resolveGate().forUser(await this.gateUser()).allows(ability, ...args)
   }

@@ -123,8 +123,12 @@ function oneLine(text: string): string {
   return text.replace(/\s+/gu, ' ').trim()
 }
 
-/** The model's foreign keys a payload cannot fill, which `create()` refuses unless they come through `set`. */
+/**
+ * The model's foreign keys a payload cannot fill, which `create()` refuses unless they come through `set`.
+ * Only an added model's `fillable` is whole: on any other it lists the names the plan adds.
+ */
 function unfillableForeignKeys(model: PlanModel): string[] {
+  if (model.change.kind !== 'add') return []
   return model.columns
     .filter((column) => column.references && !column.primaryKey && column.change.kind !== 'drop' && !model.fillable.includes(column.name))
     .map((column) => column.name)

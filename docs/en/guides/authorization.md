@@ -192,7 +192,7 @@ const canView = await gate.allows('view', somePostInstance)
 
 A plain record passed without the tuple resolves no policy. When no gate is defined for the ability either, the check throws an `Error` that names the ability and the `[Model, record]` fix, so the mistake surfaces as a 500 instead of a 403 for the record's own owner. A `before()` callback and a gate defined for the ability still receive the plain record. A class instance whose class has no policy, and a tuple whose model has none, are denied.
 
-`gate.any()` and `authorizeMiddleware()` given an array check the abilities in order, so a plain record throws at the first ability that resolves nothing, even when a later one would allow. Pass the tuple there too.
+`gate.any()` and `authorizeMiddleware()` given an array check the abilities in order, so a plain record throws at the first ability that resolves nothing, even when a later one would allow. Pass the tuple there too, and have a `modelResolver` given to `authorizeMiddleware()` or `authorizeResourceMiddleware()` return `[Model, record]` rather than the record.
 
 ### Policy Methods
 
