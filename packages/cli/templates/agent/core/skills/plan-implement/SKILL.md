@@ -101,8 +101,8 @@ it, and do not edit the application back or the plan to make it pass.
   field `plan:scaffold` stubbed, and add the validator rules and middleware it
   listed. Keep an `authorize()` call's `[Model, record]` form (a bare ORM
   record resolves no policy), and pass the foreign keys an action's comment
-  lists through `create(data, { set })`. An action is complete only when its route is mounted and validates
-  through the route contract.
+  lists through `create(data, { set })`. An action is complete only when its
+  route is mounted and validates through the route contract.
 - **`pages`**: the Inertia pages; verified by `typecheck` and `guren check`.
 
 Implement only the elements the step lists. An element of a later step is that

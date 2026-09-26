@@ -489,7 +489,7 @@ Policy は計画の ability ごとにメソッドを一つ書きます。どの�
 export default class CommentController extends Controller {
   // Planned response: a redirect to /posts/:postId
   // Rule: The comment's author is the signed-in user.
-  // postId, authorId are not fillable: write them with Comment.create(data, { set: { postId, authorId } }) (RFC 0031)
+  // postId is not fillable: write it with Comment.create(data, { set: { postId } }) (RFC 0031)
   async store(): Promise<Response> {
     await this.validateBody(CommentPayloadSchema)
     throw HttpException.notImplemented('CommentController.store is planned and not written yet')
@@ -504,7 +504,7 @@ export default class CommentController extends Controller {
 }
 ```
 
-ability はレコードに対して `[Model, record]` の形で確認します。ORM のレコードはクラスを持たず、gate がそこから Policy を探せないためです。アクションへのルートがすべて Policy のモデルのレコードを一つバインドしていれば、スタブは `this.model()` でそのレコードを取り出してタプルを渡します。そうでなければクラスだけを渡し、レコード単位の ability (`view`、`update`、`delete` など) では、アクションの上のコメントに、レコードを読み込んだあとで渡すタプルを示します。`POST` ルートが本文を受け取るアクションでは、同じコメントに、計画が追加するモデルの `fillable` から外れた外部キーを並べます。`create()` はそれらを data に含めると拒否するので、`set` で渡します (RFC 0031)。
+ability はレコードに対して `[Model, record]` の形で確認します。ORM のレコードはクラスを持たず、gate がそこから Policy を探せないためです。レコードなしで確認する `viewAny` と `create` を除き、アクションへのルートがすべて Policy のモデルのレコードを一つバインドしていれば、スタブは `this.model()` でそのレコードを取り出してタプルを渡します。そうでなければクラスだけを渡します。レコード単位の ability (`view`、`update`、`delete` など) では、レコードを読み込んだあとで渡すタプルをアクションの上のコメントに示します。`POST` ルートが本文を受け取るアクションでは、同じコメントに、計画が追加するモデルの `fillable` から外れた外部キーを並べます。`create()` はそれらを data に含めると拒否するので、`set` で渡します (RFC 0031)。
 
 検証には `validated('comments.store')` ではなく `validateBody()` を使います。`validated()` の型は生成されたルート名から決まり、`http` ステップがマウントするまでルートは登録されないためです。レスポンスは書きません。`plan:status` は名前を読み取れるレスポンス (Resource、ページ、リダイレクト) を実装済みと数えるので、スタブがそれを書くと完了に見えてしまいます。各アクションのレスポンスは、書き残したものとしてレポートに並びます。
 

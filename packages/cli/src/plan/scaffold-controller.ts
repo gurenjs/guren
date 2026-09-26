@@ -27,6 +27,9 @@ const CONTRACT_FIELDS = ['params', 'query', 'body'] as const
 /** Abilities asked of one record, which the gate resolves only from `[Model, record]`: an ORM record carries no class. */
 const RECORD_ABILITIES: ReadonlySet<string> = new Set(['view', 'show', 'update', 'edit', 'delete', 'destroy', 'restore', 'forceDelete'])
 
+/** Abilities `make:policy` writes without a record parameter, which stay on the bare class even where a record is bound. */
+const CLASS_ABILITIES: ReadonlySet<string> = new Set(['viewAny', 'create'])
+
 /** `Controller`'s own members, which an action of the same name would replace. */
 const CONTROLLER_MEMBERS: ReadonlySet<string> = new Set(['constructor', ...Object.keys(CONTROLLER_MEMBER_KINDS)])
 
@@ -215,7 +218,7 @@ export class PlanHttpEmitter {
         const ability = quoteString(policy.ability)
         const record = isBindingName(camelCase(name)) ? camelCase(name) : 'record'
         // this.model() throws on a route that binds no record of the class, so every route must bind exactly one.
-        if (routes.length > 0 && routes.every((route) => route.bind.filter((binding) => binding.model === planned!.model).length === 1)) {
+        if (!CLASS_ABILITIES.has(policy.ability) && routes.length > 0 && routes.every((route) => route.bind.filter((binding) => binding.model === planned!.model).length === 1)) {
           lines.push(`    const ${record} = this.model(${name})`, `    await this.authorize(${ability}, [${name}, ${record}])`)
         } else {
           lines.push(`    await this.authorize(${ability}, ${name})`)
