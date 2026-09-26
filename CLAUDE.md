@@ -156,7 +156,7 @@ bunx guren agent:sync --prune   # Also delete managed-directory files that left 
 bunx guren guidelines           # Auto-generate project-specific coding guidelines
 bunx guren guidelines -o .claude/rules/project-guidelines.md  # Write to file
 bunx guren make:feature Post --fields "title:string,body:text,published:boolean"  # CRUD scaffold (store/update require auth by default)
-bunx guren make:feature Post --fields "title:string,body:text" --test  # With test file
+bunx guren make:feature Post --fields "title:string,body:text" --test  # With a controller test (tests/controllers/PostController.test.ts)
 bunx guren make:feature Post --fields "title:string" --factory  # Also generate a model factory in db/factories
 bunx guren make:feature Post --fields "title:string" --public  # Skip auth checks in mutating actions
 bunx guren make:feature Post --fields "title:string" --policy  # Also generate a policy and enforce it in store/update
