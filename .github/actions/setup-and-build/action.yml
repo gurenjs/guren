@@ -32,12 +32,16 @@ runs:
     # so a hit means dist/ is byte-for-byte what a fresh build would produce.
     # The negations drop files verified NOT to feed tsdown (tests, templates
     # read at runtime, changelogs, a stray tarball), so test-only or
-    # template-only changes keep hitting the cache.
+    # template-only changes keep hitting the cache. The CLI build also writes
+    # the plan page outside dist/; without it a cache hit leaves plan:render
+    # with no template.
     - name: Restore built packages
       id: dist-cache
       uses: actions/cache@v4
       with:
-        path: packages/*/dist
+        path: |
+          packages/*/dist
+          packages/cli/assets/plan/index.html
         key: dist-${{ runner.os }}-bun${{ inputs.bun-version }}-${{ hashFiles('packages/**', '!packages/**/*.test.ts', '!packages/*/templates/**', '!packages/*/tests/**', '!packages/**/CHANGELOG.md', '!packages/**/*.tgz', 'package.json', 'bun.lock', 'tsconfig.json', 'scripts/build-packages.ts', 'scripts/workspace-packages.ts', 'scripts/tsdown-preset.ts', 'scripts/fix-dts-extensions.ts') }}
 
     - name: Install dependencies
