@@ -79,8 +79,11 @@ it, and do not edit the application back or the plan to make it pass.
   post`), with the request its route names and the expectations the plan
   states. Replace each `given()` call (the setup, the signed-in actor, a path
   parameter) and each `unwritten()` call with what it names, keep every
-  title's id and request, and leave the tests failing. The step verifies with
-  `tests:fail`, so a test that already passes, or is skipped (`test.skip`,
+  title's id and request, and leave the tests failing. The file's `beforeAll`
+  boots the app, so a `beforeEach` that creates or clears rows runs against a
+  configured database; open it with `await ready()`, so a failed boot, not a
+  database error, is what each test reports.
+  The step verifies with `tests:fail`, so a test that already passes, or is skipped (`test.skip`,
   `test.todo`), fails the step. Each test must still request its behaviour's
   route through a `TestApp`, with a path it spells, in its own body or a
   function of the same file it calls: `plan:verify` reads the requests before

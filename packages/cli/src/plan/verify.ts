@@ -597,7 +597,8 @@ export class PlanVerifier {
       return { label, status: 'fail', reason: 'the test report names behaviours the plan does not, or one behaviour in several files', findings: capFindings(report.errors.map(describeAcceptanceError)) }
     }
 
-    // The junit report carries no failure message, so the boot failure is read from Bun's own `error:` line.
+    // The junit report carries no failure message, so the boot failure is read from an `error:` line: Bun's for a
+    // case that rethrew it, or the skeleton's beforeAll's, which prints it whatever the implementer's hooks do.
     if (command === 'tests:fail' && `${result.stdout}\n${result.stderr}`.split('\n').some((line) => line.startsWith(`error: ${SKELETON_BOOT_FAILED}`))) {
       return { label, status: 'blocked', reason: 'the application did not boot, so a case failed without reaching its route', findings: tail }
     }

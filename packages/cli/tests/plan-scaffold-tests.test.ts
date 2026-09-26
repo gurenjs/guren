@@ -148,24 +148,30 @@ describe('plan:scaffold on a tests step', () => {
     expect(output.file.path).toBe(TEST_FILE)
     expect(output.file.elements).toEqual(IDS)
     expect(output.file.contents).toMatchInlineSnapshot(`
-      "import { describe, expect, test } from 'bun:test'
+      "import { beforeAll, describe, expect, test } from 'bun:test'
       import { TestApp } from '@guren/testing'
       import { Comment } from '../../../app/Models/Comment.js'
 
       // Written by plan:scaffold from comments.plan.json (task/entity/model.comment/tests). Keep each title's id and the request
       // it makes: plan:verify finds a behaviour by its id, and each test fails until its implementation exists.
-      // Setting up rows and cleaning them up is yours: a row left by another test can make a database
-      // expectation pass or fail whatever the implementation does.
+      // Rows are yours to set up and clean up: a row another test left can pass or fail a database expectation.
+      // The beforeAll below boots the application before any hook or setup of yours runs; open a hook of your
+      // own with \`await ready()\`, so a boot that fails is what each test reports rather than a database error.
       let booted: Promise<TestApp> | undefined
 
-      /** The application, booted inside a test so a boot that fails fails each test by name; primed for CSRF where it is mounted. */
-      async function client(actor?: object): Promise<TestApp> {
+      /** The booted application; once a boot fails, every call rejects with that failure. */
+      function ready(): Promise<TestApp> {
         booted ??= import('../../../src/app.js')
           .then(({ default: app }) => TestApp.fromApp(app))
           .catch((error: unknown) => {
             throw new Error(\`Application boot failed: \${error instanceof Error ? error.message : String(error)}\`, { cause: error })
           })
-        const http = actor === undefined ? await booted : (await booted).actingAs(actor)
+        return booted
+      }
+
+      /** The application, acting as \`actor\` when given; primed for CSRF where it is mounted. */
+      async function client(actor?: object): Promise<TestApp> {
+        const http = actor === undefined ? await ready() : (await ready()).actingAs(actor)
         try {
           return await http.withCsrf()
         } catch (error) {
@@ -174,6 +180,14 @@ describe('plan:scaffold on a tests step', () => {
           throw error
         }
       }
+
+      // A beforeAll that throws fails as one unnamed case, so the failure is printed for plan:verify and kept in
+      // \`booted\` for each test to rethrow by name. Bun's hook timeout defaults to 5 s, shorter than some boots.
+      beforeAll(async () => {
+        await ready().catch((error: unknown) => {
+          console.error(\`error: \${error instanceof Error ? error.message : String(error)}\`)
+        })
+      }, 120_000)
 
       /** Setup the plan states in prose: replace each call with that setup, or the test fails here. */
       function given<T = void>(setup: string): T {
@@ -408,6 +422,59 @@ describe('plan:scaffold on a tests step', () => {
       const result = await verifyTests(plan, dir)
       expect(testsCommand(result)).toMatchObject({ status: 'blocked', reason: 'the application did not boot, so a case failed without reaching its route' })
       expect(result.steps[0]!.record.outcome).toBe('blocked')
+    }, 60_000)
+
+    /** Each case's title id and the last `error:` line before it: the first case's output also holds what the beforeAll printed. */
+    function caseFailures(dir: string): Array<[string, string | undefined]> {
+      const run = Bun.spawnSync([process.execPath, 'test', TEST_FILE], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
+      const parts = run.stderr.toString().split(/^\(fail\) Comment > \[([^\]]+)\].*$/m)
+      return parts.flatMap((part, index) => (index % 2 === 1 ? [[part, [...parts[index - 1]!.matchAll(/^error: ([^:\n]+)/gm)].at(-1)?.[1]] as [string, string | undefined]] : []))
+    }
+
+    /** The skeleton with a setup hook the implementer would add, which must land or the test proves nothing. */
+    async function addHook(dir: string, hook: string): Promise<void> {
+      const file = join(dir, TEST_FILE)
+      const source = await readFile(file, 'utf8')
+      const patched = source.replace("describe('Comment', () => {\n", `describe('Comment', () => {\n${hook}\n\n`).replace('import { beforeAll, ', 'import { beforeAll, beforeEach, ')
+      expect(patched).toContain(hook)
+      expect(patched).toContain('import { beforeAll, beforeEach, ')
+      await writeFile(file, patched)
+    }
+
+    const DATABASE_HOOK = "  beforeEach(() => {\n    if (!Reflect.get(globalThis, '__planTestsBooted')) throw new Error('database has not been configured')\n  })"
+
+    // The shape an implementer adds first: a beforeEach writing rows, which needs the ORM the boot configures.
+    test('should boot the application before a beforeEach the implementer adds', async () => {
+      const { dir } = await scaffolded('setup-hook')
+      await writeFile(join(dir, 'src/app.ts'), APP_ENTRY.replace('  providers: [],', "  providers: [],\n  boot: () => {\n    Reflect.set(globalThis, '__planTestsBooted', true)\n  },"))
+      await addHook(dir, DATABASE_HOOK)
+
+      expect(caseFailures(dir)).toEqual([
+        ['AC-comments-1', 'Write this setup first'],
+        ['AC-comments-2', 'Write this setup first'],
+        ['AC-comments-3', 'Write this setup first'],
+        ['AC-comments-4', 'Write this setup first'],
+        ['AC-comments-5', 'Expected redirect status, got 404'],
+      ])
+    }, 60_000)
+
+    // Bun's own hook timeout is 5 s: past it the whole file reports one unnamed case and runs none.
+    test('should wait past five seconds for the application to boot', async () => {
+      const { dir } = await scaffolded('slow-boot')
+      await writeFile(join(dir, 'src/app.ts'), APP_ENTRY.replace('  providers: [],', '  providers: [],\n  boot: () => new Promise<void>((resolve) => setTimeout(resolve, 6_000)),'))
+
+      expect(caseFailures(dir).map(([id]) => id)).toEqual(IDS)
+    }, 60_000)
+
+    // The beforeAll prints the failure, so a hook that skips ready() and fails on the database still reads as blocked.
+    test('should still record blocked when a beforeEach without ready() meets a boot that fails', async () => {
+      const { dir, plan } = await scaffolded('setup-hook-boot-fails')
+      await writeFile(join(dir, 'src/app.ts'), APP_ENTRY.replace('  providers: [],', "  providers: [],\n  boot: () => {\n    throw new Error('database is not configured')\n  },"))
+      await addHook(dir, DATABASE_HOOK)
+      expect(caseFailures(dir).map(([, error]) => error)).toEqual(IDS.map(() => 'database has not been configured'))
+
+      const result = await verifyTests(plan, dir)
+      expect(testsCommand(result)).toMatchObject({ status: 'blocked', reason: 'the application did not boot, so a case failed without reaching its route' })
     }, 60_000)
 
     // The guest's case has nothing to fill, so once its route answers it passes, which tests:fail refuses.
