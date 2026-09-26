@@ -200,12 +200,15 @@ function notFailing(ids: readonly string[], behaviours: readonly AcceptanceBehav
   return findings
 }
 
+/** Why a judgement without a run fails: `recheckTests()` and a `tests:fail` step whose every behaviour is carried share it. */
+const NOT_CARRIED = 'the test files no longer carry the behaviours the step saw fail'
+
 /** Each id carried by no selected test file, or by more than one: what a judgement without a run reads instead. */
 function carrierFindings(ids: readonly string[], carriers: ReadonlyMap<string, readonly string[]>): { missing: string[]; findings: string[] } {
   const missing = ids.filter((id) => !carriers.has(id))
   const doubled = ids.flatMap((id) => {
     const carrying = carriers.get(id) ?? []
-    return carrying.length > 1 ? [`[${id}] is carried by ${carrying.join(' and ')}`] : []
+    return carrying.length > 1 ? [describeAcceptanceError({ kind: 'id-in-several-files', id, files: [...carrying] })] : []
   })
   return { missing, findings: [...missing.map((id) => `[${id}] is carried by no test file`), ...doubled] }
 }
@@ -249,7 +252,6 @@ export class PlanVerifier {
   private readonly selections = new Map<string, Promise<TestSelection>>()
   private readonly outcomes = new Map<string, Promise<TestOutcome>>()
   private readonly requestChecks = new Map<string, Promise<ReturnType<typeof behaviourRequestFailure>>>()
-  private readonly redRuns = new Map<string, Map<string, PlanRedRun>>()
   private readonly declaredIds: string[]
   private readonly check: () => Promise<CheckReport>
   private readonly testFiles: () => Promise<string[]>
@@ -311,7 +313,7 @@ export class PlanVerifier {
     // A test rewritten to request nothing still fails, so the red run it verified on proves nothing about it now.
     const requests = await this.requestCheck(found.step)
     const findings = [...carried, ...capFindings(requests?.findings ?? [])]
-    const reason = carried.length > 0 ? 'the test files no longer carry the behaviours the step saw fail' : requests?.reason
+    const reason = carried.length > 0 ? NOT_CARRIED : requests?.reason
     const command: PlanCommandRecord = {
       command: 'tests:fail',
       label: 'not run: a re-check that one test file still carries each behaviour',
@@ -518,12 +520,7 @@ export class PlanVerifier {
   /** A `tests:fail` step's behaviours whose red run a previous record carries to this plan; none for any other step. */
   private carried(step: PlanDerivedStep): Map<string, PlanRedRun> {
     if (!step.verify.includes('tests:fail')) return new Map()
-    let carried = this.redRuns.get(step.id)
-    if (!carried) {
-      carried = carriedRedRuns(Object.values(this.options.previous ?? {}), this.plan, step.acceptanceIds)
-      this.redRuns.set(step.id, carried)
-    }
-    return carried
+    return carriedRedRuns(Object.values(this.options.previous ?? {}), this.plan, step.acceptanceIds)
   }
 
   private selection(step: PlanDerivedStep): Promise<TestSelection> {
@@ -587,7 +584,7 @@ export class PlanVerifier {
       return {
         label: 'not run: every behaviour was seen failing before its implementation existed',
         status: findings.length > 0 ? 'fail' : 'pass',
-        reason: findings.length > 0 ? 'the test files no longer carry the behaviours the step saw fail' : carriedNote,
+        reason: findings.length > 0 ? NOT_CARRIED : carriedNote,
         findings,
       }
     }

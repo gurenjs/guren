@@ -247,7 +247,7 @@ export async function overlayVerification(
 }
 
 /** Fingerprinted files whose hash differs from the record's; one recorded unreadable never matches. */
-function changedFiles(record: PlanStepRecord, hashes: ReadonlyMap<string, string | null>): string[] {
+export function changedFiles(record: PlanStepRecord, hashes: ReadonlyMap<string, string | null>): string[] {
   return Object.entries(record.fingerprint.files)
     .filter(([file, hash]) => hash === null || hashes.get(file) !== hash)
     .map(([file]) => file)
@@ -303,17 +303,28 @@ export function behaviourShape(plan: PlanDraft | Plan, id: string): string | und
  * cannot be repeated, so a revision leaving a behaviour's test as it was keeps the observation.
  */
 export function carriedRedRuns(records: Iterable<PlanStepRecord>, plan: PlanDraft | Plan, ids: readonly string[]): Map<string, PlanRedRun> {
-  const seen = new Map<string, PlanRedRun[]>()
-  for (const record of records) {
-    for (const { id, red } of record.acceptance) if (red) seen.set(id, [...(seen.get(id) ?? []), red])
-  }
+  const recorded = recordedRedRuns(records)
   const carried = new Map<string, PlanRedRun>()
   for (const id of ids) {
     const shape = behaviourShape(plan, id)
-    const red = seen.get(id)?.find((candidate) => candidate.shape === shape)
+    const red = recorded.get(id)?.find((candidate) => candidate.shape === shape)
     if (red) carried.set(id, red)
   }
   return carried
+}
+
+/** Every red run `records` hold, by behaviour id, whatever shape it was seen at. */
+export function recordedRedRuns(records: Iterable<PlanStepRecord>): Map<string, PlanRedRun[]> {
+  const recorded = new Map<string, PlanRedRun[]>()
+  for (const record of records) {
+    for (const { id, red } of record.acceptance) {
+      if (!red) continue
+      const runs = recorded.get(id)
+      if (runs) runs.push(red)
+      else recorded.set(id, [red])
+    }
+  }
+  return recorded
 }
 
 /** Verified against this plan digest, every fingerprinted file hashing as it did: what a record must be to count at all. */
