@@ -36,6 +36,11 @@ function git(dir: string, ...args: string[]): string {
   return result.stdout.toString().trim()
 }
 
+function commit(dir: string, message: string): void {
+  git(dir, 'add', '-A')
+  git(dir, 'commit', '-q', '-m', message)
+}
+
 /** The comments fixture with its one question answered, which is what approval needs. */
 function answeredPlan(base: Record<string, unknown> = loadCommentsPlan()): Record<string, unknown> {
   return { ...base, questions: [] }
@@ -48,8 +53,7 @@ async function createApp(name: string, plan: Record<string, unknown>, options: {
   await writeWorkspaceFiles(app, { ...PLAN_APP_FILES, [planFile]: JSON.stringify(plan) })
   if (options.committed !== false) {
     git(app, 'init', '-q')
-    git(app, 'add', '-A')
-    git(app, 'commit', '-q', '-m', 'init')
+    commit(app, 'init')
     git(app, 'config', 'user.name', 'Approver')
     git(app, 'config', 'user.email', 'approver@example.com')
   }
@@ -192,8 +196,7 @@ describe('guren plan:approve', () => {
     const { app, plan } = await createApp('unstamped-flag', document)
     // A module whose schema holds only a comment, as make:module leaves it, makes every table unreadable.
     await writeWorkspaceFiles(app, { 'modules/billing/index.ts': 'export default {}\n', 'modules/billing/db/schema.ts': '// tables go here\n' })
-    git(app, 'add', '-A')
-    git(app, 'commit', '-q', '-m', 'module')
+    commit(app, 'module')
 
     await expect(runCommand(builtinSubCommands['plan:approve'], { rawArgs: [plan, '--app', app] })).rejects.toThrow(/--allow-unstamped/)
     await runCommand(builtinSubCommands['plan:approve'], { rawArgs: [plan, '--app', app, '--allow-unstamped'] })
@@ -281,11 +284,15 @@ async function buildReshapingSteps(app: string): Promise<void> {
   })
   await rm(join(app, 'app/Policies/PostPolicy.ts'))
   await rm(join(app, 'app/Http/Resources/PostResource.ts'))
-  git(app, 'add', '-A')
-  git(app, 'commit', '-q', '-m', 'build')
+  commit(app, 'build')
 }
 
-type EditablePlan = { scope: { goals: string[] }; policies: Array<Record<string, unknown>>; resources: Array<Record<string, unknown>> }
+type EditablePlan = {
+  scope: { goals: string[] }
+  policies: Array<Record<string, unknown>>
+  resources: Array<Record<string, unknown>>
+  validators: Array<Record<string, unknown>>
+}
 
 async function editPlan(plan: string, edit: (document: EditablePlan) => void): Promise<void> {
   const document = JSON.parse(await readFile(plan, 'utf8')) as EditablePlan
@@ -333,8 +340,7 @@ describe('guren plan:approve after implementation starts', () => {
     const { app, plan } = await createApp('reapprove-validator', answeredPlan())
     await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
     await writeWorkspaceFiles(app, { 'app/Http/Validators/CommentValidator.ts': 'export const CommentPayloadSchema = {}\n' })
-    git(app, 'add', '-A')
-    git(app, 'commit', '-q', '-m', 'validator')
+    commit(app, 'validator')
     await editGoal(plan)
 
     const report = await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
@@ -349,8 +355,7 @@ describe('guren plan:approve after implementation starts', () => {
     const { baseline } = JSON.parse(await readFile(plan, 'utf8')) as { baseline: { contextHash: Record<string, string> } }
     expect(baseline.contextHash).not.toHaveProperty('validator.comment')
     await writeWorkspaceFiles(app, { 'app/Http/Validators/CommentValidator.ts': 'export const CommentPayloadSchema = {}\n' })
-    git(app, 'add', '-A')
-    git(app, 'commit', '-q', '-m', 'validator')
+    commit(app, 'validator')
     await editGoal(plan)
 
     const report = await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
@@ -364,11 +369,10 @@ describe('guren plan:approve after implementation starts', () => {
   test('should still refuse a validator a revision adds under a name the application already exports', async () => {
     const { app, plan } = await createApp('reapprove-validator-collision', answeredPlan())
     await writeWorkspaceFiles(app, { 'app/Http/Validators/PostValidator.ts': 'export const PostPayloadSchema = {}\n' })
-    git(app, 'add', '-A')
-    git(app, 'commit', '-q', '-m', 'post validator')
+    commit(app, 'post validator')
     await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
     await editPlan(plan, (revised) => {
-      ;(revised as unknown as { validators: Array<Record<string, unknown>> }).validators[0]!.name = 'PostPayloadSchema'
+      revised.validators[0]!.name = 'PostPayloadSchema'
     })
 
     await expect(planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app })).rejects.toThrow(/validator\.comment: The validator "PostPayloadSchema" already exists/)
@@ -398,8 +402,7 @@ describe('guren plan:approve after implementation starts', () => {
       'modules/billing/index.ts': 'export default {}\n',
       'modules/billing/db/schema.ts': `import { pgTable, serial, text } from 'drizzle-orm/pg-core'\n${COMMENT_TABLE}`,
     })
-    git(app, 'add', '-A')
-    git(app, 'commit', '-q', '-m', 'billing')
+    commit(app, 'billing')
     await editGoal(plan)
 
     await expect(planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app })).rejects.toThrow(/model\.comment: The table "comments" already exists in modules\/billing/)
@@ -434,8 +437,7 @@ describe('guren plan:approve after implementation starts', () => {
     const { app, plan } = await createApp('reapprove-existing-to-drop', document)
     await planApproveFile(plan, { app: () => loadPlanAppState(app), appRoot: app, now: NOW })
     await rm(join(app, 'app/Http/Resources/PostResource.ts'))
-    git(app, 'add', '-A')
-    git(app, 'commit', '-q', '-m', 'someone else')
+    commit(app, 'someone else')
     await editPlan(plan, (revised) => {
       revised.resources.find((resource) => resource.id === 'resource.post')!.change = { kind: 'drop', reason: 'already gone' }
     })

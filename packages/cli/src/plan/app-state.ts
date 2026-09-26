@@ -96,6 +96,10 @@ export function declaresTable(table: PlanAppTable, name: string): boolean {
 export const COLUMNS_ARE_A_LOWER_BOUND =
   "The schema parser reports a table's columns as a lower bound: a spread column goes unreported."
 
+/** Why a validator name absent from the section is unconfirmed rather than missing, stated once as above. */
+export const VALIDATORS_ARE_A_LOWER_BOUND =
+  `Validators are read from what the files under ${VALIDATORS_DIR}/ declare and export; a schema declared or re-exported elsewhere is not seen.`
+
 export interface PlanAppRoute {
   name?: string
   method: string

@@ -323,7 +323,7 @@ function failedWrite(writing: string | undefined, written: readonly string[], re
  * not take one (`plan:status` finds a validator by its name), and a controller imports one from there.
  */
 async function rootValidatorExports(root: string, cache: ParseCache): Promise<{ files: Record<string, string> } | { unreadable: string }> {
-  const exports = await readValidatorExports(root, cache, { module: null })
+  const exports = await readValidatorExports(root, cache, true)
   if (isUnreadable(exports)) return exports
   const files: Record<string, string> = {}
   for (const { file, names } of exports) for (const name of names) files[name] ??= file

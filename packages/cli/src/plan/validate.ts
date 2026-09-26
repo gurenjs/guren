@@ -23,6 +23,7 @@ import {
   type PlanAppState,
   type PlanAppTable,
   type PlanAppUnreadable,
+  VALIDATORS_ARE_A_LOWER_BOUND,
 } from './app-state'
 import { actionTargets, columnTargets, endpointKey, NAMED_APP_SECTIONS, namedTargets, routeTarget, tableTarget, type PlanAppTarget } from './app-targets'
 import { PLAN_COMMAND_FORM, refusedPlanCommands } from './command-allowlist'
@@ -78,7 +79,8 @@ const APP_FACT_FINDINGS: ReadonlySet<string> = new Set(['plan:app-collision', 'p
 /**
  * The findings with the plan's own finished work settled: on a plan with a baseline, an
  * app-fact finding on an element freshness calls `built` (stamped at the state the plan
- * starts it from, read now as the plan leaves it) becomes a `pass`. A draft has no stamp.
+ * starts it from, read now as the plan leaves it) becomes a `pass`, and one on a validator
+ * {@link unstampedValidatorsAtEnd} names becomes a warning. A draft has no stamp.
  */
 export function settleBuiltFindings(plan: PlanDraft | Plan, app: PlanAppState, checks: PlanCheckResult[]): { checks: PlanCheckResult[]; built: string[] } {
   if (!hasBaseline(plan)) return { checks, built: [] }
@@ -501,13 +503,6 @@ function withSection<T>(
   orElse?.(section.unreadable)
 }
 
-/**
- * Why a validator name the application's validator files do not export is unconfirmed rather than
- * missing: the reading is their own exports, and a schema can be declared or re-exported elsewhere.
- */
-const VALIDATORS_ARE_A_LOWER_BOUND =
-  'Validators are read from what the files under app/Http/Validators/ declare and export; a schema declared or re-exported elsewhere is not seen.'
-
 function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
   const targets = namedTargets(plan)
   for (const appSection of NAMED_APP_SECTIONS) {
@@ -517,8 +512,8 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
         const { names, ...placement } = target.perRoot
           ? inRoot(entries, target.module)
           : { names: appNames(entries), root: undefined, elsewhere: undefined }
-        const lowerBound = appSection === 'validators' ? { unconfirmedBecause: VALIDATORS_ARE_A_LOWER_BOUND } : {}
-        checkTarget({ ...target, ...placement, ...lowerBound }, names, results)
+        const unconfirmedBecause = appSection === 'validators' ? VALIDATORS_ARE_A_LOWER_BOUND : undefined
+        checkTarget({ ...target, ...placement, unconfirmedBecause }, names, results)
       }
     })
   }
