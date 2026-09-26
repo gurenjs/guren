@@ -43,6 +43,8 @@ import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, specifierName } from '../rou
 import { importsByLocal, specifierBase, withoutExtension } from '../schema-binding'
 import { readSchemaTables, withImportTimeout, type SourcedSchemaTable } from '../schema-runtime'
 import { answersMethod, registeredBefore, routePathCovers } from '../test-requests'
+import { discoverPlanFiles } from './discovery'
+import { isUnreadable } from './unreadable'
 import type { PlanAppScope, PlanAppUnreadable } from './app-state'
 import { readResourcePayloads, readSchemaFields, type PlanAppResourcePayload, type PlanAppSchemaFields } from './field-readers'
 import { readPolicyAbilities, type PlanAppPolicyAbilities } from './policy-abilities'
@@ -517,7 +519,9 @@ export async function readValidatorExports(
   /** The project root's files only, so a module file that will not read cannot refuse it. */
   rootOnly = false,
 ): Promise<PlanAppValidatorExports[] | PlanAppUnreadable> {
-  const files = excludeBarrelFiles(await discoverValidatorFiles(root))
+  const discovered = await discoverPlanFiles(root, discoverValidatorFiles)
+  if (isUnreadable(discovered)) return discovered
+  const files = excludeBarrelFiles(discovered)
     .map((filePath) => {
       const file = toPosixRelative(root, filePath)
       return { filePath, file, module: moduleNameFromRelPath(file) }

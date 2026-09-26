@@ -3,6 +3,22 @@ import { basename, resolve, join, extname, relative, sep, posix } from 'node:pat
 import { collectionName } from './inflect'
 import { escapeRegExp } from './utils'
 
+export class FileDiscoveryError extends Error {
+  constructor(readonly directory: string, cause: unknown) {
+    super(`Could not read directory ${directory}: ${cause instanceof Error ? cause.message : String(cause)}`, { cause })
+    this.name = 'FileDiscoveryError'
+  }
+}
+
+async function readDirectory(directory: string) {
+  try {
+    return await readdir(directory, { withFileTypes: true })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' && await isDefinitelyAbsent(directory, '.')) return []
+    throw new FileDiscoveryError(directory, error)
+  }
+}
+
 const SOURCE_EXTENSIONS = new Set(['.ts', '.mts', '.js', '.mjs'])
 const TEST_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs'])
 const TEST_FILE_PATTERN = /\.test\.(ts|tsx|mts|js|jsx|mjs)$/
@@ -19,6 +35,7 @@ export const IMPORTABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.js
 /**
  * Recursively collect files matching `extensions`, skipping dotfiles,
  * declaration files, and any directory named in `excludeDirNames`.
+ * Missing directories are optional; unreadable ones throw FileDiscoveryError.
  */
 export async function collectFiles(
   directory: string,
@@ -27,12 +44,7 @@ export async function collectFiles(
 ): Promise<string[]> {
   const results: string[] = []
 
-  let entries
-  try {
-    entries = await readdir(directory, { withFileTypes: true })
-  } catch {
-    return results
-  }
+  const entries = await readDirectory(directory)
 
   for (const entry of entries) {
     if (entry.name.startsWith('.')) continue
@@ -203,12 +215,7 @@ export async function directoryExists(dirPath: string): Promise<boolean> {
  * resolves to an empty list, not an error.
  */
 export async function listModuleNames(appRoot: string): Promise<string[]> {
-  let entries
-  try {
-    entries = await readdir(resolve(appRoot, 'modules'), { withFileTypes: true })
-  } catch {
-    return []
-  }
+  const entries = await readDirectory(resolve(appRoot, 'modules'))
 
   return entries
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))

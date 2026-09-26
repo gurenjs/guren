@@ -16,6 +16,7 @@ import { resolveInertiaPageFile } from '../inertia-pages'
 import { discoverParsedModels } from '../model-parser'
 import type { ParseCache } from '../parse-cache'
 import { scanTestRequests, testCoverage, type TestRequestScan, type UnresolvedTestRequest } from '../test-requests'
+import { discoverPlanFiles } from './discovery'
 import { classDetail, describeActions } from './app-detail'
 import type { PlanAppNames } from './app-state'
 import type { PlanImpactModel, PlanImpactReader, PlanImpactRoute, PlanImpactSources } from './impact'
@@ -90,12 +91,12 @@ export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Prom
   const { root, sections } = input
   const relative = (file: string): string => toPosixRelative(root, file)
   const pageIds = isUnreadable(sections.pages) ? [] : sections.pages.map((page) => page.name)
-  const [models, controllerFiles, resourceFiles, policies, testFiles, pages] = await Promise.all([
+  const [models, controllerDiscovery, resourceDiscovery, policies, testDiscovery, pages] = await Promise.all([
     impactModels(root),
-    discoverControllerFiles(root),
-    discoverResourceFiles(root),
+    discoverPlanFiles(root, discoverControllerFiles),
+    discoverPlanFiles(root, discoverResourceFiles),
     classDetail(root, discoverPolicyFiles),
-    discoverTestFiles(root),
+    discoverPlanFiles(root, discoverTestFiles),
     Promise.all(pageIds.map(async (id) => ({ id, file: await resolveInertiaPageFile(root, id) }))),
   ])
 
@@ -104,8 +105,14 @@ export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Prom
     // A controller scan is an object, not a list, so `isUnreadable()` alone would take it for a failure.
     if (section !== undefined && !('methods' in section) && isUnreadable(section)) unreadable[reader] = section.unreadable
   }
+  note('controllers', controllerDiscovery)
+  note('resources', resourceDiscovery)
+  note('tests', testDiscovery)
+  const controllerFiles = isUnreadable(controllerDiscovery) ? [] : controllerDiscovery
+  const resourceFiles = isUnreadable(resourceDiscovery) ? [] : resourceDiscovery
+  const testFiles = isUnreadable(testDiscovery) ? [] : testDiscovery
   note('models', sections.models)
-  if (models.unreadable !== undefined) unreadable.models = models.unreadable
+  if (models.unreadable !== undefined) unreadable.models ??= models.unreadable
   note('resources', sections.resources)
   note('policies', sections.policies)
   note('pages', sections.pages)
