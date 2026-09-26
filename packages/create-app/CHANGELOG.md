@@ -1,5 +1,11 @@
 # create-guren-app
 
+## 1.17.3
+
+### Patch Changes
+
+- f125138: `--blueprint blog` now suggests `bunx guren add resource tags --fields "name:string"` under "Add features:" instead of `add resource posts`. The blog template already ships Post, so `add resource posts` stopped at the existing `PostValidator.ts` and wrote nothing, and the `--force` it suggested would have replaced the template's own Post files with generic ones. The default and worker blueprints still suggest `add resource posts`.
+
 ## 1.17.2
 
 ### Patch Changes
