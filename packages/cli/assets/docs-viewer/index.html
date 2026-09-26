@@ -178,7 +178,7 @@ body {
 /* ---- detail panel ---- */
 .panel {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 6;
-  width: var(--panel-width, min(30rem, 92vw));
+  width: min(var(--panel-width, 30rem), 92vw);
   background: var(--panel);
   border-left: 1px solid var(--border);
   box-shadow: -18px 0 40px rgba(20, 10, 15, 0.12);
@@ -210,7 +210,7 @@ body {
 
 .panel-resize {
   position: fixed; top: 0; bottom: 0; z-index: 7; display: none;
-  right: calc(var(--panel-width, min(30rem, 92vw)) - 4px); width: 8px;
+  right: calc(min(var(--panel-width, 30rem), 92vw) - 4px); width: 8px;
   cursor: col-resize; touch-action: none;
 }
 .panel-resize::after {

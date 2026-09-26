@@ -2,8 +2,9 @@
  * Payload assembly for the docs viewer endpoint (RFC 0005).
  *
  * `buildDocsViewerData` bundles everything the UI needs into one payload, so
- * the server exposes a single whole-bundle route with no path parameters and
- * therefore no traversal surface.
+ * the server exposes a whole-bundle route with no path parameters. The one
+ * parameterized route, a plan page, looks its slug up among the discovered
+ * plans and never joins it into a path.
  */
 import { access, readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'

@@ -150,8 +150,8 @@ trust tier, and link verdicts. Diagrams render when `mermaid` is in
 your `devDependencies` (new apps ship with it).
 
 What a closed [implementation plan](./implementation-plans.md) leaves
-behind reads the same way. A plan's document is its own node kind with
-its closing hash, and when `plan:render` wrote a page beside the plan,
+behind reads the same way. A plan's document is drawn in its own color
+and shows its closing hash, and when `plan:render` wrote a page beside the plan,
 its panel opens that page under `/_guren/docs/plans/<slug>`. Blocks
 `plan:close` wrote into an entity document are framed and name the plan
 they came from. Acceptance tests that verify the same documents collapse
