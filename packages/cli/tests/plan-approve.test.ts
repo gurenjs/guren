@@ -357,7 +357,7 @@ describe('guren plan:approve after implementation starts', () => {
     expect(report.builtByPlan ?? []).toEqual([])
     const { checks } = await renderPlanFile(plan, { app: () => loadPlanAppState(app), output: join(app, 'page.html') })
     expect(checks.filter((result) => result.elementId === 'validator.comment' && result.status !== 'pass')).toEqual([
-      expect.objectContaining({ key: 'plan:app-unjudged', status: 'warn', message: expect.stringContaining('stamped before validators were read') }),
+      expect.objectContaining({ key: 'plan:app-unjudged', status: 'warn', message: expect.stringContaining("holds a hash for none of this plan's validators") }),
     ])
   })
 

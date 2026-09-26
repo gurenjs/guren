@@ -20,7 +20,6 @@ import {
   discoverResourceFiles,
   discoverSideEffectFiles,
   discoverTestFiles,
-  discoverValidatorFiles,
   excludeBarrelFiles,
   moduleNameFor,
   readIfExists,
@@ -34,7 +33,7 @@ import { discoverModelClasses } from './model-parser'
 import { parseSourceFile, ParseCache } from './parse-cache'
 import { appendTableToSchema, detectSchemaDialect, ensureNamedImports } from './patch-helpers'
 import { readPlanFile } from './plan-render'
-import { exportedNames } from './plan/app-detail'
+import { exportedNames, readValidatorExports } from './plan/app-detail'
 import { requirePlanApproval } from './plan/approvals'
 import { writeFileAtomic } from './plan/beside'
 import { entityDocPath } from './plan/close-docs'
@@ -44,6 +43,7 @@ import { emitPlanTests, type PlanTestsOutput } from './plan/scaffold-tests'
 import type { Plan } from './plan/schema'
 import { planSlug, readPlanState } from './plan/state'
 import { derivePlanTasks, findPlanStep, listPlanSteps, type PlanTaskDerivation } from './plan/tasks'
+import { isUnreadable } from './plan/unreadable'
 import { composeAppProviderRegistration, resolveAppEntry } from './provider-registrar'
 import { composeRouteRegistrarCall, resolveRoutesEntry } from './route-registrar'
 import { isRoutesFileMounted } from './routes-check'
@@ -323,15 +323,10 @@ function failedWrite(writing: string | undefined, written: readonly string[], re
  * not take one (`plan:status` finds a validator by its name), and a controller imports one from there.
  */
 async function rootValidatorExports(root: string, cache: ParseCache): Promise<{ files: Record<string, string> } | { unreadable: string }> {
+  const exports = await readValidatorExports(root, cache, { module: null })
+  if (isUnreadable(exports)) return exports
   const files: Record<string, string> = {}
-  for (const filePath of excludeBarrelFiles(await discoverValidatorFiles(root))) {
-    if (moduleNameFor(root, filePath) !== null) continue
-    const file = toPosixRelative(root, filePath)
-    const parsed = await cache.get(filePath)
-    const exported = parsed ? exportedNames(parsed.ast, 'this file') : null
-    if (exported === null) return { unreadable: `${file} could not be read for its exports` }
-    for (const name of exported) files[name] ??= file
-  }
+  for (const { file, names } of exports) for (const name of names) files[name] ??= file
   return { files }
 }
 

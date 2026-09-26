@@ -279,7 +279,9 @@ Approved 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0, recor
 
 最初の承認で、計画に `baseline` が書き込まれます。`rev` は計画を書いた時点のコミットです。`contextHash` は参照している要素ごとに、アプリケーションがいま持っている形をハッシュにしたものです。コミットのないリポジトリや、未コミットの変更がある作業ツリーを拒否するのはこのためです (計画自身のファイルは除きます)。承認の記録は計画の中ではなく、隣の `approvals.json` に書かれます。両方をコミットしてください。
 
-validator は export されたスキーマのシンボルで探します。`app/Http/Validators/` のファイルを import せずに読み、export 名を集めます。セクションを読めなかった場合 (そこに構文解析できないファイルや `export *` で export するファイルがある場合など)、承認は拒否され、ハッシュのないまま残る要素が示されます。`--allow-unstamped` を付けると、それらを除いて承認します。
+validator は export されたスキーマのシンボルで探します。`app/Http/Validators/` のファイルを import せずに読み、export 名を集めます。どのファイルも宣言・export していない名前は、失敗ではなく警告になります。コントローラー内のスキーマや、別の場所からの再 export は読めないためです。セクションを読めなかった場合 (そこに構文解析できないファイルや `export *` で export するファイルがある場合など)、承認は拒否され、ハッシュのないまま残る要素が示されます。`--allow-unstamped` を付けると、それらを除いて承認します。
+
+validator を読む前に承認した計画は、validator のハッシュを持っていません。validator を書いたあとで再承認すると、その名前は衝突ではなく `plan:app-unjudged` の警告になります。計画自身が書いたものかどうかを baseline から判断できないためです。
 
 計画を識別するのはハッシュです。baseline を含めた計画の SHA-256 で、承認も検証の記録も waiver もこのハッシュを名指しします。承認後に編集した計画は別の計画です。baseline を持つ計画の現在のハッシュをどの承認も名指ししていなければ、`plan:next`、`plan:scaffold`、`plan:verify`、`plan:waive`、`plan:close` はその計画を拒否します。
 
@@ -781,7 +783,7 @@ Not approved at this hash: plan:next, plan:scaffold, plan:verify, plan:waive, pl
 Against the approved baseline: fresh 14, stale 0, unstamped 0, unjudged 0
 ```
 
-アプリケーションが承認時の形か、計画が目指す形を保っている間、その要素は `fresh` です (どちらなのかは `--json` の `basis` に出ます)。ほかの変更で別の形に動くと `stale` になります。`unstamped` はハッシュがない要素で、承認時にセクションを読めなかったものです。`unjudged` はいま読めない要素です。どちらも要約行の下に id が並びます。参照している要素に触れないコミットなら、計画は fresh のままです。
+アプリケーションが承認時の形か、計画が目指す形を保っている間、その要素は `fresh` です (どちらなのかは `--json` の `basis` に出ます)。ほかの変更で別の形に動くと `stale` になります。`unstamped` はハッシュがない要素です。承認時にセクションを読めなかったもの、改訂であとから加わったもの、validator を読む前に承認した計画の validator が該当します。`unjudged` はいま読めない要素です。どちらも要約行の下に id が並びます。参照している要素に触れないコミットなら、計画は fresh のままです。
 
 stale になった要素は、それに依存するステップをすべて保留にします。例のコピーで、実装を始める前に別のコミットが `comments.store` というルートを登録したときの出力です。
 

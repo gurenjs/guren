@@ -269,7 +269,9 @@ Approved 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0, recor
 
 The first approval writes a `baseline` into the plan: `rev`, the commit the plan was written against, and `contextHash`, a hash per referenced element of what the application holds for it today. That is why it refuses a repository with no commit and a working tree with uncommitted changes (the plan's own files excepted). The approval itself goes to `approvals.json`, beside the plan and never inside it. Commit both.
 
-A validator is found by its exported schema symbol, read from the files under `app/Http/Validators/` without importing them. If a section cannot be read (a file there that does not parse, or one exporting through `export *`), approval refuses and names the elements that would stay unhashed; `--allow-unstamped` approves without them.
+A validator is found by its exported schema symbol, read from the files under `app/Http/Validators/` without importing them. A name none of those files declares and exports is a warning rather than a failure, since a schema kept in a controller or re-exported from elsewhere is not seen. If a section cannot be read (a file there that does not parse, or one exporting through `export *`), approval refuses and names the elements that would stay unhashed; `--allow-unstamped` approves without them.
+
+A plan approved before validators were read has no hash for them. Re-approving it after its validator was written reports the name as a `plan:app-unjudged` warning instead of a collision: the baseline cannot show whether the plan wrote it.
 
 The plan's hash identifies it: a SHA-256 of the plan with its baseline. Approvals, verification records and waivers all name it, so a plan edited after approval is a different plan. `plan:next`, `plan:scaffold`, `plan:verify`, `plan:waive` and `plan:close` refuse a plan with a baseline whose current hash no approval names:
 
@@ -764,7 +766,7 @@ For an approved plan, `plan:status` also compares each referenced element with t
 Against the approved baseline: fresh 14, stale 0, unstamped 0, unjudged 0
 ```
 
-An element is `fresh` while the application holds what was stamped, or what the plan says it will hold (`--json` says which under `basis`). It is `stale` when another change moved it somewhere else. `unstamped` has no hash (its section was unreadable at approval), and `unjudged` cannot be read now; each is listed by id under the summary line. A commit elsewhere that did not touch a referenced element leaves the plan fresh.
+An element is `fresh` while the application holds what was stamped, or what the plan says it will hold (`--json` says which under `basis`). It is `stale` when another change moved it somewhere else. `unstamped` has no hash (its section was unreadable at approval, a revision named it later, or, for a validator, the plan was approved before validators were read), and `unjudged` cannot be read now; each is listed by id under the summary line. A commit elsewhere that did not touch a referenced element leaves the plan fresh.
 
 A stale element holds every step that depends on it. In a copy of the example, another commit registered a `comments.store` route before the implementation started:
 

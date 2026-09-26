@@ -36,8 +36,7 @@ export interface PlanElementFreshness {
   reason?: string
   /**
    * On a `fresh` that does not match its stamp: `built` when the stamp is the state the plan
-   * starts this element from, so the change is the plan's own work; `end` otherwise. On an
-   * `unstamped` element, `end` when the application reads as the plan leaves it.
+   * starts this element from, so the change is the plan's own work; `end` otherwise.
    */
   basis?: 'end' | 'built'
   /** On every verdict but `fresh`: the elements naming this one (`listPlanReferences()`), whose steps depend on it. */
@@ -250,6 +249,14 @@ function elementContexts(plan: PlanDraft, app: PlanAppState): ElementContext[] {
   }))
 }
 
+/**
+ * The elements the application reads exactly as the plan leaves them, whatever was stamped:
+ * the evidence `settleBuiltFindings()` has for an element no stamp covers.
+ */
+export function elementsAtPlannedEnd(plan: PlanDraft, app: PlanAppState): Set<string> {
+  return new Set(elementContexts(plan, app).flatMap(({ id, now }) => ('hash' in now && now.hash === now.end ? [id] : [])))
+}
+
 /** What `plan:approve` writes into `baseline.contextHash` for a draft. */
 export function stampContextHash(plan: PlanDraft, app: PlanAppState): PlanContextStamp {
   const contextHash: Record<string, string> = {}
@@ -273,8 +280,7 @@ export function judgeFreshness(plan: PlanDraft & { baseline: { contextHash: Reco
     if ('unreadable' in now) return { ...base, verdict: 'unjudged', reason: now.unreadable }
     const before = Object.hasOwn(stamped, id) ? stamped[id] : undefined
     if (before === undefined) {
-      const reason = 'No context was stamped for it: a revision named it after approval, or its section could not be read then.'
-      return { ...base, verdict: 'unstamped', reason, ...(now.hash === now.end ? { basis: 'end' as const } : {}) }
+      return { ...base, verdict: 'unstamped', reason: 'No context was stamped for it: a revision named it after approval, or its section could not be read then.' }
     }
     if (before === now.hash) return { ...base, verdict: 'fresh' }
     if (now.hash === now.end) {

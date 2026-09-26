@@ -205,6 +205,8 @@ export interface PlanAppDetailInput {
   controllers: ControllerMethodScan | PlanAppUnreadable
   pages: string[] | PlanAppUnreadable
   models: PlanAppUnreadable | undefined
+  /** {@link readValidatorExports} as the §2 checks read it, so both judge one reading. */
+  validators: PlanAppValidatorExports[] | PlanAppUnreadable
 }
 
 const IDENTIFIER_PATTERN = /[A-Za-z_$][\w$]*/g
@@ -245,7 +247,7 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
     tableDetail(root),
     modelDetail(root, input.models),
     pageDetail(root, input.pages),
-    validatorDetail(root, cache, contractSchemaObjects(input.definitions)),
+    validatorDetail(input.validators, contractSchemaObjects(input.definitions)),
     classDetail(root, discoverResourceFiles),
     readResourcePayloads(root),
     policyDetail(root, cache),
@@ -510,12 +512,19 @@ export interface PlanAppValidatorExports {
  * for their fields, so the two cannot disagree about which validators exist. Barrels are
  * excluded as for models: a re-export belongs to the file that declares it.
  */
-export async function readValidatorExports(root: string, cache: ParseCache): Promise<PlanAppValidatorExports[] | PlanAppUnreadable> {
+export async function readValidatorExports(
+  root: string,
+  cache: ParseCache,
+  /** One app root only, so a file in another root that will not read cannot refuse it. */
+  only?: { module: PlanAppScope },
+): Promise<PlanAppValidatorExports[] | PlanAppUnreadable> {
+  const files = excludeBarrelFiles(await discoverValidatorFiles(root)).filter((filePath) => !only || moduleNameFor(root, filePath) === only.module)
+  const parsed = await Promise.all(files.map((filePath) => cache.get(filePath)))
   const read: PlanAppValidatorExports[] = []
-  for (const filePath of excludeBarrelFiles(await discoverValidatorFiles(root))) {
+  for (const [index, filePath] of files.entries()) {
     const file = toPosixRelative(root, filePath)
-    const parsed = await cache.get(filePath)
-    const names = parsed ? exportedNames(parsed.ast, 'this file') : null
+    const ast = parsed[index]?.ast
+    const names = ast ? exportedNames(ast, 'this file') : null
     // One unread file makes every absent name unprovable, as with the controller scan.
     if (names === null) return { unreadable: `${file} could not be read for its exported schemas` }
     read.push({ filePath, file, module: moduleNameFromRelPath(file), names: names.filter((name) => name !== 'default') })
@@ -529,9 +538,8 @@ export async function readValidatorExports(root: string, cache: ParseCache): Pro
  * imported; one that would not import leaves its own symbols unmatchable and their
  * fields unread, never the section unreadable.
  */
-async function validatorDetail(root: string, cache: ParseCache, contracts: Set<object>): Promise<ValidatorRead> {
+async function validatorDetail(exports: PlanAppValidatorExports[] | PlanAppUnreadable, contracts: Set<object>): Promise<ValidatorRead> {
   const symbols: SchemaSymbols = new Map()
-  const exports = await readValidatorExports(root, cache)
   if (!Array.isArray(exports)) return { validators: exports, symbols }
   const validators: PlanAppValidatorDetail[] = []
   for (const { filePath, file, module, names: exported } of exports) {

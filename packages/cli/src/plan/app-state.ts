@@ -35,7 +35,7 @@ import { parseModelFile } from '../model-parser'
 import { parseSchemaTables, schemaPathFor } from '../schema-parser'
 import { isConfirmedApiOnlyApp } from '../app-surface'
 import { loadRouteDefinitions, resolveRoutesFile } from '../load-routes'
-import { loadPlanAppDetail, readValidatorExports, type PlanAppDetail } from './app-detail'
+import { loadPlanAppDetail, readValidatorExports, type PlanAppDetail, type PlanAppValidatorExports } from './app-detail'
 import type { PlanImpactSources } from './impact'
 import { loadPlanImpactSources } from './impact-sources'
 import { ParseCache } from '../parse-cache'
@@ -157,7 +157,7 @@ export async function loadPlanAppState(
     classSection(root, roots, RESOURCES_DIR, discoverResourceFiles),
     classSection(root, roots, POLICIES_DIR, discoverPolicyFiles),
     pageSection(root),
-    validatorSection(root, roots, cache),
+    validatorSections(root, roots, cache),
     routeSection(root, options.routesFile),
     controllerSections(root, cache),
     tableSection(root, roots),
@@ -170,7 +170,7 @@ export async function loadPlanAppState(
     resources,
     policies,
     pages,
-    validators,
+    validators: validators.names,
     routes: isUnreadable(routes.routes) ? routes.routes : routes.routes.map(({ name, method, path }) => ({ name, method, path })),
     tables,
     apiOnly,
@@ -200,6 +200,7 @@ export async function loadPlanAppState(
     controllers: controllers.scan,
     pages: isUnreadable(pages) ? pages : appNames(pages),
     models: isUnreadable(models) ? models : undefined,
+    validators: validators.exports,
   })
   return { ...state, detail }
 }
@@ -253,11 +254,16 @@ async function classSection(
     .sort(byName)
 }
 
-async function validatorSection(cwd: string, roots: ReadonlyArray<AppRoot>, cache: ParseCache): Promise<PlanAppNames> {
-  const [probe, files] = await Promise.all([probeDirectory(roots, VALIDATORS_DIR), readValidatorExports(cwd, cache)])
-  if (probe) return { unreadable: probe }
-  if (isUnreadable(files)) return files
-  return files.flatMap(({ module, names }) => names.map((name) => ({ name, module }))).sort(byName)
+/** The names the §2 checks judge, and the reading `plan:status`'s detail imports the same files from. */
+async function validatorSections(
+  cwd: string,
+  roots: ReadonlyArray<AppRoot>,
+  cache: ParseCache,
+): Promise<{ names: PlanAppNames; exports: PlanAppValidatorExports[] | PlanAppUnreadable }> {
+  const [probe, exports] = await Promise.all([probeDirectory(roots, VALIDATORS_DIR), readValidatorExports(cwd, cache)])
+  if (probe) return { names: { unreadable: probe }, exports }
+  if (isUnreadable(exports)) return { names: exports, exports }
+  return { names: exports.flatMap(({ module, names }) => names.map((name) => ({ name, module }))).sort(byName), exports }
 }
 
 async function pageSection(cwd: string): Promise<PlanAppNames> {

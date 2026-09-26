@@ -26,7 +26,7 @@ import {
 } from './app-state'
 import { actionTargets, columnTargets, endpointKey, NAMED_APP_SECTIONS, namedTargets, routeTarget, tableTarget, type PlanAppTarget } from './app-targets'
 import { PLAN_COMMAND_FORM, refusedPlanCommands } from './command-allowlist'
-import { judgeFreshness, type PlanElementFreshness } from './freshness'
+import { elementsAtPlannedEnd, judgeFreshness } from './freshness'
 import { listPlanReferences } from './references'
 import {
   findDuplicatePlanIds,
@@ -82,9 +82,8 @@ const APP_FACT_FINDINGS: ReadonlySet<string> = new Set(['plan:app-collision', 'p
  */
 export function settleBuiltFindings(plan: PlanDraft | Plan, app: PlanAppState, checks: PlanCheckResult[]): { checks: PlanCheckResult[]; built: string[] } {
   if (!hasBaseline(plan)) return { checks, built: [] }
-  const elements = judgeFreshness(plan, app).elements
-  const builtIds = new Set(elements.filter((element) => element.verdict === 'fresh' && element.basis === 'built').map((element) => element.id))
-  const unstampedValidators = unstampedValidatorsAtEnd(plan, elements)
+  const builtIds = new Set(judgeFreshness(plan, app).elements.filter((element) => element.basis === 'built').map((element) => element.id))
+  const unstampedValidators = unstampedValidatorsAtEnd(plan, app)
   const built = new Set<string>()
   const settled = checks.map((result) => {
     if (result.status !== 'fail' || !APP_FACT_FINDINGS.has(result.key) || result.elementId === undefined) return result
@@ -100,21 +99,19 @@ export function settleBuiltFindings(plan: PlanDraft | Plan, app: PlanAppState, c
 }
 
 const UNSTAMPED_VALIDATOR_NOTE =
-  'The baseline was stamped before validators were read and holds no hash for it, so whether this plan built it cannot be told; the application reads as the plan leaves it.'
+  "The baseline holds a hash for none of this plan's validators, so whether this plan built this one cannot be told; the application reads as the plan leaves it."
 
 /**
- * Validators of a baseline that stamps none of the plan's validators, which is every baseline
- * stamped before `loadPlanAppState()` read them, and that the application reads as the plan
- * leaves them. Their finding is a warning rather than a pass: the plan's own work and someone
- * else's same-named export look alike. `plan:scaffold` still refuses to write over an export.
+ * Validators the application reads as the plan leaves them, on a baseline stamping none of the
+ * plan's validators: every baseline stamped before validators were read is one. Their finding is
+ * a warning rather than a pass, since the plan's own work and someone else's same-named export
+ * look alike there; `plan:scaffold` still refuses to write over an export.
  */
-function unstampedValidatorsAtEnd(plan: Plan, elements: ReadonlyArray<PlanElementFreshness>): Set<string> {
-  if (plan.validators.some((validator) => Object.hasOwn(plan.baseline.contextHash, validator.id))) return new Set()
-  return new Set(
-    elements
-      .filter((element) => element.section === 'validators' && element.verdict === 'unstamped' && element.basis === 'end')
-      .map((element) => element.id),
-  )
+function unstampedValidatorsAtEnd(plan: Plan, app: PlanAppState): Set<string> {
+  const stamped = plan.baseline.contextHash
+  if (plan.validators.length === 0 || plan.validators.some((validator) => Object.hasOwn(stamped, validator.id))) return new Set()
+  const atEnd = elementsAtPlannedEnd(plan, app)
+  return new Set(plan.validators.filter((validator) => atEnd.has(validator.id)).map((validator) => validator.id))
 }
 
 export function validatePlan(plan: PlanDraft, app: PlanAppState): PlanCheckResult[] {
@@ -504,6 +501,13 @@ function withSection<T>(
   orElse?.(section.unreadable)
 }
 
+/**
+ * Why a validator name the application's validator files do not export is unconfirmed rather than
+ * missing: the reading is their own exports, and a schema can be declared or re-exported elsewhere.
+ */
+const VALIDATORS_ARE_A_LOWER_BOUND =
+  'Validators are read from what the files under app/Http/Validators/ declare and export; a schema declared or re-exported elsewhere is not seen.'
+
 function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckResult[]): void {
   const targets = namedTargets(plan)
   for (const appSection of NAMED_APP_SECTIONS) {
@@ -513,7 +517,8 @@ function checkAgainstApp(plan: PlanDraft, app: PlanAppState, results: PlanCheckR
         const { names, ...placement } = target.perRoot
           ? inRoot(entries, target.module)
           : { names: appNames(entries), root: undefined, elsewhere: undefined }
-        checkTarget({ ...target, ...placement }, names, results)
+        const lowerBound = appSection === 'validators' ? { unconfirmedBecause: VALIDATORS_ARE_A_LOWER_BOUND } : {}
+        checkTarget({ ...target, ...placement, ...lowerBound }, names, results)
       }
     })
   }

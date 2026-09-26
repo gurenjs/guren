@@ -225,14 +225,16 @@ describe('validatePlan', () => {
     expectResult(results, 'plan:app-collision', 'validator.comment', 'fail')
   })
 
-  test('should fail an existing validator the application does not export, and pass one it does', () => {
+  test('should warn, never fail, on an existing validator the validator files do not export, and pass one they do', () => {
     const draft = plan()
     draft.validators[0].change = { kind: 'existing' }
 
-    const missing = expectResult(validatePlan(draft, appState({ validators: [] })), 'plan:app-missing', 'validator.comment', 'fail')
-    expect(missing.message).toContain('The validator "CommentPayloadSchema" was not found in the project root')
+    // A schema declared in a controller, or re-exported from elsewhere, is one the reading cannot see.
+    const unseen = expectResult(validatePlan(draft, appState({ validators: [] })), 'plan:app-unjudged', 'validator.comment', 'warn')
+    expect(unseen.message).toContain('The validator "CommentPayloadSchema" was not found in the project root')
+    expect(unseen.message).toContain('a schema declared or re-exported elsewhere is not seen')
     const found = validatePlan(draft, appState({ validators: ['CommentPayloadSchema'] }))
-    expect(find(found, 'plan:app-missing', 'validator.comment')).toBeUndefined()
+    expect(find(found, 'plan:app-unjudged', 'validator.comment')).toBeUndefined()
   })
 
   test('should judge a validator in the app root the plan names', () => {
@@ -241,8 +243,8 @@ describe('validatePlan', () => {
 
     const results = validatePlan(draft, appState({ validators: [{ name: 'CommentPayloadSchema', module: 'billing' }] }))
 
-    const missing = expectResult(results, 'plan:app-missing', 'validator.comment', 'fail')
-    expect(missing.message).toContain('This application declares one in modules/billing.')
+    const unseen = expectResult(results, 'plan:app-unjudged', 'validator.comment', 'warn')
+    expect(unseen.message).toContain('This application declares one in modules/billing.')
   })
 
   test('should warn once, naming why, when the validators could not be read', () => {
