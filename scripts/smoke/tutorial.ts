@@ -1,6 +1,6 @@
 /**
- * `smoke:tutorial` (RFC 0019 §3): the tutorial chapters under docs/en/tutorials/
- * are the script. Each chapter's `run` blocks execute, `file=` blocks are
+ * `smoke:tutorial [course]` (RFC 0019 §3): the chapters under docs/en/<course>/
+ * (`tutorials` by default, or `agent-course`) are the script. Each chapter's `run` blocks execute, `file=` blocks are
  * written, `manual` blocks are skipped, and every chapter ends with `guren gate`
  * (unless its own gate passed on the same app) and `bun run build`. The one substitution:
  * `bunx create-guren-app` becomes this checkout's scaffolder with the app's
@@ -15,7 +15,9 @@ import { assertSingleInstalledCopies, ensureBuiltPackages, rewriteAppDependencie
 import {
   cdTarget,
   chapterFiles,
+  COURSES,
   executableBlocks,
+  isCourse,
   parseScaffoldCommand,
   parseTutorialBlocks,
   type ExecutableBlock,
@@ -26,6 +28,8 @@ const repoRoot = resolve(import.meta.dir, '../..')
 const CLI_BIN = resolve(repoRoot, 'packages/cli/src/bin.ts')
 const CREATE_APP = resolve(repoRoot, 'packages/create-app/src/cli.ts')
 const BANNER_TIMEOUT_MS = 90_000
+const COURSE = process.argv[2] ?? 'tutorials'
+if (!isCourse(COURSE)) throw new Error(`Unknown course "${COURSE}"; expected one of ${COURSES.join(', ')}.`)
 
 interface Background {
   block: RunBlock
@@ -380,7 +384,7 @@ async function appSnapshot(session: Session): Promise<string> {
 }
 
 async function runChapter(session: Session, name: string): Promise<void> {
-  const file = join('docs/en/tutorials', name)
+  const file = join('docs/en', COURSE, name)
   const chapter = parseTutorialBlocks(await readFile(join(repoRoot, file), 'utf8'), file)
   if (chapter.issues.length > 0) {
     throw new Error(`${file} does not parse; run audit:tutorial-blocks:\n${chapter.issues.map((issue) => `  line ${issue.line}: ${issue.message}`).join('\n')}`)
@@ -430,9 +434,9 @@ async function tagChapter(session: Session, name: string): Promise<void> {
 async function main(): Promise<void> {
   await ensureBuiltPackages()
   const through = process.env.GUREN_TUTORIAL_THROUGH
-  const names = (await chapterFiles(join(repoRoot, 'docs/en/tutorials')))
+  const names = (await chapterFiles(join(repoRoot, 'docs/en', COURSE)))
     .filter((name) => !through || name.slice(0, 2) <= through)
-  if (names.length === 0) throw new Error('No chapters found under docs/en/tutorials (files named NN-<slug>.md).')
+  if (names.length === 0) throw new Error(`No chapters found under docs/en/${COURSE} (files named NN-<slug>.md).`)
 
   const tempRoot = await mkdtemp(join(tmpdir(), 'guren-tutorial-'))
   tempRootForLog = tempRoot

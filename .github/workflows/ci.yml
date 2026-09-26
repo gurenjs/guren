@@ -420,6 +420,23 @@ jobs:
       - name: Tutorial smoke
         run: bun run smoke:tutorial
 
+  agent-course-smoke:
+    runs-on: ubuntu-latest
+    # docs/en/agent-course/NN-*.md through the same runner, taking every
+    # "Without an agent" block. Its own job, so neither course's cap has to
+    # absorb the other's growth.
+    timeout-minutes: 15
+    env:
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Bun and build packages
+        uses: ./.github/actions/setup-and-build
+
+      - name: Agent course smoke
+        run: bun run smoke:agent-course
+
   sqlite-smoke:
     runs-on: ubuntu-latest
     # No redis service — verifies all tests gracefully skip when Redis is

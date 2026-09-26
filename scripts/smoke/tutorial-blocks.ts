@@ -61,6 +61,14 @@ const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u
 // Chapters are files, so their order is their name: `01-zero-to-deployed.md`.
 export const CHAPTER_FILE = /^\d{2}-[a-z0-9-]+\.md$/u
 
+/** Each course is a directory under docs/<locale>/, audited and run the same way. */
+export const COURSES = ['tutorials', 'agent-course'] as const
+export type Course = (typeof COURSES)[number]
+
+export function isCourse(value: string): value is Course {
+  return (COURSES as readonly string[]).includes(value)
+}
+
 /** The chapter files of a tutorials directory, in course order. */
 export async function chapterFiles(dir: string): Promise<string[]> {
   const entries = await readdir(dir)

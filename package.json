@@ -50,6 +50,7 @@
     "smoke:golden-path": "bash ./scripts/smoke-golden-path.sh",
     "smoke:prototype": "bun run ./scripts/smoke/prototype-blog.ts",
     "smoke:tutorial": "bun run ./scripts/smoke/tutorial.ts",
+    "smoke:agent-course": "bun run ./scripts/smoke/tutorial.ts agent-course",
     "smoke:golden-path:postgres": "GUREN_SMOKE_DB=postgres bash ./scripts/smoke-golden-path.sh",
     "smoke:golden-path:mysql": "GUREN_SMOKE_DB=mysql bash ./scripts/smoke-golden-path.sh",
     "changeset": "changeset",
