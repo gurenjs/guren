@@ -195,9 +195,11 @@ class EntryBuilder {
 
   /** The notes that need every route of the entry first. */
   finish(): void {
-    // A `routePattern` request targets this route; only its constraint was left unchecked.
-    for (const [key, uncertain] of [['impact.testRequests.unresolved', false], ['impact.testRequests.uncertain', true]] as const) {
-      const sites = [...this.gaps].filter(([, request]) => (request.reason === 'routePattern') === uncertain).map(([site]) => site)
+    // A `routePattern` or `routeOrder` request does target this route: only its constraint or an earlier route may stop it.
+    const keyOf = (reason: UnresolvedTestRequest['reason']): string =>
+      reason === 'routePattern' ? 'impact.testRequests.uncertain' : reason === 'routeOrder' ? 'impact.testRequests.order' : 'impact.testRequests.unresolved'
+    for (const key of ['impact.testRequests.unresolved', 'impact.testRequests.uncertain', 'impact.testRequests.order']) {
+      const sites = [...this.gaps].filter(([, request]) => keyOf(request.reason) === key).map(([site]) => site)
       if (sites.length > 0) this.note(key, { count: String(sites.length), requests: sites.join(', ') })
     }
     if (!this.askedNoneReach || this.gaps.size > 0) return

@@ -42,7 +42,7 @@ export interface TestRequest extends TestRequestSite {
   target: TestRequestTarget
 }
 
-export type UnresolvedReason = 'dynamicPath' | 'partialSegment' | 'unknownReceiver' | 'localReceiver' | 'routePattern'
+export type UnresolvedReason = 'dynamicPath' | 'partialSegment' | 'unknownReceiver' | 'localReceiver' | 'routePattern' | 'routeOrder'
 
 export interface UnresolvedTestRequest extends TestRequestSite {
   reason: UnresolvedReason
@@ -61,6 +61,8 @@ export interface TestRequestRoute {
   method: string
   path: string
   toolName?: string
+  /** The module whose registrar declared it, or `null` for the entry registrar's: its scope in {@link registeredBefore}. */
+  module?: string | null
 }
 
 const RUNTIME = Symbol('runtime')
@@ -675,20 +677,69 @@ function push<T>(map: Map<number, T[]>, index: number, value: T): void {
   map.set(index, list)
 }
 
-/** Every matching route is listed: a static scan has no registration order to pick hono's first match by. */
-export function testCoverage(scan: Pick<TestRequestScan, 'requests' | 'unresolved'>, routes: readonly TestRequestRoute[], options: RoutePathMatchOptions = {}): TestCoverage {
+export interface RegisteredRoute {
+  index: number
+  /** The module whose registrar declared it, or `null` for the entry registrar's. */
+  module: string | null
+}
+
+/**
+ * Whether `earlier` registers before `later`, in `mountRoutes()`'s order: the entry registrar's
+ * routes, then each module's in `createApp({ modules })` order, each scope in its list order.
+ * The CLI loads modules in directory order instead, so two modules' routes are `undefined`.
+ */
+export function registeredBefore(earlier: RegisteredRoute, later: RegisteredRoute): boolean | undefined {
+  if (earlier.module === later.module) return earlier.index < later.index
+  if (earlier.module === null || later.module === null) return earlier.module === null
+  return undefined
+}
+
+export interface TestCoverageOptions extends RoutePathMatchOptions {
+  /**
+   * `routes` are the application's, in registration order within each `module`, so a request is
+   * given to the route hono answers it with: the first registered of its method (or `ALL`) whose
+   * path matches. `modulesIncomplete` says a module's routes did not load, any of which may come first.
+   */
+  registered?: { modulesIncomplete: boolean }
+}
+
+interface Candidate extends RegisteredRoute {
+  match: Match
+}
+
+function scopeOf(route: TestRequestRoute, index: number): RegisteredRoute {
+  return { index, module: route.module ?? null }
+}
+
+/**
+ * Without `registered`, every matching route is listed. With it, a route another answers first
+ * gets nothing, and one an earlier route may answer first, or that only an unknown module order
+ * puts first, gets the request as uncertain (`routeOrder`).
+ */
+export function testCoverage(scan: Pick<TestRequestScan, 'requests' | 'unresolved'>, routes: readonly TestRequestRoute[], options: TestCoverageOptions = {}): TestCoverage {
   const coverage: TestCoverage = { byRoute: new Map(), uncertainByRoute: new Map(), unresolved: [...scan.unresolved] }
+  const { registered } = options
   for (const { target, ...site } of scan.requests) {
-    routes.forEach((route, index) => {
-      if (target.kind === 'tool') {
+    if (target.kind === 'tool') {
+      routes.forEach((route, index) => {
         if (route.toolName === target.name) push(coverage.byRoute, index, site)
-        return
-      }
-      if (route.method.toUpperCase() !== target.method) return
+      })
+      continue
+    }
+    const candidates: Candidate[] = []
+    routes.forEach((route, index) => {
+      const method = route.method.toUpperCase()
+      if (method !== target.method && (registered === undefined || method !== 'ALL')) return
       const match = routePathMatches(route.path, target.segments, options)
-      if (match === 'match') push(coverage.byRoute, index, site)
-      else if (match === 'unknown') push(coverage.uncertainByRoute, index, { ...site, reason: 'routePattern', method: target.method })
+      if (match !== 'none') candidates.push({ ...scopeOf(route, index), match })
     })
+    for (const candidate of candidates) {
+      const ahead = registered === undefined ? [] : candidates.filter((other) => registeredBefore(other, candidate) !== false)
+      if (ahead.some((other) => other.match === 'match' && registeredBefore(other, candidate) === true)) continue
+      if (candidate.match === 'unknown') push(coverage.uncertainByRoute, candidate.index, { ...site, reason: 'routePattern', method: target.method })
+      else if (ahead.length > 0 || (registered?.modulesIncomplete === true && candidate.module !== null)) push(coverage.uncertainByRoute, candidate.index, { ...site, reason: 'routeOrder', method: target.method })
+      else push(coverage.byRoute, candidate.index, site)
+    }
   }
   return coverage
 }

@@ -32,6 +32,7 @@ const UNRESOLVED: Record<UnresolvedReason, string> = {
   unknownReceiver: 'a request on what an imported helper returns',
   localReceiver: 'a request on what a function of the file returns with no `TestApp` return type: annotate it `TestApp` or `Promise<TestApp>`',
   routePattern: 'a route pattern this reader cannot compare',
+  routeOrder: 'a route registered before it that may answer first',
 }
 
 function describeRoute(route: TestRequestRoute): string {

@@ -42,7 +42,7 @@ import { resolveAppEntry } from '../provider-registrar'
 import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, specifierName } from '../route-registrar'
 import { importsByLocal, specifierBase, withoutExtension } from '../schema-binding'
 import { readSchemaTables, withImportTimeout, type SourcedSchemaTable } from '../schema-runtime'
-import { routePathCovers } from '../test-requests'
+import { registeredBefore, routePathCovers } from '../test-requests'
 import type { PlanAppScope, PlanAppUnreadable } from './app-state'
 import { readResourcePayloads, readSchemaFields, type PlanAppResourcePayload, type PlanAppSchemaFields } from './field-readers'
 import { readPolicyAbilities, type PlanAppPolicyAbilities } from './policy-abilities'
@@ -307,10 +307,9 @@ function routeDetail(input: PlanAppDetailInput, symbols: SchemaSymbols): PlanApp
 }
 
 /**
- * Hono hands a request to the first registered route that matches it, in `mountRoutes()`'s
- * order: the entry registrar's routes, then each module's in `createApp({ modules })` order.
- * The CLI loads modules in directory order instead, so two modules' routes are compared both
- * ways and never settled. The routes a provider registers are not in the definitions.
+ * Hono hands a request to the first registered route that matches it, in the order
+ * {@link registeredBefore} reads: two modules' routes are compared both ways and never
+ * settled. The routes a provider registers are not in the definitions.
  */
 function shadowing(input: PlanAppDetailInput, routes: ContextRoute[], index: number): Exclude<PlanAppMount, 'mounted'> | undefined {
   const route = routes[index]!
@@ -324,11 +323,10 @@ function shadowing(input: PlanAppDetailInput, routes: ContextRoute[], index: num
   for (let other = 0; other < routes.length; other += 1) {
     const candidate = routes[other]!
     const otherScope = input.provenance[other] ?? null
-    const sameScope = otherScope === scope
-    const acrossModules = !sameScope && scope !== null && otherScope !== null
-    const before = sameScope ? other < index : acrossModules || otherScope === null
+    const before = registeredBefore({ index: other, module: otherScope }, { index, module: scope })
+    const acrossModules = before === undefined
     const method = candidate.method.toUpperCase()
-    if (!before || (method !== routeMethod && method !== 'ALL')) continue
+    if (before === false || (method !== routeMethod && method !== 'ALL')) continue
     const covers = routePathCovers(candidate.path, route.path)
     if (covers === 'none') continue
     if (covers === 'match' && !acrossModules) {

@@ -7,7 +7,7 @@ import { runCommand } from 'citty'
 import { builtinSubCommands } from '../src/commands'
 import type { ColumnConsumerScan } from '../src/column-consumers'
 import { loadPlanAppState } from '../src/plan/app-state'
-import { impactBreakingChanges, planChangesExisting, planImpact, type PlanImpactEntry, type PlanImpactSources } from '../src/plan/impact'
+import { impactBreakingChanges, planChangesExisting, planImpact, type PlanImpactEntry, type PlanImpactRoute, type PlanImpactSources } from '../src/plan/impact'
 import { planBreakingChanges, renderPlanHtml } from '../src/plan/render'
 import { PlanDraftSchema, type PlanChange, type PlanDraft } from '../src/plan/schema'
 import { CAN_DENY_FILE_READS, createTempWorkspace, linkWorkspaceCore, writeWorkspaceFiles, type TempWorkspace } from './helpers'
@@ -299,6 +299,15 @@ describe('planImpact', () => {
       ])
     })
 
+    test('should give a request an earlier route may answer first a note of its own', () => {
+      const base = sources()
+      base.routes[1] = { ...base.routes[1]!, uncertainTests: [{ ...REQUEST, reason: 'routeOrder', method: 'PATCH' }] }
+
+      expect(entryFor(planImpact(alteredUpdate(), base), 'route.comments.store').notes).toEqual([
+        { key: 'impact.testRequests.order', values: { count: '1', requests: 'tests/posts.test.ts:14' } },
+      ])
+    })
+
     test('should not say it of a renamed route, whose paths the tests still reach', () => {
       const entry = entryFor(planImpact(alteredUpdate({ kind: 'rename', from: 'posts.update' }), sources()), 'route.comments.store')
 
@@ -529,6 +538,36 @@ await http.get(String(postId))
     ])
     expect(impact.routes.find((route) => route.name === 'posts.index')?.tests).toBeUndefined()
     expect(impact.testRequests.unresolved).toEqual([{ file: 'tests/comments-http.test.ts', line: 7, text: 'GET <runtime>', reason: 'dynamicPath', method: 'GET' }])
+  })
+
+  test('should hang a request off the route registered first of the two its path matches, never off both', async () => {
+    await linkWorkspaceCore(workspace.dir)
+    await writeWorkspaceFiles(workspace.dir, {
+      ...PLAN_VERIFY_APP_FILES,
+      'tests/comments.test.ts': '',
+      'routes/web.ts': `import type { Router } from '@guren/core'
+import { PostController } from '../app/Http/Controllers/PostController.js'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/meetups/create', [PostController, 'index']).name('meetups.create')
+  router.get('/meetups/:id', [PostController, 'show']).name('meetups.show')
+}
+`,
+      'tests/meetups-http.test.ts': `import { TestApp } from '@guren/testing'
+import app from '../src/app'
+
+const http = await TestApp.fromApp(app)
+await http.get('/meetups/create')
+await http.get('/meetups/1')
+`,
+    })
+
+    const impact = (await loadPlanAppState(workspace.dir, { impact: true })).impact!
+    const route = (name: string): PlanImpactRoute | undefined => impact.routes.find((candidate) => candidate.name === name)
+
+    expect(route('meetups.create')?.tests).toEqual([{ file: 'tests/meetups-http.test.ts', line: 5, text: 'GET /meetups/create' }])
+    expect(route('meetups.show')?.tests).toEqual([{ file: 'tests/meetups-http.test.ts', line: 6, text: 'GET /meetups/1' }])
+    expect(route('meetups.show')?.uncertainTests).toBeUndefined()
   })
 
   test('should carry a request a constrained route could not be checked against from the routes file to its note', async () => {
