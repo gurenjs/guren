@@ -1,6 +1,7 @@
 import type { AppManifest, DriverMapEntry, RouteEntry } from '@guren/server'
 import { consola } from 'consola'
 
+import { markCommandFailed } from '../command-status'
 import { CliError } from '../cli-error'
 import { defineCommand } from '../define-command'
 import { DEFAULT_INTROSPECT_TIMEOUT_MS, introspectApp } from '../introspect'
@@ -100,7 +101,7 @@ export const introspectCommand = defineCommand({
     })
 
     if (result.status === 'failed') {
-      process.exitCode = 1
+      markCommandFailed()
       if (args.json) {
         console.log(JSON.stringify(result, null, 2))
       } else {

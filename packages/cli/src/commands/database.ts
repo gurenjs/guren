@@ -1,4 +1,5 @@
 import { consola } from 'consola'
+import { markCommandFailed } from '../command-status'
 import { defineCommand } from '../define-command'
 import { runDatabaseMigrations, runDatabaseSeeders, resetDatabase } from '../db-migrate'
 import type { MigrationRunSummary, SeederRunSummary } from '../db-migrate'
@@ -301,7 +302,7 @@ export const rollbackCommand = defineCommand({
         consola.info(`  • ${remedy}`)
       }
     }
-    process.exit(1)
+    markCommandFailed()
   },
 })
 

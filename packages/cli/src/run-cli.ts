@@ -2,6 +2,7 @@ import { consola } from 'consola'
 import { runCommand, showUsage } from 'citty'
 import type { CommandDef } from 'citty'
 import { CliError } from './cli-error'
+import { runWithCommandStatus } from './command-status'
 import { unknownCommandHint } from './unknown-command'
 
 type AnyCommandDef = CommandDef<any>
@@ -107,8 +108,7 @@ export async function runCli(cmd: AnyCommandDef, rawArgs: string[]): Promise<num
       return 0
     }
 
-    await runCommand(cmd, { rawArgs })
-    return 0
+    return await runWithCommandStatus(() => runCommand(cmd, { rawArgs }))
   } catch (error) {
     if (isUsageError(error)) {
       const unknown =

@@ -1,4 +1,5 @@
 import { resolve } from 'node:path'
+import { markCommandFailed } from '../command-status'
 import { defineCommand } from '../define-command'
 import { CliError } from '../cli-error'
 import { renderPlanFile } from '../plan-render'
@@ -202,7 +203,7 @@ export const planVerifyCommand = defineCommand({
       timeoutMs: seconds === undefined ? undefined : seconds * 1000,
     })
     console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanVerify(report))
-    if (args.ci && report.steps.some((step) => step.record.outcome !== 'verified')) process.exitCode = 1
+    if (args.ci && report.steps.some((step) => step.record.outcome !== 'verified')) markCommandFailed()
   },
 })
 
