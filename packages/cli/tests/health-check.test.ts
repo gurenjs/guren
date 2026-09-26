@@ -22,7 +22,7 @@ interface HealthCliRun {
 
 /**
  * Run `health:check --json` and return its parsed report. A subprocess because
- * the paths under test end in `process.exit(1)` and the exit code is half of
+ * the paths under test must exit non-zero and the exit code is half of
  * what they assert; {@link runCliBinCaptured} owns the child's environment.
  */
 async function runHealthCli(cwd: string, args: string[] = []): Promise<HealthCliRun> {

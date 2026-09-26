@@ -28,6 +28,7 @@ import {
   makeLangCommand,
   makeFeatureCommand,
 } from './commands/make'
+import { markCommandFailed } from './command-status'
 import { ATTACH_ARG, FIELDS_ARG } from './commands/scaffold-options'
 import { routeTypesCommand, codegenCommand, openApiGenerateCommand } from './commands/codegen'
 import { migrateCommand, seedCommand, resetCommand, freshCommand, rollbackCommand, statusCommand } from './commands/database'
@@ -191,7 +192,7 @@ const aiEvalCommand = defineCommand({
       json: Boolean(args.json),
     })
     // A case that produced nothing scorable is a run the caller must see fail.
-    if (result.failures.length > 0) process.exitCode = 1
+    if (result.failures.length > 0) markCommandFailed()
   },
 })
 
@@ -509,7 +510,7 @@ const storageLinkCommand = defineCommand({
     if (args.remove) {
       const success = removeStorageLink()
       if (!success) {
-        process.exit(1)
+        markCommandFailed()
       }
     } else {
       const success = createStorageLink({
@@ -517,7 +518,7 @@ const storageLinkCommand = defineCommand({
         relative: Boolean(args.relative),
       })
       if (!success) {
-        process.exit(1)
+        markCommandFailed()
       }
     }
   },
@@ -676,7 +677,7 @@ const envExampleCommand = defineCommand({
     const schema = await loadEnvSchema(cwd)
     if (schema.status !== 'loaded') {
       consola.error(schema.status === 'absent' ? `No ${ENV_SCHEMA_FILE}: declare the environment with defineEnv() first.` : schema.message)
-      process.exitCode = 1
+      markCommandFailed()
       return
     }
 
@@ -806,7 +807,7 @@ const doctorCommand = defineCommand({
     }
 
     if (args.strict && (report.hasWarnings || report.hasFailures)) {
-      process.exit(1)
+      markCommandFailed()
     }
   },
 })

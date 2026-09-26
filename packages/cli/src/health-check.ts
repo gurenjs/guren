@@ -2,6 +2,7 @@ import { consola } from 'consola'
 import { resolve } from 'node:path'
 import { lstat, stat } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
+import { markCommandFailed } from './command-status'
 import { isDefinitelyAbsent } from './discovery'
 
 export interface HealthCheckOptions {
@@ -204,7 +205,7 @@ export async function runHealthCheck(options: HealthCheckOptions = {}): Promise<
   emit(report, options)
 
   if (report.status === 'unhealthy') {
-    process.exit(1)
+    markCommandFailed()
   }
 }
 

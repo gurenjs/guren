@@ -1,4 +1,5 @@
 import { consola } from 'consola'
+import { markCommandFailed } from '../command-status'
 import { defineCommand } from '../define-command'
 import { CHECK_SUITES, ciSuiteConflict, runCheck, renderCheckReport } from '../check'
 import { gatingResults } from '../check-result'
@@ -77,12 +78,12 @@ export const checkCommand = defineCommand({
     const suiteFlags = CHECK_SUITES.filter((suite) => args[suite])
     if (args.ci && suiteFlags.length > 0) {
       consola.error(ciSuiteConflict(suiteFlags))
-      process.exitCode = 1
+      markCommandFailed()
       return
     }
     if (args.ci && args.fix) {
       consola.error('--fix regenerates the files a --ci gate exists to catch drifting. Run guren check --fix locally and commit what it writes.')
-      process.exitCode = 1
+      markCommandFailed()
       return
     }
 
@@ -108,7 +109,7 @@ export const checkCommand = defineCommand({
         fixes = settleFixRuns(fixes, report)
       }
       report.fixes = fixes
-      if (fixes.some((run) => !run.ok)) process.exitCode = 1
+      if (fixes.some((run) => !run.ok)) markCommandFailed()
     }
 
     if (args.json) {
@@ -121,10 +122,10 @@ export const checkCommand = defineCommand({
     // `guren check` has never set one, and changing that on a v1.0-stable
     // command is a breaking change reserved for a major release.
     if (suiteFlags.length > 0 && report.failCount > 0) {
-      process.exitCode = 1
+      markCommandFailed()
     }
     if (args.ci && gatingResults(report).length > 0) {
-      process.exitCode = 1
+      markCommandFailed()
     }
   },
 })
@@ -172,7 +173,7 @@ export const gateCommand = defineCommand({
     }
 
     if (!report.ok) {
-      process.exitCode = 1
+      markCommandFailed()
     }
   },
 })
@@ -227,7 +228,7 @@ export const auditCommand = defineCommand({
     }
 
     if (report.failCount > 0) {
-      process.exitCode = 1
+      markCommandFailed()
     }
   },
 })
