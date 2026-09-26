@@ -7,7 +7,6 @@
  * Nothing here runs at import beyond building the command objects. Keep it that
  * way: a top-level `await` or `process.*` read would run for every importer.
  */
-import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { showUsage } from 'citty'
 import {
@@ -49,7 +48,7 @@ import { writeSpecArtifacts } from './spec-generate'
 import { buildDocsGraphReport, renderDocsGraphMarkdown } from './docs-graph'
 import { announceKeptFiles, announceWrittenFiles } from './utils'
 import { consoleCommand } from './console'
-import { bootstrapApplication, resolveMainEntry, type MaybeApplication } from './runtime'
+import { loadApplication } from './runtime'
 import { runQueueWorker, listFailedJobs, retryFailedJob, retryAllFailedJobs, flushFailedJobs } from './queue'
 import { displayRoutes } from './route-list'
 import { cacheConfig, clearConfigCache, showConfigCacheInfo } from './config-cache'
@@ -299,8 +298,7 @@ const queueRetryCommand = defineCommand({
     } else if (args.id) {
       await retryFailedJob(args.id)
     } else {
-      consola.error('Please provide a job ID or use --all to retry all failed jobs.')
-      process.exit(1)
+      throw new UsageError('Please provide a job ID or use --all to retry all failed jobs.')
     }
   },
 })
@@ -748,32 +746,7 @@ const devCommand = keepsProcessAlive(defineCommand({
     description: 'Start the Guren application in development mode using Bun.',
   },
   async run() {
-    let entry: string
-    try {
-      entry = await resolveMainEntry()
-    } catch (error) {
-      consola.error(error instanceof Error ? error.message : String(error))
-      process.exit(1)
-      return
-    }
-
-    let mod: Record<string, unknown>
-    try {
-      mod = await import(pathToFileURL(entry).href)
-    } catch (error) {
-      consola.error(`Failed to import application entry (${entry}):`, error)
-      process.exit(1)
-      return
-    }
-
-    let app: MaybeApplication
-    try {
-      app = await bootstrapApplication(mod)
-    } catch (error) {
-      consola.error(error instanceof Error ? error.message : String(error))
-      process.exit(1)
-      return
-    }
+    const { app } = await loadApplication()
 
     // `PORT=0` means "any free port", so this tests for a number, not truthiness.
     const parsedPort = Number.parseInt(process.env.PORT ?? '', 10)
@@ -784,9 +757,7 @@ const devCommand = keepsProcessAlive(defineCommand({
     try {
       address = (await app.listen?.({ port, hostname })) as { url?: string } | undefined
     } catch (error) {
-      consola.error('Failed to start application listener:', error)
-      process.exit(1)
-      return
+      throw new Error(`Failed to start application listener: ${error instanceof Error ? error.message : String(error)}`, { cause: error })
     }
 
     // Report where it actually bound: the requested port is not it once the walk

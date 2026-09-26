@@ -425,3 +425,13 @@ export function measured<T extends Pick<PlanStepWork, 'measured'> & { reason?: s
   if (!work.measured) throw new Error(`not measured: ${work.reason}`)
   return work as Extract<T, { measured: true }>
 }
+
+/** The message a command refused with; a run that was not refused fails the test. */
+export async function refusal(work: () => Promise<unknown>): Promise<string> {
+  try {
+    await work()
+  } catch (error) {
+    return (error as Error).message
+  }
+  throw new Error('the run was not refused')
+}

@@ -11,7 +11,7 @@ import { runGate, type GateStageResult } from '../src/gate'
 import type { Introspection } from '../src/introspect'
 import { buildJobSource } from '../src/make-job'
 import { buildListenerSource } from '../src/make-listener'
-import { formatPlanScaffold, formatPlanScaffoldMount, planScaffoldFile, planScaffoldMountFile, type PlanScaffoldMountReport, type PlanScaffoldReport } from '../src/plan-scaffold'
+import { formatPlanScaffold, formatPlanScaffoldMount, planScaffoldFile, planScaffoldMountFile, type PlanScaffoldMountReport, type PlanScaffoldStepReport } from '../src/plan-scaffold'
 import { parsePlanDocument } from '../src/plan-render'
 import { loadPlanAppState } from '../src/plan/app-state'
 import { emitPlanScaffold, planScaffoldMounts, type PlanScaffoldApp, type PlanScaffoldOutput } from '../src/plan/scaffold'
@@ -24,7 +24,7 @@ import { affectsRouteWiring } from '../src/routes-check'
 import { readSchemaTables } from '../src/schema-runtime'
 import type { SchemaDialect } from '../src/schema-parser'
 import { checkTypes, createTempRoot, linkWorkspaceCore, renderedAppCompilerOptions, snapshotTree, TSC_TIMEOUT, writeWorkspaceFiles } from './helpers'
-import { approvedAgainst, approvePlanFile, loadParsedCommentsPlan, type PlanInput } from './plan-fixture'
+import { approvedAgainst, approvePlanFile, loadParsedCommentsPlan, refusal, type PlanInput } from './plan-fixture'
 
 // A temp app resolves `drizzle-orm` from Bun's global cache or not at all, so each one links
 // the copy `@guren/orm` pins, and the barrel the emitted schema imports, as schema-runtime.test.ts does.
@@ -469,6 +469,13 @@ function verifiedRecord(digest: string): PlanStepRecord {
   }
 }
 
+/** A scaffold step's report, which carries the tables, providers and routes file a tests step's does not. */
+async function scaffoldStep(plan: string, dir: string): Promise<PlanScaffoldStepReport> {
+  const report = await planScaffoldFile(plan, { appRoot: dir, step: STEP })
+  if (report.kind !== 'scaffold') throw new Error(`${STEP} was written as a ${report.kind} step`)
+  return report
+}
+
 /** What `plan:next` writes when it hands a step out. */
 function mark(dir: string, step: string): Promise<string> {
   return writePlanActiveStep(dir, 'widgets', { plan: PLAN_FILE, step, startedAt: '2026-09-25T00:00:00.000Z', continuations: 0 })
@@ -485,15 +492,6 @@ function unmatched(status: PlanStatus, ids: readonly string[]): string[] {
     .flatMap((element) => element.properties.filter((property) => property.verdict !== 'match').map((property) => `${element.id} ${property.property}`))
 }
 
-async function refusal(work: () => Promise<unknown>): Promise<string> {
-  try {
-    await work()
-  } catch (error) {
-    return (error as Error).message
-  }
-  throw new Error('the run was not refused')
-}
-
 describe('plan:scaffold', () => {
   beforeAll(async () => {
     ROOT = await createTempRoot('guren-plan-scaffold-')
@@ -505,14 +503,14 @@ describe('plan:scaffold', () => {
 
   describe('round trip through the plan:status readers', () => {
     const DIALECTS = ['pg', 'mysql', 'sqlite'] as const
-    const runs = new Map<SchemaDialect, { dir: string; plan: string; report: PlanScaffoldReport }>()
+    const runs = new Map<SchemaDialect, { dir: string; plan: string; report: PlanScaffoldStepReport }>()
     // Bun caches a routes file by path for the process, so a mounted app is one whose routes nothing read before the mount.
     const mounted = new Map<SchemaDialect, { dir: string; plan: string; report: PlanScaffoldMountReport }>()
 
     beforeAll(async () => {
       for (const dialect of DIALECTS) {
         const { dir, plan } = await createApp(`round-${dialect}`, { dialect, link: true })
-        runs.set(dialect, { dir, plan, report: await planScaffoldFile(plan, { appRoot: dir, step: STEP }) })
+        runs.set(dialect, { dir, plan, report: await scaffoldStep(plan, dir) })
         const app = await createApp(`mounted-${dialect}`, { dialect, link: true })
         await planScaffoldFile(app.plan, { appRoot: app.dir, step: STEP })
         await mark(app.dir, MOUNT_STEP)
@@ -1083,12 +1081,12 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
 
     test('should refuse another step kind and name the task’s scaffold step', async () => {
       const message = await refusedWithNothingWritten('wrong-kind', { mark: 'task/entity/model.widget/data' }, 'task/entity/model.widget/data')
-      expect(message).toContain('task/entity/model.widget/data is a data step, and plan:scaffold writes a scaffold step only. The scaffold step of task/entity/model.widget is task/entity/model.widget/scaffold.')
+      expect(message).toContain('task/entity/model.widget/data is a data step, and plan:scaffold writes a scaffold or tests step only. The scaffold step of task/entity/model.widget is task/entity/model.widget/scaffold.')
     })
 
     test('should refuse a step the plan does not derive and list its scaffold steps', async () => {
       const message = await refusedWithNothingWritten('no-step', { mark: 'task/entity/model.gadget/scaffold' }, 'task/entity/model.gadget/scaffold')
-      expect(message).toContain(`task/entity/model.gadget/scaffold is no step of the plan, and plan:scaffold writes a scaffold step only. Its scaffold steps: ${STEP}.`)
+      expect(message).toContain(`task/entity/model.gadget/scaffold is no step of the plan, and plan:scaffold writes a scaffold or tests step only. Its scaffold steps: ${STEP}.`)
     })
 
     test('should refuse a step plan:next has not marked, so the writes count as that step’s work', async () => {
@@ -1402,7 +1400,7 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     })
     const { dir, plan } = await createApp('omitted', { document: approve(document), link: true })
 
-    const report = await planScaffoldFile(plan, { appRoot: dir, step: STEP })
+    const report = await scaffoldStep(plan, dir)
 
     expect(report.omitted).toEqual([{ model: 'model.widget', relationship: 'gadgets', reason: 'the application has no Gadget model yet' }])
     expect(await readFile(join(dir, 'app/Models/Widget.ts'), 'utf8')).not.toContain("'gadgets'")
@@ -1544,9 +1542,9 @@ Widget.belongsToMany('tags', () => import('./Tag.js').then((module) => module.Ta
     const log = spyOn(console, 'log').mockImplementation(() => {})
     try {
       await runCommand(builtinSubCommands['plan:scaffold'] as CommandDef, { rawArgs: [plan, '--step', STEP, '--app', dir, '--json'] })
-      const report = JSON.parse(String(log.mock.calls[0]![0])) as PlanScaffoldReport
-      expect(Object.keys(report).sort()).toEqual(['appended', 'created', 'emitted', 'left', 'omitted', 'plan', 'registered', 'reportVersion', 'step', 'unmounted', 'unwritten'])
-      expect(report).toMatchObject({ reportVersion: 1, step: STEP, plan: { file: PLAN_FILE, title: 'Widgets' }, created: CREATED })
+      const report = JSON.parse(String(log.mock.calls[0]![0])) as PlanScaffoldStepReport
+      expect(Object.keys(report).sort()).toEqual(['appended', 'created', 'emitted', 'kind', 'left', 'omitted', 'plan', 'registered', 'reportVersion', 'step', 'unmounted', 'unwritten'])
+      expect(report).toMatchObject({ reportVersion: 1, step: STEP, kind: 'scaffold', plan: { file: PLAN_FILE, title: 'Widgets' }, created: CREATED })
       expect(report.plan.hash).toMatch(/^[0-9a-f]{64}$/)
     } finally {
       log.mockRestore()

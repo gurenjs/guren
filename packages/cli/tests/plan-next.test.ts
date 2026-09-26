@@ -135,6 +135,23 @@ describe('plan:next', () => {
     expect(report.step!.mount).toBeUndefined()
   })
 
+  test('should name plan:scaffold for a tests step, with the behaviours it writes a skeleton for', async () => {
+    const approved = approvedAgainst(loadCommentsPlan())
+    const { app, plan } = await createApp('tests-text')
+    await writeWorkspaceFiles(app, { 'comments.plan.json': JSON.stringify(approved) })
+    await approvePlanFile(plan)
+    await writeState(app, { steps: { [SCAFFOLD]: { ...(await holding(app)), planDigest: planDigest(parsePlanDocument(approved)) } } })
+
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+    const text = formatPlanNext(report, 'comments.plan.json')
+
+    expect(report.step!.id).toBe(TESTS)
+    expect(report.step!.scaffold).toEqual({ command: `bunx guren plan:scaffold ${plan} --step ${TESTS}`, writes: ['AC-comments-1', 'AC-comments-2', 'AC-comments-3', 'AC-comments-4'], leaves: [] })
+    expect(text).toContain(`Write this step’s test skeletons with \`bunx guren plan:scaffold comments.plan.json --step ${TESTS}\`, not by hand, then fill them in.`)
+    expect(text).toContain('It writes one TestApp test per behaviour (AC-comments-1, AC-comments-2, AC-comments-3, AC-comments-4)')
+    expect(text).not.toContain('It writes each added model')
+  })
+
   test('should name --mount for the http step holding the routes the scaffold wrote, and what it left to write', async () => {
     const approved = approvedAgainst(loadCommentsPlan())
     const { app, plan } = await createApp('mount-text')
