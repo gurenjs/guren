@@ -1,13 +1,13 @@
-import { readFile, writeFile, unlink, readdir, mkdir, rm, rename, link } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { readFile, writeFile, unlink, readdir, mkdir, rm, rename, link, copyFile } from 'node:fs/promises'
+import { constants, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import type { CacheStore, FileStoreOptions, CachedItem } from '../types'
 import { withFileLock } from './file-lock'
 
-// Locks only guard read-modify-write (add, increment). One held this long is taken
-// over: its owner most likely died mid-operation, and losing one update beats a key
-// that stays locked until someone deletes the directory.
+// Locks guard read-modify-write (add, increment), delete and cleanup; reads and set()
+// take none. One held this long is taken over: its owner most likely died mid-operation,
+// and losing one update beats a key that stays locked until someone deletes the directory.
 const LOCK_TIMEOUT_MS = 5000
 
 /** File-based cache store. */
@@ -113,9 +113,10 @@ export class FileStore implements CacheStore {
     return value !== null
   }
 
+  // Locked so it cannot land while cleanup() has the file moved aside and be undone by the restore.
   async delete(key: string): Promise<boolean> {
     const filePath = this.getFilePath(key)
-    return this.deleteCacheFile(filePath)
+    return this.locked(filePath, () => this.deleteCacheFile(filePath))
   }
 
   async clear(): Promise<void> {
@@ -251,9 +252,8 @@ export class FileStore implements CacheStore {
     return cleaned
   }
 
-  // The lock keeps add() and increment() out; set() takes none, so the file is judged
-  // after it is moved aside, and one set() replaced since the read goes back. A newer
-  // set() already in its place wins (EEXIST). Readers miss the key while it is aside.
+  // set() takes no lock, so the file is judged after it is moved aside: an entry set()
+  // wrote since the unlocked read is restored. Readers miss the key while it is aside.
   private async removeIfExpired(filePath: string): Promise<boolean> {
     const grave = `${filePath}.${randomUUID()}.grave`
     try {
@@ -263,9 +263,23 @@ export class FileStore implements CacheStore {
     }
     const item = await this.readCacheFile(grave)
     const expired = item !== null && this.isExpired(item)
-    if (!expired) await link(grave, filePath).catch(() => undefined)
-    await unlink(grave).catch(() => undefined)
+    if (expired || await this.restore(grave, filePath)) await unlink(grave).catch(() => undefined)
     return expired
+  }
+
+  // Never overwrites: EEXIST means a newer set() took the slot and wins. link() fails with
+  // EPERM under fs.protected_hardlinks (another uid's file) and on filesystems without hard
+  // links, so an exclusive copy follows. False keeps the grave, the value's only copy.
+  private async restore(grave: string, filePath: string): Promise<boolean> {
+    for (const put of [() => link(grave, filePath), () => copyFile(grave, filePath, constants.COPYFILE_EXCL)]) {
+      try {
+        await put()
+        return true
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') return true
+      }
+    }
+    return false
   }
 
   getBasePath(): string {

@@ -219,12 +219,12 @@ await cache.store('file').set('persistent', 'data')
 | `extension` | `'.cache'` | キャッシュファイルの拡張子 |
 | `now` | `Date.now` | TTL 計算に使う時計（エポック ms）。テストで注入可能 |
 
-期限切れのエントリーを `get()`、`has()`、`ttl()` で読むと、キーはないものとして扱われますが、ファイルはディスクに残ります。読んだ後に別の書き込みがファイルを置き換えている可能性があるためです。`cleanup()` は `add()` や `increment()` と同じロックを取って期限切れのファイルを削除するので、確認した後に書き込まれたエントリーは削除しません。ディスク容量を空けるには、スケジュールしたタスクなどから定期的に呼び出してください。
+期限切れのアイテムを `get()`、`has()`、`ttl()` で読むと、キーはないものとして扱われますが、ファイルはディスクに残ります。読んだ後に別の書き込みがファイルを置き換えている可能性があるためです。期限切れのファイルは `cleanup()` が削除します。`cleanup()` は `add()`、`increment()`、`decrement()`、`delete()` と同じキーごとのロックを取ります。そのうえで期限切れのファイルを退避し、退避先でもう一度確認します。最初の確認の後に `set()` が書いたアイテムは元に戻します。退避している間、そのキーの読み取りはヒットしません。`cleanup()` は、[スケジュールしたコールバック](./scheduling.md#コールバック)などから定期的に呼び出してください。呼び出すストアの `path` と `extension` は設定と揃えます。拡張子が異なるファイルは対象になりません。
 
 ```ts
 import { FileCacheStore } from '@guren/core'
 
-const removed = await new FileCacheStore({ path: 'storage/cache' }).cleanup()
+const removed = await new FileCacheStore({ path: './storage/cache', extension: '.cache' }).cleanup()
 ```
 
 ## タグ付きキャッシュ
