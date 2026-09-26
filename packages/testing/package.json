@@ -1,6 +1,6 @@
 {
   "name": "@guren/testing",
-  "version": "1.14.0",
+  "version": "1.14.1",
   "description": "Testing utilities for Guren applications: TestApp with HTTP and Inertia assertions, plus auth, mail, queue and event fakes for bun:test.",
   "keywords": [
     "guren",

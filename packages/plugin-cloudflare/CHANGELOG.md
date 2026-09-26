@@ -1,5 +1,18 @@
 # @guren/plugin-cloudflare
 
+## 0.12.3
+
+### Patch Changes
+
+- 203d25d: The plugin's provider introspects through its own `introspect()` hook (RFC 0026), which binds nothing and reads no Workers binding.
+- Updated dependencies [da3686f]
+- Updated dependencies [0ebdf79]
+- Updated dependencies [4097977]
+- Updated dependencies [c549bca]
+- Updated dependencies [203d25d]
+- Updated dependencies [122e175]
+  - @guren/core@1.22.0
+
 ## 0.12.2
 
 ### Patch Changes

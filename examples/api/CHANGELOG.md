@@ -1,5 +1,69 @@
 # @guren/example-api
 
+## 0.1.48
+
+### Patch Changes
+
+- Updated dependencies [3d2d39b]
+- Updated dependencies [4ce01ae]
+- Updated dependencies [9eebeec]
+- Updated dependencies [16fca2e]
+- Updated dependencies [9cd5e44]
+- Updated dependencies [1b85e80]
+- Updated dependencies [96c7592]
+- Updated dependencies [b6f5d44]
+- Updated dependencies [356c147]
+- Updated dependencies [5355104]
+- Updated dependencies [3ca4ed7]
+- Updated dependencies [9b47c77]
+- Updated dependencies [da3686f]
+- Updated dependencies [14e98c6]
+- Updated dependencies [cb35986]
+- Updated dependencies [3a09114]
+- Updated dependencies [d1882bb]
+- Updated dependencies [0c58c15]
+- Updated dependencies [f3a4b6f]
+- Updated dependencies [8e635ef]
+- Updated dependencies [cb49e13]
+- Updated dependencies [3cdb312]
+- Updated dependencies [0ebdf79]
+- Updated dependencies [e08047c]
+- Updated dependencies [d1b6d1a]
+- Updated dependencies [0c22361]
+- Updated dependencies [3d5760a]
+- Updated dependencies [548d833]
+- Updated dependencies [4097977]
+- Updated dependencies [c549bca]
+- Updated dependencies [c549bca]
+- Updated dependencies [203d25d]
+- Updated dependencies [17836ed]
+- Updated dependencies [e89f0de]
+- Updated dependencies [4877a1c]
+- Updated dependencies [94c6966]
+- Updated dependencies [02704dc]
+- Updated dependencies [02fca62]
+- Updated dependencies [122e175]
+- Updated dependencies [9cd5e44]
+- Updated dependencies [74b5bd4]
+- Updated dependencies [52cc8fa]
+- Updated dependencies [da12a1d]
+- Updated dependencies [1f6de30]
+- Updated dependencies [1c83249]
+- Updated dependencies [9d79b44]
+- Updated dependencies [8a1e18f]
+- Updated dependencies [b59ab29]
+- Updated dependencies [e13c8b3]
+- Updated dependencies [5b4411e]
+- Updated dependencies [43523fa]
+- Updated dependencies [3858844]
+- Updated dependencies [0a99f92]
+- Updated dependencies [4ef63b3]
+- Updated dependencies [5d8aa8e]
+  - @guren/cli@2.28.0
+  - @guren/core@1.22.0
+  - @guren/testing@1.14.1
+  - @guren/orm@2.13.0
+
 ## 0.1.47
 
 ### Patch Changes
