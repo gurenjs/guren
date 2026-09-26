@@ -61,7 +61,7 @@ export interface PlanApproveFileOptions {
   cwd?: string
   now?: () => Date
   exec?: CapturedExec
-  /** Approve although a section other than validators could not be read, leaving its elements unstamped. */
+  /** Approve although a section could not be read, leaving its elements unstamped. */
   allowUnstamped?: boolean
 }
 
@@ -94,12 +94,11 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
     const rev = await headRevision(appRoot, exec)
     await refuseDirtyTree(appRoot, path, exec)
     const stamp = stampContextHash(plan, app)
-    // Validators are never read, so they alone never refuse; any other section would stay unstamped for good.
-    const unread = stamp.unstamped.filter((entry) => entry.sections.some((section) => section !== 'validators'))
-    if (unread.length > 0 && !options.allowUnstamped) {
-      const sections = [...new Set(unread.flatMap((entry) => entry.sections.filter((section) => section !== 'validators')))]
+    // A baseline is never restamped, so an element left out here stays unstamped for good.
+    if (stamp.unstamped.length > 0 && !options.allowUnstamped) {
+      const sections = [...new Set(stamp.unstamped.flatMap((entry) => entry.sections))]
       throw new CliError(
-        `The application's ${sections.join(', ')} could not be read, so these elements would get no context hash and never be judged fresh or stale:\n${unread
+        `The application's ${sections.join(', ')} could not be read, so these elements would get no context hash and never be judged fresh or stale:\n${stamp.unstamped
           .map((entry) => `  ${entry.id}: ${entry.reason}`)
           .join('\n')}\nFix what the reason names, or pass --allow-unstamped to approve without them.`,
       )

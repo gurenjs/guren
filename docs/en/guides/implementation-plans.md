@@ -263,14 +263,15 @@ bunx guren plan:approve docs/plans/comments/plan.json
 ```text
 Comments on posts (plan.json)
 
-Stamped the baseline at 0c871a5b9dc25587d33ae3d6bb6c3befe2c7e6a2: 13 element(s) hashed.
-Not hashed, since their section could not be read: validator.comment
+Stamped the baseline at 0c871a5b9dc25587d33ae3d6bb6c3befe2c7e6a2: 14 element(s) hashed.
 Approved 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0, recorded in docs/plans/comments/approvals.json.
 ```
 
 The first approval writes a `baseline` into the plan: `rev`, the commit the plan was written against, and `contextHash`, a hash per referenced element of what the application holds for it today. That is why it refuses a repository with no commit and a working tree with uncommitted changes (the plan's own files excepted). The approval itself goes to `approvals.json`, beside the plan and never inside it. Commit both.
 
-Validators are never hashed: the stamp finds each element's file from its name, and it does not resolve a validator's exported schema symbol to a file. If another section cannot be read, approval refuses and names the elements that would stay unhashed; `--allow-unstamped` approves without them.
+A validator is found by its exported schema symbol, read from the files under `app/Http/Validators/` without importing them. A name none of those files declares and exports is a warning rather than a failure, since a schema kept in a controller or re-exported from elsewhere is not seen. If a section cannot be read (a file there that does not parse, or one exporting through `export *`), approval refuses and names the elements that would stay unhashed; `--allow-unstamped` approves without them.
+
+A plan approved before validators were read has no hash for them. Re-approving it after its validator was written reports the name as a `plan:app-unjudged` warning instead of a collision: the baseline cannot show whether the plan wrote it.
 
 The plan's hash identifies it: a SHA-256 of the plan with its baseline. Approvals, verification records and waivers all name it, so a plan edited after approval is a different plan. `plan:next`, `plan:scaffold`, `plan:verify`, `plan:waive` and `plan:close` refuse a plan with a baseline whose current hash no approval names:
 
@@ -763,11 +764,10 @@ Verification results live in `.guren/plans/`, which git ignores: a result is a f
 For an approved plan, `plan:status` also compares each referenced element with the hash stamped at approval:
 
 ```text
-Against the approved baseline: fresh 13, stale 0, unstamped 0, unjudged 1
-  unjudged: validator.comment
+Against the approved baseline: fresh 14, stale 0, unstamped 0, unjudged 0
 ```
 
-An element is `fresh` while the application holds what was stamped, or what the plan says it will hold (`--json` says which under `basis`). It is `stale` when another change moved it somewhere else. `unstamped` has no hash (its section was unreadable at approval), and `unjudged` cannot be read now. Validators always read `unjudged` (they are never hashed, see Approving), so the line above appears in any plan that declares a validator. A commit elsewhere that did not touch a referenced element leaves the plan fresh.
+An element is `fresh` while the application holds what was stamped, or what the plan says it will hold (`--json` says which under `basis`). It is `stale` when another change moved it somewhere else. `unstamped` has no hash (its section was unreadable at approval, a revision named it later, or, for a validator, the plan was approved before validators were read), and `unjudged` cannot be read now; each is listed by id under the summary line. A commit elsewhere that did not touch a referenced element leaves the plan fresh.
 
 A stale element holds every step that depends on it. In a copy of the example, another commit registered a `comments.store` route before the implementation started:
 

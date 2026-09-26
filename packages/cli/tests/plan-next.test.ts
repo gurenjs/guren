@@ -834,10 +834,13 @@ describe('plan:next on stale context', () => {
   test('should report what the returned step depends on whose freshness is not judged, blocking nothing', async () => {
     const { app, plan } = await approvedApp('reported', loadCommentsPlan(), [SCAFFOLD, TESTS, DATA])
 
-    const report = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+    const readable = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
+    expect(readable.step!.id).toBe(HTTP)
+    expect(readable.step!.unconfirmed ?? []).toEqual([])
+
+    const report = await planNextFile(plan, { appRoot: app, app: planAppState({ validators: { unreadable: 'a validator file did not parse' } }), now: NOW })
 
     expect(report.step!.id).toBe(HTTP)
-    // Validators are never read, so the one the step owns is always unjudged.
     expect(report.step!.unconfirmed).toEqual([expect.objectContaining({ id: 'validator.comment', verdict: 'unjudged', owned: true })])
     expect(formatPlanNext(report, 'comments.plan.json')).toContain('Depends on elements whose freshness is not confirmed, which holds nothing:\n  unjudged  validator.comment: ')
   })
