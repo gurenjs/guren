@@ -298,8 +298,7 @@ const queueRetryCommand = defineCommand({
     } else if (args.id) {
       await retryFailedJob(args.id)
     } else {
-      consola.error('Please provide a job ID or use --all to retry all failed jobs.')
-      process.exit(1)
+      throw new UsageError('Please provide a job ID or use --all to retry all failed jobs.')
     }
   },
 })

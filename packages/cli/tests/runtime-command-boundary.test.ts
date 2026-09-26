@@ -4,6 +4,9 @@ import { CLI_BIN_PATH, createTempRoot, writeWorkspaceFiles } from './helpers'
 const commandsUrl = new URL('../src/commands.ts', import.meta.url).href
 const runnerUrl = new URL('../src/run-cli.ts', import.meta.url).href
 
+const HARD_TIMEOUT_MS = 20_000
+const TEST_TIMEOUT_MS = HARD_TIMEOUT_MS + 5_000
+
 const cases = [
   { name: 'dev missing entry', args: ['dev'], source: undefined, message: 'Could not locate an application entry point' },
   { name: 'console missing entry', args: ['console'], source: undefined, message: 'Could not locate an application entry point' },
@@ -19,6 +22,7 @@ const cases = [
       export default { listen() {}, container: { has: () => true, make: () => manager } }
     `,
   },
+  { name: 'queue retry without an id', args: ['queue:retry'], source: undefined, message: 'Please provide a job ID' },
 ]
 
 describe('runtime command error boundary', () => {
@@ -34,7 +38,9 @@ describe('runtime command error boundary', () => {
           console.log('RETURNED:' + code)
         } finally { console.log('CALLER_CLEANUP') }
       `
-      const proc = Bun.spawn(['bun', '--eval', script], { cwd: root, stdout: 'pipe', stderr: 'pipe' })
+      const proc = Bun.spawn(['bun', '--eval', script], {
+        cwd: root, stdout: 'pipe', stderr: 'pipe', timeout: HARD_TIMEOUT_MS, killSignal: 'SIGKILL',
+      })
       const [stdout, stderr, code] = await Promise.all([
         new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
       ])
@@ -43,15 +49,31 @@ describe('runtime command error boundary', () => {
       expect(stdout).toContain('CALLER_CLEANUP')
       expect(stderr).toContain(scenario.message)
       expect(stderr.match(/\[error\]/g)?.length).toBe(1)
-    })
+    }, TEST_TIMEOUT_MS)
   }
+
+  // dev and console are exempt from the bin's exit on success, so a failure the app
+  // leaves a handle open behind must still be ended by the bin, not by the command.
+  test('the bin exits with code 1 when dev fails while the app holds a handle open', async () => {
+    const root = await createTempRoot('guren-runtime-command-handle-')
+    await writeWorkspaceFiles(root, {
+      'src/main.ts': "export default { listen() { setInterval(() => {}, 60_000); throw new Error('listen failed') } }",
+    })
+    const proc = Bun.spawn(['bun', CLI_BIN_PATH, 'dev'], {
+      cwd: root, stdout: 'pipe', stderr: 'pipe', timeout: HARD_TIMEOUT_MS, killSignal: 'SIGKILL',
+    })
+    const [, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited])
+    expect(proc.signalCode).toBeNull()
+    expect(code).toBe(1)
+    expect(stderr).toContain('Failed to start application listener: listen failed')
+  }, TEST_TIMEOUT_MS)
 
   test('console still opens after a boot failure and closes on EOF', async () => {
     const root = await createTempRoot('guren-console-boot-warning-')
     await writeWorkspaceFiles(root, { 'src/main.ts': "export default { listen() {}, boot() { throw new Error('provider failed') } }" })
     const { NODE_ENV: _testEnv, ...env } = process.env
     const proc = Bun.spawn(['bun', CLI_BIN_PATH, 'console'], { cwd: root, env, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' })
-    const timer = setTimeout(() => proc.kill(), 4000)
+    const timer = setTimeout(() => proc.kill(), HARD_TIMEOUT_MS)
     try {
       const stdout = (async () => {
         let output = ''
@@ -74,5 +96,5 @@ describe('runtime command error boundary', () => {
       clearTimeout(timer)
       proc.kill()
     }
-  })
+  }, TEST_TIMEOUT_MS)
 })
