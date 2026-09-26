@@ -273,14 +273,15 @@ bunx guren plan:approve docs/plans/comments/plan.json
 ```text
 Comments on posts (plan.json)
 
-Stamped the baseline at 0c871a5b9dc25587d33ae3d6bb6c3befe2c7e6a2: 13 element(s) hashed.
-Not hashed, since their section could not be read: validator.comment
+Stamped the baseline at 0c871a5b9dc25587d33ae3d6bb6c3befe2c7e6a2: 14 element(s) hashed.
 Approved 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0, recorded in docs/plans/comments/approvals.json.
 ```
 
 最初の承認で、計画に `baseline` が書き込まれます。`rev` は計画を書いた時点のコミットです。`contextHash` は参照している要素ごとに、アプリケーションがいま持っている形をハッシュにしたものです。コミットのないリポジトリや、未コミットの変更がある作業ツリーを拒否するのはこのためです (計画自身のファイルは除きます)。承認の記録は計画の中ではなく、隣の `approvals.json` に書かれます。両方をコミットしてください。
 
-validator はハッシュを取りません。baseline を刻むときは要素の名前からファイルをたどりますが、validator の名前 (export されたスキーマのシンボル) からはファイルをたどらないためです。それ以外のセクションが読めなかった場合、承認は拒否され、ハッシュのないまま残る要素が示されます。`--allow-unstamped` を付けると、それらを除いて承認します。
+validator は export されたスキーマのシンボルで探します。`app/Http/Validators/` のファイルを import せずに読み、export 名を集めます。どのファイルも宣言・export していない名前は、失敗ではなく警告になります。コントローラー内のスキーマや、別の場所からの再 export は読めないためです。セクションを読めなかった場合 (そこに構文解析できないファイルや `export *` で export するファイルがある場合など)、承認は拒否され、ハッシュのないまま残る要素が示されます。`--allow-unstamped` を付けると、それらを除いて承認します。
+
+validator を読む前に承認した計画は、validator のハッシュを持っていません。validator を書いたあとで再承認すると、その名前は衝突ではなく `plan:app-unjudged` の警告になります。計画自身が書いたものかどうかを baseline から判断できないためです。
 
 計画を識別するのはハッシュです。baseline を含めた計画の SHA-256 で、承認も検証の記録も waiver もこのハッシュを名指しします。承認後に編集した計画は別の計画です。baseline を持つ計画の現在のハッシュをどの承認も名指ししていなければ、`plan:next`、`plan:scaffold`、`plan:verify`、`plan:waive`、`plan:close` はその計画を拒否します。
 
@@ -358,10 +359,10 @@ bunx guren plan:revise docs/plans/comments/plan.json --edited /tmp/comments.edit
 | `scaffold` | 新しいエンティティの最初の版。`plan:scaffold` が書きます | `codegen`、`typecheck` |
 | `tests` | 受け入れ振る舞いごとのテスト。`plan:scaffold` が雛形を書き、失敗する状態にします | `codegen`、テストが失敗すること |
 | `data` | テーブル、マイグレーション、モデルのリレーションと fillable。scaffold 済みなら、マイグレーションと `plan:scaffold` が書かなかったもの | `codegen`、`db:migrate`、`typecheck` |
-| `http` | コントローラーとルート。validator、Resource、Policy も書きます。scaffold 済みなら、`plan:scaffold` がスタブにしたものと書かなかったもの | `codegen`、`guren check`、テストが通ること |
+| `http` | コントローラーとルート。validator、Resource、Policy も書きます。scaffold 済みなら、`plan:scaffold` がスタブにしたものと書かなかったもの | `codegen`、`typecheck`、`guren check`、テストが通ること |
 | `pages` | ページコンポーネント | `codegen`、`typecheck`、`guren check` |
 
-複数のエンティティが共有する作業は `task/foundation` に入ります。ステップの id は `task/entity/model.comment/http` のような形です。`commands`、`data`、`http`、`pages` のステップは、担当する要素が五つを超えるファイルにまたがると複数に分かれ、`task/entity/model.comment/http/1`、`task/entity/model.comment/http/2` のような id になります。`scaffold` と `tests` は分かれません。`--step` に渡す正確な id は `plan:next` が表示します。次のステップを尋ね、実装し、検証し、コミットする。これを繰り返します。
+テストはタスクごとに一つのステップ、振る舞いを判定するステップでだけ実行されます。最後の `http` ステップで、`http` がなければタスクの最後のステップなので、`data` や `pages` で実行されることもあります。分割された `http` の前半を含め、ほかのステップはテストを実行しません。`typecheck` を実行するのはタスクの最後の `http` ステップだけです。前半のパートが、後半のパートで書く Resource やジョブを import することがあるためです。`http` のアクションが描画するページのうち `pages` ステップで追加するものは、ファイルができるまで `.guren/pages.gen.ts` に載りません。`plan:next` はそのページを `http` ステップと一緒に表示します。default export と計画の `Props` だけを持つスタブをこのステップで作り、残りは `pages` ステップで書きます。複数のエンティティが共有する作業は `task/foundation` に入ります。ステップの id は `task/entity/model.comment/http` のような形です。`commands`、`data`、`http`、`pages` のステップは、担当する要素が五つを超えるファイルにまたがると複数に分かれ、`task/entity/model.comment/http/1`、`task/entity/model.comment/http/2` のような id になります。`scaffold` と `tests` は分かれません。`--step` に渡す正確な id は `plan:next` が表示します。次のステップを尋ね、実装し、検証し、コミットする。これを繰り返します。
 
 ```bash
 bunx guren plan:next docs/plans/comments/plan.json
@@ -569,7 +570,8 @@ test('[AC-comments-1] A signed-in user can comment on a post.', async () => {
 - リクエストはルートが示すものです。メソッド、パラメーターをセグメント全体の埋め込みにしたパス、ボディにした `input` (`GET` ならクエリ文字列) を書きます。
 - 期待値は計画のものです。`status`、`redirect` (ルートと共通のパラメーターはルートの値を使います)、`inertia` (JSON を求めるリクエストにし、Inertia のバージョン確認を通らずにページを受け取ります)、`errors` (JSON のボディから読みます)、`database` の行を書きます。行はモデルを通したクエリで、ルートにモデルがあり、計画のカラムの型と比べられる値のときに書きます。行の準備と後片付けは実装する側の作業です。ほかのテストが残した行があると、実装に関係なく期待値が通ったり失敗したりします。
 - 計画が文章で書いた前提、ルートが求めるときのサインイン済みのアクター、パスの各パラメーターは `given()` の呼び出しになり、呼ぶと例外を投げます。雛形に書けない期待値は `unwritten()` の呼び出しになり、これも例外を投げます。期待する 404 も同じ扱いです。まだないルートも 404 を返すからです。どれもレポートと出力に一覧で示します。
-- `client()` はテストの中で `src/app.ts` を import し、`TestApp.fromApp()` で起動します。起動に失敗してもファイル全体ではなく、各テストが名前付きで失敗します。アプリケーションが CSRF をマウントしていれば、`withCsrf()` で準備します。`cookie: false` で CSRF をマウントしたアプリケーションには対応していません。
+- `ready()` は `src/app.ts` を import し、`TestApp.fromApp()` で一度だけ起動します。ファイルの `beforeAll` がこれを呼ぶので、行の作成や削除のために追加する `beforeEach` より先に ORM が設定されます。Bun のフックの既定の制限時間は 5 秒ですが、起動は 120 秒まで待ちます。起動の失敗は `beforeAll` では投げずに出力するので、追加したフックに関係なく `plan:verify` はステップを `blocked` と記録します。`ready()` か `client()` を呼んだ各テストは、その失敗で名前付きで失敗します。追加するフックは `await ready()` から始めてください。各テストが報告するのがデータベースエラーではなく起動の失敗になります。
+- `client()` は起動済みのアプリケーションを返します。アクターを渡せばそのアクターとして振る舞います。アプリケーションが CSRF をマウントしていれば、`withCsrf()` で準備します。`cookie: false` で CSRF をマウントしたアプリケーションには対応していません。
 - サインイン済みのアクターを用意するのは、`auth` か `auth:*` のミドルウェア、Policy、`forbidden` の振る舞いのときだけです。
 
 実装より前は、どのテストも `given()` の呼び出しか、まだマウントされていないルートで失敗します。skip されるテストはないので、`tests:fail` の条件どおりにステップを検証できます。アプリケーションが起動しないときは、どのテストもルートに届いていないので、`plan:verify` はステップを `blocked` と記録します。コードを書く前に通ってしまう場合が二つあり、そのときは `tests:fail` でステップが失敗します。一つは既存のルートで準備するものがない振る舞いで、レポートに一覧で示します。もう一つは、新しいルートのパスに既存のルートがすでに応答する振る舞いで、こちらは一覧に出ません。`given()` と `unwritten()` の呼び出しは、それぞれが示す前提やアサーションに置き換えてください。テストを `test.skip` や `test.todo` に変えないでください。skip したケースは実行に数えられず、ステップはそこで失敗します。後のステップも同じファイルを実行して通ることを求めるので、タイトルの id とリクエストは残してください。
@@ -779,11 +781,10 @@ Not approved at this hash: plan:next, plan:scaffold, plan:verify, plan:waive, pl
 承認済みの計画では、`plan:status` は参照している要素を承認時のハッシュとも比べます。
 
 ```text
-Against the approved baseline: fresh 13, stale 0, unstamped 0, unjudged 1
-  unjudged: validator.comment
+Against the approved baseline: fresh 14, stale 0, unstamped 0, unjudged 0
 ```
 
-アプリケーションが承認時の形か、計画が目指す形を保っている間、その要素は `fresh` です (どちらなのかは `--json` の `basis` に出ます)。ほかの変更で別の形に動くと `stale` になります。`unstamped` はハッシュがない要素で、承認時にセクションを読めなかったものです。`unjudged` はいま読めない要素です。validator はハッシュを取らないので (「承認」の節を参照してください)、常に `unjudged` になります。そのため validator を宣言した計画には上の行が必ず出ます。参照している要素に触れないコミットなら、計画は fresh のままです。
+アプリケーションが承認時の形か、計画が目指す形を保っている間、その要素は `fresh` です (どちらなのかは `--json` の `basis` に出ます)。ほかの変更で別の形に動くと `stale` になります。`unstamped` はハッシュがない要素です。承認時にセクションを読めなかったもの、改訂であとから加わったもの、validator を読む前に承認した計画の validator が該当します。`unjudged` はいま読めない要素です。どちらも要約行の下に id が並びます。参照している要素に触れないコミットなら、計画は fresh のままです。
 
 stale になった要素は、それに依存するステップをすべて保留にします。例のコピーで、実装を始める前に別のコミットが `comments.store` というルートを登録したときの出力です。
 

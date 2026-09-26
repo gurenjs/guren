@@ -79,6 +79,11 @@ export interface PlanNextStep extends Pick<PlanDerivedStep, 'id' | 'kind' | 'ver
    * the step's elements that scaffold wrote as stubs, and those it left to write by hand.
    */
   mount?: { command: string; file: string; scaffolded: string[]; byHand: string[] }
+  /**
+   * An http step's: the added or renamed views its actions render. `pages.gen.ts` names a page only once
+   * its file exists, and the task's last http step typechecks, so each is written here as a stub the pages step completes.
+   */
+  pageStubs?: Array<{ view: string; page: string }>
 }
 
 export interface PlanNextStaleElement extends PlanStepContextElement {
@@ -396,8 +401,24 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
       ...(verifiedAt === undefined ? {} : { verifiedAt }),
       ...(scaffolded ? { scaffolded } : step.kind === 'scaffold' || step.kind === 'tests' ? { scaffold: scaffoldOf(plan, step, planPath) } : {}),
       ...mountable,
+      ...pageStubsOf(plan, step),
     },
   }
+}
+
+function pageStubsOf(plan: PlanDraft, step: PlanDerivedStep): Pick<PlanNextStep, 'pageStubs'> {
+  if (step.kind !== 'http') return {}
+  const owned = new Set(step.elementIds)
+  const views = new Set<string>()
+  for (const controller of plan.controllers) {
+    for (const action of controller.actions) {
+      if (owned.has(action.id) && action.response.kind === 'inertia') views.add(action.response.view)
+    }
+  }
+  const pageStubs = plan.views
+    .filter((view) => views.has(view.id) && (view.change.kind === 'add' || view.change.kind === 'rename'))
+    .map((view) => ({ view: view.id, page: view.page }))
+  return pageStubs.length > 0 ? { pageStubs } : {}
 }
 
 function scaffoldOf(plan: PlanDraft, step: PlanDerivedStep, planArgument: string): NonNullable<PlanNextStep['scaffold']> {
@@ -547,6 +568,13 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     }
     // A draft is never scaffolded (plan:scaffold refuses it), so it has nothing to mount.
     if (step.mount && report.plan.hash !== null) lines.push('', ...mountLines(step, step.mount, planArgument))
+    if (step.pageStubs) {
+      lines.push(
+        '',
+        'Pages its actions render, which the pages step writes: create each now as a stub with a default export and the plan\u2019s Props, so codegen names it in .guren/pages.gen.ts and the typecheck passes. Leave the rest of the page to the pages step.',
+        ...step.pageStubs.map((stub) => `  ${stub.page} (${stub.view})`),
+      )
+    }
     if (step.acceptance.length > 0) {
       const heading = step.kind !== 'tests' ? ' that must pass' : step.scaffolded ? ' its tests carry' : ' to write, as test titles `[<id>] <description>`, failing'
       lines.push('', `Behaviours${heading}:`)

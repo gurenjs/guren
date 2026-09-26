@@ -263,14 +263,15 @@ bunx guren plan:approve docs/plans/comments/plan.json
 ```text
 Comments on posts (plan.json)
 
-Stamped the baseline at 0c871a5b9dc25587d33ae3d6bb6c3befe2c7e6a2: 13 element(s) hashed.
-Not hashed, since their section could not be read: validator.comment
+Stamped the baseline at 0c871a5b9dc25587d33ae3d6bb6c3befe2c7e6a2: 14 element(s) hashed.
 Approved 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0, recorded in docs/plans/comments/approvals.json.
 ```
 
 The first approval writes a `baseline` into the plan: `rev`, the commit the plan was written against, and `contextHash`, a hash per referenced element of what the application holds for it today. That is why it refuses a repository with no commit and a working tree with uncommitted changes (the plan's own files excepted). The approval itself goes to `approvals.json`, beside the plan and never inside it. Commit both.
 
-Validators are never hashed: the stamp finds each element's file from its name, and it does not resolve a validator's exported schema symbol to a file. If another section cannot be read, approval refuses and names the elements that would stay unhashed; `--allow-unstamped` approves without them.
+A validator is found by its exported schema symbol, read from the files under `app/Http/Validators/` without importing them. A name none of those files declares and exports is a warning rather than a failure, since a schema kept in a controller or re-exported from elsewhere is not seen. If a section cannot be read (a file there that does not parse, or one exporting through `export *`), approval refuses and names the elements that would stay unhashed; `--allow-unstamped` approves without them.
+
+A plan approved before validators were read has no hash for them. Re-approving it after its validator was written reports the name as a `plan:app-unjudged` warning instead of a collision: the baseline cannot show whether the plan wrote it.
 
 The plan's hash identifies it: a SHA-256 of the plan with its baseline. Approvals, verification records and waivers all name it, so a plan edited after approval is a different plan. `plan:next`, `plan:scaffold`, `plan:verify`, `plan:waive` and `plan:close` refuse a plan with a baseline whose current hash no approval names:
 
@@ -348,10 +349,10 @@ Guren derives the work from the plan, and the order does not depend on a model. 
 | `scaffold` | The first version of a new entity, written by `plan:scaffold` | `codegen`, `typecheck` |
 | `tests` | One test per acceptance behaviour, written as a skeleton by `plan:scaffold`, failing | `codegen`, the tests failing |
 | `data` | Table, migration, model relationships and fillable; after a scaffold, the migration and what `plan:scaffold` left out | `codegen`, `db:migrate`, `typecheck` |
-| `http` | Controllers and routes; validators, resources and policies, or after a scaffold, what `plan:scaffold` left as a stub or unwritten | `codegen`, `guren check`, the tests passing |
+| `http` | Controllers and routes; validators, resources and policies, or after a scaffold, what `plan:scaffold` left as a stub or unwritten | `codegen`, `typecheck`, `guren check`, the tests passing |
 | `pages` | Page components | `codegen`, `typecheck`, `guren check` |
 
-Work shared by several entities goes to a `task/foundation` task. Step ids read `task/entity/model.comment/http`. A `commands`, `data`, `http` or `pages` step whose elements span more than five files is split into parts with ids such as `task/entity/model.comment/http/1` and `task/entity/model.comment/http/2`; `scaffold` and `tests` are never split. `plan:next` prints the exact id to pass to `--step`. The loop is: ask for the next step, implement it, verify it, commit.
+The tests run on one step per task, the one its behaviours are judged at: the last `http` step, or the task's last step when it has none, so a `data` or `pages` step can run them too. Any other step, an earlier part of a split `http` step included, runs no tests. Only the task's last `http` step runs `typecheck`, since an earlier part may import a resource or job a later part writes. A page an `http` action renders that the `pages` step adds is not in `.guren/pages.gen.ts` until its file exists, so `plan:next` lists it with the `http` step: create it there as a stub with a default export and the plan's `Props`, and write the rest in the `pages` step. Work shared by several entities goes to a `task/foundation` task. Step ids read `task/entity/model.comment/http`. A `commands`, `data`, `http` or `pages` step whose elements span more than five files is split into parts with ids such as `task/entity/model.comment/http/1` and `task/entity/model.comment/http/2`; `scaffold` and `tests` are never split. `plan:next` prints the exact id to pass to `--step`. The loop is: ask for the next step, implement it, verify it, commit.
 
 ```bash
 bunx guren plan:next docs/plans/comments/plan.json
@@ -559,7 +560,8 @@ test('[AC-comments-1] A signed-in user can comment on a post.', async () => {
 - The request is the one its route names: the method, the path with each parameter as a whole-segment interpolation, and the `input` as the body (as the query string for a `GET`).
 - The expectations are the plan's: `status`, `redirect` (a parameter it shares with the route reuses the route's value), `inertia` (the request asks for JSON, which returns the page without Inertia's version check), `errors` (read from the JSON body), and a `database` row as a query through the model, for a table whose model the root declares and a value the plan's column type can compare with. Setting up those rows and cleaning them up is yours: a row another test left behind can make the expectation pass or fail whatever the code does.
 - The setup the plan states in prose, the signed-in actor where the route requires one, and each path parameter are `given()` calls, which throw. An expectation the skeleton cannot write is an `unwritten()` call, which throws too, and so is an expected 404, which a route that does not exist yet answers as well. The report and the output list each one.
-- `client()` imports `src/app.ts` and boots it with `TestApp.fromApp()` inside the test, so a boot that fails fails each test by name rather than the file. It primes CSRF with `withCsrf()` when the application mounts it; an application that mounts CSRF with `cookie: false` is not handled.
+- `ready()` imports `src/app.ts` and boots it once with `TestApp.fromApp()`. The file's `beforeAll` calls it, so the ORM is configured before any `beforeEach` you add to create or clear rows. It waits up to 120 seconds, past Bun's 5-second hook default. A boot that fails is printed there rather than thrown, so `plan:verify` records the step `blocked` whatever your hooks do, and each test that calls `ready()` or `client()` fails by name with it. Open a hook of your own with `await ready()`, so the boot failure, not a database error, is what each test reports.
+- `client()` returns the booted application, acting as the actor when given one, and primes CSRF with `withCsrf()` when the application mounts it; an application that mounts CSRF with `cookie: false` is not handled.
 - Only `auth` or `auth:*` middleware, a policy, or a `forbidden` behaviour gets a signed-in actor.
 
 Before the implementation exists every test fails, either at a `given()` call or on the route that is not mounted yet, and none is skipped, so the step verifies as `tests:fail` asks. When the application does not boot, `plan:verify` records the step `blocked`, since no test reached its route. Two cases can pass before any code is written, and `tests:fail` then fails the step: a behaviour on a route that exists already with nothing to set up, which the report lists as may pass now, and a behaviour on a new route whose path an existing route already answers, which nothing lists. Replace each `given()` and `unwritten()` call with the setup or assertion it names. Do not turn a test into `test.skip` or `test.todo`: a skipped case is not a run, and the step fails on it. Keep each title's id and each request, since the later steps run the same file and need it to pass.
@@ -762,11 +764,10 @@ Verification results live in `.guren/plans/`, which git ignores: a result is a f
 For an approved plan, `plan:status` also compares each referenced element with the hash stamped at approval:
 
 ```text
-Against the approved baseline: fresh 13, stale 0, unstamped 0, unjudged 1
-  unjudged: validator.comment
+Against the approved baseline: fresh 14, stale 0, unstamped 0, unjudged 0
 ```
 
-An element is `fresh` while the application holds what was stamped, or what the plan says it will hold (`--json` says which under `basis`). It is `stale` when another change moved it somewhere else. `unstamped` has no hash (its section was unreadable at approval), and `unjudged` cannot be read now. Validators always read `unjudged` (they are never hashed, see Approving), so the line above appears in any plan that declares a validator. A commit elsewhere that did not touch a referenced element leaves the plan fresh.
+An element is `fresh` while the application holds what was stamped, or what the plan says it will hold (`--json` says which under `basis`). It is `stale` when another change moved it somewhere else. `unstamped` has no hash (its section was unreadable at approval, a revision named it later, or, for a validator, the plan was approved before validators were read), and `unjudged` cannot be read now; each is listed by id under the summary line. A commit elsewhere that did not touch a referenced element leaves the plan fresh.
 
 A stale element holds every step that depends on it. In a copy of the example, another commit registered a `comments.store` route before the implementation started:
 

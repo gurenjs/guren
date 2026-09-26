@@ -105,7 +105,7 @@ export function planAppState(overrides: PlanAppStateInput = {}): PlanAppState {
     resources: names(resources ?? ['PostResource']),
     policies: names(policies ?? ['PostPolicy']),
     pages: names(pages ?? ['posts/Index', 'posts/Show']),
-    validators: names(validators ?? { unreadable: 'validators are named by exported symbol' }),
+    validators: names(validators ?? []),
     routes: [
       { name: 'posts.index', method: 'GET', path: '/posts' },
       { name: 'posts.show', method: 'GET', path: '/posts/:id' },
@@ -119,7 +119,7 @@ export function planAppState(overrides: PlanAppStateInput = {}): PlanAppState {
 /**
  * The same application on disk, for the tests that go through the command and its
  * scanners. It does not derive from {@link planAppState}; the command test asserting
- * the fixture's three warnings is what holds the two together.
+ * the fixture's two warnings is what holds the two together.
  * It declares no routes file, so the route section reads as an application with no
  * routes rather than as one nobody could read, which would be a second warning.
  */
