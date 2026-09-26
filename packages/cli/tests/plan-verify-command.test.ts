@@ -91,6 +91,7 @@ describe('plan:verify', () => {
     const { record } = step!
     expect(record.commands.map((command) => [command.command, command.status, command.label])).toEqual([
       ['codegen', 'pass', 'bun run codegen'],
+      ['typecheck', 'pass', 'bun run typecheck'],
       ['check', 'pass', 'guren check'],
       ['tests', 'pass', 'bun test tests/comments.test.ts'],
     ])
@@ -329,7 +330,7 @@ export class CommentController extends Controller {
 
     const result = await verify(plan, app, '--step', HTTP)
 
-    expect(result.steps[0]!.record.commands.map((command) => [command.command, command.status])).toEqual([['codegen', 'pass'], ['check', 'pass'], ['tests', 'pass']])
+    expect(result.steps[0]!.record.commands.map((command) => [command.command, command.status])).toEqual([['codegen', 'pass'], ['typecheck', 'pass'], ['check', 'pass'], ['tests', 'pass']])
     expect(states(result)).toMatchObject({ 'action.comments.store': 'wired', 'route.comments.store': 'drifted', 'validator.comment': 'wired' })
   })
 
@@ -360,7 +361,7 @@ export class CommentController extends Controller {
     const output = await run('plan:verify', plan, app, '--step', HTTP, '--ci')
 
     expect(process.exitCode).toBe(1)
-    expect(output).toMatch(new RegExp(`^${HTTP}: incomplete \\(\\d+ ms\\)\n  pass     codegen     bun run codegen\n  pass     check       guren check\n`))
+    expect(output).toMatch(new RegExp(`^${HTTP}: incomplete \\(\\d+ ms\\)\n  pass     codegen     bun run codegen\n  pass     typecheck   bun run typecheck\n  pass     check       guren check\n`))
     expect(output).toContain('  passing  [AC-comments-1]')
     expect(output).toContain('  not at its completion state: action.comments.destroy: planned')
     expect(output).toContain('Recorded in .guren/plans/ci.state.json')

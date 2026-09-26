@@ -22,13 +22,16 @@ export type PlanVerifyCommand = (typeof PLAN_VERIFY_COMMANDS)[number]
 /**
  * Every list opens with `codegen`: typecheck, check and the tests read `.guren/*.gen.ts`,
  * which a fresh clone lacks, and a step verified on its own must not fail for that.
+ * `tests` is in no list: `stepsOf()` adds it to the step the behaviours are judged at.
+ * `http` lists no `typecheck`: `stepsOf()` adds it to a task's last `http` step, since
+ * parts are packed in document order and an earlier one may import what a later one writes.
  */
 export const PLAN_STEP_VERIFY: Record<PlanStepKind, readonly PlanVerifyCommand[]> = {
   commands: ['codegen', 'typecheck'],
   scaffold: ['codegen', 'typecheck'],
   tests: ['codegen', 'tests:fail'],
   data: ['codegen', 'db:migrate', 'typecheck'],
-  http: ['codegen', 'check', 'tests'],
+  http: ['codegen', 'check'],
   pages: ['codegen', 'typecheck', 'check'],
 }
 
@@ -814,6 +817,9 @@ function stepsOf(
     })
   }
 
+  const lastHttp = steps.filter((candidate) => candidate.kind === 'http').at(-1)
+  lastHttp?.verify.splice(1, 0, 'typecheck')
+
   // The behaviours are judged where the routes are finished: the last `http` step, or the task's last work step without one.
   let verifies: PlanDerivedStep | undefined
   for (const candidate of steps) {
@@ -821,7 +827,7 @@ function stepsOf(
   }
   if (verifies && verifies.kind !== 'tests' && task.acceptanceIds.length > 0) {
     verifies.acceptanceIds = [...task.acceptanceIds]
-    // Without an `http` step nothing else would run them: `data` and `pages` verify by type alone.
+    // Only here: a step without behaviours has no test to select, and `bun test` with no file runs the whole suite.
     if (!verifies.verify.includes('tests')) verifies.verify.push('tests')
   }
   return steps
