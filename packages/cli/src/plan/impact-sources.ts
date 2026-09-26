@@ -61,7 +61,7 @@ function impactRoutes(input: PlanImpactSourcesInput, requests: TestRequestScan):
       ...(toolName !== undefined ? { toolName } : {}),
     }
   })
-  const coverage = testCoverage(requests, routes, { registered: { modulesIncomplete: input.moduleWarnings.length > 0 } })
+  const coverage = testCoverage(requests, routes, { registered: { provenance: input.provenance, modulesIncomplete: input.moduleWarnings.length > 0 } })
   for (const [index, tests] of coverage.byRoute) routes[index]!.tests = tests
   for (const [index, tests] of coverage.uncertainByRoute) routes[index]!.uncertainTests = tests
   return { routes, unresolved: coverage.unresolved }

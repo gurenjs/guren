@@ -132,7 +132,8 @@ await http.get('/odd/1')
 })
 
 describe('testCoverage in registration order', () => {
-  const MEETUPS: TestRequestRoute[] = [
+  type RegisteredTestRoute = TestRequestRoute & { module: string | null }
+  const MEETUPS: RegisteredTestRoute[] = [
     { method: 'GET', path: '/meetups/create', module: null },
     { method: 'GET', path: '/meetups/:id', module: null },
   ]
@@ -143,8 +144,8 @@ await http.get('/meetups/1')
 `
 
   /** Per request, `route` for each one it reaches and `route?reason` for each it may reach. */
-  function answered(result: TestRequestScan, routes: TestRequestRoute[], modulesIncomplete = false): string[] {
-    const coverage = testCoverage(result, routes, { registered: { modulesIncomplete } })
+  function answered(result: TestRequestScan, routes: RegisteredTestRoute[], modulesIncomplete = false): string[] {
+    const coverage = testCoverage(result, routes, { registered: { provenance: routes.map((route) => route.module), modulesIncomplete } })
     const label = (index: number): string => `${routes[index]!.method} ${routes[index]!.path}`
     return result.requests.map((request) => {
       const at = (site: { file: string; line: number }): boolean => site.file === request.file && site.line === request.line
@@ -167,9 +168,9 @@ await http.get('/meetups/1')
 
   test("should put the entry registrar's routes first and leave two modules' routes unordered", async () => {
     const result = await scanOne(SOURCE)
-    const entryFirst: TestRequestRoute[] = [{ ...MEETUPS[1]!, module: 'events' }, MEETUPS[0]!]
+    const entryFirst: RegisteredTestRoute[] = [{ ...MEETUPS[1]!, module: 'events' }, MEETUPS[0]!]
     expect(answered(result, entryFirst)).toEqual(['GET /meetups/create -> GET /meetups/create', 'GET /meetups/1 -> GET /meetups/:id'])
-    const twoModules: TestRequestRoute[] = [{ ...MEETUPS[0]!, module: 'events' }, { ...MEETUPS[1]!, module: 'calendar' }]
+    const twoModules: RegisteredTestRoute[] = [{ ...MEETUPS[0]!, module: 'events' }, { ...MEETUPS[1]!, module: 'calendar' }]
     expect(answered(result, twoModules)).toEqual([
       'GET /meetups/create -> GET /meetups/create?routeOrder | GET /meetups/:id?routeOrder',
       'GET /meetups/1 -> GET /meetups/:id',

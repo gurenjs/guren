@@ -308,6 +308,18 @@ describe('planImpact', () => {
       ])
     })
 
+    test('should keep both notes for a request uncertain on two routes of one entry for different reasons', () => {
+      const base = sources()
+      base.routes[0] = { ...base.routes[0]!, uncertainTests: [{ ...REQUEST, reason: 'routePattern', method: 'GET' }] }
+      base.routes.push({ ...base.routes[0]!, name: 'posts.preview', path: '/posts/:post/preview', uncertainTests: [{ ...REQUEST, reason: 'routeOrder', method: 'GET' }] })
+      const notes = entryFor(planImpact(plan(), base), 'model.post').notes.filter((note) => note.key.startsWith('impact.testRequests.'))
+
+      expect(notes).toEqual([
+        { key: 'impact.testRequests.uncertain', values: { count: '1', requests: 'tests/posts.test.ts:14' } },
+        { key: 'impact.testRequests.order', values: { count: '1', requests: 'tests/posts.test.ts:14' } },
+      ])
+    })
+
     test('should not say it of a renamed route, whose paths the tests still reach', () => {
       const entry = entryFor(planImpact(alteredUpdate({ kind: 'rename', from: 'posts.update' }), sources()), 'route.comments.store')
 

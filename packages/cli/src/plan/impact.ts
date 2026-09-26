@@ -8,7 +8,7 @@
 
 import type { ColumnConsumerScan, ColumnRead, ResourceModelTie } from '../column-consumers'
 import { inAppRoot, isTestFileNamedFor, moduleNameFromRelPath } from '../discovery'
-import { mayReach, type TestRequestSite, type UnresolvedTestRequest } from '../test-requests'
+import { mayReach, type TestRequestSite, type UnresolvedReason, type UnresolvedTestRequest } from '../test-requests'
 import type { PlanAppActionDetail, PlanAppClassDetail } from './app-detail'
 import type { PlanAppScope } from './app-state'
 import type { PlanBreakingChange } from './page/payload'
@@ -109,6 +109,16 @@ const READER_KEYS: Record<PlanImpactReader, string> = {
   tests: 'impact.unreadable.tests',
 }
 
+/** A `routePattern` or `routeOrder` request does target its route: only a constraint or an earlier route may stop it. */
+const TEST_REQUEST_KEYS: Record<UnresolvedReason, string> = {
+  dynamicPath: 'impact.testRequests.unresolved',
+  partialSegment: 'impact.testRequests.unresolved',
+  unknownReceiver: 'impact.testRequests.unresolved',
+  localReceiver: 'impact.testRequests.unresolved',
+  routePattern: 'impact.testRequests.uncertain',
+  routeOrder: 'impact.testRequests.order',
+}
+
 function changes(change: PlanChange): boolean {
   return change.kind === 'alter' || change.kind === 'rename' || change.kind === 'drop'
 }
@@ -183,7 +193,8 @@ class EntryBuilder {
   /** The requests the scan could not match that may still reach `route`. */
   testRequestGaps(route: PlanImpactRoute): void {
     const candidates = [...(route.uncertainTests ?? []), ...this.sources.testRequests.unresolved.filter((request) => mayReach(request, route))]
-    for (const request of candidates) this.gaps.set(`${request.file}:${request.line}`, request)
+    // Keyed by reason too: one request may be uncertain on two routes of the entry for different reasons.
+    for (const request of candidates) this.gaps.set(`${request.file}:${request.line} ${request.reason}`, request)
     const { unparsed } = this.sources.testRequests
     if (unparsed.length > 0) this.note('impact.testRequests.unparsed', { files: unparsed.join(', ') })
   }
@@ -195,11 +206,9 @@ class EntryBuilder {
 
   /** The notes that need every route of the entry first. */
   finish(): void {
-    // A `routePattern` or `routeOrder` request does target this route: only its constraint or an earlier route may stop it.
-    const keyOf = (reason: UnresolvedTestRequest['reason']): string =>
-      reason === 'routePattern' ? 'impact.testRequests.uncertain' : reason === 'routeOrder' ? 'impact.testRequests.order' : 'impact.testRequests.unresolved'
-    for (const key of ['impact.testRequests.unresolved', 'impact.testRequests.uncertain', 'impact.testRequests.order']) {
-      const sites = [...this.gaps].filter(([, request]) => keyOf(request.reason) === key).map(([site]) => site)
+    const sitesByKey = new Map<string, string[]>([...new Set(Object.values(TEST_REQUEST_KEYS))].map((key) => [key, []]))
+    for (const request of this.gaps.values()) sitesByKey.get(TEST_REQUEST_KEYS[request.reason])!.push(`${request.file}:${request.line}`)
+    for (const [key, sites] of sitesByKey) {
       if (sites.length > 0) this.note(key, { count: String(sites.length), requests: sites.join(', ') })
     }
     if (!this.askedNoneReach || this.gaps.size > 0) return

@@ -61,8 +61,6 @@ export interface TestRequestRoute {
   method: string
   path: string
   toolName?: string
-  /** The module whose registrar declared it, or `null` for the entry registrar's: its scope in {@link registeredBefore}. */
-  module?: string | null
 }
 
 const RUNTIME = Symbol('runtime')
@@ -694,27 +692,25 @@ export function registeredBefore(earlier: RegisteredRoute, later: RegisteredRout
   return undefined
 }
 
+/** Whether a route registered under `routeMethod` answers a request of `requestMethod`, as hono dispatches it. */
+export function answersMethod(routeMethod: string, requestMethod: string): boolean {
+  const method = routeMethod.toUpperCase()
+  return method === requestMethod || method === 'ALL'
+}
+
 export interface TestCoverageOptions extends RoutePathMatchOptions {
   /**
-   * `routes` are the application's, in registration order within each `module`, so a request is
-   * given to the route hono answers it with: the first registered of its method (or `ALL`) whose
-   * path matches. `modulesIncomplete` says a module's routes did not load, any of which may come first.
+   * `routes` are the application's in registration order within each scope, `provenance[i]` the
+   * module that declared route `i` (`null` for the entry registrar's), so a request is given to
+   * the route hono answers it with. `modulesIncomplete` says a module's routes did not load.
    */
-  registered?: { modulesIncomplete: boolean }
-}
-
-interface Candidate extends RegisteredRoute {
-  match: Match
-}
-
-function scopeOf(route: TestRequestRoute, index: number): RegisteredRoute {
-  return { index, module: route.module ?? null }
+  registered?: { provenance: ReadonlyArray<string | null>; modulesIncomplete: boolean }
 }
 
 /**
- * Without `registered`, every matching route is listed. With it, a route another answers first
- * gets nothing, and one an earlier route may answer first, or that only an unknown module order
- * puts first, gets the request as uncertain (`routeOrder`).
+ * Without `registered`, every matching route of the request's method is listed. With it, a route
+ * another answers first gets nothing, and one an earlier route may answer first, or that only an
+ * unknown module order puts first, gets the request as uncertain (`routeOrder`).
  */
 export function testCoverage(scan: Pick<TestRequestScan, 'requests' | 'unresolved'>, routes: readonly TestRequestRoute[], options: TestCoverageOptions = {}): TestCoverage {
   const coverage: TestCoverage = { byRoute: new Map(), uncertainByRoute: new Map(), unresolved: [...scan.unresolved] }
@@ -726,18 +722,34 @@ export function testCoverage(scan: Pick<TestRequestScan, 'requests' | 'unresolve
       })
       continue
     }
-    const candidates: Candidate[] = []
+    const uncertain = (reason: UnresolvedReason): UnresolvedTestRequest => ({ ...site, reason, method: target.method })
+    if (registered === undefined) {
+      routes.forEach((route, index) => {
+        if (route.method.toUpperCase() !== target.method) return
+        const match = routePathMatches(route.path, target.segments, options)
+        if (match === 'match') push(coverage.byRoute, index, site)
+        else if (match === 'unknown') push(coverage.uncertainByRoute, index, uncertain('routePattern'))
+      })
+      continue
+    }
+    const candidates: Array<RegisteredRoute & { match: Match }> = []
     routes.forEach((route, index) => {
-      const method = route.method.toUpperCase()
-      if (method !== target.method && (registered === undefined || method !== 'ALL')) return
+      if (!answersMethod(route.method, target.method)) return
       const match = routePathMatches(route.path, target.segments, options)
-      if (match !== 'none') candidates.push({ ...scopeOf(route, index), match })
+      if (match !== 'none') candidates.push({ index, module: registered.provenance[index] ?? null, match })
     })
     for (const candidate of candidates) {
-      const ahead = registered === undefined ? [] : candidates.filter((other) => registeredBefore(other, candidate) !== false)
-      if (ahead.some((other) => other.match === 'match' && registeredBefore(other, candidate) === true)) continue
-      if (candidate.match === 'unknown') push(coverage.uncertainByRoute, candidate.index, { ...site, reason: 'routePattern', method: target.method })
-      else if (ahead.length > 0 || (registered?.modulesIncomplete === true && candidate.module !== null)) push(coverage.uncertainByRoute, candidate.index, { ...site, reason: 'routeOrder', method: target.method })
+      let answeredFirst = false
+      let contested = registered.modulesIncomplete && candidate.module !== null
+      for (const other of candidates) {
+        const before = registeredBefore(other, candidate)
+        if (before === false) continue
+        if (before && other.match === 'match') answeredFirst = true
+        contested = true
+      }
+      if (answeredFirst) continue
+      if (candidate.match === 'unknown') push(coverage.uncertainByRoute, candidate.index, uncertain('routePattern'))
+      else if (contested) push(coverage.uncertainByRoute, candidate.index, uncertain('routeOrder'))
       else push(coverage.byRoute, candidate.index, site)
     }
   }

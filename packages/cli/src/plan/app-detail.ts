@@ -42,7 +42,7 @@ import { resolveAppEntry } from '../provider-registrar'
 import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, specifierName } from '../route-registrar'
 import { importsByLocal, specifierBase, withoutExtension } from '../schema-binding'
 import { readSchemaTables, withImportTimeout, type SourcedSchemaTable } from '../schema-runtime'
-import { registeredBefore, routePathCovers } from '../test-requests'
+import { answersMethod, registeredBefore, routePathCovers } from '../test-requests'
 import type { PlanAppScope, PlanAppUnreadable } from './app-state'
 import { readResourcePayloads, readSchemaFields, type PlanAppResourcePayload, type PlanAppSchemaFields } from './field-readers'
 import { readPolicyAbilities, type PlanAppPolicyAbilities } from './policy-abilities'
@@ -314,6 +314,7 @@ function routeDetail(input: PlanAppDetailInput, symbols: SchemaSymbols): PlanApp
 function shadowing(input: PlanAppDetailInput, routes: ContextRoute[], index: number): Exclude<PlanAppMount, 'mounted'> | undefined {
   const route = routes[index]!
   const scope = input.provenance[index] ?? null
+  const later = { index, module: scope }
   const routeMethod = route.method.toUpperCase()
   const self = `${routeMethod} ${route.path}`
   const site = (candidate: ContextRoute, otherScope: string | null): string =>
@@ -322,11 +323,11 @@ function shadowing(input: PlanAppDetailInput, routes: ContextRoute[], index: num
   // A later definite shadow outranks an earlier uncertain one, so the scan does not stop at the first.
   for (let other = 0; other < routes.length; other += 1) {
     const candidate = routes[other]!
+    if (!answersMethod(candidate.method, routeMethod)) continue
     const otherScope = input.provenance[other] ?? null
-    const before = registeredBefore({ index: other, module: otherScope }, { index, module: scope })
+    const before = registeredBefore({ index: other, module: otherScope }, later)
+    if (before === false) continue
     const acrossModules = before === undefined
-    const method = candidate.method.toUpperCase()
-    if (before === false || (method !== routeMethod && method !== 'ALL')) continue
     const covers = routePathCovers(candidate.path, route.path)
     if (covers === 'none') continue
     if (covers === 'match' && !acrossModules) {
