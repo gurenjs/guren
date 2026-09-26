@@ -200,6 +200,22 @@ headersOf().get('Location')
     ])
   })
 
+  test('should call a request on what a same-file function returns unresolved when nothing annotates it a TestApp', async () => {
+    const result = await scanOne(`${IMPORT}
+async function signedIn() {
+  return TestApp.fromApp(app)
+}
+async function typed(): Promise<TestApp> {
+  return TestApp.fromApp(app)
+}
+const http = await signedIn()
+await http.post('/posts', {})
+await (await typed()).get('/posts')
+`)
+    expect(reached(result)).toEqual(['GET /posts -> GET /posts'])
+    expect(result.unresolved.map((request) => `${request.line} ${request.reason} ${request.method}`)).toEqual(['11 localReceiver POST'])
+  })
+
   test('should map agent().call() to the route publishing the tool', async () => {
     const result = await scanOne(`${IMPORT}
 const http = await TestApp.fromApp(app)
@@ -249,6 +265,14 @@ describe('routePathMatches', () => {
     expect(routePathMatches('/posts/:id', runtime)).toBe('match')
     expect(routePathMatches('/posts/create', runtime)).toBe('none')
     expect(routePathMatches('/posts/:id.json', runtime)).toBe('match')
+  })
+
+  test('should read a runtime segment as filling a constrained parameter only when asked, and never a literal the constraint rejects', () => {
+    const runtime: TestRequestSegment[] = [{ literal: 'posts' }, { runtime: true }]
+    const fills = { runtimeFillsConstraints: true }
+    expect(routePathMatches('/posts/:id{[0-9]+}', runtime)).toBe('unknown')
+    expect(routePathMatches('/posts/:id{[0-9]+}', runtime, fills)).toBe('match')
+    expect(routePathMatches('/posts/:id{[0-9]+}', [{ literal: 'posts' }, { literal: 'abc' }], fills)).toBe('none')
   })
 
   test('should answer unknown, never none, where a runtime segment meets a constraint or its span', () => {

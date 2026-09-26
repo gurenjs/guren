@@ -1426,10 +1426,20 @@ agent wrote, and the tamper it detects is the same.
   from `bun:test`) whose literal title carries the id, including a `describe`
   whose cases do. Its requests are those in its callback and in every
   same-file function it calls by name, transitively, matched by name like the
-  receivers. Hooks are not followed: the request is the behaviour's action, and
-  a `beforeEach` is its `given`. Some carrying case must request the route.
+  receivers. Hooks outside a carrying `describe` are not followed (one inside
+  it is in its callback): the request is the behaviour's action, and a
+  `beforeEach` is its `given`. Some carrying case must request the route. A
+  `test.todo` carrying the id has no body, and the miss names it so.
+- A whole path segment filled at runtime reaches a constrained parameter
+  (`` `/comments/${id}` `` against `/comments/:id{[0-9]+}`), in this check
+  only (`routePathMatches()`'s `runtimeFillsConstraints`; Impact still reads
+  it as uncertain). A skeleton cannot spell a literal for an arbitrary
+  constraint, and whether the value passes it is the run's to find, as a 404.
+  A literal segment the constraint rejects stays a miss.
 - Three verdicts per behaviour. Reached. Unreadable when nothing reached it and
-  a carrying case holds an unresolved request `mayReach()` allows, a request
+  a carrying case holds an unresolved request `mayReach()` allows (including
+  one on what a same-file function returns when nothing annotates it
+  `TestApp`, `localReceiver`, whose remedy is that annotation), a request
   the route pattern cannot be compared with, or a call handing the `TestApp`
   (or its agent) to a function the file does not define, or a carrying file
   did not parse or holds a test whose title is not all literal. A miss
@@ -2014,9 +2024,11 @@ migration).** Two defects the loop hit once a plan had more than one task.
   whole-plan run, `--step` on it, or as an earlier step): `tests:fail` cannot
   pass once the implementation exists, and its red run was observed when it
   verified. It stays `verified` while one test file still carries each of its
-  behaviours' ids as a bracketed token, which a comment carries as well as a
-  test title (a gap the run itself would catch). One carried by no file or by
-  several is reported, and the record is left drifted rather than replaced: a
+  behaviours' ids as a bracketed token and a test case titled with each id
+  still requests the behaviour's route (the §5 amendment on the "still calls
+  its route" check), which closes the gap a token in a comment left. One
+  carried by no file or by several, or whose tests no longer request its
+  route, is reported, and the record is left drifted rather than replaced: a
   recorded failure would send the next run to `tests:fail`, which cannot pass
   then. `plan:next` and the `Stop` hook reach it through `plan:verify --step`,
   so all four agree.

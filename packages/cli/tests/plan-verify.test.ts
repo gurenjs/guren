@@ -25,6 +25,25 @@ const PAGES = 'task/entity/model.comment/pages'
 const TESTS = 'task/entity/model.comment/tests'
 const IDS = ['AC-comments-1', 'AC-comments-2', 'AC-comments-3', 'AC-comments-4']
 
+/** One `[id] x` test per id, its body the statement `request` gives, requesting the behaviour's route by default. */
+function commentTests(ids: readonly string[], request: (id: string) => string = requestsRoute): string {
+  return `${TEST_APP_TYPE_IMPORT}${ids.map((id) => `test('[${id}] x', () => { ${request(id)} })\n`).join('')}`
+}
+
+/** A fresh app root holding `files`, removed after `run`. */
+async function withTests(files: Record<string, string>, run: (root: string) => Promise<void>): Promise<void> {
+  const root = await mkdtemp(join(tmpdir(), 'guren-plan-tests-'))
+  try {
+    for (const [file, text] of Object.entries(files)) {
+      await mkdir(dirname(join(root, file)), { recursive: true })
+      await writeFile(join(root, file), text, 'utf8')
+    }
+    await run(root)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}
+
 let ROOT: string
 let plan: PlanDraft
 let derivation: PlanTaskDerivation
@@ -33,7 +52,7 @@ const FILES: Record<string, string> = {
   'app/Models/Comment.ts': 'export class Comment {}\n',
   'app/Http/Controllers/CommentController.ts': 'export class CommentController {}\n',
   'db/schema.ts': 'export const comments = {}\n',
-  'tests/comments.test.ts': `${TEST_APP_TYPE_IMPORT}${IDS.map((id) => `test('[${id}] x', () => { ${requestsRoute(id)} })\n`).join('')}`,
+  'tests/comments.test.ts': commentTests(IDS),
   'tests/posts.test.ts': "test('[AC-posts-10] unrelated', () => {})\n",
 }
 
@@ -322,19 +341,14 @@ describe('PlanVerifier', () => {
   })
 
   describe('recheckTests', () => {
-    const titles = (ids: string[]): string => `${TEST_APP_TYPE_IMPORT}${ids.map((id) => `test('[${id}] x', () => { ${requestsRoute(id)} })\n`).join('')}`
+    const previous = record({ acceptance: IDS.map((id) => ({ id, status: 'failing' as const })) })
+    const recheck = (root: string, files: string[]): Promise<PlanStepVerification> =>
+      verifier(statusOf(), fakeExec(), { root, testFiles: async () => files.map((file) => join(root, file)) }).recheckTests(TESTS, previous)
 
     test('should keep a drifted tests step verified while one file carries each id, and name a lost or doubled one', async () => {
-      const root = await mkdtemp(join(tmpdir(), 'guren-plan-recheck-'))
-      try {
-        await mkdir(join(root, 'tests'), { recursive: true })
-        await writeFile(join(root, 'tests/comments.test.ts'), titles(['AC-comments-1', 'AC-comments-3', 'AC-comments-4']), 'utf8')
-        await writeFile(join(root, 'tests/more.test.ts'), titles(['AC-comments-3']), 'utf8')
-        const previous = record({ acceptance: IDS.map((id) => ({ id, status: 'failing' as const })) })
-        const recheck = (): Promise<PlanStepVerification> =>
-          verifier(statusOf(), fakeExec(), { root, testFiles: async () => [join(root, 'tests/comments.test.ts'), join(root, 'tests/more.test.ts')] }).recheckTests(TESTS, previous)
-
-        const step = await recheck()
+      const files = { 'tests/comments.test.ts': commentTests(['AC-comments-1', 'AC-comments-3', 'AC-comments-4']), 'tests/more.test.ts': commentTests(['AC-comments-3']) }
+      await withTests(files, async (root) => {
+        const step = await recheck(root, Object.keys(files))
 
         expect(step.record.outcome).toBe('failed')
         expect(step.record.commands[0]!.findings).toEqual(['[AC-comments-2] is carried by no test file', '[AC-comments-3] is carried by tests/comments.test.ts and tests/more.test.ts'])
@@ -345,23 +359,16 @@ describe('PlanVerifier', () => {
           { id: 'AC-comments-4', status: 'failing' },
         ])
 
-        await writeFile(join(root, 'tests/comments.test.ts'), titles(IDS), 'utf8')
+        await writeFile(join(root, 'tests/comments.test.ts'), commentTests(IDS), 'utf8')
         await writeFile(join(root, 'tests/more.test.ts'), '', 'utf8')
-        expect((await recheck()).record.outcome).toBe('verified')
-      } finally {
-        await rm(root, { recursive: true, force: true })
-      }
+        expect((await recheck(root, Object.keys(files))).record.outcome).toBe('verified')
+      })
     })
 
     test('should fail the re-check of a test rewritten to request nothing, which still fails as tests:fail saw', async () => {
-      const root = await mkdtemp(join(tmpdir(), 'guren-plan-recheck-'))
-      try {
-        await mkdir(join(root, 'tests'), { recursive: true })
-        const emptied = titles(IDS).replace(requestsRoute('AC-comments-4'), "expect('the author').toBe('deleted')")
-        await writeFile(join(root, 'tests/comments.test.ts'), emptied, 'utf8')
-        const previous = record({ acceptance: IDS.map((id) => ({ id, status: 'failing' as const })) })
-
-        const step = await verifier(statusOf(), fakeExec(), { root, testFiles: async () => [join(root, 'tests/comments.test.ts')] }).recheckTests(TESTS, previous)
+      const emptied = commentTests(IDS, (id) => (id === 'AC-comments-4' ? "expect('the author').toBe('deleted')" : requestsRoute(id)))
+      await withTests({ 'tests/comments.test.ts': emptied }, async (root) => {
+        const step = await recheck(root, ['tests/comments.test.ts'])
 
         expect(step.record.outcome).toBe('failed')
         expect(step.record.commands[0]).toMatchObject({
@@ -369,30 +376,19 @@ describe('PlanVerifier', () => {
           reason: 'a behaviour\'s test does not request the route the behaviour names',
           findings: ['[AC-comments-4] no test carrying it requests DELETE /comments/:id: tests/comments.test.ts:5 requests nothing'],
         })
-      } finally {
-        await rm(root, { recursive: true, force: true })
-      }
+      })
     })
   })
 
   describe('whether each behaviour\'s test still requests its route', () => {
-    async function withTests(source: string, run: (root: string) => Promise<void>): Promise<void> {
-      const root = await mkdtemp(join(tmpdir(), 'guren-plan-requests-'))
-      try {
-        await mkdir(join(root, 'tests'), { recursive: true })
-        await writeFile(join(root, 'tests/comments.test.ts'), source, 'utf8')
-        await run(root)
-      } finally {
-        await rm(root, { recursive: true, force: true })
-      }
-    }
-    const cases = (request: (id: string) => string): string => `${TEST_APP_TYPE_IMPORT}${IDS.map((id) => `test('[${id}] x', () => { ${request(id)} })\n`).join('')}`
+    const verifyIn = (root: string, fake: Pick<FakeExec, 'exec'>, step: string): Promise<PlanStepVerification> =>
+      verifier(statusOf(), fake, { root, testFiles: async () => [join(root, 'tests/comments.test.ts')] }).verify(step)
 
     test('should fail tests:fail on a test requesting another route, without running bun test', async () => {
-      const source = cases((id) => (id === 'AC-comments-2' ? "void ((app: TestApp) => app.get('/posts/1'))" : requestsRoute(id)))
-      await withTests(source, async (root) => {
+      const source = commentTests(IDS, (id) => (id === 'AC-comments-2' ? "void ((app: TestApp) => app.get('/posts/1'))" : requestsRoute(id)))
+      await withTests({ 'tests/comments.test.ts': source }, async (root) => {
         const fake = fakeExec({}, FAILING)
-        const step = await verifier(statusOf(), fake, { root, testFiles: async () => [join(root, 'tests/comments.test.ts')] }).verify(TESTS)
+        const step = await verifyIn(root, fake, TESTS)
 
         expect(step.record.outcome).toBe('failed')
         expect(commandOf(step, 'tests:fail')).toMatchObject({
@@ -405,9 +401,9 @@ describe('PlanVerifier', () => {
     })
 
     test('should fail the http step\'s tests on a request this check cannot read, rather than let the step verify', async () => {
-      const source = `import { signedIn } from './helpers'\n${cases((id) => (id === 'AC-comments-1' ? "void (async () => (await signedIn()).post('/posts/1/comments', {}))" : requestsRoute(id)))}`
-      await withTests(source, async (root) => {
-        const step = await verifier(statusOf(), fakeExec(), { root, testFiles: async () => [join(root, 'tests/comments.test.ts')] }).verify(HTTP)
+      const source = `import { signedIn } from './helpers'\n${commentTests(IDS, (id) => (id === 'AC-comments-1' ? "void (async () => (await signedIn()).post('/posts/1/comments', {}))" : requestsRoute(id)))}`
+      await withTests({ 'tests/comments.test.ts': source }, async (root) => {
+        const step = await verifyIn(root, fakeExec(), HTTP)
 
         expect(step.record.outcome).toBe('failed')
         expect(commandOf(step, 'tests')).toMatchObject({

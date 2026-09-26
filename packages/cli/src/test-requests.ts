@@ -42,7 +42,7 @@ export interface TestRequest extends TestRequestSite {
   target: TestRequestTarget
 }
 
-export type UnresolvedReason = 'dynamicPath' | 'partialSegment' | 'unknownReceiver' | 'routePattern'
+export type UnresolvedReason = 'dynamicPath' | 'partialSegment' | 'unknownReceiver' | 'localReceiver' | 'routePattern'
 
 export interface UnresolvedTestRequest extends TestRequestSite {
   reason: UnresolvedReason
@@ -74,11 +74,16 @@ interface Receivers {
   namespaces: ReadonlySet<string>
   /** Value imports, whose calls return something the file does not show. */
   imported: ReadonlySet<string>
+  /** Every same-file function by name; one not in `functions` returns what its annotation does not say. */
+  local: ReadonlySet<string>
   names: Set<string>
   functions: Set<string>
-  foreign: Set<string>
+  /** Bindings holding what such a call returned, and which kind of call it was. */
+  foreign: Map<string, ForeignReason>
   agents: Set<string>
 }
+
+type ForeignReason = Extract<UnresolvedReason, 'unknownReceiver' | 'localReceiver'>
 
 /** `TestApp`, an alias of it, or `testing.TestApp` through a namespace import, as a type or a value. */
 function namesTestApp(name: BabelNode, receivers: Receivers): boolean {
@@ -155,17 +160,24 @@ function isTestApp(value: unknown, receivers: Receivers): boolean {
   return BUILDERS.has(member.name) && isTestApp(member.object, receivers)
 }
 
-/** What a call to an imported function returns, which may be a `TestApp` the file never names. */
-function isForeign(value: unknown, receivers: Receivers): boolean {
+/**
+ * What a call to an imported function returns, or to a same-file one not annotated to return a
+ * `TestApp`: either may be a `TestApp` the file never names.
+ */
+function foreignReason(value: unknown, receivers: Receivers): ForeignReason | undefined {
   const node = unwrapTypeAssertion(value as BabelNode)
-  if (!node || isTestApp(node, receivers)) return false
-  if (node.type === 'AwaitExpression') return isForeign(node.argument, receivers)
-  if (node.type === 'Identifier') return receivers.foreign.has(node.name as string)
-  if (node.type !== 'CallExpression') return false
+  if (!node || isTestApp(node, receivers)) return undefined
+  if (node.type === 'AwaitExpression') return foreignReason(node.argument, receivers)
+  if (node.type === 'Identifier') return receivers.foreign.get(node.name as string)
+  if (node.type !== 'CallExpression') return undefined
   const callee = node.callee as BabelNode
-  if (callee.type === 'Identifier') return receivers.imported.has(callee.name as string)
+  if (callee.type === 'Identifier') {
+    const name = callee.name as string
+    if (receivers.imported.has(name)) return 'unknownReceiver'
+    return receivers.local.has(name) ? 'localReceiver' : undefined
+  }
   const member = calleeMember(node)
-  return member !== undefined && BUILDERS.has(member.name) && isForeign(member.object, receivers)
+  return member !== undefined && BUILDERS.has(member.name) ? foreignReason(member.object, receivers) : undefined
 }
 
 function isAgent(value: unknown, receivers: Receivers): boolean {
@@ -182,21 +194,25 @@ function returnsTestApp(fn: BabelNode, receivers: Receivers): boolean {
 }
 
 /** Grows the receiver names to a fixed point, since a binding may be declared before what makes it one. */
-function collectReceivers(ast: File): Receivers {
+function collectReceivers(ast: File, local: ReadonlySet<string>): Receivers {
   const receivers: Receivers = {
     aliases: importedLocals(ast, { specifier: TESTING, exportName: 'TestApp' }),
     namespaces: importedNamespaces(ast, TESTING),
     imported: valueImports(ast),
+    local,
     names: new Set(),
     functions: new Set(),
-    foreign: new Set(),
+    foreign: new Map(),
     agents: new Set(),
   }
   const addTo = (set: Set<string>, name: string): boolean => (set.has(name) ? false : (set.add(name), true))
   const bind = (name: string, value: unknown): boolean => {
     if (isTestApp(value, receivers)) return addTo(receivers.names, name)
     if (isAgent(value, receivers)) return addTo(receivers.agents, name)
-    return isForeign(value, receivers) ? addTo(receivers.foreign, name) : false
+    const reason = foreignReason(value, receivers)
+    if (reason === undefined || receivers.foreign.get(name) === reason) return false
+    receivers.foreign.set(name, reason)
+    return true
   }
   for (let changed = true; changed;) {
     changed = false
@@ -279,33 +295,40 @@ function calleeText(callee: BabelNode): string | undefined {
   return object === undefined || name === undefined ? undefined : `${object}.${name}`
 }
 
-function scanFile(ast: File, file: string, sink: (node: BabelNode, call: ScannedCall) => void): void {
-  const receivers = collectReceivers(ast)
+interface ScannedEntry {
+  /** The call's source offset, which the case scan places it by. */
+  start: number
+  call: ScannedCall
+}
+
+function scanFile(ast: File, file: string, functions: ReadonlyMap<string, Range[]>): ScannedEntry[] {
+  const receivers = collectReceivers(ast, new Set(functions.keys()))
   const constants = stringConstants(ast)
+  const entries: ScannedEntry[] = []
 
   walk(ast.program, (node) => {
-    if (node.type !== 'CallExpression') return
+    if (node.type !== 'CallExpression' || typeof node.start !== 'number') return
     const args = node.arguments as BabelNode[]
     const member = calleeMember(node)
-    if (member) scanRequest(node, member, args, file, receivers, constants, sink)
+    const call = member && scanRequest(member, args, file, receivers, constants)
+    if (call) entries.push({ start: node.start, call })
     if (member && (isTestApp(member.object, receivers) || isAgent(member.object, receivers))) return
     if (args.some((arg) => isTestApp(arg, receivers) || isAgent(arg, receivers))) {
       const callee = calleeText(node.callee as BabelNode)
       const line = node.loc?.start.line ?? 0
-      sink(node, { kind: 'handoff', site: { file, line, text: `${callee ?? '<expression>'}(…)` }, ...(callee === undefined ? {} : { callee }) })
+      entries.push({ start: node.start, call: { kind: 'handoff', site: { file, line, text: `${callee ?? '<expression>'}(…)` }, ...(callee === undefined ? {} : { callee }) } })
     }
   })
+  return entries
 }
 
 function scanRequest(
-  node: BabelNode,
   member: { object: BabelNode; name: string; line: number },
   args: BabelNode[],
   file: string,
   receivers: Receivers,
   constants: ReadonlyMap<string, string>,
-  sink: (node: BabelNode, call: ScannedCall) => void,
-): void {
+): ScannedCall | undefined {
   const { line } = member
   const primes = member.name === 'withCsrf'
   const method = primes ? 'GET' : REQUEST_METHODS[member.name]
@@ -314,17 +337,19 @@ function scanRequest(
     const text = parts === null ? `${method} <runtime>` : describePath(method, parts)
     if (isTestApp(member.object, receivers)) {
       const segments = parts === null ? 'dynamicPath' : pathSegments(parts)
-      if (typeof segments === 'string') sink(node, { kind: 'unresolved', request: { file, line, text, reason: segments, method } })
-      else sink(node, { kind: 'request', request: { file, line, text, target: { kind: 'path', method, segments } } })
-    } else if (startsLikePath(parts) && isForeign(member.object, receivers)) {
-      sink(node, { kind: 'unresolved', request: { file, line, text, reason: 'unknownReceiver', method } })
+      if (typeof segments === 'string') return { kind: 'unresolved', request: { file, line, text, reason: segments, method } }
+      return { kind: 'request', request: { file, line, text, target: { kind: 'path', method, segments } } }
     }
-  } else if (member.name === 'call' && args.length > 0 && isAgent(member.object, receivers)) {
+    const reason = startsLikePath(parts) ? foreignReason(member.object, receivers) : undefined
+    return reason === undefined ? undefined : { kind: 'unresolved', request: { file, line, text, reason, method } }
+  }
+  if (member.name === 'call' && args.length > 0 && isAgent(member.object, receivers)) {
     const name = literalString(args[0])
     const text = `agent().call(${name === null ? '<runtime>' : `'${name}'`})`
-    if (name === null) sink(node, { kind: 'unresolved', request: { file, line, text, reason: 'dynamicPath' } })
-    else sink(node, { kind: 'request', request: { file, line, text, target: { kind: 'tool', name } } })
+    if (name === null) return { kind: 'unresolved', request: { file, line, text, reason: 'dynamicPath' } }
+    return { kind: 'request', request: { file, line, text, target: { kind: 'tool', name } } }
   }
+  return undefined
 }
 
 /** Every `TestApp` request the given test files spell. `files` are absolute. */
@@ -338,16 +363,16 @@ export async function scanTestRequests(root: string, files: readonly string[], c
       if (outcome.status === 'unreadable' || outcome.source.includes('TestApp')) scan.unparsed.push(file)
       continue
     }
-    scanFile(outcome.ast, file, (_node, call) => {
+    for (const { call } of scanFile(outcome.ast, file, localFunctions(outcome.ast))) {
       if (call.kind === 'request') scan.requests.push(call.request)
       else if (call.kind === 'unresolved') scan.unresolved.push(call.request)
-    })
+    }
   }
   return scan
 }
 
 /** The requests a test case makes, for the ids its title or an enclosing `describe`'s carries. */
-export interface TestCaseRequests extends TestRequestScan {
+export interface TestCaseRequests extends Omit<TestRequestScan, 'unparsed'> {
   file: string
   line: number
   title: string
@@ -360,6 +385,8 @@ export interface TestCaseScan {
   cases: Map<string, TestCaseRequests[]>
   /** Test calls whose title is not all literal, so a token may hide in it. */
   opaqueTitles: TestRequestSite[]
+  /** Per accepted token, the test calls carrying it with no callback (`test.todo('[AC-1] x')`). */
+  bodiless: Map<string, TestRequestSite[]>
   /** Files that did not parse, so no case of theirs was read. */
   unparsed: string[]
 }
@@ -416,19 +443,18 @@ function localFunctions(ast: File): Map<string, Range[]> {
   return functions
 }
 
-function within(ranges: readonly Range[], node: BabelNode): boolean {
-  const start = node.start
-  return typeof start === 'number' && ranges.some((range) => start >= range.start && start < range.end)
+function within(ranges: readonly Range[], start: number): boolean {
+  return ranges.some((range) => start >= range.start && start < range.end)
 }
 
 /** A case's body and, transitively, every same-file function called by name from inside it. */
-function caseRanges(body: Range, functions: ReadonlyMap<string, Range[]>, calls: ReadonlyArray<{ node: BabelNode; name: string }>): Range[] {
+function caseRanges(body: Range, functions: ReadonlyMap<string, Range[]>, calls: ReadonlyArray<{ start: number; name: string }>): Range[] {
   const ranges = [body]
   const followed = new Set<string>()
   for (let grew = true; grew;) {
     grew = false
-    for (const { node, name } of calls) {
-      if (followed.has(name) || !within(ranges, node)) continue
+    for (const { start, name } of calls) {
+      if (followed.has(name) || !within(ranges, start)) continue
       followed.add(name)
       ranges.push(...(functions.get(name) ?? []))
       grew = true
@@ -443,7 +469,7 @@ function caseRanges(body: Range, functions: ReadonlyMap<string, Range[]>, calls:
  * makes the requests in its body and in the same-file functions it calls by name. `files` are absolute.
  */
 export async function scanTestCaseRequests(root: string, files: readonly string[], cache: ParseCache, accept: (token: string) => boolean): Promise<TestCaseScan> {
-  const scan: TestCaseScan = { cases: new Map(), opaqueTitles: [], unparsed: [] }
+  const scan: TestCaseScan = { cases: new Map(), opaqueTitles: [], bodiless: new Map(), unparsed: [] }
   for (const absolute of files) {
     const file = toPosixRelative(root, absolute)
     const outcome = await cache.read(absolute)
@@ -460,31 +486,36 @@ function scanCases(ast: File, file: string, accept: (token: string) => boolean, 
   const runner = new Set<string>(TEST_CALLEES)
   for (const name of TEST_CALLEES) for (const local of importedLocals(ast, { specifier: RUNNER, exportName: name })) runner.add(local)
   const functions = localFunctions(ast)
-  const found: Array<{ node: BabelNode; call: ScannedCall }> = []
-  scanFile(ast, file, (node, call) => found.push({ node, call }))
-  const calls: Array<{ node: BabelNode; name: string }> = []
+  const found = scanFile(ast, file, functions)
+  const calls: Array<{ start: number; name: string }> = []
   walk(ast.program, (node) => {
     const callee = node.type === 'CallExpression' ? (node.callee as BabelNode) : undefined
-    if (callee?.type === 'Identifier' && functions.has(callee.name as string)) calls.push({ node, name: callee.name as string })
+    if (callee?.type === 'Identifier' && functions.has(callee.name as string) && typeof node.start === 'number') calls.push({ start: node.start, name: callee.name as string })
   })
 
   walk(ast.program, (node) => {
     if (node.type !== 'CallExpression') return
+    const root = chainRoot(node.callee as BabelNode)
+    if (root === undefined || !runner.has(root)) return
     const args = node.arguments as BabelNode[]
     const body = args.slice(1).find(isFunction)
-    const root = chainRoot(node.callee as BabelNode)
-    if (!body || root === undefined || !runner.has(root)) return
-    const line = node.loc?.start.line ?? 0
     const text = titleText(args[0])
+    // `test.each(rows)` and `test.if(c)` carry no title: the call they return does.
+    if (!body && text === null) return
+    const line = node.loc?.start.line ?? 0
     const shown = text?.replaceAll(HOLE, '${…}') ?? '<runtime>'
     if (text === null || text.includes(HOLE)) scan.opaqueTitles.push({ file, line, text: shown })
     const tokens = new Set((text === null ? [] : bracketedTokens(text)).filter((token) => !token.includes(HOLE) && accept(token)))
-    const range = rangeOf(body)
-    if (tokens.size === 0 || !range) return
+    if (tokens.size === 0) return
+    const range = body && rangeOf(body)
+    if (!range) {
+      for (const token of tokens) scan.bodiless.set(token, [...(scan.bodiless.get(token) ?? []), { file, line, text: shown }])
+      return
+    }
     const ranges = caseRanges(range, functions, calls)
-    const entry: TestCaseRequests = { file, line, title: shown, requests: [], unresolved: [], unparsed: [], handedOff: [] }
-    for (const { node: site, call } of found) {
-      if (!within(ranges, site)) continue
+    const entry: TestCaseRequests = { file, line, title: shown, requests: [], unresolved: [], handedOff: [] }
+    for (const { start, call } of found) {
+      if (!within(ranges, start)) continue
       if (call.kind === 'request') entry.requests.push(call.request)
       else if (call.kind === 'unresolved') entry.unresolved.push(call.request)
       else if (call.callee === undefined || !functions.has(call.callee)) entry.handedOff.push(call.site)
@@ -545,7 +576,15 @@ function patternSegments(path: string): PatternSegment[] {
   })
 }
 
-function matchFrom(patterns: readonly PatternSegment[], pi: number, segments: readonly TestRequestSegment[], si: number): Match {
+export interface RoutePathMatchOptions {
+  /**
+   * Read a runtime segment at a constrained parameter as filling it, one segment. For a caller
+   * asking whether a request names the route, not whether its value passes: an unmatched value 404s.
+   */
+  runtimeFillsConstraints?: boolean
+}
+
+function matchFrom(patterns: readonly PatternSegment[], pi: number, segments: readonly TestRequestSegment[], si: number, options: RoutePathMatchOptions): Match {
   if (pi === patterns.length) return si === segments.length ? 'match' : 'none'
   const pattern = patterns[pi]!
   const last = pi === patterns.length - 1
@@ -553,7 +592,7 @@ function matchFrom(patterns: readonly PatternSegment[], pi: number, segments: re
   if (pattern.source === null) {
     if (last) return 'match'
     // A middle `*` takes one segment, and hono does not let it take an empty one.
-    return segment === undefined || ('literal' in segment && segment.literal === '') ? 'none' : matchFrom(patterns, pi + 1, segments, si + 1)
+    return segment === undefined || ('literal' in segment && segment.literal === '') ? 'none' : matchFrom(patterns, pi + 1, segments, si + 1, options)
   }
   if (last && pattern.param?.optional && si === segments.length) return 'match'
   if (segment === undefined) return 'none'
@@ -561,14 +600,14 @@ function matchFrom(patterns: readonly PatternSegment[], pi: number, segments: re
   if ('runtime' in segment) {
     if (!pattern.param) return 'none'
     // A runtime value may fail the constraint, or span `/` and take the segments after it.
-    return constraint === undefined ? matchFrom(patterns, pi + 1, segments, si + 1) : 'unknown'
+    return constraint === undefined || options.runtimeFillsConstraints ? matchFrom(patterns, pi + 1, segments, si + 1, options) : 'unknown'
   }
   let result: Match = 'none'
   const settles = (match: Match): boolean => {
     if (match === 'unknown') result = 'unknown'
     return match === 'match'
   }
-  if (compile(pattern.source).test(segment.literal) && settles(matchFrom(patterns, pi + 1, segments, si + 1))) return 'match'
+  if (compile(pattern.source).test(segment.literal) && settles(matchFrom(patterns, pi + 1, segments, si + 1, options))) return 'match'
   if (constraint === undefined) return result
   // A constraint may match `/` (`:path{.+}`) and take the spelled segments after it along.
   let joined = segment.literal
@@ -576,7 +615,7 @@ function matchFrom(patterns: readonly PatternSegment[], pi: number, segments: re
     const following = segments[end]!
     if ('runtime' in following) return 'unknown'
     joined += `/${following.literal}`
-    if (compile(pattern.source).test(joined) && settles(matchFrom(patterns, pi + 1, segments, end + 1))) return 'match'
+    if (compile(pattern.source).test(joined) && settles(matchFrom(patterns, pi + 1, segments, end + 1, options))) return 'match'
   }
   return result
 }
@@ -587,9 +626,9 @@ function matchFrom(patterns: readonly PatternSegment[], pi: number, segments: re
  * A runtime segment fills a lone param; against a constraint it is `unknown`.
  * A constraint this engine cannot compile is `unknown` too, never read as no match.
  */
-export function routePathMatches(path: string, segments: readonly TestRequestSegment[]): Match {
+export function routePathMatches(path: string, segments: readonly TestRequestSegment[], options: RoutePathMatchOptions = {}): Match {
   try {
-    return matchFrom(patternSegments(path), 0, segments, 0)
+    return matchFrom(patternSegments(path), 0, segments, 0, options)
   } catch (error) {
     if (error instanceof UncompilablePattern) return 'unknown'
     throw error
@@ -630,7 +669,7 @@ function push<T>(map: Map<number, T[]>, index: number, value: T): void {
 }
 
 /** Every matching route is listed: a static scan has no registration order to pick hono's first match by. */
-export function testCoverage(scan: TestRequestScan, routes: readonly TestRequestRoute[]): TestCoverage {
+export function testCoverage(scan: Pick<TestRequestScan, 'requests' | 'unresolved'>, routes: readonly TestRequestRoute[], options: RoutePathMatchOptions = {}): TestCoverage {
   const coverage: TestCoverage = { byRoute: new Map(), uncertainByRoute: new Map(), unresolved: [...scan.unresolved] }
   for (const { target, ...site } of scan.requests) {
     routes.forEach((route, index) => {
@@ -639,7 +678,7 @@ export function testCoverage(scan: TestRequestScan, routes: readonly TestRequest
         return
       }
       if (route.method.toUpperCase() !== target.method) return
-      const match = routePathMatches(route.path, target.segments)
+      const match = routePathMatches(route.path, target.segments, options)
       if (match === 'match') push(coverage.byRoute, index, site)
       else if (match === 'unknown') push(coverage.uncertainByRoute, index, { ...site, reason: 'routePattern', method: target.method })
     })
