@@ -240,7 +240,7 @@ export const planScaffoldCommand = defineCommand({
   meta: {
     name: 'plan:scaffold',
     description:
-      "Write the scaffold step of an approved plan (RFC 0030 §5): each added model's table in db/schema.ts, with every column option and foreign key the plan states, and its model class with the plan's relationships and fillable; the step's validators; each resource and policy of the model, the policy's abilities denying until written, and a provider registering the policy with the gate, added to createApp(); each added controller with exactly the planned actions, which validate and authorize as planned and then answer 501; the routes to them in routes/<collection>.ts, not mounted; the side-effect classes. With --mount, from the http step holding those routes, call that file's registrar first in the entry registrar. Writes no pages or action bodies, and runs no codegen or migration. The step must be the one plan:next marked. Refuses, with nothing written, a draft, another step kind, a module element, an API-only application, a provider it cannot register, any target that already exists, a re-run included, and a mount with nothing to mount or already mounted.",
+      "Write the scaffold step of an approved plan (RFC 0030 §5): each added model's table in db/schema.ts, with every column option and foreign key the plan states, and its model class with the plan's relationships and fillable; the step's validators; each resource and policy of the model, the policy's abilities denying until written, and a provider registering the policy with the gate, added to createApp(); each added controller with exactly the planned actions, which validate and authorize as planned and then answer 501; the routes to them in routes/<collection>.ts, not mounted; the side-effect classes. From a tests step, write tests/plans/<plan>/<collection>.test.ts with one TestApp test per behaviour, titled with its id, making its request and asserting what the plan expects, each failing at a given() placeholder until its setup is written. With --mount, from the http step holding those routes, call that file's registrar first in the entry registrar. Writes no pages or action bodies, and runs no codegen or migration. The step must be the one plan:next marked. Refuses, with nothing written, a draft, another step kind, a module element, an API-only application, a provider it cannot register, any target that already exists, a re-run included, and a mount with nothing to mount or already mounted.",
   },
   args: {
     plan: {
@@ -251,7 +251,7 @@ export const planScaffoldCommand = defineCommand({
     },
     step: {
       type: 'string',
-      description: 'The scaffold step id, as plan:next names it; with --mount, the http step holding the routes.',
+      description: 'The scaffold or tests step id, as plan:next names it; with --mount, the http step holding the routes.',
       required: true,
       valueHint: 'task/entity/model.comment/scaffold',
     },
