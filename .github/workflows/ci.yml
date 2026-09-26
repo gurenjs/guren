@@ -238,8 +238,8 @@ jobs:
         # loses a child exit, a worker then spins at 100% CPU) is open as of
         # 1.4.2. `--shard` splits the files across jobs instead.
         bun-version: ['1.4.2']
-        # The shard count is repeated in `Run tests`; keep the two in step.
-        shard: [1, 2, 3]
+        # scripts/workflow-shards.test.ts holds this list to 1/n..n/n.
+        shard: ['1/3', '2/3', '3/3']
     services:
       redis:
         image: redis:7-alpine
@@ -308,15 +308,15 @@ jobs:
       # not something the documentation settles.
       - name: Run tests
         timeout-minutes: 15
-        run: bun run ./scripts/test-packages.ts --shard=${{ matrix.shard }}/3
+        run: bun run ./scripts/test-packages.ts --shard=${{ matrix.shard }}
 
       # The runs below are small, so each lands on one shard rather than all.
       - name: Example app tests
-        if: matrix.shard == 1
+        if: matrix.shard == '1/3'
         run: bun run test:examples
 
       - name: Testing package tests (vitest)
-        if: matrix.shard == 2
+        if: matrix.shard == '2/3'
         run: bun run test:testing
 
       # The durable agent runtime's workerd lane. Its own runner (vitest 4 +
@@ -326,7 +326,7 @@ jobs:
       # pieces it covers (an alarm waking an agent, a Durable Object's identity
       # as the principal) are exactly the ones a mock cannot exercise.
       - name: Durable agent tests (workerd)
-        if: matrix.shard == 3
+        if: matrix.shard == '3/3'
         run: bun run test:agents
 
   # Scaffolding smokes, split from build-and-test so the unit-test critical
@@ -430,7 +430,7 @@ jobs:
       fail-fast: false
       matrix:
         # Sharded like build-and-test, whose comment says why not --parallel.
-        shard: [1, 2, 3]
+        shard: ['1/3', '2/3', '3/3']
     env:
       APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
     steps:
@@ -440,7 +440,7 @@ jobs:
       - name: Generate route types
         run: bun run build:routes
       - name: Run tests (no Redis)
-        run: bun run ./scripts/test-packages.ts --shard=${{ matrix.shard }}/3
+        run: bun run ./scripts/test-packages.ts --shard=${{ matrix.shard }}
 
   e2e:
     runs-on: ubuntu-latest
