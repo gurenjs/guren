@@ -145,6 +145,8 @@ describe('guren plan:approve', () => {
     const before = await readFile(plan, 'utf8')
 
     await expect(planApproveFile(plan, { app: planAppState(), appRoot: app })).rejects.toThrow(/question Q-delete is unanswered: Does deleting a comment remove the row\?/)
+    // A reader who answered on the review page is told the page wrote nothing, and what does.
+    await expect(planApproveFile(plan, { app: planAppState(), appRoot: app })).rejects.toThrow(/review page does not change the plan file\. Send the agent the prompt the page copies with "Copy prompt for the agent", or remove each answered question yourself with plan:revise/)
     expect(await readFile(plan, 'utf8')).toBe(before)
     expect((await readPlanApprovals(plan)).value).toBeUndefined()
   })

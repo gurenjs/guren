@@ -264,6 +264,7 @@ Impact は下限です。静的な走査なので、別の関数やファイル�
 ```text
  ERROR  docs/plans/comments/plan.json is not approved while a check fails or a question is open; an assumption nobody confirmed is not approved by silence.
   question Q-delete is unanswered: Does deleting a comment remove the row?
+An answer chosen on the review page does not change the plan file. Send the agent the prompt the page copies with "Copy prompt for the agent", or remove each answered question yourself with plan:revise (--edited with a copy of the plan, or --ops with a remove op), passing the page's feedback with --feedback.
 ```
 
 問題がなくなったら承認します。

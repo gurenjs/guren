@@ -79,8 +79,13 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
     ...plan.questions.map((question) => `  question ${question.id} is unanswered: ${question.question}`),
   ]
   if (blockers.length > 0) {
+    // The review page writes nothing, so a reader who answered there lands here with the plan unchanged.
+    const answerHint =
+      plan.questions.length > 0
+        ? '\nAn answer chosen on the review page does not change the plan file. Send the agent the prompt the page copies with "Copy prompt for the agent", or remove each answered question yourself with plan:revise (--edited with a copy of the plan, or --ops with a remove op), passing the page\'s feedback with --feedback.'
+        : ''
     throw new CliError(
-      `${path} is not approved while a check fails or a question is open; an assumption nobody confirmed is not approved by silence.\n${blockers.join('\n')}`,
+      `${path} is not approved while a check fails or a question is open; an assumption nobody confirmed is not approved by silence.\n${blockers.join('\n')}${answerHint}`,
     )
   }
   // Read before anything is written, so a file that will not read leaves the plan file untouched too.

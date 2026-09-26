@@ -254,6 +254,7 @@ Approval is a person's decision, made after reading the page. It refuses while a
 ```text
  ERROR  docs/plans/comments/plan.json is not approved while a check fails or a question is open; an assumption nobody confirmed is not approved by silence.
   question Q-delete is unanswered: Does deleting a comment remove the row?
+An answer chosen on the review page does not change the plan file. Send the agent the prompt the page copies with "Copy prompt for the agent", or remove each answered question yourself with plan:revise (--edited with a copy of the plan, or --ops with a remove op), passing the page's feedback with --feedback.
 ```
 
 Once the plan is clean:
