@@ -277,7 +277,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 .page-link { align-self: flex-start; font-family: var(--mono); font-size: 0.72rem; color: var(--plan); border: 1px solid var(--plan); border-radius: 3px; padding: 0.25rem 0.6rem; text-decoration: none; }
 .page-link:hover, .page-link:focus-visible { background: var(--plan-tint); }
 
-.plan-list { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.4rem; max-width: 18rem; }
+.plan-list { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.4rem; max-width: 18rem; max-height: 30vh; overflow-y: auto; }
 .plan-list:empty { display: none; }
 .plan-list button {
   display: flex; justify-content: space-between; gap: 0.75rem; align-items: baseline;
@@ -311,6 +311,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 .state-drifted, .state-incomplete, .state-blocked { color: var(--warn); }
 .state-failed { color: var(--fail); }
 .state-outdated, .state-not-run { color: var(--text-muted); }
+.state-waiver-withdrawn { color: var(--warn); }
 
 .frontmatter {
   background: var(--raised); border: 1px solid var(--border); border-radius: 4px;
@@ -391,7 +392,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   <span><span class="swatch derives"></span>derives (regenerated from code)</span>
 </div>
 
-<p class="hint">click a node · drag to pan · pinch to zoom · 0 fit · f reading mode</p>
+<p class="hint">click a node · drag a node to move it · drag the background to pan · pinch to zoom · 0 fit</p>
 
 <div class="zoom-controls" role="group" aria-label="Zoom">
   <button id="zoom-in" title="Zoom in (+)" aria-label="Zoom in">+</button>
@@ -423,7 +424,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   const BASE_URL = '/_guren/docs'
   const DATA_URL = BASE_URL + '/data.json'
   const RADIUS = { doc: 22, entity: 15, code: 10, test: 9, testGroup: 14, openplan: 19 }
-  const STEP_GLYPH = { verified: '●', drifted: '▲', incomplete: '▲', blocked: '■', failed: '✕', outdated: '○', 'not-run': '○' }
+  const STEP_GLYPH = { verified: '●', drifted: '▲', incomplete: '▲', 'waiver-withdrawn': '▲', blocked: '■', failed: '✕', outdated: '○', 'not-run': '○' }
   const VERDICT_RANK = { pass: 0, warn: 1, fail: 2 }
   const VERDICT_GLYPH = { pass: '●', warn: '▲', fail: '✕' }
   const svg = document.getElementById('graph')
@@ -572,7 +573,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     // Fresh graphs get ring seeding: docs inner, satellites outer.
     if (previous.size === 0) {
       const docs = nodes.filter((n) => n.kind === 'doc' || n.kind === 'openplan')
-      const sats = nodes.filter((n) => n.kind !== 'doc')
+      const sats = nodes.filter((n) => n.kind !== 'doc' && n.kind !== 'openplan')
       docs.forEach((n, i) => {
         const a = (i / Math.max(docs.length, 1)) * Math.PI * 2
         n.x = W / 2 + Math.cos(a) * 130; n.y = H / 2 + Math.sin(a) * 130
@@ -853,13 +854,18 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     return li
   }
 
-  function pageLink(page) {
-    return Object.assign(el('a', 'page-link', 'open plan page ↗'), {
+  /** The page link, and where the page is older than its plan, the command that renders it again. */
+  function appendPageLink(head, page) {
+    head.append(Object.assign(el('a', 'page-link', 'open plan page ↗'), {
       href: BASE_URL + '/plans/' + encodeURIComponent(page.slug),
       target: '_blank',
       rel: 'noopener',
       title: page.page,
-    })
+    }))
+    if (page.stale) {
+      head.append(el('p', 'plan-reason', 'The page was rendered from an earlier version of the plan.'))
+      head.append(commandRow(page.render))
+    }
   }
 
   function buildDocDetail(doc) {
@@ -877,7 +883,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     if (doc.closedPlanHash) chips.append(el('span', 'chip chip-plan', 'closed ' + doc.closedPlanHash.slice(0, 12)))
     head.append(chips)
     const page = data.planPages.find((p) => p.doc === doc.path)
-    if (page) head.append(pageLink(page))
+    if (page) appendPageLink(head, page)
     root.append(head)
 
     const front = el('div', 'frontmatter')
@@ -1001,7 +1007,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     const page = data.planPages.find((p) => p.plan === plan.file)
     if (page && page.stale) chips.append(el('span', 'chip chip-stale', 'page is stale'))
     head.append(chips)
-    if (page) head.append(pageLink(page))
+    if (page) appendPageLink(head, page)
     root.append(head)
 
     const front = el('div', 'frontmatter')
@@ -1069,7 +1075,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     head.append(el('p', 'path', kindLabel))
     head.append(el('h1', 'mono-title', node.label))
     const page = node.kind === 'code' ? data.planPages.find((p) => p.plan === node.id) : undefined
-    if (page) head.append(pageLink(page))
+    if (page) appendPageLink(head, page)
     root.append(head)
 
     const isPlan = (e) => byId.has(e.from) && kindOf(byId.get(e.from)) === 'plan'
@@ -1227,13 +1233,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       ev.preventDefault()
       setExpanded(!expanded)
     }
-    if (typing || ev.metaKey || ev.ctrlKey || ev.altKey) return
+    const inPanel = ev.target instanceof Element && ev.target.closest('.panel') !== null
+    if (typing || inPanel || ev.metaKey || ev.ctrlKey || ev.altKey) return
     if (ev.key === '+' || ev.key === '=') zoomBy(1 / ZOOM_STEP)
     else if (ev.key === '-') zoomBy(ZOOM_STEP)
     else if (ev.key === '0') fitView()
   })
 
-  // ---- zoom & pan: the viewBox moves over the fixed simulation space ----
+  // Zoom and pan move the viewBox over the fixed simulation space, so node positions never change.
   const ZOOM_STEP = 1.25
   const view = { x: 0, y: 0, w: W, h: H }
   const applyView = () => svg.setAttribute('viewBox', view.x + ' ' + view.y + ' ' + view.w + ' ' + view.h)
@@ -1267,25 +1274,29 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     applyView()
   }
   // A trackpad pinch arrives as a wheel event with ctrlKey set; a plain wheel or two-finger scroll pans.
+  // deltaMode 1 (Firefox's mouse wheel) counts lines and 2 pages; both become pixels here.
+  const WHEEL_UNIT = [1, 16, 400]
   svg.addEventListener('wheel', (ev) => {
     ev.preventDefault()
+    const unit = WHEEL_UNIT[ev.deltaMode] ?? 1
     if (ev.ctrlKey || ev.metaKey) {
-      zoomAt(toGraph(ev.clientX, ev.clientY), Math.exp(ev.deltaY * 0.01))
+      zoomAt(toGraph(ev.clientX, ev.clientY), Math.exp(ev.deltaY * unit * 0.01))
     } else {
       const scale = pixelsPerUnit()
-      view.x += ev.deltaX / scale
-      view.y += ev.deltaY / scale
+      view.x += (ev.deltaX * unit) / scale
+      view.y += (ev.deltaY * unit) / scale
       applyView()
     }
   }, { passive: false })
   let panning = null
   svg.addEventListener('pointerdown', (ev) => {
-    if (ev.target !== svg) return
+    if (ev.target !== svg || ev.button !== 0) return
     try { svg.setPointerCapture(ev.pointerId) } catch {}
     panning = { x: ev.clientX, y: ev.clientY, viewX: view.x, viewY: view.y, moved: false }
   })
   svg.addEventListener('pointermove', (ev) => {
     if (!panning) return
+    if (ev.buttons === 0) { panning = null; svg.classList.remove('dragging'); return }
     const dx = ev.clientX - panning.x, dy = ev.clientY - panning.y
     if (!panning.moved && Math.hypot(dx, dy) < 3) return
     panning.moved = true

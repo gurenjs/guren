@@ -21,8 +21,11 @@ import { hashFiles, readPlanWaivers, recordDrift, recordStillHolds } from './pla
 
 export type DocsViewerPlanStanding = 'draft' | 'approved' | 'unapproved' | 'baseline-removed' | 'unreadable'
 
-/** `outdated`: a record taken against another version of the plan, which counts for nothing now. */
-export type DocsViewerStepState = 'verified' | 'drifted' | 'failed' | 'blocked' | 'incomplete' | 'outdated' | 'not-run'
+/**
+ * `outdated`: a record taken against another version of the plan, which counts for nothing now.
+ * `waiver-withdrawn`: verified here, over a waiver the decision log does not hold.
+ */
+export type DocsViewerStepState = 'verified' | 'drifted' | 'failed' | 'blocked' | 'incomplete' | 'outdated' | 'waiver-withdrawn' | 'not-run'
 
 export interface DocsViewerPlanStep {
   id: string
@@ -64,9 +67,10 @@ export interface DocsViewerPlans {
   hashes: Map<string, string | null>
 }
 
-/** A shell word as the reader will paste it. */
-function shellWord(value: string): string {
-  return /^[\w./@-]+$/u.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`
+/** A plan command as the reader will paste it, the file quoted for a POSIX shell where it needs it. */
+export function planCommand(subcommand: string, file: string): string {
+  const word = /^[\w./@-]+$/u.test(file) ? file : `'${file.replace(/'/g, `'\\''`)}'`
+  return `bunx guren ${subcommand} ${word}`
 }
 
 function stepState(record: PlanStepRecord | undefined, digest: string, holds: boolean, changed: string[]): DocsViewerStepState {
@@ -74,7 +78,7 @@ function stepState(record: PlanStepRecord | undefined, digest: string, holds: bo
   if (holds) return 'verified'
   if (changed.length > 0) return 'drifted'
   if (record.planDigest !== digest) return 'outdated'
-  return record.outcome === 'verified' ? 'outdated' : record.outcome
+  return record.outcome === 'verified' ? 'waiver-withdrawn' : record.outcome
 }
 
 async function closedHash(appRoot: string, slug: string): Promise<string | undefined> {
@@ -82,17 +86,20 @@ async function closedHash(appRoot: string, slug: string): Promise<string | undef
   return source === undefined ? undefined : planDocClosedHash(source)
 }
 
+function unreadablePlan(file: string, slug: string, reason: string): DocsViewerOpenPlan {
+  return { slug, file, title: file, standing: 'unreadable', reason, entities: [], steps: [], waivers: [], next: [], status: planCommand('plan:status', file) }
+}
+
 async function readViewerPlan(appRoot: string, path: string, apiOnly: boolean): Promise<{ open?: DocsViewerOpenPlan; hash?: string | null }> {
   const file = toPosixRelative(appRoot, path)
-  const slug = planSlug(path)
-  const command = (subcommand: string): string => `bunx guren ${subcommand} ${shellWord(file)}`
+  const command = (subcommand: string): string => planCommand(subcommand, file)
   let plan: Awaited<ReturnType<typeof readPlanFile>>['plan']
   try {
     plan = (await readPlanFile(path, appRoot)).plan
   } catch (error) {
-    const reason = (error as Error).message
-    return { open: { slug, file, title: file, standing: 'unreadable', reason, entities: [], steps: [], waivers: [], next: [], status: command('plan:status') } }
+    return { open: unreadablePlan(file, planSlug(path), (error as Error).message) }
   }
+  const slug = planSlug(path)
   const hash = hasBaseline(plan) ? planHash(plan) : null
   // A revision approved after the close carries another hash, and is open work again.
   if (hash !== null && (await closedHash(appRoot, slug)) === hash) return { hash }
@@ -104,6 +111,8 @@ async function readViewerPlan(appRoot: string, path: string, apiOnly: boolean): 
   const records = stateRead.state?.steps ?? {}
   const hashes = await hashFiles(appRoot, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
   const active = stateRead.state?.active?.plan === file ? stateRead.state.active : undefined
+  // plan:next drops an approval stall once the gate passes, so an approved plan's is already answered.
+  const stalled = active?.stalled && !(active.stalled.cause === 'approval' && standingRead?.state === 'approved') ? active.stalled : undefined
 
   const steps = listPlanSteps(derivePlanTasks(plan, { apiOnly })).map(({ task, step }): DocsViewerPlanStep => {
     const record = records[step.id]
@@ -118,7 +127,7 @@ async function readViewerPlan(appRoot: string, path: string, apiOnly: boolean): 
       ...(record ? { ranAt: record.ranAt } : {}),
       ...(changed.length > 0 ? { changed } : {}),
       ...(marked ? { active: true } : {}),
-      ...(marked && active?.stalled ? { stall: { at: active.stalled.at, reason: active.stalled.reason } } : {}),
+      ...(marked && stalled ? { stall: { at: stalled.at, reason: stalled.reason } } : {}),
     }
   })
 
@@ -155,7 +164,16 @@ export async function readViewerPlans(appRoot: string): Promise<DocsViewerPlans>
   const { files } = await discoverPlanFiles(appRoot)
   if (files.length === 0) return { open: [], hashes: new Map() }
   const apiOnly = await isConfirmedApiOnlyApp(appRoot).catch(() => false)
-  const read = await Promise.all(files.map(async (path) => ({ file: toPosixRelative(appRoot, path), ...(await readViewerPlan(appRoot, path, apiOnly)) })))
+  // One plan the readers choke on is that plan's problem, never the whole payload's.
+  const read = await Promise.all(
+    files.map(async (path) => {
+      const file = toPosixRelative(appRoot, path)
+      const entry: { open?: DocsViewerOpenPlan; hash?: string | null } = await readViewerPlan(appRoot, path, apiOnly).catch((error: unknown) => ({
+        open: unreadablePlan(file, planSlug(path), (error as Error).message),
+      }))
+      return { file, ...entry }
+    }),
+  )
   const hashes = new Map<string, string | null>()
   for (const entry of read) if (entry.hash !== undefined) hashes.set(entry.file, entry.hash)
   return { open: read.flatMap((entry) => (entry.open ? [entry.open] : [])), hashes }

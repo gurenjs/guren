@@ -20,7 +20,7 @@ import { escapeHtml, renderDocHtml } from './docs-render'
 import type { AcceptanceTestRef } from './docs-acceptance'
 import { planDocClosedHashIn, planDocPath, readPlanBlocks } from './plan/close-docs'
 import { renderedPlanHash } from './plan/render'
-import { readViewerPlans, type DocsViewerOpenPlan } from './docs-viewer-plans'
+import { planCommand, readViewerPlans, type DocsViewerOpenPlan } from './docs-viewer-plans'
 import { discoverPlanFiles } from './plan-check'
 import { planOutputPath } from './plan/beside'
 import { planSlug } from './plan/state'
@@ -88,6 +88,8 @@ export interface DocsViewerPlanPage {
   doc: string
   /** The page carries another hash than the plan's current one; a draft's page is never judged. */
   stale?: boolean
+  /** `stale` only: the command that renders it again. */
+  render?: string
 }
 
 /** Marks each page rendered at another hash than its plan's; one that will not read is left unjudged. */
@@ -97,7 +99,7 @@ async function judgePageFreshness(cwd: string, pages: DocsViewerPlanPage[], hash
       const current = hashes.get(page.plan)
       if (typeof current !== 'string') return page
       const rendered = renderedPlanHash(await readFile(resolve(cwd, page.page), 'utf-8').catch(() => ''))
-      return rendered === undefined || rendered === current ? page : { ...page, stale: true }
+      return rendered === undefined || rendered === current ? page : { ...page, stale: true, render: planCommand('plan:render', page.plan) }
     }),
   )
 }

@@ -4,8 +4,8 @@ import { join } from 'node:path'
 
 import { readViewerPlans } from '../src/docs-viewer-plans'
 import { planHash } from '../src/plan/identity'
-import { renderedPlanHash } from '../src/plan/render'
-import { PlanSchema } from '../src/plan/schema'
+import { renderedPlanHash, renderPlanHtml } from '../src/plan/render'
+import { PlanDraftSchema, PlanSchema } from '../src/plan/schema'
 import { PLAN_STATE_VERSION, planDigest, type PlanStepRecord } from '../src/plan/state'
 import { derivePlanTasks, listPlanSteps } from '../src/plan/tasks'
 import { hashFiles } from '../src/plan/verification'
@@ -64,7 +64,7 @@ describe('readViewerPlans', () => {
       })
       await approvePlanFile(path)
       const plan = PlanSchema.parse(document)
-      const [first, second, third] = listPlanSteps(derivePlanTasks(plan, { apiOnly: false })).map(({ step }) => step.id)
+      const [first, second, third, fourth, fifth] = listPlanSteps(derivePlanTasks(plan, { apiOnly: false })).map(({ step }) => step.id)
       const hashes = await hashFiles(dir, ['app/Models/Comment.ts'])
       await writeWorkspaceFiles(dir, {
         '.guren/plans/comments.state.json': JSON.stringify({
@@ -72,6 +72,8 @@ describe('readViewerPlans', () => {
           steps: {
             [first]: record(plan, { 'app/Models/Comment.ts': hashes.get('app/Models/Comment.ts')! }),
             [second]: record(plan, { 'app/Models/Post.ts': 'not-the-hash' }),
+            [fourth]: record(plan, {}, 'failed'),
+            [fifth]: { ...record(plan, {}), planDigest: 'an-earlier-version' },
           },
           active: {
             plan: 'docs/plans/comments.plan.json',
@@ -92,6 +94,8 @@ describe('readViewerPlans', () => {
       expect(byId.get(second)?.state).toBe('drifted')
       expect(byId.get(second)?.changed).toEqual(['app/Models/Post.ts'])
       expect(byId.get(third)).toMatchObject({ state: 'not-run', active: true, stall: { reason: 'three continuations' } })
+      expect(byId.get(fourth)?.state).toBe('failed')
+      expect(byId.get(fifth)?.state).toBe('outdated')
       expect(read.next).toEqual(['bunx guren plan:next docs/plans/comments.plan.json'])
     } finally {
       await workspace.cleanup()
@@ -118,6 +122,27 @@ describe('readViewerPlans', () => {
     }
   })
 
+  it('reports a plan file it cannot read as unreadable, beside the plans it can', async () => {
+    const workspace = await createTempWorkspace('guren-cli-viewer-plans-unreadable-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'docs/plans/broken.plan.json': '{ not json',
+        'docs/plans/comments.plan.json': JSON.stringify(loadCommentsPlan()),
+      })
+
+      const { open } = await readViewerPlans(workspace.dir)
+
+      expect(open.map((plan) => [plan.file, plan.standing])).toEqual([
+        ['docs/plans/broken.plan.json', 'unreadable'],
+        ['docs/plans/comments.plan.json', 'draft'],
+      ])
+      expect(open[0].reason).toBeDefined()
+      expect(open[0].next).toEqual([])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('asks for approval again once the plan changed since its approval', async () => {
     const workspace = await createTempWorkspace('guren-cli-viewer-plans-unapproved-')
     try {
@@ -139,6 +164,12 @@ describe('readViewerPlans', () => {
 })
 
 describe('renderedPlanHash', () => {
+  it('reads back the hash renderPlanHtml embeds, so a template change cannot make every page read fresh', () => {
+    const plan = PlanSchema.parse(loadApprovedCommentsPlan())
+    expect(renderedPlanHash(renderPlanHtml({ plan }))).toBe(planHash(plan))
+    expect(renderedPlanHash(renderPlanHtml({ plan: PlanDraftSchema.parse(loadCommentsPlan()) }))).toBeNull()
+  })
+
   it('reads the hash a rendered page embeds, and nothing from a page without a payload', () => {
     const page = (payload: string): string => `<html><script type="application/json" id="plan-data">${payload}</script></html>`
     expect(renderedPlanHash(page(JSON.stringify({ planHash: 'abc' })))).toBe('abc')
