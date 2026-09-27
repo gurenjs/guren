@@ -2719,6 +2719,56 @@ readings (`packages/cli/src/plan-close.ts`, `plan/close-docs.ts`,
   the id; whether it passes is a result of `plan:verify` in one environment,
   which a committed document cannot state.
 
+**Amended after acceptance (2026-09-27), the docs viewer.** A person
+managing plans needs one place that answers "which plans are open, where is
+each, and what do I run next". That place is the `/_guren/docs` viewer
+(RFC 0005), and it stays read-only: approving, verifying, waiving and closing
+remain CLI acts, as the served-mode amendment above already requires for
+approval. The viewer shows state and names the command; it never runs one.
+
+- **Closed plans** (#1116). A `type: plan` document is drawn in its own
+  color and shows the hash it closed at. A block `plan:close` wrote into an
+  entity document is framed and links to its plan, read through
+  `readPlanBlocks()`, which reuses `readEntityDoc()`, so the viewer and the
+  close agree on what a block is. Acceptance ids that verify the same set of
+  documents collapse into one node listing each id, its verdict and the test
+  files carrying it; one node per id buried a 17-behaviour plan's two
+  documents under 34 edges. A page `plan:render` wrote beside a plan opens at
+  `/_guren/docs/plans/<slug>`. `docs:graph --json` is unchanged by all of it.
+- **Open plans.** Every plan file the `check --plan` discovery rule finds
+  (`discoverPlanFiles()`) that `planDocClosedHash()` does not report closed at
+  its current hash is shown, classified by `readPlanApprovalStanding()`: a
+  draft, approved at its current hash, unapproved (edited since approval),
+  baseline removed, or unreadable. A plan is linked to the entity of each
+  model it adds, alters or renames (`touchedModels()`), so an entity's panel
+  lists the plans in flight against it beside the closed ones. The link is
+  the viewer's; `docs:graph --json` gains no node kind, since an agent reads a
+  plan through `plan:status` and `plan:next`.
+- **Progress.** Per open plan, the steps `derivePlanTasks()` derives, each
+  with its record in `.guren/plans/<slug>.state.json`: verified while
+  `recordStillHolds()` holds (the fingerprinted files hashed now, the
+  decision log's waivers), drifted where `recordDrift()` names the changed
+  files, failed, blocked or incomplete as recorded, or not run. The active
+  mark and a stall with its cause are shown on their step, and each waiver
+  with its reason. The state file is git-ignored, so the view says it is
+  this checkout's progress, not the team's.
+- **What it does not read.** Element states (`planStatusFile()`), freshness
+  (`judgeFreshness()`) and the holds `plan:next` computes import
+  `db/schema.ts` and the routes file. The viewer rebuilds its payload on a
+  poll, and nothing it rebuilds may execute application code, so the panel
+  names `plan:status <file>` for those instead.
+- **The next command.** Each open plan names one command, copyable: a draft
+  `plan:render` then `plan:approve`; a plan unapproved at its current hash
+  `plan:approve`; an approved plan with a step whose record does not stand
+  `plan:next`; one whose every step stands `plan:close`. This is a reading of
+  the records, not `plan:next`'s decision, which also weighs freshness.
+- **A stale page.** A rendered page carries the plan hash it was rendered at
+  (`planHash` in its payload). Where that differs from the plan's current
+  hash the link is marked stale and names `plan:render`. A draft's page
+  carries no hash and is not judged.
+- The served mode stays deferred. The viewer's one route that takes a
+  parameter serves a file `plan:render` wrote and accepts no write.
+
 ### 8. Producers
 
 The schema, the checks, the renderer and the status derivation involve no
