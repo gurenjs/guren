@@ -1670,7 +1670,7 @@ With `'tagId', 'postId'`, loading `tags` looks for `post_tags` rows whose `tag_i
 
 Compare `destroy` in `app/Http/Controllers/PostController.ts` with the `comments` table in `db/schema.ts`.
 
-`destroy` deletes only the post. The comments are meant to go in the database: `onDelete: 'cascade'` on `comments.postId`, which the migration under `db/migrations/` writes as `ON DELETE cascade` on the foreign key. SQLite applies a cascade only on a connection where `PRAGMA foreign_keys` is on, and it is off by default, so if the comments survive a delete made through the dev server, that is the reason.
+`destroy` deletes only the post. The comments are meant to go in the database: `onDelete: 'cascade'` on `comments.postId`, which the migration under `db/migrations/` writes as `ON DELETE cascade` on the foreign key. SQLite applies a cascade only on a connection where `PRAGMA foreign_keys` is on. It is off by default, and `createSqliteDatabase()` turns it on for every connection it opens, so deleting the post removes its comments in the same statement.
 
 Without the cascade, the app would have to delete the children itself, before the parent:
 

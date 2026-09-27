@@ -242,6 +242,89 @@ describe('createSqliteDatabase resetDatabase', () => {
   })
 })
 
+describe('createSqliteDatabase foreign keys', () => {
+  type QueryableDatabase = RunnableDatabase & { get(query: unknown): unknown }
+
+  function writeMigration(name: string, statement: string): void {
+    const folder = join(workDir, 'migrations', name)
+    mkdirSync(folder, { recursive: true })
+    writeFileSync(join(folder, 'migration.sql'), statement)
+  }
+
+  function foreignKeysPragma(db: QueryableDatabase): number {
+    return (db.get(sql`PRAGMA foreign_keys`) as { foreign_keys: number }).foreign_keys
+  }
+
+  function countComments(db: QueryableDatabase): number {
+    return (db.get(sql`SELECT count(*) AS n FROM comments`) as { n: number }).n
+  }
+
+  test('should enforce ON DELETE cascade on a connection no reset has touched', async () => {
+    // Enforcement is per connection and off by default. resetDatabase() turns
+    // it on as well, so this opens without one: a reset would hide the open path.
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    })
+
+    const db = (await database.getDatabase()) as QueryableDatabase
+    expect(foreignKeysPragma(db)).toBe(1)
+
+    db.run(sql`CREATE TABLE posts (id integer primary key)`)
+    db.run(sql`CREATE TABLE comments (id integer primary key, post_id integer REFERENCES posts(id) ON DELETE cascade)`)
+    db.run(sql`INSERT INTO posts VALUES (1)`)
+    db.run(sql`INSERT INTO comments VALUES (1, 1)`)
+    db.run(sql`DELETE FROM posts WHERE id = 1`)
+
+    expect(countComments(db)).toBe(0)
+
+    await database.closeDatabase()
+  })
+
+  test('should keep child rows through a drizzle-kit table rebuild', async () => {
+    // The migrator runs inside a transaction, where the migration's own
+    // `PRAGMA foreign_keys=OFF` is a no-op, so the DROP TABLE of the rebuild
+    // would cascade into comments unless the factory turns enforcement off.
+    writeMigration(
+      '20260101000000_init',
+      [
+        'CREATE TABLE `posts` (`id` integer PRIMARY KEY, `title` text);',
+        'CREATE TABLE `comments` (`id` integer PRIMARY KEY, `post_id` integer REFERENCES `posts`(`id`) ON DELETE cascade);',
+      ].join('\n--> statement-breakpoint\n'),
+    )
+    const options = {
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    }
+
+    const first = createSqliteDatabase(options)
+    const firstDb = (await first.getDatabase()) as QueryableDatabase
+    firstDb.run(sql`INSERT INTO posts VALUES (1, 'hello')`)
+    firstDb.run(sql`INSERT INTO comments VALUES (1, 1)`)
+    await first.closeDatabase()
+
+    writeMigration(
+      '20260102000000_require_title',
+      [
+        'PRAGMA foreign_keys=OFF;',
+        "CREATE TABLE `__new_posts` (`id` integer PRIMARY KEY, `title` text NOT NULL DEFAULT '');",
+        'INSERT INTO `__new_posts`(`id`, `title`) SELECT `id`, `title` FROM `posts`;',
+        'DROP TABLE `posts`;',
+        'ALTER TABLE `__new_posts` RENAME TO `posts`;',
+        'PRAGMA foreign_keys=ON;',
+      ].join('--> statement-breakpoint\n'),
+    )
+
+    const second = createSqliteDatabase(options)
+    const secondDb = (await second.getDatabase()) as QueryableDatabase
+
+    expect(countComments(secondDb)).toBe(1)
+    expect(foreignKeysPragma(secondDb)).toBe(1)
+
+    await second.closeDatabase()
+  })
+})
+
 describe('createSqliteDatabase migration reporting', () => {
   function writeMigration(name: string, statement: string): void {
     const folder = join(workDir, 'migrations', name)
