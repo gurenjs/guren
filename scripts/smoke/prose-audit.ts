@@ -1,12 +1,12 @@
 /**
- * `audit:prose`: the mechanical half of .claude/rules/prose.md, for docs/en and
- * docs/ja. Flags the tells that mark prose as machine-written or translated:
- * the ja list rewrite #767 removed, the en vocabulary and stock phrases that
- * the Wikipedia "Signs of AI writing" guide and the Science Advances excess-
- * vocabulary study both name, and em-dash density (a threshold, never a ban:
- * human technical prose runs 3-6 per 1000 words, LLM output 9-10). Prose only:
- * fenced and indented code, tables and heading text are skipped; a heading's
- * shape (emoji, bold) is still judged, since that is a tell of its own.
+ * `audit:prose`: the mechanical half of .claude/rules/prose.md, for docs/en and docs/ja.
+ * ja: the phrases #767 removed, and the tells #1110/#1112 rewrote away (English words left
+ * in prose, colour for test results, chains of short sentences, literal "you", two headings).
+ * On the pre-#1110 docs those rules find 257 lines; on the rewritten ones, none.
+ * en: the vocabulary and stock phrases the Wikipedia "Signs of AI writing" guide and the
+ * Science Advances excess-vocabulary study name, and em-dash density (human 3-6/1000, LLM 9-10).
+ * Course chapters: a prompt in a blockquote. Fenced and indented code and tables are skipped;
+ * of a heading only its shape and the ja heading rules are judged.
  */
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -17,6 +17,8 @@ export type Locale = 'en' | 'ja'
 export interface ProseRule {
   pattern: RegExp
   hint: string
+  /** Judge the line without parenthesised glosses, 「quoted output」, bold labels and link text, where an English word is deliberate. */
+  outsideGlosses?: boolean
 }
 
 export const JA_RULES: ProseRule[] = [
@@ -34,7 +36,34 @@ export const JA_RULES: ProseRule[] = [
   { pattern: /堅牢|シームレス|パワフル|エレガント|直感的|革命的|ゲームチェンジャー/u, hint: '空疎な形容。具体的に何がどうなるかを書く' },
   { pattern: /私たち|あなたは|あなたに/u, hint: '英語の we / you の直訳。主語を省くか、対象を具体的に書く' },
   { pattern: /いかがでしたか|と言えるでしょう|探っていきましょう/u, hint: 'ブログ調の定型。事実だけを書く' },
+  {
+    pattern: /(?<![\w./-])(?:verified|drifted|stalled|waived?|waiver|advisory|findings?|verdicts?|rubrics?|brief|subagents?|baseline|fail-closed|read-only)(?![\w./-])/iu,
+    hint: '訳さずに残った英単語。地の文は日本語にし、画面に出る値だけ `verified` のように backtick で書く(初出は「検証済み (`verified`)」のように訳を添える)',
+    outsideGlosses: true,
+  },
+  { pattern: /[緑赤](?:です|でした|になり|になる|になっ|のまま)/u, hint: 'テスト結果を色で言わない。「通る」「失敗する」と書く' },
+  { pattern: /(?:[^。!?！？\n]{1,12}。){3}/u, hint: '短文が 3 つ以上続いている(英語の文の区切りの直訳)。接続助詞でつなぐか、1 文にまとめる' },
+  { pattern: /自分の役目|自分のターミナル/u, hint: '英語の you の直訳。主語を省くか「手元の」「読者は」と書く' },
 ]
+
+// Section titles the courses renamed away from; a heading's text is otherwise not judged.
+export const JA_HEADING_RULES: ProseRule[] = [
+  { pattern: /いまいる場所/u, hint: '章末の見出しは「ここまでの状態」' },
+  { pattern: /、手で$/u, hint: '英語の見出しの直訳。「〜を手で組む」「〜を手で加える」のように動詞で終える' },
+]
+
+// A prompt the reader sends to an agent is a plain ```text fence, which gets the site's Copy button;
+// a blockquote reads as a citation. GitHub alerts (`> [!TIP]`) stay blockquotes.
+const COURSE_DIR = /(?:^|\/)docs\/(?:en|ja)\/(?:tutorials|agent-course)\//u
+const BLOCKQUOTE_PROMPT_HINT = 'prompts go in a plain ```text fence after a line that says where to send them, not in a blockquote (docs/CLAUDE.md)'
+
+function withoutGlosses(text: string): string {
+  return text
+    .replace(/\[([^\]]*)\]\([^)]*\)/gu, ' ')
+    .replace(/\*\*[^*]+\*\*/gu, ' ')
+    .replace(/\([^()]*\)|（[^（）]*）|「[^「」]*」/gu, ' ')
+    .replace(/<[^>]+>/gu, ' ')
+}
 
 // Words the excess-vocabulary study and the Wikipedia guide both list; "robust",
 // "comprehensive" and "seamless" are included because in these docs they only
@@ -96,17 +125,29 @@ export function localeOf(file: string): Locale | null {
 export function auditProse(file: string, source: string, locale: Locale = localeOf(file) ?? 'en'): ProseFinding[] {
   const findings: ProseFinding[] = []
   const rules = locale === 'ja' ? JA_RULES : EN_RULES
+  const course = COURSE_DIR.test(file)
   let words = 0
   let dashes = 0
+  let inAlert = false
   for (const { line, text, kind } of classifyLines(source)) {
     if (kind === 'code' || kind === 'table') continue
     const stripped = text.replace(/`[^`\n]*`/gu, '`')
     for (const shape of SHAPE_RULES) {
       if ((shape.kind === 'heading') === (kind === 'heading') && shape.pattern.test(stripped)) findings.push({ file, line, text: text.trim(), hint: shape.hint })
     }
+    if (kind === 'heading' && locale === 'ja') {
+      for (const rule of JA_HEADING_RULES) {
+        if (rule.pattern.test(stripped)) findings.push({ file, line, text: text.trim(), hint: rule.hint })
+      }
+    }
     if (kind !== 'prose') continue
+    const quoted = /^>( |$)/u.test(text)
+    if (text.startsWith('> [!')) inAlert = true
+    else if (!quoted) inAlert = false
+    else if (course && !inAlert) findings.push({ file, line, text: text.trim(), hint: BLOCKQUOTE_PROMPT_HINT })
+    const glossFree = withoutGlosses(stripped)
     for (const rule of rules) {
-      if (rule.pattern.test(stripped)) findings.push({ file, line, text: text.trim(), hint: rule.hint })
+      if (rule.pattern.test(rule.outsideGlosses ? glossFree : stripped)) findings.push({ file, line, text: text.trim(), hint: rule.hint })
     }
     if (locale === 'en') {
       words += (stripped.match(/[A-Za-z][A-Za-z'-]*/gu) ?? []).length
