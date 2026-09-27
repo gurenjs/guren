@@ -2,6 +2,7 @@ import { resolve, relative } from 'node:path'
 import { consola } from 'consola'
 import type { Statement } from '@babel/types'
 import {
+  discoveryFailure,
   FileDiscoveryError,
   discoverAppConfigFiles,
   discoverControllerFiles,
@@ -384,8 +385,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     const cwd = resolve(options.cwd ?? process.cwd())
     return {
       cwd,
-      checks: [check('discovery:read', 'Scan incomplete', 'fail', error.message,
-          'Fix the directory or its permissions and run the check again.', toPosixRelative(cwd, error.directory))],
+      checks: [discoveryFailure(cwd, error, 'the check')],
       passCount: 0, warnCount: 0, failCount: 1,
     }
   }

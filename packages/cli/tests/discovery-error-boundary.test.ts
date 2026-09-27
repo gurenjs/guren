@@ -109,18 +109,20 @@ describe('directory discovery failures in diagnostic commands', () => {
     })
   }
 
-  test('doctor reports an incomplete scan instead of aborting', async () => {
-    const workspace = await createTempWorkspace('guren-discovery-doctor-')
-    try {
-      await writeWorkspaceFiles(workspace.dir, { modules: 'not a directory' })
-      const result = await runCliBinCaptured(['doctor', '--json', '--no-introspect'], workspace.dir)
-      expect(result.exitCode).toBe(0)
-      // The command prints the raw report after the JSON document, so read the first one.
-      const report = JSON.parse(result.stdout.slice(0, result.stdout.indexOf('\n}\n') + 2))
-      expect(report.checks).toEqual([expect.objectContaining({ key: 'discovery:read', status: 'fail' })])
-      expect(report.checks[0].message).toContain('ENOTDIR')
-    } finally {
-      await workspace.cleanup()
-    }
-  })
+  for (const flags of [[], ['--next']]) {
+    test(`doctor ${['--json', ...flags].join(' ')} reports an incomplete scan instead of aborting`, async () => {
+      const workspace = await createTempWorkspace('guren-discovery-doctor-')
+      try {
+        await writeWorkspaceFiles(workspace.dir, { modules: 'not a directory' })
+        const result = await runCliBinCaptured(['doctor', '--json', '--no-introspect', ...flags], workspace.dir)
+        expect(result.exitCode).toBe(0)
+        // The command prints the raw report after the JSON document, so read the first one.
+        const report = JSON.parse(result.stdout.slice(0, result.stdout.indexOf('\n}\n') + 2))
+        expect(report.checks).toEqual([expect.objectContaining({ key: 'discovery:read', status: 'fail' })])
+        expect(report.checks[0].message).toContain('ENOTDIR')
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+  }
 })

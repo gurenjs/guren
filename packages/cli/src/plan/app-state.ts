@@ -149,7 +149,8 @@ export async function loadPlanAppState(
   options: { routesFile?: string; detail?: boolean; impact?: boolean } = {},
 ): Promise<PlanAppState> {
   const root = resolve(cwd)
-  const roots = await listAppRoots(root).catch((): AppRoot[] => [])
+  // An unreadable `modules/` still leaves the project root to probe; the sections report the directory.
+  const roots = await listAppRoots(root).catch((): AppRoot[] => [{ module: null, dir: root }])
 
   // One cache for the controller, validator and Impact column scans, which parse the same files.
   const cache = new ParseCache()

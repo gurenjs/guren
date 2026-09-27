@@ -10,6 +10,18 @@ export class FileDiscoveryError extends Error {
   }
 }
 
+/** The one result `check`, `audit` and `doctor` report in place of a scan a {@link FileDiscoveryError} cut short. */
+export function discoveryFailure(cwd: string, error: FileDiscoveryError, command: string) {
+  return {
+    key: 'discovery:read',
+    title: 'Scan incomplete',
+    status: 'fail' as const,
+    message: error.message,
+    suggestion: `Fix the directory or its permissions and run ${command} again.`,
+    filePath: toPosixRelative(cwd, error.directory),
+  }
+}
+
 async function readDirectory(directory: string) {
   try {
     return await readdir(directory, { withFileTypes: true })

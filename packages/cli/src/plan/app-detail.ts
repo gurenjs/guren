@@ -26,7 +26,6 @@ import {
   discoverSideEffectFiles,
   discoverValidatorFiles,
   excludeBarrelFiles,
-  FileDiscoveryError,
   listModuleNames,
   moduleNameFor,
   moduleNameFromRelPath,
@@ -596,19 +595,12 @@ function statementIdentifiers(source: string, ast: File): string[] {
  * drops and `make:module` scaffolds — the set `discoverRoutePathFiles` reads for the
  * same reason.
  */
-function skipUnreadableDirectory<T>(fallback: () => T): (error: unknown) => T {
-  return (error) => {
-    if (error instanceof FileDiscoveryError) return fallback()
-    throw error
-  }
-}
-
 async function routeFileDetail(root: string, cache: ParseCache, routesFile: string | undefined): Promise<PlanAppRouteFile[]> {
   // Only mentions and fingerprints read these, so an unreadable directory narrows them
   // rather than failing `plan:status`, which exits 0 whatever it finds.
   const [moduleRoutes, projectFiles, moduleNames] = await Promise.all([
-    discoverModuleRoutesFiles(root).catch(skipUnreadableDirectory((): Awaited<ReturnType<typeof discoverModuleRoutesFiles>> => [])),
-    discoverRoutesFiles(root).catch(skipUnreadableDirectory((): string[] => [])),
+    discoverSectionFiles(root, discoverModuleRoutesFiles),
+    discoverSectionFiles(root, discoverRoutesFiles),
     listModuleNames(root).catch((): string[] => []),
   ])
   const moduleEntries = await Promise.all(
@@ -616,8 +608,8 @@ async function routeFileDetail(root: string, cache: ParseCache, routesFile: stri
   )
   const files = unique([
     ...(routesFile === undefined ? [] : [routesFile]),
-    ...projectFiles.map((file) => toPosixRelative(root, file)),
-    ...moduleRoutes.flatMap((module) => module.files.map((file) => toPosixRelative(root, file))),
+    ...(isUnreadable(projectFiles) ? [] : projectFiles).map((file) => toPosixRelative(root, file)),
+    ...(isUnreadable(moduleRoutes) ? [] : moduleRoutes).flatMap((module) => module.files.map((file) => toPosixRelative(root, file))),
     ...moduleEntries.flatMap((entry) => (entry === null ? [] : [toPosixRelative(root, entry)])),
   ])
 
