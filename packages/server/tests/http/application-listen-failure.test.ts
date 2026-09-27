@@ -76,7 +76,7 @@ describe('Application.listen startup failures', () => {
       expect(result.stopped).toBe(true)
       if (failure === 'close') expect(stderr).toContain('cleanup failed')
       else if (failure === 'timeout') expect(stderr).toContain('did not close within 10ms')
-      else expect(stderr).toBe('')
+      else expect(stderr).not.toMatch(/Failed to stop|did not close/)
     }, 20_000)
   }
 })

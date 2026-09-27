@@ -1004,10 +1004,12 @@ export class Application {
   }
 
   private registerBunTeardown(): void {
-    if (this.disposeBunTeardown || typeof process === 'undefined') return
+    if (this.disposeBunTeardown || typeof process === 'undefined') {
+      return
+    }
+
     this.disposeBunTeardown = registerBunTeardown()
   }
-
 }
 
 export function createApp(options: ApplicationOptions = {}): Application {
