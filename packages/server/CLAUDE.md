@@ -28,3 +28,9 @@ Provides the HTTP/MVC runtime: `Application`, `createApp`, app-local `Router`, c
 - Build with `bun run --cwd packages/server build`
 - When touching asset middleware, keep Bun-only APIs behind runtime checks to allow non-Bun consumers to stub them
 - Validate Vite plugin changes against `examples/blog/vite.config.ts` and the CLI `codegen` command to avoid regressions
+
+## Boot retries
+- `http/boot-sequence.ts` checkpoints completed application stages and route registrars. A later failure must not replay a successful boot callback, route mount, or dev endpoint.
+- ProviderManager keeps per-provider registration/boot progress; `registerAll()` still runs on each attempt so providers supplied before retry are registered.
+- A failed hook can have partial effects. Retrying it is the hook owner's responsibility; use a fresh application when it cannot be retried safely. Do not claim rollback of user callbacks or external resources.
+- Router resolves every route's middleware and handler before mounting any route on Hono, so a validation failure can be repaired without leaving an earlier route mounted.
