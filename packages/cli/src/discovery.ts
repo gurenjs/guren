@@ -3,6 +3,34 @@ import { basename, resolve, join, extname, relative, sep, posix } from 'node:pat
 import { collectionName } from './inflect'
 import { escapeRegExp } from './utils'
 
+export class FileDiscoveryError extends Error {
+  constructor(readonly directory: string, cause: unknown) {
+    super(`Could not read directory ${directory}: ${cause instanceof Error ? cause.message : String(cause)}`, { cause })
+    this.name = 'FileDiscoveryError'
+  }
+}
+
+/** The one result `check`, `audit` and `doctor` report in place of a scan a {@link FileDiscoveryError} cut short. */
+export function discoveryFailure(cwd: string, error: FileDiscoveryError, command: string) {
+  return {
+    key: 'discovery:read',
+    title: 'Scan incomplete',
+    status: 'fail' as const,
+    message: error.message,
+    suggestion: `Fix the directory or its permissions and run ${command} again.`,
+    filePath: toPosixRelative(cwd, error.directory),
+  }
+}
+
+async function readDirectory(directory: string) {
+  try {
+    return await readdir(directory, { withFileTypes: true })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' && await isDefinitelyAbsent(directory, '.')) return []
+    throw new FileDiscoveryError(directory, error)
+  }
+}
+
 const SOURCE_EXTENSIONS = new Set(['.ts', '.mts', '.js', '.mjs'])
 const TEST_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs'])
 const TEST_FILE_PATTERN = /\.test\.(ts|tsx|mts|js|jsx|mjs)$/
@@ -19,20 +47,46 @@ export const IMPORTABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.js
 /**
  * Recursively collect files matching `extensions`, skipping dotfiles,
  * declaration files, and any directory named in `excludeDirNames`.
+ * Missing directories are optional; unreadable ones throw FileDiscoveryError.
  */
 export async function collectFiles(
   directory: string,
   extensions: ReadonlySet<string> = SOURCE_EXTENSIONS,
   excludeDirNames: Set<string> = new Set(),
 ): Promise<string[]> {
+  return walkFiles(directory, extensions, excludeDirNames, () => false)
+}
+
+/** Where deploy code lives: the app's source trees plus the deploy plugins' `functions/` and `api/`. */
+export const DEPLOY_SCAN_DIRS = ['src', 'app', 'config', 'db', 'routes', 'modules', 'bin', 'functions', 'api'] as const
+
+/** The project's top-level directories a whole-project walk must read, or fail. */
+const PROJECT_SOURCE_DIRS: ReadonlySet<string> = new Set([...DEPLOY_SCAN_DIRS, 'tests', 'resources'])
+
+/**
+ * {@link collectFiles} over the whole project, minus {@link NON_SOURCE_DIR_NAMES}. A
+ * directory that will not open is skipped when it lies outside the source roots
+ * (`docker/pgdata`): a database bind mount or a cache owned by another user holds
+ * no source, and no setting could exclude it. Under a source root it still throws.
+ */
+export async function collectProjectFiles(
+  cwd: string,
+  extensions: ReadonlySet<string> = SOURCE_EXTENSIONS,
+): Promise<string[]> {
+  const root = resolve(cwd)
+  return walkFiles(root, extensions, NON_SOURCE_DIR_NAMES, (directory) =>
+    !PROJECT_SOURCE_DIRS.has(relative(root, directory).split(sep)[0] ?? ''))
+}
+
+async function walkFiles(
+  directory: string,
+  extensions: ReadonlySet<string>,
+  excludeDirNames: ReadonlySet<string>,
+  skipUnreadable: (directory: string) => boolean,
+): Promise<string[]> {
   const results: string[] = []
 
-  let entries
-  try {
-    entries = await readdir(directory, { withFileTypes: true })
-  } catch {
-    return results
-  }
+  const entries = await readDirectory(directory)
 
   for (const entry of entries) {
     if (entry.name.startsWith('.')) continue
@@ -41,7 +95,11 @@ export async function collectFiles(
 
     if (entry.isDirectory()) {
       if (excludeDirNames.has(entry.name)) continue
-      results.push(...(await collectFiles(fullPath, extensions, excludeDirNames)))
+      try {
+        results.push(...(await walkFiles(fullPath, extensions, excludeDirNames, skipUnreadable)))
+      } catch (error) {
+        if (!(error instanceof FileDiscoveryError && error.directory === fullPath && skipUnreadable(fullPath))) throw error
+      }
     } else if (entry.isFile()) {
       if (entry.name.endsWith('.d.ts')) continue
       if (extensions.has(extname(entry.name))) {
@@ -203,12 +261,7 @@ export async function directoryExists(dirPath: string): Promise<boolean> {
  * resolves to an empty list, not an error.
  */
 export async function listModuleNames(appRoot: string): Promise<string[]> {
-  let entries
-  try {
-    entries = await readdir(resolve(appRoot, 'modules'), { withFileTypes: true })
-  } catch {
-    return []
-  }
+  const entries = await readDirectory(resolve(appRoot, 'modules'))
 
   return entries
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
@@ -462,7 +515,7 @@ export function isTestFileNamedFor(file: string, entity: string): boolean {
  * use) as well as colocated beside source files.
  */
 export async function discoverTestFiles(appRoot: string): Promise<string[]> {
-  const files = await collectFiles(appRoot, TEST_FILE_EXTENSIONS, NON_SOURCE_DIR_NAMES)
+  const files = await collectProjectFiles(appRoot, TEST_FILE_EXTENSIONS)
   return files.filter((file) => TEST_FILE_PATTERN.test(file))
 }
 

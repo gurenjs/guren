@@ -2,7 +2,7 @@
  * The application state the plan reference checks (RFC 0030 §2) read, through the
  * scanners the other commands already use.
  *
- * Every section is a list **or** the reason it could not be read. The discoverers
+ * Every section is a list **or** the reason it could not be read. Some readers
  * answer `[]` both for "this app has none" and for a directory that would not open,
  * and the two point opposite ways here: an empty list clears every `add` of a
  * collision *and* fails every `existing` target. The loader decides which it is; a
@@ -21,10 +21,7 @@ import {
   formatTruncatedList,
   isDefinitelyAbsent,
   listAppRoots,
-  MODELS_DIR,
-  POLICIES_DIR,
   moduleNameFor,
-  RESOURCES_DIR,
   VALIDATORS_DIR,
   type AppRoot,
 } from '../discovery'
@@ -36,6 +33,7 @@ import { parseSchemaTables, schemaPathFor } from '../schema-parser'
 import { isConfirmedApiOnlyApp } from '../app-surface'
 import { loadRouteDefinitions, resolveRoutesFile } from '../load-routes'
 import { loadPlanAppDetail, readValidatorExports, type PlanAppDetail, type PlanAppValidatorExports } from './app-detail'
+import { discoverSectionFiles } from './discovery'
 import type { PlanImpactSources } from './impact'
 import { loadPlanImpactSources } from './impact-sources'
 import { ParseCache } from '../parse-cache'
@@ -151,15 +149,16 @@ export async function loadPlanAppState(
   options: { routesFile?: string; detail?: boolean; impact?: boolean } = {},
 ): Promise<PlanAppState> {
   const root = resolve(cwd)
-  const roots = await listAppRoots(root).catch((): AppRoot[] => [])
+  // An unreadable `modules/` still leaves the project root to probe; the sections report the directory.
+  const roots = await listAppRoots(root).catch((): AppRoot[] => [{ module: null, dir: root }])
 
   // One cache for the controller, validator and Impact column scans, which parse the same files.
   const cache = new ParseCache()
   const [apiOnly, models, resources, policies, pages, validators, routes, controllers, tables] = await Promise.all([
     isConfirmedApiOnlyApp(root).catch(() => false),
-    modelSection(root, roots),
-    classSection(root, roots, RESOURCES_DIR, discoverResourceFiles),
-    classSection(root, roots, POLICIES_DIR, discoverPolicyFiles),
+    modelSection(root),
+    classSection(root, discoverResourceFiles),
+    classSection(root, discoverPolicyFiles),
     pageSection(root),
     validatorSections(root, roots, cache),
     routeSection(root, options.routesFile),
@@ -180,7 +179,7 @@ export async function loadPlanAppState(
     apiOnly,
   }
   if (options.impact) {
-    // The controller scan and the test discovery answer `[]` for a directory that would not open.
+    // Noted after the discoverers' reasons, so the section root's own failure is the one reported.
     const [controllersDir, testsDir] = await Promise.all([probeDirectory(roots, CONTROLLERS_DIR), probeDirectory(roots, 'tests')])
     state.impact = await loadPlanImpactSources({
       root,
@@ -211,9 +210,8 @@ export async function loadPlanAppState(
 }
 
 /**
- * The reason a section's directory would not open, for the discoverers that answer
- * `[]` either way. Only the directory itself is probed, not the tree beneath it: an
- * unreadable nested directory still under-reports, which no cheap probe catches.
+ * The reason a section's directory would not open, probed per app root. A directory
+ * beneath it that will not open is the discoverer's to report (`discoverSectionFiles()`).
  */
 async function probeDirectory(roots: ReadonlyArray<AppRoot>, relativeDir: string): Promise<string | undefined> {
   const failures = await Promise.all(
@@ -230,9 +228,9 @@ async function probeDirectory(roots: ReadonlyArray<AppRoot>, relativeDir: string
   return failures.find((failure) => failure !== undefined)
 }
 
-async function modelSection(cwd: string, roots: ReadonlyArray<AppRoot>): Promise<PlanAppNames> {
-  const [probe, files] = await Promise.all([probeDirectory(roots, MODELS_DIR), discoverModelFiles(cwd)])
-  if (probe) return { unreadable: probe }
+async function modelSection(cwd: string): Promise<PlanAppNames> {
+  const files = await discoverSectionFiles(cwd, discoverModelFiles)
+  if (isUnreadable(files)) return files
   const parsed = await Promise.all(files.map(async (file) => ({ file, info: await parseModelFile(file) })))
   return parsed
     .flatMap(({ file, info }) => (info ? [{ name: info.className, module: moduleNameFor(cwd, file) }] : []))
@@ -248,12 +246,10 @@ function byName(a: PlanAppName, b: PlanAppName): number {
 /** A section named after the class each discovered file declares, as `guren context` names them. */
 async function classSection(
   cwd: string,
-  roots: ReadonlyArray<AppRoot>,
-  relativeDir: string,
   discover: (appRoot: string) => Promise<string[]>,
 ): Promise<PlanAppNames> {
-  const [probe, files] = await Promise.all([probeDirectory(roots, relativeDir), discover(cwd)])
-  if (probe) return { unreadable: probe }
+  const files = await discoverSectionFiles(cwd, discover)
+  if (isUnreadable(files)) return files
   return excludeBarrelFiles(files)
     .map((file) => ({ name: classNameFromPath(file), module: moduleNameFor(cwd, file) }))
     .sort(byName)
@@ -272,12 +268,9 @@ async function validatorSections(
 }
 
 async function pageSection(cwd: string): Promise<PlanAppNames> {
-  const pagesDir = 'resources/js/pages'
-  const [probe, pages] = await Promise.all([
-    probeDirectory([{ dir: cwd, module: null }], pagesDir),
-    listInertiaPageIds(cwd),
-  ])
-  return probe ? { unreadable: probe } : pages.map((name) => ({ name, module: null }))
+  const pages = await discoverSectionFiles(cwd, listInertiaPageIds)
+  if (isUnreadable(pages)) return pages
+  return pages.map((name) => ({ name, module: null }))
 }
 
 /**

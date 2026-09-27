@@ -43,6 +43,8 @@ import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, specifierName } from '../rou
 import { importsByLocal, specifierBase, withoutExtension } from '../schema-binding'
 import { readSchemaTables, withImportTimeout, type SourcedSchemaTable } from '../schema-runtime'
 import { answersMethod, registeredBefore, routePathCovers } from '../test-requests'
+import { discoverSectionFiles } from './discovery'
+import { isUnreadable } from './unreadable'
 import type { PlanAppScope, PlanAppUnreadable } from './app-state'
 import { readResourcePayloads, readSchemaFields, type PlanAppResourcePayload, type PlanAppSchemaFields } from './field-readers'
 import { readPolicyAbilities, type PlanAppPolicyAbilities } from './policy-abilities'
@@ -517,7 +519,9 @@ export async function readValidatorExports(
   /** The project root's files only, so a module file that will not read cannot refuse it. */
   rootOnly = false,
 ): Promise<PlanAppValidatorExports[] | PlanAppUnreadable> {
-  const files = excludeBarrelFiles(await discoverValidatorFiles(root))
+  const discovered = await discoverSectionFiles(root, discoverValidatorFiles)
+  if (isUnreadable(discovered)) return discovered
+  const files = excludeBarrelFiles(discovered)
     .map((filePath) => {
       const file = toPosixRelative(root, filePath)
       return { filePath, file, module: moduleNameFromRelPath(file) }
@@ -592,9 +596,11 @@ function statementIdentifiers(source: string, ast: File): string[] {
  * same reason.
  */
 async function routeFileDetail(root: string, cache: ParseCache, routesFile: string | undefined): Promise<PlanAppRouteFile[]> {
+  // Only mentions and fingerprints read these, so an unreadable directory narrows them
+  // rather than failing `plan:status`, which exits 0 whatever it finds.
   const [moduleRoutes, projectFiles, moduleNames] = await Promise.all([
-    discoverModuleRoutesFiles(root),
-    discoverRoutesFiles(root),
+    discoverSectionFiles(root, discoverModuleRoutesFiles),
+    discoverSectionFiles(root, discoverRoutesFiles),
     listModuleNames(root).catch((): string[] => []),
   ])
   const moduleEntries = await Promise.all(
@@ -602,8 +608,8 @@ async function routeFileDetail(root: string, cache: ParseCache, routesFile: stri
   )
   const files = unique([
     ...(routesFile === undefined ? [] : [routesFile]),
-    ...projectFiles.map((file) => toPosixRelative(root, file)),
-    ...moduleRoutes.flatMap((module) => module.files.map((file) => toPosixRelative(root, file))),
+    ...(isUnreadable(projectFiles) ? [] : projectFiles).map((file) => toPosixRelative(root, file)),
+    ...(isUnreadable(moduleRoutes) ? [] : moduleRoutes).flatMap((module) => module.files.map((file) => toPosixRelative(root, file))),
     ...moduleEntries.flatMap((entry) => (entry === null ? [] : [toPosixRelative(root, entry)])),
   ])
 

@@ -2,6 +2,8 @@ import { resolve, relative } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { consola } from 'consola'
 import {
+  FileDiscoveryError,
+  discoveryFailure,
   collectFiles,
   discoverModelFiles,
   classNameFromPath,
@@ -292,6 +294,23 @@ function finding(
 }
 
 export async function runAudit(options: RunAuditOptions = {}): Promise<AuditReport> {
+  try {
+    return await collectAuditReport(options)
+  } catch (error) {
+    if (!(error instanceof FileDiscoveryError)) throw error
+    const cwd = resolve(options.cwd ?? process.cwd())
+    return {
+      cwd,
+      findings: [discoveryFailure(cwd, error, 'the audit')],
+      passCount: 0, warnCount: 0, failCount: 1, ignoredCount: 0,
+      routesAnalyzed: false,
+      routeSource: { from: 'routes-file', reason: 'Directory discovery failed; the audit did not complete.' },
+      csrfExemptionScan: { status: 'partial', packagesScanned: 0, declaredBy: [] },
+    }
+  }
+}
+
+async function collectAuditReport(options: RunAuditOptions): Promise<AuditReport> {
   const cwd = resolve(options.cwd ?? process.cwd())
   const findings: AuditFinding[] = []
 

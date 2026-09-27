@@ -2,6 +2,8 @@ import { resolve, relative } from 'node:path'
 import { consola } from 'consola'
 import type { Statement } from '@babel/types'
 import {
+  discoveryFailure,
+  FileDiscoveryError,
   discoverAppConfigFiles,
   discoverControllerFiles,
   discoverModelFiles,
@@ -376,6 +378,20 @@ async function introspectionUnavailable(run: Promise<Introspection> | undefined)
 }
 
 export async function runCheck(options: RunCheckOptions = {}): Promise<CheckReport> {
+  try {
+    return await collectCheckReport(options)
+  } catch (error) {
+    if (!(error instanceof FileDiscoveryError)) throw error
+    const cwd = resolve(options.cwd ?? process.cwd())
+    return {
+      cwd,
+      checks: [discoveryFailure(cwd, error, 'the check')],
+      passCount: 0, warnCount: 0, failCount: 1,
+    }
+  }
+}
+
+async function collectCheckReport(options: RunCheckOptions): Promise<CheckReport> {
   const cwd = resolve(options.cwd ?? process.cwd())
   const checks: CheckResult[] = []
   const cache = new ParseCache()

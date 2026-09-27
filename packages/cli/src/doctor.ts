@@ -7,6 +7,8 @@ import {
   discoverDbArtifactFiles,
   discoverModelFiles,
   discoverTestFiles,
+  discoveryFailure,
+  FileDiscoveryError,
   fileExists,
   findFirstExisting,
   hasControllerTest,
@@ -1294,6 +1296,27 @@ export async function getDoctorRuleEvaluations(
   cwd: string
   evaluations: DoctorRuleEvaluation[]
 }> {
+  try {
+    return await collectDoctorRuleEvaluations(options, plans)
+  } catch (error) {
+    if (!(error instanceof FileDiscoveryError)) throw error
+    const cwd = resolve(options.cwd ?? process.cwd())
+    return { cwd, evaluations: [discoveryFailureEvaluation(cwd, error)] }
+  }
+}
+
+function discoveryFailureEvaluation(cwd: string, error: FileDiscoveryError): DoctorRuleEvaluation {
+  const { key, title, status, message, suggestion } = discoveryFailure(cwd, error, 'doctor')
+  return { check: createCheck(key, title, status, message, { fix: suggestion, manualFix: suggestion }), autofix: null }
+}
+
+async function collectDoctorRuleEvaluations(
+  options: { cwd?: string; introspect?: boolean },
+  plans: DoctorManifestPlans | undefined,
+): Promise<{
+  cwd: string
+  evaluations: DoctorRuleEvaluation[]
+}> {
   const cwd = resolve(options.cwd ?? process.cwd())
   const manifestPlans = plans ?? createManifestPlans(cwd, options)
   const context: DoctorRuleContext = { cwd, ...manifestPlans }
@@ -1335,7 +1358,18 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorR
   // One memo for the whole run: the rules and `--next` both read these plans,
   // and the agent one can evaluate the app's module graph.
   const plans = createManifestPlans(resolve(options.cwd ?? process.cwd()), options)
-  const { cwd, evaluations } = await getDoctorRuleEvaluations({ cwd: options.cwd }, plans)
+  const { cwd, evaluations: ruleEvaluations } = await getDoctorRuleEvaluations({ cwd: options.cwd }, plans)
+  let evaluations = ruleEvaluations
+  let nextSteps: NextStep[] | undefined
+  if (options.next) {
+    try {
+      nextSteps = await suggestNextSteps({ cwd }, plans)
+    } catch (error) {
+      if (!(error instanceof FileDiscoveryError)) throw error
+      evaluations = [discoveryFailureEvaluation(cwd, error)]
+      nextSteps = []
+    }
+  }
   const checks = evaluations.map((evaluation) => evaluation.check)
   const fixableChecks = checks.filter((check) => check.status !== 'pass' && Boolean(check.canAutofix))
   const manualChecks = checks.filter((check) => check.status !== 'pass' && !check.canAutofix)
@@ -1350,8 +1384,8 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorR
     recommendedCommands: [...DOCTOR_RECOMMENDED_COMMANDS],
   }
 
-  if (options.next) {
-    report.nextSteps = await suggestNextSteps({ cwd }, plans)
+  if (nextSteps) {
+    report.nextSteps = nextSteps
   }
 
   if (options.json) {

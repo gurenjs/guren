@@ -518,6 +518,40 @@ describe('loadPlanAppState({ impact: true })', () => {
     expect(impact.models.map((model) => model.className).sort()).toEqual(['Post', 'User'])
   })
 
+  for (const [section, path] of [
+    ['controllers', 'app/Http/Controllers/nested'],
+    ['models', 'app/Models/nested'],
+    ['resources', 'app/Http/Resources/nested'],
+    ['policies', 'app/Policies/nested'],
+    ['tests', 'tests/nested'],
+  ] as const) {
+    test.skipIf(!CAN_DENY_FILE_READS)(`should report an unreadable nested ${section} directory`, async () => {
+      await writeWorkspaceFiles(workspace.dir, { ...PLAN_APP_FILES, [`${path}/Hidden.ts`]: 'export class Hidden {}' })
+      const directory = join(workspace.dir, path)
+      await chmod(directory, 0o000)
+      try {
+        const impact = (await loadPlanAppState(workspace.dir, { impact: true })).impact!
+        expect(impact.unreadable[section]).toContain(path)
+      } finally {
+        await chmod(directory, 0o755)
+      }
+    })
+  }
+
+  test.skipIf(!CAN_DENY_FILE_READS)('should retain an unreadable nested validator section while loading impact', async () => {
+    const path = 'app/Http/Validators/nested'
+    await writeWorkspaceFiles(workspace.dir, { ...PLAN_APP_FILES, [`${path}/Hidden.ts`]: 'export const hidden = {}' })
+    const directory = join(workspace.dir, path)
+    await chmod(directory, 0o000)
+    try {
+      const state = await loadPlanAppState(workspace.dir, { impact: true })
+      expect(state.validators).toEqual({ unreadable: expect.stringContaining(path) })
+      expect(state.impact).toBeDefined()
+    } finally {
+      await chmod(directory, 0o755)
+    }
+  })
+
   test.skipIf(!CAN_DENY_FILE_READS)('should say the controllers directory would not open, rather than scan nothing in silence', async () => {
     await writeWorkspaceFiles(workspace.dir, PLAN_APP_FILES)
     await chmod(join(workspace.dir, 'app/Http/Controllers'), 0o000)
