@@ -943,7 +943,7 @@ bun run db:status
 
 生成された SQL を、第 5 章第 1 節の `users` のマイグレーションの説明と比べてください。そのうえで、SQLite の `ALTER TABLE` で何を変えられるかを考えます。
 
-SQL は `posts` を作り直しています。外部キーの検査を止め、`author_id` を nullable にした `__new_posts` を作り、`INSERT … SELECT` ですべての行をコピーし、`posts` を削除し、`__new_posts` を `posts` に名前を変えてから、外部キーの検査を戻します。SQLite の `ALTER TABLE` でできるのは、テーブル名の変更と、列の追加、名前の変更、削除です。既存の列の定義は変えられず、`NOT NULL` はその定義の一部です。変えるには新しい形でテーブルを作り直して行をコピーするしかなく、行が失われないのはこのコピーのおかげです。第 14 章でアプリを移す Postgres では、`ALTER COLUMN … DROP NOT NULL` でその場で変更できます。
+SQL は `posts` を作り直しています。外部キーの検査を止め、`author_id` を nullable にした `__new_posts` を作り、`INSERT … SELECT` ですべての行をコピーし、`posts` を削除し、`__new_posts` を `posts` に名前を変えてから、外部キーの検査を戻します。マイグレーションはトランザクションの中で実行されるので、検査を切り替える 2 行はそこでは効きません。代わりに `createSqliteDatabase()` が、実行全体の前後で検査を止めて戻します。SQLite の `ALTER TABLE` でできるのは、テーブル名の変更と、列の追加、名前の変更、削除です。既存の列の定義は変えられず、`NOT NULL` はその定義の一部です。変えるには新しい形でテーブルを作り直して行をコピーするしかなく、行が失われないのはこのコピーのおかげです。第 14 章でアプリを移す Postgres では、`ALTER COLUMN … DROP NOT NULL` でその場で変更できます。
 
 </details>
 

@@ -398,7 +398,7 @@ interface DatabaseConnection {
 }
 ```
 
-Guren の SQLite アダプターは、この `DatabaseConnection` をそのままは提供しません。`config/database.ts` の `getDatabase()` が解決するのは内部の Drizzle インスタンスで、このインターフェースとは形が異なります。そのため、これらのヘルパーを使うにはアダプターを自分で書き、テスト実行前に `setTestDatabase()` へ渡す必要があります。**同一の接続でなければならない**という制約があるのは `useDatabaseTransactions()` だけです。`beforeEach` でトランザクションを開始し `afterEach` でロールバックするため、同じファイルへ独立に開いた 2 本目の接続からは、1 本目の接続で行った書き込みが見えず、ロールバックもされません。`useTruncateTables()` にこの制約はありません。`DELETE FROM` は即座にコミットされる操作なので、同じデータベースファイルへの接続であればどれを使ってもモデル側から見える行を削除できます。アダプターの配線が大げさだと感じる場合は、上記の `resetDatabase()` パターンの方がシンプルで、この問題自体を避けられます。
+Guren の SQLite アダプターは、この `DatabaseConnection` をそのままは提供しません。`config/database.ts` の `getDatabase()` が解決するのは内部の Drizzle インスタンスで、このインターフェースとは形が異なります。そのため、これらのヘルパーを使うにはアダプターを自分で書き、テスト実行前に `setTestDatabase()` へ渡す必要があります。**同一の接続でなければならない**という制約があるのは `useDatabaseTransactions()` だけです。`beforeEach` でトランザクションを開始し `afterEach` でロールバックするため、同じファイルへ独立に開いた 2 本目の接続からは、1 本目の接続で行った書き込みが見えず、ロールバックもされません。`useTruncateTables()` にこの制約はありません。`DELETE FROM` は即座にコミットされる操作なので、同じデータベースファイルへの接続であればどれを使ってもモデル側から見える行を削除できます。テーブルは渡した順に空にします。外部キーを検査する接続(Postgres と MySQL のすべての接続と、`getDatabase()` が返す SQLite の接続)では、外部キーが cascade でない限り、子テーブルを親より先に並べてください。アダプターの配線が大げさだと感じる場合は、上記の `resetDatabase()` パターンの方がシンプルで、この問題自体を避けられます。
 
 ### HTTP テスト
 

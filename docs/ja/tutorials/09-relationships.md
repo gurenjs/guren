@@ -1670,7 +1670,7 @@ git commit -m "feat: tag posts through a pivot table"
 
 `app/Http/Controllers/PostController.ts` の `destroy` と、`db/schema.ts` の `comments` テーブルを見比べてください。
 
-`destroy` が削除するのは投稿だけです。コメントはデータベースで消える設計です。`comments.postId` の `onDelete: 'cascade'` を、`db/migrations/` のマイグレーションが外部キーの `ON DELETE cascade` として書き出しています。SQLite がカスケードを実行するのは `PRAGMA foreign_keys` がオンの接続だけで、既定はオフです。`createSqliteDatabase()` は開く接続ごとにこれをオンにするので、投稿を削除した同じ文でコメントも消えます。
+`destroy` が削除するのは投稿だけです。コメントはデータベースで消える設計です。`comments.postId` の `onDelete: 'cascade'` を、`db/migrations/` のマイグレーションが外部キーの `ON DELETE cascade` として書き出しています。SQLite がカスケードを実行するのは `PRAGMA foreign_keys` がオンの接続だけで、既定はオフです。`createSqliteDatabase()` は開く接続ごとにこれをオンにするので、投稿を削除する同じ DELETE 文でコメントも消えます。
 
 カスケードがなければ、アプリが親より先に子を削除する必要があります。
 

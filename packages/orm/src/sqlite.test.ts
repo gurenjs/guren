@@ -23,6 +23,24 @@ function reevaluate(options: SqliteDatabaseOptions, times: number): SqliteDataba
   return evaluations
 }
 
+function writeMigration(name: string, statement: string): void {
+  const folder = join(workDir, 'migrations', name)
+  mkdirSync(folder, { recursive: true })
+  writeFileSync(join(folder, 'migration.sql'), statement)
+}
+
+async function captureConsole(method: 'info' | 'warn', run: () => Promise<void>): Promise<string[]> {
+  const lines: string[] = []
+  const original = console[method]
+  console[method] = (...args: unknown[]) => void lines.push(args.map(String).join(' '))
+  try {
+    await run()
+  } finally {
+    console[method] = original
+  }
+  return lines
+}
+
 let workDir: string
 
 beforeEach(() => {
@@ -245,12 +263,6 @@ describe('createSqliteDatabase resetDatabase', () => {
 describe('createSqliteDatabase foreign keys', () => {
   type QueryableDatabase = RunnableDatabase & { get(query: unknown): unknown }
 
-  function writeMigration(name: string, statement: string): void {
-    const folder = join(workDir, 'migrations', name)
-    mkdirSync(folder, { recursive: true })
-    writeFileSync(join(folder, 'migration.sql'), statement)
-  }
-
   function foreignKeysPragma(db: QueryableDatabase): number {
     return (db.get(sql`PRAGMA foreign_keys`) as { foreign_keys: number }).foreign_keys
   }
@@ -260,8 +272,9 @@ describe('createSqliteDatabase foreign keys', () => {
   }
 
   test('should enforce ON DELETE cascade on a connection no reset has touched', async () => {
-    // Enforcement is per connection and off by default. resetDatabase() turns
-    // it on as well, so this opens without one: a reset would hide the open path.
+    // Enforcement is per connection and off by default. resetDatabase() and a
+    // migration run both leave it on, so this opens with neither: the folder
+    // stays empty, or the check would pass without the open path.
     const database = createSqliteDatabase({
       migrationsFolder: join(workDir, 'migrations'),
       filename: join(workDir, 'app.db'),
@@ -323,26 +336,36 @@ describe('createSqliteDatabase foreign keys', () => {
 
     await second.closeDatabase()
   })
+
+  test('should warn when an applied migration leaves a row with no parent', async () => {
+    // Enforcement is off while migrations run, so the orphan goes in unchecked.
+    writeMigration(
+      '20260101000000_init',
+      [
+        'CREATE TABLE `posts` (`id` integer PRIMARY KEY);',
+        'CREATE TABLE `comments` (`id` integer PRIMARY KEY, `post_id` integer REFERENCES `posts`(`id`));',
+        'INSERT INTO `comments` VALUES (1, 99);',
+      ].join('\n--> statement-breakpoint\n'),
+    )
+    const options = {
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    }
+
+    const first = createSqliteDatabase(options)
+    const warnings = await captureConsole('warn', async () => void (await first.getDatabase()))
+    await first.closeDatabase()
+    expect(warnings.join('\n')).toContain('comments -> posts (1)')
+
+    // Nothing applied on the next boot, so nothing is checked or repeated.
+    const second = createSqliteDatabase(options)
+    const reboot = await captureConsole('warn', async () => void (await second.getDatabase()))
+    await second.closeDatabase()
+    expect(reboot).toEqual([])
+  })
 })
 
 describe('createSqliteDatabase migration reporting', () => {
-  function writeMigration(name: string, statement: string): void {
-    const folder = join(workDir, 'migrations', name)
-    mkdirSync(folder, { recursive: true })
-    writeFileSync(join(folder, 'migration.sql'), statement)
-  }
-
-  async function captureConsole(method: 'info' | 'warn', run: () => Promise<void>): Promise<string[]> {
-    const lines: string[] = []
-    const original = console[method]
-    console[method] = (...args: unknown[]) => void lines.push(args.map(String).join(' '))
-    try {
-      await run()
-    } finally {
-      console[method] = original
-    }
-    return lines
-  }
 
   test('should name what a boot applied and say nothing on the next one', async () => {
     writeMigration('20260101000000_create_widgets', 'CREATE TABLE widgets (id integer primary key);')
