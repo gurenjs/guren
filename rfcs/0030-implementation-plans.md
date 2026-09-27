@@ -2762,6 +2762,13 @@ approval. The viewer shows state and names the command; it never runs one.
   `plan:approve`; an approved plan with a step whose record does not stand
   `plan:next`; one whose every step stands `plan:close`. This is a reading of
   the records, not `plan:next`'s decision, which also weighs freshness.
+  The command is a button that copies it to the clipboard, `plan:approve`
+  included; the person runs it in a terminal. An approve route was
+  considered and not taken. The viewer and the plan page show text a model
+  wrote, so a script injected through a rendering defect could send the same
+  request as the button, and the server cannot tell the two apart; the
+  command also writes the baseline and the approvals under `docs/plans/`,
+  where no viewer route writes.
 - **A stale page.** A rendered page carries the plan hash it was rendered at
   (`planHash` in its payload). Where that differs from the plan's current
   hash the link is marked stale and names `plan:render`. A draft's page
