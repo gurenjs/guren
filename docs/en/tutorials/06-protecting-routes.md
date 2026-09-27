@@ -943,7 +943,7 @@ The guest gets the same redirect to `/login` as for the form, and nothing is sto
 
 Compare the SQL with what chapter 5 section 1 said about the `users` migration, and ask what SQLite's `ALTER TABLE` can change.
 
-The SQL rebuilds `posts`. It turns foreign-key enforcement off, creates `__new_posts` with `author_id` nullable, copies every row across with `INSERT … SELECT`, drops `posts`, renames `__new_posts` to `posts`, and turns foreign keys back on. SQLite's `ALTER TABLE` can rename a table and add, rename or drop a column, but it cannot change the definition of a column that exists, and `NOT NULL` is part of that definition. The only way to change it is to build the table again in the new shape and copy the rows, and the copy is why no row is lost. Postgres, where chapter 14 takes the app, changes it in place with `ALTER COLUMN … DROP NOT NULL`.
+The SQL rebuilds `posts`. It turns foreign-key enforcement off, creates `__new_posts` with `author_id` nullable, copies every row across with `INSERT … SELECT`, drops `posts`, renames `__new_posts` to `posts`, and turns foreign keys back on. The two pragma lines do nothing inside the migrator's transaction; `createSqliteDatabase()` turns enforcement off around the whole run instead. SQLite's `ALTER TABLE` can rename a table and add, rename or drop a column, but it cannot change the definition of a column that exists, and `NOT NULL` is part of that definition. The only way to change it is to build the table again in the new shape and copy the rows, and the copy is why no row is lost. Postgres, where chapter 14 takes the app, changes it in place with `ALTER COLUMN … DROP NOT NULL`.
 
 </details>
 
