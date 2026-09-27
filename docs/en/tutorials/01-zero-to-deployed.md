@@ -203,6 +203,8 @@ The rest of `.claude/` is read on demand rather than at start:
 - **`agents/`** are two subagents with their own briefs: `code-review` and `test-writer`.
 - **`.mcp.json`** points the agent at the dev MCP endpoint the `dev` script mounted, so it can query the running app.
 
+Each piece is a Claude Code feature with its own page in Claude Code's documentation: [hooks](https://code.claude.com/docs/en/hooks) (and the [hooks guide](https://code.claude.com/docs/en/hooks-guide)), [`CLAUDE.md` and rules](https://code.claude.com/docs/en/memory), [skills](https://code.claude.com/docs/en/skills), [subagents](https://code.claude.com/docs/en/sub-agents), and [MCP](https://code.claude.com/docs/en/mcp). Read them when you want the details of a piece beyond what Guren puts in it.
+
 Each later chapter puts one of these to work, and chapter 8 has you write your own. For now, the two hooks are what you are about to watch.
 
 ## 6. Your first change, by hand
@@ -361,13 +363,17 @@ git commit -m "feat: add a tagline to the home page"
 
 Now the same kind of change, done by an agent, with you watching the hooks. Start your agent inside `guren-blog` (for Claude Code, that is `claude`). Because of the `SessionStart` hook, its first message already carries the project map you printed in step 5. Ask it:
 
-> Explain this project: what does `bunx guren context` report, which hook runs when you edit `routes/web.ts`, and which one runs when you end a turn with uncommitted changes?
+```text
+Explain this project: what does `bunx guren context` report, which hook runs when you edit `routes/web.ts`, and which one runs when you end a turn with uncommitted changes?
+```
 
 Read the answer against `.claude/settings.json`. It should name all three hooks and what each runs. If it does not mention `guren gate`, it has not read `CLAUDE.md`; that is worth knowing about your agent before you hand it work.
 
 Then hand it work:
 
-> Move the tagline text out of `HomeController` into `lang/en/messages.json` as `messages.tagline`, and read it through `this.t()` like the welcome message. Keep the tests unchanged and green.
+```text
+Move the tagline text out of `HomeController` into `lang/en/messages.json` as `messages.tagline`, and read it through `this.t()` like the welcome message. Keep the tests unchanged and green.
+```
 
 Watch for two things in the transcript:
 
@@ -466,6 +472,24 @@ Nothing below is needed by a later chapter. Where an exercise changes a file, do
 
 1. The workflow the scaffold wrote runs `bunx guren gate --deps`, and you have been running `bunx guren gate`. Run the longer one. What does `--deps` add, and what would it do on a machine with no network?
 2. Run `bunx guren doctor --next`. Pick one thing it reports and say what changing it would buy you. Some of its suggestions are for a production app you have not built yet; say which.
+
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Read the Gate step in `.github/workflows/ci.yml` and the comment above it, then compare the audit line the gate prints with and without the flag.
+
+`--deps` adds a dependency scan to the audit stage. It runs `bun audit` against the npm advisory database, and the stage line reads `audit + dependency scan`. A high or critical advisory fails the stage; a lower one is only a warning. The scan needs the npm registry. With no network it cannot run, and that is reported as a warning, not a failure. The gate prints only failing findings, so `gate --deps` still goes green on that machine without having scanned anything. To see the warning, run `bunx guren audit`, which scans dependencies by default (`--no-deps` turns the scan off). That is why the workflow's comment tells you to drop `--deps` on a runner that cannot reach the registry.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+The report has two parts: the checks, each marked ok, warn or fail with a Fix line under anything that is not ok, and, because of `--next`, a numbered "Next steps" list.
+
+One answer: the next steps include "Run the security audit", which doctor suggests whenever the app has a controller. Running `bunx guren audit` buys you a list of mutating routes that lack validation or authentication. This app has none yet, but from chapter 3 on it will, and the gate runs the same audit. The production ones are the checks whose titles start with "Deploy" (password hashing, runtime stores, provider discovery). They judge an app that declares a deploy plugin or the Lambda adapter, and on this app they pass because it declares neither. They start to matter when the app is deployed to a serverless host. Your report may list other items, and other answers are possible.
+
+</details>
 
 ## Next
 

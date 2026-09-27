@@ -251,6 +251,8 @@ export interface PageOptions {
 export interface Page {
   document: PageDocument
   storage: Record<string, string>
+  /** Every text the page wrote to the clipboard, oldest first. */
+  clipboard: string[]
   location: { hash: string }
   window: PageNode
   byId(id: string): PageNode
@@ -307,6 +309,7 @@ export function openPlanPage(html: string, options: PageOptions = {}): Page {
 
   const storage: Record<string, string> = { ...options.storage }
   const location = { hash: options.hash ?? '' }
+  const clipboard: string[] = []
   const window = new PageNode('#window')
   Object.assign(window, {
     location,
@@ -316,7 +319,14 @@ export function openPlanPage(html: string, options: PageOptions = {}): Page {
         storage[key] = String(value)
       },
     },
-    navigator: { clipboard: { writeText: () => Promise.resolve() } },
+    navigator: {
+      clipboard: {
+        writeText: (text: string) => {
+          clipboard.push(text)
+          return Promise.resolve()
+        },
+      },
+    },
     requestAnimationFrame: (callback: () => void) => callback(),
     setTimeout: () => 0,
     clearTimeout: () => {},
@@ -335,6 +345,7 @@ export function openPlanPage(html: string, options: PageOptions = {}): Page {
   return {
     document,
     storage,
+    clipboard,
     location,
     window,
     byId(id) {

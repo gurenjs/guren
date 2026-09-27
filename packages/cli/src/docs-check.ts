@@ -14,7 +14,7 @@ import { scanDocs, extractDocsTags, buildEntityDocIndex, type DocRef } from './d
 import { ISSUE_REF_FORMS } from './issue-refs'
 import type { ParseCache } from './parse-cache'
 import { advisory, check, type CheckResult } from './check-result'
-import { acceptanceIdSegment, acceptanceTestsLoader, type AcceptanceTestRef } from './docs-acceptance'
+import { acceptanceIdEntity, acceptanceTestsLoader, type AcceptanceTestRef } from './docs-acceptance'
 
 export interface DocsCheckOptions {
   cwd: string
@@ -182,7 +182,7 @@ async function checkAcceptanceCitations(
           `${ref.path} rule`,
           'warn',
           `The rule "${rule}" cites no acceptance id, so no test is known to verify it.`,
-          `Cite the behaviour that verifies it, as "(AC-<entity>-<n>)", or move the text out of the Rules section of ${ref.path}.`,
+          `Cite the behaviour that verifies it, as "(AC-<collection>-<task>-<n>)", or move the text out of the Rules section of ${ref.path}.`,
           ref.path,
         ),
       )
@@ -215,16 +215,18 @@ async function checkAcceptanceCitations(
   // Judged on a whole run only: a --changed scope cannot see the document that would cite the id.
   if (changedFiles) return results
   const cited = new Set(citing.flatMap((ref) => ref.citations))
-  const citedSegments = new Set([...cited].map(acceptanceIdSegment).filter((segment) => segment !== undefined))
+  // The entity nodes `docs:graph` draws, so its test → entity edge and this verdict name one entity.
+  const entities = [...new Set(refs.flatMap((ref) => ref.entities))]
+  const citedEntities = new Set([...cited].map((id) => acceptanceIdEntity(id, entities)).filter((entity) => entity !== undefined))
   for (const [id, files] of carried) {
-    const segment = acceptanceIdSegment(id)
-    if (cited.has(id) || segment === undefined || !citedSegments.has(segment)) continue
+    const entity = acceptanceIdEntity(id, entities)
+    if (cited.has(id) || entity === undefined || !citedEntities.has(entity)) continue
     results.push(
       advisory(
         `docs-uncited-test:${id}`,
         `${id} citation`,
         'warn',
-        `${files.join(', ')} carries [${id}], and documents cite other ${segment} behaviours but not this one.`,
+        `${files.join(', ')} carries [${id}], and documents cite other ${entity} behaviours but not this one.`,
         `Cite (${id}) beside the rule it verifies, or close the plan it belongs to with guren plan:close.`,
         files[0],
       ),

@@ -23,6 +23,24 @@ function reevaluate(options: SqliteDatabaseOptions, times: number): SqliteDataba
   return evaluations
 }
 
+function writeMigration(name: string, statement: string): void {
+  const folder = join(workDir, 'migrations', name)
+  mkdirSync(folder, { recursive: true })
+  writeFileSync(join(folder, 'migration.sql'), statement)
+}
+
+async function captureConsole(method: 'info' | 'warn', run: () => Promise<void>): Promise<string[]> {
+  const lines: string[] = []
+  const original = console[method]
+  console[method] = (...args: unknown[]) => void lines.push(args.map(String).join(' '))
+  try {
+    await run()
+  } finally {
+    console[method] = original
+  }
+  return lines
+}
+
 let workDir: string
 
 beforeEach(() => {
@@ -242,24 +260,112 @@ describe('createSqliteDatabase resetDatabase', () => {
   })
 })
 
-describe('createSqliteDatabase migration reporting', () => {
-  function writeMigration(name: string, statement: string): void {
-    const folder = join(workDir, 'migrations', name)
-    mkdirSync(folder, { recursive: true })
-    writeFileSync(join(folder, 'migration.sql'), statement)
+describe('createSqliteDatabase foreign keys', () => {
+  type QueryableDatabase = RunnableDatabase & { get(query: unknown): unknown }
+
+  function foreignKeysPragma(db: QueryableDatabase): number {
+    return (db.get(sql`PRAGMA foreign_keys`) as { foreign_keys: number }).foreign_keys
   }
 
-  async function captureConsole(method: 'info' | 'warn', run: () => Promise<void>): Promise<string[]> {
-    const lines: string[] = []
-    const original = console[method]
-    console[method] = (...args: unknown[]) => void lines.push(args.map(String).join(' '))
-    try {
-      await run()
-    } finally {
-      console[method] = original
-    }
-    return lines
+  function countComments(db: QueryableDatabase): number {
+    return (db.get(sql`SELECT count(*) AS n FROM comments`) as { n: number }).n
   }
+
+  test('should enforce ON DELETE cascade on a connection no reset has touched', async () => {
+    // Enforcement is per connection and off by default. resetDatabase() and a
+    // migration run both leave it on, so this opens with neither: the folder
+    // stays empty, or the check would pass without the open path.
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    })
+
+    const db = (await database.getDatabase()) as QueryableDatabase
+    expect(foreignKeysPragma(db)).toBe(1)
+
+    db.run(sql`CREATE TABLE posts (id integer primary key)`)
+    db.run(sql`CREATE TABLE comments (id integer primary key, post_id integer REFERENCES posts(id) ON DELETE cascade)`)
+    db.run(sql`INSERT INTO posts VALUES (1)`)
+    db.run(sql`INSERT INTO comments VALUES (1, 1)`)
+    db.run(sql`DELETE FROM posts WHERE id = 1`)
+
+    expect(countComments(db)).toBe(0)
+
+    await database.closeDatabase()
+  })
+
+  test('should keep child rows through a drizzle-kit table rebuild', async () => {
+    // The migrator runs inside a transaction, where the migration's own
+    // `PRAGMA foreign_keys=OFF` is a no-op, so the DROP TABLE of the rebuild
+    // would cascade into comments unless the factory turns enforcement off.
+    writeMigration(
+      '20260101000000_init',
+      [
+        'CREATE TABLE `posts` (`id` integer PRIMARY KEY, `title` text);',
+        'CREATE TABLE `comments` (`id` integer PRIMARY KEY, `post_id` integer REFERENCES `posts`(`id`) ON DELETE cascade);',
+      ].join('\n--> statement-breakpoint\n'),
+    )
+    const options = {
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    }
+
+    const first = createSqliteDatabase(options)
+    const firstDb = (await first.getDatabase()) as QueryableDatabase
+    firstDb.run(sql`INSERT INTO posts VALUES (1, 'hello')`)
+    firstDb.run(sql`INSERT INTO comments VALUES (1, 1)`)
+    await first.closeDatabase()
+
+    writeMigration(
+      '20260102000000_require_title',
+      [
+        'PRAGMA foreign_keys=OFF;',
+        "CREATE TABLE `__new_posts` (`id` integer PRIMARY KEY, `title` text NOT NULL DEFAULT '');",
+        'INSERT INTO `__new_posts`(`id`, `title`) SELECT `id`, `title` FROM `posts`;',
+        'DROP TABLE `posts`;',
+        'ALTER TABLE `__new_posts` RENAME TO `posts`;',
+        'PRAGMA foreign_keys=ON;',
+      ].join('--> statement-breakpoint\n'),
+    )
+
+    const second = createSqliteDatabase(options)
+    const secondDb = (await second.getDatabase()) as QueryableDatabase
+
+    expect(countComments(secondDb)).toBe(1)
+    expect(foreignKeysPragma(secondDb)).toBe(1)
+
+    await second.closeDatabase()
+  })
+
+  test('should warn when an applied migration leaves a row with no parent', async () => {
+    // Enforcement is off while migrations run, so the orphan goes in unchecked.
+    writeMigration(
+      '20260101000000_init',
+      [
+        'CREATE TABLE `posts` (`id` integer PRIMARY KEY);',
+        'CREATE TABLE `comments` (`id` integer PRIMARY KEY, `post_id` integer REFERENCES `posts`(`id`));',
+        'INSERT INTO `comments` VALUES (1, 99);',
+      ].join('\n--> statement-breakpoint\n'),
+    )
+    const options = {
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    }
+
+    const first = createSqliteDatabase(options)
+    const warnings = await captureConsole('warn', async () => void (await first.getDatabase()))
+    await first.closeDatabase()
+    expect(warnings.join('\n')).toContain('comments -> posts (1)')
+
+    // Nothing applied on the next boot, so nothing is checked or repeated.
+    const second = createSqliteDatabase(options)
+    const reboot = await captureConsole('warn', async () => void (await second.getDatabase()))
+    await second.closeDatabase()
+    expect(reboot).toEqual([])
+  })
+})
+
+describe('createSqliteDatabase migration reporting', () => {
 
   test('should name what a boot applied and say nothing on the next one', async () => {
     writeMigration('20260101000000_create_widgets', 'CREATE TABLE widgets (id integer primary key);')

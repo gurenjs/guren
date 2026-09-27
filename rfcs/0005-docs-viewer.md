@@ -141,6 +141,23 @@ deliberately **no per-file endpoint taking a path parameter** — the
 whole-bundle payload removes the path-traversal surface entirely, and
 OKF bundles are small (a corpus is dozens of documents, not thousands).
 
+**Amended after acceptance (2026-09-27), implementation plans.** The viewer
+is also where a person follows RFC 0030's plans; that RFC's §7 amendment of
+the same date says what it shows. Two changes land here:
+
+- One route takes a parameter: `GET /_guren/docs/plans/:slug` serves the page
+  `plan:render` wrote beside a plan (#1116). The slug is looked up among the
+  plans `discoverPlanFiles()` finds and is never joined into a path, so the
+  traversal argument above still holds. The page keeps its own
+  `default-src 'none'` policy, and the route accepts no write.
+- `data.json` grows `tests` (the files carrying each acceptance id),
+  `planPages`, and the open plans with their step records. Everything in it
+  is still read from files; nothing a poll rebuilds imports `db/schema.ts`,
+  the routes file, or any other application module.
+
+Open Question 2 is answered for one case: acceptance ids verifying the same
+documents are one node in the UI.
+
 ### The graph builder
 
 ```ts

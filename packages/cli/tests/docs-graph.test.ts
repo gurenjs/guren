@@ -122,6 +122,25 @@ describe('buildDocsGraph', () => {
     expect(nodes.filter((n) => n.id === 'app/Models/Post.ts')).toHaveLength(1)
     expect(edges.filter((e) => e.to === 'app/Models/Post.ts')).toHaveLength(2)
   })
+
+  it('joins a task-named acceptance id to the one entity its id leads with', () => {
+    const meetup = doc('docs/entities/Meetup.md', { type: 'entity', entities: ['Meetup'], citations: ['AC-meetups-host-1'] })
+    const post = doc('docs/entities/Post.md', { type: 'entity', entities: ['Post', 'PostComment'] })
+    const tests = [
+      { id: 'AC-meetups-host-1', files: ['tests/meetups.test.ts'] },
+      { id: 'AC-meetups-edit-2', files: ['tests/meetups.test.ts'] },
+      { id: 'AC-post-comments-1', files: ['tests/comments.test.ts'] },
+    ]
+
+    const { edges } = buildDocsGraph([meetup, post], [warnResult('docs-uncited-test:AC-meetups-edit-2')], tests)
+
+    expect(edges.filter((e) => e.relation === 'verifies')).toEqual([
+      { from: 'test:AC-meetups-edit-2', to: 'entity:Meetup', relation: 'verifies', verdict: 'warn' },
+      { from: 'test:AC-meetups-host-1', to: 'docs/entities/Meetup.md', relation: 'verifies', verdict: 'pass' },
+      { from: 'test:AC-meetups-host-1', to: 'entity:Meetup', relation: 'verifies', verdict: 'pass' },
+      { from: 'test:AC-post-comments-1', to: 'entity:PostComment', relation: 'verifies', verdict: 'pass' },
+    ])
+  })
 })
 
 describe('buildDocsGraphReport', () => {

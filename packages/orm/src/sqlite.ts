@@ -1,5 +1,6 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { sql } from 'drizzle-orm'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
@@ -125,6 +126,29 @@ function assertNotConnectionUri(dbPath: string, source: string): void {
   )
 }
 
+type SqliteHandle = { run(query: unknown): unknown; all(query: unknown): unknown[] }
+
+/**
+ * Migrations run with enforcement off, so a rebuild's copy step or a data
+ * migration can leave rows whose parent is gone. drizzle owns the COMMIT, so
+ * this can only report them afterwards, as SQLite's own ALTER procedure would.
+ */
+function reportForeignKeyViolations(handle: SqliteHandle): void {
+  const rows = handle.all(sql.raw('PRAGMA foreign_key_check;')) as Array<{ table: string; parent: string }>
+  if (rows.length === 0) return
+
+  const counts = new Map<string, number>()
+  for (const { table, parent } of rows) {
+    const key = `${table} -> ${parent}`
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  const summary = [...counts].map(([key, count]) => `${key} (${count})`).join(', ')
+  console.warn(
+    `[guren/orm] The migrations just applied left ${rows.length} row(s) whose foreign key names no parent row: ${summary}.\n` +
+    '[guren/orm] Foreign keys are not enforced while migrations run. `PRAGMA foreign_key_check` lists the rows.',
+  )
+}
+
 export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteDatabase {
   const { migrationsFolder, filename, seedersFolder, relations } = options
 
@@ -197,6 +221,9 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
     // only for a URI left for `new Database()` to refuse.
     const sqlite = new Database(target.kind === 'memory' ? ':memory:' : (dbFile ?? dbPath))
     sqlite.exec('PRAGMA journal_mode = WAL;')
+    // Per connection, and off unless SQLite was compiled otherwise: without it
+    // no REFERENCES clause (`onDelete: 'cascade'` included) is enforced.
+    sqlite.exec('PRAGMA foreign_keys = ON;')
     sqliteClient = sqlite
     // Returned from this local: a newer evaluation may close this handle while
     // the await below is suspended, clearing `sqliteClient`, and the attempt
@@ -266,7 +293,22 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       const { migrate } = await import('drizzle-orm/bun-sqlite/migrator')
       await migrateAndReport(resolvedMigrationsFolder, {
         readApplied: report ? readAppliedMigrations : undefined,
-        migrate: () => migrate(db as any, { migrationsFolder: resolvedMigrationsFolder }), // eslint-disable-line @typescript-eslint/no-explicit-any
+        migrate: () => {
+          // The migrator wraps every pending migration in one transaction, where
+          // SQLite ignores a migration's own `PRAGMA foreign_keys=OFF`; a
+          // drizzle-kit table rebuild would then cascade its DROP TABLE into the
+          // child rows. Synchronous, so nothing else runs on the handle meanwhile.
+          const handle = db as SqliteHandle
+          const appliedBefore = readAppliedMigrations().length
+          handle.run(sql.raw('PRAGMA foreign_keys = OFF;'))
+          try {
+            migrate(db as any, { migrationsFolder: resolvedMigrationsFolder }) // eslint-disable-line @typescript-eslint/no-explicit-any
+          } finally {
+            handle.run(sql.raw('PRAGMA foreign_keys = ON;'))
+          }
+          // The check scans every referencing table, so an up-to-date boot skips it.
+          if (readAppliedMigrations().length > appliedBefore) reportForeignKeyViolations(handle)
+        },
       })
 
       return summary

@@ -614,7 +614,9 @@ Three red. The first of them, `posts.authorId.notNull`, is a test of the schema 
 
 Ask your agent:
 
-> Every post now has an author (`scripts/backfill-post-authors.ts` has run). Make `authorId` on the `posts` table NOT NULL with a new migration, and show each post's author name on the posts list and the post page. Load the authors for a page of posts in one query, not one per post, and keep `PostResource` the one place a post's shape is defined. `tests/PostController.test.ts` describes all of it; make it pass.
+```text
+Every post now has an author (`scripts/backfill-post-authors.ts` has run). Make `authorId` on the `posts` table NOT NULL with a new migration, and show each post's author name on the posts list and the post page. Load the authors for a page of posts in one query, not one per post, and keep `PostResource` the one place a post's shape is defined. `tests/PostController.test.ts` describes all of it; make it pass.
+```
 
 This is the first time the agent touches your database, and this chapter's harness lever is the **`db-manage` skill** in `.claude/skills/db-manage/`. Read it before the agent does. It tells the agent how migrations are generated, applied and inspected in this app (`make:migration`, `db:migrate`, `db:status`), that they are forward-only, and it carries safety rules: a destructive operation (`db:reset`, `db:fresh`) is never run without confirming with you first, showing what it would affect and warning about the data loss. Watch whether the agent generates a migration and applies it, or asks you about a reset. The skill exists so that the difference is not left to the model's mood.
 
@@ -926,6 +928,24 @@ One file survives `git clean` on purpose: `.env` is ignored, and `add auth` appe
 
 1. A guest who opens `/posts/create` is redirected to `/login`. What happens to a guest who POSTs to `/posts`? Write the test and find out before you guess; then say whether that answer is the one you want.
 2. The backfill script filled `authorId` on rows that had none. On a branch, make the column nullable again and run `bun run db:make` without applying it. Read the SQL. Why does SQLite rebuild the table instead of altering the column? Undo it with `git reset --hard` and `git clean -fd`, not with `git branch -D` alone.
+
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Section 1's `tests/PostController.test.ts` already has "sends a guest to the login page instead of storing". Read it beside `requireAuthenticated({ redirectTo: '/login' })` in `routes/web.ts`.
+
+The guest gets the same redirect to `/login` as for the form, and nothing is stored: the middleware answers before the action runs, whatever the method. CSRF runs before authentication, so a guest POST without a token is refused with a 403 before it even reaches the wall; that is why the test primes a token with `withCsrf()`. Whether the redirect is what you want depends on who is calling. For a person in a browser it is reasonable, although the form they filled in is lost and `LoginController` always sends them to `/` afterwards. A JSON client would rather get a 401, which is what `requireAuthenticated()` answers without `redirectTo`. Other answers are possible.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+Compare the SQL with what chapter 5 section 1 said about the `users` migration, and ask what SQLite's `ALTER TABLE` can change.
+
+The SQL rebuilds `posts`. It turns foreign-key enforcement off, creates `__new_posts` with `author_id` nullable, copies every row across with `INSERT … SELECT`, drops `posts`, renames `__new_posts` to `posts`, and turns foreign keys back on. The two pragma lines do nothing inside the migrator's transaction; `createSqliteDatabase()` turns enforcement off around the whole run instead. SQLite's `ALTER TABLE` can rename a table and add, rename or drop a column, but it cannot change the definition of a column that exists, and `NOT NULL` is part of that definition. The only way to change it is to build the table again in the new shape and copy the rows, and the copy is why no row is lost. Postgres, where chapter 14 takes the app, changes it in place with `ALTER COLUMN … DROP NOT NULL`.
+
+</details>
 
 ## Next
 

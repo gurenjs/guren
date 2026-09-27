@@ -438,7 +438,9 @@ One red, three green, and the greens are the interesting part. The 422 is green 
 
 Hand the backend to the agent:
 
-> Promote the announcements feature from its prototype to a real backend. Add an `announcements` table to `db/schema.ts` (title, body, `pinned` as a boolean defaulting to false, `createdAt`), generate and run the migration with `bun run db:make create_announcements` and `bun run db:migrate`, then run `bunx guren make:feature Announcement --fields "title:string,body:text,pinned:boolean"` to write the model, Resource and controller. Replace each `prototype` handler for the `announcements.*` routes in `routes/web.ts` with the matching `[AnnouncementController, 'action']`, keeping the public/auth split as it is. Do not modify the page components, the validator or `resources/js/prototype/index.ts`. Regenerate the spec views with `bunx guren spec:generate`. `tests/AnnouncementController.test.ts` must pass.
+```text
+Promote the announcements feature from its prototype to a real backend. Add an `announcements` table to `db/schema.ts` (title, body, `pinned` as a boolean defaulting to false, `createdAt`), generate and run the migration with `bun run db:make create_announcements` and `bun run db:migrate`, then run `bunx guren make:feature Announcement --fields "title:string,body:text,pinned:boolean"` to write the model, Resource and controller. Replace each `prototype` handler for the `announcements.*` routes in `routes/web.ts` with the matching `[AnnouncementController, 'action']`, keeping the public/auth split as it is. Do not modify the page components, the validator or `resources/js/prototype/index.ts`. Regenerate the spec views with `bunx guren spec:generate`. `tests/AnnouncementController.test.ts` must pass.
+```
 
 The rubric:
 
@@ -753,6 +755,49 @@ The fixture is still there, and `bun run build:prototype` still works: the custo
 
 1. The fixture's `shared.auth.user` is Ada. On a branch, set it to `null`, run `bun run dev:prototype`, and open `/announcements/create`. It renders. Say why the server would not have, and where in the fixture a guest check would have to go to make the prototype honest about it.
 2. On a branch, add a `notFoundPage` to `definePrototype()` pointing at a page of your own, and open `/announcements/99` in the prototype. Then remove the page component and run `bun run typecheck`. What caught it, and would the same mistake in a controller have been caught in the same place?
+
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Find where `/announcements/create` is registered in `routes/web.ts`, and compare that with what runs in the browser.
+
+The route sits in the `router.middleware('auth')` group, so on the server `requireAuthenticated({ redirectTo: '/login' })` runs before the `prototype` handler and sends a guest to `/login`. In the browser no middleware runs: the fixture's `shared` is all the prototype knows about the user. A handler receives `shared`, so the check goes into the entry itself:
+
+```ts
+'announcements.create': ({ shared, page, redirect }) =>
+  shared.auth.user ? page(pages.announcements.New, {}) : redirect('login'),
+```
+
+The same check belongs in every entry of the `auth` group (`edit`, `store`, `update`, `destroy`). `login` has no fixture entry, so the redirect opens the not-found dialog until you add an entry that renders the login page.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+`notFoundPage` receives `{ status, message }` as props. A page for it, `resources/js/pages/errors/NotFound.tsx`:
+
+```tsx
+interface Props {
+  status: number
+  message: string
+}
+
+export default function NotFound({ status, message }: Props) {
+  return (
+    <main>
+      <h1>{status}</h1>
+      <p>{message}</p>
+    </main>
+  )
+}
+```
+
+After `bun run codegen`, add `notFoundPage: pages.errors.NotFound,` to `definePrototype()`. `/announcements/99` then reaches `notFound()` in the `announcements.show` entry, and the prototype renders your page as a 200.
+
+`bun run typecheck` is `tsc --noEmit` against `.guren/pages.gen.ts` as it stands. If nothing regenerated that file, `pages.errors.NotFound` is still in it and the typecheck passes. While `bun run dev:prototype` runs, Vite reruns codegen when a page file is deleted; otherwise run `bun run codegen`, or `bunx guren gate`, which runs codegen before the typecheck. Then `tsc` fails in the fixture at `notFoundPage`. The typechecker caught it, against the regenerated page manifest. A controller's `this.inertia(pages.errors.NotFound, …)` would fail in the same place: `guren check` leaves `pages.*` references to the typechecker and only checks page names written as strings.
+
+</details>
 
 ## The end, again
 

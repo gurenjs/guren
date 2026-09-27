@@ -30,9 +30,9 @@ export interface RenderPlanInput {
   plan: PlanDraft | Plan
   checks?: readonly PlanCheckResult[]
   /**
-   * The plan file's name, for the `plan:render` and `plan:approve` commands the page prints.
-   * A name is dropped unless it is {@link PLAN_FILE_PATTERN}: the page shows those lines for
-   * someone to paste into a shell, so a name carrying `;` or a quote would be pasted with it.
+   * The plan file's path from where `plan:render` ran, for the commands and the agent prompt the page prints.
+   * A path is dropped unless it is {@link PLAN_FILE_PATTERN}: the page shows those lines for
+   * someone to paste into a shell, so a path carrying `;` or a quote would be pasted with it.
    */
   planFile?: string
   /** Derived task status (RFC 0030 §6). Reserved: an absent value renders nothing. */
@@ -49,8 +49,8 @@ import type { PlanBreakingChange, PlanElementEntry, PlanLink, PlanPagePayload } 
 
 const DATA_PLACEHOLDER = '__GUREN_PLAN_DATA__'
 
-/** A bare file name with no shell metacharacter, no quote, no space and no path segment. */
-export const PLAN_FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+/** A relative path of plain names: no shell metacharacter, quote or space, and no segment opening with `.` or `-`. */
+export const PLAN_FILE_PATTERN = /^(?:[A-Za-z0-9][A-Za-z0-9._-]*\/)*[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 /** The template a plan is rendered into, script included. Exported for the tests that hold the document to its rules. */
 export function planTemplateSource(): string {

@@ -74,6 +74,24 @@ git commit -m "docs: close the meetups plan"
 1. Add a paragraph of your own under `## Purpose` in `docs/entities/Meetup.md`, outside the markers. Run `plan:close` again and confirm your paragraph survives.
 2. Run `bunx guren docs:graph --entity Meetup`. Which kinds of node does it connect to the entity document?
 
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+`plan:close` finds its own blocks by the plan's slug and the section, and rewrites only the lines between a block's markers.
+
+The paragraph survives. Put it above or below the `<!-- guren:plan meetups … purpose -->` block, not inside it. After the second run, `git diff docs/entities/Meetup.md` shows only your paragraph, because the blocks come out exactly as before. Then commit the paragraph or restore the file: `plan:approve` in chapter 6 needs a clean tree.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+`--entity Meetup` shows the neighbours of the entity node `Meetup`, one hop away.
+
+Documents and tests. `docs/entities/Meetup.md` and `docs/plans/meetups.md` connect with `governs`, since both name `Meetup` in their frontmatter. Each `AC-meetups-N` test connects with `verifies`, since the `meetups` segment of its id names the entity. Code nodes hang off documents rather than off the entity, so they do not appear here; `--path docs/entities/Meetup.md` shows the document's own neighbours. Any other document that names `Meetup` in its frontmatter would appear too.
+
+</details>
+
 ## Next
 
 [Chapter 6: A Plan That Changes What Exists](./06-changing-what-exists.md) plans registrations, which reach into the meetups you just built.

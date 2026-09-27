@@ -54,6 +54,15 @@ Linted: dashes (`—`, `–`) in prose; ことができます / することが�
 言い換えれば / 要するに / ことに留意 / 興味深いことに / 面白いのは / 堅牢 / シームレス /
 パワフル / エレガント / 直感的 / 革命的 / ゲームチェンジャー / 私たち / あなたは /
 あなたに / いかがでしたか / と言えるでしょう / 探っていきましょう; the shape rules above.
+Also linted since #1110/#1112: English status words and jargon left in running
+prose (verified, drifted, stalled, waiver, advisory, finding, verdict, rubric,
+brief, subagent, baseline, fail-closed, read-only; judged per paragraph, and a
+gloss in parentheses, a 「quoted」 output, bold, link text, a tag and inline
+code are exempt); test results in colours (緑です / 赤になる); 自分の役目 /
+自分のターミナル; the headings いまいる場所 and 「〜、手で」. In both locales, a
+blockquote in a tutorial or agent-course chapter that is not a GitHub alert.
+Chopped sentences are judgment only: no length rule tells 「テストは失敗します。
+このテストが仕様です。」 from a translated chain.
 
 Judgment (the translated-English tells rewrite #767 removed):
 - **Reorder "not X but Y".** 「〜であって、〜ではありません」「〜するものではなく〜です」
@@ -74,11 +83,36 @@ Judgment (the translated-English tells rewrite #767 removed):
   do (Inertia, Resource, Policy, registrar, fillable), and match the file's
   majority on 全角/半角 括弧 and spaces around Latin text.
 
+Judgment (the tells rewrites #1110 and #1112 removed; read
+`docs/ja/agent-course/01-setup.md` as the reference voice):
+- **Rebuild the sentence, not the words.** A Japanese sentence that stops where
+  the English one stopped reads as a translation even with every word right.
+  Join short sentences with 〜ので / 〜が / 〜て when they are one thought.
+- **No inanimate subjects acting.** 「この節は〜を示します」「`plan:verify` は〜を
+  生む」 → 「この節では〜を見ていきます」「`plan:verify` を実行すると〜が記録されます」.
+- **No cleft sentences.** 「〜のは〜です」「〜するのは〜だけです」「〜のおかげです」
+  → a plain statement.
+- **Printed values stay printed.** A value the CLI or the page shows (`verified`,
+  `advisory`, **Needs attention**) keeps its spelling in backticks or bold, with
+  a Japanese gloss on first use; the running prose says it in Japanese
+  (検証が通る, 参考扱いの警告).
+- **One vocabulary.** verified 検証済み, drifted 検証後に変更された, stalled 行き詰まり,
+  held 保留, waived 免除, advisory 参考扱い, finding 指摘, verdict 判定, baseline 基準点,
+  rubric 確認項目, brief 指示書. Claude Code's own terms follow its Japanese docs:
+  スキル, サブエージェント, ルール, and hooks stays hooks.
+- **A prompt says where it goes.** In a course chapter the line before a prompt
+  fence names the target: 「Claude Code のセッションに、次のプロンプトを送ります。」
+  (agent course) or 「エージェントに次のプロンプトを送ります。」 (tutorial).
+
 Examples:
 - 悪: マニフェストは純粋なデータです — CLI はプラグインのコードを一切実行しません。
   良: マニフェストはただのデータです。CLI はインストール中にプラグインのコードを実行しません。
 - 悪: `userOrFail()` が証明するのは*誰が*呼んでいるかであり、実行してよいかを決めるものではありません。
   良: `userOrFail()` は呼び出し元が誰かを確かめるだけで、実行する権限があるかまでは判断しません。
+- 悪: ステップは Guren が計画から導きます。誰も書きません。自分の役目は、各コミットを読むことです。
+  良: ステップは Guren が計画から組み立てるので、人が書く必要はありません。読者は、届いたコミットを順に読んでいきます。
+- 悪: 計画の実装中は、エージェントが取り組んでいるステップも検証し、verified でない間は最大 3 回までエージェントを差し戻します。
+  良: 計画を実装している間は、取り組んでいるステップの検証も行い、検証が通るまで最大 3 回エージェントに差し戻します。
 - 悪: Guren provides a robust queue system for deferring time-consuming tasks.
   良: The queue defers slow work (mail, imports, webhooks) to a worker process.
 

@@ -12,7 +12,8 @@
 
 ## Tone & Style
 - Concise, active, welcoming. Assume readers understand modern TypeScript tooling
-- Use second-person ("you"). Avoid passive voice and apologetic phrasing
+- Use second-person ("you") in English. Avoid passive voice and apologetic phrasing
+- Japanese drops the subject instead of translating "you" (`.claude/rules/prose.md`)
 - Prefer fenced code blocks with explanations for commands
 
 ## Cross-Linking
@@ -71,10 +72,13 @@
   blocks included; `audit:tutorial-blocks` compares the executable blocks of
   `docs/ja/tutorials/` to the English ones byte for byte
 - Every chapter after 0 ends with two exercises, between the trip-ups and the
-  Next link. They carry no answers, and no fence in them takes an attribute, so
-  the smoke never runs one: the app it hands to the next chapter has to be the
-  app the text built. An exercise that changes a file says to do it on a branch,
-  because the next chapter rewrites whole files and would silently undo it
+  Next link. Each is followed by its own folded `<details>` holding a hint and
+  an example answer, checked against the framework's source, so opening one
+  does not show the other. No fence in an exercise or an answer takes an
+  attribute, so the smoke never runs one: the app it hands to the next chapter
+  has to be the app the text built. An exercise that changes a file says to do
+  it on a branch, because the next chapter rewrites whole files and would
+  silently undo it. The agent course follows the same rule
 - `bun run audit:tutorial-blocks` after editing; `GUREN_TUTORIAL_THROUGH=01
   bun run smoke:tutorial` to execute the chapters up to one
 - A chapter that passes its gate is tagged `chapter-NN` in the app's own git
@@ -91,8 +95,11 @@
 - The reader directs an agent through RFC 0030 plans; the prose teaches decisions
   (answer, review, approve, accept a step, resolve a held step), so every chapter
   gives its checks as a short table instead of code to type
-- Every agent beat is a blockquote prompt followed by **Without an agent**
-  fallback blocks. The fallbacks follow one reference plan per plan chapter
+- Every agent beat is a prompt followed by **Without an agent** fallback
+  blocks. The prompt sits in a plain ` ```text ` fence with no attribute (so
+  the smoke never runs it, and the site gives it a Copy button), after a
+  sentence that says where to send it; a blockquote read as a citation, and
+  readers did not know it was theirs to send. Both courses follow this. The fallbacks follow one reference plan per plan chapter
   (2 and 6), and chapters 2 and 6 tell a reader with their own plan how to rejoin
 - Long fallback files sit inside `<details>`, so the page shows the decision and
   folds the code

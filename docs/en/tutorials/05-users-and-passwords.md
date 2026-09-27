@@ -736,7 +736,9 @@ Two red. The second test pins a decision: a guest asking for `/profile` gets a 4
 
 Ask your agent:
 
-> Add a `/profile` page named `profile` for the signed-in user. `ProfileController.show` gets the user with `this.auth.userOrFail()`, which answers 401 to a guest, and sends the name and email to `resources/js/pages/profile/Show.tsx` through a `UserResource` (id, name, email; never the password hash). The page shows both and has a "Log out" button that posts to `/logout` through an Inertia `Link` with `method="post"`. `tests/ProfileController.test.ts` describes it; make it pass.
+```text
+Add a `/profile` page named `profile` for the signed-in user. `ProfileController.show` gets the user with `this.auth.userOrFail()`, which answers 401 to a guest, and sends the name and email to `resources/js/pages/profile/Show.tsx` through a `UserResource` (id, name, email; never the password hash). The page shows both and has a "Log out" button that posts to `/logout` through an Inertia `Link` with `method="post"`. `tests/ProfileController.test.ts` describes it; make it pass.
+```
 
 This chapter's harness lever is **`guren context User`**. Chapter 1 showed you the whole-project map an agent gets at session start. Before an agent touches one entity, it can ask for that entity's bundle instead:
 
@@ -915,12 +917,40 @@ git commit -m "feat: add the profile page"
 import { Hash } from '@guren/core'
 
 const started = performance.now()
-await Hash.make('correct horse battery')
+await new Hash().hash('correct horse battery')
 console.log(performance.now() - started, 'ms')
 ```
 
    Then say why the login route still needs the rate limit chapter 14 adds, even though every attempt costs that much.
 2. `actingAs()` skips the login flow, so it cannot test the flow itself. Write a test that posts the wrong password to `/login` and asserts the message a visitor sees. Where does that message come from, and why is it the same for a wrong password and an unknown email?
+
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Save the snippet as a file in the app root (for example `hash-time.ts`), run it with `bun hash-time.ts`, and delete it afterwards. Do not run it inside `bun test`: while tests run, the hasher switches to a much cheaper cost so that they stay fast, and the number would mean nothing.
+
+A slow hash limits how fast one attempt is, not how many attempts arrive. An attacker sends many in parallel, from many connections, and each one makes your server spend that time on a hash, so a flood of wrong passwords costs your server far more than it costs the sender. The rate limit in chapter 14 caps the attempts one client can make on `/login` in a window, which is the one thing the hash cannot do.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+`tests/LoginController.test.ts` from section 5 already has "rejects the wrong password with a message". Read it, then write its twin for an email nobody registered:
+
+```ts
+it('rejects an unknown email with the same message', async () => {
+  const csrf = await http.withCsrf('/login')
+  await csrf
+    .post('/login', { email: 'nobody@example.com', password: 'correct horse battery' })
+    .assertStatus(422)
+    .assertJsonPath('errors.message.0', 'Invalid credentials.')
+})
+```
+
+The message comes from `LoginController.store`. When `this.auth.attempt()` returns false, the action throws `ValidationException.withMessages({ message: 'Invalid credentials.' })`, and the login page shows it from `errors.message`. `attempt()` returns false in both cases without saying which one it was, and the action does not ask. Two different messages would tell anyone with a list of addresses which of them have an account on the blog.
+
+</details>
 
 ## Next
 

@@ -5,3 +5,5 @@ data/
 public/assets/
 .guren/ssr/
 .DS_Store
+docs/plans/**/*.html
+*.plan.html

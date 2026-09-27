@@ -1,6 +1,6 @@
 # Bun でフルスタック
 
-Bun にはランタイム、パッケージマネージャ、バンドラ、テストランナーが同梱され、開発サーバーは HTML ページと API ルートを並べて配信します。フルスタックフレームワークは同梱されておらず、公式ドキュメントもそう明記しています。このページは「Bun のフルスタックフレームワーク」を探している人向けです。Bun、Hono、Elysia がそれぞれ何を担うか、何が残るか、Guren がその残りをどう埋めるかを整理します。Guren は Bun で開発し、Node.js、Vercel、Cloudflare Workers にもデプロイします。
+Bun にはランタイム、パッケージマネージャ、バンドラ、テストランナーが入っていて、開発サーバーで HTML ページと API ルートを一緒に配信できます。ただしフルスタックフレームワークは含まれておらず、Bun の公式ドキュメントにもそう書かれています。このページは「Bun のフルスタックフレームワーク」を探している人に向けて、Bun、Hono、Elysia がそれぞれどこまで受け持つのか、組み立てが必要な部分として何が残るのかを整理します。そのうえで、Guren がその残りをどう埋めるかを説明します。Guren のアプリは Bun で開発しながら、Node.js、Vercel、Cloudflare Workers にもデプロイできます。
 
 ## Bun が担うもの
 
@@ -10,42 +10,42 @@ Bun のフルスタック開発サーバー(Bun 1.2.3 以降)は、HTML の impo
 
 ## Hono と Elysia が担うもの
 
-どちらも優れたフレームワークで、どちらも自らをバックエンド用と説明しています。
+どちらも優れたフレームワークですが、それぞれ自分をバックエンド向けのフレームワークだと説明しています。
 
 | | Hono | Elysia |
 |---|---|---|
-| 自己紹介 | Web 標準の上に作られた、あらゆる JavaScript ランタイム向けの Web フレームワーク | Bun でバックエンドサーバーを作るための、扱いやすい Web フレームワーク |
-| 同梱 | ルーター、ミドルウェア、バリデータ、サーバー描画用の JSX | ルーター、スキーマ検証、Eden による end-to-end 型、OpenAPI 生成 |
-| 利用者に任せる範囲 | ORM、マイグレーション、認証、セッション、ジョブ、メール、フロントエンド連携 | ORM、マイグレーション、認証、セッション、ジョブ、メール、フロントエンド連携 |
+| 公式の説明 | Web 標準の上に作られた、あらゆる JavaScript ランタイム向けの Web フレームワーク | Bun でバックエンドサーバーを作るための、扱いやすい Web フレームワーク |
+| 含まれるもの | ルーター、ミドルウェア、バリデータ、サーバー描画用の JSX | ルーター、スキーマ検証、Eden による end-to-end 型、OpenAPI 生成 |
+| 利用者が用意するもの | ORM、マイグレーション、認証、セッション、ジョブ、メール、フロントエンド連携 | ORM、マイグレーション、認証、セッション、ジョブ、メール、フロントエンド連携 |
 
-JSON エンドポイントが数本のサービスなら、ここで止まってどちらかを選んでください。Elysia の Eden はルートに対して型付けされた TypeScript クライアントを生成します。Hono は Bun、Node.js、Deno、Workers で同じコードが動きます。
+作るものが JSON エンドポイント数本だけなら、このページはここまでで十分なので、どちらかを選んでください。Elysia なら、Eden がルートの定義から型付きの TypeScript クライアントを作ってくれます。Hono なら、同じコードが Bun、Node.js、Deno、Workers でそのまま動きます。
 
 ## 残るもの
 
-どちらのフレームワークの上でも、フルスタックのアプリケーションには同じ問いが残ります。答えの一つひとつが、選ぶ依存関係と、書いて、テストして、保守するつなぎのコードです。
+どちらのフレームワークを使っても、フルスタックのアプリケーションを作るなら次の項目は自分で解決する必要があります。項目ごとに依存ライブラリを選び、それをつなぐコードを書いて、テストし、保守していくことになります。
 
 - データベースアクセスとマイグレーション
 - パスワード、セッション、OAuth、パスワードリセット、メールアドレス確認
-- フィールドごとのエラーを持つ 422 応答に変換されるバリデーション
-- 手書きの API 層なしで、サーバーから型付きデータを受け取るフロントエンド
+- 失敗したらフィールドごとのエラー付きで 422 を返すバリデーション
+- API 層を手書きしなくても、サーバーから型付きのデータを受け取れるフロントエンド
 - バックグラウンドジョブ、メール、キャッシュ、イベント
 - アプリを起動して応答を検証するテストハーネス
 - デプロイ先ごとの本番ビルド
 
 ## Guren が足すもの
 
-Guren は Hono の上に載る Laravel 流の層です。すべてのリクエストが Hono のルーターを通るので、性能の階級は変わりません。上の一覧の各行には既定の答えがあります。
+Guren は、Hono の上に Laravel のような構成を載せたフレームワークです。リクエストはすべて Hono のルーターを通るので、性能は Hono と同じ水準のままです。上に挙げた項目には、それぞれ最初から決まった答えが用意されています。
 
 | 必要なもの | Guren アプリでは |
 |---|---|
 | HTTP | `router.get('/posts', [PostController, 'index'])`、コントローラ、ミドルウェアグループ |
 | データベース | Drizzle ORM と Model API。`Post.where('published', true).get()`、`bun run db:migrate` |
-| 認証 | `bunx guren add auth` が登録、ログイン、セッション、パスワード系のフローを生成。`bunx guren add oauth` でプロバイダを追加 |
-| バリデーション | Zod スキーマを渡す `this.validateBody(schema)`。失敗は 422 応答になる |
-| フロントエンド | React で書く Inertia.js のページ。ページの props はコントローラから codegen で型付け |
-| ジョブ、メール、キャッシュ、イベント | 組み込みのサブシステム。プロバイダで有効化 |
-| テスト | `@guren/testing` の `TestApp` を `bun test` で実行 |
-| コーディングエージェント | `guren context`、`guren check`、`guren audit` が、プロジェクトの地図と作業の機械検証をエージェントに渡す |
+| 認証 | `bunx guren add auth` で登録、ログイン、セッション、パスワード関連のフローを生成し、`bunx guren add oauth` でプロバイダを追加 |
+| バリデーション | `this.validateBody(schema)` に Zod スキーマを渡す。検証に失敗すると 422 を返す |
+| フロントエンド | React で書く Inertia.js のページ。props の型はコントローラから codegen で生成 |
+| ジョブ、メール、キャッシュ、イベント | フレームワークに組み込み済みで、プロバイダを登録すると使える |
+| テスト | `@guren/testing` の `TestApp` を使い、`bun test` で実行 |
+| コーディングエージェント | `guren context` でプロジェクトの全体像を、`guren check` と `guren audit` で作業結果の機械的な検証をエージェントに渡す |
 
 ルート、コントローラ、型付きページの例です。
 
@@ -81,21 +81,21 @@ export default class PostController extends Controller {
 }
 ```
 
-`pages.posts.Index` の React ページは `Props` インターフェースを宣言し、codegen がコントローラの `this.inertia()` 呼び出しをそれと照合します。リクエストの経路全体は [First Steps](./first-steps.md) を参照してください。
+`pages.posts.Index` の React ページには `Props` インターフェースを宣言しておき、コントローラの `this.inertia()` 呼び出しがそれに合っているかを codegen が照合します。リクエストが通る経路の全体は [First Steps](./first-steps.md) で説明しています。
 
 ## Guren アプリの中で Bun が使われる場所
 
-`bunx create-guren-app my-app` が生成するプロジェクトのスクリプトは Bun で動きます。`bun run dev` は `bun --hot` でサーバーを起動し、`bun test` がテストを実行します。既定のデータベースは `bun:sqlite` 経由の SQLite で、PostgreSQL と MySQL も選べます。`createApp({ auth: { hasher: 'argon2' } })` を指定すると、`Bun.password` が Argon2id のハッシャーとして使われます。
+`bunx create-guren-app my-app` で作ったプロジェクトのスクリプトは Bun で動きます。`bun run dev` を実行すると `bun --hot` でサーバーが起動し、テストは `bun test` で実行します。既定のデータベースは `bun:sqlite` を使う SQLite で、PostgreSQL と MySQL も選べます。`createApp({ auth: { hasher: 'argon2' } })` を指定すれば、`Bun.password` を Argon2id のハッシャーとして使えます。
 
-Bun ファーストは Bun 専用という意味ではありません。既定のパスワードハッシャーは `node:crypto` の scrypt なので、同じコードが Node.js でも検証に通ります。デプロイプラグインの対象は、Node.js ランタイムの AWS Lambda、Bun ランタイムの Vercel、D1 を使う Cloudflare Workers です。それぞれの手順は[デプロイガイド](./deployment.md)にあります。
+Bun ファーストといっても、Bun でしか動かないわけではありません。既定のパスワードハッシャーは `node:crypto` の scrypt なので、同じコードのまま Node.js でもパスワードを検証できます。デプロイプラグインは、Node.js ランタイムの AWS Lambda、Bun ランタイムの Vercel、D1 を使う Cloudflare Workers に対応しています。それぞれの手順は[デプロイガイド](./deployment.md)を参照してください。
 
 ## 別の選択肢が合う場面
 
-- データベースもユーザーもない小さな API サービス: 素の Hono か Elysia。Eden の型付きクライアントが欲しければ Elysia
-- React の描画そのものが製品であるコンテンツサイトやストアフロント: Next.js
-- Laravel や Rails を使っていて、移る理由のないチーム: そのまま
+- データベースもユーザー管理もない小さな API サービス: 素の Hono か Elysia。Eden の型付きクライアントが欲しいなら Elysia
+- React での描画そのものが製品の価値になるコンテンツサイトやストアフロント: Next.js
+- すでに Laravel や Rails を使っていて、移る理由がないチーム: 今のままで構いません
 
-比較の詳細は [Why Guren](./why-guren.md) にあります。
+それぞれの比較は [Why Guren](./why-guren.md) でさらに詳しく扱っています。
 
 ## 次のステップ
 

@@ -70,17 +70,9 @@ flowchart LR
 
 The gate is the one you ran in section 1. You will not configure any of this. It is why "the agent says it's done" and "it is done" come close to meaning the same thing.
 
-## 3. Keep rendered plans out of git
+Claude Code's own documentation covers each part: [CLAUDE.md](https://code.claude.com/docs/en/memory), [skills](https://code.claude.com/docs/en/skills), and [hooks](https://code.claude.com/docs/en/hooks), including the [`Stop`](https://code.claude.com/docs/en/hooks#stop) and [`SessionStart`](https://code.claude.com/docs/en/hooks#sessionstart) events this course relies on.
 
-Each plan gets a review page, `plan.html`, rendered from `plan.json` whenever you ask. It is generated, so it stays out of the repository:
-
-```bash run
-printf 'docs/plans/**/*.html\n' >> .gitignore
-git add .gitignore
-git commit -m "chore: ignore rendered plan pages"
-```
-
-## 4. Start the agent
+## 3. Start the agent
 
 Open a second terminal in `guren-meetups` and start Claude Code:
 
@@ -88,13 +80,12 @@ Open a second terminal in `guren-meetups` and start Claude Code:
 claude
 ```
 
-Leave it open. From chapter 2 on, the prompts shown as quotes go there.
+Leave it open. From chapter 2 on, what you send the agent appears in a code block: copy it into this session and send it.
 
 ## Where you are
 
 - A scaffolded app with sign-in, committed.
 - A harness the agent reads, with the two plan skills and the Stop hook.
-- Rendered plan pages ignored by git.
 
 ## Common trip-ups
 
@@ -105,6 +96,24 @@ Leave it open. From chapter 2 on, the prompts shown as quotes go there.
 
 1. Open `.claude/skills/plan-write/SKILL.md`. Find the one command it tells the agent never to run, and the reason it gives.
 2. Run `bunx guren context`. This is what the `SessionStart` hook injects into every agent session. Which of its sections would you read first before planning a change?
+
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Read the opening paragraph, before the numbered steps.
+
+The command is `plan:approve`. The skill says approving is the person's decision, made after reading the review page. Its last section names the command only to say that you, not the agent, will run it.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+The output has one `##` section per kind of thing: Stack, Models, Routes and Pages, then Controllers, Policies and the other kinds the app has, and an API digest at the end.
+
+One good answer is **Routes**. Its table gives each route's method, path, name and controller action, the same names a plan uses, so a change that reuses or collides with an existing name shows up there first. **Models** comes next, for the tables and relationships the change will point at. Other answers work too: for a change that is mostly UI, **Pages** is a fair place to start.
+
+</details>
 
 ## Next
 

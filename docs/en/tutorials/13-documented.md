@@ -287,7 +287,11 @@ Red: there is no `docs/context/posts.md`.
 
 ## 6. Delegate it
 
-> Write `docs/context/posts.md`, a context document for the `Post` model, in the shape of `docs/context/comments.md`. Cover what a post is, who may change it, what publishing means, and how cover images and the gallery are stored and served. Also record the storage decision as an ADR with `bunx guren make:adr`, and link the two. `tests/Documentation.test.ts` and `bunx guren check --docs` both have to pass.
+Send this prompt to your agent:
+
+```text
+Write `docs/context/posts.md`, a context document for the `Post` model, in the shape of `docs/context/comments.md`. Cover what a post is, who may change it, what publishing means, and how cover images and the gallery are stored and served. Also record the storage decision as an ADR with `bunx guren make:adr`, and link the two. `tests/Documentation.test.ts` and `bunx guren check --docs` both have to pass.
+```
 
 This is the chapter's harness lever, and it works in the direction you have not seen yet. Every other chapter put a rule in front of the agent before it wrote code. Here the agent has to *read* your app to write anything true, and the two commands it has for that are the two you just ran: `guren context Post` tells it what a post touches, and `docs:graph` tells it what is already documented. An agent that writes a plausible document without reading either will get the details wrong, and the details are checkable.
 
@@ -449,6 +453,52 @@ Watch the YAML, because this one bites: `issues: [412, #398]` loses everything a
 
 1. On a branch, add a column to `db/schema.ts` and run `bunx guren gate`. Which of the four views drifted, and which did not? Explain the ones that did not from what each view reads. Throw the branch and the edit away, not just the branch.
 2. This app made a decision that is still undocumented: tags are normalised in the validator rather than in the model. Write the ADR, link it to `Post`, and make `bunx guren check --docs` pass. Then say what a future reader gains from that file that the code alone would not have told them.
+
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Decide from what each view reads, in the table in section 1. On a branch, add a column (for example `wordCount: integer('word_count')` on `posts`), run the gate, then throw both away. `git restore .` comes before `git switch -`, because uncommitted edits follow you to the other branch:
+
+```bash
+git switch -c try-a-column
+bunx guren gate
+git restore .
+git switch -
+git branch -D try-a-column
+```
+
+The check stage reports `docs/spec/er.md` as out of date, because that view lists every table's columns. `domain.md` reads the model classes and their relations, and a column is neither. `screens.md` reads routes, controllers and pages, which did not change. `modules.md` reads import lines, and a new column adds no import. (The table in section 2 lists `modules.md` for `db/schema.ts` because an edit there can change an import, not because every edit does.) Without a migration, expect the test stage to fail as well: the model now selects a column the test database does not have.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+`make:adr` fills in the controller, resource and policy for the entity you name, but not the validator. Add that one to `related` yourself.
+
+```bash
+bunx guren make:adr "Tags are normalised in the validator" --entity Post --by "human:you"
+```
+
+In the new file under `docs/adr/`, add `app/Http/Validators/PostValidator.ts` under `related`, then write the argument, for example:
+
+```md
+## Decision
+
+`PostPayloadSchema` turns the `tags` field into a lower-cased, trimmed,
+de-duplicated list before the controller sees it. `Tag` and `PostTag` store
+names as they are given.
+
+## Consequences
+
+Every request that writes tags follows the same rule, and the rule sits beside
+the other post rules. Code that creates a `Tag` directly (a seeder, a console
+command) skips it and has to normalise the name itself.
+```
+
+`bunx guren check --docs` passes once `Post` and every `related` path exist. What the file gives a future reader is the part the code cannot show: that the placement was chosen rather than forgotten, and which paths the rule does not cover. Other decisions and wordings are possible.
+
+</details>
 
 ## Next
 

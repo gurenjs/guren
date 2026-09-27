@@ -175,6 +175,22 @@ describe('docs viewer integration', () => {
     expect(conditional.status).toBe(304)
   })
 
+  test('serves a rendered plan page by slug and nothing else', async () => {
+    process.env.NODE_ENV = 'development'
+    process.env.GUREN_DOCS = '1'
+    const app = await bootWorkspaceApp()
+    await mkdir(join(dir!, 'docs/plans/comments'), { recursive: true })
+    await writeFile(join(dir!, 'docs/plans/comments/plan.json'), '{}', 'utf8')
+    await writeFile(join(dir!, 'docs/plans/comments/plan.html'), '<title>Comments plan</title>', 'utf8')
+
+    const page = await app.fetch(new Request(`http://localhost${DOCS_VIEWER_PATH}/plans/comments`), loopbackEnv)
+    expect(page.status).toBe(200)
+    expect(await page.text()).toContain('Comments plan')
+
+    const unknown = await app.fetch(new Request(`http://localhost${DOCS_VIEWER_PATH}/plans/package.json`), loopbackEnv)
+    expect(unknown.status).toBe(404)
+  })
+
   test('rejects cross-origin requests to the mounted endpoint', async () => {
     process.env.NODE_ENV = 'development'
     process.env.GUREN_DOCS = '1'

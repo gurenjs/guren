@@ -1,6 +1,6 @@
 # API を構築して公開する
 
-このガイドでは、Guren で JSON API を構築して公開するまでの手順を説明します。API 専用プロジェクトの作成、データベーススキーマの定義、バリデーション付きコントローラーの作成、エンドポイントのテストまでをカバーします。
+このガイドでは、Guren で JSON API を作って公開するまでの手順を説明します。API 専用プロジェクトを作成し、データベースのスキーマを定義して、バリデーション付きのコントローラーを書き、最後にエンドポイントを試します。
 
 > [!NOTE]
 > コントローラー、バリデーション、ミドルウェアの詳細は[コントローラー](./controllers.md)と[バリデーション](./validation.md)を参照してください。
@@ -12,7 +12,7 @@
 
 ## 1. API プロジェクトを作成する
 
-`api` ブループリントを指定すると、Inertia やフロントエンドツールを省いた軽量な API スターターが生成されます:
+`api` ブループリントを指定すると、Inertia やフロントエンドのツールを含まない、軽量な API 用の雛形ができます。
 
 ```bash
 bunx create-guren-app my-api --blueprint api --db postgres
@@ -28,7 +28,7 @@ bun run db:up
 
 ## 3. スキーマを定義する
 
-`db/schema.ts` を開いてテーブルを追加します。以下はシンプルな `tasks` テーブルの例です:
+`db/schema.ts` を開き、テーブルを追加します。ここでは簡単な `tasks` テーブルを例にします。
 
 ```typescript
 import { pgTable, serial, text, boolean, timestamp } from '@guren/orm/drizzle/pg'
@@ -41,7 +41,7 @@ export const tasks = pgTable('tasks', {
 })
 ```
 
-マイグレーションを生成して実行します:
+マイグレーションを生成し、実行します。
 
 ```bash
 bunx guren make:migration --name create_tasks
@@ -54,7 +54,7 @@ bunx guren db:migrate
 bunx guren make:model Task
 ```
 
-スキーマと関連付けます:
+生成されたモデルをスキーマのテーブルに結びつけます。
 
 ```typescript
 import { defineModel } from '@guren/core'
@@ -69,7 +69,7 @@ export class Task extends defineModel(tasks) {}
 bunx guren make:controller TaskController
 ```
 
-Zod バリデーション付きの CRUD アクションを追加します:
+Zod でバリデーションする CRUD アクションを追加します。
 
 ```typescript
 import { Controller } from '@guren/core'
@@ -126,7 +126,7 @@ export class TaskController extends Controller {
 
 ## 6. ルートを登録する
 
-`routes/web.ts`(API 専用プロジェクトでは `routes/api.ts`)を開いて追加します:
+`routes/web.ts`（API 専用プロジェクトでは `routes/api.ts`）を開き、ルートを追加します。
 
 ```typescript
 import { Router } from '@guren/core'
@@ -147,14 +147,9 @@ export function registerApiRoutes(router: Router): void {
 bun run codegen
 ```
 
-ここでは `.guren/pages.gen.ts` は生成されません。このマニフェストは
-`@guren/inertia-client` を import しますが、API 専用アプリにはそのパッケージが
-入っていません。それでいて `tsconfig.json` は `.guren/` 配下をすべて型検査するため、
-生成すると `bun run typecheck` が 1 行目で落ちます。
+API 専用アプリでは、ここで `.guren/pages.gen.ts` は生成されません。このマニフェストは `@guren/inertia-client` を import しますが、API 専用アプリにはそのパッケージが入っていないからです。一方で `tsconfig.json` は `.guren/` 配下をすべて型検査するので、もし生成すると `bun run typecheck` が 1 行目で失敗します。
 
-この判断を下すのはスキャフォルダーではなく codegen です。`resources/js/pages`
-にページコンポーネントが現れたときは、手でコピーした場合でもチェックアウトで
-入ってきた場合でも、codegen はマニフェストを書かずにその理由を出力します:
+生成するかどうかは codegen が実行のたびに判断し、雛形を生成するコマンドは関与しません。`resources/js/pages` にページコンポーネントが現れた場合は、手でコピーしたものでもチェックアウトで入ってきたものでも、codegen はマニフェストを書かずに理由を出力します。
 
 ```
 [warn] 1 page component under resources/js/pages, but this app has no
@@ -162,24 +157,19 @@ bun run codegen
 .guren/pages.gen.ts
 ```
 
-`guren check` と `guren doctor` も同じ状態を報告します。アプリがこの形になる前に
-生成された `.guren/pages.gen.ts` がディスクに残っている場合は、より強く警告します。
-`tsc` を落とすのはこの残骸なので、原因となったページコンポーネントを削除した後でも
-報告され、`guren check --ci` はこの状態で失敗します（未使用のページコンポーネント
-だけでは CI は失敗しません）。codegen はこのファイルを削除しません。本当に必要な
-ファイルを消してしまうと、型エラーが原因不明の不具合に変わるからです。不要であれば
-自分で削除してください。Inertia のページを描画するアプリなら、`@guren/inertia-client`
-の依存と `routes/web.ts` を追加します。
+`guren check` と `guren doctor` も同じ状態を報告します。アプリがこの構成になる前に生成された `.guren/pages.gen.ts` がディスクに残っていると、警告はより強くなります。`tsc` を失敗させるのはこの残ったファイルなので、原因のページコンポーネントを削除した後も報告は続き、この状態では `guren check --ci` が失敗します（使われていないページコンポーネントがあるだけなら、CI は失敗しません）。
+
+codegen はこのファイルを削除しません。本当に必要なファイルを消してしまうと、型エラーが原因のわからない不具合に変わってしまうからです。不要なら手で削除してください。Inertia のページを描画するアプリにしたい場合は、`@guren/inertia-client` の依存と `routes/web.ts` を追加します。
 
 ## 8. エンドポイントをテストする
 
-開発サーバーを起動します:
+開発サーバーを起動します。
 
 ```bash
 bun run dev
 ```
 
-`curl` や任意の HTTP クライアントでリクエストを送ります:
+`curl` などの HTTP クライアントでリクエストを送ってみます。
 
 ```bash
 # タスクを作成
@@ -204,9 +194,7 @@ curl -X DELETE http://localhost:3333/api/tasks/1
 
 ## 9. API トークン認証を追加する
 
-認証が必要なルートには API トークンを配線します。これを生成するスキャフォールドは
-ありません。`guren add auth` は Inertia のサインイン画面を作るため、API 専用アプリ
-では実行を拒否します。ミドルウェアは自分で用意してください:
+認証が必要なルートには API トークンの確認を組み込みます。この部分を生成するコマンドはありません。`guren add auth` は Inertia のサインイン画面を作るコマンドなので、API 専用アプリでは実行を拒否します。ミドルウェアは次のように手で用意してください。
 
 ```typescript
 import { createBearerTokenMiddleware, DatabaseApiTokenStore } from '@guren/core'
@@ -217,7 +205,7 @@ const store = new DatabaseApiTokenStore(apiTokens)
 export const requireApiToken = createBearerTokenMiddleware({ store })
 ```
 
-これで変更系のルートを保護します:
+このミドルウェアで、データを変更するルートを保護します。
 
 ```typescript
 router.middleware(requireApiToken).group((auth) => {
@@ -227,10 +215,9 @@ router.middleware(requireApiToken).group((auth) => {
 })
 ```
 
-`api_tokens` テーブル、`createApiToken` でのトークン発行、abilities によるスコープ
-制限については[API トークンガイド](./api-tokens.md)を参照してください。
+`api_tokens` テーブルの用意、`createApiToken` によるトークンの発行、abilities による権限範囲の制限は、[API トークンガイド](./api-tokens.md)で説明しています。
 
-クライアントは `Authorization` ヘッダーにトークンを含めます:
+クライアントは、トークンを `Authorization` ヘッダーに入れて送ります。
 
 ```bash
 curl -X POST http://localhost:3333/api/tasks \

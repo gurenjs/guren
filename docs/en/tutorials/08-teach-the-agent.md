@@ -55,11 +55,11 @@ A record that belongs to a user carries the owner's id (`authorId` on posts, `us
 `guren audit` verifies authentication only and stays green when a policy call is missing. The tests in rule 4 are the only check that sees it. Write them before the action.
 ```
 
-The frontmatter is the mechanism. `paths` names the files this rule applies to, and it is the only key Claude Code reads from a rule; when the agent edits a controller, a policy, a route or a test, the rule is loaded into its context, and when it edits a page it is not. The body is written for a reader who will act on it: numbered, one obligation per item, the exact call to make, and the reason the last line gives, because an agent that knows *why* the audit cannot help is less likely to treat a green audit as permission.
+The frontmatter is the mechanism. `paths` names the files this rule applies to, and it is the only key Claude Code reads from a rule; when the agent edits a controller, a policy, a route or a test, the rule is loaded into its context, and when it edits a page it is not. The body is written for a reader who will act on it: numbered, one obligation per item, the exact call to make, and the reason the last line gives, because an agent that knows *why* the audit cannot help is less likely to treat a green audit as permission. Claude Code's documentation lists how rules load under [path-specific rules](https://code.claude.com/docs/en/memory#path-specific-rules).
 
 ## 3. The skill
 
-A rule says what must be true. A skill says how to get there, and the agent reaches for it when the task matches its description. Create `.claude/skills/owned-resource/SKILL.md`:
+A rule says what must be true. A skill says how to get there, and the agent reaches for it when the task matches its description ([Claude Code: skills](https://code.claude.com/docs/en/skills)). Create `.claude/skills/owned-resource/SKILL.md`:
 
 ```md file=.claude/skills/owned-resource/SKILL.md
 ---
@@ -85,7 +85,7 @@ Two things to notice. The `description` is what the agent matches a request agai
 
 ## 4. The reviewer
 
-A subagent is an agent with its own brief and its own context, invoked by the main one. `code-review` has a general brief. This one has yours. Create `.claude/agents/ownership-review.md`:
+A subagent is an agent with its own brief and its own context, invoked by the main one ([Claude Code: subagents](https://code.claude.com/docs/en/sub-agents)). `code-review` has a general brief. This one has yours. Create `.claude/agents/ownership-review.md`:
 
 ```md file=.claude/agents/ownership-review.md
 ---
@@ -215,11 +215,15 @@ The whole file fails to load: there is no `Link` model. Red enough.
 
 The prompt, deliberately bare:
 
-> Add a blogroll: a Link resource with a title and a URL that a signed-in user creates and owns. Full CRUD at `/links`. `tests/LinkController.test.ts` describes it; make it pass.
+```text
+Add a blogroll: a Link resource with a title and a URL that a signed-in user creates and owns. Full CRUD at `/links`. `tests/LinkController.test.ts` describes it; make it pass.
+```
 
 No policy, no owner column, no tests are mentioned. Now watch what reads the prompt before the agent acts on it. "Creates and owns" should match the `owned-resource` skill's description; if it does, the transcript shows the agent reading `SKILL.md` and then working down the list. When it opens the controller, `ownership.md` loads on the glob. When it says it is done, ask:
 
-> Use the ownership-review subagent to review the uncommitted changes.
+```text
+Use the ownership-review subagent to review the uncommitted changes.
+```
 
 and read its list. The outcomes to distinguish:
 
@@ -501,6 +505,44 @@ git commit -m "feat: add the blogroll"
 
 1. Write a second rule for a convention this app has that no check enforces. One candidate: every page component declares a `Props` interface, because `spec:generate` reads it in chapter 13. Keep it under twenty lines and say in the rule why no command can see it.
 2. Run `bunx guren agent:sync --dry-run`. Which files would it replace, and which does it leave alone? The line between those two answers is the line between the framework's harness and yours.
+
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Open `.claude/rules/project-guidelines.md` first: anything `guren guidelines` already derives does not belong in the rule. Then scope `paths` to the files where the convention applies, here the page components. One possible rule, saved as `.claude/rules/page-props.md`:
+
+```md
+---
+paths:
+  - "resources/js/pages/**"
+---
+
+# Page props
+
+Every page component declares `interface Props` (or `type Props`) and annotates
+its default export with it: `export default function Show({ post }: Props)`.
+
+`bun run codegen` copies that type into `.guren/pages.gen.ts`, where
+`this.inertia()` checks a controller's props against it, and `spec:generate`
+quotes it in `docs/spec/screens.md`.
+
+No command asks for the declaration: codegen also accepts a type written inline
+on the default export's parameter, and `guren check` does not look for `Props`.
+Only this rule states the convention.
+```
+
+Other rules work as well. What matters is a narrow `paths` list and a last paragraph that says why no check covers it.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+`agent:sync` sorts every file it plans into two kinds: managed files, which it ships under names it owns and refreshes, and user-owned files, which it writes only when they are missing.
+
+On a current harness it writes nothing. The managed files (the six rules in `.claude/rules/`, the skill directories it ships under `.claude/skills/`, `code-review.md` and `test-writer.md` in `.claude/agents/`, and the two hooks in `.claude/hooks/`) are counted in one "already up to date" line. A managed file whose contents differ from the framework's template is listed under "Would write", with a warning that the sync would replace it. `.claude/settings.json`, `.mcp.json` and `CLAUDE.md` are reported as skipped, because they are yours once written. `ownership.md`, `project-guidelines.md`, `owned-resource/` and `ownership-review.md` do not appear at all: the sync only looks at the names it ships. So the framework's harness is exactly that list of names, and everything else under `.claude/` is yours.
+
+</details>
 
 ## Next
 

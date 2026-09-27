@@ -5,7 +5,7 @@
  */
 
 import { mkdir, readFile, stat } from 'node:fs/promises'
-import { basename, dirname, resolve } from 'node:path'
+import { dirname, relative, resolve, sep } from 'node:path'
 
 import { CliError, formatSchemaIssues } from './cli-error'
 import type { PlanAppState } from './plan/app-state'
@@ -109,7 +109,8 @@ export async function renderPlanFile(planPath: string, options: RenderPlanFileOp
     plan,
     checks,
     ...(impact ? { impact } : {}),
-    planFile: basename(absolutePlan),
+    // From where the command ran, which is where the printed commands and the agent run from.
+    planFile: relative(cwd, absolutePlan).split(sep).join('/'),
     uiLocale: await pageLocale(plan, options),
   })
   const target = options.output ? resolve(cwd, options.output) : planOutputPath(absolutePlan)

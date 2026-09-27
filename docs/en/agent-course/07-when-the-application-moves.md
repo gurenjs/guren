@@ -11,7 +11,11 @@ A plan is approved against the app as it was at one commit. Real work does not s
 
 ## 1. Start the build
 
-> Implement docs/plans/registrations/plan.json with the plan-implement skill. One commit per step.
+Send this prompt to the Claude Code session:
+
+```text
+Implement docs/plans/registrations/plan.json with the plan-implement skill. One commit per step.
+```
 
 The first three steps go as in chapter 4. The data step is the one to read closely: it is where `Meetup` gains its `registrations` relationship, the `alter` from chapter 6.
 
@@ -216,7 +220,11 @@ The rename is a reasonable change, so the plan follows it.
 
 ## 4. Revise and approve again
 
-> A teammate renamed the route meetups.show to meetups.detail. Revise docs/plans/registrations/plan.json with plan:revise so route.meetups.show names meetups.detail, keeping its id.
+Send this prompt to the Claude Code session:
+
+```text
+A teammate renamed the route meetups.show to meetups.detail. Revise docs/plans/registrations/plan.json with plan:revise so route.meetups.show names meetups.detail, keeping its id.
+```
 
 The element keeps its id, `route.meetups.show`: ids are how everything else in the plan, and every record, refers to it. Only the name changes.
 
@@ -256,7 +264,11 @@ With an agent, `plan-implement` does this on its own when you tell it to continu
 
 ## 5. Finish the build
 
-> Continue implementing docs/plans/registrations/plan.json.
+Send this prompt to the Claude Code session:
+
+```text
+Continue implementing docs/plans/registrations/plan.json.
+```
 
 The http step is the one where Impact from chapter 6 pays off. `MeetupResource` now needs a registration count, and `index`, `show` and `edit` all build it.
 
@@ -466,7 +478,7 @@ The waiver goes to `decisions.json` beside the plan and is committed. It names t
 ## Where you are
 
 - Registrations built, verified, closed, and documented.
-- A held step you resolved by revising the plan, with the reason on record in `revisions/0001.json`.
+- A held step you resolved by revising the plan, with the reason on record in `revisions/0002.json`.
 
 ## Common trip-ups
 
@@ -476,7 +488,25 @@ The waiver goes to `decisions.json` beside the plan and is committed. It names t
 ## Exercises
 
 1. On a branch, revert the teammate's commit instead of revising the plan, and run `plan:next`. Is the step still held?
-2. Read `docs/plans/registrations/revisions/0001.json`. Which field would tell a reviewer, a year from now, why the plan names `meetups.detail`?
+2. Read `docs/plans/registrations/revisions/0002.json`. Which field would tell a reviewer, a year from now, why the plan names `meetups.detail`?
+
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Do this at the point of section 3, before you revise the plan. A step is held while what an element depends on hashes to neither its stamp from approval nor the state the plan itself would produce.
+
+No, it is not held. After `git revert`, the route is named `meetups.show` again, so `route.meetups.show` hashes to what the chapter 6 approval stamped, and `plan:next` hands out the http step. This is the "Undo the change" row of the table. `plan:next` writes its mark under `.guren/plans/`, which git ignores, so the mark stays when you switch back; on your main branch the step reads held again, as in section 3.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+A revision record holds `parent` and `result`, the plan hashes before and after, and `ops`, the changes. Every op carries the reason it was made.
+
+The `reason` of the op that modifies `route.meetups.show`. With the **Without an agent** blocks, it reads "A teammate renamed the route to meetups.detail." and sits in `revisions/0002.json`: the answer to `Q-full` in chapter 6 was the plan's first revision and took `0001.json`. With an agent, the reason is the message the agent passed to `plan:revise` and the number can differ, so look for the record whose op names `route.meetups.show`.
+
+</details>
 
 ## Next
 

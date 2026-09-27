@@ -883,7 +883,9 @@ Two red: `images` is not a collection `Post` declares.
 
 Ask your agent:
 
-> Add a gallery to posts: a `hasManyAttached` collection named `images` (images only) on `Post`. The new-post form accepts several files under `images`, `store` attaches each one, the post page shows them, and `DELETE /posts/:id/images/:attachment`, named `posts.images.destroy`, removes one image for the post's author. Load the gallery with `withAttachments` and expose it through `PostResource`. `tests/PostAttachments.test.ts` describes it; make it pass.
+```text
+Add a gallery to posts: a `hasManyAttached` collection named `images` (images only) on `Post`. The new-post form accepts several files under `images`, `store` attaches each one, the post page shows them, and `DELETE /posts/:id/images/:attachment`, named `posts.images.destroy`, removes one image for the post's author. Load the gallery with `withAttachments` and expose it through `PostResource`. `tests/PostAttachments.test.ts` describes it; make it pass.
+```
 
 This is the same shape as the cover, one level up: `this.files('images')` instead of `this.file('cover')`, an array instead of a nullable, and `detach` with an attachment id instead of a replacing `attach`. The interesting part of the rubric is the delete route: it must find the attachment by the id in the URL *and* only within this post's collection, so a valid attachment id from someone else's post is refused. `detach(post.id, 'images', attachmentId)` does exactly that; a hand-rolled delete by attachment id alone would not.
 
@@ -1460,6 +1462,26 @@ git commit -m "feat: add a gallery to posts"
 
 1. Rename a text file to `cover.png` and upload it. What does the app answer, and which line of `Post` decided that? Now rename a real PNG to `cover.txt` and upload that. Explain the difference in one sentence.
 2. Delete a post that has a cover, then run `bun run console attachments:prune --dry-run`. Nothing is reported. What would have to go wrong in `destroy` for that command to have work to do?
+
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Look at how `Post` declares `cover` in `app/Models/Post.ts`.
+
+The text file named `cover.png` is refused with a validation error on `cover`: "The file must be an image." The deciding line is `cover: hasOneAttached({ image: 'require' })`. With `'require'`, `attach()` inspects the first bytes of the upload for an image signature, and the file name and the type the browser declared play no part. So the real PNG renamed `cover.txt` is accepted and stored with the content type `image/png`, under its name `cover.txt`. In one sentence: the attachments layer decides what a file is from its bytes, not from its name.
+
+If you uploaded through the new-post form, notice that `store` had already saved the post before `attach()` refused the file, so the post exists without a cover.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+Read what the command compares: every attachment row's `attachableType` is resolved through `Model.morphMap` in `config/attachments.ts`, and the owning record is looked up.
+
+`attachments:prune` reports a row whose owner no longer exists. `destroy` calls `Post.purgeAttachments(post.id)` before `Post.delete(...)`, so no such row is left behind. The command has work to do when a post disappears without the purge: the call is removed from `destroy`, or a post is deleted by some other path (a console command, a script, a second action) that never calls it. With `--objects` it also looks for stored files under `attachments/` that no row points at. A model missing from `Model.morphMap` has its rows reported as skipped, never removed.
+
+</details>
 
 ## Next
 

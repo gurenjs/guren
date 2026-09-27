@@ -22,13 +22,17 @@ For this plan:
 
 1. Under **Can guests browse meetups?**, keep **yes** selected and write "Yes, browsing is public." in the answer box.
 2. On `route.meetups.store`, leave the policy warning alone. It is a choice you made in chapter 2.
-3. Click **Copy feedback** at the bottom of the page.
+3. Click **Copy prompt for the agent** at the bottom of the page.
+
+Picking an answer on the page does not change `plan.json`, and neither does anything else you do there: `plan:approve` still finds the question open until the agent applies your review. The button copies a prompt that names the plan, asks the agent to apply the review with the `plan-write` skill, and carries the page's feedback.
 
 ## 2. Hand the review to the agent
 
-> Apply my review of docs/plans/meetups/plan.json with plan:revise. Add a behaviour for each acceptance warning on the page: unauthenticated for meetups.create and meetups.update, forbidden for meetups.edit, validation for meetups.update. Also add a success behaviour for the organizer opening meetups.edit. Keep the meetups.store warning, since any signed-in user may organize a meetup. Here is the page's feedback:
->
-> *(paste the copied feedback here)*
+Paste the copied prompt into the Claude Code session. The page cannot know about the missing behaviours from chapter 2, so add this below the pasted prompt before you send it:
+
+```text
+Also add a behaviour for each acceptance warning on the page: unauthenticated for meetups.create and meetups.update, forbidden for meetups.edit, validation for meetups.update. Add a success behaviour for the organizer opening meetups.edit. Keep the meetups.store warning, since any signed-in user may organize a meetup.
+```
 
 The `plan-write` skill edits a copy of the plan outside the repository, then runs `bunx guren plan:revise` with the copy and your feedback. `plan:revise` refuses the copy if it still holds a question you answered, and it records each change with its reason in `docs/plans/meetups/revisions/0001.json`.
 
@@ -133,6 +137,24 @@ git commit -m "docs: approve the meetups plan"
 
 1. Edit one word in the approved `plan.json` and run `bunx guren plan:next docs/plans/meetups/plan.json`. Read the refusal, then restore the file with `git checkout docs/plans/meetups/plan.json`.
 2. Read `approvals.json`. When you approve the plan in chapter 6, its approvals file also gets a `readings` field, which this one lacks. What does this plan have none of that the second plan will?
+
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Change a word inside a string, such as a behaviour's `description`, so the file is still valid JSON. A file that no longer parses gets a different error.
+
+`plan:next` refuses before it reads the app or marks a step. The message says the plan is not approved at its current hash, so no step of it is handed out: it was edited after approval, or never approved. It ends by telling you to run `guren plan:approve` once the plan says what you mean to build. The approval in `approvals.json` names a hash of the whole plan, so one changed word is enough. After `git checkout`, the hash matches again.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+`readings` records how each planned property of an `alter` element read at the moment of approval.
+
+This plan has no `alter` element. Everything is `add`, except `model.user` and its `id` column, which are `existing`. With nothing to read, its approval holds only the hash, the time and, when git knows your name, who approved. The registrations plan alters `Meetup`, `MeetupResource`, `meetups/Show` and `MeetupController.show`, so its approval also gets `readings`.
+
+</details>
 
 ## Next
 

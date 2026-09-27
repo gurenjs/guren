@@ -1,4 +1,5 @@
 import type { InlineConfig, ViteDevServer } from 'vite'
+import { closeViteDevServerBounded } from './server-lifecycle'
 
 export interface StartViteDevServerOptions {
   root?: string
@@ -47,17 +48,22 @@ export async function startViteDevServer(
   const { createServer } = await import('vite')
 
   const server = await createServer(resolveViteDevServerConfig(options))
-  await server.listen()
+  try {
+    await server.listen()
 
-  const resolved = server.resolvedUrls
-  const localUrls = resolved?.local?.length
-    ? resolved.local
-    : [`http://${typeof host === 'string' ? host : 'localhost'}:${server.config.server.port ?? port ?? 5173}`]
-  const networkUrls = resolved?.network ?? []
+    const resolved = server.resolvedUrls
+    const localUrls = resolved?.local?.length
+      ? resolved.local
+      : [`http://${typeof host === 'string' ? host : 'localhost'}:${server.config.server.port ?? port ?? 5173}`]
+    const networkUrls = resolved?.network ?? []
 
-  return {
-    server,
-    localUrl: localUrls[0],
-    networkUrls,
+    return {
+      server,
+      localUrl: localUrls[0],
+      networkUrls,
+    }
+  } catch (error) {
+    await closeViteDevServerBounded(server)
+    throw error
   }
 }

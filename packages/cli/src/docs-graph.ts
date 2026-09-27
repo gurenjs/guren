@@ -13,7 +13,7 @@ import { matchesGlob } from './glob-match'
 import type { CheckResult, CheckStatus } from './check-result'
 import { SPEC_VIEWS } from './spec-generate'
 import { SPEC_DIR } from './spec-artifact'
-import { acceptanceIdNamesEntity, acceptanceTestsLoader, type AcceptanceTestRef } from './docs-acceptance'
+import { acceptanceIdEntity, acceptanceTestsLoader, type AcceptanceTestRef } from './docs-acceptance'
 
 export interface DocsGraphNode {
   /** Doc path, `entity:<Name>`, `test:<acceptance id>`, or a code path/label. */
@@ -126,11 +126,10 @@ export function buildDocsGraph(refs: DocRef[], checks: CheckResult[], tests: Acc
       if (!ref.citations.includes(id)) continue
       edges.push({ from: node, to: ref.path, relation: 'verifies', verdict: verdictOf(byKey, `docs-cites:${ref.path}:${id}`) })
     }
-    for (const entity of entityNames) {
-      if (acceptanceIdNamesEntity(id, entity)) {
-        const verdict = carried.has(id) ? verdictOf(byKey, `docs-uncited-test:${id}`) : 'warn'
-        edges.push({ from: node, to: `entity:${entity}`, relation: 'verifies', verdict })
-      }
+    const entity = acceptanceIdEntity(id, entityNames)
+    if (entity !== undefined) {
+      const verdict = carried.has(id) ? verdictOf(byKey, `docs-uncited-test:${id}`) : 'warn'
+      edges.push({ from: node, to: `entity:${entity}`, relation: 'verifies', verdict })
     }
   }
 
@@ -155,6 +154,8 @@ export function buildDocsGraph(refs: DocRef[], checks: CheckResult[], tests: Acc
 export interface LoadedDocsGraph {
   refs: DocRef[]
   checks: CheckResult[]
+  /** Empty unless some doc cites an id: the test tree is read only then. */
+  tests: AcceptanceTestRef[]
   graph: DocsGraph
 }
 
@@ -163,7 +164,8 @@ export async function loadDocsGraph(cwd: string): Promise<LoadedDocsGraph> {
   const refs = await scanDocs(cwd)
   const tests = acceptanceTestsLoader(cwd, refs)
   const checks = await runDocsCheck({ cwd, refs, tests })
-  return { refs, checks, graph: buildDocsGraph(refs, checks, await tests()) }
+  const carried = await tests()
+  return { refs, checks, tests: carried, graph: buildDocsGraph(refs, checks, carried) }
 }
 
 export interface DocsGraphReportOptions {

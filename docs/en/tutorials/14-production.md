@@ -231,7 +231,7 @@ bun run preview
 
 - **Session and CSRF cookies get `Secure`**, so they travel only over HTTPS.
 - **HSTS** is sent for a year.
-- **Stack traces stop**. An unhandled error becomes a plain 500 instead of the debug page you have been reading since chapter 2.
+- **Stack traces stop**. An unhandled error becomes a plain 500 page instead of the JSON with the exception name and stack trace that development returns.
 - **The development endpoints refuse to mount**: the MCP endpoint your editor talks to and the docs viewer are both gated on `NODE_ENV !== 'production'` *and* their own env flag. Neither can be turned on in production by setting a variable.
 - **Assets come from `public/assets/`** with the manifest the build wrote, not from Vite.
 - **The port does not walk.** In development a busy port makes the server try the next one; in production it fails instead, because a server that silently moves is a server your load balancer cannot find.
@@ -271,7 +271,7 @@ Everything below is true of the app you have right now. Some rows are already do
 | Rate limiting | in-memory, per process | fine for one container; `RedisRateLimitStore` for several |
 | Cookies, HSTS, error pages | automatic under `NODE_ENV=production` | done |
 | `APP_KEY` | in `.env`, which is not committed | set it as a platform secret, or the container starts without one |
-| `APP_URL` | `http://localhost:3333`, from `.env`: under `NODE_ENV=production` the app answers only to `localhost`, and a request to `127.0.0.1:3333` gets a 403 | the public URL; unset, host authorization stays off and warns |
+| `APP_URL` | `http://localhost:3333`, from `.env`: under `NODE_ENV=production` the app answers only to `localhost`, and a request to `127.0.0.1:3333` gets a 403 | the public URL; it is required in production, so an app without it does not start |
 | Uploads | on the `local` disk, inside the container | an S3 or R2 disk, or every deploy loses them |
 | Queue | `sync`: jobs run inside the request | a Redis or SQS driver plus `guren queue:work` as a second process |
 | Mail | `log`: printed to the server output | a real transport and its credentials |
@@ -353,8 +353,34 @@ More than that, you have a way of working. Every chapter here was the same four 
 
 ## Exercises
 
-1. Start `bun run preview` with `APP_URL` unset, and ask for the home page with a `Host` header the app has never heard of. Then set `APP_URL` and ask again. Which answer is which, and which of the two would you rather ship by accident?
+1. Start `bun run preview` with `APP_URL` unset, and ask for the home page with a `Host` header the app has never heard of. Then set `APP_URL` and ask again. What happens each time, and which of the two would you rather ship by accident?
 2. The `Dockerfile` from chapter 1 does not copy `storage/`. Choose one of the two fixes named above, apply it, and write the one-paragraph reason in an ADR. Whichever you choose, say what you gave up.
+
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Read `APP_URL` in `config/env.ts` and `hostAuthorization` in `config/http.ts` before you run anything. To unset the value, comment out its line in `.env`. The request:
+
+```bash
+curl -i -H 'Host: attacker.example' http://localhost:3333/
+```
+
+With `APP_URL` unset (an empty value counts as unset too), there is no answer to read: `config/env.ts` declares `APP_URL: Env.url().requiredInProduction()`, so under `NODE_ENV=production` the boot stops with an error that names `APP_URL` as required and not set, and `curl` cannot connect. The `false` branch in `config/http.ts`, which would turn host authorization off, is commented as unreachable for that reason. With `APP_URL=http://localhost:3333`, the app answers only to `localhost` on any port, so the unknown `Host` gets a 403, and the same request with `-H 'Host: localhost:3333'` gets the page. Both behaviours fail closed, which is what you want to ship by accident. The one to avoid is an app that answers every `Host`, since that header is whatever the client sent.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+The directories the image carries are the `COPY --from=builder` lines of the production stage in the `Dockerfile`, plus the builder's `mkdir -p` line. Object storage is a disk in `config/storage.ts` that `disk` in `config/attachments.ts` points at.
+
+A volume: add `storage` to the builder's `mkdir -p` and a `COPY --from=builder /app/storage ./storage` line, then mount a persistent volume at `/app/storage` (a `[mounts]` section in `fly.toml`, or `docker run -v blog-storage:/app/storage` locally). You give up running more than one machine, since the files live on one volume, the backups become yours, and `bunx guren deploy --force` regenerates the `Dockerfile` without your line.
+
+Object storage: add an `s3` disk as the [Storage guide](../guides/storage.md) shows, declare its keys in `config/env.ts`, point `disk` at it and mark it `'private'` in `disks`. You give up a setup that works with no account: the app needs a bucket, credentials held as platform secrets, and a bill. Covers stored before the switch stay on `local`, since every attachment row records its disk.
+
+Either way, `bunx guren make:adr` gives you the file, and the paragraph names the option you did not take and why. Both choices are defensible.
+
+</details>
 
 ## The end
 

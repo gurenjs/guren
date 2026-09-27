@@ -9,7 +9,8 @@ import { readFile } from 'node:fs/promises'
 
 import { discoverTestFiles, toPosixRelative } from './discovery'
 import { markdownLines, stripMarkdownCode } from './docs-links'
-import { collectionName } from './inflect'
+import { collectionName, collectionSlug } from './inflect'
+import { kebabCase } from './utils'
 import { bracketedTokens, isAcceptanceId } from './plan/acceptance-status'
 
 export interface AcceptanceTestRef {
@@ -73,19 +74,32 @@ export function acceptanceTestsLoader(cwd: string, refs: ReadonlyArray<{ citatio
   }
 }
 
-/** The `<entity>` segment of `AC-<entity>-<n>`, or `undefined` for an id of another shape. */
-export function acceptanceIdSegment(id: string): string | undefined {
-  return /^AC-(.+)-[^-]+$/u.exec(id)?.[1]
+/**
+ * The names an id may lead with for `entity`, lowercased: its class name and collection (`comments`
+ * for `Comment`, the spelling the plan's ids use), each as written and kebab-cased.
+ */
+function entityIdNames(entity: string): string[] {
+  const collection = collectionName(entity)
+  return [...new Set([entity, collection, kebabCase(entity), collectionSlug(entity)].map((name) => name.toLowerCase()))]
 }
 
 /**
- * Whether an id's segment names `entity`: its collection (`comments` for `Comment`, the
- * spelling the plan's ids use) or the class name itself, case-insensitively.
+ * The entity an id names, or `undefined`. The grammar (`isAcceptanceId()`) has no entity segment: a
+ * plan's id names its task, `AC-<collection>[-<task>]-<n>`, and the task names the entity, so the
+ * entity is the one whose name the id leads with as whole dash-separated segments, the longest one
+ * winning (`AC-post-comments-1` names `PostComment` over `Post`).
  */
-export function acceptanceIdNamesEntity(id: string, entity: string): boolean {
-  const segment = acceptanceIdSegment(id)?.toLowerCase()
-  if (segment === undefined) return false
-  return segment === entity.toLowerCase() || segment === collectionName(entity).toLowerCase()
+export function acceptanceIdEntity(id: string, entities: Iterable<string>): string | undefined {
+  if (!isAcceptanceId(id)) return undefined
+  const lower = id.toLowerCase()
+  let best: { entity: string; length: number } | undefined
+  for (const entity of entities) {
+    for (const name of entityIdNames(entity)) {
+      const prefix = `ac-${name}-`
+      if (lower.length > prefix.length && lower.startsWith(prefix) && name.length > (best?.length ?? 0)) best = { entity, length: name.length }
+    }
+  }
+  return best?.entity
 }
 
 /** The `## ` heading a rules section goes under, per plan locale; `plan:close` writes these words. */

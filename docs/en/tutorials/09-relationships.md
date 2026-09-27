@@ -1098,7 +1098,9 @@ Two red: `findWithOrFail` throws because `Post` has no relation called `tags`. R
 
 Ask your agent:
 
-> Add tags to posts as a many-to-many. Tables `tags` (unique `name`) and `post_tags` (`postId`, `tagId`, composite primary key, cascade on delete) with a migration; models `Tag` and `PostTag`; a `tags` relation on `Post` declared with `belongsToMany` through the `postTags` table and typed in `relationTypes`. The post forms get a `tags` text field: a comma-separated list, lower-cased, trimmed, de-duplicated, empty allowed. `store` and `update` replace the post's tags with the list, creating tag rows that do not exist yet; the post page shows the tag names; `PostResource` carries `tags` as names. `tests/PostController.test.ts` describes it; make it pass.
+```text
+Add tags to posts as a many-to-many. Tables `tags` (unique `name`) and `post_tags` (`postId`, `tagId`, composite primary key, cascade on delete) with a migration; models `Tag` and `PostTag`; a `tags` relation on `Post` declared with `belongsToMany` through the `postTags` table and typed in `relationTypes`. The post forms get a `tags` text field: a comma-separated list, lower-cased, trimmed, de-duplicated, empty allowed. `store` and `update` replace the post's tags with the list, creating tag rows that do not exist yet; the post page shows the tag names; `PostResource` carries `tags` as names. `tests/PostController.test.ts` describes it; make it pass.
+```
 
 The harness lever here is the **`orm-models.md` rule** and the API digest that `guren context` puts in front of the agent at session start. Both say, in as many words, that there is no `attach()`, `detach()` or `sync()` in Guren: a pivot table is a model, and you write to it with `create` and `delete` like any other. An agent that has worked with other ORMs has those methods in its memory, and would happily write `post.tags().sync(ids)`. Watch whether yours reaches for a `PostTag` model instead. If it does, the rule and the digest are why.
 
@@ -1653,6 +1655,33 @@ git commit -m "feat: tag posts through a pivot table"
 
 1. `Post.belongsToMany('tags', …, postTags, 'postId', 'tagId')` names the two pivot columns in an order. On a branch, swap them, run `bun test`, and read what breaks. Then say why a wrong pivot is worse than a missing one.
 2. Delete a post that has comments, and check the `comments` table. Which layer removed them, and what would the app have to do instead if the foreign key had no `onDelete: 'cascade'`?
+
+<details>
+<summary>Exercise 1: hint and an example answer</summary>
+
+Read the two column arguments of `belongsToMany` in `app/Models/Post.ts` as "the pivot column that points at this model, then the one that points at the related model". Swapping them keeps both valid column names, so nothing checks the order.
+
+With `'tagId', 'postId'`, loading `tags` looks for `post_tags` rows whose `tag_id` equals the post's id, then reads their `post_id` values as tag ids. Nothing throws. The two tag tests fail on the list they get back, and which tags that list holds depends only on which ids happen to coincide, so on a small test database it can be empty, partial, or right by chance. That is why a wrong pivot is worse than a missing one: a missing relation fails at the first `findWithOrFail(id, 'tags')` with an error naming `tags`, while a swapped one returns plausible data that typechecks, and only a test comparing the actual names notices.
+
+</details>
+
+<details>
+<summary>Exercise 2: hint and an example answer</summary>
+
+Compare `destroy` in `app/Http/Controllers/PostController.ts` with the `comments` table in `db/schema.ts`.
+
+`destroy` deletes only the post. The comments are meant to go in the database: `onDelete: 'cascade'` on `comments.postId`, which the migration under `db/migrations/` writes as `ON DELETE cascade` on the foreign key. SQLite applies a cascade only on a connection where `PRAGMA foreign_keys` is on. It is off by default, and `createSqliteDatabase()` turns it on for every connection it opens, so deleting the post removes its comments in the same statement.
+
+Without the cascade, the app would have to delete the children itself, before the parent:
+
+```ts
+await Comment.delete({ postId: post.id })
+await Post.delete({ id: post.id })
+```
+
+With foreign keys enforced and no cascade, deleting the post first fails on the constraint. Every other path that deletes a post would need the same two lines, which is the argument for leaving the rule in the schema.
+
+</details>
 
 ## Next
 
