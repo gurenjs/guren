@@ -802,10 +802,6 @@ const doctorCommand = defineCommand({
       introspect: args.introspect !== false,
     })
 
-    if (args.json) {
-      consola.log(JSON.stringify(report, null, 2))
-    }
-
     if (args.strict && (report.hasWarnings || report.hasFailures)) {
       markCommandFailed()
     }
