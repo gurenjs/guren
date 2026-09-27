@@ -53,9 +53,9 @@ const PROJECT_SOURCE_DIRS: ReadonlySet<string> = new Set([...DEPLOY_SCAN_DIRS, '
 
 /**
  * {@link collectFiles} over the whole project, minus {@link NON_SOURCE_DIR_NAMES}. A
- * top-level directory outside the source roots that will not open is skipped: a
- * database bind mount or a cache owned by another user holds no source, and no
- * setting could exclude it. A source root, or anything deeper, still throws.
+ * directory that will not open is skipped when it lies outside the source roots
+ * (`docker/pgdata`): a database bind mount or a cache owned by another user holds
+ * no source, and no setting could exclude it. Under a source root it still throws.
  */
 export async function collectProjectFiles(
   cwd: string,
@@ -63,7 +63,7 @@ export async function collectProjectFiles(
 ): Promise<string[]> {
   const root = resolve(cwd)
   return walkFiles(root, extensions, NON_SOURCE_DIR_NAMES, (directory) =>
-    resolve(directory, '..') === root && !PROJECT_SOURCE_DIRS.has(basename(directory)))
+    !PROJECT_SOURCE_DIRS.has(relative(root, directory).split(sep)[0] ?? ''))
 }
 
 async function walkFiles(

@@ -89,8 +89,8 @@ describe('directory discovery failures in diagnostic commands', () => {
     })
   }
 
-  for (const [dir, code, failCount] of [['pgdata', 0, 0], ['tests', 1, 1]] as const) {
-    test(`check --arch ${failCount ? 'fails on' : 'skips'} an unreadable top-level ${dir} directory`, async () => {
+  for (const [dir, code, failCount] of [['pgdata', 0, 0], ['docker/pgdata', 0, 0], ['tests', 1, 1], ['app/Models/nested', 1, 1]] as const) {
+    test(`check --arch ${failCount ? 'fails on' : 'skips'} an unreadable ${dir} directory`, async () => {
       const workspace = await createTempWorkspace('guren-discovery-root-walk-')
       try {
         await writeWorkspaceFiles(workspace.dir, {
