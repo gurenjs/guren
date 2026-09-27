@@ -40,4 +40,5 @@ file::memory:*
 
 # The plan page with its script bundled in, written by `packages/cli/scripts/build-plan-page.ts`.
 packages/cli/assets/plan/index.html
+# The docs viewer shell with its script bundled in, written by `packages/cli/scripts/build-docs-viewer.ts`.
 packages/cli/assets/docs-viewer/index.html

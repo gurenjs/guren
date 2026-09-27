@@ -4,7 +4,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { composeDocsViewerPage, DOCS_VIEWER_ASSET_DIR } from '../src/docs-viewer'
+import { composeDocsViewerPage, DOCS_VIEWER_ASSET_DIR } from '../src/docs-viewer-shell'
 
 const packageRoot = join(import.meta.dir, '..')
 const html = composeDocsViewerPage(join(packageRoot, 'src/docs-viewer-page'))

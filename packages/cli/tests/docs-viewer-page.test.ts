@@ -16,8 +16,9 @@ describe('the docs viewer shell', () => {
     expect(bundle).not.toMatch(/\brequire\(|\bimport\.meta\b/)
   })
 
-  test('should bundle only the page modules: what it imports from the CLI is types', () => {
-    const modules = [...bundle.matchAll(/^ {2}\/\/ (\S+\.ts)$/gm)].map((match) => match[1])
+  test('should bundle only the page modules: what it imports from the CLI or a package is types', () => {
+    // The bundler names every module it inlines, a package's `.js` included, in a comment line of its own.
+    const modules = [...bundle.matchAll(/^ {2}\/\/ (\S+)$/gm)].map((match) => match[1])
     expect(modules.length).toBeGreaterThan(0)
     expect(modules.filter((path) => path.includes('/'))).toEqual([])
   })
