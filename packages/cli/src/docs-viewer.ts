@@ -18,7 +18,7 @@ import { resolveDocLink } from './docs-check'
 import { loadDocsGraph, type DocsGraphEdge, type DocsGraphNode } from './docs-graph'
 import { escapeHtml, renderDocHtml } from './docs-render'
 import type { AcceptanceTestRef } from './docs-acceptance'
-import { planDocClosedHash, planDocPath, readPlanBlocks } from './plan/close-docs'
+import { planDocClosedHashIn, planDocPath, readPlanBlocks } from './plan/close-docs'
 import { discoverPlanFiles } from './plan-check'
 import { planOutputPath } from './plan/beside'
 import { planSlug } from './plan/state'
@@ -59,8 +59,6 @@ export interface DocsViewerDoc {
   issues: IssueLink[]
   /** The plan hash a doc `plan:close` wrote says it closed at (RFC 0030 §7). */
   closedPlanHash?: string
-  /** The slug a plan doc's rendered page is served under, at `plans/<slug>`. */
-  planPage?: string
   /**
    * Rendered body; the leading H1 is dropped (the panel header carries the title), and each
    * block `plan:close` fenced is a `<section class="plan-block">` naming its plan.
@@ -80,27 +78,30 @@ export interface DocsViewerData {
 
 export interface DocsViewerPlanPage {
   slug: string
-  /** App-relative POSIX paths of the plan file and its rendered page. */
+  /** App-relative POSIX paths: the plan file, its rendered page, and the doc `plan:close` writes for it. */
   plan: string
   page: string
+  doc: string
 }
 
 /**
  * Each discovered plan whose page exists where `plan:render` writes it by default; a page
  * written elsewhere with `-o` is not found. Of two plans sharing a slug, the first with a page wins.
  */
-async function findPlanPages(cwd: string): Promise<Array<DocsViewerPlanPage & { absolute: string }>> {
+async function findPlanPages(cwd: string, onlySlug?: string): Promise<DocsViewerPlanPage[]> {
   const { files } = await discoverPlanFiles(cwd)
+  const candidates = onlySlug === undefined ? files : files.filter((file) => planSlug(file) === onlySlug)
   const found = await Promise.all(
-    files.map(async (file) => {
-      const absolute = planOutputPath(file)
-      if (!(await fileExists(cwd, absolute))) return undefined
-      return { slug: planSlug(file), plan: toPosixRelative(cwd, file), page: toPosixRelative(cwd, absolute), absolute }
+    candidates.map(async (file): Promise<DocsViewerPlanPage | undefined> => {
+      const page = planOutputPath(file)
+      if (!(await fileExists(cwd, page))) return undefined
+      const slug = planSlug(file)
+      return { slug, plan: toPosixRelative(cwd, file), page: toPosixRelative(cwd, page), doc: planDocPath(slug) }
     }),
   )
-  const pages: Array<DocsViewerPlanPage & { absolute: string }> = []
-  for (const page of found) if (page && !pages.some((kept) => kept.slug === page.slug)) pages.push(page)
-  return pages
+  const bySlug = new Map<string, DocsViewerPlanPage>()
+  for (const page of found) if (page && !bySlug.has(page.slug)) bySlug.set(page.slug, page)
+  return [...bySlug.values()]
 }
 
 /**
@@ -108,8 +109,8 @@ async function findPlanPages(cwd: string): Promise<Array<DocsViewerPlanPage & { 
  * discovered plans, never joined into a path, so a request cannot reach another file.
  */
 export async function docsViewerPlanPage(cwd: string, slug: string): Promise<string | undefined> {
-  const page = (await findPlanPages(cwd)).find((entry) => entry.slug === slug)
-  return page ? readFile(page.absolute, 'utf-8') : undefined
+  const [page] = await findPlanPages(cwd, slug)
+  return page ? readFile(resolve(cwd, page.page), 'utf-8') : undefined
 }
 
 /** Both match one character, so neither can backtrack the way a quantifier can. */
@@ -223,9 +224,8 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
       tests,
       graph: { nodes, edges },
     },
-    pagesFound,
+    planPages,
   ] = await Promise.all([loadDocsGraph(cwd), findPlanPages(cwd)])
-  const pageSlugByDoc = new Map(pagesFound.map((page) => [planDocPath(page.slug), page.slug]))
   const staleDocs = new Set(
     checks.filter((check) => check.key.startsWith('docs-stale:')).map((check) => check.filePath),
   )
@@ -235,7 +235,8 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
   const docs = await Promise.all(
     refs.map(async (ref): Promise<DocsViewerDoc> => {
       const source = await readFile(resolve(cwd, ref.path), 'utf-8').catch(() => '')
-      const body = stripLeadingH1(parseDocFrontmatter(source)?.body ?? source)
+      const frontmatter = parseDocFrontmatter(source)
+      const body = stripLeadingH1(frontmatter?.body ?? source)
       return {
         path: ref.path,
         module: ref.module,
@@ -253,8 +254,7 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
         stale: staleDocs.has(ref.path),
         trustTier: docTrustTier(ref),
         issues: ref.issues.map((issue) => describeIssue(issue, originRepo)),
-        closedPlanHash: ref.type === 'plan' ? planDocClosedHash(source) : undefined,
-        planPage: ref.type === 'plan' ? pageSlugByDoc.get(ref.path) : undefined,
+        closedPlanHash: ref.type === 'plan' ? planDocClosedHashIn(frontmatter?.data) : undefined,
         // Links carry the app-root path they resolve to, so the viewer
         // navigates by map lookup instead of re-deriving the rules client-side.
         html: renderViewerBody(ref.path, body),
@@ -262,7 +262,6 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
     }),
   )
 
-  const planPages = pagesFound.map(({ slug, plan, page }) => ({ slug, plan, page }))
   return { nodes, edges, docs, tests, planPages }
 }
 

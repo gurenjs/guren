@@ -8,7 +8,7 @@
 import { posix } from 'node:path'
 
 import { RULES_HEADING_BY_LOCALE } from '../docs-acceptance'
-import { parseDocFrontmatter } from '../docs-frontmatter'
+import { parseDocFrontmatter, type DocFrontmatterValue } from '../docs-frontmatter'
 import { markdownLines } from '../docs-links'
 import type { PlanApproval } from './approvals'
 import type { PlanWaiver } from './decisions'
@@ -124,7 +124,11 @@ function bullets(items: readonly string[]): string[] {
  * for a document that does not say it is closed. The frontmatter reader returns scalars as strings.
  */
 export function planDocClosedHash(source: string): string | undefined {
-  const data = parseDocFrontmatter(source)?.data
+  return planDocClosedHashIn(parseDocFrontmatter(source)?.data)
+}
+
+/** {@link planDocClosedHash} over frontmatter a caller has already parsed. */
+export function planDocClosedHashIn(data: Record<string, DocFrontmatterValue> | undefined): string | undefined {
   return data?.closed === 'true' && typeof data.plan_hash === 'string' ? data.plan_hash : undefined
 }
 
@@ -326,13 +330,14 @@ export interface PlanDocBlock {
 }
 
 /**
- * The blocks `plan:close` fenced in a document, in document order, over its lines as
- * {@link readEntityDoc} split them; `undefined` wherever that reader reports a problem.
+ * The blocks `plan:close` fenced in a document, in document order (blocks cannot nest, so the
+ * reader stores them as they close), over its lines as {@link readEntityDoc} split them;
+ * `undefined` wherever that reader reports a problem.
  */
 export function readPlanBlocks(document: string): { lines: string[]; blocks: PlanDocBlock[] } | undefined {
   const { doc, problems } = readEntityDoc(document)
   if (problems.length > 0) return undefined
-  return { lines: doc.lines, blocks: [...doc.blocks.values()].sort((a, b) => a.open - b.open) }
+  return { lines: doc.lines, blocks: [...doc.blocks.values()] }
 }
 
 /** The line of a `## ` heading naming `section` in any plan locale, outside code. */

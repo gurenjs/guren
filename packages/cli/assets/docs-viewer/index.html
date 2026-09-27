@@ -132,17 +132,16 @@ body {
   padding: 0.35rem 0.6rem; width: 15rem;
 }
 .controls input[type="search"]::placeholder { color: var(--text-muted); }
-.kind-toggles { display: flex; gap: 0.35rem; flex-wrap: wrap; }
-.kind-toggles button {
+.kind-toggles, .view-toggles { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.kind-toggles button, .view-toggles button {
   font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.06em;
   color: var(--text-secondary); background: var(--panel);
   border: 1px solid var(--border-strong); border-radius: 2px;
   padding: 0.18rem 0.5rem; cursor: pointer;
 }
 .kind-toggles button[aria-pressed="false"] { opacity: 0.4; text-decoration: line-through; }
-.kind-toggles button:hover { border-color: var(--accent); }
-.kind-toggles .option { margin-left: 0.4rem; }
-.kind-toggles .option[aria-pressed="false"] { text-decoration: none; }
+.kind-toggles button:hover, .view-toggles button:hover { border-color: var(--accent); }
+.view-toggles button[aria-pressed="true"] { border-color: var(--spec); color: var(--spec); }
 
 .legend {
   position: fixed; bottom: 1.5rem; left: 1.75rem; z-index: 4;
@@ -186,14 +185,15 @@ body {
   transition: transform 240ms cubic-bezier(0.2, 0.7, 0.2, 1);
   overflow-y: auto;
   padding: 0 1.75rem 3rem;
+  --panel-bar-height: 3rem;
 }
 @media (prefers-reduced-motion: reduce) { .panel { transition: none; } }
 .panel.open { transform: none; }
 
 .panel-bar {
-  position: sticky; top: 0; z-index: 2;
-  display: flex; justify-content: flex-end; gap: 0.4rem;
-  margin: 0 -1.75rem 1.25rem; padding: 0.75rem 1.25rem;
+  position: sticky; top: 0; z-index: 2; height: var(--panel-bar-height);
+  display: flex; justify-content: flex-end; align-items: center; gap: 0.4rem;
+  margin: 0 -1.75rem 1.25rem; padding: 0 1.25rem;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
@@ -218,7 +218,7 @@ body {
   background: var(--accent); opacity: 0; transition: opacity 120ms ease;
 }
 .panel-resize:hover::after, .panel-resize.active::after { opacity: 0.6; }
-.panel-open:not(.panel-expanded) .panel-resize { display: block; }
+.panel.open:not(.expanded) + .panel-resize { display: block; }
 body.resizing { cursor: col-resize; user-select: none; }
 .panel.expanded .doc-detail {
   display: grid;
@@ -228,7 +228,7 @@ body.resizing { cursor: col-resize; user-select: none; }
   padding-top: 1rem;
 }
 .panel.expanded .doc-head { grid-column: 1 / -1; max-width: 63.5rem; width: 100%; margin: 0 auto; }
-.panel.expanded .frontmatter { grid-column: 1; align-self: start; position: sticky; top: 3.5rem; max-height: calc(100vh - 4.5rem); overflow-y: auto; }
+.panel.expanded .frontmatter { grid-column: 1; align-self: start; position: sticky; top: calc(var(--panel-bar-height) + 0.5rem); max-height: calc(100vh - var(--panel-bar-height) - 1.5rem); overflow-y: auto; }
 .panel.expanded .prose, .panel.expanded .rel-note { grid-column: 2; }
 .panel.expanded .doc-detail h1 { font-size: 2rem; }
 .panel.expanded .description { font-size: 1.05rem; max-width: 60ch; }
@@ -277,9 +277,8 @@ body.resizing { cursor: col-resize; user-select: none; }
 .rel-target { color: var(--text-secondary); overflow-wrap: anywhere; }
 .rel-target.as-link { color: var(--accent-strong); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .rel-note { color: var(--text-secondary); font-size: 0.95rem; }
-.relations li.rel-member { flex-direction: column; gap: 0.1rem; }
-.rel-member .rel-head { display: flex; gap: 0.5rem; align-items: baseline; }
-.rel-file { color: var(--text-muted); overflow-wrap: anywhere; padding-left: 1.1rem; }
+.relations li.rel-member { flex-wrap: wrap; }
+.rel-files { flex-basis: 100%; display: flex; flex-direction: column; padding-left: 1.1rem; color: var(--text-muted); overflow-wrap: anywhere; }
 .verdict.pass { color: var(--pass); }
 .verdict.warn { color: var(--warn); }
 .verdict.fail { color: var(--fail); }
@@ -322,6 +321,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   <div class="controls">
     <input type="search" id="search" placeholder="filter nodes…" aria-label="Filter nodes" />
     <div class="kind-toggles" id="kind-toggles" role="group" aria-label="Node kinds"></div>
+    <div class="view-toggles" role="group" aria-label="View">
+      <button id="group-tests" aria-pressed="true">group tests</button>
+    </div>
   </div>
 </header>
 
@@ -346,7 +348,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   </div>
 </div>
 
-<div class="panel-resize" id="panel-resize" role="separator" aria-orientation="vertical" aria-label="Resize panel" title="drag to resize · double-click to reset"></div>
 <aside class="panel" id="panel" aria-hidden="true">
   <div class="panel-bar">
     <button id="expand" aria-pressed="false" title="Toggle reading mode (f)">⤢ expand</button>
@@ -354,12 +355,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   </div>
   <div id="panel-content"></div>
 </aside>
+<div class="panel-resize" id="panel-resize" role="separator" aria-orientation="vertical" aria-label="Resize panel" title="drag to resize · double-click to reset"></div>
 
 <script src="/_guren/docs/assets/mermaid.js" id="mermaid-script"></script>
 <script>
 (() => {
   'use strict'
-  const DATA_URL = '/_guren/docs/data.json'
+  const BASE_URL = '/_guren/docs'
+  const DATA_URL = BASE_URL + '/data.json'
   const RADIUS = { doc: 22, entity: 15, code: 10, test: 9, testGroup: 14 }
   const VERDICT_RANK = { pass: 0, warn: 1, fail: 2 }
   const VERDICT_GLYPH = { pass: '●', warn: '▲', fail: '✕' }
@@ -374,9 +377,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet')
 
   // ---- state ----
-  let data = { nodes: [], edges: [], docs: [], tests: [] }
+  let data = { nodes: [], edges: [], docs: [], tests: [], planPages: [] }
   let testFiles = new Map()
-  let planPages = []
   let docByPath = new Map()
   let nodes = [], edges = [], byId = new Map(), neighbors = new Map()
   let nodeEls = [], edgeEls = []
@@ -420,8 +422,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   // its plan doc and its entity doc, and a node per id buries both documents under the edges.
   function groupTests(rawNodes, rawEdges) {
     if (!testsGrouped) return { nodes: rawNodes, edges: rawEdges }
-    const tests = new Map(rawNodes.filter((n) => n.kind === 'test').map((n) => [n.id, { node: n, to: new Set() }]))
-    for (const e of rawEdges) if (tests.has(e.from)) tests.get(e.from).to.add(e.to)
+    const tests = new Map(rawNodes.filter((n) => n.kind === 'test').map((n) => [n.id, { node: n, to: new Set(), verdicts: [] }]))
+    for (const e of rawEdges) {
+      const test = tests.get(e.from)
+      if (test) { test.to.add(e.to); test.verdicts.push(e.verdict) }
+    }
     const byTargets = new Map()
     for (const [id, test] of tests) {
       if (test.to.size === 0) continue
@@ -433,8 +438,13 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     const groupNodes = []
     for (const [key, ids] of byTargets) {
       if (ids.length < 2) continue
-      const members = ids.map((id) => tests.get(id).node)
-      const node = { id: 'tests:' + key, kind: 'test', label: idPattern(members.map((m) => m.label)), members }
+      const members = ids.map((id) => {
+        const { node, verdicts } = tests.get(id)
+        return { id, label: node.label, verdict: worstVerdict(verdicts) }
+      })
+      const label = idPattern(members.map((m) => m.label))
+      const searchText = [label, ...members.map((m) => m.label)].join(' ').toLowerCase()
+      const node = { id: 'tests:' + key, kind: 'test', label, members, searchText }
       groupNodes.push(node)
       for (const id of ids) groupOf.set(id, node.id)
     }
@@ -469,8 +479,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     const previous = byId
     data = newData
     docByPath = new Map(data.docs.map((d) => [d.path, d]))
-    testFiles = new Map((data.tests || []).map((t) => [t.id, t.files]))
-    planPages = data.planPages || []
+    testFiles = new Map(data.tests.map((t) => [t.id, t.files]))
     const view = groupTests(data.nodes, data.edges)
     nodes = view.nodes.map((n) => {
       const old = previous.get(n.id)
@@ -692,8 +701,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 
   // ---- filters ----
   const matchesSearch = (n) =>
-    !n || searchTerm === '' ||
-    [n.label, n.id, ...(n.members || []).map((m) => m.label)].join(' ').toLowerCase().includes(searchTerm)
+    !n || searchTerm === '' || (n.searchText || (n.label + ' ' + n.id).toLowerCase()).includes(searchTerm)
   const dimmedBySearch = (n) => searchTerm !== '' && !matchesSearch(n)
 
   function applyFilters() {
@@ -725,14 +733,12 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     })
     toggleHost.append(button)
   }
-  const groupButton = el('button', 'option', 'group tests')
-  groupButton.setAttribute('aria-pressed', 'true')
+  const groupButton = document.getElementById('group-tests')
   groupButton.addEventListener('click', () => {
     testsGrouped = !testsGrouped
     groupButton.setAttribute('aria-pressed', String(testsGrouped))
     rebuild(data)
   })
-  toggleHost.append(groupButton)
 
   // ---- detail panel ----
   const panel = document.getElementById('panel')
@@ -768,7 +774,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 
   function pageLink(page) {
     return Object.assign(el('a', 'page-link', 'open plan page ↗'), {
-      href: '/_guren/docs/plans/' + encodeURIComponent(page.slug),
+      href: BASE_URL + '/plans/' + encodeURIComponent(page.slug),
       target: '_blank',
       rel: 'noopener',
       title: page.page,
@@ -789,7 +795,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     if (doc.stale) chips.append(el('span', 'chip chip-stale', 'stale'))
     if (doc.closedPlanHash) chips.append(el('span', 'chip chip-plan', 'closed ' + doc.closedPlanHash.slice(0, 12)))
     head.append(chips)
-    const page = doc.planPage ? planPages.find((p) => p.slug === doc.planPage) : undefined
+    const page = data.planPages.find((p) => p.doc === doc.path)
     if (page) head.append(pageLink(page))
     root.append(head)
 
@@ -858,15 +864,12 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     const list = el('ul', 'relations')
     for (const member of node.members || [node]) {
       const files = testFiles.get(member.label) || []
-      const li = el('li', 'rel-member')
-      if (node.members) {
-        const verdict = worstVerdict(data.edges.filter((e) => e.from === member.id).map((e) => e.verdict))
-        const row = el('span', 'rel-head')
-        row.append(el('span', 'verdict ' + verdict, VERDICT_GLYPH[verdict]), el('span', 'rel-target', member.label))
-        li.append(row)
-      }
-      if (files.length === 0) li.append(el('span', 'rel-file', 'no test title carries this id'))
-      for (const file of files) li.append(el('span', 'rel-file', file))
+      const li = node.members ? relationItem(member.label, member.verdict, null) : el('li')
+      li.classList.add('rel-member')
+      const fileList = el('span', 'rel-files')
+      if (files.length === 0) fileList.append(el('span', '', 'no test title carries this id'))
+      for (const file of files) fileList.append(el('span', '', file))
+      li.append(fileList)
       list.append(li)
     }
     front.append(list)
@@ -880,11 +883,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       : node.kind === 'entity' ? 'Model entity' : node.kind === 'test' ? 'Acceptance test' : 'Code'
     head.append(el('p', 'path', kindLabel))
     head.append(el('h1', 'mono-title', node.label))
-    const page = node.kind === 'code' ? planPages.find((p) => p.plan === node.id) : undefined
+    const page = node.kind === 'code' ? data.planPages.find((p) => p.plan === node.id) : undefined
     if (page) head.append(pageLink(page))
     root.append(head)
 
-    const isPlan = (e) => docByPath.get(e.from)?.type === 'plan'
+    const isPlan = (e) => byId.has(e.from) && kindOf(byId.get(e.from)) === 'plan'
     const incoming = edges.filter((e) => e.to === node.id && e.relation !== 'derives' && e.relation !== 'verifies')
     const plans = incoming.filter(isPlan)
     const governedBy = incoming.filter((e) => !isPlan(e))
@@ -984,7 +987,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   function setExpanded(value) {
     expanded = value
     panel.classList.toggle('expanded', value)
-    document.body.classList.toggle('panel-expanded', value)
     expandButton.textContent = value ? '⤡ collapse' : '⤢ expand'
     expandButton.setAttribute('aria-pressed', String(value))
   }
@@ -993,11 +995,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   // The width is a per-browser convenience: storage may be blocked, and the default then holds.
   const WIDTH_KEY = 'guren-docs-panel-width'
   const resizer = document.getElementById('panel-resize')
-  const clampWidth = (px) => Math.round(Math.min(Math.max(px, 320), innerWidth * 0.92))
+  // The CSS caps the width at 92vw; only the floor is enforced here.
   const setPanelWidth = (px) => {
-    if (px === null) document.documentElement.style.removeProperty('--panel-width')
-    else document.documentElement.style.setProperty('--panel-width', clampWidth(px) + 'px')
+    for (const node of [panel, resizer]) {
+      if (px === null) node.style.removeProperty('--panel-width')
+      else node.style.setProperty('--panel-width', Math.round(Math.max(px, 320)) + 'px')
+    }
   }
+  let pendingWidth = null
   try {
     const saved = Number(localStorage.getItem(WIDTH_KEY))
     if (saved > 0) setPanelWidth(saved)
@@ -1009,9 +1014,12 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     document.body.classList.add('resizing')
   })
   resizer.addEventListener('pointermove', (ev) => {
-    if (resizer.hasPointerCapture(ev.pointerId)) setPanelWidth(innerWidth - ev.clientX)
+    if (!resizer.hasPointerCapture(ev.pointerId)) return
+    if (pendingWidth === null) requestAnimationFrame(() => { setPanelWidth(pendingWidth); pendingWidth = null })
+    pendingWidth = innerWidth - ev.clientX
   })
   const endResize = () => {
+    if (pendingWidth !== null) setPanelWidth(pendingWidth)
     resizer.classList.remove('active')
     document.body.classList.remove('resizing')
     try {
