@@ -1,9 +1,9 @@
 # 認証アプリを作る
 
-このガイドでは、ユーザー登録・ログイン・保護されたルートを備えたアプリケーションを構築します。空のディレクトリから認証フロー完成まで、10分以内で完了できます。
+このガイドでは、ユーザー登録とログイン、ログインしないと見られないルートを持つアプリを作ります。空のディレクトリから始めて、認証の流れができあがるまで 10 分もかかりません。
 
 > [!NOTE]
-> これはタスク指向のガイドです。セッション、ガード、ユーザープロバイダーの詳細は[認証ガイド](./authentication.md)を参照してください。
+> このガイドは作業の手順を追うためのものです。セッション、ガード、ユーザープロバイダーの詳しい説明は[認証ガイド](./authentication.md)にあります。
 
 ## 前提条件
 
@@ -20,20 +20,20 @@ bun install
 
 ## 2. 認証機能を追加する
 
-`add auth` ジェネレーターを使うと、コントローラー、Inertia ページ、ユーザーモデル、マイグレーション、セッションミドルウェアが一括で生成されます:
+`add auth` ジェネレーターを実行すると、コントローラー、Inertia ページ、ユーザーモデル、マイグレーション、セッションミドルウェアがまとめて生成されます。
 
 ```bash
 bunx guren add auth
 ```
 
-生成されるもの:
+生成されるのは次のものです。
 
 - `app/Http/Controllers/Auth/LoginController.ts` と `RegisterController.ts`
 - パスワードとリメンバートークンのカラムを持つ `app/Models/User.ts`
-- `resources/js/pages/Auth/` 配下の Inertia ページ
-- アプリケーションプロバイダーに登録済みの `AuthProvider`
-- 開発環境向けのデフォルト設定が適用されたセッションミドルウェア
-- `routes/web.ts` のレジストラに接続された `routes/auth.ts`
+- `resources/js/pages/Auth/` 以下の Inertia ページ
+- アプリケーションのプロバイダーに登録された `AuthProvider`
+- 開発環境向けの既定値で設定されたセッションミドルウェア
+- `routes/web.ts` の registrar から呼ばれる `routes/auth.ts`
 
 ## 3. データベースを起動する
 
@@ -41,7 +41,7 @@ bunx guren add auth
 bun run db:up
 ```
 
-マイグレーションを実行して `users` テーブルを作成します:
+マイグレーションを実行して、`users` テーブルを作ります。
 
 ```bash
 bunx guren db:migrate
@@ -53,7 +53,7 @@ bunx guren db:migrate
 bun run codegen
 ```
 
-ルートとページの型付きマニフェストが生成され、コントローラーとフロントエンドコンポーネントを型で結び付けられます。
+ルートとページの型付きマニフェストが生成されます。これで、コントローラーとフロントエンドのコンポーネントが型でつながります。
 
 ## 5. 開発サーバーを起動する
 
@@ -61,13 +61,13 @@ bun run codegen
 bun run dev
 ```
 
-`http://localhost:3333/register` でアカウントを作成し、`http://localhost:3333/login` でログインできます。
+`http://localhost:3333/register` でアカウントを作り、`http://localhost:3333/login` からログインしてみてください。
 
 ## 6. 主要なコードを理解する
 
 ### LoginController
 
-生成されるコントローラーは `LoginSchema`（同時に生成される `app/Http/Validators/LoginValidator.ts` にあります）でバリデーションを行い、認証ガードに処理を委譲します:
+生成されたコントローラーは、入力を `LoginSchema` で検証してから、認証の処理をガードに任せます。`LoginSchema` は、同時に生成される `app/Http/Validators/LoginValidator.ts` にあります。
 
 ```typescript
 import { Controller, ValidationException } from '@guren/core'
@@ -102,11 +102,11 @@ export default class LoginController extends Controller {
 }
 ```
 
-認証に失敗した場合は `ValidationException.withMessages()` を throw します。フレームワークはこれを `errors` を含む 422 として返し、生成されるログインページは `errors.message` を表示します。特定の入力欄にメッセージを紐付けたい場合は、キーにフィールド名を使ってください（`{ email: '...' }`）。
+認証に失敗したときは `ValidationException.withMessages()` の例外を投げます。フレームワークはこれを `errors` 付きの 422 として返し、生成されたログインページが `errors.message` を表示します。メッセージを特定の入力欄に出したいときは、キーにフィールド名を使ってください（`{ email: '...' }`）。
 
 ### 認証ミドルウェア
 
-ジェネレーターは `routes/auth.ts` を生成し、ルートレジストラから呼び出すよう配線します。ガードはルートごとに個別に指定します:
+ジェネレーターは `routes/auth.ts` を生成し、ルートの registrar から呼び出されるようにつなぎます。ガードはルートごとに指定します。
 
 ```typescript
 import { Router, requireAuthenticated, requireGuest } from '@guren/core'
@@ -120,7 +120,7 @@ export function registerAuthRoutes(router: Router): void {
 }
 ```
 
-短い名前でグループ全体を保護したい場合は、自分でエイリアスを登録してください。`aliasMiddleware()` はエイリアス名を型に持つ Router を返すので、戻り値を必ず受け取ります:
+グループ全体を短い名前で保護したいときは、エイリアスを自分で登録します。`aliasMiddleware()` はエイリアス名を型に含んだ Router を返すので、戻り値は必ず変数で受け取ってください。
 
 ```typescript
 export function registerWebRoutes(baseRouter: Router): void {
@@ -134,7 +134,7 @@ export function registerWebRoutes(baseRouter: Router): void {
 
 ### 保護されたページ
 
-保護されたコントローラー内では `this.auth` で現在のユーザーにアクセスできます:
+保護されたコントローラーの中では、`this.auth` からログイン中のユーザーを取り出せます。
 
 ```typescript
 import { Controller } from '@guren/core'
@@ -152,19 +152,19 @@ export default class DashboardController extends Controller {
 }
 ```
 
-`this.auth.user<T>()` はゲストの場合 `null` を返します。null を分岐で処理せず 401 にしたい場合は `this.auth.userOrFail<T>()` を使ってください。
+`this.auth.user<T>()` は、ゲストのときは `null` を返します。`null` を分岐で扱わずに 401 を返したいときは、`this.auth.userOrFail<T>()` を使ってください。
 
 ## 7. フローを検証する
 
-1. `/register` にアクセスしてユーザーを作成する
-2. `/login` にアクセスして作成した認証情報でログインする
-3. `/dashboard` に遷移し、ユーザー名が表示されることを確認する
-4. シークレットウィンドウで `/dashboard` にアクセスし、`/login` にリダイレクトされることを確認する
-5. ログアウトして、ログインページに戻ることを確認する
+1. `/register` を開いてユーザーを作る
+2. `/login` を開き、作ったアカウントでログインする
+3. `/dashboard` に移り、ユーザー名が表示されることを確かめる
+4. シークレットウィンドウで `/dashboard` を開き、`/login` にリダイレクトされることを確かめる
+5. ログアウトして、ログインページに戻ることを確かめる
 
 ## 次のステップ
 
-- [メール認証](./email-verification.md): 保護されたルートへのアクセス前にメールアドレスの確認を求める
-- [パスワードリセット](./password-reset.md): ユーザーが自分でアカウントを復旧できるようにする
-- [認可](./authorization.md): ロールベースのアクセス制御を追加する
-- [API トークン](./api-tokens.md): プログラムからのアクセス用にトークンを発行する
+- [メール認証](./email-verification.md): 保護されたルートに入る前に、メールアドレスの確認を求める
+- [パスワードリセット](./password-reset.md): ユーザーが自分でアカウントを取り戻せるようにする
+- [認可](./authorization.md): ロールに基づくアクセス制御を加える
+- [API トークン](./api-tokens.md): プログラムからアクセスするためのトークンを発行する

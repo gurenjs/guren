@@ -1,10 +1,10 @@
 # テストガイド
 
-よく書かれた一つのテストは、ユーザーより先にバグを見つけてくれます。Guren では、ブラウザで手動確認するよりテストを書くほうが速いと感じられるようにしています。
+よく書けたテストが 1 つあれば、ユーザーより先にバグを見つけられます。Guren は、ブラウザで手作業で確かめるよりテストを書くほうが速いと感じられることを目指しています。
 
 ## TestApp
 
-`TestApp` は、アプリケーションの HTTP レイヤーをテストするための API です。ミドルウェアとルーティングスタック一式を備えた軽量なアプリケーションインスタンスを起動し、リクエストの送信と、Fluent インターフェースによるレスポンスのアサーションができます。
+`TestApp` は、アプリケーションの HTTP 層をテストするための API です。ミドルウェアとルーティングをひととおり備えた軽量なアプリケーションのインスタンスを起動し、そこにリクエストを送って、レスポンスをメソッドチェーンでアサートできます。
 
 ### TestApp の作成
 
@@ -38,7 +38,7 @@ describe('Posts API', () => {
 
 ### 実アプリをラップする
 
-`TestApp.create({ ... })` は渡したパーツからアプリを組み立てます。単体スライスのテストには便利ですが、その部分集合はサーバーが実際に動かす構成(プロバイダー、`auth`、`i18n`、セキュリティデフォルト)から知らないうちにずれていきます。実構成を検証したいテストでは、プロジェクトがエクスポートするアプリをラップしてください:
+`TestApp.create({ ... })` は、渡した部品からアプリを組み立てます。一部分だけを切り出したテストには便利ですが、組み立てた構成は、サーバーが実際に動かす構成(プロバイダー、`auth`、`i18n`、セキュリティの既定値)から知らないうちに離れていきます。実際の構成で確かめたいテストでは、プロジェクトが export しているアプリをラップしてください。
 
 ```ts
 import { TestApp } from '@guren/testing'
@@ -55,16 +55,16 @@ test('ホームページを返す', async () => {
 })
 ```
 
-`fromApp()` はアプリの boot と fetch ハンドラの束縛を代わりに行います。同じインスタンスに対して複数のテストファイルから呼んで構いません。`boot()` は冪等で、最初の boot を再利用します。
+`fromApp()` は、アプリの boot と fetch ハンドラの束縛をまとめて行います。同じインスタンスに対して、複数のテストファイルから呼んでも構いません。`boot()` は何度呼んでも結果が変わらず、最初の boot をそのまま使います。
 
-同じことを手作業で行う、次の長い書き方もあります。アロー関数に注目してください。`fetch` はインスタンス状態を読むため、束縛していない `app.fetch` をそのまま `fromFetch` に渡すと最初のリクエストで例外になります。`fromApp()` はこの罠を取り除くためにあります。`fromFetch` は、Guren アプリケーションではなく任意の fetch 関数を持っている場合に使ってください。
+同じことを手で書くと、次のような長い形になります。ここでアロー関数を使っている点に注意してください。`fetch` はインスタンスの状態を読むので、束縛していない `app.fetch` をそのまま `fromFetch` に渡すと、最初のリクエストで例外になります。`fromApp()` は、この落とし穴をなくすために用意されています。`fromFetch` を使うのは、手元にあるのが Guren アプリケーションではなく任意の fetch 関数の場合です。
 
 ```ts
 await app.boot()
 http = TestApp.fromFetch((request) => app.fetch(request))
 ```
 
-パーツから組み立てる場合、`TestApp.create()` は `createApp` と同じオプションを受け取ります: セッションと CSRF のミドルウェアが必要なら `auth` を、テスト対象のコントローラーが `this.t()` / `this.tc()` を使うなら `i18n` を渡します:
+部品から組み立てる場合、`TestApp.create()` は `createApp` と同じオプションを受け取ります。セッションと CSRF のミドルウェアが必要なら `auth` を、テストするコントローラーが `this.t()` / `this.tc()` を使うなら `i18n` を渡してください。
 
 ```ts
 const app = await TestApp.create({
@@ -73,7 +73,7 @@ const app = await TestApp.create({
 })
 ```
 
-`process.env` を書き換えずに環境変数を 1 つだけ試すには、`config/env.ts` のスキーマを `env` に、上書きする値を `envSource` に渡します。`envSource` は `process.env` より先に読まれ、`''` を渡した変数は未設定として扱われます。`create()` は `config` 配列を受け取らないため、上書きが届くのはプロバイダーやコントローラーが `this.make('env')` で読む値です。不正な値を渡すと `create()` は `EnvValidationError` で reject します:
+`process.env` を書き換えずに環境変数を 1 つだけ変えて試したいときは、`config/env.ts` のスキーマを `env` に、上書きする値を `envSource` に渡します。`envSource` は `process.env` より先に読まれ、`''` を渡した変数は未設定として扱われます。`create()` は `config` 配列を受け取らないので、上書きした値が届くのは、プロバイダーやコントローラーが `this.make('env')` で読む値だけです。不正な値を渡すと、`create()` が返す Promise は `EnvValidationError` で reject されます。
 
 ```ts
 import { TestApp } from '@guren/testing'
@@ -86,11 +86,11 @@ const app = await TestApp.create({
 })
 ```
 
-`TestApp.fromApp(app)` は `src/app.ts` が `createApp()` に渡すスキーマと config 定義で起動するので、機能テストは本番と同じ設定で動きます。詳しくは[設定](./configuration.md#テスト)を参照してください。
+`TestApp.fromApp(app)` は、`src/app.ts` が `createApp()` に渡しているスキーマと config 定義で起動するので、機能テストも本番と同じ設定で動きます。詳しくは[設定](./configuration.md#テスト)を参照してください。
 
 ### リクエストの送信
 
-TestApp は標準的な HTTP メソッドをすべてサポートしています。
+TestApp では、標準的な HTTP メソッドをすべて使えます。
 
 ```ts
 await app.get('/posts')
@@ -103,7 +103,7 @@ await app.query('/posts/search', body) // HTTP QUERY (RFC 10008)
 
 ### Fluent アサーション
 
-レスポンスに対してアサーションを直接チェーンできます。
+リクエストの後ろに、レスポンスのアサーションをそのままつなげて書けます。
 
 ```ts
 // ステータスのアサーション
@@ -130,7 +130,7 @@ await app.get('/old-page').assertRedirect('/new-page')
 
 ### テストでの認証
 
-`actingAs()` を使って認証済みユーザーをシミュレートします。
+ログイン済みのユーザーとしてリクエストを送るには、`actingAs()` を使います。
 
 ```ts
 import { User } from '@/app/Models/User'
@@ -150,20 +150,20 @@ await app.get('/dashboard').assertUnauthorized()
 
 ### テストでのパスワードハッシュ
 
-パスワードのテストを速く保つための設定は要りません。`TestApp` が `GUREN_TESTING=1` を設定し、この変数がある間、既定のハッシャーは軽量なパラメータを使います(scrypt を N=1024、`hasher: 'argon2'` なら Argon2id を 1 MiB・1 反復)。本番強度のハッシュは 1 回 100ms 以上かかるため、次のようなテストでは実行時間の大半をそこで使ってしまいます。
+パスワードを扱うテストを速くするための設定は要りません。`TestApp` が `GUREN_TESTING=1` を設定し、この変数がある間は既定のハッシャーが軽いパラメータを使います(scrypt なら N=1024、`hasher: 'argon2'` の Argon2id なら 1 MiB・1 反復)。本番の強さのハッシュは 1 回に 100ms 以上かかるので、次のようなテストでは実行時間のほとんどがハッシュに使われてしまいます。
 
 ```ts
 const user = await User.create({ email: 'ada@example.com', name: 'Ada', password: 'correct horse battery' })
 await app.post('/login', { email: 'ada@example.com', password: 'correct horse battery' }).assertRedirect('/')
 ```
 
-それでも、ログインのテストが検証するのは本物のハッシュです。検証はハッシュに埋め込まれたパラメータを読むので、テストでは軽量なハッシュが、本番では本番のハッシュが、どちらも同じように検証されます。テスト外では `Hash.needsRehash()` が軽量なハッシュを古いものとして報告するので、[暗号化ガイド](./encryption.md)の rehash-on-login パターンが、テストモードのプロセスが書いた行を昇格させます。デプロイしたアプリでこの変数を設定するものはありません。
+それでも、ログインのテストでは本物のハッシュが検証されます。検証のときはハッシュに埋め込まれたパラメータを読むので、テストでは軽いハッシュを、本番では本番のハッシュを、同じように検証できます。テストの外では `Hash.needsRehash()` が軽いハッシュを古いものと判定します。そのため、テストモードのプロセスが書き込んだ行も、[暗号化ガイド](./encryption.md)にあるログイン時の再ハッシュ(rehash-on-login)で本番の強さに置き換わります。デプロイしたアプリでこの変数が設定されることはありません。
 
 ### カスタムリクエストヘッダー
 
-`withHeaders()` / `withHeader()` で全リクエストにヘッダーを付与できます。
-ロケール検出・API バージョニング・Bearer トークンなどに便利です。
-`actingAs()` や `json()` と同様に新しい `TestApp` を返すので、自由に合成できます。
+`withHeaders()` / `withHeader()` を使うと、すべてのリクエストにヘッダーを付けられます。
+ロケールの判定、API のバージョン指定、Bearer トークンなどに便利です。
+`actingAs()` や `json()` と同じく新しい `TestApp` を返すので、自由に組み合わせられます。
 
 ```ts
 // Accept-Language でロケールを切り替えてレンダリング
@@ -180,31 +180,31 @@ await app
 
 ### `@guren/testing` でコントローラーをテストする
 
-`@guren/testing` パッケージには、コントローラーテスト向けのヘルパーが用意されています。
+`@guren/testing` パッケージには、コントローラーのテストに使うヘルパーがあります。
 
-- `createControllerContext(url, init?)`: コントローラー用の Hono コンテキストを構築します。
-- `createGurenControllerModule()`: Vitest 実行時に `guren` パッケージをモックし、コントローラーを分離してテストできるようにします。
-- `createControllerModuleMock()`: `vi.mock('@guren/core', …)` に渡すモックです。`Controller` はフレームワーク本体の `Controller` を継承し、起動済みアプリが必要な `inertia()` と `make()` の解決先だけを差し替えます。
-- `readInertiaResponse(response)`: Inertia レスポンスを `{ format, payload, body }` に正規化し、アサーションを簡単にします。
+- `createControllerContext(url, init?)`: コントローラー用の Hono コンテキストを作ります。
+- `createGurenControllerModule()`: Vitest の実行時に `guren` パッケージをモックし、コントローラーを切り離してテストできるようにします。
+- `createControllerModuleMock()`: `vi.mock('@guren/core', …)` に渡すモックです。この `Controller` はフレームワーク本体の `Controller` を継承していて、起動済みのアプリを必要とする `inertia()` と `make()` の解決先だけを差し替えます。
+- `readInertiaResponse(response)`: Inertia のレスポンスを `{ format, payload, body }` の形にそろえ、アサーションを書きやすくします。
 
-これらのユーティリティを Vitest スイート（例: `examples/blog/tests`）にインポートすれば、Bun 固有の API を避けつつ React/Inertia のコントローラーテストを書けます。
+これらを Vitest のスイート（例: `examples/blog/tests`）で import すれば、Bun 固有の API を使わずに React/Inertia のコントローラーのテストを書けます。
 
 ### トラブルシューティング
 
-- `vi.mock is not a function` が表示される場合、そのテストは Bun で実行されています。上記の Vitest コマンドに切り替えてください。
-- `ReferenceError: document is not defined` は、DOM 依存のテストが jsdom の外で実行されていることを示しています。Vitest ランナーを使うか、jsdom を明示的に設定してください。
-- jsdom 環境では、`FormData` に入れて送った `File` がアクションに届きません。`createControllerContext(url, { method: 'POST', body: formData })` で `this.file()` を呼ぶアクションをテストすると起きます。jsdom はグローバルの `File` と `Blob` を独自のクラスに置き換えるため、undici が multipart ボディの組み立てと解析に使うクラスと一致しません。Vitest と Node のバージョンによって、テストがタイムアウトする、undici の内部で失敗する、`this.file()` が `null` を返してアップロードが失われたままテストが通る、のいずれかになります。コントローラーテストは DOM を描画しないので、ファイルの先頭行に次のコメントを書いて Node 環境で実行してください。
+- `vi.mock is not a function` が出る場合は、そのテストが Bun で実行されています。上の Vitest のコマンドで実行してください。
+- `ReferenceError: document is not defined` が出るのは、DOM に依存するテストが jsdom の外で実行されているときです。Vitest のランナーを使うか、jsdom を明示的に設定してください。
+- jsdom 環境では、`FormData` に入れて送った `File` がアクションに届きません。`this.file()` を呼ぶアクションを `createControllerContext(url, { method: 'POST', body: formData })` でテストすると起きます。jsdom はグローバルの `File` と `Blob` を独自のクラスに置き換えるので、undici が multipart のボディの組み立てと解析に使うクラスと一致しなくなるためです。Vitest と Node のバージョンによって、テストがタイムアウトするか、undici の内部で失敗するか、`this.file()` が `null` を返してアップロードが消えたままテストが通ってしまいます。コントローラーのテストは DOM を描画しないので、ファイルの先頭行に次のコメントを書いて Node 環境で実行してください。
 
   ```ts
   // @vitest-environment node
   import { describe, expect, it } from 'vitest'
   ```
 
-ランナーを分けることで、フレームワークコードには Bun の高速なフィードバックを、SPA テストにはリアルな DOM 動作を、それぞれ確保できます。
+ランナーを分けておくと、フレームワークのコードでは Bun の速いフィードバックが得られ、SPA のテストでは実際に近い DOM の動きで確かめられます。
 
 ## サービスのフェイク
 
-テストで本物のメールを送ったり、本物のイベントをディスパッチしたり、キューにジョブを積んだりするのは避けます。`@guren/testing` にはそれぞれのフェイク `fakeEvent()`、`fakeMail()`、`fakeQueue()` があります。プロジェクトが export するアプリに対し、フェイクが必要なテストの中で `app.container.fake()` を使ってバインドします。
+テストの中で本物のメールを送ったり、本物のイベントをディスパッチしたり、キューにジョブを積んだりするのは避けます。`@guren/testing` には、それぞれのフェイクとして `fakeEvent()`、`fakeMail()`、`fakeQueue()` があります。フェイクが必要なテストの中で、プロジェクトが export しているアプリに `app.container.fake()` でバインドしてください。
 
 ```ts
 import { beforeAll, test } from 'bun:test'
@@ -257,15 +257,15 @@ test('placing an order queues the processing job', async () => {
 })
 ```
 
-コンテナの各キーが保持するのはマネージャーです（`events` は `EventManager`、`mail` は `MailManager`、`queue` は `QueueManager`）。フェイクはその一段下の部品なので、マネージャーに包んでからバインドします。
+コンテナの各キーに入っているのはマネージャーです（`events` は `EventManager`、`mail` は `MailManager`、`queue` は `QueueManager`）。フェイクはその 1 段下の部品なので、マネージャーに包んでからバインドします。
 
-- `fakeEvent()` は内部に持つマネージャーを通して記録します。`events.getManager()` をバインドしてください。このマネージャーにはリスナーが登録されないので、リスナーは実行されず、リスナーが始めるはずのジョブやメールも動きません。
+- `fakeEvent()` は、内部に持っているマネージャーを通して記録します。バインドするのは `events.getManager()` です。このマネージャーにはリスナーが登録されないので、リスナーは実行されず、リスナーが始めるはずのジョブやメールも動きません。
 - `fakeMail()` はトランスポートです。本物の `MailManager` に登録し、そのマネージャーをバインドします。
 - `fakeQueue()` はドライバーです。`createQueueManager()` のファクトリーから返し、そのマネージャーをバインドします。
 
-`assertPushed` にはペイロードの型を明示的に渡します。ジョブクラスだけでは TypeScript にペイロードの型が伝わらず、述語の引数が `unknown` になります。
+`assertPushed` には、ペイロードの型を明示して渡してください。ジョブクラスだけではペイロードの型が TypeScript に伝わらず、述語の引数が `unknown` になります。
 
-`fake()` は破棄可能なオブジェクト（disposable）を返すので、`using` で受けるとテストの終了時にアプリ本来のバインディングが戻ります。`fromApp()` を呼ぶテストファイルは、すべて同じアプリのインスタンスを共有します。`beforeAll` でバインドしたまま戻さないフェイクは、後に実行されるファイルにも残ります。バインドは `fromApp()` がアプリを起動した後に行ってください。プロバイダは起動中に本物のサービスを組み立てますが、フェイクのイベントマネージャーは `EventManager` のすべてを備えてはいません。
+`fake()` は破棄できるオブジェクト（disposable）を返すので、`using` で受け取っておけば、テストの終わりにアプリ本来のバインディングに戻ります。`fromApp()` を呼ぶテストファイルは、どれも同じアプリのインスタンスを共有します。`beforeAll` でバインドしたまま戻さないフェイクは、後から実行されるファイルにも残ってしまいます。バインドは、`fromApp()` がアプリを起動した後で行ってください。プロバイダは起動中に本物のサービスを組み立てますが、フェイクのイベントマネージャーは `EventManager` の機能をすべて備えているわけではないからです。
 
 フェイクをマネージャーに包まずに直接バインドすると、最初に使われたところで失敗し、リクエストは 500 を返します。
 
@@ -275,18 +275,18 @@ test('placing an order queues the processing job', async () => {
 | `mail` に `fakeMail()` | `manager.getDefaultFrom is not a function` |
 | `queue` に `fakeQueue()` | `manager.getDefaultDriverName is not a function` |
 
-`setQueueDriver(fakeQueue().getDriver())` でも `Job.dispatch()` を横取りできますが、2.23.0 で非推奨になり、3.0.0 で削除されます。
+`setQueueDriver(fakeQueue().getDriver())` でも `Job.dispatch()` を横取りできますが、この方法は 2.23.0 で非推奨になり、3.0.0 で削除されます。
 
 ### 使えるアサーション
 
-`FakeMail` が記録するのは組み立て済みのメッセージで、それを作った `Mail` クラスは記録しません。アサーションが見るのは宛先、件名、本文です。
+`FakeMail` が記録するのは組み立て済みのメッセージで、それを作った `Mail` クラスは記録しません。アサーションで確かめられるのは、宛先、件名、本文です。
 
 **FakeMail:**
 
 | メソッド | 説明 |
 |--------|-------------|
-| `assertSent(callback?)` | メールが送信された。callback を渡すと、いずれかがそれに一致する |
-| `assertSentTimes(count)` | 送信されたメールが全部でちょうど `count` 通 |
+| `assertSent(callback?)` | メールが送信された。callback を渡した場合は、送信されたどれかがそれに一致する |
+| `assertSentTimes(count)` | 送信されたメールが全部でちょうど `count` 通ある |
 | `assertNothingSent()` | メールが 1 通も送信されていない |
 | `assertSentTo(email)` | そのアドレス宛てにメールが送信された |
 | `assertSentFrom(email)` | そのアドレスからメールが送信された |
@@ -294,37 +294,37 @@ test('placing an order queues the processing job', async () => {
 | `assertSentWithBodyContaining(text)` | テキストか HTML の本文に `text` を含むメールがある |
 | `assertSentWithCc(email)`、`assertSentWithBcc(email)` | そのアドレスを CC または BCC に含むメールがある |
 | `assertSentWithAttachment(filename)` | このファイル名の添付を持つメールがある |
-| `sent()`、`sentTo(email)` | 記録されたメール。すべて、または 1 つのアドレス宛てのもの |
+| `sent()`、`sentTo(email)` | 記録されたメールを返す。すべて、または 1 つのアドレス宛てのもの |
 
 **FakeEvent:**
 
 | メソッド | 説明 |
 |--------|-------------|
-| `assertDispatched(event, callback?)` | イベントがディスパッチされた。callback を渡すと、いずれかのインスタンスが一致する |
+| `assertDispatched(event, callback?)` | イベントがディスパッチされた。callback を渡した場合は、どれかのインスタンスがそれに一致する |
 | `assertDispatchedTimes(event, count)` | イベントがちょうど `count` 回ディスパッチされた |
 | `assertDispatchedWith(event, data)` | `data` のプロパティをすべて `===` で満たすインスタンスがある |
-| `assertDispatchedInOrder(events)` | この順序でディスパッチされた。間に別のイベントが入ってもよい |
+| `assertDispatchedInOrder(events)` | この順にディスパッチされた。間に別のイベントが入ってもよい |
 | `assertNotDispatched(event)` | イベントがディスパッチされていない |
 | `assertNothingDispatched()` | イベントが 1 つもディスパッチされていない |
-| `dispatched(event)` | 記録されたそのイベントのインスタンス |
+| `dispatched(event)` | 記録されたそのイベントのインスタンスを返す |
 
 **FakeQueue:**
 
 | メソッド | 説明 |
 |--------|-------------|
-| `assertPushed(job, callback?)` | ジョブが積まれた。callback を渡すと、いずれかのペイロードが一致する |
+| `assertPushed(job, callback?)` | ジョブが積まれた。callback を渡した場合は、どれかのペイロードがそれに一致する |
 | `assertPushedTimes(job, count)` | ジョブがちょうど `count` 回積まれた |
 | `assertPushedOn(queue, job)` | ジョブが指定した名前のキューに積まれた |
 | `assertPushedWithDelay(job, delay)` | ジョブがこの遅延（ミリ秒）で積まれた |
 | `assertNotPushed(job)` | ジョブが積まれていない |
 | `assertNothingPushed()` | ジョブが 1 つも積まれていない |
-| `pushed(job)` | 記録されたそのジョブの積み込み |
+| `pushed(job)` | 記録されたそのジョブの積み込みを返す |
 
-3 つとも `clear()` を持っています。複数のテストで同じフェイクを使い回すときに記録を消せます。
+3 つとも `clear()` を持っているので、複数のテストで同じフェイクを使い回すときは記録を消せます。
 
 ### テストデータベースの分離
 
-`bun test` は `NODE_ENV=test` を自動的に設定します。新規にスキャフォールドされたプロジェクトの `config/database.ts` はこれを利用して、テストが開発用データベースにまったく触れないようにしています。
+`bun test` は `NODE_ENV=test` を自動で設定します。新しく生成したプロジェクトの `config/database.ts` はこれを使い、テストが開発用のデータベースに一切触れないようにしています。
 
 ```ts
 // config/database.ts
@@ -340,10 +340,10 @@ const database = createSqliteDatabase({
 })
 ```
 
-テストはデフォルトで `./data/guren.db` とは別ファイルの `./data/guren.test.db` を読み書きします。そのため、テストが作成したデータが開発サーバーで見ているデータに混ざることはありません。テスト用ファイル自体は `TEST_DATABASE_URL` で上書きできます(例: 並列実行する CI シャードごとに別ファイルを割り当てる場合)。それ以外の環境では引き続き `DATABASE_URL` が優先されます。どちらのキーもスキャフォールドの `config/env.ts` に宣言済みで、アプリの起動時には検証済みの値が `context` で渡されます([設定](./configuration.md#データベース接続)を参照)。
+テストは既定で、`./data/guren.db` とは別のファイル `./data/guren.test.db` を読み書きします。そのため、テストで作ったデータが、開発サーバーで見ているデータに混ざることはありません。テスト用のファイルは `TEST_DATABASE_URL` で変えられます(たとえば、並列で走らせる CI のシャードごとに別のファイルを割り当てる場合)。テスト以外の環境では、これまでどおり `DATABASE_URL` が使われます。どちらのキーも雛形の `config/env.ts` に宣言してあり、アプリの起動時には検証済みの値が `context` で渡されます([設定](./configuration.md#データベース接続)を参照)。
 
 > [!WARNING]
-> このブランチが導入される前にスキャフォールドされたプロジェクトは、`NODE_ENV` に関係なく `DATABASE_URL`(または `./data/guren.db`)へ直接書き込みます。そのため `bun test` が開発サーバーと同じデータベースを汚染してしまいます。後付けする際は `filename` オプションを差し替え、`DATABASE_URL` と `TEST_DATABASE_URL` を `config/env.ts` に宣言してください。このファイルがないアプリは先に追加します([設定](./configuration.md#サービスプロバイダを使うアプリ)を参照):
+> この `NODE_ENV` による分岐が入る前に生成したプロジェクトは、`NODE_ENV` に関係なく `DATABASE_URL`(または `./data/guren.db`)に直接書き込みます。そのため、`bun test` が開発サーバーと同じデータベースを汚してしまいます。あとから対応するには、`filename` オプションを差し替え、`DATABASE_URL` と `TEST_DATABASE_URL` を `config/env.ts` に宣言してください。このファイルがないアプリでは、先に追加します([設定](./configuration.md#サービスプロバイダを使うアプリ)を参照)。
 >
 > ```diff
 > +import env from './env.js'
@@ -363,7 +363,7 @@ const database = createSqliteDatabase({
 
 ### データのクリーンアップ
 
-ほとんどのスイートでは、テスト専用ファイルによる分離だけで十分です。`config/database.ts` がすでにエクスポートしている `resetDatabase()` を `beforeEach` で使い、クリーンな状態にリセットしましょう。この関数はすべてのテーブルを削除したあとマイグレーションを再適用します（`guren db:reset` と同じ最終状態）。そのため、リセット直後からテーブルをそのままクエリできます。
+ほとんどのスイートは、テスト専用のファイルで分けるだけで十分です。テストごとにきれいな状態に戻すには、`config/database.ts` がすでに export している `resetDatabase()` を `beforeEach` で呼んでください。この関数はすべてのテーブルを削除してからマイグレーションを適用し直すので（最終的な状態は `guren db:reset` と同じ）、リセットした直後からテーブルにそのままクエリできます。
 
 ```typescript
 import { describe, it, expect, beforeEach } from 'bun:test'
@@ -386,7 +386,7 @@ describe('User モデル', () => {
 })
 ```
 
-`@guren/testing` には、よりきめ細かいテストごとのクリーンアップ用に `useTruncateTables(tables)` と `useDatabaseTransactions()` も用意されています。`useTruncateTables()` は各テーブルの行を削除する `beforeEach` フックのみを登録し、`useDatabaseTransactions()` はトランザクションを開始してテスト後にロールバックする `beforeEach`/`afterEach` フックを登録します。どちらも、事前に `setTestDatabase()` で登録した以下の形の接続に対して動作します。
+テストごとにもっと細かく後片付けしたい場合のために、`@guren/testing` には `useTruncateTables(tables)` と `useDatabaseTransactions()` もあります。`useTruncateTables()` は、各テーブルの行を削除する `beforeEach` フックだけを登録します。`useDatabaseTransactions()` は、トランザクションを始めてテストの後にロールバックする `beforeEach`/`afterEach` フックを登録します。どちらも、あらかじめ `setTestDatabase()` で登録した、次の形の接続に対して動きます。
 
 ```typescript
 interface DatabaseConnection {
@@ -398,11 +398,11 @@ interface DatabaseConnection {
 }
 ```
 
-Guren の SQLite アダプターは、この `DatabaseConnection` をそのままは提供しません。`config/database.ts` の `getDatabase()` が解決するのは内部の Drizzle インスタンスで、このインターフェースとは形が異なります。そのため、これらのヘルパーを使うにはアダプターを自分で書き、テスト実行前に `setTestDatabase()` へ渡す必要があります。**同一の接続でなければならない**という制約があるのは `useDatabaseTransactions()` だけです。`beforeEach` でトランザクションを開始し `afterEach` でロールバックするため、同じファイルへ独立に開いた 2 本目の接続からは、1 本目の接続で行った書き込みが見えず、ロールバックもされません。`useTruncateTables()` にこの制約はありません。`DELETE FROM` は即座にコミットされる操作なので、同じデータベースファイルへの接続であればどれを使ってもモデル側から見える行を削除できます。アダプターの配線が大げさだと感じる場合は、上記の `resetDatabase()` パターンの方がシンプルで、この問題自体を避けられます。
+Guren の SQLite アダプターは、この `DatabaseConnection` をそのままの形では渡してくれません。`config/database.ts` の `getDatabase()` が返すのは内部の Drizzle インスタンスで、このインターフェースとは形が違います。そのため、これらのヘルパーを使うには小さなアダプターを自分で書き、テストを実行する前に `setTestDatabase()` に渡す必要があります。`useDatabaseTransactions()` だけは、**モデルが書き込むのと同じ接続を包む**必要があります。`beforeEach` でトランザクションを始めて `afterEach` でロールバックするので、同じファイルに別に開いた 2 本目の接続からは、1 本目の接続での書き込みが見えず、ロールバックもされないからです。`useTruncateTables()` にはこの制約はありません。`DELETE FROM` はその場でコミットされるので、同じデータベースファイルへの接続ならどれを使っても、モデルから見える行を削除できます。アダプターを用意するのが大げさに感じるなら、上の `resetDatabase()` のやり方のほうが簡単で、この問題にもそもそも悩まずに済みます。
 
 ### HTTP テスト
 
-HTTP エンドポイントのテストには TestApp（推奨）または低レベルのコントローラーテストヘルパーを使います。
+HTTP エンドポイントのテストには、TestApp（推奨）か、低レベルのコントローラーテスト用ヘルパーを使います。
 
 ```typescript
 import { describe, it, expect } from 'bun:test'
@@ -434,7 +434,7 @@ describe('UserController', () => {
 })
 ```
 
-低レベルのコントローラーユニットテストには、`createControllerContext` も引き続き使えます。
+コントローラー単体の低レベルなテストには、これまでどおり `createControllerContext` も使えます。
 
 ```typescript
 import { createControllerContext } from '@guren/testing'
@@ -452,13 +452,13 @@ it('ユーザー一覧を返す', async () => {
 
 ### ベストプラクティス
 
-1. **ほとんどのテストには TestApp を使う** - ミドルウェアとルーティング一式を含む、最もリアルなテスト環境になります。
-2. **beforeEach でフェイクをリセットする** - 常にクリーンな状態から始めましょう。
-3. **具体的なアサーションを使う** - 可能な限り `assertSent` より `assertSentWith` を優先しましょう。
-4. **失敗ケースをテストする** - エラーシナリオでイベントやメールが送信されないことを検証しましょう。
-5. **テストを分離する** - 各テストは独立している必要があります。
-6. **認証には `actingAs()` を使う** - テストでセッションデータを手動設定するのは避けましょう。
-7. **コンテナフェイクを使う** - import のモックではなく、`container.fake()` でサービスを置き換えましょう。
+1. **ほとんどのテストには TestApp を使う**: ミドルウェアとルーティングをひととおり含むので、いちばん本番に近い環境でテストできます。
+2. **beforeEach でフェイクをリセットする**: 毎回きれいな状態から始めます。
+3. **具体的なアサーションを使う**: できるだけ `assertSent` より `assertSentWith` を使います。
+4. **失敗するケースもテストする**: エラーになる場面で、イベントやメールが送られないことを確かめます。
+5. **テストを互いに切り離す**: どのテストも、ほかのテストに依存しないようにします。
+6. **認証には `actingAs()` を使う**: テストの中でセッションのデータを手で設定するのは避けます。
+7. **コンテナのフェイクを使う**: import をモックするのではなく、`container.fake()` でサービスを置き換えます。
 
 ## テストの実行
 
@@ -480,4 +480,4 @@ bunx guren make:test posts/PostController --runner bun
 ```
 
 > [!NOTE]
-> サーバーサイドのコードは Bun ネイティブのテストランナー（`bun:test`）を使います。フロントエンドや React コンポーネントは jsdom を使う Vitest でテストします。フレームワークコードは Bun の高速なフィードバックを、SPA テストはリアルな DOM 挙動を、それぞれ得られるようランナーを使い分けています。
+> サーバー側のコードは、Bun 標準のテストランナー（`bun:test`）でテストします。フロントエンドや React コンポーネントは、jsdom を使う Vitest でテストします。ランナーを使い分けているのは、フレームワークのコードでは Bun の速いフィードバックを、SPA のテストでは実際に近い DOM の動きを得るためです。

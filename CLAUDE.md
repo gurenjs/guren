@@ -567,8 +567,9 @@ Available AI-powered skills that Claude can use automatically:
 |-------|---------------|---------|
 | `dev-workflow` | "build", "test", "typecheck", "pr check", "e2e", "dev server" | Build, test (smart/full), type check, pre-PR validation, E2E tests, dev server |
 | `rfc-authoring` | "write an RFC", "propose a breaking change" | Draft an RFC per `contributing/rfc-process.md` |
+| `docs-writing` | editing `docs/en` or `docs/ja`, translating a page, a course chapter or exercise | Write docs that read as native prose: `.claude/rules/prose.md` in order, the load-bearing strings, the audits |
 
-Only these two. The application-facing skills live in the harness template under
+Only these three. The application-facing skills live in the harness template under
 `packages/cli/templates/agent/core/skills/` and ship to scaffolded apps, where
 `bunx guren` resolves and framework sources do not. For framework API questions
 here, read `docs/en/guides/` and `packages/*/src` directly.
