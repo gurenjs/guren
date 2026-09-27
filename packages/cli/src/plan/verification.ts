@@ -327,6 +327,26 @@ export function recordedRedRuns(records: Iterable<PlanStepRecord>): Map<string, 
   return recorded
 }
 
+export type PlanRecordJudgement =
+  | { state: 'verified' }
+  | { state: 'drifted'; files: string[] }
+  | { state: 'outdated' }
+  | { state: 'waiver-withdrawn' }
+  | { state: 'failed' | 'blocked' | 'incomplete' }
+
+/**
+ * What a step's record says now, in the terms {@link recordStillHolds} and {@link recordDrift}
+ * decide by: taken against another digest it is `outdated`, and a verified one that stands on its
+ * files but not on the decision log is `waiver-withdrawn`.
+ */
+export function judgeStepRecord(record: PlanStepRecord, digest: string, hashes: ReadonlyMap<string, string | null>, waived: ReadonlySet<string>): PlanRecordJudgement {
+  if (recordStillHolds(record, digest, hashes, waived)) return { state: 'verified' }
+  const files = recordDrift(record, digest, hashes, waived)
+  if (files.length > 0) return { state: 'drifted', files }
+  if (record.planDigest !== digest) return { state: 'outdated' }
+  return record.outcome === 'verified' ? { state: 'waiver-withdrawn' } : { state: record.outcome }
+}
+
 /** Verified against this plan digest, every fingerprinted file hashing as it did: what a record must be to count at all. */
 export function recordStands(record: PlanStepRecord, digest: string, hashes: ReadonlyMap<string, string | null>): boolean {
   return record.outcome === 'verified' && record.planDigest === digest && changedFiles(record, hashes).length === 0

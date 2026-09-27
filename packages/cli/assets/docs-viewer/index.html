@@ -308,10 +308,9 @@ body.resizing { cursor: col-resize; user-select: none; }
 .steps li.active .step-id { font-weight: 700; }
 .steps .badge { font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--plan); border: 1px solid var(--plan); border-radius: 2px; padding: 0 0.3rem; }
 .state-verified { color: var(--pass); }
-.state-drifted, .state-incomplete, .state-blocked { color: var(--warn); }
+.state-drifted, .state-incomplete, .state-blocked, .state-waiver-withdrawn { color: var(--warn); }
 .state-failed { color: var(--fail); }
 .state-outdated, .state-not-run { color: var(--text-muted); }
-.state-waiver-withdrawn { color: var(--warn); }
 
 .frontmatter {
   background: var(--raised); border: 1px solid var(--border); border-radius: 4px;
@@ -439,7 +438,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 
   // ---- state ----
   let data = { nodes: [], edges: [], docs: [], tests: [], planPages: [], plans: [] }
-  let planByNode = new Map()
   let testFiles = new Map()
   let docByPath = new Map()
   let nodes = [], edges = [], byId = new Map(), neighbors = new Map()
@@ -475,6 +473,12 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     return node
   }
   const svgEl = (tag) => document.createElementNS(NS, tag)
+  const toGraph = (clientX, clientY) => {
+    const pt = svg.createSVGPoint()
+    pt.x = clientX; pt.y = clientY
+    return pt.matrixTransform(svg.getScreenCTM().inverse())
+  }
+  const planNodeId = (plan) => 'plan:' + plan.file
   const kindOf = (n) =>
     n.kind === 'openplan' ? 'plan' : n.kind === 'doc' && (n.docType === 'spec' || n.docType === 'plan') ? n.docType : n.kind
   const worstVerdict = (verdicts) =>
@@ -534,8 +538,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     const edgesOut = view.edges.slice()
     const ids = new Set(nodesOut.map((n) => n.id))
     for (const plan of data.plans) {
-      const id = 'plan:' + plan.file
-      nodesOut.push({ id, kind: 'openplan', label: plan.title, standing: plan.standing })
+      const id = planNodeId(plan)
+      nodesOut.push({ id, kind: 'openplan', label: plan.title, plan })
       for (const name of plan.entities) {
         const entity = 'entity:' + name
         if (!ids.has(entity)) { nodesOut.push({ id: entity, kind: 'entity', label: name }); ids.add(entity) }
@@ -559,7 +563,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     data = newData
     docByPath = new Map(data.docs.map((d) => [d.path, d]))
     testFiles = new Map(data.tests.map((t) => [t.id, t.files]))
-    planByNode = new Map(data.plans.map((plan) => ['plan:' + plan.file, plan]))
     const view = withOpenPlans(groupTests(data.nodes, data.edges))
     nodes = view.nodes.map((n) => {
       const old = previous.get(n.id)
@@ -630,7 +633,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
         const tag = svgEl('text')
         tag.setAttribute('class', 'kindtag')
         tag.setAttribute('dy', '3')
-        tag.textContent = n.kind === 'openplan' ? n.standing : n.docType
+        tag.textContent = n.kind === 'openplan' ? n.plan.standing : n.docType
         g.append(tag)
       }
       if (n.members) {
@@ -748,9 +751,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     g.addEventListener('pointermove', (ev) => {
       if (dragged !== n) return
       moved = true
-      const pt = svg.createSVGPoint()
-      pt.x = ev.clientX; pt.y = ev.clientY
-      const p = pt.matrixTransform(svg.getScreenCTM().inverse())
+      const p = toGraph(ev.clientX, ev.clientY)
       n.x = p.x; n.y = p.y
     })
     const finish = () => { if (dragged === n) { dragged = null; svg.classList.remove('dragging') } }
@@ -932,7 +933,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     const node = byId.get(id)
     if (!node) return id
     if (node.members) return node.label + ' ×' + node.members.length
-    return node.kind === 'openplan' ? node.label + ' (' + node.standing + ')' : node.label
+    return node.kind === 'openplan' ? node.label + ' (' + node.plan.standing + ')' : node.label
   }
 
   /** A titled list of edges, reading `endpoint` ('from' | 'to') off each. */
@@ -972,7 +973,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       const button = el('button')
       button.append(el('span', '', plan.title), el('span', 'progress', plan.standing + ' · ' + verifiedCount(plan) + '/' + plan.steps.length))
       button.title = plan.file
-      button.addEventListener('click', () => openPanel('plan:' + plan.file))
+      button.addEventListener('click', () => openPanel(planNodeId(plan)))
       host.append(button)
     }
   }
@@ -1018,11 +1019,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     if (plan.reason) front.append(el('p', 'plan-reason', plan.reason))
     for (const reason of plan.unreadable || []) front.append(el('p', 'plan-reason', reason))
     const grid = el('div', 'meta-grid')
-    metaRow(grid, 'approved', plan.approval ? actorLine({ by: plan.approval.by, at: plan.approval.at }) : '—')
+    metaRow(grid, 'approved', plan.approval ? actorLine(plan.approval) : '—')
     front.append(el('p', 'panel-label panel-label-spaced', 'Plan'))
     front.append(grid)
     if (plan.entities.length > 0) {
-      relationSection(front, 'Entities', true, plan.entities.map((name) => ({ from: 'plan:' + plan.file, to: 'entity:' + name, verdict: 'pass' })), 'to')
+      relationSection(front, 'Entities', true, plan.entities.map((name) => ({ from: planNodeId(plan), to: 'entity:' + name, verdict: 'pass' })), 'to')
     }
     if (plan.waivers.length > 0) {
       front.append(el('p', 'panel-label panel-label-spaced', 'Waivers'))
@@ -1030,7 +1031,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       for (const waiver of plan.waivers) {
         const li = relationItem(waiver.elementId, 'warn', null)
         li.classList.add('rel-member')
-        li.append(el('span', 'rel-files', waiver.reason + ' (' + actorLine({ by: waiver.by, at: waiver.at }) + ')'))
+        li.append(el('span', 'rel-files', waiver.reason + ' (' + actorLine(waiver) + ')'))
         list.append(li)
       }
       front.append(list)
@@ -1156,8 +1157,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     selected = id
     content.textContent = ''
     const doc = docByPath.get(id)
-    const plan = planByNode.get(id)
-    content.append(doc ? buildDocDetail(doc) : plan ? buildPlanDetail(plan) : buildSatelliteDetail(node))
+    content.append(doc ? buildDocDetail(doc) : node.plan ? buildPlanDetail(node.plan) : buildSatelliteDetail(node))
     nodeEls.forEach(({ n, g }) => g.classList.toggle('selected', n.id === id))
     panel.classList.add('open')
     panel.setAttribute('aria-hidden', 'false')
@@ -1246,11 +1246,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   const ZOOM_STEP = 1.25
   const view = { x: 0, y: 0, w: W, h: H }
   const applyView = () => svg.setAttribute('viewBox', view.x + ' ' + view.y + ' ' + view.w + ' ' + view.h)
-  const toGraph = (clientX, clientY) => {
-    const pt = svg.createSVGPoint()
-    pt.x = clientX; pt.y = clientY
-    return pt.matrixTransform(svg.getScreenCTM().inverse())
-  }
   /** Screen pixels per graph unit, for turning a pointer or wheel delta into a pan. */
   const pixelsPerUnit = () => svg.getScreenCTM().a
   function zoomAt(point, factor) {
@@ -1294,27 +1289,28 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   svg.addEventListener('pointerdown', (ev) => {
     if (ev.target !== svg || ev.button !== 0) return
     try { svg.setPointerCapture(ev.pointerId) } catch {}
-    panning = { x: ev.clientX, y: ev.clientY, viewX: view.x, viewY: view.y, moved: false }
+    panning = { x: ev.clientX, y: ev.clientY, viewX: view.x, viewY: view.y, scale: pixelsPerUnit(), moved: false }
   })
   svg.addEventListener('pointermove', (ev) => {
     if (!panning) return
-    if (ev.buttons === 0) { panning = null; svg.classList.remove('dragging'); return }
+    if (ev.buttons === 0) return stopPan()
     const dx = ev.clientX - panning.x, dy = ev.clientY - panning.y
     if (!panning.moved && Math.hypot(dx, dy) < 3) return
     panning.moved = true
     svg.classList.add('dragging')
-    const scale = pixelsPerUnit()
-    view.x = panning.viewX - dx / scale
-    view.y = panning.viewY - dy / scale
+    view.x = panning.viewX - dx / panning.scale
+    view.y = panning.viewY - dy / panning.scale
     applyView()
   })
-  const endPan = () => {
-    if (panning && !panning.moved) closePanel()
+  const stopPan = () => {
     panning = null
     svg.classList.remove('dragging')
   }
-  svg.addEventListener('pointerup', endPan)
-  svg.addEventListener('pointercancel', () => { panning = null; svg.classList.remove('dragging') })
+  svg.addEventListener('pointerup', () => {
+    if (panning && !panning.moved) closePanel()
+    stopPan()
+  })
+  svg.addEventListener('pointercancel', stopPan)
   document.getElementById('zoom-in').addEventListener('click', () => zoomBy(1 / ZOOM_STEP))
   document.getElementById('zoom-out').addEventListener('click', () => zoomBy(ZOOM_STEP))
   document.getElementById('zoom-fit').addEventListener('click', fitView)

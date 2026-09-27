@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { readViewerPlans } from '../src/docs-viewer-plans'
+import { discoverPlanFiles } from '../src/plan-check'
 import { planHash } from '../src/plan/identity'
 import { renderedPlanHash, renderPlanHtml } from '../src/plan/render'
 import { PlanDraftSchema, PlanSchema } from '../src/plan/schema'
@@ -26,13 +27,18 @@ function record(plan: Parameters<typeof planDigest>[0], files: Record<string, st
   }
 }
 
+/** The plans as the viewer's payload reads them: discovery shared with the page lookup. */
+async function readPlans(dir: string): ReturnType<typeof readViewerPlans> {
+  return readViewerPlans(dir, (await discoverPlanFiles(dir)).files)
+}
+
 describe('readViewerPlans', () => {
   it('shows a draft with every step not run and the commands that approve it', async () => {
     const workspace = await createTempWorkspace('guren-cli-viewer-plans-draft-')
     try {
       await writeWorkspaceFiles(workspace.dir, { 'docs/plans/comments.plan.json': JSON.stringify(loadCommentsPlan()) })
 
-      const { open, hashes } = await readViewerPlans(workspace.dir)
+      const { open, hashes } = await readPlans(workspace.dir)
 
       expect(open).toHaveLength(1)
       const [plan] = open
@@ -85,7 +91,7 @@ describe('readViewerPlans', () => {
         }),
       })
 
-      const [read] = (await readViewerPlans(dir)).open
+      const [read] = (await readPlans(dir)).open
 
       expect(read.standing).toBe('approved')
       expect(read.approval?.by).toBe('Ada <ada@example.com>')
@@ -113,7 +119,7 @@ describe('readViewerPlans', () => {
         'docs/plans/comments.md': `---\ntype: plan\nclosed: true\nplan_hash: ${hash}\n---\n\n# Comments\n`,
       })
 
-      const { open, hashes } = await readViewerPlans(dir)
+      const { open, hashes } = await readPlans(dir)
 
       expect(open).toEqual([])
       expect(hashes.get('docs/plans/comments/plan.json')).toBe(hash)
@@ -144,7 +150,7 @@ describe('readViewerPlans', () => {
         }),
       })
 
-      const [read] = (await readViewerPlans(dir)).open
+      const [read] = (await readPlans(dir)).open
 
       const step = read.steps.find((entry) => entry.id === first)
       expect(step?.active).toBe(true)
@@ -162,7 +168,7 @@ describe('readViewerPlans', () => {
         'docs/plans/comments.plan.json': JSON.stringify(loadCommentsPlan()),
       })
 
-      const { open } = await readViewerPlans(workspace.dir)
+      const { open } = await readPlans(workspace.dir)
 
       expect(open.map((plan) => [plan.file, plan.standing])).toEqual([
         ['docs/plans/broken.plan.json', 'unreadable'],
@@ -185,7 +191,7 @@ describe('readViewerPlans', () => {
       await approvePlanFile(path)
       await writeFile(path, JSON.stringify({ ...document, title: 'Comments, revised' }))
 
-      const [read] = (await readViewerPlans(dir)).open
+      const [read] = (await readPlans(dir)).open
 
       expect(read.standing).toBe('unapproved')
       expect(read.next).toEqual(['bunx guren plan:approve docs/plans/comments.plan.json'])
