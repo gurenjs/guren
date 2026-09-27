@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 
-import { acceptanceIdNamesEntity, extractAcceptanceCitations, scanAcceptanceTests } from '../src/docs-acceptance'
+import { acceptanceIdEntity, extractAcceptanceCitations, scanAcceptanceTests } from '../src/docs-acceptance'
 import { runDocsCheck } from '../src/docs-check'
 import { buildDocsGraphReport } from '../src/docs-graph'
 import { createTempWorkspace, writeWorkspaceFiles, type TempWorkspace } from './helpers'
@@ -17,12 +17,31 @@ describe('extractAcceptanceCitations', () => {
   })
 })
 
-describe('acceptanceIdNamesEntity', () => {
+describe('acceptanceIdEntity', () => {
   it('should match the collection segment and the class name, and nothing else', () => {
-    expect(acceptanceIdNamesEntity('AC-comments-4', 'Comment')).toBe(true)
-    expect(acceptanceIdNamesEntity('AC-comment-4', 'Comment')).toBe(true)
-    expect(acceptanceIdNamesEntity('AC-posts-1', 'Comment')).toBe(false)
-    expect(acceptanceIdNamesEntity('AC-4', 'Comment')).toBe(false)
+    expect(acceptanceIdEntity('AC-comments-4', ['Comment'])).toBe('Comment')
+    expect(acceptanceIdEntity('AC-comment-4', ['Comment'])).toBe('Comment')
+    expect(acceptanceIdEntity('AC-posts-1', ['Comment'])).toBeUndefined()
+    expect(acceptanceIdEntity('AC-4', ['Comment'])).toBeUndefined()
+  })
+
+  it('should read the entity a task-named id leads with', () => {
+    expect(acceptanceIdEntity('AC-meetups-host-1', ['Meetup'])).toBe('Meetup')
+    expect(acceptanceIdEntity('AC-meetups-host-1', ['Host'])).toBeUndefined()
+    expect(acceptanceIdEntity('AC-Meetup-edit-10', ['Meetup'])).toBe('Meetup')
+  })
+
+  it('should take a name only as whole dash-separated segments followed by more of the id', () => {
+    expect(acceptanceIdEntity('AC-commentsx-1', ['Comment'])).toBeUndefined()
+    expect(acceptanceIdEntity('AC-comments-', ['Comment'])).toBeUndefined()
+    expect(acceptanceIdEntity('AC-comments', ['Comment'])).toBeUndefined()
+  })
+
+  it('should prefer the entity with the longest name the id leads with', () => {
+    expect(acceptanceIdEntity('AC-post-comments-1', ['Post', 'PostComment'])).toBe('PostComment')
+    expect(acceptanceIdEntity('AC-post-comments-1', ['PostComment', 'Post'])).toBe('PostComment')
+    expect(acceptanceIdEntity('AC-posts-edit-1', ['Post', 'PostComment'])).toBe('Post')
+    expect(acceptanceIdEntity('AC-postComments-1', ['Post', 'PostComment'])).toBe('PostComment')
   })
 })
 
@@ -73,6 +92,45 @@ describe('the doc → test relation', () => {
       { from: 'test:AC-comments-1', to: 'entity:Comment', relation: 'verifies', verdict: 'pass' },
       { from: 'test:AC-comments-2', to: 'entity:Comment', relation: 'verifies', verdict: 'warn' },
       { from: 'test:AC-comments-7', to: 'entity:Comment', relation: 'verifies', verdict: 'warn' },
+    ])
+  })
+})
+
+describe('the doc → test relation for task-named ids', () => {
+  let workspace: TempWorkspace
+
+  beforeAll(async () => {
+    workspace = await createTempWorkspace('guren-cli-docs-acceptance-task-')
+    await writeWorkspaceFiles(workspace.dir, {
+      'package.json': '{}',
+      'app/Models/Meetup.ts': 'export class Meetup {}\n',
+      'tests/meetups.test.ts': "test('[AC-meetups-host-1] cited', () => {})\ntest('[AC-meetups-host-2] nobody cites this', () => {})\ntest('[AC-meetups-browse-1] another task', () => {})\n",
+      'docs/entities/Meetup.md': ['---', 'type: entity', 'entities: [Meetup]', '---', '', '# Meetup', '', '## Rules', '', '- A host creates a meetup. (AC-meetups-host-1)', ''].join('\n'),
+    })
+  })
+
+  afterAll(async () => {
+    await workspace.cleanup()
+  })
+
+  it('should warn on every test of the entity its documents skip, whichever task it belongs to', async () => {
+    const results = await runDocsCheck({ cwd: workspace.dir })
+    const byKey = Object.fromEntries(results.map((result) => [result.key, result]))
+
+    expect(byKey['docs-cites:docs/entities/Meetup.md:AC-meetups-host-1']?.status).toBe('pass')
+    expect(byKey['docs-uncited-test:AC-meetups-host-1']).toBeUndefined()
+    expect(byKey['docs-uncited-test:AC-meetups-host-2']?.status).toBe('warn')
+    expect(byKey['docs-uncited-test:AC-meetups-host-2']?.message).toBe('tests/meetups.test.ts carries [AC-meetups-host-2], and documents cite other Meetup behaviours but not this one.')
+    expect(byKey['docs-uncited-test:AC-meetups-browse-1']?.status).toBe('warn')
+  })
+
+  it('should draw a verifies edge from each test to the entity its id leads with', async () => {
+    const report = await buildDocsGraphReport({ cwd: workspace.dir, entity: 'Meetup' })
+
+    expect(report.edges.filter((edge) => edge.relation === 'verifies' && edge.to === 'entity:Meetup')).toEqual([
+      { from: 'test:AC-meetups-browse-1', to: 'entity:Meetup', relation: 'verifies', verdict: 'warn' },
+      { from: 'test:AC-meetups-host-1', to: 'entity:Meetup', relation: 'verifies', verdict: 'pass' },
+      { from: 'test:AC-meetups-host-2', to: 'entity:Meetup', relation: 'verifies', verdict: 'warn' },
     ])
   })
 })
