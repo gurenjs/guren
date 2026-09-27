@@ -17,6 +17,13 @@ Provides the HTTP/MVC runtime: `Application`, `createApp`, app-local `Router`, c
 - Keep Bun-specific APIs isolated so tests and Vitest helpers can stub them (`configureInertiaVitest` relies on these seams)
 - Sync middleware/session changes with the CLI auth scaffolds and `@guren/testing` mocks
 
+- `http/server-lifecycle.ts` owns the process-wide HTTP/Vite slots, Vite adoption,
+  managed asset environment, bounded shutdown, and signal-handler disposal.
+  `Application` sequences startup and keeps its own HTTP handle/address.
+  Check ownership after each asynchronous close before clearing shared state.
+  Startup failures reject to the caller; only signal teardown ends the process.
+  A Vite instance that fails to start must be closed with the same bounded policy.
+
 ## Build & Dev
 - Build with `bun run --cwd packages/server build`
 - When touching asset middleware, keep Bun-only APIs behind runtime checks to allow non-Bun consumers to stub them
