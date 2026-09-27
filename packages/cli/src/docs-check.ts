@@ -182,7 +182,7 @@ async function checkAcceptanceCitations(
           `${ref.path} rule`,
           'warn',
           `The rule "${rule}" cites no acceptance id, so no test is known to verify it.`,
-          `Cite the behaviour that verifies it, as "(AC-<entity>-<n>)", or move the text out of the Rules section of ${ref.path}.`,
+          `Cite the behaviour that verifies it, as "(AC-<collection>-<task>-<n>)", or move the text out of the Rules section of ${ref.path}.`,
           ref.path,
         ),
       )
