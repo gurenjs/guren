@@ -56,11 +56,13 @@ Linted: dashes (`—`, `–`) in prose; ことができます / することが�
 あなたに / いかがでしたか / と言えるでしょう / 探っていきましょう; the shape rules above.
 Also linted since #1110/#1112: English status words and jargon left in running
 prose (verified, drifted, stalled, waiver, advisory, finding, verdict, rubric,
-brief, subagent, baseline, fail-closed, read-only; a gloss in parentheses, a
-「quoted」 output, bold, link text and inline code are exempt); test results in
-colours (緑です / 赤になる); three or more sentences of 12 字 or less in a row;
-自分の役目 / 自分のターミナル; the headings いまいる場所 and 「〜、手で」. In both
-locales, a blockquote prompt in a tutorial or agent-course chapter.
+brief, subagent, baseline, fail-closed, read-only; judged per paragraph, and a
+gloss in parentheses, a 「quoted」 output, bold, link text, a tag and inline
+code are exempt); test results in colours (緑です / 赤になる); 自分の役目 /
+自分のターミナル; the headings いまいる場所 and 「〜、手で」. In both locales, a
+blockquote in a tutorial or agent-course chapter that is not a GitHub alert.
+Chopped sentences are judgment only: no length rule tells 「テストは失敗します。
+このテストが仕様です。」 from a translated chain.
 
 Judgment (the translated-English tells rewrite #767 removed):
 - **Reorder "not X but Y".** 「〜であって、〜ではありません」「〜するものではなく〜です」
@@ -108,7 +110,7 @@ Examples:
 - 悪: `userOrFail()` が証明するのは*誰が*呼んでいるかであり、実行してよいかを決めるものではありません。
   良: `userOrFail()` は呼び出し元が誰かを確かめるだけで、実行する権限があるかまでは判断しません。
 - 悪: ステップは Guren が計画から導きます。誰も書きません。自分の役目は、各コミットを読むことです。
-  良: ステップは人が書くものではなく、Guren が計画から組み立てます。読者は、届いたコミットを順に読んでいきます。
+  良: ステップは Guren が計画から組み立てるので、人が書く必要はありません。読者は、届いたコミットを順に読んでいきます。
 - 悪: 計画の実装中は、エージェントが取り組んでいるステップも検証し、verified でない間は最大 3 回までエージェントを差し戻します。
   良: 計画を実装している間は、取り組んでいるステップの検証も行い、検証が通るまで最大 3 回エージェントに差し戻します。
 - 悪: Guren provides a robust queue system for deferring time-consuming tasks.

@@ -948,7 +948,7 @@ app.auth.useTokens(new DatabaseApiTokenStore(apiTokens))
 .agent({ toolName: 'posts_publish', description: 'Publish a draft post. Only the post\'s author may call it.', readOnlyHint: true })
 ```
 
-`guren check --ci` は `posts.publish` のツールで失敗します。ルートは `readOnlyHint: true` を宣言しているのに、アクションがレコードを書き換えているからです。チェックは `publish` の本体を読んで `Post.forceUpdate` を見つけ、参考扱い (advisory) ではない警告を出します。`--ci` が失敗するにはそれで十分です。この注釈がポリシーと同じくらい重く扱われるのは、2 つの役目を持つからです。クライアントはこれを「人の確認なしに呼んでよい」と読みます。また、第 4 節で見た認可のルールからツールを外すのもこの注釈です。`authorize` を呼んでいないルートに間違った注釈を付けると、あの失敗が出なくなります。そのため、注釈自体もポリシーと同じ基準で確かめられます。
+`guren check --ci` は `posts.publish` のツールで失敗します。ルートは `readOnlyHint: true` を宣言しているのに、アクションがレコードを書き換えているからです。チェックは `publish` の本体を読んで `Post.forceUpdate` を見つけ、参考扱い (advisory) ではない警告を出します。`--ci` が失敗するにはそれで十分です。この注釈は 2 つの役目を持つので、ポリシーと同じくらい重く扱われます。クライアントはこれを「人の確認なしに呼んでよい」と読みます。また、第 4 節で見た認可のルールからツールを外すのもこの注釈です。`authorize` を呼んでいないルートに間違った注釈を付けると、あの失敗が出なくなります。そのため、注釈自体もポリシーと同じ基準で確かめられます。
 
 </details>
 

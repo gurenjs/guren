@@ -9,7 +9,7 @@ The rules live in `.claude/rules/prose.md`. This skill is the order to apply the
 
 ## 1. Before writing
 
-- Read `.claude/rules/prose.md` in full, and `docs/CLAUDE.md` if the page is in a course.
+- Read `.claude/rules/prose.md` and `docs/CLAUDE.md` in full. The latter covers audience and cross-linking for every page, and the tutorial and agent-course conventions.
 - Editing one locale: read the same page in the other locale for meaning. The English page is the source for facts. Neither locale gains a fact the other lacks unless you add it to both.
 - Find what is load-bearing and must not change:
   - `grep -n "<file name>" scripts/smoke/docs-audit.ts`: strings the audit asserts literally.

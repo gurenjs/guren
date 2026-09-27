@@ -12,7 +12,8 @@
 
 ## Tone & Style
 - Concise, active, welcoming. Assume readers understand modern TypeScript tooling
-- Use second-person ("you"). Avoid passive voice and apologetic phrasing
+- Use second-person ("you") in English. Avoid passive voice and apologetic phrasing
+- Japanese drops the subject instead of translating "you" (`.claude/rules/prose.md`)
 - Prefer fenced code blocks with explanations for commands
 
 ## Cross-Linking
