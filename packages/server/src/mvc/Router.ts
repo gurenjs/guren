@@ -692,7 +692,9 @@ export class Router<in M extends string = never> {
   }
 
   mount(app: Hono, options: RouterMountOptions = {}): void {
-    for (const route of this.registry) {
+    // Resolve every chain before touching Hono: a bad later route must not
+    // leave earlier routes mounted when the caller fixes it and retries.
+    const prepared = this.registry.map((route) => {
       const resolvedMiddlewares = this.resolveMiddlewareNames(route.routeMiddlewareNames)
       const handler = isPrototypeHandler(route.handler)
         ? createPrototypeRouteHandler(route, {
@@ -711,6 +713,9 @@ export class Router<in M extends string = never> {
       if (contractMiddleware) chain.push(contractMiddleware)
       if (preflightMiddleware) chain.push(preflightMiddleware)
       chain.push(handler)
+      return { route, chain }
+    })
+    for (const { route, chain } of prepared) {
       mountRoute(app, route.method, route.path, ...chain)
     }
   }

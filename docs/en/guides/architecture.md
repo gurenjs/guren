@@ -124,6 +124,12 @@ export default class AppServiceProvider extends ServiceProvider {
 > }
 > ```
 
+### Boot failures and retries
+
+Concurrent `app.boot()` calls share one attempt. After a failure, another call retries the failed step and continues, preserving completed boot callbacks, route registrars, route mounting, and dev endpoints. Provider registration and boot hooks that already succeeded are also preserved. `app.booted()` waits for the current attempt when one is running.
+
+A rejected hook may have already changed application state or an external service. Guren does not roll back those effects: make the failing hook safe to retry or clean up its partial work. If that is not possible, release any resources it created and construct a fresh application. Retrying does not rerun a successful callback to apply changed options or new routes; use a fresh application for those changes.
+
 ## Routing
 `routes/web.ts` exports a registrar and configures an app-local router:
 

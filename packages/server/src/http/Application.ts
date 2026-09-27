@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { MiddlewareHandler, ExecutionContext } from 'hono'
 import { Router, type RouteDefinition } from '../mvc/Router'
+import { BootSequence } from './boot-sequence'
 import { loadPrototypeFixture, PROTOTYPE_FIXTURE_BINDING, type PrototypeFixtureLoader } from '../mvc/prototype'
 import { Container, mountModuleRoutes, type ServiceProvider, type GurenModule } from '../container'
 import { ProviderManager, type ServiceProviderConstructor } from '../container/ServiceProvider'
@@ -298,7 +299,8 @@ export class Application {
   private readonly cookielessAuthPaths = new Set<string>()
   /** {@link configDefinitions} with where each was listed, which ConfigServiceProvider's errors name. */
   readonly configEntries: ReadonlyArray<ConfiguredDefinition>
-  private routesRegistered = false
+  private routeRegistration?: BootSequence
+  private bootSequence?: BootSequence
   private bootPromise?: Promise<void>
   private manifestPromise?: Promise<AppManifest>
   private bootAttempted = false
@@ -480,18 +482,12 @@ export class Application {
 
   /** Runs the registrars once; `introspect()` stops here, since mounting refuses an unregistered alias it reports. */
   private async registerRoutes(): Promise<void> {
-    if (!this.routesRegistered) {
-      if (this.options.routes) {
-        // Not cleared: routes added directly to app.router before boot() stay.
-        await this.options.routes(this.router)
-      }
-
-      for (const gurenModule of this.options.modules ?? []) {
-        await mountModuleRoutes(this.router, gurenModule)
-      }
-
-      this.routesRegistered = true
-    }
+    // Not cleared: routes added directly to app.router before boot() stay.
+    this.routeRegistration ??= new BootSequence([
+      () => this.options.routes?.(this.router),
+      ...(this.options.modules ?? []).map((gurenModule) => () => mountModuleRoutes(this.router, gurenModule)),
+    ])
+    await this.routeRegistration.run()
   }
 
   /**
@@ -549,9 +545,9 @@ export class Application {
   /**
    * Registers providers, runs the boot callback, mounts routes, boots providers.
    *
-   * Booting twice is a no-op — the first call's promise is reused, concurrent
-   * callers included. A boot that throws is not remembered, so a later call
-   * retries on the partially mounted app rather than starting clean.
+   * Concurrent callers share a boot. On failure, a later call resumes at the
+   * failed step; completed steps stay complete. A throwing hook must undo its
+   * own partial effects or be safe to retry; otherwise construct a fresh app.
    */
   async boot(): Promise<void> {
     // Degrading here, not only in `introspect()`, covers an entry that boots
@@ -568,12 +564,12 @@ export class Application {
       )
     }
 
-    this.bootPromise ??= this.bootOnce()
+    const attempt = this.bootPromise ??= this.bootOnce()
 
     try {
-      await this.bootPromise
+      await attempt
     } catch (error) {
-      this.bootPromise = undefined
+      if (this.bootPromise === attempt) this.bootPromise = undefined
       throw error
     }
   }
@@ -626,24 +622,25 @@ export class Application {
     }
 
     await this.providerManager.registerAll()
-
-    await this.options.boot?.(this.hono)
-
-    await this.mountRoutes()
-    // MCP endpoint (/_guren/mcp): project introspection for AI agents.
-    await this.mountDevEndpoint(
-      isMcpEndpointEnabled(),
-      async () => (await import('../mcp/McpServiceProvider')).McpServiceProvider,
-      'GUREN_MCP=1 but the MCP endpoint could not load — is @guren/cli installed?',
-    )
-    // Docs viewer (/_guren/docs): read-only UI over the OKF docs bundle (RFC 0005).
-    await this.mountDevEndpoint(
-      isDocsViewerEnabled(),
-      async () => (await import('../docs-viewer/DocsViewerServiceProvider')).DocsViewerServiceProvider,
-      'GUREN_DOCS=1 but the docs viewer could not load — is @guren/cli resolvable from this app?',
-    )
-    await this.providerManager.bootAll()
-    this.warnOnUnconfiguredAuth()
+    this.bootSequence ??= new BootSequence([
+      () => this.options.boot?.(this.hono),
+      () => this.mountRoutes(),
+      // MCP endpoint (/_guren/mcp): project introspection for AI agents.
+      () => this.mountDevEndpoint(
+        isMcpEndpointEnabled(),
+        async () => (await import('../mcp/McpServiceProvider')).McpServiceProvider,
+        'GUREN_MCP=1 but the MCP endpoint could not load — is @guren/cli installed?',
+      ),
+      // Docs viewer (/_guren/docs): read-only UI over the OKF docs bundle (RFC 0005).
+      () => this.mountDevEndpoint(
+        isDocsViewerEnabled(),
+        async () => (await import('../docs-viewer/DocsViewerServiceProvider')).DocsViewerServiceProvider,
+        'GUREN_DOCS=1 but the docs viewer could not load — is @guren/cli resolvable from this app?',
+      ),
+      () => this.providerManager.bootAll(),
+      () => this.warnOnUnconfiguredAuth(),
+    ])
+    await this.bootSequence.run()
   }
 
   /**
