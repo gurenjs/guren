@@ -33,6 +33,8 @@ import { ATTACH_ARG, FIELDS_ARG } from './commands/scaffold-options'
 import { routeTypesCommand, codegenCommand, openApiGenerateCommand } from './commands/codegen'
 import { migrateCommand, seedCommand, resetCommand, freshCommand, rollbackCommand, statusCommand } from './commands/database'
 import { introspectCommand } from './commands/introspect'
+import { graphCommand } from './commands/graph'
+import { runtimeErrorsCommand } from './commands/runtime-errors'
 import { planCommand, planRenderCommand, planStatusCommand, planVerifyCommand, planNextCommand, planScaffoldCommand, planApproveCommand, planWaiveCommand, planReviseCommand, planCloseCommand } from './commands/plan'
 import { toolListCommand, toolInspectCommand, toolCallCommand, toolLogCommand, tokenIssueCommand, toolDevCommand } from './commands/tools'
 import { assertDestructiveCommandAllowed } from './commands/destructive-guard'
@@ -1735,6 +1737,8 @@ export const builtinSubCommands = {
   console: consoleCommand,
   dev: devCommand,
   'model:list': modelListCommand,
+  'runtime:errors': runtimeErrorsCommand,
+  graph: graphCommand,
   context: contextCommand,
   introspect: introspectCommand,
   check: checkCommand,

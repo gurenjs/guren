@@ -95,6 +95,8 @@ export const PLAN_COMMAND_CLASSES: Readonly<Record<string, 'generator' | PlanCom
   'schedule:list': 'reads-only',
   'lang:list': 'reads-only',
   context: 'reads-only',
+  'runtime:errors': 'reads-only',
+  graph: 'process',
   check: 'reads-only',
   audit: 'reads-only',
   doctor: 'reads-only',
