@@ -89,6 +89,8 @@ export type RouteSchemaEntry = JsonSchema | { unreadable: string }
 export type RouteEntry = Omit<RouteDefinition, 'schemas' | 'controller' | 'middlewareNames' | 'module'> & {
   module: string | null
   controller?: ControllerRef
+  /** Populated only by graph introspection after matching the actual bound class identity. */
+  bindingSources?: Record<string, { file: string; exportName: string; name: string }>
   /** In the order `mount()` runs them: named, then group-scoped inline, then route-local inline. */
   middleware: MiddlewareEntry[]
   schemas: Partial<Record<'params' | 'query' | 'body' | 'output', RouteSchemaEntry>>

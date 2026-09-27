@@ -10,7 +10,7 @@ import { dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { AppManifest, AttachmentsDescription } from '@guren/server'
 
-import { classNameFromPath, discoverControllerFiles, toPosixRelative } from './discovery'
+import { classNameFromPath, discoverControllerFiles, discoverModelFiles, toPosixRelative } from './discovery'
 import { controllerImportWarning, pickDeclaringFile } from './introspect-controller-file'
 import { DEFAULT_INTROSPECT_TIMEOUT_MS, INTROSPECT_CHILD_BUDGET_MARGIN_MS, type Introspection, type IntrospectionFailure } from './introspect'
 import { bootstrapApplication, resolveMainEntry } from './runtime'
@@ -26,6 +26,7 @@ const LISTEN_GUIDANCE =
 interface IntrospectableApp {
   introspect?: () => Promise<AppManifest>
   router?: {
+    registeredModelBindings?: () => ReadonlyArray<Record<string, { name?: string }>>
     registeredHandlers?: () => ReadonlyArray<{ index: number; controller?: unknown }>
     hasRoute?: (name: string) => boolean
   }
@@ -171,6 +172,35 @@ async function resolveControllers(
   }
 }
 
+async function resolveModelBindings(manifest: AppManifest, app: IntrospectableApp, root: string): Promise<void> {
+  const bindings = app.router?.registeredModelBindings?.()
+  if (!bindings) return
+  const wanted = new Set(bindings.flatMap((entry) => Object.values(entry)))
+  if (wanted.size === 0) return
+  const exportsOf = new Map<unknown, Array<{ file: string; exportName: string }>>()
+  for (const file of await discoverModelFiles(root)) {
+    writeFileSync(scanFile, toPosixRelative(root, file))
+    let mod: Record<string, unknown>
+    try { mod = await import(pathToFileURL(file).href) as Record<string, unknown> } catch {
+      manifest.warnings.push({ code: 'model-import', message: `Could not import ${toPosixRelative(root, file)} for binding identity.` })
+      continue
+    }
+    for (const [exportName, value] of Object.entries(mod)) {
+      if (wanted.has(value as { name?: string })) exportsOf.set(value, [...(exportsOf.get(value) ?? []), { file, exportName }])
+    }
+  }
+  for (const [index, bound] of bindings.entries()) {
+    const route = manifest.routes[index]
+    if (!route) continue
+    for (const [parameter, model] of Object.entries(bound)) {
+      const candidate = pickDeclaringFile(exportsOf.get(model) ?? [], model.name ?? '')
+      if (!candidate || !model.name) continue
+      route.bindingSources ??= Object.create(null) as NonNullable<typeof route.bindingSources>
+      route.bindingSources[parameter] = { file: toPosixRelative(root, candidate.file), exportName: candidate.exportName, name: model.name }
+    }
+  }
+}
+
 async function introspect(root: string): Promise<Introspection> {
   let entry: string
   try {
@@ -202,6 +232,7 @@ async function introspect(root: string): Promise<Introspection> {
   describeUnboundAttachments(manifest, app, loaded.framework)
   loadingApp = false
   await resolveControllers(manifest, app, root, loaded.framework)
+  if (process.argv[4] === 'graph') await resolveModelBindings(manifest, app, root)
   return { status: 'ok', manifest }
 }
 
