@@ -1,10 +1,10 @@
 # 暗号化とハッシュ
 
-Guren には、データの暗号化とパスワードの安全なハッシュ化を行うためのユーティリティが用意されています。
+Guren には、データを暗号化するユーティリティと、パスワードを安全にハッシュ化するユーティリティが入っています。
 
 ## APP_KEY
 
-Guren アプリケーションには必ず `APP_KEY` が要ります。base64 エンコードされた 32 バイトのシークレットで、暗号化と Cookie 署名、トークン署名に使われます。用途ごとのキーは HKDF で個別に導出されるので、`APP_KEY` ひとつで全サブシステムを安全に保護できます。
+Guren アプリケーションには必ず `APP_KEY` を設定します。base64 でエンコードした 32 バイトのシークレットで、暗号化、Cookie の署名、トークンの署名に使います。用途ごとのキーは HKDF でそれぞれ導出するので、`APP_KEY` が 1 つあればすべてのサブシステムを安全に保護できます。
 
 ### キーの生成
 
@@ -16,14 +16,14 @@ bunx guren key:generate
 bunx guren key:generate --write
 ```
 
-`create-guren-app` でプロジェクトをスキャフォールドすると、`APP_KEY` は自動的に生成されます。
+`create-guren-app` でプロジェクトの雛形を作ると、`APP_KEY` も自動で生成されます。
 
 ### キーローテーション
 
-既存の暗号化データやアクティブなセッションを壊さずに `APP_KEY` をローテーションするには:
+暗号化済みのデータや有効なセッションを壊さずに `APP_KEY` をローテーションするには、次の手順を踏みます。
 
-1. 現在の `APP_KEY` の値を `APP_PREVIOUS_KEYS` に移動
-2. 新しい `APP_KEY` を生成
+1. 現在の `APP_KEY` の値を `APP_PREVIOUS_KEYS` に移す
+2. 新しい `APP_KEY` を生成する
 
 ```bash
 # .env
@@ -31,15 +31,15 @@ APP_KEY=base64:<新しいキー>
 APP_PREVIOUS_KEYS=base64:<古いキー>
 ```
 
-旧キーが複数ある場合はカンマ区切りで指定します。Guren は現在のキーを最初に試し、復号や署名検証では旧キーにもフォールバックします。
+古いキーが複数あるときはカンマで区切って並べます。Guren はまず現在のキーを使い、復号や署名の検証に失敗したら古いキーでも試します。
 
 ## 暗号化
 
-`Encrypter` クラスは、機密データを AES-256-GCM で暗号化します。
+機密データの暗号化には `Encrypter` クラスを使います。暗号方式は AES-256-GCM です。
 
 ### セットアップ
 
-32 バイトのキーを渡して Encrypter を作成します。
+32 バイトのキーを渡して Encrypter を作ります。
 
 ```typescript
 import { Encrypter, generateKey } from '@guren/core'
@@ -92,7 +92,7 @@ const key = generateKey()
 const currentKey = encrypter.getKey()
 ```
 
-暗号化キーは環境変数に安全に保存してください。
+暗号化キーは環境変数に入れ、安全に管理してください。
 
 ```bash
 # .env
@@ -113,19 +113,19 @@ try {
 
 ## ハッシュ化
 
-パスワードのハッシュ化は `PasswordHasher` を通して行います。実装は 3 つ同梱されています。
+パスワードのハッシュ化には `PasswordHasher` を使います。実装は次の 3 つが同梱されています。
 
 | クラス | アルゴリズム | ランタイム |
 | --- | --- | --- |
-| `Hash`（`DefaultHasher` のエイリアス） | scrypt を書く（`algorithm: 'argon2'` なら Argon2id）。検証は保存されたハッシュの形式に従う | 両方 |
-| `Argon2Hasher` | `Bun.password`。既定は Argon2id、指定で bcrypt | Bun のみ |
+| `Hash`（`DefaultHasher` のエイリアス） | scrypt で書き込む（`algorithm: 'argon2'` なら Argon2id）。検証は保存済みハッシュの形式に合わせる | 両方 |
+| `Argon2Hasher` | `Bun.password`。既定は Argon2id で、指定すれば bcrypt | Bun のみ |
 | `NodeHasher` | `crypto.scrypt` | すべて |
 
-特別な理由がなければ `Hash` を使ってください。`AuthenticatableModel` と `ModelUserProvider` の既定値であり、両方の形式を検証できる唯一の実装です。`NodeHasher` も両方で動きます。Bun が `node:crypto` を実装しているためです。Bun 専用なのは `Argon2Hasher` だけです。アプリケーションでは直接構築せず、`createApp({ auth: { hasher } })` で 1 回だけ選びます（[認証](/docs/guides/authentication#パスワードハッシャー)を参照）。
+特別な理由がなければ `Hash` を使ってください。`AuthenticatableModel` と `ModelUserProvider` が既定で使うハッシャーで、両方の形式を検証できるのはこれだけです。Bun は `node:crypto` を実装しているので、`NodeHasher` もどちらのランタイムでも動きます。Bun 専用は `Argon2Hasher` だけです。アプリケーションではハッシャーを直接構築せず、`createApp({ auth: { hasher } })` で 1 回だけ選びます（[認証](/docs/guides/authentication#パスワードハッシャー)を参照）。
 
-> `Argon2Hasher` は 2.23.0 まで `ScryptHasher` という名前でした。書き出すのは scrypt ではないので改名しています。旧名も同じクラスを指しますが、非推奨です。
+> `Argon2Hasher` は 2.23.0 まで `ScryptHasher` という名前でした。実際に書き込む形式は scrypt ではないため、名前を変えています。旧名も同じクラスを指しますが、非推奨です。
 
-2 つの形式に互換性はありません。`$scrypt$` のハッシュはどこでも検証できますが、Argon2id は `Bun.password` のある環境でしか検証できません。`Hash` が scrypt を書くのはそのためで、別形式のハッシュは `needsRehash()` で報告します。
+2 つの形式には互換性がありません。`$scrypt$` のハッシュはどの環境でも検証できますが、Argon2id のハッシュは `Bun.password` がある環境でしか検証できません。そのため `Hash` は scrypt で書き込み、もう一方の形式のハッシュを見つけると `needsRehash()` で知らせます。
 
 ### ハッシャーの作成
 
@@ -139,7 +139,7 @@ const hash = new Hash()
 const argon2 = new Hash({ algorithm: 'argon2' })
 ```
 
-アルゴリズムやコストパラメータを固定したい場合は `Argon2Hasher` / `NodeHasher` を直接構築してください。[アルゴリズムオプション](#アルゴリズムオプション)を参照。
+アルゴリズムやコストパラメータを固定したい場合は、`Argon2Hasher` / `NodeHasher` を直接構築してください。詳しくは[アルゴリズムオプション](#アルゴリズムオプション)を参照してください。
 
 ### パスワードのハッシュ化
 
@@ -148,7 +148,7 @@ const hashedPassword = await hash.hash('user-password')
 // $scrypt$N=16384,r=8,p=1$...
 ```
 
-`AuthenticatableModel` を継承したモデルは、これを自動で行います。`create()` に平文の `password` を渡すと、モデルがハッシュ化して `passwordHash` カラムへ格納します。[認証](/docs/guides/authentication)を参照してください。
+`AuthenticatableModel` を継承したモデルでは、この処理が自動で行われます。`create()` に平文の `password` を渡すと、モデルがハッシュ化して `passwordHash` カラムに保存します。詳しくは[認証](/docs/guides/authentication)を参照してください。
 
 ### パスワードの検証
 
@@ -158,9 +158,9 @@ const hashedPassword = await hash.hash('user-password')
 const isValid = await hash.verify(hashedPassword, 'user-password')
 ```
 
-この順序は `Bun.password.verify(plain, hashed)` や単体関数の `verifyPassword(plain, hashed)` とは逆なので、呼び出すたびに確認してください。どちらの引数も `string` なので、入れ替えてもコンパイルは通り、型エラーは出ません。同梱のハッシャーは明らかな入れ替えを実行時に検出し、順序を明示した `TypeError` をスローします。
+この順序は `Bun.password.verify(plain, hashed)` や単体関数の `verifyPassword(plain, hashed)` と逆なので、呼び出すたびに確かめてください。引数はどちらも `string` のため、入れ替えてもコンパイルは通り、型エラーにはなりません。同梱のハッシャーは明らかな入れ替えを実行時に見つけ、正しい順序を示した `TypeError` を投げます。
 
-多くのアプリではこれを直接呼ぶ必要はありません。`AuthManager` を設定していれば、**セッション**ガードが検索と照合をまとめて行います。アカウントが存在しない場合にダミーハッシュを走らせる処理も含まれるので、応答時間からアカウントの有無を判別されずに済みます。
+たいていのアプリでは、これを直接呼ぶ必要はありません。`AuthManager` を設定していれば、**セッション**ガードがユーザーの検索と照合をまとめて行います。アカウントが存在しないときにもダミーのハッシュ計算を走らせるので、応答時間からアカウントの有無を見分けられることもありません。
 
 ```typescript
 const user = await this.auth.guard('web').validate({ email, password })
@@ -169,7 +169,7 @@ if (!user) {
 }
 ```
 
-ガード名は明示してください。`TokenGuard.validate()` はスローします（ベアラートークンは資格情報ベースではないため）。メールとパスワードからトークンを発行するトークン専用 API は、セッションガードか `ModelUserProvider` を明示的に取得する必要があります。
+ガード名は明示してください。ベアラートークンは資格情報で認証する仕組みではないので、`TokenGuard.validate()` は例外を投げます。トークンだけを使う API でメールアドレスとパスワードからトークンを発行するなら、セッションガードか `ModelUserProvider` を明示的に取得してください。
 
 ### 再ハッシュが必要かチェック
 
@@ -179,7 +179,7 @@ if (hash.needsRehash(user.passwordHash)) {
 }
 ```
 
-`needsRehash()` はハッシュに埋め込まれたパラメータとハッシャーの設定値を比較するので、コストファクタを上げたあとに `true` を返します。`Hash` は自分が書かない形式のハッシュにも `true` を返します。セッションガードはログイン成功のたびにこれを呼び、必要ならその場でパスワードを再ハッシュします。
+`needsRehash()` は、ハッシュに埋め込まれたパラメータとハッシャーの設定値を比べます。そのため、コストファクタを上げたあとは `true` を返します。`Hash` の場合は、自分では書き込まない形式のハッシュに対しても `true` を返します。セッションガードはログインに成功するたびにこれを呼び、必要ならその場でパスワードを再ハッシュします。
 
 ## アルゴリズムオプション
 
@@ -213,7 +213,7 @@ const hash = new NodeHasher({
 })
 ```
 
-同じ scrypt 実装は単体関数としても使えます。こちらは**平文が第1引数**で、`PasswordHasher.verify()` とは逆です。
+同じ scrypt の実装は単体の関数としても使えます。こちらは `PasswordHasher.verify()` とは逆に、**平文が第1引数**です。
 
 ```typescript
 import { hashPassword, verifyPassword, needsRehash } from '@guren/core'
@@ -260,11 +260,11 @@ export default class AuthController extends Controller {
 
 ## セキュリティベストプラクティス
 
-1. **平文パスワードを保存しない**: パスワードは保存前に必ずハッシュ化します。
-2. **強度のある APP_KEY を使う**: `bunx guren key:generate --write` で生成します。バージョン管理にはコミットしないでください。
+1. **平文パスワードを保存しない**: パスワードは保存する前に必ずハッシュ化します。
+2. **強度のある APP_KEY を使う**: `bunx guren key:generate --write` で生成し、バージョン管理にはコミットしないでください。
 3. **独自の暗号化を作らない**: 用意されているユーティリティを使います。
-4. **キーを定期的にローテーションする**: ダウンタイムなしで入れ替えるには `APP_PREVIOUS_KEYS` を使います（[キーローテーション](#キーローテーション)を参照）。
-5. **形式の選択は `Hash` に任せる**: どこでも scrypt なので、ローカルの Bun で書いたカラムがデプロイ先でもそのまま検証できます。
+4. **キーを定期的にローテーションする**: `APP_PREVIOUS_KEYS` を使えば、ダウンタイムなしで入れ替えられます（[キーローテーション](#キーローテーション)を参照）。
+5. **形式の選択は `Hash` に任せる**: どの環境でも scrypt で書き込むので、ローカルの Bun で書いたカラムをデプロイ先でもそのまま検証できます。
 
 ## テスト
 

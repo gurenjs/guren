@@ -1,10 +1,10 @@
 # ヘルスチェック
 
-Guren のヘルスチェックは、アプリケーションが依存しているサービスの状態をまとめて監視するための仕組みです。ロードバランサーやオーケストレーター、監視ツール向けに `/health` エンドポイントを公開する用途に使います。
+Guren のヘルスチェックを使うと、アプリケーションが依存しているサービスの状態をまとめて監視できます。ロードバランサーやオーケストレーター、監視ツールから見える `/health` エンドポイントを用意するときに使います。
 
 ## 設定
 
-ヘルスマネージャーを作成し、チェックを登録します。
+ヘルスマネージャーを作り、そこにチェックを登録します。
 
 ```typescript
 import { createHealthManager, DatabaseCheck, RedisCheck, MemoryCheck } from '@guren/core'
@@ -58,7 +58,7 @@ health.register(new RedisCheck(redis, {
 
 ### メモリチェック
 
-プロセスのメモリ使用量を、指定したしきい値と照らして監視します。
+プロセスのメモリ使用量が、指定したしきい値を超えていないかを監視します。
 
 ```typescript
 import { MemoryCheck } from '@guren/core'
@@ -70,14 +70,14 @@ health.register(new MemoryCheck({
 }))
 ```
 
-メモリチェックはヒープ使用量に基づいてステータスを返します。
-- **healthy**（正常）: しきい値未満
-- **degraded**（機能低下）: しきい値以上、危険値未満
+メモリチェックは、ヒープの使用量に応じて次のステータスを返します。
+- **healthy**（正常）: 警告しきい値未満
+- **degraded**（機能低下）: 警告しきい値以上、危険しきい値未満
 - **unhealthy**（異常）: 危険しきい値以上
 
 ### キャッシュチェック
 
-`CacheStore` にキーをひとつ書き込み、読み戻して削除します。渡すのはマネージャではなくストア本体です（`CacheManager` の `cache.store()`、または自作のストア）。
+`CacheStore` にキーを 1 つ書き込み、読み戻してから削除します。コンストラクタには、マネージャではなくストア本体（`CacheManager` の `cache.store()`、または自作のストア）を渡してください。
 
 ```typescript
 import { CacheCheck } from '@guren/core'
@@ -89,11 +89,11 @@ health.register(new CacheCheck(cache.store(), {
 }))
 ```
 
-旧来の `get` / `put` / `forget` を持つオブジェクトはコンストラクタの型に合わなくなり、実行時にはチェックが `unhealthy` を返します。呼び出すメソッドがそこに無いためです。`StorageCheck` も同様に `StorageDriver` を受け取り、その `put` は保存先のパスを返す必要があります。
+以前の `get` / `put` / `forget` の形で書いたオブジェクトは、コンストラクタの型に合わないのでコンパイルが通りません。実行した場合も、チェックが呼び出すメソッドが存在しないため `unhealthy` になります。`StorageCheck` も同じように `StorageDriver` を受け取り、その `put` は保存先のパスを返す必要があります。
 
 ### ストレージチェック
 
-`StorageDriver` にファイルをひとつ書き込み、読み戻して削除します。渡すのはマネージャではなくディスク本体です（`StorageManager` の `storage.disk()`、または自作のドライバ）。
+`StorageDriver` にファイルを 1 つ書き込み、読み戻してから削除します。コンストラクタには、マネージャではなくディスク本体（`StorageManager` の `storage.disk()`、または自作のドライバ）を渡してください。
 
 ```typescript
 import { StorageCheck } from '@guren/core'
@@ -110,7 +110,7 @@ health.register(new StorageCheck(storage.disk(), {
 
 ### CustomCheckの使用
 
-コールバック関数を渡してチェックを作れます。
+`customCheck()` にコールバック関数を渡すと、その場でチェックを作れます。
 
 ```typescript
 import { customCheck } from '@guren/core'
@@ -142,7 +142,7 @@ health.register(customCheck('queue-depth', async () => {
 
 ### HealthCheckクラスの拡張
 
-使い回すチェックは、基底クラスを継承して書きます。
+何度も使うチェックは、基底クラスの `HealthCheck` を継承したクラスとして書きます。
 
 ```typescript
 import { HealthCheck, CheckResult } from '@guren/core'
@@ -190,7 +190,7 @@ health.register(new ExternalServiceCheck(
 
 ## チェックオプション
 
-チェックを登録する際にオプションを設定できます。
+チェックを登録するときに、オプションを指定できます。
 
 ```typescript
 health.register(check, {
@@ -201,8 +201,8 @@ health.register(check, {
 
 ### クリティカル vs 非クリティカルチェック
 
-- **クリティカルチェック**: 異常（`unhealthy`）になると、全体のステータスも `unhealthy` になります
-- **非クリティカルチェック**: 異常になると、全体のステータスは `degraded`（機能低下）になります
+- **クリティカルなチェック**: 異常（`unhealthy`）になると、全体のステータスも `unhealthy` になります
+- **クリティカルでないチェック**: 異常になっても、全体のステータスは `degraded`（機能低下）にとどまります
 
 ```typescript
 // データベースはクリティカル - なしではアプリが動作しない
@@ -214,7 +214,7 @@ health.register(new RedisCheck(redis), { critical: false })
 
 ## ヘルスレポート
 
-ヘルスチェックはレポートオブジェクトを返します。
+`health.check()` を呼ぶと、次のようなレポートオブジェクトが返ります。
 
 ```typescript
 const report = await health.check()
@@ -248,7 +248,7 @@ const dbResult = await health.getCheck('database')
 
 ## HTTPミドルウェア
 
-組み込みのミドルウェアで、ヘルスエンドポイントを公開できます。
+組み込みのミドルウェアをルートに登録すると、ヘルスチェック用のエンドポイントを公開できます。
 
 ```typescript
 import { createHealthManager } from '@guren/core'
@@ -271,7 +271,7 @@ router.get('/health/simple', health.middleware({ detailed: false }))
 
 ### レスポンス形式
 
-**詳細レスポンス（healthy/degradedは200 OK、unhealthyは503）：**
+**詳細レスポンス（`healthy` と `degraded` は 200 OK、`unhealthy` は 503）：**
 
 ```json
 {
@@ -313,7 +313,7 @@ router.get('/health/simple', health.middleware({ detailed: false }))
 
 ### ヘルスチェック実行
 
-コマンドラインからヘルスチェックを実行します。
+ヘルスチェックはコマンドラインからも実行できます。
 
 ```bash
 # すべてのヘルスチェックを実行
@@ -399,9 +399,9 @@ router.get('/health/ready', health.middleware({
 
 ## ベストプラクティス
 
-1. **liveness と readiness を分ける** - `/health/live` は基本チェック、`/health/ready` は完全なチェック用
-2. **データベースはクリティカルにする** - 通常、これなしではアプリが動きません
-3. **チェックは速く終わらせる** - タイムアウトを適切に設定し、時間のかかるチェックは避ける
-4. **メタデータを添える** - 関連するメトリクスがあるとデバッグが楽になります
-5. **オーケストレーターから使う** - Kubernetes や Docker はコンテナの健全性判定にこのエンドポイントを使えます
-6. **機能低下（degraded）を監視する** - 異常（unhealthy）に落ちる前に、機能低下の段階でアラートを出します
+1. **liveness と readiness を分ける**: `/health/live` では基本的なチェックだけを、`/health/ready` ではすべてのチェックを実行します。
+2. **データベースはクリティカルにする**: たいていのアプリは、データベースが無いと動きません。
+3. **チェックは速く終わらせる**: タイムアウトを適切に設定し、時間のかかるチェックは避けてください。
+4. **メタデータを添える**: 関連するメトリクスを入れておくと、デバッグが楽になります。
+5. **オーケストレーターから使う**: Kubernetes や Docker は、このエンドポイントでコンテナの健全性を判定できます。
+6. **機能低下（`degraded`）を監視する**: 異常（`unhealthy`）になる前の、機能低下の段階でアラートを出します。
