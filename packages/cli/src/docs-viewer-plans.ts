@@ -1,0 +1,162 @@
+/**
+ * The plans half of the docs viewer's payload (RFC 0030 §7, the docs viewer amendment): every
+ * plan not closed at its current hash, with its approval, its derived steps and their records.
+ * Plan JSON, approvals, the decision log, `.guren/plans/` and the files a record fingerprinted
+ * only: the payload is rebuilt on a poll, so nothing here imports the application.
+ */
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+
+import { isConfirmedApiOnlyApp } from './app-surface'
+import { toPosixRelative } from './discovery'
+import { discoverPlanFiles } from './plan-check'
+import { readPlanFile } from './plan-render'
+import { describeUnapproved, readPlanApprovalStanding } from './plan/approvals'
+import { planDocClosedHash, planDocPath, touchedModels } from './plan/close-docs'
+import { planHash } from './plan/identity'
+import { hasBaseline, type Plan } from './plan/schema'
+import { planDigest, planSlug, readPlanState, type PlanStepRecord } from './plan/state'
+import { describePlanTask, derivePlanTasks, listPlanSteps } from './plan/tasks'
+import { hashFiles, readPlanWaivers, recordDrift, recordStillHolds } from './plan/verification'
+
+export type DocsViewerPlanStanding = 'draft' | 'approved' | 'unapproved' | 'baseline-removed' | 'unreadable'
+
+/** `outdated`: a record taken against another version of the plan, which counts for nothing now. */
+export type DocsViewerStepState = 'verified' | 'drifted' | 'failed' | 'blocked' | 'incomplete' | 'outdated' | 'not-run'
+
+export interface DocsViewerPlanStep {
+  id: string
+  task: string
+  kind: string
+  state: DocsViewerStepState
+  ranAt?: string
+  /** `drifted` only: the fingerprinted files that changed since the step verified. */
+  changed?: string[]
+  /** The step `plan:next` marked, which the Stop hook verifies on every stop. */
+  active?: boolean
+  stall?: { at: string; reason: string }
+}
+
+export interface DocsViewerOpenPlan {
+  slug: string
+  /** App-relative, POSIX separators. */
+  file: string
+  title: string
+  standing: DocsViewerPlanStanding
+  /** Why the plan cannot be judged or approved as it stands. */
+  reason?: string
+  approval?: { at: string; by?: string }
+  /** The models it adds, alters or renames. */
+  entities: string[]
+  steps: DocsViewerPlanStep[]
+  waivers: Array<{ elementId: string; reason: string; at: string; by?: string }>
+  /** `.guren/plans/<slug>.state.json` or the decision log would not read. */
+  unreadable?: string[]
+  /** The commands the records say come next, in order; a reading of them, not `plan:next`'s decision. */
+  next: string[]
+  /** `plan:status` for what the viewer does not read: element states and freshness. */
+  status: string
+}
+
+export interface DocsViewerPlans {
+  open: DocsViewerOpenPlan[]
+  /** The current hash of every readable plan, by app-relative file; `null` for a draft. */
+  hashes: Map<string, string | null>
+}
+
+/** A shell word as the reader will paste it. */
+function shellWord(value: string): string {
+  return /^[\w./@-]+$/u.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+function stepState(record: PlanStepRecord | undefined, digest: string, holds: boolean, changed: string[]): DocsViewerStepState {
+  if (record === undefined) return 'not-run'
+  if (holds) return 'verified'
+  if (changed.length > 0) return 'drifted'
+  if (record.planDigest !== digest) return 'outdated'
+  return record.outcome === 'verified' ? 'outdated' : record.outcome
+}
+
+async function closedHash(appRoot: string, slug: string): Promise<string | undefined> {
+  const source = await readFile(join(appRoot, planDocPath(slug)), 'utf8').catch(() => undefined)
+  return source === undefined ? undefined : planDocClosedHash(source)
+}
+
+async function readViewerPlan(appRoot: string, path: string, apiOnly: boolean): Promise<{ open?: DocsViewerOpenPlan; hash?: string | null }> {
+  const file = toPosixRelative(appRoot, path)
+  const slug = planSlug(path)
+  const command = (subcommand: string): string => `bunx guren ${subcommand} ${shellWord(file)}`
+  let plan: Awaited<ReturnType<typeof readPlanFile>>['plan']
+  try {
+    plan = (await readPlanFile(path, appRoot)).plan
+  } catch (error) {
+    const reason = (error as Error).message
+    return { open: { slug, file, title: file, standing: 'unreadable', reason, entities: [], steps: [], waivers: [], next: [], status: command('plan:status') } }
+  }
+  const hash = hasBaseline(plan) ? planHash(plan) : null
+  // A revision approved after the close carries another hash, and is open work again.
+  if (hash !== null && (await closedHash(appRoot, slug)) === hash) return { hash }
+
+  const standingRead = await readPlanApprovalStanding(path, plan)
+  const standing: DocsViewerPlanStanding = standingRead?.state ?? 'draft'
+  const digest = planDigest(plan)
+  const [stateRead, log] = await Promise.all([readPlanState(appRoot, slug), readPlanWaivers(path, plan)])
+  const records = stateRead.state?.steps ?? {}
+  const hashes = await hashFiles(appRoot, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
+  const active = stateRead.state?.active?.plan === file ? stateRead.state.active : undefined
+
+  const steps = listPlanSteps(derivePlanTasks(plan, { apiOnly })).map(({ task, step }): DocsViewerPlanStep => {
+    const record = records[step.id]
+    const holds = record !== undefined && recordStillHolds(record, digest, hashes, log.waived)
+    const changed = record && !holds ? recordDrift(record, digest, hashes, log.waived) : []
+    const marked = active?.step === step.id
+    return {
+      id: step.id,
+      task: describePlanTask(task.title),
+      kind: step.kind,
+      state: stepState(record, digest, holds, changed),
+      ...(record ? { ranAt: record.ranAt } : {}),
+      ...(changed.length > 0 ? { changed } : {}),
+      ...(marked ? { active: true } : {}),
+      ...(marked && active?.stalled ? { stall: { at: active.stalled.at, reason: active.stalled.reason } } : {}),
+    }
+  })
+
+  let next: string[] = []
+  let reason: string | undefined
+  if (standingRead === undefined) next = [command('plan:render'), command('plan:approve')]
+  else if (standingRead.state === 'unapproved') next = [command('plan:approve')]
+  else if (standingRead.state === 'approved') next = [command(steps.every((step) => step.state === 'verified') ? 'plan:close' : 'plan:next')]
+  else reason = describeUnapproved(file, standingRead, 'no step of it is handed out')
+
+  const unreadable = [stateRead.unreadable, log.unreadable].filter((entry): entry is string => entry !== undefined)
+  return {
+    hash,
+    open: {
+      slug,
+      file,
+      title: plan.title,
+      standing,
+      ...(reason ? { reason } : {}),
+      ...(standingRead?.state === 'approved'
+        ? { approval: { at: standingRead.approval.approvedAt, ...(standingRead.approval.approvedBy ? { by: standingRead.approval.approvedBy } : {}) } }
+        : {}),
+      entities: touchedModels(plan as Plan).map((model) => model.name),
+      steps,
+      waivers: [...log.waivers.values()].map(({ elementId, reason: why, at, by }) => ({ elementId, reason: why, at, ...(by ? { by } : {}) })),
+      ...(unreadable.length > 0 ? { unreadable } : {}),
+      next,
+      status: command('plan:status'),
+    },
+  }
+}
+
+export async function readViewerPlans(appRoot: string): Promise<DocsViewerPlans> {
+  const { files } = await discoverPlanFiles(appRoot)
+  if (files.length === 0) return { open: [], hashes: new Map() }
+  const apiOnly = await isConfirmedApiOnlyApp(appRoot).catch(() => false)
+  const read = await Promise.all(files.map(async (path) => ({ file: toPosixRelative(appRoot, path), ...(await readViewerPlan(appRoot, path, apiOnly)) })))
+  const hashes = new Map<string, string | null>()
+  for (const entry of read) if (entry.hash !== undefined) hashes.set(entry.file, entry.hash)
+  return { open: read.flatMap((entry) => (entry.open ? [entry.open] : [])), hashes }
+}

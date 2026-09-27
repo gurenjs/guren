@@ -247,6 +247,23 @@ export function buildPlanPayload(input: RenderPlanInput): PlanPagePayload {
   }
 }
 
+const EMBEDDED_PAYLOAD = /<script type="application\/json" id="plan-data">([\s\S]*?)<\/script>/
+
+/**
+ * The plan hash a page {@link renderPlanHtml} wrote carries: `null` for a draft's, `undefined`
+ * where the page holds no payload this reads, such as one an older template wrote.
+ */
+export function renderedPlanHash(html: string): string | null | undefined {
+  const embedded = EMBEDDED_PAYLOAD.exec(html)?.[1]
+  if (embedded === undefined) return undefined
+  try {
+    const hash = (JSON.parse(embedded) as { planHash?: unknown }).planHash
+    return typeof hash === 'string' || hash === null ? hash : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** The plan as one self-contained HTML document. Pure: nothing but the template is read. */
 export function renderPlanHtml(input: RenderPlanInput): string {
   const payload = escapeJsonForScript(JSON.stringify(buildPlanPayload(input)))

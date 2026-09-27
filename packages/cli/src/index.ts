@@ -108,6 +108,7 @@ export {
   type DocsViewerPlanPage,
   type DocTrustTier,
 } from './docs-viewer'
+export type { DocsViewerOpenPlan, DocsViewerPlanStep, DocsViewerPlanStanding, DocsViewerStepState } from './docs-viewer-plans'
 export {
   generateSpecArtifacts,
   writeSpecArtifacts,

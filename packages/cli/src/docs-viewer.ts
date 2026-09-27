@@ -19,6 +19,8 @@ import { loadDocsGraph, type DocsGraphEdge, type DocsGraphNode } from './docs-gr
 import { escapeHtml, renderDocHtml } from './docs-render'
 import type { AcceptanceTestRef } from './docs-acceptance'
 import { planDocClosedHashIn, planDocPath, readPlanBlocks } from './plan/close-docs'
+import { renderedPlanHash } from './plan/render'
+import { readViewerPlans, type DocsViewerOpenPlan } from './docs-viewer-plans'
 import { discoverPlanFiles } from './plan-check'
 import { planOutputPath } from './plan/beside'
 import { planSlug } from './plan/state'
@@ -74,6 +76,8 @@ export interface DocsViewerData {
   tests: AcceptanceTestRef[]
   /** Plans whose page `plan:render` wrote beside them, served at `plans/<slug>`. */
   planPages: DocsViewerPlanPage[]
+  /** Every plan not closed at its current hash, with its steps' records (RFC 0030 §7). */
+  plans: DocsViewerOpenPlan[]
 }
 
 export interface DocsViewerPlanPage {
@@ -82,6 +86,20 @@ export interface DocsViewerPlanPage {
   plan: string
   page: string
   doc: string
+  /** The page carries another hash than the plan's current one; a draft's page is never judged. */
+  stale?: boolean
+}
+
+/** Marks each page rendered at another hash than its plan's; one that will not read is left unjudged. */
+async function judgePageFreshness(cwd: string, pages: DocsViewerPlanPage[], hashes: ReadonlyMap<string, string | null>): Promise<DocsViewerPlanPage[]> {
+  return Promise.all(
+    pages.map(async (page) => {
+      const current = hashes.get(page.plan)
+      if (typeof current !== 'string') return page
+      const rendered = renderedPlanHash(await readFile(resolve(cwd, page.page), 'utf-8').catch(() => ''))
+      return rendered === undefined || rendered === current ? page : { ...page, stale: true }
+    }),
+  )
 }
 
 /**
@@ -224,8 +242,10 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
       tests,
       graph: { nodes, edges },
     },
-    planPages,
-  ] = await Promise.all([loadDocsGraph(cwd), findPlanPages(cwd)])
+    pagesFound,
+    plans,
+  ] = await Promise.all([loadDocsGraph(cwd), findPlanPages(cwd), readViewerPlans(cwd)])
+  const planPages = await judgePageFreshness(cwd, pagesFound, plans.hashes)
   const staleDocs = new Set(
     checks.filter((check) => check.key.startsWith('docs-stale:')).map((check) => check.filePath),
   )
@@ -262,7 +282,7 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
     }),
   )
 
-  return { nodes, edges, docs, tests, planPages }
+  return { nodes, edges, docs, tests, planPages, plans: plans.open }
 }
 
 /**

@@ -30,7 +30,7 @@ import { listPlanElements, type PlanAcceptance, type PlanDraft, type PlanElement
 import { describeDependency, HELD_STEP_REMEDY, judgeStepContext, stepInProgress, type PlanStepContext, type PlanStepContextElement } from './plan/step-context'
 import { ensurePlanStateIgnored, PLAN_STATE_DIR, planDigest, planSlug, planStatePath, readPlanState, writePlanActiveStep, type PlanActiveStep, type PlanStall, type PlanStepRecord } from './plan/state'
 import { planScaffoldCommandLine, planScaffoldCoverage, planScaffoldMountCommandLine, planScaffoldMounts } from './plan/scaffold'
-import { derivePlanTasks, listPlanSteps, planLaterRelationships, type PlanDerivedStep, type PlanLaterRelationship, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
+import { derivePlanTasks, describePlanTask, listPlanSteps, planLaterRelationships, type PlanDerivedStep, type PlanLaterRelationship, type PlanDerivedTask, type PlanTaskDerivation, type PlanTaskTitle } from './plan/tasks'
 import { validatePlan, type PlanCheckResult } from './plan/validate'
 import { hashFiles, readPlanWaivers, recordDrift, recordStillHolds, type PlanWaiversRead } from './plan/verification'
 import { readStepStart } from './plan/work'
@@ -476,19 +476,6 @@ function indent(text: string, pad: string): string {
   return text.split('\n').join(`\n${pad}`)
 }
 
-function describeTask(title: PlanTaskTitle): string {
-  switch (title.kind) {
-    case 'foundation':
-      return 'foundation'
-    case 'entity':
-      return `entity ${title.name}`
-    case 'story':
-      return `story ${title.name}`
-    case 'cross':
-      return `cross-entity ${title.models.join(', ')}`
-  }
-}
-
 function describeExpectation(behaviour: PlanAcceptance): string {
   const parts: string[] = []
   if (behaviour.expect.status !== undefined) parts.push(`status ${behaviour.expect.status}`)
@@ -573,7 +560,7 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     }
   } else {
     const part = step.part ? ` (part ${step.part.index} of ${step.part.of})` : ''
-    lines.push(`Next: ${step.id}${part}`, `  task: ${describeTask(step.task)} (${step.taskId})`, `  verify: ${step.verify.join(' → ')}`)
+    lines.push(`Next: ${step.id}${part}`, `  task: ${describePlanTask(step.task)} (${step.taskId})`, `  verify: ${step.verify.join(' → ')}`)
     const toImplement = step.elements.filter((element) => !element.waived)
     const waived = step.elements.flatMap((element) => (element.waived ? [`  ${element.id} (${element.section}): ${element.waived.reason} (${element.waived.at})`] : []))
     if (toImplement.length > 0) {
