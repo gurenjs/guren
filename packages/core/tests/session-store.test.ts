@@ -179,13 +179,15 @@ describe('DatabaseSessionStore', () => {
   })
 
   test('should delete rows expiring exactly at the cleanup boundary', async () => {
+    // Inserted directly: `write()` reads its own clock, so its expiry drifts past the boundary.
     const boundary = new Date()
-    await store.write('edge', {}, 0)
+    sqlite.exec(
+      `INSERT INTO sessions (id, data, expires_at) VALUES ('edge', '{}', ${boundary.getTime()}), ('later', '{}', ${boundary.getTime() + 1})`,
+    )
 
-    await store.deleteExpired(new Date(boundary.getTime() + 1))
+    await store.deleteExpired(boundary)
 
-    const rows = sqlite.query('SELECT COUNT(*) as count FROM sessions').get() as { count: number }
-    expect(rows.count).toBe(0)
+    expect(sqlite.query('SELECT id FROM sessions').all()).toEqual([{ id: 'later' }])
   })
 
   test('should rethrow create failures that are not concurrent-create races', async () => {
