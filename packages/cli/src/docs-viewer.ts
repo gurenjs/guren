@@ -7,7 +7,6 @@
  * plans and never joins it into a path.
  */
 import { open, readFile } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { parseDocFrontmatter } from './docs-frontmatter'
 import { localLinkTarget } from './docs-links'
@@ -309,10 +308,4 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
   return { nodes, edges, docs, tests, planPages, plans: plans.open }
 }
 
-/**
- * Absolute path of the viewer's static UI shell. `assets/` sits next to both
- * `src/` and `dist/`, so the relative hop works from source and build alike.
- */
-export function docsViewerAssetPath(): string {
-  return fileURLToPath(new URL('../assets/docs-viewer/index.html', import.meta.url))
-}
+export { composeDocsViewerPage, DOCS_VIEWER_ASSET_DIR, docsViewerAssetPath, docsViewerShell } from './docs-viewer-shell'

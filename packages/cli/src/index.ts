@@ -103,6 +103,7 @@ export {
   buildDocsViewerData,
   docsViewerAssetPath,
   docsViewerPlanPage,
+  docsViewerShell,
   type DocsViewerData,
   type DocsViewerDoc,
   type DocsViewerPlanPage,

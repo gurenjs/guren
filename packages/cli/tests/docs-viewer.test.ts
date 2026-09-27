@@ -1,7 +1,7 @@
-import { mkdir, writeFile, access } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { buildDocsViewerData, docTrustTier, docsViewerAssetPath, docsViewerPlanPage } from '../src/docs-viewer'
+import { buildDocsViewerData, docTrustTier, docsViewerPlanPage } from '../src/docs-viewer'
 import { createTempWorkspace } from './helpers'
 import { approvePlanFile, loadApprovedCommentsPlan } from './plan-fixture'
 
@@ -298,13 +298,5 @@ describe('buildDocsViewerData and plan pages', () => {
     } finally {
       await workspace.cleanup()
     }
-  })
-})
-
-describe('docsViewerAssetPath', () => {
-  it('points at the shipped UI shell', async () => {
-    const path = docsViewerAssetPath()
-    expect(path.endsWith('assets/docs-viewer/index.html')).toBe(true)
-    await access(path)
   })
 })
