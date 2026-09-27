@@ -2,7 +2,8 @@
 
 **Author:** Guren contributors
 **Date:** 2026-09-27
-**Status:** Draft
+**Status:** Accepted (2026-09-27; the deciding maintainer explicitly approved
+the proposal and shortened the standard discussion period before implementation.)
 
 ## Problem
 
@@ -244,6 +245,27 @@ Correlate events to graph routes by method, registered pattern and name. Include
 the runtime session and capture time, and report ambiguity or source changes.
 Never manufacture a snapshot ID for an event captured without a graph snapshot.
 
+### Implementation notes
+
+**Amended in implementation:** graph node IDs use the declaring class symbol
+and source path, with export aliases used for identity resolution. Route nodes
+also carry method, path, name, controller action and registration order. Graph-only introspection
+can ask `Router.registeredModelBindings()` for actual classes and match them
+to exports; ordinary introspection keeps its existing import scope. Older servers
+without that capability leave bindings unresolved. The manifest adds optional
+`bindingSources` without changing its version or existing fields.
+
+The initial readers cover route/controller/model/page nodes and
+handles/binds/renders edges. Other sections explicitly remain unavailable, so
+v0 normally returns exit 1 with useful partial JSON. Static mode currently
+leaves routes unavailable rather than inferring fluent route declarations.
+
+Runtime events carry a correlation status; duplicate or unknown routes are not
+guessed. Their status is the exception status, before a custom renderer changes
+the response. `stop()` resets the application buffer and its session; Guren has
+no general provider disposal method. The existing peer guard's explicit
+`GUREN_ALLOW_UNVERIFIED_PEER` override still applies.
+
 ### 5. Follow-on roadmap
 
 | Stage | Deliverable | Completion boundary |
@@ -324,11 +346,33 @@ usage documentation. Development runtime collection remains explicitly enabled.
 An eventual migration of a consumer requires fixture parity and its own review;
 this RFC does not authorize changing current gate verdicts.
 
-## Open Questions
+## Decision
 
-1. Accept the proposed v0 boundary and command/tool names, including structural
-   errors without free-form exception messages?
-2. Accept one CLI-owned graph schema with adapters over existing readers, keeping
-   `@guren/core` public exports unchanged for v0?
-3. Keep the standard RFC discussion period, or explicitly shorten it by maintainer
-   decision before implementation? Draft status does not authorize skipping it.
+The maintainer accepted the v0 scope, proposed interfaces and CLI-owned schema
+on 2026-09-27, and explicitly shortened the standard discussion period.
+Implementation proceeds in the four reviewable changes listed in section 1.
+
+## Initial implementation measurements
+
+On Bun 1.4.2, ten built-CLI invocations per command against the five-file
+fixture in `packages/cli/tests/application-graph-fixture.ts` produced:
+
+| Command | First invocation | Subsequent p50 | Subsequent p95 | JSON bytes |
+| --- | ---: | ---: | ---: | ---: |
+| context | 427 ms | 138 ms | 149 ms | 636 |
+| graph | 278 ms | 246 ms | 294 ms | 3255 |
+
+Reproduce with `bun scripts/benchmarks/application-graph.ts` after building.
+Every sample starts a CLI process and its registration child. The operating
+system's filesystem cache is not cleared, and context runs before graph; the
+first invocation is not a controlled cold-disk benchmark. No application-wide
+performance or adoption claim follows from this small fixture.
+
+For comparable runs on this fixture, investigate graph p95 above three times
+context p95 or above one second. Payload growth must follow added evidence,
+and remain below the explicit transport limit.
+
+The repeatable failed-request test checks that HTTP and MCP return the same
+retained event and that a cursor does not replay it. A controlled agent repair
+experiment (completion, time, manual copying, calls and cost) remains a rollout
+measurement; no agent-effectiveness result is claimed by this implementation.
