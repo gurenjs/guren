@@ -6,7 +6,7 @@
  * parameterized route, a plan page, looks its slug up among the discovered
  * plans and never joins it into a path.
  */
-import { readFile, stat } from 'node:fs/promises'
+import { open, readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { parseDocFrontmatter } from './docs-frontmatter'
@@ -95,14 +95,22 @@ export interface DocsViewerPlanPage {
 /** A page's embedded hash by path, kept while its mtime holds: a page embeds the whole plan, and the payload is rebuilt on a poll. */
 const renderedHashes = new Map<string, { mtimeMs: number; hash: string | null | undefined }>()
 
+/** Stat and read through one handle, so the mtime cached is the mtime of the bytes read. */
 async function pageHash(path: string): Promise<string | null | undefined> {
-  const mtimeMs = await stat(path).then((stats) => stats.mtimeMs, () => undefined)
-  if (mtimeMs === undefined) return undefined
-  const cached = renderedHashes.get(path)
-  if (cached?.mtimeMs === mtimeMs) return cached.hash
-  const hash = renderedPlanHash(await readFile(path, 'utf-8').catch(() => ''))
-  renderedHashes.set(path, { mtimeMs, hash })
-  return hash
+  const handle = await open(path, 'r').catch(() => undefined)
+  if (handle === undefined) return undefined
+  try {
+    const { mtimeMs } = await handle.stat()
+    const cached = renderedHashes.get(path)
+    if (cached?.mtimeMs === mtimeMs) return cached.hash
+    const hash = renderedPlanHash(await handle.readFile('utf-8'))
+    renderedHashes.set(path, { mtimeMs, hash })
+    return hash
+  } catch {
+    return undefined
+  } finally {
+    await handle.close()
+  }
 }
 
 /** Marks each page rendered at another hash than its plan's; one that will not read is left unjudged. */
