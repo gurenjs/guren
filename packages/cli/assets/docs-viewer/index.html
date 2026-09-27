@@ -424,6 +424,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     for (const e of rawEdges) if (tests.has(e.from)) tests.get(e.from).to.add(e.to)
     const byTargets = new Map()
     for (const [id, test] of tests) {
+      if (test.to.size === 0) continue
       const key = [...test.to].sort().join('\n')
       if (!byTargets.has(key)) byTargets.set(key, [])
       byTargets.get(key).push(id)

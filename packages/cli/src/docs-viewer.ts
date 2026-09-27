@@ -85,7 +85,7 @@ export interface DocsViewerPlanPage {
 
 /**
  * Each discovered plan whose page exists where `plan:render` writes it by default; a page
- * written elsewhere with `-o` is not found. The first plan of a slug two plans share wins.
+ * written elsewhere with `-o` is not found. Of two plans sharing a slug, the first with a page wins.
  */
 async function findPlanPages(cwd: string): Promise<Array<DocsViewerPlanPage & { absolute: string }>> {
   const { files } = await discoverPlanFiles(cwd)

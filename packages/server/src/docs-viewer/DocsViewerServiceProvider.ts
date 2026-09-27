@@ -81,11 +81,14 @@ export class DocsViewerServiceProvider extends ServiceProvider {
 
     // Read on every request, so a page `plan:render` rewrites shows at the next reload.
     hono.get(`${DOCS_VIEWER_PATH}/plans/:slug`, async (ctx) => {
-      const page = await cli.docsViewerPlanPage?.(cwd, ctx.req.param('slug'))
+      if (cli.docsViewerPlanPage === undefined) {
+        return ctx.json({ message: 'This @guren/cli does not serve plan pages; upgrade it' }, 404)
+      }
+      const page = await cli.docsViewerPlanPage(cwd, ctx.req.param('slug'))
       if (page === undefined) {
         return ctx.json({ message: 'No rendered page for this plan (bunx guren plan:render <plan>)' }, 404)
       }
-      return ctx.html(page)
+      return ctx.html(page, 200, { 'Cache-Control': 'no-store' })
     })
 
     // Mermaid is resolved from the *app's* node_modules rather than shipped in
