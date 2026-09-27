@@ -16,7 +16,7 @@ import { resolveInertiaPageFile } from '../inertia-pages'
 import { discoverParsedModels } from '../model-parser'
 import type { ParseCache } from '../parse-cache'
 import { scanTestRequests, testCoverage, type TestRequestScan, type UnresolvedTestRequest } from '../test-requests'
-import { discoverPlanFiles } from './discovery'
+import { discoverSectionFiles } from './discovery'
 import { classDetail, describeActions } from './app-detail'
 import type { PlanAppNames } from './app-state'
 import type { PlanImpactModel, PlanImpactReader, PlanImpactRoute, PlanImpactSources } from './impact'
@@ -93,10 +93,10 @@ export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Prom
   const pageIds = isUnreadable(sections.pages) ? [] : sections.pages.map((page) => page.name)
   const [models, controllerDiscovery, resourceDiscovery, policies, testDiscovery, pages] = await Promise.all([
     impactModels(root),
-    discoverPlanFiles(root, discoverControllerFiles),
-    discoverPlanFiles(root, discoverResourceFiles),
+    discoverSectionFiles(root, discoverControllerFiles),
+    discoverSectionFiles(root, discoverResourceFiles),
     classDetail(root, discoverPolicyFiles),
-    discoverPlanFiles(root, discoverTestFiles),
+    discoverSectionFiles(root, discoverTestFiles),
     Promise.all(pageIds.map(async (id) => ({ id, file: await resolveInertiaPageFile(root, id) }))),
   ])
 

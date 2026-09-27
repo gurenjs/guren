@@ -1,14 +1,13 @@
 import { dirname, resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import {
-  collectFiles,
+  collectProjectFiles,
   discoverModelFiles,
   listAppRoots,
   classNameFromPath,
   toPosixRelative,
   moduleNameFromRelPath,
   IMPORTABLE_EXTENSIONS,
-  NON_SOURCE_DIR_NAMES,
 } from './discovery'
 import { specHeader, compareStrings, mermaidToken, type SpecArtifact } from './spec-artifact'
 
@@ -72,7 +71,7 @@ function locationOf(relPath: string): string {
 type EdgeMap = Map<string, Set<string>>
 
 async function collectDependencyEdges(cwd: string): Promise<EdgeMap> {
-  const files = await collectFiles(cwd, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES)
+  const files = await collectProjectFiles(cwd, IMPORTABLE_EXTENSIONS)
   const sources = await Promise.all(files.map((absPath) => readFile(absPath, 'utf-8')))
 
   const edges: EdgeMap = new Map()

@@ -384,11 +384,8 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     const cwd = resolve(options.cwd ?? process.cwd())
     return {
       cwd,
-      checks: [{
-        ...check('discovery:read', 'Scan incomplete', 'fail', error.message,
-          'Fix the directory or its permissions and run the check again.', toPosixRelative(cwd, error.directory)),
-        evidence: 'none',
-      }],
+      checks: [check('discovery:read', 'Scan incomplete', 'fail', error.message,
+          'Fix the directory or its permissions and run the check again.', toPosixRelative(cwd, error.directory))],
       passCount: 0, warnCount: 0, failCount: 1,
     }
   }

@@ -2,11 +2,10 @@ import { join, resolve } from 'node:path'
 import type { Statement } from '@babel/types'
 import { check, type CheckResult, type CheckStatus } from './check-result'
 import {
-  collectFiles,
+  collectProjectFiles,
   toPosixRelative,
   listModuleNames,
   moduleNameFromRelPath,
-  NON_SOURCE_DIR_NAMES,
   IMPORTABLE_EXTENSIONS,
 } from './discovery'
 import { matchesAnyGlob } from './glob-match'
@@ -50,7 +49,7 @@ export async function runArchCheck(options: RunArchCheckOptions): Promise<CheckR
   // guren.arch.ts pays for nothing; `readonly` because both evaluators share it.
   let importableFilesPromise: Promise<readonly string[]> | null = null
   const importableFiles = (): Promise<readonly string[]> =>
-    (importableFilesPromise ??= collectFiles(cwd, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES))
+    (importableFilesPromise ??= collectProjectFiles(cwd, IMPORTABLE_EXTENSIONS))
 
   // Both evaluators resolve the same imports; each path is stat'ed once per run.
   const probe = cachedFileProbe()

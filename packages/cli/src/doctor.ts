@@ -7,6 +7,7 @@ import {
   discoverDbArtifactFiles,
   discoverModelFiles,
   discoverTestFiles,
+  FileDiscoveryError,
   fileExists,
   findFirstExisting,
   hasControllerTest,
@@ -1290,6 +1291,28 @@ function createManifestPlans(cwd: string, options: { introspect?: boolean } = {}
 export async function getDoctorRuleEvaluations(
   options: { cwd?: string; introspect?: boolean } = {},
   plans?: DoctorManifestPlans,
+): Promise<{
+  cwd: string
+  evaluations: DoctorRuleEvaluation[]
+}> {
+  try {
+    return await collectDoctorRuleEvaluations(options, plans)
+  } catch (error) {
+    if (!(error instanceof FileDiscoveryError)) throw error
+    const fix = 'Fix the directory or its permissions and run doctor again.'
+    return {
+      cwd: resolve(options.cwd ?? process.cwd()),
+      evaluations: [{
+        check: createCheck('discovery:read', 'Scan incomplete', 'fail', error.message, { fix, manualFix: fix }),
+        autofix: null,
+      }],
+    }
+  }
+}
+
+async function collectDoctorRuleEvaluations(
+  options: { cwd?: string; introspect?: boolean },
+  plans: DoctorManifestPlans | undefined,
 ): Promise<{
   cwd: string
   evaluations: DoctorRuleEvaluation[]

@@ -8,7 +8,7 @@
 import { relative, resolve } from 'node:path'
 import type { CallExpression, File, Node } from '@babel/types'
 import { memberKeyName, objectLiteral, unwrapTypeAssertion, walk } from './ast-walk'
-import { collectFiles, listAppRoots, NON_SOURCE_DIR_NAMES } from './discovery'
+import { collectFiles, collectProjectFiles, listAppRoots } from './discovery'
 import type { ParseCache, ParsedFile } from './parse-cache'
 import { resolveAppEntry } from './provider-registrar'
 
@@ -122,7 +122,7 @@ export async function scanPluginCalls(
   target: PluginExport,
   scope: 'app' | 'project' = 'app',
 ): Promise<PluginCall[]> {
-  const files = (scope === 'project' ? await collectFiles(cwd, undefined, NON_SOURCE_DIR_NAMES) : await appFiles(cwd))
+  const files = (scope === 'project' ? await collectProjectFiles(cwd) : await appFiles(cwd))
     .filter((file) => !/\.test\.[jt]sx?$/.test(file))
 
   const calls: PluginCall[] = []

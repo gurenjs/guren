@@ -301,11 +301,8 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
     const cwd = resolve(options.cwd ?? process.cwd())
     return {
       cwd,
-      findings: [{
-        ...finding('discovery:read', 'Scan incomplete', 'fail', error.message,
-          'Fix the directory or its permissions and run the audit again.', toPosixRelative(cwd, error.directory)),
-        evidence: 'none',
-      }],
+      findings: [finding('discovery:read', 'Scan incomplete', 'fail', error.message,
+          'Fix the directory or its permissions and run the audit again.', toPosixRelative(cwd, error.directory))],
       passCount: 0, warnCount: 0, failCount: 1, ignoredCount: 0,
       routesAnalyzed: false,
       routeSource: { from: 'routes-file', reason: 'Directory discovery failed; the audit did not complete.' },

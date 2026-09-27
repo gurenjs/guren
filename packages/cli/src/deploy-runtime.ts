@@ -5,6 +5,7 @@ import { memberKeyName, walk, type BabelNode } from './ast-walk'
 import { resolveSessionDrivers, type SessionDriverRegistry } from './session-drivers'
 import {
   collectFiles,
+  DEPLOY_SCAN_DIRS,
   toPosixRelative,
   IMPORTABLE_EXTENSIONS,
   NON_SOURCE_DIR_NAMES,
@@ -180,8 +181,7 @@ export interface DeployRuntimeOptions {
   introspect?: (() => Promise<Introspection>) | false
 }
 
-/** Where deploy code lives: the app's source trees plus the deploy plugins' `functions/` and `api/`. */
-export const DEPLOY_SCAN_DIRS = ['src', 'app', 'config', 'db', 'routes', 'modules', 'bin', 'functions', 'api'] as const
+export { DEPLOY_SCAN_DIRS }
 
 /** Test files are excluded from the scan — see readAppSources. */
 const TEST_FILE_PATTERN = /\.(test|spec)\.[cm]?[jt]sx?$/
