@@ -45,6 +45,13 @@ describe('diagnostic command boundary', () => {
     expect(result.stdout + result.stderr).not.toContain('"findings":')
   })
 
+  it('doctor --json writes exactly one versioned document to stdout', async () => {
+    const result = await invoke(['doctor', '--json', '--no-introspect'])
+    const report = JSON.parse(result.stdout)
+    expect(report.version).toBe(1)
+    expect(result.exitCode).toBe(0)
+  })
+
   it('gate fails when verification stages cannot run and returns its JSON report', async () => {
     const result = await invoke(['gate', '--json'])
     const report = JSON.parse(result.stdout)
