@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { buildDocsViewerData, docTrustTier, docsViewerAssetPath, docsViewerPlanPage } from '../src/docs-viewer'
 import { createTempWorkspace } from './helpers'
+import { approvePlanFile, loadApprovedCommentsPlan } from './plan-fixture'
 
 describe('docTrustTier', () => {
   it('derives the OKF trust tier from verified actors', () => {
@@ -260,6 +261,40 @@ describe('buildDocsViewerData and closed plans', () => {
       expect(data.docs[0].html).not.toContain('plan-block')
       expect(data.docs[0].html).toContain('<li>Never closed.</li>')
       expect(data.planPages).toEqual([])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
+describe('buildDocsViewerData and plan pages', () => {
+  it('marks a page rendered at an older hash than its plan stale, with the command that renders it again', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-viewer-stale-page-')
+    try {
+      const dir = workspace.dir
+      await mkdir(join(dir, 'docs/plans/comments'), { recursive: true })
+      await writeFile(join(dir, 'package.json'), '{}', 'utf8')
+      await writeFile(join(dir, 'docs/plans/comments/plan.json'), JSON.stringify(loadApprovedCommentsPlan()), 'utf8')
+      await approvePlanFile(join(dir, 'docs/plans/comments/plan.json'))
+      await writeFile(
+        join(dir, 'docs/plans/comments/plan.html'),
+        '<script type="application/json" id="plan-data">{"planHash":"an-earlier-hash"}</script>',
+        'utf8',
+      )
+
+      const data = await buildDocsViewerData(dir)
+
+      expect(data.planPages).toEqual([
+        {
+          slug: 'comments',
+          plan: 'docs/plans/comments/plan.json',
+          page: 'docs/plans/comments/plan.html',
+          doc: 'docs/plans/comments.md',
+          stale: true,
+          render: 'bunx guren plan:render docs/plans/comments/plan.json',
+        },
+      ])
+      expect(data.plans.map((plan) => [plan.file, plan.standing])).toEqual([['docs/plans/comments/plan.json', 'approved']])
     } finally {
       await workspace.cleanup()
     }

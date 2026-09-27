@@ -11,7 +11,7 @@ import { isConfirmedApiOnlyApp } from './app-surface'
 import { toPosixRelative } from './discovery'
 import { discoverPlanFiles } from './plan-check'
 import { readPlanFile } from './plan-render'
-import { describeUnapproved, readPlanApprovalStanding } from './plan/approvals'
+import { readPlanApprovalStanding } from './plan/approvals'
 import { planDocClosedHash, planDocPath, touchedModels } from './plan/close-docs'
 import { planHash } from './plan/identity'
 import { hasBaseline, type Plan } from './plan/schema'
@@ -81,25 +81,43 @@ function stepState(record: PlanStepRecord | undefined, digest: string, holds: bo
   return record.outcome === 'verified' ? 'waiver-withdrawn' : record.outcome
 }
 
+/** The hash the plan's closing doc names; a doc that exists and will not read throws, as `readOpenPlan()` refuses it. */
 async function closedHash(appRoot: string, slug: string): Promise<string | undefined> {
-  const source = await readFile(join(appRoot, planDocPath(slug)), 'utf8').catch(() => undefined)
-  return source === undefined ? undefined : planDocClosedHash(source)
+  try {
+    return planDocClosedHash(await readFile(join(appRoot, planDocPath(slug)), 'utf8'))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw new Error(`${planDocPath(slug)} could not be read: ${(error as Error).message}`)
+  }
+}
+
+/** Each file hashed once per payload, however many plans' records fingerprint it. */
+function fileHasher(appRoot: string): (files: string[]) => Promise<Map<string, string | null>> {
+  const cache = new Map<string, Promise<string | null>>()
+  return async (files) => {
+    const missing = files.filter((file) => !cache.has(file))
+    if (missing.length > 0) {
+      const read = hashFiles(appRoot, missing)
+      for (const file of missing) cache.set(file, read.then((hashes) => hashes.get(file) ?? null))
+    }
+    return new Map(await Promise.all(files.map(async (file) => [file, await cache.get(file)!] as const)))
+  }
 }
 
 function unreadablePlan(file: string, slug: string, reason: string): DocsViewerOpenPlan {
   return { slug, file, title: file, standing: 'unreadable', reason, entities: [], steps: [], waivers: [], next: [], status: planCommand('plan:status', file) }
 }
 
-async function readViewerPlan(appRoot: string, path: string, apiOnly: boolean): Promise<{ open?: DocsViewerOpenPlan; hash?: string | null }> {
-  const file = toPosixRelative(appRoot, path)
+interface PlanReadContext {
+  appRoot: string
+  apiOnly: boolean
+  hash: (files: string[]) => Promise<Map<string, string | null>>
+}
+
+async function readViewerPlan(context: PlanReadContext, path: string, file: string, slug: string): Promise<{ open?: DocsViewerOpenPlan; hash?: string | null }> {
+  const { appRoot, apiOnly } = context
   const command = (subcommand: string): string => planCommand(subcommand, file)
-  let plan: Awaited<ReturnType<typeof readPlanFile>>['plan']
-  try {
-    plan = (await readPlanFile(path, appRoot)).plan
-  } catch (error) {
-    return { open: unreadablePlan(file, planSlug(path), (error as Error).message) }
-  }
-  const slug = planSlug(path)
+  const plan = (await readPlanFile(path, appRoot)).plan
   const hash = hasBaseline(plan) ? planHash(plan) : null
   // A revision approved after the close carries another hash, and is open work again.
   if (hash !== null && (await closedHash(appRoot, slug)) === hash) return { hash }
@@ -109,7 +127,7 @@ async function readViewerPlan(appRoot: string, path: string, apiOnly: boolean): 
   const digest = planDigest(plan)
   const [stateRead, log] = await Promise.all([readPlanState(appRoot, slug), readPlanWaivers(path, plan)])
   const records = stateRead.state?.steps ?? {}
-  const hashes = await hashFiles(appRoot, Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
+  const hashes = await context.hash(Object.values(records).flatMap((record) => Object.keys(record.fingerprint.files)))
   const active = stateRead.state?.active?.plan === file ? stateRead.state.active : undefined
   // plan:next drops an approval stall once the gate passes, so an approved plan's is already answered.
   const stalled = active?.stalled && !(active.stalled.cause === 'approval' && standingRead?.state === 'approved') ? active.stalled : undefined
@@ -136,7 +154,10 @@ async function readViewerPlan(appRoot: string, path: string, apiOnly: boolean): 
   if (standingRead === undefined) next = [command('plan:render'), command('plan:approve')]
   else if (standingRead.state === 'unapproved') next = [command('plan:approve')]
   else if (standingRead.state === 'approved') next = [command(steps.every((step) => step.state === 'verified') ? 'plan:close' : 'plan:next')]
-  else reason = describeUnapproved(file, standingRead, 'no step of it is handed out')
+  else if (standingRead.state === 'baseline-removed') {
+    reason = `The plan has no baseline, but ${standingRead.approvals} approval(s) are recorded beside it: restore the baseline, keep the new draft in a file of its own, or approve it again.`
+    next = [command('plan:approve')]
+  } else reason = `The approvals beside the plan cannot be read, so it counts as approved by no one: ${standingRead.reason}`
 
   const unreadable = [stateRead.unreadable, log.unreadable].filter((entry): entry is string => entry !== undefined)
   return {
@@ -163,13 +184,14 @@ async function readViewerPlan(appRoot: string, path: string, apiOnly: boolean): 
 export async function readViewerPlans(appRoot: string): Promise<DocsViewerPlans> {
   const { files } = await discoverPlanFiles(appRoot)
   if (files.length === 0) return { open: [], hashes: new Map() }
-  const apiOnly = await isConfirmedApiOnlyApp(appRoot).catch(() => false)
+  const context: PlanReadContext = { appRoot, apiOnly: await isConfirmedApiOnlyApp(appRoot).catch(() => false), hash: fileHasher(appRoot) }
   // One plan the readers choke on is that plan's problem, never the whole payload's.
   const read = await Promise.all(
     files.map(async (path) => {
       const file = toPosixRelative(appRoot, path)
-      const entry: { open?: DocsViewerOpenPlan; hash?: string | null } = await readViewerPlan(appRoot, path, apiOnly).catch((error: unknown) => ({
-        open: unreadablePlan(file, planSlug(path), (error as Error).message),
+      const slug = planSlug(path)
+      const entry: { open?: DocsViewerOpenPlan; hash?: string | null } = await readViewerPlan(context, path, file, slug).catch((error: unknown) => ({
+        open: unreadablePlan(file, slug, (error as Error).message),
       }))
       return { file, ...entry }
     }),

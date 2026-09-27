@@ -122,6 +122,38 @@ describe('readViewerPlans', () => {
     }
   })
 
+  it('drops a stall the approval gate recorded once the plan is approved, as plan:next does', async () => {
+    const workspace = await createTempWorkspace('guren-cli-viewer-plans-stall-')
+    try {
+      const dir = workspace.dir
+      const document = loadApprovedCommentsPlan()
+      await writeWorkspaceFiles(dir, { 'docs/plans/comments.plan.json': JSON.stringify(document) })
+      await approvePlanFile(join(dir, 'docs/plans/comments.plan.json'))
+      const [first] = listPlanSteps(derivePlanTasks(PlanSchema.parse(document), { apiOnly: false })).map(({ step }) => step.id)
+      await writeWorkspaceFiles(dir, {
+        '.guren/plans/comments.state.json': JSON.stringify({
+          stateVersion: PLAN_STATE_VERSION,
+          steps: {},
+          active: {
+            plan: 'docs/plans/comments.plan.json',
+            step: first,
+            startedAt: '2026-09-27T10:00:00.000Z',
+            continuations: 0,
+            stalled: { at: '2026-09-27T10:05:00.000Z', reason: 'not approved at this hash', cause: 'approval' },
+          },
+        }),
+      })
+
+      const [read] = (await readViewerPlans(dir)).open
+
+      const step = read.steps.find((entry) => entry.id === first)
+      expect(step?.active).toBe(true)
+      expect(step?.stall).toBeUndefined()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('reports a plan file it cannot read as unreadable, beside the plans it can', async () => {
     const workspace = await createTempWorkspace('guren-cli-viewer-plans-unreadable-')
     try {

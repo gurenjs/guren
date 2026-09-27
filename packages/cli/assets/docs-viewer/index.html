@@ -1103,6 +1103,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       note.innerHTML =
         (node.members ? 'Ids verifying the same documents, grouped (toggle <em>group tests</em>). ' : '')
         + 'A test whose title carries an acceptance id verifies the documents citing it. A citation no test carries warns in <code>guren check --docs</code>.'
+    } else if (node.kind === 'entity' && governedBy.length === 0 && plans.length > 0) {
+      note.textContent = 'A model the plans above change. No document names it yet; plan:close writes its entity document.'
     } else if (node.kind === 'entity') {
       note.innerHTML =
         'A model class linked by name from doc frontmatter (survives file moves). Explore it with <code></code>.'
