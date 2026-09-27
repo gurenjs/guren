@@ -8,7 +8,7 @@
 import { posix } from 'node:path'
 
 import { RULES_HEADING_BY_LOCALE } from '../docs-acceptance'
-import { parseDocFrontmatter } from '../docs-frontmatter'
+import { parseDocFrontmatter, type DocFrontmatterValue } from '../docs-frontmatter'
 import { markdownLines } from '../docs-links'
 import type { PlanApproval } from './approvals'
 import type { PlanWaiver } from './decisions'
@@ -124,7 +124,11 @@ function bullets(items: readonly string[]): string[] {
  * for a document that does not say it is closed. The frontmatter reader returns scalars as strings.
  */
 export function planDocClosedHash(source: string): string | undefined {
-  const data = parseDocFrontmatter(source)?.data
+  return planDocClosedHashIn(parseDocFrontmatter(source)?.data)
+}
+
+/** {@link planDocClosedHash} over frontmatter a caller has already parsed. */
+export function planDocClosedHashIn(data: Record<string, DocFrontmatterValue> | undefined): string | undefined {
   return data?.closed === 'true' && typeof data.plan_hash === 'string' ? data.plan_hash : undefined
 }
 
@@ -260,8 +264,8 @@ interface EntityDocLines {
   lines: string[]
   inFence: boolean[]
   eol: '\n' | '\r\n'
-  /** `<slug> <section>` → the lines of its open and close markers. */
-  blocks: Map<string, { open: number; close: number }>
+  /** `<slug> <section>` → the block: its open and close marker lines, and what the open one names. */
+  blocks: Map<string, PlanDocBlock>
 }
 
 /**
@@ -281,7 +285,7 @@ export function readEntityDoc(document: string): { doc: EntityDocLines; problems
   // Everything after an unclosed fence reads as code, so a block written there would be code too.
   if (scanned.unclosedFence !== undefined) return { doc, problems: [`line ${scanned.unclosedFence + 1}: a code fence opens here and never closes`] }
   const problems: string[] = []
-  let open: { key: string; line: number } | undefined
+  let open: { key: string; line: number; slug: string; hash: string; section: string } | undefined
   const unclosed = (): void => {
     if (open) problems.push(`line ${open.line + 1}: the block "${open.key}" opens and never closes`)
     open = undefined
@@ -295,7 +299,7 @@ export function readEntityDoc(document: string): { doc: EntityDocLines; problems
     }
     if (opening) {
       unclosed()
-      open = { key: `${opening[1]} ${opening[3]}`, line: index }
+      open = { key: `${opening[1]} ${opening[3]}`, line: index, slug: opening[1], hash: opening[2], section: opening[3] }
     } else if (closing) {
       const key = `${closing[1]} ${closing[2]}`
       if (open?.key !== key) {
@@ -305,7 +309,7 @@ export function readEntityDoc(document: string): { doc: EntityDocLines; problems
         problems.push(`line ${open.line + 1}: the block "${key}" appears twice`)
         open = undefined
       } else {
-        doc.blocks.set(key, { open: open.line, close: index })
+        doc.blocks.set(key, { slug: open.slug, hash: open.hash, section: open.section, open: open.line, close: index })
         open = undefined
       }
     } else if (!doc.inFence[index] && HEADING.test(text)) {
@@ -314,6 +318,26 @@ export function readEntityDoc(document: string): { doc: EntityDocLines; problems
   })
   unclosed()
   return { doc, problems }
+}
+
+export interface PlanDocBlock {
+  slug: string
+  hash: string
+  section: string
+  /** Lines of the open and close markers, in `lines`. */
+  open: number
+  close: number
+}
+
+/**
+ * The blocks `plan:close` fenced in a document, in document order (blocks cannot nest, so the
+ * reader stores them as they close), over its lines as {@link readEntityDoc} split them;
+ * `undefined` wherever that reader reports a problem.
+ */
+export function readPlanBlocks(document: string): { lines: string[]; blocks: PlanDocBlock[] } | undefined {
+  const { doc, problems } = readEntityDoc(document)
+  if (problems.length > 0) return undefined
+  return { lines: doc.lines, blocks: [...doc.blocks.values()] }
 }
 
 /** The line of a `## ` heading naming `section` in any plan locale, outside code. */
