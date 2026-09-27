@@ -260,8 +260,8 @@ interface EntityDocLines {
   lines: string[]
   inFence: boolean[]
   eol: '\n' | '\r\n'
-  /** `<slug> <section>` → the lines of its open and close markers, and the hash the open one names. */
-  blocks: Map<string, { open: number; close: number; hash: string }>
+  /** `<slug> <section>` → the block: its open and close marker lines, and what the open one names. */
+  blocks: Map<string, PlanDocBlock>
 }
 
 /**
@@ -281,7 +281,7 @@ export function readEntityDoc(document: string): { doc: EntityDocLines; problems
   // Everything after an unclosed fence reads as code, so a block written there would be code too.
   if (scanned.unclosedFence !== undefined) return { doc, problems: [`line ${scanned.unclosedFence + 1}: a code fence opens here and never closes`] }
   const problems: string[] = []
-  let open: { key: string; line: number; hash: string } | undefined
+  let open: { key: string; line: number; slug: string; hash: string; section: string } | undefined
   const unclosed = (): void => {
     if (open) problems.push(`line ${open.line + 1}: the block "${open.key}" opens and never closes`)
     open = undefined
@@ -295,7 +295,7 @@ export function readEntityDoc(document: string): { doc: EntityDocLines; problems
     }
     if (opening) {
       unclosed()
-      open = { key: `${opening[1]} ${opening[3]}`, line: index, hash: opening[2] }
+      open = { key: `${opening[1]} ${opening[3]}`, line: index, slug: opening[1], hash: opening[2], section: opening[3] }
     } else if (closing) {
       const key = `${closing[1]} ${closing[2]}`
       if (open?.key !== key) {
@@ -305,7 +305,7 @@ export function readEntityDoc(document: string): { doc: EntityDocLines; problems
         problems.push(`line ${open.line + 1}: the block "${key}" appears twice`)
         open = undefined
       } else {
-        doc.blocks.set(key, { open: open.line, close: index, hash: open.hash })
+        doc.blocks.set(key, { slug: open.slug, hash: open.hash, section: open.section, open: open.line, close: index })
         open = undefined
       }
     } else if (!doc.inFence[index] && HEADING.test(text)) {
@@ -332,11 +332,7 @@ export interface PlanDocBlock {
 export function readPlanBlocks(document: string): { lines: string[]; blocks: PlanDocBlock[] } | undefined {
   const { doc, problems } = readEntityDoc(document)
   if (problems.length > 0) return undefined
-  const blocks = [...doc.blocks].map(([key, block]) => {
-    const [slug, section] = key.split(' ')
-    return { slug, section, ...block }
-  })
-  return { lines: doc.lines, blocks: blocks.sort((a, b) => a.open - b.open) }
+  return { lines: doc.lines, blocks: [...doc.blocks.values()].sort((a, b) => a.open - b.open) }
 }
 
 /** The line of a `## ` heading naming `section` in any plan locale, outside code. */

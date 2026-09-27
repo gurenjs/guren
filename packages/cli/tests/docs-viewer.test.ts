@@ -227,6 +227,8 @@ describe('buildDocsViewerData and closed plans', () => {
 
       const plan = data.docs.find((doc) => doc.path === 'docs/plans/comments.md')!
       expect(plan.closedPlanHash).toBe('abcdef0123456789abcdef')
+      expect(plan.planPage).toBe('comments')
+      expect(entity.planPage).toBeUndefined()
       expect(data.tests).toEqual([{ id: 'AC-comments-1', files: ['tests/comments.test.ts'] }])
       expect(data.planPages).toEqual([
         { slug: 'comments', plan: 'docs/plans/comments/plan.json', page: 'docs/plans/comments/plan.html' },

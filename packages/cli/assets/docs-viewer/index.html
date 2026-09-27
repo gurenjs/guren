@@ -766,9 +766,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     return li
   }
 
-  // plan:close writes docs/plans/<slug>.md, so a plan doc names its page by file name.
-  const pageForDoc = (doc) =>
-    doc.type === 'plan' ? planPages.find((p) => 'docs/plans/' + p.slug + '.md' === doc.path) : undefined
   function pageLink(page) {
     return Object.assign(el('a', 'page-link', 'open plan page ↗'), {
       href: '/_guren/docs/plans/' + encodeURIComponent(page.slug),
@@ -792,7 +789,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     if (doc.stale) chips.append(el('span', 'chip chip-stale', 'stale'))
     if (doc.closedPlanHash) chips.append(el('span', 'chip chip-plan', 'closed ' + doc.closedPlanHash.slice(0, 12)))
     head.append(chips)
-    const page = pageForDoc(doc)
+    const page = doc.planPage ? planPages.find((p) => p.slug === doc.planPage) : undefined
     if (page) head.append(pageLink(page))
     root.append(head)
 

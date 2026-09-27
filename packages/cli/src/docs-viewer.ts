@@ -6,7 +6,7 @@
  * parameterized route, a plan page, looks its slug up among the discovered
  * plans and never joins it into a path.
  */
-import { access, readFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { parseDocFrontmatter } from './docs-frontmatter'
@@ -22,7 +22,7 @@ import { planDocClosedHash, planDocPath, readPlanBlocks } from './plan/close-doc
 import { discoverPlanFiles } from './plan-check'
 import { planOutputPath } from './plan/beside'
 import { planSlug } from './plan/state'
-import { toPosixRelative } from './discovery'
+import { fileExists, toPosixRelative } from './discovery'
 
 export type DocTrustTier = 'unverified' | 'machine-confirmed' | 'human-reviewed'
 
@@ -59,6 +59,8 @@ export interface DocsViewerDoc {
   issues: IssueLink[]
   /** The plan hash a doc `plan:close` wrote says it closed at (RFC 0030 §7). */
   closedPlanHash?: string
+  /** The slug a plan doc's rendered page is served under, at `plans/<slug>`. */
+  planPage?: string
   /**
    * Rendered body; the leading H1 is dropped (the panel header carries the title), and each
    * block `plan:close` fenced is a `<section class="plan-block">` naming its plan.
@@ -89,14 +91,15 @@ export interface DocsViewerPlanPage {
  */
 async function findPlanPages(cwd: string): Promise<Array<DocsViewerPlanPage & { absolute: string }>> {
   const { files } = await discoverPlanFiles(cwd)
+  const found = await Promise.all(
+    files.map(async (file) => {
+      const absolute = planOutputPath(file)
+      if (!(await fileExists(cwd, absolute))) return undefined
+      return { slug: planSlug(file), plan: toPosixRelative(cwd, file), page: toPosixRelative(cwd, absolute), absolute }
+    }),
+  )
   const pages: Array<DocsViewerPlanPage & { absolute: string }> = []
-  for (const file of files) {
-    const slug = planSlug(file)
-    const absolute = planOutputPath(file)
-    if (pages.some((page) => page.slug === slug)) continue
-    const exists = await access(absolute).then(() => true, () => false)
-    if (exists) pages.push({ slug, plan: toPosixRelative(cwd, file), page: toPosixRelative(cwd, absolute), absolute })
-  }
+  for (const page of found) if (page && !pages.some((kept) => kept.slug === page.slug)) pages.push(page)
   return pages
 }
 
@@ -193,7 +196,8 @@ function resolveViewerLink(docPath: string, target: string): string {
 function renderViewerBody(docPath: string, body: string): string {
   const render = (text: string): string =>
     renderDocHtml(text, { resolveLink: (target) => resolveViewerLink(docPath, target) })
-  const read = readPlanBlocks(body)
+  // Only a document plan:close wrote into can hold a block; the rest skip the marker scan.
+  const read = body.includes('<!-- guren:plan ') ? readPlanBlocks(body) : undefined
   if (!read || read.blocks.length === 0) return render(body)
 
   const parts: string[] = []
@@ -212,12 +216,16 @@ function renderViewerBody(docPath: string, body: string): string {
 }
 
 export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> {
-  const {
-    refs,
-    checks,
-    tests,
-    graph: { nodes, edges },
-  } = await loadDocsGraph(cwd)
+  const [
+    {
+      refs,
+      checks,
+      tests,
+      graph: { nodes, edges },
+    },
+    pagesFound,
+  ] = await Promise.all([loadDocsGraph(cwd), findPlanPages(cwd)])
+  const pageSlugByDoc = new Map(pagesFound.map((page) => [planDocPath(page.slug), page.slug]))
   const staleDocs = new Set(
     checks.filter((check) => check.key.startsWith('docs-stale:')).map((check) => check.filePath),
   )
@@ -245,7 +253,8 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
         stale: staleDocs.has(ref.path),
         trustTier: docTrustTier(ref),
         issues: ref.issues.map((issue) => describeIssue(issue, originRepo)),
-        closedPlanHash: planDocClosedHash(source),
+        closedPlanHash: ref.type === 'plan' ? planDocClosedHash(source) : undefined,
+        planPage: ref.type === 'plan' ? pageSlugByDoc.get(ref.path) : undefined,
         // Links carry the app-root path they resolve to, so the viewer
         // navigates by map lookup instead of re-deriving the rules client-side.
         html: renderViewerBody(ref.path, body),
@@ -253,7 +262,7 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
     }),
   )
 
-  const planPages = (await findPlanPages(cwd)).map(({ slug, plan, page }) => ({ slug, plan, page }))
+  const planPages = pagesFound.map(({ slug, plan, page }) => ({ slug, plan, page }))
   return { nodes, edges, docs, tests, planPages }
 }
 
