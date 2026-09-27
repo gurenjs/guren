@@ -1,10 +1,10 @@
 # APIリソース
 
-APIリソースは、モデルとAPIレスポンスのあいだに立つ変換レイヤーです。データをJSONへシリアライズする方法を細かく制御できます。
+APIリソースは、モデルを API レスポンスに変換する層です。モデルのデータをどういう JSON にするかを、フィールド単位で細かく決められます。
 
 ## 基本的な使い方
 
-`Resource`クラスを継承してリソースを作成します：
+リソースは `Resource` クラスを継承して作ります。
 
 ```typescript
 import { Resource } from '@guren/core'
@@ -49,11 +49,11 @@ export default class UserController extends Controller {
 
 ## 条件付きフィールド
 
-リソースには、条件によってフィールドを出し分けるヘルパーメソッドがあります。
+リソースには、条件に応じてフィールドを出し分けるヘルパーメソッドがあります。
 
 ### when()
 
-条件がtrueの場合のみフィールドを含めます。
+条件が true のときだけフィールドを含めます。
 
 ```typescript
 export class UserResource extends Resource<User> {
@@ -72,7 +72,7 @@ export class UserResource extends Resource<User> {
 
 ### whenLoaded()
 
-リレーションがロードされている場合のみフィールドを含めます。
+リレーションがロード済みのときだけフィールドを含めます。
 
 ```typescript
 export class PostResource extends Resource<Post> {
@@ -96,7 +96,7 @@ export class PostResource extends Resource<Post> {
 
 ### whenNotNull()
 
-nullでない場合のみフィールドを含めます。
+値が null でないときだけフィールドを含めます。
 
 ```typescript
 export class ProfileResource extends Resource<Profile> {
@@ -112,7 +112,7 @@ export class ProfileResource extends Resource<Profile> {
 
 ### whenOr()
 
-デフォルト値付きでフィールドを含めます。
+デフォルト値を指定して、フィールドを含めます。
 
 ```typescript
 export class SettingsResource extends Resource<Settings> {
@@ -130,7 +130,7 @@ export class SettingsResource extends Resource<Settings> {
 
 ## 追加データ
 
-リソースレスポンスに追加データを加えます。
+`additional()` を使うと、リソースのレスポンスに別のデータを追加できます。
 
 ```typescript
 const resource = new UserResource(user)
@@ -145,7 +145,7 @@ return this.json({ data: resource.toJSON() })
 
 ## リソースコレクション
 
-モデルの配列をリソースに変換します。
+モデルの配列は、まとめてリソースに変換できます。
 
 ```typescript
 // 静的メソッド
@@ -159,11 +159,11 @@ const data = collect(users, UserResource)
 
 ## ページネーション
 
-Guren のページネーションには2つの方式があります。
+Guren のページネーションには 2 つの方式があります。
 
 ### オフセットベースページネーション
 
-ページ番号を使用した従来のページネーションです。
+ページ番号で位置を指定する、よく使われる方式です。
 
 ```typescript
 import { paginate, Paginator } from '@guren/core'
@@ -216,7 +216,7 @@ export default class UserController extends Controller {
 
 ### カーソルベースページネーション
 
-無限スクロールやリアルタイムデータに最適です。
+無限スクロールや、頻繁に更新されるデータに向いています。
 
 ```typescript
 import { Controller, CursorPaginator, decodeCursor, encodeCursor } from '@guren/core'
@@ -300,7 +300,7 @@ export default class PostController extends Controller {
 
 ## JsonResource
 
-カスタムクラスなしで簡単に変換できます。
+専用のクラスを作らずに、簡単な変換だけを済ませたいときに使います。
 
 ```typescript
 import { JsonResource } from '@guren/core'
@@ -312,7 +312,7 @@ const resource = new JsonResource(user)
 
 ## リソースの生成
 
-CLIを使用して新しいリソースを生成します。
+新しいリソースは CLI で生成できます。
 
 ```bash
 bunx guren make:resource User
@@ -321,7 +321,7 @@ bunx guren make:resource User
 
 ## Resource から API レスポンスを型付けする
 
-`guren codegen` は各 Resource の形を `.guren/data.gen.ts` に抽出します（`Data.Post`、`Data.User` など）。Resource で応答するルートは、ルートコントラクトで Resource を指名するだけで、その形をレスポンス型として宣言できます。Zod スキーマも、フィールドの再記述も不要です:
+`guren codegen` を実行すると、各 Resource の形が `.guren/data.gen.ts` に `Data.Post` や `Data.User` として書き出されます。Resource を返すルートでは、ルートコントラクトに Resource を指定するだけで、その形をレスポンス型として宣言できます。Zod スキーマを書いたり、フィールドを並べ直したりする必要はありません。
 
 ```ts
 router.query('/posts/search', {
@@ -331,11 +331,11 @@ router.query('/posts/search', {
 }, [PostController, 'search'])
 ```
 
-生成された API クライアントは、このルートの `json()` を `{ data: Data.Post[] }` として型付けします。ヒントの書き方は [Resource レスポンスヒント](./routing.md#resource-レスポンスヒント)を参照してください。
+生成される API クライアントでは、このルートの `json()` の型が `{ data: Data.Post[] }` になります。ヒントの書き方は [Resource レスポンスヒント](./routing.md#resource-レスポンスヒント)を参照してください。
 
 ### コード生成が読む形を宣言する
 
-抽出はソースコードレベルで行われるため、Resource は自分のファイル内にペイロードの型を明記する必要があります。注釈のない `toArray()` からオブジェクトリテラルを返すのは TypeScript としては正しいものの、コード生成はその形を読み取れません。`make:resource` が生成するとおり、クラス名にちなんだ interface を宣言して `toArray()` に注釈を付けてください:
+codegen は型をソースコードから直接読み取るので、ペイロードの型は Resource 自身のファイルに明記しておく必要があります。型注釈のない `toArray()` からオブジェクトリテラルを返すコードは、TypeScript としては正しくても codegen には形が読めません。`make:resource` が生成するコードと同じように、クラス名に合わせた interface を宣言し、`toArray()` の戻り値に注釈として付けてください。
 
 ```ts
 export interface UserResourceData {
@@ -350,11 +350,11 @@ export class UserResource extends Resource<User, UserResourceData> {
 }
 ```
 
-2 つ目の型引数はペイロードの型で、これを渡すと `toJSON()` も同じ型を返します。省略した場合は `Record<string, unknown>` になるので、`toJSON()` の戻り値をそのままページや API クライアントに渡すなら指定してください。
+2 つ目の型引数はペイロードの型です。これを渡すと、`toJSON()` の戻り値も同じ型になります。省略すると `Record<string, unknown>` になるので、`toJSON()` の戻り値をそのままページや API クライアントに渡す場合は指定してください。
 
-interface は Resource 自身のファイルで宣言してください。共通の型モジュールから import したものは読み取られません。型を抽出できなかった Resource は黙って捨てられるのではなく `guren codegen` の警告で名指しされるので、`Data.*` が生成されない理由は必ず表示されます。
+interface は Resource 自身のファイルで宣言してください。共通の型モジュールから import した interface は読み取られません。型を取り出せなかった Resource は、`guren codegen` の警告に名前が出ます。何も言わずに除外されることはないので、`Data.*` に型が生成されなかったときは必ず理由が分かります。
 
-ペイロード型はプレーンな interface である必要はありません。本体をコピーできない形の**エクスポート済み**エイリアス、たとえば Zod スキーマ由来の型や交差型、宣言マージされた interface は、宣言そのものへの参照として出力されます。こうすると、1 つのスキーマをランタイムのコントラクトとペイロード型の両方で唯一の情報源にできます:
+ペイロード型はプレーンな interface でなくても構いません。Zod スキーマから導いた型、交差型、宣言マージされた interface のように codegen が中身を書き写せない型でも、**エクスポート済み**のエイリアスであれば、宣言そのものを参照する形で出力されます。これを使えば、1 つのスキーマをランタイムのコントラクトとペイロード型の両方の元にできます。
 
 ```ts
 export const UserResourceSchema = z.object({ id: z.number(), name: z.string() })
@@ -367,18 +367,18 @@ export class UserResource extends Resource<User> {
 }
 ```
 
-`data.gen.ts` は Resource のモジュール越しに宣言を名前で参照するため、宣言はエクスポートされている必要があります。また、参照には渡す型引数がないため、ジェネリック型はどちらの方式でも対象外です。
+`data.gen.ts` は Resource のモジュールを経由して宣言を名前で参照するので、宣言はエクスポートしておく必要があります。また、参照には型引数を渡せないため、ジェネリック型はどちらの書き方でも扱えません。
 
 ### モジュール内の Resource
 
-コード生成はプロジェクトルートの `app/Http/Resources` に加えて、各 `modules/<name>/` の中も走査します。モジュールの Resource はモジュール名を冠した名前で出力され、`modules/billing/app/Http/Resources/InvoiceResource.ts` は `Data.BillingInvoice` になります。この修飾は衝突したときだけでなく常に付きます。そうすることで型名は「クラスがどこにあるか」だけで決まり、別の場所に2つ目の `InvoiceResource` を追加してもフロントエンドが既にインポートしている型名が変わることはありません。
+codegen はプロジェクトルートの `app/Http/Resources` に加えて、各 `modules/<name>/` の中も探します。モジュールの Resource はモジュール名を先頭に付けた名前で出力され、たとえば `modules/billing/app/Http/Resources/InvoiceResource.ts` は `Data.BillingInvoice` になります。モジュール名は名前が衝突したときに限らず、常に付きます。型名がクラスの置き場所だけで決まるので、別の場所に 2 つ目の `InvoiceResource` を追加しても、フロントエンドがすでに import している型名は変わりません。
 
-レスポンスヒントが持つ情報は Resource のクラス名だけなので、2つのアプリルートが同じ `InvoiceResource` を宣言しているとヒントは解決できません。この場合はコード生成が両方のファイル名を挙げて警告し、どちらのモジュールのペイロードなのかを推測せず、そのルートのレスポンスを型無しのままにします。解消するにはどちらかのクラス名を変更してください。
+レスポンスヒントに書けるのは Resource のクラス名だけです。そのため、2 つのアプリルートがどちらも `InvoiceResource` を宣言していると、ヒントがどちらを指すのか決まりません。この場合、codegen は両方のファイル名を挙げて警告し、どちらのモジュールのペイロードかを推測せずに、そのルートのレスポンスを型無しのままにします。解消するには、どちらかのクラス名を変えてください。
 
 ## ベストプラクティス
 
-1. **リソースの役割を絞る** - モデル変換ごとに1つのリソース
-2. **リレーションにはwhenLoadedを使用** - ロード済みのリレーションだけを含めてN+1問題を防ぐ
-3. **日付を一貫して変換** - 日付フィールドには`.toISOString()`を使う
-4. **機密データを隠す** - パスワード、トークン、内部IDは公開しない
-5. **大規模データセットにはカーソルページネーション** - オフセットより高速
+1. **リソースの役割を絞る**: 1 つのリソースには、モデルの変換を 1 種類だけ担当させます。
+2. **リレーションには whenLoaded を使う**: ロード済みのリレーションだけを含めれば、N+1 問題を防げます。
+3. **日付の変換をそろえる**: 日付フィールドには `.toISOString()` を使います。
+4. **機密データを隠す**: パスワード、トークン、内部 ID は公開しないでください。
+5. **大きなデータセットにはカーソルページネーションを使う**: オフセット方式より高速です。

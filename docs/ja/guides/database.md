@@ -1,22 +1,22 @@
 # データベースガイド
 
-Guren は Drizzle ORM と PostgreSQL を組み合わせて使います。このガイドでは、スキーマ定義、マイグレーション、シーダー、アプリケーションコードからの日常的な利用方法を説明します。
+Guren は Drizzle ORM と PostgreSQL を組み合わせて使います。このガイドでは、スキーマの定義、マイグレーション、シーダー、アプリケーションのコードからの普段の使い方を説明します。
 
-現在は PostgreSQL / SQLite / MySQL / Aurora Serverless(AWS Data API)をサポートしています。
+対応しているデータベースは、PostgreSQL / SQLite / MySQL / Aurora Serverless(AWS Data API)です。
 
 ## 設定の概要
-- `config/database.ts`: データベース接続を生成し、フレームワークに公開します。
-- `drizzle.config.ts`: drizzle-kit の共通設定(スキーマパス、マイグレーション出力先、DB 方言など)。
-- `db/schema.ts`: モデルとマイグレーションで使用する Drizzle のスキーマ定義。
-- `db/migrations/`: 生成または手書きの SQL マイグレーション。
-- `db/seeders/`: サンプルデータを投入するシードスクリプト。
+- `config/database.ts`: データベース接続を作り、フレームワークから使えるようにします。
+- `drizzle.config.ts`: drizzle-kit の共通設定です(スキーマのパス、マイグレーションの出力先、DB 方言など)。
+- `db/schema.ts`: モデルとマイグレーションで使う Drizzle のスキーマ定義です。
+- `db/migrations/`: 生成した、または手で書いた SQL マイグレーションを置きます。
+- `db/seeders/`: サンプルデータを投入するシードスクリプトを置きます。
 
-`.env` ファイルで `DATABASE_URL` を設定してください(デフォルト値: `postgres://guren:guren@localhost:54322/guren`)。このキーはスキャフォールドの `config/env.ts` に宣言済みです。
+`.env` ファイルで `DATABASE_URL` を設定してください(デフォルト値: `postgres://guren:guren@localhost:54322/guren`)。このキーは、雛形の `config/env.ts` ですでに宣言されています。
 
-`config/database.ts` はドライバのファクトリで接続を作り、`defineDatabaseConfig()` で包んで default export します。`createApp({ config })` にこの定義を並べると、アプリは検証済みの環境変数を使って起動時に ORM を接続します。下の各ドライバの節にファイルの形を載せています。リゾルバが受け取る `context` 引数は[設定](./configuration.md#データベース接続)で説明しています。
+`config/database.ts` では、ドライバのファクトリで接続を作り、`defineDatabaseConfig()` で包んで default export します。この定義を `createApp({ config })` に加えると、アプリは起動時に、検証済みの環境変数を使って ORM を接続します。ファイルの書き方は、下の各ドライバの節に載せています。リゾルバが受け取る `context` 引数については[設定](./configuration.md#データベース接続)で説明しています。
 
 ## スキーマ定義
-`db/schema.ts` で Drizzle のスキーマビルダーを使います。
+スキーマは `db/schema.ts` に、Drizzle のスキーマビルダーを使って書きます。
 
 ```ts
 import { pgTable, serial, text, boolean, timestamp, jsonb } from '@guren/orm/drizzle/pg'
@@ -35,14 +35,14 @@ export const posts = pgTable('posts', {
 ```
 
 PostgreSQL では、タイムスタンプ列に必ず `{ withTimezone: true }` を付けてください。
-`timestamp without time zone` はオフセットを持たない壁時計を保存します。そのため
-`defaultNow()` はデータベースセッションのタイムゾーンで書き込むのに、アプリはそれを
-UTC として読み戻し、アプリ以外のクライアントには別の時刻が見えることになります。
-スキャフォールドは既にこれを出力します。付け忘れた列は `bunx guren check`
-が警告します。この警告はスキーマを静的に解析するので、読み取れた範囲しか
-報告できません。警告が出ないことは「検出されなかった」であって、保証ではありません。
+`timestamp without time zone` は、オフセットを持たない時計の表示だけを保存します。
+そのため、`defaultNow()` はデータベースセッションのタイムゾーンで値を書き込むのに、
+アプリはその値を UTC として読み戻し、アプリ以外のクライアントには別の時刻が見えてしまいます。
+雛形はすでにこのオプションを付けて出力します。付け忘れた列があれば `bunx guren check`
+が警告します。ただし、この警告はスキーマを静的に解析して出すので、読み取れた範囲しか
+報告できません。警告が出ないのは検出されなかったというだけで、問題が無い保証にはなりません。
 
-テーブルは `defineModel()` でモデルに公開するのが推奨です。
+テーブルは、`defineModel()` を使ってモデルから扱えるようにするのがおすすめです。
 
 ```ts
 // app/Models/Post.ts
@@ -58,7 +58,7 @@ export class Post extends defineModel(posts) {}
 
 ### create のペイロードを整える
 
-`defineModel()` が `create()` 用に推論する型は、データベース側のデフォルト値を持たない全カラムを必須にします。モデル自身が値を導出するカラムがある場合は、型を手書きせず同じ呼び出しで指定します。
+`defineModel()` が `create()` 用に推論する型では、データベース側にデフォルト値の無いカラムがすべて必須になります。値をモデル自身が作るカラムがある場合は、型を手で書かずに、同じ `defineModel()` の呼び出しで指定してください。
 
 ```ts
 export class User extends defineModel(users, {
@@ -68,13 +68,13 @@ export class User extends defineModel(users, {
 }) {}
 ```
 
-`optionalOnCreate` はカラムを任意にします(型はそのままで、渡さなくてよくなります)。`requireOnCreate` は逆にフィールドを必須にし、テーブルのカラム(Drizzle はデフォルト値付きを任意にします)と `base` が提供するフィールドの両方を受け付けます。どちらも型レベルのみの指定で、実際のキーと照合されるためタイポはコンパイルエラーになります。
+`optionalOnCreate` はカラムを任意にします(型は変わらず、渡さなくてもよくなります)。`requireOnCreate` は反対にフィールドを必須にします。指定できるのは、テーブルのカラム(Drizzle はデフォルト値のあるカラムを任意にします)と、`base` が持つフィールドです。どちらも型の上だけの指定ですが、実際のキーと照合されるので、打ち間違いはコンパイルエラーになります。
 
-どちらもペイロードを閉じるわけではありません。create の型は未知のキーを `unknown` として受け入れるため、意図しないフィールドを実行時に弾くのは引き続き `fillable` です。
+どちらを指定しても、ペイロードに入れられるキーが限定されるわけではありません。create の型は知らないキーも `unknown` として受け入れるので、意図しないフィールドを実行時に弾くのはこれまでどおり `fillable` の役目です。
 
 ## SQLite サポート
 
-Guren は Bun 組み込みの SQLite ドライバで SQLite に対応しています。新規プロジェクトはデフォルトで SQLite を使うため、Docker や外部データベースのセットアップは要りません。
+Guren は、Bun に組み込まれた SQLite ドライバで SQLite に対応しています。新しいプロジェクトはデフォルトで SQLite を使うので、Docker や外部のデータベースを用意する必要はありません。
 
 ```ts
 // config/database.ts
@@ -98,16 +98,16 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
 
-`seedOnBoot` が true のとき、マイグレーションフォルダにマイグレーションがあれば起動時にシーダーを実行します。スキャフォールドは本番でこれを無効にしているので、本番では `bunx guren db:seed` を明示的に実行してください。テスト用ファイルの分離は[テストガイド](./testing.md#テストデータベースの分離)で説明しています。
+`seedOnBoot` が true のときは、マイグレーションフォルダにマイグレーションがあれば、起動時にシーダーが実行されます。雛形では本番環境でこの設定を無効にしているので、本番では `bunx guren db:seed` を明示的に実行してください。テスト用のデータベースファイルを分ける方法は、[テストガイド](./testing.md#テストデータベースの分離)で説明しています。
 
-SQLite アダプタは `createPostgresDatabase` と同じ API を持つため、切り替えはインポートと接続設定の変更だけで済みます。
+SQLite アダプタは `createPostgresDatabase` と同じ API を持っているので、import と接続設定を変えるだけで切り替えられます。
 
 > [!TIP]
-> 開発とテストには SQLite を使い、本番では PostgreSQL に切り替えるのがおすすめです。ORM アダプタが差を吸収するので、モデルやクエリはそのまま動きます。
+> 開発とテストでは SQLite を使い、本番では PostgreSQL に切り替える構成がおすすめです。違いは ORM アダプタが吸収するので、モデルやクエリはそのまま動きます。
 
 ## MySQL サポート
 
-MySQL(および互換データベース)を使う場合は `createMySqlDatabase` を使います。
+MySQL(と互換データベース)を使う場合は、`createMySqlDatabase` を使います。
 
 ```ts
 // config/database.ts
@@ -126,14 +126,14 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
 
-MySQL アダプタも PostgreSQL / SQLite と同じランタイム API(`getDatabase`, `migrateDatabase`, `configureOrm`, `seedDatabase`)を提供するため、切り替え時は主に import と接続設定の変更だけで済みます。
+MySQL アダプタも、PostgreSQL / SQLite と同じランタイム API(`getDatabase`, `migrateDatabase`, `configureOrm`, `seedDatabase`)を持っています。そのため、切り替えるときに変えるのは、主に import と接続設定だけです。
 
 > [!TIP]
-> Drizzle のリレーショナルクエリ (`db.query.<table>.findMany(...)`) を使いたい場合は、`drizzle-orm` の `defineRelations(schema, ...)` で生成した値を `relations` オプションに渡してください (RQB v2)。Guren の `Model` API ではこの設定は不要です。
+> Drizzle のリレーショナルクエリ (`db.query.<table>.findMany(...)`) を使いたい場合は、`drizzle-orm` の `defineRelations(schema, ...)` で作った値を `relations` オプションに渡してください (RQB v2)。Guren の `Model` API だけを使うなら、この設定は要りません。
 
 ## Aurora Serverless（AWS Data API）サポート
 
-AWS Lambda 上で RDS Data API を有効にした Aurora Serverless v2 に接続する場合は `createAwsDataApiDatabase` を使います。Data API は HTTP ベースのため、接続プールの管理が不要で、Lambda 関数を VPC 内に配置する必要もありません。
+AWS Lambda から、RDS Data API を有効にした Aurora Serverless v2 に接続する場合は、`createAwsDataApiDatabase` を使います。Data API は HTTP で通信するので、接続プールを管理する必要がなく、Lambda 関数を VPC 内に置く必要もありません。
 
 ```ts
 // config/database.ts
@@ -159,48 +159,48 @@ export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV
 
 3 つのキーは `config/env.ts` に宣言してください(例: `Env.string().optional()`。[設定](./configuration.md#環境変数を宣言する)を参照)。
 
-ドライバパッケージも合わせてインストールしてください:
+ドライバのパッケージもインストールしてください。
 
 ```bash
 bun add @aws-sdk/client-rds-data
 ```
 
-このアダプタも他のドライバと同じランタイム API を提供し、マイグレーションは標準の drizzle-kit フォルダを使用します。意図的な違いが 1 つあります。`getDatabase()` は保留中のマイグレーションを自動実行**しません**。Lambda ではこのチェックがコールドスタートのたびに直列の Data API 往復を数回消費するからです。マイグレーションは帯域外で実行するか(ローカルでは `bun run db:migrate`、デプロイ後はコンソールハンドラ)、`migrateOnStart: true` で従来の挙動に戻せます。Data API に対して `drizzle-kit generate`/`push` を実行する場合は、`drizzle.config.ts` に `driver: 'aws-data-api'` と同じ `database`/`resourceArn`/`secretArn` を設定してください。
+このアダプタもほかのドライバと同じランタイム API を持ち、マイグレーションには標準の drizzle-kit のフォルダを使います。ただし、意図して変えている点が 1 つあります。`getDatabase()` は、未適用のマイグレーションを自動で実行**しません**。Lambda ではこの確認のために、コールドスタートのたびに Data API との往復が何回か順番に発生するからです。マイグレーションはアプリの起動とは別に実行してください(ローカルでは `bun run db:migrate`、デプロイ後はコンソールハンドラを使います)。`migrateOnStart: true` を指定すれば、起動時に実行する以前の動きに戻せます。Data API に対して `drizzle-kit generate`/`push` を実行する場合は、`drizzle.config.ts` に `driver: 'aws-data-api'` と、同じ `database`/`resourceArn`/`secretArn` を設定してください。
 
 > [!NOTE]
-> 認証は AWS SDK の標準クレデンシャルチェーン(Lambda 上では IAM ロール、ローカルでは `AWS_PROFILE`)を使用します。リージョンやクレデンシャルを明示的に指定する場合は `clientOptions` を渡してください。
+> 認証には AWS SDK の標準のクレデンシャルチェーン(Lambda 上では IAM ロール、ローカルでは `AWS_PROFILE`)を使います。リージョンやクレデンシャルを明示的に指定したい場合は、`clientOptions` を渡してください。
 
 ## マイグレーションの生成
-Guren CLI は drizzle-kit をラップしており、Drizzle スキーマから SQL ファイルを直接生成できます。
+Guren の CLI は drizzle-kit を内部で呼び出すので、Drizzle のスキーマから SQL ファイルを直接生成できます。
 
 ```bash
 bunx guren make:migration --name add_posts_table
 ```
 
-コマンドはプロジェクトルートの `drizzle.config.ts`(`.mts/.js/.mjs` も可)を参照し、スキーマパス・出力ディレクトリ・DB 方言のデフォルト値を取得します。`drizzle.config.json` も読み込みます(`.ts` などと並んでいる場合はそちらが優先です)。
+このコマンドは、プロジェクトルートの `drizzle.config.ts`(`.mts/.js/.mjs` でも構いません)から、スキーマのパス、出力ディレクトリ、DB 方言のデフォルト値を読み取ります。`drizzle.config.json` も読み込みます(`.ts` などと両方ある場合はそちらが優先されます)。
 
-必要に応じてスキーマや出力先を上書きできます。
+スキーマや出力先は、必要に応じて上書きできます。
 
 ```bash
 bunx guren make:migration --schema ./custom/schema.ts --out ./custom/migrations
 ```
 
-上書きを指定すると drizzle-kit には `--config` を渡せなくなります(drizzle-kit は `--config` と他のフラグの併用を拒否します)。そのため Guren が設定ファイルを自分で読み、`dialect`(および `driver`)をコマンドラインへ引き継ぎます。上書きしなかった項目は設定ファイルの値がそのまま使われるので、`--schema` だけを指定した場合でも出力先は設定ファイルの `out` のままです。
+上書きを指定すると、drizzle-kit に `--config` を渡せなくなります(drizzle-kit は `--config` とほかのフラグを同時に指定できません)。そこで Guren が設定ファイルを読み、`dialect`(と `driver`)をコマンドラインのフラグとして渡します。上書きしなかった項目には設定ファイルの値がそのまま使われるので、`--schema` だけを指定した場合でも、出力先は設定ファイルの `out` のままです。
 
-設定ファイルが無いアプリでは `dialect` の出どころが無いので、`--dialect` で明示してください。
+設定ファイルの無いアプリでは `dialect` をどこからも読めないので、`--dialect` で明示してください。
 
 ```bash
 bunx guren make:migration --dialect postgresql --schema ./db/schema.ts --out ./db/migrations
 ```
 
-`make:migration` はアプリにインストールされた drizzle-kit を実行します。アプリの `node_modules` を探し、無ければ親ディレクトリの `node_modules`(ワークスペースで巻き上げられたもの)を探します。どこにも無い場合は `bun install` を求めて停止します。npm 上の drizzle-kit はアプリが入れたものとフラグが異なる場合があるため、npm からは取得しません。
+`make:migration` は、アプリにインストールされている drizzle-kit を実行します。まずアプリの `node_modules` を探し、無ければ親ディレクトリの `node_modules`(ワークスペースで巻き上げられたもの)を探します。どこにも無ければ、`bun install` を実行するよう伝えて止まります。npm にある drizzle-kit は、アプリに入っているものとフラグが違う場合があるので、npm からは取得しません。
 
-なお設定ファイルの `schema` を配列で宣言している場合、`--schema` は値を 1 つしか取らないため上書き経路では引き継げません。この場合は Guren がエラーで停止します(黙って一部のテーブルだけを生成しないためです)。`--schema` に 1 つのパスか glob を渡すか、上書きをやめて設定ファイルをそのまま使ってください。
+なお、設定ファイルで `schema` を配列にしている場合、`--schema` には値を 1 つしか渡せないので、上書きするときにはその配列を引き継げません。この場合、Guren はエラーで止まります(一部のテーブルだけを黙って生成してしまわないようにするためです)。`--schema` に 1 つのパスか glob を渡すか、上書きをやめて設定ファイルをそのまま使ってください。
 
-空のファイルが欲しい場合は手動で作成しても構いません。マイグレーションは単なる SQL です。
+空のファイルが欲しい場合は、手で作っても構いません。マイグレーションはただの SQL です。
 
 ## マイグレーションの実行
-`db/migrations/` に SQL マイグレーションファイルを追加します(例: `0001_add_posts.sql`)。標準的な PostgreSQL 文を記述します。
+`db/migrations/` に SQL マイグレーションファイル(例: `0001_add_posts.sql`)を追加し、普通の PostgreSQL の文を書きます。
 
 ```sql
 CREATE TABLE posts (
@@ -210,29 +210,29 @@ CREATE TABLE posts (
 );
 ```
 
-マイグレーションの適用は以下のコマンドで行います。
+マイグレーションは次のコマンドで適用します。
 
 ```bash
 bun run db:migrate
 ```
 
-スキャフォールドに含まれるスクリプトが未適用のマイグレーションを順番に実行します。完了したマイグレーションは追跡されるため、再実行しても安全です。
+雛形に含まれるスクリプトが、未適用のマイグレーションを順番に実行します。適用済みのマイグレーションは記録されるので、何度実行しても問題ありません。
 
 > [!NOTE]
-> いったんどこかの環境に適用したマイグレーションは、不変として扱ってください。修正が必要な場合は、既存の SQL ファイルを編集するのではなく、新しいマイグレーションを追加します。そうすれば、すべてのデプロイ環境で履歴の一貫性が保たれます。
+> どこかの環境に一度適用したマイグレーションは、変更しないでください。修正が必要なときは、既存の SQL ファイルを編集せずに、新しいマイグレーションを追加します。そうすれば、どのデプロイ環境でも同じ履歴が保たれます。
 
 ### マイグレーションが走るタイミング
 
-マイグレーションを適用するのは `db:migrate` だけではありません。Data API アダプタと D1 アダプタを除くすべてのドライバは、最初の `getDatabase()` または `configureOrm()` の呼び出しで未適用のマイグレーションを適用します。環境による区別はありません。`bun run dev` も `bun test` も、スキャフォールドの `Dockerfile` が `bun bin/serve.ts` で起動するコンテナも、すべて起動時にマイグレーションします。新しいイメージを配るだけのデプロイがマイグレーション済みで立ち上がるのは、これがあるからです。何かを適用した起動は、適用したものとその出どころを 1 行で表示します。最新の状態のデータベースは黙って立ち上がります。
+マイグレーションが適用されるのは `db:migrate` を実行したときだけではありません。Data API アダプタと D1 アダプタ以外のドライバは、最初に `getDatabase()` か `configureOrm()` が呼ばれたときに、未適用のマイグレーションを適用します。これは環境を問いません。`bun run dev` でも `bun test` でも、雛形の `Dockerfile` が `bun bin/serve.ts` で起動するコンテナでも、起動時にマイグレーションが走ります。新しいイメージを配るだけのデプロイでも、マイグレーション済みの状態で立ち上がるのはこのためです。何かを適用した起動では、適用したものとその出どころが 1 行で表示されます。データベースが最新の状態なら、何も表示せずに立ち上がります。
 
-この便利さの代償として、残すつもりのなかったマイグレーションもデータベースに届きます。ジェネレーターは `db/migrations/` の下に新しいフォルダを未追跡のまま書きますが、`git switch` も `git branch -D` も未追跡ファイルは消しません。捨てたはずのブランチで生成したマイグレーションが、ディスクに残ったまま未適用の状態で待つことになります。ブランチが道連れにしてくれると期待せず、`git clean -fd` で消してください。何が消えるかは先に `git clean -fdn` で見られます。
+この仕組みは便利な反面、残すつもりのなかったマイグレーションまでデータベースに適用されてしまいます。ジェネレーターは `db/migrations/` の下に新しいフォルダを未追跡のまま作りますが、`git switch` でも `git branch -D` でも未追跡のファイルは消えません。そのため、捨てたつもりのブランチで生成したマイグレーションが、ディスクに残ったまま適用される時を待つことになります。ブランチと一緒に消えることは期待せず、`git clean -fd` で削除してください。何が消えるかは、先に `git clean -fdn` で確認できます。
 
-フォルダを消して間に合うのは、まだどの起動も適用していないときだけです。ジェネレーターがファイルを書き換えている最中に dev サーバーがリロードすると、そちらが先に適用します。そうなると、どのフォルダにも対応しない行がトラッカーに残ります。マイグレーターはその行を読み飛ばすので、そのマイグレーションが作ったものはデータベースに残ったままです。`db:status` はその行を orphaned(孤立)と表示し、起動のたびにマイグレーション前の警告が出ます。
+フォルダを消して間に合うのは、まだどの起動でも適用されていない場合だけです。ジェネレーターがファイルを書き換えている途中で dev サーバーがリロードすると、先にそちらで適用されてしまいます。そうなると、トラッカーにはどのフォルダにも対応しない行が残ります。マイグレーターはその行を読み飛ばすので、そのマイグレーションが作ったものはデータベースに残ったままになります。`db:status` はその行を orphaned(孤立)と表示し、起動のたびにマイグレーションの前に警告が出ます。
 
-例外の 2 つが起動時にマイグレーションしない理由は、それぞれ違います。Data API アダプタは `migrateOnStart` によるオプトインです。未適用かどうかの確認だけで、Lambda のコールドスタートのたびに直列のラウンドトリップがかかるからです。D1 にはランタイムの経路そのものがありません。マイグレーションは `wrangler d1 migrations apply <database>` を通すものなので、`migrateDatabase()` は試みずにそう伝えます。
+例外の 2 つのアダプタが起動時にマイグレーションしない理由は、それぞれ別です。Data API アダプタは、`migrateOnStart` を指定したときだけ起動時に実行します。未適用かどうかを確認するだけで、Lambda のコールドスタートのたびに往復が順番に発生するからです。D1 には、実行時にマイグレーションする手段そのものがありません。マイグレーションは `wrangler d1 migrations apply <database>` で適用するものなので、`migrateDatabase()` は実行を試みず、そのことを伝えるだけです。
 
 ## データ投入（シード）
-シードスクリプトを `db/seeders/` に配置します。典型的なシーダーは、async の `run()` 関数をエクスポートします。
+シードスクリプトは `db/seeders/` に置きます。よくある形のシーダーは、async の `run()` 関数を export します。
 
 ```ts
 // db/seeders/PostsSeeder.ts
@@ -243,7 +243,7 @@ export async function run() {
 }
 ```
 
-すべてのシーダーを実行するには以下のコマンドを使います。
+すべてのシーダーは次のコマンドで実行します。
 
 ```bash
 bun run db:seed
@@ -251,7 +251,7 @@ bun run db:seed
 
 ### Drizzle を直接使うシーダー
 
-`defineSeeder()` はシーダーに Drizzle のデータベースそのものを渡します。モデル層を介さない一括 INSERT や UPSERT に便利です。この `db` の型はダイアレクトごとに異なるため、コンテキストには `AppSeederContext` を注釈してください。アプリが設定しているデータベースに対応する別名を `config/database.ts` がエクスポートしています。
+`defineSeeder()` を使うと、シーダーに Drizzle のデータベースそのものが渡されます。モデル層を通さずに一括で INSERT や UPSERT をしたいときに便利です。この `db` の型はダイアレクトごとに違うので、コンテキストには `AppSeederContext` の型注釈を付けてください。`AppSeederContext` は、アプリが設定しているデータベースに合わせた型の別名で、`config/database.ts` が export しています。
 
 ```ts
 // db/seeders/PostsSeeder.ts
@@ -264,7 +264,7 @@ export default defineSeeder(async ({ db }: AppSeederContext) => {
 })
 ```
 
-型引数なしの `SeederContext` は PostgreSQL を意味するため、MySQL や SQLite では自分のスキーマが型エラーになります。`AppSeederContext` は、このリリース以降にスキャフォールドしたアプリの `config/database.ts` がエクスポートします。それ以前に作成したアプリでは、ダイアレクトの別名(`PostgresSeederContext` / `MySqlSeederContext` / `SqliteSeederContext` / `AwsDataApiSeederContext`)を `@guren/core` から直接インポートしてください。
+型引数なしの `SeederContext` は PostgreSQL 用なので、MySQL や SQLite ではアプリのスキーマが型エラーになります。`AppSeederContext` を export しているのは、このリリース以降に雛形生成したアプリの `config/database.ts` です。それより前に作ったアプリでは、ダイアレクトごとの別名(`PostgresSeederContext` / `MySqlSeederContext` / `SqliteSeederContext` / `AwsDataApiSeederContext`)を `@guren/core` から直接 import してください。
 
 ```ts
 import { defineSeeder, type MySqlSeederContext } from '@guren/core'
@@ -273,13 +273,13 @@ import { defineSeeder, type MySqlSeederContext } from '@guren/core'
 > [!NOTE]
 > D1 にはシーダーコンテキストがありません。`seedDatabase()` はシーダーを実行しないため、D1 のシードは `wrangler d1 execute <database> --file <seed.sql>` で行ってください。
 
-開発・テスト・デモ環境のフィクスチャ投入にシーダーを活用してください。
+シーダーは、開発・テスト・デモ環境に fixture のデータを入れるときに使ってください。
 
 > [!CAUTION]
-> シードスクリプトはデータを変更・削除する可能性があります。シーダーがその環境向けに明示的に設計されていない限り、本番データベースに対して実行しないでください。
+> シードスクリプトはデータを変更したり削除したりすることがあります。本番環境向けに作ったシーダーでない限り、本番のデータベースに対しては実行しないでください。
 
 ## ORM の使い方
-`DatabaseProvider`(または `bootModels()` を呼ぶ独自プロバイダー)がアプリケーション起動時に実行されると、すべてのモデルが設定済みのデータベースアダプターにアクセスできるようになります。よく使うヘルパーは以下の通りです。
+アプリケーションの起動時に `DatabaseProvider`(または `bootModels()` を呼ぶ独自のプロバイダー)が実行されると、すべてのモデルから設定済みのデータベースアダプターを使えるようになります。よく使うヘルパーは次のとおりです。
 
 ```ts
 await Post.all()            // 全件取得
@@ -289,13 +289,13 @@ await Post.create(payload)  // 新しいレコードを挿入
 await Post.first()          // 最初のマッチするレコードを返す
 ```
 
-一括の `update()`・`forceUpdate()`・`delete()` では `limit()`・`offset()`・`orderBy()` を指定できません。先に対象の ID を取得し、`whereIn()` で更新・削除してください。`SoftDeletes` モデルではビルダーの `delete()` も論理削除になります。物理削除には `forceDelete()` を使います。
+一括の `update()`・`forceUpdate()`・`delete()` では、`limit()`・`offset()`・`orderBy()` を指定できません。先に対象の ID を取得してから、`whereIn()` で更新・削除してください。`SoftDeletes` を使うモデルでは、ビルダーの `delete()` も論理削除になります。物理削除には `forceDelete()` を使います。
 
-SQLite では、トランザクションの外から呼んだ通常のモデル読み書きは、そのトランザクションの終了を待ちます。引数なしの `toDrizzle()` が返すクエリも、await すれば同じように待ちます。同期実行の `.all()`・`.get()`・`.run()`・`.values()` は待てないため、別のリクエストがトランザクションを開いている間は例外になります。`db` から自分で組み立てた Drizzle クエリは待たずにそのトランザクションの中で実行されます。`toDrizzle(query)` に渡したクエリも同じです。先にトランザクションの終了を待ってください。
+SQLite では、トランザクションの外から呼んだ通常のモデルの読み書きは、開いているトランザクションが終わるのを待ってから実行されます。引数なしの `toDrizzle()` が返すクエリも、await すれば同じように待ちます。同期実行の `.all()`・`.get()`・`.run()`・`.values()` は待てないので、別のリクエストがトランザクションを開いている間に呼ぶと例外になります。`db` から自分で組み立てた Drizzle クエリは、待たずにそのトランザクションの中で実行されてしまいます。`toDrizzle(query)` に渡したクエリも同じです。こうしたクエリは、先にトランザクションの終了を待ってから実行してください。
 
 ## トランザクション
 
-複数の書き込みを「全部成功 or 全部失敗」にしたい場合は `Model.transaction()` を使います。
+複数の書き込みを、すべて成功するかすべて失敗するかのどちらかにしたい場合は、`Model.transaction()` を使います。
 
 ```ts
 await Post.transaction(async (trx) => {
@@ -310,13 +310,13 @@ await Post.transaction(async (trx) => {
 
 コールバック内で例外が投げられると、トランザクションはロールバックされます。
 
-コールバックの中では、`{ trx }` を渡していないモデル呼び出しも開いているトランザクション上で実行されます。ハンドルを渡す書き方も引き続き有効で、後述のトランザクション束縛スコープはそれを代行します。渡していない呼び出しもプールへは流れず、同じトランザクションの中で実行されます。接続がひとつのプールでは、プールへ流れたクエリはトランザクションが握っている接続を待ち続けます。
+コールバックの中では、`{ trx }` を渡していないモデルの呼び出しも、開いているトランザクションの上で実行されます。ハンドルを渡す書き方もこれまでどおり使え、後述のトランザクション束縛スコープはその受け渡しを代わりに行います。ハンドルを渡していない呼び出しもプールには回らず、同じトランザクションの中で実行されます。もしプールに回っていたら、接続が 1 本だけのプールでは、その接続を使っているトランザクションをずっと待ち続けることになります。
 
-トランザクションの内側で開かれた `Model.transaction()` は、すでに開いているトランザクションの上のセーブポイントとして実行されます。書き込みは外側と一緒にコミットまたはロールバックされ、内側のエラーを外側のコールバックが握りつぶした場合は内側の書き込みだけが取り消されます。入れ子のトランザクションは 1 つずつ await してください。ひとつの接続上のセーブポイントは取得した順に解放されるため、同時にふたつ走らせると互いのフレームを壊します。
+トランザクションの内側で呼んだ `Model.transaction()` は、開いているトランザクションの上のセーブポイントとして実行されます。内側の書き込みは外側と一緒にコミットまたはロールバックされます。内側で起きたエラーを外側のコールバックが握りつぶした場合は、内側の書き込みだけが取り消されます。入れ子のトランザクションは 1 つずつ await してください。1 つの接続の上のセーブポイントは作った順に解放されるので、2 つを同時に走らせると互いのフレームを壊してしまいます。
 
-SQLite は接続をひとつしか持たないため、同時に扱えるトランザクションはひとつだけです。同時に開始されたトランザクションは順番待ちのうえ逐次実行され、それぞれが個別にコミットまたはロールバックされます。コールバックの中でデータベース以外の処理を await しても問題ありません。次のトランザクションを待たせるだけです。
+SQLite は接続を 1 つしか持たないので、同時に扱えるトランザクションも 1 つだけです。同時に開始したトランザクションは順番に 1 つずつ実行され、それぞれが個別にコミットまたはロールバックされます。コールバックの中でデータベース以外の処理を await しても問題はなく、次のトランザクションが待たされるだけです。
 
-より簡潔に書きたい場合は、トランザクション束縛スコープも使えます。
+もっと簡潔に書きたい場合は、トランザクション束縛スコープも使えます。
 
 ```ts
 await Post.transaction(async (_trx, txPost) => {
@@ -331,7 +331,7 @@ await Post.transaction(async (_trx, txPost) => {
 
 ## Fluent クエリビルダー
 
-モデルは Fluent な `QueryBuilder` を公開しており、条件・ソート・制限をチェーンしてから実行できます。
+モデルから使える `QueryBuilder` では、条件、並び順、件数の制限をメソッドチェーンでつなげてから実行できます。
 
 ```ts
 // シンプルな where 句
@@ -360,7 +360,7 @@ const hits = await Post.where((q) => {
 const users = await User.where({ role: 'admin' })
 ```
 
-`QueryBuilder` は thenable なので、直接 `await` することも `.get()` を明示的に呼ぶこともできます。どちらも同じ結果になります。
+`QueryBuilder` は thenable なので、そのまま `await` しても、`.get()` を明示的に呼んでも構いません。結果はどちらも同じです。
 
 ### 利用可能な QueryBuilder メソッド
 
@@ -393,17 +393,17 @@ const newest = await Post.newQuery().max('createdAt')
 const hasDrafts = await Post.where('status', 'draft').exists()
 ```
 
-集計にもモデルのグローバルスコープが掛かります。`SoftDeletes` を持つモデルでは、`get()` と同じくゴミ箱に入った行は合計に含まれません。
+集計にも、モデルのグローバルスコープが適用されます。`SoftDeletes` を使うモデルでは、`get()` と同じように、ゴミ箱に入った行は合計に含まれません。
 
-戻り値の型は列の型に従います。`integer` や `real` の列の合計は `number`、`bigint({ mode: 'bigint' })` の列は `bigint`、`numeric` や `decimal` の列は `string` です。Drizzle がこれらの列を桁が落ちないよう文字列で扱うのに合わせています。`avg()` は `number` の列なら `number` を、それ以外の列なら小数の文字列を返します。
+戻り値の型は列の型で決まります。合計は、`integer` や `real` の列なら `number`、`bigint({ mode: 'bigint' })` の列なら `bigint`、`numeric` や `decimal` の列なら `string` になります。Drizzle がこれらの列を、桁が落ちないように文字列で扱うのに合わせています。`avg()` は、`number` の列なら `number` を、それ以外の列なら小数の文字列を返します。
 
-一致する行が無いとき、`sum()` はその型のゼロ(`0`、`0n`、`'0'`)を返し、ほかの 3 つは `null` を返します。`count()` と同じく `limit()` と `offset()` は無視されます。
+一致する行が無いとき、`sum()` はその型のゼロ(`0`、`0n`、`'0'`)を返し、ほかの 3 つは `null` を返します。`count()` と同じく、`limit()` と `offset()` は無視されます。
 
-`number` の列の合計が `Number.MAX_SAFE_INTEGER` を超えると、丸めずに例外を投げます。その列は `mode: 'bigint'` で宣言してください。
+`number` の列の合計が `Number.MAX_SAFE_INTEGER` を超えた場合は、値を丸めずに例外を投げます。そうした列は `mode: 'bigint'` で宣言してください。
 
 ### クイックテンプレート: モデルファースト vs RQB
 
-用途に合った方を選んでください。どちらも型安全です。
+用途に合うほうを選んでください。どちらも型安全です。
 
 ```ts
 // モデルファースト（簡潔な CRUD、流暢なビルダー）
@@ -434,7 +434,7 @@ const rows = await Post.newQuery()
 
 ### Drizzle に渡す（`toDrizzle()`）
 
-`toDrizzle()` は、モデルの条件とグローバルスコープを `WHERE` 句に入れた状態でクエリを Drizzle に渡します。結合や独自の select など、ビルダーで書けないクエリに使います。
+`toDrizzle()` を使うと、モデルの条件とグローバルスコープを `WHERE` 句に入れたまま、クエリを Drizzle に引き渡せます。結合や独自の select など、ビルダーでは書けないクエリに使います。
 
 ```ts
 import { getDatabase } from '@/config/database'
@@ -452,21 +452,21 @@ const rows = await Post.where('status', 'published')
   .orderBy(desc(posts.id))
 ```
 
-- 引数なしの `toDrizzle()` は `select().from(table)` から始まり、トランザクションが開いていればその中で実行されます。渡したクエリは、それを組み立てたハンドルで実行されます。`Model.transaction()` の中では `trx` から組み立ててください。
-- 戻り値に重ねた `.where()` はモデルの条件と AND で結合されるので、スコープは外れません。すでに `where()` を呼んだクエリを渡すときは、その前に `$dynamic()` を呼んでください。
-- ビルダーの `orderBy()`、`limit()`、`offset()` は引き継がれます。`select()` を引き継ぐのは引数なしの形だけで、渡したクエリは自分の select のままです。
-- 行は Drizzle が読んだ形のまま返ります。キャスト、アクセサ、Eager Loading は適用されません。
-- `toSql()` は同じ条件をひとつの `SQL` 断片として返します。素の Drizzle の select では 2 回目の `.where()` が 1 回目を置き換えるので、自分で組み立てるクエリでは `and()` で結合してください。
+- 引数なしの `toDrizzle()` は `select().from(table)` から始まり、トランザクションが開いていればその中で実行されます。クエリを渡した場合は、そのクエリを組み立てたハンドルで実行されます。`Model.transaction()` の中では、`trx` から組み立ててください。
+- 戻り値にさらに `.where()` を付けると、モデルの条件と AND で結合されるので、スコープが外れることはありません。すでに `where()` を呼んだクエリを渡すときは、その前に `$dynamic()` を呼んでください。
+- ビルダーの `orderBy()`、`limit()`、`offset()` は引き継がれます。`select()` を引き継ぐのは引数なしの形だけで、クエリを渡した場合はそのクエリの select がそのまま使われます。
+- 行は Drizzle が読んだ形のまま返り、キャスト、アクセサ、Eager Loading は適用されません。
+- `toSql()` は、同じ条件を 1 つの `SQL` 断片として返します。素の Drizzle の select では 2 回目の `.where()` が 1 回目を置き換えてしまうので、自分で組み立てるクエリでは `and()` でつないでください。
 
 ```ts
 const popular = await db.select().from(posts).where(and(Post.newQuery().toSql(), gt(posts.views, 100)))
 ```
 
-`db` だけで書いたクエリはモデルを通らず、スコープもひとつも掛かりません。`Model.query()` はそうしたクエリを返していたため、非推奨になりました([アップグレード](./upgrading.md)を参照)。
+`db` だけで書いたクエリはモデルを通らないので、スコープは 1 つも適用されません。`Model.query()` はそうしたクエリを返していたので、非推奨になりました([アップグレード](./upgrading.md)を参照)。
 
 ## クエリスコープ
 
-再利用可能なクエリ制約を、モデル上の名前付きスコープとして定義できます。よく使うフィルタに名前が付き、探すのも組み合わせるのも楽になります。
+何度も使うクエリの条件は、モデルに名前付きのスコープとして定義できます。よく使うフィルタに名前が付くので、探すのも組み合わせるのも楽になります。
 
 ```ts
 import { defineModel, type QueryBuilder } from '@guren/core'
@@ -483,7 +483,7 @@ export class Post extends defineModel(posts) {
 }
 ```
 
-`.scope()` でスコープを適用します。
+スコープは `.scope()` で適用します。
 
 ```ts
 // 単一のスコープ
@@ -501,7 +501,7 @@ const myPopularPosts = await Post.scope('published')
 
 ## グローバルスコープ
 
-グローバルスコープは、モデルのすべてのクエリに自動的に適用されるフィルタです。マルチテナンシーやソフトデリートなど、常に有効にしたい条件に使います。
+グローバルスコープは、モデルのすべてのクエリに自動で適用されるフィルタです。マルチテナンシーやソフトデリートのように、常にかけておきたい条件に使います。
 
 ```ts
 // 現在のテナントで常にフィルタ
@@ -511,43 +511,43 @@ User.addGlobalScope('tenant', (q) => q.where('tenantId', currentTenantId()))
 User.addGlobalScope('active', (q) => q.where('active', true))
 ```
 
-すべてのクエリ入口に自動適用されます。対象は `all()`、`find()`、`first()`、`where()` と
+グローバルスコープは、クエリを始めるどのメソッドにも自動で適用されます。対象は `all()`、`find()`、`first()`、`where()` と
 その `whereIn` / `whereNull` / `select` 系、`scope()`、`orderBy()`、`paginate()`
 (行だけでなく件数にも)、`newQuery()`、そしてリレーションを eager load するクエリ
-(この場合は*関連先*モデルのスコープが適用されます)です。
+(この場合は*関連先*のモデルのスコープが適用されます)です。
 
-書き込みも同様です。`update()`・`forceUpdate()`・`delete()` は `where` に同じスコープを
-足すため、`tenant` スコープがあれば、あるテナントが別テナントの行を「読む」だけでなく
-「更新・削除する」ことも防げます。
+書き込みにも適用されます。`update()`・`forceUpdate()`・`delete()` は `where` に同じスコープを
+加えるので、`tenant` スコープがあれば、別のテナントの行を読むことだけでなく、
+更新や削除も防げます。
 
-これを回避する唯一の方法は、下記のとおり明示的に指定することです。
+スコープを外せるのは、次に説明する方法で明示的に指定した場合だけです。
 
 ### グローバルスコープの一時除外
 
-特定のスコープを1回のクエリだけ除外できます。
+特定のスコープを、1 回のクエリでだけ外せます。
 
 ```ts
 const allUsers = await User.withoutGlobalScope('active').get()
 ```
 
-すべてのグローバルスコープを除外する場合は以下のようにします。
+すべてのグローバルスコープを外すには、次のようにします。
 
 ```ts
 const everyone = await User.withoutGlobalScopes().get()
 ```
 
-スコープを完全に削除することもできます。
+スコープそのものを削除することもできます。
 
 ```ts
 User.removeGlobalScope('active')
 ```
 
 > [!TIP]
-> `SoftDeletes` ミックスインは `'softDelete'` という名前のグローバルスコープを登録します。`withTrashed()` は `withoutGlobalScope('softDelete')` そのものであり、どちらの書き方でも削除済みレコードに到達しつつ、他のグローバルスコープはそのまま適用されます。つまり `tenant` スコープによる分離は維持されます。それも含めてすべて外すのは `withoutGlobalScopes()` だけです。
+> `SoftDeletes` ミックスインは、`'softDelete'` という名前のグローバルスコープを登録します。`withTrashed()` は `withoutGlobalScope('softDelete')` と同じ処理なので、どちらで書いても削除済みのレコードまで取得でき、ほかのグローバルスコープはそのまま適用されます。`tenant` スコープによるテナントの分離も保たれます。それも含めてすべてのスコープを外すのは、`withoutGlobalScopes()` だけです。
 
 ## モデルフック
 
-フックを使うと、モデルのライフサイクルの特定のポイントでロジックを実行できます。静的な `hooks` オブジェクトとして定義します。
+フックを使うと、モデルのライフサイクルの決まったタイミングで処理を実行できます。フックは静的な `hooks` オブジェクトに定義します。
 
 ```ts
 import { defineModel } from '@guren/core'
@@ -595,7 +595,7 @@ export class Post extends defineModel(posts) {
 
 ## モデルオブザーバー
 
-フックのロジックが複雑になったら、専用のオブザーバークラスに切り出せます。オブザーバーはフックと同じライフサイクルイベントに応答しますが、独立したファイルに配置できます。
+フックの処理が複雑になってきたら、専用のオブザーバークラスに切り出せます。オブザーバーはフックと同じライフサイクルイベントを受け取りますが、別のファイルに分けて置けます。
 
 ```ts
 // app/Observers/PostObserver.ts
@@ -612,7 +612,7 @@ export class PostObserver implements ModelObserver {
 }
 ```
 
-モデルにオブザーバーを登録します。
+オブザーバーはモデルに登録して使います。
 
 ```ts
 import { PostObserver } from '@/app/Observers/PostObserver'
@@ -620,13 +620,13 @@ import { PostObserver } from '@/app/Observers/PostObserver'
 Post.observe(PostObserver)
 ```
 
-before イベント(`creating`、`updating`、`deleting`、`saving`)で `false` を返すと操作が中止されます。インラインフックと同じ動作です。
+操作の前に呼ばれるイベント(`creating`、`updating`、`deleting`、`saving`)で `false` を返すと、その操作は中止されます。インラインのフックと同じ動きです。
 
-フックとオブザーバーは共存できます。フックが先に実行され、その後にオブザーバーが実行されます。
+フックとオブザーバーは同時に使えます。先にフックが実行され、そのあとでオブザーバーが実行されます。
 
 ## ソフトデリート
 
-ソフトデリートは、レコードを実際に削除する代わりに `deletedAt` タイムスタンプを設定して削除済みとしてマークします。`SoftDeletes` をミックスインして有効にします。
+ソフトデリートでは、レコードを実際には削除せず、`deletedAt` にタイムスタンプを入れて削除済みの印を付けます。`SoftDeletes` をミックスインすると有効になります。
 
 ```ts
 import { SoftDeletes, defineModel } from '@guren/core'
@@ -635,7 +635,7 @@ import { posts } from '@/db/schema'
 export class Post extends SoftDeletes(defineModel(posts)) {}
 ```
 
-スキーマに `deletedAt`(または同等の)タイムスタンプカラムが必要です。
+スキーマには、`deletedAt`(または同じ役割の)タイムスタンプカラムが必要です。
 
 ### ソフトデリートの操作
 
@@ -659,15 +659,15 @@ await Post.restore({ id: 1 })
 await Post.forceDelete({ id: 1 })
 ```
 
-これらはいずれもモデルの「他の」グローバルスコープを尊重します。`delete()` が
+これらのメソッドには、どれもモデルの*ほかの*グローバルスコープが適用されます。`delete()` が
 `deletedAt` を設定するのは、現在のスコープから見える未削除の行だけです。すでに削除済みの
-行に対しては何にもマッチせず、元の `deletedAt` はそのまま残ります。`restore()` と
-`forceDelete()` は削除済みレコードに到達するために `softDelete` フィルタだけを外し、
-残りのスコープは維持します。したがって `tenant` スコープがあれば、取り消しのきかない
-`forceDelete()` が別テナントの行に届くことはありません。
+行には一致しないので、元の `deletedAt` はそのまま残ります。`restore()` と
+`forceDelete()` は、削除済みのレコードを対象にするために `softDelete` フィルタだけを外し、
+ほかのスコープは残します。そのため `tenant` スコープがあれば、取り消しのきかない
+`forceDelete()` が別のテナントの行を消すことはありません。
 
-トランザクション内では、いずれもハンドルを受け取れます。`delete()` はトランザクション
-スコープが担い、残りは他の書き込みと同じく末尾の引数で受け取ります。
+トランザクションの中では、どのメソッドにもトランザクションのハンドルを渡せます。`delete()` は
+トランザクションスコープから呼び、それ以外はほかの書き込みと同じく最後の引数で渡します。
 
 ```ts
 await Post.transaction(async (trx, txPost) => {
@@ -680,7 +680,7 @@ await Post.transaction(async (trx, txPost) => {
 
 ## 属性キャスト
 
-`static casts` を定義すると、データベースから読み取ったカラムの値を自動的に変換できます。
+`static casts` を定義すると、データベースから読み取ったカラムの値が自動で変換されます。
 
 ```ts
 export class Post extends defineModel(posts) {
@@ -705,11 +705,11 @@ export class Post extends defineModel(posts) {
 
 ## アクセサとミューテータ
 
-アクセサはレコード読み取り時に仮想属性を計算します。ミューテータはデータベースへの書き込み前に値を変換します。
+アクセサは、レコードを読み取るときに仮想的な属性を計算します。ミューテータは、データベースに書き込む前に値を変換します。
 
 ### アクセサ
 
-レコード取得時に自動的に適用される計算プロパティを定義します。
+レコードを取得したときに自動で計算されるプロパティを定義します。
 
 ```ts
 export class User extends defineModel(users, {
@@ -728,11 +728,11 @@ const user = await User.find(1)
 console.log(user.fullName)  // "John Doe"
 ```
 
-アクセサは `all()`、`find()`、`where()`、`first()`、`paginate()` のすべての読み取りパスで実行されます。
+アクセサは、`all()`、`find()`、`where()`、`first()`、`paginate()` のどれで読み取っても実行されます。
 
 ### ミューテータ
 
-データベースに保存する前に入力データを変換します。
+入力データを、データベースに保存する前に変換します。
 
 ```ts
 export class User extends defineModel(users) {
@@ -748,15 +748,15 @@ await User.create({ email: '  JOHN@EXAMPLE.COM  ', name: '  John  ' })
 // 保存される値: email = "john@example.com", name = "John"
 ```
 
-ミューテータは `create()` と `update()` の両方で、フックやキャストのシリアライズより前に実行されます。
+ミューテータは `create()` と `update()` のどちらでも、フックやキャストのシリアライズより先に実行されます。
 
 ## シリアライゼーション
 
-API レスポンスや Inertia プロップスでモデルレコードの表示を制御します。
+API レスポンスや Inertia の props に、モデルのレコードをどう出すかを制御できます。
 
 ### フィールドの非表示
 
-機密フィールドをシリアライズ出力から除外します。
+機密情報のフィールドを、シリアライズした出力から外します。
 
 ```ts
 export class User extends defineModel(users, {
@@ -764,7 +764,7 @@ export class User extends defineModel(users, {
 }) {}
 ```
 
-`fillable` と同じく、オプションはテーブルのカラム名に対して型チェックされます。`static hidden = [...]` も引き続き使えます。
+`fillable` と同じく、このオプションの値はテーブルのカラム名と照らして型チェックされます。`static hidden = [...]` の書き方も引き続き使えます。
 
 ```ts
 const user = await User.find(1)
@@ -773,11 +773,11 @@ const json = User.serialize(user)
 // passwordHash と rememberToken は除外される
 ```
 
-`hidden` に列挙したフィールドは `auth.user()` が返すレコードからも除去されるため、認証済みユーザーを公開する Inertia 共有 props や API レスポンスに漏れることはありません。詳細は[認証ガイド](./authentication.md)を参照してください。
+`hidden` に並べたフィールドは `auth.user()` が返すレコードからも取り除かれるので、ログイン中のユーザーを渡す Inertia の共有 props や API レスポンスに漏れることはありません。詳細は[認証ガイド](./authentication.md)を参照してください。
 
 ### 表示フィールドのホワイトリスト
 
-ブラックリストの代わりにホワイトリストを使用することもできます。
+隠すフィールドを並べる代わりに、表示するフィールドを並べることもできます。
 
 ```ts
 export class User extends defineModel(users, {
@@ -785,11 +785,11 @@ export class User extends defineModel(users, {
 }) {}
 ```
 
-`visible` が設定されている場合、そのフィールドのみが表示されます。`visible` は `hidden` より優先されます。
+`visible` を設定すると、そこに並べたフィールドだけが出力されます。`visible` は `hidden` より優先されます。
 
 ### 仮想属性の追加
 
-アクセサで計算された値をシリアライズ出力に含めます。
+アクセサで計算した値を、シリアライズした出力に含めます。
 
 ```ts
 export class User extends defineModel(users, {
@@ -801,7 +801,7 @@ export class User extends defineModel(users, {
 }) {}
 ```
 
-`appends` に書けるのは同じオプションの `accessors` で宣言した名前だけです。未宣言の名前はコンパイルエラーになります。
+`appends` に書けるのは、同じオプションの `accessors` で宣言した名前だけです。宣言していない名前を書くとコンパイルエラーになります。
 
 ```ts
 const json = User.serialize(user)
@@ -816,11 +816,11 @@ const json = User.serializeMany(users)
 ```
 
 > [!TIP]
-> `serialize()` と `serializeMany()` は Inertia ページプロップスや API レスポンスの構築に最適です。より複雑な変換には `JsonResource` と組み合わせてください。
+> `serialize()` と `serializeMany()` は、Inertia ページの props や API レスポンスを組み立てるのに向いています。もっと複雑な変換が必要なら、`JsonResource` と組み合わせてください。
 
 ## マスアサインメント保護
 
-`fillable` で、`create()` や `update()` で設定可能なフィールドを制御できます。
+`fillable` を使うと、`create()` や `update()` で値を設定できるフィールドを限定できます。
 
 ```ts
 export class Post extends defineModel(posts, {
@@ -830,14 +830,14 @@ export class Post extends defineModel(posts, {
 }) {}
 ```
 
-クラス側に `static fillable = ['title', 'body', 'status']` と宣言しても同じ許可リストになります。オプション形は TypeScript が全フィールド名をテーブルと照合するため推奨です(サブクラスの `static` 宣言はオプションを上書きします)。`fillable` を設定すると、許可リスト外のフィールドを `create()` や `update()` に渡したときに `MassAssignmentException`(`@guren/core` からエクスポート)がスローされます。エラーメッセージにはブロックされたフィールド名が入ります。タイプミスやインジェクションの試みが黙って捨てられ、後から NOT NULL 違反として現れる代わりに、呼び出した箇所でその場で気づけます。
+クラス側で `static fillable = ['title', 'body', 'status']` と宣言しても、同じ許可リストになります。ただし、オプションで渡す書き方なら TypeScript がすべてのフィールド名をテーブルと照合するので、こちらをおすすめします(サブクラスで `static` を宣言すると、オプションの値は上書きされます)。`fillable` を設定すると、許可リストに無いフィールドを `create()` や `update()` に渡したときに、`MassAssignmentException`(`@guren/core` から export されています)が投げられます。エラーメッセージには、拒否されたフィールド名が入ります。打ち間違いやインジェクションの試みが黙って捨てられ、あとで NOT NULL 違反として表に出るのではなく、呼び出したその場で気づけます。
 
 ```ts
 await Post.create({ title: 'Hello', body: '...', status: 'draft', authorId: 1 })
 // MassAssignmentException: Post: mass assignment blocked for field(s) "authorId"
 ```
 
-OAuth アカウント連携やシーダー、システムレコードなど、サーバーサイドで組み立てた信頼できるデータには、許可リストをバイパスする `forceCreate()` / `forceUpdate()` を使います。
+OAuth のアカウント連携、シーダー、システムが作るレコードのように、サーバー側で組み立てた信頼できるデータには、許可リストを無視する `forceCreate()` / `forceUpdate()` を使います。
 
 ```ts
 const user = await User.forceCreate({
@@ -850,18 +850,18 @@ await User.forceUpdate({ id: user.id }, { emailVerifiedAt: new Date() })
 ```
 
 > [!WARNING]
-> `forceCreate()` / `forceUpdate()` はマスアサインメント保護を完全にスキップします。リクエスト入力をそのまま渡さないでください。
+> `forceCreate()` / `forceUpdate()` は、マスアサインメント保護をまったく通しません。リクエストの入力をそのまま渡さないでください。
 
-`fillable` の設定に関係なく、次の2つの保護が常に適用されます。
+`fillable` の設定に関係なく、次の2つの保護は常に働きます。
 
-- 主キー(`id`)は一括代入の入力から常に黙って除外されます。フォームが `id` をラウンドトリップしても書き込み先は変わりません。
-- `AuthenticatableModel` を継承するモデルでは、認証情報のカラム(パスワードハッシュとリメンバートークン)は常に例外をスローします。`fillable` に列挙しても許可されません。平文の `password` を渡してモデルにハッシュ化させるか、信頼できるサーバーサイドの値には `forceCreate()` / `forceUpdate()` を使ってください。
+- 主キー(`id`)は、一括代入の入力から常に黙って取り除かれます。フォームが `id` を送り返してきても、書き込み先の行は変わりません。
+- `AuthenticatableModel` を継承したモデルでは、認証情報のカラム(パスワードハッシュとリメンバートークン)を渡すと常に例外が投げられます。`fillable` に並べても許可されません。平文の `password` を渡してモデルにハッシュ化させるか、信頼できるサーバー側の値なら `forceCreate()` / `forceUpdate()` を使ってください。
 
-`fillable` が未設定の場合、`id` と拒否された認証情報カラムを除くすべてのカラムが代入可能になります。ユーザー入力を受け取るモデルには必ず宣言してください。
+`fillable` を設定していない場合は、`id` と拒否される認証情報のカラムを除いて、すべてのカラムに代入できます。ユーザーの入力を受け取るモデルには、必ず宣言してください。
 
 ## リレーションの定義
 
-ORM には Eloquent スタイルのリレーション層が組み込まれています。リレーションはモデルクラスに一度だけ宣言します。`static table` の近くに置くと見通しがよくなります。
+ORM には、Eloquent と同じ書き方のリレーション機能が組み込まれています。リレーションはモデルクラスに一度だけ宣言します。`static table` の近くに書いておくと見通しがよくなります。
 
 ### hasMany / belongsTo
 
@@ -912,7 +912,7 @@ User.belongsToMany('roles', Role, userRoles, 'userId', 'roleId')
 Post.belongsToMany('tags', Tag, postTags, 'postId', 'tagId')
 ```
 
-`pivotTable` に渡すのは `@/db/schema` からエクスポートした Drizzle のテーブルオブジェクトで、テーブル名の文字列ではありません。
+`pivotTable` には、テーブル名の文字列ではなく、`@/db/schema` から export した Drizzle のテーブルオブジェクトを渡します。
 
 ### hasManyThrough
 
@@ -921,20 +921,20 @@ Post.belongsToMany('tags', Tag, postTags, 'postId', 'tagId')
 Country.hasManyThrough('posts', Post, User, 'countryId', 'authorId')
 ```
 
-- `hasMany(name, RelatedModel, foreignKey, localKey)`: 関連モデルの外部キーと親側のローカルキー(通常 `id`)を指定します。
-- `belongsTo(name, RelatedModel, foreignKey, ownerKey)`: 現在のモデルの外部キーと関連モデルの所有キーを結びつけます。
-- `hasOne(name, RelatedModel, foreignKey, localKey)`: `hasMany` と同じように動作しますが、単一のレコードまたは `null` を返します。
-- `belongsToMany(name, RelatedModel, pivotTable, foreignPivotKey, relatedPivotKey, parentKey?, relatedKey?)`: ピボットテーブルを通じた多対多を処理します。`pivotTable` は Drizzle のテーブルオブジェクトです。`foreignPivotKey` と `relatedPivotKey` はどちらもピボット側の列で、それぞれ自モデルと関連モデルを参照します。`parentKey` と `relatedKey` はそれらが指すローカルキーで、既定値はどちらも `'id'` です。
-- `hasManyThrough(name, RelatedModel, ThroughModel, firstKey, secondKey)`: 中間モデルを経由してリモートリレーションにアクセスします。
-- `morphMany(name, RelatedModel, morphName, localKey)`: 1対多のポリモーフィックリレーション。
-- `morphTo(name, morphName)`: ポリモーフィックリレーションの逆方向。
-- `static relationTypes` で eager load されるリレーションの型を記述します。`Model.with('author')` などのヘルパーがこれらの型をマージし、コントローラーやビューで完全に型付けされたリレーションデータを受け取れます。
+- `hasMany(name, RelatedModel, foreignKey, localKey)`: 関連モデル側の外部キーと、親側のローカルキー(通常は `id`)を指定します。
+- `belongsTo(name, RelatedModel, foreignKey, ownerKey)`: このモデルの外部キーを、関連モデルの所有キーに結び付けます。
+- `hasOne(name, RelatedModel, foreignKey, localKey)`: `hasMany` と同じように動きますが、1 件のレコードか `null` を返します。
+- `belongsToMany(name, RelatedModel, pivotTable, foreignPivotKey, relatedPivotKey, parentKey?, relatedKey?)`: ピボットテーブルを使った多対多を扱います。`pivotTable` は Drizzle のテーブルオブジェクトです。`foreignPivotKey` と `relatedPivotKey` はどちらもピボット側の列で、それぞれこのモデルと関連モデルを参照します。`parentKey` と `relatedKey` はその参照先のローカルキーで、既定値はどちらも `'id'` です。
+- `hasManyThrough(name, RelatedModel, ThroughModel, firstKey, secondKey)`: 中間のモデルを経由して、その先のリレーションを取得します。
+- `morphMany(name, RelatedModel, morphName, localKey)`: 1対多のポリモーフィックリレーションです。
+- `morphTo(name, morphName)`: ポリモーフィックリレーションの逆向きです。
+- `static relationTypes` には、eager load されるリレーションの型を書きます。`Model.with('author')` などのヘルパーがこの型をマージするので、コントローラーやビューで、完全に型の付いたリレーションのデータを受け取れます。
 
 ### ポリモーフィックリレーション
 
-ポリモーフィックリレーションを使うと、1つのリレーションで複数の親モデルに属せます。例えば、投稿と動画の両方にコメントを付けられます。
+ポリモーフィックリレーションを使うと、1つのリレーションで複数の種類の親モデルに属せます。たとえば、投稿にも動画にもコメントを付けられます。
 
-関連テーブルに type/id カラムを定義します。
+関連テーブルには、type と id のカラムを定義します。
 
 ```ts
 export const comments = sqliteTable('comments', {
@@ -945,7 +945,7 @@ export const comments = sqliteTable('comments', {
 })
 ```
 
-リレーションを登録します。
+次に、リレーションを登録します。
 
 ```ts
 Post.morphMany('comments', Comment, 'commentable', 'id')
@@ -955,7 +955,7 @@ Comment.morphTo('commentable', 'commentable')
 Model.morphMap = { Post, Video }
 ```
 
-通常のリレーションと同じようにクエリできます。
+あとは通常のリレーションと同じように取得できます。
 
 ```ts
 const postWithComments = await Post.with('comments')
@@ -964,7 +964,7 @@ const comment = await Comment.findWith(1, 'commentable')
 
 ### `with` による eager loading
 
-`Model.with()` を使って、一つ以上のリレーションを eager load できます。各レコードの浅いコピーを返し、設定された名前のプロパティにリレーションデータが挿入されます。
+`Model.with()` を使うと、1 つ以上のリレーションを eager load できます。戻り値は各レコードの浅いコピーで、リレーションに付けた名前のプロパティに関連データが入ります。
 
 ```ts
 // ユーザーと投稿を一緒に読み込む
@@ -976,7 +976,7 @@ const posts = await Post.with('author', { authorId: [1, 2] })
 // posts[0].author は関連する UserRecord か null（belongsTo の場合）
 ```
 
-QueryBuilder 上でも eager loading が使えるので、フィルタやソートと組み合わせられます。レコードを返す `get()`、`first()`、`firstOrFail()`、`paginate()` のいずれでもリレーションが付与されます。
+eager loading は QueryBuilder でも使えるので、フィルタや並べ替えと組み合わせられます。レコードを返す `get()`、`first()`、`firstOrFail()`、`paginate()` のどれを使っても、リレーションが付いてきます。
 
 ```ts
 const activeUsers = await User.where('active', true)
@@ -990,14 +990,14 @@ const user = await User.newQuery().with('posts').first()
 const page = await Post.newQuery().with('author').orderBy('id', 'desc').paginate({ page: 1, perPage: 10 })
 ```
 
-ネストリレーションはドット記法で指定します。
+ネストしたリレーションは、ドットでつないで指定します。
 
 ```ts
 const users = await User.with('posts.comments')
 ```
 
-同じリレーションから複数のパスを枝分かれさせることもできます。共通する先頭の
-リレーションは一度だけ読み込まれるため、どの枝も同じレコードに載ります。
+同じリレーションから複数のパスに枝分かれさせることもできます。共通する先頭の
+リレーションは一度だけ読み込まれるので、どの枝の結果も同じレコードに付きます。
 
 ```ts
 const users = await User.newQuery().with('posts.comments', 'posts.tags').get()
@@ -1006,10 +1006,10 @@ users[0].posts[0].comments // 読み込まれます
 users[0].posts[0].tags     // こちらも読み込まれます
 ```
 
-QueryBuilder では、`with()` のオブジェクト形式でリレーションごとにコールバックを
-渡し、読み込みクエリに条件を追加できます。コールバックは外部キーによる絞り込みが
-すでに適用されたクエリビルダを受け取るので、`where()` を呼ぶと読み込む関連レコード
-がさらに絞り込まれます。
+QueryBuilder では、`with()` にオブジェクトを渡してリレーションごとにコールバックを
+指定し、読み込むクエリに条件を加えられます。コールバックが受け取るクエリビルダには
+外部キーでの絞り込みがすでにかかっているので、`where()` を呼ぶと、読み込む関連
+レコードがさらに絞り込まれます。
 
 ```ts
 const users = await User.newQuery()
@@ -1019,9 +1019,9 @@ const users = await User.newQuery()
 users[0].posts // published な投稿だけが入る
 ```
 
-各キーは、そのキーが指す階層だけに作用し、キーを書く順序は結果に影響しません。
-ドット付きのキーは末尾の階層にかかり、先頭のリレーションは絞り込まれません。
-両方の階層を絞りたい場合は、両方のキーを指定してください。
+それぞれのキーは、そのキーが指す階層にだけ効き、キーを書く順番は結果に影響しません。
+ドットを含むキーは最後の階層にだけ効くので、先頭のリレーションは絞り込まれません。
+両方の階層を絞り込みたい場合は、両方のキーを指定してください。
 
 ```ts
 // `posts` は絞り込まれず、`comments` だけが絞り込まれる
@@ -1039,26 +1039,26 @@ await User.newQuery()
 ```
 
 > [!WARNING]
-> コールバックの最上位で `orWhere()` を呼ぶと、ローダーが適用した外部キーの条件と
-> OR で結合されるため、絞り込みではなく**条件が広がります**。次のようにグループ化
-> してください: `q.where((g) => g.where('a', 1).orWhere('b', 2))`
+> コールバックの一番外側で `orWhere()` を呼ぶと、ローダーが加えた外部キーの条件と
+> OR でつながるので、絞り込むどころか**条件が広がってしまいます**。次のように
+> グループにまとめてください: `q.where((g) => g.where('a', 1).orWhere('b', 2))`
 >
 > `select()` を使う場合は、リレーションのキーになる列(`hasMany` や `hasOne` なら
-> 外部キー、`belongsTo` ならオーナーキー)を必ず含めてください。含めないとローダー
-> が親レコードと突き合わせられず、リレーションは空になります。
+> 外部キー、`belongsTo` ならオーナーキー)を必ず含めてください。含めないと、ローダー
+> が親レコードと突き合わせられず、リレーションが空になります。
 
 > [!NOTE]
-> リレーションは親レコードごとではなくまとめて読み込むため、コールバック内の
-> `limit()` は親ごとではなく結果全体に効きます。`limit()`・`offset()`・
-> `orderBy()` を含むコールバックの場合は、キーを分割せずに 1 本のクエリで読み込
-> みます。含まない場合はドライバのパラメータ上限に収まる大きさへ分割します。
-> `belongsToMany` と `hasManyThrough` で分割されるのは、親ではなく関連先のキーで
-> す。`morphTo` の場合はコールバックが対象の型ごとに実行されるので、すべての対象
-> に共通する列だけを参照できます。
+> リレーションは親レコードごとに読み込むのではなく、まとめて読み込みます。その
+> ため、コールバックの中の `limit()` は、親ごとではなく結果全体に効きます。
+> `limit()`・`offset()`・`orderBy()` を含むコールバックでは、キーを分けずに 1 本の
+> クエリで読み込みます。含まない場合は、ドライバのパラメータ数の上限に収まるよう
+> にキーを分けて読み込みます。`belongsToMany` と `hasManyThrough` で分けられるのは、
+> 親のキーではなく関連先のキーです。`morphTo` ではコールバックが対象の型ごとに
+> 実行されるので、参照できるのはすべての対象に共通する列だけです。
 
-`belongsToMany` と `hasManyThrough` では、コールバックが制約するのは**関連先
-モデル**のクエリで、取得対象を特定するピボットテーブルや中間テーブルの検索には
-効きません。関連先モデル自身の列で絞り込んでください。
+`belongsToMany` と `hasManyThrough` でコールバックが条件を加えるのは、**関連先
+モデル**のクエリです。取得する行を決めるピボットテーブルや中間テーブルの検索には
+効かないので、関連先モデル自身の列で絞り込んでください。
 
 ```ts
 // 各投稿の `news` タグだけを残す。ピボットの検索はそのまま
@@ -1067,11 +1067,11 @@ await Post.newQuery()
   .get()
 ```
 
-静的メソッドの `Model.with()` はシグネチャが異なり、第 2 引数は**親**レコードを
-絞り込む条件です。コールバックによる制約を使う場合は
-`Model.newQuery().with({ ... })` を利用してください。
+静的メソッドの `Model.with()` はシグネチャが違い、第 2 引数は**親**レコードを
+絞り込む条件です。コールバックで条件を加えたい場合は、
+`Model.newQuery().with({ ... })` を使ってください。
 
-ネストパスの型は `relationTypes` の先頭セグメントのみが反映されます。ネスト先まで型を効かせたい場合は、先頭リレーションのレコード型の中にネストした形を宣言してください。
+ネストしたパスの型に反映されるのは、`relationTypes` の先頭のセグメントだけです。ネストの先まで型を付けたい場合は、先頭のリレーションのレコード型の中に、ネストした形を宣言してください。
 
 ```ts
 export class User extends defineModel(users) {
@@ -1085,9 +1085,9 @@ loaded[0].posts[0].comments // CommentRecord[] — 末端まで型付き
 ```
 
 > [!NOTE]
-> `relationTypes` と照合されるのは先頭セグメント(上記の `posts`)だけです。最初のドット以降は検証されない文字列なので、タイプミスや不正な末尾(`'posts.'`・`'posts..comments'`・`'posts.typo'`)もコンパイルは通ります。ランタイムでは末尾が未知のリレーション名であればエラーになりますが、それはローダーが実際にロード済みの子レコードへ再帰した場合に限られます。すべてのレコードで先頭リレーションが 0 件しかロードされなければ、末尾は一切検査されず静かに何もせず終わります。`morphTo` リレーションを経由したネストは常にランタイムでエラーになりますが、この制約も型レベルでは表現されていません。
+> `relationTypes` と照合されるのは、先頭のセグメント(上の例では `posts`)だけです。最初のドットより後ろは検証されない文字列なので、打ち間違いや不正な末尾(`'posts.'`・`'posts..comments'`・`'posts.typo'`)があってもコンパイルは通ります。実行時には、末尾が知らないリレーション名ならエラーになります。ただしそれは、ローダーが読み込んだ子レコードの中まで実際にたどった場合に限られます。先頭のリレーションがどのレコードでも 0 件だった場合は、末尾は一切検査されず、何も起きずに終わります。`morphTo` のリレーションを経由したネストは実行時に必ずエラーになりますが、この制約も型では表現されていません。
 
-`BelongsToRecord<T>` は常に `T | null` です。外部キーが `NOT NULL` で親レコードの存在が保証される場合は、代わりに `BelongsToRequiredRecord<T>` で宣言できます。`declare` 修飾子を使えばランタイム用のプレースホルダ値も不要です。
+`BelongsToRecord<T>` は常に `T | null` です。外部キーが `NOT NULL` で、親レコードが必ず存在する場合は、代わりに `BelongsToRequiredRecord<T>` で宣言できます。`declare` 修飾子を使えば、実行時用のプレースホルダの値も要りません。
 
 ```ts
 export class Comment extends defineModel(comments) {
@@ -1100,22 +1100,22 @@ const comments = await Comment.with('author')
 comments[0].author.name // null チェック不要
 ```
 
-`hasMany` リレーションは配列として展開されます(マッチするものがない場合は `[]`)。`belongsTo` は単一の関連レコードまたは外部キーが存在しない場合は `null` を返します。複数のリレーションを配列で渡すこともできます: `await User.with(['posts'])`。
+`hasMany` のリレーションは配列として入ります(一致するものが無ければ `[]`)。`belongsTo` は関連レコードを 1 件返し、外部キーが無い場合は `null` を返します。複数のリレーションを配列で渡すこともできます: `await User.with(['posts'])`。
 
 ### リレーション件数の取得
 
-`withCount()` は関連レコード本体をロードせずに `${name}Count` フィールドを付与します。件数だけ表示する一覧ページに最適です。
+`withCount()` は、関連レコードそのものは読み込まずに、`${name}Count` フィールドだけを付けます。件数だけを表示する一覧ページに向いています。
 
 ```ts
 const users = await User.withCount('posts')        // users[0].postsCount は number
 const posts = await Post.withCount(['comments', 'author'], { published: true })
 ```
 
-`hasMany` / `hasOne` / `morphMany`(レコードごとの子件数)と `belongsTo`(0 または 1)に対応しています。
+対応しているのは、`hasMany` / `hasOne` / `morphMany`(レコードごとの子の件数)と、`belongsTo`(0 か 1)です。
 
 ## ページネーション
 
-一覧ページでは ORM の `PaginatedResult<T>` をそのまま `paginate()` に流し、resource output と page definition を揃えるのが標準です。
+一覧ページでは、ORM の `PaginatedResult<T>` をそのまま `paginate()` に渡し、Resource の出力とページ定義の型をそろえるのが基本の書き方です。
 
 ```ts
 import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
@@ -1139,7 +1139,7 @@ export default class PostController extends Controller {
 ```
 
 ## トランザクション
-`config/database.ts` のデータベースインスタンスを使ってトランザクションを実行します。
+`config/database.ts` のデータベースインスタンスを使って、トランザクションを直接実行することもできます。
 
 ```ts
 import { db } from '@/config/database'
@@ -1149,14 +1149,14 @@ await db.transaction(async (tx) => {
 })
 ```
 
-操作をアトミックに保つため、必要に応じてモデルや Drizzle クエリに `tx` を渡してください。
+操作をアトミックに保つために、必要に応じてモデルや Drizzle のクエリに `tx` を渡してください。
 
 ## Tips
-- マイグレーションは冪等に保ち、2 回実行すると失敗するような破壊的な文は避けましょう。
-- 可変データにはシーダーを使い、マイグレーションは追記専用として扱いましょう。
-- カラムやテーブルをリネームする場合は、データ移行用のマイグレーションを明示的に用意し、情報の損失を防ぎましょう。
-- スコープを使ってよく使うクエリパターンをカプセル化し、コントローラーをクリーンに保ちましょう。
-- マスアサインメントの脆弱性を防ぐため、ユーザー入力を受け取るモデルには `fillable` を宣言しましょう。
-- ユーザー向けコンテンツには、復元の可能性を考慮してソフトデリートの利用を検討しましょう。
+- マイグレーションは何度実行しても同じ結果になるように書き、2 回実行すると失敗するような破壊的な文は避けてください。
+- 変わりうるデータはシーダーで入れ、マイグレーションは追記するだけのものとして扱ってください。
+- カラムやテーブルの名前を変えるときは、データを移すためのマイグレーションを別に用意して、データが失われないようにしてください。
+- よく使うクエリの条件はスコープにまとめて、コントローラーをすっきり保ってください。
+- マスアサインメントの脆弱性を防ぐために、ユーザーの入力を受け取るモデルには `fillable` を宣言してください。
+- ユーザー向けのコンテンツでは、あとで復元できるように、ソフトデリートを使うことを検討してください。
 
-スキーマ・マイグレーション・シーダーが揃えば、データベースをコードと一緒に安全に育てていけます。
+スキーマ、マイグレーション、シーダーをそろえておけば、コードと一緒にデータベースも安全に育てていけます。

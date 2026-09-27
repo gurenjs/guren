@@ -1,13 +1,13 @@
 # APIトークンガイド
 
-Guren には、APIリクエストを認証するためのAPIトークンの仕組みが用意されています。トークンは保存前にハッシュ化され、abilities（スコープ）と有効期限を指定できます。
+API リクエストの認証には、Guren の API トークンを使えます。トークンは保存する前にハッシュ化され、abilities（スコープ）と有効期限を指定できます。
 
 ## コアコンセプト
 
-- **ApiToken**: データベースに保存されるトークンデータ（ハッシュ化され、プレーンテキストは保存されない）。
-- **ApiTokenStore**: トークンストレージのインターフェース（メモリまたはデータベース）。
-- **Bearerトークンミドルウェア**: Authorizationヘッダーを使用してリクエストを認証。
-- **Abilities**: トークンが実行できるアクションを定義するスコープ。
+- **ApiToken**: データベースに保存するトークンのデータ。ハッシュ化した値だけを保存し、平文は保存しません
+- **ApiTokenStore**: トークンの保存先のインターフェース（メモリまたはデータベース）
+- **Bearerトークンミドルウェア**: Authorization ヘッダーを見てリクエストを認証するミドルウェア
+- **Abilities**: トークンに許す操作を決めるスコープ
 
 ## 基本的な使い方
 
@@ -32,13 +32,13 @@ return ctx.json({ token: plainTextToken })
 
 ### トークンフォーマット
 
-トークンは`{id}|{token}`形式で返されます。
+トークンは `{id}|{token}` の形式で返されます。
 
 ```
 abc123def456...|xyz789ghi012...
 ```
 
-トークン部分は保存前にハッシュ化されるため、プレーンテキストのトークンは復元できません。
+`{token}` の部分は保存する前にハッシュ化されるので、平文のトークンを後から復元することはできません。
 
 ### トークンの検証
 
@@ -80,7 +80,7 @@ tokenCanAny(token, ['users:read', 'users:write'])   // false
 
 ### ワイルドカードAbility
 
-`*`を指定すると、すべてのabilitiesを付与できます。
+`*` を指定すると、すべての abilities を与えられます。
 
 ```ts
 const { plainTextToken } = await createApiToken(store, {
@@ -136,9 +136,9 @@ router.get('/api/me', (ctx) => {
 })
 ```
 
-読み込んだユーザーはそのリクエストの呼び出し主体（principal）になります。コントローラの `this.auth.user()`、`requireAuthenticated()`、Gate（Policy、`this.authorize()`、`authorizeMiddleware()`）はいずれもこのユーザーを参照します。呼び出し主体は auth context ではなくリクエスト側に記録されるため、ミドルウェアを `boot()` の前にマウントしても後にマウントしても読まれます。
+読み込んだユーザーは、そのリクエストの呼び出し主体（principal）になります。コントローラの `this.auth.user()`、`requireAuthenticated()`、Gate（Policy、`this.authorize()`、`authorizeMiddleware()`）は、どれもこのユーザーを返します。呼び出し主体は auth context ではなくリクエストに記録されるので、ミドルウェアを `boot()` の前にマウントしても後にマウントしても読み取れます。
 
-このリクエストで `auth.logout()` を呼ぶと、提示されたトークンを失効させ、同時に存在するセッションはそのまま残します。`loadUser` が `null` を返した場合、そのリクエストは未認証になります。トークンの検証自体は成功しており、そのリクエストはトークンのものなので、ログイン済みセッションが代わりに使われることはありません。ミドルウェアが実行されなかったリクエストは、セッションのユーザーをそのまま保ちます。`useTokens({ provider })` を設定している場合、読み込んだユーザーはその provider で機密項目を取り除かれる（sanitize）ため、パスワードハッシュやモデルの `hidden` フィールドが auth 層の外に出ることはありません。
+このリクエストで `auth.logout()` を呼ぶと、送られてきたトークンが失効し、同じリクエストにあるセッションはそのまま残ります。`loadUser` が `null` を返したリクエストは、未認証として扱われます。トークンの検証そのものは通っていて、そのリクエストはトークンに属するものなので、ログイン中のセッションのユーザーが代わりに使われることはありません。ミドルウェアが実行されなかったリクエストでは、セッションのユーザーがそのまま使われます。`useTokens({ provider })` を設定している場合は、読み込んだユーザーからその provider が機密項目を取り除く（sanitize）ので、パスワードハッシュやモデルの `hidden` フィールドが auth 層の外に出ることはありません。
 
 ### カスタムエラーハンドラー
 
@@ -226,7 +226,7 @@ router.post('/api/tokens/revoke-all', async (ctx) => {
 
 ### 組み込みの DatabaseApiTokenStore
 
-本番環境では組み込みの `DatabaseApiTokenStore` を使います。`api_tokens` スキーマの Drizzle テーブルを渡すだけで済み、カスタムストアを実装する必要はありません。
+本番環境では、組み込みの `DatabaseApiTokenStore` を使います。`api_tokens` スキーマの Drizzle テーブルを渡すだけでよく、独自のストアを実装する必要はありません。
 
 ```ts
 import { DatabaseApiTokenStore } from '@guren/core'
@@ -241,11 +241,11 @@ const { plainTextToken } = await createApiToken(store, {
 })
 ```
 
-ストアはアプリで設定済みの ORM 接続（標準の `DatabaseProvider` セットアップ）を使うので、追加の配線は要りません。期限切れトークンは `verifyApiToken` が拒否します。テーブルから削除するには、スケジュールジョブから `store.deleteExpired()` を呼んでください。
+ストアはアプリで設定済みの ORM の接続（標準の `DatabaseProvider` の構成）を使うので、ほかに何かをつなぐ必要はありません。期限切れのトークンは `verifyApiToken` が拒否します。テーブルから消すには、スケジュールしたジョブから `store.deleteExpired()` を呼んでください。
 
 ### データベーススキーマ
 
-カラムのプロパティ名は `ApiToken` のフィールドと一致させます。
+カラムのプロパティ名は、`ApiToken` のフィールド名と揃えます。
 
 ```ts
 // db/schema.ts
@@ -263,7 +263,7 @@ export const apiTokens = pgTable('api_tokens', {
 })
 ```
 
-SQLite では、timestamp のカラムを `text` か `integer(..., { mode: 'timestamp_ms' })` で宣言します。`text` は ISO 文字列を保持する形で、`create-guren-app` が `users.created_at` に使う形と同じです。ストアは各カラムの宣言に合わせて書き込みます。drizzle の timestamp モードのカラムには Date、text カラムには ISO 文字列、モード指定のない integer カラムにはエポックミリ秒です。
+SQLite では、timestamp のカラムを `text` か `integer(..., { mode: 'timestamp_ms' })` で宣言します。`text` は ISO 文字列を入れる形で、`create-guren-app` が `users.created_at` に使っているのと同じです。ストアは、各カラムの宣言に合わせた値を書き込みます。drizzle の timestamp モードのカラムには Date を、text のカラムには ISO 文字列を、モードを指定していない integer のカラムにはエポックミリ秒を書きます。
 
 ```ts
 // db/schema.ts
@@ -281,7 +281,7 @@ export const apiTokens = sqliteTable('api_tokens', {
 })
 ```
 
-`abilities` カラムが `jsonb` ではなく JSON 文字列を保持する text カラムの場合は、`{ abilitiesMode: 'text' }` を渡します。
+`abilities` カラムが `jsonb` ではなく、JSON 文字列を入れる text のカラムなら、`{ abilitiesMode: 'text' }` を渡します。
 
 ```ts
 const store = new DatabaseApiTokenStore(apiTokens, { abilitiesMode: 'text' })
@@ -289,7 +289,7 @@ const store = new DatabaseApiTokenStore(apiTokens, { abilitiesMode: 'text' })
 
 ### カスタムストア
 
-`ApiTokenStore` インターフェースを実装したオブジェクトであれば何でも使えます。トークンを外部システムに保存したい場合は自前で実装してください。
+`ApiTokenStore` インターフェースを実装したオブジェクトなら、どれでもストアとして使えます。トークンを外部のシステムに保存したいときは、自分で実装してください。
 
 ```ts
 import type { ApiTokenStore, ApiToken } from '@guren/core'
@@ -418,18 +418,18 @@ describe('APIトークン', () => {
 
 ## ベストプラクティス
 
-1. **プレーントークンを保存しない**: 保存されるのはハッシュ化したトークンだけ。プレーンテキストは作成時に一度だけ表示する。
+1. **平文のトークンを保存しない**: 保存するのはハッシュ化したトークンだけにし、平文は作成時に一度だけ表示します。
 
-2. **具体的なabilitiesを使用**: `['*']`ではなく`['posts:read', 'posts:write']`のように絞る。
+2. **abilities を具体的に指定する**: `['*']` ではなく、`['posts:read', 'posts:write']` のように絞ります。
 
-3. **有効期限を設定**: トークンには有効期限を付ける。30〜90日が一般的。
+3. **有効期限を設定する**: トークンには有効期限を付けます。30〜90 日がよく使われます。
 
-4. **パスワード変更時に無効化**: ユーザーがパスワードを変更したら、すべてのトークンを無効化する。
+4. **パスワード変更時に無効化する**: ユーザーがパスワードを変えたら、そのユーザーのトークンをすべて無効化します。
 
-5. **本番環境ではデータベースストレージを使用**: `MemoryApiTokenStore`はテスト専用。
+5. **本番環境ではデータベースに保存する**: `MemoryApiTokenStore` はテスト専用です。
 
-6. **最終使用日時を追跡**: `lastUsedAt`フィールドで使われていないトークンを見つける。
+6. **最終使用日時を追う**: `lastUsedAt` フィールドを見れば、使われていないトークンが見つかります。
 
-7. **トークンに意味のある名前を付ける**: 「モバイルアプリ」「CI/CDパイプライン」など、見て分かる名前にする。
+7. **トークンにわかりやすい名前を付ける**: 「モバイルアプリ」「CI/CDパイプライン」のように、見ただけで用途がわかる名前にします。
 
-8. **トークンローテーションを実装**: ユーザーが定期的にトークンを再生成できるようにする。
+8. **トークンのローテーションを用意する**: ユーザーが定期的にトークンを作り直せるようにします。

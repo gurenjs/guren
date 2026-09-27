@@ -1,6 +1,6 @@
 # Markdownレンダリング
 
-`@guren/plugin-markdown`は、そのまま使えるデフォルト設定でmarkdownをHTMLにレンダリングします。GitHub Flavored Markdown、`dangerouslySetInnerHTML`に渡しても安全なサニタイズ済み出力、GitHubスタイルのアラート、見出しアンカー、オプションのshikiコードハイライトを備えています。guren.dev自身のdocsとブログもこのパイプラインを使っています。
+`@guren/plugin-markdown`は、markdownをHTMLにレンダリングするプラグインです。デフォルト設定のままで安全に使えるようにしてあり、GitHub Flavored Markdown、`dangerouslySetInnerHTML`に渡しても安全なサニタイズ済みの出力、GitHubスタイルのアラート、見出しアンカーに対応し、shikiによるコードハイライトも追加できます。guren.dev自身のdocsとブログも、このパイプラインでレンダリングしています。
 
 ## インストール
 
@@ -18,9 +18,9 @@ const renderer = createMarkdownRenderer()
 const html = await renderer.render('# Hello\n\n> [!NOTE]\n> デフォルトでサニタイズされます。')
 ```
 
-`render()`は入力に対する純粋な非同期関数です。1つのレンダラインスタンスは並行リクエスト下でも安全で、パッケージはキャッシュを持ちません。保存時にレンダリングしてHTMLを格納する（ブログのパターン）か、リクエストごとにレンダリングするかは、アプリ側で選べます。
+`render()`は、入力だけで結果が決まる非同期関数です。パッケージはキャッシュを持たないので、1つのレンダラインスタンスを並行するリクエストで共有しても問題ありません。保存時にレンダリングしてHTMLを保存しておくか（ブログではこの方式です）、リクエストのたびにレンダリングするかは、アプリ側で決めてください。
 
-全オプションとデフォルト値:
+オプションとそのデフォルト値は次のとおりです。
 
 ```ts
 createMarkdownRenderer({
@@ -35,16 +35,16 @@ createMarkdownRenderer({
 
 ## サニタイズ
 
-markdown記法だけでも`javascript:`や`data:`のURLは`href`や`src`に入り込めるため、生HTMLのエスケープだけでは不十分です。デフォルトの`sanitize: true`では、レンダリング結果は返される前に`sanitize-html`の許可リスト（allowlist）を通過します。
+markdownの記法だけでも、`href`や`src`に`javascript:`や`data:`のURLを入れられます。そのため、生のHTMLをエスケープするだけでは足りません。デフォルトの`sanitize: true`では、レンダリングしたHTMLを返す前に`sanitize-html`の許可リスト（allowlist）に通します。
 
-- 構造タグのみ許可。`<script>`のような生HTMLはエスケープされます。黙って消えることはありません
-- `href`/`src`は`http`、`https`、`mailto`に限定。プロトコル相対URL（`//host/path`）は拒否されます
-- インラインstyleはshikiが出力する宣言（色と`--shiki-dark`カスタムプロパティ）だけに限定されます。ハイライト済みコードはそのまま通過します
-- 見出しの`id`とアラートのマークアップは、値の完全一致で許可されます
+- 許可するのは構造を表すタグだけです。`<script>`のような生のHTMLは、黙って消さずにエスケープします
+- `href`と`src`に使えるのは`http`、`https`、`mailto`だけで、プロトコル相対URL（`//host/path`）は拒否します
+- インラインのstyleは、shikiが出力する宣言（色と`--shiki-dark`カスタムプロパティ）だけを許可します。そのため、ハイライトしたコードはサニタイズ後もそのまま残ります
+- 見出しの`id`とアラートのマークアップは、値が完全に一致する場合に限って許可します
 
-結果は`dangerouslySetInnerHTML`で安全に注入できます。
+こうして得られた結果は、`dangerouslySetInnerHTML`で安全に埋め込めます。
 
-許可リストの拡張はコールバックで行います。デフォルト値を受け取り、使用するオプションを返します:
+許可リストを置き換えずに広げたい場合は、コールバックを渡します。コールバックはデフォルト値を受け取り、実際に使うオプションを返します。
 
 ```ts
 createMarkdownRenderer({
@@ -55,11 +55,11 @@ createMarkdownRenderer({
 })
 ```
 
-信頼済みコンテンツ（ビルド時にレンダリングする自分のdocsなど）には、`sanitize: false`で明示的にオプトアウトします。
+ビルド時にレンダリングする自分のdocsのように、信頼できるコンテンツであれば、`sanitize: false`を指定して明示的にサニタイズを外せます。
 
 ## アラート
 
-GitHubの5つのblockquoteディレクティブは、ラベル付きのアラートブロックとしてレンダリングされます:
+GitHubの5種類のblockquoteディレクティブは、ラベル付きのアラートブロックとしてレンダリングされます。
 
 ```markdown
 > [!NOTE]
@@ -69,9 +69,9 @@ GitHubの5つのblockquoteディレクティブは、ラベル付きのアラー
 > 確認すべきこと。
 ```
 
-マークアップにはフレームワーク中立なクラス名（`guren-markdown-alert`、`guren-markdown-alert--note`〜`--caution`、`__label`、`__body`）が付き、パッケージ自体はスタイルを適用しません。[スタイリング](#スタイリング)を参照してください。
+マークアップには、特定のフレームワークに依存しないクラス名（`guren-markdown-alert`、`guren-markdown-alert--note`〜`--caution`、`__label`、`__body`）が付きます。パッケージ自体はスタイルを当てないので、[スタイリング](#スタイリング)を参照してください。
 
-`alertLabels`はタイプごとのラベル文字列を上書きします（`@guren/plugin-markdown` 0.2.0以降）。i18nや別の語彙のために使え、複数タイプで1つのラベルを共有できます。クラス名は書かれたディレクティブに紐づいたまま変わらず、ラベルはエスケープ済みテキストとしてレンダリングされます:
+`alertLabels`を使うと、表示するラベルの文字列をタイプごとに上書きできます（`@guren/plugin-markdown` 0.2.0以降）。i18nや、別の言葉づかいに合わせたいときに使ってください。複数のタイプで同じラベルを使っても構いません。クラス名は書かれたディレクティブのまま変わらず、ラベルはエスケープしたテキストとしてレンダリングされます。
 
 ```ts
 createMarkdownRenderer({
@@ -79,15 +79,15 @@ createMarkdownRenderer({
 })
 ```
 
-明示的な空文字列はラベル文字列を抑止します。省略したタイプはデフォルトのラベル（`Note`、`Tip`、`Important`、`Warning`、`Caution`）を保ちます。
+空文字列を明示的に指定すると、ラベルの文字列は表示されません。指定しなかったタイプは、デフォルトのラベル（`Note`、`Tip`、`Important`、`Warning`、`Caution`）のままです。
 
 ## 見出しアンカー
 
-`anchors: true`ではすべての見出しにslugの`id`が付きます。unicode対応で、1レンダリング内の重複にも安全です（`Setup`、`Setup-1`、`Setup`は`setup`、`setup-1`、`setup-2`になります）。見出しテキストにHTMLが紛れ込んでも壊れません。
+`anchors: true`では、すべての見出しにslugの`id`が付きます。slugはunicodeに対応しており、1回のレンダリングの中で重複しても番号で区別されます（`Setup`、`Setup-1`、`Setup`は`setup`、`setup-1`、`setup-2`になります）。見出しのテキストにHTMLが紛れ込んでいても壊れません。
 
 ## リンクの書き換え
 
-`rewriteLink`はレンダリング前にすべてのリンクの`href`に対して実行されます。たとえば、GitHub互換の相対`.md`リンクをサイトのルートに変換できます:
+`rewriteLink`は、レンダリングの前にすべてのリンクの`href`に対して呼ばれます。たとえば、GitHubでも動く相対`.md`リンクを、サイトのルートに変換できます。
 
 ```ts
 createMarkdownRenderer({
@@ -97,7 +97,7 @@ createMarkdownRenderer({
 
 ## shikiによるコードハイライト
 
-`shiki`は専用サブパスの背後にあるoptional peer dependencyです。使う場合だけインストールします:
+`shiki`は専用のサブパスから読み込むoptional peer dependencyなので、使う場合だけインストールしてください。
 
 ```bash
 bun add shiki
@@ -115,11 +115,11 @@ const renderer = createMarkdownRenderer({
 })
 ```
 
-これは必要な部分だけを読み込む（fine-grainedな）`shiki/core`ハイライタを構築します。列挙した文法だけを読み込み、oniguruma WASMの代わりにJavaScript正規表現エンジンを使います。出力はデュアルテーマで、ライトパレットはインライン、ダークパレットは`--shiki-dark`カスタムプロパティに載ります。未ロード言語のフェンスは例外を投げずプレーンテキストにフォールバックします。
+このコードは、必要な部分だけを読み込む（fine-grainedな）`shiki/core`のハイライタを組み立てます。読み込む文法は列挙したものだけで、正規表現エンジンにはoniguruma WASMではなくJavaScriptのものを使います。出力はデュアルテーマで、ライトのパレットはインラインに、ダークのパレットは`--shiki-dark`カスタムプロパティに入ります。読み込んでいない言語のフェンスは、例外を投げずにプレーンテキストとして出力します。
 
 ### Cloudflare Workersでは
 
-すべてのimportを静的に解決する必要があるバンドラは、実行時の文法名解決ができません。代わりに明示的なモジュールthunkを渡します。thunkはロードを遅延させる効果もあり、モジュールのimport自体は初回レンダリングまでコストゼロです:
+importをすべて静的に解決しなければならないバンドラでは、文法名を実行時に解決できません。その場合は、モジュールを読み込むthunkを明示的に渡します。thunkを使うとロードも遅れるので、初回のレンダリングまではモジュールのimportにコストがかかりません。
 
 ```ts
 createShikiHighlight({
@@ -132,21 +132,21 @@ createShikiHighlight({
 })
 ```
 
-Workersバンドルに入るコードでは、フルの`shiki`エントリをimportしないでください。全文法とoniguruma WASMを引き込んでしまいます。ビルド時に動くコード（docsのプリレンダリングなど）では、バンドルサイズより任意の言語に対応できることが重要なので、フルエントリで問題ありません。
+Workersのバンドルに入るコードでは、`shiki`のフルエントリをimportしないでください。すべての文法とoniguruma WASMまで取り込まれてしまいます。docsのプリレンダリングのようにビルド時だけ動くコードでは、バンドルサイズよりどの言語でも扱えることのほうが大事なので、フルエントリを使って構いません。
 
 ### カスタムハイライタ
 
-`highlight`は単なる関数`(code, lang) => string | Promise<string>`です。`<pre`で始まる結果は完全なコードブロックとしてそのまま出力され（shikiの形）、それ以外はデフォルトの`<pre><code>`でラップされます。
+`highlight`は、`(code, lang) => string | Promise<string>`という形のただの関数です。結果が`<pre`で始まる場合は完成したコードブロックとみなしてそのまま出力し（shikiの出力がこの形です）、それ以外はデフォルトの`<pre><code>`で包みます。
 
 ## スタイリング
 
-レンダラはクラス名だけを出力し、スタイルは適用しません。アラートとダークモードのshiki切替をカバーする小さな参照スタイルシートが同梱されています:
+レンダラはクラス名を出力するだけで、スタイルは当てません。アラートと、ダークモードでのshikiの切り替えを扱う小さな参考用スタイルシートを同梱しています。
 
 ```ts
 import '@guren/plugin-markdown/styles.css'
 ```
 
-アラートのアクセント色はCSSカスタムプロパティなので、変数の上書きだけで再スタイルできます:
+アラートのアクセントカラーはCSSカスタムプロパティなので、変数を上書きするだけで見た目を変えられます。
 
 ```css
 .guren-markdown-alert--note { --guren-markdown-alert-accent: #e11d48; }
@@ -154,7 +154,7 @@ import '@guren/plugin-markdown/styles.css'
 
 ## コンテナサービスとして
 
-`markdownPlugin()`は設定済みレンダラを`markdown`コンテナサービスとして登録します:
+`markdownPlugin()`を使うと、設定したレンダラが`markdown`という名前のコンテナサービスとして登録されます。
 
 ```ts
 import { createApp } from '@guren/core'
@@ -171,4 +171,4 @@ import type { MarkdownRenderer } from '@guren/plugin-markdown'
 const renderer = container.make<MarkdownRenderer>('markdown')
 ```
 
-プラグイン形態はオプションです。`createMarkdownRenderer`は`createApp`なしでも動作します。
+プラグインとして登録するかどうかは任意です。`createMarkdownRenderer`は`createApp`がなくても動きます。
