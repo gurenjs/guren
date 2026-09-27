@@ -12,6 +12,8 @@ import { createDocsViewerAccessGuard, DOCS_VIEWER_PATH, isDocsViewerEnabled } fr
 interface DocsViewerCliApi {
   buildDocsViewerData(cwd: string): Promise<unknown>
   docsViewerAssetPath(): string
+  /** Absent before `@guren/cli` composed the shell from TypeScript; the built asset is read instead. */
+  docsViewerShell?(): string
   /** Absent before `@guren/cli` served plan pages; the route then answers 404. */
   docsViewerPlanPage?(cwd: string, slug: string): Promise<string | undefined>
 }
@@ -51,7 +53,7 @@ export class DocsViewerServiceProvider extends ServiceProvider {
     // Read once: the shell never changes for the lifetime of the process.
     let shell: Promise<string> | null = null
     hono.get(DOCS_VIEWER_PATH, async (ctx) => {
-      shell ??= readFile(cli.docsViewerAssetPath(), 'utf-8')
+      shell ??= cli.docsViewerShell ? Promise.resolve(cli.docsViewerShell()) : readFile(cli.docsViewerAssetPath(), 'utf-8')
       return ctx.html(await shell)
     })
 

@@ -9,11 +9,10 @@
  * what this publishes is the blog example's public docs.
  */
 import { mkdirSync, statSync, writeFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
-import { buildDocsViewerData, docsViewerAssetPath } from '@guren/cli'
+import { buildDocsViewerData, docsViewerShell } from '@guren/cli'
 
 import { formatBytes } from './lib/format-bytes.js'
 import { stageMermaid } from './lib/stage-mermaid.js'
@@ -95,7 +94,7 @@ console.log(
     ` — ${formatBytes(gzipSync(Buffer.from(json, 'utf8')).length)} gzipped`,
 )
 
-const shell = await readFile(docsViewerAssetPath(), 'utf-8')
+const shell = docsViewerShell()
 write(
   resolve(outDir, 'index.html'),
   inject(
