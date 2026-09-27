@@ -6,7 +6,7 @@
  * parameterized route, a plan page, looks its slug up among the discovered
  * plans and never joins it into a path.
  */
-import { readFile } from 'node:fs/promises'
+import { open, readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { parseDocFrontmatter } from './docs-frontmatter'
@@ -19,6 +19,8 @@ import { loadDocsGraph, type DocsGraphEdge, type DocsGraphNode } from './docs-gr
 import { escapeHtml, renderDocHtml } from './docs-render'
 import type { AcceptanceTestRef } from './docs-acceptance'
 import { planDocClosedHashIn, planDocPath, readPlanBlocks } from './plan/close-docs'
+import { renderedPlanHash } from './plan/render'
+import { planCommand, readViewerPlans, type DocsViewerOpenPlan } from './docs-viewer-plans'
 import { discoverPlanFiles } from './plan-check'
 import { planOutputPath } from './plan/beside'
 import { planSlug } from './plan/state'
@@ -74,6 +76,8 @@ export interface DocsViewerData {
   tests: AcceptanceTestRef[]
   /** Plans whose page `plan:render` wrote beside them, served at `plans/<slug>`. */
   planPages: DocsViewerPlanPage[]
+  /** Every plan not closed at its current hash, with its steps' records (RFC 0030 §7). */
+  plans: DocsViewerOpenPlan[]
 }
 
 export interface DocsViewerPlanPage {
@@ -82,14 +86,50 @@ export interface DocsViewerPlanPage {
   plan: string
   page: string
   doc: string
+  /** The page carries another hash than the plan's current one; a draft's page is never judged. */
+  stale?: boolean
+  /** `stale` only: the command that renders it again. */
+  render?: string
+}
+
+/** A page's embedded hash by path, kept while its mtime holds: a page embeds the whole plan, and the payload is rebuilt on a poll. */
+const renderedHashes = new Map<string, { mtimeMs: number; hash: string | null | undefined }>()
+
+/** Stat and read through one handle, so the mtime cached is the mtime of the bytes read. */
+async function pageHash(path: string): Promise<string | null | undefined> {
+  const handle = await open(path, 'r').catch(() => undefined)
+  if (handle === undefined) return undefined
+  try {
+    const { mtimeMs } = await handle.stat()
+    const cached = renderedHashes.get(path)
+    if (cached?.mtimeMs === mtimeMs) return cached.hash
+    const hash = renderedPlanHash(await handle.readFile('utf-8'))
+    renderedHashes.set(path, { mtimeMs, hash })
+    return hash
+  } catch {
+    return undefined
+  } finally {
+    await handle.close()
+  }
+}
+
+/** Marks each page rendered at another hash than its plan's; one that will not read is left unjudged. */
+async function judgePageFreshness(cwd: string, pages: DocsViewerPlanPage[], hashes: ReadonlyMap<string, string | null>): Promise<DocsViewerPlanPage[]> {
+  return Promise.all(
+    pages.map(async (page) => {
+      const current = hashes.get(page.plan)
+      if (typeof current !== 'string') return page
+      const rendered = await pageHash(resolve(cwd, page.page))
+      return rendered === undefined || rendered === current ? page : { ...page, stale: true, render: planCommand('plan:render', page.plan) }
+    }),
+  )
 }
 
 /**
  * Each discovered plan whose page exists where `plan:render` writes it by default; a page
  * written elsewhere with `-o` is not found. Of two plans sharing a slug, the first with a page wins.
  */
-async function findPlanPages(cwd: string, onlySlug?: string): Promise<DocsViewerPlanPage[]> {
-  const { files } = await discoverPlanFiles(cwd)
+async function findPlanPages(cwd: string, files: readonly string[], onlySlug?: string): Promise<DocsViewerPlanPage[]> {
   const candidates = onlySlug === undefined ? files : files.filter((file) => planSlug(file) === onlySlug)
   const found = await Promise.all(
     candidates.map(async (file): Promise<DocsViewerPlanPage | undefined> => {
@@ -109,7 +149,7 @@ async function findPlanPages(cwd: string, onlySlug?: string): Promise<DocsViewer
  * discovered plans, never joined into a path, so a request cannot reach another file.
  */
 export async function docsViewerPlanPage(cwd: string, slug: string): Promise<string | undefined> {
-  const [page] = await findPlanPages(cwd, slug)
+  const [page] = await findPlanPages(cwd, (await discoverPlanFiles(cwd)).files, slug)
   return page ? readFile(resolve(cwd, page.page), 'utf-8') : undefined
 }
 
@@ -224,8 +264,12 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
       tests,
       graph: { nodes, edges },
     },
-    planPages,
-  ] = await Promise.all([loadDocsGraph(cwd), findPlanPages(cwd)])
+    [pagesFound, plans],
+  ] = await Promise.all([
+    loadDocsGraph(cwd),
+    discoverPlanFiles(cwd).then(({ files }) => Promise.all([findPlanPages(cwd, files), readViewerPlans(cwd, files)])),
+  ])
+  const planPages = await judgePageFreshness(cwd, pagesFound, plans.hashes)
   const staleDocs = new Set(
     checks.filter((check) => check.key.startsWith('docs-stale:')).map((check) => check.filePath),
   )
@@ -262,7 +306,7 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
     }),
   )
 
-  return { nodes, edges, docs, tests, planPages }
+  return { nodes, edges, docs, tests, planPages, plans: plans.open }
 }
 
 /**

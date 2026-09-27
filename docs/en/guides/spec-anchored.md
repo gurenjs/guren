@@ -159,6 +159,19 @@ into one node listing each id and the test files carrying it (the
 **group tests** toggle shows them one by one). Drag the panel's left edge
 to resize it; double-click the edge to reset the width.
 
+Plans that are not closed yet are listed under the counters and drawn as
+dashed nodes linked to the entities they change. A plan's panel shows
+whether it is a draft or approved, each step with what its last
+`plan:verify` recorded (verified, drifted with the files that changed,
+failed, not run), the step `plan:next` marked and any stall, the waivers,
+and the command to run next with a copy button. Approving, verifying and
+closing stay in the terminal. The records live in the git-ignored
+`.guren/plans/`, so the progress is your checkout's.
+
+Drag the background or scroll to move around the graph, pinch or hold
+Ctrl/⌘ while scrolling to zoom, and press `0` (or **fit**) to fit the
+whole graph.
+
 ![The Docs Graph viewer: on the left a graph joining document, spec, and code nodes; on the right a panel showing the selected ER Diagram's frontmatter, table diagram, and column listings](../../images/docs-graph-er.png)
 
 "Only reachable from your own machine" is enforced rather than assumed:

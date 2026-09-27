@@ -77,6 +77,7 @@ body {
 /* ---- graph marks ---- */
 .edge { stroke: var(--border-strong); stroke-width: 1.2; }
 .edge.derives { stroke-dasharray: 4 5; }
+.edge.plans { stroke: var(--plan); stroke-dasharray: 2 4; }
 .edge.warn { stroke: var(--warn); }
 .edge.fail { stroke: var(--fail); }
 .edge.dim { opacity: 0.12; }
@@ -104,6 +105,8 @@ body {
 .node.code circle { fill: var(--raised); stroke: var(--border-strong); stroke-width: 1.2; }
 .node.test circle { fill: var(--page); stroke: var(--spec); stroke-width: 1.2; stroke-dasharray: 2 2; }
 .node.test.group circle { fill: var(--spec-tint); stroke-width: 1.6; }
+.node.openplan circle { fill: var(--page); stroke: var(--plan); stroke-width: 1.8; stroke-dasharray: 5 3; }
+.node.openplan .halo { stroke: var(--plan); }
 .node .count { font-size: 9.5px; fill: var(--spec); }
 .node:hover circle, .node.selected circle, .node:focus-visible circle { stroke-width: 3; }
 .node.selected .halo { display: block; }
@@ -155,6 +158,7 @@ body {
 .legend .dot.adr { background: var(--accent-tint); border: 1.5px solid var(--accent); }
 .legend .dot.spec { background: var(--spec-tint); border: 1.5px solid var(--spec); }
 .legend .dot.plan { background: var(--plan-tint); border: 1.5px solid var(--plan); }
+.legend .dot.openplan { background: var(--page); border: 1.5px dashed var(--plan); }
 .legend .dot.entity { background: var(--page); border: 1.5px solid var(--pass); }
 .legend .dot.code { background: var(--raised); border: 1.5px solid var(--border-strong); }
 .legend .dot.test { background: var(--page); border: 1.5px dashed var(--spec); }
@@ -165,6 +169,18 @@ body {
   pointer-events: none;
 }
 .panel-open .hint { display: none; }
+
+.zoom-controls {
+  position: fixed; top: 1.5rem; right: 1.75rem; z-index: 4;
+  display: flex; gap: 0.3rem;
+}
+.zoom-controls button {
+  font-family: var(--mono); font-size: 0.72rem; min-width: 1.9rem;
+  color: var(--text-secondary); background: var(--panel);
+  border: 1px solid var(--border-strong); border-radius: 3px;
+  padding: 0.2rem 0.5rem; cursor: pointer;
+}
+.zoom-controls button:hover { border-color: var(--accent); color: var(--accent-strong); }
 
 .empty-state {
   position: fixed; inset: 0; display: none;
@@ -261,6 +277,41 @@ body.resizing { cursor: col-resize; user-select: none; }
 .page-link { align-self: flex-start; font-family: var(--mono); font-size: 0.72rem; color: var(--plan); border: 1px solid var(--plan); border-radius: 3px; padding: 0.25rem 0.6rem; text-decoration: none; }
 .page-link:hover, .page-link:focus-visible { background: var(--plan-tint); }
 
+.plan-list { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.4rem; max-width: 18rem; max-height: 30vh; overflow-y: auto; }
+.plan-list:empty { display: none; }
+.plan-list button {
+  display: flex; justify-content: space-between; gap: 0.75rem; align-items: baseline;
+  font-family: var(--mono); font-size: 0.7rem; text-align: left;
+  color: var(--text-secondary); background: var(--panel);
+  border: 1px solid var(--border-strong); border-left: 3px solid var(--plan); border-radius: 2px;
+  padding: 0.3rem 0.55rem; cursor: pointer;
+}
+.plan-list button:hover { border-color: var(--plan); }
+.plan-list .progress { color: var(--text-muted); white-space: nowrap; }
+.chip-standing-approved { border-color: var(--pass); color: var(--pass); }
+.chip-standing-unapproved, .chip-standing-draft { border-color: var(--warn); color: var(--warn); }
+.chip-standing-unreadable, .chip-standing-baseline-removed { border-color: var(--fail); color: var(--fail); }
+.command { display: flex; gap: 0.4rem; align-items: center; font-size: 0.72rem; }
+.command code { flex: 1; overflow-wrap: anywhere; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 3px; padding: 0.25rem 0.45rem; }
+.command button {
+  font-family: var(--mono); font-size: 0.66rem; color: var(--plan); background: var(--panel);
+  border: 1px solid var(--plan); border-radius: 3px; padding: 0.2rem 0.5rem; cursor: pointer; white-space: nowrap;
+}
+.command button:hover { background: var(--plan-tint); }
+.plan-reason { font-size: 0.72rem; color: var(--fail); white-space: pre-wrap; }
+.plan-progress h3 { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin-top: 0.4rem; }
+.panel .plan-progress .steps { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.panel .plan-progress .steps li { display: flex; flex-wrap: wrap; gap: 0.2rem 0.55rem; align-items: baseline; font-family: var(--mono); font-size: 0.74rem; line-height: 1.5; color: var(--text-secondary); }
+.steps .step-id { color: var(--text); overflow-wrap: anywhere; }
+.steps .step-state { color: var(--text-muted); }
+.steps .step-note { flex-basis: 100%; padding-left: 1.1rem; color: var(--text-muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+.steps li.active .step-id { font-weight: 700; }
+.steps .badge { font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--plan); border: 1px solid var(--plan); border-radius: 2px; padding: 0 0.3rem; }
+.state-verified { color: var(--pass); }
+.state-drifted, .state-incomplete, .state-blocked, .state-waiver-withdrawn { color: var(--warn); }
+.state-failed { color: var(--fail); }
+.state-outdated, .state-not-run { color: var(--text-muted); }
+
 .frontmatter {
   background: var(--raised); border: 1px solid var(--border); border-radius: 4px;
   padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem;
@@ -324,6 +375,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     <div class="view-toggles" role="group" aria-label="View">
       <button id="group-tests" aria-pressed="true">group tests</button>
     </div>
+    <div class="plan-list" id="plan-list" aria-label="Open plans"></div>
   </div>
 </header>
 
@@ -331,6 +383,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   <span><span class="dot adr"></span>doc</span>
   <span><span class="dot spec"></span>generated spec</span>
   <span><span class="dot plan"></span>closed plan</span>
+  <span><span class="dot openplan"></span>open plan</span>
   <span><span class="dot entity"></span>model entity</span>
   <span><span class="dot code"></span>code</span>
   <span><span class="dot test"></span>acceptance test</span>
@@ -338,7 +391,13 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   <span><span class="swatch derives"></span>derives (regenerated from code)</span>
 </div>
 
-<p class="hint">click a node · f for reading mode · drag to rearrange</p>
+<p class="hint">click a node · drag a node to move it · drag the background to pan · pinch to zoom · 0 fit</p>
+
+<div class="zoom-controls" role="group" aria-label="Zoom">
+  <button id="zoom-in" title="Zoom in (+)" aria-label="Zoom in">+</button>
+  <button id="zoom-out" title="Zoom out (−)" aria-label="Zoom out">−</button>
+  <button id="zoom-fit" title="Fit the graph (0)">fit</button>
+</div>
 
 <div class="empty-state" id="empty-state">
   <div>
@@ -363,7 +422,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   'use strict'
   const BASE_URL = '/_guren/docs'
   const DATA_URL = BASE_URL + '/data.json'
-  const RADIUS = { doc: 22, entity: 15, code: 10, test: 9, testGroup: 14 }
+  const RADIUS = { doc: 22, entity: 15, code: 10, test: 9, testGroup: 14, openplan: 19 }
+  const STEP_GLYPH = { verified: '●', drifted: '▲', incomplete: '▲', 'waiver-withdrawn': '▲', blocked: '■', failed: '✕', outdated: '○', 'not-run': '○' }
   const VERDICT_RANK = { pass: 0, warn: 1, fail: 2 }
   const VERDICT_GLYPH = { pass: '●', warn: '▲', fail: '✕' }
   const svg = document.getElementById('graph')
@@ -377,7 +437,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet')
 
   // ---- state ----
-  let data = { nodes: [], edges: [], docs: [], tests: [], planPages: [] }
+  let data = { nodes: [], edges: [], docs: [], tests: [], planPages: [], plans: [] }
   let testFiles = new Map()
   let docByPath = new Map()
   let nodes = [], edges = [], byId = new Map(), neighbors = new Map()
@@ -413,8 +473,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     return node
   }
   const svgEl = (tag) => document.createElementNS(NS, tag)
+  const toGraph = (clientX, clientY) => {
+    const pt = svg.createSVGPoint()
+    pt.x = clientX; pt.y = clientY
+    return pt.matrixTransform(svg.getScreenCTM().inverse())
+  }
+  const planNodeId = (plan) => 'plan:' + plan.file
   const kindOf = (n) =>
-    n.kind === 'doc' && (n.docType === 'spec' || n.docType === 'plan') ? n.docType : n.kind
+    n.kind === 'openplan' ? 'plan' : n.kind === 'doc' && (n.docType === 'spec' || n.docType === 'plan') ? n.docType : n.kind
   const worstVerdict = (verdicts) =>
     verdicts.reduce((worst, v) => (VERDICT_RANK[v] > VERDICT_RANK[worst] ? v : worst), 'pass')
 
@@ -466,6 +532,23 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     return { nodes: rawNodes.filter((n) => !groupOf.has(n.id)).concat(groupNodes), edges: groupedEdges }
   }
 
+  // Open plans are the viewer's own nodes: docs:graph --json gains no kind for them (RFC 0030 §7).
+  function withOpenPlans(view) {
+    const nodesOut = view.nodes.slice()
+    const edgesOut = view.edges.slice()
+    const ids = new Set(nodesOut.map((n) => n.id))
+    for (const plan of data.plans) {
+      const id = planNodeId(plan)
+      nodesOut.push({ id, kind: 'openplan', label: plan.title, plan })
+      for (const name of plan.entities) {
+        const entity = 'entity:' + name
+        if (!ids.has(entity)) { nodesOut.push({ id: entity, kind: 'entity', label: name }); ids.add(entity) }
+        edgesOut.push({ from: id, to: entity, relation: 'plans', verdict: 'pass' })
+      }
+    }
+    return { nodes: nodesOut, edges: edgesOut }
+  }
+
   /** `AC-meetups-edit-1`, `AC-meetups-host-2` → `AC-meetups-*`. */
   function idPattern(labels) {
     let prefix = labels[0]
@@ -480,7 +563,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     data = newData
     docByPath = new Map(data.docs.map((d) => [d.path, d]))
     testFiles = new Map(data.tests.map((t) => [t.id, t.files]))
-    const view = groupTests(data.nodes, data.edges)
+    const view = withOpenPlans(groupTests(data.nodes, data.edges))
     nodes = view.nodes.map((n) => {
       const old = previous.get(n.id)
       return Object.assign({}, n, {
@@ -492,8 +575,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     })
     // Fresh graphs get ring seeding: docs inner, satellites outer.
     if (previous.size === 0) {
-      const docs = nodes.filter((n) => n.kind === 'doc')
-      const sats = nodes.filter((n) => n.kind !== 'doc')
+      const docs = nodes.filter((n) => n.kind === 'doc' || n.kind === 'openplan')
+      const sats = nodes.filter((n) => n.kind !== 'doc' && n.kind !== 'openplan')
       docs.forEach((n, i) => {
         const a = (i / Math.max(docs.length, 1)) * Math.PI * 2
         n.x = W / 2 + Math.cos(a) * 130; n.y = H / 2 + Math.sin(a) * 130
@@ -546,11 +629,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       circle.setAttribute('r', n.r)
       g.append(halo, circle)
 
-      if (n.kind === 'doc' && n.docType) {
+      if ((n.kind === 'doc' && n.docType) || n.kind === 'openplan') {
         const tag = svgEl('text')
         tag.setAttribute('class', 'kindtag')
         tag.setAttribute('dy', '3')
-        tag.textContent = n.docType
+        tag.textContent = n.kind === 'openplan' ? n.plan.standing : n.docType
         g.append(tag)
       }
       if (n.members) {
@@ -578,7 +661,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       ['concepts', String(data.docs.length)],
       ['relations', String(data.edges.length)],
       ['human-reviewed', String(human)],
+      ['open plans', String(data.plans.length)],
     ]
+    renderPlanList()
     const host = document.getElementById('stats')
     host.textContent = ''
     for (const [label, value] of stats) {
@@ -666,9 +751,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     g.addEventListener('pointermove', (ev) => {
       if (dragged !== n) return
       moved = true
-      const pt = svg.createSVGPoint()
-      pt.x = ev.clientX; pt.y = ev.clientY
-      const p = pt.matrixTransform(svg.getScreenCTM().inverse())
+      const p = toGraph(ev.clientX, ev.clientY)
       n.x = p.x; n.y = p.y
     })
     const finish = () => { if (dragged === n) { dragged = null; svg.classList.remove('dragging') } }
@@ -772,13 +855,18 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     return li
   }
 
-  function pageLink(page) {
-    return Object.assign(el('a', 'page-link', 'open plan page ↗'), {
+  /** The page link, and where the page is older than its plan, the command that renders it again. */
+  function appendPageLink(head, page) {
+    head.append(Object.assign(el('a', 'page-link', 'open plan page ↗'), {
       href: BASE_URL + '/plans/' + encodeURIComponent(page.slug),
       target: '_blank',
       rel: 'noopener',
       title: page.page,
-    })
+    }))
+    if (page.stale) {
+      head.append(el('p', 'plan-reason', 'The page was rendered from an earlier version of the plan.'))
+      head.append(commandRow(page.render))
+    }
   }
 
   function buildDocDetail(doc) {
@@ -796,7 +884,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     if (doc.closedPlanHash) chips.append(el('span', 'chip chip-plan', 'closed ' + doc.closedPlanHash.slice(0, 12)))
     head.append(chips)
     const page = data.planPages.find((p) => p.doc === doc.path)
-    if (page) head.append(pageLink(page))
+    if (page) appendPageLink(head, page)
     root.append(head)
 
     const front = el('div', 'frontmatter')
@@ -844,7 +932,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     if (doc && doc.title) return doc.title
     const node = byId.get(id)
     if (!node) return id
-    return node.members ? node.label + ' ×' + node.members.length : node.label
+    if (node.members) return node.label + ' ×' + node.members.length
+    return node.kind === 'openplan' ? node.label + ' (' + node.plan.standing + ')' : node.label
   }
 
   /** A titled list of edges, reading `endpoint` ('from' | 'to') off each. */
@@ -875,6 +964,109 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     front.append(list)
   }
 
+  const verifiedCount = (plan) => plan.steps.filter((step) => step.state === 'verified').length
+
+  function renderPlanList() {
+    const host = document.getElementById('plan-list')
+    host.textContent = ''
+    for (const plan of data.plans) {
+      const button = el('button')
+      button.append(el('span', '', plan.title), el('span', 'progress', plan.standing + ' · ' + verifiedCount(plan) + '/' + plan.steps.length))
+      button.title = plan.file
+      button.addEventListener('click', () => openPanel(planNodeId(plan)))
+      host.append(button)
+    }
+  }
+
+  // Copies only: approving, verifying and closing stay CLI acts (RFC 0030 §7).
+  function commandRow(text) {
+    const row = el('div', 'command')
+    const code = el('code', '', text)
+    const button = el('button', '', 'copy')
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(text)
+        button.textContent = 'copied'
+      } catch {
+        getSelection().selectAllChildren(code)
+        button.textContent = 'selected'
+      }
+      setTimeout(() => { button.textContent = 'copy' }, 1600)
+    })
+    row.append(code, button)
+    return row
+  }
+
+  function buildPlanDetail(plan) {
+    const root = el('article', 'doc-detail')
+    const head = el('div', 'doc-head')
+    head.append(el('p', 'path', plan.file))
+    head.append(el('h1', '', plan.title))
+    const chips = el('div', 'chips')
+    chips.append(el('span', 'chip chip-standing-' + plan.standing, plan.standing))
+    chips.append(el('span', 'chip', verifiedCount(plan) + '/' + plan.steps.length + ' steps verified'))
+    const page = data.planPages.find((p) => p.plan === plan.file)
+    if (page && page.stale) chips.append(el('span', 'chip chip-stale', 'page is stale'))
+    head.append(chips)
+    if (page) appendPageLink(head, page)
+    root.append(head)
+
+    const front = el('div', 'frontmatter')
+    if (plan.next.length > 0) {
+      front.append(el('p', 'panel-label', 'Next'))
+      for (const command of plan.next) front.append(commandRow(command))
+    }
+    if (plan.reason) front.append(el('p', 'plan-reason', plan.reason))
+    for (const reason of plan.unreadable || []) front.append(el('p', 'plan-reason', reason))
+    const grid = el('div', 'meta-grid')
+    metaRow(grid, 'approved', plan.approval ? actorLine(plan.approval) : '—')
+    front.append(el('p', 'panel-label panel-label-spaced', 'Plan'))
+    front.append(grid)
+    if (plan.entities.length > 0) {
+      relationSection(front, 'Entities', true, plan.entities.map((name) => ({ from: planNodeId(plan), to: 'entity:' + name, verdict: 'pass' })), 'to')
+    }
+    if (plan.waivers.length > 0) {
+      front.append(el('p', 'panel-label panel-label-spaced', 'Waivers'))
+      const list = el('ul', 'relations')
+      for (const waiver of plan.waivers) {
+        const li = relationItem(waiver.elementId, 'warn', null)
+        li.classList.add('rel-member')
+        li.append(el('span', 'rel-files', waiver.reason + ' (' + actorLine(waiver) + ')'))
+        list.append(li)
+      }
+      front.append(list)
+    }
+    front.append(el('p', 'panel-label panel-label-spaced', 'Element states and freshness'))
+    front.append(commandRow(plan.status))
+    root.append(front)
+
+    const progress = el('div', 'prose plan-progress')
+    let task = null
+    let list = null
+    for (const step of plan.steps) {
+      if (step.task !== task) {
+        task = step.task
+        progress.append(el('h3', '', task))
+        list = el('ul', 'steps')
+        progress.append(list)
+      }
+      const li = el('li', step.active ? 'active' : '')
+      li.append(el('span', 'state-' + step.state, STEP_GLYPH[step.state]), el('span', 'step-id', step.id))
+      if (step.active) li.append(el('span', 'badge', 'current'))
+      li.append(el('span', 'step-state state-' + step.state, step.state + (step.ranAt ? ' · ' + step.ranAt : '')))
+      if (step.changed) li.append(el('span', 'step-note', 'changed since: ' + step.changed.join(', ')))
+      if (step.stall) li.append(el('span', 'step-note', 'stalled ' + step.stall.at + ': ' + step.stall.reason))
+      list.append(li)
+    }
+    if (plan.steps.length === 0) progress.append(el('p', '', 'No steps derived.'))
+    root.append(progress)
+
+    root.append(Object.assign(el('p', 'rel-note'), {
+      textContent: 'Step records come from .guren/plans/, which git ignores: this is this checkout\'s progress, not the team\'s.',
+    }))
+    return root
+  }
+
   function buildSatelliteDetail(node) {
     const root = el('article', 'doc-detail')
     const head = el('div', 'doc-head')
@@ -884,7 +1076,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     head.append(el('p', 'path', kindLabel))
     head.append(el('h1', 'mono-title', node.label))
     const page = node.kind === 'code' ? data.planPages.find((p) => p.plan === node.id) : undefined
-    if (page) head.append(pageLink(page))
+    if (page) appendPageLink(head, page)
     root.append(head)
 
     const isPlan = (e) => byId.has(e.from) && kindOf(byId.get(e.from)) === 'plan'
@@ -912,6 +1104,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       note.innerHTML =
         (node.members ? 'Ids verifying the same documents, grouped (toggle <em>group tests</em>). ' : '')
         + 'A test whose title carries an acceptance id verifies the documents citing it. A citation no test carries warns in <code>guren check --docs</code>.'
+    } else if (node.kind === 'entity' && governedBy.length === 0 && plans.length > 0) {
+      note.textContent = 'A model the plans above change. No document names it yet; plan:close writes its entity document.'
     } else if (node.kind === 'entity') {
       note.innerHTML =
         'A model class linked by name from doc frontmatter (survives file moves). Explore it with <code></code>.'
@@ -963,7 +1157,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     selected = id
     content.textContent = ''
     const doc = docByPath.get(id)
-    content.append(doc ? buildDocDetail(doc) : buildSatelliteDetail(node))
+    content.append(doc ? buildDocDetail(doc) : node.plan ? buildPlanDetail(node.plan) : buildSatelliteDetail(node))
     nodeEls.forEach(({ n, g }) => g.classList.toggle('selected', n.id === id))
     panel.classList.add('open')
     panel.setAttribute('aria-hidden', 'false')
@@ -1041,8 +1235,85 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       ev.preventDefault()
       setExpanded(!expanded)
     }
+    const inPanel = ev.target instanceof Element && ev.target.closest('.panel') !== null
+    if (typing || inPanel || ev.metaKey || ev.ctrlKey || ev.altKey) return
+    if (ev.key === '+' || ev.key === '=') zoomBy(1 / ZOOM_STEP)
+    else if (ev.key === '-') zoomBy(ZOOM_STEP)
+    else if (ev.key === '0') fitView()
   })
-  svg.addEventListener('pointerdown', (ev) => { if (ev.target === svg) closePanel() })
+
+  // Zoom and pan move the viewBox over the fixed simulation space, so node positions never change.
+  const ZOOM_STEP = 1.25
+  const view = { x: 0, y: 0, w: W, h: H }
+  const applyView = () => svg.setAttribute('viewBox', view.x + ' ' + view.y + ' ' + view.w + ' ' + view.h)
+  /** Screen pixels per graph unit, for turning a pointer or wheel delta into a pan. */
+  const pixelsPerUnit = () => svg.getScreenCTM().a
+  function zoomAt(point, factor) {
+    const w = Math.min(Math.max(view.w * factor, W / 10), W * 4)
+    const k = w / view.w
+    view.x = point.x - (point.x - view.x) * k
+    view.y = point.y - (point.y - view.y) * k
+    view.w = w
+    view.h = w * H / W
+    applyView()
+  }
+  const zoomBy = (factor) => zoomAt({ x: view.x + view.w / 2, y: view.y + view.h / 2 }, factor)
+  function fitView() {
+    if (nodes.length === 0) return
+    const pad = 60
+    const xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y)
+    const minX = Math.min(...xs) - pad, maxX = Math.max(...xs) + pad
+    const minY = Math.min(...ys) - pad, maxY = Math.max(...ys) + pad
+    view.w = Math.max(maxX - minX, (maxY - minY) * W / H, W / 4)
+    view.h = view.w * H / W
+    view.x = (minX + maxX) / 2 - view.w / 2
+    view.y = (minY + maxY) / 2 - view.h / 2
+    applyView()
+  }
+  // A trackpad pinch arrives as a wheel event with ctrlKey set; a plain wheel or two-finger scroll pans.
+  // deltaMode 1 (Firefox's mouse wheel) counts lines and 2 pages; both become pixels here.
+  const WHEEL_UNIT = [1, 16, 400]
+  svg.addEventListener('wheel', (ev) => {
+    ev.preventDefault()
+    const unit = WHEEL_UNIT[ev.deltaMode] ?? 1
+    if (ev.ctrlKey || ev.metaKey) {
+      zoomAt(toGraph(ev.clientX, ev.clientY), Math.exp(ev.deltaY * unit * 0.01))
+    } else {
+      const scale = pixelsPerUnit()
+      view.x += (ev.deltaX * unit) / scale
+      view.y += (ev.deltaY * unit) / scale
+      applyView()
+    }
+  }, { passive: false })
+  let panning = null
+  svg.addEventListener('pointerdown', (ev) => {
+    if (ev.target !== svg || ev.button !== 0) return
+    try { svg.setPointerCapture(ev.pointerId) } catch {}
+    panning = { x: ev.clientX, y: ev.clientY, viewX: view.x, viewY: view.y, scale: pixelsPerUnit(), moved: false }
+  })
+  svg.addEventListener('pointermove', (ev) => {
+    if (!panning) return
+    if (ev.buttons === 0) return stopPan()
+    const dx = ev.clientX - panning.x, dy = ev.clientY - panning.y
+    if (!panning.moved && Math.hypot(dx, dy) < 3) return
+    panning.moved = true
+    svg.classList.add('dragging')
+    view.x = panning.viewX - dx / panning.scale
+    view.y = panning.viewY - dy / panning.scale
+    applyView()
+  })
+  const stopPan = () => {
+    panning = null
+    svg.classList.remove('dragging')
+  }
+  svg.addEventListener('pointerup', () => {
+    if (panning && !panning.moved) closePanel()
+    stopPan()
+  })
+  svg.addEventListener('pointercancel', stopPan)
+  document.getElementById('zoom-in').addEventListener('click', () => zoomBy(1 / ZOOM_STEP))
+  document.getElementById('zoom-out').addEventListener('click', () => zoomBy(ZOOM_STEP))
+  document.getElementById('zoom-fit').addEventListener('click', fitView)
 
   // ---- data loading & freshness ----
   async function load() {

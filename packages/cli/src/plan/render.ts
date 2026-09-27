@@ -12,7 +12,7 @@
 import { readPlanTemplate } from './assets'
 import { planDiagram } from './diagram'
 import { layoutPlanFlows } from './flow'
-import { planHash } from './identity'
+import { planHashOrNull } from './identity'
 import { impactBreakingChanges, type PlanImpactEntry } from './impact'
 import { loadPlanDictionaries, matchPlanLocale, type PlanLocale } from './locales'
 import { hasBaseline, listPlanElements, type Plan, type PlanDraft } from './schema'
@@ -70,10 +70,6 @@ export function escapeJsonForScript(json: string): string {
 }
 
 export { hasBaseline }
-
-function hashOf(plan: PlanDraft | Plan): string | null {
-  return hasBaseline(plan) ? planHash(plan) : null
-}
 
 /**
  * Which entity each element belongs to, for the page's filter. The plan already says
@@ -229,7 +225,7 @@ export function buildPlanPayload(input: RenderPlanInput): PlanPagePayload {
   const breaking = planBreakingChanges(plan)
   return {
     plan,
-    planHash: hashOf(plan),
+    planHash: planHashOrNull(plan),
     checks: [...(input.checks ?? [])],
     breaking: input.impact ? [...breaking, ...impactBreakingChanges(plan, input.impact, breaking)] : breaking,
     impact: input.impact ? [...input.impact] : null,
@@ -244,6 +240,23 @@ export function buildPlanPayload(input: RenderPlanInput): PlanPagePayload {
     entities: [...new Set(elements.map((element) => element.entity))].filter((entity) => entity !== null).sort(),
     status: input.status ?? null,
     i18n: { initial: input.uiLocale ?? matchPlanLocale(plan.locale) ?? 'en', dictionaries: loadPlanDictionaries() },
+  }
+}
+
+const EMBEDDED_PAYLOAD = /<script type="application\/json" id="plan-data">([\s\S]*?)<\/script>/
+
+/**
+ * The plan hash a page {@link renderPlanHtml} wrote carries: `null` for a draft's, `undefined`
+ * where the page holds no payload this reads, such as one an older template wrote.
+ */
+export function renderedPlanHash(html: string): string | null | undefined {
+  const embedded = EMBEDDED_PAYLOAD.exec(html)?.[1]
+  if (embedded === undefined) return undefined
+  try {
+    const hash = (JSON.parse(embedded) as { planHash?: unknown }).planHash
+    return typeof hash === 'string' || hash === null ? hash : undefined
+  } catch {
+    return undefined
   }
 }
 
