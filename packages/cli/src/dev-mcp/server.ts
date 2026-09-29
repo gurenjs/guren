@@ -1,6 +1,8 @@
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 
+import { freshApplicationGraph } from '../application-graph-fresh'
+import { runtimeErrorQuerySchema, runtimeErrorResultSchema, unavailableRuntimeErrors, type RuntimeErrorReader } from '../runtime-errors'
 import { type CheckReport } from '../check'
 import { type ContextRoute } from '../context-route'
 import { type ProjectContext } from '../context'
@@ -74,6 +76,7 @@ export interface CreateDevMcpServerOptions {
   cwd: string
   api: DevMcpApi
   version?: string
+  runtimeErrors?: RuntimeErrorReader
 }
 
 /** A context route that declares agent metadata (RFC 0016). */
@@ -127,6 +130,24 @@ export function createDevMcpServer(options: CreateDevMcpServerOptions): McpServe
   const { cwd, api, version = '0.2.0' } = options
 
   const server = new McpServer({ name: 'guren', version })
+
+  server.registerTool('guren_get_runtime_errors', {
+    description: 'Read retained server request errors from this development session. Unavailable collection is distinct from no retained events.',
+    inputSchema: runtimeErrorQuerySchema,
+    annotations: { readOnlyHint: true },
+  }, async (query) => {
+    try {
+      const result = options.runtimeErrors ? runtimeErrorResultSchema.parse(await options.runtimeErrors(query))
+        : unavailableRuntimeErrors('The installed server does not provide runtime errors.')
+      return { content: [json(result)] }
+    } catch { return { content: [json(unavailableRuntimeErrors('Runtime error collection is unavailable.'))] } }
+  })
+
+  server.registerTool('guren_get_application_graph', {
+    description: 'Read the application graph with explicit coverage, source evidence and snapshot freshness.',
+    inputSchema: z.object({}),
+    annotations: { readOnlyHint: true },
+  }, async () => ({ content: [json(await freshApplicationGraph(cwd))] }))
 
   server.registerTool(
     'guren_get_context',

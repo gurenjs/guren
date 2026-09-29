@@ -1,4 +1,5 @@
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
+import { captureRuntimeError } from '../mcp/runtime-errors'
 import type { Context } from '../http/Application'
 import type { Middleware } from '../http/middleware'
 import type {
@@ -61,6 +62,7 @@ export class ExceptionHandler {
   }
 
   async handle(error: Error, ctx: Context): Promise<Response> {
+    if (!this.shouldNotReport(error)) captureRuntimeError(error, ctx, resolveExceptionStatus(error))
     await this.reportException(error)
 
     return this.renderException(error, ctx)

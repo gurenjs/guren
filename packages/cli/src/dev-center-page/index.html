@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Guren · Dev Center</title>
+<style>
+:root{color-scheme:light;--g-font-sans:'Noto Sans JP',system-ui,sans-serif;--g-font-mono:'JetBrains Mono',ui-monospace,monospace;--g-page:#fff;--g-panel:#fff;--g-raised:#fffafa;--g-ink:#1a1212;--g-line:#e5e7eb;--g-line-strong:#d1d5db;--g-heading:#111827;--g-text:#1f2937;--g-text-2:#4b5563;--g-muted:#6b7280;--g-accent:#db1b1b;--g-accent-text:#991b1b;--g-accent-tint:#fff1f2;--g-ok:#286983;--g-warn:#b45309;--g-danger:#b91c1c;--g-danger-chip:#f23a3a;--g-danger-tint:#fff1f2;--g-tick:linear-gradient(180deg,#ff3c28,#8b0000);--g-r-ctl:8px;--g-r-card:12px;--g-shadow-card:0 4px 6px -1px rgba(0,0,0,.05),0 2px 4px -1px rgba(0,0,0,.03)}
+:root.dark{color-scheme:dark;--g-page:#1a1a2e;--g-panel:#1e1e34;--g-raised:#232340;--g-line:#2e2e4a;--g-line-strong:#3d3d5c;--g-heading:#e0def4;--g-text:#e0def4;--g-text-2:#908caa;--g-muted:#6e6a86;--g-accent-text:#eb6f92;--g-accent-tint:rgba(235,111,146,.12);--g-ok:#9ccfd8;--g-warn:#f6c177;--g-danger:#ffa5a5;--g-danger-tint:rgba(242,58,58,.12);--g-shadow-card:0 4px 6px -1px rgba(0,0,0,.3),0 2px 4px -1px rgba(0,0,0,.2)}
+@media(prefers-color-scheme:dark){:root{color-scheme:dark;--g-page:#1a1a2e;--g-panel:#1e1e34;--g-raised:#232340;--g-line:#2e2e4a;--g-line-strong:#3d3d5c;--g-heading:#e0def4;--g-text:#e0def4;--g-text-2:#908caa;--g-muted:#6e6a86;--g-accent-text:#eb6f92;--g-accent-tint:rgba(235,111,146,.12);--g-ok:#9ccfd8;--g-warn:#f6c177;--g-danger:#ffa5a5;--g-danger-tint:rgba(242,58,58,.12);--g-shadow-card:0 4px 6px -1px rgba(0,0,0,.3),0 2px 4px -1px rgba(0,0,0,.2)}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--g-page);color:var(--g-text);font:400 14px/1.6 var(--g-font-sans);-webkit-font-smoothing:antialiased}
+a{color:var(--g-accent-text)}
+h1,h2,h3,p{margin:0}
+.g-topbar{display:flex;align-items:center;gap:22px;padding:0 max(20px,4vw);min-height:52px;background:var(--g-panel);border-bottom:1px solid var(--g-line)}
+.brand{text-decoration:none;display:flex;align-items:center;gap:9px;color:var(--g-heading);font-size:15px}
+.brand span{font:500 12px/1 var(--g-font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--g-muted)}
+.g-topbar nav{display:flex;gap:20px;margin-left:auto;flex-wrap:wrap}
+.g-topbar nav a{color:var(--g-text-2);font-weight:500;text-decoration:none}
+.g-topbar nav a:hover{color:var(--g-heading)}
+main{max-width:1500px;margin:auto;padding:28px max(20px,4vw)}
+.g-title{position:relative;padding-left:16px;font-size:20px;font-weight:700;color:var(--g-heading);letter-spacing:-.01em}
+.g-title::before{content:'';position:absolute;left:0;top:4px;bottom:4px;width:3px;border-radius:2px;background:var(--g-tick)}
+.lede{margin:8px 0 0;color:var(--g-text-2);max-width:60em}
+.toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:16px 0}
+.g-btn{display:inline-flex;align-items:center;padding:8px 16px;border-radius:var(--g-r-ctl);border:1px solid var(--g-line-strong);background:var(--g-panel);color:var(--g-text);font:700 13.5px/1.45 var(--g-font-sans);cursor:pointer;transition:border-color .12s}
+.g-btn:hover{border-color:var(--g-muted)}
+.g-btn:focus-visible,.node:focus-visible,summary:focus-visible{outline:2px solid var(--g-accent);outline-offset:2px}
+.g-btn[disabled]{opacity:.45;cursor:wait}
+.g-input,.g-select{padding:8px 12px;border:1px solid var(--g-line-strong);border-radius:var(--g-r-ctl);background:var(--g-panel);color:var(--g-text);font:400 14px/1.5 var(--g-font-sans)}
+.g-input:focus,.g-select:focus{outline:2px solid var(--g-accent);outline-offset:-1px;border-color:transparent}
+.g-input::placeholder{color:var(--g-muted)}
+.g-input{flex:1;min-width:180px}
+.toolbar.tight{margin-top:0}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px}
+.label{font:500 11.5px/1.7 var(--g-font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--g-muted)}
+.value{font:700 24px/1.3 var(--g-font-mono);color:var(--g-heading)}
+.g-card{background:var(--g-panel);border:1px solid var(--g-line);border-radius:var(--g-r-card);box-shadow:var(--g-shadow-card);min-width:0}
+.g-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px 18px;border-bottom:1px solid var(--g-line)}
+.g-card-title{font-size:15px;font-weight:700;color:var(--g-heading)}
+.g-card-body{padding:18px}
+.layout{display:grid;grid-template-columns:minmax(240px,1fr) minmax(300px,1.5fr);gap:16px;margin-top:16px}
+.wide{margin-top:16px}
+.list{display:flex;flex-direction:column;gap:6px;max-height:480px;overflow:auto}
+.node{display:block;text-align:left;width:100%;overflow-wrap:anywhere;padding:8px 12px;border:1px solid var(--g-line);border-radius:var(--g-r-ctl);background:var(--g-panel);color:var(--g-text);font:inherit;cursor:pointer}
+.node:hover{border-color:var(--g-line-strong);background:var(--g-raised)}
+.node[aria-pressed=true]{border-color:var(--g-accent-text);background:var(--g-accent-tint)}
+.meta,small{color:var(--g-text-2);font-size:12px}
+.mono,.meta.mono,pre,.g-code{font-family:var(--g-font-mono)}
+.kind{display:inline-block;margin-right:8px;padding:0 7px;border-radius:999px;box-shadow:inset 0 0 0 1px var(--g-line);background:var(--g-raised);color:var(--g-text-2);font:500 11.5px/1.7 var(--g-font-mono)}
+.g-badge{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font:500 12px/1.6 var(--g-font-mono);color:var(--g-danger);background:var(--g-danger-tint)}
+.g-badge::before{content:'';width:6px;height:6px;border-radius:999px;background:currentColor}
+.warning{color:var(--g-warn)}.good{color:var(--g-ok)}.error{color:var(--g-danger)}
+.g-callout{display:grid;grid-template-columns:84px 1fr;gap:14px;padding:10px 2px;border-top:1px solid var(--g-line);font-size:13.5px}
+.g-callout:last-child{border-bottom:1px solid var(--g-line)}
+.g-callout .k{font:700 12.5px/1.7 var(--g-font-mono);text-align:right}
+.g-callout.note .k,.g-callout.ok .k{color:var(--g-ok)}
+.g-callout.rule .k{color:var(--g-warn)}
+.g-callout .b{min-width:0;overflow-wrap:anywhere}
+.g-callout code{font:500 12.5px/1.7 var(--g-font-mono);color:var(--g-accent-text)}
+.g-callout .meta{display:block}
+.g-code{margin:8px 0;padding:16px 20px;border-radius:var(--g-r-card);background:var(--g-ink);color:#fff5f5;font-size:12.5px;line-height:1.75;white-space:pre-wrap;overflow-wrap:anywhere}
+h2.g-card-title{margin:0}
+h3{margin:18px 0 6px;font-size:13px;color:var(--g-heading)}
+details{margin-top:10px}
+summary{cursor:pointer;color:var(--g-text-2)}
+ul{padding-left:20px}
+li{overflow-wrap:anywhere;margin:5px 0}
+#snapshot{overflow-wrap:anywhere;font-family:var(--g-font-mono)}
+.g-empty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:32px 24px;text-align:center;border:1px dashed var(--g-line-strong);border-radius:var(--g-r-card)}
+.g-empty h3{margin:0;font-size:15px;color:var(--g-heading)}
+.g-empty p{max-width:34em;font-size:13px;color:var(--g-text-2)}
+#detail:empty::before{content:'Select a route or symbol to inspect its relationships.';color:var(--g-text-2)}
+.event{border-top:1px solid var(--g-line);padding:14px 0}
+.event:first-child{border-top:0;padding-top:0}
+.event-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.foot{margin-top:16px;color:var(--g-text-2);font-size:12.5px}
+.rel{margin-top:6px}
+.g-card-body>p+p,#errors{margin-top:8px}
+.event-head+.meta{margin-top:4px}
+@media(max-width:700px){.g-topbar{padding:10px 20px}.layout{grid-template-columns:1fr}main{padding:20px}}
+</style></head><body>
+<header class="g-topbar"><a class="brand" href="/_guren"><svg viewBox="0 0 299 516" width="13" height="22" fill="none" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M120.853 0C169.647 25.1364 195.255 83.7877 184.353 136.5C175.756 178.065 136.039 208.749 137.372 253.138C138.729 298.251 168.879 330.194 161.353 377.5C181.444 352.982 200.458 332.078 208.353 300.5C214.367 261.839 179.943 229.848 190.898 190.72C194.731 177.22 208.153 147.3 231.353 136.5C218.919 181.573 237.455 211.003 266.353 245C300.243 280.246 308.266 343.188 284.853 386C253.141 442.376 189.378 465.573 149.853 515.5C121.558 476.749 77.5264 459.842 48.8528 424C-12.4118 347.419 -19.5127 245.133 47.3528 169C80.8397 130.872 165.348 59.327 120.853 0Z" fill="url(#flame)"/><defs><linearGradient id="flame" x1="149.117" y1="0" x2="149.117" y2="515.5" gradientUnits="userSpaceOnUse"><stop stop-color="#FF3C28"/><stop offset="1" stop-color="#8B0000"/></linearGradient></defs></svg><b>Guren</b><span>Dev Center</span></a><nav aria-label="Developer tools"><a href="/_guren/docs">Docs &amp; plans</a><a href="/_guren/graph.json">Graph JSON</a></nav></header>
+<main><h1 class="g-title">Application graph</h1><p class="lede">Inspect registered routes and source relationships. Coverage describes what the readers can establish.</p>
+<div class="toolbar"><button id="refresh" class="g-btn" type="button">Refresh graph</button><span id="graph-status" role="status">Ready to read your application.</span></div><p id="snapshot" class="meta"></p>
+<div class="stats" aria-label="Snapshot totals"><div class="g-card g-card-body"><div class="label">symbols</div><div id="stat-symbols" class="value">–</div></div><div class="g-card g-card-body"><div class="label">relationships</div><div id="stat-edges" class="value">–</div></div><div class="g-card g-card-body"><div class="label">unresolved</div><div id="stat-unresolved" class="value">–</div></div><div class="g-card g-card-body"><div class="label">runtime errors</div><div id="stat-errors" class="value">–</div></div></div>
+<div class="layout"><section class="g-card" aria-label="Routes and symbols"><div class="g-card-body"><div class="toolbar tight"><input id="search" class="g-input" type="search" aria-label="Filter symbols" placeholder="Filter by name, file or module"><select id="kind" class="g-select" aria-label="Symbol kind"><option value="route">Routes</option><option value="">All symbols</option><option value="controller">Controllers</option><option value="model">Models</option><option value="page">Pages</option></select></div><div id="nodes" class="list"></div></div></section><section class="g-card" aria-label="Selected symbol"><div id="detail" class="g-card-body"></div></section></div>
+<section class="g-card wide"><div class="g-card-head"><h2 class="g-card-title">Coverage</h2></div><div class="g-card-body"><div id="coverage"></div><details><summary id="unresolved-title">Unresolved relationships</summary><ul id="unresolved"></ul></details></div></section>
+<section class="g-card wide"><div class="g-card-head"><h2 class="g-card-title">Runtime errors</h2><button id="refresh-errors" class="g-btn" type="button">Refresh errors</button></div><div class="g-card-body"><p class="meta">Framework-handled server exceptions retained by this development process. Messages and request values are omitted.</p><p id="error-status" class="meta" role="status"></p><div id="errors"></div></div></section>
+<p class="foot">Enable the existing docs and plan viewer with <code class="mono">GUREN_DOCS=1</code>. Graph reads do not run verification commands.</p>
+</main><script>__GUREN_DEV_CENTER_SCRIPT__</script></body></html>

@@ -24,7 +24,7 @@ export class SmtpTransport implements MailTransport {
       auth: options.auth,
       pool: options.pool ?? true,
       maxConnections: options.maxConnections ?? 5,
-    } as nodemailer.TransportOptions)
+    })
   }
 
   async send(message: MailMessage): Promise<SendResult> {

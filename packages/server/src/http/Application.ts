@@ -22,6 +22,7 @@ import type { TranslationLoader } from '../i18n'
 import { createSecurityHeaders, type SecurityHeadersOptions } from './middleware/security-headers'
 import { createHostAuthorizationMiddleware, type HostAuthorizationOptions } from './middleware/host-authorization'
 import { isMcpEndpointEnabled } from '../mcp/endpoint'
+import { RUNTIME_ERRORS_BINDING, RuntimeErrorBuffer } from '../mcp/runtime-errors'
 import { isDocsViewerEnabled } from '../docs-viewer/endpoint'
 import type { DevBannerOptions } from './dev-banner'
 import { formatHostPort, isWildcardHost } from './host-port'
@@ -328,6 +329,7 @@ export class Application {
     this.container.instance('hono', this.hono)
     this.container.instance('auth', this.authManager)
     this.container.instance('router', this.router)
+    if (isMcpEndpointEnabled()) this.container.instance(RUNTIME_ERRORS_BINDING, new RuntimeErrorBuffer(process.cwd()))
 
     if (options.inertia?.document) {
       this.container.instance('inertia.document', options.inertia.document)
@@ -970,6 +972,7 @@ export class Application {
     this.disposeBunTeardown = undefined
 
     await closeOwnedViteDevServer(this)
+    if (!this.bunServer) this.container.makeOptional<RuntimeErrorBuffer>(RUNTIME_ERRORS_BINDING)?.reset()
   }
 
   register(provider: ServiceProviderConstructor): this {

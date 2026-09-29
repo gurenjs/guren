@@ -27,6 +27,8 @@ export interface IntrospectOptions {
    * one read of the app (the gate under the dev MCP server), which keeps its own per-run memo.
    */
   fresh?: boolean
+  /** Graph-only identity scan; ordinary diagnostics keep their existing import scope. */
+  modelBindings?: boolean
 }
 
 export const DEFAULT_INTROSPECT_TIMEOUT_MS = 30_000
@@ -78,25 +80,25 @@ const runs = new Map<string, Promise<Introspection>>()
 export function introspectApp(cwd: string, options: IntrospectOptions = {}): Promise<Introspection> {
   const root = resolve(cwd)
   const timeoutMs = options.timeoutMs ?? DEFAULT_INTROSPECT_TIMEOUT_MS
-  if (options.fresh) return runOrCrash(root, timeoutMs)
-  const key = `${timeoutMs}:${root}`
+  if (options.fresh) return runOrCrash(root, timeoutMs, options.modelBindings === true)
+  const key = `${timeoutMs}:${options.modelBindings === true}:${root}`
   let run = runs.get(key)
   if (!run) {
-    run = runOrCrash(root, timeoutMs)
+    run = runOrCrash(root, timeoutMs, options.modelBindings === true)
     runs.set(key, run)
   }
   return run
 }
 
-function runOrCrash(root: string, timeoutMs: number): Promise<Introspection> {
-  return runIntrospection(root, timeoutMs).catch((error: unknown): Introspection => ({
+function runOrCrash(root: string, timeoutMs: number, modelBindings: boolean): Promise<Introspection> {
+  return runIntrospection(root, timeoutMs, modelBindings).catch((error: unknown): Introspection => ({
     status: 'failed',
     reason: 'crashed',
     message: `The introspection process could not run: ${error instanceof Error ? error.message : String(error)}`,
   }))
 }
 
-async function runIntrospection(root: string, timeoutMs: number): Promise<Introspection> {
+async function runIntrospection(root: string, timeoutMs: number, modelBindings: boolean): Promise<Introspection> {
   const child = siblingEntry('introspect-child')
   if (!child) {
     return { status: 'failed', reason: 'crashed', message: 'introspect-child is missing beside the CLI; rebuild @guren/cli.' }
@@ -106,7 +108,7 @@ async function runIntrospection(root: string, timeoutMs: number): Promise<Intros
 
   try {
     const started = Date.now()
-    const run = await runCaptured([bunExecutable(), child, resultFile, String(timeoutMs + INTROSPECT_CHILD_BUDGET_MARGIN_MS)], root, {
+    const run = await runCaptured([bunExecutable(), child, resultFile, String(timeoutMs + INTROSPECT_CHILD_BUDGET_MARGIN_MS), ...(modelBindings ? ['graph'] : [])], root, {
       timeoutMs,
       env: { GUREN_INTROSPECT: '1' },
       processGroup: true,

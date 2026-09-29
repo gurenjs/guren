@@ -1,3 +1,4 @@
+import type { RuntimeErrorReader } from '../runtime-errors'
 import { generateAgentTypes } from '../agents-types'
 import { generateApiClientTypes } from '../api-client-types'
 import { generateChannelTypes } from '../channel-types'
@@ -28,6 +29,7 @@ export interface DevMcpHandler {
 export interface CreateDevMcpHandlerOptions {
   cwd: string
   version?: string
+  runtimeErrors?: RuntimeErrorReader
   /** Stands in for the project on disk; defaults to this package's own functions. */
   api?: DevMcpApi
 }
@@ -78,7 +80,7 @@ export function createDevMcpHandler(options: CreateDevMcpHandlerOptions): DevMcp
 
   const start = (): Promise<DevMcpHandler> => {
     started ??= import('./serve').then(({ startDevMcp }) =>
-      startDevMcp({ cwd: options.cwd, api, version: options.version }),
+      startDevMcp({ cwd: options.cwd, api, version: options.version, runtimeErrors: options.runtimeErrors }),
     )
     return started
   }

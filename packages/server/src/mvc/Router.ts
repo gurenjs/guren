@@ -781,6 +781,19 @@ export class Router<in M extends string = never> {
       isControllerAction(handler) ? { index, controller: handler[0], action: String(handler[1]) } : { index })
   }
 
+  /** Model identities behind the serialized binding names, indexed like definitions (RFC 0032). */
+  registeredModelBindings(): ReadonlyArray<Record<string, BindableModel>> {
+    return this.registry.map(({ path, bindings }) => {
+      const result: Record<string, BindableModel> = Object.create(null)
+      for (const parameter of extractPathParamNames(path)) {
+        const model = this.modelBindings.get(parameter)?.model
+        if (model) result[parameter] = model
+      }
+      for (const [parameter, binding] of bindings ?? []) result[parameter] = binding.model
+      return result
+    })
+  }
+
   /**
    * Every alias and group resolved, and each route's chain in `mount()` order,
    * index-aligned with {@link definitions} (RFC 0026 §3). Like `definitions()`,

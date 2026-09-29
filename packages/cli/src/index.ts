@@ -143,3 +143,5 @@ export type { UpgradeCanaryOptions, UpgradeCanaryResult, UpgradedDependency } fr
 export type { DeployOptions, DeployTarget } from './deploy'
 export type { InstallPluginOptions } from './plugin'
 export type { RouteTypesPluginOptions } from './vite/route-types'
+
+export { createDevCenterHandler } from './dev-center'

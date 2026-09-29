@@ -1068,3 +1068,116 @@ The command boots your application (honouring `src/main.ts` and registered provi
 - Need the plain Bun REPL? Run `bun repl` for a minimal prompt or `bun repl --inspect` to pair with DevTools.
 
 These patterns deliver the same iterative mode of operation you’d expect from a future `guren repl`, without waiting for a dedicated CLI wrapper.
+
+## Application graph and runtime errors
+
+Use `graph` to read the routes, controllers, models and Inertia pages that Guren
+can identify, together with the evidence for their relationships:
+
+```bash
+bunx guren graph --json
+bunx guren graph --json --no-introspect
+```
+
+The JSON includes `schemaVersion`, `snapshot`, `nodes`, `edges`, `unresolved`
+and `coverage`. The schema ships at
+`node_modules/@guren/cli/assets/application-graph.schema.json`. IDs distinguish
+source files and modules. Duplicate routes keep separate IDs and registration
+order. A relationship based only on a matching name stays unresolved.
+
+Default collection registers the application in an isolated process without
+booting it. It also imports controller and bound-model candidate files to match
+class identities; top-level application code still runs. `--no-introspect` reads
+source only and leaves registered routes unavailable. Existing `context` and
+`check` commands retain their import behavior.
+
+The initial graph supports `handles`, `binds` and `renders`. Middleware, validator,
+policy and test nodes, and their relationships, carry explicit `unavailable`
+coverage until readers are implemented. An absent optional directory is empty;
+unreadable or unsupported source is reported as partial coverage. With an older
+server, model bindings without identity information remain unresolved.
+
+A complete, stable graph exits 0. Partial coverage, unavailable sections or source
+changes during collection exit 1 **with the graph still on stdout**. The initial
+version therefore normally exits 1. Consumers should parse the JSON even then.
+A collection or output-limit failure instead returns
+`{ "schemaVersion": 1, "error": { "code": "…", "message": "…" } }`.
+Graph output is limited to 8 MiB.
+
+The snapshot hash includes graph content and source fingerprints, excluding the
+capture time. A fresh read observes uncommitted edits. Files read from the project
+are compared before and after registration; a change sets
+`snapshot.consistency` to `changed`. Dependencies, dotfiles and generated build
+directories are outside this source comparison. This is not a filesystem
+transaction or evidence that a test passed.
+
+To read failures from the running development application, enable its existing
+MCP endpoint and address the origin it reports:
+
+```bash
+GUREN_MCP=1 bun run dev
+```
+
+From another terminal:
+
+```bash
+bunx guren runtime:errors --json --url http://127.0.0.1:3333
+bunx guren runtime:errors --json --url http://127.0.0.1:3333 --limit 100
+```
+
+Replace the port with the bound port. The client accepts an explicit HTTP
+loopback origin, rejects credentials and redirects, and times out after five
+seconds. The endpoint retains the MCP peer/origin guard, including its existing
+explicit `GUREN_ALLOW_UNVERIFIED_PEER` override. Production never enables
+collection.
+
+Coding agents can use `guren_get_application_graph` and
+`guren_get_runtime_errors` through `/_guren/mcp`. The latter reads the same data
+as `/_guren/runtime/errors` and the CLI. Pass `nextCursor.sessionId` as
+`--session` and `nextCursor.after` as `--after` on subsequent CLI reads. MCP takes
+`sessionId`, `after` and `limit` directly. The default limit is 20, with a maximum
+of 100.
+
+Each application retains at most 100 server-error events for 15 minutes, bounded
+by 8 KiB per event and 256 KiB total. Events contain the exception's HTTP status,
+method, a registered route when identifiable, and existing project-relative
+stack locations. They omit exception messages, request values, headers, cookies
+and raw stack text. A custom renderer can return a different response status.
+A model/controller relation in the graph does not prove authorization.
+
+`status: "unavailable"` means collection could not be read; it is distinct from
+an available empty feed. `dropped` reports discarded events, and `cursorExpired`
+reports a cursor outside retained history or from another session. Stopping the
+application clears its buffer and changes the session ID. Custom error handlers
+that bypass Guren's exception handler, excluded exception classes, browser
+errors, logs, background jobs and failed tests are outside this feed.
+
+Continue with [implementation plans](./implementation-plans.md) to compare
+planned work against the application's existing verification rules.
+
+### Dev Center
+
+Start the development server with the MCP endpoint enabled, then open
+`http://localhost:3333/_guren` (use your app's port):
+
+```bash
+GUREN_MCP=1 GUREN_DOCS=1 bun run dev
+```
+
+The Dev Center displays the same application graph as `guren graph` and the
+same retained errors as `guren runtime:errors`. Select a route to inspect its
+related symbols and evidence, or filter by symbol kind, name, file or module.
+Coverage and unresolved relationships remain visible when a reader cannot
+establish a relationship. A snapshot marked as changed needs another read.
+
+The page reads once when opened. **Refresh graph** starts a fresh scan, which
+can import application modules as described above; **Refresh errors** replaces
+the displayed retention window. Neither button runs verification commands.
+A failed read shows unavailable data and clears the previous result. An empty
+error window means no retained exceptions, not that the application is healthy.
+
+**Docs & plans** opens the existing docs viewer at `/_guren/docs`, including its
+plan views. That viewer requires `GUREN_DOCS=1`. The Dev Center itself requires
+`GUREN_MCP=1` and uses its peer/origin guard; it is disabled in production.
+Older CLI versions without the page factory keep their existing MCP tools but
+do not mount the Dev Center. Upgrade Guren if `/_guren` returns 404.

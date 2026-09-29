@@ -1,3 +1,4 @@
+import { RUNTIME_ERRORS_BINDING, RUNTIME_ERRORS_PATH, type RuntimeErrorBuffer, type RuntimeErrorQuery } from './runtime-errors'
 import { ServiceProvider } from '../container/ServiceProvider'
 import { createMcpAccessGuard, isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from './endpoint'
 
@@ -7,7 +8,8 @@ import { createMcpAccessGuard, isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from '.
  * build as `any`. Same seam as `DocsViewerServiceProvider`'s.
  */
 export interface DevMcpCliApi {
-  createDevMcpHandler?(options: { cwd: string }): {
+  createDevCenterHandler?(options: { cwd: string }): { fetch(request: Request): Promise<Response> }
+  createDevMcpHandler?(options: { cwd: string; runtimeErrors?: (query: RuntimeErrorQuery) => unknown }): {
     fetch(request: Request): Promise<Response>
   }
 }
@@ -57,7 +59,32 @@ export class McpServiceProvider extends ServiceProvider {
       return
     }
 
-    const handler = cli.createDevMcpHandler({ cwd: process.cwd() })
+    // Optional capability: older CLIs keep serving their existing MCP tools.
+    if (cli.createDevCenterHandler) {
+      const center = cli.createDevCenterHandler({ cwd: process.cwd() })
+      for (const path of ['/_guren', '/_guren/', '/_guren/graph.json']) {
+        hono.use(path, createMcpAccessGuard())
+        hono.get(path, (ctx) => isMcpEndpointEnabled() ? center.fetch(ctx.req.raw) : ctx.notFound())
+      }
+    }
+
+    const buffer = this.container.makeOptional<RuntimeErrorBuffer>(RUNTIME_ERRORS_BINDING)
+    const runtimeErrors = buffer ? (query: RuntimeErrorQuery) => isMcpEndpointEnabled() ? buffer.read(query)
+      : { schemaVersion: 1, status: 'unavailable', reason: 'Runtime collection is disabled.' } : undefined
+    const handler = cli.createDevMcpHandler({ cwd: process.cwd(), runtimeErrors })
+    hono.use(RUNTIME_ERRORS_PATH, createMcpAccessGuard())
+    hono.get(RUNTIME_ERRORS_PATH, (ctx) => {
+      ctx.header('Cache-Control', 'no-store')
+      if (!isMcpEndpointEnabled()) return ctx.notFound()
+      if (!runtimeErrors) return ctx.json({ schemaVersion: 1, status: 'unavailable', reason: 'Runtime collector is not available.' })
+      try {
+        return ctx.json(runtimeErrors({
+          sessionId: ctx.req.query('sessionId'),
+          ...(ctx.req.query('after') !== undefined ? { after: Number(ctx.req.query('after')) } : {}),
+          ...(ctx.req.query('limit') !== undefined ? { limit: Number(ctx.req.query('limit')) } : {}),
+        }))
+      } catch { return ctx.json({ schemaVersion: 1, status: 'unavailable', reason: 'Invalid runtime cursor or limit.' }, 400) }
+    })
 
     // The handler performs no Origin or peer validation of its own.
     hono.use(MCP_ENDPOINT_PATH, createMcpAccessGuard())
