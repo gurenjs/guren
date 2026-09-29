@@ -12,10 +12,6 @@ function text(tag: string, value: string, className?: string): HTMLElement {
   if (className) node.className = className
   return node
 }
-const dark = matchMedia('(prefers-color-scheme: dark)')
-const applyTheme = () => document.documentElement.classList.toggle('dark', dark.matches)
-applyTheme()
-dark.onchange = applyTheme
 const COVERAGE_KEY = { complete: 'ok', partial: 'rule', unavailable: 'note' } as const
 let graph: GurenApplicationGraph | undefined
 let selected: string | undefined
