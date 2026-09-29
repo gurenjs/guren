@@ -8,6 +8,7 @@ import { createMcpAccessGuard, isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from '.
  * build as `any`. Same seam as `DocsViewerServiceProvider`'s.
  */
 export interface DevMcpCliApi {
+  createDevCenterHandler?(options: { cwd: string }): { fetch(request: Request): Promise<Response> }
   createDevMcpHandler?(options: { cwd: string; runtimeErrors?: (query: RuntimeErrorQuery) => unknown }): {
     fetch(request: Request): Promise<Response>
   }
@@ -56,6 +57,15 @@ export class McpServiceProvider extends ServiceProvider {
     if (!canServeDevMcp(cli)) {
       console.warn(`[guren] ${DEV_MCP_CLI_TOO_OLD}`)
       return
+    }
+
+    // Optional capability: older CLIs keep serving their existing MCP tools.
+    if (cli.createDevCenterHandler) {
+      const center = cli.createDevCenterHandler({ cwd: process.cwd() })
+      for (const path of ['/_guren', '/_guren/', '/_guren/graph.json']) {
+        hono.use(path, createMcpAccessGuard())
+        hono.get(path, (ctx) => isMcpEndpointEnabled() ? center.fetch(ctx.req.raw) : ctx.notFound())
+      }
     }
 
     const buffer = this.container.makeOptional<RuntimeErrorBuffer>(RUNTIME_ERRORS_BINDING)

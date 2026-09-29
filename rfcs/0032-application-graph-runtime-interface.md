@@ -376,3 +376,25 @@ The repeatable failed-request test checks that HTTP and MCP return the same
 retained event and that a cursor does not replay it. A controlled agent repair
 experiment (completion, time, manual copying, calls and cost) remains a rollout
 measurement; no agent-effectiveness result is claimed by this implementation.
+
+## M2 implementation notes
+
+The maintainer continued the accepted roadmap on 2026-09-29. The Dev Center
+at `/_guren` reuses `GUREN_MCP=1`, its production exclusion and peer/origin guard.
+The CLI owns its bundled page and graph reader through an optional factory on
+the existing server/CLI seam. Older CLIs keep the existing MCP endpoint.
+
+The page reads `/_guren/graph.json` through the same fresh child as MCP and reads
+`/_guren/runtime/errors?limit=100` without another collector. Concurrent graph
+requests share only an in-flight scan; completed results are never cached.
+Opening the page reads once; refresh buttons initiate subsequent reads. There
+is no automatic polling or verification command execution. Failed reads clear
+the previous display. Coverage, unresolved references and changed snapshots
+remain visible; event correlation describes the runtime reading, not a claim
+that the displayed graph snapshot existed when the exception occurred.
+
+Docs and plans remain reachable through `/_guren/docs`, preserving its separate
+`GUREN_DOCS=1` activation. All project-authored labels are rendered as text. The
+shell has a script-hash CSP, disallows framing, and all Dev Center responses
+use no-store caching. Route filtering and symbol navigation are presentation
+operations over the shared graph, not another parser or verification system.

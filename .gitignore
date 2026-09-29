@@ -42,3 +42,5 @@ file::memory:*
 packages/cli/assets/plan/index.html
 # The docs viewer shell with its script bundled in, written by `packages/cli/scripts/build-docs-viewer.ts`.
 packages/cli/assets/docs-viewer/index.html
+
+packages/cli/assets/dev-center/index.html

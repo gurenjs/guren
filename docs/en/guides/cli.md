@@ -1154,3 +1154,30 @@ errors, logs, background jobs and failed tests are outside this feed.
 
 Continue with [implementation plans](./implementation-plans.md) to compare
 planned work against the application's existing verification rules.
+
+### Dev Center
+
+Start the development server with the MCP endpoint enabled, then open
+`http://localhost:3333/_guren` (use your app's port):
+
+```bash
+GUREN_MCP=1 GUREN_DOCS=1 bun run dev
+```
+
+The Dev Center displays the same application graph as `guren graph` and the
+same retained errors as `guren runtime:errors`. Select a route to inspect its
+related symbols and evidence, or filter by symbol kind, name, file or module.
+Coverage and unresolved relationships remain visible when a reader cannot
+establish a relationship. A snapshot marked as changed needs another read.
+
+The page reads once when opened. **Refresh graph** starts a fresh scan, which
+can import application modules as described above; **Refresh errors** replaces
+the displayed retention window. Neither button runs verification commands.
+A failed read shows unavailable data and clears the previous result. An empty
+error window means no retained exceptions, not that the application is healthy.
+
+**Docs & plans** opens the existing docs viewer at `/_guren/docs`, including its
+plan views. That viewer requires `GUREN_DOCS=1`. The Dev Center itself requires
+`GUREN_MCP=1` and uses its peer/origin guard; it is disabled in production.
+Older CLI versions without the page factory keep their existing MCP tools but
+do not mount the Dev Center. Upgrade Guren if `/_guren` returns 404.
