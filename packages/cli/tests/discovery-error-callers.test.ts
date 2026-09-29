@@ -23,10 +23,10 @@ const PLAN = {
   locale: 'en',
   scope: { goals: [], nonGoals: [] },
   models: [{ id: 'm', change: { kind: 'existing' }, name: 'Post', table: 'posts', columns: [], relationships: [], fillable: [] }],
-  policies: [{ id: 'pol', change: { kind: 'drop' }, name: 'PostPolicy', model: 'm', abilities: [{ name: 'delete', rule: 'r' }] }],
+  policies: [{ id: 'pol', change: { kind: 'drop', reason: 'r' }, name: 'PostPolicy', model: 'm', abilities: [{ name: 'delete', rule: 'r' }] }],
   sideEffects: [
     { id: 'fx.add', change: { kind: 'add' }, kind: 'job', name: 'SendDigest', trigger: 'hourly', description: 'd' },
-    { id: 'fx.drop', change: { kind: 'drop' }, kind: 'job', name: 'OldDigest', trigger: 'hourly', description: 'd' },
+    { id: 'fx.drop', change: { kind: 'drop', reason: 'r' }, kind: 'job', name: 'OldDigest', trigger: 'hourly', description: 'd' },
   ],
 }
 

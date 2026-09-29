@@ -33,7 +33,7 @@ function policyPlan(abilities: Array<{ name: string; rule: string }>): PlanDraft
   return plan({ policies: [{ id: 'pol', change: ADD, name: 'PostPolicy', model: 'm', abilities }] })
 }
 
-function effectPlan(kind: string, name: string, change: { kind: 'add' | 'drop' } = ADD): PlanDraft {
+function effectPlan(kind: string, name: string, change: { kind: 'add' } | { kind: 'drop'; reason: string } = ADD): PlanDraft {
   return plan({ sideEffects: [{ id: 'fx', change, kind, name, trigger: 'when a post is published', description: 'd' }] })
 }
 
@@ -256,7 +256,7 @@ describe('judgePlan on side effects', () => {
   test('should block an added or dropped side effect whose directory would not open, never reading it as absent', () => {
     const app = state({ sideEffects: { ...NO_SIDE_EFFECTS, job: { unreadable: 'app/Jobs/billing would not open (permission denied)' } } })
 
-    for (const change of [{ kind: 'add' }, { kind: 'drop' }] as const) {
+    for (const change of [{ kind: 'add' }, { kind: 'drop', reason: 'digests moved to a queue' }] as const) {
       const element = only(effectPlan('job', 'SendDigest', change), app, 'fx')
 
       expect(element).toMatchObject({ state: 'blocked', reason: expect.stringContaining('app/Jobs/billing would not open'), files: [] })
