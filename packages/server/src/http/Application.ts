@@ -22,7 +22,8 @@ import type { TranslationLoader } from '../i18n'
 import { createSecurityHeaders, type SecurityHeadersOptions } from './middleware/security-headers'
 import { createHostAuthorizationMiddleware, type HostAuthorizationOptions } from './middleware/host-authorization'
 import { isMcpEndpointEnabled } from '../mcp/endpoint'
-import { RUNTIME_ERRORS_BINDING, RuntimeErrorBuffer } from '../mcp/runtime-errors'
+import { loadRuntimeErrorsModule, RUNTIME_ERRORS_BINDING } from '../mcp/runtime-error-capture'
+import type { RuntimeErrorBuffer } from '../mcp/runtime-errors'
 import { isDocsViewerEnabled } from '../docs-viewer/endpoint'
 import type { DevBannerOptions } from './dev-banner'
 import { formatHostPort, isWildcardHost } from './host-port'
@@ -305,6 +306,8 @@ export class Application {
   private bootPromise?: Promise<void>
   private manifestPromise?: Promise<AppManifest>
   private bootAttempted = false
+  /** Settles once the dev-only runtime error buffer is bound; boot waits for it so McpServiceProvider sees the binding. */
+  private runtimeErrorsLoaded?: Promise<void>
 
   constructor(private readonly options: ApplicationOptions = {}) {
     this.configEntries = [
@@ -329,7 +332,16 @@ export class Application {
     this.container.instance('hono', this.hono)
     this.container.instance('auth', this.authManager)
     this.container.instance('router', this.router)
-    if (isMcpEndpointEnabled()) this.container.instance(RUNTIME_ERRORS_BINDING, new RuntimeErrorBuffer(process.cwd()))
+    const runtimeErrors = loadRuntimeErrorsModule()
+    if (runtimeErrors) {
+      const root = process.cwd()
+      this.runtimeErrorsLoaded = runtimeErrors.then(
+        ({ RuntimeErrorBuffer }) => { this.container.instance(RUNTIME_ERRORS_BINDING, new RuntimeErrorBuffer(root)) },
+        (error: unknown) => {
+          console.warn(`[guren] GUREN_MCP=1 but the runtime error collector could not load: ${error instanceof Error ? error.message : String(error)}`)
+        },
+      )
+    }
 
     if (options.inertia?.document) {
       this.container.instance('inertia.document', options.inertia.document)
@@ -617,6 +629,7 @@ export class Application {
 
   private async bootOnce(): Promise<void> {
     this.bootAttempted = true
+    await this.runtimeErrorsLoaded
     if (this.options.hostAuthorization !== undefined && this.hasHttpConfig()) {
       throw new Error(
         '[guren] Host authorization is configured twice: createApp({ hostAuthorization }) and config/http.ts. Keep one.',
