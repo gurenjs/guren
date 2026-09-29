@@ -95,6 +95,8 @@ export class RuntimeErrorBuffer {
   private frames(stack: string | undefined): RuntimeErrorEvent['frames'] {
     const root = this.root.replace(/\\/g, '/').replace(/\/$/, '') + '/'
     const frames: RuntimeErrorEvent['frames'] = []
+    let actualRoot: string
+    try { actualRoot = realpathSync(this.root).replace(/\\/g, '/').replace(/\/$/, '') + '/' } catch { return frames }
     for (const line of (stack ?? '').slice(0, 32 * 1024).split('\n').slice(1, 41)) {
       const match = line.match(/(?:\(|\s)((?:file:\/\/)?(?:\/|[A-Za-z]:[\\/])[^\n]*):([0-9]+):([0-9]+)\)?$/)
       if (!match) continue
@@ -104,7 +106,6 @@ export class RuntimeErrorBuffer {
       if (!/^[\w./@ -]+\.(?:[cm]?[jt]sx?)$/.test(file) || file.split('/').some((part) => part === '..' || part === 'node_modules' || part.startsWith('.'))) continue
       try {
         const actual = realpathSync(path).replace(/\\/g, '/')
-        const actualRoot = realpathSync(this.root).replace(/\\/g, '/').replace(/\/$/, '') + '/'
         if (!actual.startsWith(actualRoot) || !statSync(actual).isFile()) continue
       } catch { continue }
       frames.push({ file, line: Number(match[2]), column: Number(match[3]) })

@@ -1,6 +1,6 @@
 import { defineCommand } from '../define-command'
 import { markCommandFailed } from '../command-status'
-import { graphResultSchema, isCompleteGraph, type GraphResult } from '../application-graph'
+import { isCompleteGraph, type GraphResult } from '../application-graph'
 import { loadApplicationGraph } from '../application-graph-load'
 import { GRAPH_OUTPUT_LIMIT } from '../application-graph-fresh'
 
@@ -14,7 +14,7 @@ export const graphCommand = defineCommand({
   async run({ args }) {
     let result: GraphResult
     try {
-      result = graphResultSchema.parse(await loadApplicationGraph({ cwd: args.app ?? process.cwd(), introspect: args.introspect !== false }))
+      result = await loadApplicationGraph({ cwd: args.app ?? process.cwd(), introspect: args.introspect !== false })
     } catch {
       result = { schemaVersion: 1, error: { code: 'collection-failed', message: 'Application graph collection could not complete.' } }
     }

@@ -1,5 +1,5 @@
-import { captureRuntimeError } from '../mcp/runtime-errors'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
+import { captureRuntimeError } from '../mcp/runtime-errors'
 import type { Context } from '../http/Application'
 import type { Middleware } from '../http/middleware'
 import type {

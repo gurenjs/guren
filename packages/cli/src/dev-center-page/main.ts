@@ -1,5 +1,5 @@
 import type { GraphNode, GurenApplicationGraph, GraphResult } from '../application-graph'
-import { runtimeErrorResultSchema } from '../runtime-errors'
+import type { RuntimeErrorResult } from '../runtime-errors'
 
 function element<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id)
@@ -124,7 +124,8 @@ async function loadErrors(): Promise<void> {
   stat('stat-errors', undefined)
   try {
     // Read the complete retained window (at most 100), replacing the UI on every refresh.
-    const result = runtimeErrorResultSchema.parse(await readJson('/_guren/runtime/errors?limit=100'))
+    const result = await readJson('/_guren/runtime/errors?limit=100') as RuntimeErrorResult
+    if (result?.schemaVersion !== 1 || (result.status === 'available' && !Array.isArray(result.events))) throw new Error('Unsupported runtime payload')
     if (result.status === 'unavailable') { status.textContent = `Unavailable: ${result.reason}`; return }
     stat('stat-errors', result.events.length)
     status.textContent = `${result.events.length} retained errors · ${result.dropped} dropped · Session ${result.sessionId} · Collection started ${result.startedAt}${result.cursorExpired ? ' · Earlier events are no longer retained' : ''}`
