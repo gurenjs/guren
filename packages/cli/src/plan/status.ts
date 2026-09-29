@@ -592,13 +592,16 @@ class StatusContext {
     element: { id: string; change: PlanChange; name: string; module?: string },
     names: PlanAppNames,
     noun: PlanNoun,
-    classes: T[] | undefined,
+    classes: T[] | PlanAppUnreadable | undefined,
     judge: { properties?: (found: T | undefined) => PlanPropertyStatus[]; mount?: { verdict: (found: T) => PlanAppMount; files: (found: T) => string[] } },
   ): PlanElementStatus {
     const { properties, mount } = judge
+    // A scan that could not read the directory is no answer, whatever the section's names say.
+    const judged = classes !== undefined && isUnreadable(classes) ? classes : names
+    const readable = classes === undefined || isUnreadable(classes) ? undefined : classes
     const find = (name: string): Existence =>
-      existsInScope(names, name, noun, element.module, classes, (entry) => entry.className === name)
-    const found = (): T | undefined => findClass(classes, element.name, element.module)
+      existsInScope(judged, name, noun, element.module, readable, (entry) => entry.className === name)
+    const found = (): T | undefined => findClass(readable, element.name, element.module)
     return this.conclude({
       id: element.id,
       section,
@@ -608,7 +611,7 @@ class StatusContext {
       previous: previousOf(element.change, find),
       properties: properties && (() => properties(found())),
       mount: mount && { verdict: () => mount.verdict(found()!), files: () => mount.files(found()!) },
-      files: () => classFiles(classes, element.name, element.module),
+      files: () => classFiles(readable, element.name, element.module),
     })
   }
 
@@ -1242,7 +1245,7 @@ class StatusContext {
 
   sideEffect(effect: PlanSideEffect): PlanElementStatus {
     const classes = this.detail?.sideEffects[effect.kind]
-    const names: PlanAppNames = classes ? classes.map((entry) => ({ name: entry.className, module: entry.module })) : NO_DETAIL
+    const names: PlanAppNames = !classes ? NO_DETAIL : isUnreadable(classes) ? classes : classes.map((entry) => ({ name: entry.className, module: entry.module }))
     return this.named('sideEffects', effect, names, { plural: `${effect.kind} classes`, singular: effect.kind }, classes, {
       // Removing the last use is what unwires it, and a use sits in the file that makes it.
       mount: { verdict: (found) => this.sideEffectMount(effect, found), files: (found) => found.usedIn },

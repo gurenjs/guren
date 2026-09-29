@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import type { CheckReport } from '../src/check-result'
+import { FileDiscoveryError } from '../src/discovery'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
 import { planDigest, planSlug, PLAN_STATE_GITIGNORE, PLAN_STATE_VERSION, readPlanState, writePlanStepRecord, type PlanStepRecord } from '../src/plan/state'
 import { planHash } from '../src/plan/identity'
@@ -160,6 +161,11 @@ function elementOf(status: PlanStatus<PlanElementState>, id: string): PlanElemen
 
 function commandsOf(step: PlanStepVerification): Record<string, string> {
   return Object.fromEntries(step.record.commands.map((command) => [command.command, command.status]))
+}
+
+/** What `discoverTestFiles()` throws for a directory under the fixture's tests that will not open. */
+function deniedTestsDirectory(): FileDiscoveryError {
+  return new FileDiscoveryError(join(ROOT, 'tests/admin'), Object.assign(new Error('permission denied'), { code: 'EACCES' }))
 }
 
 function commandOf(step: PlanStepVerification, command: string): PlanStepRecord['commands'][number] {
@@ -344,6 +350,14 @@ describe('PlanVerifier', () => {
     const previous = record({ acceptance: IDS.map((id) => ({ id, status: 'failing' as const })) })
     const recheck = (root: string, files: string[]): Promise<PlanStepVerification> =>
       verifier(statusOf(), fakeExec(), { root, testFiles: async () => files.map((file) => join(root, file)) }).recheckTests(TESTS, previous)
+
+    test('should block the re-check, keeping every behaviour, when the test files cannot be listed', async () => {
+      const step = await verifier(statusOf(), fakeExec(), { testFiles: async () => { throw deniedTestsDirectory() } }).recheckTests(TESTS, previous)
+
+      expect(step.record.outcome).toBe('blocked')
+      expect(step.record.commands).toEqual([expect.objectContaining({ command: 'tests:fail', status: 'blocked', reason: 'the test files could not be listed: tests/admin would not open (permission denied)' })])
+      expect(step.record.acceptance).toEqual(previous.acceptance)
+    })
 
     test('should keep a drifted tests step verified while one file carries each id, and name a lost or doubled one', async () => {
       const files = { 'tests/comments.test.ts': commentTests(['AC-comments-1', 'AC-comments-3', 'AC-comments-4']), 'tests/more.test.ts': commentTests(['AC-comments-3']) }
@@ -581,6 +595,16 @@ describe('PlanVerifier', () => {
     expect(commandOf(unlisted, 'tests')).toMatchObject({ status: 'fail' })
     expect(fake.calls.some((call) => call[1] === 'test')).toBe(false)
     expect(none.record.acceptance.map((behaviour) => behaviour.status)).toEqual(['pending', 'pending', 'pending', 'pending'])
+  })
+
+  test('should block the tests command, not fail it, when a directory the test discovery reads would not open', async () => {
+    const fake = fakeExec()
+
+    const step = await verifier(statusOf(), fake, { testFiles: async () => { throw deniedTestsDirectory() } }).verify(HTTP)
+
+    expect(commandOf(step, 'tests')).toMatchObject({ status: 'blocked', reason: 'the test files could not be listed: tests/admin would not open (permission denied)' })
+    expect(step.record.outcome).toBe('blocked')
+    expect(fake.calls.some((call) => call[1] === 'test')).toBe(false)
   })
 
   test('should fail the tests command on an id the plan does not declare, recording its behaviours as pending', async () => {

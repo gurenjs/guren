@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { definePolicy } from '@guren/core'
 
 import type { PlanAppDetail, PlanAppPolicyDetail, PlanAppSideEffectDetail } from '../src/plan/app-detail'
-import { loadPlanAppState, type PlanAppState } from '../src/plan/app-state'
+import { isUnreadable, loadPlanAppState, type PlanAppState, type PlanAppUnreadable } from '../src/plan/app-state'
 import { describeCloseBlockers } from '../src/plan/close-remedy'
 import { DEFINE_POLICY_ABILITIES } from '../src/plan/policy-abilities'
 import { PlanDraftSchema, type PlanDraft } from '../src/plan/schema'
@@ -33,8 +33,8 @@ function policyPlan(abilities: Array<{ name: string; rule: string }>): PlanDraft
   return plan({ policies: [{ id: 'pol', change: ADD, name: 'PostPolicy', model: 'm', abilities }] })
 }
 
-function effectPlan(kind: string, name: string): PlanDraft {
-  return plan({ sideEffects: [{ id: 'fx', change: ADD, kind, name, trigger: 'when a post is published', description: 'd' }] })
+function effectPlan(kind: string, name: string, change: { kind: 'add' | 'drop' } = ADD): PlanDraft {
+  return plan({ sideEffects: [{ id: 'fx', change, kind, name, trigger: 'when a post is published', description: 'd' }] })
 }
 
 const NO_SIDE_EFFECTS: PlanAppDetail['sideEffects'] = { job: [], event: [], listener: [], mail: [], notification: [] }
@@ -70,6 +70,11 @@ type Uses = Partial<Pick<PlanAppSideEffectDetail, 'usedIn' | 'unprovenIn' | 'men
 
 function effect(className: string, file: string, uses: Uses = {}): PlanAppSideEffectDetail {
   return { className, module: null, file, usedIn: [], unprovenIn: [], mentionedIn: [], ...uses }
+}
+
+function readable<T>(section: T[] | PlanAppUnreadable): T[] {
+  if (isUnreadable(section)) throw new Error(section.unreadable)
+  return section
 }
 
 function only(document: PlanDraft, app: PlanAppState, id: string): PlanElementStatus {
@@ -187,6 +192,12 @@ describe('judgePlan on policy abilities', () => {
     expect(element.properties[0]).toMatchObject({ verdict: 'unknown', reason: expect.stringContaining('declares no class PostPolicy') })
     expect(element.state).toBe('unjudged')
   })
+
+  test('should block a policy whose directory would not open, though the section names it', () => {
+    const element = only(policyPlan([{ name: 'delete', rule: 'r' }]), state({ policies: { unreadable: 'app/Policies/admin would not open (permission denied)' } }), 'pol')
+
+    expect(element).toMatchObject({ state: 'blocked', reason: expect.stringContaining('app/Policies/admin would not open'), files: [] })
+  })
 })
 
 describe('judgePlan on side effects', () => {
@@ -240,6 +251,16 @@ describe('judgePlan on side effects', () => {
 
     expect(only(effectPlan('mail', 'WelcomeMail'), app, 'fx').state).toBe('wired')
     expect(only(effectPlan('notification', 'PostPublishedNotification'), app, 'fx').state).toBe('present')
+  })
+
+  test('should block an added or dropped side effect whose directory would not open, never reading it as absent', () => {
+    const app = state({ sideEffects: { ...NO_SIDE_EFFECTS, job: { unreadable: 'app/Jobs/billing would not open (permission denied)' } } })
+
+    for (const change of [{ kind: 'add' }, { kind: 'drop' }] as const) {
+      const element = only(effectPlan('job', 'SendDigest', change), app, 'fx')
+
+      expect(element).toMatchObject({ state: 'blocked', reason: expect.stringContaining('app/Jobs/billing would not open'), files: [] })
+    }
   })
 
   test('should not let a wired side effect verify without a behaviour that reaches it', () => {
@@ -566,7 +587,7 @@ describe('the policy and side-effect readers', () => {
   })
 
   const effectOf = (kind: keyof PlanAppDetail['sideEffects'], className: string) => {
-    const found = detail.sideEffects[kind].find((entry) => entry.className === className)
+    const found = readable(detail.sideEffects[kind]).find((entry) => entry.className === className)
     if (!found) throw new Error(`no ${kind} ${className}`)
     return found
   }
@@ -638,7 +659,7 @@ describe('the policy and side-effect readers', () => {
   })
 
   test('should read a policy’s abilities off its class or its definePolicy object', () => {
-    const abilitiesOf = (className: string) => detail.policies.find((entry) => entry.className === className)?.abilities
+    const abilitiesOf = (className: string) => readable(detail.policies).find((entry) => entry.className === className)?.abilities
 
     expect(abilitiesOf('PostPolicy')).toEqual({ declared: ['view', 'update'], fields: ['delete', 'archive'] })
     expect(abilitiesOf('CommentPolicy')).toEqual({

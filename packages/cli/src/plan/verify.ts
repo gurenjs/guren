@@ -28,10 +28,12 @@ import {
   type AcceptanceReport,
 } from './acceptance-status'
 import { behaviourRequestFailure, readBehaviourRequests } from './behaviour-requests'
+import { discoverSectionFiles } from './discovery'
 import type { Plan, PlanDraft } from './schema'
 import type { PlanCommandRecord, PlanFingerprint, PlanRedRun, PlanStepRecord } from './state'
 import { awaitsVerification, type PlanElementStatus, type PlanStatus } from './status'
 import { findPlanStep, type PlanDerivedStep, type PlanTaskDerivation, type PlanVerifyCommand } from './tasks'
+import { isUnreadable, type PlanAppUnreadable } from './unreadable'
 import { behaviourShape, carriedRedRuns, hashFiles } from './verification'
 
 export interface PlanStepVerification {
@@ -233,6 +235,8 @@ interface TestSelection {
   /** Each acceptance id of the step → the files carrying it, which `files` is the union of. */
   carriers: Map<string, string[]>
   label: string
+  /** Why the test files could not be listed: the environment's, so the commands reading them are `blocked`. */
+  unreadable?: string
 }
 
 interface TestOutcome extends TestSelection {
@@ -258,7 +262,7 @@ export class PlanVerifier {
   private readonly drizzleKit: () => Promise<AppDrizzleKit>
   private readonly now: () => Date
   private judged: Promise<{ status: PlanStatus; elements: Map<string, PlanElementStatus> }> | undefined
-  private testFilesPromise: Promise<string[]> | undefined
+  private testFilesPromise: Promise<string[] | PlanAppUnreadable> | undefined
 
   constructor(
     private readonly plan: PlanDraft | Plan,
@@ -308,7 +312,26 @@ export class PlanVerifier {
     if (!found) throw new Error(`no step ${stepId} is derived from this plan`)
     const started = performance.now()
     const ranAt = this.now().toISOString()
-    const { files, carriers } = await this.selection(found.step)
+    const label = 'not run: a re-check that one test file still carries each behaviour'
+    const { files, carriers, unreadable } = await this.selection(found.step)
+    if (unreadable !== undefined) {
+      const command: PlanCommandRecord = { command: 'tests:fail', label, status: 'blocked', durationMs: 0, reason: `the test files could not be listed: ${unreadable}`, findings: [] }
+      return {
+        stepId,
+        taskId: found.task.id,
+        record: {
+          outcome: 'blocked',
+          planDigest: this.options.planDigest,
+          ranAt,
+          durationMs: Math.round(performance.now() - started),
+          commands: [command],
+          acceptance: previous.acceptance,
+          incomplete: [],
+          waived: [],
+          fingerprint: { files: {}, environment: currentEnvironment() },
+        },
+      }
+    }
     const { missing, findings: carried } = carrierFindings(found.step.acceptanceIds, carriers)
     // A test rewritten to request nothing still fails, so the red run it verified on proves nothing about it now.
     const requests = await this.requestCheck(found.step)
@@ -316,7 +339,7 @@ export class PlanVerifier {
     const reason = carried.length > 0 ? NOT_CARRIED : requests?.reason
     const command: PlanCommandRecord = {
       command: 'tests:fail',
-      label: 'not run: a re-check that one test file still carries each behaviour',
+      label,
       status: findings.length > 0 ? 'fail' : 'pass',
       durationMs: 0,
       ...(reason === undefined ? {} : { reason }),
@@ -528,8 +551,10 @@ export class PlanVerifier {
   }
 
   private async selectTests(step: PlanDerivedStep): Promise<TestSelection> {
-    this.testFilesPromise ??= this.testFiles().catch((): string[] => [])
-    const carriers = await acceptanceCarriers(this.options.root, await this.testFilesPromise, step.acceptanceIds)
+    this.testFilesPromise ??= discoverSectionFiles(this.options.root, () => this.testFiles()).catch((): string[] => [])
+    const listed = await this.testFilesPromise
+    if (isUnreadable(listed)) return { files: [], carriers: new Map(), label: 'bun test', unreadable: listed.unreadable }
+    const carriers = await acceptanceCarriers(this.options.root, listed, step.acceptanceIds)
     const files = carrierFiles(carriers)
     return { files, carriers, label: `bun test ${files.join(' ')}`.trimEnd() }
   }
@@ -570,7 +595,8 @@ export class PlanVerifier {
     const ids = step.acceptanceIds
     // Derivation lists `tests` only where behaviours are judged; `bun test` with no file would run the whole suite.
     if (ids.length === 0) throw new Error(`${command} runs for a step with acceptance behaviours`)
-    const { files, carriers } = await this.selection(step)
+    const { files, carriers, unreadable } = await this.selection(step)
+    if (unreadable !== undefined) return { label: 'bun test', status: 'blocked', reason: `the test files could not be listed: ${unreadable}`, findings: [] }
     if (files.length === 0) {
       return { label: 'bun test', status: 'fail', reason: `no test file carries ${ids.map((id) => `[${id}]`).join(', ')} as a literal token`, findings: [] }
     }
