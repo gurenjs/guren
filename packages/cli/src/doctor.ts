@@ -1145,7 +1145,10 @@ async function hasTestInfrastructure(cwd: string): Promise<boolean> {
     return true
   }
 
-  const testFiles = await discoverTestFiles(cwd).catch(() => [] as string[])
+  const testFiles = await discoverTestFiles(cwd).catch((error: unknown): string[] => {
+    if (error instanceof FileDiscoveryError) throw error
+    return []
+  })
   return testFiles.length > 0
 }
 
@@ -1443,9 +1446,19 @@ export async function suggestNextSteps(
   const steps: NextStep[] = []
   let priority = 1
 
-  const controllerFiles = await discoverControllerFiles(cwd).catch(() => [] as string[])
+  // A directory that will not open is no evidence of absence: the step naming it replaces what its scan would suggest.
+  const unreadable = new Map<string, FileDiscoveryError>()
+  const unlessUnreadable = <T>(fallback: T) => (error: unknown): T => {
+    if (error instanceof FileDiscoveryError) unreadable.set(error.directory, error)
+    return fallback
+  }
+  const controllerFiles = await discoverControllerFiles(cwd).catch(unlessUnreadable<string[]>([]))
+  const testInfraPresent = await hasTestInfrastructure(cwd).catch(unlessUnreadable(true))
+  for (const error of unreadable.values()) {
+    const failure = discoveryFailure(cwd, error, 'doctor --next')
+    steps.push({ priority: priority++, title: failure.title, description: `${failure.message}. ${failure.suggestion}`, filePath: failure.filePath })
+  }
 
-  const testInfraPresent = await hasTestInfrastructure(cwd).catch(() => true)
   if (!testInfraPresent) {
     steps.push({
       priority: priority++,

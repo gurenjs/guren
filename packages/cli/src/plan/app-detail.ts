@@ -184,12 +184,12 @@ export interface PlanAppDetail {
   controllerCollisions: string[]
   pages: PlanAppPageDetail[] | PlanAppUnreadable
   validators: PlanAppValidatorDetail[] | PlanAppUnreadable
-  resources: PlanAppClassDetail[]
+  resources: PlanAppClassDetail[] | PlanAppUnreadable
   /** What `guren codegen` reads each resource's payload as, for a planned resource's fields. */
   resourcePayloads: PlanAppResourcePayload[] | PlanAppUnreadable
-  policies: PlanAppPolicyDetail[]
+  policies: PlanAppPolicyDetail[] | PlanAppUnreadable
   routeFiles: PlanAppRouteFile[]
-  sideEffects: Record<PlanAppSideEffectKind, PlanAppSideEffectDetail[]>
+  sideEffects: Record<PlanAppSideEffectKind, PlanAppSideEffectDetail[] | PlanAppUnreadable>
   /** Per kind, why an absent use proves nothing: a source file that did not parse, a scan that failed, `AutoDiscovery`. */
   sideEffectUsesUnread?: Partial<Record<PlanAppSideEffectKind, string>>
 }
@@ -444,9 +444,13 @@ function actionDetail(
 }
 
 /** Classes a directory scan discovers, each tagged with the app root it came from. */
-export async function classDetail(root: string, discover: (appRoot: string) => Promise<string[]>): Promise<PlanAppClassDetail[]> {
-  const files = excludeBarrelFiles(await discover(root).catch((): string[] => []))
-  return files.map((file) => ({ className: classNameFromPath(file), module: moduleNameFor(root, file), file: toPosixRelative(root, file) }))
+export async function classDetail(
+  root: string,
+  discover: (appRoot: string) => Promise<string[]>,
+): Promise<PlanAppClassDetail[] | PlanAppUnreadable> {
+  const discovered = await discoverSectionFiles(root, discover).catch((): string[] => [])
+  if (isUnreadable(discovered)) return discovered
+  return excludeBarrelFiles(discovered).map((file) => ({ className: classNameFromPath(file), module: moduleNameFor(root, file), file: toPosixRelative(root, file) }))
 }
 
 async function pageDetail(root: string, pages: string[] | PlanAppUnreadable): Promise<PlanAppDetail['pages']> {
@@ -622,8 +626,9 @@ async function routeFileDetail(root: string, cache: ParseCache, routesFile: stri
   return details
 }
 
-async function policyDetail(root: string, cache: ParseCache): Promise<PlanAppPolicyDetail[]> {
+async function policyDetail(root: string, cache: ParseCache): Promise<PlanAppDetail['policies']> {
   const policies = await classDetail(root, discoverPolicyFiles)
+  if (isUnreadable(policies)) return policies
   return Promise.all(
     policies.map(async (policy) => {
       const parsed = await cache.get(resolve(root, policy.file))
@@ -635,11 +640,14 @@ async function policyDetail(root: string, cache: ParseCache): Promise<PlanAppPol
 async function sideEffectDetail(root: string, cache: ParseCache): Promise<Pick<PlanAppDetail, 'sideEffects' | 'sideEffectUsesUnread'>> {
   const kinds = Object.keys(SIDE_EFFECT_DIRS) as PlanAppSideEffectKind[]
   const classes = await Promise.all(kinds.map(async (kind) => [kind, await classDetail(root, (appRoot) => discoverSideEffectFiles(appRoot, kind))] as const))
-  const targets = classes.flatMap(([kind, entries]) => entries.map((entry) => ({ ...entry, kind })))
+  const targets = classes.flatMap(([kind, entries]) => (isUnreadable(entries) ? [] : entries.map((entry) => ({ ...entry, kind }))))
   const read = await scanSideEffectUses(root, cache, targets).catch((error: unknown) => ({ unreadable: reasonOf(error) }))
   const uses = 'unreadable' in read ? undefined : read.byFile
   const sideEffects = Object.fromEntries(
-    classes.map(([kind, entries]) => [kind, entries.map((entry) => ({ ...entry, usedIn: [], unprovenIn: [], mentionedIn: [], ...uses?.get(entry.file) }))]),
+    classes.map(([kind, entries]) => [
+      kind,
+      isUnreadable(entries) ? entries : entries.map((entry) => ({ ...entry, usedIn: [], unprovenIn: [], mentionedIn: [], ...uses?.get(entry.file) })),
+    ]),
   ) as PlanAppDetail['sideEffects']
   return { sideEffects, ...unreadUses(kinds, read) }
 }

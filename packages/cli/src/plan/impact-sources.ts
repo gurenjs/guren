@@ -91,7 +91,7 @@ export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Prom
   const { root, sections } = input
   const relative = (file: string): string => toPosixRelative(root, file)
   const pageIds = isUnreadable(sections.pages) ? [] : sections.pages.map((page) => page.name)
-  const [models, controllerDiscovery, resourceDiscovery, policies, testDiscovery, pages] = await Promise.all([
+  const [models, controllerDiscovery, resourceDiscovery, policyDiscovery, testDiscovery, pages] = await Promise.all([
     impactModels(root),
     discoverSectionFiles(root, discoverControllerFiles),
     discoverSectionFiles(root, discoverResourceFiles),
@@ -108,9 +108,11 @@ export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Prom
   note('controllers', controllerDiscovery)
   note('resources', resourceDiscovery)
   note('tests', testDiscovery)
+  note('policies', policyDiscovery)
   const controllerFiles = isUnreadable(controllerDiscovery) ? [] : controllerDiscovery
   const resourceFiles = isUnreadable(resourceDiscovery) ? [] : resourceDiscovery
   const testFiles = isUnreadable(testDiscovery) ? [] : testDiscovery
+  const policies = isUnreadable(policyDiscovery) ? [] : policyDiscovery
   note('models', sections.models)
   if (models.unreadable !== undefined) unreadable.models ??= models.unreadable
   note('resources', sections.resources)
