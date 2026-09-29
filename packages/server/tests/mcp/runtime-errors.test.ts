@@ -147,8 +147,8 @@ describe('development runtime error buffer', () => {
     expect(seam).toContain("process.env.NODE_ENV !== 'production' && isMcpEndpointEnabled()) {\n    return loading ??= import('./runtime-errors')")
     expect(seam).not.toContain('process.env?.')
     for (const path of ['http/Application.ts', 'errors/ExceptionHandler.ts', 'mcp/McpServiceProvider.ts', 'mcp/runtime-error-capture.ts']) {
-      const imports = (await read(path)).match(/^import .*runtime-errors'$/gm) ?? []
-      expect(imports.every((line) => line.startsWith('import type '))).toBe(true)
+      const statements = (await read(path)).match(/^(?:import|export)\b(?:(?!\bfrom ')[\s\S])*from '[^']*\/runtime-errors'/gm) ?? []
+      expect(statements.filter((statement) => !/^(?:import|export) type\b/.test(statement))).toEqual([])
     }
   })
 })
