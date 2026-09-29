@@ -1152,13 +1152,14 @@ application clears its buffer and changes the session ID. Custom error handlers
 that bypass Guren's exception handler, excluded exception classes, browser
 errors, logs, background jobs and failed tests are outside this feed.
 
-`guren_get_open_plans` answers which implementation plans are in progress. It
-returns the payload the docs viewer's plan views read: every plan not closed at
-its current hash, its approval, each step with the outcome its last
-`plan:verify` recorded, the step `plan:next` marked, waivers, and the next
-command. It reads plan files and `.guren/plans/` only, so it runs no
-verification and never imports the application. Run `plan:status` for the state
-of each planned element.
+`guren_get_plans` answers which implementation plans are in progress. It lists
+the plans the docs viewer shows: every plan not closed at its current hash,
+drafts included, with its approval, each step with the outcome its last
+`plan:verify` recorded, waivers, and the next command. `active` names the step
+`plan:next` marked in each plan, and `unreadable` names plan directories that
+would not list. The tool reads plan files and `.guren/plans/` only, so it runs
+no verification and never imports the application. Run `plan:status` for the
+state of each planned element.
 
 Continue with [implementation plans](./implementation-plans.md) to compare
 planned work against the application's existing verification rules.

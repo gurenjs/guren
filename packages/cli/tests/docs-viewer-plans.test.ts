@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { readOpenPlans, readViewerPlans } from '../src/docs-viewer-plans'
+import { readPlanOverview, readViewerPlans } from '../src/docs-viewer-plans'
 import { discoverPlanFiles } from '../src/plan-check'
 import { planHash } from '../src/plan/identity'
 import { renderedPlanHash, renderPlanHtml } from '../src/plan/render'
@@ -217,27 +217,36 @@ describe('renderedPlanHash', () => {
   })
 })
 
-describe('readOpenPlans', () => {
-  it('returns the viewer payload for the plans it discovers', async () => {
-    const workspace = await createTempWorkspace('guren-cli-open-plans-')
+describe('readPlanOverview', () => {
+  it('lists each plan with the step plan:next marked, drafts included', async () => {
+    const workspace = await createTempWorkspace('guren-cli-plan-overview-')
     try {
-      await writeWorkspaceFiles(workspace.dir, { 'docs/plans/comments.plan.json': JSON.stringify(loadCommentsPlan()) })
+      const dir = workspace.dir
+      await writeWorkspaceFiles(dir, { 'docs/plans/comments.plan.json': JSON.stringify(loadCommentsPlan()) })
+      const marked = (await readPlans(dir)).open[0]!.steps[1]!.id
+      await writeWorkspaceFiles(dir, {
+        '.guren/plans/comments.state.json': JSON.stringify({
+          stateVersion: PLAN_STATE_VERSION,
+          steps: {},
+          active: { plan: 'docs/plans/comments.plan.json', step: marked, startedAt: '2026-09-29T10:00:00.000Z', continuations: 0 },
+        }),
+      })
 
-      const report = await readOpenPlans(workspace.dir)
+      const overview = await readPlanOverview(dir)
 
-      expect(report.schemaVersion).toBe(1)
-      expect(report.plans).toEqual((await readPlans(workspace.dir)).open)
-      expect(report.plans.map((plan) => plan.file)).toEqual(['docs/plans/comments.plan.json'])
-      expect(report.unreadable).toEqual([])
+      expect(overview.schemaVersion).toBe(1)
+      expect(overview.plans.map((plan) => [plan.file, plan.standing])).toEqual([['docs/plans/comments.plan.json', 'draft']])
+      expect(overview.active).toEqual([{ plan: 'docs/plans/comments.plan.json', step: marked }])
+      expect(overview.unreadable).toEqual([])
     } finally {
       await workspace.cleanup()
     }
   })
 
   it('returns no plans for an app without any', async () => {
-    const workspace = await createTempWorkspace('guren-cli-open-plans-none-')
+    const workspace = await createTempWorkspace('guren-cli-plan-overview-none-')
     try {
-      expect(await readOpenPlans(workspace.dir)).toEqual({ schemaVersion: 1, plans: [], unreadable: [] })
+      expect(await readPlanOverview(workspace.dir)).toEqual({ schemaVersion: 1, plans: [], active: [], unreadable: [] })
     } finally {
       await workspace.cleanup()
     }

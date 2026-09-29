@@ -8,7 +8,7 @@ import { type ContextRoute } from '../context-route'
 import { type ProjectContext } from '../context'
 import { type ResourceDefinition } from '../data-types'
 import { type DocsGraphReport, type DocsGraphReportOptions } from '../docs-graph'
-import { type OpenPlansReport } from '../docs-viewer-plans'
+import { type PlanOverview } from '../docs-viewer-plans'
 import { type DoctorReport } from '../doctor'
 import { type EntityContext, type EntityContextOptions } from '../entity-context'
 import { type GateReport } from '../gate'
@@ -71,7 +71,7 @@ export interface DevMcpApi {
   ): Promise<DevMcpCodegenResult>
   buildDocsGraphReport(options: DocsGraphReportOptions): Promise<DocsGraphReport>
   renderDocsGraphMarkdown(report: DocsGraphReport): string
-  readOpenPlans(appRoot: string): Promise<OpenPlansReport>
+  readPlanOverview(appRoot: string): Promise<PlanOverview>
 }
 
 export interface CreateDevMcpServerOptions {
@@ -281,14 +281,14 @@ export function createDevMcpServer(options: CreateDevMcpServerOptions): McpServe
   )
 
   server.registerTool(
-    'guren_get_open_plans',
+    'guren_get_plans',
     {
       description:
-        'Implementation plans not closed at their current hash: approval, each derived step with its last plan:verify outcome, the marked step and its stall, waivers, and the next plan command. Reads plan files and .guren/plans/ only; it runs no verification. The same payload the docs viewer shows.',
+        'Implementation plans not closed at their current hash, drafts included: approval, each derived step with its last plan:verify outcome, waivers, and the next plan command. `active` names the step plan:next marked in each plan. Reads plan files and .guren/plans/ only; it runs no verification. The docs viewer lists the same plans.',
       inputSchema: z.object({}),
       annotations: { readOnlyHint: true },
     },
-    async () => ({ content: [json(await api.readOpenPlans(cwd))] }),
+    async () => ({ content: [json(await api.readPlanOverview(cwd))] }),
   )
 
   server.registerTool(

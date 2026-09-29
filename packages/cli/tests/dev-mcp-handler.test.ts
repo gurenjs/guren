@@ -114,7 +114,7 @@ function createMockApi(overrides: Partial<DevMcpApi> = {}): DevMcpApi {
     generateApiClientTypes: async () => ({ outputPath: '.guren/api-client.gen.ts' }),
     buildDocsGraphReport: async () => ({ nodes: [], edges: [], focus: [] }),
     renderDocsGraphMarkdown: () => '# Docs graph',
-    readOpenPlans: async () => ({ schemaVersion: 1, plans: [], unreadable: [] }),
+    readPlanOverview: async () => ({ schemaVersion: 1, plans: [], active: [], unreadable: [] }),
     ...overrides,
   }
 }
@@ -153,7 +153,7 @@ describe('createDevMcpHandler', () => {
             'guren_agent_surface',
             'guren_check',
             'guren_gate',
-            'guren_get_open_plans',
+            'guren_get_plans',
             'guren_codegen',
           ]),
         )
@@ -186,13 +186,14 @@ describe('createDevMcpHandler', () => {
         await handler.close()
       })
 
-      test('reads open plans for the app root as a read-only tool', async () => {
+      test('reads the plan overview for the app root as a read-only tool', async () => {
         const seen: string[] = []
+        const overview = { schemaVersion: 1 as const, plans: [], active: [], unreadable: [{ dir: 'docs/plans', reason: 'EACCES' }] }
         const handler = handlerWith(
           {
-            readOpenPlans: async (appRoot) => {
+            readPlanOverview: async (appRoot) => {
               seen.push(appRoot)
-              return { schemaVersion: 1, plans: [], unreadable: [{ dir: 'docs/plans', reason: 'EACCES' }] }
+              return overview
             },
           },
           '/projects/blog',
@@ -200,11 +201,11 @@ describe('createDevMcpHandler', () => {
         const client = await connect(handler, era)
 
         const { tools } = await client.listTools()
-        const result = await client.callTool({ name: 'guren_get_open_plans', arguments: {} })
+        const result = await client.callTool({ name: 'guren_get_plans', arguments: {} })
 
-        expect(tools.find((tool) => tool.name === 'guren_get_open_plans')?.annotations?.readOnlyHint).toBe(true)
+        expect(tools.find((tool) => tool.name === 'guren_get_plans')?.annotations?.readOnlyHint).toBe(true)
         expect(seen).toEqual(['/projects/blog'])
-        expect(JSON.parse(toolText(result))).toEqual({ schemaVersion: 1, plans: [], unreadable: [{ dir: 'docs/plans', reason: 'EACCES' }] })
+        expect(JSON.parse(toolText(result))).toEqual(overview)
 
         await client.close()
         await handler.close()
