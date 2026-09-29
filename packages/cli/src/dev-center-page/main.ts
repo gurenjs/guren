@@ -12,6 +12,11 @@ function text(tag: string, value: string, className?: string): HTMLElement {
   if (className) node.className = className
   return node
 }
+const dark = matchMedia('(prefers-color-scheme: dark)')
+const applyTheme = () => document.documentElement.classList.toggle('dark', dark.matches)
+applyTheme()
+dark.onchange = applyTheme
+const COVERAGE_KEY = { complete: 'ok', partial: 'rule', unavailable: 'note' } as const
 let graph: GurenApplicationGraph | undefined
 let selected: string | undefined
 const nodes = element('nodes')
@@ -21,23 +26,31 @@ const kind = element<HTMLSelectElement>('kind')
 const refresh = element<HTMLButtonElement>('refresh')
 const errorsButton = element<HTMLButtonElement>('refresh-errors')
 
+function empty(title: string, body: string): HTMLElement {
+  const node = text('div', '', 'g-empty')
+  node.append(text('h3', title), text('p', body))
+  return node
+}
+function stat(id: string, value: number | undefined): void {
+  element(id).textContent = value === undefined ? '–' : String(value)
+}
 function showNode(node: GraphNode): void {
   selected = node.id
-  detail.replaceChildren(text('span', node.kind, 'tag'), text('h2', node.label), text('p', `Module: ${node.module ?? 'app'}`))
-  if (node.file) detail.append(text('pre', node.file))
-  if (node.route) detail.append(text('pre', JSON.stringify(node.route, null, 2)))
-  detail.append(text('h3', 'Evidence'), text('pre', JSON.stringify(node.evidence, null, 2)), text('h3', 'Relationships'))
+  detail.replaceChildren(text('span', node.kind, 'kind'), text('h2', node.label, 'g-card-title'), text('p', `Module: ${node.module ?? 'app'}`, 'meta'))
+  if (node.file) detail.append(text('pre', node.file, 'g-code'))
+  if (node.route) detail.append(text('pre', JSON.stringify(node.route, null, 2), 'g-code'))
+  detail.append(text('h3', 'Evidence'), text('pre', JSON.stringify(node.evidence, null, 2), 'g-code'), text('h3', 'Relationships'))
   const edges = graph!.edges.filter((edge) => edge.from === node.id || edge.to === node.id)
-  if (!edges.length) detail.append(text('p', 'No resolved relationships in this snapshot.'))
+  if (!edges.length) detail.append(text('p', 'No resolved relationships in this snapshot.', 'meta'))
   for (const edge of edges) {
     const outgoing = edge.from === node.id
     const target = graph!.nodes.find((candidate) => candidate.id === (outgoing ? edge.to : edge.from))
     if (!target) continue
-    const button = text('button', `${outgoing ? '→' : '←'} ${edge.relation} · ${target.label}`, 'node') as HTMLButtonElement
+    const button = text('button', `${outgoing ? '→' : '←'} ${edge.relation} · ${target.label}`, 'node rel') as HTMLButtonElement
     button.type = 'button'
     button.onclick = () => { showNode(target); renderNodes() }
     const evidence = text('details', '')
-    evidence.append(text('summary', 'Relationship evidence'), text('pre', JSON.stringify(edge.evidence, null, 2)))
+    evidence.append(text('summary', 'Relationship evidence'), text('pre', JSON.stringify(edge.evidence, null, 2), 'g-code'))
     detail.append(button, evidence)
   }
 }
@@ -47,12 +60,12 @@ function renderNodes(): void {
   const query = search.value.toLowerCase()
   const matching = graph.nodes.filter((node) => (!kind.value || node.kind === kind.value)
     && [node.label, node.file, node.module].some((value) => value?.toLowerCase().includes(query)))
-  if (!matching.length) nodes.append(text('p', 'No matching symbols in this snapshot.'))
+  if (!matching.length) nodes.append(empty('No matching symbols', 'Nothing in this snapshot matches the filter.'))
   for (const node of matching) {
     const button = text('button', '', 'node') as HTMLButtonElement
     button.type = 'button'
     button.setAttribute('aria-pressed', String(node.id === selected))
-    button.append(text('span', node.kind, 'tag'), document.createTextNode(node.label), text('div', `${node.module ?? 'app'}${node.file ? ` · ${node.file}` : ''}`, 'meta'))
+    button.append(text('span', node.kind, 'kind'), document.createTextNode(node.label), text('div', `${node.module ?? 'app'}${node.file ? ` · ${node.file}` : ''}`, 'meta mono'))
     button.onclick = () => { showNode(node); renderNodes() }
     nodes.append(button)
   }
@@ -75,14 +88,20 @@ async function loadGraph(): Promise<void> {
     const incomplete = Object.values(graph.coverage).some((section) => section.status !== 'complete')
     status.textContent = `${graph.nodes.length} symbols · ${graph.edges.length} relationships · ${incomplete ? 'Incomplete coverage' : 'Complete coverage'}${graph.snapshot.consistency === 'changed' ? ' · Sources changed during scan; refresh again' : ''}`
     status.className = incomplete || graph.snapshot.consistency === 'changed' ? 'warning' : 'good'
+    stat('stat-symbols', graph.nodes.length)
+    stat('stat-edges', graph.edges.length)
+    stat('stat-unresolved', graph.unresolved.length)
     element('snapshot').textContent = `Captured ${graph.snapshot.capturedAt} · Snapshot ${graph.snapshot.id}`
     const coverage = element('coverage')
     coverage.replaceChildren()
     for (const [name, section] of Object.entries(graph.coverage)) {
-      const item = text('details', '')
-      item.append(text('summary', `${name} · ${section.status}`, section.status === 'complete' ? 'good' : 'warning'))
-      for (const reason of section.reasons) item.append(text('p', `${reason.code}: ${reason.message}${reason.file ? ` (${reason.file})` : ''}`))
-      coverage.append(item)
+      const key = COVERAGE_KEY[section.status]
+      const body = text('div', '', 'b')
+      body.append(text('code', name), document.createTextNode(` ${section.status}`))
+      for (const reason of section.reasons) body.append(text('span', `${reason.code}: ${reason.message}${reason.file ? ` (${reason.file})` : ''}`, 'meta'))
+      const row = text('div', '', `g-callout ${key}`)
+      row.append(text('span', key, 'k'), body)
+      coverage.append(row)
     }
     element('unresolved-title').textContent = `Unresolved relationships (${graph.unresolved.length})`
     element('unresolved').replaceChildren(...graph.unresolved.map((item) => text('li', `${item.relation ?? 'reference'}: ${item.target} — ${item.reason}`)))
@@ -94,6 +113,7 @@ async function loadGraph(): Promise<void> {
     status.textContent = `Graph unavailable: ${error instanceof Error ? error.message : 'Read failed'}. Refresh to retry.`
     status.className = 'error'
     graph = undefined
+    for (const id of ['stat-symbols', 'stat-edges', 'stat-unresolved']) stat(id, undefined)
     nodes.replaceChildren(); detail.replaceChildren(); element('coverage').replaceChildren(); element('unresolved').replaceChildren()
     element('snapshot').textContent = ''
     element('unresolved-title').textContent = 'Unresolved relationships (unavailable)'
@@ -105,17 +125,21 @@ async function loadErrors(): Promise<void> {
   status.textContent = 'Reading runtime errors…'
   const list = element('errors')
   list.replaceChildren()
+  stat('stat-errors', undefined)
   try {
     // Read the complete retained window (at most 100), replacing the UI on every refresh.
     const result = runtimeErrorResultSchema.parse(await readJson('/_guren/runtime/errors?limit=100'))
     if (result.status === 'unavailable') { status.textContent = `Unavailable: ${result.reason}`; return }
+    stat('stat-errors', result.events.length)
     status.textContent = `${result.events.length} retained errors · ${result.dropped} dropped · Session ${result.sessionId} · Collection started ${result.startedAt}${result.cursorExpired ? ' · Earlier events are no longer retained' : ''}`
-    if (!result.events.length) list.append(text('p', 'No retained server exceptions in this collection window.'))
+    if (!result.events.length) list.append(empty('No retained server exceptions', 'Nothing has failed in this collection window.'))
     for (const event of [...result.events].reverse()) {
       const row = text('article', '', 'event')
-      row.append(text('strong', `${event.status} · ${event.method} ${event.route?.pattern ?? '(route unavailable)'}`), text('div', `${event.occurredAt} · #${event.sequence} · Runtime correlation: ${event.correlation}`, 'meta'))
-      if (event.route) row.append(text('div', event.route.name ?? '', 'meta'))
-      row.append(text('pre', event.frames.map((frame) => `${frame.file}:${frame.line ?? '?'}:${frame.column ?? '?'}`).join('\n') || 'No project-local stack locations.'))
+      const head = text('div', '', 'event-head')
+      head.append(text('span', String(event.status), 'g-badge'), text('strong', `${event.method} ${event.route?.pattern ?? '(route unavailable)'}`, 'mono'))
+      row.append(head, text('div', `${event.occurredAt} · #${event.sequence} · Runtime correlation: ${event.correlation}`, 'meta mono'))
+      if (event.route?.name) row.append(text('div', event.route.name, 'meta mono'))
+      row.append(text('pre', event.frames.map((frame) => `${frame.file}:${frame.line ?? '?'}:${frame.column ?? '?'}`).join('\n') || 'No project-local stack locations.', 'g-code'))
       list.append(row)
     }
   } catch (error) { status.textContent = `Runtime unavailable: ${error instanceof Error ? error.message : 'Read failed'}. Refresh to retry.` }
