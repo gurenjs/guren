@@ -225,7 +225,8 @@ const VALIDATE_MEMBERS = [
   'validateParamsSafe',
 ] as const satisfies readonly ControllerMemberName[]
 
-const VALIDATE_CALL_PATTERN = new RegExp(
+/** A schema handed to a validate call, captured as written (`schemas.post`); the application graph reads it too. */
+export const VALIDATE_CALL_PATTERN = new RegExp(
   `\\bthis\\s*\\.\\s*${accessorCallPattern(VALIDATE_MEMBERS)}\\s*([A-Za-z_$][\\w$]*(?:\\s*\\.\\s*[A-Za-z_$][\\w$]*)*)`,
   'g',
 )

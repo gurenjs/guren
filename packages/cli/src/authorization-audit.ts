@@ -34,13 +34,13 @@ export const GUEST_PATH_PATTERN = /(login|logout|register|signup|sign-up|passwor
  * `this.authorize()`: `gate.allows(...)` on a `this.make('gate').forUser(user)`.
  * `forUser` counts because the string the gate is made with is blanked away.
  */
-const GATE_CALL_PATTERN = /\b[gG]ate\s*\.\s*(?:allows|denies|any|all|none|authorize|inspect|check|forUser)\s*\(/
+export const GATE_CALL_PATTERN = /\b[gG]ate\s*\.\s*(?:allows|denies|any|all|none|authorize|inspect|check|forUser)\s*\(/
 
 const AUDIT_IGNORE_MARKER = 'guren-audit-ignore'
 
 const POLICY_SUFFIX = 'Policy'
 
-interface PolicyBinding {
+export interface PolicyBinding {
   model: string
   policy: string
   /** Absolute path of the model file, which a controller's imports are resolved against. */
@@ -50,7 +50,7 @@ interface PolicyBinding {
   policyPattern: RegExp
 }
 
-async function policyBindings(cwd: string, cache: ParseCache): Promise<PolicyBinding[]> {
+export async function policyBindings(cwd: string, cache: ParseCache): Promise<PolicyBinding[]> {
   const policyFiles = await discoverPolicyFiles(cwd)
   if (policyFiles.length === 0) return []
 
@@ -77,7 +77,7 @@ async function policyBindings(cwd: string, cache: ParseCache): Promise<PolicyBin
  * the model's module as, so `import { Post as PostModel }`, a default import
  * and `Models.Post` under `import * as Models` are references too.
  */
-async function modelPatterns(
+export async function modelPatterns(
   cwd: string,
   controllerFile: string,
   bindings: PolicyBinding[],

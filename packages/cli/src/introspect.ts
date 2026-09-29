@@ -7,10 +7,11 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import type { AppManifest } from '@guren/server'
+import type { AppManifest, RouteEntry } from '@guren/server'
 
 import { siblingEntry } from './cli-entry'
 import { outputTail } from './command-output'
+import type { ContractSegment } from './contract-segments'
 import { bunExecutable, runCaptured } from './subprocess'
 
 export type IntrospectionFailure = 'no-entry' | 'import' | 'timeout' | 'crashed' | 'old-server'
@@ -27,8 +28,24 @@ export interface IntrospectOptions {
    * one read of the app (the gate under the dev MCP server), which keeps its own per-run memo.
    */
   fresh?: boolean
-  /** Graph-only identity scan; ordinary diagnostics keep their existing import scope. */
-  modelBindings?: boolean
+  /**
+   * The application graph's identity scans (RFC 0032): the child also imports model and validator
+   * files to match bound models and contract schemas to their exports. Ordinary diagnostics keep
+   * their import scope. Passed to the child as {@link INTROSPECT_GRAPH_ENV}, never as an argument.
+   */
+  graph?: boolean
+}
+
+/** Set to `1` beside `GUREN_INTROSPECT` for a {@link IntrospectOptions.graph} run. */
+export const INTROSPECT_GRAPH_ENV = 'GUREN_INTROSPECT_GRAPH'
+
+/** A route of a graph run: the CLI's own fields beside the server's, written only by its own child. */
+export type GraphRouteEntry = RouteEntry & {
+  /**
+   * Per contract segment the route declares, the validator-file exports its schema object *is*
+   * (object identity, so a schema reached only from a call the app made). Empty: no export is it.
+   */
+  contractSources?: Partial<Record<ContractSegment, Array<{ file: string; exportName: string }>>>
 }
 
 export const DEFAULT_INTROSPECT_TIMEOUT_MS = 30_000
@@ -80,25 +97,26 @@ const runs = new Map<string, Promise<Introspection>>()
 export function introspectApp(cwd: string, options: IntrospectOptions = {}): Promise<Introspection> {
   const root = resolve(cwd)
   const timeoutMs = options.timeoutMs ?? DEFAULT_INTROSPECT_TIMEOUT_MS
-  if (options.fresh) return runOrCrash(root, timeoutMs, options.modelBindings === true)
-  const key = `${timeoutMs}:${options.modelBindings === true}:${root}`
+  const graph = options.graph === true
+  if (options.fresh) return runOrCrash(root, timeoutMs, graph)
+  const key = `${timeoutMs}:${graph}:${root}`
   let run = runs.get(key)
   if (!run) {
-    run = runOrCrash(root, timeoutMs, options.modelBindings === true)
+    run = runOrCrash(root, timeoutMs, graph)
     runs.set(key, run)
   }
   return run
 }
 
-function runOrCrash(root: string, timeoutMs: number, modelBindings: boolean): Promise<Introspection> {
-  return runIntrospection(root, timeoutMs, modelBindings).catch((error: unknown): Introspection => ({
+function runOrCrash(root: string, timeoutMs: number, graph: boolean): Promise<Introspection> {
+  return runIntrospection(root, timeoutMs, graph).catch((error: unknown): Introspection => ({
     status: 'failed',
     reason: 'crashed',
     message: `The introspection process could not run: ${error instanceof Error ? error.message : String(error)}`,
   }))
 }
 
-async function runIntrospection(root: string, timeoutMs: number, modelBindings: boolean): Promise<Introspection> {
+async function runIntrospection(root: string, timeoutMs: number, graph: boolean): Promise<Introspection> {
   const child = siblingEntry('introspect-child')
   if (!child) {
     return { status: 'failed', reason: 'crashed', message: 'introspect-child is missing beside the CLI; rebuild @guren/cli.' }
@@ -108,9 +126,10 @@ async function runIntrospection(root: string, timeoutMs: number, modelBindings: 
 
   try {
     const started = Date.now()
-    const run = await runCaptured([bunExecutable(), child, resultFile, String(timeoutMs + INTROSPECT_CHILD_BUDGET_MARGIN_MS), ...(modelBindings ? ['graph'] : [])], root, {
+    const run = await runCaptured([bunExecutable(), child, resultFile, String(timeoutMs + INTROSPECT_CHILD_BUDGET_MARGIN_MS)], root, {
       timeoutMs,
-      env: { GUREN_INTROSPECT: '1' },
+      // Always set, so a value inherited from this process cannot turn an ordinary run into a graph run.
+      env: { GUREN_INTROSPECT: '1', [INTROSPECT_GRAPH_ENV]: graph ? '1' : '0' },
       processGroup: true,
     })
     const result = run.timedOut ? undefined : await readResult(resultFile)
@@ -131,11 +150,11 @@ async function runIntrospection(root: string, timeoutMs: number, modelBindings: 
   }
 }
 
-/** Where the child was when the clock ran out: the controller file it was importing, if any. */
+/** Where the child was when the clock ran out: the controller, model or validator file it was importing, if any. */
 async function timeoutMessage(scanFile: string, timeoutMs: number): Promise<string> {
   const file = await readFile(scanFile, 'utf8').catch(() => '')
   if (file) {
-    return `The app registered, but importing ${file} to match a routed controller did not finish within ${timeoutMs}ms. `
+    return `The app registered, but importing ${file} to match a route's controller, bound model or contract schema did not finish within ${timeoutMs}ms. `
       + 'Its module scope may await something that never settles.'
   }
   return `The app did not finish loading and registering within ${timeoutMs}ms. `

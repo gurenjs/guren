@@ -3,6 +3,7 @@
  * cwd and `GUREN_INTROSPECT=1` set before the entry evaluates. The result goes
  * to the file named in argv, never stdout: the app's own modules print there.
  * It exits explicitly, since an app may hold open handles (timers, a Redis client).
+ * `GUREN_INTROSPECT_GRAPH=1` adds the application graph's identity scans (RFC 0032).
  */
 import { writeFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
@@ -10,9 +11,17 @@ import { dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { AppManifest, AttachmentsDescription } from '@guren/server'
 
-import { classNameFromPath, discoverControllerFiles, discoverModelFiles, toPosixRelative } from './discovery'
+import { CONTRACT_SEGMENTS } from './contract-segments'
+import { classNameFromPath, discoverControllerFiles, discoverModelFiles, discoverValidatorFiles, excludeBarrelFiles, toPosixRelative } from './discovery'
 import { controllerImportWarning, pickDeclaringFile } from './introspect-controller-file'
-import { DEFAULT_INTROSPECT_TIMEOUT_MS, INTROSPECT_CHILD_BUDGET_MARGIN_MS, type Introspection, type IntrospectionFailure } from './introspect'
+import {
+  DEFAULT_INTROSPECT_TIMEOUT_MS,
+  INTROSPECT_CHILD_BUDGET_MARGIN_MS,
+  INTROSPECT_GRAPH_ENV,
+  type GraphRouteEntry,
+  type Introspection,
+  type IntrospectionFailure,
+} from './introspect'
 import { bootstrapApplication, resolveMainEntry } from './runtime'
 
 /** `IntrospectionListenError.code` in `@guren/server`, spelled here: the app may resolve a server older than this CLI's. */
@@ -27,6 +36,7 @@ interface IntrospectableApp {
   introspect?: () => Promise<AppManifest>
   router?: {
     registeredModelBindings?: () => ReadonlyArray<Record<string, { name?: string }>>
+    definitions?: () => ReadonlyArray<{ schemas?: Partial<Record<string, unknown>> }>
     registeredHandlers?: () => ReadonlyArray<{ index: number; controller?: unknown }>
     hasRoute?: (name: string) => boolean
   }
@@ -39,6 +49,8 @@ interface FrameworkModule {
 }
 
 const outFile = process.argv[2]
+/** Named rather than positional, so no argument the parent adds can switch these imports on by accident. */
+const graphScans = process.env[INTROSPECT_GRAPH_ENV] === '1'
 /** Past this the child ends itself; the parent passes its own cap plus a margin, so its `timeout` report comes first. */
 const budgetMs = Number(process.argv[3]) || DEFAULT_INTROSPECT_TIMEOUT_MS + INTROSPECT_CHILD_BUDGET_MARGIN_MS
 /** The controller file being imported, beside the result, so the parent can name where a timeout struck. */
@@ -201,6 +213,49 @@ async function resolveModelBindings(manifest: AppManifest, app: IntrospectableAp
   }
 }
 
+/**
+ * Which validator exports each route's contract schemas are, by object identity (RFC 0032), the
+ * match `plan/app-detail.ts` makes for `contractSchemas`. Barrels are skipped: a re-export
+ * belongs to the file that declares it. `output` is a response schema, not validation.
+ */
+async function resolveContractSources(manifest: AppManifest, app: IntrospectableApp, root: string): Promise<void> {
+  const definitions = app.router?.definitions?.()
+  if (!definitions) return
+  const isSchema = (value: unknown): value is object => value !== null && typeof value === 'object'
+  const wanted = new Set(definitions.flatMap((definition) => CONTRACT_SEGMENTS.map((key) => definition.schemas?.[key]).filter(isSchema)))
+  if (wanted.size === 0) return
+  let files: string[]
+  try {
+    files = excludeBarrelFiles(await discoverValidatorFiles(root))
+  } catch (error) {
+    manifest.warnings.push({ code: 'validator-discovery', message: `Could not list validator files: ${messageOf(error)}` })
+    return
+  }
+  const exportsOf = new Map<unknown, Array<{ file: string; exportName: string }>>()
+  for (const file of files) {
+    const relative = toPosixRelative(root, file)
+    writeFileSync(scanFile, relative)
+    let mod: Record<string, unknown>
+    try { mod = await import(pathToFileURL(file).href) as Record<string, unknown> } catch (error) {
+      manifest.warnings.push({ code: 'validator-import', message: `Could not import ${relative} for contract schema identity: ${messageOf(error)}` })
+      continue
+    }
+    for (const [exportName, value] of Object.entries(mod)) {
+      if (wanted.has(value as object)) exportsOf.set(value, [...(exportsOf.get(value) ?? []), { file: relative, exportName }])
+    }
+  }
+  for (const [index, definition] of definitions.entries()) {
+    const route = manifest.routes[index] as GraphRouteEntry | undefined
+    if (!route) continue
+    for (const key of CONTRACT_SEGMENTS) {
+      const schema = definition.schemas?.[key]
+      if (!isSchema(schema)) continue
+      route.contractSources ??= {}
+      route.contractSources[key] = exportsOf.get(schema) ?? []
+    }
+  }
+}
+
 async function introspect(root: string): Promise<Introspection> {
   let entry: string
   try {
@@ -232,7 +287,10 @@ async function introspect(root: string): Promise<Introspection> {
   describeUnboundAttachments(manifest, app, loaded.framework)
   loadingApp = false
   await resolveControllers(manifest, app, root, loaded.framework)
-  if (process.argv[4] === 'graph') await resolveModelBindings(manifest, app, root)
+  if (graphScans) {
+    await resolveModelBindings(manifest, app, root)
+    await resolveContractSources(manifest, app, root)
+  }
   return { status: 'ok', manifest }
 }
 
