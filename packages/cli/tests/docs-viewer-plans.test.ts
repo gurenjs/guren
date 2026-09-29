@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { readViewerPlans } from '../src/docs-viewer-plans'
+import { readOpenPlans, readViewerPlans } from '../src/docs-viewer-plans'
 import { discoverPlanFiles } from '../src/plan-check'
 import { planHash } from '../src/plan/identity'
 import { renderedPlanHash, renderPlanHtml } from '../src/plan/render'
@@ -214,5 +214,32 @@ describe('renderedPlanHash', () => {
     expect(renderedPlanHash(page(JSON.stringify({ planHash: null })))).toBeNull()
     expect(renderedPlanHash(page('not json'))).toBeUndefined()
     expect(renderedPlanHash('<html></html>')).toBeUndefined()
+  })
+})
+
+describe('readOpenPlans', () => {
+  it('returns the viewer payload for the plans it discovers', async () => {
+    const workspace = await createTempWorkspace('guren-cli-open-plans-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, { 'docs/plans/comments.plan.json': JSON.stringify(loadCommentsPlan()) })
+
+      const report = await readOpenPlans(workspace.dir)
+
+      expect(report.schemaVersion).toBe(1)
+      expect(report.plans).toEqual((await readPlans(workspace.dir)).open)
+      expect(report.plans.map((plan) => plan.file)).toEqual(['docs/plans/comments.plan.json'])
+      expect(report.unreadable).toEqual([])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('returns no plans for an app without any', async () => {
+    const workspace = await createTempWorkspace('guren-cli-open-plans-none-')
+    try {
+      expect(await readOpenPlans(workspace.dir)).toEqual({ schemaVersion: 1, plans: [], unreadable: [] })
+    } finally {
+      await workspace.cleanup()
+    }
   })
 })

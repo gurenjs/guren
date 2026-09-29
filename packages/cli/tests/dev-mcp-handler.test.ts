@@ -114,6 +114,7 @@ function createMockApi(overrides: Partial<DevMcpApi> = {}): DevMcpApi {
     generateApiClientTypes: async () => ({ outputPath: '.guren/api-client.gen.ts' }),
     buildDocsGraphReport: async () => ({ nodes: [], edges: [], focus: [] }),
     renderDocsGraphMarkdown: () => '# Docs graph',
+    readOpenPlans: async () => ({ schemaVersion: 1, plans: [], unreadable: [] }),
     ...overrides,
   }
 }
@@ -152,6 +153,7 @@ describe('createDevMcpHandler', () => {
             'guren_agent_surface',
             'guren_check',
             'guren_gate',
+            'guren_get_open_plans',
             'guren_codegen',
           ]),
         )
@@ -179,6 +181,30 @@ describe('createDevMcpHandler', () => {
 
         expect(seen).toEqual(['/projects/blog'])
         expect(JSON.parse(toolText(result))).toMatchObject({ passCount: 3 })
+
+        await client.close()
+        await handler.close()
+      })
+
+      test('reads open plans for the app root as a read-only tool', async () => {
+        const seen: string[] = []
+        const handler = handlerWith(
+          {
+            readOpenPlans: async (appRoot) => {
+              seen.push(appRoot)
+              return { schemaVersion: 1, plans: [], unreadable: [{ dir: 'docs/plans', reason: 'EACCES' }] }
+            },
+          },
+          '/projects/blog',
+        )
+        const client = await connect(handler, era)
+
+        const { tools } = await client.listTools()
+        const result = await client.callTool({ name: 'guren_get_open_plans', arguments: {} })
+
+        expect(tools.find((tool) => tool.name === 'guren_get_open_plans')?.annotations?.readOnlyHint).toBe(true)
+        expect(seen).toEqual(['/projects/blog'])
+        expect(JSON.parse(toolText(result))).toEqual({ schemaVersion: 1, plans: [], unreadable: [{ dir: 'docs/plans', reason: 'EACCES' }] })
 
         await client.close()
         await handler.close()

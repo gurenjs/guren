@@ -7,6 +7,7 @@
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { commandFix, formatFixCommand } from './check-result'
 import { toPosixRelative } from './discovery'
+import { discoverPlanFiles } from './plan-check'
 import { readPlanFile } from './plan-render'
 import { readPlanApprovalStanding } from './plan/approvals'
 import { touchedModels } from './plan/close-docs'
@@ -157,6 +158,24 @@ async function readViewerPlan(context: PlanReadContext, path: string, file: stri
       next,
       status: command('plan:status'),
     },
+  }
+}
+
+export interface OpenPlansReport {
+  schemaVersion: 1
+  plans: DocsViewerOpenPlan[]
+  /** Plan directories that exist and would not list; a plan in one is missing from `plans`. */
+  unreadable: Array<{ dir: string; reason: string }>
+}
+
+/** What `guren_get_open_plans` returns: the docs viewer's plans, so an agent and the page read one payload. */
+export async function readOpenPlans(appRoot: string): Promise<OpenPlansReport> {
+  const discovery = await discoverPlanFiles(appRoot)
+  const { open } = await readViewerPlans(appRoot, discovery.files)
+  return {
+    schemaVersion: 1,
+    plans: open,
+    unreadable: discovery.unreadable.map(({ dir, reason }) => ({ dir: toPosixRelative(appRoot, dir) || '.', reason })),
   }
 }
 

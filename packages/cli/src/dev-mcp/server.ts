@@ -8,6 +8,7 @@ import { type ContextRoute } from '../context-route'
 import { type ProjectContext } from '../context'
 import { type ResourceDefinition } from '../data-types'
 import { type DocsGraphReport, type DocsGraphReportOptions } from '../docs-graph'
+import { type OpenPlansReport } from '../docs-viewer-plans'
 import { type DoctorReport } from '../doctor'
 import { type EntityContext, type EntityContextOptions } from '../entity-context'
 import { type GateReport } from '../gate'
@@ -70,6 +71,7 @@ export interface DevMcpApi {
   ): Promise<DevMcpCodegenResult>
   buildDocsGraphReport(options: DocsGraphReportOptions): Promise<DocsGraphReport>
   renderDocsGraphMarkdown(report: DocsGraphReport): string
+  readOpenPlans(appRoot: string): Promise<OpenPlansReport>
 }
 
 export interface CreateDevMcpServerOptions {
@@ -276,6 +278,17 @@ export function createDevMcpServer(options: CreateDevMcpServerOptions): McpServe
       const report = await api.runGate({ cwd, changed, deps })
       return { content: [json(report)], isError: !report.ok }
     },
+  )
+
+  server.registerTool(
+    'guren_get_open_plans',
+    {
+      description:
+        'Implementation plans not closed at their current hash: approval, each derived step with its last plan:verify outcome, the marked step and its stall, waivers, and the next plan command. Reads plan files and .guren/plans/ only; it runs no verification. The same payload the docs viewer shows.',
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true },
+    },
+    async () => ({ content: [json(await api.readOpenPlans(cwd))] }),
   )
 
   server.registerTool(
