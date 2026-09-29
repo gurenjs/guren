@@ -24,7 +24,7 @@ export function createDevCenterHandler(options: {
       }
       if (path !== '/_guren' && path !== '/_guren/') return new Response('Not found', { status: 404, headers })
       const html = devCenterShell()
-      const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+      const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi)]
         .map((match) => `'sha256-${createHash('sha256').update(match[1]!).digest('base64')}'`).join(' ')
       return new Response(html, { headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8',
         'Content-Security-Policy': `default-src 'none'; script-src ${scripts}; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'`,

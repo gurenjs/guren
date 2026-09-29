@@ -36,7 +36,7 @@ test('serves a self-contained shell with hashed scripts, no-store, and fixed rou
   const response = await handler.fetch(new Request('http://localhost/_guren'))
   const html = await response.text()
   expect(response.headers.get('cache-control')).toBe('no-store')
-  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+  const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi)]
   expect(scripts).toHaveLength(1)
   const digest = createHash('sha256').update(scripts[0]![1]!).digest('base64')
   expect(response.headers.get('content-security-policy')).toContain(`script-src 'sha256-${digest}'`)
