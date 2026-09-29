@@ -170,7 +170,7 @@
     "figlet": "^1.7.0",
     "hono": "^4.13.7",
     "ioredis": "^5.11.1",
-    "nodemailer": "^9.1.1"
+    "nodemailer": "^10.0.2"
   },
   "peerDependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
