@@ -629,7 +629,7 @@ export class Application {
 
   private async bootOnce(): Promise<void> {
     this.bootAttempted = true
-    await this.runtimeErrorsLoaded
+    if (this.runtimeErrorsLoaded) await this.runtimeErrorsLoaded
     if (this.options.hostAuthorization !== undefined && this.hasHttpConfig()) {
       throw new Error(
         '[guren] Host authorization is configured twice: createApp({ hostAuthorization }) and config/http.ts. Keep one.',

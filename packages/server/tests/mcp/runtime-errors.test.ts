@@ -146,8 +146,10 @@ describe('development runtime error buffer', () => {
     const seam = await read('mcp/runtime-error-capture.ts')
     expect(seam).toContain("process.env.NODE_ENV !== 'production' && isMcpEndpointEnabled()) {\n    return loading ??= import('./runtime-errors')")
     expect(seam).not.toContain('process.env?.')
-    for (const path of ['http/Application.ts', 'errors/ExceptionHandler.ts', 'mcp/McpServiceProvider.ts', 'mcp/runtime-error-capture.ts']) {
-      const statements = (await read(path)).match(/^(?:import|export)\b(?:(?!\bfrom ')[\s\S])*from '[^']*\/runtime-errors'/gm) ?? []
+    const sources = await Array.fromAsync(new Bun.Glob('**/*.ts').scan(join(import.meta.dir, '../../src')))
+    expect(sources).toContain('http/Application.ts')
+    for (const path of sources.filter((source) => !source.endsWith('mcp/runtime-errors.ts') && !source.endsWith('.test.ts'))) {
+      const statements = (await read(path)).match(/^(?:import|export)\b(?:(?!\bfrom\s*['"])[\s\S])*from\s*['"][^'"]*\/runtime-errors['"]/gm) ?? []
       expect(statements.filter((statement) => !/^(?:import|export) type\b/.test(statement))).toEqual([])
     }
   })
