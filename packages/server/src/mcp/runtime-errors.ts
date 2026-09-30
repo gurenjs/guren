@@ -2,12 +2,11 @@ import { realpathSync, statSync } from 'node:fs'
 import { routePath } from 'hono/route'
 import type { Context } from 'hono'
 
-import { isMcpEndpointEnabled } from './endpoint'
 import { tryGetRequestContainer } from '../http/request-container'
 import type { Router } from '../mvc/Router'
+import type { RuntimeErrorCollector } from './runtime-error-capture'
 
-export const RUNTIME_ERRORS_BINDING = 'dev.runtimeErrors'
-export const RUNTIME_ERRORS_PATH = '/_guren/runtime/errors'
+export { RUNTIME_ERRORS_BINDING, RUNTIME_ERRORS_PATH } from './runtime-error-capture'
 export interface RuntimeErrorQuery { sessionId?: string; after?: number; limit?: number }
 export interface RuntimeErrorEvent {
   sessionId: string
@@ -31,7 +30,7 @@ export interface RuntimeErrorResult {
   cursorExpired: boolean
 }
 
-export class RuntimeErrorBuffer {
+export class RuntimeErrorBuffer implements RuntimeErrorCollector {
   private sessionId = crypto.randomUUID()
   private startedAt: string
   private sequence = 0
@@ -48,6 +47,18 @@ export class RuntimeErrorBuffer {
     this.startedAt = new Date(this.now()).toISOString()
     this.sequence = this.dropped = this.bytes = 0
     this.events = []
+  }
+
+  /** Called through `captureRuntimeError()`, which has already checked the status and guards the call. */
+  capture(error: Error, ctx: Context, status: number): void {
+    const pattern = routePath(ctx)
+    const definitions = tryGetRequestContainer(ctx)?.makeOptional<Router>('router')?.definitions() ?? []
+    const matches = definitions.filter((entry) => entry.path === pattern && (entry.method === ctx.req.method || entry.method === 'ALL'))
+    const route = matches.length === 1 ? matches[0] : undefined
+    this.record(error, {
+      method: ctx.req.method, status, correlation: matches.length === 1 ? 'matched' : matches.length > 1 ? 'ambiguous' : 'unavailable',
+      ...(route ? { route: { method: route.method, pattern: route.path, ...(route.name ? { name: route.name } : {}) } } : {}),
+    })
   }
 
   record(error: Error, detail: Pick<RuntimeErrorEvent, 'method' | 'route' | 'correlation' | 'status'>): void {
@@ -112,25 +123,5 @@ export class RuntimeErrorBuffer {
       if (frames.length === 10) break
     }
     return frames
-  }
-}
-
-/** Only ExceptionHandler calls this, after applying its dontReport policy. */
-export function captureRuntimeError(error: Error, ctx: Context, status: number): void {
-  if (!isMcpEndpointEnabled() || status < 500 || status > 599 || !Number.isInteger(status)) return
-  try {
-    const container = tryGetRequestContainer(ctx)
-    const buffer = container?.makeOptional<RuntimeErrorBuffer>(RUNTIME_ERRORS_BINDING)
-    if (!buffer) return
-    const pattern = routePath(ctx)
-    const definitions = container?.makeOptional<Router>('router')?.definitions() ?? []
-    const matches = definitions.filter((entry) => entry.path === pattern && (entry.method === ctx.req.method || entry.method === 'ALL'))
-    const route = matches.length === 1 ? matches[0] : undefined
-    buffer.record(error, {
-      method: ctx.req.method, status, correlation: matches.length === 1 ? 'matched' : matches.length > 1 ? 'ambiguous' : 'unavailable',
-      ...(route ? { route: { method: route.method, pattern: route.path, ...(route.name ? { name: route.name } : {}) } } : {}),
-    })
-  } catch {
-    // Development instrumentation must never replace the application exception.
   }
 }
