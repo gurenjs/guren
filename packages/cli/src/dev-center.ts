@@ -23,10 +23,9 @@ export function createDevCenterHandler(options: {
   const scanAfterArrival = (): Promise<GraphResult> => {
     if (queued) return queued
     if (!running) return start()
-    queued = running.then(() => undefined, () => undefined).then(() => {
-      queued = undefined
-      return start()
-    })
+    // Registered after `settle`, so the follow-up starts in the same tick `running` clears.
+    const next = () => { queued = undefined; return start() }
+    queued = running.then(next, next)
     return queued
   }
   return {
