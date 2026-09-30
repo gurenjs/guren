@@ -72,8 +72,9 @@ export function buildApplicationGraph(input: ApplicationGraphInputs): GurenAppli
     if (ids.has(entry.from) && ids.has(entry.to)) return [{ ...entry, evidence: ordered(entry.evidence) }]
     unresolved.push({ from: ids.has(entry.from) ? entry.from : undefined, relation: entry.relation, target: entry.to, reason: 'An endpoint could not be resolved.' })
     const previous = coverage[entry.relation]
-    coverage[entry.relation] = { status: previous?.status === 'unavailable' ? 'unavailable' : 'partial',
-      reasons: [...(previous?.reasons ?? []).filter((reason) => reason.code !== 'endpoint'), { code: 'endpoint', message: 'An edge endpoint could not be resolved.' }] }
+    // An edge was read, so the relation has a reader and the default `unsupported` reason does not apply.
+    coverage[entry.relation] = { status: 'partial',
+      reasons: ordered([...(previous?.reasons ?? []).filter((reason) => reason.code !== 'endpoint' && reason.code !== 'unsupported'), { code: 'endpoint', message: 'An edge endpoint could not be resolved.' }]) }
     return []
   })
   const content = { coverage, nodes, edges: ordered(edges), unresolved: ordered(unresolved) }
