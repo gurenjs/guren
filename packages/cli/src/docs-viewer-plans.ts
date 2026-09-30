@@ -169,8 +169,8 @@ async function readViewerPlan(context: PlanReadContext, path: string, file: stri
 export interface PlanOverview {
   schemaVersion: 1
   plans: DocsViewerOpenPlan[]
-  /** The step `plan:next` marked in each plan that has one. */
-  active: Array<{ plan: string; step: string }>
+  /** The step `plan:next` marked in each plan that has one; `stall` once the Stop hook gave up on it. */
+  active: Array<{ plan: string; step: string; stall?: { at: string; reason: string } }>
   unreadable: PlanDiscovery['unreadable']
 }
 
@@ -181,7 +181,9 @@ export async function readPlanOverview(appRoot: string): Promise<PlanOverview> {
   return {
     schemaVersion: 1,
     plans: open,
-    active: open.flatMap((plan) => plan.steps.filter((step) => step.active).map((step) => ({ plan: plan.file, step: step.id }))),
+    active: open.flatMap((plan) =>
+      plan.steps.filter((step) => step.active).map((step) => ({ plan: plan.file, step: step.id, ...(step.stall ? { stall: step.stall } : {}) })),
+    ),
     unreadable: discovery.unreadable.map((entry) => ({ ...entry, dir: toPosixRelative(appRoot, entry.dir) || '.' })),
   }
 }

@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 import { createDevMcpHandler, type DevMcpHandler } from '../src/dev-mcp/handler'
 import type { DevMcpApi } from '../src/dev-mcp/server'
@@ -318,6 +320,20 @@ describe('createDevMcpHandler', () => {
 
     expect(payload.routesLoaded).toBe(false)
     expect(payload.loadErrors).toEqual(['routes/web.ts threw: boom'])
+
+    await client.close()
+    await handler.close()
+  })
+
+  test('lists every registered tool in the agent harness tool table', async () => {
+    const handler = handlerWith()
+    const client = await connect(handler, 'modern')
+
+    const { tools } = await client.listTools()
+    const table = await readFile(join(import.meta.dir, '../templates/agent/core/entry-body.md'), 'utf8')
+    const documented = [...table.matchAll(/^\| `(guren_[a-z_]+)` \|/gm)].map((match) => match[1])
+
+    expect([...documented].sort()).toEqual(tools.map((tool) => tool.name).sort())
 
     await client.close()
     await handler.close()

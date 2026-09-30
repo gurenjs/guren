@@ -284,7 +284,7 @@ export function createDevMcpServer(options: CreateDevMcpServerOptions): McpServe
     'guren_get_plans',
     {
       description:
-        'Implementation plans not closed at their current hash, drafts included: approval, each derived step with its last plan:verify outcome, waivers, and the next plan command. `active` names the step plan:next marked in each plan. Reads plan files and .guren/plans/ only; it runs no verification. The docs viewer lists the same plans.',
+        'Implementation plans not closed at their current hash, drafts included: approval, each derived step with its last plan:verify outcome, waivers, and the next plan command. `active` names the step plan:next marked in each plan, with its stall when the Stop hook gave up on it. Reads plan files and .guren/plans/ only; it runs no verification. The docs viewer lists the same plans.',
       inputSchema: z.object({}),
       annotations: { readOnlyHint: true },
     },

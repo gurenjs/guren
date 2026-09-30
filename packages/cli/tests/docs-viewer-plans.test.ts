@@ -228,7 +228,13 @@ describe('readPlanOverview', () => {
         '.guren/plans/comments.state.json': JSON.stringify({
           stateVersion: PLAN_STATE_VERSION,
           steps: {},
-          active: { plan: 'docs/plans/comments.plan.json', step: marked, startedAt: '2026-09-29T10:00:00.000Z', continuations: 0 },
+          active: {
+            plan: 'docs/plans/comments.plan.json',
+            step: marked,
+            startedAt: '2026-09-29T10:00:00.000Z',
+            continuations: 3,
+            stalled: { at: '2026-09-29T10:30:00.000Z', reason: 'three continuations' },
+          },
         }),
       })
 
@@ -236,7 +242,9 @@ describe('readPlanOverview', () => {
 
       expect(overview.schemaVersion).toBe(1)
       expect(overview.plans.map((plan) => [plan.file, plan.standing])).toEqual([['docs/plans/comments.plan.json', 'draft']])
-      expect(overview.active).toEqual([{ plan: 'docs/plans/comments.plan.json', step: marked }])
+      expect(overview.active).toEqual([
+        { plan: 'docs/plans/comments.plan.json', step: marked, stall: { at: '2026-09-29T10:30:00.000Z', reason: 'three continuations' } },
+      ])
       expect(overview.unreadable).toEqual([])
     } finally {
       await workspace.cleanup()
