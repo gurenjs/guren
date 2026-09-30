@@ -3,7 +3,6 @@
  * cwd and `GUREN_INTROSPECT=1` set before the entry evaluates. The result goes
  * to the file named in argv, never stdout: the app's own modules print there.
  * It exits explicitly, since an app may hold open handles (timers, a Redis client).
- * `GUREN_INTROSPECT_GRAPH=1` adds the application graph's identity scans (RFC 0032).
  */
 import { writeFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
@@ -17,8 +16,10 @@ import { controllerImportWarning, pickDeclaringFile } from './introspect-control
 import {
   DEFAULT_INTROSPECT_TIMEOUT_MS,
   INTROSPECT_CHILD_BUDGET_MARGIN_MS,
+  GRAPH_SCAN_WARNINGS,
   INTROSPECT_GRAPH_ENV,
   type GraphRouteEntry,
+  type GraphScanWarning,
   type Introspection,
   type IntrospectionFailure,
 } from './introspect'
@@ -49,7 +50,6 @@ interface FrameworkModule {
 }
 
 const outFile = process.argv[2]
-/** Named rather than positional, so no argument the parent adds can switch these imports on by accident. */
 const graphScans = process.env[INTROSPECT_GRAPH_ENV] === '1'
 /** Past this the child ends itself; the parent passes its own cap plus a margin, so its `timeout` report comes first. */
 const budgetMs = Number(process.argv[3]) || DEFAULT_INTROSPECT_TIMEOUT_MS + INTROSPECT_CHILD_BUDGET_MARGIN_MS
@@ -184,23 +184,46 @@ async function resolveControllers(
   }
 }
 
-async function resolveModelBindings(manifest: AppManifest, app: IntrospectableApp, root: string): Promise<void> {
-  const bindings = app.router?.registeredModelBindings?.()
-  if (!bindings) return
-  const wanted = new Set(bindings.flatMap((entry) => Object.values(entry)))
-  if (wanted.size === 0) return
-  const exportsOf = new Map<unknown, Array<{ file: string; exportName: string }>>()
-  for (const file of await discoverModelFiles(root)) {
-    writeFileSync(scanFile, toPosixRelative(root, file))
+type ExportSite = { file: string; exportName: string }
+
+/**
+ * Every export of the discovered files whose value is in `wanted`, keyed by that value, with
+ * project-relative files. A discovery or import failure is one `code` warning, never a crash.
+ */
+async function exportsByIdentity(
+  manifest: AppManifest,
+  root: string,
+  discover: () => Promise<string[]>,
+  wanted: ReadonlySet<unknown>,
+  code: GraphScanWarning,
+): Promise<Map<unknown, ExportSite[]>> {
+  const exportsOf = new Map<unknown, ExportSite[]>()
+  let files: string[]
+  try { files = await discover() } catch (error) {
+    manifest.warnings.push({ code, message: `Could not list files for ${GRAPH_SCAN_WARNINGS[code]} identity: ${messageOf(error)}` })
+    return exportsOf
+  }
+  for (const absolute of files) {
+    const file = toPosixRelative(root, absolute)
+    writeFileSync(scanFile, file)
     let mod: Record<string, unknown>
-    try { mod = await import(pathToFileURL(file).href) as Record<string, unknown> } catch {
-      manifest.warnings.push({ code: 'model-import', message: `Could not import ${toPosixRelative(root, file)} for binding identity.` })
+    try { mod = await import(pathToFileURL(absolute).href) as Record<string, unknown> } catch (error) {
+      manifest.warnings.push({ code, message: `Could not import ${file} for ${GRAPH_SCAN_WARNINGS[code]} identity: ${messageOf(error)}` })
       continue
     }
     for (const [exportName, value] of Object.entries(mod)) {
-      if (wanted.has(value as { name?: string })) exportsOf.set(value, [...(exportsOf.get(value) ?? []), { file, exportName }])
+      if (wanted.has(value)) exportsOf.set(value, [...(exportsOf.get(value) ?? []), { file, exportName }])
     }
   }
+  return exportsOf
+}
+
+async function resolveModelBindings(manifest: AppManifest, app: IntrospectableApp, root: string): Promise<void> {
+  const bindings = app.router?.registeredModelBindings?.()
+  if (!bindings) return
+  const wanted = new Set<unknown>(bindings.flatMap((entry) => Object.values(entry)))
+  if (wanted.size === 0) return
+  const exportsOf = await exportsByIdentity(manifest, root, () => discoverModelFiles(root), wanted, 'model-import')
   for (const [index, bound] of bindings.entries()) {
     const route = manifest.routes[index]
     if (!route) continue
@@ -208,7 +231,7 @@ async function resolveModelBindings(manifest: AppManifest, app: IntrospectableAp
       const candidate = pickDeclaringFile(exportsOf.get(model) ?? [], model.name ?? '')
       if (!candidate || !model.name) continue
       route.bindingSources ??= Object.create(null) as NonNullable<typeof route.bindingSources>
-      route.bindingSources[parameter] = { file: toPosixRelative(root, candidate.file), exportName: candidate.exportName, name: model.name }
+      route.bindingSources[parameter] = { file: candidate.file, exportName: candidate.exportName, name: model.name }
     }
   }
 }
@@ -222,28 +245,9 @@ async function resolveContractSources(manifest: AppManifest, app: Introspectable
   const definitions = app.router?.definitions?.()
   if (!definitions) return
   const isSchema = (value: unknown): value is object => value !== null && typeof value === 'object'
-  const wanted = new Set(definitions.flatMap((definition) => CONTRACT_SEGMENTS.map((key) => definition.schemas?.[key]).filter(isSchema)))
+  const wanted = new Set<unknown>(definitions.flatMap((definition) => CONTRACT_SEGMENTS.map((key) => definition.schemas?.[key]).filter(isSchema)))
   if (wanted.size === 0) return
-  let files: string[]
-  try {
-    files = excludeBarrelFiles(await discoverValidatorFiles(root))
-  } catch (error) {
-    manifest.warnings.push({ code: 'validator-discovery', message: `Could not list validator files: ${messageOf(error)}` })
-    return
-  }
-  const exportsOf = new Map<unknown, Array<{ file: string; exportName: string }>>()
-  for (const file of files) {
-    const relative = toPosixRelative(root, file)
-    writeFileSync(scanFile, relative)
-    let mod: Record<string, unknown>
-    try { mod = await import(pathToFileURL(file).href) as Record<string, unknown> } catch (error) {
-      manifest.warnings.push({ code: 'validator-import', message: `Could not import ${relative} for contract schema identity: ${messageOf(error)}` })
-      continue
-    }
-    for (const [exportName, value] of Object.entries(mod)) {
-      if (wanted.has(value as object)) exportsOf.set(value, [...(exportsOf.get(value) ?? []), { file: relative, exportName }])
-    }
-  }
+  const exportsOf = await exportsByIdentity(manifest, root, async () => excludeBarrelFiles(await discoverValidatorFiles(root)), wanted, 'validator-import')
   for (const [index, definition] of definitions.entries()) {
     const route = manifest.routes[index] as GraphRouteEntry | undefined
     if (!route) continue

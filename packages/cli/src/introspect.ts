@@ -31,13 +31,17 @@ export interface IntrospectOptions {
   /**
    * The application graph's identity scans (RFC 0032): the child also imports model and validator
    * files to match bound models and contract schemas to their exports. Ordinary diagnostics keep
-   * their import scope. Passed to the child as {@link INTROSPECT_GRAPH_ENV}, never as an argument.
+   * their import scope.
    */
   graph?: boolean
 }
 
 /** Set to `1` beside `GUREN_INTROSPECT` for a {@link IntrospectOptions.graph} run. */
 export const INTROSPECT_GRAPH_ENV = 'GUREN_INTROSPECT_GRAPH'
+
+/** The warnings a graph run's identity scans add, by the relation whose identities they leave unread. */
+export const GRAPH_SCAN_WARNINGS = { 'model-import': 'binds', 'validator-import': 'validates' } as const
+export type GraphScanWarning = keyof typeof GRAPH_SCAN_WARNINGS
 
 /** A route of a graph run: the CLI's own fields beside the server's, written only by its own child. */
 export type GraphRouteEntry = RouteEntry & {

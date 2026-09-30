@@ -15,7 +15,7 @@ import { memberKeyName, unwrapTypeAssertion, propertyValue, topLevelDeclaration 
 import { createAppOptions, findModuleDescriptor, hidesKeys, moduleMountState } from '../app-entry'
 import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { ContextRoute } from '../context-route'
-import { accessorCallPattern, blankCommentsAndStrings, type ControllerMemberName, type ControllerMethodScan } from '../controller-methods'
+import { blankCommentsAndStrings, VALIDATE_CALL_PATTERN, type ControllerMethodScan } from '../controller-methods'
 import {
   classNameFromPath,
   discoverModelFiles,
@@ -214,22 +214,6 @@ export interface PlanAppDetailInput {
 const IDENTIFIER_PATTERN = /[A-Za-z_$][\w$]*/g
 const MEMBER_CALL_PATTERN = /\bthis\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/g
 const ABILITY_PATTERN = /\bthis\s*\.\s*(?:authorize|can)\s*\(\s*(['"`])([^'"`]+)\1/g
-
-/** Spelled through `ControllerMemberName`, so a rename in `Controller.ts` fails to compile. */
-const VALIDATE_MEMBERS = [
-  'validateBody',
-  'validateBodySafe',
-  'validateQuery',
-  'validateQuerySafe',
-  'validateParams',
-  'validateParamsSafe',
-] as const satisfies readonly ControllerMemberName[]
-
-/** A schema handed to a validate call, captured as written (`schemas.post`); the application graph reads it too. */
-export const VALIDATE_CALL_PATTERN = new RegExp(
-  `\\bthis\\s*\\.\\s*${accessorCallPattern(VALIDATE_MEMBERS)}\\s*([A-Za-z_$][\\w$]*(?:\\s*\\.\\s*[A-Za-z_$][\\w$]*)*)`,
-  'g',
-)
 
 /** A validator file is imported like the schema, so it gets the schema reader's budget. */
 const VALIDATOR_IMPORT_TIMEOUT_MS = 5000
@@ -523,6 +507,8 @@ export async function readValidatorExports(
   cache: ParseCache,
   /** The project root's files only, so a module file that will not read cannot refuse it. */
   rootOnly = false,
+  /** Called per file whose exports will not read, which is then skipped rather than failing the whole reading. */
+  onUnreadFile?: (file: string) => void,
 ): Promise<PlanAppValidatorExports[] | PlanAppUnreadable> {
   const discovered = await discoverSectionFiles(root, discoverValidatorFiles)
   if (isUnreadable(discovered)) return discovered
@@ -538,6 +524,7 @@ export async function readValidatorExports(
     const ast = parsed[index]?.ast
     const names = ast ? exportedNames(ast, 'this file') : null
     // One unread file makes every absent name unprovable, as with the controller scan.
+    if (names === null && onUnreadFile) { onUnreadFile(entry.file); continue }
     if (names === null) return { unreadable: `${entry.file} could not be read for its exported schemas` }
     read.push({ ...entry, names: names.filter((name) => name !== 'default') })
   }

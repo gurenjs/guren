@@ -60,10 +60,6 @@ function ordered<T>(values: T[]): T[] {
 
 export function buildApplicationGraph(input: ApplicationGraphInputs): GurenApplicationGraph {
   const coverage = { ...input.coverage }
-  for (const key of [...GRAPH_KINDS, ...GRAPH_RELATIONS]) {
-    coverage[key] ??= { status: 'unavailable', reasons: [{ code: 'unsupported', message: 'No reader for this section.' }] }
-  }
-  for (const [key, value] of Object.entries(coverage)) coverage[key] = { ...value, reasons: ordered(value.reasons) }
   const nodes = ordered(input.nodes.map((entry) => ({ ...entry, evidence: ordered(entry.evidence) })))
   const ids = new Set(nodes.map((entry) => entry.id))
   if (ids.size !== nodes.length) throw new Error('Duplicate application graph node ID.')
@@ -71,12 +67,15 @@ export function buildApplicationGraph(input: ApplicationGraphInputs): GurenAppli
   const edges = input.edges.flatMap((entry) => {
     if (ids.has(entry.from) && ids.has(entry.to)) return [{ ...entry, evidence: ordered(entry.evidence) }]
     unresolved.push({ from: ids.has(entry.from) ? entry.from : undefined, relation: entry.relation, target: entry.to, reason: 'An endpoint could not be resolved.' })
-    const previous = coverage[entry.relation]
-    // An edge was read, so the relation has a reader and the default `unsupported` reason does not apply.
-    coverage[entry.relation] = { status: 'partial',
-      reasons: ordered([...(previous?.reasons ?? []).filter((reason) => reason.code !== 'endpoint' && reason.code !== 'unsupported'), { code: 'endpoint', message: 'An edge endpoint could not be resolved.' }]) }
+    const reasons = (coverage[entry.relation]?.reasons ?? []).filter((reason) => reason.code !== 'endpoint')
+    coverage[entry.relation] = { status: 'partial', reasons: [...reasons, { code: 'endpoint', message: 'An edge endpoint could not be resolved.' }] }
     return []
   })
+  // Filled after the edges, so a relation an edge was read for is never reported as having no reader.
+  for (const key of [...GRAPH_KINDS, ...GRAPH_RELATIONS]) {
+    coverage[key] ??= { status: 'unavailable', reasons: [{ code: 'unsupported', message: 'No reader for this section.' }] }
+  }
+  for (const [key, value] of Object.entries(coverage)) coverage[key] = { ...value, reasons: ordered(value.reasons) }
   const content = { coverage, nodes, edges: ordered(edges), unresolved: ordered(unresolved) }
   return {
     schemaVersion: 1,
