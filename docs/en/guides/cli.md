@@ -1071,8 +1071,9 @@ These patterns deliver the same iterative mode of operation you’d expect from 
 
 ## Application graph and runtime errors
 
-Use `graph` to read the routes, controllers, models and Inertia pages that Guren
-can identify, together with the evidence for their relationships:
+Use `graph` to read the routes, controllers, models, Inertia pages, middleware,
+validators, policies and tests that Guren can identify, together with the
+evidence for their relationships:
 
 ```bash
 bunx guren graph --json
@@ -1086,20 +1087,44 @@ source files and modules. Duplicate routes keep separate IDs and registration
 order. A relationship based only on a matching name stays unresolved.
 
 Default collection registers the application in an isolated process without
-booting it. It also imports controller and bound-model candidate files to match
-class identities; top-level application code still runs. `--no-introspect` reads
-source only and leaves registered routes unavailable. Existing `context` and
-`check` commands retain their import behavior.
+booting it. It also imports controller, bound-model and validator files to match
+class and schema identities; top-level application code still runs.
+`--no-introspect` reads source only. Registered routes, middleware and the
+relationships that start at a route (`handles`, `binds`, `usesMiddleware`,
+`tests`) are then unavailable, and `validates` and `authorizes` keep only their
+source half as partial coverage. Existing `context` and `check` commands retain
+their import behavior.
 
-The initial graph supports `handles`, `binds` and `renders`. Middleware, validator,
-policy and test nodes, and their relationships, carry explicit `unavailable`
-coverage until readers are implemented. An absent optional directory is empty;
-unreadable or unsupported source is reported as partial coverage. With an older
-server, model bindings without identity information remain unresolved.
+Each relationship comes from a reader other commands already use:
+
+- `handles`, `binds` and `usesMiddleware` come from registered routes. A
+  middleware node is an alias or group the router registers. Inline middleware
+  has no identity, since two handlers can share a function name, so it stays
+  unresolved. Middleware added with `app.use()` is not part of a route's chain
+  and does not appear.
+- `validates` links a controller to the validator export it passes to
+  `validateBody()`, `validateQuery()` or `validateParams()`, and a route to the
+  validator export its `params`, `query` or `body` contract schema is. A schema
+  declared outside the validator files, in the controller file for example,
+  stays unresolved.
+- `authorizes` links a controller to a policy class its action imports and
+  names. `this.authorize()` and `this.can()` reach a policy through the
+  `gate.policy()` binding a provider makes at boot, which the graph does not
+  run, so those calls stay unresolved with the policy named after the model as
+  a candidate. Authorization middleware is reported the same way.
+- `tests` links a test file to each route its `TestApp` requests reach, read the
+  way `plan:render` reads them for Impact. A request found is not a test passed.
+  A request no registered route answers is listed as unresolved without making
+  the section partial.
+
+An absent optional directory is empty; unreadable or unsupported source is
+reported as partial coverage. With an older server, model bindings without
+identity information remain unresolved.
 
 A complete, stable graph exits 0. Partial coverage, unavailable sections or source
-changes during collection exit 1 **with the graph still on stdout**. The initial
-version therefore normally exits 1. Consumers should parse the JSON even then.
+changes during collection exit 1 **with the graph still on stdout**. An
+application that authorizes through the gate or uses inline middleware exits 1
+for that reason, so consumers should parse the JSON even then.
 A collection or output-limit failure instead returns
 `{ "schemaVersion": 1, "error": { "code": "…", "message": "…" } }`.
 Graph output is limited to 8 MiB.

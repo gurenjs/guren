@@ -225,6 +225,37 @@ export const AUTHORIZE_CALL_PATTERN = controllerMemberCall('authorize')
  */
 export const AUTHORIZATION_CALL_PATTERN = controllerMemberCall('authorize', 'can')
 
+/**
+ * A gate consulted by hand, the form the authorization guide documents beside
+ * `this.authorize()`: `gate.allows(...)` on a `this.make('gate').forUser(user)`.
+ * `forUser` counts because the string the gate is made with is blanked away.
+ */
+const GATE_CALL_PATTERN = /\b[gG]ate\s*\.\s*(?:allows|denies|any|all|none|authorize|inspect|check|forUser)\s*\(/
+
+/** Whether an action body shows an authorization decision: {@link AUTHORIZATION_CALL_PATTERN} or a gate asked by hand. */
+export function consultsAuthorization(body: string): boolean {
+  return AUTHORIZATION_CALL_PATTERN.test(body) || GATE_CALL_PATTERN.test(body)
+}
+
+/** Spelled through `ControllerMemberName`, so a rename in `Controller.ts` fails to compile. */
+const VALIDATE_MEMBERS = [
+  'validateBody',
+  'validateBodySafe',
+  'validateQuery',
+  'validateQuerySafe',
+  'validateParams',
+  'validateParamsSafe',
+] as const satisfies readonly ControllerMemberName[]
+
+/** Every validate call, whatever its argument: what {@link VALIDATE_CALL_PATTERN} could not capture is the difference. */
+export const VALIDATE_MEMBER_CALL_PATTERN = new RegExp(controllerMemberCall(...VALIDATE_MEMBERS).source, 'g')
+
+/** A schema handed to a validate call, captured as written (`schemas.post`). */
+export const VALIDATE_CALL_PATTERN = new RegExp(
+  `\\bthis\\s*\\.\\s*${accessorCallPattern(VALIDATE_MEMBERS)}\\s*([A-Za-z_$][\\w$]*(?:\\s*\\.\\s*[A-Za-z_$][\\w$]*)*)`,
+  'g',
+)
+
 /** An Inertia page response, which carries no JSON schema an agent could read. */
 export const INERTIA_CALL_PATTERN = controllerMemberCall('inertia')
 
