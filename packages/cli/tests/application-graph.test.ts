@@ -163,7 +163,36 @@ describe('application graph', () => {
     } finally { await workspace.cleanup() }
   })
 
-  test('only a graph run imports for identities, whatever the parent process inherited', async () => {
+  test('records what the validate and policy readers cannot follow instead of dropping it', async () => {
+    const workspace = await createTempWorkspace('guren-graph-unfollowed-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, { ...relations,
+        'src/main.ts': "throw new Error('must not run')",
+        'app/Policies/index.ts': "export { PostPolicy } from './PostPolicy'",
+        'app/Policies/CommentPolicy.ts': 'export class CommentPolicy { create() { return true } }',
+        'app/Models/Comment.ts': 'export class Comment {}',
+        'app/Http/Controllers/CommentController.ts': `import { Controller } from '@guren/core'
+import type { CommentPolicy } from '../../Policies/CommentPolicy'
+import { PostPolicy } from '../../Policies'
+import { Comment } from '../../Models/Comment'
+export class CommentController extends Controller {
+  async store() { await this.validateBody({ safeParse: (data: unknown) => ({ success: true, data }) }); return null as unknown as CommentPolicy }
+  async update() { new PostPolicy(); await this.authorize('create', Comment) }
+}`,
+      })
+      const graph = await loadApplicationGraph({ cwd: workspace.dir, introspect: false })
+      const from = (label: string) => graph.nodes.find((node) => node.label === label)!.id
+      const unresolved = (relation: string) => graph.unresolved.filter((entry) => entry.relation === relation && entry.from === from('CommentController')).map((entry) => entry.target).sort()
+      expect(unresolved('validates')).toEqual(['CommentController.store'])
+      expect(codes(graph, 'validates')).toContain('dynamic-schema')
+      // A type-only import authorizes nothing; a barrel import is a name match; a gate call still names its candidate.
+      expect(related(graph, 'authorizes')).toEqual(['PostController -> PostPolicy'])
+      expect(unresolved('authorizes')).toEqual(['CommentPolicy', 'PostPolicy'])
+      expect(codes(graph, 'authorizes')).toEqual(expect.arrayContaining(['boot-bound-policy', 'unresolved-policy-import']))
+    } finally { await workspace.cleanup() }
+  })
+
+  test('only a graph run reports identities, whatever the parent process inherited', async () => {
     const workspace = await createTempWorkspace('guren-graph-env-')
     const inherited = process.env[INTROSPECT_GRAPH_ENV]
     try {

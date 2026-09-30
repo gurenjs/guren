@@ -8,7 +8,7 @@ import {
 } from './application-graph'
 import { importReferencePatterns, modelPatterns, policyBindings, type PolicyBinding } from './authorization-audit'
 import { CONTRACT_SEGMENTS } from './contract-segments'
-import { consultsAuthorization, parseControllerMethods, VALIDATE_CALL_PATTERN, type ControllerDeclaration } from './controller-methods'
+import { consultsAuthorization, parseControllerMethods, VALIDATE_CALL_PATTERN, VALIDATE_MEMBER_CALL_PATTERN, type ControllerDeclaration } from './controller-methods'
 import {
   classNameFromPath, collectFiles, discoverPolicyFiles, discoverTestFiles, excludeBarrelFiles,
   FileDiscoveryError, moduleNameFromRelPath, NON_SOURCE_DIR_NAMES, toPosixRelative,
@@ -21,6 +21,7 @@ import { readValidatorExports } from './plan/app-detail'
 import { readPolicyAbilities } from './plan/policy-abilities'
 import { isUnreadable } from './plan/unreadable'
 import { importsByLocal, specifierBase, withoutExtension, type ImportEntry } from './schema-binding'
+import { wholeIdentifierPattern } from './utils'
 import { scanTestRequests, testCoverage, type TestRequestScan, type TestRequestSite, type UnresolvedReason } from './test-requests'
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs', '.json'])
@@ -187,7 +188,11 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
     const read = await readValidatorExports(cwd, cache, false, (file) => failure('validator', 'unparsed-or-unsupported', file))
     if (isUnreadable(read)) { failure('validator', 'unreadable-directory'); return }
     for (const { filePath, file, names } of read) {
-      for (const name of names) validators.set(symbolKey(filePath, name), add('validator', file, name))
+      for (const name of names) {
+        // A name exported twice, or a `.ts` and its emitted `.js` twin, would give one key two nodes.
+        if (validators.has(symbolKey(filePath, name))) { failure('validator', 'duplicate-export', file); continue }
+        validators.set(symbolKey(filePath, name), add('validator', file, name))
+      }
     }
   })
   const policies: Array<{ node: GraphNode; file: string }> = []
@@ -198,6 +203,7 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
       const parsed = await cache.get(absolute)
       const abilities = parsed ? readPolicyAbilities(parsed.ast, className) : undefined
       if (!abilities || 'unreadable' in abilities) { failure('policy', 'unparsed-or-unsupported', file); continue }
+      if (policies.some((entry) => withoutExtension(entry.file) === withoutExtension(absolute))) { failure('policy', 'source-twin', file); continue }
       policies.push({ node: add('policy', file, className), file: absolute })
     }
   })
@@ -233,7 +239,11 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
       const from = controllerId(declaration)
       const imported = await importsOf(declaration.file)
       for (const [action, method] of declaration.methods) {
-        for (const match of method.body.matchAll(VALIDATE_CALL_PATTERN)) {
+        const captured = [...method.body.matchAll(VALIDATE_CALL_PATTERN)]
+        if (captured.length < [...method.body.matchAll(VALIDATE_MEMBER_CALL_PATTERN)].length) {
+          unresolve({ from, relation: 'validates', target: `${declaration.className}.${action}`, reason: 'A validate call passes an expression the reader cannot follow to a schema.' }, 'dynamic-schema', declaration.file)
+        }
+        for (const match of captured) {
           const chain = match[1]!.replace(/\s+/g, '')
           const target = importedSymbol(declaration.file, imported, chain, validators)
           if (target) link(from, target.id, 'validates', { kind: 'static', source: `controller:${action}`, file: declaration.file, line: method.line })
@@ -250,11 +260,19 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
       const imported = await importsOf(declaration.file)
       const referenced = policies.flatMap(({ node, file }) =>
         importReferencePatterns(cwd, controllerFile, imported, file, node.label).map((pattern) => ({ node, pattern })))
+      // Imported under a policy's name from a file that is no policy node (a barrel, an alias): a name match only.
+      const byNameOnly = [...imported].flatMap(([local, entry]) => (!entry.typeOnly && entry.kind === 'named'
+        && policies.some(({ node }) => node.label === entry.imported)
+        && !referenced.some(({ pattern }) => pattern.test(local)) ? [{ label: entry.imported, pattern: wholeIdentifierPattern(local) }] : []))
       const named = bindings.length > 0 ? await modelPatterns(cwd, controllerFile, bindings, cache) : new Map<PolicyBinding, RegExp[]>()
       for (const [action, method] of declaration.methods) {
-        const direct = referenced.filter(({ pattern }) => pattern.test(method.body))
-        for (const { node } of direct) link(from, node.id, 'authorizes', { kind: 'static', source: `controller:${action}`, file: declaration.file, line: method.line })
-        if (direct.length > 0 || !consultsAuthorization(method.body)) continue
+        for (const { node } of referenced.filter(({ pattern }) => pattern.test(method.body))) {
+          link(from, node.id, 'authorizes', { kind: 'static', source: `controller:${action}`, file: declaration.file, line: method.line })
+        }
+        for (const { label } of byNameOnly.filter(({ pattern }) => pattern.test(method.body))) {
+          unresolve({ from, relation: 'authorizes', target: label, reason: `${declaration.className}.${action} names ${label}, imported from a path that does not resolve to its policy file.` }, 'unresolved-policy-import', declaration.file)
+        }
+        if (!consultsAuthorization(method.body)) continue
         const key = `${declaration.className}.${action}`
         const candidates = bindings.filter((binding) => named.get(binding)?.some((pattern) => pattern.test(method.body)))
         for (const binding of candidates) {
@@ -275,6 +293,8 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
       if (result.status === 'failed') { failure('route', result.reason); return }
       addRoutes(result.manifest)
       for (const warning of result.manifest.warnings) {
+        // A note on rendering a contract schema as JSON Schema, which the graph does not read.
+        if (warning.code === 'schema-partial') continue
         failure(GRAPH_SCAN_WARNINGS[warning.code as keyof typeof GRAPH_SCAN_WARNINGS] ?? 'route', warning.code)
       }
     })
@@ -308,7 +328,7 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
   function importedSymbol(file: string, imported: Map<string, ImportEntry>, chain: string, symbols: Map<string, GraphNode>): GraphNode | undefined {
     const [local, member, ...rest] = chain.split('.')
     const entry = imported.get(local!)
-    if (!entry || rest.length > 0) return undefined
+    if (!entry || entry.typeOnly || rest.length > 0) return undefined
     const base = specifierBase(cwd, resolve(cwd, file), entry.source)
     if (base === null) return undefined
     if (member === undefined && entry.kind === 'named') return symbols.get(symbolKey(base, entry.imported))

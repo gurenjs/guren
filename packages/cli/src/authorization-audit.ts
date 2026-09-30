@@ -67,7 +67,7 @@ export async function policyBindings(cwd: string, cache: ParseCache): Promise<Po
 /**
  * How a file spells each class it imports from `targetFile` (absolute): the local
  * name of a named import of `className` or of a default import, or `namespace.Class`.
- * An import through a barrel names the barrel, not `targetFile`, so it yields nothing.
+ * A type-only import, or one through a barrel (which names the barrel, not `targetFile`), yields nothing.
  */
 export function importReferencePatterns(
   cwd: string,
@@ -78,6 +78,7 @@ export function importReferencePatterns(
 ): RegExp[] {
   const patterns: RegExp[] = []
   for (const [local, entry] of imports) {
+    if (entry.typeOnly) continue
     const base = specifierBase(cwd, importer, entry.source)
     if (base === null || withoutExtension(base) !== withoutExtension(targetFile)) continue
     if (entry.kind === 'namespace') {
