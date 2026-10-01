@@ -1,12 +1,14 @@
 /**
- * The plans half of the docs viewer's payload (RFC 0030 §7, the docs viewer amendment): every
- * plan not closed at its current hash, with its approval, its derived steps and their records.
+ * The plans half of the docs viewer's payload (RFC 0030 §7, the docs viewer amendment), which
+ * `guren_get_plans` also returns: every plan not closed at its current hash, with its approval,
+ * its derived steps and their records.
  * Plan JSON, approvals, the decision log, `.guren/plans/` and the files a record fingerprinted
  * only: the payload is rebuilt on a poll, so nothing here imports the application.
  */
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { commandFix, formatFixCommand } from './check-result'
 import { toPosixRelative } from './discovery'
+import { discoverPlanFiles, type PlanDiscovery } from './plan-check'
 import { readPlanFile } from './plan-render'
 import { readPlanApprovalStanding } from './plan/approvals'
 import { touchedModels } from './plan/close-docs'
@@ -157,6 +159,32 @@ async function readViewerPlan(context: PlanReadContext, path: string, file: stri
       next,
       status: command('plan:status'),
     },
+  }
+}
+
+/**
+ * Drafts included, unlike `readOpenPlan()` (plan/open-plan.ts), which counts approved plans only.
+ * `dir` in `unreadable` is app-relative; a plan in such a directory is missing from `plans`.
+ */
+export interface PlanOverview {
+  schemaVersion: 1
+  plans: DocsViewerOpenPlan[]
+  /** The step `plan:next` marked in each plan that has one; `stall` once the Stop hook gave up on it. */
+  active: Array<{ plan: string; step: string; stall?: { at: string; reason: string } }>
+  unreadable: PlanDiscovery['unreadable']
+}
+
+/** What `guren_get_plans` returns: the plans the docs viewer lists, with the directories that would not list. */
+export async function readPlanOverview(appRoot: string): Promise<PlanOverview> {
+  const discovery = await discoverPlanFiles(appRoot)
+  const { open } = await readViewerPlans(appRoot, discovery.files)
+  return {
+    schemaVersion: 1,
+    plans: open,
+    active: open.flatMap((plan) =>
+      plan.steps.filter((step) => step.active).map((step) => ({ plan: plan.file, step: step.id, ...(step.stall ? { stall: step.stall } : {}) })),
+    ),
+    unreadable: discovery.unreadable.map((entry) => ({ ...entry, dir: toPosixRelative(appRoot, entry.dir) || '.' })),
   }
 }
 
