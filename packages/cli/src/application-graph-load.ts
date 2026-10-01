@@ -11,11 +11,12 @@ import { CONTRACT_SEGMENTS } from './contract-segments'
 import { readControllerGraph } from './application-graph-controllers'
 import { consultsAuthorization, VALIDATE_CALL_PATTERN, VALIDATE_MEMBER_CALL_PATTERN, type ControllerDeclaration } from './controller-methods'
 import {
-  classNameFromPath, collectFiles, discoverPolicyFiles, discoverTestFiles, excludeBarrelFiles,
+  classNameFromPath, discoverPolicyFiles, discoverTestFiles, excludeBarrelFiles,
   FileDiscoveryError, moduleNameFromRelPath, NON_SOURCE_DIR_NAMES, toPosixRelative,
 } from './discovery'
-import { discoverModelClasses } from './model-parser'
-import { extractInertiaPageRefs, PAGE_COMPONENT_EXTENSIONS } from './inertia-pages'
+import { readModelGraph } from './application-graph-models'
+import { readPageGraph } from './application-graph-pages'
+import { extractInertiaPageRefs } from './inertia-pages'
 import { CHECK_INTROSPECT_TIMEOUT_MS, GRAPH_SCAN_WARNINGS, introspectApp, type GraphRouteEntry } from './introspect'
 import { ParseCache, parseSourceFile, type ParseOutcome } from './parse-cache'
 import { readValidatorGraph } from './application-graph-validators'
@@ -170,19 +171,14 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
     for (const file of scan.unparsedFiles) failure('controller', 'unparsed', file)
   })
   await section('model', async () => {
-    for (const model of await discoverModelClasses(cwd, cache)) {
-      const file = toPosixRelative(cwd, model.filePath)
-      if (model.classDecl) add('model', file, model.className)
-      else failure('model', 'unparsed-or-unsupported', file)
-    }
+    const reading = await readModelGraph(cwd, cache)
+    input.nodes.push(...reading.nodes)
+    for (const file of reading.unsupportedFiles) failure('model', 'unparsed-or-unsupported', file)
   })
   await section('page', async () => {
-    for (const absolute of await collectFiles(resolve(cwd, 'resources/js/pages'), PAGE_COMPONENT_EXTENSIONS)) {
-      const file = toPosixRelative(cwd, absolute)
-      const parsed = await cache.get(absolute)
-      if (!parsed) { failure('page', 'unparsed-or-unreadable', file); continue }
-      add('page', file, file.slice('resources/js/pages/'.length).replace(/\.(tsx|jsx)$/, ''))
-    }
+    const reading = await readPageGraph(cwd, cache)
+    input.nodes.push(...reading.nodes)
+    for (const file of reading.unparsedFiles) failure('page', 'unparsed-or-unreadable', file)
   })
   const validators = new Map<string, GraphNode>()
   await section('validator', async () => {

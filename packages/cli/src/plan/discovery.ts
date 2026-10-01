@@ -4,8 +4,8 @@ import type { PlanAppUnreadable } from './unreadable'
 /** A missing section is empty; an unreadable one cannot settle a plan reference. */
 export async function discoverSectionFiles<T>(
   cwd: string,
-  discover: (root: string) => Promise<T[]>,
-): Promise<T[] | PlanAppUnreadable> {
+  discover: (root: string) => Promise<T>,
+): Promise<T | PlanAppUnreadable> {
   try {
     return await discover(cwd)
   } catch (error) {
