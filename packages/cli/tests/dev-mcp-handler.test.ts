@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 import { createDevMcpHandler, type DevMcpHandler } from '../src/dev-mcp/handler'
 import type { DevMcpApi } from '../src/dev-mcp/server'
@@ -114,6 +116,7 @@ function createMockApi(overrides: Partial<DevMcpApi> = {}): DevMcpApi {
     generateApiClientTypes: async () => ({ outputPath: '.guren/api-client.gen.ts' }),
     buildDocsGraphReport: async () => ({ nodes: [], edges: [], focus: [] }),
     renderDocsGraphMarkdown: () => '# Docs graph',
+    readPlanOverview: async () => ({ schemaVersion: 1, plans: [], active: [], unreadable: [] }),
     ...overrides,
   }
 }
@@ -152,6 +155,7 @@ describe('createDevMcpHandler', () => {
             'guren_agent_surface',
             'guren_check',
             'guren_gate',
+            'guren_get_plans',
             'guren_codegen',
           ]),
         )
@@ -179,6 +183,31 @@ describe('createDevMcpHandler', () => {
 
         expect(seen).toEqual(['/projects/blog'])
         expect(JSON.parse(toolText(result))).toMatchObject({ passCount: 3 })
+
+        await client.close()
+        await handler.close()
+      })
+
+      test('reads the plan overview for the app root as a read-only tool', async () => {
+        const seen: string[] = []
+        const overview = { schemaVersion: 1 as const, plans: [], active: [], unreadable: [{ dir: 'docs/plans', reason: 'EACCES' }] }
+        const handler = handlerWith(
+          {
+            readPlanOverview: async (appRoot) => {
+              seen.push(appRoot)
+              return overview
+            },
+          },
+          '/projects/blog',
+        )
+        const client = await connect(handler, era)
+
+        const { tools } = await client.listTools()
+        const result = await client.callTool({ name: 'guren_get_plans', arguments: {} })
+
+        expect(tools.find((tool) => tool.name === 'guren_get_plans')?.annotations?.readOnlyHint).toBe(true)
+        expect(seen).toEqual(['/projects/blog'])
+        expect(JSON.parse(toolText(result))).toEqual(overview)
 
         await client.close()
         await handler.close()
@@ -291,6 +320,20 @@ describe('createDevMcpHandler', () => {
 
     expect(payload.routesLoaded).toBe(false)
     expect(payload.loadErrors).toEqual(['routes/web.ts threw: boom'])
+
+    await client.close()
+    await handler.close()
+  })
+
+  test('lists every registered tool in the agent harness tool table', async () => {
+    const handler = handlerWith()
+    const client = await connect(handler, 'modern')
+
+    const { tools } = await client.listTools()
+    const table = await readFile(join(import.meta.dir, '../templates/agent/core/entry-body.md'), 'utf8')
+    const documented = [...table.matchAll(/^\| `(guren_[a-z_]+)` \|/gm)].map((match) => match[1])
+
+    expect([...documented].sort()).toEqual(tools.map((tool) => tool.name).sort())
 
     await client.close()
     await handler.close()

@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { Application } from '../../src/http/Application'
 import { ExceptionHandler } from '../../src/errors/ExceptionHandler'
 import { RuntimeErrorBuffer, RUNTIME_ERRORS_BINDING, RUNTIME_ERRORS_PATH } from '../../src/mcp/runtime-errors'
@@ -120,7 +122,9 @@ describe('development runtime error buffer', () => {
     try {
       const read = (headers?: HeadersInit, address?: string) => app.fetch(new Request(`http://localhost${RUNTIME_ERRORS_PATH}`, { headers }),
         address ? { server: { requestIP: () => ({ address }) } } : undefined)
-      expect((await read({}, '127.0.0.1')).status).toBe(200)
+      const available = await read({}, '127.0.0.1')
+      expect(available.status).toBe(200)
+      expect(((await available.json()) as { status: string }).status).toBe('available')
       expect((await read({ origin: 'https://evil.example' }, '127.0.0.1')).status).toBe(403)
       expect((await read({}, '192.0.2.1')).status).toBe(403)
       expect((await read()).status).toBe(403)
@@ -133,5 +137,20 @@ describe('development runtime error buffer', () => {
       const disabled = new Application()
       expect(disabled.container.has(RUNTIME_ERRORS_BINDING)).toBe(false)
     } finally { await app.stop() }
+  })
+
+  test('keeps the buffer module behind an import a deploy build can drop', async () => {
+    // A deploy build's define settles only this exact expression; an optional chain or a
+    // value import of ./runtime-errors would put its node:fs work back into every bundle.
+    const read = (path: string) => readFile(join(import.meta.dir, '../../src', path), 'utf8')
+    const seam = await read('mcp/runtime-error-capture.ts')
+    expect(seam).toContain("process.env.NODE_ENV !== 'production' && isMcpEndpointEnabled()) {\n    return loading ??= import('./runtime-errors')")
+    expect(seam).not.toContain('process.env?.')
+    const sources = await Array.fromAsync(new Bun.Glob('**/*.ts').scan(join(import.meta.dir, '../../src')))
+    expect(sources).toContain('http/Application.ts')
+    for (const path of sources.filter((source) => !source.endsWith('mcp/runtime-errors.ts') && !source.endsWith('.test.ts'))) {
+      const statements = (await read(path)).match(/^(?:import|export)\b(?:(?!\bfrom\s*['"])[\s\S])*from\s*['"][^'"]*\/runtime-errors['"]/gm) ?? []
+      expect(statements.filter((statement) => !/^(?:import|export) type\b/.test(statement))).toEqual([])
+    }
   })
 })

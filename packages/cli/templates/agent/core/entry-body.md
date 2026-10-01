@@ -108,6 +108,10 @@ are rejected with 403.
 | `guren_check` | Validate route ↔ controller ↔ page consistency, doc links, spec freshness |
 | `guren_gate` | Every CI stage (codegen, typecheck, lint, check, audit, test) in one verdict; `ok` = the change is done |
 | `guren_docs_graph` | OKF docs relation graph (narrow with entity/path) — impact query before renames |
+| `guren_agent_surface` | Routes an autonomous agent can already call (`.agent()` tools) — check before editing one |
+| `guren_get_application_graph` | Routes, controllers, models and pages with their relationships, coverage and evidence |
+| `guren_get_runtime_errors` | Server errors the running dev app retained: status, route, project stack frames |
+| `guren_get_plans` | Implementation plans not closed yet, drafts included: approval, step outcomes, the active step, the next command |
 | `guren_list_models` | List models (relations, soft deletes, auth trait) |
 | `guren_generate_guidelines` | Generate project-specific coding guidelines |
 | `guren_doctor` | Project health check + suggested next actions |

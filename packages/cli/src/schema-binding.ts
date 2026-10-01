@@ -70,6 +70,8 @@ export interface ImportEntry {
   /** The *exported* name a local aliases; empty for default and namespace imports, which have none. */
   imported: string
   kind: 'named' | 'default' | 'namespace'
+  /** `import type` or a `type` specifier: erased at compile time, so no runtime reference. */
+  typeOnly?: true
 }
 
 /** Local binding → where it came from and the exported name it aliases. */
@@ -78,6 +80,7 @@ export function importsByLocal(body: Statement[]): Map<string, ImportEntry> {
   for (const statement of body) {
     if (statement.type !== 'ImportDeclaration') continue
     const source = statement.source.value
+    const typeDeclaration = statement.importKind === 'type'
     for (const specifier of statement.specifiers) {
       if (specifier.type === 'ImportSpecifier') {
         const imported = specifier.imported
@@ -85,12 +88,14 @@ export function importsByLocal(body: Statement[]): Map<string, ImportEntry> {
           source,
           imported: imported.type === 'Identifier' ? imported.name : imported.value,
           kind: 'named',
+          ...(typeDeclaration || specifier.importKind === 'type' ? { typeOnly: true as const } : {}),
         })
       } else {
         imports.set(specifier.local.name, {
           source,
           imported: '',
           kind: specifier.type === 'ImportDefaultSpecifier' ? 'default' : 'namespace',
+          ...(typeDeclaration ? { typeOnly: true as const } : {}),
         })
       }
     }

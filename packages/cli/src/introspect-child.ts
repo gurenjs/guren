@@ -10,9 +10,19 @@ import { dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { AppManifest, AttachmentsDescription } from '@guren/server'
 
-import { classNameFromPath, discoverControllerFiles, discoverModelFiles, toPosixRelative } from './discovery'
+import { CONTRACT_SEGMENTS } from './contract-segments'
+import { classNameFromPath, discoverControllerFiles, discoverModelFiles, discoverValidatorFiles, excludeBarrelFiles, toPosixRelative } from './discovery'
 import { controllerImportWarning, pickDeclaringFile } from './introspect-controller-file'
-import { DEFAULT_INTROSPECT_TIMEOUT_MS, INTROSPECT_CHILD_BUDGET_MARGIN_MS, type Introspection, type IntrospectionFailure } from './introspect'
+import {
+  DEFAULT_INTROSPECT_TIMEOUT_MS,
+  INTROSPECT_CHILD_BUDGET_MARGIN_MS,
+  GRAPH_SCAN_WARNINGS,
+  INTROSPECT_GRAPH_ENV,
+  type GraphRouteEntry,
+  type GraphScanWarning,
+  type Introspection,
+  type IntrospectionFailure,
+} from './introspect'
 import { bootstrapApplication, resolveMainEntry } from './runtime'
 
 /** `IntrospectionListenError.code` in `@guren/server`, spelled here: the app may resolve a server older than this CLI's. */
@@ -27,6 +37,7 @@ interface IntrospectableApp {
   introspect?: () => Promise<AppManifest>
   router?: {
     registeredModelBindings?: () => ReadonlyArray<Record<string, { name?: string }>>
+    definitions?: () => ReadonlyArray<{ schemas?: Partial<Record<string, unknown>> }>
     registeredHandlers?: () => ReadonlyArray<{ index: number; controller?: unknown }>
     hasRoute?: (name: string) => boolean
   }
@@ -39,6 +50,7 @@ interface FrameworkModule {
 }
 
 const outFile = process.argv[2]
+const graphScans = process.env[INTROSPECT_GRAPH_ENV] === '1'
 /** Past this the child ends itself; the parent passes its own cap plus a margin, so its `timeout` report comes first. */
 const budgetMs = Number(process.argv[3]) || DEFAULT_INTROSPECT_TIMEOUT_MS + INTROSPECT_CHILD_BUDGET_MARGIN_MS
 /** The controller file being imported, beside the result, so the parent can name where a timeout struck. */
@@ -172,23 +184,46 @@ async function resolveControllers(
   }
 }
 
-async function resolveModelBindings(manifest: AppManifest, app: IntrospectableApp, root: string): Promise<void> {
-  const bindings = app.router?.registeredModelBindings?.()
-  if (!bindings) return
-  const wanted = new Set(bindings.flatMap((entry) => Object.values(entry)))
-  if (wanted.size === 0) return
-  const exportsOf = new Map<unknown, Array<{ file: string; exportName: string }>>()
-  for (const file of await discoverModelFiles(root)) {
-    writeFileSync(scanFile, toPosixRelative(root, file))
+type ExportSite = { file: string; exportName: string }
+
+/**
+ * Every export of the discovered files whose value is in `wanted`, keyed by that value, with
+ * project-relative files. A discovery or import failure is one `code` warning, never a crash.
+ */
+async function exportsByIdentity(
+  manifest: AppManifest,
+  root: string,
+  discover: () => Promise<string[]>,
+  wanted: ReadonlySet<unknown>,
+  code: GraphScanWarning,
+): Promise<Map<unknown, ExportSite[]>> {
+  const exportsOf = new Map<unknown, ExportSite[]>()
+  let files: string[]
+  try { files = await discover() } catch (error) {
+    manifest.warnings.push({ code, message: `Could not list files for ${GRAPH_SCAN_WARNINGS[code]} identity: ${messageOf(error)}` })
+    return exportsOf
+  }
+  for (const absolute of files) {
+    const file = toPosixRelative(root, absolute)
+    writeFileSync(scanFile, file)
     let mod: Record<string, unknown>
-    try { mod = await import(pathToFileURL(file).href) as Record<string, unknown> } catch {
-      manifest.warnings.push({ code: 'model-import', message: `Could not import ${toPosixRelative(root, file)} for binding identity.` })
+    try { mod = await import(pathToFileURL(absolute).href) as Record<string, unknown> } catch (error) {
+      manifest.warnings.push({ code, message: `Could not import ${file} for ${GRAPH_SCAN_WARNINGS[code]} identity: ${messageOf(error)}` })
       continue
     }
     for (const [exportName, value] of Object.entries(mod)) {
-      if (wanted.has(value as { name?: string })) exportsOf.set(value, [...(exportsOf.get(value) ?? []), { file, exportName }])
+      if (wanted.has(value)) exportsOf.set(value, [...(exportsOf.get(value) ?? []), { file, exportName }])
     }
   }
+  return exportsOf
+}
+
+async function resolveModelBindings(manifest: AppManifest, app: IntrospectableApp, root: string): Promise<void> {
+  const bindings = app.router?.registeredModelBindings?.()
+  if (!bindings) return
+  const wanted = new Set<unknown>(bindings.flatMap((entry) => Object.values(entry)))
+  if (wanted.size === 0) return
+  const exportsOf = await exportsByIdentity(manifest, root, () => discoverModelFiles(root), wanted, 'model-import')
   for (const [index, bound] of bindings.entries()) {
     const route = manifest.routes[index]
     if (!route) continue
@@ -196,7 +231,31 @@ async function resolveModelBindings(manifest: AppManifest, app: IntrospectableAp
       const candidate = pickDeclaringFile(exportsOf.get(model) ?? [], model.name ?? '')
       if (!candidate || !model.name) continue
       route.bindingSources ??= Object.create(null) as NonNullable<typeof route.bindingSources>
-      route.bindingSources[parameter] = { file: toPosixRelative(root, candidate.file), exportName: candidate.exportName, name: model.name }
+      route.bindingSources[parameter] = { file: candidate.file, exportName: candidate.exportName, name: model.name }
+    }
+  }
+}
+
+/**
+ * Which validator exports each route's contract schemas are, by object identity (RFC 0032), the
+ * match `plan/app-detail.ts` makes for `contractSchemas`. Barrels are skipped: a re-export
+ * belongs to the file that declares it. `output` is a response schema, not validation.
+ */
+async function resolveContractSources(manifest: AppManifest, app: IntrospectableApp, root: string): Promise<void> {
+  const definitions = app.router?.definitions?.()
+  if (!definitions) return
+  const isSchema = (value: unknown): value is object => value !== null && typeof value === 'object'
+  const wanted = new Set<unknown>(definitions.flatMap((definition) => CONTRACT_SEGMENTS.map((key) => definition.schemas?.[key]).filter(isSchema)))
+  if (wanted.size === 0) return
+  const exportsOf = await exportsByIdentity(manifest, root, async () => excludeBarrelFiles(await discoverValidatorFiles(root)), wanted, 'validator-import')
+  for (const [index, definition] of definitions.entries()) {
+    const route = manifest.routes[index] as GraphRouteEntry | undefined
+    if (!route) continue
+    for (const key of CONTRACT_SEGMENTS) {
+      const schema = definition.schemas?.[key]
+      if (!isSchema(schema)) continue
+      route.contractSources ??= {}
+      route.contractSources[key] = exportsOf.get(schema) ?? []
     }
   }
 }
@@ -232,7 +291,10 @@ async function introspect(root: string): Promise<Introspection> {
   describeUnboundAttachments(manifest, app, loaded.framework)
   loadingApp = false
   await resolveControllers(manifest, app, root, loaded.framework)
-  if (process.argv[4] === 'graph') await resolveModelBindings(manifest, app, root)
+  if (graphScans) {
+    await resolveModelBindings(manifest, app, root)
+    await resolveContractSources(manifest, app, root)
+  }
   return { status: 'ok', manifest }
 }
 

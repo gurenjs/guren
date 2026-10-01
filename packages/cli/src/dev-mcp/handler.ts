@@ -7,6 +7,7 @@ import { renderContextMarkdown } from '../context'
 import { generateDataTypes } from '../data-types'
 import { runDoctor, suggestNextSteps } from '../doctor'
 import { buildDocsGraphReport, renderDocsGraphMarkdown } from '../docs-graph'
+import { readPlanOverview } from '../docs-viewer-plans'
 import { renderEntityContextMarkdown } from '../entity-context'
 import { createFreshContextApi } from '../fresh-context'
 import { runGate } from '../gate'
@@ -63,6 +64,7 @@ function defaultApi(): DevMcpApi {
     generateApiClientTypes,
     buildDocsGraphReport,
     renderDocsGraphMarkdown,
+    readPlanOverview,
     ...createFreshContextApi(),
   }
 }

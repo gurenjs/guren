@@ -1,4 +1,5 @@
-import { RUNTIME_ERRORS_BINDING, RUNTIME_ERRORS_PATH, type RuntimeErrorBuffer, type RuntimeErrorQuery } from './runtime-errors'
+import type { RuntimeErrorBuffer, RuntimeErrorQuery } from './runtime-errors'
+import { RUNTIME_ERRORS_BINDING, RUNTIME_ERRORS_PATH } from './runtime-error-capture'
 import { ServiceProvider } from '../container/ServiceProvider'
 import { createMcpAccessGuard, isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from './endpoint'
 

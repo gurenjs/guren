@@ -11,7 +11,7 @@ import { resolve } from 'node:path'
 import type { AuditedRoute, AuditFinding } from './audit'
 import type { CheckEvidence } from './check-result'
 import {
-  AUTHORIZATION_CALL_PATTERN,
+  consultsAuthorization,
   controllerMethodFor,
   type ControllerMethodScan,
 } from './controller-methods'
@@ -20,7 +20,7 @@ import { describeMethod } from './http-methods'
 import { discoverModelClasses } from './model-parser'
 import type { ParseCache } from './parse-cache'
 import { readPolicyAbilities } from './plan/policy-abilities'
-import { importsByLocal, specifierBase, withoutExtension } from './schema-binding'
+import { importsByLocal, specifierBase, withoutExtension, type ImportEntry } from './schema-binding'
 import { camelCase, escapeRegExp, wholeIdentifierPattern } from './utils'
 
 /**
@@ -29,18 +29,11 @@ import { camelCase, escapeRegExp, wholeIdentifierPattern } from './utils'
  */
 export const GUEST_PATH_PATTERN = /(login|logout|register|signup|sign-up|password|forgot|reset|verification|verify-email)/i
 
-/**
- * A gate consulted by hand, the form the authorization guide documents beside
- * `this.authorize()`: `gate.allows(...)` on a `this.make('gate').forUser(user)`.
- * `forUser` counts because the string the gate is made with is blanked away.
- */
-const GATE_CALL_PATTERN = /\b[gG]ate\s*\.\s*(?:allows|denies|any|all|none|authorize|inspect|check|forUser)\s*\(/
-
 const AUDIT_IGNORE_MARKER = 'guren-audit-ignore'
 
 const POLICY_SUFFIX = 'Policy'
 
-interface PolicyBinding {
+export interface PolicyBinding {
   model: string
   policy: string
   /** Absolute path of the model file, which a controller's imports are resolved against. */
@@ -50,7 +43,7 @@ interface PolicyBinding {
   policyPattern: RegExp
 }
 
-async function policyBindings(cwd: string, cache: ParseCache): Promise<PolicyBinding[]> {
+export async function policyBindings(cwd: string, cache: ParseCache): Promise<PolicyBinding[]> {
   const policyFiles = await discoverPolicyFiles(cwd)
   if (policyFiles.length === 0) return []
 
@@ -72,34 +65,49 @@ async function policyBindings(cwd: string, cache: ParseCache): Promise<PolicyBin
 }
 
 /**
+ * How a file spells each class it imports from `targetFile` (absolute): the local
+ * name of a named import of `className` or of a default import, or `namespace.Class`.
+ * A type-only import, or one through a barrel (which names the barrel, not `targetFile`), yields nothing.
+ */
+export function importReferencePatterns(
+  cwd: string,
+  importer: string,
+  imports: Map<string, ImportEntry>,
+  targetFile: string,
+  className: string,
+): RegExp[] {
+  const patterns: RegExp[] = []
+  for (const [local, entry] of imports) {
+    if (entry.typeOnly) continue
+    const base = specifierBase(cwd, importer, entry.source)
+    if (base === null || withoutExtension(base) !== withoutExtension(targetFile)) continue
+    if (entry.kind === 'namespace') {
+      patterns.push(new RegExp(`(?<![\\w$.])${escapeRegExp(local)}\\s*\\.\\s*${escapeRegExp(className)}(?![\\w$])`))
+    } else if (entry.kind === 'default' || entry.imported === className) {
+      patterns.push(wholeIdentifierPattern(local))
+    }
+  }
+  return patterns
+}
+
+/**
  * How one controller file may spell each model: the bare class name always
  * (an import through a barrel resolves to no file), plus what the file imports
  * the model's module as, so `import { Post as PostModel }`, a default import
  * and `Models.Post` under `import * as Models` are references too.
  */
-async function modelPatterns(
+export async function modelPatterns(
   cwd: string,
   controllerFile: string,
   bindings: PolicyBinding[],
   cache: ParseCache,
 ): Promise<Map<PolicyBinding, RegExp[]>> {
-  const patterns = new Map(bindings.map((binding) => [binding, [wholeIdentifierPattern(binding.model)]]))
   const parsed = await cache.get(controllerFile)
-  if (!parsed) return patterns
-
-  for (const [local, entry] of importsByLocal(parsed.ast.program.body)) {
-    const base = specifierBase(cwd, controllerFile, entry.source)
-    if (base === null) continue
-    for (const binding of bindings) {
-      if (withoutExtension(base) !== withoutExtension(binding.modelFile)) continue
-      if (entry.kind === 'namespace') {
-        patterns.get(binding)!.push(new RegExp(`(?<![\\w$.])${escapeRegExp(local)}\\s*\\.\\s*${escapeRegExp(binding.model)}(?![\\w$])`))
-      } else if (entry.kind === 'default' || entry.imported === binding.model) {
-        patterns.get(binding)!.push(wholeIdentifierPattern(local))
-      }
-    }
-  }
-  return patterns
+  const imports = parsed ? importsByLocal(parsed.ast.program.body) : new Map<string, ImportEntry>()
+  return new Map(bindings.map((binding) => [binding, [
+    wholeIdentifierPattern(binding.model),
+    ...importReferencePatterns(cwd, controllerFile, imports, binding.modelFile, binding.model),
+  ]]))
 }
 
 function describeBindings(bindings: PolicyBinding[]): string {
@@ -191,8 +199,7 @@ export async function auditAuthorization(
       continue
     }
     if (
-      AUTHORIZATION_CALL_PATTERN.test(info.body)
-      || GATE_CALL_PATTERN.test(info.body)
+      consultsAuthorization(info.body)
       || touched.some((binding) => binding.policyPattern.test(info.body))
     ) {
       push('pass', `${controllerKey} consults a policy for ${describeBindings(touched)}.`)

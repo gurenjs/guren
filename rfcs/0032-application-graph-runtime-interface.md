@@ -259,6 +259,7 @@ The initial readers cover route/controller/model/page nodes and
 handles/binds/renders edges. Other sections explicitly remain unavailable, so
 v0 normally returns exit 1 with useful partial JSON. Static mode currently
 leaves routes unavailable rather than inferring fluent route declarations.
+The M3 readers below fill the remaining sections.
 
 Runtime events carry a correlation status; duplicate or unknown routes are not
 guessed. Their status is the exception status, before a custom renderer changes
@@ -398,3 +399,26 @@ Docs and plans remain reachable through `/_guren/docs`, preserving its separate
 shell has a script-hash CSP, disallows framing, and all Dev Center responses
 use no-store caching. Route filtering and symbol navigation are presentation
 operations over the shared graph, not another parser or verification system.
+
+## M3 graph readers
+
+Toward plan reader convergence, the remaining node kinds and relations adapt
+readers other commands already use, with no new parser:
+
+| Section | Reader |
+| --- | --- |
+| `middleware`, `usesMiddleware` | The manifest's registered aliases and groups, and each route's resolved chain (RFC 0026). |
+| `validator` | Validator-file exports by AST, as `plan:status` reads them. |
+| `validates` | Validate calls in controller bodies resolved through imports, and route contract schemas matched to validator exports by object identity in the graph child. |
+| `policy`, `authorizes` | Policy discovery, and a policy class an action imports and names. |
+| `test`, `tests` | `TestApp` request resolution, hung off the answering route as Impact does. |
+
+Evidence stays honest. Inline middleware, gate calls (the `gate.policy()`
+binding is made at boot), authorization middleware, schemas outside validator
+files, and test requests the reader cannot resolve are `unresolved` entries
+that leave their section partial. A request no route answers is listed but does
+not narrow coverage. Without introspection, route-only sections are unavailable
+and `validates`/`authorizes` keep their source half as partial. The graph child
+learns it is a graph run from `GUREN_INTROSPECT_GRAPH=1`, not a positional
+argument, and the graph-only fields (`bindingSources`, `contractSources`) are
+absent from ordinary introspection.
