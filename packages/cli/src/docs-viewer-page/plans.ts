@@ -6,7 +6,7 @@
 import type { DocsViewerPlanPage } from '../docs-viewer'
 import type { DocsViewerOpenPlan, DocsViewerStepState } from '../docs-viewer-plans'
 import { byId, el } from './dom'
-import { planNodeId } from './model'
+import { planNodeId, scanWarnings } from './model'
 import { actorLine, metaRow, openPanel, relationItem, relationSection } from './panel'
 import { BASE_URL, state } from './state'
 
@@ -33,6 +33,12 @@ export function renderPlanList(): void {
     button.addEventListener('click', () => openPanel(planNodeId(plan)))
     host.append(button)
   }
+}
+
+export function renderScanWarnings(): void {
+  const host = byId('scan-warnings')
+  host.textContent = ''
+  for (const warning of scanWarnings(state.data)) host.append(el('p', '', warning))
 }
 
 export function commandRow(text: string): HTMLElement {

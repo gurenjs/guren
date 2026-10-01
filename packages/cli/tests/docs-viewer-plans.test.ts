@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test'
-import { writeFile } from 'node:fs/promises'
+import { chmod, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
+import { buildDocsViewerData } from '../src/docs-viewer'
 import { readPlanOverview, readViewerPlans } from '../src/docs-viewer-plans'
 import { discoverPlanFiles } from '../src/plan-check'
 import { planHash } from '../src/plan/identity'
@@ -10,7 +11,7 @@ import { PlanDraftSchema, PlanSchema } from '../src/plan/schema'
 import { PLAN_STATE_VERSION, planDigest, type PlanStepRecord } from '../src/plan/state'
 import { derivePlanTasks, listPlanSteps } from '../src/plan/tasks'
 import { hashFiles } from '../src/plan/verification'
-import { createTempWorkspace, writeWorkspaceFiles } from './helpers'
+import { CAN_DENY_FILE_READS, createTempWorkspace, writeWorkspaceFiles } from './helpers'
 import { approvePlanFile, loadApprovedCommentsPlan, loadCommentsPlan } from './plan-fixture'
 
 function record(plan: Parameters<typeof planDigest>[0], files: Record<string, string>, outcome: PlanStepRecord['outcome'] = 'verified'): PlanStepRecord {
@@ -29,7 +30,7 @@ function record(plan: Parameters<typeof planDigest>[0], files: Record<string, st
 
 /** The plans as the viewer's payload reads them: discovery shared with the page lookup. */
 async function readPlans(dir: string): ReturnType<typeof readViewerPlans> {
-  return readViewerPlans(dir, (await discoverPlanFiles(dir)).files)
+  return readViewerPlans(dir, await discoverPlanFiles(dir))
 }
 
 describe('readViewerPlans', () => {
@@ -214,6 +215,57 @@ describe('renderedPlanHash', () => {
     expect(renderedPlanHash(page(JSON.stringify({ planHash: null })))).toBeNull()
     expect(renderedPlanHash(page('not json'))).toBeUndefined()
     expect(renderedPlanHash('<html></html>')).toBeUndefined()
+  })
+})
+
+describe('the plan directories that would not list', () => {
+  it('names them app-relative even when no plan was found, the app root as .', async () => {
+    const workspace = await createTempWorkspace('guren-cli-viewer-plans-unlisted-')
+    try {
+      const dir = workspace.dir
+      const plansDir = join(dir, 'docs/plans')
+      const { open, unreadable } = await readViewerPlans(dir, {
+        files: [],
+        unreadable: [
+          { dir: plansDir, reason: `EACCES: permission denied, scandir '${plansDir}'` },
+          { dir, reason: 'EACCES: permission denied' },
+        ],
+      })
+
+      expect(open).toEqual([])
+      expect(unreadable).toEqual([
+        { dir: 'docs/plans', reason: "EACCES: permission denied, scandir 'docs/plans'" },
+        { dir: '.', reason: 'EACCES: permission denied' },
+      ])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it.skipIf(!CAN_DENY_FILE_READS)('reaches the viewer payload as guren_get_plans names them', async () => {
+    const workspace = await createTempWorkspace('guren-cli-viewer-plans-eacces-')
+    const plansDir = join(workspace.dir, 'docs/plans')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'docs/plans/comments.plan.json': JSON.stringify(loadCommentsPlan()),
+        'tags.plan.json': JSON.stringify(loadCommentsPlan()),
+      })
+      await chmod(plansDir, 0o000)
+
+      const overview = await readPlanOverview(workspace.dir)
+      const data = await buildDocsViewerData(workspace.dir)
+
+      expect(overview.unreadable).toEqual([{ dir: 'docs/plans', reason: expect.any(String) }])
+      expect(overview.unreadable[0]!.reason).not.toContain(workspace.dir)
+      expect(data.unreadablePlanDirs).toEqual(overview.unreadable)
+      expect(data.plans.map((plan) => plan.file)).toEqual(['tags.plan.json'])
+      // The docs scan walks docs/plans too; it throws for check --docs, and the viewer names it instead.
+      expect(data.docsScanFailure).toEqual({ dir: 'docs/plans', reason: overview.unreadable[0]!.reason })
+      expect(data.nodes).toEqual([])
+    } finally {
+      await chmod(plansDir, 0o755)
+      await workspace.cleanup()
+    }
   })
 })
 

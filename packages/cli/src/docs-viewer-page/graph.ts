@@ -3,7 +3,7 @@ import type { DocsViewerData } from '../docs-viewer'
 import { byId, el, svgEl } from './dom'
 import { groupTests, kindOf, TOGGLE_KINDS, withOpenPlans, type ViewNode } from './model'
 import { closePanel, openPanel } from './panel'
-import { renderPlanList } from './plans'
+import { renderPlanList, renderScanWarnings } from './plans'
 import { H, state, W, type SimNode } from './state'
 
 const RADIUS = { doc: 22, entity: 15, code: 10, test: 9, openplan: 19 } as const
@@ -65,7 +65,8 @@ export function rebuild(data: DocsViewerData): void {
   renderDom()
   renderStats()
   applyFilters()
-  byId('empty-state').classList.toggle('visible', data.docs.length === 0)
+  // A scan that stopped is not an empty bundle: the warning above the plan list says why.
+  byId('empty-state').classList.toggle('visible', data.docs.length === 0 && !data.docsScanFailure)
   if (state.selected && !state.byId.has(state.selected)) closePanel()
   else if (state.selected) openPanel(state.selected, { keepScroll: true })
   settle(320)
@@ -135,6 +136,7 @@ function renderStats(): void {
     ['human-reviewed', human],
     ['open plans', data.plans.length],
   ]
+  renderScanWarnings()
   renderPlanList()
   const host = byId('stats')
   host.textContent = ''

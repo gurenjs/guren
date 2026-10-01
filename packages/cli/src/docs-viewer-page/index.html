@@ -288,6 +288,9 @@ body.resizing { cursor: col-resize; user-select: none; }
 }
 .plan-list button:hover { border-color: var(--plan); }
 .plan-list .progress { color: var(--text-muted); white-space: nowrap; }
+.scan-warnings { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.4rem; max-width: 18rem; }
+.scan-warnings:empty { display: none; }
+.scan-warnings p { font-family: var(--mono); font-size: 0.7rem; color: var(--warn); border-left: 3px solid var(--warn); padding: 0.2rem 0.55rem; overflow-wrap: anywhere; }
 .chip-standing-approved { border-color: var(--pass); color: var(--pass); }
 .chip-standing-unapproved, .chip-standing-draft { border-color: var(--warn); color: var(--warn); }
 .chip-standing-unreadable, .chip-standing-baseline-removed { border-color: var(--fail); color: var(--fail); }
@@ -375,6 +378,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     <div class="view-toggles" role="group" aria-label="View">
       <button id="group-tests" aria-pressed="true">group tests</button>
     </div>
+    <div class="scan-warnings" id="scan-warnings" aria-label="Scan warnings"></div>
     <div class="plan-list" id="plan-list" aria-label="Open plans"></div>
   </div>
 </header>

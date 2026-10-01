@@ -75,6 +75,13 @@ function report(path: string): void {
 
 const data = await buildDocsViewerData(bundleRoot)
 
+// The dev viewer shows a directory it could not read; a published one would ship without it.
+const unread = [...(data.docsScanFailure ? [data.docsScanFailure] : []), ...data.unreadablePlanDirs]
+if (unread.length > 0) {
+  console.error(`Could not read ${unread.map(({ dir, reason }) => `${dir} (${reason})`).join(', ')} under ${bundleRoot}; refusing to publish a partial viewer.`)
+  process.exit(1)
+}
+
 // A bundle resolved to the wrong directory still builds, just empty — which is
 // indistinguishable from a working one that renders nothing.
 if (data.nodes.length === 0 || data.edges.length === 0) {

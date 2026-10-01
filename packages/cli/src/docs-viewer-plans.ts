@@ -7,7 +7,7 @@
  */
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { commandFix, formatFixCommand } from './check-result'
-import { toPosixRelative } from './discovery'
+import { relativeUnreadableDirs, toPosixRelative } from './discovery'
 import { discoverPlanFiles, type PlanDiscovery } from './plan-check'
 import { readPlanFile } from './plan-render'
 import { readPlanApprovalStanding } from './plan/approvals'
@@ -59,10 +59,18 @@ export interface DocsViewerOpenPlan {
   status: string
 }
 
+/** A directory that exists and would not list. `dir` is app-relative, `.` for the app root. */
+export interface DocsViewerUnreadableDir {
+  dir: string
+  reason: string
+}
+
 export interface DocsViewerPlans {
   open: DocsViewerOpenPlan[]
   /** The current hash of every readable plan, by app-relative file; `null` for a draft. */
   hashes: Map<string, string | null>
+  /** Plan directories that would not list: the plans in them are missing from `open`. */
+  unreadable: DocsViewerUnreadableDir[]
 }
 
 /** A plan command as `guren check` prints a fix, so both quote a path alike. */
@@ -162,35 +170,33 @@ async function readViewerPlan(context: PlanReadContext, path: string, file: stri
   }
 }
 
-/**
- * Drafts included, unlike `readOpenPlan()` (plan/open-plan.ts), which counts approved plans only.
- * `dir` in `unreadable` is app-relative; a plan in such a directory is missing from `plans`.
- */
+/** Drafts included, unlike `readOpenPlan()` (plan/open-plan.ts), which counts approved plans only. */
 export interface PlanOverview {
   schemaVersion: 1
   plans: DocsViewerOpenPlan[]
   /** The step `plan:next` marked in each plan that has one; `stall` once the Stop hook gave up on it. */
   active: Array<{ plan: string; step: string; stall?: { at: string; reason: string } }>
-  unreadable: PlanDiscovery['unreadable']
+  unreadable: DocsViewerUnreadableDir[]
 }
 
 /** What `guren_get_plans` returns: the plans the docs viewer lists, with the directories that would not list. */
 export async function readPlanOverview(appRoot: string): Promise<PlanOverview> {
-  const discovery = await discoverPlanFiles(appRoot)
-  const { open } = await readViewerPlans(appRoot, discovery.files)
+  const { open, unreadable } = await readViewerPlans(appRoot, await discoverPlanFiles(appRoot))
   return {
     schemaVersion: 1,
     plans: open,
     active: open.flatMap((plan) =>
       plan.steps.filter((step) => step.active).map((step) => ({ plan: plan.file, step: step.id, ...(step.stall ? { stall: step.stall } : {}) })),
     ),
-    unreadable: discovery.unreadable.map((entry) => ({ ...entry, dir: toPosixRelative(appRoot, entry.dir) || '.' })),
+    unreadable,
   }
 }
 
-/** `files` is what `discoverPlanFiles()` found, which the caller shares with the page lookup. */
-export async function readViewerPlans(appRoot: string, files: readonly string[]): Promise<DocsViewerPlans> {
-  if (files.length === 0) return { open: [], hashes: new Map() }
+/** `discovery` is `discoverPlanFiles()`'s, whose `files` the docs viewer shares with the page lookup. */
+export async function readViewerPlans(appRoot: string, discovery: PlanDiscovery): Promise<DocsViewerPlans> {
+  const { files } = discovery
+  const unreadable = relativeUnreadableDirs(appRoot, discovery.unreadable)
+  if (files.length === 0) return { open: [], hashes: new Map(), unreadable }
   const context: PlanReadContext = { appRoot, apiOnly: await isConfirmedApiOnlyApp(appRoot).catch(() => false), hash: fileHasher(appRoot) }
   // One plan the readers choke on is that plan's problem, never the whole payload's.
   const read = await Promise.all(
@@ -205,5 +211,5 @@ export async function readViewerPlans(appRoot: string, files: readonly string[])
   )
   const hashes = new Map<string, string | null>()
   for (const entry of read) if (entry.hash !== undefined) hashes.set(entry.file, entry.hash)
-  return { open: read.flatMap((entry) => (entry.open ? [entry.open] : [])), hashes }
+  return { open: read.flatMap((entry) => (entry.open ? [entry.open] : [])), hashes, unreadable }
 }
