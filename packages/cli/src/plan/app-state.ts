@@ -14,7 +14,6 @@ import { resolve } from 'node:path'
 import type { RouteDefinition } from '@guren/server'
 import {
   classNameFromPath,
-  discoverModelFiles,
   discoverPolicyFiles,
   discoverResourceFiles,
   excludeBarrelFiles,
@@ -29,8 +28,9 @@ import type { ControllerMethodScan } from '../controller-methods'
 import { readControllerGraph } from '../application-graph-controllers'
 import { readValidatorGraph } from '../application-graph-validators'
 import { planControllerSections } from './graph-controllers'
-import { listInertiaPageIds } from '../inertia-pages'
-import { parseModelFile } from '../model-parser'
+import { planModelSection, planPageSection } from './graph-models-pages'
+import { readModelGraph } from '../application-graph-models'
+import { readPageGraph } from '../application-graph-pages'
 import { parseSchemaTables, schemaPathFor } from '../schema-parser'
 import { isConfirmedApiOnlyApp } from '../app-surface'
 import { loadRouteDefinitions, resolveRoutesFile } from '../load-routes'
@@ -154,14 +154,14 @@ export async function loadPlanAppState(
   // An unreadable `modules/` still leaves the project root to probe; the sections report the directory.
   const roots = await listAppRoots(root).catch((): AppRoot[] => [{ module: null, dir: root }])
 
-  // One cache for the controller, validator and Impact column scans, which parse the same files.
+  // One cache keeps the shared graph readers and Impact scans on the same source readings.
   const cache = new ParseCache()
   const [apiOnly, models, resources, policies, pages, validators, routes, controllers, tables] = await Promise.all([
     isConfirmedApiOnlyApp(root).catch(() => false),
-    modelSection(root),
+    modelSection(root, cache),
     classSection(root, discoverResourceFiles),
     classSection(root, discoverPolicyFiles),
-    pageSection(root),
+    pageSection(root, cache),
     validatorSections(root, roots, cache),
     routeSection(root, options.routesFile),
     controllerSections(root, cache),
@@ -230,13 +230,10 @@ async function probeDirectory(roots: ReadonlyArray<AppRoot>, relativeDir: string
   return failures.find((failure) => failure !== undefined)
 }
 
-async function modelSection(cwd: string): Promise<PlanAppNames> {
-  const files = await discoverSectionFiles(cwd, discoverModelFiles)
-  if (isUnreadable(files)) return files
-  const parsed = await Promise.all(files.map(async (file) => ({ file, info: await parseModelFile(file) })))
-  return parsed
-    .flatMap(({ file, info }) => (info ? [{ name: info.className, module: moduleNameFor(cwd, file) }] : []))
-    .sort((a, b) => a.name.localeCompare(b.name))
+async function modelSection(cwd: string, cache: ParseCache): Promise<PlanAppNames> {
+  const reading = await discoverSectionFiles(cwd, (root) => readModelGraph(root, cache))
+  if ('unreadable' in reading) return reading
+  return planModelSection(reading)
 }
 
 /** Code-unit order, which is what `sort()` gives bare names. */
@@ -270,10 +267,10 @@ async function validatorSections(
   return { names: nodes.map(({ label, module }) => ({ name: label, module })).sort(byName), exports }
 }
 
-async function pageSection(cwd: string): Promise<PlanAppNames> {
-  const pages = await discoverSectionFiles(cwd, listInertiaPageIds)
-  if (isUnreadable(pages)) return pages
-  return pages.map((name) => ({ name, module: null }))
+async function pageSection(cwd: string, cache: ParseCache): Promise<PlanAppNames> {
+  const reading = await discoverSectionFiles(cwd, (root) => readPageGraph(root, cache))
+  if ('unreadable' in reading) return reading
+  return planPageSection(reading)
 }
 
 /**

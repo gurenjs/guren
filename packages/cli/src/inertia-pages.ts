@@ -143,13 +143,20 @@ export async function describeInertiaPagePropKeys(cwd: string, id: string): Prom
  * excluding the shared `contracts/` types directory.
  */
 export async function listInertiaPageIds(cwd: string): Promise<string[]> {
+  return (await discoverInertiaPageFiles(cwd)).map(({ id }) => id).filter((id) => !id.startsWith('contracts')).sort()
+}
+
+export interface InertiaPageFile {
+  id: string
+  filePath: string
+}
+
+/** Unfiltered components: callers retain their own contracts-prefix and parse policies. */
+export async function discoverInertiaPageFiles(cwd: string): Promise<InertiaPageFile[]> {
   const pagesDir = resolve(cwd, 'resources/js/pages')
   const files = await collectFiles(pagesDir, PAGE_COMPONENT_EXTENSIONS)
-  return files
-    .map((file) => {
-      const path = relative(pagesDir, file).split(/[\\/]/).join('/')
-      return path.slice(0, path.length - extname(path).length)
-    })
-    .filter((id) => !id.startsWith('contracts'))
-    .sort()
+  return files.map((filePath) => {
+    const path = relative(pagesDir, filePath).split(/[\\/]/).join('/')
+    return { id: path.slice(0, path.length - extname(path).length), filePath }
+  })
 }

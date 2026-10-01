@@ -443,5 +443,23 @@ their caller's complete-or-partial policy.
 Parity tests compare reference checks, status, approval context hashes and
 freshness against the prior projection, including modules, aliases, class-field
 actions, name collisions, captured sources and unreadable files or directories.
-Routes, models, pages, policies and resources retain their existing Plan readers
-until their semantics have independent parity coverage.
+
+The Model and Page adapters also share their graph readings. Model graph nodes
+retain every named top-level class, while the Plan view selects only the file's
+first class, including its rule that an anonymous first class contributes no
+name. Parse failures still omit the model from Plan's existence view; a source
+that cannot be read now reports an unreadable section instead of aborting the
+whole load. This preserves Plan's distinction between syntax errors and
+unavailable source bytes.
+
+Page IDs come from one component-file discovery. The Plan view retains duplicate
+`.tsx`/`.jsx` IDs, root scope and its entire `contracts` prefix exclusion. Its
+existence checks include malformed component sources, while graph nodes require
+a parsed component and report partial coverage for failures. Page prop detail
+and model property detail keep their existing readers and policies.
+
+Model/Page parity tests cover checks, status, approval hashes and freshness for
+root and module plans, multiple classes, anonymous defaults, malformed sources,
+duplicate page IDs and unreadable directories. Captured-cache tests exercise
+both adapters without importing app code. Routes, policies and resources retain
+their existing Plan readers until their semantics have independent parity coverage.
