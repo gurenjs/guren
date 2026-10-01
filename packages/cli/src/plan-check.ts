@@ -11,7 +11,7 @@ import { readdir } from 'node:fs/promises'
 import { join, posix, sep } from 'node:path'
 
 import type { CheckResult } from './check-result'
-import { toPosixRelative } from './discovery'
+import { relativeUnreadableDirs, toPosixRelative } from './discovery'
 import type { PlanAppState } from './plan/app-state'
 import type { PlanAppTarget } from './plan/app-targets'
 import { isPlanRevisionsDirName, type planSiblingPath } from './plan/beside'
@@ -206,10 +206,9 @@ export async function checkPlans(options: PlanCheckOptions): Promise<CheckResult
     filePath: file,
     advisory: true,
   })
-  const results = discovery.unreadable.map(({ dir, reason }) => {
-    const file = toPosixRelative(appRoot, dir)
-    return unreadable(file, `${file} could not be listed, so no plan in it was checked: ${reason}`, 'Fix the directory permissions.')
-  })
+  const results = relativeUnreadableDirs(appRoot, discovery.unreadable).map(({ dir, reason }) =>
+    unreadable(dir, `${dir === '.' ? 'The app root' : dir} could not be listed, so no plan in it was checked: ${reason}`, 'Fix the directory permissions.'),
+  )
   if (discovery.files.length === 0) return results
 
   const m = await loadModules()

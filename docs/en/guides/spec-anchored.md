@@ -168,6 +168,13 @@ and the command to run next with a copy button. Approving, verifying and
 closing stay in the terminal. The records live in the git-ignored
 `.guren/plans/`, so the progress is your checkout's.
 
+A directory the viewer cannot list, such as a `docs/plans` your user has
+no permission to read, is named with its error above the plan list. A
+plans directory means plans are missing from the list, and a directory
+under `docs/` stops the document scan, so no document appears in the
+graph until the permissions are fixed. `guren_get_plans` reports the same plan
+directories.
+
 Drag the background or scroll to move around the graph, pinch or hold
 Ctrl/⌘ while scrolling to zoom, and press `0` (or **fit**) to fit the
 whole graph.

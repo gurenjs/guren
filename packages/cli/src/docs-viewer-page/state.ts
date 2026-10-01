@@ -17,7 +17,7 @@ export interface SimNode extends ViewNode {
 }
 
 export const state = {
-  data: { nodes: [], edges: [], docs: [], tests: [], planPages: [], plans: [] } as DocsViewerData,
+  data: { nodes: [], edges: [], docs: [], tests: [], planPages: [], plans: [], unreadablePlanDirs: [] } satisfies DocsViewerData as DocsViewerData,
   docByPath: new Map<string, DocsViewerDoc>(),
   testFiles: new Map<string, string[]>(),
   nodes: [] as SimNode[],

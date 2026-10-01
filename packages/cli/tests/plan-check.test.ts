@@ -8,6 +8,7 @@ import { consola } from 'consola'
 import { ciSuiteConflict, runCheck } from '../src/check'
 import { gatingResults, type CheckResult } from '../src/check-result'
 import { builtinSubCommands } from '../src/commands'
+import { relativeUnreadableDirs } from '../src/discovery'
 import { checkPlans, discoverPlanFiles, isPlanInput } from '../src/plan-check'
 import { planApprovalsPath } from '../src/plan/approvals'
 import { planDocClosedHash, renderPlanDoc } from '../src/plan/close-docs'
@@ -169,6 +170,19 @@ describe('guren check --plan', () => {
       } finally {
         await chmod(join(dir, 'docs/plans'), 0o755)
       }
+    })
+
+    test('should name an unlisted directory app-relative, the app root as ., with the app root dropped from its error', () => {
+      const root = join('/tmp', 'app')
+      expect(relativeUnreadableDirs(root, [
+        { dir: join(root, 'docs/plans'), reason: `EACCES: permission denied, scandir '${join(root, 'docs/plans')}'` },
+        { dir: root, reason: `EACCES: permission denied, scandir '${root}'` },
+        { dir: join(root, 'docs/plans/x'), reason: `EIO, scandir '${root}2/docs'` },
+      ])).toEqual([
+        { dir: 'docs/plans', reason: "EACCES: permission denied, scandir 'docs/plans'" },
+        { dir: '.', reason: `EACCES: permission denied, scandir '${root}'` },
+        { dir: 'docs/plans/x', reason: `EIO, scandir '${root}2/docs'` },
+      ])
     })
 
     test('should treat a plan, its records and anything under docs/plans as a --changed input', () => {

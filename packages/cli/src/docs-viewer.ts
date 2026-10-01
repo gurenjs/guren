@@ -14,16 +14,16 @@ import type { DocActorEvent, DocRef } from './docs-index'
 import { describeIssue, type IssueLink } from './issue-refs'
 import { resolveOriginRepo } from './github'
 import { resolveDocLink } from './docs-check'
-import { loadDocsGraph, type DocsGraphEdge, type DocsGraphNode } from './docs-graph'
+import { loadDocsGraph, type DocsGraphEdge, type DocsGraphNode, type LoadedDocsGraph } from './docs-graph'
 import { escapeHtml, renderDocHtml } from './docs-render'
 import type { AcceptanceTestRef } from './docs-acceptance'
 import { planDocClosedHashIn, planDocPath, readPlanBlocks } from './plan/close-docs'
 import { renderedPlanHash } from './plan/render'
-import { planCommand, readViewerPlans, type DocsViewerOpenPlan } from './docs-viewer-plans'
+import { planCommand, readViewerPlans, type DocsViewerOpenPlan, type DocsViewerUnreadableDir } from './docs-viewer-plans'
 import { discoverPlanFiles } from './plan-check'
 import { planOutputPath } from './plan/beside'
 import { planSlug } from './plan/state'
-import { fileExists, toPosixRelative } from './discovery'
+import { FileDiscoveryError, fileExists, relativeUnreadableDirs, toPosixRelative } from './discovery'
 
 export type DocTrustTier = 'unverified' | 'machine-confirmed' | 'human-reviewed'
 
@@ -77,6 +77,10 @@ export interface DocsViewerData {
   planPages: DocsViewerPlanPage[]
   /** Every plan not closed at its current hash, with its steps' records (RFC 0030 §7). */
   plans: DocsViewerOpenPlan[]
+  /** Plan directories that would not list, as `guren_get_plans` names them: the plans in them are missing from `plans`. */
+  unreadablePlanDirs: DocsViewerUnreadableDir[]
+  /** The directory that cut the docs scan short, which leaves every document out of the payload. */
+  docsScanFailure?: DocsViewerUnreadableDir
 }
 
 export interface DocsViewerPlanPage {
@@ -255,6 +259,21 @@ function renderViewerBody(docPath: string, body: string): string {
   return parts.filter((part) => part !== '').join('\n')
 }
 
+/**
+ * The docs scan throws on a directory it cannot read, as `check --docs` needs; the viewer shows that
+ * directory instead and still serves the plans, which never read the docs graph.
+ */
+async function loadViewerDocsGraph(cwd: string): Promise<LoadedDocsGraph & { scanFailure?: DocsViewerUnreadableDir }> {
+  try {
+    return await loadDocsGraph(cwd)
+  } catch (error) {
+    if (!(error instanceof FileDiscoveryError)) throw error
+    const reason = error.cause instanceof Error ? error.cause.message : String(error.cause)
+    const [scanFailure] = relativeUnreadableDirs(cwd, [{ dir: error.directory, reason }])
+    return { refs: [], checks: [], tests: [], graph: { nodes: [], edges: [] }, scanFailure }
+  }
+}
+
 export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> {
   const [
     {
@@ -262,11 +281,12 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
       checks,
       tests,
       graph: { nodes, edges },
+      scanFailure,
     },
     [pagesFound, plans],
   ] = await Promise.all([
-    loadDocsGraph(cwd),
-    discoverPlanFiles(cwd).then(({ files }) => Promise.all([findPlanPages(cwd, files), readViewerPlans(cwd, files)])),
+    loadViewerDocsGraph(cwd),
+    discoverPlanFiles(cwd).then((discovery) => Promise.all([findPlanPages(cwd, discovery.files), readViewerPlans(cwd, discovery)])),
   ])
   const planPages = await judgePageFreshness(cwd, pagesFound, plans.hashes)
   const staleDocs = new Set(
@@ -305,7 +325,7 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
     }),
   )
 
-  return { nodes, edges, docs, tests, planPages, plans: plans.open }
+  return { nodes, edges, docs, tests, planPages, plans: plans.open, unreadablePlanDirs: plans.unreadable, ...(scanFailure ? { docsScanFailure: scanFailure } : {}) }
 }
 
 export { composeDocsViewerPage, DOCS_VIEWER_ASSET_DIR, docsViewerAssetPath, docsViewerShell } from './docs-viewer-shell'

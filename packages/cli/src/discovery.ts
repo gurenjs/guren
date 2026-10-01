@@ -120,6 +120,14 @@ export function toPosixRelative(cwd: string, absPath: string): string {
 }
 
 /**
+ * Directories that would not list, as `check --plan`, the docs viewer and `guren_get_plans` show
+ * them: `dir` app-relative with `.` for the app root, and the app root dropped from the error's paths.
+ */
+export function relativeUnreadableDirs(appRoot: string, unreadable: ReadonlyArray<{ dir: string; reason: string }>): Array<{ dir: string; reason: string }> {
+  return unreadable.map(({ dir, reason }) => ({ dir: toPosixRelative(appRoot, dir) || '.', reason: reason.replaceAll(`${appRoot}${sep}`, '') }))
+}
+
+/**
  * Module name if `relPath` — POSIX-relative, as `toPosixRelative` produces —
  * is under `modules/<name>/`, else `null`. The one source of truth for
  * "module path → name", shared by the arch and consistency checks.
