@@ -422,3 +422,26 @@ and `validates`/`authorizes` keep their source half as partial. The graph child
 learns it is a graph run from `GUREN_INTROSPECT_GRAPH=1`, not a positional
 argument, and the graph-only fields (`bindingSources`, `contractSources`) are
 absent from ordinary introspection.
+
+### Plan source identity convergence
+
+The first Plan adapter uses the shared static Controller and Validator graph
+readings. `readControllerGraph()` produces file-scoped graph nodes and retains
+the same action scan for Plan detail and Impact. `readValidatorGraph()` produces
+schema-export nodes and retains the same export list for detailed field imports.
+Neither adapter imports application code. Callers supply their own ParseCache,
+including the graph loader's captured-source cache.
+
+The Plan compatibility view preserves existing order and collision rules from
+RFC 0030. Its class and action maps still resolve a same-named collision by scan
+order, while the graph retains all file-scoped declarations. This convergence
+does not silently repair that legacy rule: changing approval facts requires a
+separate migration. Partial controller scans remain unreadable for Plan; graph
+readers can retain successfully read nodes. Validator readers likewise preserve
+their caller's complete-or-partial policy.
+
+Parity tests compare reference checks, status, approval context hashes and
+freshness against the prior projection, including modules, aliases, class-field
+actions, name collisions, captured sources and unreadable files or directories.
+Routes, models, pages, policies and resources retain their existing Plan readers
+until their semantics have independent parity coverage.

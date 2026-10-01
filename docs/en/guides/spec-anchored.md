@@ -168,6 +168,13 @@ and the command to run next with a copy button. Approving, verifying and
 closing stay in the terminal. The records live in the git-ignored
 `.guren/plans/`, so the progress is your checkout's.
 
+A directory the viewer cannot list, such as a `docs/plans` your user has
+no permission to read, is named with its error above the plan list. A
+plans directory means plans are missing from the list, and a directory
+under `docs/` stops the document scan, so no document appears in the
+graph until the permissions are fixed. `guren_get_plans` reports the same plan
+directories.
+
 The page reloads the bundle every few seconds. When a reload fails, a
 notice under the counters says why: the HTTP status (the dev server's
 output has the error), a server that stopped answering, or a payload

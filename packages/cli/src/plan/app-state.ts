@@ -18,7 +18,6 @@ import {
   discoverPolicyFiles,
   discoverResourceFiles,
   excludeBarrelFiles,
-  formatTruncatedList,
   isDefinitelyAbsent,
   listAppRoots,
   moduleNameFor,
@@ -26,13 +25,16 @@ import {
   type AppRoot,
 } from '../discovery'
 import { routeDefinitionToContextRoute, type ContextRoute } from '../context-route'
-import { parseControllerMethods, type ControllerMethodScan } from '../controller-methods'
+import type { ControllerMethodScan } from '../controller-methods'
+import { readControllerGraph } from '../application-graph-controllers'
+import { readValidatorGraph } from '../application-graph-validators'
+import { planControllerSections } from './graph-controllers'
 import { listInertiaPageIds } from '../inertia-pages'
 import { parseModelFile } from '../model-parser'
 import { parseSchemaTables, schemaPathFor } from '../schema-parser'
 import { isConfirmedApiOnlyApp } from '../app-surface'
 import { loadRouteDefinitions, resolveRoutesFile } from '../load-routes'
-import { loadPlanAppDetail, readValidatorExports, type PlanAppDetail, type PlanAppValidatorExports } from './app-detail'
+import { loadPlanAppDetail, type PlanAppDetail, type PlanAppValidatorExports } from './app-detail'
 import { discoverSectionFiles } from './discovery'
 import type { PlanImpactSources } from './impact'
 import { loadPlanImpactSources } from './impact-sources'
@@ -261,10 +263,11 @@ async function validatorSections(
   roots: ReadonlyArray<AppRoot>,
   cache: ParseCache,
 ): Promise<{ names: PlanAppNames; exports: PlanAppValidatorExports[] | PlanAppUnreadable }> {
-  const [probe, exports] = await Promise.all([probeDirectory(roots, VALIDATORS_DIR), readValidatorExports(cwd, cache)])
+  const [probe, reading] = await Promise.all([probeDirectory(roots, VALIDATORS_DIR), readValidatorGraph(cwd, cache)])
+  const { exports, nodes } = reading
   if (probe) return { names: { unreadable: probe }, exports }
   if (isUnreadable(exports)) return { names: exports, exports }
-  return { names: exports.flatMap(({ module, names }) => names.map((name) => ({ name, module }))).sort(byName), exports }
+  return { names: nodes.map(({ label, module }) => ({ name: label, module })).sort(byName), exports }
 }
 
 async function pageSection(cwd: string): Promise<PlanAppNames> {
@@ -283,26 +286,11 @@ async function controllerSections(
   cwd: string,
   cache: ParseCache,
 ): Promise<{ classes: PlanAppNames; actions: PlanAppNames; scan: ControllerMethodScan | PlanAppUnreadable }> {
-  let scan: ControllerMethodScan
   try {
-    scan = await parseControllerMethods(cwd, cache)
+    return planControllerSections(await readControllerGraph(cwd, cache))
   } catch (error) {
     const unreadable = { unreadable: error instanceof Error ? error.message : String(error) }
     return { classes: unreadable, actions: unreadable, scan: unreadable }
-  }
-
-  const skipped = [...scan.unreadableFiles, ...scan.unparsedFiles]
-  if (skipped.length > 0) {
-    const unreadable = {
-      unreadable: `${skipped.length} controller file(s) did not parse: ${formatTruncatedList(skipped)}`,
-    }
-    return { classes: unreadable, actions: unreadable, scan: unreadable }
-  }
-  const scopeOf = (filePath: string): PlanAppScope => moduleNameFor(cwd, resolve(cwd, filePath))
-  return {
-    classes: [...scan.classFiles].map(([className, file]) => ({ name: className, module: scopeOf(file) })),
-    actions: [...scan.methods].map(([key, info]) => ({ name: key, module: scopeOf(info.filePath) })),
-    scan,
   }
 }
 

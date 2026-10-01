@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import { docsViewerAssetPath, docsViewerShell } from '../src/docs-viewer'
-import { groupTests, idPattern, kindOf, loadFailureNotice, withOpenPlans, worstVerdict, type GraphView, type ViewEdge, type ViewNode } from '../src/docs-viewer-page/model'
+import { groupTests, idPattern, kindOf, loadFailureNotice, scanWarnings, withOpenPlans, worstVerdict, type GraphView, type ViewEdge, type ViewNode } from '../src/docs-viewer-page/model'
 import type { DocsViewerOpenPlan } from '../src/docs-viewer-plans'
 
 const shell = docsViewerShell()
@@ -92,6 +92,24 @@ describe('withOpenPlans', () => {
     expect(result.edges.map((entry) => [entry.from, entry.to, entry.relation])).toEqual([
       ['plan:docs/plans/rsvp.plan.json', 'entity:Meetup', 'plans'],
       ['plan:docs/plans/rsvp.plan.json', 'entity:Rsvp', 'plans'],
+    ])
+  })
+})
+
+describe('scanWarnings', () => {
+  test('should warn nothing for a payload that read everything', () => {
+    expect(scanWarnings({ unreadablePlanDirs: [] })).toEqual([])
+  })
+
+  test('should warn once for the docs scan and once per plan directory, naming each and its error', () => {
+    const denied = "EACCES: permission denied, scandir 'docs/plans'"
+    expect(scanWarnings({
+      docsScanFailure: { dir: 'docs/plans', reason: denied },
+      unreadablePlanDirs: [{ dir: 'docs/plans', reason: denied }, { dir: '.', reason: 'EACCES: permission denied' }],
+    })).toEqual([
+      `Docs could not be scanned: docs/plans (${denied}). No document is shown until it can be.`,
+      `Plan directory could not be listed: docs/plans (${denied})`,
+      'Plan directory could not be listed: . (EACCES: permission denied)',
     ])
   })
 })

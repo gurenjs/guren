@@ -1182,7 +1182,8 @@ plan not closed at its current hash, including drafts nobody has approved yet,
 with its approval, each step with the outcome its last `plan:verify` recorded,
 waivers, and the next command. `active` names the step `plan:next` marked in
 each plan, with its `stall` once the Stop hook gave up on it, and `unreadable`
-names plan directories that would not list. The tool reads plan files and `.guren/plans/` only, so it runs
+names plan directories that would not list (app-relative, `.` for the app root,
+with the error), the same ones the docs viewer shows above its plan list. The tool reads plan files and `.guren/plans/` only, so it runs
 no verification and never imports the application. Run `plan:status` for the
 state of each planned element.
 

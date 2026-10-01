@@ -3,6 +3,7 @@
  * so the grouping and the viewer-only nodes can be tested without one.
  */
 import type { DocsGraphEdge, DocsGraphNode } from '../docs-graph'
+import type { DocsViewerData } from '../docs-viewer'
 import type { DocsViewerOpenPlan } from '../docs-viewer-plans'
 
 export type Verdict = DocsGraphEdge['verdict']
@@ -137,6 +138,15 @@ export function withOpenPlans(view: GraphView, plans: readonly DocsViewerOpenPla
     }
   }
   return { nodes, edges }
+}
+
+/** What the payload could not read, shown above the plan list: a scan that stopped leaves the graph or the list short. */
+export function scanWarnings(data: Pick<DocsViewerData, 'docsScanFailure' | 'unreadablePlanDirs'>): string[] {
+  const failure = data.docsScanFailure
+  return [
+    ...(failure ? [`Docs could not be scanned: ${failure.dir} (${failure.reason}). No document is shown until it can be.`] : []),
+    ...data.unreadablePlanDirs.map(({ dir, reason }) => `Plan directory could not be listed: ${dir} (${reason})`),
+  ]
 }
 
 /** Why a poll of `data.json` brought no payload. */
