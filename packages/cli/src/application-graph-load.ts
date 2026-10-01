@@ -8,7 +8,8 @@ import {
 } from './application-graph'
 import { importReferencePatterns, modelPatterns, policyBindings, type PolicyBinding } from './authorization-audit'
 import { CONTRACT_SEGMENTS } from './contract-segments'
-import { consultsAuthorization, parseControllerMethods, VALIDATE_CALL_PATTERN, VALIDATE_MEMBER_CALL_PATTERN, type ControllerDeclaration } from './controller-methods'
+import { readControllerGraph } from './application-graph-controllers'
+import { consultsAuthorization, VALIDATE_CALL_PATTERN, VALIDATE_MEMBER_CALL_PATTERN, type ControllerDeclaration } from './controller-methods'
 import {
   classNameFromPath, collectFiles, discoverPolicyFiles, discoverTestFiles, excludeBarrelFiles,
   FileDiscoveryError, moduleNameFromRelPath, NON_SOURCE_DIR_NAMES, toPosixRelative,
@@ -17,7 +18,7 @@ import { discoverModelClasses } from './model-parser'
 import { extractInertiaPageRefs, PAGE_COMPONENT_EXTENSIONS } from './inertia-pages'
 import { CHECK_INTROSPECT_TIMEOUT_MS, GRAPH_SCAN_WARNINGS, introspectApp, type GraphRouteEntry } from './introspect'
 import { ParseCache, parseSourceFile, type ParseOutcome } from './parse-cache'
-import { readValidatorExports } from './plan/app-detail'
+import { readValidatorGraph } from './application-graph-validators'
 import { readPolicyAbilities } from './plan/policy-abilities'
 import { isUnreadable } from './plan/unreadable'
 import { importsByLocal, specifierBase, withoutExtension, type ImportEntry } from './schema-binding'
@@ -162,9 +163,9 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
 
   let controllers: ControllerDeclaration[] = []
   await section('controller', async () => {
-    const scan = await parseControllerMethods(cwd, cache)
+    const { scan, nodes } = await readControllerGraph(cwd, cache)
     controllers = scan.declarations
-    for (const declaration of controllers) add('controller', declaration.file, declaration.className)
+    input.nodes.push(...nodes)
     for (const file of scan.unreadableFiles) failure('controller', 'unreadable', file)
     for (const file of scan.unparsedFiles) failure('controller', 'unparsed', file)
   })
@@ -185,14 +186,14 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
   })
   const validators = new Map<string, GraphNode>()
   await section('validator', async () => {
-    const read = await readValidatorExports(cwd, cache, false, (file) => failure('validator', 'unparsed-or-unsupported', file))
-    if (isUnreadable(read)) { failure('validator', 'unreadable-directory'); return }
-    for (const { filePath, file, names } of read) {
-      for (const name of names) {
-        // A name exported twice, or a `.ts` and its emitted `.js` twin, would give one key two nodes.
-        if (validators.has(symbolKey(filePath, name))) { failure('validator', 'duplicate-export', file); continue }
-        validators.set(symbolKey(filePath, name), add('validator', file, name))
-      }
+    const reading = await readValidatorGraph(cwd, cache, (file) => failure('validator', 'unparsed-or-unsupported', file))
+    if (isUnreadable(reading.exports)) { failure('validator', 'unreadable-directory'); return }
+    for (const node of reading.nodes) {
+      const key = symbolKey(resolve(cwd, node.file!), node.label)
+      // A name exported twice, or a `.ts` and its emitted `.js` twin, would give one key two nodes.
+      if (validators.has(key)) { failure('validator', 'duplicate-export', node.file); continue }
+      input.nodes.push(node)
+      validators.set(key, node)
     }
   })
   const policies: Array<{ node: GraphNode; file: string }> = []
