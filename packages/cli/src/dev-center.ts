@@ -8,19 +8,34 @@ export function createDevCenterHandler(options: {
   cwd: string
   graph?: (cwd: string) => Promise<GraphResult>
 }): { fetch(request: Request): Promise<Response> } {
-  let inFlight: Promise<GraphResult> | undefined
+  const load = options.graph ?? freshApplicationGraph
+  let running: Promise<GraphResult> | undefined
+  let queued: Promise<GraphResult> | undefined
+  const start = (): Promise<GraphResult> => {
+    const scan = new Promise<GraphResult>((resolve) => resolve(load(options.cwd)))
+    running = scan
+    const settle = () => { if (running === scan) running = undefined }
+    scan.then(settle, settle)
+    return scan
+  }
+  // A read joins only a scan that starts after it arrived: one started earlier may predate an edit
+  // and still report `stable`. Everything arriving mid-scan shares one follow-up.
+  const scanAfterArrival = (): Promise<GraphResult> => {
+    if (queued) return queued
+    if (!running) return start()
+    // Registered after `settle`, so the follow-up starts in the same tick `running` clears.
+    const next = () => { queued = undefined; return start() }
+    queued = running.then(next, next)
+    return queued
+  }
   return {
     async fetch(request) {
       const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }
       const path = new URL(request.url).pathname
       if (request.method !== 'GET') return new Response('Method not allowed', { status: 405, headers: { ...headers, Allow: 'GET' } })
       if (path === '/_guren/graph.json') {
-        // Concurrent tabs share the in-flight scan; the next completed read is always fresh.
-        inFlight ??= (options.graph ?? freshApplicationGraph)(options.cwd)
-        const scan = inFlight
-        try { return Response.json(await scan, { headers }) }
+        try { return Response.json(await scanAfterArrival(), { headers }) }
         catch { return Response.json({ schemaVersion: 1, error: { code: 'collection-failed', message: 'Graph collection failed.' } }, { headers, status: 503 }) }
-        finally { if (inFlight === scan) inFlight = undefined }
       }
       if (path !== '/_guren' && path !== '/_guren/') return new Response('Not found', { status: 404, headers })
       const html = devCenterShell()
