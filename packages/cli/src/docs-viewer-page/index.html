@@ -124,6 +124,7 @@ body {
 .hud .sub { font-family: var(--mono); font-size: 0.72rem; color: var(--text-muted); }
 .stats { display: flex; gap: 1.5rem; margin-top: 0.35rem; }
 .load-error { max-width: 26rem; margin-top: 0.4rem; font-family: var(--mono); font-size: 0.7rem; color: var(--fail); border-left: 3px solid var(--fail); padding: 0.2rem 0.55rem; overflow-wrap: anywhere; }
+.load-error:empty { margin: 0; padding: 0; border: 0; }
 .stat { display: flex; flex-direction: column; }
 .stat-value { font-family: var(--mono); font-size: 1.15rem; font-variant-numeric: tabular-nums; }
 .stat-label { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); }
@@ -370,7 +371,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   <h1>docs graph</h1>
   <span class="sub" id="subtitle">OKF bundle</span>
   <div class="stats" id="stats"></div>
-  <p class="load-error" id="load-error" role="status" hidden></p>
+  <p class="load-error" id="load-error" role="status"></p>
   <div class="controls">
     <input type="search" id="search" placeholder="filter nodes…" aria-label="Filter nodes" />
     <div class="kind-toggles" id="kind-toggles" role="group" aria-label="Node kinds"></div>

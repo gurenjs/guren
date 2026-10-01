@@ -25,9 +25,9 @@ function report(failure: LoadFailure | null): void {
   failedPolls = failure ? failedPolls + 1 : 0
   const notice = failure ? loadFailureNotice(failure, failedPolls, loaded) : null
   const host = byId('load-error')
-  // A live region: rewriting the same text on every poll would announce it again.
+  // A live region, never hidden (a region revealed already filled goes unannounced), and
+  // rewriting the same text on every poll would announce it again.
   if (host.textContent !== (notice ?? '')) host.textContent = notice ?? ''
-  host.hidden = notice === null
 }
 
 async function load(): Promise<void> {
@@ -41,9 +41,9 @@ async function load(): Promise<void> {
   if (response.status === 304) return report(null)
   if (!response.ok) return report({ kind: 'status', status: response.status })
   try {
-    const data = (await response.json()) as DocsViewerData
+    rebuild((await response.json()) as DocsViewerData)
+    // Only after the rebuild: a payload it threw on must not be answered 304 from then on.
     etag = response.headers.get('etag')
-    rebuild(data)
     loaded = true
     report(null)
   } catch (error) {
