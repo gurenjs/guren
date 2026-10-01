@@ -168,6 +168,12 @@ and the command to run next with a copy button. Approving, verifying and
 closing stay in the terminal. The records live in the git-ignored
 `.guren/plans/`, so the progress is your checkout's.
 
+The page reloads the bundle every few seconds. When a reload fails, a
+notice under the counters says why: the HTTP status (the dev server's
+output has the error), a server that stopped answering, or a payload
+that would not parse. The graph on screen is then the last one that
+loaded, and the notice clears once a reload succeeds.
+
 Drag the background or scroll to move around the graph, pinch or hold
 Ctrl/⌘ while scrolling to zoom, and press `0` (or **fit**) to fit the
 whole graph.

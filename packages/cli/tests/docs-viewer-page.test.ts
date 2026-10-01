@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import { docsViewerAssetPath, docsViewerShell } from '../src/docs-viewer'
-import { groupTests, idPattern, kindOf, withOpenPlans, worstVerdict, type GraphView, type ViewEdge, type ViewNode } from '../src/docs-viewer-page/model'
+import { groupTests, idPattern, kindOf, loadFailureNotice, withOpenPlans, worstVerdict, type GraphView, type ViewEdge, type ViewNode } from '../src/docs-viewer-page/model'
 import type { DocsViewerOpenPlan } from '../src/docs-viewer-plans'
 
 const shell = docsViewerShell()
@@ -93,6 +93,28 @@ describe('withOpenPlans', () => {
       ['plan:docs/plans/rsvp.plan.json', 'entity:Meetup', 'plans'],
       ['plan:docs/plans/rsvp.plan.json', 'entity:Rsvp', 'plans'],
     ])
+  })
+})
+
+describe('loadFailureNotice', () => {
+  test('should name the status a failed answer carried, and whether stale data is on screen', () => {
+    expect(loadFailureNotice({ kind: 'status', status: 500 }, 1, false)).toBe(
+      "The docs data could not be loaded (HTTP 500); the dev server's output has the error. Retrying.",
+    )
+    expect(loadFailureNotice({ kind: 'status', status: 500 }, 1, true)).toBe(
+      "The docs data could not be loaded (HTTP 500); the dev server's output has the error. Showing what the last successful load returned; retrying.",
+    )
+  })
+
+  test('should let one unanswered poll pass, which a dev server restart gives, and report the second', () => {
+    expect(loadFailureNotice({ kind: 'unreachable' }, 1, true)).toBeNull()
+    expect(loadFailureNotice({ kind: 'unreachable' }, 2, true)).toBe('The dev server is not answering. Showing what the last successful load returned; retrying.')
+  })
+
+  test('should report a payload that would not parse with its error', () => {
+    expect(loadFailureNotice({ kind: 'unreadable', message: 'Unexpected end of JSON input' }, 1, false)).toBe(
+      'The docs data could not be read (Unexpected end of JSON input). Retrying.',
+    )
   })
 })
 

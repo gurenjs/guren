@@ -9,6 +9,7 @@
 import type { DocsViewerData } from '../docs-viewer'
 import { byId } from './dom'
 import { mountGraph, rebuild } from './graph'
+import { loadFailureNotice, type LoadFailure } from './model'
 import { closePanel, mountPanel, toggleExpanded } from './panel'
 import { mountResize } from './resize'
 import { BASE_URL, state } from './state'
@@ -17,15 +18,36 @@ import { fitView, mountZoom, zoomIn, zoomOut } from './zoom'
 const POLL_MS = 5000
 
 let etag: string | null = null
+let loaded = false
+let failedPolls = 0
+
+function report(failure: LoadFailure | null): void {
+  failedPolls = failure ? failedPolls + 1 : 0
+  const notice = failure ? loadFailureNotice(failure, failedPolls, loaded) : null
+  const host = byId('load-error')
+  // A live region: rewriting the same text on every poll would announce it again.
+  if (host.textContent !== (notice ?? '')) host.textContent = notice ?? ''
+  host.hidden = notice === null
+}
 
 async function load(): Promise<void> {
+  let response: Response
   try {
-    const response = await fetch(`${BASE_URL}/data.json`, { headers: etag ? { 'If-None-Match': etag } : {} })
-    if (response.status === 304 || !response.ok) return
-    etag = response.headers.get('etag')
-    rebuild((await response.json()) as DocsViewerData)
+    response = await fetch(`${BASE_URL}/data.json`, { headers: etag ? { 'If-None-Match': etag } : {} })
   } catch {
-    // Dev server restarting (bun --hot): the next poll catches up.
+    report({ kind: 'unreachable' })
+    return
+  }
+  if (response.status === 304) return report(null)
+  if (!response.ok) return report({ kind: 'status', status: response.status })
+  try {
+    const data = (await response.json()) as DocsViewerData
+    etag = response.headers.get('etag')
+    rebuild(data)
+    loaded = true
+    report(null)
+  } catch (error) {
+    report({ kind: 'unreadable', message: error instanceof Error ? error.message : String(error) })
   }
 }
 
