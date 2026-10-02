@@ -461,5 +461,21 @@ and model property detail keep their existing readers and policies.
 Model/Page parity tests cover checks, status, approval hashes and freshness for
 root and module plans, multiple classes, anonymous defaults, malformed sources,
 duplicate page IDs and unreadable directories. Captured-cache tests exercise
-both adapters without importing app code. Routes, policies and resources retain
-their existing Plan readers until their semantics have independent parity coverage.
+both adapters without importing app code.
+
+Policy and Resource filename identities now share `sourceClassIdentities()`.
+The Plan existence sections and class detail share its names, module scopes and
+relative paths. Impact uses the same Resource metadata for column consumers and
+Policy metadata for its references; the graph uses it before checking Policy
+ability support. A declaration with a different name does not change that
+filename identity. Discovery order, barrel exclusions and source twins remain
+caller-visible, including the graph's first-supported-twin rule. Directory
+failures retain each caller's unreadable or partial reporting.
+
+Policy abilities and Resource payloads retain their existing readers. Resource
+payloads still follow codegen's declared-class and payload-type rules, which
+are distinct from the filename-based existence view. No Resource node kind is
+added to the public graph contract. Parity tests cover root/module Plan checks,
+status, approval hashes, freshness, detailed abilities and Impact, plus graph
+Policy identities and failure coverage. Route convergence remains separate
+until its registrar, provenance and live-schema semantics have parity coverage.

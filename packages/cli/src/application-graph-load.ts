@@ -11,7 +11,7 @@ import { CONTRACT_SEGMENTS } from './contract-segments'
 import { readControllerGraph } from './application-graph-controllers'
 import { consultsAuthorization, VALIDATE_CALL_PATTERN, VALIDATE_MEMBER_CALL_PATTERN, type ControllerDeclaration } from './controller-methods'
 import {
-  classNameFromPath, discoverPolicyFiles, discoverTestFiles, excludeBarrelFiles,
+  discoverPolicyFiles, discoverTestFiles,
   FileDiscoveryError, moduleNameFromRelPath, NON_SOURCE_DIR_NAMES, toPosixRelative,
 } from './discovery'
 import { readModelGraph } from './application-graph-models'
@@ -24,6 +24,7 @@ import { readPolicyAbilities } from './plan/policy-abilities'
 import { isUnreadable } from './plan/unreadable'
 import { importsByLocal, specifierBase, withoutExtension, type ImportEntry } from './schema-binding'
 import { wholeIdentifierPattern } from './utils'
+import { readSourceClassIdentities } from './source-class-identities'
 import { scanTestRequests, testCoverage, type TestRequestScan, type TestRequestSite, type UnresolvedReason } from './test-requests'
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs', '.json'])
@@ -194,9 +195,8 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
   })
   const policies: Array<{ node: GraphNode; file: string }> = []
   await section('policy', async () => {
-    for (const absolute of excludeBarrelFiles(await discoverPolicyFiles(cwd))) {
-      const file = toPosixRelative(cwd, absolute)
-      const className = classNameFromPath(absolute)
+    for (const { file, className } of await readSourceClassIdentities(cwd, discoverPolicyFiles)) {
+      const absolute = resolve(cwd, file)
       const parsed = await cache.get(absolute)
       const abilities = parsed ? readPolicyAbilities(parsed.ast, className) : undefined
       if (!abilities || 'unreadable' in abilities) { failure('policy', 'unparsed-or-unsupported', file); continue }

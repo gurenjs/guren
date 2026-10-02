@@ -15,6 +15,7 @@ import { discoverControllerFiles, discoverModelFiles, discoverPolicyFiles, disco
 import { resolveInertiaPageFile } from '../inertia-pages'
 import { discoverParsedModels } from '../model-parser'
 import type { ParseCache } from '../parse-cache'
+import { readSourceClassIdentities } from '../source-class-identities'
 import { scanTestRequests, testCoverage, type TestRequestScan, type UnresolvedTestRequest } from '../test-requests'
 import { discoverSectionFiles } from './discovery'
 import { classDetail, describeActions } from './app-detail'
@@ -94,7 +95,7 @@ export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Prom
   const [models, controllerDiscovery, resourceDiscovery, policyDiscovery, testDiscovery, pages] = await Promise.all([
     impactModels(root),
     discoverSectionFiles(root, discoverControllerFiles),
-    discoverSectionFiles(root, discoverResourceFiles),
+    discoverSectionFiles(root, (cwd) => readSourceClassIdentities(cwd, discoverResourceFiles)),
     classDetail(root, discoverPolicyFiles),
     discoverSectionFiles(root, discoverTestFiles),
     Promise.all(pageIds.map(async (id) => ({ id, file: await resolveInertiaPageFile(root, id) }))),
@@ -110,7 +111,7 @@ export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Prom
   note('tests', testDiscovery)
   note('policies', policyDiscovery)
   const controllerFiles = isUnreadable(controllerDiscovery) ? [] : controllerDiscovery
-  const resourceFiles = isUnreadable(resourceDiscovery) ? [] : resourceDiscovery
+  const resourceIdentities = isUnreadable(resourceDiscovery) ? [] : resourceDiscovery
   const testFiles = isUnreadable(testDiscovery) ? [] : testDiscovery
   const policies = isUnreadable(policyDiscovery) ? [] : policyDiscovery
   note('models', sections.models)
@@ -127,7 +128,7 @@ export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Prom
     {
       models: models.models,
       controllers: controllerFiles.map(relative),
-      resources: excludeBarrelFiles(resourceFiles).map(relative),
+      resources: resourceIdentities.map(({ file }) => file),
       pages: pages.flatMap((page) => (page.file === undefined ? [] : [{ id: page.id, file: page.file }])),
     },
     input.cache,
