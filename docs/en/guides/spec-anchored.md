@@ -175,6 +175,12 @@ under `docs/` stops the document scan, so no document appears in the
 graph until the permissions are fixed. `guren_get_plans` reports the same plan
 directories.
 
+The page reloads the bundle every few seconds. When a reload fails, a
+notice under the counters says why: the HTTP status (the dev server's
+output has the error), a server that stopped answering, or a payload
+that would not parse. The graph on screen is then the last one that
+loaded, and the notice clears once a reload succeeds.
+
 Drag the background or scroll to move around the graph, pinch or hold
 Ctrl/⌘ while scrolling to zoom, and press `0` (or **fit**) to fit the
 whole graph.

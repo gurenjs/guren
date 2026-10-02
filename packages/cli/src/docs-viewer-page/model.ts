@@ -148,3 +148,21 @@ export function scanWarnings(data: Pick<DocsViewerData, 'docsScanFailure' | 'unr
     ...data.unreadablePlanDirs.map(({ dir, reason }) => `Plan directory could not be listed: ${dir} (${reason})`),
   ]
 }
+
+/** Why a poll of `data.json` brought no payload. */
+export type LoadFailure = { kind: 'status'; status: number } | { kind: 'unreachable' } | { kind: 'unreadable'; message: string }
+
+/**
+ * The notice for `streak` failed polls in a row, or null. A dev server restarting under `bun --hot`
+ * answers no poll for a moment, so one unanswered poll goes unreported.
+ */
+export function loadFailureNotice(failure: LoadFailure, streak: number, loaded: boolean): string | null {
+  if (failure.kind === 'unreachable' && streak < 2) return null
+  const cause =
+    failure.kind === 'status'
+      ? `The docs data could not be loaded (HTTP ${failure.status}); the dev server's output has the error.`
+      : failure.kind === 'unreachable'
+        ? 'The dev server is not answering.'
+        : `The docs data could not be read (${failure.message}).`
+  return `${cause} ${loaded ? 'Showing what the last successful load returned; retrying.' : 'Retrying.'}`
+}
