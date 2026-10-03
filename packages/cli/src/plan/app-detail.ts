@@ -17,7 +17,6 @@ import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { ContextRoute } from '../context-route'
 import { blankCommentsAndStrings, VALIDATE_CALL_PATTERN, type ControllerMethodScan } from '../controller-methods'
 import {
-  discoverModelFiles,
   discoverModuleRoutesFiles,
   discoverPolicyFiles,
   discoverResourceFiles,
@@ -34,7 +33,8 @@ import {
 } from '../discovery'
 import { moduleRoutesEntryFile } from '../import-resolution'
 import { extractInertiaPageRefs, describeInertiaPagePropKeys, resolveInertiaPageFile } from '../inertia-pages'
-import { discoverParsedModels, type ModelRelationship } from '../model-parser'
+import type { ModelRelationship } from '../model-parser'
+import { readModelSources, type ModelSourceReading } from '../model-source-reading'
 import type { PagePropKeys } from '../page-props-extractor'
 import { ParseCache } from '../parse-cache'
 import { sourceClassIdentities, type SourceClassIdentity } from '../source-class-identities'
@@ -203,6 +203,8 @@ export interface PlanAppDetailInput {
   controllers: ControllerMethodScan | PlanAppUnreadable
   pages: string[] | PlanAppUnreadable
   models: PlanAppUnreadable | undefined
+  /** Shared with Impact when both views are requested in one Plan reading. */
+  modelReading?: Promise<ModelSourceReading>
   /** {@link readValidatorExports} as the §2 checks read it, so both judge one reading. */
   validators: PlanAppValidatorExports[] | PlanAppUnreadable
 }
@@ -228,7 +230,7 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
 
   const [tables, models, pages, validatorRead, resources, resourcePayloads, policies, routeFiles, sideEffects, mounts] = await Promise.all([
     tableDetail(root),
-    modelDetail(root, input.models),
+    modelDetail(root, input.models, input.modelReading),
     pageDetail(root, input.pages),
     validatorDetail(input.validators, contractSchemaObjects(input.definitions)),
     classDetail(root, discoverResourceFiles),
@@ -368,24 +370,21 @@ async function tableDetail(root: string): Promise<PlanAppDetail['tables']> {
 async function modelDetail(
   root: string,
   unreadable: PlanAppUnreadable | undefined,
+  shared?: Promise<ModelSourceReading>,
 ): Promise<Pick<PlanAppDetail, 'models' | 'unparsedModelFiles'>> {
   if (unreadable) return { models: unreadable, unparsedModelFiles: [] }
-  try {
-    const [models, files] = await Promise.all([discoverParsedModels(root), discoverModelFiles(root)])
-    const parsed = new Set(models.map((model) => model.relPath))
-    return {
-      models: models.map(({ info, module, relPath }) => ({
-        className: info.className,
-        module,
-        file: relPath,
-        table: info.tableName,
-        relationships: info.relationships,
-        fillable: info.fillable,
-      })),
-      unparsedModelFiles: excludeBarrelFiles(files).map((file) => toPosixRelative(root, file)).filter((file) => !parsed.has(file)),
-    }
-  } catch (error) {
-    return { models: { unreadable: reasonOf(error) }, unparsedModelFiles: [] }
+  const reading = await (shared ?? readModelSources(root))
+  if (reading.unreadable !== undefined) return { models: { unreadable: reading.unreadable }, unparsedModelFiles: [] }
+  return {
+    models: reading.models.map(({ info, module, relPath }) => ({
+      className: info.className,
+      module,
+      file: relPath,
+      table: info.tableName,
+      relationships: info.relationships,
+      fillable: info.fillable,
+    })),
+    unparsedModelFiles: reading.unparsedFiles,
   }
 }
 

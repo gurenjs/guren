@@ -499,3 +499,19 @@ freshness, duplicate and unnamed routes, live schema references, module scope,
 registrar overrides, unavailable sources and registrar exceptions. Graph tests
 compare node IDs and snapshot hashes against the previous projection and keep
 fresh registered reads separate from Plan's registrar import-cache behavior.
+
+
+Model detailed status and Impact share `readModelSources()` within one Plan
+load. It retains `discoverParsedModels()`'s first declared class selection, module scope,
+relationship and fillable metadata, and the list of non-barrel files that did
+not yield a model. A source discovery/read failure invalidates the whole source
+reading and preserves its reason; detailed status still gives the existence
+section's unreadable verdict precedence. Standalone consumers read afresh, and
+an existence-only load does not request detailed metadata. No model code is
+imported, and the captured-cache graph identity reader remains unchanged.
+
+Parity coverage compares detailed status, Impact, approval hashes and freshness,
+including module/name collisions, multiple and anonymous classes, dynamic
+fillable, malformed sources, barrels and unavailable directories or source
+bytes. Combined reads share the same model metadata; the next standalone read
+observes source edits.
