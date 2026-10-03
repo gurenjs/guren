@@ -55,6 +55,7 @@ deployments (AWS Lambda, for example) serve them from a CDN instead.
 | `bun run dev` | Start dev server (Bun + Vite) |
 | `bun run build` | Build for production |
 | `bun run preview` | Start the built app with the Bun production server |
+| `bun run start` | Start the app in production mode (`NODE_ENV=production`); what a deployment runs |
 | `bun run db:migrate` | Run database migrations |
 | `bun run db:seed` | Seed the database |
 | `bun run codegen` | Regenerate route/page types |

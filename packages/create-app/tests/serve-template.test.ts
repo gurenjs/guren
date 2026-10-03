@@ -143,4 +143,25 @@ describe('scaffolded bin/serve.ts', () => {
     expect(result.requestedPorts).toEqual([4000])
     expect(result.strictPortAtListen).toBe('1')
   })
+
+  it('warns when a deployed APP_URL runs outside production mode', async () => {
+    const result = await runServeTemplate(DEFAULT_SERVE, { APP_URL: 'https://example.com' })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toContain('APP_URL points at example.com but NODE_ENV is unset')
+    expect(result.stderr).toContain('bun run start')
+  })
+
+  it.each([
+    ['production', { APP_URL: 'https://example.com', NODE_ENV: 'production' }],
+    ['test', { APP_URL: 'https://example.com', NODE_ENV: 'test' }],
+    ['a localhost APP_URL', { APP_URL: 'http://localhost:3333' }],
+    ['an IPv6 loopback APP_URL', { APP_URL: 'http://[::1]:3333' }],
+    ['no APP_URL', {}],
+  ])('stays quiet under %s', async (_label, env: Record<string, string>) => {
+    const result = await runServeTemplate(DEFAULT_SERVE, env)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).not.toContain('APP_URL points at')
+  })
 })

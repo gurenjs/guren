@@ -55,11 +55,13 @@ Run these commands on every deployment to keep the schema in sync. Seeders are o
 > Run migrations before the new code begins serving traffic. Rolling back partially applied migrations is messy: if a deploy fails after running them, redeploy the previous commit **without** re-running migrations.
 
 ## 5. Start the Server
-You can start the Bun server directly:
+The scaffolded `start` script runs the Bun server in production mode:
 
 ```bash
-NODE_ENV=production bun run bin/serve.ts
+bun run start
 ```
+
+It is `NODE_ENV=production bun bin/serve.ts`. HSTS, the `Secure` session cookie, hidden error details and the `APP_URL` host allowlist all depend on `NODE_ENV=production`, so a platform that runs `bun bin/serve.ts` itself has to set the variable. When `APP_URL` names a host other than localhost and `NODE_ENV` is not `production`, `bin/serve.ts` prints a warning at startup.
 
 For reliability, wrap this command with a process manager (e.g. `systemd`, `pm2`, `supervisord`, or your hosting provider’s run command). Example `systemd` unit:
 

@@ -55,11 +55,13 @@ bun run db:seed
 > マイグレーションは、新しいコードがトラフィックを受け始める前に実行してください。途中まで適用されたマイグレーションのロールバックは面倒です。マイグレーションを実行した後にデプロイが失敗したら、マイグレーションは再実行せずに前のコミットを再デプロイしてください。
 
 ## 5. サーバー起動
-Bun で直接起動できます。
+スキャフォールドした `start` スクリプトで、Bun サーバーを本番モードで起動します。
 
 ```bash
-NODE_ENV=production bun run bin/serve.ts
+bun run start
 ```
+
+中身は `NODE_ENV=production bun bin/serve.ts` です。HSTS、セッション Cookie の `Secure` 属性、エラー詳細の非表示、`APP_URL` によるホストの許可リストは、どれも `NODE_ENV=production` のときだけ有効になります。そのため、ホスティング側で `bun bin/serve.ts` を直接起動する場合は、この変数を自分で設定してください。`APP_URL` が localhost 以外のホストを指しているのに `NODE_ENV` が `production` でなければ、`bin/serve.ts` が起動時に警告を出します。
 
 安定して動かすには、このコマンドをプロセスマネージャー（`systemd`, `pm2`, `supervisord` など）やホスティングの起動コマンドから呼び出してください。後ろに `systemd` ユニットの例を載せています。
 

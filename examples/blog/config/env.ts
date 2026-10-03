@@ -2,10 +2,8 @@ import { defineEnv, Env, type InferEnv } from '@guren/core'
 
 const env = defineEnv({
   APP_NAME: Env.string().default('Guren Blog'),
-  APP_ENV: Env.string().default('development'),
   APP_KEY: Env.string().secret().requiredInProduction()
     .describe('Signs cookies and encrypts session payloads.'),
-  APP_DEBUG: Env.boolean().default(false),
   APP_URL: Env.url().requiredInProduction()
     .describe('Public base URL. Production host authorization answers only to its hostname.'),
   PORT: Env.port().default(3333),

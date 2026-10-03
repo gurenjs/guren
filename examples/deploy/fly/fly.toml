@@ -14,4 +14,4 @@ primary_region = "nrt"
     timeout = "5s"
 
 [env]
-  APP_ENV = "production"
+  NODE_ENV = "production"

@@ -20,6 +20,7 @@ Routes are registered through `routes/web.ts`, which exports a registrar consume
 - `bun run dev` - start the Bun API server alongside the Vite dev server.
 - `bun run build` - build both the client and SSR bundles with Vite.
 - `bun run preview` - serve the built app through the Bun production server locally.
+- `bun run start` - start the app in production mode (`NODE_ENV=production`); what a deployment runs.
 - `bun run codegen` - regenerate route declarations, route helpers, and page manifests.
 - `bun run db:make` - scaffold a new SQL migration from your schema using drizzle-kit.
 - `bun run db:migrate` - apply database migrations.
