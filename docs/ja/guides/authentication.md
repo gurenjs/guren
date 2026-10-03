@@ -43,6 +43,12 @@ bun run dev
 bunx guren make:auth --install --minimal
 ```
 
+### スロットリング
+
+`POST /login`、`POST /register`、`POST /forgot-password` には、生成される `app/Http/Middleware/AuthThrottle.ts` のスロットルがかかります。回数はクライアントの IP アドレスと送信されたメールアドレスの組ごとに数え、ログインと新規登録は 1 分に 5 回、リセットの申請は 15 分に 3 回までです。上限を超えると、Inertia のフォームには `errors.message` のバリデーションエラーとしてメッセージが表示され、それ以外のクライアントには `Retry-After` ヘッダー付きの `429` が返ります。メッセージは `lang/en/auth.json` の `auth.throttle`（ログイン）か `auth.too_many_requests` から読みます。このファイルは、アプリにまだ無い場合にだけコマンドが書き込みます。
+
+上限の変更などは、このファイルを直接編集してください。デフォルトのストアはプロセスのメモリにあるので、複数のインスタンスで回数を共有するには `@guren/core/redis` の `store: new RedisRateLimitStore(redis)` を渡します。プロキシや CDN の後ろでは、どのクライアントもプロキシのアドレスから届くため、`clientIp()` でプロキシが設定するヘッダーを読むように変えてください。オプションの一覧は[レート制限ガイド](./rate-limiting.md)にあります。
+
 ### パスワードリセット
 
 ログインページの「Forgot your password?」を押すと、`ForgotPasswordController` と `ResetPasswordController` が扱うリセットの流れに入ります。内部では、フレームワークの `createPasswordResetToken` / `completePasswordReset` を使っています。リセットトークンは、生成される `app/Auth/PasswordResetStore.ts` に保存されます。これはインメモリのストアなので、本番や複数インスタンスの構成では Redis ベースのストアに差し替えてください。メールは、同じく生成される `config/mail.ts` を通じて送られます。`config/mail.ts` はデフォルトで `log` ドライバを使うので、リセットリンクはコンソールに出力され、開発環境では何も設定せずに動作を確認できます。実際にメールを送るには、`MAIL_MAILER=smtp`（と `SMTP_*` の環境変数）を設定してください。

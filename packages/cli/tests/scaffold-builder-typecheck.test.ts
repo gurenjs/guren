@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { extname, join } from 'node:path'
 import { checkTypes, TSC_TIMEOUT, createTempWorkspace, renderedAppCompilerOptions, seedInertiaApp, writeWorkspaceFiles } from './helpers'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { makeAuth, type MakeAuthOptions } from '../src/make-auth'
@@ -78,7 +78,7 @@ describe('rendered make:auth output typechecks', () => {
           // Everything the scaffold wrote must reach the program; a walk that
           // skipped the generated subtrees would be green for the wrong reason.
           const collected = rootNames.map((file) => toPosixRelative(workspace.dir, file))
-          for (const path of created) {
+          for (const path of created.filter((file) => IMPORTABLE_EXTENSIONS.has(extname(file)))) {
             expect(collected).toContain(path)
           }
 

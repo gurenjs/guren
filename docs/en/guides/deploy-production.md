@@ -34,7 +34,7 @@ Your production environment needs these variables at minimum:
 | `APP_URL` | `https://example.com` | Public-facing URL |
 | `PORT` | `3333` | Server listen port |
 | `DATABASE_URL` | `postgres://user:pass@host:5432/db` | Postgres connection string |
-| `APP_KEY` | `base64:...` | Encrypts and signs sessions, cookies, and tokens |
+| `APP_KEY` | `base64:...` | Signs session cookies and tokens (CSRF, password reset); keys encryption |
 
 `NODE_ENV=production` is not in the table because the Dockerfile generated in the next step sets it.
 

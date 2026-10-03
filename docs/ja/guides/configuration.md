@@ -37,7 +37,7 @@ import { defineEnv, Env, type InferEnv } from '@guren/core'
 
 const env = defineEnv({
   APP_KEY: Env.string().secret().requiredInProduction()
-    .describe('Signs cookies and encrypts session payloads.'),
+    .describe('Root secret for signing and encryption; each use derives its own key.'),
   APP_URL: Env.url().requiredInProduction(),
   PORT: Env.port().default(3333),
   DATABASE_URL: Env.string().optional(),
