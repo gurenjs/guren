@@ -13,6 +13,7 @@ const repoRoot = join(import.meta.dir, '../../..')
  */
 const LOCKSTEP_PAIRS = [
   'app/Http/Controllers/DashboardController.ts',
+  'app/Http/Middleware/AuthThrottle.ts',
   'app/Http/Validators/LoginValidator.ts',
   'app/Http/Validators/RegisterValidator.ts',
   'resources/js/pages/dashboard/Index.tsx',

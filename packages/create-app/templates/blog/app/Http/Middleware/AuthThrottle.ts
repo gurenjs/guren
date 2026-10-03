@@ -1,5 +1,5 @@
 import { createRateLimitMiddleware, getRequestTranslator, ValidationException } from '@guren/core'
-import type { Context } from '@guren/core'
+import type { Context, Middleware } from '@guren/core'
 
 interface ThrottleOptions {
   /** Requests allowed per client and email address within the window. */
@@ -45,21 +45,27 @@ function throttleMessage(ctx: Context, options: ThrottleOptions, seconds: number
  * store lives in process memory: pass `store: new RedisRateLimitStore(redis)`
  * (from `@guren/core/redis`) to share counts across instances.
  */
-function authThrottle(name: string, options: ThrottleOptions) {
-  return createRateLimitMiddleware({
-    limit: options.limit,
-    windowMs: options.windowMs,
-    keyPrefix: `auth:${name}:`,
-    keyGenerator: async (ctx) => `${clientIp(ctx) ?? 'unknown'}|${(await submittedEmail(ctx)) ?? ''}`,
-    onRateLimited: (ctx, retryAfter) => {
-      const message = throttleMessage(ctx, options, retryAfter)
-      // An Inertia form shows a flashed error; a bare 429 would open its error modal.
-      if (ctx.req.header('x-inertia') === 'true') {
-        throw ValidationException.withMessages({ message })
-      }
-      return ctx.json({ message, retryAfter }, 429)
-    },
-  })
+function authThrottle(name: string, options: ThrottleOptions): Middleware {
+  // Built on the first request: the default store starts a sweep timer, which
+  // Cloudflare Workers refuses while a module is being evaluated.
+  let limiter: Middleware | undefined
+  return (ctx, next) => {
+    limiter ??= createRateLimitMiddleware({
+      limit: options.limit,
+      windowMs: options.windowMs,
+      keyPrefix: `auth:${name}:`,
+      keyGenerator: async (ctx) => `${clientIp(ctx) ?? 'unknown'}|${(await submittedEmail(ctx)) ?? ''}`,
+      onRateLimited: (ctx, retryAfter) => {
+        const message = throttleMessage(ctx, options, retryAfter)
+        // An Inertia form shows a flashed error; a bare 429 would open its error modal.
+        if (ctx.req.header('x-inertia') === 'true') {
+          throw ValidationException.withMessages({ message })
+        }
+        return ctx.json({ message, retryAfter }, 429)
+      },
+    })
+    return limiter(ctx, next)
+  }
 }
 
 export const throttleLogin = authThrottle('login', {

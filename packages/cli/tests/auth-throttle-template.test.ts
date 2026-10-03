@@ -120,10 +120,25 @@ describe('scaffolded AuthThrottle', () => {
     }
   })
 
-  it('ships byte-identical in the blog starter, beside the same translations', async () => {
-    expect(await readFile(join(BLOG_TEMPLATE, 'app/Http/Middleware/AuthThrottle.ts'), 'utf8'))
-      .toBe(await readFile(TEMPLATE, 'utf8'))
+  // The blog's copy of the file is pinned by scaffold-blog-sync.test.ts.
+  it('ships the same translations in the blog starter', async () => {
     expect(JSON.parse(await readFile(join(BLOG_TEMPLATE, 'lang/en/auth.json'), 'utf8')))
       .toEqual(AUTH_THROTTLE_TRANSLATIONS)
+  })
+
+  // workerd refuses a timer while a module evaluates, and the default store starts one.
+  it('starts no timer when the module is imported', () => {
+    const script = [
+      "import '@guren/core'",
+      'let started = 0',
+      'const original = globalThis.setInterval',
+      'globalThis.setInterval = ((...args) => { started++; return original(...args) })',
+      `await import(${JSON.stringify(TEMPLATE)})`,
+      'console.log(started)',
+    ].join('\n')
+    const result = Bun.spawnSync([process.execPath, '-e', script], { cwd: join(import.meta.dir, '..') })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout.toString().trim()).toBe('0')
   })
 })
