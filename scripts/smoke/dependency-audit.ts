@@ -31,6 +31,14 @@ const IGNORED_ADVISORIES: IgnoredAdvisory[] = [
       '(`bun pm why esbuild`), resolved at 0.27.7 in the lockfile. Nothing published ' +
       'or scaffolded runs the esbuild dev server.',
   },
+  {
+    id: 'GHSA-vfj7-8cjw-p6xm',
+    reason:
+      'braces <=3.0.3 stack-exhaustion DoS on deeply nested patterns; no patched release. ' +
+      'The only holder is the root devDependency @changesets/cli, through micromatch and ' +
+      'fast-glob (`bun pm why braces`), matching globs from this repo\'s own config. ' +
+      'Nothing published or scaffolded installs it. Remove once braces ships a fix.',
+  },
 ]
 
 const ignoredIds = new Set<string>()
