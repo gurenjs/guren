@@ -34,7 +34,7 @@ bunx guren doctor
 | `APP_URL` | `https://example.com` | 公開 URL |
 | `PORT` | `3333` | サーバーが待ち受けるポート |
 | `DATABASE_URL` | `postgres://user:pass@host:5432/db` | Postgres の接続文字列 |
-| `APP_KEY` | `base64:...` | セッション、Cookie、トークンの暗号化と署名に使う鍵 |
+| `APP_KEY` | `base64:...` | セッション Cookie とトークン（CSRF、パスワードリセット）の署名、暗号化に使う鍵 |
 
 `NODE_ENV=production` は次の手順で生成する Dockerfile の中で設定されるため、表には入れていません。
 
