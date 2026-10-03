@@ -16,6 +16,7 @@ import {
 } from './discovery'
 import { readModelGraph } from './application-graph-models'
 import { readPageGraph } from './application-graph-pages'
+import { readRouteGraph } from './application-graph-routes'
 import { extractInertiaPageRefs } from './inertia-pages'
 import { CHECK_INTROSPECT_TIMEOUT_MS, GRAPH_SCAN_WARNINGS, introspectApp, type GraphRouteEntry } from './introspect'
 import { ParseCache, parseSourceFile, type ParseOutcome } from './parse-cache'
@@ -340,17 +341,12 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
     for (const [name, entry] of Object.entries(aliases)) {
       input.nodes.push({ id: middlewareId(name), kind: 'middleware', label: name, module: null, evidence: [{ kind: 'registered', source: `introspection:${entry.kind}` }] })
     }
-    const occurrences = new Map<string, number>()
     const routeIds: string[] = []
-    for (const [order, route] of (manifest.routes as GraphRouteEntry[]).entries()) {
-      const identity = graphId(route.module, route.method, route.path, route.name ?? null)
-      const occurrence = occurrences.get(identity) ?? 0
-      occurrences.set(identity, occurrence + 1)
-      const id = graphId('route', route.module, route.method, route.path, route.name ?? null, occurrence)
+    for (const { node, route } of readRouteGraph(manifest.routes as GraphRouteEntry[], 'introspection')) {
+      const id = node.id
       routeIds.push(id)
-      const evidence: GraphEvidence = { kind: 'registered', source: 'introspection' }
-      input.nodes.push({ id, kind: 'route', label: route.name ?? `${route.method} ${route.path}`, module: route.module,
-        route: { method: route.method, path: route.path, ...(route.name ? { name: route.name } : {}), ...(route.controller ? { action: route.controller.action } : {}), order }, evidence: [evidence] })
+      const evidence = node.evidence[0]!
+      input.nodes.push(node)
       if (route.controller) {
         const ref = route.controller
         const matched = controllers.filter((entry) => ref.resolved === 'identity'

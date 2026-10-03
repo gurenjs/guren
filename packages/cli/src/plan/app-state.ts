@@ -11,7 +11,6 @@
 
 import { readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import type { RouteDefinition } from '@guren/server'
 import {
   discoverPolicyFiles,
   discoverResourceFiles,
@@ -20,7 +19,6 @@ import {
   VALIDATORS_DIR,
   type AppRoot,
 } from '../discovery'
-import { routeDefinitionToContextRoute, type ContextRoute } from '../context-route'
 import type { ControllerMethodScan } from '../controller-methods'
 import { readControllerGraph } from '../application-graph-controllers'
 import { readValidatorGraph } from '../application-graph-validators'
@@ -30,7 +28,7 @@ import { readModelGraph } from '../application-graph-models'
 import { readPageGraph } from '../application-graph-pages'
 import { parseSchemaTables, schemaPathFor } from '../schema-parser'
 import { isConfirmedApiOnlyApp } from '../app-surface'
-import { loadRouteDefinitions, resolveRoutesFile } from '../load-routes'
+import { readRoutesFileGraph } from '../application-graph-routes'
 import { loadPlanAppDetail, type PlanAppDetail, type PlanAppValidatorExports } from './app-detail'
 import { discoverSectionFiles } from './discovery'
 import type { PlanImpactSources } from './impact'
@@ -161,7 +159,7 @@ export async function loadPlanAppState(
     classSection(root, discoverPolicyFiles),
     pageSection(root, cache),
     validatorSections(root, roots, cache),
-    routeSection(root, options.routesFile),
+    readRoutesFileGraph(root, options.routesFile),
     controllerSections(root, cache),
     tableSection(root, roots),
   ])
@@ -174,7 +172,7 @@ export async function loadPlanAppState(
     policies,
     pages,
     validators: validators.names,
-    routes: isUnreadable(routes.routes) ? routes.routes : routes.routes.map(({ name, method, path }) => ({ name, method, path })),
+    routes: isUnreadable(routes.routes) ? routes.routes : routes.entries.map(({ node, route }) => ({ name: route.name, method: node.route.method.toUpperCase(), path: node.route.path })),
     tables,
     apiOnly,
   }
@@ -285,33 +283,6 @@ async function controllerSections(
   } catch (error) {
     const unreadable = { unreadable: error instanceof Error ? error.message : String(error) }
     return { classes: unreadable, actions: unreadable, scan: unreadable }
-  }
-}
-
-interface RouteSection {
-  routes: ContextRoute[] | PlanAppUnreadable
-  /** What `routes` was rendered from, in the same order; the detail needs the live schemas. */
-  definitions: RouteDefinition[] | undefined
-  /** The entry that was loaded, app-relative; `undefined` when the app has none. */
-  file: string | undefined
-  /** One entry per route, in order: the module that declared it, or `null` for the entry registrar. */
-  provenance: Array<string | null>
-  moduleWarnings: string[]
-}
-
-async function routeSection(cwd: string, routesFile: string | undefined): Promise<RouteSection> {
-  const target = await resolveRoutesFile(cwd, routesFile)
-  const section: RouteSection = { routes: [], definitions: undefined, file: undefined, provenance: [], moduleWarnings: [] }
-  if (target.silentlyAbsent) return section
-
-  try {
-    const definitions = await loadRouteDefinitions(resolve(cwd, target.path), cwd, section.moduleWarnings, section.provenance)
-    return { ...section, file: target.path, definitions, routes: definitions.map(routeDefinitionToContextRoute) }
-  } catch (error) {
-    // Presence, not truthiness: `new Error()` carries '', and a discarded error reports
-    // the routes file as an app with no routes rather than as one nobody could read.
-    const reason = (error instanceof Error ? error.message : String(error)) || 'the routes file threw without a message'
-    return { ...section, file: target.path, routes: { unreadable: reason } }
   }
 }
 

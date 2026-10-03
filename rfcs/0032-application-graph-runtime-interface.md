@@ -477,5 +477,25 @@ payloads still follow codegen's declared-class and payload-type rules, which
 are distinct from the filename-based existence view. No Resource node kind is
 added to the public graph contract. Parity tests cover root/module Plan checks,
 status, approval hashes, freshness, detailed abilities and Impact, plus graph
-Policy identities and failure coverage. Route convergence remains separate
-until its registrar, provenance and live-schema semantics have parity coverage.
+Policy identities and failure coverage.
+
+Route identities now share `readRouteGraph()`: module, method, path, name and
+occurrence determine the node ID, while registration order remains explicit.
+The Plan existence projection uses those node endpoints, retaining its name
+and uppercase-method conventions. Source routes stay attached by reference so
+Plan detail keeps live Zod schemas and graph relations keep controller, model
+and validator export identities. Schemas are never serialized into route nodes.
+
+`readRoutesFileGraph()` preserves Plan's registrar selection, explicit `--routes`,
+legitimately absent default, directory provenance, skipped-module warnings and
+unreadable-error handling. Graph reads still come from the fresh registered app
+child. These remain distinct evidence sources: a module's declared name may
+differ from its directory, and a provider's route or a different app registrar
+must not silently change an approved Plan's facts. Source authority convergence
+would require its own approval migration; this slice shares identity projection.
+
+Route parity tests cover Plan checks, detailed status, approval hashes and
+freshness, duplicate and unnamed routes, live schema references, module scope,
+registrar overrides, unavailable sources and registrar exceptions. Graph tests
+compare node IDs and snapshot hashes against the previous projection and keep
+fresh registered reads separate from Plan's registrar import-cache behavior.
