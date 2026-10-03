@@ -19,3 +19,9 @@ declare module '@guren/core' {
     keys: TranslationKey
   }
 }
+
+declare module '@guren/inertia-client' {
+  interface GurenTranslationKeys {
+    keys: TranslationKey
+  }
+}
