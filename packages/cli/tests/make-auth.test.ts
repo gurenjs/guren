@@ -70,10 +70,12 @@ export function registerWebRoutes(router: Router): void {
 
       const created = await makeAuth({ install: true, force: true })
 
-      // 27 auth files plus the session blueprint's config and provider.
-      expect(created).toHaveLength(29)
+      // 29 auth files plus the session blueprint's config and provider.
+      expect(created).toHaveLength(31)
       expect(created).toEqual(expect.arrayContaining([
         expect.stringContaining('AppUrl.ts'),
+        expect.stringContaining('app/Http/Middleware/AuthThrottle.ts'),
+        expect.stringContaining('lang/en/auth.json'),
         expect.stringContaining('LoginController.ts'),
         expect.stringContaining('routes/auth.ts'),
         expect.stringContaining('ProfileController.ts'),
@@ -126,6 +128,11 @@ export function registerWebRoutes(router: Router): void {
       expect(authRoutes).toContain("router.post('/forgot-password'")
       expect(authRoutes).toContain("router.get('/reset-password'")
       expect(authRoutes).toContain("router.post('/reset-password'")
+      expect(authRoutes).toContain("import { throttleLogin, throttleRegistration, throttlePasswordResetRequest } from '../app/Http/Middleware/AuthThrottle.js'")
+      expect(authRoutes).toContain("requireGuest({ redirectTo: '/dashboard' }), throttleLogin).name('login.store')")
+      expect(authRoutes).toContain("requireGuest({ redirectTo: '/dashboard' }), throttleRegistration).name('register.store')")
+      expect(authRoutes).toContain("requireGuest({ redirectTo: '/dashboard' }), throttlePasswordResetRequest).name('forgot-password.store')")
+      expect(JSON.parse(await readFile(join(workspace.dir, 'lang/en/auth.json'), 'utf8'))).toHaveProperty('throttle')
 
       // Emailed links must never be built from the request URL: it comes from
       // the `Host` header, so a forged host mails a real token to the attacker.
@@ -257,8 +264,8 @@ export type AppSchema = typeof schema
 
       const created = await makeAuth({ force: true, minimal: true })
 
-      // 13 auth files plus the session blueprint's config and provider.
-      expect(created).toHaveLength(15)
+      // 15 auth files plus the session blueprint's config and provider.
+      expect(created).toHaveLength(17)
       expect(created).not.toEqual(expect.arrayContaining([
         expect.stringContaining('RegisterController.ts'),
         expect.stringContaining('RegisterValidator.ts'),
@@ -275,6 +282,7 @@ export type AppSchema = typeof schema
       expect(authRoutes).not.toContain('ForgotPasswordController')
       expect(authRoutes).not.toContain("router.get('/register'")
       expect(authRoutes).not.toContain("router.get('/forgot-password'")
+      expect(authRoutes).toContain("import { throttleLogin } from '../app/Http/Middleware/AuthThrottle.js'")
 
       const loginPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'), 'utf8')
       expect(loginPage).not.toContain('href="/register"')
@@ -288,6 +296,24 @@ export type AppSchema = typeof schema
   // A blog-shaped registrar takes `baseRouter` and rebinds it to `router`
   // inside the body: wiring keyed on the literal name `router` mounts nothing,
   // and passing `router` names a `const` declared below the call.
+  it('keeps an existing lang/en/auth.json even under --force', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-lang-')
+    try {
+      const published = '{\n  "failed": "Nope."\n}\n'
+      await writeWorkspaceFiles(workspace.dir, {
+        'db/schema.ts': `export const posts = 'posts'\n`,
+        'lang/en/auth.json': published,
+      })
+
+      const created = await makeAuth({ force: true, minimal: true })
+
+      expect(created.join('\n')).not.toContain('lang/en/auth.json')
+      expect(await readFile(join(workspace.dir, 'lang/en/auth.json'), 'utf8')).toBe(published)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('calls the auth registrar with the parameter its registrar declares', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-auth-base-router-')
     try {
@@ -977,6 +1003,8 @@ export const posts = pgTable('posts', {
       const authRoutes = await readFile(join(workspace.dir, 'routes/auth.ts'), 'utf8')
       expect(authRoutes).toContain("router.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('login')")
       expect(authRoutes).not.toContain("router.post('/login'")
+      expect(authRoutes).not.toContain('AuthThrottle')
+      expect(created.join('\n')).not.toContain('lang/en/auth.json')
       expect(authRoutes).not.toContain('RegisterController')
       expect(authRoutes).not.toContain('ForgotPasswordController')
       // Logout and the OAuth entry points stay.

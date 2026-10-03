@@ -63,10 +63,16 @@ const defaultValidation = {
   exists: 'The selected :attribute is invalid.',
 }
 
+/** Read by the throttles in `make:auth`'s AuthThrottle.ts, which restates them as its fallback. */
+export const AUTH_THROTTLE_TRANSLATIONS = {
+  throttle: 'Too many login attempts. Please try again in :seconds seconds.',
+  too_many_requests: 'Too many requests. Please try again in :seconds seconds.',
+}
+
 const defaultAuth = {
   failed: 'These credentials do not match our records.',
   password: 'The provided password is incorrect.',
-  throttle: 'Too many login attempts. Please try again in :seconds seconds.',
+  ...AUTH_THROTTLE_TRANSLATIONS,
   login: {
     success: 'You have been logged in successfully.',
     required: 'Please login to continue.',

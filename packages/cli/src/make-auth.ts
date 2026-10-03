@@ -25,7 +25,10 @@ import { ensureGurenUiTokens, FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_SUBMI
 import { appMailBindings, MAIL_SCAFFOLD, reportKeptMail } from './mail-scaffold'
 import { KNOWN_OAUTH_PROVIDERS, OAUTH_PROVIDER_LABELS, oauthEnvEntries } from './oauth-scaffold'
 import { definitionTemplateFile, scaffoldTemplateFile } from './scaffold-templates'
+import { AUTH_THROTTLE_TRANSLATIONS } from './lang'
 import { appendScaffoldEnv, installsConfigDefinition, scaffoldEnv } from './service-scaffold'
+
+const AUTH_LANG_FILE = 'lang/en/auth.json'
 
 function authFile(path: string): ScaffoldFileEntry {
   return scaffoldTemplateFile('auth', path)
@@ -1064,7 +1067,7 @@ function buildRoutesTemplate({
   const registerRoutes = includeExtras
     ? `
   router.get('/register', [RegisterController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('register')
-  router.post('/register', [RegisterController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('register.store')
+  router.post('/register', [RegisterController, 'store'], requireGuest({ redirectTo: '/dashboard' }), throttleRegistration).name('register.store')
 `
     : ''
 
@@ -1074,7 +1077,7 @@ function buildRoutesTemplate({
   const resetRoutes = includeExtras
     ? `
   router.get('/forgot-password', [ForgotPasswordController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('forgot-password')
-  router.post('/forgot-password', [ForgotPasswordController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('forgot-password.store')
+  router.post('/forgot-password', [ForgotPasswordController, 'store'], requireGuest({ redirectTo: '/dashboard' }), throttlePasswordResetRequest).name('forgot-password.store')
   router.get('/reset-password', [ResetPasswordController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('reset-password')
   router.post('/reset-password', [ResetPasswordController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('reset-password.store')
 `
@@ -1111,11 +1114,19 @@ function buildRoutesTemplate({
   // Passwordless apps expose /login only as the OAuth button page — there is
   // no credential exchange to POST to.
   const loginStoreRoute = includePassword
-    ? `\n  router.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('login.store')`
+    ? `\n  router.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' }), throttleLogin).name('login.store')`
+    : ''
+
+  const throttles = [
+    ...(includePassword ? ['throttleLogin'] : []),
+    ...(includeExtras ? ['throttleRegistration', 'throttlePasswordResetRequest'] : []),
+  ]
+  const throttleImport = throttles.length > 0
+    ? `\nimport { ${throttles.join(', ')} } from '../app/Http/Middleware/AuthThrottle.js'`
     : ''
 
   return `import { Router, requireAuthenticated, requireGuest${requireVerifiedImport} } from '@guren/core'
-import LoginController from '../app/Http/Controllers/Auth/LoginController.js'${registerImport}${resetImport}${verifyImport}${oauthImport}
+import LoginController from '../app/Http/Controllers/Auth/LoginController.js'${registerImport}${resetImport}${verifyImport}${oauthImport}${throttleImport}
 import DashboardController from '../app/Http/Controllers/DashboardController.js'
 import ProfileController from '../app/Http/Controllers/ProfileController.js'
 
@@ -1580,8 +1591,13 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   ]
 
   if (includePassword) {
+    // Never replaced, even under --force: it may hold the app's own auth strings.
+    if ((await readIfExists(process.cwd(), AUTH_LANG_FILE)) === null) {
+      files.push({ path: AUTH_LANG_FILE, contents: `${JSON.stringify(AUTH_THROTTLE_TRANSLATIONS, null, 2)}\n` })
+    }
     files.push(
       authFile('app/Http/Validators/LoginValidator.ts'),
+      authFile('app/Http/Middleware/AuthThrottle.ts'),
       // Without password login the demo user is an unreachable row, and
       // seeding it would hash with scrypt — the cost --oauth-only avoids.
       { path: 'db/seeders/UsersSeeder.ts', contents: buildSeederTemplate(detectSchemaDialect(schemaSource ?? '')) },

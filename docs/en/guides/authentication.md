@@ -43,6 +43,12 @@ Pass `--minimal` to skip the registration and password reset scaffold and genera
 bunx guren make:auth --install --minimal
 ```
 
+### Throttling
+
+`POST /login`, `POST /register` and `POST /forgot-password` go through the throttles in the generated `app/Http/Middleware/AuthThrottle.ts`. Each counts requests per client IP and submitted email address: five logins or registrations a minute, three reset requests every 15 minutes. Past the limit, an Inertia form gets the message as a validation error under `errors.message`, and any other client gets a `429` with a `Retry-After` header. The message comes from `auth.throttle` (logins) or `auth.too_many_requests` in `lang/en/auth.json`, which the command writes unless the app already has one.
+
+The file is yours to edit: change a limit, or pass `store: new RedisRateLimitStore(redis)` from `@guren/core/redis` so every instance shares one count, since the default store lives in process memory. Behind a proxy or CDN every client arrives from the proxy's address, so read the header your proxy sets in `clientIp()`. See the [rate limiting guide](./rate-limiting.md) for the options.
+
 ### Password reset
 
 Clicking "Forgot your password?" on the login page walks through `ForgotPasswordController` and `ResetPasswordController`, which use the framework's `createPasswordResetToken` / `completePasswordReset` primitives under the hood. The reset token is stored with the generated `app/Auth/PasswordResetStore.ts` (an in-memory store, so swap it for a Redis-backed store in production or any multi-instance deployment) and emailed via the generated `config/mail.ts`, which defaults to the `log` driver: reset links print straight to the console, so the flow works with zero setup in development. Set `MAIL_MAILER=smtp` (and the `SMTP_*` environment variables) once you're ready to send real email.
