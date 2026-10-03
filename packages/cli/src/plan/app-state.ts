@@ -13,13 +13,10 @@ import { readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { RouteDefinition } from '@guren/server'
 import {
-  classNameFromPath,
   discoverPolicyFiles,
   discoverResourceFiles,
-  excludeBarrelFiles,
   isDefinitelyAbsent,
   listAppRoots,
-  moduleNameFor,
   VALIDATORS_DIR,
   type AppRoot,
 } from '../discovery'
@@ -39,6 +36,7 @@ import { discoverSectionFiles } from './discovery'
 import type { PlanImpactSources } from './impact'
 import { loadPlanImpactSources } from './impact-sources'
 import { ParseCache } from '../parse-cache'
+import { readSourceClassIdentities } from '../source-class-identities'
 import { isUnreadable, type PlanAppUnreadable } from './unreadable'
 
 const CONTROLLERS_DIR = 'app/Http/Controllers'
@@ -247,10 +245,9 @@ async function classSection(
   cwd: string,
   discover: (appRoot: string) => Promise<string[]>,
 ): Promise<PlanAppNames> {
-  const files = await discoverSectionFiles(cwd, discover)
-  if (isUnreadable(files)) return files
-  return excludeBarrelFiles(files)
-    .map((file) => ({ name: classNameFromPath(file), module: moduleNameFor(cwd, file) }))
+  const identities = await discoverSectionFiles(cwd, (root) => readSourceClassIdentities(root, discover))
+  if (isUnreadable(identities)) return identities
+  return identities.map(({ className, module }) => ({ name: className, module }))
     .sort(byName)
 }
 

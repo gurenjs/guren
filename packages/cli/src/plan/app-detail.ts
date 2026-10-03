@@ -17,7 +17,6 @@ import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { ContextRoute } from '../context-route'
 import { blankCommentsAndStrings, VALIDATE_CALL_PATTERN, type ControllerMethodScan } from '../controller-methods'
 import {
-  classNameFromPath,
   discoverModelFiles,
   discoverModuleRoutesFiles,
   discoverPolicyFiles,
@@ -38,6 +37,7 @@ import { extractInertiaPageRefs, describeInertiaPagePropKeys, resolveInertiaPage
 import { discoverParsedModels, type ModelRelationship } from '../model-parser'
 import type { PagePropKeys } from '../page-props-extractor'
 import { ParseCache } from '../parse-cache'
+import { sourceClassIdentities, type SourceClassIdentity } from '../source-class-identities'
 import { resolveAppEntry } from '../provider-registrar'
 import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, specifierName } from '../route-registrar'
 import { importsByLocal, specifierBase, withoutExtension } from '../schema-binding'
@@ -129,11 +129,7 @@ export interface PlanAppValidatorDetail {
 }
 
 /** A class a plan names and a directory scan discovers, for the kinds with no other reader. */
-export interface PlanAppClassDetail {
-  className: string
-  module: PlanAppScope
-  file: string
-}
+export type PlanAppClassDetail = SourceClassIdentity
 
 /** A routes file and what it names, for the note on an element nothing wired. */
 export interface PlanAppRouteFile {
@@ -435,7 +431,7 @@ export async function classDetail(
 ): Promise<PlanAppClassDetail[] | PlanAppUnreadable> {
   const discovered = await discoverSectionFiles(root, discover).catch((): string[] => [])
   if (isUnreadable(discovered)) return discovered
-  return excludeBarrelFiles(discovered).map((file) => ({ className: classNameFromPath(file), module: moduleNameFor(root, file), file: toPosixRelative(root, file) }))
+  return sourceClassIdentities(root, discovered)
 }
 
 async function pageDetail(root: string, pages: string[] | PlanAppUnreadable): Promise<PlanAppDetail['pages']> {
