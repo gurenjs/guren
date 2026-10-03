@@ -5,7 +5,7 @@ services:
       - "3333:3333"
     environment:
       DATABASE_URL: postgres://guren:guren@postgres:5432/guren
-      APP_ENV: production
+      NODE_ENV: production
     depends_on:
       postgres:
         condition: service_healthy

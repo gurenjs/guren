@@ -56,6 +56,10 @@ export async function auditBlueprintTemplates(root: string): Promise<void> {
 export async function auditConsoleWiring(root: string): Promise<void> {
   const packageJson = await read(root, 'package.json')
   assert(packageJson.includes('"console": "bun bin/console.ts"'), `${root} must expose a console script so generated commands are runnable.`)
+  assert(
+    packageJson.includes('"start": "NODE_ENV=production bun bin/serve.ts"'),
+    `${root} must expose a start script that sets NODE_ENV=production, which HSTS, the Secure session cookie and hidden error details key on.`,
+  )
 
   const consoleEntry = await read(root, 'src/console.ts')
   assert(consoleEntry.includes('export const kernel ='), `${root} must export the console kernel as \`kernel\` — the serverless recipes import it by that name.`)

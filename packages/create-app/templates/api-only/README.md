@@ -24,3 +24,5 @@ bun run dev        # Start dev server
 bun run typecheck  # Type check
 bun run test       # Run tests
 ```
+
+In production, start the server with `bun run start`, which sets `NODE_ENV=production`. HSTS, the `Secure` session cookie and hidden error details depend on it.
