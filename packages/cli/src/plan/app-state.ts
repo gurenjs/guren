@@ -25,6 +25,7 @@ import { readValidatorGraph } from '../application-graph-validators'
 import { planControllerSections } from './graph-controllers'
 import { planModelSection, planPageSection } from './graph-models-pages'
 import { readModelGraph } from '../application-graph-models'
+import { readModelSources } from '../model-source-reading'
 import { readPageGraph } from '../application-graph-pages'
 import { parseSchemaTables, schemaPathFor } from '../schema-parser'
 import { isConfirmedApiOnlyApp } from '../app-surface'
@@ -176,12 +177,14 @@ export async function loadPlanAppState(
     tables,
     apiOnly,
   }
+  const modelReading = options.impact || (options.detail && !isUnreadable(models)) ? readModelSources(root) : undefined
   if (options.impact) {
     // Noted after the discoverers' reasons, so the section root's own failure is the one reported.
     const [controllersDir, testsDir] = await Promise.all([probeDirectory(roots, CONTROLLERS_DIR), probeDirectory(roots, 'tests')])
     state.impact = await loadPlanImpactSources({
       root,
       cache,
+      modelReading,
       routes: routes.routes,
       definitions: routes.definitions,
       provenance: routes.provenance,
@@ -202,6 +205,7 @@ export async function loadPlanAppState(
     controllers: controllers.scan,
     pages: isUnreadable(pages) ? pages : appNames(pages),
     models: isUnreadable(models) ? models : undefined,
+    modelReading,
     validators: validators.exports,
   })
   return { ...state, detail }

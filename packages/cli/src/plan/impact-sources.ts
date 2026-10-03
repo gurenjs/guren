@@ -11,9 +11,9 @@ import { deriveAgentTools, type RouteDefinition } from '@guren/server'
 import { scanColumnConsumers } from '../column-consumers'
 import type { ContextRoute } from '../context-route'
 import type { ControllerMethodScan } from '../controller-methods'
-import { discoverControllerFiles, discoverModelFiles, discoverPolicyFiles, discoverResourceFiles, discoverTestFiles, excludeBarrelFiles, toPosixRelative } from '../discovery'
+import { discoverControllerFiles, discoverPolicyFiles, discoverResourceFiles, discoverTestFiles, toPosixRelative } from '../discovery'
 import { resolveInertiaPageFile } from '../inertia-pages'
-import { discoverParsedModels } from '../model-parser'
+import { readModelSources, type ModelSourceReading } from '../model-source-reading'
 import type { ParseCache } from '../parse-cache'
 import { readSourceClassIdentities } from '../source-class-identities'
 import { scanTestRequests, testCoverage, type TestRequestScan, type UnresolvedTestRequest } from '../test-requests'
@@ -27,6 +27,8 @@ export interface PlanImpactSourcesInput {
   root: string
   /** Shared with the controller scan, so no controller is parsed twice. */
   cache: ParseCache
+  /** Shared with detailed status; both views must describe the same model bytes. */
+  modelReading?: Promise<ModelSourceReading>
   routes: ContextRoute[] | PlanAppUnreadable
   /** What `routes` was rendered from, in the same order, for `deriveAgentTools()`. */
   definitions: RouteDefinition[] | undefined
@@ -37,10 +39,6 @@ export interface PlanImpactSourcesInput {
   controllers: ControllerMethodScan | PlanAppUnreadable
   /** The §2 sections, whose `unreadable` verdicts carry over. */
   sections: { models: PlanAppNames; resources: PlanAppNames; policies: PlanAppNames; pages: PlanAppNames; tests?: PlanAppUnreadable }
-}
-
-function reasonOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 /** The tool each route name publishes, by the one derivation the runtime and codegen share. */
@@ -69,31 +67,12 @@ function impactRoutes(input: PlanImpactSourcesInput, requests: TestRequestScan):
   return { routes, unresolved: coverage.unresolved }
 }
 
-interface ModelRead {
-  models: PlanImpactModel[]
-  unparsed: string[]
-  unreadable?: string
-}
-
-/** Parsed models, and the model files that yielded no class: a model missing for that reason is not absent. */
-async function impactModels(root: string): Promise<ModelRead> {
-  try {
-    const [parsed, files] = await Promise.all([discoverParsedModels(root), discoverModelFiles(root)])
-    const models = parsed.map(({ info, module, relPath }) => ({ className: info.className, module, file: relPath, relationships: info.relationships }))
-    const seen = new Set(models.map((model) => model.file))
-    const unparsed = excludeBarrelFiles(files).map((file) => toPosixRelative(root, file)).filter((file) => !seen.has(file))
-    return { models, unparsed }
-  } catch (error) {
-    return { models: [], unparsed: [], unreadable: reasonOf(error) }
-  }
-}
-
 export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Promise<PlanImpactSources> {
   const { root, sections } = input
   const relative = (file: string): string => toPosixRelative(root, file)
   const pageIds = isUnreadable(sections.pages) ? [] : sections.pages.map((page) => page.name)
   const [models, controllerDiscovery, resourceDiscovery, policyDiscovery, testDiscovery, pages] = await Promise.all([
-    impactModels(root),
+    input.modelReading ?? readModelSources(root),
     discoverSectionFiles(root, discoverControllerFiles),
     discoverSectionFiles(root, (cwd) => readSourceClassIdentities(cwd, discoverResourceFiles)),
     classDetail(root, discoverPolicyFiles),
@@ -123,10 +102,13 @@ export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Prom
   note('routes', input.routes)
   note('controllers', input.controllers)
 
+  const impactModels: PlanImpactModel[] = models.models.map(({ info, module, relPath }) => ({
+    className: info.className, module, file: relPath, relationships: info.relationships,
+  }))
   const reads = await scanColumnConsumers(
     root,
     {
-      models: models.models,
+      models: impactModels,
       controllers: controllerFiles.map(relative),
       resources: resourceIdentities.map(({ file }) => file),
       pages: pages.flatMap((page) => (page.file === undefined ? [] : [{ id: page.id, file: page.file }])),
@@ -140,7 +122,7 @@ export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Prom
 
   return {
     routes: routes.routes,
-    models: models.models,
+    models: impactModels,
     actions: 'methods' in input.controllers ? describeActions(root, input.controllers) : [],
     resources: reads.resources,
     policies,
@@ -148,7 +130,7 @@ export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Prom
     testRequests: { unresolved: routes.unresolved, unparsed: requests.unparsed },
     reads,
     unreadable,
-    unparsedModels: models.unparsed,
+    unparsedModels: models.unparsedFiles,
     missingPages: pages.filter((page) => page.file === undefined).map((page) => page.id),
   }
 }
