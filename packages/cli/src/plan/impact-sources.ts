@@ -12,7 +12,7 @@ import { scanColumnConsumers } from '../column-consumers'
 import type { ContextRoute } from '../context-route'
 import type { ControllerMethodScan } from '../controller-methods'
 import { discoverControllerFiles, discoverPolicyFiles, discoverResourceFiles, discoverTestFiles, toPosixRelative } from '../discovery'
-import { resolveInertiaPageFile } from '../inertia-pages'
+import { readPageSources, type PageSourceReading } from '../page-source-reading'
 import { readModelSources, type ModelSourceReading } from '../model-source-reading'
 import type { ParseCache } from '../parse-cache'
 import { readSourceClassIdentities } from '../source-class-identities'
@@ -29,6 +29,8 @@ export interface PlanImpactSourcesInput {
   cache: ParseCache
   /** Shared with detailed status; both views must describe the same model bytes. */
   modelReading?: Promise<ModelSourceReading>
+  /** File selection shared with detailed status, without requesting Props metadata. */
+  pageReading?: Promise<PageSourceReading[]>
   routes: ContextRoute[] | PlanAppUnreadable
   /** What `routes` was rendered from, in the same order, for `deriveAgentTools()`. */
   definitions: RouteDefinition[] | undefined
@@ -77,7 +79,7 @@ export async function loadPlanImpactSources(input: PlanImpactSourcesInput): Prom
     discoverSectionFiles(root, (cwd) => readSourceClassIdentities(cwd, discoverResourceFiles)),
     classDetail(root, discoverPolicyFiles),
     discoverSectionFiles(root, discoverTestFiles),
-    Promise.all(pageIds.map(async (id) => ({ id, file: await resolveInertiaPageFile(root, id) }))),
+    isUnreadable(sections.pages) ? [] : input.pageReading ?? readPageSources(root, pageIds),
   ])
 
   const unreadable: Partial<Record<PlanImpactReader, string>> = {}

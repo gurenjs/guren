@@ -515,3 +515,17 @@ including module/name collisions, multiple and anonymous classes, dynamic
 fillable, malformed sources, barrels and unavailable directories or source
 bytes. Combined reads share the same model metadata; the next standalone read
 observes source edits.
+
+Page detailed status and Impact share `readPageSources()`'s file selections.
+Duplicate IDs, TSX-before-JSX priority, contracts-prefix exclusions and missing
+file diagnostics retain their Plan semantics. Detailed status reads Props from
+that selected file without resolving the ID again; Impact requests no Props
+metadata. A selected file that becomes unreadable stays that file, while a
+subsequent invocation resolves current files afresh. Resolution errors still
+propagate, and an unreadable Page section takes precedence over any file list.
+Graph identities and captured-source behavior remain unchanged.
+
+Parity tests cover detailed status, Impact, approval hashes and freshness, plus
+extension collisions, nested IDs, malformed or unavailable source, missing and
+duplicate IDs, component appearance/removal between consumers and standalone
+refreshes. Props declarations remain static and no Page component is imported.

@@ -130,7 +130,11 @@ export async function describeInertiaPage(cwd: string, id: string): Promise<Iner
 export async function describeInertiaPagePropKeys(cwd: string, id: string): Promise<PagePropKeys | null> {
   const filePath = await resolveInertiaPageFile(cwd, id)
   if (!filePath) return null
+  return describeInertiaPageFilePropKeys(cwd, filePath)
+}
 
+/** An already selected component must not be resolved again while its Props are being read. */
+export async function describeInertiaPageFilePropKeys(cwd: string, filePath: string): Promise<PagePropKeys> {
   try {
     return await extractPagePropKeys(resolve(cwd, filePath))
   } catch (error) {

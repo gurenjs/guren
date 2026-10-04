@@ -32,10 +32,11 @@ import {
   type SideEffectKind,
 } from '../discovery'
 import { moduleRoutesEntryFile } from '../import-resolution'
-import { extractInertiaPageRefs, describeInertiaPagePropKeys, resolveInertiaPageFile } from '../inertia-pages'
+import { extractInertiaPageRefs, describeInertiaPageFilePropKeys } from '../inertia-pages'
 import type { ModelRelationship } from '../model-parser'
 import { readModelSources, type ModelSourceReading } from '../model-source-reading'
 import type { PagePropKeys } from '../page-props-extractor'
+import { readPageSources, type PageSourceReading } from '../page-source-reading'
 import { ParseCache } from '../parse-cache'
 import { sourceClassIdentities, type SourceClassIdentity } from '../source-class-identities'
 import { resolveAppEntry } from '../provider-registrar'
@@ -202,6 +203,8 @@ export interface PlanAppDetailInput {
   moduleWarnings: string[]
   controllers: ControllerMethodScan | PlanAppUnreadable
   pages: string[] | PlanAppUnreadable
+  /** Shared file selection; only detailed status reads Props. */
+  pageReading?: Promise<PageSourceReading[]>
   models: PlanAppUnreadable | undefined
   /** Shared with Impact when both views are requested in one Plan reading. */
   modelReading?: Promise<ModelSourceReading>
@@ -231,7 +234,7 @@ export async function loadPlanAppDetail(input: PlanAppDetailInput): Promise<Plan
   const [tables, models, pages, validatorRead, resources, resourcePayloads, policies, routeFiles, sideEffects, mounts] = await Promise.all([
     tableDetail(root),
     modelDetail(root, input.models, input.modelReading),
-    pageDetail(root, input.pages),
+    pageDetail(root, input.pages, input.pageReading),
     validatorDetail(input.validators, contractSchemaObjects(input.definitions)),
     classDetail(root, discoverResourceFiles),
     readResourcePayloads(root),
@@ -433,18 +436,19 @@ export async function classDetail(
   return sourceClassIdentities(root, discovered)
 }
 
-async function pageDetail(root: string, pages: string[] | PlanAppUnreadable): Promise<PlanAppDetail['pages']> {
+async function pageDetail(
+  root: string,
+  pages: string[] | PlanAppUnreadable,
+  shared?: Promise<PageSourceReading[]>,
+): Promise<PlanAppDetail['pages']> {
   if (!Array.isArray(pages)) return pages
-  return Promise.all(
-    pages.map(async (id) => {
-      const file = await resolveInertiaPageFile(root, id)
-      return {
-        id,
-        ...(file === undefined ? {} : { file }),
-        props: (await describeInertiaPagePropKeys(root, id)) ?? { status: 'unreadable' as const, reason: 'the page has no component file' },
-      }
-    }),
-  )
+  const reading = await (shared ?? readPageSources(root, pages))
+  return Promise.all(reading.map(async ({ id, file }) => ({
+    id,
+    ...(file === undefined ? {} : { file }),
+    props: file === undefined ? { status: 'unreadable' as const, reason: 'the page has no component file' } :
+      await describeInertiaPageFilePropKeys(root, file),
+  })))
 }
 
 /**
