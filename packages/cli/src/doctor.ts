@@ -38,7 +38,8 @@ import type { RouteDefinition } from '@guren/server'
 import { judgeDeployVerdicts, readDeployRuntime } from './deploy-runtime'
 import { checkIntrospection, type Introspection } from './introspect'
 import { describeIntrospectionFailure, introspectedRoutes } from './manifest-section'
-import type { CheckEvidence } from './check-result'
+import { commandFix, type CheckEvidence, type CheckFix, type CheckFixRun } from './check-result'
+import { repairDoctorReport } from './doctor-fix'
 import { detectConfigMigrations, undeclaredEnv, type ConfigMigration, type EnvDeclaration } from './config-migration'
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail'
@@ -50,6 +51,8 @@ export interface DoctorCheck {
   message: string
   fix?: string
   canAutofix?: boolean
+  /** Generated-file repair; configuration autofixes remain exclusive to upgrade. */
+  repair?: CheckFix
   manualFix?: string
   /** Set by the checks that read the introspected app (RFC 0026 §5). */
   evidence?: CheckEvidence
@@ -76,12 +79,14 @@ export interface DoctorReport {
   hasFailures: boolean
   nextSteps?: NextStep[]
   recommendedCommands: string[]
+  fixes?: CheckFixRun[]
 }
 
 export interface RunDoctorOptions {
   cwd?: string
   json?: boolean
   next?: boolean
+  fix?: boolean
   /** Read the introspected app for the deploy-runtime checks (RFC 0026 §5); `guren doctor` sets it unless `--no-introspect`. */
   introspect?: boolean
 }
@@ -119,12 +124,14 @@ export interface DoctorJsonOutput {
     message: string
     fix: string | null
     canAutofix: boolean
+    repair?: CheckFix
     manualFix: string | null
     evidence?: CheckEvidence
     evidenceReason?: string
   }>
   nextSteps: NextStep[] | null
   recommendedCommands: string[]
+  fixes?: CheckFixRun[]
 }
 
 interface DoctorRuleContext {
@@ -196,6 +203,7 @@ function createAgentManifestRule(): DoctorRule {
           {
             fix: `Run \`guren codegen --force\` to remove ${AGENTS_MANIFEST_FILE}.`,
             manualFix: `Run \`guren codegen --force\` to remove ${AGENTS_MANIFEST_FILE}.`,
+            repair: await generatedRepair(context),
           },
         )
       }
@@ -226,6 +234,7 @@ function createAgentManifestRule(): DoctorRule {
         {
           fix: `Run \`guren codegen --force\` to regenerate ${AGENTS_MANIFEST_FILE}.`,
           manualFix: `Run \`guren codegen --force\` to regenerate ${AGENTS_MANIFEST_FILE}.`,
+          repair: await generatedRepair(context),
         },
       )
     },
@@ -277,6 +286,7 @@ function createCheck(
   options: {
     fix?: string
     canAutofix?: boolean
+    repair?: CheckFix
     manualFix?: string
   } = {},
 ): DoctorCheck {
@@ -295,6 +305,7 @@ function createCheck(
     fix: options.fix,
     canAutofix: options.canAutofix,
     manualFix: options.manualFix,
+    ...(options.repair ? { repair: options.repair } : {}),
   }
 }
 
@@ -468,8 +479,14 @@ async function detectPageContracts(context: DoctorRuleContext): Promise<DoctorCh
     {
       fix: 'Run `bunx guren codegen --force` to generate page type definitions.',
       manualFix: 'Run `bunx guren codegen --force` to regenerate .guren/pages.gen.ts.',
+      repair: await generatedRepair(context),
     },
   )
+}
+
+async function generatedRepair(context: DoctorRuleContext): Promise<CheckFix> {
+  const target = await resolveRoutesFile(context.cwd)
+  return commandFix('codegen', '--force', '--routes', target.path)
 }
 
 function createGeneratedManifestRule(generatedFile: string): DoctorRule {
@@ -508,6 +525,7 @@ function createGeneratedManifestRule(generatedFile: string): DoctorRule {
         {
           fix: `Run \`guren codegen --force\` to regenerate ${generatedFile}.`,
           manualFix: `Run \`guren codegen --force\` to regenerate ${generatedFile}.`,
+          repair: await generatedRepair(context),
         },
       )
     },
@@ -1377,7 +1395,7 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorR
   const fixableChecks = checks.filter((check) => check.status !== 'pass' && Boolean(check.canAutofix))
   const manualChecks = checks.filter((check) => check.status !== 'pass' && !check.canAutofix)
 
-  const report: DoctorReport = {
+  let report: DoctorReport = {
     cwd,
     checks,
     fixableChecks,
@@ -1390,6 +1408,8 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorR
   if (nextSteps) {
     report.nextSteps = nextSteps
   }
+
+  if (options.fix) report = await repairDoctorReport(report, options)
 
   if (options.json) {
     const jsonOutput = buildJsonOutput(report)
@@ -1426,12 +1446,14 @@ export function buildJsonOutput(report: DoctorReport): DoctorJsonOutput {
       message: c.message,
       fix: c.fix ?? null,
       canAutofix: c.canAutofix ?? false,
+      ...(c.repair ? { repair: c.repair } : {}),
       manualFix: c.manualFix ?? null,
       ...(c.evidence ? { evidence: c.evidence } : {}),
       ...(c.evidenceReason ? { evidenceReason: c.evidenceReason } : {}),
     })),
     nextSteps: report.nextSteps ?? null,
     recommendedCommands: report.recommendedCommands,
+    ...(report.fixes ? { fixes: report.fixes } : {}),
   }
 }
 
@@ -1566,8 +1588,8 @@ export async function suggestNextSteps(
     steps.push({
       priority: priority++,
       title: 'Run codegen',
-      description: 'Generated type manifests are missing or outdated.',
-      command: 'bunx guren codegen',
+      description: 'Regenerate missing or stale manifests and run doctor again.',
+      command: 'bunx guren doctor --fix --next',
     })
   }
 
@@ -1636,6 +1658,12 @@ function envSchemaSource(declarations: readonly EnvDeclaration[]): string {
 
 export function renderDoctorReport(report: DoctorReport): void {
   consola.box(`Guren doctor report for ${report.cwd}`)
+
+  for (const run of report.fixes ?? []) {
+    const log = run.ok ? consola.success : consola.error
+    log(`${run.ok ? '[ok]' : '[fail]'} ${run.command}`)
+    for (const line of run.output ?? []) consola.info(`       ${line}`)
+  }
 
   for (const check of report.checks) {
     const prefix = check.status === 'pass' ? '[ok]' : check.status === 'warn' ? '[warn]' : '[fail]'

@@ -778,6 +778,10 @@ const doctorCommand = defineCommand({
     description: 'Inspect the current workspace for vNext runtime, codegen, and bootstrap issues.',
   },
   args: {
+    fix: {
+      type: 'boolean',
+      description: 'Regenerate missing or stale generated files, then run doctor again.',
+    },
     json: {
       type: 'boolean',
       description: 'Output the doctor report as JSON.',
@@ -800,11 +804,12 @@ const doctorCommand = defineCommand({
   async run({ args }) {
     const report = await runDoctor({
       json: Boolean(args.json),
+      fix: Boolean(args.fix),
       next: Boolean(args.next),
       introspect: args.introspect !== false,
     })
 
-    if (args.strict && (report.hasWarnings || report.hasFailures)) {
+    if (report.fixes?.some((run) => !run.ok) || (args.strict && (report.hasWarnings || report.hasFailures))) {
       markCommandFailed()
     }
   },

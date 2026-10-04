@@ -131,6 +131,7 @@ bunx guren check --changed      # Restrict file-scanning checks to files changed
 bunx guren audit                # Security audit: validation/auth on mutating routes, raw SQL, secrets, mass assignment, CSRF exemptions (app source, plus a scan of installed Guren-facing packages — the only surface that sees a plugin's); agent-exposed routes (RFC 0016) get the stricter treatment — an unverifiable body-validation warn becomes a fail, and destructiveHint: false on an action that deletes, updates, or force-writes warns; in-process agents' local tools (RFC 0029 §2.4) are listed under their own heading (`aiLocalTools` in JSON), with a warn when a tool's `execute` writes through a Model whose table an `.agent()` route also uses
 bunx guren audit --json         # Audit results as JSON (exits non-zero on failures)
 bunx guren doctor --next        # Doctor report + actionable next steps
+bunx guren doctor --fix         # Regenerate the generated files doctor names, then recheck in a fresh child; configuration autofixes stay in upgrade
 
 # Implementation plans (RFC 0030)
 bunx guren plan "comments on posts" --print-prompt  # The prompt and draft JSON Schema an in-session agent writes a plan from (RFC 0030 §8); calls no model; `--json` prints `{ prompt, schema }`. Without --print-prompt, and with --revise, it exits 1

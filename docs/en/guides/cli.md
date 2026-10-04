@@ -251,6 +251,22 @@ bunx guren check --fix          # regenerate what the findings name, then check 
 bunx guren check --spec --fix   # the same, limited to the spec views
 ```
 
+`doctor --fix` regenerates the missing or stale generated manifests reported
+by doctor, then runs doctor again in a fresh process. It selects the app's
+route entry, including `routes/api.ts`, and runs each distinct generator once.
+`doctor --json` exposes these repairs as `repair: { kind: 'command', args }`;
+with `--fix`, the final report also includes `fixes`. A failed command or a
+repair finding that does not pass recheck makes the command exit nonzero.
+An unavailable recheck also counts as failure. Other warnings remain in the
+report; `--strict` makes those warnings and failures set the exit code.
+Configuration autofixes marked `canAutofix` still belong to `guren upgrade`.
+This flag only rewrites generated files.
+
+```bash
+bunx guren doctor --fix --next
+bunx guren doctor --fix --json
+```
+
 `gate` is the one command that answers "is this change done?". It runs
 codegen, typecheck, lint (when the app has an `.oxlintrc.json`),
 `check` under the `--ci` rule, `audit`, and the test suite (the stages
