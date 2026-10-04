@@ -529,3 +529,38 @@ Parity tests cover detailed status, Impact, approval hashes and freshness, plus
 extension collisions, nested IDs, malformed or unavailable source, missing and
 duplicate IDs, component appearance/removal between consumers and standalone
 refreshes. Props declarations remain static and no Page component is imported.
+
+### M3 closure and evidence boundaries
+
+Plan and graph readers converge on the supported source identities and metadata
+above. The remaining Test reader uses `discoverTestFiles()`, `scanTestRequests()`
+and `testCoverage()` in both Graph and Impact. No second request parser or route
+matcher is needed. Middleware identities and chains come from the registered
+manifest; Plan does not declare a separate Middleware existence section.
+
+Cross-consumer tests pin literal/parameter shadowing, ALL-method precedence,
+unmatched and dynamic requests, malformed TestApp files, absent test directories
+and unreadable test directories. Colliding routes from different modules stay
+uncertain in both consumers: the shared matcher does not infer cross-module
+precedence even from a registered manifest. Matching registered root routes produce the
+same file/line reachability in Graph and Impact. Graph keeps an unmatched
+request as an unresolved entry without reducing supported-scope coverage;
+Impact does not treat it as an unread request. Malformed TestApp source makes
+Graph's `tests` relation partial and is retained in Impact's `unparsed` list.
+A missing test directory is complete empty evidence; an unreadable directory
+is partial in Graph and an unreadable reader in Impact. Neither executes tests.
+
+Registration remains a distinct authority. Plan reads source registrars and
+preserves their module directory provenance, skipped-module warnings and
+conservative cross-module ordering. Graph reads a fresh registered app, including
+provider routes, declared module names and resolved middleware. These differences
+must not be removed by feeding live graph facts into existing Plan approvals.
+Graph's static mode retains Test nodes but marks route-based test relations and
+Middleware unavailable. Inline middleware and unregistered group members remain
+unresolved rather than acquired identities.
+
+M3's source-reader convergence is complete for this supported scope. Whole-graph
+approval authority, arbitrary TypeScript evaluation and shared source capture
+across separate commands are outside this milestone. M4 can build on the
+existing generated-file-only `check --fix` boundary and doctor suggestions;
+automatic dependency or configuration rewrites remain excluded.
