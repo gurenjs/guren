@@ -1000,7 +1000,18 @@ decides a task, so `tasks.ts` fixes it:
   nothing and complete on their commands; `scaffold` lists what it `generates`.
   A step kind with no work is left out. Flows are descriptions and are nobody's
   work.
-- **Which task.** A column follows its model and an action its controller.
+- **Which task.** A column follows its model. An action goes to the one task
+  intent that `covers` it, else to the one task covering every covered route
+  to it, else with its controller. An action completes at `wired`, which its
+  route's mount and contract decide: placed in an earlier task than its route
+  (an uncovered controller in Foundation, its actions covered by story tasks),
+  that task's step can verify only by mounting the route, after which the task's
+  validation, forbidden and unauthenticated behaviours pass before its `tests`
+  step sees them fail. A controller is then placed by the tasks its actions
+  went to when no intent covers it and no model places it: theirs when they
+  agree, Foundation when they do not, where the class completes at `present`
+  and mounts nothing. An action and a route to it that two tasks own are
+  reported (`action-route-split`), since neither order completes them apart.
   For the rest, in this order: the one task intent that `covers` it; the models
   it references (a resource's or policy's `model`, a view's prop resources, a
   controller's policies, resources and pages); what uses it (a route its
@@ -1491,7 +1502,7 @@ the other emitters.
   fails before its implementation. The header says setting up and cleaning up
   rows is the agent's: a row another test left can make a `has` or `missing`
   pass or fail whatever the implementation does.
-- Two holes stay open. (a) A behaviour on an `existing`, `alter` or `rename`
+- Three holes stay open. (a) A behaviour on an `existing`, `alter` or `rename`
   route (a rename usually keeps the path) with no `given()` or `unwritten()`
   call may pass at once, the route answering as the plan expects already; the
   report lists it (`mayPassNow`) so the agent knows why
@@ -1499,7 +1510,10 @@ the other emitters.
   added route whose path an existing route already answers (a parameter or
   wildcard route registered first) reaches that route, not a 404, and may pass
   too; it is neither listed nor refused, since telling it needs the registered
-  routes, which the scaffold does not load.
+  routes, which the scaffold does not load. (c) A behaviour on a route another
+  task owns, which its task waits for, passes once that task is implemented;
+  nothing lists it, and `tests:fail` refuses the step. Owning an action with
+  its routes closes the case where Foundation took that work by default.
 - The file compiles: the helpers, `expect` and each model import are written
   only when used, and a test renders it beside the scaffold step's output and
   typechecks it. Refused before the write, like the other scaffold writes: the

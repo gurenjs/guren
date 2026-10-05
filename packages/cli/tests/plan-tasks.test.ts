@@ -597,6 +597,154 @@ describe('derivePlanTasks', () => {
     })
   })
 
+  describe('behaviours a tests step must see fail', () => {
+    type ActionInput = NonNullable<PlanInput['controllers']>[number]['actions'][number]
+    type IntentInput = NonNullable<PlanInput['tasks']>[number]
+
+    const store = (id: string, name: string, body: string): ActionInput => ({
+      id,
+      change: ADD,
+      name,
+      body,
+      authorization: { middleware: ['auth'] },
+      response: { kind: 'redirect', to: '/notes' },
+      rules: [],
+    })
+    const post = (id: string, path: string, action: string): NonNullable<PlanInput['routes']>[number] => ({
+      id,
+      change: ADD,
+      method: 'POST',
+      path,
+      name: id.replace('route.', ''),
+      action,
+      middleware: ['auth'],
+      bind: [],
+    })
+    const behaviours = (prefix: string, route: string): IntentInput['acceptance'] => [
+      { id: `AC-${prefix}-1`, description: 'A signed-in user saves one.', kind: 'success', actor: 'user', route, given: [], input: [{ name: 'body', json: '"x"' }], expect: { status: 302 } },
+      { id: `AC-${prefix}-2`, description: 'An empty one is rejected.', kind: 'validation', actor: 'user', route, given: [], input: [{ name: 'body', json: '""' }], expect: { status: 422, errors: ['body'] } },
+      { id: `AC-${prefix}-3`, description: 'A guest is sent to sign in.', kind: 'unauthenticated', actor: 'guest', route, given: [], expect: { redirect: '/login' } },
+    ]
+    const validator = (id: string, name: string): NonNullable<PlanInput['validators']>[number] => ({
+      id,
+      change: ADD,
+      name,
+      fields: [{ name: 'body', type: 'text', required: true, rules: ['min 1'] }],
+    })
+
+    /** No model, so the intent is a story; it covers the route and validator, the action only when asked, the controller never. */
+    function notesPlan(coverAction: boolean): PlanDraft {
+      return planFrom({
+        validators: [validator('validator.note', 'NotePayloadSchema')],
+        controllers: [{ id: 'controller.notes', change: ADD, className: 'NotebookController', actions: [store('action.notes.store', 'store', 'validator.note')] }],
+        routes: [post('route.notes.store', '/notes', 'action.notes.store')],
+        tasks: [
+          {
+            id: 'task.notes',
+            entity: 'Notebook',
+            summary: 'Save a note.',
+            covers: ['validator.note', 'route.notes.store', ...(coverAction ? ['action.notes.store'] : [])],
+            acceptance: behaviours('notes', 'route.notes.store'),
+          },
+        ],
+      })
+    }
+
+    /** An action completes at `wired`, which its route decides: an added route shares its action's task, after that task's `tests` step. */
+    function expectActionsWithTheirRoutes(plan: PlanDraft, result: PlanTaskDerivation): void {
+      const at = new Map<string, { task: string; step: number; tests: number }>()
+      for (const derived of result.tasks) {
+        const tests = derived.steps.findIndex((step) => step.kind === 'tests')
+        derived.steps.forEach((step, index) => {
+          for (const id of step.elementIds) at.set(id, { task: derived.id, step: index, tests })
+        })
+      }
+      for (const route of plan.routes) {
+        const action = at.get(route.action)
+        const owner = at.get(route.id)
+        if (!action || !owner) continue
+        expect(owner.task, route.id).toBe(action.task)
+        expect(Math.min(owner.step, action.step), route.id).toBeGreaterThan(owner.tests)
+      }
+    }
+
+    for (const coverAction of [true, false]) {
+      test(`should own the action with its route, after the tests step, when the intent covers ${coverAction ? 'the action' : 'only its route'}`, () => {
+        const plan = notesPlan(coverAction)
+        const result = derivePlanTasks(plan)
+
+        // Foundation owned the action, and its http step could complete it only by mounting the route,
+        // after which the validation and unauthenticated behaviours pass before the tests step runs.
+        expect(ids(result)).toEqual(['task/story/task.notes'])
+        expect(task(result, 'task/story/task.notes').steps.map((step) => [step.kind, step.elementIds, step.verify])).toEqual([
+          ['tests', [], ['codegen', 'tests:fail']],
+          ['http', ['validator.note', 'controller.notes', 'action.notes.store', 'route.notes.store'], ['codegen', 'typecheck', 'check', 'tests']],
+        ])
+        expect(result.notes.map((note) => note.kind)).toEqual(['intent-story'])
+        expectActionsWithTheirRoutes(plan, result)
+      })
+    }
+
+    test('should leave in Foundation only the class of a controller whose actions two tasks cover, each action going with its own task', () => {
+      const plan = planFrom({
+        validators: [validator('validator.draft', 'DraftPayloadSchema'), validator('validator.publish', 'PublishPayloadSchema')],
+        controllers: [
+          {
+            id: 'controller.posts',
+            change: ADD,
+            className: 'ArticleController',
+            actions: [store('action.posts.store', 'store', 'validator.draft'), store('action.posts.publish', 'publish', 'validator.publish')],
+          },
+        ],
+        routes: [post('route.posts.store', '/articles', 'action.posts.store'), post('route.posts.publish', '/articles/:id/publish', 'action.posts.publish')],
+        tasks: [
+          { id: 'task.drafts', entity: 'Drafts', summary: 'Write drafts.', covers: ['validator.draft', 'action.posts.store', 'route.posts.store'], acceptance: behaviours('drafts', 'route.posts.store') },
+          { id: 'task.publish', entity: 'Publishing', summary: 'Publish.', covers: ['validator.publish', 'action.posts.publish', 'route.posts.publish'], acceptance: behaviours('publish', 'route.posts.publish') },
+        ],
+      })
+      const result = derivePlanTasks(plan)
+
+      // A controller class completes at `present`: it mounts nothing, so no behaviour passes on it alone.
+      expect(task(result, FOUNDATION_TASK_ID).steps.map((step) => step.elementIds)).toEqual([['controller.posts']])
+      for (const [intent, action, route] of [
+        ['task.drafts', 'action.posts.store', 'route.posts.store'],
+        ['task.publish', 'action.posts.publish', 'route.posts.publish'],
+      ]) {
+        const steps = task(result, `task/story/${intent}`).steps
+        expect(steps.map((step) => step.kind), intent).toEqual(['tests', 'http'])
+        expect(steps[1].elementIds, intent).toEqual(expect.arrayContaining([action, route]))
+      }
+      expect(result.notes.map((note) => note.kind)).toEqual(['intent-story', 'intent-story'])
+      expectActionsWithTheirRoutes(plan, result)
+      expectFoundationStandsAlone(plan, result)
+    })
+
+    test('should report an action one task covers and a route to it another covers, which no order can complete apart', () => {
+      const plan = planFrom({
+        validators: [validator('validator.note', 'NotePayloadSchema')],
+        controllers: [{ id: 'controller.notes', change: ADD, className: 'NotebookController', actions: [store('action.notes.store', 'store', 'validator.note')] }],
+        routes: [post('route.notes.store', '/notes', 'action.notes.store')],
+        tasks: [
+          { id: 'task.write', entity: 'Writing', summary: 'Write.', covers: ['validator.note', 'action.notes.store'], acceptance: [] },
+          { id: 'task.notes', entity: 'Notebook', summary: 'Save a note.', covers: ['route.notes.store'], acceptance: behaviours('notes', 'route.notes.store') },
+        ],
+      })
+      const result = derivePlanTasks(plan)
+
+      expect(result.notes.filter((note) => note.kind === 'action-route-split').map((note) => note.ids)).toEqual([
+        ['action.notes.store', 'route.notes.store'],
+      ])
+    })
+
+    test('should keep every fixture plan’s actions with their routes', () => {
+      for (const plan of [parsePlan(), parsePlan(busyPlan), sharedFormPlan(), hubPlan({ entity: 'Post' })]) {
+        const result = derivePlanTasks(plan)
+        expectActionsWithTheirRoutes(plan, result)
+        expect(result.notes.filter((note) => note.kind === 'action-route-split')).toEqual([])
+      }
+    })
+  })
+
   describe('behaviours without an http step', () => {
     const behaviour = (id: string): NonNullable<PlanInput['tasks']>[number]['acceptance'][number] => ({
       id,

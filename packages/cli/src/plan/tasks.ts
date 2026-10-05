@@ -76,6 +76,7 @@ export type PlanTaskNoteKind =
   | 'intent-empty'
   | 'element-unassigned'
   | 'foundation-reference'
+  | 'action-route-split'
   | 'dependency-cycle'
   | 'hint-unreadable'
   | 'hint-contradiction'
@@ -483,24 +484,46 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
     if (validator !== undefined) push(validatorUsers, validator, task)
   }
 
+  /** Action id → the one task covering every covered route to it, which routes are not placed yet to say. */
+  const routeCoverage = new Map<string, Set<TaskDraft | undefined>>()
+  for (const route of plan.routes) {
+    if (!coveredBy.has(route.id)) continue
+    const bucket = routeCoverage.get(route.action)
+    if (bucket) bucket.add(coveredOnce(route.id))
+    else routeCoverage.set(route.action, new Set([coveredOnce(route.id)]))
+  }
+  // An action completes at `wired`, which its route's mount and contract decide. Placed with an
+  // uncovered controller, it would land in an earlier step than its route and make that step do
+  // the route's work, which then passes the task's behaviours before its `tests` step sees them fail.
+  const actionTask = (id: string): TaskDraft | undefined => {
+    const covered = coveredOnce(id)
+    if (covered) return covered
+    const routes = routeCoverage.get(id)
+    return routes?.size === 1 ? routes.values().next().value : undefined
+  }
+
   for (const controller of plan.controllers) {
     const models: Array<string | undefined> = []
+    const users: TaskDraft[] = []
     for (const action of controller.actions) {
       models.push(policyModel.get(action.authorization.policy?.id ?? ''))
       if (action.response.kind === 'resource') models.push(resourceModel.get(action.response.resource))
       if (action.response.kind === 'inertia') {
         for (const modelId of viewModels.get(action.response.view) ?? []) models.push(modelId)
       }
+      const placed = actionTask(action.id)
+      if (placed) users.push(placed)
     }
-    const task = decide(controller, { models: distinct(models), className: controller.className })
+    const task = decide(controller, { models: distinct(models), users, className: controller.className })
     place(task, 'controllers', controller)
     for (const action of controller.actions) {
-      place(task, 'actions', action, { file: controller.id })
-      follows.set(action.id, controller.id)
-      uses(action.body, task)
-      uses(action.params, task)
-      uses(action.query, task)
-      if (action.response.kind === 'inertia') push(renderedBy, action.response.view, task)
+      const own = actionTask(action.id) ?? task
+      place(own, 'actions', action, { file: controller.id })
+      if (own === task) follows.set(action.id, controller.id)
+      uses(action.body, own)
+      uses(action.params, own)
+      uses(action.query, own)
+      if (action.response.kind === 'inertia') push(renderedBy, action.response.view, own)
     }
   }
 
@@ -617,6 +640,17 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
       kind: 'foundation-reference',
       message: `"${head}" carries Foundation work that needs ${targets.map((id) => `"${id}"`).join(', ')}, which a story task owns. Foundation waits for nothing, so that order is not kept. Cover "${head}" from one task to place it.`,
       ids: [head, ...targets],
+    })
+  }
+
+  for (const route of plan.routes) {
+    const routeOwner = owner.get(route.id)
+    const actionOwner = owner.get(route.action)
+    if (!hasWork.has(route.id) || !hasWork.has(route.action) || routeOwner === actionOwner) continue
+    notes.push({
+      kind: 'action-route-split',
+      message: `"${route.action}" is owned by "${actionOwner?.id}" and "${route.id}", which dispatches to it, by "${routeOwner?.id}". An action completes only once a route mounts it, so the earlier of the two cannot complete without the other's work, and a behaviour on the route may pass before its tests step. Cover both from one task.`,
+      ids: [route.action, route.id],
     })
   }
 
