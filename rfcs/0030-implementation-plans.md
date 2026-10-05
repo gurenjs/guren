@@ -1007,10 +1007,10 @@ decides a task, so `tasks.ts` fixes it:
   (an uncovered controller in Foundation, its actions covered by story tasks),
   that task's step can verify only by mounting the route, after which the task's
   validation, forbidden and unauthenticated behaviours pass before its `tests`
-  step sees them fail. A controller is then placed by the tasks its actions
-  went to when no intent covers it and no model places it: theirs when they
-  agree, Foundation when they do not, where the class completes at `present`
-  and mounts nothing. An action and a route to it that two tasks own are
+  step sees them fail. A controller no intent covers goes where its changed
+  actions went when one task took them all, ahead of the models it
+  references; otherwise it is placed as before, several such tasks making it
+  Foundation, where the class completes at `present` and mounts nothing. An action and a route to it that two tasks own are
   reported (`action-route-split`), since neither order completes them apart.
   For the rest, in this order: the one task intent that `covers` it; the models
   it references (a resource's or policy's `model`, a view's prop resources, a

@@ -719,6 +719,27 @@ describe('derivePlanTasks', () => {
       expectFoundationStandsAlone(plan, result)
     })
 
+    test('should send a controller whose every changed action one task covers to that task, ahead of the model it renders', () => {
+      const plan = planFrom({
+        models: [model('Post')],
+        resources: [resource('Post')],
+        controllers: [
+          {
+            id: 'controller.posts',
+            change: ADD,
+            className: 'PostController',
+            actions: [{ id: 'action.posts.show', change: ADD, name: 'show', authorization: { middleware: [] }, response: { kind: 'resource', resource: 'resource.post' }, rules: [] }],
+          },
+        ],
+        routes: [{ id: 'route.posts.show', change: ADD, method: 'GET', path: '/posts/:id', name: 'posts.show', action: 'action.posts.show', middleware: [], bind: [] }],
+        tasks: [{ id: 'task.reading', entity: 'Reading', summary: 'Read a post.', covers: ['action.posts.show'], acceptance: [] }],
+      })
+      const result = derivePlanTasks(plan)
+
+      expect(task(result, 'task/story/task.reading').steps.map((step) => step.elementIds)).toEqual([['controller.posts', 'action.posts.show', 'route.posts.show']])
+      expectActionsWithTheirRoutes(plan, result)
+    })
+
     test('should report an action one task covers and a route to it another covers, which no order can complete apart', () => {
       const plan = planFrom({
         validators: [validator('validator.note', 'NotePayloadSchema')],

@@ -440,10 +440,9 @@ git commit -m "feat(registrations): register and cancel [task/entity/model.regis
 bunx guren plan:next docs/plans/registrations/plan.json
 bunx guren plan:verify docs/plans/registrations/plan.json --step task/entity/model.registration/pages
 bunx guren plan:next docs/plans/registrations/plan.json
-bunx guren plan:verify docs/plans/registrations/plan.json --step task/entity/model.meetup/http
 ```
 
-The last step, `task/entity/model.meetup/http`, belongs to `MeetupController.show`, the `alter` the approval warned about. It adds no code of its own; `AC-registrations-7` reaching the action is what confirms it.
+`MeetupController.show`, the `alter` the approval warned about, belongs to the http step as well, since the plan's task covers it. Nothing Guren reads in it changes, so `AC-registrations-7` reaching the action is what confirms it.
 
 Check the http commit against chapter 4's list, plus two rows for this plan:
 

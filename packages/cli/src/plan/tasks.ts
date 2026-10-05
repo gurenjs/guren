@@ -514,7 +514,10 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
       const placed = actionTask(action.id)
       if (placed) users.push(placed)
     }
-    const task = decide(controller, { models: distinct(models), users, className: controller.className })
+    // A controller whose every changed action one task took is that task's file, whatever its models say.
+    const changed = controller.actions.filter((action) => action.change.kind !== 'existing').map((action) => actionTask(action.id))
+    const settled = changed.length > 0 && changed.every((placed) => placed !== undefined && placed === changed[0]) ? changed[0] : undefined
+    const task = coveredOnce(controller.id) ?? settled ?? decide(controller, { models: distinct(models), users, className: controller.className })
     place(task, 'controllers', controller)
     for (const action of controller.actions) {
       const own = actionTask(action.id) ?? task
