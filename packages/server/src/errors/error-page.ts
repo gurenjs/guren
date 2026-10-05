@@ -21,26 +21,37 @@ export function renderErrorPage(statusCode: number, message?: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${statusCode} ${title}</title>
   <style>
+    /* Guren UI's tokens (github.com/gurenjs/guren-ui); the link home is the screen's one crimson fill. */
+    :root {
+      color-scheme: light;
+      --g-page: #ffffff; --g-heading: #111827; --g-text-2: #4b5563; --g-line-strong: #d1d5db;
+      --g-accent: #db1b1b; --g-accent-down: #b91c1c; --g-on-accent: #fff5f5;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { color-scheme: dark; --g-page: #1a1a2e; --g-heading: #e0def4; --g-text-2: #908caa; --g-line-strong: #3d3d5c; }
+    }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: 'Noto Sans JP', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
       min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
-      background: #fafaf9;
-      color: #1c1917;
+      background: var(--g-page);
+      color: var(--g-heading);
+      -webkit-font-smoothing: antialiased;
     }
     .container { text-align: center; padding: 2rem; }
-    .status { font-size: 6rem; font-weight: 700; color: #d6d3d1; line-height: 1; }
-    .title { font-size: 1.5rem; font-weight: 600; margin-top: 1rem; }
-    .description { color: #78716c; margin-top: 0.5rem; max-width: 28rem; }
+    .status { font: 700 6rem/1 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace; color: var(--g-line-strong); }
+    .title { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.01em; margin-top: 1rem; }
+    .description { color: var(--g-text-2); margin-top: 0.5rem; max-width: 28rem; }
     .home-link {
-      display: inline-block; margin-top: 2rem; padding: 0.625rem 1.5rem;
-      background: #1c1917; color: #fff; border-radius: 0.375rem;
-      text-decoration: none; font-size: 0.875rem; font-weight: 500;
+      display: inline-block; margin-top: 2rem; padding: 8px 16px;
+      background: var(--g-accent); color: var(--g-on-accent); border-radius: 8px;
+      text-decoration: none; font-size: 13.5px; font-weight: 700;
     }
-    .home-link:hover { background: #292524; }
+    .home-link:hover { background: var(--g-accent-down); }
+    .home-link:focus-visible { outline: 2px solid var(--g-accent); outline-offset: 2px; }
   </style>
 </head>
 <body>
