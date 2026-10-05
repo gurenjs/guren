@@ -24,6 +24,8 @@ const RULES = [
   'Write it to `docs/plans/<slug>/plan.json`',
   '`scope` with its `goals` and `nonGoals`',
   'Never write `baseline`',
+  'One fact per item',
+  'Lead with the decision or the outcome',
   "`locale` is the BCP 47 tag of the request's language",
   'Ids share one namespace across the whole plan',
   'Keep ids stable',
