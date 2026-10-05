@@ -32,11 +32,11 @@ const BANNER = `
 .demo-banner {
   position: fixed; top: 1.5rem; right: 1.75rem; z-index: 5;
   max-width: 22rem; text-align: right;
-  font-family: var(--mono); font-size: 0.72rem; line-height: 1.6;
-  color: var(--text-muted);
+  font-family: var(--g-font-mono); font-size: 0.72rem; line-height: 1.6;
+  color: var(--g-muted);
 }
-.demo-banner code { color: var(--text-secondary); }
-.demo-banner a { color: var(--accent); text-decoration: none; }
+.demo-banner code { color: var(--g-text-2); }
+.demo-banner a { color: var(--g-accent-text); text-decoration: none; }
 .demo-banner a:hover { text-decoration: underline; }
 @media (max-width: 900px) { .demo-banner { display: none; } }
 </style>

@@ -133,7 +133,7 @@ async function loadErrors(): Promise<void> {
     for (const event of [...result.events].reverse()) {
       const row = text('article', '', 'event')
       const head = text('div', '', 'event-head')
-      head.append(text('span', String(event.status), 'g-badge'), text('strong', `${event.method} ${event.route?.pattern ?? '(route unavailable)'}`, 'mono'))
+      head.append(text('span', String(event.status), 'g-badge g-badge-danger'), text('strong', `${event.method} ${event.route?.pattern ?? '(route unavailable)'}`, 'mono'))
       row.append(head, text('div', `${event.occurredAt} · #${event.sequence} · Runtime correlation: ${event.correlation}`, 'meta mono'))
       if (event.route?.name) row.append(text('div', event.route.name, 'meta mono'))
       row.append(text('pre', event.frames.map((frame) => `${frame.file}:${frame.line ?? '?'}:${frame.column ?? '?'}`).join('\n') || 'No project-local stack locations.', 'g-code'))

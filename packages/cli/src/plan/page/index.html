@@ -33,13 +33,13 @@
       /*
        * Guren UI's own tokens, copied from its `tokens.css`. Light is the docs light
        * theme (white + crimson), dark the rose-pine-moon ground with the rose accent.
-       * The two font families are the one part not adopted: this page may make no
-       * request, so a face it cannot supply is a face some machine renders differently.
+       * The faces are named but not supplied, since this page may make no request: a
+       * machine without them renders the system stack that follows.
        */
       :root {
         color-scheme: light;
-        --g-font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
-        --g-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        --g-font-sans: 'Noto Sans JP', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+        --g-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
         --g-page: #ffffff;
         --g-panel: #ffffff;
