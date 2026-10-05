@@ -217,13 +217,31 @@
 
       /* Scope items are sentences, so each group takes the full reading width: side by
          side, a 240px column turned a dozen of them into a page-long strip. */
-      .scope > div {
+      .scope > * {
         max-width: 56em;
       }
 
-      .scope > div + div {
+      .scope > * + * {
         border-top: 1px solid var(--g-line);
         margin-top: 6px;
+      }
+
+      .scope h4,
+      .scope summary {
+        font: 700 14px/1.6 var(--g-font-sans);
+        letter-spacing: 0;
+        text-transform: none;
+        color: var(--g-heading);
+        margin: 12px 0 6px;
+      }
+
+      .scope summary {
+        cursor: pointer;
+        width: fit-content;
+      }
+
+      .scope summary:hover {
+        color: var(--g-accent-text);
       }
 
       .scope li + li {
