@@ -33,7 +33,7 @@ const BANNER = `
   position: fixed; top: 1.5rem; right: 1.75rem; z-index: 5;
   max-width: 22rem; text-align: right;
   font-family: var(--g-font-mono); font-size: 0.72rem; line-height: 1.6;
-  color: var(--g-muted);
+  color: var(--g-text-2);
 }
 .demo-banner code { color: var(--g-text-2); }
 .demo-banner a { color: var(--g-accent-text); text-decoration: none; }
