@@ -1022,8 +1022,11 @@ decides a task, so `tasks.ts` fixes it:
   action's controller, a validator the actions and forms naming it, a view the
   actions rendering it); the model it is named after, through `inflect.ts`.
   Several referenced models that the name does not settle make a cross-entity
-  task; several users make it Foundation; no evidence is Foundation with a
-  note. A route's `bind` is read only when its action is not in the plan, since
+  task; several users make it Foundation, except a validator or a view, which
+  completes at `wired` through a mounted action using it and so goes to its
+  first user in document order, the others waiting for that task (in
+  Foundation its step could verify only by mounting a later task's route); no
+  evidence is Foundation with a note. A route's `bind` is read only when its action is not in the plan, since
   a nested route binds its parent too. An `add`, `rename` or `drop` model is
   always its own slice; an altered one that exactly one other slice covers is
   that slice's edit (the `hasMany` a new child needs). In a class name a digit
@@ -1084,7 +1087,9 @@ decides a task, so `tasks.ts` fixes it:
   `task/cross/<model ids joined by +>`, and `<task id>/<step kind>` with `/<n>`
   appended when the kind was split. No plan id can contain `/`.
 - **Splitting** counts files: a column is its model's file, an action its
-  controller's, and a slice's routes are one registrar. Parts fill in document
+  controller's, a route to an action of its own task that controller's too
+  (the action completes only once the route mounts it, so the two never land
+  in different parts), and the slice's other routes are one registrar. Parts fill in document
   order; a screen group (the page's first path segment) moves to the next part
   whole unless it is wider than a part. `scaffold` and `tests` are not split.
   A part's id is stable and its content is not: a revision that adds an

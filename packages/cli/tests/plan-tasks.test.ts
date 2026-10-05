@@ -321,17 +321,17 @@ describe('derivePlanTasks', () => {
       expect(http?.elementIds).toContain('route.comments.store')
     })
 
-    test('should put commands and what several slices use in Foundation, which every task waits for', () => {
+    test('should put commands in Foundation, which every task waits for, and a validator several slices use with the first of them', () => {
       const result = derive(busyPlan)
       const foundation = task(result, FOUNDATION_TASK_ID)
 
       expect(ids(result)[0]).toBe(FOUNDATION_TASK_ID)
       expect(foundation.title).toEqual({ kind: 'foundation' })
       expect(foundation.dependsOn).toEqual([])
-      expect(foundation.steps.map((step) => [step.kind, step.elementIds, step.verify])).toEqual([
-        ['commands', ['command.attachments'], ['codegen', 'typecheck']],
-        ['http', ['validator.page'], ['codegen', 'typecheck', 'check']],
-      ])
+      expect(foundation.steps.map((step) => [step.kind, step.elementIds, step.verify])).toEqual([['commands', ['command.attachments'], ['codegen', 'typecheck']]])
+      // A validator completes at `wired`, through a mounted action using it, which Foundation's step has none of.
+      expect(stepsOfKind(result, 'task/entity/model.post', 'http')[0].elementIds).toContain('validator.page')
+      expect(task(result, 'task/entity/model.comment').dependsOn).toContain('task/entity/model.post')
       for (const other of result.tasks.slice(1)) expect(other.dependsOn, other.id).toContain(FOUNDATION_TASK_ID)
       expect(result.notes).toEqual([])
     })
@@ -366,11 +366,7 @@ describe('derivePlanTasks', () => {
         for (const entry of plan.resources ?? []) entry.change = { kind: 'existing' }
       })
 
-      expect(task(result, 'task/cross/model.comment+model.post').dependsOn).toEqual([
-        FOUNDATION_TASK_ID,
-        'task/entity/model.post',
-        'task/entity/model.comment',
-      ])
+      expect(task(result, 'task/cross/model.comment+model.post').dependsOn).toEqual(['task/entity/model.post', 'task/entity/model.comment'])
     })
 
     test('should own every changed element once across Foundation, slices and a cross-entity task', () => {
@@ -788,6 +784,38 @@ describe('derivePlanTasks', () => {
       expect(derivePlanTasks(plan).notes.filter((note) => note.kind === 'action-route-split')).toEqual([])
     })
 
+    test('should keep an action and its route in one http part however finely the step splits', () => {
+      const plan = notesPlan(true)
+      const parts = task(derivePlanTasks(plan, { splitThreshold: 1 }), 'task/story/task.notes').steps.filter((step) => step.kind === 'http')
+
+      expect(parts.map((step) => step.elementIds)).toEqual([['validator.note'], ['controller.notes', 'action.notes.store', 'route.notes.store']])
+    })
+
+    test('should send a validator two tasks use to the first of them, which mounts a route validating with it', () => {
+      const plan = planFrom({
+        validators: [validator('validator.shared', 'SharedPayloadSchema')],
+        controllers: [
+          {
+            id: 'controller.posts',
+            change: ADD,
+            className: 'ArticleController',
+            actions: [store('action.posts.store', 'store', 'validator.shared'), store('action.posts.publish', 'publish', 'validator.shared')],
+          },
+        ],
+        routes: [post('route.posts.store', '/articles', 'action.posts.store'), post('route.posts.publish', '/articles/:id/publish', 'action.posts.publish')],
+        tasks: [
+          { id: 'task.drafts', entity: 'Drafts', summary: 'Write drafts.', covers: ['action.posts.store', 'route.posts.store'], acceptance: behaviours('drafts', 'route.posts.store') },
+          { id: 'task.publish', entity: 'Publishing', summary: 'Publish.', covers: ['action.posts.publish', 'route.posts.publish'], acceptance: behaviours('publish', 'route.posts.publish') },
+        ],
+      })
+      const result = derivePlanTasks(plan)
+
+      expect(task(result, FOUNDATION_TASK_ID).steps.map((step) => step.elementIds)).toEqual([['controller.posts']])
+      expect(stepsOfKind(result, 'task/story/task.drafts', 'http')[0].elementIds).toContain('validator.shared')
+      expect(task(result, 'task/story/task.publish').dependsOn).toContain('task/story/task.drafts')
+      expectActionsWithTheirRoutes(plan, result)
+    })
+
     test('should keep every fixture plan’s actions with their routes', () => {
       for (const plan of [parsePlan(), parsePlan(busyPlan), sharedFormPlan(), hubPlan({ entity: 'Post' })]) {
         const result = derivePlanTasks(plan)
@@ -1024,7 +1052,8 @@ describe('derivePlanTasks', () => {
       const whole = task(derive(), 'task/entity/model.comment')
       expect(stepIds(whole)).toContain('task/entity/model.comment/http')
 
-      const split = task(derive(undefined, { splitThreshold: 4 }), 'task/entity/model.comment')
+      // A route counts as its action's controller file, so the step spans four files.
+      const split = task(derive(undefined, { splitThreshold: 3 }), 'task/entity/model.comment')
       const http = split.steps.filter((step) => step.kind === 'http')
       expect(http.map((step) => [step.id, step.part, step.elementIds])).toEqual([
         [
@@ -1062,7 +1091,7 @@ describe('derivePlanTasks', () => {
         expect(derive(undefined, { splitThreshold })).toEqual(derive())
       }
       const parts = task(derive(undefined, { splitThreshold: 0 }), 'task/entity/model.comment').steps.filter((step) => step.kind === 'http')
-      expect(parts).toHaveLength(5)
+      expect(parts).toHaveLength(4)
     })
   })
 

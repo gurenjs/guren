@@ -427,7 +427,7 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
   const unassigned: string[] = []
   const decide = (
     element: { id: string; change: PlanChange },
-    evidence: { models?: string[]; users?: TaskDraft[]; className?: string; collection?: string },
+    evidence: { models?: string[]; users?: TaskDraft[]; className?: string; collection?: string; wiredThroughUsers?: boolean },
   ): TaskDraft => {
     const covered = coveredOnce(element.id)
     if (covered) return covered
@@ -442,7 +442,9 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
 
     const users = distinct(evidence.users ?? [])
     if (users.length === 1) return users[0]
-    if (users.length > 1) return foundation
+    // A validator or page completes at `wired`, through a mounted action using it: in Foundation, its step
+    // could verify only by mounting a later task's route. The first user mounts one, and the others wait for it.
+    if (users.length > 1) return evidence.wiredThroughUsers === true ? users[0] : foundation
 
     const named = modelNamedBy(plan.models, spellings, evidence)
     if (named !== undefined) return entityDraft(named)
@@ -530,6 +532,7 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
     }
   }
 
+  const controllerOfAction = planElementParents(plan)
   for (const route of plan.routes) {
     const dispatchesTo = owner.get(route.action)
     // A nested route binds its parent's model too, so binds speak only when the action is not in the plan.
@@ -538,18 +541,20 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
       users: dispatchesTo ? [dispatchesTo] : [],
       collection: route.name.split('.')[0],
     })
-    place(task, 'routes', route, { file: ROUTES_FILE })
+    // A route to an action of the same task splits with the action's controller: the action completes only once a route mounts it.
+    const file = dispatchesTo === task && hasWork.has(route.action) ? controllerOfAction.get(route.action) : undefined
+    place(task, 'routes', route, { file: file ?? ROUTES_FILE })
   }
 
   for (const view of plan.views) {
     const group = view.page.split('/')[0]
-    const task = decide(view, { models: viewModels.get(view.id), users: renderedBy.get(view.id), collection: group })
+    const task = decide(view, { models: viewModels.get(view.id), users: renderedBy.get(view.id), collection: group, wiredThroughUsers: true })
     place(task, 'views', view, { group })
     uses(view.form?.validator, task)
   }
 
   for (const validator of plan.validators) {
-    place(decide(validator, { users: validatorUsers.get(validator.id), className: validator.name }), 'validators', validator)
+    place(decide(validator, { users: validatorUsers.get(validator.id), className: validator.name, wiredThroughUsers: true }), 'validators', validator)
   }
   for (const effect of plan.sideEffects) place(decide(effect, { className: effect.name }), 'sideEffects', effect)
 
@@ -990,5 +995,8 @@ function split(elements: readonly WorkElement[], threshold: number): WorkElement
     }
   }
   close()
+  // A file gathers elements from across the document (a route its controller's), so a part lists them back in document order.
+  const position = new Map(elements.map((element, index) => [element, index]))
+  for (const part of parts) part.sort((a, b) => (position.get(a) as number) - (position.get(b) as number))
   return parts
 }
