@@ -149,10 +149,13 @@ the revised plan first, and it fails against the code that implements the old
 one. Its `http` step then asks for the new implementation.
 
 A `tests` step has no such record when it was verified by a CLI older than
-this rule, or when its test passed before it ever failed. Its behaviours
+this rule, or when its test passed before it ever failed, as it does when an
+earlier step already mounted the routes its behaviours request. Its behaviours
 already pass, so it cannot verify: the Stop hook gives up on it at once, and
 `plan:next` keeps returning it. It owns no element, so `plan:close` does not
-wait for it. Report it and leave the close to the person.
+wait for it. Report it and leave the close to the person. A task's actions and
+the routes to them come after its `tests` step, so do not mount a route a
+later task owns to finish an earlier step.
 
 ## The Stop hook
 
