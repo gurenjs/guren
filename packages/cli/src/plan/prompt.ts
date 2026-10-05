@@ -64,6 +64,15 @@ const DOCUMENT = `## The document
 - \`locale\` is the BCP 47 tag of the request's language (\`en\`, \`ja\`). Write every piece of prose in that language: the summary, descriptions, rules, questions and acceptance descriptions.
 - Every other section is optional. Leave out the ones the change does not touch.`
 
+const SCOPE = `## Goals, non-goals, assumptions and hints
+
+These four lists open the page, and the person reads them before any element, so keep each item to one sentence they can take in at a glance:
+
+- One fact per item. An item that joins a decision, its reason and how it will be checked is three items, or one with the rest left out.
+- Lead with the decision or the outcome. Add the reason as a short clause only where it is not obvious.
+- Leave out the detail an element carries (a column's type, a route's path, a validator's rules): the person reads it on that element.
+- \`hints\` are advice for whoever implements the plan. The same rules apply: one piece of advice per item.`
+
 const IDS = `## Ids and changes
 
 - Every element has an \`id\` and a \`change\`. Ids share one namespace across the whole plan, start with a letter, and hold letters, digits, \`_\`, \`.\`, \`:\` and \`-\`. Name them by section and name: \`model.comment\`, \`column.comment.body\`, \`validator.comment\`, \`controller.comments\`, \`action.comments.store\`, \`route.comments.store\`, \`view.posts.show\`, \`policy.comment\`. An id may not be \`constructor\`, \`toString\` or any other \`Object.prototype\` member.
@@ -109,7 +118,7 @@ Do not run \`plan:approve\`. Approval is the person's decision, made after readi
 
 /** `request` is the person's words, or absent when the agent is to ask for them first. */
 export function buildPlanPrompt(request?: string): PlanPrompt {
-  const prompt = [INTRO, requestSection(request), CONTEXT, QUESTIONS, DOCUMENT, IDS, ALTERS, TASKS, COMMANDS, CHECK].join('\n\n')
+  const prompt = [INTRO, requestSection(request), CONTEXT, QUESTIONS, DOCUMENT, SCOPE, IDS, ALTERS, TASKS, COMMANDS, CHECK].join('\n\n')
   return { prompt: `${prompt}\n`, schema: planDraftJsonSchema() }
 }
 
