@@ -757,6 +757,37 @@ describe('derivePlanTasks', () => {
       ])
     })
 
+    test('should make an action another task took from its added controller wait for the task writing the class', () => {
+      const plan = planFrom({
+        validators: [validator('validator.note', 'NotePayloadSchema')],
+        controllers: [{ id: 'controller.notes', change: ADD, className: 'NotebookController', actions: [store('action.notes.store', 'store', 'validator.note')] }],
+        routes: [post('route.notes.store', '/notes', 'action.notes.store')],
+        tasks: [
+          { id: 'task.notes', entity: 'Notebook', summary: 'Save a note.', covers: ['validator.note', 'action.notes.store', 'route.notes.store'], acceptance: behaviours('notes', 'route.notes.store') },
+          { id: 'task.shell', entity: 'Shell', summary: 'The controller.', covers: ['controller.notes'], acceptance: [] },
+        ],
+      })
+      const result = derivePlanTasks(plan)
+
+      expect(ids(result)).toEqual(['task/story/task.shell', 'task/story/task.notes'])
+      expect(task(result, 'task/story/task.notes').dependsOn).toEqual(['task/story/task.shell'])
+      expectActionsWithTheirRoutes(plan, result)
+    })
+
+    test('should not report an action whose own task mounts one of its routes, whatever task holds another', () => {
+      const plan = planFrom({
+        validators: [validator('validator.note', 'NotePayloadSchema')],
+        controllers: [{ id: 'controller.notes', change: ADD, className: 'NotebookController', actions: [store('action.notes.store', 'store', 'validator.note')] }],
+        routes: [post('route.notes.store', '/notes', 'action.notes.store'), post('route.notes.quick', '/quick-notes', 'action.notes.store')],
+        tasks: [
+          { id: 'task.notes', entity: 'Notebook', summary: 'Save a note.', covers: ['validator.note', 'action.notes.store', 'route.notes.store'], acceptance: behaviours('notes', 'route.notes.store') },
+          { id: 'task.quick', entity: 'Quick notes', summary: 'A second way in.', covers: ['route.notes.quick'], acceptance: behaviours('quick', 'route.notes.quick') },
+        ],
+      })
+
+      expect(derivePlanTasks(plan).notes.filter((note) => note.kind === 'action-route-split')).toEqual([])
+    })
+
     test('should keep every fixture plan’s actions with their routes', () => {
       for (const plan of [parsePlan(), parsePlan(busyPlan), sharedFormPlan(), hubPlan({ entity: 'Post' })]) {
         const result = derivePlanTasks(plan)

@@ -574,6 +574,13 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
       else if (columnById.get(reference.from.id)?.change.kind !== 'drop') reads(reference.from.id, reference.to)
     }
   }
+  // An action an intent took from its controller is written into the controller's file, so it waits for the class; a dropped one goes first.
+  for (const controller of plan.controllers) {
+    for (const action of controller.actions) {
+      if (controller.change.kind === 'drop') reads(controller.id, action.id)
+      else reads(action.id, controller.id)
+    }
+  }
 
   /**
    * Foundation waits for nothing, so nothing in it may need another task's work. A unit
@@ -646,14 +653,19 @@ export function derivePlanTasks(plan: PlanDraft, options: DerivePlanTasksOptions
     })
   }
 
-  for (const route of plan.routes) {
-    const routeOwner = owner.get(route.id)
-    const actionOwner = owner.get(route.action)
-    if (!hasWork.has(route.id) || !hasWork.has(route.action) || routeOwner === actionOwner) continue
+  // Any one mounted route completes an action, so only an action with no live route in its own task depends on another task's mount.
+  const liveRoutes = new Map<string, Array<(typeof plan.routes)[number]>>()
+  for (const route of plan.routes) if (route.change.kind !== 'drop') push(liveRoutes, route.action, route)
+  const dropped = new Set(plan.controllers.flatMap((controller) => controller.actions.filter((action) => action.change.kind === 'drop').map((action) => action.id)))
+  for (const [actionId, routes] of liveRoutes) {
+    const actionOwner = owner.get(actionId)
+    if (!hasWork.has(actionId) || dropped.has(actionId) || routes.some((route) => owner.get(route.id) === actionOwner)) continue
+    const elsewhere = routes.filter((route) => hasWork.has(route.id)).map((route) => route.id)
+    if (elsewhere.length === 0) continue
     notes.push({
       kind: 'action-route-split',
-      message: `"${route.action}" is owned by "${actionOwner?.id}" and "${route.id}", which dispatches to it, by "${routeOwner?.id}". An action completes only once a route mounts it, so the earlier of the two cannot complete without the other's work, and a behaviour on the route may pass before its tests step. Cover both from one task.`,
-      ids: [route.action, route.id],
+      message: `"${actionId}" is owned by "${actionOwner?.id}", and every route to it by other tasks (${elsewhere.map((id) => `"${id}"`).join(', ')}). An action completes only once a route mounts it, so its step cannot complete without that task's work, and a behaviour on the route may pass before its tests step. Cover the action with one of its routes.`,
+      ids: [actionId, ...elsewhere],
     })
   }
 

@@ -1010,8 +1010,12 @@ decides a task, so `tasks.ts` fixes it:
   step sees them fail. A controller no intent covers goes where its changed
   actions went when one task took them all, ahead of the models it
   references; otherwise it is placed as before, several such tasks making it
-  Foundation, where the class completes at `present` and mounts nothing. An action and a route to it that two tasks own are
-  reported (`action-route-split`), since neither order completes them apart.
+  Foundation, where the class completes at `present` and mounts nothing. An
+  action placed apart from its controller waits for the task changing the
+  class (a dropped one goes first). Any one mounted route completes an action,
+  so an action none of whose routes its own task holds is reported
+  (`action-route-split`): its step cannot complete without another task's
+  mount.
   For the rest, in this order: the one task intent that `covers` it; the models
   it references (a resource's or policy's `model`, a view's prop resources, a
   controller's policies, resources and pages); what uses it (a route its
