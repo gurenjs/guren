@@ -172,6 +172,14 @@
         padding-left: 20px;
       }
 
+      li + li {
+        margin-top: 4px;
+      }
+
+      li::marker {
+        color: var(--g-muted);
+      }
+
       a {
         color: var(--g-accent-text);
         text-decoration-thickness: 1px;
@@ -207,10 +215,37 @@
         margin-bottom: 16px;
       }
 
-      .grid2 {
-        display: grid;
-        gap: 0 24px;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      /* Scope items are sentences, so each group takes the full reading width: side by
+         side, a 240px column turned a dozen of them into a page-long strip. */
+      .scope > * {
+        max-width: 56em;
+      }
+
+      .scope > * + * {
+        border-top: 1px solid var(--g-line);
+        margin-top: 6px;
+      }
+
+      .scope h4,
+      .scope summary {
+        font: 700 14px/1.6 var(--g-font-sans);
+        letter-spacing: 0;
+        text-transform: none;
+        color: var(--g-heading);
+        margin: 12px 0 6px;
+      }
+
+      .scope summary {
+        cursor: pointer;
+        width: fit-content;
+      }
+
+      .scope summary:hover {
+        color: var(--g-accent-text);
+      }
+
+      .scope li + li {
+        margin-top: 6px;
       }
 
       /*
@@ -991,7 +1026,7 @@
         <h1 id="plan-title"></h1>
         <p class="lede" id="plan-summary"></p>
         <div class="meta" id="plan-meta"></div>
-        <div class="panel grid2" id="plan-scope"></div>
+        <div class="panel scope" id="plan-scope"></div>
       </header>
       <section class="panel pinned" id="pinned" hidden></section>
       <section id="questions"></section>

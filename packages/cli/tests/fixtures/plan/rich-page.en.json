@@ -1,5 +1,5 @@
 [
-  "Comments on postsSigned-in users can comment on a post; an author can delete their own comment.plan 5101c32bb2f1baseline 6445bc71GoalsComment on a postDelete your own commentNon-goalsThreaded repliesEditing a commentAssumptionsComments are shown on the post page, newest lastHintsRun the migration before deploying.",
+  "Comments on postsSigned-in users can comment on a post; an author can delete their own comment.plan 5101c32bb2f1baseline 6445bc71GoalsComment on a postDelete your own commentNon-goalsThreaded repliesEditing a commentAssumptions (1)Comments are shown on the post page, newest lastHints (1)Run the migration before deploying.",
   "@aria-label Blocking findings",
   "Needs attentionfail Route action on ",
   "-> #el-route.comments.store",
