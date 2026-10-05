@@ -1,5 +1,17 @@
 # create-guren-app
 
+## 1.18.0
+
+### Minor Changes
+
+- 716c3c8: Throttle sign-in by default. `guren make:auth` (and `guren add auth`) now writes `app/Http/Middleware/AuthThrottle.ts` and mounts it on `POST /login`, `POST /register` and `POST /forgot-password`, counting requests per client IP and submitted email. Past the limit an Inertia form shows the translated `auth.throttle` / `auth.too_many_requests` message as a validation error, and other clients get a 429. The command writes `lang/en/auth.json` with those keys unless the app already has one. The blog starter ships the same throttles on login and registration.
+
+### Patch Changes
+
+- b59bc45: The `APP_KEY` description in a new app's `config/env.ts` no longer says the key encrypts session payloads. The default session store keeps the data on the server and the cookie carries only a signed session id; the payload is encrypted only under the opt-in `cookie` session driver.
+- d2461cb: A new app's `.gitignore` now leaves out the review pages `guren plan:render` writes (`docs/plans/**/*.html` and `*.plan.html`), so rendering a plan no longer leaves untracked files for you to ignore by hand.
+- 2d206b6: Scaffolded apps gain a `start` script (`NODE_ENV=production bun bin/serve.ts`), the one way a deployment runs the server in production mode. HSTS, the `Secure` session cookie, hidden error details and the `APP_URL` host allowlist all key on `NODE_ENV=production`, and `bin/serve.ts` now warns at startup when `APP_URL` names a non-loopback host while `NODE_ENV` is not `production`. `APP_ENV` and `APP_DEBUG` are no longer declared in `config/env.ts` or `.env.example`: nothing read them, and `NODE_ENV` alone decides production mode.
+
 ## 1.17.5
 
 ### Patch Changes
