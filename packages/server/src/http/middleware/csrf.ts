@@ -218,8 +218,18 @@ function remember(ctx: Context, token: string, boundId: string | undefined): str
 }
 
 export function csrfField(ctx: Context): string {
-  const token = getCsrfToken(ctx)
+  const token = escapeAttribute(getCsrfToken(ctx))
   return `<input type="hidden" name="${CSRF_FORM_FIELD}" value="${token}" />`
+}
+
+// The token can come from the request's cookie, so it is never trusted as markup.
+function escapeAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }
 
 /**
