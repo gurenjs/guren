@@ -196,6 +196,16 @@ describe('Encrypter', () => {
       expect(signer.verify(signed, { purpose: 'test', allowExpired: true })?.userId).toBe(1)
     })
 
+    test('rejects a signed token with segments appended after the signature', () => {
+      const keyring = deriveAppKeyring({ current: parseAppKey(key), previous: [] }, 'message-signing')
+      const signer = new MessageSigner(keyring)
+      const signed = signer.sign({ userId: 1 }, { purpose: 'test' })
+
+      expect(signer.verify(`${signed}..suffix`, { purpose: 'test' })).toBeNull()
+      expect(signer.verify(`${signed}.suffix`, { purpose: 'test' })).toBeNull()
+      expect(signer.verify(`${signed}.`, { purpose: 'test' })).toBeNull()
+    })
+
     test('signs and verifies URLs', () => {
       const keyring = deriveAppKeyring({ current: parseAppKey(key), previous: [] }, 'message-signing')
       const signedUrl = signUrl('https://example.com/invite?b=2&a=1', keyring, { expiresIn: 60_000 })

@@ -63,8 +63,14 @@ export class MessageSigner {
     token: string,
     options: VerifySignedMessageOptions = {},
   ): (T & SignedMessageClaims) | null {
-    const [encodedPayload, signature, extra] = token.split('.')
-    if (!encodedPayload || !signature || extra) {
+    // Exactly two segments: `P.S..x` has an empty third one, and a check on it
+    // alone accepted an unsigned suffix that callers reusing the raw token echo.
+    const segments = token.split('.')
+    if (segments.length !== 2) {
+      return null
+    }
+    const [encodedPayload, signature] = segments
+    if (!encodedPayload || !signature) {
       return null
     }
 
