@@ -818,7 +818,7 @@ export class LogCommentListener extends Listener<CommentPosted> {
 }
 ```
 
-先に実行されるのはこちらです。`SendCommentMailListener` の優先度は既定の 0 で、10 のほうが高いからです。このリスナーの `handle` で例外を投げると、エラーはその場で `emit()` を抜けます。`SendCommentMailListener` は実行されず、ジョブもメールも発生しません。`CommentController` の `store` は `emit()` を await しているので、リクエストはリダイレクトされず、エラーハンドラーが返す 500 で終わります。コメント自体は保存されています。`emit()` より前に `forceCreate` が実行されているからです。リスナーに `failed()` を定義しておくと、エラーが伝わる前にそれが呼ばれます。
+先に実行されるのはこちらです。`SendCommentMailListener` の優先度は既定の 0 で、10 のほうが高いからです。このリスナーの `handle` で例外を投げると、エラーはその場で `emit()` を抜けます。`SendCommentMailListener` は実行されず、ジョブもメールも発生しません。`CommentController` の `store` は `emit()` を await しているので、リクエストはリダイレクトされず、エラーハンドラーが返す 500 で終わります。コメント自体は保存されています。`emit()` より前に `create` が実行されているからです。リスナーに `failed()` を定義しておくと、エラーが伝わる前にそれが呼ばれます。
 
 </details>
 

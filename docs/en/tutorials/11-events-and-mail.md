@@ -818,7 +818,7 @@ export class LogCommentListener extends Listener<CommentPosted> {
 }
 ```
 
-It runs first: 10 is higher than the default 0 that `SendCommentMailListener` keeps. Make its `handle` throw, and the error leaves `emit()` at once, so `SendCommentMailListener` never runs and no job or mail follows. `store` in `CommentController` awaits `emit()`, so the request fails with a 500 from the error handler instead of the redirect. The comment itself is saved, because `forceCreate` ran before `emit()`. A listener that defines `failed()` has it called before the error propagates.
+It runs first: 10 is higher than the default 0 that `SendCommentMailListener` keeps. Make its `handle` throw, and the error leaves `emit()` at once, so `SendCommentMailListener` never runs and no job or mail follows. `store` in `CommentController` awaits `emit()`, so the request fails with a 500 from the error handler instead of the redirect. The comment itself is saved, because `create` ran before `emit()`. A listener that defines `failed()` has it called before the error propagates.
 
 </details>
 
