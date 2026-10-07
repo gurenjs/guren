@@ -1,5 +1,14 @@
 # @guren/server
 
+## 2.29.1
+
+### Patch Changes
+
+- 88dee3d: The production error page and the development debug page now use Guren UI's tokens and follow the system light or dark theme. The error page's link home is a crimson button, and the debug page drops its fixed dark violet palette. The markup and text are unchanged.
+- 2789763: Reject a signed token with segments after its signature. `MessageSigner.verify()` accepted `payload.signature..anything`, leaving the suffix unauthenticated, and the CSRF middleware reused a guest's `XSRF-TOKEN` cookie verbatim, so a cookie planted from a sibling subdomain could carry markup into `csrfField()`. `csrfField()` now also HTML-escapes the token.
+- Updated dependencies [85436ba]
+  - @guren/orm@2.14.0
+
 ## 2.29.0
 
 ### Minor Changes
