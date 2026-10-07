@@ -333,6 +333,8 @@ const post = await Post.create(data, { set: { authorId: author.id } })
 await Post.update({ id: post.id }, data, { set: { status: 'draft' } })
 ```
 
+The query builder's bulk update takes the same option: `Post.where('status', 'draft').update(data, { set: { reviewedAt: new Date() } })`.
+
 `data` is still filtered by `fillable`; only the keys in `set` skip it. Because `set` exists to keep the two apart, it throws a `MassAssignmentException` when:
 
 - a `set` key is in `fillable` (a request could already set it, so it belongs in `data`);
