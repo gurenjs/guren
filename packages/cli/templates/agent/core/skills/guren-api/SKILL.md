@@ -39,7 +39,7 @@ export default class PostController extends Controller {
     // routes/web.ts: router.post('/posts', { name: 'posts.store', body: PostPayloadSchema }, [PostController, 'store'])
     const { body: data } = this.validated('posts.store')     // route contract already answered 422
     const user = await this.auth.userOrFail<UserRecord>()    // throws 401 — <T> defaults to Authenticatable, no .id
-    const post = await Post.create({ ...data, authorId: user.id })
+    const post = await Post.create(data, { set: { authorId: user.id } })  // authorId is not fillable
     return this.redirect('/posts/' + post?.id)
   }
 }
@@ -91,7 +91,8 @@ await Post.create({ title: 'Hello' })
 export class Post extends defineModel(posts, {
   // Whitelist: only these fields are accepted (recommended).
   // Typed against the table's columns — a typo is a compile error.
-  fillable: ['title', 'excerpt', 'body', 'authorId'],
+  // authorId is chosen by the server, so it is not listed: it goes in `set`.
+  fillable: ['title', 'excerpt', 'body'],
 }) {}
 
 export class User extends defineModel(users, {
@@ -108,7 +109,8 @@ export class User extends defineModel(users, {
 - Credential columns (`passwordHash`, `rememberToken`) **always throw** on authenticatable models — the framework denies them; listing them in `fillable` does not open them
 - Enforced by `Model.filterFillable()`, called automatically before persistence
 - Always define `fillable` on models that accept user input — this is the second defense layer after Zod validation
-- `forceCreate()` / `forceUpdate()` bypass filtering for trusted server-side values (e.g. `passwordHash: 'oauth:...'`). **Never call them with request input**
+- A column the server chooses (owner `authorId`, parent `postId`) stays out of `fillable` and goes in `set`: `Post.create(data, { set: { authorId: user.id } })`, `Post.update(where, data, { set: { … } })`. `data` is still filtered; `set` throws on `id`, a credential column, a fillable key, a key `data` also carries, or a model with no `fillable`. Never spread request input into `set`
+- `forceCreate()` / `forceUpdate()` bypass filtering. They are for writes that carry no request data: seeders, system records, OAuth hash sentinels (`passwordHash: 'oauth:...'`). **Never call them with request input**
 
 **Relationships** — declare once, eager-load anywhere:
 

@@ -311,6 +311,7 @@ describe('GUREN_API_DIGEST', () => {
       'paginate(result, { path?, query?, fragment? })',
       'PaginatorOptions',
       'withPaginate',
+      'create(data, { set: { authorId } })',
     ],
     'controllers-http.md': [
       'validateBody',

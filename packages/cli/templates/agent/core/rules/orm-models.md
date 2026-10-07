@@ -21,7 +21,8 @@ export type PostRecord = typeof posts.$inferSelect
 export class Post extends defineModel(posts, {
   // Typed against the table's columns — a typo is a compile error.
   // (`static fillable = [...]` on the class also works and shadows the option.)
-  fillable: ['title', 'body', 'authorId'],
+  // authorId is chosen by the server, so it stays out: Post.create(data, { set: { authorId } }).
+  fillable: ['title', 'body'],
 }) {
   static override relationTypes: { author: BelongsToRecord<UserRecord> } = { author: null }
 }
@@ -43,14 +44,15 @@ export class User extends defineModel(users, {
 
 Drop `requireOnCreate` when accounts can also be created without a password (OAuth-only sign-up).
 Optional means optional — passing `passwordHash` still type-checks. At runtime the base class
-denies the hash and remember-token columns from mass assignment entirely; `forceCreate()`/
-`forceUpdate()` is the path for trusted server-side values.
+denies the hash and remember-token columns from mass assignment entirely (`set` refuses them too).
+A sentinel such as `passwordHash: 'oauth:…'` is written with `forceCreate()`, since that write
+carries no request data (see Mass assignment below).
 
 ## Statics
 
 `find(id)` → record | null · `findOrFail(id)` throws `ModelNotFoundException` (renders 404) ·
-`first(where?)` → record | null · `all()` · `create(data)` · `forceCreate(data)` ·
-`update(where, data)` · `forceUpdate(where, data)` · `delete(where)` ·
+`first(where?)` → record | null · `all()` · `create(data, { set? })` · `forceCreate(data)` ·
+`update(where, data, { set? })` · `forceUpdate(where, data)` · `delete(where)` ·
 `paginate(options?)` · `transaction(async (trx) => ...)`
 
 ## Where clauses
@@ -185,6 +187,13 @@ For concurrency safety add a unique index and catch the constraint error, or wra
   and `appends`
 - Credential columns (`passwordHash`, `rememberToken`) **always throw** on authenticatable
   models — the framework denies them, listing them in `fillable` does not open them
-- `forceCreate()` / `forceUpdate()` bypass filtering — trusted server-side values only.
+- A column the server chooses (the owner `authorId`, a parent `postId`, a default `status`)
+  stays out of `fillable` and goes in `set`, beside the validated data:
+  `Post.create(data, { set: { authorId: user.id } })`, `Post.update(where, data, { set: { … } })`.
+  `data` is still filtered; `set` throws when a key is `id`, a credential column, or in `fillable`,
+  when `data` carries the same key, and on a model with no `fillable`. Never spread request
+  input into `set`
+- `forceCreate()` / `forceUpdate()` bypass filtering. They are for writes that carry no
+  request data at all: seeders, system records, OAuth hash sentinels (`passwordHash: 'oauth:…'`).
   **Never call them with request input**; a `MassAssignmentException` is never fixed by
   switching the same payload to `force*`

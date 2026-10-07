@@ -63,7 +63,7 @@ the change was supposed to do.
 - [ ] The policy is registered with `gate.policy(Model, Policy)` in the app's authorization provider, or the gate denies every action
 
 ### Models and data
-- [ ] `defineModel(table, { fillable: [...] })`, with any owner column left out of it; `forceCreate`/`forceUpdate` carry validated fields and server-derived values only, never a raw request body
+- [ ] `defineModel(table, { fillable: [...] })`, with any owner column left out of it and written through `create(data, { set: { authorId } })`; `forceCreate`/`forceUpdate` carry no request data at all (seeders, system records, OAuth hash sentinels), and nothing spreads request input into `set`
 - [ ] A `db/schema.ts` change comes with a migration in `db/migrations/`
 - [ ] Relations eager-loaded with `Post.with('author')` rather than queried inside a loop; lists paginated with `Post.paginate` and the `paginate` helper
 - [ ] Slow work (mail, imports, webhooks) dispatched to the queue, not awaited in the request

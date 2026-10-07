@@ -1784,6 +1784,7 @@ export default function registerRoutes(router: any) {
       const forceWrite = report.findings.find(f => f.key === 'force-write-request-data:PostController.store')
       expect(forceWrite).toBeDefined()
       expect(forceWrite!.status).toBe('warn')
+      expect(forceWrite!.suggestion).toContain('create(data, { set: { authorId: user.id } })')
     } finally {
       await workspace.cleanup()
     }
