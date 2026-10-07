@@ -1,5 +1,5 @@
 // Companion for typechecking templates/scaffold/auth: what
-// buildUserModelTemplate(true) in make-auth.ts emits. Pinned to the builder
+// buildUserModelTemplate(true, true) in make-auth.ts emits. Pinned to the builder
 // by scaffold-output.test.ts, so a builder change fails there with
 // instructions rather than silently drifting from this copy.
 import { AuthenticatableModel, defineModel } from '@guren/core'
@@ -12,6 +12,9 @@ export class User extends defineModel(users, {
   // Derived from the plain `password`, so callers never set it directly
   optionalOnCreate: ['passwordHash'],
   requireOnCreate: ['password'],
+  // What a request may set. emailVerifiedAt and the OAuth provider ids are
+  // chosen by the server and written through `set` (RFC 0031).
+  fillable: ['name', 'email', 'password'],
   // Never serialized by Model.serialize() and stripped from auth.user()
   hidden: ['passwordHash', 'rememberToken'],
 }) {

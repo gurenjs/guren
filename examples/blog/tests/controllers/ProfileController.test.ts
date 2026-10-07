@@ -118,7 +118,8 @@ describe('ProfileController', () => {
 
     expect(mockUserUpdate).toHaveBeenCalledWith(
       { id: 1 },
-      expect.objectContaining({ email: 'new@example.com', emailVerifiedAt: null }),
+      { name: 'Ada', email: 'new@example.com' },
+      { set: { emailVerifiedAt: null } },
     )
     expect(mockSendEmailVerificationMail).toHaveBeenCalled()
     expect(payload.props.status).toBe('Profile updated. Check your new email address for a verification link.')
