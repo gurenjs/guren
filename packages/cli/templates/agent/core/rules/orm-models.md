@@ -92,7 +92,7 @@ so guarding `if (ids.length === 0)` before a `where in` is optional, not require
 
 Terminate with: `get()` / `first()` / `firstOrFail()` / `count()` /
 `paginate(page?, perPage?)` or `paginate({ page, perPage })` /
-`update(data)` / `forceUpdate(data)` / `delete()`
+`update(data, { set? })` / `forceUpdate(data)` / `delete()`
 
 ## Pagination
 
