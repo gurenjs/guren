@@ -133,11 +133,20 @@ Always add `fillable` to generated models. This is the second defense layer afte
 
 ```typescript
 export class <Name> extends defineModel(<names>, {
-  fillable: ['title', 'body', 'authorId'],  // only these fields pass to create()/update()
+  fillable: ['title', 'body'],  // only these fields pass to create()/update()
 }) {}
 ```
 
 Prefer the `defineModel` option over `static fillable = [...]` — the option is typed against the table's columns, so a typo is a compile error (a `static` declaration still works and shadows the option).
+
+List only the columns a request may set. A column the server chooses (the owner `authorId`, a parent `postId`) stays out of `fillable` and is written with `set`, beside the validated data:
+
+```typescript
+const user = await this.auth.userOrFail<UserRecord>()
+const post = await <Name>.create(data, { set: { authorId: user.id } })
+```
+
+Never use `forceCreate()` / `forceUpdate()` to add an owner to request data, and never spread request input into `set`.
 
 For User models, credential columns (`passwordHash`, `rememberToken`) are denied from
 mass assignment by `AuthenticatableModel` itself — never list them in `fillable`:

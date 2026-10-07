@@ -135,14 +135,14 @@ export class PostController extends Controller {
   async store() {
     const { body: data } = this.validated('posts.store')     // the route's body schema answered 422 already
     const user = await this.auth.userOrFail<UserRecord>()    // 401 if unauthenticated
-    const post = await Post.create({ ...data, authorId: user.id })
+    const post = await Post.create(data, { set: { authorId: user.id } })  // server-chosen column
     return this.redirect('/posts')
   }
 }
 
 // app/Models/Post.ts
 export class Post extends defineModel(posts, {
-  fillable: ['title', 'body', 'authorId'],  // typed against the table's columns
+  fillable: ['title', 'body'],  // typed against the table's columns; authorId stays out (set above)
 }) {}
 ```
 
