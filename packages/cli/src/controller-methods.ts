@@ -294,14 +294,18 @@ const UPDATE_CALL_PATTERN = modelCallPattern('update')
  */
 export const FORCE_WRITE_PATTERN = /\.\s*force(?:Create|Update)\s*\(/
 
+const UPLOAD_MEMBERS: ReadonlySet<string> = new Set<ControllerMemberName>(['file', 'files'])
+
 /**
  * `this.<member>(` for the members whose value carries request input, which the
- * force-write review prompt pairs with a force write (RFC 0031 §6). `validated()`
- * reads no body itself, so its kind above stays `non-body`; it still hands the
- * action what the route contract parsed.
+ * force-write review prompt pairs with a force write (RFC 0031 §6): every body
+ * validator and body payload reader but the uploads, plus `validated()`, whose
+ * kind stays `non-body` because the route contract read the body for it.
  */
 export const REQUEST_DATA_CALL_PATTERN = controllerMemberCall(
-  'validateBody', 'validateBodySafe', 'validated', 'input', 'only', 'except',
+  ...[...controllerMembers('body-validation'), ...controllerMembers('body-payload')]
+    .filter((name) => !UPLOAD_MEMBERS.has(name)) as ControllerMemberName[],
+  'validated',
 )
 
 const SET_KEY_PATTERN = /\bset\s*:\s*\{/g

@@ -3,6 +3,8 @@ import { chmod, mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
+  REQUEST_DATA_CALL_PATTERN,
+  spreadsIntoSet,
   attachControllerRefs,
   blankCommentsAndStrings,
   classActionMembers,
@@ -560,5 +562,37 @@ class PostController {
   accessor draft = () => null
 }`).map((m) => m.name),
     ).toEqual(['overloaded'])
+  })
+})
+
+describe('spreadsIntoSet', () => {
+  it.each([
+    ['await Post.create({}, { set: { ...data, authorId: 1 } })', true],
+    ['await Post.update({ id: 1 }, {}, { trx, set: { authorId: 1, ...data } })', true],
+    ["await Post.where('slug', s).update(d, { set: { ...x } })", true],
+    ['await txPost.create<Foo>(data, { set: { ...owner } })', true],
+    ['await Post.create(data, { set: { authorId: 1 } })', false],
+    ['await Post.create(data, { set: { authorId: 1, meta: { ...defaults } } })', false],
+    ['await db.insert(p).values(d).onConflictDoUpdate({ target: p.id, set: { ...d } })', false],
+    ['const opts = { set: { ...data } }; await Post.create(d, opts)', false],
+  ])('reads %s as %p', (body, expected) => {
+    expect(spreadsIntoSet(body)).toBe(expected)
+  })
+})
+
+describe('REQUEST_DATA_CALL_PATTERN', () => {
+  it.each([
+    ["this.validated('posts.store')", true],
+    ['this.validateBody(schema)', true],
+    ['this.validateBodySafe(schema)', true],
+    ["this.input('title')", true],
+    ["this.only(['title'])", true],
+    ["this.except(['id'])", true],
+    ['this.validateParams(schema)', false],
+    ['this.validateQuery(schema)', false],
+    ["this.file('cover')", false],
+    ["validated('posts.store')", false],
+  ])('reads %s as %p', (call, expected) => {
+    expect(REQUEST_DATA_CALL_PATTERN.test(call)).toBe(expected)
   })
 })
