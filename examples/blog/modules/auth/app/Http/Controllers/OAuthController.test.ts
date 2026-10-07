@@ -137,12 +137,8 @@ describe('OAuthController', () => {
       const response = await controller.callback()
 
       expect(mockUserCreate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          name: 'New Person',
-          email: 'new@example.com',
-          githubId: 'gh-2',
-          emailVerifiedAt: expect.any(Date),
-        }),
+        { name: 'New Person', email: 'new@example.com', password: expect.any(String) },
+        { set: { githubId: 'gh-2', emailVerifiedAt: expect.any(Date) } },
       )
       expect(response.status).toBe(302)
       expect(response.headers.get('Location')).toBe('/dashboard')
@@ -219,7 +215,7 @@ describe('OAuthController', () => {
 
       const response = await controller.callback()
 
-      expect(mockUserCreate).toHaveBeenCalledWith(expect.objectContaining({ email: 'mixed@example.com' }))
+      expect(mockUserCreate).toHaveBeenCalledWith(expect.objectContaining({ email: 'mixed@example.com' }), expect.anything())
       expect(response.status).toBe(302)
     })
 
