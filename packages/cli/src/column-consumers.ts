@@ -122,13 +122,15 @@ interface ArgumentPositions {
   where?: number
   /** The data a write is given: the columns it names are written. */
   data?: number
+  /** A write's options, whose `set` names columns written beside the data (RFC 0031). */
+  options?: number
 }
 
 /** The model class's own methods whose arguments name columns, by position. */
 const STATIC_ARGUMENTS: ReadonlyMap<string, ArgumentPositions> = new Map([
-  ['create', { data: 0 }],
+  ['create', { data: 0, options: 1 }],
   ['forceCreate', { data: 0 }],
-  ['update', { where: 0, data: 1 }],
+  ['update', { where: 0, data: 1, options: 2 }],
   ['forceUpdate', { where: 0, data: 1 }],
   ['delete', { where: 0 }],
   ['first', { where: 0 }],
@@ -142,7 +144,7 @@ const STATIC_ARGUMENTS: ReadonlyMap<string, ArgumentPositions> = new Map([
 const BUILDER_ARGUMENTS: ReadonlyMap<string, ArgumentPositions> = new Map([
   ['create', { data: 0 }],
   ['forceCreate', { data: 0 }],
-  ['update', { data: 0 }],
+  ['update', { data: 0, options: 1 }],
   ['forceUpdate', { data: 0 }],
 ])
 
@@ -531,6 +533,20 @@ class RecordWalker {
     }
   }
 
+  /** The columns a write's `set` option names; options the scan cannot see may name any. */
+  private setColumns(tie: Tie, argument: BabelNode | undefined): void {
+    if (!argument) return
+    const options = unwrapTypeAssertion(argument)
+    if (options.type !== 'ObjectExpression') {
+      this.opaqueRead(tie, argument, true)
+      return
+    }
+    for (const property of options.properties as BabelNode[]) {
+      if (property.type === 'ObjectProperty' && keyOf(property) === 'set') this.columnKeys(tie, property.value as BabelNode, true)
+      else if (property.type === 'SpreadElement') this.opaqueRead(tie, property, true)
+    }
+  }
+
   /**
    * The columns a query on the model names: `where('title', …)`, `select('title', 'body')`,
    * `where({ title })`, and the data `create`/`update` write. A column held in a variable is opaque.
@@ -544,6 +560,7 @@ class RecordWalker {
     if (positions) {
       if (positions.where !== undefined) this.columnKeys(tie, args[positions.where], false)
       if (positions.data !== undefined) this.columnKeys(tie, args[positions.data], true)
+      if (positions.options !== undefined) this.setColumns(tie, args[positions.options])
       return
     }
     if (COLUMN_ARGUMENT_METHODS.has(method)) {
