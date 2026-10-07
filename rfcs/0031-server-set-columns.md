@@ -264,16 +264,22 @@ to writes that carry no request data at all: seeders, the runtime stores
    - type tests beside the existing `optionalOnCreate`/`requireOnCreate` ones:
      `set` removes a required key from `data`, a key in both fails, `id` in
      `set` fails, and `S` is inferred from `set` alone.
+
+   Shipped in #1042 (orm 2.13.0, core 1.22.0).
 2. **`@guren/cli`** (patch), after part 1 is released, since what it ships is
    read by apps against their installed `@guren/core`:
    - the force-write finding's fix text;
    - the harness `rules/orm-models.md`, `entry-body.md`,
      `skills/guren-api/SKILL.md` and `skills/feature/SKILL.md` move to `set`, with
      owner columns out of `fillable`.
+
+   Shipped in #1152.
 3. **Docs and shipped code**, also after part 1 is released, so that
    `smoke:starter:npm` never sees a template using an unpublished API: the
    first and third rows of the table in Problem, chapter 6's force-write section
    rewritten around `set`, and chapter 8's agent rule 3.
+
+   Shipped in #1153, with `database.md` gaining a section on `set`.
 
 Left for follow-ups, each small and independent of this design:
 
@@ -281,20 +287,31 @@ Left for follow-ups, each small and independent of this design:
   only for `validateBody`, so a route-contract body plus a force write is never
   flagged. The trigger shares its pattern with the route-validation check, so the
   fix is a "returns request data" classification in `controller-methods.ts`
-  that both use, not a hand-written widening.
+  that both use, not a hand-written widening. Shipped in #1155: the force-write
+  trigger reads `REQUEST_DATA_CALL_PATTERN`, derived from the member kinds; the
+  route-validation check keeps its own pattern, since `validated()` validates
+  nothing itself.
 - **`make:auth`.** Its `User` model declares no `fillable`, and its OAuth and
   profile controllers write `emailVerifiedAt` and the provider id through plain
   `create`/`update`. Giving the model a `fillable` and those writes `set` is a
-  scaffold change of its own.
+  scaffold change of its own. Shipped in #1156, with email confirmation, which
+  carries no request data, on `forceUpdate`.
 - **`QueryBuilder.update(data, { set })`.** It already calls `filterFillable`,
-  so it takes `set` without a design change once a caller needs it.
+  so it takes `set` without a design change once a caller needs it. Shipped in
+  #1157.
 - **A declared group of server-owned columns**, which is RFC 0006's Open
   Question 4 (public `deniedFields()`). It would let a model refuse an owner
-  column in `data` even on a path that does not use `set`.
+  column in `data` even on a path that does not use `set`. Open.
 - **A spread inside a `set` literal.** Step 4 misses one that carries no
   fillable key (section 4). A `guren audit` warning on `set: { ...x }` would
   cover the literal form. An options object passed by variable stays out of
   its reach, which is why Alternatives Considered rejects it as the only guard.
+  Shipped in #1155 as `set-spread:*`.
+- **Plan Impact.** Its column scan read write keys from the data argument only,
+  so an owner moved into `set` left the column's consumers. Shipped in #1158.
+- **An all-optional object type in `set`.** `Partial<Pick<UserRecord, 'githubId'>>`
+  matches no overload, while `{ githubId: string }` does. #1156 types the
+  provider identity as a union of required ids instead. Open.
 
 ## Alternatives Considered
 

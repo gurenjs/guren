@@ -534,6 +534,7 @@ export class User extends defineModel(users, {
   base: AuthenticatableModel,
   optionalOnCreate: ['passwordHash'],
   requireOnCreate: ['password'],
+  fillable: ['name', 'email', 'password'],
   hidden: ['passwordHash', 'rememberToken'],
 }) {}
 ```
