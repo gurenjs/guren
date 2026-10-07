@@ -327,6 +327,48 @@ describe('scanColumnConsumers on writes and queries it cannot classify', () => {
     expect(result.opaque.map((read) => `${read.line}${read.write ? ' write' : ''}`)).toEqual(['7 write', '8 write'])
   })
 
+  test('should write the columns a set option names beside the data (RFC 0031)', async () => {
+    const result = await scan({
+      controllers: controller(`  async store() {
+    await Post.create({ title: 'x' }, { set: { authorId: 1 } })
+    await Post.update({ id: 1 }, { body: 'y' }, { trx, set: { status: 'draft' } })
+    await Post.where('slug', 's').update({}, { set: { reviewedAt: new Date() } })
+    await Post.create({ title: 'z' }, { trx })
+    return this.redirect('/posts')
+  }`),
+    })
+
+    expect(result.reads.map((read) => `${read.property}${read.write ? ' write' : ''}`))
+      .toEqual(['title write', 'authorId write', 'id', 'body write', 'status write', 'slug', 'reviewedAt write', 'title write'])
+    expect(result.opaque).toEqual([])
+  })
+
+  test('should read a transaction scope write by the class signatures', async () => {
+    const result = await scan({
+      controllers: controller(`  async store() {
+    await Post.inTransaction(trx).create({ title: 'x' }, { set: { authorId: 1 } })
+    await Post.inTransaction(trx).update({ id: 1 }, { body: 'y' }, { set: { status: 'draft' } })
+    return this.redirect('/posts')
+  }`),
+    })
+
+    expect(result.reads.map((read) => `${read.property}${read.write ? ' write' : ''}`))
+      .toEqual(['title write', 'authorId write', 'id', 'body write', 'status write'])
+  })
+
+  test('should name write options it cannot see as an opaque write', async () => {
+    const result = await scan({
+      controllers: controller(`  async store() {
+    const options = { set: { authorId: 1 } }
+    await Post.create({ title: 'x' }, options)
+    await Post.create({ title: 'y' }, { ...options })
+    return this.redirect('/posts')
+  }`),
+    })
+
+    expect(result.opaque.map((read) => `${read.line}${read.write ? ' write' : ''}`)).toEqual(['7 write', '8 write'])
+  })
+
   test('should name a column held in a variable, and a query ending in an unclassified method, as opaque', async () => {
     const result = await scan({
       controllers: controller(`  async index() {
