@@ -142,6 +142,7 @@ Prefer the `defineModel` option over `static fillable = [...]` — the option is
 List only the columns a request may set. A column the server chooses (the owner `authorId`, a parent `postId`) stays out of `fillable` and is written with `set`, beside the validated data:
 
 ```typescript
+const data = await this.validateBody(<Name>PayloadSchema)
 const user = await this.auth.userOrFail<UserRecord>()
 const post = await <Name>.create(data, { set: { authorId: user.id } })
 ```

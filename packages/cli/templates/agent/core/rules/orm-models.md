@@ -44,8 +44,9 @@ export class User extends defineModel(users, {
 
 Drop `requireOnCreate` when accounts can also be created without a password (OAuth-only sign-up).
 Optional means optional — passing `passwordHash` still type-checks. At runtime the base class
-denies the hash and remember-token columns from mass assignment entirely; `forceCreate()`/
-`forceUpdate()` is the path for trusted server-side values.
+denies the hash and remember-token columns from mass assignment entirely (`set` refuses them too).
+A sentinel such as `passwordHash: 'oauth:…'` is written with `forceCreate()`, since that write
+carries no request data (see Mass assignment below).
 
 ## Statics
 
