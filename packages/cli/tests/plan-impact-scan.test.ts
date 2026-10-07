@@ -343,6 +343,19 @@ describe('scanColumnConsumers on writes and queries it cannot classify', () => {
     expect(result.opaque).toEqual([])
   })
 
+  test('should read a transaction scope write by the class signatures', async () => {
+    const result = await scan({
+      controllers: controller(`  async store() {
+    await Post.inTransaction(trx).create({ title: 'x' }, { set: { authorId: 1 } })
+    await Post.inTransaction(trx).update({ id: 1 }, { body: 'y' }, { set: { status: 'draft' } })
+    return this.redirect('/posts')
+  }`),
+    })
+
+    expect(result.reads.map((read) => `${read.property}${read.write ? ' write' : ''}`))
+      .toEqual(['title write', 'authorId write', 'id', 'body write', 'status write'])
+  })
+
   test('should name write options it cannot see as an opaque write', async () => {
     const result = await scan({
       controllers: controller(`  async store() {

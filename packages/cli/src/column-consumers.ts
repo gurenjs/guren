@@ -148,6 +148,14 @@ const BUILDER_ARGUMENTS: ReadonlyMap<string, ArgumentPositions> = new Map([
   ['forceUpdate', { data: 0 }],
 ])
 
+/** The class itself, or `Model.inTransaction(trx)`, whose scope takes the class's own write signatures. */
+function takesClassArguments(receiver: BabelNode): boolean {
+  const node = unwrapTypeAssertion(receiver)
+  if (node.type === 'Identifier') return true
+  return (node.type === 'CallExpression' || node.type === 'OptionalCallExpression')
+    && methodName(unwrapTypeAssertion(node.callee as BabelNode)) === 'inTransaction'
+}
+
 /** Query methods whose first argument is a column name (`select` takes several). */
 const COLUMN_ARGUMENT_METHODS = new Set(['where', 'orWhere', 'whereIn', 'whereNotIn', 'whereNull', 'whereNotNull', 'orderBy', 'select', 'sum', 'avg', 'min', 'max', 'countBy'])
 
@@ -542,8 +550,9 @@ class RecordWalker {
       return
     }
     for (const property of options.properties as BabelNode[]) {
-      if (property.type === 'ObjectProperty' && keyOf(property) === 'set') this.columnKeys(tie, property.value as BabelNode, true)
-      else if (property.type === 'SpreadElement') this.opaqueRead(tie, property, true)
+      const key = property.type === 'ObjectProperty' ? keyOf(property) : undefined
+      if (key === 'set') this.columnKeys(tie, property.value as BabelNode, true)
+      else if (key === undefined) this.opaqueRead(tie, property, true)
     }
   }
 
@@ -556,7 +565,7 @@ class RecordWalker {
     if (!model) return
     const tie: Tie = { model, many: false }
     const args = node.arguments as BabelNode[]
-    const positions = unwrapTypeAssertion(receiver).type === 'Identifier' ? STATIC_ARGUMENTS.get(method) : BUILDER_ARGUMENTS.get(method)
+    const positions = takesClassArguments(receiver) ? STATIC_ARGUMENTS.get(method) : BUILDER_ARGUMENTS.get(method)
     if (positions) {
       if (positions.where !== undefined) this.columnKeys(tie, args[positions.where], false)
       if (positions.data !== undefined) this.columnKeys(tie, args[positions.data], true)
