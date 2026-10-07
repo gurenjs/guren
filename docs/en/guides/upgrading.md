@@ -146,14 +146,14 @@ export class User extends defineModel(users, { base: AuthenticatableModel }) {
 
 - **What changed**: Models that define `fillable` now throw a `MassAssignmentException` when `create()` / `update()` receives a field outside the allowlist. Previously, extra fields were silently discarded.
 - **Who is affected**: Any code that passes unfiltered objects (spread request bodies, merged defaults) to `create()` / `update()`.
-- **How to migrate**: Pass only allowlisted fields, or use `forceCreate()` / `forceUpdate()` for trusted server-side data such as seeders and system records.
+- **How to migrate**: Pass only allowlisted fields in the data. A column the server chooses, such as the author, goes in the `set` option ([Columns the server chooses](./database.md#columns-the-server-chooses)). Keep `forceCreate()` / `forceUpdate()` for writes that carry no request data, such as seeders and system records.
 
 ```ts
 // Before: authorId silently dropped when not in fillable
 await Post.create({ ...data, authorId: user.id })
 
-// After: keep authorId out of fillable and set it from the session with forceCreate
-await Post.forceCreate({ ...validated, authorId: user.id })
+// After: keep authorId out of fillable and pass it from the session in set
+await Post.create(data, { set: { authorId: user.id } })
 ```
 
 #### Sanitized auth user records

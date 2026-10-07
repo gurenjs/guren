@@ -49,7 +49,7 @@ A record that belongs to a user carries the owner's id (`authorId` on posts, `us
 
 1. **A policy exists** in `app/Policies/<Model>Policy.ts` and is registered in `app/Providers/AuthProvider.ts` with `this.container.make('gate').policy(Model, ModelPolicy)`. Its `update` and `delete` (and any other mutating ability) return `user !== null && user.id === record.<ownerColumn>`.
 2. **Every action that changes a record** calls `await this.authorize('<ability>', [Model, record])` before doing anything else. Authentication (`requireAuthenticated`, `this.auth.userOrFail()`) is not authorization; a route inside the `auth` group still needs the policy call.
-3. **The owner is set by the server**, never by the request: `Model.forceCreate({ ...validated, userId: user.id })` with `user` from `this.auth.userOrFail()`. The owner column is never in `fillable`.
+3. **The owner is set by the server**, never by the request: `Model.create(validated, { set: { userId: user.id } })` with `user` from `this.auth.userOrFail()`. The owner column is never in `fillable`, and `forceCreate`/`forceUpdate` never carry request data.
 4. **Every mutating action has two tests**: the owner succeeds, and another signed-in user gets `assertForbidden()`. A guest test (`assertRedirect('/login')`) covers the wall, not the door; write both.
 
 `guren audit` verifies authentication only and stays green when a policy call is missing. The tests in rule 4 are the only check that sees it. Write them before the action.
@@ -74,14 +74,14 @@ Follow these steps in order. Do not skip the tests; the audit cannot see a missi
 1. Scaffold the resource, then its policy: `bunx guren add resource <Name> --fields "<fields>"` and `bunx guren make:policy <Name>`.
 2. Add the owner column to the table in `db/schema.ts`: `userId: integer('user_id').notNull().references(() => users.id)`. Then `bun run db:make create_<names>` and `bun run db:migrate`. Never `db:reset` to get there.
 3. In `app/Models/<Name>.ts`, list only the request fields in `fillable`; never the owner column.
-4. In the controller: `store` sets the owner with `forceCreate({ ...data, userId: user.id })` where `user` is `await this.auth.userOrFail<UserRecord>()`; `edit`, `update` and `destroy` resolve the record with route model binding and call `await this.authorize('update' | 'delete', [<Name>, record])` first.
+4. In the controller: `store` sets the owner with `<Name>.create(data, { set: { userId: user.id } })` where `user` is `await this.auth.userOrFail<UserRecord>()`; `edit`, `update` and `destroy` resolve the record with route model binding and call `await this.authorize('update' | 'delete', [<Name>, record])` first.
 5. Register the policy in `app/Providers/AuthProvider.ts`: `this.container.make('gate').policy(<Name>, <Name>Policy)`.
 6. Routes: `index` and `show` public; `create`, `store`, `edit`, `update`, `destroy` inside `router.middleware('auth').group(...)`, with `bind: { id: <Name> }` on the record routes.
 7. Tests in `tests/<Name>Controller.test.ts`: the owner can store and update; another user gets 403 on update and destroy; a guest is redirected to `/login` from the form and from store.
 8. `bun run codegen`, `bun test`, `bunx guren gate`.
 ```
 
-Two things to notice. The `description` is what the agent matches a request against, so it names the shapes of request it should trigger on, in the words a person would use. And step 2 encodes the migration discipline from chapter 6 and step 4 the `forceCreate` rule, so the agent does not have to remember either; it has to follow a list.
+Two things to notice. The `description` is what the agent matches a request against, so it names the shapes of request it should trigger on, in the words a person would use. And step 2 encodes the migration discipline from chapter 6 and step 4 the owner rule (`set`, never `forceCreate`), so the agent does not have to remember either; it has to follow a list.
 
 ## 4. The reviewer
 
@@ -101,7 +101,7 @@ You review one thing: whether the changes in `git diff` (staged and unstaged) re
 For every controller action in the diff that creates, updates or deletes a record:
 
 1. Does the model have an owner column? If so, is there `await this.authorize(..., [Model, record])` before the write? Name the file and line if it is missing.
-2. Is the owner set from `this.auth.userOrFail()` with `forceCreate`, and absent from `fillable`?
+2. Is the owner set from `this.auth.userOrFail()` through `set`, and absent from `fillable`? Does any `forceCreate`/`forceUpdate` carry request data?
 3. Is the policy registered in `app/Providers/AuthProvider.ts`?
 4. Do `tests/<Name>Controller.test.ts` contain, for that action, an owner test and an `assertForbidden()` test for another user?
 
@@ -330,7 +330,7 @@ export default class LinkController extends Controller {
   async store(): Promise<Response> {
     const user = await this.auth.userOrFail<UserRecord>()
     const data = await this.validateBody(LinkPayloadSchema)
-    const link = await Link.forceCreate({ ...data, userId: user.id })
+    const link = await Link.create(data, { set: { userId: user.id } })
     return this.redirect(`/links/${link.id}`)
   }
 
@@ -469,7 +469,7 @@ bun test
 The rubric is the rule, applied:
 
 - `LinkPolicy` exists and is registered; `edit`, `update` and `destroy` call `authorize` with `[Link, link]`.
-- `store` sets `userId` from the session with `forceCreate`; `fillable` is `title` and `url`.
+- `store` sets `userId` from the session through `set`; `fillable` is `title` and `url`.
 - The record routes carry `bind`, and the mutating ones are in the `auth` group.
 - A migration created `links`, and nothing reset the database.
 - The seven tests are green, and the `ownership-review` subagent's list is empty.

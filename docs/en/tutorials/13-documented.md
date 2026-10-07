@@ -201,7 +201,7 @@ export default class CommentController extends Controller {
     await this.authorize('create', Comment)
     const author = await this.auth.userOrFail<UserRecord>()
     const data = await this.validateBody(CommentPayloadSchema)
-    const comment = await Comment.forceCreate({ ...data, postId: post.id, authorId: author.id })
+    const comment = await Comment.create(data, { set: { postId: post.id, authorId: author.id } })
     await this.make('events').emit(new CommentPosted(comment.id))
 
     if (this.isToolCall()) {

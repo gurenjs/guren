@@ -321,7 +321,30 @@ await Post.create({ title: 'Hello', body: '...', status: 'draft', authorId: 1 })
 // MassAssignmentException: Post: mass assignment blocked for field(s) "authorId"
 ```
 
-For trusted, server-side-assembled data (OAuth account linking, seeders, system records), bypass the allowlist with `forceCreate()` / `forceUpdate()`:
+#### Columns the server chooses
+
+Some columns belong in the row but must never come from a request: the post's author, the post a comment belongs to, a default status. Keep them out of `fillable` and pass them in the `set` option, beside the validated data:
+
+```ts
+const author = await this.auth.userOrFail<UserRecord>()
+const data = await this.validateBody(PostPayloadSchema)
+
+const post = await Post.create(data, { set: { authorId: author.id } })
+await Post.update({ id: post.id }, data, { set: { status: 'draft' } })
+```
+
+`data` is still filtered by `fillable`; only the keys in `set` skip it. Because `set` exists to keep the two apart, it throws a `MassAssignmentException` when:
+
+- a `set` key is in `fillable` (a request could already set it, so it belongs in `data`);
+- `data` carries a key that `set` also sets;
+- a `set` key is `id` or a credential column;
+- the model declares no `fillable`.
+
+`{ set: { ...data, authorId } }` usually throws under the first rule, because the spread moves fillable keys into `set`. It does not when the spread carries no fillable key, so do not rely on the throw: never spread request input into `set`.
+
+#### Force writes
+
+For writes that carry no request data at all (OAuth account linking, seeders, system records), bypass the allowlist with `forceCreate()` / `forceUpdate()`:
 
 ```ts
 const user = await User.forceCreate({
@@ -334,7 +357,7 @@ await User.forceUpdate({ id: user.id }, { emailVerifiedAt: new Date() })
 ```
 
 > [!WARNING]
-> `forceCreate()` / `forceUpdate()` skip mass-assignment protection entirely. Never pass raw request input to them.
+> `forceCreate()` / `forceUpdate()` skip mass-assignment protection entirely. Never pass request input to them, validated or not: to add a server-chosen column to request data, use `set`.
 
 Two protections apply regardless of `fillable`:
 

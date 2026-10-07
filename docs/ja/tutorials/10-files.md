@@ -385,7 +385,7 @@ export default class PostController extends Controller {
   async store(): Promise<Response> {
     const author = await this.auth.userOrFail<UserRecord>()
     const { tags, ...data } = await this.validateBody(PostPayloadSchema)
-    const post = await Post.forceCreate({ ...data, authorId: author.id })
+    const post = await Post.create(data, { set: { authorId: author.id } })
     await syncTags(post.id, tags)
     const cover = await this.file('cover')
     if (cover) {
@@ -1050,7 +1050,7 @@ export default class PostController extends Controller {
   async store(): Promise<Response> {
     const author = await this.auth.userOrFail<UserRecord>()
     const { tags, ...data } = await this.validateBody(PostPayloadSchema)
-    const post = await Post.forceCreate({ ...data, authorId: author.id })
+    const post = await Post.create(data, { set: { authorId: author.id } })
     await syncTags(post.id, tags)
     const cover = await this.file('cover')
     if (cover) {

@@ -297,7 +297,7 @@ export default class PostsController extends Controller {
   async store() {
     const { body } = this.validated('posts.store')
     const user = await this.auth.userOrFail<UserRecord>()
-    const post = await Post.create({ ...body, authorId: user.id })
+    const post = await Post.create(body, { set: { authorId: user.id } })
     return this.redirect(`/posts/${post.id}`)
   }
 }

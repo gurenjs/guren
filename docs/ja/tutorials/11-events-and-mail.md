@@ -301,7 +301,7 @@ export default class CommentController extends Controller {
     await this.authorize('create', Comment)
     const author = await this.auth.userOrFail<UserRecord>()
     const data = await this.validateBody(CommentPayloadSchema)
-    const comment = await Comment.forceCreate({ ...data, postId: post.id, authorId: author.id })
+    const comment = await Comment.create(data, { set: { postId: post.id, authorId: author.id } })
     await this.make('events').emit(new CommentPosted(comment.id))
     return this.redirect(`/posts/${post.id}`)
   }
@@ -670,7 +670,7 @@ export default class PostController extends Controller {
   async store(): Promise<Response> {
     const author = await this.auth.userOrFail<UserRecord>()
     const { tags, ...data } = await this.validateBody(PostPayloadSchema)
-    const post = await Post.forceCreate({ ...data, authorId: author.id })
+    const post = await Post.create(data, { set: { authorId: author.id } })
     await syncTags(post.id, tags)
     const cover = await this.file('cover')
     if (cover) {
@@ -818,7 +818,7 @@ export class LogCommentListener extends Listener<CommentPosted> {
 }
 ```
 
-先に実行されるのはこちらです。`SendCommentMailListener` の優先度は既定の 0 で、10 のほうが高いからです。このリスナーの `handle` で例外を投げると、エラーはその場で `emit()` を抜けます。`SendCommentMailListener` は実行されず、ジョブもメールも発生しません。`CommentController` の `store` は `emit()` を await しているので、リクエストはリダイレクトされず、エラーハンドラーが返す 500 で終わります。コメント自体は保存されています。`emit()` より前に `forceCreate` が実行されているからです。リスナーに `failed()` を定義しておくと、エラーが伝わる前にそれが呼ばれます。
+先に実行されるのはこちらです。`SendCommentMailListener` の優先度は既定の 0 で、10 のほうが高いからです。このリスナーの `handle` で例外を投げると、エラーはその場で `emit()` を抜けます。`SendCommentMailListener` は実行されず、ジョブもメールも発生しません。`CommentController` の `store` は `emit()` を await しているので、リクエストはリダイレクトされず、エラーハンドラーが返す 500 で終わります。コメント自体は保存されています。`emit()` より前に `create` が実行されているからです。リスナーに `failed()` を定義しておくと、エラーが伝わる前にそれが呼ばれます。
 
 </details>
 

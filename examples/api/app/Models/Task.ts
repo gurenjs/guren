@@ -7,7 +7,8 @@ export type NewTaskRecord = typeof tasks.$inferInsert
 export type TaskOwnerSummary = Pick<UserRecord, 'id' | 'name'>
 
 export class Task extends defineModel(tasks, {
-  fillable: ['title', 'description', 'completed', 'userId'],
+  // userId is the token's owner, written through `set`; a request never chooses it.
+  fillable: ['title', 'description', 'completed'],
 }) {
   static override relationTypes: { owner: BelongsToRecord<TaskOwnerSummary> } = {
     owner: null,

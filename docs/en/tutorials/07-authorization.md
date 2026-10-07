@@ -308,7 +308,7 @@ export default class PostController extends Controller {
   async store(): Promise<Response> {
     const author = await this.auth.userOrFail<UserRecord>()
     const data = await this.validateBody(PostPayloadSchema)
-    const post = await Post.forceCreate({ ...data, authorId: author.id })
+    const post = await Post.create(data, { set: { authorId: author.id } })
     return this.redirect(`/posts/${post.id}`)
   }
 
@@ -700,7 +700,7 @@ export default class PostController extends Controller {
   async store(): Promise<Response> {
     const author = await this.auth.userOrFail<UserRecord>()
     const data = await this.validateBody(PostPayloadSchema)
-    const post = await Post.forceCreate({ ...data, authorId: author.id })
+    const post = await Post.create(data, { set: { authorId: author.id } })
     return this.redirect(`/posts/${post.id}`)
   }
 

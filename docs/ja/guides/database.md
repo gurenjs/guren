@@ -837,7 +837,30 @@ await Post.create({ title: 'Hello', body: '...', status: 'draft', authorId: 1 })
 // MassAssignmentException: Post: mass assignment blocked for field(s) "authorId"
 ```
 
-OAuth のアカウント連携、シーダー、システムが作るレコードのように、サーバー側で組み立てた信頼できるデータには、許可リストを無視する `forceCreate()` / `forceUpdate()` を使います。
+### サーバーが決めるカラム
+
+投稿の著者、コメントが属する投稿、初期のステータスのように、行には必要でもリクエストから受け取ってはいけないカラムがあります。こうしたカラムは `fillable` に入れず、バリデート済みのデータとは別に `set` オプションで渡します。
+
+```ts
+const author = await this.auth.userOrFail<UserRecord>()
+const data = await this.validateBody(PostPayloadSchema)
+
+const post = await Post.create(data, { set: { authorId: author.id } })
+await Post.update({ id: post.id }, data, { set: { status: 'draft' } })
+```
+
+`data` はこれまでどおり `fillable` で絞り込まれ、`set` のキーだけが許可リストを通らずに書き込まれます。`set` は 2 つを分けておくための仕組みなので、次の場合は `MassAssignmentException` になります。
+
+- `set` のキーが `fillable` に含まれている(リクエストからすでに設定できるので、`data` に入れるべきキーです)。
+- `set` で設定するキーが `data` にも入っている。
+- `set` のキーが `id` か認証情報のカラムである。
+- モデルが `fillable` を宣言していない。
+
+`{ set: { ...data, authorId } }` と書くと、展開で `fillable` のキーが `set` に入るので、たいていは 1 つ目の規則で例外になります。ただし、展開したデータに `fillable` のキーが 1 つも無いと例外にならないので、これを当てにはできません。リクエストの入力は `set` に展開しないでください。
+
+### force write(`forceCreate` / `forceUpdate`)
+
+OAuth のアカウント連携、シーダー、システムが作るレコードのように、リクエストのデータをまったく含まない書き込みには、許可リストを無視する `forceCreate()` / `forceUpdate()` を使います。
 
 ```ts
 const user = await User.forceCreate({
@@ -850,7 +873,7 @@ await User.forceUpdate({ id: user.id }, { emailVerifiedAt: new Date() })
 ```
 
 > [!WARNING]
-> `forceCreate()` / `forceUpdate()` は、マスアサインメント保護をまったく通しません。リクエストの入力をそのまま渡さないでください。
+> `forceCreate()` / `forceUpdate()` は、マスアサインメント保護をまったく通しません。リクエストの入力は、バリデート済みかどうかにかかわらず渡さないでください。リクエストのデータにサーバーが決めるカラムを足すときは `set` を使います。
 
 `fillable` の設定に関係なく、次の2つの保護は常に働きます。
 
