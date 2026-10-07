@@ -554,12 +554,13 @@ export class QueryBuilder<
   }
 
   /**
-   * Bulk update. Mass-assignment protection and persistence preparation
-   * (mutators, casts, `preparePersistencePayload`) apply exactly as in
-   * `Model.update()`; per-record hooks and observers are skipped by design.
+   * Bulk update. Mass-assignment protection and persistence preparation apply
+   * exactly as in `Model.update()`; per-record hooks and observers are skipped.
+   * `set` holds the columns the server chooses (RFC 0031); `data` is untyped
+   * here, so a key in both is refused at runtime only, by `filterFillable()`.
    */
-  async update(data: PlainObject): Promise<TRecord> {
-    return this.runBulkUpdate(data, true)
+  async update(data: PlainObject, options?: { set?: PlainObject }): Promise<TRecord> {
+    return this.runBulkUpdate(data, true, options?.set)
   }
 
   /**
@@ -570,9 +571,9 @@ export class QueryBuilder<
     return this.runBulkUpdate(data, false)
   }
 
-  private async runBulkUpdate(data: PlainObject, applyFillable: boolean): Promise<TRecord> {
+  private async runBulkUpdate(data: PlainObject, applyFillable: boolean, set?: PlainObject): Promise<TRecord> {
     const model = this.modelClass as typeof Model
-    const filtered = applyFillable ? model.filterFillable(data) : { ...data }
+    const filtered = applyFillable ? model.filterFillable(data, set) : { ...data }
     const payload = await model.prepareBulkPersistencePayload(filtered)
     return this[PREPARED_UPDATE](payload)
   }

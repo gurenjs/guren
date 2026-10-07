@@ -849,6 +849,8 @@ const post = await Post.create(data, { set: { authorId: author.id } })
 await Post.update({ id: post.id }, data, { set: { status: 'draft' } })
 ```
 
+クエリビルダーの一括更新も同じオプションを受け付けます: `Post.where('status', 'draft').update(data, { set: { reviewedAt: new Date() } })`。
+
 `data` はこれまでどおり `fillable` で絞り込まれ、`set` のキーだけが許可リストを通らずに書き込まれます。`set` は 2 つを分けておくための仕組みなので、次の場合は `MassAssignmentException` になります。
 
 - `set` のキーが `fillable` に含まれている(リクエストからすでに設定できるので、`data` に入れるべきキーです)。

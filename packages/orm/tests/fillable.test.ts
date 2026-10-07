@@ -321,6 +321,32 @@ describe('Model.filterFillable', () => {
       await LoosePost.where({ slug: 'a' }).update({ id: 5, title: 'x' })
       expect(calls).toEqual([{ title: 'x' }])
     })
+
+    it('writes set beside the filtered data on the fluent builder (RFC 0031)', async () => {
+      class StrictPost extends Model<PlainObject> {
+        static override table = 'posts'
+        static fillable = ['title', 'body']
+      }
+      const { adapter, calls } = createBuilderAdapter()
+      StrictPost.useAdapter(adapter)
+
+      await StrictPost.where({ id: 1 }).update({ title: 'x' }, { set: { authorId: 99 } })
+      expect(calls).toEqual([{ title: 'x', authorId: 99 }])
+    })
+
+    it('refuses a fillable key in set on the fluent builder before the adapter runs', async () => {
+      class StrictPost extends Model<PlainObject> {
+        static override table = 'posts'
+        static fillable = ['title', 'body']
+      }
+      const { adapter, calls } = createBuilderAdapter()
+      StrictPost.useAdapter(adapter)
+
+      await expect(
+        StrictPost.where({ id: 1 }).update({}, { set: { title: 'x' } }),
+      ).rejects.toThrow(MassAssignmentException)
+      expect(calls).toEqual([])
+    })
   })
 
 describe('create / update with set (RFC 0031)', () => {
