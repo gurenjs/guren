@@ -1,5 +1,19 @@
 # @guren/example-agents
 
+## 0.1.20
+
+### Patch Changes
+
+- Updated dependencies [947bf2b]
+- Updated dependencies [1364d1e]
+- Updated dependencies [3612fba]
+- Updated dependencies [a1d7b39]
+- Updated dependencies [db4fabf]
+- Updated dependencies [85436ba]
+- Updated dependencies [4df2450]
+  - @guren/cli@2.30.0
+  - @guren/orm@2.14.0
+
 ## 0.1.19
 
 ### Patch Changes

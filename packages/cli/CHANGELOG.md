@@ -1,5 +1,24 @@
 # @guren/cli
 
+## 2.30.0
+
+### Minor Changes
+
+- 947bf2b: `guren audit` reads two more shapes of request data that can skip `fillable` (RFC 0031). The force-write review prompt (`force-write-request-data:*`) now fires when a force write sits beside any controller call that returns request data, `this.validated()`, `input()`, `only()` and `except()` included, not only `validateBody()`. A new warning, `set-spread:*`, flags a spread written inside the `set` option of `create()` or `update()` (`Post.create(data, { set: { ...x } })`), which the ORM refuses only when the spread carries a fillable key.
+
+### Patch Changes
+
+- 1364d1e: The docs viewer (`/_guren/docs`) now uses Guren UI's tokens, faces and radii, matching the plan page and Dev Center; its title carries the ember tick. Dev Center's buttons and status badges use Guren UI's variant classes, and the plan page names Guren UI's faces ahead of the system fonts. No font file is embedded: each page grows by less than 1 KB.
+- 3612fba: Plan Impact lists the columns a `set` option writes (RFC 0031). `Post.create(data, { set: { authorId } })`, `Post.update(where, data, { set })` and the builder's `update(data, { set })` now report `authorId` as a write, as the same key in the data did. Write options the scan cannot see, held in a variable or spread, are reported as an opaque write instead of being skipped.
+- a1d7b39: `make:auth` gives the generated `User` model a `fillable` list (`name`, `email`, and `password` when password sign-in exists) and writes the server-chosen columns through `set` (RFC 0031). The OAuth callback creates the account with `User.create({ name, email }, { set })`, so the provider id and `emailVerifiedAt` can no longer arrive in create data. The profile update resets `emailVerifiedAt` through `set`. Email confirmation, which carries no request data, uses `forceUpdate`. Apps scaffolded before keep their model; to adopt this, add the same `fillable` and move those writes as the new scaffold does.
+- db4fabf: Place a plan action with the task that covers it or the routes to it, not with an uncovered controller in Foundation. Foundation's `http` step could verify only by mounting those routes, which made a task's validation, forbidden and unauthenticated behaviours pass before its `tests` step saw them fail, so `tests:fail` never verified.
+- 4df2450: Point the force-write audit fix and the agent harness at `create(data, { set })` (RFC 0031). The `force-write-request-data` suggestion now rewrites `forceCreate({ ...data, authorId: user.id })` as `create(data, { set: { authorId: user.id } })`, and the harness rules, skills and code-review checklist keep owner columns out of `fillable` and write them through `set`, leaving force writes to seeders, system records and OAuth hash sentinels. `bunx guren agent:sync` refreshes the rules, skills and agents; the example in an existing `CLAUDE.md` is the app's own and is not rewritten.
+- Updated dependencies [88dee3d]
+- Updated dependencies [85436ba]
+- Updated dependencies [2789763]
+  - @guren/server@2.29.1
+  - @guren/orm@2.14.0
+
 ## 2.29.0
 
 ### Minor Changes

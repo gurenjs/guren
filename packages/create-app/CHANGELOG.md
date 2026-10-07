@@ -1,5 +1,11 @@
 # create-guren-app
 
+## 1.18.1
+
+### Patch Changes
+
+- 5ea68cc: Write the post's author through `Post.create(data, { set: { authorId } })` in the blog template, so the validated body keeps `fillable` filtering instead of passing through `forceCreate` (RFC 0031).
+
 ## 1.18.0
 
 ### Minor Changes
