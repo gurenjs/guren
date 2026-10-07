@@ -429,7 +429,7 @@ export const posts = pgTable('posts', {
         join(workspace.dir, 'app/Http/Controllers/ProfileController.ts'),
         'utf8',
       )
-      expect(profileController).toContain('set: { emailVerifiedAt: emailChanged ? null : user.emailVerifiedAt }')
+      expect(profileController).toContain('await User.update({ id: user.id }, data, { set: { emailVerifiedAt: null } })')
       expect(profileController).toContain('sendEmailVerificationMail(')
     } finally {
       await workspace.cleanup()
@@ -1041,6 +1041,10 @@ export const posts = pgTable('posts', {
       expect(profileController).not.toContain('password')
       const profilePage = await readFile(join(workspace.dir, 'resources/js/pages/profile/Edit.tsx'), 'utf8')
       expect(profilePage).not.toContain('password')
+      const model = await readFile(join(workspace.dir, 'app/Models/User.ts'), 'utf8')
+      expect(model).toContain("fillable: ['name', 'email'],")
+      const oauthController = await readFile(join(workspace.dir, 'app/Http/Controllers/Auth/OAuthController.ts'), 'utf8')
+      expect(oauthController).toContain('const serverColumns = identityWhere(provider, profile.id)')
 
       // Nothing re-verifies the email in this mode, so a profile that could
       // replace it would claim an address the account never proved.
@@ -1449,7 +1453,7 @@ export default app
       expect(controller).toContain('const { name, email, password } = await this.validateBody(ProfileUpdateSchema)')
       // A replacement address loses the old one's verified status and has to
       // be re-proven before it counts.
-      expect(controller).toContain('set: { emailVerifiedAt: emailChanged ? null : user.emailVerifiedAt }')
+      expect(controller).toContain('await User.update({ id: user.id }, data, { set: { emailVerifiedAt: null } })')
       expect(view).toContain("form.setData('email'")
     } finally {
       await workspace.cleanup()

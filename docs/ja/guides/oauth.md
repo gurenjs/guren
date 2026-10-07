@@ -136,7 +136,7 @@ export default class GitHubOAuthController extends Controller {
 
     let user = await User.where('githubId', profile.id).first()
     if (!user) {
-      user = await User.create({ email: profile.email, name: profile.name, githubId: profile.id })
+      user = await User.create({ email: profile.email, name: profile.name }, { set: { githubId: profile.id } })
     }
 
     await this.auth.login(user)

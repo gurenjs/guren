@@ -260,15 +260,14 @@ function buildOAuthControllerTemplate(providers: string[], includeVerify: boolea
   const identityEntries = providers
     .map((provider) => `    ${provider}: { ${provider}Id: profileId },`)
     .join('\n')
-  // One member per provider, each id required: `set` refuses an all-optional object type.
+  // One member per provider, each id required: `set` refuses an all-optional object
+  // type, so a Partial<Pick<UserRecord, …>> here would not compile.
   const identityType = providers.map((provider) => `{ ${provider}Id: string }`).join(' | ')
 
-  // Verified on arrival, since the provider vouches for the address and this
-  // controller sends no verification email — without it requireVerifiedEmail
-  // would strand every OAuth user at /verify-email forever.
   const serverColumns = includeVerify
     ? `      // Verified on arrival: the provider vouches for the address, and this
-      // controller sends no verification email.
+      // controller sends no verification email, so requireVerifiedEmail would
+      // otherwise strand every OAuth user at /verify-email.
       const serverColumns = { ...identityWhere(provider, profile.id), emailVerifiedAt: new Date() }
 `
     : `      const serverColumns = identityWhere(provider, profile.id)
@@ -451,14 +450,25 @@ import { appUrl } from '../../Auth/AppUrl.js'
 import { sendEmailVerificationMail } from '../../Mail/EmailVerificationMail.js'`
     : ''
 
-  const verifyResetOption = includeVerify
-    ? `, {
+  const passwordUpdateField = includePassword
+    ? `
+      ...(password ? { password } : {}),`
+    : ''
+  const passwordData = includePassword ? ', ...(password ? { password } : {})' : ''
+  const profileWrite = includeVerify
+    ? `const data = { name, email${passwordData} }
+    if (emailChanged) {
       // The new address hasn't been proven to belong to this user yet — an
       // arbitrary replacement email must not inherit the old address's
       // verified status. Not fillable, so the server writes it through \`set\`.
-      set: { emailVerifiedAt: emailChanged ? null : user.emailVerifiedAt },
+      await User.update({ id: user.id }, data, { set: { emailVerifiedAt: null } })
+    } else {
+      await User.update({ id: user.id }, data)
     }`
-    : ''
+    : `await User.update({ id: user.id }, {
+      name,
+      email,${passwordUpdateField}
+    })`
 
   const verifyResend = includeVerify
     ? `
@@ -477,10 +487,6 @@ import { sendEmailVerificationMail } from '../../Mail/EmailVerificationMail.js'`
     : `'Profile updated successfully.'`
 
   const destructuredFields = includePassword ? '{ name, email, password }' : '{ name, email }'
-  const passwordUpdateField = includePassword
-    ? `
-      ...(password ? { password } : {}),`
-    : ''
 
   return `import { ${coreImports} } from '@guren/core'
 import { User, type UserRecord } from '../../Models/User.js'
@@ -519,10 +525,7 @@ export default class ProfileController extends Controller {
       }
     }
 
-    await User.update({ id: user.id }, {
-      name,
-      email,${passwordUpdateField}
-    }${verifyResetOption})
+    ${profileWrite}
 
     const refreshed = await User.find(user.id)
     if (refreshed) {

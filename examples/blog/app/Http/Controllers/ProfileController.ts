@@ -39,12 +39,13 @@ export default class ProfileController extends Controller {
       }
     }
 
-    // The new address is unproven: it must not inherit the old one's verified status.
-    await User.update(
-      { id: authed.id },
-      { name, email, ...(password ? { password } : {}) },
-      { set: { emailVerifiedAt: emailChanged ? null : authed.emailVerifiedAt } },
-    )
+    const data = { name, email, ...(password ? { password } : {}) }
+    if (emailChanged) {
+      // The new address is unproven: it must not inherit the old one's verified status.
+      await User.update({ id: authed.id }, data, { set: { emailVerifiedAt: null } })
+    } else {
+      await User.update({ id: authed.id }, data)
+    }
 
     const refreshedUser = await User.find(authed.id)
     if (!refreshedUser) {
