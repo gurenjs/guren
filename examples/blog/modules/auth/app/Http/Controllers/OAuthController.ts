@@ -1,7 +1,7 @@
 import { Controller, ValidationException, type OAuthManager } from '@guren/core'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { User, type UserRecord } from '../../../../../app/Models/User.js'
+import { User } from '../../../../../app/Models/User.js'
 
 const ProviderParamSchema = z.object({
   provider: z.enum(['github', 'google']),
@@ -14,8 +14,10 @@ const CallbackQuerySchema = z.object({
 
 type OAuthProvider = z.infer<typeof ProviderParamSchema>['provider']
 
-function identityWhere(provider: OAuthProvider, profileId: string): Partial<UserRecord> {
-  const identities: Record<OAuthProvider, Partial<UserRecord>> = {
+type ProviderIdentity = { githubId: string } | { googleId: string }
+
+function identityWhere(provider: OAuthProvider, profileId: string): ProviderIdentity {
+  const identities: Record<OAuthProvider, ProviderIdentity> = {
     github: { githubId: profileId },
     google: { googleId: profileId },
   }
@@ -82,15 +84,13 @@ export default class OAuthController extends Controller {
 
       // A random password so the account still satisfies AuthenticatableModel's
       // hashing pipeline; it is never surfaced and cannot realistically be guessed.
-      user = await User.create({
-        name: profile.name ?? resolvedEmail,
-        email: resolvedEmail,
-        password: randomUUID(),
-        // The address passed the check above, so demanding a verification link
-        // this app never sends would strand the user at /verify-email.
-        emailVerifiedAt: new Date(),
-        ...identityWhere(provider, profile.id),
-      })
+      // The address passed the check above, so demanding a verification link
+      // this app never sends would strand the user at /verify-email.
+      const serverColumns = { ...identityWhere(provider, profile.id), emailVerifiedAt: new Date() }
+      user = await User.create(
+        { name: profile.name ?? resolvedEmail, email: resolvedEmail, password: randomUUID() },
+        { set: serverColumns },
+      )
     }
 
     this.auth.session()?.regenerate()

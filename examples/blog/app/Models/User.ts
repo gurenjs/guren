@@ -9,7 +9,9 @@ export class User extends defineModel(users, {
   base: AuthenticatableModel,
   optionalOnCreate: ['passwordHash'],
   requireOnCreate: ['password'],
-  fillable: ['name', 'email', 'password', 'emailVerifiedAt', 'githubId', 'googleId'],
+  // What a request may set. emailVerifiedAt and the provider ids are chosen by
+  // the server and written through `set` (RFC 0031).
+  fillable: ['name', 'email', 'password'],
   hidden: ['passwordHash', 'rememberToken'],
 }) {
   static override relationTypes: { posts: HasManyRecord<PostRecord> } = {

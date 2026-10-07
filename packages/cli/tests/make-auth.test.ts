@@ -429,7 +429,7 @@ export const posts = pgTable('posts', {
         join(workspace.dir, 'app/Http/Controllers/ProfileController.ts'),
         'utf8',
       )
-      expect(profileController).toContain('emailVerifiedAt: null')
+      expect(profileController).toContain('set: { emailVerifiedAt: emailChanged ? null : user.emailVerifiedAt }')
       expect(profileController).toContain('sendEmailVerificationMail(')
     } finally {
       await workspace.cleanup()
@@ -1184,6 +1184,10 @@ export const posts = pgTable('posts', {
       // requireVerifiedEmail strands every OAuth signup at /verify-email.
       const controller = await readFile(join(workspace.dir, 'app/Http/Controllers/Auth/OAuthController.ts'), 'utf8')
       expect(controller).toContain('emailVerifiedAt: new Date()')
+      // The provider id and verification stamp are server-chosen: set, never the create data (RFC 0031).
+      expect(controller).toContain('User.create({ name: profile.name ?? email, email }, { set: serverColumns })')
+      const model = await readFile(join(workspace.dir, 'app/Models/User.ts'), 'utf8')
+      expect(model).toContain("fillable: ['name', 'email', 'password'],")
     } finally {
       await workspace.cleanup()
     }
@@ -1445,7 +1449,7 @@ export default app
       expect(controller).toContain('const { name, email, password } = await this.validateBody(ProfileUpdateSchema)')
       // A replacement address loses the old one's verified status and has to
       // be re-proven before it counts.
-      expect(controller).toContain('emailVerifiedAt: null')
+      expect(controller).toContain('set: { emailVerifiedAt: emailChanged ? null : user.emailVerifiedAt }')
       expect(view).toContain("form.setData('email'")
     } finally {
       await workspace.cleanup()

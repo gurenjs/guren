@@ -35,7 +35,8 @@ export default class VerifyEmailController extends Controller {
     const token = this.request.query('token') ?? ''
 
     const verifiedEmail = await completeEmailVerification(token, emailVerificationStore, async (email) => {
-      await User.update({ email }, { emailVerifiedAt: new Date() })
+      // Not fillable, and nothing here came from the request body: a force write.
+      await User.forceUpdate({ email }, { emailVerifiedAt: new Date() })
       return email
     })
 

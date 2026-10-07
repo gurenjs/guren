@@ -260,15 +260,23 @@ function buildOAuthControllerTemplate(providers: string[], includeVerify: boolea
   const identityEntries = providers
     .map((provider) => `    ${provider}: { ${provider}Id: profileId },`)
     .join('\n')
+  // One member per provider, each id required: `set` refuses an all-optional object type.
+  const identityType = providers.map((provider) => `{ ${provider}Id: string }`).join(' | ')
 
   // Verified on arrival, since the provider vouches for the address and this
   // controller sends no verification email — without it requireVerifiedEmail
   // would strand every OAuth user at /verify-email forever.
-  const emailVerifiedAtField = includeVerify ? '\n        emailVerifiedAt: new Date(),' : ''
+  const serverColumns = includeVerify
+    ? `      // Verified on arrival: the provider vouches for the address, and this
+      // controller sends no verification email.
+      const serverColumns = { ...identityWhere(provider, profile.id), emailVerifiedAt: new Date() }
+`
+    : `      const serverColumns = identityWhere(provider, profile.id)
+`
 
   return `import { Controller, ValidationException, type OAuthManager } from '@guren/core'
 import { z } from 'zod'
-import { User, type UserRecord } from '../../../Models/User.js'
+import { User } from '../../../Models/User.js'
 
 const ProviderParamSchema = z.object({
   provider: z.enum([${providerLiterals}]),
@@ -281,8 +289,10 @@ const CallbackQuerySchema = z.object({
 
 type OAuthProvider = z.infer<typeof ProviderParamSchema>['provider']
 
-function identityWhere(provider: OAuthProvider, profileId: string): Partial<UserRecord> {
-  const identities: Record<OAuthProvider, Partial<UserRecord>> = {
+type ProviderIdentity = ${identityType}
+
+function identityWhere(provider: OAuthProvider, profileId: string): ProviderIdentity {
+  const identities: Record<OAuthProvider, ProviderIdentity> = {
 ${identityEntries}
   }
   return identities[provider]
@@ -356,12 +366,9 @@ export default class OAuthController extends Controller {
       // skipped when no password is supplied, and password login safely
       // rejects accounts without a hash. Hashing a synthetic password here
       // would also blow the request CPU budget on metered runtimes
-      // (Cloudflare Workers free tier).
-      user = await User.create({
-        name: profile.name ?? email,
-        email,${emailVerifiedAtField}
-        ...identityWhere(provider, profile.id),
-      })
+      // (Cloudflare Workers free tier). The provider id is not fillable: it goes
+      // through \`set\`, so a request can never link an account to it.
+${serverColumns}      user = await User.create({ name: profile.name ?? email, email }, { set: serverColumns })
     }
 
     this.auth.session()?.regenerate()
@@ -444,12 +451,13 @@ import { appUrl } from '../../Auth/AppUrl.js'
 import { sendEmailVerificationMail } from '../../Mail/EmailVerificationMail.js'`
     : ''
 
-  const verifyResetField = includeVerify
-    ? `
+  const verifyResetOption = includeVerify
+    ? `, {
       // The new address hasn't been proven to belong to this user yet — an
       // arbitrary replacement email must not inherit the old address's
-      // verified status.
-      ...(emailChanged ? { emailVerifiedAt: null } : {}),`
+      // verified status. Not fillable, so the server writes it through \`set\`.
+      set: { emailVerifiedAt: emailChanged ? null : user.emailVerifiedAt },
+    }`
     : ''
 
   const verifyResend = includeVerify
@@ -513,8 +521,8 @@ export default class ProfileController extends Controller {
 
     await User.update({ id: user.id }, {
       name,
-      email,${verifyResetField}${passwordUpdateField}
-    })
+      email,${passwordUpdateField}
+    }${verifyResetOption})
 
     const refreshed = await User.find(user.id)
     if (refreshed) {
@@ -534,8 +542,9 @@ ${verifyResend}
  * OAuth accounts are created without a password, so `password` can only be
  * required on the create payload when password sign-up is the sole way in.
  */
-function buildUserModelTemplate(requirePassword: boolean): string {
+function buildUserModelTemplate(requirePassword: boolean, includePassword: boolean): string {
   const requireOnCreate = requirePassword ? "\n  requireOnCreate: ['password']," : ''
+  const fillable = includePassword ? "'name', 'email', 'password'" : "'name', 'email'"
 
   return `import { AuthenticatableModel, defineModel } from '@guren/core'
 import { users } from '../../db/schema.js'
@@ -546,6 +555,9 @@ export class User extends defineModel(users, {
   base: AuthenticatableModel,
   // Derived from the plain \`password\`, so callers never set it directly
   optionalOnCreate: ['passwordHash'],${requireOnCreate}
+  // What a request may set. emailVerifiedAt and the OAuth provider ids are
+  // chosen by the server and written through \`set\` (RFC 0031).
+  fillable: [${fillable}],
   // Never serialized by Model.serialize() and stripped from auth.user()
   hidden: ['passwordHash', 'rememberToken'],
 }) {
@@ -1575,7 +1587,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     { path: 'app/Http/Controllers/Auth/LoginController.ts', contents: buildLoginControllerTemplate(includePassword) },
     authFile('app/Http/Controllers/DashboardController.ts'),
     { path: 'app/Http/Controllers/ProfileController.ts', contents: buildProfileControllerTemplate(features) },
-    { path: 'app/Models/User.ts', contents: buildUserModelTemplate(passwordOnlySignUp) },
+    { path: 'app/Models/User.ts', contents: buildUserModelTemplate(passwordOnlySignUp, includePassword) },
     authFile('app/Providers/AuthProvider.ts'),
     { path: 'app/Http/Validators/ProfileValidator.ts', contents: buildProfileValidatorTemplate(features) },
     authFile('resources/js/components/Layout.tsx'),
