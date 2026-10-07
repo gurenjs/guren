@@ -59,7 +59,7 @@ export default class PostController extends Controller {
     const { body: data } = this.validated('posts.store')
     const authUser = await this.auth.userOrFail<UserRecord>()
 
-    const post = await Post.forceCreate({ ...data, authorId: authUser.id })
+    const post = await Post.create(data, { set: { authorId: authUser.id } })
 
     if (post) {
       // Invalidate and announce before the attach: a rejected cover throws,

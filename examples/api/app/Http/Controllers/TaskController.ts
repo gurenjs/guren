@@ -48,11 +48,7 @@ export default class TaskController extends Controller {
     const userId = this.getUserId()
     const data = await this.validateBody(CreateTaskSchema)
 
-    const task = await Task.create({
-      ...data,
-      userId,
-      completed: false,
-    })
+    const task = await Task.create({ ...data, completed: false }, { set: { userId } })
 
     const cacheService = this.#cacheService()
     await cacheService.invalidateUserTasks(userId)
@@ -90,10 +86,7 @@ export default class TaskController extends Controller {
     const wasCompleted = task.completed
     const data = await this.validateBody(UpdateTaskSchema)
 
-    await Task.update({ id: task.id }, {
-      ...data,
-      updatedAt: new Date(),
-    })
+    await Task.update({ id: task.id }, data, { set: { updatedAt: new Date() } })
 
     const refreshed = await Task.find(task.id)
 

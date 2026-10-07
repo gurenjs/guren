@@ -68,9 +68,9 @@ export default class PostController extends Controller {
     await this.authorize('create', Post)
     const author = await this.auth.userOrFail<UserRecord>()
     const { body: data } = this.validated('posts.store')
-    // forceCreate, because `authorId` is deliberately absent from Post.fillable:
-    // it comes from the session, and a request must never be able to set it.
-    const post = await Post.forceCreate({ ...data, authorId: author.id })
+    // `authorId` is deliberately absent from Post.fillable: it comes from the
+    // session through `set`, and a request must never be able to set it.
+    const post = await Post.create(data, { set: { authorId: author.id } })
 
     return this.redirect(post?.id ? `/posts/${post.id}` : '/posts')
   }

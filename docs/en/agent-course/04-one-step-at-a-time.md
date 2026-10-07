@@ -235,7 +235,7 @@ export default class MeetupController extends Controller {
   async store(): Promise<Response> {
     const data = await this.validateBody(MeetupPayloadSchema)
     const user = await this.auth.userOrFail<UserRecord>()
-    const meetup = await Meetup.forceCreate({ ...data, organizerId: user.id })
+    const meetup = await Meetup.create(data, { set: { organizerId: user.id } })
     return this.redirect(`/meetups/${meetup.id}`)
   }
 

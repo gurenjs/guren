@@ -7,7 +7,7 @@ The blog has users now, but nothing checks for one: a guest can still write, edi
 - What `requireAuthenticated` and `requireGuest` do, and how a middleware alias and a group keep routes readable
 - Why `guren audit` trusts `requireAuthenticated` and not a middleware you wrote with "auth" in its name
 - How to add a required column to a table that already has rows: nullable, backfill, then not null
-- What `forceCreate` and `forceUpdate` are for, and why `authorId` must never be fillable
+- How `set` writes a column the server chooses, why `authorId` must never be fillable, and what `forceCreate` and `forceUpdate` are still for
 - How a skill changes what an agent does with your database
 
 Start the dev server if it is not running:
@@ -370,7 +370,7 @@ export default class PostController extends Controller {
   async store(): Promise<Response> {
     const author = await this.auth.userOrFail<UserRecord>()
     const data = await this.validateBody(PostPayloadSchema)
-    const post = await Post.forceCreate({ ...data, authorId: author.id })
+    const post = await Post.create(data, { set: { authorId: author.id } })
     return this.redirect(`/posts/${post.id}`)
   }
 
@@ -397,7 +397,9 @@ export default class PostController extends Controller {
 }
 ```
 
-`forceCreate` is the deliberate choice here, and it is worth a moment. `fillable` on the model lists `title` and `body`, and `authorId` is not on it: a request must never be able to say who wrote a post. `Post.create({ ...data, authorId: author.id })` would therefore throw a `MassAssignmentException` naming `authorId`. `forceCreate` bypasses the filter, and it is safe because nothing in that object came from the request unfiltered: `data` passed the validator, and `author.id` came from the session. The rule is not "never use forceCreate"; it is "only with values the server chose".
+The second argument to `create` is worth a moment. `fillable` on the model lists `title` and `body`, and `authorId` is not on it: a request must never be able to say who wrote a post. `Post.create({ ...data, authorId: author.id })` would therefore throw a `MassAssignmentException` naming `authorId`. `set` holds the columns the server chose. `data` still goes through `fillable`, and `authorId` is written beside it from the session. `set` throws on a key that is in `fillable` or that `data` also carries, so if the validator ever gains an `authorId` field, the request still cannot choose the author: the write fails instead.
+
+`forceCreate` would also write this row, but it skips `fillable` for the whole object, the request data included. Keep force writes for writes that carry no request data at all, like the backfill script in the next section and the rows your tests create.
 
 ```bash run
 bun test
@@ -411,9 +413,7 @@ bunx guren audit
 
 The three authentication warnings are gone. The report prints only what still needs attention, so to see what replaced them run `bunx guren audit --json`: each of those routes now passes with "Protected by an authentication guard (verified via middleware capabilities)". That last phrase matters. `requireAuthenticated` carries a marker the framework stamps on it; `audit` trusts the marker, not the name. Had you written your own `requireLogin` middleware and aliased it as `auth`, the audit would say the middleware is *named like* a guard but is not one it recognises, and keep warning. That is the right answer: a reviewer, human or machine, cannot tell from a name whether a function checks anything.
 
-One warning is left, and it is not a mistake: `[warn] [API3] PostController.store force write`, on a method that validates a body and then calls `forceCreate`. Every action of that shape gets it, here and in the chapters after this one.
-
-It is a review prompt, not a verdict. `audit` can see that validated input reaches `forceCreate`; it cannot follow the data to know that the validator is the allowlist standing in for `fillable`. That is the judgement you made above, and it holds, so the warning is right to be raised and right for you to accept. For the same reason it is only ever a warning: `guren gate` below passes with it in place. Read a finding and decide, rather than arranging for it to disappear. The next force write might be one that really does pass a raw body through.
+`store` gets no warning about how it writes, either. A method that validates a body and then calls `forceCreate` or `forceUpdate` gets `[warn] [API3] ... force write`, because `audit` cannot follow the data to see whether the request reached the force write. With `set`, the request data never leaves `fillable`, so there is nothing for that warning to ask. If you meet it in another codebase, treat it as a review prompt: read what reaches the force write before you decide.
 
 ```bash run
 bunx guren gate
@@ -458,7 +458,7 @@ console.log(`Assigned ${orphans.length} post(s) to ${legacy.name} (#${legacy.id}
 bun scripts/backfill-post-authors.ts
 ```
 
-`forceUpdate` for the same reason as `forceCreate`: `authorId` is not fillable, and this value was chosen here. A random UUID as the password means the account has a valid hash and no password anyone knows.
+`forceUpdate` is right here: the script carries no request data at all, and `authorId` is not fillable. A random UUID as the password means the account has a valid hash and no password anyone knows.
 
 Requiring the column is the next slice, and it is the agent's.
 
@@ -730,7 +730,7 @@ export default class PostController extends Controller {
   async store(): Promise<Response> {
     const author = await this.auth.userOrFail<UserRecord>()
     const data = await this.validateBody(PostPayloadSchema)
-    const post = await Post.forceCreate({ ...data, authorId: author.id })
+    const post = await Post.create(data, { set: { authorId: author.id } })
     return this.redirect(`/posts/${post.id}`)
   }
 
@@ -912,7 +912,7 @@ One file survives `git clean` on purpose: `.env` is ignored, and `add auth` appe
 ## Where you are
 
 - Post mutations, the profile and logout behind `requireAuthenticated`; the login and registration pages behind `requireGuest`.
-- An audit you can read: the authentication warnings answered, the force-write warning accepted on purpose, and an understanding of why it trusts the framework's guard and not a name.
+- An audit you can read: the authentication warnings answered, the author written through `set` rather than a force write, and an understanding of why the audit trusts the framework's guard and not a name.
 - An author on every post, added without losing a row: nullable, backfilled, required.
 - The agent's first migration, run under the `db-manage` skill's rules.
 
@@ -921,7 +921,7 @@ One file survives `git clean` on purpose: `.env` is ignored, and `add auth` appe
 - **`.middleware('auth')` does not compile.** `aliasMiddleware()` returns a new router type that knows the name; the result was not captured. Chain and assign, as in the file above.
 - **A signed-in test gets redirected to `/login`.** `actingAs()` must come before `withCsrf()`: the priming request has to be authenticated too. Both return new clients; reassign.
 - **`db:migrate` fails with "NOT NULL constraint failed".** A post still has no author; run `bun scripts/backfill-post-authors.ts` first. The order is the whole point of section 3.
-- **`store` answers 500 with a `MassAssignmentException`.** It passed `authorId` to `Post.create`, and `fillable` does not list it. Use `forceCreate` with a value the server chose.
+- **`store` answers 500 with a `MassAssignmentException` naming `authorId`.** Either `authorId` arrived in `data` (spread into the first argument, or admitted by the validator), or it is listed in `fillable`. `set` refuses both: keep `authorId` out of `fillable` and out of `PostPayloadSchema`, and pass it only in `set`.
 - **The list shows "unknown" for every author.** The `IN` query got ids of the wrong type, or the map is keyed by something other than the user's id. Log `authors` once; it should have one entry per distinct author.
 
 ## Exercises

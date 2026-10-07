@@ -301,7 +301,7 @@ export default class CommentController extends Controller {
     await this.authorize('create', Comment)
     const author = await this.auth.userOrFail<UserRecord>()
     const data = await this.validateBody(CommentPayloadSchema)
-    const comment = await Comment.forceCreate({ ...data, postId: post.id, authorId: author.id })
+    const comment = await Comment.create(data, { set: { postId: post.id, authorId: author.id } })
     await this.make('events').emit(new CommentPosted(comment.id))
     return this.redirect(`/posts/${post.id}`)
   }
@@ -670,7 +670,7 @@ export default class PostController extends Controller {
   async store(): Promise<Response> {
     const author = await this.auth.userOrFail<UserRecord>()
     const { tags, ...data } = await this.validateBody(PostPayloadSchema)
-    const post = await Post.forceCreate({ ...data, authorId: author.id })
+    const post = await Post.create(data, { set: { authorId: author.id } })
     await syncTags(post.id, tags)
     const cover = await this.file('cover')
     if (cover) {

@@ -133,14 +133,14 @@ export class User extends defineModel(users, { base: AuthenticatableModel }) {
 
 - **何が変わったか**: `fillable` を定義したモデルで、許可リストにないフィールドを `create()` / `update()` に渡すと、`MassAssignmentException` が投げられるようになりました。以前は、余分なフィールドは黙って捨てられていました。
 - **誰に影響するか**: 絞り込んでいないオブジェクト（スプレッドしたリクエストボディや、デフォルト値をマージしたものなど）を `create()` / `update()` に渡しているコードです。
-- **移行方法**: 許可リストにあるフィールドだけを渡してください。シーダーやシステム用のレコードなど、サーバー側で用意した信頼できるデータには `forceCreate()` / `forceUpdate()` を使います。
+- **移行方法**: データには許可リストにあるフィールドだけを渡してください。著者のようにサーバーが決めるカラムは `set` オプションで渡します（[サーバーが決めるカラム](./database.md#サーバーが決めるカラム)）。シーダーやシステム用のレコードなど、リクエストのデータを含まない書き込みには `forceCreate()` / `forceUpdate()` を使います。
 
 ```ts
 // Before: authorId silently dropped when not in fillable
 await Post.create({ ...data, authorId: user.id })
 
-// After: keep authorId out of fillable and set it from the session with forceCreate
-await Post.forceCreate({ ...validated, authorId: user.id })
+// After: keep authorId out of fillable and pass it from the session in set
+await Post.create(data, { set: { authorId: user.id } })
 ```
 
 #### 認証ユーザーレコードのサニタイズ

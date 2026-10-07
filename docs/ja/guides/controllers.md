@@ -247,7 +247,7 @@ export default class PostsController extends Controller {
   async store() {
     const data = await this.validateBody(StorePostSchema)     // 422 をスロー
     const user = await this.auth.userOrFail<UserRecord>()     // 401 をスロー
-    const post = await Post.create({ ...data, authorId: user.id })
+    const post = await Post.create(data, { set: { authorId: user.id } })
     return this.redirect('/posts')
   }
 }

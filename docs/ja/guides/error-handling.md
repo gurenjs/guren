@@ -115,7 +115,7 @@ export default class PostController extends Controller {
   async store(): Promise<Response> {
     const data = await this.validateBody(StorePostSchema)  // 失敗時 422
     const user = await this.auth.userOrFail<UserRecord>()  // 未認証時 401
-    const post = await Post.create({ ...data, authorId: user.id })
+    const post = await Post.create(data, { set: { authorId: user.id } })
     return this.redirect(`/posts/${post.id}`)
   }
 
