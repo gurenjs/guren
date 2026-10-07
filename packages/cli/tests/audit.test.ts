@@ -1880,6 +1880,66 @@ export default function registerRoutes(router: any) {
       await workspace.cleanup()
     }
   })
+
+  async function auditStore(prefix: string, body: string): Promise<Map<string, string>> {
+    const workspace = await createTempWorkspace(prefix)
+    try {
+      await writeController(workspace.dir, 'PostController', `export default class PostController {
+  async store() {
+${body}
+    return null
+  }
+}`)
+      await writeRoutes(workspace.dir, POST_ROUTE)
+      const report = await runAudit({ cwd: workspace.dir })
+      return new Map(report.findings.map((f) => [f.key, f.status]))
+    } finally {
+      await workspace.cleanup()
+    }
+  }
+
+  it('warns when a force write sits beside the data validated() returns', async () => {
+    const findings = await auditStore('guren-cli-audit-force-validated-', `    const { body } = this.validated('posts.store')
+    await Post.forceCreate({ ...body, authorId: 1 })`)
+
+    expect(findings.get('force-write-request-data:PostController.store')).toBe('warn')
+  })
+
+  it('warns when request data reaches a force write through input()', async () => {
+    const findings = await auditStore('guren-cli-audit-force-input-', `    const title = await this.input('title')
+    await Post.forceCreate({ title, authorId: 1 })`)
+
+    expect(findings.get('force-write-request-data:PostController.store')).toBe('warn')
+  })
+
+  it('warns on a spread inside the set option of create()', async () => {
+    const findings = await auditStore('guren-cli-audit-set-spread-', `    const data = await this.validateBody(schema)
+    await Post.create({}, { set: { ...data, authorId: 1 } })`)
+
+    expect(findings.get('set-spread:PostController.store')).toBe('warn')
+  })
+
+  it('warns on a spread inside the set option of update()', async () => {
+    const findings = await auditStore('guren-cli-audit-set-spread-update-', `    const data = await this.validateBody(schema)
+    await Post.update({ id: 1 }, {}, { trx, set: { authorId: 1, ...data } })`)
+
+    expect(findings.get('set-spread:PostController.store')).toBe('warn')
+  })
+
+  it('does not warn on a set literal that names its columns', async () => {
+    const findings = await auditStore('guren-cli-audit-set-literal-', `    const data = await this.validateBody(schema)
+    await Post.create(data, { set: { authorId: 1, meta: { ...defaults } } })`)
+
+    expect(findings.has('set-spread:PostController.store')).toBe(false)
+    expect(findings.has('force-write-request-data:PostController.store')).toBe(false)
+  })
+
+  it('does not read drizzle onConflictDoUpdate({ set }) as the ORM option', async () => {
+    const findings = await auditStore('guren-cli-audit-set-drizzle-', `    const data = await this.validateBody(schema)
+    await db.insert(posts).values(data).onConflictDoUpdate({ target: posts.id, set: { ...data } })`)
+
+    expect(findings.has('set-spread:PostController.store')).toBe(false)
+  })
 })
 
 const WEBHOOK_ROUTE = `export default function registerRoutes(router: any) {
