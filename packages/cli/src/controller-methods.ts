@@ -295,6 +295,65 @@ const UPDATE_CALL_PATTERN = modelCallPattern('update')
 export const FORCE_WRITE_PATTERN = /\.\s*force(?:Create|Update)\s*\(/
 
 /**
+ * `this.<member>(` for the members whose value carries request input, which the
+ * force-write review prompt pairs with a force write (RFC 0031 §6). `validated()`
+ * reads no body itself, so its kind above stays `non-body`; it still hands the
+ * action what the route contract parsed.
+ */
+export const REQUEST_DATA_CALL_PATTERN = controllerMemberCall(
+  'validateBody', 'validateBodySafe', 'validated', 'input', 'only', 'except',
+)
+
+const SET_KEY_PATTERN = /\bset\s*:\s*\{/g
+const SET_TARGET_CALLS = new Set(['create', 'update'])
+
+/**
+ * Whether a blanked body spreads into a `set` literal passed straight to a
+ * `create(`/`update(` call: `Post.create(data, { set: { ...x } })` (RFC 0031 §4).
+ * The call is found by bracket depth, so drizzle's `onConflictDoUpdate({ set })`
+ * and an options object held in a variable are out of reach.
+ */
+export function spreadsIntoSet(body: string): boolean {
+  for (const match of body.matchAll(SET_KEY_PATTERN)) {
+    const open = match.index + match[0].length - 1
+    if (literalHasTopLevelSpread(body, open) && enclosingCallName(body, match.index) !== undefined) return true
+  }
+  return false
+}
+
+function literalHasTopLevelSpread(body: string, open: number): boolean {
+  let depth = 0
+  for (let i = open + 1; i < body.length; i++) {
+    const char = body[i]
+    if (char === '{' || char === '(' || char === '[') depth++
+    else if (char === '}' || char === ')' || char === ']') {
+      if (depth === 0) return false
+      depth--
+    } else if (depth === 0 && body.startsWith('...', i)) return true
+  }
+  return false
+}
+
+/** The `create`/`update` call whose argument is the object literal holding `at`, if any. */
+function enclosingCallName(body: string, at: number): string | undefined {
+  const openers: Array<{ char: string, index: number }> = []
+  let depth = 0
+  for (let i = at - 1; i >= 0 && openers.length < 2; i--) {
+    const char = body[i]
+    if (char === '}' || char === ')' || char === ']') depth++
+    else if (char === '{' || char === '(' || char === '[') {
+      if (depth > 0) depth--
+      else openers.push({ char, index: i })
+    }
+  }
+  const [options, call] = openers
+  if (options?.char !== '{' || call?.char !== '(') return undefined
+  if (!/[(,]\s*$/.test(body.slice(call.index, options.index))) return undefined
+  const name = /([A-Za-z_$][\w$]*)\s*(?:<[^()]*>)?\s*$/.exec(body.slice(0, call.index))?.[1]
+  return name !== undefined && SET_TARGET_CALLS.has(name) ? name : undefined
+}
+
+/**
  * Whether an action body shows it changes stored records. The one rule behind
  * both annotation-honesty checks (`guren audit`'s `destructiveHint: false` and
  * `guren check`'s `readOnlyHint: true`), which must not disagree about what counts

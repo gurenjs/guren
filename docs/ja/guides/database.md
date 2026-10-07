@@ -856,7 +856,7 @@ await Post.update({ id: post.id }, data, { set: { status: 'draft' } })
 - `set` のキーが `id` か認証情報のカラムである。
 - モデルが `fillable` を宣言していない。
 
-`{ set: { ...data, authorId } }` と書くと、展開で `fillable` のキーが `set` に入るので、たいていは 1 つ目の規則で例外になります。ただし、展開したデータに `fillable` のキーが 1 つも無いと例外にならないので、これを当てにはできません。リクエストの入力は `set` に展開しないでください。
+`{ set: { ...data, authorId } }` と書くと、展開で `fillable` のキーが `set` に入るので、たいていは 1 つ目の規則で例外になります。ただし、展開したデータに `fillable` のキーが 1 つも無いと例外にならないので、これを当てにはできません。リクエストの入力は `set` に展開しないでください。`set` のリテラルの中に書いた展開は、`guren audit` が警告します(`set-spread:*`)。
 
 ### force write(`forceCreate` / `forceUpdate`)
 

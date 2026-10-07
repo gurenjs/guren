@@ -340,7 +340,7 @@ await Post.update({ id: post.id }, data, { set: { status: 'draft' } })
 - a `set` key is `id` or a credential column;
 - the model declares no `fillable`.
 
-`{ set: { ...data, authorId } }` usually throws under the first rule, because the spread moves fillable keys into `set`. It does not when the spread carries no fillable key, so do not rely on the throw: never spread request input into `set`.
+`{ set: { ...data, authorId } }` usually throws under the first rule, because the spread moves fillable keys into `set`. It does not when the spread carries no fillable key, so do not rely on the throw: never spread request input into `set`. `guren audit` warns on a spread written inside a `set` literal (`set-spread:*`).
 
 #### Force writes
 
