@@ -558,7 +558,8 @@ export class QueryBuilder<
    * (mutators, casts, `preparePersistencePayload`) apply exactly as in
    * `Model.update()`; per-record hooks and observers are skipped by design.
    * `set` holds the columns the server chooses, as in
-   * `Model.update(where, data, { set })` (RFC 0031).
+   * `Model.update(where, data, { set })` (RFC 0031). `data` is untyped here, so a
+   * key in both is refused at runtime only, by `filterFillable()`.
    */
   async update(data: PlainObject, options?: { set?: PlainObject }): Promise<TRecord> {
     return this.runBulkUpdate(data, true, options?.set)
