@@ -122,13 +122,15 @@ interface ArgumentPositions {
   where?: number
   /** The data a write is given: the columns it names are written. */
   data?: number
+  /** A write's options, whose `set` names columns written beside the data (RFC 0031). */
+  options?: number
 }
 
 /** The model class's own methods whose arguments name columns, by position. */
 const STATIC_ARGUMENTS: ReadonlyMap<string, ArgumentPositions> = new Map([
-  ['create', { data: 0 }],
+  ['create', { data: 0, options: 1 }],
   ['forceCreate', { data: 0 }],
-  ['update', { where: 0, data: 1 }],
+  ['update', { where: 0, data: 1, options: 2 }],
   ['forceUpdate', { where: 0, data: 1 }],
   ['delete', { where: 0 }],
   ['first', { where: 0 }],
@@ -142,9 +144,17 @@ const STATIC_ARGUMENTS: ReadonlyMap<string, ArgumentPositions> = new Map([
 const BUILDER_ARGUMENTS: ReadonlyMap<string, ArgumentPositions> = new Map([
   ['create', { data: 0 }],
   ['forceCreate', { data: 0 }],
-  ['update', { data: 0 }],
+  ['update', { data: 0, options: 1 }],
   ['forceUpdate', { data: 0 }],
 ])
+
+/** The class itself, or `Model.inTransaction(trx)`, whose scope takes the class's own write signatures. */
+function takesClassArguments(receiver: BabelNode): boolean {
+  const node = unwrapTypeAssertion(receiver)
+  if (node.type === 'Identifier') return true
+  return (node.type === 'CallExpression' || node.type === 'OptionalCallExpression')
+    && methodName(unwrapTypeAssertion(node.callee as BabelNode)) === 'inTransaction'
+}
 
 /** Query methods whose first argument is a column name (`select` takes several). */
 const COLUMN_ARGUMENT_METHODS = new Set(['where', 'orWhere', 'whereIn', 'whereNotIn', 'whereNull', 'whereNotNull', 'orderBy', 'select', 'sum', 'avg', 'min', 'max', 'countBy'])
@@ -531,6 +541,21 @@ class RecordWalker {
     }
   }
 
+  /** The columns a write's `set` option names; options the scan cannot see may name any. */
+  private setColumns(tie: Tie, argument: BabelNode | undefined): void {
+    if (!argument) return
+    const options = unwrapTypeAssertion(argument)
+    if (options.type !== 'ObjectExpression') {
+      this.opaqueRead(tie, argument, true)
+      return
+    }
+    for (const property of options.properties as BabelNode[]) {
+      const key = property.type === 'ObjectProperty' ? keyOf(property) : undefined
+      if (key === 'set') this.columnKeys(tie, property.value as BabelNode, true)
+      else if (key === undefined) this.opaqueRead(tie, property, true)
+    }
+  }
+
   /**
    * The columns a query on the model names: `where('title', …)`, `select('title', 'body')`,
    * `where({ title })`, and the data `create`/`update` write. A column held in a variable is opaque.
@@ -540,10 +565,11 @@ class RecordWalker {
     if (!model) return
     const tie: Tie = { model, many: false }
     const args = node.arguments as BabelNode[]
-    const positions = unwrapTypeAssertion(receiver).type === 'Identifier' ? STATIC_ARGUMENTS.get(method) : BUILDER_ARGUMENTS.get(method)
+    const positions = takesClassArguments(receiver) ? STATIC_ARGUMENTS.get(method) : BUILDER_ARGUMENTS.get(method)
     if (positions) {
       if (positions.where !== undefined) this.columnKeys(tie, args[positions.where], false)
       if (positions.data !== undefined) this.columnKeys(tie, args[positions.data], true)
+      if (positions.options !== undefined) this.setColumns(tie, args[positions.options])
       return
     }
     if (COLUMN_ARGUMENT_METHODS.has(method)) {

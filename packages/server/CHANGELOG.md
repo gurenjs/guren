@@ -1,5 +1,32 @@
 # @guren/server
 
+## 2.29.1
+
+### Patch Changes
+
+- 88dee3d: The production error page and the development debug page now use Guren UI's tokens and follow the system light or dark theme. The error page's link home is a crimson button, and the debug page drops its fixed dark violet palette. The markup and text are unchanged.
+- 2789763: Reject a signed token with segments after its signature. `MessageSigner.verify()` accepted `payload.signature..anything`, leaving the suffix unauthenticated, and the CSRF middleware reused a guest's `XSRF-TOKEN` cookie verbatim, so a cookie planted from a sibling subdomain could carry markup into `csrfField()`. `csrfField()` now also HTML-escapes the token.
+- Updated dependencies [85436ba]
+  - @guren/orm@2.14.0
+
+## 2.29.0
+
+### Minor Changes
+
+- 004ddc0: Add an evidence-bearing application graph through CLI and development MCP, with explicit coverage and source freshness. Add bounded per-application server-error reads through development MCP and a loopback HTTP endpoint, omitting raw exception text and request values. Preserve existing context, diagnostic and plan behavior.
+- 004ddc0: Add the development-only Dev Center at /\_guren to inspect application graph evidence, coverage, unresolved relationships and retained runtime errors. Enable it with GUREN_MCP=1; existing docs and plan views remain available with GUREN_DOCS=1.
+- b72f7f7: The docs viewer at `/_guren/docs` reads what a closed implementation plan (RFC 0030) leaves behind. A plan document is its own node kind and shows the hash it closed at; a block `plan:close` wrote into an entity document is framed and links to its plan; acceptance tests verifying the same documents collapse into one node that lists each id with the test files carrying it (a toggle expands them). A plan whose page `plan:render` wrote beside it opens at `/_guren/docs/plans/<slug>`, served by `@guren/server` through the new `docsViewerPlanPage()` in `@guren/cli`. The detail panel can be resized by dragging its left edge, and the panel's top bar no longer lets content show through above it while scrolling.
+
+### Patch Changes
+
+- aa2ce6a: Resume failed application boots without repeating completed startup steps or route registrars. Prepare all route handlers before mounting them, so an invalid later route does not leave earlier routes partially mounted. Failed hooks remain retryable and must handle their own partial effects.
+- fd1e551: The docs viewer's page is written in TypeScript under `src/docs-viewer-page/` and bundled into the shipped HTML at build time, the way the plan page is, so the page is type-checked against the payload it reads. `docsViewerShell()` returns the page (composed from source when the CLI runs from source), and the server reads it when the CLI provides it. The zoom buttons move to the bottom right, clear of the published snapshot's banner.
+- 004ddc0: Require Nodemailer 10.0.2 or newer to fix cross-transport TLS server name reuse in its DNS cache.
+- f94bdad: Keep the development runtime error collector out of deploy bundles. `ExceptionHandler` and `Application` imported it statically, so every Lambda, Vercel and Workers bundle carried its buffer and its `node:fs` import although only `GUREN_MCP=1` in development ever runs it. The capture call ExceptionHandler makes now lives in a small module with no `node:fs`, and `Application` loads the buffer through an `import()` behind a `process.env.NODE_ENV` test the deploy builds settle, so the bundler drops it. In development nothing changes except timing: the buffer is bound once the module loads, which `boot()` waits for, rather than in the constructor.
+- ee895b7: Return managed Vite startup failures to Application.listen callers instead of terminating the process, and close a created Vite server when startup fails. Centralize HTTP and Vite ownership, bounded shutdown, and process teardown in an internal lifecycle module while preserving restart and hot-reload behavior. Under `bun --hot`, a Vite startup failure no longer ends the process; the next file change retries the listener.
+- Updated dependencies [a9ad746]
+  - @guren/orm@2.13.1
+
 ## 2.28.1
 
 ### Patch Changes

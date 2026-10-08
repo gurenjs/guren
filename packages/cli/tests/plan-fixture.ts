@@ -206,10 +206,10 @@ function planReferences(plan: PlanDraft): Map<string, string[]> {
     for (const action of controller.actions) {
       // An existing action is nobody's work, so what it reads is nobody's obligation.
       if (action.change.kind === 'existing') continue
+      // An action may go to another task than its controller's (an intent covering it or its routes), so what it reads is its own.
       const response = action.response
-      add(controller.id, action.body, action.params, action.query, action.authorization.policy?.id)
-      add(controller.id, response.kind === 'inertia' ? response.view : undefined, response.kind === 'resource' ? response.resource : undefined)
-      add(action.id, ...(out.get(controller.id) ?? []))
+      add(action.id, action.body, action.params, action.query, action.authorization.policy?.id)
+      add(action.id, response.kind === 'inertia' ? response.view : undefined, response.kind === 'resource' ? response.resource : undefined)
     }
   }
   for (const route of plan.routes) add(route.id, route.action, ...route.bind.map((bind) => bind.model))

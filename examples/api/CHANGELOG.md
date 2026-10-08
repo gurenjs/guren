@@ -1,5 +1,61 @@
 # @guren/example-api
 
+## 0.1.53
+
+### Patch Changes
+
+- Updated dependencies [aaa04ab]
+  - @guren/cli@2.30.1
+
+## 0.1.52
+
+### Patch Changes
+
+- Updated dependencies [947bf2b]
+- Updated dependencies [1364d1e]
+- Updated dependencies [3612fba]
+- Updated dependencies [a1d7b39]
+- Updated dependencies [db4fabf]
+- Updated dependencies [85436ba]
+- Updated dependencies [4df2450]
+  - @guren/cli@2.30.0
+  - @guren/orm@2.14.0
+
+## 0.1.51
+
+### Patch Changes
+
+- Updated dependencies [3bb92e8]
+- Updated dependencies [004ddc0]
+- Updated dependencies [716c3c8]
+- Updated dependencies [0742dc3]
+- Updated dependencies [004ddc0]
+- Updated dependencies [823ab84]
+- Updated dependencies [2018f10]
+- Updated dependencies [9d3373a]
+- Updated dependencies [fd1e551]
+- Updated dependencies [4174e75]
+- Updated dependencies [b72f7f7]
+- Updated dependencies [a1f20e5]
+- Updated dependencies [74e6a6e]
+- Updated dependencies [472ee88]
+- Updated dependencies [4df01e5]
+- Updated dependencies [004ddc0]
+- Updated dependencies [ed7b1ec]
+- Updated dependencies [5d45998]
+- Updated dependencies [b7e912a]
+- Updated dependencies [ebfc7f6]
+- Updated dependencies [94fc3cb]
+- Updated dependencies [d2461cb]
+- Updated dependencies [198b499]
+- Updated dependencies [d30347e]
+- Updated dependencies [168b63e]
+- Updated dependencies [f94bdad]
+- Updated dependencies [a9ad746]
+  - @guren/cli@2.29.0
+  - @guren/core@1.24.0
+  - @guren/orm@2.13.1
+
 ## 0.1.50
 
 ### Patch Changes

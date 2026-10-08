@@ -19,8 +19,9 @@ main{max-width:1500px;margin:auto;padding:28px max(20px,4vw)}
 .g-title::before{content:'';position:absolute;left:0;top:4px;bottom:4px;width:3px;border-radius:2px;background:var(--g-tick)}
 .lede{margin:8px 0 0;color:var(--g-text-2);max-width:60em}
 .toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:16px 0}
-.g-btn{display:inline-flex;align-items:center;padding:8px 16px;border-radius:var(--g-r-ctl);border:1px solid var(--g-line-strong);background:var(--g-panel);color:var(--g-text);font:700 13.5px/1.45 var(--g-font-sans);cursor:pointer;transition:border-color .12s}
-.g-btn:hover{border-color:var(--g-muted)}
+.g-btn{display:inline-flex;align-items:center;gap:7px;padding:8px 16px;border-radius:var(--g-r-ctl);border:1px solid transparent;font:700 13.5px/1.45 var(--g-font-sans);cursor:pointer;text-decoration:none;transition:background .12s,border-color .12s,color .12s}
+.g-btn-secondary{background:var(--g-panel);border-color:var(--g-line-strong);color:var(--g-text)}
+.g-btn-secondary:hover{border-color:var(--g-muted)}
 .g-btn:focus-visible,.node:focus-visible,summary:focus-visible{outline:2px solid var(--g-accent);outline-offset:2px}
 .g-btn[disabled]{opacity:.45;cursor:wait}
 .g-input,.g-select{padding:8px 12px;border:1px solid var(--g-line-strong);border-radius:var(--g-r-ctl);background:var(--g-panel);color:var(--g-text);font:400 14px/1.5 var(--g-font-sans)}
@@ -44,8 +45,9 @@ main{max-width:1500px;margin:auto;padding:28px max(20px,4vw)}
 .meta,small{color:var(--g-text-2);font-size:12px}
 .mono,.meta.mono,pre,.g-code{font-family:var(--g-font-mono)}
 .kind{display:inline-block;margin-right:8px;padding:0 7px;border-radius:999px;box-shadow:inset 0 0 0 1px var(--g-line);background:var(--g-raised);color:var(--g-text-2);font:500 11.5px/1.7 var(--g-font-mono)}
-.g-badge{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font:500 12px/1.6 var(--g-font-mono);color:var(--g-danger);background:var(--g-danger-tint)}
+.g-badge{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font:500 12px/1.6 var(--g-font-mono)}
 .g-badge::before{content:'';width:6px;height:6px;border-radius:999px;background:currentColor}
+.g-badge-danger{color:var(--g-danger);background:var(--g-danger-tint)}
 .warning{color:var(--g-warn)}.good{color:var(--g-ok)}.error{color:var(--g-danger)}
 .g-callout{display:grid;grid-template-columns:84px 1fr;gap:14px;padding:10px 2px;border-top:1px solid var(--g-line);font-size:13.5px}
 .g-callout:last-child{border-bottom:1px solid var(--g-line)}
@@ -78,10 +80,10 @@ li{overflow-wrap:anywhere;margin:5px 0}
 </style></head><body>
 <header class="g-topbar"><a class="brand" href="/_guren"><svg viewBox="0 0 299 516" width="13" height="22" fill="none" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M120.853 0C169.647 25.1364 195.255 83.7877 184.353 136.5C175.756 178.065 136.039 208.749 137.372 253.138C138.729 298.251 168.879 330.194 161.353 377.5C181.444 352.982 200.458 332.078 208.353 300.5C214.367 261.839 179.943 229.848 190.898 190.72C194.731 177.22 208.153 147.3 231.353 136.5C218.919 181.573 237.455 211.003 266.353 245C300.243 280.246 308.266 343.188 284.853 386C253.141 442.376 189.378 465.573 149.853 515.5C121.558 476.749 77.5264 459.842 48.8528 424C-12.4118 347.419 -19.5127 245.133 47.3528 169C80.8397 130.872 165.348 59.327 120.853 0Z" fill="url(#flame)"/><defs><linearGradient id="flame" x1="149.117" y1="0" x2="149.117" y2="515.5" gradientUnits="userSpaceOnUse"><stop stop-color="#FF3C28"/><stop offset="1" stop-color="#8B0000"/></linearGradient></defs></svg><b>Guren</b><span>Dev Center</span></a><nav aria-label="Developer tools"><a href="/_guren/docs">Docs &amp; plans</a><a href="/_guren/graph.json">Graph JSON</a></nav></header>
 <main><h1 class="g-title">Application graph</h1><p class="lede">Inspect registered routes and source relationships. Coverage describes what the readers can establish.</p>
-<div class="toolbar"><button id="refresh" class="g-btn" type="button">Refresh graph</button><span id="graph-status" role="status">Ready to read your application.</span></div><p id="snapshot" class="meta"></p>
+<div class="toolbar"><button id="refresh" class="g-btn g-btn-secondary" type="button">Refresh graph</button><span id="graph-status" role="status">Ready to read your application.</span></div><p id="snapshot" class="meta"></p>
 <div class="stats" aria-label="Snapshot totals"><div class="g-card g-card-body"><div class="label">symbols</div><div id="stat-symbols" class="value">–</div></div><div class="g-card g-card-body"><div class="label">relationships</div><div id="stat-edges" class="value">–</div></div><div class="g-card g-card-body"><div class="label">unresolved</div><div id="stat-unresolved" class="value">–</div></div><div class="g-card g-card-body"><div class="label">runtime errors</div><div id="stat-errors" class="value">–</div></div></div>
 <div class="layout"><section class="g-card" aria-label="Routes and symbols"><div class="g-card-body"><div class="toolbar tight"><input id="search" class="g-input" type="search" aria-label="Filter symbols" placeholder="Filter by name, file or module"><select id="kind" class="g-select" aria-label="Symbol kind"><option value="route">Routes</option><option value="">All symbols</option><option value="controller">Controllers</option><option value="model">Models</option><option value="page">Pages</option><option value="middleware">Middleware</option><option value="validator">Validators</option><option value="policy">Policies</option><option value="test">Tests</option></select></div><div id="nodes" class="list"></div></div></section><section class="g-card" aria-label="Selected symbol"><div id="detail" class="g-card-body"></div></section></div>
 <section class="g-card wide"><div class="g-card-head"><h2 class="g-card-title">Coverage</h2></div><div class="g-card-body"><div id="coverage"></div><details><summary id="unresolved-title">Unresolved relationships</summary><ul id="unresolved"></ul></details></div></section>
-<section class="g-card wide"><div class="g-card-head"><h2 class="g-card-title">Runtime errors</h2><button id="refresh-errors" class="g-btn" type="button">Refresh errors</button></div><div class="g-card-body"><p class="meta">Framework-handled server exceptions retained by this development process. Messages and request values are omitted.</p><p id="error-status" class="meta" role="status"></p><div id="errors"></div></div></section>
+<section class="g-card wide"><div class="g-card-head"><h2 class="g-card-title">Runtime errors</h2><button id="refresh-errors" class="g-btn g-btn-secondary" type="button">Refresh errors</button></div><div class="g-card-body"><p class="meta">Framework-handled server exceptions retained by this development process. Messages and request values are omitted.</p><p id="error-status" class="meta" role="status"></p><div id="errors"></div></div></section>
 <p class="foot">Enable the existing docs and plan viewer with <code class="mono">GUREN_DOCS=1</code>. Graph reads do not run verification commands.</p>
 </main><script>__GUREN_DEV_CENTER_SCRIPT__</script></body></html>

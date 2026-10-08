@@ -213,7 +213,7 @@ export default class PostController extends Controller {
   async store(): Promise<Response> {
     const data = await this.validateBody(StorePostSchema)  // 422 on failure
     const user = await this.auth.userOrFail<UserRecord>()  // 401 if not logged in
-    const post = await Post.create({ ...data, authorId: user.id })
+    const post = await Post.create(data, { set: { authorId: user.id } })
     return this.redirect(`/posts/${post.id}`)
   }
 

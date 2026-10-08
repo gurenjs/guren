@@ -548,7 +548,7 @@ Suppress a false positive by placing `// guren-audit-ignore` on the flagged line
 const apiKey = 'example-not-a-real-key'
 ```
 
-Route- and model-level findings (`authz:*`, `policy:*`, `validation:*`, `agent-annotation:*`, `mass-assignment:*`, `hidden-columns:*`) have no single line to attach a comment to: they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead (`policy:*` also honours the marker in a comment above the action, since the action is where its fix goes), keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`:
+Route- and model-level findings (`authz:*`, `policy:*`, `validation:*`, `agent-annotation:*`, `mass-assignment:*`, `hidden-columns:*`) have no single line to attach a comment to: they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead (`policy:*` also honours the marker in a comment above the action, since the action is where its fix goes), keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`. `force-write-request-data:*` and `set-spread:*` name a controller method but carry no line either, so they are ignored the same way:
 
 ```ts
 // config/audit.ts

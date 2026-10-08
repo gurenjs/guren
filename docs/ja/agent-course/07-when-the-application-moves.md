@@ -380,7 +380,7 @@ export default class MeetupController extends Controller {
   async store(): Promise<Response> {
     const data = await this.validateBody(MeetupPayloadSchema)
     const user = await this.auth.userOrFail<UserRecord>()
-    const meetup = await Meetup.forceCreate({ ...data, organizerId: user.id })
+    const meetup = await Meetup.create(data, { set: { organizerId: user.id } })
     return this.redirect(`/meetups/${meetup.id}`)
   }
 
@@ -440,10 +440,9 @@ git commit -m "feat(registrations): register and cancel [task/entity/model.regis
 bunx guren plan:next docs/plans/registrations/plan.json
 bunx guren plan:verify docs/plans/registrations/plan.json --step task/entity/model.registration/pages
 bunx guren plan:next docs/plans/registrations/plan.json
-bunx guren plan:verify docs/plans/registrations/plan.json --step task/entity/model.meetup/http
 ```
 
-最後のステップ `task/entity/model.meetup/http` は、承認時に警告が出た `alter`、つまり `MeetupController.show` のステップです。このステップではコードを追加せず、`AC-registrations-7` がこのアクションに到達することで確認が済みます。
+承認時に警告が出た `alter`、つまり `MeetupController.show` も、計画のタスクが `covers` に挙げているので http ステップに入ります。Guren が読み取る部分は変わらないので、`AC-registrations-7` がこのアクションに到達することで確認が済みます。
 
 http ステップのコミットは第 4 章のチェック表で確認し、この計画ではさらに次の 2 行を加えます。
 

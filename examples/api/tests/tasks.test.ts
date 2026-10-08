@@ -143,6 +143,7 @@ describe('TaskController', () => {
       const response = await controller.store()
 
       expect(response.status).toBe(201)
+      expect(mockTaskCreate).toHaveBeenCalledWith({ title: 'New Task', completed: false }, { set: { userId: 1 } })
       const json = await response.json()
       expect(json.data.title).toBe('New Task')
     })

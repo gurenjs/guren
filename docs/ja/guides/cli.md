@@ -333,7 +333,7 @@ bunx guren codegen --introspect
 const apiKey = 'example-not-a-real-key'
 ```
 
-ルート単位・モデル単位の指摘(`authz:*`、`policy:*`、`validation:*`、`agent-annotation:*`、`mass-assignment:*`、`hidden-columns:*`)には、コメントを付けられる行がありません。ルートレジストラを実行し、モデルを検査して得られる指摘だからです(`policy:*` だけは、直す場所がアクションなので、その上のコメントに置いたマーカーも受け付けます)。これらを無視するには、`config/audit.ts` に指摘の `key`(`--json` の出力からそのままコピーできます)と、省略できない `reason` を書きます。
+ルート単位・モデル単位の指摘(`authz:*`、`policy:*`、`validation:*`、`agent-annotation:*`、`mass-assignment:*`、`hidden-columns:*`)には、コメントを付けられる行がありません。ルートレジストラを実行し、モデルを検査して得られる指摘だからです(`policy:*` だけは、直す場所がアクションなので、その上のコメントに置いたマーカーも受け付けます)。これらを無視するには、`config/audit.ts` に指摘の `key`(`--json` の出力からそのままコピーできます)と、省略できない `reason` を書きます。`force-write-request-data:*` と `set-spread:*` もコントローラーのメソッド単位の指摘で行を持たないので、同じ方法で無視します。
 
 ```ts
 // config/audit.ts

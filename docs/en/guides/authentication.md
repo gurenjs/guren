@@ -446,7 +446,7 @@ export default class DashboardController extends Controller {
   async store() {
     const user = await this.auth.userOrFail<UserRecord>()  // throws 401 if not authenticated
     // user is guaranteed non-null here
-    await Post.create({ authorId: user.id, ...data })
+    await Post.create(data, { set: { authorId: user.id } })
     return this.redirect('/posts')
   }
 }
@@ -534,6 +534,7 @@ export class User extends defineModel(users, {
   base: AuthenticatableModel,
   optionalOnCreate: ['passwordHash'],
   requireOnCreate: ['password'],
+  fillable: ['name', 'email', 'password'],
   hidden: ['passwordHash', 'rememberToken'],
 }) {}
 ```

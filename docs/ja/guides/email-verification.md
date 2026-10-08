@@ -56,7 +56,7 @@ const user = await completeEmailVerification(
   store,
   async (email) => {
     // ユーザーのメールを確認済みとしてマーク
-    await User.update(
+    await User.forceUpdate(
       { email },
       { emailVerifiedAt: new Date() }
     )
@@ -147,7 +147,7 @@ export class VerificationController extends Controller {
       token,
       this.store,
       async (email) => {
-        await User.where('email', email).update({
+        await User.where('email', email).forceUpdate({
           emailVerifiedAt: new Date(),
         })
         return User.where('email', email).first()

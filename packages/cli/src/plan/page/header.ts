@@ -1,7 +1,7 @@
 /** What stands above the tabs: the plan's own prose, its scope, and the findings that block it. */
 
 import { byId, el, link, list } from './dom'
-import { ariaLabel, tel } from './locale'
+import { ariaLabel, t, tel } from './locale'
 import type { PlanPagePayload } from './payload'
 
 function scopeBlock(title: string, items: readonly string[]): HTMLDivElement {
@@ -10,6 +10,27 @@ function scopeBlock(title: string, items: readonly string[]): HTMLDivElement {
   if (items.length) block.appendChild(list(items))
   else block.appendChild(tel('p', 'note', 'scope.none'))
   return block
+}
+
+/** Assumptions and hints are looked up, not reviewed first: folded, they leave goals and non-goals on screen. */
+function foldedScopeBlock(title: string, items: readonly string[]): HTMLElement {
+  if (!items.length) return scopeBlock(title, items)
+  const block = el('details')
+  block.appendChild(tel('summary', null, 'sections.tab', () => ({ label: t(title), count: items.length })))
+  block.appendChild(list(items))
+  return block
+}
+
+function openFoldsForPrint(host: HTMLElement): void {
+  let reopened: HTMLDetailsElement[] = []
+  window.addEventListener('beforeprint', () => {
+    reopened = [...host.querySelectorAll('details')].filter((fold) => !fold.open)
+    for (const fold of reopened) fold.open = true
+  })
+  window.addEventListener('afterprint', () => {
+    for (const fold of reopened) fold.open = false
+    reopened = []
+  })
 }
 
 export function renderHeader({ plan, planHash }: PlanPagePayload): void {
@@ -34,8 +55,9 @@ export function renderHeader({ plan, planHash }: PlanPagePayload): void {
   const scope = byId('plan-scope')
   scope.appendChild(scopeBlock('scope.goals', plan.scope.goals))
   scope.appendChild(scopeBlock('scope.nonGoals', plan.scope.nonGoals))
-  scope.appendChild(scopeBlock('scope.assumptions', plan.assumptions))
-  if (plan.hints.length) scope.appendChild(scopeBlock('scope.hints', plan.hints))
+  scope.appendChild(foldedScopeBlock('scope.assumptions', plan.assumptions))
+  if (plan.hints.length) scope.appendChild(foldedScopeBlock('scope.hints', plan.hints))
+  openFoldsForPrint(scope)
 }
 
 export function renderPinned({ checks, breaking }: PlanPagePayload): void {

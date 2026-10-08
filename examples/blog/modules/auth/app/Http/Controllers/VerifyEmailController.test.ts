@@ -6,13 +6,13 @@ import {
 } from '@guren/testing'
 import type { Context } from '@guren/core'
 
-const { mockUserUpdate, mockSendEmailVerificationMail } = vi.hoisted(() => ({
-  mockUserUpdate: vi.fn(),
+const { mockUserForceUpdate, mockSendEmailVerificationMail } = vi.hoisted(() => ({
+  mockUserForceUpdate: vi.fn(),
   mockSendEmailVerificationMail: vi.fn(),
 }))
 
 vi.mock('../../../../../app/Models/User.js', () => ({
-  User: { update: mockUserUpdate },
+  User: { forceUpdate: mockUserForceUpdate },
 }))
 
 vi.mock('../../../../../app/Mail/EmailVerificationMail.js', () => ({
@@ -100,7 +100,7 @@ describe('VerifyEmailController', () => {
 
   describe('confirm()', () => {
     it('verifies the email and redirects to /dashboard for a valid token', async () => {
-      mockUserUpdate.mockResolvedValue(undefined)
+      mockUserForceUpdate.mockResolvedValue(undefined)
       const { token } = await createEmailVerificationToken('ada@example.com', emailVerificationStore)
 
       const controller = createController({ id: 1, email: 'ada@example.com', emailVerifiedAt: null })
@@ -109,7 +109,7 @@ describe('VerifyEmailController', () => {
 
       const response = await controller.confirm()
 
-      expect(mockUserUpdate).toHaveBeenCalledWith({ email: 'ada@example.com' }, { emailVerifiedAt: expect.any(Date) })
+      expect(mockUserForceUpdate).toHaveBeenCalledWith({ email: 'ada@example.com' }, { emailVerifiedAt: expect.any(Date) })
       expect(response.status).toBe(302)
       expect(response.headers.get('Location')).toBe('/dashboard')
     })
@@ -124,7 +124,7 @@ describe('VerifyEmailController', () => {
       const response = await controller.confirm()
       const { payload } = await readInertiaResponse(response)
 
-      expect(mockUserUpdate).not.toHaveBeenCalled()
+      expect(mockUserForceUpdate).not.toHaveBeenCalled()
       expect(payload.props.status).toBe('This verification link is invalid or has expired. Request a new one below.')
     })
   })

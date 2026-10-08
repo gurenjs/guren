@@ -105,6 +105,27 @@ describe('csrfField', () => {
     expect(html).toContain('<input type="hidden" name="_token"')
     expect(html).toMatch(/value="[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"/)
   })
+
+  it('does not echo markup appended to a planted guest XSRF cookie', async () => {
+    const app = createTestApp()
+    let minted: string | undefined
+    app.get('/token', (c) => {
+      minted = getCsrfToken(c)
+      return c.text('ok')
+    })
+    app.get('/form', (c) => c.html(`<form>${csrfField(c)}</form>`))
+
+    await app.request('/token')
+    const planted = `${minted}.."><script>alert(1)</script>`
+    const res = await app.request('/form', {
+      headers: { Cookie: `XSRF-TOKEN=${encodeURIComponent(planted)}` },
+    })
+    const html = await res.text()
+
+    expect(html).not.toContain('<script>')
+    expect(html).toMatch(/value="[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"/)
+    expect(pickCookie(res, 'XSRF-TOKEN')).not.toContain('script')
+  })
 })
 
 describe('verifyCsrfToken', () => {

@@ -39,7 +39,7 @@ export function registerWebRoutes(base: Router) {
     const user = await this.auth.userOrFail<UserRecord>()  // no session? 401
     const data = await this.validateBody(CreatePostSchema) // bad input? 422
     // The owner comes from the session, never from the request body.
-    const post = await Post.forceCreate({ ...data, authorId: user.id })
+    const post = await Post.create(data, { set: { authorId: user.id } })
     return this.redirect(\`/posts/\${post.id}\`)
   }
 }`,

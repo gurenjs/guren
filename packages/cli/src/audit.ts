@@ -45,6 +45,8 @@ import {
   parseControllerMethods,
   AUTH_CALL_PATTERN,
   FORCE_WRITE_PATTERN,
+  REQUEST_DATA_CALL_PATTERN,
+  spreadsIntoSet,
   type ControllerMethodInfo,
   type ControllerMethodScan,
   type ControllerNameCollision,
@@ -541,10 +543,10 @@ function withEvidence(evidence: CheckEvidence, entry: AuditFinding): AuditFindin
 }
 
 /**
- * A controller method that both validates a request body and calls
- * forceCreate/forceUpdate is likely feeding request-derived data past
- * mass-assignment protection. Static analysis cannot prove data flow, so this is
- * a review prompt (warn), never a fail.
+ * Two review prompts (warn, never fail) for request data that may skip `fillable`:
+ * a method that reads request data and calls forceCreate/forceUpdate, and a
+ * `set` literal that spreads an object (RFC 0031 §4). Static analysis cannot
+ * prove data flow, so neither is a verdict.
  */
 function auditForceWrites(scan: ControllerMethodScan, everyDeclaration: boolean, findings: AuditFinding[]): void {
   // On the manifest path no collision finding covers a class no route reaches by name, so
@@ -558,23 +560,38 @@ function auditForceWrites(scan: ControllerMethodScan, everyDeclaration: boolean,
     : [...scan.methods]
 
   for (const [methodKey, info] of methods) {
+    if (spreadsIntoSet(info.body)) {
+      findings.push(
+        finding(
+          `set-spread:${methodKey}`,
+          `${methodKey} set spread`,
+          'warn',
+          `${methodKey} spreads an object into the set option of create()/update() — set skips fillable, so `
+          + `request data spread into it is written unfiltered.`,
+          `Pass request data as the first argument, which fillable filters, and name only the columns the server `
+          + `chooses in set: create(data, { set: { authorId: user.id } }). set throws on a fillable key at runtime, `
+          + `but a spread that carries none (a .passthrough() schema's extra keys, say) reaches the database.`,
+          info.filePath,
+        ),
+      )
+    }
+
     if (!FORCE_WRITE_PATTERN.test(info.body)) continue
-    // Same predicate the route-validation check uses, so the two findings
-    // cannot disagree about whether a method validates its body.
-    if (!VALIDATE_BODY_PATTERN.test(info.body)) continue
+    if (!REQUEST_DATA_CALL_PATTERN.test(info.body)) continue
 
     findings.push(
       finding(
         `force-write-request-data:${methodKey}`,
         `${methodKey} force write`,
         'warn',
-        `${methodKey} validates a request body and calls forceCreate/forceUpdate in the same method — `
-        + `if the validated input reaches the force* call, mass-assignment protection is bypassed with request data.`,
-        `Check what reaches the force* call. If the validated body is spread only so that a server-chosen column `
-        + `outside fillable can be added (forceCreate({ ...data, authorId: user.id })), confirm the schema declares `
-        + `only columns a request may set and that the server value comes after the spread; that write is the `
-        + `reviewed exception. Otherwise pass request-derived data through create()/update() (protected): a `
-        + `MassAssignmentException is never fixed by moving the same payload to forceCreate/forceUpdate.`,
+        `${methodKey} reads request data (validateBody, validated, input, …) and calls forceCreate/forceUpdate in the `
+        + `same method — if that data reaches the force* call, mass-assignment protection is bypassed with request data.`,
+        `Check what reaches the force* call. If the request data is spread only so that a server-chosen column `
+        + `can be added (forceCreate({ ...data, authorId: user.id })), write it with create(data, { set: { authorId: user.id } }) `
+        + `(update(where, data, { set }) for an update), with authorId removed from fillable and from the body schema, `
+        + `since set refuses a fillable key and a key the data also carries. Never spread request input into set. Force writes are for writes that carry no request data `
+        + `(seeders, OAuth hash sentinels): a MassAssignmentException is never fixed by moving the same payload to `
+        + `forceCreate/forceUpdate.`,
         info.filePath,
       ),
     )

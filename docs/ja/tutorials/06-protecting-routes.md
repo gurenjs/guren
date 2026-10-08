@@ -7,7 +7,7 @@
 - `requireAuthenticated` と `requireGuest` の働きと、ミドルウェアのエイリアスとグループでルートを読みやすく保つ方法
 - `guren audit` が `requireAuthenticated` は信頼し、名前に「auth」を含む自作のミドルウェアは信頼しない理由
 - 行が入っているテーブルに必須列を追加する手順: nullable で追加し、値を埋めてから not null にする
-- `forceCreate` と `forceUpdate` の用途と、`authorId` を fillable にしない理由
+- `set` でサーバーが決める列を書く方法と、`authorId` を fillable にしない理由、`forceCreate` と `forceUpdate` を使う場面
 - スキルを置くと、エージェントによるデータベースの扱い方がどう変わるか
 
 開発サーバーを起動していなければ、起動しておきます。
@@ -370,7 +370,7 @@ export default class PostController extends Controller {
   async store(): Promise<Response> {
     const author = await this.auth.userOrFail<UserRecord>()
     const data = await this.validateBody(PostPayloadSchema)
-    const post = await Post.forceCreate({ ...data, authorId: author.id })
+    const post = await Post.create(data, { set: { authorId: author.id } })
     return this.redirect(`/posts/${post.id}`)
   }
 
@@ -397,7 +397,9 @@ export default class PostController extends Controller {
 }
 ```
 
-ここで `forceCreate` を使っているのは意図的な選択なので、少し詳しく見ておきます。モデルの `fillable` には `title` と `body` だけがあり、`authorId` は含まれていません。投稿の著者をリクエスト側から指定できてはいけないからです。そのため `Post.create({ ...data, authorId: author.id })` と書くと、`authorId` を名指しした `MassAssignmentException` が投げられます。`forceCreate` はこのフィルターを迂回しますが、ここでは問題ありません。渡すオブジェクトには、リクエストから検査を経ずに来た値が 1 つも含まれていないからです。`data` はバリデーターを通過したもので、`author.id` はセッションから取り出したものです。`forceCreate` そのものを避ける必要はなく、サーバーが決めた値にだけ使えばよい、と覚えておいてください。
+`create` の第 2 引数について、少し詳しく見ておきます。モデルの `fillable` には `title` と `body` だけがあり、`authorId` は含まれていません。投稿の著者をリクエスト側から指定できてはいけないからです。そのため `Post.create({ ...data, authorId: author.id })` と書くと、`authorId` を名指しした `MassAssignmentException` が投げられます。`set` には、サーバーが決めた列を渡します。`data` はこれまでどおり `fillable` で絞り込まれ、`authorId` はその横にセッションの値で書き込まれます。`set` は `fillable` に含まれるキーも、`data` にも入っているキーも受け付けません。そのため、あとでバリデーターに `authorId` が加わっても、リクエストから著者を選ぶことはできず、書き込みが失敗します。
+
+`forceCreate` でもこの行は書けますが、オブジェクト全体について `fillable` を飛ばすので、リクエストのデータも検査されずに入ります。force write は、次の節のバックフィル用スクリプトやテストで作る行のように、リクエストのデータをまったく含まない書き込みにだけ使います。
 
 ```bash run
 bun test
@@ -411,9 +413,7 @@ bunx guren audit
 
 認証に関する 3 つの警告が消えました。レポートには対応が必要なものしか出ないので、代わりにどう判定されたかは `bunx guren audit --json` で確かめます。どのルートも「Protected by an authentication guard (verified via middleware capabilities)」として合格しています。括弧内の言い回しに意味があります。`requireAuthenticated` にはフレームワークが付けたマーカーがあり、`audit` は名前ではなくこのマーカーを見て判定します。自作の `requireLogin` ミドルウェアに `auth` というエイリアスを付けた場合、audit は、ガード*のような名前*ではあるものの認識できるガードではないと判断し、警告を出し続けます。この判断は正しいものです。人間でも機械でも、レビュアーは名前だけを見て、その関数が本当に何かを検査しているかを見分けられません。
 
-警告が 1 つ残っていますが、これは誤りではありません。`[warn] [API3] PostController.store force write` は、ボディをバリデートしたうえで `forceCreate` を呼んでいるメソッドに出る警告です。この形のアクションには、この章でもこれ以降の章でも必ずこの警告が出ます。
-
-この警告は判定ではなく、レビューを促すためのものです。`audit` に分かるのは、バリデート済みの入力が `forceCreate` に渡っていることまでです。データの流れを追って、そのバリデーターが `fillable` の代わりに許可リストの役割を果たしているかまでは確かめられません。そこは上の説明で読者自身が判断したところで、その判断はいまも成り立っています。したがって、この警告が出るのは正しく、それを受け入れるのも正しい対応です。同じ理由で、この警告が失敗扱いになることはなく、下の `guren gate` もこの警告を残したまま通ります。警告が出たら、消す方法を探すのではなく、内容を読んで判断してください。次に出る force write の警告は、本当に生のボディをそのまま渡してしまったものかもしれません。
+`store` の書き込み方に対する警告も出ていません。ボディをバリデートしたうえで `forceCreate` や `forceUpdate` を呼んでいるメソッドには、`[warn] [API3] ... force write` が出ます。`audit` はデータの流れを追えないので、リクエストが force write まで届いているかを確かめられないからです。`set` を使えばリクエストのデータは `fillable` を通ったままなので、この警告の対象になりません。別のコードベースでこの警告に出会ったら、レビューを促すものとして扱い、force write に何が渡っているかを読んでから判断してください。
 
 ```bash run
 bunx guren gate
@@ -458,7 +458,7 @@ console.log(`Assigned ${orphans.length} post(s) to ${legacy.name} (#${legacy.id}
 bun scripts/backfill-post-authors.ts
 ```
 
-`forceUpdate` を使う理由は `forceCreate` と同じで、`authorId` は fillable ではなく、値はこのスクリプトが決めたものだからです。パスワードにはランダムな UUID を使っているので、このアカウントは有効なハッシュを持ちながら、そのパスワードを誰も知りません。
+ここでは `forceUpdate` を使います。このスクリプトはリクエストのデータをまったく含まず、`authorId` は fillable ではないからです。パスワードにはランダムな UUID を使っているので、このアカウントは有効なハッシュを持ちながら、そのパスワードを誰も知りません。
 
 列を必須にする作業は、このあとエージェントに任せます。
 
@@ -730,7 +730,7 @@ export default class PostController extends Controller {
   async store(): Promise<Response> {
     const author = await this.auth.userOrFail<UserRecord>()
     const data = await this.validateBody(PostPayloadSchema)
-    const post = await Post.forceCreate({ ...data, authorId: author.id })
+    const post = await Post.create(data, { set: { authorId: author.id } })
     return this.redirect(`/posts/${post.id}`)
   }
 
@@ -912,7 +912,7 @@ bun run db:status
 ## ここまでの状態
 
 - 投稿の変更、プロフィール、ログアウトは `requireAuthenticated` で、ログインと登録のページは `requireGuest` で守られています。
-- audit の結果を読めるようになりました。認証の警告には対応し、force write の警告は意図して受け入れています。audit が名前ではなくフレームワークのガードを信頼する理由も分かっています。
+- audit の結果を読めるようになりました。認証の警告には対応し、著者は force write ではなく `set` で書き込んでいます。audit が名前ではなくフレームワークのガードを信頼する理由も分かっています。
 - nullable で追加し、値を埋め、必須にするという手順で、行を 1 つも失わずにすべての投稿に著者を設定しました。
 - エージェントの最初のマイグレーションを、`db-manage` スキルのルールに沿って実行しました。
 
@@ -921,7 +921,7 @@ bun run db:status
 - **`.middleware('auth')` がコンパイルできない。** `aliasMiddleware()` はその名前を知っている新しいルーター型を返しますが、その戻り値を受け取っていません。上のファイルのように、チェーンして変数に代入してください。
 - **サインイン済みのテストが `/login` にリダイレクトされる。** `actingAs()` は `withCsrf()` より前に呼ぶ必要があります。トークンを用意するリクエストも認証済みでなければならないからです。どちらも新しいクライアントを返すので、戻り値を代入し直してください。
 - **`db:migrate` が「NOT NULL constraint failed」で失敗する。** 著者のいない投稿がまだ残っています。先に `bun scripts/backfill-post-authors.ts` を実行してください。第 3 節の手順は、この順序で進めることに意味があります。
-- **`store` が `MassAssignmentException` で 500 を返す。** `store` が `Post.create` に `authorId` を渡していますが、`fillable` には含まれていません。サーバーが決めた値には `forceCreate` を使ってください。
+- **`store` が `authorId` を名指しした `MassAssignmentException` で 500 を返す。** `authorId` が `data` に入っている (第 1 引数に展開した、またはバリデーターが受け付けた) か、`fillable` に含まれています。`set` はどちらも受け付けません。`authorId` は `fillable` と `PostPayloadSchema` から外し、`set` にだけ渡してください。
 - **一覧の著者がすべて「unknown」になる。** `IN` クエリに渡した id の型が違うか、map のキーがユーザーの id になっていません。`authors` を一度ログに出してみてください。著者ごとに 1 件ずつ入っているはずです。
 
 ## 演習

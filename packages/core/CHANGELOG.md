@@ -1,5 +1,55 @@
 # @guren/core
 
+## 1.24.0
+
+### Minor Changes
+
+- 004ddc0: Add an evidence-bearing application graph through CLI and development MCP, with explicit coverage and source freshness. Add bounded per-application server-error reads through development MCP and a loopback HTTP endpoint, omitting raw exception text and request values. Preserve existing context, diagnostic and plan behavior.
+- 004ddc0: Add the development-only Dev Center at /\_guren to inspect application graph evidence, coverage, unresolved relationships and retained runtime errors. Enable it with GUREN_MCP=1; existing docs and plan views remain available with GUREN_DOCS=1.
+
+### Patch Changes
+
+- 004ddc0: Require Nodemailer 10.0.2 or newer to fix cross-transport TLS server name reuse in its DNS cache.
+- ed7b1ec: Share Model and Page identity readings between the Application Graph and implementation plans, preserving existing Plan checks and approval context hashes. Report unreadable model sources as an unreadable Plan section rather than aborting the application state load.
+- 5d45998: Share filename-based Policy and Resource identity readings across Plan checks, detailed state and Impact, and reuse the same Policy identities in the Application Graph. Preserve approval context hashes, module scopes, discovery order, source-twin handling and unreadable-directory diagnostics.
+- b7e912a: Share Route identity projection between the Application Graph and Plan checks while preserving registration order, duplicate occurrences, live schema references, module-directory provenance and approval context hashes. Retain each caller's registrar selection and source-freshness behavior.
+- ebfc7f6: Share Controller and Validator source identities between application graphs and implementation-plan readers, preserving existing Plan checks, approval context hashes, scope and unreadable-section behavior.
+- 94fc3cb: Share the static Model source reading between Plan detailed status and Impact so a combined reading uses the same table, relationship, fillable and unparsed-file metadata. Preserve standalone loading, module scope, first-class selection and unreadable-source verdicts.
+- 198b499: Share Page component-file selection between Plan detailed status and Impact. Preserve duplicate IDs, TSX precedence, missing and unreadable diagnostics, and approval facts while keeping Props analysis exclusive to detailed status.
+- f94bdad: Keep the development runtime error collector out of deploy bundles. `ExceptionHandler` and `Application` imported it statically, so every Lambda, Vercel and Workers bundle carried its buffer and its `node:fs` import although only `GUREN_MCP=1` in development ever runs it. The capture call ExceptionHandler makes now lives in a small module with no `node:fs`, and `Application` loads the buffer through an `import()` behind a `process.env.NODE_ENV` test the deploy builds settle, so the bundler drops it. In development nothing changes except timing: the buffer is bound once the module loads, which `boot()` waits for, rather than in the constructor.
+- Updated dependencies [3bb92e8]
+- Updated dependencies [aa2ce6a]
+- Updated dependencies [004ddc0]
+- Updated dependencies [716c3c8]
+- Updated dependencies [0742dc3]
+- Updated dependencies [004ddc0]
+- Updated dependencies [823ab84]
+- Updated dependencies [2018f10]
+- Updated dependencies [9d3373a]
+- Updated dependencies [fd1e551]
+- Updated dependencies [4174e75]
+- Updated dependencies [b72f7f7]
+- Updated dependencies [a1f20e5]
+- Updated dependencies [74e6a6e]
+- Updated dependencies [472ee88]
+- Updated dependencies [4df01e5]
+- Updated dependencies [004ddc0]
+- Updated dependencies [ed7b1ec]
+- Updated dependencies [5d45998]
+- Updated dependencies [b7e912a]
+- Updated dependencies [ebfc7f6]
+- Updated dependencies [94fc3cb]
+- Updated dependencies [d2461cb]
+- Updated dependencies [198b499]
+- Updated dependencies [d30347e]
+- Updated dependencies [168b63e]
+- Updated dependencies [f94bdad]
+- Updated dependencies [ee895b7]
+- Updated dependencies [a9ad746]
+  - @guren/cli@2.29.0
+  - @guren/server@2.29.0
+  - @guren/orm@2.13.1
+
 ## 1.23.0
 
 ### Minor Changes
