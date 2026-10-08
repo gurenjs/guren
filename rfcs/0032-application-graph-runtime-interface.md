@@ -564,3 +564,19 @@ approval authority, arbitrary TypeScript evaluation and shared source capture
 across separate commands are outside this milestone. M4 can build on the
 existing generated-file-only `check --fix` boundary and doctor suggestions;
 automatic dependency or configuration rewrites remain excluded.
+
+### M4 generated-file repair
+
+`doctor --fix` consumes only structured `repair` commands on generated-file
+findings. It uses the same deduplicated command runner and remaining-finding
+check as `check --fix`. Route entry selection is preserved for API-only apps.
+Doctor's text advice and `canAutofix` configuration migrations are not execution
+inputs; those migrations stay with `upgrade`.
+
+After generation, a child runs doctor with the same next-step and introspection
+options. Its report must match the app root and contain every original check.
+Failed commands, retained warnings on repaired files, malformed or unavailable rechecks all fail the repair. The JSON report includes the final
+checks and `fixes`; unrelated warnings remain, with their existing `--strict`
+exit behavior. Default doctor runs retain their read-only behavior and text
+advice. This slice does not add arbitrary repairs or change dependency/config
+files, and does not complete M4's first-feature measurement work.
