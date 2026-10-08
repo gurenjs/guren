@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildJsonOutput, suggestNextSteps, type DoctorCheck, type DoctorReport } from '../src/doctor'
 import { doctorRecheckArgs, repairDoctorReport } from '../src/doctor-fix'
@@ -84,6 +85,29 @@ describe('doctor generated-file repair', () => {
     expect(result.fixes?.[0]?.output?.[0]).toContain('Could not verify')
     expect(result.checks[0]!.status).toBe('warn')
   })
+
+  test('accepts a recheck carrying a field value this version does not know', async () => {
+    const after = output(report([finding('generated:routes', 'pass')]))
+    after.stdout = after.stdout.replace('"status":"pass"', '"status":"pass","evidence":"runtime","future":true')
+    const result = await repairDoctorReport(report([finding()]), {}, async (args) => args.includes('doctor') ? after : { exitCode: 0, stdout: '', stderr: '' })
+    expect(result.fixes).toEqual([{ command: 'bunx guren codegen --force --routes routes/api.ts', ok: true }])
+  })
+
+  test('accepts a recheck that reports the app root through its physical path', async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), 'guren-doctor-root-')))
+    const link = `${dir}-link`
+    try {
+      await symlink(dir, link)
+      const before = { ...report([finding()]), cwd: link }
+      const after = { ...report([finding('generated:routes', 'pass')]), cwd: dir }
+      const result = await repairDoctorReport(before, {}, async (args) => args.includes('doctor') ? output(after) : { exitCode: 0, stdout: '', stderr: '' })
+      expect(result.fixes?.[0]?.ok).toBe(true)
+      expect(result.cwd).toBe(link)
+    } finally {
+      await rm(link, { force: true })
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('doctor --fix CLI', () => {
@@ -138,6 +162,22 @@ export function registerWebRoutes(router) {
       for (const key of ['page-contracts', 'generated:.guren/pages.gen.ts', 'generated:.guren/agents.gen.ts']) {
         expect(after.checks.find((check: DoctorCheck) => check.key === key).status).toBe('pass')
       }
+    } finally { await workspace.cleanup() }
+  }, 30_000)
+
+  test('settles an app with no routes file without asking codegen for route manifests', async () => {
+    const workspace = await createTempWorkspace('guren-doctor-repair-no-routes-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'package.json': '{}',
+        'resources/js/pages/Home.tsx': 'export default function Home() { return <div /> }',
+      })
+      const run = await runCliBinCaptured(['doctor', '--fix', '--json', '--next', '--no-introspect'], workspace.dir)
+      expect(run.exitCode).toBe(0)
+      const after = JSON.parse(run.stdout)
+      expect(after.fixes).toEqual([{ command: 'bunx guren codegen --force', ok: true }])
+      for (const check of after.checks.filter((check: DoctorCheck) => check.key.startsWith('generated:'))) expect(check.status).toBe('pass')
+      expect(after.nextSteps.some((step: { title: string }) => step.title === 'Run codegen')).toBe(false)
     } finally { await workspace.cleanup() }
   }, 30_000)
 

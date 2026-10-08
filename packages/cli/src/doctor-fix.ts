@@ -1,38 +1,43 @@
+import { realpath } from 'node:fs/promises'
 import { z } from 'zod'
-import type { DoctorCheck, DoctorReport, RunDoctorOptions } from './doctor'
+import { DOCTOR_STATUSES, summarizeDoctorReport, type DoctorCheck, type DoctorJsonOutput, type DoctorReport, type RunDoctorOptions } from './doctor'
 import { runCheckFixes, settleFixRuns } from './check-fix'
-import { formatFixCommand, type CheckReport } from './check-result'
+import type { CheckReport } from './check-result'
 import { cliEntry } from './cli-entry'
 import { bunExecutable, runCaptured, type CapturedExec } from './subprocess'
 
+// Only what the repair reads is checked; the child is this CLI, so the rest is
+// DoctorJsonOutput. A closed copy of every field would fail a good recheck once a field gains a value.
 const recheckSchema = z.object({
   version: z.literal(1),
   cwd: z.string(),
-  checks: z.array(z.object({
-    key: z.string(), title: z.string(), status: z.enum(['pass', 'warn', 'fail']), message: z.string(),
-    fix: z.string().nullable(), canAutofix: z.boolean(), manualFix: z.string().nullable(),
-    repair: z.object({ kind: z.literal('command'), args: z.array(z.string()) }).optional(),
-    evidence: z.enum(['manifest', 'static', 'none']).optional(), evidenceReason: z.string().optional(),
-  })),
-  nextSteps: z.array(z.object({
-    priority: z.number(), title: z.string(), description: z.string(),
-    filePath: z.string().optional(), command: z.string().optional(), content: z.string().optional(),
-  })).nullable(),
+  checks: z.array(z.looseObject({ key: z.string(), status: z.enum(DOCTOR_STATUSES) })),
+  nextSteps: z.array(z.unknown()).nullable(),
   recommendedCommands: z.array(z.string()),
 })
 
-function fixReport(report: DoctorReport): CheckReport {
-  const checks = report.checks.map(({ repair, ...check }) => ({ ...check, fix: repair }))
+function fixReport(cwd: string, checks: DoctorCheck[]): CheckReport {
+  const findings = checks.map(({ repair, ...check }) => ({ ...check, fix: repair }))
   return {
-    cwd: report.cwd, checks,
-    passCount: checks.filter((check) => check.status === 'pass').length,
-    warnCount: checks.filter((check) => check.status === 'warn').length,
-    failCount: checks.filter((check) => check.status === 'fail').length,
+    cwd, checks: findings,
+    passCount: findings.filter((check) => check.status === 'pass').length,
+    warnCount: findings.filter((check) => check.status === 'warn').length,
+    failCount: findings.filter((check) => check.status === 'fail').length,
   }
+}
+
+export function hasPendingRepair(checks: DoctorCheck[]): boolean {
+  return checks.some((check) => check.status !== 'pass' && check.repair !== undefined)
 }
 
 export function doctorRecheckArgs(options: RunDoctorOptions): string[] {
   return ['doctor', '--json', ...(options.next ? ['--next'] : []), ...(options.introspect ? [] : ['--no-introspect'])]
+}
+
+async function sameDirectory(a: string, b: string): Promise<boolean> {
+  if (a === b) return true
+  const physical = (path: string) => realpath(path).catch(() => path)
+  return (await physical(a)) === (await physical(b))
 }
 
 /** Re-read in a child: generators can clear failed imports that this process's ESM cache retains. */
@@ -41,13 +46,15 @@ export async function repairDoctorReport(
   options: RunDoctorOptions,
   exec: CapturedExec = runCaptured,
 ): Promise<DoctorReport> {
-  const runs = await runCheckFixes(fixReport(before), exec)
+  const runs = await runCheckFixes(fixReport(before.cwd, before.checks), exec)
   if (runs.length === 0) return { ...before, fixes: [] }
   try {
     const child = await exec([bunExecutable(), cliEntry(), ...doctorRecheckArgs(options)], before.cwd)
     if (child.exitCode !== 0) throw new Error('Doctor recheck failed.')
-    const data = recheckSchema.parse(JSON.parse(child.stdout))
-    if (data.cwd !== before.cwd) throw new Error('Doctor recheck returned a different app root.')
+    const parsed: unknown = JSON.parse(child.stdout)
+    recheckSchema.parse(parsed)
+    const data = parsed as DoctorJsonOutput
+    if (!(await sameDirectory(data.cwd, before.cwd))) throw new Error('Doctor recheck returned a different app root.')
     const checks: DoctorCheck[] = data.checks.map(({ fix, manualFix, ...check }) => ({
       ...check, ...(fix === null ? {} : { fix }), ...(manualFix === null ? {} : { manualFix }),
     }))
@@ -55,23 +62,11 @@ export async function repairDoctorReport(
     if (before.checks.some((check) => !checks.some((after) => after.key === check.key))) {
       throw new Error('Doctor recheck omitted an original check.')
     }
-    const after: DoctorReport = {
-      cwd: data.cwd, checks,
-      fixableChecks: checks.filter((check) => check.status !== 'pass' && check.canAutofix),
-      manualChecks: checks.filter((check) => check.status !== 'pass' && !check.canAutofix),
-      hasWarnings: checks.some((check) => check.status === 'warn'),
-      hasFailures: checks.some((check) => check.status === 'fail'),
-      ...(data.nextSteps === null ? {} : { nextSteps: data.nextSteps }),
-      recommendedCommands: data.recommendedCommands,
-    }
-    const fixes = settleFixRuns(runs, fixReport(after)).map((run) => {
-      const unsettled = before.checks.some((check) => check.repair && formatFixCommand(check.repair) === run.command
-        && checks.find((current) => current.key === check.key)?.status !== 'pass')
-      return run.ok && unsettled
-        ? { ...run, ok: false, output: ['It exited 0, but the generated-file findings did not pass recheck.'] }
-        : run
-    })
-    return { ...after, fixes }
+    const after = summarizeDoctorReport(before.cwd, checks, data.nextSteps ?? undefined, data.recommendedCommands)
+    // A finding that still fails without naming its repair has not been cleared by it either.
+    const repairs = new Map(before.checks.flatMap((check) => (check.repair ? [[check.key, check.repair] as const] : [])))
+    const settling = checks.map((check) => ({ ...check, repair: check.repair ?? repairs.get(check.key) }))
+    return { ...after, fixes: settleFixRuns(runs, fixReport(before.cwd, settling)) }
   } catch (error) {
     const message = `Could not verify generated-file repairs: ${error instanceof Error ? error.message : String(error)}`
     return { ...before, fixes: runs.map((run) => run.ok ? { ...run, ok: false, output: [message] } : run) }

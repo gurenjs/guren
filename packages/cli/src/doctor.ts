@@ -32,17 +32,18 @@ import { AGENTS_MANIFEST_FILE, planAgentManifest, STALE_AGENT_MANIFEST_MESSAGE, 
 import { emptyActions } from './controller-methods'
 import { parseSourceFile } from './parse-cache'
 import { resolveRoutesEntry } from './route-registrar'
-import { DEFAULT_ROUTES_FILE, loadRouteDefinitions, resolveRoutesFile } from './load-routes'
+import { DEFAULT_ROUTES_FILE, loadRouteDefinitions, resolveRoutesFile, type RoutesFileTarget } from './load-routes'
 import { appDeclaresPrototypeRoutes } from './prototype-check'
 import type { RouteDefinition } from '@guren/server'
 import { judgeDeployVerdicts, readDeployRuntime } from './deploy-runtime'
 import { checkIntrospection, type Introspection } from './introspect'
 import { describeIntrospectionFailure, introspectedRoutes } from './manifest-section'
 import { commandFix, type CheckEvidence, type CheckFix, type CheckFixRun } from './check-result'
-import { repairDoctorReport } from './doctor-fix'
+import { hasPendingRepair, repairDoctorReport } from './doctor-fix'
 import { detectConfigMigrations, undeclaredEnv, type ConfigMigration, type EnvDeclaration } from './config-migration'
 
-export type DoctorStatus = 'pass' | 'warn' | 'fail'
+export const DOCTOR_STATUSES = ['pass', 'warn', 'fail'] as const
+export type DoctorStatus = (typeof DOCTOR_STATUSES)[number]
 
 export interface DoctorCheck {
   key: string
@@ -147,6 +148,8 @@ interface DoctorRuleContext {
   routeGraph: () => Promise<RouteDefinition[]>
   /** See {@link DoctorManifestPlans.introspection}. */
   introspection?: () => Promise<Introspection>
+  /** See {@link DoctorManifestPlans.routesTarget}. */
+  routesTarget: () => Promise<RoutesFileTarget>
 }
 
 interface DoctorRule {
@@ -165,6 +168,8 @@ const GENERATED_FILES = [
   '.guren/api-client.gen.ts',
   '.guren/channels.gen.ts',
 ]
+// The manifests codegen skips when the routes file is absent (its `missing-routes` stage in codegen.ts).
+const ROUTE_MANIFESTS = new Set(['.guren/routes.gen.ts', '.guren/data.gen.ts', '.guren/api-client.gen.ts', '.guren/channels.gen.ts'])
 
 /**
  * The agent manifest's rule (RFC 0016). Separate from the generic one because
@@ -385,7 +390,7 @@ async function detectRoutes(context: DoctorRuleContext): Promise<DoctorCheck> {
 async function detectPrototypeRoutes(context: DoctorRuleContext): Promise<DoctorCheck> {
   const key = 'prototype-routes'
   const title = 'Prototype Routes'
-  const target = await resolveRoutesFile(context.cwd)
+  const target = await context.routesTarget()
   if (target.silentlyAbsent) {
     return createCheck(key, title, 'pass', 'No routes to inspect.')
   }
@@ -485,8 +490,8 @@ async function detectPageContracts(context: DoctorRuleContext): Promise<DoctorCh
 }
 
 async function generatedRepair(context: DoctorRuleContext): Promise<CheckFix> {
-  const target = await resolveRoutesFile(context.cwd)
-  return commandFix('codegen', '--force', '--routes', target.path)
+  const target = await context.routesTarget()
+  return target.silentlyAbsent ? commandFix('codegen', '--force') : commandFix('codegen', '--force', '--routes', target.path)
 }
 
 function createGeneratedManifestRule(generatedFile: string): DoctorRule {
@@ -505,6 +510,10 @@ function createGeneratedManifestRule(generatedFile: string): DoctorRule {
 
       if (await fileExists(context.cwd, generatedFile)) {
         return createCheck(key, generatedFile, 'pass', `Generated manifest present at ${generatedFile}.`)
+      }
+
+      if (ROUTE_MANIFESTS.has(generatedFile) && (await context.routesTarget()).silentlyAbsent) {
+        return createCheck(key, generatedFile, 'pass', `No routes file; codegen does not write ${generatedFile}.`)
       }
 
       if (plan && plan.reason !== 'pages') {
@@ -1293,6 +1302,8 @@ export interface DoctorManifestPlans {
    * target is found, the prototype rule once a routes file passes the handler. Absent under `--no-introspect`.
    */
   introspection?: () => Promise<Introspection>
+  /** The routes file codegen should read, resolved at most once per run. */
+  routesTarget: () => Promise<RoutesFileTarget>
 }
 
 function createManifestPlans(cwd: string, options: { introspect?: boolean } = {}): DoctorManifestPlans {
@@ -1301,12 +1312,18 @@ function createManifestPlans(cwd: string, options: { introspect?: boolean } = {}
     graph ??= loadRouteDefinitions(resolve(cwd, DEFAULT_ROUTES_FILE), cwd)
     return graph
   }
+  let target: Promise<RoutesFileTarget> | undefined
+  const routesTarget = () => {
+    target ??= resolveRoutesFile(cwd)
+    return target
+  }
   const introspection = options.introspect ? checkIntrospection(cwd) : undefined
   return {
     pageManifest: planPageManifest(cwd),
     agentManifest: planAgentManifest(cwd, DEFAULT_ROUTES_FILE, routeGraph),
     routeGraph,
     introspection,
+    routesTarget,
   }
 }
 
@@ -1375,41 +1392,48 @@ async function collectDoctorRuleEvaluations(
   return { cwd, evaluations: [...ruleEvaluations, ...deployEvaluations] }
 }
 
+export function summarizeDoctorReport(
+  cwd: string,
+  checks: DoctorCheck[],
+  nextSteps?: NextStep[],
+  recommendedCommands: string[] = [...DOCTOR_RECOMMENDED_COMMANDS],
+): DoctorReport {
+  return {
+    cwd,
+    checks,
+    fixableChecks: checks.filter((check) => check.status !== 'pass' && Boolean(check.canAutofix)),
+    manualChecks: checks.filter((check) => check.status !== 'pass' && !check.canAutofix),
+    hasWarnings: checks.some((check) => check.status === 'warn'),
+    hasFailures: checks.some((check) => check.status === 'fail'),
+    recommendedCommands,
+    ...(nextSteps ? { nextSteps } : {}),
+  }
+}
+
 export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorReport> {
   // One memo for the whole run: the rules and `--next` both read these plans,
   // and the agent one can evaluate the app's module graph.
   const plans = createManifestPlans(resolve(options.cwd ?? process.cwd()), options)
   const { cwd, evaluations: ruleEvaluations } = await getDoctorRuleEvaluations({ cwd: options.cwd }, plans)
-  let evaluations = ruleEvaluations
-  let nextSteps: NextStep[] | undefined
-  if (options.next) {
-    try {
-      nextSteps = await suggestNextSteps({ cwd }, plans)
-    } catch (error) {
-      if (!(error instanceof FileDiscoveryError)) throw error
-      evaluations = [discoveryFailureEvaluation(cwd, error)]
-      nextSteps = []
+  let checks = ruleEvaluations.map((evaluation) => evaluation.check)
+  let report: DoctorReport
+  if (options.fix && hasPendingRepair(checks)) {
+    // The recheck child reads the next steps after the repairs; reading them here first would be discarded.
+    report = await repairDoctorReport(summarizeDoctorReport(cwd, checks), options)
+  } else {
+    let nextSteps: NextStep[] | undefined
+    if (options.next) {
+      try {
+        nextSteps = await suggestNextSteps({ cwd }, plans)
+      } catch (error) {
+        if (!(error instanceof FileDiscoveryError)) throw error
+        checks = [discoveryFailureEvaluation(cwd, error).check]
+        nextSteps = []
+      }
     }
+    report = summarizeDoctorReport(cwd, checks, nextSteps)
+    if (options.fix) report.fixes = []
   }
-  const checks = evaluations.map((evaluation) => evaluation.check)
-  const fixableChecks = checks.filter((check) => check.status !== 'pass' && Boolean(check.canAutofix))
-  const manualChecks = checks.filter((check) => check.status !== 'pass' && !check.canAutofix)
-
-  let report: DoctorReport = {
-    cwd,
-    checks,
-    fixableChecks,
-    manualChecks,
-    hasWarnings: checks.some((check) => check.status === 'warn'),
-    hasFailures: checks.some((check) => check.status === 'fail'),
-    recommendedCommands: [...DOCTOR_RECOMMENDED_COMMANDS],
-  }
-
-  if (nextSteps) {
-    report.nextSteps = nextSteps
-  }
-
-  if (options.fix) report = await repairDoctorReport(report, options)
 
   if (options.json) {
     const jsonOutput = buildJsonOutput(report)
@@ -1566,7 +1590,11 @@ export async function suggestNextSteps(
     // Ignore
   }
 
-  const [pagesPlan, agentPlan] = await Promise.all([manifestPlans.pageManifest, manifestPlans.agentManifest])
+  const [pagesPlan, agentPlan, routesTarget] = await Promise.all([
+    manifestPlans.pageManifest,
+    manifestPlans.agentManifest,
+    manifestPlans.routesTarget(),
+  ])
   const requiredManifests = [
     '.guren/routes.gen.ts',
     ...(pagesPlan.reason === 'pages' ? [PAGES_MANIFEST_FILE] : []),
@@ -1575,7 +1603,7 @@ export async function suggestNextSteps(
     // `.agent()`: an app that derives no tool is not missing a manifest.
     ...(agentPlan.reason === 'tools' ? [AGENTS_MANIFEST_FILE] : []),
     '.guren/api-client.gen.ts',
-  ]
+  ].filter((manifest) => !(routesTarget.silentlyAbsent && ROUTE_MANIFESTS.has(manifest)))
   // A stale agent manifest is the same next step: codegen removes it.
   let missingManifests = agentPlan.staleManifest
   for (const manifest of requiredManifests) {
