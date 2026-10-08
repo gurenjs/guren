@@ -1,6 +1,7 @@
 import { realpath } from 'node:fs/promises'
 import { z } from 'zod'
-import { DOCTOR_STATUSES, summarizeDoctorReport, type DoctorCheck, type DoctorJsonOutput, type DoctorReport, type RunDoctorOptions } from './doctor'
+import type { DoctorCheck, DoctorJsonOutput, DoctorReport, RunDoctorOptions } from './doctor'
+import { DOCTOR_STATUSES, summarizeDoctorReport } from './doctor-report'
 import { runCheckFixes, settleFixRuns } from './check-fix'
 import type { CheckReport } from './check-result'
 import { cliEntry } from './cli-entry'

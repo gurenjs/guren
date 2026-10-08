@@ -40,10 +40,11 @@ import { checkIntrospection, type Introspection } from './introspect'
 import { describeIntrospectionFailure, introspectedRoutes } from './manifest-section'
 import { commandFix, type CheckEvidence, type CheckFix, type CheckFixRun } from './check-result'
 import { hasPendingRepair, repairDoctorReport } from './doctor-fix'
+import { summarizeDoctorReport, type DoctorStatus } from './doctor-report'
 import { detectConfigMigrations, undeclaredEnv, type ConfigMigration, type EnvDeclaration } from './config-migration'
 
-export const DOCTOR_STATUSES = ['pass', 'warn', 'fail'] as const
-export type DoctorStatus = (typeof DOCTOR_STATUSES)[number]
+export type { DoctorStatus } from './doctor-report'
+export { DOCTOR_RECOMMENDED_COMMANDS, DOCTOR_STATUSES, summarizeDoctorReport } from './doctor-report'
 
 export interface DoctorCheck {
   key: string
@@ -245,12 +246,6 @@ function createAgentManifestRule(): DoctorRule {
     },
   }
 }
-
-export const DOCTOR_RECOMMENDED_COMMANDS = [
-  'bunx guren codegen --force',
-  'bun run typecheck',
-  'bun run build',
-]
 
 export const CANONICAL_APP_SCRIPTS = {
   dev: 'bun run codegen && bun run dev:server',
@@ -1390,24 +1385,6 @@ async function collectDoctorRuleEvaluations(
   }))
 
   return { cwd, evaluations: [...ruleEvaluations, ...deployEvaluations] }
-}
-
-export function summarizeDoctorReport(
-  cwd: string,
-  checks: DoctorCheck[],
-  nextSteps?: NextStep[],
-  recommendedCommands: string[] = [...DOCTOR_RECOMMENDED_COMMANDS],
-): DoctorReport {
-  return {
-    cwd,
-    checks,
-    fixableChecks: checks.filter((check) => check.status !== 'pass' && Boolean(check.canAutofix)),
-    manualChecks: checks.filter((check) => check.status !== 'pass' && !check.canAutofix),
-    hasWarnings: checks.some((check) => check.status === 'warn'),
-    hasFailures: checks.some((check) => check.status === 'fail'),
-    recommendedCommands,
-    ...(nextSteps ? { nextSteps } : {}),
-  }
 }
 
 export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorReport> {

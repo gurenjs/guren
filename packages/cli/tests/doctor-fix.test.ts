@@ -169,7 +169,7 @@ export function registerWebRoutes(router) {
     const workspace = await createTempWorkspace('guren-doctor-repair-no-routes-')
     try {
       await writeWorkspaceFiles(workspace.dir, {
-        'package.json': '{}',
+        'package.json': '{"dependencies":{"@guren/inertia-client":"*"}}',
         'resources/js/pages/Home.tsx': 'export default function Home() { return <div /> }',
       })
       const run = await runCliBinCaptured(['doctor', '--fix', '--json', '--next', '--no-introspect'], workspace.dir)
