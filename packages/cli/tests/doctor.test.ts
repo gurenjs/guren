@@ -560,6 +560,9 @@ describe('runDoctor', () => {
         JSON.stringify({ name: 'doctor-api-client' }, null, 2),
         'utf8',
       )
+      // codegen writes api-client.gen.ts only beside a routes file; without one doctor passes it.
+      await mkdir(join(workspace.dir, 'routes'), { recursive: true })
+      await writeFile(join(workspace.dir, 'routes/web.ts'), 'export function registerWebRoutes() {}\n', 'utf8')
 
       const report = await runDoctor({ cwd: workspace.dir, json: true })
       const apiClientCheck = report.checks.find((check) => check.key === 'generated:.guren/api-client.gen.ts')
