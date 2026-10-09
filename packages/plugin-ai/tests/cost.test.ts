@@ -37,6 +37,15 @@ describe('usageOf', () => {
     })
   })
 
+  test('should count a tool named after an Object.prototype member, and price it only when priced', () => {
+    const counted = usageOf({ usage, content: [{ type: 'tool-call', toolCallId: 'a', toolName: 'constructor', providerExecuted: true }] })
+
+    expect(Object.entries(counted.serverToolRequests ?? {})).toEqual([['constructor', 1]])
+    expect(Object.entries(addUsage(counted, counted).serverToolRequests ?? {})).toEqual([['constructor', 2]])
+    expect(computeCostUsd(counted, { input: 0, output: 0 })).toBe(0)
+    expect(computeCostUsd(counted, { input: 0, output: 0, perThousandRequests: { toString: 5 } })).toBe(0)
+  })
+
   test('should read a single step, and leave serverToolRequests out when there were none', () => {
     expect(usageOf({ usage, content: [searched('a')] }).serverToolRequests).toEqual({ web_search: 1 })
     expect(usageOf({ usage: { ...usage, inputTokens: undefined }, steps: [] })).not.toHaveProperty('serverToolRequests')

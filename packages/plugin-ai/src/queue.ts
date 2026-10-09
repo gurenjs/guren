@@ -23,14 +23,8 @@ export interface RunAgentPayload {
   channel?: string
 }
 
-type ResponseDetails = 'rawFinishReason' | 'sources' | 'providerMetadata' | 'modelId'
-
-/**
- * What `AgentResponded` carries: the response without `steps`, which a queued listener would
- * serialize whole. The details are optional so an event built by hand, in a listener's test, still compiles.
- */
-export type QueuedAgentResponse = Omit<AgentResponse<unknown>, 'steps' | 'conversationId' | ResponseDetails>
-  & Partial<Pick<AgentResponse<unknown>, ResponseDetails>>
+/** What `AgentResponded` carries: the response without `steps`, which a queued listener would serialize whole. */
+export type QueuedAgentResponse = Omit<AgentResponse<unknown>, 'steps' | 'conversationId'>
 
 export class AgentResponded extends Event {
   static override eventName = 'AgentResponded'

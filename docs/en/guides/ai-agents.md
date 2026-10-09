@@ -133,7 +133,7 @@ Anthropic's `cacheControl` at this level turns on prompt caching for the whole r
 
 ### Resuming a paused turn
 
-A provider can end a response before the turn is over. Anthropic does this with `pause_turn` when its server-side tool loop (web search, web fetch) runs long. The AI SDK reports that as `finishReason: 'stop'`, so the tool loop ends with the research half done. `continueWhen` lets `prompt()` resume it:
+A provider can end a response before the turn is over. Anthropic does this with `pause_turn` when its server-side tool loop (web search, web fetch) runs long. When the paused response leaves a server-side tool call waiting for its result, the AI SDK resumes the turn itself. When it does not, the SDK reports the pause as `finishReason: 'stop'`, and the tool loop ends with the research half done. `continueWhen` lets `prompt()` resume it:
 
 ```ts
 import { Agent, isPausedTurn } from '@guren/plugin-ai'
@@ -145,7 +145,7 @@ export class AdditiveResearcher extends Agent {
 
 When the tool loop ends, `prompt()` passes the last step to `continueWhen`. While it returns `true`, `prompt()` calls the model again with the turn so far appended and no new user message. That is how Anthropic resumes a paused turn. It works under `as(null)`, and a conversation stores the whole turn once. `isPausedTurn` reads `step.rawFinishReason === 'pause_turn'`. It is a plain function, so another provider's condition can be written the same way.
 
-`maxContinuations` (5 by default) caps the extra calls. When the cap is reached, the response is returned with `rawFinishReason` still `'pause_turn'`, so check it. `stopWhen` counts afresh on each call, so one prompt can take up to `stopWhen`'s steps times `maxContinuations + 1`. `steps`, `sources` and `usage` cover every call. When a resumed call answers in one step, its text is appended to the paused step's text. When it goes on to call tools, `text` is the final step's alone. `stream()` and `broadcast()` do not continue.
+`maxContinuations` (5 by default) caps the extra calls. When the cap is reached, the response is returned with `rawFinishReason` still `'pause_turn'`, so check it. `stopWhen` counts afresh on each call, so one prompt can take up to `stopWhen`'s steps times `maxContinuations + 1`. `steps`, `sources` and `usage` cover every call. `text` joins every step's text since the last step that called an application tool, so a turn a pause split across steps reads whole. The AI SDK's own `text` is the final step's alone. `stream()` and `broadcast()` do not continue.
 
 An agent cannot declare both `output` and `continueWhen`, and `as()` refuses one that does. The AI SDK parses the output at the end of every call, so a paused call fails before it can be resumed. Let one agent research in text and a second turn its answer into the schema. Anthropic does not combine structured output with search citations anyway.
 

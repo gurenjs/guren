@@ -225,9 +225,13 @@ server-side web search). Three additions, each backward compatible:
   declares `output` too, since the SDK parses the output at the end of each
   call and a paused call throws before `continueWhen` sees it.
 - **`AgentResponse`** gains `rawFinishReason`, `sources` (every step's),
-  `providerMetadata` (the final step's) and `modelId`, and `AgentResponded`
-  carries them as optional fields. §10's `computeCostUsd()`, `addUsage()` and
-  `usageOf()` move to the main entry, and `AiPricing` gains
+  `providerMetadata` (the final step's) and `modelId`, all optional in the
+  type so a response built by hand still compiles. `text` joins every step's
+  text since the last step that called an application tool: the SDK's `text`
+  is the final step's, which drops the start of a turn that a pause, or a
+  deferred server-side result (`supportsDeferredResults`), split across
+  steps. §10's `computeCostUsd()`, `addUsage()` and `usageOf()` move to the
+  main entry, and `AiPricing` gains
   `perThousandRequests`, priced per tool name against the provider-executed
   tool calls `usageOf()` counts from the steps (a call answered with a
   `tool-error` is left out, as Anthropic bills no failed search).

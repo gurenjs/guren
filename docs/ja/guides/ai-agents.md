@@ -133,7 +133,7 @@ export class AdditiveResearcher extends Agent {
 
 ### 一時停止したターンを再開する
 
-プロバイダが、ターンの途中でレスポンスを終えることがあります。Anthropic は、サーバー側のツールループ(Web 検索・Web 取得)が長引くと `pause_turn` で止めます。AI SDK はこれを `finishReason: 'stop'` として返すので、ツールループは調査の途中で終わってしまいます。`continueWhen` を書くと、`prompt()` がそのターンを再開します。
+プロバイダが、ターンの途中でレスポンスを終えることがあります。Anthropic は、サーバー側のツールループ(Web 検索・Web 取得)が長引くと `pause_turn` で止めます。一時停止したレスポンスに、結果を待っているサーバー側のツール呼び出しが残っていれば、AI SDK が自分でターンを再開します。残っていないときは、AI SDK はこの停止を `finishReason: 'stop'` として返すので、ツールループは調査の途中で終わってしまいます。`continueWhen` を書くと、`prompt()` がそのターンを再開します。
 
 ```ts
 import { Agent, isPausedTurn } from '@guren/plugin-ai'
@@ -145,7 +145,7 @@ export class AdditiveResearcher extends Agent {
 
 ツールループが終わると、`prompt()` は最後のステップを `continueWhen` に渡します。`true` が返るあいだ、`prompt()` はそこまでのターンを後ろに付け、新しいユーザーメッセージは足さずに、モデルをもう一度呼びます。これが Anthropic で一時停止したターンを再開する方法です。`as(null)` でも動き、会話にはターン全体が 1 回だけ保存されます。`isPausedTurn` は `step.rawFinishReason === 'pause_turn'` を見るだけのただの関数なので、ほかのプロバイダの条件も同じ形で書けます。
 
-追加の呼び出しは `maxContinuations`(既定 5)回までです。上限に達すると、`rawFinishReason` が `'pause_turn'` のままのレスポンスが返るので、確かめてください。`stopWhen` は呼び出しごとに数え直すため、1 回のプロンプトは最大で `stopWhen` のステップ数の `maxContinuations + 1` 倍まで進みます。`steps`、`sources`、`usage` はすべての呼び出しを含みます。再開した呼び出しが 1 ステップで答えたときは、その text を一時停止したステップの text の後ろに続けます。そこからさらにツールを呼んだときは、`text` は最後のステップのものだけです。`stream()` と `broadcast()` は再開しません。
+追加の呼び出しは `maxContinuations`(既定 5)回までです。上限に達すると、`rawFinishReason` が `'pause_turn'` のままのレスポンスが返るので、確かめてください。`stopWhen` は呼び出しごとに数え直すため、1 回のプロンプトは最大で `stopWhen` のステップ数の `maxContinuations + 1` 倍まで進みます。`steps`、`sources`、`usage` はすべての呼び出しを含みます。`text` は、アプリケーションのツールを最後に呼んだステップより後の、すべてのステップの text をつなげたものです。そのため、一時停止で複数のステップに分かれたターンも、全体が読めます。AI SDK 自身の `text` は最後のステップのものだけです。`stream()` と `broadcast()` は再開しません。
 
 `output` と `continueWhen` の両方を宣言したエージェントは、`as()` の時点で拒否されます。AI SDK は呼び出しのたびに最後に出力をパースするので、一時停止した呼び出しは再開する前に失敗するためです。調査はテキストで答えるエージェントにさせ、その答えを別のエージェントでスキーマの形にしてください。Anthropic では、もともと構造化出力と検索の引用を一緒には使えません。
 

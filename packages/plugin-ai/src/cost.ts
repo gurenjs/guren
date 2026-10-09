@@ -57,9 +57,9 @@ export function addUsage(left: AiUsage, right: AiUsage): AiUsage {
     sum[key] = (a ?? 0) + (b ?? 0)
   }
   if (left.serverToolRequests || right.serverToolRequests) {
-    const requests: Record<string, number> = { ...left.serverToolRequests }
-    for (const [tool, count] of Object.entries(right.serverToolRequests ?? {})) {
-      requests[tool] = (requests[tool] ?? 0) + count
+    const requests = counter()
+    for (const counts of [left.serverToolRequests, right.serverToolRequests]) {
+      for (const [tool, count] of Object.entries(counts ?? {})) requests[tool] = (requests[tool] ?? 0) + count
     }
     sum.serverToolRequests = requests
   }
@@ -87,7 +87,10 @@ export function computeCostUsd(usage: AiUsage, pricing: AiPricing | undefined): 
   const output = (usage.outputTokens ?? 0) * pricing.output
   let requests = 0
   for (const [tool, count] of Object.entries(usage.serverToolRequests ?? {})) {
-    requests += count * (pricing.perThousandRequests?.[tool] ?? 0)
+    const price = pricing.perThousandRequests && Object.hasOwn(pricing.perThousandRequests, tool)
+      ? pricing.perThousandRequests[tool]!
+      : 0
+    requests += count * price
   }
   return (input + output) / PER_MILLION + requests / PER_THOUSAND
 }
@@ -114,11 +117,16 @@ function serverToolRequests(steps: ReadonlyArray<UsageStep>): Record<string, num
     for (const part of step.content) {
       if (part.type !== 'tool-call' || !part.providerExecuted || !part.toolName) continue
       if (part.toolCallId && failed.has(part.toolCallId)) continue
-      requests ??= {}
+      requests ??= counter()
       requests[part.toolName] = (requests[part.toolName] ?? 0) + 1
     }
   }
   return requests
+}
+
+/** Keyed by tool names an app chooses, so `constructor` must not read `Object.prototype`'s. */
+function counter(): Record<string, number> {
+  return Object.create(null) as Record<string, number>
 }
 
 function stripUndefined(usage: AiUsage): AiUsage {

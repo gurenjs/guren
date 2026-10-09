@@ -119,7 +119,7 @@ describe('continueWhen', () => {
     expect(response.usage.inputTokens).toBe(6)
     expect(response.usage.inputTokenDetails.noCacheTokens).toBe(6)
     expect(response.usage.outputTokens).toBe(4)
-    expect(response.sources.map((source) => source.sourceType === 'url' && source.url)).toEqual(['https://example.org/1'])
+    expect(response.sources?.map((source) => source.sourceType === 'url' && source.url)).toEqual(['https://example.org/1'])
     expect(response.finishReason).toBe('stop')
     expect(response.rawFinishReason).toBe('end_turn')
   })
@@ -148,6 +148,38 @@ describe('continueWhen', () => {
     expect(model.doGenerateCalls).toHaveLength(1)
     expect(response.rawFinishReason).toBe('pause_turn')
     expect(response.text).toBe('Searching. ')
+  })
+
+  test('should keep the text of a turn the SDK itself resumed for a deferred server-side result', async () => {
+    const h = await bootHarness()
+    const model = h.scriptResults([
+      {
+        content: [
+          { type: 'text', text: 'A' },
+          { type: 'tool-call', toolCallId: 'search-1', toolName: 'web_search', input: '{"query":"e100"}', providerExecuted: true },
+        ],
+        finishReason: { unified: 'stop', raw: 'pause_turn' },
+        usage: USAGE,
+        warnings: [],
+      },
+      {
+        content: [
+          { type: 'tool-result', toolCallId: 'search-1', toolName: 'web_search', result: [{ url: 'https://example.org/1' }] },
+          { type: 'text', text: 'B' },
+        ],
+        finishReason: { unified: 'stop', raw: 'end_turn' },
+        usage: USAGE,
+        warnings: [],
+      },
+    ])
+
+    const deferred = { ...webSearch, supportsDeferredResults: true } as Tool
+    const Plain = agent({ instructions: 'Research.', tools: () => ({ web_search: deferred }) })
+    const response = await h.manager.agent(Plain).as(null).prompt('Check E100')
+
+    expect(model.doGenerateCalls).toHaveLength(2)
+    expect(response.steps).toHaveLength(2)
+    expect(response.text).toBe('AB')
   })
 
   test('should take the last round text alone when the continuation went on to more steps', async () => {

@@ -67,7 +67,10 @@ export interface QueuedAgentRun {
 export type AgentSource = StepResult<ToolSet>['sources'][number]
 
 export interface AgentResponse<TOutput> {
-  /** The final step's text; a continuation that resumes a paused step in one step adds to it (`continueWhen`). */
+  /**
+   * The final turn's text: every step's since the last one that called an application tool. A step
+   * that resumes a paused or deferred server-side tool call continues the same turn, so it adds to it.
+   */
   text: string
   output: TOutput
   /** Every step, continuations included. */
@@ -77,12 +80,12 @@ export interface AgentResponse<TOutput> {
   finishReason: FinishReason
   /** The provider's own reason, such as Anthropic's `pause_turn`, which the SDK reports as `stop`. */
   rawFinishReason?: string
-  /** Every step's sources, in order. */
-  sources: AgentSource[]
+  /** Every step's sources, in order. Always set by `prompt()`; optional so a response built by hand still compiles. */
+  sources?: AgentSource[]
   /** The final step's provider metadata; each step's is on {@link steps}. */
   providerMetadata?: ProviderMetadata
-  /** The model that answered the final step, as the provider reports it. */
-  modelId: string
+  /** The model that answered the final step, as the provider reports it. Always set by `prompt()`. */
+  modelId?: string
   /** Set when the prompt started or continued a conversation. */
   conversationId?: string
 }
@@ -386,11 +389,13 @@ export function bindAgent<T extends Agent>(
       }
       await persistTurn(responseMessages)
       const last = rounds.at(-1)!
-      const lastStep = last.steps.at(-1)!
+      const steps = rounds.flatMap((round) => round.steps) as Array<StepResult<ToolSet>>
+      const lastStep = steps.at(-1)!
+      const text = turnText(steps)
       return {
-        text: stitchedText(rounds),
-        output: (output ? last.output : stitchedText(rounds)) as InferAgentOutput<T>,
-        steps: rounds.flatMap((round) => round.steps) as Array<StepResult<ToolSet>>,
+        text,
+        output: (output ? last.output : text) as InferAgentOutput<T>,
+        steps,
         usage: rounds.length === 1 ? last.usage : rounds.map((round) => round.usage).reduce(addLanguageModelUsage),
         finishReason: last.finishReason,
         ...(last.rawFinishReason !== undefined ? { rawFinishReason: last.rawFinishReason } : {}),
@@ -501,14 +506,17 @@ export function bindAgent<T extends Agent>(
 }
 
 /**
- * The SDK's `text` is the final step's. A continuation's first step resumes the paused step, so
- * a round answering in that one step adds to the text; one that went on to call tools starts afresh.
+ * The SDK's `text` is the final step's alone, which drops the start of a turn that a paused
+ * (`continueWhen`) or deferred (`supportsDeferredResults`) server-side tool call split across
+ * steps. Only a step that called an application tool ends the turn its text belongs to.
  */
-function stitchedText(rounds: ReadonlyArray<{ text: string; steps: readonly unknown[] }>): string {
+function turnText(steps: ReadonlyArray<StepResult<ToolSet>>): string {
   let text = ''
-  rounds.forEach((round, index) => {
-    text = index > 0 && round.steps.length === 1 ? text + round.text : round.text
-  })
+  let afresh = false
+  for (const step of steps) {
+    text = (afresh ? '' : text) + step.text
+    afresh = step.content.some((part) => part.type === 'tool-call' && !part.providerExecuted)
+  }
   return text
 }
 
