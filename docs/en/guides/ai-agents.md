@@ -147,6 +147,8 @@ When the tool loop ends, `prompt()` passes the last step to `continueWhen`. Whil
 
 `maxContinuations` (5 by default) caps the extra calls. When the cap is reached, the response is returned with `rawFinishReason` still `'pause_turn'`, so check it. `stopWhen` counts afresh on each call, so one prompt can take up to `stopWhen`'s steps times `maxContinuations + 1`. `steps`, `sources` and `usage` cover every call. When a resumed call answers in one step, its text is appended to the paused step's text. When it goes on to call tools, `text` is the final step's alone. `stream()` and `broadcast()` do not continue.
 
+An agent cannot declare both `output` and `continueWhen`, and `as()` refuses one that does. The AI SDK parses the output at the end of every call, so a paused call fails before it can be resumed. Let one agent research in text and a second turn its answer into the schema. Anthropic does not combine structured output with search citations anyway.
+
 ### Prompting it
 
 In a controller, job or command, resolve the `ai` manager from the container, bind the agent to a principal, and prompt:

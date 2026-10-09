@@ -221,7 +221,9 @@ server-side web search). Three additions, each backward compatible:
   `isPausedTurn` reads `rawFinishReason`, so no provider package is imported.
   It works without a conversation store; with one, the whole turn is stored
   once. `stream()` and `broadcast()` do not continue: a resumed stream would
-  need a second response spliced into the first.
+  need a second response spliced into the first. `as()` refuses a class that
+  declares `output` too, since the SDK parses the output at the end of each
+  call and a paused call throws before `continueWhen` sees it.
 - **`AgentResponse`** gains `rawFinishReason`, `sources` (every step's),
   `providerMetadata` (the final step's) and `modelId`, and `AgentResponded`
   carries them as optional fields. §10's `computeCostUsd()`, `addUsage()` and

@@ -310,6 +310,13 @@ export function bindAgent<T extends Agent>(
 
   const agentName = resolveAgentName(cls)
   const output = (instance as { output?: OutputInterface }).output
+  if (output && instance.continueWhen) {
+    // The SDK parses the output at the end of every call, so a paused call throws before continueWhen sees it.
+    throw new Error(
+      `${agentName} declares both an output schema and continueWhen, and a paused call fails to parse before it can `
+      + 'be resumed. Let one agent research in text with continueWhen, and a second turn its answer into the schema.',
+    )
+  }
 
   const requestedConversation = (requested: true | string | undefined, conversation: string | undefined) => {
     if (conversation !== undefined && requested !== undefined && requested !== conversation) {
@@ -369,7 +376,7 @@ export function bindAgent<T extends Agent>(
       while (
         instance.continueWhen
         && rounds.length <= maxContinuations
-        && instance.continueWhen(rounds.at(-1)!.finalStep as StepResult<ToolSet>)
+        && instance.continueWhen(rounds.at(-1)!.steps.at(-1) as StepResult<ToolSet>)
       ) {
         // Aborted between calls, the turn fails as one aborted mid-call does, storing nothing.
         options.signal?.throwIfAborted()
@@ -379,6 +386,7 @@ export function bindAgent<T extends Agent>(
       }
       await persistTurn(responseMessages)
       const last = rounds.at(-1)!
+      const lastStep = last.steps.at(-1)!
       return {
         text: stitchedText(rounds),
         output: (output ? last.output : stitchedText(rounds)) as InferAgentOutput<T>,
@@ -387,8 +395,8 @@ export function bindAgent<T extends Agent>(
         finishReason: last.finishReason,
         ...(last.rawFinishReason !== undefined ? { rawFinishReason: last.rawFinishReason } : {}),
         sources: rounds.flatMap((round) => round.sources),
-        ...(last.finalStep.providerMetadata ? { providerMetadata: last.finalStep.providerMetadata } : {}),
-        modelId: last.finalStep.response.modelId,
+        ...(lastStep.providerMetadata ? { providerMetadata: lastStep.providerMetadata } : {}),
+        modelId: lastStep.response.modelId,
         ...(history ? { conversationId: history.id } : {}),
       }
     },

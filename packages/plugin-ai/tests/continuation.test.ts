@@ -2,8 +2,9 @@ process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 import { describe, expect, test } from 'bun:test'
 import { jsonSchema, type Tool } from 'ai'
+import { z } from 'zod'
 
-import { Agent, agent, isPausedTurn, type AgentCallSettings, type ContinueCondition } from '../src'
+import { Agent, Output, agent, isPausedTurn, type AgentCallSettings, type ContinueCondition } from '../src'
 import { bootHarness, USAGE, type GenerateResult } from './fixture'
 
 // A provider-executed tool, shaped as a provider package builds one, so no provider is imported.
@@ -167,6 +168,16 @@ describe('continueWhen', () => {
     expect(model.doGenerateCalls).toHaveLength(3)
     expect(response.text).toBe('Done.')
     expect(response.steps).toHaveLength(3)
+  })
+
+  test('should refuse at as() an agent declaring an output schema, which a paused call cannot parse', async () => {
+    const h = await bootHarness()
+
+    class Structured extends Researcher {
+      output = Output.object({ schema: z.object({ verdict: z.string() }) })
+    }
+
+    expect(() => h.manager.agent(Structured).as(null)).toThrow('Structured declares both an output schema and continueWhen')
   })
 
   test('should store the user message and every round once, in a conversation', async () => {
