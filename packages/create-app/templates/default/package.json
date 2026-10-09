@@ -22,7 +22,7 @@
     "db:seed": "bunx guren db:seed"
   },
   "dependencies": {
-    "@guren/cli": "^2.30.1",
+    "@guren/cli": "^2.31.0",
     "@guren/core": "^1.24.0",
     "@guren/inertia-client": "^1.2.2",
     "@guren/orm": "^2.14.0",

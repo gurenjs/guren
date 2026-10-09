@@ -1,6 +1,6 @@
 {
   "name": "@guren/cli",
-  "version": "2.30.1",
+  "version": "2.31.0",
   "description": "CLI for the Guren framework: scaffolding (make:*, add), migrations, codegen, and the check, audit and gate commands a coding agent runs to verify its work.",
   "keywords": [
     "guren",

@@ -1,5 +1,17 @@
 # @guren/example-agents
 
+## 0.1.22
+
+### Patch Changes
+
+- 0a50478: The example's `anthropic` provider runs Claude Opus 5.5 (`claude-opus-5-5`) on `@ai-sdk/anthropic@^4.0.78`.
+- Updated dependencies [0a50478]
+- Updated dependencies [0a50478]
+- Updated dependencies [3e1cb72]
+- Updated dependencies [5a82a14]
+  - @guren/cli@2.31.0
+  - @guren/plugin-ai@0.5.0
+
 ## 0.1.21
 
 ### Patch Changes
