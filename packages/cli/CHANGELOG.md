@@ -1,5 +1,16 @@
 # @guren/cli
 
+## 2.31.0
+
+### Minor Changes
+
+- 3e1cb72: Add `doctor --fix` for generated-file repairs with deduplicated generators, API route selection, fresh rechecks and structured repair results. Configuration autofixes remain in `upgrade`.
+
+### Patch Changes
+
+- 0a50478: `guren add ai --provider anthropic` installs `@ai-sdk/anthropic@^4.0.78`, a release that knows Claude Opus 5.5 rejects forced tool choice and disabled thinking, and sends an agent's `output` schema through `output_config.format`.
+- 0a50478: `guren add ai` writes Claude Opus 5.5 into `config/ai.ts`: `claude-opus-5-5` for `--provider anthropic` and `anthropic/claude-opus-5.5` for `--provider gateway`, in place of Claude Opus 5.
+
 ## 2.30.1
 
 ### Patch Changes
