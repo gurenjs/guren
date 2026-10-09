@@ -30,10 +30,13 @@ export type ScriptedStep =
   | { text: string }
   | { toolCalls: Array<{ name: string; input: Record<string, unknown> }> }
 
-const USAGE = {
+export const USAGE = {
   inputTokens: { total: 3, noCache: 3, cacheRead: 0, cacheWrite: 0 },
   outputTokens: { total: 2, text: 2, reasoning: 0 },
 }
+
+/** One `doGenerate` answer, for a test that scripts content the step shorthand cannot say. */
+export type GenerateResult = Awaited<ReturnType<MockLanguageModelV4['doGenerate']>>
 
 /** A model that answers each generate or stream call with the next step of the script. */
 export function scriptedModel(steps: ScriptedStep[]): MockLanguageModelV4 {
@@ -152,6 +155,8 @@ export interface Harness {
   records: Array<AgentToolInvoked | AgentToolDenied>
   /** Swap what the `default` provider answers with, per test. */
   script(steps: ScriptedStep[]): MockLanguageModelV4
+  /** {@link script} with whole `doGenerate` answers. */
+  scriptResults(results: GenerateResult[]): MockLanguageModelV4
   /** The `main` provider's embedding and image models; only `main` configures them. */
   embeddings: MockEmbeddingModelV4
   images: MockImageModelV4
@@ -241,6 +246,12 @@ export async function bootHarness(
       current.doGenerateCalls = next.doGenerateCalls
       current.doStream = next.doStream
       current.doStreamCalls = next.doStreamCalls
+      return current
+    },
+    scriptResults(results) {
+      const next = new MockLanguageModelV4({ doGenerate: results })
+      current.doGenerate = next.doGenerate
+      current.doGenerateCalls = next.doGenerateCalls
       return current
     },
   }

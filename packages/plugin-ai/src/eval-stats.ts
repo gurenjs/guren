@@ -6,7 +6,7 @@
  * It is not a confidence interval and carries no level; reps of one case tighten sampling
  * noise and nothing else, which is why the rows, not the cases, are what n counts.
  */
-import { addUsage, sumCosts } from './eval-cost'
+import { addUsage, sumCosts } from './cost'
 import type { EvalMetric, EvalMetricSummary, EvalRow, EvalUsage } from './eval-types'
 
 export function summarizeMetrics(rows: readonly EvalRow[], metrics: readonly EvalMetric[]): EvalMetricSummary[] {

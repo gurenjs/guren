@@ -3,14 +3,17 @@
  * configured in `config/ai.ts` and reaches the application only through
  * `appTools()`, which runs every call through the agent invocation pipeline.
  */
-export { Agent, agent, bindAgent, resolveAgentName } from './agent'
+export { Agent, agent, bindAgent, isPausedTurn, resolveAgentName } from './agent'
 export type {
+  AgentCallSettings,
   AgentClass,
   AgentPrincipalInput,
   AgentResponse,
+  AgentSource,
   AnonymousAgentOptions,
   AppTools,
   BoundAgent,
+  ContinueCondition,
   InferAgentOutput,
   PromptOptions,
   QueuedAgentRun,
@@ -22,6 +25,9 @@ export { AGENT_CHUNK_EVENT } from './protocol'
 
 export { appToolDefinitions, appTools } from './app-tools'
 export type { AppToolDefinition, AppToolDenial, AppToolError } from './app-tools'
+
+export { addUsage, computeCostUsd, sumCosts, usageOf } from './cost'
+export type { UsageSource, UsageStep } from './cost'
 
 export { DatabaseConversationStore, MemoryConversationStore } from './conversations'
 export type { ConversationDrivers, ConversationsConfig, ConversationStore, StoredConversation } from './conversations'
@@ -54,6 +60,7 @@ export type {
   AiProviderName,
   AiPricing,
   AiProviders,
+  AiUsage,
   AppAgentTools,
   Granted,
 } from './types'

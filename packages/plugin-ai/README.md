@@ -48,6 +48,8 @@ With `guren codegen` run, `.guren/agents.gen.ts` types `appTools()`: a name no r
 
 A tool defined with `tool()` inside `tools()` runs with whatever authority its closure has, and nothing gates or audits it. Anything a route already does belongs in `appTools()`.
 
+`settings` sends AI SDK call settings with every model call (`maxOutputTokens`, `providerOptions` such as Anthropic's `effort` or `cacheControl`). `continueWhen = isPausedTurn` lets `prompt()` resume a turn Anthropic paused with `pause_turn` during server-side web search, up to `maxContinuations` (5) extra calls. A response carries `sources`, `providerMetadata`, `modelId` and `rawFinishReason` beside `text`, `output`, `steps` and `usage`, and `computeCostUsd(usageOf(response), pricing)` prices it, server-side tool calls included through `pricing.perThousandRequests`.
+
 Tool names reach the model provider verbatim. Anthropic and OpenAI accept only `[A-Za-z0-9_-]{1,64}`, so a route named `tickets.show` needs `.agent({ toolName: 'tickets_show' })`.
 
 In tests, `app.fakeAi()` from `@guren/testing` scripts the model per agent while the tools still run through the pipeline. It needs `ai` installed beside `@guren/plugin-ai`, since the fake is built on `MockLanguageModelV4` from `ai/test`:

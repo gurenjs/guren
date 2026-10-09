@@ -56,7 +56,7 @@ describe('queue()', () => {
     expect(responded[0]!.agentName).toBe('support')
     expect(responded[0]!.principal).toEqual(USER)
     expect(responded[0]!.conversationId).toBeUndefined()
-    expect(responded[0]!.response).toMatchObject({ text: 'queued answer', output: 'queued answer', finishReason: 'stop' })
+    expect(responded[0]!.response).toMatchObject({ text: 'queued answer', output: 'queued answer', finishReason: 'stop', sources: [], modelId: 'mock-model-id' })
     expect(Object.keys(responded[0]!.response)).not.toContain('steps')
   })
 

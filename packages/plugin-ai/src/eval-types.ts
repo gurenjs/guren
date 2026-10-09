@@ -3,7 +3,7 @@
  * real invocation and these records; where they land is a {@link EvalReporter}'s.
  */
 import type { AgentClass, AgentPrincipalInput, AgentResponse, InferAgentOutput } from './agent'
-import type { AiProviderName } from './types'
+import type { AiProviderName, AiUsage } from './types'
 
 /** One case as `fromJsonl()` reads it: `{ id, input, expected?, seed?, tags? }`. */
 export interface EvalCase<TExpected = unknown, TSeed = unknown> {
@@ -44,14 +44,7 @@ export interface EvalAppHandle {
   close?(): unknown
 }
 
-export interface EvalUsage {
-  inputTokens?: number
-  noCacheInputTokens?: number
-  cacheReadTokens?: number
-  cacheWriteTokens?: number
-  outputTokens?: number
-  totalTokens?: number
-}
+export type EvalUsage = AiUsage
 
 /**
  * `truncated` is `finishReason === 'length'`: plumbing, kept out of every metric mean and

@@ -23,12 +23,33 @@ export type AiEvaluationQuestions = Record<string, AiEvaluationQuestion>
 export type AiEvaluationAnswer<Q extends AiEvaluationQuestion> = Experimental_EvaluationAnswer<Q>
 export type AiEvaluationResult<Q extends AiEvaluationQuestions> = Experimental_EvaluationResult<Q>
 
-/** USD per million tokens. Declared here because `config/ai.ts` names it and the eval runner prices with it. */
+/**
+ * USD per million tokens, and per thousand calls of a provider-executed tool. Declared here
+ * because `config/ai.ts` names it, and both the eval runner and `computeCostUsd()` price with it.
+ */
 export interface AiPricing {
   input: number
   output: number
   cacheRead?: number
   cacheWrite?: number
+  /**
+   * USD per 1,000 calls of a provider-executed (server-side) tool, keyed by the name the agent's
+   * `tools()` gives it: `{ web_search: 10 }` for Anthropic's web search. A tool absent here is
+   * charged for its tokens alone, which is right for Anthropic's web fetch.
+   */
+  perThousandRequests?: Readonly<Record<string, number>>
+}
+
+/** What `usageOf()` reads from a response, in the units {@link AiPricing} prices. */
+export interface AiUsage {
+  inputTokens?: number
+  noCacheInputTokens?: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+  /** Provider-executed tool calls that did not fail, keyed by tool name; absent when there were none. */
+  serverToolRequests?: Record<string, number>
 }
 
 type NamesOf<T> = [keyof T] extends [never] ? string : Extract<keyof T, string>

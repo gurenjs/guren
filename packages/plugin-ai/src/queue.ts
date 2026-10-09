@@ -57,11 +57,8 @@ export class RunAgentJob extends Job<RunAgentPayload> {
       await publishStream(this.make('broadcast'), payload.channel, payload.agentName, () => bind().stream(payload.input, options))
       return
     }
-    const response = await bind().prompt(payload.input, options)
-    const { text, output, usage, finishReason, conversationId } = response
-    await this.makeOptional('events')?.emit(
-      new AgentResponded(payload.agentName, payload.principal, conversationId, { text, output, usage, finishReason }),
-    )
+    const { steps: _steps, conversationId, ...response } = await bind().prompt(payload.input, options)
+    await this.makeOptional('events')?.emit(new AgentResponded(payload.agentName, payload.principal, conversationId, response))
   }
 }
 
