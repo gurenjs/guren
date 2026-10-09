@@ -21,7 +21,7 @@
     "cloudflare:build": "bun run build && bun ../../packages/cli/src/bin.ts cloudflare:build"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.54",
+    "@ai-sdk/anthropic": "^4.0.78",
     "@ai-sdk/typesafe-ai": "^3.0.3",
     "@guren/cli": "workspace:*",
     "@guren/core": "workspace:*",
