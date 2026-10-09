@@ -11,9 +11,11 @@ import {
   type LanguageModelUsage,
   type ModelMessage,
   type OutputInterface,
+  type ProviderMetadata,
   type StepResult,
   type StopCondition,
   type Tool,
+  type ToolLoopAgentSettings,
   type ToolSet,
 } from 'ai'
 
@@ -61,16 +63,62 @@ export interface QueuedAgentRun {
   conversationId?: string
 }
 
+/** One source a step cited or retrieved (a web search result, a citation), as the AI SDK reports it. */
+export type AgentSource = StepResult<ToolSet>['sources'][number]
+
 export interface AgentResponse<TOutput> {
+  /** The final step's text; a continuation that resumes a paused step in one step adds to it (`continueWhen`). */
   text: string
   output: TOutput
+  /** Every step, continuations included. */
   steps: Array<StepResult<ToolSet>>
   /** Summed over every step. */
   usage: LanguageModelUsage
   finishReason: FinishReason
+  /** The provider's own reason, such as Anthropic's `pause_turn`, which the SDK reports as `stop`. */
+  rawFinishReason?: string
+  /** Every step's sources, in order. */
+  sources: AgentSource[]
+  /** The final step's provider metadata; each step's is on {@link steps}. */
+  providerMetadata?: ProviderMetadata
+  /** The model that answered the final step, as the provider reports it. */
+  modelId: string
   /** Set when the prompt started or continued a conversation. */
   conversationId?: string
 }
+
+/**
+ * The AI SDK call settings an agent sends with every model call: the output cap, sampling,
+ * retries, headers, timeouts, tool choice and `providerOptions` (Anthropic's `effort` or
+ * `cacheControl`, say). Model, instructions, tools, output and `stopWhen` stay the class's own.
+ */
+export type AgentCallSettings = Pick<
+  ToolLoopAgentSettings<never, ToolSet>,
+  | 'maxOutputTokens'
+  | 'temperature'
+  | 'topP'
+  | 'topK'
+  | 'presencePenalty'
+  | 'frequencyPenalty'
+  | 'stopSequences'
+  | 'seed'
+  | 'reasoning'
+  | 'maxRetries'
+  | 'headers'
+  | 'timeout'
+  | 'toolChoice'
+  | 'providerOptions'
+>
+
+/** Whether `prompt()` resumes the turn whose last step this is, by calling the model again with it appended. */
+export type ContinueCondition = (step: StepResult<ToolSet>) => boolean
+
+/**
+ * Anthropic's `pause_turn`: the server paused its own tool loop (web search, web fetch), and the
+ * turn resumes when the paused response is sent back. Read from the raw finish reason, so no
+ * provider package is imported.
+ */
+export const isPausedTurn: ContinueCondition = (step) => step.rawFinishReason === 'pause_turn'
 
 /** The class's `output` member's parsed type, or `string` when it declares none. */
 export type InferAgentOutput<T> = T extends { output: OutputInterface<infer O, unknown, unknown> } ? O : string
@@ -114,14 +162,14 @@ export interface AgentClass<T extends Agent<any> = Agent<any>> {
 }
 
 const DEFAULT_STOP_WHEN = 20
+const DEFAULT_MAX_CONTINUATIONS = 5
 export const ANONYMOUS_AGENT_NAME = 'anonymous'
 
 let constructing: AgentContext | undefined
 
 /**
- * Subclass and set `instructions`; optionally `provider`, `tools()`, `output`
- * (an `Output.object(...)`, read by {@link InferAgentOutput}) and `stopWhen`.
- * Constructed by `ai.agent(Class).as(principal)` or `Class.as(principal)`, never `new`.
+ * Subclass and set `instructions`; optionally `provider`, `tools()`, `output` (read by
+ * {@link InferAgentOutput}), `stopWhen`, `settings` and `continueWhen`. Constructed by `ai.agent(Class).as(principal)` or `Class.as(principal)`, never `new`.
  * `extends Agent<typeof X.scopes>` (scopes `as const`) makes an ungranted
  * `appTools()` name a compile error (RFC 0029 §11).
  */
@@ -137,6 +185,15 @@ export abstract class Agent<S extends readonly AgentToolScope[] = readonly Agent
   abstract instructions: string
   provider?: AiProviderName
   stopWhen?: StopCondition<ToolSet> | Array<StopCondition<ToolSet>>
+  settings?: AgentCallSettings
+  /**
+   * Checked against the last step once the tool loop ends: while it holds, `prompt()` (and so
+   * `queue()`) calls the model again with the turn so far appended. `stopWhen` counts afresh on
+   * each call. `stream()` and `broadcast()` do not continue.
+   */
+  continueWhen?: ContinueCondition
+  /** How many times `continueWhen` may continue one prompt; 5 when absent. */
+  maxContinuations?: number
 
   constructor() {
     const context = constructing
@@ -198,6 +255,9 @@ export interface AnonymousAgentOptions {
   provider?: AiProviderName
   tools?: (agent: Agent) => ToolSet
   stopWhen?: StopCondition<ToolSet> | Array<StopCondition<ToolSet>>
+  settings?: AgentCallSettings
+  continueWhen?: ContinueCondition
+  maxContinuations?: number
 }
 
 /** An anonymous subclass for a one-off call. Give it an `output` by subclassing instead. */
@@ -208,6 +268,9 @@ export function agent(options: AnonymousAgentOptions): AgentClass {
     instructions = options.instructions
     override provider = options.provider
     override stopWhen = options.stopWhen
+    override settings = options.settings
+    override continueWhen = options.continueWhen
+    override maxContinuations = options.maxContinuations
 
     override tools(): ToolSet {
       return options.tools ? options.tools(this) : {}
@@ -263,6 +326,8 @@ export function bindAgent<T extends Agent>(
     const history = await openConversation(requestedConversation(options.conversation, conversation))
     const userMessage: ModelMessage = { role: 'user', content: input }
     const loop = new ToolLoopAgent({
+      // First, so the class's own model, instructions and tools win over a stray key.
+      ...instance.settings,
       id: agentName,
       model: scope.manager.model(options.provider ?? instance.provider),
       instructions: instance.instructions,
@@ -270,10 +335,16 @@ export function bindAgent<T extends Agent>(
       ...(output ? { output } : {}),
       stopWhen: instance.stopWhen ?? stepCountIs(DEFAULT_STOP_WHEN),
     })
+    const abort = options.signal ? { abortSignal: options.signal } : {}
     const call = {
       ...(history ? { messages: [...history.messages, userMessage] } : { prompt: input }),
-      ...(options.signal ? { abortSignal: options.signal } : {}),
+      ...abort,
     }
+    // A trailing assistant message, with no new user message, is how a paused turn resumes.
+    const continueCall = (responseMessages: readonly ModelMessage[]) => ({
+      messages: [...(history?.messages ?? []), userMessage, ...responseMessages],
+      ...abort,
+    })
     // Only once the model has answered: a failed or aborted turn stores nothing, and a new conversation no row.
     const persistTurn = async (responseMessages: readonly ModelMessage[]) => {
       if (!history) return
@@ -284,22 +355,40 @@ export function bindAgent<T extends Agent>(
         await history.store.append(history.id, history.owner, turn)
       }
     }
-    return { history, loop, call, persistTurn }
+    return { history, loop, call, continueCall, persistTurn }
   }
 
   const bound = (conversation: string | undefined): BoundAgent<T> => ({
     agent: instance,
     continue: (id) => bound(id),
     prompt: async (input, options = {}) => {
-      const { history, loop, call, persistTurn } = await run(input, options, conversation)
-      const result = await loop.generate(call)
-      await persistTurn(result.responseMessages)
+      const { history, loop, call, continueCall, persistTurn } = await run(input, options, conversation)
+      const rounds = [await loop.generate(call)]
+      const responseMessages = [...rounds[0]!.responseMessages]
+      const maxContinuations = instance.maxContinuations ?? DEFAULT_MAX_CONTINUATIONS
+      while (
+        instance.continueWhen
+        && rounds.length <= maxContinuations
+        && instance.continueWhen(rounds.at(-1)!.finalStep as StepResult<ToolSet>)
+      ) {
+        // Aborted between calls, the turn fails as one aborted mid-call does, storing nothing.
+        options.signal?.throwIfAborted()
+        const next = await loop.generate(continueCall(responseMessages))
+        rounds.push(next)
+        responseMessages.push(...next.responseMessages)
+      }
+      await persistTurn(responseMessages)
+      const last = rounds.at(-1)!
       return {
-        text: result.text,
-        output: (output ? result.output : result.text) as InferAgentOutput<T>,
-        steps: result.steps as Array<StepResult<ToolSet>>,
-        usage: result.usage,
-        finishReason: result.finishReason,
+        text: stitchedText(rounds),
+        output: (output ? last.output : stitchedText(rounds)) as InferAgentOutput<T>,
+        steps: rounds.flatMap((round) => round.steps) as Array<StepResult<ToolSet>>,
+        usage: rounds.length === 1 ? last.usage : rounds.map((round) => round.usage).reduce(addLanguageModelUsage),
+        finishReason: last.finishReason,
+        ...(last.rawFinishReason !== undefined ? { rawFinishReason: last.rawFinishReason } : {}),
+        sources: rounds.flatMap((round) => round.sources),
+        ...(last.finalStep.providerMetadata ? { providerMetadata: last.finalStep.providerMetadata } : {}),
+        modelId: last.finalStep.response.modelId,
         ...(history ? { conversationId: history.id } : {}),
       }
     },
@@ -401,6 +490,37 @@ export function bindAgent<T extends Agent>(
   }
 
   return bound(undefined)
+}
+
+/**
+ * The SDK's `text` is the final step's. A continuation's first step resumes the paused step, so
+ * a round answering in that one step adds to the text; one that went on to call tools starts afresh.
+ */
+function stitchedText(rounds: ReadonlyArray<{ text: string; steps: readonly unknown[] }>): string {
+  let text = ''
+  rounds.forEach((round, index) => {
+    text = index > 0 && round.steps.length === 1 ? text + round.text : round.text
+  })
+  return text
+}
+
+/** `raw` is the provider's own per-call usage, which does not sum, so it is left out. */
+function addLanguageModelUsage(left: LanguageModelUsage, right: LanguageModelUsage): LanguageModelUsage {
+  const add = (a: number | undefined, b: number | undefined) => (a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0))
+  return {
+    inputTokens: add(left.inputTokens, right.inputTokens),
+    inputTokenDetails: {
+      noCacheTokens: add(left.inputTokenDetails.noCacheTokens, right.inputTokenDetails.noCacheTokens),
+      cacheReadTokens: add(left.inputTokenDetails.cacheReadTokens, right.inputTokenDetails.cacheReadTokens),
+      cacheWriteTokens: add(left.inputTokenDetails.cacheWriteTokens, right.inputTokenDetails.cacheWriteTokens),
+    },
+    outputTokens: add(left.outputTokens, right.outputTokens),
+    outputTokenDetails: {
+      textTokens: add(left.outputTokenDetails.textTokens, right.outputTokenDetails.textTokens),
+      reasoningTokens: add(left.outputTokenDetails.reasoningTokens, right.outputTokenDetails.reasoningTokens),
+    },
+    totalTokens: add(left.totalTokens, right.totalTokens),
+  }
 }
 
 function normalizePrincipal(input: AgentPrincipalInput): AgentPrincipal | null {

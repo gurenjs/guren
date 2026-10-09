@@ -23,8 +23,14 @@ export interface RunAgentPayload {
   channel?: string
 }
 
-/** What `AgentResponded` carries: the response without `steps`, which a queued listener would serialize whole. */
-export type QueuedAgentResponse = Omit<AgentResponse<unknown>, 'steps' | 'conversationId'>
+type ResponseDetails = 'rawFinishReason' | 'sources' | 'providerMetadata' | 'modelId'
+
+/**
+ * What `AgentResponded` carries: the response without `steps`, which a queued listener would
+ * serialize whole. The details are optional so an event built by hand, in a listener's test, still compiles.
+ */
+export type QueuedAgentResponse = Omit<AgentResponse<unknown>, 'steps' | 'conversationId' | ResponseDetails>
+  & Partial<Pick<AgentResponse<unknown>, ResponseDetails>>
 
 export class AgentResponded extends Event {
   static override eventName = 'AgentResponded'
@@ -57,11 +63,8 @@ export class RunAgentJob extends Job<RunAgentPayload> {
       await publishStream(this.make('broadcast'), payload.channel, payload.agentName, () => bind().stream(payload.input, options))
       return
     }
-    const response = await bind().prompt(payload.input, options)
-    const { text, output, usage, finishReason, conversationId } = response
-    await this.makeOptional('events')?.emit(
-      new AgentResponded(payload.agentName, payload.principal, conversationId, { text, output, usage, finishReason }),
-    )
+    const { steps: _steps, conversationId, ...response } = await bind().prompt(payload.input, options)
+    await this.makeOptional('events')?.emit(new AgentResponded(payload.agentName, payload.principal, conversationId, response))
   }
 }
 

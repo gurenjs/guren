@@ -103,12 +103,49 @@ export class TicketDigest extends Agent<typeof TicketDigest.scopes> {
 | `tools()` | The tools the model may call. A method, because it runs after the principal is known. | `{}` |
 | `output` | `Output.object({ schema })` for a parsed, typed result. | text |
 | `stopWhen` | When the tool loop stops, e.g. `stepCountIs(5)`. | 20 steps |
+| `settings` | AI SDK call settings sent with every model call: `maxOutputTokens`, `temperature`, `providerOptions` and the like. | none |
+| `continueWhen` | Whether `prompt()` calls the model again to resume the turn its last step ended, e.g. `isPausedTurn`. | never |
+| `maxContinuations` | How many times `continueWhen` may resume one prompt. | 5 |
 | `static agentName` | The name fakes, audit lines and queued runs use. | the class name |
 | `static scopes` | Which application tools `appTools()` may hand the model. | `[]` |
 
 Pin `agentName`. It defaults to the class name, which a bundler that mangles identifiers rewrites, and a queued run or a stored conversation written before the rename then stops resolving.
 
 `Agent`, `Output`, `tool` and `stepCountIs` are all exported from `@guren/plugin-ai`, so an agent file imports one package.
+
+### Call settings
+
+`settings` holds what the AI SDK calls call settings, sent with every model call the agent makes: the output cap, sampling, retries, headers, timeouts, `toolChoice` and `providerOptions`. Provider-specific options go in `providerOptions`, keyed by provider:
+
+```ts
+import { Agent, type AgentCallSettings } from '@guren/plugin-ai'
+
+export class AdditiveResearcher extends Agent {
+  instructions = 'Research the additive and write a cited report.'
+  override settings: AgentCallSettings = {
+    maxOutputTokens: 32_000,
+    providerOptions: { anthropic: { effort: 'medium', cacheControl: { type: 'ephemeral' } } },
+  }
+}
+```
+
+Anthropic's `cacheControl` at this level turns on prompt caching for the whole request. The model, instructions, tools, `output` and `stopWhen` stay the class's own members, and a key of the same name in `settings` does not replace them. Settings live on the class, never on a `prompt()` call, so a queued run uses the same ones. Two providers that differ only in their settings can become one provider and two agents.
+
+### Resuming a paused turn
+
+A provider can end a response before the turn is over. Anthropic does this with `pause_turn` when its server-side tool loop (web search, web fetch) runs long. The AI SDK reports that as `finishReason: 'stop'`, so the tool loop ends with the research half done. `continueWhen` lets `prompt()` resume it:
+
+```ts
+import { Agent, isPausedTurn } from '@guren/plugin-ai'
+
+export class AdditiveResearcher extends Agent {
+  override continueWhen = isPausedTurn
+}
+```
+
+When the tool loop ends, `prompt()` passes the last step to `continueWhen`. While it returns `true`, `prompt()` calls the model again with the turn so far appended and no new user message. That is how Anthropic resumes a paused turn. It works under `as(null)`, and a conversation stores the whole turn once. `isPausedTurn` reads `step.rawFinishReason === 'pause_turn'`. It is a plain function, so another provider's condition can be written the same way.
+
+`maxContinuations` (5 by default) caps the extra calls. When the cap is reached, the response is returned with `rawFinishReason` still `'pause_turn'`, so check it. `stopWhen` counts afresh on each call, so one prompt can take up to `stopWhen`'s steps times `maxContinuations + 1`. `steps`, `sources` and `usage` cover every call. When a resumed call answers in one step, its text is appended to the paused step's text. When it goes on to call tools, `text` is the final step's alone. `stream()` and `broadcast()` do not continue.
 
 ### Prompting it
 
@@ -133,6 +170,30 @@ export default class AgentOpsController extends Controller {
 ```
 
 `response` carries `text`, `output` (typed from the class's `output` schema, or the text when it declares none), `steps` (the AI SDK's steps, tool calls included), `usage` summed over every step, and `finishReason`. Check `finishReason` when the answer matters: `'length'` means the model ran out of tokens, and the output is incomplete.
+
+It also carries `rawFinishReason` (the provider's own reason, such as `'pause_turn'`), `sources` (every step's search results and citations, in order), `providerMetadata` (the final step's; each step's is on `steps`) and `modelId` (the model that answered, as the provider reports it).
+
+### What a run cost
+
+`usageOf(response)` reads a response's tokens and counts its provider-executed tool calls (web search, say) by tool name. A call that came back as an error is not counted. `computeCostUsd(usage, pricing)` prices that, and `addUsage()` sums two usages. These are the functions the eval runner uses. Put the prices in `config/ai.ts`, where evals read them too:
+
+```ts
+// config/ai.ts: USD per million tokens, and per 1,000 calls of a server-side tool
+research: {
+  model: () => anthropic('claude-sonnet-5-5'),
+  pricing: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5, perThousandRequests: { web_search: 10 } },
+},
+```
+
+```ts
+import { computeCostUsd, usageOf } from '@guren/plugin-ai'
+
+const ai = this.make('ai')
+const response = await ai.agent(AdditiveResearcher).as(null).prompt(input)
+const usd = computeCostUsd(usageOf(response), ai.config.providers.research?.pricing)
+```
+
+`perThousandRequests` is keyed by the name the tool has in the agent's `tools()`. A tool not listed there is charged for its tokens only, which is right for Anthropic's web fetch. With no `pricing`, `computeCostUsd()` returns `undefined`, not 0.
 
 Give `userOrFail()` a type argument with an `id`. Without one it returns an `Authenticatable`, which `as()` does not accept.
 
@@ -610,7 +671,7 @@ Results land under `.claude/hillclimb/<flow>/<variant>/`: a row per case and rep
 
 Three things the summary is careful about:
 
-- **Cost comes from the response's own usage** and the provider's `pricing` in `config/ai.ts`. A provider with no `pricing` yields rows with no cost rather than a zero, and `--max-cost-usd` says it cannot hold.
+- **Cost comes from the response's own usage** and the provider's `pricing` in `config/ai.ts`, server-side tool calls included when `perThousandRequests` prices them. A provider with no `pricing` yields rows with no cost rather than a zero, and `--max-cost-usd` says it cannot hold.
 - **A truncated answer** (`finishReason` of `'length'`) is kept out of every metric mean and counted beside it, so a variant cannot look better by truncating more.
 - **`--max-cost-usd` is a soft ceiling.** No new case starts once the derived cost crosses it, and cases already running finish.
 

@@ -23,7 +23,7 @@ import {
   type EvalTraceTurn,
 } from '../src/eval'
 // Arithmetic internals, deliberately not on the published surface.
-import { computeCostUsd } from '../src/eval-cost'
+import { computeCostUsd } from '../src'
 import { summarizeMetrics } from '../src/eval-stats'
 import { scriptedModel, type ScriptedStep } from './fixture'
 

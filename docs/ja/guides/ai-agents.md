@@ -103,12 +103,49 @@ export class TicketDigest extends Agent<typeof TicketDigest.scopes> {
 | `tools()` | モデルが呼べるツール。呼び出し主体(principal)が決まった後で実行するため、メソッドとして書きます。 | `{}` |
 | `output` | パース済みで型の付いた結果を得る `Output.object({ schema })`。 | テキスト |
 | `stopWhen` | ツールループを止める条件。例: `stepCountIs(5)`。 | 20ステップ |
+| `settings` | モデルを呼ぶたびに送る AI SDK のコール設定。`maxOutputTokens`、`temperature`、`providerOptions` など。 | なし |
+| `continueWhen` | 最後のステップで終わったターンを、`prompt()` がモデルをもう一度呼んで再開するかどうか。例: `isPausedTurn`。 | 再開しない |
+| `maxContinuations` | 1 回のプロンプトで `continueWhen` が再開できる回数。 | 5 |
 | `static agentName` | フェイク・監査ログ・キュー実行が使う名前。 | クラス名 |
 | `static scopes` | `appTools()` がモデルに渡してよいアプリケーションのツール。 | `[]` |
 
 `agentName` は明示して固定してください。既定値のクラス名は識別子を短縮するバンドラに書き換えられ、そうなると名前が変わる前にキューに入った実行や保存済みの会話を解決できなくなります。
 
 `Agent`、`Output`、`tool`、`stepCountIs` はすべて `@guren/plugin-ai` から export されているので、エージェントのファイルが import するパッケージは1つで済みます。
+
+### コール設定
+
+`settings` には、AI SDK がコール設定(call settings)と呼ぶものを書きます。エージェントがモデルを呼ぶたびに送られます。出力の上限、サンプリング、リトライ、ヘッダー、タイムアウト、`toolChoice`、`providerOptions` が書けます。プロバイダ固有のオプションは、プロバイダ名をキーにして `providerOptions` に入れます。
+
+```ts
+import { Agent, type AgentCallSettings } from '@guren/plugin-ai'
+
+export class AdditiveResearcher extends Agent {
+  instructions = 'Research the additive and write a cited report.'
+  override settings: AgentCallSettings = {
+    maxOutputTokens: 32_000,
+    providerOptions: { anthropic: { effort: 'medium', cacheControl: { type: 'ephemeral' } } },
+  }
+}
+```
+
+この位置に Anthropic の `cacheControl` を書くと、リクエスト全体でプロンプトキャッシュが有効になります。モデル、instructions、ツール、`output`、`stopWhen` はクラス自身のメンバーのままで、`settings` に同じ名前のキーがあっても置き換わりません。設定はクラスに書くもので、`prompt()` の呼び出しごとには渡しません。そのため、キューに入れた実行も同じ設定で動きます。設定だけが違う 2 つのプロバイダは、1 つのプロバイダと 2 つのエージェントにまとめられます。
+
+### 一時停止したターンを再開する
+
+プロバイダが、ターンの途中でレスポンスを終えることがあります。Anthropic は、サーバー側のツールループ(Web 検索・Web 取得)が長引くと `pause_turn` で止めます。AI SDK はこれを `finishReason: 'stop'` として返すので、ツールループは調査の途中で終わってしまいます。`continueWhen` を書くと、`prompt()` がそのターンを再開します。
+
+```ts
+import { Agent, isPausedTurn } from '@guren/plugin-ai'
+
+export class AdditiveResearcher extends Agent {
+  override continueWhen = isPausedTurn
+}
+```
+
+ツールループが終わると、`prompt()` は最後のステップを `continueWhen` に渡します。`true` が返るあいだ、`prompt()` はそこまでのターンを後ろに付け、新しいユーザーメッセージは足さずに、モデルをもう一度呼びます。これが Anthropic で一時停止したターンを再開する方法です。`as(null)` でも動き、会話にはターン全体が 1 回だけ保存されます。`isPausedTurn` は `step.rawFinishReason === 'pause_turn'` を見るだけのただの関数なので、ほかのプロバイダの条件も同じ形で書けます。
+
+追加の呼び出しは `maxContinuations`(既定 5)回までです。上限に達すると、`rawFinishReason` が `'pause_turn'` のままのレスポンスが返るので、確かめてください。`stopWhen` は呼び出しごとに数え直すため、1 回のプロンプトは最大で `stopWhen` のステップ数の `maxContinuations + 1` 倍まで進みます。`steps`、`sources`、`usage` はすべての呼び出しを含みます。再開した呼び出しが 1 ステップで答えたときは、その text を一時停止したステップの text の後ろに続けます。そこからさらにツールを呼んだときは、`text` は最後のステップのものだけです。`stream()` と `broadcast()` は再開しません。
 
 ### プロンプトを送る
 
@@ -133,6 +170,30 @@ export default class AgentOpsController extends Controller {
 ```
 
 `response` には、`text`、`output`(クラスの `output` スキーマから型が付きます。宣言がなければテキスト)、`steps`(ツール呼び出しを含む AI SDK のステップ)、全ステップを合計した `usage`、`finishReason` が入ります。結果が大事な場面では `finishReason` を確かめてください。`'length'` なら、モデルがトークンを使い切っていて、出力は途中で切れています。
+
+ほかに、`rawFinishReason`(`'pause_turn'` のような、プロバイダ自身の終了理由)、`sources`(全ステップの検索結果と引用を順に並べたもの)、`providerMetadata`(最後のステップのもの。ステップごとのものは `steps` にあります)、`modelId`(プロバイダが返した、答えたモデルの名前)も入ります。
+
+### 実行にかかった費用
+
+`usageOf(response)` は、レスポンスのトークン数を読み、プロバイダ側で実行されたツール呼び出し(Web 検索など)をツール名ごとに数えます。エラーで返った呼び出しは数えません。`computeCostUsd(usage, pricing)` はそれに値段を付け、`addUsage()` は 2 つの usage を足します。どれも eval のランナーが使っている関数です。値段は `config/ai.ts` に書けば、eval もそこから読みます。
+
+```ts
+// config/ai.ts: 100 万トークンあたりの USD と、サーバー側ツールの 1,000 回あたりの USD
+research: {
+  model: () => anthropic('claude-sonnet-5-5'),
+  pricing: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5, perThousandRequests: { web_search: 10 } },
+},
+```
+
+```ts
+import { computeCostUsd, usageOf } from '@guren/plugin-ai'
+
+const ai = this.make('ai')
+const response = await ai.agent(AdditiveResearcher).as(null).prompt(input)
+const usd = computeCostUsd(usageOf(response), ai.config.providers.research?.pricing)
+```
+
+`perThousandRequests` のキーは、エージェントの `tools()` でそのツールに付けた名前です。ここにないツールはトークン分だけが計上されます。Anthropic の Web 取得はそれで正しい値になります。`pricing` がないと、`computeCostUsd()` は 0 ではなく `undefined` を返します。
 
 `userOrFail()` には `id` を持つ型引数を渡してください。型引数がないと `Authenticatable` が返り、`as()` はそれを受け付けません。
 
@@ -610,7 +671,7 @@ bunx guren ai:eval ticket-digest --variant v1 --cases 20    # one round against 
 
 サマリでは、次の 3 点に気を付けています。
 
-- **費用は、レスポンス自身の usage** と `config/ai.ts` のプロバイダの `pricing` から計算します。`pricing` のないプロバイダでは、行の費用は 0 ではなく未記録になり、`--max-cost-usd` が効かないことも報告されます。
+- **費用は、レスポンス自身の usage** と `config/ai.ts` のプロバイダの `pricing` から計算します。`perThousandRequests` に値段があれば、サーバー側のツール呼び出しも含めます。`pricing` のないプロバイダでは、行の費用は 0 ではなく未記録になり、`--max-cost-usd` が効かないことも報告されます。
 - **途中で切れた回答**(`finishReason` が `'length'`)は、どの指標の平均からも外し、別に件数を数えます。途中で打ち切られる回答が増えた版のほうが良く見える、ということは起きません。
 - **`--max-cost-usd` は厳密な上限ではありません。** 計算した費用が上限を超えると新しいケースは始まりませんが、実行中のケースは最後まで走ります。
 

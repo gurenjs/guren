@@ -202,6 +202,34 @@ interface AgentResponse<T> {
 An `agent({ instructions, tools })` helper returns an anonymous subclass for
 one-off calls, mirroring laravel/ai's `agent()`.
 
+**Amended in implementation** (found building an app agent on Anthropic's
+server-side web search). Three additions, each backward compatible:
+
+- **`settings`**: the class gains a `settings` member, the AI SDK's call
+  settings (`maxOutputTokens`, sampling, `maxRetries`, `headers`, `timeout`,
+  `toolChoice`, `providerOptions`), spread into `ToolLoopAgent` before the
+  members the class owns, so a stray `model` or `instructions` key cannot
+  replace them. Without it an app wrapped every model in
+  `wrapLanguageModel(defaultSettingsMiddleware(...))` inside `config/ai.ts`,
+  one provider entry per combination of effort and output cap. Settings stay
+  on the class, never in `PromptOptions`, which §6 keeps serializable.
+- **`continueWhen`**: `@ai-sdk/anthropic` maps `stop_reason: 'pause_turn'` to
+  `finishReason: 'stop'`, so the tool loop ends while the server's own search
+  loop is only paused. `continueWhen(step)`, checked against the last step,
+  makes `prompt()` call the model again with the turn's response messages
+  appended and no new user message, at most `maxContinuations` (5) times;
+  `isPausedTurn` reads `rawFinishReason`, so no provider package is imported.
+  It works without a conversation store; with one, the whole turn is stored
+  once. `stream()` and `broadcast()` do not continue: a resumed stream would
+  need a second response spliced into the first.
+- **`AgentResponse`** gains `rawFinishReason`, `sources` (every step's),
+  `providerMetadata` (the final step's) and `modelId`, and `AgentResponded`
+  carries them as optional fields. §10's `computeCostUsd()`, `addUsage()` and
+  `usageOf()` move to the main entry, and `AiPricing` gains
+  `perThousandRequests`, priced per tool name against the provider-executed
+  tool calls `usageOf()` counts from the steps (a call answered with a
+  `tool-error` is left out, as Anthropic bills no failed search).
+
 **Principal.** `as(principal)` fixes who the model acts as for the whole
 prompt. `as()` normalizes its argument to `AgentPrincipal`
 (`{ kind, id, abilities? }`; a user record contributes only its id and

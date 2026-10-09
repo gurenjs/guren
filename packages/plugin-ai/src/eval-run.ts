@@ -19,7 +19,7 @@ import { resolveAgentName } from './agent'
 import type { Agent, AgentResponse, BoundAgent, PromptOptions } from './agent'
 import type { AiProviderConfig } from './config'
 import type { AiManager } from './manager'
-import { addUsage, computeCostUsd, sumCosts, toEvalUsage } from './eval-cost'
+import { addUsage, computeCostUsd, sumCosts, usageOf } from './cost'
 import { hillclimbReporter } from './eval-reporter'
 import { summarizeMetrics, totalCostUsd, totalJudgeCostUsd, totalUsage } from './eval-stats'
 import type {
@@ -316,7 +316,7 @@ async function runAttempt(
         )
       }
       const response = await judgeBound.prompt(input, promptOptions(definition.judge.provider, signal))
-      const usage = toEvalUsage(response.usage)
+      const usage = usageOf(response)
       // The judge's model is recorded for the same reason the agent's is: a round where it
       // silently resolved to a different one is otherwise invisible in the written data.
       judged.push({
@@ -335,7 +335,7 @@ async function runAttempt(
         + 'config, so a run cannot continue without it.',
       )
     }
-    const usage = toEvalUsage(response.usage)
+    const usage = usageOf(response)
     if (usage.inputTokens === undefined && usage.outputTokens === undefined) {
       throw new EvalRunError(`${kase.id}: the response carried no usage, so its cost cannot be derived.`)
     }
