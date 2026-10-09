@@ -15,7 +15,7 @@ export default defineAiConfig((env) => ({
     anthropic: {
       model: () => {
         if (!env.ANTHROPIC_API_KEY) throw new Error('Set ANTHROPIC_API_KEY in .env to call the anthropic provider.')
-        return createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5')
+        return createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5-5')
       },
     },
     typesafe: {

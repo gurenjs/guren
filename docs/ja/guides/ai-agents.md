@@ -41,7 +41,7 @@ export default defineAiConfig((env) => ({
     anthropic: {
       model: () => {
         if (!env.ANTHROPIC_API_KEY) throw new Error('Set ANTHROPIC_API_KEY in .env to call the anthropic provider.')
-        return createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5')
+        return createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5-5')
       },
     },
   },
@@ -51,12 +51,32 @@ export default defineAiConfig((env) => ({
 
 `model` の中のガードは消さないでください。検証済みの env は `process.env` にコピーされないので、キーは明示的に渡します。渡さないとプロバイダのパッケージが自分で `process.env` を読みにいき、空の `ANTHROPIC_API_KEY=` 行の値が本物のキーとして API に送られてしまいます。
 
+既定のモデルは Claude Opus 5.5(`claude-opus-5-5`)で、API の振る舞いが Claude Opus 5 と 2 点違います。
+
+effort の既定値は `medium` で、Claude Opus 5 の `high` より 1 段低くなっています。thinking はオフにできないので、調整できるのは effort だけです。プロバイダを通るすべての呼び出しを別の段階で動かすには、AI SDK の `defaultSettingsMiddleware` でモデルを包みます。
+
+```ts
+import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai'
+
+anthropic: {
+  model: () => {
+    if (!env.ANTHROPIC_API_KEY) throw new Error('Set ANTHROPIC_API_KEY in .env to call the anthropic provider.')
+    return wrapLanguageModel({
+      model: createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5-5'),
+      middleware: defaultSettingsMiddleware({ settings: { providerOptions: { anthropic: { effort: 'high' } } } }),
+    })
+  },
+},
+```
+
+ツールの強制指定(`tool_choice` の `any` や特定ツールの指定)は 400 になります。`@ai-sdk/anthropic` 4.0.78 以降はこのモデルを知っていて、`toolChoice: 'required'` やツール名の指定を警告付きで `auto` に落とし、エージェントの `output` スキーマを強制ツール呼び出しではなくネイティブの構造化出力(`output_config.format`)で送ります。`guren add ai` は `@ai-sdk/anthropic@^4.0.78` をインストールします。古い版に固定しているアプリは上げてください。
+
 `providers` は、名前とファクトリの対応表です。各ファクトリは、その名前を使う最初のプロンプトで 1 度だけ実行され、結果はメモ化されます。エージェントはプロバイダの名前を指定するだけで、モデルのインスタンスは持ちません。そのため、テスト用のフェイク(`fakeAi()`)で、アプリケーションから使えるすべてのモデルを差し替えられます。2 つ目のプロバイダを加えるときは、そのパッケージをインストールしてエントリを足します。
 
 ```ts
 providers: {
-  anthropic: { model: () => createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5') },
-  fast: { model: () => createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-haiku-4-5') },
+  anthropic: { model: () => createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5-5') },
+  fast: { model: () => createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-haiku-5-5') },
 },
 ```
 
@@ -448,7 +468,7 @@ AI SDK が受け取るオプション (`maxRetries`、`abortSignal`、`headers`�
 ```ts
 // config/ai.ts
 providers: {
-  anthropic: { model: () => createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5') },
+  anthropic: { model: () => createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5-5') },
   typesafe: { evaluationModel: () => createTypeSafeAi({ apiKey: env.TYPESAFE_AI_API_KEY }).evaluationModel('jev-latest') },
 },
 defaultEvaluation: 'typesafe',

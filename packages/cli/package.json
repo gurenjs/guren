@@ -92,7 +92,7 @@
     }
   },
   "devDependencies": {
-    "@ai-sdk/anthropic": "^4.0.54",
+    "@ai-sdk/anthropic": "^4.0.78",
     "@ai-sdk/openai": "^4.0.67",
     "@babel/types": "^7.29.0",
     "@inertiajs/react": "^3.6.1",

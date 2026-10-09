@@ -14,7 +14,7 @@ import { createAnthropic } from '@ai-sdk/anthropic'
 export default defineAiConfig((env) => ({
   default: 'anthropic',
   providers: {
-    anthropic: { model: () => createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5') },
+    anthropic: { model: () => createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5-5') },
   },
 }))
 ```

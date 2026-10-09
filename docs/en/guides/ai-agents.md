@@ -41,7 +41,7 @@ export default defineAiConfig((env) => ({
     anthropic: {
       model: () => {
         if (!env.ANTHROPIC_API_KEY) throw new Error('Set ANTHROPIC_API_KEY in .env to call the anthropic provider.')
-        return createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5')
+        return createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5-5')
       },
     },
   },
@@ -51,12 +51,32 @@ export default defineAiConfig((env) => ({
 
 Keep the guard in `model`. The validated env is not copied into `process.env`, so the key is passed explicitly. Given no key, the provider package reads `process.env` itself, and a blank `ANTHROPIC_API_KEY=` line reaches the API as a real key.
 
+The default model is Claude Opus 5.5 (`claude-opus-5-5`), and two of its API behaviors differ from Claude Opus 5.
+
+Effort defaults to `medium`, one level below Claude Opus 5's `high`. Thinking cannot be turned off, so effort is the only control. To run every call through a provider at another level, wrap the model with the AI SDK's `defaultSettingsMiddleware`:
+
+```ts
+import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai'
+
+anthropic: {
+  model: () => {
+    if (!env.ANTHROPIC_API_KEY) throw new Error('Set ANTHROPIC_API_KEY in .env to call the anthropic provider.')
+    return wrapLanguageModel({
+      model: createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5-5'),
+      middleware: defaultSettingsMiddleware({ settings: { providerOptions: { anthropic: { effort: 'high' } } } }),
+    })
+  },
+},
+```
+
+A forced tool choice (`tool_choice` of `any` or a named tool) returns a 400. `@ai-sdk/anthropic` 4.0.78 or later knows this model: it downgrades `toolChoice: 'required'` and a named tool choice to `auto` with a warning, and sends an agent's `output` schema as native structured output (`output_config.format`) instead of a forced tool call. `guren add ai` installs `@ai-sdk/anthropic@^4.0.78`; an app that pins an older one should upgrade it.
+
 `providers` is a map of names to factories. Each factory runs once, on the first prompt that names it, and the result is memoized. An agent names a provider, never a model instance, which is what lets the test fake replace every model the application can reach. To add a second provider, install its package and add an entry:
 
 ```ts
 providers: {
-  anthropic: { model: () => createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5') },
-  fast: { model: () => createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-haiku-4-5') },
+  anthropic: { model: () => createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5-5') },
+  fast: { model: () => createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-haiku-5-5') },
 },
 ```
 
@@ -448,7 +468,7 @@ The model comes from an `evaluationModel` factory in `config/ai.ts`. `model` is 
 ```ts
 // config/ai.ts
 providers: {
-  anthropic: { model: () => createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5') },
+  anthropic: { model: () => createAnthropic({ apiKey: env.ANTHROPIC_API_KEY })('claude-opus-5-5') },
   typesafe: { evaluationModel: () => createTypeSafeAi({ apiKey: env.TYPESAFE_AI_API_KEY }).evaluationModel('jev-latest') },
 },
 defaultEvaluation: 'typesafe',

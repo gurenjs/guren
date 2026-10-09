@@ -8,7 +8,7 @@ export default defineAiConfig((env) => ({
   default: 'gateway',
   providers: {
     gateway: {
-      model: () => createGateway({ apiKey: env.AI_GATEWAY_API_KEY })('anthropic/claude-opus-5'),
+      model: () => createGateway({ apiKey: env.AI_GATEWAY_API_KEY })('anthropic/claude-opus-5.5'),
     },
   },
 }))
