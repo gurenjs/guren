@@ -12,9 +12,18 @@ Three properties, none of which a job or a cron entry has:
 - **Durable state.** `this.state` and a private SQLite database survive deploys and evictions.
 - **Per-instance schedules.** Cron for a recurring sweep, a delay in seconds for "look at this again in an hour". Both are backed by Durable Object alarms, so an agent wakes with no request touching your Worker.
 
-What it is **not** is a privileged internal. `this.tools.call(name, args)` is the only way an agent reaches your application, and every call goes through the same invocation pipeline as every other agent surface: the scopes its registration declares, the route's own validation and policies, the approval queue, and a redacted audit record under `surface: 'durable'`. An agent is a consumer of your application, not an MCP server and not a second privileged path into your models. An in-house agent deserves *less* trust than an external one, not more, precisely because it runs unattended.
+Each instance is a Cloudflare *Durable Object*: an addressable instance with its own storage, which Cloudflare evicts (unloads) when idle and wakes again by name or by alarm.
 
-Durable agents run on Cloudflare Workers only. It is the one platform that gives durable identity, alarms and per-instance state at the edge, and `@guren/plugin-agents` is built on the [Cloudflare Agents SDK](https://www.npmjs.com/package/agents) that packages them. Under Bun there is no Durable Object emulation: the agent routes answer 503 locally, which is more honest than a fake.
+An agent has no privileged access to your app. `this.tools.call(name, args)` is its only way in, and every call goes through the same checks as a call from any other agent:
+
+- the scopes its registration declares;
+- the route's own validation and policies;
+- the approval queue, for a tool that requires one;
+- an audit record with secrets masked, under `surface: 'durable'`.
+
+Treat an in-house agent with *less* trust than an external one, since it runs unattended.
+
+Durable agents run on Cloudflare Workers only. It is the one platform that gives durable identity, alarms and per-instance state at the edge, and `@guren/plugin-agents` is built on the [Cloudflare Agents SDK](https://www.npmjs.com/package/agents) that packages them. Under Bun there is no Durable Object emulation, so locally an app's route that talks to its agent answers 503 (see [Talking to your agent](#talking-to-your-agent)), which is more honest than a fake.
 
 ## Install and register
 
@@ -107,7 +116,7 @@ export default defineAgentsConfig({
 })
 ```
 
-**The grammar is static, and that is a constraint rather than a style.** `guren cloudflare:build` reads this file as source to append a named export per class to the generated worker, and a runtime class value carries no source path, so `module` and `export` are literal strings. A spread inside `agents`, a computed key, or a re-exported config leaves the build with nothing to export while the file reads as though the agent were registered; `guren check` fails each of those with the reason.
+**Keep the file static.** `module` and `export` name the class's file and export as strings, because `guren cloudflare:build` appends a named export per class to the generated worker and a class value carries no source path. `guren check` reads the file as source to verify those names, so it fails a spread inside `agents`, a computed key or a re-exported config, each with the reason.
 
 Three more rules the same file carries:
 
@@ -251,7 +260,7 @@ On each wake the agent asks the queue about every waiting row, through the same 
 
 How often it checks:
 
-- The first check comes after 30 seconds, and the wait doubles after each check. It never drops below one second and never runs past the earliest row's expiry or the approval TTL.
+- The first check comes after 30 seconds, and the wait doubles after each check. It never drops below one second, and never runs more than a few seconds past the earliest row's expiry or past an hour.
 - There is only ever one check schedule, and one wake asks about every row, so a newly waiting call does not inherit an older row's long wait.
 - Nothing is held in memory. An eviction between the request and the approval loses nothing, because the rows and the schedule are both durable.
 
@@ -263,9 +272,9 @@ Overridable, a no-op unless you override it, and called for every outcome:
 |---|---|
 | `approved` | a human approved it. `result` is the retry's own answer, which can itself be a refusal |
 | `rejected` | a human refused it. Nothing was called |
-| `expired` | the request lapsed unanswered |
+| `expired` | the request lapsed, unanswered or approved but not yet spent |
 | `unknown` | the queue holds no record of this request any more |
-| `unreadable` | the ledger row could not be decrypted — a rotated app key — so the arguments are gone and nothing can retry it |
+| `unreadable` | the ledger row could not be decrypted (the app key was rotated past its `previousKeys`, or the row is corrupt), so the arguments are gone and nothing can retry it |
 
 `args` carries the arguments the parked call was made with, absent only for `'unreadable'`. Since the queue keeps no reversible copy, this is the one place an application learns *which* call a human answered.
 
