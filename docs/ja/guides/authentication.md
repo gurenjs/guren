@@ -74,7 +74,7 @@ bunx guren make:auth
 ログインページの「Forgot your password?」を押すと、`ForgotPasswordController` と `ResetPasswordController` が扱うリセットの流れに入ります。内部ではフレームワークの `createPasswordResetToken` / `completePasswordReset` を使っています（[パスワードリセット](./password-reset.md)を参照）。
 
 - トークンは、生成される `app/Auth/PasswordResetStore.ts` に保存されます。これはインメモリのストアなので、本番や複数インスタンスの構成では Redis ベースのストアに差し替えてください。
-- リンクは、生成される `config/mail.ts` を通じて送られます。既定の `log` ドライバではリンクがコンソールに出力されるので、開発環境では何も設定せずに動きます。実際にメールを送るには、`MAIL_MAILER=smtp` と `SMTP_*` の環境変数を設定してください。
+- リンクは、生成される `config/mail.ts` を通じて送られます。既定の `log` ドライバーではリンクがコンソールに出力されるので、開発環境では何も設定せずに動きます。実際にメールを送るには、`MAIL_MAILER=smtp` と `SMTP_*` の環境変数を設定してください。
 
 ### メール確認
 
@@ -84,7 +84,7 @@ bunx guren make:auth
 bunx guren make:auth --install --verify
 ```
 
-`users` テーブルに `emailVerifiedAt` カラムが追加され、`VerifyEmailController`（「メールを確認してください」の案内の表示、再送、トークンの確認を担当）と `VerifyEmail` ページが生成されます。登録すると確認メールが送られ、`/dashboard` ではなく `/verify-email` にリダイレクトされるようになります。生成される `/dashboard` ルートには `requireVerifiedEmail` が付くので、確認を済ませていないユーザーは、確認が終わるまで `/verify-email` に戻されます。確認リンクも、パスワードリセットと同じインメモリのストアと `log` ドライバのメール設定を使うので、開発環境では何も設定せずに動作を確認できます。
+`users` テーブルに `emailVerifiedAt` カラムが追加され、`VerifyEmailController`（「メールを確認してください」の案内の表示、再送、トークンの確認を担当）と `VerifyEmail` ページが生成されます。登録すると確認メールが送られ、`/dashboard` ではなく `/verify-email` にリダイレクトされるようになります。生成される `/dashboard` ルートには `requireVerifiedEmail` が付くので、確認を済ませていないユーザーは、確認が終わるまで `/verify-email` に戻されます。確認リンクも、パスワードリセットと同じインメモリのストアと `log` ドライバーのメール設定を使うので、開発環境では何も設定せずに動作を確認できます。
 
 ## OAuth / ソーシャルログイン
 
@@ -122,7 +122,7 @@ bunx guren make:auth --install --oauth github,google
 
 コールバックを認可リダイレクトと結びつける OAuth の state は、データベースに保存します。`--oauth` は `db/schema.ts` に `oauth_states` テーブルを追加し、`users` や `sessions` と同じマイグレーションに含めます。`config/oauth.ts` は `DatabaseOAuthStateStore` を `stateStore` に渡し、`--install` がその定義を `createApp({ config })` に追加します。これで、リダイレクトとコールバックが別々のプロセスに届いても動きます。Workers、Lambda、Vercel ではそれがふつうです（[Stateストレージ](./oauth.md#stateストレージ)を参照）。`db/schema.ts` がないアプリでは `stateStore` のない定義が生成され、state はプロセスのメモリに置かれます。
 
-この定義の形で生成されるのは、`config/env.ts` があり、`oauth` を束縛するプロバイダがない場合です。それ以外の場合は、同じ内容を登録する `app/Providers/OAuthProvider.ts` を生成し、そちらを登録します（`db/schema.ts` がなければ `CoreOAuthServiceProvider` も登録します）。OAuth をサービスプロバイダで設定しているアプリも、そのまま動きます。詳しくは[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
+この定義の形で生成されるのは、`config/env.ts` があり、`oauth` をバインドするプロバイダーがない場合です。それ以外の場合は、同じ内容を登録する `app/Providers/OAuthProvider.ts` を生成し、そちらを登録します（`db/schema.ts` がなければ `CoreOAuthServiceProvider` も登録します）。OAuth をサービスプロバイダーで設定しているアプリも、そのまま動きます。詳しくは[サービスプロバイダーを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
 
 ### OAuth のみでサインインする
 
@@ -158,7 +158,7 @@ bunx guren add oauth
 
 `db/schema.ts` には `oauth_states` テーブルが追加され、そのマイグレーションも生成されます。`drizzle-kit` をまだインストールしていない場合は、あとで `bun run db:make` を実行してください。`oauth-states:prune` コマンドも登録されます。`config/oauth.ts` は `DatabaseOAuthStateStore` を `stateStore` に渡すので、認可リダイレクトを発行したのとは別のプロセスにコールバックが届いても動きます。Workers、Lambda、Vercel ではそれがふつうです（[Stateストレージ](./oauth.md#stateストレージ)を参照）。`CoreOAuthServiceProvider` は state をメモリ上に持つので、登録しません。`db/schema.ts` がないアプリでは、何も書き込まずにエラーで終了します。
 
-[`--oauth`](#oauth-ログインボタン) と同じく、`config/env.ts` がないアプリや、すでにプロバイダが `oauth` を束縛しているアプリでは、同じ内容とストアを登録する `app/Providers/OAuthProvider.ts` が生成されます。
+[`--oauth`](#oauth-ログインボタン) と同じく、`config/env.ts` がないアプリや、すでにプロバイダーが `oauth` をバインドしているアプリでは、同じ内容とストアを登録する `app/Providers/OAuthProvider.ts` が生成されます。
 
 ### プロバイダー資格情報の設定
 
@@ -416,9 +416,9 @@ app.use('*', createSessionMiddleware())
 
 定義は `createApp({ config })` に追加されます。下の例のうち `redis` ストアだけは手で書き足す部分です。`@guren/core/redis` を import すると ioredis がすべてのバンドルに入るので、必要になるまで雛形には含めていません。`guren add auth` はこのコマンドを内部で実行するので、生成した直後のアプリでも、セッションは最初からデータベースに保存されます。以下は、手で組み込む場合に備えて、生成されるものを説明したものです。
 
-[`--oauth`](#oauth-ログインボタン) と同じく、`config/env.ts` がないアプリや、すでにプロバイダが `session` を束縛しているアプリでは、プレーンな `SessionConfig` としての `config/session.ts` と、それを束縛する `app/Providers/SessionProvider.ts` が生成されます。
+[`--oauth`](#oauth-ログインボタン) と同じく、`config/env.ts` がないアプリや、すでにプロバイダーが `session` をバインドしているアプリでは、プレーンな `SessionConfig` としての `config/session.ts` と、それをバインドする `app/Providers/SessionProvider.ts` が生成されます。
 
-使う可能性のあるストアが複数あるなら、まとめて宣言しておき、環境ごとに選びます。`defineSessionConfig` が `session` キーに `SessionManager` を bind し、`AuthServiceProvider` は起動時に、それを組み込んだセッションミドルウェアを組み立てます。ストア自体は最初のリクエストのときに解決されます。
+使う可能性のあるストアが複数あるなら、まとめて宣言しておき、環境ごとに選びます。`defineSessionConfig` が `session` キーに `SessionManager` をバインドし、`AuthServiceProvider` は起動時に、それを組み込んだセッションミドルウェアを組み立てます。ストア自体は最初のリクエストのときに解決されます。
 
 ```ts
 // config/session.ts
@@ -456,7 +456,7 @@ const app = createApp({
 })
 ```
 
-`defineSessionConfig()` は、マネージャを `createSessionManager()` で組み立てます。`createSessionManager()` は、`new SessionManager()` に `database` ドライバを登録したものです。このドライバはテーブルを ORM のモデルで包むので、ORM に依存しない HTTP 層には置けず、`@guren/core` からしか提供できません。`database` ストアを宣言するときは、常にこちらを使ってください。別の方法で組み立てたマネージャには、`registerDatabaseSessionDriver(manager)` でドライバを追加できます。
+`defineSessionConfig()` は、マネージャーを `createSessionManager()` で組み立てます。`createSessionManager()` は、`new SessionManager()` に `database` ドライバーを登録したものです。このドライバーはテーブルを ORM のモデルで包むので、ORM に依存しない HTTP 層には置けず、`@guren/core` からしか提供できません。`database` ストアを宣言するときは、常にこちらを使ってください。別の方法で組み立てたマネージャーには、`registerDatabaseSessionDriver(manager)` でドライバーを追加できます。
 
 #### `cookie` ストア
 
@@ -480,15 +480,15 @@ stores: {
 
 `database` ドライバーを使うには、`db/schema.ts` の `sessions` テーブルとそのマイグレーションが必要です。カラムは `id`（text の主キー）・`data`・`expiresAt` の 3 つで、方言ごとの定義は [Cloudflare ガイド](./cloudflare.md#セッションと-oauth-state-はデータベースに保存する) にあります。期限切れの行は、`manager.pruneExpired()` を定期的に実行して片付けてください（`read()` は期限切れの行をすでに存在しないものとして扱います）。
 
-マネージャ側の cookie と TTL の設定が基本になり、`auth.sessionOptions` がそれをフィールドごとに上書きします。次の設定ミスは起動時にエラーになるので、`SESSION_DRIVER` の打ち間違いも最初のログインより前に見つかります。
+マネージャー側の cookie と TTL の設定が基本になり、`auth.sessionOptions` がそれをフィールドごとに上書きします。次の設定ミスは起動時にエラーになるので、`SESSION_DRIVER` の打ち間違いも最初のログインより前に見つかります。
 
-- `auth.sessionOptions.store` とマネージャの両方を設定した（どちらかを黙って選ぶことはしません）
-- `default` のストアのドライバが登録されていない
-- `default` の名前が `stores` に宣言されていない（`AuthServiceProvider` がマネージャを組み立てる時点で検出します）
+- `auth.sessionOptions.store` とマネージャーの両方を設定した（どちらかを黙って選ぶことはしません）
+- `default` のストアのドライバーが登録されていない
+- `default` の名前が `stores` に宣言されていない（`AuthServiceProvider` がマネージャーを組み立てる時点で検出します）
 
-`memory` は常に宣言済みなので、`SESSION_DRIVER=memory` はエントリを書かなくても動きます。マネージャは、どのプロバイダの boot よりも前にバインドされます。詳しくは [config 定義](./configuration.md#config-定義) を参照してください。
+`memory` は常に宣言済みなので、`SESSION_DRIVER=memory` はエントリを書かなくても動きます。マネージャーは、どのプロバイダーの boot よりも前にバインドされます。詳しくは [config 定義](./configuration.md#config-定義) を参照してください。
 
-プラグインがドライバを追加するときは、`SessionDrivers` インターフェースを型の拡張（module augmentation）で広げ、`manager.registerDriver(name, factory)` を呼びます。ストアの解決は遅延して行われるので、プラグインの `register()` が設定の宣言より後に実行されても問題ありません。
+プラグインがドライバーを追加するときは、`SessionDrivers` インターフェースを型の拡張（module augmentation）で広げ、`manager.registerDriver(name, factory)` を呼びます。ストアの解決は遅延して行われるので、プラグインの `register()` が設定の宣言より後に実行されても問題ありません。
 
 > [!WARNING]
 > Cloudflare Workers、AWS Lambda、Vercel ではリクエストの間でメモリを共有しないので、デフォルトの `MemorySessionStore` を使うと、ログインした直後のリクエストでセッションが失われます。ミドルウェアはこの状況を検出するとプロセスごとに 1 度警告を出し、`guren check` とデプロイのビルドは事前に警告します。

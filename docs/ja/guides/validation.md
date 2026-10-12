@@ -278,7 +278,7 @@ function Login({ errors }: { errors?: Record<string, string> }) {
 
 - アプリにセッションがあればエラーをセッションに保持し（`createApp({ auth })` でマウントされます）、なければ有効期限の短い Cookie に保持します。そのため、作ったばかりのアプリでもエラーが表示されます。
 - リダイレクト先は `Referer` ヘッダーで、ヘッダーがなければ `/` です。
-- この処理を差し替えるには、サービスプロバイダの `boot()` で独自のレンダラーを登録します。`this.container.make<ExceptionHandler>('exception.handler').render(ValidationException, (error, ctx) => …)` のように書くと、組み込みのものより先に呼ばれます。
+- この処理を差し替えるには、サービスプロバイダーの `boot()` で独自のレンダラーを登録します。`this.container.make<ExceptionHandler>('exception.handler').render(ValidationException, (error, ctx) => …)` のように書くと、組み込みのものより先に呼ばれます。
 
 ### Inertia での表示
 
