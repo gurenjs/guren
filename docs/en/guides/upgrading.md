@@ -1,6 +1,6 @@
 # Upgrading Guren
 
-Use this guide when you move an app to a newer version. Follow the workflow below. The migration notes are listed newest first; apply the ones for every version you cross, starting from the oldest.
+Use this guide when you move an app to a newer version. Follow the workflow below. The migration notes are listed by release (the version on the GitHub release), newest first; apply the ones for every release you cross, starting from the oldest.
 
 ## Upgrade Workflow (Required)
 
@@ -32,7 +32,7 @@ bun run test
 
 ## Migration Notes
 
-### @guren/cli 2.28.0
+### 2.26.x → 2.27.0
 
 #### `analyzeDeployRuntime()` and `judgeDeployRuntime()` are deprecated
 
@@ -40,15 +40,13 @@ bun run test
 - **Who is affected**: Scripts that import either function. `bunx guren upgrade --check-only` lists them.
 - **How to migrate**: Call `checkDeployRuntime(cwd)`, which returns the same three verdicts, or none when the app declares no deploy target. It reads the password hasher and session stores from the app itself, loaded without booting; when that load fails, those two verdicts come back as the advisory `deploy-password-hashing-unverified` and `deploy-runtime-stores-unverified`. The six hasher and session-config signal arrays on `DeployRuntimeAnalysis` are now always empty.
 
-### @guren/server 2.27.0
-
 #### Concurrent cache misses share one callback
 
 - **What changed**: When several calls in one process miss the same key with the same TTL at the same time, `remember()` and `rememberForever()` on a store from `cache.store()` run the callback once, and every caller receives the same result object or the same error. Hits are unchanged.
 - **Who is affected**: Code on the file or Redis store that changes a remembered value in place. Callers that missed together used to get a copy each; now a change reaches the callers it shares the result with.
 - **How to migrate**: Copy the value before modifying it (`structuredClone(value)`). See [Concurrent Misses](./cache.md#concurrent-misses).
 
-### @guren/server 2.26.0
+### 2.25.x → 2.26.0
 
 #### Queue cancellation and reservations
 
