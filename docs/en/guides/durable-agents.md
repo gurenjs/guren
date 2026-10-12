@@ -4,6 +4,16 @@ A durable agent is a long-lived, stateful process your own application hosts, an
 
 [Agent Interface](./agent-interface.md) gave your application a surface agents can call. This guide is about the other side: hosting an agent of your own that calls it, such as a triager that wakes every hour, a researcher that accumulates findings over a week, an operations agent that proposes a destructive change and then waits, possibly for days, for a human to say yes.
 
+Getting one running takes five steps, each with its own section below:
+
+1. [Install the plugin and register it](#install-and-register) in `src/app.ts`.
+2. [Scaffold the class](#scaffolding-one) with `make:agent`.
+3. [Register it](#the-registry) in `config/agents.ts`, with the tools it may call.
+4. [Write the agent](#writing-the-agent) against `this.tools`.
+5. [Deploy it to Workers](#deploying-to-workers).
+
+[Human in the loop](#human-in-the-loop) covers calls that wait for a person's approval, and [Testing](#testing) how to split the test suite.
+
 ## What a durable agent is
 
 Three properties, none of which a job or a cron entry has:
@@ -258,11 +268,14 @@ Behind that `return`, `this.tools` saves `{ requestId, tool, args }` into `guren
 
 On each wake the agent asks the queue about every waiting row, through the same pipeline as any tool call, so the check is itself audited. On `approved`, it repeats the original call with the stored arguments. The queue matches the arguments' fingerprint and uses each approval once, so the retry spends exactly the approval a human granted.
 
-How often it checks:
+<details>
+<summary>How often the agent checks</summary>
 
 - The first check comes after 30 seconds, and the wait doubles after each check. It never drops below one second, and never runs more than a few seconds past the earliest row's expiry or past an hour.
 - There is only ever one check schedule, and one wake asks about every row, so a newly waiting call does not inherit an older row's long wait.
 - Nothing is held in memory. An eviction between the request and the approval loses nothing, because the rows and the schedule are both durable.
+
+</details>
 
 ### `onToolApprovalSettled`
 
@@ -278,9 +291,14 @@ Overridable, a no-op unless you override it, and called for every outcome:
 
 `args` carries the arguments the parked call was made with, absent only for `'unreadable'`. Since the queue keeps no reversible copy, this is the one place an application learns *which* call a human answered.
 
+<details>
+<summary>Recovering from an interrupted sweep</summary>
+
 One case is worth knowing about because it is the reason `status` and `result` are separate: if a sweep is interrupted after the retry ran but before the row was cleared, the next sweep finds the approval already spent and settles with `status: 'approved'` and **no `result`**, calling nothing. Repeating the call there would find no unconsumed approval, file a fresh request, page a human again, and perform the action twice.
 
 The sweep is written not to throw, because the SDK gives a failed scheduled callback three attempts and then drops the schedule. One bad row would otherwise replay the whole sweep and leave every surviving row with no wake at all. Each row is handled on its own, a hook of yours that throws is reported and swallowed, and a retry refused for want of budget keeps its row rather than spending a human's approval on a refusal.
+
+</details>
 
 ### The store and the operator side are yours
 
@@ -306,7 +324,10 @@ bunx guren cloudflare:build
 bunx wrangler deploy
 ```
 
-When the app has a `config/agents.ts`, the build adds the Durable Object half of the worker:
+When the app has a `config/agents.ts`, the build also generates the Durable Object half of the worker. You never edit it, but it explains what the next sections check.
+
+<details>
+<summary>What the generated worker adds</summary>
 
 ```js
 // .cloudflare/worker.js — generated
@@ -328,6 +349,8 @@ const agentEntry = {
 ```
 
 A named export per registered class, so wrangler has something to point a Durable Object binding at. One boot slot for both entrypoints, because an alarm can wake an agent before any request has booted the application: the agent boots it, and the request that follows joins that boot rather than starting a second. And an explicit binding list, because the SDK's router would otherwise reach every Durable Object in `env`.
+
+</details>
 
 ### The bindings verifier
 
@@ -428,7 +451,18 @@ Two suites in the Guren repository show the two shapes: [the plugin's workerd te
 
 ## What the checks enforce
 
-`bunx guren check` picks the agent registry up automatically when `config/agents.ts` exists, and contributes nothing when it does not.
+`bunx guren check` picks the agent registry up automatically when `config/agents.ts` exists, and contributes nothing when it does not. Not every rule is `check`'s, though, so this is where each one is reported:
+
+| Rule | Reported by |
+|---|---|
+| The registry is a static `defineAgentsConfig()` literal with valid `module`, `export` and `scopes` | `guren check`, as a failure |
+| A `tool:` scope names a tool some route declares | `guren check`, as a warning |
+| `app/Agents/**` imports no models, `db/**`, `@guren/orm` or `@guren/plugin-agents/runtime` | `guren check --arch`, as a failure |
+| A non-read-only tool the agent calls requires authorization | `guren check`, through the agent-route rules |
+| The agent name matches `^[A-Za-z0-9_-]+$`, and `budget.callsPerMinute` is a whole number of at least 1 | `agentsPlugin`, when the app boots |
+| `@guren/plugin-agents` is a runtime dependency, every class has a SQLite Durable Object binding, and `keep_names` is not `false` | `guren cloudflare:build`, before deploying |
+
+The paragraphs below give the detail behind each row except the last, which [Install and register](#install-and-register) and [The bindings verifier](#the-bindings-verifier) cover.
 
 `check` **fails** on a registry it or the deploy build could not read: an unparseable file, a config that is not a literal `defineAgentsConfig({ agents: { … } })`, a spread inside `agents`, a non-literal `module` or `export`, a `module` naming a file that does not exist or that does not export that class as a class declaration, a duplicated agent key or export name, a missing or non-literal `scopes` array, and a scope outside the registration grammar. It **warns** on a `tool:` scope naming a tool no route declares. Such a scope grants nothing, so it points at a typo or a renamed route rather than a security hole.
 
@@ -440,7 +474,8 @@ The routes an agent calls are checked by the ordinary agent-route rules, and the
 
 ## Related
 
-- [Agent Interface](./agent-interface.md): `.agent()` routes, tool derivation, scopes, approvals, and the audit trail an agent's calls land in
+- [Agent Interface](./agent-interface.md): `.agent()` routes and how tools are derived from them
+- [Control and Audit Agent Tool Access](./agent-tool-governance.md): scopes, approvals, and the audit trail an agent's calls land in
 - [AI Agents](./ai-agents.md): calling a model with the app's tools, from a request, a job or a durable agent
 - [Cloudflare Workers Deployment](./cloudflare.md): the rest of the deploy path (D1, sessions, secrets, static assets)
 - [Authorization](./authorization.md): the policies that decide what the `agent:<name>:<instance>` principal may do
