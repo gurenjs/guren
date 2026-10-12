@@ -1,12 +1,23 @@
 # バリデーション
 
-Guren のバリデーションは、スキーマを先に書くやり方が基本です。Zod 互換のスキーマをコントローラー、ルートコントラクト、ミドルウェアで使い回し、どうしても必要なときだけ旧来の `FormRequest` 互換レイヤーを使います。
+リクエストの入力をスキーマで検証し、型の付いたパース済みの値を受け取ります。入力が不正なときは 422 のレスポンスを返して終わります。Inertia のリクエストなら、フィールドごとのエラーメッセージを付けてフォームへリダイレクトします。
 
-> **サポートする Zod バージョン:** zod 4 の API にだけ対応しています。実行時のバリデーションそのものは、`safeParse` を持つスキーマならどれでも受け付けます。ただし、スキーマの構造を読み取るツール(`guren codegen`、OpenAPI 生成、`guren context`)は、zod v3 の API(旧 `zod@3` パッケージと `zod/v3` サブパス)で書かれたスキーマを、警告を出して受け付けません。スキーマは `import { z } from 'zod'` で書いてください。
+スキーマは zod 4 で書きます（`import { z } from 'zod'`）。ほかのライブラリを使う場合は[スキーマインターフェース](#スキーマインターフェース)を参照してください。
+
+## 検証する場所の選び方
+
+| 場所 | 使う場面 | 値の受け取り方 |
+|------|----------|----------------|
+| [コントローラーのヘルパー](#コントローラーバリデーションヘルパー) | 通常はこれ。コントローラーのアクションの中で検証する | `this.validateBody()` などの戻り値 |
+| [ルートコントラクト](#ルートコントラクトによる検証) | ルートの型を codegen、OpenAPI、エージェントのツールにも渡したい | `this.validated('route.name')` |
+| [ミドルウェア](#ミドルウェアバリデーション) | ハンドラーがインラインの関数のときや、リクエストによってスキーマを変えたいとき | `getValidatedData(ctx)` |
+| [`validate()` / `validateSafe()`](#手動バリデーション) | 検証するデータがリクエストから来ない（ジョブ、コンソールコマンド、スクリプト） | 戻り値 |
+
+Laravel から移行したコード向けに、クラスで書く `FormRequest` の層も残っています。非推奨なので、新しく書く検証には上の 4 つのどれかを使ってください。
 
 ## クイックスタート
 
-おすすめは、コントローラーのバリデーションヘルパーを使う書き方です。
+アクションの先頭でヘルパーを呼びます。戻り値はパース済みの値なので、下の `data` には `{ title: string; content: string }` の型が付きます。
 
 ```ts
 import { Controller, paginate } from '@guren/core'
@@ -47,31 +58,109 @@ export default class PostsController extends Controller {
 }
 ```
 
-## ミドルウェアバリデーション
+ボディが `StorePostSchema` を満たさないと、`validateBody()` が `ValidationException` を投げてアクションはそこで止まります。この例外を自分で catch する必要はありません。フレームワークが[フォームバリデーションエラー](#フォームバリデーションエラー)で説明するレスポンスに変えて返します。
 
-### `validateRequest(schema)` 互換ミドルウェア
+## コントローラーバリデーションヘルパー
 
-`validateRequest()` は、バリデーション用のミドルウェアを作るファクトリです。
+ヘルパーはそれぞれ、リクエストの決まった部分を読みます。
+
+| ヘルパー | 入力元 | 非同期 | 失敗したとき |
+|----------|--------|--------|--------------|
+| `this.validateBody(schema)` | JSON またはフォームのボディ | はい | `ValidationException`（422）を投げる |
+| `this.validateQuery(schema)` | クエリ文字列（`?page=1&sort=desc`） | いいえ | `ValidationException`（422）を投げる |
+| `this.validateParams(schema)` | ルートパラメータ（`:id`、`:slug`） | いいえ | `ValidationException`（422）を投げる |
+| `this.validateBodySafe(schema)` | JSON またはフォームのボディ | はい | `{ success: false, errors }` を返す |
+| `this.validateQuerySafe(schema)` | クエリ文字列 | いいえ | `{ success: false, errors }` を返す |
+| `this.validateParamsSafe(schema)` | ルートパラメータ | いいえ | `{ success: false, errors }` を返す |
+
+エラーの扱いをアクションの中で決めたいときは、`Safe` の付いた版を使います（[Inertia での表示](#inertia-での表示)の例を参照）。成功したときの戻り値は `{ success: true, data }` です。
+
+ルートパラメータは文字列で届くので、スキーマの側で型を変換します。
 
 ```ts
-import { Router, validateRequest } from '@guren/core'
+const PostIdParamSchema = z.object({
+  id: z.coerce.number().int().positive(),
+})
+
+export default class PostsController extends Controller {
+  async show() {
+    const { id } = this.validateParams(PostIdParamSchema)
+    const post = await Post.findOrFail(id)
+    return this.json(post)
+  }
+}
+```
+
+### 配列形式のクエリパラメータ
+
+同じクエリキーが繰り返されると、スキーマには配列として渡ります。たとえば `?tag=a&tag=b` は `{ tag: ['a', 'b'] }` になります。一方、1 回しか出てこないキーはただの文字列のままです。1 回のことも複数回のこともあるパラメータには、`union` を使ってください。
+
+```ts
+const FilterQuerySchema = z.object({
+  // ?tag=a&tag=b -> ['a', 'b'] / ?tag=a -> 'a'
+  tag: z.union([z.string(), z.array(z.string())]).optional()
+    .transform((value) => (typeof value === 'string' ? [value] : value ?? [])),
+})
+```
+
+この挙動は、`this.validateQuery()` にも、[ルートコントラクト](./routing.md#ルートコントラクト)で指定する `query:` スキーマにも当てはまります。
+
+## ルートコントラクトによる検証
+
+ルートに `params`、`query`、`body` のスキーマを宣言しておくと、ハンドラーを呼ぶ前に入力が検証されます。ハンドラーがコントローラーのアクションでも同じです。アクションの中でスキーマを書き直す必要はなく、パース済みの値を `this.validated()` で読み出します。
+
+```ts
+router.post('/posts', { name: 'posts.store', body: StorePostSchema }, [PostsController, 'store'])
+
+export default class PostsController extends Controller {
+  async store() {
+    const { body } = this.validated('posts.store')
+    const post = await Post.create(body)
+    return this.created({ post })
+  }
+}
+```
+
+コントローラーのアクションで検証に失敗すると、ヘルパーと同じ `ValidationException`（422）が投げられます。そのため、Inertia のフォームでは手を加えずにエラーを表示できます。ハンドラーがインラインの関数のルートは、ミドルウェアと同じ形の 422 をその場で返します（[フォームバリデーションエラー](#フォームバリデーションエラー)を参照）。詳しくは[検証済み入力の読み取り](./routing.md#検証済み入力の読み取り)を参照してください。
+
+## ミドルウェアバリデーション
+
+### `validateRequest(schema)`
+
+`validateRequest()` は、ハンドラーより前にリクエストボディを検証するミドルウェアを作ります。ハンドラーでは、パース済みのボディを `getValidatedData()` で取り出します。
+
+```ts
+import { Router, getValidatedData, validateRequest } from '@guren/core'
 import { z } from 'zod'
 
-const schema = z.object({
-  email: z.email(),
-  password: z.string().min(8),
+const CreatePostSchema = z.object({
+  title: z.string().min(1),
+  content: z.string().min(1),
 })
 
 const router = new Router()
 
-router.post('/login', [AuthController, 'login'], validateRequest(schema))
+router.post('/posts', async (ctx) => {
+  const data = getValidatedData<z.infer<typeof CreatePostSchema>>(ctx)!
+  return ctx.json({ post: await Post.create(data) })
+}, validateRequest(CreatePostSchema))
 ```
 
-バリデーションに失敗すると、デフォルトではエラーの詳細を載せた 422 レスポンスが返ります。
+ミドルウェアがそのルートで動いていなければ `getValidatedData()` は `undefined` を返すので、例では `!` を付けています。
+
+検証に失敗すると、ミドルウェアがその場で 422 を返します。中身はトップレベルのフィールドごとに最初のメッセージ 1 つです。
+
+```json
+{
+  "errors": {
+    "title": "Too small: expected string to have >=1 characters"
+  }
+}
+```
 
 ### `validateRequestWith(schemaFactory)`
 
-リクエストのコンテキストに応じてスキーマを組み立てたいときに使います。スキーマを返す関数は同期的に呼ばれるので、その中でログイン中のユーザーを await することはできません。必要な値は、`resolveIsAdmin` のように前段のミドルウェアで解決しておいてください。
+リクエストに応じてスキーマを組み立てたいときに使います。スキーマを返す関数は同期的に呼ばれるので、その中でログイン中のユーザーを await することはできません。必要な値は、`resolveIsAdmin` のように前段のミドルウェアで解決しておいてください。
 
 ```ts
 import { AUTH_CONTEXT_KEY, Router, defineMiddleware, validateRequestWith } from '@guren/core'
@@ -98,93 +187,137 @@ router.put('/users/:id', [UserController, 'update'], resolveIsAdmin, validateReq
 }))
 ```
 
-## 検証済みデータの取得
+アクションでは、パース済みのボディを `getValidatedData(this.ctx)` で取り出します。
 
-バリデーションミドルウェアを通ったあとは、`getValidatedData()` で型の付いたデータを取り出せます。
+### カスタムエラーハンドリング
 
-```ts
-import { getValidatedData } from '@guren/core'
-import type { z } from 'zod'
-import { Router } from '@guren/core'
-
-const router = new Router()
-
-router.post('/posts', async (ctx) => {
-  const data = getValidatedData<z.infer<typeof createPostSchema>>(ctx)
-
-  // TypeScript は正確な型を認識
-  console.log(data.title)  // string
-  console.log(data.content) // string
-  console.log(data.published) // boolean
-
-  return ctx.json({ post: await Post.create(data) })
-}, validateRequest(createPostSchema))
-```
-
-## 手動バリデーション
-
-ミドルウェアの外で検証したいときは、`validate()` か `validateSafe()` を使います。
-
-```ts
-import { validate, validateSafe } from '@guren/core'
-
-// バリデーション失敗時に例外をスロー
-const data = validate(schema, requestData)
-
-// 結果オブジェクトを返す（例外をスローしない）
-const result = validateSafe(schema, requestData)
-if (result.success) {
-  console.log(result.data)
-} else {
-  console.log(result.error)
-}
-```
-
-## カスタムエラーハンドリング
-
-`onError` を渡すと、デフォルトのエラーレスポンスを差し替えられます。
+どちらのミドルウェアも `onError` オプションを受け取り、422 のレスポンスを差し替えられます。引数には、フィールド名からメッセージへの同じ対応表が渡ります。
 
 ```ts
 validateRequest(schema, {
-  onError: (ctx, error) => {
-    // カスタムエラーフォーマット
+  onError: (ctx, errors) => {
     return ctx.json({
       message: 'バリデーションに失敗しました',
-      errors: error.issues.map(issue => ({
-        field: issue.path.join('.'),
-        message: issue.message,
-      })),
+      errors: Object.entries(errors).map(([field, message]) => ({ field, message })),
     }, 422)
   },
 })
 ```
 
-## スキーマインターフェース
+ステータスだけを変えたいなら `status` を、どのフィールドにも結び付かないエラーのメッセージを変えたいなら `fallbackMessage` を指定します。
 
-Guren のバリデーションは、特定のスキーマライブラリに縛られません。`ValidationSchema` を実装したオブジェクトなら、どれでも渡せます。
+## 手動バリデーション
+
+リクエストから来ないデータは、`validate()` か `validateSafe()` で検証します。
 
 ```ts
-interface ValidationSchema<T> {
-  parse(data: unknown): T
-  safeParse(data: unknown): { success: true; data: T } | { success: false; error: unknown }
+import { validate, validateSafe } from '@guren/core'
+
+// パース済みのデータを返す。失敗するとスキーマ自身のエラー（zod なら ZodError）を投げる
+const data = validate(schema, input)
+
+// 例外は投げない
+const result = validateSafe(schema, input)
+if (result.success) {
+  console.log(result.data)
+} else {
+  console.log(result.errors) // { field: '最初のメッセージ' }
 }
 ```
 
-Zod のほか、Valibot や自作のバリデーターも使えます。
+## フォームバリデーションエラー
+
+エラーの形は、検証した場所によって次のように異なります。「ネストのキー」の列は、`address.postalCode` で失敗したときのキーです。
+
+| 発生元 | 形 | キーあたりのメッセージ | ネストのキー |
+|--------|----|------------------------|--------------|
+| ヘルパーとコントラクトの `body`、JSON リクエスト | `{ message, errors: { [key]: string[] } }`、422 | すべて | `address.postalCode` |
+| コントラクトの `params` / `query`、JSON リクエスト | `{ message, errors: { [key]: string[] } }`、422 | 1 つ | `address` |
+| すべての `ValidationException`、Inertia リクエスト | ページの `errors` prop：`{ [key]: string }` | 1 つ | 投げたときのまま |
+| `this.validateBodySafe()` など | `{ success: false, errors: { [key]: string } }` | 1 つ | `address.postalCode` |
+| `validateRequest()`、`validateSafe()`、インラインのハンドラーのコントラクト | `{ errors: { [key]: string } }` | 1 つ | `address` |
+
+キーがトップレベルのフィールド名になる場所では、どのフィールドにも結び付かないエラーに `message` というキーが付きます。
+
+### JSON リクエスト
+
+JSON や API のリクエストで `ValidationException` が投げられると、次の 422 を返します。
+
+```json
+{
+  "message": "The given data was invalid.",
+  "errors": {
+    "email": ["Invalid email address"],
+    "password": ["Too small: expected string to have >=8 characters"]
+  }
+}
+```
+
+### Inertia リクエストの自動ハンドリング
+
+Inertia のリクエスト（`X-Inertia` ヘッダー付き）には JSON を返さず、次の順で処理します。
+
+1. エラーを次のリクエストまでの一度だけ保持します。
+2. 直前のページへ `303` でリダイレクトします。
+3. そのページを読み込むと、エラーが共有 props の `errors` に入ります。メッセージはフィールドごとに 1 つです。
+
+```tsx
+function Login({ errors }: { errors?: Record<string, string> }) {
+  return (
+    <form>
+      <input name="email" />
+      {errors?.email && <span className="error">{errors.email}</span>}
+    </form>
+  )
+}
+```
+
+`validateBody`、`validateQuery`、`validateParams`、ルートコントラクトの失敗にも、自分のコードで投げた `ValidationException.withMessages(...)` にも、同じ処理が適用されます。
+
+細かい点は次のとおりです。
+
+- アプリにセッションがあればエラーをセッションに保持し（`createApp({ auth })` でマウントされます）、なければ有効期限の短い Cookie に保持します。そのため、作ったばかりのアプリでもエラーが表示されます。
+- リダイレクト先は `Referer` ヘッダーで、ヘッダーがなければ `/` です。
+- この処理を差し替えるには、サービスプロバイダーの `boot()` で独自のレンダラーを登録します。`this.container.make<ExceptionHandler>('exception.handler').render(ValidationException, (error, ctx) => …)` のように書くと、組み込みのものより先に呼ばれます。
+
+### Inertia での表示
+
+リダイレクトせずに同じレスポンスでエラーを表示したいときは、`Safe` の付いたヘルパーを使い、戻り値の `errors` をページに渡します。ページの `errors` prop は `ValidationErrors<T>` で宣言します。codegen がページの `Props` を読み取るので、`this.inertia()` に渡す値もその型で検査されます。
 
 ```ts
-// Valibot を使用
-import * as v from 'valibot'
-import { Router } from '@guren/core'
+import { pages } from '@/.guren/pages.gen'
 
-const schema = v.object({
-  name: v.string([v.minLength(1)]),
-  email: v.string([v.email()]),
-})
+async store() {
+  const result = await this.validateBodySafe(schema)
+  if (!result.success) {
+    return this.inertia(pages.users.Create, {
+      errors: result.errors,
+    })
+  }
 
-const router = new Router()
+  await User.create(result.data)
+  return this.redirect('/users')
+}
+```
 
-router.post('/users', handler, validateRequest(schema))
+```tsx
+import type { ValidationErrors } from '@guren/core'
+
+interface Props {
+  errors?: ValidationErrors<'email' | 'password'>
+}
+
+export default function CreateUser({ errors }: Props) {
+  return (
+    <form>
+      <input name="email" />
+      {errors?.email && <span className="error">{errors.email}</span>}
+
+      <input name="password" type="password" />
+      {errors?.password && <span className="error">{errors.password}</span>}
+    </form>
+  )
+}
 ```
 
 ## 一般的なパターン
@@ -248,193 +381,24 @@ const schema = z.object({
 })
 ```
 
-## フォームバリデーションエラー
+## スキーマインターフェース
 
-バリデーションに失敗したときは、デフォルトで次の形式のレスポンスが返ります。
-
-```json
-{
-  "error": "Validation failed",
-  "issues": [
-    {
-      "path": ["email"],
-      "message": "Invalid email"
-    },
-    {
-      "path": ["password"],
-      "message": "String must contain at least 8 character(s)"
-    }
-  ]
-}
-```
-
-### Inertia リクエストの自動ハンドリング
-
-Inertia のリクエスト（`X-Inertia` ヘッダー付き）で `ValidationException` が投げられた場合は、上の JSON を返しません。Laravel と同じく、エラーをセッションに flash してから、直前のページへ `303` でリダイレクトします。flash したエラーは、次にページを読み込んだときに共有 props の `errors` として渡ります。このときメッセージは、フィールドごとに 1 つずつにまとめられます。
-
-```tsx
-function Login({ errors }: { errors?: Record<string, string> }) {
-  return (
-    <form>
-      <input name="email" />
-      {errors?.email && <span className="error">{errors.email}</span>}
-    </form>
-  )
-}
-```
-
-この動きは、`validateBody` / `validateQuery` / `validateParams` が失敗したときにも、自分のコードで `ValidationException.withMessages(...)` を投げたときにも同じです。flash にはセッションミドルウェアが必要です（`auth` オプションを設定すれば自動でマウントされます）。挙動を変えたい場合は、サービスプロバイダで `ValidationException` 用のレンダラーを登録してください。登録したレンダラーが組み込みのものより優先されます。
-
-### Inertia での表示
-
-page definition に `ValidationErrors<T>` を含めておくと、コントローラーとコンポーネントで同じ型を共有できます。
+Guren は Zod を import せずにスキーマ自身のメソッドを呼ぶので、次の形を持つオブジェクトならどれでも使えます。`validate()` は `parse()` を、それ以外はすべて `safeParse()` を呼びます。
 
 ```ts
-import { type ValidationErrors } from '@guren/core'
-import { pages } from '@/.guren/pages.gen'
-
-type CreateUserFields = 'email' | 'password'
-type CreateUserProps = {
-  errors?: ValidationErrors<CreateUserFields>
-}
-
-async store() {
-  const result = await this.validateBodySafe(schema)
-  if (!result.success) {
-    return this.inertia<CreateUserProps>(pages.users.Create, {
-      errors: result.errors,
-    })
-  }
-
-  await User.create(result.data)
-  return this.redirect('/users')
+interface ValidationSchema<T> {
+  parse(data: unknown): T
+  safeParse(data: unknown):
+    | { success: true; data: T }
+    | { success: false; error: { issues: Array<{ path: PropertyKey[]; message: string }> } }
 }
 ```
 
-```tsx
-import type { PageProps } from '@guren/inertia-client'
-import { pages } from '@/.guren/pages.gen'
+エラーのキーは `issues[].path` から作られます。ほかのライブラリのスキーマを使うときは、この形を返す小さなアダプターを書いてください。
 
-type Props = PageProps<typeof pages.users.Create>
+スキーマの構造を読み取るツール（型付きのルートマニフェストを書き出す `guren codegen`、OpenAPI 生成、`guren context`）は zod 4 にだけ対応しています。zod v3 の API（`zod@3` パッケージや `zod/v3` サブパス）で書いたスキーマは、警告を出して読み飛ばします。
 
-function CreateUser({ errors }: Props) {
-  return (
-    <form>
-      <input name="email" />
-      {errors?.email && <span className="error">{errors.email}</span>}
-
-      <input name="password" type="password" />
-      {errors?.password && <span className="error">{errors.password}</span>}
-    </form>
-  )
-}
-```
-
-## ルートコントラクトによる検証
-
-`params`、`query`、`body` のスキーマを宣言したルートでは、ハンドラーが動く前に入力が検証されます。コントローラーのアクションも同じです。アクションの中でスキーマを書き直す必要はなく、パース済みの値を `this.validated()` で読み出します。
-
-```ts
-router.post('/posts', { name: 'posts.store', body: StorePostSchema }, [PostsController, 'store'])
-
-export default class PostsController extends Controller {
-  async store() {
-    const { body } = this.validated('posts.store')
-    const post = await Post.create(body)
-    return this.created({ post })
-  }
-}
-```
-
-検証に失敗すると、`validateBody()` と同じ `ValidationException`(422)が同じエラーキーで投げられるので、Inertia のフォームは手を加えずにエラーを表示できます。詳しくは[検証済み入力の読み取り](./routing.md#検証済み入力の読み取り)を参照してください。
-
-## コントローラーバリデーションヘルパー
-
-コントローラーで検証するなら、`validateBody`、`validateQuery`、`validateParams` を使うのがいちばん手軽です。どれも `safeParse()` を持つ Zod 風のスキーマを受け取り、検証に失敗すると `ValidationException`（422）を投げます。
-
-```ts
-import { Controller } from '@guren/core'
-import { z } from 'zod'
-
-const StorePostSchema = z.object({
-  title: z.string().min(1).max(200),
-  content: z.string().min(10),
-})
-
-const PostIdParamSchema = z.object({
-  id: z.coerce.number().int().positive(),
-})
-
-const PageQuerySchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-})
-
-export default class PostsController extends Controller {
-  async index() {
-    const { page } = this.validateQuery(PageQuerySchema)
-    const posts = await Post.paginate({ page })
-    return this.json(posts)
-  }
-
-  async show() {
-    const { id } = this.validateParams(PostIdParamSchema)
-    const post = await Post.findOrFail(id)
-    return this.json(post)
-  }
-
-  async store() {
-    const data = await this.validateBody(StorePostSchema)
-    const post = await Post.create(data)
-    return this.created({ post })
-  }
-}
-```
-
-| ヘルパー | 入力元 | 非同期 | 説明 |
-|--------|--------|--------|------|
-| `this.validateBody(schema)` | リクエストボディ | はい | JSON またはフォームのボディをパース |
-| `this.validateQuery(schema)` | クエリ文字列 | いいえ | `?page=1&sort=desc` をパース |
-| `this.validateParams(schema)` | ルートパラメータ | いいえ | `:id`、`:slug` などをパース |
-
-> [!TIP]
-> これらのヘルパーは、`safeParse()` を実装したスキーマライブラリ（Zod、Valibot、自作のバリデーター）であれば、どれとでも組み合わせられます。
-
-### 配列形式のクエリパラメータ
-
-同じクエリキーが繰り返されると、スキーマには配列として渡ります。たとえば `?tag=a&tag=b` は `{ tag: ['a', 'b'] }` になります。一方、1 回しか出てこないキーはただの文字列のままです。1 回のことも複数回のこともあるパラメータには、`union` を使ってください。
-
-```ts
-const FilterQuerySchema = z.object({
-  // ?tag=a&tag=b -> ['a', 'b'] / ?tag=a -> 'a'
-  tag: z.union([z.string(), z.array(z.string())]).optional()
-    .transform((value) => (typeof value === 'string' ? [value] : value ?? [])),
-})
-```
-
-この挙動は、`this.validateQuery()` にも、[ルートコントラクト](./routing.md#ルートコントラクト)で指定する `query:` スキーマにも当てはまります。
-
-## 型安全なリクエストパース
-
-型安全を徹底したいときは、リクエストのパースと組み合わせます。
-
-```ts
-import { Router, parseRequestPayload, validateRequest, getValidatedData } from '@guren/core'
-
-const schema = z.object({
-  title: z.string(),
-  content: z.string(),
-})
-
-const router = new Router()
-
-router.post('/posts', async (ctx) => {
-  const data = getValidatedData<z.infer<typeof schema>>(ctx)!
-  // 完全に型付けされ、検証済みのデータ
-  return ctx.json({ post: await Post.create(data) })
-}, validateRequest(schema))
-```
-
-## コンパイル済みパース (zod 4.5+)
+## コンパイル済みパース（zod 4.5+）
 
 zod 4.5 では、スキーマを高速な生成コードにコンパイルできます。`create-guren-app` で作ったアプリでは最初から有効で、`src/app.ts` の先頭に次の import が入っています。
 
@@ -442,7 +406,7 @@ zod 4.5 では、スキーマを高速な生成コードにコンパイルでき
 import 'zod/compile'
 ```
 
-この import より後に組み立てたスキーマは、コンパイル済みの経路でパースされます。Guren のバリデーションヘルパー、ルートコントラクト(`params`、`query`、`body`、`output`)、バリデーションミドルウェアは、どれもスキーマ自身の `parse`/`safeParse` を呼んでいるので、コードを書き換えなくても速くなります。
+この import より後に組み立てたスキーマは、コンパイル済みの経路でパースされます。Guren のバリデーションヘルパー、ルートコントラクト（`params`、`query`、`body`、`output`）、バリデーションミドルウェアは、どれもスキーマ自身の `parse`/`safeParse` を呼んでいるので、コードを書き換えなくても速くなります。
 
 既存のアプリで使うには、`zod` の依存を `^4.5.0` に上げたうえで、エントリモジュールの**最初の行**にこの import を追加してください。スキーマを定義するどのモジュールよりも前に読み込まれる必要があります。
 
@@ -451,7 +415,7 @@ Bun で計測したところ、100 件のリスト出力の検証は約 19µs �
 注意点が 3 つあります。
 
 - **import の順序が効きます。** import より前に組み立てたスキーマは、通常のパーサーのまま動きます。必ずエントリモジュールの先頭に置いてください。
-- **制約のあるランタイムでも動きます。** 生成コードを禁止しているランタイム(厳格な CSP など)では、`z.config({ jitless: true })` を呼べばコンパイルを飛ばし、すべてそのまま動きます。対応していないスキーマ機能も通常のパーサーにフォールバックするだけで、コンパイルが例外を投げることはありません。
-- **refinement には副作用を持たせないでください。** 不正な入力に対しては、`.refine()` や `.transform()` のコールバックが 2 回実行されることがあります。高速経路のあとに、完全なエラーを組み立てるためのフォールバックが走るからです。検証結果は変わりませんが、コールバック内の副作用は 2 回起きます。
+- **制約のあるランタイムでも動きます。** 生成コードを禁止しているランタイム（厳格な CSP など）では、`z.config({ jitless: true })` を呼べばコンパイルを飛ばし、すべてそのまま動きます。対応していないスキーマ機能も通常のパーサーにフォールバックするだけで、コンパイルが例外を投げることはありません。
+- **`.refine()` や `.transform()` には副作用を持たせないでください。** 不正な入力に対しては、`.refine()` や `.transform()` のコールバックが 2 回実行されることがあります。高速経路のあとに、完全なエラーを組み立てるためのフォールバックが走るからです。検証結果は変わりませんが、コールバック内の副作用は 2 回起きます。
 
-zod 以外のスキーマを使ったバリデーションには影響しません。Valibot や自作のバリデーターは、これまでどおりそれぞれの `parse`/`safeParse` で動きます。
+zod 以外のスキーマには影響しません。これまでどおり、それぞれの `parse`/`safeParse` で動きます。

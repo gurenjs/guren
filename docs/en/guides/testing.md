@@ -1,101 +1,94 @@
 # Testing
 
-A single well-written test catches bugs before your users do. Guren makes testing so convenient that writing tests feels faster than manually checking things in a browser.
+Test your app over HTTP with `TestApp`: send a request through the real middleware and routes, then assert on the response. This page also covers signing a user in, keeping tests off your development database, and swapping mail, events and queues for fakes.
+
+A scaffolded app runs its tests with Bun's test runner and ships one example, `tests/HomeController.test.ts`. Run the suite with `bun run test` (see [Running Tests](#running-tests)).
 
 ## TestApp
 
-`TestApp` is the centerpiece of Guren's testing story. It boots a lightweight instance of your application with the full middleware and routing stack, then lets you make requests and assert on responses with a fluent API:
+`TestApp` boots your application in-process, with the full middleware and routing stack, and gives each request a fluent set of assertions. The scaffold's own test wraps the app `src/app.ts` exports:
 
 ```ts
-import { describe, test, beforeAll } from 'bun:test'
-import { TestApp } from '@guren/testing'
-
-describe('Posts', () => {
-  let app: TestApp
-
-  beforeAll(async () => {
-    app = await TestApp.create()
-  })
-
-  test('lists all posts', async () => {
-    await app.get('/posts').assertOk()
-  })
-
-  test('creates a post', async () => {
-    await app
-      .post('/posts', { title: 'Hello', content: 'World' })
-      .assertStatus(201)
-      .assertJsonPath('post.title', 'Hello')
-  })
-
-  test('returns 404 for missing post', async () => {
-    await app.get('/posts/999').assertNotFound()
-  })
-})
-```
-
-All standard HTTP methods are available:
-
-```ts
-await app.get('/posts')
-await app.post('/posts', body)
-await app.put('/posts/1', body)
-await app.patch('/posts/1', body)
-await app.delete('/posts/1')
-await app.query('/posts/search', body) // HTTP QUERY (RFC 10008)
-```
-
-### Wrapping the real application
-
-`TestApp.create({ ... })` assembles an app from the parts you pass, which is good for isolated slices, but the subset can silently drift from what the server actually runs (providers, `auth`, `i18n`, security defaults). For tests that should exercise the real configuration, wrap the app your project exports:
-
-```ts
+import { beforeAll, describe, test } from 'bun:test'
 import { TestApp } from '@guren/testing'
 import app from '../src/app.js'
 
-let http: TestApp
+describe('Posts', () => {
+  let http: TestApp
 
-beforeAll(async () => {
-  http = await TestApp.fromApp(app)
-})
+  beforeAll(async () => {
+    http = await TestApp.fromApp(app)
+  })
 
-test('serves the home page', async () => {
-  await http.get('/').assertOk()
+  test('lists all posts', async () => {
+    await http.get('/posts').assertOk()
+  })
+
+  test('returns 404 for a missing post', async () => {
+    await http.get('/posts/999').assertNotFound()
+  })
 })
 ```
 
-`fromApp()` boots the app and binds its fetch handler for you. Several test files may call it on the same instance: `boot()` is idempotent and reuses the first boot.
+The examples on this page call the `TestApp` `http` and the application `app`. All standard HTTP methods are available:
 
-You may also see the longer form below, which does the same thing by hand. Note the arrow function: `fetch` reads instance state, so handing the unbound `app.fetch` reference to `fromFetch` throws on the first request. `fromApp()` exists to remove that footgun; reach for `fromFetch` when you have an arbitrary fetch function rather than a Guren application.
+```ts
+await http.get('/posts')
+await http.post('/posts', body)
+await http.put('/posts/1', body)
+await http.patch('/posts/1', body)
+await http.delete('/posts/1')
+await http.query('/posts/search', body) // HTTP QUERY (RFC 10008)
+```
+
+### Choosing How to Build the App
+
+| Builder | What it runs | Use it when |
+|---------|--------------|-------------|
+| `TestApp.fromApp(app)` | The app `src/app.ts` exports, with its providers, `auth`, `i18n` and config | Most tests: they see the configuration production uses |
+| `TestApp.create({ ... })` | An app assembled from the options you pass | Testing one slice in isolation, or trying an env override |
+| `TestApp.fromFetch(fetch)` | Any fetch function | The handler is not a Guren application |
+
+### Wrapping the real application
+
+`fromApp()` boots the app and binds its fetch handler. Several test files may call it on the same instance: `boot()` runs once, and later calls reuse that boot. It also boots with the env schema and config definitions `src/app.ts` passes to `createApp()` ([Configuration](./configuration.md#tests) has the details).
+
+You may see the longer form below, which does the same by hand:
 
 ```ts
 await app.boot()
 http = TestApp.fromFetch((request) => app.fetch(request))
 ```
 
-When you do assemble an app from parts, `TestApp.create()` mirrors `createApp`'s options: pass `auth` to mount session + CSRF middleware, and `i18n` when controllers under test use `this.t()` / `this.tc()`:
+Keep the arrow function if you write it this way. `fetch` reads instance state, so passing the unbound `app.fetch` to `fromFetch` throws on the first request.
+
+### Assembling an app from parts
+
+`TestApp.create()` takes the same options as `createApp`. A subset can drift from what the server actually runs, so pass what the code under test needs: `auth` to mount the session and CSRF middleware, and `i18n` when controllers call `this.t()` / `this.tc()`:
 
 ```ts
-const app = await TestApp.create({
+const http = await TestApp.create({
   routes: registerWebRoutes,
   i18n: { supported: ['en'] },
 })
 ```
 
-To try one environment variable without mutating `process.env`, pass your `config/env.ts` schema as `env` and the override as `envSource`. `envSource` is read ahead of `process.env`, and `''` makes a variable unset. `create()` takes no `config` array, so the override reaches what providers and controllers read through `this.make('env')`; an invalid value makes `create()` reject with an `EnvValidationError`:
+To try one environment variable without changing `process.env`, pass your `config/env.ts` schema as `env` and the override as `envSource`:
 
 ```ts
 import { TestApp } from '@guren/testing'
 import env from '../config/env.js'
 
-const app = await TestApp.create({
+const http = await TestApp.create({
   env,
   envSource: { CACHE_STORE: 'memory', APP_URL: '' },
   providers: [ReportProvider],
 })
 ```
 
-`TestApp.fromApp(app)` boots with the schema and config definitions `src/app.ts` passes to `createApp()`, so a feature test sees the configuration production uses. [Configuration](./configuration.md#tests) has the details.
+- `envSource` is read ahead of `process.env`, and `''` makes a variable unset.
+- The override reaches what providers and controllers read through `this.make('env')`. `create()` takes no `config` array.
+- An invalid value makes `create()` reject with an `EnvValidationError`.
 
 ### Fluent Assertions
 
@@ -103,28 +96,28 @@ Chain assertions directly on the response:
 
 ```ts
 // Status
-await app.get('/posts').assertOk()                         // 200
-await app.get('/posts').assertStatus(200)
-await app.post('/posts', data).assertStatus(201)
-await app.delete('/posts/1').assertNoContent()              // 204
-await app.get('/secret').assertUnauthorized()                // 401
-await app.get('/secret').assertForbidden()                   // 403
-await app.get('/missing').assertNotFound()                   // 404
+await http.get('/posts').assertOk()                         // 200
+await http.get('/posts').assertStatus(200)
+await http.post('/posts', data).assertStatus(201)
+await http.delete('/posts/1').assertNoContent()              // 204
+await http.get('/secret').assertUnauthorized()                // 401
+await http.get('/secret').assertForbidden()                   // 403
+await http.get('/missing').assertNotFound()                   // 404
 
 // JSON
-await app.get('/posts').assertJson({ data: [] })
-await app.get('/posts').assertJsonCount(5, 'data')
-await app.get('/posts/1').assertJsonPath('post.title', 'Hello')
-await app.get('/posts').assertJsonStructure(['data', 'meta'])
+await http.get('/posts').assertJson({ data: [] })
+await http.get('/posts').assertJsonCount(5, 'data')
+await http.get('/posts/1').assertJsonPath('post.title', 'Hello')
+await http.get('/posts').assertJsonStructure(['data', 'meta'])
 
 // Headers and redirects
-await app.get('/posts').assertHeader('content-type', 'application/json')
-await app.get('/old-page').assertRedirect('/new-page')
+await http.get('/posts').assertHeader('content-type', 'application/json')
+await http.get('/old-page').assertRedirect('/new-page')
 ```
 
 ## Authentication in Tests
 
-Use `actingAs()` to simulate an authenticated user without touching session or token logic:
+Use `actingAs()` to send requests as a user without going through the login flow:
 
 ```ts
 import { User } from '@/app/Models/User'
@@ -135,31 +128,31 @@ const user = await User.create({
 })
 
 // Authenticated requests
-await app.actingAs(user).get('/dashboard').assertOk()
-await app.actingAs(user).post('/posts', data).assertStatus(201)
+await http.actingAs(user).get('/dashboard').assertOk()
+await http.actingAs(user).post('/posts', data).assertStatus(201)
 
 // Without auth, protected routes reject
-await app.get('/dashboard').assertUnauthorized()
+await http.get('/dashboard').assertUnauthorized()
 ```
 
 ### Password hashing in tests
 
-You do not need to configure anything to keep password tests fast. `TestApp` sets `GUREN_TESTING=1`, and while that variable is set the default hasher uses cheap parameters: scrypt at N=1024 (Argon2id at 1 MiB and one iteration under `hasher: 'argon2'`). A production-strength hash costs over 100 ms, which is most of what a test like this spends:
+Password tests are fast with no setup. `TestApp` sets `GUREN_TESTING=1`, and while that variable is set the default hasher uses cheap parameters: scrypt at N=1024 (Argon2id at 1 MiB and one iteration under `hasher: 'argon2'`). A production-strength hash costs over 100 ms, which would be most of what a test like this spends:
 
 ```ts
 const user = await User.create({ email: 'ada@example.com', name: 'Ada', password: 'correct horse battery' })
-await app.post('/login', { email: 'ada@example.com', password: 'correct horse battery' }).assertRedirect('/')
+await http.post('/login', { email: 'ada@example.com', password: 'correct horse battery' }).assertRedirect('/')
 ```
 
-Your login test still verifies a real hash: verification reads the parameters stored in it, so a cheap hash verifies in tests and a production hash verifies too. Outside tests, `Hash.needsRehash()` reports a cheap hash as stale, so the rehash-on-login pattern from the [Encryption guide](./encryption.md) upgrades any row a test-mode process wrote. Nothing sets the variable in a deployed app.
+The login test still verifies a real hash, because verification reads the parameters stored in the hash itself. A cheap hash never survives into production either: outside tests, `Hash.needsRehash()` reports it as stale, and the rehash-on-login pattern from the [Encryption guide](./encryption.md) upgrades it. Nothing sets the variable in a deployed app.
 
 ## Testing JSON APIs
 
-For API endpoints, use `.json()` to set the appropriate headers and get JSON-focused assertions:
+For API endpoints, `.json()` sends JSON headers so the app answers with JSON, including its validation errors:
 
 ```ts
 test('API returns paginated posts', async () => {
-  await app.json().get('/api/posts')
+  await http.json().get('/api/posts')
     .assertOk()
     .assertJsonStructure(['data', 'meta'])
     .assertJsonCount(10, 'data')
@@ -167,26 +160,26 @@ test('API returns paginated posts', async () => {
 })
 
 test('API validates input', async () => {
-  await app.json().post('/api/posts', { title: '' })
+  await http.json().post('/api/posts', { title: '' })
     .assertStatus(422)
-    .assertJsonPath('errors.title.0', 'The title field is required.')
+    .assertJsonPath('errors.title.0', 'Too small: expected string to have >=1 characters')
 })
 ```
 
+The error body has the shape described in [Validation](./validation.md#form-validation-errors).
+
 ## Custom Request Headers
 
-Use `withHeaders()` / `withHeader()` to send headers on every request, handy
-for locale detection, API versioning, or bearer tokens. Like `actingAs()` and
-`json()`, they return a new `TestApp`, so variants compose freely:
+Use `withHeaders()` / `withHeader()` to send headers on every request: a locale, an API version, a bearer token. Like `actingAs()` and `json()`, they return a new `TestApp`, so variants compose:
 
 ```ts
 test('renders the English locale', async () => {
-  const en = app.withHeaders({ 'Accept-Language': 'en' })
+  const en = http.withHeaders({ 'Accept-Language': 'en' })
   await en.get('/').assertOk()
 })
 
 test('accepts an API token', async () => {
-  await app
+  await http
     .withHeader('Authorization', `Bearer ${token}`)
     .json()
     .get('/api/me/tasks')
@@ -198,7 +191,7 @@ test('accepts an API token', async () => {
 
 ### Test Database Isolation
 
-`bun test` sets `NODE_ENV=test` automatically. A fresh scaffold's `config/database.ts` uses that to keep tests off your development database entirely:
+`bun test` sets `NODE_ENV=test`, and a scaffolded `config/database.ts` uses it to point tests at a separate SQLite file:
 
 ```ts
 // config/database.ts
@@ -214,10 +207,18 @@ const database = createSqliteDatabase({
 })
 ```
 
-Tests read and write `./data/guren.test.db` by default, a separate file from `./data/guren.db`, so nothing a test creates ever leaks into the data you're looking at in the dev server. Override the test file itself with `TEST_DATABASE_URL` (for example, to give each parallel CI shard its own file); `DATABASE_URL` stays authoritative for every other environment. Both keys are declared in the scaffolded `config/env.ts`, and `context` carries their validated values when the app boots (see [Configuration](./configuration.md#the-database-connection)).
+| Environment | Database file | Override with |
+|-------------|---------------|---------------|
+| `bun test` | `./data/guren.test.db` | `TEST_DATABASE_URL` (for example, one file per parallel CI shard) |
+| Everything else | `./data/guren.db` | `DATABASE_URL` |
+
+Nothing a test creates shows up in the dev server's data. Both keys are declared in the scaffolded `config/env.ts`, and `context` carries their validated values when the app boots (see [Configuration](./configuration.md#the-database-connection)).
 
 > [!WARNING]
-> Scaffolds created before this branch existed write straight to `DATABASE_URL` (or `./data/guren.db`) regardless of `NODE_ENV`, so `bun test` pollutes the same database your dev server reads from. Retrofit it by replacing the `filename` option, and declare `DATABASE_URL` and `TEST_DATABASE_URL` in `config/env.ts` (an app without that file adds it first; see [Configuration](./configuration.md#apps-with-service-providers)):
+> Only the SQLite scaffold switches databases. An app created with `--db postgres` or `--db mysql` reads `DATABASE_URL` in tests too, so `resetDatabase()` in a test would empty your development database. Create a separate test database and run the tests against it, for example `DATABASE_URL=postgres://guren:guren@localhost:54322/guren_test bun test`.
+
+> [!WARNING]
+> Apps scaffolded with `create-guren-app` 1.1.0 or earlier write to `DATABASE_URL` (or `./data/guren.db`) whatever `NODE_ENV` is, so `bun test` writes into the database your dev server reads. To fix one, replace the `filename` option and declare `DATABASE_URL` and `TEST_DATABASE_URL` in `config/env.ts` (an app without that file adds it first; see [Configuration](./configuration.md#apps-with-service-providers)):
 >
 > ```diff
 > +import env from './env.js'
@@ -237,7 +238,7 @@ Tests read and write `./data/guren.test.db` by default, a separate file from `./
 
 ### Cleaning Up Between Tests
 
-For most suites, the separate test-database file is isolation enough. Reset it back to a clean slate in `beforeEach` using the `resetDatabase()` helper your `config/database.ts` already exports. It drops every table and re-applies migrations, the same end state `guren db:reset` leaves behind, so your tables are ready to query straight after:
+To start each test from an empty database (on SQLite, or with `DATABASE_URL` pointing at a test database), call the `resetDatabase()` helper your `config/database.ts` already exports in `beforeEach`. It drops every table and re-applies migrations, the same end state `guren db:reset` leaves, so the tables are ready to query straight after:
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'
@@ -260,7 +261,16 @@ describe('User Model', () => {
 })
 ```
 
-`@guren/testing` also ships `useTruncateTables(tables)` and `useDatabaseTransactions()` for finer-grained, per-test cleanup. `useTruncateTables()` registers a `beforeEach` hook that deletes each table's rows; `useDatabaseTransactions()` registers `beforeEach`/`afterEach` hooks that begin a transaction and roll it back after the test. Both operate on a connection you register up front with `setTestDatabase()`, matching this shape:
+### Per-test cleanup helpers
+
+`@guren/testing` also ships two finer-grained helpers. Most suites do not need them; `resetDatabase()` is simpler.
+
+| Helper | What it registers |
+|--------|-------------------|
+| `useTruncateTables(tables)` | A `beforeEach` hook that deletes every row of each listed table |
+| `useDatabaseTransactions()` | `beforeEach` / `afterEach` hooks that begin a transaction and roll it back after the test |
+
+Both run against a connection you register first with `setTestDatabase()`, in this shape:
 
 ```ts
 interface DatabaseConnection {
@@ -272,11 +282,16 @@ interface DatabaseConnection {
 }
 ```
 
-Guren's SQLite adapter doesn't hand you a ready-made `DatabaseConnection` (`getDatabase()` from `config/database.ts` resolves to the underlying Drizzle instance, not this interface), so using these helpers means writing a small adapter yourself and passing it to `setTestDatabase()` before your tests run. `useDatabaseTransactions()` specifically **must wrap the same connection your models write through**: it begins a transaction on `beforeEach` and rolls it back on `afterEach`, and a second, independently-opened connection to the same file won't see (or roll back) writes made via the first one. `useTruncateTables()` has no such requirement: a `DELETE FROM` on any connection to the same database file removes the rows your models see, since it commits immediately rather than participating in a shared transaction. Tables are cleared in list order, so on a connection that enforces foreign keys (every Postgres and MySQL connection, and the SQLite one `getDatabase()` returns) list each child table before its parent unless the foreign key cascades. If the adapter plumbing sounds like more than your suite needs, the `resetDatabase()` pattern above is simpler and sidesteps the whole question.
+Before you write that connection:
+
+- Guren does not hand you one. `getDatabase()` from `config/database.ts` returns the underlying Drizzle instance, so you write a small adapter and pass it to `setTestDatabase()` before the tests run.
+- `useDatabaseTransactions()` **must wrap the connection your models write through**. A second connection to the same file neither sees nor rolls back the first one's writes.
+- `useTruncateTables()` works through any connection to the same database, because each `DELETE FROM` commits immediately.
+- Tables are cleared in list order. On a connection that enforces foreign keys (every Postgres and MySQL connection, and the SQLite one `getDatabase()` returns), list each child table before its parent unless the foreign key cascades.
 
 ## Faking Services
 
-Real tests should not send actual emails, dispatch real events, or push jobs to a queue. `@guren/testing` ships a fake for each: `fakeEvent()`, `fakeMail()` and `fakeQueue()`. Bind them on the app your project exports with `app.container.fake()`, inside the test that needs them:
+Tests should not send real mail, run real listeners or push real jobs. `@guren/testing` ships a fake for each: `fakeEvent()`, `fakeMail()` and `fakeQueue()`. Bind one on the app your project exports with `app.container.fake()`, inside the test that needs it:
 
 ```ts
 import { beforeAll, test } from 'bun:test'
@@ -329,15 +344,19 @@ test('placing an order queues the processing job', async () => {
 })
 ```
 
-Each container key holds a manager (`events` an `EventManager`, `mail` a `MailManager`, `queue` a `QueueManager`), and each fake is one level below that, so it goes in wrapped:
+The example assumes an app created with `createApp({ auth })`, which checks CSRF tokens. `http.withCsrf()` fetches `/` once and returns a `TestApp` that sends the session cookie and CSRF token on every later request, so a `POST` passes the check the way a browser's would. In an app without `auth` nothing checks CSRF, `withCsrf()` throws because no token is issued, and you call `http.post()` directly.
 
-- `fakeEvent()` records through the manager it holds: bind `events.getManager()`. Nothing listens on that manager, so listeners do not run, and neither do the jobs or mail they would have started.
-- `fakeMail()` is a transport: register it on a real `MailManager` and bind the manager.
-- `fakeQueue()` is a driver: return it from a `createQueueManager()` factory and bind the manager.
+### Binding a fake
 
-`assertPushed` takes the payload type explicitly. A job class alone does not tell TypeScript its payload, so the predicate would receive `unknown`.
+Each container key holds a manager, and each fake sits one level below it, so it goes in wrapped:
 
-`fake()` returns a disposable, and `using` puts the app's own binding back when the test ends. Every test file that calls `fromApp()` shares one app instance, so a fake bound in `beforeAll` and never restored stays bound for the files that run after it. Bind fakes after `fromApp()` has booted the app, too: providers set up the real services during boot, and the fake event manager is not a full `EventManager`.
+| Key | The manager it holds | How to bind the fake |
+|-----|----------------------|----------------------|
+| `events` | `EventManager` | `fakeEvent()` records through its own manager: bind `events.getManager()` |
+| `mail` | `MailManager` | `fakeMail()` is a transport: register it on a real `MailManager` and bind the manager |
+| `queue` | `QueueManager` | `fakeQueue()` is a driver: return it from a `createQueueManager()` factory and bind the manager |
+
+With the event fake bound, listeners do not run, and neither do the jobs or mail they would have started.
 
 Binding the fake itself rather than a manager fails on first use, and the request answers 500:
 
@@ -346,6 +365,13 @@ Binding the fake itself rather than a manager fails on first use, and the reques
 | `fakeEvent()` as `events` | `this.make("events").emit is not a function` |
 | `fakeMail()` as `mail` | `manager.getDefaultFrom is not a function` |
 | `fakeQueue()` as `queue` | `manager.getDefaultDriverName is not a function` |
+
+Two rules about when to bind:
+
+- **Bind with `using` inside the test.** `fake()` returns a disposable, and `using` puts the app's own binding back when the test ends. Every test file that calls `fromApp()` shares one app instance, so a fake bound in `beforeAll` and never restored stays bound for the files that run after it.
+- **Bind after `fromApp()` has booted the app.** Providers resolve the real services during boot. A fake bound before that is handed to them in place of a full `EventManager`, and their setup fails.
+
+`assertPushed` takes the payload type explicitly. A job class alone does not tell TypeScript its payload, so the predicate would receive `unknown`.
 
 `setQueueDriver(fakeQueue().getDriver())` also intercepts `Job.dispatch()`, but it is deprecated since 2.23.0 and removed in 3.0.0.
 
@@ -397,28 +423,37 @@ All three also have `clear()`, for a fake kept across tests.
 ## Running Tests
 
 ```bash
-# Full test suite
+# The whole suite
 bun run test
 
-# Framework packages (Bun test runner)
-bun run test:bun
-
-# Example apps (Vitest)
-bun run test:examples
-
-# Single file
-bun test path/to/file.test.ts
+# One file
+bun test tests/HomeController.test.ts
 
 # Generate a test file
-bunx guren make:test posts/PostController --runner bun
+bunx guren make:test posts/PostController
 ```
 
-> [!NOTE]
-> Framework packages use Bun's native test runner (`bun:test`). Example apps and React components use Vitest with jsdom. Keep the runners separate to get fast feedback from Bun for framework code and realistic DOM behavior for SPA tests.
+`make:test` writes a `bun:test` file, or a Vitest one when the app has a `vitest.config.*` or depends on `vitest`. Pass `--runner bun` or `--runner vitest` to choose.
+
+## Testing a Controller Without the App (Vitest)
+
+`TestApp` covers most controller tests. If you add Vitest to test a controller in isolation, with its models mocked, `@guren/testing` has helpers for that:
+
+- `createControllerContext(url, init?)` builds the request context a controller reads.
+- `createControllerModuleMock()` is passed to `vi.mock('@guren/core', …)`. Its `Controller` extends the framework's own; `inertia()` renders without a booted app, and `make()` resolves from the context's values.
+- `createGurenControllerModule()` returns a lighter, standalone `Controller` stub that does not extend the framework's, for code that needs only `setContext`, `make`, `text`, `inertia` and `view`.
+- `readInertiaResponse(response)` normalizes an Inertia response to `{ format, payload, body }` for assertions.
+
+Two problems are specific to this setup:
+
+- `vi.mock is not a function` means Bun ran the file. Run Vitest files with `bunx vitest`, not `bun test`.
+- `ReferenceError: document is not defined` means a test that needs the DOM ran outside jsdom. Set the file's environment to `jsdom`.
 
 ### File uploads under jsdom
 
-Under Vitest's `jsdom` environment, a `File` posted inside a `FormData` body (for example through `createControllerContext(url, { method: 'POST', body: formData })` to an action that calls `this.file()`) never reaches the action. jsdom replaces the global `File` and `Blob` with its own classes, which are not the ones undici uses to encode and parse the multipart body. Depending on the Vitest and Node versions, the test times out, fails inside undici, or passes while `this.file()` returns `null` and the upload is dropped. Controller tests render no DOM, so switch the file to the Node environment with a comment on its first line:
+Under Vitest's `jsdom` environment, a `File` posted inside a `FormData` body never reaches the action: `this.file()` sees nothing. This happens when you pass `createControllerContext(url, { method: 'POST', body: formData })` to an action that reads an upload.
+
+The cause is that jsdom replaces the global `File` and `Blob` with its own classes, which Node's built-in `fetch` (undici) cannot encode into a multipart body. Depending on the Vitest and Node versions, the test times out, fails inside undici, or passes while `this.file()` returns `null`. Controller tests render no DOM, so switch the file to the Node environment with a comment on its first line:
 
 ```ts
 // @vitest-environment node
