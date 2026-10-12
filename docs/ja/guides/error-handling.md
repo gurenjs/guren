@@ -2,38 +2,74 @@
 
 Guren のエラー処理は、グローバルエラーハンドラーからコントローラー内での例外のキャッチまで、いくつかの層に分かれています。土台は Hono のエラー処理の仕組みで、ユーザーに見せるエラーは自由にカスタマイズできます。
 
-## グローバルエラーハンドラー
+## ExceptionHandler
 
-グローバルエラーハンドラーは Hono の `onError` メソッドで登録します。
-
-> 登録は `src/app.ts` で `createApp(...)` の直後、または `boot(hono)` コールバック内で行います。`app.boot()` の前に設定してください。
+リクエストの中で投げられた例外を何として報告し、クライアントに何を返すかは、`ExceptionHandler` が決めます。アプリは起動時にこれを 1 つ作り、Hono の `onError` に登録します。カスタマイズはサービスプロバイダーの `boot()` で行い、コンテナからそのインスタンスを受け取ります。
 
 ```ts
-import { createApp } from '@guren/core'
-import { HTTPException } from 'hono/http-exception'
+// app/Providers/ExceptionServiceProvider.ts
+import { ServiceProvider } from '@guren/core'
+import type { ExceptionHandler } from '@guren/core'
 
-const app = createApp()
-
-app.hono.onError((error, ctx) => {
-  console.error('未処理のエラー:', error)
-
-  // HTTP 例外を処理
-  if (error instanceof HTTPException) {
-    return ctx.json({
-      error: error.message,
-      status: error.status,
-    }, error.status)
+class PaymentDeclinedError extends Error {
+  constructor(readonly reason: string) {
+    super('Payment declined')
   }
+}
 
-  // その他のエラーを処理
-  const isDev = process.env.NODE_ENV !== 'production'
+export class ExceptionServiceProvider extends ServiceProvider {
+  boot(): void {
+    const handler = this.container.make<ExceptionHandler>('exception.handler')
 
-  return ctx.json({
-    error: isDev ? error.message : 'Internal Server Error',
-    ...(isDev && { stack: error.stack }),
-  }, 500)
-})
+    // エラー追跡サービスに送らない、想定内の失敗
+    handler.dontReport(PaymentDeclinedError)
+
+    // それ以外のすべての例外で実行される
+    handler.report((error) => {
+      console.error('[report]', error)
+    })
+
+    // 特定の例外クラスにだけ独自のレスポンスを返し、それ以外は既定の描画のまま
+    handler.render(PaymentDeclinedError, (error, ctx) =>
+      ctx.json({ message: error.message, reason: error.reason }, 402),
+    )
+  }
+}
 ```
+
+このプロバイダーは `createApp({ providers: [ExceptionServiceProvider] })` で登録します。
+
+| メソッド | 役割 |
+|---|---|
+| `report(callback)` | レポーターを追加します。`dontReport()` で除外していない例外ごとに、すべてのレポーターが実行されます。例外を投げたレポーターはログに記録され、ほかのレポーターはそのまま実行されます |
+| `dontReport(ErrorClass)` | そのクラスの例外ではレポーターを実行しません |
+| `render(ErrorClass, renderer)` | そのクラスの例外に独自のレスポンスを返します。登録した順に試し、最初に一致したものを使います |
+
+例外クラスとの一致は、`instanceof` かクラス名で判定します。そのため、別のコピーのパッケージから投げられた例外でも一致します。レポーターを 1 つも登録していなければ、5xx の例外はコンソールに出力されるので、本番の失敗が記録されずに終わることはありません。
+
+## Hono の `onError` を置き換える
+
+Hono の `onError` には ExceptionHandler が登録されます。登録はアプリの起動中、`boot(hono)` コールバックのあとに行われるので、`app.boot()` より前に `app.hono.onError()` で設定したハンドラーは置き換えられます。カスタマイズは、上の ExceptionHandler で行ってください。
+
+`onError` を完全に自分で扱いたい場合は、`ErrorServiceProvider` のサブクラスを登録します。アプリは組み込みのプロバイダーの代わりに、そのサブクラスを使います。
+
+```ts
+// app/Providers/AppErrorServiceProvider.ts
+import { ErrorServiceProvider } from '@guren/core'
+import type { Hono } from 'hono'
+
+export class AppErrorServiceProvider extends ErrorServiceProvider {
+  boot(): void {
+    const hono = this.container.make<Hono>('hono')
+    hono.onError((error, ctx) => {
+      const isDev = process.env.NODE_ENV !== 'production'
+      return ctx.json({ error: isDev ? error.message : 'Internal Server Error' }, 500)
+    })
+  }
+}
+```
+
+この方法では、`HttpException` や `ModelNotFoundException` のステータスを含め、ExceptionHandler の処理がすべて使われなくなります。必要がなければ `render()` を使ってください。
 
 ## HTTP 例外
 

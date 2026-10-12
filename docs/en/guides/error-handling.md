@@ -4,72 +4,72 @@ An exception thrown anywhere in a request ends up at the `ExceptionHandler`, whi
 
 ## ExceptionHandler
 
-The `ExceptionHandler` class provides a centralized place to handle all exceptions thrown by your application. Register it as a service provider or configure it during application boot:
+The `ExceptionHandler` decides what is reported and what the client sees for every exception a request throws. The app creates one at boot and installs it as Hono's `onError` handler. Customize it from a service provider's `boot()`, where the container hands you that instance:
 
 ```ts
-import { ExceptionHandler } from '@guren/core'
+// app/Providers/ExceptionServiceProvider.ts
+import { ServiceProvider } from '@guren/core'
+import type { ExceptionHandler } from '@guren/core'
 
-class AppExceptionHandler extends ExceptionHandler {
-  // Exceptions that should not be reported to your logging system
-  dontReport = [
-    'ValidationException',
-    'AuthenticationException',
-  ]
-
-  // Register custom exception reporting
-  register(): void {
-    this.reportable('DatabaseException', (error) => {
-      // Send to external error tracking service
-      errorTracker.captureException(error)
-    })
+class PaymentDeclinedError extends Error {
+  constructor(readonly reason: string) {
+    super('Payment declined')
   }
+}
 
-  // Customize the response for specific exceptions
-  render(error: Error, ctx: Context): Response {
-    if (error instanceof ValidationException) {
-      return ctx.json({
-        message: 'Validation failed',
-        errors: error.errors,
-      }, 422)
-    }
+export class ExceptionServiceProvider extends ServiceProvider {
+  boot(): void {
+    const handler = this.container.make<ExceptionHandler>('exception.handler')
 
-    return super.render(error, ctx)
+    // Expected failures that should not reach your error tracker
+    handler.dontReport(PaymentDeclinedError)
+
+    // Runs for every other exception
+    handler.report((error) => {
+      console.error('[report]', error)
+    })
+
+    // A response for one exception class; everything else keeps the default rendering
+    handler.render(PaymentDeclinedError, (error, ctx) =>
+      ctx.json({ message: error.message, reason: error.reason }, 402),
+    )
   }
 }
 ```
 
-## Global Error Handler
+Register the provider in `createApp({ providers: [ExceptionServiceProvider] })`.
 
-Register a global error handler using Hono's `onError` method on the underlying app:
+| Method | What it does |
+|---|---|
+| `report(callback)` | Adds a reporter. Every reporter runs for each exception not excluded by `dontReport()`; one that throws is logged and the others still run |
+| `dontReport(ErrorClass)` | Skips the reporters for that class |
+| `render(ErrorClass, renderer)` | Answers that class with your own response. Renderers are tried in registration order, and the first match wins |
 
-> Register handlers in `src/app.ts` right after `createApp(...)`, or inside the `boot(hono)` callback. Make sure it is set before `app.boot()`.
+A class matches by `instanceof` or by its name, so an exception from another copy of a package still matches. With no reporter registered, the handler logs 5xx exceptions to the console so a production failure is never silent.
+
+## Replacing Hono's `onError`
+
+The exception handler owns Hono's `onError` hook: it is installed while the app boots, after the `boot(hono)` callback runs. A handler you set with `app.hono.onError()` before `app.boot()` is therefore replaced, so customize the exception handler above instead.
+
+To take the hook over completely, register a subclass of `ErrorServiceProvider`. The app then uses it in place of the built-in one:
 
 ```ts
-import { createApp } from '@guren/core'
-import { HTTPException } from 'hono/http-exception'
+// app/Providers/AppErrorServiceProvider.ts
+import { ErrorServiceProvider } from '@guren/core'
+import type { Hono } from 'hono'
 
-const app = createApp()
-
-app.hono.onError((error, ctx) => {
-  console.error('Unhandled error:', error)
-
-  // Handle HTTP exceptions
-  if (error instanceof HTTPException) {
-    return ctx.json({
-      error: error.message,
-      status: error.status,
-    }, error.status)
+export class AppErrorServiceProvider extends ErrorServiceProvider {
+  boot(): void {
+    const hono = this.container.make<Hono>('hono')
+    hono.onError((error, ctx) => {
+      const isDev = process.env.NODE_ENV !== 'production'
+      return ctx.json({ error: isDev ? error.message : 'Internal Server Error' }, 500)
+    })
   }
-
-  // Handle all other errors
-  const isDev = process.env.NODE_ENV !== 'production'
-
-  return ctx.json({
-    error: isDev ? error.message : 'Internal Server Error',
-    ...(isDev && { stack: error.stack }),
-  }, 500)
-})
+}
 ```
+
+This skips everything the exception handler does, including the status of `HttpException` and `ModelNotFoundException`, so prefer `render()` unless you need that.
 
 ## Built-in Exception Classes
 
@@ -193,7 +193,7 @@ const app = createApp({
 })
 ```
 
-In production, the debug page is replaced with a generic error response that does not expose sensitive information. You can customize the production error page by overriding the `render()` method in your `ExceptionHandler`.
+In production, the debug page is replaced with a generic error response that does not expose sensitive information. To change the production response for a class of error, register a renderer with `render()` (see [ExceptionHandler](#exceptionhandler)).
 
 ## Controller Error Handling
 

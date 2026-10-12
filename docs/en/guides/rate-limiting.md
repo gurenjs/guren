@@ -228,14 +228,14 @@ import { createRedisClient, RedisRateLimitStore, RedisSlidingWindowRateLimitStor
 const redis = createRedisClient({ url: process.env.REDIS_URL })
 
 const limiter = createRateLimitMiddleware({
-  max: 60,
+  limit: 60,
   windowMs: 60_000,
   store: new RedisRateLimitStore(redis),
 })
 
 // Sliding-window variant for smoother limiting
 const sliding = createRateLimitMiddleware({
-  max: 60,
+  limit: 60,
   windowMs: 60_000,
   store: new RedisSlidingWindowRateLimitStore(redis),
 })

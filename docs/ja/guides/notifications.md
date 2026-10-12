@@ -441,6 +441,37 @@ class OrderConfirmation extends Notification {
 
 ## テスト
 
+### `container.fake()` を使う
+
+テストでは、通知マネージャーを差し替えられます。コンテナから `notifications` を取り出して送信するコードは、差し替えたマネージャーを通して送信します。差し替えは `_` のスコープを抜けると元に戻ります。
+
+```ts
+import { expect, test } from 'bun:test'
+import { MemoryChannel, NotificationManager } from '@guren/core'
+import type { Notifiable } from '@guren/core'
+import app from '@/src/app'
+import type { Order } from '@/app/Models/Order'
+import { OrderShipped } from '@/app/Notifications/OrderShipped'
+
+test('sends the shipping notification by mail', async () => {
+  const mail = new MemoryChannel()
+  using _ = app.container.fake('notifications', new NotificationManager({
+    channels: { mail, database: new MemoryChannel() },
+  }))
+
+  // テスト対象のコードの代わり。同じようにコンテナからマネージャーを取り出して送信する
+  const user: Notifiable = { id: 1, routeNotificationFor: () => 'ada@example.com' }
+  const order = { id: 7 } as Order
+  await app.container.make('notifications').send(user, new OrderShipped(order, 'ABC123'))
+
+  const sent = mail.getSentNotifications()
+  expect(sent).toHaveLength(1)
+  expect(sent[0].notification).toBeInstanceOf(OrderShipped)
+})
+```
+
+### マネージャーを直接使う
+
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'
 import {

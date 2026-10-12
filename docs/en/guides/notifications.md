@@ -483,23 +483,30 @@ class OrderConfirmation extends Notification {
 
 ### Using `container.fake()`
 
-Swap the notification manager in tests:
+Swap the notification manager in tests. Code that resolves `notifications` from the container, as in [Container Integration](#container-integration), then sends through the fake, and the swap is undone when `_` goes out of scope:
 
 ```ts
-// Access via app.container or this.container in providers
-import { NotificationManager, MemoryChannel } from '@guren/core'
+import { expect, test } from 'bun:test'
+import { MemoryChannel, NotificationManager } from '@guren/core'
+import type { Notifiable } from '@guren/core'
+import app from '@/src/app'
+import type { Order } from '@/app/Models/Order'
+import { OrderShipped } from '@/app/Notifications/OrderShipped'
 
-test('sends order notification', async () => {
-  const memoryChannel = new MemoryChannel()
-  const fakeNotifications = new NotificationManager({
-    channels: { memory: memoryChannel },
-  })
+test('sends the shipping notification by mail', async () => {
+  const mail = new MemoryChannel()
+  using _ = app.container.fake('notifications', new NotificationManager({
+    channels: { mail, database: new MemoryChannel() },
+  }))
 
-  using _ = container.fake('notifications', fakeNotifications)
+  // Stands in for the code under test, which resolves the manager the same way
+  const user: Notifiable = { id: 1, routeNotificationFor: () => 'ada@example.com' }
+  const order = { id: 7 } as Order
+  await app.container.make('notifications').send(user, new OrderShipped(order, 'ABC123'))
 
-  // Run code under test
-  const sent = memoryChannel.getSentNotifications()
+  const sent = mail.getSentNotifications()
   expect(sent).toHaveLength(1)
+  expect(sent[0].notification).toBeInstanceOf(OrderShipped)
 })
 ```
 
