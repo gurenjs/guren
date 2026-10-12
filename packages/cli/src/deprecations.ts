@@ -302,6 +302,21 @@ export const deprecations: Deprecation[] = [
       ),
   },
   {
+    id: 'debug-error-middleware',
+    what: 'debugErrorMiddleware(), which never sees an error in a Guren app',
+    since: '2.30.0',
+    removedIn: '3.0.0',
+    replacement:
+      "Remove it. Hono hands a handler's error to the app's onError, where the ExceptionHandler now renders "
+      + 'the debug page for a browser request while debug details are on.',
+    detect: async (cwd) =>
+      detectGurenImports(
+        cwd,
+        (specifier) => specifier === 'debugErrorMiddleware',
+        [...(await discoverAppConfigFiles(cwd)), ...(await collectFiles(resolve(cwd, 'routes'))), ...(await discoverTestFiles(cwd))],
+      ),
+  },
+  {
     ...DEPLOY_RUNTIME_ANALYSIS_DEPRECATION,
     what: "analyzeDeployRuntime() and judgeDeployRuntime() from '@guren/cli'",
     detect: async (cwd) =>

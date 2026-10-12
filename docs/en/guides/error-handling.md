@@ -178,9 +178,15 @@ app.hono.notFound((ctx) => {
 
 ## Debug Details
 
-While `NODE_ENV` is not `production`, the exception handler adds the exception's name and stack to the JSON body. In production those are dropped, the message of a 5xx that is not an `HttpException` becomes `Internal Server Error`, and a browser asking for HTML gets a generic error page instead. An `HttpException` keeps its own message in production, so do not put internal details in one.
+While `NODE_ENV` is not `production`, the exception handler shows what went wrong:
 
-To decide it another way, bind your own handler under `exception.handler` in a provider's `register()`. The framework adds its own renderers in `boot()`, so they attach to yours:
+- A browser request that ends in a 5xx gets the debug page: the exception's name and message, the stack trace, the request's method, URL and headers, and the `NODE_ENV`, Bun version and platform. A browser request is one that accepts `text/html` and is not an Inertia visit or an XHR.
+- An Inertia visit, an XHR or a JSON caller gets the JSON body with the exception's name and stack added.
+- A browser request that ends in a 4xx gets the plain error page with its message, as in production. A 4xx is the caller's mistake, and a stack trace would not help with it.
+
+In production the details are dropped, the message of a 5xx that is not an `HttpException` becomes `Internal Server Error`, and a browser gets the generic error page. An `HttpException` keeps its own message in production, so do not put internal details in one.
+
+To turn details on and off by another rule, bind your own handler under `exception.handler` in a provider's `register()`. The framework adds its own renderers in `boot()`, so they attach to yours:
 
 ```ts
 // app/Providers/ExceptionServiceProvider.ts
@@ -199,6 +205,10 @@ export class ExceptionServiceProvider extends ServiceProvider {
 ```
 
 `createApp()` has no `debug` option; this binding is where the choice is made.
+
+The debug page prints every request header, `Cookie` and `Authorization` included, so keep details off on any server other people can reach.
+
+`debugErrorMiddleware()` is deprecated and will be removed in 3.0.0. Its `catch` never sees an error (see [Error Middleware](#error-middleware)), and the exception handler now renders the same page, so remove it from your middleware. `bunx guren upgrade --check-only` lists the files that import it.
 
 ## Controller Error Handling
 
@@ -376,6 +386,7 @@ The exception handler already answers differently by environment, so most apps n
 |---|---|---|
 | Message of a 5xx | The exception's own | `Internal Server Error`, except an `HttpException`, which keeps its own |
 | Exception name and stack | Included in the JSON body | Omitted |
+| A browser's 5xx | The debug page | A generic error page |
 
 `debug` follows `NODE_ENV`; [Debug Details](#debug-details) shows how to decide it another way. To change what one class of error answers, register a renderer (see [ExceptionHandler](#exceptionhandler)).
 
