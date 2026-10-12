@@ -8,7 +8,7 @@ Middleware runs code around a request: before the controller action, after it, o
 | A route or route group, with `.middleware()` | Those routes | [Route Middleware](#route-middleware) |
 | A name, with `aliasMiddleware()` / `groupMiddleware()` | Routes that use the name | [Middleware Aliases](#middleware-aliases), [Middleware Groups](#middleware-groups) |
 
-An app created with `createApp({ auth })` already mounts the session, CSRF and auth-context middleware for every request; see [Built-in Helpers](#built-in-helpers).
+An app created with `createApp({ auth })` already mounts the session and CSRF middleware, and every app mounts the auth context (which `requireAuthenticated` reads); see [Built-in Helpers](#built-in-helpers).
 
 ## Global Middleware
 
@@ -46,18 +46,16 @@ Route middleware applies only to that route, or to every route inside a group. `
 
 ## Middleware Aliases
 
-Register a short name for a middleware function, then refer to it by name in your route files without importing the function each time:
+Register a short name for a middleware function, then refer to it by name in your route files without importing the function each time. `requireAdmin` here is middleware the app defines itself (see [Writing Custom Middleware](#writing-custom-middleware)):
 
 ```ts
 import { Router, requireAuthenticated } from '@guren/core'
 import { requireAdmin } from '@/app/Http/middleware/admin'
-import { csrfProtection } from '@/app/Http/middleware/csrf'
 
 export function registerWebRoutes(baseRouter: Router): void {
   const router = baseRouter
     .aliasMiddleware('auth', requireAuthenticated())
     .aliasMiddleware('admin', requireAdmin())
-    .aliasMiddleware('csrf', csrfProtection())
 }
 ```
 
@@ -70,32 +68,30 @@ Once registered, use the alias anywhere middleware is accepted:
 
 ```ts
 router.get('/dashboard', [DashboardController, 'index']).middleware('auth')
-router.post('/settings', [SettingsController, 'update']).middleware('auth', 'csrf')
+router.post('/settings', [SettingsController, 'update']).middleware('auth', 'admin')
 ```
 
-Aliases also make middleware visible to `guren audit`, which reports a route's middleware by name. It recognizes the framework's guards (`requireAuthenticated()` and `requireGuest()`) either way, but any other middleware passed as a bare function is invisible to it.
+Aliases also make middleware visible to `guren audit`, which reports a route's middleware by name. It recognizes the framework's guards and authorization middleware either way, but your own middleware passed as a bare function is invisible to it.
 
 ## Middleware Groups
 
-A group bundles several aliases under one name, for stacks that run together. Every member must already be a registered alias:
+A group bundles several aliases under one name, for stacks that run together. Every member must be a registered alias or another group:
 
 ```ts
-const router = new Router()
+const router = baseRouter
   .aliasMiddleware('auth', requireAuthenticated())
-  .aliasMiddleware('session', createSessionMiddleware())
-  .aliasMiddleware('csrf', createCsrfMiddleware())
+  .aliasMiddleware('admin', requireAdmin())
   .aliasMiddleware('throttle', createRateLimitMiddleware({ limit: 60, windowMs: 60_000 }))
-  .groupMiddleware('web', ['session', 'csrf'])
+  .groupMiddleware('backoffice', ['auth', 'admin'])
   .groupMiddleware('api', ['throttle'])
 ```
 
 Apply a group to a set of routes with `router.middleware()`:
 
 ```ts
-router.middleware('web').group((web) => {
-  web.get('/', [HomeController, 'index'])
-  web.get('/about', [PagesController, 'about'])
-  web.get('/contact', [PagesController, 'contact'])
+router.middleware('backoffice').group((backoffice) => {
+  backoffice.get('/admin', [AdminController, 'index'])
+  backoffice.get('/admin/users', [AdminUserController, 'index'])
 })
 
 router.middleware('api').group((api) => {
@@ -107,9 +103,9 @@ router.middleware('api').group((api) => {
 Groups and individual aliases combine:
 
 ```ts
-router.middleware('web', 'auth').group((group) => {
-  group.get('/profile', [ProfileController, 'show'])
-  group.put('/profile', [ProfileController, 'update'])
+router.middleware('api', 'auth').group((group) => {
+  group.get('/api/me', [ProfileController, 'show'])
+  group.put('/api/me', [ProfileController, 'update'])
 })
 ```
 
@@ -145,7 +141,7 @@ flowchart LR
   Written --> Actual
 ```
 
-When relative order matters, register every piece as an alias. The last two steps cannot be reordered: a schema attached to the route is always validated after all middleware, immediately before the action.
+When relative order matters, register every piece as an alias. On a controller action, the last two steps cannot be reordered: a schema attached to the route is validated after all middleware, immediately before the action.
 
 ## Built-in Helpers
 
@@ -154,6 +150,8 @@ When relative order matters, register every piece as an alias. The last two step
 | `defineMiddleware` | Types a Hono middleware function for Guren | — |
 | `createSessionMiddleware` | Attaches a session to each request | With `createApp({ auth })` |
 | `createCsrfMiddleware` | Checks the CSRF token on state-changing requests | With `createApp({ auth })` |
+
+To opt out of the automatic session or CSRF middleware, pass `auth: { autoSession: false }` or `auth: { autoCsrf: false }`.
 | `attachAuthContext` | Puts the auth context on each request | Always |
 | `requireAuthenticated` / `requireGuest` | Let only signed-in users / only guests through | No: add them to routes |
 | `createRateLimitMiddleware` | Limits requests per client | No: add it to routes |

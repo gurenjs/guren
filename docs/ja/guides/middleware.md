@@ -8,7 +8,7 @@
 | ルートやルートグループ（`.middleware()`） | そのルート | [ルートミドルウェア](#ルートミドルウェア) |
 | 名前（`aliasMiddleware()` / `groupMiddleware()`） | その名前を使うルート | [ミドルウェアエイリアス](#ミドルウェアエイリアス)、[ミドルウェアグループ](#ミドルウェアグループ) |
 
-`createApp({ auth })` で作ったアプリでは、セッション、CSRF、認証コンテキストのミドルウェアがすでにすべてのリクエストにマウントされています（[ビルトインヘルパー](#ビルトインヘルパー)を参照）。
+`createApp({ auth })` で作ったアプリでは、セッションと CSRF のミドルウェアがすでにすべてのリクエストにマウントされています。認証コンテキスト（`requireAuthenticated` が読むもの）は、どのアプリにもマウントされます（[ビルトインヘルパー](#ビルトインヘルパー)を参照）。
 
 ## グローバルミドルウェア
 
@@ -46,18 +46,16 @@ export function registerWebRoutes(router: Router): void {
 
 ## ミドルウェアエイリアス
 
-ミドルウェアの関数に短い名前を付けて登録しておくと、ルートファイルでは関数を毎回 import せずに名前で指定できます。
+ミドルウェアの関数に短い名前を付けて登録しておくと、ルートファイルでは関数を毎回 import せずに名前で指定できます。例の `requireAdmin` は、アプリが自分で定義したミドルウェアです（[カスタムミドルウェアを書く](#カスタムミドルウェアを書く)を参照）。
 
 ```ts
 import { Router, requireAuthenticated } from '@guren/core'
 import { requireAdmin } from '@/app/Http/middleware/admin'
-import { csrfProtection } from '@/app/Http/middleware/csrf'
 
 export function registerWebRoutes(baseRouter: Router): void {
   const router = baseRouter
     .aliasMiddleware('auth', requireAuthenticated())
     .aliasMiddleware('admin', requireAdmin())
-    .aliasMiddleware('csrf', csrfProtection())
 }
 ```
 
@@ -70,32 +68,30 @@ export function registerWebRoutes(baseRouter: Router): void {
 
 ```ts
 router.get('/dashboard', [DashboardController, 'index']).middleware('auth')
-router.post('/settings', [SettingsController, 'update']).middleware('auth', 'csrf')
+router.post('/settings', [SettingsController, 'update']).middleware('auth', 'admin')
 ```
 
-エイリアスで登録したミドルウェアは、`guren audit` の報告にも名前で表示されます。フレームワークのガード（`requireAuthenticated()` と `requireGuest()`）はどちらの渡し方でも認識されますが、それ以外のミドルウェアを関数のまま渡すと `guren audit` からは見えません。
+エイリアスで登録したミドルウェアは、`guren audit` の報告にも名前で表示されます。フレームワークのガードと認可のミドルウェアはどちらの渡し方でも認識されますが、自分で書いたミドルウェアを関数のまま渡すと `guren audit` からは見えません。
 
 ## ミドルウェアグループ
 
-グループは、いっしょに使う複数のエイリアスを 1 つの名前にまとめたものです。グループに入れるものは、すべて登録済みのエイリアスである必要があります。
+グループは、いっしょに使う複数のエイリアスを 1 つの名前にまとめたものです。グループには、登録済みのエイリアスか別のグループだけを入れられます。
 
 ```ts
-const router = new Router()
+const router = baseRouter
   .aliasMiddleware('auth', requireAuthenticated())
-  .aliasMiddleware('session', createSessionMiddleware())
-  .aliasMiddleware('csrf', createCsrfMiddleware())
+  .aliasMiddleware('admin', requireAdmin())
   .aliasMiddleware('throttle', createRateLimitMiddleware({ limit: 60, windowMs: 60_000 }))
-  .groupMiddleware('web', ['session', 'csrf'])
+  .groupMiddleware('backoffice', ['auth', 'admin'])
   .groupMiddleware('api', ['throttle'])
 ```
 
 グループをまとめてルートに付けるには `router.middleware()` を使います。
 
 ```ts
-router.middleware('web').group((web) => {
-  web.get('/', [HomeController, 'index'])
-  web.get('/about', [PagesController, 'about'])
-  web.get('/contact', [PagesController, 'contact'])
+router.middleware('backoffice').group((backoffice) => {
+  backoffice.get('/admin', [AdminController, 'index'])
+  backoffice.get('/admin/users', [AdminUserController, 'index'])
 })
 
 router.middleware('api').group((api) => {
@@ -107,9 +103,9 @@ router.middleware('api').group((api) => {
 グループと個別のエイリアスは組み合わせられます。
 
 ```ts
-router.middleware('web', 'auth').group((group) => {
-  group.get('/profile', [ProfileController, 'show'])
-  group.put('/profile', [ProfileController, 'update'])
+router.middleware('api', 'auth').group((group) => {
+  group.get('/api/me', [ProfileController, 'show'])
+  group.put('/api/me', [ProfileController, 'update'])
 })
 ```
 
@@ -122,7 +118,7 @@ router.middleware('web', 'auth').group((group) => {
 3. ルートの `body`、`params`、`query` スキーマの検証
 4. コントローラーのアクション
 
-名前で指定したものが関数より先に動く規則は、1 回の `.middleware()` の中だけでなく、グループをまたいでも同じです。そのため、外側のグループに書いたインラインハンドラーは、内側のグループの名前付きミドルウェアより**後**に実行され、コードの見た目とは逆の順になります。
+名前で指定したものが関数より先に動く規則は、1 回の `.middleware()` の中でも、グループをまたいでも同じです。そのため、外側のグループに書いたインラインハンドラーは、内側のグループの名前付きミドルウェアより**後**に実行され、コードの見た目とは逆の順になります。
 
 ```mermaid
 flowchart LR
@@ -145,7 +141,7 @@ flowchart LR
   Written --> Actual
 ```
 
-前後関係が問題になる場合は、すべてをエイリアスとして登録してください。最後の 2 段は並べ替えられません。ルートに付けたスキーマは、すべてのミドルウェアが終わったあと、アクションの直前に必ず検証されます。
+前後関係が問題になる場合は、すべてをエイリアスとして登録してください。コントローラーのアクションでは最後の 2 段は並べ替えられず、ルートに付けたスキーマはすべてのミドルウェアが終わったあと、アクションの直前に検証されます。
 
 ## ビルトインヘルパー
 
@@ -154,13 +150,15 @@ flowchart LR
 | `defineMiddleware` | Hono のミドルウェア関数に Guren 用の型を付ける | — |
 | `createSessionMiddleware` | 各リクエストにセッションを付ける | `createApp({ auth })` のとき |
 | `createCsrfMiddleware` | 状態を変えるリクエストの CSRF トークンを検査する | `createApp({ auth })` のとき |
+
+セッションや CSRF のミドルウェアを自動でマウントさせたくない場合は、`auth: { autoSession: false }` や `auth: { autoCsrf: false }` を渡します。
 | `attachAuthContext` | 各リクエストに認証コンテキストを付ける | 常に |
 | `requireAuthenticated` / `requireGuest` | ログイン済みのユーザーだけ／ゲストだけを通す | なし（ルートに付ける） |
 | `createRateLimitMiddleware` | クライアントごとのリクエスト数を制限する | なし（ルートに付ける） |
 
 ### `createSessionMiddleware`
 
-リクエストのコンテキストにセッションを付けます。セッション ID は署名付きの Cookie で受け渡し、データはストアを渡さなければメモリ（`MemorySessionStore`）に保存します。自分でマウントするのは、`auth` オプションを使わないアプリの場合だけです。
+リクエストのコンテキストにセッションを付けます。セッション ID は署名付きの Cookie で受け渡し、データはストアを渡さなければメモリ（`MemorySessionStore`）に保存します。`auth` オプションを使うアプリでは自動でマウントされるので、自分でマウントする必要はありません。
 
 ```ts
 import { createSessionMiddleware } from '@guren/core'
@@ -189,11 +187,11 @@ router.middleware('auth').group((auth) => {
 })
 ```
 
-`redirectTo` が効くのはブラウザーからのリクエストだけです。エージェントのツール呼び出し（[エージェントインターフェース](./agent-interface.md)を参照）はリダイレクトをたどれないので、どちらのガードも JSON で拒否を返します。ステータスは `requireAuthenticated` が `401`、`requireGuest` が `403` で、`status` を渡した場合はその値です。このとき、`redirectTo` と一緒に設定した `responseFactory` も使われません。
+`redirectTo` はブラウザーからのリクエストにだけ効きます。エージェントのツール呼び出し（[エージェントインターフェース](./agent-interface.md)を参照）はリダイレクトをたどれないので、どちらのガードも JSON で拒否を返します。ステータスは `requireAuthenticated` が `401`、`requireGuest` が `403` で、`status` を渡した場合はその値です。このとき、`redirectTo` と一緒に設定した `responseFactory` も使われません。
 
 ### CSRF 保護
 
-CSRF ミドルウェアは、状態を変えるリクエスト（POST、PUT、PATCH、DELETE）のトークンを検査します。`createApp({ auth })` がすべてのリクエストにマウントするので、手で付けるのは `auth` オプションを使わないアプリの場合だけです。
+CSRF ミドルウェアは、状態を変えるリクエスト（POST、PUT、PATCH、DELETE）のトークンを検査します。`createApp({ auth })` がすべてのリクエストにマウントするので、手で付ける必要があるのは `auth` オプションを使わないアプリです。
 
 ```ts
 const router = new Router().aliasMiddleware('csrf', createCsrfMiddleware())
