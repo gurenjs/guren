@@ -196,33 +196,7 @@ const errors = formatValidationErrors(result.error, '入力内容を確認して
 
 ## エラーミドルウェア
 
-エラー処理をミドルウェアにしておけば、いろいろな場所で使い回せます。
-
-```ts
-import { defineMiddleware } from '@guren/core'
-import { HTTPException } from 'hono/http-exception'
-
-export const errorHandler = defineMiddleware(async (ctx, next) => {
-  try {
-    await next()
-  } catch (error) {
-    if (error instanceof HTTPException) {
-      throw error // HTTP 例外はグローバルハンドラーに任せる
-    }
-
-    // 予期しないエラーをログ出力
-    console.error('予期しないエラー:', error)
-
-    // 汎用エラーレスポンスを返す
-    return ctx.json({
-      error: '問題が発生しました',
-    }, 500)
-  }
-})
-
-// グローバルに登録
-app.use('*', errorHandler)
-```
+ミドルウェアでは、後ろのハンドラーが投げた例外を捕まえられません。Hono は例外が投げられたその場で `onError`(つまり ExceptionHandler)に渡すので、`next()` を `try { await next() } catch` で囲んでも、その `catch` には届きません。共通のエラー処理はレポーターやレンダラーに書き([ExceptionHandler](#exceptionhandler) を参照)、`try`/`catch` は[コントローラーでのエラーハンドリング](#コントローラーでのエラーハンドリング)のように、直接呼び出すコードに使ってください。
 
 ## Inertia エラーページ
 
@@ -376,27 +350,31 @@ ExceptionHandler は、環境に応じてすでに返すものを変えている
 | 5xx のメッセージ | 例外のメッセージそのまま | `Internal Server Error` |
 | 例外の名前とスタックトレース | JSON の本文に含める | 含めない |
 
-`debug` の既定値は `NODE_ENV !== 'production'` で、`createApp({ debug })` で上書きできます。特定のクラスの例外への応答を変えたいときは、レンダラーを登録してください([ExceptionHandler](#exceptionhandler) を参照)。
+`debug` は `NODE_ENV` で決まります。別の基準で決めたいときは、[デバッグ情報](#デバッグ情報)を参照してください。特定のクラスの例外への応答を変えたいときは、レンダラーを登録してください([ExceptionHandler](#exceptionhandler) を参照)。
 
-### デバッグページ
+### デバッグ情報
 
-開発環境では、スタックトレースやリクエスト情報を載せた詳しいデバッグページが自動で表示されます。表示するかどうかは、`createApp()` の `debug` オプションで切り替えます。
+`NODE_ENV` が `production` でない間、ExceptionHandler は 5xx のメッセージをそのまま返し、JSON の本文に例外の名前とスタックトレースを加えます。本番環境ではこれらを省き、HTML を求めるブラウザには汎用のエラーページを返します。
+
+この判定を変えたいときは、プロバイダーの `register()` で自分のハンドラーを `exception.handler` に登録します。フレームワークは自分のレンダラーを `boot()` で追加するので、それらも登録したハンドラーに付きます。
 
 ```ts
-import { createApp } from '@guren/core'
+// app/Providers/ExceptionServiceProvider.ts
+import { ServiceProvider, createExceptionHandler } from '@guren/core'
 
-const app = createApp({
-  debug: process.env.NODE_ENV !== 'production',
-})
+export class ExceptionServiceProvider extends ServiceProvider {
+  register(): void {
+    this.container.instance('exception.handler', createExceptionHandler({
+      // NODE_ENV がちょうど 'development' のときだけ詳細を出す
+      isDebug: () => process.env.NODE_ENV === 'development',
+    }))
+  }
+
+  // boot() は上の ExceptionHandler の節と同じ
+}
 ```
 
-デバッグページには次の情報が載ります。
-- エラーメッセージとスタックトレース
-- リクエスト情報（メソッド、パス、ヘッダー）
-- 登録済みのミドルウェアとルート
-- 環境変数（機密情報は自動でマスク）
-
-本番環境では `debug: false`（デフォルト）にして、内部の情報が外に漏れないようにしてください。
+`createApp()` には `debug` オプションはなく、判定はこの登録で決まります。
 
 ## ベストプラクティス
 

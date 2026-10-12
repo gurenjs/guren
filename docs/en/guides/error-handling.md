@@ -176,26 +176,29 @@ app.hono.notFound((ctx) => {
 })
 ```
 
-## Debug Error Page
+## Debug Details
 
-In development, Guren renders a detailed error page when an unhandled exception occurs. The debug page includes:
+While `NODE_ENV` is not `production`, the exception handler keeps a 5xx's own message and adds the exception's name and stack to the JSON body. In production those are dropped, and a browser asking for HTML gets a generic error page instead.
 
-- The exception message and class name
-- A full stack trace with source file links
-- The request details (method, URL, headers)
-- Environment and route information
-
-The debug page is enabled automatically when `NODE_ENV` is not set to `production`. To customize its behavior:
+To decide it another way, bind your own handler under `exception.handler` in a provider's `register()`. The framework adds its own renderers in `boot()`, so they attach to yours:
 
 ```ts
-import { createApp } from '@guren/core'
+// app/Providers/ExceptionServiceProvider.ts
+import { ServiceProvider, createExceptionHandler } from '@guren/core'
 
-const app = createApp({
-  debug: process.env.NODE_ENV !== 'production',
-})
+export class ExceptionServiceProvider extends ServiceProvider {
+  register(): void {
+    this.container.instance('exception.handler', createExceptionHandler({
+      // Details only when NODE_ENV is exactly 'development'
+      isDebug: () => process.env.NODE_ENV === 'development',
+    }))
+  }
+
+  // boot() as in the ExceptionHandler section above
+}
 ```
 
-In production, the debug page is replaced with a generic error response that does not expose sensitive information. To change the production response for a class of error, register a renderer with `render()` (see [ExceptionHandler](#exceptionhandler)).
+`createApp()` has no `debug` option; this binding is where the choice is made.
 
 ## Controller Error Handling
 
@@ -258,33 +261,7 @@ const errors = formatValidationErrors(result.error, 'Please check your input')
 
 ## Error Middleware
 
-Create reusable error handling middleware:
-
-```ts
-import { defineMiddleware } from '@guren/core'
-import { HTTPException } from 'hono/http-exception'
-
-export const errorHandler = defineMiddleware(async (ctx, next) => {
-  try {
-    await next()
-  } catch (error) {
-    if (error instanceof HTTPException) {
-      throw error // Let the global handler deal with HTTP exceptions
-    }
-
-    // Log unexpected errors
-    console.error('Unexpected error:', error)
-
-    // Return a generic error response
-    return ctx.json({
-      error: 'Something went wrong',
-    }, 500)
-  }
-})
-
-// Register globally
-app.use('*', errorHandler)
-```
+A middleware cannot catch what a later handler throws. Hono hands the exception to `onError`, which is the exception handler, at the point it is thrown, so a `try { await next() } catch` around `next()` never sees it. Put shared error logic in a reporter or a renderer (see [ExceptionHandler](#exceptionhandler)), and keep `try`/`catch` for code you call directly, as in [Controller Error Handling](#controller-error-handling).
 
 ## Inertia Error Pages
 
@@ -400,7 +377,7 @@ The exception handler already answers differently by environment, so most apps n
 | Message of a 5xx | The exception's own | `Internal Server Error` |
 | Exception name and stack | Included in the JSON body | Omitted |
 
-`debug` defaults to `NODE_ENV !== 'production'`, and `createApp({ debug })` overrides it, as [Debug Error Page](#debug-error-page) shows. To change what one class of error answers, register a renderer (see [ExceptionHandler](#exceptionhandler)).
+`debug` follows `NODE_ENV`; [Debug Details](#debug-details) shows how to decide it another way. To change what one class of error answers, register a renderer (see [ExceptionHandler](#exceptionhandler)).
 
 ## Best Practices
 
