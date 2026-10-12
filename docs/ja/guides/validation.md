@@ -10,7 +10,7 @@
 |------|----------|----------------|
 | [コントローラーのヘルパー](#コントローラーバリデーションヘルパー) | 通常はこれ。コントローラーのアクションの中で検証する | `this.validateBody()` などの戻り値 |
 | [ルートコントラクト](#ルートコントラクトによる検証) | ルートの型を codegen、OpenAPI、エージェントのツールにも渡したい | `this.validated('route.name')` |
-| [ミドルウェア](#ミドルウェアバリデーション) | ハンドラーがインラインの関数である。またはスキーマがリクエストによって変わる | `getValidatedData(ctx)` |
+| [ミドルウェア](#ミドルウェアバリデーション) | ハンドラーがインラインの関数のときや、リクエストによってスキーマを変えたいとき | `getValidatedData(ctx)` |
 | [`validate()` / `validateSafe()`](#手動バリデーション) | 検証するデータがリクエストから来ない（ジョブ、コンソールコマンド、スクリプト） | 戻り値 |
 
 Laravel から移行したコード向けに、クラスで書く `FormRequest` の層も残っています。非推奨なので、新しく書く検証には上の 4 つのどれかを使ってください。
@@ -107,7 +107,7 @@ const FilterQuerySchema = z.object({
 
 ## ルートコントラクトによる検証
 
-`params`、`query`、`body` のスキーマを宣言したルートでは、ハンドラーがコントローラーのアクションでも、動く前に入力が検証されます。アクションの中でスキーマを書き直す必要はなく、パース済みの値を `this.validated()` で読み出します。
+ルートに `params`、`query`、`body` のスキーマを宣言しておくと、ハンドラーを呼ぶ前に入力が検証されます。ハンドラーがコントローラーのアクションでも同じです。アクションの中でスキーマを書き直す必要はなく、パース済みの値を `this.validated()` で読み出します。
 
 ```ts
 router.post('/posts', { name: 'posts.store', body: StorePostSchema }, [PostsController, 'store'])
@@ -121,102 +121,7 @@ export default class PostsController extends Controller {
 }
 ```
 
-コントローラーのアクションでは、検証に失敗するとヘルパーと同じ `ValidationException`（422）が投げられるので、Inertia のフォームは手を加えずにエラーを表示できます。ハンドラーがインラインの関数のルートは、ミドルウェアと同じ形の 422 をその場で返します（形は下の表を参照）。詳しくは[検証済み入力の読み取り](./routing.md#検証済み入力の読み取り)を参照してください。
-
-## フォームバリデーションエラー
-
-エラーの形は、検証した場所によって次のように異なります。
-
-| 発生元 | 形 | 中身 |
-|--------|----|------|
-| `ValidationException`、JSON リクエスト | `{ message, errors: { [key]: string[] } }`、422 | フィールドごとの全メッセージ |
-| `ValidationException`、Inertia リクエスト | ページの `errors` prop：`{ [key]: string }` | フィールドごとの最初のメッセージ |
-| `this.validateBodySafe()` など | `{ success: false, errors: { [key]: string } }` | フィールドごとの最初のメッセージ |
-| `validateRequest()`、`validateSafe()`、インラインのハンドラーのコントラクト | `{ errors: { [key]: string } }` | トップレベルのフィールドごとの最初のメッセージ |
-
-ネストしたフィールドのキーは、ヘルパーとコントラクトの `body` では完全なパス（`address.postalCode`）になります。ミドルウェア、`validateSafe()`、コントラクトの `params` と `query` ではトップレベルのフィールド名（`address`）になり、どのフィールドにも結び付かないエラーには `message` というキーを使います。
-
-### JSON リクエスト
-
-JSON や API のリクエストで `ValidationException` が投げられると、次の 422 を返します。
-
-```json
-{
-  "message": "The given data was invalid.",
-  "errors": {
-    "email": ["Invalid email address"],
-    "password": ["Too small: expected string to have >=8 characters"]
-  }
-}
-```
-
-### Inertia リクエストの自動ハンドリング
-
-Inertia のリクエスト（`X-Inertia` ヘッダー付き）には JSON を返さず、Laravel と同じように次の順で処理します。
-
-1. エラーを次のリクエストまでの一度だけ保持します。
-2. 直前のページへ `303` でリダイレクトします。
-3. そのページを読み込むと、エラーが共有 props の `errors` に入ります。メッセージはフィールドごとに 1 つです。
-
-```tsx
-function Login({ errors }: { errors?: Record<string, string> }) {
-  return (
-    <form>
-      <input name="email" />
-      {errors?.email && <span className="error">{errors.email}</span>}
-    </form>
-  )
-}
-```
-
-`validateBody`、`validateQuery`、`validateParams`、ルートコントラクトの失敗にも、自分のコードで投げた `ValidationException.withMessages(...)` にも、同じ処理が適用されます。
-
-エラーの保持には、アプリにセッションがあればセッションを使い（`createApp({ auth })` でマウントされます）、なければ有効期限の短い Cookie を使います。そのため、作ったばかりのアプリでもエラーは表示されます。リダイレクト先は `Referer` ヘッダーで、ヘッダーがなければ `/` です。挙動を変えたい場合は、`ValidationException` 用のレンダラーを登録してください（[エラーハンドリング](./error-handling.md)を参照）。登録したレンダラーが組み込みのものより優先されます。
-
-### Inertia での表示
-
-リダイレクトせずに同じレスポンスでエラーを表示したいときは、`Safe` の付いたヘルパーを使い、戻り値の `errors` をページに渡します。prop の型を `ValidationErrors<T>` にしておくと、コントローラーとコンポーネントで同じエラーの型を共有できます。
-
-```ts
-import { type ValidationErrors } from '@guren/core'
-import { pages } from '@/.guren/pages.gen'
-
-type CreateUserFields = 'email' | 'password'
-type CreateUserProps = {
-  errors?: ValidationErrors<CreateUserFields>
-}
-
-async store() {
-  const result = await this.validateBodySafe(schema)
-  if (!result.success) {
-    return this.inertia<CreateUserProps>(pages.users.Create, {
-      errors: result.errors,
-    })
-  }
-
-  await User.create(result.data)
-  return this.redirect('/users')
-}
-```
-
-```tsx
-import type { PageProps } from '@guren/inertia-client'
-import { pages } from '@/.guren/pages.gen'
-
-type Props = PageProps<typeof pages.users.Create>
-
-function CreateUser({ errors }: Props) {
-  return (
-    <form>
-      <input name="email" />
-      {errors?.email && <span className="error">{errors.email}</span>}
-
-      <input name="password" type="password" />
-      {errors?.password && <span className="error">{errors.password}</span>}
-    </form>
-  )
-}
-```
+コントローラーのアクションで検証に失敗すると、ヘルパーと同じ `ValidationException`（422）が投げられます。そのため、Inertia のフォームでは手を加えずにエラーを表示できます。ハンドラーがインラインの関数のルートは、ミドルウェアと同じ形の 422 をその場で返します（[フォームバリデーションエラー](#フォームバリデーションエラー)を参照）。詳しくは[検証済み入力の読み取り](./routing.md#検証済み入力の読み取り)を参照してください。
 
 ## ミドルウェアバリデーション
 
@@ -320,6 +225,101 @@ if (result.success) {
 }
 ```
 
+## フォームバリデーションエラー
+
+エラーの形は、検証した場所によって次のように異なります。「ネストのキー」の列は、`address.postalCode` で失敗したときのキーです。
+
+| 発生元 | 形 | キーあたりのメッセージ | ネストのキー |
+|--------|----|------------------------|--------------|
+| ヘルパーとコントラクトの `body`、JSON リクエスト | `{ message, errors: { [key]: string[] } }`、422 | すべて | `address.postalCode` |
+| コントラクトの `params` / `query`、JSON リクエスト | `{ message, errors: { [key]: string[] } }`、422 | 1 つ | `address` |
+| すべての `ValidationException`、Inertia リクエスト | ページの `errors` prop：`{ [key]: string }` | 1 つ | 投げたときのまま |
+| `this.validateBodySafe()` など | `{ success: false, errors: { [key]: string } }` | 1 つ | `address.postalCode` |
+| `validateRequest()`、`validateSafe()`、インラインのハンドラーのコントラクト | `{ errors: { [key]: string } }` | 1 つ | `address` |
+
+キーがトップレベルのフィールド名になる場所では、どのフィールドにも結び付かないエラーに `message` というキーが付きます。
+
+### JSON リクエスト
+
+JSON や API のリクエストで `ValidationException` が投げられると、次の 422 を返します。
+
+```json
+{
+  "message": "The given data was invalid.",
+  "errors": {
+    "email": ["Invalid email address"],
+    "password": ["Too small: expected string to have >=8 characters"]
+  }
+}
+```
+
+### Inertia リクエストの自動ハンドリング
+
+Inertia のリクエスト（`X-Inertia` ヘッダー付き）には JSON を返さず、次の順で処理します。
+
+1. エラーを次のリクエストまでの一度だけ保持します。
+2. 直前のページへ `303` でリダイレクトします。
+3. そのページを読み込むと、エラーが共有 props の `errors` に入ります。メッセージはフィールドごとに 1 つです。
+
+```tsx
+function Login({ errors }: { errors?: Record<string, string> }) {
+  return (
+    <form>
+      <input name="email" />
+      {errors?.email && <span className="error">{errors.email}</span>}
+    </form>
+  )
+}
+```
+
+`validateBody`、`validateQuery`、`validateParams`、ルートコントラクトの失敗にも、自分のコードで投げた `ValidationException.withMessages(...)` にも、同じ処理が適用されます。
+
+細かい点は次のとおりです。
+
+- アプリにセッションがあればエラーをセッションに保持し（`createApp({ auth })` でマウントされます）、なければ有効期限の短い Cookie に保持します。そのため、作ったばかりのアプリでもエラーが表示されます。
+- リダイレクト先は `Referer` ヘッダーで、ヘッダーがなければ `/` です。
+- この処理を差し替えるには、サービスプロバイダの `boot()` で独自のレンダラーを登録します。`this.container.make<ExceptionHandler>('exception.handler').render(ValidationException, (error, ctx) => …)` のように書くと、組み込みのものより先に呼ばれます。
+
+### Inertia での表示
+
+リダイレクトせずに同じレスポンスでエラーを表示したいときは、`Safe` の付いたヘルパーを使い、戻り値の `errors` をページに渡します。ページの `errors` prop は `ValidationErrors<T>` で宣言します。codegen がページの `Props` を読み取るので、`this.inertia()` に渡す値もその型で検査されます。
+
+```ts
+import { pages } from '@/.guren/pages.gen'
+
+async store() {
+  const result = await this.validateBodySafe(schema)
+  if (!result.success) {
+    return this.inertia(pages.users.Create, {
+      errors: result.errors,
+    })
+  }
+
+  await User.create(result.data)
+  return this.redirect('/users')
+}
+```
+
+```tsx
+import type { ValidationErrors } from '@guren/core'
+
+interface Props {
+  errors?: ValidationErrors<'email' | 'password'>
+}
+
+export default function CreateUser({ errors }: Props) {
+  return (
+    <form>
+      <input name="email" />
+      {errors?.email && <span className="error">{errors.email}</span>}
+
+      <input name="password" type="password" />
+      {errors?.password && <span className="error">{errors.password}</span>}
+    </form>
+  )
+}
+```
+
 ## 一般的なパターン
 
 ### ネストされたオブジェクト
@@ -383,7 +383,7 @@ const schema = z.object({
 
 ## スキーマインターフェース
 
-バリデーションは Zod を import せず、スキーマ自身のメソッドを呼ぶので、次の形を持つオブジェクトならどれでも使えます。`validate()` が使うのは `parse()` だけで、それ以外はすべて `safeParse()` だけを使います。
+Guren は Zod を import せずにスキーマ自身のメソッドを呼ぶので、次の形を持つオブジェクトならどれでも使えます。`validate()` は `parse()` を、それ以外はすべて `safeParse()` を呼びます。
 
 ```ts
 interface ValidationSchema<T> {

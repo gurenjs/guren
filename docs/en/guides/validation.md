@@ -121,102 +121,7 @@ export default class PostsController extends Controller {
 }
 ```
 
-On a controller action, a failure throws the same `ValidationException` (422) as the helpers, so Inertia forms display it unchanged. A route whose handler is an inline function answers the 422 itself, in the middleware's shape (see the table below). See [Reading Validated Input](./routing.md#reading-validated-input).
-
-## Form Validation Errors
-
-Each path reports errors in its own shape:
-
-| Source | Shape | Keys |
-|--------|-------|------|
-| `ValidationException`, JSON request | `{ message, errors: { [key]: string[] } }`, 422 | Every message per field |
-| `ValidationException`, Inertia request | The page's `errors` prop: `{ [key]: string }` | First message per field |
-| `this.validateBodySafe()` and siblings | `{ success: false, errors: { [key]: string } }` | First message per field |
-| `validateRequest()`, `validateSafe()`, inline-handler contracts | `{ errors: { [key]: string } }` | First message per top-level field |
-
-The helpers and a contract's `body` key a nested field by its full path (`address.postalCode`). The middleware, `validateSafe()` and a contract's `params` and `query` key it by its top-level field (`address`), and use the key `message` when an error names no field.
-
-### JSON Requests
-
-A JSON or API request that throws `ValidationException` gets a 422:
-
-```json
-{
-  "message": "The given data was invalid.",
-  "errors": {
-    "email": ["Invalid email address"],
-    "password": ["Too small: expected string to have >=8 characters"]
-  }
-}
-```
-
-### Automatic Handling on Inertia Requests
-
-An Inertia request (one carrying the `X-Inertia` header) gets no JSON. Guren behaves as Laravel does:
-
-1. The errors are flashed to the session.
-2. The response is a `303` redirect back to the previous page.
-3. On that page load, the errors arrive in the shared `errors` prop, one message per field.
-
-```tsx
-function Login({ errors }: { errors?: Record<string, string> }) {
-  return (
-    <form>
-      <input name="email" />
-      {errors?.email && <span className="error">{errors.email}</span>}
-    </form>
-  )
-}
-```
-
-This covers failures from `validateBody`, `validateQuery`, `validateParams` and route contracts, and any `ValidationException.withMessages(...)` you throw yourself.
-
-The errors travel in the session when the app has one (`createApp({ auth })` mounts it), and otherwise in a short-lived cookie, so a fresh scaffold shows them too. The redirect goes to the `Referer` header, or `/` when there is none. To change the behavior, register your own renderer for `ValidationException` (see [ExceptionHandler](./error-handling.md#exceptionhandler)); it takes precedence over the built-in one.
-
-### Displaying in Inertia
-
-To render the errors on the same response instead of redirecting, use a `Safe` helper and pass its `errors` to the page. Typing the prop with `ValidationErrors<T>` lets the controller and the component share one error shape:
-
-```ts
-import { type ValidationErrors } from '@guren/core'
-import { pages } from '@/.guren/pages.gen'
-
-type CreateUserFields = 'email' | 'password'
-type CreateUserProps = {
-  errors?: ValidationErrors<CreateUserFields>
-}
-
-async store() {
-  const result = await this.validateBodySafe(schema)
-  if (!result.success) {
-    return this.inertia<CreateUserProps>(pages.users.Create, {
-      errors: result.errors,
-    })
-  }
-
-  await User.create(result.data)
-  return this.redirect('/users')
-}
-```
-
-```tsx
-import type { PageProps } from '@guren/inertia-client'
-import { pages } from '@/.guren/pages.gen'
-
-type Props = PageProps<typeof pages.users.Create>
-
-function CreateUser({ errors }: Props) {
-  return (
-    <form>
-      <input name="email" />
-      {errors?.email && <span className="error">{errors.email}</span>}
-
-      <input name="password" type="password" />
-      {errors?.password && <span className="error">{errors.password}</span>}
-    </form>
-  )
-}
-```
+On a controller action, a failure throws the same `ValidationException` (422) as the helpers, so Inertia forms display it unchanged. A route whose handler is an inline function answers the 422 itself, in the middleware's shape (see [Form Validation Errors](#form-validation-errors)). See [Reading Validated Input](./routing.md#reading-validated-input).
 
 ## Middleware Validation
 
@@ -317,6 +222,101 @@ if (result.success) {
   console.log(result.data)
 } else {
   console.log(result.errors) // { field: 'first message' }
+}
+```
+
+## Form Validation Errors
+
+Each path reports errors in its own shape. "Nested key" is how a failure on `address.postalCode` is keyed:
+
+| Source | Shape | Messages per key | Nested key |
+|--------|-------|------------------|------------|
+| Helpers and contract `body`, JSON request | `{ message, errors: { [key]: string[] } }`, 422 | All | `address.postalCode` |
+| Contract `params` / `query`, JSON request | `{ message, errors: { [key]: string[] } }`, 422 | One | `address` |
+| Any `ValidationException`, Inertia request | The page's `errors` prop: `{ [key]: string }` | One | As thrown |
+| `this.validateBodySafe()` and siblings | `{ success: false, errors: { [key]: string } }` | One | `address.postalCode` |
+| `validateRequest()`, `validateSafe()`, inline-handler contracts | `{ errors: { [key]: string } }` | One | `address` |
+
+A key of `address` is used whenever the key is the top-level field; an error that names no field there is keyed `message`.
+
+### JSON Requests
+
+A JSON or API request that throws `ValidationException` gets a 422:
+
+```json
+{
+  "message": "The given data was invalid.",
+  "errors": {
+    "email": ["Invalid email address"],
+    "password": ["Too small: expected string to have >=8 characters"]
+  }
+}
+```
+
+### Automatic Handling on Inertia Requests
+
+An Inertia request (one carrying the `X-Inertia` header) gets no JSON. Instead:
+
+1. The errors are stored for the next request only.
+2. The response is a `303` redirect back to the previous page.
+3. On that page load, the errors arrive in the shared `errors` prop, one message per field.
+
+```tsx
+function Login({ errors }: { errors?: Record<string, string> }) {
+  return (
+    <form>
+      <input name="email" />
+      {errors?.email && <span className="error">{errors.email}</span>}
+    </form>
+  )
+}
+```
+
+This covers failures from `validateBody`, `validateQuery`, `validateParams` and route contracts, and any `ValidationException.withMessages(...)` you throw yourself.
+
+A few details:
+
+- The errors are stored in the session when the app has one (`createApp({ auth })` mounts it), and otherwise in a short-lived cookie, so a fresh scaffold shows them too.
+- The redirect goes to the `Referer` header, or to `/` when there is none.
+- To replace this behavior, register your own renderer from a service provider's `boot()`: `this.container.make<ExceptionHandler>('exception.handler').render(ValidationException, (error, ctx) => …)`. It runs before the built-in one.
+
+### Displaying in Inertia
+
+To render the errors on the same response instead of redirecting, use a `Safe` helper and pass its `errors` to the page. Declare the page's `errors` prop with `ValidationErrors<T>`; codegen reads the page's `Props`, so `this.inertia()` checks the controller against it:
+
+```ts
+import { pages } from '@/.guren/pages.gen'
+
+async store() {
+  const result = await this.validateBodySafe(schema)
+  if (!result.success) {
+    return this.inertia(pages.users.Create, {
+      errors: result.errors,
+    })
+  }
+
+  await User.create(result.data)
+  return this.redirect('/users')
+}
+```
+
+```tsx
+import type { ValidationErrors } from '@guren/core'
+
+interface Props {
+  errors?: ValidationErrors<'email' | 'password'>
+}
+
+export default function CreateUser({ errors }: Props) {
+  return (
+    <form>
+      <input name="email" />
+      {errors?.email && <span className="error">{errors.email}</span>}
+
+      <input name="password" type="password" />
+      {errors?.password && <span className="error">{errors.password}</span>}
+    </form>
+  )
 }
 ```
 
