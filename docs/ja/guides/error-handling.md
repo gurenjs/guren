@@ -1,39 +1,77 @@
 # エラーハンドリング
 
-Guren のエラー処理は、グローバルエラーハンドラーからコントローラー内での例外のキャッチまで、いくつかの層に分かれています。土台は Hono のエラー処理の仕組みで、ユーザーに見せるエラーは自由にカスタマイズできます。
+リクエストの中で投げられた例外は、どこで投げられても `ExceptionHandler` に届き、報告するかどうかとクライアントに何を返すかがそこで決まります。カスタマイズはサービスプロバイダーから行い、その場で立て直したいエラーだけをコントローラーの `try`/`catch` で扱います。返す内容は、開発環境と本番環境で変わります。
 
-## グローバルエラーハンドラー
+## ExceptionHandler
 
-グローバルエラーハンドラーは Hono の `onError` メソッドで登録します。
-
-> 登録は `src/app.ts` で `createApp(...)` の直後、または `boot(hono)` コールバック内で行います。`app.boot()` の前に設定してください。
+リクエストの中で投げられた例外を報告するかどうかと、クライアントに何を返すかは、`ExceptionHandler` が決めます。アプリは起動時にこれを 1 つ作り、Hono の `onError` に登録します。カスタマイズはサービスプロバイダーの `boot()` で行い、コンテナからそのインスタンスを受け取ります。
 
 ```ts
-import { createApp } from '@guren/core'
-import { HTTPException } from 'hono/http-exception'
+// app/Providers/ExceptionServiceProvider.ts
+import { ServiceProvider } from '@guren/core'
+import type { ExceptionHandler } from '@guren/core'
 
-const app = createApp()
-
-app.hono.onError((error, ctx) => {
-  console.error('未処理のエラー:', error)
-
-  // HTTP 例外を処理
-  if (error instanceof HTTPException) {
-    return ctx.json({
-      error: error.message,
-      status: error.status,
-    }, error.status)
+class PaymentDeclinedError extends Error {
+  constructor(readonly reason: string) {
+    super('Payment declined')
   }
+}
 
-  // その他のエラーを処理
-  const isDev = process.env.NODE_ENV !== 'production'
+export class ExceptionServiceProvider extends ServiceProvider {
+  register(): void {}
 
-  return ctx.json({
-    error: isDev ? error.message : 'Internal Server Error',
-    ...(isDev && { stack: error.stack }),
-  }, 500)
-})
+  boot(): void {
+    const handler = this.container.make<ExceptionHandler>('exception.handler')
+
+    // エラー追跡サービスに送らない、想定内の失敗
+    handler.dontReport(PaymentDeclinedError)
+
+    // それ以外のすべての例外で実行される
+    handler.report((error) => {
+      console.error('[report]', error)
+    })
+
+    // 特定の例外クラスにだけ独自のレスポンスを返し、それ以外は既定の描画のまま
+    handler.render(PaymentDeclinedError, (error, ctx) =>
+      ctx.json({ message: error.message, reason: error.reason }, 402),
+    )
+  }
+}
 ```
+
+このプロバイダーは `createApp({ providers: [ExceptionServiceProvider] })` で登録します。
+
+| メソッド | 役割 |
+|---|---|
+| `report(callback)` | レポーターを追加します。`dontReport()` で除外していない例外ごとに、すべてのレポーターが実行されます。例外を投げたレポーターはログに記録され、ほかのレポーターはそのまま実行されます |
+| `dontReport(ErrorClass)` | そのクラスの例外ではレポーターを実行しません |
+| `render(ErrorClass, renderer)` | そのクラスの例外に独自のレスポンスを返します。登録した順に試し、最初に一致したものを使います |
+
+例外クラスとの一致は、`instanceof` かクラス名で判定します。そのため、同じパッケージが重複してインストールされていても一致します。レポーターを 1 つも登録していなければ、5xx の例外はコンソールに出力されるので、本番の失敗が記録されずに終わることはありません。
+
+## Hono の `onError` を置き換える
+
+Hono の `onError` には、アプリの起動中に `ExceptionHandler` が登録されます。この登録は `boot(hono)` コールバックのあとに行われます。そのため、`app.boot()` より前に `app.hono.onError()` で設定したハンドラーは置き換えられてしまうので、カスタマイズは上の `ExceptionHandler` で行ってください。
+
+`onError` を完全に自分で扱いたい場合は、`ErrorServiceProvider` のサブクラスを登録します。アプリは組み込みのプロバイダーの代わりに、そのサブクラスを使います。
+
+```ts
+// app/Providers/AppErrorServiceProvider.ts
+import { ErrorServiceProvider } from '@guren/core'
+import type { Hono } from 'hono'
+
+export class AppErrorServiceProvider extends ErrorServiceProvider {
+  boot(): void {
+    const hono = this.container.make<Hono>('hono')
+    hono.onError((error, ctx) => {
+      const isDev = process.env.NODE_ENV !== 'production'
+      return ctx.json({ error: isDev ? error.message : 'Internal Server Error' }, 500)
+    })
+  }
+}
+```
+
+この方法では、`HttpException` や `ModelNotFoundException` のステータスを含め、`ExceptionHandler` の処理がすべて使われなくなります。必要がなければ `render()` を使ってください。
 
 ## HTTP 例外
 
@@ -158,61 +196,41 @@ const errors = formatValidationErrors(result.error, '入力内容を確認して
 
 ## エラーミドルウェア
 
-エラー処理をミドルウェアにしておけば、いろいろな場所で使い回せます。
-
-```ts
-import { defineMiddleware } from '@guren/core'
-import { HTTPException } from 'hono/http-exception'
-
-export const errorHandler = defineMiddleware(async (ctx, next) => {
-  try {
-    await next()
-  } catch (error) {
-    if (error instanceof HTTPException) {
-      throw error // HTTP 例外はグローバルハンドラーに任せる
-    }
-
-    // 予期しないエラーをログ出力
-    console.error('予期しないエラー:', error)
-
-    // 汎用エラーレスポンスを返す
-    return ctx.json({
-      error: '問題が発生しました',
-    }, 500)
-  }
-})
-
-// グローバルに登録
-app.use('*', errorHandler)
-```
+ミドルウェアでは、後ろのハンドラーが投げた `Error` を捕まえられません。Hono は例外が投げられたその場で `onError`(つまり ExceptionHandler)に渡すので、`next()` を `try { await next() } catch` で囲んでも、その `catch` には届きません。共通のエラー処理はレポーターやレンダラーに書き([ExceptionHandler](#exceptionhandler) を参照)、`try`/`catch` は[コントローラーでのエラーハンドリング](#コントローラーでのエラーハンドリング)のように、直接呼び出すコードに使ってください。
 
 ## Inertia エラーページ
 
-Inertia のアプリでは、エラー用のコンポーネントを表示します。
+Inertia のアプリでは、存在しないレコードへのページ遷移で JSON ではなくエラーページのコンポーネントを表示したいところです。プロバイダーで 2 つの not found 例外にレンダラーを登録し、ブラウザ以外の呼び出し元には JSON を返します。
 
 ```ts
-// Inertia 用グローバルエラーハンドラー
-app.hono.onError(async (error, ctx) => {
-  const isInertia = ctx.req.header('X-Inertia') === 'true'
+// app/Providers/ErrorPageServiceProvider.ts
+import { ModelNotFoundException, NotFoundHttpException, ServiceProvider, inertia } from '@guren/core'
+import type { ExceptionHandler } from '@guren/core'
 
-  if (isInertia) {
-    const status = error instanceof HTTPException ? error.status : 500
+export class ErrorPageServiceProvider extends ServiceProvider {
+  register(): void {}
 
-    // Inertia エラーページを返す
-    return ctx.json({
-      component: 'Error',
-      props: {
-        status,
-        message: error.message,
-      },
-      url: ctx.req.path,
-    }, status)
+  boot(): void {
+    const handler = this.container.make<ExceptionHandler>('exception.handler')
+
+    for (const errorClass of [NotFoundHttpException, ModelNotFoundException]) {
+      handler.render<Error>(errorClass, (error, ctx) => {
+        const wantsPage = ctx.req.header('X-Inertia') === 'true'
+          || (ctx.req.header('accept') ?? '').includes('text/html')
+        if (!wantsPage) return ctx.json({ message: error.message }, 404)
+
+        return inertia('Error', { status: 404, message: error.message }, {
+          status: 404,
+          request: ctx.req.raw,
+          container: this.container,
+        })
+      })
+    }
   }
-
-  // 非 Inertia のエラーハンドリング
-  return ctx.json({ error: error.message }, 500)
-})
+}
 ```
+
+レンダラーは、特定のクラスに絞って登録してください。`ValidationException`、`AuthenticationException`、`AuthorizationException` はどれも `HttpException` のサブクラスなので、`HttpException` にレンダラーを登録すると、バリデーションのリダイレクトを含め、検証・認証・認可の失敗への応答まで置き換わってしまいます。
 
 エラー用の React コンポーネントは、たとえば次のように書きます。
 
@@ -325,48 +343,38 @@ const posts = await withErrorBoundary(
 
 ## 開発環境 vs 本番環境
 
-エラーの出し方は、環境によって変えます。
+ExceptionHandler は、環境に応じてすでに返すものを変えているので、たいていのアプリでは何も書く必要はありません。
+
+| | 開発環境(`debug` が有効) | 本番環境 |
+|---|---|---|
+| 5xx のメッセージ | 例外のメッセージそのまま | `Internal Server Error`(`HttpException` は自分のメッセージのまま) |
+| 例外の名前とスタックトレース | JSON の本文に含める | 含めない |
+
+`debug` は `NODE_ENV` で決まります。別の基準で決めたいときは、[デバッグ情報](#デバッグ情報)を参照してください。特定のクラスの例外への応答を変えたいときは、レンダラーを登録してください([ExceptionHandler](#exceptionhandler) を参照)。
+
+### デバッグ情報
+
+`NODE_ENV` が `production` でない間、ExceptionHandler は JSON の本文に例外の名前とスタックトレースを加えます。本番環境ではこれらを省き、`HttpException` 以外の 5xx のメッセージを `Internal Server Error` に置き換え、HTML を求めるブラウザには汎用のエラーページを返します。`HttpException` は本番環境でも自分のメッセージをそのまま返すので、内部の詳細を入れないでください。
+
+この判定を変えたいときは、プロバイダーの `register()` で自分のハンドラーを `exception.handler` に登録します。フレームワークは自分のレンダラーを `boot()` で追加するので、それらも登録したハンドラーに付きます。
 
 ```ts
-app.hono.onError((error, ctx) => {
-  const isDev = process.env.NODE_ENV !== 'production'
+// app/Providers/ExceptionServiceProvider.ts
+import { ServiceProvider, createExceptionHandler } from '@guren/core'
 
-  if (isDev) {
-    // 開発環境では完全なエラーを表示
-    return ctx.json({
-      error: error.message,
-      stack: error.stack,
-      name: error.name,
-    }, 500)
+export class ExceptionServiceProvider extends ServiceProvider {
+  register(): void {
+    this.container.instance('exception.handler', createExceptionHandler({
+      // NODE_ENV がちょうど 'development' のときだけ詳細を出す
+      isDebug: () => process.env.NODE_ENV === 'development',
+    }))
   }
 
-  // 本番環境では詳細を隠す
-  return ctx.json({
-    error: '予期しないエラーが発生しました',
-    requestId: ctx.get('requestId'), // リクエスト ID ミドルウェアを使用している場合
-  }, 500)
-})
+  // boot() は上の ExceptionHandler の節と同じ
+}
 ```
 
-### デバッグページ
-
-開発環境では、スタックトレースやリクエスト情報を載せた詳しいデバッグページが自動で表示されます。表示するかどうかは、`createApp()` の `debug` オプションで切り替えます。
-
-```ts
-import { createApp } from '@guren/core'
-
-const app = createApp({
-  debug: process.env.NODE_ENV !== 'production',
-})
-```
-
-デバッグページには次の情報が載ります。
-- エラーメッセージとスタックトレース
-- リクエスト情報（メソッド、パス、ヘッダー）
-- 登録済みのミドルウェアとルート
-- 環境変数（機密情報は自動でマスク）
-
-本番環境では `debug: false`（デフォルト）にして、内部の情報が外に漏れないようにしてください。
+`createApp()` には `debug` オプションはなく、判定はこの登録で決まります。
 
 ## ベストプラクティス
 

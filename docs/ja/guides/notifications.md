@@ -93,12 +93,10 @@ notifications
 ### ユーザーへの送信
 
 ```ts
-// ユーザーはNotifiableインターフェースを実装する必要がある
+// routeNotificationFor() を持つものはすべて Notifiable
 const user: Notifiable = {
-  id: 1,
-  email: 'user@example.com',
   routeNotificationFor(channel: string): string | null {
-    if (channel === 'mail') return this.email
+    if (channel === 'mail') return 'user@example.com'
     return null
   },
 }
@@ -226,7 +224,7 @@ import { MemoryChannel } from '@guren/core'
 const memoryChannel = new MemoryChannel()
 
 // 後で送信された通知を確認
-const sent = memoryChannel.getSentNotifications()
+const sent = memoryChannel.sent
 ```
 
 ## Notifiableインターフェース
@@ -441,6 +439,37 @@ class OrderConfirmation extends Notification {
 
 ## テスト
 
+### `container.fake()` を使う
+
+テストでは、通知マネージャーを差し替えられます。コンテナから `notifications` を取り出して送信するコードは、差し替えたマネージャーを通して送信します。差し替えは `_` のスコープを抜けると元に戻ります。
+
+```ts
+import { expect, test } from 'bun:test'
+import { MemoryChannel, NotificationManager } from '@guren/core'
+import type { Notifiable } from '@guren/core'
+import app from '@/src/app'
+import type { Order } from '@/app/Models/Order'
+import { OrderShipped } from '@/app/Notifications/OrderShipped'
+
+test('sends the shipping notification by mail', async () => {
+  const mail = new MemoryChannel()
+  using _ = app.container.fake('notifications', new NotificationManager({
+    channels: { mail, database: new MemoryChannel() },
+  }))
+
+  // テスト対象のコードの代わり。同じようにコンテナからマネージャーを取り出して送信する
+  const user: Notifiable = { routeNotificationFor: () => 'ada@example.com' }
+  const order = { id: 7 } as Order
+  await app.container.make('notifications').send(user, new OrderShipped(order, 'ABC123'))
+
+  const sent = mail.sent
+  expect(sent).toHaveLength(1)
+  expect(sent[0].notification).toBeInstanceOf(OrderShipped)
+})
+```
+
+### マネージャーを直接使う
+
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'
 import {
@@ -473,13 +502,12 @@ describe('Notifications', () => {
 
   test('通知を送信する', async () => {
     const user: Notifiable = {
-      id: 1,
       routeNotificationFor: () => 'test@example.com',
     }
 
     await notifications.send(user, new TestNotification())
 
-    const sent = memoryChannel.getSentNotifications()
+    const sent = memoryChannel.sent
     expect(sent).toHaveLength(1)
     expect(sent[0].notification).toBeInstanceOf(TestNotification)
   })
@@ -495,13 +523,12 @@ describe('Notifications', () => {
     }
 
     const user: Notifiable = {
-      id: 1,
       routeNotificationFor: () => 'test@example.com',
     }
 
     await notifications.send(user, new ConditionalNotification())
 
-    expect(memoryChannel.getSentNotifications()).toHaveLength(0)
+    expect(memoryChannel.sent).toHaveLength(0)
   })
 
   test('複数チャンネルに送信する', async () => {
@@ -524,14 +551,13 @@ describe('Notifications', () => {
     }
 
     const user: Notifiable = {
-      id: 1,
       routeNotificationFor: () => 'test@example.com',
     }
 
     await notifications.send(user, new MultiChannelNotification())
 
-    expect(mailChannel.getSentNotifications()).toHaveLength(1)
-    expect(dbChannel.getSentNotifications()).toHaveLength(1)
+    expect(mailChannel.sent).toHaveLength(1)
+    expect(dbChannel.sent).toHaveLength(1)
   })
 })
 ```

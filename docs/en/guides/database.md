@@ -1131,9 +1131,12 @@ async index() {
   const result = await Post.scope('published').paginate({ page, perPage: 15 })
   const paginator = paginate(result, { path: this.request.path ?? '/posts' })
 
-  return this.inertia<PostsIndexProps>(pages.posts.Index, {
+  return this.inertia(pages.posts.Index, {
     data: result.data.map((post) => new PostResource(post).toJSON()),
-    pagination: paginator,
-  })
+    pagination: {
+      meta: paginator.meta(),
+      links: paginator.links(),
+    },
+  } satisfies PostsIndexProps)
 }
 ```

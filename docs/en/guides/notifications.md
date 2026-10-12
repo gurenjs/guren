@@ -113,12 +113,10 @@ await notifications.send(user, new OrderShipped(order, 'ABC123'))
 ### Sending to a User
 
 ```ts
-// User must implement Notifiable interface
+// Anything with routeNotificationFor() is a Notifiable
 const user: Notifiable = {
-  id: 1,
-  email: 'user@example.com',
   routeNotificationFor(channel: string): string | null {
-    if (channel === 'mail') return this.email
+    if (channel === 'mail') return 'user@example.com'
     return null
   },
 }
@@ -246,7 +244,7 @@ import { MemoryChannel } from '@guren/core'
 const memoryChannel = new MemoryChannel()
 
 // Later, check sent notifications
-const sent = memoryChannel.getSentNotifications()
+const sent = memoryChannel.sent
 ```
 
 ## Notifiable Interface
@@ -483,23 +481,30 @@ class OrderConfirmation extends Notification {
 
 ### Using `container.fake()`
 
-Swap the notification manager in tests:
+Swap the notification manager in tests. Code that resolves `notifications` from the container, as in [Container Integration](#container-integration), then sends through the fake, and the swap is undone when `_` goes out of scope:
 
 ```ts
-// Access via app.container or this.container in providers
-import { NotificationManager, MemoryChannel } from '@guren/core'
+import { expect, test } from 'bun:test'
+import { MemoryChannel, NotificationManager } from '@guren/core'
+import type { Notifiable } from '@guren/core'
+import app from '@/src/app'
+import type { Order } from '@/app/Models/Order'
+import { OrderShipped } from '@/app/Notifications/OrderShipped'
 
-test('sends order notification', async () => {
-  const memoryChannel = new MemoryChannel()
-  const fakeNotifications = new NotificationManager({
-    channels: { memory: memoryChannel },
-  })
+test('sends the shipping notification by mail', async () => {
+  const mail = new MemoryChannel()
+  using _ = app.container.fake('notifications', new NotificationManager({
+    channels: { mail, database: new MemoryChannel() },
+  }))
 
-  using _ = container.fake('notifications', fakeNotifications)
+  // Stands in for the code under test, which resolves the manager the same way
+  const user: Notifiable = { routeNotificationFor: () => 'ada@example.com' }
+  const order = { id: 7 } as Order
+  await app.container.make('notifications').send(user, new OrderShipped(order, 'ABC123'))
 
-  // Run code under test
-  const sent = memoryChannel.getSentNotifications()
+  const sent = mail.sent
   expect(sent).toHaveLength(1)
+  expect(sent[0].notification).toBeInstanceOf(OrderShipped)
 })
 ```
 
@@ -537,13 +542,12 @@ describe('Notifications', () => {
 
   test('sends notification', async () => {
     const user: Notifiable = {
-      id: 1,
       routeNotificationFor: () => 'test@example.com',
     }
 
     await notifications.send(user, new TestNotification())
 
-    const sent = memoryChannel.getSentNotifications()
+    const sent = memoryChannel.sent
     expect(sent).toHaveLength(1)
     expect(sent[0].notification).toBeInstanceOf(TestNotification)
   })
@@ -559,13 +563,12 @@ describe('Notifications', () => {
     }
 
     const user: Notifiable = {
-      id: 1,
       routeNotificationFor: () => 'test@example.com',
     }
 
     await notifications.send(user, new ConditionalNotification())
 
-    expect(memoryChannel.getSentNotifications()).toHaveLength(0)
+    expect(memoryChannel.sent).toHaveLength(0)
   })
 
   test('sends to multiple channels', async () => {
@@ -588,14 +591,13 @@ describe('Notifications', () => {
     }
 
     const user: Notifiable = {
-      id: 1,
       routeNotificationFor: () => 'test@example.com',
     }
 
     await notifications.send(user, new MultiChannelNotification())
 
-    expect(mailChannel.getSentNotifications()).toHaveLength(1)
-    expect(dbChannel.getSentNotifications()).toHaveLength(1)
+    expect(mailChannel.sent).toHaveLength(1)
+    expect(dbChannel.sent).toHaveLength(1)
   })
 })
 ```
