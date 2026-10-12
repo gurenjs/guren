@@ -178,7 +178,7 @@ app.hono.notFound((ctx) => {
 
 ## Debug Details
 
-While `NODE_ENV` is not `production`, the exception handler keeps a 5xx's own message and adds the exception's name and stack to the JSON body. In production those are dropped, and a browser asking for HTML gets a generic error page instead.
+While `NODE_ENV` is not `production`, the exception handler adds the exception's name and stack to the JSON body. In production those are dropped, the message of a 5xx that is not an `HttpException` becomes `Internal Server Error`, and a browser asking for HTML gets a generic error page instead. An `HttpException` keeps its own message in production, so do not put internal details in one.
 
 To decide it another way, bind your own handler under `exception.handler` in a provider's `register()`. The framework adds its own renderers in `boot()`, so they attach to yours:
 
@@ -261,7 +261,7 @@ const errors = formatValidationErrors(result.error, 'Please check your input')
 
 ## Error Middleware
 
-A middleware cannot catch what a later handler throws. Hono hands the exception to `onError`, which is the exception handler, at the point it is thrown, so a `try { await next() } catch` around `next()` never sees it. Put shared error logic in a reporter or a renderer (see [ExceptionHandler](#exceptionhandler)), and keep `try`/`catch` for code you call directly, as in [Controller Error Handling](#controller-error-handling).
+A middleware cannot catch an `Error` that a later handler throws. Hono hands it to `onError`, which is the exception handler, at the point it is thrown, so a `try { await next() } catch` around `next()` never sees it. Put shared error logic in a reporter or a renderer (see [ExceptionHandler](#exceptionhandler)), and keep `try`/`catch` for code you call directly, as in [Controller Error Handling](#controller-error-handling).
 
 ## Inertia Error Pages
 
@@ -279,7 +279,7 @@ export class ErrorPageServiceProvider extends ServiceProvider {
     const handler = this.container.make<ExceptionHandler>('exception.handler')
 
     for (const errorClass of [NotFoundHttpException, ModelNotFoundException]) {
-      handler.render(errorClass, (error, ctx) => {
+      handler.render<Error>(errorClass, (error, ctx) => {
         const wantsPage = ctx.req.header('X-Inertia') === 'true'
           || (ctx.req.header('accept') ?? '').includes('text/html')
         if (!wantsPage) return ctx.json({ message: error.message }, 404)
@@ -374,7 +374,7 @@ The exception handler already answers differently by environment, so most apps n
 
 | | Development (`debug` on) | Production |
 |---|---|---|
-| Message of a 5xx | The exception's own | `Internal Server Error` |
+| Message of a 5xx | The exception's own | `Internal Server Error`, except an `HttpException`, which keeps its own |
 | Exception name and stack | Included in the JSON body | Omitted |
 
 `debug` follows `NODE_ENV`; [Debug Details](#debug-details) shows how to decide it another way. To change what one class of error answers, register a renderer (see [ExceptionHandler](#exceptionhandler)).

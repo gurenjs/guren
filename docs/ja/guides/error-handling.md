@@ -196,7 +196,7 @@ const errors = formatValidationErrors(result.error, '入力内容を確認して
 
 ## エラーミドルウェア
 
-ミドルウェアでは、後ろのハンドラーが投げた例外を捕まえられません。Hono は例外が投げられたその場で `onError`(つまり ExceptionHandler)に渡すので、`next()` を `try { await next() } catch` で囲んでも、その `catch` には届きません。共通のエラー処理はレポーターやレンダラーに書き([ExceptionHandler](#exceptionhandler) を参照)、`try`/`catch` は[コントローラーでのエラーハンドリング](#コントローラーでのエラーハンドリング)のように、直接呼び出すコードに使ってください。
+ミドルウェアでは、後ろのハンドラーが投げた `Error` を捕まえられません。Hono は例外が投げられたその場で `onError`(つまり ExceptionHandler)に渡すので、`next()` を `try { await next() } catch` で囲んでも、その `catch` には届きません。共通のエラー処理はレポーターやレンダラーに書き([ExceptionHandler](#exceptionhandler) を参照)、`try`/`catch` は[コントローラーでのエラーハンドリング](#コントローラーでのエラーハンドリング)のように、直接呼び出すコードに使ってください。
 
 ## Inertia エラーページ
 
@@ -214,7 +214,7 @@ export class ErrorPageServiceProvider extends ServiceProvider {
     const handler = this.container.make<ExceptionHandler>('exception.handler')
 
     for (const errorClass of [NotFoundHttpException, ModelNotFoundException]) {
-      handler.render(errorClass, (error, ctx) => {
+      handler.render<Error>(errorClass, (error, ctx) => {
         const wantsPage = ctx.req.header('X-Inertia') === 'true'
           || (ctx.req.header('accept') ?? '').includes('text/html')
         if (!wantsPage) return ctx.json({ message: error.message }, 404)
@@ -347,14 +347,14 @@ ExceptionHandler は、環境に応じてすでに返すものを変えている
 
 | | 開発環境(`debug` が有効) | 本番環境 |
 |---|---|---|
-| 5xx のメッセージ | 例外のメッセージそのまま | `Internal Server Error` |
+| 5xx のメッセージ | 例外のメッセージそのまま | `Internal Server Error`(`HttpException` は自分のメッセージのまま) |
 | 例外の名前とスタックトレース | JSON の本文に含める | 含めない |
 
 `debug` は `NODE_ENV` で決まります。別の基準で決めたいときは、[デバッグ情報](#デバッグ情報)を参照してください。特定のクラスの例外への応答を変えたいときは、レンダラーを登録してください([ExceptionHandler](#exceptionhandler) を参照)。
 
 ### デバッグ情報
 
-`NODE_ENV` が `production` でない間、ExceptionHandler は 5xx のメッセージをそのまま返し、JSON の本文に例外の名前とスタックトレースを加えます。本番環境ではこれらを省き、HTML を求めるブラウザには汎用のエラーページを返します。
+`NODE_ENV` が `production` でない間、ExceptionHandler は JSON の本文に例外の名前とスタックトレースを加えます。本番環境ではこれらを省き、`HttpException` 以外の 5xx のメッセージを `Internal Server Error` に置き換え、HTML を求めるブラウザには汎用のエラーページを返します。`HttpException` は本番環境でも自分のメッセージをそのまま返すので、内部の詳細を入れないでください。
 
 この判定を変えたいときは、プロバイダーの `register()` で自分のハンドラーを `exception.handler` に登録します。フレームワークは自分のレンダラーを `boot()` で追加するので、それらも登録したハンドラーに付きます。
 
