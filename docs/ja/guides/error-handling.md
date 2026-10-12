@@ -349,14 +349,21 @@ ExceptionHandler は、環境に応じてすでに返すものを変えている
 |---|---|---|
 | 5xx のメッセージ | 例外のメッセージそのまま | `Internal Server Error`(`HttpException` は自分のメッセージのまま) |
 | 例外の名前とスタックトレース | JSON の本文に含める | 含めない |
+| ブラウザへの 5xx | デバッグページ | 汎用のエラーページ |
 
 `debug` は `NODE_ENV` で決まります。別の基準で決めたいときは、[デバッグ情報](#デバッグ情報)を参照してください。特定のクラスの例外への応答を変えたいときは、レンダラーを登録してください([ExceptionHandler](#exceptionhandler) を参照)。
 
 ### デバッグ情報
 
-`NODE_ENV` が `production` でない間、ExceptionHandler は JSON の本文に例外の名前とスタックトレースを加えます。本番環境ではこれらを省き、`HttpException` 以外の 5xx のメッセージを `Internal Server Error` に置き換え、HTML を求めるブラウザには汎用のエラーページを返します。`HttpException` は本番環境でも自分のメッセージをそのまま返すので、内部の詳細を入れないでください。
+`NODE_ENV` が `production` でない間、ExceptionHandler はエラーの詳細を返します。
 
-この判定を変えたいときは、プロバイダーの `register()` で自分のハンドラーを `exception.handler` に登録します。フレームワークは自分のレンダラーを `boot()` で追加するので、それらも登録したハンドラーに付きます。
+- ブラウザからのリクエストが 5xx で終わると、デバッグページを表示します。例外の名前とメッセージ、スタックトレース、リクエストのメソッド・URL・ヘッダー、`NODE_ENV`・Bun のバージョン・プラットフォームが載ります。ここでのブラウザからのリクエストは、`text/html` を受け付け、Inertia の遷移でも XHR でもないものを指します。
+- Inertia の遷移、XHR、JSON を求めるリクエストには、例外の名前とスタックトレースを加えた JSON の本文を返します。
+- ブラウザからのリクエストが 4xx で終わったときは、本番環境と同じく、メッセージ入りの通常のエラーページを返します。4xx は呼び出し側の誤りなので、スタックトレースを見ても役に立ちません。
+
+本番環境ではこれらの詳細を省き、`HttpException` 以外の 5xx のメッセージを `Internal Server Error` に置き換え、ブラウザには汎用のエラーページを返します。`HttpException` は本番環境でも自分のメッセージをそのまま返すので、内部の詳細を入れないでください。
+
+詳細を出すかどうかを別の基準で決めたいときは、プロバイダーの `register()` で自分のハンドラーを `exception.handler` に登録します。フレームワークは自分のレンダラーを `boot()` で追加するので、それらも登録したハンドラーに付きます。
 
 ```ts
 // app/Providers/ExceptionServiceProvider.ts
@@ -375,6 +382,10 @@ export class ExceptionServiceProvider extends ServiceProvider {
 ```
 
 `createApp()` には `debug` オプションはなく、判定はこの登録で決まります。
+
+デバッグページには Cookie や `Authorization` を含むリクエストヘッダーがそのまま載ります。他の人がアクセスできるサーバーでは、詳細を出さない設定にしてください。
+
+`debugErrorMiddleware()` は非推奨になり、3.0.0 で削除されます。このミドルウェアの `catch` にはエラーが届かず([エラーミドルウェア](#エラーミドルウェア)を参照)、同じページを ExceptionHandler が表示するようになったので、ミドルウェアから外してください。`bunx guren upgrade --check-only` を実行すると、これを import しているファイルが一覧で出ます。
 
 ## ベストプラクティス
 
