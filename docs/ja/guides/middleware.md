@@ -150,11 +150,11 @@ flowchart LR
 | `defineMiddleware` | Hono のミドルウェア関数に Guren 用の型を付ける | — |
 | `createSessionMiddleware` | 各リクエストにセッションを付ける | `createApp({ auth })` のとき |
 | `createCsrfMiddleware` | 状態を変えるリクエストの CSRF トークンを検査する | `createApp({ auth })` のとき |
-
-セッションや CSRF のミドルウェアを自動でマウントさせたくない場合は、`auth: { autoSession: false }` や `auth: { autoCsrf: false }` を渡します。
 | `attachAuthContext` | 各リクエストに認証コンテキストを付ける | 常に |
 | `requireAuthenticated` / `requireGuest` | ログイン済みのユーザーだけ／ゲストだけを通す | なし（ルートに付ける） |
 | `createRateLimitMiddleware` | クライアントごとのリクエスト数を制限する | なし（ルートに付ける） |
+
+セッションや CSRF のミドルウェアを自動でマウントさせたくない場合は、`auth: { autoSession: false }` や `auth: { autoCsrf: false }` を渡します。
 
 ### `createSessionMiddleware`
 

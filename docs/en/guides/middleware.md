@@ -150,11 +150,11 @@ When relative order matters, register every piece as an alias. On a controller a
 | `defineMiddleware` | Types a Hono middleware function for Guren | — |
 | `createSessionMiddleware` | Attaches a session to each request | With `createApp({ auth })` |
 | `createCsrfMiddleware` | Checks the CSRF token on state-changing requests | With `createApp({ auth })` |
-
-To opt out of the automatic session or CSRF middleware, pass `auth: { autoSession: false }` or `auth: { autoCsrf: false }`.
 | `attachAuthContext` | Puts the auth context on each request | Always |
 | `requireAuthenticated` / `requireGuest` | Let only signed-in users / only guests through | No: add them to routes |
 | `createRateLimitMiddleware` | Limits requests per client | No: add it to routes |
+
+To opt out of the automatic session or CSRF middleware, pass `auth: { autoSession: false }` or `auth: { autoCsrf: false }`.
 
 ### `createSessionMiddleware`
 
