@@ -20,7 +20,7 @@ reason. An app with no policy gets no such finding.
 
 ## Suppressing audit findings
 
-Every `audit` finding can be suppressed when it is a false positive, by one of two mechanisms depending on whether the finding has a source line.
+When an `audit` finding is a false positive, suppress it with one of two mechanisms. Which one applies depends on whether the finding has a source line (`policy:*` accepts both).
 
 For a finding with a source line, place `// guren-audit-ignore` on the flagged line or the line above it:
 

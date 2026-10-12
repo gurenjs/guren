@@ -180,7 +180,7 @@ re-run to repair a partial install (`add session`, `add cache`, `add schedule`,
 
 Validate your app before shipping. These commands are also designed for AI coding agents (add `--json` for machine-readable output).
 
-Details on these commands live in [Checks and Audits in Depth](./cli-checks.md): the audit's [policy rule](./cli-checks.md#the-audits-policy-rule), what [`introspect`](./cli-checks.md#introspecting-the-registered-app) runs, the extra rules for [agent-exposed routes](./cli-checks.md#agent-exposed-routes) and [in-process agents](./cli-checks.md#in-process-agents), [suppressing a false positive](./cli-checks.md#suppressing-audit-findings), [architecture boundaries](./cli-checks.md#architecture-boundaries), and [how the checks read the app](./cli-checks.md#how-the-checks-read-the-app).
+[Checks and Audits in Depth](./cli-checks.md) explains the rules behind these commands, and how to suppress a false positive.
 
 | Command | Description | Example |
 |---------|-------------|---------|
@@ -270,14 +270,21 @@ non-zero if any failed. A stage that *cannot* run is a failure, not a
 skip: an `.oxlintrc.json` with no oxlint installed, a missing
 `typecheck` script, a routes entry that will not load. Only an app with
 no `.oxlintrc.json` skips lint. The `check` and `audit` stages read the
-introspected app (see [Checks that read the introspected app](./cli-checks.md#checks-that-read-the-introspected-app))
-through one introspection per run, capped at 10 seconds, which comes after
-codegen, so a fresh clone's entry imports by then. An introspection that fails adds one
-advisory line to the stage that asked for it and never fails the gate. Every
-`-unverified` result is printed on the check stage as an advisory line as
-well, naming why the app could not vouch for it, except on a `--changed` run
-that changed no source, which does not introspect. `guren plan:verify` prints
-the same lines on its check step.
+introspected app: the app's providers and routes are registered in a child
+process that never boots it (see [Checks that read the introspected app](./cli-checks.md#checks-that-read-the-introspected-app)).
+That happens once per run, capped at 10 seconds, after codegen, so a fresh
+clone's entry imports by then.
+
+Two kinds of result are printed as [advisory](./glossary.md#plan-states)
+lines, which never fail the gate:
+
+- an introspection that fails adds one line to the stage that asked for it;
+- each `-unverified` result (a verdict only the app could give, which
+  introspection could not confirm) is printed on the check stage, naming why.
+  A `--changed` run that changed no source does not introspect, so it prints
+  none.
+
+`guren plan:verify` prints the same lines on its check step.
 
 ```bash
 bunx guren gate            # every stage, in full
@@ -287,10 +294,13 @@ bunx guren gate --json     # the per-stage report, for tools
 ```
 
 The scaffolded `.github/workflows/ci.yml` is one `bunx guren gate --deps`
-step, so a change that passes the gate locally passes CI. The Claude Code
-harness runs it from a `Stop` hook (see [Agent Harness](./agent-harness.md#hooks)),
-the MCP server exposes it as `guren_gate`, and `AGENTS.md` tells other agents
-to run it before declaring a change done.
+step, so a change that passes the gate locally passes CI. The agent
+harness runs it when a Claude Code, Codex or Cursor turn ends (see
+[Agent Harness](./agent-harness.md#hooks)), the MCP server exposes it as
+`guren_gate`, and `AGENTS.md` tells every agent that reads it to run it before
+declaring a change done.
+
+More on these commands in [Checks and Audits in Depth](./cli-checks.md): the audit's [policy rule](./cli-checks.md#the-audits-policy-rule), what [`introspect`](./cli-checks.md#introspecting-the-registered-app) runs, the extra rules for [agent-exposed routes](./cli-checks.md#agent-exposed-routes) and [in-process agents](./cli-checks.md#in-process-agents), [suppressing a false positive](./cli-checks.md#suppressing-audit-findings), [architecture boundaries](./cli-checks.md#architecture-boundaries), and [how the checks read the app](./cli-checks.md#how-the-checks-read-the-app).
 
 ## Application Modules
 
@@ -334,7 +344,7 @@ Inertia pages are not colocated inside `modules/<name>/`. They stay under the to
 
 ## AI Agent Harness
 
-Apps scaffolded with `create-guren-app` include an agent harness: project guides, rules, skills, hooks and an MCP config for Claude Code, Codex, Cursor, GitHub Copilot and OpenCode. [Agent Harness](./agent-harness.md) lists the files each agent gets and how the hooks work.
+Apps scaffolded with `create-guren-app` include an agent harness: project guides, rules, skills and an MCP config for Claude Code, Codex, Cursor, GitHub Copilot and OpenCode, plus hooks for the agents that support them. [Agent Harness](./agent-harness.md) lists the files each agent gets and how the hooks work.
 
 | Command | Description | Example |
 |---------|-------------|---------|

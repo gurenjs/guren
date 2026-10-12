@@ -24,9 +24,9 @@ Each agent documents the files the harness writes for it. For Claude Code: [`CLA
 
 What runs, by agent:
 
-- Claude Code, Codex and Cursor: when a turn ends with uncommitted changes, the gate hook runs [`guren gate`](./cli.md#inspection-audit-commands), so a failing stage is fixed in the same turn rather than in CI. While a plan step that `guren plan:next` marked is not verified (see [Implementation Plans](./implementation-plans.md)), the hook also sends that step's findings back, up to three times.
+- Claude Code, Codex and Cursor: when a turn ends with uncommitted changes, the gate hook runs [`guren gate`](./cli.md#inspection-audit-commands), so a failing stage is fixed in the same turn rather than in CI. While the plan step `guren plan:next` marked is not [`verified`](./glossary.md#plan-states) (see [Implementation Plans](./implementation-plans.md)), the hook also sends that step's findings back, up to three times.
 - Claude Code only: it loads the `guren context` project map at session start, re-runs `guren check` after edits to routes, `app/Http/`, models, schema or pages, and runs oxlint on an edited source file when the app has an `.oxlintrc.json`.
-- GitHub Copilot and OpenCode have no hooks. `AGENTS.md` tells them to run `guren context` at session start, `guren check` after edits, and `guren gate` before declaring a change done.
+- Every agent that reads `AGENTS.md` (Codex, Cursor, GitHub Copilot and OpenCode) is told there to run `guren context` at session start, `guren check` after edits, and `guren gate` before declaring a change done. For Codex and Cursor the gate hook backs up the last of these; GitHub Copilot and OpenCode have no hooks at all.
 
 A few details about where the hooks apply:
 

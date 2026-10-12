@@ -24,15 +24,15 @@
 
 エージェントごとに、次のものが動きます。
 
-- Claude Code、Codex、Cursor では、コミットしていない変更を残したままターンが終わると、ゲートの hook が [`guren gate`](./cli.md#検査監査コマンド) を実行します。失敗したステージは CI まで持ち越さず、同じターンの中で直せます。`guren plan:next` で印を付けた計画のステップがまだ検証を通っていなければ（[実装計画](./implementation-plans.md)を参照）、そのステップの指摘も最大 3 回まで差し戻します。
+- Claude Code、Codex、Cursor では、コミットしていない変更を残したままターンが終わると、ゲートの hook が [`guren gate`](./cli.md#検査監査コマンド) を実行します。失敗したステージは CI まで持ち越さず、同じターンの中で直せます。`guren plan:next` で印を付けた計画のステップがまだ[検証済み](./glossary.md#計画の状態)になっていなければ（[実装計画](./implementation-plans.md)を参照）、そのステップの指摘も最大 3 回まで差し戻します。
 - Claude Code ではさらに、セッションの開始時に `guren context` のプロジェクトマップを読み込みます。ルート、`app/Http/`、モデル、スキーマ、ページを編集すると `guren check` を再実行し、アプリに `.oxlintrc.json` があれば、編集したソースファイルに oxlint をかけます。
-- GitHub Copilot と OpenCode には hooks がありません。代わりに `AGENTS.md` で、セッション開始時に `guren context`、編集後に `guren check`、作業を終える前に `guren gate` を実行するよう指示しています。
+- `AGENTS.md` を読むエージェント（Codex、Cursor、GitHub Copilot、OpenCode）には、`AGENTS.md` で、セッション開始時に `guren context`、編集後に `guren check`、作業を終える前に `guren gate` を実行するよう指示しています。Codex と Cursor では最後の `guren gate` をゲートの hook でも確かめますが、GitHub Copilot と OpenCode には hooks がありません。
 
 hook が効く範囲には、次の注意点があります。
 
-- hook は、自分がインストールされたアプリにゲートをかけるので、monorepo の中のアプリでは、そのアプリのツリーだけが対象です。Claude Code の hook はセッションがいる checkout にゲートをかけるので、途中で worktree に入った場合は、その worktree のツリーが対象です。
+- ゲートの対象は hook をインストールしたアプリなので、monorepo の中のアプリでは、そのアプリのツリーだけを検査します。Claude Code の hook はセッションがいる checkout にゲートをかけるので、途中で worktree に入った場合は、その worktree のツリーが対象です。
 - Cursor は `.cursor/hooks.json` をワークスペースのルートから読むので、アプリは単独のワークスペースとして開いてください。
-- Cursor は設定によっては `.claude/settings.json` の hook も読み込みます。その場合は Claude 用の hook が処理を譲るので、ゲートは 1 回しか走りません。
+- Cursor は設定によっては `.claude/settings.json` の hook も読み込みます。その場合、Claude 用の hook の側では何も実行しないので、ゲートは 1 回しか走りません。
 
 ## アプリを作る前に: カタログから Guren のスキルを入れる
 

@@ -5,11 +5,11 @@
 | Tool | Needs the dev server | Section |
 |---|---|---|
 | `guren graph` | No: it reads the project on disk | [The application graph](#the-application-graph) |
-| `guren runtime:errors` | Yes, started with `GUREN_MCP=1` | [Runtime errors](#runtime-errors) |
-| MCP tools for coding agents | Yes, started with `GUREN_MCP=1` | [Reading from a coding agent](#reading-from-a-coding-agent) |
-| Dev Center | Yes, started with `GUREN_MCP=1` | [Dev Center](#dev-center) |
+| `guren runtime:errors` | Yes, with the MCP endpoint enabled | [Runtime errors](#runtime-errors) |
+| MCP tools for coding agents | Yes, with the MCP endpoint enabled | [Reading from a coding agent](#reading-from-a-coding-agent) |
+| Dev Center | Yes, with the MCP endpoint enabled | [Dev Center](#dev-center) |
 
-All of them are development tools. Production never enables runtime error collection or the Dev Center.
+The scaffolded `bun run dev` already enables the MCP endpoint (`GUREN_MCP=1`) and the docs viewer (`GUREN_DOCS=1`); the commands below spell the variables out for an app whose `dev` script does not. All of them are development tools. Production never enables runtime error collection or the Dev Center.
 
 ## The application graph
 
@@ -132,8 +132,9 @@ as `/_guren/runtime/errors` and the CLI. MCP takes `sessionId`, `after` and
 The same endpoint serves `guren_get_plans`, which lists the
 [implementation plans](./implementation-plans.md) the docs viewer at
 `/_guren/docs` shows: every plan not closed at its current hash, including
-drafts nobody has approved yet, with its approval, each step with the outcome
-its last `plan:verify` recorded, waivers, and the next command. `active` names
+drafts nobody has approved yet. Each plan comes with its approval, each step
+with the outcome its last `plan:verify` recorded (the values are in
+[Plan states](./glossary.md#plan-states)), its waivers, and the next command. `active` names
 the step `plan:next` marked in each plan, with its `stall` once the Stop hook
 gave up on it. `unreadable` names plan directories that would not list
 (app-relative, `.` for the app root, with the error), the same ones the docs
