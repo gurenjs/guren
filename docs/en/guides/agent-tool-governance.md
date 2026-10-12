@@ -9,7 +9,7 @@ three controls decide what an agent may do and keep a record of what it did:
 | Approval gates | Which calls wait for a person before they run | [Approval-gated tools](#approval-gated-tools) |
 | Audit trail | Where every call and every refusal is recorded | [The audit trail](#the-audit-trail) |
 
-Token scopes are required: a token with none sees no tools at all. Approval gates and the audit trail are optional, and each works without the other.
+Token scopes are required: a token with none sees no tools at all. Below, a *principal* is the identity a call runs as: the user a token or session belongs to, or a service for a token with no user. Approval gates and the audit trail are optional, and each works without the other.
 
 ## Tokens and scopes
 

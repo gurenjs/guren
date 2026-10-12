@@ -584,7 +584,8 @@ mcpPlugin({
 | `rateLimit` | `{ max: 60, writeMax: 20, windowMs: 60_000 }` | Per-token budget; `false` disables it |
 | `updateLastUsed` | `true` | Whether verifying a bearer writes the token's `lastUsedAt` |
 | `approvals` | none | The approval queue: `{ store, notify, ttlMs? }`. See [Approval-gated tools](./agent-tool-governance.md#approval-gated-tools) |
-| `audit` | none | Where the audit trail is written: `{ file, days? }` or `{ sink }`. See [Writing the trail down](./agent-tool-governance.md#writing-the-trail-down) |
+| `audit` | none | Where the audit trail is written: `{ file?, days? }` or `{ sink }`. See [Writing the trail down](./agent-tool-governance.md#writing-the-trail-down) |
+| `auth` | bearer tokens | `'external'` trusts an authority in front of the app to verify each request instead; no token store is consulted |
 
 Rate limits are keyed on the **token id**, not an IP: budgets follow
 credentials. They are enforced in process memory, so one long-running server
