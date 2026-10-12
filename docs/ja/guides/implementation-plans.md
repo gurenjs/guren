@@ -205,7 +205,7 @@ Write this step’s test skeletons with `bunx guren plan:scaffold docs/plans/com
 
 Behaviours to write, as test titles `[<id>] <description>`, failing:
   [AC-comments-1] A signed-in user can comment on a post.
-      success; actor user; route route.comments.store; given a post exists; expect status 302; comments has 1 row(s)
+      success; actor user; route route.comments.store; given a post exists; expect status 303; comments has 1 row(s)
   [AC-comments-2] An empty comment is rejected.
       validation; actor user; route route.comments.store; given a post exists; expect status 422; errors on body
   [AC-comments-3] A guest cannot comment.
@@ -265,7 +265,7 @@ Recorded in .guren/plans/comments.state.json
 
 それぞれの結果の例と、`data` ステップが `db:migrate` の前に行うマイグレーションの確認は、[ステップの結果の詳細](./implementation-plan-verification.md#ステップの結果の詳細)にあります。
 
-`plan:verify` は、承認のない計画を何も実行しないうちに拒否するので、誰も合意していないハッシュのもとで結果が記録されることはありません。承認済みの計画に対しては、`plan:verify` はアプリケーションを実際に動かします。`bun test` はアプリケーションを起動し、`db:migrate` は設定されたデータベースを開きます。開発用かテスト用のデータベースに向けて実行し、本番のデータベースには向けないでください。各コマンドは 600 秒を過ぎると `blocked` になり、この時間は `--timeout <seconds>` で変えられます。`--step` を省くと全ステップを順に実行し、記録がまだ有効なステップは飛ばします。検証後にファイルが変わったステップは、次に述べるとおり最後に確かめ直します。`--ci` を付けると、実行したステップが 1 つでも検証を通らなければ終了コード 1 を返します。`--json` を付けると結果をデータで出力します。
+`plan:verify` は、基準点があるのに現在のハッシュで承認されていない計画を、何も実行しないうちに拒否します。そのため、誰も合意していないハッシュのもとで結果が記録されることはありません。まだ誰も承認していない下書きは、[承認](#承認-planapprove)で説明したとおりそのまま実行します。承認済みの計画に対しては、`plan:verify` はアプリケーションを実際に動かします。`bun test` はアプリケーションを起動し、`db:migrate` は設定されたデータベースを開きます。開発用かテスト用のデータベースに向けて実行し、本番のデータベースには向けないでください。各コマンドは 600 秒を過ぎると `blocked` になり、この時間は `--timeout <seconds>` で変えられます。`--step` を省くと全ステップを順に実行し、記録がまだ有効なステップは飛ばします。検証後にファイルが変わったステップは、次に述べるとおり最後に確かめ直します。`--ci` を付けると、実行したステップが 1 つでも検証を通らなければ終了コード 1 を返します。`--json` を付けると結果をデータで出力します。
 
 ### 一ステップ、一コミット
 

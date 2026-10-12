@@ -137,7 +137,7 @@ test('[AC-comments-1] A signed-in user can comment on a post.', async () => {
   given('a post exists')
   const actor = given<object>('the actor: user')
   const postId = given<number | string>('the :postId parameter')
-  await (await client(actor)).post(`/posts/${postId}/comments`, { body: 'Nice post' }).assertStatus(302)
+  await (await client(actor)).post(`/posts/${postId}/comments`, { body: 'Nice post' }).assertStatus(303)
   expect(await Comment.where({ body: 'Nice post' }).first()).not.toBeNull()
 })
 ```

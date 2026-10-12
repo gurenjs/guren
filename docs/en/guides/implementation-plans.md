@@ -195,7 +195,7 @@ Write this step’s test skeletons with `bunx guren plan:scaffold docs/plans/com
 
 Behaviours to write, as test titles `[<id>] <description>`, failing:
   [AC-comments-1] A signed-in user can comment on a post.
-      success; actor user; route route.comments.store; given a post exists; expect status 302; comments has 1 row(s)
+      success; actor user; route route.comments.store; given a post exists; expect status 303; comments has 1 row(s)
   [AC-comments-2] An empty comment is rejected.
       validation; actor user; route route.comments.store; given a post exists; expect status 422; errors on body
   [AC-comments-3] A guest cannot comment.
@@ -255,7 +255,7 @@ A step ends in one of four outcomes.
 
 Examples of each outcome, and the migration check a `data` step runs before `db:migrate`, are in [Step outcomes in detail](./implementation-plan-verification.md#step-outcomes-in-detail).
 
-`plan:verify` refuses an unapproved plan before it runs anything, so nothing is recorded against a hash nobody agreed to. Past that, it executes your application: `bun test` boots it and `db:migrate` opens the database it is configured for, so run it against a development or test database, never production. Each command may take 600 seconds before it counts as `blocked`; `--timeout <seconds>` changes that. Without `--step` it runs every step in order and skips the ones whose record still holds; steps whose files changed since they verified are re-checked last, as described next. `--ci` exits 1 when a step it ran did not verify, and `--json` prints the report as data.
+`plan:verify` refuses a plan that has a baseline but no approval at its current hash before it runs anything, so nothing is recorded against a hash nobody agreed to. A draft nobody has approved yet still runs, as [Approving](#approving-planapprove) says. Past that, it executes your application: `bun test` boots it and `db:migrate` opens the database it is configured for, so run it against a development or test database, never production. Each command may take 600 seconds before it counts as `blocked`; `--timeout <seconds>` changes that. Without `--step` it runs every step in order and skips the ones whose record still holds; steps whose files changed since they verified are re-checked last, as described next. `--ci` exits 1 when a step it ran did not verify, and `--json` prints the report as data.
 
 ### One step, one commit
 
