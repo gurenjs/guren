@@ -2,7 +2,7 @@
 
 Validate request input against a schema and get typed, parsed values back. When the input is invalid, the request ends with a 422 response, or, on an Inertia request, a redirect back to the form with one error message per field.
 
-Write schemas with zod 4 (`import { z } from 'zod'`). Validation itself accepts any schema with a `safeParse()` method, but `guren codegen`, OpenAPI generation and `guren context` read schemas structurally and skip ones written with the zod v3 API (the `zod@3` package or the `zod/v3` subpath), with a warning.
+Write schemas with zod 4 (`import { z } from 'zod'`). [Schema Interface](#schema-interface) covers other libraries.
 
 ## Choosing Where to Validate
 
@@ -10,7 +10,7 @@ Write schemas with zod 4 (`import { z } from 'zod'`). Validation itself accepts 
 |-------|-------------|----------------------|
 | [Controller helpers](#controller-validation-helpers) | The default, inside a controller action | The return value of `this.validateBody()` and its siblings |
 | [Route contract](#route-contract-validation) | The route should also carry its types into codegen, OpenAPI and agent tools | `this.validated('route.name')` |
-| [Middleware](#middleware-validation) | The handler is an inline function rather than a controller action | `getValidatedData(ctx)` |
+| [Middleware](#middleware-validation) | The handler is an inline function, or the schema depends on the request | `getValidatedData(ctx)` |
 | [`validate()` / `validateSafe()`](#manual-validation) | The data does not come from a request: a job, a console command, a script | The return value |
 
 A `FormRequest` class layer also exists for code migrated from Laravel. It is deprecated; write new validation with one of the four above.
@@ -91,9 +91,6 @@ export default class PostsController extends Controller {
 }
 ```
 
-> [!TIP]
-> The helpers accept any schema library that implements `safeParse()`: Zod, Valibot, or your own validators.
-
 ### Array-Style Query Parameters
 
 Repeated query keys reach your schema as arrays: `?tag=a&tag=b` becomes `{ tag: ['a', 'b'] }`. A key that appears only once stays a plain string, so use `union` when a parameter may appear one or more times:
@@ -124,15 +121,24 @@ export default class PostsController extends Controller {
 }
 ```
 
-A failure throws the same `ValidationException` (422) as `validateBody()`, with the same error keys, so Inertia forms display it unchanged. See [Reading Validated Input](./routing.md#reading-validated-input).
+On a controller action, a failure throws the same `ValidationException` (422) as the helpers, so Inertia forms display it unchanged. A route whose handler is an inline function answers the 422 itself, in the middleware's shape (see the table below). See [Reading Validated Input](./routing.md#reading-validated-input).
 
 ## Form Validation Errors
 
-What the client receives when a `ValidationException` is thrown depends on the request.
+Each path reports errors in its own shape:
+
+| Source | Shape | Keys |
+|--------|-------|------|
+| `ValidationException`, JSON request | `{ message, errors: { [key]: string[] } }`, 422 | Every message per field |
+| `ValidationException`, Inertia request | The page's `errors` prop: `{ [key]: string }` | First message per field |
+| `this.validateBodySafe()` and siblings | `{ success: false, errors: { [key]: string } }` | First message per field |
+| `validateRequest()`, `validateSafe()`, inline-handler contracts | `{ errors: { [key]: string } }` | First message per top-level field |
+
+The helpers and a contract's `body` key a nested field by its full path (`address.postalCode`). The middleware, `validateSafe()` and a contract's `params` and `query` key it by its top-level field (`address`), and use the key `message` when an error names no field.
 
 ### JSON Requests
 
-A JSON or API request gets a 422 with every message for each field, keyed by the field's path:
+A JSON or API request that throws `ValidationException` gets a 422:
 
 ```json
 {
@@ -165,7 +171,7 @@ function Login({ errors }: { errors?: Record<string, string> }) {
 
 This covers failures from `validateBody`, `validateQuery`, `validateParams` and route contracts, and any `ValidationException.withMessages(...)` you throw yourself.
 
-Flashing needs the session middleware, which is mounted automatically when the `auth` option is set. To change the behavior, register your own renderer for `ValidationException` in a service provider; it takes precedence over the built-in one.
+The errors travel in the session when the app has one (`createApp({ auth })` mounts it), and otherwise in a short-lived cookie, so a fresh scaffold shows them too. The redirect goes to the `Referer` header, or `/` when there is none. To change the behavior, register your own renderer for `ValidationException` (see [ExceptionHandler](./error-handling.md#exceptionhandler)); it takes precedence over the built-in one.
 
 ### Displaying in Inertia
 
@@ -276,6 +282,8 @@ router.put('/users/:id', [UserController, 'update'], resolveIsAdmin, validateReq
 }))
 ```
 
+The action reads the parsed body with `getValidatedData(this.ctx)`.
+
 ### Custom Error Handling
 
 Both middleware take an `onError` option that replaces the 422 response. It receives the same field-to-message map:
@@ -375,30 +383,20 @@ const schema = z.object({
 
 ## Schema Interface
 
-Validation does not depend on Zod. The middleware and `validate()` accept any object with this shape, and the controller helpers need only `safeParse()`:
+Validation calls the schema's own methods rather than importing Zod, so any object with this shape works. `validate()` needs only `parse()`; everything else needs only `safeParse()`:
 
 ```ts
 interface ValidationSchema<T> {
   parse(data: unknown): T
-  safeParse(data: unknown): { success: true; data: T } | { success: false; error: unknown }
+  safeParse(data: unknown):
+    | { success: true; data: T }
+    | { success: false; error: { issues: Array<{ path: PropertyKey[]; message: string }> } }
 }
 ```
 
-A Valibot schema, for example:
+The error keys come from `issues[].path`, so a schema from another library needs a small adapter that returns this shape.
 
-```ts
-import * as v from 'valibot'
-import { Router, validateRequest } from '@guren/core'
-
-const schema = v.object({
-  name: v.string([v.minLength(1)]),
-  email: v.string([v.email()]),
-})
-
-const router = new Router()
-
-router.post('/users', handler, validateRequest(schema))
-```
+The tools that read schemas structurally (`guren codegen`, which writes the typed route manifests; OpenAPI generation; `guren context`) understand zod 4 only. They skip a schema written with the zod v3 API (the `zod@3` package or the `zod/v3` subpath) and print a warning.
 
 ## Compiled Parsing (zod 4.5+)
 
@@ -420,4 +418,4 @@ Three things to know:
 - **Restricted runtimes are handled.** If your runtime forbids generated code (a strict CSP), call `z.config({ jitless: true })`; compilation is skipped and everything still works. Schema features the compiler does not support also fall back to the regular parser, so compilation never throws.
 - **Keep refinements side-effect free.** On invalid input, `.refine()` and `.transform()` callbacks can run twice: the fast path runs first, then the fallback that builds the full error. Validation results are unchanged, but side effects inside those callbacks would happen twice.
 
-Valibot and custom validators are unaffected; they keep their own `parse`/`safeParse`.
+Schemas from other libraries are unaffected; they keep their own `parse`/`safeParse`.
