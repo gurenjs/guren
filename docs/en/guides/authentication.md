@@ -10,14 +10,17 @@ Run the scaffolder with `--install` (`bunx guren add auth` does the same):
 bunx guren make:auth --install
 ```
 
-This command generates login, registration, and password reset controllers, Inertia pages, a layout, `AuthProvider`, `config/mail.ts`, user model, SQL migration, and a demo seeder. The `--install` flag automatically:
+The command writes:
 
-1. Registers `AuthProvider` in your `Application` providers array and lists the mail definition in its `config` array
-2. Adds `createSessionMiddleware` with development-friendly defaults (uses `cookieSecure: true` in production)
-3. Wires `registerAuthRoutes(router)` into `routes/web.ts`
-4. Updates `db/schema.ts` to include password and remember-token columns
+- login, registration, password reset and profile controllers, their Inertia pages and a layout, and `routes/auth.ts`;
+- `AuthProvider`, the `User` model, a demo seeder, and `config/mail.ts` for the reset emails;
+- the `users` columns and a `sessions` table in `db/schema.ts`, `config/session.ts`, and one migration for both.
 
-An app that already binds mail, through `guren add mail` or a provider of its own, keeps that setup. `make:auth` then writes no `config/mail.ts`, registers nothing for mail, and the reset mail sends through the existing binding. Likewise, `guren add mail` run after `make:auth` keeps the setup auth wrote and adds only its sample mailable.
+`--install` then wires it into the app:
+
+1. Registers `AuthProvider` in `createApp()` and adds the mail definition to its `config` array.
+2. Adds `auth: {}` to `createApp()`, which mounts the session and CSRF middleware.
+3. Calls `registerAuthRoutes(router)` from `routes/web.ts`.
 
 Then run:
 
@@ -37,6 +40,7 @@ Flags change what is generated:
 | `--verify` | Adds email verification (see [Email verification](#email-verification)) | Not with `--minimal` |
 | `--oauth github,google` | Adds provider sign-in buttons (see [OAuth login buttons](#oauth-login-buttons)) | Works with `--minimal` |
 | `--oauth-only` | Provider sign-in only, no passwords (see [OAuth as the only sign-in method](#oauth-as-the-only-sign-in-method)) | Needs `--oauth`; implies `--minimal` |
+| `--no-session` | Keeps sessions in process memory instead of a database table | Lost on restart and across instances |
 
 ### Without `--install`
 
@@ -46,12 +50,18 @@ If you prefer to wire things yourself, or already have part of the setup, omit t
 bunx guren make:auth
 ```
 
-Then manually:
-1. Register `AuthProvider` in `src/app.ts`
-2. Add `createSessionMiddleware` to your middleware stack (auto-added by `AuthServiceProvider` unless you opt out)
-3. Register `registerAuthRoutes(router)` from `routes/web.ts`
+The command prints the steps it skipped. The main ones:
 
-The `--install` flag is safe and idempotent – it won't duplicate existing configuration.
+1. Register `AuthProvider` in your `createApp()` providers array.
+2. Add `auth: {}` to the `createApp()` options to enable sessions and CSRF.
+3. Import `registerAuthRoutes` from `routes/auth.ts` and call it from your `routes/web.ts` registrar.
+4. Add the `config/mail.ts` definition to the `config` array, and set `APP_URL` in `.env` (emailed links are built from it).
+
+`--install` is idempotent: it does not duplicate configuration that is already there.
+
+An app that already sets up mail, through `guren add mail` or a provider of its own, keeps that setup: `make:auth` writes no `config/mail.ts`, and the reset mail goes through the existing one. `--no-session` skips the session table and config and leaves sessions in process memory.
+
+## Generated Flows
 
 ### Throttling
 
@@ -77,6 +87,17 @@ bunx guren make:auth --install --verify
 This adds an `emailVerifiedAt` column to the `users` table, a `VerifyEmailController` (shows a "check your email" notice, resends the verification link, and confirms the token), and a `VerifyEmail` page.
 
 Registering then sends a verification email and redirects to `/verify-email` instead of `/dashboard`. The generated `/dashboard` route is guarded with `requireVerifiedEmail`, so unverified users are sent back to `/verify-email` until they confirm. Verification links use the same in-memory store and `log`-driver mail as password reset, so this works with no setup in development.
+
+## OAuth / Social login
+
+There are two ways to add provider sign-in:
+
+| Command | What you get |
+|---------|--------------|
+| `make:auth --oauth github,google` | Buttons on the generated login and registration pages, with account creation and linking already written |
+| `guren add oauth` | The OAuth manager, a controller with a stub callback, and routes, for a sign-in flow you write yourself |
+
+Don't run both against the same app: they write the same files, so the second run aborts (or, with `--force`, overwrites the first).
 
 ### OAuth login buttons
 
@@ -104,8 +125,6 @@ The OAuth state that ties the callback to its authorize redirect is kept in the 
 
 The definition is what the command writes once `config/env.ts` exists and no provider binds `oauth`. Otherwise it writes `app/Providers/OAuthProvider.ts` with the same registrations (plus `CoreOAuthServiceProvider` when there is no `db/schema.ts`) and wires that provider instead. Apps that configure OAuth in a service provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
 
-`--oauth` shares its `OAuthController` / `config/oauth.ts` file paths and the database state store with `guren add oauth` below, with a complete (not stub) callback. Don't run both against the same app, since the second run either aborts (no `--force`) or overwrites the first (`--force`).
-
 ### OAuth as the only sign-in method
 
 `--oauth` still scaffolds password login alongside the buttons. Add `--oauth-only` to drop it entirely:
@@ -121,6 +140,79 @@ Like plain `--oauth` without `--verify`, the profile email is read-only in this 
 `make:auth` only writes the files it scaffolds; it never deletes. Converting an existing password app with `--oauth-only --force` therefore leaves the old registration and reset files behind, and the scaffold prints the list. Delete them: the stale `db/seeders/UsersSeeder.ts` in particular is picked up by `db:seed` rather than by the route table, so a dead `routes/auth.ts` does not neutralize it.
 
 This is the recommended shape for CPU-metered runtimes such as the Cloudflare Workers free tier, where a single password hash exceeds the per-request CPU budget no matter which hashing algorithm you pick.
+
+### Scaffold OAuth in an app
+
+Guren ships OAuth primitives plus provider presets for GitHub, Google and Discord. `guren add oauth` sets them up without the `make:auth` pages:
+
+```bash
+bunx guren add oauth
+```
+
+This creates:
+
+- `config/oauth.ts`
+- `app/Http/Controllers/Auth/OAuthController.ts`
+- `routes/oauth.ts`
+
+and lists the `config/oauth.ts` definition in `createApp({ config })`. The definition binds the `oauth` manager; its contents are shown in the [OAuth guide](./oauth.md#registering-the-manager).
+
+It also adds an `oauth_states` table to `db/schema.ts` and generates its migration (run `bun run db:make` yourself if `drizzle-kit` is not installed yet), and registers the `oauth-states:prune` command. `config/oauth.ts` passes `DatabaseOAuthStateStore` as its `stateStore`, so the callback does not need to reach the process that issued the authorize redirect, which on Workers, Lambda and Vercel it usually does not (see [State Storage](./oauth.md#state-storage)). `CoreOAuthServiceProvider` is not registered, because its manager keeps state in process memory. The command refuses to run in an app with no `db/schema.ts`, and writes nothing.
+
+As with [`--oauth`](#oauth-login-buttons), an app without `config/env.ts`, or with a provider already binding `oauth`, gets `app/Providers/OAuthProvider.ts` with the same registrations and store instead.
+
+### Configure provider credentials
+
+The command declares three keys per provider in `config/env.ts` and adds them, blank, to `.env`:
+
+```bash
+OAUTH_GITHUB_CLIENT_ID=...
+OAUTH_GITHUB_CLIENT_SECRET=...
+OAUTH_GITHUB_REDIRECT_URI=https://your-app.test/auth/github/callback
+```
+
+Equivalent keys exist for `GOOGLE` and `DISCORD`. A provider is registered only when all three of its keys are set.
+
+### Route flow
+
+```ts
+router.get('/auth/:provider', [OAuthController, 'redirectToProvider'])
+router.get('/auth/:provider/callback', [OAuthController, 'callback'])
+```
+
+`redirectToProvider` creates a signed state and redirects to the provider consent screen.  
+`callback` validates state, exchanges code for token, then fetches the remote profile.
+
+### Post-login redirect (`redirectTo`)
+
+Pass `redirectTo` when starting the flow and read it back, sanitized, after the callback. In the scaffolded `OAuthController` (which resolves the manager with `this.oauth()`):
+
+```ts
+// /auth/github?redirectTo=/settings
+async redirectToProvider(): Promise<Response> {
+  const { url } = await this.oauth().authorize('github', {
+    redirectTo: this.request.query('redirectTo'),
+    session: this.auth.session(),
+  })
+  return this.redirect(url)
+}
+
+async callback(): Promise<Response> {
+  const { profile, redirectTo } = await this.oauth().handleCallback('github', {
+    code,
+    state,
+    session: this.auth.session(),
+  })
+  // ...log the user in...
+  return this.redirect(redirectTo ?? '/')
+}
+```
+
+`redirectTo` is guarded against open redirects on both ends of the flow: only app-relative paths (`/settings`) survive by default. Protocol-relative URLs (`//evil.com`), backslash variants, non-http schemes, and unlisted hosts are dropped: `redirectTo` comes back as `undefined` and your fallback applies.
+
+To allow specific external hosts (wildcards supported), list them in `stateConfig` in `config/oauth.ts`. [Redirect After Login](./oauth.md#redirect-after-login) in the OAuth guide shows the definition.
+
+> **Note:** `createRedirectSafetyMiddleware` (opt-in) validates `Location` headers with its own separate `allowedHosts` option. If you mount it, keep both allowlists in agreement, or the middleware rewrites an approved external redirect to `/`.
 
 ## Controllers & Routes
 
@@ -168,7 +260,7 @@ If you assembled authentication by hand, make the same call from your own servic
 
 Sharing `auth.user()` this way is safe by default: the record is sanitized before it leaves the auth layer, so the password hash never reaches the browser (see [Sanitized User Records](#sanitized-user-records)).
 
-Augment `InertiaSharedProps` (see the Controllers guide) to type this `auth` payload for React pages.
+Augment `InertiaSharedProps` (see the [Controllers guide](./controllers.md)) to type this `auth` payload for React pages.
 
 > `shareInertiaProps` merges its props over whatever was registered before, so
 > several parts of your app (auth, i18n, flash, …) can each contribute without
@@ -279,7 +371,7 @@ The generated setup is built from these parts, which the rest of the page config
 
 ## Enabling Sessions
 
-Guards need access to the session. By default, `AuthServiceProvider` will attach `createSessionMiddleware` for you. To customize or disable it, pass auth options to `createApp()`:
+Guards need access to the session. When `createApp()` receives an `auth` option, `AuthServiceProvider` attaches the session middleware (and CSRF) for you. Pass options there to customize it:
 
 ```ts
 import { createApp } from '@guren/core'
@@ -294,7 +386,7 @@ const app = createApp({
 })
 ```
 
-If you need manual control, register the middleware explicitly in `src/app.ts`:
+Without the `auth` option you can mount the session middleware yourself, but nothing then attaches CSRF protection or the provider's session handling:
 
 ```ts
 import { createApp, createSessionMiddleware } from '@guren/core'
@@ -379,6 +471,8 @@ Three things it cannot do, and you should decide against them deliberately:
 - **No "log out everywhere", and no session listing**: there is nothing server-side to enumerate.
 
 Set `ttlSeconds` deliberately: nothing server-side can expire the cookie early, so the encrypted payload's own expiry is the only limit.
+
+#### The `database` store and boot checks
 
 The `database` driver needs a `sessions` table in `db/schema.ts` and a migration. It has three columns: `id` (text primary key), `data`, and `expiresAt`. The dialect-specific shape is in the [Cloudflare guide](./cloudflare.md#sessions-and-oauth-state-must-be-database-backed). Sweep expired rows on a schedule with `manager.pruneExpired()`; `read()` already treats them as missing.
 
@@ -509,86 +603,11 @@ Leave `requireOnCreate` off when accounts can also arrive without a password —
 
 A credential column holding something that is not a password hash means the account cannot authenticate with one. `ModelUserProvider` treats a null column, an empty string, and a sentinel such as `'oauth:...'` alike: the login is denied, and the same hashing work is spent as on a real verification so the response is not distinguishable by time. A value that *claims* a hash format and fails to satisfy it still throws. That is a corrupt or truncated column, and denying it in silence would leave nothing to notice it by. A nullable column is the clearer choice for a passwordless account; `make:auth --oauth` scaffolds one.
 
-The default `AuthServiceProvider` automatically registers a `web` guard that uses the `users` provider. If you need additional guards (e.g. token-based APIs), call `auth.registerGuard('api', factory)` inside the provider and set it as default via `auth.setDefaultGuard('api')` when appropriate.
+`createApp()` registers a default `web` guard that uses the `users` provider. If you need additional guards (e.g. token-based APIs), call `auth.registerGuard('api', factory)` inside the provider and set it as default via `auth.setDefaultGuard('api')` when appropriate.
 
 ## Remember Tokens
 
 `SessionGuard` manages remember tokens automatically when your user provider implements `setRememberToken` / `getRememberToken`. `ModelUserProvider` handles this when the `rememberTokenColumn` option is supplied.
-
-## OAuth / Social login
-
-Guren ships first-party OAuth primitives plus provider presets for GitHub / Google / Discord. This is a lower-level, standalone scaffold. For OAuth buttons wired directly into `make:auth`'s login/registration pages with automatic account creation, see [OAuth login buttons](#oauth-login-buttons) above instead.
-
-### Scaffold OAuth in an app
-
-```bash
-bunx guren add oauth
-```
-
-This creates:
-
-- `config/oauth.ts`
-- `app/Http/Controllers/Auth/OAuthController.ts`
-- `routes/oauth.ts`
-
-and lists the `config/oauth.ts` definition in `createApp({ config })`. The definition binds the `oauth` manager; its contents are shown in the [OAuth guide](./oauth.md#registering-the-manager).
-
-It also adds an `oauth_states` table to `db/schema.ts` and generates its migration (run `bun run db:make` yourself if `drizzle-kit` is not installed yet), and registers the `oauth-states:prune` command. `config/oauth.ts` passes `DatabaseOAuthStateStore` as its `stateStore`, so the callback does not need to reach the process that issued the authorize redirect, which on Workers, Lambda and Vercel it usually does not (see [State Storage](./oauth.md#state-storage)). `CoreOAuthServiceProvider` is not registered, because its manager keeps state in process memory. The command refuses to run in an app with no `db/schema.ts`, and writes nothing.
-
-As with [`--oauth`](#oauth-login-buttons), an app without `config/env.ts`, or with a provider already binding `oauth`, gets `app/Providers/OAuthProvider.ts` with the same registrations and store instead.
-
-### Configure provider credentials
-
-The command declares three keys per provider in `config/env.ts` and adds them, blank, to `.env`:
-
-```bash
-OAUTH_GITHUB_CLIENT_ID=...
-OAUTH_GITHUB_CLIENT_SECRET=...
-OAUTH_GITHUB_REDIRECT_URI=https://your-app.test/auth/github/callback
-```
-
-Equivalent keys exist for `GOOGLE` and `DISCORD`. A provider is registered only when all three of its keys are set.
-
-### Route flow
-
-```ts
-router.get('/auth/:provider', [OAuthController, 'redirectToProvider'])
-router.get('/auth/:provider/callback', [OAuthController, 'callback'])
-```
-
-`redirectToProvider` creates a signed state and redirects to the provider consent screen.  
-`callback` validates state, exchanges code for token, then fetches the remote profile.
-
-### Post-login redirect (`redirectTo`)
-
-Pass `redirectTo` when starting the flow and read it back, sanitized, after the callback. In the scaffolded `OAuthController` (which resolves the manager with `this.oauth()`):
-
-```ts
-// /auth/github?redirectTo=/settings
-async redirectToProvider(): Promise<Response> {
-  const { url } = await this.oauth().authorize('github', {
-    redirectTo: this.request.query('redirectTo'),
-    session: this.auth.session(),
-  })
-  return this.redirect(url)
-}
-
-async callback(): Promise<Response> {
-  const { profile, redirectTo } = await this.oauth().handleCallback('github', {
-    code,
-    state,
-    session: this.auth.session(),
-  })
-  // ...log the user in...
-  return this.redirect(redirectTo ?? '/')
-}
-```
-
-`redirectTo` is guarded against open redirects on both ends of the flow: only app-relative paths (`/settings`) survive by default. Protocol-relative URLs (`//evil.com`), backslash variants, non-http schemes, and unlisted hosts are dropped: `redirectTo` comes back as `undefined` and your fallback applies.
-
-To allow specific external hosts (wildcards supported), list them in `stateConfig` in `config/oauth.ts`. [Redirect After Login](./oauth.md#redirect-after-login) in the OAuth guide shows the definition.
-
-> **Note:** `createRedirectSafetyMiddleware` (opt-in) validates `Location` headers with its own separate `allowedHosts` option. If you mount it, keep both allowlists in agreement, or the middleware rewrites an approved external redirect to `/`.
 
 ## Custom One-Time Token Stores
 
