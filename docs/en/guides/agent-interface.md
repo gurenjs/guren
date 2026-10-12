@@ -239,7 +239,7 @@ explicit values so nothing downstream has to reapply a default:
 
 **Annotations are hints for client UX. They enforce nothing.** Enforcement
 lives in your policies (evaluated inside the dispatched request, exactly as for
-a browser) and in token scopes (evaluated before the request is even
+a browser) and in [token scopes](./agent-tool-governance.md#tokens-and-scopes) (evaluated before the request is even
 synthesized). That is precisely why the two claims that *weaken* a check are
 held against the controller body:
 
@@ -542,6 +542,11 @@ so the app must configure an [API token store](./api-tokens.md):
 - a `subscriptions/listen` request → a JSON-RPC error, since the tool list never
   changes while the server runs and a held stream would serve nothing
 
+A valid token is not enough to see a tool. The token also needs a `tool:` or
+`tools:` scope, and the default `['*']` an `ApiToken` carries grants none, so a
+token issued without one gets an empty `tools/list`. Issue one with
+[`guren token:issue --tools`](./agent-tool-governance.md#issuing-a-token).
+
 You do not need to write a CSRF exemption for it. A request carrying
 `Authorization: Bearer` and no `Cookie` header at all skips CSRF verification
 framework-wide, since with no cookie there is no ambient authority to protect,
@@ -579,6 +584,7 @@ mcpPlugin({
 | `rateLimit` | `{ max: 60, writeMax: 20, windowMs: 60_000 }` | Per-token budget; `false` disables it |
 | `updateLastUsed` | `true` | Whether verifying a bearer writes the token's `lastUsedAt` |
 | `approvals` | none | The approval queue: `{ store, notify, ttlMs? }`. See [Approval-gated tools](./agent-tool-governance.md#approval-gated-tools) |
+| `audit` | none | Where the audit trail is written: `{ file, days? }` or `{ sink }`. See [Writing the trail down](./agent-tool-governance.md#writing-the-trail-down) |
 
 Rate limits are keyed on the **token id**, not an IP: budgets follow
 credentials. They are enforced in process memory, so one long-running server
@@ -657,9 +663,9 @@ pending request and notifies nobody.
 
 ## Locking the tools down
 
-Token scopes, approval gates and the audit trail are covered in
-[Control and Audit Agent Tool Access](./agent-tool-governance.md). Read it
-before you hand a token to an agent you do not run yourself.
+[Control and Audit Agent Tool Access](./agent-tool-governance.md) covers the
+token scopes every MCP caller needs, plus two optional controls: approval gates
+for tools a person should confirm, and the audit trail.
 
 ## Dev MCP is a different endpoint
 

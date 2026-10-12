@@ -9,7 +9,7 @@ three controls decide what an agent may do and keep a record of what it did:
 | Approval gates | Which calls wait for a person before they run | [Approval-gated tools](#approval-gated-tools) |
 | Audit trail | Where every call and every refusal is recorded | [The audit trail](#the-audit-trail) |
 
-Each one works on its own, so you can adopt them in any order.
+Token scopes are required: a token with none sees no tools at all. Approval gates and the audit trail are optional, and each works without the other.
 
 ## Tokens and scopes
 
@@ -25,36 +25,13 @@ Four scope forms, and no more:
 | Scope | Grants |
 |---|---|
 | `tool:posts.store` | exactly that one tool |
-| `tools:read` | every tool whose resolved `readOnlyHint` is true |
+| `tools:read` | every tool whose resolved [`readOnlyHint`](./agent-interface.md#annotations) is true |
 | `tools:posts.*` | every tool named `posts.…` (the dot is part of the match, so not `posts` itself) |
 | `tools:*` | every tool |
 
 Scopes are additive and there is no deny form. A tool the token's scopes do not
 cover is **absent from `tools/list`**, not merely refused, so an ungranted
 catalog cannot map your write surface for a read-only agent.
-
-### What an OAuth client asks for
-
-This grammar is your application's, not the MCP specification's, so a generic
-client cannot guess it and sends no scope at all. A
-`guren cloudflare:build --mcp-oauth` worker therefore advertises what it
-accepts, in the two documents the specification tells a client to read: the
-`scope` on the 401 `WWW-Authenticate` challenge, and Protected Resource
-Metadata (RFC 9728). Both carry `tools:read`.
-
-That value is the coarse read scope on purpose. A conforming client requests
-everything the field lists, and the field is specified to carry the minimum
-that basic functionality needs, so listing `tools:*` there would have every
-client ask for your whole tool surface. The wider `tools:*` stays advertised in
-the authorization server metadata (RFC 8414), which no client reads to *choose*
-a scope, for anyone inspecting what the server accepts.
-
-A client that ignores all of it and still sends nothing reaches the consent
-screen with a default applied, so it is never offered an empty page. Widening
-to a write tool needs that tool's exact name, and a read grant cannot reveal
-one: a tool outside the grant is absent from `tools/list`, and
-`guren_preflight` refuses it too. Read the name from `bunx guren tool:list` and
-re-authorize with `tool:<name>`.
 
 ### Issuing a token
 
@@ -120,6 +97,29 @@ Two issuance-time warnings, neither of them a refusal:
   can also write it back can be steered by that content. Split the two across
   separate tokens where you can.
 
+### What an OAuth client asks for
+
+This grammar is your application's, not the MCP specification's, so a generic
+client cannot guess it and sends no scope at all. A
+`guren cloudflare:build --mcp-oauth` worker therefore advertises what it
+accepts, in the two documents the specification tells a client to read: the
+`scope` on the 401 `WWW-Authenticate` challenge, and Protected Resource
+Metadata (RFC 9728). Both carry `tools:read`.
+
+That value is the coarse read scope on purpose. A conforming client requests
+everything the field lists, and the field is specified to carry the minimum
+that basic functionality needs, so listing `tools:*` there would have every
+client ask for your whole tool surface. The wider `tools:*` stays advertised in
+the authorization server metadata (RFC 8414), which no client reads to *choose*
+a scope, for anyone inspecting what the server accepts.
+
+A client that ignores all of it and still sends nothing reaches the consent
+screen with a default applied, so it is never offered an empty page. Widening
+to a write tool needs that tool's exact name, and a read grant cannot reveal
+one: a tool outside the grant is absent from `tools/list`, and
+[`guren_preflight`](./agent-interface.md#rehearsing-a-call-over-mcp) refuses it too. Read the name from `bunx guren tool:list` and
+re-authorize with `tool:<name>`.
+
 ## Approval-gated tools
 
 Some actions should not happen because an agent asked. Mark the route, and a
@@ -155,7 +155,7 @@ ledger of its own (see [Durable Agents](./durable-agents.md)).
 ### Configuring the queue
 
 There is no default store. Where pending approvals live is your decision, for
-the same reason the audit sink has no default: this endpoint runs on Workers
+the same reason the [audit trail](#writing-the-trail-down) has no default sink: this endpoint runs on Workers
 and Lambda, where a framework that quietly fell back to process memory would
 approve a record the next isolate has never heard of.
 
@@ -172,7 +172,7 @@ mcpPlugin({
 })
 ```
 
-`store` implements `AgentApprovalStore`:
+`DrizzleApprovalStore` is not part of the framework: [`examples/agents`](https://github.com/gurenjs/guren/blob/main/examples/agents/app/Services/DrizzleApprovalStore.ts) carries one to copy. `store` implements `AgentApprovalStore`:
 
 | Method | What it does |
 |---|---|
@@ -213,7 +213,7 @@ through an interface it cannot see.
   does not authorize `{id: 9}`. Key order and nesting do not change the match;
   types do, so `{id: 5}` and `{id: '5'}` are different calls. The match is a
   SHA-256 of a canonical form of the **raw** arguments: the stored record
-  carries the hash and the *redacted* copy of the arguments, so the queue never
+  carries the hash and the [*redacted*](#redaction) copy of the arguments, so the queue never
   becomes a second place your secrets live.
 - **An approval is single-use, and it expires.** One call goes through; the
   next is a fresh request. Past `expiresAt` the record authorizes nothing.
@@ -272,13 +272,19 @@ forward them wherever you already forward events.
 | Event | When | Carries |
 |---|---|---|
 | `AgentToolInvoked` | the call reached the application | `principal`, `tool`, `arguments`, `status`, `durationMs`, `surface` |
-| `AgentToolDenied` | the adapter refused before any HTTP happened | `principal`, `tool`, `arguments`, `reason`, `surface` |
+| `AgentToolDenied` | Guren refused the call before building any HTTP request | `principal`, `tool`, `arguments`, `reason`, `surface` |
 
 `reason` is one of `'auth'`, `'scope'`, `'approval'`, `'rate-limit'`: exactly
 the checks that precede the request. **A policy denial is not one of them:**
 policies evaluate inside the dispatched request, so it arrives as an
 `AgentToolInvoked` with status `403`. A denial carries no status or duration
 because nothing ran.
+
+`principal` is who the call ran as, `{ kind: 'user' | 'service', id }`, or
+`null` when nobody authenticated. `surface` is where it arrived from: `mcp`
+(this endpoint), `dev-mcp`, `cli` (`guren tool:call`), `webmcp` (an in-browser
+session), `durable` (an agent the app hosts) or `in-process`
+(`@guren/plugin-ai`).
 
 A `guren_preflight` call is recorded like any other invocation, under
 `tool: 'guren_preflight'`. An agent probing what it is allowed to do is
@@ -358,7 +364,7 @@ Configuring a sink also covers `bunx guren tool:call`. That command boots your
 application, so it finds the trail the application configured and writes to it
 (one record per call, `surface: 'cli'`, arguments masked by the same
 `.agent({ redact })` list, alongside your MCP records rather than in a second
-file). It is worth having: a call from a terminal runs as whoever `--as` names,
+file). It is worth having: a call from a terminal runs as whoever [`--as`](./agent-interface.md#as-bypasses-authentication) names,
 with no credential to verify, which is exactly the kind of write an audit trail
 is for.
 

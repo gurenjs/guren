@@ -560,7 +560,7 @@ bunx guren tool:log --json | jq 'select(.status >= 400)'
 | `--app` | Current directory | Application root directory |
 | `--json` | `false` | Output one raw record per line, for piping |
 
-`-n` applies **after** filtering, so `--denied -n 50` is the last fifty denials rather than the denials among the last fifty records. Records only exist once a sink is configured: the trail is opt-in, and the command prints the configuration line to add when it finds none. See [Agent Interface — The audit trail](./agent-tool-governance.md#the-audit-trail).
+`-n` applies **after** filtering, so `--denied -n 50` is the last fifty denials rather than the denials among the last fifty records. Records only exist once a sink is configured: the trail is opt-in, and the command prints the configuration line to add when it finds none. See [Control and Audit Agent Tool Access — The audit trail](./agent-tool-governance.md#the-audit-trail).
 
 Everything shown is derived from contracts the route already carries: the input schema merges its `params`, `query` and `body` schemas, the output schema comes from `output`, and the authorization ability comes from the policy its middleware chain checks. Nothing is declared twice, so a tool cannot advertise a schema the endpoint does not validate.
 

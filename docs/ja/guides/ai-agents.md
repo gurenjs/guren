@@ -6,7 +6,7 @@ AI エージェントは、アプリケーションの中で言語モデルを�
 
 | ガイド | 問い |
 |---|---|
-| [エージェントインターフェース](./agent-interface.md) | エージェントはこのアプリケーションに何ができるか(`.agent()` ルート、スコープ、承認、監査) |
+| [エージェントインターフェース](./agent-interface.md) | エージェントはこのアプリケーションに何ができるか(`.agent()` ルート。スコープ、承認、監査は[エージェントツールの権限と監査](./agent-tool-governance.md)) |
 | AI エージェント(このガイド) | アプリケーションのコードから、そのツールを使う仕事をどうモデルに頼むか |
 | [永続エージェント](./durable-agents.md) | 自分の state とスケジュールを持つ長命なエージェントをどこで動かすか |
 
@@ -706,7 +706,8 @@ bunx guren ai:eval ticket-digest --variant v1 --cases 20    # one round against 
 
 ## 関連
 
-- [エージェントインターフェース](./agent-interface.md): `.agent()` ルート、ツールの導出、スコープ、承認、監査ログ
+- [エージェントインターフェース](./agent-interface.md): `.agent()` ルートとツールの導出
+- [エージェントツールの権限と監査](./agent-tool-governance.md): スコープ、承認、監査ログ
 - [永続エージェント](./durable-agents.md): Cloudflare Workers で長命なエージェントをホストする
 - [キュー](./queue.md)と[イベント](./events.md): キューに入れたプロンプトが使うワーカーとリスナー
 - [CLI](./cli.md): `add ai`、`make:ai-agent`、`codegen`

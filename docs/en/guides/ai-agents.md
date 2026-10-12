@@ -6,7 +6,7 @@ Three guides cover the agent story, and each answers one question:
 
 | Guide | Question |
 |---|---|
-| [Agent Interface](./agent-interface.md) | What can an agent do to this application? (`.agent()` routes, scopes, approvals, audit) |
+| [Agent Interface](./agent-interface.md) | What can an agent do to this application? (`.agent()` routes; scopes, approvals and audit are in [Control and Audit Agent Tool Access](./agent-tool-governance.md)) |
 | AI Agents (this guide) | How does application code ask a model to do something with those tools? |
 | [Durable Agents](./durable-agents.md) | Where does a long-lived agent with its own state and schedule run? |
 
@@ -706,7 +706,8 @@ These parts of the design have not shipped:
 
 ## Related
 
-- [Agent Interface](./agent-interface.md): `.agent()` routes, tool derivation, scopes, approvals and the audit trail
+- [Agent Interface](./agent-interface.md): `.agent()` routes and tool derivation
+- [Control and Audit Agent Tool Access](./agent-tool-governance.md): scopes, approvals and the audit trail
 - [Durable Agents](./durable-agents.md): hosting a long-lived agent on Cloudflare Workers
 - [Queue](./queue.md) and [Events](./events.md): the worker and the listener a queued prompt uses
 - [CLI](./cli.md): `add ai`, `make:ai-agent`, `codegen`
