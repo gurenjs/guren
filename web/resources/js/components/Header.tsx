@@ -62,6 +62,7 @@ export function Header({ variant, basePath = '/docs', locales = [] }: HeaderProp
             </Link>
             <div className="flex items-center gap-5">
               <nav className="hidden items-center gap-6 text-sm font-medium text-white/80 md:flex">
+                <Link href="/start" className="transition hover:text-white">Get started</Link>
                 <Link href="/docs" className="transition hover:text-white">Docs</Link>
                 <Link href="/docs/tutorials/00-overview" className="transition hover:text-white">Tutorials</Link>
                 <Link href="/docs/agent-course/00-overview" className="transition hover:text-white">Agent Course</Link>

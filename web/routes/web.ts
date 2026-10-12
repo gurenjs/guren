@@ -4,9 +4,11 @@ import DocsController from '../app/Http/Controllers/DocsController.js'
 import DocsSearchController, { DocSearchQuerySchema } from '../app/Http/Controllers/DocsSearchController.js'
 import HomeController from '../app/Http/Controllers/HomeController.js'
 import MetaController from '../app/Http/Controllers/MetaController.js'
+import StartController, { StartQuerySchema } from '../app/Http/Controllers/StartController.js'
 
 export function registerWebRoutes(router: Router): void {
   router.get('/', [HomeController, 'index'])
+  router.get('/start', { name: 'start', query: StartQuerySchema }, [StartController, 'index'])
 
   router.get('/sitemap.xml', [MetaController, 'sitemap'])
   router.get('/llms.txt', [MetaController, 'llms'])

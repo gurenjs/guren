@@ -1,11 +1,12 @@
 import { Link } from '@inertiajs/react'
-import { Fragment, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useState, type KeyboardEvent, type ReactNode } from 'react'
 interface Props {
   codeExamples: Record<string, string>
 }
 import { GITHUB_URL, OWN_REPO_LINK_REL, SITE_DESCRIPTION, SITE_TITLE } from '../../../config/site.js'
 import { BurningName } from '../components/BurningName.js'
 import { ConventionGrid } from '../components/ConventionGrid.js'
+import { CopyCommand } from '../components/CopyCommand.js'
 import { Footer } from '../components/Footer.js'
 import { Header } from '../components/Header.js'
 import { FunctionIcon, GithubIcon, GlobeIcon, LayersIcon, ServerIcon } from '../components/icons.js'
@@ -113,43 +114,6 @@ function TextLink({ href, external, children }: { href: string; external?: boole
 const PRIMARY_BUTTON =
   'inline-flex items-center rounded-md bg-crimson-600 px-6 py-3 font-bold text-crimson-50 transition hover:bg-crimson-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crimson-300'
 
-function CopyCommand({ command }: { command: string }) {
-  const [copied, setCopied] = useState(false)
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(command)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // Clipboard unavailable; the command is still selectable by hand.
-    }
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={copy}
-      className="group inline-flex max-w-full items-center gap-2 rounded-md border border-white/15 bg-ink px-4 py-3 text-left font-mono text-[13px] text-crimson-50 transition hover:border-crimson-300/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crimson-300 sm:gap-3 sm:text-sm"
-      aria-label={`Copy command: ${command}`}
-    >
-      <span className="select-none text-crimson-400">$</span>
-      {/* Break between words only: the hyphens in create-guren-app are line-break opportunities. */}
-      <span className="min-w-0">
-        {command.split(' ').map((word, i) => (
-          <Fragment key={i}>
-            {i > 0 && ' '}
-            <span className="whitespace-nowrap">{word}</span>
-          </Fragment>
-        ))}
-      </span>
-      <span className="select-none text-xs text-smoke/70 transition group-hover:text-smoke">
-        {copied ? 'copied' : 'copy'}
-      </span>
-    </button>
-  )
-}
-
 function HeroName() {
   return (
     <figure aria-hidden className="hidden flex-col items-center lg:flex">
@@ -205,7 +169,7 @@ export default function Home({ codeExamples }: Props) {
                 Vercel or Cloudflare Workers.
               </p>
               <div className="mt-10 flex flex-wrap items-center gap-3">
-                <Link href="/docs/guides/getting-started" className={PRIMARY_BUTTON}>
+                <Link href="/start" className={PRIMARY_BUTTON}>
                   Get started
                 </Link>
                 <CopyCommand command="bunx create-guren-app my-app" />
@@ -458,6 +422,10 @@ export default function Home({ codeExamples }: Props) {
               <div className="mt-9">
                 <CopyCommand command="bunx create-guren-app my-app" />
               </div>
+              <p className="mt-4 text-[0.9375rem] text-smoke">
+                Postgres, an API-only app, or a coding agent to set it up?{' '}
+                <TextLink href="/start">Pick your options</TextLink> and copy the command or the prompt.
+              </p>
               <div className="mt-5 flex flex-wrap gap-3">
                 <Link href="/docs/guides/getting-started" className={PRIMARY_BUTTON}>
                   Read the quickstart
