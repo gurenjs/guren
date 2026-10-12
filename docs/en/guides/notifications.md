@@ -113,12 +113,10 @@ await notifications.send(user, new OrderShipped(order, 'ABC123'))
 ### Sending to a User
 
 ```ts
-// User must implement Notifiable interface
+// Anything with routeNotificationFor() is a Notifiable
 const user: Notifiable = {
-  id: 1,
-  email: 'user@example.com',
   routeNotificationFor(channel: string): string | null {
-    if (channel === 'mail') return this.email
+    if (channel === 'mail') return 'user@example.com'
     return null
   },
 }
@@ -246,7 +244,7 @@ import { MemoryChannel } from '@guren/core'
 const memoryChannel = new MemoryChannel()
 
 // Later, check sent notifications
-const sent = memoryChannel.getSentNotifications()
+const sent = memoryChannel.sent
 ```
 
 ## Notifiable Interface
@@ -500,11 +498,11 @@ test('sends the shipping notification by mail', async () => {
   }))
 
   // Stands in for the code under test, which resolves the manager the same way
-  const user: Notifiable = { id: 1, routeNotificationFor: () => 'ada@example.com' }
+  const user: Notifiable = { routeNotificationFor: () => 'ada@example.com' }
   const order = { id: 7 } as Order
   await app.container.make('notifications').send(user, new OrderShipped(order, 'ABC123'))
 
-  const sent = mail.getSentNotifications()
+  const sent = mail.sent
   expect(sent).toHaveLength(1)
   expect(sent[0].notification).toBeInstanceOf(OrderShipped)
 })
@@ -544,13 +542,12 @@ describe('Notifications', () => {
 
   test('sends notification', async () => {
     const user: Notifiable = {
-      id: 1,
       routeNotificationFor: () => 'test@example.com',
     }
 
     await notifications.send(user, new TestNotification())
 
-    const sent = memoryChannel.getSentNotifications()
+    const sent = memoryChannel.sent
     expect(sent).toHaveLength(1)
     expect(sent[0].notification).toBeInstanceOf(TestNotification)
   })
@@ -566,13 +563,12 @@ describe('Notifications', () => {
     }
 
     const user: Notifiable = {
-      id: 1,
       routeNotificationFor: () => 'test@example.com',
     }
 
     await notifications.send(user, new ConditionalNotification())
 
-    expect(memoryChannel.getSentNotifications()).toHaveLength(0)
+    expect(memoryChannel.sent).toHaveLength(0)
   })
 
   test('sends to multiple channels', async () => {
@@ -595,14 +591,13 @@ describe('Notifications', () => {
     }
 
     const user: Notifiable = {
-      id: 1,
       routeNotificationFor: () => 'test@example.com',
     }
 
     await notifications.send(user, new MultiChannelNotification())
 
-    expect(mailChannel.getSentNotifications()).toHaveLength(1)
-    expect(dbChannel.getSentNotifications()).toHaveLength(1)
+    expect(mailChannel.sent).toHaveLength(1)
+    expect(dbChannel.sent).toHaveLength(1)
   })
 })
 ```

@@ -93,12 +93,10 @@ notifications
 ### ユーザーへの送信
 
 ```ts
-// ユーザーはNotifiableインターフェースを実装する必要がある
+// routeNotificationFor() を持つものはすべて Notifiable
 const user: Notifiable = {
-  id: 1,
-  email: 'user@example.com',
   routeNotificationFor(channel: string): string | null {
-    if (channel === 'mail') return this.email
+    if (channel === 'mail') return 'user@example.com'
     return null
   },
 }
@@ -226,7 +224,7 @@ import { MemoryChannel } from '@guren/core'
 const memoryChannel = new MemoryChannel()
 
 // 後で送信された通知を確認
-const sent = memoryChannel.getSentNotifications()
+const sent = memoryChannel.sent
 ```
 
 ## Notifiableインターフェース
@@ -460,11 +458,11 @@ test('sends the shipping notification by mail', async () => {
   }))
 
   // テスト対象のコードの代わり。同じようにコンテナからマネージャーを取り出して送信する
-  const user: Notifiable = { id: 1, routeNotificationFor: () => 'ada@example.com' }
+  const user: Notifiable = { routeNotificationFor: () => 'ada@example.com' }
   const order = { id: 7 } as Order
   await app.container.make('notifications').send(user, new OrderShipped(order, 'ABC123'))
 
-  const sent = mail.getSentNotifications()
+  const sent = mail.sent
   expect(sent).toHaveLength(1)
   expect(sent[0].notification).toBeInstanceOf(OrderShipped)
 })
@@ -504,13 +502,12 @@ describe('Notifications', () => {
 
   test('通知を送信する', async () => {
     const user: Notifiable = {
-      id: 1,
       routeNotificationFor: () => 'test@example.com',
     }
 
     await notifications.send(user, new TestNotification())
 
-    const sent = memoryChannel.getSentNotifications()
+    const sent = memoryChannel.sent
     expect(sent).toHaveLength(1)
     expect(sent[0].notification).toBeInstanceOf(TestNotification)
   })
@@ -526,13 +523,12 @@ describe('Notifications', () => {
     }
 
     const user: Notifiable = {
-      id: 1,
       routeNotificationFor: () => 'test@example.com',
     }
 
     await notifications.send(user, new ConditionalNotification())
 
-    expect(memoryChannel.getSentNotifications()).toHaveLength(0)
+    expect(memoryChannel.sent).toHaveLength(0)
   })
 
   test('複数チャンネルに送信する', async () => {
@@ -555,14 +551,13 @@ describe('Notifications', () => {
     }
 
     const user: Notifiable = {
-      id: 1,
       routeNotificationFor: () => 'test@example.com',
     }
 
     await notifications.send(user, new MultiChannelNotification())
 
-    expect(mailChannel.getSentNotifications()).toHaveLength(1)
-    expect(dbChannel.getSentNotifications()).toHaveLength(1)
+    expect(mailChannel.sent).toHaveLength(1)
+    expect(dbChannel.sent).toHaveLength(1)
   })
 })
 ```
