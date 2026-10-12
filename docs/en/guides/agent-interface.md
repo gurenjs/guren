@@ -1146,7 +1146,7 @@ agent-exposed one, and `destructiveHint: false` on an action that deletes,
 updates or force-writes warns.
 
 The full finding-key tables are in
-[CLI — Agent-exposed routes](./cli.md#agent-exposed-routes).
+[CLI — Agent-exposed routes](./cli-checks.md#agent-exposed-routes).
 
 ## Related
 

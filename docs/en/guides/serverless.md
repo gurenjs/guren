@@ -264,7 +264,7 @@ const app = createApp({
 
 The scaffolded `config/database.ts` seeds the database on boot as a local development convenience (`seedOnBoot: process.env.NODE_ENV !== 'production'`) and skips it in production. Keep that guard. Lambda boots the app on every cold start, so boot-time seeding would re-run against production data.
 
-**Migrations** ship with the function: `lambda:build` copies `db/migrations/` next to the bundle, so a `db:migrate` console command can apply them in place. See [Console — `createConsoleHandler(kernel)`](#console--createconsolehandlerkernel) for the command and how to invoke it.
+**Migrations** ship with the function: `lambda:build` copies `db/migrations/` next to the bundle, so a `db:migrate` console command can apply them in place. See [Console — `createConsoleHandler(kernel)`](#console-createconsolehandlerkernel) for the command and how to invoke it.
 
 **Seeders cannot run inside the function.** They are ordinary `.ts` modules that import your schema and `@guren/core`, and the deployed function is a self-contained bundle with no `node_modules` and no TypeScript loader, so the Node.js runtime rejects them outright. Seed from somewhere that has the project source instead:
 

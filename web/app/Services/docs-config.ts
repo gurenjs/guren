@@ -87,6 +87,8 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
       'agent-interface',
       'ai-agents',
       'durable-agents',
+      'agent-harness',
+      'application-diagnostics',
     ],
   },
   {
@@ -97,6 +99,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
       'deploy-production',
       'troubleshoot',
       'cli',
+      'cli-checks',
       'plugins',
       'support-matrix',
       'upgrading',
