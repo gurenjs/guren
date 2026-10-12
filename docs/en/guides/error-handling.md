@@ -206,7 +206,7 @@ export class ExceptionServiceProvider extends ServiceProvider {
 
 `createApp()` has no `debug` option; this binding is where the choice is made.
 
-The debug page prints every request header, `Cookie` and `Authorization` included, so keep details off on any server other people can reach.
+The debug page lists every request header, but shows `[redacted]` in place of the values of `Cookie`, `Authorization`, `Proxy-Authorization`, `X-XSRF-TOKEN` and `X-CSRF-Token`. The stack trace, file paths and the other headers are printed as they are, so keep details off on any server other people can reach.
 
 `debugErrorMiddleware()` is deprecated and will be removed in 3.0.0. Its `catch` never sees an error (see [Error Middleware](#error-middleware)), and the exception handler now renders the same page, so remove it from your middleware. `bunx guren upgrade --check-only` lists the files that import it.
 

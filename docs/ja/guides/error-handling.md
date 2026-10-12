@@ -383,7 +383,7 @@ export class ExceptionServiceProvider extends ServiceProvider {
 
 `createApp()` には `debug` オプションはなく、判定はこの登録で決まります。
 
-デバッグページには Cookie や `Authorization` を含むリクエストヘッダーがそのまま載ります。他の人がアクセスできるサーバーでは、詳細を出さない設定にしてください。
+デバッグページにはリクエストヘッダーが一覧で載りますが、`Cookie`、`Authorization`、`Proxy-Authorization`、`X-XSRF-TOKEN`、`X-CSRF-Token` の値は `[redacted]` に置き換わります。スタックトレースやファイルパス、ほかのヘッダーはそのまま表示されるので、他の人がアクセスできるサーバーでは詳細を出さない設定にしてください。
 
 `debugErrorMiddleware()` は非推奨になり、3.0.0 で削除されます。このミドルウェアの `catch` にはエラーが届かず([エラーミドルウェア](#エラーミドルウェア)を参照)、同じページを ExceptionHandler が表示するようになったので、ミドルウェアから外してください。`bunx guren upgrade --check-only` を実行すると、これを import しているファイルが一覧で出ます。
 

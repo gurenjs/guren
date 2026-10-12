@@ -127,3 +127,46 @@ describe('renderDebugPage stack frames', () => {
     ])
   })
 })
+
+const HEADER_ROW_PATTERN = /<tr><td class="key">([^<]*)<\/td><td class="value">([^<]*)<\/td><\/tr>/g
+
+function headerRowsIn(html: string): Record<string, string> {
+  return Object.fromEntries([...html.matchAll(HEADER_ROW_PATTERN)].map(([, key, value]) => [key, value]))
+}
+
+describe('renderDebugPage request headers', () => {
+  const CREDENTIALS = {
+    Cookie: 'guren_session=s3cr3t-session; theme=dark',
+    Authorization: 'Bearer s3cr3t-token',
+    'Proxy-Authorization': 'Basic s3cr3t-proxy',
+    'X-XSRF-TOKEN': 's3cr3t-xsrf',
+    'X-CSRF-Token': 's3cr3t-csrf',
+  }
+
+  function pageWithHeaders(headers: Record<string, string>): string {
+    return renderDebugPage(new Error('boom'), new Request('http://example.com/posts?page=2', { headers }))
+  }
+
+  test('should redact the values of credential-bearing headers and keep their names', () => {
+    const html = pageWithHeaders(CREDENTIALS)
+
+    expect(html).not.toContain('s3cr3t')
+    const rows = headerRowsIn(html)
+    for (const name of Object.keys(CREDENTIALS)) {
+      expect(rows[name.toLowerCase()]).toBe('[redacted]')
+    }
+  })
+
+  test('should keep every other header as sent', () => {
+    const rows = headerRowsIn(pageWithHeaders({
+      ...CREDENTIALS,
+      Accept: 'text/html',
+      'User-Agent': 'probe/1.0',
+      'X-Request-Id': 'req-42',
+    }))
+
+    expect(rows.accept).toBe('text/html')
+    expect(rows['user-agent']).toBe('probe/1.0')
+    expect(rows['x-request-id']).toBe('req-42')
+  })
+})
