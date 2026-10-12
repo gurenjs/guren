@@ -4,13 +4,14 @@ A durable agent is a long-lived, stateful process your own application hosts, an
 
 [Agent Interface](./agent-interface.md) gave your application a surface agents can call. This guide is about the other side: hosting an agent of your own that calls it, such as a triager that wakes every hour, a researcher that accumulates findings over a week, an operations agent that proposes a destructive change and then waits, possibly for days, for a human to say yes.
 
-Getting one running takes five steps, each with its own section below:
+Getting one running takes these steps, each with its own section below:
 
-1. [Install the plugin and register it](#install-and-register) in `src/app.ts`.
-2. [Scaffold the class](#scaffolding-one) with `make:agent`.
-3. [Register it](#the-registry) in `config/agents.ts`, with the tools it may call.
-4. [Write the agent](#writing-the-agent) against `this.tools`.
-5. [Deploy it to Workers](#deploying-to-workers).
+1. [Install the packages](#install-and-register).
+2. [Scaffold the class](#scaffolding-one) with `make:agent`, which also writes its registration in `config/agents.ts`.
+3. [Add `agentsPlugin(agents)`](#install-and-register) to `src/app.ts`.
+4. [Adjust the registration](#the-registry): the tools the agent may call and its budget.
+5. [Write the agent](#writing-the-agent) against `this.tools`.
+6. [Deploy it to Workers](#deploying-to-workers).
 
 [Human in the loop](#human-in-the-loop) covers calls that wait for a person's approval, and [Testing](#testing) how to split the test suite.
 
@@ -64,7 +65,7 @@ const app = createApp({
 export default app
 ```
 
-`EventServiceProvider` is what makes the audit events reachable at all (see [the audit trail](./agent-tool-governance.md#the-audit-trail)).
+`@/config/agents` is the registry `make:agent` writes (see [Scaffolding one](#scaffolding-one)). `EventServiceProvider` is what makes the audit events reachable at all (see [the audit trail](./agent-tool-governance.md#the-audit-trail)).
 
 `EncryptionServiceProvider` and an `APP_KEY` let an agent retry a call that waited for a human's approval. The call's arguments are kept in the agent's own storage, encrypted with the app key (see [The ledger](#the-ledger)). Without an encrypter, the plugin warns at boot: a call waiting for approval is still reported to the agent with its `requestId`, but nothing retries it for you. The provider's position in `providers` does not matter.
 
@@ -457,16 +458,14 @@ Two suites in the Guren repository show the two shapes: [the plugin's workerd te
 |---|---|
 | The registry is a static `defineAgentsConfig()` literal with valid `module`, `export` and `scopes` | `guren check`, as a failure |
 | A `tool:` scope names a tool some route declares | `guren check`, as a warning |
-| `app/Agents/**` imports no models, `db/**`, `@guren/orm` or `@guren/plugin-agents/runtime` | `guren check --arch`, as a failure |
-| A non-read-only tool the agent calls requires authorization | `guren check`, through the agent-route rules |
+| `app/Agents/**` imports no models, `db/**`, `@guren/orm` or `@guren/plugin-agents/runtime` | `guren check` (or `check --arch` alone), as a failure |
+| A non-read-only tool the agent calls requires authorization | `guren check`, as a failure (an agent-route rule) |
 | The agent name matches `^[A-Za-z0-9_-]+$`, and `budget.callsPerMinute` is a whole number of at least 1 | `agentsPlugin`, when the app boots |
 | `@guren/plugin-agents` is a runtime dependency, every class has a SQLite Durable Object binding, and `keep_names` is not `false` | `guren cloudflare:build`, before deploying |
 
-The paragraphs below give the detail behind each row except the last, which [Install and register](#install-and-register) and [The bindings verifier](#the-bindings-verifier) cover.
+The paragraphs below give the detail behind the `guren check` rows. [The registry](#the-registry) covers the boot-time rules, and [Install and register](#install-and-register) and [The bindings verifier](#the-bindings-verifier) the build's.
 
 `check` **fails** on a registry it or the deploy build could not read: an unparseable file, a config that is not a literal `defineAgentsConfig({ agents: { … } })`, a spread inside `agents`, a non-literal `module` or `export`, a `module` naming a file that does not exist or that does not export that class as a class declaration, a duplicated agent key or export name, a missing or non-literal `scopes` array, and a scope outside the registration grammar. It **warns** on a `tool:` scope naming a tool no route declares. Such a scope grants nothing, so it points at a typo or a renamed route rather than a security hole.
-
-Two registry rules are enforced somewhere else, and it is worth knowing where: an agent name outside `^[A-Za-z0-9_-]+$` and a `budget.callsPerMinute` that is not a whole number of at least one are refused by `agentsPlugin` at boot, not by `check`. They fail the app's startup rather than its review.
 
 `bunx guren check --arch` enforces the boundary the scaffold wrote: an `app/Agents/**` file importing `app/Models/**`, `db/**`, `@guren/orm` or `@guren/plugin-agents/runtime` fails. **This boundary is a convention the checker enforces, not a sandbox.** In-process code shares the isolate and can import whatever it likes, and the checker sees static imports only, so a dynamic `import()` escapes it. What the boundary buys is that crossing it is visible in review rather than incidental, with the audit trail as the other half.
 
