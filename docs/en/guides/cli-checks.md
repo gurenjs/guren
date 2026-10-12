@@ -1,6 +1,6 @@
 # Checks and Audits in Depth
 
-The [CLI Reference](./cli.md#inspection-audit-commands) lists `check`, `audit`, `gate`, `introspect` and `doctor`. This page holds the rules behind them: what the audit's policy rule looks for, what `introspect` runs, the extra rules for agent routes and in-process agents, architecture boundaries, and which facts the checks read from the running app.
+The [CLI Reference](./cli.md#inspection-audit-commands) lists `check`, `audit`, `gate`, `introspect` and `doctor`. This page holds the rules behind them: what the audit's policy rule looks for, how to suppress an audit finding, what `introspect` runs, the extra rules for agent routes and in-process agents, architecture boundaries, and which facts the checks read from the registered (but never booted) app.
 
 ## The audit's policy rule
 
@@ -17,6 +17,32 @@ those the audit reads. A helper the action calls is not followed, so put
 `// guren-audit-ignore` in a comment above an action whose check lives
 elsewhere: the finding is then reported as ignored, with that comment as its
 reason. An app with no policy gets no such finding.
+
+## Suppressing audit findings
+
+Every `audit` finding can be suppressed when it is a false positive, by one of two mechanisms depending on whether the finding has a source line.
+
+For a finding with a source line, place `// guren-audit-ignore` on the flagged line or the line above it:
+
+```ts
+// guren-audit-ignore -- documented example value
+const apiKey = 'example-not-a-real-key'
+```
+
+Route- and model-level findings (`authz:*`, `policy:*`, `validation:*`, `agent-annotation:*`, `mass-assignment:*`, `hidden-columns:*`) have no single line to attach a comment to: they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead (`policy:*` also honours the marker in a comment above the action, since the action is where its fix goes), keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`. `force-write-request-data:*` and `set-spread:*` name a controller method but carry no line either, so they are ignored the same way:
+
+```ts
+// config/audit.ts
+export default {
+  ignore: [
+    { key: 'authz:POST /webhooks/stripe', reason: 'HMAC signature verified in the controller' },
+  ],
+}
+```
+
+Ignored findings stay in the report with `status: "ignored"` and an `ignoreReason`. Nothing is silently dropped. An entry with a missing `key`/`reason`, or one that never matches a finding, produces its own warning so stale rules don't rot unnoticed.
+
+`config/audit.ts` only accepts findings that have no source line, the route- and model-level ones above. Line-scoped findings (hardcoded secrets, raw SQL, disabled security toggles) already have `// guren-audit-ignore` for that; an entry targeting one is rejected with a warning pointing you back to the inline comment, rather than becoming a second, less visible way to silence them.
 
 ## Introspecting the registered app
 
@@ -106,28 +132,6 @@ Routes that declare `.agent()` metadata (see [Routing](./routing.md)) are checke
 - `agent-annotation:*` warns when `destructiveHint: false` is declared on an action that deletes, updates, or force-writes records, and also when that claim could not be checked because the action body was unreadable.
 - `controller-unreadable:*` warns when a controller file could not be read, since every rule above saw no body for the actions it declares.
 - `controller-unparsed:*` warns when a controller file was read but could not be parsed. The rules above saw no body for its actions, and a route matched to one of its classes by name alone is judged against another controller file that declares the same class name, with no `controller-name-collision:*` reported.
-
-Suppress a false positive by placing `// guren-audit-ignore` on the flagged line or the line above it:
-
-```ts
-// guren-audit-ignore -- documented example value
-const apiKey = 'example-not-a-real-key'
-```
-
-Route- and model-level findings (`authz:*`, `policy:*`, `validation:*`, `agent-annotation:*`, `mass-assignment:*`, `hidden-columns:*`) have no single line to attach a comment to: they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead (`policy:*` also honours the marker in a comment above the action, since the action is where its fix goes), keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`. `force-write-request-data:*` and `set-spread:*` name a controller method but carry no line either, so they are ignored the same way:
-
-```ts
-// config/audit.ts
-export default {
-  ignore: [
-    { key: 'authz:POST /webhooks/stripe', reason: 'HMAC signature verified in the controller' },
-  ],
-}
-```
-
-Ignored findings stay in the report with `status: "ignored"` and an `ignoreReason`. Nothing is silently dropped. An entry with a missing `key`/`reason`, or one that never matches a finding, produces its own warning so stale rules don't rot unnoticed.
-
-`config/audit.ts` only accepts findings that have no source line, the route- and model-level ones above. Line-scoped findings (hardcoded secrets, raw SQL, disabled security toggles) already have `// guren-audit-ignore` for that; an entry targeting one is rejected with a warning pointing you back to the inline comment, rather than becoming a second, less visible way to silence them.
 
 ## In-process agents
 

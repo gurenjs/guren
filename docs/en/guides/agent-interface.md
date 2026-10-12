@@ -1146,7 +1146,7 @@ agent-exposed one, and `destructiveHint: false` on an action that deletes,
 updates or force-writes warns.
 
 The full finding-key tables are in
-[CLI — Agent-exposed routes](./cli-checks.md#agent-exposed-routes).
+[Checks and Audits in Depth: Agent-exposed routes](./cli-checks.md#agent-exposed-routes).
 
 ## Related
 
@@ -1154,6 +1154,7 @@ The full finding-key tables are in
 - [API Tokens](./api-tokens.md): the store the MCP endpoint verifies bearers against
 - [Authorization](./authorization.md): the policies that decide what a principal may do
 - [Events](./events.md): listener registration and the event manager
-- [CLI](./cli.md): `tool:list`, `tool:inspect`, and the check/audit finding keys
+- [CLI](./cli.md): `tool:list` and `tool:inspect`
+- [Checks and Audits in Depth](./cli-checks.md#agent-exposed-routes): the check/audit finding keys for agent routes
 - [AI Agents](./ai-agents.md): an agent class in your app that calls a model with these tools
 - [Durable Agents](./durable-agents.md): hosting an agent of your own that calls this surface

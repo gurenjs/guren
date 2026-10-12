@@ -170,7 +170,7 @@ export default defineArchRules({
 })
 ```
 
-See the [CLI guide](./cli.md) for how architecture rules work in general.
+See [Architecture boundaries](./cli-checks.md#architecture-boundaries) for how architecture rules work in general.
 
 ## Gotchas
 

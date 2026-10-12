@@ -137,6 +137,8 @@ lint の設定は、`create-guren-app` 1.12 以降で作ったアプリには最
 
 リリース前にアプリを検証するためのコマンドです。AI コーディングエージェントから使うことも想定していて、`--json` を付けると機械で読める形式で出力します。
 
+これらのコマンドの詳細は[チェックと監査の詳細](./cli-checks.md)にあります。`audit` の [Policy ルール](./cli-checks.md#audit-の-policy-ルール)、[`introspect`](./cli-checks.md#登録済みアプリのイントロスペクション) が実行するもの、[エージェントに公開したルート](./cli-checks.md#エージェントに公開したルート)と[インプロセスエージェント](./cli-checks.md#インプロセスエージェント)に追加される規則、[`audit` の指摘の抑制](./cli-checks.md#audit-の指摘を抑制する)、[アーキテクチャ境界](./cli-checks.md#アーキテクチャ境界)、[チェックがアプリを読む仕組み](./cli-checks.md#チェックがアプリを読む仕組み)です。
+
 | コマンド | 説明 | 例 |
 |---------|------|-----|
 | `check` | アプリの配線を検証する（対象の一覧は表の後ろ） | `bunx guren check --json` |
@@ -148,6 +150,10 @@ lint の設定は、`create-guren-app` 1.12 以降で作ったアプリには最
 | `docs:graph` | OKF docs のリレーショングラフ。文書・エンティティ・コードパスがノードで、検証済みのリレーションがエッジになる。`--entity <Model>` / `--path <file>` で周辺だけに絞れるので、リネームの前に「これを規定している docs はどれか」を調べられる | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |
 | `spec:generate` | `docs/spec/` にある導出スペックビュー(ER 図・ドメインモデル・画面一覧・モジュールマップ)を生成し直す。詳しくは[スペックアンカード開発](./spec-anchored.md)を参照 | `bunx guren spec:generate` |
 
+`audit` は、名前付きミドルウェアで保護したルート(例: `router.middleware('auth').group(...)`)を保護済みとして扱い、`/login` や `/register` などのゲスト向けのフローを認証チェックの対象から外します。
+
+### `check` の検証対象
+
 `check` が検証するのは次のものです。
 
 - ルート、コントローラー、ページ、モデルが互いに食い違っていないこと
@@ -156,6 +162,8 @@ lint の設定は、`create-guren-app` 1.12 以降で作ったアプリには最
 - deferred props: ページの `Props` が必須として宣言している prop に `defer()` を渡していないか（参考扱いの警告）
 - doc リンク、スペックビューが最新か、アーキテクチャ境界
 - デプロイ用プラグインか Lambda アダプターを宣言しているアプリでは、`guren doctor` が報告するデプロイ実行環境の判定（参考扱い）
+
+### 終了コードとスイートのフラグ
 
 `audit` は失敗(fail)を見つけると非ゼロの終了コードを返します。フラグなしの `check` は報告するだけですが、スイートを選ぶフラグを付けると、そのスイートに失敗があったときに非ゼロで終了します。雛形に含まれる CI ワークフローは、後で説明する `gate` を実行します。
 
@@ -167,7 +175,9 @@ bunx guren check --spec    # docs/spec/ が再生成結果と一致するか
 bunx guren check --prototype  # prototype ハンドラーのルートに名前付きの fixture エントリがあり、ローダーが配線されているか
 ```
 
-スイートのフラグを複数付けると、それぞれのスイートをすべて実行します。`--changed` を付けると、どのスイートも main とのマージベースから変更されたファイルだけを対象にします。エージェントハーネスが編集のたびに走らせる hook は、この速い経路を使っています。
+スイートのフラグを複数付けると、それぞれのスイートをすべて実行します。`--changed` を付けると、どのスイートも main とのマージベースから変更されたファイルだけを対象にします。[エージェントハーネス](./agent-harness.md#hooks)が編集のたびに走らせる hook は、この速い経路を使っています。
+
+### `--fix` で生成し直す
 
 指摘の中には、ファイルを生成し直せば消えるものもあります。`.guren/*.gen.ts` マニフェストがない場合(`guren codegen`)と、`docs/spec/` のビューが古い場合(`guren spec:generate`)です。`check --json` は、こうした指摘に `fix` フィールドを付けます。中身は `{ "kind": "command", "args": ["codegen"] }` のような、`guren` に続く引数です。`--fix` を付けると、重複を除いた fix を 1 回ずつ実行してからもう一度チェックし、2 回目の結果を報告します。実行したコマンドは `fixes` に入ります。どれかのコマンドが失敗したときや、コマンドは成功したのに消えるはずの指摘が残ったときは、非ゼロで終了します。`--ci` と `--fix` は同時に指定できません。ゲートが古いファイルを自分で生成し直すと、いつでも通ってしまうからです。`--fix` は手元で実行し、書き換わったファイルをコミットしてください。コードの修正や判断が必要な指摘には `fix` が付かず、`suggestion` の文章だけが付きます。
 
@@ -183,6 +193,8 @@ bunx guren doctor --fix --next
 bunx guren doctor --fix --json
 ```
 
+### `gate`
+
 `gate` は、「この変更は終わったか」に 1 つの終了コードで答えるコマンドです。雛形に含まれる CI ワークフローが実行するステージ、つまり codegen、typecheck、lint(アプリに `.oxlintrc.json` がある場合)、`--ci` の規則での `check`、`audit`、テストスイートをすべて実行し、ステージごとに結果を報告して、どれかが失敗すれば非ゼロで終了します。実行*できない*ステージは、スキップではなく失敗として扱います。たとえば、`.oxlintrc.json` があるのに oxlint が入っていない、`typecheck` スクリプトがない、routes のエントリが読み込めない、といった場合です。lint をスキップするのは、`.oxlintrc.json` がないアプリだけです。
 
 `check` と `audit` のステージは、イントロスペクションの結果を読みます([イントロスペクションの結果を読むチェック](./cli-checks.md#イントロスペクションの結果を読むチェック)参照)。イントロスペクションは 1 回の実行につき 1 回(上限 10 秒)で、codegen のあとに行うので、clone したばかりのアプリでもエントリを import できます。イントロスペクションが失敗しても、それを必要としたステージに参考扱いの行を 1 行加えるだけで、ゲートは失敗にしません。`-unverified` の結果も、アプリが確認できなかった理由を添えて、check ステージに参考扱いの行として表示します。ただし、ソースを変更していない `--changed` の実行ではイントロスペクションを行わないので、この行は出ません。`guren plan:verify` も、check のステップで同じ行を表示します。
@@ -194,11 +206,7 @@ bunx guren gate --deps     # audit ステージに依存関係スキャンを追
 bunx guren gate --json     # ステージごとのレポート(ツール向け)
 ```
 
-雛形に含まれる `.github/workflows/ci.yml` は `bunx guren gate --deps` の 1 ステップだけなので、手元でゲートを通した変更は CI でも通ります。Claude Code のハーネスはこのコマンドを `Stop` hook から実行し([AIエージェントハーネス](#aiエージェントハーネス)参照)、MCP サーバは `guren_gate` ツールとして公開しています。そのほかのエージェントには、変更が終わったと言う前に実行するよう `AGENTS.md` で指示しています。
-
-名前付きミドルウェアで保護したルート(例: `router.middleware('auth').group(...)`)は、保護済みとして扱われます。`/login` や `/register` などのゲスト向けのフローは、認証チェックの対象外です。
-
-これらのコマンドの詳細は[チェックと監査の詳細](./cli-checks.md)にあります。`audit` の [Policy ルール](./cli-checks.md#audit-の-policy-ルール)、[`introspect`](./cli-checks.md#登録済みアプリのイントロスペクション) が実行するもの、[エージェントに公開したルート](./cli-checks.md#エージェントに公開したルート)と[インプロセスエージェント](./cli-checks.md#インプロセスエージェント)に追加される規則、[アーキテクチャ境界](./cli-checks.md#アーキテクチャ境界)、[チェックがアプリを読む仕組み](./cli-checks.md#チェックがアプリを読む仕組み)です。
+雛形に含まれる `.github/workflows/ci.yml` は `bunx guren gate --deps` の 1 ステップだけなので、手元でゲートを通した変更は CI でも通ります。Claude Code のハーネスはこのコマンドを `Stop` hook から実行し([エージェントハーネス](./agent-harness.md#hooks)参照)、MCP サーバは `guren_gate` ツールとして公開しています。そのほかのエージェントには、作業を終える前に実行するよう `AGENTS.md` で指示しています。
 
 ## アプリケーションモジュール
 
@@ -242,7 +250,7 @@ Inertia のページは、`modules/<name>/` の下には置きません。トッ
 
 ## AIエージェントハーネス
 
-`create-guren-app` で作ったアプリには、エージェントハーネスが入っています。Claude Code、Codex、Cursor、GitHub Copilot、OpenCode 向けのプロジェクトガイド、ルール、スキル、hook と、各エージェントの MCP の設定（`.mcp.json`、`.codex/config.toml`、`.cursor/mcp.json`、`.vscode/mcp.json`、`opencode.json` の `mcp` エントリ）です。エージェントごとに入るものと hook の動きは[エージェントハーネス](./agent-harness.md)で説明しています。
+`create-guren-app` で作ったアプリには、エージェントハーネスが入っています。Claude Code、Codex、Cursor、GitHub Copilot、OpenCode 向けのプロジェクトガイド、ルール、スキル、hooks、MCP の設定です。エージェントごとに入るファイルと hooks の動きは[エージェントハーネス](./agent-harness.md)で説明しています。
 
 | コマンド | 説明 | 例 |
 |---------|------|-----|
@@ -590,6 +598,8 @@ bunx create-guren-app my-app --mode ssr
 
 CLI はデフォルトのテンプレートをコピーし、メタデータを書き換えます。`--mode ssr`(デフォルト)なら SSR が有効になり、`--mode spa` なら無効になります。空でないディレクトリに生成するときは `--force` を付けます。
 
+雛形を作るときには、[エージェントハーネス](./agent-harness.md#エージェントを選ぶ)を入れるエージェントも尋ねられます。`--agents codex,cursor` のように指定するか、`--agents none` でハーネスを入れずに済ませられます。
+
 ## トラブルシューティング
 - `command not found: bunx`: Bun が古いのかもしれません。サポートの基準になっている Bun 1.4.2 をインストールしてください。
 - `Error: Port already in use`: 開発サーバーのポート(デフォルトは 3333)がほかで使われています。`.env` の `PORT` を変えてから再起動してください。
@@ -624,4 +634,9 @@ bunx guren console
 
 ## アプリ構造と実行時エラーの取得
 
-`bunx guren graph` は動いているアプリの配線を、`bunx guren runtime:errors` は最近起きたサーバーエラーを表示します。どちらも[アプリ構造と実行時エラー](./application-diagnostics.md)で説明しています。
+| コマンド | 説明 | 例 |
+|---------|------|-----|
+| `graph` | アプリの配線（ルート、コントローラー、モデル、ページと、それらを結ぶ根拠）を、ディスク上のプロジェクトから読んで出力する | `bunx guren graph --json` |
+| `runtime:errors` | 開発中のアプリで最近起きたサーバーエラーを一覧する（`GUREN_MCP=1` が必要） | `bunx guren runtime:errors --json --url http://127.0.0.1:3333` |
+
+どちらのコマンドも、同じデータをコーディングエージェントに渡す MCP ツールや Dev Center とあわせて、[アプリ構造と実行時エラー](./application-diagnostics.md)で説明しています。

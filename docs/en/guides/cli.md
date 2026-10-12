@@ -178,7 +178,9 @@ re-run to repair a partial install (`add session`, `add cache`, `add schedule`,
 
 ## Inspection & Audit Commands
 
-Validate your app before shipping. These commands are also designed for AI coding agents (add `--json` for machine-readable output):
+Validate your app before shipping. These commands are also designed for AI coding agents (add `--json` for machine-readable output).
+
+Details on these commands live in [Checks and Audits in Depth](./cli-checks.md): the audit's [policy rule](./cli-checks.md#the-audits-policy-rule), what [`introspect`](./cli-checks.md#introspecting-the-registered-app) runs, the extra rules for [agent-exposed routes](./cli-checks.md#agent-exposed-routes) and [in-process agents](./cli-checks.md#in-process-agents), [suppressing a false positive](./cli-checks.md#suppressing-audit-findings), [architecture boundaries](./cli-checks.md#architecture-boundaries), and [how the checks read the app](./cli-checks.md#how-the-checks-read-the-app).
 
 | Command | Description | Example |
 |---------|-------------|---------|
@@ -191,6 +193,10 @@ Validate your app before shipping. These commands are also designed for AI codin
 | `docs:graph` | The OKF docs relation graph: documents, entities, and code paths as nodes, verified relations as edges. `--entity <Model>` or `--path <file>` narrows to a neighborhood — ask "what governs this?" before renaming | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |
 | `spec:generate` | Regenerates the derived spec views in `docs/spec/` (ER diagram, domain model, screens, module map) — see [Spec-Anchored Development](./spec-anchored.md) | `bunx guren spec:generate` |
 
+`audit` recognizes routes wrapped in named middleware (for example `router.middleware('auth').group(...)`) as protected, and leaves guest flows such as `/login` and `/register` out of its authentication checks.
+
+### What `check` covers
+
 `check` covers:
 
 - routes, controllers, pages and models agreeing with each other;
@@ -199,6 +205,8 @@ Validate your app before shipping. These commands are also designed for AI codin
 - deferred Inertia props: a `defer()` passed for a prop the page's `Props` declares as required (advisory);
 - doc links, spec-view freshness and architecture boundaries;
 - for an app that declares a deploy plugin or the Lambda adapter, the deploy-runtime verdicts `guren doctor` reports (advisory).
+
+### Exit codes and suite flags
 
 `audit` exits with a non-zero status when it finds failures. Plain `check` is informational. Its suite flags each exit non-zero on
 failures in that suite, and `gate` (below) is what the scaffolded CI
@@ -214,7 +222,9 @@ bunx guren check --prototype  # routes on the prototype handler have a named fix
 
 Combining suite flags runs their union. `--changed` restricts any of
 them to files changed against the merge base with `main`, the fast
-path the agent-harness edit hook uses.
+path the agent harness's [edit hook](./agent-harness.md#hooks) uses.
+
+### Regenerating with `--fix`
 
 Some findings clear by regenerating files: a missing `.guren/*.gen.ts`
 manifest (`guren codegen`) and a drifted `docs/spec/` view
@@ -250,6 +260,8 @@ bunx guren doctor --fix --next
 bunx guren doctor --fix --json
 ```
 
+### `gate`
+
 `gate` is the one command that answers "is this change done?". It runs
 codegen, typecheck, lint (when the app has an `.oxlintrc.json`),
 `check` under the `--ci` rule, `audit`, and the test suite (the stages
@@ -276,13 +288,9 @@ bunx guren gate --json     # the per-stage report, for tools
 
 The scaffolded `.github/workflows/ci.yml` is one `bunx guren gate --deps`
 step, so a change that passes the gate locally passes CI. The Claude Code
-harness runs it from a `Stop` hook (see [AI Agent Harness](#ai-agent-harness)),
+harness runs it from a `Stop` hook (see [Agent Harness](./agent-harness.md#hooks)),
 the MCP server exposes it as `guren_gate`, and `AGENTS.md` tells other agents
 to run it before declaring a change done.
-
-Routes wrapped in named middleware (for example `router.middleware('auth').group(...)`) are recognized as protected. Guest flows such as `/login` and `/register` are excluded from authentication checks.
-
-Details on these commands live in [Checks and Audits in Depth](./cli-checks.md): the audit's [policy rule](./cli-checks.md#the-audits-policy-rule), what [`introspect`](./cli-checks.md#introspecting-the-registered-app) runs, the extra rules for [agent-exposed routes](./cli-checks.md#agent-exposed-routes) and [in-process agents](./cli-checks.md#in-process-agents), [architecture boundaries](./cli-checks.md#architecture-boundaries), and [how the checks read the app](./cli-checks.md#how-the-checks-read-the-app).
 
 ## Application Modules
 
@@ -326,7 +334,7 @@ Inertia pages are not colocated inside `modules/<name>/`. They stay under the to
 
 ## AI Agent Harness
 
-Apps scaffolded with `create-guren-app` include an agent harness: project guides, rules, skills and hooks for Claude Code, Codex, Cursor, GitHub Copilot and OpenCode, plus each agent's MCP config (`.mcp.json`, `.codex/config.toml`, `.cursor/mcp.json`, `.vscode/mcp.json`, or the `mcp` entry in `opencode.json`). [Agent Harness](./agent-harness.md) describes what each agent gets and how the hooks work.
+Apps scaffolded with `create-guren-app` include an agent harness: project guides, rules, skills, hooks and an MCP config for Claude Code, Codex, Cursor, GitHub Copilot and OpenCode. [Agent Harness](./agent-harness.md) lists the files each agent gets and how the hooks work.
 
 | Command | Description | Example |
 |---------|-------------|---------|
@@ -678,6 +686,8 @@ bunx create-guren-app my-app
 
 The CLI copies the default template, updates metadata, and prompts for a rendering mode. Choose **SSR** (default) to keep server-side rendering enabled via `autoConfigureInertiaAssets`, or pick **SPA** to disable SSR. Skip the prompt with `--mode ssr` or `--mode spa`, and overwrite a non-empty directory with `--force`.
 
+It also asks which coding agents to install the [agent harness](./agent-harness.md#choosing-agents) for. Answer with `--agents codex,cursor`, or skip the harness with `--agents none`.
+
 ## Troubleshooting
 - `command not found: bunx`: Your Bun version may be outdated. Install the supported Bun 1.4.2 baseline.
 - `Error: Port already in use`: The development server (default port 3333) is occupied. Update `PORT` in `.env` and restart.
@@ -712,4 +722,9 @@ These patterns deliver the same iterative mode of operation you’d expect from 
 
 ## Application graph and runtime errors
 
-`bunx guren graph` prints how the running app is wired, and `bunx guren runtime:errors` lists the server errors it hit recently. Both are covered in [Application Graph and Runtime Errors](./application-diagnostics.md).
+| Command | Description | Example |
+|---------|-------------|---------|
+| `graph` | Print how the app is wired (routes, controllers, models, pages and the evidence linking them), read from the project on disk | `bunx guren graph --json` |
+| `runtime:errors` | List the server errors the running development app hit recently (needs `GUREN_MCP=1`) | `bunx guren runtime:errors --json --url http://127.0.0.1:3333` |
+
+[Application Graph and Runtime Errors](./application-diagnostics.md) covers both, the MCP tools that serve the same data to coding agents, and the Dev Center.

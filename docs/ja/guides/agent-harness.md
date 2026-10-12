@@ -1,30 +1,38 @@
 # エージェントハーネス
 
-`create-guren-app` で作ったアプリには、コーディングエージェント（Claude Code、Codex、Cursor、GitHub Copilot、OpenCode）に Guren のアプリでの作業のしかたを伝えるファイルと、作業中に Guren のチェックを走らせる hook が入っています。このページでは、エージェントごとに入るものと、`agent:init` と `agent:sync` によるその管理を説明します。
+`create-guren-app` で作ったアプリには、AI エージェント向けのハーネスが入っています。コーディングエージェントに Guren のアプリでの作業のしかたを伝えるファイルと、作業中に Guren のチェックを走らせる hooks です。このページでは、エージェントごとに入るもの、hooks の動き、`agent:init` と `agent:sync` によるファイルの管理を説明します。
 
-`create-guren-app` で作ったアプリには、AI エージェント向けのハーネスが最初から入っています。雛形を作るときに使うエージェント(Claude Code・Codex・Cursor・GitHub Copilot・OpenCode)を選ぶと、それぞれのエージェントがそのまま読み込める形でファイルがインストールされます。非対話の環境では `--agents codex,cursor` のように指定し、`--agents none` で入れないこともできます。
+## エージェントを選ぶ
+
+雛形を作るときに使うエージェント（Claude Code、Codex、Cursor、GitHub Copilot、OpenCode）を選ぶと、それぞれのエージェントがそのまま読み込める形でファイルがインストールされます。非対話の環境では `--agents codex,cursor` のように指定し、`--agents none` で入れないこともできます。
 
 選んだエージェントごとに、次のものが生成されます。
 
 | エージェント | プロジェクトガイド | ルールとスキル | MCP の設定 | ターン終了時のゲート |
 |--------------|--------------------|----------------|------------|----------------------|
 | Claude Code | `CLAUDE.md` | `.claude/` 配下のルール、スキル、サブエージェント | `.mcp.json` | `Stop` hook が、失敗した指摘を添えて停止を 1 回ブロックする |
-| Codex | `AGENTS.md` | `.agents/rules/`、`.agents/skills/`、コマンドの許可リスト `.codex/rules/guren.rules` | `.codex/config.toml` | `.codex/hooks.json` が停止を 1 回ブロックする（Codex の project hook は、`/hooks` で一度信頼すると動きます） |
-| Cursor | `AGENTS.md` | `.agents/` と `.cursor/rules/guren-*.mdc` | `.cursor/mcp.json` | `.cursor/hooks.json` が指摘を自動の follow-up メッセージとして送る（回数の上限は `loop_limit`） |
+| Codex | `AGENTS.md` | `.agents/rules/`、`.agents/skills/`、コマンドの許可リスト `.codex/rules/guren.rules` | `.codex/config.toml` | `.codex/hooks.json` が停止を 1 回ブロックする（Codex のプロジェクト単位の hook は、`/hooks` で一度信頼すると動きます） |
+| Cursor | `AGENTS.md` | `.agents/` と `.cursor/rules/guren-*.mdc` | `.cursor/mcp.json` | `.cursor/hooks.json` が指摘を自動の追加メッセージとして送る（回数の上限は `loop_limit`） |
 | GitHub Copilot | `AGENTS.md` | `.agents/` と `.github/instructions/guren-*.instructions.md` | `.vscode/mcp.json` | なし（`AGENTS.md` で `guren gate` の実行を指示） |
 | OpenCode | `AGENTS.md` | `.agents/` | `opencode.json` の `mcp` エントリ | なし（`AGENTS.md` で `guren gate` の実行を指示） |
 
 スキルはエージェント共通の SKILL.md 標準形式です。MCP の設定は開発サーバーの MCP エンドポイントを指し、エンドポイントは生成された `dev` スクリプトの `GUREN_MCP=1` で有効になります。
 
-ゲートの hook は、コミットしていない変更を残したままターンが終わると `guren gate` を実行します。そのため、失敗したステージは CI まで持ち越さず、同じターンの中で直せます。同じ hook は、`guren plan:next` で印を付けた計画のステップも検証し（RFC 0030）、そのステップの検証が通るまで、最大 3 回指摘を差し戻します。Claude Code では、さらにセッションの開始時に `guren context` のプロジェクトマップを読み込み、ルート、`app/Http/`、モデル、スキーマ、ページを編集すると `guren check` を再実行し、アプリに `.oxlintrc.json` があれば、編集したソースファイルに oxlint をかけます。これらの hook がないエージェントには、`AGENTS.md` で、セッション開始時に `guren context`、編集後に `guren check`、変更が終わったと言う前に `guren gate` を実行するよう指示しています。
+ハーネスが書き出すファイルの仕様は、各エージェントの公式ドキュメントで確認できます。Claude Code については [`CLAUDE.md` と `.claude/rules/`](https://code.claude.com/docs/ja/memory)、[スキル](https://code.claude.com/docs/ja/skills)、[サブエージェント](https://code.claude.com/docs/ja/sub-agents)、[hooks](https://code.claude.com/docs/ja/hooks)、[MCP](https://code.claude.com/docs/ja/mcp)、[`settings.json`](https://code.claude.com/docs/ja/settings) のページです。ほかのエージェントについては、[`AGENTS.md`](https://agents.md/) の形式、[Agent Skills](https://agentskills.io/) の標準、Cursor の [Rules](https://cursor.com/ja/docs/rules) と [Hooks](https://cursor.com/ja/docs/hooks)、GitHub Copilot の[リポジトリのカスタム指示](https://docs.github.com/ja/copilot/how-tos/copilot-on-github/customize-copilot/add-custom-instructions/add-repository-instructions)、OpenCode の [Rules](https://opencode.ai/docs/rules/) を参照してください。
+
+## hooks
+
+エージェントごとに、次のものが動きます。
+
+- Claude Code、Codex、Cursor では、コミットしていない変更を残したままターンが終わると、ゲートの hook が [`guren gate`](./cli.md#検査監査コマンド) を実行します。失敗したステージは CI まで持ち越さず、同じターンの中で直せます。`guren plan:next` で印を付けた計画のステップがまだ検証を通っていなければ（[実装計画](./implementation-plans.md)を参照）、そのステップの指摘も最大 3 回まで差し戻します。
+- Claude Code ではさらに、セッションの開始時に `guren context` のプロジェクトマップを読み込みます。ルート、`app/Http/`、モデル、スキーマ、ページを編集すると `guren check` を再実行し、アプリに `.oxlintrc.json` があれば、編集したソースファイルに oxlint をかけます。
+- GitHub Copilot と OpenCode には hooks がありません。代わりに `AGENTS.md` で、セッション開始時に `guren context`、編集後に `guren check`、作業を終える前に `guren gate` を実行するよう指示しています。
 
 hook が効く範囲には、次の注意点があります。
 
 - hook は、自分がインストールされたアプリにゲートをかけるので、monorepo の中のアプリでは、そのアプリのツリーだけが対象です。Claude Code の hook はセッションがいる checkout にゲートをかけるので、途中で worktree に入った場合は、その worktree のツリーが対象です。
 - Cursor は `.cursor/hooks.json` をワークスペースのルートから読むので、アプリは単独のワークスペースとして開いてください。
 - Cursor は設定によっては `.claude/settings.json` の hook も読み込みます。その場合は Claude 用の hook が処理を譲るので、ゲートは 1 回しか走りません。
-
-ハーネスが書き出すファイルの仕様は、各エージェントの公式ドキュメントで確認できます。Claude Code については [`CLAUDE.md` と `.claude/rules/`](https://code.claude.com/docs/ja/memory)、[スキル](https://code.claude.com/docs/ja/skills)、[サブエージェント](https://code.claude.com/docs/ja/sub-agents)、[hooks](https://code.claude.com/docs/ja/hooks)、[MCP](https://code.claude.com/docs/ja/mcp)、[`settings.json`](https://code.claude.com/docs/ja/settings) のページです。ほかのエージェントについては、[`AGENTS.md`](https://agents.md/) の形式、[Agent Skills](https://agentskills.io/) の標準、Cursor の [Rules](https://cursor.com/ja/docs/rules) と [Hooks](https://cursor.com/ja/docs/hooks)、GitHub Copilot の[リポジトリのカスタム指示](https://docs.github.com/ja/copilot/how-tos/copilot-on-github/customize-copilot/add-custom-instructions/add-repository-instructions)、OpenCode の [Rules](https://opencode.ai/docs/rules/) を参照してください。
 
 ## アプリを作る前に: カタログから Guren のスキルを入れる
 

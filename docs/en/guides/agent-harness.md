@@ -1,8 +1,10 @@
 # Agent Harness
 
-Apps scaffolded with `create-guren-app` include files that teach coding agents (Claude Code, Codex, Cursor, GitHub Copilot, OpenCode) how to work in a Guren app, and hooks that run Guren's checks while they work. This page describes what is installed for each agent and how `agent:init` and `agent:sync` maintain it.
+Apps scaffolded with `create-guren-app` include an AI agent harness: files that teach coding agents how to work in a Guren app, and hooks that run Guren's checks while they work. This page covers what is installed for each agent, what the hooks do, and how `agent:init` and `agent:sync` maintain the files.
 
-Apps scaffolded with `create-guren-app` include an AI agent harness out of the box. The scaffolder asks which coding agents you use (Claude Code, Codex, Cursor, GitHub Copilot, OpenCode) and installs the files each one reads natively (answer non-interactively with `--agents codex,cursor`, or skip the harness with `--agents none`).
+## Choosing agents
+
+The scaffolder asks which coding agents you use (Claude Code, Codex, Cursor, GitHub Copilot, OpenCode) and installs the files each one reads natively. Answer non-interactively with `--agents codex,cursor`, or skip the harness with `--agents none`.
 
 What each selection writes:
 
@@ -16,15 +18,21 @@ What each selection writes:
 
 Skills follow the cross-agent SKILL.md standard. The MCP configs point at the dev server's MCP endpoint, which the scaffolded `dev` script enables with `GUREN_MCP=1`.
 
-The gate hooks run `guren gate` when a turn ends with uncommitted changes, so a failing stage is fixed in the same turn rather than in CI. They also verify the plan step `guren plan:next` marked (RFC 0030) and send the findings back while that step is not verified, up to three times. Claude Code additionally loads the `guren context` project map at session start, re-runs `guren check` after edits to routes, `app/Http/`, models, schema or pages, and runs oxlint on an edited source file when the app has an `.oxlintrc.json`. Agents without those hooks are told by `AGENTS.md` to run `guren context` at session start, `guren check` after edits, and `guren gate` before declaring a change done.
+Each agent documents the files the harness writes for it. For Claude Code: [`CLAUDE.md` and `.claude/rules/`](https://code.claude.com/docs/en/memory), [skills](https://code.claude.com/docs/en/skills), [subagents](https://code.claude.com/docs/en/sub-agents), [hooks](https://code.claude.com/docs/en/hooks), [MCP](https://code.claude.com/docs/en/mcp) and [`settings.json`](https://code.claude.com/docs/en/settings). For the others: the [`AGENTS.md`](https://agents.md/) format, the [Agent Skills](https://agentskills.io/) standard, Cursor's [rules](https://cursor.com/docs/rules) and [hooks](https://cursor.com/docs/hooks), GitHub Copilot's [repository instructions](https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/add-custom-instructions/add-repository-instructions), and OpenCode's [rules](https://opencode.ai/docs/rules/).
+
+## Hooks
+
+What runs, by agent:
+
+- Claude Code, Codex and Cursor: when a turn ends with uncommitted changes, the gate hook runs [`guren gate`](./cli.md#inspection-audit-commands), so a failing stage is fixed in the same turn rather than in CI. While a plan step that `guren plan:next` marked is not verified (see [Implementation Plans](./implementation-plans.md)), the hook also sends that step's findings back, up to three times.
+- Claude Code only: it loads the `guren context` project map at session start, re-runs `guren check` after edits to routes, `app/Http/`, models, schema or pages, and runs oxlint on an edited source file when the app has an `.oxlintrc.json`.
+- GitHub Copilot and OpenCode have no hooks. `AGENTS.md` tells them to run `guren context` at session start, `guren check` after edits, and `guren gate` before declaring a change done.
 
 A few details about where the hooks apply:
 
 - A hook gates the app it is installed in, so a monorepo app is gated on its own tree. Claude Code's hooks gate the checkout the session is in, so a worktree it entered is gated on its own tree.
 - Cursor reads `.cursor/hooks.json` from the workspace root, so open the app as its own workspace.
 - Cursor can also load `.claude/settings.json` hooks when its third-party setting is on. The Claude hook steps aside there, so the gate runs once.
-
-Each agent documents the files the harness writes for it. For Claude Code: [`CLAUDE.md` and `.claude/rules/`](https://code.claude.com/docs/en/memory), [skills](https://code.claude.com/docs/en/skills), [subagents](https://code.claude.com/docs/en/sub-agents), [hooks](https://code.claude.com/docs/en/hooks), [MCP](https://code.claude.com/docs/en/mcp) and [`settings.json`](https://code.claude.com/docs/en/settings). For the others: the [`AGENTS.md`](https://agents.md/) format, the [Agent Skills](https://agentskills.io/) standard, Cursor's [rules](https://cursor.com/docs/rules) and [hooks](https://cursor.com/docs/hooks), GitHub Copilot's [repository instructions](https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/add-custom-instructions/add-repository-instructions), and OpenCode's [rules](https://opencode.ai/docs/rules/).
 
 ## Before you have an app: install the Guren skills from a catalog
 

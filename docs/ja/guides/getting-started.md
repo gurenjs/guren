@@ -28,7 +28,7 @@ cd my-app
 
 - **レンダリングモード**: SSR（デフォルト）か SPA。SSR を選ぶと、サーバーで描画した HTML が返り、Vite のアセットも自動で検出されます。
 - **データベース**: SQLite（デフォルト、設定不要）、PostgreSQL、MySQL のいずれか。
-- **AIエージェント**: [エージェントハーネス](./cli.md#aiエージェントハーネス)を、どのコーディングエージェント向けに用意するか。Claude Code（デフォルト）、Codex、Cursor、GitHub Copilot、OpenCode から選びます。
+- **AIエージェント**: [エージェントハーネス](./agent-harness.md#エージェントを選ぶ)を、どのコーディングエージェント向けに用意するか。Claude Code（デフォルト）、Codex、Cursor、GitHub Copilot、OpenCode から選びます。
 
 答え終わると、依存関係がインストールされ、`APP_KEY` を生成済みの `.env` ファイルも作られます。`--mode ssr`、`--db sqlite`、`--agents codex,cursor` のようにフラグを付ければ、質問に対話なしで答えられます。認証の雛形を最初から入れたい場合は `--auth` を付けてください。
 
