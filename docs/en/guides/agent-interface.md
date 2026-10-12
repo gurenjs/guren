@@ -543,8 +543,8 @@ so the app must configure an [API token store](./api-tokens.md):
 
 You do not need to write a CSRF exemption for it. A request carrying
 `Authorization: Bearer` and no `Cookie` header at all skips CSRF verification
-framework-wide, and the dispatcher synthesizes cookie-less bearer requests by
-construction. The plugin also declares its own configured path as authenticating
+framework-wide, since with no cookie there is no ambient authority to protect,
+and the dispatcher builds cookie-less bearer requests by construction. The plugin also declares its own configured path as authenticating
 without cookies, so a request that misses that rule (one with no bearer, or one
 a browser attached cookies to) is answered by the `401` above rather than by a
 CSRF `403` that hides the real reason. Neither skip authenticates anything: both
@@ -642,9 +642,9 @@ Four rules worth knowing:
   companion would be a way to probe the authorization surface of tools the
   token cannot call. An ungranted name is refused as an error result, the way a
   direct call to it is.
-- **A tool that requires approval can still be checked.** It is not callable
-  and not listed, which is precisely when "would this be accepted?" is worth
-  asking, and the rehearsal executes nothing.
+- **A tool that requires approval can still be checked.** Its real call files
+  a request for a human, so a rehearsal is how you ask "would this be
+  accepted?" without filing one, and the rehearsal executes nothing.
 - **`guren_preflight` is listed only for a token that grants at least one
   tool.** A token that can call nothing has nothing to rehearse.
 - **The name is reserved.** A route whose `.agent()` tool name claims it fails
@@ -1075,7 +1075,8 @@ sink that was never wired.
 `event.arguments` is masked before the event is constructed. Two sources are
 unioned: a built-in list of sensitive key fragments every app gets without
 asking (`password`, `passphrase`, `secret`, `token`, `apikey`, `authorization`,
-`credential`, `cookie`, `session`) and the route's own `redact` metadata.
+`credential`, `cookie`, `session`, `privatekey`, `pwd`, `jwt`) and the route's own
+`redact` metadata.
 
 ```ts
 router
