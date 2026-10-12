@@ -104,7 +104,7 @@ EventBridge から呼び出されたときに、実行時刻を迎えたタス�
 
 雛形の `src/lambda.ts` で `console` の export のコメントを外すと、ハンドラが有効になります。
 
-カーネルには組み込みのコマンドがありません。マイグレーション用のコマンドが必要になるのは Data API アダプタを使う場合だけです（Data API アダプタの `getDatabase()` は、未適用のマイグレーションを意図的に実行しません。ほかのアダプタは初回利用時に適用します）。このトレードオフと `migrateOnStart` については [Aurora Serverless の項](./database.md#aurora-serverlessaws-data-apiサポート) を参照してください。どのアダプタでも、マイグレーションを別に実行しておけば、その待ち時間がリクエストの処理にかかりません。
+カーネルには組み込みのコマンドがありません。マイグレーション用のコマンドが必要になるのは Data API アダプタを使う場合だけです（Data API アダプタの `getDatabase()` は、未適用のマイグレーションを意図的に実行しません。ほかのアダプタは初回利用時に適用します）。このトレードオフと `migrateOnStart` については [Aurora Serverless の項](./database.md#aurora-serverlessaws-data-api) を参照してください。どのアダプタでも、マイグレーションを別に実行しておけば、その待ち時間がリクエストの処理にかかりません。
 
 ```bash
 bunx guren make:command Migrate --command db:migrate

@@ -174,31 +174,21 @@ bun run db:migrate
 
 ### Generating migrations
 
-The command reads the first of `drizzle.config.ts`, `.mts`, `.js`, `.mjs` and
-`.json` that exists, in that order, for the schema path, output directory, and
-dialect. You can override the paths:
+The command reads the first of `drizzle.config.ts`, `.mts`, `.js`, `.mjs` and `.json` that exists, in that order, for the schema path, output directory, and dialect. You can override the paths:
 
 ```bash
 bunx guren make:migration --schema ./custom/schema.ts --out ./custom/migrations
 ```
 
-Overrides cannot be combined with drizzle-kit's `--config`, so Guren reads the
-config itself and restates its `dialect` (and `driver`) on the command line.
-Fields you did not override keep their configured values. If a config field
-cannot be restated as a flag, the command names it rather than letting the
-migration differ silently.
+Overrides cannot be combined with drizzle-kit's `--config`, so Guren reads the config itself and restates its `dialect` (and `driver`) on the command line. Fields you did not override keep their configured values, so `--schema` alone still writes to the config's `out`. If a config field cannot be restated as a flag, the command names it rather than letting the migration differ silently. A config whose `schema` is a list is one such case: drizzle-kit would keep only the last entry, so an override without `--schema` stops with an error.
 
-An app with no drizzle config has nothing to declare the dialect, so state it
-directly:
+An app with no drizzle config has nothing to declare the dialect, so state it directly:
 
 ```bash
 bunx guren make:migration --dialect postgresql
 ```
 
-The command runs the drizzle-kit your app installs, found in its `node_modules`
-or a parent's (a hoisted workspace install). With none installed it stops and
-asks for `bun install`; it never fetches a copy from npm, whose version may
-take other flags.
+The command runs the drizzle-kit your app installs, found in its `node_modules` or a parent's (a hoisted workspace install). With none installed it stops and asks for `bun install`; it never fetches a copy from npm, whose version may take other flags.
 
 > [!NOTE]
 > Once a migration has shipped to any environment, treat it as immutable. Create a follow-up migration to correct mistakes.
@@ -585,7 +575,16 @@ User.belongsToMany('roles', Role, userRoles, 'userId', 'roleId')
 Country.hasManyThrough('posts', Post, User, 'countryId', 'authorId')
 ```
 
-`belongsToMany(name, RelatedModel, pivotTable, foreignPivotKey, relatedPivotKey, parentKey?, relatedKey?)` takes `pivotTable` as the Drizzle table object exported from `@/db/schema`, not the table's name. `foreignPivotKey` and `relatedPivotKey` are both columns *on the pivot*, referencing this model and the related one; `parentKey` and `relatedKey` are the local keys they point at, and both default to `'id'`.
+| Method | Arguments |
+|--------|-----------|
+| `hasMany(name, Related, foreignKey, localKey)` | The foreign key on the related table, and this model's key it points at (usually `id`). Loads an array, `[]` when nothing matches |
+| `belongsTo(name, Related, foreignKey, ownerKey)` | The foreign key on this model, and the related model's key. Loads one record or `null` |
+| `hasOne(name, Related, foreignKey, localKey)` | As `hasMany`, but loads one record or `null` |
+| `belongsToMany(name, Related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey?, relatedKey?)` | Many-to-many through a pivot table |
+| `hasManyThrough(name, Related, Through, firstKey, secondKey)` | Records reached through an intermediate model |
+| `morphMany(name, Related, morphName, localKey)` / `morphTo(name, morphName)` | Polymorphic relations, below |
+
+For `belongsToMany`, `pivotTable` is the Drizzle table object exported from `@/db/schema`, not the table's name. `foreignPivotKey` and `relatedPivotKey` are both columns *on the pivot*, referencing this model and the related one; `parentKey` and `relatedKey` are the local keys they point at, and both default to `'id'`.
 
 ### Polymorphic Relationships
 
@@ -974,6 +973,8 @@ export class Post extends defineModel(posts) {
   }
 }
 ```
+
+The cast types are `'json'`, `'date'`, `'boolean'`, `'number'` and `'string'`.
 
 ## Accessors & Mutators
 
