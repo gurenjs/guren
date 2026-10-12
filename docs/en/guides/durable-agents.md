@@ -12,9 +12,18 @@ Three properties, none of which a job or a cron entry has:
 - **Durable state.** `this.state` and a private SQLite database survive deploys and evictions.
 - **Per-instance schedules.** Cron for a recurring sweep, a delay in seconds for "look at this again in an hour". Both are backed by Durable Object alarms, so an agent wakes with no request touching your Worker.
 
-What it is **not** is a privileged internal. `this.tools.call(name, args)` is the only way an agent reaches your application, and every call goes through the same invocation pipeline as every other agent surface: the scopes its registration declares, the route's own validation and policies, the approval queue, and a redacted audit record under `surface: 'durable'`. An agent is a consumer of your application, not an MCP server and not a second privileged path into your models. An in-house agent deserves *less* trust than an external one, not more, precisely because it runs unattended.
+Each instance is a Cloudflare *Durable Object*: an addressable instance with its own storage, which Cloudflare evicts (unloads) when idle and wakes again by name or by alarm.
 
-The substrate is Cloudflare Workers, and only Cloudflare Workers: exactly one platform today gives durable identity, alarms and embedded per-instance state at the edge, and `@guren/plugin-agents` is built on the [Cloudflare Agents SDK](https://www.npmjs.com/package/agents) that packages them. There is no Bun emulation of Durable Objects — a fake one would be worth less than the honest 503 your app answers with locally.
+An agent has no privileged access to your app. `this.tools.call(name, args)` is its only way in, and every call goes through the same checks as a call from any other agent:
+
+- the scopes its registration declares;
+- the route's own validation and policies;
+- the approval queue, for a tool that requires one;
+- an audit record with secrets masked, under `surface: 'durable'`.
+
+Treat an in-house agent with *less* trust than an external one, since it runs unattended.
+
+Durable agents run on Cloudflare Workers only. It is the one platform that gives durable identity, alarms and per-instance state at the edge, and `@guren/plugin-agents` is built on the [Cloudflare Agents SDK](https://www.npmjs.com/package/agents) that packages them. Under Bun there is no Durable Object emulation, so locally an app's route that talks to its agent answers 503 (see [Talking to your agent](#talking-to-your-agent)), which is more honest than a fake.
 
 ## Install and register
 
@@ -47,7 +56,7 @@ export default app
 
 `EventServiceProvider` is what makes the audit events reachable at all (see [the audit trail](./agent-interface.md#the-audit-trail)).
 
-`EncryptionServiceProvider` and an `APP_KEY` are what make the **pending-approval ledger** work. A call parked on a human has to keep its arguments somewhere so it can be retried, the approval queue deliberately keeps no reversible copy of them, and the bound on holding them at all is that they are ciphertext at rest under the app key. With no encrypter bound, the plugin warns at boot and runs without a ledger: a parked call is still reported to the agent with its `requestId`, it is simply never retried for you. The requirement is that the provider is registered and `APP_KEY` is set; its position in `providers` does not matter.
+`EncryptionServiceProvider` and an `APP_KEY` let an agent retry a call that waited for a human's approval. The call's arguments are kept in the agent's own storage, encrypted with the app key (see [The ledger](#the-ledger)). Without an encrypter, the plugin warns at boot: a call waiting for approval is still reported to the agent with its `requestId`, but nothing retries it for you. The provider's position in `providers` does not matter.
 
 ## Scaffolding one
 
@@ -107,7 +116,7 @@ export default defineAgentsConfig({
 })
 ```
 
-**The grammar is static, and that is a constraint rather than a style.** `guren cloudflare:build` reads this file as source to append a named export per class to the generated worker, and a runtime class value carries no source path, so `module` and `export` are literal strings. A spread inside `agents`, a computed key, or a re-exported config leaves the build with nothing to export while the file reads as though the agent were registered; `guren check` fails each of those with the reason.
+**Keep the file static.** `module` and `export` name the class's file and export as strings, because `guren cloudflare:build` appends a named export per class to the generated worker and a class value carries no source path. `guren check` reads the file as source to verify those names, so it fails a spread inside `agents`, a computed key or a re-exported config, each with the reason.
 
 Three more rules the same file carries:
 
@@ -124,7 +133,9 @@ Registration scopes are deliberately **narrower** than the token scopes in [Toke
 | `tool:tickets.close` | exactly that one tool |
 | `tools:read` | every tool whose resolved `readOnlyHint` is true |
 
-`tools:*` and prefix grants like `tools:tickets.*` are legal for an issued token and **refused at registration**, for the reason `token:issue` refuses an unmatched scope: an unattended principal must not acquire consent to tools that do not exist yet. `tools:read` is expanded against the loaded route graph (by `guren check` when you run it, and again by the runtime at boot) rather than pinned into a generated file, so a route that stops being read-only narrows what the agent may call on its next wake instead of on its next regeneration. `bunx guren check --json` reports the expansion under `agentScopes`.
+`tools:*` and prefix grants like `tools:tickets.*` are legal for an issued token and **refused at registration**: an agent running unattended must not gain access to tools that do not exist yet.
+
+`tools:read` is expanded against the app's routes when `guren check` runs and again when the app boots, rather than written into a generated file. A route that stops being read-only therefore drops out of what the agent may call on its next wake. `bunx guren check --json` reports the expansion under `agentScopes`.
 
 A budget refusal comes back as a `denied` result with `reason: 'rate-limit'`. The window lives in the in-memory instance, so an eviction resets it: it is a burst floor, not a global quota, and an app that needs a real one still needs a shared store and its own [rate-limit middleware](./rate-limiting.md).
 
@@ -204,7 +215,7 @@ const result = await this.tools.call('tickets.close', { id })
 
 **`ok` is not success.** It says the request reached your application; the application's own verdict is `result.outcome.isError`, with the HTTP status in `result.outcome.status`. A 403 from a policy and a 422 from a schema both arrive as `ok`. The other three discriminants are declared as absent on each variant, so `if (result.pending) return` narrows without a type guard.
 
-`this.tools.preflight(name, args)` asks the same route for a verdict instead of an execution (the same seam [`--preflight` and `guren_preflight`](./agent-interface.md#rehearsing-a-call-over-mcp) reach). The scope gate runs and the budget is spent; the approval gate is skipped, because rehearsing an approval-gated tool is exactly when the question is worth asking and a rehearsal executes nothing.
+`this.tools.preflight(name, args)` asks the same route for a verdict instead of an execution, as [`--preflight` and `guren_preflight`](./agent-interface.md#rehearsing-a-call-over-mcp) do. The scope gate runs and the budget is spent; the approval gate is skipped, because rehearsing an approval-gated tool is exactly when the question is worth asking and a rehearsal executes nothing.
 
 ### Two rules about state
 
@@ -214,7 +225,9 @@ const result = await this.tools.call('tickets.close', { id })
 
 ### The principal
 
-Every instance is its own principal: `agent:<name>:<instance>`, where the instance half is the Durable Object's own name. Your policies see a service principal, so an ability can admit an operator and an agent as two different kinds of caller, and an approval granted to one instance can never be spent by another. The seam that installs it is in-process and has no wire representation, so it satisfies `requireAuthenticated()`, `Controller.auth` and `Gate`; it deliberately does **not** satisfy a bearer-token check, which judges an issued `ApiToken` the application never granted.
+A principal is the identity your app's auth and policies see for a caller. Every agent instance is its own principal, `agent:<name>:<instance>`, where the instance half is the Durable Object's name. Policies can therefore tell an operator and an agent apart, and an approval granted to one instance can never be spent by another.
+
+The principal is installed in-process and never travels over the wire. It satisfies `requireAuthenticated()`, `Controller.auth` and `Gate`, and deliberately does **not** satisfy a bearer-token check, which looks for an issued `ApiToken` the application never granted.
 
 ## Human in the loop
 
@@ -237,11 +250,19 @@ export class Ops extends GurenAgent<Env, OpsState> {
 
 ### The ledger
 
-Behind that `return`, `this.tools` checkpoints `{ requestId, tool, args }` into `guren_pending_tool_calls`, a framework-owned table in the agent's own Durable Object SQLite, and schedules a check. The queue stores only redacted input and a non-reversible fingerprint by design, so the retry material has to live on the agent's side; the bounds are what make that acceptable. The table is per-instance private storage no API surfaces, rows are encrypted with the app key at rest, and each row is purged when its approval settles or expires. The TTL is the queue's, never the agent's to extend.
+Behind that `return`, `this.tools` saves `{ requestId, tool, args }` into `guren_pending_tool_calls`, a framework-owned table in the agent's own Durable Object SQLite, and schedules a check. The approval queue keeps only redacted input and a one-way fingerprint, so the arguments needed for the retry have to live on the agent's side. Three bounds make that acceptable:
 
-On each wake the agent asks the queue about every parked row, through the pipeline, so the check is itself audited. `approved` repeats the original call with the stored arguments; the queue's consume-on-use and fingerprint match make that spend exactly the approval a human granted, and nothing else.
+- The table is the instance's private storage, and no API exposes it.
+- Rows are encrypted with the app key.
+- Each row is deleted when its approval is answered or expires, and the expiry is the queue's, which the agent cannot extend.
 
-The backoff is 30 seconds doubling per check, floored at one second and capped by the earliest row's expiry and by the approval TTL. There is exactly one check schedule at any moment: one wake asks about every row, so the cadence serves the newest parked call rather than inheriting the oldest row's stretched backoff. Nothing is held in memory — an eviction between the request and the approval loses nothing, because the state and the schedule are both durable.
+On each wake the agent asks the queue about every waiting row, through the same pipeline as any tool call, so the check is itself audited. On `approved`, it repeats the original call with the stored arguments. The queue matches the arguments' fingerprint and uses each approval once, so the retry spends exactly the approval a human granted.
+
+How often it checks:
+
+- The first check comes after 30 seconds, and the wait doubles after each check. It never drops below one second, and never runs more than a few seconds past the earliest row's expiry or past an hour.
+- There is only ever one check schedule, and one wake asks about every row, so a newly waiting call does not inherit an older row's long wait.
+- Nothing is held in memory. An eviction between the request and the approval loses nothing, because the rows and the schedule are both durable.
 
 ### `onToolApprovalSettled`
 
@@ -251,9 +272,9 @@ Overridable, a no-op unless you override it, and called for every outcome:
 |---|---|
 | `approved` | a human approved it. `result` is the retry's own answer, which can itself be a refusal |
 | `rejected` | a human refused it. Nothing was called |
-| `expired` | the request lapsed unanswered |
+| `expired` | the request lapsed, unanswered or approved but not yet spent |
 | `unknown` | the queue holds no record of this request any more |
-| `unreadable` | the ledger row could not be decrypted — a rotated app key — so the arguments are gone and nothing can retry it |
+| `unreadable` | the ledger row could not be decrypted (the app key was rotated past its `previousKeys`, or the row is corrupt), so the arguments are gone and nothing can retry it |
 
 `args` carries the arguments the parked call was made with, absent only for `'unreadable'`. Since the queue keeps no reversible copy, this is the one place an application learns *which* call a human answered.
 
@@ -403,17 +424,17 @@ Split the suite the way the runtime splits:
 
 **Durable Object behaviour on workerd.** Boot-from-alarm, the named exports, the routing guard, and approval retry after eviction are exactly the things a mock cannot exercise. Run them under [`@cloudflare/vitest-plugin`](https://www.npmjs.com/package/@cloudflare/vitest-plugin) against the **generated** worker rather than a stand-in, so the build wiring is what is under test. The package ships `evictDurableObject`, which makes "the retry survives eviction" a real assertion instead of a claim.
 
-Two suites in this repository are the two shapes: `packages/plugin-agents/tests/workers` for the workerd lane, and `examples/agents/tests` for an application's own.
+Two suites in the Guren repository show the two shapes: [the plugin's workerd tests](https://github.com/gurenjs/guren/tree/main/packages/plugin-agents/tests/workers) and [`examples/agents/tests`](https://github.com/gurenjs/guren/tree/main/examples/agents/tests), an application's own.
 
 ## What the checks enforce
 
 `bunx guren check` picks the agent registry up automatically when `config/agents.ts` exists, and contributes nothing when it does not.
 
-`check` **fails** on a registry it or the deploy build could not read: an unparseable file, a config that is not a literal `defineAgentsConfig({ agents: { … } })`, a spread inside `agents`, a non-literal `module` or `export`, a `module` naming a file that does not exist or that does not export that class as a class declaration, a duplicated agent key or export name, a missing or non-literal `scopes` array, and a scope outside the registration grammar. It **warns** on a `tool:` scope naming a tool no route declares: the gate is fail-closed, so that scope grants nothing. That is a typo or a renamed route, not a hole.
+`check` **fails** on a registry it or the deploy build could not read: an unparseable file, a config that is not a literal `defineAgentsConfig({ agents: { … } })`, a spread inside `agents`, a non-literal `module` or `export`, a `module` naming a file that does not exist or that does not export that class as a class declaration, a duplicated agent key or export name, a missing or non-literal `scopes` array, and a scope outside the registration grammar. It **warns** on a `tool:` scope naming a tool no route declares. Such a scope grants nothing, so it points at a typo or a renamed route rather than a security hole.
 
 Two registry rules are enforced somewhere else, and it is worth knowing where: an agent name outside `^[A-Za-z0-9_-]+$` and a `budget.callsPerMinute` that is not a whole number of at least one are refused by `agentsPlugin` at boot, not by `check`. They fail the app's startup rather than its review.
 
-`bunx guren check --arch` enforces the boundary the scaffold wrote: an `app/Agents/**` file importing `app/Models/**`, `db/**`, `@guren/orm` or `@guren/plugin-agents/runtime` fails. Stated plainly, **this is a discipline, not a sandbox.** In-process application code shares the isolate and can import whatever it likes, and the checker sees static imports only, so a dynamic `import()` escapes it. What the boundary buys is that crossing it is visible in review rather than incidental, with the audit trail as the other half.
+`bunx guren check --arch` enforces the boundary the scaffold wrote: an `app/Agents/**` file importing `app/Models/**`, `db/**`, `@guren/orm` or `@guren/plugin-agents/runtime` fails. **This boundary is a convention the checker enforces, not a sandbox.** In-process code shares the isolate and can import whatever it likes, and the checker sees static imports only, so a dynamic `import()` escapes it. What the boundary buys is that crossing it is visible in review rather than incidental, with the audit trail as the other half.
 
 The routes an agent calls are checked by the ordinary agent-route rules, and the one that matters most here is that a non-read-only tool needs *authorization*, not merely authentication: see [Authentication is not authorization](./agent-interface.md#authentication-is-not-authorization).
 

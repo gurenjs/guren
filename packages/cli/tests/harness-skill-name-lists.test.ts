@@ -7,7 +7,7 @@ import { RETIRED_CANONICAL_SKILLS } from '../src/agent-targets'
 const SKILLS_DIR = new URL('../templates/agent/core/skills/', import.meta.url)
 
 const LISTS = [
-  { file: '../../../docs/en/guides/cli.md', start: 'its name is not one the harness itself ships:', end: ' for skills' },
+  { file: '../../../docs/en/guides/cli.md', start: '| `.claude/skills/`, `.agents/skills/` | ', end: ' |\n' },
   { file: '../../../docs/ja/guides/cli.md', start: 'スキルなら ', end: '、ルールなら' },
   { file: '../templates/agent-catalog/skills/guren-harness/SKILL.md', start: 'canonical skill names (', end: ')' },
 ]
