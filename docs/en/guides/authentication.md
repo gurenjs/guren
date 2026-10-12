@@ -1,18 +1,10 @@
 # Authentication Guide
 
-Guren ships with a Laravel-inspired authentication stack that sits on top of the session middleware and the ORM layer. The goal is to match the expressiveness of Laravel's guards and user providers while staying idiomatic to TypeScript and Bun.
+Add sign-in, registration and password reset to an app with one command, then protect routes and read the signed-in user in controllers. The first half of this page covers that generated setup; the second half covers sessions, guards and user providers, for when you change how it works.
 
-## Core Concepts
+## Quickstart
 
-- **AuthManager** – central registry for guards and user providers. Resolved from the service container via `this.container.make<AuthManager>('auth')`.
-- **Guards** – runtime objects responsible for authenticating a request. The default `SessionGuard` persists the logged-in user's identifier inside the session and supports optional "remember me" tokens.
-- **User Providers** – data access adapters used by guards to load and validate users. `ModelUserProvider` integrates with Guren's `Model` abstraction so you can back authentication with Drizzle ORM tables.
-- **Auth Context** – per-request facade that surfaces guard helpers (`auth.check()`, `auth.user()`, `auth.login()`, etc.). The context is attached automatically by `AuthServiceProvider`; it is available in controllers via the `this.auth` helper and in middleware through `attachAuthContext`.
-- **OAuthManager** – social login helper that manages provider configs, CSRF-safe OAuth state, code exchange, and user profile fetch.
-
-## Quickstart via CLI
-
-For new applications, run the bundled scaffolder with automatic installation (the session middleware will be auto-attached by default):
+Run the scaffolder with `--install` (`bunx guren add auth` does the same):
 
 ```bash
 bunx guren make:auth --install
@@ -27,7 +19,7 @@ This command generates login, registration, and password reset controllers, Iner
 
 An app that already binds mail, through `guren add mail` or a provider of its own, keeps that setup. `make:auth` then writes no `config/mail.ts`, registers nothing for mail, and the reset mail sends through the existing binding. Likewise, `guren add mail` run after `make:auth` keeps the setup auth wrote and adds only its sample mailable.
 
-After scaffolding, simply run:
+Then run:
 
 ```bash
 bun run db:migrate
@@ -35,13 +27,31 @@ bun run db:seed
 bun run dev
 ```
 
-Visit `http://localhost:3000/login` and sign in with `demo@example.com` / `secret`, or visit `/register` to create a new account.
+Open `/login` on the URL `bun run dev` prints (`http://localhost:3333` by default) and sign in with `demo@example.com` / `secret`, or open `/register` to create a new account.
 
-Pass `--minimal` to skip the registration and password reset scaffold and generate the login-only experience instead:
+Flags change what is generated:
+
+| Flag | What it changes | Notes |
+|------|-----------------|-------|
+| `--minimal` | Login only: no registration or password reset | |
+| `--verify` | Adds email verification (see [Email verification](#email-verification)) | Not with `--minimal` |
+| `--oauth github,google` | Adds provider sign-in buttons (see [OAuth login buttons](#oauth-login-buttons)) | Works with `--minimal` |
+| `--oauth-only` | Provider sign-in only, no passwords (see [OAuth as the only sign-in method](#oauth-as-the-only-sign-in-method)) | Needs `--oauth`; implies `--minimal` |
+
+### Without `--install`
+
+If you prefer to wire things yourself, or already have part of the setup, omit the flag:
 
 ```bash
-bunx guren make:auth --install --minimal
+bunx guren make:auth
 ```
+
+Then manually:
+1. Register `AuthProvider` in `src/app.ts`
+2. Add `createSessionMiddleware` to your middleware stack (auto-added by `AuthServiceProvider` unless you opt out)
+3. Register `registerAuthRoutes(router)` from `routes/web.ts`
+
+The `--install` flag is safe and idempotent – it won't duplicate existing configuration.
 
 ### Throttling
 
@@ -51,7 +61,10 @@ The file is yours to edit: change a limit, or pass `store: new RedisRateLimitSto
 
 ### Password reset
 
-Clicking "Forgot your password?" on the login page walks through `ForgotPasswordController` and `ResetPasswordController`, which use the framework's `createPasswordResetToken` / `completePasswordReset` primitives under the hood. The reset token is stored with the generated `app/Auth/PasswordResetStore.ts` (an in-memory store, so swap it for a Redis-backed store in production or any multi-instance deployment) and emailed via the generated `config/mail.ts`, which defaults to the `log` driver: reset links print straight to the console, so the flow works with zero setup in development. Set `MAIL_MAILER=smtp` (and the `SMTP_*` environment variables) once you're ready to send real email.
+"Forgot your password?" on the login page leads through `ForgotPasswordController` and `ResetPasswordController`, built on the framework's `createPasswordResetToken` / `completePasswordReset` (see [Password Reset](./password-reset.md)).
+
+- The token is kept by the generated `app/Auth/PasswordResetStore.ts`, an in-memory store. Swap it for a Redis-backed store in production or any multi-instance deployment.
+- The link is mailed through the generated `config/mail.ts`, which defaults to the `log` driver: links print to the console, so the flow works with no setup in development. Set `MAIL_MAILER=smtp` and the `SMTP_*` variables to send real email.
 
 ### Email verification
 
@@ -61,7 +74,9 @@ Pass `--verify` to also scaffold an email verification flow:
 bunx guren make:auth --install --verify
 ```
 
-This adds an `emailVerifiedAt` column to the `users` table, a `VerifyEmailController` (shows a "check your email" notice, resends the verification link, and confirms the token), and a `VerifyEmail` page. Registering now sends a verification email and redirects to `/verify-email` instead of `/dashboard`, and the generated `/dashboard` route is guarded with `requireVerifiedEmail`: unverified users are redirected back to `/verify-email` until they confirm. Verification links use the same in-memory store and `log`-driver mail setup as password reset, so this also works with zero setup in development. `--verify` requires the default (non-minimal) experience, since it builds on the registration flow.
+This adds an `emailVerifiedAt` column to the `users` table, a `VerifyEmailController` (shows a "check your email" notice, resends the verification link, and confirms the token), and a `VerifyEmail` page.
+
+Registering then sends a verification email and redirects to `/verify-email` instead of `/dashboard`. The generated `/dashboard` route is guarded with `requireVerifiedEmail`, so unverified users are sent back to `/verify-email` until they confirm. Verification links use the same in-memory store and `log`-driver mail as password reset, so this works with no setup in development.
 
 ### OAuth login buttons
 
@@ -71,7 +86,17 @@ Pass `--oauth` with a comma-separated provider list to also scaffold "Continue w
 bunx guren make:auth --install --oauth github,google
 ```
 
-This adds a `githubId` / `googleId` column per provider to the `users` table, a `config/oauth.ts` definition that registers each provider with the `OAuthManager` (only once its `OAUTH_<PROVIDER>_CLIENT_ID`, `_CLIENT_SECRET` and `_REDIRECT_URI` are all set; the command declares them in `config/env.ts`, see [OAuth / Social login](#oauth-social-login) below), and an `OAuthController` with `redirectToProvider` and `callback` actions. The callback looks up the user by provider ID, refuses to link an existing account with the same email (that account signs in with the method it was created with), and otherwise creates a **passwordless** account before logging the user in. Nothing is hashed at signup, and the scaffolded `users.passwordHash` column is left nullable. Account creation is refused when the provider reports the address as unverified (Google's `email_verified`, Discord's `verified`); returning an email is not a claim that the provider checked it, and an unverified one would let an account claim an address it does not own. Existing links are unaffected if a provider's status changes later. Unlike `--verify`, `--oauth` works with `--minimal`, since it doesn't depend on the registration scaffold.
+This adds:
+
+- a `githubId` / `googleId` column per provider on the `users` table;
+- a `config/oauth.ts` definition that registers each provider with the `OAuthManager` once its `OAUTH_<PROVIDER>_CLIENT_ID`, `_CLIENT_SECRET` and `_REDIRECT_URI` are all set (the command declares them in `config/env.ts`; see [OAuth / Social login](#oauth-social-login));
+- an `OAuthController` with `redirectToProvider` and `callback` actions.
+
+The callback signs in the user linked to that provider ID. Otherwise:
+
+- If an existing account has the same email, it refuses to link them: that account signs in with the method it was created with.
+- If the provider reports the address as unverified (Google's `email_verified`, Discord's `verified`), it refuses to create an account, since an unverified address would let an account claim one it does not own. Existing links are unaffected if a provider's status changes later.
+- Otherwise it creates a **passwordless** account and signs the user in. Nothing is hashed at signup, and the scaffolded `users.passwordHash` column is nullable.
 
 `--oauth` without `--verify` scaffolds the profile email **read-only**: `ProfileUpdateSchema` omits the field and `ProfileController.update()` never reads one, so neither the form nor a hand-crafted request can move an account off the address its provider vouched for. With `--verify` the field stays editable, because a replacement address resets `emailVerifiedAt` and has to be confirmed through a link sent to it. Note that in every mode an address is only *claimed*, never reserved: registration accepts any well-formed email and `users.email` is unique, so an account already holding an address blocks its real owner's first OAuth sign-in. Add your own ownership checks if that matters for your app.
 
@@ -97,103 +122,160 @@ Like plain `--oauth` without `--verify`, the profile email is read-only in this 
 
 This is the recommended shape for CPU-metered runtimes such as the Cloudflare Workers free tier, where a single password hash exceeds the per-request CPU budget no matter which hashing algorithm you pick.
 
-### One-time token stores
+## Controllers & Routes
 
-Password reset and email verification use atomic store operations. `replace()` revokes the email's previous tokens and stores the new one in a single operation. `consume(tokenId, email)` compares the stored email and deletes the token atomically, returning `true` to exactly one caller. The memory and Redis stores implement both methods. Issuance normalizes email addresses to lowercase before replacement.
-
-Custom `PasswordResetTokenStore` and `EmailVerificationTokenStore` implementations must add these methods before using the issuance and completion helpers. Password reset stores accept `replace(tokenId, email, expiresAt)`; email verification stores accept `replace(token)`. The methods are optional in the interfaces for source compatibility, but the helpers reject stores that lack the required operation. A process-local lock around separate reads and deletes does not protect a store shared by several workers; use a transaction or an atomic database command.
-
-`completePasswordReset()` and `completeEmailVerification()` consume the token before calling application code. If the update fails, request a new token; the consumed token is not restored. `verifyPasswordResetToken()` and `verifyEmailToken()` only inspect validity and do not reserve or consume a token. Use the completion helpers for updates. Existing scaffolded password reset controllers should migrate their separate verify/update/delete sequence to `completePasswordReset()`. Upgrade `@guren/core` and `@guren/cli` together, and restart all instances that issue or complete tokens; older instances still run the non-atomic sequence.
-
-## OAuth / Social login
-
-Guren ships first-party OAuth primitives plus provider presets for GitHub / Google / Discord. This is a lower-level, standalone scaffold. For OAuth buttons wired directly into `make:auth`'s login/registration pages with automatic account creation, see [OAuth login buttons](#oauth-login-buttons) above instead.
-
-### Scaffold OAuth in an app
-
-```bash
-bunx guren add oauth
-```
-
-This creates:
-
-- `config/oauth.ts`
-- `app/Http/Controllers/Auth/OAuthController.ts`
-- `routes/oauth.ts`
-
-and lists the `config/oauth.ts` definition in `createApp({ config })`. The definition binds the `oauth` manager; its contents are shown in the [OAuth guide](./oauth.md#registering-the-manager).
-
-It also adds an `oauth_states` table to `db/schema.ts` and generates its migration (run `bun run db:make` yourself if `drizzle-kit` is not installed yet), and registers the `oauth-states:prune` command. `config/oauth.ts` passes `DatabaseOAuthStateStore` as its `stateStore`, so the callback does not need to reach the process that issued the authorize redirect, which on Workers, Lambda and Vercel it usually does not (see [State Storage](./oauth.md#state-storage)). `CoreOAuthServiceProvider` is not registered, because its manager keeps state in process memory. The command refuses to run in an app with no `db/schema.ts`, and writes nothing.
-
-As with [`--oauth`](#oauth-login-buttons), an app without `config/env.ts`, or with a provider already binding `oauth`, gets `app/Providers/OAuthProvider.ts` with the same registrations and store instead.
-
-### Configure provider credentials
-
-The command declares three keys per provider in `config/env.ts` and adds them, blank, to `.env`:
-
-```bash
-OAUTH_GITHUB_CLIENT_ID=...
-OAUTH_GITHUB_CLIENT_SECRET=...
-OAUTH_GITHUB_REDIRECT_URI=https://your-app.test/auth/github/callback
-```
-
-Equivalent keys exist for `GOOGLE` and `DISCORD`. A provider is registered only when all three of its keys are set.
-
-### Route flow
+Controllers read the signed-in user through `this.auth`:
 
 ```ts
-router.get('/auth/:provider', [OAuthController, 'redirectToProvider'])
-router.get('/auth/:provider/callback', [OAuthController, 'callback'])
-```
+import { pages } from '@/.guren/pages.gen'
+import type { UserRecord } from '@/app/Models/User'
 
-`redirectToProvider` creates a signed state and redirects to the provider consent screen.  
-`callback` validates state, exchanges code for token, then fetches the remote profile.
+export default class DashboardController extends Controller {
+  async index() {
+    const user = await this.auth.user()       // returns user or null
+    return this.inertia(pages.dashboard.Index, { user })
+  }
 
-### Post-login redirect (`redirectTo`)
-
-Pass `redirectTo` when starting the flow and read it back, sanitized, after the callback. In the scaffolded `OAuthController` (which resolves the manager with `this.oauth()`):
-
-```ts
-// /auth/github?redirectTo=/settings
-async redirectToProvider(): Promise<Response> {
-  const { url } = await this.oauth().authorize('github', {
-    redirectTo: this.request.query('redirectTo'),
-    session: this.auth.session(),
-  })
-  return this.redirect(url)
-}
-
-async callback(): Promise<Response> {
-  const { profile, redirectTo } = await this.oauth().handleCallback('github', {
-    code,
-    state,
-    session: this.auth.session(),
-  })
-  // ...log the user in...
-  return this.redirect(redirectTo ?? '/')
+  async store() {
+    const user = await this.auth.userOrFail<UserRecord>()  // throws 401 if not authenticated
+    // user is guaranteed non-null here
+    await Post.create(data, { set: { authorId: user.id } })
+    return this.redirect('/posts')
+  }
 }
 ```
 
-`redirectTo` is guarded against open redirects on both ends of the flow: only app-relative paths (`/settings`) survive by default. Protocol-relative URLs (`//evil.com`), backslash variants, non-http schemes, and unlisted hosts are dropped: `redirectTo` comes back as `undefined` and your fallback applies.
+Use `this.validateBody()` / `this.validateQuery()` / `this.validateParams()` with Zod schemas for typed validation. Reserve `FormRequest` for compatibility code.
 
-To allow specific external hosts (wildcards supported), list them in `stateConfig` in `config/oauth.ts`. [Redirect After Login](./oauth.md#redirect-after-login) in the OAuth guide shows the definition.
+Surfacing the logged-in user on every Inertia page is already wired for you. The `app/Providers/AuthProvider.ts` that `bunx guren add auth` (equivalently `bunx guren make:auth --install`) generates registers it in `boot()`, so `auth.user` is readable from every page's props right after scaffolding. It is what the generated layout reads to toggle between **Sign in** and **Log out**.
 
-> **Note:** `createRedirectSafetyMiddleware` (opt-in) validates `Location` headers with its own separate `allowedHosts` option. If you mount it, keep both allowlists in agreement, or the middleware rewrites an approved external redirect to `/`.
+```ts
+// app/Providers/AuthProvider.ts (generated; register()'s useModel setup elided)
+import { ServiceProvider, shareInertiaProps, AUTH_CONTEXT_KEY } from '@guren/core'
+import type { AuthContext } from '@guren/core'
 
-### Manual Setup
-
-If you prefer to configure manually or already have partial setup, omit the `--install` flag:
-
-```bash
-bunx guren make:auth
+export default class AuthProvider extends ServiceProvider {
+  boot(): void {
+    shareInertiaProps(async (ctx) => {
+      const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+      return { auth: { user: await auth?.user() } }
+    }, this.container)
+  }
+}
 ```
 
-Then manually:
-1. Register `AuthProvider` in `src/app.ts`
-2. Add `createSessionMiddleware` to your middleware stack (auto-added by `AuthServiceProvider` unless you opt out)
-3. Register `registerAuthRoutes(router)` from `routes/web.ts`
+If you assembled authentication by hand, make the same call from your own service provider's `boot()`.
 
-The `--install` flag is safe and idempotent – it won't duplicate existing configuration.
+Sharing `auth.user()` this way is safe by default: the record is sanitized before it leaves the auth layer, so the password hash never reaches the browser (see [Sanitized User Records](#sanitized-user-records)).
+
+Augment `InertiaSharedProps` (see the Controllers guide) to type this `auth` payload for React pages.
+
+> `shareInertiaProps` merges its props over whatever was registered before, so
+> several parts of your app (auth, i18n, flash, …) can each contribute without
+> clobbering one another:
+>
+> ```ts
+> shareInertiaProps((ctx) => ({ i18n: { locale: detectLocale(ctx) } }), this.container)
+> ```
+>
+> Pass `this.container` to scope the props to one application; without it they
+> are process-wide and leak into a second application booted alongside.
+>
+> `setInertiaSharedProps` replaces the process-wide resolver rather than
+> merging, dropping whatever is registered at the moment it runs. Reach for it
+> only when you mean to replace the whole thing.
+
+Route middleware makes protecting endpoints straightforward:
+
+```ts
+import { Router, requireAuthenticated, requireGuest } from '@guren/core'
+import LoginController from '@/app/Http/Controllers/Auth/LoginController'
+import DashboardController from '@/app/Http/Controllers/DashboardController'
+
+export function registerWebRoutes(baseRouter: Router): void {
+  const router = baseRouter
+    .aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+    .aliasMiddleware('guest', requireGuest({ redirectTo: '/dashboard' }))
+
+  router.middleware('guest').group((guest) => {
+    guest.get('/login', [LoginController, 'show'])
+    guest.post('/login', [LoginController, 'store'])
+  })
+
+  router.middleware('auth').group((auth) => {
+    auth.post('/logout', [LoginController, 'destroy'])
+    auth.get('/dashboard', [DashboardController, 'index'])
+  })
+}
+```
+
+## Session Guard Helpers
+
+- `auth.check()` – resolves to `true` when a user is authenticated.
+- `auth.user()` – returns the current user record (or `null`), sanitized: the password hash, remember token, and the model's `hidden` fields are stripped.
+- `auth.userOrFail()` – returns the current user or throws `AuthenticationException` (401). Useful when you know the route is protected and want to avoid null checks.
+- `auth.login(user, remember?)` – logs in the given user and optionally issues a remember token.
+- `auth.attempt(credentials, remember?)` – validates credentials using the active guard and logs in on success.
+- `auth.logout()` – clears the session and remember token.
+
+## Sanitized User Records
+
+`auth.user()` (and the cached user available right after `login()` or `attempt()`) never exposes credential material. `ModelUserProvider` strips the password column, the remember-token column, and any fields the model marks as `hidden` before the record leaves the auth layer:
+
+```ts
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  optionalOnCreate: ['passwordHash'],
+  requireOnCreate: ['password'],
+  fillable: ['name', 'email', 'password'],
+  hidden: ['passwordHash', 'rememberToken'],
+}) {}
+```
+
+The `make:auth` scaffolder generates the user model with this `hidden` configuration out of the box. See [Hiding Fields](./database.md#hiding-fields) for the option and the still-supported `static hidden = [...]` form.
+
+Credential validation still runs on the raw database record internally, so login and remember-me tokens are unaffected: sanitization only changes what `auth.user()` exposes to application code.
+
+Custom user providers can opt in by implementing the optional `sanitize(user)` method on the `UserProvider` interface. `SessionGuard` calls it before caching or returning the user:
+
+```ts
+sanitize(user: AuthUser): AuthUser {
+  const { passwordHash, ...safe } = user
+  return safe as AuthUser
+}
+```
+
+### Typing Sanitized Users
+
+Sanitization happens at runtime, so a plain `auth.user<UserRecord>()` would still *type* the record as if the credential fields were present. Use the `Sanitized<T>` helper to strip the conventional credential keys from the type:
+
+```ts
+import type { Sanitized } from '@guren/core'
+
+// Strips password/passwordHash/rememberToken-style keys from the type
+const user = await this.auth.userOrFail<Sanitized<UserRecord>>()
+
+user.email        // ✅ string
+user.passwordHash // ❌ compile error — stripped at runtime
+```
+
+If your model hides additional fields via `hidden`, or your credential columns use names outside the conventions (`password`, `passwordHash`, `password_hash`, `rememberToken`, `remember_token`), list them in the second type parameter:
+
+```ts
+type SafeUser = Sanitized<UserRecord, 'twoFactorSecret' | 'credentialDigest'>
+```
+
+The runtime strips exactly the columns your provider is configured with plus the model's `hidden` fields. A static type cannot see that configuration, so `Sanitized<T>` reflects the conventional names and relies on you to pass anything else. `guren audit` warns about sensitive columns missing from `hidden`, which keeps the runtime side honest.
+
+## How Authentication Fits Together
+
+The generated setup is built from these parts, which the rest of the page configures:
+
+- **AuthManager** – central registry for guards and user providers. Resolved from the service container via `this.container.make<AuthManager>('auth')`.
+- **Guards** – runtime objects responsible for authenticating a request. The default `SessionGuard` persists the logged-in user's identifier inside the session and supports optional "remember me" tokens.
+- **User Providers** – data access adapters used by guards to load and validate users. `ModelUserProvider` integrates with Guren's `Model` abstraction so you can back authentication with Drizzle ORM tables.
+- **Auth Context** – per-request facade that surfaces guard helpers (`auth.check()`, `auth.user()`, `auth.login()`, etc.). The context is attached automatically by `AuthServiceProvider`; it is available in controllers via the `this.auth` helper and in middleware through `attachAuthContext`.
+- **OAuthManager** – social login helper that manages provider configs, CSRF-safe OAuth state, code exchange, and user profile fetch.
 
 ## Enabling Sessions
 
@@ -429,154 +511,94 @@ A credential column holding something that is not a password hash means the acco
 
 The default `AuthServiceProvider` automatically registers a `web` guard that uses the `users` provider. If you need additional guards (e.g. token-based APIs), call `auth.registerGuard('api', factory)` inside the provider and set it as default via `auth.setDefaultGuard('api')` when appropriate.
 
-## Controllers & Routes
-
-Controllers now expose an `auth` helper:
-
-```ts
-import { pages } from '@/.guren/pages.gen'
-import type { UserRecord } from '@/app/Models/User'
-
-export default class DashboardController extends Controller {
-  async index() {
-    const user = await this.auth.user()       // returns user or null
-    return this.inertia(pages.dashboard.Index, { user })
-  }
-
-  async store() {
-    const user = await this.auth.userOrFail<UserRecord>()  // throws 401 if not authenticated
-    // user is guaranteed non-null here
-    await Post.create(data, { set: { authorId: user.id } })
-    return this.redirect('/posts')
-  }
-}
-```
-
-Use `this.validateBody()` / `this.validateQuery()` / `this.validateParams()` with Zod schemas for typed validation. Reserve `FormRequest` for compatibility code.
-
-Surfacing the logged-in user on every Inertia page is already wired for you. The `app/Providers/AuthProvider.ts` that `bunx guren add auth` (equivalently `bunx guren make:auth --install`) generates registers it in `boot()`, so `auth.user` is readable from every page's props right after scaffolding. It is what the generated layout reads to toggle between **Sign in** and **Log out**.
-
-```ts
-// app/Providers/AuthProvider.ts (generated; register()'s useModel setup elided)
-import { ServiceProvider, shareInertiaProps, AUTH_CONTEXT_KEY } from '@guren/core'
-import type { AuthContext } from '@guren/core'
-
-export default class AuthProvider extends ServiceProvider {
-  boot(): void {
-    shareInertiaProps(async (ctx) => {
-      const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
-      return { auth: { user: await auth?.user() } }
-    }, this.container)
-  }
-}
-```
-
-If you assembled authentication by hand, make the same call from your own service provider's `boot()`.
-
-Sharing `auth.user()` this way is safe by default: the record is sanitized before it leaves the auth layer, so the password hash never reaches the browser (see [Sanitized User Records](#sanitized-user-records)).
-
-Augment `InertiaSharedProps` (see the Controllers guide) to type this `auth` payload for React pages.
-
-> `shareInertiaProps` merges its props over whatever was registered before, so
-> several parts of your app (auth, i18n, flash, …) can each contribute without
-> clobbering one another:
->
-> ```ts
-> shareInertiaProps((ctx) => ({ i18n: { locale: detectLocale(ctx) } }), this.container)
-> ```
->
-> Pass `this.container` to scope the props to one application; without it they
-> are process-wide and leak into a second application booted alongside.
->
-> `setInertiaSharedProps` replaces the process-wide resolver rather than
-> merging, dropping whatever is registered at the moment it runs. Reach for it
-> only when you mean to replace the whole thing.
-
-Route middleware makes protecting endpoints straightforward:
-
-```ts
-import { Router, requireAuthenticated, requireGuest } from '@guren/core'
-import LoginController from '@/app/Http/Controllers/Auth/LoginController'
-import DashboardController from '@/app/Http/Controllers/DashboardController'
-
-export function registerWebRoutes(baseRouter: Router): void {
-  const router = baseRouter
-    .aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
-    .aliasMiddleware('guest', requireGuest({ redirectTo: '/dashboard' }))
-
-  router.middleware('guest').group((guest) => {
-    guest.get('/login', [LoginController, 'show'])
-    guest.post('/login', [LoginController, 'store'])
-  })
-
-  router.middleware('auth').group((auth) => {
-    auth.post('/logout', [LoginController, 'destroy'])
-    auth.get('/dashboard', [DashboardController, 'index'])
-  })
-}
-```
-
-## Session Guard Helpers
-
-- `auth.check()` – resolves to `true` when a user is authenticated.
-- `auth.user()` – returns the current user record (or `null`), sanitized: the password hash, remember token, and the model's `hidden` fields are stripped.
-- `auth.userOrFail()` – returns the current user or throws `AuthenticationException` (401). Useful when you know the route is protected and want to avoid null checks.
-- `auth.login(user, remember?)` – logs in the given user and optionally issues a remember token.
-- `auth.attempt(credentials, remember?)` – validates credentials using the active guard and logs in on success.
-- `auth.logout()` – clears the session and remember token.
-
-## Sanitized User Records
-
-`auth.user()` (and the cached user available right after `login()` or `attempt()`) never exposes credential material. `ModelUserProvider` strips the password column, the remember-token column, and any fields the model marks as `hidden` before the record leaves the auth layer:
-
-```ts
-export class User extends defineModel(users, {
-  base: AuthenticatableModel,
-  optionalOnCreate: ['passwordHash'],
-  requireOnCreate: ['password'],
-  fillable: ['name', 'email', 'password'],
-  hidden: ['passwordHash', 'rememberToken'],
-}) {}
-```
-
-The `make:auth` scaffolder generates the user model with this `hidden` configuration out of the box. See [Hiding Fields](./database.md#hiding-fields) for the option and the still-supported `static hidden = [...]` form.
-
-Credential validation still runs on the raw database record internally, so login and remember-me tokens are unaffected: sanitization only changes what `auth.user()` exposes to application code.
-
-Custom user providers can opt in by implementing the optional `sanitize(user)` method on the `UserProvider` interface. `SessionGuard` calls it before caching or returning the user:
-
-```ts
-sanitize(user: AuthUser): AuthUser {
-  const { passwordHash, ...safe } = user
-  return safe as AuthUser
-}
-```
-
-### Typing Sanitized Users
-
-Sanitization happens at runtime, so a plain `auth.user<UserRecord>()` would still *type* the record as if the credential fields were present. Use the `Sanitized<T>` helper to strip the conventional credential keys from the type:
-
-```ts
-import type { Sanitized } from '@guren/core'
-
-// Strips password/passwordHash/rememberToken-style keys from the type
-const user = await this.auth.userOrFail<Sanitized<UserRecord>>()
-
-user.email        // ✅ string
-user.passwordHash // ❌ compile error — stripped at runtime
-```
-
-If your model hides additional fields via `hidden`, or your credential columns use names outside the conventions (`password`, `passwordHash`, `password_hash`, `rememberToken`, `remember_token`), list them in the second type parameter:
-
-```ts
-type SafeUser = Sanitized<UserRecord, 'twoFactorSecret' | 'credentialDigest'>
-```
-
-The runtime strips exactly the columns your provider is configured with plus the model's `hidden` fields. A static type cannot see that configuration, so `Sanitized<T>` reflects the conventional names and relies on you to pass anything else. `guren audit` warns about sensitive columns missing from `hidden`, which keeps the runtime side honest.
-
 ## Remember Tokens
 
 `SessionGuard` manages remember tokens automatically when your user provider implements `setRememberToken` / `getRememberToken`. `ModelUserProvider` handles this when the `rememberTokenColumn` option is supplied.
+
+## OAuth / Social login
+
+Guren ships first-party OAuth primitives plus provider presets for GitHub / Google / Discord. This is a lower-level, standalone scaffold. For OAuth buttons wired directly into `make:auth`'s login/registration pages with automatic account creation, see [OAuth login buttons](#oauth-login-buttons) above instead.
+
+### Scaffold OAuth in an app
+
+```bash
+bunx guren add oauth
+```
+
+This creates:
+
+- `config/oauth.ts`
+- `app/Http/Controllers/Auth/OAuthController.ts`
+- `routes/oauth.ts`
+
+and lists the `config/oauth.ts` definition in `createApp({ config })`. The definition binds the `oauth` manager; its contents are shown in the [OAuth guide](./oauth.md#registering-the-manager).
+
+It also adds an `oauth_states` table to `db/schema.ts` and generates its migration (run `bun run db:make` yourself if `drizzle-kit` is not installed yet), and registers the `oauth-states:prune` command. `config/oauth.ts` passes `DatabaseOAuthStateStore` as its `stateStore`, so the callback does not need to reach the process that issued the authorize redirect, which on Workers, Lambda and Vercel it usually does not (see [State Storage](./oauth.md#state-storage)). `CoreOAuthServiceProvider` is not registered, because its manager keeps state in process memory. The command refuses to run in an app with no `db/schema.ts`, and writes nothing.
+
+As with [`--oauth`](#oauth-login-buttons), an app without `config/env.ts`, or with a provider already binding `oauth`, gets `app/Providers/OAuthProvider.ts` with the same registrations and store instead.
+
+### Configure provider credentials
+
+The command declares three keys per provider in `config/env.ts` and adds them, blank, to `.env`:
+
+```bash
+OAUTH_GITHUB_CLIENT_ID=...
+OAUTH_GITHUB_CLIENT_SECRET=...
+OAUTH_GITHUB_REDIRECT_URI=https://your-app.test/auth/github/callback
+```
+
+Equivalent keys exist for `GOOGLE` and `DISCORD`. A provider is registered only when all three of its keys are set.
+
+### Route flow
+
+```ts
+router.get('/auth/:provider', [OAuthController, 'redirectToProvider'])
+router.get('/auth/:provider/callback', [OAuthController, 'callback'])
+```
+
+`redirectToProvider` creates a signed state and redirects to the provider consent screen.  
+`callback` validates state, exchanges code for token, then fetches the remote profile.
+
+### Post-login redirect (`redirectTo`)
+
+Pass `redirectTo` when starting the flow and read it back, sanitized, after the callback. In the scaffolded `OAuthController` (which resolves the manager with `this.oauth()`):
+
+```ts
+// /auth/github?redirectTo=/settings
+async redirectToProvider(): Promise<Response> {
+  const { url } = await this.oauth().authorize('github', {
+    redirectTo: this.request.query('redirectTo'),
+    session: this.auth.session(),
+  })
+  return this.redirect(url)
+}
+
+async callback(): Promise<Response> {
+  const { profile, redirectTo } = await this.oauth().handleCallback('github', {
+    code,
+    state,
+    session: this.auth.session(),
+  })
+  // ...log the user in...
+  return this.redirect(redirectTo ?? '/')
+}
+```
+
+`redirectTo` is guarded against open redirects on both ends of the flow: only app-relative paths (`/settings`) survive by default. Protocol-relative URLs (`//evil.com`), backslash variants, non-http schemes, and unlisted hosts are dropped: `redirectTo` comes back as `undefined` and your fallback applies.
+
+To allow specific external hosts (wildcards supported), list them in `stateConfig` in `config/oauth.ts`. [Redirect After Login](./oauth.md#redirect-after-login) in the OAuth guide shows the definition.
+
+> **Note:** `createRedirectSafetyMiddleware` (opt-in) validates `Location` headers with its own separate `allowedHosts` option. If you mount it, keep both allowlists in agreement, or the middleware rewrites an approved external redirect to `/`.
+
+## Custom One-Time Token Stores
+
+Password reset and email verification store one-time tokens. The memory and Redis stores need nothing from you; this section is for writing your own store, or upgrading an older scaffold.
+
+The helpers rely on two atomic store operations. `replace()` revokes the email's previous tokens and stores the new one in a single operation. `consume(tokenId, email)` compares the stored email and deletes the token atomically, returning `true` to exactly one caller. The memory and Redis stores implement both methods. Issuance normalizes email addresses to lowercase before replacement.
+
+Custom `PasswordResetTokenStore` and `EmailVerificationTokenStore` implementations must add these methods before using the issuance and completion helpers. Password reset stores accept `replace(tokenId, email, expiresAt)`; email verification stores accept `replace(token)`. The methods are optional in the interfaces for source compatibility, but the helpers reject stores that lack the required operation. A process-local lock around separate reads and deletes does not protect a store shared by several workers; use a transaction or an atomic database command.
+
+`completePasswordReset()` and `completeEmailVerification()` consume the token before calling application code. If the update fails, request a new token; the consumed token is not restored. `verifyPasswordResetToken()` and `verifyEmailToken()` only inspect validity and do not reserve or consume a token. Use the completion helpers for updates. Existing scaffolded password reset controllers should migrate their separate verify/update/delete sequence to `completePasswordReset()`. Upgrade `@guren/core` and `@guren/cli` together, and restart all instances that issue or complete tokens; older instances still run the non-atomic sequence.
 
 ## Example Application
 
