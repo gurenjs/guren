@@ -35,7 +35,7 @@ flowchart LR
 | タスク、ステップ | Guren が計画から組み立てる作業。おもにエンティティごとにタスクがあり、共有する作業にもタスクができる。タスクは 6 種類のステップに分かれる（[実装](#実装-plannext-と-planverify)） |
 | 記録 | ステップの検証結果。`.guren/plans/` に置かれる |
 | 状態 | 要素の進み具合。`planned`、`present`、`wired`、`verified`、`drifted`、`unjudged`、`blocked`、`waived` のどれか（[進捗を読む](#進捗を読む-planstatus)） |
-| 到達 | 通った振る舞いが、ルートと期待するページから計画の参照をたどって、その要素まで達しているか |
+| 到達 | 通った振る舞いが、ルートと期待するページから計画の参照をたどって、その要素まで達しているか（[規則](./implementation-plan-verification.md#要素が完了と数えられる条件)） |
 | 鮮度 | 要素が依存するものが、基準点のときのままか（[鮮度](./implementation-plan-verification.md#鮮度)）。依存先が古くなったステップは、`plan:next` が保留する |
 | 免除(waive) | 人が理由を付けて、要素を未完成のまま受け入れること（[要素を waive する](#要素を-waive-する-planwaive)） |
 
@@ -102,7 +102,7 @@ bunx guren plan:render docs/plans/comments/plan.json
 - 存在しない `existing` や `alter` の対象
 - 認証だけで認可のない、状態を変えるルート
 - validator のない、ボディを受け取るルート
-- 先に挙げた、足りない振る舞い
+- 足りない振る舞い（[受け入れ振る舞い](./implementation-plan-format.md#受け入れ振る舞い)を参照）
 
 検査が失敗しても描画は止まらず、先に進めなくなるのは `plan:approve` のほうです。基準点 (`baseline`) を持つ計画では、`plan:render` も承認と同じように計画自身が行った作業を差し引いて判定します。そのため、計画が作った要素との衝突は、ページ上では通過した検査として表示されます。例の削除ルートの名前を、ブログがすでに使っている名前に変えると、次のように報告されます。
 
@@ -137,8 +137,6 @@ Approved 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0, recor
 
 最初に承認したときに、計画に `baseline` が書き込まれます。`rev` は計画を書いた時点のコミットで、`contextHash` は参照している要素ごとに、アプリケーションでの今の形をハッシュにしたものです。コミットのないリポジトリや、未コミットの変更がある作業ツリー (計画自身のファイルは除く) で承認が拒否されるのはこのためです。承認の記録は計画の中には入らず、隣の `approvals.json` に書かれます。両方をコミットしてください。
 
-validator のハッシュの取り方と、読み取れないセクションがあるときの対処は、[承認の詳細](./implementation-plan-verification.md#承認の詳細)にあります。
-
 計画はハッシュで識別します。ハッシュは基準点を含めた計画の SHA-256 で、承認、検証の記録、免除の記録はどれもこのハッシュで計画を指します。承認後に編集した計画は、別の計画として扱われます。基準点を持つ計画の現在のハッシュがどの承認にも記録されていなければ、`plan:next`、`plan:scaffold`、`plan:verify`、`plan:waive`、`plan:close` はその計画を拒否します。
 
 ```text
@@ -147,7 +145,7 @@ validator のハッシュの取り方と、読み取れないセクションが�
 
 `plan:status` と `plan:render` は、承認する前に変更を読むためのコマンドなので、こうした計画でも拒否しません。基準点のない下書きにはハッシュがないので、`plan:next` と `plan:verify` は下書きをこれまでどおり受け付けます。`plan:scaffold` は承認された内容からコードを書くコマンドなので、下書きを拒否します。隣に承認の記録がある下書きは、未承認の計画と同じように拒否されます。承認済みの計画から `baseline` を消しても、この確認を避けることはできません。
 
-実装の途中で編集した計画をもう一度承認するときの扱いは[承認の詳細](./implementation-plan-verification.md#承認の詳細)に、`alter` が承認時に記録するものは[`alter` の読み取り](./implementation-plan-verification.md#alter-の読み取り)にあります。
+計画は実装を始める前に承認してください。承認のときには、`alter` ごとに計画した性質がどう読めるかを記録するので、承認時点ですでに一致していた性質は変更の証拠になりません（[`alter` の読み取り](./implementation-plan-verification.md#alter-の読み取り)）。validator のハッシュの取り方と、実装の途中で編集した計画をもう一度承認するときの扱いは、[承認の詳細](./implementation-plan-verification.md#承認の詳細)にあります。
 
 ## 改訂: `plan:revise`
 
@@ -244,13 +242,15 @@ task/entity/model.comment/tests: verified (607 ms)
 Recorded in .guren/plans/comments.state.json
 ```
 
+`work:` の行は、`plan:next` が印を付けてからそのステップで変わったファイル数と行数です（[ステップごとのファイル数と行数](./implementation-plan-verification.md#ステップごとのファイル数と行数)）。
+
 `tests` ステップの検証が通るのは、すべての振る舞いにテストがあり、そのすべてが失敗したときだけです。コードより先に通ってしまうテストは何も証明しませんし、skip したテストは失敗に数えません。`plan:verify` は、ステップの id がソースに書かれたテストファイルを選んで `bun test` で実行します。後のステップでも同じファイルを実行し、今度は通ることを求めます。検証結果のあとには計画の状態が表示されますが、その読み方は後で説明します。
 
 `plan:verify` は、テストを実行する前に、各振る舞いのテストがその振る舞いのルートにリクエストしているかを確かめます（[`plan:verify` によるテストのリクエストの読み取り](./implementation-plan-verification.md#planverify-によるテストのリクエストの読み取り)）。
 
 ### scaffold と tests のステップ
 
-`plan:next` は、`scaffold` と `tests` のステップを手で書かずに `plan:scaffold` で書くよう指示し、scaffold ステップが書いたルートは `http` ステップで `plan:scaffold --mount` を使ってマウントするよう指示します。それぞれが書き出すものは[計画からコードとテストを生成する](./implementation-plan-scaffolding.md)にあります。
+`plan:next` は、`scaffold` と `tests` のステップを手で書かずに `plan:scaffold` で書くよう指示し、scaffold ステップが書いたルートは `http` ステップで `plan:scaffold --mount` を使ってマウントするよう指示します。どちらも、あえて手を付けずに残すものがあります。キーがまだないリレーション、例外を投げる Resource のフィールド、`false` を返す Policy のメソッド、501 を返すアクション、例外を投げる `given()` で書かれたテストの前提です。それぞれが書き出すものと残すものは[計画からコードとテストを生成する](./implementation-plan-scaffolding.md)にあります。
 
 ### 結果
 
@@ -277,7 +277,7 @@ Routes
       Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http; changed since: app/Http/Resources/CommentResource.ts.
 ```
 
-`http` の振る舞いを通してしか `verified` にならない要素 (コントローラーと Policy) は、`plan:status` が読み取った状態に戻りました。ファイルが変わったステップの振る舞いは、要素に届く経路として数えないためです (「進捗を読む」の節を参照してください)。
+`http` の振る舞いを通してしか `verified` にならない要素 (コントローラーと Policy) は、`plan:status` が読み取った状態に戻りました。ファイルが変わったステップの振る舞いは、要素に届く経路として数えないためです ([要素が完了と数えられる条件](./implementation-plan-verification.md#要素が完了と数えられる条件)を参照してください)。
 
 こうしたステップは、`plan:verify --step` で確かめ直します。指定したステップの検証が通ると、同じ実行の中で、ファイルが変わった前のステップをタスク順に確かめ直します。コマンドを実行するステップが検証を通らなかった時点で、確かめ直しは止まります。結果はそれぞれ記録され (`failed` なら壊れた箇所も添えます)、レポートの「Re-checked」の下に並びます。そのあと `plan:next` は、検証を通っていない最初のステップを返します。たいていは失敗したステップです。確かめ直しが `blocked` になったステップは、後の実行に回します。指定したステップ自体が検証を通らなければ、前のステップの記録には手を付けず、後の実行に回したステップとして示します。ステップ間で共有しているコマンドが失敗している以上、確かめ直しても同じ理由で失敗するからです。
 
@@ -401,7 +401,7 @@ Not approved at this hash: plan:next, plan:scaffold, plan:verify, plan:waive, pl
     No planned property of it matched beyond its existence and no behaviour can reach it, so no plan:verify run lifts it: waive it with bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "<why>"
 ```
 
-副作用にはどの振る舞いも届かないので (「進捗を読む」の節を参照してください)、示される選択肢は免除だけです。
+副作用にはどの振る舞いも届かないので ([要素が完了と数えられる条件](./implementation-plan-verification.md#要素が完了と数えられる条件)を参照してください)、示される選択肢は免除だけです。
 
 ```bash
 bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "no behaviour can observe an emitted event; the listener's own plan tests the notification"

@@ -1,6 +1,6 @@
 # Generating Code and Tests from a Plan
 
-`plan:next` sends `scaffold` and `tests` steps to `plan:scaffold`, which writes code and test skeletons from an approved plan. This page describes what it writes, what it leaves for you, and when it refuses. The workflow around it is in [Implementation Plans](./implementation-plans.md).
+`plan:next` sends `scaffold` and `tests` steps to `plan:scaffold`, which writes code and test skeletons from an approved plan. This page describes what it writes, what it leaves for you, and when it refuses. The workflow around it is in [Implementation Plans](./implementation-plans.md), and element states such as `planned` and `wired` are defined in [Reading progress](./implementation-plans.md#reading-progress-planstatus).
 
 ## The scaffold step: `plan:scaffold`
 
@@ -60,7 +60,7 @@ export class CommentResource extends Resource<CommentRecord, CommentResourceData
 }
 ```
 
-Each policy is written with one method per planned ability, and every method returns `false` until you write its rule, which the method's comment quotes. `app/Providers/CommentPolicyProvider.ts` registers it with the gate in `boot()`, and the command adds that provider to `createApp({ providers })` in `src/app.ts`. `plan:status` reads a policy by its abilities and does not read its registration, so a policy is complete at `present`.
+Each policy is written with one method per planned ability, and every method returns `false` until you write its rule, which the method's comment quotes. `app/Providers/CommentPolicyProvider.ts` registers it with the authorization gate in `boot()`, and the command adds that provider to `createApp({ providers })` in `src/app.ts`. `plan:status` reads a policy by its abilities and does not read its registration, so a policy is complete at `present`.
 
 Each controller the step adds holds exactly the planned actions and nothing else. An action validates its `params` and `query` with the planned validators, authorizes with the planned policy ability, validates its `body`, then answers 501. A caller the policy denies gets 403 whatever it sent:
 
@@ -97,7 +97,7 @@ export function registerCommentRoutes(router: Router): void {
 }
 ```
 
-Nothing calls the file yet, so its routes are not registered and read as `planned`: a mounted route would answer 401 or 422 before the `tests` step, and a behaviour that already passes fails that step. `auth` is the only middleware it applies; any other name the plan gives is listed for the `http` step, which knows the handler the application aliases it to. `guren check` reports the unmounted file as advisory while the plan is approved and not closed and its `http` step is not verified, so the gate does not block the steps in between. Once that step verifies or the plan closes, an unmounted file is a warning again.
+Nothing calls the file yet, so its routes are not registered and read as `planned`: a mounted route would answer 401 or 422 before the `tests` step, and a behaviour that already passes fails that step. `auth` is the only middleware it applies; any other name the plan gives is listed for the `http` step, which knows the handler the application aliases it to. `guren check` reports the unmounted file as advisory while the plan is approved and not closed and its `http` step is not verified, so `guren gate` does not block the steps in between. Once that step verifies or the plan closes, an unmounted file is a warning again.
 
 Each job, event, listener, mail and notification the step adds is written as the matching `make:*` command writes it, under the plan's class name. `plan:status` reads one as `present`; it is `wired` once something dispatches, registers or sends it, which is the `http` step's work. Where `docs/entities/Comment.md` already exists, the controller and the routes file carry `@docs docs/entities/Comment.md`; a tag to a document that does not exist yet would fail `guren check`.
 

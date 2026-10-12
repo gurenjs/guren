@@ -35,7 +35,7 @@ The page uses these words in a fixed sense. Each is explained in full in its sec
 | Task, step | The work Guren derives: mostly a task per entity, plus tasks for shared work, split into steps of six kinds ([Implementing](#implementing-plannext-and-planverify)) |
 | Record | A step's verification result, kept in `.guren/plans/` |
 | State | How far an element is: `planned`, `present`, `wired`, `verified`, `drifted`, `unjudged`, `blocked` or `waived` ([Reading progress](#reading-progress-planstatus)) |
-| Reach | Whether a passing behaviour exercises an element, following the plan's references from its route and expected page |
+| Reach | Whether a passing behaviour exercises an element, following the plan's references from its route and expected page ([rules](./implementation-plan-verification.md#when-an-element-counts-as-complete)) |
 | Fresh, stale | Whether what an element depends on still matches the baseline ([Freshness](./implementation-plan-verification.md#freshness)). `plan:next` holds back a step whose context went stale |
 | Waiver | A person accepting an element incomplete, with a reason ([Waiving](#waiving-an-element-planwaive)) |
 
@@ -94,7 +94,7 @@ It writes `docs/plans/comments/plan.html` and prints the path. `-o` writes somew
 
 The page is one file with no network access: it opens from disk and can be attached to a review. It has a tab per section, a filter per entity, a "Changes only" toggle that hides `existing` elements, an entity relationship diagram of the plan merged over the current schema, and every id links to the element it names. Failed checks and breaking changes are pinned under "Needs attention". Each element has Approve and Request changes buttons and a comment box, and the footer exports the review as `feedback.json`. Nothing done on the page changes the plan file. **Copy prompt for the agent** copies one message, in the page's language, that names the plan, asks the agent to apply the review with the `plan-write` skill, and carries the feedback, so the review reaches the plan through a revision. `plan:revise` reads its approvals and answered questions (below); the comments are for you or your agent to apply to a copy of the plan. The two commands it prints are the ones that follow a revision, `plan:render` and `plan:approve`.
 
-The checks run against the application as it is now. They report, among others, a route whose action is not in the plan, a foreign key to a model that exists nowhere, an `add` whose name is already taken, an `existing` or `alter` target that does not exist, a mutating route with authentication and no authorization, a body-carrying route with no validator, and the missing behaviours above. Rendering never fails on a check; `plan:approve` does. On a plan with a baseline, `plan:render` settles the same findings approval does, so a collision the plan's own work explains shows on the page as a passing check rather than a blocking one. Renaming the delete route of the example to a name the blog already uses gives:
+The checks run against the application as it is now. They report, among others, a route whose action is not in the plan, a foreign key to a model that exists nowhere, an `add` whose name is already taken, an `existing` or `alter` target that does not exist, a mutating route with authentication and no authorization, a body-carrying route with no validator, and the missing behaviours described in [Acceptance behaviours](./implementation-plan-format.md#acceptance-behaviours). Rendering never fails on a check; `plan:approve` does. On a plan with a baseline, `plan:render` settles the same findings approval does, so a collision the plan's own work explains shows on the page as a passing check rather than a blocking one. Renaming the delete route of the example to a name the blog already uses gives:
 
 ```text
   route.comments.destroy: The route name "posts.destroy" already exists in this application.
@@ -127,8 +127,6 @@ Approved 22735cb551ac15559cd5cabc344925f8f75af7a62efe39570ac49d8c032a59c0, recor
 
 The first approval writes a `baseline` into the plan: `rev`, the commit the plan was written against, and `contextHash`, a hash per referenced element of what the application holds for it today. That is why it refuses a repository with no commit and a working tree with uncommitted changes (the plan's own files excepted). The approval itself goes to `approvals.json`, beside the plan and never inside it. Commit both.
 
-How validators are hashed, and what to do when a section cannot be read, is in [Approval in detail](./implementation-plan-verification.md#approval-in-detail).
-
 The plan's hash identifies it: a SHA-256 of the plan with its baseline. Approvals, verification records and waivers all name it, so a plan edited after approval is a different plan. `plan:next`, `plan:scaffold`, `plan:verify`, `plan:waive` and `plan:close` refuse a plan with a baseline whose current hash no approval names:
 
 ```text
@@ -137,7 +135,7 @@ The plan's hash identifies it: a SHA-256 of the plan with its baseline. Approval
 
 `plan:status` and `plan:render` keep working, since they are how you read the change before approving it. A draft, which has no baseline and so no hash, is still accepted by `plan:next` and `plan:verify`; `plan:scaffold` refuses one, since it writes code from what someone approved. A draft with approvals recorded beside it is refused like an unapproved plan: deleting `baseline` from an approved plan does not take it out of the gate.
 
-Approving an edited plan again, mid-implementation, is covered in [Approval in detail](./implementation-plan-verification.md#approval-in-detail), and what an `alter` records at approval in [Readings of an `alter`](./implementation-plan-verification.md#readings-of-an-alter).
+Approve the plan before implementing it: for every `alter`, approval records what each planned property reads, and a property that already matched then proves nothing ([Readings of an `alter`](./implementation-plan-verification.md#readings-of-an-alter)). How validators are hashed, and approving an edited plan again mid-implementation, are in [Approval in detail](./implementation-plan-verification.md#approval-in-detail).
 
 ## Revising: `plan:revise`
 
@@ -234,13 +232,15 @@ task/entity/model.comment/tests: verified (607 ms)
 Recorded in .guren/plans/comments.state.json
 ```
 
+The `work:` line counts the files and lines the step changed since `plan:next` marked it ([Files and lines per step](./implementation-plan-verification.md#files-and-lines-per-step)).
+
 The `tests` step passes only when every behaviour has a test and each one fails: a test that passes before the code exists proves nothing, and a skipped test is not a failing one. `plan:verify` selects the test files whose source carries the step's ids, and runs them with `bun test`. Later steps run the same files and need them to pass. After the verify output it prints the plan's status, described below.
 
 Before it runs the tests, `plan:verify` checks that each behaviour's test requests the route the behaviour names ([How `plan:verify` reads test requests](./implementation-plan-verification.md#how-planverify-reads-test-requests)).
 
 ### Scaffold and tests steps
 
-`plan:next` tells you to write a `scaffold` or `tests` step with `plan:scaffold` rather than by hand, and to mount the routes a scaffold step wrote with `plan:scaffold --mount` from the `http` step. What each writes is in [Generating Code and Tests from a Plan](./implementation-plan-scaffolding.md).
+`plan:next` tells you to write a `scaffold` or `tests` step with `plan:scaffold` rather than by hand, and to mount the routes a scaffold step wrote with `plan:scaffold --mount` from the `http` step. Both leave work for you on purpose: relationships whose keys are not there yet, resource fields that throw, policy methods that return `false`, actions that answer 501, and test setup written as `given()` calls that throw. What each writes and leaves is in [Generating Code and Tests from a Plan](./implementation-plan-scaffolding.md).
 
 ### Outcomes
 
@@ -267,7 +267,7 @@ Routes
       Verified 2026-09-22T10:18:13.443Z by task/entity/model.comment/http; changed since: app/Http/Resources/CommentResource.ts.
 ```
 
-The elements verified only through a behaviour of `http` (its controller and policy) fell back to the state `plan:status` reads for them, since a step whose files changed carries no reach (see Reading progress).
+The elements verified only through a behaviour of `http` (its controller and policy) fell back to the state `plan:status` reads for them, since a step whose files changed carries no reach (see [When an element counts as complete](./implementation-plan-verification.md#when-an-element-counts-as-complete)).
 
 `plan:verify --step` re-checks such steps. Once the given step verifies, the same run re-checks the earlier steps whose files changed, in task order, stopping at the first one that runs commands and does not verify. Each outcome is recorded (a `failed` one names what broke) and listed under "Re-checked"; `plan:next` then returns the earliest step left unverified, usually the one that failed. A re-check that comes out `blocked` is left for a later run. While the given step does not verify, the earlier records are left alone and listed as left for a later run, since the commands the steps share would fail them too.
 
@@ -384,7 +384,7 @@ When an element will not be finished under this plan, or nothing in the plan can
     No planned property of it matched beyond its existence and no behaviour can reach it, so no plan:verify run lifts it: waive it with bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "<why>"
 ```
 
-No behaviour can reach a side effect (see Reading progress), so the line names only the waiver:
+No behaviour can reach a side effect (see [When an element counts as complete](./implementation-plan-verification.md#when-an-element-counts-as-complete)), so the line names only the waiver:
 
 ```bash
 bunx guren plan:waive docs/plans/comments/plan.json event.commentPosted --reason "no behaviour can observe an emitted event; the listener's own plan tests the notification"

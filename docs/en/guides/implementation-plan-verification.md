@@ -4,7 +4,7 @@ This page collects the rules behind approval and verification, for when a verdic
 
 ## Impact
 
-For every element the plan alters, renames or drops, the page lists what in the application depends on it: relationships, routes with their `ApiRoutes` entries and agent tools, resources, policies, controller actions, tests, and for a column the places that read or write it. A plan that renames `posts.excerpt` to `summary` in the blog shows, under the column:
+For every element the plan alters, renames or drops, the review page `plan:render` writes lists what in the application depends on it: relationships, routes with their `ApiRoutes` entries and agent tools, resources, policies, controller actions, tests, and for a column the places that read or write it. A plan that renames `posts.excerpt` to `summary` in the blog shows, under the column:
 
 ```text
 PostResource reads it                              app/Http/Resources/PostResource.ts:32
@@ -147,7 +147,7 @@ Each record also carries the work that implemented the step, printed as its `wor
 
 ## When an element counts as complete
 
-A property no scanner reads is never counted as a match, and an element whose planned properties are all unreadable is `unjudged` rather than complete. A kind that has a mount point is the exception: a validator, an action, a route, a page and a side effect complete on being mounted, since the mount is a reading of the element itself. An element that plans no property at all, such as a controller, completes on existing. An `alter` counts only what moved since its readings at approval, whatever it mounts (see Readings of an `alter`, under Approving).
+A property no scanner reads is never counted as a match, and an element whose planned properties are all unreadable is `unjudged` rather than complete. A kind that has a mount point is the exception: a validator, an action, a route, a page and a side effect complete on being mounted, since the mount is a reading of the element itself. An element that plans no property at all, such as a controller, completes on existing. An `alter` counts only what moved since its readings at approval, whatever it mounts (see [Readings of an `alter`](#readings-of-an-alter)).
 
 A route is mounted but not reached when a route registered before it, with the same method or `ALL`, answers every request its path matches: a planned `GET /comments/new` after `GET /comments/:id` never receives a request. Such a route stays `present`, and so do the action, validator and page only it reaches; so does a route that may be shadowed, where the order or the paths cannot be compared. The note names the earlier route and the routes file or module that registered it; register the planned route first, or change its path.
 
@@ -204,7 +204,7 @@ Freshness counts the edited plan's end state, so the stale element turns fresh o
 bunx guren check --plan
 ```
 
-`check --plan` looks at every open plan at once. A plan is found at the application root as `*.plan.json`, and under `docs/plans/` as `plan.json` or `*.plan.json`. Open means approved at its current hash and not closed. It reports an open plan with `drifted` elements or with a command the check above refuses (one approved before that check existed), and two open plans that change the same element, matched by what they change in the application rather than by id. Midway through the example, with a second approved plan renaming `posts.excerpt`:
+`check --plan` looks at every open plan at once. A plan is found at the application root as `*.plan.json`, and under `docs/plans/` as `plan.json` or `*.plan.json`. Open means approved at its current hash and not closed. It reports an open plan with `drifted` elements or with a command the [commands check](./implementation-plan-format.md#commands) refuses (one approved before that check existed), and two open plans that change the same element, matched by what they change in the application rather than by id. Midway through the example, with a second approved plan renaming `posts.excerpt`:
 
 ```text
  WARN  [warn] Approved plan drifted: docs/plans/comments/plan.json has 2 drifted element(s): model.comment, resource.comment.

@@ -1,6 +1,6 @@
 # Writing an Implementation Plan
 
-This page describes the plan file itself: its sections, element ids and changes, acceptance behaviours, questions and commands. For the workflow that renders, approves and implements it, see [Implementation Plans](./implementation-plans.md).
+This page describes the plan file itself: its sections, element ids and changes, acceptance behaviours, questions and commands. For the workflow that renders, approves and implements it, see [Implementation Plans](./implementation-plans.md); the words this page uses (element, behaviour, step) are defined in its [Terms](./implementation-plans.md#terms) table.
 
 ## The document
 

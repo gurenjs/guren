@@ -1,6 +1,6 @@
 # 計画からコードとテストを生成する
 
-`plan:next` は、`scaffold` と `tests` のステップを `plan:scaffold` で書くよう指示します。`plan:scaffold` は、承認済みの計画からコードとテストの雛形を書き出します。このページでは、書き出すもの、残しておくもの、拒否する場合を説明します。前後の流れは[実装計画](./implementation-plans.md)にあります。
+`plan:next` は、`scaffold` と `tests` のステップを `plan:scaffold` で書くよう指示します。`plan:scaffold` は、承認済みの計画からコードとテストの雛形を書き出します。このページでは、書き出すもの、残しておくもの、拒否する場合を説明します。前後の流れは[実装計画](./implementation-plans.md)に、`planned` や `wired` といった要素の状態は[進捗を読む](./implementation-plans.md#進捗を読む-planstatus)にあります。
 
 ## scaffold ステップ: `plan:scaffold`
 
