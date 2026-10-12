@@ -1,116 +1,15 @@
 # Cache Guide
 
-Guren provides a unified caching API with support for multiple storage backends. Caching helps improve application performance by storing expensive computations or database queries for quick retrieval.
-
-The standard path is: import cache APIs from `@guren/core`, configure the stores in `config/cache.ts`, and keep services responsible for cache keys and invalidation.
+The cache stores the result of slow work, such as a database query or a computation, under a key so the next request can read it back. Add it with `bunx guren add cache`, pick a backend with `CACHE_STORE`, and read the cache from the container as `cache`.
 
 ## Core Concepts
 
-- **CacheStore** – Interface for cache operations (get, set, delete, etc.). All drivers implement this interface.
-- **CacheManager** – Central registry for configuring and accessing multiple cache stores.
-- **TaggedCache** – Allows grouping cache items by tags for bulk invalidation.
-- **Drivers** – Storage backends: Memory (default), Redis, and File.
+- **CacheManager**: the registry of configured stores. `config/cache.ts` binds it in the container as `cache`.
+- **CacheStore**: one backend's operations (get, set, delete, and so on). `cache.store()` returns the default one.
+- **Drivers**: the backends. `memory` (the default), `redis` and `file`.
+- **TaggedCache**: a view of a store that groups keys under tags, so you can delete them together.
 
-## Basic Usage
-
-### Quick Start (Container-bound Facade)
-
-The simplest way to use the cache without passing a manager around is to create facades from an application container:
-
-```ts
-import { createFacades } from '@guren/core'
-
-const { Cache } = createFacades(app.container)
-
-// Store a value (TTL in seconds)
-await Cache.store().set('user:1', { name: 'John' }, 3600)
-
-// Retrieve a value
-const user = await Cache.store().get<{ name: string }>('user:1')
-
-// Check if key exists
-const exists = await Cache.store().has('user:1')
-
-// Delete a value
-await Cache.store().delete('user:1')
-```
-
-### Direct Instantiation
-
-You can also create a `CacheManager` directly:
-
-```ts
-import { CacheManager } from '@guren/core'
-
-const cache = new CacheManager()
-
-await cache.store().set('user:1', { name: 'John' }, 3600)
-const user = await cache.store().get<{ name: string }>('user:1')
-```
-
-### Cache Operations
-
-```ts
-const store = cache.store()
-
-// Basic operations
-await store.set('key', 'value', 3600)  // Set with 3600s TTL
-await store.set('key', 'value')         // Set without expiration
-const value = await store.get<string>('key')
-const exists = await store.has('key')
-await store.delete('key')
-await store.clear()                     // Clear all items
-
-// Increment/Decrement
-await store.set('counter', 0)
-await store.increment('counter')        // 1
-await store.increment('counter', 5)     // 6
-await store.decrement('counter', 2)     // 4
-
-// Get remaining TTL (in seconds)
-const ttl = await store.ttl('key')      // -1 = no expiration, -2 = not found
-
-// Batch operations
-await store.setMany(new Map([
-  ['key1', 'value1'],
-  ['key2', 'value2'],
-]), 3600)
-
-const values = await store.getMany<string>(['key1', 'key2'])
-const deleted = await store.deleteMany(['key1', 'key2'])
-```
-
-### Remember Pattern
-
-The `remember` method is ideal for caching database queries or expensive computations:
-
-```ts
-// Cache for 1 hour, compute if not cached
-const posts = await cache.store().remember('posts:recent', 3600, async () => {
-  return await Post.orderBy('createdAt', 'desc').limit(10).get()
-})
-
-// Cache forever until manually cleared
-const settings = await cache.store().rememberForever('app:settings', async () => {
-  return await Settings.all()
-})
-```
-
-### Concurrent Misses
-
-When several calls in one process miss the same key with the same TTL at the same time, the callback runs once and every one of those callers gets its outcome: the same object, or the same error. A callback that throws caches nothing, so the next call runs it again. Hits are not shared: each concurrent hit gets what `get()` returns.
-
-This applies to `remember` and `rememberForever` on a store from `cache.store()`, including stores added with `registerStore()`, and on tagged caches, including one you build with `new TaggedCache(store, tags)`. Only calls through the same store instance share a callback: two `CacheManager`s, or two store names that point at one Redis, each run their own. A store you construct and call directly, such as `new MemoryStore()` or `new FileStore(...)`, does not share callbacks.
-
-Sharing stops at the process boundary (the isolate, on Cloudflare Workers). Two servers that miss the same key at once each run the callback.
-
-- Callers that missed together share one object, so treat the result as read-only: a change made by one caller is visible to the others. Copy it first (`structuredClone(posts)`) if you need to modify it. The memory store returns the stored object itself on every hit as well, so there a change also alters the cached value.
-- The callback runs on behalf of every caller that joins it, so keep it independent of the request that started it. Do not pass that request's `AbortSignal`, and do not read request state such as the signed-in user or the locale unless the key includes it. A failure caused by the first caller's request, such as an abort, reaches every caller that joined.
-- Calls with different TTLs do not share a callback, and `rememberForever` counts as a TTL of its own. Each callback stores its result with its own caller's TTL, and the one that finishes last overwrites the others: a `remember(key, 60, ...)` that finishes after a `rememberForever` leaves an entry that expires in 60 seconds.
-- A call that arrives 10 seconds or more after the running callback started runs its own callback instead of waiting. Callers already waiting stay with the first callback, so give slow I/O inside a callback its own timeout.
-- Writing the key through the same store instance (`set`, `delete`, `setMany`, `deleteMany`, `clear`, or a tagged cache's `set` and `delete`) makes later misses start a new callback instead of joining one that began before the write. The running callback is not cancelled: it still stores its result when it finishes, which can replace the value the write stored.
-
-## Configuration
+## Setup
 
 `bunx guren add cache` writes `config/cache.ts`, declares `CACHE_STORE` in `config/env.ts`, and adds the definition to `createApp({ config })`:
 
@@ -145,7 +44,7 @@ const app = createApp({
 })
 ```
 
-The callback receives the validated environment, so every key it reads must be declared in `config/env.ts`. See the [configuration guide](./configuration.md) for declaring variables and for how definitions boot.
+The callback receives the validated environment, so every key it reads must be declared in `config/env.ts`. See the [configuration guide](./configuration.md) for declaring variables and for how definitions boot. Apps that configure the cache in a service provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
 
 ### Multiple Stores
 
@@ -182,62 +81,96 @@ export default defineCacheConfig((env) => ({
 
 The name in `CACHE_STORE` is not checked at boot. A name missing from `stores` throws `Cache store not found` the first time the store is resolved.
 
-The definition binds the manager as `cache` in the container:
+## Getting the Cache
+
+Resolve the manager the definition binds as `cache`, then pick a store from it:
+
+| Where you are | How to get it |
+|---------------|---------------|
+| A controller | `this.make('cache')` |
+| A service provider | `this.container.make('cache')` |
+| Anywhere else (a service, a job) | `resolve<CacheManager>('cache')`, imported from `@guren/core` |
 
 ```ts
-const cache = app.container.make('cache') // CacheManager
+const cache = this.make('cache') // CacheManager
 
-// Use default store (CACHE_STORE)
-await cache.store().set('key', 'value')
-
-// Use specific store
-await cache.store('memory').set('temp', 'data', 60)
-await cache.store('file').set('persistent', 'data')
+await cache.store().set('key', 'value')             // the default store (CACHE_STORE)
+await cache.store('memory').set('temp', 'data', 60) // a named store
 ```
 
-Apps that configure the cache in a service provider keep working; see [Apps with service providers](./configuration.md#apps-with-service-providers).
+The rest of this page writes `cache` for that manager.
 
-### Driver Options
-
-**Memory Store:**
-| Option | Default | Description |
-|--------|---------|-------------|
-| `maxSize` | `Infinity` | Maximum number of items |
-| `checkPeriod` | `60000` | Cleanup interval for expired items (ms) |
-| `now` | `Date.now` | Clock for TTL calculations (epoch ms); injectable for tests |
-
-**Redis Store:**
-| Option | Default | Description |
-|--------|---------|-------------|
-| `client` | required | An ioredis client, or a function returning one synchronously (called when the store is first used) |
-| `prefix` | `'cache:'` | Key prefix for all cache keys |
-
-**File Store:**
-| Option | Default | Description |
-|--------|---------|-------------|
-| `path` | required | Directory path for cache files |
-| `extension` | `'.cache'` | File extension for cache files |
-| `now` | `Date.now` | Clock for TTL calculations (epoch ms); injectable for tests |
-
-Reading an expired entry with `get()`, `has()` or `ttl()` reports it as missing but leaves its file on disk, since a writer may have replaced the file after the read. `cleanup()` deletes expired files. It takes the same per-key lock as `add()`, `increment()`, `decrement()` and `delete()`, moves each expired file aside and checks it again there, so an entry `set()` wrote after the first check is put back. While a file is aside, reads of that key miss. Call `cleanup()` periodically, for example from a [scheduled callback](./scheduling.md#callbacks), on a store with the same `path` and `extension` as the configured one; files with another extension are skipped:
+A facade gives the same manager without resolving it each time:
 
 ```ts
-import { FileCacheStore } from '@guren/core'
+import { createFacades } from '@guren/core'
 
-const removed = await new FileCacheStore({ path: './storage/cache', extension: '.cache' }).cleanup()
+const { Cache } = createFacades(app.container)
+
+await Cache.store().set('user:1', { name: 'John' }, 3600)
 ```
+
+`new CacheManager()` builds a separate manager with one in-memory store and no configuration. It suits a script or a unit test, not application code, which should share the configured one.
+
+## Basic Usage
+
+### Cache Operations
+
+```ts
+const store = cache.store()
+
+// Basic operations
+await store.set('key', 'value', 3600)  // Set with 3600s TTL
+await store.set('key', 'value')         // Set without expiration
+const value = await store.get<string>('key')
+const exists = await store.has('key')
+await store.delete('key')
+await store.clear()                     // Clear all items
+
+// Increment/Decrement
+await store.set('counter', 0)
+await store.increment('counter')        // 1
+await store.increment('counter', 5)     // 6
+await store.decrement('counter', 2)     // 4
+
+// Get remaining TTL (in seconds)
+const ttl = await store.ttl('key')      // -1 = no expiration, -2 = not found
+
+// Batch operations
+await store.setMany(new Map([
+  ['key1', 'value1'],
+  ['key2', 'value2'],
+]), 3600)
+
+const values = await store.getMany<string>(['key1', 'key2'])
+const deleted = await store.deleteMany(['key1', 'key2'])
+```
+
+TTLs are in seconds. Incrementing or decrementing a counter keeps its original expiration.
+
+### Remember Pattern
+
+`remember` returns the cached value, or runs the callback, stores its result and returns it:
+
+```ts
+// Cache for 1 hour, compute if not cached
+const posts = await cache.store().remember('posts:recent', 3600, async () => {
+  return await Post.orderBy('createdAt', 'desc').limit(10).get()
+})
+
+// Cache forever until manually cleared
+const settings = await cache.store().rememberForever('app:settings', async () => {
+  return await Settings.all()
+})
+```
+
+When several requests miss the same key at once, the callback runs only once; see [Concurrent Misses](#concurrent-misses) for what they share.
 
 ## Tagged Cache
 
-Counters preserve their original expiration when incremented or decremented. On the file store, `add()`, `increment()` and `decrement()` take a filesystem lock that store instances and processes share. A lock one writer has held for five seconds is treated as abandoned by a crashed process and taken over, so a key never stays locked. A writer still running at that point (a suspended process, a stalled disk) then runs alongside the one that took its lock over, and one of their updates can be lost. Keep counters that several processes update, and that must not lose an update, on the Redis store.
-
-Custom stores used with tags must implement atomic `add(key, value): Promise<boolean>`: insert without expiration only when the key is absent, and return whether insertion succeeded. Built-in stores implement this operation; the file store's `add()` is not atomic across a lock takeover.
-
-Tags allow you to group related cache items for easy invalidation:
+Tags group related keys so you can delete them together:
 
 ```ts
-const cache = new CacheManager()
-
 // Store items with tags
 await cache.store().tags(['posts', 'user:1']).set('user:1:posts', posts, 3600)
 await cache.store().tags(['posts', 'user:2']).set('user:2:posts', posts, 3600)
@@ -277,24 +210,26 @@ await cache.store().tags([`user:${userId}`, 'dashboard']).set(
 await cache.store().tags([`user:${userId}`]).flush()
 ```
 
+The built-in stores all support tags. A custom store used with tags must implement an atomic `add(key, value): Promise<boolean>`: insert without expiration only when the key is absent, and return whether it inserted.
+
 ## Use Cases
 
 ### Caching Database Queries
 
 ```ts
-import { CacheManager } from '@guren/core'
+import { resolve, type CacheManager } from '@guren/core'
 import { Post } from '@/app/Models/Post'
 
-const cache = new CacheManager()
+const cache = () => resolve<CacheManager>('cache')
 
 export async function getRecentPosts(): Promise<Post[]> {
-  return cache.store().remember('posts:recent', 300, async () => {
+  return cache().store().remember('posts:recent', 300, async () => {
     return await Post.orderBy('createdAt', 'desc').limit(10).get()
   })
 }
 
 export async function getPost(id: number): Promise<Post | null> {
-  return cache.store().tags(['posts', `post:${id}`]).remember(
+  return cache().store().tags(['posts', `post:${id}`]).remember(
     `post:${id}`,
     3600,
     async () => Post.find(id)
@@ -304,33 +239,37 @@ export async function getPost(id: number): Promise<Post | null> {
 // Invalidate when post is updated
 export async function updatePost(id: number, data: Partial<Post>): Promise<void> {
   await Post.where('id', id).update(data)
-  await cache.store().tags([`post:${id}`]).flush()
+  await cache().store().tags([`post:${id}`]).flush()
 }
 ```
 
 ### Rate Limiting Data
 
 ```ts
-const cache = new CacheManager()
+import { resolve, type CacheManager } from '@guren/core'
+
+const cache = () => resolve<CacheManager>('cache')
 
 export async function checkRateLimit(ip: string, limit: number): Promise<boolean> {
   const key = `ratelimit:${ip}`
-  const current = await cache.store().get<number>(key) ?? 0
+  const current = await cache().store().get<number>(key) ?? 0
 
   if (current >= limit) {
     return false
   }
 
-  await cache.store().increment(key)
+  await cache().store().increment(key)
 
   // Set TTL only on first request
   if (current === 0) {
-    await cache.store().set(key, 1, 60) // 1-minute window
+    await cache().store().set(key, 1, 60) // 1-minute window
   }
 
   return true
 }
 ```
+
+For request throttling, the [rate limiting middleware](./rate-limiting.md) already does this.
 
 ### Session-like Data
 
@@ -354,38 +293,85 @@ export async function getUserPreferences(
 }
 ```
 
-## Container Integration
+## Concurrent Misses
 
-`config/cache.ts` binds the cache manager as a singleton. You can resolve it from the container:
+When several calls in one process miss the same key with the same TTL at the same time, the callback runs once and every one of those callers gets its outcome: the same object, or the same error. A callback that throws caches nothing, so the next call runs it again. Hits are not shared: each concurrent hit gets what `get()` returns.
+
+Which calls share a callback:
+
+- `remember` and `rememberForever` on a store from `cache.store()`, including stores added with `registerStore()`, and on tagged caches, including one built with `new TaggedCache(store, tags)`.
+- Only calls through the same store instance. Two `CacheManager`s, or two store names that point at one Redis, each run their own callback.
+- Not a store you construct and call directly, such as `new MemoryStore()` or `new FileStore(...)`.
+- Not across processes (or isolates, on Cloudflare Workers). Two servers that miss the same key at once each run the callback.
+
+What to keep in mind:
+
+- **Treat the result as read-only.** Callers that missed together share one object, so a change made by one is visible to the others; copy it first (`structuredClone(posts)`) if you need to modify it. The memory store also returns the stored object itself on every hit, so there a change alters the cached value too.
+- **Keep the callback independent of the request.** It runs on behalf of every caller that joins it, so do not pass the first request's `AbortSignal` or read request state (the signed-in user, the locale) unless the key includes it. A failure caused by the first caller's request, such as an abort, reaches every caller that joined.
+- **Different TTLs do not share.** `rememberForever` counts as a TTL of its own. Each callback stores its result with its own caller's TTL, and the last to finish wins: a `remember(key, 60, ...)` that finishes after a `rememberForever` leaves an entry that expires in 60 seconds.
+- **Slow callbacks stop being shared after 10 seconds.** A call that arrives 10 seconds or more after the running callback started runs its own instead of waiting. Callers already waiting stay with the first, so give slow I/O inside a callback its own timeout.
+- **A write starts a new round.** Writing the key through the same store instance (`set`, `delete`, `setMany`, `deleteMany`, `clear`, or a tagged cache's `set` and `delete`) makes later misses start a new callback. The running callback is not cancelled: it still stores its result when it finishes, which can replace the value the write stored.
+
+## Driver Options
+
+**Memory Store:**
+| Option | Default | Description |
+|--------|---------|-------------|
+| `maxSize` | `Infinity` | Maximum number of items |
+| `checkPeriod` | `60000` | Cleanup interval for expired items (ms) |
+| `now` | `Date.now` | Clock for TTL calculations (epoch ms); injectable for tests |
+
+**Redis Store:**
+| Option | Default | Description |
+|--------|---------|-------------|
+| `client` | required | An ioredis client, or a function returning one synchronously (called when the store is first used) |
+| `prefix` | `'cache:'` | Key prefix for all cache keys |
+
+**File Store:**
+| Option | Default | Description |
+|--------|---------|-------------|
+| `path` | required | Directory path for cache files |
+| `extension` | `'.cache'` | File extension for cache files |
+| `now` | `Date.now` | Clock for TTL calculations (epoch ms); injectable for tests |
+
+### Cleaning up the file store
+
+Reading an expired entry with `get()`, `has()` or `ttl()` reports it as missing but leaves its file on disk. Call `cleanup()` periodically to delete expired files, for example from a [scheduled callback](./scheduling.md#callbacks), on a store with the same `path` and `extension` as the configured one (files with another extension are skipped):
 
 ```ts
-// Access via app.container or this.container in providers
+import { FileCacheStore } from '@guren/core'
 
-// Type-safe resolution
-const cache = container.make('cache') // CacheManager
-await cache.store().get('key')
+const removed = await new FileCacheStore({ path: './storage/cache', extension: '.cache' }).cleanup()
 ```
+
+`cleanup()` is safe to run beside live writes. It takes the same per-key lock as `add()`, `increment()`, `decrement()` and `delete()`, moves each expired file aside and checks it again, and puts back an entry that `set()` wrote in the meantime. Reads of that key miss while its file is aside.
+
+### Counters on the file store
+
+On the file store, `add()`, `increment()` and `decrement()` take a filesystem lock that store instances and processes share. A lock held for five seconds is treated as abandoned by a crashed process and taken over, so a key never stays locked. A writer that was only slow (a suspended process, a stalled disk) then runs alongside the one that took over, and one of their updates can be lost. Keep counters that several processes update, and that must not lose an update, on the Redis store.
 
 ## Testing
 
 ### Using `container.fake()`
 
-In tests, you can swap the cache manager with a fake using `container.fake()` and the `using` declaration for automatic cleanup:
+To give the app a fresh in-memory cache for one test, bind a new `CacheManager` over `cache` with `container.fake()`. The `using` declaration restores the real one when the test ends:
 
 ```ts
-import { describe, test, expect } from 'bun:test'
-// Access via app.container or this.container in providers
+import { beforeAll, describe, expect, test } from 'bun:test'
 import { CacheManager } from '@guren/core'
+import { TestApp } from '@guren/testing'
+import app from '../src/app.js'
 
 describe('Cache in application code', () => {
-  test('uses fake cache manager', async () => {
-    const fakeCache = new CacheManager() // in-memory by default
+  beforeAll(async () => {
+    await TestApp.fromApp(app)
+  })
 
-    using _ = container.fake('cache', fakeCache)
+  test('uses a fake cache manager', async () => {
+    using _ = app.container.fake('cache', new CacheManager())
 
-    // All code that resolves 'cache' from the container (including facades)
-    // now receives fakeCache
-    const cache = container.make('cache')
+    // Everything that resolves 'cache' (including facades) now gets the fake
+    const cache = app.container.make('cache')
     await cache.store().set('key', 'value', 3600)
     expect(await cache.store().get('key')).toBe('value')
   })
@@ -394,7 +380,7 @@ describe('Cache in application code', () => {
 
 ### Using the Memory Store Directly
 
-Use the Memory store for unit testing cache logic:
+To unit-test cache logic on its own, build a manager per test:
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'
@@ -444,18 +430,8 @@ describe('Cache', () => {
 
 ## Best Practices
 
-1. **Use appropriate TTLs**: Set reasonable expiration times based on data volatility.
-
-2. **Use tags for related data**: Group cache items by entity or feature for easy invalidation.
-
-3. **Cache at the right level**: Cache database results, not controller responses.
-
-4. **Handle cache misses gracefully**: Always provide fallback logic for cache misses.
-
-5. **Use typed generics**: Specify types when retrieving values for type safety.
-
-6. **Monitor cache hit rates**: Track cache effectiveness to optimize TTLs and strategies.
-
-7. **Use Redis for production**: Memory cache doesn't persist across restarts; use Redis for production.
-
-8. **Avoid caching sensitive data**: Don't cache passwords, tokens, or other sensitive information.
+1. **Set TTLs from how often the data changes.** Short for feeds, long for settings.
+2. **Tag related data** by entity or feature, so one `flush()` invalidates it.
+3. **Cache data, not responses.** Cache query results and computations rather than whole controller responses.
+4. **Use Redis in production.** The memory store is per process and empties on restart.
+5. **Do not cache secrets.** Keep passwords, tokens and other credentials out of the cache.
