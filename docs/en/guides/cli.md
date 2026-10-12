@@ -16,7 +16,7 @@ Commands follow a subcommand pattern such as `bunx guren make:controller UserCon
 
 ## High-Level Scaffolds
 
-Use `bunx guren add ...` when you want the standard vNext path instead of low-level file generators:
+`bunx guren add <feature>` adds a feature the way the starter app has it: it creates the provider, config and runtime files and patches `src/app.ts` to use them. Reach for it before the lower-level `make:*` generators.
 
 ```bash
 bunx guren add auth
@@ -37,7 +37,9 @@ bunx guren add prototype
 bunx guren add ai --provider anthropic
 ```
 
-> **Golden path:** Start with `bunx guren add auth` and `bunx guren add resource`, then add more features as your app grows.
+Start with `bunx guren add auth` and `bunx guren add resource`, then add more features as your app grows.
+
+### Installing a plugin
 
 ```bash
 bunx guren plugin @acme/guren-plugin-audit
@@ -45,10 +47,7 @@ bunx guren plugin @acme/guren-plugin-audit
 
 `plugin` (also available as `add plugin`) installs the package with `bun add` when missing (pass `--no-install` to skip), verifies the plugin's declared Guren compatibility (`--ignore-compatibility` to override), wires the provider into `src/app.ts`, and applies any config stubs and env keys the plugin declares in its `gurenPlugin` manifest. `--force` overwrites already-published files.
 
-
-These commands patch `src/app.ts`, create the matching provider/runtime files, and keep the generated app aligned with the reference starter.
-
-Apps scaffolded by `create-guren-app` 1.12 or later already carry this setup; `add lint` is for apps created before that. It is the one that touches no application code: it writes `.oxlintrc.json` (oxlint with the Guren rules from `@guren/cli/oxlint`: `guren/await-async-assertion` as an error, `guren/no-unvalidated-env-read` as an error in `app/`, `config/`, `routes/`, `src/` and `modules/`, the `guren/comment-*` rules as warnings), adds `lint` and `lint:fix` scripts, and adds `oxlint` as a dev dependency on a tilde range (patch updates only: oxlint's JS plugin API is alpha); run `bun install` afterwards. `bunx oxlint` runs under Bun, so no Node install is needed. In an app created before `config/env.ts`, the rule also reports the `process.env` reads in its own `config/database.ts` and `src/app.ts` until they move to a schema or carry a disable.
+### `add admin`
 
 `bunx guren add admin` scaffolds:
 
@@ -71,27 +70,18 @@ to `/login`, a route that only exists once you run `bunx guren add auth`. Add
 authentication first if you want a usable dashboard, or pass `--public` and add
 your own check later.
 
-`add admin` needs a fullstack app. The dashboard is an Inertia page, so on an app
-scaffolded from the `api` blueprint, with no `@guren/inertia-client` dependency and
-no web routes entry (`routes/web.ts` or `routes/web.js`), the command refuses and
-writes nothing rather than scaffolding a controller that does not typecheck and a
-routes file nothing mounts. Scaffold an admin endpoint with `make:controller`
-instead, and register it in `routes/api.ts`.
+### `add resource`
 
-`add auth` needs a fullstack app for the same reason, and refuses on the same two
-signals, as does `make:auth`, which reaches the same scaffold. Auth also patches
-`db/schema.ts` and generates a migration, so the refusal comes before all of that,
-not just before the first file: the app is left exactly as it was. For a
-token-based API, guard `routes/api.ts` with `createBearerTokenMiddleware` from
-`@guren/core` and issue tokens with `createApiToken`. See the
-[API tokens guide](./api-tokens.md).
+`add resource` needs the two files it patches to be there: it appends its table to `db/schema.ts` and registers the CRUD
+routes in `routes/web.ts`, and unless those routes are registered already,
+`routes/web.ts` must export a route registrar it can patch. When one of those is
+missing, the command names it and writes nothing, rather than leaving a scaffold
+behind and a table appended for routes that were never registered. Use
+`bunx guren make:feature` instead if you want the files without the two patches;
+it prints the route block to paste and tells you which schema file to add the
+table to.
 
-`add resource` refuses on those same two signals, and for the same reason: it
-scaffolds React page components and a controller that returns Inertia responses.
-Its refusal likewise comes before the table it would otherwise append to your
-`db/schema.ts`. So does `make:feature`, which reaches the same scaffold
-directly. Scaffold a JSON controller with `make:controller` instead, and wire it
-into `routes/api.ts`.
+### `add prototype`
 
 `add prototype` installs prototype mode ([Prototype First](./prototype-first.md)): a
 fixture under `resources/js/prototype/` that answers Inertia visits from seed data, the
@@ -104,6 +94,8 @@ app whose routes for that entity are still on `prototype`, promotes it: model, R
 and controller, with the Resource typed against the page-data type and the pages left as
 they are. `bun run build:prototype` runs `check --prototype` before Vite, so a route with
 no fixture entry fails the build rather than the customer's click.
+
+### `add ai`
 
 `add ai` sets up in-process AI agents with `@guren/plugin-ai`. It writes `config/ai.ts`
 for one provider (`--provider anthropic`, `openai` or `gateway`), declares that
@@ -121,34 +113,28 @@ derives each one, `--output` adds a structured-output schema stub, and `--test` 
 a test that scripts the model with `app.fakeAi()`. [AI Agents](./ai-agents.md) covers
 the rest: scopes, conversations, streaming and queueing.
 
-`make:controller` reads the same two signals but adapts instead of refusing: on
-an app they identify as API-only, the generated controller returns JSON
-(`this.json(...)`) rather than an Inertia page, so it typechecks as written and
-can be wired into `routes/api.ts` as-is. Whenever the signals cannot confirm an
-API-only app, you get the usual Inertia template. Installing
-`@guren/inertia-client` is enough to switch back.
+### `add lint`
 
-`make:view` refuses on those signals like the scaffolds above, because a page has
-no JSON shape to adapt to and the app has no way to render one. `guren codegen`
-(which `bun run dev` runs for you) leaves such components out of
-`.guren/pages.gen.ts` rather than folding them in, because that file imports
-the `@guren/inertia-client` an API-only app never installs. The refusal is about
-saying so at the command that caused it, not about preventing a broken
-`typecheck`. Install `@guren/inertia-client` first when taking an API app
-fullstack, and the command works again.
+Apps scaffolded by `create-guren-app` 1.12 or later already carry this setup; `add lint` is for apps created before that. It touches no application code: it writes `.oxlintrc.json` (oxlint with the Guren rules from `@guren/cli/oxlint`: `guren/await-async-assertion` as an error, `guren/no-unvalidated-env-read` as an error in `app/`, `config/`, `routes/`, `src/` and `modules/`, the `guren/comment-*` rules as warnings), adds `lint` and `lint:fix` scripts, and adds `oxlint` as a dev dependency on a tilde range (patch updates only: oxlint's JS plugin API is alpha); run `bun install` afterwards. `bunx oxlint` runs under Bun, so no Node install is needed. In an app created before `config/env.ts`, the rule also reports the `process.env` reads in its own `config/database.ts` and `src/app.ts` until they move to a schema or carry a disable.
 
-`add resource` also needs the two files it patches to be there, whatever shape the
-rest of your app is: it appends its table to `db/schema.ts` and registers the CRUD
-routes in `routes/web.ts`, and unless those routes are registered already,
-`routes/web.ts` must export a route registrar it can patch. When one of those is
-missing, the command names it and writes nothing, rather than leaving a scaffold
-behind and a table appended for routes that were never registered. Use
-`bunx guren make:feature` instead if you want the files without the two patches;
-it prints the route block to paste and tells you which schema file to add the
-table to.
+### On an API-only app
 
-Both commands also look for every file they would write before writing the first
-one. When some are already there (a model you wrote by hand, say), the command
+An app scaffolded from the `api` blueprint has no `@guren/inertia-client` dependency and no web routes entry (`routes/web.ts` or `routes/web.js`). Commands that would write Inertia pages react to those two signals:
+
+| Command | On an API-only app |
+|---------|--------------------|
+| `add admin` | Refuses and writes nothing. Write an admin endpoint with `make:controller` and register it in `routes/api.ts` |
+| `add auth`, `make:auth` | Refuses before patching `db/schema.ts` or generating a migration. For a token API, guard `routes/api.ts` with `createBearerTokenMiddleware` and issue tokens with `createApiToken` (see the [API tokens guide](./api-tokens.md)) |
+| `add resource`, `make:feature` | Refuses before appending the table. Write a JSON controller with `make:controller` and wire it into `routes/api.ts` |
+| `make:view` | Refuses: a page has no JSON shape to adapt to |
+| `make:controller` | Adapts: the controller returns `this.json(...)` and can be wired into `routes/api.ts` as written |
+
+When the signals cannot confirm an API-only app, every command behaves as on a fullstack one. Installing `@guren/inertia-client` is enough to switch back. `guren codegen` leaves page components out of `.guren/pages.gen.ts` on an API-only app, because that file imports `@guren/inertia-client`; `make:view`'s refusal exists to say so at the command that caused it.
+
+### When files already exist
+
+`add resource` and `make:feature` look for every file they would write before
+writing the first one. When some are already there (a model you wrote by hand, say), the command
 lists each of them and writes nothing, and `add resource` leaves `db/schema.ts` and
 `routes/web.ts` unpatched. `--force` overwrites every file on that list, your own
 among them. A file that only `--test`, `--factory` or `--policy` adds is marked

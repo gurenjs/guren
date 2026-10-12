@@ -1,6 +1,6 @@
 # Upgrading Guren
 
-Use this guide when you move an app to a newer minor version. Follow the workflow below, then apply the migration notes for every version you cross, newest first. Major-version changes are listed under their own version.
+Use this guide when you move an app to a newer version. Follow the workflow below. The migration notes are listed newest first; apply the ones for every version you cross, starting from the oldest.
 
 ## Upgrade Workflow (Required)
 
@@ -21,7 +21,8 @@ bunx guren upgrade --check-only
 
 Each finding names the version the API was deprecated in, the version it is removed in, the replacement to move to, and the files that use it. Nothing is written to disk.
 
-5. Run validations:
+5. Apply the migration notes below for every version between your current one and the target.
+6. Run validations:
 
 ```bash
 bun run build
@@ -29,11 +30,17 @@ bun run typecheck
 bun run test
 ```
 
-6. Apply the migration notes below for your source and target versions.
-
 ## Migration Notes
 
-### Unreleased
+### @guren/cli 2.28.0
+
+#### `analyzeDeployRuntime()` and `judgeDeployRuntime()` are deprecated
+
+- **What changed**: These two `@guren/cli` exports, for scripts that check whether an app is safe to deploy, carry `@deprecated` and warn once each per process. They keep working until `@guren/cli` 3.0.0.
+- **Who is affected**: Scripts that import either function. `bunx guren upgrade --check-only` lists them.
+- **How to migrate**: Call `checkDeployRuntime(cwd)`, which returns the same three verdicts, or none when the app declares no deploy target. It reads the password hasher and session stores from the app itself, loaded without booting; when that load fails, those two verdicts come back as the advisory `deploy-password-hashing-unverified` and `deploy-runtime-stores-unverified`. The six hasher and session-config signal arrays on `DeployRuntimeAnalysis` are now always empty.
+
+### @guren/server 2.27.0
 
 #### Concurrent cache misses share one callback
 
@@ -41,16 +48,18 @@ bun run test
 - **Who is affected**: Code on the file or Redis store that changes a remembered value in place. Callers that missed together used to get a copy each; now a change reaches the callers it shares the result with.
 - **How to migrate**: Copy the value before modifying it (`structuredClone(value)`). See [Concurrent Misses](./cache.md#concurrent-misses).
 
+### @guren/server 2.26.0
+
 #### Queue cancellation and reservations
 
-- **What changed**: Jobs receive a cancellation signal through `this.signal`. A timeout requests cancellation, and the worker waits for `handle()` to settle before retrying; a handler that completes after the timeout is acknowledged rather than retried. Redis workers now renew their reservations, and reject an acknowledgement from a worker whose reservation has expired. `SqsDriver` renews the message's visibility while a job runs.
-- **Who is affected**: Apps with queued jobs, especially those on Redis or SQS, and custom queue drivers.
-- **How to migrate**:
-  - Pass `this.signal` to `fetch` and other cancellable I/O. A handler that ignores it can run past the timeout, so keep a process supervisor that can stop a stuck worker.
+- **What changed**: Jobs receive a cancellation signal through `this.signal`, which aborts when the job times out or its worker loses the job to another worker. After a timeout the worker waits for `handle()` to settle before retrying, and a handler that completes late is acknowledged rather than retried. A worker holds a *reservation* on the job it runs: Redis workers now renew it, and once another worker has taken the job, the first one's acknowledgement is rejected. `SqsDriver` likewise keeps the message hidden from other workers while a job runs.
+- **Who is affected**: Apps with queued jobs, especially on Redis or SQS, and custom queue drivers.
+- **How to migrate**, for every app:
+  - Pass `this.signal` to `fetch` and other cancellable I/O. A handler that ignores it can run past the timeout, so keep a process manager (systemd, a container restart policy) that can stop a stuck worker.
   - Restart every worker when you deploy this update: an older worker skips the reservation check. Queue keys and stored payloads stay compatible.
-  - On SQS, set `SqsDriver`'s `visibilityTimeout` option to the queue's attribute.
-  - Custom drivers may implement `heartbeatInterval` and `extendReservation(job)`. `delete()` gains an optional second argument, the reservation token; existing drivers keep working. A driver failure now resets the worker and rejects `start()`, so a supervisor can restart it with backoff.
+  - On SQS, set `SqsDriver`'s `visibilityTimeout` option to the queue's visibility timeout, in seconds (default 30).
   - Delivery is still at least once, so external side effects still need idempotency keys.
+- **How to migrate**, for custom queue drivers: implement `heartbeatInterval` and `extendReservation(job)` to renew reservations. `delete()` gains an optional second argument, the reservation token; existing drivers keep working. A driver failure now resets the worker and rejects `start()`, so a process manager can restart it with backoff.
 
 ```ts
 import { Job } from '@guren/core'
@@ -61,13 +70,6 @@ export class SyncInvoiceJob extends Job<{ url: string }> {
   }
 }
 ```
-
-#### `analyzeDeployRuntime()` and `judgeDeployRuntime()` are deprecated
-
-- **What changed**: These two `@guren/cli` exports, for scripts that check whether an app is safe to deploy, carry `@deprecated` (`deploy-runtime-analysis`) and warn once per process. They keep working until `@guren/cli` 3.0.0.
-- **Who is affected**: Scripts that import either function. `bunx guren upgrade --check-only` lists them.
-- **How to migrate**: Call `checkDeployRuntime(cwd)`, which returns the same three verdicts. It reads the password hasher and session stores from the app itself, loaded without booting; when that load fails, those two verdicts come back as the advisory `deploy-password-hashing-unverified` and `deploy-runtime-stores-unverified`. The six hasher and session-config signal arrays on `DeployRuntimeAnalysis` are now always empty.
-
 
 ### 2.23.x → 2.24.0
 
@@ -124,7 +126,11 @@ The functional helpers built on these accessors are not deprecated and keep thei
 
 - **What changed**: `static guarded` and `static strictFillable` are removed. `fillable` is always strict; the primary key (`id`) is always silently stripped. On `AuthenticatableModel` subclasses, the password-hash and remember-token columns can never be mass-assigned: a request body carrying them throws a `MassAssignmentException`, whatever `fillable` says.
 - **Who is affected**: Models declaring `guarded` or `strictFillable` (now flagged as errors by `guren check`), and code that mass-assigns a precomputed hash or remember token through `create()`/`update()`.
-- **How to migrate**: Delete `guarded`/`strictFillable` declarations; `bunx guren upgrade --check-only` lists the affected files. **If a `guarded` list carried app-specific fields beyond `id` and the credential columns (e.g. `tenantId`, `isAdmin`), deleting the line makes them mass-assignable**: declare `static fillable = [...]` without those fields to keep them protected. Where a model relied on `strictFillable = false`, each new throw names a field that was being silently dropped: add it to `fillable` or remove it from the payload. Replace `create({ ..., passwordHash })` with `create({ ..., password })` and let the model hash it, or `forceCreate({ ..., passwordHash: 'oauth:...' })` for trusted server-side values — never with request input.
+- **How to migrate**: `bunx guren upgrade --check-only` lists the affected files.
+  - Delete the `guarded` and `strictFillable` declarations.
+  - **If a `guarded` list carried app-specific fields beyond `id` and the credential columns (e.g. `tenantId`, `isAdmin`), deleting it makes them mass-assignable.** Declare `static fillable = [...]` without those fields to keep them protected.
+  - Where a model relied on `strictFillable = false`, each new throw names a field that was being silently dropped: add it to `fillable` or remove it from the payload.
+  - Replace `create({ ..., passwordHash })` with `create({ ..., password })` and let the model hash it. For trusted server-side values use `forceCreate({ ..., passwordHash: 'oauth:...' })`, never with request input.
 
 ```ts
 // Before
@@ -168,12 +174,6 @@ await Post.create(data, { set: { authorId: user.id } })
 - **What changed**: `private-` / `presence-` channels without a registered authorizer are now denied by default, and subscribing requires the `clientId` delivered in the SSE `connected` event.
 - **Who is affected**: Apps using the SSE broadcasting endpoints.
 - **How to migrate**: Register authorizers with `broadcast.privateChannel()` / `broadcast.presenceChannel()`, capture the `clientId` from the `connected` event, and send it in `POST /broadcasting/auth` to authorize and subscribe in one call. See the [Broadcasting guide](./broadcasting.md).
-
-Verify the upgrade:
-
-```bash
-bun run typecheck && bun run test
-```
 
 ## Breaking Change Template (for maintainers)
 
