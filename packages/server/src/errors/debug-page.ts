@@ -289,13 +289,25 @@ function renderStackSection(frames: StackFrame[]): string {
   </section>`
 }
 
+// Page script can read what the page prints, HttpOnly session cookies included.
+const REDACTED_HEADERS = new Set([
+  'cookie',
+  'authorization',
+  'proxy-authorization',
+  'x-xsrf-token',
+  'x-csrf-token',
+])
+
+const REDACTED_VALUE = '[redacted]'
+
 function renderRequestSection(request: Request): string {
   const url = new URL(request.url)
   const headers: string[] = []
 
   request.headers.forEach((value, key) => {
+    const shown = REDACTED_HEADERS.has(key.toLowerCase()) ? REDACTED_VALUE : value
     headers.push(
-      `<tr><td class="key">${escapeHtml(key)}</td><td class="value">${escapeHtml(value)}</td></tr>`,
+      `<tr><td class="key">${escapeHtml(key)}</td><td class="value">${escapeHtml(shown)}</td></tr>`,
     )
   })
 

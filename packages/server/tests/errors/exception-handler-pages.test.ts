@@ -52,6 +52,25 @@ describe('ExceptionHandler pages in a booted app', () => {
     expect(html).toContain('<h2>Stack Trace</h2>')
   })
 
+  it('redacts the session cookie and credentials on the debug page', async () => {
+    const app = await appWithDebug(true)
+
+    const response = await app.fetch(get('/boom', {
+      ...BROWSER,
+      Cookie: 'guren_session=s3cr3t-session',
+      Authorization: 'Bearer s3cr3t-token',
+      'User-Agent': 'probe/1.0',
+    }))
+    const html = await response.text()
+
+    expect(response.status).toBe(500)
+    expect(html).toContain('<h2>Request</h2>')
+    expect(html).not.toContain('s3cr3t')
+    expect(html).toContain('<tr><td class="key">cookie</td><td class="value">[redacted]</td></tr>')
+    expect(html).toContain('<tr><td class="key">authorization</td><td class="value">[redacted]</td></tr>')
+    expect(html).toContain('<tr><td class="key">user-agent</td><td class="value">probe/1.0</td></tr>')
+  })
+
   it('renders the debug page for a 5xx HttpException', async () => {
     const app = await appWithDebug(true)
 
