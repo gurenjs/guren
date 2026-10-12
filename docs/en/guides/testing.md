@@ -30,15 +30,15 @@ describe('Posts', () => {
 })
 ```
 
-All standard HTTP methods are available:
+The examples on this page call the `TestApp` `http` and the application `app`. All standard HTTP methods are available:
 
 ```ts
-await app.get('/posts')
-await app.post('/posts', body)
-await app.put('/posts/1', body)
-await app.patch('/posts/1', body)
-await app.delete('/posts/1')
-await app.query('/posts/search', body) // HTTP QUERY (RFC 10008)
+await http.get('/posts')
+await http.post('/posts', body)
+await http.put('/posts/1', body)
+await http.patch('/posts/1', body)
+await http.delete('/posts/1')
+await http.query('/posts/search', body) // HTTP QUERY (RFC 10008)
 ```
 
 ### Choosing How to Build the App
@@ -67,7 +67,7 @@ Keep the arrow function if you write it this way. `fetch` reads instance state, 
 `TestApp.create()` takes the same options as `createApp`. A subset can drift from what the server actually runs, so pass what the code under test needs: `auth` to mount the session and CSRF middleware, and `i18n` when controllers call `this.t()` / `this.tc()`:
 
 ```ts
-const app = await TestApp.create({
+const http = await TestApp.create({
   routes: registerWebRoutes,
   i18n: { supported: ['en'] },
 })
@@ -79,7 +79,7 @@ To try one environment variable without changing `process.env`, pass your `confi
 import { TestApp } from '@guren/testing'
 import env from '../config/env.js'
 
-const app = await TestApp.create({
+const http = await TestApp.create({
   env,
   envSource: { CACHE_STORE: 'memory', APP_URL: '' },
   providers: [ReportProvider],
@@ -96,23 +96,23 @@ Chain assertions directly on the response:
 
 ```ts
 // Status
-await app.get('/posts').assertOk()                         // 200
-await app.get('/posts').assertStatus(200)
-await app.post('/posts', data).assertStatus(201)
-await app.delete('/posts/1').assertNoContent()              // 204
-await app.get('/secret').assertUnauthorized()                // 401
-await app.get('/secret').assertForbidden()                   // 403
-await app.get('/missing').assertNotFound()                   // 404
+await http.get('/posts').assertOk()                         // 200
+await http.get('/posts').assertStatus(200)
+await http.post('/posts', data).assertStatus(201)
+await http.delete('/posts/1').assertNoContent()              // 204
+await http.get('/secret').assertUnauthorized()                // 401
+await http.get('/secret').assertForbidden()                   // 403
+await http.get('/missing').assertNotFound()                   // 404
 
 // JSON
-await app.get('/posts').assertJson({ data: [] })
-await app.get('/posts').assertJsonCount(5, 'data')
-await app.get('/posts/1').assertJsonPath('post.title', 'Hello')
-await app.get('/posts').assertJsonStructure(['data', 'meta'])
+await http.get('/posts').assertJson({ data: [] })
+await http.get('/posts').assertJsonCount(5, 'data')
+await http.get('/posts/1').assertJsonPath('post.title', 'Hello')
+await http.get('/posts').assertJsonStructure(['data', 'meta'])
 
 // Headers and redirects
-await app.get('/posts').assertHeader('content-type', 'application/json')
-await app.get('/old-page').assertRedirect('/new-page')
+await http.get('/posts').assertHeader('content-type', 'application/json')
+await http.get('/old-page').assertRedirect('/new-page')
 ```
 
 ## Authentication in Tests
@@ -128,11 +128,11 @@ const user = await User.create({
 })
 
 // Authenticated requests
-await app.actingAs(user).get('/dashboard').assertOk()
-await app.actingAs(user).post('/posts', data).assertStatus(201)
+await http.actingAs(user).get('/dashboard').assertOk()
+await http.actingAs(user).post('/posts', data).assertStatus(201)
 
 // Without auth, protected routes reject
-await app.get('/dashboard').assertUnauthorized()
+await http.get('/dashboard').assertUnauthorized()
 ```
 
 ### Password hashing in tests
@@ -141,7 +141,7 @@ Password tests are fast with no setup. `TestApp` sets `GUREN_TESTING=1`, and whi
 
 ```ts
 const user = await User.create({ email: 'ada@example.com', name: 'Ada', password: 'correct horse battery' })
-await app.post('/login', { email: 'ada@example.com', password: 'correct horse battery' }).assertRedirect('/')
+await http.post('/login', { email: 'ada@example.com', password: 'correct horse battery' }).assertRedirect('/')
 ```
 
 The login test still verifies a real hash, because verification reads the parameters stored in the hash itself. A cheap hash never survives into production either: outside tests, `Hash.needsRehash()` reports it as stale, and the rehash-on-login pattern from the [Encryption guide](./encryption.md) upgrades it. Nothing sets the variable in a deployed app.
@@ -152,7 +152,7 @@ For API endpoints, `.json()` sends JSON headers so the app answers with JSON, in
 
 ```ts
 test('API returns paginated posts', async () => {
-  await app.json().get('/api/posts')
+  await http.json().get('/api/posts')
     .assertOk()
     .assertJsonStructure(['data', 'meta'])
     .assertJsonCount(10, 'data')
@@ -160,7 +160,7 @@ test('API returns paginated posts', async () => {
 })
 
 test('API validates input', async () => {
-  await app.json().post('/api/posts', { title: '' })
+  await http.json().post('/api/posts', { title: '' })
     .assertStatus(422)
     .assertJsonPath('errors.title.0', 'Too small: expected string to have >=1 characters')
 })
@@ -174,12 +174,12 @@ Use `withHeaders()` / `withHeader()` to send headers on every request: a locale,
 
 ```ts
 test('renders the English locale', async () => {
-  const en = app.withHeaders({ 'Accept-Language': 'en' })
+  const en = http.withHeaders({ 'Accept-Language': 'en' })
   await en.get('/').assertOk()
 })
 
 test('accepts an API token', async () => {
-  await app
+  await http
     .withHeader('Authorization', `Bearer ${token}`)
     .json()
     .get('/api/me/tasks')
@@ -215,6 +215,9 @@ const database = createSqliteDatabase({
 Nothing a test creates shows up in the dev server's data. Both keys are declared in the scaffolded `config/env.ts`, and `context` carries their validated values when the app boots (see [Configuration](./configuration.md#the-database-connection)).
 
 > [!WARNING]
+> Only the SQLite scaffold switches databases. An app created with `--db postgres` or `--db mysql` reads `DATABASE_URL` in tests too, so `resetDatabase()` in a test would empty your development database. Create a separate test database and run the tests against it, for example `DATABASE_URL=postgres://guren:guren@localhost:54322/guren_test bun test`.
+
+> [!WARNING]
 > Apps scaffolded with `create-guren-app` 1.1.0 or earlier write to `DATABASE_URL` (or `./data/guren.db`) whatever `NODE_ENV` is, so `bun test` writes into the database your dev server reads. To fix one, replace the `filename` option and declare `DATABASE_URL` and `TEST_DATABASE_URL` in `config/env.ts` (an app without that file adds it first; see [Configuration](./configuration.md#apps-with-service-providers)):
 >
 > ```diff
@@ -235,7 +238,7 @@ Nothing a test creates shows up in the dev server's data. Both keys are declared
 
 ### Cleaning Up Between Tests
 
-To start each test from an empty database, call the `resetDatabase()` helper your `config/database.ts` already exports in `beforeEach`. It drops every table and re-applies migrations, the same end state `guren db:reset` leaves, so the tables are ready to query straight after:
+To start each test from an empty database (on SQLite, or with `DATABASE_URL` pointing at a test database), call the `resetDatabase()` helper your `config/database.ts` already exports in `beforeEach`. It drops every table and re-applies migrations, the same end state `guren db:reset` leaves, so the tables are ready to query straight after:
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'
@@ -279,7 +282,7 @@ interface DatabaseConnection {
 }
 ```
 
-Things to know before writing that connection:
+Before you write that connection:
 
 - Guren does not hand you one. `getDatabase()` from `config/database.ts` returns the underlying Drizzle instance, so you write a small adapter and pass it to `setTestDatabase()` before the tests run.
 - `useDatabaseTransactions()` **must wrap the connection your models write through**. A second connection to the same file neither sees nor rolls back the first one's writes.
@@ -341,7 +344,7 @@ test('placing an order queues the processing job', async () => {
 })
 ```
 
-`http.withCsrf()` fetches `/` once and returns a `TestApp` that sends the session cookie and CSRF token on every later request, so a `POST` passes CSRF protection the way a browser's would.
+The example assumes an app created with `createApp({ auth })`, which checks CSRF tokens. `http.withCsrf()` fetches `/` once and returns a `TestApp` that sends the session cookie and CSRF token on every later request, so a `POST` passes the check the way a browser's would. In an app without `auth` nothing checks CSRF, `withCsrf()` throws because no token is issued, and you call `http.post()` directly.
 
 ### Binding a fake
 
@@ -366,7 +369,7 @@ Binding the fake itself rather than a manager fails on first use, and the reques
 Two rules about when to bind:
 
 - **Bind with `using` inside the test.** `fake()` returns a disposable, and `using` puts the app's own binding back when the test ends. Every test file that calls `fromApp()` shares one app instance, so a fake bound in `beforeAll` and never restored stays bound for the files that run after it.
-- **Bind after `fromApp()` has booted the app.** Providers set up the real services during boot, and the fake event manager is not a full `EventManager`.
+- **Bind after `fromApp()` has booted the app.** Providers resolve the real services during boot. A fake bound before that is handed to them in place of a full `EventManager`, and their setup fails.
 
 `assertPushed` takes the payload type explicitly. A job class alone does not tell TypeScript its payload, so the predicate would receive `unknown`.
 
@@ -437,8 +440,8 @@ bunx guren make:test posts/PostController
 `TestApp` covers most controller tests. If you add Vitest to test a controller in isolation, with its models mocked, `@guren/testing` has helpers for that:
 
 - `createControllerContext(url, init?)` builds the request context a controller reads.
-- `createControllerModuleMock()` is passed to `vi.mock('@guren/core', …)`. Its `Controller` extends the framework's own and replaces only `inertia()` and `make()`, which need a booted app.
-- `createGurenControllerModule()` is the module that mock is built from, for a test that needs only the `Controller`.
+- `createControllerModuleMock()` is passed to `vi.mock('@guren/core', …)`. Its `Controller` extends the framework's own; `inertia()` renders without a booted app, and `make()` resolves from the context's values.
+- `createGurenControllerModule()` returns a lighter, standalone `Controller` stub that does not extend the framework's, for code that needs only `setContext`, `make`, `text`, `inertia` and `view`.
 - `readInertiaResponse(response)` normalizes an Inertia response to `{ format, payload, body }` for assertions.
 
 Two problems are specific to this setup:
@@ -448,7 +451,9 @@ Two problems are specific to this setup:
 
 ### File uploads under jsdom
 
-Under Vitest's `jsdom` environment, a `File` posted inside a `FormData` body (for example through `createControllerContext(url, { method: 'POST', body: formData })` to an action that calls `this.file()`) never reaches the action. jsdom replaces the global `File` and `Blob` with its own classes, which are not the ones undici uses to encode and parse the multipart body. Depending on the Vitest and Node versions, the test times out, fails inside undici, or passes while `this.file()` returns `null`. Controller tests render no DOM, so switch the file to the Node environment with a comment on its first line:
+Under Vitest's `jsdom` environment, a `File` posted inside a `FormData` body never reaches the action: `this.file()` sees nothing. This happens when you pass `createControllerContext(url, { method: 'POST', body: formData })` to an action that reads an upload.
+
+The cause is that jsdom replaces the global `File` and `Blob` with its own classes, which Node's built-in `fetch` (undici) cannot encode into a multipart body. Depending on the Vitest and Node versions, the test times out, fails inside undici, or passes while `this.file()` returns `null`. Controller tests render no DOM, so switch the file to the Node environment with a comment on its first line:
 
 ```ts
 // @vitest-environment node

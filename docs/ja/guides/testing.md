@@ -30,15 +30,15 @@ describe('Posts', () => {
 })
 ```
 
-標準的な HTTP メソッドはすべて使えます。
+このページの例では、`TestApp` を `http`、アプリケーションを `app` と呼びます。標準的な HTTP メソッドはすべて使えます。
 
 ```ts
-await app.get('/posts')
-await app.post('/posts', body)
-await app.put('/posts/1', body)
-await app.patch('/posts/1', body)
-await app.delete('/posts/1')
-await app.query('/posts/search', body) // HTTP QUERY (RFC 10008)
+await http.get('/posts')
+await http.post('/posts', body)
+await http.put('/posts/1', body)
+await http.patch('/posts/1', body)
+await http.delete('/posts/1')
+await http.query('/posts/search', body) // HTTP QUERY (RFC 10008)
 ```
 
 ### アプリの組み立て方を選ぶ
@@ -67,7 +67,7 @@ http = TestApp.fromFetch((request) => app.fetch(request))
 `TestApp.create()` は `createApp` と同じオプションを受け取ります。一部分だけで組み立てた構成は、サーバーが実際に動かす構成から離れていきがちです。テストするコードが必要とするものは渡してください。セッションと CSRF のミドルウェアが必要なら `auth` を、コントローラーが `this.t()` / `this.tc()` を呼ぶなら `i18n` を渡します。
 
 ```ts
-const app = await TestApp.create({
+const http = await TestApp.create({
   routes: registerWebRoutes,
   i18n: { supported: ['en'] },
 })
@@ -79,7 +79,7 @@ const app = await TestApp.create({
 import { TestApp } from '@guren/testing'
 import env from '../config/env.js'
 
-const app = await TestApp.create({
+const http = await TestApp.create({
   env,
   envSource: { CACHE_STORE: 'memory', APP_URL: '' },
   providers: [ReportProvider],
@@ -87,7 +87,7 @@ const app = await TestApp.create({
 ```
 
 - `envSource` は `process.env` より先に読まれます。`''` を渡した変数は未設定として扱われます。
-- 上書きした値が届くのは、プロバイダーやコントローラーが `this.make('env')` で読む値です。`create()` は `config` 配列を受け取りません。
+- 上書きした値は、プロバイダーやコントローラーが `this.make('env')` で読む値に反映されます。`create()` は `config` 配列を受け取らないので、`config/*.ts` の定義には反映されません。
 - 不正な値を渡すと、`create()` が返す Promise は `EnvValidationError` で reject されます。
 
 ### Fluent アサーション
@@ -96,23 +96,23 @@ const app = await TestApp.create({
 
 ```ts
 // ステータス
-await app.get('/posts').assertOk()                         // 200
-await app.get('/posts').assertStatus(200)
-await app.post('/posts', data).assertStatus(201)
-await app.delete('/posts/1').assertNoContent()              // 204
-await app.get('/secret').assertUnauthorized()                // 401
-await app.get('/secret').assertForbidden()                   // 403
-await app.get('/missing').assertNotFound()                   // 404
+await http.get('/posts').assertOk()                         // 200
+await http.get('/posts').assertStatus(200)
+await http.post('/posts', data).assertStatus(201)
+await http.delete('/posts/1').assertNoContent()              // 204
+await http.get('/secret').assertUnauthorized()                // 401
+await http.get('/secret').assertForbidden()                   // 403
+await http.get('/missing').assertNotFound()                   // 404
 
 // JSON
-await app.get('/posts').assertJson({ data: [] })
-await app.get('/posts').assertJsonCount(5, 'data')
-await app.get('/posts/1').assertJsonPath('post.title', 'Hello')
-await app.get('/posts').assertJsonStructure(['data', 'meta'])
+await http.get('/posts').assertJson({ data: [] })
+await http.get('/posts').assertJsonCount(5, 'data')
+await http.get('/posts/1').assertJsonPath('post.title', 'Hello')
+await http.get('/posts').assertJsonStructure(['data', 'meta'])
 
 // ヘッダーとリダイレクト
-await app.get('/posts').assertHeader('content-type', 'application/json')
-await app.get('/old-page').assertRedirect('/new-page')
+await http.get('/posts').assertHeader('content-type', 'application/json')
+await http.get('/old-page').assertRedirect('/new-page')
 ```
 
 ## テストでの認証
@@ -128,23 +128,23 @@ const user = await User.create({
 })
 
 // ログイン済みとしてリクエストを送る
-await app.actingAs(user).get('/dashboard').assertOk()
-await app.actingAs(user).post('/posts', data).assertStatus(201)
+await http.actingAs(user).get('/dashboard').assertOk()
+await http.actingAs(user).post('/posts', data).assertStatus(201)
 
 // ログインしていなければ、保護されたルートは拒否する
-await app.get('/dashboard').assertUnauthorized()
+await http.get('/dashboard').assertUnauthorized()
 ```
 
 ### テストでのパスワードハッシュ
 
-パスワードを扱うテストは、何も設定しなくても速く動きます。`TestApp` が `GUREN_TESTING=1` を設定し、この変数がある間は既定のハッシャーが軽いパラメータを使うからです（scrypt なら N=1024、`hasher: 'argon2'` の Argon2id なら 1 MiB・1 反復）。本番の強さのハッシュは 1 回に 100ms 以上かかるので、次のようなテストでは実行時間のほとんどがハッシュに使われてしまいます。
+パスワードを扱うテストは、何も設定しなくても速く動きます。`TestApp` は `GUREN_TESTING=1` を設定し、この変数がある間、既定のハッシャーは軽いパラメータを使います（scrypt なら N=1024、`hasher: 'argon2'` の Argon2id なら 1 MiB・1 反復）。本番の強さのハッシュは 1 回に 100ms 以上かかるので、もしそれを使えば、次のようなテストでは実行時間のほとんどがハッシュに費やされます。
 
 ```ts
 const user = await User.create({ email: 'ada@example.com', name: 'Ada', password: 'correct horse battery' })
-await app.post('/login', { email: 'ada@example.com', password: 'correct horse battery' }).assertRedirect('/')
+await http.post('/login', { email: 'ada@example.com', password: 'correct horse battery' }).assertRedirect('/')
 ```
 
-それでも、ログインのテストでは本物のハッシュが検証されます。検証のときはハッシュに埋め込まれたパラメータを読むからです。軽いハッシュが本番に残ることもありません。テストの外では `Hash.needsRehash()` が軽いハッシュを古いものと判定し、[暗号化ガイド](./encryption.md)にあるログイン時の再ハッシュで本番の強さに置き換わります。デプロイしたアプリでこの変数が設定されることはありません。
+検証のときはハッシュに埋め込まれたパラメータを読むので、ログインのテストでも本物のハッシュが検証されます。軽いハッシュが本番に残ることもありません。テストの外では `Hash.needsRehash()` が軽いハッシュを古いものと判定し、[暗号化ガイド](./encryption.md)にあるログイン時の再ハッシュで本番の強さに置き換わります。デプロイしたアプリでこの変数が設定されることはありません。
 
 ## JSON API のテスト
 
@@ -152,7 +152,7 @@ API エンドポイントには `.json()` を使います。JSON のヘッダー
 
 ```ts
 test('API returns paginated posts', async () => {
-  await app.json().get('/api/posts')
+  await http.json().get('/api/posts')
     .assertOk()
     .assertJsonStructure(['data', 'meta'])
     .assertJsonCount(10, 'data')
@@ -160,7 +160,7 @@ test('API returns paginated posts', async () => {
 })
 
 test('API validates input', async () => {
-  await app.json().post('/api/posts', { title: '' })
+  await http.json().post('/api/posts', { title: '' })
     .assertStatus(422)
     .assertJsonPath('errors.title.0', 'Too small: expected string to have >=1 characters')
 })
@@ -174,12 +174,12 @@ test('API validates input', async () => {
 
 ```ts
 test('renders the English locale', async () => {
-  const en = app.withHeaders({ 'Accept-Language': 'en' })
+  const en = http.withHeaders({ 'Accept-Language': 'en' })
   await en.get('/').assertOk()
 })
 
 test('accepts an API token', async () => {
-  await app
+  await http
     .withHeader('Authorization', `Bearer ${token}`)
     .json()
     .get('/api/me/tasks')
@@ -215,6 +215,9 @@ const database = createSqliteDatabase({
 テストで作ったデータが、開発サーバーで見ているデータに混ざることはありません。どちらのキーも雛形の `config/env.ts` に宣言してあり、アプリの起動時には検証済みの値が `context` で渡されます（[設定](./configuration.md#データベース接続)を参照）。
 
 > [!WARNING]
+> データベースを切り替えるのは SQLite の雛形だけです。`--db postgres` や `--db mysql` で作ったアプリはテストでも `DATABASE_URL` を読むので、テストで `resetDatabase()` を呼ぶと開発用のデータベースが空になります。テスト用のデータベースを別に作り、`DATABASE_URL=postgres://guren:guren@localhost:54322/guren_test bun test` のようにそちらを指定してテストを実行してください。
+
+> [!WARNING]
 > `create-guren-app` 1.1.0 以前で生成したアプリは、`NODE_ENV` に関係なく `DATABASE_URL`（または `./data/guren.db`）に書き込みます。そのため、`bun test` が開発サーバーと同じデータベースに書き込んでしまいます。直すには、`filename` オプションを差し替え、`DATABASE_URL` と `TEST_DATABASE_URL` を `config/env.ts` に宣言してください。このファイルがないアプリでは、先に追加します（[設定](./configuration.md#サービスプロバイダを使うアプリ)を参照）。
 >
 > ```diff
@@ -235,7 +238,7 @@ const database = createSqliteDatabase({
 
 ### テスト間のクリーンアップ
 
-テストごとに空のデータベースから始めるには、`config/database.ts` がすでに export している `resetDatabase()` を `beforeEach` で呼びます。この関数はすべてのテーブルを削除してからマイグレーションを適用し直し、`guren db:reset` と同じ状態にするので、直後からテーブルにクエリできます。
+テストごとに空のデータベースから始めるには（SQLite の場合か、`DATABASE_URL` がテスト用のデータベースを指している場合）、`config/database.ts` がすでに export している `resetDatabase()` を `beforeEach` で呼びます。この関数はすべてのテーブルを削除してからマイグレーションを適用し直し、`guren db:reset` と同じ状態にするので、直後からテーブルにクエリできます。
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'
@@ -283,7 +286,7 @@ interface DatabaseConnection {
 
 - Guren はこの接続を用意しません。`config/database.ts` の `getDatabase()` が返すのは内部の Drizzle インスタンスなので、小さなアダプターを書いて、テストを実行する前に `setTestDatabase()` に渡します。
 - `useDatabaseTransactions()` には、**モデルが書き込むのと同じ接続**を渡す必要があります。同じファイルに別に開いた 2 本目の接続からは、1 本目の書き込みが見えず、ロールバックもされません。
-- `useTruncateTables()` は、同じデータベースへの接続ならどれを通しても動きます。`DELETE FROM` はその場でコミットされるからです。
+- `useTruncateTables()` が発行する `DELETE FROM` はその場でコミットされるので、同じデータベースへの接続ならどれを通しても動きます。
 - テーブルは渡した順に空にします。外部キーを検査する接続（Postgres と MySQL のすべての接続と、`getDatabase()` が返す SQLite の接続）では、外部キーが cascade でない限り、子テーブルを親より先に並べてください。
 
 ## サービスのフェイク
@@ -341,11 +344,11 @@ test('placing an order queues the processing job', async () => {
 })
 ```
 
-`http.withCsrf()` は `/` を一度取得し、以降のすべてのリクエストでセッションの Cookie と CSRF トークンを送る `TestApp` を返します。これで、`POST` もブラウザーからの送信と同じように CSRF の保護を通ります。
+この例は、CSRF トークンを検査する `createApp({ auth })` のアプリを前提にしています。`http.withCsrf()` は `/` を一度取得し、以降のすべてのリクエストでセッションの Cookie と CSRF トークンを送る `TestApp` を返します。これで、`POST` もブラウザーからの送信と同じように検査を通ります。`auth` を使わないアプリでは CSRF を検査しないうえ、トークンが発行されないので `withCsrf()` は例外を投げます。その場合は `http.post()` をそのまま呼んでください。
 
 ### フェイクのバインド
 
-コンテナの各キーに入っているのはマネージャーで、フェイクはその 1 段下の部品です。そのため、マネージャーに包んでからバインドします。
+コンテナの各キーにはマネージャーが入っていて、フェイクはその 1 段下の部品にあたります。そのため、マネージャーに包んでからバインドします。
 
 | キー | 入っているマネージャー | フェイクのバインド方法 |
 |------|------------------------|------------------------|
@@ -366,7 +369,7 @@ test('placing an order queues the processing job', async () => {
 バインドするタイミングには決まりが 2 つあります。
 
 - **テストの中で `using` を使ってバインドします。** `fake()` は破棄できるオブジェクト（disposable）を返すので、`using` で受け取っておけば、テストの終わりにアプリ本来のバインディングに戻ります。`fromApp()` を呼ぶテストファイルはどれも同じアプリのインスタンスを共有するので、`beforeAll` でバインドしたまま戻さないフェイクは、後から実行されるファイルにも残ってしまいます。
-- **`fromApp()` がアプリを起動した後でバインドします。** プロバイダーは起動中に本物のサービスを組み立てますが、フェイクのイベントマネージャーは `EventManager` の機能をすべて備えているわけではありません。
+- **`fromApp()` がアプリを起動した後でバインドします。** プロバイダーは起動中に本物のサービスを解決します。その前にバインドしたフェイクは完全な `EventManager` の代わりにプロバイダーへ渡され、セットアップが失敗します。
 
 `assertPushed` には、ペイロードの型を明示して渡してください。ジョブクラスだけではペイロードの型が TypeScript に伝わらず、述語の引数が `unknown` になります。
 
@@ -374,7 +377,7 @@ test('placing an order queues the processing job', async () => {
 
 ### 使えるアサーション
 
-`FakeMail` が記録するのは組み立て済みのメッセージで、それを作った `Mail` クラスは記録しません。アサーションで確かめられるのは、宛先、件名、本文です。
+`FakeMail` は組み立て済みのメッセージを記録し、それを作った `Mail` クラスは記録しません。そのため、アサーションでは宛先、件名、本文を確かめます。
 
 **FakeMail:**
 
@@ -437,8 +440,8 @@ bunx guren make:test posts/PostController
 コントローラーのテストは、たいてい `TestApp` で足ります。Vitest を追加して、モデルをモックしたうえでコントローラー単体をテストしたい場合は、`@guren/testing` の次のヘルパーを使います。
 
 - `createControllerContext(url, init?)` は、コントローラーが読むリクエストのコンテキストを作ります。
-- `createControllerModuleMock()` は `vi.mock('@guren/core', …)` に渡すモックです。この `Controller` はフレームワーク本体の `Controller` を継承していて、起動済みのアプリを必要とする `inertia()` と `make()` だけを差し替えます。
-- `createGurenControllerModule()` は、このモックの元になるモジュールです。`Controller` だけが必要なテストで使います。
+- `createControllerModuleMock()` は `vi.mock('@guren/core', …)` に渡すモックです。この `Controller` はフレームワーク本体の `Controller` を継承していて、`inertia()` は起動済みのアプリなしで描画し、`make()` はコンテキストの値から解決します。
+- `createGurenControllerModule()` は、フレームワークの `Controller` を継承しない、軽い独立した `Controller` のスタブを返します。`setContext`、`make`、`text`、`inertia`、`view` だけを使うコードに向いています。
 - `readInertiaResponse(response)` は、Inertia のレスポンスを `{ format, payload, body }` の形にそろえ、アサーションを書きやすくします。
 
 この構成に特有の問題が 2 つあります。
@@ -448,7 +451,9 @@ bunx guren make:test posts/PostController
 
 ### jsdom でのファイルアップロード
 
-Vitest の `jsdom` 環境では、`FormData` に入れて送った `File` がアクションに届きません。たとえば `this.file()` を呼ぶアクションを `createControllerContext(url, { method: 'POST', body: formData })` でテストすると起きます。jsdom はグローバルの `File` と `Blob` を独自のクラスに置き換えるので、undici が multipart のボディの組み立てと解析に使うクラスと一致しなくなります。Vitest と Node のバージョンによって、テストがタイムアウトするか、undici の内部で失敗するか、`this.file()` が `null` を返したままテストが通ってしまいます。コントローラーのテストは DOM を描画しないので、ファイルの先頭行に次のコメントを書いて Node 環境で実行してください。
+Vitest の `jsdom` 環境では、`FormData` に入れて送った `File` がアクションに届かず、`this.file()` には何も見えません。アップロードを読むアクションを `createControllerContext(url, { method: 'POST', body: formData })` でテストすると起きます。
+
+jsdom がグローバルの `File` と `Blob` を独自のクラスに置き換えるため、Node 組み込みの `fetch`（undici）が multipart のボディを組み立てられなくなるのが原因です。症状は Vitest と Node のバージョンによって異なり、テストのタイムアウト、undici の内部での失敗、`this.file()` が `null` のままテストが通る、のいずれかになります。コントローラーのテストは DOM を描画しないので、ファイルの先頭行に次のコメントを書いて Node 環境で実行してください。
 
 ```ts
 // @vitest-environment node
