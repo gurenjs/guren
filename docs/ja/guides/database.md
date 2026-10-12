@@ -150,7 +150,7 @@ export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV
 bun add @aws-sdk/client-rds-data
 ```
 
-このアダプタもほかのドライバと同じランタイム API を持ち、マイグレーションには標準の drizzle-kit のフォルダを使います。ただし、意図して変えている点が 1 つあります。`getDatabase()` は、未適用のマイグレーションを自動で実行**しません**。Lambda ではこの確認のために、コールドスタートのたびに Data API との往復が何回か順番に発生するからです。マイグレーションはアプリの起動とは別に実行してください(ローカルでは `bun run db:migrate`、デプロイ後はコンソールハンドラを使います)。`migrateOnStart: true` を指定すれば、起動時に実行する以前の動きに戻せます。Data API に対して `drizzle-kit generate`/`push` を実行する場合は、`drizzle.config.ts` に `driver: 'aws-data-api'` と、同じ `database`/`resourceArn`/`secretArn` を設定してください。
+このアダプタもほかのドライバーと同じランタイム API を持ち、マイグレーションには標準の drizzle-kit のフォルダを使います。ただし、意図して変えている点が 1 つあります。`getDatabase()` は、未適用のマイグレーションを自動で実行**しません**。Lambda ではこの確認のために、コールドスタートのたびに Data API との往復が何回か順番に発生するからです。マイグレーションはアプリの起動とは別に実行してください(ローカルでは `bun run db:migrate`、デプロイ後はコンソールハンドラを使います)。`migrateOnStart: true` を指定すれば、起動時に実行する以前の動きに戻せます。Data API に対して `drizzle-kit generate`/`push` を実行する場合は、`drizzle.config.ts` に `driver: 'aws-data-api'` と、同じ `database`/`resourceArn`/`secretArn` を設定してください。
 
 > [!NOTE]
 > 認証には AWS SDK の標準のクレデンシャルチェーン(Lambda 上では IAM ロール、ローカルでは `AWS_PROFILE`)を使います。リージョンやクレデンシャルを明示的に指定したい場合は、`clientOptions` を渡してください。
@@ -203,7 +203,7 @@ bunx guren make:migration --dialect postgresql
 
 ### マイグレーションが走るタイミング
 
-マイグレーションは `db:migrate` を実行したとき以外にも適用されます。Data API アダプタと D1 アダプタ以外のドライバは、最初に `getDatabase()` か `configureOrm()` が呼ばれたときに、未適用のマイグレーションを適用します。これは環境を問いません。`bun run dev` でも `bun test` でも、雛形の `Dockerfile` が `bun bin/serve.ts` で起動するコンテナでも、起動時にマイグレーションが走ります。そのため、新しいイメージを配るだけのデプロイでも、マイグレーション済みの状態で立ち上がります。何かを適用した起動では、適用したものとその出どころが 1 行で表示されます。データベースが最新の状態なら、何も表示せずに立ち上がります。
+マイグレーションは `db:migrate` を実行したとき以外にも適用されます。Data API アダプタと D1 アダプタ以外のドライバーは、最初に `getDatabase()` か `configureOrm()` が呼ばれたときに、未適用のマイグレーションを適用します。これは環境を問いません。`bun run dev` でも `bun test` でも、雛形の `Dockerfile` が `bun bin/serve.ts` で起動するコンテナでも、起動時にマイグレーションが走ります。そのため、新しいイメージを配るだけのデプロイでも、マイグレーション済みの状態で立ち上がります。何かを適用した起動では、適用したものとその出どころが 1 行で表示されます。データベースが最新の状態なら、何も表示せずに立ち上がります。
 
 この仕組みは便利な反面、残すつもりのなかったマイグレーションまでデータベースに適用されてしまいます。ジェネレーターは `db/migrations/` の下に新しいフォルダを未追跡のまま作りますが、`git switch` でも `git branch -D` でも未追跡のファイルは消えません。そのため、捨てたつもりのブランチで生成したマイグレーションが、ディスクに残ったまま適用される時を待つことになります。ブランチと一緒に消えることは期待せず、`git clean -fd` で削除してください。何が消えるかは、先に `git clean -fdn` で確認できます。
 
