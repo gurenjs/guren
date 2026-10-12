@@ -48,8 +48,9 @@ async function auditEnglishDocs(root: string): Promise<void> {
   assert(cli.includes('bun run console <command>'), 'CLI guide must distinguish the app command runner from the `guren console` REPL.')
   // the per-agent MCP config map mirrors planComponents (agent-targets.ts);
   // this paragraph already shipped one false claim (Cursor via .mcp.json)
+  const harness = await read(root, 'docs/en/guides/agent-harness.md')
   for (const mcpPath of ['.mcp.json', '.cursor/mcp.json', '.vscode/mcp.json', '.codex/config.toml', 'opencode.json']) {
-    assert(cli.includes(mcpPath), `CLI guide must name ${mcpPath} in the agent harness MCP config map.`)
+    assert(harness.includes(mcpPath), `Agent harness guide must name ${mcpPath} in the per-agent MCP config map.`)
   }
   assert(cli.includes('agent:init --target'), 'CLI guide must document agent:init --target.')
   // `db:seed` accepts no per-seeder flag, and citty ignores an argument the
@@ -186,8 +187,9 @@ async function auditJapaneseDocs(root: string): Promise<void> {
   const cli = await read(root, 'docs/ja/guides/cli.md')
   // same claims as the English CLI guide: the per-agent MCP config map
   // mirrors planComponents (agent-targets.ts)
+  const harness = await read(root, 'docs/ja/guides/agent-harness.md')
   for (const mcpPath of ['.mcp.json', '.cursor/mcp.json', '.vscode/mcp.json', '.codex/config.toml', 'opencode.json']) {
-    assert(cli.includes(mcpPath), `Japanese CLI guide must name ${mcpPath} in the agent harness MCP config map.`)
+    assert(harness.includes(mcpPath), `Japanese agent harness guide must name ${mcpPath} in the per-agent MCP config map.`)
   }
   assert(cli.includes('agent:init --target'), 'Japanese CLI guide must document agent:init --target.')
   assert(!/db:seed[^\n]*--class/.test(cli), 'Japanese CLI guide must not spell a per-seeder flag on a db:seed line — the command takes no such argument and would silently seed everything.')

@@ -28,7 +28,7 @@ The scaffolder walks you through a few choices, and the defaults are right for g
 
 - **Rendering mode**: SSR (default) or SPA. SSR gives you server-rendered HTML with automatic Vite asset discovery.
 - **Database**: SQLite (default, zero-config), PostgreSQL, or MySQL.
-- **AI agents**: which coding agents to set up the [agent harness](./cli.md#ai-agent-harness) for: Claude Code (default), Codex, Cursor, GitHub Copilot, OpenCode.
+- **AI agents**: which coding agents to set up the [agent harness](./agent-harness.md#choosing-agents) for: Claude Code (default), Codex, Cursor, GitHub Copilot, OpenCode.
 
 It then installs dependencies and creates a `.env` file with a generated `APP_KEY` for you. Flags answer the prompts non-interactively (`--mode ssr`, `--db sqlite`, `--agents codex,cursor`), and `--auth` includes authentication scaffolding from the start.
 
