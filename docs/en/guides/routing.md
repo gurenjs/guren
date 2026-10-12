@@ -1,6 +1,6 @@
 # Routing
 
-Routes map URLs to your application logic. They define what happens when a user visits `/posts`, submits a form, or hits an API endpoint. In vNext-style apps, each application owns a `Router` instance and route files export a registrar function instead of mutating a global registry.
+Routes map a method and a URL to the code that answers it: a controller action or an inline handler. Each application owns one `Router`. A route file exports a registrar, a function that receives that router and registers routes on it, and `src/app.ts` passes the registrar to `createApp()`.
 
 ## Defining Routes
 
@@ -23,40 +23,48 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
-Available methods: `router.get`, `router.post`, `router.put`, `router.patch`, `router.delete`, `router.query`, and the generic `router.on(method, path, handler)`.
-
-### The QUERY method
-
-`router.query()` registers a route for the HTTP QUERY method ([RFC 10008](https://www.rfc-editor.org/info/rfc10008/)): safe and idempotent like GET, but the request carries a body like POST. Use it for search and filter endpoints whose criteria are too complex for a URL:
-
-```ts
-import { z } from 'zod'
-
-router.query('/posts/search', {
-  name: 'posts.search',
-  body: z.object({ keywords: z.array(z.string()), limit: z.number().default(20) }),
-}, [PostsController, 'search'])
-```
-
-Things to know before reaching for it:
-
-- **Handlers must not mutate state.** QUERY is a safe method, and Guren's CSRF protection skips it on that assumption (browsers cannot send QUERY without a CORS preflight, so cross-site request forgery is not a concern, as long as the handler really is read-only). To force CSRF tokens anyway, add `'QUERY'` to the CSRF middleware's `methods` option.
-- **Call it with `fetch` or the generated API client** (`client.request('posts.search', { body })`). HTML forms and Inertia form helpers cannot send QUERY.
-- **Check your deployment path.** Guren's fetch-based adapters (Bun, the Cloudflare Workers and Vercel plugins) do not block QUERY, but verify that your platform's ingress accepts it: some proxies and CDNs reject methods outside the classic set. Notably CloudFront, which the Lambda plugin's asset distribution puts in front of your app, does not forward QUERY. Intermediary caching of QUERY responses is also not widely implemented yet.
-- **OpenAPI 3.1 cannot express QUERY**, so `guren openapi:generate` skips QUERY routes with a warning.
-- To advertise support to clients, set the `Accept-Query` response header yourself, e.g. `ctx.header('Accept-Query', 'application/json')` on the resource's GET handler.
+Available methods: `router.get`, `router.post`, `router.put`, `router.patch`, `router.delete`, `router.query` (see [The QUERY Method](#the-query-method)), and the generic `router.on(method, path, handler)`.
 
 Pass the registrar to `createApp()` in `src/app.ts`:
 
 ```ts
 // src/app.ts
 import { createApp } from '@guren/core'
-import registerWebRoutes from '@/routes/web'
+import { registerWebRoutes } from '@/routes/web'
 
 const app = createApp({
   routes: registerWebRoutes,
 })
 ```
+
+## Route Parameters
+
+Dynamic segments use `:param` syntax:
+
+```ts
+router.get('/posts/:id', [PostsController, 'show'])
+router.get('/users/:userId/posts/:postId', [PostsController, 'showForUser'])
+```
+
+Read them in the controller:
+
+```ts
+const id = this.ctx.req.param('id')
+const userId = this.ctx.req.param('userId')
+```
+
+Hono's pattern syntax applies:
+
+| Pattern | Matches |
+|---------|---------|
+| `/posts/:id?` | `/posts` and `/posts/42` (optional segment) |
+| `/items/:id{[0-9]+}` | `/items/42`, not `/items/abc` (regex constraint) |
+| `/files/:path{.+}` | `/files/a/b/c` (several segments) |
+
+Avoid `/:slug*`. It is not a Hono wildcard: it registers a one-segment parameter literally named `slug*`, so `/files/x/y` returns 404.
+
+> [!NOTE]
+> For large apps, split routes into multiple registrars (`routes/api.ts`, `routes/admin.ts`) and compose them from `src/app.ts`.
 
 ## Route Groups
 
@@ -98,7 +106,7 @@ This keeps your code resilient to path changes. If you rename `/posts` to `/arti
 
 ## Middleware
 
-Middleware runs before (or after) your route handler. Guren supports three levels of middleware configuration.
+Attach middleware to a route with `.middleware()`, or to a set of routes with `router.middleware().group()`. Names you register with `aliasMiddleware()` can be used in place of functions. The [Middleware guide](./middleware.md) covers groups, execution order and the built-in middleware.
 
 ### Registering Aliases
 
@@ -112,6 +120,13 @@ export function registerWebRoutes(baseRouter: Router): void {
   const router = baseRouter
     .aliasMiddleware('auth', requireAuthenticated())
     .aliasMiddleware('admin', requireAdmin())
+
+  router.get('/admin', [AdminController, 'index']).middleware('auth', 'admin')
+
+  router.middleware('auth').group((auth) => {
+    auth.get('/dashboard', [DashboardController, 'index'])
+    auth.get('/settings', [SettingsController, 'index'])
+  })
 }
 ```
 
@@ -119,47 +134,6 @@ export function registerWebRoutes(baseRouter: Router): void {
 > `aliasMiddleware()` returns a **new `Router` type** carrying the alias name it just registered. Call it without capturing the result and the name never reaches the type, so a later `.middleware('auth')` fails to compile. Always chain and assign, as above.
 >
 > The type travels across functions too. A registrar typed `Router<'auth' | 'guest'>` only accepts a router on which both names were aliased and the result captured, so hand it the captured `router` rather than the `baseRouter` it came from. The entry registrar itself takes plain `Router`: it is the one that registers the aliases, and `createApp({ routes })` hands it a router carrying none.
-
-### Middleware Groups
-
-Bundle related middleware under a single name. Group members must already be registered aliases:
-
-```ts
-const router = new Router()
-  .aliasMiddleware('auth', requireAuthenticated())
-  .aliasMiddleware('admin', requireAdmin())
-  .aliasMiddleware('session', createSessionMiddleware())
-  .aliasMiddleware('csrf', createCsrfMiddleware())
-  .aliasMiddleware('throttle', createRateLimitMiddleware({ limit: 60, windowMs: 60_000 }))
-  .groupMiddleware('web', ['session', 'csrf'])
-  .groupMiddleware('api', ['throttle'])
-```
-
-### Applying Middleware
-
-Use `router.middleware().group()` for a set of routes, or `.middleware()` on a single route:
-
-```ts
-// Group-level — all routes inside share the middleware
-router.middleware('web').group((web) => {
-  web.get('/', [HomeController, 'index'])
-  web.get('/about', [PagesController, 'about'])
-})
-
-// Nested — combine middleware layers
-router.middleware('web').group((web) => {
-  web.middleware('auth').group((auth) => {
-    auth.get('/dashboard', [DashboardController, 'index'])
-    auth.get('/settings', [SettingsController, 'index'])
-  })
-})
-
-// Per-route — for one-off protection
-router.get('/admin', [AdminController, 'index']).middleware('auth', 'admin')
-```
-
-> [!TIP]
-> Keep route files clean by using aliases. Import middleware functions once at the top and alias them, then use string names everywhere else.
 
 ## Route Model Binding
 
@@ -173,7 +147,7 @@ async show() {
 }
 ```
 
-With model binding, Guren resolves the model automatically. Declare the binding on the route with the `bind` option and read the record in the controller with `this.model()`:
+With model binding, Guren resolves the model automatically. Declare the binding in the route's options object (the second argument, described under [Route Contracts](#route-contracts)) with the `bind` option and read the record in the controller with `this.model()`:
 
 ```ts
 // routes/web.ts — :id is looked up with Post.findOrFail(id)
@@ -259,27 +233,6 @@ router.resource('/posts', PostsController, {
 // Custom parameter name
 router.resource('/posts', PostsController, { param: 'post' })
 ```
-
-## Route Parameters
-
-Dynamic segments use `:param` syntax:
-
-```ts
-router.get('/posts/:id', [PostsController, 'show'])
-router.get('/users/:userId/posts/:postId', [PostsController, 'showForUser'])
-```
-
-Read them in the controller:
-
-```ts
-const id = this.ctx.req.param('id')
-const userId = this.ctx.req.param('userId')
-```
-
-Optional segments (`router.get('/posts/:id?', handler)`) and regex constraints (`router.get('/items/:id{[0-9]+}', handler)`) follow Hono's pattern support. To match across multiple segments, use a constrained parameter such as `:path{.+}`. Note that `/:slug*` is not Hono wildcard syntax: it registers a single-segment parameter literally named `slug*` (asterisk included, so you would have to read it as `this.ctx.req.param('slug*')`), and `/files/x/y` 404s rather than matching. Avoid it.
-
-> [!NOTE]
-> For large apps, split routes into multiple registrars (`routes/api.ts`, `routes/admin.ts`) and compose them from `src/app.ts`.
 
 ## Route Contracts
 
@@ -403,7 +356,7 @@ Available OpenAPI fields:
 | `operationId` | `string` | Override the auto-generated operation ID |
 | `deprecated` | `boolean` | Mark endpoint as deprecated |
 
-See the [OpenAPI guide](#openapi) section in the CLI reference for generating the spec document.
+See [OpenAPI Document Generation](#openapi-document-generation) for generating the spec document.
 
 ### Agent Tools
 
@@ -438,6 +391,27 @@ router.resource('/posts', PostsController, {
 Exposure is opt-in per route, the tool name is the route name used verbatim, and a route with no `.name()` cannot become a tool. Declaring `agent` in the route options *and* chaining `.agent()` throws — declare it once.
 
 `bunx guren tool:list` shows what an agent would see. For the metadata fields, the input/output derivation rules, the MCP endpoint, token scopes and the audit trail, see the [Agent Interface guide](./agent-interface.md).
+
+## The QUERY Method
+
+`router.query()` registers a route for the HTTP QUERY method ([RFC 10008](https://www.rfc-editor.org/info/rfc10008/)): safe and idempotent like GET, but the request carries a body like POST. Use it for search and filter endpoints whose criteria are too complex for a URL:
+
+```ts
+import { z } from 'zod'
+
+router.query('/posts/search', {
+  name: 'posts.search',
+  body: z.object({ keywords: z.array(z.string()), limit: z.number().default(20) }),
+}, [PostsController, 'search'])
+```
+
+Things to know before reaching for it:
+
+- **Handlers must not mutate state.** QUERY is a safe method, so Guren's CSRF protection skips it. That is sound because browsers cannot send QUERY cross-site without a CORS preflight, but only while the handler really is read-only. To require CSRF tokens anyway, add `'QUERY'` to the CSRF middleware's `methods` option.
+- **Call it with `fetch` or the generated API client** (`client.request('posts.search', { body })`). HTML forms and Inertia form helpers cannot send QUERY.
+- **Check your deployment path.** Guren's fetch-based adapters (Bun, the Cloudflare Workers and Vercel plugins) do not block QUERY, but verify that your platform's ingress accepts it: some proxies and CDNs reject methods outside the classic set. Notably CloudFront, which the Lambda plugin's asset distribution puts in front of your app, does not forward QUERY. Intermediary caching of QUERY responses is also not widely implemented yet.
+- **OpenAPI 3.1 cannot express QUERY**, so `guren openapi:generate` skips QUERY routes with a warning.
+- To advertise support to clients, set the `Accept-Query` response header yourself, e.g. `ctx.header('Accept-Query', 'application/json')` on the resource's GET handler.
 
 ## OpenAPI Document Generation
 
@@ -514,8 +488,4 @@ mountOpenApiDocs(app, {
 await app.listen({ port: 0 })
 ```
 
-`app.address` is where `listen()` bound this app, and `undefined` until it has.
-Reading it inside the function is what keeps the entrypoint out of it: nothing
-has to carry the address back down into the app that produced it. Mounting
-against a plain Hono instance leaves you without an `Application` to ask, so
-supply the value the function returns however that app knows it.
+`app.address` is where `listen()` bound this app, and `undefined` until it has. Because the function runs per request, it reads the address after `listen()` has set it. A plain Hono instance has no `Application` to ask, so return the address however that app knows it.

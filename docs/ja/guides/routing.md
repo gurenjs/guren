@@ -1,64 +1,116 @@
 # ルーティングガイド
 
-Guren には、Hono の HTTP サーバーの上で動く Laravel 風のルーティング DSL があります。推奨する構成では、`routes/web.ts` が registrar 関数を export し、アプリの起動時にそのアプリ専用の `Router` へルートを登録します。
+ルートは、メソッドと URL の組み合わせを、それに応答するコード（コントローラーのアクションかインラインハンドラー）に結び付けます。アプリケーションはそれぞれ 1 つの `Router` を持ちます。ルートファイルは registrar（そのルーターを受け取ってルートを登録する関数）を export し、`src/app.ts` がその registrar を `createApp()` に渡します。
 
-## 基本の使い方
-`routes/web.ts` を作成または編集し、`Router` と、使うコントローラーをインポートします。
+## ルートの定義
+
+`routes/web.ts` を作り、アプリケーションのルーターを受け取る registrar を export します。
 
 ```ts
+// routes/web.ts
 import { Router } from '@guren/core'
 import PostsController from '@/app/Http/Controllers/PostsController'
 
 export function registerWebRoutes(router: Router): void {
-  router.get('/', [PostsController, 'index'])
+  // コントローラーのタプル（いちばんよく使う形）
+  router.get('/posts', [PostsController, 'index'])
   router.post('/posts', [PostsController, 'store'])
+  router.put('/posts/:id', [PostsController, 'update'])
+  router.delete('/posts/:id', [PostsController, 'destroy'])
+
+  // インラインハンドラー（ヘルスチェックや Webhook のような軽いエンドポイント向け）
+  router.get('/health', (ctx) => ctx.json({ ok: true }))
 }
 ```
 
-各ルートには、パスと次のどちらかを渡します。
-- コントローラーのタプル `[ControllerClass, 'method']`
-- インラインハンドラー `(ctx) => new Response('...')`
+使えるメソッドは `router.get`、`router.post`、`router.put`、`router.patch`、`router.delete`、`router.query`（[QUERY メソッド](#query-メソッド)を参照）と、汎用の `router.on(method, path, handler)` です。
 
-使えるメソッドは `router.get`、`router.post`、`router.put`、`router.patch`、`router.delete`、`router.query` と、汎用の `router.on(method, path, handler)` です。
-
-### QUERY メソッド
-
-`router.query()` は、HTTP の QUERY メソッド（[RFC 10008](https://www.rfc-editor.org/info/rfc10008/)）のルートを登録します。QUERY は GET と同じく安全（safe）で冪等なメソッドですが、POST のようにリクエストボディを持てます。URL に収まらない複雑な検索条件やフィルタ条件を受け取るエンドポイントに使ってください。
+registrar は、`src/app.ts` で `createApp()` に渡します。
 
 ```ts
-import { z } from 'zod'
+// src/app.ts
+import { createApp } from '@guren/core'
+import { registerWebRoutes } from '@/routes/web'
 
-router.query('/posts/search', {
-  name: 'posts.search',
-  body: z.object({ keywords: z.array(z.string()), limit: z.number().default(20) }),
-}, [PostsController, 'search'])
-```
-
-使う前に、次の点を確認してください。
-
-- **ハンドラーで状態を変更しないでください。** QUERY は安全なメソッドなので、Guren の CSRF 保護はそれを前提に QUERY を検証の対象から外しています（ブラウザは CORS のプリフライトなしに QUERY を送れないので、ハンドラーが読み取り専用である限り CSRF の心配はありません）。それでも CSRF トークンを要求したい場合は、CSRF ミドルウェアの `methods` オプションに `'QUERY'` を追加してください。
-- **呼び出しには `fetch` か、生成された API クライアント**（`client.request('posts.search', { body })`）を使います。HTML フォームや Inertia のフォームヘルパーは QUERY を送れません。
-- **デプロイ先の経路を確認してください。** Guren の fetch ベースのアダプター（Bun、Cloudflare Workers / Vercel プラグイン）は QUERY をブロックしませんが、プラットフォームの入口が QUERY を受け付けるかどうかは別に確かめる必要があります。従来からあるメソッド以外を拒否するプロキシや CDN もあります。特に、Lambda プラグインのアセット配信でアプリの前段に置かれる CloudFront は、QUERY を転送しません。また、中間キャッシュで QUERY のレスポンスをキャッシュする仕組みも、まだ広くは実装されていません。
-- **OpenAPI 3.1 では QUERY を表現できない**ので、`guren openapi:generate` は QUERY のルートを警告付きでスキップします。
-- QUERY に対応していることをクライアントに知らせるには、リソースの GET ハンドラーなどで `Accept-Query` レスポンスヘッダーを自分で設定してください（例: `ctx.header('Accept-Query', 'application/json')`）。
-
-## ルートグループ
-`router.group(prefix, callback)` を使うと、複数のルートに共通のパスプレフィックスとミドルウェアを適用できます。
-
-```ts
-router.group('/posts', (posts) => {
-  posts.get('/', [PostsController, 'index'])
-  posts.get('/:id', [PostsController, 'show'])
+const app = createApp({
+  routes: registerWebRoutes,
 })
 ```
 
-グループは入れ子にできます。プレフィックスの前後の `/` は自動で整理されるので、`/posts` と `/new` を組み合わせると `/posts/new` になります。
+## ルートパラメータ
+
+動的なセグメントは `:param` の形で書きます。
+
+```ts
+router.get('/posts/:id', [PostsController, 'show'])
+router.get('/users/:userId/posts/:postId', [PostsController, 'showForUser'])
+```
+
+コントローラーでは次のように読み取ります。
+
+```ts
+const id = this.ctx.req.param('id')
+const userId = this.ctx.req.param('userId')
+```
+
+パターンには Hono の構文が使えます。
+
+| パターン | マッチするもの |
+|----------|----------------|
+| `/posts/:id?` | `/posts` と `/posts/42`（省略できるセグメント） |
+| `/items/:id{[0-9]+}` | `/items/42`。`/items/abc` にはマッチしない（正規表現による制約） |
+| `/files/:path{.+}` | `/files/a/b/c`（複数のセグメント） |
+
+`/:slug*` は使わないでください。Hono のワイルドカードではなく、`slug*` という名前の 1 セグメントのパラメータとして登録されるので、`/files/x/y` には 404 を返します。
+
+> [!NOTE]
+> 大きなアプリでは、ルートを複数の registrar（`routes/api.ts`、`routes/admin.ts`）に分け、`src/app.ts` で組み合わせます。
+
+## ルートグループ
+
+共通のプレフィックスを持つルートをまとめると、同じパスを何度も書かずに済みます。
+
+```ts
+export function registerWebRoutes(router: Router): void {
+  router.group('/posts', (posts) => {
+    posts.get('/', [PostsController, 'index'])      // GET /posts
+    posts.get('/:id', [PostsController, 'show'])    // GET /posts/:id
+    posts.post('/', [PostsController, 'store'])     // POST /posts
+  })
+}
+```
+
+グループは入れ子にでき、プレフィックスは自動でつながります。
+
+```ts
+router.group('/admin', (admin) => {
+  admin.group('/users', (users) => {
+    users.get('/', [AdminUsersController, 'index']) // GET /admin/users
+  })
+})
+```
+
+## 名前付きルート
+
+ルートに名前を付けておくと、パスを直接書く代わりに名前から URL を組み立てられます。
+
+```ts
+router.get('/posts/:id', [PostsController, 'show']).name('posts.show')
+
+// あとで URL を組み立てる
+const url = router.route('posts.show', { id: 42 })
+// => '/posts/42'
+```
+
+パスを変えても、変更が必要なのはルートの定義だけです。たとえば `/posts` を `/articles` に変えても、名前で URL を組み立てているコードはそのまま動きます。
 
 ## ミドルウェア
 
-### ルート単位のミドルウェア
+ルートには `.middleware()` で、ルートのまとまりには `router.middleware().group()` でミドルウェアを付けます。`aliasMiddleware()` で登録した名前は、関数の代わりに使えます。グループ、実行順、組み込みのミドルウェアについては[ミドルウェアガイド](./middleware.md)を参照してください。
 
-ルートに `.middleware()` をチェーンすると、そのルートにだけミドルウェアを適用できます。
+### ミドルウェアエイリアス
+
+ミドルウェアの関数に短い名前を付けておくと、文字列で指定できます。
 
 ```ts
 import { Router, requireAuthenticated } from '@guren/core'
@@ -70,91 +122,22 @@ export function registerWebRoutes(baseRouter: Router): void {
     .aliasMiddleware('admin', requireAdmin())
 
   router.get('/admin', [AdminController, 'index']).middleware('auth', 'admin')
-}
-```
 
-### ミドルウェアエイリアス
-
-ミドルウェア関数に短い名前を付けて登録しておくと、どのルートからも文字列で参照できます。
-
-```ts
-import { Router, requireAuthenticated } from '@guren/core'
-import { requireAdmin } from '@/app/Http/middleware/admin'
-
-export function registerWebRoutes(baseRouter: Router): void {
-  const router = baseRouter
-    .aliasMiddleware('auth', requireAuthenticated())
-    .aliasMiddleware('admin', requireAdmin())
+  router.middleware('auth').group((auth) => {
+    auth.get('/dashboard', [DashboardController, 'index'])
+    auth.get('/settings', [SettingsController, 'index'])
+  })
 }
 ```
 
 > [!IMPORTANT]
 > `aliasMiddleware()` は、登録したエイリアス名を型に含んだ**新しい `Router` 型**を返します。戻り値を受け取らずに呼び出すと、登録した名前が型に反映されず、後に続く `.middleware('auth')` が型エラーになります。上の例のように、必ずチェーンして戻り値を受け取ってください。
 >
-> この型は関数をまたいでも引き継がれます。`Router<'auth' | 'guest'>` と型を付けた登録関数には、その 2 つをエイリアス登録して戻り値を受け取った `router` を渡してください。元の `baseRouter` のままでは型が合いません。エントリの登録関数だけは素の `Router` を受け取ります。エイリアスを登録するのはその関数自身で、`createApp({ routes })` が渡すルーターにはまだ何も登録されていないからです。
-
-エイリアスを登録すると、ミドルウェアを指定できる場所ならどこでも、その名前を文字列で使えます。
-
-```ts
-router.get('/dashboard', [DashboardController, 'index']).middleware('auth')
-router.get('/admin', [AdminController, 'index']).middleware('auth', 'admin')
-```
-
-### ミドルウェアグループ
-
-よく使うミドルウェアの組み合わせは、1 つの名前にまとめられます。グループに入れるのは、先にエイリアスとして登録した名前だけです。
-
-```ts
-const router = new Router()
-  .aliasMiddleware('auth', requireAuthenticated())
-  .aliasMiddleware('admin', requireAdmin())
-  .aliasMiddleware('session', createSessionMiddleware())
-  .aliasMiddleware('csrf', createCsrfMiddleware())
-  .aliasMiddleware('throttle', createRateLimitMiddleware({ limit: 60, windowMs: 60_000 }))
-  .groupMiddleware('web', ['session', 'csrf'])
-  .groupMiddleware('api', ['throttle'])
-```
-
-ミドルウェアグループは、ルートグループに適用します。
-
-```ts
-router.middleware('web').group((web) => {
-  web.get('/', [HomeController, 'index'])
-  web.get('/about', [PagesController, 'about'])
-})
-
-router.middleware('auth').group((auth) => {
-  auth.get('/dashboard', [DashboardController, 'index'])
-  auth.get('/settings', [SettingsController, 'index'])
-})
-```
-
-ミドルウェアグループと個別のエイリアスは自由に組み合わせられます。
-
-```ts
-router.middleware('web', 'auth').group((group) => {
-  group.get('/profile', [ProfileController, 'show'])
-})
-```
-
-グローバルに登録する方法、組み込みのヘルパー、セッションの扱いについては、[ミドルウェアガイド](./middleware.md)を参照してください。
-
-## ルートパラメータ
-動的なパラメータは Hono の構文で書きます。
-
-```ts
-router.get('/posts/:id', [PostsController, 'show'])
-```
-
-コントローラー内では `this.validateParams()` か `this.ctx.req.param('id')` でパラメータを読み取ります。
-
-省略可能なセグメント（`router.get('/posts/:id?', handler)`）や正規表現による制約（`router.get('/items/:id{[0-9]+}', handler)`）も、Hono のパターンとして使えます。複数のセグメントにまたがってマッチさせたいときは、`:path{.+}` のような制約付きのパラメータを使います。
-
-`/:slug*` は Hono のワイルドカード構文ではないので注意してください。これは `slug*` という名前（アスタリスクを含む）の 1 セグメントのパラメータとして登録され、`/files/x/y` のような複数セグメントのパスには 404 を返します。値も `this.ctx.req.param('slug*')` のようにアスタリスク込みのキーで読むことになるので、使わないでください。
+> この型は関数をまたいでも引き継がれます。`Router<'auth' | 'guest'>` と型を付けた登録関数には、その 2 つをエイリアス登録して戻り値を受け取った `router` を渡してください。元の `baseRouter` のままでは型が合いません。エントリの登録関数だけは素の `Router` を受け取ります。エイリアスを登録するのはこの関数自身で、`createApp({ routes })` から渡される時点のルーターにはまだ何も登録されていないためです。
 
 ## ルートモデルバインディング
 
-毎回 `findOrFail()` を書く代わりに、ルートパラメータにモデルをバインドできます。ルートの `bind` オプションでバインディングを宣言し、コントローラーでは `this.model()` でレコードを受け取ります。
+毎回 `findOrFail()` を書く代わりに、ルートパラメータにモデルをバインドできます。ルートのオプションオブジェクト（第 2 引数。[ルートコントラクト](#ルートコントラクト)で説明します）の `bind` オプションでバインディングを宣言し、コントローラーでは `this.model()` でレコードを受け取ります。
 
 ```ts
 import { PostResource } from '@/app/Http/Resources/PostResource'
@@ -211,35 +194,37 @@ async show(_ctx: Context, post: PostRecord) {
 > [!NOTE]
 > バインドした値は Hono のコンテキストには格納されません。`this.ctx.get('post')` は `undefined` を返すので、`this.model(Post)` か位置引数を使ってください。また、バインディングが解決されるのはコントローラータプルのルートだけです。インラインハンドラーは Hono の `(ctx, next)` を受け取るので、レコードは自分で取得してください。
 
-## ブートストラップ
-registrar は、`src/app.ts` で `createApp()` に渡します。
+## リソースルート
+
+`router.resource()` を使うと、1 行で RESTful なルート一式を登録できます。
 
 ```ts
-// src/app.ts
-import { createApp } from '@guren/core'
-import registerWebRoutes from '@/routes/web'
+router.resource('/posts', PostsController)
+```
 
-const app = createApp({
-  routes: registerWebRoutes,
+登録されるのは次のルートです。
+
+| メソッド | パス | アクション | 名前 |
+|--------|------|--------|------|
+| GET | `/posts` | `index` | `posts.index` |
+| GET | `/posts/create` | `create` | `posts.create` |
+| POST | `/posts` | `store` | `posts.store` |
+| GET | `/posts/:id` | `show` | `posts.show` |
+| GET | `/posts/:id/edit` | `edit` | `posts.edit` |
+| PUT | `/posts/:id` | `update` | `posts.update` |
+| DELETE | `/posts/:id` | `destroy` | `posts.destroy` |
+
+コントローラーにあるメソッドの分だけが登録されます。オプションで範囲を絞れます。
+
+```ts
+// API 専用。create と edit（HTML フォーム用）を外す
+router.resource('/posts', PostsController, {
+  only: ['index', 'show', 'store', 'update', 'destroy'],
 })
+
+// パラメータ名を変える
+router.resource('/posts', PostsController, { param: 'post' })
 ```
-
-## カスタムハンドラー
-インラインハンドラーを使うと、コントローラーを作らずに Hono の `Context` を直接扱えます。
-
-```ts
-router.get('/health', (ctx) => ctx.json({ ok: true }))
-```
-
-ヘルスチェックや Webhook のような軽いエンドポイントに向いています。
-
-## Tips
-- `routes/web.ts` には HTTP の定義だけを書き、ビジネスロジックはコントローラーやサービスに移してください。
-- 大きなアプリでは、ルートを別のファイル（例: `routes/admin.ts`）に分け、`src/app.ts` で registrar を組み合わせます。
-- コントローラーのメソッドに `index`、`show`、`store`、`update`、`destroy` のような分かりやすい名前を付けると、フレームワーク全体の規約と揃います。
-- ミドルウェアのエイリアスを使うとルートファイルがすっきりし、あちこちでミドルウェア関数をインポートせずに済みます。
-
-ルーティング DSL を使うと、複雑な HTTP の構成も表現しながら、エントリーポイントを宣言的で見通しのよい形に保てます。
 
 ## ルートコントラクト
 
@@ -363,7 +348,7 @@ router.get('/posts/:id', {
 | `operationId` | `string` | 自動生成されるオペレーション ID を上書き |
 | `deprecated` | `boolean` | エンドポイントを非推奨としてマーク |
 
-スペックのドキュメントを生成する方法は、CLI リファレンスの OpenAPI の節を参照してください。
+スペックのドキュメントを生成する方法は、[OpenAPI ドキュメント生成](#openapi-ドキュメント生成)を参照してください。
 
 ### エージェントツール
 
@@ -398,6 +383,27 @@ router.resource('/posts', PostsController, {
 公開するかどうかはルートごとに選ぶオプトイン方式です。ツール名にはルート名がそのまま使われるので、`.name()` のないルートはツールにできません。ルートオプションの `agent` と `.agent()` のチェーンを両方書くと、登録時に例外を投げます。宣言は 1 か所だけにしてください。
 
 エージェントから何が見えるかは、`bunx guren tool:list` で確認できます。メタデータの各フィールド、入出力の導出ルール、MCP エンドポイント、トークンのスコープ、監査ログについては、[エージェントインターフェースガイド](./agent-interface.md)を参照してください。
+
+## QUERY メソッド
+
+`router.query()` は、HTTP の QUERY メソッド（[RFC 10008](https://www.rfc-editor.org/info/rfc10008/)）のルートを登録します。QUERY は GET と同じく安全（safe）で冪等なメソッドですが、POST のようにリクエストボディを持てます。URL に収まらない複雑な検索条件やフィルタ条件を受け取るエンドポイントに使ってください。
+
+```ts
+import { z } from 'zod'
+
+router.query('/posts/search', {
+  name: 'posts.search',
+  body: z.object({ keywords: z.array(z.string()), limit: z.number().default(20) }),
+}, [PostsController, 'search'])
+```
+
+使う前に、次の点を確認してください。
+
+- **ハンドラーで状態を変更しないでください。** QUERY は安全なメソッドなので、Guren の CSRF 保護は QUERY を検査しません。ブラウザーは CORS のプリフライトなしに別のサイトから QUERY を送れないためですが、これが成り立つのはハンドラーが読み取り専用である間だけです。それでも CSRF トークンを要求したい場合は、CSRF ミドルウェアの `methods` オプションに `'QUERY'` を追加してください。
+- **呼び出しには `fetch` か、生成された API クライアント**（`client.request('posts.search', { body })`）を使います。HTML フォームや Inertia のフォームヘルパーは QUERY を送れません。
+- **デプロイ先の経路を確認してください。** Guren の fetch ベースのアダプター（Bun、Cloudflare Workers / Vercel プラグイン）は QUERY をブロックしませんが、プラットフォームの入口が QUERY を受け付けるかどうかは別に確かめる必要があります。従来からあるメソッド以外を拒否するプロキシや CDN もあります。特に、Lambda プラグインのアセット配信でアプリの前段に置かれる CloudFront は、QUERY を転送しません。また、中間キャッシュで QUERY のレスポンスをキャッシュする仕組みも、まだ広くは実装されていません。
+- **OpenAPI 3.1 では QUERY を表現できない**ので、`guren openapi:generate` は QUERY のルートを警告付きでスキップします。
+- QUERY に対応していることをクライアントに知らせるには、リソースの GET ハンドラーなどで `Accept-Query` レスポンスヘッダーを自分で設定してください（例: `ctx.header('Accept-Query', 'application/json')`）。
 
 ## OpenAPI ドキュメント生成
 
@@ -474,4 +480,4 @@ mountOpenApiDocs(app, {
 await app.listen({ port: 0 })
 ```
 
-`app.address` は `listen()` がこのアプリをバインドしたアドレスで、バインドする前は `undefined` です。関数の中でこれを読めば、エントリポイントを経由する必要がなく、アドレスを決めたアプリ自身にそれを外から渡し直さずに済みます。素の Hono のインスタンスにマウントする場合は問い合わせる `Application` がないので、そのアプリがアドレスを知っている方法で、関数の戻り値を組み立ててください。
+`app.address` は `listen()` がこのアプリをバインドしたアドレスで、バインドする前は `undefined` です。関数はリクエストのたびに呼ばれるので、`listen()` がアドレスを決めた後で読むことになります。素の Hono のインスタンスには問い合わせる `Application` がないので、そのアプリが知っている方法でアドレスを返してください。
