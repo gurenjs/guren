@@ -1,33 +1,11 @@
 # Guren アップグレードガイド
 
-## 未リリース: `analyzeDeployRuntime()` と `judgeDeployRuntime()` を非推奨に
-
-`@guren/cli` が export しているデプロイ実行環境向けの 2 つの関数に `@deprecated`(`deploy-runtime-analysis`)を付けました。呼び出すとプロセスごとに 1 回警告が出ますが、`@guren/cli` 3.0.0 までは動き続けます。
-
-代わりに `checkDeployRuntime(cwd)` を呼んでください。同じ 3 つの判定が返ります。パスワードハッシュとストアの判定は introspect したアプリから読むので、それが得られない場合は `deploy-password-hashing-unverified` と `deploy-runtime-stores-unverified`(参考扱いの警告、advisory)になります。`DeployRuntimeAnalysis` のうち、ハッシャーとセッション設定に関する 6 つのシグナル配列は常に空です。
-
-どちらかの関数を import しているファイルは、`bunx guren upgrade --check-only` で一覧できます。
-
-## 未リリース: キャッシュの同時ミスでコールバックを共有
-
-`cache.store()` で取得したストアの `remember()` と `rememberForever()` は、同じプロセスの中で同じキー・同じ TTL への呼び出しが同時にミスした場合、コールバックを 1 回だけ実行するようになりました。同時にミスした呼び出し元は、全員が同じ結果オブジェクトか同じ例外を受け取ります。ヒットしたときの挙動は変わりません。
-
-ファイルストアと Redis ストアでは、これまで同時にミスした呼び出し元がそれぞれ別のコピーを受け取っていました。今後は結果を共有するので、取得した値をその場で書き換えるコードは、ほかの呼び出し元にも影響します。書き換える前に値をコピーしてください。詳しくは[同時ミス](./cache.md#同時ミス)を参照してください。
-
-## 未リリース: キューのキャンセルと予約
-
-ジョブの `this.signal` は、`fetch` など中断できる I/O に渡してください。タイムアウトするとキャンセルが要求され、ワーカーは `handle()` が終わるのを待ってから再試行します。タイムアウトのあとで正常に終わった処理は、再試行せずに完了として扱います。シグナルを無視する処理は制限時間を超えて動き続けるので、止まらないワーカーを強制終了できるよう、プロセスの監視も用意してください。
-
-Redis ワーカーは予約を更新し続け、古くなった予約に対する完了通知を受け付けません。旧ワーカーは所有権を確認しないので、この更新をデプロイするときはすべてのワーカーを再起動してください。キーの構成と保存済みのペイロードは互換性を保っています。配信は「少なくとも 1 回」のままなので、外部への書き込みには引き続き冪等性キーが必要です。
-
-`SqsDriver` は、ジョブの実行中にメッセージの可視性を更新します。オプションの `visibilityTimeout` には、キューの属性と同じ秒数を設定してください。独自ドライバーには `heartbeatInterval` と `extendReservation(job)` を追加できます。`delete()` の省略可能な第 2 引数には予約トークンが渡されますが、既存のドライバーはそのまま動きます。ドライバーが例外を投げると、ワーカーは実行中フラグを戻して `start()` を失敗させるので、監視側でバックオフを挟んで再起動できます。
-
-以下は、マイナーバージョン間でアップグレードするときの手順です。
+アプリを新しいマイナーバージョンに上げるときは、このガイドを使います。下の手順に沿って進め、またいだバージョンごとの移行メモを新しいものから順に当てはめてください。メジャーバージョンの変更も、それぞれのバージョンの項に載せています。
 
 ## 必須アップグレード手順
 
 1. `CHANGELOG.md` とリリースノートを読む
-2. `docs/ja/guides/release-policy.md` の互換性マトリクスを確認する
+2. [リリースポリシー](./release-policy.md)の互換性マトリクスを確認する
 3. 依存関係を更新し、生成物を作り直す
 
 ```bash
@@ -55,13 +33,49 @@ bun run test
 
 ## 移行メモ
 
+### 未リリース
+
+#### キャッシュの同時ミスでコールバックを共有
+
+- **何が変わったか**: 同じプロセスの中で、同じキー・同じ TTL への呼び出しが同時にミスした場合、`cache.store()` で取得したストアの `remember()` と `rememberForever()` はコールバックを 1 回だけ実行します。同時にミスした呼び出し元は、全員が同じ結果オブジェクトか同じ例外を受け取ります。ヒットしたときの挙動は変わりません。
+- **誰に影響するか**: ファイルストアや Redis ストアで、取得した値をその場で書き換えているコードです。これまでは同時にミスした呼び出し元がそれぞれ別のコピーを受け取っていましたが、今後は結果を共有するので、書き換えがほかの呼び出し元にも及びます。
+- **移行方法**: 書き換える前に値をコピーしてください（`structuredClone(value)`）。詳しくは[同時ミス](./cache.md#同時ミス)を参照してください。
+
+#### キューのキャンセルと予約
+
+- **何が変わったか**: ジョブは `this.signal` でキャンセルのシグナルを受け取ります。タイムアウトするとキャンセルが要求され、ワーカーは `handle()` が終わるのを待ってから再試行します。タイムアウトのあとで正常に終わった処理は、再試行せずに完了として扱います。Redis ワーカーは予約を更新し続け、予約の切れたワーカーからの完了通知は受け付けません。`SqsDriver` は、ジョブの実行中にメッセージの可視性を更新します。
+- **誰に影響するか**: キューでジョブを動かしているアプリ（特に Redis と SQS）と、独自のキュードライバーです。
+- **移行方法**:
+  - `this.signal` を、`fetch` など中断できる I/O に渡してください。シグナルを無視する処理は制限時間を超えて動き続けるので、止まらないワーカーを強制終了できるようにプロセスの監視も用意します。
+  - この更新をデプロイするときは、すべてのワーカーを再起動してください。古いワーカーは予約を確認しません。キーの構成と保存済みのペイロードは互換性を保っています。
+  - SQS では、`SqsDriver` の `visibilityTimeout` オプションにキューの属性と同じ値を設定してください。
+  - 独自ドライバーには `heartbeatInterval` と `extendReservation(job)` を追加できます。`delete()` には省略可能な第 2 引数（予約トークン）が加わりましたが、既存のドライバーはそのまま動きます。ドライバーが失敗するとワーカーの状態を戻して `start()` を失敗させるので、監視側でバックオフを挟んで再起動できます。
+  - 配信は「少なくとも 1 回」のままなので、外部への書き込みには引き続き冪等性キーが必要です。
+
+```ts
+import { Job } from '@guren/core'
+
+export class SyncInvoiceJob extends Job<{ url: string }> {
+  async handle(payload: { url: string }) {
+    await fetch(payload.url, { signal: this.signal })
+  }
+}
+```
+
+#### `analyzeDeployRuntime()` と `judgeDeployRuntime()` が非推奨に
+
+- **何が変わったか**: デプロイしてよい状態かを確かめるスクリプト向けに `@guren/cli` が export しているこの 2 つの関数に、`@deprecated`（`deploy-runtime-analysis`）が付きました。呼び出すとプロセスごとに 1 回警告が出ますが、`@guren/cli` 3.0.0 までは動き続けます。
+- **誰に影響するか**: どちらかを import しているスクリプトです。`bunx guren upgrade --check-only` で一覧できます。
+- **移行方法**: `checkDeployRuntime(cwd)` を呼んでください。同じ 3 つの判定が返ります。パスワードのハッシャーとセッションのストアは、アプリを起動せずに読み込んで調べます。読み込みに失敗した場合、この 2 つの判定は参考扱いの `deploy-password-hashing-unverified` と `deploy-runtime-stores-unverified` になります。`DeployRuntimeAnalysis` のうち、ハッシャーとセッション設定に関する 6 つのシグナル配列は常に空です。
+
+
 ### 2.23.x → 2.24.0
 
 #### `Model.query()` が非推奨に
 
-- **変更点**: `Model.query()` に `@deprecated` が付き、モデルごとに 1 回だけ警告が出ます。`@guren/orm` 3.0.0 まではこれまでどおり動きます。あわせてクエリビルダーに `sum()`、`avg()`、`min()`、`max()`、`exists()`、`toSql()`、`toDrizzle()` を追加しました。いずれもモデルのグローバルスコープを適用します。
-- **影響を受けるコード**: `Post.query()` や `Post.query(db)` を呼んでいるコードです。このクエリはグローバルスコープをすべて素通りするため、`SoftDeletes` やテナントのスコープを持つモデルでは、ゴミ箱に入った行やほかのテナントの行まで読んでいました。
-- **移行方法**: `bunx guren upgrade --check-only` で呼び出し箇所を確認してください。何に置き換えるかはクエリの中身によるので、codemod は用意していません。集計はビルダーに、結合は `toDrizzle()` に移します。詳しくは[データベース](./database.md)を参照してください。
+- **何が変わったか**: `Model.query()` に `@deprecated` が付き、モデルごとに 1 回だけ警告が出ます。`@guren/orm` 3.0.0 まではこれまでどおり動きます。あわせてクエリビルダーに `sum()`、`avg()`、`min()`、`max()`、`exists()`、`toSql()`、`toDrizzle()` を追加しました。いずれもモデルのグローバルスコープを適用します。
+- **誰に影響するか**: `Post.query()` や `Post.query(db)` を呼んでいるコードです。このクエリはグローバルスコープをすべて素通りするため、`SoftDeletes` やテナントのスコープを持つモデルでは、ゴミ箱に入った行やほかのテナントの行まで読んでいました。
+- **移行方法**: `bunx guren upgrade --check-only` で呼び出し箇所を確認してください。何に置き換えるかはクエリの中身によるので、codemod は用意していません。集計はビルダーに、結合は `toDrizzle()` に移します。詳しくは[Drizzle に渡す](./database.md#drizzle-に渡すtodrizzle)を参照してください。
 
 ```ts
 // Before
@@ -75,16 +89,16 @@ const rows = await Post.newQuery().toDrizzle().where(gt(posts.views, 100)).order
 
 #### モジュールレベルのサービス setter / getter が非推奨に
 
-- **変更点**: `setGate`/`getGate`、`setEncrypter`/`getEncrypter`、`setMailManager`/`getMailManager`、`setQueueDriver`/`getQueueDriver`、`setI18n`/`getI18n`/`tryGetI18n`、`setLogManager`/`getLogManager`、`setNotificationManager`/`getNotificationManager`、`setBroadcastManager`/`getBroadcastManager`、`setExceptionHandler`/`getExceptionHandler`、`setContainer`/`getContainer`、`setInertiaDocument`、`setInertiaSsrRenderer`、`setInertiaSharedProps`/`getInertiaSharedPropsResolver` に `@deprecated` が付き、シンボルごとに 1 回だけ警告が出ます。3.0.0 まではこれまでどおり動きます。setter は起動中のアプリケーションのコンテナに値をバインドするようになったため、1 つのプロセスに 2 つのアプリケーションがあっても、互いのサービスを上書きしません。
-- **影響範囲**: 同じキーをバインドしたうえで setter も呼んでいる provider、getter を通してサービスを読むコード、`setGate()` や `setQueueDriver()` でフェイクを注入しているテストが対象です。
+- **何が変わったか**: `setGate`/`getGate`、`setEncrypter`/`getEncrypter`、`setMailManager`/`getMailManager`、`setQueueDriver`/`getQueueDriver`、`setI18n`/`getI18n`/`tryGetI18n`、`setLogManager`/`getLogManager`、`setNotificationManager`/`getNotificationManager`、`setBroadcastManager`/`getBroadcastManager`、`setExceptionHandler`/`getExceptionHandler`、`setContainer`/`getContainer`、`setInertiaDocument`、`setInertiaSsrRenderer`、`setInertiaSharedProps`/`getInertiaSharedPropsResolver` に `@deprecated` が付き、シンボルごとに 1 回だけ警告が出ます。3.0.0 まではこれまでどおり動きます。setter は起動中のアプリケーションのコンテナに値をバインドするようになったため、1 つのプロセスに 2 つのアプリケーションがあっても、互いのサービスを上書きしません。
+- **誰に影響するか**: 同じキーをバインドしたうえで setter も呼んでいるプロバイダー、getter を通してサービスを読むコード、`setGate()` や `setQueueDriver()` でフェイクを注入しているテストが対象です。
 - **移行方法**: まず `bunx guren upgrade --check-only` で対象ファイルを確認し、`bunx guren upgrade` で書き換えます。codemod が行う書き換えは次のとおりです。
-  - provider 内の getter を `this.container.make(key)` にする
+  - プロバイダー内の getter を `this.container.make(key)` にする
   - setter に渡していた値を `this.container.instance(key, value)` でバインドする(同じファイルでそのキーをすでにバインドしている場合は、呼び出しを削除する)
   - インラインの `setInertiaDocument({ ... })` を `createApp({ inertia: { document } })` に移す
   - attachments の `storage` ファクトリに、バインド元のコンテナを渡す
   - `Job` 内の `getContainer().make(key)` を `this.make(key)` にする
 
-  テストでの注入は報告するだけで、書き換えはしません。フェイクを入れたマネージャーを `app.container.fake(key, manager)` でバインドしてください（[サービスのフェイク](./testing.md#サービスのフェイク)を参照）。また、codemod は `setQueueDriver()` の呼び出しには手を付けません。3.0.0 までは、このピンがバインド済みのマネージャーより優先されるからです。キューのテストをコンテナのフェイクに移すときは、同じ変更でピンも外してください。
+  テストでの注入は報告するだけで、書き換えはしません。フェイクを入れたマネージャーを `app.container.fake(key, manager)` でバインドしてください（[サービスのフェイク](./testing.md#サービスのフェイク)を参照）。また、codemod は `setQueueDriver()` の呼び出しには手を付けません。3.0.0 までは、このピンがバインド済みのマネージャーより優先されるためです。キューのテストをコンテナのフェイクに移すときは、同じ変更でピンも外してください。
 
 ```ts
 // Before
@@ -161,9 +175,9 @@ await Post.create(data, { set: { authorId: user.id } })
 bun run typecheck && bun run test
 ```
 
-## 破壊的変更テンプレート（今後のリリース用）
+## 破壊的変更テンプレート（メンテナー向け）
 
-破壊的変更を記録するときは、項目ごとに次の内容を書きます。
+リリースで何かを壊すときは、その移行メモに次の内容を書きます。
 
 - **何が変わったか**
 - **なぜ変えたか**

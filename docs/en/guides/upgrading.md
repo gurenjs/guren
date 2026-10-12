@@ -1,53 +1,11 @@
 # Upgrading Guren
 
-## Unreleased: `analyzeDeployRuntime()` and `judgeDeployRuntime()` are deprecated
-
-The two deploy-runtime functions `@guren/cli` exports carry `@deprecated`
-(`deploy-runtime-analysis`) and warn once per process. They keep working until
-`@guren/cli` 3.0.0. Call `checkDeployRuntime(cwd)`, which returns the same three
-verdicts. The password hashing and store verdicts now come from the introspected
-app, so without it they are `deploy-password-hashing-unverified` and
-`deploy-runtime-stores-unverified` (advisory). The six `DeployRuntimeAnalysis`
-signal arrays for the hasher and the session config are always empty.
-`bunx guren upgrade --check-only` lists the files that import either function.
-
-## Unreleased: concurrent cache misses share one callback
-
-`remember()` and `rememberForever()` on a store from `cache.store()` run the
-callback once when several calls in one process miss the same key with the
-same TTL at the same time, and every one of those callers receives the same
-result object or the same error. Hits are unchanged. On the file and Redis
-stores, callers that missed together used to get a copy each, so code that
-changes a remembered value in place now changes it for the callers it shares
-the result with. Copy the value before modifying it. See
-[Concurrent Misses](./cache.md#concurrent-misses).
-
-## Unreleased: queue cancellation and reservations
-
-Jobs now receive a cancellation signal through `this.signal`. Pass it to `fetch`
-and other cancellable I/O. A timeout requests cancellation; the worker waits for
-`handle()` to settle before retrying, and acknowledges a handler that completes
-after the timeout. Handlers that ignore the signal can exceed the timeout, so keep
-a process supervisor for hard termination of stuck workers.
-
-Redis workers renew their reservations and fence late acknowledgements. Restart
-all workers when deploying this update so older workers do not bypass ownership
-checks. Queue keys and stored payloads remain compatible. External side effects
-still require idempotency keys because delivery is at least once.
-
-`SqsDriver` renews its message visibility while a job runs; set its `visibilityTimeout`
-option to the queue's attribute. Custom drivers may implement `heartbeatInterval` and
-`extendReservation(job)`.
-The optional second argument to `delete()` carries the reservation token; existing
-drivers remain compatible. A driver failure resets worker state and rejects
-`start()`, allowing a supervisor to restart it with backoff.
-
-Use this guide for minor-to-minor upgrades.
+Use this guide when you move an app to a newer minor version. Follow the workflow below, then apply the migration notes for every version you cross, newest first. Major-version changes are listed under their own version.
 
 ## Upgrade Workflow (Required)
 
-1. Read `CHANGELOG.md` and release notes.
-2. Check `docs/en/guides/release-policy.md` compatibility matrix.
+1. Read `CHANGELOG.md` and the release notes.
+2. Check the compatibility matrix in the [Release Policy](./release-policy.md).
 3. Update dependencies and regenerate artifacts:
 
 ```bash
@@ -71,9 +29,45 @@ bun run typecheck
 bun run test
 ```
 
-6. Apply migration notes for your source/target versions.
+6. Apply the migration notes below for your source and target versions.
 
 ## Migration Notes
+
+### Unreleased
+
+#### Concurrent cache misses share one callback
+
+- **What changed**: When several calls in one process miss the same key with the same TTL at the same time, `remember()` and `rememberForever()` on a store from `cache.store()` run the callback once, and every caller receives the same result object or the same error. Hits are unchanged.
+- **Who is affected**: Code on the file or Redis store that changes a remembered value in place. Callers that missed together used to get a copy each; now a change reaches the callers it shares the result with.
+- **How to migrate**: Copy the value before modifying it (`structuredClone(value)`). See [Concurrent Misses](./cache.md#concurrent-misses).
+
+#### Queue cancellation and reservations
+
+- **What changed**: Jobs receive a cancellation signal through `this.signal`. A timeout requests cancellation, and the worker waits for `handle()` to settle before retrying; a handler that completes after the timeout is acknowledged rather than retried. Redis workers now renew their reservations, and reject an acknowledgement from a worker whose reservation has expired. `SqsDriver` renews the message's visibility while a job runs.
+- **Who is affected**: Apps with queued jobs, especially those on Redis or SQS, and custom queue drivers.
+- **How to migrate**:
+  - Pass `this.signal` to `fetch` and other cancellable I/O. A handler that ignores it can run past the timeout, so keep a process supervisor that can stop a stuck worker.
+  - Restart every worker when you deploy this update: an older worker skips the reservation check. Queue keys and stored payloads stay compatible.
+  - On SQS, set `SqsDriver`'s `visibilityTimeout` option to the queue's attribute.
+  - Custom drivers may implement `heartbeatInterval` and `extendReservation(job)`. `delete()` gains an optional second argument, the reservation token; existing drivers keep working. A driver failure now resets the worker and rejects `start()`, so a supervisor can restart it with backoff.
+  - Delivery is still at least once, so external side effects still need idempotency keys.
+
+```ts
+import { Job } from '@guren/core'
+
+export class SyncInvoiceJob extends Job<{ url: string }> {
+  async handle(payload: { url: string }) {
+    await fetch(payload.url, { signal: this.signal })
+  }
+}
+```
+
+#### `analyzeDeployRuntime()` and `judgeDeployRuntime()` are deprecated
+
+- **What changed**: These two `@guren/cli` exports, for scripts that check whether an app is safe to deploy, carry `@deprecated` (`deploy-runtime-analysis`) and warn once per process. They keep working until `@guren/cli` 3.0.0.
+- **Who is affected**: Scripts that import either function. `bunx guren upgrade --check-only` lists them.
+- **How to migrate**: Call `checkDeployRuntime(cwd)`, which returns the same three verdicts. It reads the password hasher and session stores from the app itself, loaded without booting; when that load fails, those two verdicts come back as the advisory `deploy-password-hashing-unverified` and `deploy-runtime-stores-unverified`. The six hasher and session-config signal arrays on `DeployRuntimeAnalysis` are now always empty.
+
 
 ### 2.23.x → 2.24.0
 
@@ -97,7 +91,14 @@ const rows = await Post.newQuery().toDrizzle().where(gt(posts.views, 100)).order
 
 - **What changed**: `setGate`/`getGate`, `setEncrypter`/`getEncrypter`, `setMailManager`/`getMailManager`, `setQueueDriver`/`getQueueDriver`, `setI18n`/`getI18n`/`tryGetI18n`, `setLogManager`/`getLogManager`, `setNotificationManager`/`getNotificationManager`, `setBroadcastManager`/`getBroadcastManager`, `setExceptionHandler`/`getExceptionHandler`, `setContainer`/`getContainer`, `setInertiaDocument`, `setInertiaSsrRenderer`, and `setInertiaSharedProps`/`getInertiaSharedPropsResolver` carry `@deprecated` and warn once per symbol. They keep working until 3.0.0. A setter now binds the value on the container of the application that is live, so two applications in one process no longer overwrite each other's services.
 - **Who is affected**: Providers that call a setter after binding the same key, code that reads a service through a getter, and tests that inject a fake through `setGate()` or `setQueueDriver()`.
-- **How to migrate**: Run `bunx guren upgrade --check-only` for the list of files, then `bunx guren upgrade` to apply the rewrites. The codemod turns a getter inside a provider into `this.container.make(key)`, binds a setter's value with `this.container.instance(key, value)` (or deletes the call when the same file already binds that key), moves an inline `setInertiaDocument({ ... })` into `createApp({ inertia: { document } })`, gives the attachments `storage` factory the container it is bound with, and rewrites `getContainer().make(key)` inside a `Job` to `this.make(key)`. Test injections are reported, not rewritten: bind a manager holding the fake with `app.container.fake(key, manager)` instead (see [Faking Services](./testing.md#faking-services)). The codemod leaves `setQueueDriver()` calls alone, because the pin still overrides the bound manager until 3.0.0; a queue test that moves to the container fake drops the pin in the same change.
+- **How to migrate**: Run `bunx guren upgrade --check-only` for the list of files, then `bunx guren upgrade` to apply the rewrites. The codemod:
+  - turns a getter inside a provider into `this.container.make(key)`;
+  - binds a setter's value with `this.container.instance(key, value)`, or deletes the call when the same file already binds that key;
+  - moves an inline `setInertiaDocument({ ... })` into `createApp({ inertia: { document } })`;
+  - gives the attachments `storage` factory the container it is bound with;
+  - rewrites `getContainer().make(key)` inside a `Job` to `this.make(key)`.
+
+  Test injections are reported, not rewritten: bind a manager holding the fake with `app.container.fake(key, manager)` instead (see [Faking Services](./testing.md#faking-services)). The codemod leaves `setQueueDriver()` calls alone, because the pin still overrides the bound manager until 3.0.0; a queue test that moves to the container fake drops the pin in the same change.
 
 ```ts
 // Before
@@ -174,9 +175,9 @@ Verify the upgrade:
 bun run typecheck && bun run test
 ```
 
-## Breaking Change Template (for future releases)
+## Breaking Change Template (for maintainers)
 
-For each breaking item, document:
+When a release breaks something, its migration note documents:
 
 - **What changed**
 - **Why**
