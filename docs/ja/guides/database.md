@@ -6,7 +6,7 @@ Guren では、Drizzle のテーブルから作ったモデルを通してデー
 
 ## データベースへの接続
 
-雛形は、`create-guren-app --db` で選んだドライバーに合わせて `config/database.ts` を書き出し、`createApp({ config })` にその定義を加えます。そのため、アプリは起動時に検証済みの環境変数を使って ORM を接続します。どのドライバーも同じ関数（`getDatabase`、`migrateDatabase`、`closeDatabase`、`configureOrm`、`seedDatabase`）を持つので、切り替えてもモデルやクエリは変わりません。
+雛形は、`create-guren-app --db` で選んだドライバーに合わせて `config/database.ts` を書き出し、`createApp({ config })` にその定義を加えます。そのため、アプリは起動時に検証済みの環境変数を使って ORM を接続します。どのドライバーも同じ関数（`getDatabase`、`migrateDatabase`、`closeDatabase`、`configureOrm`、`seedDatabase`、`resetDatabase`、`migrationStatus`）と `AppSeederContext` 型を持つので、切り替えてもモデルやクエリは変わりません。
 
 | ドライバー | `--db` | `config/database.ts` のファクトリー |
 |------------|--------|-------------------------------------|
@@ -14,6 +14,7 @@ Guren では、Drizzle のテーブルから作ったモデルを通してデー
 | PostgreSQL | `postgres` | `createPostgresDatabase` |
 | MySQL | `mysql` | `createMySqlDatabase` |
 | Aurora Serverless（AWS Data API） | なし（手で書く） | `createAwsDataApiDatabase` |
+| Cloudflare D1 | なし（[Cloudflare ガイド](./cloudflare.md)を参照） | D1 用のファクトリー |
 
 各ファクトリーは、接続の設定をリゾルバーで `config/env.ts` から読みます。リゾルバーが受け取る `context` 引数については[設定](./configuration.md#データベース接続)で説明しています。
 
@@ -23,7 +24,7 @@ Guren では、Drizzle のテーブルから作ったモデルを通してデー
 
 ```ts
 // config/database.ts
-import { createSqliteDatabase, defineDatabaseConfig } from '@guren/core'
+import { createSqliteDatabase, defineDatabaseConfig, type SqliteSeederContext } from '@guren/core'
 import env from './env.js'
 
 const database = createSqliteDatabase({
@@ -38,7 +39,9 @@ const database = createSqliteDatabase({
   },
 })
 
-export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase, resetDatabase, migrationStatus } = database
+
+export type AppSeederContext = SqliteSeederContext
 
 export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
@@ -54,7 +57,7 @@ export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV
 
 ```ts
 // config/database.ts
-import { createPostgresDatabase, defineDatabaseConfig } from '@guren/core'
+import { createPostgresDatabase, defineDatabaseConfig, type PostgresSeederContext } from '@guren/core'
 import env from './env.js'
 
 const database = createPostgresDatabase({
@@ -64,7 +67,9 @@ const database = createPostgresDatabase({
     ?? 'postgres://guren:guren@localhost:54322/guren',
 })
 
-export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase, resetDatabase, migrationStatus } = database
+
+export type AppSeederContext = PostgresSeederContext
 
 export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
@@ -94,7 +99,7 @@ MySQL（と互換データベース）では `createMySqlDatabase` を使いま�
 
 ```ts
 // config/database.ts
-import { createMySqlDatabase, defineDatabaseConfig } from '@guren/core'
+import { createMySqlDatabase, defineDatabaseConfig, type MySqlSeederContext } from '@guren/core'
 import env from './env.js'
 
 const database = createMySqlDatabase({
@@ -104,7 +109,9 @@ const database = createMySqlDatabase({
     ?? 'mysql://guren:guren@localhost:33306/guren',
 })
 
-export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase, resetDatabase, migrationStatus } = database
+
+export type AppSeederContext = MySqlSeederContext
 
 export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
@@ -123,7 +130,7 @@ const values = (context?: ConnectionContext) => context?.env ?? env.parse(undefi
 const database = createAwsDataApiDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
-  // リゾルバが undefined を返すと環境変数にフォールバックします:
+  // リゾルバーが undefined を返すと環境変数にフォールバックします:
   // DATABASE_NAME, DATABASE_RESOURCE_ARN, DATABASE_SECRET_ARN
   database: (context) => values(context).DATABASE_NAME,
   resourceArn: (context) => values(context).DATABASE_RESOURCE_ARN,
@@ -137,7 +144,7 @@ export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV
 
 3 つのキーは `config/env.ts` に宣言してください(例: `Env.string().optional()`。[設定](./configuration.md#環境変数を宣言する)を参照)。
 
-ドライバのパッケージもインストールしてください。
+ドライバーのパッケージもインストールしてください。
 
 ```bash
 bun add @aws-sdk/client-rds-data
@@ -196,11 +203,11 @@ bunx guren make:migration --dialect postgresql
 
 ### マイグレーションが走るタイミング
 
-マイグレーションは `db:migrate` を実行したとき以外にも適用されます。Data API アダプタと D1 アダプタ以外のドライバは、最初に `getDatabase()` か `configureOrm()` が呼ばれたときに、未適用のマイグレーションを適用します。これは環境を問いません。`bun run dev` でも `bun test` でも、雛形の `Dockerfile` が `bun bin/serve.ts` で起動するコンテナでも、起動時にマイグレーションが走ります。新しいイメージを配るだけのデプロイでも、マイグレーション済みの状態で立ち上がるのはこのためです。何かを適用した起動では、適用したものとその出どころが 1 行で表示されます。データベースが最新の状態なら、何も表示せずに立ち上がります。
+マイグレーションは `db:migrate` を実行したとき以外にも適用されます。Data API アダプタと D1 アダプタ以外のドライバは、最初に `getDatabase()` か `configureOrm()` が呼ばれたときに、未適用のマイグレーションを適用します。これは環境を問いません。`bun run dev` でも `bun test` でも、雛形の `Dockerfile` が `bun bin/serve.ts` で起動するコンテナでも、起動時にマイグレーションが走ります。そのため、新しいイメージを配るだけのデプロイでも、マイグレーション済みの状態で立ち上がります。何かを適用した起動では、適用したものとその出どころが 1 行で表示されます。データベースが最新の状態なら、何も表示せずに立ち上がります。
 
 この仕組みは便利な反面、残すつもりのなかったマイグレーションまでデータベースに適用されてしまいます。ジェネレーターは `db/migrations/` の下に新しいフォルダを未追跡のまま作りますが、`git switch` でも `git branch -D` でも未追跡のファイルは消えません。そのため、捨てたつもりのブランチで生成したマイグレーションが、ディスクに残ったまま適用される時を待つことになります。ブランチと一緒に消えることは期待せず、`git clean -fd` で削除してください。何が消えるかは、先に `git clean -fdn` で確認できます。
 
-フォルダを消して間に合うのは、まだどの起動でも適用されていない場合だけです。ジェネレーターがファイルを書き換えている途中で dev サーバーがリロードすると、先にそちらで適用されてしまいます。そうなると、トラッカーにはどのフォルダにも対応しない行が残ります。マイグレーターはその行を読み飛ばすので、そのマイグレーションが作ったものはデータベースに残ったままになります。`db:status` はその行を orphaned(孤立)と表示し、起動のたびにマイグレーションの前に警告が出ます。
+フォルダを消して間に合うのは、まだどの起動でも適用されていない場合に限られます。ジェネレーターがファイルを書き換えている途中で dev サーバーがリロードすると、先にそちらで適用されてしまいます。そうなると、トラッカーにはどのフォルダにも対応しない行が残ります。マイグレーターはその行を読み飛ばすので、そのマイグレーションが作ったものはデータベースに残ったままになります。`db:status` はその行を orphaned(孤立)と表示し、起動のたびにマイグレーションの前に警告が出ます。
 
 例外の 2 つのアダプタが起動時にマイグレーションしない理由は、それぞれ別です。Data API アダプタは、`migrateOnStart` を指定したときだけ起動時に実行します。未適用かどうかを確認するだけで、Lambda のコールドスタートのたびに往復が順番に発生するからです。D1 には、実行時にマイグレーションする手段そのものがありません。マイグレーションは `wrangler d1 migrations apply <database>` で適用するものなので、`migrateDatabase()` は実行を試みず、そのことを伝えるだけです。
 
@@ -238,7 +245,7 @@ export default defineSeeder(async ({ db }: AppSeederContext) => {
 })
 ```
 
-型引数なしの `SeederContext` は PostgreSQL 用なので、MySQL や SQLite ではアプリのスキーマが型エラーになります。`AppSeederContext` を export しているのは、このリリース以降に雛形生成したアプリの `config/database.ts` です。それより前に作ったアプリでは、ダイアレクトごとの別名(`PostgresSeederContext` / `MySqlSeederContext` / `SqliteSeederContext` / `AwsDataApiSeederContext`)を `@guren/core` から直接 import してください。
+型引数なしの `SeederContext` は PostgreSQL 用なので、MySQL や SQLite ではアプリのスキーマが型エラーになります。このリリース以降に生成したアプリでは、`config/database.ts` が `AppSeederContext` を export しています。それより前に作ったアプリでは、ダイアレクトごとの別名(`PostgresSeederContext` / `MySqlSeederContext` / `SqliteSeederContext` / `AwsDataApiSeederContext`)を `@guren/core` から直接 import してください。
 
 ```ts
 import { defineSeeder, type MySqlSeederContext } from '@guren/core'
@@ -278,7 +285,7 @@ export class User extends defineModel(users, {
 
 `optionalOnCreate` はカラムを任意にします(型は変わらず、渡さなくてもよくなります)。`requireOnCreate` は反対にフィールドを必須にします。指定できるのは、テーブルのカラム(Drizzle はデフォルト値のあるカラムを任意にします)と、`base` が持つフィールドです。どちらも型の上だけの指定ですが、実際のキーと照合されるので、打ち間違いはコンパイルエラーになります。
 
-どちらを指定しても、ペイロードに入れられるキーが限定されるわけではありません。create の型は知らないキーも `unknown` として受け入れるので、意図しないフィールドを実行時に弾くのはこれまでどおり `fillable` の役目です。
+どちらを指定しても、ペイロードに入れられるキーが限定されるわけではありません。create の型は知らないキーも `unknown` として受け入れるので、意図しないフィールドは、これまでどおり実行時に `fillable` で弾きます。
 
 ## データの取得
 
@@ -328,7 +335,7 @@ const hits = await Post.where((q) => {
 | メソッド | 説明 |
 |--------|-------------|
 | `.where(column, value)` | 等値でフィルタ |
-| `.where(column, operator, value)` | 演算子でフィルタ(`>`、`<`、`>=`、`<=`、`!=`、`LIKE`) |
+| `.where(column, operator, value)` | 演算子でフィルタ（`'='`、`'!='`、`'>'`、`'<'`、`'>='`、`'<='`、`'like'`、`'in'`、`'not in'`、`'is null'`、`'is not null'`） |
 | `.where(object)` | 複数の等値条件でフィルタ |
 | `.where(callback)` | 括弧でグループ化した条件を AND で結合 |
 | `.orWhere(column, value)` | OR 条件 |
@@ -493,7 +500,7 @@ await Post.update({ id: post.id }, data, { set: { status: 'draft' } })
 
 `{ set: { ...data, authorId } }` と書くと、展開で `fillable` のキーが `set` に入るので、たいていは 1 つ目の規則で例外になります。ただし、展開したデータに `fillable` のキーが 1 つも無いと例外にならないので、これを当てにはできません。リクエストの入力は `set` に展開しないでください。`set` のリテラルの中に書いた展開は、`guren audit` が警告します(`set-spread:*`)。
 
-#### force write(`forceCreate` / `forceUpdate`)
+#### 許可リストを通さない書き込み（`forceCreate` / `forceUpdate`）
 
 OAuth のアカウント連携、シーダー、システムが作るレコードのように、リクエストのデータをまったく含まない書き込みには、許可リストを無視する `forceCreate()` / `forceUpdate()` を使います。
 
@@ -537,6 +544,8 @@ export class User extends defineModel(users) {
     posts: [],
   }
 }
+
+User.hasMany('posts', () => import('./Post.js').then((m) => m.Post), 'authorId', 'id')
 
 // app/Models/Post.ts
 import { defineModel, type BelongsToRecord } from '@guren/core'
@@ -665,7 +674,7 @@ users[0].posts[0].tags     // こちらも読み込まれます
 
 #### 読み込む関連レコードを絞り込む
 
-QueryBuilder では、`with()` にオブジェクトを渡してリレーションごとにコールバックを指定し、読み込むクエリに条件を加えられます。コールバックが受け取るクエリビルダには外部キーでの絞り込みがすでにかかっているので、`where()` を呼ぶと、読み込む関連レコードがさらに絞り込まれます。
+QueryBuilder では、`with()` にオブジェクトを渡してリレーションごとにコールバックを指定し、読み込むクエリに条件を加えられます。コールバックが受け取るクエリビルダーには外部キーでの絞り込みがすでにかかっているので、`where()` を呼ぶと、読み込む関連レコードがさらに絞り込まれます。
 
 ```ts
 const users = await User.newQuery()
@@ -705,12 +714,12 @@ await User.newQuery()
 > リレーションは親レコードごとに読み込むのではなく、まとめて読み込みます。その
 > ため、コールバックの中の `limit()` は、親ごとではなく結果全体に効きます。
 > `limit()`・`offset()`・`orderBy()` を含むコールバックでは、キーを分けずに 1 本の
-> クエリで読み込みます。含まない場合は、ドライバのパラメータ数の上限に収まるよう
+> クエリで読み込みます。含まない場合は、ドライバーのパラメータ数の上限に収まるよう
 > にキーを分けて読み込みます。`belongsToMany` と `hasManyThrough` で分けられるのは、
 > 親のキーではなく関連先のキーです。`morphTo` ではコールバックが対象の型ごとに
 > 実行されるので、参照できるのはすべての対象に共通する列だけです。
 
-`belongsToMany` と `hasManyThrough` でコールバックが条件を加えるのは、**関連先モデル**のクエリです。取得する行を決めるピボットテーブルや中間テーブルの検索には効かないので、関連先モデル自身の列で絞り込んでください。
+`belongsToMany` と `hasManyThrough` では、コールバックは**関連先モデル**のクエリに条件を加えます。取得する行を決めるピボットテーブルや中間テーブルの検索には効かないので、関連先モデル自身の列で絞り込んでください。
 
 ```ts
 // 各投稿の `news` タグだけを残す。ピボットの検索はそのまま
@@ -723,7 +732,7 @@ await Post.newQuery()
 
 #### 読み込んだリレーションの型
 
-ネストしたパスの型に反映されるのは、`relationTypes` の先頭のセグメントだけです。ネストの先まで型を付けたい場合は、先頭のリレーションのレコード型の中に、ネストした形を宣言してください。
+`relationTypes` から型が付くのは、ネストしたパスの先頭のセグメントに限られます。ネストの先まで型を付けたい場合は、先頭のリレーションのレコード型の中に、ネストした形を宣言してください。
 
 ```ts
 export class User extends defineModel(users) {
@@ -737,9 +746,9 @@ loaded[0].posts[0].comments // CommentRecord[] — 末端まで型付き
 ```
 
 > [!NOTE]
-> `relationTypes` と照合されるのは、先頭のセグメント(上の例では `posts`)だけです。最初のドットより後ろは検証されない文字列なので、打ち間違いや不正な末尾(`'posts.'`・`'posts..comments'`・`'posts.typo'`)があってもコンパイルは通ります。実行時には、末尾が知らないリレーション名ならエラーになります。ただしそれは、ローダーが読み込んだ子レコードの中まで実際にたどった場合に限られます。先頭のリレーションがどのレコードでも 0 件だった場合は、末尾は一切検査されず、何も起きずに終わります。`morphTo` のリレーションを経由したネストは実行時に必ずエラーになりますが、この制約も型では表現されていません。
+> `relationTypes` と照合するのは、先頭のセグメント（上の例では `posts`）に限られます。最初のドットより後ろは検証されない文字列なので、打ち間違いや不正な末尾(`'posts.'`・`'posts..comments'`・`'posts.typo'`)があってもコンパイルは通ります。実行時には、末尾が知らないリレーション名ならエラーになります。ただしそれは、ローダーが読み込んだ子レコードの中まで実際にたどった場合に限られます。先頭のリレーションがどのレコードでも 0 件だった場合は、末尾は一切検査されず、何も起きずに終わります。`morphTo` のリレーションを経由したネストは実行時に必ずエラーになりますが、この制約も型では表現されていません。
 
-`BelongsToRecord<T>` は常に `T | null` です。外部キーが `NOT NULL` で、親レコードが必ず存在する場合は、代わりに `BelongsToRequiredRecord<T>` で宣言できます。`declare` 修飾子を使えば、実行時用のプレースホルダの値も要りません。
+`BelongsToRecord<T>` は常に `T | null` です。外部キーが `NOT NULL` で、親レコードが必ず存在する場合は、代わりに `BelongsToRequiredRecord<T>` で宣言できます。`declare` 修飾子を使えば、実行時用のプレースホルダーの値も要りません。
 
 ```ts
 export class Comment extends defineModel(comments) {
@@ -837,7 +846,7 @@ User.removeGlobalScope('active')
 ```
 
 > [!TIP]
-> `SoftDeletes` ミックスインは、`'softDelete'` という名前のグローバルスコープを登録します。`withTrashed()` は `withoutGlobalScope('softDelete')` と同じ処理なので、どちらで書いても削除済みのレコードまで取得でき、ほかのグローバルスコープはそのまま適用されます。`tenant` スコープによるテナントの分離も保たれます。それも含めてすべてのスコープを外すのは、`withoutGlobalScopes()` だけです。
+> `SoftDeletes` ミックスインは、`'softDelete'` という名前のグローバルスコープを登録します。`withTrashed()` は `withoutGlobalScope('softDelete')` と同じ処理なので、どちらで書いても削除済みのレコードまで取得でき、ほかのグローバルスコープはそのまま適用されます。`tenant` スコープによるテナントの分離も保たれます。それも含めてすべてのスコープを外すには、`withoutGlobalScopes()` を使います。
 
 ## モデルフック
 
@@ -886,6 +895,7 @@ export class Post extends defineModel(posts) {
 | `updated` | 更新後 |
 | `deleting` | 削除前 |
 | `deleted` | 削除後 |
+| `saving` / `saved` | 挿入と更新の前／後（どちらでも呼ばれる） |
 
 ## モデルオブザーバー
 
@@ -933,7 +943,7 @@ import { posts } from '@/db/schema'
 export class Post extends SoftDeletes(defineModel(posts)) {}
 ```
 
-スキーマには、`deletedAt`(または同じ役割の)タイムスタンプカラムが必要です。
+スキーマには `deletedAt` のタイムスタンプカラムが必要です。
 
 ### ソフトデリートの操作
 

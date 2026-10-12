@@ -6,7 +6,7 @@ The page follows the order you meet things in: connect, declare the schema and m
 
 ## Connecting to the Database
 
-The scaffold writes `config/database.ts` for the driver you picked with `create-guren-app --db`, and `createApp({ config })` lists it, so the ORM connects at boot with the app's validated environment. Every driver exposes the same functions (`getDatabase`, `migrateDatabase`, `closeDatabase`, `configureOrm`, `seedDatabase`), so models and queries do not change when you switch.
+The scaffold writes `config/database.ts` for the driver you picked with `create-guren-app --db`, and `createApp({ config })` lists it, so the ORM connects at boot with the app's validated environment. Every driver exposes the same functions (`getDatabase`, `migrateDatabase`, `closeDatabase`, `configureOrm`, `seedDatabase`, `resetDatabase`, `migrationStatus`) and an `AppSeederContext` type, so models and queries do not change when you switch.
 
 | Driver | `--db` | Factory in `config/database.ts` |
 |--------|--------|---------------------------------|
@@ -14,6 +14,7 @@ The scaffold writes `config/database.ts` for the driver you picked with `create-
 | PostgreSQL | `postgres` | `createPostgresDatabase` |
 | MySQL | `mysql` | `createMySqlDatabase` |
 | Aurora Serverless (AWS Data API) | none: write it by hand | `createAwsDataApiDatabase` |
+| Cloudflare D1 | none: see the [Cloudflare guide](./cloudflare.md#database-d1) | D1's own factory |
 
 Each factory reads its connection settings from `config/env.ts` through a resolver; [Configuration](./configuration.md#the-database-connection) explains the resolver's `context` argument.
 
@@ -23,7 +24,7 @@ New projects use SQLite through Bun's built-in driver, with no Docker or externa
 
 ```ts
 // config/database.ts
-import { createSqliteDatabase, defineDatabaseConfig } from '@guren/core'
+import { createSqliteDatabase, defineDatabaseConfig, type SqliteSeederContext } from '@guren/core'
 import env from './env.js'
 
 const database = createSqliteDatabase({
@@ -38,7 +39,9 @@ const database = createSqliteDatabase({
   },
 })
 
-export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase, resetDatabase, migrationStatus } = database
+
+export type AppSeederContext = SqliteSeederContext
 
 export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
@@ -54,7 +57,7 @@ With `seedOnBoot` true, the app runs the seeders at boot once the migrations fol
 
 ```ts
 // config/database.ts
-import { createPostgresDatabase, defineDatabaseConfig } from '@guren/core'
+import { createPostgresDatabase, defineDatabaseConfig, type PostgresSeederContext } from '@guren/core'
 import env from './env.js'
 
 const database = createPostgresDatabase({
@@ -64,7 +67,9 @@ const database = createPostgresDatabase({
     ?? 'postgres://guren:guren@localhost:54322/guren',
 })
 
-export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase, resetDatabase, migrationStatus } = database
+
+export type AppSeederContext = PostgresSeederContext
 
 export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
@@ -94,7 +99,7 @@ Use `createMySqlDatabase` when your app runs on MySQL-compatible databases.
 
 ```ts
 // config/database.ts
-import { createMySqlDatabase, defineDatabaseConfig } from '@guren/core'
+import { createMySqlDatabase, defineDatabaseConfig, type MySqlSeederContext } from '@guren/core'
 import env from './env.js'
 
 const database = createMySqlDatabase({
@@ -104,7 +109,9 @@ const database = createMySqlDatabase({
     ?? 'mysql://guren:guren@localhost:33306/guren',
 })
 
-export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase, resetDatabase, migrationStatus } = database
+
+export type AppSeederContext = MySqlSeederContext
 
 export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
@@ -224,6 +231,8 @@ so rather than trying.
 
 ## Seeding
 
+Seeders live in `db/seeders/`. The simplest one exports an async `run()` function; this one uses the `Post` model described in [Defining Models](#defining-models):
+
 ```ts
 // db/seeders/PostsSeeder.ts
 import { Post } from '@/app/Models/Post'
@@ -232,6 +241,8 @@ export async function run() {
   await Post.create({ title: 'Hello', body: 'Welcome to Guren!' })
 }
 ```
+
+`bun run db:seed` runs every seeder:
 
 ```bash
 bun run db:seed
@@ -351,10 +362,11 @@ const hits = await Post.where((q) => {
 | Method | Description |
 |--------|-------------|
 | `.where(column, value)` | Filter by equality |
-| `.where(column, op, value)` | Filter with operator (`>`, `<`, `!=`, `LIKE`) |
+| `.where(column, op, value)` | Filter with an operator: `'='`, `'!='`, `'>'`, `'<'`, `'>='`, `'<='`, `'like'`, `'in'`, `'not in'`, `'is null'`, `'is not null'` |
 | `.where(object)` | Filter by multiple equalities |
 | `.where(callback)` | Parenthesized condition group, AND-ed with the rest |
 | `.orWhere(column, value)` | OR condition |
+| `.orWhere(column, op, value)` | OR condition with an operator |
 | `.orWhere(callback)` | OR a parenthesized condition group |
 | `.orderBy(column, direction?)` | Sort results |
 | `.limit(n)` / `.offset(n)` | Limit and skip |
@@ -798,6 +810,8 @@ export class Post extends defineModel(posts) {
 }
 ```
 
+Apply them with `.scope()`, chained with each other or with any other condition:
+
 ```ts
 const trending = await Post.scope('published').scope('popular').get()
 
@@ -879,6 +893,7 @@ export class Post extends defineModel(posts) {
 | `creating` / `created` | Before / after insert |
 | `updating` / `updated` | Before / after update |
 | `deleting` / `deleted` | Before / after delete |
+| `saving` / `saved` | Before / after both insert and update |
 
 ## Model Observers
 
