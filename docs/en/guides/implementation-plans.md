@@ -18,7 +18,26 @@ flowchart LR
   Verify --> Close
 ```
 
-The examples on this page come from one plan, comments on the posts of `examples/blog`, run against a copy of that application.
+The examples on this page come from one plan, comments on posts, run against a copy of Guren's [blog example](https://github.com/gurenjs/guren/tree/main/examples/blog).
+
+## Terms
+
+The page uses these words in a fixed sense. Each is explained in full in its section.
+
+| Term | Meaning |
+|---|---|
+| Element | One thing the plan names: a model, column, route, action, validator, page, resource, policy, command or side effect. Each has an id such as `model.comment` ([Ids and changes](#ids-and-changes)) |
+| Change | What the plan does to an element: `add`, `alter`, `rename`, `drop`, or `existing` for one it only refers to |
+| Behaviour | An acceptance criterion with an id such as `AC-comments-1`, which becomes a test ([Acceptance behaviours](#acceptance-behaviours)) |
+| Baseline | The commit and the per-element hashes the first approval stamps into the plan ([Approving](#approving-planapprove)) |
+| Plan hash | A hash of the plan and its baseline. Approvals, verification records and waivers name it, so an edited plan is a different plan |
+| Reading | What an `alter`'s planned property read at approval ([Readings of an `alter`](#readings-of-an-alter)) |
+| Task, step | The work Guren derives: a task per entity, split into steps of six kinds ([Implementing](#implementing-plannext-and-planverify)) |
+| Record | A step's verification result, kept in `.guren/plans/` |
+| State | How far an element is: `planned`, `present`, `wired`, `verified`, `drifted`, `unjudged`, `blocked` or `waived` ([Reading progress](#reading-progress-planstatus)) |
+| Reach | Whether a passing behaviour exercises an element, following the plan's references from its route |
+| Fresh, stale | Whether what an element depends on still matches the baseline ([Freshness](#freshness)). A step whose context went stale is *held* |
+| Waiver | A person accepting an element incomplete, with a reason ([Waiving](#waiving-an-element-planwaive)) |
 
 ## Where a plan lives
 
@@ -344,7 +363,7 @@ Revising a plan that is already implemented brings every step back, since no rec
 
 ## Implementing: `plan:next` and `plan:verify`
 
-Guren derives the work from the plan, and the order does not depend on a model. Every entity the plan adds or changes is a task, ordered by foreign keys, and there are six kinds of step, and a task gets only those it has work for:
+Guren derives the work from the plan, and the order does not depend on a model. The loop is: ask for the next step, implement it, verify it, commit. Every entity the plan adds or changes is a task, ordered by foreign keys. There are six kinds of step, and a task gets only those it has work for:
 
 | Step | Work | Verified by |
 |---|---|---|
@@ -355,7 +374,13 @@ Guren derives the work from the plan, and the order does not depend on a model. 
 | `http` | Controllers and routes; validators, resources and policies, or after a scaffold, what `plan:scaffold` left as a stub or unwritten | `codegen`, `typecheck`, `guren check`, the tests passing |
 | `pages` | Page components | `codegen`, `typecheck`, `guren check` |
 
-The tests run on one step per task, the one its behaviours are judged at: the last `http` step, or the task's last step when it has none, so a `data` or `pages` step can run them too. Any other step, an earlier part of a split `http` step included, runs no tests. Only the task's last `http` step runs `typecheck`, since an earlier part may import a resource or job a later part writes. A page an `http` action renders that the `pages` step adds is not in `.guren/pages.gen.ts` until its file exists, so `plan:next` lists it with the `http` step: create it there as a stub with a default export and the plan's `Props`, and write the rest in the `pages` step. Work shared by several entities goes to a `task/foundation` task. An action stays with the task that covers it or the routes to it, even when its controller class is shared, so a task's `tests` step runs before the step that mounts its routes, validators and middleware. A validator or page several tasks use goes to the first of them rather than to Foundation, and the others wait for that task. Step ids read `task/entity/model.comment/http`. A `commands`, `data`, `http` or `pages` step whose elements span more than five files is split into parts with ids such as `task/entity/model.comment/http/1` and `task/entity/model.comment/http/2`; `scaffold` and `tests` are never split. `plan:next` prints the exact id to pass to `--step`. The loop is: ask for the next step, implement it, verify it, commit.
+How the work is divided:
+
+- **Tests run on one step per task**, the one its behaviours are judged at: the last `http` step, or the task's last step when it has none, so a `data` or `pages` step can run them too. Any other step, an earlier part of a split `http` step included, runs no tests.
+- **Only the task's last `http` step runs `typecheck`**, since an earlier part may import a resource or job a later part writes.
+- **A page an `http` action renders** is not in `.guren/pages.gen.ts` until its file exists, so `plan:next` lists it with the `http` step: create it there as a stub with a default export and the plan's `Props`, and write the rest in the `pages` step.
+- **Shared work** goes to a `task/foundation` task. An action stays with the task that covers it or the routes to it, even when its controller class is shared, so a task's `tests` step runs before the step that mounts its routes, validators and middleware. A validator or page several tasks use goes to the first of them rather than to Foundation, and the others wait for that task.
+- **Step ids** read `task/entity/model.comment/http`. A `commands`, `data`, `http` or `pages` step whose elements span more than five files is split into parts such as `task/entity/model.comment/http/1` and `/2`; `scaffold` and `tests` are never split. `plan:next` prints the exact id to pass to `--step`.
 
 ```bash
 bunx guren plan:next docs/plans/comments/plan.json
@@ -738,7 +763,17 @@ A route is mounted but not reached when a route registered before it, with the s
 
 A side effect is mounted when the application's source, outside tests and the class's own file, uses the class through the framework's API: a job dispatched or scheduled, an event emitted, a listener registered, a mail sent or queued, a notification sent. Its step is `incomplete` until that use exists. Once it does, the step can verify, but the element stays `wired`. Which action uses it is not checked against the plan's `trigger`.
 
-A verified step does not lift an element none of whose planned properties matched beyond its existence. A key a validator or resource declares, and an ability a policy declares, count as such a match: they show only that the name exists. Such an element becomes `verified` only while a behaviour of a step whose record stands reaches it, following the plan's own references: a behaviour's route and expected page, a route's action and bound models, an action's validators, policy and response page or resource, a page's prop resources, the model behind a reached resource or policy, and the controller of an action it reaches. A form's validator, the route the form submits to and the routes a page's buttons call do not carry reach, since a request to a route shows nothing of the page that links to it. The behaviours that count belong to the steps that must see them pass; the `tests` step, which verifies by seeing them fail, never carries reach. So such an element needs a behaviour that reaches it, or a waiver, before the plan can close. That covers a validator, resource or policy whose keys or abilities are all that matched, a page none of whose planned props matched, a controller (it plans no property), and an `alter` none of whose matches counts. No behaviour can reach a column, command, job, event, listener, mail or notification, so one of these that does not lift on its own properties closes only with a waiver. `--json` records why an element was not lifted under `hold`.
+A verified step does not by itself complete an element none of whose planned properties matched beyond its existence. (A key a validator or resource declares, and an ability a policy declares, count as such a match: they show only that the name exists.) Such an element becomes `verified` only while a passing behaviour *reaches* it, following the plan's own references:
+
+- a behaviour reaches its route and its expected page;
+- a route reaches its action and bound models;
+- an action reaches its validators, policy, and response page or resource;
+- a page reaches its prop resources;
+- a reached resource or policy reaches its model, and a reached action its controller.
+
+A form's validator, the route a form submits to and the routes a page's buttons call do not carry reach, since a request to a route shows nothing of the page that links to it. Only behaviours of steps that must see them pass count; the `tests` step, which verifies by seeing them fail, never carries reach.
+
+So these elements need a behaviour that reaches them, or a waiver, before the plan can close: a validator, resource or policy whose keys or abilities are all that matched, a page none of whose planned props matched, a controller (it plans no property), and an `alter` none of whose matches counts. No behaviour can reach a column, command, job, event, listener, mail or notification, so one of these that does not complete on its own properties closes only with a waiver. `--json` records why an element was not completed under `hold`.
 
 A planned `body`, `params` or `query` validator counts as matched when the action validates with it or a route holds it as a contract schema. An action that validates with something else, a schema built in place (`this.validateBody(PostSchema.partial())`) included, or through a helper, keeps the action at `present` with a note instead of drifting it.
 
