@@ -32,11 +32,11 @@ The page uses these words in a fixed sense. Each is explained in full in its sec
 | Baseline | The commit and the per-element hashes the first approval stamps into the plan ([Approving](#approving-planapprove)) |
 | Plan hash | A hash of the plan and its baseline. Approvals, verification records and waivers name it, so an edited plan is a different plan |
 | Reading | What an `alter`'s planned property read at approval ([Readings of an `alter`](#readings-of-an-alter)) |
-| Task, step | The work Guren derives: a task per entity, split into steps of six kinds ([Implementing](#implementing-plannext-and-planverify)) |
+| Task, step | The work Guren derives: mostly a task per entity, plus tasks for shared work, split into steps of six kinds ([Implementing](#implementing-plannext-and-planverify)) |
 | Record | A step's verification result, kept in `.guren/plans/` |
 | State | How far an element is: `planned`, `present`, `wired`, `verified`, `drifted`, `unjudged`, `blocked` or `waived` ([Reading progress](#reading-progress-planstatus)) |
-| Reach | Whether a passing behaviour exercises an element, following the plan's references from its route |
-| Fresh, stale | Whether what an element depends on still matches the baseline ([Freshness](#freshness)). A step whose context went stale is *held* |
+| Reach | Whether a passing behaviour exercises an element, following the plan's references from its route and expected page |
+| Fresh, stale | Whether what an element depends on still matches the baseline ([Freshness](#freshness)). `plan:next` holds back a step whose context went stale |
 | Waiver | A person accepting an element incomplete, with a reason ([Waiving](#waiving-an-element-planwaive)) |
 
 ## Where a plan lives
@@ -363,7 +363,7 @@ Revising a plan that is already implemented brings every step back, since no rec
 
 ## Implementing: `plan:next` and `plan:verify`
 
-Guren derives the work from the plan, and the order does not depend on a model. The loop is: ask for the next step, implement it, verify it, commit. Every entity the plan adds or changes is a task, ordered by foreign keys. There are six kinds of step, and a task gets only those it has work for:
+Guren derives the work from the plan, and the order does not depend on a model. The loop is: ask for the next step, implement it, verify it, commit. Every entity the plan adds or changes is a task, and work shared by several gets a task of its own. Tasks are ordered by the references between their elements, foreign keys among them. There are six kinds of step, and a task gets only those it has work for:
 
 | Step | Work | Verified by |
 |---|---|---|
@@ -377,7 +377,7 @@ Guren derives the work from the plan, and the order does not depend on a model. 
 How the work is divided:
 
 - **Tests run on one step per task**, the one its behaviours are judged at: the last `http` step, or the task's last step when it has none, so a `data` or `pages` step can run them too. Any other step, an earlier part of a split `http` step included, runs no tests.
-- **Only the task's last `http` step runs `typecheck`**, since an earlier part may import a resource or job a later part writes.
+- **Of a split `http` step, only the last part runs `typecheck`**, since an earlier part may import a resource or job a later part writes. The other kinds of step run it as the table shows.
 - **A page an `http` action renders** is not in `.guren/pages.gen.ts` until its file exists, so `plan:next` lists it with the `http` step: create it there as a stub with a default export and the plan's `Props`, and write the rest in the `pages` step.
 - **Shared work** goes to a `task/foundation` task. An action stays with the task that covers it or the routes to it, even when its controller class is shared, so a task's `tests` step runs before the step that mounts its routes, validators and middleware. A validator or page several tasks use goes to the first of them rather than to Foundation, and the others wait for that task.
 - **Step ids** read `task/entity/model.comment/http`. A `commands`, `data`, `http` or `pages` step whose elements span more than five files is split into parts such as `task/entity/model.comment/http/1` and `/2`; `scaffold` and `tests` are never split. `plan:next` prints the exact id to pass to `--step`.
@@ -748,7 +748,7 @@ Elements the plan changes: 16
 
 | State | Meaning |
 |---|---|
-| `planned` | Not in the code yet |
+| `planned` | Not in the code yet; for an `alter`, every readable property still differs; for a `drop`, still present |
 | `present` | In the code, and every planned property the scanners can read matches (for a `drop`, absent) |
 | `wired` | Reachable: a route mounted by `createApp()` that no earlier route answers first, an action such a route dispatches to, a page such an action returns, a validator such a route or action validates with, a side effect the application dispatches, emits, registers or sends |
 | `verified` | Its step verified, and the files it fingerprinted are unchanged |
