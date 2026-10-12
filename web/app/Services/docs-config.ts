@@ -85,6 +85,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
       'implementation-plan-scaffolding',
       'implementation-plan-verification',
       'agent-interface',
+      'agent-tool-governance',
       'ai-agents',
       'durable-agents',
       'agent-harness',

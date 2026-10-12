@@ -292,7 +292,7 @@ aiPlugin({
 })
 ```
 
-Without its own `audit`, the plugin records into the trail `mcpPlugin({ audit })` configures, and with neither it only emits the audit events. Configuring both is an error at the first `appTools()` call. Without `approvals`, an approval-gated tool is refused and nothing runs. [Approval-gated tools](./agent-interface.md#approval-gated-tools) covers the store and the approval routes.
+Without its own `audit`, the plugin records into the trail `mcpPlugin({ audit })` configures, and with neither it only emits the audit events. Configuring both is an error at the first `appTools()` call. Without `approvals`, an approval-gated tool is refused and nothing runs. [Approval-gated tools](./agent-tool-governance.md#approval-gated-tools) covers the store and the approval routes.
 
 Each bound agent may make 60 tool calls per minute. A model looping on a failing tool gets a refusal after that instead of running up the route.
 
