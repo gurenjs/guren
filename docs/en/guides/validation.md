@@ -1,12 +1,23 @@
 # Validation
 
-Guren's primary validation path is schema-first. Use Zod-compatible schemas in controllers, route definitions, or middleware so request parsing and type inference stay in one place. A legacy `FormRequest` compatibility layer still exists for migrations.
+Validate request input against a schema and get typed, parsed values back. When the input is invalid, the request ends with a 422 response, or, on an Inertia request, a redirect back to the form with one error message per field.
 
-> **Supported Zod version:** the zod 4 API only. Runtime validation duck-types any schema with `safeParse`, but the tools that read schemas structurally (`guren codegen`, OpenAPI generation, `guren context`) refuse schemas authored with the zod v3 API (the old `zod@3` package or the `zod/v3` subpath) and say so with a warning. Author schemas with `import { z } from 'zod'`.
+Write schemas with zod 4 (`import { z } from 'zod'`). Validation itself accepts any schema with a `safeParse()` method, but `guren codegen`, OpenAPI generation and `guren context` read schemas structurally and skip ones written with the zod v3 API (the `zod@3` package or the `zod/v3` subpath), with a warning.
+
+## Choosing Where to Validate
+
+| Where | Use it when | Read the values with |
+|-------|-------------|----------------------|
+| [Controller helpers](#controller-validation-helpers) | The default, inside a controller action | The return value of `this.validateBody()` and its siblings |
+| [Route contract](#route-contract-validation) | The route should also carry its types into codegen, OpenAPI and agent tools | `this.validated('route.name')` |
+| [Middleware](#middleware-validation) | The handler is an inline function rather than a controller action | `getValidatedData(ctx)` |
+| [`validate()` / `validateSafe()`](#manual-validation) | The data does not come from a request: a job, a console command, a script | The return value |
+
+A `FormRequest` class layer also exists for code migrated from Laravel. It is deprecated; write new validation with one of the four above.
 
 ## Quick Start
 
-Use controller validation helpers for the mainline path:
+Call a helper at the top of the action. It returns the parsed value, so `data` below is typed `{ title: string; content: string }`:
 
 ```ts
 import { Controller, paginate } from '@guren/core'
@@ -47,74 +58,41 @@ export default class PostsController extends Controller {
 }
 ```
 
-## Route Contract Validation
-
-A route that declares `params`, `query` or `body` schemas is validated before its handler runs, controller actions included. The action then reads the parsed values with `this.validated()` rather than declaring the schema a second time:
-
-```ts
-router.post('/posts', { name: 'posts.store', body: StorePostSchema }, [PostsController, 'store'])
-
-export default class PostsController extends Controller {
-  async store() {
-    const { body } = this.validated('posts.store')
-    const post = await Post.create(body)
-    return this.created({ post })
-  }
-}
-```
-
-A failure throws the same `ValidationException` (422) that `validateBody()` throws, with the same error keys, so Inertia forms display it unchanged. See [Reading Validated Input](./routing.md#reading-validated-input).
+If the body fails `StorePostSchema`, `validateBody()` throws a `ValidationException` and the action stops there. You do not catch it: the framework turns it into the response described in [Form Validation Errors](#form-validation-errors).
 
 ## Controller Validation Helpers
 
-The simplest way to validate in controllers is with `validateBody`, `validateQuery`, and `validateParams`. They accept any Zod-like schema (anything with `safeParse()`) and throw `ValidationException` (422) on failure:
+Each helper reads one part of the request:
+
+| Helper | Input source | Async | On failure |
+|--------|--------------|-------|------------|
+| `this.validateBody(schema)` | JSON or form body | Yes | Throws `ValidationException` (422) |
+| `this.validateQuery(schema)` | Query string (`?page=1&sort=desc`) | No | Throws `ValidationException` (422) |
+| `this.validateParams(schema)` | Route parameters (`:id`, `:slug`) | No | Throws `ValidationException` (422) |
+| `this.validateBodySafe(schema)` | JSON or form body | Yes | Returns `{ success: false, errors }` |
+| `this.validateQuerySafe(schema)` | Query string | No | Returns `{ success: false, errors }` |
+| `this.validateParamsSafe(schema)` | Route parameters | No | Returns `{ success: false, errors }` |
+
+Use a `Safe` variant when the action decides what to do with the errors itself, as in [Displaying in Inertia](#displaying-in-inertia). On success it returns `{ success: true, data }`.
+
+Route parameters arrive as strings, so coerce them in the schema:
 
 ```ts
-import { Controller } from '@guren/core'
-import { z } from 'zod'
-
-const StorePostSchema = z.object({
-  title: z.string().min(1).max(200),
-  content: z.string().min(10),
-})
-
 const PostIdParamSchema = z.object({
   id: z.coerce.number().int().positive(),
 })
 
-const PageQuerySchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-})
-
 export default class PostsController extends Controller {
-  async index() {
-    const { page } = this.validateQuery(PageQuerySchema)
-    const posts = await Post.paginate({ page })
-    return this.json(posts)
-  }
-
   async show() {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id)
     return this.json(post)
   }
-
-  async store() {
-    const data = await this.validateBody(StorePostSchema)
-    const post = await Post.create(data)
-    return this.created({ post })
-  }
 }
 ```
 
-| Helper | Input Source | Async | Description |
-|--------|-------------|-------|-------------|
-| `this.validateBody(schema)` | Request body | Yes | Parses JSON or form body |
-| `this.validateQuery(schema)` | Query string | No | Parses `?page=1&sort=desc` |
-| `this.validateParams(schema)` | Route params | No | Parses `:id`, `:slug`, etc. |
-
 > [!TIP]
-> These helpers work with any schema library that implements `safeParse()`: Zod, Valibot, or custom validators.
+> The helpers accept any schema library that implements `safeParse()`: Zod, Valibot, or your own validators.
 
 ### Array-Style Query Parameters
 
@@ -130,31 +108,148 @@ const FilterQuerySchema = z.object({
 
 This applies to `this.validateQuery()` and to `query:` schemas attached via [route contracts](./routing.md#route-contracts).
 
-## Middleware Validation
+## Route Contract Validation
 
-### `validateRequest(schema)` Compatibility Middleware
-
-Factory that creates validation middleware:
+A route that declares `params`, `query` or `body` schemas is validated before its handler runs, controller actions included. The action then reads the parsed values with `this.validated()` instead of naming the schema a second time:
 
 ```ts
-import { Router, validateRequest } from '@guren/core'
+router.post('/posts', { name: 'posts.store', body: StorePostSchema }, [PostsController, 'store'])
+
+export default class PostsController extends Controller {
+  async store() {
+    const { body } = this.validated('posts.store')
+    const post = await Post.create(body)
+    return this.created({ post })
+  }
+}
+```
+
+A failure throws the same `ValidationException` (422) as `validateBody()`, with the same error keys, so Inertia forms display it unchanged. See [Reading Validated Input](./routing.md#reading-validated-input).
+
+## Form Validation Errors
+
+What the client receives when a `ValidationException` is thrown depends on the request.
+
+### JSON Requests
+
+A JSON or API request gets a 422 with every message for each field, keyed by the field's path:
+
+```json
+{
+  "message": "The given data was invalid.",
+  "errors": {
+    "email": ["Invalid email address"],
+    "password": ["Too small: expected string to have >=8 characters"]
+  }
+}
+```
+
+### Automatic Handling on Inertia Requests
+
+An Inertia request (one carrying the `X-Inertia` header) gets no JSON. Guren behaves as Laravel does:
+
+1. The errors are flashed to the session.
+2. The response is a `303` redirect back to the previous page.
+3. On that page load, the errors arrive in the shared `errors` prop, one message per field.
+
+```tsx
+function Login({ errors }: { errors?: Record<string, string> }) {
+  return (
+    <form>
+      <input name="email" />
+      {errors?.email && <span className="error">{errors.email}</span>}
+    </form>
+  )
+}
+```
+
+This covers failures from `validateBody`, `validateQuery`, `validateParams` and route contracts, and any `ValidationException.withMessages(...)` you throw yourself.
+
+Flashing needs the session middleware, which is mounted automatically when the `auth` option is set. To change the behavior, register your own renderer for `ValidationException` in a service provider; it takes precedence over the built-in one.
+
+### Displaying in Inertia
+
+To render the errors on the same response instead of redirecting, use a `Safe` helper and pass its `errors` to the page. Typing the prop with `ValidationErrors<T>` lets the controller and the component share one error shape:
+
+```ts
+import { type ValidationErrors } from '@guren/core'
+import { pages } from '@/.guren/pages.gen'
+
+type CreateUserFields = 'email' | 'password'
+type CreateUserProps = {
+  errors?: ValidationErrors<CreateUserFields>
+}
+
+async store() {
+  const result = await this.validateBodySafe(schema)
+  if (!result.success) {
+    return this.inertia<CreateUserProps>(pages.users.Create, {
+      errors: result.errors,
+    })
+  }
+
+  await User.create(result.data)
+  return this.redirect('/users')
+}
+```
+
+```tsx
+import type { PageProps } from '@guren/inertia-client'
+import { pages } from '@/.guren/pages.gen'
+
+type Props = PageProps<typeof pages.users.Create>
+
+function CreateUser({ errors }: Props) {
+  return (
+    <form>
+      <input name="email" />
+      {errors?.email && <span className="error">{errors.email}</span>}
+
+      <input name="password" type="password" />
+      {errors?.password && <span className="error">{errors.password}</span>}
+    </form>
+  )
+}
+```
+
+## Middleware Validation
+
+### `validateRequest(schema)`
+
+`validateRequest()` builds a middleware that validates the request body before the handler runs. The handler reads the parsed body with `getValidatedData()`:
+
+```ts
+import { Router, getValidatedData, validateRequest } from '@guren/core'
 import { z } from 'zod'
 
-const schema = z.object({
-  email: z.email(),
-  password: z.string().min(8),
+const CreatePostSchema = z.object({
+  title: z.string().min(1),
+  content: z.string().min(1),
 })
 
 const router = new Router()
 
-router.post('/login', [AuthController, 'login'], validateRequest(schema))
+router.post('/posts', async (ctx) => {
+  const data = getValidatedData<z.infer<typeof CreatePostSchema>>(ctx)!
+  return ctx.json({ post: await Post.create(data) })
+}, validateRequest(CreatePostSchema))
 ```
 
-By default, validation errors return a 422 response with error details.
+`getValidatedData()` returns `undefined` when the middleware has not run on the route, hence the `!`.
+
+On failure the middleware answers by itself, with a 422 holding the first message for each top-level field:
+
+```json
+{
+  "errors": {
+    "title": "Too small: expected string to have >=1 characters"
+  }
+}
+```
 
 ### `validateRequestWith(schemaFactory)`
 
-Use it when the schema depends on the request context. The factory runs synchronously, so it cannot await the signed-in user; resolve what it needs in a middleware mounted before it, as `resolveIsAdmin` does here:
+Use it when the schema depends on the request. The factory runs synchronously, so it cannot await the signed-in user; resolve what it needs in a middleware mounted before it, as `resolveIsAdmin` does here:
 
 ```ts
 import { AUTH_CONTEXT_KEY, Router, defineMiddleware, validateRequestWith } from '@guren/core'
@@ -181,93 +276,40 @@ router.put('/users/:id', [UserController, 'update'], resolveIsAdmin, validateReq
 }))
 ```
 
-## Getting Validated Data
+### Custom Error Handling
 
-After validation middleware runs, retrieve typed data with `getValidatedData()`:
-
-```ts
-import { getValidatedData } from '@guren/core'
-import type { z } from 'zod'
-import { Router } from '@guren/core'
-
-const router = new Router()
-
-router.post('/posts', async (ctx) => {
-  const data = getValidatedData<z.infer<typeof createPostSchema>>(ctx)
-
-  // TypeScript knows the exact shape
-  console.log(data.title)  // string
-  console.log(data.content) // string
-  console.log(data.published) // boolean
-
-  return ctx.json({ post: await Post.create(data) })
-}, validateRequest(createPostSchema))
-```
-
-## Manual Validation
-
-For validation outside middleware, use `validate()` or `validateSafe()`:
-
-```ts
-import { validate, validateSafe } from '@guren/core'
-
-// Throws on validation failure
-const data = validate(schema, requestData)
-
-// Returns result object (never throws)
-const result = validateSafe(schema, requestData)
-if (result.success) {
-  console.log(result.data)
-} else {
-  console.log(result.error)
-}
-```
-
-## Custom Error Handling
-
-Override the default error response:
+Both middleware take an `onError` option that replaces the 422 response. It receives the same field-to-message map:
 
 ```ts
 validateRequest(schema, {
-  onError: (ctx, error) => {
-    // Custom error format
+  onError: (ctx, errors) => {
     return ctx.json({
       message: 'Validation failed',
-      errors: error.issues.map(issue => ({
-        field: issue.path.join('.'),
-        message: issue.message,
-      })),
+      errors: Object.entries(errors).map(([field, message]) => ({ field, message })),
     }, 422)
   },
 })
 ```
 
-## Schema Interface
+`status` changes the failure status instead, and `fallbackMessage` sets the message used when no error names a field.
 
-Guren's validation is schema-library agnostic. Any object implementing `ValidationSchema` works:
+## Manual Validation
+
+For data that does not come from a request, call `validate()` or `validateSafe()`:
 
 ```ts
-interface ValidationSchema<T> {
-  parse(data: unknown): T
-  safeParse(data: unknown): { success: true; data: T } | { success: false; error: unknown }
+import { validate, validateSafe } from '@guren/core'
+
+// Returns the parsed data, or throws the schema's own error (a ZodError for zod)
+const data = validate(schema, input)
+
+// Never throws
+const result = validateSafe(schema, input)
+if (result.success) {
+  console.log(result.data)
+} else {
+  console.log(result.errors) // { field: 'first message' }
 }
-```
-
-This means you can use Zod, Valibot, or custom validators:
-
-```ts
-// With Valibot
-import * as v from 'valibot'
-import { Router } from '@guren/core'
-
-const schema = v.object({
-  name: v.string([v.minLength(1)]),
-  email: v.string([v.email()]),
-})
-
-const router = new Router()
-
-router.post('/users', handler, validateRequest(schema))
 ```
 
 ## Common Patterns
@@ -331,107 +373,31 @@ const schema = z.object({
 })
 ```
 
-## Form Validation Errors
+## Schema Interface
 
-When validation fails, the default response format is:
-
-```json
-{
-  "error": "Validation failed",
-  "issues": [
-    {
-      "path": ["email"],
-      "message": "Invalid email"
-    },
-    {
-      "path": ["password"],
-      "message": "String must contain at least 8 character(s)"
-    }
-  ]
-}
-```
-
-### Automatic Handling on Inertia Requests
-
-When a `ValidationException` is thrown during an Inertia request (one carrying the `X-Inertia` header), Guren does not return the JSON payload above. Instead it behaves like Laravel: the errors are flashed to the session and the request is redirected back (`303`) to the previous page. On the next page load the flashed errors are injected into the shared `errors` prop, flattened to one message per field:
-
-```tsx
-function Login({ errors }: { errors?: Record<string, string> }) {
-  return (
-    <form>
-      <input name="email" />
-      {errors?.email && <span className="error">{errors.email}</span>}
-    </form>
-  )
-}
-```
-
-This applies to `validateBody` / `validateQuery` / `validateParams` failures as well as `ValidationException.withMessages(...)` thrown from your own code. Flashing requires session middleware, which is mounted automatically when the `auth` option is set. To customize the behavior, register your own renderer for `ValidationException` in a service provider; it takes precedence over the built-in one.
-
-### Displaying in Inertia
-
-Use page definitions with `ValidationErrors<T>` so controller and component share the same error shape.
+Validation does not depend on Zod. The middleware and `validate()` accept any object with this shape, and the controller helpers need only `safeParse()`:
 
 ```ts
-import { type ValidationErrors } from '@guren/core'
-import { pages } from '@/.guren/pages.gen'
-
-type CreateUserFields = 'email' | 'password'
-type CreateUserProps = {
-  errors?: ValidationErrors<CreateUserFields>
-}
-
-async store() {
-  const result = await this.validateBodySafe(schema)
-  if (!result.success) {
-    return this.inertia<CreateUserProps>(pages.users.Create, {
-      errors: result.errors,
-    })
-  }
-
-  await User.create(result.data)
-  return this.redirect('/users')
+interface ValidationSchema<T> {
+  parse(data: unknown): T
+  safeParse(data: unknown): { success: true; data: T } | { success: false; error: unknown }
 }
 ```
 
-```tsx
-import type { PageProps } from '@guren/inertia-client'
-import { pages } from '@/.guren/pages.gen'
-
-type Props = PageProps<typeof pages.users.Create>
-
-function CreateUser({ errors }: Props) {
-  return (
-    <form>
-      <input name="email" />
-      {errors?.email && <span className="error">{errors.email}</span>}
-
-      <input name="password" type="password" />
-      {errors?.password && <span className="error">{errors.password}</span>}
-    </form>
-  )
-}
-```
-
-## Type-Safe Request Parsing
-
-For complete type safety, combine with request parsing:
+A Valibot schema, for example:
 
 ```ts
-import { Router, parseRequestPayload, validateRequest, getValidatedData } from '@guren/core'
+import * as v from 'valibot'
+import { Router, validateRequest } from '@guren/core'
 
-const schema = z.object({
-  title: z.string(),
-  content: z.string(),
+const schema = v.object({
+  name: v.string([v.minLength(1)]),
+  email: v.string([v.email()]),
 })
 
 const router = new Router()
 
-router.post('/posts', async (ctx) => {
-  const data = getValidatedData<z.infer<typeof schema>>(ctx)!
-  // Fully typed, validated data ready to use
-  return ctx.json({ post: await Post.create(data) })
-}, validateRequest(schema))
+router.post('/users', handler, validateRequest(schema))
 ```
 
 ## Compiled Parsing (zod 4.5+)
@@ -442,7 +408,7 @@ zod 4.5 can compile schemas into a generated fast path. Apps scaffolded with `cr
 import 'zod/compile'
 ```
 
-Every schema built after that import parses through the compiled path automatically. Because Guren's validation helpers, route contracts (`params`, `query`, `body`, `output`), and validation middleware all call your schema's own `parse`/`safeParse`, they speed up without any further changes.
+Every schema built after that import parses through the compiled path. Guren's validation helpers, route contracts (`params`, `query`, `body`, `output`) and validation middleware all call your schema's own `parse`/`safeParse`, so they speed up with no further changes.
 
 To adopt it in an existing app, move your `zod` dependency to `^4.5.0` and add the import as the **first** line of your entry module, before any module that defines schemas.
 
@@ -451,7 +417,7 @@ In our benchmarks on Bun, validating a 100-item list output dropped from about 1
 Three things to know:
 
 - **Import order matters.** Schemas built before the import keep the regular parser. Keep the import first in the entry module.
-- **Restricted runtimes are handled.** Call `z.config({ jitless: true })` if your runtime forbids generated code (strict CSP); compilation is skipped and everything still works. Unsupported schema features silently keep the regular parser too — compilation never throws.
-- **Keep refinements side-effect free.** On invalid input, `.refine()` and `.transform()` callbacks can run twice (the fast path first, then the fallback that builds the full error). Validation results are unchanged, but side effects inside those callbacks would double.
+- **Restricted runtimes are handled.** If your runtime forbids generated code (a strict CSP), call `z.config({ jitless: true })`; compilation is skipped and everything still works. Schema features the compiler does not support also fall back to the regular parser, so compilation never throws.
+- **Keep refinements side-effect free.** On invalid input, `.refine()` and `.transform()` callbacks can run twice: the fast path runs first, then the fallback that builds the full error. Validation results are unchanged, but side effects inside those callbacks would happen twice.
 
-Schema-agnostic validation is unaffected: Valibot or custom validators simply keep their own `parse`/`safeParse` behavior.
+Valibot and custom validators are unaffected; they keep their own `parse`/`safeParse`.
