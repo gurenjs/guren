@@ -512,7 +512,7 @@ bunx guren tool:call posts.index --as user:42 --json
 
 The command exits non-zero when the call comes back as an error result, so a 422 or a 403 is not read as a success by a script. See [Agent Interface — Calling a tool yourself](./agent-interface.md#calling-a-tool-yourself).
 
-If the application it boots has an [audit trail](./agent-interface.md#the-audit-trail) configured, the call is recorded in it as `surface: 'cli'` (the same file, the same masking, alongside the MCP records). A call from here runs as whoever `--as` names, with nothing verified, so it is worth being able to see later. An application with no trail configured records nothing and the call is unaffected.
+If the application it boots has an [audit trail](./agent-tool-governance.md#the-audit-trail) configured, the call is recorded in it as `surface: 'cli'` (the same file, the same masking, alongside the MCP records). A call from here runs as whoever `--as` names, with nothing verified, so it is worth being able to see later. An application with no trail configured records nothing and the call is unaffected.
 
 `tool:dev` serves the application's *own* endpoint, so it requires
 [`@guren/plugin-mcp`](./agent-interface.md) to be installed and registered, and
@@ -560,7 +560,7 @@ bunx guren tool:log --json | jq 'select(.status >= 400)'
 | `--app` | Current directory | Application root directory |
 | `--json` | `false` | Output one raw record per line, for piping |
 
-`-n` applies **after** filtering, so `--denied -n 50` is the last fifty denials rather than the denials among the last fifty records. Records only exist once a sink is configured: the trail is opt-in, and the command prints the configuration line to add when it finds none. See [Agent Interface — The audit trail](./agent-interface.md#the-audit-trail).
+`-n` applies **after** filtering, so `--denied -n 50` is the last fifty denials rather than the denials among the last fifty records. Records only exist once a sink is configured: the trail is opt-in, and the command prints the configuration line to add when it finds none. See [Control and Audit Agent Tool Access — The audit trail](./agent-tool-governance.md#the-audit-trail).
 
 Everything shown is derived from contracts the route already carries: the input schema merges its `params`, `query` and `body` schemas, the output schema comes from `output`, and the authorization ability comes from the policy its middleware chain checks. Nothing is declared twice, so a tool cannot advertise a schema the endpoint does not validate.
 

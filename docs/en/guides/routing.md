@@ -269,7 +269,7 @@ router.resource('/posts', PostsController, {
 
 Exposure is opt-in per route, the tool name is the route name used verbatim, and a route with no `.name()` cannot become a tool. Declaring `agent` in the route options *and* chaining `.agent()` throws — declare it once.
 
-`bunx guren tool:list` shows what an agent would see. For the metadata fields, the input/output derivation rules, the MCP endpoint, token scopes and the audit trail, see the [Agent Interface guide](./agent-interface.md).
+`bunx guren tool:list` shows what an agent would see. For the metadata fields, the input/output derivation rules and the MCP endpoint, see the [Agent Interface guide](./agent-interface.md); for token scopes, approvals and the audit trail, see [Control and Audit Agent Tool Access](./agent-tool-governance.md).
 
 ## Route Model Binding
 

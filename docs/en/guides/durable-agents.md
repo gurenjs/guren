@@ -54,7 +54,7 @@ const app = createApp({
 export default app
 ```
 
-`EventServiceProvider` is what makes the audit events reachable at all (see [the audit trail](./agent-interface.md#the-audit-trail)).
+`EventServiceProvider` is what makes the audit events reachable at all (see [the audit trail](./agent-tool-governance.md#the-audit-trail)).
 
 `EncryptionServiceProvider` and an `APP_KEY` let an agent retry a call that waited for a human's approval. The call's arguments are kept in the agent's own storage, encrypted with the app key (see [The ledger](#the-ledger)). Without an encrypter, the plugin warns at boot: a call waiting for approval is still reported to the agent with its `requestId`, but nothing retries it for you. The provider's position in `providers` does not matter.
 
@@ -126,7 +126,7 @@ Three more rules the same file carries:
 
 ### Scopes
 
-Registration scopes are deliberately **narrower** than the token scopes in [Tokens and scopes](./agent-interface.md#tokens-and-scopes). Two forms are accepted:
+Registration scopes are deliberately **narrower** than the token scopes in [Tokens and scopes](./agent-tool-governance.md#tokens-and-scopes). Two forms are accepted:
 
 | Scope | Grants |
 |---|---|
@@ -231,7 +231,7 @@ The principal is installed in-process and never travels over the wire. It satisf
 
 ## Human in the loop
 
-A route declaring `approval: 'required'` refuses the first call, files a pending request, notifies your approvers, and hands the agent the id (the mechanism [Approval-gated tools](./agent-interface.md#approval-gated-tools) describes in full). What a durable agent adds is that it comes back on its own:
+A route declaring `approval: 'required'` refuses the first call, files a pending request, notifies your approvers, and hands the agent the id (the mechanism [Approval-gated tools](./agent-tool-governance.md#approval-gated-tools) describes in full). What a durable agent adds is that it comes back on its own:
 
 ```ts
 export class Ops extends GurenAgent<Env, OpsState> {
@@ -284,7 +284,7 @@ The sweep is written not to throw, because the SDK gives a failed scheduled call
 
 ### The store and the operator side are yours
 
-There is no default approval store, for the same reason the audit sink has no default: one degrading to process memory would answer "approved" for a record the next isolate never heard of. Implement `AgentApprovalStore` (the four methods and the two guarantees are in [Configuring the queue](./agent-interface.md#configuring-the-queue)) and resolve requests through your own routes. [`examples/agents`](https://github.com/gurenjs/guren/tree/main/examples/agents) carries a Drizzle implementation and two operator surfaces over it: a JSON API an operator drives with `curl`, and a browser console showing the tickets, the pending approvals, and the agent's own report on one page. Copy whichever shape your deployment needs — they are the same rules either way.
+There is no default approval store, for the same reason the audit sink has no default: one degrading to process memory would answer "approved" for a record the next isolate never heard of. Implement `AgentApprovalStore` (the four methods and the two guarantees are in [Configuring the queue](./agent-tool-governance.md#configuring-the-queue)) and resolve requests through your own routes. [`examples/agents`](https://github.com/gurenjs/guren/tree/main/examples/agents) carries a Drizzle implementation and two operator surfaces over it: a JSON API an operator drives with `curl`, and a browser console showing the tickets, the pending approvals, and the agent's own report on one page. Copy whichever shape your deployment needs — they are the same rules either way.
 
 Four things those operator surfaces taught, worth repeating in yours:
 
