@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from 'hono'
 import { matchingOpenParen } from '../support/stack-frames'
+import { warnDeprecated } from '../support/deprecate'
 
 /** Development-only error page: exposes the stack trace and request details. */
 export function renderDebugPage(error: Error, request?: Request): string {
@@ -126,10 +127,18 @@ function toggleSection(button) {
 }
 
 /**
- * Renders a debug page in development; in production the error is re-thrown for
- * the ExceptionHandler.
+ * @deprecated since 2.30.0, removed in 3.0.0. The ExceptionHandler renders this
+ * page itself for a browser request while debug details are on. Hono hands a
+ * handler's error to the app's `onError` where it is thrown, so this `catch`
+ * never sees one in a Guren app.
  */
 export function debugErrorMiddleware(): MiddlewareHandler {
+  warnDeprecated(
+    'debug-error-middleware',
+    'debugErrorMiddleware',
+    'Remove it: the ExceptionHandler renders the debug page for a browser request while debug details are on.',
+    { since: '2.30.0', removedIn: '3.0.0' },
+  )
   return async (c, next) => {
     try {
       await next()

@@ -796,6 +796,22 @@ describe('checkDeprecations', () => {
     })
   })
 
+  describe('debug-error-middleware', () => {
+    it('reports imports where an app would mount it, and not a same-named local import', async () => {
+      await writeWorkspaceFiles(workspace.dir, {
+        'src/app.ts': "import { createApp, debugErrorMiddleware } from '@guren/core'\n",
+        'routes/web.ts': "import { debugErrorMiddleware as debugPage } from '@guren/server'\n",
+        'tests/errors.test.ts': "import { debugErrorMiddleware } from '@guren/core'\n",
+        'config/errors.ts': "import { debugErrorMiddleware } from './local'\nimport { renderDebugPage } from '@guren/core'\n",
+      })
+
+      const warning = (await checkDeprecations(workspace.dir)).find((entry) => entry.id === 'debug-error-middleware')
+      expect((warning?.affectedFiles ?? []).sort()).toEqual(
+        [join('routes', 'web.ts'), join('src', 'app.ts'), join('tests', 'errors.test.ts')].sort(),
+      )
+    })
+  })
+
   describe('deploy-runtime-analysis', () => {
     it('reports the deprecated analysis entry points imported from @guren/cli, and not checkDeployRuntime', async () => {
       await writeWorkspaceFiles(workspace.dir, {

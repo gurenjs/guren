@@ -12,6 +12,7 @@ import type {
 } from './types'
 import { HttpException } from './HttpException'
 import { renderErrorPage } from './error-page'
+import { renderDebugPage } from './debug-page'
 import { ambientBinding, bindAmbient } from '../http/default-application'
 import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
 
@@ -123,27 +124,24 @@ export class ExceptionHandler {
     // `reportException` judged it by; `toResponse()` supplies only the body.
     const statusCode = resolveExceptionStatus(error)
 
+    let body: ErrorResponse
     if (HttpException.isHttpException(error)) {
-      const { body } = error.toResponse(debug)
-
-      if (this.wantsHtmlResponse(ctx) && !debug) {
-        return ctx.html(renderErrorPage(statusCode, body.message), statusCode as ContentfulStatusCode)
+      body = error.toResponse(debug).body
+    } else {
+      body = { message: statusCode < 500 || debug ? error.message : 'Internal Server Error' }
+      if (debug) {
+        body.exception = error.name
+        body.stack = error.stack
       }
-
-      return ctx.json(body, statusCode as ContentfulStatusCode)
     }
 
-    const body: ErrorResponse = {
-      message: statusCode < 500 || debug ? error.message : 'Internal Server Error',
-    }
-
-    if (debug) {
-      body.exception = error.name
-      body.stack = error.stack
-    }
-
-    if (this.wantsHtmlResponse(ctx) && !debug) {
-      return ctx.html(renderErrorPage(statusCode, body.message), statusCode as ContentfulStatusCode)
+    if (this.wantsHtmlResponse(ctx)) {
+      // A 4xx is the caller's mistake, so a browser gets the plain page even in
+      // debug: a stack trace for every mistyped id would bury the real faults.
+      const html = debug && statusCode >= 500
+        ? renderDebugPage(error, ctx.req.raw)
+        : renderErrorPage(statusCode, body.message)
+      return ctx.html(html, statusCode as ContentfulStatusCode)
     }
 
     return ctx.json(body, statusCode as ContentfulStatusCode)
