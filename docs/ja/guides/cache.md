@@ -4,14 +4,14 @@
 
 ## コアコンセプト
 
-- **CacheManager**: 設定したストアをまとめるレジストリ。`config/cache.ts` がコンテナに `cache` としてバインドします
+- **CacheManager**: 設定したストアをまとめるレジストリ。`config/cache.ts` によって、コンテナ（サービスを名前で登録しておく入れ物）に `cache` という名前で登録されます
 - **CacheStore**: 1 つの保存先に対する操作（get、set、delete など）。`cache.store()` がデフォルトのストアを返します
 - **ドライバー**: 保存先の実装。`memory`（デフォルト）、`redis`、`file` があります
-- **TaggedCache**: キーをタグでまとめて、一度に削除できるようにするストアの見方
+- **TaggedCache**: ストアのキーにタグを付けてまとめ、一度に削除できるようにするもの
 
 ## セットアップ
 
-`bunx guren add cache` を実行すると、`config/cache.ts` が書き出され、`config/env.ts` に `CACHE_STORE` が宣言され、定義が `createApp({ config })` に追加されます。
+`bunx guren add cache` は、`config/cache.ts` を書き出し、`config/env.ts` に `CACHE_STORE` を宣言して `.env` では `memory` に設定し、その定義を `createApp({ config })` に追加します。小さなサービスの例として `app/Services/ApplicationCache.ts` も書き出します。
 
 ```ts
 // config/cache.ts
@@ -20,17 +20,25 @@ import { defineCacheConfig } from '@guren/core'
 // CACHE_STORE でストアを選ぶ。`memory` はプロセス単位なので、長時間動く
 // 1 台のサーバーでは正しく動くが、Workers、Lambda、Vercel では 2 つの
 // リクエストが別インスタンスに届くことがあり、正しく動かない。
-export default defineCacheConfig((env) => ({
-  default: env.CACHE_STORE,
-  stores: {
+export default defineCacheConfig((env) => {
+  const stores = {
     memory: { driver: 'memory' },
     // Redis を使う場合は '@guren/core/redis' の `createRedisClient` と
     // `redis: { driver: 'redis', client: () => createRedisClient({ url: env.REDIS_URL }) }`
     // のエントリを追加し、REDIS_URL を config/env.ts に宣言する。このモジュールは
     // ioredis を読み込むので、使う場所でだけインポートする。関数はストアを最初に
     // 解決したときに実行されるため、CACHE_STORE で選ぶまで接続は開かない。
-  },
-}))
+  } as const
+
+  // 起動時に確かめる。マネージャーはどんな名前も受け付け、最初のキャッシュ操作で例外を投げるため。
+  if (!Object.hasOwn(stores, env.CACHE_STORE)) {
+    throw new Error(
+      `CACHE_STORE="${env.CACHE_STORE}" is not a declared store. Declare it in config/cache.ts or use one of: ${Object.keys(stores).join(', ')}.`,
+    )
+  }
+
+  return { default: env.CACHE_STORE, stores }
+})
 ```
 
 ```ts
@@ -44,7 +52,7 @@ const app = createApp({
 })
 ```
 
-コールバックには検証済みの環境変数が渡されるので、読み取るキーはすべて `config/env.ts` に宣言しておきます。変数の宣言のしかたと、定義が起動時にどう処理されるかは[設定ガイド](./configuration.md)にあります。サービスプロバイダーでキャッシュを設定しているアプリもそのまま動きます（[サービスプロバイダを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ)を参照）。
+コールバックには検証済みの環境変数が渡されるので、読み取るキーはすべて `config/env.ts` に宣言しておきます。変数の宣言のしかたと、定義が起動時にどう処理されるかは[設定ガイド](./configuration.md)にあります。サービスプロバイダーでキャッシュを設定しているアプリもそのまま動きます（[サービスプロバイダーを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ)を参照）。
 
 ### 複数のストア
 
@@ -79,11 +87,11 @@ export default defineCacheConfig((env) => ({
 }))
 ```
 
-`CACHE_STORE` の名前は起動時には検査されません。`stores` にない名前を指定すると、そのストアを初めて解決したときに `Cache store not found` が投げられます。
+生成された設定ファイルは、[セットアップ](#セットアップ)のとおり、起動時に `CACHE_STORE` を `stores` と照合します。ストアを追加するときもこの検査は残してください。検査がなければマネージャーはどんな名前も受け付け、最初のキャッシュ操作で `Cache store not found` を投げます。
 
 ## キャッシュの取り出し
 
-定義が `cache` としてバインドしたマネージャーを解決し、そこからストアを選びます。
+`cache` という名前で登録されたマネージャーをコンテナから取り出し（解決し）、そこからストアを選びます。
 
 | 書く場所 | 取り出し方 |
 |----------|------------|
@@ -301,7 +309,7 @@ export async function getUserPreferences(
 
 - `cache.store()` で取り出したストアと、タグ付きキャッシュでの `remember` と `rememberForever`。`registerStore()` で追加したストアや、`new TaggedCache(store, tags)` で作ったタグ付きキャッシュも含みます。
 - 同じストアインスタンスを通した呼び出しに限ります。`CacheManager` が 2 つある場合や、同じ Redis を指すストア名が 2 つある場合は、それぞれがコールバックを実行します。
-- `new MemoryStore()` や `new FileStore(...)` のように自分で作って直接呼ぶストアは、共有しません。
+- `new MemoryCacheStore()` や `new FileCacheStore(...)` のように自分で作って直接呼ぶストアは、共有しません。
 - プロセス（Cloudflare Workers では isolate）をまたいでは共有しません。別々のサーバーが同時に同じキーでミスすれば、それぞれがコールバックを実行します。
 
 気をつける点は次のとおりです。
@@ -314,20 +322,20 @@ export async function getUserPreferences(
 
 ## ドライバーのオプション
 
-**Memory Store:**
+**メモリストア:**
 | オプション | デフォルト | 説明 |
 |-----------|-----------|------|
 | `maxSize` | `Infinity` | 最大アイテム数 |
 | `checkPeriod` | `60000` | 期限切れアイテムのクリーンアップ間隔（ms） |
 | `now` | `Date.now` | TTL の計算に使う時計（エポック ms）。テストで差し替えられます |
 
-**Redis Store:**
+**Redis ストア:**
 | オプション | デフォルト | 説明 |
 |-----------|-----------|------|
 | `client` | 必須 | ioredis のクライアント、またはそれを同期的に返す関数（関数はストアが最初に使われたときに実行されます） |
 | `prefix` | `'cache:'` | すべてのキャッシュキーに付けるプレフィックス |
 
-**File Store:**
+**ファイルストア:**
 | オプション | デフォルト | 説明 |
 |-----------|-----------|------|
 | `path` | 必須 | キャッシュファイルを置くディレクトリのパス |
@@ -378,9 +386,9 @@ describe('Cache in application code', () => {
 })
 ```
 
-### メモリストアを直接使う
+### テストごとにマネージャーを作る
 
-キャッシュを使うロジックだけを単体でテストするなら、テストごとにマネージャーを作ります。
+キャッシュを使うロジックだけを単体でテストするなら、テストごとに新しいメモリのマネージャーを作ります。
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'
@@ -432,6 +440,6 @@ describe('Cache', () => {
 
 1. **TTL はデータが変わる頻度で決めます。** フィードは短く、設定値は長くします。
 2. **関係するデータにはタグを付けます。** エンティティや機能ごとにまとめておけば、1 回の `flush()` で無効化できます。
-3. **レスポンスではなくデータをキャッシュします。** コントローラーのレスポンス全体ではなく、クエリの結果や計算結果をキャッシュします。
+3. **キャッシュするのはデータにします。** クエリや計算の結果をキャッシュし、コントローラーのレスポンス全体は対象にしません。
 4. **本番では Redis を使います。** メモリストアはプロセスごとに分かれ、再起動すると空になります。
 5. **秘密の値はキャッシュしません。** パスワードやトークンなどの認証情報はキャッシュに入れないでください。

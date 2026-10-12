@@ -11,7 +11,7 @@ The cache stores the result of slow work, such as a database query or a computat
 
 ## Setup
 
-`bunx guren add cache` writes `config/cache.ts`, declares `CACHE_STORE` in `config/env.ts`, and adds the definition to `createApp({ config })`:
+`bunx guren add cache` writes `config/cache.ts`, declares `CACHE_STORE` in `config/env.ts` (and sets it to `memory` in `.env`), adds the definition to `createApp({ config })`, and writes a small example service, `app/Services/ApplicationCache.ts`:
 
 ```ts
 // config/cache.ts
@@ -20,17 +20,25 @@ import { defineCacheConfig } from '@guren/core'
 // CACHE_STORE picks the store. `memory` is per-process: correct on one
 // long-lived server, wrong on Workers, Lambda and Vercel, where two requests
 // can land in different instances.
-export default defineCacheConfig((env) => ({
-  default: env.CACHE_STORE,
-  stores: {
+export default defineCacheConfig((env) => {
+  const stores = {
     memory: { driver: 'memory' },
     // For Redis, add `createRedisClient` from '@guren/core/redis' and a
     // `redis: { driver: 'redis', client: () => createRedisClient({ url: env.REDIS_URL }) }`
     // entry, with REDIS_URL declared in config/env.ts. Import it only where you use
     // it, since that module pulls in ioredis. The function runs when the store is
     // first resolved, so no connection opens until CACHE_STORE selects it.
-  },
-}))
+  } as const
+
+  // Checked at boot: the manager accepts any name and throws on the first cache call.
+  if (!Object.hasOwn(stores, env.CACHE_STORE)) {
+    throw new Error(
+      `CACHE_STORE="${env.CACHE_STORE}" is not a declared store. Declare it in config/cache.ts or use one of: ${Object.keys(stores).join(', ')}.`,
+    )
+  }
+
+  return { default: env.CACHE_STORE, stores }
+})
 ```
 
 ```ts
@@ -79,7 +87,7 @@ export default defineCacheConfig((env) => ({
 }))
 ```
 
-The name in `CACHE_STORE` is not checked at boot. A name missing from `stores` throws `Cache store not found` the first time the store is resolved.
+The scaffolded file checks `CACHE_STORE` against `stores` at boot, as shown in [Setup](#setup); keep that check when you add stores. Without it, the manager accepts any name and throws `Cache store not found` on the first cache call.
 
 ## Getting the Cache
 
@@ -301,7 +309,7 @@ Which calls share a callback:
 
 - `remember` and `rememberForever` on a store from `cache.store()`, including stores added with `registerStore()`, and on tagged caches, including one built with `new TaggedCache(store, tags)`.
 - Only calls through the same store instance. Two `CacheManager`s, or two store names that point at one Redis, each run their own callback.
-- Not a store you construct and call directly, such as `new MemoryStore()` or `new FileStore(...)`.
+- Not a store you construct and call directly, such as `new MemoryCacheStore()` or `new FileCacheStore(...)`.
 - Not across processes (or isolates, on Cloudflare Workers). Two servers that miss the same key at once each run the callback.
 
 What to keep in mind:
@@ -378,9 +386,9 @@ describe('Cache in application code', () => {
 })
 ```
 
-### Using the Memory Store Directly
+### Building a Manager per Test
 
-To unit-test cache logic on its own, build a manager per test:
+To unit-test cache logic on its own, build a fresh in-memory manager per test:
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'
