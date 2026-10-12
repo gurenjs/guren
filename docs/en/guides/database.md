@@ -1,10 +1,75 @@
 # Database
 
-Guren uses Drizzle ORM and supports PostgreSQL, SQLite, MySQL, and Aurora Serverless (AWS Data API). You define your schema in TypeScript, derive models from those tables, and get a fluent query API that feels like Laravel Eloquent while staying fully type-safe.
+Guren reads and writes the database through models built on Drizzle tables, with a query API shaped like Laravel's Eloquent and typed from your schema. A new app uses SQLite and needs no setup; PostgreSQL, MySQL and Aurora Serverless are a configuration change away.
+
+The page follows the order you meet things in: connect, declare the schema and migrate it, seed it, then define models and query them.
 
 ## Connecting to the Database
 
-Define your table schema, configure the Drizzle adapter, and you are ready to query:
+The scaffold writes `config/database.ts` for the driver you picked with `create-guren-app --db`, and `createApp({ config })` lists it, so the ORM connects at boot with the app's validated environment. Every driver exposes the same functions (`getDatabase`, `migrateDatabase`, `closeDatabase`, `configureOrm`, `seedDatabase`), so models and queries do not change when you switch.
+
+| Driver | `--db` | Factory in `config/database.ts` |
+|--------|--------|---------------------------------|
+| SQLite (the default) | `sqlite` | `createSqliteDatabase` |
+| PostgreSQL | `postgres` | `createPostgresDatabase` |
+| MySQL | `mysql` | `createMySqlDatabase` |
+| Aurora Serverless (AWS Data API) | none: write it by hand | `createAwsDataApiDatabase` |
+
+Each factory reads its connection settings from `config/env.ts` through a resolver; [Configuration](./configuration.md#the-database-connection) explains the resolver's `context` argument.
+
+### SQLite
+
+New projects use SQLite through Bun's built-in driver, with no Docker or external database:
+
+```ts
+// config/database.ts
+import { createSqliteDatabase, defineDatabaseConfig } from '@guren/core'
+import env from './env.js'
+
+const database = createSqliteDatabase({
+  migrationsFolder: new URL('../db/migrations', import.meta.url),
+  seedersFolder: new URL('../db/seeders', import.meta.url),
+  filename: (context) => {
+    const values = context?.env ?? env.parse(undefined, { mode: 'report' }).values
+    // `bun test` sets NODE_ENV=test, so the suite uses its own file.
+    return process.env.NODE_ENV === 'test'
+      ? values.TEST_DATABASE_URL ?? './data/guren.test.db'
+      : values.DATABASE_URL ?? './data/guren.db'
+  },
+})
+
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+
+export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
+```
+
+With `seedOnBoot` true, the app runs the seeders at boot once the migrations folder holds migrations. Scaffolds turn it off in production, where you run `bunx guren db:seed` explicitly. Tests use a separate file; see [Testing](./testing.md#test-database-isolation).
+
+> [!TIP]
+> Use SQLite for development and testing, then switch to PostgreSQL for production. Your models and queries work unchanged.
+
+### PostgreSQL
+
+`DATABASE_URL` is declared in the scaffolded `config/env.ts`:
+
+```ts
+// config/database.ts
+import { createPostgresDatabase, defineDatabaseConfig } from '@guren/core'
+import env from './env.js'
+
+const database = createPostgresDatabase({
+  migrationsFolder: new URL('../db/migrations', import.meta.url),
+  seedersFolder: new URL('../db/seeders', import.meta.url),
+  connectionString: (context) => (context?.env ?? env.parse(undefined, { mode: 'report' }).values).DATABASE_URL
+    ?? 'postgres://guren:guren@localhost:54322/guren',
+})
+
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+
+export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
+```
+
+Tables are declared with `pgTable`:
 
 ```ts
 // db/schema.ts
@@ -21,24 +86,9 @@ export const posts = pgTable('posts', {
 })
 ```
 
-On PostgreSQL, give every timestamp column `{ withTimezone: true }`. A
-`timestamp without time zone` stores a bare wall clock with no offset, so
-`defaultNow()` records it in the database session's zone while your app reads
-it back as UTC, and any client other than your app sees a different instant.
-Scaffolds already emit it, and `bunx guren check` warns about a column
-declared without it. That warning reads the schema statically, so it reports
-what it can see — treat silence as "nothing found", not as a guarantee.
+On PostgreSQL, give every timestamp column `{ withTimezone: true }`. A `timestamp without time zone` stores a bare wall clock with no offset, so `defaultNow()` records it in the database session's zone while your app reads it back as UTC, and any client other than your app sees a different instant. Scaffolds already emit it, and `bunx guren check` warns about a column declared without it. That warning reads the schema statically, so a clean result means nothing was found, not that every column is right.
 
-```ts
-// config/database.ts
-import { DrizzleAdapter } from '@guren/core'
-
-DrizzleAdapter.configure({ connectionString: process.env.DATABASE_URL })
-```
-
-That is the low-level call. An app does not make it itself: `config/database.ts` builds the connection with a driver factory and default-exports it with `defineDatabaseConfig()`, and `createApp({ config })` lists that definition, so the ORM connects at boot with the app's validated environment. `DATABASE_URL` is declared in the scaffolded `config/env.ts`. The driver sections below show the file for each database, and [Configuration](./configuration.md#the-database-connection) explains the resolver's `context` argument.
-
-## MySQL Support
+### MySQL
 
 Use `createMySqlDatabase` when your app runs on MySQL-compatible databases.
 
@@ -59,12 +109,8 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
 
-Like the PostgreSQL and SQLite adapters, the MySQL adapter exposes the same runtime API (`getDatabase`, `migrateDatabase`, `configureOrm`, `seedDatabase`) so switching drivers is mostly an import/configuration change.
 
-> [!TIP]
-> If you want to use Drizzle's relational queries (`db.query.<table>.findMany(...)`), pass a `relations` option built with `defineRelations(schema, ...)` from `drizzle-orm` (RQB v2). The `Model` API in Guren does not require this.
-
-## Aurora Serverless (AWS Data API)
+### Aurora Serverless (AWS Data API)
 
 Use `createAwsDataApiDatabase` when your app runs on AWS Lambda against Aurora Serverless v2 with the RDS Data API enabled. The Data API is HTTP-based, so there is no connection pool to manage and the Lambda function does not need to run inside a VPC.
 
@@ -102,6 +148,137 @@ The adapter exposes the same runtime API as the other drivers, and migrations us
 
 > [!NOTE]
 > Authentication uses the standard AWS SDK credential chain (IAM role on Lambda, `AWS_PROFILE` locally). Pass `clientOptions` to override the region or credentials explicitly.
+
+## Schema and Migrations
+
+Tables are declared in `db/schema.ts` with Drizzle's builders for your driver. A fresh SQLite app starts with a `users` table:
+
+```ts
+// db/schema.ts
+import { sqliteTable, integer, text } from '@guren/orm/drizzle/sqlite'
+
+export const users = sqliteTable('users', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+})
+```
+
+After changing the schema, generate a migration from it and apply it:
+
+```bash
+bunx guren make:migration --name add_posts_table
+bun run db:migrate
+```
+
+### Generating migrations
+
+The command reads the first of `drizzle.config.ts`, `.mts`, `.js`, `.mjs` and
+`.json` that exists, in that order, for the schema path, output directory, and
+dialect. You can override the paths:
+
+```bash
+bunx guren make:migration --schema ./custom/schema.ts --out ./custom/migrations
+```
+
+Overrides cannot be combined with drizzle-kit's `--config`, so Guren reads the
+config itself and restates its `dialect` (and `driver`) on the command line.
+Fields you did not override keep their configured values. If a config field
+cannot be restated as a flag, the command names it rather than letting the
+migration differ silently.
+
+An app with no drizzle config has nothing to declare the dialect, so state it
+directly:
+
+```bash
+bunx guren make:migration --dialect postgresql
+```
+
+The command runs the drizzle-kit your app installs, found in its `node_modules`
+or a parent's (a hoisted workspace install). With none installed it stops and
+asks for `bun install`; it never fetches a copy from npm, whose version may
+take other flags.
+
+> [!NOTE]
+> Once a migration has shipped to any environment, treat it as immutable. Create a follow-up migration to correct mistakes.
+
+### When migrations run
+
+`db:migrate` is not the only thing that applies them. Every driver except the
+Data API and D1 adapters applies pending migrations on the first `getDatabase()`
+or `configureOrm()` call, in every environment: `bun run dev`, `bun test`, and the
+container the scaffolded `Dockerfile` starts with `bun bin/serve.ts` all migrate
+at boot, which is what lets a deploy that ships only a new image arrive
+migrated. A boot that applies something prints one line naming what it applied
+and where it came from; an up-to-date database boots silently.
+
+The cost of that convenience is that a migration you did not mean to keep still
+reaches the database. A generator writes one as a new, untracked folder under
+`db/migrations/`, and neither `git switch` nor `git branch -D` removes an
+untracked file, so a migration generated on a branch you threw away is still on
+disk and still pending. Remove it with `git clean -fd` (`git clean -fdn` first
+shows what that would take) rather than expecting the branch to take it with it.
+
+Removing the folder only helps before a boot has applied it, and a dev server
+that reloads while the generator is still editing files can get there first.
+After that, the tracker keeps a row for a migration no folder carries, the
+migrator skips it, and whatever it created stays in the database. `db:status`
+lists such a row as orphaned, and every boot warns about it before migrating.
+
+The two exceptions never migrate at boot, for different reasons. The Data API
+adapter is opt-in (`migrateOnStart`) because the check costs serialized round
+trips on every Lambda cold start. D1 has no runtime path at all: migrations go
+through `wrangler d1 migrations apply <database>`, and `migrateDatabase()` says
+so rather than trying.
+
+## Seeding
+
+```ts
+// db/seeders/PostsSeeder.ts
+import { Post } from '@/app/Models/Post'
+
+export async function run() {
+  await Post.create({ title: 'Hello', body: 'Welcome to Guren!' })
+}
+```
+
+```bash
+bun run db:seed
+```
+
+### Seeding through Drizzle
+
+`defineSeeder()` hands the seeder the Drizzle database itself, which is useful
+for bulk inserts and upserts that bypass the model layer. Its type depends on
+the dialect, so annotate the context with `AppSeederContext`, the alias
+`config/database.ts` exports for whichever database the app is configured with:
+
+```ts
+// db/seeders/PostsSeeder.ts
+import { defineSeeder } from '@guren/core'
+import type { AppSeederContext } from '../../config/database.js'
+import { posts } from '../schema.js'
+
+export default defineSeeder(async ({ db }: AppSeederContext) => {
+  await db.insert(posts).values({ title: 'Hello', body: 'Welcome to Guren!' })
+})
+```
+
+`SeederContext` without a type argument means PostgreSQL, so on MySQL or SQLite
+it rejects the app's own schema. `AppSeederContext` is exported by
+`config/database.ts` in apps scaffolded from this release onwards; an older app
+imports its dialect's alias from `@guren/core` directly instead, one of
+`PostgresSeederContext`, `MySqlSeederContext`, `SqliteSeederContext`, or
+`AwsDataApiSeederContext`:
+
+```ts
+import { defineSeeder, type MySqlSeederContext } from '@guren/core'
+```
+
+> [!NOTE]
+> D1 has no seeder context: its `seedDatabase()` does not run seeders. Seed a D1
+> database with `wrangler d1 execute <database> --file <seed.sql>` instead.
 
 ## Defining Models
 
@@ -208,7 +385,7 @@ const newest = await Post.newQuery().max('createdAt')
 const hasDrafts = await Post.where('status', 'draft').exists()
 ```
 
-Aggregates run through the model's global scopes, so a model with `SoftDeletes` leaves trashed rows out of a sum just as it leaves them out of `get()`.
+Aggregates run through the model's [global scopes](#global-scopes), so a model with [`SoftDeletes`](#soft-deletes) leaves trashed rows out of a sum just as it leaves them out of `get()`.
 
 The result keeps the column's type. An `integer` or `real` column sums to a `number`, a `bigint({ mode: 'bigint' })` column to a `bigint`, and a `numeric` or `decimal` column to a `string`, which is how Drizzle types those columns so that no digit is lost. `avg()` returns a `number` for a `number` column and a decimal string otherwise. When nothing matches, `sum()` returns the zero of that type (`0`, `0n` or `'0'`) and the other three return `null`. Like `count()`, aggregates ignore `limit()` and `offset()`.
 
@@ -234,7 +411,7 @@ const rows = await Post.where('status', 'published')
   .orderBy(desc(posts.id))
 ```
 
-- Without an argument, `toDrizzle()` starts from `select().from(table)` and runs inside the open transaction when there is one. A query you pass runs on the handle you built it from, so inside `Model.transaction()` build it from `trx`.
+- Without an argument, `toDrizzle()` starts from `select().from(table)` and runs inside the open transaction when there is one. A query you pass runs on the handle you built it from, so inside [`Model.transaction()`](#transactions) build it from `trx`.
 - A `.where()` on the result is AND-ed with the model's conditions and cannot drop a scope. To pass a query that already has a `where()`, call `$dynamic()` before it.
 - The builder's `orderBy()`, `limit()` and `offset()` carry over. `select()` carries over only without an argument, since a query you pass keeps its own selection.
 - Rows come back as Drizzle reads them. Casts, accessors and eager loads do not apply.
@@ -245,6 +422,9 @@ const popular = await db.select().from(posts).where(and(Post.newQuery().toSql(),
 ```
 
 A query written against `db` alone never goes through the model and applies none of its scopes. `Model.query()` returned exactly that kind of query and is deprecated for this reason (see [Upgrading](./upgrading.md)).
+
+> [!TIP]
+> To use Drizzle's relational queries (`db.query.<table>.findMany(...)`), pass a `relations` option built with `defineRelations(schema, ...)` from `drizzle-orm` (RQB v2). The `Model` API in Guren does not require this.
 
 ## Creating and Updating
 
@@ -264,8 +444,6 @@ await Post.delete({ id: post.id })
 
 Bulk `update()`, `forceUpdate()`, and `delete()` reject `limit()`, `offset()`, and `orderBy()`. Select the intended IDs first, then write with `whereIn()`. On a `SoftDeletes` model, builder `delete()` also marks rows deleted; use `forceDelete()` for permanent removal.
 
-SQLite queues ordinary model reads and writes made outside an open transaction until that transaction settles. Awaiting a query from `toDrizzle()` without an argument waits the same way. Its synchronous `.all()`, `.get()`, `.run()` and `.values()` cannot wait, so they throw while another request holds a transaction open. A Drizzle query you build on `db` yourself, including one you pass to `toDrizzle(query)`, does not wait and would run inside that transaction; await the transaction first.
-
 ### Transactions
 
 Use `Model.transaction()` when multiple writes must succeed or fail together:
@@ -283,13 +461,7 @@ await Post.transaction(async (trx) => {
 
 If an error is thrown in the callback, Guren rolls back the transaction.
 
-Inside the callback, a model call with no `{ trx }` runs on the open transaction as well. Passing the handle is still correct, and the transaction-bound scope below does it for you. A call that leaves it off also stays inside the transaction instead of going to the pool, where a single-connection pool would make it wait on the transaction that owns the connection.
-
-A `Model.transaction()` opened inside another one runs as a savepoint on the transaction already open, not as a second top-level one. Its writes commit or roll back with the outer transaction, and an inner error the outer callback catches discards only the inner writes. Await each nested transaction before starting the next: savepoints on one connection are released in the order they were taken, so two running at once discard each other's frames.
-
-SQLite holds a single connection, which takes one transaction at a time, so concurrent transactions are queued and run one after another, each committing or rolling back on its own. Awaiting non-database work inside the callback is fine; it only makes the next transaction wait.
-
-You can also use the transaction-bound scope for cleaner type-safe writes:
+The second argument to the callback is a transaction-bound copy of the model, which passes `{ trx }` for you:
 
 ```ts
 await Post.transaction(async (_trx, txPost) => {
@@ -301,6 +473,12 @@ await Post.transaction(async (_trx, txPost) => {
   await txPost.update({ id: post.id }, { status: 'published' })
 })
 ```
+
+Things to know:
+
+- **A call without `{ trx }` still joins the transaction.** Inside the callback, a model call that leaves the handle off runs on the open transaction instead of going to the pool, where a single-connection pool would make it wait on the transaction that owns the connection.
+- **A nested `Model.transaction()` is a savepoint.** Its writes commit or roll back with the outer transaction, and an inner error the outer callback catches discards only the inner writes. Await each nested transaction before starting the next: savepoints on one connection are released in the order they were taken, so two running at once discard each other's frames.
+- **On SQLite, transactions run one at a time.** SQLite holds a single connection, so concurrent transactions are queued, each committing or rolling back on its own. Model reads and writes made outside a transaction wait until it settles, and so does awaiting `toDrizzle()` without an argument. Its synchronous `.all()`, `.get()`, `.run()` and `.values()` cannot wait, so they throw while another request holds a transaction open. A Drizzle query you build on `db` yourself does not wait and would run inside that transaction; await the transaction first.
 
 ### Mass Assignment Protection
 
@@ -395,6 +573,8 @@ export class Post extends defineModel(posts) {
 Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorId', 'id')
 ```
 
+`relationTypes` tells TypeScript what each relation loads as; the values (`[]`, `null`) are runtime placeholders. [Typing loaded relations](#typing-loaded-relations) shows the `declare` form that needs none. The related model is passed as a function that imports it, so two models can refer to each other without a circular import.
+
 ### Other relationship types
 
 ```ts
@@ -470,6 +650,8 @@ const user = await User.newQuery().with('posts').first()
 const page = await Post.newQuery().with('author').orderBy('id', 'desc').paginate({ page: 1, perPage: 10 })
 ```
 
+#### Nested relations
+
 Nested relations use dot notation:
 
 ```ts
@@ -485,6 +667,8 @@ const users = await User.newQuery().with('posts.comments', 'posts.tags').get()
 users[0].posts[0].comments // loaded
 users[0].posts[0].tags     // loaded too
 ```
+
+#### Constraining what loads
 
 On the QueryBuilder, the object form of `with()` takes a callback per relation
 to constrain the query that loads it. The callback receives that relation's
@@ -552,6 +736,8 @@ await Post.newQuery()
 The static `Model.with()` is a different signature: its second argument filters
 the *parent* records, not the relation. Use `Model.newQuery().with({ ... })` for
 constraint callbacks.
+
+#### Typing loaded relations
 
 Nested paths type only the head segment from `relationTypes`. To get typed
 children, declare the nested shape inside the head relation's record type:
@@ -708,11 +894,11 @@ export class PostObserver implements ModelObserver {
     data.slug = slugify(data.title as string)
   }
 
-  created(data: PlainObject) {
+  async created(data: PlainObject) {
     await notifySubscribers(data)
   }
 
-  deleting(data: PlainObject) {
+  async deleting(data: PlainObject) {
     await clearPostCache(data.id)
   }
 }
@@ -935,151 +1121,3 @@ async index() {
   })
 }
 ```
-
-## SQLite Support
-
-Guren supports SQLite out of the box via Bun's built-in SQLite driver. New projects use SQLite by default, with no Docker or external database needed.
-
-```ts
-// config/database.ts
-import { createSqliteDatabase, defineDatabaseConfig } from '@guren/core'
-import env from './env.js'
-
-const database = createSqliteDatabase({
-  migrationsFolder: new URL('../db/migrations', import.meta.url),
-  seedersFolder: new URL('../db/seeders', import.meta.url),
-  filename: (context) => {
-    const values = context?.env ?? env.parse(undefined, { mode: 'report' }).values
-    // `bun test` sets NODE_ENV=test, so the suite uses its own file.
-    return process.env.NODE_ENV === 'test'
-      ? values.TEST_DATABASE_URL ?? './data/guren.test.db'
-      : values.DATABASE_URL ?? './data/guren.db'
-  },
-})
-
-export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
-
-export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
-```
-
-With `seedOnBoot` true, the app runs the seeders at boot once the migrations folder holds migrations. Scaffolds turn it off in production, where you run `bunx guren db:seed` explicitly. [Testing](./testing.md#test-database-isolation) covers the separate test file.
-
-The SQLite adapter has the same API as `createPostgresDatabase`, so switching between them only requires changing the import and connection config.
-
-> [!TIP]
-> Use SQLite for development and testing, then switch to PostgreSQL for production. The ORM adapter abstraction means your models and queries work unchanged.
-
-## Migrations
-
-Generate migrations from your Drizzle schema:
-
-```bash
-bunx guren make:migration --name add_posts_table
-bun run db:migrate
-```
-
-The command reads the first of `drizzle.config.ts`, `.mts`, `.js`, `.mjs` and
-`.json` that exists, in that order, for the schema path, output directory, and
-dialect. You can override the paths:
-
-```bash
-bunx guren make:migration --schema ./custom/schema.ts --out ./custom/migrations
-```
-
-Overrides cannot be combined with drizzle-kit's `--config`, so Guren reads the
-config itself and restates its `dialect` (and `driver`) on the command line.
-Fields you did not override keep their configured values. If a config field
-cannot be restated as a flag, the command names it rather than letting the
-migration differ silently.
-
-An app with no drizzle config has nothing to declare the dialect, so state it
-directly:
-
-```bash
-bunx guren make:migration --dialect postgresql
-```
-
-The command runs the drizzle-kit your app installs, found in its `node_modules`
-or a parent's (a hoisted workspace install). With none installed it stops and
-asks for `bun install`; it never fetches a copy from npm, whose version may
-take other flags.
-
-> [!NOTE]
-> Once a migration has shipped to any environment, treat it as immutable. Create a follow-up migration to correct mistakes.
-
-### When migrations run
-
-`db:migrate` is not the only thing that applies them. Every driver except the
-Data API and D1 adapters applies pending migrations on the first `getDatabase()`
-or `configureOrm()` call, in every environment: `bun run dev`, `bun test`, and the
-container the scaffolded `Dockerfile` starts with `bun bin/serve.ts` all migrate
-at boot, which is what lets a deploy that ships only a new image arrive
-migrated. A boot that applies something prints one line naming what it applied
-and where it came from; an up-to-date database boots silently.
-
-The cost of that convenience is that a migration you did not mean to keep still
-reaches the database. A generator writes one as a new, untracked folder under
-`db/migrations/`, and neither `git switch` nor `git branch -D` removes an
-untracked file, so a migration generated on a branch you threw away is still on
-disk and still pending. Remove it with `git clean -fd` (`git clean -fdn` first
-shows what that would take) rather than expecting the branch to take it with it.
-
-Removing the folder only helps before a boot has applied it, and a dev server
-that reloads while the generator is still editing files can get there first.
-After that, the tracker keeps a row for a migration no folder carries, the
-migrator skips it, and whatever it created stays in the database. `db:status`
-lists such a row as orphaned, and every boot warns about it before migrating.
-
-The two exceptions never migrate at boot, for different reasons. The Data API
-adapter is opt-in (`migrateOnStart`) because the check costs serialized round
-trips on every Lambda cold start. D1 has no runtime path at all: migrations go
-through `wrangler d1 migrations apply <database>`, and `migrateDatabase()` says
-so rather than trying.
-
-## Seeding
-
-```ts
-// db/seeders/PostsSeeder.ts
-import { Post } from '@/app/Models/Post'
-
-export async function run() {
-  await Post.create({ title: 'Hello', body: 'Welcome to Guren!' })
-}
-```
-
-```bash
-bun run db:seed
-```
-
-### Seeding through Drizzle
-
-`defineSeeder()` hands the seeder the Drizzle database itself, which is useful
-for bulk inserts and upserts that bypass the model layer. Its type depends on
-the dialect, so annotate the context with `AppSeederContext`, the alias
-`config/database.ts` exports for whichever database the app is configured with:
-
-```ts
-// db/seeders/PostsSeeder.ts
-import { defineSeeder } from '@guren/core'
-import type { AppSeederContext } from '../../config/database.js'
-import { posts } from '../schema.js'
-
-export default defineSeeder(async ({ db }: AppSeederContext) => {
-  await db.insert(posts).values({ title: 'Hello', body: 'Welcome to Guren!' })
-})
-```
-
-`SeederContext` without a type argument means PostgreSQL, so on MySQL or SQLite
-it rejects the app's own schema. `AppSeederContext` is exported by
-`config/database.ts` in apps scaffolded from this release onwards; an older app
-imports its dialect's alias from `@guren/core` directly instead, one of
-`PostgresSeederContext`, `MySqlSeederContext`, `SqliteSeederContext`, or
-`AwsDataApiSeederContext`:
-
-```ts
-import { defineSeeder, type MySqlSeederContext } from '@guren/core'
-```
-
-> [!NOTE]
-> D1 has no seeder context: its `seedDatabase()` does not run seeders. Seed a D1
-> database with `wrangler d1 execute <database> --file <seed.sql>` instead.
