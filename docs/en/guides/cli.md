@@ -35,6 +35,7 @@ bunx guren add schedule
 bunx guren add lint
 bunx guren add prototype
 bunx guren add ai --provider anthropic
+bunx guren add oauth
 ```
 
 Start with `bunx guren add auth` and `bunx guren add resource`, then add more features as your app grows.
@@ -89,10 +90,10 @@ fixture under `resources/js/prototype/` that answers Inertia visits from seed da
 `resources/js/app.tsx` and `src/app.ts`. `--remove` takes the scripts and the loaders
 back out. `make:feature <Entity> --fields "…" --prototype` then writes the visible half
 of a feature only, pages, validator, a page-data type and fixture entries, and prints the
-routes to register on the `prototype` handler; the same command without the flag, in an
-app whose routes for that entity are still on `prototype`, promotes it: model, Resource
-and controller, with the Resource typed against the page-data type and the pages left as
-they are. `bun run build:prototype` runs `check --prototype` before Vite, so a route with
+routes to register on the `prototype` handler. Run the same command without the flag
+once that page-data type exists (`resources/js/types/<Entity>.ts`) and it promotes the
+feature: model, Resource and controller, with the Resource typed against the page-data
+type, and the pages and validator left as they are. `bun run build:prototype` runs `check --prototype` before Vite, so a route with
 no fixture entry fails the build rather than the customer's click.
 
 ### `add ai`
@@ -101,7 +102,7 @@ no fixture entry fails the build rather than the customer's click.
 for one provider (`--provider anthropic`, `openai` or `gateway`), declares that
 provider's API key in `config/env.ts` and the env files, and registers the config and
 `aiPlugin()` in `createApp()`. It then runs `bun add` for the plugin, `ai` and the
-provider package; `--no-install` prints the command instead. The key is optional, so
+provider package (`gateway` needs none); `--no-install` prints the command instead. The key is optional, so
 the app boots without it and the first prompt fails. The command needs a
 `config/env.ts`. In an app with a `db/schema.ts`, it also adds the
 `ai_conversations` and `ai_messages` tables, generates their migration, and
@@ -127,6 +128,7 @@ An app scaffolded from the `api` blueprint has no `@guren/inertia-client` depend
 | `add auth`, `make:auth` | Refuses before patching `db/schema.ts` or generating a migration. For a token API, guard `routes/api.ts` with `createBearerTokenMiddleware` and issue tokens with `createApiToken` (see the [API tokens guide](./api-tokens.md)) |
 | `add resource`, `make:feature` | Refuses before appending the table. Write a JSON controller with `make:controller` and wire it into `routes/api.ts` |
 | `make:view` | Refuses: a page has no JSON shape to adapt to |
+| `add prototype` | Refuses: prototype mode answers Inertia visits |
 | `make:controller` | Adapts: the controller returns `this.json(...)` and can be wired into `routes/api.ts` as written |
 
 When the signals cannot confirm an API-only app, every command behaves as on a fullstack one. Installing `@guren/inertia-client` is enough to switch back. `guren codegen` leaves page components out of `.guren/pages.gen.ts` on an API-only app, because that file imports `@guren/inertia-client`; `make:view`'s refusal exists to say so at the command that caused it.
@@ -467,7 +469,7 @@ rules: [
 Two flags make this practical for AI coding agents and large apps:
 
 ```bash
-bunx guren check --arch      # architecture checks only — fast path for an edit hook
+bunx guren check --arch      # architecture checks only, the fastest run
 bunx guren check --changed   # restrict checks to files changed vs. the merge base with main
 ```
 
@@ -529,7 +531,7 @@ What each selection writes:
 
 Skills follow the cross-agent SKILL.md standard. The MCP configs point at the dev server's MCP endpoint, which the scaffolded `dev` script enables with `GUREN_MCP=1`.
 
-The gate hooks run `guren gate` when a turn ends with uncommitted changes, so a failing stage is fixed in the same turn rather than in CI. They also verify the plan step `guren plan:next` marked (RFC 0030) and send the findings back while that step is not verified, up to three times. Claude Code additionally loads the `guren context` project map at session start and re-runs `guren check` after edits to routes, controllers, models, schema or pages. Agents without those hooks are told by `AGENTS.md` to run `guren context` at session start, `guren check` after edits, and `guren gate` before declaring a change done.
+The gate hooks run `guren gate` when a turn ends with uncommitted changes, so a failing stage is fixed in the same turn rather than in CI. They also verify the plan step `guren plan:next` marked (RFC 0030) and send the findings back while that step is not verified, up to three times. Claude Code additionally loads the `guren context` project map at session start, re-runs `guren check` after edits to routes, `app/Http/`, models, schema or pages, and runs oxlint on an edited source file when the app has an `.oxlintrc.json`. Agents without those hooks are told by `AGENTS.md` to run `guren context` at session start, `guren check` after edits, and `guren gate` before declaring a change done.
 
 A few details about where the hooks apply:
 
@@ -559,19 +561,19 @@ Install it at user scope: these skills are for the step *before* a project exist
 | `agent:init` | Install the agent harness for the selected agents into an existing app (skips files that already exist; `--force` overwrites) | `bunx guren agent:init --target codex,cursor` |
 | `agent:sync` | Refresh framework-managed files (rules, skills, subagents, hooks) for every agent detected on disk | `bunx guren agent:sync` |
 
-`agent:init --target` accepts `claude` (the default), `codex`, `cursor`, `copilot`, `opencode`, and `all`. `agent:sync` never overwrites user-owned files (`CLAUDE.md`, `AGENTS.md`, `.claude/settings.json`, and the MCP client configs), so your customizations survive framework updates (a user-owned file you deleted is recreated). When an MCP config already exists, `agent:init` leaves it alone and prints the snippet to merge by hand.
+`agent:init --target` accepts `claude` (the default), `codex`, `cursor`, `copilot`, `opencode`, and `all`. `agent:sync` never overwrites user-owned files (`CLAUDE.md`, `AGENTS.md`, `.claude/settings.json`, and the MCP client configs), so your customizations survive framework updates (a user-owned file you deleted is recreated). When an MCP config or a hook config already exists, `agent:init` leaves it alone and prints the snippet to merge by hand.
 
 Framework-managed files (rules, skills, subagents, hooks) *are* overwritten by `agent:sync`, which is its job, so keep project-specific rules in files of your own instead of appending to the shipped ones. The sync makes every overwrite visible: files that already match the latest version are skipped, and any file that held different contents is called out as replaced. Run `agent:sync --dry-run` first to see what a sync would write, replace, or prune without changing anything. `agent:init` accepts `--dry-run` too, as the preview for `--force`.
 
 When a framework rule or skill is renamed or removed in a release, the old copies stay behind, and Cursor and Copilot keep auto-loading stale `.cursor/rules/guren-*.mdc` / `.github/instructions/guren-*.instructions.md` files. `agent:sync` lists any files in the framework-managed locations that are no longer part of the harness; `agent:sync --prune` deletes them.
 
-The harness claims files **by name**, so your own files in the same directories are never listed or deleted unless they use a claimed name:
+The harness claims files **by name**, so your own files in the same directories (or in subdirectories of the rules roots) are never listed or deleted unless they use a claimed name:
 
 | Location | Claimed names |
 |----------|---------------|
 | `.claude/rules/`, `.agents/rules/` | The rule filenames the harness ships or used to ship, listed in your entry document (compared ignoring case) |
 | `.claude/skills/`, `.agents/skills/` | `dev-workflow`, `db-manage`, `scaffold`, `feature`, `guren-api`, `plugin-authoring`, `agent-interface`, `ai-agent`, `github-projects`, `plan-write`, `plan-implement` |
-| `.cursor/rules/`, `.github/instructions/` | **Any** `guren-`prefixed file |
+| `.cursor/rules/`, `.github/instructions/` | **Any** `guren-*.mdc` / `guren-*.instructions.md` file at the top level |
 
 Skills that `npx skills add` and Agent Plugins clients install into the same directories are yours by this rule too. Keep your own Cursor and Copilot rules under a different prefix, and review the report before `--prune`: a file of your own under a claimed name is the one case it removes.
 
@@ -894,11 +896,11 @@ bunx guren queue:work --stop-when-empty
 
 ## Shared Options
 
-These options behave consistently across every `make:*` and `add` command:
+`make:*` and `add` commands share one writer option:
 
-- `--force` / `-f`: Overwrite files even if they already exist.
-- `--dry-run`: Show what would be generated without writing files (planned).
-- `--cwd <path>`: Execute the command against a specific workspace (defaults to the current directory).
+- `--force` / `-f`: Overwrite files even if they already exist. `add ai` and `add prototype` take `--force` without the `-f` alias.
+
+Run a command from the app's root directory; it acts on the current directory.
 
 ## Template Details
 
@@ -923,7 +925,7 @@ The CLI copies the default template, updates metadata, and prompts for a renderi
 ## Troubleshooting
 - `command not found: bunx`: Your Bun version may be outdated. Install the supported Bun 1.4.2 baseline.
 - `Error: Port already in use`: The development server (default port 3333) is occupied. Update `PORT` in `.env` and restart.
-- `Database connection failed`: Make sure your Postgres instance is reachable and that `.env` points to `postgres://guren:guren@localhost:54322/guren`.
+- `Database connection failed`: A new app uses SQLite at `./data/guren.db`, so check `DATABASE_URL` in `.env`. On an app created with `--db postgres` or `--db mysql`, make sure the database is running (`bun run db:up`) and that `DATABASE_URL` points at it.
 
 ## How the Checks Read the App
 
@@ -968,7 +970,7 @@ from source, and the routes and storage drivers from the app.
 
 `guren check`, `doctor`, `audit`, `gate` and `plan:verify` introspect, all
 with the same 10-second cap, so `check --ci` and the gate judge an app the same
-way. The edit hook (`check --arch`) and the dev MCP server's `guren_check` do
+way. The edit hook (`check --changed`) and the dev MCP server's `guren_check` do
 not, so there the verdicts only the app can answer are `-unverified`.
 
 Each of these results carries `evidence` in `--json` output. A verdict that reads

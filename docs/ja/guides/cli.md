@@ -35,6 +35,7 @@ bunx guren add schedule
 bunx guren add lint
 bunx guren add prototype
 bunx guren add ai --provider anthropic
+bunx guren add oauth
 ```
 
 まず `bunx guren add auth` と `bunx guren add resource` から始め、アプリが育つのに合わせてほかの機能を足していってください。
@@ -71,11 +72,11 @@ bunx guren add admin --public
 
 `add prototype` は、プロトタイプモード([プロトタイプファースト](./prototype-first.md))を導入するコマンドです。実行すると、シードデータで Inertia の visit に応答する `resources/js/prototype/` の fixture、`dev:prototype` と `build:prototype` のスクリプト、`resources/js/app.tsx` と `src/app.ts` に入るローダー 2 行が追加されます。`--remove` を付けると、スクリプトとローダーを取り除きます。
 
-続けて `make:feature <Entity> --fields "…" --prototype` を実行すると、機能のうち画面に見える部分(ページ、バリデーター、ページデータ型、fixture のエントリ)を書き出し、`prototype` ハンドラーで登録するルートを表示します。そのエンティティのルートがまだ `prototype` で動いているアプリで、同じコマンドをフラグなしで実行すると昇格になります。モデル、Resource、コントローラーが書き出され、Resource はページデータ型に合わせて型付けされます。ページには手を付けません。`bun run build:prototype` は Vite の前に `check --prototype` を実行するので、fixture にエントリがないルートは、顧客がクリックしたときではなくビルドの時点で失敗します。
+続けて `make:feature <Entity> --fields "…" --prototype` を実行すると、機能のうち画面に見える部分(ページ、バリデーター、ページデータ型、fixture のエントリ)を書き出し、`prototype` ハンドラーで登録するルートを表示します。ページデータ型（`resources/js/types/<Entity>.ts`）ができたあとで、同じコマンドをフラグなしで実行すると昇格になります。モデル、Resource、コントローラーが書き出され、Resource はページデータ型に合わせて型付けされます。ページとバリデーターには手を付けません。`bun run build:prototype` は Vite の前に `check --prototype` を実行するので、fixture にエントリがないルートは、顧客がクリックしたときではなくビルドの時点で失敗します。
 
 ### `add ai`
 
-`add ai` は、`@guren/plugin-ai` を使ったインプロセスの AI エージェントを導入します。プロバイダを 1 つ(`--provider anthropic`、`openai`、`gateway` のいずれか)選ぶと、そのプロバイダ用の `config/ai.ts` を書き出し、API キーを `config/env.ts` と env ファイルに宣言し、設定と `aiPlugin()` を `createApp()` に登録します。そのあとプラグイン、`ai`、プロバイダのパッケージを `bun add` します。`--no-install` を付けると、実行するコマンドを表示するだけになります。キーは任意なので、設定していなくてもアプリは起動し、最初のプロンプトを送った時点で失敗します。
+`add ai` は、`@guren/plugin-ai` を使ったインプロセスの AI エージェントを導入します。プロバイダを 1 つ(`--provider anthropic`、`openai`、`gateway` のいずれか)選ぶと、そのプロバイダ用の `config/ai.ts` を書き出し、API キーを `config/env.ts` と env ファイルに宣言し、設定と `aiPlugin()` を `createApp()` に登録します。そのあとプラグイン、`ai`、プロバイダーのパッケージ（`gateway` では不要）を `bun add` します。`--no-install` を付けると、実行するコマンドを表示するだけになります。キーは任意なので、設定していなくてもアプリは起動し、最初のプロンプトを送った時点で失敗します。
 
 このコマンドを使うには `config/env.ts` が必要です。`db/schema.ts` があるアプリでは、`ai_conversations` と `ai_messages` の 2 つのテーブルを追加してマイグレーションを生成し、会話をそこに保存するよう `config/ai.ts` を設定します。`--no-conversations` を付けると、この処理を省きます。テーブルには、ツールの結果も含めてモデルが見た会話がそのまま残るので、機密データとして扱ってください。
 
@@ -95,6 +96,7 @@ lint の設定は、`create-guren-app` 1.12 以降で作ったアプリには最
 | `add auth`、`make:auth` | `db/schema.ts` へのパッチやマイグレーションの生成より前に中断する。トークンベースの API なら、`createBearerTokenMiddleware` で `routes/api.ts` を保護し、`createApiToken` でトークンを発行する（[API トークンガイド](./api-tokens.md)を参照） |
 | `add resource`、`make:feature` | テーブルを追記する前に中断する。JSON を返すコントローラーを `make:controller` で生成し、`routes/api.ts` につなぐ |
 | `make:view` | 中断する。ページには代わりになる JSON の形がない |
+| `add prototype` | 中断する。プロトタイプモードは Inertia の visit に応答するもの |
 | `make:controller` | 合わせて生成する。`this.json(...)` を返すコントローラーになり、そのまま `routes/api.ts` につなげる |
 
 手がかりから API 専用だと確認できなければ、どのコマンドもフルスタックのアプリと同じように動きます。`@guren/inertia-client` をインストールすれば、通常の動きに戻ります。`guren codegen` は、API 専用アプリではページコンポーネントを `.guren/pages.gen.ts` から外します。このファイルが `@guren/inertia-client` を import するためで、`make:view` の中断は、それを原因となったコマンドの時点で知らせるためのものです。
@@ -363,7 +365,7 @@ rules: [
 AI コーディングエージェントや大きなアプリで使いやすくするためのフラグが 2 つあります。
 
 ```bash
-bunx guren check --arch      # アーキテクチャチェックのみ実行 — 編集フック向けの高速パス
+bunx guren check --arch      # アーキテクチャチェックのみ。いちばん速い
 bunx guren check --changed   # main とのマージベースからの変更ファイルのみを検査対象にする
 ```
 
@@ -425,7 +427,7 @@ Inertia のページは、`modules/<name>/` の下には置きません。トッ
 
 スキルはエージェント共通の SKILL.md 標準形式です。MCP の設定は開発サーバーの MCP エンドポイントを指し、エンドポイントは生成された `dev` スクリプトの `GUREN_MCP=1` で有効になります。
 
-ゲートの hook は、コミットしていない変更を残したままターンが終わると `guren gate` を実行します。そのため、失敗したステージは CI まで持ち越さず、同じターンの中で直せます。同じ hook は、`guren plan:next` で印を付けた計画のステップも検証し（RFC 0030）、そのステップの検証が通るまで、最大 3 回指摘を差し戻します。Claude Code では、さらにセッションの開始時に `guren context` のプロジェクトマップを読み込み、ルート・コントローラー・モデル・スキーマ・ページを編集すると `guren check` を再実行します。これらの hook がないエージェントには、`AGENTS.md` で、セッション開始時に `guren context`、編集後に `guren check`、変更が終わったと言う前に `guren gate` を実行するよう指示しています。
+ゲートの hook は、コミットしていない変更を残したままターンが終わると `guren gate` を実行します。そのため、失敗したステージは CI まで持ち越さず、同じターンの中で直せます。同じ hook は、`guren plan:next` で印を付けた計画のステップも検証し（RFC 0030）、そのステップの検証が通るまで、最大 3 回指摘を差し戻します。Claude Code では、さらにセッションの開始時に `guren context` のプロジェクトマップを読み込み、ルート、`app/Http/`、モデル、スキーマ、ページを編集すると `guren check` を再実行し、アプリに `.oxlintrc.json` があれば、編集したソースファイルに oxlint をかけます。これらの hook がないエージェントには、`AGENTS.md` で、セッション開始時に `guren context`、編集後に `guren check`、変更が終わったと言う前に `guren gate` を実行するよう指示しています。
 
 hook が効く範囲には、次の注意点があります。
 
@@ -457,7 +459,7 @@ npx skills add gurenjs/agent-skills
 | `agent:init` | 選んだエージェント向けのハーネスを既存のアプリに入れる(既存のファイルはスキップ、`--force` で上書き) | `bunx guren agent:init --target codex,cursor` |
 | `agent:sync` | フレームワークが管理するファイル(ルール・スキル・サブエージェント・hooks)を、ディスク上で見つかったすべてのエージェントの分まとめて最新版にする | `bunx guren agent:sync` |
 
-`agent:init --target` には `claude`(デフォルト)・`codex`・`cursor`・`copilot`・`opencode`・`all` を指定できます。`agent:sync` は利用者が持つファイル(`CLAUDE.md`・`AGENTS.md`・`.claude/settings.json`・各 MCP クライアントの設定)を上書きしないので、フレームワークを更新してもカスタマイズは残ります(削除した利用者側のファイルは作り直されます)。MCP の設定がすでにある場合、`agent:init` はファイルを上書きせず、手で追記するためのスニペットを表示します。
+`agent:init --target` には `claude`(デフォルト)・`codex`・`cursor`・`copilot`・`opencode`・`all` を指定できます。`agent:sync` は利用者が持つファイル(`CLAUDE.md`・`AGENTS.md`・`.claude/settings.json`・各 MCP クライアントの設定)を上書きしないので、フレームワークを更新してもカスタマイズは残ります(削除した利用者側のファイルは作り直されます)。MCP や hook の設定がすでにある場合、`agent:init` はファイルを上書きせず、手で追記するためのスニペットを表示します。
 
 フレームワークが管理するファイル(ルール・スキル・サブエージェント・hooks)は、`agent:sync` が上書きします。それがこのコマンドの役目なので、プロジェクト固有のルールは配布されたファイルに書き足さず、別の名前の自分のファイルとして置いてください。上書きは必ず画面に表示されます。最新版と同じファイルはスキップし、内容が違っていたファイルは「置き換えた」とはっきり示します。先に `agent:sync --dry-run` を実行すれば、ファイルを一切変えずに、何が書き込まれ、何が置き換えられ、何が削除候補になるかを確認できます。`agent:init` も `--dry-run` を受け付けるので、`--force` のプレビューとして使えます。
 
@@ -466,10 +468,10 @@ npx skills add gurenjs/agent-skills
 削除の対象は、常に**名前**で決まります。
 
 - ルールのルート(`.claude/rules/`、`.agents/rules/`): ハーネスが配布している(または以前配布した)ルールのファイル名だけ
-- 各エージェント形式のルール: `guren-` プレフィックスのものだけ
+- 各エージェント形式のルール: 最上位にある `guren-*.mdc` / `guren-*.instructions.md` だけ
 - スキルのルート(`.claude/skills/`、`.agents/skills/`): ハーネスが配布している(または以前配布した)スキルのディレクトリだけ
 
-配布されたルールの隣(サブディレクトリを含む)に置いた自作のルールファイルや、自分で追加したスキル(`npx skills add` や Agent Plugins のクライアントが同じディレクトリに入れたものを含む)は、一覧にも出ず、削除もされません。例外は、ハーネス自身が配布している名前とぶつかった場合だけです。スキルなら `dev-workflow`・`db-manage`・`scaffold`・`feature`・`guren-api`・`plugin-authoring`・`agent-interface`・`ai-agent`・`github-projects`・`plan-write`・`plan-implement`、ルールならエントリードキュメントに載っているファイル名(大文字と小文字は区別しません)が該当します。Cursor と Copilot では名前の一覧ではなくプレフィックスで判定するので、`guren-` で始まるファイルが**すべて**該当します。Cursor や Copilot の自作ルールには別のプレフィックスを付けておき、`--prune` の前には一覧を確認してください。
+配布されたルールの隣(サブディレクトリを含む)に置いた自作のルールファイルや、自分で追加したスキル(`npx skills add` や Agent Plugins のクライアントが同じディレクトリに入れたものを含む)は、一覧にも出ず、削除もされません。例外は、ハーネス自身が配布している名前とぶつかった場合だけです。スキルなら `dev-workflow`・`db-manage`・`scaffold`・`feature`・`guren-api`・`plugin-authoring`・`agent-interface`・`ai-agent`・`github-projects`・`plan-write`・`plan-implement`、ルールならエントリードキュメントに載っているファイル名(大文字と小文字は区別しません)が該当します。Cursor と Copilot では名前の一覧ではなくプレフィックスで判定するので、最上位にある `guren-*.mdc` / `guren-*.instructions.md` が**すべて**該当します。Cursor や Copilot の自作ルールには別のプレフィックスを付けておき、`--prune` の前には一覧を確認してください。
 
 ## デプロイレシピ生成
 
@@ -786,11 +788,11 @@ bunx guren queue:work --stop-when-empty
 
 ## 共通オプション
 
-次のオプションは、どの `make:*` / `add` コマンドでも同じように動きます。
+`make:*` と `add` のコマンドには、共通の書き込みオプションが 1 つあります。
 
-- `--force` / `-f`: 既存のファイルを上書きする
-- `--dry-run`: 生成する内容を表示するだけで、書き込まない(予定)
-- `--cwd <path>`: 指定したパスのワークスペースでコマンドを実行する(デフォルトはカレントディレクトリ)
+- `--force` / `-f`: 既存のファイルを上書きする。`add ai` と `add prototype` は `--force` だけを受け付け、`-f` は使えない
+
+コマンドはアプリのルートディレクトリで実行します。カレントディレクトリが対象になります。
 
 ## テンプレートの特徴
 
@@ -815,7 +817,7 @@ CLI はデフォルトのテンプレートをコピーし、メタデータを�
 ## トラブルシューティング
 - `command not found: bunx`: Bun が古いのかもしれません。サポートの基準になっている Bun 1.4.2 をインストールしてください。
 - `Error: Port already in use`: 開発サーバーのポート(デフォルトは 3333)がほかで使われています。`.env` の `PORT` を変えてから再起動してください。
-- `Database connection failed`: デフォルトのデータベースは SQLite(`./data/guren.db`)です。PostgreSQL を使う場合は、`.env` の `DATABASE_URL` を確認してください。
+- `Database connection failed`: 新しいアプリは SQLite（`./data/guren.db`）を使うので、`.env` の `DATABASE_URL` を確認してください。`--db postgres` や `--db mysql` で作ったアプリでは、データベースが起動していて（`bun run db:up`）、`DATABASE_URL` がそれを指していることを確かめてください。
 
 ## チェックがアプリを読む仕組み
 
@@ -844,7 +846,7 @@ CLI はデフォルトのテンプレートをコピーし、メタデータを�
 
 イントロスペクションは 1 回の実行につき最大 1 回で、ソースファイルを変更していない `--changed` の実行では行いません。マニフェストは実行環境の `.env` を読み込んだ状態で作られるので、環境変数で選ぶストアは、ローカルの値で判定されます。また、イントロスペクションは provider の `boot()` より前で止まります。そのため、関数の中で呼ぶ `configureAttachments()` については、呼び出しのオプションをソースから、ルートとストレージのドライバをアプリから読みます。
 
-イントロスペクションは、`guren check`、`doctor`、`audit`、`gate`、`plan:verify` で行います。上限はどれも 10 秒なので、`check --ci` とゲートの判定は一致します。編集フック(`check --arch`)と dev MCP サーバの `guren_check` はイントロスペクションを行わないので、アプリでしか答えられない判定は `-unverified` になります。
+イントロスペクションは、`guren check`、`doctor`、`audit`、`gate`、`plan:verify` で行います。上限はどれも 10 秒なので、`check --ci` とゲートの判定は一致します。編集フック(`check --changed`)と dev MCP サーバの `guren_check` はイントロスペクションを行わないので、アプリでしか答えられない判定は `-unverified` になります。
 
 これらの結果には、`--json` の出力で `evidence` が付きます。複数の事実を読む判定では、その中でいちばん弱い根拠を示します。
 
