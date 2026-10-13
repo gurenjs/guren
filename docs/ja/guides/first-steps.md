@@ -166,7 +166,9 @@ test('lists posts', async () => {
 
 `bun run dev` を実行した状態で [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs) を開くと、これらの文書とエンティティ、コードパスを 1 つのインタラクティブな Docs Graph として見られます。
 
-![Docs Graph。スペックビューと ADR のノードが、schema.ts・Models・routes・Controllers・pages といったコードのノードと線で結ばれている](../../images/docs-graph.png)Docs Graph は上のリクエスト経路の代わりになるものではありません。経路のまわりに、設計の理由と生成したビューを結びつけるものです。ワークフロー全体は [スペックアンカード開発](./spec-anchored.md) を参照してください。
+![Docs Graph。スペックビューと ADR のノードが、schema.ts・Models・routes・Controllers・pages といったコードのノードと線で結ばれている](../../images/docs-graph.png)
+
+Docs Graph は上のリクエスト経路の代わりになるものではありません。経路のまわりに、設計の理由と生成したビューを結びつけるものです。ワークフロー全体は [スペックアンカード開発](./spec-anchored.md) を参照してください。
 
 ## メンタルモデル
 
