@@ -1,6 +1,8 @@
 # 第 4 章: バリデーションとリソース
 
-第 3 章では、スキーマをコントローラーの中に書き、ページにはフィールドをそのまま詰めたオブジェクトを渡していました。この章では、そのどちらにも決まった置き場所を用意します。1 つはバリデーターファイルで、人が読んで分かるエラーメッセージを持たせ、ルート・コントローラー・フォームの 3 か所で共有します。もう 1 つはリソースクラスで、ブラウザから投稿がどう見えるかをここで決めます。そのあと編集、削除、ページネーションをテストで仕様にしてエージェントに任せ、取り込む前に `code-review` サブエージェントにもう 1 人のレビュアーとして目を通してもらいます。
+第 3 章では、スキーマをコントローラーの中に書き、ページにはフィールドをそのまま詰めたオブジェクトを渡していました。この章では、そのどちらにも決まった置き場所を用意します。1 つはバリデーターファイルで、人が読んで分かるエラーメッセージを持たせ、ルート・コントローラー・フォームの 3 か所で共有します。もう 1 つはリソースクラスで、ブラウザから投稿がどう見えるかをここで決めます。
+
+そのあと編集、削除、ページネーションをテストで仕様にしてエージェントに任せ、取り込む前に `code-review` サブエージェントにもう 1 人のレビュアーとして目を通してもらいます。
 
 **この章で学ぶこと:**
 
@@ -539,7 +541,9 @@ bun test
 Complete the posts CRUD. Add `edit`, `update` and `destroy` actions to `PostController` using route model binding like `show`, and register `GET /posts/:id/edit` (`posts.edit`), `PUT /posts/:id` (`posts.update`, with `body: PostPayloadSchema`) and `DELETE /posts/:id` (`posts.destroy`). Add `resources/js/pages/posts/Edit.tsx` as a form like `New.tsx` that submits with `form.put`, and give `Show.tsx` an Edit link and a Delete button. Paginate `index` at ten posts per page with `Post.paginate` and the `paginate` helper, validating `?page=` with a `ListPostsQuerySchema` in the validator, and render the page links in `Index.tsx`. Use `PostResource` for every post sent to a page. `tests/PostController.test.ts` describes all of it; make it pass.
 ```
 
-エージェントに任せる作業としてはここまでで最も大きいので、この章で紹介するハーネスの仕組みを使います。`.claude/agents/code-review.md` にある **`code-review` サブエージェント**です。サブエージェントは、専用の指示書と独立したコンテキストを持つエージェントで、メインのエージェントから呼び出して使います。このサブエージェントの指示書には Guren のコードレビューの手順が書かれています。まず `guren check` と `guren audit` を実行し、そのうえで 2 つのコマンドでは判断できない点を差分から読み取ります。
+エージェントに任せる作業としてはここまでで最も大きいので、この章で紹介するハーネスの仕組みを使います。`.claude/agents/code-review.md` にある **`code-review` サブエージェント**です。サブエージェントは、専用の指示書と独立したコンテキストを持つエージェントで、メインのエージェントから呼び出して使います。
+
+このサブエージェントの指示書には Guren のコードレビューの手順が書かれています。まず `guren check` と `guren audit` を実行し、そのうえで 2 つのコマンドでは判断できない点を差分から読み取ります。
 
 エージェントが完了を報告したら、下の確認項目を自分で確かめる前に、エージェントに次のプロンプトを送ります。
 
@@ -880,7 +884,9 @@ it('rejects a title of only spaces', async () => {
 })
 ```
 
-`.trim()` がないと空白は `.min(1)` を通ってしまい、投稿が保存されてリクエストはリダイレクトされるので、テストは失敗します。`.trim()` を戻せば通ります。ルールが外れたことに気づく既存のテストは、ありません。「rejects an empty post with a message per field」が送るのは `''` で、これは `.trim()` の有無にかかわらず `.min(1)` で失敗します。つまりこのテストは、ルールがあってもなくても通ります。新しいテストを残す価値があるのはそのためです。
+`.trim()` がないと空白は `.min(1)` を通ってしまい、投稿が保存されてリクエストはリダイレクトされるので、テストは失敗します。`.trim()` を戻せば通ります。
+
+ルールが外れたことに気づく既存のテストは、ありません。「rejects an empty post with a message per field」が送るのは `''` で、これは `.trim()` の有無にかかわらず `.min(1)` で失敗します。つまりこのテストは、ルールがあってもなくても通ります。新しいテストを残す価値があるのはそのためです。
 
 </details>
 
@@ -889,7 +895,11 @@ it('rejects a title of only spaces', async () => {
 
 `bun test` は TypeScript を型検査せずに実行します。`bun run typecheck` も実行して、結果を比べてください。
 
-失敗するのは、レスポンスの中に本文を探すテストです。「shows one post」と「serves the edit form with the post in it」がそれに当たります。一覧のテストはタイトルしか見ないので通ります。ページが表示されるのは、実行時に props を検査するものがないからです。`post.body` は `undefined` になり、React はそこに何も描画しません。契約を検査しているのはコンパイル時です。`toArray()` は `body` を必須とする `PostResourceData` を返すと宣言しているので、`bun run typecheck` は `app/Http/Resources/PostResource.ts` で失敗します。インターフェースからも `body` を消すと、今度は `post.body` を読んでいるページの側で失敗します。ゲートはテストより先に typecheck を実行するので、そこで止まっていたはずです。
+失敗するのは、レスポンスの中に本文を探すテストです。「shows one post」と「serves the edit form with the post in it」がそれに当たります。一覧のテストはタイトルしか見ないので通ります。
+
+ページが表示されるのは、実行時に props を検査するものがないからです。`post.body` は `undefined` になり、React はそこに何も描画しません。
+
+契約を検査しているのはコンパイル時です。`toArray()` は `body` を必須とする `PostResourceData` を返すと宣言しているので、`bun run typecheck` は `app/Http/Resources/PostResource.ts` で失敗します。インターフェースからも `body` を消すと、今度は `post.body` を読んでいるページの側で失敗します。ゲートはテストより先に typecheck を実行するので、そこで止まっていたはずです。
 
 </details>
 

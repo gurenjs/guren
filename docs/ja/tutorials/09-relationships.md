@@ -1,6 +1,8 @@
 # 第 9 章: リレーションシップ
 
-第 6 章では、著者の id を集めて `IN` クエリを 1 本実行するヘルパー `authorsOf` を作りました。これでも動きますし、リレーションシップが内部でしていることもこれと同じです。この章では、このヘルパーを本来の仕組みに置き換えます。モデルに一度だけ宣言し、`with()` で読み込む `belongsTo` と `hasMany` です。続いて、ほかの 2 つのテーブルを参照する最初のテーブルとしてコメントを追加します。最後に、まだ一度も作っていない形である、中間テーブルを通した多対多のタグ付けをエージェントに任せます。
+第 6 章では、著者の id を集めて `IN` クエリを 1 本実行するヘルパー `authorsOf` を作りました。これでも動きますし、リレーションシップが内部でしていることもこれと同じです。この章では、このヘルパーを本来の仕組みに置き換えます。モデルに一度だけ宣言し、`with()` で読み込む `belongsTo` と `hasMany` です。
+
+続いて、ほかの 2 つのテーブルを参照する最初のテーブルとしてコメントを追加します。最後に、まだ一度も作っていない形である、中間テーブルを通した多対多のタグ付けをエージェントに任せます。
 
 この章を終えると、ブログには互いに参照し合う 4 つのテーブルがそろいます。
 
@@ -48,7 +50,9 @@ export class Post extends defineModel(posts, { fillable: ['title', 'body'] }) {
 Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorId', 'id')
 ```
 
-宣言は 2 つの部分に分かれています。`relationTypes` は型の側で、読み込んだ `author` が `UserRecord` か `null` になることを表します。プレースホルダーの値(to-one なら `null`、to-many なら `[]`)も、この型に合わせる必要があります。クラスの後ろにある `Post.belongsTo(...)` はランタイムの側で、リレーションの名前、相手のモデル、このテーブルの外部キー、その外部キーが指すキーを順に渡します。相手のモデルを関数の中で遅延 import しているのは、このあと `User` からも `Post` を参照するからです。2 つのモジュールが読み込み時に互いを import し合うことはできません。
+宣言は 2 つの部分に分かれています。`relationTypes` は型の側で、読み込んだ `author` が `UserRecord` か `null` になることを表します。プレースホルダーの値(to-one なら `null`、to-many なら `[]`)も、この型に合わせる必要があります。クラスの後ろにある `Post.belongsTo(...)` はランタイムの側で、リレーションの名前、相手のモデル、このテーブルの外部キー、その外部キーが指すキーを順に渡します。
+
+相手のモデルを関数の中で遅延 import しているのは、このあと `User` からも `Post` を参照するからです。2 つのモジュールが読み込み時に互いを import し合うことはできません。
 
 逆向きのリレーションは `User` に書きます。
 
@@ -256,7 +260,9 @@ bun test
 
 以前と同じ投稿のテスト 20 件がすべて通ります。リレーションを使っても、振る舞いを変えない以上はただのリファクタリングです。
 
-ただ、テストでは確かめられない変化が 1 つあります。いま `bunx guren spec:generate` を実行すると、`User ||--o{ Post` が描かれるようになっています。このコマンドが出力する ER 図とドメイン図は、リレーションを `Post.belongsTo(...)` や `User.hasMany(...)` の呼び出しから、相手のモデルを `relationTypes` から読み取ります。リレーションには狭い別名ではなくレコード型(`BelongsToRecord<UserRecord>`)で型を付けたほうがよい理由が、これでもう 1 つ増えました。第 13 章では、これらの図を生成してドキュメントからリンクし、ゲートで検査するようにします。それまでは生成しないでおいてください。誰も再生成しない図をコミットしておくと、ゲートがそこで失敗します。
+ただ、テストでは確かめられない変化が 1 つあります。いま `bunx guren spec:generate` を実行すると、`User ||--o{ Post` が描かれるようになっています。このコマンドが出力する ER 図とドメイン図は、リレーションを `Post.belongsTo(...)` や `User.hasMany(...)` の呼び出しから、相手のモデルを `relationTypes` から読み取ります。リレーションには狭い別名ではなくレコード型(`BelongsToRecord<UserRecord>`)で型を付けたほうがよい理由が、これでもう 1 つ増えました。
+
+第 13 章では、これらの図を生成してドキュメントからリンクし、ゲートで検査するようにします。それまでは生成しないでおいてください。誰も再生成しない図をコミットしておくと、ゲートがそこで失敗します。
 
 ```bash run
 bunx guren gate
@@ -672,7 +678,9 @@ export default class PostController extends Controller {
 }
 ```
 
-`Comment.where('postId', post.id).with('author').orderBy('id', 'asc').get()` はクエリビルダーを使った書き方で、絞り込み、結果へのリレーションの読み込み、並べ替えを順に行います。コメントが何件あっても、コメントに 1 本、著者に 1 本のクエリで済みます。2 つ目のテストで使っている `Post.findWithOrFail(id, 'comments')` と比べてみてください。こちらは同じコメントを `hasMany` 経由で読み込みます。まず投稿を取得し、その子をプロパティとして受け取りたいときは `findWithOrFail` が向いています。子そのものを一覧にしたくて、並べ方まで指定したいときはクエリビルダーを使います。
+`Comment.where('postId', post.id).with('author').orderBy('id', 'asc').get()` はクエリビルダーを使った書き方で、絞り込み、結果へのリレーションの読み込み、並べ替えを順に行います。コメントが何件あっても、コメントに 1 本、著者に 1 本のクエリで済みます。
+
+2 つ目のテストで使っている `Post.findWithOrFail(id, 'comments')` と比べてみてください。こちらは同じコメントを `hasMany` 経由で読み込みます。まず投稿を取得し、その子をプロパティとして受け取りたいときは `findWithOrFail` が向いています。子そのものを一覧にしたくて、並べ方まで指定したいときはクエリビルダーを使います。
 
 ルートは 2 本で、どちらもサインインしたユーザーだけが使えます。
 
@@ -1092,7 +1100,9 @@ describe('PostController', () => {
 bun test
 ```
 
-2 件のテストが失敗します。`Post` に `tags` というリレーションがないので、`findWithOrFail` が例外を投げるからです。最初のテストをもう一度読んでみてください。`Guren, bun, guren` を送り、`bun` と `guren` が返ることを期待しています。カンマで区切り、小文字にそろえ、重複を取り除くこと。フォームに求める約束はこれで全部です。
+2 件のテストが失敗します。`Post` に `tags` というリレーションがないので、`findWithOrFail` が例外を投げるからです。
+
+最初のテストをもう一度読んでみてください。`Guren, bun, guren` を送り、`bun` と `guren` が返ることを期待しています。カンマで区切り、小文字にそろえ、重複を取り除くこと。フォームに求める約束はこれで全部です。
 
 ## 5. エージェントに任せる
 
@@ -1102,7 +1112,9 @@ bun test
 Add tags to posts as a many-to-many. Tables `tags` (unique `name`) and `post_tags` (`postId`, `tagId`, composite primary key, cascade on delete) with a migration; models `Tag` and `PostTag`; a `tags` relation on `Post` declared with `belongsToMany` through the `postTags` table and typed in `relationTypes`. The post forms get a `tags` text field: a comma-separated list, lower-cased, trimmed, de-duplicated, empty allowed. `store` and `update` replace the post's tags with the list, creating tag rows that do not exist yet; the post page shows the tag names; `PostResource` carries `tags` as names. `tests/PostController.test.ts` describes it; make it pass.
 ```
 
-ここで効いてくるハーネスの仕組みは、**`orm-models.md` のルール**と、セッション開始時に `guren context` がエージェントに渡す API ダイジェストです。どちらにも、Guren には `attach()`、`detach()`、`sync()` がないことがはっきり書かれています。中間テーブルはモデルの 1 つで、ほかのモデルと同じく `create` と `delete` で書き込みます。ほかの ORM を扱ったことのあるエージェントはこれらのメソッドを覚えているので、ためらわずに `post.tags().sync(ids)` と書いてしまいがちです。エージェントがそうせずに `PostTag` モデルを使うかどうかを見てください。`PostTag` を使ったなら、ルールとダイジェストが効いています。
+ここで効いてくるハーネスの仕組みは、**`orm-models.md` のルール**と、セッション開始時に `guren context` がエージェントに渡す API ダイジェストです。どちらにも、Guren には `attach()`、`detach()`、`sync()` がないことがはっきり書かれています。中間テーブルはモデルの 1 つで、ほかのモデルと同じく `create` と `delete` で書き込みます。
+
+ほかの ORM を扱ったことのあるエージェントはこれらのメソッドを覚えているので、ためらわずに `post.tags().sync(ids)` と書いてしまいがちです。エージェントがそうせずに `PostTag` モデルを使うかどうかを見てください。`PostTag` を使ったなら、ルールとダイジェストが効いています。
 
 **手元にエージェントがない場合は、** まずスキーマを書きます。`primaryKey` は `sqliteTable` と同じモジュールから import します。
 

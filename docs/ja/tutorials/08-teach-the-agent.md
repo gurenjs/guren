@@ -1,6 +1,8 @@
 # 第 8 章: エージェントにプロジェクトを教える
 
-第 7 章では、認可に一言も触れないプロンプトを送り、その抜けに何が気づくかを確かめました。気づいたのは、読者が自分で書いたテストだけでした。この章では、あそこまで際どい状況を二度と起こさないようにします。用意するのは 3 つで、エージェントがコントローラーを開くたびに読むルール、所有者のいるリソースを作るときに従う手順、そしてこの点だけを確認するレビュアーの指示書です。そのあと、コードをテストするのと同じ考え方でハーネスをテストします。この 3 つには触れずにエージェントへリソースを任せ、指示がなくても正しく作れるかを確かめます。
+第 7 章では、認可に一言も触れないプロンプトを送り、その抜けに何が気づくかを確かめました。気づいたのは、読者が自分で書いたテストだけでした。この章では、あそこまで際どい状況を二度と起こさないようにします。用意するのは 3 つで、エージェントがコントローラーを開くたびに読むルール、所有者のいるリソースを作るときに従う手順、そしてこの点だけを確認するレビュアーの指示書です。
+
+そのあと、コードをテストするのと同じ考え方でハーネスをテストします。この 3 つには触れずにエージェントへリソースを任せ、指示がなくても正しく作れるかを確かめます。
 
 ここまではハーネスを使う側でしたが、この章では自分でハーネスを書きます。
 
@@ -55,7 +57,9 @@ A record that belongs to a user carries the owner's id (`authorId` on posts, `us
 `guren audit` verifies authentication only and stays green when a policy call is missing. The tests in rule 4 are the only check that sees it. Write them before the action.
 ```
 
-ルールがいつ読み込まれるかは frontmatter で決まります。`paths` には、このルールを適用するファイルを指定します。Claude Code がルールの frontmatter から読むキーは `paths` だけです。この指定により、エージェントがコントローラー、ポリシー、ルート、テストを編集するときにはルールがコンテキストに読み込まれ、ページを編集するときには読み込まれません。本文は、これを読んで実際に手を動かす相手に向けて書きます。番号を振り、1 項目に義務を 1 つだけ書き、呼ぶべきメソッドをそのまま示し、最後の行に理由を添えます。audit では*なぜ*見つけられないのかを知っているエージェントは、audit が通ったことを「問題なし」の意味に取りにくくなります。ルールが読み込まれる条件は、Claude Code のドキュメントの[パス固有のルール](https://code.claude.com/docs/ja/memory#path-specific-rules)で説明されています。
+ルールがいつ読み込まれるかは frontmatter で決まります。`paths` には、このルールを適用するファイルを指定します。Claude Code がルールの frontmatter から読むキーは `paths` だけです。この指定により、エージェントがコントローラー、ポリシー、ルート、テストを編集するときにはルールがコンテキストに読み込まれ、ページを編集するときには読み込まれません。
+
+本文は、これを読んで実際に手を動かす相手に向けて書きます。番号を振り、1 項目に義務を 1 つだけ書き、呼ぶべきメソッドをそのまま示し、最後の行に理由を添えます。audit では*なぜ*見つけられないのかを知っているエージェントは、audit が通ったことを「問題なし」の意味に取りにくくなります。ルールが読み込まれる条件は、Claude Code のドキュメントの[パス固有のルール](https://code.claude.com/docs/ja/memory#path-specific-rules)で説明されています。
 
 ## 3. スキル
 
@@ -116,9 +120,13 @@ Report only findings, as a list of `file:line — what is missing`. If there are
 bunx guren agent:sync --dry-run
 ```
 
-出力には更新対象のファイルが並びます(ハーネスが最新なら何も出ません)。いま書いた 3 つのファイルは一度も出てきません。「Skipped 3 existing file(s): .claude/settings.json, .mcp.json, CLAUDE.md」と表示される 3 つのファイルは、それとは別のものです。これらは雛形が書き出したファイルで、読者が編集してよいものなので、sync はファイルが存在しないときにしか書き込みません。これがファイル名で持ち主を決めるルールです。sync が管理するのはフレームワークが同梱するファイル名だけで、`ownership.md`、`owned-resource`、`ownership-review` はそこに含まれません。
+出力には更新対象のファイルが並びます(ハーネスが最新なら何も出ません)。いま書いた 3 つのファイルは一度も出てきません。
 
-ハーネスには、まだ使っていない部品がもう 1 つあります。`.mcp.json` は、`bun run dev` がマウントする開発用の MCP エンドポイントをエージェントに教えるファイルです。これがあると、エージェントはシェルでコマンドを実行する代わりに、`guren_check`、`guren_get_context`、`guren_entity_context`、`guren_gate` をツールとして呼び出せます。`guren_make_feature` でジェネレーターを実行することもできます。このコースでは MCP に頼る場面はありませんが、トランスクリプトに `bunx guren check` ではなく `guren_check` が出てきたら、この仕組みを使っています。
+「Skipped 3 existing file(s): .claude/settings.json, .mcp.json, CLAUDE.md」と表示される 3 つのファイルは、それとは別のものです。これらは雛形が書き出したファイルで、読者が編集してよいものなので、sync はファイルが存在しないときにしか書き込みません。これがファイル名で持ち主を決めるルールです。sync が管理するのはフレームワークが同梱するファイル名だけで、`ownership.md`、`owned-resource`、`ownership-review` はそこに含まれません。
+
+ハーネスには、まだ使っていない部品がもう 1 つあります。`.mcp.json` は、`bun run dev` がマウントする開発用の MCP エンドポイントをエージェントに教えるファイルです。これがあると、エージェントはシェルでコマンドを実行する代わりに、`guren_check`、`guren_get_context`、`guren_entity_context`、`guren_gate` をツールとして呼び出せます。`guren_make_feature` でジェネレーターを実行することもできます。
+
+このコースでは MCP に頼る場面はありませんが、トランスクリプトに `bunx guren check` ではなく `guren_check` が出てきたら、この仕組みを使っています。
 
 ```bash run
 git add -A
@@ -219,7 +227,11 @@ bun test
 Add a blogroll: a Link resource with a title and a URL that a signed-in user creates and owns. Full CRUD at `/links`. `tests/LinkController.test.ts` describes it; make it pass.
 ```
 
-ポリシーにも、所有者の列にも、テストにも触れていません。エージェントが動き出す前に、このプロンプトに何が反応するかを見ておいてください。「creates and owns」は `owned-resource` スキルの description に合致するはずです。合致すれば、エージェントが `SKILL.md` を読み、リストを上から順に進めていく様子がトランスクリプトに残ります。コントローラーを開いた時点で、`paths` の glob に一致して `ownership.md` も読み込まれます。エージェントが作業を終えたと言ったら、続けて次のプロンプトを送ります。
+ポリシーにも、所有者の列にも、テストにも触れていません。
+
+エージェントが動き出す前に、このプロンプトに何が反応するかを見ておいてください。「creates and owns」は `owned-resource` スキルの description に合致するはずです。合致すれば、エージェントが `SKILL.md` を読み、リストを上から順に進めていく様子がトランスクリプトに残ります。コントローラーを開いた時点で、`paths` の glob に一致して `ownership.md` も読み込まれます。
+
+エージェントが作業を終えたと言ったら、続けて次のプロンプトを送ります。
 
 ```text
 Use the ownership-review subagent to review the uncommitted changes.
