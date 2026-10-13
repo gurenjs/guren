@@ -1,15 +1,17 @@
-import { Link, router } from '@inertiajs/react'
-import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { router } from '@inertiajs/react'
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { pageTitle } from '../../../config/site.js'
 import { CopyBlock, CopyCommand } from '../components/CopyCommand.js'
 import { Footer } from '../components/Footer.js'
 import { Header } from '../components/Header.js'
 import { InlineCode } from '../components/InlineCode.js'
 import { Seo } from '../components/Seo.js'
+import { TextLink } from '../components/TextLink.js'
+import { Tick } from '../components/Tick.js'
 import {
   AGENT_DETAILS,
   AGENTS,
-  DEFAULT_PROJECT_NAME,
+  DEFAULT_START_OPTIONS,
   buildAgentPrompt,
   buildCreateCommand,
   buildNextSteps,
@@ -24,24 +26,31 @@ import {
   type RenderingMode,
   type StartOptions,
 } from '../lib/start-command.js'
+import { tabAfterKey } from '../lib/tabs.js'
 
 interface Props {
   initial: StartOptions
 }
 
-const BLUEPRINT_CHOICES: Array<{ value: Blueprint; label: string; detail: string }> = [
+interface ChoiceItem<T> {
+  value: T
+  label: string
+  detail: string
+}
+
+const BLUEPRINT_CHOICES: Array<ChoiceItem<Blueprint>> = [
   { value: 'default', label: 'Full-stack', detail: 'React pages through Inertia, ready for your first resource.' },
   { value: 'blog', label: 'Blog', detail: 'Posts, sign-in and a seeded demo account to read and change.' },
   { value: 'api', label: 'API only', detail: 'JSON routes. No React and no frontend build.' },
   { value: 'worker', label: 'Full-stack with jobs', detail: 'Adds a queue, events, a cache and scheduled tasks.' },
 ]
 
-const MODE_CHOICES: Array<{ value: RenderingMode; label: string; detail: string }> = [
+const MODE_CHOICES: Array<ChoiceItem<RenderingMode>> = [
   { value: 'ssr', label: 'SSR', detail: 'The server renders HTML, then React takes over.' },
   { value: 'spa', label: 'SPA', detail: 'React renders in the browser. One build fewer.' },
 ]
 
-const DATABASE_CHOICES: Array<{ value: Database; label: string; detail: string }> = [
+const DATABASE_CHOICES: Array<ChoiceItem<Database>> = [
   { value: 'sqlite', label: 'SQLite', detail: 'Nothing to install. The database is a file.' },
   { value: 'postgres', label: 'PostgreSQL', detail: 'Runs in a Docker container the app sets up.' },
   { value: 'mysql', label: 'MySQL', detail: 'Runs in a Docker container the app sets up.' },
@@ -50,16 +59,59 @@ const DATABASE_CHOICES: Array<{ value: Database; label: string; detail: string }
 const TABS = ['command', 'agent'] as const
 type Tab = (typeof TABS)[number]
 
+// Long enough that typing a project name updates the URL once per pause:
+// Safari throttles history.replaceState to about 100 calls per 10 seconds.
+const URL_SYNC_DELAY_MS = 250
+
 const FIELDSET = 'border-t border-white/10 pt-6'
 const LEGEND = 'text-sm font-bold uppercase tracking-[0.08em] text-crimson-300'
 
-function choiceClass(selected: boolean, disabled = false): string {
-  const base =
-    'flex cursor-pointer flex-col gap-1 rounded-md border px-4 py-3 transition has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-crimson-300'
-  if (disabled) return `${base} cursor-not-allowed border-white/10 opacity-50`
-  return selected
-    ? `${base} border-crimson-400 bg-crimson-900/40`
-    : `${base} border-white/15 hover:border-white/35`
+function Choice({
+  type,
+  name,
+  value,
+  checked,
+  onChange,
+  label,
+  detail,
+}: {
+  type: 'radio' | 'checkbox'
+  name?: string
+  value?: string
+  checked: boolean
+  onChange: (checked: boolean) => void
+  label: string
+  detail?: string
+}) {
+  return (
+    <label
+      className={`flex cursor-pointer flex-col gap-1 rounded-md border px-4 py-3 transition has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-crimson-300 ${
+        checked ? 'border-crimson-400 bg-crimson-900/40' : 'border-white/15 hover:border-white/35'
+      }`}
+    >
+      <span className="flex items-center gap-2 font-bold text-crimson-50">
+        <input
+          type={type}
+          name={name}
+          value={value}
+          checked={checked}
+          onChange={(event) => onChange(event.target.checked)}
+          className="accent-crimson-500"
+        />
+        {label}
+      </span>
+      {detail ? <span className="text-sm leading-snug text-smoke">{detail}</span> : null}
+    </label>
+  )
+}
+
+function Field({ legend, children }: { legend: string; children: ReactNode }) {
+  return (
+    <fieldset className={FIELDSET}>
+      <legend className={LEGEND}>{legend}</legend>
+      {children}
+    </fieldset>
+  )
 }
 
 function RadioGroup<T extends string>({
@@ -72,60 +124,50 @@ function RadioGroup<T extends string>({
 }: {
   name: string
   legend: string
-  choices: Array<{ value: T; label: string; detail: string }>
+  choices: Array<ChoiceItem<T>>
   value: T
   onChange: (value: T) => void
   columns: string
 }) {
   return (
-    <fieldset className={FIELDSET}>
-      <legend className={LEGEND}>{legend}</legend>
+    <Field legend={legend}>
       <div className={`mt-4 grid gap-2 ${columns}`}>
         {choices.map((choice) => (
-          <label key={choice.value} className={choiceClass(value === choice.value)}>
-            <span className="flex items-center gap-2 font-bold text-crimson-50">
-              <input
-                type="radio"
-                name={name}
-                value={choice.value}
-                checked={value === choice.value}
-                onChange={() => onChange(choice.value)}
-                className="accent-crimson-500"
-              />
-              {choice.label}
-            </span>
-            <span className="text-sm leading-snug text-smoke">{choice.detail}</span>
-          </label>
+          <Choice
+            key={choice.value}
+            type="radio"
+            name={name}
+            value={choice.value}
+            checked={value === choice.value}
+            onChange={() => onChange(choice.value)}
+            label={choice.label}
+            detail={choice.detail}
+          />
         ))}
       </div>
-    </fieldset>
+    </Field>
   )
 }
 
-function Checkbox({
+function CheckboxField({
+  legend,
   checked,
   onChange,
   label,
   detail,
 }: {
+  legend: string
   checked: boolean
   onChange: (checked: boolean) => void
   label: string
   detail: string
 }) {
   return (
-    <label className={choiceClass(checked)}>
-      <span className="flex items-center gap-2 font-bold text-crimson-50">
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={(event) => onChange(event.target.checked)}
-          className="accent-crimson-500"
-        />
-        {label}
-      </span>
-      <span className="text-sm leading-snug text-smoke">{detail}</span>
-    </label>
+    <Field legend={legend}>
+      <div className="mt-4">
+        <Choice type="checkbox" checked={checked} onChange={onChange} label={label} detail={detail} />
+      </div>
+    </Field>
   )
 }
 
@@ -146,26 +188,27 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
   )
 }
 
-function Prerequisites({ options }: { options: StartOptions }) {
+function CreateStep({ options }: { options: StartOptions }) {
+  const database = DATABASE_CHOICES.find((choice) => choice.value === options.db)!.label
   return (
-    <p>
-      Needs{' '}
-      <a href="https://bun.sh" target="_blank" rel="noopener noreferrer" className="text-crimson-300 underline">
-        Bun
-      </a>{' '}
-      1.4.2 or later
-      {usesDatabaseContainer(options.db) ? <>, and Docker running for {options.db === 'mysql' ? 'MySQL' : 'PostgreSQL'}</> : null}.
-    </p>
+    <Step n={1} title="Create the app">
+      <p>
+        Needs{' '}
+        <a href="https://bun.sh" target="_blank" rel="noopener noreferrer" className="text-crimson-300 underline">
+          Bun
+        </a>{' '}
+        1.4.2 or later
+        {usesDatabaseContainer(options.db) ? <>, and Docker running for {database}</> : null}.
+      </p>
+      <CopyCommand command={buildCreateCommand(options)} />
+    </Step>
   )
 }
 
 function CommandPanel({ options }: { options: StartOptions }) {
   return (
     <ol className="space-y-8">
-      <Step n={1} title="Create the app">
-        <Prerequisites options={options} />
-        <CopyCommand command={buildCreateCommand(options)} />
-      </Step>
+      <CreateStep options={options} />
       <Step n={2} title="Run it">
         <CopyBlock text={buildNextSteps(options).join('\n')} label="the commands to run the app" />
         <p>
@@ -175,13 +218,8 @@ function CommandPanel({ options }: { options: StartOptions }) {
       </Step>
       <Step n={3} title="Build something">
         <p>
-          <Link href="/docs/tutorials/00-overview" className="text-crimson-300 underline">
-            The tutorial
-          </Link>{' '}
-          turns this app into a blog, one concept per chapter. The{' '}
-          <Link href="/docs/guides/getting-started" className="text-crimson-300 underline">
-            quickstart
-          </Link>{' '}
+          <TextLink href="/docs/tutorials/00-overview">The tutorial</TextLink> turns this app into a blog,
+          one concept per chapter. The <TextLink href="/docs/guides/getting-started">quickstart</TextLink>{' '}
           covers environment variables, generators and production builds.
         </p>
       </Step>
@@ -190,9 +228,9 @@ function CommandPanel({ options }: { options: StartOptions }) {
 }
 
 function AgentPanel({ options }: { options: StartOptions }) {
-  const [agent, setAgent] = useState<Agent>(options.agents[0] ?? 'claude')
+  const [agent, setAgent] = useState<Agent | undefined>(options.agents[0])
   const [goal, setGoal] = useState('')
-  const active = options.agents.includes(agent) ? agent : options.agents[0]
+  const active = agent && options.agents.includes(agent) ? agent : options.agents[0]
 
   if (!active) {
     return (
@@ -207,10 +245,7 @@ function AgentPanel({ options }: { options: StartOptions }) {
 
   return (
     <ol className="space-y-8">
-      <Step n={1} title="Create the app">
-        <Prerequisites options={options} />
-        <CopyCommand command={buildCreateCommand(options)} />
-      </Step>
+      <CreateStep options={options} />
       <Step n={2} title={`Start ${detail.label} inside the app`}>
         {options.agents.length > 1 ? (
           <div role="radiogroup" aria-label="Agent to start" className="flex flex-wrap gap-2">
@@ -251,10 +286,8 @@ function AgentPanel({ options }: { options: StartOptions }) {
         <CopyBlock text={buildAgentPrompt(options, active, goal)} label="the prompt" prompt />
         <p>
           The agent checks the app with the same gate CI runs, and asks before it writes code. The{' '}
-          <Link href="/docs/agent-course/00-overview" className="text-crimson-300 underline">
-            agent course
-          </Link>{' '}
-          shows how to take a feature from plan to merged commits.
+          <TextLink href="/docs/agent-course/00-overview">agent course</TextLink> shows how to take a
+          feature from plan to merged commits.
         </p>
       </Step>
     </ol>
@@ -265,36 +298,39 @@ export default function Start({ initial }: Props) {
   const [options, setOptions] = useState<StartOptions>(initial)
   const [nameInput, setNameInput] = useState(initial.name)
   const [tab, setTab] = useState<Tab>('command')
+  const syncedQuery = useRef(startOptionsToQuery(initial))
 
   const update = (patch: Partial<StartOptions>) => setOptions((current) => ({ ...current, ...patch }))
 
   useEffect(() => {
     const query = startOptionsToQuery(options)
-    // Through Inertia, not history.replaceState: Back restores the page from
-    // Inertia's own record, which a bare URL change leaves at the first visit.
-    router.replace({
-      url: `/start${query ? `?${query}` : ''}`,
-      props: (props: Record<string, unknown>) => ({ ...props, initial: options }),
-      preserveState: true,
-      preserveScroll: true,
-    })
+    if (query === syncedQuery.current) return
+    const timer = setTimeout(() => {
+      syncedQuery.current = query
+      // Through Inertia, not history.replaceState: Back restores the page from
+      // Inertia's own record, which a bare URL change leaves at the first visit.
+      router.replace({
+        url: `/start${query ? `?${query}` : ''}`,
+        props: (props: Record<string, unknown>) => ({ ...props, initial: options }),
+        preserveState: true,
+        preserveScroll: true,
+      })
+    }, URL_SYNC_DELAY_MS)
+    return () => clearTimeout(timer)
   }, [options])
 
   const changeName = (value: string) => {
     setNameInput(value)
-    update({ name: isValidProjectName(value) ? value : DEFAULT_PROJECT_NAME })
+    update({ name: isValidProjectName(value) ? value : DEFAULT_START_OPTIONS.name })
   }
 
-  const toggleAgent = (agent: Agent, on: boolean) => {
-    const next = on ? [...options.agents, agent] : options.agents.filter((a) => a !== agent)
-    update({ agents: AGENTS.filter((a) => next.includes(a)) })
-  }
+  const toggleAgent = (agent: Agent, on: boolean) =>
+    update({ agents: AGENTS.filter((a) => (a === agent ? on : options.agents.includes(a))) })
 
   const moveTab = (event: KeyboardEvent<HTMLDivElement>) => {
-    const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key]
-    if (!step) return
+    const next = tabAfterKey(TABS, tab, event.key)
+    if (!next) return
     event.preventDefault()
-    const next = TABS[(TABS.indexOf(tab) + step + TABS.length) % TABS.length]!
     setTab(next)
     document.getElementById(`start-tab-${next}`)?.focus()
   }
@@ -312,7 +348,7 @@ export default function Start({ initial }: Props) {
         <Header variant="home" />
 
         <main className="mx-auto max-w-6xl px-6 pb-24 pt-14 md:pt-20">
-          <span aria-hidden className="block h-[3px] w-8 bg-gradient-to-r from-ember to-crimson-700" />
+          <Tick />
           <h1 className="mt-5 text-balance text-[2.25rem] font-bold leading-[1.08] tracking-[-0.03em] md:text-[3rem]">
             Start a new app
           </h1>
@@ -341,7 +377,7 @@ export default function Start({ initial }: Props) {
                 />
                 <span id="start-name-help" className={`mt-2 block text-sm ${nameInvalid ? 'text-crimson-300' : 'text-smoke'}`}>
                   {nameInvalid
-                    ? `Use lowercase letters, digits, dots, dashes and underscores. Using "${DEFAULT_PROJECT_NAME}" until then.`
+                    ? `Use lowercase letters, digits, dots, dashes and underscores. Using "${DEFAULT_START_OPTIONS.name}" until then.`
                     : 'The directory the app is created in.'}
                 </span>
               </label>
@@ -376,52 +412,39 @@ export default function Start({ initial }: Props) {
               />
 
               {offersAuth(options.blueprint) ? (
-                <fieldset className={FIELDSET}>
-                  <legend className={LEGEND}>Authentication</legend>
-                  <div className="mt-4">
-                    <Checkbox
-                      checked={options.auth}
-                      onChange={(auth) => update({ auth })}
-                      label="Add sign-in"
-                      detail="Sign-up and sign-in pages, sessions and a users table."
-                    />
-                  </div>
-                </fieldset>
+                <CheckboxField
+                  legend="Authentication"
+                  checked={options.auth}
+                  onChange={(auth) => update({ auth })}
+                  label="Add sign-in"
+                  detail="Sign-up and sign-in pages, sessions and a users table."
+                />
               ) : null}
 
-              <fieldset className={FIELDSET}>
-                <legend className={LEGEND}>Coding agents</legend>
+              <Field legend="Coding agents">
                 <p className="mt-2 text-sm text-smoke">
                   The app ships instructions, skills and checks for each agent you pick.
                 </p>
                 <div className="mt-4 grid gap-2 sm:grid-cols-2">
                   {AGENTS.map((agent) => (
-                    <label key={agent} className={choiceClass(options.agents.includes(agent))}>
-                      <span className="flex items-center gap-2 font-bold text-crimson-50">
-                        <input
-                          type="checkbox"
-                          checked={options.agents.includes(agent)}
-                          onChange={(event) => toggleAgent(agent, event.target.checked)}
-                          className="accent-crimson-500"
-                        />
-                        {AGENT_DETAILS[agent].label}
-                      </span>
-                    </label>
+                    <Choice
+                      key={agent}
+                      type="checkbox"
+                      checked={options.agents.includes(agent)}
+                      onChange={(on) => toggleAgent(agent, on)}
+                      label={AGENT_DETAILS[agent].label}
+                    />
                   ))}
                 </div>
-              </fieldset>
+              </Field>
 
-              <fieldset className={FIELDSET}>
-                <legend className={LEGEND}>Git</legend>
-                <div className="mt-4">
-                  <Checkbox
-                    checked={options.git}
-                    onChange={(git) => update({ git })}
-                    label="Initialize a repository"
-                    detail="Runs git init and makes a first commit of the scaffold."
-                  />
-                </div>
-              </fieldset>
+              <CheckboxField
+                legend="Git"
+                checked={options.git}
+                onChange={(git) => update({ git })}
+                label="Initialize a repository"
+                detail="Runs git init and makes a first commit of the scaffold."
+              />
             </form>
 
             <section id="start-output" aria-label="How to start" className="scroll-mt-24 lg:sticky lg:top-24 lg:self-start">

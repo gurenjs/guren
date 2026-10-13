@@ -21,10 +21,8 @@ export interface StartOptions {
   git: boolean
 }
 
-export const DEFAULT_PROJECT_NAME = 'my-app'
-
 export const DEFAULT_START_OPTIONS: StartOptions = {
-  name: DEFAULT_PROJECT_NAME,
+  name: 'my-app',
   blueprint: 'default',
   mode: 'ssr',
   db: 'sqlite',
@@ -77,7 +75,7 @@ function parseAgents(value: unknown): Agent[] {
 
 /** Reads `/start?…`, falling back per field so a stale or hand-edited link still renders. */
 export function startOptionsFromQuery(query: Record<string, unknown>): StartOptions {
-  const name = typeof query.name === 'string' && isValidProjectName(query.name) ? query.name : DEFAULT_PROJECT_NAME
+  const name = typeof query.name === 'string' && isValidProjectName(query.name) ? query.name : DEFAULT_START_OPTIONS.name
   return {
     name,
     blueprint: pick(BLUEPRINTS, query.blueprint, DEFAULT_START_OPTIONS.blueprint),
@@ -89,6 +87,11 @@ export function startOptionsFromQuery(query: Record<string, unknown>): StartOpti
   }
 }
 
+/** The `--agents` value, which the query string reuses. */
+function agentsArg(agents: readonly Agent[]): string {
+  return agents.length === 0 ? 'none' : agents.join(',')
+}
+
 /** The query string for the non-default choices, so a shared link stays short. */
 export function startOptionsToQuery(options: StartOptions): string {
   const params = new URLSearchParams()
@@ -97,8 +100,8 @@ export function startOptionsToQuery(options: StartOptions): string {
   if (options.mode !== DEFAULT_START_OPTIONS.mode) params.set('mode', options.mode)
   if (options.db !== DEFAULT_START_OPTIONS.db) params.set('db', options.db)
   if (options.auth !== DEFAULT_START_OPTIONS.auth) params.set('auth', options.auth ? '1' : '0')
-  const agents = options.agents.length === 0 ? 'none' : options.agents.join(',')
-  if (agents !== DEFAULT_START_OPTIONS.agents.join(',')) params.set('agents', agents)
+  const agents = agentsArg(options.agents)
+  if (agents !== agentsArg(DEFAULT_START_OPTIONS.agents)) params.set('agents', agents)
   if (options.git !== DEFAULT_START_OPTIONS.git) params.set('git', options.git ? '1' : '0')
   // A comma is legal in a query value; leaving it unescaped keeps a shared link readable.
   return params.toString().replaceAll('%2C', ',')
@@ -112,6 +115,11 @@ export function hasRenderingMode(blueprint: Blueprint): boolean {
 /** blog ships sign-in already, and api has no pages to sign in on: create-guren-app ignores --auth for both. */
 export function offersAuth(blueprint: Blueprint): boolean {
   return blueprint === 'default' || blueprint === 'worker'
+}
+
+/** Sign-in is scaffolded only when asked for on a blueprint that does not ignore --auth. */
+function addsAuth(options: StartOptions): boolean {
+  return offersAuth(options.blueprint) && options.auth
 }
 
 export function usesDatabaseContainer(db: Database): boolean {
@@ -128,19 +136,19 @@ export function buildCreateCommand(options: StartOptions): string {
   if (options.blueprint !== 'default') parts.push('--blueprint', options.blueprint)
   if (hasRenderingMode(options.blueprint)) parts.push('--mode', options.mode)
   parts.push('--db', options.db)
-  if (offersAuth(options.blueprint) && options.auth) parts.push('--auth')
-  parts.push('--agents', options.agents.length === 0 ? 'none' : options.agents.join(','))
+  if (addsAuth(options)) parts.push('--auth')
+  parts.push('--agents', agentsArg(options.agents))
   parts.push(options.git ? '--git' : '--no-git')
   return parts.join(' ')
 }
 
 /** Setup inside the new directory before the first `bun run dev`, per create-guren-app's README for each blueprint. */
-export function buildSetupSteps(options: StartOptions): string[] {
+function buildSetupSteps(options: StartOptions): string[] {
   const steps: string[] = []
   if (usesDatabaseContainer(options.db)) steps.push('bun run db:up')
   if (options.blueprint === 'blog') {
     steps.push('bun run db:make', 'bun run db:migrate', 'bun run db:seed')
-  } else if (offersAuth(options.blueprint) && options.auth) {
+  } else if (addsAuth(options)) {
     // `guren add auth` writes its own migration during scaffolding.
     steps.push('bun run db:migrate')
   }

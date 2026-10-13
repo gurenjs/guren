@@ -12,7 +12,10 @@ import { Header } from '../components/Header.js'
 import { FunctionIcon, GithubIcon, GlobeIcon, LayersIcon, ServerIcon } from '../components/icons.js'
 import { InlineCode } from '../components/InlineCode.js'
 import { Seo } from '../components/Seo.js'
+import { TextLink } from '../components/TextLink.js'
+import { Tick } from '../components/Tick.js'
 import { softwareJsonLd, websiteJsonLd } from '../lib/structured-data.js'
+import { tabAfterKey } from '../lib/tabs.js'
 
 const agentCommands = [
   { command: 'guren context User', detail: 'Everything about one entity' },
@@ -77,11 +80,6 @@ const TAB_FILES: Record<TabKey, string> = {
   View: 'resources/js/pages/posts/Index.tsx',
 }
 
-/** The logo's flame gradient cut to a short bar: the page's one structural mark. */
-function Tick() {
-  return <span aria-hidden className="block h-[3px] w-8 bg-gradient-to-r from-ember to-crimson-700" />
-}
-
 function SectionHeading({ children }: { children: ReactNode }) {
   return (
     <>
@@ -95,20 +93,6 @@ function SectionHeading({ children }: { children: ReactNode }) {
 
 function Lead({ children }: { children: ReactNode }) {
   return <p className="mt-5 max-w-[34rem] text-[1.0625rem] leading-[1.65] text-smoke">{children}</p>
-}
-
-function TextLink({ href, external, children }: { href: string; external?: boolean; children: ReactNode }) {
-  const className =
-    'font-semibold text-crimson-300 underline decoration-crimson-300/40 underline-offset-4 transition hover:decoration-crimson-300'
-  return external ? (
-    <a href={href} target="_blank" rel={OWN_REPO_LINK_REL} className={className}>
-      {children}
-    </a>
-  ) : (
-    <Link href={href} className={className}>
-      {children}
-    </Link>
-  )
 }
 
 const PRIMARY_BUTTON =
@@ -128,10 +112,9 @@ export default function Home({ codeExamples }: Props) {
 
   // Arrow keys move between the tabs, as the ARIA tabs pattern expects.
   const moveTab = (event: KeyboardEvent<HTMLDivElement>) => {
-    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key]
-    if (!step) return
+    const next = tabAfterKey(TAB_KEYS, activeTab, event.key)
+    if (!next) return
     event.preventDefault()
-    const next = TAB_KEYS[(TAB_KEYS.indexOf(activeTab) + step + TAB_KEYS.length) % TAB_KEYS.length]!
     setActiveTab(next)
     document.getElementById(`loop-tab-${next}`)?.focus()
   }
