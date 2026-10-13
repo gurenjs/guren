@@ -371,7 +371,9 @@ git commit -m "chore: deploy recipes for fly and railway"
 curl -i -H 'Host: attacker.example' http://localhost:3333/
 ```
 
-`APP_URL` が未設定だと(空の値も未設定として扱われます)、読むべき応答がそもそも返りません。`config/env.ts` が `APP_URL: Env.url().requiredInProduction()` と宣言しているので、`NODE_ENV=production` では起動が止まり、`APP_URL` が必須なのに設定されていないというエラーが出ます。`curl` は接続できません。ホストの認可をオフにする `config/http.ts` の `false` の分岐に、到達しないというコメントが付いているのはこのためです。`APP_URL=http://localhost:3333` を設定すると、アプリはどのポートでも `localhost` にだけ応答します。知らない `Host` には 403 が返り、`-H 'Host: localhost:3333'` を付けた同じリクエストにはページが返ります。どちらも安全側に倒れる挙動で、うっかり本番に出すならこちらです。避けたいのは、どんな `Host` にも応答するアプリです。そのヘッダーはクライアントが送ってきた値にすぎないからです。
+`APP_URL` が未設定だと(空の値も未設定として扱われます)、読むべき応答がそもそも返りません。`config/env.ts` が `APP_URL: Env.url().requiredInProduction()` と宣言しているので、`NODE_ENV=production` では起動が止まり、`APP_URL` が必須なのに設定されていないというエラーが出ます。`curl` は接続できません。ホストの認可をオフにする `config/http.ts` の `false` の分岐に、到達しないというコメントが付いているのはこのためです。
+
+`APP_URL=http://localhost:3333` を設定すると、アプリはどのポートでも `localhost` にだけ応答します。知らない `Host` には 403 が返り、`-H 'Host: localhost:3333'` を付けた同じリクエストにはページが返ります。どちらも安全側に倒れる挙動で、うっかり本番に出すならこちらです。避けたいのは、どんな `Host` にも応答するアプリです。そのヘッダーはクライアントが送ってきた値にすぎないからです。
 
 </details>
 
@@ -380,9 +382,13 @@ curl -i -H 'Host: attacker.example' http://localhost:3333/
 
 イメージに入るディレクトリは、`Dockerfile` の本番ステージにある `COPY --from=builder` の行と、builder ステージの `mkdir -p` の行で決まります。オブジェクトストレージは `config/storage.ts` のディスクで、`config/attachments.ts` の `disk` がそれを指します。
 
-ボリュームを使う場合: builder の `mkdir -p` に `storage` を足し、`COPY --from=builder /app/storage ./storage` の行を加えます。そのうえで `/app/storage` に永続ボリュームをマウントします(`fly.toml` の `[mounts]` セクション、手元なら `docker run -v blog-storage:/app/storage`)。諦めるのは、複数台のマシンで動かすことです。ファイルが 1 つのボリュームにしかないからです。バックアップも自分の仕事になり、`bunx guren deploy --force` で `Dockerfile` を作り直すと追加した行は消えます。
+ボリュームを使う場合: builder の `mkdir -p` に `storage` を足し、`COPY --from=builder /app/storage ./storage` の行を加えます。そのうえで `/app/storage` に永続ボリュームをマウントします(`fly.toml` の `[mounts]` セクション、手元なら `docker run -v blog-storage:/app/storage`)。
 
-オブジェクトストレージを使う場合: [ストレージのガイド](../guides/storage.md) のとおりに `s3` ディスクを追加し、そのキーを `config/env.ts` で宣言します。`disk` をそのディスクに向け、`disks` で `'private'` にします。諦めるのは、アカウントなしで動く構成です。バケット、プラットフォームのシークレットに置く認証情報、そして請求が必要になります。切り替える前に保存したカバー画像は `local` に残ります。添付ファイルの各行が自分のディスクを記録しているからです。
+諦めるのは、複数台のマシンで動かすことです。ファイルが 1 つのボリュームにしかないからです。バックアップも自分の仕事になり、`bunx guren deploy --force` で `Dockerfile` を作り直すと追加した行は消えます。
+
+オブジェクトストレージを使う場合: [ストレージのガイド](../guides/storage.md) のとおりに `s3` ディスクを追加し、そのキーを `config/env.ts` で宣言します。`disk` をそのディスクに向け、`disks` で `'private'` にします。
+
+諦めるのは、アカウントなしで動く構成です。バケット、プラットフォームのシークレットに置く認証情報、そして請求が必要になります。切り替える前に保存したカバー画像は `local` に残ります。添付ファイルの各行が自分のディスクを記録しているからです。
 
 どちらを選んでも、ファイルは `bunx guren make:adr` で作れます。段落には、選ばなかったほうの案とその理由を書きます。どちらの選択にも十分な理由があります。
 

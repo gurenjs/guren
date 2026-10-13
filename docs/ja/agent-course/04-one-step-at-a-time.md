@@ -518,7 +518,9 @@ bun run dev
 
 失敗するのは 2 つです。`AC-meetups-4` (他人の勉強会への `PUT` に、期待した 403 の代わりに 303 が返る) と、`AC-meetups-9` (他人の勉強会の編集フォームに、403 の代わりに 200 が返る) です。残りの 10 個は通ります。scaffold が書く `return false` とちょうど逆の関係です。全員を通す Policy は `forbidden` の振る舞いが見つけ、誰も通さない Policy は主催者の `success` の振る舞いが見つけます。
 
-元に戻すときは、まず `git restore app/Policies/MeetupPolicy.ts` で変更を捨ててください。コミットしていない変更は `git switch` で切り替えた先にもついてきます。そのあと元のブランチに戻ります。失敗した実行で、`.guren/plans/` にある http ステップの記録が上書きされています。このディレクトリは git の管理外なので、元のブランチで `bunx guren plan:verify docs/plans/meetups/plan.json --step task/entity/model.meetup/http` をもう一度実行してください。実行しないと、第 5 章の `plan:close` が拒否されます。
+元に戻すときは、まず `git restore app/Policies/MeetupPolicy.ts` で変更を捨ててください。コミットしていない変更は `git switch` で切り替えた先にもついてきます。そのあと元のブランチに戻ります。
+
+失敗した実行で、`.guren/plans/` にある http ステップの記録が上書きされています。このディレクトリは git の管理外なので、元のブランチで `bunx guren plan:verify docs/plans/meetups/plan.json --step task/entity/model.meetup/http` をもう一度実行してください。実行しないと、第 5 章の `plan:close` が拒否されます。
 
 </details>
 
