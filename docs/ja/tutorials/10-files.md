@@ -24,7 +24,11 @@ bun run dev
 bunx guren add attachments
 ```
 
-ここで入ったコードは今後アプリの一部として保守していくので、何が変わったかを確認しておきます。まずストレージレイヤーが入りました。`config: [...]` に登録された `config/storage.ts` と `app/Services/FileStorage.ts` で、ディスクは `./storage/app` を保存先とする `local` と、`./public/storage` を保存先とする `public` の 2 つです。続いて `db/schema.ts` に `attachments` テーブルを追加し、`config/attachments.ts` と `app/Providers/AttachmentsProvider.ts` を作成して、プロバイダーを `src/app.ts` に登録しました。さらに、ルート registrar の先頭に `registerAttachmentRoutes` の呼び出しを入れて配信ルートをマウントし、`attachments:prune` コンソールコマンドも登録しています。テーブルにはマイグレーションが必要です。
+ここで入ったコードは今後アプリの一部として保守していくので、何が変わったかを確認しておきます。まずストレージレイヤーが入りました。`config: [...]` に登録された `config/storage.ts` と `app/Services/FileStorage.ts` で、ディスクは `./storage/app` を保存先とする `local` と、`./public/storage` を保存先とする `public` の 2 つです。
+
+続いて `db/schema.ts` に `attachments` テーブルを追加し、`config/attachments.ts` と `app/Providers/AttachmentsProvider.ts` を作成して、プロバイダーを `src/app.ts` に登録しました。さらに、ルート registrar の先頭に `registerAttachmentRoutes` の呼び出しを入れて配信ルートをマウントし、`attachments:prune` コンソールコマンドも登録しています。
+
+テーブルにはマイグレーションが必要です。
 
 ```bash run
 bun run db:make create_attachments
@@ -40,7 +44,9 @@ bun run db:migrate
 printf 'storage/app/\npublic/storage/\n' >> .gitignore
 ```
 
-2 つ目は、config にモデルのマップを足すことです。どのモデルが attachments を持つかはジェネレーターには分からないので、この部分は自動では書かれません。prune コマンドはこのマップを使って、attachment の持ち主がまだ存在するかを確かめます。下のブロックでは、末尾に `Model.morphMap` を足し、そのために必要な `Model` と `Post` の import を加えています。ジェネレーターが書いた長めのコメントは、この節で説明する 3 つの判断に絞りました。
+2 つ目は、config にモデルのマップを足すことです。どのモデルが attachments を持つかはジェネレーターには分からないので、この部分は自動では書かれません。prune コマンドはこのマップを使って、attachment の持ち主がまだ存在するかを確かめます。
+
+下のブロックでは、末尾に `Model.morphMap` を足し、そのために必要な `Model` と `Post` の import を加えています。ジェネレーターが書いた長めのコメントは、この節で説明する 3 つの判断に絞りました。
 
 ```ts file=config/attachments.ts
 import { Model, configureAttachments } from '@guren/core'
@@ -240,7 +246,13 @@ describe('post attachments', () => {
 })
 ```
 
-このファイルで注目したい点は 3 つあります。1 つ目は、アップロードが `File` を含む `FormData` になっていることです。`TestApp` は `File` を見つけると multipart で送ります。JSON のボディではファイルを運べません。2 つ目に、URL については署名されていることまでアサートしています。署名の無い URL が返るなら、ディスクが公開されていることになるからです。3 つ目に、最後のテストは attachment の行に記録されたオブジェクトキーを使って、ディスクそのものを調べています。投稿を削除したらファイルも残してはいけませんが、これはデータベースへのアサーションでは確かめられません。テストは `NODE_ENV=test` で実行され、雛形で作られた `config/storage.ts` はこのとき `local` ディスクの保存先を `./storage/app/testing` にします。`disk()` がパスを自分で組み立てずにディスクへ問い合わせているのはこのためで、テストでアップロードしたファイルが、開発用データベースの参照するファイルと混ざることもありません。
+このファイルで注目したい点は 3 つあります。1 つ目は、アップロードが `File` を含む `FormData` になっていることです。`TestApp` は `File` を見つけると multipart で送ります。JSON のボディではファイルを運べません。
+
+2 つ目に、URL については署名されていることまでアサートしています。署名の無い URL が返るなら、ディスクが公開されていることになるからです。
+
+3 つ目に、最後のテストは attachment の行に記録されたオブジェクトキーを使って、ディスクそのものを調べています。投稿を削除したらファイルも残してはいけませんが、これはデータベースへのアサーションでは確かめられません。
+
+テストは `NODE_ENV=test` で実行され、雛形で作られた `config/storage.ts` はこのとき `local` ディスクの保存先を `./storage/app/testing` にします。`disk()` がパスを自分で組み立てずにディスクへ問い合わせているのはこのためで、テストでアップロードしたファイルが、開発用データベースの参照するファイルと混ざることもありません。
 
 ```bash run expect-fail
 bun test
@@ -448,7 +460,9 @@ export default class PostController extends Controller {
 }
 ```
 
-この章の要になる細部が 2 つあります。1 つは、`hasOneAttached` のコレクションに `Post.attach(post.id, 'cover', cover)` を呼ぶと**差し替え**になることです。古いファイルは削除されて新しいファイルが保存され、行は 1 件のままです。もう 1 つは、`purgeAttachments` を `delete` より先に呼ぶことです。attachments テーブルはポリモーフィックで、すべてのモデルが 1 つのテーブルを共有するため、`posts` への外部キーを持ちません。そのため削除は連鎖(cascade)せず、purge せずに投稿を削除すると、ディスクには持ち主のいないファイルが、テーブルには持ち主のいない行が残ります。`attachments:prune` はそうした残り物をあとから見つけるためのコマンドで、3 つ目のテストはそもそもこの状態を許しません。
+この章の要になる細部が 2 つあります。1 つは、`hasOneAttached` のコレクションに `Post.attach(post.id, 'cover', cover)` を呼ぶと**差し替え**になることです。古いファイルは削除されて新しいファイルが保存され、行は 1 件のままです。
+
+もう 1 つは、`purgeAttachments` を `delete` より先に呼ぶことです。attachments テーブルはポリモーフィックで、すべてのモデルが 1 つのテーブルを共有するため、`posts` への外部キーを持ちません。そのため削除は連鎖(cascade)せず、purge せずに投稿を削除すると、ディスクには持ち主のいないファイルが、テーブルには持ち主のいない行が残ります。`attachments:prune` はそうした残り物をあとから見つけるためのコマンドで、3 つ目のテストはそもそもこの状態を許しません。
 
 カバー画像を差し替えるルートは `update` に含めず、独立した `POST` にしています。Inertia のフォームからファイルを `PUT` で送るにはメソッドの偽装(method spoofing)が必要ですが、Guren はそれを行いません。ルートを分けたほうが単純で、読みやすくもなります。
 
@@ -740,7 +754,9 @@ bun test
 bunx guren check
 ```
 
-出力のうち 4 行が新しく加わり、どれも通っています。モデルが attachments を宣言していて `configureAttachments()` もあること、config がスキーマの export するテーブルに結び付いていること、配信が有効で `registerAttachmentRoutes()` がマウントされていること、ディスク `local` の保存先が `public/` の外にあることの 4 つです。どれも実行時には遅れて、しかも黙って失敗する間違いなので、`check` で先に捕まえるようになっています。最後の 1 つは、違反すると長いメッセージ付きの失敗になります。保存先が `public/` の中にあるディスクでは、ファイルに届くのに配信ルートを通る必要がありません。そのため配信ルートをどう設定していても、アップロードされたファイルはすべて署名も期限も無い URL で取得できてしまいます。ファイルがサーバー上にあるだけなのか、ウェブに公開されているのかは、ここで分かれます。
+出力のうち 4 行が新しく加わり、どれも通っています。モデルが attachments を宣言していて `configureAttachments()` もあること、config がスキーマの export するテーブルに結び付いていること、配信が有効で `registerAttachmentRoutes()` がマウントされていること、ディスク `local` の保存先が `public/` の外にあることの 4 つです。どれも実行時には遅れて、しかも黙って失敗する間違いなので、`check` で先に捕まえるようになっています。
+
+最後の 1 つは、違反すると長いメッセージ付きの失敗になります。保存先が `public/` の中にあるディスクでは、ファイルに届くのに配信ルートを通る必要がありません。そのため配信ルートをどう設定していても、アップロードされたファイルはすべて署名も期限も無い URL で取得できてしまいます。ファイルがサーバー上にあるだけなのか、ウェブに公開されているのかは、ここで分かれます。
 
 このチェックはハーネスからも実行されます。`PostToolUse` hook がモデルや config ファイルを編集するたびに実行するので、エージェントがディスクを `public` に「単純化」してしまっても、次の作業に移る前に同じ文言で指摘を受けます。
 
@@ -887,7 +903,9 @@ bun test
 Add a gallery to posts: a `hasManyAttached` collection named `images` (images only) on `Post`. The new-post form accepts several files under `images`, `store` attaches each one, the post page shows them, and `DELETE /posts/:id/images/:attachment`, named `posts.images.destroy`, removes one image for the post's author. Load the gallery with `withAttachments` and expose it through `PostResource`. `tests/PostAttachments.test.ts` describes it; make it pass.
 ```
 
-やることはカバー画像と同じで、それを複数枚に広げるだけです。`this.file('cover')` の代わりに `this.files('images')` を、nullable の代わりに配列を使い、差し替えの `attach` の代わりに attachment の id を渡す `detach` を使います。確認項目で見どころになるのは削除ルートです。URL の id で attachment を探すだけでなく、探す範囲を*この投稿の*コレクションに限る必要があります。そうすれば、他人の投稿に付いた有効な attachment id が渡されても拒否できます。`detach(post.id, 'images', attachmentId)` はまさにこの動きをしますが、attachment の id だけで削除する処理を自分で書いた場合はそうなりません。
+やることはカバー画像と同じで、それを複数枚に広げるだけです。`this.file('cover')` の代わりに `this.files('images')` を、nullable の代わりに配列を使い、差し替えの `attach` の代わりに attachment の id を渡す `detach` を使います。
+
+確認項目で見どころになるのは削除ルートです。URL の id で attachment を探すだけでなく、探す範囲を*この投稿の*コレクションに限る必要があります。そうすれば、他人の投稿に付いた有効な attachment id が渡されても拒否できます。`detach(post.id, 'images', attachmentId)` はまさにこの動きをしますが、attachment の id だけで削除する処理を自分で書いた場合はそうなりません。
 
 **手元にエージェントが無い場合は、** モデルにコレクションを 1 つ追加します。
 

@@ -34,7 +34,9 @@ bunx guren spec:generate
 | `screens.md` | ルート、コントローラー、ページ: すべてのルート、その背後のアクション、そして渡す props とともにレンダリングするページコンポーネント |
 | `modules.md` | すべてのソースファイルの import: アプリのどの部分がどこに依存しているのか |
 
-`docs/spec/er.md` を開いてみてください。mermaid の図と、テーブルごとの表が並んでいます。`posts`、`users`、`comments`、`tags`、`postTags` (`post_tags` テーブル)、`links`、`attachments` が載っているのは、これまでの章でそれらをコードに書いたからです。誰かが説明を書き足したわけではありません。続けて `docs/spec/screens.md` を開き、第 4 章で作ったページを探してください。`Props` 型が、アプリのソースからそのまま引用されています。
+`docs/spec/er.md` を開いてみてください。mermaid の図と、テーブルごとの表が並んでいます。`posts`、`users`、`comments`、`tags`、`postTags` (`post_tags` テーブル)、`links`、`attachments` が載っているのは、これまでの章でそれらをコードに書いたからです。誰かが説明を書き足したわけではありません。
+
+続けて `docs/spec/screens.md` を開き、第 4 章で作ったページを探してください。`Props` 型が、アプリのソースからそのまま引用されています。
 
 どのファイルも、編集しないよう求める 1 行と、自動生成されたことを示す frontmatter から始まります。どちらも書かれているとおりの意味です。次の節では、この 1 行目を無視して手で編集すると何が起きるかを確かめます。
 
@@ -242,7 +244,9 @@ bunx guren context Comment
 bunx guren docs:graph --entity Comment
 ```
 
-グラフは同じリンクを反対側からたどり、エンティティに関わるドキュメントと、それらをつなぐエッジを表示します。`--entity` で絞り込んだ場合、コードは表示されません。`bunx guren docs:graph --path app/Http/Controllers/CommentController.ts` のようにファイルを起点にすると、コードのノードと、そのコードに関わるドキュメントが一覧されます。ここに出てくるものはどれも、コードから導出されたものか、チェックで検証される frontmatter に宣言されたものです。そのため、別途覚えておく規約はありません。
+グラフは同じリンクを反対側からたどり、エンティティに関わるドキュメントと、それらをつなぐエッジを表示します。`--entity` で絞り込んだ場合、コードは表示されません。`bunx guren docs:graph --path app/Http/Controllers/CommentController.ts` のようにファイルを起点にすると、コードのノードと、そのコードに関わるドキュメントが一覧されます。
+
+ここに出てくるものはどれも、コードから導出されたものか、チェックで検証される frontmatter に宣言されたものです。そのため、別途覚えておく規約はありません。
 
 ```bash run
 bunx guren gate
@@ -293,7 +297,9 @@ bun test
 Write `docs/context/posts.md`, a context document for the `Post` model, in the shape of `docs/context/comments.md`. Cover what a post is, who may change it, what publishing means, and how cover images and the gallery are stored and served. Also record the storage decision as an ADR with `bunx guren make:adr`, and link the two. `tests/Documentation.test.ts` and `bunx guren check --docs` both have to pass.
 ```
 
-この章でハーネスが助ける方向は、これまでの章と逆です。ほかの章では、コードを書く前のエージェントにルールを渡していました。今回は、正しい内容を書くためにエージェントがアプリを*読む*必要があり、そのための手段がさきほど実行した 2 つのコマンドです。`guren context Post` で投稿が何に関わっているかが、`docs:graph` で何がすでに文書化されているかが分かります。どちらも読まずにもっともらしいドキュメントを書くと細部を間違えます。そして細部は、コードと突き合わせれば確かめられます。
+この章でハーネスが助ける方向は、これまでの章と逆です。ほかの章では、コードを書く前のエージェントにルールを渡していました。今回は、正しい内容を書くためにエージェントがアプリを*読む*必要があり、そのための手段がさきほど実行した 2 つのコマンドです。`guren context Post` で投稿が何に関わっているかが、`docs:graph` で何がすでに文書化されているかが分かります。
+
+どちらも読まずにもっともらしいドキュメントを書くと細部を間違えます。そして細部は、コードと突き合わせれば確かめられます。
 
 **手元にエージェントが無い場合は、** 次のドキュメントを使ってください。
 
@@ -429,7 +435,9 @@ issues: [412, "acme/blog#398"]
 bunx guren make:adr "Drafts expire after ninety days" --entity Post --issue 412
 ```
 
-`guren check --docs` が検証するのは、各参照の書式だけです。issue 412 が実在するかを GitHub に問い合わせることはしません。このチェックはゲートの一部なので、ネットワークが必要だと飛行機の中などでは通らなくなってしまいます。`guren context Post` を実行すると、ドキュメントに宣言された issue が一覧されます。`guren context Post --live` はツールチェーンの中で唯一ネットワークにアクセスするコマンドで、各 issue の状態と担当者を表示します。ほかの人がすでに担当している作業に手を付ける前に確認できます。
+`guren check --docs` が検証するのは、各参照の書式だけです。issue 412 が実在するかを GitHub に問い合わせることはしません。このチェックはゲートの一部なので、ネットワークが必要だと飛行機の中などでは通らなくなってしまいます。
+
+`guren context Post` を実行すると、ドキュメントに宣言された issue が一覧されます。`guren context Post --live` はツールチェーンの中で唯一ネットワークにアクセスするコマンドで、各 issue の状態と担当者を表示します。ほかの人がすでに担当している作業に手を付ける前に確認できます。
 
 YAML の書き方には注意してください。実際によく引っかかる点です。`issues: [412, #398]` と書くと、`412` より後ろがすべて消えます。引用符で囲まれていない `#` はコメントの始まりと解釈されるからです。引用符で囲むか、数字だけで書いてください。
 

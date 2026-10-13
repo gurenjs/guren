@@ -46,7 +46,9 @@ export const posts = sqliteTable('posts', {
 bun run db:make create_posts_table
 ```
 
-`db:make` は、`db/schema.ts` と `db/migrations/` にある既存のマイグレーションをすべて突き合わせ、差分を埋める SQL を書き出します。今回は最初のマイグレーションなので、両方のテーブルを作る SQL になります。`db/migrations/` の下にできた新しいフォルダを開いてみてください。中には読みやすい `migration.sql` が入っていますが、このファイルを手で編集することはありません。マイグレーションを適用します。
+`db:make` は、`db/schema.ts` と `db/migrations/` にある既存のマイグレーションをすべて突き合わせ、差分を埋める SQL を書き出します。今回は最初のマイグレーションなので、両方のテーブルを作る SQL になります。`db/migrations/` の下にできた新しいフォルダを開いてみてください。中には読みやすい `migration.sql` が入っていますが、このファイルを手で編集することはありません。
+
+マイグレーションを適用します。
 
 ```bash run
 bun run db:migrate
@@ -71,7 +73,9 @@ export class Post extends defineModel(posts, { fillable: ['title', 'body'] }) {
 
 モデルはこれだけで、あえて薄くしています。`defineModel(posts)` によって、クラスに `find`、`findOrFail`、`all`、`create`、`update`、`delete`、`paginate` とクエリビルダーが備わり、どれもテーブル定義から型が付きます。`PostRecord` は上の 4 列とまったく同じ型で、この型を手で書く必要はありません。
 
-`fillable` の 1 行は、便利さのためではなく安全のための設定です。`Post.create(data)` は、ここに挙げたキーだけを書き込みます。`data` に紛れ込んだ `id` は何も言わずに取り除かれますが、それ以外のキー(たとえば `createdAt`)が含まれていると、`create` は `MassAssignmentException` を投げ、何も書き込みません。第 4 章ではバリデーション済みのリクエストボディを `create` に渡しますが、そのときもこの 1 行があるので、フォームに無いフィールドをクライアントが勝手に設定することはできません。`guren audit` もこの設定があるかを検査します。
+`fillable` の 1 行は、便利さのためではなく安全のための設定です。`Post.create(data)` は、ここに挙げたキーだけを書き込みます。`data` に紛れ込んだ `id` は何も言わずに取り除かれますが、それ以外のキー(たとえば `createdAt`)が含まれていると、`create` は `MassAssignmentException` を投げ、何も書き込みません。
+
+第 4 章ではバリデーション済みのリクエストボディを `create` に渡しますが、そのときもこの 1 行があるので、フォームに無いフィールドをクライアントが勝手に設定することはできません。`guren audit` もこの設定があるかを検査します。
 
 ## 3. 先にテストを書く
 
@@ -365,7 +369,9 @@ bun test
 Add the create form for posts. `GET /posts/create`, named `posts.create`, renders `resources/js/pages/posts/New.tsx` with a title input and a body textarea that submit to `POST /posts`, named `posts.store`. The `store` action validates `title` and `body` as non-empty strings with zod, creates the post, and redirects to its page. Register `/posts/create` before `/posts/:id`. `tests/PostController.test.ts` describes the behaviour; make it pass.
 ```
 
-この章で扱うハーネスの仕組みは、`.claude/skills/scaffold/` にある **`scaffold` スキル**です。このスキルは、どんな `bunx guren make:*` ジェネレーターがあり、記憶を頼りにファイルを書く代わりにいつそれを使えばよいかを、エージェントに教えます。たとえば、ページの骨組みには `make:view posts/New`、Zod スキーマのファイルには `make:validator Post` を使います。エージェントがジェネレーターを使うかどうかを見ていてください。どちらの結果でも構いませんが、ジェネレーターの出力はフレームワークの検証済みの書き方なので、ジェネレーターを使うエージェントほど間違える余地が小さくなります。
+この章で扱うハーネスの仕組みは、`.claude/skills/scaffold/` にある **`scaffold` スキル**です。このスキルは、どんな `bunx guren make:*` ジェネレーターがあり、記憶を頼りにファイルを書く代わりにいつそれを使えばよいかを、エージェントに教えます。たとえば、ページの骨組みには `make:view posts/New`、Zod スキーマのファイルには `make:validator Post` を使います。
+
+エージェントがジェネレーターを使うかどうかを見ていてください。どちらの結果でも構いませんが、ジェネレーターの出力はフレームワークの検証済みの書き方なので、ジェネレーターを使うエージェントほど間違える余地が小さくなります。
 
 **手元にエージェントが無い場合は、** 次の 3 ファイルを書きます。コントローラーにはアクションが 2 つ増えます。
 
@@ -524,7 +530,9 @@ git commit -m "feat: add the new post form"
 
 ## ジェネレーターで作る場合
 
-この章と次の章で作るものは、すべて `bunx guren add resource` のコマンド 1 つで生成できます。スキーマのテーブル定義、モデル、バリデーター、リソース、7 つのアクションを持つコントローラー、ルート、4 つのページです。マイグレーションはこれまでどおり `bun run db:make` で生成します。ここまで手で作ってきたので、ジェネレーターの出力を読んで理解できるはずです。第 5 章からは、そのうえでジェネレーターを使っていきます。今すぐ比べてみたい場合は、あとで捨てるブランチで試してください。
+この章と次の章で作るものは、すべて `bunx guren add resource` のコマンド 1 つで生成できます。スキーマのテーブル定義、モデル、バリデーター、リソース、7 つのアクションを持つコントローラー、ルート、4 つのページです。マイグレーションはこれまでどおり `bun run db:make` で生成します。
+
+ここまで手で作ってきたので、ジェネレーターの出力を読んで理解できるはずです。第 5 章からは、そのうえでジェネレーターを使っていきます。今すぐ比べてみたい場合は、あとで捨てるブランチで試してください。
 
 ```bash manual
 git switch -c scratch/add-resource
@@ -539,9 +547,13 @@ git branch -D scratch/add-resource
 
 `git switch main` と `git branch -D` は参照を動かすだけで、どちらを実行してもコミットしていない作業は元に戻りません。`reset` と `clean` を省くと、ジェネレーターが書いたファイルはすべて `main` の作業ツリーに残ります。消す前に対象の一覧を確認できるよう、先に `-n` で空実行します。また、ジェネレーターが新しく作ったファイルは未追跡で diff には表示されないため、`git diff` ではなく `git status` で確認します。
 
-コードを読む前に、まずファイルの一覧を見てください。`db/schema.ts` と `routes/web.ts` は一覧にありません。スキーマはすでに `posts` をエクスポートしていて、ルートも `/posts` を登録済みなので、コマンドはどちらのファイルも変更せず、生成すべきマイグレーションもありません。それ以外のファイルは、`--force` を付けたので上書きされています。`app/Models/Post.ts` もその 1 つで、生成されたモデルには `fillable` がありません。そのため、このブランチで `bunx guren audit` を実行すると、マスアサインメントの警告が出ます。
+コードを読む前に、まずファイルの一覧を見てください。`db/schema.ts` と `routes/web.ts` は一覧にありません。スキーマはすでに `posts` をエクスポートしていて、ルートも `/posts` を登録済みなので、コマンドはどちらのファイルも変更せず、生成すべきマイグレーションもありません。
 
-生成されたコントローラーは、この章で書いたものと 3 か所違います。1 つ目は `:id` パラメータをモデルにバインドせずスキーマで検証している点、2 つ目は `index` がページネーションしている点、3 つ目は `store`、`update`、`destroy` が `this.auth.userOrFail()` から始まる点です。1 つ目と 2 つ目は第 4 章、3 つ目は第 6 章で扱います。`edit`、`update`、`destroy` アクションと `Edit.tsx` ページも生成されますが、このブランチではどこからもアクセスできません。ルートファイルは変更されていないので、これらのルートが 1 つも登録されていないからです。
+それ以外のファイルは、`--force` を付けたので上書きされています。`app/Models/Post.ts` もその 1 つで、生成されたモデルには `fillable` がありません。そのため、このブランチで `bunx guren audit` を実行すると、マスアサインメントの警告が出ます。
+
+生成されたコントローラーは、この章で書いたものと 3 か所違います。1 つ目は `:id` パラメータをモデルにバインドせずスキーマで検証している点、2 つ目は `index` がページネーションしている点、3 つ目は `store`、`update`、`destroy` が `this.auth.userOrFail()` から始まる点です。1 つ目と 2 つ目は第 4 章、3 つ目は第 6 章で扱います。
+
+`edit`、`update`、`destroy` アクションと `Edit.tsx` ページも生成されますが、このブランチではどこからもアクセスできません。ルートファイルは変更されていないので、これらのルートが 1 つも登録されていないからです。
 
 ## ここまでの状態
 
@@ -570,9 +582,15 @@ git branch -D scratch/add-resource
 
 `migration.sql` の各列の行を、`db/schema.ts` の対応する行と並べて見てください。
 
-`posts` の `title`、`body`、`created_at` と、`users` の `name`、`email`、`created_at` が `NOT NULL` です。どれも、その列で `.notNull()` を呼んでいるからです。細かい点が 2 つあります。`id` は `integer PRIMARY KEY AUTOINCREMENT` で、`NOT NULL` が付いていません。SQLite の整数の主キーはもともと null になり得ないので、drizzle-kit はこのキーワードを省きます。`created_at` には `NOT NULL` があっても `DEFAULT` がありません。`$defaultFn` は、モデルが行を挿入するときにアプリの中で実行されるからです。生の SQL で `created_at` を指定せずに挿入すると拒否されます。
+`posts` の `title`、`body`、`created_at` と、`users` の `name`、`email`、`created_at` が `NOT NULL` です。どれも、その列で `.notNull()` を呼んでいるからです。
 
-`body` を nullable にしても、`db:make` は `ALTER COLUMN` を書きません。代わりにテーブルを作り直します。`body` に `NOT NULL` のない `__new_posts` テーブルを作り、`INSERT … SELECT` で `posts` から行をコピーし、`DROP TABLE posts` のあと `__new_posts` を `posts` に名前を変えます。同じ手順は第 5 章と第 6 章でも出てきます。SQLite にこれが必要な理由は、第 6 章の演習 2 で扱います。
+細かい点が 2 つあります。`id` は `integer PRIMARY KEY AUTOINCREMENT` で、`NOT NULL` が付いていません。SQLite の整数の主キーはもともと null になり得ないので、drizzle-kit はこのキーワードを省きます。
+
+`created_at` には `NOT NULL` があっても `DEFAULT` がありません。`$defaultFn` は、モデルが行を挿入するときにアプリの中で実行されるからです。生の SQL で `created_at` を指定せずに挿入すると拒否されます。
+
+`body` を nullable にしても、`db:make` は `ALTER COLUMN` を書きません。代わりにテーブルを作り直します。`body` に `NOT NULL` のない `__new_posts` テーブルを作り、`INSERT … SELECT` で `posts` から行をコピーし、`DROP TABLE posts` のあと `__new_posts` を `posts` に名前を変えます。
+
+同じ手順は第 5 章と第 6 章でも出てきます。SQLite にこれが必要な理由は、第 6 章の演習 2 で扱います。
 
 </details>
 
@@ -581,7 +599,9 @@ git branch -D scratch/add-resource
 
 行を探しているのはコントローラーではなく、`bind: { id: Post }` を持つ `posts.show` のルートです。そこから例外の行き先をたどり、[エラーハンドリング](../guides/error-handling.md)を読んでください。
 
-ルートモデルバインディングは `Post.findOrFail(id)` を呼びます。行がなければ、ステータス 404 を持つ `ModelNotFoundException` を投げます。途中で捕まえるものはないので、例外はアプリの `ExceptionHandler` まで届き、例外が持つステータスで応答します。応答はエラーページか JSON で、呼び出し元とデバッグモードの設定によって変わります。`Post.find(id)` は例外を投げず、`null` を返します。`show` で `const post = await Post.find(id)` と書くと、TypeScript は `post.id` の箇所で `post` が null かもしれないと指摘します。それを無視すると、行がないときは 404 ではなく `TypeError` による 500 になります。404 に戻すには `null` を確かめて自分で例外を投げる必要があり、それは `findOrFail` がすでにしていることです。
+ルートモデルバインディングは `Post.findOrFail(id)` を呼びます。行がなければ、ステータス 404 を持つ `ModelNotFoundException` を投げます。途中で捕まえるものはないので、例外はアプリの `ExceptionHandler` まで届き、例外が持つステータスで応答します。応答はエラーページか JSON で、呼び出し元とデバッグモードの設定によって変わります。
+
+`Post.find(id)` は例外を投げず、`null` を返します。`show` で `const post = await Post.find(id)` と書くと、TypeScript は `post.id` の箇所で `post` が null かもしれないと指摘します。それを無視すると、行がないときは 404 ではなく `TypeError` による 500 になります。404 に戻すには `null` を確かめて自分で例外を投げる必要があり、それは `findOrFail` がすでにしていることです。
 
 </details>
 
