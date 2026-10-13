@@ -12,6 +12,8 @@ import {
   buildAgentPrompt,
   buildCreateCommand,
   buildNextSteps,
+  buildScaffoldPrompt,
+  buildSkillInstallCommands,
   hasRenderingMode,
   offersAuth,
   startOptionsFromQuery,
@@ -140,6 +142,25 @@ describe('buildAgentPrompt', () => {
       'I want to build this: a reading list\nPropose a plan',
     )
     expect(buildAgentPrompt(DEFAULT_START_OPTIONS, 'claude')).toContain('ask me what I want to build first')
+  })
+})
+
+describe('the agent-runs-it route', () => {
+  it('installs the skills from the catalog the agent harness guide names', () => {
+    const guide = read('docs/en/guides/agent-harness.md')
+    for (const agent of AGENTS) {
+      for (const command of buildSkillInstallCommands(agent)) expect(guide).toContain(command)
+    }
+    expect(buildSkillInstallCommands('claude')).toHaveLength(2)
+    expect(buildSkillInstallCommands('codex')).toEqual(['npx skills add gurenjs/agent-skills'])
+  })
+
+  it('names the skill the catalog ships and hands over the exact command', () => {
+    const skill = read('packages/cli/templates/agent-catalog/skills/guren-new-app/SKILL.md')
+    expect(skill).toMatch(/^name: guren-new-app$/mu)
+    const prompt = buildScaffoldPrompt(options({ db: 'mysql' }))
+    expect(prompt).toContain('guren-new-app skill')
+    expect(prompt).toContain(`\`${buildCreateCommand(options({ db: 'mysql' }))}\``)
   })
 })
 

@@ -15,6 +15,8 @@ import {
   buildAgentPrompt,
   buildCreateCommand,
   buildNextSteps,
+  buildScaffoldPrompt,
+  buildSkillInstallCommands,
   hasRenderingMode,
   isValidProjectName,
   offersAuth,
@@ -227,8 +229,48 @@ function CommandPanel({ options }: { options: StartOptions }) {
   )
 }
 
+function Pills<T extends string>({
+  label,
+  items,
+  value,
+  onChange,
+}: {
+  label: string
+  items: Array<{ value: T; label: string }>
+  value: T
+  onChange: (value: T) => void
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex flex-wrap items-center gap-2">
+      <span className="mr-1 text-sm text-smoke">{label}</span>
+      {items.map((item) => (
+        <button
+          key={item.value}
+          type="button"
+          role="radio"
+          aria-checked={item.value === value}
+          onClick={() => onChange(item.value)}
+          className={`rounded-full border px-3 py-1 text-sm transition ${
+            item.value === value ? 'border-crimson-400 bg-crimson-900/40 text-crimson-50' : 'border-white/15 text-smoke hover:border-white/35'
+          }`}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+type Runner = 'you' | 'agent'
+
+const RUNNERS: Array<{ value: Runner; label: string }> = [
+  { value: 'you', label: 'You run it' },
+  { value: 'agent', label: 'The agent runs it' },
+]
+
 function AgentPanel({ options }: { options: StartOptions }) {
   const [agent, setAgent] = useState<Agent | undefined>(options.agents[0])
+  const [runner, setRunner] = useState<Runner>('you')
   const [goal, setGoal] = useState('')
   const active = agent && options.agents.includes(agent) ? agent : options.agents[0]
 
@@ -242,55 +284,90 @@ function AgentPanel({ options }: { options: StartOptions }) {
   }
 
   const detail = AGENT_DETAILS[active]
+  const inApp = [`cd ${options.name}`, detail.launch].join('\n')
+  const pasteWhere = detail.where ? <> Paste prompts into {detail.where}.</> : null
+
+  const firstPrompt = (n: number) => (
+    <Step n={n} title="Send this prompt">
+      <label className="block">
+        <span className="text-sm text-smoke">What do you want to build first? (optional)</span>
+        <textarea
+          value={goal}
+          onChange={(event) => setGoal(event.target.value)}
+          rows={2}
+          placeholder="A page where members list the books they have read"
+          className="mt-2 w-full rounded-md border border-white/15 bg-ink px-3 py-2 font-home text-[0.9375rem] text-crimson-50 placeholder:text-smoke/50 focus-visible:outline-2 focus-visible:outline-crimson-300"
+        />
+      </label>
+      <CopyBlock text={buildAgentPrompt(options, active, goal)} label="the prompt" prompt />
+      <p>
+        The agent checks the app with the same gate CI runs, and asks before it writes code. The{' '}
+        <TextLink href="/docs/agent-course/00-overview">agent course</TextLink> shows how to take a
+        feature from plan to merged commits.
+      </p>
+    </Step>
+  )
 
   return (
-    <ol className="space-y-8">
-      <CreateStep options={options} />
-      <Step n={2} title={`Start ${detail.label} inside the app`}>
+    <div className="space-y-8">
+      <div className="space-y-3">
         {options.agents.length > 1 ? (
-          <div role="radiogroup" aria-label="Agent to start" className="flex flex-wrap gap-2">
-            {options.agents.map((a) => (
-              <button
-                key={a}
-                type="button"
-                role="radio"
-                aria-checked={a === active}
-                onClick={() => setAgent(a)}
-                className={`rounded-full border px-3 py-1 text-sm transition ${
-                  a === active ? 'border-crimson-400 bg-crimson-900/40 text-crimson-50' : 'border-white/15 text-smoke hover:border-white/35'
-                }`}
-              >
-                {AGENT_DETAILS[a].label}
-              </button>
-            ))}
-          </div>
-        ) : null}
-        <CopyBlock text={[`cd ${options.name}`, detail.launch].join('\n')} label={`the commands to start ${detail.label}`} />
-        <p>
-          Start it from the new directory, not from the one you ran the command in: that is where it
-          finds <InlineCode>{detail.entry}</InlineCode> and the rest of the harness the scaffolder wrote.
-          {detail.where ? <> Paste the prompt into {detail.where}.</> : null}
-        </p>
-      </Step>
-      <Step n={3} title="Send this prompt">
-        <label className="block">
-          <span className="text-sm text-smoke">What do you want to build first? (optional)</span>
-          <textarea
-            value={goal}
-            onChange={(event) => setGoal(event.target.value)}
-            rows={2}
-            placeholder="A page where members list the books they have read"
-            className="mt-2 w-full rounded-md border border-white/15 bg-ink px-3 py-2 font-home text-[0.9375rem] text-crimson-50 placeholder:text-smoke/50 focus-visible:outline-2 focus-visible:outline-crimson-300"
+          <Pills
+            label="Agent"
+            items={options.agents.map((a) => ({ value: a, label: AGENT_DETAILS[a].label }))}
+            value={active}
+            onChange={setAgent}
           />
-        </label>
-        <CopyBlock text={buildAgentPrompt(options, active, goal)} label="the prompt" prompt />
-        <p>
-          The agent checks the app with the same gate CI runs, and asks before it writes code. The{' '}
-          <TextLink href="/docs/agent-course/00-overview">agent course</TextLink> shows how to take a
-          feature from plan to merged commits.
-        </p>
-      </Step>
-    </ol>
+        ) : null}
+        <Pills label="Create command" items={RUNNERS} value={runner} onChange={setRunner} />
+      </div>
+
+      {runner === 'you' ? (
+        <ol className="space-y-8">
+          <CreateStep options={options} />
+          <Step n={2} title={`Start ${detail.label} inside the app`}>
+            <CopyBlock text={inApp} label={`the commands to start ${detail.label}`} />
+            <p>
+              Start it from the new directory, not from the one you ran the command in: that is where it
+              finds <InlineCode>{detail.entry}</InlineCode> and the rest of the harness the scaffolder wrote.
+              {pasteWhere}
+            </p>
+          </Step>
+          {firstPrompt(3)}
+        </ol>
+      ) : (
+        <ol className="space-y-8">
+          <Step n={1} title="Install the Guren skills (once per machine)">
+            <CopyBlock text={buildSkillInstallCommands(active).join('\n')} label="the commands to install the Guren skills" />
+            <p>
+              They teach {detail.label} what Guren is and how to scaffold an app, before any app exists. The{' '}
+              <TextLink href="/docs/guides/agent-harness#before-you-have-an-app-install-the-guren-skills-from-a-catalog">
+                agent harness guide
+              </TextLink>{' '}
+              covers what they install.
+            </p>
+          </Step>
+          <Step n={2} title={`Start ${detail.label} where the app should go`}>
+            <CopyBlock text={detail.launch} label={`the command to start ${detail.label}`} />
+            <p>
+              The directory you start it in becomes the parent of <InlineCode>{options.name}/</InlineCode>.
+              {pasteWhere}
+            </p>
+          </Step>
+          <Step n={3} title="Ask it to create the app">
+            <CopyBlock text={buildScaffoldPrompt(options)} label="the prompt that creates the app" prompt />
+          </Step>
+          <Step n={4} title={`Restart ${detail.label} inside the app`}>
+            <CopyBlock text={inApp} label={`the commands to start ${detail.label} in the app`} />
+            <p>
+              Quit the first session. A session started in the parent directory does not load the{' '}
+              <InlineCode>{detail.entry}</InlineCode> and hooks the scaffolder wrote into the app.
+            </p>
+          </Step>
+          {firstPrompt(5)}
+        </ol>
+      )}
+    </div>
   )
 }
 

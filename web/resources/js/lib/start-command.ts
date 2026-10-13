@@ -159,6 +159,23 @@ export function buildNextSteps(options: StartOptions): string[] {
   return [`cd ${options.name}`, ...buildSetupSteps(options), 'bun run dev']
 }
 
+/** The on-ramp skills from gurenjs/agent-skills, per docs/en/guides/agent-harness.md; user scope, once per machine. */
+export function buildSkillInstallCommands(agent: Agent): string[] {
+  return agent === 'claude'
+    ? ['claude plugin marketplace add gurenjs/agent-skills', 'claude plugin install guren@gurenjs --scope user']
+    : ['npx skills add gurenjs/agent-skills']
+}
+
+/** For an agent started in the parent directory: it scaffolds through the guren-new-app skill, then hands back. */
+export function buildScaffoldPrompt(options: StartOptions): string {
+  return [
+    'Create a new Guren app with the guren-new-app skill.',
+    `Run exactly this command, which already answers every prompt: \`${buildCreateCommand(options)}\``,
+    `Then check the postconditions the skill lists inside \`${options.name}/\`, and stop there.`,
+    "Don't change anything in the app yet: I'll restart you inside it.",
+  ].join('\n')
+}
+
 export function buildAgentPrompt(options: StartOptions, agent: Agent, goal = ''): string {
   const { entry } = AGENT_DETAILS[agent]
   const setup = buildSetupSteps(options)
