@@ -163,31 +163,19 @@ export default class AttachmentsProvider extends ServiceProvider {
 
 ### アタッチメント付きフィーチャーのスキャフォールド
 
-レイヤーを導入したあとは、`make:feature`(と `guren add resource`)で
-アタッチメントに対応したフィーチャー一式を雛形生成できます。
+レイヤーを導入したあとは、`make:feature`(と `guren add resource`)でアタッチメントに対応したフィーチャー一式を雛形生成できます。
 
 ```bash
 bunx guren make:feature Post --fields "title:string,body:text" --attach "cover:one,images:many"
 ```
 
-`--attach` には、カンマで区切った `name:kind` の組を渡します(kind は `one` か
-`many` で、省略すると `one`)。生成されるモデルは `Attachable` ミックスインで
-包まれ、どのコレクションにも `image: 'require'` が付きます(画像以外のファイルを
-受け取るコレクションでは、このオプションを外してください)。store アクションは
-同じ名前の multipart フィールドを `this.file()` / `this.files()` で読んで
-`Post.attach()` を呼び、destroy アクションは行を削除する前に
-`Post.purgeAttachments()` を呼びます。
+`--attach` には、カンマで区切った `name:kind` の組を渡します(kind は `one` か `many` で、省略すると `one`)。生成されるモデルは `Attachable` ミックスインで包まれ、どのコレクションにも `image: 'require'` が付きます(画像以外のファイルを受け取るコレクションでは、このオプションを外してください)。store アクションは同じ名前の multipart フィールドを `this.file()` / `this.files()` で読んで `Post.attach()` を呼び、destroy アクションは行を削除する前に `Post.purgeAttachments()` を呼びます。
 
-アプリに `configureAttachments()` が
-ないと、このコマンドは雛形を生成しません。先に
-`bunx guren add attachments` を実行してください。
+アプリに `configureAttachments()` がないと、このコマンドは雛形を生成しません。先に `bunx guren add attachments` を実行してください。
 
-生成された New ページには、
-`<input type="file">` を自分で追加します(Inertia の `useForm` は、フォームデータに
-`File` が含まれると自動で multipart の POST に切り替わります)。生成された
-`update()` はアタッチメントを扱いません。Edit ページからのアップロードも
-受け付けたい場合は、同じ `this.file()` と `Post.attach()` の行を `update()` にも
-追加してください(`hasOne` は置き換え、`hasMany` は追加になります)。
+生成された New ページには、 `<input type="file">` を自分で追加します(Inertia の `useForm` は、フォームデータに `File` が含まれると自動で multipart の POST に切り替わります)。
+
+生成された `update()` はアタッチメントを扱いません。Edit ページからのアップロードも受け付けたい場合は、同じ `this.file()` と `Post.attach()` の行を `update()` にも追加してください(`hasOne` は置き換え、`hasMany` は追加になります)。
 
 ## アタッチメントの操作
 
