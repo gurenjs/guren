@@ -59,6 +59,13 @@ export function MobileMenu({ open, onClose, basePath, locales = [] }: MobileMenu
             Home
           </Link>
           <Link
+            href="/start"
+            className="rounded-lg px-3 py-2.5 text-[0.95rem] font-medium text-docs-text no-underline transition hover:bg-docs-accent-tint hover:text-docs-accent"
+            onClick={onClose}
+          >
+            Get started
+          </Link>
+          <Link
             href={basePath}
             className="rounded-lg px-3 py-2.5 text-[0.95rem] font-medium text-docs-text no-underline transition hover:bg-docs-accent-tint hover:text-docs-accent"
             onClick={onClose}

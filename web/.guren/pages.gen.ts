@@ -2,6 +2,7 @@
 // Run `guren codegen` to regenerate.
 
 import type { PageContract, PagePropsRecord } from '@guren/inertia-client'
+import type { Agent, Blueprint, Database, RenderingMode, StartOptions } from '../resources/js/lib/start-command.js'
 
 
 export const pageManifest = {
@@ -11,6 +12,7 @@ export const pageManifest = {
   'Docs/Index': './pages/Docs/Index.tsx',
   'Docs/Show': './pages/Docs/Show.tsx',
   'Home': './pages/Home.tsx',
+  'Start': './pages/Start.tsx',
 } as const
 
 export type PageManifest = typeof pageManifest
@@ -105,6 +107,9 @@ export interface PagePropsMap {
   'Home': {
   codeExamples: Record<string, string>
 }
+  'Start': {
+  initial: StartOptions
+}
 }
 
 export type InferPageProps<TId extends PageId> =
@@ -136,5 +141,6 @@ export const pages = {
     Index: defineGeneratedPage<'Docs/Index', PagePropsMap['Docs/Index']>('Docs/Index', pageManifest['Docs/Index']),
     Show: defineGeneratedPage<'Docs/Show', PagePropsMap['Docs/Show']>('Docs/Show', pageManifest['Docs/Show'])
   },
-  Home: defineGeneratedPage<'Home', PagePropsMap['Home']>('Home', pageManifest['Home'])
+  Home: defineGeneratedPage<'Home', PagePropsMap['Home']>('Home', pageManifest['Home']),
+  Start: defineGeneratedPage<'Start', PagePropsMap['Start']>('Start', pageManifest['Start'])
 } as const

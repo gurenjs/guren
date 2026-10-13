@@ -32,6 +32,8 @@ The scaffolder walks you through a few choices, and the defaults are right for g
 
 It then installs dependencies and creates a `.env` file with a generated `APP_KEY` for you. Flags answer the prompts non-interactively (`--mode ssr`, `--db sqlite`, `--agents codex,cursor`), and `--auth` includes authentication scaffolding from the start.
 
+To build the command from your choices instead, use [the start page](https://guren.dev/start). It also writes a first prompt for your coding agent.
+
 ### 2. Start the dev server
 
 ```bash

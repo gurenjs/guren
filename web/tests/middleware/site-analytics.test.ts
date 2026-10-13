@@ -102,6 +102,7 @@ describe('classifyContent', () => {
     expect(classifyContent('/docs/guides/getting-started')).toBe('docs')
     expect(classifyContent('/blog/some-post')).toBe('blog')
     expect(classifyContent('/')).toBe('home')
+    expect(classifyContent('/start')).toBe('start')
     expect(classifyContent('/login')).toBe('other')
   })
 
