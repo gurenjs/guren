@@ -344,7 +344,9 @@ test('placing an order queues the processing job', async () => {
 })
 ```
 
-この例は、CSRF トークンを検査する `createApp({ auth })` のアプリを前提にしています。`http.withCsrf()` は `/` を一度取得し、以降のすべてのリクエストでセッションの Cookie と CSRF トークンを送る `TestApp` を返します。これで、`POST` もブラウザーからの送信と同じように検査を通ります。`auth` を使わないアプリでは CSRF を検査しないうえ、トークンが発行されないので `withCsrf()` は例外を投げます。その場合は `http.post()` をそのまま呼んでください。
+この例は、CSRF トークンを検査する `createApp({ auth })` のアプリを前提にしています。`http.withCsrf()` は `/` を一度取得し、以降のすべてのリクエストでセッションの Cookie と CSRF トークンを送る `TestApp` を返します。これで、`POST` もブラウザーからの送信と同じように検査を通ります。
+
+`auth` を使わないアプリでは CSRF を検査しないうえ、トークンが発行されないので `withCsrf()` は例外を投げます。その場合は `http.post()` をそのまま呼んでください。
 
 ### フェイクのバインド
 

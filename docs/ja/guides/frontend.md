@@ -151,7 +151,9 @@ export class UserController extends Controller {
 
 初回の page object には、後から読み込む prop のキーが `deferredProps` に入ります。キーは第 2 引数のグループ名（省略時は `default`）ごとにまとめられ、上の例では `{ "default": ["permissions"], "attributes": ["teams", "projects"] }` になります。クライアントはグループごとに partial reload を 1 回ずつ送るので、`teams` と `projects` は一緒に届き、`permissions` はそれと並行して読み込まれます。コールバックが実行されるのは、この後続のリクエストのときだけです。
 
-クライアント側では、後続のリクエストが返るまで prop は `undefined` です。`Props` では省略可能として宣言し、`<Deferred>` の中で描画してください。値が届くまでは fallback が表示されます。コントローラーはどの prop にも deferred な値を渡せるので、必須として宣言していても型検査は通ってしまいます。`?` を付けずに宣言した prop に `defer()` を渡していると、`guren check` が警告を出します。
+クライアント側では、後続のリクエストが返るまで prop は `undefined` です。`Props` では省略可能として宣言し、`<Deferred>` の中で描画してください。値が届くまでは fallback が表示されます。
+
+コントローラーはどの prop にも deferred な値を渡せるので、必須として宣言していても型検査は通ってしまいます。`?` を付けずに宣言した prop に `defer()` を渡していると、`guren check` が警告を出します。
 
 ```tsx
 import type { PageProps } from '@guren/inertia-client/contracts'
@@ -191,9 +193,15 @@ const app = createApp({
 
 マークアップは手を加えずにそのまま出力されるので、開発者が書いた文字列だけを渡してください。`public/` 直下のファイルは Bun ランタイムが配信します。Node ベースのデプロイでは CDN から配信してください。
 
-ブラウザがドキュメントとして描画する形式のファイル (`.html`、`.htm`、`.svg`、`.xhtml`、`.xml`) には、`Content-Disposition: attachment` と `X-Content-Type-Options: nosniff` が付きます。URL を直接開いてもファイルはダウンロードされ、中のスクリプトが自サイトのオリジンで動くことはありません。画像・スクリプト・スタイルシート・フォントは影響を受けず、`<img src="/logo.svg">`、CSS の `url()`、`<link rel="icon">` もこれまでどおり読み込まれます。Content-Disposition は、遷移するかダウンロードするかを決めるだけだからです。ただし `<iframe>` や `<object>` への埋め込みは遷移として扱われるため、この形では描画されなくなります。ユーザーがアップロードしたファイルを一切置かない public ディレクトリなら、`rootPublicAssets: { inlineDocuments: true }` と `inlineDocuments: true` で、ルートの系統ごとにこの動作を止められます。そうでない場合は、そのページをコントローラーから返してください。
+ブラウザがドキュメントとして描画する形式のファイル (`.html`、`.htm`、`.svg`、`.xhtml`、`.xml`) には、`Content-Disposition: attachment` と `X-Content-Type-Options: nosniff` が付きます。URL を直接開いてもファイルはダウンロードされ、中のスクリプトが自サイトのオリジンで動くことはありません。
 
-アプリより先にプラットフォームが `public/` を配信するデプロイ先でも、同じ方針が適用されます。Cloudflare・Vercel・Lambda の各プラグインがビルド時にこの方針をプラットフォームに宣言するので、ローカルでダウンロードになるファイルは本番でもダウンロードになります。ただし、この宣言はフレームワークが判定する content type ではなく拡張子をもとにしています。また、プラグインが読むのはビルド済みのディレクトリでルート設定ではないため、`inlineDocuments` はプラットフォームには伝わりません。意図して無効にしているアプリは、プラットフォーム側で取り消してください。具体的には、生成された `.cloudflare/assets/_headers` からルールを消す、`.vercel/output/config.json` から `handle: "hit"` のルートを消す、CDK スタックから CloudFront Function の関連付けを外す、のいずれかをビルドの後に実行します。これらのファイルはビルドのたびに作り直されるので、毎回実行する必要があります。
+画像・スクリプト・スタイルシート・フォントは影響を受けず、`<img src="/logo.svg">`、CSS の `url()`、`<link rel="icon">` もこれまでどおり読み込まれます。Content-Disposition は、遷移するかダウンロードするかを決めるだけだからです。ただし `<iframe>` や `<object>` への埋め込みは遷移として扱われるため、この形では描画されなくなります。
+
+ユーザーがアップロードしたファイルを一切置かない public ディレクトリなら、`rootPublicAssets: { inlineDocuments: true }` と `inlineDocuments: true` で、ルートの系統ごとにこの動作を止められます。そうでない場合は、そのページをコントローラーから返してください。
+
+アプリより先にプラットフォームが `public/` を配信するデプロイ先でも、同じ方針が適用されます。Cloudflare・Vercel・Lambda の各プラグインがビルド時にこの方針をプラットフォームに宣言するので、ローカルでダウンロードになるファイルは本番でもダウンロードになります。ただし、この宣言はフレームワークが判定する content type ではなく拡張子をもとにしています。また、プラグインが読むのはビルド済みのディレクトリでルート設定ではないため、`inlineDocuments` はプラットフォームには伝わりません。
+
+意図して無効にしているアプリは、プラットフォーム側で取り消してください。具体的には、生成された `.cloudflare/assets/_headers` からルールを消す、`.vercel/output/config.json` から `handle: "hit"` のルートを消す、CDK スタックから CloudFront Function の関連付けを外す、のいずれかをビルドの後に実行します。これらのファイルはビルドのたびに作り直されるので、毎回実行する必要があります。
 
 ## サーバーサイドレンダリング
 どのアプリにも既定で `resources/js/ssr.tsx` が入っていて、`@guren/inertia-client` の `renderInertiaServer()` を呼び出します。`autoConfigureInertiaAssets(app, { importMeta })` を使ってブートすると、Guren が次の処理を自動で行います。
@@ -309,7 +317,9 @@ codegen がインポートパスを書き換えるので、`pages.gen.ts` から
 ## ホットリロード
 `bun run dev` を実行すると Bun が Vite dev サーバーを自動で起動するので、TSX を変更するとすぐにリロードされます。
 
-バックエンドもリロードされます。`dev:server` は `bun --hot bin/serve.ts` を実行するので、コントローラー・ルート・モデルへの変更は、再起動しなくても次のリクエストから反映されます。ルートを追加したときは codegen が走ってもう一度リロードが入り、そこで落ち着きます。ただし、プロセスの中に持っている状態はリロードで引き継がれません。メモリドライバーのセッションとキャッシュは空の状態から作り直され、モジュールレベルの変数も初期化されます。Redis やデータベースなどプロセスの外にあるストアは影響を受けないので、セッションをプロセスの外に置いていればサインインしたままです。
+バックエンドもリロードされます。`dev:server` は `bun --hot bin/serve.ts` を実行するので、コントローラー・ルート・モデルへの変更は、再起動しなくても次のリクエストから反映されます。ルートを追加したときは codegen が走ってもう一度リロードが入り、そこで落ち着きます。
+
+ただし、プロセスの中に持っている状態はリロードで引き継がれません。メモリドライバーのセッションとキャッシュは空の状態から作り直され、モジュールレベルの変数も初期化されます。Redis やデータベースなどプロセスの外にあるストアは影響を受けないので、セッションをプロセスの外に置いていればサインインしたままです。
 
 この既定の設定が入る前に作ったプロジェクトでは、自分でフラグを追加してください。
 

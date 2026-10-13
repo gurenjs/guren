@@ -80,7 +80,9 @@ export default defineOAuthConfig((env) => {
 })
 ```
 
-各プロバイダーは `OAUTH_<PROVIDER>_CLIENT_ID`・`_CLIENT_SECRET`・`_REDIRECT_URI` の3つのキーを読みます。これらのキーは `config/env.ts` で宣言してください（[設定](./configuration.md#環境変数を宣言する)を参照）。`guren add oauth` を使えば、宣言も済んだ状態になります。`_REDIRECT_URI` には、`https://your.app/auth/github/callback` のようなコールバックの完全な URL を設定します。キーがそろっていないプロバイダーは登録されず、そのプロバイダーでフローを開始すると `OAuth provider "github" is not configured.` という例外が投げられます。
+各プロバイダーは `OAUTH_<PROVIDER>_CLIENT_ID`・`_CLIENT_SECRET`・`_REDIRECT_URI` の3つのキーを読みます。これらのキーは `config/env.ts` で宣言してください（[設定](./configuration.md#環境変数を宣言する)を参照）。`guren add oauth` を使えば、宣言も済んだ状態になります。`_REDIRECT_URI` には、`https://your.app/auth/github/callback` のようなコールバックの完全な URL を設定します。
+
+キーがそろっていないプロバイダーは登録されず、そのプロバイダーでフローを開始すると `OAuth provider "github" is not configured.` という例外が投げられます。
 
 定義は `createApp({ config })` の配列に加えます。
 
@@ -320,7 +322,9 @@ export const oauthStates = sqliteTable('oauth_states', {
 
 `binding` 列には、[stateをブラウザに束縛する](#stateをブラウザに束縛する)で使うハッシュが入ります。この列が無いと、ストアは束縛を保存できません。束縛したstateがすべて束縛の無い状態で戻ってくるので、`handleCallback` は「Invalid or expired OAuth state」として拒否します。どのストアが原因かは、コンソールの警告に出ます。`session` / `bindTo` を使う前に、この列を追加してください。
 
-stateの行が消えるのはコールバックが届いたときなので、途中でやめたサインインの行は残ったままになります。`guren add oauth` が登録するコンソールコマンド `oauth-states:prune` を定期実行すれば、期限切れの行をまとめて削除できます。このコマンドは、`oauth` に束縛されたストアに対して `OAuthManager.pruneExpiredStates()` を呼びます。すでにRedisを運用しているアプリなら、引き続きRedisも使えます。Redisではキーが自動で期限切れになります。`REDIS_URL` は `config/env.ts` で宣言してください。
+stateの行が消えるのはコールバックが届いたときなので、途中でやめたサインインの行は残ったままになります。`guren add oauth` が登録するコンソールコマンド `oauth-states:prune` を定期実行すれば、期限切れの行をまとめて削除できます。このコマンドは、`oauth` に束縛されたストアに対して `OAuthManager.pruneExpiredStates()` を呼びます。
+
+すでにRedisを運用しているアプリなら、引き続きRedisも使えます。Redisではキーが自動で期限切れになります。`REDIS_URL` は `config/env.ts` で宣言してください。
 
 ```ts
 // config/oauth.ts

@@ -58,9 +58,15 @@ bunx guren lambda:build
 
 SQS のメッセージを Guren のジョブとして処理します。Lambda のイベントソースマッピングでは `ReportBatchItemFailures` を有効にしてください（同梱の CDK コンストラクトでは設定済みです）。標準キューのバッチは並行して実行し、失敗したレコードを個別に返します。ARN が `.fifo` で終わる FIFO キューは 1 件ずつ順番に実行し、失敗が出たらそのレコードと未処理のレコードをすべて返して、SQS が順序を保てるようにします。
 
-試行回数は、ジョブ本文に記録済みの回数に AWS の `ApproximateReceiveCount` を足した値です。受信回数が正の値でないレコードは失敗として返します。`maxAttempts` に達した試行が失敗すると、キューワーカーと同じく、その試行のエラーを渡して `failed()` を 1 回だけ呼びます。それ以降に配信されたときは、`handle()` も `failed()` も実行しません。最終的に失敗したメッセージも `batchItemFailures` に残るので、キューのリドライブポリシーによってデッドレターキューへ移されます。このポリシーは自分で設定してください。`maxAttempts` はメッセージを削除せず、デッドレターキューも作りません。
+試行回数は、ジョブ本文に記録済みの回数に AWS の `ApproximateReceiveCount` を足した値です。受信回数が正の値でないレコードは失敗として返します。`maxAttempts` に達した試行が失敗すると、キューワーカーと同じく、その試行のエラーを渡して `failed()` を 1 回だけ呼びます。それ以降に配信されたときは、`handle()` も `failed()` も実行しません。
 
-`handle()` は、再配信によって何度呼ばれても問題が起きないように実装してください。上限は AWS が配信した回数で数えるので、FIFO で前のレコードが失敗して未処理のまま返されたレコードの受信回数も含まれます。そのため、一度も実行されないまま上限に達するレコードも出てきます。そうしたレコードは `failed()` を通らずにデッドレターキューへ移ります。キューの `maxReceiveCount` は、この挙動を踏まえて設定してください。リドライブの上限が低いと、`maxAttempts` に達して `failed()` が呼ばれる前にジョブが移されることがあります。実行して失敗したレコードは、ジョブ名、試行回数、エラーを JSON でログに出します。FIFO のバッチが途中で止まったときは、未処理のまま返したレコードもログに残ります。
+最終的に失敗したメッセージも `batchItemFailures` に残るので、キューのリドライブポリシーによってデッドレターキューへ移されます。このポリシーは自分で設定してください。`maxAttempts` はメッセージを削除せず、デッドレターキューも作りません。
+
+`handle()` は、再配信によって何度呼ばれても問題が起きないように実装してください。上限は AWS が配信した回数で数えるので、FIFO で前のレコードが失敗して未処理のまま返されたレコードの受信回数も含まれます。そのため、一度も実行されないまま上限に達するレコードも出てきます。そうしたレコードは `failed()` を通らずにデッドレターキューへ移ります。
+
+キューの `maxReceiveCount` は、この挙動を踏まえて設定してください。リドライブの上限が低いと、`maxAttempts` に達して `failed()` が呼ばれる前にジョブが移されることがあります。
+
+実行して失敗したレコードは、ジョブ名、試行回数、エラーを JSON でログに出します。FIFO のバッチが途中で止まったときは、未処理のまま返したレコードもログに残ります。
 
 SQS ドライバは、`guren add queue` が生成する `config/queue.ts` で設定し、`createApp({ config })` に加えます。
 
@@ -90,9 +96,13 @@ export default defineQueueConfig((env) => ({
 
 ### SQS を通常のワーカーで処理する
 
-`guren queue:work` でも、`SqsDriver` を通して SQS のジョブを処理できます。標準のアダプターは `ApproximateReceiveCount` を取得するので、再配信やワーカーの再起動があっても試行回数が引き継がれます。成功したジョブと `maxAttempts` に達したジョブは SQS から削除するため、ワーカーには `sqs:DeleteMessage` の権限が必要です。失敗の記録はプロセスのメモリに置かれるので、再起動後も残したい場合は、アプリ側で監視や永続的なエラー記録を用意してください。最終的に失敗したジョブは削除され、SQS のデッドレターキューには移りません。
+`guren queue:work` でも、`SqsDriver` を通して SQS のジョブを処理できます。標準のアダプターは `ApproximateReceiveCount` を取得するので、再配信やワーカーの再起動があっても試行回数が引き継がれます。成功したジョブと `maxAttempts` に達したジョブは SQS から削除するため、ワーカーには `sqs:DeleteMessage` の権限が必要です。
 
-通常のワーカーで独自のアダプターを使う場合は、`deleteMessage({ queueUrl, receiptHandle })` を実装し、`receiveMessage()` から SQS の `ApproximateReceiveCount` に基づく `receiveCount` を返してください。どちらかが欠けたアダプターは警告を 1 回出し、以前と同じ動きになります。つまり、処理を終えたジョブがキューに残り、試行回数は再配信のたびにメッセージ本文の値から数え直しになります。ジョブの送信だけに使うアダプターなら、どちらも不要です。`MessageSystemAttributeNames` が API に届くのは、このパラメーターに対応した `@aws-sdk/client-sqs`（3.577.0 以降）を使っている場合だけで、それより古いクライアントでは同じ警告が出ます。Lambda のイベントソースから処理する場合は、これまでどおり `createSqsHandler()` と AWS のバッチ処理結果の仕組みを使います。
+失敗の記録はプロセスのメモリに置かれるので、再起動後も残したい場合は、アプリ側で監視や永続的なエラー記録を用意してください。最終的に失敗したジョブは削除され、SQS のデッドレターキューには移りません。
+
+通常のワーカーで独自のアダプターを使う場合は、`deleteMessage({ queueUrl, receiptHandle })` を実装し、`receiveMessage()` から SQS の `ApproximateReceiveCount` に基づく `receiveCount` を返してください。どちらかが欠けたアダプターは警告を 1 回出し、以前と同じ動きになります。つまり、処理を終えたジョブがキューに残り、試行回数は再配信のたびにメッセージ本文の値から数え直しになります。ジョブの送信だけに使うアダプターなら、どちらも不要です。
+
+`MessageSystemAttributeNames` が API に届くのは、このパラメーターに対応した `@aws-sdk/client-sqs`（3.577.0 以降）を使っている場合だけで、それより古いクライアントでは同じ警告が出ます。Lambda のイベントソースから処理する場合は、これまでどおり `createSqsHandler()` と AWS のバッチ処理結果の仕組みを使います。
 
 ### スケジュール — `createScheduleHandler(scheduler)`
 
@@ -158,7 +168,9 @@ const database = createAwsDataApiDatabase({
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
 ```
 
-ドライバも一緒にインストールしてください（`bun add @aws-sdk/client-rds-data`）。関数には、クラスターに対する `rds-data` のアクションと、シークレットに対する `secretsmanager:GetSecretValue` の権限が必要です。後述する CDK コンストラクトの `dataApi` オプションを使えば、どちらも設定されます。認証には関数の IAM ロールを使います。`drizzle-kit generate`/`push` を使うときは、`drizzle.config.ts` で `driver: 'aws-data-api'` を設定します。
+ドライバも一緒にインストールしてください（`bun add @aws-sdk/client-rds-data`）。関数には、クラスターに対する `rds-data` のアクションと、シークレットに対する `secretsmanager:GetSecretValue` の権限が必要です。後述する CDK コンストラクトの `dataApi` オプションを使えば、どちらも設定されます。認証には関数の IAM ロールを使います。
+
+`drizzle-kit generate`/`push` を使うときは、`drizzle.config.ts` で `driver: 'aws-data-api'` を設定します。
 
 ファクトリの詳細は[データベースガイド](./database.md)を参照してください。
 
@@ -233,7 +245,9 @@ const log = new LogManager({
 
 Lambda は静的ファイルの配信には向いていません。`lambda:build` が `public/` を S3 向けに `.lambda/assets` へステージングし、CDK コンストラクト（後述）が S3 バケットと、その前に置く CloudFront ディストリビューションをプロビジョニングします（デフォルトのオリジンはアプリです）。バケットへ振り分けられるのは `/public/*` と、`.lambda/assets` の直下にある各エントリ（`/robots.txt` など）です。ビルド済みのクライアントアセットは `/public/assets/` から配信されます。
 
-これらのファイルには関数より先にディストリビューションが応答するので、フレームワークが自分で `public/` を配信するときに効かせているガードは働きません。そこでコンストラクトは、アセット向けのビヘイビアに viewer-response の CloudFront Function を付けて、同じガードを掛け直しています。ブラウザがドキュメントとして描画する形式 (`.html`、`.htm`、`.svg`、`.xhtml`、`.xml`) には、どの階層にあっても、拡張子が大文字でも小文字でも、`Content-Disposition: attachment` と `X-Content-Type-Options: nosniff` が付きます。画像、スクリプト、スタイルシート、フォントには手を加えず、デフォルトのビヘイビア (つまりアプリ) のヘッダーもアプリが返すままです。
+これらのファイルには関数より先にディストリビューションが応答するので、フレームワークが自分で `public/` を配信するときに効かせているガードは働きません。そこでコンストラクトは、アセット向けのビヘイビアに viewer-response の CloudFront Function を付けて、同じガードを掛け直しています。
+
+ブラウザがドキュメントとして描画する形式 (`.html`、`.htm`、`.svg`、`.xhtml`、`.xml`) には、どの階層にあっても、拡張子が大文字でも小文字でも、`Content-Disposition: attachment` と `X-Content-Type-Options: nosniff` が付きます。画像、スクリプト、スタイルシート、フォントには手を加えず、デフォルトのビヘイビア (つまりアプリ) のヘッダーもアプリが返すままです。
 
 アセットを手動でデプロイする場合は、`.lambda/assets` をバケットに同期し、関数の `GUREN_INERTIA_ENTRY` / `GUREN_INERTIA_STYLES` に CDN の URL を設定してください（設定する値は `.lambda/env.json` に載っています）。ただし、上で説明したドキュメント向けのルールは、ステージングしたディレクトリではなく CDK コンストラクトに含まれています。自前で用意したディストリビューションでは、`public/` の `.svg` がアプリのオリジン上でインラインに描画されます。
 
@@ -316,7 +330,11 @@ export default class SessionDriversProvider extends ServiceProvider {
 
 テーブル名は `DYNAMODB_SESSIONS_TABLE` から読みます。この変数は CDK コンストラクトの `sessionsTable` がすべての関数に設定します。自分で指定したい場合は、ストアの設定に `table` を渡してください。登録を import の副作用ではなく関数呼び出しにしているのは、使われていない import を削除するバンドラーに、ドライバまで一緒に削除されないようにするためです。
 
-テーブルには、文字列のパーティションキー `id` と、`expires_at` に対する TTL の設定が必要です。読み取りは強い整合性で行うので、ログイン時に書き込んだセッションは、その直後のリダイレクトで確実に読めます。DynamoDB の TTL は期限が来た瞬間ではなく 48 時間以内にアイテムを削除するため、ストア自身も `expires_at` を過ぎたセッションは存在しないものとして扱います。TTL はあくまで後片付けの仕組みで、期限の判定には使っていません。DynamoDB のアイテムは 400 KB までなので、セッションには id だけを入れてください。
+テーブルには、文字列のパーティションキー `id` と、`expires_at` に対する TTL の設定が必要です。読み取りは強い整合性で行うので、ログイン時に書き込んだセッションは、その直後のリダイレクトで確実に読めます。
+
+DynamoDB の TTL は期限が来た瞬間ではなく 48 時間以内にアイテムを削除するため、ストア自身も `expires_at` を過ぎたセッションは存在しないものとして扱います。TTL はあくまで後片付けの仕組みで、期限の判定には使っていません。
+
+DynamoDB のアイテムは 400 KB までなので、セッションには id だけを入れてください。
 
 `redis` ドライバ（ElastiCache）も引き続き選べます。キャッシュには Redis や DynamoDB が向いています（下のインフラの表を参照してください）。
 

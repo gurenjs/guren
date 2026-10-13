@@ -189,7 +189,9 @@ export const authModule = defineModule({
 })
 ```
 
-ただし、コンテナはアプリ全体で 1 つです。モジュールの定義も、`createApp({ config })` に並べたときと同じく、アプリ全体で共通のキー（上の例では `oauth`）をバインドします。`ConfigServiceProvider` はまずアプリの定義をバインドし、続いて `createApp({ modules })` に並んだ順に各モジュールの定義をバインドします。アプリとモジュール、あるいは 2 つのモジュールが同じキーを定義していると、起動は両方の場所を挙げて失敗します。この重複は、起動する前に `guren check` でも報告されます。なお `guren check` がモジュールの `config` を配線済みとみなすのは、そのモジュールが `createApp({ modules })` に並んでいる場合に限ります。
+ただし、コンテナはアプリ全体で 1 つです。モジュールの定義も、`createApp({ config })` に並べたときと同じく、アプリ全体で共通のキー（上の例では `oauth`）をバインドします。`ConfigServiceProvider` はまずアプリの定義をバインドし、続いて `createApp({ modules })` に並んだ順に各モジュールの定義をバインドします。
+
+アプリとモジュール、あるいは 2 つのモジュールが同じキーを定義していると、起動は両方の場所を挙げて失敗します。この重複は、起動する前に `guren check` でも報告されます。なお `guren check` がモジュールの `config` を配線済みとみなすのは、そのモジュールが `createApp({ modules })` に並んでいる場合に限ります。
 
 ## データベース接続
 
@@ -277,7 +279,9 @@ const app = await TestApp.create({
 
 ## サービスプロバイダを使うアプリ
 
-config 定義ができる前に作られたアプリでは、サービスをプロバイダで設定しています（`CacheProvider`、`MailProvider`、`config/session.ts` を読む `SessionProvider` など）。これらはそのまま動くので、移行は必須ではありません。`bunx guren doctor --next` を実行すると、こうしたプロバイダを見つけて、書くべき定義を、プロバイダが読んでいた値と宣言が必要な変数を添えて表示してくれます。移すときは次の手順で進めます。
+config 定義ができる前に作られたアプリでは、サービスをプロバイダで設定しています（`CacheProvider`、`MailProvider`、`config/session.ts` を読む `SessionProvider` など）。これらはそのまま動くので、移行は必須ではありません。
+
+`bunx guren doctor --next` を実行すると、こうしたプロバイダを見つけて、書くべき定義を、プロバイダが読んでいた値と宣言が必要な変数を添えて表示してくれます。移すときは次の手順で進めます。
 
 1. `config/env.ts` を追加し、プロバイダが読んでいる変数を宣言する。
 2. 対応する `define*Config` ヘルパーで `config/<service>.ts` を書き、`process.env` の代わりに `env` から読む。

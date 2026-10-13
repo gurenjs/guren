@@ -371,7 +371,9 @@ export class UserResource extends Resource<User> {
 
 ### モジュール内の Resource
 
-codegen はプロジェクトルートの `app/Http/Resources` に加えて、各 `modules/<name>/` の中も探します。モジュールの Resource はモジュール名を先頭に付けた名前で出力され、たとえば `modules/billing/app/Http/Resources/InvoiceResource.ts` は `Data.BillingInvoice` になります。モジュール名は名前が衝突したときに限らず、常に付きます。型名がクラスの置き場所だけで決まるので、別の場所に 2 つ目の `InvoiceResource` を追加しても、フロントエンドがすでに import している型名は変わりません。
+codegen はプロジェクトルートの `app/Http/Resources` に加えて、各 `modules/<name>/` の中も探します。モジュールの Resource はモジュール名を先頭に付けた名前で出力され、たとえば `modules/billing/app/Http/Resources/InvoiceResource.ts` は `Data.BillingInvoice` になります。
+
+モジュール名は名前が衝突したときに限らず、常に付きます。型名がクラスの置き場所だけで決まるので、別の場所に 2 つ目の `InvoiceResource` を追加しても、フロントエンドがすでに import している型名は変わりません。
 
 レスポンスヒントに書けるのは Resource のクラス名だけです。そのため、2 つのアプリルートがどちらも `InvoiceResource` を宣言していると、ヒントがどちらを指すのか決まりません。この場合、codegen は両方のファイル名を挙げて警告し、どちらのモジュールのペイロードかを推測せずに、そのルートのレスポンスを型無しのままにします。解消するには、どちらかのクラス名を変えてください。
 

@@ -95,7 +95,9 @@
 }
 ```
 
-`kind` には `success`、`validation`、`unauthenticated`、`forbidden`、`not-found`、`state` のどれかを書きます。検査はこの種類ごとに振る舞いを数え、validator があるのに `validation` の振る舞いがないルートや、認証が必要なのに `unauthenticated` の振る舞いがないルートを報告します。`expect` には `status`、`redirect`、`inertia`、`errors`、`database` を書けます。リクエストの `input` とデータベースの値は、`{ "name": "body", "json": "\"Nice post\"" }` のように値を JSON テキストとして書きます。
+`kind` には `success`、`validation`、`unauthenticated`、`forbidden`、`not-found`、`state` のどれかを書きます。検査はこの種類ごとに振る舞いを数え、validator があるのに `validation` の振る舞いがないルートや、認証が必要なのに `unauthenticated` の振る舞いがないルートを報告します。
+
+`expect` には `status`、`redirect`、`inertia`、`errors`、`database` を書けます。リクエストの `input` とデータベースの値は、`{ "name": "body", "json": "\"Nice post\"" }` のように値を JSON テキストとして書きます。
 
 振る舞いは 1 つずつテストになり、テスト名には角括弧で囲んだ id を入れます。受け入れ振る舞いの id は `AC-` で始めてください。計画にない `AC-` の id が角括弧で書かれていると `plan:verify` が報告するので、打ち間違いに気づけます。
 
@@ -135,4 +137,8 @@ Guren は、GET 以外のリクエストに対するリダイレクトを 303 �
 { "id": "command.attachments", "command": "guren add attachments", "reason": "Comments take images." }
 ```
 
-検査を通るのは、`guren <subcommand>` か `bunx guren <subcommand>` の形で、サブコマンドが `make:migration` 以外の `make:*`、`lang:publish`、`add plugin` 以外の `add <blueprint>` のどれかであるコマンドです。引数に使えるのは文字、数字、`_-.,:/=@+%` で、空白を含む値は一重引用符か二重引用符で囲みます (`--fields "title:string,body:text?"`)。シェルの演算子、`$`、バックスラッシュ、閉じていない引用符があると検査は失敗します。絶対パスの引数や、`..` でアプリケーションの外に出る引数も失敗します (`--path /etc`、`--app=../other`)。この検査で制限しているのはシェルの構文とジェネレーターの書き込み先で、`--force` などジェネレーターごとのその他のフラグは判断しません。ここに挙げた以外のコマンドも失敗します。`bun run db:migrate` は計画に書くものではなく、`data` ステップの検証コマンドとして実行されます。この検査が失敗している間は `plan:approve` が承認を拒否し、こうしたコマンドを含む計画には、下書きでも承認済みでも `plan:next` がステップを渡しません。
+検査を通るのは、`guren <subcommand>` か `bunx guren <subcommand>` の形で、サブコマンドが `make:migration` 以外の `make:*`、`lang:publish`、`add plugin` 以外の `add <blueprint>` のどれかであるコマンドです。引数に使えるのは文字、数字、`_-.,:/=@+%` で、空白を含む値は一重引用符か二重引用符で囲みます (`--fields "title:string,body:text?"`)。シェルの演算子、`$`、バックスラッシュ、閉じていない引用符があると検査は失敗します。絶対パスの引数や、`..` でアプリケーションの外に出る引数も失敗します (`--path /etc`、`--app=../other`)。
+
+この検査で制限しているのはシェルの構文とジェネレーターの書き込み先で、`--force` などジェネレーターごとのその他のフラグは判断しません。ここに挙げた以外のコマンドも失敗します。`bun run db:migrate` は計画に書くものではなく、`data` ステップの検証コマンドとして実行されます。
+
+この検査が失敗している間は `plan:approve` が承認を拒否し、こうしたコマンドを含む計画には、下書きでも承認済みでも `plan:next` がステップを渡しません。

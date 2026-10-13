@@ -143,7 +143,9 @@ export class User extends defineModel(users, { base: AuthenticatableModel }) {
 }
 ```
 
-`ModelUserProvider` は認証情報のカラム名をモデル（`passwordHashField` と、新しく加わった `rememberTokenField`）から読み取ります。そのため、カラム名を変えてもプロバイダー側を設定し直す必要はありません。`passwordColumn` / `rememberTokenColumn` オプションを明示した場合は、これまでどおりそちらが優先されます。また、`defineModel()` の非推奨だった `createType` オプションは削除しました。代わりに `optionalOnCreate` / `requireOnCreate` を使ってください。
+`ModelUserProvider` は認証情報のカラム名をモデル（`passwordHashField` と、新しく加わった `rememberTokenField`）から読み取ります。そのため、カラム名を変えてもプロバイダー側を設定し直す必要はありません。`passwordColumn` / `rememberTokenColumn` オプションを明示した場合は、これまでどおりそちらが優先されます。
+
+また、`defineModel()` の非推奨だった `createType` オプションは削除しました。代わりに `optionalOnCreate` / `requireOnCreate` を使ってください。
 
 ### rc → 1.0.0
 

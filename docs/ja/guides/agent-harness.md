@@ -47,9 +47,13 @@ claude plugin install guren@gurenjs --scope user
 npx skills add gurenjs/agent-skills
 ```
 
-インストール先はユーザースコープです。これらのスキルはプロジェクトができる*前*の段階で使うもので、何を作るにしても同じ 2 つだからです。プロジェクトスコープにすると、そのときたまたまいたリポジトリの設定に書き込まれてしまい、すでにハーネスが入っているアプリの共同作業者にまで導入用のスキルを配ることになります。このプラグインは [Agent Plugins v1](https://agent-plugins.org) にも準拠しているので、ルートの `plugin.json` を読むクライアントなら、リポジトリから直接インストールできます。
+インストール先はユーザースコープです。これらのスキルはプロジェクトができる*前*の段階で使うもので、何を作るにしても同じ 2 つだからです。プロジェクトスコープにすると、そのときたまたまいたリポジトリの設定に書き込まれてしまい、すでにハーネスが入っているアプリの共同作業者にまで導入用のスキルを配ることになります。
 
-中身は `guren-new-app`(Guren を説明し、`bunx create-guren-app` で雛形を作って、アプリ側に引き継ぐ)と `guren-harness`(`bunx guren agent:init --target <agents>` を実行し、`guren context` → 編集 → `guren check` → `guren audit` のループを説明する)の 2 つです。ハーネスのルールやスキルは、あえてコピーしていません。それらはアプリ自身の CLI が入れるもので、常にアプリのバージョンと揃っています。このカタログのリポジトリはリリースのたびに Guren のリポジトリから生成されるので、変更は `gurenjs/agent-skills` ではなく Guren のほうに送ってください。
+このプラグインは [Agent Plugins v1](https://agent-plugins.org) にも準拠しているので、ルートの `plugin.json` を読むクライアントなら、リポジトリから直接インストールできます。
+
+中身は `guren-new-app`(Guren を説明し、`bunx create-guren-app` で雛形を作って、アプリ側に引き継ぐ)と `guren-harness`(`bunx guren agent:init --target <agents>` を実行し、`guren context` → 編集 → `guren check` → `guren audit` のループを説明する)の 2 つです。
+
+ハーネスのルールやスキルは、あえてコピーしていません。それらはアプリ自身の CLI が入れるもので、常にアプリのバージョンと揃っています。このカタログのリポジトリはリリースのたびに Guren のリポジトリから生成されるので、変更は `gurenjs/agent-skills` ではなく Guren のほうに送ってください。
 
 ## ハーネスの導入と更新
 
@@ -60,7 +64,9 @@ npx skills add gurenjs/agent-skills
 
 `agent:init --target` には `claude`(デフォルト)・`codex`・`cursor`・`copilot`・`opencode`・`all` を指定できます。`agent:sync` は利用者が持つファイル(`CLAUDE.md`・`AGENTS.md`・`.claude/settings.json`・各 MCP クライアントの設定)を上書きしないので、フレームワークを更新してもカスタマイズは残ります(削除した利用者側のファイルは作り直されます)。MCP や hook の設定がすでにある場合、`agent:init` はファイルを上書きせず、手で追記するためのスニペットを表示します。
 
-フレームワークが管理するファイル(ルール・スキル・サブエージェント・hooks)は、`agent:sync` が上書きします。それがこのコマンドの役目なので、プロジェクト固有のルールは配布されたファイルに書き足さず、別の名前の自分のファイルとして置いてください。上書きは必ず画面に表示されます。最新版と同じファイルはスキップし、内容が違っていたファイルは「置き換えた」とはっきり示します。先に `agent:sync --dry-run` を実行すれば、ファイルを一切変えずに、何が書き込まれ、何が置き換えられ、何が削除候補になるかを確認できます。`agent:init` も `--dry-run` を受け付けるので、`--force` のプレビューとして使えます。
+フレームワークが管理するファイル(ルール・スキル・サブエージェント・hooks)は、`agent:sync` が上書きします。それがこのコマンドの役目なので、プロジェクト固有のルールは配布されたファイルに書き足さず、別の名前の自分のファイルとして置いてください。
+
+上書きは必ず画面に表示されます。最新版と同じファイルはスキップし、内容が違っていたファイルは「置き換えた」とはっきり示します。先に `agent:sync --dry-run` を実行すれば、ファイルを一切変えずに、何が書き込まれ、何が置き換えられ、何が削除候補になるかを確認できます。`agent:init` も `--dry-run` を受け付けるので、`--force` のプレビューとして使えます。
 
 リリースでフレームワークのルールやスキルの名前が変わったり削除されたりしても、古いファイルは配布先のルートにすべて残ったままになります。特に Cursor と Copilot は、古い `.cursor/rules/guren-*.mdc` / `.github/instructions/guren-*.instructions.md` を glob で読み込み続けます。`agent:sync` は、フレームワークが管理する場所にあって今のハーネスに含まれないファイルを一覧にし、`agent:sync --prune` を付けるとそれらを削除します。
 
@@ -70,4 +76,6 @@ npx skills add gurenjs/agent-skills
 - 各エージェント形式のルール: 最上位にある `guren-*.mdc` / `guren-*.instructions.md` だけ
 - スキルのルート(`.claude/skills/`、`.agents/skills/`): ハーネスが配布している(または以前配布した)スキルのディレクトリだけ
 
-配布されたルールの隣(サブディレクトリを含む)に置いた自作のルールファイルや、自分で追加したスキル(`npx skills add` や Agent Plugins のクライアントが同じディレクトリに入れたものを含む)は、一覧にも出ず、削除もされません。例外は、ハーネス自身が配布している名前とぶつかった場合だけです。スキルなら `dev-workflow`・`db-manage`・`scaffold`・`feature`・`guren-api`・`plugin-authoring`・`agent-interface`・`ai-agent`・`github-projects`・`plan-write`・`plan-implement`、ルールならエントリードキュメントに載っているファイル名(大文字と小文字は区別しません)が該当します。Cursor と Copilot では名前の一覧ではなくプレフィックスで判定するので、最上位にある `guren-*.mdc` / `guren-*.instructions.md` が**すべて**該当します。Cursor や Copilot の自作ルールには別のプレフィックスを付けておき、`--prune` の前には一覧を確認してください。
+配布されたルールの隣(サブディレクトリを含む)に置いた自作のルールファイルや、自分で追加したスキル(`npx skills add` や Agent Plugins のクライアントが同じディレクトリに入れたものを含む)は、一覧にも出ず、削除もされません。例外は、ハーネス自身が配布している名前とぶつかった場合だけです。スキルなら `dev-workflow`・`db-manage`・`scaffold`・`feature`・`guren-api`・`plugin-authoring`・`agent-interface`・`ai-agent`・`github-projects`・`plan-write`・`plan-implement`、ルールならエントリードキュメントに載っているファイル名(大文字と小文字は区別しません)が該当します。
+
+Cursor と Copilot では名前の一覧ではなくプレフィックスで判定するので、最上位にある `guren-*.mdc` / `guren-*.instructions.md` が**すべて**該当します。Cursor や Copilot の自作ルールには別のプレフィックスを付けておき、`--prune` の前には一覧を確認してください。

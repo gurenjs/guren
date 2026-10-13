@@ -71,7 +71,9 @@ anthropic: {
 
 ツールの強制指定(`tool_choice` の `any` や特定ツールの指定)は 400 になります。`@ai-sdk/anthropic` 4.0.78 以降はこのモデルを知っていて、`toolChoice: 'required'` やツール名の指定を警告付きで `auto` に落とし、エージェントの `output` スキーマを強制ツール呼び出しではなくネイティブの構造化出力(`output_config.format`)で送ります。`guren add ai` は `@ai-sdk/anthropic@^4.0.78` をインストールします。古い版に固定しているアプリは上げてください。
 
-`providers` は、名前とファクトリの対応表です。各ファクトリは、その名前を使う最初のプロンプトで 1 度だけ実行され、結果はメモ化されます。エージェントはプロバイダの名前を指定するだけで、モデルのインスタンスは持ちません。そのため、テスト用のフェイク(`fakeAi()`)で、アプリケーションから使えるすべてのモデルを差し替えられます。2 つ目のプロバイダを加えるときは、そのパッケージをインストールしてエントリを足します。
+`providers` は、名前とファクトリの対応表です。各ファクトリは、その名前を使う最初のプロンプトで 1 度だけ実行され、結果はメモ化されます。エージェントはプロバイダの名前を指定するだけで、モデルのインスタンスは持ちません。そのため、テスト用のフェイク(`fakeAi()`)で、アプリケーションから使えるすべてのモデルを差し替えられます。
+
+2 つ目のプロバイダを加えるときは、そのパッケージをインストールしてエントリを足します。
 
 ```ts
 providers: {
@@ -149,11 +151,15 @@ export class AdditiveResearcher extends Agent {
 }
 ```
 
-この位置に Anthropic の `cacheControl` を書くと、リクエスト全体でプロンプトキャッシュが有効になります。モデル、instructions、ツール、`output`、`stopWhen` はクラス自身のメンバーのままで、`settings` に同じ名前のキーがあっても置き換わりません。設定はクラスに書くもので、`prompt()` の呼び出しごとには渡しません。そのため、キューに入れた実行も同じ設定で動きます。設定だけが違う 2 つのプロバイダは、1 つのプロバイダと 2 つのエージェントにまとめられます。
+この位置に Anthropic の `cacheControl` を書くと、リクエスト全体でプロンプトキャッシュが有効になります。モデル、instructions、ツール、`output`、`stopWhen` はクラス自身のメンバーのままで、`settings` に同じ名前のキーがあっても置き換わりません。
+
+設定はクラスに書くもので、`prompt()` の呼び出しごとには渡しません。そのため、キューに入れた実行も同じ設定で動きます。設定だけが違う 2 つのプロバイダは、1 つのプロバイダと 2 つのエージェントにまとめられます。
 
 ### 一時停止したターンを再開する
 
-プロバイダが、ターンの途中でレスポンスを終えることがあります。Anthropic は、サーバー側のツールループ(Web 検索・Web 取得)が長引くと `pause_turn` で止めます。一時停止したレスポンスに、結果を待っているサーバー側のツール呼び出しが残っていれば、AI SDK が自分でターンを再開します。残っていないときは、AI SDK はこの停止を `finishReason: 'stop'` として返すので、ツールループは調査の途中で終わってしまいます。`continueWhen` を書くと、`prompt()` がそのターンを再開します。
+プロバイダが、ターンの途中でレスポンスを終えることがあります。Anthropic は、サーバー側のツールループ(Web 検索・Web 取得)が長引くと `pause_turn` で止めます。一時停止したレスポンスに、結果を待っているサーバー側のツール呼び出しが残っていれば、AI SDK が自分でターンを再開します。残っていないときは、AI SDK はこの停止を `finishReason: 'stop'` として返すので、ツールループは調査の途中で終わってしまいます。
+
+`continueWhen` を書くと、`prompt()` がそのターンを再開します。
 
 ```ts
 import { Agent, isPausedTurn } from '@guren/plugin-ai'
@@ -163,9 +169,15 @@ export class AdditiveResearcher extends Agent {
 }
 ```
 
-ツールループが終わると、`prompt()` は最後のステップを `continueWhen` に渡します。`true` が返るあいだ、`prompt()` はそこまでのターンを後ろに付け、新しいユーザーメッセージは足さずに、モデルをもう一度呼びます。これが Anthropic で一時停止したターンを再開する方法です。`as(null)` でも動き、会話にはターン全体が 1 回だけ保存されます。`isPausedTurn` は `step.rawFinishReason === 'pause_turn'` を見るだけのただの関数なので、ほかのプロバイダの条件も同じ形で書けます。
+ツールループが終わると、`prompt()` は最後のステップを `continueWhen` に渡します。`true` が返るあいだ、`prompt()` はそこまでのターンを後ろに付け、新しいユーザーメッセージは足さずに、モデルをもう一度呼びます。これが Anthropic で一時停止したターンを再開する方法です。`as(null)` でも動き、会話にはターン全体が 1 回だけ保存されます。
 
-追加の呼び出しは `maxContinuations`(既定 5)回までです。上限に達すると、`rawFinishReason` が `'pause_turn'` のままのレスポンスが返るので、確かめてください。`stopWhen` は呼び出しごとに数え直すため、1 回のプロンプトは最大で `stopWhen` のステップ数の `maxContinuations + 1` 倍まで進みます。`steps`、`sources`、`usage` はすべての呼び出しを含みます。`text` は、アプリケーションのツールを最後に呼んだステップより後の、すべてのステップの text をつなげたものです。そのため、一時停止で複数のステップに分かれたターンも、全体が読めます。AI SDK 自身の `text` は最後のステップのものだけです。`stream()` と `broadcast()` は再開しません。
+`isPausedTurn` は `step.rawFinishReason === 'pause_turn'` を見るだけのただの関数なので、ほかのプロバイダの条件も同じ形で書けます。
+
+追加の呼び出しは `maxContinuations`(既定 5)回までです。上限に達すると、`rawFinishReason` が `'pause_turn'` のままのレスポンスが返るので、確かめてください。`stopWhen` は呼び出しごとに数え直すため、1 回のプロンプトは最大で `stopWhen` のステップ数の `maxContinuations + 1` 倍まで進みます。
+
+`steps`、`sources`、`usage` はすべての呼び出しを含みます。`text` は、アプリケーションのツールを最後に呼んだステップより後の、すべてのステップの text をつなげたものです。そのため、一時停止で複数のステップに分かれたターンも、全体が読めます。AI SDK 自身の `text` は最後のステップのものだけです。
+
+`stream()` と `broadcast()` は再開しません。
 
 `output` と `continueWhen` の両方を宣言したエージェントは、`as()` の時点で拒否されます。AI SDK は呼び出しのたびに最後に出力をパースするので、一時停止した呼び出しは再開する前に失敗するためです。調査はテキストで答えるエージェントにさせ、その答えを別のエージェントでスキーマの形にしてください。Anthropic では、もともと構造化出力と検索の引用を一緒には使えません。
 
@@ -223,11 +235,15 @@ const usd = computeCostUsd(usageOf(response), ai.config.providers.research?.pric
 
 ### principal
 
-`as(principal)` は、結び付けたエージェントのすべてのツール呼び出しについて、モデルが誰として振る舞うかを固定します。受け付けるのは、ユーザーのレコード、`AgentPrincipal`(`{ kind: 'user' | 'service', id, abilities? }`)、`null` のどれかです。保持されるのは `kind`、`id`、`abilities` だけです。ツール呼び出しはリクエストとしてルートに届き、ルートは設定済みのユーザープロバイダでユーザーを組み立て直します。そのため、渡したオブジェクトにロールやテナントのフィールドがあっても、ポリシーには届きません。
+`as(principal)` は、結び付けたエージェントのすべてのツール呼び出しについて、モデルが誰として振る舞うかを固定します。受け付けるのは、ユーザーのレコード、`AgentPrincipal`(`{ kind: 'user' | 'service', id, abilities? }`)、`null` のどれかです。
+
+保持されるのは `kind`、`id`、`abilities` だけです。ツール呼び出しはリクエストとしてルートに届き、ルートは設定済みのユーザープロバイダでユーザーを組み立て直します。そのため、渡したオブジェクトにロールやテナントのフィールドがあっても、ポリシーには届きません。
 
 呼び出し主体が `abilities` を持っている場合、エージェントが使えるツールは、クラスの `scopes` とその abilities の両方が許可するものに絞られます。呼び出し側の同意によってエージェントの権限が狭まることはあっても、広がることはありません。
 
-`as(null)` は匿名の実行で、定期的な要約のように、誰かが起動したわけではない処理に使います。このとき `appTools()` が受け付けるのは、ルートが読み取り専用(read-only)と宣言しているツールだけです。渡した名前のうち、この条件を満たさないものはすべて、構築時のエラーに名前が並びます。匿名のリクエストには、書き込みを認可したり承認したりする相手(identity)がいません。そのため、ツールを呼ぶたびに拒否するのではなく、エージェントを組み立てる時点で拒否します。
+`as(null)` は匿名の実行で、定期的な要約のように、誰かが起動したわけではない処理に使います。このとき `appTools()` が受け付けるのは、ルートが読み取り専用(read-only)と宣言しているツールだけです。渡した名前のうち、この条件を満たさないものはすべて、構築時のエラーに名前が並びます。
+
+匿名のリクエストには、書き込みを認可したり承認したりする相手(identity)がいません。そのため、ツールを呼ぶたびに拒否するのではなく、エージェントを組み立てる時点で拒否します。
 
 ## アプリケーションのツール
 
@@ -257,7 +273,9 @@ const usd = computeCostUsd(usageOf(response), ai.config.providers.research?.pric
 
 ### ツール名の型
 
-プラグインに依存するアプリで `bunx guren codegen` を実行すると、生成される `.guren/agents.gen.ts` によって `appTools()` に型が付きます。どのルートからも導出されない名前はコンパイルエラーになり、各ツールの入力と結果にはルートの契約から型が付きます。`scopes` を `as const` で宣言し、`extends Agent<typeof TicketDigest.scopes>` と書くと、どの `tool:` 要素にも許可されていない名前もコンパイルエラーになります。型パラメータを書かなければ、コンパイル時に確認されるのは名前だけです。プレフィックスによる許可は `as()` の実行時に確認されます。
+プラグインに依存するアプリで `bunx guren codegen` を実行すると、生成される `.guren/agents.gen.ts` によって `appTools()` に型が付きます。どのルートからも導出されない名前はコンパイルエラーになり、各ツールの入力と結果にはルートの契約から型が付きます。
+
+`scopes` を `as const` で宣言し、`extends Agent<typeof TicketDigest.scopes>` と書くと、どの `tool:` 要素にも許可されていない名前もコンパイルエラーになります。型パラメータを書かなければ、コンパイル時に確認されるのは名前だけです。プレフィックスによる許可は `as()` の実行時に確認されます。
 
 ### モデルが受け取る結果
 
@@ -292,7 +310,9 @@ aiPlugin({
 })
 ```
 
-`audit` を渡さない場合、プラグインは `mcpPlugin({ audit })` が設定した監査ログに記録します。どちらも設定されていなければ、監査イベントを発行するだけです。両方を設定すると、最初の `appTools()` 呼び出しでエラーになります。`approvals` がなければ、承認が必要なツールは拒否され、何も実行されません。ストアと承認用のルートは[承認が必要なツール](./agent-tool-governance.md#承認が必要なツール)で説明しています。
+`audit` を渡さない場合、プラグインは `mcpPlugin({ audit })` が設定した監査ログに記録します。どちらも設定されていなければ、監査イベントを発行するだけです。両方を設定すると、最初の `appTools()` 呼び出しでエラーになります。
+
+`approvals` がなければ、承認が必要なツールは拒否され、何も実行されません。ストアと承認用のルートは[承認が必要なツール](./agent-tool-governance.md#承認が必要なツール)で説明しています。
 
 ツール呼び出しは、結び付けたエージェント 1 つにつき 1 分あたり 60 回までです。失敗し続けるツールをモデルが何度も呼んでも、上限を超えた呼び出しは拒否され、ルートには届きません。
 
@@ -348,7 +368,9 @@ const next = await ai.agent(SupportTriager).as(user).continue(first.conversation
 
 `as(null)` では、会話を始めることも続けることもできません。匿名の呼び出し元全員で 1 つの会話を共有することになってしまうからです。`agentName` のない `agent()` も同じです。
 
-ストアは `config/ai.ts` の `conversations` で設定します。`{ driver: 'database', conversations, messages }` には、`guren add ai` が追加する 2 つのテーブルを指定します。`{ driver: 'memory' }` はテストと開発用で、会話をプロセスの中に保持します。ストアを設定しないまま会話を求めたプロンプトは、モデルを呼ぶ前に失敗します。ターンはモデルが答えた後で保存されるので、失敗したプロンプトは行を残しません。
+ストアは `config/ai.ts` の `conversations` で設定します。`{ driver: 'database', conversations, messages }` には、`guren add ai` が追加する 2 つのテーブルを指定します。`{ driver: 'memory' }` はテストと開発用で、会話をプロセスの中に保持します。
+
+ストアを設定しないまま会話を求めたプロンプトは、モデルを呼ぶ前に失敗します。ターンはモデルが答えた後で保存されるので、失敗したプロンプトは行を残しません。
 
 テーブルには、ユーザーのテキスト、ツールの引数、すべてのツールの結果が、モデルが見たとおりに残ります。伏せ字(redaction)にするのは監査ログだけで、この履歴はそのまま残します。id を伏せてしまうと、次のターンでその id を使った操作ができなくなるからです。2 つのテーブルは、どちらも機密データとして扱ってください。
 
@@ -375,7 +397,11 @@ export default class SupportChatController extends Controller {
 }
 ```
 
-ページ側では、`@guren/plugin-ai/client` の `createChatTransport()` が 1 ターン分の `{ conversation, message }` だけを送り、それまでのやりとり全体は送りません。ブラウザから送られた記録を受け入れると、モデルやツールが「すでに言ったこと」をブラウザ側で捏造できてしまうため、履歴はサーバー側に置きます。最初のターンでは `conversation: null` を送ります。コントローラが会話を始め、レスポンスの `X-Guren-Conversation` ヘッダでその id を返すので、トランスポートはそれを覚えておき、以降のターンで送ります。トランスポートは `XSRF-TOKEN` クッキーを `X-XSRF-TOKEN` ヘッダに入れて送り返すので、ルートは CSRF 保護の内側に置いたままで構いません。
+ページ側では、`@guren/plugin-ai/client` の `createChatTransport()` が 1 ターン分の `{ conversation, message }` だけを送り、それまでのやりとり全体は送りません。ブラウザから送られた記録を受け入れると、モデルやツールが「すでに言ったこと」をブラウザ側で捏造できてしまうため、履歴はサーバー側に置きます。
+
+最初のターンでは `conversation: null` を送ります。コントローラが会話を始め、レスポンスの `X-Guren-Conversation` ヘッダでその id を返すので、トランスポートはそれを覚えておき、以降のターンで送ります。
+
+トランスポートは `XSRF-TOKEN` クッキーを `X-XSRF-TOKEN` ヘッダに入れて送り返すので、ルートは CSRF 保護の内側に置いたままで構いません。
 
 ```tsx
 import { useChat } from '@ai-sdk/react'
@@ -442,7 +468,9 @@ events.on(AgentResponded, async (event) => {
 
 `conversation: true` を渡すとディスパッチの前に会話が作られるので、id はすぐに使えます。ワーカーは、常にその会話を続ける形で実行します。キューのリスナーはイベント全体をシリアライズするので、イベントのレスポンスには `steps` が入りません。
 
-キューに入れた実行は 1 回しか試行されません。再試行すると、モデルがもう一度呼ばれ、すべてのツールがもう一度実行されてしまうからです。visibility timeout を持つドライバ(Redis、SQS)は、その時間を超えた実行を再配信します。そのため、このタイムアウトとワーカーの `--timeout` は、いちばん長い実行より長くしてください。呼び出し主体は、abilities も含めて、キューに入れた時点のものが使われます。
+キューに入れた実行は 1 回しか試行されません。再試行すると、モデルがもう一度呼ばれ、すべてのツールがもう一度実行されてしまうからです。visibility timeout を持つドライバ(Redis、SQS)は、その時間を超えた実行を再配信します。そのため、このタイムアウトとワーカーの `--timeout` は、いちばん長い実行より長くしてください。
+
+呼び出し主体は、abilities も含めて、キューに入れた時点のものが使われます。
 
 ### 実行をブロードキャストする
 
@@ -526,7 +554,9 @@ AI SDK が受け取るオプション (`maxRetries`、`abortSignal`、`headers`�
 
 `evaluate()` は、ある 1 つの状態について型付きの質問を投げ、答えをテキストではなく確率で受け取ります。質問は、選択肢から 1 つ選ぶ `choice`、順序のある段階で採点する `score`、`boolean` の 3 種類です。中身は AI SDK の `experimental_evaluate` で、`embed()` と同じくモデルだけをプロバイダ名から解決します。AI SDK はこの API を experimental としていて、patch リリースで変わることがありますが、プラグインはそれに追随します。
 
-モデルは `config/ai.ts` の `evaluationModel` ファクトリから取り出します。Jev(TypeSafe AI)のように何も生成しないモデルもあるので、このエントリでは `model` を省略できます。`defaultEvaluation` には、`evaluate()` でプロバイダを指定しなかったときに使うエントリを書きます。省略すると `default` が使われます。すでに Vercel AI Gateway 経由でモデルを使っているアプリなら、同じモデルを `gateway.evaluationModel('typesafe-ai/jev')` で取り出せます。
+モデルは `config/ai.ts` の `evaluationModel` ファクトリから取り出します。Jev(TypeSafe AI)のように何も生成しないモデルもあるので、このエントリでは `model` を省略できます。
+
+`defaultEvaluation` には、`evaluate()` でプロバイダを指定しなかったときに使うエントリを書きます。省略すると `default` が使われます。すでに Vercel AI Gateway 経由でモデルを使っているアプリなら、同じモデルを `gateway.evaluationModel('typesafe-ai/jev')` で取り出せます。
 
 ```ts
 // config/ai.ts
@@ -557,11 +587,15 @@ answers.category.probabilities // { billing: 0.93, bug: 0.05, account: 0.02 }
 answers.urgent.probability     // 0.37
 ```
 
-`provider` と `manager` の解決のしかたは `embed()` と同じです。`choice` の答えは `criteria` のキーのどれかになるので、選択肢をデータベースの enum から読めば、答えはそのまま列の型になります。確率は順位の目安として扱い、そのままの割合とは受け取らないでください。公開されている意図分類のデータセットで測ったところ、Jev の確率はどのビンでも実際の的中率より高く出ていました。答えをそのまま採用するしきい値は、手元のデータのラベル付きサンプルを使い、必要な precision から決めてください。[`examples/agents`](https://github.com/gurenjs/guren/tree/main/examples/agents) はこの形でチケットを振り分けていて、計測の結果を README に載せています。
+`provider` と `manager` の解決のしかたは `embed()` と同じです。`choice` の答えは `criteria` のキーのどれかになるので、選択肢をデータベースの enum から読めば、答えはそのまま列の型になります。
+
+確率は順位の目安として扱い、そのままの割合とは受け取らないでください。公開されている意図分類のデータセットで測ったところ、Jev の確率はどのビンでも実際の的中率より高く出ていました。答えをそのまま採用するしきい値は、手元のデータのラベル付きサンプルを使い、必要な precision から決めてください。[`examples/agents`](https://github.com/gurenjs/guren/tree/main/examples/agents) はこの形でチケットを振り分けていて、計測の結果を README に載せています。
 
 ## テスト
 
-`@guren/testing` の `app.fakeAi()` は、`TestApp.fromApp(app)` で起動したアプリの `ai` バインディングを差し替えます。応答をスクリプトで決めるのはモデルだけです。ツールはパイプラインを通ってルートにディスパッチされるので、テストでもスコープゲート、ポリシー、承認ゲートが実際に働きます。次の例は `examples/agents` のテストを短くしたものです。元のテストでは先にチケットを作り、ツールが返した実際の答えにそのチケットが入っていることも確かめています。
+`@guren/testing` の `app.fakeAi()` は、`TestApp.fromApp(app)` で起動したアプリの `ai` バインディングを差し替えます。応答をスクリプトで決めるのはモデルだけです。ツールはパイプラインを通ってルートにディスパッチされるので、テストでもスコープゲート、ポリシー、承認ゲートが実際に働きます。
+
+次の例は `examples/agents` のテストを短くしたものです。元のテストでは先にチケットを作り、ツールが返した実際の答えにそのチケットが入っていることも確かめています。
 
 ```ts
 import { beforeAll, describe, expect, test } from 'bun:test'
@@ -610,7 +644,9 @@ describe('TicketDigest', () => {
 
 `calls(Agent)` は、各プロンプトを `input`、`principal`、`response`、`toolCalls` と一緒に返します。各ツール呼び出しには、実際のツールが返した値か、投げたエラーが記録されます。`stream()` の呼び出しでは、テストがレスポンスボディを読み進めるのに合わせて `toolCalls` が埋まっていきます。
 
-プロンプトを確かめるには、`assertPrompted(Agent, predicate?)`、`assertNotPrompted(Agent, predicate)`、`assertNeverPrompted(Agent)` を使います。応答を決めていないプロンプトは例外を投げます。さらに、`using` ブロックの終わりでフェイクを破棄するときにも、エージェント名を示してもう一度例外を投げます。ルートは最初のエラーを、中身の分からない 500 に変えてしまうことが多いからです。決めておいた回答に届く前に(`stopWhen` によって)ループが止まった場合も、破棄が失敗します。
+プロンプトを確かめるには、`assertPrompted(Agent, predicate?)`、`assertNotPrompted(Agent, predicate)`、`assertNeverPrompted(Agent)` を使います。
+
+応答を決めていないプロンプトは例外を投げます。さらに、`using` ブロックの終わりでフェイクを破棄するときにも、エージェント名を示してもう一度例外を投げます。ルートは最初のエラーを、中身の分からない 500 に変えてしまうことが多いからです。決めておいた回答に届く前に(`stopWhen` によって)ループが止まった場合も、破棄が失敗します。
 
 フェイクは `conversations()` に本物のストアで答えるので、`conversation: true` を付けたプロンプトは、応答を決めてあっても本番と同じ行を書き込みます。
 残る 2 つの呼び出しは、`respondEmbeddings()` と `respondImages()` で応答を決めます。
@@ -621,7 +657,11 @@ ai.respondEmbeddings([[0.1, 0.2], [0.3, 0.4]])   // 値1つにつきベクトル
 ai.respondImages(['<base64>', ['<base64>', '<base64>']])   // image() の呼び出し1回につき1エントリ
 ```
 
-ベクトルの配列は**値**ごとに 1 つずつ取り出されるので、`embedMany(['a', 'b'])` は、SDK がどうバッチにまとめても 2 つ消費します。関数 (`(value) => number[]`) を渡すと、どの値にも答えるので尽きることがありません。`embedCalls()` と `imageCalls()` は各呼び出しの内容を返します。`assertEmbedded(predicate?)`、`assertNeverEmbedded()`、`assertGeneratedImage(predicate?)`、`assertNeverGeneratedImage()` は、プロンプト用のアサーションに相当するものです。応答を決めていない `embed()` や `image()` は、応答を決めていないプロンプトと同じく、呼び出しと破棄の両方で失敗します。`config/ai.ts` のエントリがその種類のモデルを宣言していないプロバイダでも同じです。
+ベクトルの配列は**値**ごとに 1 つずつ取り出されるので、`embedMany(['a', 'b'])` は、SDK がどうバッチにまとめても 2 つ消費します。関数 (`(value) => number[]`) を渡すと、どの値にも答えるので尽きることがありません。
+
+`embedCalls()` と `imageCalls()` は各呼び出しの内容を返します。`assertEmbedded(predicate?)`、`assertNeverEmbedded()`、`assertGeneratedImage(predicate?)`、`assertNeverGeneratedImage()` は、プロンプト用のアサーションに相当するものです。
+
+応答を決めていない `embed()` や `image()` は、応答を決めていないプロンプトと同じく、呼び出しと破棄の両方で失敗します。`config/ai.ts` のエントリがその種類のモデルを宣言していないプロバイダでも同じです。
 
 `respondEvaluations([...])` は、今後の `evaluate()` 1 回につき 1 つずつ、答えの組を積んでおきます。質問ごとに値を 1 つ書きます。
 
@@ -636,7 +676,9 @@ ai.respondEvaluations([{ category: 'billing', urgent: 0.97 }])
 | `score` に数値 | その位置。整数なら one-hot の分布も付く |
 | AI SDK の answer オブジェクト | そのまま通す |
 
-値は、消費されるときに質問と照らし合わされます。選択肢にない choice、段階数を超える score、0〜1 の範囲外の確率を書くと、呼び出しと破棄の両方が失敗します。本物のモデルが返せない値を、フェイクが返すことはありません。応答を決めたモデルは本物の `experimental_evaluate` の下で動くので、SDK 自身の検証も働きます。`evaluationCalls()` は各呼び出しの `state`、`questions`、`provider`、`answers` を返します。`assertEvaluated(predicate?)` と `assertNeverEvaluated()` は、プロンプト用のアサーションに相当するものです。
+値は、消費されるときに質問と照らし合わされます。選択肢にない choice、段階数を超える score、0〜1 の範囲外の確率を書くと、呼び出しと破棄の両方が失敗します。本物のモデルが返せない値を、フェイクが返すことはありません。応答を決めたモデルは本物の `experimental_evaluate` の下で動くので、SDK 自身の検証も働きます。
+
+`evaluationCalls()` は各呼び出しの `state`、`questions`、`provider`、`answers` を返します。`assertEvaluated(predicate?)` と `assertNeverEvaluated()` は、プロンプト用のアサーションに相当するものです。
 
 フェイクで確かめられるのは配線までです。instructions とツールの説明で本物のモデルから正しい答えを引き出せるかどうかは、実際にモデルを呼ぶ、もう 1 つの計測で確かめます。
 

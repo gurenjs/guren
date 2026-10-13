@@ -121,7 +121,11 @@ try {
 | `Argon2Hasher` | `Bun.password`。既定は Argon2id で、指定すれば bcrypt | Bun のみ |
 | `NodeHasher` | `crypto.scrypt` | すべて |
 
-特別な理由がなければ `Hash` を使ってください。`AuthenticatableModel` と `ModelUserProvider` が既定で使うハッシャーで、両方の形式を検証できるのはこれだけです。Bun は `node:crypto` を実装しているので、`NodeHasher` もどちらのランタイムでも動きます。Bun 専用は `Argon2Hasher` だけです。アプリケーションではハッシャーを直接構築せず、`createApp({ auth: { hasher } })` で 1 回だけ選びます（[認証](/docs/guides/authentication#パスワードハッシャー)を参照）。
+特別な理由がなければ `Hash` を使ってください。`AuthenticatableModel` と `ModelUserProvider` が既定で使うハッシャーで、両方の形式を検証できるのはこれだけです。
+
+Bun は `node:crypto` を実装しているので、`NodeHasher` もどちらのランタイムでも動きます。Bun 専用は `Argon2Hasher` だけです。
+
+アプリケーションではハッシャーを直接構築せず、`createApp({ auth: { hasher } })` で 1 回だけ選びます（[認証](/docs/guides/authentication#パスワードハッシャー)を参照）。
 
 > `Argon2Hasher` は 2.23.0 まで `ScryptHasher` という名前でした。実際に書き込む形式は scrypt ではないため、名前を変えています。旧名も同じクラスを指しますが、非推奨です。
 

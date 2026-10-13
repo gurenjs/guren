@@ -138,7 +138,11 @@ router.get('/api/me', (ctx) => {
 
 読み込んだユーザーは、そのリクエストの呼び出し主体（principal）になります。コントローラの `this.auth.user()`、`requireAuthenticated()`、Gate（Policy、`this.authorize()`、`authorizeMiddleware()`）は、どれもこのユーザーを返します。呼び出し主体は auth context ではなくリクエストに記録されるので、ミドルウェアを `boot()` の前にマウントしても後にマウントしても読み取れます。
 
-このリクエストで `auth.logout()` を呼ぶと、送られてきたトークンが失効し、同じリクエストにあるセッションはそのまま残ります。`loadUser` が `null` を返したリクエストは、未認証として扱われます。トークンの検証そのものは通っていて、そのリクエストはトークンに属するものなので、ログイン中のセッションのユーザーが代わりに使われることはありません。ミドルウェアが実行されなかったリクエストでは、セッションのユーザーがそのまま使われます。`useTokens({ provider })` を設定している場合は、読み込んだユーザーからその provider が機密項目を取り除く（sanitize）ので、パスワードハッシュやモデルの `hidden` フィールドが auth 層の外に出ることはありません。
+このリクエストで `auth.logout()` を呼ぶと、送られてきたトークンが失効し、同じリクエストにあるセッションはそのまま残ります。
+
+`loadUser` が `null` を返したリクエストは、未認証として扱われます。トークンの検証そのものは通っていて、そのリクエストはトークンに属するものなので、ログイン中のセッションのユーザーが代わりに使われることはありません。ミドルウェアが実行されなかったリクエストでは、セッションのユーザーがそのまま使われます。
+
+`useTokens({ provider })` を設定している場合は、読み込んだユーザーからその provider が機密項目を取り除く（sanitize）ので、パスワードハッシュやモデルの `hidden` フィールドが auth 層の外に出ることはありません。
 
 ### カスタムエラーハンドラー
 
@@ -263,7 +267,9 @@ export const apiTokens = pgTable('api_tokens', {
 })
 ```
 
-SQLite では、timestamp のカラムを `text` か `integer(..., { mode: 'timestamp_ms' })` で宣言します。`text` は ISO 文字列を入れる形で、`create-guren-app` が `users.created_at` に使っているのと同じです。ストアは、各カラムの宣言に合わせた値を書き込みます。drizzle の timestamp モードのカラムには Date を、text のカラムには ISO 文字列を、モードを指定していない integer のカラムにはエポックミリ秒を書きます。
+SQLite では、timestamp のカラムを `text` か `integer(..., { mode: 'timestamp_ms' })` で宣言します。`text` は ISO 文字列を入れる形で、`create-guren-app` が `users.created_at` に使っているのと同じです。
+
+ストアは、各カラムの宣言に合わせた値を書き込みます。drizzle の timestamp モードのカラムには Date を、text のカラムには ISO 文字列を、モードを指定していない integer のカラムにはエポックミリ秒を書きます。
 
 ```ts
 // db/schema.ts
