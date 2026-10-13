@@ -552,7 +552,11 @@ Only this rule states the convention.
 
 `agent:sync` は、書き込む予定のファイルを 2 種類に分けます。フレームワークが自分の名前で配布し、同期のたびに更新する管理対象のファイルと、存在しないときにだけ書く利用者のファイルです。
 
-ハーネスが最新なら、何も書き込みません。管理対象のファイル(`.claude/rules/` の 6 つのルール、`.claude/skills/` に配布されるスキルのディレクトリ、`.claude/agents/` の `code-review.md` と `test-writer.md`、`.claude/hooks/` の 2 つのフック)は、「already up to date」の 1 行にまとめて数えられます。フレームワークのテンプレートと内容が違う管理対象のファイルがあれば「Would write」に並び、置き換えるという警告が出ます。`.claude/settings.json`、`.mcp.json`、`CLAUDE.md` はスキップされたと報告されます。一度書いたあとは読者のファイルだからです。`ownership.md`、`project-guidelines.md`、`owned-resource/`、`ownership-review.md` はどこにも出てきません。同期が見るのは、自分が配布する名前だけです。フレームワークのハーネスはその名前の一覧そのもので、`.claude/` にあるそれ以外のファイルは読者のものです。
+ハーネスが最新なら、何も書き込みません。管理対象のファイル(`.claude/rules/` の 6 つのルール、`.claude/skills/` に配布されるスキルのディレクトリ、`.claude/agents/` の `code-review.md` と `test-writer.md`、`.claude/hooks/` の 2 つのフック)は、「already up to date」の 1 行にまとめて数えられます。フレームワークのテンプレートと内容が違う管理対象のファイルがあれば「Would write」に並び、置き換えるという警告が出ます。
+
+`.claude/settings.json`、`.mcp.json`、`CLAUDE.md` はスキップされたと報告されます。一度書いたあとは読者のファイルだからです。
+
+`ownership.md`、`project-guidelines.md`、`owned-resource/`、`ownership-review.md` はどこにも出てきません。同期が見るのは、自分が配布する名前だけです。フレームワークのハーネスはその名前の一覧そのもので、`.claude/` にあるそれ以外のファイルは読者のものです。
 
 </details>
 

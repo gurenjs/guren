@@ -1673,7 +1673,9 @@ git commit -m "feat: tag posts through a pivot table"
 
 `app/Models/Post.ts` の `belongsToMany` に渡す 2 つの列は、「このモデルを指す中間テーブルの列、次に関連先のモデルを指す列」の順に読みます。入れ替えてもどちらも実在する列名なので、順番を確かめる仕組みはありません。
 
-`'tagId', 'postId'` にすると、`tags` の読み込みは `tag_id` が投稿の id と等しい `post_tags` の行を探し、その行の `post_id` をタグの id として読みます。例外は出ません。タグの 2 つのテストは、返ってきた一覧の中身で失敗します。一覧にどのタグが入るかは id がたまたま一致するかどうかだけで決まるので、小さなテスト用データベースでは空にも、一部だけにも、偶然正しくもなります。中間テーブルの指定を間違えるほうが厄介なのはこのためです。リレーションを忘れた場合は、最初の `findWithOrFail(id, 'tags')` が `tags` を名指しするエラーで止まります。入れ替えた場合はもっともらしいデータが返り、型チェックも通るので、実際の名前を比べるテストしか気付けません。
+`'tagId', 'postId'` にすると、`tags` の読み込みは `tag_id` が投稿の id と等しい `post_tags` の行を探し、その行の `post_id` をタグの id として読みます。例外は出ません。タグの 2 つのテストは、返ってきた一覧の中身で失敗します。一覧にどのタグが入るかは id がたまたま一致するかどうかだけで決まるので、小さなテスト用データベースでは空にも、一部だけにも、偶然正しくもなります。
+
+中間テーブルの指定を間違えるほうが厄介なのはこのためです。リレーションを忘れた場合は、最初の `findWithOrFail(id, 'tags')` が `tags` を名指しするエラーで止まります。入れ替えた場合はもっともらしいデータが返り、型チェックも通るので、実際の名前を比べるテストしか気付けません。
 
 </details>
 
@@ -1682,7 +1684,9 @@ git commit -m "feat: tag posts through a pivot table"
 
 `app/Http/Controllers/PostController.ts` の `destroy` と、`db/schema.ts` の `comments` テーブルを見比べてください。
 
-`destroy` が削除するのは投稿だけです。コメントはデータベースで消える設計です。`comments.postId` の `onDelete: 'cascade'` を、`db/migrations/` のマイグレーションが外部キーの `ON DELETE cascade` として書き出しています。SQLite がカスケードを実行するのは `PRAGMA foreign_keys` がオンの接続だけで、既定はオフです。`createSqliteDatabase()` は開く接続ごとにこれをオンにするので、投稿を削除する同じ DELETE 文でコメントも消えます。
+`destroy` が削除するのは投稿だけです。コメントはデータベースで消える設計です。`comments.postId` の `onDelete: 'cascade'` を、`db/migrations/` のマイグレーションが外部キーの `ON DELETE cascade` として書き出しています。
+
+SQLite がカスケードを実行するのは `PRAGMA foreign_keys` がオンの接続だけで、既定はオフです。`createSqliteDatabase()` は開く接続ごとにこれをオンにするので、投稿を削除する同じ DELETE 文でコメントも消えます。
 
 カスケードがなければ、アプリが親より先に子を削除する必要があります。
 

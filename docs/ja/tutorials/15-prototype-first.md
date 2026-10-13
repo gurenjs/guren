@@ -821,7 +821,9 @@ export default function NotFound({ status, message }: Props) {
 
 `bun run codegen` のあとで、`definePrototype()` に `notFoundPage: pages.errors.NotFound,` を足します。`/announcements/99` を開くと `announcements.show` のエントリーが `notFound()` を返し、プロトタイプはこのページを 200 で表示します。
 
-`bun run typecheck` の中身は、現在の `.guren/pages.gen.ts` に対する `tsc --noEmit` です。このファイルを誰も再生成していなければ `pages.errors.NotFound` は残っていて、型チェックは通ります。`bun run dev:prototype` の実行中なら、ページのファイルを削除したときに Vite が codegen をやり直します。そうでなければ `bun run codegen` か、型チェックの前に codegen を実行する `bunx guren gate` を実行してください。すると `tsc` が fixture の `notFoundPage` の行で失敗します。検出したのは、再生成されたページのマニフェストに対する型チェックです。コントローラーの `this.inertia(pages.errors.NotFound, …)` も同じ段階で失敗します。`guren check` は `pages.*` の参照を型チェックに任せていて、自分で確かめるのは文字列で書いたページ名だけです。
+`bun run typecheck` の中身は、現在の `.guren/pages.gen.ts` に対する `tsc --noEmit` です。このファイルを誰も再生成していなければ `pages.errors.NotFound` は残っていて、型チェックは通ります。`bun run dev:prototype` の実行中なら、ページのファイルを削除したときに Vite が codegen をやり直します。そうでなければ `bun run codegen` か、型チェックの前に codegen を実行する `bunx guren gate` を実行してください。すると `tsc` が fixture の `notFoundPage` の行で失敗します。
+
+検出したのは、再生成されたページのマニフェストに対する型チェックです。コントローラーの `this.inertia(pages.errors.NotFound, …)` も同じ段階で失敗します。`guren check` は `pages.*` の参照を型チェックに任せていて、自分で確かめるのは文字列で書いたページ名だけです。
 
 </details>
 

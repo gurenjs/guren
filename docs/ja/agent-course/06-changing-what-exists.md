@@ -429,7 +429,9 @@ git commit -m "docs: approve the registrations plan"
 
 読み取り結果は承認の項目の `readings.properties` にあり、1 件ごとに `element`、`property`、`verdict` を持ちます。ページの prop は、`Props` インターフェースに宣言された名前で読み取られます。
 
-`differ` と読まれたのは `prop registrationId` です。承認の時点で `Show.tsx` が宣言していたのは `meetup` だけでした。`match` と読まれたのは `prop meetup` です。ページの `actions` と `states` は `unknown` です。ページが何を描画するかは、どの仕組みも読み取らないからです。あとでこの計画の成果として数えられるのは `registrationId` だけです。`alter` の一致が数えられるのは、承認時に `differ` か `unknown` と記録されたプロパティに限られます。`meetup` は作業を始める前から一致していたので、あとで一致していても、この計画の成果とは言えません。
+`differ` と読まれたのは `prop registrationId` です。承認の時点で `Show.tsx` が宣言していたのは `meetup` だけでした。`match` と読まれたのは `prop meetup` です。ページの `actions` と `states` は `unknown` です。ページが何を描画するかは、どの仕組みも読み取らないからです。
+
+あとでこの計画の成果として数えられるのは `registrationId` だけです。`alter` の一致が数えられるのは、承認時に `differ` か `unknown` と記録されたプロパティに限られます。`meetup` は作業を始める前から一致していたので、あとで一致していても、この計画の成果とは言えません。
 
 </details>
 

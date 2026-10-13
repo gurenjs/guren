@@ -954,7 +954,9 @@ app.auth.useTokens(new DatabaseApiTokenStore(apiTokens))
 .agent({ toolName: 'posts_publish', description: 'Publish a draft post. Only the post\'s author may call it.', readOnlyHint: true })
 ```
 
-`guren check --ci` は `posts.publish` のツールで失敗します。ルートは `readOnlyHint: true` を宣言しているのに、アクションがレコードを書き換えているからです。チェックは `publish` の本体を読んで `Post.forceUpdate` を見つけ、参考扱い (advisory) ではない警告を出します。`--ci` が失敗するにはそれで十分です。この注釈は 2 つの役目を持つので、ポリシーと同じくらい重く扱われます。クライアントはこれを「人の確認なしに呼んでよい」と読みます。また、第 4 節で見た認可のルールからツールを外すのもこの注釈です。`authorize` を呼んでいないルートに間違った注釈を付けると、あの失敗が出なくなります。そのため、注釈自体もポリシーと同じ基準で確かめられます。
+`guren check --ci` は `posts.publish` のツールで失敗します。ルートは `readOnlyHint: true` を宣言しているのに、アクションがレコードを書き換えているからです。チェックは `publish` の本体を読んで `Post.forceUpdate` を見つけ、参考扱い (advisory) ではない警告を出します。`--ci` が失敗するにはそれで十分です。
+
+この注釈は 2 つの役目を持つので、ポリシーと同じくらい重く扱われます。クライアントはこれを「人の確認なしに呼んでよい」と読みます。また、第 4 節で見た認可のルールからツールを外すのもこの注釈です。`authorize` を呼んでいないルートに間違った注釈を付けると、あの失敗が出なくなります。そのため、注釈自体もポリシーと同じ基準で確かめられます。
 
 </details>
 
@@ -970,7 +972,9 @@ expect(result.status).toBe(404)
 console.log(result.text)
 ```
 
-エージェントが受け取るのはエラーの結果です。`isError` が true、ステータスは 404 で、テキストはエラーレスポンスの JSON 本文です。その `message` は `Post not found for id=999` になります。`bun test` ではハンドラーが詳細を出すので、本文には `exception` と `stack` も入ります。`bun run preview` で HTML を求めるブラウザには、同じメッセージの素の HTML の 404 ページが返ります。本番以外では、ブラウザにも同じ JSON が返ります。
+エージェントが受け取るのはエラーの結果です。`isError` が true、ステータスは 404 で、テキストはエラーレスポンスの JSON 本文です。その `message` は `Post not found for id=999` になります。
+
+`bun test` ではハンドラーが詳細を出すので、本文には `exception` と `stack` も入ります。`bun run preview` で HTML を求めるブラウザには、同じメッセージの素の HTML の 404 ページが返ります。本番以外では、ブラウザにも同じ JSON が返ります。
 
 フレームワークによる部分は、404 というステータス(`findWithOrFail` が投げる例外が持っています)、リクエストの `Accept` ヘッダーによる JSON と HTML の切り替え、本番以外での詳細の表示、4xx や 5xx の応答を MCP のエラー結果に変換する処理です。アプリのコードによる部分は、`show` で `findWithOrFail` を使っていること(`find` で探して応答を自分で決める書き方もあります)と、投稿が見つからないときに専用のページを用意するかどうかです。
 
