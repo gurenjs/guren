@@ -230,7 +230,9 @@ broadcast.webSocketMiddleware({
 
 ### 独自のソケットルート
 
-独自のプロトコルを使うルートでは、これまでどおり下位の API を使えます。`subscribeWebSocketClient()` は、SSE の `subscribeClient()` と同じく認可を行いません。サーバーが選んだチャンネルはそのまま渡してかまいませんが、クライアントが指定したチャンネルは、先に `broadcast.authorize()` で認可してください。クライアントをユーザー ID 付きで登録しておくと、`POST /broadcasting/auth` は、そのユーザーからのリクエストに限ってチャンネルを追加します。ソケットの open ハンドラーには次のように書きます。
+独自のプロトコルを使うルートでは、これまでどおり下位の API を使えます。`subscribeWebSocketClient()` は、SSE の `subscribeClient()` と同じく認可を行いません。サーバーが選んだチャンネルはそのまま渡してかまいませんが、クライアントが指定したチャンネルは、先に `broadcast.authorize()` で認可してください。
+
+クライアントをユーザー ID 付きで登録しておくと、`POST /broadcasting/auth` は、そのユーザーからのリクエストに限ってチャンネルを追加します。ソケットの open ハンドラーには次のように書きます。
 
 ```ts
 const clientId = broadcast.registerWebSocketClient({
@@ -292,7 +294,13 @@ const off = feed.on('NewPost', (payload) => {
 
 これで、フロントエンドではチャンネル名やイベント名だけでなく、payload の形も型付きで扱えます。
 
-`useChannel(name)` は、呼び出すたびに `endpoint?channels=name` に対して専用の `EventSource` を開きます（既定の endpoint は `/broadcasting/events` です。endpoint にすでにクエリ文字列がある場合は `&channels=` でつなぎます）。引数に渡したチャンネルは、型の指定に使われるだけでなく、サーバーが実際に購読するチャンネルにもなります。後で紹介する `?channels=` の例と同じく、ストリームの開始時に認可と購読が行われます。SSE ルートが `getUser` でユーザーを解決していれば、プライベートチャンネルとプレゼンスチャンネルも同じ呼び出しで購読できます。サーバーが拒否したチャンネルは、`connected` イベントの `channels` 一覧に載らず、イベントも届きません。チャンネルごとにストリームを 1 本ずつ開くのは意図した設計です。イベントはイベント名で振り分けられるので、チャンネルごとにストリームを分けておくことで、`feed.on('NewPost', …)` が「`announcements` の `NewPost`」を指すようになります。URL を自分で組み立てる場合は、`channelStreamUrl(endpoint, channel)` を使えます。
+`useChannel(name)` は、呼び出すたびに `endpoint?channels=name` に対して専用の `EventSource` を開きます（既定の endpoint は `/broadcasting/events` です。endpoint にすでにクエリ文字列がある場合は `&channels=` でつなぎます）。引数に渡したチャンネルは、型の指定に使われるだけでなく、サーバーが実際に購読するチャンネルにもなります。後で紹介する `?channels=` の例と同じく、ストリームの開始時に認可と購読が行われます。
+
+SSE ルートが `getUser` でユーザーを解決していれば、プライベートチャンネルとプレゼンスチャンネルも同じ呼び出しで購読できます。サーバーが拒否したチャンネルは、`connected` イベントの `channels` 一覧に載らず、イベントも届きません。
+
+チャンネルごとにストリームを 1 本ずつ開くのは意図した設計です。イベントはイベント名で振り分けられるので、チャンネルごとにストリームを分けておくことで、`feed.on('NewPost', …)` が「`announcements` の `NewPost`」を指すようになります。
+
+URL を自分で組み立てる場合は、`channelStreamUrl(endpoint, channel)` を使えます。
 
 ### E2E 型安全リアルタイム
 

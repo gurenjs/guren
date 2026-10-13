@@ -25,7 +25,9 @@ export default class BlogController extends Controller {
 }
 ```
 
-`view(component, props, options?)` が受け取るのは JSX 要素ではなく、コンポーネントと props です。そのため、コントローラーは JSX を含まない普通の `.ts` ファイルのままで済みます。props は呼び出し箇所でコンパイル時に検査されるので、prop 名を間違えればその場で型エラーになります。間に codegen を挟む必要もありません。省略できる第 3 引数には、`status` と `headers`、それに `doctype` フラグ（[後述](#完全なドキュメントとフラグメント)）を渡せます。
+`view(component, props, options?)` が受け取るのは JSX 要素ではなく、コンポーネントと props です。そのため、コントローラーは JSX を含まない普通の `.ts` ファイルのままで済みます。props は呼び出し箇所でコンパイル時に検査されるので、prop 名を間違えればその場で型エラーになります。間に codegen を挟む必要もありません。
+
+省略できる第 3 引数には、`status` と `headers`、それに `doctype` フラグ（[後述](#完全なドキュメントとフラグメント)）を渡せます。
 
 ## `view()` と `this.inertia()` の使い分け
 
@@ -43,7 +45,9 @@ export default class BlogController extends Controller {
 
 ## 最初の View コンポーネント
 
-View コンポーネントは `app/View/*.tsx` に置きます（モジュールの中なら `modules/<name>/app/View/`）。`resources/js/pages/` の下には置かないでください。このディレクトリは、codegen が Inertia のページ用に使っています。View のファイルはどれも `@guren/core` を指す JSX プラグマで始め、型も `@guren/core` から import します。アプリの依存に `hono` を足す必要はありません。JSX ランタイムは、アプリがすでに入れている `@guren/core` から再 export されています。
+View コンポーネントは `app/View/*.tsx` に置きます（モジュールの中なら `modules/<name>/app/View/`）。`resources/js/pages/` の下には置かないでください。このディレクトリは、codegen が Inertia のページ用に使っています。
+
+View のファイルはどれも `@guren/core` を指す JSX プラグマで始め、型も `@guren/core` から import します。アプリの依存に `hono` を足す必要はありません。JSX ランタイムは、アプリがすでに入れている `@guren/core` から再 export されています。
 
 ```tsx
 // app/View/Layout.tsx。すべてのページが自分でラップするドキュメントの骨格
@@ -154,7 +158,11 @@ return this.view(CommentPartial, { comment }, { doctype: false })
 
 ## 2 つの JSX 世界を分離する
 
-`view()` と Inertia の両方を使うアプリには、2 種類の JSX が混在します。`resources/js/pages/` の下にある React（ブラウザでハイドレーションされる）と、`app/View/` の下にあるサーバー専用のコンポーネントです。取り違えのほとんどは、コンパイラがすでにエラーにします。React コンポーネントを `view()` に渡した場合や、View コンポーネントを React のページの中でレンダリングした場合、型注釈のあるコンポーネントでプラグマを書き忘れた場合などです。View コンポーネントには、必ず `FC<Props>` の型注釈を明示してください。注釈のないコンポーネントが境界をまたいでも、コンパイラには見つけられないことがあります。
+`view()` と Inertia の両方を使うアプリには、2 種類の JSX が混在します。`resources/js/pages/` の下にある React（ブラウザでハイドレーションされる）と、`app/View/` の下にあるサーバー専用のコンポーネントです。
+
+取り違えのほとんどは、コンパイラがすでにエラーにします。React コンポーネントを `view()` に渡した場合や、View コンポーネントを React のページの中でレンダリングした場合、型注釈のあるコンポーネントでプラグマを書き忘れた場合などです。
+
+View コンポーネントには、必ず `FC<Props>` の型注釈を明示してください。注釈のないコンポーネントが境界をまたいでも、コンパイラには見つけられないことがあります。
 
 残りの取り違えは、`guren.arch.ts` に境界のルールを足せば `bunx guren check` で検出できます。
 

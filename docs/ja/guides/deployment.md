@@ -121,7 +121,11 @@ CLI は `src/lambda.ts` を生成し、`lambda:build` コマンドを登録し�
 bunx guren lambda:build
 ```
 
-ビルドすると `.lambda/` ディレクトリができます。中身は、単体で動く関数のバンドル、S3 に置くために用意した静的アセット、関数が必要とする環境変数の一覧です。CloudFront はこの静的ファイルを関数より手前で配信します。そのため CDK コンストラクトはアセット用のビヘイビアに viewer-response の関数を置き、ブラウザがドキュメントとして描画する形式 (`.html`、`.htm`、`.svg`、`.xhtml`、`.xml`) に `Content-Disposition: attachment` と `X-Content-Type-Options: nosniff` を付けます。フレームワークが自分で `public/` を配信するときと同じ扱いです。HTTP、SQS キュー、EventBridge のスケジュール実行、CLI コマンドには、それぞれ専用のハンドラーがあります。データベースや SSR、CDK でのデプロイまで含めた手順は **[サーバーレスデプロイガイド](./serverless.md)** を参照してください。
+ビルドすると `.lambda/` ディレクトリができます。中身は、単体で動く関数のバンドル、S3 に置くために用意した静的アセット、関数が必要とする環境変数の一覧です。
+
+CloudFront はこの静的ファイルを関数より手前で配信します。そのため CDK コンストラクトはアセット用のビヘイビアに viewer-response の関数を置き、ブラウザがドキュメントとして描画する形式 (`.html`、`.htm`、`.svg`、`.xhtml`、`.xml`) に `Content-Disposition: attachment` と `X-Content-Type-Options: nosniff` を付けます。フレームワークが自分で `public/` を配信するときと同じ扱いです。
+
+HTTP、SQS キュー、EventBridge のスケジュール実行、CLI コマンドには、それぞれ専用のハンドラーがあります。データベースや SSR、CDK でのデプロイまで含めた手順は **[サーバーレスデプロイガイド](./serverless.md)** を参照してください。
 
 ## Vercel（サーバーレス）
 
@@ -144,7 +148,9 @@ vercel deploy --prebuilt
 > [!NOTE]
 > このプラグインは SSR アプリ専用です。Vite のマニフェストを読み、正しい `GUREN_INERTIA_*` 環境変数をサーバーレス関数に注入します。API-only アプリには Docker か Lambda を使ってください。
 
-`public/` は `.vercel/output/static` にコピーされ、関数より手前で CDN が配信します。そのため生成される `config.json` には、ブラウザがドキュメントとして描画する形式 (`.html`、`.htm`、`.svg`、`.xhtml`、`.xml`) に `Content-Disposition: attachment` と `X-Content-Type-Options: nosniff` を付けるルートが入ります。フレームワークが自分で `public/` を配信するときと同じ扱いです。このルートは `handle: "hit"` の後ろにあるので、CDN が応答したファイルにだけ効きます。動的な `/sitemap.xml` のように関数が返すパスには影響しません。
+`public/` は `.vercel/output/static` にコピーされ、関数より手前で CDN が配信します。そのため生成される `config.json` には、ブラウザがドキュメントとして描画する形式 (`.html`、`.htm`、`.svg`、`.xhtml`、`.xml`) に `Content-Disposition: attachment` と `X-Content-Type-Options: nosniff` を付けるルートが入ります。フレームワークが自分で `public/` を配信するときと同じ扱いです。
+
+このルートは `handle: "hit"` の後ろにあるので、CDN が応答したファイルにだけ効きます。動的な `/sitemap.xml` のように関数が返すパスには影響しません。
 
 ## Cloudflare Workers
 

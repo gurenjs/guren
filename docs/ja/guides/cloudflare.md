@@ -36,7 +36,9 @@ bunx wrangler deploy
 
 アプリをビルドする前に、`guren doctor` と同じデプロイランタイムのチェックが走ります。セッションや OAuth state をプロセスのメモリに置いている、[Bun でしか読めないパスワードハッシャー](/docs/guides/authentication#パスワードハッシャー)を選んでいる、プロバイダをファイルシステムから探している、のどれかに当てはまると警告が出ます(ビルド自体は止まりません)。いずれもローカルでは動くのに Workers では動かないものです。警告は Vite の出力のあとではなく、まだ読んでいるうちに目に入る位置に出ます。
 
-ビルドは、トップレベルか、いずれかの `env.<name>` ブロックで `"keep_names": false` を設定した `wrangler.jsonc` も受け付けません。Guren は、デプロイをまたいで残るレコードにクラス名を書き込むからです。キューに入れたジョブとイベント、保存した通知は、`static jobName`・`static eventName`・`type` ゲッターで名前を固定していなければ、クラス名をキーにして保存されます。[永続エージェント](./durable-agents.md)もクラス名で探されます。wrangler は、`keep_names` で無効にしない限り esbuild の `keepNames` を有効にしてバンドルするので、`"minify": true` を指定するだけならこれらの名前は保たれます。`keep_names` を無効にすると、minify したときにすべてのクラス名が変わります。minify しなくても、同じ名前のトップレベルクラスが 2 つあると 2 つ目の名前が変わります（`OrderShipped2`）。そうなると、前回のデプロイで書き込んだレコードを解決できなくなります。
+ビルドは、トップレベルか、いずれかの `env.<name>` ブロックで `"keep_names": false` を設定した `wrangler.jsonc` も受け付けません。Guren は、デプロイをまたいで残るレコードにクラス名を書き込むからです。キューに入れたジョブとイベント、保存した通知は、`static jobName`・`static eventName`・`type` ゲッターで名前を固定していなければ、クラス名をキーにして保存されます。[永続エージェント](./durable-agents.md)もクラス名で探されます。
+
+wrangler は、`keep_names` で無効にしない限り esbuild の `keepNames` を有効にしてバンドルするので、`"minify": true` を指定するだけならこれらの名前は保たれます。`keep_names` を無効にすると、minify したときにすべてのクラス名が変わります。minify しなくても、同じ名前のトップレベルクラスが 2 つあると 2 つ目の名前が変わります（`OrderShipped2`）。そうなると、前回のデプロイで書き込んだレコードを解決できなくなります。
 
 ## データベース（D1）
 
@@ -88,7 +90,9 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
 
-`config/env.ts` に `SQLITE_DATABASE_PATH: Env.string().default('./data/guren.db')` を宣言し、`database` を `createApp({ config })` に加えてください。リゾルバについては [設定ガイド](./configuration.md#データベース接続) で詳しく説明しています。`getWorkersEnv` と `isWorkersRuntime` は `@guren/plugin-cloudflare/env` から import してください。パッケージのルートにはビルド用のツールも入っていて、それはワーカーのバンドルには要らないからです。
+`config/env.ts` に `SQLITE_DATABASE_PATH: Env.string().default('./data/guren.db')` を宣言し、`database` を `createApp({ config })` に加えてください。リゾルバについては [設定ガイド](./configuration.md#データベース接続) で詳しく説明しています。
+
+`getWorkersEnv` と `isWorkersRuntime` は `@guren/plugin-cloudflare/env` から import してください。パッケージのルートにはビルド用のツールも入っていて、それはワーカーのバンドルには要らないからです。
 
 バインディングは値ではなく、値を返す関数として渡します。バインディングはリクエストが届いて初めて存在するので、読み取るのを後回しにする必要があります。
 
@@ -249,7 +253,9 @@ Bun のプロセス（スクリプトや、Workers 以外へのデプロイ）�
 bun -e "console.log('base64:'+Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64'))" | bunx wrangler secret put APP_KEY
 ```
 
-アプリが読むほかの値（OAuth の認証情報、API キーなど）も同じ方法で設定し、それぞれを `config/env.ts` で宣言します。vars とシークレットはワーカーのエントリポイントの `env` に渡され、`process.env` に入っているとは限りません。`@guren/plugin-cloudflare` がアプリのブート前にこの `env` をバインドし、スキーマはそこから値を読むので、アプリのコードはローカルと同じように検証済みの値を使えます（[設定](./configuration.md#cloudflare-workers)）。`wrangler.jsonc` の `vars` には、秘密ではない値だけを書いてください。
+アプリが読むほかの値（OAuth の認証情報、API キーなど）も同じ方法で設定し、それぞれを `config/env.ts` で宣言します。vars とシークレットはワーカーのエントリポイントの `env` に渡され、`process.env` に入っているとは限りません。`@guren/plugin-cloudflare` がアプリのブート前にこの `env` をバインドし、スキーマはそこから値を読むので、アプリのコードはローカルと同じように検証済みの値を使えます（[設定](./configuration.md#cloudflare-workers)）。
+
+`wrangler.jsonc` の `vars` には、秘密ではない値だけを書いてください。
 
 ## 無料プランの制限
 
@@ -260,7 +266,9 @@ bun -e "console.log('base64:'+Buffer.from(crypto.getRandomValues(new Uint8Array(
 | ワーカーサイズ | 非圧縮で 64 MiB（全プラン共通） | 生成するコンテンツはバンドルに入れず、Static Assets、KV、R2 に置く |
 | リクエストあたりの CPU | 10 ミリ秒 | 重い処理はビルド時か保存時に回す |
 
-Cloudflare は 2026-09-04 に圧縮後のサイズの上限（無料 3 MB、有料 10 MB）を撤廃し、いまは非圧縮のバンドルサイズだけを検査しています。アプリのサイズは `bunx guren cloudflare:size`（または `cloudflare:build --report-size`）で測れます。wrangler のドライランを実行し、パッケージごとの内訳を大きい順に表示するので、いつの間にかバンドルが膨らんでいたときの原因がそこで分かります。この数字には表れない制限もあり、起動時間（1 秒、`wrangler check startup`）とメモリ（isolate あたり 128 MB）がそれです。どちらも、大きなデータをバンドルすると消費されます。
+Cloudflare は 2026-09-04 に圧縮後のサイズの上限（無料 3 MB、有料 10 MB）を撤廃し、いまは非圧縮のバンドルサイズだけを検査しています。アプリのサイズは `bunx guren cloudflare:size`（または `cloudflare:build --report-size`）で測れます。wrangler のドライランを実行し、パッケージごとの内訳を大きい順に表示するので、いつの間にかバンドルが膨らんでいたときの原因がそこで分かります。
+
+この数字には表れない制限もあり、起動時間（1 秒、`wrangler check startup`）とメモリ（isolate あたり 128 MB）がそれです。どちらも、大きなデータをバンドルすると消費されます。
 
 この CPU 制限があるので、パスワードのハッシュ化は事実上できません。わざと遅くしてある処理を 10 ミリ秒に収めるのは無理だからです。無料プランでは、パスワードではなく OAuth で認証してください。OAuth のフローは[認証ガイド](./authentication.md)で説明しています。
 
@@ -371,7 +379,13 @@ Workers に固有の制約は次のとおりです。
 - **`preventOverlapping()` は、起動をまたいでは効きません。** これはタスクがメモリ上に持つフラグで、起動のたびに新しい isolate になる可能性があるためです。トリガーの間隔より時間のかかるタスクは、前回の実行と重なります。タスクを間隔より短く収めるか、isolate より長く残る場所にガードを置いてください。候補は D1 の行か、インスタンスごとの永続的な state と alarm によるスケジュールを持つ Durable Object です([永続エージェント](./durable-agents.md))。特定の identity を持たないアプリ全体の定期処理には cron トリガーが合います。一方、重なってはいけないジョブには identity があるので、Durable Object で表します。
 - **`runOnOneServer()` には、isolate 間で共有する `SchedulerLock` が必要です。** 既定の `MemorySchedulerLock` は 1 つの isolate の中にしか存在しないので、ここでは何も守れません。スケジューラは警告を出したうえで、起動のたびにタスクを実行します。Workers には Redis がなく、KV には条件付きの書き込みがないので、`SchedulerLock` は一意キーへの D1 の INSERT か Durable Object を使って実装し、`createScheduler({ lock })` に渡してください。
 
-`--mcp-oauth` を使ったワーカーでは、もう 1 つ掃除が走ります。タスクを実行する前に、前回の掃除から 1 時間たったかを毎回確かめ、たっていれば OAuth プロバイダの `purgeExpiredData` を呼びます。クライアントが削除されて取り残された付与記録（grant）には有効期限がなく、KV の TTL では消えないので、これを取り除けるのはこの掃除だけです。1 回の掃除では、まず付与記録を最大 15 件調べ、続く 2 回目の呼び出しで token を最大 15 件調べます。プロバイダは付与記録を調べる段階で予算を使い切るとそこで戻ってしまい、その後ろの token まで一度も届かないので、呼び出しを 2 回に分けています。どちらも毎回キー空間の先頭から調べます。プロバイダのカーソルは呼び出しをまたいで残らないため、その範囲より後ろのレコードには届きません。途中で打ち切られた場合は、その旨が `wrangler tail` に出ます。Free プランでは 1 回の起動で使えるサブリクエストが 50 までで、KV の読み取りもそこに数えられます。しかもこの予算はアプリ自身のタスクと分け合うので、件数をここまで小さくしています。ワーカーの側からは、どのプランで動いているかを判別できません。掃除が失敗してもログに出るだけで、その回は済んだものとして次の間隔まで待ち、アプリのタスクは止まりません。
+`--mcp-oauth` を使ったワーカーでは、もう 1 つ掃除が走ります。タスクを実行する前に、前回の掃除から 1 時間たったかを毎回確かめ、たっていれば OAuth プロバイダの `purgeExpiredData` を呼びます。クライアントが削除されて取り残された付与記録（grant）には有効期限がなく、KV の TTL では消えないので、これを取り除けるのはこの掃除だけです。
+
+1 回の掃除では、まず付与記録を最大 15 件調べ、続く 2 回目の呼び出しで token を最大 15 件調べます。プロバイダは付与記録を調べる段階で予算を使い切るとそこで戻ってしまい、その後ろの token まで一度も届かないので、呼び出しを 2 回に分けています。どちらも毎回キー空間の先頭から調べます。プロバイダのカーソルは呼び出しをまたいで残らないため、その範囲より後ろのレコードには届きません。途中で打ち切られた場合は、その旨が `wrangler tail` に出ます。
+
+Free プランでは 1 回の起動で使えるサブリクエストが 50 までで、KV の読み取りもそこに数えられます。しかもこの予算はアプリ自身のタスクと分け合うので、件数をここまで小さくしています。ワーカーの側からは、どのプランで動いているかを判別できません。
+
+掃除が失敗してもログに出るだけで、その回は済んだものとして次の間隔まで待ち、アプリのタスクは止まりません。
 
 この掃除にも、ほかと同じく `triggers.crons` のエントリが必要です。掃除のためだけにトリガーを追加する場合でも `scheduler` のバインドは必要で、ないと毎回の起動で、掃除のあとに上で説明した例外が投げられます。
 
@@ -379,7 +393,9 @@ Workers に固有の制約は次のとおりです。
 
 Workers は、アプリケーションが自分でホストするエージェントの基盤にもなります。Durable Object を使うと、長く動き続けるエージェントに、永続的な identity、永続的な state、alarm によるスケジュールを持たせられます。`@guren/plugin-agents` は、それらを、ルートですでに宣言しているエージェントツールの裏側に置きます。
 
-アプリに `config/agents.ts` があると、`cloudflare:build` は次の 3 つを追加で行います。1 つ目は、登録されたクラスごとの名前付き export を生成ワーカーに追記することです。2 つ目は、コミット済みの `wrangler.jsonc` がそれぞれのクラスを SQLite をバックエンドにした Durable Object としてホストしているかの検証です。足りなければ、バインディングのないままデプロイすることはせず、追記すべき JSON をそのまま出力して失敗します。3 つ目は、`/agents/*` を、レジストリ自身の authorizer の後ろにすべて拒否する設定でマウントすることです。`durable_objects` と `migrations` のエントリは手で書かず、ビルドを実行してその出力を貼り付けてください。
+アプリに `config/agents.ts` があると、`cloudflare:build` は次の 3 つを追加で行います。1 つ目は、登録されたクラスごとの名前付き export を生成ワーカーに追記することです。2 つ目は、コミット済みの `wrangler.jsonc` がそれぞれのクラスを SQLite をバックエンドにした Durable Object としてホストしているかの検証です。足りなければ、バインディングのないままデプロイすることはせず、追記すべき JSON をそのまま出力して失敗します。3 つ目は、`/agents/*` を、レジストリ自身の authorizer の後ろにすべて拒否する設定でマウントすることです。
+
+`durable_objects` と `migrations` のエントリは手で書かず、ビルドを実行してその出力を貼り付けてください。
 
 デプロイしたエージェントの無料プランでの実測値、1 回の定期処理で使える D1 クエリの予算、そのほかエージェントの書き方全般は[永続エージェント](./durable-agents.md)にまとめてあります。
 

@@ -303,7 +303,9 @@ import queue from '../config/queue.js'
 const app = createApp({ env, config: [mail, queue] })
 ```
 
-`defineMailConfig` は、manager を解決するコンテナを渡して manager を作ります。そのため、manager は自分がどのアプリに属しているかを知っています。`config/queue.ts` の書き方は[キューガイド](./queue.md)を参照してください。`QUEUE_CONNECTION=sync` ではジョブがその場で実行されるので、送信をリクエストの処理から切り離したい場合は、ワーカーが処理するドライバを選んでください。
+`defineMailConfig` は、manager を解決するコンテナを渡して manager を作ります。そのため、manager は自分がどのアプリに属しているかを知っています。
+
+`config/queue.ts` の書き方は[キューガイド](./queue.md)を参照してください。`QUEUE_CONNECTION=sync` ではジョブがその場で実行されるので、送信をリクエストの処理から切り離したい場合は、ワーカーが処理するドライバを選んでください。
 
 コンテナを渡さずに `createMailManager(config)` で作った mail manager は、既定のアプリケーションの `queue` バインディングにジョブを入れます。`mail` バインディングが見つからないジョブは `setMailManager()` で設定した値を使いますが、この setter は 2.23.0 で非推奨になりました。`config/mail.ts` と同じように、manager はアプリのコンテナに束縛してください。
 

@@ -6,7 +6,9 @@ Guren では、Drizzle のテーブルから作ったモデルを通してデー
 
 ## データベースへの接続
 
-雛形は、`create-guren-app --db` で選んだドライバーに合わせて `config/database.ts` を書き出し、`createApp({ config })` にその定義を加えます。そのため、アプリは起動時に検証済みの環境変数を使って ORM を接続します。どのドライバーも同じ関数（`getDatabase`、`migrateDatabase`、`closeDatabase`、`configureOrm`、`seedDatabase`、`resetDatabase`、`migrationStatus`）と `AppSeederContext` 型を持つので、切り替えてもモデルやクエリは変わりません。
+雛形は、`create-guren-app --db` で選んだドライバーに合わせて `config/database.ts` を書き出し、`createApp({ config })` にその定義を加えます。そのため、アプリは起動時に検証済みの環境変数を使って ORM を接続します。
+
+どのドライバーも同じ関数（`getDatabase`、`migrateDatabase`、`closeDatabase`、`configureOrm`、`seedDatabase`、`resetDatabase`、`migrationStatus`）と `AppSeederContext` 型を持つので、切り替えてもモデルやクエリは変わりません。
 
 | ドライバー | `--db` | `config/database.ts` のファクトリー |
 |------------|--------|-------------------------------------|
@@ -91,7 +93,9 @@ export const posts = pgTable('posts', {
 })
 ```
 
-PostgreSQL では、タイムスタンプ列に必ず `{ withTimezone: true }` を付けてください。`timestamp without time zone` は、オフセットを持たない時計の表示だけを保存します。そのため、`defaultNow()` はデータベースセッションのタイムゾーンで値を書き込むのに、アプリはその値を UTC として読み戻し、アプリ以外のクライアントには別の時刻が見えてしまいます。雛形はすでにこのオプションを付けて出力します。付け忘れた列があれば `bunx guren check`が警告します。ただし、この警告はスキーマを静的に解析して出すので、警告が出なくても、すべての列が正しいとは限りません。
+PostgreSQL では、タイムスタンプ列に必ず `{ withTimezone: true }` を付けてください。`timestamp without time zone` は、オフセットを持たない時計の表示だけを保存します。そのため、`defaultNow()` はデータベースセッションのタイムゾーンで値を書き込むのに、アプリはその値を UTC として読み戻し、アプリ以外のクライアントには別の時刻が見えてしまいます。
+
+雛形はすでにこのオプションを付けて出力します。付け忘れた列があれば `bunx guren check`が警告します。ただし、この警告はスキーマを静的に解析して出すので、警告が出なくても、すべての列が正しいとは限りません。
 
 ### MySQL
 
@@ -150,7 +154,11 @@ export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV
 bun add @aws-sdk/client-rds-data
 ```
 
-このアダプタもほかのドライバーと同じランタイム API を持ち、マイグレーションには標準の drizzle-kit のフォルダを使います。ただし、意図して変えている点が 1 つあります。`getDatabase()` は、未適用のマイグレーションを自動で実行**しません**。Lambda ではこの確認のために、コールドスタートのたびに Data API との往復が何回か順番に発生するからです。マイグレーションはアプリの起動とは別に実行してください(ローカルでは `bun run db:migrate`、デプロイ後はコンソールハンドラを使います)。`migrateOnStart: true` を指定すれば、起動時に実行する以前の動きに戻せます。Data API に対して `drizzle-kit generate`/`push` を実行する場合は、`drizzle.config.ts` に `driver: 'aws-data-api'` と、同じ `database`/`resourceArn`/`secretArn` を設定してください。
+このアダプタもほかのドライバーと同じランタイム API を持ち、マイグレーションには標準の drizzle-kit のフォルダを使います。ただし、意図して変えている点が 1 つあります。`getDatabase()` は、未適用のマイグレーションを自動で実行**しません**。Lambda ではこの確認のために、コールドスタートのたびに Data API との往復が何回か順番に発生するからです。
+
+マイグレーションはアプリの起動とは別に実行してください(ローカルでは `bun run db:migrate`、デプロイ後はコンソールハンドラを使います)。`migrateOnStart: true` を指定すれば、起動時に実行する以前の動きに戻せます。
+
+Data API に対して `drizzle-kit generate`/`push` を実行する場合は、`drizzle.config.ts` に `driver: 'aws-data-api'` と、同じ `database`/`resourceArn`/`secretArn` を設定してください。
 
 > [!NOTE]
 > 認証には AWS SDK の標準のクレデンシャルチェーン(Lambda 上では IAM ロール、ローカルでは `AWS_PROFILE`)を使います。リージョンやクレデンシャルを明示的に指定したい場合は、`clientOptions` を渡してください。
@@ -203,13 +211,19 @@ bunx guren make:migration --dialect postgresql
 
 ### マイグレーションが走るタイミング
 
-マイグレーションは `db:migrate` を実行したとき以外にも適用されます。Data API アダプタと D1 アダプタ以外のドライバーは、最初に `getDatabase()` か `configureOrm()` が呼ばれたときに、未適用のマイグレーションを適用します。これは環境を問いません。`bun run dev` でも `bun test` でも、雛形の `Dockerfile` が `bun bin/serve.ts` で起動するコンテナでも、起動時にマイグレーションが走ります。そのため、新しいイメージを配るだけのデプロイでも、マイグレーション済みの状態で立ち上がります。何かを適用した起動では、適用したものとその出どころが 1 行で表示されます。データベースが最新の状態なら、何も表示せずに立ち上がります。
+マイグレーションは `db:migrate` を実行したとき以外にも適用されます。Data API アダプタと D1 アダプタ以外のドライバーは、最初に `getDatabase()` か `configureOrm()` が呼ばれたときに、未適用のマイグレーションを適用します。これは環境を問いません。`bun run dev` でも `bun test` でも、雛形の `Dockerfile` が `bun bin/serve.ts` で起動するコンテナでも、起動時にマイグレーションが走ります。そのため、新しいイメージを配るだけのデプロイでも、マイグレーション済みの状態で立ち上がります。
 
-この仕組みは便利な反面、残すつもりのなかったマイグレーションまでデータベースに適用されてしまいます。ジェネレーターは `db/migrations/` の下に新しいフォルダを未追跡のまま作りますが、`git switch` でも `git branch -D` でも未追跡のファイルは消えません。そのため、捨てたつもりのブランチで生成したマイグレーションが、ディスクに残ったまま適用される時を待つことになります。ブランチと一緒に消えることは期待せず、`git clean -fd` で削除してください。何が消えるかは、先に `git clean -fdn` で確認できます。
+何かを適用した起動では、適用したものとその出どころが 1 行で表示されます。データベースが最新の状態なら、何も表示せずに立ち上がります。
+
+この仕組みは便利な反面、残すつもりのなかったマイグレーションまでデータベースに適用されてしまいます。ジェネレーターは `db/migrations/` の下に新しいフォルダを未追跡のまま作りますが、`git switch` でも `git branch -D` でも未追跡のファイルは消えません。そのため、捨てたつもりのブランチで生成したマイグレーションが、ディスクに残ったまま適用される時を待つことになります。
+
+ブランチと一緒に消えることは期待せず、`git clean -fd` で削除してください。何が消えるかは、先に `git clean -fdn` で確認できます。
 
 フォルダを消して間に合うのは、まだどの起動でも適用されていない場合に限られます。ジェネレーターがファイルを書き換えている途中で dev サーバーがリロードすると、先にそちらで適用されてしまいます。そうなると、トラッカーにはどのフォルダにも対応しない行が残ります。マイグレーターはその行を読み飛ばすので、そのマイグレーションが作ったものはデータベースに残ったままになります。`db:status` はその行を orphaned(孤立)と表示し、起動のたびにマイグレーションの前に警告が出ます。
 
-例外の 2 つのアダプタが起動時にマイグレーションしない理由は、それぞれ別です。Data API アダプタは、`migrateOnStart` を指定したときだけ起動時に実行します。未適用かどうかを確認するだけで、Lambda のコールドスタートのたびに往復が順番に発生するからです。D1 には、実行時にマイグレーションする手段そのものがありません。マイグレーションは `wrangler d1 migrations apply <database>` で適用するものなので、`migrateDatabase()` は実行を試みず、そのことを伝えるだけです。
+例外の 2 つのアダプタが起動時にマイグレーションしない理由は、それぞれ別です。Data API アダプタは、`migrateOnStart` を指定したときだけ起動時に実行します。未適用かどうかを確認するだけで、Lambda のコールドスタートのたびに往復が順番に発生するからです。
+
+D1 には、実行時にマイグレーションする手段そのものがありません。マイグレーションは `wrangler d1 migrations apply <database>` で適用するものなので、`migrateDatabase()` は実行を試みず、そのことを伝えるだけです。
 
 ## データ投入（シード）
 
@@ -470,7 +484,9 @@ export class Post extends defineModel(posts, {
 }) {}
 ```
 
-クラス側で `static fillable = ['title', 'body', 'status']` と宣言しても、同じ許可リストになります。ただし、オプションで渡す書き方なら TypeScript がすべてのフィールド名をテーブルと照合するので、こちらをおすすめします(サブクラスで `static` を宣言すると、オプションの値は上書きされます)。`fillable` を設定すると、許可リストに無いフィールドを `create()` や `update()` に渡したときに、`MassAssignmentException`(`@guren/core` から export されています)が投げられます。エラーメッセージには、拒否されたフィールド名が入ります。打ち間違いやインジェクションの試みが黙って捨てられ、あとで NOT NULL 違反として表に出るのではなく、呼び出したその場で気づけます。
+クラス側で `static fillable = ['title', 'body', 'status']` と宣言しても、同じ許可リストになります。ただし、オプションで渡す書き方なら TypeScript がすべてのフィールド名をテーブルと照合するので、こちらをおすすめします(サブクラスで `static` を宣言すると、オプションの値は上書きされます)。
+
+`fillable` を設定すると、許可リストに無いフィールドを `create()` や `update()` に渡したときに、`MassAssignmentException`(`@guren/core` から export されています)が投げられます。エラーメッセージには、拒否されたフィールド名が入ります。打ち間違いやインジェクションの試みが黙って捨てられ、あとで NOT NULL 違反として表に出るのではなく、呼び出したその場で気づけます。
 
 ```ts
 await Post.create({ title: 'Hello', body: '...', status: 'draft', authorId: 1 })
@@ -967,7 +983,9 @@ await Post.restore({ id: 1 })
 await Post.forceDelete({ id: 1 })
 ```
 
-これらのメソッドには、どれもモデルの*ほかの*グローバルスコープが適用されます。`delete()` が`deletedAt` を設定するのは、現在のスコープから見える未削除の行だけです。すでに削除済みの行には一致しないので、元の `deletedAt` はそのまま残ります。`restore()` と`forceDelete()` は、削除済みのレコードを対象にするために `softDelete` フィルタだけを外し、ほかのスコープは残します。そのため `tenant` スコープがあれば、取り消しのきかない`forceDelete()` が別のテナントの行を消すことはありません。
+これらのメソッドには、どれもモデルの*ほかの*グローバルスコープが適用されます。`delete()` が`deletedAt` を設定するのは、現在のスコープから見える未削除の行だけです。すでに削除済みの行には一致しないので、元の `deletedAt` はそのまま残ります。
+
+`restore()` と`forceDelete()` は、削除済みのレコードを対象にするために `softDelete` フィルタだけを外し、ほかのスコープは残します。そのため `tenant` スコープがあれば、取り消しのきかない`forceDelete()` が別のテナントの行を消すことはありません。
 
 トランザクションの中では、どのメソッドにもトランザクションのハンドルを渡せます。`delete()` はトランザクションスコープから呼び、それ以外はほかの書き込みと同じく最後の引数で渡します。
 

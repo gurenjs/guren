@@ -37,7 +37,9 @@ bunx create-guren-app my-app --prototype
 | `prototype: () => import('../resources/js/prototype/index.js')` | `src/app.ts` の `createApp()` に渡す |
 | `ImportMetaEnv.GUREN_PROTOTYPE` | `resources/js/vite-env.d.ts` で宣言 |
 
-`GUREN_PROTOTYPE` は、`vite --mode prototype` ではリテラルの `true`、それ以外のビルドではすべてリテラルの `false` として定義されます。そのため本番ではクライアント側の分岐と fixture の import がデッドコードになり、ブラウザで visit に応答するランタイムが本番のバンドルに入ることはありません。このコマンドは冪等で、アップグレード後にもう一度実行しても、すでにあるものは変わりません。`bunx guren add prototype --remove` を実行すると、スクリプトと 2 行の組み込みが取り除かれます。fixture は削除されずに残るので、不要なら手で消してください。
+`GUREN_PROTOTYPE` は、`vite --mode prototype` ではリテラルの `true`、それ以外のビルドではすべてリテラルの `false` として定義されます。そのため本番ではクライアント側の分岐と fixture の import がデッドコードになり、ブラウザで visit に応答するランタイムが本番のバンドルに入ることはありません。
+
+このコマンドは冪等で、アップグレード後にもう一度実行しても、すでにあるものは変わりません。`bunx guren add prototype --remove` を実行すると、スクリプトと 2 行の組み込みが取り除かれます。fixture は削除されずに残るので、不要なら手で消してください。
 
 ## fixture
 
@@ -196,7 +198,9 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
-`prototype` ルートでは、まずミドルウェアが実行され、次に契約が検査されます（`params`、`query`、`body` のスキーマに合わなければ、fixture に渡る前に 422 を返します）。そのあと、本物の shared props のパイプラインの中で、ルート名に対応する fixture のエントリが実行されます。fixture の `shared.auth` はサーバー自身のリゾルバーより *下の* 優先度で適用されるので、本物のセッションがあればそちらがデモユーザーより優先され、fixture によって誰かがログイン状態になることはありません。`page()` は `this.inertia()` と同じ経路で描画し、`redirect()` は名前付きルートへの 303、`errors()` は `ValidationException` を投げ、`notFound()` は 404 を返します。
+`prototype` ルートでは、まずミドルウェアが実行され、次に契約が検査されます（`params`、`query`、`body` のスキーマに合わなければ、fixture に渡る前に 422 を返します）。そのあと、本物の shared props のパイプラインの中で、ルート名に対応する fixture のエントリが実行されます。fixture の `shared.auth` はサーバー自身のリゾルバーより *下の* 優先度で適用されるので、本物のセッションがあればそちらがデモユーザーより優先され、fixture によって誰かがログイン状態になることはありません。
+
+`page()` は `this.inertia()` と同じ経路で描画し、`redirect()` は名前付きルートへの 303、`errors()` は `ValidationException` を投げ、`notFound()` は 404 を返します。
 
 boot 時には次の 3 つのルールが検査されます。違反はどれもルートを名指しするハードエラーになります。
 

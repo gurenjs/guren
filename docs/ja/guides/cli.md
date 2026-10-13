@@ -66,17 +66,27 @@ bunx guren add admin --public
 
 ### `add resource`
 
-`add resource` は、パッチを当てる 2 つのファイルがそろっていることを求めます。テーブル定義を `db/schema.ts` に追記し、CRUD ルートを `routes/web.ts` に登録するので、どちらもあらかじめ存在していなければなりません。さらに、対象のルートがまだ登録されていない場合は、`routes/web.ts` がパッチを当てられるルートレジストラを export している必要があります。どれかが欠けていると、コマンドは足りないものを示して、何も生成しません。生成したファイルだけが残り、登録されないルートのためのテーブルが `db/schema.ts` に追記された状態になるのを避けるためです。2 つのパッチなしでファイルだけ欲しい場合は、`bunx guren make:feature` を使ってください。貼り付け用のルートのブロックを表示し、テーブル定義を追記するスキーマファイルも教えてくれます。
+`add resource` は、パッチを当てる 2 つのファイルがそろっていることを求めます。テーブル定義を `db/schema.ts` に追記し、CRUD ルートを `routes/web.ts` に登録するので、どちらもあらかじめ存在していなければなりません。さらに、対象のルートがまだ登録されていない場合は、`routes/web.ts` がパッチを当てられるルートレジストラを export している必要があります。
+
+どれかが欠けていると、コマンドは足りないものを示して、何も生成しません。生成したファイルだけが残り、登録されないルートのためのテーブルが `db/schema.ts` に追記された状態になるのを避けるためです。
+
+2 つのパッチなしでファイルだけ欲しい場合は、`bunx guren make:feature` を使ってください。貼り付け用のルートのブロックを表示し、テーブル定義を追記するスキーマファイルも教えてくれます。
 
 ### `add prototype`
 
 `add prototype` は、プロトタイプモード([プロトタイプファースト](./prototype-first.md))を導入するコマンドです。実行すると、シードデータで Inertia の visit に応答する `resources/js/prototype/` の fixture、`dev:prototype` と `build:prototype` のスクリプト、`resources/js/app.tsx` と `src/app.ts` に入るローダー 2 行が追加されます。`--remove` を付けると、スクリプトとローダーを取り除きます。
 
-続けて `make:feature <Entity> --fields "…" --prototype` を実行すると、機能のうち画面に見える部分(ページ、バリデーター、ページデータ型、fixture のエントリ)を書き出し、`prototype` ハンドラーで登録するルートを表示します。ページデータ型（`resources/js/types/<Entity>.ts`）ができたあとで、同じコマンドをフラグなしで実行すると昇格になります。モデル、Resource、コントローラーが書き出され、Resource はページデータ型に合わせて型付けされます。ページとバリデーターには手を付けません。`bun run build:prototype` は Vite の前に `check --prototype` を実行するので、fixture にエントリがないルートは、顧客がクリックしたときではなくビルドの時点で失敗します。
+続けて `make:feature <Entity> --fields "…" --prototype` を実行すると、機能のうち画面に見える部分(ページ、バリデーター、ページデータ型、fixture のエントリ)を書き出し、`prototype` ハンドラーで登録するルートを表示します。
+
+ページデータ型（`resources/js/types/<Entity>.ts`）ができたあとで、同じコマンドをフラグなしで実行すると昇格になります。モデル、Resource、コントローラーが書き出され、Resource はページデータ型に合わせて型付けされます。ページとバリデーターには手を付けません。
+
+`bun run build:prototype` は Vite の前に `check --prototype` を実行するので、fixture にエントリがないルートは、顧客がクリックしたときではなくビルドの時点で失敗します。
 
 ### `add ai`
 
-`add ai` は、`@guren/plugin-ai` を使ったインプロセスの AI エージェントを導入します。プロバイダを 1 つ(`--provider anthropic`、`openai`、`gateway` のいずれか)選ぶと、そのプロバイダ用の `config/ai.ts` を書き出し、API キーを `config/env.ts` と env ファイルに宣言し、設定と `aiPlugin()` を `createApp()` に登録します。そのあとプラグイン、`ai`、プロバイダーのパッケージ（`gateway` では不要）を `bun add` します。`--no-install` を付けると、実行するコマンドを表示するだけになります。キーは任意なので、設定していなくてもアプリは起動し、最初のプロンプトを送った時点で失敗します。
+`add ai` は、`@guren/plugin-ai` を使ったインプロセスの AI エージェントを導入します。プロバイダを 1 つ(`--provider anthropic`、`openai`、`gateway` のいずれか)選ぶと、そのプロバイダ用の `config/ai.ts` を書き出し、API キーを `config/env.ts` と env ファイルに宣言し、設定と `aiPlugin()` を `createApp()` に登録します。そのあとプラグイン、`ai`、プロバイダーのパッケージ（`gateway` では不要）を `bun add` します。`--no-install` を付けると、実行するコマンドを表示するだけになります。
+
+キーは任意なので、設定していなくてもアプリは起動し、最初のプロンプトを送った時点で失敗します。
 
 このコマンドを使うには `config/env.ts` が必要です。`db/schema.ts` があるアプリでは、`ai_conversations` と `ai_messages` の 2 つのテーブルを追加してマイグレーションを生成し、会話をそこに保存するよう `config/ai.ts` を設定します。`--no-conversations` を付けると、この処理を省きます。テーブルには、ツールの結果も含めてモデルが見た会話がそのまま残るので、機密データとして扱ってください。
 
@@ -84,7 +94,11 @@ bunx guren add admin --public
 
 ### `add lint`
 
-lint の設定は、`create-guren-app` 1.12 以降で作ったアプリには最初から入っています。`add lint` はそれより前に作ったアプリ向けのコマンドで、アプリのコードには手を付けません。実行すると `.oxlintrc.json` を書き出します。中身は `@guren/cli/oxlint` の Guren ルールを入れた oxlint の設定で、`guren/await-async-assertion` は error、`app/`・`config/`・`routes/`・`src/`・`modules/` に対する `guren/no-unvalidated-env-read` は error、`guren/comment-*` は warn です。あわせて `lint` / `lint:fix` スクリプトを追加し、`oxlint` を `~` レンジで devDependency に加えます。oxlint の JS プラグイン API はまだ alpha なので、パッチ更新だけを受け入れるようにしています。実行したら `bun install` してください。`bunx oxlint` は Bun 上で動くので、Node は要りません。`config/env.ts` が導入される前に作ったアプリでは、自前の `config/database.ts` や `src/app.ts` にある `process.env` の読み取りも、スキーマに移すか無効化のコメントを付けるまで、このルールに報告されます。
+lint の設定は、`create-guren-app` 1.12 以降で作ったアプリには最初から入っています。`add lint` はそれより前に作ったアプリ向けのコマンドで、アプリのコードには手を付けません。
+
+実行すると `.oxlintrc.json` を書き出します。中身は `@guren/cli/oxlint` の Guren ルールを入れた oxlint の設定で、`guren/await-async-assertion` は error、`app/`・`config/`・`routes/`・`src/`・`modules/` に対する `guren/no-unvalidated-env-read` は error、`guren/comment-*` は warn です。あわせて `lint` / `lint:fix` スクリプトを追加し、`oxlint` を `~` レンジで devDependency に加えます。oxlint の JS プラグイン API はまだ alpha なので、パッチ更新だけを受け入れるようにしています。
+
+実行したら `bun install` してください。`bunx oxlint` は Bun 上で動くので、Node は要りません。`config/env.ts` が導入される前に作ったアプリでは、自前の `config/database.ts` や `src/app.ts` にある `process.env` の読み取りも、スキーマに移すか無効化のコメントを付けるまで、このルールに報告されます。
 
 ### API 専用アプリの場合
 
@@ -103,7 +117,9 @@ lint の設定は、`create-guren-app` 1.12 以降で作ったアプリには最
 
 ### 既存のファイルがある場合
 
-`add resource` と `make:feature` は、最初のファイルを書く前に、書き出す予定のファイルをすべて確認します。手書きのモデルなど、すでにあるファイルが見つかれば、該当するものをすべて一覧にして中断し、何も書き込みません。`add resource` の場合は、`db/schema.ts` と `routes/web.ts` も変更しません。`--force` を付けると、一覧のファイルは手書きのものも含めてすべて上書きされます。`--test`・`--factory`・`--policy` を付けたときだけ追加されるファイルには、一覧にそのフラグが添えてあり、フラグを外せば衝突を避けられます。プロトタイプからの昇格では、プロトタイプのときに書いたページとバリデーターをそのまま残すので、これらは既存のファイルとして数えません。
+`add resource` と `make:feature` は、最初のファイルを書く前に、書き出す予定のファイルをすべて確認します。手書きのモデルなど、すでにあるファイルが見つかれば、該当するものをすべて一覧にして中断し、何も書き込みません。`add resource` の場合は、`db/schema.ts` と `routes/web.ts` も変更しません。
+
+`--force` を付けると、一覧のファイルは手書きのものも含めてすべて上書きされます。`--test`・`--factory`・`--policy` を付けたときだけ追加されるファイルには、一覧にそのフラグが添えてあり、フラグを外せば衝突を避けられます。プロトタイプからの昇格では、プロトタイプのときに書いたページとバリデーターをそのまま残すので、これらは既存のファイルとして数えません。
 
 複数のファイルを書き出すほかのコマンドも、最初に書き込む前に同じ確認をして中断します。対象は `make:auth`、`make:module`、`make:ai-agent`(`--test` がフラグにあたります)、`deploy`、そして `add` の各ブループリントで、サンプルのイベント・ジョブ・Mailable も含みます。ファイルを 1 つだけ書く `make:*` コマンドも、同じメッセージで中断します。例外は、途中まで入ったものを再実行で補うためのブループリント(`add session`、`add cache`、`add schedule`、`add ai`、`add prototype`)で、既存のファイルは残し、足りないものだけを書き出します。
 
@@ -179,14 +195,22 @@ bunx guren check --prototype  # prototype ハンドラーのルートに名前�
 
 ### `--fix` で生成し直す
 
-指摘の中には、ファイルを生成し直せば消えるものもあります。`.guren/*.gen.ts` マニフェストがない場合(`guren codegen`)と、`docs/spec/` のビューが古い場合(`guren spec:generate`)です。`check --json` は、こうした指摘に `fix` フィールドを付けます。中身は `{ "kind": "command", "args": ["codegen"] }` のような、`guren` に続く引数です。`--fix` を付けると、重複を除いた fix を 1 回ずつ実行してからもう一度チェックし、2 回目の結果を報告します。実行したコマンドは `fixes` に入ります。どれかのコマンドが失敗したときや、コマンドは成功したのに消えるはずの指摘が残ったときは、非ゼロで終了します。`--ci` と `--fix` は同時に指定できません。ゲートが古いファイルを自分で生成し直すと、いつでも通ってしまうからです。`--fix` は手元で実行し、書き換わったファイルをコミットしてください。コードの修正や判断が必要な指摘には `fix` が付かず、`suggestion` の文章だけが付きます。
+指摘の中には、ファイルを生成し直せば消えるものもあります。`.guren/*.gen.ts` マニフェストがない場合(`guren codegen`)と、`docs/spec/` のビューが古い場合(`guren spec:generate`)です。`check --json` は、こうした指摘に `fix` フィールドを付けます。中身は `{ "kind": "command", "args": ["codegen"] }` のような、`guren` に続く引数です。
+
+`--fix` を付けると、重複を除いた fix を 1 回ずつ実行してからもう一度チェックし、2 回目の結果を報告します。実行したコマンドは `fixes` に入ります。どれかのコマンドが失敗したときや、コマンドは成功したのに消えるはずの指摘が残ったときは、非ゼロで終了します。
+
+`--ci` と `--fix` は同時に指定できません。ゲートが古いファイルを自分で生成し直すと、いつでも通ってしまうからです。`--fix` は手元で実行し、書き換わったファイルをコミットしてください。コードの修正や判断が必要な指摘には `fix` が付かず、`suggestion` の文章だけが付きます。
 
 ```bash
 bunx guren check --fix          # 指摘が示すファイルを再生成して、もう一度チェック
 bunx guren check --spec --fix   # 同じことをスペックビューに限って行う
 ```
 
-`doctor --fix` はdoctorが指摘した不足・古い生成ファイルを再生成し、別のプロセスでもう一度doctorを実行します。`routes/api.ts` を含むアプリのルートエントリを選び、同じ生成コマンドは1回だけ実行します。`doctor --json` では実行可能な修復を `repair: { kind: 'command', args }` として返し、`--fix` を付けた結果には実行記録の `fixes` も入ります。生成コマンドが失敗した場合、再確認で修復対象の指摘が解消しなかった場合、再確認自体ができなかった場合は非ゼロで終了します。ほかの警告はレポートに残り、`--strict` を付けると警告・失敗も終了コードに反映します。`canAutofix` が示す設定の自動修正は引き続き `guren upgrade` の対象です。このフラグは生成ファイルだけを書き換えます。
+`doctor --fix` はdoctorが指摘した不足・古い生成ファイルを再生成し、別のプロセスでもう一度doctorを実行します。`routes/api.ts` を含むアプリのルートエントリを選び、同じ生成コマンドは1回だけ実行します。
+
+`doctor --json` では実行可能な修復を `repair: { kind: 'command', args }` として返し、`--fix` を付けた結果には実行記録の `fixes` も入ります。生成コマンドが失敗した場合、再確認で修復対象の指摘が解消しなかった場合、再確認自体ができなかった場合は非ゼロで終了します。ほかの警告はレポートに残り、`--strict` を付けると警告・失敗も終了コードに反映します。
+
+`canAutofix` が示す設定の自動修正は引き続き `guren upgrade` の対象です。このフラグは生成ファイルだけを書き換えます。
 
 ```bash
 bunx guren doctor --fix --next
@@ -195,7 +219,9 @@ bunx guren doctor --fix --json
 
 ### `gate`
 
-`gate` は、「この変更は終わったか」に 1 つの終了コードで答えるコマンドです。雛形に含まれる CI ワークフローが実行するステージ、つまり codegen、typecheck、lint(アプリに `.oxlintrc.json` がある場合)、`--ci` の規則での `check`、`audit`、テストスイートをすべて実行し、ステージごとに結果を報告して、どれかが失敗すれば非ゼロで終了します。実行*できない*ステージは、スキップではなく失敗として扱います。たとえば、`.oxlintrc.json` があるのに oxlint が入っていない、`typecheck` スクリプトがない、routes のエントリが読み込めない、といった場合です。lint をスキップするのは、`.oxlintrc.json` がないアプリだけです。
+`gate` は、「この変更は終わったか」に 1 つの終了コードで答えるコマンドです。雛形に含まれる CI ワークフローが実行するステージ、つまり codegen、typecheck、lint(アプリに `.oxlintrc.json` がある場合)、`--ci` の規則での `check`、`audit`、テストスイートをすべて実行し、ステージごとに結果を報告して、どれかが失敗すれば非ゼロで終了します。
+
+実行*できない*ステージは、スキップではなく失敗として扱います。たとえば、`.oxlintrc.json` があるのに oxlint が入っていない、`typecheck` スクリプトがない、routes のエントリが読み込めない、といった場合です。lint をスキップするのは、`.oxlintrc.json` がないアプリだけです。
 
 `check` と `audit` のステージは、イントロスペクションの結果を読みます。イントロスペクションでは、アプリを起動しない子プロセスで provider とルートを登録します([イントロスペクションの結果を読むチェック](./cli-checks.md#イントロスペクションの結果を読むチェック)参照)。1 回の実行につき 1 回(上限 10 秒)で、codegen のあとに行うので、clone したばかりのアプリでもエントリを import できます。
 
@@ -227,7 +253,9 @@ bunx guren make:module Billing
 
 `modules/billing/{index.ts, routes.ts, db/schema.ts}` が生成され、配線も自動で済みます。`db/schema.ts` には `export * from '../modules/billing/db/schema'` が、`src/app.ts` には `billingModule` の import と `createApp({ modules: [...] })` への登録が追加されます。
 
-ルートの `db/schema.ts` が、drizzle に渡すスキーマオブジェクト(`export const schema = { posts, users }` のように、名前が `schema` であるか `typeof` で参照されているもの)を持っていることがあります。その場合はモジュール側にも `export const billingSchema = {}` が生成され、ルートのオブジェクトがそれを展開します(`{ posts, users, ...billingSchema }`)。モジュールのテーブルは `modules/billing/db/schema.ts` に宣言し、1 つずつ `billingSchema` に並べてください。どちらかのオブジェクトからテーブルが抜けていると、`guren check` が報告します。ルートのオブジェクトが並べても展開もしていないモジュールのテーブルも、報告の対象です。
+ルートの `db/schema.ts` が、drizzle に渡すスキーマオブジェクト(`export const schema = { posts, users }` のように、名前が `schema` であるか `typeof` で参照されているもの)を持っていることがあります。その場合はモジュール側にも `export const billingSchema = {}` が生成され、ルートのオブジェクトがそれを展開します(`{ posts, users, ...billingSchema }`)。モジュールのテーブルは `modules/billing/db/schema.ts` に宣言し、1 つずつ `billingSchema` に並べてください。
+
+どちらかのオブジェクトからテーブルが抜けていると、`guren check` が報告します。ルートのオブジェクトが並べても展開もしていないモジュールのテーブルも、報告の対象です。
 
 ほとんどの `make:*` コマンドは `--module <name>` を受け付け、プロジェクトルートではなくモジュールの中に雛形を生成できます。
 

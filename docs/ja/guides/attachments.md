@@ -141,7 +141,9 @@ export default class AttachmentsProvider extends ServiceProvider {
 }
 ```
 
-このプロバイダを `createApp({ providers })` に登録します。config モジュールを import すると、起動時に `configureAttachments()` が走ります。これは web プロセスでもワーカープロセスでも、最初の `attach()` より前に実行されます。`bindTo()` は、アプリのコンテナをエンジンに渡します。署名配信ルートはリクエストを受けたアプリのエンジンから配信し、上の `storage` ファクトリにも同じコンテナが渡されます。
+このプロバイダを `createApp({ providers })` に登録します。config モジュールを import すると、起動時に `configureAttachments()` が走ります。これは web プロセスでもワーカープロセスでも、最初の `attach()` より前に実行されます。
+
+`bindTo()` は、アプリのコンテナをエンジンに渡します。署名配信ルートはリクエストを受けたアプリのエンジンから配信し、上の `storage` ファクトリにも同じコンテナが渡されます。
 
 束縛がなければ、ルートと storage ファクトリは最後にアタッチメントを設定したアプリを使います。そのため、アプリを 1 つしか動かさないプロセスではこの違いは表に出ず、1 つのプロセスで 2 つのアプリを動かすと違いが出ます。
 
@@ -174,9 +176,13 @@ bunx guren make:feature Post --fields "title:string,body:text" --attach "cover:o
 受け取るコレクションでは、このオプションを外してください)。store アクションは
 同じ名前の multipart フィールドを `this.file()` / `this.files()` で読んで
 `Post.attach()` を呼び、destroy アクションは行を削除する前に
-`Post.purgeAttachments()` を呼びます。アプリに `configureAttachments()` が
+`Post.purgeAttachments()` を呼びます。
+
+アプリに `configureAttachments()` が
 ないと、このコマンドは雛形を生成しません。先に
-`bunx guren add attachments` を実行してください。生成された New ページには、
+`bunx guren add attachments` を実行してください。
+
+生成された New ページには、
 `<input type="file">` を自分で追加します(Inertia の `useForm` は、フォームデータに
 `File` が含まれると自動で multipart の POST に切り替わります)。生成された
 `update()` はアタッチメントを扱いません。Edit ページからのアップロードも
@@ -212,7 +218,9 @@ await Post.purgeAttachments(post.id)
 
 `AttachmentData` はリソースで返すための形で、`{ id, collection, name, contentType, size, width, height, url, placeholder, variants }` を持ちます。`JsonResource.toArray()` からそのまま返せるので、ページは型の付いたアタッチメントを props として受け取れます。`placeholder` は ThumbHash による LQIP のデータ URL で、実際の画像を読み込んでいる間に表示できます。
 
-`hasOne` の置き換えが同時に起きた場合、1 つのプロセスの中では順番に処理されます。同じテーブルオブジェクトを使う別のエンジンがあっても同様です。複数のプロセスやサーバーレスのインスタンスで動かす場合は、共有のロックサービスを使って `configureAttachments({ withCollectionLock: (key, callback) => sharedLock.run(key, callback), ... })` を設定してください。このロックは、コールバックが終わるまで排他的に保持し、時間のかかるアップロードの間は延長し、失敗したときにも解放しなければなりません。同じアタッチメントテーブルに書き込むすべての箇所で、同じサービスとロックの名前空間を使ってください。
+`hasOne` の置き換えが同時に起きた場合、1 つのプロセスの中では順番に処理されます。同じテーブルオブジェクトを使う別のエンジンがあっても同様です。
+
+複数のプロセスやサーバーレスのインスタンスで動かす場合は、共有のロックサービスを使って `configureAttachments({ withCollectionLock: (key, callback) => sharedLock.run(key, callback), ... })` を設定してください。このロックは、コールバックが終わるまで排他的に保持し、時間のかかるアップロードの間は延長し、失敗したときにも解放しなければなりません。同じアタッチメントテーブルに書き込むすべての箇所で、同じサービスとロックの名前空間を使ってください。
 
 ### リレーションで生の行を扱う
 
@@ -337,12 +345,16 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
-すると、private ディスクの `attachmentUrl()` は**パス相対の署名付き URL**(`/attachments/{id}/{filename}?expires=…&signature=…`)を返すようになります。署名にはアタッチメント配信専用に導出した鍵による HMAC を使い、URL は `urlExpiresIn` が過ぎると失効します(URL ごとに上書きするには `{ expiresIn }`、ダウンロードを強制するには `{ disposition: 'attachment' }` を渡します。ただし強制が保証されるのは proxy の応答だけで、リダイレクトするディスクでは、バックエンドが presigned URL の response override に従うかどうかで決まります。R2 は従いません: [Cloudflare ガイド](./cloudflare.md#workers-でのアタッチメント)参照)。ルートはまず署名を検証します(検証に失敗した場合はどれも同じ 404 を返します)。次に、配信のタイミングでバリアントを解決します(宣言済みでまだ生成されていないバリアントにはオリジナルを返し、生成が終わると同じ URL でバリアントを返すようになります)。そのうえで、次のどちらかの方法で配信します。
+すると、private ディスクの `attachmentUrl()` は**パス相対の署名付き URL**(`/attachments/{id}/{filename}?expires=…&signature=…`)を返すようになります。署名にはアタッチメント配信専用に導出した鍵による HMAC を使い、URL は `urlExpiresIn` が過ぎると失効します(URL ごとに上書きするには `{ expiresIn }`、ダウンロードを強制するには `{ disposition: 'attachment' }` を渡します。ただし強制が保証されるのは proxy の応答だけで、リダイレクトするディスクでは、バックエンドが presigned URL の response override に従うかどうかで決まります。R2 は従いません: [Cloudflare ガイド](./cloudflare.md#workers-でのアタッチメント)参照)。
+
+ルートはまず署名を検証します(検証に失敗した場合はどれも同じ 404 を返します)。次に、配信のタイミングでバリアントを解決します(宣言済みでまだ生成されていないバリアントにはオリジナルを返し、生成が終わると同じ URL でバリアントを返すようになります)。そのうえで、次のどちらかの方法で配信します。
 
 - ドライバが `capabilities.presignedGet` を宣言しているディスク(S3、`presign` 付きの R2)では、有効期間の短い presigned URL に **302 でリダイレクト**します。バイト列はバケットが配信するので、アプリの帯域は使いません。
 - それ以外のディスクでは、強化したヘッダ(inline の allowlist、`nosniff`、`Content-Security-Policy: sandbox`、`Referrer-Policy: no-referrer`、ETag/304)を付けて**プロキシで配信**します。この方法なら、**local ディスクの private が本当に非公開になり**、**R2 の private ディスクも `presign` のクレデンシャルなしにバインディングだけで動きます**。
 
-ディスクごとに上書きしたい場合は、`disks` をオブジェクト形式で書きます: `{ docs: { visibility: 'private', serve: 'proxy' } }`。`serve` に指定できるのは `'auto'`(既定)、`'redirect'`、`'proxy'`、`'direct'`(ルートを使わず、従来どおり `temporaryUrl()` の URL を返す)です。`guren check` は、`delivery` を設定しているときにルートがマウントされているかを確かめ、presign できないドライバのディスクに `serve: 'redirect'` を指定していないかも検出します。
+ディスクごとに上書きしたい場合は、`disks` をオブジェクト形式で書きます: `{ docs: { visibility: 'private', serve: 'proxy' } }`。`serve` に指定できるのは `'auto'`(既定)、`'redirect'`、`'proxy'`、`'direct'`(ルートを使わず、従来どおり `temporaryUrl()` の URL を返す)です。
+
+`guren check` は、`delivery` を設定しているときにルートがマウントされているかを確かめ、presign できないドライバのディスクに `serve: 'redirect'` を指定していないかも検出します。
 
 **配信 prefix は 1 プロセスにつき 1 つです。** マウントされるルートの `prefix` と `routeName` には、ルートを登録するアプリの設定ではなく、プロセス内で最後に実行された `configureAttachments()` の設定が使われます。異なる prefix を設定した 2 つの `Application` が同じプロセスにあると、どちらも同じ prefix でマウントされ、どちらの prefix になるかはモジュールの読み込み順で決まります。1 プロセスに 1 アプリという通常のデプロイや、prefix が同じ 2 つのアプリでは、この問題は起きません。
 
@@ -438,7 +450,9 @@ const record = await Post.attach(post.id, 'cover', new File([bytes], 'cover.png'
 expect(await storage.disk('media').exists(record.path)).toBe(true)
 ```
 
-Vitest の `jsdom` 環境では、`createControllerContext()` からアップロードした `File` がコントローラーのアクションに届きません。jsdom 独自の `File` と `Blob` が、undici が multipart ボディの組み立てと解析に使うクラスとは別物だからです。Vitest と Node のバージョンによって、テストがタイムアウトする、undici の内部で失敗する、`this.file()` が `null` を返しているのにテストが通る、のどれかになります。こうしたテストファイルは、1 行目に次のコメントを書いて Node 環境で実行してください。
+Vitest の `jsdom` 環境では、`createControllerContext()` からアップロードした `File` がコントローラーのアクションに届きません。jsdom 独自の `File` と `Blob` が、undici が multipart ボディの組み立てと解析に使うクラスとは別物だからです。Vitest と Node のバージョンによって、テストがタイムアウトする、undici の内部で失敗する、`this.file()` が `null` を返しているのにテストが通る、のどれかになります。
+
+こうしたテストファイルは、1 行目に次のコメントを書いて Node 環境で実行してください。
 
 ```ts
 // @vitest-environment node

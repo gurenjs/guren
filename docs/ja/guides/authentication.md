@@ -65,7 +65,9 @@ bunx guren make:auth
 
 ### スロットリング
 
-`POST /login`、`POST /register`、`POST /forgot-password` には、生成される `app/Http/Middleware/AuthThrottle.ts` のスロットルがかかります。回数はクライアントの IP アドレスと送信されたメールアドレスの組ごとに数え、ログインと新規登録は 1 分に 5 回、リセットの申請は 15 分に 3 回までです。上限を超えると、Inertia のフォームには `errors.message` のバリデーションエラーとしてメッセージが表示され、それ以外のクライアントには `Retry-After` ヘッダー付きの `429` が返ります。メッセージは `lang/en/auth.json` の `auth.throttle`（ログイン）か `auth.too_many_requests` から読みます。このファイルは、アプリにまだ無い場合にだけコマンドが書き込みます。
+`POST /login`、`POST /register`、`POST /forgot-password` には、生成される `app/Http/Middleware/AuthThrottle.ts` のスロットルがかかります。回数はクライアントの IP アドレスと送信されたメールアドレスの組ごとに数え、ログインと新規登録は 1 分に 5 回、リセットの申請は 15 分に 3 回までです。
+
+上限を超えると、Inertia のフォームには `errors.message` のバリデーションエラーとしてメッセージが表示され、それ以外のクライアントには `Retry-After` ヘッダー付きの `429` が返ります。メッセージは `lang/en/auth.json` の `auth.throttle`（ログイン）か `auth.too_many_requests` から読みます。このファイルは、アプリにまだ無い場合にだけコマンドが書き込みます。
 
 上限の変更などは、このファイルを直接編集してください。デフォルトのストアはプロセスのメモリにあるので、複数のインスタンスで回数を共有するには `@guren/core/redis` の `store: new RedisRateLimitStore(redis)` を渡します。プロキシや CDN の後ろでは、どのクライアントもプロキシのアドレスから届くため、`clientIp()` でプロキシが設定するヘッダーを読むように変えてください。オプションの一覧は[レート制限ガイド](./rate-limiting.md)にあります。
 
@@ -84,7 +86,9 @@ bunx guren make:auth
 bunx guren make:auth --install --verify
 ```
 
-`users` テーブルに `emailVerifiedAt` カラムが追加され、`VerifyEmailController`（「メールを確認してください」の案内の表示、再送、トークンの確認を担当）と `VerifyEmail` ページが生成されます。登録すると確認メールが送られ、`/dashboard` ではなく `/verify-email` にリダイレクトされるようになります。生成される `/dashboard` ルートには `requireVerifiedEmail` が付くので、確認を済ませていないユーザーは、確認が終わるまで `/verify-email` に戻されます。確認リンクも、パスワードリセットと同じインメモリのストアと `log` ドライバーのメール設定を使うので、開発環境では何も設定せずに動作を確認できます。
+`users` テーブルに `emailVerifiedAt` カラムが追加され、`VerifyEmailController`（「メールを確認してください」の案内の表示、再送、トークンの確認を担当）と `VerifyEmail` ページが生成されます。登録すると確認メールが送られ、`/dashboard` ではなく `/verify-email` にリダイレクトされるようになります。生成される `/dashboard` ルートには `requireVerifiedEmail` が付くので、確認を済ませていないユーザーは、確認が終わるまで `/verify-email` に戻されます。
+
+確認リンクも、パスワードリセットと同じインメモリのストアと `log` ドライバーのメール設定を使うので、開発環境では何も設定せずに動作を確認できます。
 
 ## OAuth / ソーシャルログイン
 
@@ -116,11 +120,17 @@ bunx guren make:auth --install --oauth github,google
 - プロバイダーがそのアドレスを未検証と報告していれば（Google の `email_verified`、Discord の `verified`）、アカウントを作りません。未検証のまま作成すると、自分のものではないアドレスを名乗れてしまうためです。すでに紐付け済みのアカウントは、あとからプロバイダー側の状態が変わっても影響を受けません。
 - どちらでもなければ、**パスワードを持たない**アカウントを作ってログインさせます。サインアップのときにハッシュの計算は発生せず、生成される `users.passwordHash` カラムも nullable のままです。
 
-`--verify` を付けずに `--oauth` を使うと、プロフィールのメールアドレスは**読み取り専用**で生成されます。`ProfileUpdateSchema` からフィールドが除かれ、`ProfileController.update()` もメールアドレスを受け取らないので、フォームからでも、手で組み立てたリクエストからでも、プロバイダーが保証したアドレスからアカウントを付け替えることはできません。`--verify` も付けた場合は、メールアドレスを編集できます。その場合、変更後のアドレスは `emailVerifiedAt` がリセットされ、そのアドレスに届いたリンクで確認するまで検証済みになりません。
+`--verify` を付けずに `--oauth` を使うと、プロフィールのメールアドレスは**読み取り専用**で生成されます。`ProfileUpdateSchema` からフィールドが除かれ、`ProfileController.update()` もメールアドレスを受け取らないので、フォームからでも、手で組み立てたリクエストからでも、プロバイダーが保証したアドレスからアカウントを付け替えることはできません。
+
+`--verify` も付けた場合は、メールアドレスを編集できます。その場合、変更後のアドレスは `emailVerifiedAt` がリセットされ、そのアドレスに届いたリンクで確認するまで検証済みになりません。
 
 なお、どのモードでも、アドレスは名乗られるだけで、誰かのために確保されるわけではありません。登録フォームは形式が正しいメールアドレスならすべて受け付け、`users.email` には一意制約があります。そのため、あるアドレスをすでに別のアカウントが使っていると、本来の持ち主が初めて OAuth でサインインしようとしても拒否されます。これが問題になるアプリでは、アドレスの所有を確かめる仕組みを独自に追加してください。
 
-コールバックを認可リダイレクトと結びつける OAuth の state は、データベースに保存します。`--oauth` は `db/schema.ts` に `oauth_states` テーブルを追加し、`users` や `sessions` と同じマイグレーションに含めます。`config/oauth.ts` は `DatabaseOAuthStateStore` を `stateStore` に渡し、`--install` がその定義を `createApp({ config })` に追加します。これで、リダイレクトとコールバックが別々のプロセスに届いても動きます。Workers、Lambda、Vercel ではそれがふつうです（[Stateストレージ](./oauth.md#stateストレージ)を参照）。`db/schema.ts` がないアプリでは `stateStore` のない定義が生成され、state はプロセスのメモリに置かれます。
+コールバックを認可リダイレクトと結びつける OAuth の state は、データベースに保存します。`--oauth` は `db/schema.ts` に `oauth_states` テーブルを追加し、`users` や `sessions` と同じマイグレーションに含めます。
+
+`config/oauth.ts` は `DatabaseOAuthStateStore` を `stateStore` に渡し、`--install` がその定義を `createApp({ config })` に追加します。これで、リダイレクトとコールバックが別々のプロセスに届いても動きます。Workers、Lambda、Vercel ではそれがふつうです（[Stateストレージ](./oauth.md#stateストレージ)を参照）。
+
+`db/schema.ts` がないアプリでは `stateStore` のない定義が生成され、state はプロセスのメモリに置かれます。
 
 この定義の形で生成されるのは、`config/env.ts` があり、`oauth` をバインドするプロバイダーがない場合です。それ以外の場合は、同じ内容を登録する `app/Providers/OAuthProvider.ts` を生成し、そちらを登録します（`db/schema.ts` がなければ `CoreOAuthServiceProvider` も登録します）。OAuth をサービスプロバイダーで設定しているアプリも、そのまま動きます。詳しくは[サービスプロバイダーを使うアプリ](./configuration.md#サービスプロバイダを使うアプリ) を参照してください。
 
@@ -132,7 +142,9 @@ bunx guren make:auth --install --oauth github,google
 bunx guren make:auth --install --oauth github --oauth-only
 ```
 
-`/login` は資格情報の入力欄がない、プロバイダーのボタンだけのページになり、`POST /login` ルートは生成されません。`LoginController` にあるのは `show()` とログアウト用の `destroy()` だけになります。新規登録、パスワードリセット、ログインページとプロフィールページのパスワード欄、`LoginValidator`、デモ用の `UsersSeeder` は、どれも生成されません（サインインに使えないパスワードをシードしても意味がないためです）。`--oauth-only` を使うには、プロバイダーを 1 つ以上指定した `--oauth` が必要です（そうしないと、サインインする手段のないアプリになります）。`--oauth-only` には `--minimal` の効果も含まれます。プロバイダーから得たメールアドレスはすでに検証済みとして扱えるので、`--verify` は無視されます。
+`/login` は資格情報の入力欄がない、プロバイダーのボタンだけのページになり、`POST /login` ルートは生成されません。`LoginController` にあるのは `show()` とログアウト用の `destroy()` だけになります。新規登録、パスワードリセット、ログインページとプロフィールページのパスワード欄、`LoginValidator`、デモ用の `UsersSeeder` は、どれも生成されません（サインインに使えないパスワードをシードしても意味がないためです）。
+
+`--oauth-only` を使うには、プロバイダーを 1 つ以上指定した `--oauth` が必要です（そうしないと、サインインする手段のないアプリになります）。`--oauth-only` には `--minimal` の効果も含まれます。プロバイダーから得たメールアドレスはすでに検証済みとして扱えるので、`--verify` は無視されます。
 
 `--verify` なしの `--oauth` と同じく、このモードでもプロフィールのメールアドレスは読み取り専用です（詳しくは上を参照）。
 
@@ -156,7 +168,11 @@ bunx guren add oauth
 
 あわせて、`config/oauth.ts` の定義が `createApp({ config })` に追加されます。この定義が `oauth` マネージャーを登録します。中身は [OAuth ガイド](./oauth.md#マネージャーの登録)で説明しています。
 
-`db/schema.ts` には `oauth_states` テーブルが追加され、そのマイグレーションも生成されます。`drizzle-kit` をまだインストールしていない場合は、あとで `bun run db:make` を実行してください。`oauth-states:prune` コマンドも登録されます。`config/oauth.ts` は `DatabaseOAuthStateStore` を `stateStore` に渡すので、認可リダイレクトを発行したのとは別のプロセスにコールバックが届いても動きます。Workers、Lambda、Vercel ではそれがふつうです（[Stateストレージ](./oauth.md#stateストレージ)を参照）。`CoreOAuthServiceProvider` は state をメモリ上に持つので、登録しません。`db/schema.ts` がないアプリでは、何も書き込まずにエラーで終了します。
+`db/schema.ts` には `oauth_states` テーブルが追加され、そのマイグレーションも生成されます。`drizzle-kit` をまだインストールしていない場合は、あとで `bun run db:make` を実行してください。`oauth-states:prune` コマンドも登録されます。
+
+`config/oauth.ts` は `DatabaseOAuthStateStore` を `stateStore` に渡すので、認可リダイレクトを発行したのとは別のプロセスにコールバックが届いても動きます。Workers、Lambda、Vercel ではそれがふつうです（[Stateストレージ](./oauth.md#stateストレージ)を参照）。`CoreOAuthServiceProvider` は state をメモリ上に持つので、登録しません。
+
+`db/schema.ts` がないアプリでは、何も書き込まずにエラーで終了します。
 
 [`--oauth`](#oauth-ログインボタン) と同じく、`config/env.ts` がないアプリや、すでにプロバイダーが `oauth` をバインドしているアプリでは、同じ内容とストアを登録する `app/Providers/OAuthProvider.ts` が生成されます。
 
@@ -414,7 +430,9 @@ app.use('*', createSessionMiddleware())
 - `SESSION_DRIVER` キー（`config/env.ts` に `database` をデフォルトとして宣言し、`.env` と `.env.example` にも追加）
 - `sessions:prune` コマンド
 
-定義は `createApp({ config })` に追加されます。下の例のうち `redis` ストアだけは手で書き足す部分です。`@guren/core/redis` を import すると ioredis がすべてのバンドルに入るので、必要になるまで雛形には含めていません。`guren add auth` はこのコマンドを内部で実行するので、生成した直後のアプリでも、セッションは最初からデータベースに保存されます。以下は、手で組み込む場合に備えて、生成されるものを説明したものです。
+定義は `createApp({ config })` に追加されます。下の例のうち `redis` ストアだけは手で書き足す部分です。`@guren/core/redis` を import すると ioredis がすべてのバンドルに入るので、必要になるまで雛形には含めていません。
+
+`guren add auth` はこのコマンドを内部で実行するので、生成した直後のアプリでも、セッションは最初からデータベースに保存されます。以下は、手で組み込む場合に備えて、生成されるものを説明したものです。
 
 [`--oauth`](#oauth-ログインボタン) と同じく、`config/env.ts` がないアプリや、すでにプロバイダーが `session` をバインドしているアプリでは、プレーンな `SessionConfig` としての `config/session.ts` と、それをバインドする `app/Providers/SessionProvider.ts` が生成されます。
 
@@ -456,7 +474,9 @@ const app = createApp({
 })
 ```
 
-`defineSessionConfig()` は、マネージャーを `createSessionManager()` で組み立てます。`createSessionManager()` は、`new SessionManager()` に `database` ドライバーを登録したものです。このドライバーはテーブルを ORM のモデルで包むので、ORM に依存しない HTTP 層には置けず、`@guren/core` からしか提供できません。`database` ストアを宣言するときは、常にこちらを使ってください。別の方法で組み立てたマネージャーには、`registerDatabaseSessionDriver(manager)` でドライバーを追加できます。
+`defineSessionConfig()` は、マネージャーを `createSessionManager()` で組み立てます。`createSessionManager()` は、`new SessionManager()` に `database` ドライバーを登録したものです。このドライバーはテーブルを ORM のモデルで包むので、ORM に依存しない HTTP 層には置けず、`@guren/core` からしか提供できません。`database` ストアを宣言するときは、常にこちらを使ってください。
+
+別の方法で組み立てたマネージャーには、`registerDatabaseSessionDriver(manager)` でドライバーを追加できます。
 
 #### `cookie` ストア
 
@@ -478,7 +498,9 @@ stores: {
 
 #### `database` ストアと起動時の検査
 
-`database` ドライバーを使うには、`db/schema.ts` の `sessions` テーブルとそのマイグレーションが必要です。カラムは `id`（text の主キー）・`data`・`expiresAt` の 3 つで、方言ごとの定義は [Cloudflare ガイド](./cloudflare.md#セッションと-oauth-state-はデータベースに保存する) にあります。期限切れの行は、`manager.pruneExpired()` を定期的に実行して片付けてください（`read()` は期限切れの行をすでに存在しないものとして扱います）。
+`database` ドライバーを使うには、`db/schema.ts` の `sessions` テーブルとそのマイグレーションが必要です。カラムは `id`（text の主キー）・`data`・`expiresAt` の 3 つで、方言ごとの定義は [Cloudflare ガイド](./cloudflare.md#セッションと-oauth-state-はデータベースに保存する) にあります。
+
+期限切れの行は、`manager.pruneExpired()` を定期的に実行して片付けてください（`read()` は期限切れの行をすでに存在しないものとして扱います）。
 
 マネージャー側の cookie と TTL の設定が基本になり、`auth.sessionOptions` がそれをフィールドごとに上書きします。次の設定ミスは起動時にエラーになるので、`SESSION_DRIVER` の打ち間違いも最初のログインより前に見つかります。
 
@@ -599,13 +621,21 @@ export class User extends defineModel(users, {
 }
 ```
 
-`AuthenticatableModel` を `base` に渡し、同じ呼び出しの中で create のペイロードの型を整えます。`defineModel()` がテーブルから推論する型では、デフォルト値のないカラムがすべて必須になりますが、ここではそれが正しい形ではありません。呼び出し側が渡すのは平文の `password` で、`passwordHash` ではないからです。`optionalOnCreate` でカラムを任意にし、`requireOnCreate` で仮想フィールドを必須にします。どちらも型レベルの指定なので、キャストも型マーカーの再宣言もいりません。
+`AuthenticatableModel` を `base` に渡し、同じ呼び出しの中で create のペイロードの型を整えます。`defineModel()` がテーブルから推論する型では、デフォルト値のないカラムがすべて必須になりますが、ここではそれが正しい形ではありません。呼び出し側が渡すのは平文の `password` で、`passwordHash` ではないからです。
 
-任意にしただけなので、呼び出し側が `passwordHash` を渡しても型チェックは通ります。実行時には、`AuthenticatableModel` がハッシュのカラム（と remember トークン）への一括代入を常に拒否します。リクエストボディにこれらが含まれていると、モデルの `fillable` の内容にかかわらず `MassAssignmentException` を投げます。`passwordHash: 'oauth:...'` のような、サーバー側で決める信頼できる値を書き込むときは、`forceCreate()` / `forceUpdate()` を使ってください。
+`optionalOnCreate` でカラムを任意にし、`requireOnCreate` で仮想フィールドを必須にします。どちらも型レベルの指定なので、キャストも型マーカーの再宣言もいりません。
+
+任意にしただけなので、呼び出し側が `passwordHash` を渡しても型チェックは通ります。実行時には、`AuthenticatableModel` がハッシュのカラム（と remember トークン）への一括代入を常に拒否します。リクエストボディにこれらが含まれていると、モデルの `fillable` の内容にかかわらず `MassAssignmentException` を投げます。
+
+`passwordHash: 'oauth:...'` のような、サーバー側で決める信頼できる値を書き込むときは、`forceCreate()` / `forceUpdate()` を使ってください。
 
 OAuth だけでサインアップする場合など、パスワードなしでアカウントを作るときは、`requireOnCreate` を付けずに `password` を任意のままにします。
 
-資格情報のカラムにパスワードのハッシュ以外の値が入っていれば、そのアカウントはパスワードでは認証できないという意味になります。`ModelUserProvider` は、null、空文字列、`'oauth:...'` のような番兵の値をどれも同じように扱います。ログインを拒否しつつ、本物の検証と同じだけハッシュの計算を行うので、応答時間からも区別できません。一方、ハッシュの形式を名乗っているのに中身がそれを満たさない値には、これまでどおり例外を投げます。これはカラムの破損や切り詰めなので、黙って拒否すると気付く手がかりがなくなってしまうためです。パスワードを持たないアカウントには nullable なカラムを使うほうが分かりやすく、`make:auth --oauth` もそちらを生成します。
+資格情報のカラムにパスワードのハッシュ以外の値が入っていれば、そのアカウントはパスワードでは認証できないという意味になります。`ModelUserProvider` は、null、空文字列、`'oauth:...'` のような番兵の値をどれも同じように扱います。ログインを拒否しつつ、本物の検証と同じだけハッシュの計算を行うので、応答時間からも区別できません。
+
+一方、ハッシュの形式を名乗っているのに中身がそれを満たさない値には、これまでどおり例外を投げます。これはカラムの破損や切り詰めなので、黙って拒否すると気付く手がかりがなくなってしまうためです。
+
+パスワードを持たないアカウントには nullable なカラムを使うほうが分かりやすく、`make:auth --oauth` もそちらを生成します。
 
 `createApp()` は、`users` プロバイダーを使う既定の `web` ガードを登録します。別のガード（たとえばトークンベースの API 用）が必要なら、プロバイダーの中で `auth.registerGuard('api', factory)` を呼び、必要に応じて `auth.setDefaultGuard('api')` で既定のガードを切り替えます。
 
@@ -619,9 +649,15 @@ OAuth だけでサインアップする場合など、パスワードなしで�
 
 ヘルパーは、ストアの 2 つのアトミックな操作を前提にしています。`replace()` は、そのメールアドレスの既存トークンの失効と新しいトークンの保存を一度に行います。`consume(tokenId, email)` は、保存済みのメールアドレスとの照合とトークンの削除を一度に行い、同時に呼ばれても成功を示す `true` を返すのは 1 回だけです。メモリ版と Redis 版のストアは、どちらもこの 2 つを実装しています。発行時は、メールアドレスを小文字にそろえてから置き換えます。
 
-独自の `PasswordResetTokenStore` や `EmailVerificationTokenStore` を使っている場合は、発行・完了のヘルパーを使う前に、これらのメソッドを追加してください。パスワード再設定のストアは `replace(tokenId, email, expiresAt)`、メール認証のストアは `replace(token)` を受け取ります。型の互換性のためにメソッドは省略可能になっていますが、必要な操作が実装されていなければ、ヘルパーはエラーにします。複数のワーカーで共有するストアでは、プロセス内のロックだけでは足りません。トランザクションや、データベースのアトミックなコマンドで実装してください。
+独自の `PasswordResetTokenStore` や `EmailVerificationTokenStore` を使っている場合は、発行・完了のヘルパーを使う前に、これらのメソッドを追加してください。パスワード再設定のストアは `replace(tokenId, email, expiresAt)`、メール認証のストアは `replace(token)` を受け取ります。型の互換性のためにメソッドは省略可能になっていますが、必要な操作が実装されていなければ、ヘルパーはエラーにします。
 
-`completePasswordReset()` と `completeEmailVerification()` は、アプリの更新処理を呼ぶ前にトークンを消費します。消費したトークンは元に戻らないので、更新に失敗したときはトークンを再発行してください。`verifyPasswordResetToken()` と `verifyEmailToken()` は有効かどうかを確かめるだけで、トークンを予約したり消費したりはしません。更新には完了用のヘルパーを使ってください。生成済みのパスワード再設定コントローラーで検証・更新・削除を別々に呼んでいる場合は、`completePasswordReset()` に置き換えてください。その際は `@guren/core` と `@guren/cli` を一緒に更新し、トークンを発行・消費するすべてのインスタンスを再起動してください。古いインスタンスには、同時実行の問題が残ります。
+複数のワーカーで共有するストアでは、プロセス内のロックだけでは足りません。トランザクションや、データベースのアトミックなコマンドで実装してください。
+
+`completePasswordReset()` と `completeEmailVerification()` は、アプリの更新処理を呼ぶ前にトークンを消費します。消費したトークンは元に戻らないので、更新に失敗したときはトークンを再発行してください。
+
+`verifyPasswordResetToken()` と `verifyEmailToken()` は有効かどうかを確かめるだけで、トークンを予約したり消費したりはしません。更新には完了用のヘルパーを使ってください。
+
+生成済みのパスワード再設定コントローラーで検証・更新・削除を別々に呼んでいる場合は、`completePasswordReset()` に置き換えてください。その際は `@guren/core` と `@guren/cli` を一緒に更新し、トークンを発行・消費するすべてのインスタンスを再起動してください。古いインスタンスには、同時実行の問題が残ります。
 
 ## 実例アプリ
 
