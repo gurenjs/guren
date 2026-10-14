@@ -1,5 +1,20 @@
 # @guren/cli
 
+## 2.31.1
+
+### Patch Changes
+
+- 6168f16: CI now runs a non-blocking trial lane on Bun 1.4.3 beside the primary Bun 1.4.2. Bun 1.4.3 fixes CVE-2026-48618 (TLS certificate name matching in `fetch`, `https`, `tls.connect` and `Bun.connect`); Guren's own suite passes on it unchanged.
+- 5dbe288: The exception handler now renders the development debug page (stack trace, request, environment) for a browser request that ends in a 5xx while debug details are on, where it used to answer with the JSON body. Inertia visits, XHRs and JSON callers keep the JSON body with `exception` and `stack`, and a 4xx gets the plain error page with its message in development as in production.
+
+  ### Deprecated
+
+  - **`debugErrorMiddleware()`**: Hono hands a handler's error to the app's `onError`, where `ErrorServiceProvider` installs the exception handler, so the middleware's `catch` never saw an error in a Guren app. Remove it; the exception handler renders the same page. It warns once per process, and will be removed in 3.0.0. Detected by `bunx guren upgrade --check-only` as `debug-error-middleware`.
+
+- Updated dependencies [5dbe288]
+- Updated dependencies [6bce9e0]
+  - @guren/server@2.30.0
+
 ## 2.31.0
 
 ### Minor Changes
