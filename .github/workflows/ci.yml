@@ -596,3 +596,8 @@ jobs:
 
       - name: Assemble Cloudflare worker
         run: cd web && bun scripts/cloudflare-build.ts
+
+      # The gate deploy-web.yml runs before deploying (RFC 0032 M5), here so a
+      # change that bundles the collector or the CLI fails its own PR.
+      - name: Check development-only code is not bundled
+        run: cd web && bun run dev-only:check

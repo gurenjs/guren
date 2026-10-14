@@ -65,6 +65,12 @@ jobs:
       - name: Check worker bundle size
         run: cd web && bun run bundle:check
 
+      # RFC 0032 M5: the runtime error collector and @guren/cli (the Dev
+      # Center behind GUREN_MCP=1) must not reach the Worker. Judged from the
+      # bundle's inputs, so it fails before anything touches D1.
+      - name: Check development-only code is not bundled
+        run: cd web && bun run dev-only:check
+
       # Idempotent: only unapplied migrations run. Before deploy so new code
       # never runs against an old schema.
       - name: Apply D1 migrations
@@ -88,3 +94,9 @@ jobs:
       # not an earlier database.
       - name: Retire superseded search tables
         run: cd web && bun run search:prune
+
+      # The live site, read-only: the development endpoints answer 404 and the
+      # home page 200. Last, so a failure reports without skipping the prune;
+      # it does not roll back.
+      - name: Check development endpoints on the live site
+        run: cd web && bun run endpoints:check
