@@ -580,3 +580,28 @@ checks and `fixes`; unrelated warnings remain, with their existing `--strict`
 exit behavior. Default doctor runs retain their read-only behavior and text
 advice. This slice does not add arbitrary repairs or change dependency/config
 files, and does not complete M4's first-feature measurement work.
+
+### M4 first-feature measurement
+
+`smoke:golden-path` times each step and reports the first working feature:
+steps 1-8 (create the app, vendor and install, `add auth`, `add resource
+posts`, codegen, typecheck, build, the starter tests) plus step 16 up to the
+created post appearing on `GET /posts`, which includes migrating, seeding,
+booting and signing in. Steps 9-15 add a second resource and add-ons a first
+feature does not need; step 0 checks this repository's build.
+
+CI on Bun 1.4.2 (`ubuntu-latest`, the `starter-smokes` job of #1182):
+
+| Database | Steps 1-8 | Step 16 to the created post | First working feature |
+| --- | ---: | ---: | ---: |
+| SQLite | 5.3 s | 2.7 s | 8.1 s |
+| Postgres | 5.1 s | 3.2 s | 8.3 s |
+| MySQL | 5.3 s | 3.5 s | 8.7 s |
+
+Build (1.7 s) is the largest static step; typecheck takes 0.4-0.5 s. Reproduce
+with `bun run smoke:golden-path` (`:postgres`, `:mysql`); the table is also
+written to the job summary. These are machine times on a warm runner: the app
+installs vendored local tarballs with Bun's cache, the database services are
+already running, and nothing a person does between commands is counted. They
+set a regression baseline for the scaffold path, not an onboarding or adoption
+claim. With `doctor --fix` above, M4 is complete.
