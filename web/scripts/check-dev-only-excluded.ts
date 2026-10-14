@@ -1,6 +1,6 @@
 /**
  * Fail the deploy when the Worker bundle takes development-only code: the
- * runtime error collector `@guren/server` loads only under GUREN_MCP=1, and
+ * runtime error collector the framework loads only under GUREN_MCP=1, and
  * `@guren/cli`, which `cloudflare:build` stubs (RFC 0032 M5). Reads wrangler's
  * dry run on the assembled .cloudflare/, like `bundle:check`. Needs no credentials.
  *   bun scripts/check-dev-only-excluded.ts
@@ -14,7 +14,7 @@ import { judgeDevOnlyInputs } from './lib/dev-only-inputs.js'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 
-/** The directory holding the package's package.json. `@guren/server` resolves through `@guren/core`, which is all web declares. */
+/** The directory holding the package's package.json. */
 function packageRoot(specifier: string, from = root): string {
   let dir = dirname(realpathSync(Bun.resolveSync(specifier, from)))
   while (!existsSync(join(dir, 'package.json'))) dir = dirname(dir)
@@ -36,7 +36,15 @@ function realInput(input: string): string {
   return existsSync(file) ? realpathSync(file) : file
 }
 
-const collectorFiles = filesDefining(packageRoot('@guren/server', packageRoot('@guren/core')), 'class RuntimeErrorBuffer')
+/** `@guren/core` and the framework packages it depends on, where the collector lives whichever one owns it. */
+function frameworkRoots(): string[] {
+  const core = packageRoot('@guren/core')
+  const manifest = JSON.parse(readFileSync(join(core, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> }
+  const dependencies = Object.keys(manifest.dependencies ?? {}).filter((name) => name.startsWith('@guren/'))
+  return [core, ...dependencies.map((name) => packageRoot(name, core))]
+}
+
+const collectorFiles = frameworkRoots().flatMap((dir) => filesDefining(dir, 'class RuntimeErrorBuffer'))
 const cliDir = `${packageRoot('@guren/cli')}/`
 
 function bundleInputs(outDir: string): string[] {
@@ -68,7 +76,7 @@ try {
 }
 
 const verdict = judgeDevOnlyInputs(inputs, [
-  { what: 'the development runtime error collector (@guren/server)', files: collectorFiles },
+  { what: 'the development runtime error collector', files: collectorFiles },
   { what: '@guren/cli (Dev Center, development MCP)', files: [cliDir] },
 ])
 for (const line of verdict.lines) console.log(line)
