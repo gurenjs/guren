@@ -605,3 +605,37 @@ installs vendored local tarballs with Bun's cache, the database services are
 already running, and nothing a person does between commands is counted. They
 set a regression baseline for the scaffold path, not an onboarding or adoption
 claim. With `doctor --fix` above, M4 is complete.
+
+### M5 example and deployment path
+
+The documented example is the blog: `examples/blog/README.md` ("Inspecting the
+App") reads its graph (`posts.show` handled by `PostController`, `posts.edit`
+binding `Post` and using `auth`, the pages and validators), names the sections
+that read `partial` and why, and places the Dev Center and `runtime:errors`
+beside it. The user guides stay scaffold-based.
+
+The verified deployment path is guren.dev, a Guren app that `deploy-web.yml`
+deploys to Cloudflare Workers on every main push. Two gates hold the production
+boundary this RFC promised:
+
+- Before deploying, `web/scripts/check-dev-only-excluded.ts` fails when any
+  input of wrangler's dry-run bundle is the runtime error collector or a file of
+  `@guren/cli` (the Dev Center and development MCP, which `cloudflare:build`
+  stubs). It reads esbuild's metafile, not the bundle text, since the
+  collector's class name also appears in a callback every build keeps. The
+  collector's files are found by their class definition in `@guren/core` and
+  its `@guren/*` dependencies; finding none fails the gate. PR CI runs it after
+  assembling the worker. Importing the collector or `@guren/cli/arch` into the
+  worker made it fail, naming the file.
+- After deploying, `web/scripts/check-production-endpoints.ts` expects `/` to
+  answer 200 and `/_guren`, `/_guren/graph.json`, `/_guren/runtime/errors` and
+  `/_guren/mcp` to answer 404 on the live site. It reports and does not roll
+  back. It cannot tell the new Worker from an earlier one still served at the
+  edge, and an earlier one answers the same, so a pass shows the boundary holds
+  on whatever answers, not that the new version was the one read.
+  `/_guren/docs` is left out: guren.dev serves a prerendered docs-viewer
+  snapshot there on purpose.
+
+Other deployment targets (Lambda, Vercel, Docker) expand from observed
+failures, as the roadmap says. With this, every stage of the roadmap in section
+5 has landed: M1 through M3 in the sections above, M4 and M5 here.
