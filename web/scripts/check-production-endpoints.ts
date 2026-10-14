@@ -19,7 +19,7 @@ let ok = true
 for (const [path, expected] of EXPECTED) {
   let status: number | string
   try {
-    status = (await fetch(new URL(path, origin), { redirect: 'manual' })).status
+    status = (await fetch(new URL(path, origin), { redirect: 'manual', signal: AbortSignal.timeout(10_000) })).status
   } catch (error) {
     status = error instanceof Error ? error.message : String(error)
   }

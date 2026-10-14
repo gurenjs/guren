@@ -60,7 +60,7 @@ The command exits 1 here because some sections are `partial`; the JSON is still 
 bun ../../packages/cli/src/bin.ts runtime:errors --json --url http://127.0.0.1:3333
 ```
 
-with its route (`posts.show` for a failing `GET /posts/1`) and project-relative stack locations, which lead back to the nodes the graph reports. A production build mounts neither endpoint.
+with its route (for a failing `GET /posts/1`, method `GET`, pattern `/posts/:id`, name `posts.show`) and project-relative stack locations, which lead back to the nodes the graph reports. A production build mounts neither endpoint.
 
 ## Shutting Down
 
