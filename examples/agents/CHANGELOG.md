@@ -1,5 +1,13 @@
 # @guren/example-agents
 
+## 0.1.23
+
+### Patch Changes
+
+- Updated dependencies [6168f16]
+- Updated dependencies [5dbe288]
+  - @guren/cli@2.31.1
+
 ## 0.1.22
 
 ### Patch Changes

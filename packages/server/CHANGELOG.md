@@ -1,5 +1,19 @@
 # @guren/server
 
+## 2.30.0
+
+### Minor Changes
+
+- 5dbe288: The exception handler now renders the development debug page (stack trace, request, environment) for a browser request that ends in a 5xx while debug details are on, where it used to answer with the JSON body. Inertia visits, XHRs and JSON callers keep the JSON body with `exception` and `stack`, and a 4xx gets the plain error page with its message in development as in production.
+
+  ### Deprecated
+
+  - **`debugErrorMiddleware()`**: Hono hands a handler's error to the app's `onError`, where `ErrorServiceProvider` installs the exception handler, so the middleware's `catch` never saw an error in a Guren app. Remove it; the exception handler renders the same page. It warns once per process, and will be removed in 3.0.0. Detected by `bunx guren upgrade --check-only` as `debug-error-middleware`.
+
+### Patch Changes
+
+- 6bce9e0: The development debug page now shows `[redacted]` in place of the values of the `Cookie`, `Authorization`, `Proxy-Authorization`, `X-XSRF-TOKEN` and `X-CSRF-Token` request headers. It printed them verbatim, which put HttpOnly session cookies where the page's script could read them. The other headers are shown as sent.
+
 ## 2.29.1
 
 ### Patch Changes
