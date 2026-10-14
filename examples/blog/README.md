@@ -37,6 +37,31 @@ This example demonstrates how to build a simple blog using the Guren framework, 
    ```
    This waits for the application bootstrap, asserts that the home page returns SSR-rendered markup, and verifies the `/posts` JSON endpoint. If the database isn't reachable, the script exits gracefully.
 
+## Inspecting the App
+
+The [application graph](../../docs/en/guides/application-diagnostics.md) shows how the blog is wired without starting it. Inside this repository, call the CLI from source rather than `bunx guren`:
+
+```bash
+cd examples/blog
+bun ../../packages/cli/src/bin.ts graph --json
+```
+
+The command exits 1 here because some sections are `partial`; the JSON is still printed in full. What the blog's graph holds:
+
+- `posts.show` (`GET /posts/:id`) has a `handles` edge to `PostController`, which `renders` `posts/Index`, `posts/Show`, `posts/New` and `posts/Edit`, each with the line of the action that names the page.
+- `posts.edit` also `binds` `Post` (from `bind: { id: Post }`) and `usesMiddleware` `auth`.
+- `PostController` `validates` with `PostIdParamSchema` and `PageQuerySchema` from `app/Http/Validators/PostValidator.ts`.
+- `coverage.handles` and `coverage.usesMiddleware` are `partial` (`controller-identity`, `inline-middleware`). `coverage.validates` is `partial` because the auth module's `OAuthController` validates with schemas declared in the controller file; those stay in `unresolved` instead of being guessed.
+- There are no `tests` edges: the blog's controller tests call actions directly rather than sending requests through `TestApp`, so no test reaches a route.
+
+`bun run dev` already sets `GUREN_MCP=1` and `GUREN_DOCS=1`. With it running, http://localhost:3333/_guren opens the Dev Center, which shows the same graph and the server errors the app hit recently. A request that fails with a 5xx also appears in
+
+```bash
+bun ../../packages/cli/src/bin.ts runtime:errors --json --url http://127.0.0.1:3333
+```
+
+with its route (`posts.show` for a failing `GET /posts/1`) and project-relative stack locations, which lead back to the nodes the graph reports. A production build mounts neither endpoint.
+
 ## Shutting Down
 
 ```bash
