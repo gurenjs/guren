@@ -45,11 +45,57 @@ cleanup() {
 
 trap cleanup EXIT
 
+# BSD date has no %N, and macOS ships bash 3.2 without $EPOCHREALTIME.
+now_ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time() * 1000'; }
+
+# "<n>|<label>|<ms>" per finished step, for report_timings (RFC 0032 M4).
+STEP_TIMINGS=()
+STEP_LABEL=""
+STEP_STARTED_MS=""
+FIRST_FEATURE_RUNTIME_MS=""
+
+end_step() {
+  if [[ -n "$STEP_STARTED_MS" ]]; then
+    STEP_TIMINGS+=("${STEP_LABEL}|$(( $(now_ms) - STEP_STARTED_MS ))")
+  fi
+  STEP_STARTED_MS=""
+}
+
 step() {
   local n="$1"
   shift
+  end_step
+  STEP_LABEL="${n}|$*"
+  STEP_STARTED_MS="$(now_ms)"
   echo ""
   echo "=== Step ${n}: $* ==="
+}
+
+seconds() { awk -v ms="$1" 'BEGIN { printf "%.1f", ms / 1000 }'; }
+
+# The first working feature is steps 1-8 (scaffold to tests) plus step 16 up to
+# the created post appearing on GET /posts. Steps 9-15 add a second resource and
+# add-ons a first feature does not need, and step 0 checks this repo's build.
+report_timings() {
+  local entry n label ms static_ms=0 table=""
+  for entry in "${STEP_TIMINGS[@]}"; do
+    n="${entry%%|*}"
+    ms="${entry##*|}"
+    label="${entry#*|}"
+    label="${label%|*}"
+    table+="| ${n} | ${label} | $(seconds "$ms") |"$'\n'
+    if (( n >= 1 && n <= 8 )); then static_ms=$(( static_ms + ms )); fi
+  done
+  local feature_ms=$(( static_ms + FIRST_FEATURE_RUNTIME_MS ))
+  local report
+  report="### Golden path timings (${SMOKE_DB})"$'\n\n'
+  report+="| Step | | Seconds |"$'\n'"| ---: | --- | ---: |"$'\n'"${table}"$'\n'
+  report+="First working feature: $(seconds "$feature_ms") s (steps 1-8: $(seconds "$static_ms") s, step 16 to the created post: $(seconds "$FIRST_FEATURE_RUNTIME_MS") s)"$'\n'
+  echo ""
+  echo "$report"
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    echo "$report" >> "$GITHUB_STEP_SUMMARY"
+  fi
 }
 
 # Substring test for a value already held in a variable.
@@ -549,6 +595,7 @@ if ! grep -qF -- "Golden path runtime" "$POSTS_PAGE"; then
   exit 1
 fi
 echo "  OK: GET /posts contains created post"
+FIRST_FEATURE_RUNTIME_MS=$(( $(now_ms) - STEP_STARTED_MS ))
 
 # The token rotates on each accepted request, so re-read it from the jar the
 # previous POST just rewrote.
@@ -622,6 +669,9 @@ rm -f "$APP_DIR/addons-check.ts"
 # ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
+end_step
+report_timings
+
 echo ""
 echo "=== Golden path smoke test PASSED ==="
 exit 0
