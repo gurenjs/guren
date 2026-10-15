@@ -3,7 +3,7 @@ import { resolve, extname } from 'node:path'
 import type { AppManifest, MiddlewareEntry } from '@guren/server'
 
 import {
-  buildApplicationGraph, graphDigest, graphId,
+  buildApplicationGraph, controllerActionSource, graphDigest, graphId,
   type ApplicationGraphInputs, type GRAPH_RELATIONS, type GraphCoverage, type GraphEvidence, type GraphNode, type GurenApplicationGraph,
 } from './application-graph'
 import { importReferencePatterns, modelPatterns, policyBindings, type PolicyBinding } from './authorization-audit'
@@ -223,7 +223,7 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
       const refs = extractInertiaPageRefs(method.rawBody, (offset) => method.body.slice(offset).startsWith('this.inertia'))
       for (const ref of refs) {
         const candidates = input.nodes.filter((entry) => entry.kind === 'page' && entry.label === ref.id)
-        if (candidates.length === 1) link(from, candidates[0]!.id, 'renders', { kind: 'static', source: `controller:${action}`, file: declaration.file, line: method.line })
+        if (candidates.length === 1) link(from, candidates[0]!.id, 'renders', { kind: 'static', source: controllerActionSource(action), file: declaration.file, line: method.line })
         else unresolve({ from, relation: 'renders', target: ref.id, reason: 'Page missing or ambiguous.' }, 'unresolved-page', declaration.file)
       }
       const calls = [...method.body.matchAll(/this\s*\.\s*inertia\s*\(/g)]
@@ -244,7 +244,7 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
         for (const match of captured) {
           const chain = match[1]!.replace(/\s+/g, '')
           const target = importedSymbol(declaration.file, imported, chain, validators)
-          if (target) link(from, target.id, 'validates', { kind: 'static', source: `controller:${action}`, file: declaration.file, line: method.line })
+          if (target) link(from, target.id, 'validates', { kind: 'static', source: controllerActionSource(action), file: declaration.file, line: method.line })
           else unresolve({ from, relation: 'validates', target: chain, reason: `${declaration.className}.${action} validates with a schema not imported from a validator file export.` }, 'unresolved-validator', declaration.file)
         }
       }
@@ -265,7 +265,7 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
       const named = bindings.length > 0 ? await modelPatterns(cwd, controllerFile, bindings, cache) : new Map<PolicyBinding, RegExp[]>()
       for (const [action, method] of declaration.methods) {
         for (const { node } of referenced.filter(({ pattern }) => pattern.test(method.body))) {
-          link(from, node.id, 'authorizes', { kind: 'static', source: `controller:${action}`, file: declaration.file, line: method.line })
+          link(from, node.id, 'authorizes', { kind: 'static', source: controllerActionSource(action), file: declaration.file, line: method.line })
         }
         for (const { label } of byNameOnly.filter(({ pattern }) => pattern.test(method.body))) {
           unresolve({ from, relation: 'authorizes', target: label, reason: `${declaration.className}.${action} names ${label}, imported from a path that does not resolve to its policy file.` }, 'unresolved-policy-import', declaration.file)

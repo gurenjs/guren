@@ -100,24 +100,7 @@ export function routeDefinitionToContextRoute(def: RouteDefinition): ContextRout
   }
 }
 
-/**
- * A value rendered inside a markdown pipe-table cell — schema type strings
- * routinely contain `|` (unions) and can span lines, both of which break
- * table structure unescaped.
- */
-export function escapeMarkdownTableCell(value: string): string {
-  const escaped = value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|')
-  if (!escaped.includes('\n')) {
-    return escaped
-  }
-  // Collapse newlines with their surrounding whitespace via split/join —
-  // regex forms of this (`\s*\r?\n\s*`) backtrack quadratically.
-  return escaped
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join(' ')
-}
+export { escapeMarkdownTableCell } from './docs-links'
 
 /**
  * Every route as a `ContextRoute`, or `[]` with the reason in `loadErrors` when the routes

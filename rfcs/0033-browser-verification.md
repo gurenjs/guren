@@ -93,8 +93,11 @@ proves it works.
 **Features.** A feature is the first path segment of a page under
 `resources/js/pages/` (`pages/posts/Index.tsx` is `posts`); a page directly under
 `pages/` is its own feature. This is the only grouping rule. Module pages live
-under the root `pages/<module>/…` tree and group the same way. The graph records
-no module for a page today, so the map claims none; module ownership is added to
+under the root `pages/<module>/…` tree and group the same way. ~~The graph records
+no module for a page today, so the map claims none~~ **Amended in
+implementation:** the graph records a page's module only for a page file under
+`modules/<name>/`, which the map prefixes to the feature name; it infers no
+module for the root tree. Further module ownership is added to
 the graph first if a later version needs it (Open Question 2).
 
 **Joining routes to pages.** The `renders` edge runs from a controller class to

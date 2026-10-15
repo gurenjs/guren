@@ -7,9 +7,13 @@
 
 import { posix } from 'node:path'
 
-import type { GraphNode, GurenApplicationGraph } from './application-graph'
-import { findHeadingLine, readMarkedLines, type MarkedLines, type MarkerSyntax } from './marker-blocks'
+import { controllerActionOf, type GraphNode, type GurenApplicationGraph } from './application-graph'
+import { escapeMarkdownTableCell } from './docs-links'
+import { readMarkedLines, spliceMarkedBlock, type MarkerSyntax } from './marker-blocks'
+import { routeTarget } from './plan/app-targets'
 import type { Plan, PlanAcceptance, PlanView } from './plan/schema'
+import { compareStrings } from './spec-artifact'
+import { slugifyProse } from './utils'
 
 export const BROWSER_MAP_DIR = 'docs/browser'
 export const BROWSER_MAP_INDEX = `${BROWSER_MAP_DIR}/README.md`
@@ -80,18 +84,13 @@ export interface ApprovedPlanInput {
   plan: Plan
 }
 
-export function featureOfPage(page: Pick<GraphNode, 'label' | 'module'>): string {
+function featureOfPage(page: Pick<GraphNode, 'label' | 'module'>): string {
   const segment = page.label.split('/')[0]!
   return page.module ? `${page.module}/${segment}` : segment
 }
 
-export function featureFile(name: string): string {
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/^-+|-+$/gu, '') || 'feature'
-  return `${BROWSER_MAP_DIR}/${slug}.md`
-}
-
-function compare(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
+function featureFile(name: string): string {
+  return `${BROWSER_MAP_DIR}/${slugifyProse(name, '-', 'feature')}.md`
 }
 
 function isParameterless(path: string): boolean {
@@ -104,30 +103,37 @@ export function buildBrowserMap(
   unreadablePlans: BrowserMap['unreadablePlans'] = [],
 ): BrowserMap {
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]))
+  const gapOf = (section: string): BrowserMapGap | undefined => {
+    const coverage = graph.coverage[section]
+    if (!coverage || coverage.status === 'complete') return undefined
+    return { section, reasons: coverage.reasons.map((reason) => reason.file ? `${reason.message} (${reason.file})` : reason.message) }
+  }
   const gaps: BrowserMapGap[] = []
   if (graph.snapshot.consistency !== 'stable') gaps.push({ section: 'snapshot', reasons: ['Sources changed while the graph was read.'] })
   for (const section of BROWSER_MAP_SECTIONS) {
-    const coverage = graph.coverage[section]
-    if (coverage && coverage.status !== 'complete') {
-      gaps.push({ section, reasons: coverage.reasons.map((reason) => reason.file ? `${reason.message} (${reason.file})` : reason.message) })
-    }
+    const gap = gapOf(section)
+    if (gap) gaps.push(gap)
   }
-  const middlewareCoverage = graph.coverage.usesMiddleware
-  const middlewareGap = middlewareCoverage && middlewareCoverage.status !== 'complete'
-    ? { section: 'usesMiddleware', reasons: middlewareCoverage.reasons.map((reason) => reason.message) }
-    : undefined
+  const middlewareGap = gapOf('usesMiddleware')
 
-  const edgesFrom = (from: string, relation: string) => graph.edges.filter((edge) => edge.from === from && edge.relation === relation)
+  const outgoing = new Map<string, string[]>()
   const rendersByController = new Map<string, Array<{ page: GraphNode; actions: Set<string> }>>()
   for (const edge of graph.edges) {
+    const key = `${edge.relation}\0${edge.from}`
+    const sameKey = outgoing.get(key)
+    if (sameKey) sameKey.push(edge.to)
+    else outgoing.set(key, [edge.to])
     if (edge.relation !== 'renders') continue
     const page = nodes.get(edge.to)
     if (!page) continue
-    const actions = new Set(edge.evidence.flatMap((entry) => entry.source.startsWith('controller:') ? [entry.source.slice('controller:'.length)] : []))
+    const actions = new Set(edge.evidence.flatMap((entry) => controllerActionOf(entry) ?? []))
     const list = rendersByController.get(edge.from) ?? []
     list.push({ page, actions })
     rendersByController.set(edge.from, list)
   }
+
+  const targets = (relation: string, from: string): string[] => outgoing.get(`${relation}\0${from}`) ?? []
+  const labels = (relation: string, from: string): string[] => targets(relation, from).flatMap((id) => nodes.get(id)?.label ?? [])
 
   const features = new Map<string, BrowserFeature>()
   const feature = (name: string): BrowserFeature => {
@@ -142,7 +148,8 @@ export function buildBrowserMap(
   const reached = new Set<string>()
   const routeFeatures = new Map<string, string[]>()
   const unassigned: BrowserMap['unassigned'] = []
-  const entities = new Map<string, Set<string>>()
+  // The graph does not record which action an unresolved render came from, so none of that controller's actions is known to render nothing.
+  const unsure = new Set(graph.unresolved.flatMap((entry) => entry.relation === 'renders' && entry.from ? [entry.from] : []))
 
   const routes = graph.nodes
     .filter((node): node is GraphNode & { route: NonNullable<GraphNode['route']> } => node.kind === 'route' && node.route !== undefined)
@@ -150,7 +157,7 @@ export function buildBrowserMap(
   for (const node of routes) {
     const { method, path, name, action } = node.route
     const base = { method, path, ...(name ? { name } : {}) }
-    const controllers = edgesFrom(node.id, 'handles').map((edge) => edge.to)
+    const controllers = targets('handles', node.id)
     if (controllers.length === 0 || action === undefined) {
       unassigned.push({ ...base, reason: action === undefined ? 'Not handled by a controller action.' : 'Its controller could not be identified.', candidates: [] })
       continue
@@ -162,40 +169,43 @@ export function buildBrowserMap(
       for (const page of rendered) reached.add(page.id)
       owners = [...new Set(rendered.map(featureOfPage))]
     } else {
-      const candidates = [...new Set(renders.map((entry) => featureOfPage(entry.page)))].sort(compare)
+      const candidates = [...new Set(renders.map((entry) => featureOfPage(entry.page)))].sort(compareStrings)
+      if (controllers.some((controller) => unsure.has(controller))) {
+        unassigned.push({ ...base, reason: 'Its controller has a render the graph could not resolve, so what this action shows is unknown.', candidates })
+        continue
+      }
       if (candidates.length !== 1) {
         unassigned.push({ ...base, reason: candidates.length === 0 ? 'Its action renders nothing, and neither does its controller.' : 'Its action renders nothing, and its controller renders pages in several features.', candidates })
         continue
       }
       owners = candidates
     }
-    const middleware = edgesFrom(node.id, 'usesMiddleware').flatMap((edge) => nodes.get(edge.to)?.label ?? []).sort(compare)
-    const route: BrowserMapRoute = { ...base, middleware, pages: [...new Set(rendered.map((page) => page.label))].sort(compare) }
-    const bound = edgesFrom(node.id, 'binds').flatMap((edge) => nodes.get(edge.to)?.label ?? [])
+    const middleware = labels('usesMiddleware', node.id).sort(compareStrings)
+    const route: BrowserMapRoute = { ...base, middleware, pages: [...new Set(rendered.map((page) => page.label))].sort(compareStrings) }
+    const bound = labels('binds', node.id)
     routeFeatures.set(node.id, owners)
     for (const owner of owners) {
       const entry = feature(owner)
       entry.routes.push(route)
       if (!entry.landmark && method === 'GET' && route.pages.length > 0 && isParameterless(path)) entry.landmark = route
-      const names = entities.get(owner) ?? new Set()
-      for (const model of bound) names.add(model)
-      entities.set(owner, names)
+      entry.entities.push(...bound)
     }
   }
   for (const page of pages) {
     if (!reached.has(page.id)) continue
-    feature(featureOfPage(page)).pages.push(page.label)
+    features.get(featureOfPage(page))!.pages.push(page.label)
   }
   for (const entry of features.values()) {
-    entry.pages.sort(compare)
-    entry.entities = [...(entities.get(entry.name) ?? [])].sort(compare)
+    entry.pages.sort(compareStrings)
+    entry.entities = [...new Set(entry.entities)].sort(compareStrings)
   }
 
   const unplaced: BrowserMap['unplaced'] = []
   for (const { file, plan } of plans) {
     for (const acceptance of plan.tasks.flatMap((task) => task.acceptance)) {
       const planRoute = plan.routes.find((route) => route.id === acceptance.route)
-      const matches = planRoute ? routes.filter((node) => node.route.name === planRoute.name && node.route.method === planRoute.method) : []
+      const name = planRoute && routeTarget(planRoute).current
+      const matches = routes.filter((node) => name !== undefined && node.route.name === name)
       const owners = [...new Set(matches.flatMap((node) => routeFeatures.get(node.id) ?? []))]
       if (!planRoute || owners.length === 0) {
         unplaced.push({ plan: file, id: acceptance.id, route: planRoute ? `${planRoute.method} ${planRoute.path} (${planRoute.name})` : acceptance.route })
@@ -211,7 +221,8 @@ export function buildBrowserMap(
       }
     }
     for (const view of plan.views) {
-      const owner = features.get(featureOfPage({ label: view.page, module: view.module ?? null }))
+      const page = pages.find((node) => node.label === view.page) ?? { label: view.page, module: null }
+      const owner = features.get(featureOfPage(page))
       owner?.views.push({ plan: file, view })
     }
   }
@@ -224,12 +235,12 @@ export function buildBrowserMap(
     complete: gaps.length === 0,
     gaps,
     ...(middlewareGap ? { middlewareGap } : {}),
-    features: [...features.values()].filter((entry) => entry.routes.length > 0).sort((a, b) => compare(a.name, b.name)),
-    unreached: pages.filter((page) => !reached.has(page.id)).map((page) => page.label).sort(compare),
+    features: [...features.values()].sort((a, b) => compareStrings(a.name, b.name)),
+    unreached: pages.filter((page) => !reached.has(page.id)).map((page) => page.label).sort(compareStrings),
     unassigned,
     unresolvedRenders,
     unplaced,
-    plans: plans.map((entry) => entry.file).sort(compare),
+    plans: plans.map((entry) => entry.file).sort(compareStrings),
     unreadablePlans,
   }
 }
@@ -237,11 +248,11 @@ export function buildBrowserMap(
 const SECTION_HEADINGS = { routes: 'Routes', reach: 'How to reach it', plan: 'Plan', index: 'Features' } as const
 type GeneratedSection = keyof typeof SECTION_HEADINGS
 
-const BROWSER_MARKERS: MarkerSyntax = {
+const BROWSER_MARKERS: MarkerSyntax<undefined> = {
   name: 'guren:browser',
   open(line) {
     const match = /^<!-- guren:browser (\S+) -->$/u.exec(line)
-    return match ? { key: match[1]!, match } : undefined
+    return match ? { key: match[1]!, data: undefined } : undefined
   },
   close(line) {
     return /^<!-- \/guren:browser (\S+) -->$/u.exec(line)?.[1]
@@ -252,15 +263,11 @@ function code(value: string): string {
   return `\`${value.replace(/`/gu, "'")}\``
 }
 
-function cell(value: string): string {
-  return value.replace(/\|/gu, '\\|')
-}
-
 function routesBlock(feature: BrowserFeature): string[] {
   return [
     '| Method | Path | Name | Middleware | Page |',
     '| --- | --- | --- | --- | --- |',
-    ...feature.routes.map((route) => `| ${route.method} | ${cell(route.path)} | ${cell(route.name ?? '')} | ${cell(route.middleware.join(', '))} | ${cell(route.pages.join(', '))} |`),
+    ...feature.routes.map((route) => `| ${route.method} | ${escapeMarkdownTableCell(route.path)} | ${escapeMarkdownTableCell(route.name ?? '')} | ${escapeMarkdownTableCell(route.middleware.join(', '))} | ${escapeMarkdownTableCell(route.pages.join(', '))} |`),
   ]
 }
 
@@ -319,7 +326,7 @@ function viewLines(entry: BrowserMapView): string[] {
 }
 
 function planBlock(feature: BrowserFeature): string[] {
-  const plans = [...new Set([...feature.acceptance.map((entry) => entry.plan), ...feature.views.map((entry) => entry.plan)])].sort(compare)
+  const plans = [...new Set([...feature.acceptance.map((entry) => entry.plan), ...feature.views.map((entry) => entry.plan)])].sort(compareStrings)
   if (plans.length === 0) return ['None: no approved plan covers these routes. Outcomes are not inferred from names.']
   const lines: string[] = []
   for (const plan of plans) {
@@ -342,7 +349,11 @@ const CHARTER_BY_KIND: Record<PlanAcceptance['kind'], string> = {
 
 function seededCharters(feature: BrowserFeature): string[] {
   const kinds = new Map<PlanAcceptance['kind'], string[]>()
-  for (const { acceptance } of feature.acceptance) kinds.set(acceptance.kind, [...(kinds.get(acceptance.kind) ?? []), acceptance.id])
+  for (const { acceptance } of feature.acceptance) {
+    const ids = kinds.get(acceptance.kind) ?? []
+    ids.push(acceptance.id)
+    kinds.set(acceptance.kind, ids)
+  }
   if (kinds.size === 0) return ['One line per area to explore: one area, one posture, one sentence.']
   return [...kinds].map(([kind, ids]) => `- ${kind} (${ids.join(', ')}): ${CHARTER_BY_KIND[kind]}`)
 }
@@ -366,28 +377,13 @@ function newFeatureDoc(feature: BrowserFeature, map: BrowserMap): string {
   return lines.join('\n')
 }
 
-/** The block replaced where it exists; otherwise inserted after its heading, or appended under a new one. */
-function splice(doc: MarkedLines, section: GeneratedSection, content: readonly string[]): string[] {
-  const { lines } = doc
-  const fenced = block(section, content)
-  const existing = doc.blocks.get(section)
-  if (existing) return [...lines.slice(0, existing.open), ...fenced, ...lines.slice(existing.close + 1)]
-  const heading = findHeadingLine(doc, 2, new Set([SECTION_HEADINGS[section]]))
-  if (heading === -1) {
-    let end = lines.length
-    while (end > 0 && lines[end - 1] === '') end--
-    return [...lines.slice(0, end), '', `## ${SECTION_HEADINGS[section]}`, '', ...fenced, '']
-  }
-  const rest = lines.slice(heading + 1)
-  return [...lines.slice(0, heading + 1), '', ...fenced, ...(rest[0] === '' ? rest : ['', ...rest])]
-}
-
 function rewrite(document: string, blocks: Array<[GeneratedSection, string[]]>): { content: string } | { problems: string[] } {
   let text = document
   for (const [section, content] of blocks) {
     const { doc, problems } = readMarkedLines(text, BROWSER_MARKERS)
     if (problems.length > 0) return { problems }
-    text = splice(doc, section, content).join(doc.eol)
+    const headings = new Set([SECTION_HEADINGS[section]])
+    text = spliceMarkedBlock(doc, section, block(section, content), { headings, newHeading: SECTION_HEADINGS[section] }).join(doc.eol)
   }
   return { content: text }
 }
@@ -409,7 +405,7 @@ function indexBlock(map: BrowserMap, orphans: readonly string[]): string[] {
   for (const feature of map.features) {
     const landmark = feature.landmark ? `${feature.landmark.method} ${feature.landmark.path}` : 'none'
     const plan = feature.acceptance.length > 0 || feature.views.length > 0 ? 'yes' : 'none'
-    lines.push(`| [${cell(feature.name)}](./${posix.basename(feature.file)}) | ${cell(landmark)} | ${feature.routes.length} | ${feature.pages.length} | ${plan} |`)
+    lines.push(`| [${escapeMarkdownTableCell(feature.name)}](./${posix.basename(feature.file)}) | ${escapeMarkdownTableCell(landmark)} | ${feature.routes.length} | ${feature.pages.length} | ${plan} |`)
   }
   const list = (title: string, entries: string[]): void => {
     if (entries.length === 0) return
@@ -417,7 +413,7 @@ function indexBlock(map: BrowserMap, orphans: readonly string[]): string[] {
   }
   list('Pages no route renders:', map.unreached.map(code))
   list('Routes in no feature:', map.unassigned.map((route) => `${code(`${route.method} ${route.path}`)}${route.name ? ` (${route.name})` : ''}: ${route.reason}${route.candidates.length > 0 ? ` Candidates: ${route.candidates.join(', ')}.` : ''}`))
-  list('Renders the graph could not resolve:', map.unresolvedRenders.map((entry) => `${entry.controller} renders ${code(entry.target)}: ${entry.reason}`))
+  list('Renders the graph could not resolve:', map.unresolvedRenders.map((entry) => `${entry.controller}, ${code(entry.target)}: ${entry.reason}`))
   list('Acceptance whose route the app does not register yet:', map.unplaced.map((entry) => `${entry.id} in ${code(entry.plan)}: ${entry.route}`))
   list('Plans that could not be read:', map.unreadablePlans.map((entry) => `${code(entry.plan)}: ${entry.reason}`))
   list('Documents with no feature any more (kept, since they hold author text):', orphans.map((file) => code(file)))

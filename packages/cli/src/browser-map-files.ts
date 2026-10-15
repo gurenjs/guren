@@ -5,7 +5,7 @@
  */
 
 import { mkdir, readdir, readFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 
 import { loadApplicationGraph } from './application-graph-load'
 import {
@@ -13,36 +13,33 @@ import {
   type ApprovedPlanInput, type BrowserMap,
 } from './browser-map'
 import { CliError } from './cli-error'
-import { toPosixRelative } from './discovery'
+import { relativeUnreadableDirs, toPosixRelative } from './discovery'
 import { discoverPlanFiles } from './plan-check'
-import { readPlanFile } from './plan-render'
-import { readPlanApprovalStanding } from './plan/approvals'
 import { writeFileAtomic } from './plan/beside'
-import { hasBaseline } from './plan/schema'
+import { readApprovedPlan } from './plan/open-plan'
 
-export interface BrowserMapRun {
+interface BrowserMapRun {
   map: BrowserMap
   /** App-relative paths whose content a run writes differently from what is on disk. */
   changed: string[]
   orphans: string[]
 }
 
-/** Plans approved at their current hash, closed or not; a draft or an unapproved plan is skipped, an unreadable one reported. */
+/**
+ * Plans approved at their current hash, closed or not, by `readApprovedPlan()`; a draft or an
+ * unapproved plan is skipped. Reasons are app-relative, since the index that prints them is committed.
+ */
 export async function approvedPlans(cwd: string): Promise<{ plans: ApprovedPlanInput[]; unreadable: BrowserMap['unreadablePlans'] }> {
   const discovery = await discoverPlanFiles(cwd)
-  const unreadable: BrowserMap['unreadablePlans'] = discovery.unreadable.map((entry) => ({ plan: toPosixRelative(cwd, entry.dir), reason: entry.reason }))
+  const unreadable: BrowserMap['unreadablePlans'] = relativeUnreadableDirs(cwd, discovery.unreadable).map(({ dir, reason }) => ({ plan: dir, reason }))
+  const readings = await Promise.all(discovery.files.map((path) => readApprovedPlan(cwd, path, 'it is not mapped')))
   const plans: ApprovedPlanInput[] = []
-  for (const path of discovery.files) {
-    const file = toPosixRelative(cwd, path)
-    try {
-      const { plan } = await readPlanFile(path, cwd)
-      const standing = await readPlanApprovalStanding(path, plan)
-      if (standing?.state === 'unreadable') unreadable.push({ plan: file, reason: standing.reason })
-      else if (standing?.state === 'approved' && hasBaseline(plan)) plans.push({ file, plan })
-    } catch (error) {
-      unreadable.push({ plan: file, reason: (error as Error).message })
+  readings.forEach((reading, index) => {
+    if (reading.kind === 'approved') plans.push({ file: reading.plan.file, plan: reading.plan.plan })
+    else if (reading.kind !== 'skipped') {
+      unreadable.push({ plan: toPosixRelative(cwd, discovery.files[index]!), reason: reading.reason.replaceAll(`${cwd}${sep}`, '') })
     }
-  }
+  })
   return { plans, unreadable }
 }
 
@@ -65,14 +62,16 @@ async function readExisting(cwd: string): Promise<Map<string, string>> {
 /** Every document as a run would leave it; refuses, writing nothing, when any document's markers are unsafe. */
 export async function runBrowserMap(options: { cwd: string; write: boolean }): Promise<BrowserMapRun> {
   const cwd = resolve(options.cwd)
-  const graph = await loadApplicationGraph({ cwd, introspect: true })
-  const { plans, unreadable } = await approvedPlans(cwd)
+  const [graph, { plans, unreadable }, existing] = await Promise.all([
+    loadApplicationGraph({ cwd, introspect: true }), approvedPlans(cwd), readExisting(cwd),
+  ])
   const map = buildBrowserMap(graph, plans, unreadable)
-  const existing = await readExisting(cwd)
 
-  const featureFiles = new Set(map.features.map((feature) => feature.file))
-  const duplicate = map.features.find((feature, index) => map.features.findIndex((other) => other.file === feature.file) !== index)
-  if (duplicate) throw new CliError(`Two features write ${duplicate.file}; rename a page directory so their names differ by more than case and punctuation.`)
+  const featureFiles = new Set<string>()
+  for (const feature of map.features) {
+    if (featureFiles.has(feature.file)) throw new CliError(`Two features write ${feature.file}; rename a page directory so their names differ by more than case and punctuation.`)
+    featureFiles.add(feature.file)
+  }
   const orphans = [...existing.keys()].filter((file) => file !== BROWSER_MAP_INDEX && !featureFiles.has(file))
 
   const outputs = new Map<string, string>()

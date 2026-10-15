@@ -25,6 +25,9 @@ export interface OpenPlan {
   hash: string
 }
 
+/** Skipped: a draft nobody approved, or a plan changed since its approval. */
+export type ApprovedPlanReading = { kind: 'approved'; plan: OpenPlan } | { kind: 'skipped' } | { kind: 'unreadable' | 'baseline-removed'; reason: string }
+
 /**
  * Skipped: a draft nobody approved, a plan changed since its approval, or one `plan:close` closed
  * at its current hash. A draft with approvals beside it lost its baseline, which is reported.
@@ -45,7 +48,11 @@ export async function readPlanClosedHash(appRoot: string, slug: string): Promise
   }
 }
 
-export async function readOpenPlan(appRoot: string, path: string): Promise<OpenPlanReading> {
+/**
+ * The plan at `path` if approved at its current hash, closed or not, by the same classification
+ * `readOpenPlan()` makes; `consequence` finishes the sentence a lost baseline is reported with.
+ */
+export async function readApprovedPlan(appRoot: string, path: string, consequence: string): Promise<ApprovedPlanReading> {
   const file = toPosixRelative(appRoot, path)
   let plan: Awaited<ReturnType<typeof readPlanFile>>['plan']
   try {
@@ -56,12 +63,17 @@ export async function readOpenPlan(appRoot: string, path: string): Promise<OpenP
   const standing = await readPlanApprovalStanding(path, plan)
   if (standing === undefined || standing.state === 'unapproved') return { kind: 'skipped' }
   if (standing.state === 'unreadable') return { kind: 'unreadable', reason: standing.reason }
-  if (standing.state === 'baseline-removed') return { kind: 'baseline-removed', reason: describeUnapproved(file, standing, 'it is not checked') }
+  if (standing.state === 'baseline-removed') return { kind: 'baseline-removed', reason: describeUnapproved(file, standing, consequence) }
+  // Only a plan with a baseline has the hash an `approved` standing names.
+  return { kind: 'approved', plan: { path, file, plan: plan as Plan, hash: standing.hash } }
+}
 
+export async function readOpenPlan(appRoot: string, path: string): Promise<OpenPlanReading> {
+  const reading = await readApprovedPlan(appRoot, path, 'it is not checked')
+  if (reading.kind !== 'approved') return reading
   const closed = await readPlanClosedHash(appRoot, planSlug(path))
   if ('unreadable' in closed) return { kind: 'unreadable', reason: closed.unreadable }
   // A revision approved after the close carries another hash, and is open work again.
-  if (closed.hash === standing.hash) return { kind: 'skipped' }
-  // Only a plan with a baseline has the hash an `approved` standing names.
-  return { kind: 'open', plan: { path, file, plan: plan as Plan, hash: standing.hash } }
+  if (closed.hash === reading.plan.hash) return { kind: 'skipped' }
+  return { kind: 'open', plan: reading.plan }
 }
