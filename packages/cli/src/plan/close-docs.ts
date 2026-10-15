@@ -9,7 +9,7 @@ import { posix } from 'node:path'
 
 import { RULES_HEADING_BY_LOCALE } from '../docs-acceptance'
 import { parseDocFrontmatter, type DocFrontmatterValue } from '../docs-frontmatter'
-import { markdownLines } from '../docs-links'
+import { findHeadingLine, readMarkedLines, type MarkedLines, type MarkerSyntax } from '../marker-blocks'
 import type { PlanApproval } from './approvals'
 import type { PlanWaiver } from './decisions'
 import { matchPlanLocale, type PlanLocale } from './locales'
@@ -258,66 +258,31 @@ function newEntityDoc(model: PlanModel): string {
 
 const OPEN_MARKER = /^<!-- guren:plan (\S+) (\S+) (\S+) -->$/u
 const CLOSE_MARKER = /^<!-- \/guren:plan (\S+) (\S+) -->$/u
-const HEADING = /^(#{1,6})\s+(.+?)\s*#*\s*$/u
 
-interface EntityDocLines {
-  lines: string[]
-  inFence: boolean[]
-  eol: '\n' | '\r\n'
+const PLAN_MARKERS: MarkerSyntax = {
+  name: 'guren:plan',
+  open(line) {
+    const match = OPEN_MARKER.exec(line)
+    return match ? { key: `${match[1]} ${match[3]}`, match } : undefined
+  },
+  close(line) {
+    const match = CLOSE_MARKER.exec(line)
+    return match ? `${match[1]} ${match[2]}` : undefined
+  },
+}
+
+interface EntityDocLines extends Omit<MarkedLines, 'blocks'> {
   /** `<slug> <section>` → the block: its open and close marker lines, and what the open one names. */
   blocks: Map<string, PlanDocBlock>
 }
 
-/**
- * The document's lines and its blocks, or what makes its markers unsafe to rewrite: an open
- * marker with no close before the next marker or heading, a close with no open, a pair that
- * appears twice, a marker inside a code fence. Any of these, and a rewrite could delete a
- * person's text or never converge, so the caller refuses rather than guesses.
- */
+/** The document's lines and its `guren:plan` blocks, or what makes them unsafe to rewrite ({@link readMarkedLines}). */
 export function readEntityDoc(document: string): { doc: EntityDocLines; problems: string[] } {
-  const scanned = markdownLines(document)
-  const doc: EntityDocLines = {
-    lines: scanned.lines.map((line) => line.text),
-    inFence: scanned.lines.map((line) => line.inFence),
-    eol: document.includes('\r\n') ? '\r\n' : '\n',
-    blocks: new Map(),
-  }
-  // Everything after an unclosed fence reads as code, so a block written there would be code too.
-  if (scanned.unclosedFence !== undefined) return { doc, problems: [`line ${scanned.unclosedFence + 1}: a code fence opens here and never closes`] }
-  const problems: string[] = []
-  let open: { key: string; line: number; slug: string; hash: string; section: string } | undefined
-  const unclosed = (): void => {
-    if (open) problems.push(`line ${open.line + 1}: the block "${open.key}" opens and never closes`)
-    open = undefined
-  }
-  doc.lines.forEach((text, index) => {
-    const opening = OPEN_MARKER.exec(text)
-    const closing = CLOSE_MARKER.exec(text)
-    if ((opening || closing) && doc.inFence[index]) {
-      problems.push(`line ${index + 1}: a guren:plan marker sits inside a code fence`)
-      return
-    }
-    if (opening) {
-      unclosed()
-      open = { key: `${opening[1]} ${opening[3]}`, line: index, slug: opening[1], hash: opening[2], section: opening[3] }
-    } else if (closing) {
-      const key = `${closing[1]} ${closing[2]}`
-      if (open?.key !== key) {
-        unclosed()
-        problems.push(`line ${index + 1}: the block "${key}" closes and never opened`)
-      } else if (doc.blocks.has(key)) {
-        problems.push(`line ${open.line + 1}: the block "${key}" appears twice`)
-        open = undefined
-      } else {
-        doc.blocks.set(key, { slug: open.slug, hash: open.hash, section: open.section, open: open.line, close: index })
-        open = undefined
-      }
-    } else if (!doc.inFence[index] && HEADING.test(text)) {
-      unclosed()
-    }
-  })
-  unclosed()
-  return { doc, problems }
+  const { doc, problems } = readMarkedLines(document, PLAN_MARKERS)
+  const blocks = new Map([...doc.blocks].map(([key, block]) => [key, {
+    slug: block.match[1]!, hash: block.match[2]!, section: block.match[3]!, open: block.open, close: block.close,
+  }]))
+  return { doc: { ...doc, blocks }, problems }
 }
 
 export interface PlanDocBlock {
@@ -342,11 +307,7 @@ export function readPlanBlocks(document: string): { lines: string[]; blocks: Pla
 
 /** The line of a `## ` heading naming `section` in any plan locale, outside code. */
 function findHeading(doc: EntityDocLines, section: EntityDocSection): number {
-  const names = new Set(Object.values(ENTITY_DOC_HEADINGS).map((headings) => headings[section]))
-  return doc.lines.findIndex((line, index) => {
-    const heading = doc.inFence[index] ? null : HEADING.exec(line)
-    return heading !== null && heading[1] === '##' && names.has(heading[2])
-  })
+  return findHeadingLine(doc, 2, new Set(Object.values(ENTITY_DOC_HEADINGS).map((headings) => headings[section])))
 }
 
 /**
