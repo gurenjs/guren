@@ -15,7 +15,7 @@ import { readPlanFile } from './plan-render'
 import { describeUnapproved, PLAN_APPROVAL_GATED_COMMANDS, readPlanApprovalStanding } from './plan/approvals'
 import { writeFileAtomic } from './plan/beside'
 import { readPlanDecisions } from './plan/decisions'
-import { FEEDBACK_STDIN, readJsonWithinLimit, readPlanFeedback } from './plan/feedback'
+import { FEEDBACK_STDIN, readJsonWithinLimit, readPlanFeedback, recoverStdinDash } from './plan/feedback'
 import { canonicalJson, planDigest } from './plan/identity'
 import { readPlanRevisionRecords, writePlanRevisionRecord } from './plan/revision-records'
 import { createPlanRevision, diffPlans, type PlanReopenedElement, type PlanRevisionRejection, type PlanRevisionOp } from './plan/revision'
@@ -64,18 +64,10 @@ const DOCUMENT_FLAGS = ['ops', 'edited', 'feedback'] as const
 
 export type PlanReviseDocumentFlags = Partial<Record<(typeof DOCUMENT_FLAGS)[number], string>>
 
-/**
- * citty parses `--ops -` as `--ops ''` and drops the `-`, so the dash is read back off the raw
- * arguments: the last spelling of the flag decides, as the parsed value does. `--ops=-` parses.
- */
+/** The document flags with a `-` citty dropped read back ({@link recoverStdinDash}). */
 export function withStdinDashes(args: PlanReviseDocumentFlags, rawArgs: readonly string[]): PlanReviseDocumentFlags {
   const recovered = { ...args }
-  for (const flag of DOCUMENT_FLAGS) {
-    if (recovered[flag] !== '') continue
-    const spellings = rawArgs.map((token, index) => (token === `--${flag}` || token.startsWith(`--${flag}=`) ? index : -1))
-    const at = Math.max(...spellings)
-    if (rawArgs[at] === `--${flag}` && rawArgs[at + 1] === FEEDBACK_STDIN) recovered[flag] = FEEDBACK_STDIN
-  }
+  for (const flag of DOCUMENT_FLAGS) recovered[flag] = recoverStdinDash(recovered[flag], flag, rawArgs)
   return recovered
 }
 

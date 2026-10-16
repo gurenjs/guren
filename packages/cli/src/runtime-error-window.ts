@@ -10,9 +10,10 @@ import type { RuntimeErrorQuery, RuntimeErrorResult } from './runtime-errors'
 export type RuntimeErrorEvent = Extract<RuntimeErrorResult, { status: 'available' }>['events'][number]
 export type RuntimeErrorRead = (origin: string, query: RuntimeErrorQuery) => Promise<RuntimeErrorResult>
 
-export type Drained =
+/** Where the feed stood before the work: what a window is judged from, and what a step stores. */
+export type WindowStart =
+  | { status: 'available'; head: { sessionId: string; after: number }; dropped: number }
   | { status: 'unavailable'; reason: string }
-  | { status: 'available'; sessionId: string; head: RuntimeErrorQuery; dropped: number; expired: boolean; events: RuntimeErrorEvent[] }
 
 export interface ErrorWindow {
   status: 'conclusive' | 'inconclusive' | 'unavailable'
@@ -20,10 +21,14 @@ export interface ErrorWindow {
   events: RuntimeErrorEvent[]
 }
 
+type Drained =
+  | { status: 'unavailable'; reason: string }
+  | { status: 'available'; head: { sessionId: string; after: number }; dropped: number; expired: boolean; events: RuntimeErrorEvent[] }
+
 const PAGE_LIMIT = 100
 
 /** Every event from `from` on, following the cursor to the head, which is the next read's start. */
-export async function drainRuntimeErrors(read: RuntimeErrorRead, origin: string, from: RuntimeErrorQuery): Promise<Drained> {
+async function drain(read: RuntimeErrorRead, origin: string, from: RuntimeErrorQuery): Promise<Drained> {
   const events: RuntimeErrorEvent[] = []
   let cursor = from
   let expired = false
@@ -32,16 +37,24 @@ export async function drainRuntimeErrors(read: RuntimeErrorRead, origin: string,
     if (page.status !== 'available') return { status: 'unavailable', reason: page.reason }
     expired ||= page.cursorExpired
     events.push(...page.events)
-    cursor = { sessionId: page.nextCursor.sessionId, after: page.nextCursor.after }
-    if (page.events.length < PAGE_LIMIT) return { status: 'available', sessionId: page.sessionId, head: cursor, dropped: page.dropped, expired, events }
+    const head = { sessionId: page.nextCursor.sessionId, after: page.nextCursor.after }
+    if (page.events.length < PAGE_LIMIT) return { status: 'available', head, dropped: page.dropped, expired, events }
+    cursor = head
   }
 }
 
-/** The window between a head read before some work and a drain from that head after it. */
-export function judgeWindow(start: Drained, end: Drained): ErrorWindow {
+/** The feed's head before some work; nothing before it is ever judged. */
+export async function readWindowStart(read: RuntimeErrorRead, origin: string): Promise<WindowStart> {
+  const start = await drain(read, origin, {})
+  return start.status === 'available' ? { status: 'available', head: start.head, dropped: start.dropped } : start
+}
+
+/** Everything since `start`, and whether that is all there was. */
+export async function windowSince(read: RuntimeErrorRead, origin: string, start: WindowStart): Promise<ErrorWindow> {
   if (start.status !== 'available') return { status: 'unavailable', reason: start.reason, events: [] }
+  const end = await drain(read, origin, start.head)
   if (end.status !== 'available') return { status: 'unavailable', reason: end.reason, events: [] }
-  if (end.sessionId !== start.sessionId) return { status: 'inconclusive', reason: 'The app restarted, so errors from before the restart are gone.', events: end.events }
+  if (end.head.sessionId !== start.head.sessionId) return { status: 'inconclusive', reason: 'The app restarted, so errors from before the restart are gone.', events: end.events }
   if (end.expired) return { status: 'inconclusive', reason: 'Errors were evicted before they were read.', events: end.events }
   if (end.dropped > start.dropped) return { status: 'inconclusive', reason: `${end.dropped - start.dropped} error(s) were dropped.`, events: end.events }
   return { status: 'conclusive', events: end.events }

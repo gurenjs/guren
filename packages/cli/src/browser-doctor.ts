@@ -7,7 +7,7 @@
 
 import { buildBrowserMap, type BrowserFeature, type BrowserMap } from './browser-map'
 import { loadApplicationGraph } from './application-graph-load'
-import { drainRuntimeErrors, judgeWindow, type ErrorWindow, type RuntimeErrorEvent, type RuntimeErrorRead } from './runtime-error-window'
+import { readWindowStart, windowSince, type ErrorWindow, type RuntimeErrorEvent, type RuntimeErrorRead } from './runtime-error-window'
 import { fetchRuntimeErrors, runtimeOrigin } from './runtime-errors'
 
 export interface FeatureCheck {
@@ -105,10 +105,10 @@ async function checkLandmark(io: DoctorIo, origin: string, feature: BrowserFeatu
 
 /** The doctor over a map already built; `io` is the network, so the judgement is testable without a server. */
 export async function examine(map: BrowserMap, origin: string, io: DoctorIo): Promise<DoctorReport> {
-  const start = await drainRuntimeErrors(io.readErrors, origin, {})
+  const start = await readWindowStart(io.readErrors, origin)
   const features: FeatureCheck[] = []
   for (const feature of map.features) features.push(await checkLandmark(io, origin, feature))
-  const window = judgeWindow(start, start.status === 'available' ? await drainRuntimeErrors(io.readErrors, origin, start.head) : start)
+  const window = await windowSince(io.readErrors, origin, start)
 
   const uncorrelated: RuntimeErrorEvent[] = []
   for (const event of window.events) {
