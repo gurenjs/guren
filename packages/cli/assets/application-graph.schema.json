@@ -161,6 +161,13 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
+                  },
+                  "authentication": {
+                    "type": "string",
+                    "enum": [
+                      "required",
+                      "guest-only"
+                    ]
                   }
                 },
                 "required": [
