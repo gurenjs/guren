@@ -7,7 +7,7 @@
 
 import { posix } from 'node:path'
 
-import { controllerActionOf, type GraphNode, type GurenApplicationGraph } from './application-graph'
+import { controllerActionOf, controllerPackageOf, type GraphNode, type GurenApplicationGraph } from './application-graph'
 import { escapeMarkdownTableCell } from './docs-links'
 import { readMarkedLines, spliceMarkedBlock, type MarkerSyntax } from './marker-blocks'
 import { routeTarget } from './plan/app-targets'
@@ -163,6 +163,11 @@ export function buildBrowserMap(
     const controllers = targets('handles', node.id)
     if (controllers.length === 0 || action === undefined) {
       unassigned.push({ ...base, reason: action === undefined ? 'Not handled by a controller action.' : 'Its controller could not be identified.', candidates: [] })
+      continue
+    }
+    const packages = controllers.flatMap((id) => nodes.get(id)?.evidence.flatMap((entry) => controllerPackageOf(entry) ?? []) ?? [])
+    if (packages.length > 0) {
+      unassigned.push({ ...base, reason: `Handled by a controller ${[...new Set(packages)].join(', ')} exports, outside the app.`, candidates: [] })
       continue
     }
     const renders = controllers.flatMap((controller) => rendersByController.get(controller) ?? [])

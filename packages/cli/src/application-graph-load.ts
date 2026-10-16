@@ -3,7 +3,7 @@ import { resolve, extname } from 'node:path'
 import type { AppManifest, MiddlewareEntry } from '@guren/server'
 
 import {
-  buildApplicationGraph, controllerActionSource, graphDigest, graphId,
+  buildApplicationGraph, controllerActionSource, graphDigest, graphId, packageControllerSource,
   type ApplicationGraphInputs, type GRAPH_RELATIONS, type GraphCoverage, type GraphEvidence, type GraphNode, type GurenApplicationGraph,
 } from './application-graph'
 import { importReferencePatterns, modelPatterns, policyBindings, type PolicyBinding } from './authorization-audit'
@@ -349,7 +349,13 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
       const modes = (route.middleware ?? []).flatMap((entry) => entry.capabilities.authentication ? [entry.capabilities.authentication.mode] : [])
       if (modes.length > 0) node.route.authentication = modes.includes('required') ? 'required' : 'guest-only'
       input.nodes.push(node)
-      if (route.controller) {
+      if (route.controller && route.controllerPackage) {
+        const external = graphId('controller', packageControllerSource(route.controllerPackage), route.controller.name)
+        if (!input.nodes.some((entry) => entry.id === external)) {
+          input.nodes.push({ id: external, kind: 'controller', label: route.controller.name, module: null, evidence: [{ kind: 'registered', source: packageControllerSource(route.controllerPackage) }] })
+        }
+        link(id, external, 'handles', evidence)
+      } else if (route.controller) {
         const ref = route.controller
         const matched = controllers.filter((entry) => ref.resolved === 'identity'
           ? entry.file === ref.file && entry.exportNames.includes(ref.exportName ?? '')
