@@ -45,6 +45,8 @@ export interface BrowserMapAcceptance {
 export interface BrowserMapView {
   plan: string
   view: PlanView
+  /** The GET routes rendering the view's page, in registration order; a spec opens the first {@link isParameterless} one. */
+  routes: BrowserMapRoute[]
 }
 
 export interface BrowserFeature {
@@ -76,6 +78,8 @@ export interface BrowserMap {
   unresolvedRenders: Array<{ controller: string; target: string; reason: string }>
   /** Acceptance whose route the app does not register yet. */
   unplaced: Array<{ plan: string; id: string; route: string }>
+  /** Views of an approved plan whose page belongs to no feature yet. */
+  unplacedViews: BrowserMapView[]
   plans: string[]
   unreadablePlans: Array<{ plan: string; reason: string }>
 }
@@ -95,7 +99,7 @@ function featureFile(name: string): string {
   return `${BROWSER_MAP_DIR}/${slugifyProse(name, '-', 'feature')}.md`
 }
 
-function isParameterless(path: string): boolean {
+export function isParameterless(path: string): boolean {
   return !/[:*]/u.test(path)
 }
 
@@ -151,6 +155,7 @@ export function buildBrowserMap(
   const reached = new Set<string>()
   const routeFeatures = new Map<string, string[]>()
   const unassigned: BrowserMap['unassigned'] = []
+  const placed: BrowserMapRoute[] = []
   // The graph does not record which action an unresolved render came from, so none of that controller's actions is known to render nothing.
   const unsure = new Set(graph.unresolved.flatMap((entry) => entry.relation === 'renders' && entry.from ? [entry.from] : []))
 
@@ -194,6 +199,7 @@ export function buildBrowserMap(
       pages: [...new Set(rendered.map((page) => page.label))].sort(compareStrings),
     }
     const bound = labels('binds', node.id)
+    placed.push(route)
     routeFeatures.set(node.id, owners)
     for (const owner of owners) {
       const entry = feature(owner)
@@ -212,6 +218,7 @@ export function buildBrowserMap(
   }
 
   const unplaced: BrowserMap['unplaced'] = []
+  const unplacedViews: BrowserMapView[] = []
   for (const { file, plan } of plans) {
     for (const acceptance of plan.tasks.flatMap((task) => task.acceptance)) {
       const planRoute = plan.routes.find((route) => route.id === acceptance.route)
@@ -233,8 +240,10 @@ export function buildBrowserMap(
     }
     for (const view of plan.views) {
       const page = pages.find((node) => node.label === view.page) ?? { label: view.page, module: null }
+      const entry: BrowserMapView = { plan: file, view, routes: placed.filter((route) => route.method === 'GET' && route.pages.includes(view.page)) }
       const owner = features.get(featureOfPage(page))
-      owner?.views.push({ plan: file, view })
+      if (owner) owner.views.push(entry)
+      else unplacedViews.push(entry)
     }
   }
 
@@ -251,6 +260,7 @@ export function buildBrowserMap(
     unassigned,
     unresolvedRenders,
     unplaced,
+    unplacedViews,
     plans: plans.map((entry) => entry.file).sort(compareStrings),
     unreadablePlans,
   }
@@ -329,6 +339,8 @@ function acceptanceLines(entry: BrowserMapAcceptance): string[] {
 function viewLines(entry: BrowserMapView): string[] {
   const { view } = entry
   const lines = [`Locators (view ${code(view.id)}, page ${code(view.page)}):`]
+  const open = entry.routes.find((route) => isParameterless(route.path))
+  lines.push(open ? `- Open with ${code(`GET ${open.path}`)}` : entry.routes.length > 0 ? `- Every GET route rendering it takes a path parameter: ${entry.routes.map((route) => code(route.path)).join(', ')}` : '- No GET route renders it yet')
   for (const field of view.form?.fields ?? []) lines.push(`- field ${code(field.field)} (${field.input}), label "${field.label}"`)
   for (const action of view.actions) lines.push(`- action "${action.label}" to ${code(action.route)} (button or link: check the page)`)
   const states = Object.entries(view.states).filter(([, value]) => value !== undefined && value !== '')
@@ -434,6 +446,7 @@ function indexBlock(map: BrowserMap, orphans: readonly string[]): string[] {
   list('Routes in no feature:', map.unassigned.map((route) => `${code(`${route.method} ${route.path}`)}${route.name ? ` (${route.name})` : ''}: ${route.reason}${route.candidates.length > 0 ? ` Candidates: ${route.candidates.join(', ')}.` : ''}`))
   list('Renders the graph could not resolve:', map.unresolvedRenders.map((entry) => `${entry.controller}, ${code(entry.target)}: ${entry.reason}`))
   list('Acceptance whose route the app does not register yet:', map.unplaced.map((entry) => `${entry.id} in ${code(entry.plan)}: ${entry.route}`))
+  list('Views whose page no feature holds yet:', map.unplacedViews.map((entry) => `${code(entry.view.id)} in ${code(entry.plan)}: ${code(entry.view.page)}`))
   list('Plans that could not be read:', map.unreadablePlans.map((entry) => `${code(entry.plan)}: ${entry.reason}`))
   list('Documents with no feature any more (kept, since they hold author text):', orphans.map((file) => code(file)))
   return lines

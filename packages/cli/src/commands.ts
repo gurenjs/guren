@@ -1440,12 +1440,12 @@ const addPrototypeCommand = defineCommand({
 const addBrowserTestsCommand = defineCommand({
   meta: {
     name: 'browser-tests',
-    description: 'Install Playwright browser tests (RFC 0033): a config that starts the app through browser:serve, specs generated from the browser map, and a seeded browser account where the app signs in with a password.',
+    description: 'Install Playwright browser tests (RFC 0033): a config that starts the app through browser:serve, a seeded browser account where the app signs in with a password, and the specs browser:map generates from then on.',
   },
   args: {
     force: {
       type: 'boolean',
-      description: 'Overwrite the hand-kept files (config, support, sign-in setup, seeder); the generated specs are rewritten on every run.',
+      description: 'Overwrite the files written once (config, support, sign-in setup, seeder) and an existing test:browser script.',
     },
     install: {
       type: 'boolean',
@@ -1457,18 +1457,21 @@ const addBrowserTestsCommand = defineCommand({
     const { addBrowserTests } = await import('./add-browser-tests')
     const overwritten: string[] = []
     const result = await addBrowserTests({ force: Boolean(args.force), install: args.install, overwritten })
-    announceWrittenFiles([...result.created, ...result.generated], overwritten)
-    for (const orphan of result.orphans) consola.warn(`${orphan} was generated for a plan that is no longer approved; delete it if the plan is gone.`)
+    announceWrittenFiles(result.created, overwritten)
+    if (result.mapped.changed.length > 0) consola.success(`browser:map wrote ${result.mapped.changed.join(', ')}`)
+    if (result.mapped.removed.length > 0) consola.success(`browser:map removed ${result.mapped.removed.join(', ')}`)
     if (!result.map.complete) consola.warn(`The browser map is incomplete (${result.map.gaps.map((gap) => gap.section).join(', ')}), so the specs may miss features; run bunx guren browser:map --check for the reasons.`)
-    if (result.signIn) consola.info('Set BROWSER_TEST_PASSWORD in .env: the browser account is seeded with it.')
-    consola.info('Next: bunx playwright install chromium, then bun run test:browser')
+    if (result.signIn) {
+      if (!result.seedsOnBoot) consola.warn('config/database.ts does not set seedOnBoot, so browser:serve never seeds the browser account and the setup project cannot sign in. Pass { seedOnBoot: process.env.NODE_ENV !== \'production\' } to defineDatabaseConfig().')
+      consola.info('Set BROWSER_TEST_PASSWORD in .env: the browser account is seeded with it.')
+    }
+    consola.info('Next: bunx playwright install chromium, then bun run test:browser. After approving a plan, run bunx guren browser:map to regenerate the specs.')
   },
 })
 
 const addSubCommands = {
   admin: addAdminCommand,
   ai: addAiCommand,
-  'browser-tests': addBrowserTestsCommand,
   attachments: createAddBlueprintCommand('attachments', 'Install the attachments layer: schema table, config, provider, and the prune command.'),
   auth: addAuthCommand,
   oauth: createAddBlueprintCommand('oauth', 'Install OAuth scaffolding with provider presets and callback routes.'),
@@ -1482,6 +1485,7 @@ const addSubCommands = {
   resource: addResourceCommand,
   plugin: addPluginCommand,
   prototype: addPrototypeCommand,
+  'browser-tests': addBrowserTestsCommand,
   session: createAddBlueprintCommand('session', 'Install database-backed sessions: the schema table and migration, config/session.ts, and sessions:prune.'),
   schedule: createAddBlueprintCommand('schedule', 'Install a schedule kernel with a sample recurring task.'),
   storage: createAddBlueprintCommand('storage', 'Install storage scaffolding with local/public disks and a sample storage service.'),

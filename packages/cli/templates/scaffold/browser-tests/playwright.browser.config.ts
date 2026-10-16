@@ -1,18 +1,28 @@
+import { existsSync } from 'node:fs'
 import { defineConfig, devices } from '@playwright/test'
 
 /** Away from the dev server's port, so a run never meets `bun run dev`. */
 const PORT = 4317
 const ORIGIN = `http://127.0.0.1:${PORT}`
 
-// `guren browser:record --begin` names runs this way; any other value could write outside .guren/browser/.
+// Playwright loads no .env. These are the files Bun loads for the app, most specific first; a value already set wins.
+const mode = process.env.NODE_ENV || 'development'
+for (const file of ['.env.local', `.env.${mode}`, '.env']) {
+  if (existsSync(file)) process.loadEnvFile(file)
+}
+
+// `guren browser:record --begin` names runs this way; the name becomes a path under .guren/browser/.
 const RUN_NAME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z-[a-z0-9-]+$/u
 const run = process.env.GUREN_BROWSER_RUN
-if (run && !RUN_NAME.test(run)) throw new Error(`GUREN_BROWSER_RUN=${run} is not a run name guren browser:record --begin wrote.`)
+if (run && (!RUN_NAME.test(run) || !existsSync(`.guren/browser/${run}/run.json`))) {
+  throw new Error(`GUREN_BROWSER_RUN=${run} names no run guren browser:record --begin opened.`)
+}
 
 export default defineConfig({
   testDir: './tests/browser',
   // `bun test` collects *.test.ts and *.spec.ts, so a browser spec under either name would run there too.
   testMatch: '**/*.browser.ts',
+  // One at a time: every spec drives the same app on the same local database.
   workers: 1,
   reporter: run ? [['list'], ['json', { outputFile: `.guren/browser/${run}/spec-report.json` }]] : 'list',
   use: {

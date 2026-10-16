@@ -13,7 +13,7 @@ import { fetchRuntimeErrors } from '../runtime-errors'
 import { CliError } from '../cli-error'
 
 export const browserMapCommand = defineCommand({
-  meta: { name: 'browser:map', description: 'Write the browser verification feature map under docs/browser/ from the application graph (RFC 0033).' },
+  meta: { name: 'browser:map', description: 'Write the browser verification feature map under docs/browser/ from the application graph, and the generated specs once guren add browser-tests has run (RFC 0033).' },
   args: {
     check: { type: 'boolean', description: 'Write nothing; exit 1 when a generated block differs from what a run would write, as well as on an incomplete map.' },
     json: { type: 'boolean', description: 'Print the map model as JSON.' },
@@ -22,10 +22,11 @@ export const browserMapCommand = defineCommand({
   async run({ args }) {
     const run = await runBrowserMap({ cwd: args.app ?? process.cwd(), write: !args.check })
     const { map } = run
-    const failed = !map.complete || map.unreadablePlans.length > 0 || (args.check === true && run.changed.length > 0)
+    const stale = [...run.changed, ...run.removed]
+    const failed = !map.complete || map.unreadablePlans.length > 0 || (args.check === true && stale.length > 0)
     if (failed) markCommandFailed()
     if (args.json) {
-      console.log(JSON.stringify({ ...map, changed: run.changed, orphans: run.orphans }))
+      console.log(JSON.stringify({ ...map, changed: run.changed, orphans: run.orphans, removed: run.removed }))
       return
     }
     const lines: string[] = []
@@ -34,8 +35,11 @@ export const browserMapCommand = defineCommand({
     lines.push(`${map.features.length} feature(s): ${map.features.map((feature) => feature.name).join(', ') || 'none'}`)
     if (map.unassigned.length > 0) lines.push(`${map.unassigned.length} route(s) in no feature, ${map.unreached.length} page(s) no route renders; see the index.`)
     if (run.orphans.length > 0) lines.push(`Kept with no feature: ${run.orphans.join(', ')}`)
-    if (args.check) lines.push(run.changed.length > 0 ? `Out of date: ${run.changed.join(', ')}. Run guren browser:map.` : 'Up to date.')
-    else lines.push(run.changed.length > 0 ? `Wrote ${run.changed.join(', ')}.` : 'Up to date; nothing written.')
+    if (args.check) lines.push(stale.length > 0 ? `Out of date: ${stale.join(', ')}. Run guren browser:map.` : 'Up to date.')
+    else {
+      lines.push(run.changed.length > 0 ? `Wrote ${run.changed.join(', ')}.` : 'Up to date; nothing written.')
+      if (run.removed.length > 0) lines.push(`Removed generated specs nothing produces any more: ${run.removed.join(', ')}.`)
+    }
     console.log(lines.join('\n'))
   },
 })
