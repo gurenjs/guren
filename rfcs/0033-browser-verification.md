@@ -559,3 +559,11 @@ changes behaviour.
    fact rather than a gap, or should §4 accept a gap confined to routes no
    feature can own? The map must not grow its own exception; this needs
    deciding before M2.
+   **Resolved (2026-10-16):** the graph. The introspection child already knows
+   which routed classes are exports of the framework module the app loads, and
+   tags those routes with the package (`controllerPackage` on the CLI's route
+   entry). The graph then gives such a route a `handles` edge to a controller
+   node with no file, its evidence naming the package, so `handles` stays
+   complete. A controller from any other package is still unresolved: nothing
+   proves where it lives. The map lists a package-handled route in the index as
+   handled outside the app, never as a gap.

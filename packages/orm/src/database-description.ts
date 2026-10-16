@@ -13,7 +13,7 @@ export interface DatabaseDescription {
 
 // Must equal AGENT_REDACTED in @guren/server's agent/redact.ts, which the ORM cannot import:
 // report-mode env parsing writes it for a required key that is unset or invalid.
-// packages/core/tests/database-description.test.ts pins the two together.
+// packages/core/tests/config.test.ts pins the two together.
 const REDACTED = '[REDACTED]'
 
 /**
