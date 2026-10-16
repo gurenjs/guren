@@ -10,11 +10,10 @@ import { loadApplicationGraph } from './application-graph-load'
 import { fetchRuntimeErrors, runtimeOrigin, type RuntimeErrorQuery, type RuntimeErrorResult } from './runtime-errors'
 
 type RuntimeErrorEvent = Extract<RuntimeErrorResult, { status: 'available' }>['events'][number]
-type FeatureStatus = 'pass' | 'fail' | 'redirected' | 'skipped'
 
 export interface FeatureCheck {
   feature: string
-  status: FeatureStatus
+  status: 'pass' | 'fail' | 'auth-required' | 'skipped'
   route?: { method: string; path: string; name?: string }
   httpStatus?: number
   /** The component the page payload names, and what the graph says the landmark renders. */
@@ -57,9 +56,11 @@ export function pageComponent(html: string): string | undefined {
   while ((tag = openTag.exec(html)) !== null) {
     const text = tag[0].toLowerCase()
     if (!text.includes('data-page="app"') || !text.includes('type="application/json"')) continue
-    const close = html.toLowerCase().indexOf('</script', openTag.lastIndex)
-    if (close === -1) return undefined
-    return componentOf(html.slice(openTag.lastIndex, close))
+    // Searched on the original, never a lowercased copy: case folding can change a string's length.
+    const close = /<\/script\s*>/giu
+    close.lastIndex = openTag.lastIndex
+    const end = close.exec(html)
+    return end ? componentOf(html.slice(openTag.lastIndex, end.index)) : undefined
   }
   const legacy = /data-page="([^"]+)"/u.exec(html)
   if (!legacy) return undefined
@@ -108,13 +109,21 @@ async function checkLandmark(io: DoctorIo, origin: string, feature: BrowserFeatu
   if (response.status >= 300 && response.status < 400) {
     await response.body?.cancel()
     const location = response.headers.get('location') ?? undefined
-    return { ...base, status: 'redirected', httpStatus: response.status, ...(location ? { location } : {}), reason: 'Redirected, so the page was not compared; a sign-in redirect reads the same.' }
+    const redirect = { ...base, httpStatus: response.status, ...(location ? { location } : {}) }
+    if (landmark.authentication === 'required') return { ...redirect, status: 'auth-required', reason: 'Its middleware requires a signed-in user, so the page was not compared.' }
+    return { ...redirect, status: 'fail', reason: `Redirected to ${location ?? 'nowhere'}, though its middleware requires no signed-in user.` }
   }
   if (response.status !== 200) {
     await response.body?.cancel()
     return { ...base, status: 'fail', httpStatus: response.status, reason: `HTTP ${response.status}.` }
   }
-  const component = pageComponent(await response.text())
+  let html: string
+  try {
+    html = await response.text()
+  } catch (error) {
+    return { ...base, status: 'fail', httpStatus: 200, reason: `The body could not be read: ${error instanceof Error ? error.message : String(error)}` }
+  }
+  const component = pageComponent(html)
   if (component === undefined) return { ...base, status: 'fail', httpStatus: 200, reason: 'The response carries no Inertia page payload.' }
   if (!landmark.pages.includes(component)) {
     return { ...base, status: 'fail', httpStatus: 200, component, reason: `Rendered ${component}, where the graph says ${landmark.pages.join(' or ')}.` }
@@ -155,10 +164,12 @@ export async function examine(map: BrowserMap, origin: string, io: DoctorIo): Pr
     check.reason = `${check.events.length} server error(s) on this feature's routes during the run.`
   }
 
+  const failed = features.some((check) => check.status === 'fail') || uncorrelated.length > 0
   const reasons: string[] = []
-  if (features.some((check) => check.status === 'fail')) reasons.push('A landmark failed.')
-  if (uncorrelated.length > 0) reasons.push(`${uncorrelated.length} server error(s) no mapped route accounts for.`)
-  const failed = reasons.length > 0
+  if (features.some((check) => check.status === 'fail')) reasons.push('A feature failed.')
+  if (uncorrelated.length > 0) reasons.push(`${uncorrelated.length} server error(s) no mapped route accounts for, or that the server could not tie to one route.`)
+  const signIn = features.filter((check) => check.status === 'auth-required').length
+  if (signIn > 0) reasons.push(`${signIn} landmark(s) need a signed-in user, so their pages were not compared.`)
   if (!map.complete) reasons.push(`The map is incomplete (${map.gaps.map((gap) => gap.section).join(', ')}).`)
   if (window.status !== 'conclusive') reasons.push(`The runtime-error window is ${window.status}: ${window.reason}`)
   if (!features.some((check) => check.status === 'pass')) reasons.push('No landmark was served as the graph says.')

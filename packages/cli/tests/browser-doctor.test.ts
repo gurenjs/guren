@@ -69,6 +69,12 @@ describe('pageComponent', () => {
     expect(pageComponent('<div id="app" data-page="{&quot;component&quot;:&quot;Home&quot;}"></div>')).toBe('Home')
     expect(pageComponent('<html><body>plain</body></html>')).toBeUndefined()
   })
+
+  test('reads a payload whose text changes length when lowercased, and an SSR payload escaping slashes', () => {
+    const turkish = `<title>\u0130stanbul</title><script data-page="app" type="application/json">{"component":"posts/Index","props":{"city":"\u0130stanbul"}}</script>`
+    expect(pageComponent(turkish)).toBe('posts/Index')
+    expect(pageComponent('<script data-page="app" type="application/json">{"component":"posts\\/Index"}</script>')).toBe('posts/Index')
+  })
 })
 
 describe('examine', () => {
@@ -109,13 +115,31 @@ describe('examine', () => {
     ])
   })
 
-  test('reports a redirect without comparing the page, and an unpassed run as inconclusive', async () => {
+  test('reports a sign-in redirect on a route requiring a user, and never passes over it', async () => {
+    const dashboard = feature('dashboard', '/dashboard', 'dashboard/Index')
+    const guarded = { ...dashboard.landmark!, authentication: 'required' as const }
     const report = await examine(
-      map([feature('dashboard', '/dashboard', 'dashboard/Index')]), ORIGIN,
-      io({ '/dashboard': () => new Response(null, { status: 302, headers: { location: '/login' } }) }),
+      map([feature('posts', '/posts', 'posts/Index'), { ...dashboard, routes: [guarded], landmark: guarded }]), ORIGIN,
+      io({ '/posts': () => page('posts/Index'), '/dashboard': () => new Response(null, { status: 302, headers: { location: '/login' } }) }),
     )
-    expect(report.features[0]).toMatchObject({ status: 'redirected', location: '/login' })
+    expect(report.features[1]).toMatchObject({ status: 'auth-required', location: '/login' })
     expect(report.result).toBe('inconclusive')
+  })
+
+  test('fails a redirect on a route that requires no signed-in user', async () => {
+    const report = await examine(
+      map([feature('posts', '/posts', 'posts/Index'), feature('about', '/about', 'About')]), ORIGIN,
+      io({ '/posts': () => page('posts/Index'), '/about': () => new Response(null, { status: 302, headers: { location: '/' } }) }),
+    )
+    expect(report.features[1]).toMatchObject({ status: 'fail', reason: 'Redirected to /, though its middleware requires no signed-in user.' })
+    expect(report.result).toBe('fail')
+  })
+
+  test('fails a landmark whose body cannot be read, keeping the report', async () => {
+    const broken = () => new Response(new ReadableStream({ start(controller) { controller.error(new Error('reset')) } }), { status: 200 })
+    const report = await examine(map([feature('posts', '/posts', 'posts/Index')]), ORIGIN, io({ '/posts': broken }))
+    expect(report.features[0]).toMatchObject({ status: 'fail' })
+    expect(report.features[0]!.reason).toContain('The body could not be read')
   })
 
   test('never reads an unavailable collector, a restarted app or dropped errors as zero errors', async () => {
