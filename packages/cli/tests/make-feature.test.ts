@@ -434,7 +434,7 @@ describe('makeFeature', () => {
       expect(newPage).toMatch(/import \{[^}]*\buseState\b[^}]*\} from 'react'/)
       expect(newPage).toContain('const [jsonErrors, setJsonErrors] = useState<Record<string, boolean>>({})')
       expect(newPage).toContain('setJsonErrors((prev) => ({ ...prev, meta: true }))')
-      expect(newPage).toContain('{jsonErrors.meta && (')
+      expect(newPage).toContain('{jsonErrors.meta && <p id={`${fieldIds.meta}-json-error`}')
 
       const showPage = await readFile(join(workspace.dir, 'resources/js/pages/events/Show.tsx'), 'utf8')
       // An object is not a valid React child.
@@ -472,8 +472,8 @@ describe('makeFeature', () => {
 
       const newPage = await readFile(join(workspace.dir, 'resources/js/pages/things/New.tsx'), 'utf8')
 
-      expect(newPage).toContain('{jsonErrors._meta && (')
-      expect(newPage).toContain('{jsonErrors.meta && (')
+      expect(newPage).toContain('{jsonErrors._meta && <p')
+      expect(newPage).toContain('{jsonErrors.meta && <p')
       // One hook pair for the page, not one per field.
       expect(newPage.match(/useState/g)).toHaveLength(3)
     } finally {
@@ -492,13 +492,13 @@ describe('makeFeature', () => {
       for (const page of ['New.tsx', 'Edit.tsx']) {
         const source = await readFile(join(workspace.dir, 'resources/js/pages/events', page), 'utf8')
         expect(source).toContain("import { useId, useState } from 'react'")
-        expect(source).toContain('const fieldIds = { title: useId(), body: useId(), meta: useId(), seats: useId(), startsAt: useId() }')
+        expect(source).toContain('const fieldIds = { title: useId(), body: useId(), meta: useId(), seats: useId(), startsAt: useId(), pinned: useId() }')
         for (const name of ['title', 'body', 'meta', 'seats', 'startsAt']) {
           expect(source).toContain(`<label htmlFor={fieldIds.${name}} className="${FIELD_LABEL_CLASS}">${name}</label>`)
           expect(source.match(new RegExp(`id=\\{fieldIds\\.${name}\\}`, 'g'))).toHaveLength(1)
         }
-        // The checkbox is named by the label wrapping it, so it takes no id.
-        expect(source).not.toContain('fieldIds.pinned')
+        // The checkbox is named by the label wrapping it; its id only names its error.
+        expect(source).not.toContain('id={fieldIds.pinned}')
         expect(source).toMatch(/<label className="flex items-center gap-2">\s*<input type="checkbox"/)
         expect(source).not.toContain('placeholder=')
       }
@@ -507,15 +507,65 @@ describe('makeFeature', () => {
     }
   })
 
-  it('imports no React hook for a form of checkboxes only', async () => {
+  it('imports only useId for a form of checkboxes only', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-checkbox-only-')
 
     try {
       await makeFeature('Flag', { fields: 'enabled:boolean' })
 
       const newPage = await readFile(join(workspace.dir, 'resources/js/pages/flags/New.tsx'), 'utf8')
-      expect(newPage).not.toContain("from 'react'")
-      expect(newPage).not.toContain('fieldIds')
+      expect(newPage).toContain("import { useId } from 'react'")
+      expect(newPage).toContain('const fieldIds = { enabled: useId() }')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // A validation failure reaches the page as `form.errors` only:
+  // InertiaServiceProvider flashes it into the shared `errors` prop on the redirect back.
+  it('shows each field\'s validation error and ties it to its control', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-errors-')
+
+    try {
+      await makeFeature('Event', { fields: 'title:string,body:text?,meta:json,seats:number?,startsAt:date,pinned:boolean' })
+
+      // The aria attributes belong on the control itself, not on a wrapping label.
+      const controlOf = (source: string, name: string): string => {
+        const start = name === 'pinned'
+          ? source.indexOf('<input type="checkbox"')
+          : source.lastIndexOf('<', source.indexOf(`id={fieldIds.${name}}`))
+        expect(start).toBeGreaterThanOrEqual(0)
+        return source.slice(start, source.indexOf('/>', start))
+      }
+
+      for (const page of ['New.tsx', 'Edit.tsx']) {
+        const source = await readFile(join(workspace.dir, 'resources/js/pages/events', page), 'utf8')
+        for (const name of ['title', 'body', 'seats', 'startsAt', 'pinned']) {
+          expect(source).toContain(
+            `{form.errors.${name} && <p id={\`\${fieldIds.${name}}-error\`} className="mt-1 text-sm text-g-danger">{form.errors.${name}}</p>}`,
+          )
+          const control = controlOf(source, name)
+          expect(control).toContain(`aria-invalid={form.errors.${name} ? true : undefined}`)
+          expect(control).toContain(`aria-describedby={form.errors.${name} ? \`\${fieldIds.${name}}-error\` : undefined}`)
+        }
+
+        // A json field describes itself by whichever of its two messages shows.
+        expect(source).toContain('{form.errors.meta && <p id={`${fieldIds.meta}-error`}')
+        const meta = controlOf(source, 'meta')
+        expect(meta).toStartWith('<textarea')
+        expect(meta).toContain('aria-invalid={jsonErrors.meta || form.errors.meta ? true : undefined}')
+        expect(meta).toContain(
+          "aria-describedby={[jsonErrors.meta && `${fieldIds.meta}-json-error`, form.errors.meta && `${fieldIds.meta}-error`].filter(Boolean).join(' ') || undefined}",
+        )
+      }
+
+      // Page props override shared ones, so an `errors: {}` from edit() would
+      // erase the flashed errors before the Edit page could show them.
+      const editPage = await readFile(join(workspace.dir, 'resources/js/pages/events/Edit.tsx'), 'utf8')
+      expect(editPage).not.toContain('errors?:')
+      expect(editPage).not.toContain('RouteErrors')
+      const controller = await readFile(join(workspace.dir, 'app/Http/Controllers/EventController.ts'), 'utf8')
+      expect(controller).not.toContain('errors: {}')
     } finally {
       await workspace.cleanup()
     }

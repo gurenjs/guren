@@ -547,7 +547,6 @@ ${storeAttach}    return this.redirect('${redirectPrefix}/${routeName}/' + ${var
     const ${variableName} = await ${singular}.findOrFail(id)
     return this.inertia(${pagesBase}.Edit, {
       ${variableName}: new ${singular}Resource(${variableName}).toJSON(),
-      errors: {},
     })`,
       },
       {
@@ -723,14 +722,13 @@ function generateEditPage(
 
   return `${state.imports}import { useForm } from '@inertiajs/react'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
-import type { RouteBody, RouteErrors } from '@guren/inertia-client/typed-forms'
+import type { RouteBody } from '@guren/inertia-client/typed-forms'
 import { route } from '@/.guren/routes.gen'
 
 type ${singular}FormData = RouteBody<ApiRoutes, '${routeName}.store'>
 
 interface Props {
   ${variableName}: ${singular}FormData & { id: number }
-  errors?: RouteErrors<${singular}FormData> & { message?: string }
 }
 
 export default function Edit${singular}({ ${variableName} }: Props) {
@@ -749,38 +747,91 @@ ${formFields}
 `
 }
 
-/** A checkbox is wrapped in its label, so it is the one control that needs no id. */
+/** A checkbox is wrapped in its label, so its `fieldIds` entry only names its error message. */
 function wrapsItsLabel(field: FieldDefinition): boolean {
   return field.type === 'boolean'
 }
 
-function generateFormField(field: FieldDefinition, formVar: string): string {
-  if (wrapsItsLabel(field)) {
-    return `          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={${formValue(field, formVar)}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.checked)} className="h-4 w-4 rounded accent-g-accent" />
-            ${field.name}
-          </label>`
+interface FieldMessage {
+  /** The JSX condition that renders the message. */
+  when: string
+  /** The JSX expression for the message element's id. */
+  id: string
+  text: string
+}
+
+/**
+ * A json field has two: the client's parse failure and the server's validation
+ * error, flashed onto the Inertia redirect back and read as `form.errors`.
+ */
+function fieldMessages(field: FieldDefinition, formVar: string): FieldMessage[] {
+  const messageId = (suffix: string) => `\`\${fieldIds.${field.name}}-${suffix}\``
+  const server: FieldMessage = {
+    when: `${formVar}.errors.${field.name}`,
+    id: messageId('error'),
+    text: `{${formVar}.errors.${field.name}}`,
   }
+  if (field.type !== 'json') return [server]
+  return [
+    {
+      when: `jsonErrors.${field.name}`,
+      id: messageId('json-error'),
+      text: `${field.name} is not valid JSON — fix it or the last valid value is submitted.`,
+    },
+    server,
+  ]
+}
+
+/** `aria-invalid` and `aria-describedby`, set only while a message shows. */
+function errorAttributes(messages: FieldMessage[]): [string, string] {
+  if (messages.length === 1) {
+    const [{ when, id }] = messages
+    return [`aria-invalid={${when} ? true : undefined}`, `aria-describedby={${when} ? ${id} : undefined}`]
+  }
+  const invalid = messages.map((m) => m.when).join(' || ')
+  const describedBy = messages.map((m) => `${m.when} && ${m.id}`).join(', ')
+  return [
+    `aria-invalid={${invalid} ? true : undefined}`,
+    `aria-describedby={[${describedBy}].filter(Boolean).join(' ') || undefined}`,
+  ]
+}
+
+function errorLines(messages: FieldMessage[]): string {
+  return messages
+    .map((m) => `            {${m.when} && <p id={${m.id}} className="mt-1 text-sm text-g-danger">${m.text}</p>}`)
+    .join('\n')
+}
+
+function generateFormField(field: FieldDefinition, formVar: string): string {
+  const messages = fieldMessages(field, formVar)
+  const control = wrapsItsLabel(field)
+    ? `            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={${formValue(field, formVar)}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.checked)} ${errorAttributes(messages).join(' ')} className="h-4 w-4 rounded accent-g-accent" />
+              ${field.name}
+            </label>`
+    : `            <label htmlFor={fieldIds.${field.name}} className="${FIELD_LABEL_CLASS}">${field.name}</label>
+${labelledControl(field, formVar, errorAttributes(messages))}`
   return `          <div>
-            <label htmlFor={fieldIds.${field.name}} className="${FIELD_LABEL_CLASS}">${field.name}</label>
-${labelledControl(field, formVar)}
+${control}
+${errorLines(messages)}
           </div>`
 }
 
-function labelledControl(field: FieldDefinition, formVar: string): string {
+function labelledControl(field: FieldDefinition, formVar: string, ariaAttributes: [string, string]): string {
   const id = `fieldIds.${field.name}`
+  const errorAttrs = ariaAttributes.join(' ')
   const value = formValue(field, formVar)
   const controlClass = `mt-1 ${FORM_INPUT_CLASS}`
   if (field.type === 'text') {
-    return `            <textarea id={${id}} value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="${controlClass}" />`
+    return `            <textarea id={${id}} value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} ${errorAttrs} className="${controlClass}" />`
   }
   if (field.type === 'number') {
-    return `            <input id={${id}} type="number" value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} className="${controlClass}" />`
+    return `            <input id={${id}} type="number" value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} ${errorAttrs} className="${controlClass}" />`
   }
   if (field.type === 'date') {
     // The value arrives as an ISO timestamp but `type="date"` only renders a
     // bare `YYYY-MM-DD`, and shows nothing at all for anything longer.
-    return `            <input id={${id}} type="date" value={${value}.slice(0, 10)} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="${controlClass}" />`
+    return `            <input id={${id}} type="date" value={${value}.slice(0, 10)} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} ${errorAttrs} className="${controlClass}" />`
   }
   if (field.type === 'json') {
     // Uncontrolled: a controlled textarea driven by the parsed object would
@@ -797,13 +848,11 @@ function labelledControl(field: FieldDefinition, formVar: string): string {
                   setJsonErrors((prev) => ({ ...prev, ${field.name}: true }))
                 }
               }}
+              ${ariaAttributes.join('\n              ')}
               className="${controlClass} font-mono text-sm"
-            />
-            {jsonErrors.${field.name} && (
-              <p className="mt-1 text-sm text-g-danger">${field.name} is not valid JSON — fix it or the last valid value is submitted.</p>
-            )}`
+            />`
   }
-  return `            <input id={${id}} value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="${controlClass}" />`
+  return `            <input id={${id}} value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} ${errorAttrs} className="${controlClass}" />`
 }
 
 /**
@@ -816,10 +865,9 @@ function generateFormState(fields: FieldDefinition[], formVar: string): { import
   const reactImports: string[] = []
   const hooks: string[] = []
 
-  const labelled = fields.filter((f) => !wrapsItsLabel(f))
-  if (labelled.length > 0) {
+  if (fields.length > 0) {
     reactImports.push('useId')
-    hooks.push(`  const fieldIds = { ${labelled.map((f) => `${f.name}: useId()`).join(', ')} }\n`)
+    hooks.push(`  const fieldIds = { ${fields.map((f) => `${f.name}: useId()`).join(', ')} }\n`)
   }
 
   const jsonFields = fields.filter((f) => f.type === 'json')
