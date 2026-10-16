@@ -1,6 +1,8 @@
 import { defineCommand } from '../define-command'
 import { markCommandFailed } from '../command-status'
 import { runBrowserMap } from '../browser-map-files'
+import { startBrowserServe } from '../browser-serve'
+import { CliError } from '../cli-error'
 
 export const browserMapCommand = defineCommand({
   meta: { name: 'browser:map', description: 'Write the browser verification feature map under docs/browser/ from the application graph (RFC 0033).' },
@@ -27,5 +29,32 @@ export const browserMapCommand = defineCommand({
     if (args.check) lines.push(run.changed.length > 0 ? `Out of date: ${run.changed.join(', ')}. Run guren browser:map.` : 'Up to date.')
     else lines.push(run.changed.length > 0 ? `Wrote ${run.changed.join(', ')}.` : 'Up to date; nothing written.')
     console.log(lines.join('\n'))
+  },
+})
+
+function integerArg(value: string | undefined, flag: string, max: number, unit: string): number | undefined {
+  if (value === undefined) return undefined
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > max) throw new CliError(`${flag} must be ${unit} from 1 to ${max}, got ${value}.`)
+  return parsed
+}
+
+export const browserServeCommand = defineCommand({
+  meta: { name: 'browser:serve', description: 'Start the app for a browser verification session, refusing a database it cannot show is local (RFC 0033).' },
+  args: {
+    port: { type: 'string', description: 'Port to bind on 127.0.0.1 (default: a free one).' },
+    'database-url': { type: 'string', description: "DATABASE_URL for the started app only; checked like the app's own." },
+    timeout: { type: 'string', description: 'Seconds to wait for the app to answer (default 60).' },
+    app: { type: 'string', description: 'Application root directory.' },
+  },
+  async run({ args }) {
+    const handle = await startBrowserServe({
+      cwd: args.app ?? process.cwd(),
+      port: integerArg(args.port, '--port', 65_535, 'a port'),
+      databaseUrl: args['database-url'],
+      readyTimeoutMs: (integerArg(args.timeout, '--timeout', 3_600, 'seconds') ?? 60) * 1000,
+    })
+    console.log(JSON.stringify(handle.ready))
+    if (!(await handle.ended)) markCommandFailed()
   },
 })

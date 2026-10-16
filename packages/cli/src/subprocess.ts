@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 
 export interface CapturedRun {
   exitCode: number
@@ -22,7 +22,17 @@ export interface CapturedOptions {
   processGroup?: boolean
 }
 
-const FORWARDED_SIGNALS: readonly NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP']
+export const FORWARDED_SIGNALS: readonly NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP']
+
+/** Signals the child's whole process group when it leads one (`detached` on POSIX), else the child alone. */
+export function signalChild(child: ChildProcess, signal: NodeJS.Signals, grouped: boolean): void {
+  try {
+    if (grouped && child.pid !== undefined) process.kill(-child.pid, signal)
+    else child.kill(signal)
+  } catch {
+    // Already gone: the child leads its group, so an empty group means it exited too.
+  }
+}
 
 /** A subprocess run to completion with its output captured. `command[0]` is the executable. */
 export type CapturedExec = (command: string[], cwd: string, options?: CapturedOptions) => Promise<CapturedRun>
@@ -50,14 +60,7 @@ export const runCaptured: CapturedExec = (command, cwd, options) =>
     // Both are piped above; the conditional stdin only widens the inferred type.
     const out = child.stdout!
     const err = child.stderr!
-    const kill = (): void => {
-      try {
-        if (grouped && child.pid !== undefined) process.kill(-child.pid, 'SIGKILL')
-        else child.kill('SIGKILL')
-      } catch {
-        // Already gone: the child leads its group, so an empty group means it exited too.
-      }
-    }
+    const kill = (): void => signalChild(child, 'SIGKILL', grouped)
     // A detached group is outside this terminal's foreground group, which Ctrl+C signals.
     const forward = (signal: NodeJS.Signals): void => {
       kill()

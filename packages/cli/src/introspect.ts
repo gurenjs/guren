@@ -34,6 +34,8 @@ export interface IntrospectOptions {
    * their import scope.
    */
   graph?: boolean
+  /** Laid over the child's environment; a run given any is never memoised, since the key would not name it. */
+  env?: Readonly<Record<string, string>>
 }
 
 /** Set to `1` beside `GUREN_INTROSPECT` for a {@link IntrospectOptions.graph} run. */
@@ -108,7 +110,7 @@ export function introspectApp(cwd: string, options: IntrospectOptions = {}): Pro
   const root = resolve(cwd)
   const timeoutMs = options.timeoutMs ?? DEFAULT_INTROSPECT_TIMEOUT_MS
   const graph = options.graph === true
-  if (options.fresh) return runOrCrash(root, timeoutMs, graph)
+  if (options.fresh || options.env) return runOrCrash(root, timeoutMs, graph, options.env)
   const key = `${timeoutMs}:${graph}:${root}`
   let run = runs.get(key)
   if (!run) {
@@ -118,15 +120,15 @@ export function introspectApp(cwd: string, options: IntrospectOptions = {}): Pro
   return run
 }
 
-function runOrCrash(root: string, timeoutMs: number, graph: boolean): Promise<Introspection> {
-  return runIntrospection(root, timeoutMs, graph).catch((error: unknown): Introspection => ({
+function runOrCrash(root: string, timeoutMs: number, graph: boolean, env?: Readonly<Record<string, string>>): Promise<Introspection> {
+  return runIntrospection(root, timeoutMs, graph, env).catch((error: unknown): Introspection => ({
     status: 'failed',
     reason: 'crashed',
     message: `The introspection process could not run: ${error instanceof Error ? error.message : String(error)}`,
   }))
 }
 
-async function runIntrospection(root: string, timeoutMs: number, graph: boolean): Promise<Introspection> {
+async function runIntrospection(root: string, timeoutMs: number, graph: boolean, extraEnv?: Readonly<Record<string, string>>): Promise<Introspection> {
   const child = siblingEntry('introspect-child')
   if (!child) {
     return { status: 'failed', reason: 'crashed', message: 'introspect-child is missing beside the CLI; rebuild @guren/cli.' }
@@ -139,7 +141,7 @@ async function runIntrospection(root: string, timeoutMs: number, graph: boolean)
     const run = await runCaptured([bunExecutable(), child, resultFile, String(timeoutMs + INTROSPECT_CHILD_BUDGET_MARGIN_MS)], root, {
       timeoutMs,
       // Always set, so a value inherited from this process cannot turn an ordinary run into a graph run.
-      env: { GUREN_INTROSPECT: '1', [INTROSPECT_GRAPH_ENV]: graph ? '1' : '0' },
+      env: { ...extraEnv, GUREN_INTROSPECT: '1', [INTROSPECT_GRAPH_ENV]: graph ? '1' : '0' },
       processGroup: true,
     })
     const result = run.timedOut ? undefined : await readResult(resultFile)
