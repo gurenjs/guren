@@ -34,6 +34,7 @@ import { routeTypesCommand, codegenCommand, openApiGenerateCommand } from './com
 import { migrateCommand, seedCommand, resetCommand, freshCommand, rollbackCommand, statusCommand } from './commands/database'
 import { introspectCommand } from './commands/introspect'
 import { graphCommand } from './commands/graph'
+import { browserMapCommand } from './commands/browser'
 import { runtimeErrorsCommand } from './commands/runtime-errors'
 import { planCommand, planRenderCommand, planStatusCommand, planVerifyCommand, planNextCommand, planScaffoldCommand, planApproveCommand, planWaiveCommand, planReviseCommand, planCloseCommand } from './commands/plan'
 import { toolListCommand, toolInspectCommand, toolCallCommand, toolLogCommand, tokenIssueCommand, toolDevCommand } from './commands/tools'
@@ -1744,6 +1745,7 @@ export const builtinSubCommands = {
   'model:list': modelListCommand,
   'runtime:errors': runtimeErrorsCommand,
   graph: graphCommand,
+  'browser:map': browserMapCommand,
   context: contextCommand,
   introspect: introspectCommand,
   check: checkCommand,

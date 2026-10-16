@@ -2,7 +2,8 @@
 
 **Author:** Guren contributors
 **Date:** 2026-10-14
-**Status:** Draft
+**Status:** Accepted (2026-10-15; the deciding maintainer asked for implementation to start
+and shortened the standard discussion period.)
 
 ## Problem
 
@@ -92,8 +93,11 @@ proves it works.
 **Features.** A feature is the first path segment of a page under
 `resources/js/pages/` (`pages/posts/Index.tsx` is `posts`); a page directly under
 `pages/` is its own feature. This is the only grouping rule. Module pages live
-under the root `pages/<module>/…` tree and group the same way. The graph records
-no module for a page today, so the map claims none; module ownership is added to
+under the root `pages/<module>/…` tree and group the same way. ~~The graph records
+no module for a page today, so the map claims none~~ **Amended in
+implementation:** the graph records a page's module only for a page file under
+`modules/<name>/`, which the map prefixes to the feature name; it infers no
+module for the root tree. Further module ownership is added to
 the graph first if a later version needs it (Open Question 2).
 
 **Joining routes to pages.** The `renders` edge runs from a controller class to
@@ -106,15 +110,22 @@ nothing (a `store`, a `destroy`) belongs to the feature only when every page its
 controller renders is in that feature; otherwise it is listed in the index as
 unassigned with the candidates. A page no route reaches is listed as unreached.
 
-**Coverage.** The map is complete only when the graph's `routes`, `handles`,
-`renders` and `pages` coverage is complete and the snapshot is stable. Otherwise
-every file states that the feature set may be incomplete, with the graph's
-reasons, and `browser:map` exits 1 after writing. An `unresolved` render is
-printed with its reason, never guessed.
+**Coverage.** The map is complete only when the graph's ~~`routes`, `handles`,
+`renders` and `pages`~~ coverage is complete and the snapshot is stable.
+**Amended in implementation:** the graph's keys are `route`, `controller`,
+`page`, `handles` and `renders`; a gap in `usesMiddleware` is noted in each
+feature's reach section instead, since it shortens a middleware list but not the
+feature set. Otherwise ~~every file states~~ **the index states** that the
+feature set may be incomplete, with the graph's reasons, and `browser:map` exits
+1 after writing. Feature files carry no snapshot-dependent text, so `--check`
+does not fail on an unrelated source edit. An `unresolved` render is printed
+with its reason, never guessed.
 
 **Generated and authored sections.** Each file carries OKF frontmatter
 (`type: browser`; `entities` only for models the graph binds to a feature's
-routes). `check --docs` reads `docs/` and will check these files like any other
+routes), written when the file is created and never touched afterwards, as
+`plan:close` treats an existing document's frontmatter. `check --docs` reads
+`docs/` and will check these files like any other
 document, so the generator writes only references that resolve. Sections the
 command owns sit between markers and are replaced on every run; everything else
 belongs to the author:
@@ -168,7 +179,9 @@ relations).
 
 `browser:map --json` prints the model the files are rendered from.
 `browser:map --check` exits 1 when a generated block differs from what a run
-would write, and writes nothing.
+would write, and writes nothing. **Amended in implementation:** it also exits 1
+on an incomplete map or an unread plan, as a writing run does, so a matching
+document never passes a check the map itself fails.
 
 ### 3. Launching: the `database` manifest section and `browser:serve`
 
@@ -395,10 +408,15 @@ plan should at least point at the latest run for an id is Open Question 8.
 
 | Stage | Deliverable | Done when |
 | --- | --- | --- |
-| M1 | `browser:map` and the skill | The map round-trips on `examples/blog` and a `make:feature` app; author text survives; an incomplete graph is reported, not hidden |
-| M2 | `database` manifest section, `browser:serve`, `browser:doctor`, `browser:record` | §3, §4 and §7 rules hold in fixtures, including `NODE_ENV=test` on the SQLite scaffold and a custom resolver reading `unknown` |
+| M1 | `browser:map` ~~and the skill~~ | The map round-trips on `examples/blog` and a `make:feature` app; author text survives; an incomplete graph is reported, not hidden |
+| M2 | `database` manifest section, `browser:serve`, `browser:doctor`, `browser:record`, **the skill** | §3, §4 and §7 rules hold in fixtures, including `NODE_ENV=test` on the SQLite scaffold and a custom resolver reading `unknown` |
 | M3 | `add browser-tests`, specs from plan views | A scaffolded app with one approved plan gets a spec whose locators resolve on the live page |
 | M4 | Gate decision | Measured flake rate and CI cost on the golden-path smoke decide whether an acceptance may require a browser run |
+
+**Amended in implementation:** the skill moved from M1 to M2. Its launch, doctor
+and evidence steps name `browser:serve`, `browser:doctor` and `browser:record`;
+shipped before them, it would either point at commands that do not exist or
+launch the app without §3's checks.
 
 ### 10. Acceptance
 
@@ -493,3 +511,11 @@ changes behaviour.
    state; `plan:close` cites it in the entity document's History. Any of them
    needs a rule for a run made against an older commit or graph snapshot, which
    `run.json` records but nothing yet compares.
+9. A route a framework package registers (`registerAttachmentRoutes()` in
+   `examples/blog`) has its controller outside the app, so the graph's `handles`
+   is partial and `browser:map` exits 1 on every run (found in M1). Under §4 the
+   doctor could then never pass for such an app. Should the graph mark these
+   routes as registered by a package, so their controllers are an established
+   fact rather than a gap, or should §4 accept a gap confined to routes no
+   feature can own? The map must not grow its own exception; this needs
+   deciding before M2.

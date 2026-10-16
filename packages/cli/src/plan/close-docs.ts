@@ -9,7 +9,7 @@ import { posix } from 'node:path'
 
 import { RULES_HEADING_BY_LOCALE } from '../docs-acceptance'
 import { parseDocFrontmatter, type DocFrontmatterValue } from '../docs-frontmatter'
-import { markdownLines } from '../docs-links'
+import { readMarkedLines, spliceMarkedBlock, type MarkedLines, type MarkerSyntax } from '../marker-blocks'
 import type { PlanApproval } from './approvals'
 import type { PlanWaiver } from './decisions'
 import { matchPlanLocale, type PlanLocale } from './locales'
@@ -256,68 +256,23 @@ function newEntityDoc(model: PlanModel): string {
   return ['---', 'type: entity', `entities: [${model.name}]`, `generated: { by: ${PLAN_CLOSE_ACTOR} }`, '---', '', `# ${model.name}`, ''].join('\n')
 }
 
-const OPEN_MARKER = /^<!-- guren:plan (\S+) (\S+) (\S+) -->$/u
-const CLOSE_MARKER = /^<!-- \/guren:plan (\S+) (\S+) -->$/u
-const HEADING = /^(#{1,6})\s+(.+?)\s*#*\s*$/u
-
-interface EntityDocLines {
-  lines: string[]
-  inFence: boolean[]
-  eol: '\n' | '\r\n'
-  /** `<slug> <section>` → the block: its open and close marker lines, and what the open one names. */
-  blocks: Map<string, PlanDocBlock>
+const PLAN_MARKERS: MarkerSyntax<{ slug: string; hash: string; section: string }> = {
+  name: 'guren:plan',
+  open(line) {
+    const match = /^<!-- guren:plan (\S+) (\S+) (\S+) -->$/u.exec(line)
+    return match ? { key: `${match[1]} ${match[3]}`, data: { slug: match[1]!, hash: match[2]!, section: match[3]! } } : undefined
+  },
+  close(line) {
+    const match = /^<!-- \/guren:plan (\S+) (\S+) -->$/u.exec(line)
+    return match ? `${match[1]} ${match[2]}` : undefined
+  },
 }
 
-/**
- * The document's lines and its blocks, or what makes its markers unsafe to rewrite: an open
- * marker with no close before the next marker or heading, a close with no open, a pair that
- * appears twice, a marker inside a code fence. Any of these, and a rewrite could delete a
- * person's text or never converge, so the caller refuses rather than guesses.
- */
+type EntityDocLines = MarkedLines<{ slug: string; hash: string; section: string }>
+
+/** The document's lines and its `guren:plan` blocks keyed `<slug> <section>`, or what makes them unsafe to rewrite. */
 export function readEntityDoc(document: string): { doc: EntityDocLines; problems: string[] } {
-  const scanned = markdownLines(document)
-  const doc: EntityDocLines = {
-    lines: scanned.lines.map((line) => line.text),
-    inFence: scanned.lines.map((line) => line.inFence),
-    eol: document.includes('\r\n') ? '\r\n' : '\n',
-    blocks: new Map(),
-  }
-  // Everything after an unclosed fence reads as code, so a block written there would be code too.
-  if (scanned.unclosedFence !== undefined) return { doc, problems: [`line ${scanned.unclosedFence + 1}: a code fence opens here and never closes`] }
-  const problems: string[] = []
-  let open: { key: string; line: number; slug: string; hash: string; section: string } | undefined
-  const unclosed = (): void => {
-    if (open) problems.push(`line ${open.line + 1}: the block "${open.key}" opens and never closes`)
-    open = undefined
-  }
-  doc.lines.forEach((text, index) => {
-    const opening = OPEN_MARKER.exec(text)
-    const closing = CLOSE_MARKER.exec(text)
-    if ((opening || closing) && doc.inFence[index]) {
-      problems.push(`line ${index + 1}: a guren:plan marker sits inside a code fence`)
-      return
-    }
-    if (opening) {
-      unclosed()
-      open = { key: `${opening[1]} ${opening[3]}`, line: index, slug: opening[1], hash: opening[2], section: opening[3] }
-    } else if (closing) {
-      const key = `${closing[1]} ${closing[2]}`
-      if (open?.key !== key) {
-        unclosed()
-        problems.push(`line ${index + 1}: the block "${key}" closes and never opened`)
-      } else if (doc.blocks.has(key)) {
-        problems.push(`line ${open.line + 1}: the block "${key}" appears twice`)
-        open = undefined
-      } else {
-        doc.blocks.set(key, { slug: open.slug, hash: open.hash, section: open.section, open: open.line, close: index })
-        open = undefined
-      }
-    } else if (!doc.inFence[index] && HEADING.test(text)) {
-      unclosed()
-    }
-  })
-  unclosed()
-  return { doc, problems }
+  return readMarkedLines(document, PLAN_MARKERS)
 }
 
 export interface PlanDocBlock {
@@ -330,56 +285,27 @@ export interface PlanDocBlock {
 }
 
 /**
- * The blocks `plan:close` fenced in a document, in document order (blocks cannot nest, so the
- * reader stores them as they close), over its lines as {@link readEntityDoc} split them;
- * `undefined` wherever that reader reports a problem.
+ * The blocks `plan:close` fenced in a document, in document order, over its lines as
+ * {@link readEntityDoc} split them; `undefined` wherever that reader reports a problem.
  */
 export function readPlanBlocks(document: string): { lines: string[]; blocks: PlanDocBlock[] } | undefined {
   const { doc, problems } = readEntityDoc(document)
   if (problems.length > 0) return undefined
-  return { lines: doc.lines, blocks: [...doc.blocks.values()] }
-}
-
-/** The line of a `## ` heading naming `section` in any plan locale, outside code. */
-function findHeading(doc: EntityDocLines, section: EntityDocSection): number {
-  const names = new Set(Object.values(ENTITY_DOC_HEADINGS).map((headings) => headings[section]))
-  return doc.lines.findIndex((line, index) => {
-    const heading = doc.inFence[index] ? null : HEADING.exec(line)
-    return heading !== null && heading[1] === '##' && names.has(heading[2])
-  })
+  return { lines: doc.lines, blocks: [...doc.blocks.values()].map(({ data, open, close }) => ({ ...data, open, close })) }
 }
 
 /**
- * The lines with the block of `slug` and `section` set to `content`: replaced between its
- * markers where one exists, otherwise inserted at the end of that section, or appended under a
- * new heading. No text outside a block is rewritten, but a document mixing line endings comes
- * back with its first CRLF, or LF, throughout. `content` absent removes an existing block.
+ * The lines with the block of `slug` and `section` set to `content` ({@link spliceMarkedBlock}),
+ * under the section's heading in any plan locale. A document mixing line endings comes back with
+ * its first CRLF, or LF, throughout. `content` absent removes an existing block.
  */
 function spliceLines(doc: EntityDocLines, options: { slug: string; hash: string; section: EntityDocSection; content?: readonly string[]; locale: PlanLocale }): string[] {
   const { slug, hash, section, content } = options
-  const block = content ? [`<!-- guren:plan ${slug} ${hash} ${section} -->`, ...content, `<!-- /guren:plan ${slug} ${section} -->`] : undefined
-  const { lines } = doc
-  const existing = doc.blocks.get(`${slug} ${section}`)
-  if (existing) {
-    if (block) return [...lines.slice(0, existing.open), ...block, ...lines.slice(existing.close + 1)]
-    // The blank line this writer put before the block goes with it.
-    const start = existing.open > 0 && lines[existing.open - 1] === '' ? existing.open - 1 : existing.open
-    return [...lines.slice(0, start), ...lines.slice(existing.close + 1)]
-  }
-  if (!block) return lines
-
-  const heading = findHeading(doc, section)
-  if (heading === -1) {
-    let end = lines.length
-    while (end > 0 && lines[end - 1] === '') end--
-    return [...lines.slice(0, end), '', `## ${ENTITY_DOC_HEADINGS[options.locale][section]}`, '', ...block, '']
-  }
-  let next = lines.findIndex((line, index) => index > heading && !doc.inFence[index] && /^#{1,2}\s/u.test(line))
-  if (next === -1) next = lines.length
-  let last = next - 1
-  while (last > heading && lines[last].trim() === '') last--
-  const tail = lines.slice(next)
-  return [...lines.slice(0, last + 1), '', ...block, ...(tail.length > 0 ? ['', ...tail] : [''])]
+  const fenced = content ? [`<!-- guren:plan ${slug} ${hash} ${section} -->`, ...content, `<!-- /guren:plan ${slug} ${section} -->`] : undefined
+  return spliceMarkedBlock(doc, `${slug} ${section}`, fenced, {
+    headings: new Set(Object.values(ENTITY_DOC_HEADINGS).map((headings) => headings[section])),
+    newHeading: ENTITY_DOC_HEADINGS[options.locale][section],
+  })
 }
 
 /** {@link spliceLines} over a whole document, for one section; throws where {@link readEntityDoc} finds a problem. */

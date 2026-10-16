@@ -6,6 +6,25 @@
  * checker and the viewer so they cannot disagree.
  */
 
+/**
+ * A value rendered inside a markdown pipe-table cell — schema type strings
+ * routinely contain `|` (unions) and can span lines, both of which break
+ * table structure unescaped.
+ */
+export function escapeMarkdownTableCell(value: string): string {
+  const escaped = value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|')
+  if (!escaped.includes('\n')) {
+    return escaped
+  }
+  // Collapse newlines with their surrounding whitespace via split/join —
+  // regex forms of this (`\s*\r?\n\s*`) backtrack quadratically.
+  return escaped
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(' ')
+}
+
 const URL_SCHEME_REGEX = /^[a-z][a-z0-9+.-]*:/i
 
 /**

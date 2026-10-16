@@ -33,6 +33,17 @@ export type ApplicationGraphInputs = Pick<GurenApplicationGraph, 'nodes' | 'edge
   changed?: boolean
 }
 
+const CONTROLLER_ACTION_SOURCE = 'controller:'
+
+/** The evidence source naming the controller action an edge was read from. */
+export function controllerActionSource(action: string): string {
+  return `${CONTROLLER_ACTION_SOURCE}${action}`
+}
+
+export function controllerActionOf(evidence: GraphEvidence): string | undefined {
+  return evidence.source.startsWith(CONTROLLER_ACTION_SOURCE) ? evidence.source.slice(CONTROLLER_ACTION_SOURCE.length) : undefined
+}
+
 export function graphId(...parts: Array<string | number | null>): string {
   return JSON.stringify(parts)
 }
