@@ -10,6 +10,7 @@ import { hasControllerTest } from '../src/discovery'
 import { findMigrationCreatingTable } from '../src/make-migration'
 import { generateDataTypes } from '../src/data-types'
 import { parseAttachString, parseFieldsString } from '../src/fields'
+import { FIELD_LABEL_CLASS } from '../src/guren-css'
 import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, captureConsolaLines, captureInfos, captureSuccesses, captureWarnings, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyApp, seedAttachmentsConfig, snapshotTree, writeWorkspaceFiles } from './helpers'
 
 describe('parseFieldsString', () => {
@@ -430,7 +431,7 @@ describe('makeFeature', () => {
 
       // Without the flag, submitting half-typed JSON silently sends the last
       // value that parsed, with the textarea still showing the newer text.
-      expect(newPage).toContain("import { useState } from 'react'")
+      expect(newPage).toContain("import { useId, useState } from 'react'")
       expect(newPage).toContain('const [jsonErrors, setJsonErrors] = useState<Record<string, boolean>>({})')
       expect(newPage).toContain('setJsonErrors((prev) => ({ ...prev, meta: true }))')
       expect(newPage).toContain('{jsonErrors.meta && (')
@@ -475,6 +476,46 @@ describe('makeFeature', () => {
       expect(newPage).toContain('{jsonErrors.meta && (')
       // One hook pair for the page, not one per field.
       expect(newPage.match(/useState/g)).toHaveLength(3)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // A placeholder is no accessible name: screen readers and Playwright's
+  // `getByLabel()` find a field only through a label tied to it by id.
+  it('labels every form control, tying each label to its control with useId()', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-labels-')
+
+    try {
+      await makeFeature('Event', { fields: 'title:string,body:text?,meta:json,seats:number?,startsAt:date,pinned:boolean' })
+
+      for (const page of ['New.tsx', 'Edit.tsx']) {
+        const source = await readFile(join(workspace.dir, 'resources/js/pages/events', page), 'utf8')
+        expect(source).toContain("import { useId, useState } from 'react'")
+        expect(source).toContain('const fieldIds = { title: useId(), body: useId(), meta: useId(), seats: useId(), startsAt: useId() }')
+        for (const name of ['title', 'body', 'meta', 'seats', 'startsAt']) {
+          expect(source).toContain(`<label htmlFor={fieldIds.${name}} className="${FIELD_LABEL_CLASS}">${name}</label>`)
+          expect(source.match(new RegExp(`id=\\{fieldIds\\.${name}\\}`, 'g'))).toHaveLength(1)
+        }
+        // The checkbox is named by the label wrapping it, so it takes no id.
+        expect(source).not.toContain('fieldIds.pinned')
+        expect(source).toMatch(/<label className="flex items-center gap-2">\s*<input type="checkbox"/)
+        expect(source).not.toContain('placeholder=')
+      }
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('imports no React hook for a form of checkboxes only', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-checkbox-only-')
+
+    try {
+      await makeFeature('Flag', { fields: 'enabled:boolean' })
+
+      const newPage = await readFile(join(workspace.dir, 'resources/js/pages/flags/New.tsx'), 'utf8')
+      expect(newPage).not.toContain("from 'react'")
+      expect(newPage).not.toContain('fieldIds')
     } finally {
       await workspace.cleanup()
     }
