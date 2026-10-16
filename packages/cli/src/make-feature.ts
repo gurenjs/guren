@@ -15,7 +15,7 @@ import { authAliasLine, routeCall } from './make-route'
 import { testFile } from './make-test'
 import { validatorFile } from './make-validator'
 import { parseAttachString, parseFieldsString, type AttachmentDefinition, type FieldDefinition, type FieldType } from './fields'
-import { ensureGurenUiTokens, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
+import { ensureGurenUiTokens, FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
 import { ParseCache } from './parse-cache'
 import { findDeclaredTable, moduleSchemaAggregateName, schemaPathFor } from './schema-parser'
 import { appHasPrototypeFixture, PROTOTYPE_FIXTURE_PATH } from './add-prototype'
@@ -749,65 +749,93 @@ ${formFields}
 `
 }
 
+/** A checkbox is wrapped in its label, so it is the one control that needs no id. */
+function wrapsItsLabel(field: FieldDefinition): boolean {
+  return field.type === 'boolean'
+}
+
 function generateFormField(field: FieldDefinition, formVar: string): string {
-  const value = formValue(field, formVar)
-  if (field.type === 'boolean') {
+  if (wrapsItsLabel(field)) {
     return `          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.checked)} className="h-4 w-4 rounded accent-g-accent" />
+            <input type="checkbox" checked={${formValue(field, formVar)}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.checked)} className="h-4 w-4 rounded accent-g-accent" />
             ${field.name}
           </label>`
   }
+  return `          <div>
+            <label htmlFor={fieldIds.${field.name}} className="${FIELD_LABEL_CLASS}">${field.name}</label>
+${labelledControl(field, formVar)}
+          </div>`
+}
+
+function labelledControl(field: FieldDefinition, formVar: string): string {
+  const id = `fieldIds.${field.name}`
+  const value = formValue(field, formVar)
+  const controlClass = `mt-1 ${FORM_INPUT_CLASS}`
   if (field.type === 'text') {
-    return `          <textarea value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="${FORM_INPUT_CLASS}" />`
+    return `            <textarea id={${id}} value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="${controlClass}" />`
   }
   if (field.type === 'number') {
-    return `          <input type="number" value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} placeholder="${field.name}" className="${FORM_INPUT_CLASS}" />`
+    return `            <input id={${id}} type="number" value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} className="${controlClass}" />`
   }
   if (field.type === 'date') {
     // The value arrives as an ISO timestamp but `type="date"` only renders a
     // bare `YYYY-MM-DD`, and shows nothing at all for anything longer.
-    return `          <input type="date" value={${value}.slice(0, 10)} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="${FORM_INPUT_CLASS}" />`
+    return `            <input id={${id}} type="date" value={${value}.slice(0, 10)} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="${controlClass}" />`
   }
   if (field.type === 'json') {
     // Uncontrolled: a controlled textarea driven by the parsed object would
     // reject every keystroke that leaves the JSON temporarily invalid. The
     // flag stops half-typed JSON silently submitting the last value parsed.
-    return `          <textarea
-            defaultValue={jsonText.${field.name}}
-            onChange={(event) => {
-              try {
-                ${formVar}.setData('${field.name}', JSON.parse(event.target.value))
-                setJsonErrors((prev) => ({ ...prev, ${field.name}: false }))
-              } catch {
-                setJsonErrors((prev) => ({ ...prev, ${field.name}: true }))
-              }
-            }}
-            placeholder="${field.name}"
-            className="${FORM_INPUT_CLASS} font-mono text-sm"
-          />
-          {jsonErrors.${field.name} && (
-            <p className="text-sm text-g-danger">${field.name} is not valid JSON — fix it or the last valid value is submitted.</p>
-          )}`
+    return `            <textarea
+              id={${id}}
+              defaultValue={jsonText.${field.name}}
+              onChange={(event) => {
+                try {
+                  ${formVar}.setData('${field.name}', JSON.parse(event.target.value))
+                  setJsonErrors((prev) => ({ ...prev, ${field.name}: false }))
+                } catch {
+                  setJsonErrors((prev) => ({ ...prev, ${field.name}: true }))
+                }
+              }}
+              className="${controlClass} font-mono text-sm"
+            />
+            {jsonErrors.${field.name} && (
+              <p className="mt-1 text-sm text-g-danger">${field.name} is not valid JSON — fix it or the last valid value is submitted.</p>
+            )}`
   }
-  return `          <input value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="${FORM_INPUT_CLASS}" />`
+  return `            <input id={${id}} value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="${controlClass}" />`
 }
 
 /**
  * Keyed by field name in one record rather than declared per field: two names
- * differing only in punctuation would generate the same identifier. `jsonText`
- * is seeded once, so an Edit page is not re-serializing on every keystroke.
+ * differing only in punctuation would generate the same identifier, and a field
+ * named `use` would declare a `useId` shadowing React's. `jsonText` is seeded
+ * once, so an Edit page is not re-serializing on every keystroke.
  */
 function generateFormState(fields: FieldDefinition[], formVar: string): { imports: string; hooks: string } {
-  const jsonFields = fields.filter((f) => f.type === 'json')
-  if (jsonFields.length === 0) return { imports: '', hooks: '' }
+  const reactImports: string[] = []
+  const hooks: string[] = []
 
-  const initial = jsonFields
-    .map((f) => `${f.name}: JSON.stringify(${formValue(f, formVar)}, null, 2)`)
-    .join(', ')
+  const labelled = fields.filter((f) => !wrapsItsLabel(f))
+  if (labelled.length > 0) {
+    reactImports.push('useId')
+    hooks.push(`  const fieldIds = { ${labelled.map((f) => `${f.name}: useId()`).join(', ')} }\n`)
+  }
+
+  const jsonFields = fields.filter((f) => f.type === 'json')
+  if (jsonFields.length > 0) {
+    const initial = jsonFields
+      .map((f) => `${f.name}: JSON.stringify(${formValue(f, formVar)}, null, 2)`)
+      .join(', ')
+    reactImports.push('useState')
+    hooks.push(
+      `  const [jsonText] = useState(() => ({ ${initial} }))\n`
+      + '  const [jsonErrors, setJsonErrors] = useState<Record<string, boolean>>({})\n',
+    )
+  }
 
   return {
-    imports: "import { useState } from 'react'\n",
-    hooks: `  const [jsonText] = useState(() => ({ ${initial} }))\n`
-      + '  const [jsonErrors, setJsonErrors] = useState<Record<string, boolean>>({})\n',
+    imports: reactImports.length === 0 ? '' : `import { ${reactImports.join(', ')} } from 'react'\n`,
+    hooks: hooks.join(''),
   }
 }
