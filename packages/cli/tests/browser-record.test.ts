@@ -85,7 +85,7 @@ describe('a recorded run', () => {
     const { run } = await beginRun(cwd, { url: 'http://127.0.0.1:4317', feature: 'Posts' }, deps([]))
     await expect(closeStep(cwd, run, 'missing', passing, deps([]))).rejects.toThrow('was never opened')
     await openStep(cwd, run, 'AC-posts-1', deps([]))
-    await expect(closeStep(cwd, run, 'AC-posts-1', { ...passing, screenshots: ['../run.json'] }, deps([]))).rejects.toThrow('is outside')
+    await expect(closeStep(cwd, run, 'AC-posts-1', { ...passing, screenshots: ['../run.json'] }, deps([]))).rejects.toThrow('is not a file inside')
     await expect(closeStep(cwd, run, 'AC-posts-1', { ...passing, verdict: 'trust me' }, deps([]))).rejects.toThrow('verdict')
     await closeStep(cwd, run, 'AC-posts-1', passing, deps([]))
     await expect(openStep(cwd, run, 'AC-posts-1', deps([]))).rejects.toThrow('already recorded')
