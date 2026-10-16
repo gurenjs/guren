@@ -98,6 +98,7 @@ export const PLAN_COMMAND_CLASSES: Readonly<Record<string, 'generator' | PlanCom
   'runtime:errors': 'reads-only',
   graph: 'process',
   'browser:map': 'process',
+  'browser:serve': 'process',
   check: 'reads-only',
   audit: 'reads-only',
   doctor: 'reads-only',

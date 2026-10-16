@@ -228,6 +228,19 @@ launch the skill and the blueprint use, so every launch passes the same checks:
 Port selection races another process between probe and bind; strict mode turns
 that race into a failed start rather than a server on the wrong port.
 
+**Amended in implementation:**
+- Codegen (step 3) runs before introspection (step 2): a fresh clone's entry
+  imports generated files, so introspecting first refuses every fresh clone.
+- An app that binds no database through `defineDatabaseConfig()` is refused
+  too, since nothing shows where its data lives.
+- There is no `--json`: the JSON line is the only stdout output, and the
+  child's output goes to stderr. `--timeout <s>` sets the readiness wait.
+- A stop this process asked for exits 0; the app ending on its own is a failure.
+- `GUREN_STRICT_PORT` covers the app's port, not the Vite dev server's, which
+  picks its own.
+- A refusal reason never echoes the connection setting: the SQLite driver's
+  own refusal names the value, which may carry a password.
+
 ### 4. The doctor
 
 `guren browser:doctor --url <origin> [--json]` answers one question before an
