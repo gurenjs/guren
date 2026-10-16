@@ -335,6 +335,20 @@ references in `core/entry-body.md` and `rules-catalog.md`, the two workflow
 fragments that name skills (`targets/claude/workflow.md`,
 `targets/agents/workflow.md`), and the harness tests.
 
+**Amended in implementation:**
+- The run is opened before the doctor, so `--evidence <run>` has somewhere to
+  write its report.
+- A refusal from `browser:serve` is reported to the person with its remedy;
+  the skill forbids working around it (another start, another database, an
+  edited `.env`).
+- Until the Playwright blueprint (M3) is installed, a finding is reported as
+  observed, with the run and step that show it, not as a bug.
+- Files touched were the skill, `core/entry-body.md` (a command block, as for
+  plans) and the three hand-kept lists of shipped skill names that
+  `tests/harness-skill-name-lists.test.ts` pins (the harness guide in both
+  locales and the catalog's `guren-harness` skill); `rules-catalog.md` and the
+  workflow fragments name no skill this one needs to join.
+
 ### 6. `guren add browser-tests`
 
 An opt-in blueprint, since it adds a devDependency and a browser download:

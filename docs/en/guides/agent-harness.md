@@ -67,7 +67,7 @@ The harness claims files **by name**, so your own files in the same directories 
 | Location | Claimed names |
 |----------|---------------|
 | `.claude/rules/`, `.agents/rules/` | The rule filenames the harness ships or used to ship, listed in your entry document (compared ignoring case) |
-| `.claude/skills/`, `.agents/skills/` | `dev-workflow`, `db-manage`, `scaffold`, `feature`, `guren-api`, `plugin-authoring`, `agent-interface`, `ai-agent`, `github-projects`, `plan-write`, `plan-implement` |
+| `.claude/skills/`, `.agents/skills/` | `dev-workflow`, `db-manage`, `scaffold`, `feature`, `guren-api`, `plugin-authoring`, `agent-interface`, `ai-agent`, `github-projects`, `plan-write`, `plan-implement`, `verify-in-browser` |
 | `.cursor/rules/`, `.github/instructions/` | **Any** `guren-*.mdc` / `guren-*.instructions.md` file at the top level |
 
 Skills that `npx skills add` and Agent Plugins clients install into the same directories are yours by this rule too. Keep your own Cursor and Copilot rules under a different prefix, and review the report before `--prune`: a file of your own under a claimed name is the one case it removes.

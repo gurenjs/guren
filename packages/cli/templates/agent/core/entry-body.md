@@ -76,6 +76,12 @@ bunx guren plan:revise <plan> --edited <copy> --message "<why>"  # record a chan
 bunx guren plan:next <plan>                  # the next step to implement, with its elements, behaviours and verify commands
 bunx guren plan:verify <plan> --step <id>    # run the step's verify commands and tests, record the verdict under .guren/plans/
 bunx guren plan:status <plan>                # which plan elements exist in the code, and which are verified
+
+# Browser verification (the verify-in-browser skill; evidence for the person, never a gate)
+bunx guren browser:map --check               # docs/browser/: features, landmarks, what approved plans expect
+bunx guren browser:serve                     # one instance on 127.0.0.1, refused unless its database is local
+bunx guren browser:record --begin --url <origin> --feature <name>  # open a run under .guren/browser/
+bunx guren browser:doctor --url <origin> --evidence <run>          # every landmark served, no server error
 ```
 
 ## MCP Server (AI Agent Integration)
