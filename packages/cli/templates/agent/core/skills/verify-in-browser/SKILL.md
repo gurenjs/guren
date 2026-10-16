@@ -1,15 +1,15 @@
 ---
 name: verify-in-browser
-description: Check a change the way a user sees it, in a browser, against an instance this app starts safely, and keep the evidence (RFC 0033). Use when the user says "check it in the browser", "verify the UI", "does the page work", "bug bash", "click through it", or after a change to a page, a form or a route an Inertia page submits to, once the tests pass. Not a gate: plan:verify, the Stop hook and gate never read its results.
+description: Check a change the way a user sees it, in a browser, against an instance this app starts safely, and keep the evidence (RFC 0033). Use when the user says "check it in the browser", "verify the UI", "does the page work", "bug bash", "click through it", or after a change to a page, a form or a route an Inertia page submits to, once the tests pass. Not a gate, and never a reason to call a plan step done.
 ---
 
 # Browser Verification Skill
 
 Tests prove a route at the HTTP level. This skill proves what they cannot: the
 page renders, the form submits where it should, the error a user would see is
-on screen. Its results are evidence for the person, never a verdict any gate
-reads, so never tell the person a plan step or acceptance criterion is done
-because a browser run passed.
+on screen. Its results are evidence for the person. `plan:verify`, the Stop
+hook and `guren gate` never read them, so never tell the person a plan step or
+acceptance criterion is done because a browser run passed.
 
 ## 1. Read the map
 
@@ -17,28 +17,30 @@ because a browser run passed.
 bunx guren browser:map --check
 ```
 
-`docs/browser/README.md` lists each feature, its landmark route and what an
-approved plan says it should do. When `--check` reports a stale map, run
-`bunx guren browser:map` and commit the regenerated blocks with your change.
-When it reports the map incomplete, say which sections it names; do not
-treat the features it does list as all there is.
+`docs/browser/README.md` is the index; each feature's own
+`docs/browser/<feature>.md` holds its routes, the Plan section (what an
+approved plan expects), Charters and Gotchas. When `--check` reports a stale
+map, run `bunx guren browser:map` and commit the regenerated blocks with your
+change. When it reports the map incomplete, tell the person which sections it
+names before going on.
 
 ## 2. Start one instance
 
-Run this in the background for the whole session and keep the origin it
-prints:
+Run this in the background for the whole session:
 
 ```bash
 bunx guren browser:serve
 # {"origin":"http://127.0.0.1:52817","pid":48211,"collector":"available"}
 ```
 
-It refuses to start when it cannot show the database is local, or under
-`NODE_ENV=production`. Report the refusal and its remedy to the person. Never
-work around it by starting the app another way, pointing it at another
-database, or editing `.env`: the refusal exists so a session cannot migrate or
-seed a database that is not theirs. `--database-url` takes a local one when
-the person gives you one.
+Wait for either that one JSON line or the command exiting; a refusal prints no
+JSON. It refuses when it cannot show the database is local, under
+`NODE_ENV=production`, and when the app has no `bin/serve.ts` or no
+`defineDatabaseConfig()`. Each refusal says who can act on it: relay the ones
+addressed to the person and wait. Never start the app another way, point it at
+another database or edit `.env` yourself: the refusal exists so a session
+cannot migrate or seed a database that is not theirs. When the person starts
+the app and gives you its loopback origin, continue at §3 with it.
 
 ## 3. Open a run and check the instance
 
@@ -49,27 +51,29 @@ bunx guren browser:doctor --url <origin> --evidence <run>
 ```
 
 Go on only when the doctor's result is `pass`. On `fail`, fix the server error
-or the wrong page it names first. On `inconclusive`, read its reasons: an
-incomplete map, a collector it could not read, or no landmark that passed (a
-`redirected` landmark usually means sign-in) are not passes.
+or the wrong page it names first. On `inconclusive`, report its reasons to the
+person and go on only if they agree: an incomplete map, a collector it could
+not read, or a landmark that needs a signed-in user (`auth-required`) all leave
+something unchecked.
 
 ## 4. Drive each step, recorded
 
-For each acceptance id in the feature's Plan section, or each charter:
+A step is an acceptance id from the feature's Plan section, or a charter named
+by its kind (`charter-validation`). Each is recorded once; to try again, use a
+new step id or a new run.
 
 ```bash
 bunx guren browser:record <run> --step <id> --open
 ```
 
-Then drive the page:
-
-- With `@playwright/test` installed, write or run a spec under
-  `tests/browser/`, using the map's labels after confirming them on the page.
-- Otherwise use the browser tools your client already has. Never install or
-  register an MCP server for this.
+Drive the page with the browser tools your client already has. Never install
+or register an MCP server for this. Playwright specs belong to the
+`guren add browser-tests` setup; until the app has it, do not add specs under
+`tests/browser/`, which `bun test` would pick up.
 
 Save each screenshot under `.guren/browser/<run>/screenshots/`, then close the
-step with what you saw, in this shape and no other field:
+step. `result` and `action` are required; the rest is what you observed, and
+no other field is accepted:
 
 ```bash
 bunx guren browser:record <run> --step <id> --close --input - <<'JSON'
@@ -85,22 +89,24 @@ JSON
 ```
 
 The command may lower your result: a server error during the step makes it
-`fail`, a window it could not read makes a `pass` `inconclusive`. Report the
-result it prints, not the one you sent.
+`fail`, a window it could not read makes a `pass` `inconclusive`. It exits 1 on
+anything but `pass` and has still recorded the step. Report the result it
+prints, not the one you sent. Never write `run.json` yourself.
 
 ## Proof standards
 
 - Drive the user's path. Never call a test-only endpoint or set state behind
   the page's back to make a step pass.
 - Record the action and the state it led to, not only the last screen.
-- Check the rows the plan expects with the app's own models, and say how you
-  checked them; the CLI records your account of the database, it cannot read it.
-- A finding is a bug once a spec in `tests/browser/` fails on it. Until then,
-  report it as observed, with the run and step that show it.
+- Check the rows the plan expects read-only, through the app's own models,
+  under the same `DATABASE_URL` and `NODE_ENV` the instance was started with
+  (the `--database-url` you passed, if any), and say how you checked. The CLI
+  records your account of the database; it cannot read it.
+- Report a finding as observed, with the run and step that show it.
 
 ## Cleanup
 
-Stop the `browser:serve` you started (end the background job, or send it
-SIGINT/SIGTERM); it stops the app with it. The `pid` it printed is the app's:
-signal the command, not that pid. Leave `.guren/browser/`; it is the evidence,
-and git already ignores it.
+End the `browser:serve` background job you started; it stops the app with it.
+Never kill a process by its pid or name. If the origin still answers
+afterwards, tell the person. Leave `.guren/browser/`: it is the evidence, and
+git already ignores it.

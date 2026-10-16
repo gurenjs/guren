@@ -344,7 +344,13 @@ fragments that name skills (`targets/claude/workflow.md`,
   the skill forbids working around it (another start, another database, an
   edited `.env`).
 - Until the Playwright blueprint (M3) is installed, a finding is reported as
-  observed, with the run and step that show it, not as a bug.
+  observed, with the run and step that show it, not as a bug, and no spec is
+  written under `tests/browser/`, where `bun test` would collect it.
+- Database rows are checked read-only under the `DATABASE_URL` and `NODE_ENV`
+  the instance was started with, so a check never reaches a database
+  `browser:serve` did not judge.
+- A charter is recorded under its kind (`charter-validation`), and a step id is
+  recorded once.
 - Files touched were the skill, `core/entry-body.md` (a command block, as for
   plans) and the three hand-kept lists of shipped skill names that
   `tests/harness-skill-name-lists.test.ts` pins (the harness guide in both
