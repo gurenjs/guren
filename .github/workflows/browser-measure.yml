@@ -1,0 +1,48 @@
+name: Browser Specs Measurement
+
+# RFC 0033 M4: how often the generated browser specs flake, and what a run costs, measured every
+# night outside every gate. The metrics JSON each run uploads is the data the gate decision reads;
+# a red run here means the instrument broke, not that a spec failed.
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+    inputs:
+      starts:
+        description: Times test:browser starts the app
+        default: '3'
+      repeat_each:
+        description: Runs of each test per start (--repeat-each)
+        default: '3'
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    # Estimated 10-15 minutes: a scaffold and install, a cold Chromium download (deliberately
+    # uncached, so its cost is measured), and three starts of the app.
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Bun and build packages
+        uses: ./.github/actions/setup-and-build
+
+      # The system libraries Chromium needs; the app installs its own browser in the run.
+      - name: Install Chromium's system dependencies
+        run: cd examples/blog && bunx playwright install-deps chromium
+
+      - name: Measure the browser specs
+        env:
+          GUREN_BROWSER_METRICS: ${{ runner.temp }}/browser-metrics.json
+          GUREN_BROWSER_STARTS: ${{ inputs.starts || '3' }}
+          GUREN_BROWSER_REPEAT_EACH: ${{ inputs.repeat_each || '3' }}
+        run: bun run smoke:browser-tests
+
+      - name: Upload the metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-metrics-${{ github.run_id }}
+          path: ${{ runner.temp }}/browser-metrics.json
+          if-no-files-found: warn
+          retention-days: 90
