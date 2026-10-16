@@ -1,4 +1,5 @@
 import { Head, useForm } from '@inertiajs/react'
+import { useId } from 'react'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
 import { route } from '@/.guren/routes.gen'
 import Layout from '../../components/Layout.js'
@@ -10,6 +11,10 @@ const fieldClass =
 
 export default function NewPost() {
   const form = useForm<PostFormData>({ title: '', excerpt: '', body: '' })
+
+  const titleId = useId()
+  const excerptId = useId()
+  const bodyId = useId()
 
   return (
     <Layout>
@@ -28,8 +33,11 @@ export default function NewPost() {
           }}
         >
           <div>
-            <label className="block text-sm font-bold text-g-heading">Title</label>
+            <label htmlFor={titleId} className="block text-sm font-bold text-g-heading">
+              Title
+            </label>
             <input
+              id={titleId}
               type="text"
               value={form.data.title}
               onChange={(event) => form.setData('title', event.target.value)}
@@ -39,8 +47,11 @@ export default function NewPost() {
           </div>
 
           <div>
-            <label className="block text-sm font-bold text-g-heading">Excerpt</label>
+            <label htmlFor={excerptId} className="block text-sm font-bold text-g-heading">
+              Excerpt
+            </label>
             <input
+              id={excerptId}
               type="text"
               value={form.data.excerpt}
               onChange={(event) => form.setData('excerpt', event.target.value)}
@@ -50,8 +61,11 @@ export default function NewPost() {
           </div>
 
           <div>
-            <label className="block text-sm font-bold text-g-heading">Body</label>
+            <label htmlFor={bodyId} className="block text-sm font-bold text-g-heading">
+              Body
+            </label>
             <textarea
+              id={bodyId}
               rows={10}
               value={form.data.body}
               onChange={(event) => form.setData('body', event.target.value)}
