@@ -16,6 +16,7 @@ import {
 } from './browser-map'
 import {
   BROWSER_TESTS_CONFIG, BROWSER_TESTS_SETUP, buildPlanSpecs, buildSmokeSpec, GENERATED_HEADER, GENERATED_SPECS_DIR, SMOKE_SPEC_FILE,
+  type SpecOptions,
 } from './browser-specs'
 import { CliError } from './cli-error'
 import { compareStrings } from './spec-artifact'
@@ -32,6 +33,8 @@ interface BrowserMapRun {
   orphans: string[]
   /** Generated specs nothing produces any more; a run deletes them. */
   removed: string[]
+  /** Why the generated specs were left as they are this run. */
+  specsHeld?: string
 }
 
 /**
@@ -76,17 +79,30 @@ export async function loadBrowserMap(cwd: string): Promise<BrowserMap> {
   return buildBrowserMap(graph, plans, unreadable)
 }
 
-/** The generated specs a run writes, and the specs on disk beside them; none until the browser-tests config exists. */
-async function generatedSpecs(cwd: string, map: BrowserMap): Promise<{ outputs: Map<string, string>; onDisk: Map<string, string> }> {
-  if (!(await pathExists(join(cwd, BROWSER_TESTS_CONFIG)))) return { outputs: new Map(), onDisk: new Map() }
-  const options = { signIn: await pathExists(join(cwd, BROWSER_TESTS_SETUP)) }
+interface GeneratedSpecs {
+  outputs: Map<string, string>
+  onDisk: Map<string, string>
+  held?: string
+}
+
+/**
+ * The generated specs a run writes, and the specs on disk beside them: none until the browser-tests
+ * config exists, or as `planned` says when `add browser-tests` asks before writing that config.
+ */
+async function generatedSpecs(cwd: string, map: BrowserMap, planned: SpecOptions | undefined): Promise<GeneratedSpecs> {
+  if (!planned && !(await pathExists(join(cwd, BROWSER_TESTS_CONFIG)))) return { outputs: new Map(), onDisk: new Map() }
+  // A partial map would regenerate the specs as fixme only, or delete an unread plan's: one failed read must not empty the suite.
+  if (!map.complete || map.unreadablePlans.length > 0) {
+    return { outputs: new Map(), onDisk: new Map(), held: 'the browser map is incomplete or a plan could not be read' }
+  }
+  const options = planned ?? { signIn: await pathExists(join(cwd, BROWSER_TESTS_SETUP)) }
   const outputs = new Map([[SMOKE_SPEC_FILE, buildSmokeSpec(map, options)], ...buildPlanSpecs(map, options).map((entry): [string, string] => [entry.path, entry.contents])])
   const onDisk = new Map([...await readExisting(cwd, GENERATED_SPECS_DIR, '.browser.ts'), ...await readExisting(cwd, `${GENERATED_SPECS_DIR}/plans`, '.browser.ts')])
   return { outputs, onDisk }
 }
 
 /** Every document as a run would leave it; refuses, writing nothing, when any document's markers are unsafe. */
-export async function runBrowserMap(options: { cwd: string; write: boolean; map?: BrowserMap }): Promise<BrowserMapRun> {
+export async function runBrowserMap(options: { cwd: string; write: boolean; map?: BrowserMap; specs?: SpecOptions }): Promise<BrowserMapRun> {
   const cwd = resolve(options.cwd)
   const [map, existing] = await Promise.all([options.map ?? loadBrowserMap(cwd), readExisting(cwd, BROWSER_MAP_DIR, '.md')])
 
@@ -109,7 +125,7 @@ export async function runBrowserMap(options: { cwd: string; write: boolean; map?
   for (const feature of map.features) add(feature.file, renderFeatureDoc(existing.get(feature.file), feature, map))
   add(BROWSER_MAP_INDEX, renderIndexDoc(existing.get(BROWSER_MAP_INDEX), map, orphans))
 
-  const specs = await generatedSpecs(cwd, map)
+  const specs = await generatedSpecs(cwd, map, options.specs)
   // A spec without the header is the author's, whatever directory it sits in: never rewritten or removed.
   const generated = (content: string): boolean => content.startsWith(GENERATED_HEADER)
   for (const [file, content] of specs.outputs) {
@@ -131,5 +147,5 @@ export async function runBrowserMap(options: { cwd: string; write: boolean; map?
     }
     for (const file of removed) await rm(join(cwd, file))
   }
-  return { map, changed, orphans, removed }
+  return { map, changed, orphans, removed, ...(specs.held ? { specsHeld: specs.held } : {}) }
 }

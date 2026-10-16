@@ -26,7 +26,7 @@ export const browserMapCommand = defineCommand({
     const failed = !map.complete || map.unreadablePlans.length > 0 || (args.check === true && stale.length > 0)
     if (failed) markCommandFailed()
     if (args.json) {
-      console.log(JSON.stringify({ ...map, changed: run.changed, orphans: run.orphans, removed: run.removed }))
+      console.log(JSON.stringify({ ...map, changed: run.changed, orphans: run.orphans, removed: run.removed, ...(run.specsHeld ? { specsHeld: run.specsHeld } : {}) }))
       return
     }
     const lines: string[] = []
@@ -40,6 +40,7 @@ export const browserMapCommand = defineCommand({
       lines.push(run.changed.length > 0 ? `Wrote ${run.changed.join(', ')}.` : 'Up to date; nothing written.')
       if (run.removed.length > 0) lines.push(`Removed generated specs nothing produces any more: ${run.removed.join(', ')}.`)
     }
+    if (run.specsHeld) lines.push(`The generated specs were left as they are: ${run.specsHeld}.`)
     console.log(lines.join('\n'))
   },
 })

@@ -1460,6 +1460,7 @@ const addBrowserTestsCommand = defineCommand({
     announceWrittenFiles(result.created, overwritten)
     if (result.mapped.changed.length > 0) consola.success(`browser:map wrote ${result.mapped.changed.join(', ')}`)
     if (result.mapped.removed.length > 0) consola.success(`browser:map removed ${result.mapped.removed.join(', ')}`)
+    if (result.mapped.held) consola.warn(`browser:map wrote no specs: ${result.mapped.held}. Run bunx guren browser:map once it reads the whole app.`)
     if (!result.map.complete) consola.warn(`The browser map is incomplete (${result.map.gaps.map((gap) => gap.section).join(', ')}), so the specs may miss features; run bunx guren browser:map --check for the reasons.`)
     if (result.signIn) {
       if (!result.seedsOnBoot) consola.warn('config/database.ts does not set seedOnBoot, so browser:serve never seeds the browser account and the setup project cannot sign in. Pass { seedOnBoot: process.env.NODE_ENV !== \'production\' } to defineDatabaseConfig().')

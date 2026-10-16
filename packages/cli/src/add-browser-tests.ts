@@ -37,7 +37,7 @@ export interface AddBrowserTestsResult {
   /** Files written once, by this run. */
   created: string[]
   /** What the closing `browser:map` run wrote and removed, app-relative. */
-  mapped: { changed: string[]; removed: string[] }
+  mapped: { changed: string[]; removed: string[]; held?: string }
   /** A setup project signs in as the seeded browser account. */
   signIn: boolean
   map: BrowserMap
@@ -95,6 +95,9 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
     readIfExists(cwd, 'config/database.ts'),
   ])
   const account = passwordSignIn(users, map)
+  // The closing browser:map run, written nowhere: its refusals (a slug two plans share, a spec of
+  // the author's at a generated path, broken markers) come before anything else is written.
+  await runBrowserMap({ cwd, write: false, map, specs: { signIn: account !== undefined } })
 
   const files: ScaffoldFileEntry[] = [
     scaffoldTemplateFile('browser-tests', BROWSER_TESTS_CONFIG),
@@ -124,7 +127,7 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
   const mapped = await runBrowserMap({ cwd, write: true, map })
   return {
     created,
-    mapped: { changed: mapped.changed, removed: mapped.removed },
+    mapped: { changed: mapped.changed, removed: mapped.removed, ...(mapped.specsHeld ? { held: mapped.specsHeld } : {}) },
     signIn: account !== undefined,
     map,
     seedsOnBoot: database?.includes('seedOnBoot') === true,

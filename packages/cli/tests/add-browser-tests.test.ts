@@ -240,6 +240,20 @@ describe('guren add browser-tests', () => {
     }
   })
 
+  test('refuses what browser:map would refuse before writing anything', async () => {
+    const workspace = await createTempWorkspace('guren-add-browser-tests-slug-')
+    try {
+      await seedInertiaApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, { 'package.json': INERTIA_MANIFEST })
+      const shared = ['comments.plan.json', 'docs/plans/comments/plan.json'].map((plan): BrowserMapView => ({ plan, view: view('comments.create', 'comments/Create'), routes: [] }))
+      await expect(addBrowserTests({ install: false, loadMap: async () => mapOf([POSTS], shared) })).rejects.toThrow('share the slug comments')
+      expect(await readFile(join(workspace.dir, 'package.json'), 'utf8')).toBe(INERTIA_MANIFEST)
+      expect(await Bun.file(join(workspace.dir, BROWSER_TESTS_CONFIG)).exists()).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   test('refuses an API-only app', async () => {
     const workspace = await createTempWorkspace('guren-add-browser-tests-api-')
     try {
@@ -268,6 +282,23 @@ describe('browser:map keeps the generated specs', () => {
 
       const check = await runBrowserMap({ cwd: workspace.dir, write: false, map: mapOf([POSTS, DASHBOARD]) })
       expect(check.changed).toContain(SMOKE_SPEC_FILE)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  test('leaves every generated spec as it is while the map is partial', async () => {
+    const workspace = await createTempWorkspace('guren-browser-map-specs-partial-')
+    try {
+      const planned = `${GENERATED_HEADER}// comments\n`
+      await writeWorkspaceFiles(workspace.dir, { [BROWSER_TESTS_CONFIG]: '// config\n', 'tests/browser/generated/plans/comments.browser.ts': planned })
+      const partial = { ...mapOf([POSTS]), unreadablePlans: [{ plan: 'docs/plans/comments/plan.json', reason: 'it does not parse' }] }
+      const run = await runBrowserMap({ cwd: workspace.dir, write: true, map: partial })
+      expect(run.specsHeld).toBeDefined()
+      expect(run.removed).toEqual([])
+      expect(run.changed.filter((file) => file.startsWith('tests/'))).toEqual([])
+      expect(await readFile(join(workspace.dir, 'tests/browser/generated/plans/comments.browser.ts'), 'utf8')).toBe(planned)
+      expect(await Bun.file(join(workspace.dir, SMOKE_SPEC_FILE)).exists()).toBe(false)
     } finally {
       await workspace.cleanup()
     }

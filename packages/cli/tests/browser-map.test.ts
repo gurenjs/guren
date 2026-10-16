@@ -162,7 +162,19 @@ describe('buildBrowserMap', () => {
     const posts = feature(map, 'posts')
     expect(posts.acceptance.map((entry) => entry.acceptance.id)).toEqual(['AC-comments-1', 'AC-comments-2', 'AC-comments-3'])
     expect(posts.views.map((entry) => entry.view.id)).toEqual(['view.posts.show'])
+    expect(posts.views[0]!.routes.map((entry) => `${entry.method} ${entry.path}`)).toEqual(['GET /posts/:id'])
     expect(map.unplaced).toEqual([{ plan: 'comments.plan.json', id: 'AC-comments-4', route: 'DELETE /comments/:id (comments.destroy)' }])
+    expect(map.unplacedViews).toEqual([])
+  })
+
+  test('keeps a plan view whose page no feature holds yet, rather than dropping it', () => {
+    const plan = loadParsedCommentsPlan()
+    plan.views[0] = { ...plan.views[0]!, id: 'view.invoices.create', page: 'invoices/Create' }
+    const map = buildBrowserMap(graphOf(BLOG), [{ file: 'comments.plan.json', plan }])
+    expect(map.unplacedViews.map((entry) => [entry.view.id, entry.routes])).toEqual([['view.invoices.create', []]])
+    const index = renderIndexDoc(undefined, map, [])
+    if (!('content' in index)) throw new Error('refused')
+    expect(index.content).toContain('- `view.invoices.create` in `comments.plan.json`: `invoices/Create`')
   })
 })
 
