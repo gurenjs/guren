@@ -65,8 +65,9 @@ export function defineDatabaseConfig(
     bind: (container, config) => {
       container.instance('database', config.database)
     },
-    boot: async (container, config, env) => {
-      await config.database.configureOrm(container.has('env') ? { env } : undefined)
+    boot: async (container, config) => {
+      // The container's `env`, as the introspection manifest hands `describe()`, so the two judge one value.
+      await config.database.configureOrm(container.has('env') ? { env: container.make('env') } : undefined)
       if (config.seedOnBoot && config.database.hasMigrations()) {
         await config.database.seedDatabase()
       }

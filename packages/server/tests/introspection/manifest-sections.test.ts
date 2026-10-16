@@ -301,6 +301,23 @@ describe('database section (RFC 0033 §3)', () => {
     expect(seen).toEqual([{ env: { DATABASE_URL: 'postgres://localhost/app' } }])
   })
 
+  test('reports a describe() that throws as unreadable, with no section', async () => {
+    class ThrowingDatabaseProvider extends ServiceProvider {
+      register(): void {
+        this.container.instance('database', {
+          describe() {
+            throw new Error('resolver failed')
+          },
+        })
+      }
+    }
+
+    const manifest = await createApp({ providers: [ThrowingDatabaseProvider] }).introspect()
+
+    expect(manifest.database).toBeUndefined()
+    expect(manifest.warnings).toContainEqual({ code: 'section-unreadable', message: '"database" is bound but could not be described: resolver failed' })
+  })
+
   test('leaves the section out when no database is bound', async () => {
     const manifest = await createApp({}).introspect()
 

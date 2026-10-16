@@ -6,8 +6,8 @@ import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
-import { connectionSettings, type ConnectionContext, type ConnectionResolver } from './connection-context'
-import { describeSqliteDatabase, resolveFor, type DatabaseDescription } from './database-description'
+import { connectionSettings, resolveFor, type ConnectionContext, type ConnectionResolver } from './connection-context'
+import { describeSqliteDatabase, type DatabaseDescription } from './database-description'
 
 export interface SqliteDatabaseOptions {
   migrationsFolder: string | URL

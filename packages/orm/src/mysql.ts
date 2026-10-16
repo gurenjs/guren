@@ -6,8 +6,8 @@ import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
-import { connectionSettings, type ConnectionContext, type ConnectionResolver } from './connection-context'
-import { describeServerDatabase, resolveFor, type DatabaseDescription } from './database-description'
+import { connectionSettings, resolveFor, type ConnectionContext, type ConnectionResolver } from './connection-context'
+import { describeServerDatabase, type DatabaseDescription } from './database-description'
 
 type MySqlConnectionOptions = Record<string, unknown>
 type MySql2Drizzle = typeof import('drizzle-orm/mysql2')
@@ -88,9 +88,13 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
 
   const settings = connectionSettings()
 
+  /** The one fallback rule, so what `describe()` judges is what a connection opens. */
+  function connectionStringFrom(value: string | undefined): string | undefined {
+    return (value ?? process.env.DATABASE_URL) || undefined
+  }
+
   function resolveConnectionString(): string {
-    const value = settings.resolve(connectionString)
-    const resolved = value ?? process.env.DATABASE_URL
+    const resolved = connectionStringFrom(settings.resolve(connectionString))
 
     if (!resolved) {
       throw new Error('DATABASE_URL is not set and no connection string was provided.')
@@ -299,7 +303,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     migrationStatus,
     hasMigrations,
     describe(context) {
-      return describeServerDatabase('mysql', (resolveFor(connectionString, context) ?? process.env.DATABASE_URL) || undefined, clientOptions)
+      return describeServerDatabase('mysql', connectionStringFrom(resolveFor(connectionString, context)), clientOptions)
     },
   }
 }
