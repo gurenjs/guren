@@ -15,7 +15,7 @@ import { authAliasLine, routeCall } from './make-route'
 import { testFile } from './make-test'
 import { validatorFile } from './make-validator'
 import { parseAttachString, parseFieldsString, type AttachmentDefinition, type FieldDefinition, type FieldType } from './fields'
-import { ensureGurenUiTokens, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
+import { ensureGurenUiTokens, FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
 import { ParseCache } from './parse-cache'
 import { findDeclaredTable, moduleSchemaAggregateName, schemaPathFor } from './schema-parser'
 import { appHasPrototypeFixture, PROTOTYPE_FIXTURE_PATH } from './add-prototype'
@@ -547,7 +547,6 @@ ${storeAttach}    return this.redirect('${redirectPrefix}/${routeName}/' + ${var
     const ${variableName} = await ${singular}.findOrFail(id)
     return this.inertia(${pagesBase}.Edit, {
       ${variableName}: new ${singular}Resource(${variableName}).toJSON(),
-      errors: {},
     })`,
       },
       {
@@ -723,14 +722,13 @@ function generateEditPage(
 
   return `${state.imports}import { useForm } from '@inertiajs/react'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
-import type { RouteBody, RouteErrors } from '@guren/inertia-client/typed-forms'
+import type { RouteBody } from '@guren/inertia-client/typed-forms'
 import { route } from '@/.guren/routes.gen'
 
 type ${singular}FormData = RouteBody<ApiRoutes, '${routeName}.store'>
 
 interface Props {
   ${variableName}: ${singular}FormData & { id: number }
-  errors?: RouteErrors<${singular}FormData> & { message?: string }
 }
 
 export default function Edit${singular}({ ${variableName} }: Props) {
@@ -749,65 +747,143 @@ ${formFields}
 `
 }
 
-function generateFormField(field: FieldDefinition, formVar: string): string {
-  const value = formValue(field, formVar)
-  if (field.type === 'boolean') {
-    return `          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.checked)} className="h-4 w-4 rounded accent-g-accent" />
-            ${field.name}
-          </label>`
+/** A checkbox is wrapped in its label, so its `fieldIds` entry only names its error message. */
+function wrapsItsLabel(field: FieldDefinition): boolean {
+  return field.type === 'boolean'
+}
+
+interface FieldMessage {
+  /** The JSX condition that renders the message. */
+  when: string
+  /** The JSX expression for the message element's id. */
+  id: string
+  text: string
+}
+
+/**
+ * A json field has two: the client's parse failure and the server's validation
+ * error, flashed onto the Inertia redirect back and read as `form.errors`.
+ */
+function fieldMessages(field: FieldDefinition, formVar: string): FieldMessage[] {
+  const messageId = (suffix: string) => `\`\${fieldIds.${field.name}}-${suffix}\``
+  const server: FieldMessage = {
+    when: `${formVar}.errors.${field.name}`,
+    id: messageId('error'),
+    text: `{${formVar}.errors.${field.name}}`,
   }
+  if (field.type !== 'json') return [server]
+  return [
+    {
+      when: `jsonErrors.${field.name}`,
+      id: messageId('json-error'),
+      text: `${field.name} is not valid JSON — fix it or the last valid value is submitted.`,
+    },
+    server,
+  ]
+}
+
+/** `aria-invalid` and `aria-describedby`, set only while a message shows. */
+function errorAttributes(messages: FieldMessage[]): [string, string] {
+  if (messages.length === 1) {
+    const [{ when, id }] = messages
+    return [`aria-invalid={${when} ? true : undefined}`, `aria-describedby={${when} ? ${id} : undefined}`]
+  }
+  const invalid = messages.map((m) => m.when).join(' || ')
+  const describedBy = messages.map((m) => `${m.when} && ${m.id}`).join(', ')
+  return [
+    `aria-invalid={${invalid} ? true : undefined}`,
+    `aria-describedby={[${describedBy}].filter(Boolean).join(' ') || undefined}`,
+  ]
+}
+
+function errorLines(messages: FieldMessage[]): string {
+  return messages
+    .map((m) => `            {${m.when} && <p id={${m.id}} className="mt-1 text-sm text-g-danger">${m.text}</p>}`)
+    .join('\n')
+}
+
+function generateFormField(field: FieldDefinition, formVar: string): string {
+  const messages = fieldMessages(field, formVar)
+  const control = wrapsItsLabel(field)
+    ? `            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={${formValue(field, formVar)}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.checked)} ${errorAttributes(messages).join(' ')} className="h-4 w-4 rounded accent-g-accent" />
+              ${field.name}
+            </label>`
+    : `            <label htmlFor={fieldIds.${field.name}} className="${FIELD_LABEL_CLASS}">${field.name}</label>
+${labelledControl(field, formVar, errorAttributes(messages))}`
+  return `          <div>
+${control}
+${errorLines(messages)}
+          </div>`
+}
+
+function labelledControl(field: FieldDefinition, formVar: string, ariaAttributes: [string, string]): string {
+  const id = `fieldIds.${field.name}`
+  const errorAttrs = ariaAttributes.join(' ')
+  const value = formValue(field, formVar)
+  const controlClass = `mt-1 ${FORM_INPUT_CLASS}`
   if (field.type === 'text') {
-    return `          <textarea value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="${FORM_INPUT_CLASS}" />`
+    return `            <textarea id={${id}} value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} ${errorAttrs} className="${controlClass}" />`
   }
   if (field.type === 'number') {
-    return `          <input type="number" value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} placeholder="${field.name}" className="${FORM_INPUT_CLASS}" />`
+    return `            <input id={${id}} type="number" value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} ${errorAttrs} className="${controlClass}" />`
   }
   if (field.type === 'date') {
     // The value arrives as an ISO timestamp but `type="date"` only renders a
     // bare `YYYY-MM-DD`, and shows nothing at all for anything longer.
-    return `          <input type="date" value={${value}.slice(0, 10)} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="${FORM_INPUT_CLASS}" />`
+    return `            <input id={${id}} type="date" value={${value}.slice(0, 10)} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} ${errorAttrs} className="${controlClass}" />`
   }
   if (field.type === 'json') {
     // Uncontrolled: a controlled textarea driven by the parsed object would
     // reject every keystroke that leaves the JSON temporarily invalid. The
     // flag stops half-typed JSON silently submitting the last value parsed.
-    return `          <textarea
-            defaultValue={jsonText.${field.name}}
-            onChange={(event) => {
-              try {
-                ${formVar}.setData('${field.name}', JSON.parse(event.target.value))
-                setJsonErrors((prev) => ({ ...prev, ${field.name}: false }))
-              } catch {
-                setJsonErrors((prev) => ({ ...prev, ${field.name}: true }))
-              }
-            }}
-            placeholder="${field.name}"
-            className="${FORM_INPUT_CLASS} font-mono text-sm"
-          />
-          {jsonErrors.${field.name} && (
-            <p className="text-sm text-g-danger">${field.name} is not valid JSON — fix it or the last valid value is submitted.</p>
-          )}`
+    return `            <textarea
+              id={${id}}
+              defaultValue={jsonText.${field.name}}
+              onChange={(event) => {
+                try {
+                  ${formVar}.setData('${field.name}', JSON.parse(event.target.value))
+                  setJsonErrors((prev) => ({ ...prev, ${field.name}: false }))
+                } catch {
+                  setJsonErrors((prev) => ({ ...prev, ${field.name}: true }))
+                }
+              }}
+              ${ariaAttributes.join('\n              ')}
+              className="${controlClass} font-mono text-sm"
+            />`
   }
-  return `          <input value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="${FORM_INPUT_CLASS}" />`
+  return `            <input id={${id}} value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} ${errorAttrs} className="${controlClass}" />`
 }
 
 /**
  * Keyed by field name in one record rather than declared per field: two names
- * differing only in punctuation would generate the same identifier. `jsonText`
- * is seeded once, so an Edit page is not re-serializing on every keystroke.
+ * differing only in punctuation would generate the same identifier, and a field
+ * named `use` would declare a `useId` shadowing React's. `jsonText` is seeded
+ * once, so an Edit page is not re-serializing on every keystroke.
  */
 function generateFormState(fields: FieldDefinition[], formVar: string): { imports: string; hooks: string } {
-  const jsonFields = fields.filter((f) => f.type === 'json')
-  if (jsonFields.length === 0) return { imports: '', hooks: '' }
+  const reactImports: string[] = []
+  const hooks: string[] = []
 
-  const initial = jsonFields
-    .map((f) => `${f.name}: JSON.stringify(${formValue(f, formVar)}, null, 2)`)
-    .join(', ')
+  if (fields.length > 0) {
+    reactImports.push('useId')
+    hooks.push(`  const fieldIds = { ${fields.map((f) => `${f.name}: useId()`).join(', ')} }\n`)
+  }
+
+  const jsonFields = fields.filter((f) => f.type === 'json')
+  if (jsonFields.length > 0) {
+    const initial = jsonFields
+      .map((f) => `${f.name}: JSON.stringify(${formValue(f, formVar)}, null, 2)`)
+      .join(', ')
+    reactImports.push('useState')
+    hooks.push(
+      `  const [jsonText] = useState(() => ({ ${initial} }))\n`
+      + '  const [jsonErrors, setJsonErrors] = useState<Record<string, boolean>>({})\n',
+    )
+  }
 
   return {
-    imports: "import { useState } from 'react'\n",
-    hooks: `  const [jsonText] = useState(() => ({ ${initial} }))\n`
-      + '  const [jsonErrors, setJsonErrors] = useState<Record<string, boolean>>({})\n',
+    imports: reactImports.length === 0 ? '' : `import { ${reactImports.join(', ')} } from 'react'\n`,
+    hooks: hooks.join(''),
   }
 }

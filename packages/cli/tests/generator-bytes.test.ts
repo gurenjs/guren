@@ -283,7 +283,6 @@ describe('controller, route and side-effect generators', () => {
           const post = await Post.findOrFail(id)
           return this.inertia(pages.posts.Edit, {
             post: new PostResource(post).toJSON(),
-            errors: {},
           })
         }
 
@@ -356,7 +355,6 @@ describe('controller, route and side-effect generators', () => {
           const note = await Note.findOrFail(id)
           return this.inertia(pages.notes.Edit, {
             note: new NoteResource(note).toJSON(),
-            errors: {},
           })
         }
 
