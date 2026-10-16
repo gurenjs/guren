@@ -6,6 +6,7 @@ const PORT = 4317
 const ORIGIN = `http://127.0.0.1:${PORT}`
 
 // Playwright loads no .env. These are the files Bun loads for the app, most specific first; a value already set wins.
+if (typeof process.loadEnvFile !== 'function') throw new Error(`The browser tests need Node 20.12 or later to load .env; this is Node ${process.version}.`)
 const mode = process.env.NODE_ENV || 'development'
 for (const file of ['.env.local', `.env.${mode}`, '.env']) {
   if (existsSync(file)) process.loadEnvFile(file)

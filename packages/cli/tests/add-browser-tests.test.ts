@@ -163,10 +163,12 @@ describe('what the templates restate', () => {
   test('the setup project signs in through the labels make:auth writes', async () => {
     const setup = await template('tests/browser/auth.setup.ts')
     const page = buildLoginViewTemplate(true, true)
-    for (const label of ['Email', 'Password', 'Sign in']) {
-      expect(setup).toContain(`'${label}'`)
-      expect(page).toMatch(new RegExp(`>\\s*${label}\\s*<`, 'u'))
+    for (const label of ['Email', 'Password']) {
+      expect(setup).toContain(`getByLabel('${label}')`)
+      expect(page).toMatch(new RegExp(`<label[^>]*>\\s*${label}\\s*</label>`, 'u'))
     }
+    expect(setup).toContain("getByRole('button', { name: 'Sign in', exact: true })")
+    expect(page).toMatch(/<button[^>]*>\s*Sign in\s*<\/button>/u)
   })
 })
 
@@ -299,6 +301,17 @@ describe('browser:map keeps the generated specs', () => {
       expect(run.changed.filter((file) => file.startsWith('tests/'))).toEqual([])
       expect(await readFile(join(workspace.dir, 'tests/browser/generated/plans/comments.browser.ts'), 'utf8')).toBe(planned)
       expect(await Bun.file(join(workspace.dir, SMOKE_SPEC_FILE)).exists()).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  test('refuses a spec whose name differs from a generated one only by case', async () => {
+    const workspace = await createTempWorkspace('guren-browser-map-specs-case-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, { [BROWSER_TESTS_CONFIG]: '// config\n', 'tests/browser/generated/Smoke.browser.ts': '// mine\n' })
+      await expect(runBrowserMap({ cwd: workspace.dir, write: true, map: mapOf([POSTS]) })).rejects.toThrow('only by case')
+      expect(await readFile(join(workspace.dir, 'tests/browser/generated/Smoke.browser.ts'), 'utf8')).toBe('// mine\n')
     } finally {
       await workspace.cleanup()
     }

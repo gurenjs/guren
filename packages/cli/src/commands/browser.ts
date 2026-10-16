@@ -35,7 +35,7 @@ export const browserMapCommand = defineCommand({
     lines.push(`${map.features.length} feature(s): ${map.features.map((feature) => feature.name).join(', ') || 'none'}`)
     if (map.unassigned.length > 0) lines.push(`${map.unassigned.length} route(s) in no feature, ${map.unreached.length} page(s) no route renders; see the index.`)
     if (run.orphans.length > 0) lines.push(`Kept with no feature: ${run.orphans.join(', ')}`)
-    if (args.check) lines.push(stale.length > 0 ? `Out of date: ${stale.join(', ')}. Run guren browser:map.` : 'Up to date.')
+    if (args.check) lines.push(stale.length > 0 ? `Out of date: ${stale.join(', ')}. Run guren browser:map.` : run.specsHeld ? 'The documents are up to date.' : 'Up to date.')
     else {
       lines.push(run.changed.length > 0 ? `Wrote ${run.changed.join(', ')}.` : 'Up to date; nothing written.')
       if (run.removed.length > 0) lines.push(`Removed generated specs nothing produces any more: ${run.removed.join(', ')}.`)

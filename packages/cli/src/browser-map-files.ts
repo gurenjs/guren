@@ -128,7 +128,11 @@ export async function runBrowserMap(options: { cwd: string; write: boolean; map?
   const specs = await generatedSpecs(cwd, map, options.specs)
   // A spec without the header is the author's, whatever directory it sits in: never rewritten or removed.
   const generated = (content: string): boolean => content.startsWith(GENERATED_HEADER)
+  // On a case-insensitive filesystem a name differing only by case is the same file.
+  const byCase = new Map([...specs.onDisk.keys()].map((file) => [file.toLowerCase(), file]))
   for (const [file, content] of specs.outputs) {
+    const other = byCase.get(file.toLowerCase())
+    if (other !== undefined && other !== file) problems.push(`${other}: it differs from ${file} only by case; rename or move it`)
     const current = specs.onDisk.get(file)
     if (current !== undefined && !generated(current)) problems.push(`${file}: it has no generated header, so it is yours; move it out of ${GENERATED_SPECS_DIR}/`)
     outputs.set(file, content)

@@ -398,8 +398,9 @@ cannot classify is not refused.
   `tests/browser/generated/` and `--check` reports a stale spec, so a plan
   approved later reaches the specs the way it reaches the map. The blueprint
   writes its files once and runs `browser:map` at the end. A generated spec
-  nothing produces is removed (no author text lives in one), and a file there
-  without the generated header refuses the run.
+  nothing produces is removed (no author text lives in one). A file at a path
+  the run produces (or one differing from it only by case) that lacks the
+  generated header refuses the run; any other file there is left alone.
 - The specs are a smoke spec (one test per landmark, comparing the Inertia
   component as the doctor does) and one spec per approved plan with views: each
   form field by its label and each action as a button or a link by its name,
@@ -636,7 +637,8 @@ changes behaviour.
    Node shim. Is Node on PATH an acceptable requirement for the blueprint, as it
    is for `bun run lint`?
    **Resolved (M3):** yes. `test:browser` is `playwright test`, which runs under
-   the package's Node shim, and the CLI guide says Node has to be on `PATH`. The
+   the package's Node shim, and the CLI guide says Node 20.12 or later has to
+   be on `PATH` (the config loads the env files with `process.loadEnvFile()`). The
    app itself still runs under Bun, started by `browser:serve`.
 4. Should `browser:map --check` join `guren check` as an advisory result?
 5. The seeded browser account: one per app, or one per acceptance `actor`?
