@@ -4,7 +4,7 @@ import { readFile, rm } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import type { AppManifest } from '@guren/core'
 
-import { CHECK_INTROSPECT_TIMEOUT_MS, INTROSPECT_CHILD_BUDGET_MARGIN_MS, introspectApp, introspectRunner, withCapNote, type Introspection, type IntrospectionFailure } from '../src/introspect'
+import { CHECK_INTROSPECT_TIMEOUT_MS, INTROSPECT_CHILD_BUDGET_MARGIN_MS, introspectApp, introspectRunner, withCapNote, type GraphRouteEntry, type Introspection, type IntrospectionFailure } from '../src/introspect'
 import { bunExecutable, runCaptured } from '../src/subprocess'
 import {
   assertWorkspaceBuilt,
@@ -275,6 +275,9 @@ export function registerWebRoutes(router: Router): void {
     const controllerOf = (name: string) => result.manifest.routes.find((route) => route.name === name)?.controller
     expect(controllerOf('files.show')).toMatchObject({ name: 'AttachmentDeliveryController', resolved: 'name-only', file: null })
     expect(controllerOf('inline')).toMatchObject({ name: 'InlineController', resolved: 'name-only', file: null })
+    const routeOf = (name: string) => result.manifest.routes.find((route) => route.name === name) as GraphRouteEntry | undefined
+    expect(routeOf('files.show')?.controllerPackage).toBe('@guren/core')
+    expect(routeOf('inline')?.controllerPackage).toBeUndefined()
     // InlineController is unmatched, so the full scan runs; the framework class alone would not trigger it.
     expect(existsSync(join(dir, 'side-effect.txt'))).toBe(true)
   }, 30_000)

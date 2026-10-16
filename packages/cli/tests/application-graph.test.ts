@@ -3,7 +3,7 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
 
-import { applicationGraphSchema, buildApplicationGraph, GRAPH_KINDS, GRAPH_RELATIONS, graphId, graphResultSchema, isCompleteGraph, type ApplicationGraphInputs, type GurenApplicationGraph } from '../src/application-graph'
+import { applicationGraphSchema, buildApplicationGraph, controllerPackageOf, GRAPH_KINDS, GRAPH_RELATIONS, graphId, graphResultSchema, isCompleteGraph, type ApplicationGraphInputs, type GurenApplicationGraph } from '../src/application-graph'
 import { loadApplicationGraph } from '../src/application-graph-load'
 import { freshApplicationGraph } from '../src/application-graph-fresh'
 import { createDevMcpHandler } from '../src/dev-mcp/handler'
@@ -112,6 +112,31 @@ describe('application graph', () => {
       expect(partialGraph.coverage.model!.status).toBe('partial')
       expect(partialGraph.nodes.some((node) => node.kind === 'route')).toBe(true)
     } finally { await client?.close(); await handler.close(); await workspace.cleanup() }
+  }, 30_000)
+
+  test('links routes to a framework controller through one package node, keeping handles complete', async () => {
+    const workspace = await createTempWorkspace('guren-graph-package-')
+    try {
+      await linkWorkspaceCore(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, {
+        ...source,
+        'src/main.ts': `import { AttachmentDeliveryController, createApp } from '@guren/core'
+import { PostController } from '../app/Http/Controllers/PostController'
+import { Post } from '../app/Models/Post'
+export default createApp({ routes(router) {
+  router.bind('post', Post as never)
+  router.get('/posts/:post', [PostController, 'index']).name('posts.show')
+  router.get('/files/:id/:name', [AttachmentDeliveryController, 'show']).name('files.show')
+  router.get('/media/:id/:name', [AttachmentDeliveryController, 'show']).name('media.show')
+} })`,
+      })
+      const graph = await loadApplicationGraph({ cwd: workspace.dir, introspect: true })
+      const packaged = graph.nodes.filter((node) => node.evidence.some((entry) => controllerPackageOf(entry) === '@guren/core'))
+      expect(packaged.map((node) => [node.kind, node.label, node.file])).toEqual([['controller', 'AttachmentDeliveryController', undefined]])
+      expect(graph.edges.filter((edge) => edge.relation === 'handles' && edge.to === packaged[0]!.id)).toHaveLength(2)
+      expect(graph.coverage.handles!.status).toBe('complete')
+      expect(graph.unresolved.filter((entry) => entry.relation === 'handles')).toEqual([])
+    } finally { await workspace.cleanup() }
   }, 30_000)
 
   test('fills middleware, validator, policy and test sections from registered routes and existing readers', async () => {
