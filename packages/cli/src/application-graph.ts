@@ -48,6 +48,17 @@ export function controllerActionOf(evidence: GraphEvidence): string | undefined 
   return evidence.source.startsWith(CONTROLLER_ACTION_SOURCE) ? evidence.source.slice(CONTROLLER_ACTION_SOURCE.length) : undefined
 }
 
+const PACKAGE_SOURCE = 'package:'
+
+/** The evidence source of a controller node that is a package's export rather than an app file. */
+export function packageControllerSource(specifier: string): string {
+  return `${PACKAGE_SOURCE}${specifier}`
+}
+
+export function controllerPackageOf(evidence: GraphEvidence): string | undefined {
+  return evidence.source.startsWith(PACKAGE_SOURCE) ? evidence.source.slice(PACKAGE_SOURCE.length) : undefined
+}
+
 export function graphId(...parts: Array<string | number | null>): string {
   return JSON.stringify(parts)
 }

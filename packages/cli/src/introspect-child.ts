@@ -100,7 +100,7 @@ function failed(reason: IntrospectionFailure, message: string): Introspection {
  * would run the real boot. Resolved as the entry's own imports are (Bun, ESM
  * conditions); a module that will not resolve or load is a failure, not a pass.
  */
-async function loadFramework(entry: string): Promise<{ framework: FrameworkModule } | Introspection> {
+async function loadFramework(entry: string): Promise<{ framework: FrameworkModule; specifier: string } | Introspection> {
   for (const specifier of ['@guren/core', '@guren/server']) {
     let resolved: string
     try {
@@ -117,7 +117,7 @@ async function loadFramework(entry: string): Promise<{ framework: FrameworkModul
     if (typeof framework.Application?.prototype?.introspect !== 'function') {
       return failed('old-server', 'The app resolves a @guren/server without Application.introspect(). Upgrade @guren/core to a release with RFC 0026 introspection.')
     }
-    return { framework }
+    return { framework, specifier }
   }
   return failed('crashed', 'Neither @guren/core nor @guren/server resolves from the entry, so the app cannot be introspected.')
 }
@@ -125,22 +125,30 @@ async function loadFramework(entry: string): Promise<{ framework: FrameworkModul
 /**
  * Upgrades each `name-only` controller reference to the file that exports the
  * very class the router holds (RFC 0026 §3). A framework class (core's delivery
- * controller) keeps `name-only`. App files are found by the CLI's one discovery
- * rule, those named after a routed class first (a module-cache hit); the rest
- * are imported only while an app class is still unmatched.
+ * controller) keeps `name-only`, tagged with the framework's package. App files
+ * come from the CLI's one discovery rule, those named after a routed class first
+ * (a module-cache hit); the rest are imported only while an app class is unmatched.
  */
 async function resolveControllers(
   manifest: AppManifest,
   app: IntrospectableApp,
   root: string,
   framework: FrameworkModule,
+  frameworkPackage: string,
 ): Promise<void> {
   // Core re-exports server, so one module holds every framework class a route can name.
   const frameworkExports = new Set<unknown>(Object.values(framework))
   const handlers = app.router?.registeredHandlers?.() ?? []
-  const wanted = new Set<unknown>(handlers
-    .map((handler) => handler.controller)
-    .filter((controller) => controller !== undefined && !frameworkExports.has(controller)))
+  const wanted = new Set<unknown>()
+  for (const handler of handlers) {
+    if (handler.controller === undefined) continue
+    if (!frameworkExports.has(handler.controller)) {
+      wanted.add(handler.controller)
+      continue
+    }
+    const route = manifest.routes[handler.index] as GraphRouteEntry | undefined
+    if (route?.controller) route.controllerPackage = frameworkPackage
+  }
   if (wanted.size === 0) return
 
   const routedNames = new Set(handlers.map((handler) => manifest.routes[handler.index]?.controller?.name))
@@ -290,7 +298,7 @@ async function introspect(root: string): Promise<Introspection> {
   manifest.entry.file = toPosixRelative(root, entry)
   describeUnboundAttachments(manifest, app, loaded.framework)
   loadingApp = false
-  await resolveControllers(manifest, app, root, loaded.framework)
+  await resolveControllers(manifest, app, root, loaded.framework, loaded.specifier)
   if (graphScans) {
     await resolveModelBindings(manifest, app, root)
     await resolveContractSources(manifest, app, root)
