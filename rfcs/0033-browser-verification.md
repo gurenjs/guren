@@ -558,7 +558,7 @@ launch the app without §3's checks.
 **M4 measurement.** `bun run smoke:browser-tests` builds a golden-path-shaped
 app on SQLite (auth and a posts resource, migrated; no second resource, no
 seed), approves one plan describing the posts pages through `plan:approve`,
-runs `guren add browser-tests`, and runs `test:browser` from a cold start eight
+runs `guren add browser-tests`, and runs `test:browser` from a cold start twenty
 times, each start one run of every spec with no retries, as a gate would run
 it. A start is timed whole and by its tests' own time; the scaffold, the
 approval, the blueprint and the Chromium download are timed as their own
@@ -570,13 +570,37 @@ The `Browser Specs Measurement` workflow runs it nightly, outside every gate,
 keeps each night's metrics and Playwright reports for 90 days, and reads the
 previous nights back to report the current streak of clean nights.
 
-The decision is still open. A proposed rule: an acceptance criterion may
-require a browser run once 14 consecutive nights are clean, 112 cold starts
-with no failure, which by the rule of three bounds the failure rate under 2.7%
-at 95% confidence, and the slowest start stays under two minutes on the CI
-runner. Until then the generated specs stay advisory. The decision covers the
-SQLite scaffold; the drivers share the browser, hydration and start-up paths
-that flake, but not the database.
+The decision is still open. The proposed rule holds the browser run to the
+reliability of the CI this repository already runs: it may become required
+once it fails without a fault in the code no more often than CI does, and once a
+start costs under two minutes on the CI runner. The baseline is CI's own record.
+Of the 997 `CI` runs on `main` from 2026-07-24 to 2026-10-16, 27 failed. Read one
+by one (the failing jobs' annotations and the commit after each), they split as
+follows:
+
+| Cause | Runs | Counted in the baseline |
+| --- | --- | --- |
+| Code broken by the commit, fixed by a later one | 5 | No |
+| A newly published advisory failing the dependency audit | 4 | No |
+| Infrastructure or runtime: a service container that would not start, a 15-minute hang, Bun 1.4 crashing with exit 139 | 8 | Yes |
+| Tests depending on timing or memory thresholds | 10 | Yes |
+
+That is 18 runs in 997, about 1.8% of CI runs failing with no fault in the code.
+It is an estimate, not a measurement: the split was read by hand, runs are almost
+never re-run (one in the window), so no failure is confirmed as a flake by a
+pass on the same commit, and pull request runs are left out because their
+failures are mostly real. The `e2e` job, the one Playwright job, failed once,
+when its database container did not start.
+
+By the rule of three, 167 consecutive clean cold starts bound the browser run's
+rate under 1.8% at 95% confidence: about nine nights at twenty starts. A tighter
+comparison with the `e2e` job alone (no test-caused failure in 997 runs, a rate
+under 0.3%) would need about a thousand starts, which is why the baseline is CI
+as a whole. The aggregate step reports whether the rule is met, and the baseline
+is re-read when CI's own record changes enough to move it. The decision covers
+the SQLite scaffold; the drivers share the browser, hydration and start-up paths
+that flake, but not the database. Until it is made the generated specs stay
+advisory.
 
 The first local runs on macOS found two defects the scaffold shipped rather than
 flakes: the form fields `make:feature` wrote had no label, so the posts New

@@ -23,11 +23,15 @@ const repoRoot = resolve(import.meta.dir, '../..')
 const CLI = join(repoRoot, 'packages/cli/src/bin.ts')
 const CREATE_APP = join(repoRoot, 'packages/create-app/src/cli.ts')
 const PLAN_FILE = 'docs/plans/browser-measure/plan.json'
-/** Each start takes about half a minute on a laptop; the workflow's timeout bounds the rest. */
-const MAX_STARTS = 20
-const DEFAULT_STARTS = 8
+/** A start took 5 to 7 s on a laptop; the cap keeps a dispatched run inside the workflow's timeout. */
+const MAX_STARTS = 40
+const DEFAULT_STARTS = 20
 /** Below about 30 trials the rule of three (failure rate under 3/n at 95%) is too loose to quote. */
 const RULE_OF_THREE_MIN = 30
+/** CI runs on main failing with no code at fault (infra, flaky tests), 2026-07-24 to 10-16: RFC 0033 §9. */
+const CI_SPURIOUS_RATE = 0.018
+/** The rule's cost ceiling for one start, in ms. */
+const MAX_START_MS = 120_000
 
 function startCount(): number {
   const raw = process.env.GUREN_BROWSER_STARTS
@@ -313,11 +317,13 @@ async function aggregate(dir: string): Promise<void> {
     }
   }
   const coldStarts = nights.slice(0, cleanNights).reduce((total, night) => total + night.starts.length, 0)
+  const needed = Math.ceil(3 / CI_SPURIOUS_RATE)
   await writeSummary([
     '## Browser specs measurement across nights (RFC 0033 M4)',
     '',
     `${nights.length} night(s) read. The latest ${cleanNights} in a row are clean (${coldStarts} cold starts with no start-up failure, flake or test left unrun${coldStarts >= RULE_OF_THREE_MIN ? `; by the rule of three a failure rate under ${(300 / coldStarts).toFixed(1)}% at 95% confidence` : ''}).`,
     starts.length > 0 ? `One start, median ${(starts[Math.floor(starts.length / 2)]! / 1000).toFixed(1)} s, slowest ${(starts.at(-1)! / 1000).toFixed(1)} s.` : '',
+    `The proposed rule (RFC 0033 §9) needs ${needed} clean cold starts in a row, which bounds the rate under the CI baseline of ${(CI_SPURIOUS_RATE * 100).toFixed(1)}%, and every start under ${MAX_START_MS / 1000} s: ${coldStarts >= needed && (starts.at(-1) ?? 0) < MAX_START_MS ? 'met' : 'not met yet'}.`,
     '',
     '| Test | Nights not passing | Verdicts |', '| --- | --- | --- |',
     ...[...failingTests].map(([test, seen]) => `| ${test.replaceAll('|', '\\|')} | ${seen.nights} | ${[...seen.verdicts].join(', ')} |`),
