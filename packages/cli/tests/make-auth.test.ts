@@ -1414,6 +1414,11 @@ export default app
       expect(view).toContain('Managed by your sign-in provider.')
       expect(view).not.toContain("form.setData('email'")
       expect(view).not.toContain("ValidationErrors<'name' | 'email' | 'password'>")
+      // The read-only email has no control to label.
+      expect(view).not.toContain('emailId')
+      expect(view).not.toMatch(/<label[^>]*>\s*Email/)
+      expect(view).toContain('id={nameId}')
+      expect(view).toContain('id={passwordId}')
     } finally {
       await workspace.cleanup()
     }
@@ -1474,6 +1479,12 @@ export default app
       expect(controller).toContain('const { name, email, password } = await this.validateBody(ProfileUpdateSchema)')
       expect(controller).toContain('Email is already in use.')
       expect(view).toContain("form.setData('email'")
+      // getByLabel() and screen readers find a field only through this pairing.
+      for (const id of ['nameId', 'emailId', 'passwordId']) {
+        expect(view).toContain(`<label htmlFor={${id}}`)
+        expect(view).toContain(`id={${id}}`)
+      }
+      expect(view).not.toMatch(/<label className=/)
     } finally {
       await workspace.cleanup()
     }

@@ -1,5 +1,5 @@
 import { Head, useForm } from '@inertiajs/react'
-import type { FormEvent } from 'react'
+import { useId, type FormEvent } from 'react'
 import Layout from '../../components/Layout.js'
 import type { ValidationErrors } from '@guren/core'
 
@@ -21,6 +21,10 @@ export default function ProfileEdit({ profile, status }: Props) {
     email: profile.email,
     password: '',
   })
+
+  const nameId = useId()
+  const emailId = useId()
+  const passwordId = useId()
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -48,8 +52,11 @@ export default function ProfileEdit({ profile, status }: Props) {
 
         <form className="space-y-4" onSubmit={handleSubmit}>
           <div>
-            <label className="block text-sm font-bold text-g-heading">Name</label>
+            <label htmlFor={nameId} className="block text-sm font-bold text-g-heading">
+              Name
+            </label>
             <input
+              id={nameId}
               type="text"
               value={form.data.name}
               onChange={(event) => form.setData('name', event.target.value)}
@@ -59,8 +66,11 @@ export default function ProfileEdit({ profile, status }: Props) {
           </div>
 
           <div>
-            <label className="block text-sm font-bold text-g-heading">Email</label>
+            <label htmlFor={emailId} className="block text-sm font-bold text-g-heading">
+              Email
+            </label>
             <input
+              id={emailId}
               type="email"
               value={form.data.email}
               onChange={(event) => form.setData('email', event.target.value)}
@@ -70,8 +80,11 @@ export default function ProfileEdit({ profile, status }: Props) {
           </div>
 
           <div>
-            <label className="block text-sm font-bold text-g-heading">New password</label>
+            <label htmlFor={passwordId} className="block text-sm font-bold text-g-heading">
+              New password
+            </label>
             <input
+              id={passwordId}
               type="password"
               value={form.data.password}
               onChange={(event) => form.setData('password', event.target.value)}

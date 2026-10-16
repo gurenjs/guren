@@ -960,7 +960,7 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
   const emailInput = providerOwnedEmail
     ? `
           <div>
-            <label className="${FIELD_LABEL_CLASS}">Email</label>
+            <p className="${FIELD_LABEL_CLASS}">Email</p>
             <p className="mt-1 w-full rounded-g-ctl border border-g-line bg-g-raised px-3 py-2 text-g-muted">
               {profile.email}
             </p>
@@ -968,8 +968,11 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
           </div>`
     : `
           <div>
-            <label className="${FIELD_LABEL_CLASS}">Email</label>
+            <label htmlFor={emailId} className="${FIELD_LABEL_CLASS}">
+              Email
+            </label>
             <input
+              id={emailId}
               type="email"
               value={form.data.email}
               onChange={(event) => form.setData('email', event.target.value)}
@@ -988,8 +991,11 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
   const passwordInput = includePassword
     ? `
           <div>
-            <label className="${FIELD_LABEL_CLASS}">New password</label>
+            <label htmlFor={passwordId} className="${FIELD_LABEL_CLASS}">
+              New password
+            </label>
             <input
+              id={passwordId}
               type="password"
               value={form.data.password}
               onChange={(event) => form.setData('password', event.target.value)}
@@ -999,12 +1005,20 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
           </div>
 `
     : ''
+  const emailIdDeclaration = providerOwnedEmail
+    ? ''
+    : `
+  const emailId = useId()`
+  const passwordIdDeclaration = includePassword
+    ? `
+  const passwordId = useId()`
+    : ''
   const description = includePassword
     ? 'Update your account details and password.'
     : 'Update your account details.'
 
   return `import { Head, useForm } from '@inertiajs/react'
-import type { FormEvent } from 'react'
+import { useId, type FormEvent } from 'react'
 import Layout from '../../components/Layout.js'
 import type { ValidationErrors } from '@guren/core'
 
@@ -1022,6 +1036,8 @@ export default function ProfileEdit({ profile, status }: Props) {
   const form = useForm<ProfileFormValues>({
     name: profile.name,${emailFormValue}${passwordFormValue}
   })
+
+  const nameId = useId()${emailIdDeclaration}${passwordIdDeclaration}
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -1043,8 +1059,11 @@ export default function ProfileEdit({ profile, status }: Props) {
 
         <form className="space-y-4" onSubmit={handleSubmit}>
           <div>
-            <label className="${FIELD_LABEL_CLASS}">Name</label>
+            <label htmlFor={nameId} className="${FIELD_LABEL_CLASS}">
+              Name
+            </label>
             <input
+              id={nameId}
               type="text"
               value={form.data.name}
               onChange={(event) => form.setData('name', event.target.value)}
