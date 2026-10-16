@@ -128,6 +128,14 @@ describe('buildBrowserMap', () => {
     expect(changed.gaps.map((gap) => gap.section)).toEqual(['snapshot'])
   })
 
+  test('treats a section the graph reports no coverage for as a gap, never as complete', () => {
+    const graph = graphOf(BLOG)
+    delete graph.coverage.renders
+    const map = buildBrowserMap(graph, [])
+    expect(map.complete).toBe(false)
+    expect(map.gaps).toEqual([{ section: 'renders', reasons: ['The graph reported no coverage for this section.'] }])
+  })
+
   test('places plan acceptance by the app route its plan route names, and lists the rest as unplaced', () => {
     const fixture: Fixture = {
       ...BLOG,
@@ -181,6 +189,18 @@ describe('feature documents', () => {
     expect(doc.content).toContain('(message text not planned)')
     expect(doc.content).toContain('(button or link: check the page)')
     expect(doc.content).toContain('- validation (AC-comments-2): ')
+  })
+
+  test('folds multiline plan prose so the document reads back and reruns unchanged', () => {
+    const plan = loadParsedCommentsPlan()
+    plan.tasks[0]!.acceptance[1]!.description = 'Rejects an empty body\n## Details\n<!-- /guren:browser plan -->'
+    const fixture: Fixture = { ...BLOG, routes: [...BLOG.routes, { node: route(5, 'POST', '/posts/:postId/comments', 'comments.store', 'show') }] }
+    const planned = buildBrowserMap(graphOf(fixture), [{ file: 'comments.plan.json', plan }])
+    const posts = feature(planned, 'posts')
+    const first = renderFeatureDoc(undefined, posts, planned)
+    if (!('content' in first)) throw new Error(`refused: ${first.problems.join('; ')}`)
+    expect(first.content).toContain('(validation): Rejects an empty body ## Details <!-- /guren:browser plan -->')
+    expect(renderFeatureDoc(first.content, posts, planned)).toEqual(first)
   })
 
   test('the index lists unassigned routes, unreached pages and kept orphans', () => {

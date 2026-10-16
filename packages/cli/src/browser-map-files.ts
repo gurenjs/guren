@@ -13,6 +13,7 @@ import {
   type ApprovedPlanInput, type BrowserMap,
 } from './browser-map'
 import { CliError } from './cli-error'
+import { compareStrings } from './spec-artifact'
 import { relativeUnreadableDirs, toPosixRelative } from './discovery'
 import { discoverPlanFiles } from './plan-check'
 import { writeFileAtomic } from './plan/beside'
@@ -40,6 +41,7 @@ export async function approvedPlans(cwd: string): Promise<{ plans: ApprovedPlanI
       unreadable.push({ plan: toPosixRelative(cwd, discovery.files[index]!), reason: reading.reason.replaceAll(`${cwd}${sep}`, '') })
     }
   })
+  unreadable.sort((a, b) => compareStrings(a.plan, b.plan) || compareStrings(a.reason, b.reason))
   return { plans, unreadable }
 }
 
@@ -67,9 +69,12 @@ export async function runBrowserMap(options: { cwd: string; write: boolean }): P
   ])
   const map = buildBrowserMap(graph, plans, unreadable)
 
+  // Compared without case: on a case-insensitive filesystem `readme.md` is the index.
+  const claimed = new Set([BROWSER_MAP_INDEX.toLowerCase()])
   const featureFiles = new Set<string>()
   for (const feature of map.features) {
-    if (featureFiles.has(feature.file)) throw new CliError(`Two features write ${feature.file}; rename a page directory so their names differ by more than case and punctuation.`)
+    if (claimed.has(feature.file.toLowerCase())) throw new CliError(`The feature ${feature.name} would write ${feature.file}, which another feature or the index already uses; rename its page directory.`)
+    claimed.add(feature.file.toLowerCase())
     featureFiles.add(feature.file)
   }
   const orphans = [...existing.keys()].filter((file) => file !== BROWSER_MAP_INDEX && !featureFiles.has(file))

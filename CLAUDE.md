@@ -110,7 +110,7 @@ bunx guren context              # Project context map (markdown); routes from th
 bunx guren context --json       # Project context map (JSON)
 bunx guren context User         # Entity-centric bundle: model, routes, pages, resource, policy, linked docs (--module to disambiguate, "app" = root)
 bunx guren docs:graph           # OKF docs relation graph (--entity/--path narrows; --json for agents)
-bunx guren browser:map          # Browser verification feature map under docs/browser/ (RFC 0033): one file per first page-path segment, routes joined through the graph's `handles` and the `controller:<action>` evidence of `renders`, approved plans' acceptance and view locators printed as planned; generated sections between `guren:browser` markers, author text and frontmatter kept, broken markers refuse with nothing written; exits 1 on an incomplete graph or an unread plan (--check writes nothing and exits 1 when a block is stale; --json)
+bunx guren browser:map          # Browser verification feature map under docs/browser/ (RFC 0033): one file per first page-path segment, routes joined through the graph's `handles` and the `controller:<action>` evidence of `renders`, approved plans' acceptance and view locators printed as planned; generated sections between `guren:browser` markers, author text and frontmatter kept, broken markers refuse with nothing written; exits 1 on an incomplete graph or an unread plan (--check writes nothing and exits 1 on those or a stale block; --json)
 bunx guren model:list           # List models with relationships
 bunx guren model:list --format json  # Models as JSON
 bunx guren tool:list            # Agent tools this app exposes (RFC 0016); --json for the raw derivation

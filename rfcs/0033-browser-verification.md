@@ -179,7 +179,9 @@ relations).
 
 `browser:map --json` prints the model the files are rendered from.
 `browser:map --check` exits 1 when a generated block differs from what a run
-would write, and writes nothing.
+would write, and writes nothing. **Amended in implementation:** it also exits 1
+on an incomplete map or an unread plan, as a writing run does, so a matching
+document never passes a check the map itself fails.
 
 ### 3. Launching: the `database` manifest section and `browser:serve`
 
