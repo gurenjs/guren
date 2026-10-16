@@ -6,7 +6,8 @@ import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
-import { connectionSettings, type ConnectionContext, type ConnectionResolver } from './connection-context'
+import { connectionSettings, resolveFor, type ConnectionContext, type ConnectionResolver } from './connection-context'
+import { describeSqliteDatabase, type DatabaseDescription } from './database-description'
 
 export interface SqliteDatabaseOptions {
   migrationsFolder: string | URL
@@ -40,6 +41,8 @@ export interface SqliteDatabase {
   migrationStatus(): Promise<MigrationStatusEntry[]>
   /** Whether the migrations folder holds a migration. Reads files only, never the database. */
   hasMigrations(): boolean
+  /** Where the database lives for `context`, without connecting (RFC 0033 §3); never carries the connection string. */
+  describe(context?: ConnectionContext): DatabaseDescription
 }
 
 type SqliteTarget =
@@ -172,7 +175,10 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
   const settings = connectionSettings()
 
   function resolveFilename(): string {
-    const value = settings.resolve(filename)
+    return filenameFrom(settings.resolve(filename))
+  }
+
+  function filenameFrom(value: string | undefined): string {
     if (value != null) {
       assertNotConnectionUri(value, 'the "filename" option')
       return value
@@ -365,6 +371,10 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
     hasMigrations() {
       return listLocalMigrations(resolvedMigrationsFolder).length > 0
+    },
+
+    describe(context) {
+      return describeSqliteDatabase(() => filenameFrom(resolveFor(filename, context)))
     },
 
     async migrationStatus() {

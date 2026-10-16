@@ -160,7 +160,7 @@ lint の設定は、`create-guren-app` 1.12 以降で作ったアプリには最
 | `check` | アプリの配線を検証する（対象の一覧は表の後ろ） | `bunx guren check --json` |
 | `audit` | セキュリティ監査。更新系ルートでのバリデーション・認証・Policy による認可の抜け、文字列を埋め込んだ生 SQL、ハードコードされた認証情報、無効にされたセキュリティのデフォルト設定、mass assignment の設定、`hidden` に入っていない機微なカラム、リクエストのホストから組み立てたメール内のリンク、アプリやインストール済みパッケージが宣言した CSRF の除外、インプロセスエージェントのローカルツールを調べる | `bunx guren audit --json` |
 | `gate` | 雛形に含まれる CI が実行する検証ステージ(codegen・typecheck・lint・`--ci` の規則での `check`・`audit`・テスト)をまとめて実行し、どれかが失敗すれば非ゼロで終了する。実行できないステージは、スキップではなく失敗として扱う | `bunx guren gate --changed` |
-| `introspect` | boot も listen もせずにアプリの provider とルートを登録し、マニフェストを出力する。マニフェストには、provider ごとの登録結果、解決済みのミドルウェアとコントローラのファイルを含むルート、session・auth・cache・storage・queue・attachments の設定が入る | `bunx guren introspect --json` |
+| `introspect` | boot も listen もせずにアプリの provider とルートを登録し、マニフェストを出力する。マニフェストには、provider ごとの登録結果、解決済みのミドルウェアとコントローラのファイルを含むルート、session・auth・cache・storage・queue・attachments の設定、データベースがローカルかどうか(接続文字列そのものは含まない)が入る | `bunx guren introspect --json` |
 | `doctor` | プロジェクトの健全性(環境変数・設定・生成ファイル)のレポートと、次にやるべきこと | `bunx guren doctor --next` |
 | `context [Entity]` | プロジェクトのコンテキストマップ。エンティティ名を渡すと、1 つのモデルに関するものをすべて出力する。対象は、テーブル、リレーション、`fillable`/`hidden`/`visible`/`casts`、スキーマ付きのルート(`<Entity>Controller`、モデルを指す `bind`、モデルを使うアクション本体のどれかで対応付ける)、Props 付きのページ、Resource、Policy、紐付いた docs と Issue。同名のモデルは `--module` で区別し、`"app"` はプロジェクトルートを指す。`--live` を付けると `gh` に Issue の状態を問い合わせ、`--repo owner/name` で origin リモートの代わりのリポジトリを指定できる | `bunx guren context User --json` |
 | `docs:graph` | OKF docs のリレーショングラフ。文書・エンティティ・コードパスがノードで、検証済みのリレーションがエッジになる。`--entity <Model>` / `--path <file>` で周辺だけに絞れるので、リネームの前に「これを規定している docs はどれか」を調べられる | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |

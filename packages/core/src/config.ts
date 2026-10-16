@@ -1,5 +1,5 @@
 import { defineConfig, type AppEnv, type ConfigDefinition, type SessionConfig } from '@guren/server'
-import type { ConnectionContext } from '@guren/orm'
+import type { ConnectionContext, DatabaseDescription } from '@guren/orm'
 import { createSessionManager } from './session-manager.js'
 
 /** What `defineDatabaseConfig()` needs from a dialect factory's result. */
@@ -7,6 +7,8 @@ export interface ConfigurableDatabase {
   configureOrm(context?: ConnectionContext): Promise<void>
   seedDatabase(): Promise<unknown>
   hasMigrations(): boolean
+  /** Where the database lives, read by introspection (RFC 0033 §3); absent leaves the manifest's `database` unverified. */
+  describe?(context?: ConnectionContext): DatabaseDescription
 }
 
 export interface DatabaseConfig {
@@ -63,8 +65,9 @@ export function defineDatabaseConfig(
     bind: (container, config) => {
       container.instance('database', config.database)
     },
-    boot: async (container, config, env) => {
-      await config.database.configureOrm(container.has('env') ? { env } : undefined)
+    boot: async (container, config) => {
+      // The container's `env`, as the introspection manifest hands `describe()`, so the two judge one value.
+      await config.database.configureOrm(container.has('env') ? { env: container.make('env') } : undefined)
       if (config.seedOnBoot && config.database.hasMigrations()) {
         await config.database.seedDatabase()
       }

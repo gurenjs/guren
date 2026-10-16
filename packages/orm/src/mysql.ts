@@ -6,7 +6,8 @@ import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
-import { connectionSettings, type ConnectionContext, type ConnectionResolver } from './connection-context'
+import { connectionSettings, resolveFor, type ConnectionContext, type ConnectionResolver } from './connection-context'
+import { describeServerDatabase, type DatabaseDescription } from './database-description'
 
 type MySqlConnectionOptions = Record<string, unknown>
 type MySql2Drizzle = typeof import('drizzle-orm/mysql2')
@@ -67,6 +68,8 @@ export interface MySqlDatabase {
   migrationStatus(): Promise<MigrationStatusEntry[]>
   /** Whether the migrations folder holds a migration. Reads files only, never the database. */
   hasMigrations(): boolean
+  /** Where the database lives for `context`, without connecting (RFC 0033 §3); never carries the connection string. */
+  describe(context?: ConnectionContext): DatabaseDescription
 }
 
 export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabase {
@@ -85,9 +88,13 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
 
   const settings = connectionSettings()
 
+  /** The one fallback rule, so what `describe()` judges is what a connection opens. */
+  function connectionStringFrom(value: string | undefined): string | undefined {
+    return (value ?? process.env.DATABASE_URL) || undefined
+  }
+
   function resolveConnectionString(): string {
-    const value = settings.resolve(connectionString)
-    const resolved = value ?? process.env.DATABASE_URL
+    const resolved = connectionStringFrom(settings.resolve(connectionString))
 
     if (!resolved) {
       throw new Error('DATABASE_URL is not set and no connection string was provided.')
@@ -295,6 +302,9 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     resetDatabase,
     migrationStatus,
     hasMigrations,
+    describe(context) {
+      return describeServerDatabase('mysql', connectionStringFrom(resolveFor(connectionString, context)), clientOptions)
+    },
   }
 }
 

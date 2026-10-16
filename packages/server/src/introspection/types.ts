@@ -1,3 +1,5 @@
+import type { DatabaseDescription } from '@guren/orm'
+
 import type { DerivedAgentTool } from '../agent/derive'
 import type { MiddlewareCapabilities } from '../http/middleware/capabilities'
 import type { JsonSchemaObject } from '../internal/zod-json-schema'
@@ -26,6 +28,7 @@ export interface AppManifest {
   storage?: DriverMapEntry
   queue?: DriverMapEntry
   attachments?: AttachmentsEntry
+  database?: DatabaseEntry
   agentTools: DerivedAgentTool[]
   warnings: ManifestWarning[]
 }
@@ -136,6 +139,12 @@ export interface AuthEntry {
   requiresBun: boolean | null
   providers: Record<string, AuthProviderEntry>
 }
+
+/**
+ * Where the bound database lives (RFC 0033 §3), from `describe()` on the factory
+ * `defineDatabaseConfig()` binds, read without connecting. Never the connection string.
+ */
+export type DatabaseEntry = DatabaseDescription
 
 export interface DriverMapEntry {
   default: string

@@ -12,7 +12,7 @@ import type { AppManifest } from '@guren/server'
 import { advisory, type CheckReport, type CheckResult } from './check-result'
 import type { Introspection } from './introspect'
 
-export type ManifestSectionKey = 'auth' | 'session' | 'cache' | 'storage' | 'queue' | 'attachments'
+export type ManifestSectionKey = 'auth' | 'session' | 'cache' | 'storage' | 'queue' | 'attachments' | 'database'
 
 /** What the app reported (`undefined` for a section it does not configure), or why that cannot be trusted. */
 export type ManifestSection<T> = { status: 'described'; value: T } | { status: 'unverified'; reason: string }

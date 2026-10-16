@@ -279,3 +279,49 @@ describe('definePlugin() introspection', () => {
     expect(manifest.providers.find((provider) => provider.name === 'hookedPluginProvider')?.register).toBe('introspect-hook')
   })
 })
+
+describe('database section (RFC 0033 §3)', () => {
+  test('describes the bound database with the env core hands configureOrm()', async () => {
+    const seen: unknown[] = []
+    class DatabaseProvider extends ServiceProvider {
+      register(): void {
+        this.container.instance('env', { DATABASE_URL: 'postgres://localhost/app' })
+        this.container.instance('database', {
+          describe(context: unknown) {
+            seen.push(context)
+            return { dialect: 'postgres', location: 'local' }
+          },
+        })
+      }
+    }
+
+    const manifest = await createApp({ providers: [DatabaseProvider] }).introspect()
+
+    expect(manifest.database).toEqual({ dialect: 'postgres', location: 'local' })
+    expect(seen).toEqual([{ env: { DATABASE_URL: 'postgres://localhost/app' } }])
+  })
+
+  test('reports a describe() that throws as unreadable, with no section', async () => {
+    class ThrowingDatabaseProvider extends ServiceProvider {
+      register(): void {
+        this.container.instance('database', {
+          describe() {
+            throw new Error('resolver failed')
+          },
+        })
+      }
+    }
+
+    const manifest = await createApp({ providers: [ThrowingDatabaseProvider] }).introspect()
+
+    expect(manifest.database).toBeUndefined()
+    expect(manifest.warnings).toContainEqual({ code: 'section-unreadable', message: '"database" is bound but could not be described: resolver failed' })
+  })
+
+  test('leaves the section out when no database is bound', async () => {
+    const manifest = await createApp({}).introspect()
+
+    expect(manifest.database).toBeUndefined()
+    expect(manifest.bindings).not.toContain('database')
+  })
+})
