@@ -240,6 +240,19 @@ that race into a failed start rather than a server on the wrong port.
   picks its own.
 - A refusal reason never echoes the connection setting: the SQLite driver's
   own refusal names the value, which may carry a password.
+- ~~No banner is parsed~~ (step 5): an HTTP answer alone can come from a
+  stranger already on the port, which would hand out an origin whose database
+  was never judged. The port is first checked free on 127.0.0.1 (a busy
+  `--port` refuses), and the app is ready only once its own dev banner reports
+  binding that port (`GUREN_DEV_BANNER=1`, colours off) and it then answers.
+- Signal handling starts at the spawn, not at readiness: SIGINT, SIGTERM and
+  SIGHUP stop the app's process group (a second one kills it) and this
+  process's exit kills it, so a signal during boot leaves nothing running. A
+  SIGKILL of this process still orphans the app; nothing can catch it.
+- `NODE_ENV` is passed explicitly (the caller's, else `development`), so the
+  app's own `.env` cannot serve under another value than the one judged.
+- `GUREN_BROWSER_SEED` is not set yet; it arrives with the seeder that reads it
+  (§6).
 
 ### 4. The doctor
 
@@ -319,7 +332,9 @@ An opt-in blueprint, since it adds a devDependency and a browser download:
 - `@playwright/test` as a devDependency and `test:browser` in `scripts`;
 - `playwright.config.ts` whose `webServer` runs `guren browser:serve --port
   <fixed>` with `reuseExistingServer: false`, so every Playwright launch passes
-  §3's checks and never attaches to a server it did not start;
+  §3's checks and never attaches to a server it did not start, and
+  `gracefulShutdown: { signal: 'SIGTERM' }`: Playwright otherwise SIGKILLs
+  `browser:serve`'s process group, which the app's own group survives;
 - `tests/browser/smoke.spec.ts`, one test per mapped landmark;
 - when the app has auth (`make:auth`'s users table and login route), a setup
   project that signs in once and a seeder `db/seeders/browser-account.ts` that

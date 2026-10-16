@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { databaseRefusal } from '../src/browser-serve'
+import { databaseRefusal, reportedPort } from '../src/browser-serve'
 
 describe('databaseRefusal', () => {
   test('lets a local database through', () => {
@@ -23,5 +23,17 @@ describe('databaseRefusal', () => {
 
   test('refuses an app that binds no database rather than assuming it has none', () => {
     expect(databaseRefusal({ status: 'described', value: undefined })).toContain('binds no database')
+  })
+})
+
+describe('reportedPort', () => {
+  test('reads the port from the dev banner, coloured or not', () => {
+    expect(reportedPort('   \u2022 Bound address  : http://127.0.0.1:4317\n')).toBe(4317)
+    expect(reportedPort('\u001b[35m   \u2022\u001b[39m \u001b[1mBound address \u001b[22m: \u001b[96mhttp://127.0.0.1:4317\u001b[39m')).toBe(4317)
+  })
+
+  test('reads nothing before the banner or for another address', () => {
+    expect(reportedPort('[guren] Port 4317 is in use, trying 4318...')).toBeUndefined()
+    expect(reportedPort('   \u2022 Bound address  : http://0.0.0.0:4317')).toBeUndefined()
   })
 })

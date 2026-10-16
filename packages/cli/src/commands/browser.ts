@@ -32,10 +32,10 @@ export const browserMapCommand = defineCommand({
   },
 })
 
-function positiveInteger(value: string | undefined, flag: string): number | undefined {
+function integerArg(value: string | undefined, flag: string, max: number, unit: string): number | undefined {
   if (value === undefined) return undefined
   const parsed = Number(value)
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) throw new CliError(`${flag} must be an integer from 1 to 65535, got ${value}.`)
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > max) throw new CliError(`${flag} must be ${unit} from 1 to ${max}, got ${value}.`)
   return parsed
 }
 
@@ -50,22 +50,11 @@ export const browserServeCommand = defineCommand({
   async run({ args }) {
     const handle = await startBrowserServe({
       cwd: args.app ?? process.cwd(),
-      port: positiveInteger(args.port, '--port'),
+      port: integerArg(args.port, '--port', 65_535, 'a port'),
       databaseUrl: args['database-url'],
-      readyTimeoutMs: (positiveInteger(args.timeout, '--timeout') ?? 60) * 1000,
+      readyTimeoutMs: (integerArg(args.timeout, '--timeout', 3_600, 'seconds') ?? 60) * 1000,
     })
     console.log(JSON.stringify(handle.ready))
-    let stopping = false
-    const stop = (): void => {
-      stopping = true
-      void handle.stop()
-    }
-    process.once('SIGINT', stop)
-    process.once('SIGTERM', stop)
-    const code = await handle.exited
-    process.off('SIGINT', stop)
-    process.off('SIGTERM', stop)
-    // A stop this process asked for ends the app by signal, which is not a failure.
-    if (code !== 0 && !stopping) markCommandFailed()
+    if (!(await handle.ended)) markCommandFailed()
   },
 })
