@@ -7,9 +7,8 @@
 
 import { buildBrowserMap, type BrowserFeature, type BrowserMap } from './browser-map'
 import { loadApplicationGraph } from './application-graph-load'
-import { fetchRuntimeErrors, runtimeOrigin, type RuntimeErrorQuery, type RuntimeErrorResult } from './runtime-errors'
-
-type RuntimeErrorEvent = Extract<RuntimeErrorResult, { status: 'available' }>['events'][number]
+import { readWindowStart, windowSince, type ErrorWindow, type RuntimeErrorEvent, type RuntimeErrorRead } from './runtime-error-window'
+import { fetchRuntimeErrors, runtimeOrigin } from './runtime-errors'
 
 export interface FeatureCheck {
   feature: string
@@ -20,12 +19,6 @@ export interface FeatureCheck {
   component?: string
   expected?: string[]
   location?: string
-  reason?: string
-  events: RuntimeErrorEvent[]
-}
-
-export interface ErrorWindow {
-  status: 'conclusive' | 'inconclusive' | 'unavailable'
   reason?: string
   events: RuntimeErrorEvent[]
 }
@@ -43,10 +36,8 @@ export interface DoctorReport {
 
 export interface DoctorIo {
   fetch: (url: string, init: RequestInit) => Promise<Response>
-  readErrors: (origin: string, query: RuntimeErrorQuery) => Promise<RuntimeErrorResult>
+  readErrors: RuntimeErrorRead
 }
-
-const PAGE_LIMIT = 100
 
 /** The component the Inertia initial page names, from `<script data-page>` or a legacy `data-page` attribute. */
 export function pageComponent(html: string): string | undefined {
@@ -73,25 +64,6 @@ function componentOf(json: string): string | undefined {
     return typeof page.component === 'string' ? page.component : undefined
   } catch {
     return undefined
-  }
-}
-
-type Drained =
-  | { status: 'unavailable'; reason: string }
-  | { status: 'available'; sessionId: string; head: RuntimeErrorQuery; dropped: number; expired: boolean; events: RuntimeErrorEvent[] }
-
-/** Every event from `from` on, following the cursor to the head, which is the next read's start. */
-async function drain(io: DoctorIo, origin: string, from: RuntimeErrorQuery): Promise<Drained> {
-  const events: RuntimeErrorEvent[] = []
-  let cursor = from
-  let expired = false
-  for (;;) {
-    const page = await io.readErrors(origin, { ...cursor, limit: PAGE_LIMIT })
-    if (page.status !== 'available') return { status: 'unavailable', reason: page.reason }
-    expired ||= page.cursorExpired
-    events.push(...page.events)
-    cursor = { sessionId: page.nextCursor.sessionId, after: page.nextCursor.after }
-    if (page.events.length < PAGE_LIMIT) return { status: 'available', sessionId: page.sessionId, head: cursor, dropped: page.dropped, expired, events }
   }
 }
 
@@ -133,21 +105,10 @@ async function checkLandmark(io: DoctorIo, origin: string, feature: BrowserFeatu
 
 /** The doctor over a map already built; `io` is the network, so the judgement is testable without a server. */
 export async function examine(map: BrowserMap, origin: string, io: DoctorIo): Promise<DoctorReport> {
-  const start = await drain(io, origin, {})
+  const start = await readWindowStart(io.readErrors, origin)
   const features: FeatureCheck[] = []
   for (const feature of map.features) features.push(await checkLandmark(io, origin, feature))
-
-  let window: ErrorWindow
-  if (start.status !== 'available') {
-    window = { status: 'unavailable', reason: start.reason, events: [] }
-  } else {
-    const end = await drain(io, origin, start.head)
-    if (end.status !== 'available') window = { status: 'unavailable', reason: end.reason, events: [] }
-    else if (end.sessionId !== start.sessionId) window = { status: 'inconclusive', reason: 'The app restarted during the run, so its earlier errors are gone.', events: end.events }
-    else if (end.expired) window = { status: 'inconclusive', reason: 'Errors from the run were evicted before they were read.', events: end.events }
-    else if (end.dropped > start.dropped) window = { status: 'inconclusive', reason: `${end.dropped - start.dropped} error(s) were dropped during the run.`, events: end.events }
-    else window = { status: 'conclusive', events: end.events }
-  }
+  const window = await windowSince(io.readErrors, origin, start)
 
   const uncorrelated: RuntimeErrorEvent[] = []
   for (const event of window.events) {

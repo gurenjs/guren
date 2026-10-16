@@ -18,6 +18,17 @@ import { CliError, formatSchemaIssues } from '../cli-error'
 export const FEEDBACK_STDIN = '-'
 
 /**
+ * citty parses `--flag -` as `--flag ''` and drops the `-`, so the dash is read back off the raw
+ * arguments: the last spelling of the flag decides, as the parsed value does. `--flag=-` parses.
+ */
+export function recoverStdinDash(value: string | undefined, flag: string, rawArgs: readonly string[]): string | undefined {
+  if (value !== '') return value
+  const spellings = rawArgs.map((token, index) => (token === `--${flag}` || token.startsWith(`--${flag}=`) ? index : -1))
+  const at = Math.max(...spellings)
+  return rawArgs[at] === `--${flag}` && rawArgs[at + 1] === FEEDBACK_STDIN ? FEEDBACK_STDIN : value
+}
+
+/**
  * Feedback is one comment per plan element, which stays under a megabyte however
  * long the comments are. The cap is what stops a log or a binary piped in by
  * mistake, so it is read as bytes and refused before the document is.

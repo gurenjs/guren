@@ -419,6 +419,27 @@ reader for browser runs (RFC 0032 keeps SQL execution out of scope), so
 `database` is what the recorder observed, through the app's own models or a
 spec; it is labelled as such rather than checked.
 
+**Amended in implementation:**
+- ~~Each field says who established it~~: the step groups its fields by source
+  instead, `recorder` (the agent's or a spec's account, verbatim) and `cli`
+  (the screenshots with their sha256, and the error window's status and event
+  count). `result` sits beside them, with `lowered` naming why the CLI lowered
+  it. A field one group holds is never in the other.
+- An open step's cursor is kept in `run.json` under `open`, so a run survives
+  between commands; `--close` removes it.
+- `run.json` also records the graph snapshot id (null when the graph cannot be
+  read) and the commit with whether the tree was dirty, for Open Question 8.
+- The run name must be one `--begin` could write (a stamp and a slug), so no
+  path leaves `.guren/browser/`. A step id is an acceptance id or a charter
+  slug and never a key an object already holds, so a step that was never opened
+  cannot be closed. A screenshot is resolved through links and must land inside
+  the run's `screenshots/`.
+- `--evidence` checks the run exists before the doctor runs and files the
+  report only into a run against the same origin.
+- Steps of one run are recorded one at a time: the commands read and rewrite
+  `run.json` without a lock. Runtime-error events are appended once per session
+  and sequence, so a retried close records none twice.
+
 Gitignoring stops tracking, not leaking, so what may be written there is fixed:
 
 | Kept | Not kept |
