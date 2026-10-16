@@ -285,6 +285,18 @@ window is `inconclusive`. Exit 0 only on `pass`.
 `--evidence <run>` also writes the report as `doctor.json` into that run's
 directory (§7); without it the doctor writes nothing.
 
+**Amended in implementation:**
+- Which routes require a signed-in user is read from the graph: each route node
+  carries `authentication` (`required` or `guest-only`), folded from the
+  registered middleware's capabilities, inline middleware included. A redirect
+  is `auth-required` only on a `required` route; any other redirect fails. As
+  §4's Result sentence says, an `auth-required` landmark keeps the run from
+  `pass` (Open Question 7 is how it could be checked signed in).
+- `--evidence <run>` arrives with `browser:record`, which owns the run
+  directory (§7).
+- The map is built without plans (only landmarks and completeness matter
+  here), and a request that cannot connect fails its feature.
+
 **What it does not prove.** In `default-ssr` apps the GET also renders on the
 server. An SSR failure is logged and falls back to client rendering with a valid
 page payload and a 200, outside the exception handler, so the collector never

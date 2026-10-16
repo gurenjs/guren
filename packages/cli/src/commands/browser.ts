@@ -2,6 +2,7 @@ import { defineCommand } from '../define-command'
 import { markCommandFailed } from '../command-status'
 import { runBrowserMap } from '../browser-map-files'
 import { startBrowserServe } from '../browser-serve'
+import { runBrowserDoctor, type DoctorReport } from '../browser-doctor'
 import { CliError } from '../cli-error'
 
 export const browserMapCommand = defineCommand({
@@ -56,5 +57,38 @@ export const browserServeCommand = defineCommand({
     })
     console.log(JSON.stringify(handle.ready))
     if (!(await handle.ended)) markCommandFailed()
+  },
+})
+
+function doctorLines(report: DoctorReport): string[] {
+  const window = report.window.status === 'conclusive' ? 'conclusive' : `${report.window.status} (${report.window.reason})`
+  const lines = [`Map: ${report.map.complete ? 'complete' : `incomplete (${report.map.gaps.map((gap) => gap.section).join(', ')})`}   Runtime errors: ${window}`, '']
+  for (const check of report.features) {
+    const route = check.route ? `${check.route.method} ${check.route.path}` : ''
+    const detail = check.status === 'pass' ? `${check.httpStatus} ${check.component}` : check.location ? `${check.httpStatus} -> ${check.location}` : check.reason ?? ''
+    lines.push(`  ${check.feature.padEnd(14)} ${check.status.padEnd(10)} ${route.padEnd(24)} ${detail}`)
+    for (const event of check.events) lines.push(`      ${event.status} ${event.method} ${event.route?.pattern ?? '(no route)'}${event.frames[0] ? ` at ${event.frames[0].file}:${event.frames[0].line ?? '?'}` : ''}`)
+  }
+  for (const event of report.uncorrelated) lines.push(`  uncorrelated   ${event.status} ${event.method} ${event.route?.pattern ?? '(no route)'}`)
+  lines.push('', `Result: ${report.result}${report.reasons.length > 0 ? `. ${report.reasons.join(' ')}` : ''}`)
+  return lines
+}
+
+export const browserDoctorCommand = defineCommand({
+  meta: { name: 'browser:doctor', description: 'Check that a running app serves every mapped landmark without a server error (RFC 0033).' },
+  args: {
+    url: { type: 'string', required: true, description: 'Loopback origin of the running app, as browser:serve prints it.' },
+    json: { type: 'boolean', description: 'Print the report as JSON.' },
+    app: { type: 'string', description: 'Application root directory.' },
+  },
+  async run({ args }) {
+    let report: DoctorReport
+    try {
+      report = await runBrowserDoctor({ cwd: args.app ?? process.cwd(), url: args.url })
+    } catch (error) {
+      throw new CliError(error instanceof Error ? error.message : String(error))
+    }
+    if (report.result !== 'pass') markCommandFailed()
+    console.log(args.json ? JSON.stringify(report) : doctorLines(report).join('\n'))
   },
 })

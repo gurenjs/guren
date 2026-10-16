@@ -9,7 +9,11 @@ export const graphCoverageSchema = z.object({ status: z.enum(['complete', 'parti
 const node = z.object({
   id: z.string(), kind: z.enum(GRAPH_KINDS), label: z.string(), module: z.string().nullable(),
   file: z.string().optional(), evidence: z.array(evidence),
-  route: z.object({ method: z.string(), path: z.string(), name: z.string().optional(), action: z.string().optional(), order: z.number().int().nonnegative() }).optional(),
+  route: z.object({
+    method: z.string(), path: z.string(), name: z.string().optional(), action: z.string().optional(), order: z.number().int().nonnegative(),
+    /** From the registered middleware's capabilities: `required` when any entry requires a signed-in user. */
+    authentication: z.enum(['required', 'guest-only']).optional(),
+  }).optional(),
 })
 const edge = z.object({ from: z.string(), to: z.string(), relation: z.enum(GRAPH_RELATIONS), evidence: z.array(evidence) })
 const unresolved = z.object({ from: z.string().optional(), relation: z.string().optional(), target: z.string(), reason: z.string() })
