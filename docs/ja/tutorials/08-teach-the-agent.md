@@ -352,7 +352,6 @@ export default class LinkController extends Controller {
 
     return this.inertia(pages.links.Edit, {
       link: new LinkResource(link).toJSON(),
-      errors: {},
     })
   }
 

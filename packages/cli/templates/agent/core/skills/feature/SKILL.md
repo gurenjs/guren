@@ -31,7 +31,7 @@ This generates Validator, Resource, Controller, Views (Index/Show/New/Edit), and
 - Typed page props (no `any`)
 - `route()` helper for all URLs
 - `ApiRoutes` for form data types
-- `RouteErrors` for validation error types
+- A validation error under each form field, read from `form.errors`
 
 **Or generate individually:**
 
@@ -96,7 +96,7 @@ Generated views follow these patterns for end-to-end type safety:
 
 ```typescript
 import type { ApiRoutes } from '@/.guren/api-client.gen'
-import type { RouteBody, RouteErrors } from '@guren/inertia-client/typed-forms'
+import type { RouteBody } from '@guren/inertia-client/typed-forms'
 import { route } from '@/.guren/routes.gen'
 
 type <Name>FormData = RouteBody<ApiRoutes, '<names>.store'>
@@ -119,13 +119,16 @@ interface Props extends PaginatedPageProps<<Name>ResourceData> {}
 <Link href={route('<names>.show', { id: <name>.id })}>
 ```
 
-### Error types — RouteErrors with message field
+### Validation errors — read from `form.errors`
 
-```typescript
-interface Props {
-  errors?: RouteErrors<<Name>FormData> & { message?: string }
-}
+A failed `validated()` or `validateBody()` redirects back with the errors flashed into the shared `errors` prop, and `useForm` exposes them as `form.errors`. Each field renders its own message and points its control at it:
+
+```tsx
+<input id={fieldIds.title} /* … */ aria-invalid={form.errors.title ? true : undefined} aria-describedby={form.errors.title ? `${fieldIds.title}-error` : undefined} />
+{form.errors.title && <p id={`${fieldIds.title}-error`} className="mt-1 text-sm text-g-danger">{form.errors.title}</p>}
 ```
+
+Do not pass `errors` from the `edit()` or `create()` action: page props override shared ones, so an `errors: {}` there erases the flashed errors before the page sees them.
 
 ### Models — define fillable for mass assignment protection
 
@@ -178,8 +181,8 @@ db/
 resources/js/pages/posts/
 ├── Index.tsx    ← typed props, route() links
 ├── Show.tsx     ← typed props, route() links
-├── New.tsx      ← ApiRoutes form type, route() submit
-└── Edit.tsx     ← ApiRoutes form type, RouteErrors, route() submit
+├── New.tsx      ← ApiRoutes form type, form.errors per field, route() submit
+└── Edit.tsx     ← ApiRoutes form type, form.errors per field, route() submit
 tests/controllers/PostController.test.ts
 ```
 
