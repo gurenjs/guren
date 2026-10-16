@@ -3,6 +3,11 @@ import { markCommandFailed } from '../command-status'
 import { runBrowserMap } from '../browser-map-files'
 import { startBrowserServe } from '../browser-serve'
 import { runBrowserDoctor, type DoctorReport } from '../browser-doctor'
+import { beginRun, closeStep, openStep, writeDoctorEvidence, type RecordDeps } from '../browser-record'
+import { loadApplicationGraph } from '../application-graph-load'
+import { runGit } from '../changed-files'
+import { readJsonWithinLimit } from '../plan/feedback'
+import { fetchRuntimeErrors } from '../runtime-errors'
 import { CliError } from '../cli-error'
 
 export const browserMapCommand = defineCommand({
@@ -79,6 +84,7 @@ export const browserDoctorCommand = defineCommand({
   args: {
     url: { type: 'string', required: true, description: 'Loopback origin of the running app, as browser:serve prints it.' },
     json: { type: 'boolean', description: 'Print the report as JSON.' },
+    evidence: { type: 'string', description: 'Also write the report as doctor.json into this browser:record run.' },
     app: { type: 'string', description: 'Application root directory.' },
   },
   async run({ args }) {
@@ -88,7 +94,65 @@ export const browserDoctorCommand = defineCommand({
     } catch (error) {
       throw new CliError(error instanceof Error ? error.message : String(error))
     }
+    if (args.evidence) await writeDoctorEvidence(args.app ?? process.cwd(), args.evidence, report)
     if (report.result !== 'pass') markCommandFailed()
     console.log(args.json ? JSON.stringify(report) : doctorLines(report).join('\n'))
+  },
+})
+
+function recordDeps(cwd: string): RecordDeps {
+  return {
+    readErrors: fetchRuntimeErrors,
+    graphSnapshot: async () => {
+      try {
+        return (await loadApplicationGraph({ cwd, introspect: true })).snapshot.id
+      } catch {
+        return null
+      }
+    },
+    commit: async () => {
+      const rev = await runGit(cwd, ['rev-parse', 'HEAD'])
+      const status = await runGit(cwd, ['status', '--porcelain', '--', '.'])
+      return rev?.[0] && status ? { rev: rev[0], dirty: status.length > 0 } : null
+    },
+    now: () => new Date(),
+  }
+}
+
+export const browserRecordCommand = defineCommand({
+  meta: { name: 'browser:record', description: 'Write the evidence of a browser verification run: begin a run, open a step, close it with what was observed (RFC 0033).' },
+  args: {
+    run: { type: 'positional', required: false, description: 'The run browser:record --begin printed.' },
+    begin: { type: 'boolean', description: 'Start a run against --url for --feature.' },
+    url: { type: 'string', description: 'With --begin: the loopback origin under test.' },
+    feature: { type: 'string', description: 'With --begin: the feature the run verifies.' },
+    step: { type: 'string', description: 'An acceptance id or charter slug.' },
+    open: { type: 'boolean', description: 'Take the runtime-error head for --step.' },
+    close: { type: 'boolean', description: 'Record --step from --input.' },
+    input: { type: 'string', description: 'With --close: a JSON file, or - for standard input.' },
+    app: { type: 'string', description: 'Application root directory.' },
+  },
+  async run({ args }) {
+    const cwd = args.app ?? process.cwd()
+    const deps = recordDeps(cwd)
+    if (args.begin) {
+      if (!args.url || !args.feature) throw new CliError('browser:record --begin needs --url and --feature.')
+      const run = await beginRun(cwd, { url: args.url, feature: args.feature }, deps)
+      console.log(JSON.stringify({ run: run.run }))
+      return
+    }
+    if (!args.run || !args.step || args.open === args.close) {
+      throw new CliError('Use browser:record --begin --url <origin> --feature <name>, or browser:record <run> --step <id> with exactly one of --open and --close.')
+    }
+    if (args.open) {
+      await openStep(cwd, args.run, args.step, deps)
+      console.log(JSON.stringify({ run: args.run, step: args.step, open: true }))
+      return
+    }
+    if (!args.input) throw new CliError('browser:record --close needs --input <file|->.')
+    const { document } = await readJsonWithinLimit(args.input, { cwd, what: 'step input' })
+    const step = await closeStep(cwd, args.run, args.step, document, deps)
+    if (step.result !== 'pass') markCommandFailed()
+    console.log(JSON.stringify(step))
   },
 })
