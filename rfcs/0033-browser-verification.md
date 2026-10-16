@@ -555,25 +555,35 @@ and evidence steps name `browser:serve`, `browser:doctor` and `browser:record`;
 shipped before them, it would either point at commands that do not exist or
 launch the app without §3's checks.
 
-**M4 measurement.** `bun run smoke:browser-tests` builds the golden-path app
-(auth and a posts resource, migrated), approves one plan describing the posts
-pages through `plan:approve`, runs `guren add browser-tests`, and starts
-`test:browser` several times with `--repeat-each` and no retries. Each start
-is timed, and so are the scaffold, the approval, the blueprint and the Chromium
-download. A test that fails in every run is a defect, one that fails in some
-runs is a flake, and a start that produced no report is a start-up failure; the
-three are counted apart, since only the second and third say anything about a
-gate's reliability. The `Browser Specs Measurement` workflow runs it nightly,
-outside every gate, and keeps each night's metrics JSON for 90 days.
+**M4 measurement.** `bun run smoke:browser-tests` builds a golden-path-shaped
+app on SQLite (auth and a posts resource, migrated; no second resource, no
+seed), approves one plan describing the posts pages through `plan:approve`,
+runs `guren add browser-tests`, and runs `test:browser` from a cold start eight
+times, each start one run of every spec with no retries, as a gate would run
+it. A start is timed whole and by its tests' own time; the scaffold, the
+approval, the blueprint and the Chromium download are timed as their own
+phases, which the rule does not count. A test failing in every run is a defect,
+one failing in some runs a flake, one that never ran (its setup project failed)
+is not run, and a start with no report is a start-up failure. Only the last
+three bear on a gate's reliability, so a night is clean when all three are zero.
+The `Browser Specs Measurement` workflow runs it nightly, outside every gate,
+keeps each night's metrics and Playwright reports for 90 days, and reads the
+previous nights back to report the current streak of clean nights.
 
 The decision is still open. A proposed rule: an acceptance criterion may
-require a browser run once 14 consecutive nightly runs show no flaky test and
-no start-up failure, with the incremental cost of one start under two minutes
-on the CI runner. Until then the generated specs stay advisory. The first runs
-already show two defects the scaffold ships, not flakes: the form fields
-`make:feature` writes carry no label (only a placeholder), and the profile page
-`make:auth` writes does not associate its labels with their inputs, so a spec
-locating either by label fails every time.
+require a browser run once 14 consecutive nights are clean, 112 cold starts
+with no failure, which by the rule of three bounds the failure rate under 2.7%
+at 95% confidence, and the slowest start stays under two minutes on the CI
+runner. Until then the generated specs stay advisory. The decision covers the
+SQLite scaffold; the drivers share the browser, hydration and start-up paths
+that flake, but not the database.
+
+The first local runs on macOS found two defects the scaffold shipped rather than
+flakes: the form fields `make:feature` wrote had no label, so the posts New
+view's spec failed in every run, and the profile page `make:auth` wrote did not
+associate its labels with their inputs (found in M3's live check). Both are
+fixed (gurenjs/guren#1196, gurenjs/guren#1193), so the measured spec set now
+includes the posts form.
 
 ### 10. Acceptance
 
