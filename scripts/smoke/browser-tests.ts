@@ -323,7 +323,7 @@ async function aggregate(dir: string): Promise<void> {
     '',
     `${nights.length} night(s) read. The latest ${cleanNights} in a row are clean (${coldStarts} cold starts with no start-up failure, flake or test left unrun${coldStarts >= RULE_OF_THREE_MIN ? `; by the rule of three a failure rate under ${(300 / coldStarts).toFixed(1)}% at 95% confidence` : ''}).`,
     starts.length > 0 ? `One start, median ${(starts[Math.floor(starts.length / 2)]! / 1000).toFixed(1)} s, slowest ${(starts.at(-1)! / 1000).toFixed(1)} s.` : '',
-    `The proposed rule (RFC 0033 §9) needs ${needed} clean cold starts in a row, which bounds the rate under the CI baseline of ${(CI_SPURIOUS_RATE * 100).toFixed(1)}%, and every start under ${MAX_START_MS / 1000} s: ${coldStarts >= needed && (starts.at(-1) ?? 0) < MAX_START_MS ? 'met' : 'not met yet'}.`,
+    `The rule (RFC 0033 §9, adopted provisionally) needs ${needed} clean cold starts in a row, which bounds the rate under the CI baseline of ${(CI_SPURIOUS_RATE * 100).toFixed(1)}%, and every start under ${MAX_START_MS / 1000} s: ${coldStarts >= needed && (starts.at(-1) ?? 0) < MAX_START_MS ? 'met' : 'not met yet'}.`,
     '',
     '| Test | Nights not passing | Verdicts |', '| --- | --- | --- |',
     ...[...failingTests].map(([test, seen]) => `| ${test.replaceAll('|', '\\|')} | ${seen.nights} | ${[...seen.verdicts].join(', ')} |`),

@@ -570,8 +570,9 @@ The `Browser Specs Measurement` workflow runs it nightly, outside every gate,
 keeps each night's metrics and Playwright reports for 90 days, and reads the
 previous nights back to report the current streak of clean nights.
 
-The decision is still open. The proposed rule holds the browser run to the
-reliability of the CI this repository already runs: it may become required
+The rule was adopted provisionally on 2026-10-17; whether an acceptance may
+require a browser run is decided once the nightly data meets it. The rule holds
+the browser run to the reliability of the CI this repository already runs: it may become required
 once it fails without a fault in the code no more often than CI does, and once a
 start costs under two minutes on the CI runner. The baseline is CI's own record.
 Of the 997 `CI` runs on `main` from 2026-07-24 to 2026-10-16, 27 failed. Read one
@@ -599,8 +600,8 @@ under 0.3%) would need about a thousand starts, which is why the baseline is CI
 as a whole. The aggregate step reports whether the rule is met, and the baseline
 is re-read when CI's own record changes enough to move it. The decision covers
 the SQLite scaffold; the drivers share the browser, hydration and start-up paths
-that flake, but not the database. Until it is made the generated specs stay
-advisory.
+that flake, but not the database. Until the decision is made the generated
+specs stay advisory.
 
 The first local runs on macOS found two defects the scaffold shipped rather than
 flakes: the form fields `make:feature` wrote had no label, so the posts New
