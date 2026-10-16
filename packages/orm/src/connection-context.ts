@@ -28,6 +28,11 @@ export interface ConnectionSettings {
   remember(context: ConnectionContext | undefined): boolean
 }
 
+/** A resolver's value for `context`, without touching a factory's kept context or its staleness record. */
+export function resolveFor(value: ConnectionResolver | undefined, context: ConnectionContext | undefined): string | undefined {
+  return typeof value === 'function' ? value(context) : value
+}
+
 /**
  * One per factory. The context is kept rather than passed, because resolutions
  * also run inside memoized flights and admin clients that no `configureOrm()`

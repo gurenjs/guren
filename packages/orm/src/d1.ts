@@ -39,7 +39,7 @@ export interface D1DatabaseHandle {
   migrationStatus(): Promise<never>
   /** Always false: wrangler applies D1 migrations and the factory never seeds, so nothing at boot acts on them. */
   hasMigrations(): boolean
-  /** Always `unknown`: the binding is resolved per request, inside the Workers runtime. */
+  /** Always `unknown`; see its `reason`. */
   describe(): DatabaseDescription
 }
 

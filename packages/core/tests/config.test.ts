@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createSqliteDatabase } from '@guren/orm'
-import { createApp, defineEnv, Env, resetDefaultApplication, ServiceProvider, type SessionManager } from '@guren/server'
+import { AGENT_REDACTED, createApp, defineEnv, Env, resetDefaultApplication, ServiceProvider, type SessionManager } from '@guren/server'
 import { defineDatabaseConfig, defineSessionConfig } from '../src/config'
 import { createSessionManager } from '../src/session-manager'
 
@@ -52,6 +52,31 @@ describe('defineDatabaseConfig() (RFC 0027 §2)', () => {
     } finally {
       await database.closeDatabase()
     }
+  })
+})
+
+describe('the manifest database section (RFC 0033 §3)', () => {
+  test('describes the database under the env boot connects with', async () => {
+    const env = defineEnv({ RFC33_DB_FILE: Env.string().default('./data/rfc33.db') })
+    const introspected: unknown[] = []
+    const manifest = await createApp({ env, config: [defineDatabaseConfig(recordingDatabase(introspected))] }).introspect()
+
+    const booted: unknown[] = []
+    const database = recordingDatabase(booted)
+    try {
+      await createApp({ env, config: [defineDatabaseConfig(database)] }).boot()
+    } finally {
+      await database.closeDatabase()
+    }
+
+    expect(manifest.database).toEqual({ dialect: 'sqlite', location: 'local' })
+    expect(introspected).toEqual([{ env: { RFC33_DB_FILE: './data/rfc33.db' } }])
+    expect(booted).toEqual(introspected)
+  })
+
+  test('reads the env placeholder the server writes as unknown, never as a local file', () => {
+    const database = createSqliteDatabase({ migrationsFolder: '/nonexistent/rfc33-migrations', filename: AGENT_REDACTED })
+    expect(database.describe().location).toBe('unknown')
   })
 })
 
