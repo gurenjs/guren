@@ -27,6 +27,8 @@ export interface BrowserMapRoute {
   path: string
   name?: string
   middleware: string[]
+  /** Whether its middleware requires a signed-in user (or a guest), as the graph read it. */
+  authentication?: 'required' | 'guest-only'
   /** The pages its action renders, in this feature or any other; more than one is never narrowed. */
   pages: string[]
 }
@@ -182,7 +184,10 @@ export function buildBrowserMap(
       owners = candidates
     }
     const middleware = labels('usesMiddleware', node.id).sort(compareStrings)
-    const route: BrowserMapRoute = { ...base, middleware, pages: [...new Set(rendered.map((page) => page.label))].sort(compareStrings) }
+    const route: BrowserMapRoute = {
+      ...base, middleware, ...(node.route.authentication ? { authentication: node.route.authentication } : {}),
+      pages: [...new Set(rendered.map((page) => page.label))].sort(compareStrings),
+    }
     const bound = labels('binds', node.id)
     routeFeatures.set(node.id, owners)
     for (const owner of owners) {

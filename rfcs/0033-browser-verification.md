@@ -286,10 +286,12 @@ window is `inconclusive`. Exit 0 only on `pass`.
 directory (§7); without it the doctor writes nothing.
 
 **Amended in implementation:**
-- ~~`auth-required`~~ is `redirected`: the graph records middleware names, not
-  which alias authenticates, so any redirect is reported with its `Location`,
-  its page uncompared, and is neither pass nor fail. Telling a sign-in redirect
-  from another needs the graph to carry middleware capabilities.
+- Which routes require a signed-in user is read from the graph: each route node
+  carries `authentication` (`required` or `guest-only`), folded from the
+  registered middleware's capabilities, inline middleware included. A redirect
+  is `auth-required` only on a `required` route; any other redirect fails. As
+  §4's Result sentence says, an `auth-required` landmark keeps the run from
+  `pass` (Open Question 7 is how it could be checked signed in).
 - `--evidence <run>` arrives with `browser:record`, which owns the run
   directory (§7).
 - The map is built without plans (only landmarks and completeness matter
@@ -441,8 +443,16 @@ spec; it is labelled as such rather than checked.
   between commands; `--close` removes it.
 - `run.json` also records the graph snapshot id (null when the graph cannot be
   read) and the commit with whether the tree was dirty, for Open Question 8.
-- The run name must be one `--begin` could write, so no path leaves
-  `.guren/browser/`.
+- The run name must be one `--begin` could write (a stamp and a slug), so no
+  path leaves `.guren/browser/`. A step id is an acceptance id or a charter
+  slug and never a key an object already holds, so a step that was never opened
+  cannot be closed. A screenshot is resolved through links and must land inside
+  the run's `screenshots/`.
+- `--evidence` checks the run exists before the doctor runs and files the
+  report only into a run against the same origin.
+- Steps of one run are recorded one at a time: the commands read and rewrite
+  `run.json` without a lock. Runtime-error events are appended once per session
+  and sequence, so a retried close records none twice.
 
 Gitignoring stops tracking, not leaking, so what may be written there is fixed:
 
