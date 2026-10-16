@@ -521,13 +521,22 @@ describe('makeFeature', () => {
     }
   })
 
-  // A 422 reaches the page as `form.errors` only: InertiaServiceProvider
-  // flashes the errors into the shared `errors` prop on the redirect back.
+  // A validation failure reaches the page as `form.errors` only:
+  // InertiaServiceProvider flashes it into the shared `errors` prop on the redirect back.
   it('shows each field\'s validation error and ties it to its control', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-errors-')
 
     try {
       await makeFeature('Event', { fields: 'title:string,body:text?,meta:json,seats:number?,startsAt:date,pinned:boolean' })
+
+      // The aria attributes belong on the control itself, not on a wrapping label.
+      const controlOf = (source: string, name: string): string => {
+        const start = name === 'pinned'
+          ? source.indexOf('<input type="checkbox"')
+          : source.lastIndexOf('<', source.indexOf(`id={fieldIds.${name}}`))
+        expect(start).toBeGreaterThanOrEqual(0)
+        return source.slice(start, source.indexOf('/>', start))
+      }
 
       for (const page of ['New.tsx', 'Edit.tsx']) {
         const source = await readFile(join(workspace.dir, 'resources/js/pages/events', page), 'utf8')
@@ -535,14 +544,17 @@ describe('makeFeature', () => {
           expect(source).toContain(
             `{form.errors.${name} && <p id={\`\${fieldIds.${name}}-error\`} className="mt-1 text-sm text-g-danger">{form.errors.${name}}</p>}`,
           )
-          expect(source).toContain(`aria-invalid={form.errors.${name} ? true : undefined}`)
-          expect(source).toContain(`aria-describedby={form.errors.${name} ? \`\${fieldIds.${name}}-error\` : undefined}`)
+          const control = controlOf(source, name)
+          expect(control).toContain(`aria-invalid={form.errors.${name} ? true : undefined}`)
+          expect(control).toContain(`aria-describedby={form.errors.${name} ? \`\${fieldIds.${name}}-error\` : undefined}`)
         }
 
         // A json field describes itself by whichever of its two messages shows.
         expect(source).toContain('{form.errors.meta && <p id={`${fieldIds.meta}-error`}')
-        expect(source).toContain('aria-invalid={jsonErrors.meta || form.errors.meta ? true : undefined}')
-        expect(source).toContain(
+        const meta = controlOf(source, 'meta')
+        expect(meta).toStartWith('<textarea')
+        expect(meta).toContain('aria-invalid={jsonErrors.meta || form.errors.meta ? true : undefined}')
+        expect(meta).toContain(
           "aria-describedby={[jsonErrors.meta && `${fieldIds.meta}-json-error`, form.errors.meta && `${fieldIds.meta}-error`].filter(Boolean).join(' ') || undefined}",
         )
       }

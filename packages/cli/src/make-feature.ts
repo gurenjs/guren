@@ -761,8 +761,8 @@ interface FieldMessage {
 }
 
 /**
- * A json field has two: the client's parse failure and the server's 422, which
- * arrives as `form.errors` once the Inertia redirect lands back on the page.
+ * A json field has two: the client's parse failure and the server's validation
+ * error, flashed onto the Inertia redirect back and read as `form.errors`.
  */
 function fieldMessages(field: FieldDefinition, formVar: string): FieldMessage[] {
   const messageId = (suffix: string) => `\`\${fieldIds.${field.name}}-${suffix}\``
