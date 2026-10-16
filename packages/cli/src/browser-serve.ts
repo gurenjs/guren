@@ -47,11 +47,11 @@ export function databaseRefusal(section: ManifestSection<DatabaseEntry | undefin
     return `Where the app's database lives is unverified (${section.reason}), so browser:serve does not start it. Fix what \`guren introspect\` reports, then run browser:serve again.`
   }
   if (section.value === undefined) {
-    return 'The app binds no database through defineDatabaseConfig(), so browser:serve cannot show where its data lives. Start the app yourself and pass its origin to browser:doctor --url.'
+    return 'The app binds no database through defineDatabaseConfig(), so browser:serve cannot show where its data lives. The person can start the app and give you its origin for browser:doctor --url; do not start it another way yourself.'
   }
   if (section.value.location === 'local') return undefined
   const why = section.value.reason ? ` ${section.value.reason}` : ''
-  return `The app's ${section.value.dialect} database is ${section.value.location}, not local.${why} Pass --database-url with a local database.`
+  return `The app's ${section.value.dialect} database is ${section.value.location}, not local.${why} Ask the person for a local database URL and pass it as --database-url.`
 }
 
 /** The port the app's own dev banner says it bound on 127.0.0.1, read from its output so far. */
@@ -65,7 +65,7 @@ export function reportedPort(output: string): number | undefined {
 /** The checks of RFC 0033 §3 before anything starts; throws the refusal, naming its remedy. */
 async function assertSafeToStart(cwd: string, env: Readonly<Record<string, string>>): Promise<void> {
   if (!existsSync(join(cwd, SERVE_ENTRY))) {
-    throw new CliError(`browser:serve starts ${SERVE_ENTRY}, which this app does not have. Start the app yourself and pass its origin to browser:doctor --url.`)
+    throw new CliError(`browser:serve starts ${SERVE_ENTRY}, which this app does not have. The person can start the app and give you its origin for browser:doctor --url; do not start it another way yourself.`)
   }
   const codegen = resolveScriptCommand(await readScripts(cwd), 'codegen', codegenFallback())!
   const generated = await runCaptured(codegen.command, cwd, { timeoutMs: CODEGEN_TIMEOUT_MS, processGroup: true })
@@ -113,7 +113,7 @@ export async function startBrowserServe(options: BrowserServeOptions): Promise<B
   // Explicit, so the app's own .env cannot serve under another NODE_ENV than the one judged here.
   const nodeEnv = process.env.NODE_ENV || 'development'
   if (nodeEnv === 'production') {
-    throw new CliError('browser:serve does not start an app under NODE_ENV=production. Unset it, or point browser:doctor at a server you started with --url.')
+    throw new CliError('browser:serve does not start an app under NODE_ENV=production. Ask the person to unset it; do not start the app another way.')
   }
   const env: Record<string, string> = { NODE_ENV: nodeEnv, ...(options.databaseUrl ? { DATABASE_URL: options.databaseUrl } : {}) }
   await assertSafeToStart(cwd, env)

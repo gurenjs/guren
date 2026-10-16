@@ -10,7 +10,7 @@ describe('databaseRefusal', () => {
   test('refuses a remote or unknown database, naming the reason and the remedy', () => {
     const remote = databaseRefusal({ status: 'described', value: { dialect: 'postgres', location: 'remote', reason: 'The database host db.example.com is not a loopback address.' } })
     expect(remote).toContain('postgres database is remote, not local. The database host db.example.com')
-    expect(remote).toContain('--database-url')
+    expect(remote).toContain('Ask the person for a local database URL')
     expect(databaseRefusal({ status: 'described', value: { dialect: 'd1', location: 'unknown' } })).toContain('is unknown, not local')
   })
 
