@@ -26,6 +26,7 @@ export interface AppManifest {
   storage?: DriverMapEntry
   queue?: DriverMapEntry
   attachments?: AttachmentsEntry
+  database?: DatabaseEntry
   agentTools: DerivedAgentTool[]
   warnings: ManifestWarning[]
 }
@@ -135,6 +136,16 @@ export interface AuthEntry {
   algorithm: 'scrypt' | 'argon2' | 'bcrypt' | null
   requiresBun: boolean | null
   providers: Record<string, AuthProviderEntry>
+}
+
+/**
+ * Where the bound database lives (RFC 0033 §3), from `describe()` on the factory
+ * `defineDatabaseConfig()` binds, read without connecting. Never the connection string.
+ */
+export interface DatabaseEntry {
+  dialect: string
+  location: 'local' | 'remote' | 'unknown'
+  reason?: string
 }
 
 export interface DriverMapEntry {

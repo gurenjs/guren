@@ -11,6 +11,7 @@ import type {
   AppManifest,
   AttachmentsDescription,
   AuthEntry,
+  DatabaseEntry,
   DriverMapEntry,
   ManifestWarning,
   MiddlewareEntry,
@@ -74,8 +75,8 @@ export function buildAppManifest(sources: ManifestSources): AppManifest {
     warnings,
   }
 
-  const section = <T>(key: string): T | undefined => {
-    const read = readSection<T>(sources, key, warnings)
+  const section = <T>(key: string, argument?: unknown): T | undefined => {
+    const read = readSection<T>(sources, key, warnings, argument)
     return read.status === 'described' ? read.value : undefined
   }
 
@@ -87,6 +88,9 @@ export function buildAppManifest(sources: ManifestSources): AppManifest {
     const entry = section<DriverMapEntry>(key)
     if (entry) manifest[key] = entry
   }
+  // The context core's database boot hands `configureOrm()`, so the resolver reads the env the app would.
+  const database = section<DatabaseEntry>('database', sources.container.has('env') ? { env: sources.container.make('env') } : undefined)
+  if (database) manifest.database = database
   const attachments = section<AttachmentsDescription>('attachments')
   if (attachments) {
     const { delivery, ...rest } = attachments
@@ -188,7 +192,7 @@ type SectionRead<T> = { status: 'described'; value: T } | { status: 'absent' | '
  * One a deferred provider supplies, or whose manager throws on construction,
  * is warned about and told apart from a plain absence.
  */
-function readSection<T>(sources: ManifestSources, key: string, warnings: ManifestWarning[]): SectionRead<T> {
+function readSection<T>(sources: ManifestSources, key: string, warnings: ManifestWarning[], argument?: unknown): SectionRead<T> {
   const { container } = sources
   if (!container.has(key)) {
     const deferred = sources.providers.find((provider) => provider.register === 'skipped' && provider.provides.includes(key))
@@ -211,8 +215,8 @@ function readSection<T>(sources: ManifestSources, key: string, warnings: Manifes
   }
 
   try {
-    const service = container.make(key) as { describe?: () => T } | null | undefined
-    if (typeof service?.describe === 'function') return { status: 'described', value: service.describe() }
+    const service = container.make(key) as { describe?: (argument?: unknown) => T } | null | undefined
+    if (typeof service?.describe === 'function') return { status: 'described', value: service.describe(argument) }
     warnings.push({ code: 'section-unverified', message: `"${key}" is bound to something with no describe().` })
     return { status: 'unverified' }
   } catch (error) {

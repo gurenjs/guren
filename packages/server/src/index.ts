@@ -29,6 +29,7 @@ export type {
   AuthEntry,
   AuthProviderEntry,
   ControllerRef,
+  DatabaseEntry,
   DriverMapEntry,
   JsonSchema,
   ManifestWarning,

@@ -7,6 +7,7 @@ import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailu
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
 import { connectionSettings, type ConnectionContext, type ConnectionResolver } from './connection-context'
+import { describeServerDatabase, resolveFor, type DatabaseDescription } from './database-description'
 
 type MySqlConnectionOptions = Record<string, unknown>
 type MySql2Drizzle = typeof import('drizzle-orm/mysql2')
@@ -67,6 +68,8 @@ export interface MySqlDatabase {
   migrationStatus(): Promise<MigrationStatusEntry[]>
   /** Whether the migrations folder holds a migration. Reads files only, never the database. */
   hasMigrations(): boolean
+  /** Where the database lives for `context`, without connecting (RFC 0033 §3); never carries the connection string. */
+  describe(context?: ConnectionContext): DatabaseDescription
 }
 
 export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabase {
@@ -295,6 +298,9 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     resetDatabase,
     migrationStatus,
     hasMigrations,
+    describe(context) {
+      return describeServerDatabase('mysql', (resolveFor(connectionString, context) ?? process.env.DATABASE_URL) || undefined, clientOptions)
+    },
   }
 }
 

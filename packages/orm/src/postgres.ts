@@ -8,6 +8,7 @@ import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailu
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
 import { connectionSettings, type ConnectionContext, type ConnectionResolver } from './connection-context'
+import { describeServerDatabase, resolveFor, type DatabaseDescription } from './database-description'
 
 type PostgresJsDrizzle = typeof import('drizzle-orm/postgres-js')
 type DrizzleConfig = Exclude<Parameters<PostgresJsDrizzle['drizzle']>[0], string>
@@ -62,6 +63,8 @@ export interface PostgresDatabase {
   migrationStatus(): Promise<MigrationStatusEntry[]>
   /** Whether the migrations folder holds a migration. Reads files only, never the database. */
   hasMigrations(): boolean
+  /** Where the database lives for `context`, without connecting (RFC 0033 §3); never carries the connection string. */
+  describe(context?: ConnectionContext): DatabaseDescription
 }
 
 export function createPostgresDatabase(options: PostgresDatabaseOptions): PostgresDatabase {
@@ -272,6 +275,9 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     resetDatabase,
     migrationStatus,
     hasMigrations,
+    describe(context) {
+      return describeServerDatabase('postgres', (resolveFor(connectionString, context) ?? process.env.DATABASE_URL) || undefined, clientOptions)
+    },
   }
 }
 

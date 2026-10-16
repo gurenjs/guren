@@ -2,6 +2,7 @@ import { relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { singleFlight } from './single-flight'
+import type { DatabaseDescription } from './database-description'
 
 export interface D1DatabaseOptions {
   /**
@@ -38,6 +39,8 @@ export interface D1DatabaseHandle {
   migrationStatus(): Promise<never>
   /** Always false: wrangler applies D1 migrations and the factory never seeds, so nothing at boot acts on them. */
   hasMigrations(): boolean
+  /** Always `unknown`: the binding is resolved per request, inside the Workers runtime. */
+  describe(): DatabaseDescription
 }
 
 /**
@@ -113,6 +116,10 @@ export function createD1Database(options: D1DatabaseOptions): D1DatabaseHandle {
 
     hasMigrations() {
       return false
+    },
+
+    describe() {
+      return { dialect: 'd1', location: 'unknown', reason: 'A D1 binding is resolved per request, inside the Workers runtime.' }
     },
 
     async migrationStatus() {
