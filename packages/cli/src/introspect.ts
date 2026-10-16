@@ -43,14 +43,18 @@ export const INTROSPECT_GRAPH_ENV = 'GUREN_INTROSPECT_GRAPH'
 export const GRAPH_SCAN_WARNINGS = { 'model-import': 'binds', 'validator-import': 'validates' } as const
 export type GraphScanWarning = keyof typeof GRAPH_SCAN_WARNINGS
 
-/** A route of a graph run: the CLI's own fields beside the server's, written only by its own child. */
+/** A route as the CLI's own child writes it: the server's fields, and the CLI's beside them. */
 export type GraphRouteEntry = RouteEntry & {
   /**
    * Per contract segment the route declares, the validator-file exports its schema object *is*
    * (object identity, so a schema reached only from a call the app made). Empty: no export is it.
    */
+  /** Graph runs only. */
   contractSources?: Partial<Record<ContractSegment, Array<{ file: string; exportName: string }>>>
-  /** The framework package whose export the routed controller class is (`@guren/core`), so it is outside the app by identity, not unread. */
+  /**
+   * Every run: the framework package whose export the routed controller class is (`@guren/core`),
+   * so the class is outside the app by identity rather than unread.
+   */
   controllerPackage?: string
 }
 

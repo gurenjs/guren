@@ -348,7 +348,7 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
       const evidence = node.evidence[0]!
       input.nodes.push(node)
       if (route.controller && route.controllerPackage) {
-        const external = graphId('controller', `package:${route.controllerPackage}`, route.controller.name)
+        const external = graphId('controller', packageControllerSource(route.controllerPackage), route.controller.name)
         if (!input.nodes.some((entry) => entry.id === external)) {
           input.nodes.push({ id: external, kind: 'controller', label: route.controller.name, module: null, evidence: [{ kind: 'registered', source: packageControllerSource(route.controllerPackage) }] })
         }
