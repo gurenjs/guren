@@ -53,8 +53,9 @@ export function describeSqliteDatabase(filename: () => string | undefined): Data
   let value: string | undefined
   try {
     value = filename()
-  } catch (error) {
-    return { dialect: 'sqlite', location: 'unknown', reason: error instanceof Error ? error.message : String(error) }
+  } catch {
+    // Not the error's message: the driver's own names the value, which may be a URI with a password.
+    return { dialect: 'sqlite', location: 'unknown', reason: 'The database setting is not a file path the SQLite driver accepts, such as a connection URI.' }
   }
   if (value === undefined) return { dialect: 'sqlite', location: 'unknown', reason: 'The database file does not resolve.' }
   if (value.includes(REDACTED)) return { dialect: 'sqlite', location: 'unknown', reason: 'The database file is the placeholder the env reader writes for a missing or invalid value.' }

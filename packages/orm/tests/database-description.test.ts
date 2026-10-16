@@ -34,7 +34,9 @@ describe('describeSqliteDatabase', () => {
 
   it('is unknown for the env placeholder and for a filename that refuses', () => {
     expect(describeSqliteDatabase(() => '[REDACTED]').location).toBe('unknown')
-    expect(describeSqliteDatabase(() => { throw new Error('a connection URI') })).toEqual({ dialect: 'sqlite', location: 'unknown', reason: 'a connection URI' })
+    const refused = describeSqliteDatabase(() => { throw new Error('postgres://u:secret@db.example.com/app is a connection URI') })
+    expect(refused.location).toBe('unknown')
+    expect(JSON.stringify(refused)).not.toContain('secret')
   })
 
   it('resolves the factory\'s filename for the given context without connecting', () => {
