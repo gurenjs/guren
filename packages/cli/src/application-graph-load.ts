@@ -346,6 +346,8 @@ export async function loadApplicationGraph(options: { cwd: string; introspect?: 
       const id = node.id
       routeIds.push(id)
       const evidence = node.evidence[0]!
+      const modes = (route.middleware ?? []).flatMap((entry) => entry.capabilities.authentication ? [entry.capabilities.authentication.mode] : [])
+      if (modes.length > 0) node.route.authentication = modes.includes('required') ? 'required' : 'guest-only'
       input.nodes.push(node)
       if (route.controller) {
         const ref = route.controller
