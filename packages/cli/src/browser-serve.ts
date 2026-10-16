@@ -129,11 +129,12 @@ export async function startBrowserServe(options: BrowserServeOptions): Promise<B
   let output = ''
   let ready = false
   let stopping = false
+  // GUREN_BROWSER_SEED: the browser-tests seeder writes its account only for an app started here (RFC 0033 §6).
   const child: ChildProcess = spawn(bunExecutable(), [SERVE_ENTRY], {
     cwd,
     detached: GROUPED,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, ...env, PORT: String(port), HOST, GUREN_STRICT_PORT: '1', GUREN_MCP: '1', GUREN_DEV_BANNER: '1', FORCE_COLOR: '0', NO_COLOR: '1' },
+    env: { ...process.env, ...env, PORT: String(port), HOST, GUREN_STRICT_PORT: '1', GUREN_MCP: '1', GUREN_DEV_BANNER: '1', GUREN_BROWSER_SEED: '1', FORCE_COLOR: '0', NO_COLOR: '1' },
   })
   const forward = (chunk: Buffer): void => {
     process.stderr.write(chunk)

@@ -36,6 +36,7 @@ bunx guren add lint
 bunx guren add prototype
 bunx guren add ai --provider anthropic
 bunx guren add oauth
+bunx guren add browser-tests
 ```
 
 まず `bunx guren add auth` と `bunx guren add resource` から始め、アプリが育つのに合わせてほかの機能を足していってください。
@@ -100,6 +101,20 @@ lint の設定は、`create-guren-app` 1.12 以降で作ったアプリには最
 
 実行したら `bun install` してください。`bunx oxlint` は Bun 上で動くので、Node は要りません。`config/env.ts` が導入される前に作ったアプリでは、自前の `config/database.ts` や `src/app.ts` にある `process.env` の読み取りも、スキーマに移すか無効化のコメントを付けるまで、このルールに報告されます。
 
+### `add browser-tests`
+
+`add browser-tests` は、Playwright のブラウザテストを導入します。テストはアプリを `bunx guren browser:serve` 経由で起動するので、本番環境や、ローカルだと確かめられないデータベースでは起動しません。書き出すファイルは次のとおりです。
+
+- `playwright.config.ts`(アプリを `127.0.0.1:4317` で起動する設定)と `tests/browser/support.ts`
+- `tests/browser/generated/smoke.browser.ts`: ブラウザマップの機能ごとに 1 つのテストで、パスパラメーターのない最初のページが 200 を返し、ルートが描画するはずのコンポーネントを表示することを確かめます
+- `tests/browser/generated/plans/<plan>.browser.ts`: ビューを持つ承認済みの計画ごとに 1 つのファイルで、計画がビューに定めたフォームのラベルとアクション名が、そのビューを描画するページにあることを確かめます
+
+パスワードでサインインするアプリ(`make:auth` が書き出す `users` テーブルと `POST /login` ルートがあるアプリ)では、セットアッププロジェクトの `tests/browser/auth.setup.ts` と、シーダーの `db/seeders/browser-account.ts` も書き出します。シーダーは `BROWSER_TEST_PASSWORD` のパスワードで `browser@example.test` を作りますが、作るのは `browser:serve` がアプリを起動しているときだけで、本番環境では何もしません。初回の実行までに `.env` の `BROWSER_TEST_PASSWORD` を設定してください。
+
+あわせて `test:browser` スクリプトを追加し、`@playwright/test` を devDependency に加えます。`--no-install` を付けると、`bun add` のコマンドを表示するだけになります。`test-results/`、`playwright-report/`、`tests/browser/.auth/` は `.gitignore` に追加されます。`bunx playwright install chromium` でブラウザを入れてから、`bun run test:browser` で実行します。Playwright は Node 上で動くので、`PATH` に Node が必要です。
+
+`bun test` は `*.spec.ts` も集めてしまうため、spec のファイル名は `.browser.ts` で終わります。計画を承認したら、このコマンドをもう一度実行してください。`tests/browser/generated/` の下だけを書き直し、ほかのファイルは残します(`--force` を付けるとそれらも上書きします)。ブラウザテストは `guren gate` では実行されません。
+
 ### API 専用アプリの場合
 
 `api` ブループリントで作ったアプリには、`@guren/inertia-client` への依存も、web ルートのエントリ（`routes/web.ts` / `routes/web.js`）もありません。Inertia のページを書き出すコマンドは、この 2 つの手がかりを見て次のように動きます。
@@ -111,6 +126,7 @@ lint の設定は、`create-guren-app` 1.12 以降で作ったアプリには最
 | `add resource`、`make:feature` | テーブルを追記する前に中断する。JSON を返すコントローラーを `make:controller` で生成し、`routes/api.ts` につなぐ |
 | `make:view` | 中断する。ページには代わりになる JSON の形がない |
 | `add prototype` | 中断する。プロトタイプモードは Inertia の visit に応答するもの |
+| `add browser-tests` | 中断する。spec が操作するのは Inertia のページなので、ルートは `TestApp` を使って HTTP でテストする |
 | `make:controller` | 合わせて生成する。`this.json(...)` を返すコントローラーになり、そのまま `routes/api.ts` につなげる |
 
 手がかりから API 専用だと確認できなければ、どのコマンドもフルスタックのアプリと同じように動きます。`@guren/inertia-client` をインストールすれば、通常の動きに戻ります。`guren codegen` は、API 専用アプリではページコンポーネントを `.guren/pages.gen.ts` から外します。このファイルが `@guren/inertia-client` を import するためで、`make:view` の中断は、それを原因となったコマンドの時点で知らせるためのものです。

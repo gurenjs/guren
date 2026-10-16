@@ -1437,9 +1437,38 @@ const addPrototypeCommand = defineCommand({
   },
 })
 
+const addBrowserTestsCommand = defineCommand({
+  meta: {
+    name: 'browser-tests',
+    description: 'Install Playwright browser tests (RFC 0033): a config that starts the app through browser:serve, specs generated from the browser map, and a seeded browser account where the app signs in with a password.',
+  },
+  args: {
+    force: {
+      type: 'boolean',
+      description: 'Overwrite the hand-kept files (config, support, sign-in setup, seeder); the generated specs are rewritten on every run.',
+    },
+    install: {
+      type: 'boolean',
+      default: true,
+      description: 'Run bun add -d @playwright/test when it is missing (--no-install prints the command instead).',
+    },
+  },
+  async run({ args }) {
+    const { addBrowserTests } = await import('./add-browser-tests')
+    const overwritten: string[] = []
+    const result = await addBrowserTests({ force: Boolean(args.force), install: args.install, overwritten })
+    announceWrittenFiles([...result.created, ...result.generated], overwritten)
+    for (const orphan of result.orphans) consola.warn(`${orphan} was generated for a plan that is no longer approved; delete it if the plan is gone.`)
+    if (!result.map.complete) consola.warn(`The browser map is incomplete (${result.map.gaps.map((gap) => gap.section).join(', ')}), so the specs may miss features; run bunx guren browser:map --check for the reasons.`)
+    if (result.signIn) consola.info('Set BROWSER_TEST_PASSWORD in .env: the browser account is seeded with it.')
+    consola.info('Next: bunx playwright install chromium, then bun run test:browser')
+  },
+})
+
 const addSubCommands = {
   admin: addAdminCommand,
   ai: addAiCommand,
+  'browser-tests': addBrowserTestsCommand,
   attachments: createAddBlueprintCommand('attachments', 'Install the attachments layer: schema table, config, provider, and the prune command.'),
   auth: addAuthCommand,
   oauth: createAddBlueprintCommand('oauth', 'Install OAuth scaffolding with provider presets and callback routes.'),

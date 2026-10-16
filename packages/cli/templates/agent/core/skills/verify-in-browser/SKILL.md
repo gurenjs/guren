@@ -67,9 +67,14 @@ bunx guren browser:record <run> --step <id> --open
 ```
 
 Drive the page with the browser tools your client already has. Never install
-or register an MCP server for this. Playwright specs belong to the
-`guren add browser-tests` setup; until the app has it, do not add specs under
-`tests/browser/`, which `bun test` would pick up.
+or register an MCP server for this.
+
+When the app has `guren add browser-tests` (a `test:browser` script), its specs
+are evidence too: `GUREN_BROWSER_RUN=<run> bun run test:browser` starts the app
+through `browser:serve` and files `spec-report.json` into the run. A spec file
+ends in `.browser.ts`, since `bun test` collects `*.spec.ts`. Write your own
+beside `tests/browser/generated/`, which `guren add browser-tests` rewrites.
+Without that setup, write no spec files.
 
 Save each screenshot under `.guren/browser/<run>/screenshots/`, then close the
 step. `result` and `action` are required; the rest is what you observed, and

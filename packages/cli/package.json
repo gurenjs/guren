@@ -97,6 +97,7 @@
     "@babel/types": "^7.29.0",
     "@inertiajs/react": "^3.6.1",
     "@modelcontextprotocol/client": "^2.0.0",
+    "@playwright/test": "^1.58.2",
     "@types/node": "^20.14.10",
     "@types/react": "^19.0.0",
     "ai": "^7.0.106",
