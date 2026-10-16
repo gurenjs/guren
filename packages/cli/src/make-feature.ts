@@ -749,32 +749,38 @@ ${formFields}
 `
 }
 
+/** A checkbox is wrapped in its label, so it is the one control that needs no id. */
+function wrapsItsLabel(field: FieldDefinition): boolean {
+  return field.type === 'boolean'
+}
+
 function generateFormField(field: FieldDefinition, formVar: string): string {
-  const value = formValue(field, formVar)
-  if (field.type === 'boolean') {
+  if (wrapsItsLabel(field)) {
     return `          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.checked)} className="h-4 w-4 rounded accent-g-accent" />
+            <input type="checkbox" checked={${formValue(field, formVar)}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.checked)} className="h-4 w-4 rounded accent-g-accent" />
             ${field.name}
           </label>`
   }
-  const id = `fieldIds.${field.name}`
   return `          <div>
-            <label htmlFor={${id}} className="${FIELD_LABEL_CLASS}">${field.name}</label>
-${labelledControl(field, formVar, value, id)}
+            <label htmlFor={fieldIds.${field.name}} className="${FIELD_LABEL_CLASS}">${field.name}</label>
+${labelledControl(field, formVar)}
           </div>`
 }
 
-function labelledControl(field: FieldDefinition, formVar: string, value: string, id: string): string {
+function labelledControl(field: FieldDefinition, formVar: string): string {
+  const id = `fieldIds.${field.name}`
+  const value = formValue(field, formVar)
+  const controlClass = `mt-1 ${FORM_INPUT_CLASS}`
   if (field.type === 'text') {
-    return `            <textarea id={${id}} value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="mt-1 ${FORM_INPUT_CLASS}" />`
+    return `            <textarea id={${id}} value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="${controlClass}" />`
   }
   if (field.type === 'number') {
-    return `            <input id={${id}} type="number" value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} className="mt-1 ${FORM_INPUT_CLASS}" />`
+    return `            <input id={${id}} type="number" value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} className="${controlClass}" />`
   }
   if (field.type === 'date') {
     // The value arrives as an ISO timestamp but `type="date"` only renders a
     // bare `YYYY-MM-DD`, and shows nothing at all for anything longer.
-    return `            <input id={${id}} type="date" value={${value}.slice(0, 10)} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="mt-1 ${FORM_INPUT_CLASS}" />`
+    return `            <input id={${id}} type="date" value={${value}.slice(0, 10)} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="${controlClass}" />`
   }
   if (field.type === 'json') {
     // Uncontrolled: a controlled textarea driven by the parsed object would
@@ -791,13 +797,13 @@ function labelledControl(field: FieldDefinition, formVar: string, value: string,
                   setJsonErrors((prev) => ({ ...prev, ${field.name}: true }))
                 }
               }}
-              className="mt-1 ${FORM_INPUT_CLASS} font-mono text-sm"
+              className="${controlClass} font-mono text-sm"
             />
             {jsonErrors.${field.name} && (
               <p className="mt-1 text-sm text-g-danger">${field.name} is not valid JSON — fix it or the last valid value is submitted.</p>
             )}`
   }
-  return `            <input id={${id}} value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="mt-1 ${FORM_INPUT_CLASS}" />`
+  return `            <input id={${id}} value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="${controlClass}" />`
 }
 
 /**
@@ -807,27 +813,29 @@ function labelledControl(field: FieldDefinition, formVar: string, value: string,
  * once, so an Edit page is not re-serializing on every keystroke.
  */
 function generateFormState(fields: FieldDefinition[], formVar: string): { imports: string; hooks: string } {
-  const labelled = fields.filter((f) => f.type !== 'boolean')
-  const jsonFields = fields.filter((f) => f.type === 'json')
-  const reactImports = [
-    ...(labelled.length > 0 ? ['useId'] : []),
-    ...(jsonFields.length > 0 ? ['useState'] : []),
-  ]
-  if (reactImports.length === 0) return { imports: '', hooks: '' }
+  const reactImports: string[] = []
+  const hooks: string[] = []
 
-  const idHooks = labelled.length === 0
-    ? ''
-    : `  const fieldIds = { ${labelled.map((f) => `${f.name}: useId()`).join(', ')} }\n`
-  const initial = jsonFields
-    .map((f) => `${f.name}: JSON.stringify(${formValue(f, formVar)}, null, 2)`)
-    .join(', ')
-  const jsonHooks = jsonFields.length === 0
-    ? ''
-    : `  const [jsonText] = useState(() => ({ ${initial} }))\n`
-      + '  const [jsonErrors, setJsonErrors] = useState<Record<string, boolean>>({})\n'
+  const labelled = fields.filter((f) => !wrapsItsLabel(f))
+  if (labelled.length > 0) {
+    reactImports.push('useId')
+    hooks.push(`  const fieldIds = { ${labelled.map((f) => `${f.name}: useId()`).join(', ')} }\n`)
+  }
+
+  const jsonFields = fields.filter((f) => f.type === 'json')
+  if (jsonFields.length > 0) {
+    const initial = jsonFields
+      .map((f) => `${f.name}: JSON.stringify(${formValue(f, formVar)}, null, 2)`)
+      .join(', ')
+    reactImports.push('useState')
+    hooks.push(
+      `  const [jsonText] = useState(() => ({ ${initial} }))\n`
+      + '  const [jsonErrors, setJsonErrors] = useState<Record<string, boolean>>({})\n',
+    )
+  }
 
   return {
-    imports: `import { ${reactImports.join(', ')} } from 'react'\n`,
-    hooks: idHooks + jsonHooks,
+    imports: reactImports.length === 0 ? '' : `import { ${reactImports.join(', ')} } from 'react'\n`,
+    hooks: hooks.join(''),
   }
 }

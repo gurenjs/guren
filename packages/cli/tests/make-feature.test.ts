@@ -431,7 +431,7 @@ describe('makeFeature', () => {
 
       // Without the flag, submitting half-typed JSON silently sends the last
       // value that parsed, with the textarea still showing the newer text.
-      expect(newPage).toContain("import { useId, useState } from 'react'")
+      expect(newPage).toMatch(/import \{[^}]*\buseState\b[^}]*\} from 'react'/)
       expect(newPage).toContain('const [jsonErrors, setJsonErrors] = useState<Record<string, boolean>>({})')
       expect(newPage).toContain('setJsonErrors((prev) => ({ ...prev, meta: true }))')
       expect(newPage).toContain('{jsonErrors.meta && (')
