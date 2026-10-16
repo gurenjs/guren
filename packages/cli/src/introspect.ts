@@ -50,6 +50,8 @@ export type GraphRouteEntry = RouteEntry & {
    * (object identity, so a schema reached only from a call the app made). Empty: no export is it.
    */
   contractSources?: Partial<Record<ContractSegment, Array<{ file: string; exportName: string }>>>
+  /** The framework package whose export the routed controller class is (`@guren/core`), so it is outside the app by identity, not unread. */
+  controllerPackage?: string
 }
 
 export const DEFAULT_INTROSPECT_TIMEOUT_MS = 30_000

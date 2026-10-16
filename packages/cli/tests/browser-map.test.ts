@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 
-import { buildApplicationGraph, graphId, type ApplicationGraphInputs, type GraphNode, type GurenApplicationGraph } from '../src/application-graph'
+import { buildApplicationGraph, graphId, packageControllerSource, type ApplicationGraphInputs, type GraphNode, type GurenApplicationGraph } from '../src/application-graph'
 import { BROWSER_MAP_SECTIONS, buildBrowserMap, renderFeatureDoc, renderIndexDoc, type BrowserMap } from '../src/browser-map'
 import { approvedPlans } from '../src/browser-map-files'
 import { createTempWorkspace, writeWorkspaceFiles } from './helpers'
@@ -126,6 +126,23 @@ describe('buildBrowserMap', () => {
     expect(partial.gaps).toEqual([{ section: 'handles', reasons: ['Could not fully read handles.'] }])
     const changed = buildBrowserMap(graphOf(BLOG, (input) => { input.changed = true }), [])
     expect(changed.gaps.map((gap) => gap.section)).toEqual(['snapshot'])
+  })
+
+  test('lists a route a framework package handles as outside the app, not as a gap', () => {
+    const external = graphId('controller', 'package:@guren/core', 'AttachmentDeliveryController')
+    const files = route(5, 'GET', '/attachments/:id/:filename', 'attachments.show', 'show')
+    const map = buildBrowserMap(graphOf(BLOG, (input) => {
+      input.nodes.push(
+        { id: external, kind: 'controller', label: 'AttachmentDeliveryController', module: null, evidence: [{ kind: 'registered', source: packageControllerSource('@guren/core') }] },
+        files,
+      )
+      input.edges.push({ from: files.id, to: external, relation: 'handles', evidence: [{ kind: 'registered', source: 'introspection' }] })
+    }), [])
+    expect(map.complete).toBe(true)
+    expect(map.unassigned).toContainEqual({
+      method: 'GET', path: '/attachments/:id/:filename', name: 'attachments.show',
+      reason: 'Handled by a controller @guren/core exports, outside the app.', candidates: [],
+    })
   })
 
   test('treats a section the graph reports no coverage for as a gap, never as complete', () => {
