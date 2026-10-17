@@ -144,6 +144,10 @@
       "types": "./dist/internal/zod-json-schema.d.ts",
       "default": "./dist/internal/zod-json-schema.js"
     },
+    "./internal/inertia-page": {
+      "types": "./dist/internal/inertia-page.d.ts",
+      "default": "./dist/internal/inertia-page.js"
+    },
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.ts",
       "default": "./dist/jsx-runtime.js"

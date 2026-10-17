@@ -14,6 +14,7 @@ import {
   VALIDATED_INPUT_CONTEXT_KEY,
   type ValidatedInputRecord,
 } from '@guren/server/internal/request'
+import { initialPageElement, readInitialPage } from '@guren/server/internal/inertia-page'
 import {
   AuthenticationException,
   Controller as RuntimeController,
@@ -32,13 +33,6 @@ import {
   INERTIA_VARY,
   serializePage,
 } from '@guren/server/internal/testing'
-
-const HTML_DECODE_ENTITIES: Record<string, string> = {
-  '&quot;': '"',
-  '&amp;': '&',
-  '&lt;': '<',
-  '&gt;': '>',
-}
 
 export interface ControllerContext {
   var?: {
@@ -167,7 +161,7 @@ async function renderInertia(
   const prefersJson = request.headers.has('X-Inertia') || acceptsJson(request)
 
   const response = new Response(
-    prefersJson ? serialized : `<script data-page="app" type="application/json">${serialized}</script><div id="app"></div>`,
+    prefersJson ? serialized : `${initialPageElement(serialized)}<div id="app"></div>`,
     {
       status: options.status ?? 200,
       headers: {
@@ -516,36 +510,9 @@ export async function readInertiaResponse(response: Response): Promise<{
   }
 
   const body = await response.text()
-
-  // Inertia v3: the payload lives in a JSON script element. Attributes are checked
-  // with `includes` because chaining several `[^>]*` groups in one regex backtracks
-  // polynomially on large bodies. HTML tag names are case-insensitive, so this is too.
-  let scriptPayload: string | undefined
-  const openTagPattern = /<script\b[^>]*>/gi
-  let openTag: RegExpExecArray | null
-  while ((openTag = openTagPattern.exec(body)) !== null) {
-    const tag = openTag[0].toLowerCase()
-    if (tag.includes('data-page="app"') && tag.includes('type="application/json"')) {
-      const closeTagPattern = /<\/script\s*>/gi
-      closeTagPattern.lastIndex = openTagPattern.lastIndex
-      const closeTag = closeTagPattern.exec(body)
-      if (closeTag) {
-        scriptPayload = body.slice(openTagPattern.lastIndex, closeTag.index)
-      }
-      break
-    }
-  }
-
-  let payload: InertiaPayload
-  if (scriptPayload) {
-    payload = JSON.parse(scriptPayload) as InertiaPayload
-  } else {
-    // Legacy (pre-v3): payload in the container's data-page attribute.
-    const match = body.match(/data-page="([^"]+)"/)
-    if (!match) {
-      throw new Error('Unable to find Inertia payload in HTML response.')
-    }
-    payload = JSON.parse(decodeHtml(match[1])) as InertiaPayload
+  const payload = readInitialPage(body) as InertiaPayload | undefined
+  if (payload === undefined) {
+    throw new Error('Unable to find Inertia payload in HTML response.')
   }
 
   return {
@@ -553,8 +520,4 @@ export async function readInertiaResponse(response: Response): Promise<{
     payload,
     body,
   }
-}
-
-function decodeHtml(value: string): string {
-  return value.replace(/&(?:quot|amp|lt|gt);/g, (entity) => HTML_DECODE_ENTITIES[entity] ?? entity)
 }

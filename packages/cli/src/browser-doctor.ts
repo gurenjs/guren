@@ -5,6 +5,8 @@
  * unavailable collector or an expired cursor is never read as zero errors.
  */
 
+import { readInitialPage } from '@guren/server/internal/inertia-page'
+
 import { buildBrowserMap, type BrowserFeature, type BrowserMap } from './browser-map'
 import { loadApplicationGraph } from './application-graph-load'
 import { readWindowStart, windowSince, type ErrorWindow, type RuntimeErrorEvent, type RuntimeErrorRead } from './runtime-error-window'
@@ -39,34 +41,6 @@ export interface DoctorIo {
   readErrors: RuntimeErrorRead
 }
 
-/** The component the Inertia initial page names, from `<script data-page>` or a legacy `data-page` attribute. */
-export function pageComponent(html: string): string | undefined {
-  // Attributes are tested with `includes`, since chained `[^>]*` groups backtrack polynomially on a large body.
-  const openTag = /<script\b[^>]*>/giu
-  let tag: RegExpExecArray | null
-  while ((tag = openTag.exec(html)) !== null) {
-    const text = tag[0].toLowerCase()
-    if (!text.includes('data-page="app"') || !text.includes('type="application/json"')) continue
-    // Searched on the original, never a lowercased copy: case folding can change a string's length.
-    const close = /<\/script\s*>/giu
-    close.lastIndex = openTag.lastIndex
-    const end = close.exec(html)
-    return end ? componentOf(html.slice(openTag.lastIndex, end.index)) : undefined
-  }
-  const legacy = /data-page="([^"]+)"/u.exec(html)
-  if (!legacy) return undefined
-  return componentOf(legacy[1]!.replace(/&(quot|amp|lt|gt|#39);/gu, (_, entity: string) => ({ quot: '"', amp: '&', lt: '<', gt: '>', '#39': "'" })[entity]!))
-}
-
-function componentOf(json: string): string | undefined {
-  try {
-    const page = JSON.parse(json) as { component?: unknown }
-    return typeof page.component === 'string' ? page.component : undefined
-  } catch {
-    return undefined
-  }
-}
-
 async function checkLandmark(io: DoctorIo, origin: string, feature: BrowserFeature): Promise<FeatureCheck> {
   const { landmark } = feature
   if (!landmark) return { feature: feature.name, status: 'skipped', reason: 'Every route rendering this feature takes a path parameter.', events: [] }
@@ -95,8 +69,15 @@ async function checkLandmark(io: DoctorIo, origin: string, feature: BrowserFeatu
   } catch (error) {
     return { ...base, status: 'fail', httpStatus: 200, reason: `The body could not be read: ${error instanceof Error ? error.message : String(error)}` }
   }
-  const component = pageComponent(html)
-  if (component === undefined) return { ...base, status: 'fail', httpStatus: 200, reason: 'The response carries no Inertia page payload.' }
+  let page: unknown
+  try {
+    page = readInitialPage(html)
+  } catch (error) {
+    return { ...base, status: 'fail', httpStatus: 200, reason: `The Inertia page payload is not JSON: ${error instanceof Error ? error.message : String(error)}` }
+  }
+  if (page === undefined) return { ...base, status: 'fail', httpStatus: 200, reason: 'The response carries no Inertia page payload.' }
+  const component = (page as { component?: unknown } | null)?.component
+  if (typeof component !== 'string') return { ...base, status: 'fail', httpStatus: 200, reason: 'The Inertia page payload names no component.' }
   if (!landmark.pages.includes(component)) {
     return { ...base, status: 'fail', httpStatus: 200, component, reason: `Rendered ${component}, where the graph says ${landmark.pages.join(' or ')}.` }
   }

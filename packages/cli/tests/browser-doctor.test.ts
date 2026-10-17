@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { examine, pageComponent, type DoctorIo } from '../src/browser-doctor'
+import { examine, type DoctorIo } from '../src/browser-doctor'
 import type { BrowserFeature, BrowserMap } from '../src/browser-map'
 import type { RuntimeErrorQuery, RuntimeErrorResult } from '../src/runtime-errors'
 
@@ -58,24 +58,6 @@ function io(responses: Record<string, () => Response>, options: { onRequest?: Re
     },
   }
 }
-
-describe('pageComponent', () => {
-  test('reads the script element, not the shim that names it', () => {
-    const html = `<script>document.querySelector('script[data-page="app"][type="application/json"]')</script><script data-page="app" type="application/json">{"component":"posts/Index"}</script>`
-    expect(pageComponent(html)).toBe('posts/Index')
-  })
-
-  test('reads a legacy data-page attribute and nothing from a page without one', () => {
-    expect(pageComponent('<div id="app" data-page="{&quot;component&quot;:&quot;Home&quot;}"></div>')).toBe('Home')
-    expect(pageComponent('<html><body>plain</body></html>')).toBeUndefined()
-  })
-
-  test('reads a payload whose text changes length when lowercased, and an SSR payload escaping slashes', () => {
-    const turkish = `<title>\u0130stanbul</title><script data-page="app" type="application/json">{"component":"posts/Index","props":{"city":"\u0130stanbul"}}</script>`
-    expect(pageComponent(turkish)).toBe('posts/Index')
-    expect(pageComponent('<script data-page="app" type="application/json">{"component":"posts\\/Index"}</script>')).toBe('posts/Index')
-  })
-})
 
 describe('examine', () => {
   test('passes when every landmark renders its page and no error lands', async () => {
@@ -140,6 +122,17 @@ describe('examine', () => {
     const report = await examine(map([feature('posts', '/posts', 'posts/Index')]), ORIGIN, io({ '/posts': broken }))
     expect(report.features[0]).toMatchObject({ status: 'fail' })
     expect(report.features[0]!.reason).toContain('The body could not be read')
+  })
+
+  test('tells a payload that is not JSON from a page that carries none', async () => {
+    const html = (body: string) => () => new Response(body, { status: 200, headers: { 'Content-Type': 'text/html' } })
+    const report = await examine(
+      map([feature('posts', '/posts', 'posts/Index'), feature('about', '/about', 'About')]),
+      ORIGIN,
+      io({ '/posts': html('<script data-page="app" type="application/json">{"component":</script>'), '/about': html('<p>plain</p>') }),
+    )
+    expect(report.features[0]!.reason).toContain('The Inertia page payload is not JSON')
+    expect(report.features[1]).toMatchObject({ status: 'fail', reason: 'The response carries no Inertia page payload.' })
   })
 
   test('never reads an unavailable collector, a restarted app or dropped errors as zero errors', async () => {

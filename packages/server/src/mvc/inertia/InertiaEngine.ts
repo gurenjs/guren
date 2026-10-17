@@ -6,6 +6,7 @@ import { DEFAULT_DEV_STYLES_ENTRY } from "../../support/inertia-defaults";
 import type { ContainerLike } from "../../container/types";
 import { resolveOptional } from "../../container/resolve-optional";
 import { warnDeprecatedSetter } from "../../support/deprecate";
+import { INITIAL_PAGE_SELECTOR, initialPageElement } from "./initial-page";
 import { readPartialReload, resolveInertiaProps } from "./props";
 
 ensureErrorStackTracePolyfill();
@@ -376,7 +377,7 @@ async function renderDocument(
 }
 
 function pagePayloadElement(page: InertiaPagePayload): string {
-  return `<script data-page="app" type="application/json">${serializePage(page)}</script>`;
+  return initialPageElement(serializePage(page));
 }
 
 /**
@@ -386,7 +387,7 @@ function pagePayloadElement(page: InertiaPagePayload): string {
  * A classic inline script, so it has run before the module entry does.
  */
 const PAGE_GLOBAL_FROM_ELEMENT =
-  `<script>try{var e=document.querySelector('script[data-page="app"][type="application/json"]')||document.getElementById("app"),` +
+  `<script>try{var e=document.querySelector('${INITIAL_PAGE_SELECTOR}')||document.getElementById("app"),` +
   `p=JSON.parse(e.tagName==="SCRIPT"?e.textContent:e.getAttribute("data-page"));if(p&&p.component)window.__INERTIA_PAGE__=p}catch(_){}</script>`;
 
 async function tryRenderSsr(
