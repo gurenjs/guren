@@ -48,7 +48,7 @@ jobs:
       APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The scaffolder and the `guren add` blueprints run from source, and the
       # CLI reaches @guren/server through dist/ — so this job needs the
@@ -76,7 +76,7 @@ jobs:
     # Measured max 18s; it fetches the published catalog over the network.
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Built for its own reason, not the npm-mode job's: rendering imports
       # packages/cli/src/commands.ts to read the command registry, and that
