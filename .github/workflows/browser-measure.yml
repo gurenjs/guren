@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   measure:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Measured 2m41s with twenty cold starts (about 6 s each) after the build and the Chromium
     # download; forty starts add about two minutes, and sixty fit well inside this timeout.
     timeout-minutes: 15
