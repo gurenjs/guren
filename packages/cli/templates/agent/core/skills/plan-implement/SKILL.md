@@ -201,8 +201,10 @@ the parent of the oldest commit naming its first step's id. Ids carry `.` and
 Its findings are advisory: a reviewer asked for gaps reports some whether or
 not they exist, so weigh each one against the plan before acting on it. A
 finding you do not accept is declined, with the reason. Fix one you accept,
-run `plan:verify` again (without `--step` it re-checks every step whose files
-the fix changed), and commit the fix naming the step id it belongs to. Then
+run `plan:verify --step <the task's last step>` (once that step verifies, it
+re-checks every earlier step whose files the fix changed; a run without
+`--step` would first run the later tasks' unimplemented steps and leave those
+re-checks pending), and commit the fix naming the step id it belongs to. Then
 ask for the next round, and give the agent:
 
 - the round number;
