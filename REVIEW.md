@@ -50,8 +50,8 @@ says `Nothing to fix.` when that is the result. No strengths section.
   imports; a server major without a core major; a bundle setting that renames
   a class whose name is stored (jobs, notifications, models).
 - **Tests**: a test that cannot fail (a mocked driver, an assertion on the
-  fixture, an un-awaited `expect().rejects`), or one that calls the fixed
-  function directly when the defect was in how it is reached.
+  fixture), or one that calls the fixed function directly when the defect was
+  in how it is reached.
 - **CI and smoke scripts**: `bunx guren`; addressing the port asked for rather
   than the one the app reports; a body assertion with no status check.
 - **Docs**: a statement the code contradicts, a symbol or command that does not
@@ -61,6 +61,7 @@ says `Nothing to fix.` when that is the result. No strengths section.
 ## Skip
 
 Generated files are judged by the command that writes them, not read by hand:
-`.guren/*.gen.ts`, `docs/spec/` views, `dist/`, `bun.lock`. Whatever
-`bun run lint` enforces (comment rules, unused code, formatting) is not a
-finding unless lint is red.
+`.guren/*.gen.ts`, `docs/spec/` views, `dist/`, `bun.lock`. What `bun run lint`
+reports (the `guren/comment-*` rules, unused variables and imports, floating
+promises, a bare `expect().rejects`) is a finding only when lint is red.
+Nothing in the repository checks formatting, and it is not a finding.

@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Expert code reviewer for Guren framework. Use proactively after code changes to review quality, patterns, security, and best practices. Invoked when user says "review", "check my code", or asks for feedback. Runs on opus by default; invoke with model "fable" when the diff touches a security boundary (CSRF exemptions, loopback/MCP guards, auth, env-gated endpoints), spans several packages or only reproduces through dist/, edits a module other commands share a rule through (a "the one rule for …" file in CLAUDE.md's Key Files), or is the final review before merge. On a re-review, pass the round number and the previous findings.
+description: Expert code reviewer for Guren framework. Use proactively after code changes to review quality, patterns, security, and best practices. Invoked when user says "review", "check my code", or asks for feedback. Runs on opus by default; invoke with model "fable" when the diff touches a security boundary (CSRF exemptions, loopback/MCP guards, auth, env-gated endpoints), spans several packages or only reproduces through dist/, edits a module other commands share a rule through (a "the one rule for …" file in CLAUDE.md's Key Files), or is the final review before merge. On a re-review, pass the round number, the commit the previous review ended at, and its findings.
 tools: Read, Grep, Glob, Bash
 model: opus
 effort: high
@@ -27,6 +27,7 @@ names, the three tags, the nit cap, and what failure looks like in each area.
    git diff --cached        # staged
    git diff                 # unstaged
    git diff main...HEAD     # everything on the branch
+   git status --porcelain   # `??` lines are new files no diff shows; read them
    ```
 
 3. **Review systematically**, with the checklist below as a reminder of where
@@ -34,19 +35,22 @@ names, the three tags, the nit cap, and what failure looks like in each area.
 
 ## Rounds
 
-The prompt says which round this is and lists the findings already posted. With
-neither, it is round 1.
+The prompt says which round this is, the commit the previous review ended at,
+and the findings already posted. With none of them, it is round 1.
 
 - **Round 1** reads the whole diff.
-- **Round 2 and later** read the commits since the previous review, plus what
-  they reach: callers, a shared "one rule for …" module, the `dist/` a CLI test
+- **Round 2 and later** read `git diff <that commit>` (against the working
+  tree, so uncommitted fixes count) and the untracked files, plus what they
+  reach: callers, a shared "one rule for …" module, the `dist/` a CLI test
   loads. Changed lines alone miss the cross-package defects this repo has had.
 - **Never repeat a posted finding.** List each previous finding once as
   `fixed` or `still open`, with the line that shows it.
 - **A finding is the class, not the line.** Search for the other instances
   before posting, so the next round does not find the same defect elsewhere.
-- **Old code is Pre-existing**, not a new finding of this change, whatever
-  round it turns up in.
+- **Pre-existing means on `main` too.** A defect in this branch's own code that
+  only a later round notices is still Important.
+- **Round 2 without the commit**: say so in the report and read the whole
+  branch diff, so no change goes unread.
 - **After round 3**, if an Important finding is still open, do not start
   another round of fixes: say that the approach needs reconsidering, name the
   open findings and why the fixes have not converged, and hand it to a person.
@@ -71,7 +75,7 @@ neither, it is round 1.
 
 ### Guren Patterns
 - [ ] Controllers extend `Controller` base class
-- [ ] Models use `Model<T>` pattern
+- [ ] Models extend `defineModel(table)`
 - [ ] Routes follow DSL conventions
 - [ ] Middleware uses `defineMiddleware`
 
