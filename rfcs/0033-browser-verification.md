@@ -558,7 +558,7 @@ launch the app without §3's checks.
 **M4 measurement.** `bun run smoke:browser-tests` builds a golden-path-shaped
 app on SQLite (auth and a posts resource, migrated; no second resource, no
 seed), approves one plan describing the posts pages through `plan:approve`,
-runs `guren add browser-tests`, and runs `test:browser` from a cold start twenty
+runs `guren add browser-tests`, and runs `test:browser` from a cold start forty
 times, each start one run of every spec with no retries, as a gate would run
 it. A start is timed whole and by its tests' own time; the scaffold, the
 approval, the blueprint and the Chromium download are timed as their own
@@ -594,7 +594,7 @@ failures are mostly real. The `e2e` job, the one Playwright job, failed once,
 when its database container did not start.
 
 By the rule of three, 167 consecutive clean cold starts bound the browser run's
-rate under 1.8% at 95% confidence: about nine nights at twenty starts. A tighter
+rate under 1.8% at 95% confidence: about five nights at forty starts. A tighter
 comparison with the `e2e` job alone (no test-caused failure in 997 runs, a rate
 under 0.3%) would need about a thousand starts, which is why the baseline is CI
 as a whole. The aggregate step reports whether the rule is met, and the baseline
@@ -608,7 +608,9 @@ flakes: the form fields `make:feature` wrote had no label, so the posts New
 view's spec failed in every run, and the profile page `make:auth` wrote did not
 associate its labels with their inputs (found in M3's live check). Both are
 fixed (gurenjs/guren#1196, gurenjs/guren#1193), so the measured spec set now
-includes the posts form.
+includes the posts form. The first run on the CI runner made twenty cold starts,
+all clean, at 6.1 to 6.5 s each (2.4 s of it the tests), and the whole job took
+under three minutes, so a night makes forty.
 
 ### 10. Acceptance
 
