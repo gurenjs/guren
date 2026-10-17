@@ -681,7 +681,7 @@ ${buildOAuthButtonsTemplate(providers, { divider: false })}
 `
 }
 
-function buildLoginViewTemplate(includeRegister: boolean, includeReset: boolean, oauthProviders: string[] = []): string {
+export function buildLoginViewTemplate(includeRegister: boolean, includeReset: boolean, oauthProviders: string[] = []): string {
   const signUpLink = includeRegister
     ? `
         <p className="mt-2 text-center text-sm text-g-text-2">

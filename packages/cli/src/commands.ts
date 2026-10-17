@@ -1437,6 +1437,39 @@ const addPrototypeCommand = defineCommand({
   },
 })
 
+const addBrowserTestsCommand = defineCommand({
+  meta: {
+    name: 'browser-tests',
+    description: 'Install Playwright browser tests (RFC 0033): a config that starts the app through browser:serve, a seeded browser account where the app signs in with a password, and the specs browser:map generates from then on.',
+  },
+  args: {
+    force: {
+      type: 'boolean',
+      description: 'Overwrite the files written once (config, support, sign-in setup, seeder) and an existing test:browser script.',
+    },
+    install: {
+      type: 'boolean',
+      default: true,
+      description: 'Run bun add -d @playwright/test when it is missing (--no-install prints the command instead).',
+    },
+  },
+  async run({ args }) {
+    const { addBrowserTests } = await import('./add-browser-tests')
+    const overwritten: string[] = []
+    const result = await addBrowserTests({ force: Boolean(args.force), install: args.install, overwritten })
+    announceWrittenFiles(result.created, overwritten)
+    if (result.mapped.changed.length > 0) consola.success(`browser:map wrote ${result.mapped.changed.join(', ')}`)
+    if (result.mapped.removed.length > 0) consola.success(`browser:map removed ${result.mapped.removed.join(', ')}`)
+    if (result.mapped.held) consola.warn(`browser:map wrote no specs: ${result.mapped.held}. Run bunx guren browser:map once it reads the whole app.`)
+    if (!result.map.complete) consola.warn(`The browser map is incomplete (${result.map.gaps.map((gap) => gap.section).join(', ')}), so the specs may miss features; run bunx guren browser:map --check for the reasons.`)
+    if (result.signIn) {
+      if (!result.seedsOnBoot) consola.warn('config/database.ts does not set seedOnBoot, so browser:serve never seeds the browser account and the setup project cannot sign in. Pass { seedOnBoot: process.env.NODE_ENV !== \'production\' } to defineDatabaseConfig().')
+      consola.info('Set BROWSER_TEST_PASSWORD in .env: the browser account is seeded with it.')
+    }
+    consola.info('Next: bunx playwright install chromium, then bun run test:browser. After approving a plan, run bunx guren browser:map to regenerate the specs.')
+  },
+})
+
 const addSubCommands = {
   admin: addAdminCommand,
   ai: addAiCommand,
@@ -1453,6 +1486,7 @@ const addSubCommands = {
   resource: addResourceCommand,
   plugin: addPluginCommand,
   prototype: addPrototypeCommand,
+  'browser-tests': addBrowserTestsCommand,
   session: createAddBlueprintCommand('session', 'Install database-backed sessions: the schema table and migration, config/session.ts, and sessions:prune.'),
   schedule: createAddBlueprintCommand('schedule', 'Install a schedule kernel with a sample recurring task.'),
   storage: createAddBlueprintCommand('storage', 'Install storage scaffolding with local/public disks and a sample storage service.'),

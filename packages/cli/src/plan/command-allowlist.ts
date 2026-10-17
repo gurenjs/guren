@@ -80,6 +80,8 @@ export const PLAN_COMMAND_CLASSES: Readonly<Record<string, 'generator' | PlanCom
   // As above, and `bun add` of a fixed set: the first-party plugin and the AI SDK at @guren/cli's own ranges.
   'add ai': 'generator',
   'add plugin': 'dependencies',
+  // A browser toolchain is the app owner's to take on, not a plan step's.
+  'add browser-tests': 'dependencies',
   'make:migration': 'migration',
   codegen: 'derived',
   'routes:types': 'derived',

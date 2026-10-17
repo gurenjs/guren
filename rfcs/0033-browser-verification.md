@@ -382,6 +382,62 @@ An opt-in blueprint, since it adds a devDependency and a browser download:
 The blueprint refuses an app `app-surface.ts` identifies as API-only. An app it
 cannot classify is not refused.
 
+**Amended in implementation:**
+- Spec files end in `.browser.ts`: `bun test` collects `*.spec.ts`, so
+  `tests/browser/smoke.spec.ts` would run under Bun's runner too, and the app's
+  `bun test` and `guren gate` would fail on it. `plan:verify` and `check --docs`
+  read only `*.test.*` files, and the specs carry no bracketed acceptance id
+  either, so no browser spec is ever read as the test of a plan behaviour (§8).
+- The config is `playwright.browser.config.ts` and the script is
+  `playwright test -c playwright.browser.config.ts`, so an app with its own
+  Playwright suite (the blog's `e2e/`) keeps it, and these specs never run under a
+  config that starts no `browser:serve`. A `test:browser` script that runs
+  anything else refuses the command before any write; `--force` replaces it.
+- The specs from plan views belong to `browser:map`, not the blueprint: once
+  `playwright.browser.config.ts` exists, every `browser:map` run rewrites
+  `tests/browser/generated/` and `--check` reports a stale spec, so a plan
+  approved later reaches the specs the way it reaches the map. The blueprint
+  writes its files once and runs `browser:map` at the end. A generated spec
+  nothing produces is removed (no author text lives in one). A file at a path
+  the run produces (or one differing from it only by case) that lacks the
+  generated header refuses the run; any other file there is left alone.
+- The specs are a smoke spec (one test per landmark, comparing the Inertia
+  component as the doctor does) and one spec per approved plan with views: each
+  form field by its label and each action as a button or a link by its name,
+  visible, on the route the map resolves for the view (the first GET route in
+  registration order rendering its page with no path parameter, the landmark's
+  rule). A view whose page no feature holds yet is kept in the map rather than
+  dropped. What the spec cannot open (a path parameter, no route yet, a
+  signed-in route without password sign-in) is a `test.fixme` naming why, never
+  a pass. Two approved plans of one slug refuse, since their specs would be one
+  file.
+- Password sign-in is detected on positive evidence only: the root `users` table
+  declares `email` and `passwordHash`, and the map holds a `POST /login` route.
+  An OAuth-only app gets no setup project, and its signed-in landmarks are
+  `fixme`. The setup project targets the labels `make:auth` writes (`Email`,
+  `Password`, `Sign in`), which a test pins, and saves a session only after a
+  fresh load shows a page outside `auth/`.
+- The seeder writes `browser@example.test` with an upsert that also updates the
+  password hash (and `emailVerifiedAt` where the table has it), so a changed
+  `BROWSER_TEST_PASSWORD` takes effect at the next `browser:serve`. It runs
+  through boot-time seeding, which the blueprint warns about when
+  `config/database.ts` never sets `seedOnBoot`. With the password unset it warns
+  and writes nothing, rather than seeding a default. The key is declared in
+  `config/env.ts` as an optional secret, so `check` does not report it.
+- Playwright loads no `.env`, so the config loads `.env.local`, `.env.<NODE_ENV>`
+  and `.env` with `process.loadEnvFile()`, most specific first, a value already
+  set winning: the files Bun loads for the app.
+- The JSON reporter writes to `.guren/browser/$GUREN_BROWSER_RUN/spec-report.json`
+  only for a run `browser:record --begin` opened (its name in that shape and its
+  `run.json` present); the config throws otherwise. `browser:record` does not
+  read the report: a spec run starts its own instance, so its server errors are
+  outside the run's error window.
+- The ignore entries go to the app's `.gitignore`, since an existing app has
+  no `_gitignore` template.
+- The plan command allowlist classes `add browser-tests` as `dependencies`, like
+  `add plugin`: installing a browser toolchain is the app owner's decision, not a
+  plan step's.
+
 ### 7. Evidence
 
 A run is one verification session against one origin. Its evidence goes under
@@ -580,6 +636,10 @@ changes behaviour.
 3. `@playwright/test` under Bun 1.4.2: the blog runs it through the package's
    Node shim. Is Node on PATH an acceptable requirement for the blueprint, as it
    is for `bun run lint`?
+   **Resolved (M3):** yes. `test:browser` is `playwright test`, which runs under
+   the package's Node shim, and the CLI guide says Node 20.12 or later has to
+   be on `PATH` (the config loads the env files with `process.loadEnvFile()`). The
+   app itself still runs under Bun, started by `browser:serve`.
 4. Should `browser:map --check` join `guren check` as an advisory result?
 5. The seeded browser account: one per app, or one per acceptance `actor`?
 6. Should SSR fallback become observable (a counter in the collector, or a

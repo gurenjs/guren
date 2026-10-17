@@ -36,6 +36,7 @@ bunx guren add lint
 bunx guren add prototype
 bunx guren add ai --provider anthropic
 bunx guren add oauth
+bunx guren add browser-tests
 ```
 
 Start with `bunx guren add auth` and `bunx guren add resource`, then add more features as your app grows.
@@ -118,6 +119,21 @@ the rest: scopes, conversations, streaming and queueing.
 
 Apps scaffolded by `create-guren-app` 1.12 or later already carry this setup; `add lint` is for apps created before that. It touches no application code: it writes `.oxlintrc.json` (oxlint with the Guren rules from `@guren/cli/oxlint`: `guren/await-async-assertion` as an error, `guren/no-unvalidated-env-read` as an error in `app/`, `config/`, `routes/`, `src/` and `modules/`, the `guren/comment-*` rules as warnings), adds `lint` and `lint:fix` scripts, and adds `oxlint` as a dev dependency on a tilde range (patch updates only: oxlint's JS plugin API is alpha); run `bun install` afterwards. `bunx oxlint` runs under Bun, so no Node install is needed. In an app created before `config/env.ts`, the rule also reports the `process.env` reads in its own `config/database.ts` and `src/app.ts` until they move to a schema or carry a disable.
 
+### `add browser-tests`
+
+`add browser-tests` sets up Playwright browser tests. They start your app through `bunx guren browser:serve`, which refuses production and any database it cannot show is local. The command writes `playwright.browser.config.ts`, which starts the app on `127.0.0.1:4317`, and `tests/browser/support.ts`, then runs `bunx guren browser:map`, which from then on keeps two kinds of spec under `tests/browser/generated/`:
+
+- `smoke.browser.ts`, one test per feature in the browser map: the feature's first page without a path parameter must answer 200 with the component its route renders;
+- `plans/<plan>.browser.ts` for each approved plan with views: every form label and action name the plan gives a view must be visible on the first page without a path parameter that renders it.
+
+A page the specs cannot open (every route to it takes a parameter, no route renders it yet, or it needs a signed-in user the app cannot provide) becomes a `test.fixme` that says why, so it shows up as skipped rather than passing. Run `bunx guren browser:map` again after approving a plan; `--check` exits 1 while a generated spec is out of date. It removes a generated spec no feature or plan produces any more, and refuses to overwrite a file under `tests/browser/generated/` that lacks the generated header, so put specs of your own beside that directory.
+
+When the app signs in with a password (the `users` table `make:auth` writes and a `POST /login` route), the command also writes a setup project, `tests/browser/auth.setup.ts`, and a seeder, `db/seeders/browser-account.ts`. The seeder creates `browser@example.test` with the password in `BROWSER_TEST_PASSWORD` while `browser:serve` runs the app, and does nothing in any other run or in production. Set `BROWSER_TEST_PASSWORD` in `.env` before the first run. The seeder runs through boot-time seeding, so `config/database.ts` has to pass `seedOnBoot` to `defineDatabaseConfig()`; the command warns when it does not.
+
+It adds a `test:browser` script (`playwright test -c playwright.browser.config.ts`) and the `@playwright/test` dev dependency (`--no-install` prints the `bun add` command instead), and adds `test-results/`, `playwright-report/` and `tests/browser/.auth/` to `.gitignore`. A `test:browser` script that runs something else makes the command stop before writing anything; `--force` replaces it. Install a browser with `bunx playwright install chromium`, then run `bun run test:browser`. Playwright runs under Node, so Node 20.12 or later has to be on `PATH`.
+
+Spec files end in `.browser.ts`, because `bun test` collects `*.spec.ts`. `guren gate` does not run browser tests.
+
 ### On an API-only app
 
 An app scaffolded from the `api` blueprint has no `@guren/inertia-client` dependency and no web routes entry (`routes/web.ts` or `routes/web.js`). Commands that would write Inertia pages react to those two signals:
@@ -129,6 +145,7 @@ An app scaffolded from the `api` blueprint has no `@guren/inertia-client` depend
 | `add resource`, `make:feature` | Refuses before appending the table. Write a JSON controller with `make:controller` and wire it into `routes/api.ts` |
 | `make:view` | Refuses: a page has no JSON shape to adapt to |
 | `add prototype` | Refuses: prototype mode answers Inertia visits |
+| `add browser-tests` | Refuses: the specs drive Inertia pages. Test the routes over HTTP with `TestApp` |
 | `make:controller` | Adapts: the controller returns `this.json(...)` and can be wired into `routes/api.ts` as written |
 
 When the signals cannot confirm an API-only app, every command behaves as on a fullstack one. Installing `@guren/inertia-client` is enough to switch back. `guren codegen` leaves page components out of `.guren/pages.gen.ts` on an API-only app, because that file imports `@guren/inertia-client`; `make:view`'s refusal exists to say so at the command that caused it.

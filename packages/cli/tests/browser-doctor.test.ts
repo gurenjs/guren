@@ -14,7 +14,7 @@ function feature(name: string, path: string, page: string, extra: Partial<Browse
 function map(features: BrowserFeature[], complete = true): BrowserMap {
   return {
     complete, gaps: complete ? [] : [{ section: 'handles', reasons: ['partial'] }], features,
-    unreached: [], unassigned: [], unresolvedRenders: [], unplaced: [], plans: [], unreadablePlans: [],
+    unreached: [], unassigned: [], unresolvedRenders: [], unplaced: [], unplacedViews: [], plans: [], unreadablePlans: [],
   }
 }
 
