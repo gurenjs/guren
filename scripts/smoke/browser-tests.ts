@@ -23,9 +23,9 @@ const repoRoot = resolve(import.meta.dir, '../..')
 const CLI = join(repoRoot, 'packages/cli/src/bin.ts')
 const CREATE_APP = join(repoRoot, 'packages/create-app/src/cli.ts')
 const PLAN_FILE = 'docs/plans/browser-measure/plan.json'
-/** A start took 5 to 7 s on a laptop; the cap keeps a dispatched run inside the workflow's timeout. */
-const MAX_STARTS = 40
-const DEFAULT_STARTS = 20
+/** A start takes about 6 s on the CI runner; the cap keeps a dispatched run inside the workflow's timeout. */
+const MAX_STARTS = 60
+const DEFAULT_STARTS = 40
 /** Below about 30 trials the rule of three (failure rate under 3/n at 95%) is too loose to quote. */
 const RULE_OF_THREE_MIN = 30
 /** CI runs on main failing with no code at fault (infra, flaky tests), 2026-07-24 to 10-16: RFC 0033 §9. */

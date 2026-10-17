@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       starts:
-        description: Cold starts of test:browser (1-40; empty for the script's default of 20)
+        description: Cold starts of test:browser (1-60; empty for the script's default of 40)
         required: false
 
 permissions:
@@ -24,9 +24,9 @@ concurrency:
 jobs:
   measure:
     runs-on: ubuntu-latest
-    # A scaffold and install, an uncached Chromium download (timed as its own phase), and twenty
-    # cold starts; to be replaced by the measured figure once runs exist.
-    timeout-minutes: 40
+    # Measured 2m41s with twenty cold starts (about 6 s each) after the build and the Chromium
+    # download; forty starts add about two minutes, and sixty fit well inside this timeout.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
