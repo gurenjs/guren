@@ -1,0 +1,62 @@
+name: Browser Specs Measurement
+
+# RFC 0033 M4: how often the generated browser specs flake from a cold start, and what one start
+# costs, measured every night outside every gate. Each night's metrics are kept as an artifact and
+# read back with the previous ones, so the summary shows the streak of clean nights the rule counts.
+# A red run means nothing was measured (the app never started), not that a spec failed.
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+    inputs:
+      starts:
+        description: Cold starts of test:browser (1-40; empty for the script's default of 20)
+        required: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: browser-measure
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    # A scaffold and install, an uncached Chromium download (timed as its own phase), and twenty
+    # cold starts; to be replaced by the measured figure once runs exist.
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Bun and build packages
+        uses: ./.github/actions/setup-and-build
+
+      - name: Measure the browser specs
+        env:
+          GUREN_BROWSER_OUT: ${{ runner.temp }}/browser-measure
+          GUREN_BROWSER_STARTS: ${{ inputs.starts }}
+        run: bun run smoke:browser-tests
+
+      - name: Upload the metrics and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-metrics-${{ github.run_id }}
+          path: ${{ runner.temp }}/browser-measure/
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Read the nights so far
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          nights="$RUNNER_TEMP/nights"
+          mkdir -p "$nights"
+          for id in $(gh run list --workflow browser-measure.yml --status completed --limit 13 --json databaseId --jq '.[].databaseId'); do
+            gh run download "$id" --dir "$nights/$id" || echo "Run $id kept no metrics."
+          done
+          cp "$RUNNER_TEMP/browser-measure/metrics.json" "$nights/tonight-metrics.json" || echo "Tonight kept no metrics."
+          bun ./scripts/smoke/browser-tests.ts --aggregate "$nights"
