@@ -48,14 +48,15 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+      # The streak is main's: a run dispatched on another branch measures other code.
       - name: Read the nights so far
-        if: always()
+        if: always() && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           nights="$RUNNER_TEMP/nights"
           mkdir -p "$nights"
-          for id in $(gh run list --workflow browser-measure.yml --status completed --limit 13 --json databaseId --jq '.[].databaseId'); do
+          for id in $(gh run list --workflow browser-measure.yml --branch main --status completed --limit 13 --json databaseId --jq '.[].databaseId'); do
             gh run download "$id" --dir "$nights/$id" || echo "Run $id kept no metrics."
           done
           cp "$RUNNER_TEMP/browser-measure/metrics.json" "$nights/tonight-metrics.json" || echo "Tonight kept no metrics."
