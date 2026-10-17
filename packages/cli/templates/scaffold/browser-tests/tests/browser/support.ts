@@ -14,19 +14,21 @@ export function browserTestPassword(): string {
 }
 
 /**
- * The component the server rendered, read from the Inertia initial page as `guren browser:doctor`
- * reads it. Only a full load writes that page: after a client-side visit it still names the first one.
+ * The component the server rendered: Guren's page shell sets `window.__INERTIA_PAGE__` from the same
+ * element `guren browser:doctor` reads, which is parsed here when a CSP without the shell's nonce kept
+ * that inline script from running. Only a full load writes either: after a client-side visit they
+ * still name the first page.
  */
 export async function initialComponent(page: Page): Promise<string | undefined> {
-  const raw = await page.evaluate(() => {
-    const script = document.querySelector('script[data-page="app"][type="application/json"]')
-    return script?.textContent ?? document.querySelector('[data-page]')?.getAttribute('data-page') ?? null
+  return page.evaluate(() => {
+    let initial = (window as Window & { __INERTIA_PAGE__?: { component?: unknown } }).__INERTIA_PAGE__
+    if (!initial) {
+      try {
+        initial = JSON.parse(document.querySelector('script[data-page="app"][type="application/json"]')?.textContent ?? 'null')
+      } catch {
+        initial = undefined
+      }
+    }
+    return typeof initial?.component === 'string' ? initial.component : undefined
   })
-  if (!raw) return undefined
-  try {
-    const component = (JSON.parse(raw) as { component?: unknown }).component
-    return typeof component === 'string' ? component : undefined
-  } catch {
-    return undefined
-  }
 }
