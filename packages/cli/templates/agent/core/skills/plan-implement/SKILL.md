@@ -190,29 +190,34 @@ of the three you think it needs and why, and wait to be told. Do not run
 
 ## After a task's last step
 
-When the last step of a task verifies and the harness has a `code-review`
-agent (Claude Code's does), ask it to read that task's change against the plan
-elements the task covers. Every step is already committed, so the working tree
-shows nothing: give the agent the commit the task starts from, the parent of
-its first step's commit (each step's commit names its id, so
-`git log --grep <step-id>` finds it).
+When the last step of a task is verified and committed, and the harness has a
+`code-review` agent (Claude Code's does), ask it to read that task's change
+against the plan elements the task covers. Every step is committed, so the
+working tree shows nothing: give the agent the commit the task starts from,
+the parent of the oldest commit naming its first step's id. Ids carry `.` and
+`+`, so match them literally:
+`git log --reverse --fixed-strings --grep '<step-id>' --format=%H | head -1`.
 
 Its findings are advisory: a reviewer asked for gaps reports some whether or
-not they exist, so weigh each one against the plan before acting on it. Fix an
-Important finding you accept in the step that owns the code, run
-`plan:verify --step` for that step again, and commit the fix naming the step
-id. Then ask for the next round, and give the agent:
+not they exist, so weigh each one against the plan before acting on it. A
+finding you do not accept is declined, with the reason. Fix one you accept,
+run `plan:verify` again (without `--step` it re-checks every step whose files
+the fix changed), and commit the fix naming the step id it belongs to. Then
+ask for the next round, and give the agent:
 
 - the round number;
+- the commit the task starts from, as in the first round;
 - the commit the previous review ended at (`git rev-parse HEAD` when you asked
   for it);
-- the findings it posted, as it posted them.
+- the findings it posted, as it posted them;
+- each finding you declined, with the reason.
 
 It reads only what changed since that commit, reports each earlier finding as
-`fixed` or `still open`, and raises no new nits. After the third round, if an
-Important finding is still open, it says the approach needs reconsidering
-rather than asking for another fix. Report that as you report a stall, and
-wait to be told.
+`fixed`, `still open` or `declined`, and raises no new nits. After the third
+round, if an Important finding you did not decline is still open, it says the
+approach needs reconsidering rather than asking for another fix. Stop there:
+tell the person which findings are open and what each fix tried, and wait to
+be told.
 
 ## When every step is verified
 

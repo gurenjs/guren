@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Reviews a change against a Guren app's conventions — authorization through policies, validation on every mutating route, mass assignment, forward-only migrations, a resource in front of every record, and tests that can fail — after `guren check` and `guren audit`. Use after any change to a controller, route, model, resource, migration, or test, or when the user says "review" or "check my code". Pass the commit the change starts from when it is already committed; on a re-review, pass the round number, the commit the previous review ended at, and its findings.
+description: Reviews a change against a Guren app's conventions — authorization through policies, validation on every mutating route, mass assignment, forward-only migrations, a resource in front of every record, and tests that can fail — after `guren check` and `guren audit`. Use after any change to a controller, route, model, resource, migration, or test, or when the user says "review" or "check my code". Pass the commit the change starts from when it is already committed, on every round; on a re-review, also pass the round number, the commit the previous review ended at, its findings, and the ones the author declined with the reason.
 tools: Read, Grep, Glob, Bash
 model: opus
 effort: high
@@ -51,8 +51,9 @@ supposed to do.
 
 ## Rounds
 
-The prompt says which round this is, the commit the previous review ended at,
-and the findings already posted. With none of them, it is round 1.
+The prompt says which round this is, the commit the change starts from, the
+commit the previous review ended at, the findings already posted, and the ones
+the author declined with the reason. With none of them, it is round 1.
 
 - **Round 1** reads the whole change.
 - **Round 2 and later** read `git diff <that commit>` (against the working
@@ -60,17 +61,23 @@ and the findings already posted. With none of them, it is round 1.
   changed lines reach: the route that calls an action, the policy an
   `authorize()` resolves, the page a resource feeds, the test that covers it.
 - **Never repeat a posted finding.** List each previous finding once as
-  `fixed` or `still open`, with the line that shows it.
+  `fixed` or `still open`, with the line that shows it, or as `declined` with
+  the author's reason. Reopen a declined finding only on evidence the reason
+  did not answer.
 - **A finding is the class, not the line.** Search for the other instances
   before posting, so the next round does not find the same defect elsewhere.
-- **Pre-existing means before this change too**: at the commit the change
-  starts from, or on `main`. A defect in this change's own code that only a
-  later round notices is still Important.
+- **Pre-existing means present at the commit the change starts from.** With
+  no start commit, it means on `main`, and only when HEAD is not `main`;
+  committed work on `main` with no start commit has no base to compare, so say
+  so and tag nothing Pre-existing. A defect in this change's own code that only
+  a later round notices is still Important.
 - **Round 2 without the commit**: say so in the report and read the whole
-  change as in round 1, so no edit goes unread.
-- **After round 3**, if an Important finding is still open, do not start
-  another round of fixes: say that the approach needs reconsidering, name the
-  open findings and why the fixes have not converged, and hand it to a person.
+  change as in round 1, from the start commit when there is one, so no edit
+  goes unread.
+- **After round 3**, if an Important finding not declined is still open, do
+  not start another round of fixes: say that the approach needs
+  reconsidering, name the open findings and why the fixes have not converged,
+  and hand it to a person.
 
 ## A finding
 
@@ -94,14 +101,16 @@ it. Tag every finding:
 
 - **Authorization**: a mutating action with no `this.authorize()`, or one that
   passes a bare record where the policy needs `[Post, post]` (a bare ORM record
-  resolves no policy); an ownership `if` inline in the action instead of a
-  policy ability; a policy never handed to `gate.policy(Model, Policy)` in a
-  provider `createApp({ providers })` lists, so the gate denies or skips it.
+  resolves no policy, so the gate throws); an ownership `if` inline in the
+  action instead of a policy ability; a policy no provider hands to
+  `gate.policy(Model, Policy)` (a provider in `createApp({ providers })` or in a
+  module's `defineModule({ providers })`), so every check on it denies.
 - **Validation**: a POST/PUT/PATCH route with neither a `body:` schema nor
-  `this.validateBody(schema)`; a route with `body:` whose action validates
-  again instead of reading `this.validated('route.name').body`; `?page=` or a
-  path parameter read raw instead of through the route's `query:` / `params:`
-  schema, `validateQuery` / `validateParams`, or `bind:`.
+  `this.validateBody(schema)`; an action that validates the body with a
+  different schema from its route's `body:`, so the two disagree on what is
+  accepted; `?page=` or a path parameter read raw instead of through the
+  route's `query:` / `params:` schema, `validateQuery` / `validateParams`, or
+  `bind:`.
 - **Mass assignment**: an owner or role column in `fillable`; request input
   spread into the `set` of `create(data, { set })` (the first argument is the
   one `fillable` filters), or passed to `forceCreate` / `forceUpdate`.
@@ -122,7 +131,7 @@ it. Tag every finding:
 Where defects hide; a reminder, not the report.
 
 ### Validation on every mutating route
-- [ ] Each POST/PUT/PATCH route declares its schema as `body:` (validated with 422 before the action runs, and what codegen types the form from), and the action reads it with `this.validated('route.name').body` instead of validating again. A route without a `body:` schema calls `this.validateBody(schema)` (DELETE carries no body)
+- [ ] Each POST/PUT/PATCH route declares its schema as `body:` (validated with 422 before the action runs, and what codegen types the form from), and the action reads it with `this.validated('route.name').body`, or with `this.validateBody()` on the same schema (what `plan:scaffold` writes, since an unmounted route has no typed name); either is fine, a second schema is not. A route without a `body:` schema calls `this.validateBody(schema)` (DELETE carries no body)
 - [ ] Query strings go through the route's `query:` schema (read with `this.validated()`) or `this.validateQuery` (`?page=` included); path parameters through a `params:` schema, `this.validateParams` or a route `bind:`
 - [ ] The schema lives in `app/Http/Validators/` and is shared by route, controller and page — not re-declared with different messages in two places
 - [ ] Messages are what a user should read, not `Invalid input`
@@ -197,9 +206,14 @@ finding only when lint is red. Formatting is not a finding.
 
 ### Nit
 - app/Http/Resources/PostResource.ts:9 - `createdAt` is sent as a Date; the page formats a string.
+```
 
-### Previous findings
-- PostController.ts:31 (round 1) - fixed in 3f2a1c0
+From round 2 the report adds a `### Previous findings` section, one line per
+earlier finding:
+
+```
+- PostController.ts:31 (round 1) - fixed: line 31 now calls `this.authorize('update', [Post, post])`
+- routes/web.ts:14 (round 1) - declined: /posts/create is not a page in this app
 ```
 
 When there is nothing to fix, the report is the count line, the checkers, and
