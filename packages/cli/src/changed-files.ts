@@ -70,9 +70,11 @@ export async function getChangedFilesFromBase(cwd: string): Promise<{ files: Set
     mergeBase = (await runGit(absoluteCwd, ['merge-base', 'HEAD', 'main']))?.[0]
   }
 
+  // A repository with no commit has no HEAD to diff against; everything tracked is then in the index.
+  const hasHead = (await runGit(absoluteCwd, ['rev-parse', '--verify', '--quiet', 'HEAD'])) !== null
   const [committed, uncommitted, untracked] = await Promise.all([
     mergeBase ? runGit(absoluteCwd, ['diff', '--name-only', mergeBase, 'HEAD']) : Promise.resolve([]),
-    runGit(absoluteCwd, ['diff', '--name-only', 'HEAD']),
+    runGit(absoluteCwd, hasHead ? ['diff', '--name-only', 'HEAD'] : ['diff', '--name-only', '--cached']),
     runGit(absoluteCwd, ['ls-files', '--others', '--exclude-standard']),
   ])
 

@@ -16,8 +16,11 @@ const SUGGESTION =
  * as one pending run per migrations folder, whatever `--changed` says. Reads
  * files only, never `drizzle.config.ts` or `config/database.ts`.
  */
-export async function checkDestructiveMigrations(cwd: string): Promise<CheckResult[]> {
-  const changed = await getChangedFilesFromBase(cwd)
+export async function checkDestructiveMigrations(
+  cwd: string,
+  listChanged: typeof getChangedFilesFromBase = getChangedFilesFromBase,
+): Promise<CheckResult[]> {
+  const changed = await listChanged(cwd)
   if (!changed) {
     if (!existsSync(join(cwd, 'db/migrations'))) return []
     return [{

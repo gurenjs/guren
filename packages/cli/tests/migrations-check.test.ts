@@ -88,13 +88,28 @@ describe('checkDestructiveMigrations', () => {
   })
 
   it('should report a gating finding when a git listing fails, rather than an empty pass', async () => {
-    // With no commit, `git diff HEAD` fails, so the uncommitted listing is missing.
+    const cwd = await repoWithHistory()
+    try {
+      const listing = async () => ({ files: new Set<string>(), mergeBase: 'abc', complete: false })
+      const gating = gatingResults({ cwd, checks: await checkDestructiveMigrations(cwd, listing), passCount: 0, warnCount: 0, failCount: 0 })
+      expect(gating.map((result) => result.key)).toEqual(['migrations-destructive-incomplete'])
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('should judge a repository with no commit yet, which has no HEAD to diff against', async () => {
     const cwd = await createTempRoot('guren-migrations-check-nocommit-')
     try {
       git(cwd, 'init', '-q', '-b', 'main')
-      await writeMigration(cwd, '0001_drop', 'DROP TABLE "posts";')
-      const gating = gatingResults({ cwd, checks: await checkDestructiveMigrations(cwd), passCount: 0, warnCount: 0, failCount: 0 })
-      expect(gating.map((result) => result.key)).toContain('migrations-destructive-incomplete')
+      await writeMigration(cwd, '0001_create', 'CREATE TABLE "posts" ("id" serial);')
+      git(cwd, 'add', '.')
+      await writeMigration(cwd, '0002_drop', 'DROP TABLE "posts";\nDROP TABLE "tags";')
+      const results = await checkDestructiveMigrations(cwd)
+      expect(results.map((result) => result.key)).not.toContain('migrations-destructive-incomplete')
+      expect(gatingResults({ cwd, checks: results, passCount: 0, warnCount: 0, failCount: 0 })).toMatchObject([
+        { key: 'migrations-destructive:db/migrations/0002_drop/migration.sql:2' },
+      ])
     } finally {
       await rm(cwd, { recursive: true, force: true })
     }
