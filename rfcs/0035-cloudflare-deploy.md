@@ -281,11 +281,19 @@ subcommands:
 | Resource | Lookup | Create |
 |----------|--------|--------|
 | D1 | `wrangler d1 list --json`, by `database_name` | `wrangler d1 create <name>` |
-| KV | `wrangler kv namespace list`, by title | `wrangler kv namespace create <name>` |
+| KV | `wrangler kv namespace list` (prints JSON), by title | `wrangler kv namespace create <name>` |
 | R2 | `wrangler r2 bucket list`, by name | `wrangler r2 bucket create <name>` |
 | Queue | `wrangler queues list`, by name | `wrangler queues create <name>` |
 
-`<name>` is the deterministic name from the first rule below.
+`<name>` is the deterministic name from the first rule below. In 4.129,
+`r2 bucket list` and `queues list` have no JSON output (`queues list` is also
+paginated with `--page`). Reading them means parsing a human-readable
+listing, which is the most fragile part of this design. Each parser is pinned
+by a fixture of that version's output, and a listing it cannot read is a
+blocker, never "not found". `d1 create`, `kv namespace create` and
+`r2 bucket create` also take `--binding` and `--update-config`. The command
+does not use those flags: the edit to `wrangler.jsonc` stays §3's
+comment-preserving one.
 
 The command does not use wrangler's implicit provisioning for two reasons.
 
@@ -355,8 +363,13 @@ RFC 0034 (destructive migration guard, Draft) adds `scanMigrationSql()` to
 not yet on the base branch. `cloudflare:deploy` changes that, and the guard
 becomes exact for D1:
 
-1. `wrangler d1 migrations list DB --remote` gives the migrations the remote
-   database has not applied.
+1. The applied names come from wrangler's own tracker table:
+   `wrangler d1 execute DB --remote --json --command "select name from d1_migrations"`.
+   `wrangler d1 migrations list` prints only a table, with no `--json` in
+   4.129. The pending migrations are the files in `.cloudflare/d1-migrations/`
+   that are not among the applied names. A database with no tracker table yet
+   has applied nothing. The table name follows the binding's
+   `migrations_table`, default `d1_migrations`.
 2. Each pending file in `.cloudflare/d1-migrations/` maps back to its
    `db/migrations/<folder>/migration.sql` through `flattenD1Migrations()`'s
    own naming, and is judged with `scanMigrationSql()`. An unacknowledged
@@ -452,6 +465,11 @@ deployed to any account. What it showed:
      to become Vite `resolve.alias` / `define`, because Void bundles with Vite
      and sets `no_bundle: true` for wrangler.
 
+   `voidPlugin()` is required. Void's Worker exists only as the output of a
+   `vite build` that runs it, so it would share a Vite config with Guren's
+   `guren()` plugin and its Inertia SSR build. That combination was not
+   tried.
+
    That means `cloudflare:build` would generate a second, Void-shaped app
    around the first. That is more code than Option A's provisioning step, and
    it sits on Void internals with no stability promise.
@@ -465,8 +483,14 @@ deployed to any account. What it showed:
    (`<timestamp>_<name>/migration.sql`). Void reads drizzle-kit 0.31's
    `meta/_journal.json`, and its deploy-time drift check would ask to
    regenerate the history. Void also depends on `drizzle-orm ^0.45`, while
-   Guren is on `1.0.0-rc.4`. That is two drizzle majors in one app's
-   dependency tree, and schema objects of one are not values of the other.
+   Guren is on `1.0.0-rc.4`. Installed together, npm nests 0.45.4 under
+   `void/` and the app keeps 1.0.0-rc.4. Void's `@schema` alias is the same
+   `db/schema.ts` Guren uses. With a drizzle 1.0 table there, `void db
+   generate` fails ("This version of drizzle-kit is outdated") and restores
+   the history. At runtime the two copies did coexist in a minimal case:
+   `void/db` read rows that drizzle 1.0's `drizzle-orm/d1` had written to
+   the same table object, under `wrangler dev`. Types and the query builder
+   beyond `select` / `insert` were not checked.
 5. **Void takes over `wrangler.jsonc`.** `void migrate`, which the first
    `void deploy` also runs, moved the root `wrangler.jsonc` to
    `.void/config-migration/` and wrote `void.config.ts` + `void.lock.json`,
@@ -509,6 +533,12 @@ leaves `wrangler.jsonc` in place. Appendix A's commands are the test.
   `wrangler d1 migrations apply --remote`. The guide must say clearly that
   for a first deploy this leaves a window where the code is live before its
   tables exist, and that phase 1 closes it.
+- Phase 0 relies on the experimental default that §4 avoids. If wrangler
+  turns `--x-provision` off by default, an ID-less binding reaches the
+  upload unresolved. `deploy --dry-run --x-provision=false` still passes
+  (Appendix B), so the failure would only show at the real upload. That
+  case is unverified and needs an account. Phase 1's explicit create does
+  not depend on it.
 
 **Phase 1: `cloudflare:deploy` for what the plugin already owns** (minor)
 
@@ -620,12 +650,14 @@ commands, local builds and `wrangler dev` ran.
 | 8 | Same, with `inference: { bindings: { db: true } }` | `d1_databases: [{ binding: "DB", database_name: "default", database_id: "local", migrations_dir: "../../migrations" }]` | Override works, with Void's naming |
 | 9 | `wrangler dev -c dist/ssr/wrangler.json`; `curl GET /`, `POST /posts`, `GET /db` | `200 guren home`; `201 {"created":"hello"}`; D1 `select 1` → `[{"one":1}]` | HTTP and D1 cross the shim |
 | 10 | Read `@void/deploy-cloudflare` and `void/dist` | `upsert(["main"], options.main)` when writing the deploy config. The generated entry exports only DOs discovered in `durable-objects/` (`defineDurableState` / `defineDurableObject`). | Confirms 7 for deploy, not only build |
+| 11 | New fixture: `npm install void@1.1.11 vite@8 hono drizzle-orm@1.0.0-rc.4` | App `drizzle-orm` 1.0.0-rc.4, `void/node_modules/drizzle-orm` 0.45.4 | Two drizzle majors installed |
+| 12 | `db/schema.ts` with a drizzle 1.0 `sqliteTable('posts')`; `void db generate` | `This version of drizzle-kit is outdated` … `Migration generation failed; previous SQL, snapshots and journal were restored.` | Void's migration tooling refuses a drizzle 1.0 app |
+| 13 | `routes/guren.ts` inserting and selecting through `drizzle-orm/d1` (1.0) on `c.env.DB`; `routes/void.ts` selecting through `void/db` from `@schema`; `vite build` + `wrangler dev` | Both `GET /guren` and `GET /void` return `200` with the same rows | Runtime coexistence holds for a plain select/insert. Types not checked |
 
 Not tried: the real `.cloudflare/worker.js` of `examples/agents` through the
-shim (its `alias`/`define` would need Vite equivalents), `void deploy`
-itself (it needs a Cloudflare login and creates resources), and `void/db`
-running against `@guren/orm`'s D1 driver in one bundle (blocked earlier by
-the drizzle major mismatch in item 6 and §Option B.4).
+shim (its `alias`/`define` would need Vite equivalents), `voidPlugin()` beside
+Guren's `guren()` Vite plugin and Inertia SSR build, and `void deploy`
+itself (it needs a Cloudflare login and creates resources).
 
 ## Appendix B: Spike C — wrangler's resource provisioning (2026-10-18)
 
@@ -637,3 +669,6 @@ the drizzle major mismatch in item 6 and §Option B.4).
 | 4 | Read the handler base class | `shouldProvision()` returns false when the binding `isFullySpecified()`. A placeholder such as `database_id: "TODO: wrangler d1 create"` counts as specified, so today's scaffold opts out of provisioning (phase 0). |
 | 5 | `wrangler@4.151.0 dev` on the same config; `curl /` | The D1 query is served by the local miniflare database. A missing `database_id` does not break local development. |
 | 6 | `wrangler@4.151.0 d1 migrations apply DB --local` | `0001_init.sql ✅`. Both versions contain the "Couldn't find an auto-provisioned D1 DB named …" lookup that `--remote` uses to resolve an ID-less binding by name. |
+| 7 | `wrangler@4.129.0 <cmd> --help` for the commands §1, §4, §5, §6 name | `whoami --json`, `d1 list --json`, `d1 time-travel info --json`, `secret list --format json` and `d1 execute --json` exist. `kv namespace list` prints JSON with no flag. `r2 bucket list`, `queues list` (paginated) and `d1 migrations list` have no JSON output. `d1 create`, `kv namespace create` and `r2 bucket create` take `--binding` and `--update-config`. |
+| 8 | `wrangler@4.129.0 d1 execute DB --local --json --command "select name from d1_migrations"` | `[{ "results": [{ "name": "0001_init.sql" }], "success": true, … }]`, the tracker §6 reads |
+| 9 | `wrangler@4.151.0 deploy --dry-run --x-provision=false` on the ID-less config | Still lists the bindings and exits at `--dry-run`. A dry run cannot show whether an unprovisioned upload fails |
