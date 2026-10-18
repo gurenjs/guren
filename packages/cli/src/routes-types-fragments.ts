@@ -1,26 +1,5 @@
 /** Static code fragments emitted by the route type generators, identical for every app. */
 
-/** Module augmentations for @inertiajs/react and @inertiajs/core. */
-export const DECLARATION_MODULE_AUGMENTATION = `\
-declare module '@inertiajs/react' {
-  interface BaseInertiaLinkProps {
-    href: Guren.RouteUrl
-  }
-}
-
-declare module '@inertiajs/core' {
-  interface Router {
-    visit(href: Guren.RouteUrl, options?: VisitOptions): void
-    get(url: Guren.RouteUrl, data?: RequestPayload, options?: Omit<VisitOptions, 'method' | 'data'>): void
-    post(url: Guren.RouteUrl, data?: RequestPayload, options?: Omit<VisitOptions, 'method' | 'data'>): void
-    put(url: Guren.RouteUrl, data?: RequestPayload, options?: Omit<VisitOptions, 'method' | 'data'>): void
-    patch(url: Guren.RouteUrl, data?: RequestPayload, options?: Omit<VisitOptions, 'method' | 'data'>): void
-    delete(url: Guren.RouteUrl, options?: Omit<VisitOptions, 'method'>): void
-    replace(url: Guren.RouteUrl, options?: Omit<VisitOptions, 'replace'>): void
-  }
-}
-`
-
 /**
  * The path-param rule: which keys a route path literal binds. Mirrors Hono's own lexing
  * (verified against hono@4.13.1): a param starts at a segment boundary, its key ends at

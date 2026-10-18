@@ -9,7 +9,6 @@ import { PATH_PARAM_PATTERN, escapeSingleQuoted as escapeSingleQuotes, escapeTem
 import { CONTRACT_SEGMENTS } from './contract-segments'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
 import {
-  DECLARATION_MODULE_AUGMENTATION,
   RUNTIME_TYPE_DEFINITIONS,
   RUNTIME_ROUTE_FUNCTION,
   RUNTIME_UTILITY_FUNCTIONS,
@@ -104,6 +103,8 @@ export async function generateRouteTypes(
   }
 }
 
+// No `@inertiajs/*` augmentation: `LinkComponentBaseProps.href` narrowed to RouteUrl would reject
+// the `string` that `route()` returns. The typed Link is `createTypedLink()` in @guren/inertia-client.
 export function buildDeclarationContent(definitions: RouteDefinition[], context: { source: string }): string {
   const uniquePaths = Array.from(new Set(definitions.map((route) => route.path))).sort()
   const templateLiterals = uniquePaths.map((path) => toTypeLiteral(path))
@@ -119,8 +120,6 @@ export function buildDeclarationContent(definitions: RouteDefinition[], context:
   return `\
 // Generated from ${context.source} — DO NOT EDIT
 // Run \`guren codegen\` to regenerate.
-
-import type { RequestPayload, VisitOptions } from '@inertiajs/core'
 
 export {}
 
@@ -138,8 +137,7 @@ ${routeLines}
     name?: string
   }
 }
-
-${DECLARATION_MODULE_AUGMENTATION}`
+`
 }
 
 export function buildRouteModuleContent(definitions: RouteDefinition[], context: { source: string }): string {
