@@ -124,7 +124,8 @@ export function createD1Database(options: D1DatabaseOptions): D1DatabaseHandle {
 
     async migrationStatus() {
       throw new Error(
-        "Wrangler's migration tracker is authoritative for D1. Use `wrangler d1 migrations list <database>` instead.",
+        "Wrangler's migration tracker is authoritative for D1. Use `wrangler d1 migrations list <database>` instead, " +
+          'and `wrangler d1 migrations apply <database>` to apply them once `guren check` reports no unacknowledged destructive migration.',
       )
     },
   }

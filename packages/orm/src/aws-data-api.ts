@@ -5,6 +5,7 @@ import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from '
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
+import type { DestructiveMigrationMode } from './migration-guard'
 import { singleFlight } from './single-flight'
 import { connectionSettings, type ConnectionContext, type ConnectionResolver } from './connection-context'
 
@@ -35,6 +36,12 @@ async function loadAwsDataApiModules(): Promise<{
 
 export interface AwsDataApiDatabaseOptions {
   migrationsFolder: string | URL
+  /**
+   * What a boot or `migrateDatabase()` does with a pending migration that drops,
+   * narrows or renames without a `-- guren:allow-destructive` comment (RFC 0034):
+   * `'warn'` (the v2 default) prints it and applies; `'refuse'` throws first.
+   */
+  destructiveMigrations?: DestructiveMigrationMode
   /** Database name. Falls back to the DATABASE_NAME environment variable. */
   database?: ConnectionResolver
   /** Aurora cluster ARN. Falls back to the DATABASE_RESOURCE_ARN environment variable. */
@@ -83,7 +90,7 @@ interface ResolvedConnection {
 }
 
 export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): AwsDataApiDatabase {
-  const { migrationsFolder, database, resourceArn, secretArn, clientOptions, migrateOnStart, seedersFolder, relations } = options
+  const { migrationsFolder, destructiveMigrations, database, resourceArn, secretArn, clientOptions, migrateOnStart, seedersFolder, relations } = options
 
   const resolvedMigrationsFolder =
     migrationsFolder instanceof URL ? fileURLToPath(migrationsFolder) : resolve(String(migrationsFolder))
@@ -152,6 +159,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
       const { migrate } = await loadAwsDataApiModules()
       await withAdminDb(async (db) => {
         await migrateAndReport(resolvedMigrationsFolder, {
+          destructiveMigrations,
           readApplied: report ? () => readAppliedMigrations(db) : undefined,
           migrate: () => migrate(db, { migrationsFolder: resolvedMigrationsFolder }),
         })

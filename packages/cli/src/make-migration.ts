@@ -231,6 +231,16 @@ function listMigrationNames(folder: string): string[] {
 }
 
 /**
+ * The absolute folder drizzle-kit writes migrations to: the drizzle config's
+ * `out`, else the default. Imports the config, so it runs app code.
+ */
+export async function resolveMigrationsOutput(root = process.cwd()): Promise<string> {
+  const configPath = await resolveDrizzleConfig(root)
+  const configured = configPath ? await readDrizzleConfig(configPath, root) : {}
+  return resolve(root, configured.out ?? DEFAULT_OUTPUT)
+}
+
+/**
  * The project-relative folder of a generated migration that creates `tableName`,
  * read from the drizzle config's `out` (or the default). Static: it cannot tell
  * whether the database applied it, which only `db:status` can.

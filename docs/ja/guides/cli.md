@@ -562,14 +562,20 @@ bunx guren config:show
 
 `db:migrate` は、`config/database.ts` の `migrationsFolder`(雛形から作ったアプリでは `db/migrations`)にある、まだ適用していないマイグレーションをすべて適用します。確認を求めないので、デプロイのパイプラインから人手を介さずに実行できます。
 
+適用する前に、未適用の `migration.sql` をすべて読みます。テーブルやカラムの削除、カラムの型を狭める変更、SQLite のテーブル再作成、リネーム、`TRUNCATE`、全行の `DELETE` があり、そのマイグレーションに `-- guren:allow-destructive` のコメントがなければ、0 以外の終了コードで適用を拒否します。該当する文は `db/migrations/<folder>/migration.sql:<line>` の形で表示され、この拒否は環境を問いません。対象と承認の書き方は[破壊的マイグレーション](database.md#破壊的マイグレーション)で説明しています。
+
 ```bash
 # マイグレーションを実行
 bunx guren db:migrate
 
-# 実行せずに内容だけを表示
+# 適用せずに、未適用のマイグレーションに破壊的な文がないかを確かめる
+# (承認のない文があれば終了コード 1。データベースのトラッカーを読みます)
 bunx guren db:migrate --dry-run
 
-# 結果を JSON で出力
+# 承認のない破壊的な文も、この 1 回だけ適用する
+bunx guren db:migrate --allow-destructive
+
+# 結果を JSON で出力。`destructive` に判定の内容が入ります
 bunx guren db:migrate --json
 ```
 

@@ -13,6 +13,24 @@ prefix_rule(
     ],
 )
 
+# Commands that destroy data ask first. Codex takes the strictest decision of every
+# rule a command matches, so these hold beside the `bunx guren` allow above. Prefix
+# rules see a flag only in this position: `db:migrate --json --allow-destructive`
+# is still allowed, and the CLI's own refusal is what stops it.
+prefix_rule(
+    pattern = ["bunx", "guren", ["db:fresh", "db:reset", "queue:flush"]],
+    decision = "prompt",
+    justification = "Drops every table or discards queued jobs",
+    match = ["bunx guren db:fresh --seed", "bunx guren db:reset", "bunx guren queue:flush"],
+)
+
+prefix_rule(
+    pattern = ["bunx", "guren", "db:migrate", "--allow-destructive"],
+    decision = "prompt",
+    justification = "Applies destructive migrations no -- guren:allow-destructive comment acknowledges",
+    match = ["bunx guren db:migrate --allow-destructive"],
+)
+
 prefix_rule(
     pattern = ["bun", "run", "codegen"],
     decision = "allow",

@@ -5,12 +5,19 @@ import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from '
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
+import type { DestructiveMigrationMode } from './migration-guard'
 import { singleFlight } from './single-flight'
 import { connectionSettings, resolveFor, type ConnectionContext, type ConnectionResolver } from './connection-context'
 import { describeSqliteDatabase, type DatabaseDescription } from './database-description'
 
 export interface SqliteDatabaseOptions {
   migrationsFolder: string | URL
+  /**
+   * What a boot or `migrateDatabase()` does with a pending migration that drops,
+   * narrows or renames without a `-- guren:allow-destructive` comment (RFC 0034):
+   * `'warn'` (the v2 default) prints it and applies; `'refuse'` throws first.
+   */
+  destructiveMigrations?: DestructiveMigrationMode
   /** Path to the SQLite database file. Defaults to `./data/guren.db`. */
   filename?: ConnectionResolver
   seedersFolder?: string | URL
@@ -153,7 +160,7 @@ function reportForeignKeyViolations(handle: SqliteHandle): void {
 }
 
 export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteDatabase {
-  const { migrationsFolder, filename, seedersFolder, relations } = options
+  const { migrationsFolder, destructiveMigrations, filename, seedersFolder, relations } = options
 
   const resolvedMigrationsFolder =
     migrationsFolder instanceof URL ? fileURLToPath(migrationsFolder) : resolve(String(migrationsFolder))
@@ -298,6 +305,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       const db = await database.get()
       const { migrate } = await import('drizzle-orm/bun-sqlite/migrator')
       await migrateAndReport(resolvedMigrationsFolder, {
+          destructiveMigrations,
         readApplied: report ? readAppliedMigrations : undefined,
         migrate: () => {
           // The migrator wraps every pending migration in one transaction, where

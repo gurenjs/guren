@@ -5,6 +5,7 @@ import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from '
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
+import type { DestructiveMigrationMode } from './migration-guard'
 import { singleFlight } from './single-flight'
 import { connectionSettings, resolveFor, type ConnectionContext, type ConnectionResolver } from './connection-context'
 import { describeServerDatabase, type DatabaseDescription } from './database-description'
@@ -42,6 +43,12 @@ async function loadMySqlModules(): Promise<{
 
 export interface MySqlDatabaseOptions {
   migrationsFolder: string | URL
+  /**
+   * What a boot or `migrateDatabase()` does with a pending migration that drops,
+   * narrows or renames without a `-- guren:allow-destructive` comment (RFC 0034):
+   * `'warn'` (the v2 default) prints it and applies; `'refuse'` throws first.
+   */
+  destructiveMigrations?: DestructiveMigrationMode
   connectionString?: ConnectionResolver
   clientOptions?: MySqlConnectionOptions
   seedersFolder?: string | URL
@@ -73,7 +80,7 @@ export interface MySqlDatabase {
 }
 
 export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabase {
-  const { migrationsFolder, connectionString, clientOptions, seedersFolder, relations } = options
+  const { migrationsFolder, destructiveMigrations, connectionString, clientOptions, seedersFolder, relations } = options
 
   const resolvedMigrationsFolder =
     migrationsFolder instanceof URL ? fileURLToPath(migrationsFolder) : resolve(String(migrationsFolder))
@@ -156,6 +163,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
         // Over the migration pool: a second admin pool here would cost a
         // connect on every cold start.
         await migrateAndReport(resolvedMigrationsFolder, {
+          destructiveMigrations,
           readApplied: report ? () => readAppliedMigrations(migrationDb as unknown as MySql2Database) : undefined,
           migrate: () => migrate(migrationDb, { migrationsFolder: resolvedMigrationsFolder }),
         })

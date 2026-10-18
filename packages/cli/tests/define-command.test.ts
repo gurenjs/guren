@@ -157,10 +157,10 @@ describe('built-in commands', () => {
 
 /**
  * A command that read `Boolean(args.json)` raw before the wrapper existed,
- * driven end to end. `--dry-run` keeps it away from any database: the only
- * thing the repeated flag decides here is which reporter runs.
+ * driven end to end. `--dry-run` keeps it away from any database (unlike
+ * `db:migrate`'s, which reads the tracker): the repeated flag only picks the reporter.
  */
-describe('db:migrate flag parsing', () => {
+describe('db:seed flag parsing', () => {
   let logs: string[]
   let infos: string[]
   let logSpy: ReturnType<typeof spyOn>
@@ -185,15 +185,15 @@ describe('db:migrate flag parsing', () => {
   })
 
   it('reports as text when a repeated --json ends in false', async () => {
-    await runCommand(builtinSubCommands['db:migrate'], { rawArgs: ['--dry-run', '--json=true', '--json=false'] })
+    await runCommand(builtinSubCommands['db:seed'], { rawArgs: ['--dry-run', '--json=true', '--json=false'] })
     expect(logs).toEqual([])
-    expect(infos).toEqual(['[dry-run] Would run all pending database migrations.'])
+    expect(infos).toEqual(['[dry-run] Would execute database seeders.'])
   })
 
   it('reports as JSON when a repeated --json ends in true', async () => {
-    await runCommand(builtinSubCommands['db:migrate'], { rawArgs: ['--dry-run', '--json=false', '--json=true'] })
+    await runCommand(builtinSubCommands['db:seed'], { rawArgs: ['--dry-run', '--json=false', '--json=true'] })
     expect(infos).toEqual([])
     expect(logs).toHaveLength(1)
-    expect(JSON.parse(logs[0]!)).toMatchObject({ dryRun: true, action: 'db:migrate' })
+    expect(JSON.parse(logs[0]!)).toMatchObject({ dryRun: true, action: 'db:seed' })
   })
 })

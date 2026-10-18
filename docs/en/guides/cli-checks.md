@@ -201,6 +201,23 @@ bunx guren check --changed   # restrict checks to files changed vs. the merge ba
 
 An import Guren can't resolve to a project file is reported as a warning, never a failure: an unresolved path shouldn't block your build.
 
+## Destructive migrations
+
+`guren check` judges the migrations that are not on `main` yet: those committed
+on the current branch since its merge base with `main` (or `origin/main`), plus
+uncommitted and untracked ones. It does this whether or not `--changed` is
+passed, and it never reads a migration that is already on `main`, so a drop that
+shipped long ago does not fail today's check. It reads `migration.sql` and
+`snapshot.json` only; it does not import `drizzle.config.ts` or
+`config/database.ts`.
+
+| Finding key | Rule |
+|---|---|
+| `migrations-destructive:<file>:<line>` | (warn) A destructive statement in a migration with no `-- guren:allow-destructive` comment. It counts for `check --ci` and `guren gate`, so the Stop hook sends an agent back before it finishes with one in the tree. [Destructive migrations](database.md#destructive-migrations) lists what counts. |
+| `migrations-destructive:<file>` | (pass) The migration's destructive statements are acknowledged; the message quotes the reason. |
+| `migrations-destructive-unverified` | (warn, advisory) Not a git repository, so nothing was judged. |
+| `migrations-destructive-no-base` | (warn, advisory) No merge base with `main`, so only uncommitted and untracked migrations were judged. |
+
 ## How the Checks Read the App
 
 This section is for when a check's verdict surprises you. `check`, `doctor`, `audit` and `gate` read some facts from the app itself, through [`guren introspect`](#introspecting-the-registered-app), and the rest from source.

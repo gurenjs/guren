@@ -101,6 +101,14 @@ bunx guren cloudflare:build          # regenerates .cloudflare/d1-migrations
 bunx wrangler d1 migrations apply my-app --remote
 ```
 
+Wrangler applies whatever the folder holds, so Guren's destructive-migration
+guard cannot run at that point. `bunx guren check` (and `bunx guren gate`) judge
+the migrations your branch adds before they are merged, and report a `DROP`,
+a narrowed type or a table rebuild that carries no
+`-- guren:allow-destructive` comment. Run one of them before applying to
+`--remote`; [Destructive migrations](./database.md#destructive-migrations) covers
+what it reports.
+
 > [!WARNING]
 > Build first. `migrations_dir` points inside the generated directory, and `wrangler` reports "no migrations to apply" — successfully, with no error — when it finds an empty folder. Applying before building is the one failure here that looks like success.
 

@@ -6,6 +6,12 @@
       "Bash(bun run typecheck:*)",
       "Bash(bun run lint:*)",
       "Bash(bun test:*)"
+    ],
+    "ask": [
+      "Bash(bunx guren db:fresh:*)",
+      "Bash(bunx guren db:reset:*)",
+      "Bash(bunx guren db:migrate --allow-destructive:*)",
+      "Bash(bunx guren queue:flush:*)"
     ]
   },
   "hooks": {

@@ -623,14 +623,20 @@ The cache is stored in `bootstrap/cache/config.json`. Configuration files are lo
 
 `db:migrate` applies every pending migration in the folder `config/database.ts` configures as `migrationsFolder` (`db/migrations` in a scaffolded app). It never asks for confirmation, so a deploy pipeline can run it unattended.
 
+Before applying anything it reads each pending `migration.sql` and refuses, with a non-zero exit, a statement that drops a table or column, narrows a column type, rebuilds a SQLite table, renames, truncates, or deletes every row, unless the migration carries a `-- guren:allow-destructive` comment. The refusal names each statement as `db/migrations/<folder>/migration.sql:<line>`, and holds in every environment. [Destructive migrations](database.md#destructive-migrations) explains what counts and how to acknowledge one.
+
 ```bash
 # Run migrations
 bunx guren db:migrate
 
-# Show what would happen without executing
+# Check the pending migrations for destructive statements without applying them
+# (exits 1 when one is not acknowledged; reads the database's migration tracker)
 bunx guren db:migrate --dry-run
 
-# Output the result as JSON
+# Apply destructive statements no migration acknowledges, for this run only
+bunx guren db:migrate --allow-destructive
+
+# Output the result as JSON; `destructive` lists what the guard judged
 bunx guren db:migrate --json
 ```
 

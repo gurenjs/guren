@@ -48,6 +48,15 @@ export async function runGit(cwd: string, args: string[]): Promise<string[] | nu
  * treat it as "don't filter" — this is a speed optimization, not a gate.
  */
 export async function getChangedFiles(cwd: string): Promise<Set<string> | null> {
+  return (await getChangedFilesFromBase(cwd))?.files ?? null
+}
+
+/**
+ * `getChangedFiles()` with the merge base it diffed against, undefined when
+ * neither `origin/main` nor `main` shares history with HEAD, in which case
+ * `files` holds only uncommitted and untracked changes.
+ */
+export async function getChangedFilesFromBase(cwd: string): Promise<{ files: Set<string>; mergeBase?: string } | null> {
   // realpath, not just resolve: git reports --show-toplevel through the real
   // path, and on macOS /tmp is a symlink to /private/tmp.
   const absoluteCwd = await realpath(resolve(cwd)).catch(() => resolve(cwd))
@@ -80,7 +89,7 @@ export async function getChangedFiles(cwd: string): Promise<Set<string> | null> 
     result.add(cwdRelativePath.split(sep).join('/'))
   }
 
-  return result
+  return { files: result, mergeBase }
 }
 
 /** Any file that could hold a route's params schema or change what the app's modules evaluate to. */

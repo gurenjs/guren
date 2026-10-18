@@ -193,6 +193,17 @@ bunx guren check --changed   # main とのマージベースからの変更フ�
 
 プロジェクト内のファイルに解決できない import は、失敗ではなく警告として報告されるので、解決できないパスのせいでビルドが止まることはありません。
 
+## 破壊的マイグレーション
+
+`guren check` は、まだ `main` に入っていないマイグレーションを判定します。対象は、`main`(または `origin/main`)とのマージベース以降に現在のブランチでコミットしたものと、未コミットのもの、未追跡のものです。`--changed` の有無にかかわらずこの範囲を読み、`main` に入っているマイグレーションは読みません。そのため、ずっと前にリリースした `DROP` で今日のチェックが失敗することはありません。読むのは `migration.sql` と `snapshot.json` だけで、`drizzle.config.ts` や `config/database.ts` は import しません。
+
+| 指摘のキー | ルール |
+|---|---|
+| `migrations-destructive:<file>:<line>` | (warn)`-- guren:allow-destructive` のコメントがないマイグレーションに破壊的な文があります。`check --ci` と `guren gate` で数えるので、そのままでは Stop hook がエージェントを差し戻します。対象は[破壊的マイグレーション](database.md#破壊的マイグレーション)にあります。 |
+| `migrations-destructive:<file>` | (pass)破壊的な文が承認されています。メッセージに理由が入ります。 |
+| `migrations-destructive-unverified` | (warn、参考扱い)git リポジトリではないので、何も判定していません。 |
+| `migrations-destructive-no-base` | (warn、参考扱い)`main` とのマージベースがないので、未コミットと未追跡のマイグレーションだけを判定しました。 |
+
 ## チェックがアプリを読む仕組み
 
 チェックの判定が意外だったときのための節です。`check`、`doctor`、`audit`、`gate` は、一部の事実を [`guren introspect`](#登録済みアプリのイントロスペクション) でアプリそのものから読み、残りをソースから読みます。
