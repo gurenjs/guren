@@ -73,8 +73,7 @@ whole Cloudflare API, as Wrangler's successor
   worker is bundled today, `cf` "will continue to delegate to Wrangler".
 
 So anything Guren builds on `wrangler.jsonc` and Wrangler subcommands has a
-known end date. That date is at least 18 months away and not yet fixed. Spike D
-(Appendix C) ran `cf@1.0.0-beta.18` against a copy of `examples/agents`.
+known end date. That date is at least 18 months away and not yet fixed.
 
 ### The Lambda path is already provisioned
 
@@ -169,9 +168,6 @@ the plugin:
 that plain `wrangler deploy` or `cf deploy` creates the resources. Guren only
 writes the bindings and runs the commands in order.
 
-**Wrangler-only A.** The same orchestration on `wrangler.jsonc` and Wrangler
-subcommands. This was this RFC's first draft (see Alternatives).
-
 **Recommendation: A, with C as phase 0.**
 
 - **Phase 0.** C alone, on today's Wrangler path. It is a scaffold change of
@@ -189,87 +185,128 @@ Option B is not recommended at Void 1.1.11 (see the Option B section).
 ```
 bunx guren cloudflare:deploy [--root <dir>] [--plan] [--yes] [--ci]
                              [--provision] [--skip-migrations]
-                             [--allow-destructive] [--mcp-oauth] [--mcp-path <p>]
-                             [--secrets-file <path>] [--json] [--init-ci]
+                             [--allow-destructive] [--secrets-file <path>]
+                             [--json]
 ```
 
 It is registered in `gurenPlugin.commands.names` beside `cloudflare:build`
 and `cloudflare:size`. It runs these stages in order and stops at the first
-one that fails:
+one that fails. Every operation on the account or the CLI goes through the
+backend interface (§7).
 
 | # | Stage | What it does | Writes |
 |---|-------|--------------|--------|
-| 1 | Preflight | Picks the backend (§7). Checks `cf`, the delegate Wrangler and the fallback Wrangler against their floors, and checks that Node ≥ 22.18 is on `PATH` (§7). Checks the account: `cf auth list`, or `wrangler whoami --json` on the Wrangler backend. | nothing |
-| 2 | Assemble | `buildCloudflareOutput()`, the same code `cloudflare:build` runs, into the backend's output directory (§3.3). The directory is emptied first, so no `resources.json` from an earlier run survives into stage 3. Writes the build manifest `gurenWorker()` reads (§3). | output dir |
-| 3 | Plan | Evaluates the configuration so the plan sees the developer's own bindings too: `cf build` and its `worker.config.json` on the `cf` backend, or `wrangler.jsonc` parsed on the Wrangler backend (§7). Resolves every binding to one resource and checks the planned names (§3.1, §4). Lists the pending remote migrations and checks the tracker against the layout (§6). Checks the secrets (§5). Prints the plan. Every check here only reads, so a run that is going to fail does so before it creates anything. `--plan` stops here, with exit 1 on a blocker. | nothing |
-| 4 | Provision | Creates each planned resource that does not exist yet (§4). Writes the resolved identity of every binding to `<out>/resources.json` (§3.1). | account, output dir |
-| 5 | Build | Runs `cf build` again. `gurenWorker()` now emits the resolved IDs. Checks that every binding in the new `worker.config.json` names exactly the resource stage 4 resolved, and refuses on any difference. This Build Output is the one stages 6 and 7 use. | output dir |
-| 6 | Migrate | Judges the pending migrations with the RFC 0034 scanner, records a Time Travel bookmark, lists the pending set again, and applies it only if it is unchanged (§6). | D1 |
-| 7 | Deploy | `cf deploy --prebuilt --no-provision` on stage 5's output. On the Wrangler backend, `wrangler deploy --x-provision=false` with the resolved IDs (§7). Neither can create a resource at this point, so a binding that no longer resolves fails the deploy. | Worker |
-| 8 | Report | Prints the URL, what was created, migrated and deployed, and the rollback commands (§8). | nothing |
+| 1 | Preflight | Picks the backend from which config file exists (§7), then probes only that backend's tools and the account, concurrently. | nothing |
+| 2 | Assemble | `buildCloudflareOutput()` into the backend's output directory (§3.3), sharing one introspection of the app (§2). Writes the build manifest `gurenWorker()` reads, carrying over the previous run's `resolved` section (§3). | output dir |
+| 3 | Plan | Evaluates the configuration and resolves every binding (§3.1). Reads the pending migrations (§6). Runs the plan checks (§1.1) and prints the plan. Everything here only reads, so a run that is going to fail does so before it creates anything. `--plan` stops here, with exit 1 on a blocker. | nothing |
+| 4 | Provision | Creates each planned resource that does not exist yet (§4), and writes the new resolution into the manifest. Skipped when nothing is missing and the resolution did not change. | account, manifest |
+| 5 | Build | Rebuilds, so that `gurenWorker()` emits the new resolution, and checks the result against it. Skipped when stage 4 changed nothing, because stage 3's build already carries the same IDs. | output dir |
+| 6 | Migrate | Judges the pending migrations with the RFC 0034 scanner, records a Time Travel bookmark, lists the pending set again, and applies it only if it is unchanged (§6). Skipped when nothing is pending. | D1 |
+| 7 | Deploy | Deploys the build from stage 3 or 5 with provisioning off. A binding that no longer resolves fails the deploy instead of being created (§4). | Worker |
+| 8 | Report | Prints the URL, what was created, migrated and deployed, and the rollback route (§8). | nothing |
+
+On a rerun with no changes, the command builds once, creates nothing,
+applies nothing, and deploys the same code.
 
 Without `--yes`, a TTY asks once, after stage 3, before anything is written.
-The prompt shows the whole plan. `--yes`, `--ci` and a run with no TTY follow
-§4's rules instead. `--json` prints one object:
-`{ plan, created, migrated, deployment, url }`. It is the agent-facing form,
-on the same convention as `guren check --json`. `--init-ci` writes a GitHub
-Actions workflow that runs the command under a per-Worker concurrency group
-(§4), and does not deploy.
+`--json` prints one object, `{ plan, created, migrated, deployment, url }`,
+on the same convention as `guren check --json`. `cloudflare:build` stays: it
+assembles output and nothing else.
 
-`cloudflare:build` stays: it assembles output and nothing else. A developer
-who wants to drive `cf` by hand keeps that path, and `cloudflare:deploy` is a
-superset of it.
+#### 1.1 Plan checks
+
+Stage 3 runs one list of checks over a single context: the evaluated config,
+the manifest, the account listings and the tracker rows. Each check returns
+findings with a severity and a fix. `--plan`, `--json`, the TTY prompt and
+`--ci` all read that one list.
+
+| Check | Blocks when | Section |
+|-------|-------------|---------|
+| `binding-conflict` | Two sources name different resources for one binding | §3.1 |
+| `resource-missing` | A resource does not exist and the run may not create it | §4 |
+| `resource-name` | A planned name breaks a Cloudflare name limit | §4 |
+| `oauth-drift` | The deployed Worker binds `OAUTH_KV` but `config/cloudflare.ts` turns OAuth off | §3 |
+| `cron-coverage` | A developer-declared trigger fires less often than the finest task needs | §2 |
+| `tracker-layout` | The tracker holds both flattened and nested names | §6 |
+| `secrets` | A required secret is neither set nor in `--secrets-file` | §5 |
+| `serialization` | Warning only: running in GitHub Actions without the per-Worker concurrency group | §4 |
+
+A new check is one more entry, which is also how Open Question 4 would land.
 
 ### 2. Which bindings an app needs
 
-Void infers bindings from imports and `env.X` patterns. A Guren app does not
-use either shape:
+Void infers bindings from imports and `env.X` patterns. A Guren app uses
+neither:
 
 - bindings arrive through a closure, `binding: () => getWorkersEnv<Env>().DB`;
 - the driver is picked at runtime, by
   `isWorkersRuntime() ? createD1Database(...) : createSqliteDatabase(...)`.
 
-Spike B confirms the gap: `void info --json` reports no resources at all for
-`examples/agents`. Guren can *ask the app* instead.
+Spike B confirms the gap: `void info --json` reports no resources for
+`examples/agents`. Guren can ask the app instead.
 
 | Binding | Source of truth | Phase |
 |---------|-----------------|-------|
 | D1 `DB` | Already build-owned: the scaffold writes it, and `warnDatabaseWithoutD1()` exists. Once §2.1 lands, the introspected `database` section confirms it (`dialect: 'd1'`). | 1 |
 | Durable Objects | `config/agents.ts`, already read by `readAgentRegistry()`. On `cf` they are declared as `exports: { Triager: exports.durableObject({ storage: 'sqlite' }) }`, because the Wrangler `migrations` list is not supported there (Spike D). | 1 |
-| KV `OAUTH_KV` | `--mcp-oauth`, already build-owned in that mode. | 1 |
-| Cron trigger | The schedule kernel, read the way `guren schedule:list` reads it, and `mcpOAuth`. A registered task, or the OAuth storage sweep the `--mcp-oauth` worker runs from `scheduled` (`renderDefaultExport()`), gives one `* * * * *` trigger, since the worker runs whichever tasks are due at each firing. A developer who declares `triggers` in `cloudflare.config.ts` replaces the helper's (the spread gives the developer's key precedence), and the plan blocks if that trigger fires less often than the finest task needs. A kernel that cannot be read leaves triggers alone, which keeps today's rule against guessing. A sweep-only app still meets the existing behaviour: `handler.scheduled` throws after the sweep when no `scheduler` is bound, and the plan reports that. | 1 |
-| R2 | Storage disks whose driver is `R2Driver`, from the introspected `storage` section, with the binding name taken from the driver's description (§2.1). | 2 |
+| KV `OAUTH_KV` | `mcpOAuth` in `config/cloudflare.ts` (§3). | 1 |
+| Cron trigger | One task set: the schedule kernel's tasks, plus the OAuth storage sweep when `mcpOAuth` is on. The sweep runs from `scheduled` (`renderDefaultExport()`). A non-empty set gives one `* * * * *` trigger, since the worker runs whichever tasks are due at each firing. A kernel that cannot be read leaves triggers alone, which keeps today's rule against guessing. | 1 |
+| R2 | Storage disks whose driver is `R2Driver`, from the introspected `storage` section, with the binding name from the driver's description (§2.1). | 2 |
 | KV (app) | Any KV-backed driver that describes a binding name the same way. None ships today. The row is here so the rule exists before one does. | 2 |
 | Queues | `config/queue.ts` with a Cloudflare Queues driver. That driver and the generated worker's `queue()` handler do not exist yet, so they are a prerequisite (§10, phase 3). | 3 |
 
-Inference only ever **adds**. A binding the developer wrote is never edited
-or removed. When inference and the developer disagree on a binding, the plan
-reports a blocker and changes nothing. For example, the app has an R2 disk on
-`MEDIA` but the config binds `MEDIA` to a KV namespace.
+The kernel is read with `loadScheduleKernel()` from `packages/cli/src/schedule.ts`.
+That function is exported for this purpose, so `schedule:list` and the plan
+share one reader and one "unreadable" rule.
 
-#### 2.1 Making Workers bindings visible to introspection
+Some inference results are treated specially:
+
+- **A trigger the developer declares wins.** When `triggers` appears in
+  `cloudflare.config.ts`, it replaces the helper's, because the developer's
+  key comes later in the spread. The `cron-coverage` check then judges it.
+- **A sweep-only app keeps today's behaviour.** `handler.scheduled` throws
+  after the sweep when no `scheduler` is bound, and the plan reports that.
+- **Inference only adds.** It is one more source in §3.1's resolution, so a
+  binding the developer wrote is never edited, and any disagreement is a
+  `binding-conflict`.
+
+#### 2.1 One introspection, with Workers bindings visible
 
 `guren introspect` runs `register()` under Bun, where `isWorkersRuntime()` is
-false. The manifest therefore describes the *development* branch (`sqlite`,
-`local` disks). Two additive changes fix this:
+false, so the manifest describes the development branch (`sqlite`, `local`
+disks). Two additive changes fix this:
 
-1. **A target override.** Under `GUREN_INTROSPECT=1` with
-   `GUREN_INTROSPECT_TARGET=cloudflare`, `isWorkersRuntime()` returns true.
-   Every Workers binding is already read lazily (RFC 0003, and
-   `getWorkersEnv()` throws with that advice), so `register()` builds the D1
-   factory and the R2 disk without an env existing.
+1. **A target override.** `isWorkersRuntime()` (`packages/plugin-cloudflare/src/env.ts`)
+   returns true under `GUREN_INTROSPECT=1` with
+   `GUREN_INTROSPECT_TARGET=cloudflare`. The deploy passes the variable
+   through `introspectApp(cwd, { env })`, the channel `browser:serve`
+   already uses for `DATABASE_URL`. So no new CLI flag is needed. Every
+   Workers binding is already read lazily (RFC 0003), so `register()` builds
+   the D1 factory and the R2 disk without an env existing.
 2. **Bindings named as strings.** `createD1Database({ binding: 'DB' })` and
    `new R2Driver({ binding: 'MEDIA' })` accept the binding name, resolve it
    per request through `getWorkersEnv()`, and report it from `describe()`.
    The closure form keeps working. A closure is opaque, so for it the plan
    falls back to the build-owned `DB` and prints a hint.
 
-### 3. Configuration: a Guren helper in `cloudflare.config.ts`
+The deploy runs this introspection once. Its result feeds inference and the
+agent registry. It also feeds `reportDeployRuntimeHazards()`, which
+`buildCloudflareOutput()` would otherwise run in a child of its own.
+
+### 3. Configuration
+
+Three files are authored, and one is generated:
+
+| File | Who writes it | Holds |
+|------|---------------|-------|
+| `cloudflare.config.ts` | Scaffolded once, then the developer's | The Worker, with Guren's part spread in from `gurenWorker()` |
+| `wrangler.config.ts` | Scaffolded once | The esbuild options from `gurenWranglerBundle()` (§3.2) |
+| `config/cloudflare.ts` | The developer | Guren's deploy settings: `defineCloudflareConfig({ mcpOAuth, resourceNames })` |
+| `<out>/guren-worker.json` | `cloudflare:build`, every run | The build manifest, including `resolved` |
 
 `cloudflare.config.ts` is TypeScript, and `defineConfig()` accepts a value, a
 promise, or a function returning either. That makes rewriting the file
-unnecessary. Guren exports the build-owned part as a function, and the
-developer's config spreads it in:
+unnecessary:
 
 ```ts
 // cloudflare.config.ts (scaffolded once, then the developer's)
@@ -287,128 +324,102 @@ export default defineConfig(async () => {
 })
 ```
 
-`gurenWorker()` runs inside `cf`, under Node, in a different process from
-the Bun build that knows the app. It therefore computes nothing about the
-app itself. Everything it returns comes from two files in the output
-directory:
+**`config/cloudflare.ts`** is a build-time definition. The deploy and the build
+read it, and the app never does at runtime. So it is not wired through
+`createApp({ config })`, and the `config-unwired` check of RFC 0027 skips it
+by name. It replaces the `--mcp-oauth` build flag, which today is recorded
+nowhere: forgetting it once ships a worker without the OAuth provider, and
+`/oauth/token` then answers 404. `cloudflare:build --mcp-oauth` is
+deprecated on the `cf` backend. The `oauth-drift` check turns today's
+`warnOAuthDrift()` warning into a blocker when the deployed Worker still
+binds `OAUTH_KV`.
 
-- **`<out>/guren-worker.json`**, the build manifest. `cloudflare:build`
-  writes it on every run. It holds:
-  - the entrypoint and assets directory;
-  - the compatibility flags;
-  - the D1 binding, its database name and the migration layout (§6);
-  - whether `--mcp-oauth` was on;
-  - the agent classes;
-  - the cron schedule;
-  - from phase 2, the bindings §2 infers.
+**`gurenWorker()`** runs inside `cf`, under Node, in a different process from
+the Bun build that knows the app. So it computes nothing about the app. It
+reads the manifest, and its options are `{ name, outputDir? }` (§3.3 gives
+the default). A missing or unreadable manifest is an error that names
+`bunx guren cloudflare:build`.
 
-  It is plain JSON, and it is rebuilt from the app on every run, never
-  carried over. Its settings come from the app's committed
-  `config/cloudflare.ts`:
-  ```ts
-  defineCloudflareConfig({ mcpOAuth: true, d1MigrationLayout: 'flat' })
-  ```
-  Today `--mcp-oauth` is a build flag that is recorded nowhere, so
-  forgetting it once ships a worker without the OAuth provider. On the `cf`
-  backend the setting moves into that file:
-  - `cloudflare:deploy` and `cloudflare:build` keep `--mcp-oauth` only as a
-    check, and refuse when the flag and the file disagree;
-  - the plan also blocks when the deployed Worker binds `OAUTH_KV` and the
-    file turns OAuth off. That is the drift `warnOAuthDrift()` only warns
-    about today.
-- **`<out>/resources.json`**, the resolution from stage 4 (§3.1). It is
-  absent until `cloudflare:deploy` has resolved the bindings. Without it,
-  the helper emits D1, R2 and Queue bindings by their deterministic name
-  (§4), and KV bindings with neither name nor ID, because `bindings.kv()`
-  takes only an ID. A plain `cf deploy` resolves those KV bindings by
-  inheritance, or creates them under its own default title, which is the
-  same `<worker>-<binding>` rule.
+The manifest is plain JSON and is rebuilt from the app on every run. It holds:
 
-The helper's options are `{ name, outputDir? }`. `outputDir` defaults to the
-backend's default (§3.3). A missing or unreadable manifest is an error that
-names `bunx guren cloudflare:build`. The helper returns:
+- the entrypoint, assets directory and compatibility flags;
+- the D1 binding and database name;
+- the `mcpOAuth` setting;
+- the agent classes;
+- the cron task set;
+- from phase 2, the bindings §2 infers;
+- **`resolved`**: one resource identity per binding, written by stage 4 and
+  carried over to the next run (§3.1).
 
-- `entrypoint`, `assets` and `compatibilityFlags`;
-- the D1 binding (`bindings.d1({ name })`);
-- `OAUTH_KV` under `--mcp-oauth`;
-- the agent Durable Objects as `exports`;
-- the cron trigger;
-- from phase 2, the R2 and KV bindings §2 infers.
+The helper returns all of that in `cf` form. A binding with an entry in
+`resolved` gets that identity. A binding without one is emitted in whatever
+form its type accepts without an ID:
+
+- D1, R2 and Queues by their deterministic name (§4);
+- KV with neither name nor ID, because `bindings.kv()` takes only an ID.
+
+So a plain `cf build` or `cf deploy` without Guren still works. `cf` resolves
+those bindings itself, by inheritance or by its own default name, which is
+the same `<worker>-<binding>` rule.
 
 Spike D ran this shape with a stand-in helper that awaits, spreads a binding
 set and an `exports` map, and is extended by the caller. `cf deploy --dry-run`
-built it, and the emitted `worker.config.json` carried all of it. The spike
-did not exercise the manifest handoff: the stand-in hard-coded its values.
+built it, and the emitted `worker.config.json` carried all of it. The
+stand-in hard-coded its values, so the manifest handoff is not yet exercised.
 
 Consequences:
 
 - **Build-owned keys stop drifting.** The keys `warnMissingBuildOwnedKeys()`
   warns about today are computed, so an app scaffolded on an older plugin
-  picks up a new one by upgrading the package. There is no text to edit and
-  no comment-preserving JSONC writer to add.
-- **The developer's additions stay theirs.** They live in the developer's own
-  object literal, which Guren never reads or writes.
-- **The plan reads the evaluated config, not the file.** `cf` writes the
-  resolved configuration to `.cloudflare/output/v0/workers/default/worker.config.json`
-  on build. Stage 3 compares that output with what §2 infers.
+  picks up a new one by upgrading the package.
+- **The developer's additions stay theirs.** They live in their own object
+  literal, which Guren never reads or writes.
+- **The plan reads the evaluated config.** That is `cf`'s
+  `.cloudflare/output/v0/workers/default/worker.config.json`, not the source
+  file.
 
-#### 3.1 Resource IDs are not stored in the repository
+#### 3.1 Resolving each binding once
 
-`cf` resolves an ID-less binding in one of three ways, and does not write IDs
-back:
+Left to the deploy, `cf`'s resolution (Prior art) can disagree with Guren's.
+Suppose the deployed Worker's `DB` points at a database other than the one
+named `<worker>`. Then stage 6 would migrate one database while the deploy
+binds another. So stage 3 resolves every binding once, and that answer is the
+only one.
 
-1. by inheriting it from the deployed Worker;
-2. by connecting to an existing resource of that name;
-3. by creating one.
-
-Left to the deploy, that resolution can disagree with Guren's. Suppose the
-deployed Worker's `DB` points at a database other than the one named
-`<worker>`. Then stage 6 would migrate one database while the deploy binds
-another. So Guren resolves every binding once, at stage 3, and makes that
-answer the only one.
-
-Stage 3 reads up to three sources for each binding:
+The sources:
 
 | Source | How it is read |
 |--------|----------------|
-| An ID the developer wrote in `cloudflare.config.ts` | From the `worker.config.json` of stage 3's evaluation. Stage 2 emptied the output directory, so `gurenWorker()` emitted no IDs of its own there, and every ID in it is the developer's |
-| The binding of the currently deployed Worker version | `cf workers deployments list` names the active version, and `cf workers versions get` returns it (the response shape needs an account to confirm, Open Question 9) |
-| The resource with the deterministic name (§4) | The lookups in §4 |
+| An ID the developer wrote | `worker.config.json`, minus the IDs the helper emitted from `resolved` |
+| The deployed Worker's binding | `cf workers deployments list` names the active version, and `cf workers versions get` returns it (the response shape needs an account to confirm, Open Question 9) |
+| The resource with the deterministic name | The listings in §4 |
+| Inference | §2 |
 
-How the sources combine:
+If the sources agree, the binding resolves to that resource. If any two name
+different resources, that is a `binding-conflict`, and the plan names all of
+them. If none exists, the plan creates the resource, or reports
+`resource-missing` under `--ci`.
 
-- **They agree.** The binding resolves to that resource.
-- **Two of them name different resources.** That is a blocker, reported
-  before anything is written, and the plan names all of them.
-- **None exists.** The plan creates the resource, or blocks under `--ci`.
-  For a D1 database, the plan treats its whole local history as pending
-  (§6).
-
-Stage 4 writes the result to `<out>/resources.json`. It holds the database ID
-for each D1 binding, the namespace ID for each KV binding, and the bucket or
-queue name for R2 and Queues. The build writes a self-ignoring `.gitignore`
-(`*`) into the output directory, as `.guren/plans/` already does. The
-default template ignores only `.guren/ssr/`, so this keeps
-`.guren/cloudflare/` out of commits without depending on the app's own
-ignore file. The repository therefore still stores no IDs. The file is rebuilt on every run, and a stale
-copy is never trusted: stage 3 resolves afresh and overwrites it.
+The carried-over `resolved` section is never trusted, only compared. If the
+fresh resolution equals it, stage 3's build is already the deploy build, and
+stages 4 and 5 are skipped. If it differs, stage 4 writes the new one and
+stage 5 rebuilds. Stage 5 then checks that every binding in the new
+`worker.config.json` names exactly the resolved resource.
 
 The binding types decide what has to be carried:
 
 - `bindings.d1()` accepts `{ id, name }`, and `bindings.r2()` accepts
   `{ name }`.
-- `bindings.kv()` accepts only `{ id }` (`@cloudflare/config`'s
-  `KvBindingOptions`, Spike D row 15). KV can therefore never be resolved by
-  name inside the deploy, and must take its ID from the resolution.
-- For D1 the ID is what stage 6 needs: `cf d1 migrations apply` refuses names.
+- `bindings.kv()` accepts only `{ id }` (Spike D row 15).
+- For D1 the ID is what stage 6 needs, since `cf d1 migrations apply`
+  refuses names.
 
-Stage 7 deploys with provisioning off, so every binding carries exactly what
-stage 4 resolved, and the migrated database is the bound database.
-
-This differs from Void's `void.lock.json`, and from writing IDs back as
-Wrangler 4.151 does interactively. Nothing is committed after a first deploy.
-A developer who runs plain `cf deploy` without Guren still gets `cf`'s own
-resolution, by name or inheritance.
+No ID enters the repository. The build writes a `.gitignore` of `*` into the
+output directory after emptying it, the way `runsDirectory()` in
+`packages/cli/src/browser-record.ts` does. That covers `.guren/cloudflare/`,
+which the default template does not ignore (it ignores only `.guren/ssr/`).
+This differs from Void's `void.lock.json`, and from Wrangler 4.151 writing IDs
+back interactively.
 
 #### 3.2 Bundling: `wrangler.config.ts`
 
@@ -416,177 +427,153 @@ Guren's worker still needs its esbuild `alias` and `define` entries: the
 `bun:sqlite`, `vite` and `@guren/cli` stubs, `process.env.NODE_ENV`, and
 `import.meta.url`. Under `cf` those move to `wrangler.config.ts`, which
 imports `defineWranglerConfig` from `wrangler/experimental-config`.
-`cf migrate` wrote exactly that for `examples/agents`. Guren exports
-`gurenWranglerBundle()` for that file in the same way as `gurenWorker()`.
+`cf migrate` wrote exactly that for `examples/agents`, and
+`gurenWranglerBundle()` supplies the values.
 
 The import path says "experimental". This is the most fragile point of the
-cf path, and the reason Open Question 3 asks whether Guren should move to the
-Vite bundler instead (`cf migrate --bundler vite`, `@cloudflare/vite-plugin`).
-Guren apps are already built with Vite.
+`cf` path, and the reason for Open Question 3 (the Vite bundler).
 
 #### 3.3 The output directory moves out of `.cloudflare/`
 
 `cf` writes `.cloudflare/types/` and `.cloudflare/output/`.
 `cloudflare:build` deletes and recreates `.cloudflare/` on every build
-(`resetOutputDir()`), so it would delete `cf`'s files. `cf build` itself does
-not touch the other files in `.cloudflare/` (Spike D). On the `cf` backend
-the default output directory becomes `.guren/cloudflare/`. `outputDir` is
-already an option, so this is a default per backend, not a new mechanism.
-Apps on the Wrangler backend keep `.cloudflare/`.
+(`resetOutputDir()`), so it would delete `cf`'s files. `cf build` does not
+touch other files there (Spike D row 9). On the `cf` backend the default
+output directory is therefore `.guren/cloudflare/`. `outputDir` is already
+an option, so this is a per-backend default, not a new mechanism. Apps on
+the Wrangler backend keep `.cloudflare/`.
 
 ### 4. Provisioning
 
-Provisioning is its own stage, before upload:
-
-| Resource | Lookup | Create |
-|----------|--------|--------|
-| D1 | `cf d1 list --name <name>` | `cf d1 create --name <name>` |
+| Resource | Listing | Create |
+|----------|---------|--------|
+| D1 | `cf d1 list` | `cf d1 create --name <name>` |
 | KV | `cf kv namespaces list` | `cf kv namespaces create --title <name>` |
 | R2 | `cf r2 buckets list` | `cf r2 buckets create --name <name>` |
 | Queue | `cf queues list` | `cf queues create --queue-name <name>` |
 
-On the Wrangler backend the same table maps to Appendix B's commands. There,
-`r2 bucket list` and `queues list` print only text. `cf` prints JSON by
-default.
+On the Wrangler backend the same table maps to Appendix B's commands. Stage 3
+issues one listing per resource type, concurrently with the deployed-version
+lookup, the secrets listing and the tracker read, and resolves every binding
+from those results in memory. The `d1 list` result also supplies the
+database ID that the migration commands need.
 
 `cf deploy` could create these resources itself, but the command creates
 them first, for two reasons:
 
 - **Migrations must run before the new code takes traffic.** Provisioning
   inside the deploy would put new code live against an empty database.
-  Creating first gives create → migrate → deploy.
 - **The deploy must not resolve on its own (§3.1).** Stage 7 runs
   `cf deploy --no-provision` (Wrangler: `--x-provision=false`). A resource
-  deleted after the plan, or a binding the plan missed, therefore fails the
-  deploy instead of being created unplanned. `--no-provision` is accepted by
-  beta.18 (Spike D row 16). Whether it fails cleanly on an unresolved binding
-  needs an account to confirm.
+  deleted after the plan therefore fails the deploy instead of being created
+  unplanned. Beta.18 accepts `--no-provision` (Spike D row 16). Whether it
+  fails cleanly on an unresolved binding needs an account to confirm.
 
 Rules:
 
 - **Names are deterministic.** The D1 database is `<worker>`, the name
-  `cloudflare:build` already scaffolds. Every other resource is named
-  `<worker>-<binding>`, with the binding lowercased and each `_` replaced by
-  `-`. For example, `OAUTH_KV` on `my-app` becomes the KV namespace titled
-  `my-app-oauth-kv`. This is exactly the provisioning code's
-  `autoProvisionedResourceName()`
-  (`${scriptName}-${binding.toLowerCase().replaceAll("_", "-")}`, Appendix B
-  row 1). A plain `cf deploy` that provisions on its own therefore picks the
-  same names. The rule lives in one function that the plan, the helper and
-  the tests share.
-- **Names are checked before anything is created.** Stage 3 checks every
-  planned name against Cloudflare's limits, for example R2 bucket names of
-  3–63 lowercase letters, digits and hyphens. A long Worker name plus a long
-  binding can exceed them. A name that would fail is a plan blocker, not a
-  stage 4 error after other resources exist. The fix it names is an explicit
-  name in `config/cloudflare.ts` (`resourceNames: { MEDIA_UPLOADS: '…' }`).
+  `cloudflare:build` already scaffolds. Every other resource is
+  `<worker>-<binding>`, lowercased with each `_` replaced by `-`: `OAUTH_KV`
+  on `my-app` becomes the KV namespace titled `my-app-oauth-kv`. This is the
+  provisioning code's own `autoProvisionedResourceName()` (Appendix B row 1),
+  so a plain `cf deploy` picks the same names. One function holds the rule,
+  shared by the plan, the helper and the tests.
+- **Names are checked before anything is created.** A long Worker name plus
+  a long binding can exceed Cloudflare's limits, for example R2 bucket names
+  of 3–63 lowercase letters, digits and hyphens. That is a `resource-name`
+  blocker, not a stage 4 error after other resources exist. The fix is an
+  explicit name in `config/cloudflare.ts` (`resourceNames`).
 - **Idempotent by lookup.** A resource found under the planned name is
   adopted, not created again. The plan prints "adopted" separately from
   "created", because adopting a resource that another project created under
-  the same name is a real risk. A rerun after any failure converges: the
-  account is the only state.
+  the same name is a real risk.
 - **CI does not create by default.** Under `--ci`, or with no TTY and no
-  `--yes`, a missing resource is a blocker unless `--provision` is passed.
-  A first deploy from CI that silently creates databases is the failure
-  Void's docs warn about.
+  `--yes`, a missing resource is `resource-missing` unless `--provision` is
+  passed.
 - **Nothing is ever deleted.** When a later stage fails, the report lists
   what this run created and the delete commands. It does not run them, since
   a D1 database may already hold migrated tables.
 - **Deploys of one Worker are serialized outside Guren.** Two concurrent
-  runs can create the same resource. They can also judge and apply the same
-  pending migrations, or deploy over each other, on any deploy, not only the
-  first. Guren has no lock of its own, since that would need state outside
-  the account. Serialization is a stated requirement instead:
-  - the docs and the workflow `guren cloudflare:deploy --init-ci` writes set
+  runs can create the same resource, apply the same migrations, or deploy
+  over each other. Guren has no lock of its own, since that would need state
+  outside the account. Serialization is a stated requirement instead:
+  - `guren deploy --target cloudflare` adds a GitHub Actions workflow to the
+    existing per-target scaffolds of `scaffoldDeploy()`
+    (`packages/cli/src/deploy.ts`). It runs the command under
     `concurrency: { group: cloudflare-deploy-<worker>, cancel-in-progress: false }`;
-  - preflight warns when it runs in GitHub Actions without that group.
+  - the `serialization` check warns when that group is missing.
 
-  Inside one run, stage 6 narrows the window: it lists the pending set again
-  right before applying (§6).
+  Inside one run, stage 6 narrows the window by listing the pending set
+  again right before applying.
 
 ### 5. Secrets
 
-`config/env.ts` (RFC 0027) declares the required server variables. Stage 3
-compares them with `cf workers secrets list` (on the Wrangler backend,
-`wrangler secret list --format json`) plus the config's text bindings. The
-check runs in the plan, so a missing secret fails the run before stage 4
-creates anything.
+The required server variables come from `loadEnvSchema()`
+(`packages/cli/src/app-env.ts`), the reader the CLI already uses for
+`config/env.ts`. The `secrets` check compares them with the backend's secret
+listing (`cf workers secrets list`, or `wrangler secret list --format json`)
+plus the config's text bindings.
 
-On a first deploy the Worker does not exist yet, so there is nothing to set
-a secret on. The plan therefore accepts a missing name when it appears in a
-file passed as `--secrets-file <path>`, which is forwarded to `cf deploy`'s
-own `--secrets-file` (Spike D row 2). The plan reads only the names in that
-file. On later deploys it prints one command per missing name:
-`cf workers secrets update <name>`.
-
-It never reads `.env` or `.dev.vars`. A development value is not a production
-value, and Void draws the same line.
+On a first deploy there is no Worker to set a secret on. So the check also
+accepts a name that appears in `--secrets-file <path>`, a file forwarded to
+`cf deploy`'s own `--secrets-file` (Spike D row 2). The names in that file
+are read with `envFileKeys()` (`packages/cli/src/plugin-manifest.ts`), and
+the values are never read. On later deploys the check prints one
+`cf workers secrets update <name>` per missing name. The command never reads
+`.env` or `.dev.vars`: a development value is not a production value, and
+Void draws the same line.
 
 ### 6. Remote migrations and the destructive guard
 
 RFC 0034 (destructive migration guard, Draft) adds `scanMigrationSql()`, the
 `-- guren:allow-destructive` marker and `--allow-destructive`. For D1 it
 assumes Guren never runs the apply, so its D1 guard is a `guren check` rule.
-`cloudflare:deploy` runs the apply, so the guard becomes exact:
+`cloudflare:deploy` does run the apply, so the guard becomes exact.
 
-1. On the `cf` backend, stage 3 lists the pending migrations with
-   `cf d1 migrations list <database-id> --dir db/migrations --pattern 'db/migrations/*/migration.sql'`,
-   which prints JSON. On a first deploy the database does not exist yet and
-   has no ID. The plan then treats every local migration as pending and
-   judges all of them. The ID is read after stage 4 creates the database.
-   The Wrangler backend reads the tracker with `d1 execute --json` (Appendix
-   B row 8). It first asks `sqlite_master` whether the tracker table exists:
-   a database that was created but never migrated has no table, and that
-   means nothing has been applied, not an error.
-   `cf` reads drizzle 1.0's nested layout directly, so on
-   the `cf` backend `flattenD1Migrations()` is no longer needed. Spike D
-   applied `examples/agents`' three migrations from their folders this way.
-2. Each pending file is judged with `scanMigrationSql()`. An unacknowledged
-   finding refuses the deploy with exit 1, naming
+**The layout is read from the tracker.** Wrangler applies flattened copies
+and records `<folder>.sql` in `d1_migrations`. `cf` can read drizzle 1.0's
+nested layout directly (`--pattern '<dir>/*/migration.sql'`, Spike D
+row 13), and records `<folder>/migration.sql`. Pointing an existing database
+at the other layout would make its whole history look pending, and the apply
+would run it again against live data. So the build keeps emitting the
+flattened copy (`flattenD1Migrations()`), and stage 3 picks the layout per
+database from what the tracker already holds:
+
+| Tracker rows | Layout | `cf d1 migrations` arguments |
+|--------------|--------|------------------------------|
+| None, or no tracker table | nested | `--dir db/migrations --pattern 'db/migrations/*/migration.sql'` |
+| `<folder>/migration.sql` only | nested | the same |
+| `<folder>.sql` only | flat | `--dir <out>/d1-migrations` |
+| Both | none | `tracker-layout` blocker |
+
+An app moved from Wrangler thus stays flat without any setting. Renaming its
+rows to switch layout is optional (Open Question 7). The Wrangler backend is
+always flat.
+
+The steps:
+
+1. **Read the tracker.** On a first deploy the database does not exist yet,
+   so every local migration is pending, and the ID comes from stage 4. The
+   `cf` backend lists the pending set with `cf d1 migrations list
+   <database-id>` and the layout's arguments, which prints JSON. The
+   Wrangler backend runs one `d1 execute --json` query on `d1_migrations`
+   (Appendix B row 8). A "no such table" error there means nothing has been
+   applied.
+2. **Judge.** Each pending file is judged with `scanMigrationSql()`. An
+   unacknowledged finding refuses the deploy with exit 1, naming
    `<folder>/migration.sql:<line>`. `--allow-destructive` (or
    `GUREN_ALLOW_DESTRUCTIVE_MIGRATIONS=1`) applies anyway and still prints
    the findings, the same rules as `guren db:migrate`.
-3. Before applying, the command records a Time Travel bookmark
+3. **Bookmark.** Before applying, the command records a Time Travel bookmark
    (`cf d1 time-travel get-bookmark <database-id>`) and prints it. On
    failure, the report includes the `cf d1 time-travel restore` command.
-4. Right before applying, the pending set is listed again. If it differs
-   from the set judged in step 2, the command refuses. A different set means
-   another run applied migrations in between, so the guard's verdict no
-   longer covers what would run.
-5. `cf d1 migrations apply <database-id>` with the same `--dir` and
-   `--pattern`.
+4. **Re-list.** Right before applying, the pending set is listed again. If
+   it differs from the judged set, the command refuses: another run applied
+   migrations in between, so the guard's verdict no longer covers what would
+   run.
+5. **Apply.** `cf d1 migrations apply <database-id>` with the same arguments.
 
-**The tracker names differ between layouts, which matters for existing
-apps.**
-
-- Wrangler applies the flattened copies and records `<folder>.sql` in
-  `d1_migrations`.
-- `cf` with the nested pattern records `<folder>/migration.sql`.
-
-Point an existing app's database at the nested pattern, and every migration
-it already applied looks pending. The apply would then run the whole history
-again against a live database. The rule:
-
-Phase 1 makes the nested pattern the `cf` backend's default, and the `flat`
-setting is written by `guren cloudflare:migrate`, which ships in phase 2. An
-app that ran `cf migrate` by hand in between would otherwise meet the hazard
-directly. So stage 3 also reads the tracker's names: a row named
-`<folder>.sql` for a local `<folder>/migration.sql`, under the nested
-layout, is a blocker. Stage 3 then names
-`defineCloudflareConfig({ d1MigrationLayout: 'flat' })` as the fix, and
-nothing is applied.
-
-- **A new app** uses the nested pattern from the start.
-- **An app that has ever applied migrations through Wrangler** keeps the
-  flattened directory and the default `*.sql` pattern. The build keeps
-  producing it on that app's output directory. The choice is committed in
-  the app's `config/cloudflare.ts`
-  (`defineCloudflareConfig({ d1MigrationLayout: 'flat' })`). The Bun build
-  reads it from there and copies it into the build manifest, so the helper
-  and the migration stage agree. `guren cloudflare:migrate` (§10, phase 2)
-  writes it. Switching an
-  existing app needs a one-time rename of the tracker rows, and is Open
-  Question 7.
+Stage 6 is skipped when stage 3 found nothing pending on an existing database.
 
 Migrations run before the deploy. In between, and after any rollback, the old
 code runs against the new schema. That is exactly the case the guard
@@ -595,43 +582,41 @@ one needed an acknowledgment. `--skip-migrations` leaves stage 6 out.
 
 ### 7. Backends and runtime requirements
 
-The stages are written once, against a small backend interface with
-operations such as `listD1`, `createD1`, `pendingMigrations`, `applyMigrations`,
-`bookmark`, `listSecrets` and `deploy`. There are two implementations:
+The stages are written once, against a backend interface:
 
-- **`cf`**, chosen when the app declares `cf` and has `cloudflare.config.ts`.
-  New scaffolds get it. Its floor is the first `cf` release this RFC is
+| Operation | `cf` | `wrangler` |
+|-----------|------|------------|
+| `checkAuth` | `cf auth list` | `wrangler whoami --json` |
+| `evaluateConfig` | `cf build`, then read `worker.config.json` | Parse `wrangler.jsonc` with the plugin's `parseJsonc()` |
+| `build(resolved)` | `cf build` | Render `<out>/wrangler.deploy.json` (the developer's config with the resolved IDs filled in, paths rewritten), then the dry-run bundle `reportBundleSize()` already spawns |
+| `list` / `create` per type | §4 | Appendix B |
+| `pendingMigrations`, `applyMigrations`, `bookmark` | §6 | §6, flat layout only |
+| `listSecrets` | `cf workers secrets list` | `wrangler secret list --format json` |
+| `deploy` | `cf deploy --prebuilt --no-provision` | `wrangler deploy -c <out>/wrangler.deploy.json --x-provision=false` |
+| `rollbackHint` | `cf workers deployments` | `wrangler rollback` |
+| `outputDir` | `.guren/cloudflare/` | `.cloudflare/` |
+
+The backend is chosen by which file exists. `cf` is chosen when the app has
+`cloudflare.config.ts` and declares `cf`, and new scaffolds get it.
+`wrangler` is chosen when only `wrangler.jsonc` exists, so existing apps keep
+working with nothing to change until they migrate. The Wrangler backend
+never edits `wrangler.jsonc`. It is retired together with Wrangler's
+maintenance window.
+
+Floors, which preflight checks only for the chosen backend:
+
+- **The `cf` backend** needs `cf` at the first release this RFC is
   implemented against (1.0.0-beta.18 for Spike D). While `cf` is in beta,
   tests pin the argv contract per command, the same way
   `wrangler-bundle.test.ts` pins the bundle.
-
-  This backend also needs the Wrangler that `cf` delegates the build to, at
-  **≥ 4.136.0**. That is `cf`'s own constraint for its Wrangler dev-server
-  (`versionConstraint: { range: ">=4.136.0" }`, Spike D row 17). It is higher
-  than the 4.129 in Guren's lockfile, so the two floors are checked
-  separately:
-  - preflight refuses a delegate Wrangler older than 4.136.0;
-  - `guren cloudflare:migrate` raises the app's `wrangler` dependency to
-    meet it.
-- **`wrangler`**, chosen when only `wrangler.jsonc` exists. Existing apps
-  keep working with nothing to change until they migrate. The floor is
-  4.129.0, with Appendix B's verified commands. This backend is retired
-  together with Wrangler's maintenance window.
-
-  There is no `cf build` here: stage 3 evaluates the configuration by parsing
-  `wrangler.jsonc` with the plugin's existing `parseJsonc()`, and stage 5
-  builds with `wrangler deploy --dry-run --outdir`. It never edits
-  `wrangler.jsonc`. Stage 5 writes `<out>/wrangler.deploy.json`,
-  which is the developer's config with the resolved IDs filled in, and
-  stage 7 deploys it with `-c`. The paths in it are rewritten relative to
-  the output directory.
-
-`cf` needs Node.js: the package declares `node >= 22`, and loading
-`cloudflare.config.ts` refuses to run on Bun ("cloudflare.config.ts loading
-is not supported on Bun. Please use Node.js v22.18.0 or higher", Spike D).
-Guren apps otherwise need Bun only, so the `cf` backend adds Node ≥ 22.18 to
-the deploy machine. Preflight checks for it and names the requirement.
-Wrangler's backend already needs Node for wrangler itself.
+  - It needs the Wrangler that `cf` delegates the build to at ≥ 4.136.0,
+    which is `cf`'s own constraint (Spike D row 17), and above the 4.129 in
+    Guren's lockfile. `guren cloudflare:migrate` raises the dependency.
+  - It needs Node ≥ 22.18: loading `cloudflare.config.ts` refuses to run on
+    Bun (Spike D row 10). Guren apps otherwise need Bun only, so this adds
+    Node to the deploy machine.
+- **The `wrangler` backend** needs Wrangler ≥ 4.129.0, the version
+  Appendix B's commands were verified against.
 
 Guren never logs in for the developer. Preflight prints `bunx cf auth login`,
 or `CLOUDFLARE_API_TOKEN` for CI.
@@ -643,8 +628,8 @@ Stage 8 prints:
 - the URL, the custom domains from the config's routes, and the version ID;
 - the resources created and adopted;
 - the migrations applied and the Time Travel bookmark;
-- the rollback route (`cf workers deployments`, or `wrangler rollback` on
-  that backend), with the warning that a rollback does not revert migrations.
+- the backend's `rollbackHint`, with the warning that a rollback does not
+  revert migrations.
 
 ### 9. Symmetry with Lambda
 
@@ -653,15 +638,15 @@ Stage 8 prints:
 | Declaration | CDK props in the developer's stack | `cloudflare.config.ts`, with Guren's part spread in from `gurenWorker()` |
 | Engine | `cdk deploy` (CloudFormation) | `cf` (Wrangler during the transition) |
 | Job queue | `queue` prop → SQS + DLQ + worker function | Phase 3: Queues producer/consumer + DLQ queue |
-| Schedule | `schedule` prop → EventBridge rule | Cron trigger from the schedule kernel |
+| Schedule | `schedule` prop → EventBridge rule | Cron trigger from the task set |
 | Migrations | `consoleFunction`, invoked by hand with `db:migrate` | Stage 6, guarded, before deploy |
 | Sessions | `sessionsTable` → DynamoDB | `DatabaseSessionStore` on D1, nothing to provision |
 | Assets | S3 + CloudFront | Workers Static Assets, nothing to provision |
 | Deletion | CloudFormation removal policy | Never deletes, and lists what it created |
 
-Under `cf` the two converge. Both are a typed configuration file, owned by
-the developer, into which the framework's construct or helper contributes its
-part.
+Under `cf` the two converge: both are a typed configuration file, owned by
+the developer, into which the framework's construct or helper contributes
+its part.
 
 ### 10. Delivery
 
@@ -670,45 +655,44 @@ part.
 - The scaffold omits `database_id`, and with `--mcp-oauth` omits the
   `OAUTH_KV` id, instead of writing `TODO:` placeholders. It keeps
   `database_name: <worker>`.
-- A build that finds a `TODO:` ID warns and names the key to delete.
+- Two existing messages tell the developer to paste an ID: the scaffold note
+  "fill in d1_databases[0].database_id" in `scaffoldWranglerConfig()`, and
+  the `OAUTH_KV` placeholder warning in `assertOAuthKvBound()`. Both are
+  amended to say the ID may be left out. A build that finds a `TODO:` ID
+  names the key to delete.
 - The docs change the first deploy to `cloudflare:build` → `wrangler deploy`
   (which creates the database) → `wrangler d1 migrations apply --remote`.
   They say plainly that this leaves a window where code is live before its
   tables exist.
 - Phase 0 relies on Wrangler's hidden `--x-provision` default. If Wrangler
-  turns it off, an ID-less binding reaches the upload unresolved.
-  `--dry-run` cannot show that failure (Appendix B, row 9).
+  turns it off, an ID-less binding reaches the upload unresolved, and
+  `--dry-run` cannot show that failure (Appendix B row 9).
 
 **Phase 1: `cloudflare:deploy` on the `cf` backend** (minor)
 
-- `@guren/plugin-cloudflare/config`, exporting `gurenWorker()` and
-  `gurenWranglerBundle()`.
-- Stages 1–8 for D1, agent Durable Objects (`exports`), `OAUTH_KV`, and cron,
-  including the secrets check (stage 3): a first deploy without `APP_KEY`
-  does not work.
-- `.guren/cloudflare/` as the output directory, and the nested-pattern
-  migrations.
+- `@guren/plugin-cloudflare/config`, exporting `gurenWorker()`,
+  `gurenWranglerBundle()` and `defineCloudflareConfig()`.
+- Stages 1–8 and the plan checks, for D1, agent Durable Objects (`exports`),
+  `OAUTH_KV` and cron. That includes the `secrets` check, since a first
+  deploy without `APP_KEY` does not work.
+- The tracker-chosen migration layout (§6) and `.guren/cloudflare/` as the
+  output directory.
 - The guard needs RFC 0034's `scanMigrationSql()` to ship first.
-- `guren new` / create-app scaffolds `cloudflare.config.ts` and
-  `wrangler.config.ts` instead of `wrangler.jsonc`.
+- `GUREN_INTROSPECT_TARGET`, and an exported `loadScheduleKernel()`.
+- `guren deploy --target cloudflare`.
+- `guren new` / create-app scaffolds `cloudflare.config.ts`,
+  `wrangler.config.ts` and `config/cloudflare.ts` instead of `wrangler.jsonc`.
 - The Wrangler backend for the same stages, for apps that have not migrated.
 - Tests:
-  - the plan as a pure function over the evaluated config;
+  - the plan and its checks as pure functions over the context;
   - the stages against fake `cf` and `wrangler` executables on `PATH` that
     record their argv;
   - one opt-in live test, skipped without `CLOUDFLARE_API_TOKEN`.
 
 **Phase 2: migration and inference** (minor, plus additive `@guren/orm` and `@guren/cli` changes)
 
-- `guren cloudflare:migrate` wraps `cf migrate` and resolves the follow-up
-  work it leaves for a Guren app (Spike D):
-  - the `migrations_dir` TODO is replaced by `d1MigrationLayout: 'flat'` in
-    `config/cloudflare.ts`;
-  - the Wrangler DO `migrations` become `exports`;
-  - the output directory moves;
-  - the `throw` guard `cf migrate` writes is removed only once those are done.
+- `guren cloudflare:migrate` (its steps are under Migration Path).
 - String binding names on `createD1Database` and `R2Driver`.
-- `guren introspect --target cloudflare`.
 - R2 and app KV inference.
 
 **Phase 3: Cloudflare Queues** (its own RFC)
@@ -824,26 +808,29 @@ and handles authentication. Calling it directly would mean reimplementing
   `cloudflare:build` + `wrangler deploy` sees only phase 0's warning on a
   `TODO:` ID. `cloudflare:deploy` picks the Wrangler backend for it.
 - **Moving to `cf`** is `guren cloudflare:migrate` (phase 2). It runs
-  `cf migrate --bundler wrangler` and then the Guren follow-ups:
+  `cf migrate --bundler wrangler`, then resolves the follow-up work that
+  `cf migrate` leaves for a Guren app (Spike D rows 4–5):
   - replaces the generated binding and bundle entries with `gurenWorker()`
-    and `gurenWranglerBundle()`;
+    and `gurenWranglerBundle()`, which also removes the `migrations_dir`
+    TODO, since §6 picks the layout from the tracker;
   - converts the agent DO `migrations` to `exports`;
-  - sets `d1MigrationLayout: 'flat'` for an app with remote migration
-    history;
-  - moves the output directory.
+  - writes `config/cloudflare.ts` (`mcpOAuth` from the existing `OAUTH_KV`
+    binding);
+  - moves the output directory, and raises `wrangler` to the delegate floor;
+  - removes the `throw` that `cf migrate` writes, only once all of the above
+    are done.
 
   It then runs `cloudflare:deploy --plan`, which should show nothing to
-  create. Two things it cannot check locally go into Open Questions: whether
-  a deployed DO class keeps its storage when its declaration moves from
-  `migrations` to `exports` (5), and the tracker rename (7).
+  create. Whether a deployed DO class keeps its storage when its declaration
+  moves from `migrations` to `exports` cannot be checked locally (Open
+  Question 5).
 - **The closure form of `binding` keeps working.** The string form is what
   docs and new scaffolds teach from phase 2.
 
 ## Open Questions
 
-1. **Staged rollout.** Should phase 1 deploy through
-   `cf workers versions create` + a readiness probe +
-   `cf workers deployments create` from the start?
+1. **Staged rollout.** Should the staged rollout listed under Later move
+   into phase 1?
 2. **Adoption by name.** Is adopting an existing same-named resource the
    right default, or should it need `--adopt` outside a TTY?
 3. **The bundler.** Should Guren stay on `wrangler.config.ts` from
@@ -857,14 +844,14 @@ and handles authentication. Calling it directly would mean reimplementing
    `cf migrate` refuses Wrangler DO migrations and asks for `exports`. That a
    deployed `Triager` keeps its SQLite storage after the move needs a live
    account to confirm.
-6. **KV namespaces by title.** `bindings.kv()` takes only an ID, so §3.1
-   always resolves KV through `resources.json`. A developer who runs plain
-   `cf deploy` gets inheritance, or a new namespace. Should the docs tell
-   them to deploy only through `cloudflare:deploy` once the app has KV?
-7. **Renaming the D1 tracker rows.** Should `guren cloudflare:migrate` offer
-   a guarded one-time `UPDATE d1_migrations` from `<folder>.sql` to
-   `<folder>/migration.sql`? Or should existing apps stay on the flat layout
-   for good?
+6. **KV namespaces by title.** `bindings.kv()` takes only an ID, so only
+   the manifest's `resolved` section pins a KV namespace. A developer who runs
+   plain `cf deploy` gets inheritance, or a new namespace. Should the docs
+   tell them to deploy only through `cloudflare:deploy` once the app has KV?
+7. **Renaming the D1 tracker rows.** §6 keeps an app moved from Wrangler on
+   the flat layout with no setting. Is a guarded one-time `UPDATE
+   d1_migrations` to `<folder>/migration.sql` worth offering, so that such
+   an app can drop the flattened copy?
 8. **`cf` beta churn.** How long should the `cf` backend support each beta
    floor before raising it?
 9. **Reading the deployed Worker's bindings.** §3.1 reads the active
@@ -928,7 +915,7 @@ plan: <https://blog.cloudflare.com/cloudflare-cf-cli-launch/> (2026-09-28).
 | # | Command | Result | Verdict |
 |---|---------|--------|---------|
 | 1 | `npm view cf time`; `npm view wrangler deprecated` | `cf` 1.0.0-beta.18 published 2026-10-16. Wrangler carries no npm deprecation. | `cf` is a beta, and Wrangler is still current |
-| 2 | `cf deploy --help` | Has `--provision` ("Automatically provision resources for bindings that need them", default `true`), `--prebuilt`, `--dry-run` | Provisioning is a documented flag |
+| 2 | `cf deploy --help` | Has `--provision` ("Automatically provision resources for bindings that need them", default `true`), `--prebuilt`, `--dry-run`, `--secrets-file` | Provisioning is a documented flag |
 | 3 | Read `cf/dist/deploy-input-*.mjs` | `resourcesProvision: provision ?? true`, `skipProvisioningConfigWriteback: true`, uploads with `bindings_inherit: strict`. The provisioning functions are Wrangler's (`writeProvisionedIdsToConfig`, `trackSkippedProvisioning`). | IDs are not written back. Resolution is by name or inheritance |
 | 4 | `cf migrate --dry-run --no-install` in a copy of `examples/agents` (a git repository) | `Using the Wrangler bundler because @cloudflare/vite-plugin is not declared`. Would write `cloudflare.config.ts` and `wrangler.config.ts`. Required follow-ups: `migrations_dir` "require manual migration"; Durable Object bindings need review; "Wrangler Durable Object migrations are unsupported. Replace them with an exports lifecycle declaration". | Guren's D1 migrations dir and DO migrations do not convert by themselves |
 | 5 | `cf migrate --no-install` there | `cloudflare.config.ts` gets `entrypoint: ".cloudflare/worker.js"`, `bindings.d1({ name, id })`, `bindings.durableObject({ exportName: "Triager" })`, TODO comments, and a top-level `throw new Error("Migration incomplete…")`. `wrangler.config.ts` (`wrangler/experimental-config`) gets the `alias`, `define` and assets directory. `wrangler.jsonc` stays. | Bundler options move to an experimental Wrangler API |
