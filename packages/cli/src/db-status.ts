@@ -7,12 +7,14 @@ export interface MigrationStatusRow {
   appliedAt: string | null
   /** Applied to the database, with no folder on disk. False from an @guren/orm that predates the field. */
   orphaned: boolean
+  /** The absolute migration.sql. Absent on an orphaned row, and from an @guren/orm that predates the field. */
+  path?: string
 }
 
-type StatusFn = () => Promise<Array<{ name: string; applied: boolean; appliedAt: Date | null; orphaned?: boolean }>>
+type StatusFn = () => Promise<Array<{ name: string; applied: boolean; appliedAt: Date | null; orphaned?: boolean; path?: string }>>
 type CloseFn = () => Promise<void>
 
-function pickFunction<T>(module: Record<string, unknown>, name: string): T | undefined {
+export function pickFunction<T>(module: Record<string, unknown>, name: string): T | undefined {
   const direct = module[name]
   if (typeof direct === 'function') {
     return direct as T
@@ -49,6 +51,7 @@ export async function getMigrationStatus(): Promise<MigrationStatusRow[]> {
       applied: row.applied,
       appliedAt: row.appliedAt ? row.appliedAt.toISOString() : null,
       orphaned: row.orphaned === true,
+      ...(typeof row.path === 'string' ? { path: row.path } : {}),
     }))
   } finally {
     if (close) {

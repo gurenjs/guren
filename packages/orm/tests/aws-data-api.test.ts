@@ -197,7 +197,7 @@ describe('createAwsDataApiDatabase', () => {
     executeMock.mockResolvedValueOnce({ rows: [{ name: '20240101000000_init' }] })
     const status = await database.migrationStatus()
 
-    expect(status).toEqual([{ name: '20240101000000_init', applied: true, appliedAt: null }])
+    expect(status).toEqual([{ name: '20240101000000_init', applied: true, appliedAt: null, path: expect.stringMatching(/20240101000000_init\/migration\.sql$/) }])
   })
 
   it('treats a missing tracker table as nothing applied', async () => {
@@ -209,7 +209,7 @@ describe('createAwsDataApiDatabase', () => {
     executeMock.mockRejectedValueOnce(new Error('relation "drizzle.__drizzle_migrations" does not exist'))
     const status = await database.migrationStatus()
 
-    expect(status).toEqual([{ name: '20240101000000_init', applied: false, appliedAt: null }])
+    expect(status).toEqual([{ name: '20240101000000_init', applied: false, appliedAt: null, path: expect.stringMatching(/20240101000000_init\/migration\.sql$/) }])
   })
 
   it('surfaces non-schema failures from migrationStatus', async () => {

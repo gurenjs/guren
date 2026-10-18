@@ -105,6 +105,8 @@ bunx guren cloudflare:build          # .cloudflare/d1-migrations を再生成
 bunx wrangler d1 migrations apply my-app --remote
 ```
 
+wrangler はフォルダにあるものをそのまま適用するので、この時点では Guren の破壊的マイグレーションのガードが働きません。`bunx guren check`(または `bunx guren gate`)を使うと、ブランチで追加したマイグレーションをマージ前に判定し、`-- guren:allow-destructive` のコメントがない `DROP`、型を狭める変更、テーブルの再作成を報告します。`--remote` に適用する前にどちらかを実行してください。報告の内容は[破壊的マイグレーション](./database.md#破壊的マイグレーション)にあります。
+
 > [!WARNING]
 > 必ず先にビルドしてください。`migrations_dir` は生成ディレクトリの中を指しているので、ビルドする前は空です。`wrangler` は空のフォルダを見つけると「適用するマイグレーションはありません」と報告し、**エラーにならずに正常終了します**。ビルド前に適用すると、失敗しているのに成功したように見えます。
 

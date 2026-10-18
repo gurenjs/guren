@@ -3,6 +3,9 @@ import env from './env.js'
 
 const database = createSqliteDatabase({
   migrationsFolder: new URL('../db/migrations', import.meta.url),
+  // A pending migration that drops, narrows or renames is refused at boot and by
+  // `guren db:migrate` until its first line reads `-- guren:allow-destructive: <reason>`.
+  destructiveMigrations: 'refuse',
   seedersFolder: new URL('../db/seeders', import.meta.url),
   // `context` is the application's validated environment. `guren db:*` runs this
   // outside one, where report mode reads the schema without requiring the keys

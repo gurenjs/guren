@@ -52,11 +52,11 @@ describe('database command boundary', () => {
     })
   }
 
-  it('db:migrate dry-run returns JSON without importing database code', async () => {
+  it('db:migrate dry-run reads the pending migrations and applies nothing', async () => {
     const result = await invoke(['db:migrate', '--dry-run', '--json'], true)
     expect(result.exitCode).toBe(0)
-    expect(JSON.parse(result.stdout)).toMatchObject({ action: 'db:migrate', dryRun: true })
-    expect(result.calls).toEqual([])
+    expect(JSON.parse(result.stdout)).toMatchObject({ action: 'db:migrate', dryRun: true, destructive: { pending: [] } })
+    expect(result.calls).toEqual(['import', 'status', 'close'])
   })
 
   for (const command of ['db:reset', 'db:fresh']) {

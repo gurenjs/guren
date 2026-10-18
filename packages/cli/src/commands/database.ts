@@ -1,9 +1,11 @@
 import { consola } from 'consola'
+import { ALLOW_DESTRUCTIVE_ENV, ALLOW_DESTRUCTIVE_MARKER, formatDestructiveFinding } from '@guren/orm/internal/migration-guard'
 import { markCommandFailed } from '../command-status'
 import { defineCommand } from '../define-command'
 import { runDatabaseMigrations, runDatabaseSeeders, resetDatabase } from '../db-migrate'
 import type { MigrationRunSummary, SeederRunSummary } from '../db-migrate'
 import { showMigrationStatus } from '../db-status'
+import { judgePendingMigrations, type PendingMigrationJudgement } from '../db-migration-guard'
 import { describeMigrationsFolder, describeSeedersFolder } from './display-paths'
 import { assertDestructiveCommandAllowed } from './destructive-guard'
 
@@ -138,16 +140,57 @@ async function runResetCommand(
   reportSuccess(action, message, json, runFields)
 }
 
+function destructiveFields(judgement: PendingMigrationJudgement): Record<string, unknown> {
+  return {
+    destructive: {
+      pending: judgement.pending,
+      pendingFrom: judgement.pendingFrom,
+      findings: judgement.unacknowledged,
+      acknowledged: judgement.acknowledged,
+    },
+  }
+}
+
+/** Prints what the guard found; the caller decides whether it refuses. */
+function reportDestructiveFindings(judgement: PendingMigrationJudgement, allowed: boolean): void {
+  for (const { file, reason } of judgement.acknowledged) {
+    consola.info(`${file} acknowledges its destructive statements: ${reason ?? '(no reason given after the marker)'}`)
+  }
+  if (judgement.unacknowledged.length === 0) return
+
+  const log = allowed ? consola.warn : consola.error
+  log(`${judgement.unacknowledged.length} destructive statement(s) in pending migrations carry no acknowledgement:`)
+  for (const finding of judgement.unacknowledged) {
+    consola.log(`  ${formatDestructiveFinding(finding)}`)
+  }
+  if (judgement.pendingFrom === 'all') {
+    consola.info(
+      'config/database.ts exports no migrationStatus(), so every local migration was judged, applied ones included. ' +
+        'Export it (the database factory returns one) to judge only the pending ones.',
+    )
+  }
+  if (!allowed) {
+    consola.info(
+      `Review each one. To apply it, put \`-- ${ALLOW_DESTRUCTIVE_MARKER}: <reason>\` on the first line of its migration.sql, ` +
+        'or re-run with --allow-destructive. An agent asks the user before doing either.',
+    )
+  }
+}
+
 export const migrateCommand = defineCommand({
   meta: {
     name: 'db:migrate',
-    description: 'Run all pending database migrations.',
+    description: 'Run all pending database migrations, refusing destructive ones no migration acknowledges.',
   },
   args: {
     'dry-run': {
       type: 'boolean',
       alias: 'd',
-      description: 'Show what would happen without executing',
+      description: 'Check the pending migrations for destructive statements without applying them',
+    },
+    'allow-destructive': {
+      type: 'boolean',
+      description: 'Apply destructive statements that carry no -- guren:allow-destructive comment',
     },
     json: {
       type: 'boolean',
@@ -155,19 +198,45 @@ export const migrateCommand = defineCommand({
     },
   },
   async run({ args }) {
+    const json = Boolean(args.json)
+    const allowed = Boolean(args['allow-destructive'])
+    const judgement = await judgePendingMigrations()
+    const refused = judgement.unacknowledged.length > 0 && !allowed
+
+    if (!json) reportDestructiveFindings(judgement, allowed)
+
     if (args['dry-run']) {
-      reportDryRun('db:migrate', 'Would run all pending database migrations.', Boolean(args.json))
+      const message = refused
+        ? `${judgement.pending.length} pending migration(s); ${judgement.unacknowledged.length} destructive statement(s) would be refused.`
+        : `Would apply ${judgement.pending.length} pending migration(s).`
+      reportDryRun('db:migrate', message, json, destructiveFields(judgement))
+      if (refused) markCommandFailed()
       return
     }
 
+    if (refused) {
+      if (json) {
+        console.log(JSON.stringify({
+          success: false,
+          action: 'db:migrate',
+          message: 'Refused: pending migrations contain destructive statements no migration acknowledges.',
+          ...destructiveFields(judgement),
+        }, null, 2))
+      }
+      markCommandFailed()
+      return
+    }
+
+    // The factory's own boot-path guard runs inside migrateDatabase() and reads this.
+    if (allowed) process.env[ALLOW_DESTRUCTIVE_ENV] = '1'
     const summary = await runDatabaseMigrations()
 
     if (summary?.migrationsFound === 0) {
-      reportNoMigrationsApplied('db:migrate', summary, 'nothing was applied', Boolean(args.json))
+      reportNoMigrationsApplied('db:migrate', summary, 'nothing was applied', json, destructiveFields(judgement))
       return
     }
 
-    reportSuccess('db:migrate', 'Database migrations completed.', Boolean(args.json), migrationRunFields(summary))
+    reportSuccess('db:migrate', 'Database migrations completed.', json, { ...migrationRunFields(summary), ...destructiveFields(judgement) })
   },
 })
 

@@ -20,10 +20,47 @@ bunx guren db:status
 
 ### Migrate
 ```bash
+bunx guren db:migrate --dry-run   # judge the pending migrations, apply nothing
 bun run db:migrate
 ```
 - First check database is running
 - Show pending migrations
+
+### Destructive migrations
+
+`db:migrate` reads every pending `migration.sql` first and refuses, in every
+environment, a statement that drops a table or column, narrows a column type,
+rebuilds a SQLite table (`__new_<table>`), renames, truncates, or deletes every
+row, unless the file carries an acknowledgement. Apps scaffolded with
+`destructiveMigrations: 'refuse'` in `config/database.ts` refuse the same
+migration at boot (`bun run dev`, `bun test`, a deploy). `guren check` and the
+Stop hook report one added on the current branch. Each finding names
+`db/migrations/<folder>/migration.sql:<line>`.
+
+When the guard refuses:
+
+1. Read the statement. A drop that drizzle-kit wrote because a column was
+   renamed in `db/schema.ts` is usually a mistake: drizzle-kit asks whether a
+   removed-and-added column is a rename only in an interactive terminal. Delete
+   the generated folder and ask the user to run `bun run db:make` themselves,
+   answering the rename prompt. The rename it writes is refused too (a deploy
+   still running reads the old name), but it loses no rows, and step 2 is a
+   shorter conversation.
+2. If the data loss is intended, **ask the user before acknowledging it.** Say
+   which table or column loses what.
+3. With the user's yes, put the acknowledgement on the **first line** of that
+   `migration.sql` (a comment after the last `--> statement-breakpoint` is an
+   empty statement and fails on SQLite):
+
+   ```sql
+   -- guren:allow-destructive: <why this data can go, for the reviewer>
+   ```
+
+   The reason is what the reviewer reads. `--allow-destructive` applies once
+   without editing the file; it also needs the user's yes.
+
+Never add the marker or the flag to get past a refusal on your own: it records
+that a person decided the data can go.
 
 ### Undoing migrations
 Guren migrations are drizzle-kit generated and forward-only — `db:rollback` is
@@ -94,7 +131,7 @@ docker compose logs -f   # Follow its logs
 
 ## Safety Rules
 
-1. **Destructive operations** (rollback, fresh, reset):
+1. **Destructive operations** (rollback, fresh, reset, a destructive migration):
    - Always confirm with user
    - Show what will be affected
    - Warn about data loss

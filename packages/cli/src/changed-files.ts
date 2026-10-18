@@ -48,6 +48,16 @@ export async function runGit(cwd: string, args: string[]): Promise<string[] | nu
  * treat it as "don't filter" — this is a speed optimization, not a gate.
  */
 export async function getChangedFiles(cwd: string): Promise<Set<string> | null> {
+  return (await getChangedFilesFromBase(cwd))?.files ?? null
+}
+
+/**
+ * `getChangedFiles()` with the merge base it diffed against, undefined when
+ * neither `origin/main` nor `main` shares history with HEAD, in which case
+ * `files` holds only uncommitted and untracked changes. `complete` is false
+ * when one of the git listings failed, so `files` may be short.
+ */
+export async function getChangedFilesFromBase(cwd: string): Promise<{ files: Set<string>; mergeBase?: string; complete: boolean } | null> {
   // realpath, not just resolve: git reports --show-toplevel through the real
   // path, and on macOS /tmp is a symlink to /private/tmp.
   const absoluteCwd = await realpath(resolve(cwd)).catch(() => resolve(cwd))
@@ -60,9 +70,11 @@ export async function getChangedFiles(cwd: string): Promise<Set<string> | null> 
     mergeBase = (await runGit(absoluteCwd, ['merge-base', 'HEAD', 'main']))?.[0]
   }
 
+  // A repository with no commit has no HEAD to diff against; everything tracked is then in the index.
+  const hasHead = (await runGit(absoluteCwd, ['rev-parse', '--verify', '--quiet', 'HEAD'])) !== null
   const [committed, uncommitted, untracked] = await Promise.all([
     mergeBase ? runGit(absoluteCwd, ['diff', '--name-only', mergeBase, 'HEAD']) : Promise.resolve([]),
-    runGit(absoluteCwd, ['diff', '--name-only', 'HEAD']),
+    runGit(absoluteCwd, hasHead ? ['diff', '--name-only', 'HEAD'] : ['diff', '--name-only', '--cached']),
     runGit(absoluteCwd, ['ls-files', '--others', '--exclude-standard']),
   ])
 
@@ -80,7 +92,9 @@ export async function getChangedFiles(cwd: string): Promise<Set<string> | null> 
     result.add(cwdRelativePath.split(sep).join('/'))
   }
 
-  return result
+  // A listing git failed to produce is missing files, not a list of none.
+  const complete = (mergeBase === undefined || committed !== null) && uncommitted !== null && untracked !== null
+  return { files: result, mergeBase, complete }
 }
 
 /** Any file that could hold a route's params schema or change what the app's modules evaluate to. */

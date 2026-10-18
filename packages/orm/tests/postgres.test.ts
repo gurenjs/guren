@@ -184,7 +184,7 @@ describe('createPostgresDatabase', () => {
 
     const status = await database.migrationStatus()
 
-    expect(status).toEqual([{ name: '20240101000000_init', applied: false, appliedAt: null }])
+    expect(status).toEqual([{ name: '20240101000000_init', applied: false, appliedAt: null, path: expect.stringMatching(/20240101000000_init\/migration\.sql$/) }])
   })
 
   it('surfaces a denied tracker read from db:status instead of calling every migration pending', async () => {

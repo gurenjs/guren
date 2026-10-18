@@ -6,6 +6,7 @@ import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from '
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, migrateAndReport, noMigrationsToRun, type AppliedMigrationRow, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
+import type { DestructiveMigrationMode } from './migration-guard'
 import { singleFlight } from './single-flight'
 import { connectionSettings, resolveFor, type ConnectionContext, type ConnectionResolver } from './connection-context'
 import { describeServerDatabase, type DatabaseDescription } from './database-description'
@@ -37,6 +38,12 @@ async function loadPostgresModules(): Promise<{
 
 export interface PostgresDatabaseOptions {
   migrationsFolder: string | URL
+  /**
+   * What a boot or `migrateDatabase()` does with a pending migration that drops,
+   * narrows or renames without a `-- guren:allow-destructive` comment (RFC 0034):
+   * `'warn'` (the v2 default) prints it and applies; `'refuse'` throws first.
+   */
+  destructiveMigrations?: DestructiveMigrationMode
   connectionString?: ConnectionResolver
   clientOptions?: postgres.Options<Record<string, never>>
   seedersFolder?: string | URL
@@ -68,7 +75,7 @@ export interface PostgresDatabase {
 }
 
 export function createPostgresDatabase(options: PostgresDatabaseOptions): PostgresDatabase {
-  const { migrationsFolder, connectionString, clientOptions, seedersFolder, relations } = options
+  const { migrationsFolder, destructiveMigrations, connectionString, clientOptions, seedersFolder, relations } = options
 
   const resolvedMigrationsFolder =
     migrationsFolder instanceof URL ? fileURLToPath(migrationsFolder) : resolve(String(migrationsFolder))
@@ -148,6 +155,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
         // Over the migration client: a second admin connection here would cost
         // a round trip on every cold start.
         await migrateAndReport(resolvedMigrationsFolder, {
+          destructiveMigrations,
           readApplied: report ? () => readAppliedMigrations(migrationClient) : undefined,
           migrate: () => migrate(db, { migrationsFolder: resolvedMigrationsFolder }),
         })

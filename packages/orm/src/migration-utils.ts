@@ -1,5 +1,6 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { guardPendingMigrations, type DestructiveMigrationMode } from './migration-guard'
 
 /**
  * What one `migrateDatabase()` call had to work with. `db:migrate` reports
@@ -207,6 +208,8 @@ export function describeConnectionEndpoint(connectionString: string): string | u
 export interface LocalMigrationEntry {
   /** Folder name, e.g. 20260710221915_create_users_table */
   name: string
+  /** The absolute `migration.sql` the migrator reads. */
+  path: string
 }
 
 /** drizzle-kit migrations, sorted the way the drizzle migrator applies them. */
@@ -217,7 +220,7 @@ export function listLocalMigrations(migrationsFolder: string): LocalMigrationEnt
 
   return readdirSync(migrationsFolder, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && existsSync(resolve(migrationsFolder, entry.name, 'migration.sql')))
-    .map((entry) => ({ name: entry.name }))
+    .map((entry) => ({ name: entry.name, path: resolve(migrationsFolder, entry.name, 'migration.sql') }))
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
@@ -235,6 +238,8 @@ export interface MigrationStatusEntry {
    * then deleted from disk (or migrated by another checkout). Absent otherwise.
    */
   orphaned?: boolean
+  /** The absolute `migration.sql` for a local migration; absent on an orphaned row. */
+  path?: string
 }
 
 function parseAppliedAt(row: AppliedMigrationRow | undefined): Date | null {
@@ -267,6 +272,7 @@ export function buildMigrationStatus(
       name: migration.name,
       applied: row !== undefined,
       appliedAt: parseAppliedAt(row),
+      path: migration.path,
     }
   })
 
@@ -283,6 +289,8 @@ export interface MigrationDrift {
   pending: string[]
   /** Tracker rows no local folder carries. */
   orphaned: string[]
+  /** False when the tracker could not be read, so `pending` is empty for want of an answer. */
+  readable: boolean
 }
 
 /**
@@ -299,9 +307,10 @@ export async function readMigrationDrift(
     return {
       pending: status.filter((entry) => !entry.applied).map((entry) => entry.name),
       orphaned: status.filter((entry) => entry.orphaned).map((entry) => entry.name),
+      readable: true,
     }
   } catch {
-    return { pending: [], orphaned: [] }
+    return { pending: [], orphaned: [], readable: false }
   }
 }
 
@@ -313,14 +322,21 @@ export async function readMigrationDrift(
  */
 export async function migrateAndReport(
   migrationsFolder: string,
-  { readApplied, migrate }: {
+  { readApplied, migrate, destructiveMigrations = 'warn' }: {
     readApplied?: () => Promise<AppliedMigrationRow[]> | AppliedMigrationRow[]
     /** bun:sqlite's migrator is synchronous; the others return a promise. */
     migrate: () => unknown
+    destructiveMigrations?: DestructiveMigrationMode
   },
 ): Promise<void> {
-  const drift = readApplied ? await readMigrationDrift(migrationsFolder, readApplied) : { pending: [], orphaned: [] }
+  const drift = readApplied ? await readMigrationDrift(migrationsFolder, readApplied) : { pending: [], orphaned: [], readable: true }
   reportOrphanedMigrations(drift.orphaned, migrationsFolder)
+  // A reset's re-apply (no readApplied) runs on emptied tables, so nothing it applies can lose rows.
+  // An unreadable tracker judges every local migration, with no created-in-run exemption.
+  if (readApplied) {
+    const pending = drift.readable ? drift.pending : listLocalMigrations(migrationsFolder).map((entry) => entry.name)
+    guardPendingMigrations(migrationsFolder, pending, destructiveMigrations, { pendingKnown: drift.readable })
+  }
   await migrate()
   reportAppliedMigrations(drift.pending, migrationsFolder)
 }

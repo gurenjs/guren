@@ -225,6 +225,44 @@ bunx guren make:migration --dialect postgresql
 
 D1 には、実行時にマイグレーションする手段そのものがありません。マイグレーションは `wrangler d1 migrations apply <database>` で適用するものなので、`migrateDatabase()` は実行を試みず、そのことを伝えるだけです。
 
+### 破壊的マイグレーション
+
+drizzle-kit は、スキーマの差分から導かれる SQL をそのまま書き出します。1 回の編集でカラムを消して別のカラムを足すと、リネームかどうかを尋ねてきますが、尋ねられるのは対話できるターミナルで実行したときだけです。エージェントやスクリプトから実行すると `DROP COLUMN` が書き出され、次の起動でそのまま適用されます。Guren は未適用のマイグレーションを適用する前にすべて読み、次の文を報告します。
+
+| 種類 | 対象 |
+|---|---|
+| `drop-table`、`drop-column`、`drop-schema` | `DROP TABLE`、`ALTER TABLE … DROP COLUMN`、`DROP SCHEMA` / `DROP DATABASE` |
+| `alter-column-type` | PostgreSQL の `ALTER COLUMN … SET DATA TYPE`、MySQL の `MODIFY COLUMN` / `CHANGE COLUMN` |
+| `table-rebuild` | SQLite の `__new_<table>` を作ってコピーし、元を消してリネームする手順。drizzle-kit はたいていのカラム変更をこの形で書きます。default や外部キーを足しただけのように、すべてのカラムを同じ型か広い型でコピーする再作成は報告しません |
+| `rename` | `RENAME TO`、`RENAME COLUMN`、`RENAME TABLE` |
+| `truncate`、`delete-all` | `TRUNCATE` と、`WHERE` のない `DELETE FROM` |
+
+リネームでは行は失われませんが、ひとつ前のデプロイは入れ替わるまで古い名前を読み続けます。型を広げるだけの変更(`varchar` を長くする、`smallint` を `integer` にする)は、drizzle-kit が各マイグレーションの横に書く `snapshot.json` で前後の型が読めれば報告しません。読めなければ報告します。また、未適用のマイグレーションのうち先に実行されるものが作るテーブルに対する文は報告しません。新しいデータベースでは履歴をまとめて適用するので、古い `DROP` があっても止まることはありません。
+
+破壊的なマイグレーションを適用するには、その `migration.sql` の 1 行目に、レビューする人に向けた理由を添えて承認のコメントを書きます。
+
+```sql
+-- guren:allow-destructive: posts moved to articles in 20261012_copy_posts
+DROP TABLE "posts";
+```
+
+コメントは 1 行目に置いてください。drizzle はファイルを `--> statement-breakpoint` で区切るので、最後の区切りのあとにコメントだけを置くと空の文になり、SQLite ではエラーになります。
+
+ガードが働く場面は次のとおりです。
+
+- `bunx guren db:migrate` は、承認のない文があれば環境を問わず適用を拒否します。`--dry-run` は適用せずに報告だけを行い、`--allow-destructive` はファイルを編集せずにその 1 回だけ適用します。
+- 起動時の扱いはファクトリーのオプションで決まります。新しいアプリは `config/database.ts` で `destructiveMigrations: 'refuse'` を指定しているので、何も適用する前にエラーになります。指定のないアプリの既定値は `'warn'` で、該当する文を表示したうえで適用します。`GUREN_ALLOW_DESTRUCTIVE_MIGRATIONS=1` を設定すると、拒否される実行を 1 回だけ通せます。`db:reset` は空にしたデータベースにすべてを適用し直すので、判定の対象外です。
+- `bunx guren check` と `bunx guren gate` は、まだ `main` に入っていないマイグレーション(ブランチでコミットしたもの、未コミットのもの、未追跡のもの)を判定します。エージェントの Stop hook と CI がマージ前に見つけられます。すでにリリース済みの `DROP` は報告しません。
+
+```ts
+const database = createPostgresDatabase({
+  migrationsFolder: new URL('../db/migrations', import.meta.url),
+  destructiveMigrations: 'refuse',
+})
+```
+
+このコメントは、データを消してよいと人が判断した記録です。エージェントも SQL と同じように書けてしまうので、ハーネスは書く前にユーザーへ確認するよう指示しています。理由に無理があれば、レビューで指摘されます。
+
 ## データ投入（シード）
 
 シードスクリプトは `db/seeders/` に置きます。よくある形のシーダーは、async の `run()` 関数を export します。

@@ -56,6 +56,7 @@ import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { describePageManifestSuppression, PAGES_MANIFEST_FILE, planPageManifest } from './pages-types'
 import { AGENTS_MANIFEST_FILE, planAgentManifest, STALE_AGENT_MANIFEST_MESSAGE } from './agents-types'
+import { checkDestructiveMigrations } from './migrations-check'
 import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
 import { runI18nCheck } from './i18n-check'
@@ -738,6 +739,12 @@ async function collectCheckReport(options: RunCheckOptions): Promise<CheckReport
   // `db/schema.ts` and the validator files, which no other suite does.
   if (selected.has('plan') && (sourceChanged || [...(changedFiles ?? [])].some(isPlanInput))) {
     checks.push(...(await checkPlans({ cwd, routesFile: options.routesFile })))
+  }
+
+  // 10.8. Destructive migrations (RFC 0034 §3): the migrations not on the base branch yet,
+  // whatever `--changed` says, since a historical drop that shipped is never the finding.
+  if (runs('core')) {
+    checks.push(...(await checkDestructiveMigrations(cwd)))
   }
 
   // 11. Check architecture boundaries (guren.arch.ts + derived module rules)

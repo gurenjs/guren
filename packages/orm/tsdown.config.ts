@@ -4,7 +4,7 @@ import { tsdownPreset } from '../../scripts/tsdown-preset'
 
 export default defineConfig({
   ...tsdownPreset,
-  entry: ['src/index.ts', 'src/drizzle.ts', 'src/drizzle/pg.ts', 'src/drizzle/mysql.ts', 'src/drizzle/sqlite.ts'],
+  entry: ['src/index.ts', 'src/drizzle.ts', 'src/drizzle/pg.ts', 'src/drizzle/mysql.ts', 'src/drizzle/sqlite.ts', 'src/migration-guard.ts'],
   // Not a Node builtin, so rolldown would warn about it as unresolved.
   deps: { neverBundle: ['bun:sqlite'] },
 })

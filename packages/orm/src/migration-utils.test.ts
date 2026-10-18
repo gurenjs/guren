@@ -133,7 +133,10 @@ describe('migrateDatabase run summary', () => {
 })
 
 describe('buildMigrationStatus', () => {
-  const local = [{ name: '20260101000000_first' }, { name: '20260102000000_second' }]
+  const local = [
+    { name: '20260101000000_first', path: '/m/20260101000000_first/migration.sql' },
+    { name: '20260102000000_second', path: '/m/20260102000000_second/migration.sql' },
+  ]
 
   test('should mark nothing applied when tracker is empty', () => {
     const status = buildMigrationStatus(local, [])
@@ -163,14 +166,14 @@ describe('buildMigrationStatus', () => {
     ])
 
     expect(status).toEqual([
-      { name: '20260101000000_first', applied: true, appliedAt: null },
+      { name: '20260101000000_first', applied: true, appliedAt: null, path: '/m/20260101000000_first/migration.sql' },
       {
         name: '20260101120000_create_sessions_table',
         applied: true,
         appliedAt: new Date('2026-01-01T12:00:00.000Z'),
         orphaned: true,
       },
-      { name: '20260102000000_second', applied: false, appliedAt: null },
+      { name: '20260102000000_second', applied: false, appliedAt: null, path: '/m/20260102000000_second/migration.sql' },
     ])
   })
 })
@@ -406,7 +409,7 @@ describe('readMigrationDrift', () => {
 
   test('should list the local migrations the tracker has no row for, in apply order', async () => {
     const drift = await readMigrationDrift(migrationsDir, () => [{ name: '20260101000000_first', appliedAt: null }])
-    expect(drift).toEqual({ pending: ['20260102000000_second'], orphaned: [] })
+    expect(drift).toEqual({ pending: ['20260102000000_second'], orphaned: [], readable: true })
   })
 
   test('should list the tracker rows no local folder carries', async () => {
@@ -414,7 +417,7 @@ describe('readMigrationDrift', () => {
       { name: '20260101000000_first', appliedAt: null },
       { name: '20260101120000_create_sessions_table', appliedAt: null },
     ])
-    expect(drift).toEqual({ pending: ['20260102000000_second'], orphaned: ['20260101120000_create_sessions_table'] })
+    expect(drift).toEqual({ pending: ['20260102000000_second'], orphaned: ['20260101120000_create_sessions_table'], readable: true })
   })
 
   test('should cost the names, not the boot, when the tracker cannot be read', async () => {
@@ -423,7 +426,7 @@ describe('readMigrationDrift', () => {
     const drift = await readMigrationDrift(migrationsDir, () => {
       throw new Error('permission denied for schema drizzle')
     })
-    expect(drift).toEqual({ pending: [], orphaned: [] })
+    expect(drift).toEqual({ pending: [], orphaned: [], readable: false })
   })
 })
 

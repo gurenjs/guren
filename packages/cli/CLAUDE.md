@@ -50,7 +50,15 @@ Ships the Citty-based CLI (`guren` bin) with generators and database helpers. Ge
   sequencing, and database result messages. The production refusal lives in
   `destructive-guard.ts` and throws a `CliError`; `db:seed`, `db:reset`,
   `db:fresh`, `queue:retry` and `queue:flush` call it ahead of database loading
-  and dry-run handling. `db:migrate` is not guarded and runs in production.
+  and dry-run handling. `db:migrate` is not production-guarded; it has the
+  destructive-migration guard instead (RFC 0034), in every environment:
+  `db-migration-guard.ts` reads the pending migrations through the app's
+  `migrationStatus()` (a row's `path`, else the drizzle config's `out`; a file
+  it cannot find refuses, and a config without `migrationStatus()` has every
+  local migration judged) and judges them with `@guren/orm/internal/migration-guard`
+  before `migrateDatabase()` runs. `--allow-destructive` sets
+  `GUREN_ALLOW_DESTRUCTIVE_MIGRATIONS=1` so the factory's boot-path guard agrees.
+  `--dry-run` therefore opens the database to read the tracker.
   `database-command-boundary.test.ts` exercises the CLI in subprocesses with
   inert database hooks, including refusal, dry-run, reset ordering, failures,
   and JSON status/rollback output.

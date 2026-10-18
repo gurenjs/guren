@@ -229,6 +229,69 @@ trips on every Lambda cold start. D1 has no runtime path at all: migrations go
 through `wrangler d1 migrations apply <database>`, and `migrateDatabase()` says
 so rather than trying.
 
+### Destructive migrations
+
+drizzle-kit writes whatever the schema diff implies. When a column is removed
+and another added in one edit, it asks whether that is a rename, and only in an
+interactive terminal; run by an agent or a script, it writes a `DROP COLUMN`,
+and the next boot applies it. Guren reads every pending migration before it
+applies anything and reports these statements:
+
+| Kind | What it matches |
+|---|---|
+| `drop-table`, `drop-column`, `drop-schema` | `DROP TABLE`, `ALTER TABLE … DROP COLUMN`, `DROP SCHEMA` / `DROP DATABASE` |
+| `alter-column-type` | PostgreSQL `ALTER COLUMN … SET DATA TYPE`, MySQL `MODIFY COLUMN` / `CHANGE COLUMN` |
+| `table-rebuild` | SQLite's `__new_<table>` copy, drop and rename, which drizzle-kit writes for most column changes. A rebuild that copies every column with the same or a wider type (an added default or foreign key) passes |
+| `rename` | `RENAME TO`, `RENAME COLUMN`, `RENAME TABLE` |
+| `truncate`, `delete-all` | `TRUNCATE`, and `DELETE FROM` with no `WHERE` |
+
+A rename loses no rows, but the previous deploy keeps reading the old name until
+it is replaced. A type change that only widens (a longer `varchar`, `smallint`
+to `integer`) passes when the `snapshot.json` drizzle-kit writes beside each
+migration shows both types; without that evidence it is reported. A statement
+against a table that an earlier pending migration creates is never reported, so
+a fresh database, which applies the whole history at once, is not refused over
+an old drop.
+
+To apply a destructive migration, acknowledge it on the first line of its
+`migration.sql`, with the reason a reviewer should read:
+
+```sql
+-- guren:allow-destructive: posts moved to articles in 20261012_copy_posts
+DROP TABLE "posts";
+```
+
+Keep the comment on the first line. drizzle splits the file at
+`--> statement-breakpoint`, and a comment alone after the last one is an empty
+statement that SQLite rejects.
+
+Where the guard applies:
+
+- `bunx guren db:migrate` refuses an unacknowledged statement in every
+  environment. `--dry-run` reports without applying, and
+  `--allow-destructive` applies once without editing the file.
+- At boot, the factory option decides. `destructiveMigrations: 'refuse'`, which
+  new apps set in `config/database.ts`, throws before anything is applied;
+  `'warn'`, the default for apps that do not set it, prints the statements and
+  applies them. `GUREN_ALLOW_DESTRUCTIVE_MIGRATIONS=1` lets one refused run
+  through. A `db:reset` re-applies everything into an emptied database and is
+  never judged.
+- `bunx guren check` and `bunx guren gate` report the migrations not yet on
+  `main` (committed on the branch, uncommitted or untracked), so the agent's
+  Stop hook and CI catch one before it is merged. A drop that already shipped is
+  never reported.
+
+```ts
+const database = createPostgresDatabase({
+  migrationsFolder: new URL('../db/migrations', import.meta.url),
+  destructiveMigrations: 'refuse',
+})
+```
+
+The comment records that a person decided the data can go; an agent can type it
+as easily as the statement, so the harness tells it to ask first, and review is
+where a reason that does not hold up gets caught.
+
 ## Seeding
 
 Seeders live in `db/seeders/`. The simplest one exports an async `run()` function; this one uses the `Post` model described in [Defining Models](#defining-models):

@@ -1,0 +1,2 @@
+ALTER TABLE "users" ALTER COLUMN "age" SET DATA TYPE smallint USING "age"::smallint;--> statement-breakpoint
+ALTER TABLE "users" ALTER COLUMN "email" SET DATA TYPE varchar(50) USING "email"::varchar(50);

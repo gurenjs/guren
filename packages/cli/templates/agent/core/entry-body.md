@@ -59,7 +59,8 @@ bunx guren make:controller <Name> --module <name> # most make:* commands accept 
 
 # Database workflow: edit db/schema.ts first, then
 bunx guren make:migration <name>   # generate SQL migration via drizzle-kit into db/migrations/
-bun run db:migrate                 # apply pending migrations
+bun run db:migrate                 # apply pending migrations; refuses a drop, narrowing or rename without
+                                   # `-- guren:allow-destructive: <reason>` (ask the user first; db-manage skill)
 bunx guren db:status               # show applied/pending state
 bun run db:seed                    # run seeders
 # Migrations are forward-only (no rollback). Dev reset: bunx guren db:reset --seed

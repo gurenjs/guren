@@ -1,0 +1,2 @@
+ALTER TABLE "users" ALTER COLUMN "age" SET DATA TYPE integer USING "age"::integer;--> statement-breakpoint
+ALTER TABLE "users" ALTER COLUMN "email" SET DATA TYPE varchar(500) USING "email"::varchar(500);
