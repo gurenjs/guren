@@ -33,7 +33,6 @@
     "@guren/plugin-cloudflare": "workspace:*",
     "@guren/plugin-markdown": "workspace:*",
     "@guren/testing": "workspace:*",
-    "@inertiajs/core": "^3.6.1",
     "@inertiajs/react": "^3.6.1",
     "drizzle-orm": "1.0.0-rc.4",
     "react": "^19.0.0",
