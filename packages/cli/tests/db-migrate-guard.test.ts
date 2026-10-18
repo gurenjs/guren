@@ -1,8 +1,11 @@
 import { Database } from 'bun:sqlite'
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, setDefaultTimeout } from 'bun:test'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { CLI_BIN_PATH, createTempRoot } from './helpers'
+
+// Every case spawns the CLI (some twice), past Bun's 5 s default on a loaded runner.
+setDefaultTimeout(30_000)
 
 const ORM_SQLITE = resolve(import.meta.dir, '../../orm/src/sqlite.ts')
 
@@ -165,6 +168,28 @@ describe('db:migrate destructive guard', () => {
     expect(JSON.parse(result.stdout)).toMatchObject({
       destructive: { pendingFrom: 'all', pending: ['0001_create', '0002_drop'], findings: [{ kind: 'drop-table', migration: '0002_drop' }] },
     })
+  })
+})
+
+describe('db:migrate with a drizzle config that will not load', () => {
+  it('refuses rather than judging the default folder, when the config exports no migrationStatus()', async () => {
+    const cwd = await createTempRoot('guren-db-migrate-guard-config-')
+    try {
+      await mkdir(join(cwd, 'config'))
+      await writeFile(join(cwd, 'config/database.ts'), `
+import { appendFileSync } from 'node:fs'
+export async function migrateDatabase() { appendFileSync('calls.txt', 'migrate\\n'); return { migrationsFound: 1, looseSqlFiles: 0 } }
+`)
+      await writeFile(join(cwd, 'drizzle.config.ts'), "throw new Error('DATABASE_URL is not set')\n")
+      await mkdir(join(cwd, 'elsewhere/0001_drop'), { recursive: true })
+      await writeFile(join(cwd, 'elsewhere/0001_drop/migration.sql'), DROP)
+      const result = await run(cwd, ['db:migrate'])
+      expect(result.exitCode).toBe(1)
+      expect(result.stderr).toContain('Could not load drizzle.config.ts')
+      expect(await readFile(join(cwd, 'calls.txt'), 'utf8').catch(() => '')).toBe('')
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
   })
 })
 

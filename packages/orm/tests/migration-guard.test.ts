@@ -249,3 +249,85 @@ describe('isWideningTypeChange', () => {
     expect(isWideningTypeChange(before, after)).toBe(false)
   })
 })
+
+describe('review regressions (PR #1206)', () => {
+  const types = (entries: Array<[schema: string, table: string, column: string, type: string]>) =>
+    new Map(entries.map(([schema, table, column, type]) => [[schema, table, column].join('\u0000'), type]))
+  const source = (sql: string, columnTypes?: MigrationSource['columnTypes']): MigrationSource => ({ name: 'm', file: 'm.sql', scan: scanMigrationSql(sql), ...(columnTypes ? { columnTypes } : {}) })
+
+  test('should report a narrowing cast that a repeated snapshot calls unchanged', () => {
+    const same = types([['public', 'posts', 'title', 'varchar(255)']])
+    const report = judgeMigrations([
+      source('ALTER TABLE "posts" ALTER COLUMN "title" TYPE varchar(5) USING "title"::varchar(5);', { before: same, after: same }),
+    ])
+    expect(report.unacknowledged).toMatchObject([{ kind: 'alter-column-type' }])
+  })
+
+  test('should report a widening whose USING rewrites the values', () => {
+    const before = types([['public', 'posts', 'title', 'varchar(50)']])
+    const after = types([['public', 'posts', 'title', 'varchar(500)']])
+    const report = judgeMigrations([
+      source('ALTER TABLE "posts" ALTER COLUMN "title" SET DATA TYPE varchar(500) USING left("title", 1);', { before, after }),
+    ])
+    expect(report.unacknowledged).toHaveLength(1)
+  })
+
+  test("should not let archive.posts borrow public.posts's widening evidence", () => {
+    const before = types([['public', 'posts', 'title', 'varchar(50)']])
+    const after = types([['public', 'posts', 'title', 'varchar(500)']])
+    const report = judgeMigrations([
+      source('ALTER TABLE "archive"."posts" ALTER COLUMN "title" SET DATA TYPE varchar(500) USING "title"::varchar(500);', { before, after }),
+    ])
+    expect(report.unacknowledged).toHaveLength(1)
+  })
+
+  test('should not call varchar to tinytext widening', () => {
+    expect(isWideningTypeChange('varchar(500)', 'tinytext')).toBe(false)
+    expect(isWideningTypeChange('varchar(500)', 'text')).toBe(true)
+  })
+
+  test('should report a rebuild whose copy is emptied before the original is dropped', () => {
+    const columns = types([['', 'posts', 'id', 'integer']])
+    const sql = [
+      'CREATE TABLE `__new_posts` (`id` integer PRIMARY KEY);',
+      'INSERT INTO `__new_posts`(`id`) SELECT `id` FROM `posts`;',
+      'DELETE FROM `__new_posts`;',
+      'DROP TABLE `posts`;',
+      'ALTER TABLE `__new_posts` RENAME TO `posts`;',
+    ].join('\n')
+    expect(judgeMigrations([source(sql, { before: columns, after: columns })]).unacknowledged).toMatchObject([{ kind: 'table-rebuild', line: 4 }])
+  })
+
+  test('should read SQLite bracket and string identifiers', () => {
+    expect(kinds('DROP TABLE [posts];')).toEqual(['drop-table'])
+    expect(kinds("DROP TABLE 'posts';")).toEqual(['drop-table'])
+    expect(scanMigrationSql('ALTER TABLE [posts] DROP COLUMN title;').statements).toMatchObject([{ kind: 'drop-column', table: 'posts', column: 'title' }])
+  })
+
+  test('should report a destructive statement whose target cannot be read, rather than pass it', () => {
+    expect(kinds('DROP TABLE ;')).toEqual(['drop-table'])
+    expect(kinds('ALTER TABLE ( ) DROP COLUMN x;')).toEqual(['unreadable'])
+  })
+
+  test('should judge each DELETE on the WHERE at its own depth', () => {
+    expect(kinds('WITH x AS (DELETE FROM scratch WHERE false RETURNING *) DELETE FROM posts;')).toEqual(['delete-all'])
+    expect(kinds('DELETE FROM posts USING (SELECT id FROM other WHERE id > 0) x;')).toEqual(['delete-all'])
+    expect(kinds('DELETE QUICK FROM posts;')).toEqual(['delete-all'])
+    expect(kinds('DELETE LOW_PRIORITY FROM posts;')).toEqual(['delete-all'])
+    expect(kinds('DELETE posts FROM posts JOIN users ON users.id = posts.user_id;')).toEqual(['delete-all'])
+    expect(kinds('ALTER TABLE "posts" ADD CONSTRAINT "fk" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE;')).toEqual([])
+    expect(kinds('GRANT DELETE ON posts TO app;')).toEqual([])
+  })
+
+  test('should report every table of a multi-table TRUNCATE, so a fresh first target exempts nothing else', () => {
+    const report = judgeMigrations([source('CREATE TABLE fresh (id int);\nTRUNCATE fresh, posts;')])
+    expect(report.unacknowledged).toMatchObject([{ kind: 'truncate', table: 'posts' }])
+  })
+
+  test('should read SQL that MySQL executes inside what other dialects call a comment', () => {
+    expect(kinds('SELECT 1--1; DROP TABLE posts;')).toEqual(['drop-table'])
+    expect(kinds('/*!50000 DROP TABLE posts */;')).toEqual(['drop-table'])
+    expect(kinds('-- DROP TABLE posts;')).toEqual([])
+    expect(kinds('/* DROP TABLE posts */')).toEqual([])
+  })
+})

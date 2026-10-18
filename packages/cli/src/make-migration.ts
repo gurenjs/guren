@@ -232,11 +232,16 @@ function listMigrationNames(folder: string): string[] {
 
 /**
  * The absolute folder drizzle-kit writes migrations to: the drizzle config's
- * `out`, else the default. Imports the config, so it runs app code.
+ * `out`, else the default. Imports the config, so it runs app code, and throws
+ * when that config exists but will not load.
  */
 export async function resolveMigrationsOutput(root = process.cwd()): Promise<string> {
   const configPath = await resolveDrizzleConfig(root)
   const configured = configPath ? await readDrizzleConfig(configPath, root) : {}
+  // The default stands in only for a config that is absent or names no `out`, never one that failed to load.
+  if (configured.unreadable) {
+    throw new CliError(`Could not load ${configPath} to read its \`out\`, so the migrations folder is unknown. Fix the config so it imports cleanly.`)
+  }
   return resolve(root, configured.out ?? DEFAULT_OUTPUT)
 }
 

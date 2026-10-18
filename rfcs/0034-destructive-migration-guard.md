@@ -51,9 +51,13 @@ needs no evidence of intent.
 A pure scanner, `scanMigrationSql(sql)` in `packages/orm/src/migration-guard.ts`,
 splits a migration into statements and reports each destructive one with its
 line. It tokenizes rather than matching the raw text: `--` and `/* */`
-comments, `'…'` strings, `"…"` and `` `…` `` identifiers and PostgreSQL
-`$tag$…$tag$` bodies are skipped, statements end at a top-level `;`, and
-`--> statement-breakpoint` is an ordinary comment. A dollar-quoted body is
+comments, `'…'` strings, `"…"`, `` `…` `` and SQLite's `[…]` identifiers and
+PostgreSQL `$tag$…$tag$` bodies are skipped, statements end at a top-level `;`,
+and `--> statement-breakpoint` is an ordinary comment. Comment text MySQL
+executes is scanned as SQL as well: a `/*! … */` versioned comment, and a `--`
+not followed by whitespace, which MySQL does not read as a comment. A
+destructive statement whose target name cannot be read is still reported, and
+an `ALTER TABLE` whose table cannot be read is `unreadable`. A dollar-quoted body is
 scanned again as SQL, so a `DO $$ … DROP TABLE … $$` block is not hidden by its
 quoting, and a statement is read from its first `DROP`, `ALTER`, `RENAME`,
 `TRUNCATE`, `DELETE` or `CREATE`, so a `BEGIN` or `IF … THEN` in front hides
@@ -67,8 +71,8 @@ nothing either. An unterminated string, comment or body is itself a finding
 | `alter-column-type` | `ALTER TABLE "users" ALTER COLUMN "age" SET DATA TYPE smallint USING …;` (PG), `ALTER TABLE \`users\` MODIFY COLUMN \`age\` smallint;`, `CHANGE COLUMN` (MySQL) |
 | `table-rebuild` | SQLite's `CREATE TABLE \`__new_users\` … INSERT … SELECT … DROP TABLE \`users\`; ALTER TABLE \`__new_users\` RENAME TO \`users\`;`, reported once, at the `DROP TABLE` line |
 | `rename` | `ALTER TABLE … RENAME TO …`, `RENAME COLUMN`, MySQL `RENAME TABLE` |
-| `truncate` | `TRUNCATE …` |
-| `delete-all` | `DELETE FROM …` with no `WHERE` |
+| `truncate` | `TRUNCATE …`, one finding per table it names |
+| `delete-all` | `DELETE FROM …` (MySQL's `LOW_PRIORITY`/`QUICK`/`IGNORE` and multi-table forms included, a CTE's included) with no `WHERE` at its own paren depth, so a subquery's filter does not count |
 | `drop-schema` | `DROP SCHEMA`, `DROP DATABASE` |
 | `unreadable` | see above |
 
@@ -84,19 +88,25 @@ PostgreSQL's `SET DATA TYPE` and MySQL's `MODIFY COLUMN` look the same for
 alone cannot tell them apart. drizzle-kit 1.x writes a `snapshot.json` beside
 every `migration.sql`, with `prevIds` naming the snapshot before it and each
 column's `type`. A type change is exempt when the previous snapshot's type and
-this migration's snapshot type are both readable and the change is on a closed
-widening list (a longer `varchar`, `varchar`/`char` to `text`, up the integer
-ladder, a `numeric` keeping its integer digits and scale, up MySQL's text
-ladder). Anything else, including a snapshot that is missing, unreadable or
-names no such column, is reported. A custom migration's snapshot repeats its
-predecessor's, so a type change in hand-written SQL is always reported.
+this migration's snapshot type are both readable, the SQL converts to exactly
+the type this migration's snapshot records (by no `USING`, or the plain
+`"col"::type` cast drizzle-kit writes, and with no character set or collation
+change), and the change is on a closed widening list (a longer `varchar`,
+`varchar`/`char` to `text`, `mediumtext` or `longtext`, up the integer ladder,
+a `numeric` keeping its integer digits and scale, up MySQL's text ladder).
+Snapshot columns are keyed by schema, table and column as written, so a table
+in another schema never borrows another's evidence. Anything else, including a
+snapshot that is missing, unreadable or names no such column, is reported. A
+custom migration's snapshot repeats its predecessor's, so its SQL target never
+matches a changed type and a type change in hand-written SQL is always reported.
 
 **A rebuild that copies every column loses nothing either.** drizzle-kit
 rebuilds a SQLite table for changes as small as an added default or foreign
 key. A rebuild is exempt when its `INSERT INTO __new_x(…) SELECT … FROM x`
-copies each column to itself, every column the previous snapshot gives the
-table is among them, and each keeps or widens its type in this migration's
-snapshot. Without the snapshots, or with a column left behind, it is reported.
+copies each column to itself, no other statement touches the copy and none
+touches the original between the copy and the drop, every column the previous
+snapshot gives the table is among the copied ones, and each keeps or widens its
+type in this migration's snapshot. Without the snapshots, or with a column left behind, it is reported.
 
 **A statement against a table the same run creates loses nothing.** A fresh
 database (a new clone, a CI test database, `bun test` on a new SQLite file)
@@ -182,7 +192,9 @@ The migration file is located through a new optional `path` on each
 `migrationStatus()` row, the absolute `migration.sql` the driver read. An app
 on an older `@guren/orm` has no `path`, and the CLI falls back to the drizzle
 config's `out` (default `db/migrations`). A pending name whose file is not
-there is a refusal, never a skip. A config that exports no
+there is a refusal, never a skip, and so is a drizzle config that exists
+but will not load: the default folder stands in only for one that is absent or
+names no `out`. A config that exports no
 `migrationStatus()` has every local migration judged.
 
 **`guren check` and `guren gate`.** A new rule, `migrations-destructive`, judges
@@ -193,7 +205,8 @@ shipped is never reported. An unacknowledged finding is a gating `warn`, so
 `check --ci` and the gate's check stage fail on it, and the Stop hook sends
 the agent back before it ends a turn with one in the tree. Outside a git
 repository, or with no merge base, the rule reports itself as unverified
-(advisory) rather than passing. The rule reads files only: it never imports
+(advisory) rather than passing; when a git listing fails, it reports a gating
+finding, since the scope it claims was not read. The rule reads files only: it never imports
 `drizzle.config.ts` or `config/database.ts`, which run app code.
 
 **Cloudflare D1.** D1 migrations are applied by `wrangler d1 migrations apply`,

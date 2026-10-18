@@ -54,9 +54,10 @@ export async function getChangedFiles(cwd: string): Promise<Set<string> | null> 
 /**
  * `getChangedFiles()` with the merge base it diffed against, undefined when
  * neither `origin/main` nor `main` shares history with HEAD, in which case
- * `files` holds only uncommitted and untracked changes.
+ * `files` holds only uncommitted and untracked changes. `complete` is false
+ * when one of the git listings failed, so `files` may be short.
  */
-export async function getChangedFilesFromBase(cwd: string): Promise<{ files: Set<string>; mergeBase?: string } | null> {
+export async function getChangedFilesFromBase(cwd: string): Promise<{ files: Set<string>; mergeBase?: string; complete: boolean } | null> {
   // realpath, not just resolve: git reports --show-toplevel through the real
   // path, and on macOS /tmp is a symlink to /private/tmp.
   const absoluteCwd = await realpath(resolve(cwd)).catch(() => resolve(cwd))
@@ -89,7 +90,9 @@ export async function getChangedFilesFromBase(cwd: string): Promise<{ files: Set
     result.add(cwdRelativePath.split(sep).join('/'))
   }
 
-  return { files: result, mergeBase }
+  // A listing git failed to produce is missing files, not a list of none.
+  const complete = (mergeBase === undefined || committed !== null) && uncommitted !== null && untracked !== null
+  return { files: result, mergeBase, complete }
 }
 
 /** Any file that could hold a route's params schema or change what the app's modules evaluate to. */

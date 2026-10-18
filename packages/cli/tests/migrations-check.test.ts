@@ -87,6 +87,19 @@ describe('checkDestructiveMigrations', () => {
     }
   })
 
+  it('should report a gating finding when a git listing fails, rather than an empty pass', async () => {
+    // With no commit, `git diff HEAD` fails, so the uncommitted listing is missing.
+    const cwd = await createTempRoot('guren-migrations-check-nocommit-')
+    try {
+      git(cwd, 'init', '-q', '-b', 'main')
+      await writeMigration(cwd, '0001_drop', 'DROP TABLE "posts";')
+      const gating = gatingResults({ cwd, checks: await checkDestructiveMigrations(cwd), passCount: 0, warnCount: 0, failCount: 0 })
+      expect(gating.map((result) => result.key)).toContain('migrations-destructive-incomplete')
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
   it('should report itself unverified, never passed, outside a git repository', async () => {
     const cwd = await createTempRoot('guren-migrations-check-nogit-')
     try {

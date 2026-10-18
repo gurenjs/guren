@@ -45,6 +45,16 @@ export async function checkDestructiveMigrations(cwd: string): Promise<CheckResu
   }
 
   const results: CheckResult[] = []
+  // Gating, unlike a missing merge base: the listing claims a scope it did not cover.
+  if (!changed.complete) {
+    results.push(check(
+      'migrations-destructive-incomplete',
+      TITLE,
+      'warn',
+      'A git listing of the changed files failed, so migrations not yet on `main` may be missing from this check.',
+      'Run `git status` and `git diff` to see why git failed, then check again.',
+    ))
+  }
   if (!changed.mergeBase) {
     results.push({
       ...check(
