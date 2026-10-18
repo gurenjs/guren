@@ -102,8 +102,10 @@ snapshot. Without the snapshots, or with a column left behind, it is reported.
 database (a new clone, a CI test database, `bun test` on a new SQLite file)
 applies every migration from the first, including a `DROP TABLE` that a later
 migration wrote two years ago. A finding whose table a `CREATE TABLE` earlier
-in the pending set creates is exempt. `CREATE TABLE IF NOT EXISTS` does not
-count, since it may leave an existing table and its rows in place. This is what keeps the guard from
+in the pending set creates is exempt. `CREATE TABLE IF NOT EXISTS` counts,
+because drizzle-kit 0.x wrote every create that way. It can no-op over an
+existing table only when the tracker never recorded creating it (a table made
+by `drizzle-kit push` or by hand), which the guard accepts as out of reach. This is what keeps the guard from
 refusing every fresh setup of an app with history, and it also exempts a
 branch that adds a table and then changes its mind.
 

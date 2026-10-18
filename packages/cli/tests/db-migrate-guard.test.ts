@@ -41,11 +41,13 @@ async function invoke(args: string[], fixture: Fixture) {
   try {
     await mkdir(join(cwd, 'config'))
     await writeMigrations(cwd, fixture.migrations)
+    // The rows go through a file the config reads, so no fixture value becomes code.
+    if (fixture.status) await writeFile(join(cwd, 'status.json'), JSON.stringify(fixture.status))
     const status = fixture.status
-      ? `export async function migrationStatus() { record('status'); return ${JSON.stringify(fixture.status)}.map((row) => ({ appliedAt: null, ...row, path: row.path?.replace('$CWD', process.cwd()) })) }`
+      ? "export async function migrationStatus() { record('status'); return JSON.parse(readFileSync('status.json', 'utf8')).map((row) => ({ appliedAt: null, ...row, path: row.path?.replace('$CWD', process.cwd()) })) }"
       : ''
     await writeFile(join(cwd, 'config/database.ts'), `
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 const record = (event: string) => appendFileSync('calls.txt', event + '\\n')
 export async function migrateDatabase() {
   record('migrate:' + (process.env.GUREN_ALLOW_DESTRUCTIVE_MIGRATIONS ?? ''))

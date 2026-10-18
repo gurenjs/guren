@@ -333,9 +333,9 @@ function scanStatement(tokens: Token[]): { findings: RawFinding[]; creates?: str
   if (isWord(first, 'CREATE')) {
     const tableAt = skipWords(statement, 1, 'TEMP', 'TEMPORARY', 'UNLOGGED', 'VIRTUAL')
     if (isWord(statement[tableAt], 'TABLE')) {
-      // `IF NOT EXISTS` may no-op over a table that already holds rows, so it creates nothing to exempt.
-      if (isWord(statement[tableAt + 1], 'IF')) return { findings: [] }
-      const table = readName(statement, tableAt + 1)?.name
+      // `IF NOT EXISTS` counts: drizzle-kit 0.x wrote every create that way, and it can only no-op over
+      // a table the tracker never recorded creating (one made by push or by hand).
+      const table = readName(statement, skipWords(statement, tableAt + 1, 'IF', 'NOT', 'EXISTS'))?.name
       return { findings: [], creates: table }
     }
   }
@@ -474,12 +474,21 @@ interface ParsedType {
 }
 
 function parseType(type: string): ParsedType | undefined {
-  const normalized = type.trim().toLowerCase().replace(/\s+/g, ' ')
-  const match = /^([a-z][a-z0-9 ]*?)\s*(?:\(([\d\s,]*)\))?( unsigned)?$/.exec(normalized)
-  if (!match) return undefined
-  const args = match[2] ? match[2].split(',').map((arg) => Number(arg.trim())) : []
-  if (args.some((arg) => !Number.isInteger(arg))) return undefined
-  return { base: match[1]!.trim(), args, unsigned: Boolean(match[3]) }
+  let rest = type.trim().toLowerCase().replace(/\s+/g, ' ')
+  const unsigned = rest.endsWith(' unsigned')
+  if (unsigned) rest = rest.slice(0, -' unsigned'.length)
+  let args: number[] = []
+  const open = rest.indexOf('(')
+  if (open !== -1) {
+    if (!rest.endsWith(')')) return undefined
+    const inner = rest.slice(open + 1, -1)
+    if (!/^[\d ,]*$/.test(inner)) return undefined
+    args = inner === '' ? [] : inner.split(',').map((arg) => Number(arg.trim()))
+    rest = rest.slice(0, open)
+  }
+  const base = rest.trim()
+  if (!/^[a-z][a-z0-9 ]*$/.test(base) || args.some((arg) => !Number.isInteger(arg))) return undefined
+  return { base, args, unsigned }
 }
 
 const INTEGER_RANK: Record<string, number> = {

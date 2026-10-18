@@ -111,7 +111,7 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
 
     await db.execute(sql`DROP TABLE IF EXISTS \`__drizzle_migrations\``)
     expect(await database.migrationStatus()).toEqual([
-      { name: '20240101000000_init', applied: false, appliedAt: null },
+      { name: '20240101000000_init', applied: false, appliedAt: null, path: expect.stringMatching(/20240101000000_init\/migration\.sql$/) },
     ])
 
     await db.execute(sql`CREATE TABLE \`__drizzle_migrations\` (\`id\` int PRIMARY KEY)`)

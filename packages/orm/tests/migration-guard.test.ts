@@ -194,9 +194,12 @@ describe('scanMigrationSql (hand-written; drizzle-kit never writes these without
 describe('judgeMigrations', () => {
   const source = (name: string, sql: string): MigrationSource => ({ name, file: `${name}.sql`, scan: scanMigrationSql(sql) })
 
-  test('should not let CREATE TABLE IF NOT EXISTS exempt a later drop, since it may have created nothing', () => {
-    const report = judgeMigrations([source('a', 'CREATE TABLE IF NOT EXISTS "posts" ("id" integer);'), source('b', 'DROP TABLE "posts";')])
-    expect(report.unacknowledged).toMatchObject([{ table: 'posts' }])
+  test('should let CREATE TABLE IF NOT EXISTS exempt a later statement, as drizzle-kit 0.x wrote every create', () => {
+    const report = judgeMigrations([
+      source('a', 'CREATE TABLE IF NOT EXISTS "users" ("email_verified_at" timestamp);'),
+      source('b', 'ALTER TABLE "users" ALTER COLUMN "email_verified_at" SET DATA TYPE timestamp with time zone;'),
+    ])
+    expect(report.unacknowledged).toEqual([])
   })
 
   test('should exempt nothing when told the sources are not exactly the pending ones', () => {
