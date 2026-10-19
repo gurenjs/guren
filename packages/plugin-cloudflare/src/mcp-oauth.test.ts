@@ -120,7 +120,7 @@ describe('cloudflare:build --mcp-oauth', () => {
         buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       )
 
-      expect(warning).not.toContain('placeholder id')
+      expect(warning).not.toContain('placeholder')
     })
 
     test('should accept an OAUTH_KV binding with no id, which wrangler provisions at deploy', async () => {

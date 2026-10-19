@@ -547,12 +547,7 @@ function warnPlaceholderIds(root: string): void {
 }
 
 function placeholderKeys(scope: ConfigScope, key: string, idKey: string): string[] {
-  const entries = scope.config[key]
-  if (!Array.isArray(entries)) {
-    return []
-  }
-
-  return entries.flatMap((entry, index) => {
+  return asArray(scope.config[key]).flatMap((entry, index) => {
     const id = isRecord(entry) ? entry[idKey] : undefined
     return typeof id === 'string' && !/^[0-9a-f-]+$/i.test(id) ? [`${key}[${index}].${idKey}${scope.label}`] : []
   })
