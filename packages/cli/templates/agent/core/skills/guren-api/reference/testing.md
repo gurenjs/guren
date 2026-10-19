@@ -14,17 +14,6 @@ const http = await TestApp.create({ boot, providers, routes })  // all optional
 const http = await TestApp.fromApp(app)         // wrap the app exported by src/app.ts
 ```
 
-**Prefer wrapping the real app.** Scaffolded apps export the configured
-application from `src/app.ts` — wrap it so tests exercise the app's actual
-configuration (providers, auth, i18n, security defaults) instead of
-reconstructing a subset that silently drifts:
-
-```typescript
-import app from '../src/app.js'
-
-const http = await TestApp.fromApp(app)
-```
-
 `fromApp()` boots the app for you and binds its `fetch` to the instance.
 It is `async` — `await` it. Calling it from several test files is fine:
 `Application.boot()` is idempotent and reuses the first boot.

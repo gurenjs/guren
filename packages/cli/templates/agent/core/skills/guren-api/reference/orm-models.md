@@ -146,22 +146,15 @@ const tag = existing ?? await Tag.create({ name })
 For concurrency safety add a unique index and catch the constraint error, or wrap in
 `Tag.transaction(async (trx) => ...)`.
 
-## Mass assignment
+## Mass assignment beyond the rule
 
-- With a fillable allowlist set — the typed `defineModel(table, { fillable: [...] })` option
-  (preferred) or `static fillable = [...]` — `create()`/`update()` **throw
-  `MassAssignmentException`** on any unlisted input key; the primary key (`id`) is always
-  silently stripped. The same typed options exist for `hidden`, `visible`, `accessors`,
-  and `appends`
+The rule covers `fillable`, `set` and `force*`. In addition:
+
+- The same typed `defineModel()` options exist for `hidden`, `visible`, `accessors`
+  and `appends`; `static fillable = [...]` on the class also works and shadows the option.
 - Credential columns (`passwordHash`, `rememberToken`) **always throw** on authenticatable
-  models — the framework denies them, listing them in `fillable` does not open them
-- A column the server chooses (the owner `authorId`, a parent `postId`, a default `status`)
-  stays out of `fillable` and goes in `set`, beside the validated data:
-  `Post.create(data, { set: { authorId: user.id } })`, `Post.update(where, data, { set: { … } })`.
-  `data` is still filtered; `set` throws when a key is `id`, a credential column, or in `fillable`,
-  when `data` carries the same key, and on a model with no `fillable`. Never spread request
-  input into `set`
-- `forceCreate()` / `forceUpdate()` bypass filtering. They are for writes that carry no
-  request data at all: seeders, system records, OAuth hash sentinels (`passwordHash: 'oauth:…'`).
-  **Never call them with request input**; a `MassAssignmentException` is never fixed by
-  switching the same payload to `force*`
+  models: listing them in `fillable` does not open them.
+- `set` works on updates too: `Post.update(where, data, { set: { … } })`. It also throws
+  when `data` carries the same key and on a model with no `fillable`.
+- `forceCreate()` is how an OAuth hash sentinel (`passwordHash: 'oauth:…'`) is written; a
+  `MassAssignmentException` is never fixed by switching the same payload to `force*`.

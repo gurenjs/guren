@@ -99,4 +99,3 @@ Codegen walks schemas at runtime (Zod v3 and v4):
   unrecognized constructs → `unknown`
 
 So `z.string().trim().min(1).optional().default('x')` survives as `key?: string`.
-If a generated type comes out as `unknown`, simplify the construct instead of reading `node_modules`.

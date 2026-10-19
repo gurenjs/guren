@@ -3,7 +3,7 @@ import type { Dirent } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import process from 'node:process'
-import { fileExists, readIfExists, toPosixRelative } from './discovery'
+import { fileExists, formatTruncatedList, readIfExists, toPosixRelative } from './discovery'
 import {
   DETECTABLE_COMPONENTS,
   componentsForTargets,
@@ -452,6 +452,5 @@ export async function staleHarnessNote(cwd: string): Promise<string | undefined>
   if (files.length === 0) {
     return undefined
   }
-  const more = files.length > 3 ? `, +${files.length - 3} more` : ''
-  return `> The agent harness differs from the templates of the installed @guren/cli (${files.slice(0, 3).join(', ')}${more}). \`bunx guren agent:sync\` refreshes these framework-managed files.`
+  return `> The agent harness differs from the templates of the installed @guren/cli (${formatTruncatedList(files)}). \`bunx guren agent:sync\` refreshes these framework-managed files.`
 }
