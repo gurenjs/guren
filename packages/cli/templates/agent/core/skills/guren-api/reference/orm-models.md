@@ -71,20 +71,6 @@ Terminate with: `get()` / `first()` / `firstOrFail()` / `count()` /
 `paginate(page?, perPage?)` or `paginate({ page, perPage })` /
 `update(data, { set? })` / `forceUpdate(data)` / `delete()`
 
-## Pagination
-
-```typescript
-const result = await Post.paginate({ page: 1, perPage: 15, where: {...}, orderBy: 'createdAt' })
-// PaginateOptions: { page? (1-based, default 1), perPage? (default 15), where?, orderBy? }
-// PaginatedResult: { data: TRecord[], meta: { total, perPage, currentPage, totalPages, hasMore, from, to } }
-```
-
-For Inertia/HTTP pagination links wrap it with `paginate` from `@guren/core`:
-`paginate(result, { path?, query?, fragment? })` — those three fields are `PaginatorOptions`.
-The wrapped paginator serializes as `{ data, meta, links }`; the raw `PaginatedResult`
-has no `links`. In tests, assert against the shape the route actually returns
-(e.g. `assertJsonPath('meta.total', 3)`, `assertJsonCount(2, 'data')`).
-
 ## Relations — declaration signatures
 
 - `hasOne(name, related, foreignKey, localKey)`

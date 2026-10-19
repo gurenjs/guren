@@ -58,12 +58,26 @@ await Post.whereNull('publishedAt').get()   // not where('publishedAt', 'is null
 await Post.where({ authorId }).count()      // count() is on the query builder, not the model
 ```
 
+## Pagination
+
+```typescript
+const result = await Post.paginate({ page: 1, perPage: 15, where: {...}, orderBy: 'createdAt' })
+// PaginateOptions: { page? (1-based, default 1), perPage? (default 15), where?, orderBy? }
+// PaginatedResult: { data: TRecord[], meta: { total, perPage, currentPage, totalPages, hasMore, from, to } }
+```
+
+For Inertia/HTTP pagination links wrap it with `paginate` from `@guren/core`:
+`paginate(result, { path?, query?, fragment? })` — those three fields are `PaginatorOptions`.
+The wrapped paginator serializes as `{ data, meta, links }`; the raw `PaginatedResult`
+has no `links`. In tests, assert against the shape the route actually returns
+(e.g. `assertJsonPath('meta.total', 3)`, `assertJsonCount(2, 'data')`).
+
 No `attach/detach/sync`: create and delete rows on a pivot model
 (`await PostTag.create({ postId, tagId })`, `await PostTag.delete({ postId, tagId })`;
 sync = delete by `postId`, then re-create). No `firstOrCreate`:
 `(await Tag.first({ name })) ?? (await Tag.create({ name }))`.
 
-Every static and builder method, pagination shapes, eager loading (`with`,
+Every static and builder method, eager loading (`with`,
 `findWithOrFail`, `withCount`, nested paths and their typing), authenticatable
 user models and the full mass-assignment rules:
 `__SKILLS_DIR__/guren-api/reference/orm-models.md`.

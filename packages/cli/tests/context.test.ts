@@ -311,11 +311,13 @@ describe('GUREN_API_DIGEST', () => {
       "'is null', null)",
       "belongsToMany(name, related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey = 'id', relatedKey = 'id')",
       "hasManyThrough(name, related, through, firstKey, secondKey, localKey = 'id', secondLocalKey = 'id')",
-      'paginate(result, { path?, query?, fragment? })',
-      'PaginatorOptions',
       'withPaginate',
     ],
-    'rules/orm-models.md': ['create(data, { set: { authorId } })'],
+    'rules/orm-models.md': [
+      'create(data, { set: { authorId } })',
+      'paginate(result, { path?, query?, fragment? })',
+      'PaginatorOptions',
+    ],
     'rules/controllers-http.md': [
       'validateBody',
       'userOrFail',
