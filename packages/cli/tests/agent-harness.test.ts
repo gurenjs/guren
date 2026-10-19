@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtemp, mkdir, rm, readFile, rename, symlink, writeFile, access } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { findStaleManagedFiles, installAgentHarness, loadAgentTemplates } from '../src/agent-harness'
+import { findStaleManagedFiles, installAgentHarness, loadAgentTemplates, staleHarnessNote } from '../src/agent-harness'
 import { AGENT_TARGETS, planComponents } from '../src/agent-targets'
 
 /**
@@ -768,3 +768,38 @@ describe('installAgentHarness', () => {
     expect(result.mcpEndpointNotEnabled).toBe(false)
   })
 })
+
+describe('staleHarnessNote', () => {
+  let tempDir: string
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'guren-stale-harness-test-'))
+    await writeFile(join(tempDir, 'package.json'), JSON.stringify({ name: 'my-app' }), 'utf8')
+  })
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true })
+  })
+
+  it('says nothing for an app with no harness', async () => {
+    expect(await staleHarnessNote(tempDir)).toBeUndefined()
+  })
+
+  it('says nothing for a harness the installed CLI just wrote', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    expect(await staleHarnessNote(tempDir)).toBeUndefined()
+  })
+
+  it('names the managed files agent:sync would replace', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    await writeFile(join(tempDir, '.claude/rules/testing.md'), '---\nglobs: tests/**\n---\n# Old\n', 'utf8')
+
+    const note = await staleHarnessNote(tempDir)
+
+    expect(note).toContain('.claude/rules/testing.md')
+    expect(note).toContain('bunx guren agent:sync')
+    // A note never writes: the outdated file is still on disk.
+    expect(await readFile(join(tempDir, '.claude/rules/testing.md'), 'utf8')).toContain('# Old')
+  })
+})
+

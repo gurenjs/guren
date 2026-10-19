@@ -6,167 +6,77 @@ paths:
 
 # Testing (@guren/testing + bun:test)
 
-Requests run in-process through `app.fetch()` — no server, no port.
-
-## Creating a TestApp
+Requests run in-process through `app.fetch()`: no server, no port. Wrap the
+app `src/app.ts` exports, so tests run its real providers, auth and CSRF:
 
 ```typescript
+import { beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import { TestApp } from '@guren/testing'
-
-const http = await TestApp.create()             // boots a fresh Application
-const http = await TestApp.create({ boot, providers, routes })  // all optional
-const http = await TestApp.fromApp(app)         // wrap the app exported by src/app.ts
-```
-
-**Prefer wrapping the real app.** Scaffolded apps export the configured
-application from `src/app.ts` — wrap it so tests exercise the app's actual
-configuration (providers, auth, i18n, security defaults) instead of
-reconstructing a subset that silently drifts:
-
-```typescript
 import app from '../src/app.js'
+import { resetDatabase } from '../config/database.js'
+import { Post, type PostRecord } from '../app/Models/Post.js'
 
-const http = await TestApp.fromApp(app)
-```
-
-`fromApp()` boots the app for you and binds its `fetch` to the instance.
-It is `async` — `await` it. Calling it from several test files is fine:
-`Application.boot()` is idempotent and reuses the first boot.
-
-Keep `TestApp.create({ ... })` for isolated slices (a single route or
-middleware under test).
-
-`TestApp.fromFetch(fn)` — the only one of the three that is *not* async —
-wraps an arbitrary fetch function, e.g. a bare Hono app:
-
-```typescript
-const hono = new Hono()
-const http = TestApp.fromFetch((request) => hono.fetch(request))
-```
-
-Do not reach for it to wrap a Guren `Application`; use `fromApp()`. Hand-wiring
-one is where the footgun lives: `Application.fetch` reads instance state, so
-`fromFetch(app.fetch)` throws `undefined is not an object (evaluating
-'this.hono')` at the first request. It has to be an arrow —
-`fromFetch((request) => app.fetch(request))` — which is exactly what
-`fromApp()` does for you.
-
-All three set `GUREN_TESTING=1` so `actingAs()` header auth is accepted.
-
-**Session + CSRF in tests.** `TestApp.create()` accepts `auth` just like `createApp({ auth: {} })`. Without it, session + CSRF middleware are **not** mounted — JSON requests (`app.json().post(...)`) pass with no CSRF check at all, which is fine for quick validation/auth-guard checks but not representative of production. To exercise real CSRF behavior (and for `withCsrf()` to work — it throws `"did not set an XSRF-TOKEN cookie"` otherwise):
-
-```typescript
-const app = await TestApp.create({
-  auth: {},
-  routes: registerWebRoutes,
-})
-const csrf = await app.withCsrf()
-```
-
-**Included in `create-app`-scaffolded apps' `devDependencies`** by default (`default`/`api` blueprints) — if it's missing (e.g. an older scaffold, or a project set up by hand), run `bun add -d @guren/testing`. The main entry does not require vitest; `useDatabaseTransactions()`/`useTruncateTables()` pick up bun:test's injected globals automatically — under vitest, `import '@guren/testing/vitest'` once in your setup file to register its hooks.
-
-## Test database isolation (SQLite)
-
-`bun test` sets `NODE_ENV=test` automatically. A current scaffold's `config/database.ts` branches on it so tests never touch the dev DB:
-
-```typescript
-filename: (context) => {
-  const values = context?.env ?? env.parse(undefined, { mode: 'report' }).values
-  return process.env.NODE_ENV === 'test'
-    ? values.TEST_DATABASE_URL ?? './data/guren.test.db'
-    : values.DATABASE_URL ?? './data/guren.db'
-},
-```
-
-Default test file: `./data/guren.test.db`. Override with `TEST_DATABASE_URL` (e.g. per CI shard). If `config/database.ts` writes straight to `DATABASE_URL`/`./data/guren.db` with no `NODE_ENV` check (pre-1.2.0 scaffold), retrofit its `filename` to branch on `NODE_ENV` the same way. With `config/env.ts`, declare `DATABASE_URL` and `TEST_DATABASE_URL` there and read them from `values` as above: `guren/no-unvalidated-env-read` reports a `process.env.DATABASE_URL` read in `config/`. Without `config/env.ts`, read `process.env` and branch the same way.
-
-**Cleanup between tests:** prefer `resetDatabase()` (exported from `config/database.ts`) in `beforeEach` — it operates on the same connection your models use, and drops every table then re-applies migrations, so the tables are queryable straight after (same end state as `guren db:reset`; an extra `migrateDatabase()` call is harmless but redundant). `useTruncateTables(tables)`/`useDatabaseTransactions()` from `@guren/testing` need a `DatabaseConnection` (`query`/`execute`/`beginTransaction`/`commit`/`rollback`) registered via `setTestDatabase()` — Guren's SQLite adapter doesn't expose one (`getDatabase()` resolves to the raw Drizzle instance, not this shape), so you'd have to hand-write an adapter. Only `useDatabaseTransactions()` requires that adapter to wrap the *same* connection your models write through (it begins/rolls back a transaction on it); `useTruncateTables()` just runs `DELETE FROM` per table, which commits immediately regardless of connection. `resetDatabase()` avoids the adapter question entirely.
-
-## Generating test files
-
-`bunx guren make:test <Name>` auto-detects the runner: explicit `--runner bun|vitest` wins,
-otherwise it checks for a `vitest.config.*` file or a `vitest` dependency in `package.json`,
-falling back to `bun:test`. Pass `--controller` for a controller test — it suffixes the class
-name with `Controller` and writes to `tests/controllers/${ClassName}.test.ts`, matching where
-`guren check` looks for it.
-
-## Client methods
-
-```typescript
-app.get(path)                 // → PendingTestResponse (awaitable AND chainable)
-app.post(path, body?)         // body auto-JSON-encoded unless FormData
-app.put(path, body?) / app.patch(path, body?) / app.delete(path, body?)
-app.query(path, body?)        // HTTP QUERY (RFC 10008) — safe method with a body
-
-app.actingAs(user)            // returns a NEW TestApp with the user injected
-app.json()                    // returns a NEW TestApp with Accept: application/json
-app.withHeader(name, value) / app.withHeaders(record)   // also return new TestApp
-const csrf = await app.withCsrf()   // primes session + XSRF cookies; use for mutating requests hitting CSRF
-```
-
-## Chainable assertions (on PendingTestResponse)
-
-```typescript
-await app.get('/posts').assertOk().assertJsonCount(3, 'data')
-```
-
-Exact list:
-`assertStatus(code: number)` · `assertOk()` (200) · `assertCreated()` (201) ·
-`assertNoContent()` (204) · `assertRedirect(url?: string)` (3xx, optional Location match) ·
-`assertNotFound()` (404) · `assertForbidden()` (403) · `assertUnauthorized()` (401) ·
-`assertUnprocessable()` (422) ·
-`assertJson(expected: Record<string, unknown>)` (exact deep match) ·
-`assertJsonCount(count: number, key?: string)` ·
-`assertJsonStructure(keys: string[])` (top-level keys exist) ·
-`assertJsonPath(path: string, value: unknown)` (dot-path, deep equal) ·
-`assertInertia(component: string, props?: Record<string, unknown>)` ·
-`assertCookie(name: string, value?: string)` · `assertCookieMissing(name: string)` ·
-`assertHeader(name: string, value?: string)` · `assertHeaderMissing(name: string)`
-
-## Awaited response (TestResponse)
-
-Awaiting yields a `TestResponse` with extras not available on the chain:
-
-```typescript
-const res = await app.get('/posts')
-res.status                          // number
-res.headers                         // Headers
-await res.text()                    // body string
-await res.json<T>()                 // parsed body
-res.assertBadRequest()              // 400
-res.assertServerError()             // 500
-res.assertSuccessful()              // any 2xx
-await res.assertJsonContains({ k: v })   // partial top-level match
-await res.assertBodyContains('text')
-```
-
-## Patterns
-
-```typescript
-import { describe, test, expect, beforeAll } from 'bun:test'
-
-describe('PostController', () => {
+describe('posts', () => {
   let http: TestApp
   beforeAll(async () => { http = await TestApp.fromApp(app) })
+  beforeEach(async () => { await resetDatabase() })   // drops tables, re-applies migrations
 
-  test('store validates input', async () => {
-    const csrf = await http.withCsrf()
-    await csrf.json().post('/posts', {}).assertUnprocessable()
-  })
-
-  test('store creates post for authed user', async () => {
+  test('store creates a post for the signed-in user', async () => {
     const csrf = await http.actingAs(user).withCsrf()
     await csrf.post('/posts', { title: 'Hi', body: '...' }).assertRedirect('/posts')
+    const rows: PostRecord[] = await Post.where({ title: 'Hi' }).get()
+    expect(rows).toHaveLength(1)
   })
 })
 ```
 
-**Under `fromApp()`, every mutating request needs `withCsrf()`** — a JSON one
-included. The real app mounts session and CSRF, so an unprimed POST/PUT/DELETE
-answers **403**: a 422 assertion goes red for the wrong reason, and an
-`assertForbidden()` passes whatever the policy decides. Prime after `actingAs()`,
-so the token belongs to that user's session. `TestApp.create()` without `auth`
-mounts neither, which is why its examples above need no priming.
+## Client
 
-Validation failures return 422 with `{ message, errors: Record<string, string[]> }` —
-assert with `assertJsonPath('errors.title.0', 'Title is required')`.
+`http.get / post / put / patch / delete / query(path, body?)` (body auto-JSON
+unless FormData) return a `PendingTestResponse`: awaitable and chainable.
+`http.actingAs(user)`, `http.json()` (Accept: application/json),
+`http.withHeader(name, value)` and `await http.withCsrf()` each return a NEW `TestApp`.
+
+**Under `fromApp()`, every mutating request needs `withCsrf()`**, a JSON one
+included: an unprimed POST/PUT/DELETE answers **403**, so a 422 assertion goes
+red for the wrong reason and `assertForbidden()` passes whatever the policy
+decides. Prime after `actingAs()`, so the token belongs to that user's session.
+
+## Assertions: chain them before `await`
+
+`assertStatus(code)` · `assertOk()` · `assertCreated()` · `assertNoContent()` ·
+`assertRedirect(url?)` · `assertNotFound()` · `assertForbidden()` ·
+`assertUnauthorized()` · `assertUnprocessable()` · `assertJson(exact)` ·
+`assertJsonCount(n, key?)` · `assertJsonStructure(keys)` ·
+`assertJsonPath(path, value)` · `assertInertia(component, props?)` ·
+`assertCookie(name, value?)` · `assertCookieMissing(name)` ·
+`assertHeader(name, value?)` · `assertHeaderMissing(name)`
+
+The awaited `TestResponse` has `status`, `headers`, `raw`, `await text()`,
+`await json<T>()`, the status and header asserts, `assertSuccessful()`,
+`assertBadRequest()`, `assertServerError()`, and the async
+`await res.assertJson / assertJsonPath / assertJsonContains / assertBodyContains`.
+`assertInertia`, `assertJsonCount`, `assertJsonStructure` and the cookie asserts
+exist only on the chain: `await http.get(url).assertInertia('posts/Show')`.
+
+Validation failures are 422 with `{ message, errors: Record<string, string[]> }`:
+`assertJsonPath('errors.title.0', 'Title is required')`.
+
+## Mistakes that cost a rerun
+
+- **A form post that ends in `this.redirect()` answers 303**, JSON or not:
+  assert `assertRedirect('/posts')`, not `assertCreated()`. 201 only comes
+  from an action that returns `this.json(data, { status: 201 })`.
+- **Type rows as the record type the model file exports** (`PostRecord`,
+  `UserRecord`), never as the class: `let post: Post` has no `id`.
+- **Read the database through models**, not `getDatabase()` (it returns a
+  Promise of the raw driver): `await Post.where({ authorId }).get()`,
+  `await Post.where({ authorId }).count()`, `await Post.find(id)`. `count()`
+  exists on the query builder only; `Post.count()` does not.
+- **The response body is `await res.json()`**; `res.response` is private.
+- There is no `asInertia()`: Inertia pages are asserted with `assertInertia()`.
+
+`bunx guren make:test <Name>` writes a test file (`--controller` for
+`tests/controllers/`). TestApp variants (`create`, `fromFetch`), CSRF
+without the real app, test database isolation and cleanup helpers:
+`__SKILLS_DIR__/guren-api/reference/testing.md`.

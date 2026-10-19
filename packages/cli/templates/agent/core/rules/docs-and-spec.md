@@ -1,12 +1,7 @@
 ---
 paths:
   - "docs/**"
-  - "db/schema.ts"
-  - "app/Models/**"
-  - "app/Http/Controllers/**"
-  - "routes/**"
-  - "resources/js/pages/**"
-  - "modules/**"
+  - "modules/*/docs/**"
 ---
 
 # Docs & Spec Views

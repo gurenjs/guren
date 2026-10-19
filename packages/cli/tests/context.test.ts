@@ -298,8 +298,9 @@ describe('renderContextMarkdown', () => {
 })
 
 describe('GUREN_API_DIGEST', () => {
-  // The digest is a hand-written summary of the rule files, so each token has
-  // to appear in both and a one-sided edit fails here.
+  // The digest is a hand-written summary of the rule files (each rule plus the
+  // full reference it points to), so each token has to appear in both and a
+  // one-sided edit fails here.
   const tokensByRuleFile: Record<string, string[]> = {
     'orm-models.md': [
       '`=` `!=` `>` `<` `>=` `<=` `like` `in` `not in` `is null` `is not null`',
@@ -326,10 +327,13 @@ describe('GUREN_API_DIGEST', () => {
 
   for (const [ruleFile, tokens] of Object.entries(tokensByRuleFile)) {
     it(`stays in sync with the ${ruleFile} rule file`, async () => {
-      const ruleText = await readFile(
-        new URL(`../templates/agent/core/rules/${ruleFile}`, import.meta.url),
-        'utf8',
-      )
+      const ruleText = (
+        await Promise.all(
+          ['rules', 'skills/guren-api/reference'].map((dir) =>
+            readFile(new URL(`../templates/agent/core/${dir}/${ruleFile}`, import.meta.url), 'utf8'),
+          ),
+        )
+      ).join('\n')
       for (const token of tokens) {
         expect(GUREN_API_DIGEST).toContain(token)
         expect(ruleText).toContain(token)

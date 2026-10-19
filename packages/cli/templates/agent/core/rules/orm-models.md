@@ -8,192 +8,62 @@ paths:
 
 # ORM Models
 
-Import models, database factories and seeders from `@guren/core`. The only `@guren/orm` import app code writes is `@guren/orm/drizzle/<dialect>`, in `db/schema.ts`.
+Import models from `@guren/core`. The only `@guren/orm` import app code writes
+is `@guren/orm/drizzle/<dialect>`, in `db/schema.ts`. After editing
+`db/schema.ts`, run `bunx guren make:migration <name>` (drizzle-kit writes the
+SQL; do not hand-write it), then `bun run db:migrate`.
 
 ## Defining a model
 
 ```typescript
-import { defineModel, type BelongsToRecord } from '@guren/core'
+import { defineModel, type BelongsToRecord, type HasManyRecord } from '@guren/core'
 import { posts } from '../../db/schema.js'
 
-export type PostRecord = typeof posts.$inferSelect
+export type PostRecord = typeof posts.$inferSelect   // the row type; the class `Post` has no columns
 
 export class Post extends defineModel(posts, {
-  // Typed against the table's columns — a typo is a compile error.
-  // (`static fillable = [...]` on the class also works and shadows the option.)
-  // authorId is chosen by the server, so it stays out: Post.create(data, { set: { authorId } }).
-  fillable: ['title', 'body'],
+  fillable: ['title', 'body'],   // typed; authorId stays out: Post.create(data, { set: { authorId } })
 }) {
-  static override relationTypes: { author: BelongsToRecord<UserRecord> } = { author: null }
+  static override relationTypes: {
+    author: BelongsToRecord<UserRecord>
+    comments: HasManyRecord<CommentRecord>
+  } = { author: null, comments: [] }   // single → null, array → []
 }
 Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorId', 'id')
+Post.hasMany('comments', () => import('./Comment.js').then((m) => m.Comment), 'postId', 'id')
 ```
 
-Auth user models use the same `defineModel()` call with `AuthenticatableModel` as the base, plus the
-options that reshape the create payload — the model hashes a plain `password` into `passwordHash`, so
-the column becomes optional and the virtual field becomes required:
-
-```typescript
-export class User extends defineModel(users, {
-  base: AuthenticatableModel,
-  optionalOnCreate: ['passwordHash'],
-  requireOnCreate: ['password'],
-  hidden: ['passwordHash', 'rememberToken'],
-}) {}
-```
-
-Drop `requireOnCreate` when accounts can also be created without a password (OAuth-only sign-up).
-Optional means optional — passing `passwordHash` still type-checks. At runtime the base class
-denies the hash and remember-token columns from mass assignment entirely (`set` refuses them too).
-A sentinel such as `passwordHash: 'oauth:…'` is written with `forceCreate()`, since that write
-carries no request data (see Mass assignment below).
-
-## Statics
-
-`find(id)` → record | null · `findOrFail(id)` throws `ModelNotFoundException` (renders 404) ·
-`first(where?)` → record | null · `all()` · `create(data, { set? })` · `forceCreate(data)` ·
-`update(where, data, { set? })` · `forceUpdate(where, data)` · `delete(where)` ·
-`paginate(options?)` · `transaction(async (trx) => ...)`
-
-## Where clauses
-
-```typescript
-await Post.where({ status: 'active', authorId: 1 }).get()  // object form = AND
-await Post.where({ id: [1, 2, 3] }).get()                  // array value = IN
-await Post.where('views', '>', 100).orWhere('featured', true).get()
-await Post.whereNull('publishedAt').get()                  // IS NULL; whereNotNull() for IS NOT NULL
-await Post.where('publishedAt', 'is null', null).get()     // same, operator form; orWhere takes it too
-
-// Callback form groups conditions in parentheses — required when an OR
-// chain must sit next to AND filters, or the ANDs get OR'd away:
-// (title LIKE ? OR excerpt LIKE ?) AND published = true
-await Post.where((q) => q.where('title', 'like', p).orWhere('excerpt', 'like', p))
-  .where('published', true)
-  .get()
-```
-
-Operators (exact set): `=` `!=` `>` `<` `>=` `<=` `like` `in` `not in` `is null` `is not null`
-
-`is null` / `is not null` still take the third argument: two arguments are
-`where(field, value)`, so `where('publishedAt', 'is null')` would compare to the
-string `'is null'` and throws, naming `whereNull()` / `whereNotNull()`. Pass free-text
-input as `where(field, '=', input)`, which never reads it as an operator.
-
-An empty `in` array compiles to SQL `false` — the query matches nothing and never throws,
-so guarding `if (ids.length === 0)` before a `where in` is optional, not required.
-
-## QueryBuilder chain
-
-`Post.where(...)` returns a `QueryBuilder`. Chainable:
-`where` / `orWhere` / `whereNull(field)` / `whereNotNull(field)` /
-`whereIn(field, values)` / `whereNotIn(field, values)` /
-`orderBy(field, 'asc' | 'desc')` (repeatable) / `limit(n)` / `offset(n)` /
-`with(...relations)` / `scope(name)`
-
-Terminate with: `get()` / `first()` / `firstOrFail()` / `count()` /
-`paginate(page?, perPage?)` or `paginate({ page, perPage })` /
-`update(data, { set? })` / `forceUpdate(data)` / `delete()`
-
-## Pagination
-
-```typescript
-const result = await Post.paginate({ page: 1, perPage: 15, where: {...}, orderBy: 'createdAt' })
-// PaginateOptions: { page? (1-based, default 1), perPage? (default 15), where?, orderBy? }
-// PaginatedResult: { data: TRecord[], meta: { total, perPage, currentPage, totalPages, hasMore, from, to } }
-```
-
-For Inertia/HTTP pagination links wrap it with `paginate` from `@guren/core`:
-`paginate(result, { path?, query?, fragment? })` — those three fields are `PaginatorOptions`.
-The wrapped paginator serializes as `{ data, meta, links }`; the raw `PaginatedResult`
-has no `links`. In tests, assert against the shape the route actually returns
-(e.g. `assertJsonPath('meta.total', 3)`, `assertJsonCount(2, 'data')`).
-
-## Relations — declaration signatures
-
-- `hasOne(name, related, foreignKey, localKey)`
-- `hasMany(name, related, foreignKey, localKey)`
-- `belongsTo(name, related, foreignKey, ownerKey)`
-- `belongsToMany(name, related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey = 'id', relatedKey = 'id')` — 7 args; `pivotTable` is the Drizzle table
-- `hasManyThrough(name, related, through, firstKey, secondKey, localKey = 'id', secondLocalKey = 'id')`
-- `morphMany` / `morphTo` also exist
-
-`related` is a model class or lazy loader: `() => import('./Tag.js').then((m) => m.Tag)`.
-
-Typed relation results — declare `static relationTypes` using these exported types:
-`HasManyRecord<T>` = `T[]` · `HasOneRecord<T>` = `T | null` · `BelongsToRecord<T>` = `T | null` ·
-`BelongsToRequiredRecord<T>` = `T` (NOT NULL FK) · `BelongsToManyRecord<T>` = `T[]` · `HasManyThroughRecord<T>` = `T[]`
-
-**Placeholder value must match the alias's shape**, not always `null`: array-typed relations (`hasMany`/`belongsToMany`/`hasManyThrough`) need `[]`, single-record relations (`hasOne`/`belongsTo`) need `null` — mixing them up is a TS error. With the `declare` modifier no placeholder is needed at all (type-only, no runtime value).
-
-```typescript
-static override relationTypes: { comments: HasManyRecord<CommentRecord> } = { comments: [] }  // hasMany → []
-static override relationTypes: { author: BelongsToRecord<UserRecord> } = { author: null }     // belongsTo → null
-// NOT NULL FK: parent always exists once loaded — declare it non-nullable (no placeholder with `declare`)
-declare static relationTypes: { author: BelongsToRequiredRecord<UserRecord> }
-```
-
-## Eager loading
-
-```typescript
-await Post.with('tags')                    // Array<record & { tags: TagRecord[] }>
-await Post.with(['author', 'tags'], { published: true })  // optional where filter
-await Post.with('comments.author')         // nested via dot notation (see below)
-await Post.findWith(1, 'tags')             // single record + relations, or null
-await Post.findWithOrFail(1, ['author'])   // throws ModelNotFoundException
-await Post.withCount('tags')               // adds tagsCount: number (no nested names)
-await Post.withPaginate('tags', { page: 1 })  // PaginatedResult with relations
-```
-
-**Nested paths type only the head segment** from `relationTypes`. To get typed
-children, declare the nested shape inside the head relation's record type:
-
-```typescript
-export class Post extends defineModel(posts) {
-  declare static relationTypes: {
-    comments: HasManyRecord<CommentRecord & { author: BelongsToRecord<UserRecord> }>
-  }
-}
-const post = await Post.findWithOrFail(id, 'comments.author')
-post.comments[0].author   // UserRecord | null — typed end to end
-```
-
-**The tail after the first dot is unvalidated** — `'comments.'`, `'comments..author'`, `'comments.typo'` all compile. At runtime an unknown tail throws "unknown relation", but only once the loader recurses into an actual loaded child; if the head relation loads zero rows for every record, the tail is never checked and the call silently no-ops. Nesting through `morphTo` always throws at runtime — also not type-checked.
-
-## No attach/detach/sync — use a pivot model
-
-```typescript
-export class PostTag extends defineModel(postTags) {}
-await PostTag.create({ postId, tagId })   // attach
-await PostTag.delete({ postId, tagId })   // detach
-// sync: PostTag.delete({ postId }) then re-create the desired set
-```
-
-## No firstOrCreate / updateOrCreate — hand-roll it
-
-```typescript
-const existing = await Tag.first({ name })
-const tag = existing ?? await Tag.create({ name })
-```
-
-For concurrency safety add a unique index and catch the constraint error, or wrap in
-`Tag.transaction(async (trx) => ...)`.
+The placeholder must match the alias's shape: `hasMany`/`belongsToMany`/`hasManyThrough`
+need `[]`, `hasOne`/`belongsTo` need `null`; with `declare static relationTypes`
+none is needed. `BelongsToRequiredRecord<T>` types a NOT NULL foreign key.
 
 ## Mass assignment
 
-- With a fillable allowlist set — the typed `defineModel(table, { fillable: [...] })` option
-  (preferred) or `static fillable = [...]` — `create()`/`update()` **throw
-  `MassAssignmentException`** on any unlisted input key; the primary key (`id`) is always
-  silently stripped. The same typed options exist for `hidden`, `visible`, `accessors`,
-  and `appends`
-- Credential columns (`passwordHash`, `rememberToken`) **always throw** on authenticatable
-  models — the framework denies them, listing them in `fillable` does not open them
-- A column the server chooses (the owner `authorId`, a parent `postId`, a default `status`)
-  stays out of `fillable` and goes in `set`, beside the validated data:
-  `Post.create(data, { set: { authorId: user.id } })`, `Post.update(where, data, { set: { … } })`.
-  `data` is still filtered; `set` throws when a key is `id`, a credential column, or in `fillable`,
-  when `data` carries the same key, and on a model with no `fillable`. Never spread request
-  input into `set`
-- `forceCreate()` / `forceUpdate()` bypass filtering. They are for writes that carry no
-  request data at all: seeders, system records, OAuth hash sentinels (`passwordHash: 'oauth:…'`).
-  **Never call them with request input**; a `MassAssignmentException` is never fixed by
-  switching the same payload to `force*`
+- With `fillable` set, `create()`/`update()` **throw `MassAssignmentException`** on
+  any unlisted input key; `id` is silently stripped.
+- A column the server chooses (the owner `authorId`, a parent `postId`, a default
+  `status`) stays out of `fillable` and goes in `set`:
+  `Post.create(data, { set: { authorId: user.id } })`. `set` throws on a key in
+  `fillable`, on `id` and on credential columns. Never spread request input into `set`.
+- `forceCreate()` / `forceUpdate()` bypass filtering, for writes that carry no
+  request data (seeders, system records). **Never call them with request input.**
+
+## Queries that bite
+
+```typescript
+// An OR next to AND filters needs the callback group, or the ANDs get OR'd away:
+await Post.where((q) => q.where('title', 'like', p).orWhere('excerpt', 'like', p))
+  .where('published', true).get()
+await Post.whereNull('publishedAt').get()   // not where('publishedAt', 'is null'), which throws
+await Post.where({ authorId }).count()      // count() is on the query builder, not the model
+```
+
+No `attach/detach/sync`: create and delete rows on a pivot model
+(`await PostTag.create({ postId, tagId })`, `await PostTag.delete({ postId, tagId })`;
+sync = delete by `postId`, then re-create). No `firstOrCreate`:
+`(await Tag.first({ name })) ?? (await Tag.create({ name }))`.
+
+Every static and builder method, pagination shapes, eager loading (`with`,
+`findWithOrFail`, `withCount`, nested paths and their typing), authenticatable
+user models and the full mass-assignment rules:
+`__SKILLS_DIR__/guren-api/reference/orm-models.md`.

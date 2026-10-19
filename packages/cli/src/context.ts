@@ -14,6 +14,7 @@ import {
   excludeBarrelFiles,
 } from './discovery'
 import { GUREN_API_DIGEST } from './api-digest'
+import { staleHarnessNote } from './agent-harness'
 import { discoverDeclaredCommandFiles } from './console-check'
 import { ParseCache } from './parse-cache'
 import { parseModelFile, type ModelInfo } from './model-parser'
@@ -255,5 +256,6 @@ export async function displayContext(options: ContextOptions = {}): Promise<void
   }
 
   const md = renderContextMarkdown(ctx)
-  console.log(md)
+  const note = await staleHarnessNote(resolve(options.cwd ?? process.cwd()))
+  console.log(note ? `${note}\n\n${md}` : md)
 }

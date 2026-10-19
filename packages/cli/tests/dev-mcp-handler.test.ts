@@ -330,7 +330,7 @@ describe('createDevMcpHandler', () => {
     const client = await connect(handler, 'modern')
 
     const { tools } = await client.listTools()
-    const table = await readFile(join(import.meta.dir, '../templates/agent/core/entry-body.md'), 'utf8')
+    const table = await readFile(join(import.meta.dir, '../templates/agent/core/skills/dev-workflow/SKILL.md'), 'utf8')
     const documented = [...table.matchAll(/^\| `(guren_[a-z_]+)` \|/gm)].map((match) => match[1])
 
     expect([...documented].sort()).toEqual(tools.map((tool) => tool.name).sort())

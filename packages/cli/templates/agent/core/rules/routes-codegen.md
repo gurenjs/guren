@@ -21,117 +21,31 @@ export function registerWebRoutes(baseRouter: Router): void {
 
   router.get('/posts', [PostController, 'index']).name('posts.index')
   router.post('/posts', { name: 'posts.store', body: CreatePostSchema }, [PostController, 'store'])
-
   router.middleware('auth').group((group) => {
     group.get('/dashboard', [DashboardController, 'index'])
   })
-  router.group('/admin', (admin) => { /* path-prefixed */ })
 }
 ```
 
-Options object (second arg) is `RouteContractOptions`:
-`name?` · `middlewares?: MiddlewareHandler[]` · `params?` / `query?` / `body?` / `output?`
-(Zod schemas) · `bind?: Record<string, RouteModelBinding>` (`Post` or `[Post, 'slug']`) ·
-`agent?: AgentRouteMetadata` · plus OpenAPI metadata
-(`summary?`, `description?`, `tags?`, `operationId?`, `deprecated?`).
+A new `routes/*.ts` file registers nothing until a registrar reachable from
+`routes/web.ts` calls its exported function; `guren check` reports one that is not.
 
-Schemas attached here do double duty: requests are **validated automatically**
-(422 before the controller runs) and `bunx guren codegen` extracts them into typed manifests.
+Options (second argument): `name?` · `middlewares?` · `params?` / `query?` /
+`body?` / `output?` (Zod schemas, validated before the action: 422) ·
+`bind?` (`{ id: Post }` or `{ slug: [Post, 'slug'] }`) · `agent?`.
+`router.resource('/posts', PostController, { only?, except? })` registers the
+seven actions named `posts.index` etc. Verbs: `get / post / put / patch / delete / query`
+(`query` is HTTP QUERY: safe, carries a body, never for mutations).
 
-`router.resource('/posts', PostController, { name?, param?, only?, except? })` registers
-index/create/store/show/edit/update/destroy (GET/POST/PUT/DELETE, `:id` param) named `posts.index` etc.
-Model binding: `bind: { id: Post }` (primary key) or `bind: { slug: [Post, 'slug'] }` (another column)
-+ `this.model(Post)` in the controller. See `controllers-http.md` for router-level `router.bind()`.
+## Codegen
 
-Verbs: `get / post / put / patch / delete / query` (all with the same overloads), plus
-`router.on(method, path, ...)` for anything else. `query()` registers the HTTP QUERY
-method (RFC 10008): safe and idempotent like GET but carries a request body — use it
-for complex search/filter endpoints, never for mutations (CSRF skips it on that
-assumption). Not expressible in OpenAPI 3.1 output, and Inertia forms cannot send it —
-call it via `createApiClient` or `fetch`.
+`bunx guren codegen` regenerates `.guren/pages.gen.ts`, `routes.gen.ts`,
+`data.gen.ts`, `api-client.gen.ts`. Re-run after changing route names, paths or
+schemas, a page's `interface Props`, or a Resource class. Schema types are read
+from the request side (`z.coerce.number()` is `number | string` in `body`); a
+`.transform()` output is not reflected, and an unsupported construct comes out
+`unknown`: simplify the schema instead of reading `node_modules`.
 
-## Agent tools
-
-`.agent({ description })` (or `agent:` in the options object) exposes a route as an MCP tool;
-the tool's schemas are derived from the route's own `params`/`query`/`body`/`output`, never restated.
-Per-action on a resource: `router.resource('/posts', PostController, { agent: { index: {...} } })` —
-an action not listed is **not** exposed. One declaration per route — declaring it in the options
-*and* chaining `.agent()` throws. A route with no `.name()` cannot be a tool, and the name is used
-as the tool name verbatim.
-**Authentication is not authorization**: `guren check` fails a non-read-only agent route that has
-neither `authorizeMiddleware(...)` on the chain nor `this.authorize(...)` in the action, even when
-`this.auth.userOrFail()` is present.
-
-## Route Schema Binding: concrete input → output
-
-```typescript
-const CreatePostSchema = z.object({
-  title: z.string().trim().min(1),
-  body: z.string(),
-  published: z.boolean().optional().default(false),
-  tagIds: z.array(z.coerce.number().int()).optional(),
-})
-router.post('/posts', { name: 'posts.store', body: CreatePostSchema }, [PostController, 'store'])
-```
-
-generates this entry in `.guren/api-client.gen.ts`:
-
-```typescript
-export interface ApiRoutes {
-  'posts.store': {
-    method: 'POST'
-    path: '/posts'
-    params: Record<string, never>          // path params come from ':id' segments, typed string | number
-    body: { title: string; body: string; published?: boolean; tagIds?: (number | string)[] }
-  }
-}
-```
-
-`body` is the **request** side of the schema — what a caller has to send, before
-validation runs. That is why `tagIds` accepts a string above: `z.coerce.number()`
-exists precisely so a form can send `"3"`. The controller still receives a
-`number` from `validateBody()`. The most visible case is dates:
-`z.coerce.date()` is a `string` in `body` (JSON has no date type) and a `Date`
-once parsed.
-
-Only **named** routes are emitted. `output:` schemas add a `response:` field,
-which — describing a parsed response — uses the output side instead.
-Consume with `createApiClient<ApiRoutes>({ baseUrl })` → `client.request('posts.store', { body })`.
-Mutating requests copy the `XSRF-TOKEN` cookie into the `X-XSRF-TOKEN` header, so a
-same-origin client passes CSRF protection without extra wiring. The token is never
-copied to a `baseUrl` on another origin — that client passes its own `X-XSRF-TOKEN`
-header (and `credentials: 'include'` plus CORS if it needs the session cookie sent).
-
-## Which Zod constructs survive type extraction
-
-Codegen walks schemas at runtime (Zod v3 and v4):
-
-- **Typed**: primitives (`string`/`number`/`boolean`/`bigint`/`date`), `literal`, `enum`,
-  `array`, nested `object`, `union` / `discriminatedUnion`, `intersection`, `record`,
-  `nullable` (`| null`)
-- **Unwrapped transparently**: `.optional()` and `.default()` (field becomes `key?:`),
-  `.catch()`, `.readonly()`, `.brand()`, `.lazy()`
-- **Validation checks don't change the type**: `.min()`, `.max()`, `.trim()`, `.email()`,
-  regex etc. stay `string`
-- **Coercion follows the side being rendered**: `z.coerce.number()` is `number | string`
-  in `body` and `number` in `response`; `z.coerce.date()` is `string` then `Date`
-- **`.transform()` extracts the input type**: the output of a transform function is a
-  runtime value with no type to read, so it is NOT reflected on either side.
-  `z.string().pipe(z.number())` — a real pipe, not a transform — does resolve both sides
-- **Degrades**: `tuple` → `unknown[]`, `z.nativeEnum()` → `string | number`,
-  unrecognized constructs → `unknown`
-
-So `z.string().trim().min(1).optional().default('x')` survives as `key?: string`.
-If a generated type comes out as `unknown`, simplify the construct instead of reading `node_modules`.
-
-## When to re-run codegen
-
-`bunx guren codegen` (or `bun run codegen`) regenerates `.guren/pages.gen.ts`,
-`routes.gen.ts`, `data.gen.ts`, `api-client.gen.ts`. Re-run after changing:
-
-- `routes/web.ts` (route names, paths, schemas)
-- page components' `interface Props` in `resources/js/pages/`
-- Resource classes in `app/Http/Resources/`
-
-`bun run dev` runs codegen on start, and the Vite plugin watches those paths and
-regenerates on change. In tests/CI, run it explicitly if generated types are stale.
+Agent tools (`.agent()`), the generated `ApiRoutes` shape, `createApiClient`
+and CSRF, and which Zod constructs survive extraction:
+`__SKILLS_DIR__/guren-api/reference/routes-codegen.md`.

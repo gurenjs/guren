@@ -430,3 +430,19 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
     legacyHookCommands,
   }
 }
+
+/**
+ * One line for `guren context` (the SessionStart map) when `agent:sync` would replace
+ * managed harness files: an outdated rule set is context the agent carries on every turn.
+ * Silent when nothing is installed or the comparison itself fails.
+ */
+export async function staleHarnessNote(cwd: string): Promise<string | undefined> {
+  const result = await installAgentHarness({ cwd, mode: 'sync', dryRun: true }).catch(() => undefined)
+  if (!result || result.replaced.length === 0) {
+    return undefined
+  }
+  const sample = result.replaced.slice(0, 3).join(', ')
+  const more = result.replaced.length > 3 ? `, +${result.replaced.length - 3} more` : ''
+  return `> The agent harness is older than the installed @guren/cli (${sample}${more} differ). Run \`bunx guren agent:sync\`.`
+}
+
