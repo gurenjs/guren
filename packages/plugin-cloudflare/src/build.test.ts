@@ -215,7 +215,10 @@ describe('buildCloudflareOutput', () => {
     const configPath = join(root, 'wrangler.jsonc')
     const config = JSON.parse(readFileSync(configPath, 'utf8'))
     config.d1_databases[0].database_id = 'TODO: wrangler d1 create'
-    config.kv_namespaces = [{ binding: 'CACHE', id: '0123456789abcdef0123456789abcdef' }]
+    config.kv_namespaces = [
+      { binding: 'CACHE', id: '0123456789abcdef0123456789abcdef' },
+      { binding: 'SESSIONS', id: '0'.repeat(32) },
+    ]
     config.env = {
       production: { d1_databases: [{ binding: 'DB', database_name: 'demo-app', database_id: '<the id wrangler printed>' }] },
     }
@@ -228,6 +231,8 @@ describe('buildCloudflareOutput', () => {
     expect(warnings).toContain('placeholder resource ids')
     expect(warnings).toContain('d1_databases[0].database_id\n')
     expect(warnings).toContain('d1_databases[0].database_id (env.production)')
+    expect(warnings).toContain('give each environment its own name')
+    expect(warnings).toContain('kv_namespaces[1].id')
     expect(warnings).not.toContain('kv_namespaces[0].id')
   })
 

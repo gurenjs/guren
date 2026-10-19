@@ -54,9 +54,9 @@ The scaffolded `wrangler.jsonc` binds the database by name and leaves out `datab
 }
 ```
 
-On a binding with no id, `wrangler deploy` (Wrangler 4.129 or later) looks for a database named `database_name` and creates it if there is none. A later deploy keeps the database the deployed worker is bound to, so there is no id to copy anywhere. Wrangler 4.151 and later also write the new id back into `wrangler.jsonc` when you deploy from a terminal; a CI deploy leaves the file alone and relies on the same lookup.
+On a binding with no id, `wrangler deploy` (Wrangler 4.129 or later) looks for a database named `database_name` and creates it if there is none. A later deploy keeps the database the deployed worker is bound to, so there is no id to copy anywhere. The lookup is by name across the whole account: if another project already has a database called `my-app`, the deploy binds to it, so pick a `database_name` that is unique on the account. Wrangler 4.151 and later also write the new id back into `wrangler.jsonc` when you deploy from a terminal; a CI deploy leaves the file alone and relies on the same lookup.
 
-To use a database you created yourself, run `bunx wrangler d1 create my-app` and add the id it prints as `"database_id"`. Do not leave a made-up value there: Wrangler skips provisioning for any binding that carries an id, so a placeholder fails the deploy. Apps scaffolded by an older plugin have `"database_id": "TODO: wrangler d1 create"`; the build warns about any id that is not a real one, before the app build runs, until you delete the key.
+To use a database you created yourself, run `bunx wrangler d1 create my-app` and add the id it prints as `"database_id"`. Do not leave a made-up value there: Wrangler skips provisioning for any binding that carries an id, so a placeholder fails the deploy. Apps scaffolded by an older plugin have `"database_id": "TODO: wrangler d1 create"`; before the app build runs, the build warns about any id that is not hex (or is all zeros) until you delete the key.
 
 Select the driver by runtime in `config/database.ts`. D1 speaks SQLite, so write your schema in the SQLite dialect and keep a local SQLite file for development:
 

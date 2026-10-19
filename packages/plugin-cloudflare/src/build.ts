@@ -522,9 +522,9 @@ function configScopes(config: Record<string, unknown>): ConfigScope[] {
 }
 
 /**
- * wrangler provisions only a binding with no id, so a placeholder id (earlier
- * scaffolds wrote `TODO: wrangler d1 create`) fails the deploy. Any id that is not
- * hex and hyphens is one: D1 ids are UUIDs and KV ids 32 hex digits.
+ * wrangler provisions only a binding with no id, so a placeholder id such as
+ * `TODO: wrangler d1 create` fails the deploy. D1 ids are UUIDs and KV ids 32 hex
+ * digits, so anything but hex and hyphens, or all zeros, is a placeholder.
  */
 function warnPlaceholderIds(root: string): void {
   const configPath = resolve(root, 'wrangler.jsonc')
@@ -541,15 +541,20 @@ function warnPlaceholderIds(root: string): void {
     return
   }
 
+  // An id-less binding resolves by name, so an env sharing the top level's name shares its resource.
+  const envNote = placeholders.some((key) => key.includes('(env.'))
+    ? '\nAn env.<name> binding left with no id resolves by its database_name or the worker name, so give each environment its own name before deleting its id.'
+    : ''
   console.warn(
-    `Cloudflare build: ${configPath} has placeholder resource ids, which \`wrangler deploy\` rejects. Delete these keys, and the deploy creates each resource (or connects to the one it created before); or paste a real id in:\n  ${placeholders.join('\n  ')}`,
+    `Cloudflare build: ${configPath} has placeholder resource ids, which \`wrangler deploy\` rejects. Delete these keys, and the deploy creates each resource (or connects to one of the same name); or paste a real id in:\n  ${placeholders.join('\n  ')}${envNote}`,
   )
 }
 
 function placeholderKeys(scope: ConfigScope, key: string, idKey: string): string[] {
   return asArray(scope.config[key]).flatMap((entry, index) => {
     const id = isRecord(entry) ? entry[idKey] : undefined
-    return typeof id === 'string' && !/^[0-9a-f-]+$/i.test(id) ? [`${key}[${index}].${idKey}${scope.label}`] : []
+    const placeholder = typeof id === 'string' && (!/^[0-9a-f-]+$/i.test(id) || /^[0-]*$/.test(id))
+    return placeholder ? [`${key}[${index}].${idKey}${scope.label}`] : []
   })
 }
 
@@ -1385,7 +1390,7 @@ function scaffoldWranglerConfig(
     ? `the D1 database "${appName}" and the ${OAUTH_KV_BINDING} namespace`
     : `the D1 database "${appName}"`
   console.log(
-    `Cloudflare build: scaffolded ${configPath} with no resource ids. The first \`wrangler deploy\` creates ${created}; apply migrations after it:\n`
+    `Cloudflare build: scaffolded ${configPath} with no resource ids. The first \`wrangler deploy\` (Wrangler 4.129 or later) creates ${created}, or connects to an existing one of that name on the account. The worker serves an empty database until you apply migrations right after it:\n`
     + `  wrangler d1 migrations apply ${appName} --remote`,
   )
   // Not scaffolded: a cron trigger every app pays for whether or not it has

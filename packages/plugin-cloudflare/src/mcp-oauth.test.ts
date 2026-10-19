@@ -92,7 +92,7 @@ describe('cloudflare:build --mcp-oauth', () => {
     })
 
     /**
-     * Earlier scaffolds wrote a placeholder id, which `wrangler deploy` rejects.
+     * A placeholder id opts the binding out of provisioning and fails `wrangler deploy`.
      * Warned rather than failed: the id is not needed to *build*.
      */
     test('should warn when the OAUTH_KV binding still has the scaffolded placeholder id', async () => {
