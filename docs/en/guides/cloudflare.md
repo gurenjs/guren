@@ -400,6 +400,63 @@ When the app has a `config/agents.ts`, `cloudflare:build` does three extra thing
 
 The Free-plan measurements for a deployed agent, the D1 query budget a sweep has to fit in, and everything else about writing one are in [Durable Agents](./durable-agents.md).
 
+## Deploying with the cf CLI (beta)
+
+`cf` is Cloudflare's successor to Wrangler, in open beta. It reads `cloudflare.config.ts` instead of `wrangler.jsonc`, and `cloudflare:build` switches to it when the app has a `cloudflare.config.ts` and declares the `cf` package. Without that file, nothing changes.
+
+The deploy machine needs Node 22.18 or later, because `cf` loads `cloudflare.config.ts` with Node, and Wrangler 4.136 or later, which `cf` hands the bundling to:
+
+```bash
+bun add -d cf wrangler
+```
+
+Write two files at the app root. `gurenWorker()` returns the worker `cloudflare:build` assembled: its entry, the `DB` binding by name, `OAUTH_KV` under `--mcp-oauth`, and each agent as a SQLite-backed Durable Object. Your own settings go in the same object, after the spread:
+
+```typescript
+// cloudflare.config.ts
+import { bindings, defineConfig, triggers } from 'cf/config'
+import { gurenWorker } from '@guren/plugin-cloudflare/config'
+
+export default defineConfig(async () => {
+  const worker = await gurenWorker({ name: 'my-app' })
+  return {
+    worker: {
+      ...worker,
+      compatibilityDate: '2026-10-01',
+      env: { ...worker.env, MEDIA: bindings.r2({}) },
+      triggers: [triggers.scheduled({ schedule: '* * * * *' })],
+    },
+  }
+})
+```
+
+```typescript
+// wrangler.config.ts
+import { defineWranglerConfig } from 'wrangler/experimental-config'
+import { gurenWranglerBundle } from '@guren/plugin-cloudflare/config'
+
+export default defineWranglerConfig(gurenWranglerBundle())
+```
+
+`compatibilityDate` is yours to set and to move. `gurenWranglerBundle()` supplies the module stubs, the build-time `define` entries and the assets directory, with `keepNames` on. The cron trigger is only needed when the app has scheduled tasks (see [Scheduled Tasks](#scheduled-tasks)).
+
+Build, then deploy from the app root:
+
+```bash
+bunx guren cloudflare:build
+bunx cf deploy
+```
+
+On this path the build assembles into `.guren/cloudflare/` and writes `guren-worker.json` there for `gurenWorker()` to read. The directory carries its own `.gitignore`, and `cf`'s files under `.cloudflare/` are left alone. The bindings carry no ids, so `cf deploy` creates the database and namespaces on the first deploy, by the same name lookup as [Wrangler](#database-d1).
+
+`cf d1 migrations apply` takes the database id rather than its name. Look it up with `bunx cf d1 list --name my-app`, then apply the flattened migrations the build wrote (remote is the default; `--local` targets the local simulation):
+
+```bash
+bunx cf d1 migrations apply <database-id> --dir .guren/cloudflare/d1-migrations
+```
+
+That directory records each migration under the same name as `wrangler d1 migrations apply`, so a database migrated through Wrangler keeps its history. `cloudflare:size` measures only the Wrangler path.
+
 ## Upgrading an Existing App
 
 `wrangler.jsonc` is scaffolded once and never overwritten, so an app created before a plugin update keeps its original config. The build prints exactly which entries are missing when it finds an outdated one. Add them and rebuild.
