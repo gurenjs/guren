@@ -41,6 +41,7 @@ describe.if(built)('cf config subpath (built, under Node)', () => {
           htmlHandling: 'none',
           alias: {},
           define: {},
+          vars: { NODE_ENV: 'production' },
           d1: { binding: 'DB', databaseName: 'demo-app' },
           kvNamespaces: [],
           mcpOAuth: false,
@@ -54,7 +55,7 @@ describe.if(built)('cf config subpath (built, under Node)', () => {
       const result = Bun.spawnSync({ cmd: ['node', '--input-type=module', '-e', script], cwd: app, stdout: 'pipe', stderr: 'pipe' })
 
       expect(result.stderr.toString()).toBe('')
-      expect(JSON.parse(result.stdout.toString())).toEqual({ DB: { type: 'd1', name: 'demo-app' } })
+      expect(JSON.parse(result.stdout.toString())).toEqual({ DB: { type: 'd1', name: 'demo-app' }, NODE_ENV: { type: 'text', value: 'production' } })
     } finally {
       rmSync(app, { recursive: true, force: true })
     }

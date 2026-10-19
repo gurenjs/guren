@@ -156,6 +156,10 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   // Read before the reset deletes it: a deploy settles these, and no build can recompute them.
   const resolved = backend === 'cf' ? readResolvedResources(out) : {}
   resetOutputDir(out, root, 'Cloudflare build')
+  // Written first so a build failing below still keeps the carried-over ids.
+  if (backend === 'cf') {
+    writeWorkerManifest({ root, out, packageName: packageJson.name, mcpOAuth, agents: agents.exports, resolved })
+  }
 
   // Workers Static Assets serves `/` from index.html BEFORE the worker runs,
   // and has no rewrites for the built assets' `/public/assets/` base — both
@@ -190,9 +194,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
     scaffoldConsentFlow(root)
   }
 
-  if (backend === 'cf') {
-    writeWorkerManifest({ root, out, packageName: packageJson.name, mcpOAuth, agents: agents.exports, resolved })
-  } else {
+  if (backend === 'wrangler') {
     scaffoldWranglerConfig(root, out, packageJson.name, mcpOAuth, agents.exports)
   }
 }
@@ -245,6 +247,7 @@ function writeWorkerManifest(input: {
     htmlHandling: HTML_HANDLING,
     alias: devOnlyAliases(outRelative),
     define: BUNDLE_DEFINES,
+    vars: WORKER_VARS,
     d1: { binding: 'DB', databaseName: workerName(input.packageName) },
     kvNamespaces: input.mcpOAuth ? [OAUTH_KV_BINDING] : [],
     mcpOAuth: input.mcpOAuth,
@@ -255,6 +258,7 @@ function writeWorkerManifest(input: {
     resolved: input.resolved,
   }
 
+  mkdirSync(input.out, { recursive: true })
   writeFileSync(resolve(input.out, WORKER_MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`)
   // The manifest will carry resource ids, which stay out of the repository (RFC 0035 §3.1).
   writeFileSync(resolve(input.out, '.gitignore'), '*\n')
@@ -1421,6 +1425,8 @@ function renderOAuthProvider(mcpPath: string, defaultEntry: string): string {
 }
 
 /** Substituted at bundle time, by wrangler or by the bundler `cf` delegates to. */
+const WORKER_VARS: Record<string, string> = { NODE_ENV: 'production' }
+
 const BUNDLE_DEFINES: Record<string, string> = {
   // Framework and app code branch on NODE_ENV at module scope, statements in
   // the generated worker cannot beat ESM import hoisting, and wrangler `vars`
@@ -1479,7 +1485,7 @@ function scaffoldWranglerConfig(
           migrations: [{ tag: 'v1', new_sqlite_classes: agents.map((agent) => agent.export) }],
         }
       : {}),
-    vars: { NODE_ENV: 'production' },
+    vars: WORKER_VARS,
   }
 
   try {

@@ -27,6 +27,7 @@ export type GurenBinding =
   | { type: 'd1'; name?: string; id?: string }
   | { type: 'kv'; id?: string }
   | { type: 'durable-object'; worker: string; exportName: string }
+  | { type: 'text'; value: string }
 
 export interface GurenWorker {
   name: string
@@ -63,6 +64,10 @@ export async function gurenWorker(options: GurenWorkerOptions): Promise<GurenWor
   for (const binding of manifest.kvNamespaces) {
     const id = resolved[binding]?.id
     env[binding] = { type: 'kv', ...(id ? { id } : {}) }
+  }
+
+  for (const [key, value] of Object.entries(manifest.vars)) {
+    env[key] = { type: 'text', value }
   }
 
   const exports: GurenWorker['exports'] = {}
@@ -105,14 +110,19 @@ async function readWorkerManifest(outputDir = CF_OUTPUT_DIR): Promise<WorkerMani
     text = await readFile(path, 'utf8')
   } catch {
     throw new Error(
-      `@guren/plugin-cloudflare/config: ${path} not found. Run \`bunx guren cloudflare:build\` before \`cf build\` or \`cf deploy\`; it writes this manifest.`,
+      `@guren/plugin-cloudflare/config: ${path} not found. Run \`bunx guren cloudflare:build\` before \`cf build\` or \`cf deploy\`; it writes this manifest. A build given another outputDir needs the same outputDir here.`,
     )
   }
 
-  const manifest = JSON.parse(text) as Partial<WorkerManifest>
-  if (manifest.version !== WORKER_MANIFEST_VERSION) {
+  let manifest: Partial<WorkerManifest> | null
+  try {
+    manifest = JSON.parse(text) as Partial<WorkerManifest> | null
+  } catch {
+    manifest = null
+  }
+  if (manifest?.version !== WORKER_MANIFEST_VERSION) {
     throw new Error(
-      `@guren/plugin-cloudflare/config: ${path} has manifest version ${String(manifest.version)}, and this plugin reads ${WORKER_MANIFEST_VERSION}. Run \`bunx guren cloudflare:build\` again with the installed plugin.`,
+      `@guren/plugin-cloudflare/config: ${path} is not a version ${WORKER_MANIFEST_VERSION} manifest (it reads ${manifest === null ? 'as no JSON object' : `version ${String(manifest.version)}`}). Run \`bunx guren cloudflare:build\` again with the installed plugin.`,
     )
   }
   return manifest as WorkerManifest

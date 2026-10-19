@@ -520,7 +520,10 @@ describe.skipIf(!cfEnabled)('cf builds and dry-runs the cf-backend worker', () =
 
       const workerDir = join(root, '.cloudflare/output/v0/workers/default')
       const config = JSON.parse(readFileSync(join(workerDir, 'worker.config.json'), 'utf8')) as Record<string, unknown>
-      expect(config.env).toEqual({ DB: { type: 'd1', name: 'cf-backend-probe' } })
+      expect(config.env).toEqual({
+        DB: { type: 'd1', name: 'cf-backend-probe' },
+        NODE_ENV: { type: 'text', value: 'production' },
+      })
       expect(config.compatibilityFlags).toEqual(['nodejs_compat'])
 
       const bundle = readFileSync(join(workerDir, 'bundle/worker.js'), 'utf8')

@@ -11,6 +11,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 
+import { detectCloudflareBackend } from './build'
+
 export const WORKER_SIZE_LIMIT = {
   bytes: 64 * 1024 * 1024,
   source: 'https://developers.cloudflare.com/workers/platform/limits/#worker-size',
@@ -201,7 +203,7 @@ export interface ReportBundleSizeOptions {
  */
 export function reportBundleSize(options: ReportBundleSizeOptions): BundleReport {
   const root = resolve(options.root)
-  if (existsSync(join(root, 'cloudflare.config.ts'))) {
+  if (detectCloudflareBackend(root) === 'cf') {
     throw new Error(
       `Cloudflare size: measures the bundle wrangler.jsonc deploys, and ${root} deploys through cf (cloudflare.config.ts). Run \`cf build\` and read the size of .cloudflare/output/v0/workers/default/bundle/ instead.`,
     )

@@ -55,6 +55,7 @@ describe('cloudflare:build on the cf backend (RFC 0035)', () => {
     expect(manifest.assetsDirectory).toBe('./.guren/cloudflare/assets')
     expect(manifest.alias['bun:sqlite']).toBe('./.guren/cloudflare/stub-bun-sqlite.js')
     expect(manifest.define['process.env.NODE_ENV']).toBe('"production"')
+    expect(manifest.vars).toEqual({ NODE_ENV: 'production' })
     expect(manifest.d1).toEqual({ binding: 'DB', databaseName: 'demo-app' })
     expect(manifest.kvNamespaces).toEqual([])
     expect(manifest.agents).toEqual([])
@@ -93,6 +94,21 @@ describe('cloudflare:build on the cf backend (RFC 0035)', () => {
     expect(readManifest(root).agents).toEqual([{ exportName: 'Triager', binding: 'TRIAGER' }])
     expect(warnings).not.toContain('placeholder')
     expect(readFileSync(join(root, '.guren/cloudflare/worker.js'), 'utf8')).toContain('export { Triager }')
+  })
+
+  test('should keep the carried-over ids when the build fails after the reset', async () => {
+    scaffoldApp(root, { cfBackend: true })
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    const path = join(root, '.guren/cloudflare/guren-worker.json')
+    writeJson(path, { ...readManifest(root), resolved: { DB: { id: 'e902bc31-46b4-47dc-9d46-194d0b86148c' } } })
+    // Two migrations that flatten to one file name fail the build after the reset.
+    mkdirSync(join(root, 'db/migrations/0001_init'), { recursive: true })
+    writeFileSync(join(root, 'db/migrations/0001_init/migration.sql'), 'select 1;\n')
+    writeFileSync(join(root, 'db/migrations/0001_init.sql'), 'select 1;\n')
+
+    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow()
+
+    expect(readManifest(root).resolved).toEqual({ DB: { id: 'e902bc31-46b4-47dc-9d46-194d0b86148c' } })
   })
 
   test('should refuse cloudflare:size, which measures through wrangler.jsonc', () => {

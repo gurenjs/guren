@@ -27,6 +27,8 @@ export interface WorkerManifest {
   htmlHandling: 'none'
   alias: Record<string, string>
   define: Record<string, string>
+  /** Plain-text bindings; `define` cannot reach a runtime `process.env[key]` read. */
+  vars: Record<string, string>
   d1: { binding: string; databaseName: string }
   /** KV namespace bindings the build owns (`OAUTH_KV` under `--mcp-oauth`). */
   kvNamespaces: string[]

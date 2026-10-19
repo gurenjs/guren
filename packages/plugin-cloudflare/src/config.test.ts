@@ -16,6 +16,7 @@ function manifest(overrides: Partial<WorkerManifest> = {}): WorkerManifest {
     htmlHandling: 'none',
     alias: { 'bun:sqlite': './.guren/cloudflare/stub-bun-sqlite.js' },
     define: { 'process.env.NODE_ENV': '"production"' },
+    vars: { NODE_ENV: 'production' },
     d1: { binding: 'DB', databaseName: 'demo-app' },
     kvNamespaces: [],
     mcpOAuth: false,
@@ -54,6 +55,7 @@ describe('@guren/plugin-cloudflare/config', () => {
       DB: bindings.d1({ name: 'demo-app' }),
       OAUTH_KV: bindings.kv({}),
       TRIAGER: bindings.durableObject({ worker: 'demo-app', exportName: 'Triager' }),
+      NODE_ENV: bindings.text('production'),
     })
     expect(worker.exports as Record<string, unknown>).toEqual({ Triager: exports.durableObject({ storage: 'sqlite' }) })
     expect(worker.entrypoint).toBe('./.guren/cloudflare/worker.js')
@@ -103,6 +105,13 @@ describe('@guren/plugin-cloudflare/config', () => {
   test('should refuse a manifest of another version', async () => {
     write({ ...manifest(), version: 99 })
 
-    await expect(gurenWranglerBundle({ outputDir })).rejects.toThrow(/manifest version 99/)
+    await expect(gurenWranglerBundle({ outputDir })).rejects.toThrow(/reads version 99/)
+  })
+
+  test('should name the rebuild when the manifest is not JSON', async () => {
+    mkdirSync(outputDir, { recursive: true })
+    writeFileSync(join(outputDir, 'guren-worker.json'), '{"version": 1, "entry')
+
+    await expect(gurenWorker({ name: 'demo-app', outputDir })).rejects.toThrow(/reads as no JSON object.*cloudflare:build/s)
   })
 })
