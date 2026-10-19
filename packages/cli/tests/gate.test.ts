@@ -1,6 +1,6 @@
 import { describe, expect, it, spyOn } from 'bun:test'
 import { consola } from 'consola'
-import { describeGateFailures, GATE_STAGES, renderGateReport, runGate, type GateExec, type GateExecResult, type GateReport } from '../src/gate'
+import { describeGateFailures, GATE_STAGES, renderGateReport, runGate, stopFindingsMessage, type GateExec, type GateExecResult, type GateReport } from '../src/gate'
 import type { Introspection } from '../src/introspect'
 import { createTempWorkspace, gateAppFiles, initGitRepo, linkOxlint, manifestFixture, PG_SCHEMA_FIXTURE, sessionConfigSource, writeWorkspaceFiles } from './helpers'
 
@@ -231,7 +231,9 @@ export default class PostController extends Controller {
 
       const changed = await runGate({ cwd: dir, changed: true, exec: fakeExec().exec })
       expect(changed.ok).toBe(true)
-      expect(stage(changed, 'audit').changedWarnings?.join('\n')).toContain('PostController.destroy')
+      expect(stage(changed, 'audit').changedWarnings).toEqual([
+        { file: 'app/Http/Controllers/PostController.ts', text: expect.stringContaining('PostController.destroy') },
+      ])
 
       const full = await runGate({ cwd: dir, exec: fakeExec().exec })
       expect(stage(full, 'audit').changedWarnings).toBeUndefined()
@@ -393,3 +395,37 @@ export default function registerRoutes(router: any) {
     })
   })
 })
+
+describe('stopFindingsMessage', () => {
+  const warning = { file: 'app/Http/Controllers/PostController.ts', text: 'PUT /posts/:id: PostController.update has no authorization' }
+  const report = (ok: boolean): GateReport => ({
+    cwd: '/app',
+    ok,
+    changed: true,
+    stages: [
+      { name: 'test', status: ok ? 'pass' : 'fail', durationMs: 1, findings: ok ? [] : ['(fail) posts > update'] },
+      { name: 'audit', status: 'pass', durationMs: 1, findings: [], changedWarnings: [warning] },
+    ],
+  })
+
+  it('says nothing for a passing gate with no warning on this session\'s files', () => {
+    expect(stopFindingsMessage(report(true), new Set(['README.md']))).toBeNull()
+  })
+
+  it('names the warnings on this session\'s files when the gate passes', () => {
+    const message = stopFindingsMessage(report(true), new Set([warning.file]))
+    expect(message).toContain('the gate passed')
+    expect(message).toContain(`- ${warning.text}`)
+  })
+
+  it('keeps the warnings beside the failures when the gate fails, so a single block carries both', () => {
+    const message = stopFindingsMessage(report(false), new Set([warning.file]))!
+    expect(message.indexOf('test failed')).toBeLessThan(message.indexOf(warning.text))
+    expect(message).toContain('Run `bunx guren gate` to see every stage.')
+  })
+
+  it('leaves out a warning on a file only earlier commits changed', () => {
+    expect(stopFindingsMessage(report(false), new Set()) ?? '').not.toContain(warning.text)
+  })
+})
+

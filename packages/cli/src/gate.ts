@@ -38,9 +38,24 @@ export interface GateStageResult {
   reason?: string
   /** A step the stage ran beyond its default (`--deps` adds the dependency scan to audit). */
   detail?: string
-  /** Audit warnings on the files a `--changed` run touched: they never fail the gate, but the Stop hook shows them once. */
-  changedWarnings?: string[]
+  /**
+   * Audit warnings of the kinds in `STOP_WARNING_KEYS` on the files a `--changed` run
+   * touched: they never fail the gate, but the Stop hook shows them once.
+   */
+  changedWarnings?: ChangedWarning[]
 }
+
+export interface ChangedWarning {
+  /** App-relative POSIX path of the file the finding names. */
+  file: string
+  text: string
+}
+
+/**
+ * The audit warnings a stop is sent back for: a mutating action with no authorization, and
+ * request data reaching a force write. Other warnings (raw SQL, an unread handler) stay advisory.
+ */
+export const STOP_WARNING_KEYS = ['policy:', 'force-write-request-data:'] as const
 
 export interface GateReport {
   cwd: string
@@ -189,17 +204,18 @@ async function auditStage(ctx: StageContext): Promise<StageOutcome> {
       reason: 'route-level checks did not run (routes could not be loaded; pass --routes if the entry is elsewhere)',
     }
   }
-  const changedWarnings = capFindings(
-    report.findings.filter((finding) => finding.status === 'warn' && touches(ctx, finding.filePath)).map(formatFinding),
-  )
+  const changedWarnings: ChangedWarning[] = []
+  for (const finding of report.findings) {
+    if (finding.status !== 'warn' || !STOP_WARNING_KEYS.some((key) => finding.key.startsWith(key))) continue
+    const file = appRelative(ctx.cwd, finding.filePath)
+    if (file !== undefined && ctx.changedFiles?.has(file)) changedWarnings.push({ file, text: formatFinding(finding) })
+  }
   return { status: failing.length > 0 ? 'fail' : 'pass', findings, detail, ...(changedWarnings.length > 0 ? { changedWarnings } : {}) }
 }
 
-/** Whether a finding's file is one the `--changed` run touched; never true for a full run. */
-function touches(ctx: StageContext, filePath: string | undefined): boolean {
-  if (ctx.changedFiles === null || filePath === undefined) return false
-  const rel = relative(ctx.cwd, isAbsolute(filePath) ? filePath : resolve(ctx.cwd, filePath)).split(sep).join('/')
-  return ctx.changedFiles.has(rel)
+function appRelative(cwd: string, filePath: string | undefined): string | undefined {
+  if (filePath === undefined) return undefined
+  return relative(cwd, isAbsolute(filePath) ? filePath : resolve(cwd, filePath)).split(sep).join('/')
 }
 
 const STAGE_RUNNERS: Record<GateStageName, (ctx: StageContext) => Promise<StageOutcome>> = {
@@ -261,25 +277,40 @@ export async function runGate(options: RunGateOptions = {}): Promise<GateReport>
  * feed back. Outside a git repository the tree cannot be judged clean, so the gate
  * runs. Shared by every agent's stop hook; only the stdin/stdout contract differs.
  */
-export async function stopGateFindings(cwd = process.cwd()): Promise<string | null> {
+export async function stopGateFindings(cwd = process.cwd(), options: { warnings?: boolean } = {}): Promise<string | null> {
   // Scoped to the app: a monorepo app is not the git root.
   const tree = await runGit(cwd, ['status', '--porcelain', '--', '.'])
   if (tree?.length === 0) return null
   // `--changed`: check and lint on what this session touched; typecheck, audit,
   // and the tests answer for the whole app either way.
   const report = await runGate({ cwd, changed: true })
-  if (report.ok) {
-    // A missing authorization or a request-fed force write is a warning, so it never fails
-    // the gate; on files this session changed it is the agent's to settle before stopping.
-    const warnings = report.stages.flatMap((stage) => stage.changedWarnings ?? [])
-    if (warnings.length === 0) return null
-    return [
-      'guren gate passed, but guren audit warns on files this change touched:',
-      ...warnings.map((warning) => `- ${warning}`),
-      'Fix them, or mark a deliberate exception with a `// guren-audit-ignore: <reason>` comment above the action.',
-    ].join('\n')
-  }
-  return `${describeGateFailures(report)}\nRun \`bunx guren gate\` to see every stage.`
+  const session = options.warnings === false ? new Set<string>() : await uncommittedFiles(cwd)
+  return stopFindingsMessage(report, session)
+}
+
+/** App-relative paths of this session's work: uncommitted edits and untracked files. */
+async function uncommittedFiles(cwd: string): Promise<Set<string>> {
+  const [edited, untracked] = await Promise.all([
+    runGit(cwd, ['diff', '--name-only', '--relative', 'HEAD']),
+    runGit(cwd, ['ls-files', '--others', '--exclude-standard']),
+  ])
+  return new Set([...(edited ?? []), ...(untracked ?? [])])
+}
+
+/**
+ * What the Stop hook says for a `--changed` gate report: the failing stages, and the audit
+ * warnings on files of `session` (this session's uncommitted work, not the branch's earlier
+ * commits). A warning never fails the gate, so it is the only time the agent sees one.
+ */
+export function stopFindingsMessage(report: GateReport, session: ReadonlySet<string>): string | null {
+  const warnings = report.stages.flatMap((stage) => stage.changedWarnings ?? []).filter((warning) => session.has(warning.file))
+  const warningLines = warnings.length === 0 ? [] : [
+    `guren audit warns on files this change touched${report.ok ? ' (the gate passed)' : ''}:`,
+    ...warnings.map((warning) => `- ${warning.text}`),
+    'Fix them; `bunx guren audit` says how to record a deliberate exception.',
+  ]
+  if (report.ok) return warningLines.length === 0 ? null : warningLines.join('\n')
+  return [describeGateFailures(report), ...warningLines, 'Run `bunx guren gate` to see every stage.'].join('\n')
 }
 
 /** The failing stages as plain text, one line per finding. */
@@ -308,6 +339,9 @@ export function renderGateReport(report: GateReport): void {
     log(`${label} ${name} (${stage.durationMs}ms)${stage.reason ? `: ${stage.reason}` : ''}`)
     for (const finding of stage.findings) {
       consola.info(`       - ${finding}`)
+    }
+    for (const warning of stage.changedWarnings ?? []) {
+      consola.warn(`       - ${warning.text}`)
     }
   }
 

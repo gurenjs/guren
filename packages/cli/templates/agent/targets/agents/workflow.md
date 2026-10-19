@@ -17,8 +17,10 @@ so make them part of your loop:
    while any of them fails. `--changed` narrows `check` and lint to the files
    you touched. Cursor and Codex run it for you from a stop hook
    (`.cursor/hooks.json`, `.codex/hooks.json`) when a turn ends with
-   uncommitted changes, feeding the findings back into the turn (Codex asks
-   you to trust the hook once, via `/hooks`; Cursor reads the config from the
+   uncommitted changes, feeding the findings back into the turn, along
+   with `audit` warnings on files you changed (a mutating action with no
+   authorization, request data in a force write), which never fail the
+   gate (Codex asks you to trust the hook once, via `/hooks`; Cursor reads the config from the
    workspace root, so open the app as its own workspace); Copilot and
    OpenCode have no such hook, so run it yourself. The same hook verifies the
    plan step `bunx guren plan:next` marked (`plan-implement` skill); without

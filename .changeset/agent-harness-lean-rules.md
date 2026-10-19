@@ -6,7 +6,7 @@ Make the agent harness cheaper per turn. Each path-scoped rule (`orm-models`, `c
 
 - `testing.md` names the mistakes that cost agents a rerun: a form post that redirects answers 303 (not 201), rows are typed by the model's record type (not the class), the database is read through models (`count()` is on the query builder), and `assertInertia` lives on the request chain only.
 - `guren context` (the SessionStart map) opens with a one-line note when `agent:sync` would add or replace managed harness files. `installAgentHarness()` reports those files as `writtenManaged`.
-- The Stop hook also blocks once when `guren audit` warns on a file the change touched (a mutating action with no authorization, request data in a force write). Those warnings never fail `guren gate`, so before this they never reached the agent. `GateStageResult.changedWarnings` carries them on a `--changed` run.
+- The Stop hook also reports `guren audit` warnings on files the session changed: a mutating action with no authorization, and request data reaching a force write. Those warnings never fail `guren gate`, so before this they never reached the agent. They ride on the hook's one block (beside any failing stage), Cursor sends them on its first follow-up only, `guren gate --changed` prints them, and `GateStageResult.changedWarnings` carries them.
 - Rule templates may use `__SKILLS_DIR__`, rendered per target like `__RULES_DIR__`.
 
 `bunx guren agent:sync` refreshes the rules and skills of an existing app. `CLAUDE.md` and `AGENTS.md` belong to the app, so sync leaves them alone: the shorter entry document reaches new apps, and an existing one can adopt it with `bunx guren agent:init --force` (which also overwrites `.mcp.json` and `.claude/settings.json`) or by hand.
