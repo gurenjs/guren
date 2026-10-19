@@ -73,6 +73,8 @@ Validation failures are 422 with `{ message, errors: Record<string, string[]> }`
   Promise of the raw driver): `await Post.where({ authorId }).get()`,
   `await Post.where({ authorId }).count()`, `await Post.find(id)`. `count()`
   exists on the query builder only; `Post.count()` does not.
+- **Create a user with `password`**, not `passwordHash`: the scaffolded `User`
+  model hashes it (`requireOnCreate: ['password']`).
 - **The response body is `await res.json()`**; `res.response` is private.
 - There is no `asInertia()`: Inertia pages are asserted with `assertInertia()`.
 
