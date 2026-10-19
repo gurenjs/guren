@@ -32,7 +32,6 @@ export interface WorkerManifest {
   d1: { binding: string; databaseName: string }
   /** KV namespace bindings the build owns (`OAUTH_KV` under `--mcp-oauth`). */
   kvNamespaces: string[]
-  mcpOAuth: boolean
   /** Agent classes hosted as SQLite-backed Durable Objects, with the binding each gets. */
   agents: Array<{ exportName: string; binding: string }>
   /** Keyed by binding name. The build never writes an entry, only carries them over. */

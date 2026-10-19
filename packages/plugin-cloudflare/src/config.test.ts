@@ -5,26 +5,8 @@ import { join } from 'node:path'
 import { bindings, exports, type WorkerConfig } from '@cloudflare/config/public'
 
 import { gurenWorker, gurenWranglerBundle } from './config'
-import { WORKER_MANIFEST_VERSION, type WorkerManifest } from './worker-manifest'
+import { workerManifest as manifest } from '../tests/app-fixture'
 
-function manifest(overrides: Partial<WorkerManifest> = {}): WorkerManifest {
-  return {
-    version: WORKER_MANIFEST_VERSION,
-    entrypoint: './.guren/cloudflare/worker.js',
-    assetsDirectory: './.guren/cloudflare/assets',
-    compatibilityFlags: ['nodejs_compat'],
-    htmlHandling: 'none',
-    alias: { 'bun:sqlite': './.guren/cloudflare/stub-bun-sqlite.js' },
-    define: { 'process.env.NODE_ENV': '"production"' },
-    vars: { NODE_ENV: 'production' },
-    d1: { binding: 'DB', databaseName: 'demo-app' },
-    kvNamespaces: [],
-    mcpOAuth: false,
-    agents: [],
-    resolved: {},
-    ...overrides,
-  }
-}
 
 describe('@guren/plugin-cloudflare/config', () => {
   let outputDir: string

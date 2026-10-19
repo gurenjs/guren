@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { buildCloudflareOutput, detectCloudflareBackend } from './build'
+import { detectCloudflareBackend } from './backend'
+import { buildCloudflareOutput } from './build'
 import { reportBundleSize } from './bundle-size'
 import type { WorkerManifest } from './worker-manifest'
 
@@ -79,7 +80,6 @@ describe('cloudflare:build on the cf backend (RFC 0035)', () => {
     await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }))
 
     expect(readManifest(root).kvNamespaces).toEqual(['OAUTH_KV'])
-    expect(readManifest(root).mcpOAuth).toBe(true)
   })
 
   test('should list agents with their bindings, and not check a wrangler.jsonc cf never reads', async () => {

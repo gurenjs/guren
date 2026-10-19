@@ -11,7 +11,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 
-import { detectCloudflareBackend } from './build'
+import { detectCloudflareBackend } from './backend'
 
 export const WORKER_SIZE_LIMIT = {
   bytes: 64 * 1024 * 1024,

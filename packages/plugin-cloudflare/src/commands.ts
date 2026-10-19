@@ -1,5 +1,6 @@
 import { defineCommand } from 'citty'
-import { buildCloudflareOutput, detectCloudflareBackend } from './build'
+import { detectCloudflareBackend } from './backend'
+import { buildCloudflareOutput } from './build'
 import { printBundleReport, reportBundleSize } from './bundle-size'
 
 const rootArg = {

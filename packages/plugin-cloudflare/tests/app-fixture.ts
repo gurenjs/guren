@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
+import { WORKER_MANIFEST_VERSION, type WorkerManifest } from '../src/worker-manifest'
+
 /**
  * The minimum app on disk `buildCloudflareOutput` will assemble a worker from.
  * One definition, shared by `build.test.ts` and `mcp-oauth.test.ts`: every
@@ -167,4 +169,23 @@ export function writeIntrospectableApp(root: string, app: string): void {
   writeFileSync(join(root, 'bunfig.toml'), '[install]\nauto = "disable"\n')
   writeFileSync(join(root, 'src/main.ts'), "import app from './app.js'\nexport default app\n")
   writeFileSync(join(root, 'src/app.ts'), app)
+}
+
+/** A complete manifest at the current version, as `cloudflare:build` writes it on the cf backend. */
+export function workerManifest(overrides: Partial<WorkerManifest> = {}): WorkerManifest {
+  return {
+    version: WORKER_MANIFEST_VERSION,
+    entrypoint: './.guren/cloudflare/worker.js',
+    assetsDirectory: './.guren/cloudflare/assets',
+    compatibilityFlags: ['nodejs_compat'],
+    htmlHandling: 'none',
+    alias: { 'bun:sqlite': './.guren/cloudflare/stub-bun-sqlite.js' },
+    define: { 'process.env.NODE_ENV': '"production"' },
+    vars: { NODE_ENV: 'production' },
+    d1: { binding: 'DB', databaseName: 'demo-app' },
+    kvNamespaces: [],
+    agents: [],
+    resolved: {},
+    ...overrides,
+  }
 }

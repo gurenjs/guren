@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { CF_OUTPUT_DIR, WORKER_MANIFEST_FILE } from '../src/worker-manifest'
+import { workerManifest } from './app-fixture'
+
 /**
  * `cf` evaluates cloudflare.config.ts under Node, so `@guren/plugin-cloudflare/config`
  * must load there with nothing but builtins: no Bun API, no `@guren/*`, no build tooling.
@@ -30,24 +33,10 @@ describe.if(built)('cf config subpath (built, under Node)', () => {
   test('should read the manifest and return the worker in a plain Node process', () => {
     const app = mkdtempSync(join(tmpdir(), 'guren-cf-config-node-'))
     try {
-      mkdirSync(join(app, '.guren/cloudflare'), { recursive: true })
+      mkdirSync(join(app, CF_OUTPUT_DIR), { recursive: true })
       writeFileSync(
-        join(app, '.guren/cloudflare/guren-worker.json'),
-        JSON.stringify({
-          version: 1,
-          entrypoint: './.guren/cloudflare/worker.js',
-          assetsDirectory: './.guren/cloudflare/assets',
-          compatibilityFlags: ['nodejs_compat'],
-          htmlHandling: 'none',
-          alias: {},
-          define: {},
-          vars: { NODE_ENV: 'production' },
-          d1: { binding: 'DB', databaseName: 'demo-app' },
-          kvNamespaces: [],
-          mcpOAuth: false,
-          agents: [],
-          resolved: {},
-        }),
+        join(app, CF_OUTPUT_DIR, WORKER_MANIFEST_FILE),
+        JSON.stringify(workerManifest()),
       )
       const script = `import(${JSON.stringify(`${packageDir}/dist/config.js`)})`
         + ".then((m) => m.gurenWorker({ name: 'demo-app' }))"
