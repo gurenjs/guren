@@ -1,6 +1,6 @@
 ---
 name: dev-workflow
-description: Development workflow commands for a Guren application. Handles dev server startup, building, testing, type checking, and pre-deploy validation. Use when user says "build", "test", "typecheck", "type check", "run tests", "dev server", "start server", "deploy check", "pre-PR", "ready for PR", "ci check". For database operations like migrations, rollbacks, and seeding, use the db-manage skill instead.
+description: Run the dev server, build, tests, typecheck and pre-PR checks, and look up the MCP endpoint and its tools. Database work is db-manage.
 ---
 
 # Development Workflow Skill

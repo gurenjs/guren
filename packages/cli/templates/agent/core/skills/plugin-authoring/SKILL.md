@@ -1,6 +1,6 @@
 ---
 name: plugin-authoring
-description: Install or author Guren plugins — npm packages that extend a Guren app via the ServiceProvider system. Use when the user asks to "install a plugin", "add @guren/plugin-*", "create a plugin", "build a Guren plugin", "make:plugin", or wants a reusable package that registers services, middleware, or CLI commands into a Guren app.
+description: Install or author a Guren plugin, an npm package that registers services, middleware or commands ("install a plugin", "make:plugin").
 ---
 
 # Guren Plugin Authoring Skill

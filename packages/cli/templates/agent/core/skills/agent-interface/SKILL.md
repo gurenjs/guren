@@ -1,6 +1,6 @@
 ---
 name: agent-interface
-description: Expose an existing route to AI agents as an MCP tool via route `.agent()` metadata. Use when the user asks to "expose this to agents", "make an MCP tool", "agent tool", "agent interface", "let Claude call this endpoint", or asks which of the app's routes agents can already reach.
+description: Expose an existing route to AI agents as an MCP tool with `.agent()` metadata, or list the routes agents can already reach ("make an MCP tool", "expose this to agents").
 ---
 
 # Agent Interface Skill

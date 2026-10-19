@@ -1,6 +1,6 @@
 ---
 name: ai-agent
-description: Write, wire and test an in-process AI agent with @guren/plugin-ai (an Agent class that calls a language model and reaches the app through its .agent() routes). Use when the user asks to "add an AI feature", "call Claude/OpenAI from the app", "summarize/classify/triage with an LLM", "make an AI agent", "add a chat", or mentions app/Ai/Agents, config/ai.ts, appTools(), fakeAi() or make:ai-agent. Not for durable Workers agents (make:agent) or for exposing routes to external agents (agent-interface).
+description: Write, wire and test an in-process AI agent with @guren/plugin-ai (app/Ai/Agents, config/ai.ts, appTools(), fakeAi()) when the app itself should call a model ("add an AI feature", "summarize with an LLM").
 ---
 
 # AI Agent Skill

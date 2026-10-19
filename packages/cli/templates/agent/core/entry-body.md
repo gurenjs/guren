@@ -83,63 +83,21 @@ lists them.
 
 ## Architecture Overview
 
-The request lifecycle: `routes/web.ts` registers routes on a `Router`, each pointing
-at a `[Controller, 'method']` tuple. Controllers validate input with Zod schemas,
-query models, and render Inertia pages or JSON.
-
-```typescript
-// routes/web.ts
-router.get('/posts', [PostController, 'index']).name('posts.index')
-router.post('/posts', { name: 'posts.store', body: CreatePostSchema }, [PostController, 'store'])
-
-// app/Http/Controllers/PostController.ts
-export class PostController extends Controller {
-  async store() {
-    const { body: data } = this.validated('posts.store')     // the route's body schema answered 422 already
-    const user = await this.auth.userOrFail<UserRecord>()    // 401 if unauthenticated
-    const post = await Post.create(data, { set: { authorId: user.id } })  // server-chosen column
-    return this.redirect('/posts')
-  }
-}
-
-// app/Models/Post.ts
-export class Post extends defineModel(posts, {
-  fillable: ['title', 'body'],  // typed against the table's columns; authorId stays out (set above)
-}) {}
-```
-
-- Models: `await Post.findOrFail(id)` throws a 404; `Post.where(...)` starts a query
-  builder chain. Rules in `__RULES_DIR__/orm-models.md`.
-- Attaching a Zod schema to a route both validates the request automatically and
-  feeds `bunx guren codegen` typed manifests. Rules in `__RULES_DIR__/routes-codegen.md`.
-- Middleware: `defineMiddleware(async (c, next) => { ... })` from `@guren/core`;
-  register aliases via `const router = baseRouter.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))`
-  — the return value carries the alias name in the router's type, so dropping it makes
-  a later `.middleware('auth')` fail to compile.
+`routes/web.ts` registers routes on a `Router`, each pointing at a
+`[Controller, 'method']` tuple. A route's Zod `body`/`query`/`params` schemas are
+validated before the action (422) and feed `bunx guren codegen`. Controllers read
+`this.validated('<route name>')`, query models and render Inertia pages or JSON.
+The signatures are in the `guren context` digest; each file kind's rules attach
+from `__RULES_DIR__/` when you open it.
 
 ## Testing
 
-Uses `bun:test` + `@guren/testing`. Requests run in-process via `app.fetch()` — no server needed.
-
-```typescript
-import { TestApp } from '@guren/testing'
-
-const app = await TestApp.create()
-await app.get('/posts').assertOk()
-await app.actingAs(user).json().post('/posts', { title: 'Hi' }).assertCreated()
-```
-
-Client, assertions and common mistakes: `__RULES_DIR__/testing.md`.
+`bun:test` + `@guren/testing`; requests run in-process through `TestApp`, no
+server. Rules: `__RULES_DIR__/testing.md`.
 
 ## Key Files
 
 | Path | Purpose |
 |------|---------|
-| `bin/serve.ts` | Server entry point |
-| `config/` | Application configuration |
-| `db/schema.ts` | Database table definitions |
-| `routes/web.ts` | Web route definitions |
-| `app/Providers/` | Service providers |
-| `resources/js/pages/` | React page components |
 | `__RULES_DIR__/` | Verified API rules (each file's `paths` frontmatter states the covered paths) |
 | `__SKILLS_DIR__/guren-api/reference/` | The full API reference behind each rule, read on demand |

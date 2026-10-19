@@ -1,6 +1,6 @@
 ---
 name: plan-write
-description: Write an implementation plan (`docs/plans/<slug>/plan.json`, RFC 0030) for a change before any code exists, in conversation with the person, check it with `plan:render`, and revise it from their review with `plan:revise`. Use when the user says "plan this feature", "write a plan", "design X before implementing it", "make a plan for", or asks for a change that spans several models, routes or pages. Not for building an approved plan (plan-implement) or for generating one CRUD entity (feature).
+description: Write and revise an implementation plan (`docs/plans/<slug>/plan.json`, RFC 0030) before any code, for a change across several models, routes or pages ("plan this feature").
 ---
 
 # Plan Writing Skill

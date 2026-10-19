@@ -58,6 +58,10 @@ Throw from the action; the global handler renders them by `statusCode`:
 `AuthorizationException.deny('Comment')` (403, for ownership checks outside policies),
 `ValidationException.withMessages({...})` (422). `Model.findOrFail()` throws a 404 on its own.
 
+## Middleware
+
+`defineMiddleware(async (c, next) => { … })` from `@guren/core`, in `app/Http/Middleware/`.
+
 ## Route model binding
 
 With `bind: { id: Post }` (or `{ slug: [Post, 'slug'] }`) on the route,
