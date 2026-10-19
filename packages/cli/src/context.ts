@@ -248,7 +248,10 @@ export function renderContextMarkdown(ctx: ProjectContext): string {
 }
 
 export async function displayContext(options: ContextOptions = {}): Promise<void> {
-  const ctx = await generateContext(options)
+  const [ctx, note] = await Promise.all([
+    generateContext(options),
+    options.json ? undefined : staleHarnessNote(resolve(options.cwd ?? process.cwd())),
+  ])
 
   if (options.json) {
     console.log(JSON.stringify(ctx, null, 2))
@@ -256,6 +259,5 @@ export async function displayContext(options: ContextOptions = {}): Promise<void
   }
 
   const md = renderContextMarkdown(ctx)
-  const note = await staleHarnessNote(resolve(options.cwd ?? process.cwd()))
   console.log(note ? `${note}\n\n${md}` : md)
 }

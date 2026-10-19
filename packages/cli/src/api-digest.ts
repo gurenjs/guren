@@ -110,6 +110,6 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
   assertUnprocessable / assertJson / assertJsonPath(path, value) / assertInertia(component, props?)\`
 
 Rules and gotchas: \`.claude/rules/orm-models.md\`, \`controllers-http.md\`, \`routes-codegen.md\`, \`testing.md\`
-(attached by path); the full reference behind each: \`.claude/skills/guren-api/reference/\`;
+(attached by path); the full reference behind each: the \`guren-api\` skill's \`reference/\` directory;
 health checks, redirect safety, API tokens, rate limiting: \`docs/en/guides/health-checks.md\`, \`authentication.md\`,
 \`api-tokens.md\`, \`rate-limiting.md\` in the Guren framework repo.`

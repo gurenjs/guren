@@ -790,6 +790,20 @@ describe('staleHarnessNote', () => {
     expect(await staleHarnessNote(tempDir)).toBeUndefined()
   })
 
+  it('names a managed file a newer CLI adds', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    await rm(join(tempDir, '.claude/skills/guren-api/reference/testing.md'))
+
+    expect(await staleHarnessNote(tempDir)).toContain('.claude/skills/guren-api/reference/testing.md')
+  })
+
+  it('stays quiet about a user-owned file the user removed', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    await rm(join(tempDir, '.mcp.json'))
+
+    expect(await staleHarnessNote(tempDir)).toBeUndefined()
+  })
+
   it('names the managed files agent:sync would replace', async () => {
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
     await writeFile(join(tempDir, '.claude/rules/testing.md'), '---\nglobs: tests/**\n---\n# Old\n', 'utf8')
@@ -802,4 +816,3 @@ describe('staleHarnessNote', () => {
     expect(await readFile(join(tempDir, '.claude/rules/testing.md'), 'utf8')).toContain('# Old')
   })
 })
-

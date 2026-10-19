@@ -108,4 +108,4 @@ bunx guren audit    # validation rules are stricter for agent-exposed routes
 
 `guren audit` warns when `destructiveHint: false` sits on an action that deletes, updates, or force-writes records, and treats an unverifiable body validation on an agent route as a failure rather than a warning. Suppress an audit finding you have judged safe by its exact key in `config/audit.ts`.
 
-Full routing reference: `__RULES_DIR__/routes-codegen.md`.
+Full routing reference: `__SKILLS_DIR__/guren-api/reference/routes-codegen.md`.

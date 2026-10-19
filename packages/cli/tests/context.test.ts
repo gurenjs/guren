@@ -298,11 +298,13 @@ describe('renderContextMarkdown', () => {
 })
 
 describe('GUREN_API_DIGEST', () => {
-  // The digest is a hand-written summary of the rule files (each rule plus the
-  // full reference it points to), so each token has to appear in both and a
-  // one-sided edit fails here.
-  const tokensByRuleFile: Record<string, string[]> = {
-    'orm-models.md': [
+  // The digest is a hand-written summary of the rule files, so each token has
+  // to appear in both and a one-sided edit fails here. Each token is pinned to
+  // the file that carries it: the rule an edit attaches (`rules/`), or the full
+  // reference behind it (`skills/guren-api/reference/`), so moving one is a
+  // deliberate edit here too.
+  const tokensByFile: Record<string, string[]> = {
+    'skills/guren-api/reference/orm-models.md': [
       '`=` `!=` `>` `<` `>=` `<=` `like` `in` `not in` `is null` `is not null`',
       'whereNull(field)',
       'whereNotNull(field)',
@@ -312,31 +314,25 @@ describe('GUREN_API_DIGEST', () => {
       'paginate(result, { path?, query?, fragment? })',
       'PaginatorOptions',
       'withPaginate',
-      'create(data, { set: { authorId } })',
     ],
-    'controllers-http.md': [
+    'rules/orm-models.md': ['create(data, { set: { authorId } })'],
+    'rules/controllers-http.md': [
       'validateBody',
       'userOrFail',
       'bind: { id: Post }',
-      "bind: { slug: [Post, 'slug'] }",
       "await this.authorize('update', [Post, post])",
     ],
-    'routes-codegen.md': ['.agent({ description })', 'One declaration per route'],
-    'testing.md': ['actingAs', 'withCsrf', 'assertUnprocessable', 'assertInertia', 'query(path, body?)'],
+    'skills/guren-api/reference/controllers-http.md': ["bind: { slug: [Post, 'slug'] }"],
+    'skills/guren-api/reference/routes-codegen.md': ['.agent({ description })', 'One declaration per route'],
+    'rules/testing.md': ['actingAs', 'withCsrf', 'assertUnprocessable', 'assertInertia', 'query(path, body?)'],
   }
 
-  for (const [ruleFile, tokens] of Object.entries(tokensByRuleFile)) {
-    it(`stays in sync with the ${ruleFile} rule file`, async () => {
-      const ruleText = (
-        await Promise.all(
-          ['rules', 'skills/guren-api/reference'].map((dir) =>
-            readFile(new URL(`../templates/agent/core/${dir}/${ruleFile}`, import.meta.url), 'utf8'),
-          ),
-        )
-      ).join('\n')
+  for (const [file, tokens] of Object.entries(tokensByFile)) {
+    it(`stays in sync with ${file}`, async () => {
+      const text = await readFile(new URL(`../templates/agent/core/${file}`, import.meta.url), 'utf8')
       for (const token of tokens) {
         expect(GUREN_API_DIGEST).toContain(token)
-        expect(ruleText).toContain(token)
+        expect(text).toContain(token)
       }
     })
   }

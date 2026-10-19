@@ -9,7 +9,8 @@ You implement a plan the way Guren derives it: step by step, in task order,
 with completion read from the code rather than reported by you.
 
 > The API rules in `__RULES_DIR__/` (orm-models, controllers-http, routes-codegen,
-> testing) carry the verified signatures for what each step writes.
+> testing) and their full references in `__SKILLS_DIR__/guren-api/reference/` carry
+> the verified signatures for what each step writes.
 
 ## The loop
 

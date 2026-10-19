@@ -27,7 +27,7 @@ bun run dev
 
 **After startup:**
 - App: `http://localhost:3333`
-- MCP endpoint: `http://localhost:3333/_guren/mcp` (dev only, enabled by `GUREN_MCP=1` in the `dev` script; reachable from this machine only)
+- MCP endpoint: see MCP Server below
 
 ### MCP Server
 
