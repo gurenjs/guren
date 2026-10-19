@@ -193,6 +193,51 @@ describe('runGate', () => {
     }, { oxlint: true })
   })
 
+  it('keeps audit warnings on the files a --changed run touched, and none on a full run', async () => {
+    const files = {
+      ...gateAppFiles(SCRIPTS),
+      'routes/web.ts': `import { Router } from '@guren/core'
+class PostController {
+  async destroy() { return null }
+}
+export default function registerRoutes(router: Router) {
+  router.delete('/posts/:id', [PostController, 'destroy'])
+}
+`,
+      'app/Models/Post.ts': `import { defineModel } from '@guren/core'
+import { posts } from '../../db/schema'
+export class Post extends defineModel(posts) {}
+`,
+      'app/Policies/PostPolicy.ts': `import { Policy, type AuthUser } from '@guren/core'
+export class PostPolicy extends Policy {
+  delete(user: AuthUser | null, post: { authorId: number }): boolean {
+    return user !== null && Number(user.id) === post.authorId
+  }
+}
+`,
+      'app/Http/Controllers/PostController.ts': `import { Controller } from '@guren/core'
+import { Post } from '../../Models/Post'
+export default class PostController extends Controller {
+  async destroy() {
+    const post = await Post.findOrFail(1)
+    await Post.delete({ id: post.id })
+    return this.redirect('/posts')
+  }
+}
+`,
+    }
+    await withApp('audit-warn', files, async (dir) => {
+      initGitRepo(dir)
+
+      const changed = await runGate({ cwd: dir, changed: true, exec: fakeExec().exec })
+      expect(changed.ok).toBe(true)
+      expect(stage(changed, 'audit').changedWarnings?.join('\n')).toContain('PostController.destroy')
+
+      const full = await runGate({ cwd: dir, exec: fakeExec().exec })
+      expect(stage(full, 'audit').changedWarnings).toBeUndefined()
+    })
+  })
+
   it('names a stage detail, such as the dependency scan, in the rendered line', async () => {
     await withApp('deps', gateAppFiles(SCRIPTS), async (dir) => {
       const lines: string[] = []

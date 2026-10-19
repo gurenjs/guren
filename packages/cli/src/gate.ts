@@ -10,7 +10,7 @@
  */
 
 import { existsSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { consola } from 'consola'
 import { runAudit } from './audit'
 import { getChangedFiles, runGit } from './changed-files'
@@ -38,6 +38,8 @@ export interface GateStageResult {
   reason?: string
   /** A step the stage ran beyond its default (`--deps` adds the dependency scan to audit). */
   detail?: string
+  /** Audit warnings on the files a `--changed` run touched: they never fail the gate, but the Stop hook shows them once. */
+  changedWarnings?: string[]
 }
 
 export interface GateReport {
@@ -187,7 +189,17 @@ async function auditStage(ctx: StageContext): Promise<StageOutcome> {
       reason: 'route-level checks did not run (routes could not be loaded; pass --routes if the entry is elsewhere)',
     }
   }
-  return { status: failing.length > 0 ? 'fail' : 'pass', findings, detail }
+  const changedWarnings = capFindings(
+    report.findings.filter((finding) => finding.status === 'warn' && touches(ctx, finding.filePath)).map(formatFinding),
+  )
+  return { status: failing.length > 0 ? 'fail' : 'pass', findings, detail, ...(changedWarnings.length > 0 ? { changedWarnings } : {}) }
+}
+
+/** Whether a finding's file is one the `--changed` run touched; never true for a full run. */
+function touches(ctx: StageContext, filePath: string | undefined): boolean {
+  if (ctx.changedFiles === null || filePath === undefined) return false
+  const rel = relative(ctx.cwd, isAbsolute(filePath) ? filePath : resolve(ctx.cwd, filePath)).split(sep).join('/')
+  return ctx.changedFiles.has(rel)
 }
 
 const STAGE_RUNNERS: Record<GateStageName, (ctx: StageContext) => Promise<StageOutcome>> = {
@@ -256,7 +268,17 @@ export async function stopGateFindings(cwd = process.cwd()): Promise<string | nu
   // `--changed`: check and lint on what this session touched; typecheck, audit,
   // and the tests answer for the whole app either way.
   const report = await runGate({ cwd, changed: true })
-  if (report.ok) return null
+  if (report.ok) {
+    // A missing authorization or a request-fed force write is a warning, so it never fails
+    // the gate; on files this session changed it is the agent's to settle before stopping.
+    const warnings = report.stages.flatMap((stage) => stage.changedWarnings ?? [])
+    if (warnings.length === 0) return null
+    return [
+      'guren gate passed, but guren audit warns on files this change touched:',
+      ...warnings.map((warning) => `- ${warning}`),
+      'Fix them, or mark a deliberate exception with a `// guren-audit-ignore: <reason>` comment above the action.',
+    ].join('\n')
+  }
   return `${describeGateFailures(report)}\nRun \`bunx guren gate\` to see every stage.`
 }
 
