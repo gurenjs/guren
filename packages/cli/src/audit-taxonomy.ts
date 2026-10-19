@@ -90,6 +90,16 @@ const RULE_CLASSIFICATIONS: Record<string, AuditClassification[]> = {
   ],
 }
 
+/**
+ * Warning rules the Stop hook sends back when they fire on a file the session changed:
+ * a missing authorization and request data reaching a force write. The rest stay advisory.
+ */
+const ESCALATE_ON_CHANGE = new Set(['policy', 'force-write-request-data'])
+
+export function escalatesOnChange(key: string): boolean {
+  return ESCALATE_ON_CHANGE.has(key.slice(0, key.indexOf(':')))
+}
+
 export function classifyFindingKey(key: string): AuditClassification[] | undefined {
   const prefix = key.slice(0, key.indexOf(':'))
   return RULE_CLASSIFICATIONS[prefix]

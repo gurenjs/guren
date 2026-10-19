@@ -10,10 +10,12 @@
  */
 
 import { existsSync } from 'node:fs'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { join, resolve } from 'node:path'
 import { consola } from 'consola'
 import { runAudit } from './audit'
-import { getChangedFiles, runGit } from './changed-files'
+import { escalatesOnChange } from './audit-taxonomy'
+import { toPosixRelative } from './discovery'
+import { getChangedFiles, getUncommittedFiles, runGit } from './changed-files'
 import { runCheck } from './check'
 import { formatAdvisoryFinding, formatFinding, gatingResults } from './check-result'
 import { capFindings, codegenFallback, OUTPUT_ERROR_PATTERN, outputFindings, outputTail, readScripts, resolveScriptCommand } from './command-output'
@@ -38,10 +40,7 @@ export interface GateStageResult {
   reason?: string
   /** A step the stage ran beyond its default (`--deps` adds the dependency scan to audit). */
   detail?: string
-  /**
-   * Audit warnings of the kinds in `STOP_WARNING_KEYS` on the files a `--changed` run
-   * touched: they never fail the gate, but the Stop hook shows them once.
-   */
+  /** Audit warnings `escalatesOnChange()` on the files a `--changed` run touched: never failing, shown by the Stop hook. */
   changedWarnings?: ChangedWarning[]
 }
 
@@ -50,12 +49,6 @@ export interface ChangedWarning {
   file: string
   text: string
 }
-
-/**
- * The audit warnings a stop is sent back for: a mutating action with no authorization, and
- * request data reaching a force write. Other warnings (raw SQL, an unread handler) stay advisory.
- */
-export const STOP_WARNING_KEYS = ['policy:', 'force-write-request-data:'] as const
 
 export interface GateReport {
   cwd: string
@@ -206,16 +199,11 @@ async function auditStage(ctx: StageContext): Promise<StageOutcome> {
   }
   const changedWarnings: ChangedWarning[] = []
   for (const finding of report.findings) {
-    if (finding.status !== 'warn' || !STOP_WARNING_KEYS.some((key) => finding.key.startsWith(key))) continue
-    const file = appRelative(ctx.cwd, finding.filePath)
-    if (file !== undefined && ctx.changedFiles?.has(file)) changedWarnings.push({ file, text: formatFinding(finding) })
+    if (finding.status !== 'warn' || finding.filePath === undefined || !escalatesOnChange(finding.key)) continue
+    const file = toPosixRelative(ctx.cwd, resolve(ctx.cwd, finding.filePath))
+    if (ctx.changedFiles?.has(file)) changedWarnings.push({ file, text: formatFinding(finding) })
   }
-  return { status: failing.length > 0 ? 'fail' : 'pass', findings, detail, ...(changedWarnings.length > 0 ? { changedWarnings } : {}) }
-}
-
-function appRelative(cwd: string, filePath: string | undefined): string | undefined {
-  if (filePath === undefined) return undefined
-  return relative(cwd, isAbsolute(filePath) ? filePath : resolve(cwd, filePath)).split(sep).join('/')
+  return { status: failing.length > 0 ? 'fail' : 'pass', findings, detail, changedWarnings: changedWarnings.length > 0 ? changedWarnings : undefined }
 }
 
 const STAGE_RUNNERS: Record<GateStageName, (ctx: StageContext) => Promise<StageOutcome>> = {
@@ -273,8 +261,9 @@ export async function runGate(options: RunGateOptions = {}): Promise<GateReport>
 
 /**
  * The stop-hook verdict for an agent ending a turn in the app at `cwd`: `null` when
- * the app's working tree is clean or the gate passes, else the failures as text to
- * feed back. Outside a git repository the tree cannot be judged clean, so the gate
+ * the app's working tree is clean, else the failures and the escalating audit warnings
+ * on this session's files as text to feed back (`null` when there are neither; `warnings:
+ * false` leaves the warnings out). Outside a git repository the tree cannot be judged clean, so the gate
  * runs. Shared by every agent's stop hook; only the stdin/stdout contract differs.
  */
 export async function stopGateFindings(cwd = process.cwd(), options: { warnings?: boolean } = {}): Promise<string | null> {
@@ -284,17 +273,8 @@ export async function stopGateFindings(cwd = process.cwd(), options: { warnings?
   // `--changed`: check and lint on what this session touched; typecheck, audit,
   // and the tests answer for the whole app either way.
   const report = await runGate({ cwd, changed: true })
-  const session = options.warnings === false ? new Set<string>() : await uncommittedFiles(cwd)
-  return stopFindingsMessage(report, session)
-}
-
-/** App-relative paths of this session's work: uncommitted edits and untracked files. */
-async function uncommittedFiles(cwd: string): Promise<Set<string>> {
-  const [edited, untracked] = await Promise.all([
-    runGit(cwd, ['diff', '--name-only', '--relative', 'HEAD']),
-    runGit(cwd, ['ls-files', '--others', '--exclude-standard']),
-  ])
-  return new Set([...(edited ?? []), ...(untracked ?? [])])
+  const warned = options.warnings !== false && report.stages.some((stage) => stage.changedWarnings !== undefined)
+  return stopFindingsMessage(report, warned ? ((await getUncommittedFiles(cwd)) ?? new Set()) : new Set())
 }
 
 /**

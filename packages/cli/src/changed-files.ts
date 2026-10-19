@@ -78,23 +78,38 @@ export async function getChangedFilesFromBase(cwd: string): Promise<{ files: Set
     runGit(absoluteCwd, ['ls-files', '--others', '--exclude-standard']),
   ])
 
-  const gitRootRelativePaths = new Set<string>([
-    ...(committed ?? []),
-    ...(uncommitted ?? []),
-    ...(untracked ?? []),
-  ])
-
-  const result = new Set<string>()
-  for (const gitRootRelativePath of gitRootRelativePaths) {
-    const absPath = resolve(gitRoot, gitRootRelativePath)
-    const cwdRelativePath = relative(absoluteCwd, absPath)
-    if (cwdRelativePath.startsWith('..')) continue // outside cwd (e.g. a different monorepo package)
-    result.add(cwdRelativePath.split(sep).join('/'))
-  }
+  const result = underCwd(gitRoot, absoluteCwd, [...(committed ?? []), ...(uncommitted ?? []), ...(untracked ?? [])])
 
   // A listing git failed to produce is missing files, not a list of none.
   const complete = (mergeBase === undefined || committed !== null) && uncommitted !== null && untracked !== null
   return { files: result, mergeBase, complete }
+}
+
+/**
+ * This session's work only: uncommitted and untracked files, as POSIX paths relative
+ * to `cwd`, without the branch's earlier commits. `null` outside a git repository.
+ */
+export async function getUncommittedFiles(cwd: string): Promise<Set<string> | null> {
+  const absoluteCwd = await realpath(resolve(cwd)).catch(() => resolve(cwd))
+  const gitRoot = (await runGit(absoluteCwd, ['rev-parse', '--show-toplevel']))?.[0]
+  if (!gitRoot) return null
+  const hasHead = (await runGit(absoluteCwd, ['rev-parse', '--verify', '--quiet', 'HEAD'])) !== null
+  const [uncommitted, untracked] = await Promise.all([
+    runGit(absoluteCwd, hasHead ? ['diff', '--name-only', 'HEAD'] : ['diff', '--name-only', '--cached']),
+    runGit(absoluteCwd, ['ls-files', '--others', '--exclude-standard']),
+  ])
+  return underCwd(gitRoot, absoluteCwd, [...(uncommitted ?? []), ...(untracked ?? [])])
+}
+
+/** Git-root-relative paths (as `diff --name-only` prints them) re-rooted at `cwd`, dropping those outside it. */
+function underCwd(gitRoot: string, absoluteCwd: string, gitRootRelativePaths: Iterable<string>): Set<string> {
+  const result = new Set<string>()
+  for (const gitRootRelativePath of gitRootRelativePaths) {
+    const cwdRelativePath = relative(absoluteCwd, resolve(gitRoot, gitRootRelativePath))
+    if (cwdRelativePath.startsWith('..')) continue // outside cwd (e.g. a different monorepo package)
+    result.add(cwdRelativePath.split(sep).join('/'))
+  }
+  return result
 }
 
 /** Any file that could hold a route's params schema or change what the app's modules evaluate to. */
