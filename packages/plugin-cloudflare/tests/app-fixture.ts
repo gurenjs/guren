@@ -34,6 +34,8 @@ export interface ScaffoldAppOptions {
   agentsPlugin?: boolean
   /** Declare it under `devDependencies` instead, which must not satisfy the guard. */
   agentsPluginAsDevDependency?: boolean
+  /** Put the app on the `cf` backend: a `cloudflare.config.ts` and `cf` under `devDependencies` (RFC 0035 §7). */
+  cfBackend?: boolean
 }
 
 export function scaffoldApp(root: string, options: ScaffoldAppOptions = {}): void {
@@ -45,6 +47,7 @@ export function scaffoldApp(root: string, options: ScaffoldAppOptions = {}): voi
     oauthProviderAsDevDependency = false,
     agentsPlugin = false,
     agentsPluginAsDevDependency = false,
+    cfBackend = false,
   } = options
 
   mkdirSync(join(root, 'src'), { recursive: true })
@@ -58,6 +61,10 @@ export function scaffoldApp(root: string, options: ScaffoldAppOptions = {}): voi
   const devDependencies: Record<string, string> = {}
   if (oauthProviderAsDevDependency) devDependencies['@cloudflare/workers-oauth-provider'] = '^0.10.3'
   if (agentsPluginAsDevDependency) devDependencies['@guren/plugin-agents'] = '^0.1.0'
+  if (cfBackend) {
+    devDependencies.cf = '1.0.0-beta.18'
+    writeFileSync(join(root, 'cloudflare.config.ts'), 'export default {}\n')
+  }
 
   writeJson(join(root, 'package.json'), {
     name: '@acme/demo-app',

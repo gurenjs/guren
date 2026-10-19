@@ -201,6 +201,11 @@ export interface ReportBundleSizeOptions {
  */
 export function reportBundleSize(options: ReportBundleSizeOptions): BundleReport {
   const root = resolve(options.root)
+  if (existsSync(join(root, 'cloudflare.config.ts'))) {
+    throw new Error(
+      `Cloudflare size: measures the bundle wrangler.jsonc deploys, and ${root} deploys through cf (cloudflare.config.ts). Run \`cf build\` and read the size of .cloudflare/output/v0/workers/default/bundle/ instead.`,
+    )
+  }
   const outDir = mkdtempSync(join(tmpdir(), 'guren-cf-size-'))
   const metafile = join(outDir, 'meta.json')
 
