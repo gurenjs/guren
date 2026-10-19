@@ -106,7 +106,7 @@ describe('cloudflare:build --mcp-oauth', () => {
         buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       )
 
-      expect(warning).toContain('placeholder ids')
+      expect(warning).toContain('placeholder resource ids')
       expect(warning).toContain('kv_namespaces[0].id')
       // Warned, not failed.
       expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)

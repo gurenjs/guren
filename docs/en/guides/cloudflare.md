@@ -56,7 +56,7 @@ The scaffolded `wrangler.jsonc` binds the database by name and leaves out `datab
 
 On a binding with no id, `wrangler deploy` (Wrangler 4.129 or later) looks for a database named `database_name` and creates it if there is none. A later deploy keeps the database the deployed worker is bound to, so there is no id to copy anywhere. Wrangler 4.151 and later also write the new id back into `wrangler.jsonc` when you deploy from a terminal; a CI deploy leaves the file alone and relies on the same lookup.
 
-To use a database you created yourself, run `bunx wrangler d1 create my-app` and add the id it prints as `"database_id"`. Do not leave a made-up value there: Wrangler skips provisioning for any binding that carries an id, so a placeholder fails the deploy. Apps scaffolded by an older plugin have `"database_id": "TODO: wrangler d1 create"`, and the build names that key until you delete it.
+To use a database you created yourself, run `bunx wrangler d1 create my-app` and add the id it prints as `"database_id"`. Do not leave a made-up value there: Wrangler skips provisioning for any binding that carries an id, so a placeholder fails the deploy. Apps scaffolded by an older plugin have `"database_id": "TODO: wrangler d1 create"`; the build warns about any id that is not a real one, before the app build runs, until you delete the key.
 
 Select the driver by runtime in `config/database.ts`. D1 speaks SQLite, so write your schema in the SQLite dialect and keep a local SQLite file for development:
 
@@ -404,7 +404,7 @@ The Free-plan measurements for a deployed agent, the D1 query budget a sweep has
 
 `wrangler.jsonc` is scaffolded once and never overwritten, so an app created before a plugin update keeps its original config. The build prints exactly which entries are missing when it finds an outdated one. Add them and rebuild.
 
-The build also names any `TODO:` id an older scaffold left in `d1_databases` or `kv_namespaces`. Delete the key, or replace it with the real id; see [Database (D1)](#database-d1).
+The build also names any placeholder id left in `d1_databases` or `kv_namespaces`, such as the `TODO:` values an older scaffold wrote, in every `env.<name>` block too. Delete the key, or replace it with the real id; see [Database (D1)](#database-d1).
 
 `triggers.crons` is the one entry it does not print. Whether an app registers scheduled tasks is only visible to a build that can find and load its schedule kernel, and a task declared any other way would read as absent, so the build stays quiet rather than guessing. An app that has tasks and wants them to run on Workers adds the trigger by hand; see [Scheduled Tasks](#scheduled-tasks).
 

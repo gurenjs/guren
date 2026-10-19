@@ -209,37 +209,43 @@ describe('buildCloudflareOutput', () => {
     expect(logs).toContain('wrangler d1 migrations apply demo-app --remote')
   })
 
-  test('should name each placeholder id an earlier scaffold left in wrangler.jsonc', async () => {
+  test('should name each placeholder id left in wrangler.jsonc, in every env scope', async () => {
     scaffoldApp(root)
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
     const configPath = join(root, 'wrangler.jsonc')
     const config = JSON.parse(readFileSync(configPath, 'utf8'))
     config.d1_databases[0].database_id = 'TODO: wrangler d1 create'
     config.kv_namespaces = [{ binding: 'CACHE', id: '0123456789abcdef0123456789abcdef' }]
+    config.env = {
+      production: { d1_databases: [{ binding: 'DB', database_name: 'demo-app', database_id: '<the id wrangler printed>' }] },
+    }
     writeJson(configPath, config)
 
     const warnings = await captureWarnings(() =>
       buildCloudflareOutput({ rootDir: root, skipAppBuild: true }),
     )
 
-    expect(warnings).toContain('placeholder ids')
-    expect(warnings).toContain('d1_databases[0].database_id')
+    expect(warnings).toContain('placeholder resource ids')
+    expect(warnings).toContain('d1_databases[0].database_id\n')
+    expect(warnings).toContain('d1_databases[0].database_id (env.production)')
     expect(warnings).not.toContain('kv_namespaces[0].id')
   })
 
-  test('should not warn about ids when the config carries real ones or none', async () => {
+  // Reported where the developer is still reading: before the app build, which can fail.
+  test('should warn about a placeholder id before the app build runs', async () => {
     scaffoldApp(root)
-    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
-    const configPath = join(root, 'wrangler.jsonc')
-    const config = JSON.parse(readFileSync(configPath, 'utf8'))
-    config.d1_databases[0].database_id = 'e902bc31-46b4-47dc-9d46-194d0b86148c'
-    writeJson(configPath, config)
+    writeJson(join(root, 'wrangler.jsonc'), {
+      name: 'demo-app',
+      d1_databases: [{ binding: 'DB', database_name: 'demo-app', database_id: 'TODO: wrangler d1 create' }],
+    })
+    const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+    writeJson(join(root, 'package.json'), { ...manifest, scripts: { ...manifest.scripts, build: 'exit 1' } })
 
-    const warnings = await captureWarnings(() =>
-      buildCloudflareOutput({ rootDir: root, skipAppBuild: true }),
-    )
+    const warnings = await captureWarnings(async () => {
+      await buildCloudflareOutput({ rootDir: root }).catch(() => undefined)
+    })
 
-    expect(warnings).not.toContain('placeholder')
+    expect(warnings).toContain('d1_databases[0].database_id')
   })
 
   test('should refuse to scaffold wrangler.jsonc beside a wrangler.toml', async () => {

@@ -94,6 +94,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   assertOutputDirOutsideRoot(out, root, 'Cloudflare build')
   assertWranglerJsoncIsAuthoritative(root)
   assertKeepsClassNames(root)
+  warnPlaceholderIds(root)
 
   const packageJson = readPackageJson(root)
   const mcpOAuth = options.mcpOAuth === true
@@ -233,7 +234,7 @@ function assertOAuthKvBound(root: string): void {
     return
   }
 
-  if (oauthKvBinding(config)) {
+  if (bindsOAuthKv(config)) {
     return
   }
 
@@ -246,17 +247,11 @@ function assertOAuthKvBound(root: string): void {
   )
 }
 
-/** The KV namespace a parsed config binds under the provider's name, or `undefined`. */
-function oauthKvBinding(config: Record<string, unknown>): Record<string, unknown> | undefined {
+/** Whether a parsed config binds a KV namespace under the provider's name. */
+function bindsOAuthKv(config: Record<string, unknown>): boolean {
   const namespaces = config.kv_namespaces
-  if (!Array.isArray(namespaces)) {
-    return undefined
-  }
-
-  return namespaces.find(
-    (entry): entry is Record<string, unknown> =>
-      isRecord(entry) && entry.binding === OAUTH_KV_BINDING,
-  )
+  return Array.isArray(namespaces)
+    && namespaces.some((entry) => isRecord(entry) && entry.binding === OAUTH_KV_BINDING)
 }
 
 /**
@@ -524,6 +519,43 @@ function configScopes(config: Record<string, unknown>): ConfigScope[] {
     }
   }
   return scopes
+}
+
+/**
+ * wrangler provisions only a binding with no id, so a placeholder id (earlier
+ * scaffolds wrote `TODO: wrangler d1 create`) fails the deploy. Any id that is not
+ * hex and hyphens is one: D1 ids are UUIDs and KV ids 32 hex digits.
+ */
+function warnPlaceholderIds(root: string): void {
+  const configPath = resolve(root, 'wrangler.jsonc')
+  const config = readWranglerConfig(configPath)
+  if (!config) {
+    return
+  }
+
+  const placeholders = configScopes(config).flatMap((scope) => [
+    ...placeholderKeys(scope, 'd1_databases', 'database_id'),
+    ...placeholderKeys(scope, 'kv_namespaces', 'id'),
+  ])
+  if (placeholders.length === 0) {
+    return
+  }
+
+  console.warn(
+    `Cloudflare build: ${configPath} has placeholder resource ids, which \`wrangler deploy\` rejects. Delete these keys, and the deploy creates each resource (or connects to the one it created before); or paste a real id in:\n  ${placeholders.join('\n  ')}`,
+  )
+}
+
+function placeholderKeys(scope: ConfigScope, key: string, idKey: string): string[] {
+  const entries = scope.config[key]
+  if (!Array.isArray(entries)) {
+    return []
+  }
+
+  return entries.flatMap((entry, index) => {
+    const id = isRecord(entry) ? entry[idKey] : undefined
+    return typeof id === 'string' && !/^[0-9a-f-]+$/i.test(id) ? [`${key}[${index}].${idKey}${scope.label}`] : []
+  })
 }
 
 /**
@@ -1533,39 +1565,8 @@ function warnMissingBuildOwnedKeys(
     )
   }
 
-  warnPlaceholderIds(configPath, config)
   warnMissingHtmlHandling(configPath, config)
   warnOAuthDrift(configPath, config, mcpOAuth)
-}
-
-/**
- * Earlier scaffolds wrote `TODO:` ids, and wrangler skips provisioning for a
- * binding that carries any id, so the deploy fails on the placeholder instead.
- * Deleting the key lets `wrangler deploy` create the resource or reuse its own.
- */
-function warnPlaceholderIds(configPath: string, config: Record<string, unknown>): void {
-  const placeholders = [
-    ...placeholderKeys(config.d1_databases, 'd1_databases', 'database_id'),
-    ...placeholderKeys(config.kv_namespaces, 'kv_namespaces', 'id'),
-  ]
-  if (placeholders.length === 0) {
-    return
-  }
-
-  console.warn(
-    `Cloudflare build: ${configPath} still has scaffolded placeholder ids, which \`wrangler deploy\` rejects. Delete these keys, and the deploy creates each resource (or connects to the one it created before); or paste a real id in:\n  ${placeholders.join('\n  ')}`,
-  )
-}
-
-function placeholderKeys(entries: unknown, key: string, idKey: string): string[] {
-  if (!Array.isArray(entries)) {
-    return []
-  }
-
-  return entries.flatMap((entry, index) => {
-    const id = isRecord(entry) ? entry[idKey] : undefined
-    return typeof id === 'string' && id.startsWith('TODO:') ? [`${key}[${index}].${idKey}`] : []
-  })
 }
 
 /**
@@ -1599,7 +1600,7 @@ function warnOAuthDrift(
   config: Record<string, unknown>,
   mcpOAuth: boolean,
 ): void {
-  if (mcpOAuth || !oauthKvBinding(config)) {
+  if (mcpOAuth || !bindsOAuthKv(config)) {
     return
   }
 

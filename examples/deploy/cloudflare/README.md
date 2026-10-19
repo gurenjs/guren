@@ -48,20 +48,22 @@ Add `.cloudflare/` to `.gitignore` — it is generated output, rebuilt on every 
 bun -e "console.log('base64:'+Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64'))" | bunx wrangler secret put APP_KEY
 ```
 
-### 5. Apply migrations, then deploy
+### 5. Deploy and apply migrations
+
+The first deploy creates the database, so it has to come before the first migration. Until the migration finishes, the worker is live against an empty database:
 
 ```bash
 bun run cloudflare:build
-bunx wrangler d1 migrations apply my-guren-app --remote
 bunx wrangler deploy
+bunx wrangler d1 migrations apply my-guren-app --remote
 ```
 
-On the very first deploy the database does not exist yet, so deploy first and migrate right after. Until the migration finishes, the worker is live against an empty database:
+From then on, migrate first so new code never runs against the old schema:
 
 ```bash
 bun run cloudflare:build
-bunx wrangler deploy
 bunx wrangler d1 migrations apply my-guren-app --remote
+bunx wrangler deploy
 ```
 
 > [!WARNING]
