@@ -10,7 +10,7 @@ import {
 } from '@guren/core/internal/deploy-build'
 import { buildCloudflareOutput } from './build'
 
-import { CLIENT_MANIFEST, captureWarnings, scaffoldApp, writeIntrospectableApp, writeJson } from '../tests/app-fixture'
+import { CLIENT_MANIFEST, captureLogs, captureWarnings, scaffoldApp, writeIntrospectableApp, writeJson } from '../tests/app-fixture'
 
 describe('buildCloudflareOutput', () => {
   let root: string
@@ -191,6 +191,55 @@ describe('buildCloudflareOutput', () => {
     writeFileSync(configPath, '{ "name": "user-edited" }\n')
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
     expect(readFileSync(configPath, 'utf8')).toContain('user-edited')
+  })
+
+  // wrangler provisions only a binding with no id; any id, a placeholder too, opts out.
+  test('should scaffold the D1 binding by name with no database_id', async () => {
+    scaffoldApp(root)
+
+    const logs = await captureLogs(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
+
+    const config = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'))
+    expect(config.d1_databases[0]).toEqual({
+      binding: 'DB',
+      database_name: 'demo-app',
+      migrations_dir: '.cloudflare/d1-migrations',
+    })
+    expect(logs).toContain('creates the D1 database "demo-app"')
+    expect(logs).toContain('wrangler d1 migrations apply demo-app --remote')
+  })
+
+  test('should name each placeholder id an earlier scaffold left in wrangler.jsonc', async () => {
+    scaffoldApp(root)
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    const configPath = join(root, 'wrangler.jsonc')
+    const config = JSON.parse(readFileSync(configPath, 'utf8'))
+    config.d1_databases[0].database_id = 'TODO: wrangler d1 create'
+    config.kv_namespaces = [{ binding: 'CACHE', id: '0123456789abcdef0123456789abcdef' }]
+    writeJson(configPath, config)
+
+    const warnings = await captureWarnings(() =>
+      buildCloudflareOutput({ rootDir: root, skipAppBuild: true }),
+    )
+
+    expect(warnings).toContain('placeholder ids')
+    expect(warnings).toContain('d1_databases[0].database_id')
+    expect(warnings).not.toContain('kv_namespaces[0].id')
+  })
+
+  test('should not warn about ids when the config carries real ones or none', async () => {
+    scaffoldApp(root)
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    const configPath = join(root, 'wrangler.jsonc')
+    const config = JSON.parse(readFileSync(configPath, 'utf8'))
+    config.d1_databases[0].database_id = 'e902bc31-46b4-47dc-9d46-194d0b86148c'
+    writeJson(configPath, config)
+
+    const warnings = await captureWarnings(() =>
+      buildCloudflareOutput({ rootDir: root, skipAppBuild: true }),
+    )
+
+    expect(warnings).not.toContain('placeholder')
   })
 
   test('should refuse to scaffold wrangler.jsonc beside a wrangler.toml', async () => {

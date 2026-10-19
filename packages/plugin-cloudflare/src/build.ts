@@ -233,34 +233,20 @@ function assertOAuthKvBound(root: string): void {
     return
   }
 
-  const bound = oauthKvBinding(config)
-  if (bound) {
-    // Present, but still carrying the placeholder id this build scaffolds, which
-    // `wrangler deploy` rejects. Warned rather than failed: the id is not needed
-    // to *build*, and a --dry-run deploy on an unfinished config is reasonable.
-    if (bound.id === oauthKvNamespace().id) {
-      console.warn(
-        `Cloudflare build: ${configPath} still has the scaffolded placeholder id for the ${OAUTH_KV_BINDING} binding, so a real deploy will be rejected. Create the namespace and paste its id in:\n`
-        + `  wrangler kv namespace create ${OAUTH_KV_BINDING}`,
-      )
-    }
+  if (oauthKvBinding(config)) {
     return
   }
 
   throw new Error(
-    `Cloudflare build: --mcp-oauth needs a KV namespace bound as ${OAUTH_KV_BINDING} — the OAuth provider stores its clients, grants and tokens there — and ${configPath} has none. Create one and add this entry, alongside whatever the file already has:\n`
+    `Cloudflare build: --mcp-oauth needs a KV namespace bound as ${OAUTH_KV_BINDING} — the OAuth provider stores its clients, grants and tokens there — and ${configPath} has none. Add this entry, alongside whatever the file already has:\n`
     + `  "kv_namespaces": [\n`
     + `    ${JSON.stringify(oauthKvNamespace(), null, 2).split('\n').join('\n    ')}\n`
     + `  ]\n`
-    + `Get the id from: wrangler kv namespace create ${OAUTH_KV_BINDING}`,
+    + `With no "id", \`wrangler deploy\` creates the namespace on the first deploy. To use one you created yourself, add its id from: wrangler kv namespace create ${OAUTH_KV_BINDING}`,
   )
 }
 
-/**
- * The KV namespace a parsed config binds under the provider's name, or
- * `undefined`. Returns the entry rather than a boolean because callers ask both
- * "is it bound" and "is its id still the placeholder" of the same match.
- */
+/** The KV namespace a parsed config binds under the provider's name, or `undefined`. */
 function oauthKvBinding(config: Record<string, unknown>): Record<string, unknown> | undefined {
   const namespaces = config.kv_namespaces
   if (!Array.isArray(namespaces)) {
@@ -273,9 +259,12 @@ function oauthKvBinding(config: Record<string, unknown>): Record<string, unknown
   )
 }
 
-/** The binding entry, spelled once — the scaffold writes it, the guard quotes it. */
+/**
+ * The binding entry, spelled once — the scaffold writes it, the guard quotes it.
+ * No `id`: an id-less binding is what wrangler's own provisioning creates at deploy.
+ */
 function oauthKvNamespace(): Record<string, string> {
-  return { binding: OAUTH_KV_BINDING, id: `TODO: wrangler kv namespace create ${OAUTH_KV_BINDING}` }
+  return { binding: OAUTH_KV_BINDING }
 }
 
 /**
@@ -1329,7 +1318,6 @@ function scaffoldWranglerConfig(
       {
         binding: 'DB',
         database_name: appName,
-        database_id: 'TODO: wrangler d1 create',
         migrations_dir: `${outRelative}/d1-migrations`,
       },
     ],
@@ -1366,11 +1354,13 @@ function scaffoldWranglerConfig(
     }
     throw error
   }
-  const notes = ['fill in d1_databases[0].database_id']
-  if (mcpOAuth) {
-    notes.push(`create the ${OAUTH_KV_BINDING} namespace (wrangler kv namespace create ${OAUTH_KV_BINDING}) and fill in its id`)
-  }
-  console.log(`Cloudflare build: scaffolded ${configPath} — ${notes.join(', and ')} before deploying.`)
+  const created = mcpOAuth
+    ? `the D1 database "${appName}" and the ${OAUTH_KV_BINDING} namespace`
+    : `the D1 database "${appName}"`
+  console.log(
+    `Cloudflare build: scaffolded ${configPath} with no resource ids. The first \`wrangler deploy\` creates ${created}; apply migrations after it:\n`
+    + `  wrangler d1 migrations apply ${appName} --remote`,
+  )
   // Not scaffolded: a cron trigger every app pays for whether or not it has
   // tasks, on the same rule as the OAuth KV namespace above.
   console.log(
@@ -1543,8 +1533,39 @@ function warnMissingBuildOwnedKeys(
     )
   }
 
+  warnPlaceholderIds(configPath, config)
   warnMissingHtmlHandling(configPath, config)
   warnOAuthDrift(configPath, config, mcpOAuth)
+}
+
+/**
+ * Earlier scaffolds wrote `TODO:` ids, and wrangler skips provisioning for a
+ * binding that carries any id, so the deploy fails on the placeholder instead.
+ * Deleting the key lets `wrangler deploy` create the resource or reuse its own.
+ */
+function warnPlaceholderIds(configPath: string, config: Record<string, unknown>): void {
+  const placeholders = [
+    ...placeholderKeys(config.d1_databases, 'd1_databases', 'database_id'),
+    ...placeholderKeys(config.kv_namespaces, 'kv_namespaces', 'id'),
+  ]
+  if (placeholders.length === 0) {
+    return
+  }
+
+  console.warn(
+    `Cloudflare build: ${configPath} still has scaffolded placeholder ids, which \`wrangler deploy\` rejects. Delete these keys, and the deploy creates each resource (or connects to the one it created before); or paste a real id in:\n  ${placeholders.join('\n  ')}`,
+  )
+}
+
+function placeholderKeys(entries: unknown, key: string, idKey: string): string[] {
+  if (!Array.isArray(entries)) {
+    return []
+  }
+
+  return entries.flatMap((entry, index) => {
+    const id = isRecord(entry) ? entry[idKey] : undefined
+    return typeof id === 'string' && id.startsWith('TODO:') ? [`${key}[${index}].${idKey}`] : []
+  })
 }
 
 /**

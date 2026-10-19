@@ -42,11 +42,7 @@ wrangler は、`keep_names` で無効にしない限り esbuild の `keepNames` 
 
 ## データベース（D1）
 
-データベースを作り、その ID を `wrangler.jsonc` に書き込みます。
-
-```bash
-bunx wrangler d1 create my-app
-```
+生成される `wrangler.jsonc` では、データベースを名前で指定していて、`database_id` は書かれていません。
 
 ```jsonc
 {
@@ -54,12 +50,15 @@ bunx wrangler d1 create my-app
     {
       "binding": "DB",
       "database_name": "my-app",
-      "database_id": "<wrangler が出力した ID>",
       "migrations_dir": ".cloudflare/d1-migrations"
     }
   ]
 }
 ```
+
+ID のないバインディングに対して、`wrangler deploy`（Wrangler 4.129 以降）は `database_name` の名前のデータベースを探し、なければ作成します。2 回目以降のデプロイでは、デプロイ済みのワーカーに結び付いているデータベースをそのまま使うので、ID をどこかに写す必要はありません。Wrangler 4.151 以降は、ターミナルからデプロイしたときに作成した ID を `wrangler.jsonc` に書き戻します。CI からのデプロイではファイルを変えず、同じ探し方で同じデータベースに当たります。
+
+自分で作ったデータベースを使う場合は、`bunx wrangler d1 create my-app` が出力した ID を `"database_id"` に書いてください。仮の値を書いたままにはしないでください。Wrangler は ID が書かれたバインディングを作成の対象から外すので、仮の値のままだとデプロイが失敗します。古いプラグインで生成したアプリには `"database_id": "TODO: wrangler d1 create"` が入っていて、削除するまでビルドがそのキーを名指しで警告します。
 
 `config/database.ts` で、ランタイムに応じてドライバを切り替えます。D1 は SQLite 互換なので、スキーマは SQLite のダイアレクトで書き、開発中はローカルの SQLite ファイルを使います。
 
@@ -104,6 +103,16 @@ Workers 上のアプリは自分でマイグレーションを実行しないの
 bunx guren cloudflare:build          # .cloudflare/d1-migrations を再生成
 bunx wrangler d1 migrations apply my-app --remote
 ```
+
+初回のデプロイでは、`wrangler deploy` が作成するまでデータベースが存在しません。そのため、ビルド、デプロイ、マイグレーションの順に実行します。
+
+```bash
+bunx guren cloudflare:build
+bunx wrangler deploy
+bunx wrangler d1 migrations apply my-app --remote
+```
+
+最後のコマンドが終わるまでは、新しいワーカーが空のデータベースに対して公開されていて、テーブルを読むリクエストは失敗します。3 つを続けて実行するか、先に `wrangler d1 create` でデータベースを作り、最初のデプロイの前にマイグレーションを適用してください。
 
 wrangler はフォルダにあるものをそのまま適用するので、この時点では Guren の破壊的マイグレーションのガードが働きません。`bunx guren check`(または `bunx guren gate`)を使うと、ブランチで追加したマイグレーションをマージ前に判定し、`-- guren:allow-destructive` のコメントがない `DROP`、型を狭める変更、テーブルの再作成を報告します。`--remote` に適用する前にどちらかを実行してください。報告の内容は[破壊的マイグレーション](./database.md#破壊的マイグレーション)にあります。
 
@@ -404,6 +413,8 @@ Workers は、アプリケーションが自分でホストするエージェン
 ## 既存アプリの更新
 
 `wrangler.jsonc` は最初に 1 度だけ生成され、それ以降は上書きされません。そのため、プラグインを更新する前に作ったアプリは、元の設定のまま残ります。古い設定を見つけると、ビルドが足りない項目を具体的に出力するので、それを追記してビルドし直してください。
+
+古い生成で `d1_databases` や `kv_namespaces` に残った `TODO:` の ID も、ビルドが名指しで警告します。キーを削除するか、本物の ID に書き換えてください（[データベース（D1）](#データベースd1)）。
 
 ただし、`triggers.crons` だけは出力しません。アプリがスケジュールタスクを登録しているかどうかは、スケジュールカーネルを見つけて読み込めたビルドにしか分からず、ほかの書き方で宣言したタスクは「ない」と判断されてしまうからです。そのため、ビルドは推測で出力することはせず、何も言いません。タスクがあって Workers でも動かしたい場合は、トリガーを手で追記してください（[スケジュールタスク](#スケジュールタスク)）。
 
