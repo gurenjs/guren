@@ -127,14 +127,25 @@ describe('buildDeclarationContent', () => {
     expect(matches).toHaveLength(1)
   })
 
-  it('augments Inertia types', () => {
-    const definitions: RouteDefinition[] = [{ method: 'GET', path: '/' }]
+  it('compiles on its own, with library checking on and no Inertia package installed', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'guren-routes-dts-'))
+    try {
+      const file = join(dir, 'routes.d.ts')
+      await writeFile(file, buildDeclarationContent([
+        { method: 'GET', path: '/' },
+        { method: 'GET', path: '/posts/:id' },
+      ], { source: 'routes/web.ts' }), 'utf8')
 
-    const content = buildDeclarationContent(definitions, { source: 'routes/web.ts' })
+      expect(checkTypes([file], { ...GENERATED_MODULE_COMPILER_OPTIONS, skipLibCheck: false, typeRoots: [] })).toEqual([])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }, TSC_TIMEOUT)
 
-    expect(content).toContain("declare module '@inertiajs/react'")
-    expect(content).toContain("declare module '@inertiajs/core'")
-    expect(content).toContain('href: Guren.RouteUrl')
+  it('declares no Inertia module augmentation', () => {
+    const content = buildDeclarationContent([{ method: 'GET', path: '/' }], { source: 'routes/web.ts' })
+
+    expect(content).not.toContain('@inertiajs/')
   })
 
   it('includes RouteUrl type with query string support', () => {

@@ -50,6 +50,23 @@ describe('createTypedLink param substitution', () => {
   })
 })
 
+describe('createTypedLink types', () => {
+  it('rejects an unknown route name and missing params at compile time', () => {
+    // Never called: the directives are what the root typecheck verifies.
+    const probes = () => [
+      // @ts-expect-error not a route in the manifest
+      Link({ route: 'posts.nope' }),
+      // @ts-expect-error items.show binds :id
+      Link({ route: 'items.show' }),
+      // @ts-expect-error posts.index takes no params
+      Link({ route: 'posts.index', params: { id: 1 } }),
+      // @ts-expect-error a typed Link takes route, never href
+      Link({ route: 'posts.index', href: '/nope' }),
+    ]
+    expect(typeof probes).toBe('function')
+  })
+})
+
 describe('createTypedForm param substitution', () => {
   const originalGet = (router as unknown as Record<string, unknown>).get
   const OriginalFormData = globalThis.FormData

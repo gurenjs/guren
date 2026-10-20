@@ -12,9 +12,6 @@ import React from 'react'
 import { Link as InertiaLink, router } from '@inertiajs/react'
 import type { InertiaLinkProps } from '@inertiajs/react'
 
-// These types are designed to be augmented by the generated routes.gen.ts
-// via module augmentation or by passing the route manifest as a generic.
-
 /**
  * Base route manifest shape. Users provide their generated RouteManifest.
  */
