@@ -173,12 +173,13 @@ const cloudflareInit = defineCommand({
     root: rootArg,
     force: {
       type: 'boolean',
-      description: 'Overwrite those files when they exist',
+      description: 'Rewrite those files when they exist (otherwise they are left as they are)',
     },
   },
   run({ args }) {
     const result = initCloudflare({ rootDir: args.root || process.cwd(), force: Boolean(args.force) })
-    console.log(`Cloudflare init: wrote ${result.written.join(', ')}.`)
+    if (result.written.length > 0) console.log(`Cloudflare init: wrote ${result.written.join(', ')}.`)
+    if (result.skipped.length > 0) console.log(`Cloudflare init: left ${result.skipped.join(', ')} as they are; --force rewrites them.`)
     for (const carried of result.carried) console.log(`  Carried over from wrangler.jsonc: ${carried}.`)
     for (const warning of result.warnings) console.warn(`  ${warning}`)
     console.log([

@@ -420,7 +420,7 @@ Workers は、アプリケーションが自分でホストするエージェン
 bun add -d cf wrangler
 ```
 
-`bunx guren cloudflare:init` を実行すると、この経路で読む 3 つのファイル（`cloudflare.config.ts`、`wrangler.config.ts`、`config/cloudflare.ts`。中身は下のとおり）を書き出し、`.gitignore` に `.cloudflare/` を加えます。すでに `wrangler.jsonc` があるアプリでは、D1 のデータベース名と `OAUTH_KV` のバインディングを引き継ぐので、最初の `cf` のデプロイも Wrangler のときと同じリソースに結び付きます。既存のファイルは、`--force` を付けない限り上書きしません。`wrangler.jsonc` で Durable Object を使っているアプリには警告を出します。宣言を `migrations` から `exports` に移したときに、デプロイ済みのクラスが保存領域を引き継ぐかはまだ確かめられていないので、先にステージング用のワーカーで試してください。
+`bunx guren cloudflare:init` を実行すると、この経路で読む 3 つのファイル（`cloudflare.config.ts`、`wrangler.config.ts`、`config/cloudflare.ts`。中身は下のとおり）を書き出し、`.gitignore` に `.cloudflare/` を加えます。すでに `wrangler.jsonc` があるアプリでは、ワーカー名、互換性の日付、`DB` のデータベース名、`OAUTH_KV` の名前空間（`cloudflare.config.ts` に ID で書きます）を引き継ぐので、最初の `cf` のデプロイも Wrangler のときと同じリソースに結び付きます。`cf` が読まなくなるほかの設定（routes、vars、ほかのバインディング）は名前を挙げて知らせるので、スプレッドのあとに書き足してください。既存のファイルは、`--force` を付けない限りそのまま残します。`wrangler.jsonc` で Durable Object を使っているアプリには警告を出します。宣言を `migrations` から `exports` に移したときに、デプロイ済みのクラスが保存領域を引き継ぐかはまだ確かめられていないので、先にステージング用のワーカーで試してください。
 
 ```bash
 bunx guren cloudflare:init

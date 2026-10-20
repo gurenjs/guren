@@ -1134,7 +1134,7 @@ function warnHeaderRuleBudget(merged: string, existing: string): void {
   )
 }
 
-function readPackageJson(root: string): PackageJsonLike {
+export function readPackageJson(root: string): PackageJsonLike {
   const packageJsonPath = resolve(root, 'package.json')
   if (!existsSync(packageJsonPath)) {
     return {}

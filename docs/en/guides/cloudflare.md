@@ -410,7 +410,7 @@ The deploy machine needs Node 22.18 or later, because `cf` loads `cloudflare.con
 bun add -d cf wrangler
 ```
 
-`bunx guren cloudflare:init` writes the three files this path reads: `cloudflare.config.ts`, `wrangler.config.ts` and `config/cloudflare.ts` (below), and adds `.cloudflare/` to `.gitignore`. On an app that already has a `wrangler.jsonc`, it carries over the D1 database name and the `OAUTH_KV` binding, so the first `cf` deploy binds what Wrangler did. It writes no file that exists unless you pass `--force`. An app whose `wrangler.jsonc` hosts Durable Objects gets a warning: whether a deployed class keeps its storage when its declaration moves from `migrations` to `exports` is not yet confirmed, so try the move on a staging Worker first.
+`bunx guren cloudflare:init` writes the three files this path reads: `cloudflare.config.ts`, `wrangler.config.ts` and `config/cloudflare.ts` (below), and adds `.cloudflare/` to `.gitignore`. On an app that already has a `wrangler.jsonc`, it carries over the Worker name, the compatibility date, the `DB` database name and the `OAUTH_KV` namespace (by id, in `cloudflare.config.ts`), so the first `cf` deploy binds what Wrangler did, and it names every other setting cf would no longer read (routes, vars, other bindings) for you to add after the spread. A file that exists is left as it is unless you pass `--force`. An app whose `wrangler.jsonc` hosts Durable Objects gets a warning: whether a deployed class keeps its storage when its declaration moves from `migrations` to `exports` is not yet confirmed, so try the move on a staging Worker first.
 
 ```bash
 bunx guren cloudflare:init
