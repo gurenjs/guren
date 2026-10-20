@@ -1,5 +1,6 @@
 import type { DeployResult } from './deploy'
 import type { DeployPlan } from './plan'
+import { BACKEND_WORDS } from './words'
 
 const ACTION_LABELS = {
   existing: 'existing',
@@ -25,7 +26,8 @@ export function formatPlan(plan: DeployPlan): string {
     lines.push(pending.length === 0
       ? `  Migrations: none pending (${layout} layout).`
       : `  Migrations: ${pending.length} pending (${layout} layout): ${pending.join(', ')}`)
-    if (pending.length > 0) lines.push(`    Applied with: cf d1 migrations apply <DB id> ${applyArgs.map((arg) => (arg.includes('*') ? `'${arg}'` : arg)).join(' ')}`)
+    const args = applyArgs.map((arg) => (arg.includes('*') ? `'${arg}'` : arg)).join(' ')
+    if (pending.length > 0) lines.push(`    Applied with: ${BACKEND_WORDS[plan.backend].applyMigrations(args)}`)
     for (const { migration, reason } of plan.migrations.acknowledged) {
       lines.push(`    ${migration}: destructive, acknowledged${reason ? ` (${reason})` : ''}`)
     }
@@ -60,8 +62,8 @@ export function formatResult(result: DeployResult): string {
   }
   if (result.deployment) {
     lines.push(result.deployment.output.trimEnd())
-    lines.push(result.url ? `Deployed: ${result.url}` : 'Deployed. cf printed no workers.dev URL; see its output above.')
-    lines.push(`Roll back with \`bunx cf workers deployments list --worker ${result.plan.worker}\` and a redeploy of an earlier version. A rollback does not revert migrations.`)
+    lines.push(result.url ? `Deployed: ${result.url}` : `Deployed. ${BACKEND_WORDS[result.plan.backend].cli} printed no workers.dev URL; see its output above.`)
+    lines.push(`${BACKEND_WORDS[result.plan.backend].rollback(result.plan.worker)} A rollback does not revert migrations.`)
   }
   if (result.failure) {
     lines.push(`Failed at ${result.failure.stage}: ${result.failure.message}`)

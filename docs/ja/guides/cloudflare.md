@@ -121,6 +121,22 @@ wrangler はフォルダにあるものをそのまま適用するので、こ�
 
 ワーカーが自分でシードを実行することもありません。`defineDatabaseConfig` がシードするのは、`seedOnBoot` が true で、しかもデータベースがマイグレーションありと報告したときだけです。`cloudflare:build` は `NODE_ENV` を `production` に固定しますし、D1 のハンドルには調べるファイルシステムがないので、マイグレーションなしと報告します。ローカルの `bun run dev` では SQLite 側が使われ、マイグレーションがあればブート時にシードします。
 
+### 1 つのコマンドでデプロイする（wrangler.jsonc）
+
+`bunx guren cloudflare:deploy` を使うと、ここまでの手順を、空のデータベースで公開される時間ができない順に実行できます。ビルドし、D1 のデータベース（と `OAUTH_KV`）がなければ作り、未適用のマイグレーションを破壊的マイグレーションのガードにかけてから適用し、最後にデプロイします。
+
+```bash
+bunx guren cloudflare:deploy --plan   # 何をするかを表示するだけで、何も書き込まない
+bunx guren cloudflare:deploy
+```
+
+`wrangler.jsonc` は読むだけで、書き換えません。解決した ID は、設定のコピーである `.cloudflare/wrangler.deploy.json` と `.cloudflare/guren-worker.json` に書き込み、デプロイは `wrangler deploy -c` でこのコピーを使います。どちらのファイルも、ビルドが `.cloudflare/` の中に書く `.gitignore` に含まれます。計画、その確認項目、フラグは、cf CLI について[デプロイの計画](#デプロイの計画)と[1 つのコマンドでデプロイする](#1-つのコマンドでデプロイする)で説明しているものと同じです。`wrangler.jsonc` で違うのは次の点です。
+
+- 事前確認には、アプリの Wrangler が 4.129 以上であること、PATH 上の `node` がその Wrangler の求めるバージョンであること、Wrangler がログイン済みであること（`bunx wrangler login`、CI では `CLOUDFLARE_API_TOKEN`）が必要です。
+- D1 のデータベースは `database_name` の名前で探します。マイグレーションは、`migrations_dir` が `.cloudflare/d1-migrations` のバインディング（雛形の `DB`）に、平坦化したコピーとして適用します。cf でデプロイしたことがあり、`d1_migrations` に入れ子の名前（`<folder>/migration.sql`）が記録されているデータベースは、`tracker-layout` で止まります。Wrangler で適用すると、履歴がすべてもう一度実行されてしまうからです。
+- デプロイするのは `wrangler.jsonc` の最上位だけで、`env.<name>` のブロックは対象外です。
+- 表示する後始末とロールバックのコマンドは Wrangler のもの（`wrangler d1 delete`、`wrangler kv namespace delete`、`wrangler d1 time-travel restore`、`wrangler rollback`）です。
+
 ## セッションと OAuth state はデータベースに保存する
 
 これは好みで選べることではありません。リクエストはそのたびに別の isolate に届く可能性があり、isolate 同士で共有できるのはデータベースだけだからです。メモリの実装のままでもローカルでは動いているように見えますが、本番ではセッションが毎回消えてしまいます。

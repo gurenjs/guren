@@ -24,14 +24,6 @@ interface IgnoredAdvisory {
 
 const IGNORED_ADVISORIES: IgnoredAdvisory[] = [
   {
-    id: 'GHSA-g7r4-m6w7-qqqr',
-    reason:
-      'esbuild 0.27.x arbitrary file read: Windows-only, dev-server-only, low severity. ' +
-      'Fixed in 0.28.1. The only holder is vite 8\'s optional esbuild peer ' +
-      '(`bun pm why esbuild`), resolved at 0.27.7 in the lockfile. Nothing published ' +
-      'or scaffolded runs the esbuild dev server.',
-  },
-  {
     id: 'GHSA-vfj7-8cjw-p6xm',
     reason:
       'braces <=3.0.3 stack-exhaustion DoS on deeply nested patterns; no patched release. ' +

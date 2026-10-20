@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { installCfTools, scaffoldApp, writeJson, writeMigration } from '../../tests/app-fixture'
-import type { CfResult } from './cf-cli'
+import type { CliResult } from './cf-cli'
 import { WORKER_MANIFEST_VERSION } from '../worker-manifest'
 import { runCloudflareDeploy, type CloudflareDeployOptions } from './deploy'
 
@@ -19,6 +19,8 @@ interface FakeAccount {
   fail?: Partial<Record<'create' | 'bookmark' | 'apply' | 'deploy', string>>
   /** An id cloudflare.config.ts sets after the gurenWorker() spread. */
   overrideDbId?: string
+  /** An id cloudflare.config.ts sets for DB from the start, which the manifest never records. */
+  configuredDbId?: string
 }
 
 /**
@@ -27,10 +29,10 @@ interface FakeAccount {
  */
 function fakeCf(root: string, account: FakeAccount, calls: string[][]) {
   let trackerReads = 0
-  return (args: string[]): CfResult => {
+  return (args: string[]): CliResult => {
     calls.push(args)
-    const ok = (value: unknown): CfResult => ({ exitCode: 0, stdout: JSON.stringify(value), stderr: '' })
-    const failed = (key: keyof NonNullable<FakeAccount['fail']>): CfResult | undefined =>
+    const ok = (value: unknown): CliResult => ({ exitCode: 0, stdout: JSON.stringify(value), stderr: '' })
+    const failed = (key: keyof NonNullable<FakeAccount['fail']>): CliResult | undefined =>
       account.fail?.[key] ? { exitCode: 1, stdout: '', stderr: account.fail[key] } : undefined
     const [command, sub] = args
 
@@ -39,7 +41,7 @@ function fakeCf(root: string, account: FakeAccount, calls: string[][]) {
       const manifest = JSON.parse(readFileSync(join(root, '.guren/cloudflare/guren-worker.json'), 'utf8')) as {
         resolved: Record<string, { id?: string; name?: string }>
       }
-      const db = manifest.resolved.DB
+      const db = account.configuredDbId ? { id: account.configuredDbId } : manifest.resolved.DB
       mkdirSync(join(root, '.cloudflare/output/v0/workers/default'), { recursive: true })
       writeJson(join(root, '.cloudflare/output/v0/workers/default/worker.config.json'), {
         name: 'demo-app',
@@ -163,6 +165,17 @@ describe('cloudflare:deploy', () => {
 
     expect(result.failure).toMatchObject({ stage: 'build', cleanup: [`bunx cf d1 delete ${NEW_DB}`] })
     expect(writes(calls)).toEqual(['build', 'd1 create', 'build'])
+  })
+
+  test('should migrate the database cloudflare.config.ts names by id', async () => {
+    writeMigration(root, '20261001_init', 'CREATE TABLE posts (id integer primary key);\n')
+    const calls: string[][] = []
+
+    const result = await run({ d1: [{ uuid: EXISTING_DB, name: 'demo-app' }], tracker: [], configuredDbId: EXISTING_DB }, calls)
+
+    expect(result.failure).toBeUndefined()
+    expect(calls).toContainEqual(['d1', 'migrations', 'apply', EXISTING_DB, '--dir', '.guren/cloudflare/d1-migrations'])
+    expect(result.migrated?.applied).toEqual(['20261001_init'])
   })
 
   test('should not apply when the pending set changed since the plan', async () => {

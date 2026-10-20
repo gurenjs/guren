@@ -6,9 +6,11 @@
  */
 import type { DeployEnvRequirement, PendingMigrationVerdict } from '@guren/core/internal/deploy-plan'
 
+import type { CloudflareBackend } from '../backend'
 import type { WorkerManifest } from '../worker-manifest'
 import type { AccountResource, Read } from './cf-cli'
 import type { MigrationLayout } from './migrations'
+import { BACKEND_WORDS, type BackendWords } from './words'
 
 /** One `env` entry of cf's evaluated `worker.config.json`. */
 export interface EvaluatedBinding {
@@ -25,6 +27,8 @@ export interface EvaluatedWorker {
 }
 
 export interface PlanContext {
+  /** Which CLI and config file the findings name. */
+  backend: CloudflareBackend
   worker: EvaluatedWorker
   manifest: Pick<WorkerManifest, 'resolved'> & Partial<Pick<WorkerManifest, 'resourceNames'>>
   d1: Read<AccountResource[]>
@@ -43,6 +47,10 @@ export interface PlanContext {
 export type MigrationInput =
   | { status: 'unreadable'; reason: string }
   | { status: 'layout-conflict'; nested: string[]; flat: string[] }
+  /** The config does not say which D1 binding `db/migrations` belongs to. */
+  | { status: 'unassigned'; reason: string }
+  /** The tracker holds nested names, which this backend cannot apply. */
+  | { status: 'layout-unsupported'; nested: string[] }
   | {
     status: 'ready'
     layout: MigrationLayout
@@ -83,7 +91,7 @@ export interface PlannedBinding {
   name: string
   /** Absent until the resource exists. */
   id?: string
-  /** The id came from cloudflare.config.ts, which stays its source: the manifest does not record it. */
+  /** The id came from the config file (cloudflare.config.ts, wrangler.jsonc), which stays its source: the manifest does not record it. */
   configured?: true
 }
 
@@ -106,6 +114,7 @@ export interface Finding {
 }
 
 export interface DeployPlan {
+  backend: CloudflareBackend
   worker: string
   bindings: PlannedBinding[]
   findings: Finding[]
@@ -152,12 +161,14 @@ export function autoProvisionedName(worker: string, binding: string): string {
 }
 
 export function buildPlan(context: PlanContext): DeployPlan {
+  const { backend } = context
+  const words = BACKEND_WORDS[backend]
   const findings: Finding[] = []
   const bindings: PlannedBinding[] = []
 
   for (const [binding, entry] of Object.entries(context.worker.env)) {
     if (entry.type !== 'd1' && entry.type !== 'kv') continue
-    const planned = planBinding(context, binding, entry, entry.type, findings)
+    const planned = planBinding(context, binding, entry, entry.type, findings, words)
     bindings.push(planned)
   }
 
@@ -167,7 +178,7 @@ export function buildPlan(context: PlanContext): DeployPlan {
         'source-unreadable',
         undefined,
         `${listing.reason}. Without the listing the plan cannot tell an existing resource from a missing one.`,
-        'Rerun once `cf` can reach the account.',
+        `Rerun once \`${words.cli}\` can reach the account.`,
       ))
     }
   }
@@ -192,10 +203,11 @@ export function buildPlan(context: PlanContext): DeployPlan {
     ))
   }
 
-  const migrations = context.migrations ? planMigrations(context.migrations, findings) : undefined
-  const missingSecrets = context.secrets ? planSecrets(context.secrets, context.worker.name, findings) : undefined
+  const migrations = context.migrations ? planMigrations(context.migrations, findings, words) : undefined
+  const missingSecrets = context.secrets ? planSecrets(context.secrets, context.worker.name, findings, words) : undefined
 
   return {
+    backend,
     worker: context.worker.name,
     bindings,
     findings,
@@ -205,9 +217,27 @@ export function buildPlan(context: PlanContext): DeployPlan {
   }
 }
 
-function planMigrations(input: MigrationInput, findings: Finding[]): DeployPlan['migrations'] {
+function planMigrations(input: MigrationInput, findings: Finding[], words: BackendWords): DeployPlan['migrations'] {
   if (input.status === 'unreadable') {
-    findings.push(blocker('source-unreadable', undefined, `${input.reason}. Without the tracker the plan cannot tell which migrations are pending.`, 'Rerun once `cf` can query the database.'))
+    findings.push(blocker('source-unreadable', undefined, `${input.reason}. Without the tracker the plan cannot tell which migrations are pending.`, `Rerun once \`${words.cli}\` can query the database.`))
+    return undefined
+  }
+  if (input.status === 'unassigned') {
+    findings.push(blocker(
+      'tracker-layout',
+      undefined,
+      `${input.reason}.`,
+      `Set "migrations_dir": ".cloudflare/d1-migrations" on that binding in ${words.config}.`,
+    ))
+    return undefined
+  }
+  if (input.status === 'layout-unsupported') {
+    findings.push(blocker(
+      'tracker-layout',
+      undefined,
+      `d1_migrations records drizzle's nested names (${input.nested.slice(0, 3).join(', ')}), which only the cf backend applies. ${words.cli} applies the flattened copy, so it would run the whole history again.`,
+      'Deploy with the cf backend (`bunx guren cloudflare:init`), or rename the rows to `<folder>.sql` with a guarded UPDATE on d1_migrations.',
+    ))
     return undefined
   }
   if (input.status === 'layout-conflict') {
@@ -243,7 +273,7 @@ function planMigrations(input: MigrationInput, findings: Finding[]): DeployPlan[
   }
 }
 
-function planSecrets(input: SecretsInput, worker: string, findings: Finding[]): string[] | undefined {
+function planSecrets(input: SecretsInput, worker: string, findings: Finding[], words: BackendWords): string[] | undefined {
   if (input.required.status === 'unreadable') {
     findings.push(blocker('source-unreadable', undefined, `${input.required.message}. Without it the plan cannot tell which secrets the worker needs.`, 'Fix config/env.ts so it imports, then plan again.'))
     return undefined
@@ -261,7 +291,7 @@ function planSecrets(input: SecretsInput, worker: string, findings: Finding[]): 
       ? `${worker} has no value for ${missing.join(', ')}, which config/env.ts requires in production.`
       : `config/env.ts requires ${missing.join(', ')} in production, and the deployed secrets could not be read (${input.deployed.reason}), as on a first deploy.`,
     input.deployed.ok
-      ? missing.map((name) => `bunx cf workers secrets update ${name} --worker ${worker}`).join('; ')
+      ? missing.map((name) => words.setSecret(name, worker)).join('; ')
       : `List them in a dotenv file passed as --secrets-file${input.secretsFile ? ` (${input.secretsFile} lacks them)` : ''}; only the names are read here.`,
   ))
   return missing
@@ -277,6 +307,7 @@ function planBinding(
   entry: EvaluatedBinding,
   type: ResourceType,
   findings: Finding[],
+  words: BackendWords,
 ): PlannedBinding {
   // KV cannot carry a name (`bindings.kv()` takes only an id): config/cloudflare.ts names it, or the provisioning default does.
   const name = type === 'd1' && entry.name
@@ -300,7 +331,7 @@ function planBinding(
       findings.push(blocker(
         'resource-missing',
         binding,
-        `${binding} names the ${label} ${configuredId} in cloudflare.config.ts, and the account has none with that id.`,
+        `${binding} names the ${label} ${configuredId} in ${words.config}, and the account has none with that id.`,
         `Correct the id, or remove it so the deploy uses the ${label} named "${name}".`,
       ))
     }
@@ -309,8 +340,8 @@ function planBinding(
       findings.push(blocker(
         'binding-conflict',
         binding,
-        `${binding} names the ${label} ${configuredId} in cloudflare.config.ts, while the ${label} "${name}" it would otherwise resolve to is ${other.id}.`,
-        'Keep one: remove the id from cloudflare.config.ts, or give the binding another name.',
+        `${binding} names the ${label} ${configuredId} in ${words.config}, while the ${label} "${name}" it would otherwise resolve to is ${other.id}.`,
+        `Keep one: remove the id from ${words.config}, or give the binding another name.`,
       ))
     }
     return { binding, type, action: missing ? 'unknown' : 'existing', name, id: configuredId, configured: true }
@@ -336,7 +367,7 @@ function planBinding(
         'binding-conflict',
         binding,
         `${binding} is bound to the ${label} ${resolvedId} by an earlier deploy, while the ${label} "${name}" is ${other.id}.`,
-        `Put the intended id in cloudflare.config.ts, or rename one of the ${label}s.`,
+        `Put the intended id in ${words.config}, or rename one of the ${label}s.`,
       ))
     }
     return { binding, type, action: 'existing', name, id: resolvedId }
@@ -347,7 +378,7 @@ function planBinding(
       'binding-conflict',
       binding,
       `The account has ${byName.length} ${label}s named "${name}" (${byName.map((resource) => resource.id).join(', ')}), so the name does not decide which one ${binding} binds.`,
-      'Put the intended id in cloudflare.config.ts.',
+      `Put the intended id in ${words.config}.`,
     ))
     return { binding, type, action: 'unknown', name }
   }

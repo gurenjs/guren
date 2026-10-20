@@ -34,9 +34,11 @@ import {
   loadMcpOAuthTemplate,
 } from './templates'
 import {
-  CF_OUTPUT_DIR,
   WORKER_MANIFEST_FILE,
   WORKER_MANIFEST_VERSION,
+  D1_MIGRATIONS_DIR,
+  outputDirFor,
+  WRANGLER_DEPLOY_CONFIG_FILE,
   type ResolvedResource,
   type WorkerManifest,
 } from './worker-manifest'
@@ -92,7 +94,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   const root = resolvePathLike(options.rootDir ?? process.cwd())
   const backend = detectCloudflareBackend(root)
   const out = resolvePathLike(
-    options.outputDir ?? resolve(root, backend === 'cf' ? CF_OUTPUT_DIR : '.cloudflare'),
+    options.outputDir ?? resolve(root, outputDirFor(backend)),
   )
   const appEntry = resolvePathLike(options.appEntry ?? resolve(root, 'src/app.ts'))
   const publicDir = resolvePathLike(options.publicDir ?? resolve(root, 'public'))
@@ -167,10 +169,12 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   const bundledEnv = bundledRuntimeEnv(root, publicDir, 'Cloudflare build')
 
   // Read before the reset deletes it: a deploy settles these, and no build can recompute them.
-  const resolved = backend === 'cf' ? readResolvedResources(out) : {}
+  const resolved = readResolvedResources(out)
   resetOutputDir(out, root, 'Cloudflare build')
   // Written first so a build failing below still keeps the carried-over ids.
-  if (backend === 'cf') {
+  if (backend === 'wrangler') {
+    writeResolvedOnly(out, resolved)
+  } else {
     writeWorkerManifest({
       root,
       out,
@@ -208,7 +212,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
     }),
   )
 
-  flattenD1Migrations(resolve(root, 'db/migrations'), resolve(out, 'd1-migrations'))
+  flattenD1Migrations(resolve(root, 'db/migrations'), resolve(out, D1_MIGRATIONS_DIR))
 
   writeDevOnlyStubs(out)
 
@@ -295,6 +299,17 @@ function writeWorkerManifest(input: {
   writeFileSync(resolve(input.out, WORKER_MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`)
   // The manifest will carry resource ids, which stay out of the repository (RFC 0035 §3.1).
   writeFileSync(resolve(input.out, '.gitignore'), '*\n')
+}
+
+/**
+ * The Wrangler backend's manifest holds only what `cloudflare:deploy` settled, since
+ * wrangler.jsonc is the rest. The ignore names only the files carrying ids, because
+ * an app may commit the rest of `.cloudflare/` for a host that deploys without building.
+ */
+function writeResolvedOnly(out: string, resolved: Record<string, ResolvedResource>): void {
+  mkdirSync(out, { recursive: true })
+  writeFileSync(resolve(out, WORKER_MANIFEST_FILE), `${JSON.stringify({ version: WORKER_MANIFEST_VERSION, resolved }, null, 2)}\n`)
+  writeFileSync(resolve(out, '.gitignore'), `${WORKER_MANIFEST_FILE}\n${WRANGLER_DEPLOY_CONFIG_FILE}\n.wrangler/\n`)
 }
 
 /** RFC 0035 §3: Guren's deploy settings on the cf backend, recorded nowhere else. */

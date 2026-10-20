@@ -28,6 +28,8 @@ export type LayoutDecision =
     pending: string[]
   }
   | { ok: false; nested: string[]; flat: string[] }
+  /** The tracker is on the nested layout, which this backend cannot apply. */
+  | { ok: false; unsupported: 'nested'; nested: string[] }
 
 const NESTED_SUFFIX = '/migration.sql'
 
@@ -49,13 +51,18 @@ export function readLocalMigrations(migrationsDir: string): LocalMigrations {
  * `tracker` is `null` for a database with no tracker table, or one not created yet.
  * A tracker with no rows takes the flat layout, which the guide's manual apply and
  * Wrangler both use, so the two never record different names for one database.
+ * Wrangler applies only the flat copy (`appliesNested` false), where a nested history
+ * would all read as pending.
  */
-export function decideLayout(local: LocalMigrations, tracker: readonly string[] | null): LayoutDecision {
+export function decideLayout(local: LocalMigrations, tracker: readonly string[] | null, appliesNested = true): LayoutDecision {
   const rows = tracker ?? []
   const nested = rows.filter((name) => name.endsWith(NESTED_SUFFIX))
   const flat = rows.filter((name) => !name.endsWith(NESTED_SUFFIX))
   if (nested.length > 0 && flat.length > 0) {
     return { ok: false, nested, flat }
+  }
+  if (nested.length > 0 && !appliesNested) {
+    return { ok: false, unsupported: 'nested', nested }
   }
 
   const layout: MigrationLayout = nested.length > 0 ? 'nested' : 'flat'

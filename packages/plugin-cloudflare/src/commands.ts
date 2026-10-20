@@ -89,7 +89,7 @@ const cloudflareDeploy = defineCommand({
   meta: {
     name: 'cloudflare:deploy',
     description:
-      'Deploy through the cf CLI (RFC 0035): build, plan every D1/KV binding, migration and secret against the account, then create, migrate and deploy after one confirmation',
+      'Deploy through the cf CLI, or Wrangler for an app on wrangler.jsonc (RFC 0035): build, plan every D1/KV binding, migration and secret against the account, then create, migrate and deploy after one confirmation',
   },
   args: {
     root: rootArg,
