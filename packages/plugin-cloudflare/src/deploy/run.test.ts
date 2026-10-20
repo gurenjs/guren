@@ -5,6 +5,7 @@ import { join } from 'node:path'
 
 import { installCfTools, scaffoldApp, writeJson, writeMigration } from '../../tests/app-fixture'
 import type { CfResult } from './cf-cli'
+import { WORKER_MANIFEST_VERSION } from '../worker-manifest'
 import { runCloudflareDeploy, type CloudflareDeployOptions } from './deploy'
 
 const NEW_DB = 'aaaaaaaa-0000-4000-8000-000000000001'
@@ -120,7 +121,7 @@ describe('cloudflare:deploy', () => {
 
     const manifest = JSON.parse(readFileSync(join(root, '.guren/cloudflare/guren-worker.json'), 'utf8')) as { version: number; resolved: unknown }
     expect(manifest.resolved).toEqual({ DB: { id: NEW_DB, name: 'demo-app' } })
-    expect(manifest.version).toBe(1)
+    expect(manifest.version).toBe(WORKER_MANIFEST_VERSION)
   })
 
   test('should skip creation and the rebuild when the plan already settled everything', async () => {

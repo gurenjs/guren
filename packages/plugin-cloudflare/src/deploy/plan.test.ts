@@ -268,4 +268,40 @@ describe('buildPlan', () => {
         .toBe('source-unreadable')
     })
   })
+
+  describe('serialization', () => {
+    test('should warn, never block, when the deploy workflow has no concurrency group', () => {
+      const plan = buildPlan(context({ workflow: ok('on: push\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n') }))
+
+      expect(plan.findings.map((finding) => [finding.check, finding.severity])).toEqual([['serialization', 'warning']])
+      expect(plan.findings[0]?.fix).toContain('cloudflare-deploy-demo-app')
+      expect(hasBlocker(plan)).toBe(false)
+    })
+
+    test('should warn when the group cancels a running deploy, or only a job sets one', () => {
+      const cancelling = 'concurrency:\n  group: deploy\n  cancel-in-progress: true\n'
+      const jobOnly = 'jobs:\n  lint:\n    concurrency: lint\n    runs-on: ubuntu-latest\n'
+
+      expect(buildPlan(context({ workflow: ok(cancelling) })).findings[0]?.check).toBe('serialization')
+      expect(buildPlan(context({ workflow: ok(jobOnly) })).findings[0]?.check).toBe('serialization')
+    })
+
+    test('should accept a workflow with a concurrency group, and say so when it could not read one', () => {
+      expect(buildPlan(context({ workflow: ok('concurrency:\n  group: cloudflare-deploy-demo-app\n  cancel-in-progress: false\n') })).findings).toEqual([])
+      expect(buildPlan(context({ workflow: ok('concurrency: deploy\n') })).findings).toEqual([])
+      expect(buildPlan(context({ workflow: { ok: false, reason: 'ENOENT' } })).findings[0]?.message).toContain('ENOENT')
+      expect(buildPlan(context()).findings).toEqual([])
+    })
+  })
+
+  // Deploying a Worker without the trigger it had removes it.
+  test('should block on an unreadable schedule kernel unless the config sets its own trigger', () => {
+    const unreadable = 'app/Console/Kernel.ts could not be read (failed: kernel broke)'
+
+    expect(buildPlan(context({ scheduleUnreadable: unreadable })).findings.map((finding) => finding.check)).toEqual(['schedule-unreadable'])
+    expect(buildPlan(context({
+      scheduleUnreadable: unreadable,
+      worker: { name: 'demo-app', env: { DB: { type: 'd1', name: 'demo-app' } }, scheduled: true },
+    })).findings).toEqual([])
+  })
 })

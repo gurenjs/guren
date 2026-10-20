@@ -111,6 +111,41 @@ describe('cloudflare:build on the cf backend (RFC 0035)', () => {
     expect(readManifest(root).resolved).toEqual({ DB: { id: 'e902bc31-46b4-47dc-9d46-194d0b86148c' } })
   })
 
+  test('should add one every-minute trigger when the schedule kernel registers tasks', async () => {
+    scaffoldApp(root, { cfBackend: true })
+    mkdirSync(join(root, 'app/Console'), { recursive: true })
+    writeFileSync(
+      join(root, 'app/Console/Kernel.ts'),
+      'export function registerSchedules(scheduler: { schedule(define: (s: { call(fn: () => void): { hourly(): unknown } }) => void): void }) {\n  scheduler.schedule((s) => { s.call(() => {}).hourly() })\n}\n',
+    )
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    expect(readManifest(root).crons).toEqual(['* * * * *'])
+  })
+
+  // handler.scheduled throws with no scheduler bound, so the sweep alone would fail every minute.
+  test('should add no trigger without scheduled tasks, the OAuth sweep included', async () => {
+    scaffoldApp(root, { cfBackend: true, mcpPlugin: true, oauthProvider: true })
+
+    await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }))
+
+    expect(readManifest(root).crons).toEqual([])
+    expect(readManifest(root).scheduleUnreadable).toBeUndefined()
+  })
+
+  test('should add no guessed trigger for a kernel it cannot read, and say so', async () => {
+    scaffoldApp(root, { cfBackend: true })
+    mkdirSync(join(root, 'app/Console'), { recursive: true })
+    writeFileSync(join(root, 'app/Console/Kernel.ts'), 'throw new Error("kernel broke")\n')
+
+    const warnings = await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
+
+    expect(readManifest(root).crons).toEqual([])
+    expect(readManifest(root).scheduleUnreadable).toContain('kernel broke')
+    expect(warnings).toContain('kernel broke')
+  })
+
   test('should refuse cloudflare:size, which measures through wrangler.jsonc', () => {
     scaffoldApp(root, { cfBackend: true })
     mkdirSync(join(root, '.guren'), { recursive: true })

@@ -97,6 +97,27 @@ describe('scaffoldDeploy', () => {
     expect(flyToml).toContain('PORT = "4000"')
   })
 
+  it('creates a Cloudflare deploy workflow that runs one deploy per Worker at a time', async () => {
+    const files = await scaffoldDeploy({ target: 'cloudflare' })
+
+    expect(files).toHaveLength(1)
+    const workflow = await readFile('.github/workflows/deploy-cloudflare.yml', 'utf8')
+    // The Worker name cloudflare:build derives drops the scope.
+    expect(workflow).toContain('group: cloudflare-deploy-my-guren-app')
+    expect(workflow).toContain('cancel-in-progress: false')
+    expect(workflow).toContain('run: bunx guren cloudflare:deploy --yes')
+    expect(workflow).toContain('CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}')
+    expect(workflow).toContain('node-version: 24')
+  })
+
+  it('builds an app that ships the OAuth provider with --mcp-oauth in the workflow too', async () => {
+    await writeFile('package.json', JSON.stringify({ name: 'oauth-app', dependencies: { '@cloudflare/workers-oauth-provider': '^0.10.3' } }), 'utf8')
+
+    await scaffoldDeploy({ target: 'cloudflare' })
+
+    expect(await readFile('.github/workflows/deploy-cloudflare.yml', 'utf8')).toContain('run: bunx guren cloudflare:deploy --yes --mcp-oauth')
+  })
+
   it('reports no overwrites on a fresh app', async () => {
     const overwritten: string[] = []
     const files = await scaffoldDeploy({ target: 'all', overwritten })

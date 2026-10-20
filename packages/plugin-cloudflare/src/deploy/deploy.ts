@@ -132,6 +132,8 @@ async function prepare(options: CloudflareDeployOptions): Promise<Prepared> {
   const database = buildPlan(context).bindings.find((binding) => binding.binding === databaseBinding)
   const plan = buildPlan({
     ...context,
+    ...(process.env.GITHUB_ACTIONS === 'true' ? { workflow: readRunningWorkflow(root) } : {}),
+    ...(typeof previous.scheduleUnreadable === 'string' ? { scheduleUnreadable: previous.scheduleUnreadable } : {}),
     migrations: database && !options.skipMigrations ? readMigrations(root, cf, database, options) : undefined,
     secrets: await readSecrets(root, cf, worker, options.secretsFile),
   })
@@ -290,6 +292,18 @@ function cleanupCommands(created: CreatedResource[], bookmark: { id: string; val
   ]
 }
 
+/** GITHUB_WORKFLOW_REF is `owner/repo/.github/workflows/<file>@<ref>`; the file is read from the checkout. */
+function readRunningWorkflow(root: string): Read<string> {
+  const ref = process.env.GITHUB_WORKFLOW_REF ?? ''
+  const path = /\/(\.github\/workflows\/[^@]+)@/.exec(ref)?.[1]
+  if (!path) return { ok: false, reason: 'GITHUB_WORKFLOW_REF names no workflow file' }
+  try {
+    return { ok: true, value: readFileSync(resolve(process.env.GITHUB_WORKSPACE ?? root, path), 'utf8') }
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 function readMigrations(
   root: string,
   cf: CfRunner,
@@ -433,7 +447,8 @@ function readEvaluatedWorker(root: string): EvaluatedWorker {
       }
     }
   }
-  return { name: config.name, env }
+  const triggers = Array.isArray(config.triggers) ? config.triggers : []
+  return { name: config.name, env, scheduled: triggers.some((trigger) => isRecord(trigger) && trigger.type === 'scheduled') }
 }
 
 function nodeOnPathVersion(): string | undefined {

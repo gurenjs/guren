@@ -10,7 +10,7 @@ export const WORKER_MANIFEST_FILE = 'guren-worker.json'
 /** The `cf` backend's output directory, relative to the app root (RFC 0035 §3.3). */
 export const CF_OUTPUT_DIR = '.guren/cloudflare'
 
-export const WORKER_MANIFEST_VERSION = 1
+export const WORKER_MANIFEST_VERSION = 2
 
 /** One binding's resource identity, settled by a deploy and carried over by every build. */
 export interface ResolvedResource {
@@ -32,6 +32,10 @@ export interface WorkerManifest {
   d1: { binding: string; databaseName: string }
   /** KV namespace bindings the build owns (`OAUTH_KV` under `--mcp-oauth`). */
   kvNamespaces: string[]
+  /** Cron schedules for a `scheduled` trigger; empty when the worker schedules nothing. */
+  crons: string[]
+  /** Why the schedule kernel could not be read; the plan blocks unless the config sets its own triggers. */
+  scheduleUnreadable?: string
   /** Agent classes hosted as SQLite-backed Durable Objects, with the binding each gets. */
   agents: Array<{ exportName: string; binding: string }>
   /** Keyed by binding name. The build never writes an entry, only carries them over. */

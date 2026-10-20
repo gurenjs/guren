@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { assertCwdUnsupported, kebabCase, writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
 
-export type DeployTarget = 'docker' | 'fly' | 'railway' | 'all'
+export type DeployTarget = 'docker' | 'fly' | 'railway' | 'cloudflare' | 'all'
 
 export interface DeployOptions extends WriterOptions {
   target?: DeployTarget
@@ -25,19 +25,18 @@ function sanitizeFlyAppName(name: string): string {
   return normalized.length > 0 ? normalized : 'guren-app'
 }
 
-async function inferAppName(): Promise<string> {
-  const packagePath = resolve(process.cwd(), 'package.json')
+interface AppManifest {
+  name?: string
+  dependencies?: Record<string, string>
+}
 
+/** The app's package.json, or nothing when it is missing or invalid; callers fall back to the directory name. */
+async function readAppManifest(): Promise<AppManifest> {
   try {
-    const packageJson = JSON.parse(await readFile(packagePath, 'utf8')) as { name?: string }
-    if (packageJson.name?.trim()) {
-      return sanitizeFlyAppName(packageJson.name)
-    }
+    return JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8')) as AppManifest
   } catch {
-    // Fallback to directory name when package.json is missing or invalid.
+    return {}
   }
-
-  return sanitizeFlyAppName(basename(process.cwd()))
 }
 
 /**
@@ -143,7 +142,68 @@ function railwayJsonTemplate(): string {
 `
 }
 
-function filesForTarget(target: DeployTarget, appName: string, port: number): ScaffoldFileEntry[] {
+/**
+ * Deploys through `guren cloudflare:deploy` on every push to main. One run per
+ * Worker at a time: two at once could create the same resource or apply the same
+ * migration, and Guren keeps no lock of its own. The group name matches the one
+ * `deployConcurrencyGroup()` in @guren/plugin-cloudflare suggests.
+ */
+function cloudflareWorkflowTemplate(worker: string, mcpOAuth: boolean): string {
+  return `name: Deploy to Cloudflare
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: cloudflare-deploy-${worker}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+
+      # cf loads cloudflare.config.ts with Node 22.18 or later.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # --yes applies the plan without a prompt; a plan with a blocker still stops here.
+      # Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID as repository secrets.
+      - name: Deploy
+        run: bunx guren cloudflare:deploy --yes${mcpOAuth ? ' --mcp-oauth' : ''}
+        env:
+          CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+`
+}
+
+interface CloudflareTarget {
+  /** The Worker name `cloudflare:build` derives: the package name without its scope. */
+  worker: string
+  /** The app ships the OAuth provider, so its builds take --mcp-oauth. */
+  mcpOAuth: boolean
+}
+
+/** The scope is dropped as `workerName()` in @guren/plugin-cloudflare drops it; keep the two alike. */
+function cloudflareTarget(appName: string | undefined, manifest: AppManifest): CloudflareTarget {
+  const name = appName ?? manifest.name?.replace(/^@[^/]+\//u, '') ?? basename(process.cwd())
+  return {
+    worker: sanitizeFlyAppName(name),
+    mcpOAuth: manifest.dependencies?.['@cloudflare/workers-oauth-provider'] !== undefined,
+  }
+}
+
+function filesForTarget(target: DeployTarget, appName: string, port: number, cloudflare?: CloudflareTarget): ScaffoldFileEntry[] {
   const dockerFile: ScaffoldFileEntry = { path: 'Dockerfile', contents: dockerfileTemplate(port) }
   const flyFile: ScaffoldFileEntry = { path: 'fly.toml', contents: flyTomlTemplate(appName, port) }
   const railwayFile: ScaffoldFileEntry = { path: 'railway.json', contents: railwayJsonTemplate() }
@@ -154,6 +214,11 @@ function filesForTarget(target: DeployTarget, appName: string, port: number): Sc
       return [dockerFile, flyFile]
     case 'railway':
       return [dockerFile, railwayFile]
+    case 'cloudflare':
+      return [{
+        path: '.github/workflows/deploy-cloudflare.yml',
+        contents: cloudflareWorkflowTemplate(cloudflare?.worker ?? appName, cloudflare?.mcpOAuth ?? false),
+      }]
     case 'all':
       return [dockerFile, flyFile, railwayFile]
     default: {
@@ -167,7 +232,9 @@ export async function scaffoldDeploy(options: DeployOptions = {}): Promise<strin
   assertCwdUnsupported(options, 'guren deploy')
   const target = options.target ?? 'docker'
   const port = normalizePort(options.port)
-  const appName = sanitizeFlyAppName(options.appName ?? await inferAppName())
-  const files = filesForTarget(target, appName, port)
+  const manifest = await readAppManifest()
+  const appName = sanitizeFlyAppName(options.appName ?? (manifest.name?.trim() || basename(process.cwd())))
+  const cloudflare = target === 'cloudflare' ? cloudflareTarget(options.appName, manifest) : undefined
+  const files = filesForTarget(target, appName, port, cloudflare)
   return writeScaffoldFiles(files, { force: Boolean(options.force), overwritten: options.overwritten })
 }

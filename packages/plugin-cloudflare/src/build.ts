@@ -25,6 +25,7 @@ import {
   type PathLike,
 } from '@guren/core/internal/deploy-build'
 import { reportDeployRuntimeHazards } from '@guren/core/internal/deploy-check'
+import { readScheduledTasks } from '@guren/core/internal/deploy-plan'
 
 import {
   MCP_OAUTH_REGISTRAR,
@@ -143,6 +144,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   // drops every login after deploy, and the warning belongs where the
   // developer is still reading (RFC 0020 Part 0).
   await reportDeployRuntimeHazards({ root, label: 'Cloudflare build' })
+  const schedule = backend === 'cf' ? await cronTriggers(root) : { crons: [] }
   warnDatabaseWithoutD1(root)
 
   if (!options.skipAppBuild) {
@@ -162,7 +164,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   resetOutputDir(out, root, 'Cloudflare build')
   // Written first so a build failing below still keeps the carried-over ids.
   if (backend === 'cf') {
-    writeWorkerManifest({ root, out, packageName: packageJson.name, mcpOAuth, agents: agents.exports, resolved })
+    writeWorkerManifest({ root, out, packageName: packageJson.name, mcpOAuth, agents: agents.exports, resolved, ...schedule })
   }
 
   // Workers Static Assets serves `/` from index.html BEFORE the worker runs,
@@ -219,6 +221,27 @@ export function readResolvedResources(out: string): Record<string, ResolvedResou
   return isRecord(resolved) ? (resolved as Record<string, ResolvedResource>) : {}
 }
 
+/**
+ * One `* * * * *` trigger when the schedule kernel registers tasks: the worker runs
+ * whichever are due at each firing, so a coarser trigger would skip the finest task
+ * (RFC 0035 §2). None for the OAuth sweep alone, which `handler.scheduled` follows by
+ * throwing when no scheduler is bound. A kernel it cannot read is recorded, so the
+ * deploy plan can refuse to drop a trigger the Worker may already have.
+ */
+async function cronTriggers(root: string): Promise<{ crons: string[]; scheduleUnreadable?: string }> {
+  const tasks = await readScheduledTasks(root)
+  if (tasks.status === 'unreadable') {
+    console.warn(`Cloudflare build: ${tasks.message}, so no cron trigger was added for scheduled tasks. Add triggers.scheduled() in cloudflare.config.ts if the app has any.`)
+    return { crons: [], scheduleUnreadable: tasks.message }
+  }
+  if (tasks.status === 'loaded') {
+    for (const warning of tasks.warnings) console.warn(`Cloudflare build: the schedule kernel loaded partly: ${warning}`)
+  }
+  return { crons: tasks.status === 'loaded' && tasks.count > 0 ? [EVERY_MINUTE] : [] }
+}
+
+const EVERY_MINUTE = '* * * * *'
+
 function writeWorkerManifest(input: {
   root: string
   out: string
@@ -226,6 +249,8 @@ function writeWorkerManifest(input: {
   mcpOAuth: boolean
   agents: AgentExport[]
   resolved: Record<string, ResolvedResource>
+  crons: string[]
+  scheduleUnreadable?: string
 }): void {
   const outRelative = relative(input.root, input.out).split(sep).join('/')
   const manifest: WorkerManifest = {
@@ -239,6 +264,8 @@ function writeWorkerManifest(input: {
     vars: WORKER_VARS,
     d1: { binding: 'DB', databaseName: workerName(input.packageName) },
     kvNamespaces: input.mcpOAuth ? [OAUTH_KV_BINDING] : [],
+    crons: input.crons,
+    ...(input.scheduleUnreadable ? { scheduleUnreadable: input.scheduleUnreadable } : {}),
     agents: input.agents.map((agent) => ({
       exportName: agent.export,
       binding: durableObjectBindingName(agent.export),

@@ -20,6 +20,8 @@ export interface EvaluatedBinding {
 export interface EvaluatedWorker {
   name: string
   env: Record<string, EvaluatedBinding>
+  /** Whether the evaluated config has a scheduled trigger. */
+  scheduled?: boolean
 }
 
 export interface PlanContext {
@@ -31,6 +33,10 @@ export interface PlanContext {
   mayCreate: boolean
   migrations?: MigrationInput
   secrets?: SecretsInput
+  /** In GitHub Actions: the running workflow's text, or why it could not be read. */
+  workflow?: Read<string>
+  /** The build could not read the schedule kernel (WorkerManifest.scheduleUnreadable). */
+  scheduleUnreadable?: string
 }
 
 /** What deploy.ts read about the D1 database's migrations; the judging itself is the ORM's. */
@@ -88,6 +94,8 @@ export type CheckName =
   | 'tracker-layout'
   | 'destructive-migration'
   | 'secrets'
+  | 'serialization'
+  | 'schedule-unreadable'
 
 export interface Finding {
   check: CheckName
@@ -118,6 +126,26 @@ const UNREAD_SOURCES = [
   'the deployed Worker\'s bindings (RFC 0035 Open Question 9); the deploy\'s strict inheritance covers them',
 ]
 
+/** The concurrency group `guren deploy --target cloudflare` writes for a Worker; @guren/cli's template spells it too. */
+export function deployConcurrencyGroup(worker: string): string {
+  return `cloudflare-deploy-${worker}`
+}
+
+/** A top-level `concurrency` that queues a second run rather than cancelling the first. */
+function serializesRuns(workflow: string): boolean {
+  let parsed: unknown
+  try {
+    parsed = Bun.YAML.parse(workflow)
+  } catch {
+    return false
+  }
+  const concurrency = typeof parsed === 'object' && parsed !== null ? (parsed as { concurrency?: unknown }).concurrency : undefined
+  if (typeof concurrency === 'string') return concurrency.trim() !== ''
+  if (typeof concurrency !== 'object' || concurrency === null) return false
+  const { group, 'cancel-in-progress': cancel } = concurrency as { group?: unknown; 'cancel-in-progress'?: unknown }
+  return typeof group === 'string' && group.trim() !== '' && cancel !== true
+}
+
 /** Bindings cf's provisioning would create under `<worker>-<binding>`, with `_` as `-` (RFC 0035 §4). */
 export function autoProvisionedName(worker: string, binding: string): string {
   return `${worker}-${binding.toLowerCase().replaceAll('_', '-')}`
@@ -142,6 +170,26 @@ export function buildPlan(context: PlanContext): DeployPlan {
         'Rerun once `cf` can reach the account.',
       ))
     }
+  }
+
+  if (context.workflow && !(context.workflow.ok && serializesRuns(context.workflow.value))) {
+    findings.push({
+      check: 'serialization',
+      severity: 'warning',
+      message: context.workflow.ok
+        ? 'This GitHub Actions workflow has no top-level concurrency group that waits for a running deploy, so two deploys of this Worker can overlap, or one can be cancelled midway through a migration.'
+        : `The running workflow could not be read (${context.workflow.reason}), so whether deploys of this Worker run one at a time is unknown.`,
+      fix: `Add \`concurrency: { group: ${deployConcurrencyGroup(context.worker.name)}, cancel-in-progress: false }\` at the top of the workflow, as \`guren deploy --target cloudflare\` writes it.`,
+    })
+  }
+
+  if (context.scheduleUnreadable && !context.worker.scheduled) {
+    findings.push(blocker(
+      'schedule-unreadable',
+      undefined,
+      `${context.scheduleUnreadable}, so whether the Worker needs a cron trigger is unknown, and deploying without one would remove a trigger it may already have.`,
+      'Fix the kernel so `bunx guren schedule:list` reads it, or set `triggers` yourself in cloudflare.config.ts.',
+    ))
   }
 
   const migrations = context.migrations ? planMigrations(context.migrations, findings) : undefined
