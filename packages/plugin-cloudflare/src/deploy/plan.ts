@@ -10,6 +10,7 @@ import type { CloudflareBackend } from '../backend'
 import type { WorkerManifest } from '../worker-manifest'
 import type { AccountResource, Read } from './cf-cli'
 import type { MigrationLayout } from './migrations'
+import { BACKEND_WORDS, type BackendWords } from './words'
 
 /** One `env` entry of cf's evaluated `worker.config.json`. */
 export interface EvaluatedBinding {
@@ -26,8 +27,8 @@ export interface EvaluatedWorker {
 }
 
 export interface PlanContext {
-  /** Which CLI and config file the findings name; `cf` when absent. */
-  backend?: CloudflareBackend
+  /** Which CLI and config file the findings name. */
+  backend: CloudflareBackend
   worker: EvaluatedWorker
   manifest: Pick<WorkerManifest, 'resolved'> & Partial<Pick<WorkerManifest, 'resourceNames'>>
   d1: Read<AccountResource[]>
@@ -46,6 +47,8 @@ export interface PlanContext {
 export type MigrationInput =
   | { status: 'unreadable'; reason: string }
   | { status: 'layout-conflict'; nested: string[]; flat: string[] }
+  /** The tracker holds nested names, which this backend cannot apply. */
+  | { status: 'layout-unsupported'; nested: string[] }
   | {
     status: 'ready'
     layout: MigrationLayout
@@ -130,22 +133,6 @@ const UNREAD_SOURCES = [
   'the deployed Worker\'s bindings (RFC 0035 Open Question 9); the deploy\'s strict inheritance covers them',
 ]
 
-/** What a finding names, per backend: the CLI to rerun, the file an id goes in, the command that sets a secret. */
-const VOCABULARY = {
-  cf: {
-    cli: 'cf',
-    config: 'cloudflare.config.ts',
-    setSecret: (name: string, worker: string) => `bunx cf workers secrets update ${name} --worker ${worker}`,
-  },
-  wrangler: {
-    cli: 'wrangler',
-    config: 'wrangler.jsonc',
-    setSecret: (name: string, worker: string) => `bunx wrangler secret put ${name} --name ${worker}`,
-  },
-} as const
-
-type Vocabulary = (typeof VOCABULARY)[CloudflareBackend]
-
 /** The concurrency group `guren deploy --target cloudflare` writes for a Worker; @guren/cli's template spells it too. */
 export function deployConcurrencyGroup(worker: string): string {
   return `cloudflare-deploy-${worker}`
@@ -172,8 +159,8 @@ export function autoProvisionedName(worker: string, binding: string): string {
 }
 
 export function buildPlan(context: PlanContext): DeployPlan {
-  const backend = context.backend ?? 'cf'
-  const words = VOCABULARY[backend]
+  const { backend } = context
+  const words = BACKEND_WORDS[backend]
   const findings: Finding[] = []
   const bindings: PlannedBinding[] = []
 
@@ -228,16 +215,16 @@ export function buildPlan(context: PlanContext): DeployPlan {
   }
 }
 
-function planMigrations(input: MigrationInput, findings: Finding[], words: Vocabulary): DeployPlan['migrations'] {
+function planMigrations(input: MigrationInput, findings: Finding[], words: BackendWords): DeployPlan['migrations'] {
   if (input.status === 'unreadable') {
     findings.push(blocker('source-unreadable', undefined, `${input.reason}. Without the tracker the plan cannot tell which migrations are pending.`, `Rerun once \`${words.cli}\` can query the database.`))
     return undefined
   }
-  if (input.status === 'layout-conflict' && input.flat.length === 0) {
+  if (input.status === 'layout-unsupported') {
     findings.push(blocker(
       'tracker-layout',
       undefined,
-      `d1_migrations records drizzle's nested names (${input.nested.slice(0, 3).join(', ')}), which only the cf backend applies. Wrangler applies the flattened copy, so it would run the whole history again.`,
+      `d1_migrations records drizzle's nested names (${input.nested.slice(0, 3).join(', ')}), which only the cf backend applies. ${words.cli} applies the flattened copy, so it would run the whole history again.`,
       'Deploy with the cf backend (`bunx guren cloudflare:init`), or rename the rows to `<folder>.sql` with a guarded UPDATE on d1_migrations.',
     ))
     return undefined
@@ -275,7 +262,7 @@ function planMigrations(input: MigrationInput, findings: Finding[], words: Vocab
   }
 }
 
-function planSecrets(input: SecretsInput, worker: string, findings: Finding[], words: Vocabulary): string[] | undefined {
+function planSecrets(input: SecretsInput, worker: string, findings: Finding[], words: BackendWords): string[] | undefined {
   if (input.required.status === 'unreadable') {
     findings.push(blocker('source-unreadable', undefined, `${input.required.message}. Without it the plan cannot tell which secrets the worker needs.`, 'Fix config/env.ts so it imports, then plan again.'))
     return undefined
@@ -309,7 +296,7 @@ function planBinding(
   entry: EvaluatedBinding,
   type: ResourceType,
   findings: Finding[],
-  words: Vocabulary,
+  words: BackendWords,
 ): PlannedBinding {
   // KV cannot carry a name (`bindings.kv()` takes only an id): config/cloudflare.ts names it, or the provisioning default does.
   const name = type === 'd1' && entry.name

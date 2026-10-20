@@ -526,7 +526,7 @@ describe.skipIf(!cfEnabled)('cf builds and dry-runs the cf-backend worker', () =
   test(
     'accepts every listing the plan sends, and reports auth as JSON',
     async () => {
-      const { appCfRunner, listD1Databases, listKvNamespaces, listWorkerSecrets, readMigrationTracker } = await import('./deploy/cf-cli')
+      const { appCliRunner, listD1Databases, listKvNamespaces, listWorkerSecrets, readMigrationTracker } = await import('./deploy/cf-cli')
       const sent: string[][] = []
       const recorder = (args: string[]) => {
         sent.push(args)
@@ -541,7 +541,7 @@ describe.skipIf(!cfEnabled)('cf builds and dry-runs the cf-backend worker', () =
       const previous = process.env.CLOUDFLARE_ACCOUNT_ID
       process.env.CLOUDFLARE_ACCOUNT_ID = '0'.repeat(32)
       try {
-        const real = appCfRunner(root, join(root, 'node_modules/cf/bin/cf'))
+        const real = appCliRunner(root, join(root, 'node_modules/cf/bin/cf'))
         for (const [index, args] of sent.entries()) {
           const result = real([...args, '--dry-run'])
           expect(result.exitCode).toBe(0)

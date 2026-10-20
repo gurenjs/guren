@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { installCfTools, scaffoldApp, writeJson, writeMigration } from '../../tests/app-fixture'
-import type { CfResult } from './cf-cli'
+import type { CliResult } from './cf-cli'
 import { WORKER_MANIFEST_VERSION } from '../worker-manifest'
 import { runCloudflareDeploy, type CloudflareDeployOptions } from './deploy'
 
@@ -29,10 +29,10 @@ interface FakeAccount {
  */
 function fakeCf(root: string, account: FakeAccount, calls: string[][]) {
   let trackerReads = 0
-  return (args: string[]): CfResult => {
+  return (args: string[]): CliResult => {
     calls.push(args)
-    const ok = (value: unknown): CfResult => ({ exitCode: 0, stdout: JSON.stringify(value), stderr: '' })
-    const failed = (key: keyof NonNullable<FakeAccount['fail']>): CfResult | undefined =>
+    const ok = (value: unknown): CliResult => ({ exitCode: 0, stdout: JSON.stringify(value), stderr: '' })
+    const failed = (key: keyof NonNullable<FakeAccount['fail']>): CliResult | undefined =>
       account.fail?.[key] ? { exitCode: 1, stdout: '', stderr: account.fail[key] } : undefined
     const [command, sub] = args
 

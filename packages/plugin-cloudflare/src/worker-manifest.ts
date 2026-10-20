@@ -14,6 +14,14 @@ export const CF_OUTPUT_DIR = '.guren/cloudflare'
 /** The Wrangler backend's, which the committed wrangler.jsonc points into. */
 export const WRANGLER_OUTPUT_DIR = '.cloudflare'
 
+/** The output directory of each backend, which the build writes and the deploy reads. */
+export function outputDirFor(backend: 'cf' | 'wrangler'): string {
+  return backend === 'cf' ? CF_OUTPUT_DIR : WRANGLER_OUTPUT_DIR
+}
+
+/** Inside the output directory: the flattened copy of `db/migrations`. */
+export const D1_MIGRATIONS_DIR = 'd1-migrations'
+
 /** The Wrangler backend's deploy config, rendered into its output directory with the resolved ids. */
 export const WRANGLER_DEPLOY_CONFIG_FILE = 'wrangler.deploy.json'
 

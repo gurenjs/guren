@@ -16,9 +16,6 @@ export interface CliResult {
 /** Runs a CLI with `args` from the app root. The seam the tests replace. */
 export type CliRunner = (args: string[]) => CliResult
 
-export type CfResult = CliResult
-export type CfRunner = CliRunner
-
 export type Read<T> = { ok: true; value: T } | { ok: false; reason: string }
 
 /** A D1 database (`uuid`, `name`) or a KV namespace (`id`, `title`), in one shape. */
@@ -31,14 +28,17 @@ export interface AccountResource {
 const PAGE_SIZE = 100
 const MAX_PAGES = 50
 
-/** The app's `cf`, run by `node` from PATH; cf loads cloudflare.config.ts with that Node. */
-export function appCfRunner(root: string, bin: string): CfRunner {
+/**
+ * The app's `cf` or `wrangler`, run by the `node` on PATH (cf loads cloudflare.config.ts
+ * with it). No stdin and CI=1, so no prompt waits and none writes wrangler.jsonc.
+ */
+export function appCliRunner(root: string, bin: string): CliRunner {
   return (args) => {
     const result = Bun.spawnSync({
       cmd: ['node', bin, ...args],
       cwd: root,
-      // No colour and no prompts: the output is parsed.
       env: { ...process.env, CI: '1' },
+      stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
     })
@@ -46,16 +46,16 @@ export function appCfRunner(root: string, bin: string): CfRunner {
   }
 }
 
-export function listD1Databases(cf: CfRunner): Read<AccountResource[]> {
+export function listD1Databases(cf: CliRunner): Read<AccountResource[]> {
   return listPages(cf, ['d1', 'list'], 'cf d1 list', 'uuid', 'name')
 }
 
-export function listKvNamespaces(cf: CfRunner): Read<AccountResource[]> {
+export function listKvNamespaces(cf: CliRunner): Read<AccountResource[]> {
   return listPages(cf, ['kv', 'namespaces', 'list'], 'cf kv namespaces list', 'id', 'title')
 }
 
 /** `cf auth whoami` exits 0 when logged out too, printing `{ "authenticated": false, "error": … }`. */
-export function checkAuth(cf: CfRunner): Read<true> {
+export function checkAuth(cf: CliRunner): Read<true> {
   const result = cf(['auth', 'whoami'])
   if (result.exitCode !== 0) {
     return { ok: false, reason: `cf auth whoami failed: ${failureText(result)}` }
@@ -76,22 +76,27 @@ export function checkAuth(cf: CfRunner): Read<true> {
  * exist yet (nothing applied). Any other failure is unreadable: guessing "nothing
  * applied" would replay the whole history against live data.
  */
-export function readMigrationTracker(cf: CfRunner, databaseId: string): Read<string[] | null> {
-  const result = cf(['d1', 'query', databaseId, '--sql', 'select name from d1_migrations order by id'])
+export function readMigrationTracker(cf: CliRunner, databaseId: string): Read<string[] | null> {
+  return trackerRows(cf(['d1', 'query', databaseId, '--sql', TRACKER_QUERY]), 'cf d1 query')
+}
+
+export const TRACKER_QUERY = 'select name from d1_migrations order by id'
+
+/** A tracker query's result: the API answers `[{ results: [...], success, meta }]`, with or without the envelope. */
+export function trackerRows(result: CliResult, label: string): Read<string[] | null> {
   if (result.exitCode !== 0) {
     if (/no such table:?\s*d1_migrations/i.test(failureText(result))) return { ok: true, value: null }
-    return { ok: false, reason: `cf d1 query on the migrations table failed: ${failureText(result)}` }
+    return { ok: false, reason: `${label} on the migrations table failed: ${failureText(result)}` }
   }
-  // The API answers `[{ results: [...], success, meta }]`, with or without the envelope around it.
   const statements = resultArray(parseJson(result.stdout))
   const rows = names(statements?.[0] !== undefined && isRecord(statements[0]) ? statements[0].results : undefined)
   return rows
     ? { ok: true, value: rows }
-    : { ok: false, reason: 'cf d1 query printed no `results` rows with a `name` for the migrations table' }
+    : { ok: false, reason: `${label} printed no \`results\` rows with a \`name\` for the migrations table` }
 }
 
 /** The secret names a deployed Worker has. Fails on a Worker that does not exist yet, too. */
-export function listWorkerSecrets(cf: CfRunner, worker: string): Read<string[]> {
+export function listWorkerSecrets(cf: CliRunner, worker: string): Read<string[]> {
   const result = cf(['workers', 'secrets', 'list', '--worker', worker])
   if (result.exitCode !== 0) {
     return { ok: false, reason: `cf workers secrets list failed: ${failureText(result)}` }
@@ -101,21 +106,21 @@ export function listWorkerSecrets(cf: CfRunner, worker: string): Read<string[]> 
 }
 
 /** `cf d1 create`: the new database's id, read from `uuid`. Unparseable output is a failure, though the database may exist. */
-export function createD1Database(cf: CfRunner, name: string): Read<string> {
+export function createD1Database(cf: CliRunner, name: string): Read<string> {
   return readField(cf, ['d1', 'create', '--name', name], 'cf d1 create', 'uuid')
 }
 
 /** `cf kv namespaces create`: the new namespace's id. */
-export function createKvNamespace(cf: CfRunner, title: string): Read<string> {
+export function createKvNamespace(cf: CliRunner, title: string): Read<string> {
   return readField(cf, ['kv', 'namespaces', 'create', '--title', title], 'cf kv namespaces create', 'id')
 }
 
 /** The Time Travel bookmark a restore would return the database to. */
-export function getBookmark(cf: CfRunner, databaseId: string): Read<string> {
+export function getBookmark(cf: CliRunner, databaseId: string): Read<string> {
   return readField(cf, ['d1', 'time-travel', 'get-bookmark', databaseId], 'cf d1 time-travel get-bookmark', 'bookmark')
 }
 
-export function applyMigrations(cf: CfRunner, databaseId: string, dirArgs: string[]): Read<string> {
+export function applyMigrations(cf: CliRunner, databaseId: string, dirArgs: string[]): Read<string> {
   const result = cf(['d1', 'migrations', 'apply', databaseId, ...dirArgs])
   return result.exitCode === 0
     ? { ok: true, value: result.stdout }
@@ -123,15 +128,15 @@ export function applyMigrations(cf: CfRunner, databaseId: string, dirArgs: strin
 }
 
 /** Stage 7: the build already evaluated, and no resource created behind the plan's back (RFC 0035 §4). */
-export function deployPrebuilt(cf: CfRunner, secretsFile: string | undefined): Read<string> {
+export function deployPrebuilt(cf: CliRunner, secretsFile: string | undefined): Read<string> {
   const result = cf(['deploy', '--prebuilt', '--no-provision', ...(secretsFile ? ['--secrets-file', secretsFile] : [])])
   return result.exitCode === 0
     ? { ok: true, value: `${result.stdout}${result.stderr}` }
     : { ok: false, reason: `cf deploy failed: ${failureText(result)}` }
 }
 
-/** One string field of a single result `cf` prints. */
-function readField(cf: CfRunner, args: string[], label: string, key: string): Read<string> {
+/** One string field of a single result the CLI prints. */
+export function readField(cf: CliRunner, args: string[], label: string, key: string): Read<string> {
   const result = cf(args)
   if (result.exitCode !== 0) return { ok: false, reason: `${label} failed: ${failureText(result)}` }
   const value = resultObject(parseJson(result.stdout))?.[key]
@@ -139,35 +144,39 @@ function readField(cf: CfRunner, args: string[], label: string, key: string): Re
 }
 
 /** `cf build`: evaluates cloudflare.config.ts and writes the build output the plan reads. */
-export function cfBuild(cf: CfRunner): Read<true> {
+export function cfBuild(cf: CliRunner): Read<true> {
   const result = cf(['build'])
   return result.exitCode === 0 ? { ok: true, value: true } : { ok: false, reason: failureText(result) }
 }
 
-function listPages(cf: CfRunner, command: string[], label: string, idKey: string, nameKey: string): Read<AccountResource[]> {
+function listPages(cf: CliRunner, command: string[], label: string, idKey: string, nameKey: string): Read<AccountResource[]> {
   const all: AccountResource[] = []
   for (let page = 1; page <= MAX_PAGES; page++) {
-    const result = cf([...command, '--page', String(page), '--per-page', String(PAGE_SIZE)])
-    if (result.exitCode !== 0) {
-      return { ok: false, reason: `${label} failed: ${failureText(result)}` }
-    }
-    const entries = resultArray(parseJson(result.stdout))
-    if (!entries) {
-      return { ok: false, reason: `${label} printed no JSON list` }
-    }
-    for (const entry of entries) {
-      const id: unknown = isRecord(entry) ? entry[idKey] : undefined
-      const name: unknown = isRecord(entry) ? entry[nameKey] : undefined
-      if (typeof id !== 'string' || typeof name !== 'string') {
-        return { ok: false, reason: `${label} returned an entry of an unexpected shape: ${JSON.stringify(entry)}` }
-      }
-      all.push({ id, name })
-    }
-    if (entries.length < PAGE_SIZE) {
+    const listed = parseResources(cf([...command, '--page', String(page), '--per-page', String(PAGE_SIZE)]), label, idKey, nameKey)
+    if (!listed.ok) return listed
+    all.push(...listed.value)
+    if (listed.value.length < PAGE_SIZE) {
       return { ok: true, value: all }
     }
   }
   return { ok: false, reason: `${label} still had results after ${MAX_PAGES} pages of ${PAGE_SIZE}` }
+}
+
+/** One listing's entries, each read as `{ id, name }` from the keys the resource type uses. */
+export function parseResources(result: CliResult, label: string, idKey: string, nameKey: string): Read<AccountResource[]> {
+  if (result.exitCode !== 0) return { ok: false, reason: `${label} failed: ${failureText(result)}` }
+  const entries = resultArray(parseJson(result.stdout))
+  if (!entries) return { ok: false, reason: `${label} printed no JSON list` }
+  const resources: AccountResource[] = []
+  for (const entry of entries) {
+    const id: unknown = isRecord(entry) ? entry[idKey] : undefined
+    const name: unknown = isRecord(entry) ? entry[nameKey] : undefined
+    if (typeof id !== 'string' || typeof name !== 'string') {
+      return { ok: false, reason: `${label} returned an entry of an unexpected shape: ${JSON.stringify(entry)}` }
+    }
+    resources.push({ id, name })
+  }
+  return { ok: true, value: resources }
 }
 
 /** A listing as `cf` prints it: the `result` array alone, or the API envelope around it. */
@@ -189,7 +198,15 @@ export function names(entries: unknown): string[] | undefined {
   return read.every((name) => name !== undefined) ? (read as string[]) : undefined
 }
 
+/** The JSON a command printed, past any line the CLI writes ahead of it (an update notice). */
 export function parseJson(text: string): unknown {
+  const whole = tryParse(text)
+  if (whole !== undefined) return whole
+  const start = text.search(/^[[{]/m)
+  return start === -1 ? undefined : tryParse(text.slice(start))
+}
+
+function tryParse(text: string): unknown {
   try {
     return JSON.parse(text)
   } catch {
@@ -197,7 +214,7 @@ export function parseJson(text: string): unknown {
   }
 }
 
-export function failureText(result: CfResult): string {
+export function failureText(result: CliResult): string {
   const text = `${result.stderr}${result.stdout}`.trim()
   return text === '' ? `exit code ${result.exitCode}` : text
 }

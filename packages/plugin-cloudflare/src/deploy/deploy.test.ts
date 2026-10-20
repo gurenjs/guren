@@ -4,16 +4,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { installCfTools, scaffoldApp, writeJson, writeMigration } from '../../tests/app-fixture'
-import type { CfResult } from './cf-cli'
+import type { CliResult } from './cf-cli'
 import { planCloudflareDeploy, type CloudflareDeployOptions } from './deploy'
 
 const DB_ID = 'e902bc31-46b4-47dc-9d46-194d0b86148c'
 
 /** A cf that is logged in, writes worker.config.json on `build`, lists `d1` as given, and answers the tracker and secrets. */
 function fakeCf(root: string, d1: unknown[], calls: string[][] = [], extra: { tracker?: string[]; secrets?: string[] } = {}) {
-  return (args: string[]): CfResult => {
+  return (args: string[]): CliResult => {
     calls.push(args)
-    const ok = (value: unknown): CfResult => ({ exitCode: 0, stdout: JSON.stringify(value), stderr: '' })
+    const ok = (value: unknown): CliResult => ({ exitCode: 0, stdout: JSON.stringify(value), stderr: '' })
     if (args[0] === 'auth') return ok({ authenticated: true })
     if (args[0] === 'build') {
       mkdirSync(join(root, '.cloudflare/output/v0/workers/default'), { recursive: true })
@@ -86,7 +86,7 @@ describe('cloudflare:deploy --plan', () => {
   test('should fail preflight when cf is not logged in, naming the login', async () => {
     scaffoldApp(root, { cfBackend: true })
     installCfTools(root)
-    const cf = (args: string[]): CfResult =>
+    const cf = (args: string[]): CliResult =>
       args[0] === 'auth'
         ? { exitCode: 0, stdout: JSON.stringify({ authenticated: false, error: 'Not logged in' }), stderr: '' }
         : { exitCode: 1, stdout: '', stderr: 'not reached' }
@@ -114,7 +114,7 @@ describe('cloudflare:deploy --plan', () => {
     installCfTools(root)
     mkdirSync(join(root, '.cloudflare/output/v0/workers/default'), { recursive: true })
     writeJson(join(root, '.cloudflare/output/v0/workers/default/worker.config.json'), { name: 'stale', env: {} })
-    const cf = (args: string[]): CfResult =>
+    const cf = (args: string[]): CliResult =>
       ({ exitCode: 0, stdout: args[0] === 'auth' ? '{"authenticated":true}' : '[]', stderr: '' })
 
     await expect(planCloudflareDeploy(options({ cf }))).rejects.toThrow(/worker\.config\.json is missing/)
@@ -148,7 +148,7 @@ describe('cloudflare:deploy --plan', () => {
   test('should stop when cf build cannot evaluate the config', async () => {
     scaffoldApp(root, { cfBackend: true })
     installCfTools(root)
-    const cf = (args: string[]): CfResult =>
+    const cf = (args: string[]): CliResult =>
       args[0] === 'auth'
         ? { exitCode: 0, stdout: '{"authenticated":true}', stderr: '' }
         : { exitCode: 1, stdout: '', stderr: 'Invalid `cloudflare.config.ts`' }

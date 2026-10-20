@@ -8,10 +8,10 @@ import { dirname, join } from 'node:path'
 
 import { isRecord, type CloudflareBackend } from '../backend'
 import { readWorkerManifest, readWranglerConfig } from '../build'
-import { CF_OUTPUT_DIR, WRANGLER_DEPLOY_CONFIG_FILE, WRANGLER_OUTPUT_DIR, type ResolvedResource } from '../worker-manifest'
+import { D1_MIGRATIONS_DIR, outputDirFor, WRANGLER_DEPLOY_CONFIG_FILE, type ResolvedResource } from '../worker-manifest'
 import {
   applyMigrations,
-  appCfRunner,
+  appCliRunner,
   cfBuild,
   checkAuth,
   createD1Database,
@@ -22,15 +22,14 @@ import {
   listKvNamespaces,
   listWorkerSecrets,
   readMigrationTracker,
+  parseJson,
   type AccountResource,
-  type CfRunner,
   type CliRunner,
   type Read,
 } from './cf-cli'
 import { migrationDirArgs, type MigrationLayout } from './migrations'
 import type { EvaluatedBinding, EvaluatedWorker, PlannedBinding, ResourceType } from './plan'
 import {
-  appWranglerRunner,
   applyWranglerMigrations,
   checkWranglerAuth,
   createWranglerResource,
@@ -56,7 +55,7 @@ export interface DeployBackend {
   /** The Worker the deploy would upload, read after the assemble stage. */
   evaluate(): EvaluatedWorker
   /** The D1 binding `db/migrations` is applied to, or why none could be chosen. */
-  migrationsBinding(worker: EvaluatedWorker): Read<string | undefined>
+  migrationsBinding(): Read<string | undefined>
   /** Called once the bindings are planned and before any read that needs a database by its id. */
   prepareReads(bindings: readonly PlannedBinding[]): void
   list(type: ResourceType): Read<AccountResource[]>
@@ -72,8 +71,6 @@ export interface DeployBackend {
   applyMigrations(database: PlannedBinding & { id: string }, applyArgs: string[]): Read<string>
   listSecrets(worker: string): Read<string[]>
   deploy(secretsFile: string | undefined): Read<string>
-  restoreCommand(database: { id: string; name: string }, bookmark: string): string
-  deleteCommand(resource: { type: ResourceType; id: string; name: string }): string
 }
 
 /** cf refuses to load cloudflare.config.ts on older Node (RFC 0035 Appendix C row 10). */
@@ -86,14 +83,14 @@ const EVALUATED_CONFIG = '.cloudflare/output/v0/workers/default/worker.config.js
 
 export interface CfBackendOptions {
   root: string
-  cf?: CfRunner
+  cf?: CliRunner
   nodeVersion?: () => string | undefined
 }
 
 export function cfDeployBackend(options: CfBackendOptions): DeployBackend {
   const { root } = options
   const cfPackage = resolvePackageFile(root, 'cf/package.json')
-  const cf = options.cf ?? appCfRunner(root, join(dirname(cfPackage ?? join(root, 'node_modules/cf/package.json')), 'bin', 'cf'))
+  const cf = options.cf ?? appCliRunner(root, join(dirname(cfPackage ?? join(root, 'node_modules/cf/package.json')), 'bin', 'cf'))
   const nodeVersion = options.nodeVersion ?? nodeOnPathVersion
 
   const build = (): Read<true> => {
@@ -104,7 +101,7 @@ export function cfDeployBackend(options: CfBackendOptions): DeployBackend {
 
   return {
     kind: 'cf',
-    outputDir: CF_OUTPUT_DIR,
+    outputDir: outputDirFor('cf'),
     appliesNested: true,
     preflight() {
       const problems: string[] = []
@@ -135,7 +132,7 @@ export function cfDeployBackend(options: CfBackendOptions): DeployBackend {
       return readEvaluatedWorker(root)
     },
     migrationsBinding() {
-      return { ok: true, value: readWorkerManifest(join(root, CF_OUTPUT_DIR)).d1?.binding }
+      return { ok: true, value: readWorkerManifest(join(root, outputDirFor('cf'))).d1?.binding }
     },
     prepareReads() {},
     list: (type) => (type === 'd1' ? listD1Databases(cf) : listKvNamespaces(cf)),
@@ -152,16 +149,12 @@ export function cfDeployBackend(options: CfBackendOptions): DeployBackend {
         ? { ok: false, reason: `cloudflare.config.ts binds ${drift.join(', ')} to another resource than the plan resolved. Remove the id it sets after the gurenWorker() spread, then plan again.` }
         : { ok: true, value: true }
     },
-    applyArgs: (layout) => migrationDirArgs(layout, `${CF_OUTPUT_DIR}/d1-migrations`),
+    applyArgs: (layout) => migrationDirArgs(layout, `${outputDirFor('cf')}/${D1_MIGRATIONS_DIR}`),
     readTracker: (database) => readMigrationTracker(cf, database.id),
     bookmark: (database) => getBookmark(cf, database.id),
     applyMigrations: (database, applyArgs) => applyMigrations(cf, database.id, applyArgs),
     listSecrets: (worker) => listWorkerSecrets(cf, worker),
     deploy: (secretsFile) => deployPrebuilt(cf, secretsFile),
-    restoreCommand: (database, bookmark) => `bunx cf d1 time-travel restore ${database.id} --bookmark ${bookmark}`,
-    deleteCommand: (resource) => (resource.type === 'd1'
-      ? `bunx cf d1 delete ${resource.id}`
-      : `bunx cf kv namespaces delete ${resource.id}`),
   }
 }
 
@@ -183,27 +176,36 @@ export function wranglerDeployBackend(options: WranglerBackendOptions): DeployBa
   const { root } = options
   const wranglerPackage = resolvePackageFile(root, 'wrangler/package.json')
   const wrangler = options.wrangler
-    ?? appWranglerRunner(root, join(dirname(wranglerPackage ?? join(root, 'node_modules/wrangler/package.json')), 'bin', 'wrangler.js'))
+    ?? appCliRunner(root, join(dirname(wranglerPackage ?? join(root, 'node_modules/wrangler/package.json')), 'bin', 'wrangler.js'))
   const nodeVersion = options.nodeVersion ?? nodeOnPathVersion
-  const outDir = join(root, WRANGLER_OUTPUT_DIR)
-  const flatDir = join(outDir, 'd1-migrations')
-  const configArgs = ['-c', `${WRANGLER_OUTPUT_DIR}/${WRANGLER_DEPLOY_CONFIG_FILE}`]
+  const outputDir = outputDirFor('wrangler')
+  const outDir = join(root, outputDir)
+  const flatDir = join(outDir, D1_MIGRATIONS_DIR)
+  const configArgs = ['-c', `${outputDir}/${WRANGLER_DEPLOY_CONFIG_FILE}`]
   let config: Record<string, unknown> | undefined
-  let migrationsBinding: string | undefined
+  let chosen: Read<string | undefined> | undefined
 
   const developerConfig = (): Record<string, unknown> => {
     config ??= readWranglerConfig(join(root, 'wrangler.jsonc'))
     if (!config) throw new Error(`Cloudflare deploy: ${join(root, 'wrangler.jsonc')} is missing or not valid JSONC, so the bindings could not be read.`)
     return config
   }
+  const migrationsBinding = (): Read<string | undefined> => (chosen ??= wranglerMigrationsBinding(developerConfig(), root, flatDir))
   const render = (resolved: Readonly<Record<string, ResolvedResource>>): void => {
-    const rendered = renderWranglerDeployConfig({ root, config: developerConfig(), resolved, migrationsBinding, flatDir })
+    const binding = migrationsBinding()
+    const rendered = renderWranglerDeployConfig({
+      root,
+      config: developerConfig(),
+      resolved,
+      migrationsBinding: binding.ok ? binding.value : undefined,
+      flatDir,
+    })
     writeFileSync(join(outDir, WRANGLER_DEPLOY_CONFIG_FILE), `${JSON.stringify(rendered, null, 2)}\n`)
   }
 
   return {
     kind: 'wrangler',
-    outputDir: WRANGLER_OUTPUT_DIR,
+    outputDir,
     appliesNested: false,
     preflight() {
       const problems: string[] = []
@@ -213,7 +215,7 @@ export function wranglerDeployBackend(options: WranglerBackendOptions): DeployBa
       }
       const engines = wranglerPackage ? readJson(wranglerPackage) : undefined
       const nodeRange = isRecord(engines) && isRecord(engines.engines) && typeof engines.engines.node === 'string' ? engines.engines.node : undefined
-      const node = nodeVersion()
+      const node = nodeRange ? nodeVersion() : undefined
       if (nodeRange && (!node || !Bun.semver.satisfies(node, nodeRange))) {
         problems.push(`Wrangler runs on the node on PATH, and this one needs Node ${nodeRange}; found ${node ?? 'no node'}.`)
       }
@@ -226,11 +228,7 @@ export function wranglerDeployBackend(options: WranglerBackendOptions): DeployBa
       return problems
     },
     evaluate: () => evaluateWranglerConfig(developerConfig()),
-    migrationsBinding() {
-      const chosen = wranglerMigrationsBinding(developerConfig(), root, flatDir)
-      migrationsBinding = chosen.ok ? chosen.value : undefined
-      return chosen
-    },
+    migrationsBinding,
     prepareReads(bindings) {
       const ids: Record<string, ResolvedResource> = {}
       for (const binding of bindings) {
@@ -250,10 +248,6 @@ export function wranglerDeployBackend(options: WranglerBackendOptions): DeployBa
     applyMigrations: (database, applyArgs) => applyWranglerMigrations(wrangler, database.binding, applyArgs),
     listSecrets: (worker) => listWranglerSecrets(wrangler, worker, configArgs),
     deploy: (secretsFile) => deployWithWrangler(wrangler, configArgs, secretsFile),
-    restoreCommand: (database, bookmark) => `bunx wrangler d1 time-travel restore ${database.name} --bookmark ${bookmark}`,
-    deleteCommand: (resource) => (resource.type === 'd1'
-      ? `bunx wrangler d1 delete ${resource.name}`
-      : `bunx wrangler kv namespace delete --namespace-id ${resource.id}`),
   }
 }
 
@@ -278,7 +272,7 @@ function readEvaluatedWorker(root: string): EvaluatedWorker {
 }
 
 /** Resolved the way Node resolves it from the app, so a hoisted workspace install is found. */
-export function resolvePackageFile(root: string, specifier: string): string | undefined {
+function resolvePackageFile(root: string, specifier: string): string | undefined {
   try {
     return Bun.resolveSync(specifier, root)
   } catch {
@@ -286,7 +280,7 @@ export function resolvePackageFile(root: string, specifier: string): string | un
   }
 }
 
-export function installedVersion(root: string, name: string): string | undefined {
+function installedVersion(root: string, name: string): string | undefined {
   const path = resolvePackageFile(root, `${name}/package.json`)
   const manifest = path ? readJson(path) : undefined
   return isRecord(manifest) && typeof manifest.version === 'string' ? manifest.version : undefined
@@ -301,9 +295,9 @@ function nodeOnPathVersion(): string | undefined {
   }
 }
 
-export function readJson(path: string): unknown {
+function readJson(path: string): unknown {
   try {
-    return JSON.parse(readFileSync(path, 'utf8'))
+    return parseJson(readFileSync(path, 'utf8'))
   } catch {
     return undefined
   }

@@ -34,11 +34,11 @@ import {
   loadMcpOAuthTemplate,
 } from './templates'
 import {
-  CF_OUTPUT_DIR,
   WORKER_MANIFEST_FILE,
   WORKER_MANIFEST_VERSION,
+  D1_MIGRATIONS_DIR,
+  outputDirFor,
   WRANGLER_DEPLOY_CONFIG_FILE,
-  WRANGLER_OUTPUT_DIR,
   type ResolvedResource,
   type WorkerManifest,
 } from './worker-manifest'
@@ -94,7 +94,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   const root = resolvePathLike(options.rootDir ?? process.cwd())
   const backend = detectCloudflareBackend(root)
   const out = resolvePathLike(
-    options.outputDir ?? resolve(root, backend === 'cf' ? CF_OUTPUT_DIR : WRANGLER_OUTPUT_DIR),
+    options.outputDir ?? resolve(root, outputDirFor(backend)),
   )
   const appEntry = resolvePathLike(options.appEntry ?? resolve(root, 'src/app.ts'))
   const publicDir = resolvePathLike(options.publicDir ?? resolve(root, 'public'))
@@ -212,7 +212,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
     }),
   )
 
-  flattenD1Migrations(resolve(root, 'db/migrations'), resolve(out, 'd1-migrations'))
+  flattenD1Migrations(resolve(root, 'db/migrations'), resolve(out, D1_MIGRATIONS_DIR))
 
   writeDevOnlyStubs(out)
 

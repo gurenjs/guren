@@ -26,6 +26,7 @@ describe('decideLayout', () => {
 
   test('should keep a database cf migrated from the nested layout on it', () => {
     expect(decideLayout(local, ['20261001_init/migration.sql'])).toMatchObject({ layout: 'nested', pending: ['20261002_posts'] })
+    expect(decideLayout(local, ['20261001_init/migration.sql'], false)).toEqual({ ok: false, unsupported: 'nested', nested: ['20261001_init/migration.sql'] })
   })
 
   test('should refuse a tracker holding both forms', () => {

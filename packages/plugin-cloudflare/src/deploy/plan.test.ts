@@ -14,6 +14,7 @@ function ok<T>(value: T): Read<T> {
 function context(overrides: Partial<PlanContext> & { env?: EvaluatedWorker['env'] } = {}): PlanContext {
   const { env, ...rest } = overrides
   return {
+    backend: 'cf',
     worker: { name: 'demo-app', env: env ?? { DB: { type: 'd1', name: 'demo-app' } } },
     manifest: { resolved: {} },
     d1: ok<AccountResource[]>([]),

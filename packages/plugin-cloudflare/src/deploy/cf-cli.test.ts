@@ -7,22 +7,22 @@ import {
   listKvNamespaces,
   listWorkerSecrets,
   readMigrationTracker,
-  type CfResult,
-  type CfRunner,
+  type CliResult,
+  type CliRunner,
 } from './cf-cli'
 
 /** A runner answering from a script of results, recording each argv. */
-function scripted(results: CfResult[]): CfRunner & { calls: string[][] } {
+function scripted(results: CliResult[]): CliRunner & { calls: string[][] } {
   const calls: string[][] = []
   const runner = ((args: string[]) => {
     calls.push(args)
     return results[calls.length - 1] ?? { exitCode: 1, stdout: '', stderr: 'unexpected call' }
-  }) as CfRunner & { calls: string[][] }
+  }) as CliRunner & { calls: string[][] }
   runner.calls = calls
   return runner
 }
 
-function json(value: unknown): CfResult {
+function json(value: unknown): CliResult {
   return { exitCode: 0, stdout: JSON.stringify(value), stderr: '' }
 }
 
