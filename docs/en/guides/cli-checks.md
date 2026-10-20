@@ -63,6 +63,7 @@ bunx guren introspect                 # providers, routes, services and warnings
 bunx guren introspect --json          # the manifest, for tools
 bunx guren introspect --timeout 60    # allow a slow register() up to 60 seconds (default 30)
 bunx guren introspect --app ../api    # introspect another app root
+bunx guren introspect --target cloudflare  # register the branch Workers runs (isWorkersRuntime() is true), as the Cloudflare build does
 ```
 
 Each provider is reported with how it registered: `ran`, `introspect-hook`

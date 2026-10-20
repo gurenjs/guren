@@ -45,10 +45,15 @@ export function resetWorkersEnv(): void {
 }
 
 /**
- * Whether this code is running on workerd, which identifies itself through the
- * standard navigator user agent. The switch an app's `config/database.ts` needs
- * to pick D1 over a local driver, and to keep filesystem work out of the Worker.
+ * Whether this code runs on workerd (its navigator user agent): the switch an app's
+ * `config/database.ts` takes to pick D1 and keep filesystem work out of the Worker.
+ * Also true in the Cloudflare build's introspection (RFC 0035 §2.1); both variables
+ * are required, so an exported target alone never changes `bun run dev`.
  */
 export function isWorkersRuntime(): boolean {
-  return typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers'
+  if (typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers') return true
+  // The names @guren/cli sets (INTROSPECT_TARGET_ENV); a shim may define `process` without `env`.
+  return typeof process !== 'undefined'
+    && process.env?.GUREN_INTROSPECT === '1'
+    && process.env?.GUREN_INTROSPECT_TARGET === 'cloudflare'
 }

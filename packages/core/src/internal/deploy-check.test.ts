@@ -42,6 +42,19 @@ async function captureWarnings(run: () => Promise<void>): Promise<string[]> {
   return warnings
 }
 
+/** Everything a run wrote to `console.log`. */
+async function captureLogs(run: () => Promise<unknown>): Promise<string[]> {
+  const logged: string[] = []
+  const original = console.log
+  console.log = (message: string) => logged.push(message)
+  try {
+    await run()
+  } finally {
+    console.log = original
+  }
+  return logged
+}
+
 describe('reportDeployRuntimeHazards', () => {
   let root: string
 
@@ -75,6 +88,16 @@ describe('reportDeployRuntimeHazards', () => {
     expect(logged.join('\n')).toContain('Deploy Runtime Stores from nothing verifiable, Deploy Provider Discovery from source (introspection failed with no-entry: Could not locate')
     expect(lines[1]).toStartWith('Cloudflare build: Cloudflare Workers shares no memory')
     expect(lines[1]).toContain('unverified: introspection failed with no-entry')
+  })
+
+  test('should name the platform branch the verdicts were read from', async () => {
+    writeIntrospectableApp(root, SESSION_APP)
+
+    const logged = await captureLogs(() => captureWarnings(async () => {
+      await reportDeployRuntimeHazards({ root, label: 'Cloudflare build', target: 'cloudflare' })
+    }))
+
+    expect(logged.join('\n')).toContain('Deploy Runtime Stores from the introspected app as Cloudflare Workers runs it')
   })
 
   test('should print nothing for an app with no deploy target', async () => {

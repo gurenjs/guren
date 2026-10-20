@@ -38,6 +38,15 @@ export interface IntrospectOptions {
   env?: Readonly<Record<string, string>>
 }
 
+/**
+ * The deploy target whose branch of the app's config the child registers (RFC 0035 §2.1):
+ * `cloudflare` makes `isWorkersRuntime()` true there. Passed through `env`.
+ */
+export const INTROSPECT_TARGET_ENV = 'GUREN_INTROSPECT_TARGET'
+
+/** The targets whose env subpath honours {@link INTROSPECT_TARGET_ENV}. */
+export type IntrospectTarget = 'cloudflare'
+
 /** Set to `1` beside `GUREN_INTROSPECT` for a {@link IntrospectOptions.graph} run. */
 export const INTROSPECT_GRAPH_ENV = 'GUREN_INTROSPECT_GRAPH'
 
@@ -90,7 +99,7 @@ export function introspectRunner(cwd: string, option: IntrospectOption | undefin
 }
 
 /** A run capped at {@link CHECK_INTROSPECT_TIMEOUT_MS}, for a command that judges the app. */
-export function checkIntrospection(cwd: string, options: Pick<IntrospectOptions, 'fresh'> = {}): () => Promise<Introspection> {
+export function checkIntrospection(cwd: string, options: Pick<IntrospectOptions, 'fresh' | 'env'> = {}): () => Promise<Introspection> {
   return async () => withCapNote(await introspectApp(cwd, { ...options, timeoutMs: CHECK_INTROSPECT_TIMEOUT_MS }))
 }
 
@@ -140,8 +149,8 @@ async function runIntrospection(root: string, timeoutMs: number, graph: boolean,
     const started = Date.now()
     const run = await runCaptured([bunExecutable(), child, resultFile, String(timeoutMs + INTROSPECT_CHILD_BUDGET_MARGIN_MS)], root, {
       timeoutMs,
-      // Always set, so a value inherited from this process cannot turn an ordinary run into a graph run.
-      env: { ...extraEnv, GUREN_INTROSPECT: '1', [INTROSPECT_GRAPH_ENV]: graph ? '1' : '0' },
+      // Always set, so a value inherited from this process cannot turn an ordinary run into a graph run or a target's.
+      env: { [INTROSPECT_TARGET_ENV]: '', ...extraEnv, GUREN_INTROSPECT: '1', [INTROSPECT_GRAPH_ENV]: graph ? '1' : '0' },
       processGroup: true,
     })
     const result = run.timedOut ? undefined : await readResult(resultFile)

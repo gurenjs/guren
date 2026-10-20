@@ -6,8 +6,9 @@ import { runCheck, type CheckResult } from '../src/check'
 import { gatingResults } from '../src/check-result'
 import { checkDeployRuntime, readDeployRuntime } from '../src/deploy-runtime'
 import { getDoctorRuleEvaluations } from '../src/doctor'
-import { CHECK_INTROSPECT_TIMEOUT_MS, introspectApp } from '../src/introspect'
-import { assertWorkspaceBuilt, createTempRoot, linkWorkspaceCore, runCliBinCaptured, SERVER_DIST_ENTRY, writeWorkspaceFiles } from './helpers'
+import { CHECK_INTROSPECT_TIMEOUT_MS, INTROSPECT_TARGET_ENV, introspectApp } from '../src/introspect'
+import { readManifestSection } from '../src/manifest-section'
+import { assertWorkspaceBuilt, createTempRoot, linkWorkspaceCore, linkWorkspacePackage, runCliBinCaptured, SERVER_DIST_ENTRY, writeWorkspaceFiles } from './helpers'
 
 const ENTRY = "import app from './app.js'\n\nexport default app\n"
 
@@ -225,5 +226,60 @@ export default app
 
     await introspectApp(dir, { timeoutMs: CHECK_INTROSPECT_TIMEOUT_MS })
     expect(await loads(dir)).toBe(1)
+  }, 60_000)
+})
+
+/** The scaffold's shape, D1 on workerd and SQLite under `bun run dev`, with the D1 binding read as `binding`. */
+function branchingApp(binding: string): string {
+  return `import { createApp, createD1Database, createSqliteDatabase, defineDatabaseConfig } from '@guren/core'
+import { getWorkersEnv, isWorkersRuntime } from '@guren/plugin-cloudflare/env'
+
+const database = isWorkersRuntime()
+  ? createD1Database({ binding: ${binding} })
+  : createSqliteDatabase({ filename: () => ':memory:' })
+
+export default createApp({ config: [defineDatabaseConfig(database)] })
+`
+}
+
+async function workersApp(name: string, app: string): Promise<string> {
+  const dir = await cloudflareApp(name, { 'src/app.ts': app })
+  await linkWorkspacePackage('plugin-cloudflare', dir)
+  return dir
+}
+
+function databaseDialect(result: Awaited<ReturnType<typeof introspectApp>>): unknown {
+  if (result.status !== 'ok') throw new Error(`introspection failed: ${JSON.stringify(result)}`)
+  const section = readManifestSection(result.manifest, 'database')
+  return section.status === 'described' ? section.value?.dialect : section
+}
+
+describe('introspecting the Cloudflare branch (RFC 0035 §2.1)', () => {
+  test('should register the D1 factory under the target, and the development branch whatever the shell exports', async () => {
+    const dir = await workersApp('branch-d1', branchingApp('() => getWorkersEnv<{ DB: unknown }>().DB'))
+    expect(databaseDialect(await introspectApp(dir, { env: { [INTROSPECT_TARGET_ENV]: 'cloudflare' } }))).toBe('d1')
+
+    const saved = process.env[INTROSPECT_TARGET_ENV]
+    process.env[INTROSPECT_TARGET_ENV] = 'cloudflare'
+    try {
+      expect(databaseDialect(await introspectApp(dir, { fresh: true }))).toBe('sqlite')
+    } finally {
+      if (saved === undefined) delete process.env[INTROSPECT_TARGET_ENV]
+      else process.env[INTROSPECT_TARGET_ENV] = saved
+    }
+  }, 60_000)
+
+  test('should mark the verdicts it read from the Cloudflare branch, and degrade to unverified when that branch cannot register', async () => {
+    const dir = await workersApp('branch-verdicts', ARGON2_APP)
+    const verdicts = await checkDeployRuntime(dir, { target: 'cloudflare' })
+    expect(verdicts.find((entry) => entry.key === 'deploy-password-hashing')).toMatchObject({ evidence: 'manifest', introspectedAs: 'cloudflare' })
+
+    // Read while the app registers, which workerd allows only inside a request.
+    const eager = await workersApp('branch-eager', branchingApp('getWorkersEnv<{ DB: never }>().DB'))
+    const degraded = await checkDeployRuntime(eager, { target: 'cloudflare' })
+    const unverified = degraded.find((entry) => entry.key === 'deploy-password-hashing-unverified')
+    expect(unverified?.fix).toContain('`bunx guren introspect --target cloudflare` reproduces the failure')
+
+    await expect(checkDeployRuntime(dir, { target: 'cloudflare', introspect: false })).rejects.toThrow(/cannot be combined/)
   }, 60_000)
 })

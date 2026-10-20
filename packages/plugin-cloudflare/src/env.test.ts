@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
-import { captureWorkersEnv, getWorkersEnv, resetWorkersEnv } from './env'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { captureWorkersEnv, getWorkersEnv, isWorkersRuntime, resetWorkersEnv } from './env'
 
 interface TestEnv {
   DB: string
@@ -54,5 +54,30 @@ describe('captureWorkersEnv / getWorkersEnv / resetWorkersEnv', () => {
     resetWorkersEnv()
 
     expect(() => getWorkersEnv()).toThrow()
+  })
+})
+
+describe('isWorkersRuntime under introspection (RFC 0035 §2.1)', () => {
+  const saved = { introspect: process.env.GUREN_INTROSPECT, target: process.env.GUREN_INTROSPECT_TARGET }
+
+  afterEach(() => {
+    for (const [key, value] of [['GUREN_INTROSPECT', saved.introspect], ['GUREN_INTROSPECT_TARGET', saved.target]] as const) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+
+  test('should take the Workers branch only inside an introspection run targeting Cloudflare', () => {
+    process.env.GUREN_INTROSPECT = '1'
+    process.env.GUREN_INTROSPECT_TARGET = 'cloudflare'
+    expect(isWorkersRuntime()).toBe(true)
+
+    // A target left exported in a shell must not move `bun run dev` onto the Workers branch.
+    delete process.env.GUREN_INTROSPECT
+    expect(isWorkersRuntime()).toBe(false)
+
+    process.env.GUREN_INTROSPECT = '1'
+    process.env.GUREN_INTROSPECT_TARGET = 'lambda'
+    expect(isWorkersRuntime()).toBe(false)
   })
 })
