@@ -245,7 +245,7 @@ applies anything and reports these statements:
 | `rename` | `RENAME TO`, `RENAME COLUMN`, `RENAME TABLE` |
 | `truncate`, `delete-all` | `TRUNCATE` (a MySQL `TRUNCATE PARTITION` too), and `DELETE FROM` with no `WHERE` |
 | `drop-partition` | MySQL `ALTER TABLE … DROP PARTITION`, which drops the partition's rows |
-| `drop-cascade` | `DROP TYPE`, `DROP DOMAIN` and any other `DROP … CASCADE`, which also drop the columns that depend on them, and PostgreSQL `DROP OWNED` |
+| `drop-cascade` | `DROP TYPE … CASCADE`, `DROP DOMAIN … CASCADE` and any other `DROP … CASCADE`, which also drop the columns that depend on them, and PostgreSQL `DROP OWNED` |
 | `unreadable` | SQL the guard cannot read: an unterminated string, comment or body, and SQL built at run time (`EXECUTE` of a concatenation or `format()`, `PREPARE … FROM @variable`) |
 
 The guard reads the SQL as the database will: MySQL's backslash escapes and `#`

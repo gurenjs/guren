@@ -464,3 +464,24 @@ describe('post-merge review of #1206: code-review round', () => {
     expect(kinds('ALTER TABLE logs DROP PARTITION p1;  ALTER TABLE logs DROP PARTITION p2;')).toEqual(['drop-partition', 'drop-partition'])
   })
 })
+
+describe('post-merge review of #1206: final review round', () => {
+  test('should read a column named execute as a name, not run-time SQL', () => {
+    expect(kinds('CREATE TABLE jobs ("id" integer, execute boolean);')).toEqual([])
+    expect(kinds('ALTER TABLE jobs ADD COLUMN execute boolean;')).toEqual([])
+    expect(kinds("DO $$ BEGIN EXECUTE 'DROP TABLE users'; END $$;")).toEqual(['drop-table'])
+  })
+
+  test("should read only a function's body string as SQL, not a default or a comment", () => {
+    expect(kinds("CREATE FUNCTION f(a text DEFAULT 'it''s') RETURNS int AS $$ SELECT 1 $$ LANGUAGE sql;")).toEqual([])
+    expect(kinds("CREATE PROCEDURE p() COMMENT 'truncate old logs' BEGIN SELECT 1; END;")).toEqual([])
+  })
+
+  test('should name every partition a DROP PARTITION drops', () => {
+    expect(scanMigrationSql('ALTER TABLE t DROP PARTITION p0, p1;').statements).toMatchObject([{ kind: 'drop-partition', message: 'drops partition p0, p1 of t with its rows' }])
+  })
+
+  test('should not apply backslash escapes to a PostgreSQL identifier', () => {
+    expect(scanMigrationSql('CREATE TABLE "a\\" (id int); DROP TABLE x;', { dialect: 'postgres' }).statements.map((statement) => statement.kind)).toEqual(['drop-table'])
+  })
+})

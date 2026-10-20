@@ -101,6 +101,5 @@ export async function judgePendingMigrations(cwd = process.cwd()): Promise<Pendi
     sources.push(...readMigrationSources(folder, [row.name], describePath(folder), { dialect }))
   }
 
-  // A factory that answers migrationStatus() is not D1's (whose throws), and the SQLite one that answers migrates with foreign keys off.
-  return { ...judgeMigrations(sources, { foreignKeysEnforced: described ?? false }), pending: pending.map((row) => row.name), pendingFrom: 'status' }
+  return { ...judgeMigrations(sources, { foreignKeysEnforced: described }), pending: pending.map((row) => row.name), pendingFrom: 'status' }
 }

@@ -237,7 +237,7 @@ drizzle-kit は、スキーマの差分から導かれる SQL をそのまま書
 | `rename` | `RENAME TO`、`RENAME COLUMN`、`RENAME TABLE` |
 | `truncate`、`delete-all` | `TRUNCATE`(MySQL の `TRUNCATE PARTITION` を含む)と、`WHERE` のない `DELETE FROM` |
 | `drop-partition` | MySQL の `ALTER TABLE … DROP PARTITION`。パーティションの行も消えます |
-| `drop-cascade` | `DROP TYPE`、`DROP DOMAIN` など `CASCADE` 付きの `DROP` と、PostgreSQL の `DROP OWNED`。依存するカラムもまとめて消えます |
+| `drop-cascade` | `DROP TYPE … CASCADE`、`DROP DOMAIN … CASCADE` など `CASCADE` 付きの `DROP` と、PostgreSQL の `DROP OWNED`。依存するカラムもまとめて消えます |
 | `unreadable` | ガードが読めない SQL。閉じていない文字列・コメント・本体と、実行時に組み立てる SQL(連結や `format()` を `EXECUTE` するもの、`PREPARE … FROM @変数`)です |
 
 ガードは、データベースと同じ規則で SQL を読みます。MySQL のバックスラッシュによるエスケープと `#` のコメント、PostgreSQL の `E'…'` とドル記号で囲んだ本体も、その規則どおりに扱います。方言は、起動時はファクトリーから、それ以外は `snapshot.json` から決まり、どちらからもわからなければすべての方言での読み方を合わせて判定します。`CREATE PROCEDURE`、`FUNCTION`、`TRIGGER` の本体と、文字列で書いた関数の本体の中の文も、ほかの文と同じように判定します。

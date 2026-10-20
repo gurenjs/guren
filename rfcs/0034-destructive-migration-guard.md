@@ -137,8 +137,8 @@ with `SET NULL`/`SET DEFAULT` has them rewritten, the rebuilt table's own
 self-reference included. Unless the runner is known to turn foreign keys off, a
 rebuild of a table that either snapshot or the migration's SQL references with
 one of those actions is reported. The bun:sqlite factory says so at boot;
-`db:migrate` knows it from a factory that answers `migrationStatus()` (D1's
-throws) or describes itself as `sqlite`; `guren check`, which imports no app
+`db:migrate` knows it from a factory whose `describe()` names `sqlite` (one it
+cannot describe is judged with foreign keys on); `guren check`, which imports no app
 code, from a `config/database.ts` calling `createSqliteDatabase()` with no
 `createD1Database()` and no wrangler config beside it.
 
@@ -242,7 +242,7 @@ shipped is never reported. An unacknowledged finding is a gating `warn`, so
 the agent back before it ends a turn with one in the tree. Outside a git
 repository the rule reports itself as unverified (advisory) rather than
 passing. The base is `origin/main`, then `main`, then the remote's default
-branch (`origin/HEAD`). In an app with migrations, commits with no merge base
+branch (`origin/HEAD`), then `master`. In an app with migrations, commits with no merge base
 (a shallow clone, which is what `actions/checkout` gives by default, so the
 scaffolded workflow checks out with `fetch-depth: 0`), and a git listing that
 fails, are gating findings, since the committed migrations the rule claims to

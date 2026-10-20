@@ -186,6 +186,20 @@ describe('checkDestructiveMigrations', () => {
     }
   })
 
+  it('should judge an untracked migration in an app below the repository root', async () => {
+    const root = await createTempRoot('guren-migrations-check-subdir-')
+    try {
+      git(root, 'init', '-q', '-b', 'main')
+      git(root, 'commit', '-q', '--allow-empty', '-m', 'root')
+      const cwd = join(root, 'app')
+      await writeMigration(cwd, '0001_drop', 'DROP TABLE "posts";')
+      const gating = gatingResults({ cwd, checks: await checkDestructiveMigrations(cwd), passCount: 0, warnCount: 0, failCount: 0 })
+      expect(gating.map((result) => result.filePath)).toEqual(['db/migrations/0001_drop/migration.sql'])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('should report itself unverified, never passed, outside a git repository', async () => {
     const cwd = await createTempRoot('guren-migrations-check-nogit-')
     try {

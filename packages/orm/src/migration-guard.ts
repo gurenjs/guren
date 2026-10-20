@@ -199,7 +199,9 @@ function lex(sql: string, rules: LexRules, firstLine = 1): Lexed {
     if (char === "'" || char === '"' || char === '`' || escapeString) {
       const open = escapeString ? i + 1 : i
       const quote = sql[open]!
-      const end = closingQuote(open, quote, escapeString || (rules.backslashEscapes && quote !== '`'))
+      // PostgreSQL never escapes in an identifier; MySQL's `"…"` is a string, which it does.
+      const backslash = escapeString || (rules.backslashEscapes && (quote === "'" || (quote === '"' && rules.mysqlComments)))
+      const end = closingQuote(open, quote, backslash)
       if (end === -1) return { tokens, comments, executable, unterminatedAt: startLine }
       const inner = sql.slice(open + 1, end).replaceAll(quote + quote, quote)
       advanceTo(end + 1)
@@ -366,18 +368,18 @@ function scanAlterTable(statement: Token[], line: number): RawFinding[] {
   }
   const findings: RawFinding[] = []
 
-  for (const action of splitTopLevel(statement.slice(table.next))) {
+  const actions = statement.slice(table.next)
+  // MySQL: a partition's rows go with it. A partition operation is the statement's only action; the commas list partitions.
+  if (isWord(actions[0], 'DROP', 'TRUNCATE') && isWord(actions[1], 'PARTITION')) {
+    const partitions = splitTopLevel(actions.slice(2)).map((part) => readName(part, 0)?.name ?? '?').join(', ')
+    return [isWord(actions[0], 'DROP')
+      ? { kind: 'drop-partition', line, table: table.name, message: `drops partition ${partitions} of ${table.name} with its rows` }
+      : { kind: 'truncate', line, table: table.name, message: `empties partition ${partitions} of ${table.name}` }]
+  }
+
+  for (const action of splitTopLevel(actions)) {
     const [head] = action
     if (!head) continue
-
-    // MySQL: a partition's rows go with it.
-    if (isWord(head, 'DROP', 'TRUNCATE') && isWord(action[1], 'PARTITION')) {
-      const partitions = splitTopLevel(action.slice(2)).map((part) => readName(part, 0)?.name ?? '?').join(', ')
-      findings.push(isWord(head, 'DROP')
-        ? { kind: 'drop-partition', line, table: table.name, message: `drops partition ${partitions} of ${table.name} with its rows` }
-        : { kind: 'truncate', line, table: table.name, message: `empties partition ${partitions} of ${table.name}` })
-      continue
-    }
 
     if (isWord(head, 'DROP') && !isWord(action[1], ...NON_COLUMN_DROPS)) {
       const columnAt = skipWords(action, 1, 'COLUMN', 'IF', 'EXISTS')
@@ -596,12 +598,11 @@ function scanStatement(tokens: Token[]): StatementScan {
   return { ...ddl, findings: [...ddl.findings, ...scanDeletes(tokens)] }
 }
 
-/** Whether the statement's string literals are SQL it runs: a PostgreSQL function or `DO` body written as a string. */
-function stringsAreBodies(tokens: Token[]): boolean {
-  if (isWord(tokens[0], 'DO')) return true
-  if (!isWord(tokens[0], 'CREATE')) return false
-  const kindAt = skipWords(tokens, 1, 'OR', 'REPLACE')
-  return isWord(tokens[kindAt], 'FUNCTION', 'PROCEDURE')
+/** The string literals that are SQL the statement runs: a PostgreSQL function's `AS '…'` or a `DO '…'` body, not a default or a comment. */
+function stringBodies(tokens: Token[]): Token[] {
+  const isFunction = isWord(tokens[0], 'CREATE') && isWord(tokens[skipWords(tokens, 1, 'OR', 'REPLACE')], 'FUNCTION', 'PROCEDURE')
+  if (!isFunction && !isWord(tokens[0], 'DO')) return []
+  return tokens.filter((token, at) => token.kind === 'string' && isWord(tokens[at - 1], isFunction ? 'AS' : 'DO'))
 }
 
 /**
@@ -609,13 +610,18 @@ function stringsAreBodies(tokens: Token[]): boolean {
  * `PREPARE s FROM 'literal'` are read as SQL, anything else (a concatenation,
  * `format()`, a variable) cannot be, and is a finding.
  */
+const BLOCK_STARTS = ['BEGIN', 'THEN', 'ELSE', 'LOOP', 'DO', 'DECLARE']
+
 function scanDynamicSql(tokens: Token[], prepared: Set<string>): { findings: RawFinding[]; sql: Token[] } {
   const findings: RawFinding[] = []
   const sql: Token[] = []
   const ends = (token: Token | undefined) => token === undefined || token.value === ';' || isWord(token, 'USING', 'INTO')
   tokens.forEach((token, at) => {
     let source: number | undefined
-    if (isWord(token, 'EXECUTE') && !isWord(tokens[at + 1], 'FUNCTION', 'PROCEDURE', 'ON') && tokens[at + 1]?.value !== ',' && !isWord(tokens[at - 1], 'GRANT', 'REVOKE')) {
+    // Only where a statement starts (a body's statements may follow a block keyword), so a column named `execute` is a name.
+    const startsStatement = at === 0 || isWord(tokens[at - 1], ...BLOCK_STARTS)
+    if (!startsStatement) return
+    if (isWord(token, 'EXECUTE') && !isWord(tokens[at + 1], 'FUNCTION', 'PROCEDURE')) {
       const name = readName(tokens, at + 1)
       // A statement this file prepared from SQL the scan read.
       if (name && tokens[at + 1]?.kind !== 'string' && prepared.has(name.name)) return
@@ -730,10 +736,10 @@ function scanTokens(lexed: Lexed, rules: LexRules): Omit<MigrationScan, 'acknowl
     cascades.push(...cascadeTargets(statement))
     const dynamic = scanDynamicSql(statement, prepared)
     raw.push(...dynamic.findings)
-    const bodies = stringsAreBodies(statement)
+    const bodies = stringBodies(statement)
     // A dollar-quoted body (a `DO` block, a function), a function body written as a string, and an `EXECUTE`d literal can run the same DDL.
     for (const token of statement) {
-      if (token.kind === 'body' || (bodies && token.kind === 'string') || dynamic.sql.includes(token)) scanNested(token.value, token.line)
+      if (token.kind === 'body' || bodies.includes(token) || dynamic.sql.includes(token)) scanNested(token.value, token.line)
     }
   })
   for (const { text, line } of lexed.executable) scanNested(text, line)

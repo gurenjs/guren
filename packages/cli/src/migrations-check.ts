@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { ALLOW_DESTRUCTIVE_MARKER, judgeMigrations, readMigrationSources } from '@guren/orm/internal/migration-guard'
-import { getChangedFilesFromBase } from './changed-files'
+import { getChangedFilesFromBase, runGitRaw } from './changed-files'
 import { check, type CheckResult } from './check-result'
 import { DATABASE_CONFIG_CANDIDATES } from './db-migrate'
 import { readIfExists } from './discovery'
@@ -29,8 +29,8 @@ async function foreignKeysEnforced(cwd: string): Promise<boolean> {
 /**
  * `guren check`'s destructive-migration rule (RFC 0034 §3): the migrations not
  * on the base branch yet (merge-base diff, uncommitted and untracked), judged
- * as one pending run per migrations folder, whatever `--changed` says. Reads
- * files only, never `drizzle.config.ts` or `config/database.ts`.
+ * as one pending run per migrations folder, whatever `--changed` says. Imports
+ * no app code: `config/database.ts` is read as text, never `drizzle.config.ts`.
  */
 export async function checkDestructiveMigrations(
   cwd: string,
@@ -74,14 +74,15 @@ export async function checkDestructiveMigrations(
       'Run `git status` and `git diff` to see why git failed, then check again.',
     ))
   }
-  const hasMigrations = existsSync(join(cwd, 'db/migrations'))
+  // Any migration git tracks, wherever drizzle's `out` puts it.
+  const hasMigrations = byFolder.size > 0 || ((await runGitRaw(cwd, ['ls-files', '-z', '--', '*migration.sql', 'migration.sql'])) ?? '') !== ''
   // Gating: a shallow clone has commits whose migrations nothing judged.
-  if (changed.head && !changed.mergeBase && (hasMigrations || byFolder.size > 0)) {
+  if (changed.head && !changed.mergeBase && hasMigrations) {
     results.push(check(
       'migrations-destructive-no-base',
       TITLE,
       'warn',
-      'No merge base with `main`, `origin/main` or `origin/HEAD`, so committed migrations cannot be told from shipped ones and only uncommitted and untracked ones were judged.',
+      'No merge base with `main`, `origin/main`, `origin/HEAD` or `master`, so committed migrations cannot be told from shipped ones and only uncommitted and untracked ones were judged.',
       'Fetch the base branch (`git fetch origin main`, or `fetch-depth: 0` in CI) and check again.',
     ))
   } else if (byFolder.size === 0 && changed.head && changed.mergeBase === changed.head && hasMigrations) {

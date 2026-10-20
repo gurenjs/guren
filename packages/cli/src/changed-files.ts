@@ -59,7 +59,7 @@ async function runGitPaths(cwd: string, args: string[]): Promise<string[] | null
 
 /**
  * `getChangedFiles()` with the merge base it diffed against, undefined when
- * none of `origin/main`, `main` and `origin/HEAD` shares history with HEAD, in which case
+ * none of `origin/main`, `main`, `origin/HEAD` and `master` shares history with HEAD, in which case
  * `files` holds only uncommitted and untracked changes. `head` is HEAD's
  * commit, undefined before the first commit. `complete` is false when one of
  * the git listings failed, so `files` may be short.
@@ -74,10 +74,10 @@ export async function getChangedFilesFromBase(
   const gitRoot = rootLines?.[0]
   if (!gitRoot) return null
 
-  // `origin/HEAD` is the remote's default branch, for a repository whose base is not called main.
+  // `origin/HEAD` (the remote's default branch) and `master`, for a repository whose base is not called main.
   // A repository with no commit has no HEAD to diff against; everything tracked is then in the index.
   const [bases, headLines] = await Promise.all([
-    Promise.all(['origin/main', 'main', 'origin/HEAD'].map((base) => runGit(absoluteCwd, ['merge-base', 'HEAD', base]))),
+    Promise.all(['origin/main', 'main', 'origin/HEAD', 'master'].map((base) => runGit(absoluteCwd, ['merge-base', 'HEAD', base]))),
     runGit(absoluteCwd, ['rev-parse', '--verify', '--quiet', 'HEAD']),
   ])
   const mergeBase = bases.map((lines) => lines?.[0]).find((base) => base !== undefined)
@@ -85,7 +85,8 @@ export async function getChangedFilesFromBase(
   const [committed, uncommitted, untracked] = await Promise.all([
     mergeBase ? runGitPaths(absoluteCwd, ['diff', '--name-only', mergeBase, 'HEAD']) : Promise.resolve([]),
     runGitPaths(absoluteCwd, head ? ['diff', '--name-only', 'HEAD'] : ['diff', '--name-only', '--cached']),
-    runGitPaths(absoluteCwd, ['ls-files', '--others', '--exclude-standard']),
+    // --full-name: like the diffs, relative to the git root, which the paths below resolve against.
+    runGitPaths(absoluteCwd, ['ls-files', '--others', '--exclude-standard', '--full-name']),
   ])
 
   const gitRootRelativePaths = new Set<string>([
