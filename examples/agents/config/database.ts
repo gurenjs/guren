@@ -1,11 +1,9 @@
 import { createD1Database, createSqliteDatabase } from '@guren/core'
-import { getWorkersEnv, isWorkersRuntime } from '@guren/plugin-cloudflare/env'
-
-import type { Env } from './bindings'
+import { isWorkersRuntime } from '@guren/plugin-cloudflare/env'
 
 const database = isWorkersRuntime()
   ? createD1Database({
-      binding: () => getWorkersEnv<Env>().DB,
+      binding: 'DB',
       migrationsFolder: new URL('../db/migrations', import.meta.url),
     })
   : createSqliteDatabase({

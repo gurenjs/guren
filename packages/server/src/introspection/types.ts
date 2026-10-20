@@ -148,8 +148,11 @@ export type DatabaseEntry = DatabaseDescription
 
 export interface DriverMapEntry {
   default: string
-  /** `driver` is null for an entry registered as a bare factory, whose driver is unknowable without calling it. */
-  entries: Record<string, { driver: string | null }>
+  /**
+   * `driver` is null for an entry registered as a bare factory, whose driver is unknowable without calling it.
+   * `binding` names the Workers binding a disk reads, when its registration says (RFC 0035 §2.1).
+   */
+  entries: Record<string, { driver: string | null; binding?: string }>
 }
 
 export interface AttachmentsEntry {

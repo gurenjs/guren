@@ -67,16 +67,12 @@ ID のないバインディングに対して、`wrangler deploy`（Wrangler 4.1
 ```typescript
 // config/database.ts
 import { createD1Database, createSqliteDatabase, defineDatabaseConfig } from '@guren/core'
-import { getWorkersEnv, isWorkersRuntime } from '@guren/plugin-cloudflare/env'
+import { isWorkersRuntime } from '@guren/plugin-cloudflare/env'
 import env from './env.js'
-
-interface WorkersEnv {
-  DB: unknown
-}
 
 const database = isWorkersRuntime()
   ? createD1Database({
-      binding: () => getWorkersEnv<WorkersEnv>().DB,
+      binding: 'DB',
       migrationsFolder: new URL('../db/migrations', import.meta.url),
     })
   : createSqliteDatabase({
@@ -93,9 +89,9 @@ export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV
 
 `config/env.ts` に `SQLITE_DATABASE_PATH: Env.string().default('./data/guren.db')` を宣言し、`database` を `createApp({ config })` に加えてください。リゾルバについては [設定ガイド](./configuration.md#データベース接続) で詳しく説明しています。
 
-`getWorkersEnv` と `isWorkersRuntime` は `@guren/plugin-cloudflare/env` から import してください。パッケージのルートにはビルド用のツールも入っていて、それはワーカーのバンドルには要らないからです。
+`isWorkersRuntime` は `@guren/plugin-cloudflare/env` から import してください。パッケージのルートにはビルド用のツールも入っていて、それはワーカーのバンドルには要らないからです。
 
-バインディングは値ではなく、値を返す関数として渡します。バインディングはリクエストが届いて初めて存在するので、読み取るのを後回しにする必要があります。
+`binding` にはバインディングそのものではなく、その名前を渡します。バインディングはリクエストが届いて初めて存在するので、ファクトリは最初のクエリのときに Workers の env から `DB` を読みます。名前で渡すと、Workers 側の分岐で introspect したとき（`guren introspect --target cloudflare --json`）に、どのバインディングを使っているかが報告されます。以前の書き方である `() => getWorkersEnv<Env>().DB` のような関数も動きますが、その場合は関数の外から名前が見えません。
 
 ### マイグレーションの適用
 
@@ -228,30 +224,24 @@ export default defineStorageConfig(() => ({ default: 'media' }))
 ```typescript
 // app/Providers/MediaDiskProvider.ts
 import { ServiceProvider, LocalStorageDriver } from '@guren/core'
-import { R2Driver } from '@guren/plugin-cloudflare'
-import { getWorkersEnv, isWorkersRuntime } from '@guren/plugin-cloudflare/env'
-
-interface Env {
-  MEDIA: unknown
-}
+import { r2Disk } from '@guren/plugin-cloudflare'
+import { isWorkersRuntime } from '@guren/plugin-cloudflare/env'
 
 export default class MediaDiskProvider extends ServiceProvider {
   register(): void {
-    this.container.make('storage').registerDisk('media', () =>
-      isWorkersRuntime()
-        ? new R2Driver({
-            binding: () => getWorkersEnv<Env>().MEDIA,
-            publicUrl: 'https://media.example.com',
-          })
-        : new LocalStorageDriver({ root: './storage/app/public', url: '/storage' }),
-    )
+    const storage = this.container.make('storage')
+    if (isWorkersRuntime()) {
+      storage.registerDisk('media', ...r2Disk({ binding: 'MEDIA', publicUrl: 'https://media.example.com' }))
+    } else {
+      storage.registerDisk('media', () => new LocalStorageDriver({ root: './storage/app/public', url: '/storage' }))
+    }
   }
 }
 ```
 
 `storage` を `createApp({ config })` に、`MediaDiskProvider` を `providers` に加えてください。
 
-`binding` も値ではなく、値を返す関数です。バインディングは最初のリクエストと一緒に届くので、D1 のバインディングと同じく読み取りを後回しにする必要があります。これで、[ストレージガイド](./storage.md)にある `storage.disk('media').put(...)` / `get(...)` / `files(...)` がそのまま動きます。`bun run dev` ではディスクに、`wrangler dev` と本番では R2 に書き込みます。
+`binding` には D1 と同じくバインディングの名前を渡し、ドライバは最初の操作のときに Workers の env から読みます。`r2Disk()` はファクトリと、それが作るものの説明を一緒に返すので、introspect したアプリはディスクを作らずに `{ driver: 'r2', binding: 'MEDIA' }` と報告します。これで、[ストレージガイド](./storage.md)にある `storage.disk('media').put(...)` / `get(...)` / `files(...)` がそのまま動きます。`bun run dev` ではディスクに、`wrangler dev` と本番では R2 に書き込みます。
 
 R2 は S3 と仕組みが違うため、次の 3 点で挙動が異なります。
 

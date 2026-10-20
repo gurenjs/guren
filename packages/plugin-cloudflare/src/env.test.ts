@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { captureWorkersEnv, getWorkersEnv, isWorkersRuntime, resetWorkersEnv } from './env'
+import { captureWorkersEnv, getWorkersEnv, isWorkersRuntime, resetWorkersEnv, WORKERS_ENV_SLOT } from './env'
 
 interface TestEnv {
   DB: string
@@ -54,6 +54,20 @@ describe('captureWorkersEnv / getWorkersEnv / resetWorkersEnv', () => {
     resetWorkersEnv()
 
     expect(() => getWorkersEnv()).toThrow()
+  })
+})
+
+describe('the env slot @guren/orm reads', () => {
+  test('should keep the captured env under the registry symbol createD1Database({ binding: name }) resolves through', () => {
+    resetWorkersEnv()
+    captureWorkersEnv({ DB: 'binding' })
+    try {
+      expect(WORKERS_ENV_SLOT.description).toBe('guren.workersEnv')
+      expect(Symbol.keyFor(WORKERS_ENV_SLOT)).toBe('guren.workersEnv')
+      expect((globalThis as typeof globalThis & { [WORKERS_ENV_SLOT]?: unknown })[WORKERS_ENV_SLOT]).toEqual({ env: { DB: 'binding' } })
+    } finally {
+      resetWorkersEnv()
+    }
   })
 })
 

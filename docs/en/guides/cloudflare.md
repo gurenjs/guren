@@ -65,16 +65,12 @@ Select the driver by runtime in `config/database.ts`. D1 speaks SQLite, so write
 ```typescript
 // config/database.ts
 import { createD1Database, createSqliteDatabase, defineDatabaseConfig } from '@guren/core'
-import { getWorkersEnv, isWorkersRuntime } from '@guren/plugin-cloudflare/env'
+import { isWorkersRuntime } from '@guren/plugin-cloudflare/env'
 import env from './env.js'
-
-interface WorkersEnv {
-  DB: unknown
-}
 
 const database = isWorkersRuntime()
   ? createD1Database({
-      binding: () => getWorkersEnv<WorkersEnv>().DB,
+      binding: 'DB',
       migrationsFolder: new URL('../db/migrations', import.meta.url),
     })
   : createSqliteDatabase({
@@ -89,9 +85,9 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 export default defineDatabaseConfig(database, { seedOnBoot: process.env.NODE_ENV !== 'production' })
 ```
 
-Declare `SQLITE_DATABASE_PATH: Env.string().default('./data/guren.db')` in `config/env.ts` and list `database` in `createApp({ config })`; the [Configuration guide](./configuration.md#the-database-connection) covers the resolver. Import `getWorkersEnv` and `isWorkersRuntime` from `@guren/plugin-cloudflare/env`: the package root also carries the build tooling, which has no place in the worker bundle.
+Declare `SQLITE_DATABASE_PATH: Env.string().default('./data/guren.db')` in `config/env.ts` and list `database` in `createApp({ config })`; the [Configuration guide](./configuration.md#the-database-connection) covers the resolver. Import `isWorkersRuntime` from `@guren/plugin-cloudflare/env`: the package root also carries the build tooling, which has no place in the worker bundle.
 
-The binding is a resolver, not a value: bindings only exist once a request arrives, so it must be read lazily.
+`binding` names the binding rather than holding it: bindings only exist once a request arrives, so the factory reads `DB` from the Workers env at the first query. Naming it also lets the introspected app report which binding the database uses, on the branch Workers takes (`guren introspect --target cloudflare --json`). The older form, a closure such as `() => getWorkersEnv<Env>().DB`, still works, but nothing outside the closure can see the name.
 
 ### Applying migrations
 
@@ -236,30 +232,24 @@ A storage config can name only the built-in drivers (`local`, `s3`, `memory`), s
 ```typescript
 // app/Providers/MediaDiskProvider.ts
 import { ServiceProvider, LocalStorageDriver } from '@guren/core'
-import { R2Driver } from '@guren/plugin-cloudflare'
-import { getWorkersEnv, isWorkersRuntime } from '@guren/plugin-cloudflare/env'
-
-interface Env {
-  MEDIA: unknown
-}
+import { r2Disk } from '@guren/plugin-cloudflare'
+import { isWorkersRuntime } from '@guren/plugin-cloudflare/env'
 
 export default class MediaDiskProvider extends ServiceProvider {
   register(): void {
-    this.container.make('storage').registerDisk('media', () =>
-      isWorkersRuntime()
-        ? new R2Driver({
-            binding: () => getWorkersEnv<Env>().MEDIA,
-            publicUrl: 'https://media.example.com',
-          })
-        : new LocalStorageDriver({ root: './storage/app/public', url: '/storage' }),
-    )
+    const storage = this.container.make('storage')
+    if (isWorkersRuntime()) {
+      storage.registerDisk('media', ...r2Disk({ binding: 'MEDIA', publicUrl: 'https://media.example.com' }))
+    } else {
+      storage.registerDisk('media', () => new LocalStorageDriver({ root: './storage/app/public', url: '/storage' }))
+    }
   }
 }
 ```
 
 List `storage` in `createApp({ config })` and `MediaDiskProvider` in `providers`.
 
-`binding` is a resolver, not a value: bindings arrive with the first request, so it must be read lazily, exactly like the D1 binding. Every `storage.disk('media').put(...)` / `get(...)` / `files(...)` call from the [Storage guide](./storage.md) then works unchanged; `bun run dev` writes to disk, `wrangler dev` and production write to R2.
+`binding` names the binding, as for D1, and the driver reads it from the Workers env at its first operation. `r2Disk()` returns the factory together with a description of it, so the introspected app lists the disk as `{ driver: 'r2', binding: 'MEDIA' }` without building it. Every `storage.disk('media').put(...)` / `get(...)` / `files(...)` call from the [Storage guide](./storage.md) then works unchanged; `bun run dev` writes to disk, `wrangler dev` and production write to R2.
 
 Three things follow from how R2 differs from S3:
 

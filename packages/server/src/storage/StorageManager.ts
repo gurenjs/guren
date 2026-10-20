@@ -19,6 +19,8 @@ export class StorageManager {
   private readonly resolvedDisks: Map<string, StorageDriver> = new Map()
   /** The configured driver per disk, keyed like `diskFactories`; null for a bare `registerDisk()` factory. */
   private readonly diskDrivers: Map<string, string | null> = new Map()
+  /** The Workers binding a disk reads, when its `registerDisk()` description names one. */
+  private readonly diskBindings: Map<string, string> = new Map()
   private driverFactories: Map<string, (options: unknown) => StorageDriver> = new Map()
 
   constructor(config: StorageConfig = {}) {
@@ -85,9 +87,15 @@ export class StorageManager {
     return disk
   }
 
-  registerDisk(name: string, factory: StorageDriverFactory): void {
+  /**
+   * `description` says what the factory builds, which `describe()` cannot learn without calling it:
+   * `{ driver: 'r2', binding: 'MEDIA' }` lets the Cloudflare deploy see the bucket binding (RFC 0035 §2.1).
+   */
+  registerDisk(name: string, factory: StorageDriverFactory, description?: { driver: string; binding?: string }): void {
     this.diskFactories.set(name, factory)
-    this.diskDrivers.set(name, null)
+    this.diskDrivers.set(name, description?.driver ?? null)
+    if (description?.binding) this.diskBindings.set(name, description.binding)
+    else this.diskBindings.delete(name)
     this.resolvedDisks.delete(name)
   }
 
@@ -109,7 +117,7 @@ export class StorageManager {
 
   /** The declared disks and the default, building none of them (RFC 0026 §1). */
   describe(): DriverMapEntry {
-    return describeDriverMap(this.defaultDiskName, this.diskDrivers)
+    return describeDriverMap(this.defaultDiskName, this.diskDrivers, this.diskBindings)
   }
 }
 
