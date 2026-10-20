@@ -7,14 +7,17 @@
  */
 import { isRecord } from '../backend'
 
-export interface CfResult {
+export interface CliResult {
   exitCode: number
   stdout: string
   stderr: string
 }
 
-/** Runs `cf` with `args` from the app root. The seam the tests replace. */
-export type CfRunner = (args: string[]) => CfResult
+/** Runs a CLI with `args` from the app root. The seam the tests replace. */
+export type CliRunner = (args: string[]) => CliResult
+
+export type CfResult = CliResult
+export type CfRunner = CliRunner
 
 export type Read<T> = { ok: true; value: T } | { ok: false; reason: string }
 
@@ -168,25 +171,25 @@ function listPages(cf: CfRunner, command: string[], label: string, idKey: string
 }
 
 /** A listing as `cf` prints it: the `result` array alone, or the API envelope around it. */
-function resultArray(value: unknown): unknown[] | undefined {
+export function resultArray(value: unknown): unknown[] | undefined {
   if (Array.isArray(value)) return value
   return isRecord(value) && Array.isArray(value.result) ? value.result : undefined
 }
 
 /** A single result as `cf` prints it: the object alone, or the API envelope around it. */
-function resultObject(value: unknown): Record<string, unknown> | undefined {
+export function resultObject(value: unknown): Record<string, unknown> | undefined {
   if (isRecord(value) && isRecord(value.result)) return value.result
   return isRecord(value) ? value : undefined
 }
 
 /** Every entry's string `name`, or nothing when any entry has none. */
-function names(entries: unknown): string[] | undefined {
+export function names(entries: unknown): string[] | undefined {
   if (!Array.isArray(entries)) return undefined
   const read = entries.map((entry) => (isRecord(entry) && typeof entry.name === 'string' ? entry.name : undefined))
   return read.every((name) => name !== undefined) ? (read as string[]) : undefined
 }
 
-function parseJson(text: string): unknown {
+export function parseJson(text: string): unknown {
   try {
     return JSON.parse(text)
   } catch {
@@ -194,7 +197,7 @@ function parseJson(text: string): unknown {
   }
 }
 
-function failureText(result: CfResult): string {
+export function failureText(result: CfResult): string {
   const text = `${result.stderr}${result.stdout}`.trim()
   return text === '' ? `exit code ${result.exitCode}` : text
 }

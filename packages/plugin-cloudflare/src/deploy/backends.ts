@@ -3,12 +3,12 @@
  * Every operation on the account or a CLI goes through one of these, so the stages
  * in `deploy.ts` are written once. Which backend runs is `detectCloudflareBackend()`'s.
  */
-import { readFileSync, rmSync } from 'node:fs'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { isRecord, type CloudflareBackend } from '../backend'
-import { readWorkerManifest } from '../build'
-import { CF_OUTPUT_DIR } from '../worker-manifest'
+import { readWorkerManifest, readWranglerConfig } from '../build'
+import { CF_OUTPUT_DIR, WRANGLER_DEPLOY_CONFIG_FILE, WRANGLER_OUTPUT_DIR, type ResolvedResource } from '../worker-manifest'
 import {
   applyMigrations,
   appCfRunner,
@@ -24,10 +24,28 @@ import {
   readMigrationTracker,
   type AccountResource,
   type CfRunner,
+  type CliRunner,
   type Read,
 } from './cf-cli'
 import { migrationDirArgs, type MigrationLayout } from './migrations'
 import type { EvaluatedBinding, EvaluatedWorker, PlannedBinding, ResourceType } from './plan'
+import {
+  appWranglerRunner,
+  applyWranglerMigrations,
+  checkWranglerAuth,
+  createWranglerResource,
+  deployWithWrangler,
+  getWranglerBookmark,
+  listWranglerD1,
+  listWranglerKv,
+  listWranglerSecrets,
+  readWranglerTracker,
+} from './wrangler-cli'
+import {
+  evaluateWranglerConfig,
+  renderWranglerDeployConfig,
+  wranglerMigrationsBinding,
+} from './wrangler-config'
 
 export interface DeployBackend {
   readonly kind: CloudflareBackend
@@ -144,6 +162,98 @@ export function cfDeployBackend(options: CfBackendOptions): DeployBackend {
     deleteCommand: (resource) => (resource.type === 'd1'
       ? `bunx cf d1 delete ${resource.id}`
       : `bunx cf kv namespaces delete ${resource.id}`),
+  }
+}
+
+/** The Wrangler Appendix B's commands were verified against; `-0` admits its pre-releases. */
+const WRANGLER_FLOOR = '4.129.0'
+
+export interface WranglerBackendOptions {
+  root: string
+  wrangler?: CliRunner
+  nodeVersion?: () => string | undefined
+}
+
+/**
+ * For apps on `wrangler.jsonc` (RFC 0035 §7). wrangler.jsonc stays the developer's:
+ * the deploy reads it, and renders `.cloudflare/wrangler.deploy.json` with the
+ * resolved ids for every command that needs a database or the upload.
+ */
+export function wranglerDeployBackend(options: WranglerBackendOptions): DeployBackend {
+  const { root } = options
+  const wranglerPackage = resolvePackageFile(root, 'wrangler/package.json')
+  const wrangler = options.wrangler
+    ?? appWranglerRunner(root, join(dirname(wranglerPackage ?? join(root, 'node_modules/wrangler/package.json')), 'bin', 'wrangler.js'))
+  const nodeVersion = options.nodeVersion ?? nodeOnPathVersion
+  const outDir = join(root, WRANGLER_OUTPUT_DIR)
+  const flatDir = join(outDir, 'd1-migrations')
+  const configArgs = ['-c', `${WRANGLER_OUTPUT_DIR}/${WRANGLER_DEPLOY_CONFIG_FILE}`]
+  let config: Record<string, unknown> | undefined
+  let migrationsBinding: string | undefined
+
+  const developerConfig = (): Record<string, unknown> => {
+    config ??= readWranglerConfig(join(root, 'wrangler.jsonc'))
+    if (!config) throw new Error(`Cloudflare deploy: ${join(root, 'wrangler.jsonc')} is missing or not valid JSONC, so the bindings could not be read.`)
+    return config
+  }
+  const render = (resolved: Readonly<Record<string, ResolvedResource>>): void => {
+    const rendered = renderWranglerDeployConfig({ root, config: developerConfig(), resolved, migrationsBinding, flatDir })
+    writeFileSync(join(outDir, WRANGLER_DEPLOY_CONFIG_FILE), `${JSON.stringify(rendered, null, 2)}\n`)
+  }
+
+  return {
+    kind: 'wrangler',
+    outputDir: WRANGLER_OUTPUT_DIR,
+    appliesNested: false,
+    preflight() {
+      const problems: string[] = []
+      const version = installedVersion(root, 'wrangler')
+      if (!version || !Bun.semver.satisfies(version, `>=${WRANGLER_FLOOR}-0`)) {
+        problems.push(`The deploy runs the app's Wrangler, which needs ${WRANGLER_FLOOR} or later; found ${version ?? 'none'}. Run \`bun add -d wrangler@latest\`.`)
+      }
+      const engines = wranglerPackage ? readJson(wranglerPackage) : undefined
+      const nodeRange = isRecord(engines) && isRecord(engines.engines) && typeof engines.engines.node === 'string' ? engines.engines.node : undefined
+      const node = nodeVersion()
+      if (nodeRange && (!node || !Bun.semver.satisfies(node, nodeRange))) {
+        problems.push(`Wrangler runs on the node on PATH, and this one needs Node ${nodeRange}; found ${node ?? 'no node'}.`)
+      }
+      if (problems.length === 0) {
+        const auth = checkWranglerAuth(wrangler)
+        if (!auth.ok) {
+          problems.push(`Wrangler is not logged in (${auth.reason}). Run \`bunx wrangler login\`, or set CLOUDFLARE_API_TOKEN in CI.`)
+        }
+      }
+      return problems
+    },
+    evaluate: () => evaluateWranglerConfig(developerConfig()),
+    migrationsBinding() {
+      const chosen = wranglerMigrationsBinding(developerConfig(), root, flatDir)
+      migrationsBinding = chosen.ok ? chosen.value : undefined
+      return chosen
+    },
+    prepareReads(bindings) {
+      const ids: Record<string, ResolvedResource> = {}
+      for (const binding of bindings) {
+        if (binding.id) ids[binding.binding] = { id: binding.id }
+      }
+      render(ids)
+    },
+    list: (type) => (type === 'd1' ? listWranglerD1(wrangler) : listWranglerKv(wrangler)),
+    create: (type, name) => createWranglerResource(wrangler, type, name),
+    rebuild(resolved) {
+      render(resolved)
+      return { ok: true, value: true }
+    },
+    applyArgs: () => ['--remote', ...configArgs],
+    readTracker: (database) => readWranglerTracker(wrangler, database.binding, configArgs),
+    bookmark: (database) => getWranglerBookmark(wrangler, database.binding, configArgs),
+    applyMigrations: (database, applyArgs) => applyWranglerMigrations(wrangler, database.binding, applyArgs),
+    listSecrets: (worker) => listWranglerSecrets(wrangler, worker, configArgs),
+    deploy: (secretsFile) => deployWithWrangler(wrangler, configArgs, secretsFile),
+    restoreCommand: (database, bookmark) => `bunx wrangler d1 time-travel restore ${database.name} --bookmark ${bookmark}`,
+    deleteCommand: (resource) => (resource.type === 'd1'
+      ? `bunx wrangler d1 delete ${resource.name}`
+      : `bunx wrangler kv namespace delete --namespace-id ${resource.id}`),
   }
 }
 

@@ -2,6 +2,7 @@
  * The build manifest `cloudflare:build` writes for the `cf` backend (RFC 0035 §3):
  * what `gurenWorker()` turns into `cloudflare.config.ts` bindings. It is written
  * by the Bun build and read under Node by `cf`, so this module imports nothing.
+ * On the Wrangler backend it holds only `version` and `resolved`.
  */
 
 /** The file name inside the output directory. */
@@ -9,6 +10,12 @@ export const WORKER_MANIFEST_FILE = 'guren-worker.json'
 
 /** The `cf` backend's output directory, relative to the app root (RFC 0035 §3.3). */
 export const CF_OUTPUT_DIR = '.guren/cloudflare'
+
+/** The Wrangler backend's, which the committed wrangler.jsonc points into. */
+export const WRANGLER_OUTPUT_DIR = '.cloudflare'
+
+/** The Wrangler backend's deploy config, rendered into its output directory with the resolved ids. */
+export const WRANGLER_DEPLOY_CONFIG_FILE = 'wrangler.deploy.json'
 
 export const WORKER_MANIFEST_VERSION = 2
 

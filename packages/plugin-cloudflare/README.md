@@ -18,6 +18,8 @@ bunx wrangler deploy
 
 `cloudflare:build` runs your app's `build` script, then assembles a `.cloudflare/` directory containing the worker entry, static assets for Workers Static Assets, and flattened D1 migrations. It is generated output — add it to `.gitignore` and rebuild before every deploy.
 
+`bunx guren cloudflare:deploy` does the build, the D1 creation, the migrations and the deploy in one run, through the app's Wrangler (4.129 or later). It never writes `wrangler.jsonc`: the ids it resolves go into `.cloudflare/wrangler.deploy.json`, which it deploys with `wrangler deploy -c … --x-provision=false`. The plan and its checks are the ones described below for the cf CLI.
+
 Before the app build it runs the deploy-runtime checks `guren doctor` reports and warns, without failing, when sessions or OAuth state would sit in process memory, a Bun-only password hasher (`Argon2Hasher`, `hasher: 'argon2'`, or `new Hash({ algorithm: 'argon2' })`) is selected, or providers are discovered from the filesystem. Each works locally and breaks on Workers, and the warning prints where you are still reading rather than after the Vite output.
 
 `bunx guren cloudflare:size` (or `cloudflare:build --report-size`) measures the bundle a deploy would upload through wrangler's dry run and lists its largest sources by package. The platform limit is 64 MiB uncompressed on every plan; the report warns from half of it.

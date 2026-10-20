@@ -65,12 +65,6 @@ describe('cloudflare:deploy --plan', () => {
     }
   }
 
-  test('should refuse an app on the wrangler backend', async () => {
-    scaffoldApp(root)
-
-    await expect(planCloudflareDeploy(options())).rejects.toThrow(/needs the cf backend/)
-  })
-
   test('should fail preflight on a Node cf cannot load the config with, before building', async () => {
     scaffoldApp(root, { cfBackend: true })
     installCfTools(root)

@@ -25,7 +25,12 @@ export function formatPlan(plan: DeployPlan): string {
     lines.push(pending.length === 0
       ? `  Migrations: none pending (${layout} layout).`
       : `  Migrations: ${pending.length} pending (${layout} layout): ${pending.join(', ')}`)
-    if (pending.length > 0) lines.push(`    Applied with: cf d1 migrations apply <DB id> ${applyArgs.map((arg) => (arg.includes('*') ? `'${arg}'` : arg)).join(' ')}`)
+    const args = applyArgs.map((arg) => (arg.includes('*') ? `'${arg}'` : arg)).join(' ')
+    if (pending.length > 0) {
+      lines.push(plan.backend === 'wrangler'
+        ? `    Applied with: wrangler d1 migrations apply <DB binding> ${args}`
+        : `    Applied with: cf d1 migrations apply <DB id> ${args}`)
+    }
     for (const { migration, reason } of plan.migrations.acknowledged) {
       lines.push(`    ${migration}: destructive, acknowledged${reason ? ` (${reason})` : ''}`)
     }
@@ -60,8 +65,10 @@ export function formatResult(result: DeployResult): string {
   }
   if (result.deployment) {
     lines.push(result.deployment.output.trimEnd())
-    lines.push(result.url ? `Deployed: ${result.url}` : 'Deployed. cf printed no workers.dev URL; see its output above.')
-    lines.push(`Roll back with \`bunx cf workers deployments list --worker ${result.plan.worker}\` and a redeploy of an earlier version. A rollback does not revert migrations.`)
+    lines.push(result.url ? `Deployed: ${result.url}` : `Deployed. ${result.plan.backend} printed no workers.dev URL; see its output above.`)
+    lines.push(result.plan.backend === 'wrangler'
+      ? `Roll back to the previous version with \`bunx wrangler rollback --name ${result.plan.worker}\`, or pass it an earlier version id. A rollback does not revert migrations.`
+      : `Roll back with \`bunx cf workers deployments list --worker ${result.plan.worker}\` and a redeploy of an earlier version. A rollback does not revert migrations.`)
   }
   if (result.failure) {
     lines.push(`Failed at ${result.failure.stage}: ${result.failure.message}`)

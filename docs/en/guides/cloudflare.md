@@ -129,6 +129,22 @@ though it copies every column.
 
 The worker never seeds itself either. `defineDatabaseConfig` seeds only when `seedOnBoot` is true and the database reports migrations; `cloudflare:build` pins `NODE_ENV` to `production`, and a D1 handle reports none, since it has no filesystem to look in. Locally, `bun run dev` takes the SQLite branch and seeds on boot once migrations exist.
 
+### Deploying in one command
+
+`bunx guren cloudflare:deploy` runs the steps above in an order that leaves no window on an empty database. It builds, creates the D1 database (and `OAUTH_KV`) when it is missing, applies the pending migrations through the destructive-migration guard, then deploys:
+
+```bash
+bunx guren cloudflare:deploy --plan   # shows what it would do and writes nothing
+bunx guren cloudflare:deploy
+```
+
+It reads `wrangler.jsonc` and never writes it. The ids it resolves go into `.cloudflare/wrangler.deploy.json`, a copy of your config that it deploys with `wrangler deploy -c`, and into `.cloudflare/guren-worker.json`. The build lists both in a `.gitignore` inside `.cloudflare/`. The plan, its checks and the flags are the ones [Planning a deploy](#planning-a-deploy) and [Deploying with one command](#deploying-with-one-command) describe for the cf CLI. What differs on `wrangler.jsonc`:
+
+- Preflight needs Wrangler 4.129 or later in the app, the Node version that Wrangler requires as the `node` on PATH, and a logged-in Wrangler (`bunx wrangler login`, or `CLOUDFLARE_API_TOKEN` in CI).
+- The D1 database is looked up by its `database_name`. Migrations go to the binding whose `migrations_dir` is `.cloudflare/d1-migrations` (the scaffold's `DB`), as the flattened copy. A database whose `d1_migrations` holds nested names (`<folder>/migration.sql`) from a cf deploy is a `tracker-layout` blocker, since Wrangler would apply its whole history again.
+- Only the top level of `wrangler.jsonc` is deployed, not its `env.<name>` blocks.
+- The cleanup and rollback commands it prints are Wrangler's: `wrangler d1 delete`, `wrangler kv namespace delete`, `wrangler d1 time-travel restore` and `wrangler rollback`.
+
 ## Sessions and OAuth State Must Be Database-Backed
 
 This is not a preference. Each request may land on a different isolate, and isolates share nothing but the database. The in-memory defaults will appear to work locally and then drop every session in production.

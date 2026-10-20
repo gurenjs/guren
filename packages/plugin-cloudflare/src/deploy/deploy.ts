@@ -17,8 +17,8 @@ import {
 import { detectCloudflareBackend, isRecord } from '../backend'
 import { buildCloudflareOutput, readResolvedResources, readWorkerManifest } from '../build'
 import { WORKER_MANIFEST_FILE, type ResolvedResource } from '../worker-manifest'
-import { cfDeployBackend, type DeployBackend } from './backends'
-import type { CfRunner, Read } from './cf-cli'
+import { cfDeployBackend, wranglerDeployBackend, type DeployBackend } from './backends'
+import type { CfRunner, CliRunner, Read } from './cf-cli'
 import { decideLayout, fingerprintMigrations, readLocalMigrations } from './migrations'
 import { formatPlan } from './report'
 import {
@@ -49,8 +49,9 @@ export interface CloudflareDeployOptions {
   secretsFile?: string
   /** Route the build's own output to stderr, so stdout carries only `--json`. */
   logToStderr?: boolean
-  /** Seams for tests: the `cf` runner, the version of `node` on PATH, and whether a person is at the terminal. */
+  /** Seams for tests: the `cf` and `wrangler` runners, the version of `node` on PATH, and whether a person is at the terminal. */
   cf?: CfRunner
+  wrangler?: CliRunner
   nodeVersion?: () => string | undefined
   interactive?: boolean
   /** Asks once, after the plan is shown and before anything is written. */
@@ -72,12 +73,10 @@ export async function planCloudflareDeploy(options: CloudflareDeployOptions): Pr
 
 async function prepare(options: CloudflareDeployOptions): Promise<Prepared> {
   const root = resolve(options.root)
-  if (detectCloudflareBackend(root) !== 'cf') {
-    throw new Error(
-      'Cloudflare deploy: needs the cf backend, a cloudflare.config.ts and `cf` declared (see the Cloudflare guide). An app deploying through wrangler.jsonc keeps using `cloudflare:build` and `wrangler deploy`.',
-    )
-  }
-  const backend = cfDeployBackend({ root, ...(options.cf ? { cf: options.cf } : {}), ...(options.nodeVersion ? { nodeVersion: options.nodeVersion } : {}) })
+  const seams = options.nodeVersion ? { nodeVersion: options.nodeVersion } : {}
+  const backend = detectCloudflareBackend(root) === 'cf'
+    ? cfDeployBackend({ root, ...seams, ...(options.cf ? { cf: options.cf } : {}) })
+    : wranglerDeployBackend({ root, ...seams, ...(options.wrangler ? { wrangler: options.wrangler } : {}) })
   const problems = backend.preflight()
   if (problems.length > 0) {
     throw new Error(`Cloudflare deploy: preflight failed, before anything was built:\n  ${problems.join('\n  ')}`)
@@ -99,6 +98,7 @@ async function prepare(options: CloudflareDeployOptions): Promise<Prepared> {
   const outDir = join(root, backend.outputDir)
   const previous = readWorkerManifest(outDir)
   const context = {
+    backend: backend.kind,
     worker,
     manifest: {
       resolved: readResolvedResources(outDir),
@@ -110,8 +110,8 @@ async function prepare(options: CloudflareDeployOptions): Promise<Prepared> {
   }
   // Bindings first: the migrations read the database the plan resolved the build's D1 binding to.
   const bindings = buildPlan(context).bindings
-  backend.prepareReads(bindings)
   const chosen = backend.migrationsBinding(worker)
+  backend.prepareReads(bindings)
   const databaseBinding = chosen.ok ? chosen.value : undefined
   const database = bindings.find((binding) => binding.binding === databaseBinding)
   const plan = buildPlan({
@@ -307,6 +307,10 @@ function readMigrations(
 
   const decision = decideLayout(local, tracker)
   if (!decision.ok) return { status: 'layout-conflict', nested: decision.nested, flat: decision.flat }
+  // Wrangler applies only the flattened copy, so a nested history would all read as pending.
+  if (decision.layout === 'nested' && !backend.appliesNested) {
+    return { status: 'layout-conflict', nested: (tracker ?? []).filter((name) => name.endsWith('/migration.sql')), flat: [] }
+  }
 
   let verdict
   try {

@@ -201,6 +201,13 @@ export function installCfTools(root: string, wranglerVersion = '4.151.1'): void 
   writeJson(join(root, 'node_modules/wrangler/package.json'), { name: 'wrangler', version: wranglerVersion })
 }
 
+/** A Wrangler install the Wrangler backend's preflight reads; nothing in it runs. */
+export function installWranglerTools(root: string, version = '4.129.0'): void {
+  mkdirSync(join(root, 'node_modules/wrangler/bin'), { recursive: true })
+  writeFileSync(join(root, 'node_modules/wrangler/bin/wrangler.js'), '')
+  writeJson(join(root, 'node_modules/wrangler/package.json'), { name: 'wrangler', version, engines: { node: '>=22.0.0' } })
+}
+
 /** A drizzle 1.x migration folder under `db/migrations/`. */
 export function writeMigration(root: string, folder: string, sql: string): void {
   mkdirSync(join(root, 'db/migrations', folder), { recursive: true })
