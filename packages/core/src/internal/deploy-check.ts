@@ -9,8 +9,8 @@
  */
 
 interface DeployCheckCliApi {
-  /** Absent on a @guren/cli older than RFC 0020 Part 0. */
-  checkDeployRuntime?(cwd: string): Promise<DeployRuntimeVerdict[]>
+  /** Absent on a @guren/cli older than RFC 0020 Part 0; `options` is ignored by one older than RFC 0035 §2.1. */
+  checkDeployRuntime?(cwd: string, options?: { target?: 'cloudflare' }): Promise<DeployRuntimeVerdict[]>
 }
 
 interface DeployRuntimeVerdict {
@@ -21,6 +21,8 @@ interface DeployRuntimeVerdict {
   /** Absent on a @guren/cli older than RFC 0026 Part 2a. */
   evidence?: 'manifest' | 'static' | 'none'
   evidenceReason?: string
+  /** Absent on a @guren/cli older than RFC 0035 §2.1, which introspects the dev branch whatever `target` says. */
+  introspectedAs?: 'cloudflare'
 }
 
 export interface ReportDeployRuntimeHazardsOptions {
@@ -28,6 +30,8 @@ export interface ReportDeployRuntimeHazardsOptions {
   root: string
   /** Prefix of every line, e.g. `Cloudflare build`. */
   label: string
+  /** Judge the app's branch for this platform (RFC 0035 §2.1), for a plugin whose `env` subpath honours it. */
+  target?: 'cloudflare'
 }
 
 function describeError(error: unknown): string {
@@ -40,7 +44,7 @@ function describeError(error: unknown): string {
  * prints one line saying so rather than nothing: silence would read as a clean report.
  */
 export async function reportDeployRuntimeHazards(options: ReportDeployRuntimeHazardsOptions): Promise<string[]> {
-  const { root, label } = options
+  const { root, label, target } = options
 
   let cli: DeployCheckCliApi
   try {
@@ -55,7 +59,7 @@ export async function reportDeployRuntimeHazards(options: ReportDeployRuntimeHaz
 
   let verdicts: DeployRuntimeVerdict[]
   try {
-    verdicts = await cli.checkDeployRuntime(root)
+    verdicts = await cli.checkDeployRuntime(root, { target })
   } catch (error) {
     return skipped(label, `the scan failed (${describeError(error)})`)
   }
@@ -75,9 +79,9 @@ export async function reportDeployRuntimeHazards(options: ReportDeployRuntimeHaz
 /** One line naming what each verdict was judged from, and why the source when the app could not be read. */
 function describeEvidence(label: string, verdicts: DeployRuntimeVerdict[]): string | undefined {
   const judged: string[] = []
-  for (const { title, evidence } of verdicts) {
+  for (const { title, evidence, introspectedAs } of verdicts) {
     if (evidence === undefined) return undefined
-    judged.push(`${title} from ${EVIDENCE_LABELS[evidence]}`)
+    judged.push(`${title} from ${EVIDENCE_LABELS[evidence]}${introspectedAs ? ` as ${TARGET_LABELS[introspectedAs]} runs it` : ''}`)
   }
   if (judged.length === 0) return undefined
   const reasons = [...new Set(verdicts.flatMap((verdict) => (verdict.evidenceReason ? [verdict.evidenceReason] : [])))]
@@ -85,6 +89,8 @@ function describeEvidence(label: string, verdicts: DeployRuntimeVerdict[]): stri
 }
 
 const EVIDENCE_LABELS = { manifest: 'the introspected app', static: 'source', none: 'nothing verifiable' } as const
+/** Matches `SERVERLESS_RUNTIME_LABELS` in @guren/server, which this module does not import. */
+const TARGET_LABELS = { cloudflare: 'Cloudflare Workers' } as const
 
 function skipped(label: string, reason: string): string[] {
   const line = `${label}: deploy-runtime checks skipped — ${reason}. Run \`bunx guren doctor\` before deploying.`

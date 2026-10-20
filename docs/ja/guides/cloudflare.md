@@ -36,6 +36,8 @@ bunx wrangler deploy
 
 アプリをビルドする前に、`guren doctor` と同じデプロイランタイムのチェックが走ります。セッションや OAuth state をプロセスのメモリに置いている、[Bun でしか読めないパスワードハッシャー](/docs/guides/authentication#パスワードハッシャー)を選んでいる、プロバイダをファイルシステムから探している、のどれかに当てはまると警告が出ます(ビルド自体は止まりません)。いずれもローカルでは動くのに Workers では動かないものです。警告は Vite の出力のあとではなく、まだ読んでいるうちに目に入る位置に出ます。
 
+このチェックは、Workers で動くときのアプリを調べます。ビルドがアプリを introspect している間は `@guren/plugin-cloudflare/env` の `isWorkersRuntime()` が true を返すので、これで分岐する設定は Workers 側の分岐（SQLite ではなく D1）で判定されます。`guren doctor` と `guren check` は、これまでどおり `bun run dev` が通る分岐を読みます。アプリの登録中にクロージャを介さずバインディングを読んでいると、この introspection が失敗し、チェックは確かめられなかった項目として報告します。
+
 ビルドは、トップレベルか、いずれかの `env.<name>` ブロックで `"keep_names": false` を設定した `wrangler.jsonc` も受け付けません。Guren は、デプロイをまたいで残るレコードにクラス名を書き込むからです。キューに入れたジョブとイベント、保存した通知は、`static jobName`・`static eventName`・`type` ゲッターで名前を固定していなければ、クラス名をキーにして保存されます。[永続エージェント](./durable-agents.md)もクラス名で探されます。
 
 wrangler は、`keep_names` で無効にしない限り esbuild の `keepNames` を有効にしてバンドルするので、`"minify": true` を指定するだけならこれらの名前は保たれます。`keep_names` を無効にすると、minify したときにすべてのクラス名が変わります。minify しなくても、同じ名前のトップレベルクラスが 2 つあると 2 つ目の名前が変わります（`OrderShipped2`）。そうなると、前回のデプロイで書き込んだレコードを解決できなくなります。

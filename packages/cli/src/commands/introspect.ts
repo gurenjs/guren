@@ -4,7 +4,7 @@ import { consola } from 'consola'
 import { markCommandFailed } from '../command-status'
 import { CliError } from '../cli-error'
 import { defineCommand } from '../define-command'
-import { DEFAULT_INTROSPECT_TIMEOUT_MS, introspectApp } from '../introspect'
+import { DEFAULT_INTROSPECT_TIMEOUT_MS, INTROSPECT_TARGET_ENV, introspectApp } from '../introspect'
 
 function table(headers: string[], rows: string[][]): string {
   const widths = headers.map((header, column) => Math.max(header.length, ...rows.map((row) => row[column]?.length ?? 0)))
@@ -89,6 +89,10 @@ export const introspectCommand = defineCommand({
       type: 'string',
       description: 'Application root directory. Defaults to the current directory.',
     },
+    target: {
+      type: 'string',
+      description: 'Register the app as a deploy target runs it (`cloudflare`: isWorkersRuntime() is true), as the Cloudflare build does.',
+    },
   },
   async run({ args }) {
     const seconds = args.timeout === undefined ? undefined : Number(args.timeout)
@@ -96,8 +100,13 @@ export const introspectCommand = defineCommand({
       throw new CliError(`--timeout takes a positive number of seconds, not "${args.timeout}"`)
     }
 
+    if (args.target !== undefined && args.target !== 'cloudflare') {
+      throw new CliError(`--target takes \`cloudflare\`, not "${args.target}"`)
+    }
+
     const result = await introspectApp(args.app ?? process.cwd(), {
       timeoutMs: seconds === undefined ? undefined : seconds * 1000,
+      env: args.target ? { [INTROSPECT_TARGET_ENV]: args.target } : undefined,
     })
 
     if (result.status === 'failed') {
