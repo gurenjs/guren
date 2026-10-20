@@ -5,12 +5,37 @@
  */
 import { readFileSync, rmSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import {
+  ALLOW_DESTRUCTIVE_ENV,
+  judgePendingMigrations,
+  readEnvFileKeys,
+  readRequiredDeployEnv,
+} from '@guren/core/internal/deploy-plan'
 
 import { detectCloudflareBackend, isRecord } from '../backend'
 import { buildCloudflareOutput, readResolvedResources } from '../build'
 import { CF_OUTPUT_DIR } from '../worker-manifest'
-import { appCfRunner, cfBuild, checkAuth, listD1Databases, listKvNamespaces, type CfRunner, type Read } from './cf-cli'
-import { buildPlan, type DeployPlan, type EvaluatedBinding, type EvaluatedWorker } from './plan'
+import {
+  appCfRunner,
+  cfBuild,
+  checkAuth,
+  listD1Databases,
+  listKvNamespaces,
+  listWorkerSecrets,
+  readMigrationTracker,
+  type CfRunner,
+  type Read,
+} from './cf-cli'
+import { decideLayout, migrationDirArgs, readLocalMigrations } from './migrations'
+import {
+  buildPlan,
+  type DeployPlan,
+  type EvaluatedBinding,
+  type EvaluatedWorker,
+  type MigrationInput,
+  type PlannedBinding,
+  type SecretsInput,
+} from './plan'
 
 /** cf refuses to load cloudflare.config.ts on older Node (RFC 0035 Appendix C row 10). */
 const NODE_FLOOR = '22.18.0'
@@ -29,6 +54,10 @@ export interface CloudflareDeployOptions {
   mcpOAuth?: boolean
   mcpPath?: string
   skipAppBuild?: boolean
+  /** Apply pending destructive statements no marker covers (also `GUREN_ALLOW_DESTRUCTIVE_MIGRATIONS=1`). */
+  allowDestructive?: boolean
+  /** A dotenv file of secrets for the deploy; the plan reads only its names. */
+  secretsFile?: string
   /** Route the build's own output to stderr, so stdout carries only `--json`. */
   logToStderr?: boolean
   /** Seams for tests: the `cf` runner, the version of `node` on PATH, and whether a person is at the terminal. */
@@ -70,13 +99,96 @@ export async function planCloudflareDeploy(options: CloudflareDeployOptions): Pr
   const worker = readEvaluatedWorker(root)
   const uses = (type: string) => Object.values(worker.env).some((entry) => entry.type === type)
   const unlisted: Read<never[]> = { ok: true, value: [] }
-  return buildPlan({
+  const context = {
     worker,
     manifest: { resolved: readResolvedResources(join(root, CF_OUTPUT_DIR)) },
     d1: uses('d1') ? listD1Databases(cf) : unlisted,
     kv: uses('kv') ? listKvNamespaces(cf) : unlisted,
     mayCreate: Boolean(options.provision) || (!options.ci && interactive),
+  }
+  // Bindings first: the migrations read the database the plan resolved DB to.
+  const database = buildPlan(context).bindings.find((binding) => binding.binding === DATABASE_BINDING)
+  return buildPlan({
+    ...context,
+    migrations: database ? readMigrations(root, cf, database, options) : undefined,
+    secrets: await readSecrets(root, cf, worker, options.secretsFile),
   })
+}
+
+/** The D1 binding the build always writes (`WorkerManifest.d1.binding`). */
+const DATABASE_BINDING = 'DB'
+
+function readMigrations(
+  root: string,
+  cf: CfRunner,
+  database: PlannedBinding,
+  options: CloudflareDeployOptions,
+): MigrationInput | undefined {
+  const migrationsDir = join(root, 'db', 'migrations')
+  const local = readLocalMigrations(migrationsDir)
+  if (local.folders.length === 0 && local.files.length === 0) return undefined
+  // An unresolved binding is a blocker of its own; a database to be created has applied nothing.
+  if (database.action === 'unknown') return undefined
+
+  let tracker: string[] | null = null
+  if (database.action !== 'create' && database.id) {
+    const read = readMigrationTracker(cf, database.id)
+    if (!read.ok) return { status: 'unreadable', reason: read.reason }
+    tracker = read.value
+  }
+
+  const decision = decideLayout(local, tracker)
+  if (!decision.ok) return { status: 'layout-conflict', nested: decision.nested, flat: decision.flat }
+
+  let verdict
+  try {
+    verdict = judgePendingMigrations(migrationsDir, decision.pendingFolders, 'db/migrations')
+  } catch (error) {
+    return { status: 'unreadable', reason: error instanceof Error ? error.message : String(error) }
+  }
+  return {
+    status: 'ready',
+    layout: decision.layout,
+    applyArgs: migrationDirArgs(decision.layout, `${CF_OUTPUT_DIR}/d1-migrations`),
+    pending: [...decision.pendingFolders, ...decision.pendingFiles],
+    unjudged: decision.pendingFiles,
+    verdict,
+    allowDestructive: options.allowDestructive === true || process.env[ALLOW_DESTRUCTIVE_ENV] === '1',
+  }
+}
+
+/** Binding types whose value the config itself provides, so no secret is needed under that name. */
+const VALUE_BINDING_TYPES = new Set(['text', 'json', 'secret'])
+
+async function readSecrets(
+  root: string,
+  cf: CfRunner,
+  worker: EvaluatedWorker,
+  secretsFile: string | undefined,
+): Promise<SecretsInput> {
+  const provided = Object.entries(worker.env)
+    .filter(([, entry]) => VALUE_BINDING_TYPES.has(entry.type))
+    .map(([name]) => name)
+  if (secretsFile) {
+    let content: string
+    try {
+      content = readFileSync(resolve(root, secretsFile), 'utf8')
+    } catch (error) {
+      throw new Error(`Cloudflare deploy: --secrets-file ${secretsFile} could not be read (${error instanceof Error ? error.message : String(error)}).`)
+    }
+    const keys = await readEnvFileKeys(content)
+    if (typeof keys === 'string') throw new Error(`Cloudflare deploy: --secrets-file could not be read: ${keys}.`)
+    provided.push(...keys)
+  }
+
+  const required = await readRequiredDeployEnv(root)
+  const needsDeployed = required.status === 'loaded' && required.required.some((name) => !provided.includes(name))
+  return {
+    required,
+    deployed: needsDeployed ? listWorkerSecrets(cf, worker.name) : { ok: true, value: [] },
+    provided,
+    ...(secretsFile ? { secretsFile } : {}),
+  }
 }
 
 async function withStdoutLogs<T>(toStderr: boolean, run: () => Promise<T>): Promise<T> {

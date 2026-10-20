@@ -469,7 +469,12 @@ Each binding is listed as `existing` (the resource a previous run settled, or an
 
 - `binding-conflict`: an id in `cloudflare.config.ts` and the planned name point at different resources, or two resources share the name.
 - `resource-missing`: an id you wrote is not in the account, or a resource is missing and the run may not create it. A run with `--ci`, or without a terminal, creates nothing unless `--provision` is passed.
-- `source-unreadable`: `cf` could not list the account's resources. The plan stops rather than treat that as an empty account.
+- `source-unreadable`: `cf` could not list the account's resources, query the migrations tracker, or the app's `config/env.ts` would not load. The plan stops rather than guess.
+- `tracker-layout`: the database's `d1_migrations` records both flattened names (`<folder>.sql`) and nested ones (`<folder>/migration.sql`).
+- `destructive-migration`: a pending migration drops or narrows something without a `-- guren:allow-destructive` comment ([Destructive migrations](./database.md#destructive-migrations)). `--allow-destructive` lists them as a warning instead.
+- `secrets`: a variable `config/env.ts` requires in production has no value on the deployed Worker, in the config, or in `--secrets-file`.
+
+The plan reads which migrations the database has applied, picks the layout its tracker already uses, and prints the `cf d1 migrations apply` arguments for it. A database Wrangler migrated stays on the flattened copy, so nothing is applied twice. A database the deploy will create has applied nothing, so every local migration is judged. For secrets, a first deploy has no Worker to read from, so list the values in a dotenv file and pass it as `--secrets-file .env.production`. The plan reads only the names in it.
 
 Preflight needs Node 22.18 or later as the `node` on PATH, Wrangler 4.136 or later in the app, and a logged-in `cf` (`bunx cf auth login`, or `CLOUDFLARE_API_TOKEN` in CI). `--json` prints `{ plan }` as one object. This version stops at the plan: creating resources, migrating and deploying are still `cf deploy` and `cf d1 migrations apply` as above.
 

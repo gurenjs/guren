@@ -464,6 +464,7 @@ describe.skipIf(!cfEnabled)('cf builds and dry-runs the cf-backend worker', () =
     return { exitCode: result.exitCode, output: `${result.stdout.toString()}${result.stderr.toString()}` }
   }
 
+  // Installing cf and Wrangler takes far longer than Bun's 5 s hook default.
   beforeAll(async () => {
     root = mkdtempSync(join(tmpdir(), 'guren-cf-backend-probe-'))
 
@@ -505,7 +506,7 @@ describe.skipIf(!cfEnabled)('cf builds and dry-runs the cf-backend worker', () =
 
     const { buildCloudflareOutput } = await import('./build')
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
-  })
+  }, 300_000)
 
   afterAll(() => {
     if (root) rmSync(root, { recursive: true, force: true })
@@ -544,7 +545,7 @@ describe.skipIf(!cfEnabled)('cf builds and dry-runs the cf-backend worker', () =
   test(
     'accepts every listing the plan sends, and reports auth as JSON',
     async () => {
-      const { appCfRunner, listD1Databases, listKvNamespaces } = await import('./deploy/cf-cli')
+      const { appCfRunner, listD1Databases, listKvNamespaces, listWorkerSecrets, readMigrationTracker } = await import('./deploy/cf-cli')
       const sent: string[][] = []
       const recorder = (args: string[]) => {
         sent.push(args)
@@ -552,16 +553,24 @@ describe.skipIf(!cfEnabled)('cf builds and dry-runs the cf-backend worker', () =
       }
       listD1Databases(recorder)
       listKvNamespaces(recorder)
+      const listings = sent.length
+      readMigrationTracker(recorder, '00000000-0000-4000-8000-000000000001')
+      listWorkerSecrets(recorder, 'cf-backend-probe')
 
       const previous = process.env.CLOUDFLARE_ACCOUNT_ID
       process.env.CLOUDFLARE_ACCOUNT_ID = '0'.repeat(32)
       try {
         const real = appCfRunner(root, join(root, 'node_modules/cf/bin/cf'))
-        for (const args of sent) {
+        for (const [index, args] of sent.entries()) {
           const result = real([...args, '--dry-run'])
           expect(result.exitCode).toBe(0)
-          expect((JSON.parse(result.stdout) as { query: unknown }).query).toEqual({ page: 1, per_page: 100 })
+          const request = JSON.parse(result.stdout) as { query: unknown; url: string; body?: unknown }
+          if (index < listings) expect(request.query).toEqual({ page: 1, per_page: 100 })
         }
+        const [query, secrets] = sent.slice(listings).map((args) => JSON.parse(real([...args, '--dry-run']).stdout) as { url: string; body?: unknown })
+        expect(query?.url).toEndWith('/d1/database/00000000-0000-4000-8000-000000000001/query')
+        expect(JSON.stringify(query?.body)).toContain('select name from d1_migrations order by id')
+        expect(secrets?.url).toEndWith('/workers/scripts/cf-backend-probe/secrets')
         const whoami = real(['auth', 'whoami'])
         expect(JSON.parse(whoami.stdout)).toHaveProperty('authenticated')
       } finally {

@@ -68,6 +68,39 @@ export function checkAuth(cf: CfRunner): Read<true> {
   return { ok: true, value: true }
 }
 
+/**
+ * The names `d1_migrations` records, in apply order, or `null` when the table does not
+ * exist yet (nothing applied). Any other failure is unreadable: guessing "nothing
+ * applied" would replay the whole history against live data.
+ */
+export function readMigrationTracker(cf: CfRunner, databaseId: string): Read<string[] | null> {
+  const result = cf(['d1', 'query', databaseId, '--sql', 'select name from d1_migrations order by id'])
+  if (result.exitCode !== 0) {
+    if (/no such table:?\s*d1_migrations/i.test(failureText(result))) return { ok: true, value: null }
+    return { ok: false, reason: `cf d1 query on the migrations table failed: ${failureText(result)}` }
+  }
+  // The API answers `[{ results: [...], success, meta }]`, with or without the envelope around it.
+  const statements = resultArray(parseJson(result.stdout))
+  const rows = statements?.[0] !== undefined && isRecord(statements[0]) ? statements[0].results : undefined
+  if (!Array.isArray(rows) || rows.some((row) => !isRecord(row) || typeof row.name !== 'string')) {
+    return { ok: false, reason: 'cf d1 query printed no `results` rows with a `name` for the migrations table' }
+  }
+  return { ok: true, value: rows.map((row) => (row as { name: string }).name) }
+}
+
+/** The secret names a deployed Worker has. Fails on a Worker that does not exist yet, too. */
+export function listWorkerSecrets(cf: CfRunner, worker: string): Read<string[]> {
+  const result = cf(['workers', 'secrets', 'list', '--worker', worker])
+  if (result.exitCode !== 0) {
+    return { ok: false, reason: `cf workers secrets list failed: ${failureText(result)}` }
+  }
+  const entries = resultArray(parseJson(result.stdout))
+  if (!entries || entries.some((entry) => !isRecord(entry) || typeof entry.name !== 'string')) {
+    return { ok: false, reason: 'cf workers secrets list printed no list of named secrets' }
+  }
+  return { ok: true, value: entries.map((entry) => (entry as { name: string }).name) }
+}
+
 /** `cf build`: evaluates cloudflare.config.ts and writes the build output the plan reads. */
 export function cfBuild(cf: CfRunner): Read<true> {
   const result = cf(['build'])
@@ -98,6 +131,12 @@ function listPages(cf: CfRunner, command: string[], label: string, idKey: string
     }
   }
   return { ok: false, reason: `${label} still had results after ${MAX_PAGES} pages of ${PAGE_SIZE}` }
+}
+
+/** A listing as `cf` prints it: the `result` array alone, or the API envelope around it. */
+function resultArray(value: unknown): unknown[] | undefined {
+  if (Array.isArray(value)) return value
+  return isRecord(value) && Array.isArray(value.result) ? value.result : undefined
 }
 
 function parseJsonArray(text: string): unknown[] | undefined {

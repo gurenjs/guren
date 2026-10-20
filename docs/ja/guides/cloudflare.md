@@ -479,7 +479,12 @@ bunx guren cloudflare:deploy --plan
 
 - `binding-conflict`: `cloudflare.config.ts` に書いた ID と予定の名前が別のリソースを指しているか、同じ名前のリソースが 2 つあります。
 - `resource-missing`: 書いた ID のリソースがアカウントにないか、リソースがなく、この実行では作れません。`--ci` を付けた実行と、ターミナルのない実行では、`--provision` を付けない限り何も作りません。
-- `source-unreadable`: `cf` がアカウントのリソースを一覧できませんでした。空のアカウントとして扱わずに、計画を止めます。
+- `source-unreadable`: `cf` がアカウントのリソースを一覧できなかったか、マイグレーションの記録表を読めなかったか、アプリの `config/env.ts` を読み込めませんでした。推測で進めずに、計画を止めます。
+- `tracker-layout`: データベースの `d1_migrations` に、平坦化した名前（`<folder>.sql`）と入れ子の名前（`<folder>/migration.sql`）が混在しています。
+- `destructive-migration`: 未適用のマイグレーションが、`-- guren:allow-destructive` のコメントなしに何かを削除したり型を狭めたりしています（[破壊的マイグレーション](./database.md#破壊的マイグレーション)）。`--allow-destructive` を付けると、止めずに警告として表示します。
+- `secrets`: `config/env.ts` が本番で必須としている変数に、デプロイ済みのワーカー、設定、`--secrets-file` のどこにも値がありません。
+
+計画では、データベースに適用済みのマイグレーションを読み、記録表がすでに使っている形式を選んで、その形式での `cf d1 migrations apply` の引数を表示します。Wrangler でマイグレーションしてきたデータベースは平坦化したコピーのまま扱うので、同じマイグレーションが二重に適用されることはありません。デプロイで新しく作るデータベースはまだ何も適用していないので、手元のマイグレーションをすべて判定します。secrets については、最初のデプロイでは読む相手のワーカーがまだないので、値を dotenv ファイルに書いて `--secrets-file .env.production` で渡してください。計画が読むのは、そのファイルに書かれた名前だけです。
 
 事前確認には、PATH 上の `node` が Node 22.18 以上であること、アプリの Wrangler が 4.136 以上であること、`cf` がログイン済みであること（`bunx cf auth login`、CI では `CLOUDFLARE_API_TOKEN`）が必要です。`--json` を付けると `{ plan }` を 1 つのオブジェクトとして出力します。このバージョンは計画までで、リソースの作成、マイグレーション、デプロイは、上に書いたとおり `cf deploy` と `cf d1 migrations apply` で行います。
 

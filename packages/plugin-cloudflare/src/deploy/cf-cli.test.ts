@@ -1,6 +1,15 @@
 import { describe, test, expect } from 'bun:test'
 
-import { cfBuild, checkAuth, listD1Databases, listKvNamespaces, type CfResult, type CfRunner } from './cf-cli'
+import {
+  cfBuild,
+  checkAuth,
+  listD1Databases,
+  listKvNamespaces,
+  listWorkerSecrets,
+  readMigrationTracker,
+  type CfResult,
+  type CfRunner,
+} from './cf-cli'
 
 /** A runner answering from a script of results, recording each argv. */
 function scripted(results: CfResult[]): CfRunner & { calls: string[][] } {
@@ -76,5 +85,32 @@ describe('cf CLI wrappers', () => {
       ok: false,
       reason: 'Invalid `cloudflare.config.ts`',
     })
+  })
+
+  test('should read the tracker rows, with or without the API envelope', () => {
+    const rows = [{ results: [{ name: '20261001_init.sql' }, { name: '20261002_posts.sql' }], success: true }]
+    const cf = scripted([json(rows), json({ success: true, result: rows })])
+
+    expect(readMigrationTracker(cf, 'db-id')).toEqual({ ok: true, value: ['20261001_init.sql', '20261002_posts.sql'] })
+    expect(readMigrationTracker(cf, 'db-id')).toEqual({ ok: true, value: ['20261001_init.sql', '20261002_posts.sql'] })
+    expect(cf.calls[0]).toEqual(['d1', 'query', 'db-id', '--sql', 'select name from d1_migrations order by id'])
+  })
+
+  test('should read a missing tracker table as nothing applied, and any other failure as unreadable', () => {
+    const missing = scripted([{ exitCode: 1, stdout: '', stderr: 'D1_ERROR: no such table: d1_migrations: SQLITE_ERROR' }])
+    const denied = scripted([{ exitCode: 1, stdout: '', stderr: 'Authentication error [code: 10000]' }])
+
+    expect(readMigrationTracker(missing, 'db-id')).toEqual({ ok: true, value: null })
+    expect(readMigrationTracker(denied, 'db-id').ok).toBe(false)
+    expect(readMigrationTracker(scripted([json([{ success: true }])]), 'db-id').ok).toBe(false)
+  })
+
+  test('should list secret names for one worker', () => {
+    const cf = scripted([json([{ name: 'APP_KEY', type: 'secret_text' }]), json({ result: [{ name: 'B', type: 'secret_text' }] })])
+
+    expect(listWorkerSecrets(cf, 'demo-app')).toEqual({ ok: true, value: ['APP_KEY'] })
+    expect(listWorkerSecrets(cf, 'demo-app')).toEqual({ ok: true, value: ['B'] })
+    expect(cf.calls[0]).toEqual(['workers', 'secrets', 'list', '--worker', 'demo-app'])
+    expect(listWorkerSecrets(scripted([{ exitCode: 1, stdout: '', stderr: 'workers.api.error.script_not_found' }]), 'x').ok).toBe(false)
   })
 })

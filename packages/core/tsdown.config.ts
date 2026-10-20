@@ -22,6 +22,7 @@ export default defineConfig({
     'src/agent.ts',
     'src/internal/deploy-build.ts',
     'src/internal/deploy-check.ts',
+    'src/internal/deploy-plan.ts',
     'src/internal/route-path.ts',
     'src/internal/zod-compat.ts',
     'src/internal/zod-json-schema.ts',

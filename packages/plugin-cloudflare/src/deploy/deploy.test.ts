@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -26,6 +26,36 @@ function fakeCf(root: string, d1: unknown[], calls: string[][] = []) {
     if (args[0] === 'd1') return ok(d1)
     if (args[0] === 'kv') return ok([])
     return { exitCode: 1, stdout: '', stderr: `unexpected: ${args.join(' ')}` }
+  }
+}
+
+/** An env schema of the shape `loadEnvSchema()` reads, requiring APP_KEY in production. */
+const ENV_SCHEMA = `export default {
+  vars: { APP_KEY: { defaultValue: undefined, isSecret: true } },
+  parse: () => ({ values: {}, unset: new Set(['APP_KEY']) }),
+}
+`
+
+function writeMigration(root: string, folder: string, sql: string): void {
+  mkdirSync(join(root, 'db/migrations', folder), { recursive: true })
+  writeFileSync(join(root, 'db/migrations', folder, 'migration.sql'), sql)
+}
+
+/** A cf that also answers the tracker query and the secrets listing. */
+function fakeCfWith(root: string, extra: { tracker?: string[]; secrets?: string[] }, calls: string[][] = []) {
+  const base = fakeCf(root, [{ uuid: DB_ID, name: 'demo-app' }], calls)
+  return (args: string[]): CfResult => {
+    if (args[0] === 'd1' && args[1] === 'query') {
+      calls.push(args)
+      return { exitCode: 0, stdout: JSON.stringify([{ results: (extra.tracker ?? []).map((name) => ({ name })) }]), stderr: '' }
+    }
+    if (args[0] === 'workers') {
+      calls.push(args)
+      return extra.secrets
+        ? { exitCode: 0, stdout: JSON.stringify(extra.secrets.map((name) => ({ name, type: 'secret_text' }))), stderr: '' }
+        : { exitCode: 1, stdout: '', stderr: 'workers.api.error.script_not_found' }
+    }
+    return base(args)
   }
 }
 
@@ -155,5 +185,56 @@ describe('cloudflare:deploy --plan', () => {
         : { exitCode: 1, stdout: '', stderr: 'Invalid `cloudflare.config.ts`' }
 
     await expect(planCloudflareDeploy(options({ cf }))).rejects.toThrow(/cf build.*Invalid `cloudflare\.config\.ts`/s)
+  })
+
+  test('should judge the migrations the database has not applied, on the layout its tracker records', async () => {
+    scaffoldApp(root, { cfBackend: true })
+    installCfTools(root)
+    writeMigration(root, '20261001_init', 'CREATE TABLE posts (id integer primary key);\n')
+    writeMigration(root, '20261002_drop', 'DROP TABLE posts;\n')
+    const calls: string[][] = []
+
+    const plan = await planCloudflareDeploy(options({ cf: fakeCfWith(root, { tracker: ['20261001_init.sql'] }, calls) }))
+
+    expect(calls).toContainEqual(['d1', 'query', DB_ID, '--sql', 'select name from d1_migrations order by id'])
+    expect(plan.migrations).toMatchObject({ layout: 'flat', pending: ['20261002_drop'] })
+    expect(plan.findings.map((finding) => [finding.check, finding.severity])).toEqual([['destructive-migration', 'blocker']])
+    expect(plan.findings[0]?.message).toContain('db/migrations/20261002_drop/migration.sql:1')
+
+    const allowed = await planCloudflareDeploy(options({ cf: fakeCfWith(root, { tracker: ['20261001_init.sql'] }), allowDestructive: true }))
+    expect(allowed.findings.map((finding) => finding.severity)).toEqual(['warning'])
+  })
+
+  // A table the same run creates loses nothing when it is dropped.
+  test('should judge a database to be created against every local migration', async () => {
+    scaffoldApp(root, { cfBackend: true })
+    installCfTools(root)
+    writeMigration(root, '20261001_init', 'CREATE TABLE posts (id integer primary key);\n')
+    writeMigration(root, '20261002_drop', 'DROP TABLE posts;\n')
+    const calls: string[][] = []
+
+    const plan = await planCloudflareDeploy(options({ cf: fakeCf(root, [], calls), provision: true }))
+
+    expect(calls.some((call) => call[1] === 'query')).toBe(false)
+    expect(plan.migrations).toMatchObject({ layout: 'nested', pending: ['20261001_init', '20261002_drop'] })
+    expect(plan.findings).toEqual([])
+  })
+
+  test('should read required variables from config/env.ts and accept them from the deployed worker or a secrets file', async () => {
+    scaffoldApp(root, { cfBackend: true })
+    installCfTools(root)
+    mkdirSync(join(root, 'config'), { recursive: true })
+    writeFileSync(join(root, 'config/env.ts'), ENV_SCHEMA)
+
+    const firstDeploy = await planCloudflareDeploy(options({ cf: fakeCfWith(root, {}) }))
+    expect(firstDeploy.missingSecrets).toEqual(['APP_KEY'])
+    expect(firstDeploy.findings[0]?.check).toBe('secrets')
+
+    writeFileSync(join(root, '.env.production'), 'APP_KEY=base64:never-read\n')
+    const withFile = await planCloudflareDeploy(options({ cf: fakeCfWith(root, {}), secretsFile: '.env.production' }))
+    expect(withFile.missingSecrets).toEqual([])
+
+    const deployed = await planCloudflareDeploy(options({ cf: fakeCfWith(root, { secrets: ['APP_KEY'] }) }))
+    expect(deployed.findings).toEqual([])
   })
 })
