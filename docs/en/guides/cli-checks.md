@@ -7,7 +7,8 @@ The [CLI Reference](./cli.md#inspection-audit-commands) lists `check`, `audit`, 
 The policy rule of `audit` only ever warns. Once the app keeps a policy
 for a model (`app/Policies/<Model>Policy.ts`, what `make:policy` writes,
 paired within one app root), every controller action on a non-safe method
-whose body names that model gets a `policy:<METHOD> <path>` finding. It
+whose body names that model gets a `policy:<METHOD> <path>` finding, and so
+does a GET route to an `edit` action, which shows a record's edit form. It
 passes when the action calls `this.authorize()` or `this.can()`, consults
 the gate, references the policy class, or sits behind
 `authorize()`/`authorizeResource()` middleware. It warns, naming the action,
@@ -17,6 +18,12 @@ those the audit reads. A helper the action calls is not followed, so put
 `// guren-audit-ignore` in a comment above an action whose check lives
 elsewhere: the finding is then reported as ignored, with that comment as its
 reason. An app with no policy gets no such finding.
+
+A related model rule, `owner-fillable:<Model>`, warns when a model lists in
+`fillable` a column that references the users table (the table of a model
+built on `AuthenticatableModel`), such as `authorId`: a request could then
+choose the record's owner. Keep the column out of `fillable` and set it on
+the server with `create(data, { set: { authorId: user.id } })`.
 
 ## Suppressing audit findings
 
@@ -29,7 +36,7 @@ For a finding with a source line, place `// guren-audit-ignore` on the flagged l
 const apiKey = 'example-not-a-real-key'
 ```
 
-Route- and model-level findings (`authz:*`, `policy:*`, `validation:*`, `agent-annotation:*`, `mass-assignment:*`, `hidden-columns:*`) have no single line to attach a comment to: they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead (`policy:*` also honours the marker in a comment above the action, since the action is where its fix goes), keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`. `force-write-request-data:*` and `set-spread:*` name a controller method but carry no line either, so they are ignored the same way:
+Route- and model-level findings (`authz:*`, `policy:*`, `validation:*`, `agent-annotation:*`, `mass-assignment:*`, `owner-fillable:*`, `hidden-columns:*`) have no single line to attach a comment to: they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead (`policy:*` also honours the marker in a comment above the action, since the action is where its fix goes), keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`. `force-write-request-data:*` and `set-spread:*` name a controller method but carry no line either, so they are ignored the same way:
 
 ```ts
 // config/audit.ts
