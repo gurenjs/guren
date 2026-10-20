@@ -481,28 +481,9 @@ describe.skipIf(!cfEnabled)('cf builds and dry-runs the cf-backend worker', () =
       join(root, 'public/assets/.vite/manifest.json'),
       JSON.stringify({ 'resources/js/app.tsx': { file: 'app.js' } }),
     )
-    writeFileSync(
-      join(root, 'cloudflare.config.ts'),
-      [
-        "import { defineConfig } from 'cf/config'",
-        "import { gurenWorker } from '@guren/plugin-cloudflare/config'",
-        '',
-        'export default defineConfig(async () => ({',
-        "  worker: { ...(await gurenWorker({ name: 'cf-backend-probe' })), compatibilityDate: '2026-10-01' },",
-        '}))',
-        '',
-      ].join('\n'),
-    )
-    writeFileSync(
-      join(root, 'wrangler.config.ts'),
-      [
-        "import { defineWranglerConfig } from 'wrangler/experimental-config'",
-        "import { gurenWranglerBundle } from '@guren/plugin-cloudflare/config'",
-        '',
-        'export default defineWranglerConfig(gurenWranglerBundle())',
-        '',
-      ].join('\n'),
-    )
+    // The files cloudflare:init writes, so the templates themselves meet the real cf.
+    const { initCloudflare } = await import('./init')
+    initCloudflare({ rootDir: root, compatibilityDate: '2026-10-01' })
 
     const { buildCloudflareOutput } = await import('./build')
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
@@ -510,7 +491,7 @@ describe.skipIf(!cfEnabled)('cf builds and dry-runs the cf-backend worker', () =
 
   afterAll(() => {
     if (root) rmSync(root, { recursive: true, force: true })
-  })
+  }, 60_000)
 
   test(
     'builds the manifest into a worker cf accepts',

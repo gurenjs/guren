@@ -420,7 +420,13 @@ Workers は、アプリケーションが自分でホストするエージェン
 bun add -d cf wrangler
 ```
 
-アプリのルートに 2 つのファイルを書きます。`gurenWorker()` は、`cloudflare:build` が組み立てたワーカーを返します。中身はエントリ、名前で指定した `DB` バインディング、`--mcp-oauth` のときの `OAUTH_KV`、SQLite を使う Durable Object としての各エージェントです。自分の設定は、同じオブジェクトの中でスプレッドのあとに書きます。
+`bunx guren cloudflare:init` を実行すると、この経路で読む 3 つのファイル（`cloudflare.config.ts`、`wrangler.config.ts`、`config/cloudflare.ts`。中身は下のとおり）を書き出し、`.gitignore` に `.cloudflare/` を加えます。すでに `wrangler.jsonc` があるアプリでは、D1 のデータベース名と `OAUTH_KV` のバインディングを引き継ぐので、最初の `cf` のデプロイも Wrangler のときと同じリソースに結び付きます。既存のファイルは、`--force` を付けない限り上書きしません。`wrangler.jsonc` で Durable Object を使っているアプリには警告を出します。宣言を `migrations` から `exports` に移したときに、デプロイ済みのクラスが保存領域を引き継ぐかはまだ確かめられていないので、先にステージング用のワーカーで試してください。
+
+```bash
+bunx guren cloudflare:init
+```
+
+`gurenWorker()` は、`cloudflare:build` が組み立てたワーカーを返します。中身はエントリ、名前で指定した `DB` バインディング、`--mcp-oauth` のときの `OAUTH_KV`、SQLite を使う Durable Object としての各エージェントです。自分の設定は、同じオブジェクトの中でスプレッドのあとに書きます。
 
 ```typescript
 // cloudflare.config.ts

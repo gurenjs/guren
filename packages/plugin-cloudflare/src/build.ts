@@ -358,7 +358,7 @@ function resolveOption<T>(file: string, key: string, flag: string, fromFile: T |
 }
 
 /** The Worker name, and the D1 database name a fresh binding gets. */
-function workerName(packageName: string | undefined): string {
+export function workerName(packageName: string | undefined): string {
   return (packageName ?? 'guren-app').replace(/^@[^/]+\//, '')
 }
 
@@ -438,7 +438,7 @@ function assertOAuthKvBound(root: string): void {
 }
 
 /** Whether a parsed config binds a KV namespace under the provider's name. */
-function bindsOAuthKv(config: Record<string, unknown>): boolean {
+export function bindsOAuthKv(config: Record<string, unknown>): boolean {
   const namespaces = config.kv_namespaces
   return Array.isArray(namespaces)
     && namespaces.some((entry) => isRecord(entry) && entry.binding === OAUTH_KV_BINDING)
@@ -1625,7 +1625,7 @@ function scaffoldConsentFlow(root: string): void {
  * Callers that must tell those apart check `existsSync` first; the rest treat
  * both as nothing to read.
  */
-function readWranglerConfig(configPath: string): Record<string, unknown> | undefined {
+export function readWranglerConfig(configPath: string): Record<string, unknown> | undefined {
   try {
     return parseJsonc(readFileSync(configPath, 'utf8')) as Record<string, unknown>
   } catch {

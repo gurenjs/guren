@@ -2,6 +2,7 @@ import { defineCommand } from 'citty'
 import { detectCloudflareBackend } from './backend'
 import { buildCloudflareOutput } from './build'
 import { runCloudflareDeploy } from './deploy/deploy'
+import { initCloudflare } from './init'
 import { formatResult } from './deploy/report'
 import { printBundleReport, reportBundleSize } from './bundle-size'
 
@@ -162,7 +163,34 @@ const cloudflareDeploy = defineCommand({
   },
 })
 
+const cloudflareInit = defineCommand({
+  meta: {
+    name: 'cloudflare:init',
+    description:
+      'Move the app onto the cf CLI: write cloudflare.config.ts, wrangler.config.ts and config/cloudflare.ts, carrying over what wrangler.jsonc decided',
+  },
+  args: {
+    root: rootArg,
+    force: {
+      type: 'boolean',
+      description: 'Overwrite those files when they exist',
+    },
+  },
+  run({ args }) {
+    const result = initCloudflare({ rootDir: args.root || process.cwd(), force: Boolean(args.force) })
+    console.log(`Cloudflare init: wrote ${result.written.join(', ')}.`)
+    for (const carried of result.carried) console.log(`  Carried over from wrangler.jsonc: ${carried}.`)
+    for (const warning of result.warnings) console.warn(`  ${warning}`)
+    console.log([
+      'Next:',
+      '  bun add -d cf wrangler@latest      # cf, and the Wrangler 4.136+ it bundles with',
+      '  bunx guren cloudflare:deploy --plan  # needs Node 22.18+ as the node on PATH, and `bunx cf auth login`',
+    ].join('\n'))
+  },
+})
+
 export default {
+  'cloudflare:init': cloudflareInit,
   'cloudflare:build': cloudflareBuild,
   'cloudflare:size': cloudflareSize,
   'cloudflare:deploy': cloudflareDeploy,
