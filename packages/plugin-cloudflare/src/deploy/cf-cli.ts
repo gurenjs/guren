@@ -97,6 +97,51 @@ export function listWorkerSecrets(cf: CfRunner, worker: string): Read<string[]> 
   return secrets ? { ok: true, value: secrets } : { ok: false, reason: 'cf workers secrets list printed no list of named secrets' }
 }
 
+/** `cf d1 create`: the new database's id, read from `uuid`. Unparseable output is a failure, though the database may exist. */
+export function createD1Database(cf: CfRunner, name: string): Read<string> {
+  return createResource(cf, ['d1', 'create', '--name', name], 'cf d1 create', 'uuid')
+}
+
+/** `cf kv namespaces create`: the new namespace's id. */
+export function createKvNamespace(cf: CfRunner, title: string): Read<string> {
+  return createResource(cf, ['kv', 'namespaces', 'create', '--title', title], 'cf kv namespaces create', 'id')
+}
+
+/** The Time Travel bookmark a restore would return the database to. */
+export function getBookmark(cf: CfRunner, databaseId: string): Read<string> {
+  const result = cf(['d1', 'time-travel', 'get-bookmark', databaseId])
+  if (result.exitCode !== 0) return { ok: false, reason: `cf d1 time-travel get-bookmark failed: ${failureText(result)}` }
+  const value = resultObject(parseJson(result.stdout))
+  return typeof value?.bookmark === 'string'
+    ? { ok: true, value: value.bookmark }
+    : { ok: false, reason: 'cf d1 time-travel get-bookmark printed no bookmark' }
+}
+
+export function applyMigrations(cf: CfRunner, databaseId: string, dirArgs: string[]): Read<string> {
+  const result = cf(['d1', 'migrations', 'apply', databaseId, ...dirArgs])
+  return result.exitCode === 0
+    ? { ok: true, value: result.stdout }
+    : { ok: false, reason: `cf d1 migrations apply failed: ${failureText(result)}` }
+}
+
+/** Stage 7: the build already evaluated, and no resource created behind the plan's back (RFC 0035 §4). */
+export function deployPrebuilt(cf: CfRunner, secretsFile: string | undefined): Read<string> {
+  const result = cf(['deploy', '--prebuilt', '--no-provision', ...(secretsFile ? ['--secrets-file', secretsFile] : [])])
+  return result.exitCode === 0
+    ? { ok: true, value: `${result.stdout}${result.stderr}` }
+    : { ok: false, reason: `cf deploy failed: ${failureText(result)}` }
+}
+
+function createResource(cf: CfRunner, args: string[], label: string, idKey: string): Read<string> {
+  const result = cf(args)
+  if (result.exitCode !== 0) return { ok: false, reason: `${label} failed: ${failureText(result)}` }
+  const value = resultObject(parseJson(result.stdout))
+  const id = value?.[idKey]
+  return typeof id === 'string'
+    ? { ok: true, value: id }
+    : { ok: false, reason: `${label} printed no ${idKey}, so the new resource's id is unknown` }
+}
+
 /** `cf build`: evaluates cloudflare.config.ts and writes the build output the plan reads. */
 export function cfBuild(cf: CfRunner): Read<true> {
   const result = cf(['build'])
@@ -133,6 +178,12 @@ function listPages(cf: CfRunner, command: string[], label: string, idKey: string
 function resultArray(value: unknown): unknown[] | undefined {
   if (Array.isArray(value)) return value
   return isRecord(value) && Array.isArray(value.result) ? value.result : undefined
+}
+
+/** A single result as `cf` prints it: the object alone, or the API envelope around it. */
+function resultObject(value: unknown): Record<string, unknown> | undefined {
+  if (isRecord(value) && isRecord(value.result)) return value.result
+  return isRecord(value) ? value : undefined
 }
 
 /** Every entry's string `name`, or nothing when any entry has none. */

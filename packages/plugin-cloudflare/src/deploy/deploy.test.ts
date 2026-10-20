@@ -70,14 +70,6 @@ describe('cloudflare:deploy --plan', () => {
     }
   }
 
-  test('should refuse to run without --plan, before building anything', async () => {
-    scaffoldApp(root, { cfBackend: true })
-    installCfTools(root)
-
-    await expect(planCloudflareDeploy(options({ plan: false }))).rejects.toThrow(/only `--plan`/)
-    expect(existsSync(join(root, '.guren/cloudflare'))).toBe(false)
-  })
-
   test('should refuse an app on the wrangler backend', async () => {
     scaffoldApp(root)
 

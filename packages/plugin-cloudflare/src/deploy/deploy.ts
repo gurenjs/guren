@@ -1,9 +1,11 @@
 /**
- * `guren cloudflare:deploy` (RFC 0035 §1), stages 1 to 3 so far: preflight,
- * assemble, plan. Creating resources, migrating and deploying come later, so the
- * command runs only with `--plan`, which writes nothing to the account.
+ * `guren cloudflare:deploy` (RFC 0035 §1): preflight, assemble and plan, then,
+ * unless `--plan`, create, rebuild, migrate, deploy and report. Nothing is written
+ * to the account before the plan has no blocker and the run is confirmed, and
+ * nothing is ever deleted: a failure reports what this run created instead.
  */
-import { readFileSync, rmSync } from 'node:fs'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createInterface } from 'node:readline/promises'
 import { dirname, join, resolve } from 'node:path'
 import {
   ALLOW_DESTRUCTIVE_ENV,
@@ -14,10 +16,15 @@ import {
 
 import { detectCloudflareBackend, isRecord } from '../backend'
 import { buildCloudflareOutput, readResolvedResources, readWorkerManifest } from '../build'
-import { CF_OUTPUT_DIR } from '../worker-manifest'
+import { CF_OUTPUT_DIR, WORKER_MANIFEST_FILE, type ResolvedResource } from '../worker-manifest'
 import {
+  applyMigrations,
   appCfRunner,
   cfBuild,
+  createD1Database,
+  createKvNamespace,
+  deployPrebuilt,
+  getBookmark,
   checkAuth,
   listD1Databases,
   listKvNamespaces,
@@ -27,8 +34,10 @@ import {
   type Read,
 } from './cf-cli'
 import { decideLayout, migrationDirArgs, readLocalMigrations } from './migrations'
+import { formatPlan } from './report'
 import {
   buildPlan,
+  hasBlocker,
   type DeployPlan,
   type EvaluatedBinding,
   type EvaluatedWorker,
@@ -47,9 +56,12 @@ const EVALUATED_CONFIG = '.cloudflare/output/v0/workers/default/worker.config.js
 
 export interface CloudflareDeployOptions {
   root: string
-  /** Stop after the plan. Required until stages 4 to 8 exist. */
-  plan: boolean
+  /** Stop after the plan, writing nothing to the account. */
+  plan?: boolean
+  /** Proceed without the confirmation prompt; needed by a run with no terminal that is not `--ci`. */
+  yes?: boolean
   ci?: boolean
+  skipMigrations?: boolean
   provision?: boolean
   mcpOAuth?: boolean
   mcpPath?: string
@@ -64,16 +76,23 @@ export interface CloudflareDeployOptions {
   cf?: CfRunner
   nodeVersion?: () => string | undefined
   interactive?: boolean
+  /** Asks once, after the plan is shown and before anything is written. */
+  confirm?: (plan: DeployPlan) => Promise<boolean>
+}
+
+interface Prepared {
+  plan: DeployPlan
+  root: string
+  cf: CfRunner
+  databaseBinding: string | undefined
 }
 
 export async function planCloudflareDeploy(options: CloudflareDeployOptions): Promise<DeployPlan> {
-  const root = resolve(options.root)
-  if (!options.plan) {
-    throw new Error(
-      'Cloudflare deploy: only `--plan` is available in this version. It reports what a deploy would create and bind, and changes nothing; creating resources, migrating and deploying land in a later release.',
-    )
-  }
+  return (await prepare({ ...options, plan: true })).plan
+}
 
+async function prepare(options: CloudflareDeployOptions): Promise<Prepared> {
+  const root = resolve(options.root)
   const cfBin = resolvePackageFile(root, 'cf/package.json')
   const cf = options.cf ?? appCfRunner(root, join(dirname(cfBin ?? join(root, 'node_modules/cf/package.json')), 'bin', 'cf'))
   preflight(root, cf, cfBin, options.nodeVersion ?? nodeOnPathVersion)
@@ -105,16 +124,156 @@ export async function planCloudflareDeploy(options: CloudflareDeployOptions): Pr
     manifest: { resolved: readResolvedResources(join(root, CF_OUTPUT_DIR)) },
     d1: uses('d1') ? listD1Databases(cf) : unlisted,
     kv: uses('kv') ? listKvNamespaces(cf) : unlisted,
-    mayCreate: Boolean(options.provision) || (!options.ci && interactive),
+    mayCreate: Boolean(options.provision) || (!options.ci && (interactive || Boolean(options.yes))),
   }
   // Bindings first: the migrations read the database the plan resolved the build's D1 binding to.
   const databaseBinding = previous.d1?.binding
   const database = buildPlan(context).bindings.find((binding) => binding.binding === databaseBinding)
-  return buildPlan({
+  const plan = buildPlan({
     ...context,
     migrations: database ? readMigrations(root, cf, database, options) : undefined,
     secrets: await readSecrets(root, cf, worker, options.secretsFile),
   })
+  return { plan, root, cf, databaseBinding }
+}
+
+export interface CreatedResource {
+  binding: string
+  type: 'd1' | 'kv'
+  name: string
+  id: string
+}
+
+export interface DeployResult {
+  plan: DeployPlan
+  /** Where the run stopped short of deploying, and why. */
+  stopped?: 'plan' | 'blocked' | 'declined'
+  created: CreatedResource[]
+  migrated?: { applied: string[]; bookmark: string }
+  deployment?: { output: string }
+  url?: string
+  /** A stage after the plan failed. `cleanup` lists commands, never run here. */
+  failure?: { stage: string; message: string; cleanup: string[] }
+}
+
+/** Every stage of RFC 0035 §1. Throws only before stage 4; after it, failures are reported with what to clean up. */
+export async function runCloudflareDeploy(options: CloudflareDeployOptions): Promise<DeployResult> {
+  const prepared = await prepare(options)
+  const { plan } = prepared
+  if (options.plan) return { plan, stopped: 'plan', created: [] }
+  if (hasBlocker(plan)) return { plan, stopped: 'blocked', created: [] }
+
+  const interactive = options.interactive ?? Boolean(process.stdin.isTTY)
+  if (interactive && !options.yes) {
+    if (!(await (options.confirm ?? confirmOnTerminal)(plan))) return { plan, stopped: 'declined', created: [] }
+  } else if (!options.yes && !options.ci) {
+    throw new Error('Cloudflare deploy: no terminal to confirm the plan on. Pass --yes to deploy it, or --ci to deploy without creating anything.')
+  }
+
+  return applyPlan(prepared, options)
+}
+
+async function confirmOnTerminal(plan: DeployPlan): Promise<boolean> {
+  console.error(formatPlan(plan))
+  const prompt = createInterface({ input: process.stdin, output: process.stderr })
+  try {
+    return /^y(es)?$/i.test((await prompt.question('Apply this plan to the account? [y/N] ')).trim())
+  } finally {
+    prompt.close()
+  }
+}
+
+async function applyPlan(prepared: Prepared, options: CloudflareDeployOptions): Promise<DeployResult> {
+  const { plan, root, cf, databaseBinding } = prepared
+  const result: DeployResult = { plan, created: [] }
+  const fail = (stage: string, message: string, bookmark?: { id: string; value: string }): DeployResult => ({
+    ...result,
+    failure: { stage, message, cleanup: cleanupCommands(result.created, bookmark) },
+  })
+
+  // Stage 4: create what is missing, then settle every binding's identity in the manifest.
+  const resolved: Record<string, ResolvedResource> = {}
+  for (const binding of plan.bindings) {
+    let id = binding.id
+    if (binding.action === 'create') {
+      const created = binding.type === 'd1' ? createD1Database(cf, binding.name) : createKvNamespace(cf, binding.name)
+      if (!created.ok) {
+        return fail('provision', `${created.reason}. If the resource was created anyway, the next plan finds it by name and adopts it.`)
+      }
+      id = created.value
+      result.created.push({ binding: binding.binding, type: binding.type, name: binding.name, id })
+    }
+    if (id) resolved[binding.binding] = binding.type === 'd1' ? { id, name: binding.name } : { id }
+  }
+  const outDir = join(root, CF_OUTPUT_DIR)
+  if (!sameResolution(readResolvedResources(outDir), resolved)) {
+    writeResolved(outDir, resolved)
+
+    // Stage 5: gurenWorker() reads the manifest inside `cf build`, so only cf builds again.
+    rmSync(join(root, EVALUATED_CONFIG), { force: true })
+    const rebuilt = cfBuild(cf)
+    if (!rebuilt.ok) return fail('build', `\`cf build\` failed after the resources were settled:\n${rebuilt.reason}`)
+    const drift = boundElsewhere(readEvaluatedWorker(root), resolved)
+    if (drift.length > 0) {
+      return fail('build', `cloudflare.config.ts binds ${drift.join(', ')} to another resource than the plan resolved. Remove the id it sets after the gurenWorker() spread, then plan again.`)
+    }
+  }
+
+  // Stage 6: judged at the plan; applied only if the pending set is still that one.
+  const migrations = plan.migrations
+  const databaseId = databaseBinding ? resolved[databaseBinding]?.id : undefined
+  if (!options.skipMigrations && migrations && migrations.pending.length > 0 && databaseId) {
+    const bookmark = getBookmark(cf, databaseId)
+    if (!bookmark.ok) return fail('migrate', `${bookmark.reason}. No migration was applied without a point to restore to.`)
+    const restore = { id: databaseId, value: bookmark.value }
+    const tracker = readMigrationTracker(cf, databaseId)
+    const now = tracker.ok ? decideLayout(readLocalMigrations(join(root, 'db', 'migrations')), tracker.value) : undefined
+    if (!now?.ok || now.layout !== migrations.layout || now.pending.join('\n') !== migrations.pending.join('\n')) {
+      return fail('migrate', tracker.ok
+        ? 'The pending migrations changed since the plan judged them (another run applied some?). Nothing was applied; plan again.'
+        : `${tracker.reason}. Nothing was applied.`)
+    }
+    const applied = applyMigrations(cf, databaseId, migrations.applyArgs)
+    if (!applied.ok) return fail('migrate', applied.reason, restore)
+    result.migrated = { applied: migrations.pending, bookmark: bookmark.value }
+  }
+
+  // Stage 7.
+  const deployed = deployPrebuilt(cf, options.secretsFile ? resolve(options.secretsFile) : undefined)
+  if (!deployed.ok) {
+    return fail('deploy', deployed.reason, result.migrated && databaseId ? { id: databaseId, value: result.migrated.bookmark } : undefined)
+  }
+  result.deployment = { output: deployed.value }
+  const url = /https:\/\/[^\s"'<>]+\.workers\.dev[^\s"'<>]*/.exec(deployed.value)?.[0]
+  return url ? { ...result, url } : result
+}
+
+function sameResolution(before: Record<string, ResolvedResource>, after: Record<string, ResolvedResource>): boolean {
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)])
+  return [...keys].every((key) => before[key]?.id === after[key]?.id && before[key]?.name === after[key]?.name)
+}
+
+/** Replaces only `resolved`, keeping the rest of what the build wrote. */
+function writeResolved(outDir: string, resolved: Record<string, ResolvedResource>): void {
+  const path = join(outDir, WORKER_MANIFEST_FILE)
+  const manifest = readWorkerManifest(outDir)
+  writeFileSync(path, `${JSON.stringify({ ...manifest, resolved }, null, 2)}\n`)
+}
+
+/** Bindings the rebuilt config points at another id than the plan settled. */
+function boundElsewhere(worker: EvaluatedWorker, resolved: Record<string, ResolvedResource>): string[] {
+  return Object.entries(resolved)
+    .filter(([binding, resource]) => worker.env[binding]?.id !== resource.id)
+    .map(([binding]) => binding)
+}
+
+function cleanupCommands(created: CreatedResource[], bookmark: { id: string; value: string } | undefined): string[] {
+  return [
+    ...(bookmark ? [`bunx cf d1 time-travel restore ${bookmark.id} --bookmark ${bookmark.value}`] : []),
+    ...created.map((resource) => resource.type === 'd1'
+      ? `bunx cf d1 delete ${resource.id}`
+      : `bunx cf kv namespaces delete ${resource.id}`),
+  ]
 }
 
 function readMigrations(
