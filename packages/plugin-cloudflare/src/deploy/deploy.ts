@@ -13,7 +13,7 @@ import {
 } from '@guren/core/internal/deploy-plan'
 
 import { detectCloudflareBackend, isRecord } from '../backend'
-import { buildCloudflareOutput, readWorkerManifest } from '../build'
+import { buildCloudflareOutput, readResolvedResources, readWorkerManifest } from '../build'
 import { CF_OUTPUT_DIR } from '../worker-manifest'
 import {
   appCfRunner,
@@ -102,7 +102,7 @@ export async function planCloudflareDeploy(options: CloudflareDeployOptions): Pr
   const previous = readWorkerManifest(join(root, CF_OUTPUT_DIR))
   const context = {
     worker,
-    manifest: { resolved: isRecord(previous.resolved) ? previous.resolved : {} },
+    manifest: { resolved: readResolvedResources(join(root, CF_OUTPUT_DIR)) },
     d1: uses('d1') ? listD1Databases(cf) : unlisted,
     kv: uses('kv') ? listKvNamespaces(cf) : unlisted,
     mayCreate: Boolean(options.provision) || (!options.ci && interactive),
@@ -178,9 +178,7 @@ async function readSecrets(
     }
     const keys = await readEnvFileKeys(content)
     if (typeof keys === 'string') throw new Error(`Cloudflare deploy: --secrets-file could not be read: ${keys}.`)
-    // `KEY=` is unset to the schema's parse, so a blank line provides nothing.
-    const blank = new Set([...content.matchAll(/^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*(?:""|'')?[ \t]*(?:#.*)?$/gmu)].map((match) => match[1]))
-    provided.push(...[...keys].filter((key) => !blank.has(key)))
+    provided.push(...keys)
   }
 
   const required = await readRequiredDeployEnv(root)

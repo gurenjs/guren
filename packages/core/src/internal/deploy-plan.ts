@@ -46,7 +46,7 @@ export type DeployEnvRequirement =
 interface DeployPlanCliApi {
   /** Absent on a @guren/cli older than RFC 0035. */
   requiredDeployEnv?(cwd: string): Promise<DeployEnvRequirement>
-  envFileKeys?(content: string): Set<string>
+  assignedEnvKeys?(content: string): Set<string>
 }
 
 let cliLoad: Promise<DeployPlanCliApi | string> | undefined
@@ -74,10 +74,10 @@ export async function readRequiredDeployEnv(root: string): Promise<DeployEnvRequ
   }
 }
 
-/** The keys a dotenv file assigns, read the way Bun reads it; never the values. */
+/** The keys a dotenv file assigns a non-blank value to, read the way Bun reads it; the values are never kept. */
 export async function readEnvFileKeys(content: string): Promise<Set<string> | string> {
   const cli = await loadCli()
   if (typeof cli === 'string') return cli
-  if (typeof cli.envFileKeys !== 'function') return 'the installed @guren/cli predates envFileKeys; upgrade it'
-  return cli.envFileKeys(content)
+  if (typeof cli.assignedEnvKeys !== 'function') return 'the installed @guren/cli predates assignedEnvKeys; upgrade it'
+  return cli.assignedEnvKeys(content)
 }

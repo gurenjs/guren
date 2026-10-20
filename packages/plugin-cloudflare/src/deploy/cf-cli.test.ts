@@ -52,8 +52,9 @@ describe('cf CLI wrappers', () => {
     expect(listD1Databases(cf)).toEqual({ ok: false, reason: 'cf d1 list failed: Authentication error [code: 10000]' })
   })
 
-  test('should report output that is not a JSON array as unreadable', () => {
-    expect(listKvNamespaces(scripted([{ exitCode: 0, stdout: '{"result":[]}', stderr: '' }])).ok).toBe(false)
+  test('should accept the API envelope, and report output that is no JSON list as unreadable', () => {
+    expect(listKvNamespaces(scripted([{ exitCode: 0, stdout: '{"result":[]}', stderr: '' }])).ok).toBe(true)
+    expect(listKvNamespaces(scripted([{ exitCode: 0, stdout: '{"errors":[]}', stderr: '' }])).ok).toBe(false)
     expect(listKvNamespaces(scripted([{ exitCode: 0, stdout: 'Listing namespaces...', stderr: '' }])).ok).toBe(false)
   })
 

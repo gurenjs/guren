@@ -81,11 +81,10 @@ export function readMigrationTracker(cf: CfRunner, databaseId: string): Read<str
   }
   // The API answers `[{ results: [...], success, meta }]`, with or without the envelope around it.
   const statements = resultArray(parseJson(result.stdout))
-  const rows = statements?.[0] !== undefined && isRecord(statements[0]) ? statements[0].results : undefined
-  if (!Array.isArray(rows) || rows.some((row) => !isRecord(row) || typeof row.name !== 'string')) {
-    return { ok: false, reason: 'cf d1 query printed no `results` rows with a `name` for the migrations table' }
-  }
-  return { ok: true, value: rows.map((row) => (row as { name: string }).name) }
+  const rows = names(statements?.[0] !== undefined && isRecord(statements[0]) ? statements[0].results : undefined)
+  return rows
+    ? { ok: true, value: rows }
+    : { ok: false, reason: 'cf d1 query printed no `results` rows with a `name` for the migrations table' }
 }
 
 /** The secret names a deployed Worker has. Fails on a Worker that does not exist yet, too. */
@@ -94,11 +93,8 @@ export function listWorkerSecrets(cf: CfRunner, worker: string): Read<string[]> 
   if (result.exitCode !== 0) {
     return { ok: false, reason: `cf workers secrets list failed: ${failureText(result)}` }
   }
-  const entries = resultArray(parseJson(result.stdout))
-  if (!entries || entries.some((entry) => !isRecord(entry) || typeof entry.name !== 'string')) {
-    return { ok: false, reason: 'cf workers secrets list printed no list of named secrets' }
-  }
-  return { ok: true, value: entries.map((entry) => (entry as { name: string }).name) }
+  const secrets = names(resultArray(parseJson(result.stdout)))
+  return secrets ? { ok: true, value: secrets } : { ok: false, reason: 'cf workers secrets list printed no list of named secrets' }
 }
 
 /** `cf build`: evaluates cloudflare.config.ts and writes the build output the plan reads. */
@@ -114,9 +110,9 @@ function listPages(cf: CfRunner, command: string[], label: string, idKey: string
     if (result.exitCode !== 0) {
       return { ok: false, reason: `${label} failed: ${failureText(result)}` }
     }
-    const entries = parseJsonArray(result.stdout)
+    const entries = resultArray(parseJson(result.stdout))
     if (!entries) {
-      return { ok: false, reason: `${label} printed something other than a JSON array` }
+      return { ok: false, reason: `${label} printed no JSON list` }
     }
     for (const entry of entries) {
       const id: unknown = isRecord(entry) ? entry[idKey] : undefined
@@ -139,9 +135,11 @@ function resultArray(value: unknown): unknown[] | undefined {
   return isRecord(value) && Array.isArray(value.result) ? value.result : undefined
 }
 
-function parseJsonArray(text: string): unknown[] | undefined {
-  const value = parseJson(text)
-  return Array.isArray(value) ? value : undefined
+/** Every entry's string `name`, or nothing when any entry has none. */
+function names(entries: unknown): string[] | undefined {
+  if (!Array.isArray(entries)) return undefined
+  const read = entries.map((entry) => (isRecord(entry) && typeof entry.name === 'string' ? entry.name : undefined))
+  return read.every((name) => name !== undefined) ? (read as string[]) : undefined
 }
 
 function parseJson(text: string): unknown {

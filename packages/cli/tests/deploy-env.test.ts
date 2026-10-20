@@ -54,3 +54,13 @@ describe('requiredDeployEnv', () => {
     expect((await requiredDeployEnv(workspace.dir)).status).toBe('unreadable')
   })
 })
+
+describe('assignedEnvKeys', () => {
+  test('should leave out a key whose value is blank, as the schema reads it', async () => {
+    const { assignedEnvKeys, envFileKeys } = await import('../src/plugin-manifest')
+    const content = 'APP_KEY=\nAPP_URL=https://example.com\nEMPTY=""\nNOTE= # later\nexport TOKEN=abc\n'
+
+    expect([...assignedEnvKeys(content)]).toEqual(['APP_URL', 'TOKEN'])
+    expect([...envFileKeys(content)]).toEqual(['APP_KEY', 'APP_URL', 'EMPTY', 'NOTE', 'TOKEN'])
+  })
+})
