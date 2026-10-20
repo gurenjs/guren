@@ -7,7 +7,10 @@ The [CLI Reference](./cli.md#inspection-audit-commands) lists `check`, `audit`, 
 The policy rule of `audit` only ever warns. Once the app keeps a policy
 for a model (`app/Policies/<Model>Policy.ts`, what `make:policy` writes,
 paired within one app root), every controller action on a non-safe method
-whose body names that model gets a `policy:<METHOD> <path>` finding, and so
+whose body writes that model (`create`, `update`, `delete` and their `force`
+forms, `restore`, directly or down a query chain) gets a
+`policy:<METHOD> <path>` finding; a model the action only reads, such as the
+post a comment belongs to, is not judged. So
 does a GET route to an action named `edit`, which shows a record's edit form (one
 whose only literal check is a read ability such as `view` warns too). It
 passes when the action calls `this.authorize()` or `this.can()`, consults

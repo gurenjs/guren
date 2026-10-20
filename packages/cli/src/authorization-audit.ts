@@ -195,12 +195,16 @@ export async function auditAuthorization(
       patterns = await modelPatterns(cwd, controllerFile, bindings, cache)
       patternsByFile.set(controllerFile, patterns)
     }
-    const touched = bindings.filter((binding) => patterns!.get(binding)!.some((pattern) => pattern.test(info.body)))
+    // An edit form only reads its record; any other action is judged on the models it writes,
+    // not on a parent it loads (a comment's post), which its own policy does not govern.
+    const named = bindings.filter((binding) => patterns!.get(binding)!.some((pattern) => pattern.test(info.body)))
+    const touched = editForm ? named : named.filter((binding) => writesModel(info.body, patterns!.get(binding)!))
     if (touched.length === 0) {
       push(
         'pass',
-        `${controllerKey} names no model the app keeps a policy for; a write through a service or a `
-        + 'relationship is not judged.',
+        named.length === 0
+          ? `${controllerKey} names no model the app keeps a policy for; a write through a service or a relationship is not judged.`
+          : `${controllerKey} only reads ${describeBindings(named)}; a write through a service, a relationship or a record variable is not judged.`,
       )
       continue
     }
@@ -248,3 +252,23 @@ function readOnlyAbility(body: string, rawBody: string): string | undefined {
   if (abilities.length === 0 || abilities.some((ability) => EDIT_ABILITIES.has(ability))) return undefined
   return abilities[0]
 }
+
+/** The model class's write methods (`column-consumers.ts` STATIC_ARGUMENTS / BUILDER_ARGUMENTS). */
+const MODEL_WRITE_CALL = /\.\s*(?:create|forceCreate|update|forceUpdate|delete|forceDelete|restore)\s*\(/
+
+/**
+ * Whether a blanked action body writes the model a reference pattern names: a statement that
+ * names it and calls a write method after it, directly (`Post.update(`) or down a builder chain
+ * (`Post.where(...)` then `.delete()`, continuation lines joined). A write through a variable
+ * holding a record or a builder is not seen.
+ */
+function writesModel(body: string, references: RegExp[]): boolean {
+  for (const statement of body.replace(/\n\s*(?=\.)/g, '').split(/[;\n]/)) {
+    for (const reference of references) {
+      const at = statement.search(reference)
+      if (at !== -1 && MODEL_WRITE_CALL.test(statement.slice(at))) return true
+    }
+  }
+  return false
+}
+

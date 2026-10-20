@@ -421,6 +421,30 @@ export function registerBillingRoutes(router: any) {
   })
 })
 
+describe('policy authorization judges the models an action writes', () => {
+  it('passes an action that only reads the policed model to write another one', async () => {
+    const report = await withWorkspace(app({
+      'app/Http/Controllers/PostController.ts': controller(`    const post = await Post.findOrFail(1)
+    await Comment.create({ postId: post.id, body: 'x' })
+    return this.redirect('/posts')`),
+    }))
+
+    const finding = report.findings.find((f) => f.key === KEY)
+    expect(finding?.status).toBe('pass')
+    expect(finding?.message).toContain('only reads Post (PostPolicy)')
+  })
+
+  it('warns on a write down a builder chain split over lines', async () => {
+    const report = await withWorkspace(app({
+      'app/Http/Controllers/PostController.ts': controller(`    await Post.where({ id: 1 })
+      .delete()
+    return this.redirect('/posts')`),
+    }))
+
+    expect(report.findings.find((f) => f.key === KEY)?.status).toBe('warn')
+  })
+})
+
 describe("policy authorization on a record's edit form", () => {
   const editRoutes = `
 import { Router } from '@guren/core'
