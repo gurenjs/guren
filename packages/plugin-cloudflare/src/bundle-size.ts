@@ -196,10 +196,11 @@ export interface ReportBundleSizeOptions {
 }
 
 /** The size report runs wrangler's dry run on wrangler.jsonc, which an app on the cf backend does not deploy. */
-export function assertSizeReportable(root: string): void {
-  if (detectCloudflareBackend(root) === 'cf') {
+export function assertSizeReportable(root: string, requestedBy = 'Cloudflare size'): void {
+  const app = resolve(root)
+  if (detectCloudflareBackend(app) === 'cf') {
     throw new Error(
-      `Cloudflare size: measures the bundle wrangler.jsonc deploys, and ${root} deploys through cf (cloudflare.config.ts). Run \`cf build\` and read the size of .cloudflare/output/v0/workers/default/bundle/ instead.`,
+      `${requestedBy}: the size report measures the bundle wrangler.jsonc deploys, and ${app} deploys through cf (cloudflare.config.ts). Drop it; \`cf build\` writes the bundle to .cloudflare/output/v0/workers/default/bundle/.`,
     )
   }
 }

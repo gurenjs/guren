@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { detectCloudflareBackend } from './backend'
 import { buildCloudflareOutput } from './build'
-import { reportBundleSize } from './bundle-size'
+import { assertSizeReportable, reportBundleSize } from './bundle-size'
 import type { WorkerManifest } from './worker-manifest'
 
 import { captureWarnings, scaffoldApp, writeAgentModule, writeAgentsConfig, writeJson } from '../tests/app-fixture'
@@ -206,6 +206,13 @@ describe('cloudflare:build on the cf backend (RFC 0035)', () => {
     const warnings = await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
 
     expect(warnings).toContain('is read only on the cf backend')
+  })
+
+  test('should name the --report-size flag when cloudflare:build is asked for a size it cannot measure', () => {
+    scaffoldApp(root, { cfBackend: true })
+
+    expect(() => assertSizeReportable(root, 'Cloudflare build --report-size')).toThrow(/^Cloudflare build --report-size: .*Drop it/)
+    expect(() => assertSizeReportable(join(root, '.'))).toThrow(root)
   })
 
   test('should refuse cloudflare:size, which measures through wrangler.jsonc', () => {

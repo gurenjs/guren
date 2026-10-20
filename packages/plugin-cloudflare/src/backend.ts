@@ -44,13 +44,18 @@ export function readPackageJson(root: string): PackageJsonLike {
     return {}
   }
   if (!isRecord(manifest)) return {}
-  const record = (value: unknown) => (isRecord(value) ? (value as Record<string, string>) : undefined)
   return {
-    ...(typeof manifest.name === 'string' ? { name: manifest.name } : {}),
-    scripts: record(manifest.scripts),
-    dependencies: record(manifest.dependencies),
-    devDependencies: record(manifest.devDependencies),
+    name: typeof manifest.name === 'string' ? manifest.name : undefined,
+    scripts: stringRecord(manifest.scripts),
+    dependencies: stringRecord(manifest.dependencies),
+    devDependencies: stringRecord(manifest.devDependencies),
   }
+}
+
+/** The string-valued entries of an object field; anything else reads as absent. */
+function stringRecord(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value)) return undefined
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {

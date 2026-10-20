@@ -444,7 +444,7 @@ export function bindsOAuthKv(config: Record<string, unknown>): boolean {
  * The binding entry, spelled once — the scaffold writes it, the guard quotes it.
  * No `id`: an id-less binding is what wrangler's own provisioning creates at deploy.
  */
-const OAUTH_KV_NAMESPACE = { binding: OAUTH_KV_BINDING }
+const OAUTH_KV_NAMESPACE = Object.freeze({ binding: OAUTH_KV_BINDING })
 
 /**
  * Whether the app declares `name` under `dependencies` (devDependencies do not

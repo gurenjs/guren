@@ -54,7 +54,7 @@ const cloudflareBuild = defineCommand({
   async run({ args }) {
     const rootDir = args.root || process.cwd()
     // Before the build, so a flag that cannot be honoured does not end a good build with an error.
-    if (args['report-size']) assertSizeReportable(rootDir)
+    if (args['report-size']) assertSizeReportable(rootDir, 'Cloudflare build --report-size')
     await buildCloudflareOutput({
       rootDir,
       skipAppBuild: Boolean(args['skip-app-build']),
