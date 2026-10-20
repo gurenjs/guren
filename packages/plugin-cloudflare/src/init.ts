@@ -9,7 +9,18 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, resolve } from 'node:path'
 
 import { isRecord } from './backend'
-import { readPackageJson, readWranglerConfig, workerName } from './build'
+import {
+  OAUTH_KV_BINDING,
+  asArray,
+  configScopes,
+  isPlaceholderId,
+  readPackageJson,
+  readWranglerConfig,
+  workerName,
+} from './build'
+
+/** The build's D1 binding (`WorkerManifest.d1.binding`). */
+const DATABASE_BINDING = 'DB'
 
 export interface InitCloudflareOptions {
   rootDir: string
@@ -48,15 +59,15 @@ export function initCloudflare(options: InitCloudflareOptions): InitCloudflareRe
   const wrangler = readWranglerConfig(resolve(root, 'wrangler.jsonc'))
   const defaultName = workerName(readPackageJson(root).name)
   const worker = typeof wrangler?.name === 'string' ? wrangler.name : defaultName
-  const databaseName = wrangler ? bindingEntry(wrangler.d1_databases, 'DB')?.database_name : undefined
-  const oauthKv = wrangler ? bindingEntry(wrangler.kv_namespaces, 'OAUTH_KV') : undefined
+  const databaseName = wrangler ? bindingEntry(wrangler.d1_databases, DATABASE_BINDING)?.database_name : undefined
+  const oauthKv = wrangler ? bindingEntry(wrangler.kv_namespaces, OAUTH_KV_BINDING) : undefined
   const carried: Carried = {
     worker,
     compatibilityDate: options.compatibilityDate
       ?? (typeof wrangler?.compatibility_date === 'string' ? wrangler.compatibility_date : new Date().toISOString().slice(0, 10)),
     ...(typeof databaseName === 'string' && databaseName !== worker ? { databaseName } : {}),
     // A placeholder id from an older scaffold is not carried; the plan resolves the namespace by name instead.
-    ...(typeof oauthKv?.id === 'string' && /^[0-9a-f]{32}$/i.test(oauthKv.id) ? { oauthKvId: oauthKv.id } : {}),
+    ...(typeof oauthKv?.id === 'string' && !isPlaceholderId(oauthKv.id) ? { oauthKvId: oauthKv.id } : {}),
   }
 
   const contents: Record<(typeof FILES)[number], string> = {
@@ -87,9 +98,7 @@ export function initCloudflare(options: InitCloudflareOptions): InitCloudflareRe
 }
 
 function bindingEntry(entries: unknown, binding: string): Record<string, unknown> | undefined {
-  return Array.isArray(entries)
-    ? entries.find((entry): entry is Record<string, unknown> => isRecord(entry) && entry.binding === binding)
-    : undefined
+  return asArray(entries).find((entry): entry is Record<string, unknown> => isRecord(entry) && entry.binding === binding)
 }
 
 function describeCarried(carried: Carried, mcpOAuth: boolean): string[] {
@@ -104,12 +113,12 @@ function describeCarried(carried: Carried, mcpOAuth: boolean): string[] {
 function leftBehind(wrangler: Record<string, unknown>): string[] {
   const warnings: string[] = []
   const keys = Object.keys(wrangler).filter((key) => !HANDLED_KEYS.has(key))
-  const flags = Array.isArray(wrangler.compatibility_flags) ? wrangler.compatibility_flags.filter((flag) => flag !== 'nodejs_compat') : []
+  const flags = asArray(wrangler.compatibility_flags).filter((flag) => flag !== 'nodejs_compat')
   const vars = isRecord(wrangler.vars) ? Object.keys(wrangler.vars).filter((key) => key !== 'NODE_ENV') : []
-  const extraBindings = [
-    ...(Array.isArray(wrangler.d1_databases) ? wrangler.d1_databases : []),
-    ...(Array.isArray(wrangler.kv_namespaces) ? wrangler.kv_namespaces : []),
-  ].filter((entry) => isRecord(entry) && entry.binding !== 'DB' && entry.binding !== 'OAUTH_KV').map((entry) => String((entry as { binding?: unknown }).binding))
+  const extraBindings = [...asArray(wrangler.d1_databases), ...asArray(wrangler.kv_namespaces)]
+    .filter(isRecord)
+    .filter((entry) => entry.binding !== DATABASE_BINDING && entry.binding !== OAUTH_KV_BINDING)
+    .map((entry) => String(entry.binding))
   const notCarried = [
     ...keys,
     ...flags.map((flag) => `compatibility_flags ${String(flag)}`),
@@ -126,10 +135,9 @@ function leftBehind(wrangler: Record<string, unknown>): string[] {
 }
 
 function declaresDurableObjects(wrangler: Record<string, unknown>): boolean {
-  const scopes = [wrangler, ...(isRecord(wrangler.env) ? Object.values(wrangler.env).filter(isRecord) : [])]
-  return scopes.some((scope) => {
-    const bindings = isRecord(scope.durable_objects) ? scope.durable_objects.bindings : undefined
-    return (Array.isArray(bindings) && bindings.length > 0) || (Array.isArray(scope.migrations) && scope.migrations.length > 0)
+  return configScopes(wrangler).some(({ config }) => {
+    const bindings = isRecord(config.durable_objects) ? config.durable_objects.bindings : undefined
+    return asArray(bindings).length > 0 || asArray(config.migrations).length > 0
   })
 }
 

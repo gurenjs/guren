@@ -372,7 +372,7 @@ const OAUTH_PROVIDER_PACKAGE = '@cloudflare/workers-oauth-provider'
 const MCP_OAUTH_SEAM_SPECIFIER = '@guren/plugin-mcp/oauth'
 
 /** The KV binding name `OAuthProvider` requires, fixed by the provider. */
-const OAUTH_KV_BINDING = 'OAUTH_KV'
+export const OAUTH_KV_BINDING = 'OAUTH_KV'
 
 /** The bindings a resource name can be given for: the build's D1 database and its KV namespace. */
 const NAMEABLE_BINDINGS = new Set(['DB', OAUTH_KV_BINDING])
@@ -694,7 +694,7 @@ interface ConfigScope {
   config: Record<string, unknown>
 }
 
-function configScopes(config: Record<string, unknown>): ConfigScope[] {
+export function configScopes(config: Record<string, unknown>): ConfigScope[] {
   const scopes: ConfigScope[] = [{ label: '', config }]
   if (isRecord(config.env)) {
     for (const [name, environment] of Object.entries(config.env)) {
@@ -736,9 +736,13 @@ function warnPlaceholderIds(root: string): void {
 function placeholderKeys(scope: ConfigScope, key: string, idKey: string): string[] {
   return asArray(scope.config[key]).flatMap((entry, index) => {
     const id = isRecord(entry) ? entry[idKey] : undefined
-    const placeholder = typeof id === 'string' && (!/^[0-9a-f-]+$/i.test(id) || /^[0-]*$/.test(id))
-    return placeholder ? [`${key}[${index}].${idKey}${scope.label}`] : []
+    return typeof id === 'string' && isPlaceholderId(id) ? [`${key}[${index}].${idKey}${scope.label}`] : []
   })
+}
+
+/** D1 ids are UUIDs and KV ids 32 hex digits, so anything but hex and hyphens, or all zeros, stands in for one. */
+export function isPlaceholderId(id: string): boolean {
+  return !/^[0-9a-f-]+$/i.test(id) || /^[0-]*$/.test(id)
 }
 
 /**
@@ -874,7 +878,7 @@ function sqliteBackedClasses(config: Record<string, unknown>): Set<string> {
   return classes
 }
 
-function asArray(value: unknown): unknown[] {
+export function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : []
 }
 
