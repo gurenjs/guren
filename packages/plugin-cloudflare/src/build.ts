@@ -150,7 +150,8 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   // Same placement as the checks above: an in-memory session store on Workers
   // drops every login after deploy, and the warning belongs where the
   // developer is still reading (RFC 0020 Part 0).
-  await reportDeployRuntimeHazards({ root, label: 'Cloudflare build' })
+  // As workerd runs it: the config's isWorkersRuntime() branch, not the one `bun run dev` takes.
+  await reportDeployRuntimeHazards({ root, label: 'Cloudflare build', target: 'cloudflare' })
   const schedule = backend === 'cf' ? await cronTriggers(root) : { crons: [] }
   warnDatabaseWithoutD1(root)
 

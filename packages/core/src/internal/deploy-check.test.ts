@@ -77,6 +77,23 @@ describe('reportDeployRuntimeHazards', () => {
     expect(lines[1]).toContain('unverified: introspection failed with no-entry')
   })
 
+  test('should name the platform branch the verdicts were read from', async () => {
+    writeIntrospectableApp(root, SESSION_APP)
+
+    const logged: string[] = []
+    const log = console.log
+    console.log = (message: string) => logged.push(message)
+    try {
+      await captureWarnings(async () => {
+        await reportDeployRuntimeHazards({ root, label: 'Cloudflare build', target: 'cloudflare' })
+      })
+    } finally {
+      console.log = log
+    }
+
+    expect(logged.join('\n')).toContain('Deploy Runtime Stores from the introspected app as Cloudflare Workers runs it')
+  })
+
   test('should print nothing for an app with no deploy target', async () => {
     writeApp(root, {})
 

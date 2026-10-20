@@ -15,7 +15,7 @@ import {
 import { parseSourceFile } from './parse-cache'
 import { readDeclaredDependencyNames } from './plugin-manifest'
 import type { CheckEvidence } from './check-result'
-import { checkIntrospection, type Introspection } from './introspect'
+import { checkIntrospection, INTROSPECT_TARGET_ENV, type Introspection } from './introspect'
 // The runtime warning in the session middleware names the target by the same label.
 import { SERVERLESS_RUNTIME_LABELS } from '@guren/server'
 import type { AppManifest, AuthProviderEntry, DriverMapEntry, SessionEntry } from '@guren/server'
@@ -179,6 +179,11 @@ export interface DeployRuntimeOptions {
    * `checkDeployRuntime()` introspects unless this is `false`, `readDeployRuntime()` only when given it.
    */
   introspect?: (() => Promise<Introspection>) | false
+  /**
+   * Introspect the app as that platform runs it (RFC 0035 §2.1). Passed by the deploy
+   * plugin whose `env` subpath honours it, so `doctor` and `check` keep the dev branch.
+   */
+  target?: 'cloudflare'
 }
 
 export { DEPLOY_SCAN_DIRS }
@@ -686,6 +691,8 @@ export interface DeployRuntimeVerdict {
   evidence: CheckEvidence
   /** Why the introspected app could not vouch for an `-unverified` verdict. */
   evidenceReason?: string
+  /** On a `manifest` verdict: the platform branch the app was introspected as (`DeployRuntimeOptions.target`). */
+  introspectedAs?: 'cloudflare'
 }
 
 function verdict(
@@ -1044,6 +1051,11 @@ export async function checkDeployRuntime(
   cwd: string,
   options: DeployRuntimeOptions = {},
 ): Promise<DeployRuntimeVerdict[]> {
-  const analysis = await readDeployRuntime(cwd, { introspect: options.introspect ?? checkIntrospection(cwd, { fresh: true }) })
-  return analysis.targets.length === 0 ? [] : judgeDeployVerdicts(analysis)
+  const env = options.target ? { [INTROSPECT_TARGET_ENV]: options.target } : undefined
+  const analysis = await readDeployRuntime(cwd, { introspect: options.introspect ?? checkIntrospection(cwd, { fresh: true, ...(env ? { env } : {}) }) })
+  if (analysis.targets.length === 0) return []
+  const verdicts = judgeDeployVerdicts(analysis)
+  return options.target
+    ? verdicts.map((entry) => (entry.evidence === 'manifest' ? { ...entry, introspectedAs: options.target } : entry))
+    : verdicts
 }
