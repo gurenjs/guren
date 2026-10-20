@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { installCfTools, scaffoldApp, writeJson } from '../../tests/app-fixture'
+import { installCfTools, scaffoldApp, writeJson, writeMigration } from '../../tests/app-fixture'
 import type { CfResult } from './cf-cli'
 import { runCloudflareDeploy, type CloudflareDeployOptions } from './deploy'
 
@@ -70,11 +70,6 @@ function fakeCf(root: string, account: FakeAccount, calls: string[][]) {
     }
     return { exitCode: 1, stdout: '', stderr: `unexpected: ${args.join(' ')}` }
   }
-}
-
-function writeMigration(root: string, folder: string, sql: string): void {
-  mkdirSync(join(root, 'db/migrations', folder), { recursive: true })
-  writeFileSync(join(root, 'db/migrations', folder, 'migration.sql'), sql)
 }
 
 /** The write-side commands, in the order they ran. */

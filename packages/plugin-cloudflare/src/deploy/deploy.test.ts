@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { installCfTools, scaffoldApp, writeJson } from '../../tests/app-fixture'
+import { installCfTools, scaffoldApp, writeJson, writeMigration } from '../../tests/app-fixture'
 import type { CfResult } from './cf-cli'
 import { planCloudflareDeploy, type CloudflareDeployOptions } from './deploy'
 
@@ -41,11 +41,6 @@ const ENV_SCHEMA = `export default {
   parse: () => ({ values: {}, unset: new Set(['APP_KEY']) }),
 }
 `
-
-function writeMigration(root: string, folder: string, sql: string): void {
-  mkdirSync(join(root, 'db/migrations', folder), { recursive: true })
-  writeFileSync(join(root, 'db/migrations', folder, 'migration.sql'), sql)
-}
 
 describe('cloudflare:deploy --plan', () => {
   let root: string

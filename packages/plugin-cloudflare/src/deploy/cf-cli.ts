@@ -99,22 +99,17 @@ export function listWorkerSecrets(cf: CfRunner, worker: string): Read<string[]> 
 
 /** `cf d1 create`: the new database's id, read from `uuid`. Unparseable output is a failure, though the database may exist. */
 export function createD1Database(cf: CfRunner, name: string): Read<string> {
-  return createResource(cf, ['d1', 'create', '--name', name], 'cf d1 create', 'uuid')
+  return readField(cf, ['d1', 'create', '--name', name], 'cf d1 create', 'uuid')
 }
 
 /** `cf kv namespaces create`: the new namespace's id. */
 export function createKvNamespace(cf: CfRunner, title: string): Read<string> {
-  return createResource(cf, ['kv', 'namespaces', 'create', '--title', title], 'cf kv namespaces create', 'id')
+  return readField(cf, ['kv', 'namespaces', 'create', '--title', title], 'cf kv namespaces create', 'id')
 }
 
 /** The Time Travel bookmark a restore would return the database to. */
 export function getBookmark(cf: CfRunner, databaseId: string): Read<string> {
-  const result = cf(['d1', 'time-travel', 'get-bookmark', databaseId])
-  if (result.exitCode !== 0) return { ok: false, reason: `cf d1 time-travel get-bookmark failed: ${failureText(result)}` }
-  const value = resultObject(parseJson(result.stdout))
-  return typeof value?.bookmark === 'string'
-    ? { ok: true, value: value.bookmark }
-    : { ok: false, reason: 'cf d1 time-travel get-bookmark printed no bookmark' }
+  return readField(cf, ['d1', 'time-travel', 'get-bookmark', databaseId], 'cf d1 time-travel get-bookmark', 'bookmark')
 }
 
 export function applyMigrations(cf: CfRunner, databaseId: string, dirArgs: string[]): Read<string> {
@@ -132,14 +127,12 @@ export function deployPrebuilt(cf: CfRunner, secretsFile: string | undefined): R
     : { ok: false, reason: `cf deploy failed: ${failureText(result)}` }
 }
 
-function createResource(cf: CfRunner, args: string[], label: string, idKey: string): Read<string> {
+/** One string field of a single result `cf` prints. */
+function readField(cf: CfRunner, args: string[], label: string, key: string): Read<string> {
   const result = cf(args)
   if (result.exitCode !== 0) return { ok: false, reason: `${label} failed: ${failureText(result)}` }
-  const value = resultObject(parseJson(result.stdout))
-  const id = value?.[idKey]
-  return typeof id === 'string'
-    ? { ok: true, value: id }
-    : { ok: false, reason: `${label} printed no ${idKey}, so the new resource's id is unknown` }
+  const value = resultObject(parseJson(result.stdout))?.[key]
+  return typeof value === 'string' ? { ok: true, value } : { ok: false, reason: `${label} printed no ${key}` }
 }
 
 /** `cf build`: evaluates cloudflare.config.ts and writes the build output the plan reads. */

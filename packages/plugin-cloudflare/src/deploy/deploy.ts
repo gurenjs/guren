@@ -115,7 +115,6 @@ async function prepare(options: CloudflareDeployOptions): Promise<Prepared> {
     throw new Error(`Cloudflare deploy: \`cf build\` failed, so cloudflare.config.ts could not be evaluated:\n${built.reason}`)
   }
 
-  // Whether a person can answer a prompt; piping the output elsewhere does not change it.
   const interactive = options.interactive ?? Boolean(process.stdin.isTTY)
   const worker = readEvaluatedWorker(root)
   const uses = (type: string) => Object.values(worker.env).some((entry) => entry.type === type)
@@ -161,9 +160,11 @@ export interface DeployResult {
 }
 
 /** Every stage of RFC 0035 §1. Throws only before stage 4; after it, failures are reported with what to clean up. */
-export async function runCloudflareDeploy(options: CloudflareDeployOptions): Promise<DeployResult> {
+export async function runCloudflareDeploy(input: CloudflareDeployOptions): Promise<DeployResult> {
+  // Whether a person can answer a prompt, decided once; piping the output elsewhere does not change it.
+  const options = { ...input, interactive: input.interactive ?? Boolean(process.stdin.isTTY) }
   // Refused before anything is built: nobody can answer the prompt this run would need.
-  if (!options.plan && !options.yes && !options.ci && !(options.interactive ?? Boolean(process.stdin.isTTY))) {
+  if (!options.plan && !options.yes && !options.ci && !options.interactive) {
     throw new Error('Cloudflare deploy: no terminal to confirm the plan on. Pass --yes to deploy it, --ci to deploy without creating anything, or --plan to only plan.')
   }
 
@@ -236,29 +237,25 @@ async function applyPlan(prepared: Prepared, options: CloudflareDeployOptions): 
   // Stage 6: judged at the plan; applied only if the pending set is still that one.
   const migrations = plan.migrations
   const databaseId = databaseBinding ? resolved[databaseBinding]?.id : undefined
+  let restore: { id: string; value: string } | undefined
   if (!options.skipMigrations && migrations && migrations.pending.length > 0 && databaseId) {
     const bookmark = getBookmark(cf, databaseId)
     if (!bookmark.ok) return fail('migrate', `${bookmark.reason}. No migration was applied without a point to restore to.`)
-    const restore = { id: databaseId, value: bookmark.value }
-    const tracker = readMigrationTracker(cf, databaseId)
-    const now = tracker.ok ? decideLayout(readLocalMigrations(join(root, 'db', 'migrations')), tracker.value) : undefined
-    const unchanged = now?.ok && now.layout === migrations.layout
-      && now.pending.join('\n') === migrations.pending.join('\n')
-      && fingerprintMigrations(join(root, 'db', 'migrations'), now.pending) === migrations.fingerprint
-    if (!unchanged) {
-      return fail('migrate', tracker.ok
-        ? 'The pending migrations changed since the plan judged them, by another run or an edit. Nothing was applied; plan again.'
-        : `${tracker.reason}. Nothing was applied.`)
+    // Read again the way the plan read it; the fingerprint covers the names, their order and their text.
+    const now = readMigrations(root, cf, { binding: databaseBinding ?? '', type: 'd1', action: 'existing', name: '', id: databaseId }, options)
+    if (now?.status !== 'ready' || now.layout !== migrations.layout || now.fingerprint !== migrations.fingerprint) {
+      return fail('migrate', now?.status === 'unreadable'
+        ? `${now.reason}. Nothing was applied.`
+        : 'The pending migrations changed since the plan judged them, by another run or an edit. Nothing was applied; plan again.')
     }
+    restore = { id: databaseId, value: bookmark.value }
     const applied = applyMigrations(cf, databaseId, migrations.applyArgs)
     if (!applied.ok) return fail('migrate', applied.reason, restore)
     result.migrated = { applied: migrations.pending, bookmark: bookmark.value }
   }
 
   const deployed = deployPrebuilt(cf, options.secretsFile ? resolve(options.secretsFile) : undefined)
-  if (!deployed.ok) {
-    return fail('deploy', deployed.reason, result.migrated && databaseId ? { id: databaseId, value: result.migrated.bookmark } : undefined)
-  }
+  if (!deployed.ok) return fail('deploy', deployed.reason, restore)
   result.deployment = { output: deployed.value }
   const url = /https:\/\/[^\s"'<>]+\.workers\.dev[^\s"'<>]*/.exec(deployed.value)?.[0]
   return url ? { ...result, url } : result
