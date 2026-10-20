@@ -159,13 +159,6 @@ describe('cloudflare:deploy', () => {
     expect(writes(declined)).toEqual(['build'])
   })
 
-  test('should refuse a run with no terminal, no --yes and no --ci before writing', async () => {
-    const calls: string[][] = []
-
-    await expect(run({ d1: [{ uuid: EXISTING_DB, name: 'demo-app' }], tracker: [] }, calls, { yes: false })).rejects.toThrow(/Pass --yes/)
-    expect(writes(calls)).toEqual(['build'])
-  })
-
   test('should stop before migrating when the config binds the database elsewhere', async () => {
     writeMigration(root, '20261001_init', 'CREATE TABLE posts (id integer primary key);\n')
     const calls: string[][] = []
@@ -237,5 +230,58 @@ describe('cloudflare:deploy', () => {
 
     expect(calls).toContainEqual(['deploy', '--prebuilt', '--no-provision', '--secrets-file', join(root, '.env.production')])
     expect(writes(calls)).not.toContain('d1 migrations')
+  })
+
+  // The prompt can wait indefinitely; an edit made meanwhile was never judged.
+  test('should not apply a pending migration whose text changed after the plan', async () => {
+    writeMigration(root, '20261001_init', 'CREATE TABLE posts (id integer primary key);\n')
+    const calls: string[][] = []
+
+    const result = await run({ d1: [{ uuid: EXISTING_DB, name: 'demo-app' }], tracker: [] }, calls, {
+      interactive: true,
+      yes: false,
+      confirm: async () => {
+        writeMigration(root, '20261001_init', 'DROP TABLE users;\n')
+        return true
+      },
+    })
+
+    expect(result.failure?.stage).toBe('migrate')
+    expect(writes(calls)).not.toContain('d1 migrations')
+    expect(result.confirmed).toBe(true)
+  })
+
+  test('should deploy past a migration blocker under --skip-migrations, judging nothing', async () => {
+    writeMigration(root, '20261001_drop', 'DROP TABLE users;\n')
+    const calls: string[][] = []
+
+    const result = await run({ d1: [{ uuid: EXISTING_DB, name: 'demo-app' }], tracker: [] }, calls, { skipMigrations: true })
+
+    expect(result.plan.migrations).toBeUndefined()
+    expect(result.failure).toBeUndefined()
+    // The second build settles the adopted database; no migration command runs.
+    expect(writes(calls)).toEqual(['build', 'build', 'deploy'])
+  })
+
+  test('should refuse a run with nobody to confirm before building anything', async () => {
+    const calls: string[][] = []
+
+    await expect(run({ d1: [], tracker: null }, calls, { yes: false })).rejects.toThrow(/Pass --yes/)
+    expect(calls).toEqual([])
+  })
+
+  test('should keep ids settled for bindings this build does not plan, and not record a configured id', async () => {
+    const path = join(root, '.guren/cloudflare/guren-worker.json')
+    await run({ d1: [{ uuid: EXISTING_DB, name: 'demo-app' }], tracker: [] }, [], { plan: true })
+    const manifest = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+    writeJson(path, { ...manifest, resolved: { OAUTH_KV: { id: '0123456789abcdef0123456789abcdef' } } })
+
+    // The build carries resolved over; the run then settles DB beside it.
+    await run({ d1: [{ uuid: EXISTING_DB, name: 'demo-app' }], tracker: [] }, [])
+
+    expect((JSON.parse(readFileSync(path, 'utf8')) as { resolved: unknown }).resolved).toEqual({
+      OAUTH_KV: { id: '0123456789abcdef0123456789abcdef' },
+      DB: { id: EXISTING_DB, name: 'demo-app' },
+    })
   })
 })

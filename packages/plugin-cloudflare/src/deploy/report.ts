@@ -47,7 +47,7 @@ export function formatPlan(plan: DeployPlan): string {
 
 /** The whole run: the plan, then what was created, migrated and deployed, or where it stopped. */
 export function formatResult(result: DeployResult): string {
-  const lines = [formatPlan(result.plan)]
+  const lines = result.confirmed ? [] : [formatPlan(result.plan)]
   if (result.stopped === 'blocked') lines.push('Nothing was written: resolve the blockers above, then run again.')
   if (result.stopped === 'declined') lines.push('Nothing was written.')
 

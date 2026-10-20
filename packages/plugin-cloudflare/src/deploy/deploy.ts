@@ -33,7 +33,7 @@ import {
   type CfRunner,
   type Read,
 } from './cf-cli'
-import { decideLayout, migrationDirArgs, readLocalMigrations } from './migrations'
+import { decideLayout, fingerprintMigrations, migrationDirArgs, readLocalMigrations } from './migrations'
 import { formatPlan } from './report'
 import {
   buildPlan,
@@ -82,6 +82,8 @@ export interface CloudflareDeployOptions {
 
 interface Prepared {
   plan: DeployPlan
+  /** Whether a person can answer the prompt, decided once for the plan and the run. */
+  interactive: boolean
   root: string
   cf: CfRunner
   databaseBinding: string | undefined
@@ -131,10 +133,10 @@ async function prepare(options: CloudflareDeployOptions): Promise<Prepared> {
   const database = buildPlan(context).bindings.find((binding) => binding.binding === databaseBinding)
   const plan = buildPlan({
     ...context,
-    migrations: database ? readMigrations(root, cf, database, options) : undefined,
+    migrations: database && !options.skipMigrations ? readMigrations(root, cf, database, options) : undefined,
     secrets: await readSecrets(root, cf, worker, options.secretsFile),
   })
-  return { plan, root, cf, databaseBinding }
+  return { plan, interactive, root, cf, databaseBinding }
 }
 
 export interface CreatedResource {
@@ -148,6 +150,8 @@ export interface DeployResult {
   plan: DeployPlan
   /** Where the run stopped short of deploying, and why. */
   stopped?: 'plan' | 'blocked' | 'declined'
+  /** The plan was shown at the prompt, so the report need not repeat it. */
+  confirmed?: true
   created: CreatedResource[]
   migrated?: { applied: string[]; bookmark: string }
   deployment?: { output: string }
@@ -158,18 +162,20 @@ export interface DeployResult {
 
 /** Every stage of RFC 0035 §1. Throws only before stage 4; after it, failures are reported with what to clean up. */
 export async function runCloudflareDeploy(options: CloudflareDeployOptions): Promise<DeployResult> {
+  // Refused before anything is built: nobody can answer the prompt this run would need.
+  if (!options.plan && !options.yes && !options.ci && !(options.interactive ?? Boolean(process.stdin.isTTY))) {
+    throw new Error('Cloudflare deploy: no terminal to confirm the plan on. Pass --yes to deploy it, --ci to deploy without creating anything, or --plan to only plan.')
+  }
+
   const prepared = await prepare(options)
   const { plan } = prepared
   if (options.plan) return { plan, stopped: 'plan', created: [] }
   if (hasBlocker(plan)) return { plan, stopped: 'blocked', created: [] }
 
-  const interactive = options.interactive ?? Boolean(process.stdin.isTTY)
-  if (interactive && !options.yes) {
+  if (prepared.interactive && !options.yes) {
     if (!(await (options.confirm ?? confirmOnTerminal)(plan))) return { plan, stopped: 'declined', created: [] }
-  } else if (!options.yes && !options.ci) {
-    throw new Error('Cloudflare deploy: no terminal to confirm the plan on. Pass --yes to deploy it, or --ci to deploy without creating anything.')
+    return { ...(await applyPlan(prepared, options)), confirmed: true }
   }
-
   return applyPlan(prepared, options)
 }
 
@@ -203,11 +209,19 @@ async function applyPlan(prepared: Prepared, options: CloudflareDeployOptions): 
       id = created.value
       result.created.push({ binding: binding.binding, type: binding.type, name: binding.name, id })
     }
-    if (id) resolved[binding.binding] = binding.type === 'd1' ? { id, name: binding.name } : { id }
+    if (id && !binding.configured) resolved[binding.binding] = binding.type === 'd1' ? { id, name: binding.name } : { id }
   }
   const outDir = join(root, CF_OUTPUT_DIR)
-  if (!sameResolution(readResolvedResources(outDir), resolved)) {
-    writeResolved(outDir, resolved)
+  const previous = readResolvedResources(outDir)
+  // A binding this build does not plan (OAUTH_KV without --mcp-oauth) keeps what an earlier deploy settled.
+  const merged = { ...previous, ...resolved }
+  for (const binding of plan.bindings) {
+    if (binding.configured) delete merged[binding.binding]
+  }
+  if (!sameResolution(previous, merged)) {
+    if (!writeResolved(outDir, merged)) {
+      return fail('provision', `${join(outDir, WORKER_MANIFEST_FILE)} could not be read back, so the resolved ids were not recorded. Run cloudflare:build, then deploy again.`)
+    }
 
     // Stage 5: gurenWorker() reads the manifest inside `cf build`, so only cf builds again.
     rmSync(join(root, EVALUATED_CONFIG), { force: true })
@@ -228,9 +242,12 @@ async function applyPlan(prepared: Prepared, options: CloudflareDeployOptions): 
     const restore = { id: databaseId, value: bookmark.value }
     const tracker = readMigrationTracker(cf, databaseId)
     const now = tracker.ok ? decideLayout(readLocalMigrations(join(root, 'db', 'migrations')), tracker.value) : undefined
-    if (!now?.ok || now.layout !== migrations.layout || now.pending.join('\n') !== migrations.pending.join('\n')) {
+    const unchanged = now?.ok && now.layout === migrations.layout
+      && now.pending.join('\n') === migrations.pending.join('\n')
+      && fingerprintMigrations(join(root, 'db', 'migrations'), now.pending) === migrations.fingerprint
+    if (!unchanged) {
       return fail('migrate', tracker.ok
-        ? 'The pending migrations changed since the plan judged them (another run applied some?). Nothing was applied; plan again.'
+        ? 'The pending migrations changed since the plan judged them, by another run or an edit. Nothing was applied; plan again.'
         : `${tracker.reason}. Nothing was applied.`)
     }
     const applied = applyMigrations(cf, databaseId, migrations.applyArgs)
@@ -238,7 +255,6 @@ async function applyPlan(prepared: Prepared, options: CloudflareDeployOptions): 
     result.migrated = { applied: migrations.pending, bookmark: bookmark.value }
   }
 
-  // Stage 7.
   const deployed = deployPrebuilt(cf, options.secretsFile ? resolve(options.secretsFile) : undefined)
   if (!deployed.ok) {
     return fail('deploy', deployed.reason, result.migrated && databaseId ? { id: databaseId, value: result.migrated.bookmark } : undefined)
@@ -253,11 +269,12 @@ function sameResolution(before: Record<string, ResolvedResource>, after: Record<
   return [...keys].every((key) => before[key]?.id === after[key]?.id && before[key]?.name === after[key]?.name)
 }
 
-/** Replaces only `resolved`, keeping the rest of what the build wrote. */
-function writeResolved(outDir: string, resolved: Record<string, ResolvedResource>): void {
-  const path = join(outDir, WORKER_MANIFEST_FILE)
+/** Replaces only `resolved`, keeping the rest of what the build wrote; false when there is no manifest to keep. */
+function writeResolved(outDir: string, resolved: Record<string, ResolvedResource>): boolean {
   const manifest = readWorkerManifest(outDir)
-  writeFileSync(path, `${JSON.stringify({ ...manifest, resolved }, null, 2)}\n`)
+  if (manifest.version === undefined) return false
+  writeFileSync(join(outDir, WORKER_MANIFEST_FILE), `${JSON.stringify({ ...manifest, resolved }, null, 2)}\n`)
+  return true
 }
 
 /** Bindings the rebuilt config points at another id than the plan settled. */
@@ -311,6 +328,7 @@ function readMigrations(
     pending: decision.pending,
     unjudged: decision.pendingFiles,
     verdict,
+    fingerprint: fingerprintMigrations(migrationsDir, decision.pending),
     allowDestructive: options.allowDestructive === true || process.env[ALLOW_DESTRUCTIVE_ENV] === '1',
   }
 }

@@ -156,7 +156,7 @@ const cloudflareDeploy = defineCommand({
     })
 
     console.log(args.json ? JSON.stringify(result, null, 2) : formatResult(result))
-    if (result.stopped === 'blocked' || result.failure) {
+    if (result.stopped === 'blocked' || result.stopped === 'declined' || result.failure) {
       process.exitCode = 1
     }
   },

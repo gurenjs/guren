@@ -4,7 +4,8 @@
  * `<folder>.sql`; cf over drizzle's nested layout records `<folder>/migration.sql`.
  * Pointing a database at the other layout would make its whole history look pending.
  */
-import { existsSync, readdirSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 export type MigrationLayout = 'nested' | 'flat'
@@ -73,4 +74,14 @@ export function migrationDirArgs(layout: MigrationLayout, flatDir: string): stri
   return layout === 'nested'
     ? ['--dir', 'db/migrations', '--pattern', 'db/migrations/*/migration.sql']
     : ['--dir', flatDir]
+}
+
+/** sha256 over each pending migration's name and text, in apply order. */
+export function fingerprintMigrations(migrationsDir: string, pending: readonly string[]): string {
+  const hash = createHash('sha256')
+  for (const name of pending) {
+    const path = name.endsWith('.sql') ? join(migrationsDir, name) : join(migrationsDir, name, 'migration.sql')
+    hash.update(`${name}\0`).update(readFileSync(path)).update('\0')
+  }
+  return hash.digest('hex')
 }
