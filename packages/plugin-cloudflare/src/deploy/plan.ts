@@ -4,8 +4,8 @@
  * the later stages read the same answer. A source that could not be read is a
  * blocker of its own, never an empty listing.
  */
-import type { D1Database, KvNamespace, Read } from './cf-cli'
-import type { ResolvedResource, WorkerManifest } from '../worker-manifest'
+import type { AccountResource, Read } from './cf-cli'
+import type { WorkerManifest } from '../worker-manifest'
 
 /** One `env` entry of cf's evaluated `worker.config.json`. */
 export interface EvaluatedBinding {
@@ -22,8 +22,8 @@ export interface EvaluatedWorker {
 export interface PlanContext {
   worker: EvaluatedWorker
   manifest: Pick<WorkerManifest, 'resolved'>
-  d1: Read<D1Database[]>
-  kv: Read<KvNamespace[]>
+  d1: Read<AccountResource[]>
+  kv: Read<AccountResource[]>
   /** Whether this run may create what is missing: an interactive run or `--provision`, never plain `--ci`. */
   mayCreate: boolean
 }
@@ -62,11 +62,13 @@ export interface DeployPlan {
   worker: string
   bindings: PlannedBinding[]
   findings: Finding[]
-  /** Whether the resolution differs from the manifest's, so stage 4 rewrites it and stage 5 rebuilds. */
-  resolvedChanged: boolean
   /** Sources RFC 0035 §3.1 names that this version does not read yet. */
   unread: string[]
 }
+
+const UNREAD_SOURCES = [
+  'the deployed Worker\'s bindings (RFC 0035 Open Question 9); the deploy\'s strict inheritance covers them',
+]
 
 /** Bindings cf's provisioning would create under `<worker>-<binding>`, with `_` as `-` (RFC 0035 §4). */
 export function autoProvisionedName(worker: string, binding: string): string {
@@ -85,12 +87,12 @@ export function buildPlan(context: PlanContext): DeployPlan {
 
   for (const [type, listing] of [['d1', context.d1], ['kv', context.kv]] as const) {
     if (!listing.ok && bindings.some((planned) => planned.type === type)) {
-      findings.push({
-        check: 'source-unreadable',
-        severity: 'blocker',
-        message: `${listing.reason}. Without the listing the plan cannot tell an existing resource from a missing one.`,
-        fix: 'Rerun once `cf` can reach the account.',
-      })
+      findings.push(blocker(
+        'source-unreadable',
+        undefined,
+        `${listing.reason}. Without the listing the plan cannot tell an existing resource from a missing one.`,
+        'Rerun once `cf` can reach the account.',
+      ))
     }
   }
 
@@ -98,8 +100,7 @@ export function buildPlan(context: PlanContext): DeployPlan {
     worker: context.worker.name,
     bindings,
     findings,
-    resolvedChanged: bindings.some((planned) => !sameResource(planned, context.manifest.resolved[planned.binding])),
-    unread: ['the deployed Worker\'s bindings (RFC 0035 Open Question 9); the deploy\'s strict inheritance covers them'],
+    unread: UNREAD_SOURCES,
   }
 }
 
@@ -120,36 +121,32 @@ function planBinding(
   // An id equal to the manifest's came from gurenWorker(), which is a comparison, not a source.
   const configuredId = entry.id !== undefined && entry.id !== resolvedId ? entry.id : undefined
 
-  let missing = false
   const listing = type === 'd1' ? context.d1 : context.kv
   if (!listing.ok) {
     return { binding, type, action: 'unknown', name, ...(configuredId ? { id: configuredId } : {}) }
   }
-  const resources = listing.value.map((resource) =>
-    'uuid' in resource ? { id: resource.uuid, name: resource.name } : { id: resource.id, name: resource.title })
+  const resources = listing.value
   const byName = resources.filter((resource) => resource.name === name)
   const label = type === 'd1' ? 'D1 database' : 'KV namespace'
 
   if (configuredId !== undefined) {
-    if (!resources.some((resource) => resource.id === configuredId)) {
-      missing = true
-      findings.push({
-        check: 'resource-missing',
-        severity: 'blocker',
+    const missing = !resources.some((resource) => resource.id === configuredId)
+    if (missing) {
+      findings.push(blocker(
+        'resource-missing',
         binding,
-        message: `${binding} names the ${label} ${configuredId} in cloudflare.config.ts, and the account has none with that id.`,
-        fix: `Correct the id, or remove it so the deploy uses the ${label} named "${name}".`,
-      })
+        `${binding} names the ${label} ${configuredId} in cloudflare.config.ts, and the account has none with that id.`,
+        `Correct the id, or remove it so the deploy uses the ${label} named "${name}".`,
+      ))
     }
     const other = byName.find((resource) => resource.id !== configuredId)
     if (other) {
-      findings.push({
-        check: 'binding-conflict',
-        severity: 'blocker',
+      findings.push(blocker(
+        'binding-conflict',
         binding,
-        message: `${binding} names the ${label} ${configuredId} in cloudflare.config.ts, while the ${label} "${name}" it would otherwise resolve to is ${other.id}.`,
-        fix: 'Keep one: remove the id from cloudflare.config.ts, or give the binding another name.',
-      })
+        `${binding} names the ${label} ${configuredId} in cloudflare.config.ts, while the ${label} "${name}" it would otherwise resolve to is ${other.id}.`,
+        'Keep one: remove the id from cloudflare.config.ts, or give the binding another name.',
+      ))
     }
     return { binding, type, action: missing ? 'unknown' : 'existing', name, id: configuredId }
   }
@@ -158,25 +155,23 @@ function planBinding(
   if (resolvedId !== undefined && resources.some((resource) => resource.id === resolvedId)) {
     const other = byName.find((resource) => resource.id !== resolvedId)
     if (other && !byName.some((resource) => resource.id === resolvedId)) {
-      findings.push({
-        check: 'binding-conflict',
-        severity: 'blocker',
+      findings.push(blocker(
+        'binding-conflict',
         binding,
-        message: `${binding} is bound to the ${label} ${resolvedId} by an earlier deploy, while the ${label} "${name}" is ${other.id}.`,
-        fix: `Put the intended id in cloudflare.config.ts, or rename one of the ${label}s.`,
-      })
+        `${binding} is bound to the ${label} ${resolvedId} by an earlier deploy, while the ${label} "${name}" is ${other.id}.`,
+        `Put the intended id in cloudflare.config.ts, or rename one of the ${label}s.`,
+      ))
     }
     return { binding, type, action: 'existing', name, id: resolvedId }
   }
 
   if (byName.length > 1) {
-    findings.push({
-      check: 'binding-conflict',
-      severity: 'blocker',
+    findings.push(blocker(
+      'binding-conflict',
       binding,
-      message: `The account has ${byName.length} ${label}s named "${name}" (${byName.map((resource) => resource.id).join(', ')}), so the name does not decide which one ${binding} binds.`,
-      fix: 'Put the intended id in cloudflare.config.ts.',
-    })
+      `The account has ${byName.length} ${label}s named "${name}" (${byName.map((resource) => resource.id).join(', ')}), so the name does not decide which one ${binding} binds.`,
+      'Put the intended id in cloudflare.config.ts.',
+    ))
     return { binding, type, action: 'unknown', name }
   }
 
@@ -186,17 +181,16 @@ function planBinding(
   }
 
   if (!context.mayCreate) {
-    findings.push({
-      check: 'resource-missing',
-      severity: 'blocker',
+    findings.push(blocker(
+      'resource-missing',
       binding,
-      message: `No ${label} named "${name}" exists, and this run may not create one.`,
-      fix: 'Pass --provision to let a CI run create it, or create it beforehand.',
-    })
+      `No ${label} named "${name}" exists, and this run may not create one.`,
+      'Pass --provision to let a CI run create it, or create it beforehand.',
+    ))
   }
   return { binding, type, action: 'create', name }
 }
 
-function sameResource(planned: PlannedBinding, resolved: ResolvedResource | undefined): boolean {
-  return planned.id !== undefined && planned.id === resolved?.id && (planned.type !== 'd1' || planned.name === resolved.name)
+function blocker(check: CheckName, binding: string | undefined, message: string, fix: string): Finding {
+  return { check, severity: 'blocker', ...(binding ? { binding } : {}), message, fix }
 }

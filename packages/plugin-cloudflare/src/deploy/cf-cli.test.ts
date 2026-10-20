@@ -23,7 +23,7 @@ describe('cf CLI wrappers', () => {
   test('should list D1 with explicit paging, the argv the GUREN_TEST_CF probe checks', () => {
     const cf = scripted([json([{ uuid: 'a', name: 'demo-app', version: 'production' }])])
 
-    expect(listD1Databases(cf)).toEqual({ ok: true, value: [{ uuid: 'a', name: 'demo-app' }] })
+    expect(listD1Databases(cf)).toEqual({ ok: true, value: [{ id: 'a', name: 'demo-app' }] })
     expect(cf.calls).toEqual([['d1', 'list', '--page', '1', '--per-page', '100']])
   })
 
@@ -57,7 +57,7 @@ describe('cf CLI wrappers', () => {
   test('should list KV namespaces by id and title', () => {
     const cf = scripted([json([{ id: 'k', title: 'demo-app-oauth-kv', supports_url_encoding: true }])])
 
-    expect(listKvNamespaces(cf)).toEqual({ ok: true, value: [{ id: 'k', title: 'demo-app-oauth-kv' }] })
+    expect(listKvNamespaces(cf)).toEqual({ ok: true, value: [{ id: 'k', name: 'demo-app-oauth-kv' }] })
     expect(cf.calls).toEqual([['kv', 'namespaces', 'list', '--page', '1', '--per-page', '100']])
   })
 

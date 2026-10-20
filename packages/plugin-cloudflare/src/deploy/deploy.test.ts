@@ -1,22 +1,13 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { scaffoldApp, writeJson } from '../../tests/app-fixture'
+import { installCfTools, scaffoldApp, writeJson } from '../../tests/app-fixture'
 import type { CfResult } from './cf-cli'
-import { compareVersions, planCloudflareDeploy, type CloudflareDeployOptions } from './deploy'
+import { planCloudflareDeploy, type CloudflareDeployOptions } from './deploy'
 
 const DB_ID = 'e902bc31-46b4-47dc-9d46-194d0b86148c'
-
-/** Installs what preflight looks for: cf's bin and a Wrangler of `wranglerVersion`. */
-function installTools(root: string, wranglerVersion = '4.151.1'): void {
-  mkdirSync(join(root, 'node_modules/cf/bin'), { recursive: true })
-  writeFileSync(join(root, 'node_modules/cf/bin/cf'), '')
-  writeJson(join(root, 'node_modules/cf/package.json'), { name: 'cf', version: '1.0.0-beta.18' })
-  mkdirSync(join(root, 'node_modules/wrangler'), { recursive: true })
-  writeJson(join(root, 'node_modules/wrangler/package.json'), { name: 'wrangler', version: wranglerVersion })
-}
 
 /** A cf that is logged in, writes worker.config.json on `build`, and lists `d1` as given. */
 function fakeCf(root: string, d1: unknown[], calls: string[][] = []) {
@@ -63,7 +54,7 @@ describe('cloudflare:deploy --plan', () => {
 
   test('should refuse to run without --plan, before building anything', async () => {
     scaffoldApp(root, { cfBackend: true })
-    installTools(root)
+    installCfTools(root)
 
     await expect(planCloudflareDeploy(options({ plan: false }))).rejects.toThrow(/only `--plan`/)
     expect(existsSync(join(root, '.guren/cloudflare'))).toBe(false)
@@ -77,7 +68,7 @@ describe('cloudflare:deploy --plan', () => {
 
   test('should fail preflight on a Node cf cannot load the config with, before building', async () => {
     scaffoldApp(root, { cfBackend: true })
-    installTools(root)
+    installCfTools(root)
 
     await expect(planCloudflareDeploy(options({ nodeVersion: () => 'v22.14.0' }))).rejects.toThrow(/Node 22\.18\.0 or later; found v22\.14\.0/)
     expect(existsSync(join(root, '.guren/cloudflare'))).toBe(false)
@@ -85,7 +76,7 @@ describe('cloudflare:deploy --plan', () => {
 
   test('should fail preflight on a Wrangler below the delegate floor, and on no node at all', async () => {
     scaffoldApp(root, { cfBackend: true })
-    installTools(root, '4.129.0')
+    installCfTools(root, '4.129.0')
 
     const failure = await planCloudflareDeploy(options({ nodeVersion: () => undefined })).catch((error: Error) => error.message)
 
@@ -95,7 +86,7 @@ describe('cloudflare:deploy --plan', () => {
 
   test('should fail preflight when cf is not logged in, naming the login', async () => {
     scaffoldApp(root, { cfBackend: true })
-    installTools(root)
+    installCfTools(root)
     const cf = (args: string[]): CfResult =>
       args[0] === 'auth'
         ? { exitCode: 0, stdout: JSON.stringify({ authenticated: false, error: 'Not logged in' }), stderr: '' }
@@ -106,7 +97,7 @@ describe('cloudflare:deploy --plan', () => {
 
   test('should build, evaluate the config, and plan the database against the account', async () => {
     scaffoldApp(root, { cfBackend: true })
-    installTools(root)
+    installCfTools(root)
     const calls: string[][] = []
 
     const plan = await planCloudflareDeploy(options({ cf: fakeCf(root, [{ uuid: DB_ID, name: 'demo-app' }], calls) }))
@@ -121,7 +112,7 @@ describe('cloudflare:deploy --plan', () => {
 
   test('should not read a worker.config.json an earlier build left when cf build writes none', async () => {
     scaffoldApp(root, { cfBackend: true })
-    installTools(root)
+    installCfTools(root)
     mkdirSync(join(root, '.cloudflare/output/v0/workers/default'), { recursive: true })
     writeJson(join(root, '.cloudflare/output/v0/workers/default/worker.config.json'), { name: 'stale', env: {} })
     const cf = (args: string[]): CfResult =>
@@ -132,7 +123,7 @@ describe('cloudflare:deploy --plan', () => {
 
   test('should keep stdout for the JSON when asked, sending the build\'s lines to stderr', async () => {
     scaffoldApp(root, { cfBackend: true })
-    installTools(root)
+    installCfTools(root)
     const logged: unknown[] = []
     const log = console.log
     console.log = (...args: unknown[]) => logged.push(args)
@@ -147,7 +138,7 @@ describe('cloudflare:deploy --plan', () => {
 
   test('should not plan a creation for a non-interactive run without --provision', async () => {
     scaffoldApp(root, { cfBackend: true })
-    installTools(root)
+    installCfTools(root)
 
     const plan = await planCloudflareDeploy(options({ ci: true }))
 
@@ -157,21 +148,12 @@ describe('cloudflare:deploy --plan', () => {
 
   test('should stop when cf build cannot evaluate the config', async () => {
     scaffoldApp(root, { cfBackend: true })
-    installTools(root)
+    installCfTools(root)
     const cf = (args: string[]): CfResult =>
       args[0] === 'auth'
         ? { exitCode: 0, stdout: '{"authenticated":true}', stderr: '' }
         : { exitCode: 1, stdout: '', stderr: 'Invalid `cloudflare.config.ts`' }
 
     await expect(planCloudflareDeploy(options({ cf }))).rejects.toThrow(/cf build.*Invalid `cloudflare\.config\.ts`/s)
-  })
-})
-
-describe('compareVersions', () => {
-  test('should compare the numeric prefix against a floor', () => {
-    expect(compareVersions('v22.18.0', [22, 18, 0])).toBe(0)
-    expect(compareVersions('v22.14.0', [22, 18, 0])).toBeLessThan(0)
-    expect(compareVersions('24.1.0', [22, 18, 0])).toBeGreaterThan(0)
-    expect(compareVersions('nonsense', [22, 18, 0])).toBeLessThan(0)
   })
 })

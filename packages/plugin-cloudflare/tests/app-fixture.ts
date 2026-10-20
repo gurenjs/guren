@@ -189,3 +189,12 @@ export function workerManifest(overrides: Partial<WorkerManifest> = {}): WorkerM
     ...overrides,
   }
 }
+
+/** Installs what `cloudflare:deploy` preflight resolves from the app: cf's package and bin, and a Wrangler. */
+export function installCfTools(root: string, wranglerVersion = '4.151.1'): void {
+  mkdirSync(join(root, 'node_modules/cf/bin'), { recursive: true })
+  writeFileSync(join(root, 'node_modules/cf/bin/cf'), '')
+  writeJson(join(root, 'node_modules/cf/package.json'), { name: 'cf', version: '1.0.0-beta.18' })
+  mkdirSync(join(root, 'node_modules/wrangler'), { recursive: true })
+  writeJson(join(root, 'node_modules/wrangler/package.json'), { name: 'wrangler', version: wranglerVersion })
+}

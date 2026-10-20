@@ -6,16 +6,16 @@
 import { readFileSync, rmSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
-import { detectCloudflareBackend } from '../backend'
+import { detectCloudflareBackend, isRecord } from '../backend'
 import { buildCloudflareOutput, readResolvedResources } from '../build'
 import { CF_OUTPUT_DIR } from '../worker-manifest'
 import { appCfRunner, cfBuild, checkAuth, listD1Databases, listKvNamespaces, type CfRunner, type Read } from './cf-cli'
 import { buildPlan, type DeployPlan, type EvaluatedBinding, type EvaluatedWorker } from './plan'
 
 /** cf refuses to load cloudflare.config.ts on older Node (RFC 0035 Appendix C row 10). */
-const NODE_FLOOR = [22, 18, 0] as const
-/** The Wrangler cf delegates the bundle to (Appendix C row 17). */
-const WRANGLER_FLOOR = [4, 136, 0] as const
+const NODE_FLOOR = '22.18.0'
+/** The Wrangler cf delegates the bundle to (Appendix C row 17); `-0` admits its pre-releases. */
+const WRANGLER_FLOOR = '4.136.0'
 
 /** Where `cf build` writes the evaluated Worker configuration. */
 const EVALUATED_CONFIG = '.cloudflare/output/v0/workers/default/worker.config.json'
@@ -46,7 +46,7 @@ export async function planCloudflareDeploy(options: CloudflareDeployOptions): Pr
   }
 
   const cfBin = resolvePackageFile(root, 'cf/package.json')
-  const cf = options.cf ?? appCfRunner(root, cfBin ? join(dirname(cfBin), 'bin', 'cf') : undefined)
+  const cf = options.cf ?? appCfRunner(root, join(dirname(cfBin ?? join(root, 'node_modules/cf/package.json')), 'bin', 'cf'))
   preflight(root, cf, cfBin, options.nodeVersion ?? nodeOnPathVersion)
 
   await withStdoutLogs(options.logToStderr === true, () =>
@@ -112,12 +112,12 @@ function preflight(root: string, cf: CfRunner, cfPackage: string | undefined, no
     problems.push('cf is declared but not installed. Run `bun install`.')
   }
   const node = nodeVersion()
-  if (!node || compareVersions(node, NODE_FLOOR) < 0) {
-    problems.push(`cf loads cloudflare.config.ts with the node on PATH, which needs Node ${NODE_FLOOR.join('.')} or later; found ${node ?? 'no node'}.`)
+  if (!node || !Bun.semver.satisfies(node, `>=${NODE_FLOOR}`)) {
+    problems.push(`cf loads cloudflare.config.ts with the node on PATH, which needs Node ${NODE_FLOOR} or later; found ${node ?? 'no node'}.`)
   }
   const wrangler = installedVersion(root, 'wrangler')
-  if (!wrangler || compareVersions(wrangler, WRANGLER_FLOOR) < 0) {
-    problems.push(`cf bundles through the app's Wrangler, which needs ${WRANGLER_FLOOR.join('.')} or later; found ${wrangler ?? 'none'}. Run \`bun add -d wrangler@latest\`.`)
+  if (!wrangler || !Bun.semver.satisfies(wrangler, `>=${WRANGLER_FLOOR}-0`)) {
+    problems.push(`cf bundles through the app's Wrangler, which needs ${WRANGLER_FLOOR} or later; found ${wrangler ?? 'none'}. Run \`bun add -d wrangler@latest\`.`)
   }
   if (problems.length === 0) {
     const auth = checkAuth(cf)
@@ -165,16 +165,6 @@ function installedVersion(root: string, name: string): string | undefined {
   return isRecord(manifest) && typeof manifest.version === 'string' ? manifest.version : undefined
 }
 
-/** Compares the numeric `major.minor.patch` prefix; a pre-release counts as its release. */
-export function compareVersions(version: string, floor: readonly [number, number, number]): number {
-  const parts = /(\d+)\.(\d+)\.(\d+)/.exec(version)
-  if (!parts) return -1
-  for (let index = 0; index < 3; index++) {
-    const difference = Number(parts[index + 1]) - floor[index]!
-    if (difference !== 0) return difference
-  }
-  return 0
-}
 
 function readJson(path: string): unknown {
   try {
@@ -182,9 +172,5 @@ function readJson(path: string): unknown {
   } catch {
     return undefined
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 

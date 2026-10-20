@@ -556,7 +556,7 @@ describe.skipIf(!cfEnabled)('cf builds and dry-runs the cf-backend worker', () =
       const previous = process.env.CLOUDFLARE_ACCOUNT_ID
       process.env.CLOUDFLARE_ACCOUNT_ID = '0'.repeat(32)
       try {
-        const real = appCfRunner(root)
+        const real = appCfRunner(root, join(root, 'node_modules/cf/bin/cf'))
         for (const args of sent) {
           const result = real([...args, '--dry-run'])
           expect(result.exitCode).toBe(0)
