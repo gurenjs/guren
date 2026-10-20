@@ -447,7 +447,7 @@ import { gurenWranglerBundle } from '@guren/plugin-cloudflare/config'
 export default defineWranglerConfig(gurenWranglerBundle())
 ```
 
-`compatibilityDate` は自分で決めて、自分で更新してください。`gurenWranglerBundle()` は、モジュールのスタブ、ビルド時の `define`、アセットのディレクトリを返し、`keepNames` も有効にします。スケジュールカーネルがタスクを登録しているときと、`--mcp-oauth` で OAuth の保存領域の掃除が必要なときは、`* * * * *` の cron トリガーも 1 つ加えます。スプレッドのあとに `triggers` を書けば、そちらに置き換わります。カーネルを読み込めなかったときはトリガーを加えず、ビルドが警告します。
+`compatibilityDate` は自分で決めて、自分で更新してください。`gurenWranglerBundle()` は、モジュールのスタブ、ビルド時の `define`、アセットのディレクトリを返し、`keepNames` も有効にします。スケジュールカーネルがタスクを登録しているときは、`* * * * *` の cron トリガーも 1 つ加えます。スプレッドのあとに `triggers` を書けば、そちらに置き換わります。カーネル以外の場所で登録したタスクや、`--mcp-oauth` の保存領域の掃除だけを動かしたい場合は、この `triggers` を自分で書いてください。カーネルを読み込めなかったときはトリガーを加えません。その場合 `cloudflare:deploy` は、トリガーなしでデプロイせずに止まります。カーネルが読めるようになるか、設定に `triggers` を書けば先に進みます。
 
 ビルドしてから、アプリのルートでデプロイします。
 

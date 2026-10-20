@@ -124,13 +124,14 @@ describe('cloudflare:build on the cf backend (RFC 0035)', () => {
     expect(readManifest(root).crons).toEqual(['* * * * *'])
   })
 
-  test('should add no trigger without scheduled work, and one for the OAuth sweep', async () => {
+  // handler.scheduled throws with no scheduler bound, so the sweep alone would fail every minute.
+  test('should add no trigger without scheduled tasks, the OAuth sweep included', async () => {
     scaffoldApp(root, { cfBackend: true, mcpPlugin: true, oauthProvider: true })
-    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
-    expect(readManifest(root).crons).toEqual([])
 
     await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }))
-    expect(readManifest(root).crons).toEqual(['* * * * *'])
+
+    expect(readManifest(root).crons).toEqual([])
+    expect(readManifest(root).scheduleUnreadable).toBeUndefined()
   })
 
   test('should add no guessed trigger for a kernel it cannot read, and say so', async () => {
@@ -141,6 +142,7 @@ describe('cloudflare:build on the cf backend (RFC 0035)', () => {
     const warnings = await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
 
     expect(readManifest(root).crons).toEqual([])
+    expect(readManifest(root).scheduleUnreadable).toContain('kernel broke')
     expect(warnings).toContain('kernel broke')
   })
 

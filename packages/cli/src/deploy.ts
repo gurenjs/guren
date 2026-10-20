@@ -143,17 +143,13 @@ function railwayJsonTemplate(): string {
 `
 }
 
-/** The concurrency group `cloudflare:deploy`'s serialization check looks for (RFC 0035 §4). */
-export function cloudflareDeployGroup(worker: string): string {
-  return `cloudflare-deploy-${worker}`
-}
-
 /**
  * Deploys through `guren cloudflare:deploy` on every push to main. One run per
  * Worker at a time: two at once could create the same resource or apply the same
- * migration, and Guren keeps no lock of its own.
+ * migration, and Guren keeps no lock of its own. The group name matches the one
+ * `deployConcurrencyGroup()` in @guren/plugin-cloudflare suggests.
  */
-function cloudflareWorkflowTemplate(appName: string): string {
+function cloudflareWorkflowTemplate(worker: string, mcpOAuth: boolean): string {
   return `name: Deploy to Cloudflare
 
 on:
@@ -163,7 +159,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${cloudflareDeployGroup(appName)}
+  group: cloudflare-deploy-${worker}
   cancel-in-progress: false
 
 jobs:
@@ -185,14 +181,35 @@ jobs:
       # --yes applies the plan without a prompt; a plan with a blocker still stops here.
       # Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID as repository secrets.
       - name: Deploy
-        run: bunx guren cloudflare:deploy --yes
+        run: bunx guren cloudflare:deploy --yes${mcpOAuth ? ' --mcp-oauth' : ''}
         env:
           CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 `
 }
 
-function filesForTarget(target: DeployTarget, appName: string, port: number): ScaffoldFileEntry[] {
+interface CloudflareTarget {
+  /** The Worker name `cloudflare:build` derives: the package name without its scope. */
+  worker: string
+  /** The app ships the OAuth provider, so its builds take --mcp-oauth. */
+  mcpOAuth: boolean
+}
+
+async function readCloudflareTarget(appName: string | undefined): Promise<CloudflareTarget> {
+  let manifest: { name?: string; dependencies?: Record<string, string> } = {}
+  try {
+    manifest = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8')) as typeof manifest
+  } catch {
+    // The directory name below stands in for a missing or unreadable package.json.
+  }
+  const name = appName ?? manifest.name?.replace(/^@[^/]+\//u, '') ?? basename(process.cwd())
+  return {
+    worker: sanitizeFlyAppName(name),
+    mcpOAuth: manifest.dependencies?.['@cloudflare/workers-oauth-provider'] !== undefined,
+  }
+}
+
+function filesForTarget(target: DeployTarget, appName: string, port: number, cloudflare?: CloudflareTarget): ScaffoldFileEntry[] {
   const dockerFile: ScaffoldFileEntry = { path: 'Dockerfile', contents: dockerfileTemplate(port) }
   const flyFile: ScaffoldFileEntry = { path: 'fly.toml', contents: flyTomlTemplate(appName, port) }
   const railwayFile: ScaffoldFileEntry = { path: 'railway.json', contents: railwayJsonTemplate() }
@@ -204,7 +221,10 @@ function filesForTarget(target: DeployTarget, appName: string, port: number): Sc
     case 'railway':
       return [dockerFile, railwayFile]
     case 'cloudflare':
-      return [{ path: '.github/workflows/deploy-cloudflare.yml', contents: cloudflareWorkflowTemplate(appName) }]
+      return [{
+        path: '.github/workflows/deploy-cloudflare.yml',
+        contents: cloudflareWorkflowTemplate(cloudflare?.worker ?? appName, cloudflare?.mcpOAuth ?? false),
+      }]
     case 'all':
       return [dockerFile, flyFile, railwayFile]
     default: {
@@ -219,6 +239,7 @@ export async function scaffoldDeploy(options: DeployOptions = {}): Promise<strin
   const target = options.target ?? 'docker'
   const port = normalizePort(options.port)
   const appName = sanitizeFlyAppName(options.appName ?? await inferAppName())
-  const files = filesForTarget(target, appName, port)
+  const cloudflare = target === 'cloudflare' ? await readCloudflareTarget(options.appName) : undefined
+  const files = filesForTarget(target, appName, port, cloudflare)
   return writeScaffoldFiles(files, { force: Boolean(options.force), overwritten: options.overwritten })
 }

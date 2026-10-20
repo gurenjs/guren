@@ -102,11 +102,20 @@ describe('scaffoldDeploy', () => {
 
     expect(files).toHaveLength(1)
     const workflow = await readFile('.github/workflows/deploy-cloudflare.yml', 'utf8')
-    expect(workflow).toContain('group: cloudflare-deploy-scope-my-guren-app')
+    // The Worker name cloudflare:build derives drops the scope.
+    expect(workflow).toContain('group: cloudflare-deploy-my-guren-app')
     expect(workflow).toContain('cancel-in-progress: false')
     expect(workflow).toContain('run: bunx guren cloudflare:deploy --yes')
     expect(workflow).toContain('CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}')
     expect(workflow).toContain('node-version: 24')
+  })
+
+  it('builds an app that ships the OAuth provider with --mcp-oauth in the workflow too', async () => {
+    await writeFile('package.json', JSON.stringify({ name: 'oauth-app', dependencies: { '@cloudflare/workers-oauth-provider': '^0.10.3' } }), 'utf8')
+
+    await scaffoldDeploy({ target: 'cloudflare' })
+
+    expect(await readFile('.github/workflows/deploy-cloudflare.yml', 'utf8')).toContain('run: bunx guren cloudflare:deploy --yes --mcp-oauth')
   })
 
   it('reports no overwrites on a fresh app', async () => {

@@ -437,7 +437,7 @@ import { gurenWranglerBundle } from '@guren/plugin-cloudflare/config'
 export default defineWranglerConfig(gurenWranglerBundle())
 ```
 
-`compatibilityDate` is yours to set and to move. `gurenWranglerBundle()` supplies the module stubs, the build-time `define` entries and the assets directory, with `keepNames` on. It also adds one `* * * * *` cron trigger when the schedule kernel registers tasks, or under `--mcp-oauth` for the OAuth storage sweep; a `triggers` key you write after the spread replaces it. A kernel the build cannot load adds no trigger, and the build warns.
+`compatibilityDate` is yours to set and to move. `gurenWranglerBundle()` supplies the module stubs, the build-time `define` entries and the assets directory, with `keepNames` on. It also adds one `* * * * *` cron trigger when the schedule kernel registers tasks; a `triggers` key you write after the spread replaces it. Tasks registered anywhere other than the kernel, and the `--mcp-oauth` storage sweep on its own, need that key. A kernel the build cannot load adds no trigger, and `cloudflare:deploy` then stops rather than deploy without one, until the kernel loads or the config sets `triggers`.
 
 Build, then deploy from the app root:
 

@@ -133,6 +133,7 @@ async function prepare(options: CloudflareDeployOptions): Promise<Prepared> {
   const plan = buildPlan({
     ...context,
     ...(process.env.GITHUB_ACTIONS === 'true' ? { workflow: readRunningWorkflow(root) } : {}),
+    ...(typeof previous.scheduleUnreadable === 'string' ? { scheduleUnreadable: previous.scheduleUnreadable } : {}),
     migrations: database && !options.skipMigrations ? readMigrations(root, cf, database, options) : undefined,
     secrets: await readSecrets(root, cf, worker, options.secretsFile),
   })
@@ -446,7 +447,8 @@ function readEvaluatedWorker(root: string): EvaluatedWorker {
       }
     }
   }
-  return { name: config.name, env }
+  const triggers = Array.isArray(config.triggers) ? config.triggers : []
+  return { name: config.name, env, scheduled: triggers.some((trigger) => isRecord(trigger) && trigger.type === 'scheduled') }
 }
 
 function nodeOnPathVersion(): string | undefined {
