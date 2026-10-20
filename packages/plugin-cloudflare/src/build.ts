@@ -41,6 +41,7 @@ import {
   type WorkerManifest,
 } from './worker-manifest'
 import { detectCloudflareBackend, readManifestDependencies } from './backend'
+import type { CloudflareDeployConfig } from './config'
 import { readLocalMigrations } from './deploy/migrations'
 
 interface PackageJsonLike {
@@ -115,8 +116,18 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   }
 
   const packageJson = readPackageJson(root)
-  const mcpOAuth = options.mcpOAuth === true
-  const mcpPath = options.mcpPath ?? DEFAULT_MCP_PATH
+  const configFile = deployConfigPath(root)
+  const deployConfig = backend === 'cf' && configFile ? await readDeployConfig(configFile) : undefined
+  if (backend === 'wrangler' && configFile) {
+    console.warn(`Cloudflare build: ${configFile} is read only on the cf backend (cloudflare.config.ts), so this build ignores it. Pass --mcp-oauth and --mcp-path here instead.`)
+  }
+  const configName = configFile ? relative(root, configFile).split(sep).join('/') : DEPLOY_CONFIG_FILE
+  const mcpOAuth = (backend === 'cf'
+    ? resolveOption(configName, 'mcpOAuth', '--mcp-oauth', deployConfig?.mcpOAuth, options.mcpOAuth)
+    : options.mcpOAuth) === true
+  const mcpPath = (backend === 'cf'
+    ? resolveOption(configName, 'mcpPath', '--mcp-path', deployConfig?.mcpPath, options.mcpPath)
+    : options.mcpPath) ?? DEFAULT_MCP_PATH
 
   // Checked before the app build: these are one-line edits to files the developer
   // owns, and reporting them after minutes of Vite output is reporting them where
@@ -164,7 +175,16 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   resetOutputDir(out, root, 'Cloudflare build')
   // Written first so a build failing below still keeps the carried-over ids.
   if (backend === 'cf') {
-    writeWorkerManifest({ root, out, packageName: packageJson.name, mcpOAuth, agents: agents.exports, resolved, ...schedule })
+    writeWorkerManifest({
+      root,
+      out,
+      packageName: packageJson.name,
+      mcpOAuth,
+      agents: agents.exports,
+      resolved,
+      ...schedule,
+      resourceNames: deployConfig?.resourceNames ?? {},
+    })
   }
 
   // Workers Static Assets serves `/` from index.html BEFORE the worker runs,
@@ -251,6 +271,7 @@ function writeWorkerManifest(input: {
   resolved: Record<string, ResolvedResource>
   crons: string[]
   scheduleUnreadable?: string
+  resourceNames: Record<string, string>
 }): void {
   const outRelative = relative(input.root, input.out).split(sep).join('/')
   const manifest: WorkerManifest = {
@@ -262,9 +283,10 @@ function writeWorkerManifest(input: {
     alias: devOnlyAliases(outRelative),
     define: BUNDLE_DEFINES,
     vars: WORKER_VARS,
-    d1: { binding: 'DB', databaseName: workerName(input.packageName) },
+    d1: { binding: 'DB', databaseName: input.resourceNames.DB ?? workerName(input.packageName) },
     kvNamespaces: input.mcpOAuth ? [OAUTH_KV_BINDING] : [],
     crons: input.crons,
+    resourceNames: input.resourceNames,
     ...(input.scheduleUnreadable ? { scheduleUnreadable: input.scheduleUnreadable } : {}),
     agents: input.agents.map((agent) => ({
       exportName: agent.export,
@@ -277,6 +299,62 @@ function writeWorkerManifest(input: {
   writeFileSync(resolve(input.out, WORKER_MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`)
   // The manifest will carry resource ids, which stay out of the repository (RFC 0035 §3.1).
   writeFileSync(resolve(input.out, '.gitignore'), '*\n')
+}
+
+/** RFC 0035 §3: Guren's deploy settings on the cf backend, recorded nowhere else. */
+const DEPLOY_CONFIG_FILE = 'config/cloudflare.ts'
+const DEPLOY_CONFIG_EXTENSIONS = ['.ts', '.mts', '.js', '.mjs']
+
+function deployConfigPath(root: string): string | undefined {
+  return DEPLOY_CONFIG_EXTENSIONS
+    .map((extension) => resolve(root, 'config', `cloudflare${extension}`))
+    .find((path) => existsSync(path))
+}
+
+async function readDeployConfig(path: string): Promise<CloudflareDeployConfig> {
+  let exported: unknown
+  try {
+    exported = ((await import(pathToFileURL(path).href)) as { default?: unknown }).default
+  } catch (error) {
+    throw new Error(`Cloudflare build: ${path} failed to import: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  const problems = deployConfigProblems(exported)
+  if (problems.length > 0) {
+    throw new Error(`Cloudflare build: ${path} must default-export defineCloudflareConfig({ ... }):\n  ${problems.join('\n  ')}`)
+  }
+  return exported as CloudflareDeployConfig
+}
+
+function deployConfigProblems(config: unknown): string[] {
+  if (!isRecord(config)) return ['the default export is not an object']
+  const problems: string[] = []
+  if (config.mcpOAuth !== undefined && typeof config.mcpOAuth !== 'boolean') problems.push('mcpOAuth is not a boolean')
+  if (config.mcpPath !== undefined && (typeof config.mcpPath !== 'string' || !config.mcpPath.startsWith('/'))) {
+    problems.push('mcpPath is not a path starting with /')
+  }
+  if (config.resourceNames !== undefined
+    && (!isRecord(config.resourceNames) || Object.values(config.resourceNames).some((name) => typeof name !== 'string' || name === ''))) {
+    problems.push('resourceNames is not a record of non-empty names')
+  } else if (isRecord(config.resourceNames)) {
+    const unknown = Object.keys(config.resourceNames).filter((binding) => !NAMEABLE_BINDINGS.has(binding))
+    if (unknown.length > 0) problems.push(`resourceNames names ${unknown.join(', ')}, and only ${[...NAMEABLE_BINDINGS].join(' and ')} take a name`)
+  }
+  return problems
+}
+
+/**
+ * The file is the record of a deploy setting on the cf backend; the flag, recorded
+ * nowhere, is accepted with a warning and refused when it contradicts the file.
+ */
+function resolveOption<T>(file: string, key: string, flag: string, fromFile: T | undefined, fromFlag: T | undefined): T | undefined {
+  if (fromFlag === undefined || fromFlag === false) return fromFile ?? fromFlag
+  if (fromFile !== undefined && fromFile !== fromFlag) {
+    throw new Error(`Cloudflare build: ${flag} contradicts ${key} in ${file}. Drop the flag; the file is what every build and deploy reads.`)
+  }
+  if (fromFile === undefined) {
+    console.warn(`Cloudflare build: ${flag} is recorded nowhere, so a build without it ships a different worker. Set ${key} in ${file} instead.`)
+  }
+  return fromFlag
 }
 
 /** The Worker name, and the D1 database name a fresh binding gets. */
@@ -295,6 +373,9 @@ const MCP_OAUTH_SEAM_SPECIFIER = '@guren/plugin-mcp/oauth'
 
 /** The KV binding name `OAuthProvider` requires, fixed by the provider. */
 const OAUTH_KV_BINDING = 'OAUTH_KV'
+
+/** The bindings a resource name can be given for: the build's D1 database and its KV namespace. */
+const NAMEABLE_BINDINGS = new Set(['DB', OAUTH_KV_BINDING])
 
 /** The three endpoints the provider owns or hands back, in one place. */
 const OAUTH_ENDPOINTS = {

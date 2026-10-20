@@ -449,6 +449,21 @@ export default defineWranglerConfig(gurenWranglerBundle())
 
 `compatibilityDate` は自分で決めて、自分で更新してください。`gurenWranglerBundle()` は、モジュールのスタブ、ビルド時の `define`、アセットのディレクトリを返し、`keepNames` も有効にします。スケジュールカーネルがタスクを登録しているときは、`* * * * *` の cron トリガーも 1 つ加えます。スプレッドのあとに `triggers` を書けば、そちらに置き換わります。カーネル以外の場所で登録したタスクや、`--mcp-oauth` の保存領域の掃除だけを動かしたい場合は、この `triggers` を自分で書いてください。カーネルを読み込めなかったときはトリガーを加えません。その場合 `cloudflare:deploy` は、トリガーなしでデプロイせずに止まります。カーネルが読めるようになるか、設定に `triggers` を書けば先に進みます。
 
+Guren 自身のデプロイ設定は `config/cloudflare.ts` に書きます。ビルドと `cloudflare:deploy` はこのファイルを読みますが、動いているアプリは読みません。`guren check` も、`createApp({ config })` に加えるよう求めません。
+
+```typescript
+// config/cloudflare.ts
+import { defineCloudflareConfig } from '@guren/plugin-cloudflare/config'
+
+export default defineCloudflareConfig({
+  mcpOAuth: true,
+  resourceNames: { OAUTH_KV: 'my-app-oauth' },
+})
+```
+
+- `mcpOAuth` と `mcpPath` は、この経路では `--mcp-oauth` と `--mcp-path` のフラグの代わりになります。ファイルと食い違うフラグは受け付けません。ファイルが設定していないフラグは使いますが、次のビルドに残らないので警告します。
+- `resourceNames` では、バインディングごとのリソース名を指定します。既定の名前（`DB` は `<worker>`、ほかは `<worker>-<binding>`）が別のプロジェクトと重なるときや、名前の制限に合わないときに使います。KV のバインディングは `cloudflare.config.ts` に名前を持てないので、ただの `cf deploy` では既定の名前のままになります。名前を指定したら、`cloudflare:deploy` でデプロイしてください。
+
 ビルドしてから、アプリのルートでデプロイします。
 
 ```bash

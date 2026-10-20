@@ -122,7 +122,10 @@ async function prepare(options: CloudflareDeployOptions): Promise<Prepared> {
   const previous = readWorkerManifest(join(root, CF_OUTPUT_DIR))
   const context = {
     worker,
-    manifest: { resolved: readResolvedResources(join(root, CF_OUTPUT_DIR)) },
+    manifest: {
+      resolved: readResolvedResources(join(root, CF_OUTPUT_DIR)),
+      ...(isRecord(previous.resourceNames) ? { resourceNames: previous.resourceNames } : {}),
+    },
     d1: uses('d1') ? listD1Databases(cf) : unlisted,
     kv: uses('kv') ? listKvNamespaces(cf) : unlisted,
     mayCreate: Boolean(options.provision) || (!options.ci && (interactive || Boolean(options.yes))),

@@ -26,7 +26,7 @@ export interface EvaluatedWorker {
 
 export interface PlanContext {
   worker: EvaluatedWorker
-  manifest: Pick<WorkerManifest, 'resolved'>
+  manifest: Pick<WorkerManifest, 'resolved'> & Partial<Pick<WorkerManifest, 'resourceNames'>>
   d1: Read<AccountResource[]>
   kv: Read<AccountResource[]>
   /** Whether this run may create what is missing: an interactive run or `--provision`, never plain `--ci`. */
@@ -278,8 +278,10 @@ function planBinding(
   type: ResourceType,
   findings: Finding[],
 ): PlannedBinding {
-  // KV cannot carry a name (`bindings.kv()` takes only an id), so its name is always the provisioning default.
-  const name = type === 'd1' && entry.name ? entry.name : autoProvisionedName(context.worker.name, binding)
+  // KV cannot carry a name (`bindings.kv()` takes only an id): config/cloudflare.ts names it, or the provisioning default does.
+  const name = type === 'd1' && entry.name
+    ? entry.name
+    : context.manifest.resourceNames?.[binding] ?? autoProvisionedName(context.worker.name, binding)
   const resolvedId = context.manifest.resolved[binding]?.id
   // An id equal to the manifest's came from gurenWorker(), which is a comparison, not a source.
   const configuredId = entry.id !== undefined && entry.id !== resolvedId ? entry.id : undefined
@@ -315,7 +317,19 @@ function planBinding(
   }
 
   // gurenWorker() puts the manifest's id in the config, so the deploy binds it while it exists.
-  if (resolvedId !== undefined && resources.some((resource) => resource.id === resolvedId)) {
+  const settled = resolvedId === undefined ? undefined : resources.find((resource) => resource.id === resolvedId)
+  if (settled) {
+    // An earlier deploy pins the binding by id, so a new name in config/cloudflare.ts would be shown but not bound.
+    const requested = context.manifest.resourceNames?.[binding]
+    if (requested !== undefined && requested !== settled.name) {
+      findings.push(blocker(
+        'binding-conflict',
+        binding,
+        `config/cloudflare.ts names ${binding}'s ${label} "${requested}", but an earlier deploy bound it to "${settled.name}" (${settled.id}), which the next deploy would keep.`,
+        `To move the binding, delete ${binding} from "resolved" in .guren/cloudflare/guren-worker.json and plan again; to stay, set the name back to "${settled.name}".`,
+      ))
+      return { binding, type, action: 'unknown', name: requested, id: settled.id }
+    }
     const other = byName.find((resource) => resource.id !== resolvedId)
     if (other && !byName.some((resource) => resource.id === resolvedId)) {
       findings.push(blocker(

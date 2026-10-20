@@ -34,6 +34,8 @@ export interface WorkerManifest {
   kvNamespaces: string[]
   /** Cron schedules for a `scheduled` trigger; empty when the worker schedules nothing. */
   crons: string[]
+  /** `config/cloudflare.ts` names by binding, which the plan resolves and creates under. */
+  resourceNames: Record<string, string>
   /** Why the schedule kernel could not be read; the plan blocks unless the config sets its own triggers. */
   scheduleUnreadable?: string
   /** Agent classes hosted as SQLite-backed Durable Objects, with the binding each gets. */
