@@ -539,4 +539,36 @@ describe.skipIf(!cfEnabled)('cf builds and dry-runs the cf-backend worker', () =
     },
     600_000,
   )
+
+  // The plan's own argv, run with --dry-run so cf validates it without an account.
+  test(
+    'accepts every listing the plan sends, and reports auth as JSON',
+    async () => {
+      const { appCfRunner, listD1Databases, listKvNamespaces } = await import('./deploy/cf-cli')
+      const sent: string[][] = []
+      const recorder = (args: string[]) => {
+        sent.push(args)
+        return { exitCode: 0, stdout: '[]', stderr: '' }
+      }
+      listD1Databases(recorder)
+      listKvNamespaces(recorder)
+
+      const previous = process.env.CLOUDFLARE_ACCOUNT_ID
+      process.env.CLOUDFLARE_ACCOUNT_ID = '0'.repeat(32)
+      try {
+        const real = appCfRunner(root, join(root, 'node_modules/cf/bin/cf'))
+        for (const args of sent) {
+          const result = real([...args, '--dry-run'])
+          expect(result.exitCode).toBe(0)
+          expect((JSON.parse(result.stdout) as { query: unknown }).query).toEqual({ page: 1, per_page: 100 })
+        }
+        const whoami = real(['auth', 'whoami'])
+        expect(JSON.parse(whoami.stdout)).toHaveProperty('authenticated')
+      } finally {
+        if (previous === undefined) delete process.env.CLOUDFLARE_ACCOUNT_ID
+        else process.env.CLOUDFLARE_ACCOUNT_ID = previous
+      }
+    },
+    120_000,
+  )
 })

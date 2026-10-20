@@ -457,6 +457,22 @@ bunx cf d1 migrations apply <database-id> --dir .guren/cloudflare/d1-migrations
 
 That directory records each migration under the same name as `wrangler d1 migrations apply`, so a database migrated through Wrangler keeps its history. `cloudflare:size` measures only the Wrangler path.
 
+### Planning a deploy
+
+`bunx guren cloudflare:deploy --plan` checks the tools, builds, runs `cf build`, and resolves each D1 and KV binding against the account, without writing anything there:
+
+```bash
+bunx guren cloudflare:deploy --plan
+```
+
+Each binding is listed as `existing` (the resource a previous run settled, or an id you wrote), `adopt` (found under the planned name but not yet settled, so check it belongs to this app), or `create on deploy`. The KV name is `<worker>-<binding>` with `_` written as `-`, the name `cf deploy` itself creates. The command exits 1 on a blocker:
+
+- `binding-conflict`: an id in `cloudflare.config.ts` and the planned name point at different resources, or two resources share the name.
+- `resource-missing`: an id you wrote is not in the account, or a resource is missing and the run may not create it. A run with `--ci`, or without a terminal, creates nothing unless `--provision` is passed.
+- `source-unreadable`: `cf` could not list the account's resources. The plan stops rather than treat that as an empty account.
+
+Preflight needs Node 22.18 or later as the `node` on PATH, Wrangler 4.136 or later in the app, and a logged-in `cf` (`bunx cf auth login`, or `CLOUDFLARE_API_TOKEN` in CI). `--json` prints `{ plan }` as one object. This version stops at the plan: creating resources, migrating and deploying are still `cf deploy` and `cf d1 migrations apply` as above.
+
 ## Upgrading an Existing App
 
 `wrangler.jsonc` is scaffolded once and never overwritten, so an app created before a plugin update keeps its original config. The build prints exactly which entries are missing when it finds an outdated one. Add them and rebuild.

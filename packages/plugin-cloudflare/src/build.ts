@@ -79,6 +79,8 @@ export interface BuildCloudflareOutputOptions {
    * leaves the endpoint outside the OAuth boundary silently.
    */
   mcpPath?: string
+  /** Send the app build's own output to stderr, so stdout carries only a caller's JSON. */
+  appBuildToStderr?: boolean
 }
 
 /**
@@ -143,7 +145,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   warnDatabaseWithoutD1(root)
 
   if (!options.skipAppBuild) {
-    runAppBuild(root, packageJson.scripts ?? {})
+    runAppBuild(root, packageJson.scripts ?? {}, options.appBuildToStderr === true)
   }
 
   if (!existsSync(appEntry)) {
@@ -201,7 +203,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
 }
 
 /** The previous build's `resolved` section, or nothing when there is no readable manifest. */
-function readResolvedResources(out: string): Record<string, ResolvedResource> {
+export function readResolvedResources(out: string): Record<string, ResolvedResource> {
   try {
     const manifest = JSON.parse(readFileSync(resolve(out, WORKER_MANIFEST_FILE), 'utf8')) as Partial<WorkerManifest>
     return isRecord(manifest.resolved) ? (manifest.resolved as Record<string, ResolvedResource>) : {}
@@ -1039,7 +1041,7 @@ function readPackageJson(root: string): PackageJsonLike {
   }
 }
 
-function runAppBuild(root: string, scripts: Record<string, string>): void {
+function runAppBuild(root: string, scripts: Record<string, string>, toStderr: boolean): void {
   if (!scripts.build) {
     throw new Error(
       'Cloudflare build: no "build" script found in package.json. Add one (codegen + vite build + vite build --ssr) or pass --skip-app-build after building manually.',
@@ -1049,7 +1051,7 @@ function runAppBuild(root: string, scripts: Record<string, string>): void {
   const result = Bun.spawnSync({
     cmd: ['bun', 'run', 'build'],
     cwd: root,
-    stdout: 'inherit',
+    stdout: toStderr ? 2 : 'inherit',
     stderr: 'inherit',
   })
 

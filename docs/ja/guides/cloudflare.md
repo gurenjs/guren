@@ -467,6 +467,22 @@ bunx cf d1 migrations apply <database-id> --dir .guren/cloudflare/d1-migrations
 
 このディレクトリを使うと、各マイグレーションは `wrangler d1 migrations apply` と同じ名前で記録されます。そのため、Wrangler でマイグレーションしてきたデータベースも履歴を引き継げます。`cloudflare:size` が測るのは Wrangler の経路だけです。
 
+### デプロイの計画
+
+`bunx guren cloudflare:deploy --plan` は、ツールを確かめ、ビルドし、`cf build` を実行してから、D1 と KV の各バインディングをアカウントのリソースと突き合わせます。アカウントには何も書き込みません。
+
+```bash
+bunx guren cloudflare:deploy --plan
+```
+
+各バインディングは次のどれかとして表示されます。`existing` は、前回の実行で決まったリソースか、自分で書いた ID のリソースです。`adopt` は、予定の名前で見つかったものの、まだこのアプリのものとして記録されていないリソースなので、このアプリのものか確かめてください。`create on deploy` は、デプロイ時に作られるリソースです。KV の名前は、`cf deploy` 自身が作るときと同じ `<worker>-<binding>`（`_` は `-` に置き換え）です。止める必要のある問題があると、終了コード 1 で終わります。
+
+- `binding-conflict`: `cloudflare.config.ts` に書いた ID と予定の名前が別のリソースを指しているか、同じ名前のリソースが 2 つあります。
+- `resource-missing`: 書いた ID のリソースがアカウントにないか、リソースがなく、この実行では作れません。`--ci` を付けた実行と、ターミナルのない実行では、`--provision` を付けない限り何も作りません。
+- `source-unreadable`: `cf` がアカウントのリソースを一覧できませんでした。空のアカウントとして扱わずに、計画を止めます。
+
+事前確認には、PATH 上の `node` が Node 22.18 以上であること、アプリの Wrangler が 4.136 以上であること、`cf` がログイン済みであること（`bunx cf auth login`、CI では `CLOUDFLARE_API_TOKEN`）が必要です。`--json` を付けると `{ plan }` を 1 つのオブジェクトとして出力します。このバージョンは計画までで、リソースの作成、マイグレーション、デプロイは、上に書いたとおり `cf deploy` と `cf d1 migrations apply` で行います。
+
 ## 既存アプリの更新
 
 `wrangler.jsonc` は最初に 1 度だけ生成され、それ以降は上書きされません。そのため、プラグインを更新する前に作ったアプリは、元の設定のまま残ります。古い設定を見つけると、ビルドが足りない項目を具体的に出力するので、それを追記してビルドし直してください。
