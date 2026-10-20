@@ -17,7 +17,15 @@ export interface LocalMigrations {
 }
 
 export type LayoutDecision =
-  | { ok: true; layout: MigrationLayout; pendingFolders: string[]; pendingFiles: string[] }
+  | {
+    ok: true
+    layout: MigrationLayout
+    pendingFolders: string[]
+    /** Plain files the layout applies, or would leave out (`nested`), both unjudged by the guard. */
+    pendingFiles: string[]
+    /** Folders and files together, by the name the tracker records, the order cf applies them in. */
+    pending: string[]
+  }
   | { ok: false; nested: string[]; flat: string[] }
 
 const NESTED_SUFFIX = '/migration.sql'
@@ -36,7 +44,11 @@ export function readLocalMigrations(migrationsDir: string): LocalMigrations {
   return { folders: folders.sort(), files: files.sort() }
 }
 
-/** `tracker` is `null` for a database with no tracker table, or one not created yet. */
+/**
+ * `tracker` is `null` for a database with no tracker table, or one not created yet.
+ * A tracker with no rows takes the flat layout, which the guide's manual apply and
+ * Wrangler both use, so the two never record different names for one database.
+ */
 export function decideLayout(local: LocalMigrations, tracker: readonly string[] | null): LayoutDecision {
   const rows = tracker ?? []
   const nested = rows.filter((name) => name.endsWith(NESTED_SUFFIX))
@@ -45,24 +57,15 @@ export function decideLayout(local: LocalMigrations, tracker: readonly string[] 
     return { ok: false, nested, flat }
   }
 
-  if (flat.length > 0) {
-    const applied = new Set(flat)
-    return {
-      ok: true,
-      layout: 'flat',
-      pendingFolders: local.folders.filter((folder) => !applied.has(`${folder}.sql`)),
-      pendingFiles: local.files.filter((file) => !applied.has(file)),
-    }
-  }
-
-  // A fresh database, or one cf has applied the nested layout to. Plain files are not part of that layout.
-  const applied = new Set(nested)
-  return {
-    ok: true,
-    layout: 'nested',
-    pendingFolders: local.folders.filter((folder) => !applied.has(`${folder}${NESTED_SUFFIX}`)),
-    pendingFiles: [],
-  }
+  const layout: MigrationLayout = nested.length > 0 ? 'nested' : 'flat'
+  const recorded = (folder: string) => (layout === 'nested' ? `${folder}${NESTED_SUFFIX}` : `${folder}.sql`)
+  const applied = new Set(rows)
+  const pendingFolders = local.folders.filter((folder) => !applied.has(recorded(folder)))
+  const pendingFiles = local.files.filter((file) => !applied.has(file))
+  const pending = [...pendingFolders.map((folder) => ({ key: `${folder}.sql`, name: folder })), ...pendingFiles.map((file) => ({ key: file, name: file }))]
+    .sort((left, right) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0))
+    .map((entry) => entry.name)
+  return { ok: true, layout, pendingFolders, pendingFiles, pending }
 }
 
 /** The `cf d1 migrations` arguments for a layout, after the database id. */

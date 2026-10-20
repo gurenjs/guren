@@ -202,14 +202,20 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   }
 }
 
-/** The previous build's `resolved` section, or nothing when there is no readable manifest. */
-export function readResolvedResources(out: string): Record<string, ResolvedResource> {
+/** The manifest a build left in `out`, or an empty object when there is none to read. */
+export function readWorkerManifest(out: string): Partial<WorkerManifest> {
   try {
-    const manifest = JSON.parse(readFileSync(resolve(out, WORKER_MANIFEST_FILE), 'utf8')) as Partial<WorkerManifest>
-    return isRecord(manifest.resolved) ? (manifest.resolved as Record<string, ResolvedResource>) : {}
+    const manifest: unknown = JSON.parse(readFileSync(resolve(out, WORKER_MANIFEST_FILE), 'utf8'))
+    return isRecord(manifest) ? (manifest as Partial<WorkerManifest>) : {}
   } catch {
     return {}
   }
+}
+
+/** The previous build's `resolved` section, or nothing when there is no readable manifest. */
+function readResolvedResources(out: string): Record<string, ResolvedResource> {
+  const resolved = readWorkerManifest(out).resolved
+  return isRecord(resolved) ? (resolved as Record<string, ResolvedResource>) : {}
 }
 
 function writeWorkerManifest(input: {

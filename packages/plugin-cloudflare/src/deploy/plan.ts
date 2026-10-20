@@ -164,7 +164,9 @@ function planMigrations(input: MigrationInput, findings: Finding[]): DeployPlan[
 
   const destructive = [
     ...input.verdict.unacknowledged,
-    ...input.unjudged.map((file) => `db/migrations/${file}: a plain .sql file, which the destructive-migration guard does not read`),
+    ...input.unjudged.map((file) => input.layout === 'nested'
+      ? `db/migrations/${file}: a plain .sql file, which the nested layout never applies`
+      : `db/migrations/${file}: a plain .sql file, which the destructive-migration guard does not read`),
   ]
   if (destructive.length > 0) {
     findings.push({
@@ -182,7 +184,7 @@ function planSecrets(input: SecretsInput, worker: string, findings: Finding[]): 
     findings.push(blocker('source-unreadable', undefined, `${input.required.message}. Without it the plan cannot tell which secrets the worker needs.`, 'Fix config/env.ts so it imports, then plan again.'))
     return undefined
   }
-  if (input.required.status === 'absent') return []
+  if (input.required.status === 'absent') return undefined
 
   const have = new Set([...input.provided, ...(input.deployed.ok ? input.deployed.value : [])])
   const missing = input.required.required.filter((name) => !have.has(name))

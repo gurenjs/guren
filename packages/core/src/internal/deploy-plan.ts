@@ -49,12 +49,15 @@ interface DeployPlanCliApi {
   envFileKeys?(content: string): Set<string>
 }
 
-async function loadCli(): Promise<DeployPlanCliApi | string> {
-  try {
-    return (await import('@guren/cli')) as DeployPlanCliApi
-  } catch (error) {
-    return `@guren/cli could not be loaded (${error instanceof Error ? error.message : String(error)})`
-  }
+let cliLoad: Promise<DeployPlanCliApi | string> | undefined
+
+/** Loaded once per process: both readers below run in one plan. */
+function loadCli(): Promise<DeployPlanCliApi | string> {
+  cliLoad ??= import('@guren/cli').then(
+    (cli) => cli as DeployPlanCliApi,
+    (error: unknown) => `@guren/cli could not be loaded (${error instanceof Error ? error.message : String(error)})`,
+  )
+  return cliLoad
 }
 
 /** The `config/env.ts` keys a production deploy must set, as the app's own schema decides. */

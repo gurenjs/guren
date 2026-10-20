@@ -13,7 +13,7 @@ import {
 } from '@guren/core/internal/deploy-plan'
 
 import { detectCloudflareBackend, isRecord } from '../backend'
-import { buildCloudflareOutput, readResolvedResources } from '../build'
+import { buildCloudflareOutput, readWorkerManifest } from '../build'
 import { CF_OUTPUT_DIR } from '../worker-manifest'
 import {
   appCfRunner,
@@ -99,24 +99,23 @@ export async function planCloudflareDeploy(options: CloudflareDeployOptions): Pr
   const worker = readEvaluatedWorker(root)
   const uses = (type: string) => Object.values(worker.env).some((entry) => entry.type === type)
   const unlisted: Read<never[]> = { ok: true, value: [] }
+  const previous = readWorkerManifest(join(root, CF_OUTPUT_DIR))
   const context = {
     worker,
-    manifest: { resolved: readResolvedResources(join(root, CF_OUTPUT_DIR)) },
+    manifest: { resolved: isRecord(previous.resolved) ? previous.resolved : {} },
     d1: uses('d1') ? listD1Databases(cf) : unlisted,
     kv: uses('kv') ? listKvNamespaces(cf) : unlisted,
     mayCreate: Boolean(options.provision) || (!options.ci && interactive),
   }
-  // Bindings first: the migrations read the database the plan resolved DB to.
-  const database = buildPlan(context).bindings.find((binding) => binding.binding === DATABASE_BINDING)
+  // Bindings first: the migrations read the database the plan resolved the build's D1 binding to.
+  const databaseBinding = previous.d1?.binding
+  const database = buildPlan(context).bindings.find((binding) => binding.binding === databaseBinding)
   return buildPlan({
     ...context,
     migrations: database ? readMigrations(root, cf, database, options) : undefined,
     secrets: await readSecrets(root, cf, worker, options.secretsFile),
   })
 }
-
-/** The D1 binding the build always writes (`WorkerManifest.d1.binding`). */
-const DATABASE_BINDING = 'DB'
 
 function readMigrations(
   root: string,
@@ -150,15 +149,15 @@ function readMigrations(
     status: 'ready',
     layout: decision.layout,
     applyArgs: migrationDirArgs(decision.layout, `${CF_OUTPUT_DIR}/d1-migrations`),
-    pending: [...decision.pendingFolders, ...decision.pendingFiles],
+    pending: decision.pending,
     unjudged: decision.pendingFiles,
     verdict,
     allowDestructive: options.allowDestructive === true || process.env[ALLOW_DESTRUCTIVE_ENV] === '1',
   }
 }
 
-/** Binding types whose value the config itself provides, so no secret is needed under that name. */
-const VALUE_BINDING_TYPES = new Set(['text', 'json', 'secret'])
+/** Binding types whose value the config itself provides. A `secret` binding only declares one. */
+const VALUE_BINDING_TYPES = new Set(['text', 'json'])
 
 async function readSecrets(
   root: string,
@@ -172,13 +171,16 @@ async function readSecrets(
   if (secretsFile) {
     let content: string
     try {
-      content = readFileSync(resolve(root, secretsFile), 'utf8')
+      // A path argument, so from where the command runs, as `--root` is.
+      content = readFileSync(resolve(secretsFile), 'utf8')
     } catch (error) {
       throw new Error(`Cloudflare deploy: --secrets-file ${secretsFile} could not be read (${error instanceof Error ? error.message : String(error)}).`)
     }
     const keys = await readEnvFileKeys(content)
     if (typeof keys === 'string') throw new Error(`Cloudflare deploy: --secrets-file could not be read: ${keys}.`)
-    provided.push(...keys)
+    // `KEY=` is unset to the schema's parse, so a blank line provides nothing.
+    const blank = new Set([...content.matchAll(/^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*(?:""|'')?[ \t]*(?:#.*)?$/gmu)].map((match) => match[1]))
+    provided.push(...[...keys].filter((key) => !blank.has(key)))
   }
 
   const required = await readRequiredDeployEnv(root)

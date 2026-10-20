@@ -216,7 +216,7 @@ describe('cloudflare:deploy --plan', () => {
     const plan = await planCloudflareDeploy(options({ cf: fakeCf(root, [], calls), provision: true }))
 
     expect(calls.some((call) => call[1] === 'query')).toBe(false)
-    expect(plan.migrations).toMatchObject({ layout: 'nested', pending: ['20261001_init', '20261002_drop'] })
+    expect(plan.migrations).toMatchObject({ layout: 'flat', pending: ['20261001_init', '20261002_drop'] })
     expect(plan.findings).toEqual([])
   })
 
@@ -230,8 +230,13 @@ describe('cloudflare:deploy --plan', () => {
     expect(firstDeploy.missingSecrets).toEqual(['APP_KEY'])
     expect(firstDeploy.findings[0]?.check).toBe('secrets')
 
+    // Copied from .env.example, the key is still blank: unset to the schema.
+    writeFileSync(join(root, '.env.production'), 'APP_KEY=\n')
+    const blank = await planCloudflareDeploy(options({ cf: fakeCfWith(root, {}), secretsFile: join(root, '.env.production') }))
+    expect(blank.missingSecrets).toEqual(['APP_KEY'])
+
     writeFileSync(join(root, '.env.production'), 'APP_KEY=base64:never-read\n')
-    const withFile = await planCloudflareDeploy(options({ cf: fakeCfWith(root, {}), secretsFile: '.env.production' }))
+    const withFile = await planCloudflareDeploy(options({ cf: fakeCfWith(root, {}), secretsFile: join(root, '.env.production') }))
     expect(withFile.missingSecrets).toEqual([])
 
     const deployed = await planCloudflareDeploy(options({ cf: fakeCfWith(root, { secrets: ['APP_KEY'] }) }))

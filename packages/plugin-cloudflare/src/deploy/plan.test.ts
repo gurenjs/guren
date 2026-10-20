@@ -259,7 +259,10 @@ describe('buildPlan', () => {
     })
 
     test('should need nothing without config/env.ts, and block when it cannot be read', () => {
-      expect(buildPlan(context({ secrets: { required: { status: 'absent' }, deployed: ok([]), provided: [] } })).findings).toEqual([])
+      const absent = buildPlan(context({ secrets: { required: { status: 'absent' }, deployed: ok([]), provided: [] } }))
+      expect(absent.findings).toEqual([])
+      // Unchecked, so the report does not claim every variable is provided.
+      expect(absent.missingSecrets).toBeUndefined()
       expect(buildPlan(context({ secrets: { required: { status: 'unreadable', message: 'config/env.ts failed to import' }, deployed: ok([]), provided: [] } })).findings[0]?.check)
         .toBe('source-unreadable')
     })
