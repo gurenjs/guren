@@ -185,4 +185,86 @@ describe('buildPlan', () => {
   test('should say which source it did not read', () => {
     expect(buildPlan(context()).unread.join(' ')).toContain('deployed Worker')
   })
+
+  describe('migrations', () => {
+    const ready = {
+      status: 'ready' as const,
+      layout: 'flat' as const,
+      applyArgs: ['--dir', '.guren/cloudflare/d1-migrations'],
+      pending: ['20261002_drop'],
+      unjudged: [],
+      verdict: { unacknowledged: [], acknowledged: [] },
+      allowDestructive: false,
+    }
+
+    test('should report the pending set and how it applies', () => {
+      const plan = buildPlan(context({ migrations: ready }))
+
+      expect(plan.migrations).toEqual({ layout: 'flat', pending: ['20261002_drop'], applyArgs: ready.applyArgs, acknowledged: [] })
+      expect(plan.findings).toEqual([])
+    })
+
+    test('should block a destructive statement no marker covers, and only warn under --allow-destructive', () => {
+      const verdict = { unacknowledged: ['db/migrations/20261002_drop/migration.sql:1: drops table posts (drop-table)'], acknowledged: [] }
+
+      const refused = buildPlan(context({ migrations: { ...ready, verdict } }))
+      const allowed = buildPlan(context({ migrations: { ...ready, verdict, allowDestructive: true } }))
+
+      expect(refused.findings.map((finding) => [finding.check, finding.severity])).toEqual([['destructive-migration', 'blocker']])
+      expect(refused.findings[0]?.message).toContain('migration.sql:1')
+      expect(allowed.findings.map((finding) => finding.severity)).toEqual(['warning'])
+    })
+
+    test('should block a pending plain .sql file the guard cannot read', () => {
+      const plan = buildPlan(context({ migrations: { ...ready, unjudged: ['0001_legacy.sql'] } }))
+
+      expect(plan.findings[0]?.message).toContain('0001_legacy.sql')
+      expect(hasBlocker(plan)).toBe(true)
+    })
+
+    test('should block a tracker on both layouts, and one it could not read', () => {
+      expect(buildPlan(context({ migrations: { status: 'layout-conflict', nested: ['a/migration.sql'], flat: ['b.sql'] } })).findings[0]?.check)
+        .toBe('tracker-layout')
+      expect(buildPlan(context({ migrations: { status: 'unreadable', reason: 'cf d1 query failed' } })).findings[0]?.check)
+        .toBe('source-unreadable')
+    })
+  })
+
+  describe('secrets', () => {
+    const required = { status: 'loaded' as const, required: ['APP_KEY', 'APP_URL'] }
+
+    test('should accept names the deployed worker, the config or the secrets file provide', () => {
+      const plan = buildPlan(context({ secrets: { required, deployed: ok(['APP_KEY']), provided: ['APP_URL'] } }))
+
+      expect(plan.missingSecrets).toEqual([])
+      expect(plan.findings).toEqual([])
+    })
+
+    test('should block a missing secret, naming the command that sets it', () => {
+      const plan = buildPlan(context({ secrets: { required, deployed: ok(['APP_KEY']), provided: [] } }))
+
+      expect(plan.missingSecrets).toEqual(['APP_URL'])
+      expect(plan.findings[0]?.fix).toBe('bunx cf workers secrets update APP_URL --worker demo-app')
+    })
+
+    // A first deploy has no worker to list secrets of; only the file can provide them.
+    test('should send a first deploy to --secrets-file when the deployed secrets cannot be read', () => {
+      const plan = buildPlan(context({
+        secrets: { required, deployed: { ok: false, reason: 'script not found' }, provided: ['APP_KEY'], secretsFile: '.env.production' },
+      }))
+
+      expect(plan.missingSecrets).toEqual(['APP_URL'])
+      expect(plan.findings[0]?.message).toContain('script not found')
+      expect(plan.findings[0]?.fix).toContain('.env.production lacks them')
+    })
+
+    test('should need nothing without config/env.ts, and block when it cannot be read', () => {
+      const absent = buildPlan(context({ secrets: { required: { status: 'absent' }, deployed: ok([]), provided: [] } }))
+      expect(absent.findings).toEqual([])
+      // Unchecked, so the report does not claim every variable is provided.
+      expect(absent.missingSecrets).toBeUndefined()
+      expect(buildPlan(context({ secrets: { required: { status: 'unreadable', message: 'config/env.ts failed to import' }, deployed: ok([]), provided: [] } })).findings[0]?.check)
+        .toBe('source-unreadable')
+    })
+  })
 })

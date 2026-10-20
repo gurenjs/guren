@@ -40,6 +40,7 @@ import {
   type WorkerManifest,
 } from './worker-manifest'
 import { detectCloudflareBackend, readManifestDependencies } from './backend'
+import { readLocalMigrations } from './deploy/migrations'
 
 interface PackageJsonLike {
   name?: string
@@ -202,14 +203,20 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   }
 }
 
-/** The previous build's `resolved` section, or nothing when there is no readable manifest. */
-export function readResolvedResources(out: string): Record<string, ResolvedResource> {
+/** The manifest a build left in `out`, or an empty object when there is none to read. */
+export function readWorkerManifest(out: string): Partial<WorkerManifest> {
   try {
-    const manifest = JSON.parse(readFileSync(resolve(out, WORKER_MANIFEST_FILE), 'utf8')) as Partial<WorkerManifest>
-    return isRecord(manifest.resolved) ? (manifest.resolved as Record<string, ResolvedResource>) : {}
+    const manifest: unknown = JSON.parse(readFileSync(resolve(out, WORKER_MANIFEST_FILE), 'utf8'))
+    return isRecord(manifest) ? (manifest as Partial<WorkerManifest>) : {}
   } catch {
     return {}
   }
+}
+
+/** The previous build's `resolved` section, or nothing when there is no readable manifest. */
+export function readResolvedResources(out: string): Record<string, ResolvedResource> {
+  const resolved = readWorkerManifest(out).resolved
+  return isRecord(resolved) ? (resolved as Record<string, ResolvedResource>) : {}
 }
 
 function writeWorkerManifest(input: {
@@ -875,21 +882,12 @@ export function flattenD1Migrations(migrationsDir: string, outDir: string): void
     return
   }
 
-  const entries = readdirSync(migrationsDir, { withFileTypes: true })
-  const copies: Array<{ from: string; to: string }> = []
-
-  for (const entry of entries) {
-    if (entry.isFile() && entry.name.endsWith('.sql')) {
-      copies.push({ from: resolve(migrationsDir, entry.name), to: entry.name })
-      continue
-    }
-    if (entry.isDirectory() && entry.name !== 'meta') {
-      const nested = resolve(migrationsDir, entry.name, 'migration.sql')
-      if (existsSync(nested)) {
-        copies.push({ from: nested, to: `${entry.name}.sql` })
-      }
-    }
-  }
+  // The same walk `cloudflare:deploy --plan` judges, so the two cannot disagree on the set.
+  const local = readLocalMigrations(migrationsDir)
+  const copies = [
+    ...local.files.map((file) => ({ from: resolve(migrationsDir, file), to: file })),
+    ...local.folders.map((folder) => ({ from: resolve(migrationsDir, folder, 'migration.sql'), to: `${folder}.sql` })),
+  ]
 
   const seen = new Map<string, string>()
   for (const copy of copies) {

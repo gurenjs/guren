@@ -19,6 +19,18 @@ export function formatPlan(plan: DeployPlan): string {
     lines.push(`  ${binding.binding} (${binding.type}) "${binding.name}"${id}: ${ACTION_LABELS[binding.action]}`)
   }
 
+  if (plan.migrations) {
+    const { pending, layout, applyArgs } = plan.migrations
+    lines.push(pending.length === 0
+      ? `  Migrations: none pending (${layout} layout).`
+      : `  Migrations: ${pending.length} pending (${layout} layout): ${pending.join(', ')}`)
+    if (pending.length > 0) lines.push(`    Applied with: cf d1 migrations apply <DB id> ${applyArgs.map((arg) => (arg.includes('*') ? `'${arg}'` : arg)).join(' ')}`)
+    for (const { migration, reason } of plan.migrations.acknowledged) {
+      lines.push(`    ${migration}: destructive, acknowledged${reason ? ` (${reason})` : ''}`)
+    }
+  }
+  if (plan.missingSecrets?.length === 0) lines.push('  Secrets: every required variable is provided.')
+
   for (const source of plan.unread) {
     lines.push(`  Not read: ${source}.`)
   }

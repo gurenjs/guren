@@ -123,6 +123,14 @@ const cloudflareDeploy = defineCommand({
       type: 'boolean',
       description: "Skip running the app's build script",
     },
+    'allow-destructive': {
+      type: 'boolean',
+      description: 'Accept pending destructive migration statements no -- guren:allow-destructive marker covers (still listed)',
+    },
+    'secrets-file': {
+      type: 'string',
+      description: 'A dotenv file of secrets for the deploy; the plan reads only the names it assigns',
+    },
   },
   async run({ args }) {
     const plan = await planCloudflareDeploy({
@@ -133,6 +141,8 @@ const cloudflareDeploy = defineCommand({
       mcpOAuth: Boolean(args['mcp-oauth']),
       ...(args['mcp-path'] ? { mcpPath: args['mcp-path'] } : {}),
       skipAppBuild: Boolean(args['skip-app-build']),
+      allowDestructive: Boolean(args['allow-destructive']),
+      ...(args['secrets-file'] ? { secretsFile: args['secrets-file'] } : {}),
       logToStderr: Boolean(args.json),
     })
 

@@ -282,9 +282,17 @@ export function pluginEnvEntries(entries: GurenPluginEnvEntry[]): GurenPluginEnv
   return valid
 }
 
+const ENV_ASSIGNMENT = /^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=(.*)$/gmu
+
 /** The keys a dotenv file assigns, as Bun reads it: `KEY=`, indented or `export`-prefixed. A `# KEY=` line assigns nothing. */
 export function envFileKeys(content: string): Set<string> {
-  return new Set([...content.matchAll(/^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=/gmu)].map((match) => match[1]))
+  return new Set([...content.matchAll(ENV_ASSIGNMENT)].map((match) => match[1]))
+}
+
+/** The keys a dotenv file assigns a value to: `KEY=`, `KEY=""` or `KEY= # note` is unset to an env schema. */
+export function assignedEnvKeys(content: string): Set<string> {
+  const blank = /^[ \t]*(?:""|'')?[ \t]*(?:#.*)?$/u
+  return new Set([...content.matchAll(ENV_ASSIGNMENT)].filter((match) => !blank.test(match[2] ?? '')).map((match) => match[1]))
 }
 
 /** `content` with a block appended for each entry whose key it does not assign; a comment line per line of `comment`. */

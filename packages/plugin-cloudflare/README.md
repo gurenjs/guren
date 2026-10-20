@@ -26,7 +26,7 @@ Before the app build it runs the deploy-runtime checks `guren doctor` reports an
 
 When the app has a `cloudflare.config.ts` and declares the `cf` package, `cloudflare:build` assembles into `.guren/cloudflare/` and writes `guren-worker.json` there instead of scaffolding `wrangler.jsonc`. `@guren/plugin-cloudflare/config` turns that manifest into `cf` configuration: spread `await gurenWorker({ name })` into `defineConfig({ worker })`, and pass `gurenWranglerBundle()` to `defineWranglerConfig()` in `wrangler.config.ts`. `cf` loads both files with Node 22.18 or later, and needs Wrangler 4.136 or later to bundle. The Cloudflare guide has the full setup.
 
-`bunx guren cloudflare:deploy --plan` builds, evaluates `cloudflare.config.ts`, and resolves every D1 and KV binding against the account (existing, adopt, or create), exiting 1 on a conflict, a missing resource the run may not create, or a listing it could not read. It writes nothing; this version has no deploy step yet.
+`bunx guren cloudflare:deploy --plan` builds, evaluates `cloudflare.config.ts`, and resolves every D1 and KV binding against the account (existing, adopt, or create), exiting 1 on a conflict, a missing resource the run may not create, a listing it could not read, a pending destructive migration no marker acknowledges, or a production variable no secret provides. It writes nothing; this version has no deploy step yet.
 
 ## API
 

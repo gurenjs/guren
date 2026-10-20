@@ -4,8 +4,11 @@
  * the later stages read the same answer. A source that could not be read is a
  * blocker of its own, never an empty listing.
  */
-import type { AccountResource, Read } from './cf-cli'
+import type { DeployEnvRequirement, PendingMigrationVerdict } from '@guren/core/internal/deploy-plan'
+
 import type { WorkerManifest } from '../worker-manifest'
+import type { AccountResource, Read } from './cf-cli'
+import type { MigrationLayout } from './migrations'
 
 /** One `env` entry of cf's evaluated `worker.config.json`. */
 export interface EvaluatedBinding {
@@ -26,6 +29,32 @@ export interface PlanContext {
   kv: Read<AccountResource[]>
   /** Whether this run may create what is missing: an interactive run or `--provision`, never plain `--ci`. */
   mayCreate: boolean
+  migrations?: MigrationInput
+  secrets?: SecretsInput
+}
+
+/** What deploy.ts read about the D1 database's migrations; the judging itself is the ORM's. */
+export type MigrationInput =
+  | { status: 'unreadable'; reason: string }
+  | { status: 'layout-conflict'; nested: string[]; flat: string[] }
+  | {
+    status: 'ready'
+    layout: MigrationLayout
+    /** The `cf d1 migrations apply` arguments after the database id. */
+    applyArgs: string[]
+    pending: string[]
+    /** Pending plain `.sql` files, which the guard cannot judge. */
+    unjudged: string[]
+    verdict: PendingMigrationVerdict
+    allowDestructive: boolean
+  }
+
+export interface SecretsInput {
+  required: DeployEnvRequirement
+  deployed: Read<string[]>
+  /** Names the evaluated config binds as values, and names `--secrets-file` assigns. */
+  provided: string[]
+  secretsFile?: string
 }
 
 export type ResourceType = 'd1' | 'kv'
@@ -48,7 +77,13 @@ export interface PlannedBinding {
   id?: string
 }
 
-export type CheckName = 'binding-conflict' | 'resource-missing' | 'source-unreadable'
+export type CheckName =
+  | 'binding-conflict'
+  | 'resource-missing'
+  | 'source-unreadable'
+  | 'tracker-layout'
+  | 'destructive-migration'
+  | 'secrets'
 
 export interface Finding {
   check: CheckName
@@ -62,6 +97,9 @@ export interface DeployPlan {
   worker: string
   bindings: PlannedBinding[]
   findings: Finding[]
+  migrations?: { layout: MigrationLayout; pending: string[]; applyArgs: string[]; acknowledged: PendingMigrationVerdict['acknowledged'] }
+  /** Required names neither the deployed Worker, the config nor `--secrets-file` provides. */
+  missingSecrets?: string[]
   /** Sources RFC 0035 §3.1 names that this version does not read yet. */
   unread: string[]
 }
@@ -96,12 +134,73 @@ export function buildPlan(context: PlanContext): DeployPlan {
     }
   }
 
+  const migrations = context.migrations ? planMigrations(context.migrations, findings) : undefined
+  const missingSecrets = context.secrets ? planSecrets(context.secrets, context.worker.name, findings) : undefined
+
   return {
     worker: context.worker.name,
     bindings,
     findings,
+    ...(migrations ? { migrations } : {}),
+    ...(missingSecrets ? { missingSecrets } : {}),
     unread: UNREAD_SOURCES,
   }
+}
+
+function planMigrations(input: MigrationInput, findings: Finding[]): DeployPlan['migrations'] {
+  if (input.status === 'unreadable') {
+    findings.push(blocker('source-unreadable', undefined, `${input.reason}. Without the tracker the plan cannot tell which migrations are pending.`, 'Rerun once `cf` can query the database.'))
+    return undefined
+  }
+  if (input.status === 'layout-conflict') {
+    findings.push(blocker(
+      'tracker-layout',
+      undefined,
+      `d1_migrations records both flattened names (${input.flat.slice(0, 3).join(', ')}) and nested ones (${input.nested.slice(0, 3).join(', ')}), so no layout applies only what is pending.`,
+      'Rename the rows to one form with a guarded UPDATE on d1_migrations, then plan again.',
+    ))
+    return undefined
+  }
+
+  const destructive = [
+    ...input.verdict.unacknowledged,
+    ...input.unjudged.map((file) => input.layout === 'nested'
+      ? `db/migrations/${file}: a plain .sql file, which the nested layout never applies`
+      : `db/migrations/${file}: a plain .sql file, which the destructive-migration guard does not read`),
+  ]
+  if (destructive.length > 0) {
+    findings.push({
+      check: 'destructive-migration',
+      severity: input.allowDestructive ? 'warning' : 'blocker',
+      message: `${destructive.length} pending statement(s) no migration acknowledges:\n    ${destructive.join('\n    ')}`,
+      fix: 'Review each one. Put `-- guren:allow-destructive: <reason>` on the first line of its migration.sql, or pass --allow-destructive for this run.',
+    })
+  }
+  return { layout: input.layout, pending: input.pending, applyArgs: input.applyArgs, acknowledged: input.verdict.acknowledged }
+}
+
+function planSecrets(input: SecretsInput, worker: string, findings: Finding[]): string[] | undefined {
+  if (input.required.status === 'unreadable') {
+    findings.push(blocker('source-unreadable', undefined, `${input.required.message}. Without it the plan cannot tell which secrets the worker needs.`, 'Fix config/env.ts so it imports, then plan again.'))
+    return undefined
+  }
+  if (input.required.status === 'absent') return undefined
+
+  const have = new Set([...input.provided, ...(input.deployed.ok ? input.deployed.value : [])])
+  const missing = input.required.required.filter((name) => !have.has(name))
+  if (missing.length === 0) return missing
+
+  findings.push(blocker(
+    'secrets',
+    undefined,
+    input.deployed.ok
+      ? `${worker} has no value for ${missing.join(', ')}, which config/env.ts requires in production.`
+      : `config/env.ts requires ${missing.join(', ')} in production, and the deployed secrets could not be read (${input.deployed.reason}), as on a first deploy.`,
+    input.deployed.ok
+      ? missing.map((name) => `bunx cf workers secrets update ${name} --worker ${worker}`).join('; ')
+      : `List them in a dotenv file passed as --secrets-file${input.secretsFile ? ` (${input.secretsFile} lacks them)` : ''}; only the names are read here.`,
+  ))
+  return missing
 }
 
 export function hasBlocker(plan: DeployPlan): boolean {
