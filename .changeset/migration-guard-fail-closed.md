@@ -1,6 +1,7 @@
 ---
 "@guren/orm": patch
 "@guren/cli": patch
+"create-guren-app": patch
 ---
 
 Close gaps in the destructive-migration guard (RFC 0034), each of which let a destructive statement through:
@@ -11,4 +12,4 @@ Close gaps in the destructive-migration guard (RFC 0034), each of which let a de
 - A SQLite rebuild is exempt only when the copy's own `CREATE TABLE` keeps every column's type, so a `--custom` migration's repeated snapshot vouches for nothing, and not when another table references it with `ON DELETE CASCADE`/`SET NULL`/`SET DEFAULT` where foreign keys stay on (Cloudflare D1).
 - MySQL's bare `DECIMAL` is `DECIMAL(10,0)`, so `DECIMAL(12,2)` to `DECIMAL` is narrowing.
 - A refusal over an unreadable migration tracker names the read error and keeps it as the `cause`.
-- `guren check` lists changed paths with `git -z`, so a migration folder with a non-ASCII name is judged; commits with no merge base (a shallow clone) are a gating `migrations-destructive-no-base` finding; on `main` itself it says that merged migrations are not judged (`migrations-destructive-on-base`, advisory).
+- `guren check` lists changed paths with `git -z`, so a migration folder with a non-ASCII name is judged, and falls back to `origin/HEAD` when there is no `main`. In an app with migrations, commits with no merge base (a shallow clone) are now a gating `migrations-destructive-no-base` finding, so a CI checkout needs the base branch's history: the scaffolded workflow now checks out with `fetch-depth: 0`, and an existing app running `guren gate` in CI should do the same. On `main` itself the rule says that merged migrations are not judged (`migrations-destructive-on-base`, advisory). It reads `config/database.ts` to tell a bun:sqlite app, whose rebuilds run with foreign keys off, from a D1 one.

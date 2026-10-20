@@ -11,6 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # `guren check` judges the migrations not on main yet, which needs main's history.
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
 

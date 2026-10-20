@@ -59,7 +59,7 @@ async function runGitPaths(cwd: string, args: string[]): Promise<string[] | null
 
 /**
  * `getChangedFiles()` with the merge base it diffed against, undefined when
- * neither `origin/main` nor `main` shares history with HEAD, in which case
+ * none of `origin/main`, `main` and `origin/HEAD` shares history with HEAD, in which case
  * `files` holds only uncommitted and untracked changes. `head` is HEAD's
  * commit, undefined before the first commit. `complete` is false when one of
  * the git listings failed, so `files` may be short.
@@ -77,6 +77,10 @@ export async function getChangedFilesFromBase(
   let mergeBase = (await runGit(absoluteCwd, ['merge-base', 'HEAD', 'origin/main']))?.[0]
   if (!mergeBase) {
     mergeBase = (await runGit(absoluteCwd, ['merge-base', 'HEAD', 'main']))?.[0]
+  }
+  // The remote's default branch, for a repository whose base is not called main.
+  if (!mergeBase) {
+    mergeBase = (await runGit(absoluteCwd, ['merge-base', 'HEAD', 'origin/HEAD']))?.[0]
   }
 
   // A repository with no commit has no HEAD to diff against; everything tracked is then in the index.

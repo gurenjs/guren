@@ -216,7 +216,7 @@ shipped long ago does not fail today's check. It reads `migration.sql` and
 | `migrations-destructive:<file>:<line>` | (warn) A destructive statement in a migration with no `-- guren:allow-destructive` comment. It counts for `check --ci` and `guren gate`, so the Stop hook sends an agent back before it finishes with one in the tree. [Destructive migrations](database.md#destructive-migrations) lists what counts. |
 | `migrations-destructive:<file>` | (pass) The migration's destructive statements are acknowledged; the message quotes the reason. |
 | `migrations-destructive-unverified` | (warn, advisory) Not a git repository, so nothing was judged. |
-| `migrations-destructive-no-base` | (warn) Commits exist but none is shared with `main` or `origin/main` (a shallow clone, or a base branch by another name), so committed migrations were not judged. It counts for `check --ci`: fetch the base branch (`fetch-depth: 0` in CI). |
+| `migrations-destructive-no-base` | (warn) The app has migrations and commits, but none is shared with `main`, `origin/main` or `origin/HEAD` (a shallow clone), so committed migrations were not judged. It counts for `check --ci`: fetch the base branch (`fetch-depth: 0` on `actions/checkout`, as the scaffolded workflow does). |
 | `migrations-destructive-on-base` | (warn, advisory) HEAD is on `main`, so the migrations committed there count as shipped and nothing was judged. The rule guards a branch before it merges; it cannot tell which migrations a database has applied. |
 
 ## How the Checks Read the App

@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { ALLOW_DESTRUCTIVE_MARKER, judgeMigrations, readMigrationSources } from '@guren/orm/internal/migration-guard'
 import { getChangedFilesFromBase } from './changed-files'
@@ -9,6 +9,25 @@ const TITLE = 'Destructive migrations'
 const SUGGESTION =
   `Ask the user, then put \`-- ${ALLOW_DESTRUCTIVE_MARKER}: <reason>\` on the first line of the migration, ` +
   'or regenerate it so it does not drop, narrow or rename (RFC 0034).'
+
+/**
+ * Whether the app's migrations run with foreign keys on, read from source: off
+ * only for a `createSqliteDatabase()` config (bun:sqlite's runner turns them off)
+ * with no D1 in sight. Anything else keeps them on, as D1 does.
+ */
+function foreignKeysEnforced(cwd: string): boolean {
+  if (['wrangler.json', 'wrangler.jsonc', 'wrangler.toml'].some((file) => existsSync(join(cwd, file)))) return true
+  for (const file of ['config/database.ts', 'config/database.js']) {
+    let source: string
+    try {
+      source = readFileSync(join(cwd, file), 'utf8')
+    } catch {
+      continue
+    }
+    return !(source.includes('createSqliteDatabase(') && !source.includes('createD1Database('))
+  }
+  return true
+}
 
 /**
  * `guren check`'s destructive-migration rule (RFC 0034 §3): the migrations not
@@ -48,6 +67,7 @@ export async function checkDestructiveMigrations(
   }
 
   const results: CheckResult[] = []
+  const enforced = foreignKeysEnforced(cwd)
   // Gating, unlike a missing merge base: the listing claims a scope it did not cover.
   if (!changed.complete) {
     results.push(check(
@@ -58,16 +78,17 @@ export async function checkDestructiveMigrations(
       'Run `git status` and `git diff` to see why git failed, then check again.',
     ))
   }
+  const hasMigrations = existsSync(join(cwd, 'db/migrations'))
   // Gating: a shallow clone has commits whose migrations nothing judged.
-  if (changed.head && !changed.mergeBase) {
+  if (changed.head && !changed.mergeBase && (hasMigrations || byFolder.size > 0)) {
     results.push(check(
       'migrations-destructive-no-base',
       TITLE,
       'warn',
-      'No merge base with `main` or `origin/main`, so committed migrations cannot be told from shipped ones and only uncommitted and untracked ones were judged.',
+      'No merge base with `main`, `origin/main` or `origin/HEAD`, so committed migrations cannot be told from shipped ones and only uncommitted and untracked ones were judged.',
       'Fetch the base branch (`git fetch origin main`, or `fetch-depth: 0` in CI) and check again.',
     ))
-  } else if (byFolder.size === 0 && changed.head && changed.mergeBase === changed.head && existsSync(join(cwd, 'db/migrations'))) {
+  } else if (byFolder.size === 0 && changed.head && changed.mergeBase === changed.head && hasMigrations) {
     results.push({
       ...check(
         'migrations-destructive-on-base',
@@ -85,7 +106,7 @@ export async function checkDestructiveMigrations(
     names.sort((a, b) => a.localeCompare(b))
     let report
     try {
-      report = judgeMigrations(readMigrationSources(join(cwd, folder), names, folder))
+      report = judgeMigrations(readMigrationSources(join(cwd, folder), names, folder), { foreignKeysEnforced: enforced })
     } catch (error) {
       results.push(check(`migrations-destructive:${folder}`, TITLE, 'warn', (error as Error).message, undefined, folder))
       continue

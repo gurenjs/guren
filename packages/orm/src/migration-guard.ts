@@ -93,15 +93,23 @@ interface LexRules {
   mysqlComments: boolean
   /** PostgreSQL's `$tag$…$tag$`; elsewhere `$` is an identifier character or a parameter. */
   dollarQuotes: boolean
+  /** PostgreSQL nests block comments; MySQL and SQLite end one at the first close. */
+  nestedComments: boolean
 }
 
-const LEX_RULES: Record<MigrationDialect, LexRules> = {
-  postgres: { backslashEscapes: false, escapeStrings: true, mysqlComments: false, dollarQuotes: true },
-  mysql: { backslashEscapes: true, escapeStrings: false, mysqlComments: true, dollarQuotes: false },
-  sqlite: { backslashEscapes: false, escapeStrings: false, mysqlComments: false, dollarQuotes: false },
-}
+const POSTGRES: LexRules = { backslashEscapes: false, escapeStrings: true, mysqlComments: false, dollarQuotes: true, nestedComments: true }
+const MYSQL: LexRules = { backslashEscapes: true, escapeStrings: false, mysqlComments: true, dollarQuotes: false, nestedComments: false }
 
-const DIALECTS = Object.keys(LEX_RULES) as MigrationDialect[]
+/**
+ * Each way a dialect's server may read the SQL, all of which count: MySQL under
+ * `NO_BACKSLASH_ESCAPES`, and PostgreSQL with `standard_conforming_strings` off,
+ * close a string where the default does not.
+ */
+const LEX_READINGS: Record<MigrationDialect, LexRules[]> = {
+  postgres: [POSTGRES, { ...POSTGRES, backslashEscapes: true }],
+  mysql: [MYSQL, { ...MYSQL, backslashEscapes: false }],
+  sqlite: [{ backslashEscapes: false, escapeStrings: false, mysqlComments: false, dollarQuotes: false, nestedComments: false }],
+}
 
 function lex(sql: string, rules: LexRules, firstLine = 1): Lexed {
   const tokens: Token[] = []
@@ -134,6 +142,23 @@ function lex(sql: string, rules: LexRules, firstLine = 1): Lexed {
     return -1
   }
 
+  /** The index of the close of the block comment opened at `open`, or -1. */
+  const closingComment = (open: number): number => {
+    if (!rules.nestedComments) return sql.indexOf('*/', open + 2)
+    let depth = 0
+    for (let at = open; at < sql.length - 1; at += 1) {
+      if (sql[at] === '/' && sql[at + 1] === '*') {
+        depth += 1
+        at += 1
+      } else if (sql[at] === '*' && sql[at + 1] === '/') {
+        depth -= 1
+        if (depth === 0) return at
+        at += 1
+      }
+    }
+    return -1
+  }
+
   while (i < sql.length) {
     const char = sql[i]!
     const startLine = line
@@ -154,7 +179,7 @@ function lex(sql: string, rules: LexRules, firstLine = 1): Lexed {
     }
 
     if (char === '/' && sql[i + 1] === '*') {
-      const end = sql.indexOf('*/', i + 2)
+      const end = closingComment(i)
       if (end === -1) return { tokens, comments, executable, unterminatedAt: startLine }
       const text = advanceTo(end + 2)
       const inner = text.slice(2, -2)
@@ -490,7 +515,8 @@ interface StatementScan {
 
 /** The statement read from its first DDL keyword, so a `BEGIN` or `IF … THEN` in front hides nothing. */
 function scanDdl(tokens: Token[]): StatementScan {
-  const start = tokens.findIndex((token) => isWord(token, ...STATEMENT_KEYWORDS))
+  // `BEFORE TRUNCATE ON t` / `INSERT OR TRUNCATE ON t` name a trigger's event, not a statement.
+  const start = tokens.findIndex((token, at) => isWord(token, ...STATEMENT_KEYWORDS) && !(isWord(token, 'TRUNCATE') && isWord(tokens[at + 1], 'ON', 'OR')))
   if (start === -1) return { findings: [] }
   const statement = tokens.slice(start)
   const [first, second] = statement
@@ -577,17 +603,26 @@ function stringsAreBodies(tokens: Token[]): boolean {
  * `PREPARE s FROM 'literal'` are read as SQL, anything else (a concatenation,
  * `format()`, a variable) cannot be, and is a finding.
  */
-function scanDynamicSql(tokens: Token[]): { findings: RawFinding[]; sql: Token[] } {
+function scanDynamicSql(tokens: Token[], prepared: Set<string>): { findings: RawFinding[]; sql: Token[] } {
   const findings: RawFinding[] = []
   const sql: Token[] = []
   const ends = (token: Token | undefined) => token === undefined || token.value === ';' || isWord(token, 'USING', 'INTO')
   tokens.forEach((token, at) => {
     let source: number | undefined
     if (isWord(token, 'EXECUTE') && !isWord(tokens[at + 1], 'FUNCTION', 'PROCEDURE', 'ON') && tokens[at + 1]?.value !== ',' && !isWord(tokens[at - 1], 'GRANT', 'REVOKE')) {
+      const name = readName(tokens, at + 1)
+      // A statement this file prepared from SQL the scan read.
+      if (name && tokens[at + 1]?.kind !== 'string' && prepared.has(name.name)) return
       source = at + 1
     } else if (isWord(token, 'PREPARE')) {
       const name = readName(tokens, at + 1)
-      if (name && isWord(tokens[name.next], 'FROM')) source = name.next + 1
+      // PostgreSQL's `PREPARE p [(types)] AS <statement>` is read in place.
+      const typesEnd = name && tokens[name.next]?.value === '(' ? tokens.findIndex((each, index) => index > name.next && each.value === ')') : -1
+      if (name && isWord(tokens[typesEnd === -1 ? name.next : typesEnd + 1], 'AS')) prepared.add(name.name)
+      if (name && isWord(tokens[name.next], 'FROM')) {
+        source = name.next + 1
+        if (tokens[source]?.kind === 'string' && ends(tokens[source + 1])) prepared.add(name.name)
+      }
     }
     if (source === undefined) return
     const literal = tokens[source]
@@ -670,6 +705,7 @@ function scanTokens(lexed: Lexed, rules: LexRules): Omit<MigrationScan, 'acknowl
   const copies: Array<{ into: string; from: string; columns: string[]; statement: number }> = []
   const copyTypes = new Map<string, Record<string, string>>()
   const statements = splitStatements(lexed.tokens)
+  const prepared = new Set<string>()
   const scanNested = (text: string, line: number) => {
     const nested = scanTokens(lex(text, rules, line), rules)
     raw.push(...nested.statements)
@@ -686,7 +722,7 @@ function scanTokens(lexed: Lexed, rules: LexRules): Omit<MigrationScan, 'acknowl
       if (result.columnTypes && unqualified(result.creates).startsWith(REBUILD_PREFIX)) copyTypes.set(result.creates, result.columnTypes)
     }
     cascades.push(...cascadeTargets(statement))
-    const dynamic = scanDynamicSql(statement)
+    const dynamic = scanDynamicSql(statement, prepared)
     raw.push(...dynamic.findings)
     const bodies = stringsAreBodies(statement)
     // A dollar-quoted body (a `DO` block, a function), a function body written as a string, and an `EXECUTE`d literal can run the same DDL.
@@ -760,35 +796,40 @@ function readAcknowledgement(comments: Lexed['comments']): MigrationAcknowledgem
   return null
 }
 
-function scanWith(sql: string, dialect: MigrationDialect): MigrationScan {
-  const rules = LEX_RULES[dialect]
+function scanWith(sql: string, rules: LexRules): MigrationScan {
   const lexed = lex(sql, rules)
   return { ...scanTokens(lexed, rules), acknowledged: readAcknowledgement(lexed.comments) }
 }
 
+const findingKey = (statement: DestructiveStatement) => [statement.kind, statement.line, statement.table, statement.column].join('\u0000')
+const evidence = (statement: DestructiveStatement) => JSON.stringify([statement.copiedColumns, statement.copiedColumnTypes, statement.targetType])
+
 /**
  * Every destructive statement in one migration file, and its acknowledgement.
- * With no dialect, each dialect's reading is taken and merged so that none can
- * hide a statement: every finding counts, while a create and the marker count
- * only when every reading has them.
+ * Every way the dialect's server may read the SQL (each dialect's, when none is
+ * named) is taken and merged so that none can hide a statement: every finding
+ * counts, while exemption evidence, a create and the marker count only when
+ * every reading has them.
  */
 export function scanMigrationSql(sql: string, { dialect }: ScanOptions = {}): MigrationScan {
-  if (dialect) return scanWith(sql, dialect)
-  const readings = DIALECTS.map((each) => scanWith(sql, each))
-  const merged = new Map<string, DestructiveStatement>()
-  for (const statement of readings.flatMap((reading) => reading.statements)) {
-    const key = [statement.kind, statement.line, statement.table, statement.column].join('\u0000')
-    const kept = merged.get(key)
-    if (!kept) {
-      merged.set(key, statement)
-      continue
+  const readings = (dialect ? LEX_READINGS[dialect] : Object.values(LEX_READINGS).flat()).map((rules) => scanWith(sql, rules))
+  if (readings.length === 1) return readings[0]!
+  const merged = new Map<string, DestructiveStatement[]>()
+  for (const reading of readings) {
+    const byKey = new Map<string, DestructiveStatement[]>()
+    for (const statement of reading.statements) byKey.set(findingKey(statement), [...(byKey.get(findingKey(statement)) ?? []), statement])
+    for (const [key, found] of byKey) {
+      const kept = merged.get(key)
+      if (!kept) {
+        merged.set(key, found)
+        continue
+      }
+      const longer = found.length > kept.length ? found : kept
+      const agree = kept.length === found.length && kept.every((statement, at) => evidence(statement) === evidence(found[at]!))
+      merged.set(key, agree ? longer : longer.map(({ copiedColumns, copiedColumnTypes, targetType, ...rest }) => rest))
     }
-    // Exemption evidence counts only when every reading saw the same.
-    const { copiedColumns, copiedColumnTypes, targetType, ...rest } = kept
-    const evidence = (each: DestructiveStatement) => JSON.stringify([each.copiedColumns, each.copiedColumnTypes, each.targetType])
-    if (evidence(kept) !== evidence(statement)) merged.set(key, rest)
   }
-  const statements = [...merged.values()]
+  const statements = [...merged.values()].flat()
   const createKey = (entry: { table: string; line: number }) => `${entry.table}\u0000${entry.line}`
   const [first, ...rest] = readings
   return {
@@ -1121,8 +1162,9 @@ export function readMigrationSources(
     } catch (error) {
       throw new Error(`Cannot read ${path} to check it for destructive statements: ${(error as Error).message}`)
     }
-    const snapshot = readSnapshot(resolve(migrationsFolder, name, 'snapshot.json'))
-    const sourceDialect = dialect ?? readSnapshotDialect(snapshot)
+    let snapshot: { value: unknown } | undefined
+    const readOwnSnapshot = () => (snapshot ??= { value: readSnapshot(resolve(migrationsFolder, name, 'snapshot.json')) }).value
+    const sourceDialect = dialect ?? readSnapshotDialect(readOwnSnapshot())
     const scan = scanMigrationSql(sql, { dialect: sourceDialect })
     const source: MigrationSource = {
       name,
@@ -1131,6 +1173,7 @@ export function readMigrationSources(
       ...(sourceDialect ? { dialect: sourceDialect } : {}),
     }
     if (scan.statements.some((statement) => statement.kind === 'alter-column-type' || statement.kind === 'table-rebuild')) {
+      const snapshot = readOwnSnapshot()
       const previousIds = (snapshot as { prevIds?: unknown } | undefined)?.prevIds
       const previous = Array.isArray(previousIds) && previousIds.length === 1 ? snapshotById(previousIds[0]) : undefined
       source.columnTypes = { after: readSnapshotColumnTypes(snapshot), before: readSnapshotColumnTypes(previous) }

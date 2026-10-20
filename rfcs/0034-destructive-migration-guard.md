@@ -134,10 +134,13 @@ DELETE` of each table referencing it. bun:sqlite's runner turns foreign keys off
 around the migration, so nothing fires there. Cloudflare D1 ignores `PRAGMA
 foreign_keys=OFF`, so a child with `ON DELETE CASCADE` loses its rows and one
 with `SET NULL`/`SET DEFAULT` has them rewritten, the rebuilt table's own
-self-reference included. Unless the runner says it turns foreign keys off (only
-the bun:sqlite factory does, at boot and through `describe()` for `db:migrate`),
-a rebuild of a table that either snapshot or the migration's SQL references
-with one of those actions is reported.
+self-reference included. Unless the runner is known to turn foreign keys off, a
+rebuild of a table that either snapshot or the migration's SQL references with
+one of those actions is reported. The bun:sqlite factory says so at boot;
+`db:migrate` knows it from a factory that answers `migrationStatus()` (D1's
+throws) or describes itself as `sqlite`; `guren check`, which imports no app
+code, from a `config/database.ts` calling `createSqliteDatabase()` with no
+`createD1Database()` and no wrangler config beside it.
 
 **A statement against a table the same run creates loses nothing.** A fresh
 database (a new clone, a CI test database, `bun test` on a new SQLite file)
@@ -238,9 +241,11 @@ shipped is never reported. An unacknowledged finding is a gating `warn`, so
 `check --ci` and the gate's check stage fail on it, and the Stop hook sends
 the agent back before it ends a turn with one in the tree. Outside a git
 repository the rule reports itself as unverified (advisory) rather than
-passing. With commits but no merge base (a shallow clone without
-`origin/main`, or a base branch by another name), and when a git listing
-fails, it reports a gating finding, since the committed migrations it claims to
+passing. The base is `origin/main`, then `main`, then the remote's default
+branch (`origin/HEAD`). In an app with migrations, commits with no merge base
+(a shallow clone, which is what `actions/checkout` gives by default, so the
+scaffolded workflow checks out with `fetch-depth: 0`), and a git listing that
+fails, are gating findings, since the committed migrations the rule claims to
 cover were not read. On `main` itself every committed migration counts as
 shipped; the rule then says so (advisory) instead of passing in silence. Paths
 are listed with `git -z`, so a migration folder with a non-ASCII name, which
@@ -333,6 +338,9 @@ Existing apps:
   `destructiveMigrations: 'refuse'` opts in.
 - `guren check --ci` and `guren gate` fail on an unacknowledged destructive
   migration added on the current branch. Merged migrations are never judged.
+  They also fail in a shallow clone of an app with migrations, so an existing
+  app running the gate in CI adds `fetch-depth: 0` to its `actions/checkout`
+  step, as new apps' workflow does.
 - `guren agent:sync` refreshes the `db-manage` skill and the harness entry.
   `.claude/settings.json` and `.codex/rules/guren.rules` are user-owned, and
   sync never rewrites a policy file, so an existing app adds the `ask` entries

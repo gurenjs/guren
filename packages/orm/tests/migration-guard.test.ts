@@ -342,7 +342,7 @@ describe('post-merge review of #1206: fail closed', () => {
     const sql = "INSERT INTO notes VALUES ('it\\''); DROP TABLE users; -- ');"
     expect(dialectKinds(sql, 'mysql')).toEqual(['drop-table'])
     expect(dialectKinds(sql)).toEqual(['drop-table'])
-    expect(dialectKinds(sql, 'postgres')).toEqual([])
+    expect(dialectKinds(sql, 'sqlite')).toEqual([])
   })
 
   test("should read a PostgreSQL E'' string's backslash escapes", () => {
@@ -433,5 +433,34 @@ describe('post-merge review of #1206: fail closed', () => {
     const [source] = readMigrationSources(path, [names[2]!])
     expect(source!.dialect).toBe('sqlite')
     expect(source!.foreignKeys?.after).toEqual([{ table: 'posts', tableTo: 'users', onDelete: 'NO ACTION' }])
+  })
+})
+
+describe('post-merge review of #1206: code-review round', () => {
+  test('should end a PostgreSQL block comment where PostgreSQL does, since it nests', () => {
+    const sql = "/* /* */ ' */ DROP TABLE users; -- '"
+    expect(scanMigrationSql(sql, { dialect: 'postgres' }).statements.map((statement) => statement.kind)).toEqual(['drop-table'])
+    expect(kinds(sql)).toEqual(['drop-table'])
+  })
+
+  test('should read a string as a server with the other escape setting would', () => {
+    const sql = "SELECT 'a\\'; DROP TABLE users; -- ';"
+    expect(scanMigrationSql(sql, { dialect: 'mysql' }).statements.map((statement) => statement.kind)).toContain('drop-table')
+    expect(scanMigrationSql(sql, { dialect: 'postgres' }).statements.map((statement) => statement.kind)).toContain('drop-table')
+  })
+
+  test('should run a statement prepared from a literal by name without calling it run-time SQL', () => {
+    expect(kinds("PREPARE s FROM 'UPDATE t SET x = 1 WHERE id = 2';\nEXECUTE s;")).toEqual([])
+    expect(kinds('PREPARE p (int) AS UPDATE t SET x = $1 WHERE id = 2;\nEXECUTE p(1);')).toEqual([])
+    expect(kinds('EXECUTE s;')).toEqual(['unreadable'])
+  })
+
+  test("should not read a trigger's TRUNCATE event as a statement", () => {
+    expect(kinds('CREATE TRIGGER audit BEFORE TRUNCATE ON users FOR EACH STATEMENT EXECUTE FUNCTION log();')).toEqual([])
+    expect(kinds('CREATE TRIGGER audit AFTER INSERT OR TRUNCATE ON users FOR EACH STATEMENT EXECUTE FUNCTION log();')).toEqual([])
+  })
+
+  test('should keep every finding a reading makes on one line', () => {
+    expect(kinds('ALTER TABLE logs DROP PARTITION p1;  ALTER TABLE logs DROP PARTITION p2;')).toEqual(['drop-partition', 'drop-partition'])
   })
 })

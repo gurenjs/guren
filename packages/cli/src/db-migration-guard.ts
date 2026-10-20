@@ -25,9 +25,9 @@ export interface PendingMigrationJudgement extends MigrationGuardReport {
 }
 
 /**
- * How the app's factory runs migrations, read from its `describe()` (exported, or
- * on the `defineDatabaseConfig()` default export). Only bun:sqlite's runner turns
- * foreign keys off around a rebuild; anything unread keeps them on.
+ * The app factory's dialect from its `describe()` (exported, or on the
+ * `defineDatabaseConfig()` default export). bun:sqlite's runner turns foreign
+ * keys off around a rebuild; D1's cannot.
  */
 function describeRunner(module: Record<string, unknown>): { dialect?: MigrationDialect } & Pick<JudgeOptions, 'foreignKeysEnforced'> {
   try {
@@ -36,7 +36,7 @@ function describeRunner(module: Record<string, unknown>): { dialect?: MigrationD
     const describe = (database as { describe?: () => { dialect?: unknown } } | undefined)?.describe
     const dialect = typeof describe === 'function' ? describe.call(database)?.dialect : undefined
     if (dialect === 'sqlite') return { dialect: 'sqlite', foreignKeysEnforced: false }
-    if (dialect === 'd1') return { dialect: 'sqlite' }
+    if (dialect === 'd1') return { dialect: 'sqlite', foreignKeysEnforced: true }
     if (dialect === 'postgres' || dialect === 'mysql') return { dialect }
   } catch {
     // An unreadable description judges as an unknown runner.
@@ -63,14 +63,14 @@ export async function judgePendingMigrations(cwd = process.cwd()): Promise<Pendi
   const module = await resolveDatabaseModule()
   const status = pickFunction<() => Promise<StatusRow[]>>(module, 'migrationStatus')
   const close = pickFunction<() => Promise<void>>(module, 'closeDatabase')
-  const { dialect, foreignKeysEnforced } = describeRunner(module)
+  const { dialect, foreignKeysEnforced: described } = describeRunner(module)
 
   if (!status) {
     const folder = await resolveMigrationsOutput(cwd)
     const names = localMigrationNames(folder)
     // Over every migration, applied ones included, an earlier CREATE must not exempt a new DROP.
     const sources = readMigrationSources(folder, names, describePath(folder), { dialect })
-    return { ...judgeMigrations(sources, { exemptCreatedInRun: false, foreignKeysEnforced }), pending: names, pendingFrom: 'all' }
+    return { ...judgeMigrations(sources, { exemptCreatedInRun: false, foreignKeysEnforced: described }), pending: names, pendingFrom: 'all' }
   }
 
   let rows: StatusRow[]
@@ -101,5 +101,6 @@ export async function judgePendingMigrations(cwd = process.cwd()): Promise<Pendi
     sources.push(...readMigrationSources(folder, [row.name], describePath(folder), { dialect }))
   }
 
-  return { ...judgeMigrations(sources, { foreignKeysEnforced }), pending: pending.map((row) => row.name), pendingFrom: 'status' }
+  // A factory that answers migrationStatus() is not D1's (whose throws), and the SQLite one that answers migrates with foreign keys off.
+  return { ...judgeMigrations(sources, { foreignKeysEnforced: described ?? false }), pending: pending.map((row) => row.name), pendingFrom: 'status' }
 }

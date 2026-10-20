@@ -141,6 +141,17 @@ describe('checkDestructiveMigrations', () => {
     }
   })
 
+  it('should not gate on a missing base in an app with no migrations', async () => {
+    const cwd = await createTempRoot('guren-migrations-check-nobase-empty-')
+    try {
+      git(cwd, 'init', '-q', '-b', 'trunk')
+      git(cwd, 'commit', '-q', '--allow-empty', '-m', 'root')
+      expect(await checkDestructiveMigrations(cwd)).toEqual([])
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
   it('should say, on the base branch itself, that merged migrations are not judged', async () => {
     const cwd = await repoWithHistory()
     try {
@@ -165,6 +176,11 @@ describe('checkDestructiveMigrations', () => {
       await writeCascadeRebuild(cwd)
       const gating = gatingResults({ cwd, checks: await checkDestructiveMigrations(cwd), passCount: 0, warnCount: 0, failCount: 0 })
       expect(gating).toMatchObject([{ key: 'migrations-destructive:db/migrations/0002_default/migration.sql:7' }])
+
+      // bun:sqlite's runner migrates with foreign keys off, so its config passes the same rebuild.
+      await mkdir(join(cwd, 'config'))
+      await writeFile(join(cwd, 'config/database.ts'), "const database = createSqliteDatabase({ migrationsFolder: 'db/migrations' })\n")
+      expect(gatingResults({ cwd, checks: await checkDestructiveMigrations(cwd), passCount: 0, warnCount: 0, failCount: 0 })).toEqual([])
     } finally {
       await rm(cwd, { recursive: true, force: true })
     }
