@@ -21,13 +21,9 @@ bun add @guren/plugin-cloudflare
 
 Copy the `wrangler.jsonc` here as a starting point, or let the first build scaffold one.
 
-### 2. Create the database
+### 2. The database
 
-```bash
-bunx wrangler d1 create my-guren-app
-```
-
-Paste the printed id into `d1_databases[0].database_id`.
+`d1_databases[0]` names the database and carries no `database_id`. The first `wrangler deploy` (Wrangler 4.129 or later) creates a database of that name, and later deploys keep the one the deployed worker is bound to. To create it yourself instead, run `bunx wrangler d1 create my-guren-app` and add the printed id as `database_id`.
 
 ### 3. Wire the build
 
@@ -52,7 +48,17 @@ Add `.cloudflare/` to `.gitignore` — it is generated output, rebuilt on every 
 bun -e "console.log('base64:'+Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64'))" | bunx wrangler secret put APP_KEY
 ```
 
-### 5. Apply migrations, then deploy
+### 5. Deploy and apply migrations
+
+The first deploy creates the database, so it has to come before the first migration. Until the migration finishes, the worker is live against an empty database:
+
+```bash
+bun run cloudflare:build
+bunx wrangler deploy
+bunx wrangler d1 migrations apply my-guren-app --remote
+```
+
+From then on, migrate first so new code never runs against the old schema:
 
 ```bash
 bun run cloudflare:build

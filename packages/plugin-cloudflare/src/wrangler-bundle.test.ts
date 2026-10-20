@@ -407,11 +407,10 @@ describe.skipIf(!enabled)('wrangler bundles the --mcp-oauth worker', () => {
   test(
     'resolves the oauth subpath and the provider package',
     () => {
-      // The build wrote its own wrangler.jsonc, aliases and all — including
-      // the OAUTH_KV binding, whose placeholder id a dry run does not resolve.
+      // The build wrote its own wrangler.jsonc, aliases and all, with the D1 and
+      // OAUTH_KV bindings id-less as scaffolded: the dry run must accept them.
       const config = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')) as Record<string, unknown>
-      config.kv_namespaces = [{ binding: 'OAUTH_KV', id: '0'.repeat(32) }]
-      delete config.d1_databases
+      expect(config.kv_namespaces).toEqual([{ binding: 'OAUTH_KV' }])
       delete config.assets
       writeFileSync(join(root, 'wrangler.jsonc'), JSON.stringify(config))
 
