@@ -4,7 +4,7 @@
 
 ## `audit` の Policy ルール
 
-`audit` の Policy ルールは、警告(warn)までしか出しません。あるモデルに対する Policy(`make:policy` が書く `app/Policies/<Model>Policy.ts`。同じアプリルートの中で対応付けます)が 1 つでもあると、安全でないメソッドのコントローラアクションのうち、本体でそのモデルを参照しているものに `policy:<METHOD> <path>` の指摘が付きます。レコードの編集フォームを表示する `edit` アクションへの GET ルートも、同じように判定します。アクションが次のどれかに当てはまれば合格(pass)です。
+`audit` の Policy ルールは、警告(warn)までしか出しません。あるモデルに対する Policy(`make:policy` が書く `app/Policies/<Model>Policy.ts`。同じアプリルートの中で対応付けます)が 1 つでもあると、安全でないメソッドのコントローラアクションのうち、本体でそのモデルを参照しているものに `policy:<METHOD> <path>` の指摘が付きます。レコードの編集フォームを表示する `edit` アクションへの GET ルートも、同じように判定します(文字列で書かれたチェックが `view` のような読み取りの権限だけなら、これも警告します)。アクションが次のどれかに当てはまれば合格(pass)です。
 
 - `this.authorize()` か `this.can()` を呼んでいる
 - ゲートに問い合わせている
@@ -15,7 +15,7 @@
 
 認可の判定を別の場所で行っているアクションには、その上のコメントに `// guren-audit-ignore` と書いてください。その指摘は、このコメントを理由に無視済み(`ignored`)として報告されます。Policy がないアプリでは、この指摘は出ません。
 
-関連するモデルのルールとして、`owner-fillable:<Model>` があります。users テーブル(`AuthenticatableModel` を土台にしたモデルのテーブル)を参照する列、たとえば `authorId` をモデルが `fillable` に入れていると警告します。リクエストからレコードの持ち主を選べてしまうためです。その列は `fillable` から外し、`create(data, { set: { authorId: user.id } })` のようにサーバー側で設定してください。
+関連するモデルのルールとして、`owner-fillable:<Model>` があります。users テーブル(`AuthenticatableModel` を土台にしたモデルのテーブル)を参照する列、たとえば `authorId` をモデルが `fillable` に入れていると警告します。リクエストからレコードの持ち主を選べてしまうためです。その列は `fillable` から外し、`create(data, { set: { authorId: user.id } })` のようにサーバー側で設定してください。担当者のように利用者が意図して選ぶ列は、意図した例外として `config/audit.ts` に記録します。編集フォームかどうかは、アクション名が `edit` かどうかで判断します。
 
 ## `audit` の指摘を抑制する
 

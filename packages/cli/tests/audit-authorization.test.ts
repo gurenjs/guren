@@ -474,6 +474,18 @@ ${editBody}
     expect(report.findings.find((f) => f.key === 'policy:GET /posts/:id/edit')?.status).toBe('pass')
   })
 
+  it('warns on an edit form that only checks a read ability', async () => {
+    const report = await withWorkspace(files(`    const post = await Post.findOrFail(1)
+    await this.authorize('view', [Post, post])
+    return this.json(post)`))
+
+    const edit = report.findings.find((f) => f.key === 'policy:GET /posts/:id/edit')
+    expect(edit?.status).toBe('warn')
+    expect(edit?.message).toContain("only checks the 'view' ability")
+    expect(edit?.suggestion).toContain("this.authorize('update', [Post, post])")
+    expect(edit?.suggestion).toContain('before rendering the form')
+  })
+
   it('leaves every other GET action alone', async () => {
     const report = await withWorkspace(files(`    return this.json({})`))
 

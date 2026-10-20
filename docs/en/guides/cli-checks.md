@@ -8,7 +8,8 @@ The policy rule of `audit` only ever warns. Once the app keeps a policy
 for a model (`app/Policies/<Model>Policy.ts`, what `make:policy` writes,
 paired within one app root), every controller action on a non-safe method
 whose body names that model gets a `policy:<METHOD> <path>` finding, and so
-does a GET route to an `edit` action, which shows a record's edit form. It
+does a GET route to an `edit` action, which shows a record's edit form (one
+whose only literal check is a read ability such as `view` warns too). It
 passes when the action calls `this.authorize()` or `this.can()`, consults
 the gate, references the policy class, or sits behind
 `authorize()`/`authorizeResource()` middleware. It warns, naming the action,
@@ -23,7 +24,9 @@ A related model rule, `owner-fillable:<Model>`, warns when a model lists in
 `fillable` a column that references the users table (the table of a model
 built on `AuthenticatableModel`), such as `authorId`: a request could then
 choose the record's owner. Keep the column out of `fillable` and set it on
-the server with `create(data, { set: { authorId: user.id } })`.
+the server with `create(data, { set: { authorId: user.id } })`. A column
+the user picks on purpose (an assignee) is a deliberate exception: record it
+in `config/audit.ts`. An edit form is recognized by its action name, `edit`.
 
 ## Suppressing audit findings
 

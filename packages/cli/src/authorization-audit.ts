@@ -118,6 +118,7 @@ async function authorizeSuggestion(
   controllerKey: string,
   { model, policy, policyFile }: PolicyBinding,
   cache: ParseCache,
+  editForm: boolean,
 ): Promise<string> {
   const parsed = await cache.get(policyFile)
   const abilities = parsed ? readPolicyAbilities(parsed.ast, policy) : null
@@ -125,14 +126,16 @@ async function authorizeSuggestion(
     ? `${policy} declares ${abilities.declared.join(', ') || 'no ability yet'}`
     : `${policy} could not be read as a policy`
   return (
-    `Call await this.authorize('<ability>', [${model}, ${camelCase(model)}]) in ${controllerKey} before the write `
+    `Call await this.authorize('${editForm ? 'update' : '<ability>'}', [${model}, ${camelCase(model)}]) in ${controllerKey} `
+    + `${editForm ? 'before rendering the form' : 'before the write'} `
     + `(${declared}), or attach authorize()/authorizeResource() middleware to the route. A helper the action `
     + 'calls is not read: if it authorizes there, say so in a // guren-audit-ignore comment above the action.'
   )
 }
 
 /**
- * One finding per mutating controller route, keyed `policy:<METHOD> <path>`,
+ * One finding per mutating controller route, and per GET route to an `edit` action (the
+ * resource convention for a record's edit form), keyed `policy:<METHOD> <path>`,
  * once the app has at least one policy; an app with none contributes nothing.
  * Route-level on purpose: the finding carries no `line`, so `config/audit.ts`
  * ignores it by key (a `line` would make every such entry `unsupported`); a
@@ -200,25 +203,48 @@ export async function auditAuthorization(
       )
       continue
     }
+    const readOnlyCheck = editForm ? readOnlyAbility(info.body, info.rawBody) : undefined
     if (
-      consultsAuthorization(info.body)
-      || touched.some((binding) => binding.policyPattern.test(info.body))
+      readOnlyCheck === undefined
+      && (consultsAuthorization(info.body) || touched.some((binding) => binding.policyPattern.test(info.body)))
     ) {
       push('pass', `${controllerKey} consults a policy for ${describeBindings(touched)}.`)
       continue
     }
 
     const message =
-      `${controllerKey} (${info.filePath}:${info.line}) references ${describeBindings(touched)} on `
-      + `${editForm ? "a record's edit form" : 'a mutating route'}, and neither the middleware chain nor the action body shows an authorization check.`
+      readOnlyCheck !== undefined
+        ? `${controllerKey} (${info.filePath}:${info.line}) renders a record's edit form for ${describeBindings(touched)} `
+          + `but only checks the '${readOnlyCheck}' ability, which lets anyone who may read the record open its form.`
+        : `${controllerKey} (${info.filePath}:${info.line}) references ${describeBindings(touched)} on `
+          + `${editForm ? "a record's edit form" : 'a mutating route'}, and neither the middleware chain nor the action body shows an authorization check.`
     const marker = info.leadingComments.find((comment) => comment.includes(AUDIT_IGNORE_MARKER))
     if (marker !== undefined) {
       push('ignored', message, { ignoreReason: marker, filePath: info.filePath })
       continue
     }
     push('warn', message, {
-      suggestion: await authorizeSuggestion(controllerKey, touched[0]!, cache),
+      suggestion: await authorizeSuggestion(controllerKey, touched[0]!, cache, editForm),
       filePath: info.filePath,
     })
   }
 }
+
+const LITERAL_ABILITY_PATTERN = /\bthis\.(?:authorize|can)\(\s*['"`]([A-Za-z]+)['"`]/g
+const EDIT_ABILITIES = new Set(['update', 'edit'])
+
+/**
+ * The ability an edit form's action checks when every literal one is a read-only ability
+ * (`view`): the form then opens for anyone who may read the record. Undefined when a literal
+ * names update/edit, or no ability is a literal (a variable is not judged). Literals are read
+ * from `rawBody` at offsets where the blanked `body` holds the same call, so a comment or a
+ * string that spells one is not a check.
+ */
+function readOnlyAbility(body: string, rawBody: string): string | undefined {
+  const abilities = [...rawBody.matchAll(LITERAL_ABILITY_PATTERN)]
+    .filter((match) => body.startsWith(match[0].slice(0, match[0].indexOf('(') + 1), match.index))
+    .map((match) => match[1]!)
+  if (abilities.length === 0 || abilities.some((ability) => EDIT_ABILITIES.has(ability))) return undefined
+  return abilities[0]
+}
+

@@ -1,4 +1,5 @@
-import { resolve, relative } from 'node:path'
+import { resolve, relative, sep } from 'node:path'
+import type { ClassDeclaration } from '@babel/types'
 import { readFile } from 'node:fs/promises'
 import { consola } from 'consola'
 import {
@@ -69,7 +70,7 @@ import {
   type IntrospectSource,
 } from './manifest-section'
 import { describeMethod } from './http-methods'
-import { parseSchemaTableColumns, parseSchemaTables, type SchemaTable } from './schema-parser'
+import { parseSchemaTables, type SchemaTable } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
 import {
   agentToolActions,
@@ -752,15 +753,16 @@ async function auditIntrospectSource(
   }
   // A routes file that would not load may still register through the app, so it does not skip the run.
   if (definitions && !definitions.some(isJudgedRoute)) {
-    return { skipped: 'no route mutates or carries a body, so the app was not introspected' }
+    return { skipped: 'no route mutates, carries a body or renders an edit form, so the app was not introspected' }
   }
   return introspectRunner(cwd, options.introspect)
 }
 
-/** A route the validation or authentication rule judges. */
-function isJudgedRoute(route: Pick<RouteDefinition, 'method'>): boolean {
-  const { safe, bodyCarrying } = describeMethod(route.method.toUpperCase())
-  return !safe || bodyCarrying
+/** A route the validation, authentication or policy rule judges. */
+function isJudgedRoute(route: Pick<RouteDefinition, 'method' | 'controller'>): boolean {
+  const method = route.method.toUpperCase()
+  const { safe, bodyCarrying } = describeMethod(method)
+  return !safe || bodyCarrying || (method === 'GET' && route.controller?.action === 'edit')
 }
 
 function auditRoutes(
@@ -1254,18 +1256,23 @@ function parseModelSerializationInfo(source: string, filePath: string): ModelSer
 
 async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void> {
   const modelFiles = await discoverModelFiles(cwd)
-  const schemaTables = modelFiles.length > 0 ? await parseSchemaTableColumns(cwd) : null
-  const owners = modelFiles.length > 0 ? await ownerColumnReader(cwd, modelFiles) : null
+  const tables = modelFiles.length > 0 ? await parseSchemaTables(cwd) : []
+  const schemaTables = tables.length > 0 ? new Map(tables.map((table) => [table.identifier, table.columns.map((column) => column.name)])) : null
+  const models = await Promise.all(modelFiles.map(async (filePath) => {
+    const source = await readFile(filePath, 'utf-8')
+    const ast = parseSourceFile(source, filePath)
+    const classDecl = ast ? firstClassDeclaration(ast.program.body) : null
+    const table = classDecl ? extractTableIdentifier(classDecl) : undefined
+    return { filePath, source, classDecl, table, module: moduleOf(relative(cwd, filePath)) }
+  }))
+  const ownerColumns = ownerColumnsOf(tables, models)
 
-  for (const filePath of modelFiles) {
+  for (const { filePath, source, classDecl, table, module } of models) {
     const relPath = relative(cwd, filePath)
     const name = classNameFromPath(filePath)
-    const source = await readFile(filePath, 'utf-8')
 
     // AST classification, not source text: a comment mentioning
     // AuthenticatableModel must not flip this model to structurally protected.
-    const ast = parseSourceFile(source, filePath)
-    const classDecl = ast ? firstClassDeclaration(ast.program.body) : null
     const hasFillable = classDecl ? hasModelConfig(classDecl, 'fillable') : false
     const isAuthenticatable = classDecl ? classUsesAuthenticatableBase(classDecl) : false
 
@@ -1288,26 +1295,28 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
       ),
     )
 
-    // A fillable column that references the users table lets a request choose the record's owner.
-    const info = parseModelSerializationInfo(source, filePath)
+    // A fillable column that references the users table lets a request choose which user a record belongs to.
     const fillable = classDecl && !isAuthenticatable ? resolveModelStringArrayConfig(classDecl, 'fillable') : undefined
-    const ownerColumns = fillable && info.tableIdentifier ? (owners?.(info.tableIdentifier) ?? []).filter((column) => fillable.includes(column)) : []
-    if (ownerColumns.length > 0) {
-      const listed = ownerColumns.map((column) => `'${column}'`).join(', ')
+    const owners = fillable && table ? (ownerColumns.get(`${module ?? ''}:${table}`) ?? []).filter((owner) => fillable.includes(owner.column)) : []
+    if (owners.length > 0) {
+      const listed = owners.map((owner) => `'${owner.column}'`).join(', ')
       findings.push(
         finding(
           `owner-fillable:${name}`,
           `${name} owner column fillable`,
           'warn',
-          `${name} lists ${listed} in fillable, and ${ownerColumns.length === 1 ? 'it references' : 'they reference'} the users table, so a request can choose the record's owner.`,
-          `Remove ${listed} from fillable in ${relPath} and from the request schema, and set the owner on the server: `
-          + `create(data, { set: { ${ownerColumns[0]}: user.id } }) (update(where, data, { set }) for an update).`,
+          `${name} lists ${listed} in fillable, and ${owners.length === 1 ? 'it references' : 'they reference'} ${owners[0]!.users} `
+          + `(an authenticatable model's table), so a request can choose which user the record belongs to.`,
+          `If the server decides it, remove ${listed} from fillable in ${relPath} and from the request schema, and set it on `
+          + `the server: create(data, { set: { ${owners[0]!.column}: user.id } }) (update(where, data, { set }) for an update). `
+          + `If the user picks it on purpose (an assignee), record that in config/audit.ts.`,
           relPath,
         ),
       )
     }
 
     // Sensitive columns must be excluded from serialization via hidden/visible.
+    const info = parseModelSerializationInfo(source, filePath)
     const columns = info.tableIdentifier ? schemaTables?.get(info.tableIdentifier) : undefined
     if (!columns) continue
 
@@ -1341,39 +1350,40 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
   }
 }
 
+/** `modules/<name>/...` → the module name; null for the application root. */
+function moduleOf(relPath: string): string | null {
+  const match = /^modules\/([^/]+)\//.exec(relPath.split(sep).join('/'))
+  return match ? match[1]! : null
+}
+
 /**
- * The column property names of a table that reference an authenticatable model's table
- * (a column `.references()` or a table-level `foreignKey`). Null when the schema cannot
- * be read; an expression column or constraint it cannot follow names nothing.
+ * Per `<module>:<table>` (module empty for the root), the columns referencing the table of an
+ * authenticatable model in the same root, by a column `.references()` or a table-level
+ * `foreignKey`. A reference through an aliased import, or a constraint whose columns are
+ * expressions, names nothing: those are missed, never reported.
  */
-async function ownerColumnReader(cwd: string, modelFiles: string[]): Promise<((table: string) => string[]) | null> {
-  let tables: SchemaTable[]
-  try {
-    tables = await parseSchemaTables(cwd)
-  } catch {
-    return null
-  }
-  const userTables = new Set<string>()
-  for (const filePath of modelFiles) {
-    const source = await readFile(filePath, 'utf-8')
-    const ast = parseSourceFile(source, filePath)
-    const classDecl = ast ? firstClassDeclaration(ast.program.body) : null
-    if (!classDecl || !classUsesAuthenticatableBase(classDecl)) continue
-    const table = parseModelSerializationInfo(source, filePath).tableIdentifier
-    if (table) userTables.add(table)
-  }
-  if (userTables.size === 0) return () => []
-  const byTable = new Map<string, string[]>()
+function ownerColumnsOf(
+  tables: SchemaTable[],
+  models: Array<{ classDecl: ClassDeclaration | null; table?: string; module: string | null }>,
+): Map<string, Array<{ column: string; users: string }>> {
+  const userTables = new Set(
+    models.filter((model) => model.classDecl && model.table && classUsesAuthenticatableBase(model.classDecl)).map((model) => `${model.module ?? ''}:${model.table}`),
+  )
+  const result = new Map<string, Array<{ column: string; users: string }>>()
   for (const table of tables) {
-    const columns = table.columns.filter((column) => column.references && userTables.has(column.references.table)).map((column) => column.name)
-    for (const constraint of table.constraints) {
-      if (constraint.kind === 'foreignKey' && constraint.references && userTables.has(constraint.references.table) && !constraint.opaqueColumns) {
-        columns.push(...constraint.columns)
-      }
+    const scope = table.module ?? ''
+    const owners: Array<{ column: string; users: string }> = []
+    for (const column of table.columns) {
+      if (column.references && userTables.has(`${scope}:${column.references.table}`)) owners.push({ column: column.name, users: column.references.table })
     }
-    byTable.set(table.identifier, [...new Set(columns)])
+    for (const constraint of table.constraints) {
+      if (constraint.kind !== 'foreignKey' || !constraint.references || constraint.opaqueColumns) continue
+      if (!userTables.has(`${scope}:${constraint.references.table}`)) continue
+      for (const column of constraint.columns) owners.push({ column, users: constraint.references.table })
+    }
+    if (owners.length > 0) result.set(`${scope}:${table.identifier}`, owners)
   }
-  return (table) => byTable.get(table) ?? []
+  return result
 }
 
 export function renderAuditReport(report: AuditReport): void {
