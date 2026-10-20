@@ -32,6 +32,14 @@ import {
   MCP_OAUTH_TEMPLATE_FILES,
   loadMcpOAuthTemplate,
 } from './templates'
+import {
+  CF_OUTPUT_DIR,
+  WORKER_MANIFEST_FILE,
+  WORKER_MANIFEST_VERSION,
+  type ResolvedResource,
+  type WorkerManifest,
+} from './worker-manifest'
+import { detectCloudflareBackend, readManifestDependencies } from './backend'
 
 interface PackageJsonLike {
   name?: string
@@ -81,7 +89,10 @@ export interface BuildCloudflareOutputOptions {
  */
 export async function buildCloudflareOutput(options: BuildCloudflareOutputOptions = {}): Promise<void> {
   const root = resolvePathLike(options.rootDir ?? process.cwd())
-  const out = resolvePathLike(options.outputDir ?? resolve(root, '.cloudflare'))
+  const backend = detectCloudflareBackend(root)
+  const out = resolvePathLike(
+    options.outputDir ?? resolve(root, backend === 'cf' ? CF_OUTPUT_DIR : '.cloudflare'),
+  )
   const appEntry = resolvePathLike(options.appEntry ?? resolve(root, 'src/app.ts'))
   const publicDir = resolvePathLike(options.publicDir ?? resolve(root, 'public'))
   const ssrDir = resolvePathLike(options.ssrDir ?? resolve(root, '.guren/ssr'))
@@ -92,9 +103,12 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   // but the delete waits until every check below has passed — a failed build
   // must not take the previous deploy output with it.
   assertOutputDirOutsideRoot(out, root, 'Cloudflare build')
-  assertWranglerJsoncIsAuthoritative(root)
-  assertKeepsClassNames(root)
-  warnPlaceholderIds(root)
+  // `cf` reads cloudflare.config.ts and never wrangler.jsonc, which `cf migrate` leaves in place.
+  if (backend === 'wrangler') {
+    assertWranglerJsoncIsAuthoritative(root)
+    assertKeepsClassNames(root)
+    warnPlaceholderIds(root)
+  }
 
   const packageJson = readPackageJson(root)
   const mcpOAuth = options.mcpOAuth === true
@@ -105,7 +119,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   // nobody reads.
   if (mcpOAuth) {
     assertMcpOAuthUsable(root)
-    assertOAuthKvBound(root)
+    if (backend === 'wrangler') assertOAuthKvBound(root)
   }
 
   const hostsAgents = existsSync(resolve(root, AGENTS_CONFIG_FILE))
@@ -116,7 +130,10 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
     assertAgentsPluginUsable(root)
   }
   const agents = hostsAgents ? await readAgentRegistry(root) : NO_AGENTS
-  const agentBindings = assertAgentDurableObjects(root, agents.exports)
+  // On cf, gurenWorker() binds exactly these from the manifest.
+  const agentBindings = backend === 'cf'
+    ? agents.exports.map((agent) => durableObjectBindingName(agent.export))
+    : assertAgentDurableObjects(root, agents.exports)
   warnUnroutedAgents(agents)
 
   // Same placement as the checks above: an in-memory session store on Workers
@@ -137,7 +154,13 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   const assetEnv = resolveClientAssetEnv(publicDir, clientEntryKey, 'Cloudflare build')
   const bundledEnv = bundledRuntimeEnv(root, publicDir, 'Cloudflare build')
 
+  // Read before the reset deletes it: a deploy settles these, and no build can recompute them.
+  const resolved = backend === 'cf' ? readResolvedResources(out) : {}
   resetOutputDir(out, root, 'Cloudflare build')
+  // Written first so a build failing below still keeps the carried-over ids.
+  if (backend === 'cf') {
+    writeWorkerManifest({ root, out, packageName: packageJson.name, mcpOAuth, agents: agents.exports, resolved })
+  }
 
   // Workers Static Assets serves `/` from index.html BEFORE the worker runs,
   // and has no rewrites for the built assets' `/public/assets/` base — both
@@ -172,7 +195,57 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
     scaffoldConsentFlow(root)
   }
 
-  scaffoldWranglerConfig(root, out, packageJson.name, mcpOAuth, agents.exports)
+  if (backend === 'wrangler') {
+    scaffoldWranglerConfig(root, out, packageJson.name, mcpOAuth, agents.exports)
+  }
+}
+
+/** The previous build's `resolved` section, or nothing when there is no readable manifest. */
+function readResolvedResources(out: string): Record<string, ResolvedResource> {
+  try {
+    const manifest = JSON.parse(readFileSync(resolve(out, WORKER_MANIFEST_FILE), 'utf8')) as Partial<WorkerManifest>
+    return isRecord(manifest.resolved) ? (manifest.resolved as Record<string, ResolvedResource>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeWorkerManifest(input: {
+  root: string
+  out: string
+  packageName: string | undefined
+  mcpOAuth: boolean
+  agents: AgentExport[]
+  resolved: Record<string, ResolvedResource>
+}): void {
+  const outRelative = relative(input.root, input.out).split(sep).join('/')
+  const manifest: WorkerManifest = {
+    version: WORKER_MANIFEST_VERSION,
+    entrypoint: `./${outRelative}/worker.js`,
+    assetsDirectory: `./${outRelative}/assets`,
+    compatibilityFlags: ['nodejs_compat'],
+    htmlHandling: HTML_HANDLING,
+    alias: devOnlyAliases(outRelative),
+    define: BUNDLE_DEFINES,
+    vars: WORKER_VARS,
+    d1: { binding: 'DB', databaseName: workerName(input.packageName) },
+    kvNamespaces: input.mcpOAuth ? [OAUTH_KV_BINDING] : [],
+    agents: input.agents.map((agent) => ({
+      exportName: agent.export,
+      binding: durableObjectBindingName(agent.export),
+    })),
+    resolved: input.resolved,
+  }
+
+  mkdirSync(input.out, { recursive: true })
+  writeFileSync(resolve(input.out, WORKER_MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`)
+  // The manifest will carry resource ids, which stay out of the repository (RFC 0035 §3.1).
+  writeFileSync(resolve(input.out, '.gitignore'), '*\n')
+}
+
+/** The Worker name, and the D1 database name a fresh binding gets. */
+function workerName(packageName: string | undefined): string {
+  return (packageName ?? 'guren-app').replace(/^@[^/]+\//, '')
 }
 
 /** `mcpPlugin()`'s own default mount path — see `BuildCloudflareOutputOptions.mcpPath`. */
@@ -267,16 +340,9 @@ function oauthKvNamespace(): Record<string, string> {
  * ship). An absent, unreadable or malformed manifest answers `false`.
  */
 function appDependsOn(root: string, name: string): boolean {
-  try {
-    const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
-      dependencies?: Record<string, string>
-    }
-    const dependencies = manifest.dependencies
-    return typeof dependencies === 'object' && dependencies !== null && name in dependencies
-  } catch {
-    return false
-  }
+  return readManifestDependencies(root).dependencies?.[name] !== undefined
 }
+
 
 /** The package the generated worker imports the agent runtime and router from. */
 const AGENTS_PLUGIN_PACKAGE = '@guren/plugin-agents'
@@ -1316,6 +1382,22 @@ function renderOAuthProvider(mcpPath: string, defaultEntry: string): string {
 })`
 }
 
+/** Substituted at bundle time, by wrangler or by the bundler `cf` delegates to. */
+const WORKER_VARS: Record<string, string> = { NODE_ENV: 'production' }
+
+const BUNDLE_DEFINES: Record<string, string> = {
+  // Framework and app code branch on NODE_ENV at module scope, statements in
+  // the generated worker cannot beat ESM import hoisting, and wrangler `vars`
+  // are not guaranteed to reach `process.env` before the module graph
+  // evaluates — so it is substituted at build time.
+  'process.env.NODE_ENV': '"production"',
+  // workerd leaves `import.meta.url` undefined, which kills Vite's SSR
+  // `createRequire(import.meta.url)` and scaffolded `new URL(..., import.meta.url)`
+  // at module scope. A literal is safe because Workers has no filesystem, so
+  // every such path is meaningless there anyway.
+  'import.meta.url': '"file:///worker.js"',
+}
+
 function scaffoldWranglerConfig(
   root: string,
   out: string,
@@ -1324,7 +1406,7 @@ function scaffoldWranglerConfig(
   agents: AgentExport[],
 ): void {
   const configPath = resolve(root, 'wrangler.jsonc')
-  const appName = (packageName ?? 'guren-app').replace(/^@[^/]+\//, '')
+  const appName = workerName(packageName)
   const outRelative = relative(root, out).split(sep).join('/')
 
   const config = {
@@ -1333,18 +1415,7 @@ function scaffoldWranglerConfig(
     compatibility_date: new Date().toISOString().slice(0, 10),
     compatibility_flags: ['nodejs_compat'],
     alias: devOnlyAliases(outRelative),
-    define: {
-      // Framework and app code branch on NODE_ENV at module scope, statements in
-      // the generated worker cannot beat ESM import hoisting, and wrangler `vars`
-      // are not guaranteed to reach `process.env` before the module graph
-      // evaluates — so it is substituted at build time.
-      'process.env.NODE_ENV': '"production"',
-      // workerd leaves `import.meta.url` undefined, which kills Vite's SSR
-      // `createRequire(import.meta.url)` and scaffolded `new URL(..., import.meta.url)`
-      // at module scope. A literal is safe because Workers has no filesystem, so
-      // every such path is meaningless there anyway.
-      'import.meta.url': '"file:///worker.js"',
-    },
+    define: BUNDLE_DEFINES,
     assets: { directory: `${outRelative}/assets`, html_handling: HTML_HANDLING },
     d1_databases: [
       {
@@ -1372,7 +1443,7 @@ function scaffoldWranglerConfig(
           migrations: [{ tag: 'v1', new_sqlite_classes: agents.map((agent) => agent.export) }],
         }
       : {}),
-    vars: { NODE_ENV: 'production' },
+    vars: WORKER_VARS,
   }
 
   try {

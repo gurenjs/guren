@@ -444,3 +444,99 @@ describe.skipIf(!enabled)('wrangler bundles the --mcp-oauth worker', () => {
     300_000,
   )
 })
+
+// RFC 0035: the cf backend end to end. `cf` loads cloudflare.config.ts under Node,
+// so the helper subpath must import under Node and its objects must pass cf's own
+// validation. Gated behind GUREN_TEST_CF=1, with Node 22.18 or later on PATH.
+const cfEnabled = process.env.GUREN_TEST_CF === '1'
+
+describe.skipIf(!cfEnabled)('cf builds and dry-runs the cf-backend worker', () => {
+  let root: string
+
+  function cf(args: string[]): { exitCode: number; output: string } {
+    const result = Bun.spawnSync({
+      cmd: ['node', join(root, 'node_modules/cf/bin/cf'), ...args],
+      cwd: root,
+      env: { ...process.env, CI: '1' },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    return { exitCode: result.exitCode, output: `${result.stdout.toString()}${result.stderr.toString()}` }
+  }
+
+  beforeAll(async () => {
+    root = mkdtempSync(join(tmpdir(), 'guren-cf-backend-probe-'))
+
+    // cf delegates the esbuild bundle to the app's own Wrangler, at 4.136.0 or later.
+    vendorClosure(root, 'cf-backend-probe', workspaceClosure('@guren/plugin-cloudflare'), {
+      extra: { cf: '1.0.0-beta.18', wrangler: '4.151.1' },
+    })
+
+    mkdirSync(join(root, 'src'), { recursive: true })
+    writeFileSync(join(root, 'src/app.ts'), 'export default { boot: async () => {}, fetch: async () => new Response("ok") }\n')
+    mkdirSync(join(root, 'public/assets/.vite'), { recursive: true })
+    writeFileSync(join(root, 'public/assets/app.js'), 'console.log(1)\n')
+    writeFileSync(
+      join(root, 'public/assets/.vite/manifest.json'),
+      JSON.stringify({ 'resources/js/app.tsx': { file: 'app.js' } }),
+    )
+    writeFileSync(
+      join(root, 'cloudflare.config.ts'),
+      [
+        "import { defineConfig } from 'cf/config'",
+        "import { gurenWorker } from '@guren/plugin-cloudflare/config'",
+        '',
+        'export default defineConfig(async () => ({',
+        "  worker: { ...(await gurenWorker({ name: 'cf-backend-probe' })), compatibilityDate: '2026-10-01' },",
+        '}))',
+        '',
+      ].join('\n'),
+    )
+    writeFileSync(
+      join(root, 'wrangler.config.ts'),
+      [
+        "import { defineWranglerConfig } from 'wrangler/experimental-config'",
+        "import { gurenWranglerBundle } from '@guren/plugin-cloudflare/config'",
+        '',
+        'export default defineWranglerConfig(gurenWranglerBundle())',
+        '',
+      ].join('\n'),
+    )
+
+    const { buildCloudflareOutput } = await import('./build')
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+  })
+
+  afterAll(() => {
+    if (root) rmSync(root, { recursive: true, force: true })
+  })
+
+  test(
+    'builds the manifest into a worker cf accepts',
+    () => {
+      const build = cf(['build'])
+      expect(build.output).not.toMatch(/Invalid|Could not resolve/)
+      expect(build.exitCode).toBe(0)
+
+      const workerDir = join(root, '.cloudflare/output/v0/workers/default')
+      const config = JSON.parse(readFileSync(join(workerDir, 'worker.config.json'), 'utf8')) as Record<string, unknown>
+      expect(config.env).toEqual({
+        DB: { type: 'd1', name: 'cf-backend-probe' },
+        NODE_ENV: { type: 'text', value: 'production' },
+      })
+      expect(config.compatibilityFlags).toEqual(['nodejs_compat'])
+
+      const bundle = readFileSync(join(workerDir, 'bundle/worker.js'), 'utf8')
+      expect(bundle).not.toContain('Cloudflare build:')
+      expect(bundle.length).toBeGreaterThan(1000)
+      // The assets directory came through gurenWranglerBundle().
+      expect(existsSync(join(workerDir, 'assets/public/assets/app.js'))).toBe(true)
+      expect(existsSync(join(workerDir, 'assets/_headers'))).toBe(true)
+
+      // `cf deploy` with provisioning off is what stage 7 runs; a dry run needs no account.
+      const deploy = cf(['deploy', '--prebuilt', '--no-provision', '--dry-run'])
+      expect(deploy.exitCode).toBe(0)
+    },
+    600_000,
+  )
+})

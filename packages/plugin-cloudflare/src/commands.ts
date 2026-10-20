@@ -1,4 +1,5 @@
 import { defineCommand } from 'citty'
+import { detectCloudflareBackend } from './backend'
 import { buildCloudflareOutput } from './build'
 import { printBundleReport, reportBundleSize } from './bundle-size'
 
@@ -50,6 +51,9 @@ const cloudflareBuild = defineCommand({
   },
   async run({ args }) {
     const rootDir = args.root || process.cwd()
+    if (args['report-size'] && detectCloudflareBackend(rootDir) === 'cf') {
+      throw new Error('Cloudflare build: --report-size measures through wrangler.jsonc, and this app deploys through cf. Drop the flag; `cf build` writes the bundle to .cloudflare/output/.')
+    }
     await buildCloudflareOutput({
       rootDir,
       skipAppBuild: Boolean(args['skip-app-build']),

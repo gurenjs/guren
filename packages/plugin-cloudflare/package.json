@@ -51,6 +51,10 @@
     "./env": {
       "types": "./dist/env.d.ts",
       "default": "./dist/env.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
     }
   },
   "scripts": {
@@ -63,6 +67,7 @@
     "citty": "^0.1.6"
   },
   "devDependencies": {
+    "@cloudflare/config": "0.27.0",
     "@cloudflare/workers-oauth-provider": "^0.10.3",
     "@cloudflare/workers-types": "^4.20260702.1",
     "@types/node": "^20.14.10",

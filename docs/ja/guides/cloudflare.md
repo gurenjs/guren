@@ -410,6 +410,63 @@ Workers は、アプリケーションが自分でホストするエージェン
 
 デプロイしたエージェントの無料プランでの実測値、1 回の定期処理で使える D1 クエリの予算、そのほかエージェントの書き方全般は[永続エージェント](./durable-agents.md)にまとめてあります。
 
+## cf CLI でのデプロイ（ベータ）
+
+`cf` は Wrangler の後継として Cloudflare が出した CLI で、いまはオープンベータです。`wrangler.jsonc` の代わりに `cloudflare.config.ts` を読みます。アプリに `cloudflare.config.ts` があり、`cf` パッケージを依存に入れていると、`cloudflare:build` は `cf` 向けの出力に切り替わります。このファイルがなければ、これまでと何も変わりません。
+
+デプロイするマシンには Node 22.18 以上が必要です。`cf` は `cloudflare.config.ts` を Node で読み込むからです。バンドルは `cf` から Wrangler に任されるので、Wrangler 4.136 以上も入れておきます。
+
+```bash
+bun add -d cf wrangler
+```
+
+アプリのルートに 2 つのファイルを書きます。`gurenWorker()` は、`cloudflare:build` が組み立てたワーカーを返します。中身はエントリ、名前で指定した `DB` バインディング、`--mcp-oauth` のときの `OAUTH_KV`、SQLite を使う Durable Object としての各エージェントです。自分の設定は、同じオブジェクトの中でスプレッドのあとに書きます。
+
+```typescript
+// cloudflare.config.ts
+import { bindings, defineConfig, triggers } from 'cf/config'
+import { gurenWorker } from '@guren/plugin-cloudflare/config'
+
+export default defineConfig(async () => {
+  const worker = await gurenWorker({ name: 'my-app' })
+  return {
+    worker: {
+      ...worker,
+      compatibilityDate: '2026-10-01',
+      env: { ...worker.env, MEDIA: bindings.r2({}) },
+      triggers: [triggers.scheduled({ schedule: '* * * * *' })],
+    },
+  }
+})
+```
+
+```typescript
+// wrangler.config.ts
+import { defineWranglerConfig } from 'wrangler/experimental-config'
+import { gurenWranglerBundle } from '@guren/plugin-cloudflare/config'
+
+export default defineWranglerConfig(gurenWranglerBundle())
+```
+
+`compatibilityDate` は自分で決めて、自分で更新してください。`gurenWranglerBundle()` は、モジュールのスタブ、ビルド時の `define`、アセットのディレクトリを返し、`keepNames` も有効にします。cron のトリガーは、アプリにスケジュールタスクがあるときだけ必要です（[スケジュールタスク](#スケジュールタスク)）。
+
+ビルドしてから、アプリのルートでデプロイします。
+
+```bash
+bunx guren cloudflare:build
+bunx cf deploy
+```
+
+この経路では、ビルドの出力先が `.guren/cloudflare/` になり、`gurenWorker()` が読む `guren-worker.json` もそこに書かれます。このディレクトリには専用の `.gitignore` が置かれ、`.cloudflare/` の下にある `cf` のファイルには触りません。バインディングに ID がないので、最初の `cf deploy` がデータベースと名前空間を作ります。名前での探し方は [Wrangler の場合](#データベースd1)と同じです。
+
+`cf d1 migrations apply` には、データベースの名前ではなく ID を渡します。`bunx cf d1 list --name my-app` で ID を調べてから、ビルドが書き出した平坦化済みのマイグレーションを適用してください。既定ではリモートに適用され、`--local` を付けるとローカルのシミュレーションが対象になります。
+
+```bash
+bunx cf d1 migrations apply <database-id> --dir .guren/cloudflare/d1-migrations
+```
+
+このディレクトリを使うと、各マイグレーションは `wrangler d1 migrations apply` と同じ名前で記録されます。そのため、Wrangler でマイグレーションしてきたデータベースも履歴を引き継げます。`cloudflare:size` が測るのは Wrangler の経路だけです。
+
 ## 既存アプリの更新
 
 `wrangler.jsonc` は最初に 1 度だけ生成され、それ以降は上書きされません。そのため、プラグインを更新する前に作ったアプリは、元の設定のまま残ります。古い設定を見つけると、ビルドが足りない項目を具体的に出力するので、それを追記してビルドし直してください。
