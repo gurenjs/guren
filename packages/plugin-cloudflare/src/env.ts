@@ -9,8 +9,16 @@
  * `tests/lean-env-subpath.test.ts` holds the boundary.
  */
 
+/**
+ * Where the captured env lives: a registry symbol on `globalThis`, so `@guren/orm`
+ * resolves `createD1Database({ binding: 'DB' })` without importing this package, and two
+ * installed copies of it share one env. `@guren/orm`'s d1.ts spells the same key.
+ */
+export const WORKERS_ENV_SLOT = Symbol.for('guren.workersEnv')
+
 // Wrapper object distinguishes "never captured" from "captured undefined".
-let holder: { env: unknown } | undefined
+type Holder = { env: unknown } | undefined
+const slots = globalThis as unknown as Record<symbol, Holder>
 
 /**
  * First call wins; later calls are ignored (never overwrite a live env). Not the
@@ -20,7 +28,7 @@ let holder: { env: unknown } | undefined
  * latch in `boot.ts` is what keeps one isolate on one application.
  */
 export function captureWorkersEnv(env: unknown): void {
-  holder ??= { env }
+  slots[WORKERS_ENV_SLOT] ??= { env }
 }
 
 /**
@@ -29,6 +37,7 @@ export function captureWorkersEnv(env: unknown): void {
  * entrypoint booted first, which may be the Worker's rather than the object's.
  */
 export function getWorkersEnv<E = unknown>(): E {
+  const holder = slots[WORKERS_ENV_SLOT]
   if (!holder) {
     throw new Error(
       'getWorkersEnv() was called before the first request captured the Workers env. ' +
@@ -41,7 +50,7 @@ export function getWorkersEnv<E = unknown>(): E {
 
 /** Clears the holder. Used by createWorkersHandler on boot failure and by tests. */
 export function resetWorkersEnv(): void {
-  holder = undefined
+  slots[WORKERS_ENV_SLOT] = undefined
 }
 
 /**

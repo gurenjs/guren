@@ -6,6 +6,7 @@ import type {
   StorageDriverCapabilities,
   TemporaryUrlOptions,
 } from '@guren/core'
+import { getWorkersEnv } from '../env'
 import { presignGetUrl } from './sigv4'
 
 /**
@@ -101,12 +102,11 @@ export interface R2PresignOptions {
 
 export interface R2DriverOptions {
   /**
-   * Resolver returning the R2 bucket binding. Bindings arrive with the first
-   * request on Workers, so this must be a deferred closure, e.g.
-   * `binding: () => getWorkersEnv<Env>().BUCKET` — the same contract as
-   * `createD1Database({ binding })`.
+   * The R2 bucket binding: its name (`'MEDIA'`), read from the Workers env the first
+   * request captured, or a deferred closure such as `() => getWorkersEnv<Env>().MEDIA`.
+   * The same contract as `createD1Database({ binding })`.
    */
-  binding: () => unknown
+  binding: string | (() => unknown)
   /**
    * Base URL for `url()`: the bucket's custom domain (recommended) or its r2.dev
    * subdomain. R2 has no derivable default, so `url()` throws when this is unset.
@@ -149,6 +149,8 @@ export class R2Driver implements StorageDriver {
    * the delivery route must know that *before* handing out a redirect.
    */
   readonly capabilities?: StorageDriverCapabilities
+  /** The binding's name when it was given as a string; a closure is opaque (RFC 0035 §2.1). */
+  readonly binding?: string
 
   private readonly resolveBinding: () => unknown
   private readonly publicUrl?: string
@@ -157,7 +159,9 @@ export class R2Driver implements StorageDriver {
   private readonly presign?: R2PresignOptions
 
   constructor(options: R2DriverOptions) {
-    this.resolveBinding = options.binding
+    const { binding } = options
+    this.resolveBinding = typeof binding === 'string' ? () => getWorkersEnv<Record<string, unknown>>()[binding] : binding
+    if (typeof binding === 'string') this.binding = binding
     this.publicUrl = options.publicUrl ? trimTrailingSlashes(options.publicUrl) : undefined
     this.prefix = trimSlashes(options.prefix ?? '')
     this.diskVisibility = options.visibility ?? (options.publicUrl ? 'public' : 'private')
@@ -170,6 +174,9 @@ export class R2Driver implements StorageDriver {
   private bucket(): R2BucketLike {
     const binding = this.resolveBinding()
     if (binding == null) {
+      if (this.binding) {
+        throw new Error(`R2Driver: the Workers env has no "${this.binding}" binding. Check the r2_buckets entry in wrangler.jsonc, or the R2 binding in cloudflare.config.ts.`)
+      }
       throw new Error(
         'R2Driver: the "binding" resolver returned no R2 bucket. On Workers this usually means it ran ' +
           'before the first request — defer access (e.g. binding: () => getWorkersEnv<Env>().BUCKET) and ' +

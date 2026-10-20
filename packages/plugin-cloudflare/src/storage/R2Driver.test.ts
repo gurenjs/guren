@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import { FakeR2Bucket, type FakeR2BucketOptions } from './fake-r2-bucket'
 import { describeR2DriverConformance } from './r2-driver-conformance'
+import { captureWorkersEnv, resetWorkersEnv } from '../env'
 import { R2Driver, type R2DriverOptions } from './R2Driver'
 
 // The contract itself, shared with the opt-in workerd run.
@@ -40,6 +41,20 @@ describe('R2Driver against the binding', () => {
         },
       })
       expect(calls).toBe(0)
+    })
+
+    test('should read a named binding from the captured env, and name it when the env lacks it', async () => {
+      const named = new R2Driver({ binding: 'MEDIA' })
+      expect(named.binding).toBe('MEDIA')
+      captureWorkersEnv({ MEDIA: bucket })
+      try {
+        await driver.put('a.txt', 'hi')
+        expect(await named.exists('a.txt')).toBe(true)
+        await expect(new R2Driver({ binding: 'OTHER' }).exists('a.txt')).rejects.toThrow('the Workers env has no "OTHER" binding')
+      } finally {
+        resetWorkersEnv()
+      }
+      expect(new R2Driver({ binding: () => bucket }).binding).toBeUndefined()
     })
 
     test('should throw with wrangler guidance when the resolver returns nothing', async () => {

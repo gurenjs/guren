@@ -9,6 +9,8 @@ export interface DatabaseDescription {
   dialect: 'postgres' | 'mysql' | 'sqlite' | 'd1'
   location: 'local' | 'remote' | 'unknown'
   reason?: string
+  /** The Workers binding a D1 factory names as a string; a closure is opaque, so it has none (RFC 0035 §2.1). */
+  binding?: string
 }
 
 // Must equal AGENT_REDACTED in @guren/server's agent/redact.ts, which the ORM cannot import:

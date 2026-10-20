@@ -36,30 +36,29 @@ Guren's deploy settings live in `config/cloudflare.ts` (`defineCloudflareConfig(
 
 - **`createWorkersHandler(app)`** — wraps a Guren `Application` in a Workers module handler. Boot is lazy and deduplicated on the first request, because `boot()` performs I/O that workerd forbids in global scope. The handler deduplicates boot itself, so boot-once holds for anything matching `WorkersAppLike`, not only Guren's `Application`. It also exposes `boot(env)`, for an entrypoint that holds `env` but no request — an agent Durable Object woken by an alarm. The latch behind both is `bootWorkersApp(app, env)` / `bootAndFetch(app, request, env, ctx)`, keyed on the app.
 - **Durable agents** — when the app has a `config/agents.ts` (see `@guren/plugin-agents`), `cloudflare:build` appends a named export per registered class to the generated worker, verifies the committed `wrangler.jsonc` hosts each one as a SQLite-backed Durable Object (failing with the exact JSON to add), and mounts `/agents/*` deny-all behind the registry's `routing.authorize`.
-- **`getWorkersEnv<Env>()`** and **`isWorkersRuntime()`** — from `@guren/plugin-cloudflare/env`, an import-free subpath, so `config/*.ts` does not drag the deploy generator into every boot. `getWorkersEnv` exposes the first request's bindings to boot-time config through a write-once holder; `isWorkersRuntime()` is the workerd check the snippets below branch on. workerd can also expose bindings at module scope via `cloudflare:workers`, but importing that from shared config would break every other runtime (Bun, Lambda, Vercel) — the holder keeps `config/*.ts` portable. Use it to hand a D1 binding to the ORM:
+- **`getWorkersEnv<Env>()`** and **`isWorkersRuntime()`** — from `@guren/plugin-cloudflare/env`, an import-free subpath, so `config/*.ts` does not drag the deploy generator into every boot. `getWorkersEnv` exposes the first request's bindings to boot-time config through a write-once holder; `isWorkersRuntime()` is the workerd check the snippets below branch on. workerd can also expose bindings at module scope via `cloudflare:workers`, but importing that from shared config would break every other runtime (Bun, Lambda, Vercel) — the holder keeps `config/*.ts` portable. A D1 or R2 binding can be given by name, which is read from that holder at the first use:
 
   ```typescript
   import { createD1Database } from '@guren/core'
-  import { getWorkersEnv } from '@guren/plugin-cloudflare/env'
 
   const database = createD1Database({
-    binding: () => getWorkersEnv<{ DB: unknown }>().DB,
+    binding: 'DB',
   })
   ```
 
-  The binding is a resolver, not a value — it must be read lazily.
+  A closure such as `() => getWorkersEnv<Env>().DB` still works, but only the name shows in `guren introspect --json`.
 
-- **`R2Driver`** — a storage driver over the R2 bucket binding, for `StorageManager.registerDisk()`. Same lazy `binding` contract as D1; no credentials and no AWS SDK in the bundle:
+- **`R2Driver`** — a storage driver over the R2 bucket binding, for `StorageManager.registerDisk()`. Same `binding` contract as D1; no credentials and no AWS SDK in the bundle:
 
   ```typescript
   import { createStorageManager, LocalStorageDriver } from '@guren/core'
-  import { getWorkersEnv, isWorkersRuntime } from '@guren/plugin-cloudflare/env'
+  import { isWorkersRuntime } from '@guren/plugin-cloudflare/env'
   import { R2Driver } from '@guren/plugin-cloudflare'
 
   const storage = createStorageManager({ default: 'media' })
   storage.registerDisk('media', () =>
     isWorkersRuntime()
-      ? new R2Driver({ binding: () => getWorkersEnv<{ MEDIA: unknown }>().MEDIA, publicUrl: 'https://media.example.com' })
+      ? new R2Driver({ binding: 'MEDIA', publicUrl: 'https://media.example.com' })
       : new LocalStorageDriver({ root: './storage/app/public', url: '/storage' }),
   )
   ```

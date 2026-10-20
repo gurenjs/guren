@@ -6,11 +6,11 @@ import type { DatabaseDescription } from './database-description'
 
 export interface D1DatabaseOptions {
   /**
-   * Resolver returning the Cloudflare D1 binding. Bindings arrive with the
-   * first request on Workers, so this must be a deferred closure, e.g.
-   * `binding: () => getWorkersEnv<Env>().DB`.
+   * The Cloudflare D1 binding: its name (`'DB'`), read from the Workers env the first
+   * request captured, or a deferred closure such as `() => getWorkersEnv<Env>().DB`.
+   * The name is what `describe()` reports, so the deploy can tell which binding it is.
    */
-  binding: () => unknown
+  binding: string | (() => unknown)
   /**
    * Drizzle-kit migrations folder. D1 migrations are applied out-of-band via
    * `wrangler d1 migrations apply` (point `d1_databases[].migrations_dir` here);
@@ -43,6 +43,20 @@ export interface D1DatabaseHandle {
   describe(): DatabaseDescription
 }
 
+/** `WORKERS_ENV_SLOT` in `@guren/plugin-cloudflare/env`, which captures the env; the ORM cannot import it. */
+const WORKERS_ENV_SLOT = Symbol.for('guren.workersEnv')
+
+function workersBinding(name: string): unknown {
+  const holder = (globalThis as unknown as Record<symbol, { env: unknown } | undefined>)[WORKERS_ENV_SLOT]
+  if (!holder) {
+    throw new Error(
+      `createD1Database: the "${name}" binding was read before the first request captured the Workers env. ` +
+        'Call getDatabase() inside a request, or from a handler built by createWorkersHandler().',
+    )
+  }
+  return (holder.env as Record<string, unknown> | undefined)?.[name]
+}
+
 /**
  * Cloudflare D1 database factory. D1 speaks the SQLite dialect, so schemas
  * written for `createSqliteDatabase` port unchanged; wrangler owns migrations
@@ -60,14 +74,15 @@ export function createD1Database(options: D1DatabaseOptions): D1DatabaseHandle {
         ? relative(process.cwd(), fileURLToPath(migrationsFolder))
         : migrationsFolder
 
+  const resolveBinding = typeof binding === 'string' ? () => workersBinding(binding) : binding
   const databaseHandle = singleFlight(async (): Promise<unknown> => {
-    const client = binding()
+    const client = resolveBinding()
     if (client == null) {
-      throw new Error(
-        'createD1Database: the "binding" resolver returned no D1 binding. ' +
+      throw new Error(typeof binding === 'string'
+        ? `createD1Database: the Workers env has no "${binding}" binding. Check the d1_databases entry in wrangler.jsonc, or the D1 binding in cloudflare.config.ts.`
+        : 'createD1Database: the "binding" resolver returned no D1 binding. ' +
           'On Workers this usually means it ran before the first request — defer access ' +
-          '(e.g. binding: () => getWorkersEnv<Env>().DB) and check the d1_databases entry in wrangler.jsonc.',
-      )
+          "(e.g. binding: 'DB', or () => getWorkersEnv<Env>().DB) and check the d1_databases entry in wrangler.jsonc.")
     }
 
     // drizzle-orm/d1 only accepts the positional (client, config) form —
@@ -119,7 +134,12 @@ export function createD1Database(options: D1DatabaseOptions): D1DatabaseHandle {
     },
 
     describe() {
-      return { dialect: 'd1', location: 'unknown', reason: 'A D1 binding is resolved per request, inside the Workers runtime.' }
+      return {
+        dialect: 'd1',
+        location: 'unknown',
+        reason: 'A D1 binding is resolved per request, inside the Workers runtime.',
+        ...(typeof binding === 'string' ? { binding } : {}),
+      }
     },
 
     async migrationStatus() {
