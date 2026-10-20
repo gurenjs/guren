@@ -195,16 +195,16 @@ export async function auditAuthorization(
       patterns = await modelPatterns(cwd, controllerFile, bindings, cache)
       patternsByFile.set(controllerFile, patterns)
     }
-    // An edit form only reads its record; any other action is judged on the models it writes,
-    // not on a parent it loads (a comment's post), which its own policy does not govern.
+    // A parent the action only loads (a comment's post) is governed by the child's policy;
+    // an edit form only loads its record, which is what it is judged on.
     const named = bindings.filter((binding) => patterns!.get(binding)!.some((pattern) => pattern.test(info.body)))
-    const touched = editForm ? named : named.filter((binding) => writesModel(info.body, patterns!.get(binding)!))
+    const touched = editForm ? named : named.filter((binding) => !onlyLoadsRecords(info.body, patterns!.get(binding)!))
     if (touched.length === 0) {
       push(
         'pass',
         named.length === 0
           ? `${controllerKey} names no model the app keeps a policy for; a write through a service or a relationship is not judged.`
-          : `${controllerKey} only reads ${describeBindings(named)}; a write through a service, a relationship or a record variable is not judged.`,
+          : `${controllerKey} only loads ${describeBindings(named)} with find()/findOrFail() and reads fields of the record.`,
       )
       continue
     }
@@ -253,22 +253,38 @@ function readOnlyAbility(body: string, rawBody: string): string | undefined {
   return abilities[0]
 }
 
-/** The model class's write methods (`column-consumers.ts` STATIC_ARGUMENTS / BUILDER_ARGUMENTS). */
-const MODEL_WRITE_CALL = /\.\s*(?:create|forceCreate|update|forceUpdate|delete|forceDelete|restore)\s*\(/
-
 /**
- * Whether a blanked action body writes the model a reference pattern names: a statement that
- * names it and calls a write method after it, directly (`Post.update(`) or down a builder chain
- * (`Post.where(...)` then `.delete()`, continuation lines joined). A write through a variable
- * holding a record or a builder is not seen.
+ * Whether every reference a blanked action body makes to a model is `const x = await Model.find(…)`
+ * or `findOrFail(…)`, with `x` read afterwards only as `x.field`: the action loads a record it
+ * never writes (a comment's post). Anything else (a write, a builder, a transaction scope, the
+ * record passed on or a method called on it) is not proven read-only, so the model stays judged.
  */
-function writesModel(body: string, references: RegExp[]): boolean {
-  for (const statement of body.replace(/\n\s*(?=\.)/g, '').split(/[;\n]/)) {
-    for (const reference of references) {
-      const at = statement.search(reference)
-      if (at !== -1 && MODEL_WRITE_CALL.test(statement.slice(at))) return true
+function onlyLoadsRecords(body: string, references: RegExp[]): boolean {
+  let loads = 0
+  for (const reference of references) {
+    for (const match of body.matchAll(new RegExp(reference.source, 'g'))) {
+      const head = /^\s*\.\s*(?:find|findOrFail)\s*\(/.exec(body.slice(match.index + match[0].length))
+      const declared = /\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*await\s*$/.exec(body.slice(0, match.index))
+      if (!head || !declared) return false
+      const close = closingParen(body, match.index + match[0].length + head[0].length - 1)
+      if (close === -1 || /^\s*[.?[]/.test(body.slice(close + 1))) return false
+      const rest = body.slice(close + 1)
+      for (const use of rest.matchAll(new RegExp(`(?<![\\w$.])${declared[1]!.replace(/\$/g, '\\$')}(?![\\w$])`, 'g'))) {
+        const after = rest.slice(use.index + use[0].length)
+        if (!/^\s*\??\.\s*[A-Za-z_$][\w$]*(?![\w$]|\s*(?:\(|=(?!=)))/.test(after)) return false
+      }
+      loads += 1
     }
   }
-  return false
+  return loads > 0
 }
 
+/** Index of the `)` closing the `(` at `open` in a blanked body, or -1. */
+function closingParen(body: string, open: number): number {
+  let depth = 0
+  for (let index = open; index < body.length; index += 1) {
+    if (body[index] === '(') depth += 1
+    else if (body[index] === ')' && --depth === 0) return index
+  }
+  return -1
+}

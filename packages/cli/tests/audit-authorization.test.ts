@@ -421,8 +421,8 @@ export function registerBillingRoutes(router: any) {
   })
 })
 
-describe('policy authorization judges the models an action writes', () => {
-  it('passes an action that only reads the policed model to write another one', async () => {
+describe('policy authorization leaves out a model the action only loads', () => {
+  it('passes an action that loads the policed model by id to write another one', async () => {
     const report = await withWorkspace(app({
       'app/Http/Controllers/PostController.ts': controller(`    const post = await Post.findOrFail(1)
     await Comment.create({ postId: post.id, body: 'x' })
@@ -431,13 +431,37 @@ describe('policy authorization judges the models an action writes', () => {
 
     const finding = report.findings.find((f) => f.key === KEY)
     expect(finding?.status).toBe('pass')
-    expect(finding?.message).toContain('only reads Post (PostPolicy)')
+    expect(finding?.message).toContain('only loads Post (PostPolicy)')
   })
 
   it('warns on a write down a builder chain split over lines', async () => {
     const report = await withWorkspace(app({
       'app/Http/Controllers/PostController.ts': controller(`    await Post.where({ id: 1 })
       .delete()
+    return this.redirect('/posts')`),
+    }))
+
+    expect(report.findings.find((f) => f.key === KEY)?.status).toBe('warn')
+  })
+
+  it.each([
+    ['a transaction scope', `    await Post.transaction(async (trx, posts) => {
+      await posts.delete({ id: 1 })
+    })`],
+    ['a multi-line argument object', `    await Post.where({
+      id: 1,
+    }).delete()`],
+    ['a builder held in a variable', `    const query = Post.where({ id: 1 })
+    await query.delete()`],
+    ['a method called on the loaded record', `    const post = await Post.findOrFail(1)
+    await post.delete()`],
+    ['the loaded record passed on', `    const post = await Post.findOrFail(1)
+    await remove(post)`],
+    ['a field of the loaded record assigned', `    const post = await Post.findOrFail(1)
+    post.title = 'x'`],
+  ])('warns when the write may come through %s', async (_shape, body) => {
+    const report = await withWorkspace(app({
+      'app/Http/Controllers/PostController.ts': controller(`${body}
     return this.redirect('/posts')`),
     }))
 
