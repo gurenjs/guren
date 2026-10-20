@@ -116,15 +116,17 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   }
 
   const packageJson = readPackageJson(root)
-  const deployConfig = backend === 'cf' ? await readDeployConfig(root) : undefined
-  if (backend === 'wrangler' && deployConfigPath(root)) {
-    console.warn(`Cloudflare build: ${deployConfigPath(root)} is read only on the cf backend (cloudflare.config.ts), so this build ignores it. Pass --mcp-oauth and --mcp-path here instead.`)
+  const configFile = deployConfigPath(root)
+  const deployConfig = backend === 'cf' && configFile ? await readDeployConfig(configFile) : undefined
+  if (backend === 'wrangler' && configFile) {
+    console.warn(`Cloudflare build: ${configFile} is read only on the cf backend (cloudflare.config.ts), so this build ignores it. Pass --mcp-oauth and --mcp-path here instead.`)
   }
+  const configName = configFile ? relative(root, configFile).split(sep).join('/') : DEPLOY_CONFIG_FILE
   const mcpOAuth = (backend === 'cf'
-    ? resolveOption('mcpOAuth', '--mcp-oauth', deployConfig?.mcpOAuth, options.mcpOAuth)
+    ? resolveOption(configName, 'mcpOAuth', '--mcp-oauth', deployConfig?.mcpOAuth, options.mcpOAuth)
     : options.mcpOAuth) === true
   const mcpPath = (backend === 'cf'
-    ? resolveOption('mcpPath', '--mcp-path', deployConfig?.mcpPath, options.mcpPath)
+    ? resolveOption(configName, 'mcpPath', '--mcp-path', deployConfig?.mcpPath, options.mcpPath)
     : options.mcpPath) ?? DEFAULT_MCP_PATH
 
   // Checked before the app build: these are one-line edits to files the developer
@@ -303,18 +305,13 @@ function writeWorkerManifest(input: {
 const DEPLOY_CONFIG_FILE = 'config/cloudflare.ts'
 const DEPLOY_CONFIG_EXTENSIONS = ['.ts', '.mts', '.js', '.mjs']
 
-/** The bindings a resource name can be given for: the build's D1 database and its KV namespace. */
-const NAMEABLE_BINDINGS = new Set(['DB', 'OAUTH_KV'])
-
 function deployConfigPath(root: string): string | undefined {
   return DEPLOY_CONFIG_EXTENSIONS
     .map((extension) => resolve(root, 'config', `cloudflare${extension}`))
     .find((path) => existsSync(path))
 }
 
-async function readDeployConfig(root: string): Promise<CloudflareDeployConfig | undefined> {
-  const path = deployConfigPath(root)
-  if (!path) return undefined
+async function readDeployConfig(path: string): Promise<CloudflareDeployConfig> {
   let exported: unknown
   try {
     exported = ((await import(pathToFileURL(path).href)) as { default?: unknown }).default
@@ -349,13 +346,13 @@ function deployConfigProblems(config: unknown): string[] {
  * The file is the record of a deploy setting on the cf backend; the flag, recorded
  * nowhere, is accepted with a warning and refused when it contradicts the file.
  */
-function resolveOption<T>(key: string, flag: string, fromFile: T | undefined, fromFlag: T | undefined): T | undefined {
+function resolveOption<T>(file: string, key: string, flag: string, fromFile: T | undefined, fromFlag: T | undefined): T | undefined {
   if (fromFlag === undefined || fromFlag === false) return fromFile ?? fromFlag
   if (fromFile !== undefined && fromFile !== fromFlag) {
-    throw new Error(`Cloudflare build: ${flag} contradicts ${key} in ${DEPLOY_CONFIG_FILE}. Drop the flag; the file is what every build and deploy reads.`)
+    throw new Error(`Cloudflare build: ${flag} contradicts ${key} in ${file}. Drop the flag; the file is what every build and deploy reads.`)
   }
   if (fromFile === undefined) {
-    console.warn(`Cloudflare build: ${flag} is recorded nowhere, so a build without it ships a different worker. Set ${key} in ${DEPLOY_CONFIG_FILE} instead.`)
+    console.warn(`Cloudflare build: ${flag} is recorded nowhere, so a build without it ships a different worker. Set ${key} in ${file} instead.`)
   }
   return fromFlag
 }
@@ -376,6 +373,9 @@ const MCP_OAUTH_SEAM_SPECIFIER = '@guren/plugin-mcp/oauth'
 
 /** The KV binding name `OAuthProvider` requires, fixed by the provider. */
 const OAUTH_KV_BINDING = 'OAUTH_KV'
+
+/** The bindings a resource name can be given for: the build's D1 database and its KV namespace. */
+const NAMEABLE_BINDINGS = new Set(['DB', OAUTH_KV_BINDING])
 
 /** The three endpoints the provider owns or hands back, in one place. */
 const OAUTH_ENDPOINTS = {

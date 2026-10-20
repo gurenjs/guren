@@ -124,7 +124,7 @@ async function prepare(options: CloudflareDeployOptions): Promise<Prepared> {
     worker,
     manifest: {
       resolved: readResolvedResources(join(root, CF_OUTPUT_DIR)),
-      ...(isRecord(previous.resourceNames) ? { resourceNames: previous.resourceNames as Record<string, string> } : {}),
+      ...(isRecord(previous.resourceNames) ? { resourceNames: previous.resourceNames } : {}),
     },
     d1: uses('d1') ? listD1Databases(cf) : unlisted,
     kv: uses('kv') ? listKvNamespaces(cf) : unlisted,
