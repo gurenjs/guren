@@ -67,6 +67,13 @@ describe('checkConfigWiring', () => {
     expect(results.map((result) => [result.key, result.status])).toEqual([['config-wired', 'pass']])
   })
 
+  // The exemption follows the builder's source, so a runtime definition at that path is still judged.
+  test('still reports an unwired runtime definition named config/cloudflare.ts', async () => {
+    const results = await run({ 'config/cloudflare.ts': CACHE_CONFIG_FIXTURE, 'src/app.ts': entry('{ providers: [] }', '') })
+
+    expect(results.map((result) => result.key)).toEqual(['config-unwired:config/cloudflare.ts'])
+  })
+
   test('fails a listed file that is not a definition, which the boot would die on', async () => {
     const results = await run({
       ...WITH_CACHE,

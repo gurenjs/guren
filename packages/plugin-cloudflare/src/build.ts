@@ -117,6 +117,9 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
 
   const packageJson = readPackageJson(root)
   const deployConfig = backend === 'cf' ? await readDeployConfig(root) : undefined
+  if (backend === 'wrangler' && deployConfigPath(root)) {
+    console.warn(`Cloudflare build: ${deployConfigPath(root)} is read only on the cf backend (cloudflare.config.ts), so this build ignores it. Pass --mcp-oauth and --mcp-path here instead.`)
+  }
   const mcpOAuth = (backend === 'cf'
     ? resolveOption('mcpOAuth', '--mcp-oauth', deployConfig?.mcpOAuth, options.mcpOAuth)
     : options.mcpOAuth) === true
@@ -298,10 +301,20 @@ function writeWorkerManifest(input: {
 
 /** RFC 0035 §3: Guren's deploy settings on the cf backend, recorded nowhere else. */
 const DEPLOY_CONFIG_FILE = 'config/cloudflare.ts'
+const DEPLOY_CONFIG_EXTENSIONS = ['.ts', '.mts', '.js', '.mjs']
+
+/** The bindings a resource name can be given for: the build's D1 database and its KV namespace. */
+const NAMEABLE_BINDINGS = new Set(['DB', 'OAUTH_KV'])
+
+function deployConfigPath(root: string): string | undefined {
+  return DEPLOY_CONFIG_EXTENSIONS
+    .map((extension) => resolve(root, 'config', `cloudflare${extension}`))
+    .find((path) => existsSync(path))
+}
 
 async function readDeployConfig(root: string): Promise<CloudflareDeployConfig | undefined> {
-  const path = resolve(root, DEPLOY_CONFIG_FILE)
-  if (!existsSync(path)) return undefined
+  const path = deployConfigPath(root)
+  if (!path) return undefined
   let exported: unknown
   try {
     exported = ((await import(pathToFileURL(path).href)) as { default?: unknown }).default
@@ -325,6 +338,9 @@ function deployConfigProblems(config: unknown): string[] {
   if (config.resourceNames !== undefined
     && (!isRecord(config.resourceNames) || Object.values(config.resourceNames).some((name) => typeof name !== 'string' || name === ''))) {
     problems.push('resourceNames is not a record of non-empty names')
+  } else if (isRecord(config.resourceNames)) {
+    const unknown = Object.keys(config.resourceNames).filter((binding) => !NAMEABLE_BINDINGS.has(binding))
+    if (unknown.length > 0) problems.push(`resourceNames names ${unknown.join(', ')}, and only ${[...NAMEABLE_BINDINGS].join(' and ')} take a name`)
   }
   return problems
 }

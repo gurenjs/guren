@@ -180,6 +180,34 @@ describe('cloudflare:build on the cf backend (RFC 0035)', () => {
     expect(failure).toContain('resourceNames is not a record of non-empty names')
   })
 
+  test('should mount the OAuth provider at the mcpPath config/cloudflare.js gives', async () => {
+    scaffoldApp(root, { cfBackend: true, mcpPlugin: true, oauthProvider: true })
+    mkdirSync(join(root, 'config'), { recursive: true })
+    writeFileSync(join(root, 'config/cloudflare.js'), "export default { mcpOAuth: true, mcpPath: '/api/mcp' }\n")
+
+    await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
+
+    expect(readFileSync(join(root, '.guren/cloudflare/worker.js'), 'utf8')).toContain('"/api/mcp"')
+  })
+
+  test('should refuse a resource name for a binding that cannot take one', async () => {
+    scaffoldApp(root, { cfBackend: true })
+    mkdirSync(join(root, 'config'), { recursive: true })
+    writeFileSync(join(root, 'config/cloudflare.ts'), "export default { resourceNames: { db: 'shared-db' } }\n")
+
+    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(/names db, and only DB and OAUTH_KV take a name/)
+  })
+
+  test('should warn that the wrangler backend ignores config/cloudflare.ts', async () => {
+    scaffoldApp(root)
+    mkdirSync(join(root, 'config'), { recursive: true })
+    writeFileSync(join(root, 'config/cloudflare.ts'), 'export default { mcpOAuth: true }\n')
+
+    const warnings = await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
+
+    expect(warnings).toContain('is read only on the cf backend')
+  })
+
   test('should refuse cloudflare:size, which measures through wrangler.jsonc', () => {
     scaffoldApp(root, { cfBackend: true })
     mkdirSync(join(root, '.guren'), { recursive: true })

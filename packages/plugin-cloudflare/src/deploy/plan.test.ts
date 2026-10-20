@@ -85,6 +85,18 @@ describe('buildPlan', () => {
     expect(plan.bindings[0]).toMatchObject({ action: 'adopt', name: 'shared-oauth', id: KV_ID })
   })
 
+  // The deploy binds the settled id, so a new name would be shown and not bound.
+  test('should block a resource name changed after an earlier deploy settled the binding', () => {
+    const plan = buildPlan(context({
+      env: { DB: { type: 'd1', name: 'demo-app', id: DB_ID } },
+      manifest: { resolved: { DB: { id: DB_ID, name: 'demo-app' } }, resourceNames: { DB: 'demo-db' } },
+      d1: ok([{ id: DB_ID, name: 'demo-app' }]),
+    }))
+
+    expect(plan.findings.map((finding) => finding.check)).toEqual(['binding-conflict'])
+    expect(plan.findings[0]?.fix).toContain('delete DB from "resolved"')
+  })
+
   test('should leave bindings it does not provision out of the plan', () => {
     const plan = buildPlan(context({
       env: {
