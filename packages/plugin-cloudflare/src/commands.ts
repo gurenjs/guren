@@ -1,7 +1,8 @@
 import { defineCommand } from 'citty'
 import { detectCloudflareBackend } from './backend'
 import { buildCloudflareOutput } from './build'
-import { hasBlocker, planCloudflareDeploy } from './deploy/deploy'
+import { planCloudflareDeploy } from './deploy/deploy'
+import { hasBlocker } from './deploy/plan'
 import { formatPlan } from './deploy/report'
 import { printBundleReport, reportBundleSize } from './bundle-size'
 
@@ -112,7 +113,11 @@ const cloudflareDeploy = defineCommand({
     },
     'mcp-oauth': {
       type: 'boolean',
-      description: 'Build with --mcp-oauth, which binds OAUTH_KV',
+      description: 'Build with --mcp-oauth, which binds OAUTH_KV (the plan rebuilds the deployable output, so pass what cloudflare:build gets)',
+    },
+    'mcp-path': {
+      type: 'string',
+      description: 'Path the App MCP endpoint is mounted at, as for cloudflare:build --mcp-path',
     },
     'skip-app-build': {
       type: 'boolean',
@@ -126,7 +131,9 @@ const cloudflareDeploy = defineCommand({
       ci: Boolean(args.ci),
       provision: Boolean(args.provision),
       mcpOAuth: Boolean(args['mcp-oauth']),
+      ...(args['mcp-path'] ? { mcpPath: args['mcp-path'] } : {}),
       skipAppBuild: Boolean(args['skip-app-build']),
+      logToStderr: Boolean(args.json),
     })
 
     console.log(args.json ? JSON.stringify({ plan }, null, 2) : formatPlan(plan))

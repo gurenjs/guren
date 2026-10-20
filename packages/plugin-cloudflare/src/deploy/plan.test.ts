@@ -103,6 +103,41 @@ describe('buildPlan', () => {
     const plan = buildPlan(context({ env: { DB: { type: 'd1', name: 'demo-app', id: DB_ID } } }))
 
     expect(plan.findings.map((finding) => finding.check)).toEqual(['resource-missing'])
+    expect(plan.bindings[0]?.action).toBe('unknown')
+  })
+
+  // gurenWorker() writes the manifest's id into the config, so the deploy binds it while it exists.
+  test('should keep the resolved resource among several of the same name', () => {
+    const plan = buildPlan(context({
+      env: { DB: { type: 'd1', name: 'demo-app', id: DB_ID } },
+      manifest: { resolved: { DB: { id: DB_ID, name: 'demo-app' } } },
+      d1: ok([{ uuid: DB_ID, name: 'demo-app' }, { uuid: OTHER_DB_ID, name: 'demo-app' }]),
+    }))
+
+    expect(plan.bindings[0]).toMatchObject({ action: 'existing', id: DB_ID })
+    expect(plan.findings).toEqual([])
+  })
+
+  test('should keep a resolved namespace whose title changed', () => {
+    const plan = buildPlan(context({
+      env: { OAUTH_KV: { type: 'kv', id: KV_ID } },
+      manifest: { resolved: { OAUTH_KV: { id: KV_ID } } },
+      kv: ok([{ id: KV_ID, title: 'renamed' }]),
+      mayCreate: false,
+    }))
+
+    expect(plan.bindings[0]).toMatchObject({ action: 'existing', id: KV_ID })
+    expect(plan.findings).toEqual([])
+  })
+
+  test('should block when the resolved resource and the planned name differ', () => {
+    const plan = buildPlan(context({
+      env: { DB: { type: 'd1', name: 'demo-app', id: DB_ID } },
+      manifest: { resolved: { DB: { id: DB_ID, name: 'legacy' } } },
+      d1: ok([{ uuid: DB_ID, name: 'legacy' }, { uuid: OTHER_DB_ID, name: 'demo-app' }]),
+    }))
+
+    expect(plan.findings.map((finding) => finding.check)).toEqual(['binding-conflict'])
   })
 
   test('should block when the configured id and the name point at different databases', () => {

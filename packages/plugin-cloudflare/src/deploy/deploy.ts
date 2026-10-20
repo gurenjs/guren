@@ -3,14 +3,14 @@
  * assemble, plan. Creating resources, migrating and deploying come later, so the
  * command runs only with `--plan`, which writes nothing to the account.
  */
-import { existsSync, readFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { readFileSync, rmSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 
 import { detectCloudflareBackend } from '../backend'
-import { buildCloudflareOutput } from '../build'
-import { CF_OUTPUT_DIR, WORKER_MANIFEST_FILE, type WorkerManifest } from '../worker-manifest'
-import { appCfRunner, cfBuild, checkAuth, listD1Databases, listKvNamespaces, type CfRunner } from './cf-cli'
-import { buildPlan, hasBlocker, type DeployPlan, type EvaluatedBinding, type EvaluatedWorker } from './plan'
+import { buildCloudflareOutput, readResolvedResources } from '../build'
+import { CF_OUTPUT_DIR } from '../worker-manifest'
+import { appCfRunner, cfBuild, checkAuth, listD1Databases, listKvNamespaces, type CfRunner, type Read } from './cf-cli'
+import { buildPlan, type DeployPlan, type EvaluatedBinding, type EvaluatedWorker } from './plan'
 
 /** cf refuses to load cloudflare.config.ts on older Node (RFC 0035 Appendix C row 10). */
 const NODE_FLOOR = [22, 18, 0] as const
@@ -27,7 +27,10 @@ export interface CloudflareDeployOptions {
   ci?: boolean
   provision?: boolean
   mcpOAuth?: boolean
+  mcpPath?: string
   skipAppBuild?: boolean
+  /** Route the build's own output to stderr, so stdout carries only `--json`. */
+  logToStderr?: boolean
   /** Seams for tests: the `cf` runner, the version of `node` on PATH, and whether a person is at the terminal. */
   cf?: CfRunner
   nodeVersion?: () => string | undefined
@@ -42,32 +45,62 @@ export async function planCloudflareDeploy(options: CloudflareDeployOptions): Pr
     )
   }
 
-  const cf = options.cf ?? appCfRunner(root)
-  preflight(root, cf, options.nodeVersion ?? nodeOnPathVersion)
+  const cfBin = resolvePackageFile(root, 'cf/package.json')
+  const cf = options.cf ?? appCfRunner(root, cfBin ? join(dirname(cfBin), 'bin', 'cf') : undefined)
+  preflight(root, cf, cfBin, options.nodeVersion ?? nodeOnPathVersion)
 
-  await buildCloudflareOutput({
-    rootDir: root,
-    skipAppBuild: options.skipAppBuild,
-    mcpOAuth: options.mcpOAuth,
-  })
+  await withStdoutLogs(options.logToStderr === true, () =>
+    buildCloudflareOutput({
+      rootDir: root,
+      skipAppBuild: options.skipAppBuild,
+      mcpOAuth: options.mcpOAuth,
+      ...(options.mcpPath ? { mcpPath: options.mcpPath } : {}),
+      appBuildToStderr: options.logToStderr,
+    }))
 
+  // A file left by an earlier build must not pass for this evaluation.
+  rmSync(join(root, EVALUATED_CONFIG), { force: true })
   const built = cfBuild(cf)
   if (!built.ok) {
     throw new Error(`Cloudflare deploy: \`cf build\` failed, so cloudflare.config.ts could not be evaluated:\n${built.reason}`)
   }
 
-  const interactive = options.interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY)
+  // Whether a person can answer a prompt; piping the output elsewhere does not change it.
+  const interactive = options.interactive ?? Boolean(process.stdin.isTTY)
+  const worker = readEvaluatedWorker(root)
+  const uses = (type: string) => Object.values(worker.env).some((entry) => entry.type === type)
+  const unlisted: Read<never[]> = { ok: true, value: [] }
   return buildPlan({
-    worker: readEvaluatedWorker(root),
-    manifest: readManifest(root),
-    d1: listD1Databases(cf),
-    kv: listKvNamespaces(cf),
+    worker,
+    manifest: { resolved: readResolvedResources(join(root, CF_OUTPUT_DIR)) },
+    d1: uses('d1') ? listD1Databases(cf) : unlisted,
+    kv: uses('kv') ? listKvNamespaces(cf) : unlisted,
     mayCreate: Boolean(options.provision) || (!options.ci && interactive),
   })
 }
 
+async function withStdoutLogs<T>(toStderr: boolean, run: () => Promise<T>): Promise<T> {
+  if (!toStderr) return run()
+  const log = console.log
+  console.log = console.error
+  try {
+    return await run()
+  } finally {
+    console.log = log
+  }
+}
+
+/** Resolved the way Node resolves it from the app, so a hoisted workspace install is found. */
+function resolvePackageFile(root: string, specifier: string): string | undefined {
+  try {
+    return Bun.resolveSync(specifier, root)
+  } catch {
+    return undefined
+  }
+}
+
 /** Checks only the cf backend's tools, before anything is built (RFC 0035 §7). */
-function preflight(root: string, cf: CfRunner, nodeVersion: () => string | undefined): void {
+function preflight(root: string, cf: CfRunner, cfPackage: string | undefined, nodeVersion: () => string | undefined): void {
   if (detectCloudflareBackend(root) !== 'cf') {
     throw new Error(
       'Cloudflare deploy: needs the cf backend, a cloudflare.config.ts and `cf` declared (see the Cloudflare guide). An app deploying through wrangler.jsonc keeps using `cloudflare:build` and `wrangler deploy`.',
@@ -75,7 +108,7 @@ function preflight(root: string, cf: CfRunner, nodeVersion: () => string | undef
   }
 
   const problems: string[] = []
-  if (!existsSync(join(root, 'node_modules', 'cf', 'bin', 'cf'))) {
+  if (!cfPackage) {
     problems.push('cf is declared but not installed. Run `bun install`.')
   }
   const node = nodeVersion()
@@ -117,11 +150,6 @@ function readEvaluatedWorker(root: string): EvaluatedWorker {
   return { name: config.name, env }
 }
 
-function readManifest(root: string): Pick<WorkerManifest, 'resolved'> {
-  const manifest = readJson(join(root, CF_OUTPUT_DIR, WORKER_MANIFEST_FILE))
-  return { resolved: isRecord(manifest) && isRecord(manifest.resolved) ? (manifest.resolved as WorkerManifest['resolved']) : {} }
-}
-
 function nodeOnPathVersion(): string | undefined {
   try {
     const result = Bun.spawnSync({ cmd: ['node', '--version'], stdout: 'pipe', stderr: 'pipe' })
@@ -132,7 +160,8 @@ function nodeOnPathVersion(): string | undefined {
 }
 
 function installedVersion(root: string, name: string): string | undefined {
-  const manifest = readJson(join(root, 'node_modules', name, 'package.json'))
+  const path = resolvePackageFile(root, `${name}/package.json`)
+  const manifest = path ? readJson(path) : undefined
   return isRecord(manifest) && typeof manifest.version === 'string' ? manifest.version : undefined
 }
 
@@ -159,4 +188,3 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-export { hasBlocker }

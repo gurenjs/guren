@@ -13,6 +13,7 @@ const DB_ID = 'e902bc31-46b4-47dc-9d46-194d0b86148c'
 function installTools(root: string, wranglerVersion = '4.151.1'): void {
   mkdirSync(join(root, 'node_modules/cf/bin'), { recursive: true })
   writeFileSync(join(root, 'node_modules/cf/bin/cf'), '')
+  writeJson(join(root, 'node_modules/cf/package.json'), { name: 'cf', version: '1.0.0-beta.18' })
   mkdirSync(join(root, 'node_modules/wrangler'), { recursive: true })
   writeJson(join(root, 'node_modules/wrangler/package.json'), { name: 'wrangler', version: wranglerVersion })
 }
@@ -114,7 +115,34 @@ describe('cloudflare:deploy --plan', () => {
     expect(plan.bindings).toEqual([{ binding: 'DB', type: 'd1', action: 'adopt', name: 'demo-app', id: DB_ID }])
     expect(plan.findings).toEqual([])
     expect(existsSync(join(root, '.guren/cloudflare/guren-worker.json'))).toBe(true)
-    expect(calls.map((call) => call[0])).toEqual(['auth', 'build', 'd1', 'kv'])
+    // No KV binding in the evaluated config, so no KV listing.
+    expect(calls.map((call) => call[0])).toEqual(['auth', 'build', 'd1'])
+  })
+
+  test('should not read a worker.config.json an earlier build left when cf build writes none', async () => {
+    scaffoldApp(root, { cfBackend: true })
+    installTools(root)
+    mkdirSync(join(root, '.cloudflare/output/v0/workers/default'), { recursive: true })
+    writeJson(join(root, '.cloudflare/output/v0/workers/default/worker.config.json'), { name: 'stale', env: {} })
+    const cf = (args: string[]): CfResult =>
+      ({ exitCode: 0, stdout: args[0] === 'auth' ? '{"authenticated":true}' : '[]', stderr: '' })
+
+    await expect(planCloudflareDeploy(options({ cf }))).rejects.toThrow(/worker\.config\.json is missing/)
+  })
+
+  test('should keep stdout for the JSON when asked, sending the build\'s lines to stderr', async () => {
+    scaffoldApp(root, { cfBackend: true })
+    installTools(root)
+    const logged: unknown[] = []
+    const log = console.log
+    console.log = (...args: unknown[]) => logged.push(args)
+    try {
+      await planCloudflareDeploy(options({ logToStderr: true }))
+    } finally {
+      console.log = log
+    }
+
+    expect(logged).toEqual([])
   })
 
   test('should not plan a creation for a non-interactive run without --provision', async () => {

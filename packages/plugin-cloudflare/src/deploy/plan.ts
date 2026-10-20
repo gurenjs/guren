@@ -24,7 +24,7 @@ export interface PlanContext {
   manifest: Pick<WorkerManifest, 'resolved'>
   d1: Read<D1Database[]>
   kv: Read<KvNamespace[]>
-  /** Whether this run may create what is missing: a TTY, `--yes` or `--provision`, never plain `--ci`. */
+  /** Whether this run may create what is missing: an interactive run or `--provision`, never plain `--ci`. */
   mayCreate: boolean
 }
 
@@ -120,6 +120,7 @@ function planBinding(
   // An id equal to the manifest's came from gurenWorker(), which is a comparison, not a source.
   const configuredId = entry.id !== undefined && entry.id !== resolvedId ? entry.id : undefined
 
+  let missing = false
   const listing = type === 'd1' ? context.d1 : context.kv
   if (!listing.ok) {
     return { binding, type, action: 'unknown', name, ...(configuredId ? { id: configuredId } : {}) }
@@ -131,6 +132,7 @@ function planBinding(
 
   if (configuredId !== undefined) {
     if (!resources.some((resource) => resource.id === configuredId)) {
+      missing = true
       findings.push({
         check: 'resource-missing',
         severity: 'blocker',
@@ -149,7 +151,22 @@ function planBinding(
         fix: 'Keep one: remove the id from cloudflare.config.ts, or give the binding another name.',
       })
     }
-    return { binding, type, action: 'existing', name, id: configuredId }
+    return { binding, type, action: missing ? 'unknown' : 'existing', name, id: configuredId }
+  }
+
+  // gurenWorker() puts the manifest's id in the config, so the deploy binds it while it exists.
+  if (resolvedId !== undefined && resources.some((resource) => resource.id === resolvedId)) {
+    const other = byName.find((resource) => resource.id !== resolvedId)
+    if (other && !byName.some((resource) => resource.id === resolvedId)) {
+      findings.push({
+        check: 'binding-conflict',
+        severity: 'blocker',
+        binding,
+        message: `${binding} is bound to the ${label} ${resolvedId} by an earlier deploy, while the ${label} "${name}" is ${other.id}.`,
+        fix: `Put the intended id in cloudflare.config.ts, or rename one of the ${label}s.`,
+      })
+    }
+    return { binding, type, action: 'existing', name, id: resolvedId }
   }
 
   if (byName.length > 1) {

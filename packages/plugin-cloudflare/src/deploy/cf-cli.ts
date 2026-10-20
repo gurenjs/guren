@@ -33,8 +33,7 @@ const PAGE_SIZE = 100
 const MAX_PAGES = 50
 
 /** The app's `cf`, run by `node` from PATH; cf loads cloudflare.config.ts with that Node. */
-export function appCfRunner(root: string): CfRunner {
-  const bin = join(root, 'node_modules', 'cf', 'bin', 'cf')
+export function appCfRunner(root: string, bin = join(root, 'node_modules', 'cf', 'bin', 'cf')): CfRunner {
   return (args) => {
     const result = Bun.spawnSync({
       cmd: ['node', bin, ...args],
