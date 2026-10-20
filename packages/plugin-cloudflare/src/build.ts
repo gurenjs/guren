@@ -358,7 +358,7 @@ function resolveOption<T>(file: string, key: string, flag: string, fromFile: T |
 }
 
 /** The Worker name, and the D1 database name a fresh binding gets. */
-function workerName(packageName: string | undefined): string {
+export function workerName(packageName: string | undefined): string {
   return (packageName ?? 'guren-app').replace(/^@[^/]+\//, '')
 }
 
@@ -372,7 +372,7 @@ const OAUTH_PROVIDER_PACKAGE = '@cloudflare/workers-oauth-provider'
 const MCP_OAUTH_SEAM_SPECIFIER = '@guren/plugin-mcp/oauth'
 
 /** The KV binding name `OAuthProvider` requires, fixed by the provider. */
-const OAUTH_KV_BINDING = 'OAUTH_KV'
+export const OAUTH_KV_BINDING = 'OAUTH_KV'
 
 /** The bindings a resource name can be given for: the build's D1 database and its KV namespace. */
 const NAMEABLE_BINDINGS = new Set(['DB', OAUTH_KV_BINDING])
@@ -438,7 +438,7 @@ function assertOAuthKvBound(root: string): void {
 }
 
 /** Whether a parsed config binds a KV namespace under the provider's name. */
-function bindsOAuthKv(config: Record<string, unknown>): boolean {
+export function bindsOAuthKv(config: Record<string, unknown>): boolean {
   const namespaces = config.kv_namespaces
   return Array.isArray(namespaces)
     && namespaces.some((entry) => isRecord(entry) && entry.binding === OAUTH_KV_BINDING)
@@ -694,7 +694,7 @@ interface ConfigScope {
   config: Record<string, unknown>
 }
 
-function configScopes(config: Record<string, unknown>): ConfigScope[] {
+export function configScopes(config: Record<string, unknown>): ConfigScope[] {
   const scopes: ConfigScope[] = [{ label: '', config }]
   if (isRecord(config.env)) {
     for (const [name, environment] of Object.entries(config.env)) {
@@ -736,9 +736,13 @@ function warnPlaceholderIds(root: string): void {
 function placeholderKeys(scope: ConfigScope, key: string, idKey: string): string[] {
   return asArray(scope.config[key]).flatMap((entry, index) => {
     const id = isRecord(entry) ? entry[idKey] : undefined
-    const placeholder = typeof id === 'string' && (!/^[0-9a-f-]+$/i.test(id) || /^[0-]*$/.test(id))
-    return placeholder ? [`${key}[${index}].${idKey}${scope.label}`] : []
+    return typeof id === 'string' && isPlaceholderId(id) ? [`${key}[${index}].${idKey}${scope.label}`] : []
   })
+}
+
+/** D1 ids are UUIDs and KV ids 32 hex digits, so anything but hex and hyphens, or all zeros, stands in for one. */
+export function isPlaceholderId(id: string): boolean {
+  return !/^[0-9a-f-]+$/i.test(id) || /^[0-]*$/.test(id)
 }
 
 /**
@@ -874,7 +878,7 @@ function sqliteBackedClasses(config: Record<string, unknown>): Set<string> {
   return classes
 }
 
-function asArray(value: unknown): unknown[] {
+export function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : []
 }
 
@@ -1134,7 +1138,7 @@ function warnHeaderRuleBudget(merged: string, existing: string): void {
   )
 }
 
-function readPackageJson(root: string): PackageJsonLike {
+export function readPackageJson(root: string): PackageJsonLike {
   const packageJsonPath = resolve(root, 'package.json')
   if (!existsSync(packageJsonPath)) {
     return {}
@@ -1625,7 +1629,7 @@ function scaffoldConsentFlow(root: string): void {
  * Callers that must tell those apart check `existsSync` first; the rest treat
  * both as nothing to read.
  */
-function readWranglerConfig(configPath: string): Record<string, unknown> | undefined {
+export function readWranglerConfig(configPath: string): Record<string, unknown> | undefined {
   try {
     return parseJsonc(readFileSync(configPath, 'utf8')) as Record<string, unknown>
   } catch {

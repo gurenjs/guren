@@ -32,6 +32,7 @@
     "commands": {
       "entry": "./dist/commands.js",
       "names": [
+        "cloudflare:init",
         "cloudflare:build",
         "cloudflare:size",
         "cloudflare:deploy"
