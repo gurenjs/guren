@@ -22,6 +22,14 @@ Before the app build it runs the deploy-runtime checks `guren doctor` reports an
 
 `bunx guren cloudflare:size` (or `cloudflare:build --report-size`) measures the bundle a deploy would upload through wrangler's dry run and lists its largest sources by package. The platform limit is 64 MiB uncompressed on every plan; the report warns from half of it.
 
+## Deploying with the cf CLI (beta)
+
+`bunx guren cloudflare:init` writes `cloudflare.config.ts`, `wrangler.config.ts` and `config/cloudflare.ts`, carrying over the D1 name and `OAUTH_KV` from an existing `wrangler.jsonc`. When the app has a `cloudflare.config.ts` and declares the `cf` package, `cloudflare:build` assembles into `.guren/cloudflare/` and writes `guren-worker.json` there instead of scaffolding `wrangler.jsonc`. `@guren/plugin-cloudflare/config` turns that manifest into `cf` configuration: spread `await gurenWorker({ name })` into `defineConfig({ worker })`, and pass `gurenWranglerBundle()` to `defineWranglerConfig()` in `wrangler.config.ts`. `cf` loads both files with Node 22.18 or later, and needs Wrangler 4.136 or later to bundle. The Cloudflare guide has the full setup.
+
+Guren's deploy settings live in `config/cloudflare.ts` (`defineCloudflareConfig({ mcpOAuth, mcpPath, resourceNames })`, from the same subpath), which the build and the deploy read and the running app does not; on this path it replaces the `--mcp-oauth` and `--mcp-path` flags.
+
+`bunx guren cloudflare:deploy --plan` builds, evaluates `cloudflare.config.ts`, and resolves every D1 and KV binding against the account (existing, adopt, or create), exiting 1 on a conflict, a missing resource the run may not create, a listing it could not read, a pending destructive migration no marker acknowledges, or a production variable no secret provides. Without `--plan` it asks once, then creates what is missing, records the resolved ids in the ignored manifest, applies the pending migrations after a Time Travel bookmark, and runs `cf deploy --prebuilt --no-provision`. It never deletes; a failure lists the commands that undo what the run did. `--yes` or `--ci` replace the prompt in CI.
+
 ## API
 
 - **`createWorkersHandler(app)`** — wraps a Guren `Application` in a Workers module handler. Boot is lazy and deduplicated on the first request, because `boot()` performs I/O that workerd forbids in global scope. The handler deduplicates boot itself, so boot-once holds for anything matching `WorkersAppLike`, not only Guren's `Application`. It also exposes `boot(env)`, for an entrypoint that holds `env` but no request — an agent Durable Object woken by an alarm. The latch behind both is `bootWorkersApp(app, env)` / `bootAndFetch(app, request, env, ctx)`, keyed on the app.

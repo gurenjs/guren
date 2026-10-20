@@ -31,7 +31,7 @@
     {
       "binding": "DB",
       "database_name": "my-guren-app",
-      "database_id": "<run `wrangler d1 create my-guren-app` and paste the id>",
+      // No database_id: `wrangler deploy` creates the database by this name.
       // Regenerated on every build — apply migrations after building.
       "migrations_dir": ".cloudflare/d1-migrations"
     }

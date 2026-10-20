@@ -25,6 +25,7 @@ import {
   type PathLike,
 } from '@guren/core/internal/deploy-build'
 import { reportDeployRuntimeHazards } from '@guren/core/internal/deploy-check'
+import { readScheduledTasks } from '@guren/core/internal/deploy-plan'
 
 import {
   MCP_OAUTH_REGISTRAR,
@@ -32,6 +33,16 @@ import {
   MCP_OAUTH_TEMPLATE_FILES,
   loadMcpOAuthTemplate,
 } from './templates'
+import {
+  CF_OUTPUT_DIR,
+  WORKER_MANIFEST_FILE,
+  WORKER_MANIFEST_VERSION,
+  type ResolvedResource,
+  type WorkerManifest,
+} from './worker-manifest'
+import { detectCloudflareBackend, readManifestDependencies } from './backend'
+import type { CloudflareDeployConfig } from './config'
+import { readLocalMigrations } from './deploy/migrations'
 
 interface PackageJsonLike {
   name?: string
@@ -71,6 +82,8 @@ export interface BuildCloudflareOutputOptions {
    * leaves the endpoint outside the OAuth boundary silently.
    */
   mcpPath?: string
+  /** Send the app build's own output to stderr, so stdout carries only a caller's JSON. */
+  appBuildToStderr?: boolean
 }
 
 /**
@@ -81,7 +94,10 @@ export interface BuildCloudflareOutputOptions {
  */
 export async function buildCloudflareOutput(options: BuildCloudflareOutputOptions = {}): Promise<void> {
   const root = resolvePathLike(options.rootDir ?? process.cwd())
-  const out = resolvePathLike(options.outputDir ?? resolve(root, '.cloudflare'))
+  const backend = detectCloudflareBackend(root)
+  const out = resolvePathLike(
+    options.outputDir ?? resolve(root, backend === 'cf' ? CF_OUTPUT_DIR : '.cloudflare'),
+  )
   const appEntry = resolvePathLike(options.appEntry ?? resolve(root, 'src/app.ts'))
   const publicDir = resolvePathLike(options.publicDir ?? resolve(root, 'public'))
   const ssrDir = resolvePathLike(options.ssrDir ?? resolve(root, '.guren/ssr'))
@@ -92,19 +108,33 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   // but the delete waits until every check below has passed — a failed build
   // must not take the previous deploy output with it.
   assertOutputDirOutsideRoot(out, root, 'Cloudflare build')
-  assertWranglerJsoncIsAuthoritative(root)
-  assertKeepsClassNames(root)
+  // `cf` reads cloudflare.config.ts and never wrangler.jsonc, which `cf migrate` leaves in place.
+  if (backend === 'wrangler') {
+    assertWranglerJsoncIsAuthoritative(root)
+    assertKeepsClassNames(root)
+    warnPlaceholderIds(root)
+  }
 
   const packageJson = readPackageJson(root)
-  const mcpOAuth = options.mcpOAuth === true
-  const mcpPath = options.mcpPath ?? DEFAULT_MCP_PATH
+  const configFile = deployConfigPath(root)
+  const deployConfig = backend === 'cf' && configFile ? await readDeployConfig(configFile) : undefined
+  if (backend === 'wrangler' && configFile) {
+    console.warn(`Cloudflare build: ${configFile} is read only on the cf backend (cloudflare.config.ts), so this build ignores it. Pass --mcp-oauth and --mcp-path here instead.`)
+  }
+  const configName = configFile ? relative(root, configFile).split(sep).join('/') : DEPLOY_CONFIG_FILE
+  const mcpOAuth = (backend === 'cf'
+    ? resolveOption(configName, 'mcpOAuth', '--mcp-oauth', deployConfig?.mcpOAuth, options.mcpOAuth)
+    : options.mcpOAuth) === true
+  const mcpPath = (backend === 'cf'
+    ? resolveOption(configName, 'mcpPath', '--mcp-path', deployConfig?.mcpPath, options.mcpPath)
+    : options.mcpPath) ?? DEFAULT_MCP_PATH
 
   // Checked before the app build: these are one-line edits to files the developer
   // owns, and reporting them after minutes of Vite output is reporting them where
   // nobody reads.
   if (mcpOAuth) {
     assertMcpOAuthUsable(root)
-    assertOAuthKvBound(root)
+    if (backend === 'wrangler') assertOAuthKvBound(root)
   }
 
   const hostsAgents = existsSync(resolve(root, AGENTS_CONFIG_FILE))
@@ -115,17 +145,21 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
     assertAgentsPluginUsable(root)
   }
   const agents = hostsAgents ? await readAgentRegistry(root) : NO_AGENTS
-  const agentBindings = assertAgentDurableObjects(root, agents.exports)
+  // On cf, gurenWorker() binds exactly these from the manifest.
+  const agentBindings = backend === 'cf'
+    ? agents.exports.map((agent) => durableObjectBindingName(agent.export))
+    : assertAgentDurableObjects(root, agents.exports)
   warnUnroutedAgents(agents)
 
   // Same placement as the checks above: an in-memory session store on Workers
   // drops every login after deploy, and the warning belongs where the
   // developer is still reading (RFC 0020 Part 0).
   await reportDeployRuntimeHazards({ root, label: 'Cloudflare build' })
+  const schedule = backend === 'cf' ? await cronTriggers(root) : { crons: [] }
   warnDatabaseWithoutD1(root)
 
   if (!options.skipAppBuild) {
-    runAppBuild(root, packageJson.scripts ?? {})
+    runAppBuild(root, packageJson.scripts ?? {}, options.appBuildToStderr === true)
   }
 
   if (!existsSync(appEntry)) {
@@ -136,7 +170,22 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   const assetEnv = resolveClientAssetEnv(publicDir, clientEntryKey, 'Cloudflare build')
   const bundledEnv = bundledRuntimeEnv(root, publicDir, 'Cloudflare build')
 
+  // Read before the reset deletes it: a deploy settles these, and no build can recompute them.
+  const resolved = backend === 'cf' ? readResolvedResources(out) : {}
   resetOutputDir(out, root, 'Cloudflare build')
+  // Written first so a build failing below still keeps the carried-over ids.
+  if (backend === 'cf') {
+    writeWorkerManifest({
+      root,
+      out,
+      packageName: packageJson.name,
+      mcpOAuth,
+      agents: agents.exports,
+      resolved,
+      ...schedule,
+      resourceNames: deployConfig?.resourceNames ?? {},
+    })
+  }
 
   // Workers Static Assets serves `/` from index.html BEFORE the worker runs,
   // and has no rewrites for the built assets' `/public/assets/` base — both
@@ -171,7 +220,146 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
     scaffoldConsentFlow(root)
   }
 
-  scaffoldWranglerConfig(root, out, packageJson.name, mcpOAuth, agents.exports)
+  if (backend === 'wrangler') {
+    scaffoldWranglerConfig(root, out, packageJson.name, mcpOAuth, agents.exports)
+  }
+}
+
+/** The manifest a build left in `out`, or an empty object when there is none to read. */
+export function readWorkerManifest(out: string): Partial<WorkerManifest> {
+  try {
+    const manifest: unknown = JSON.parse(readFileSync(resolve(out, WORKER_MANIFEST_FILE), 'utf8'))
+    return isRecord(manifest) ? (manifest as Partial<WorkerManifest>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/** The previous build's `resolved` section, or nothing when there is no readable manifest. */
+export function readResolvedResources(out: string): Record<string, ResolvedResource> {
+  const resolved = readWorkerManifest(out).resolved
+  return isRecord(resolved) ? (resolved as Record<string, ResolvedResource>) : {}
+}
+
+/**
+ * One `* * * * *` trigger when the schedule kernel registers tasks: the worker runs
+ * whichever are due at each firing, so a coarser trigger would skip the finest task
+ * (RFC 0035 §2). None for the OAuth sweep alone, which `handler.scheduled` follows by
+ * throwing when no scheduler is bound. A kernel it cannot read is recorded, so the
+ * deploy plan can refuse to drop a trigger the Worker may already have.
+ */
+async function cronTriggers(root: string): Promise<{ crons: string[]; scheduleUnreadable?: string }> {
+  const tasks = await readScheduledTasks(root)
+  if (tasks.status === 'unreadable') {
+    console.warn(`Cloudflare build: ${tasks.message}, so no cron trigger was added for scheduled tasks. Add triggers.scheduled() in cloudflare.config.ts if the app has any.`)
+    return { crons: [], scheduleUnreadable: tasks.message }
+  }
+  if (tasks.status === 'loaded') {
+    for (const warning of tasks.warnings) console.warn(`Cloudflare build: the schedule kernel loaded partly: ${warning}`)
+  }
+  return { crons: tasks.status === 'loaded' && tasks.count > 0 ? [EVERY_MINUTE] : [] }
+}
+
+const EVERY_MINUTE = '* * * * *'
+
+function writeWorkerManifest(input: {
+  root: string
+  out: string
+  packageName: string | undefined
+  mcpOAuth: boolean
+  agents: AgentExport[]
+  resolved: Record<string, ResolvedResource>
+  crons: string[]
+  scheduleUnreadable?: string
+  resourceNames: Record<string, string>
+}): void {
+  const outRelative = relative(input.root, input.out).split(sep).join('/')
+  const manifest: WorkerManifest = {
+    version: WORKER_MANIFEST_VERSION,
+    entrypoint: `./${outRelative}/worker.js`,
+    assetsDirectory: `./${outRelative}/assets`,
+    compatibilityFlags: ['nodejs_compat'],
+    htmlHandling: HTML_HANDLING,
+    alias: devOnlyAliases(outRelative),
+    define: BUNDLE_DEFINES,
+    vars: WORKER_VARS,
+    d1: { binding: 'DB', databaseName: input.resourceNames.DB ?? workerName(input.packageName) },
+    kvNamespaces: input.mcpOAuth ? [OAUTH_KV_BINDING] : [],
+    crons: input.crons,
+    resourceNames: input.resourceNames,
+    ...(input.scheduleUnreadable ? { scheduleUnreadable: input.scheduleUnreadable } : {}),
+    agents: input.agents.map((agent) => ({
+      exportName: agent.export,
+      binding: durableObjectBindingName(agent.export),
+    })),
+    resolved: input.resolved,
+  }
+
+  mkdirSync(input.out, { recursive: true })
+  writeFileSync(resolve(input.out, WORKER_MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`)
+  // The manifest will carry resource ids, which stay out of the repository (RFC 0035 §3.1).
+  writeFileSync(resolve(input.out, '.gitignore'), '*\n')
+}
+
+/** RFC 0035 §3: Guren's deploy settings on the cf backend, recorded nowhere else. */
+const DEPLOY_CONFIG_FILE = 'config/cloudflare.ts'
+const DEPLOY_CONFIG_EXTENSIONS = ['.ts', '.mts', '.js', '.mjs']
+
+function deployConfigPath(root: string): string | undefined {
+  return DEPLOY_CONFIG_EXTENSIONS
+    .map((extension) => resolve(root, 'config', `cloudflare${extension}`))
+    .find((path) => existsSync(path))
+}
+
+async function readDeployConfig(path: string): Promise<CloudflareDeployConfig> {
+  let exported: unknown
+  try {
+    exported = ((await import(pathToFileURL(path).href)) as { default?: unknown }).default
+  } catch (error) {
+    throw new Error(`Cloudflare build: ${path} failed to import: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  const problems = deployConfigProblems(exported)
+  if (problems.length > 0) {
+    throw new Error(`Cloudflare build: ${path} must default-export defineCloudflareConfig({ ... }):\n  ${problems.join('\n  ')}`)
+  }
+  return exported as CloudflareDeployConfig
+}
+
+function deployConfigProblems(config: unknown): string[] {
+  if (!isRecord(config)) return ['the default export is not an object']
+  const problems: string[] = []
+  if (config.mcpOAuth !== undefined && typeof config.mcpOAuth !== 'boolean') problems.push('mcpOAuth is not a boolean')
+  if (config.mcpPath !== undefined && (typeof config.mcpPath !== 'string' || !config.mcpPath.startsWith('/'))) {
+    problems.push('mcpPath is not a path starting with /')
+  }
+  if (config.resourceNames !== undefined
+    && (!isRecord(config.resourceNames) || Object.values(config.resourceNames).some((name) => typeof name !== 'string' || name === ''))) {
+    problems.push('resourceNames is not a record of non-empty names')
+  } else if (isRecord(config.resourceNames)) {
+    const unknown = Object.keys(config.resourceNames).filter((binding) => !NAMEABLE_BINDINGS.has(binding))
+    if (unknown.length > 0) problems.push(`resourceNames names ${unknown.join(', ')}, and only ${[...NAMEABLE_BINDINGS].join(' and ')} take a name`)
+  }
+  return problems
+}
+
+/**
+ * The file is the record of a deploy setting on the cf backend; the flag, recorded
+ * nowhere, is accepted with a warning and refused when it contradicts the file.
+ */
+function resolveOption<T>(file: string, key: string, flag: string, fromFile: T | undefined, fromFlag: T | undefined): T | undefined {
+  if (fromFlag === undefined || fromFlag === false) return fromFile ?? fromFlag
+  if (fromFile !== undefined && fromFile !== fromFlag) {
+    throw new Error(`Cloudflare build: ${flag} contradicts ${key} in ${file}. Drop the flag; the file is what every build and deploy reads.`)
+  }
+  if (fromFile === undefined) {
+    console.warn(`Cloudflare build: ${flag} is recorded nowhere, so a build without it ships a different worker. Set ${key} in ${file} instead.`)
+  }
+  return fromFlag
+}
+
+/** The Worker name, and the D1 database name a fresh binding gets. */
+export function workerName(packageName: string | undefined): string {
+  return (packageName ?? 'guren-app').replace(/^@[^/]+\//, '')
 }
 
 /** `mcpPlugin()`'s own default mount path — see `BuildCloudflareOutputOptions.mcpPath`. */
@@ -184,7 +372,10 @@ const OAUTH_PROVIDER_PACKAGE = '@cloudflare/workers-oauth-provider'
 const MCP_OAUTH_SEAM_SPECIFIER = '@guren/plugin-mcp/oauth'
 
 /** The KV binding name `OAuthProvider` requires, fixed by the provider. */
-const OAUTH_KV_BINDING = 'OAUTH_KV'
+export const OAUTH_KV_BINDING = 'OAUTH_KV'
+
+/** The bindings a resource name can be given for: the build's D1 database and its KV namespace. */
+const NAMEABLE_BINDINGS = new Set(['DB', OAUTH_KV_BINDING])
 
 /** The three endpoints the provider owns or hands back, in one place. */
 const OAUTH_ENDPOINTS = {
@@ -233,49 +424,32 @@ function assertOAuthKvBound(root: string): void {
     return
   }
 
-  const bound = oauthKvBinding(config)
-  if (bound) {
-    // Present, but still carrying the placeholder id this build scaffolds, which
-    // `wrangler deploy` rejects. Warned rather than failed: the id is not needed
-    // to *build*, and a --dry-run deploy on an unfinished config is reasonable.
-    if (bound.id === oauthKvNamespace().id) {
-      console.warn(
-        `Cloudflare build: ${configPath} still has the scaffolded placeholder id for the ${OAUTH_KV_BINDING} binding, so a real deploy will be rejected. Create the namespace and paste its id in:\n`
-        + `  wrangler kv namespace create ${OAUTH_KV_BINDING}`,
-      )
-    }
+  if (bindsOAuthKv(config)) {
     return
   }
 
   throw new Error(
-    `Cloudflare build: --mcp-oauth needs a KV namespace bound as ${OAUTH_KV_BINDING} — the OAuth provider stores its clients, grants and tokens there — and ${configPath} has none. Create one and add this entry, alongside whatever the file already has:\n`
+    `Cloudflare build: --mcp-oauth needs a KV namespace bound as ${OAUTH_KV_BINDING} — the OAuth provider stores its clients, grants and tokens there — and ${configPath} has none. Add this entry, alongside whatever the file already has:\n`
     + `  "kv_namespaces": [\n`
     + `    ${JSON.stringify(oauthKvNamespace(), null, 2).split('\n').join('\n    ')}\n`
     + `  ]\n`
-    + `Get the id from: wrangler kv namespace create ${OAUTH_KV_BINDING}`,
+    + `With no "id", \`wrangler deploy\` creates the namespace on the first deploy. To use one you created yourself, add its id from: wrangler kv namespace create ${OAUTH_KV_BINDING}`,
   )
+}
+
+/** Whether a parsed config binds a KV namespace under the provider's name. */
+export function bindsOAuthKv(config: Record<string, unknown>): boolean {
+  const namespaces = config.kv_namespaces
+  return Array.isArray(namespaces)
+    && namespaces.some((entry) => isRecord(entry) && entry.binding === OAUTH_KV_BINDING)
 }
 
 /**
- * The KV namespace a parsed config binds under the provider's name, or
- * `undefined`. Returns the entry rather than a boolean because callers ask both
- * "is it bound" and "is its id still the placeholder" of the same match.
+ * The binding entry, spelled once — the scaffold writes it, the guard quotes it.
+ * No `id`: an id-less binding is what wrangler's own provisioning creates at deploy.
  */
-function oauthKvBinding(config: Record<string, unknown>): Record<string, unknown> | undefined {
-  const namespaces = config.kv_namespaces
-  if (!Array.isArray(namespaces)) {
-    return undefined
-  }
-
-  return namespaces.find(
-    (entry): entry is Record<string, unknown> =>
-      isRecord(entry) && entry.binding === OAUTH_KV_BINDING,
-  )
-}
-
-/** The binding entry, spelled once — the scaffold writes it, the guard quotes it. */
 function oauthKvNamespace(): Record<string, string> {
-  return { binding: OAUTH_KV_BINDING, id: `TODO: wrangler kv namespace create ${OAUTH_KV_BINDING}` }
+  return { binding: OAUTH_KV_BINDING }
 }
 
 /**
@@ -283,16 +457,9 @@ function oauthKvNamespace(): Record<string, string> {
  * ship). An absent, unreadable or malformed manifest answers `false`.
  */
 function appDependsOn(root: string, name: string): boolean {
-  try {
-    const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
-      dependencies?: Record<string, string>
-    }
-    const dependencies = manifest.dependencies
-    return typeof dependencies === 'object' && dependencies !== null && name in dependencies
-  } catch {
-    return false
-  }
+  return readManifestDependencies(root).dependencies?.[name] !== undefined
 }
+
 
 /** The package the generated worker imports the agent runtime and router from. */
 const AGENTS_PLUGIN_PACKAGE = '@guren/plugin-agents'
@@ -527,7 +694,7 @@ interface ConfigScope {
   config: Record<string, unknown>
 }
 
-function configScopes(config: Record<string, unknown>): ConfigScope[] {
+export function configScopes(config: Record<string, unknown>): ConfigScope[] {
   const scopes: ConfigScope[] = [{ label: '', config }]
   if (isRecord(config.env)) {
     for (const [name, environment] of Object.entries(config.env)) {
@@ -535,6 +702,47 @@ function configScopes(config: Record<string, unknown>): ConfigScope[] {
     }
   }
   return scopes
+}
+
+/**
+ * wrangler provisions only a binding with no id, so a placeholder id such as
+ * `TODO: wrangler d1 create` fails the deploy. D1 ids are UUIDs and KV ids 32 hex
+ * digits, so anything but hex and hyphens, or all zeros, is a placeholder.
+ */
+function warnPlaceholderIds(root: string): void {
+  const configPath = resolve(root, 'wrangler.jsonc')
+  const config = readWranglerConfig(configPath)
+  if (!config) {
+    return
+  }
+
+  const placeholders = configScopes(config).flatMap((scope) => [
+    ...placeholderKeys(scope, 'd1_databases', 'database_id'),
+    ...placeholderKeys(scope, 'kv_namespaces', 'id'),
+  ])
+  if (placeholders.length === 0) {
+    return
+  }
+
+  // An id-less binding resolves by name, so an env sharing the top level's name shares its resource.
+  const envNote = placeholders.some((key) => key.includes('(env.'))
+    ? '\nAn env.<name> binding left with no id resolves by its database_name or the worker name, so give each environment its own name before deleting its id.'
+    : ''
+  console.warn(
+    `Cloudflare build: ${configPath} has placeholder resource ids, which \`wrangler deploy\` rejects. Delete these keys, and the deploy creates each resource (or connects to one of the same name); or paste a real id in:\n  ${placeholders.join('\n  ')}${envNote}`,
+  )
+}
+
+function placeholderKeys(scope: ConfigScope, key: string, idKey: string): string[] {
+  return asArray(scope.config[key]).flatMap((entry, index) => {
+    const id = isRecord(entry) ? entry[idKey] : undefined
+    return typeof id === 'string' && isPlaceholderId(id) ? [`${key}[${index}].${idKey}${scope.label}`] : []
+  })
+}
+
+/** D1 ids are UUIDs and KV ids 32 hex digits, so anything but hex and hyphens, or all zeros, stands in for one. */
+export function isPlaceholderId(id: string): boolean {
+  return !/^[0-9a-f-]+$/i.test(id) || /^[0-]*$/.test(id)
 }
 
 /**
@@ -670,7 +878,7 @@ function sqliteBackedClasses(config: Record<string, unknown>): Set<string> {
   return classes
 }
 
-function asArray(value: unknown): unknown[] {
+export function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : []
 }
 
@@ -786,21 +994,12 @@ export function flattenD1Migrations(migrationsDir: string, outDir: string): void
     return
   }
 
-  const entries = readdirSync(migrationsDir, { withFileTypes: true })
-  const copies: Array<{ from: string; to: string }> = []
-
-  for (const entry of entries) {
-    if (entry.isFile() && entry.name.endsWith('.sql')) {
-      copies.push({ from: resolve(migrationsDir, entry.name), to: entry.name })
-      continue
-    }
-    if (entry.isDirectory() && entry.name !== 'meta') {
-      const nested = resolve(migrationsDir, entry.name, 'migration.sql')
-      if (existsSync(nested)) {
-        copies.push({ from: nested, to: `${entry.name}.sql` })
-      }
-    }
-  }
+  // The same walk `cloudflare:deploy --plan` judges, so the two cannot disagree on the set.
+  const local = readLocalMigrations(migrationsDir)
+  const copies = [
+    ...local.files.map((file) => ({ from: resolve(migrationsDir, file), to: file })),
+    ...local.folders.map((folder) => ({ from: resolve(migrationsDir, folder, 'migration.sql'), to: `${folder}.sql` })),
+  ]
 
   const seen = new Map<string, string>()
   for (const copy of copies) {
@@ -939,7 +1138,7 @@ function warnHeaderRuleBudget(merged: string, existing: string): void {
   )
 }
 
-function readPackageJson(root: string): PackageJsonLike {
+export function readPackageJson(root: string): PackageJsonLike {
   const packageJsonPath = resolve(root, 'package.json')
   if (!existsSync(packageJsonPath)) {
     return {}
@@ -952,7 +1151,7 @@ function readPackageJson(root: string): PackageJsonLike {
   }
 }
 
-function runAppBuild(root: string, scripts: Record<string, string>): void {
+function runAppBuild(root: string, scripts: Record<string, string>, toStderr: boolean): void {
   if (!scripts.build) {
     throw new Error(
       'Cloudflare build: no "build" script found in package.json. Add one (codegen + vite build + vite build --ssr) or pass --skip-app-build after building manually.',
@@ -962,7 +1161,7 @@ function runAppBuild(root: string, scripts: Record<string, string>): void {
   const result = Bun.spawnSync({
     cmd: ['bun', 'run', 'build'],
     cwd: root,
-    stdout: 'inherit',
+    stdout: toStderr ? 2 : 'inherit',
     stderr: 'inherit',
   })
 
@@ -1295,6 +1494,22 @@ function renderOAuthProvider(mcpPath: string, defaultEntry: string): string {
 })`
 }
 
+/** Substituted at bundle time, by wrangler or by the bundler `cf` delegates to. */
+const WORKER_VARS: Record<string, string> = { NODE_ENV: 'production' }
+
+const BUNDLE_DEFINES: Record<string, string> = {
+  // Framework and app code branch on NODE_ENV at module scope, statements in
+  // the generated worker cannot beat ESM import hoisting, and wrangler `vars`
+  // are not guaranteed to reach `process.env` before the module graph
+  // evaluates — so it is substituted at build time.
+  'process.env.NODE_ENV': '"production"',
+  // workerd leaves `import.meta.url` undefined, which kills Vite's SSR
+  // `createRequire(import.meta.url)` and scaffolded `new URL(..., import.meta.url)`
+  // at module scope. A literal is safe because Workers has no filesystem, so
+  // every such path is meaningless there anyway.
+  'import.meta.url': '"file:///worker.js"',
+}
+
 function scaffoldWranglerConfig(
   root: string,
   out: string,
@@ -1303,7 +1518,7 @@ function scaffoldWranglerConfig(
   agents: AgentExport[],
 ): void {
   const configPath = resolve(root, 'wrangler.jsonc')
-  const appName = (packageName ?? 'guren-app').replace(/^@[^/]+\//, '')
+  const appName = workerName(packageName)
   const outRelative = relative(root, out).split(sep).join('/')
 
   const config = {
@@ -1312,24 +1527,12 @@ function scaffoldWranglerConfig(
     compatibility_date: new Date().toISOString().slice(0, 10),
     compatibility_flags: ['nodejs_compat'],
     alias: devOnlyAliases(outRelative),
-    define: {
-      // Framework and app code branch on NODE_ENV at module scope, statements in
-      // the generated worker cannot beat ESM import hoisting, and wrangler `vars`
-      // are not guaranteed to reach `process.env` before the module graph
-      // evaluates — so it is substituted at build time.
-      'process.env.NODE_ENV': '"production"',
-      // workerd leaves `import.meta.url` undefined, which kills Vite's SSR
-      // `createRequire(import.meta.url)` and scaffolded `new URL(..., import.meta.url)`
-      // at module scope. A literal is safe because Workers has no filesystem, so
-      // every such path is meaningless there anyway.
-      'import.meta.url': '"file:///worker.js"',
-    },
+    define: BUNDLE_DEFINES,
     assets: { directory: `${outRelative}/assets`, html_handling: HTML_HANDLING },
     d1_databases: [
       {
         binding: 'DB',
         database_name: appName,
-        database_id: 'TODO: wrangler d1 create',
         migrations_dir: `${outRelative}/d1-migrations`,
       },
     ],
@@ -1352,7 +1555,7 @@ function scaffoldWranglerConfig(
           migrations: [{ tag: 'v1', new_sqlite_classes: agents.map((agent) => agent.export) }],
         }
       : {}),
-    vars: { NODE_ENV: 'production' },
+    vars: WORKER_VARS,
   }
 
   try {
@@ -1366,11 +1569,13 @@ function scaffoldWranglerConfig(
     }
     throw error
   }
-  const notes = ['fill in d1_databases[0].database_id']
-  if (mcpOAuth) {
-    notes.push(`create the ${OAUTH_KV_BINDING} namespace (wrangler kv namespace create ${OAUTH_KV_BINDING}) and fill in its id`)
-  }
-  console.log(`Cloudflare build: scaffolded ${configPath} — ${notes.join(', and ')} before deploying.`)
+  const created = mcpOAuth
+    ? `the D1 database "${appName}" and the ${OAUTH_KV_BINDING} namespace`
+    : `the D1 database "${appName}"`
+  console.log(
+    `Cloudflare build: scaffolded ${configPath} with no resource ids. The first \`wrangler deploy\` (Wrangler 4.129 or later) creates ${created}, or connects to an existing one of that name on the account. The worker serves an empty database until you apply migrations right after it:\n`
+    + `  wrangler d1 migrations apply ${appName} --remote`,
+  )
   // Not scaffolded: a cron trigger every app pays for whether or not it has
   // tasks, on the same rule as the OAuth KV namespace above.
   console.log(
@@ -1424,7 +1629,7 @@ function scaffoldConsentFlow(root: string): void {
  * Callers that must tell those apart check `existsSync` first; the rest treat
  * both as nothing to read.
  */
-function readWranglerConfig(configPath: string): Record<string, unknown> | undefined {
+export function readWranglerConfig(configPath: string): Record<string, unknown> | undefined {
   try {
     return parseJsonc(readFileSync(configPath, 'utf8')) as Record<string, unknown>
   } catch {
@@ -1578,7 +1783,7 @@ function warnOAuthDrift(
   config: Record<string, unknown>,
   mcpOAuth: boolean,
 ): void {
-  if (mcpOAuth || !oauthKvBinding(config)) {
+  if (mcpOAuth || !bindsOAuthKv(config)) {
     return
   }
 

@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
+import { WORKER_MANIFEST_VERSION, type WorkerManifest } from '../src/worker-manifest'
+
 /**
  * The minimum app on disk `buildCloudflareOutput` will assemble a worker from.
  * One definition, shared by `build.test.ts` and `mcp-oauth.test.ts`: every
@@ -34,6 +36,8 @@ export interface ScaffoldAppOptions {
   agentsPlugin?: boolean
   /** Declare it under `devDependencies` instead, which must not satisfy the guard. */
   agentsPluginAsDevDependency?: boolean
+  /** Put the app on the `cf` backend: a `cloudflare.config.ts` and `cf` under `devDependencies` (RFC 0035 §7). */
+  cfBackend?: boolean
 }
 
 export function scaffoldApp(root: string, options: ScaffoldAppOptions = {}): void {
@@ -45,6 +49,7 @@ export function scaffoldApp(root: string, options: ScaffoldAppOptions = {}): voi
     oauthProviderAsDevDependency = false,
     agentsPlugin = false,
     agentsPluginAsDevDependency = false,
+    cfBackend = false,
   } = options
 
   mkdirSync(join(root, 'src'), { recursive: true })
@@ -58,6 +63,10 @@ export function scaffoldApp(root: string, options: ScaffoldAppOptions = {}): voi
   const devDependencies: Record<string, string> = {}
   if (oauthProviderAsDevDependency) devDependencies['@cloudflare/workers-oauth-provider'] = '^0.10.3'
   if (agentsPluginAsDevDependency) devDependencies['@guren/plugin-agents'] = '^0.1.0'
+  if (cfBackend) {
+    devDependencies.cf = '1.0.0-beta.18'
+    writeFileSync(join(root, 'cloudflare.config.ts'), 'export default {}\n')
+  }
 
   writeJson(join(root, 'package.json'), {
     name: '@acme/demo-app',
@@ -160,4 +169,40 @@ export function writeIntrospectableApp(root: string, app: string): void {
   writeFileSync(join(root, 'bunfig.toml'), '[install]\nauto = "disable"\n')
   writeFileSync(join(root, 'src/main.ts'), "import app from './app.js'\nexport default app\n")
   writeFileSync(join(root, 'src/app.ts'), app)
+}
+
+/** A complete manifest at the current version, as `cloudflare:build` writes it on the cf backend. */
+export function workerManifest(overrides: Partial<WorkerManifest> = {}): WorkerManifest {
+  return {
+    version: WORKER_MANIFEST_VERSION,
+    entrypoint: './.guren/cloudflare/worker.js',
+    assetsDirectory: './.guren/cloudflare/assets',
+    compatibilityFlags: ['nodejs_compat'],
+    htmlHandling: 'none',
+    alias: { 'bun:sqlite': './.guren/cloudflare/stub-bun-sqlite.js' },
+    define: { 'process.env.NODE_ENV': '"production"' },
+    vars: { NODE_ENV: 'production' },
+    d1: { binding: 'DB', databaseName: 'demo-app' },
+    kvNamespaces: [],
+    crons: [],
+    resourceNames: {},
+    agents: [],
+    resolved: {},
+    ...overrides,
+  }
+}
+
+/** Installs what `cloudflare:deploy` preflight resolves from the app: cf's package and bin, and a Wrangler. */
+export function installCfTools(root: string, wranglerVersion = '4.151.1'): void {
+  mkdirSync(join(root, 'node_modules/cf/bin'), { recursive: true })
+  writeFileSync(join(root, 'node_modules/cf/bin/cf'), '')
+  writeJson(join(root, 'node_modules/cf/package.json'), { name: 'cf', version: '1.0.0-beta.18' })
+  mkdirSync(join(root, 'node_modules/wrangler'), { recursive: true })
+  writeJson(join(root, 'node_modules/wrangler/package.json'), { name: 'wrangler', version: wranglerVersion })
+}
+
+/** A drizzle 1.x migration folder under `db/migrations/`. */
+export function writeMigration(root: string, folder: string, sql: string): void {
+  mkdirSync(join(root, 'db/migrations', folder), { recursive: true })
+  writeFileSync(join(root, 'db/migrations', folder, 'migration.sql'), sql)
 }

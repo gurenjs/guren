@@ -95,7 +95,7 @@ function formatFlags(task: TaskInfo): string {
 }
 
 /** Why a listing has no tasks; see {@link reportEmptyKernel} for what each state means. */
-type KernelLoad =
+export type KernelLoad =
   | { kind: 'loaded'; path: string; tasks: TaskInfo[]; warnings: string[] }
   | { kind: 'missing' }
   | { kind: 'not-found'; path: string }
@@ -194,8 +194,11 @@ async function readKernelModule(kernelPath: string): Promise<KernelLoad> {
   return { kind: 'unrecognized', path: kernelPath, exports: Object.keys(mod) }
 }
 
-/** Loads the schedule kernel from `--kernel`, or from the conventional locations. */
-async function loadScheduleKernel(options: ScheduleOptions = {}): Promise<KernelLoad> {
+/**
+ * Loads the schedule kernel from `--kernel`, or from the conventional locations.
+ * Exported for the deploy plugins, so a cron trigger follows the same reading as `schedule:list`.
+ */
+export async function loadScheduleKernel(options: ScheduleOptions = {}): Promise<KernelLoad> {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
 
   const kernelPaths = options.kernel

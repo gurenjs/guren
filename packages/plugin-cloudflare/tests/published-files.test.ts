@@ -48,5 +48,6 @@ describe.if(built)('published files', () => {
 
     expect(files).toContain('dist/index.js')
     expect(files).toContain('dist/commands.js')
+    expect(files).toContain('dist/config.js')
   })
 })

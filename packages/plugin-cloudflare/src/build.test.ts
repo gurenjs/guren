@@ -10,7 +10,7 @@ import {
 } from '@guren/core/internal/deploy-build'
 import { buildCloudflareOutput } from './build'
 
-import { CLIENT_MANIFEST, captureWarnings, scaffoldApp, writeIntrospectableApp, writeJson } from '../tests/app-fixture'
+import { CLIENT_MANIFEST, captureLogs, captureWarnings, scaffoldApp, writeIntrospectableApp, writeJson } from '../tests/app-fixture'
 
 describe('buildCloudflareOutput', () => {
   let root: string
@@ -191,6 +191,66 @@ describe('buildCloudflareOutput', () => {
     writeFileSync(configPath, '{ "name": "user-edited" }\n')
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
     expect(readFileSync(configPath, 'utf8')).toContain('user-edited')
+  })
+
+  // wrangler provisions only a binding with no id; any id, a placeholder too, opts out.
+  test('should scaffold the D1 binding by name with no database_id', async () => {
+    scaffoldApp(root)
+
+    const logs = await captureLogs(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
+
+    const config = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'))
+    expect(config.d1_databases[0]).toEqual({
+      binding: 'DB',
+      database_name: 'demo-app',
+      migrations_dir: '.cloudflare/d1-migrations',
+    })
+    expect(logs).toContain('creates the D1 database "demo-app"')
+    expect(logs).toContain('wrangler d1 migrations apply demo-app --remote')
+  })
+
+  test('should name each placeholder id left in wrangler.jsonc, in every env scope', async () => {
+    scaffoldApp(root)
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    const configPath = join(root, 'wrangler.jsonc')
+    const config = JSON.parse(readFileSync(configPath, 'utf8'))
+    config.d1_databases[0].database_id = 'TODO: wrangler d1 create'
+    config.kv_namespaces = [
+      { binding: 'CACHE', id: '0123456789abcdef0123456789abcdef' },
+      { binding: 'SESSIONS', id: '0'.repeat(32) },
+    ]
+    config.env = {
+      production: { d1_databases: [{ binding: 'DB', database_name: 'demo-app', database_id: '<the id wrangler printed>' }] },
+    }
+    writeJson(configPath, config)
+
+    const warnings = await captureWarnings(() =>
+      buildCloudflareOutput({ rootDir: root, skipAppBuild: true }),
+    )
+
+    expect(warnings).toContain('placeholder resource ids')
+    expect(warnings).toContain('d1_databases[0].database_id\n')
+    expect(warnings).toContain('d1_databases[0].database_id (env.production)')
+    expect(warnings).toContain('give each environment its own name')
+    expect(warnings).toContain('kv_namespaces[1].id')
+    expect(warnings).not.toContain('kv_namespaces[0].id')
+  })
+
+  // Reported where the developer is still reading: before the app build, which can fail.
+  test('should warn about a placeholder id before the app build runs', async () => {
+    scaffoldApp(root)
+    writeJson(join(root, 'wrangler.jsonc'), {
+      name: 'demo-app',
+      d1_databases: [{ binding: 'DB', database_name: 'demo-app', database_id: 'TODO: wrangler d1 create' }],
+    })
+    const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+    writeJson(join(root, 'package.json'), { ...manifest, scripts: { ...manifest.scripts, build: 'exit 1' } })
+
+    const warnings = await captureWarnings(async () => {
+      await buildCloudflareOutput({ rootDir: root }).catch(() => undefined)
+    })
+
+    expect(warnings).toContain('d1_databases[0].database_id')
   })
 
   test('should refuse to scaffold wrangler.jsonc beside a wrangler.toml', async () => {

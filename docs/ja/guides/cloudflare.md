@@ -42,11 +42,7 @@ wrangler は、`keep_names` で無効にしない限り esbuild の `keepNames` 
 
 ## データベース（D1）
 
-データベースを作り、その ID を `wrangler.jsonc` に書き込みます。
-
-```bash
-bunx wrangler d1 create my-app
-```
+生成される `wrangler.jsonc` では、データベースを名前で指定していて、`database_id` は書かれていません。
 
 ```jsonc
 {
@@ -54,12 +50,15 @@ bunx wrangler d1 create my-app
     {
       "binding": "DB",
       "database_name": "my-app",
-      "database_id": "<wrangler が出力した ID>",
       "migrations_dir": ".cloudflare/d1-migrations"
     }
   ]
 }
 ```
+
+ID のないバインディングに対して、`wrangler deploy`（Wrangler 4.129 以降）は `database_name` の名前のデータベースを探し、なければ作成します。2 回目以降のデプロイでは、デプロイ済みのワーカーに結び付いているデータベースをそのまま使うので、ID をどこかに写す必要はありません。名前での検索はアカウント全体が対象なので、別のプロジェクトにすでに `my-app` という名前のデータベースがあると、デプロイはそれに結び付きます。`database_name` には、アカウントの中で重ならない名前を付けてください。Wrangler 4.151 以降は、ターミナルからデプロイしたときに作成した ID を `wrangler.jsonc` に書き戻します。CI からのデプロイではファイルを変えず、同じ探し方で同じデータベースに当たります。
+
+自分で作ったデータベースを使う場合は、`bunx wrangler d1 create my-app` が出力した ID を `"database_id"` に書いてください。仮の値を書いたままにはしないでください。Wrangler は ID が書かれたバインディングを作成の対象から外すので、仮の値のままだとデプロイが失敗します。古いプラグインで生成したアプリには `"database_id": "TODO: wrangler d1 create"` が入っています。16 進数でない ID やすべて 0 の ID が残っていると、キーを削除するまで、ビルドがアプリのビルドの前に警告します。
 
 `config/database.ts` で、ランタイムに応じてドライバを切り替えます。D1 は SQLite 互換なので、スキーマは SQLite のダイアレクトで書き、開発中はローカルの SQLite ファイルを使います。
 
@@ -104,6 +103,16 @@ Workers 上のアプリは自分でマイグレーションを実行しないの
 bunx guren cloudflare:build          # .cloudflare/d1-migrations を再生成
 bunx wrangler d1 migrations apply my-app --remote
 ```
+
+初回のデプロイでは、`wrangler deploy` が作成するまでデータベースが存在しません。そのため、ビルド、デプロイ、マイグレーションの順に実行します。
+
+```bash
+bunx guren cloudflare:build
+bunx wrangler deploy
+bunx wrangler d1 migrations apply my-app --remote
+```
+
+最後のコマンドが終わるまでは、新しいワーカーが空のデータベースに対して公開されていて、テーブルを読むリクエストは失敗します。3 つを続けて実行するか、先に `wrangler d1 create` でデータベースを作り、最初のデプロイの前にマイグレーションを適用してください。
 
 wrangler はフォルダにあるものをそのまま適用するので、この時点では Guren の破壊的マイグレーションのガードが働きません。`bunx guren check`(または `bunx guren gate`)を使うと、ブランチで追加したマイグレーションをマージ前に判定し、`-- guren:allow-destructive` のコメントがない `DROP`、型を狭める変更、テーブルの再作成を報告します。ガードの役目を果たすのはプルリクエストなので、その CI で全履歴を取得したうえで(`fetch-depth: 0`)`bunx guren check --ci` を実行し、通ったものだけをマージしてください。`main` の上で実行すると、コミット済みのマイグレーションはすべてリリース済みとみなされて何も判定されません。そのため、`--remote` に適用する直前に `main` で実行しても、wrangler がこれから適用するものの確認にはなりません。報告の内容は[破壊的マイグレーション](./database.md#破壊的マイグレーション)にあります。D1 はマイグレーション中も外部キーを有効にしたままなので、ほかのテーブルが `ON DELETE CASCADE` で参照するテーブルの再作成は、すべてのカラムをコピーしていてもここで報告されます。
 
@@ -401,9 +410,129 @@ Workers は、アプリケーションが自分でホストするエージェン
 
 デプロイしたエージェントの無料プランでの実測値、1 回の定期処理で使える D1 クエリの予算、そのほかエージェントの書き方全般は[永続エージェント](./durable-agents.md)にまとめてあります。
 
+## cf CLI でのデプロイ（ベータ）
+
+`cf` は Wrangler の後継として Cloudflare が出した CLI で、いまはオープンベータです。`wrangler.jsonc` の代わりに `cloudflare.config.ts` を読みます。アプリに `cloudflare.config.ts` があり、`cf` パッケージを依存に入れていると、`cloudflare:build` は `cf` 向けの出力に切り替わります。このファイルがなければ、これまでと何も変わりません。
+
+デプロイするマシンには Node 22.18 以上が必要です。`cf` は `cloudflare.config.ts` を Node で読み込むからです。バンドルは `cf` から Wrangler に任されるので、Wrangler 4.136 以上も入れておきます。
+
+```bash
+bun add -d cf wrangler
+```
+
+`bunx guren cloudflare:init` を実行すると、この経路で読む 3 つのファイル（`cloudflare.config.ts`、`wrangler.config.ts`、`config/cloudflare.ts`。中身は下のとおり）を書き出し、`.gitignore` に `.cloudflare/` を加えます。すでに `wrangler.jsonc` があるアプリでは、ワーカー名、互換性の日付、`DB` のデータベース名、`OAUTH_KV` の名前空間（`cloudflare.config.ts` に ID で書きます）を引き継ぐので、最初の `cf` のデプロイも Wrangler のときと同じリソースに結び付きます。`cf` が読まなくなるほかの設定（routes、vars、ほかのバインディング）は名前を挙げて知らせるので、スプレッドのあとに書き足してください。既存のファイルは、`--force` を付けない限りそのまま残します。`wrangler.jsonc` で Durable Object を使っているアプリには警告を出します。宣言を `migrations` から `exports` に移したときに、デプロイ済みのクラスが保存領域を引き継ぐかはまだ確かめられていないので、先にステージング用のワーカーで試してください。
+
+```bash
+bunx guren cloudflare:init
+```
+
+`gurenWorker()` は、`cloudflare:build` が組み立てたワーカーを返します。中身はエントリ、名前で指定した `DB` バインディング、`--mcp-oauth` のときの `OAUTH_KV`、SQLite を使う Durable Object としての各エージェントです。自分の設定は、同じオブジェクトの中でスプレッドのあとに書きます。
+
+```typescript
+// cloudflare.config.ts
+import { bindings, defineConfig } from 'cf/config'
+import { gurenWorker } from '@guren/plugin-cloudflare/config'
+
+export default defineConfig(async () => {
+  const worker = await gurenWorker({ name: 'my-app' })
+  return {
+    worker: {
+      ...worker,
+      compatibilityDate: '2026-10-01',
+      env: { ...worker.env, MEDIA: bindings.r2({}) },
+    },
+  }
+})
+```
+
+```typescript
+// wrangler.config.ts
+import { defineWranglerConfig } from 'wrangler/experimental-config'
+import { gurenWranglerBundle } from '@guren/plugin-cloudflare/config'
+
+export default defineWranglerConfig(gurenWranglerBundle())
+```
+
+`compatibilityDate` は自分で決めて、自分で更新してください。`gurenWranglerBundle()` は、モジュールのスタブ、ビルド時の `define`、アセットのディレクトリを返し、`keepNames` も有効にします。スケジュールカーネルがタスクを登録しているときは、`* * * * *` の cron トリガーも 1 つ加えます。スプレッドのあとに `triggers` を書けば、そちらに置き換わります。カーネル以外の場所で登録したタスクや、`--mcp-oauth` の保存領域の掃除だけを動かしたい場合は、この `triggers` を自分で書いてください。カーネルを読み込めなかったときはトリガーを加えません。その場合 `cloudflare:deploy` は、トリガーなしでデプロイせずに止まります。カーネルが読めるようになるか、設定に `triggers` を書けば先に進みます。
+
+Guren 自身のデプロイ設定は `config/cloudflare.ts` に書きます。ビルドと `cloudflare:deploy` はこのファイルを読みますが、動いているアプリは読みません。`guren check` も、`createApp({ config })` に加えるよう求めません。
+
+```typescript
+// config/cloudflare.ts
+import { defineCloudflareConfig } from '@guren/plugin-cloudflare/config'
+
+export default defineCloudflareConfig({
+  mcpOAuth: true,
+  resourceNames: { OAUTH_KV: 'my-app-oauth' },
+})
+```
+
+- `mcpOAuth` と `mcpPath` は、この経路では `--mcp-oauth` と `--mcp-path` のフラグの代わりになります。ファイルと食い違うフラグは受け付けません。ファイルが設定していないフラグは使いますが、次のビルドに残らないので警告します。
+- `resourceNames` では、バインディングごとのリソース名を指定します。既定の名前（`DB` は `<worker>`、ほかは `<worker>-<binding>`）が別のプロジェクトと重なるときや、名前の制限に合わないときに使います。KV のバインディングは `cloudflare.config.ts` に名前を持てないので、ただの `cf deploy` では既定の名前のままになります。名前を指定したら、`cloudflare:deploy` でデプロイしてください。
+
+ビルドしてから、アプリのルートでデプロイします。
+
+```bash
+bunx guren cloudflare:build
+bunx cf deploy
+```
+
+この経路では、ビルドの出力先が `.guren/cloudflare/` になり、`gurenWorker()` が読む `guren-worker.json` もそこに書かれます。このディレクトリには専用の `.gitignore` が置かれ、`.cloudflare/` の下にある `cf` のファイルには触りません。バインディングに ID がないので、最初の `cf deploy` がデータベースと名前空間を作ります。名前での探し方は [Wrangler の場合](#データベースd1)と同じです。
+
+`cf d1 migrations apply` には、データベースの名前ではなく ID を渡します。`bunx cf d1 list --name my-app` で ID を調べてから、ビルドが書き出した平坦化済みのマイグレーションを適用してください。既定ではリモートに適用され、`--local` を付けるとローカルのシミュレーションが対象になります。
+
+```bash
+bunx cf d1 migrations apply <database-id> --dir .guren/cloudflare/d1-migrations
+```
+
+このディレクトリを使うと、各マイグレーションは `wrangler d1 migrations apply` と同じ名前で記録されます。そのため、Wrangler でマイグレーションしてきたデータベースも履歴を引き継げます。`cloudflare:size` が測るのは Wrangler の経路だけです。
+
+### デプロイの計画
+
+`bunx guren cloudflare:deploy --plan` は、ツールを確かめ、ビルドし、`cf build` を実行してから、D1 と KV の各バインディングをアカウントのリソースと突き合わせます。アカウントには何も書き込みません。
+
+```bash
+bunx guren cloudflare:deploy --plan
+```
+
+各バインディングは次のどれかとして表示されます。`existing` は、前回の実行で決まったリソースか、自分で書いた ID のリソースです。`adopt` は、予定の名前で見つかったものの、まだこのアプリのものとして記録されていないリソースなので、このアプリのものか確かめてください。`create on deploy` は、デプロイ時に作られるリソースです。KV の名前は、`cf deploy` 自身が作るときと同じ `<worker>-<binding>`（`_` は `-` に置き換え）です。止める必要のある問題があると、終了コード 1 で終わります。
+
+- `binding-conflict`: `cloudflare.config.ts` に書いた ID と予定の名前が別のリソースを指しているか、同じ名前のリソースが 2 つあります。
+- `resource-missing`: 書いた ID のリソースがアカウントにないか、リソースがなく、この実行では作れません。`--ci` を付けた実行と、ターミナルのない実行では、`--provision` を付けない限り何も作りません。
+- `source-unreadable`: `cf` がアカウントのリソースを一覧できなかったか、マイグレーションの記録表を読めなかったか、アプリの `config/env.ts` を読み込めませんでした。推測で進めずに、計画を止めます。
+- `tracker-layout`: データベースの `d1_migrations` に、平坦化した名前（`<folder>.sql`）と入れ子の名前（`<folder>/migration.sql`）が混在しています。
+- `destructive-migration`: 未適用のマイグレーションが、`-- guren:allow-destructive` のコメントなしに何かを削除したり型を狭めたりしています（[破壊的マイグレーション](./database.md#破壊的マイグレーション)）。`--allow-destructive` を付けると、止めずに警告として表示します。
+- `secrets`: `config/env.ts` が本番で必須としている変数に、デプロイ済みのワーカー、設定、`--secrets-file` のどこにも値がありません。
+
+計画では、データベースに適用済みのマイグレーションを読み、記録表がすでに使っている形式を選んで、その形式での `cf d1 migrations apply` の引数を表示します。Wrangler でマイグレーションしてきたデータベースは平坦化したコピーのまま扱うので、同じマイグレーションが二重に適用されることはありません。デプロイで新しく作るデータベースはまだ何も適用していないので、手元のマイグレーションをすべて判定します。secrets については、最初のデプロイでは読む相手のワーカーがまだないので、値を dotenv ファイルに書いて `--secrets-file .env.production` で渡してください。計画が読むのは、そのファイルに書かれた名前だけです。
+
+事前確認には、PATH 上の `node` が Node 22.18 以上であること、アプリの Wrangler が 4.136 以上であること、`cf` がログイン済みであること（`bunx cf auth login`、CI では `CLOUDFLARE_API_TOKEN`）が必要です。`--json` を付けると `{ plan }` を 1 つのオブジェクトとして出力します。
+
+### 1 つのコマンドでデプロイする
+
+`--plan` を付けなければ、同じコマンドがそのままデプロイまで進みます。
+
+```bash
+bunx guren cloudflare:deploy --secrets-file .env.production
+```
+
+計画を表示したあとに 1 度だけ確認を求め、承認するまではアカウントに何も書き込みません。止める必要のある問題が計画にあれば、そこで止まります。承認すると、次の順に進みます。
+
+1. `create on deploy` のリソースを作り、解決した各 ID を `guren-worker.json` に記録します。このファイルは git に含めない出力先にあり、リポジトリには入りません。
+2. ID が変わったときは `cf build` をやり直します。`cloudflare.config.ts` が記録と別のリソースを指していれば、そこで止めます。
+3. D1 の Time Travel の bookmark を記録し、未適用のマイグレーションを取り直して、計画で判定したものと同じときだけ適用します。
+4. `cf deploy --prebuilt --no-provision` を実行します。この時点でリソースがなければ、計画にないリソースを作らずにデプロイを失敗させます。
+5. URL、作ったリソース、適用したマイグレーション、ロールバックの方法を表示します。ロールバックしてもマイグレーションは戻りません。
+
+リソースを削除することはありません。何かを書き込んだあとで失敗したときは、この実行で作ったものを消す `cf d1 delete` / `cf kv namespaces delete` のコマンドと、マイグレーションのあとなら bookmark に戻す `cf d1 time-travel restore` のコマンドを表示します。必要なら自分で実行してください。
+
+`bunx guren deploy --target cloudflare` を使うと、main への push のたびにこれを実行する GitHub Actions のワークフローを書き出せます。CI では確認に答える人がいないので、デプロイするには `--yes` を付けます。作るものがないときだけデプロイしたいなら `--ci` を付けます（`--ci --provision` で作成も許可します）。`--skip-migrations` を付けると、マイグレーションを適用せずにデプロイします。同じワーカーのデプロイは、GitHub Actions のワーカーごとの `concurrency` グループなどで 1 つずつ実行してください。同時に走ると、同じリソースを作ったり、同じマイグレーションを適用したりすることがあります。
+
 ## 既存アプリの更新
 
 `wrangler.jsonc` は最初に 1 度だけ生成され、それ以降は上書きされません。そのため、プラグインを更新する前に作ったアプリは、元の設定のまま残ります。古い設定を見つけると、ビルドが足りない項目を具体的に出力するので、それを追記してビルドし直してください。
+
+`d1_databases` や `kv_namespaces` に残った仮の ID も、ビルドが名指しで警告します。古いプラグインが書いた `TODO:` の値が典型で、`env.<name>` のブロックの中も調べます。キーを削除するか、本物の ID に書き換えてください（[データベース（D1）](#データベースd1)）。
 
 ただし、`triggers.crons` だけは出力しません。アプリがスケジュールタスクを登録しているかどうかは、スケジュールカーネルを見つけて読み込めたビルドにしか分からず、ほかの書き方で宣言したタスクは「ない」と判断されてしまうからです。そのため、ビルドは推測で出力することはせず、何も言いません。タスクがあって Workers でも動かしたい場合は、トリガーを手で追記してください（[スケジュールタスク](#スケジュールタスク)）。
 

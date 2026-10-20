@@ -407,11 +407,10 @@ describe.skipIf(!enabled)('wrangler bundles the --mcp-oauth worker', () => {
   test(
     'resolves the oauth subpath and the provider package',
     () => {
-      // The build wrote its own wrangler.jsonc, aliases and all — including
-      // the OAUTH_KV binding, whose placeholder id a dry run does not resolve.
+      // The build wrote its own wrangler.jsonc, aliases and all, with the D1 and
+      // OAUTH_KV bindings id-less as scaffolded: the dry run must accept them.
       const config = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')) as Record<string, unknown>
-      config.kv_namespaces = [{ binding: 'OAUTH_KV', id: '0'.repeat(32) }]
-      delete config.d1_databases
+      expect(config.kv_namespaces).toEqual([{ binding: 'OAUTH_KV' }])
       delete config.assets
       writeFileSync(join(root, 'wrangler.jsonc'), JSON.stringify(config))
 
@@ -443,5 +442,184 @@ describe.skipIf(!enabled)('wrangler bundles the --mcp-oauth worker', () => {
       expect(bundle).toContain('guren:oauth-purge:last')
     },
     300_000,
+  )
+})
+
+// RFC 0035: the cf backend end to end. `cf` loads cloudflare.config.ts under Node,
+// so the helper subpath must import under Node and its objects must pass cf's own
+// validation. Gated behind GUREN_TEST_CF=1, with Node 22.18 or later on PATH.
+const cfEnabled = process.env.GUREN_TEST_CF === '1'
+
+describe.skipIf(!cfEnabled)('cf builds and dry-runs the cf-backend worker', () => {
+  let root: string
+
+  function cf(args: string[]): { exitCode: number; output: string } {
+    const result = Bun.spawnSync({
+      cmd: ['node', join(root, 'node_modules/cf/bin/cf'), ...args],
+      cwd: root,
+      env: { ...process.env, CI: '1' },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    return { exitCode: result.exitCode, output: `${result.stdout.toString()}${result.stderr.toString()}` }
+  }
+
+  // Installing cf and Wrangler takes far longer than Bun's 5 s hook default.
+  beforeAll(async () => {
+    root = mkdtempSync(join(tmpdir(), 'guren-cf-backend-probe-'))
+
+    // cf delegates the esbuild bundle to the app's own Wrangler, at 4.136.0 or later.
+    vendorClosure(root, 'cf-backend-probe', workspaceClosure('@guren/plugin-cloudflare'), {
+      extra: { cf: '1.0.0-beta.18', wrangler: '4.151.1' },
+    })
+
+    mkdirSync(join(root, 'src'), { recursive: true })
+    writeFileSync(join(root, 'src/app.ts'), 'export default { boot: async () => {}, fetch: async () => new Response("ok") }\n')
+    mkdirSync(join(root, 'public/assets/.vite'), { recursive: true })
+    writeFileSync(join(root, 'public/assets/app.js'), 'console.log(1)\n')
+    writeFileSync(
+      join(root, 'public/assets/.vite/manifest.json'),
+      JSON.stringify({ 'resources/js/app.tsx': { file: 'app.js' } }),
+    )
+    // The files cloudflare:init writes, so the templates themselves meet the real cf.
+    const { initCloudflare } = await import('./init')
+    initCloudflare({ rootDir: root, compatibilityDate: '2026-10-01' })
+
+    const { buildCloudflareOutput } = await import('./build')
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+  }, 300_000)
+
+  afterAll(() => {
+    if (root) rmSync(root, { recursive: true, force: true })
+  }, 60_000)
+
+  test(
+    'builds the manifest into a worker cf accepts',
+    () => {
+      const build = cf(['build'])
+      expect(build.output).not.toMatch(/Invalid|Could not resolve/)
+      expect(build.exitCode).toBe(0)
+
+      const workerDir = join(root, '.cloudflare/output/v0/workers/default')
+      const config = JSON.parse(readFileSync(join(workerDir, 'worker.config.json'), 'utf8')) as Record<string, unknown>
+      expect(config.env).toEqual({
+        DB: { type: 'd1', name: 'cf-backend-probe' },
+        NODE_ENV: { type: 'text', value: 'production' },
+      })
+      expect(config.compatibilityFlags).toEqual(['nodejs_compat'])
+
+      const bundle = readFileSync(join(workerDir, 'bundle/worker.js'), 'utf8')
+      expect(bundle).not.toContain('Cloudflare build:')
+      expect(bundle.length).toBeGreaterThan(1000)
+      // The assets directory came through gurenWranglerBundle().
+      expect(existsSync(join(workerDir, 'assets/public/assets/app.js'))).toBe(true)
+      expect(existsSync(join(workerDir, 'assets/_headers'))).toBe(true)
+
+      // `cf deploy` with provisioning off is what stage 7 runs; a dry run needs no account.
+      const deploy = cf(['deploy', '--prebuilt', '--no-provision', '--dry-run'])
+      expect(deploy.exitCode).toBe(0)
+    },
+    600_000,
+  )
+
+  // The plan's own argv, run with --dry-run so cf validates it without an account.
+  test(
+    'accepts every listing the plan sends, and reports auth as JSON',
+    async () => {
+      const { appCfRunner, listD1Databases, listKvNamespaces, listWorkerSecrets, readMigrationTracker } = await import('./deploy/cf-cli')
+      const sent: string[][] = []
+      const recorder = (args: string[]) => {
+        sent.push(args)
+        return { exitCode: 0, stdout: '[]', stderr: '' }
+      }
+      listD1Databases(recorder)
+      listKvNamespaces(recorder)
+      const listings = sent.length
+      readMigrationTracker(recorder, '00000000-0000-4000-8000-000000000001')
+      listWorkerSecrets(recorder, 'cf-backend-probe')
+
+      const previous = process.env.CLOUDFLARE_ACCOUNT_ID
+      process.env.CLOUDFLARE_ACCOUNT_ID = '0'.repeat(32)
+      try {
+        const real = appCfRunner(root, join(root, 'node_modules/cf/bin/cf'))
+        for (const [index, args] of sent.entries()) {
+          const result = real([...args, '--dry-run'])
+          expect(result.exitCode).toBe(0)
+          const request = JSON.parse(result.stdout) as { query: unknown; url: string; body?: unknown }
+          if (index < listings) expect(request.query).toEqual({ page: 1, per_page: 100 })
+        }
+        const [query, secrets] = sent.slice(listings).map((args) => JSON.parse(real([...args, '--dry-run']).stdout) as { url: string; body?: unknown })
+        expect(query?.url).toEndWith('/d1/database/00000000-0000-4000-8000-000000000001/query')
+        expect(JSON.stringify(query?.body)).toContain('select name from d1_migrations order by id')
+        expect(secrets?.url).toEndWith('/workers/scripts/cf-backend-probe/secrets')
+        const whoami = real(['auth', 'whoami'])
+        expect(JSON.parse(whoami.stdout)).toHaveProperty('authenticated')
+      } finally {
+        if (previous === undefined) delete process.env.CLOUDFLARE_ACCOUNT_ID
+        else process.env.CLOUDFLARE_ACCOUNT_ID = previous
+      }
+    },
+    120_000,
+  )
+  // The stages' write commands, each forced to --dry-run or --local and run logged
+  // out (empty HOME, no token), so nothing here can reach a real account.
+  test(
+    'accepts the write commands the deploy stages send, without touching an account',
+    async () => {
+      const cfCli = await import('./deploy/cf-cli')
+      const sent: string[][] = []
+      const recorder = (args: string[]) => {
+        sent.push(args)
+        return { exitCode: 0, stdout: '{}', stderr: '' }
+      }
+      const id = '00000000-0000-4000-8000-000000000001'
+      cfCli.createD1Database(recorder, 'cf-backend-probe')
+      cfCli.createKvNamespace(recorder, 'cf-backend-probe-oauth-kv')
+      cfCli.getBookmark(recorder, id)
+
+      const home = mkdtempSync(join(tmpdir(), 'guren-cf-home-'))
+      const { CLOUDFLARE_API_TOKEN: _token, ...env } = process.env
+      const isolated = (args: string[]) => {
+        if (!args.includes('--dry-run') && !args.includes('--local')) {
+          throw new Error(`refusing to run cf ${args.join(' ')} without --dry-run or --local`)
+        }
+        const result = Bun.spawnSync({
+          cmd: ['node', join(root, 'node_modules/cf/bin/cf'), ...args],
+          cwd: root,
+          env: { ...env, HOME: home, CI: '1', CLOUDFLARE_ACCOUNT_ID: '0'.repeat(32) },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        })
+        return { exitCode: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString() }
+      }
+      try {
+        const [d1, kv, bookmark] = sent.map((args) => {
+          const result = isolated([...args, '--dry-run'])
+          expect(result.exitCode).toBe(0)
+          return JSON.parse(result.stdout) as { method: string; url: string; body?: unknown }
+        })
+        expect(d1).toMatchObject({ method: 'POST' })
+        expect(d1?.url).toEndWith('/d1/database')
+        expect(JSON.stringify(d1?.body)).toContain('cf-backend-probe')
+        expect(kv?.url).toEndWith('/storage/kv/namespaces')
+        expect(JSON.stringify(kv?.body)).toContain('cf-backend-probe-oauth-kv')
+        expect(bookmark?.url).toContain(`/d1/database/${id}/time_travel/bookmark`)
+
+        // The apply stage's argv, applied for real to a local database.
+        mkdirSync(join(root, 'migrations-probe'), { recursive: true })
+        writeFileSync(join(root, 'migrations-probe/0001_init.sql'), 'create table posts (id integer primary key);\n')
+        const applied = isolated(['d1', 'migrations', 'apply', id, '--dir', 'migrations-probe', '--local', '--persist-to', join(home, 'state')])
+        expect(applied.exitCode).toBe(0)
+        expect(applied.stdout).toContain('0001_init.sql')
+        const broken = join(root, 'migrations-broken')
+        mkdirSync(broken, { recursive: true })
+        writeFileSync(join(broken, '0001_bad.sql'), 'this is not sql;\n')
+        expect(isolated(['d1', 'migrations', 'apply', id, '--dir', 'migrations-broken', '--local', '--persist-to', join(home, 'state')]).exitCode)
+          .not.toBe(0)
+      } finally {
+        rmSync(home, { recursive: true, force: true })
+      }
+    },
+    120_000,
   )
 })

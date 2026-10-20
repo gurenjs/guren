@@ -172,7 +172,7 @@ re-run to repair a partial install (`add session`, `add cache`, `add schedule`,
 | Command | Description | Example |
 |---------|-------------|---------|
 | `key:generate` | Generate a new `APP_KEY` value. Use `--write` to save it to `.env` | `bunx guren key:generate --write` |
-| `deploy` | Generate deployment recipe files for Docker/Fly.io/Railway | `bunx guren deploy --target all --app my-app --port 3333` |
+| `deploy` | Generate deployment recipe files for Docker/Fly.io/Railway, or a Cloudflare deploy workflow | `bunx guren deploy --target all --app my-app --port 3333` |
 | `make:controller <Name>` | Generates a controller in `app/Http/Controllers` (returns JSON instead of an Inertia page on an API-only app) | `bunx guren make:controller PostController` |
 | `make:model <Name>` | Generates a minimal model class and type definition in `app/Models` (imports `camelCase(Name)s` from `db/schema`) | `bunx guren make:model Post` |
 | `make:view <path>` | Generates a React component in `resources/js/pages` (refuses on an API-only app) | `bunx guren make:view posts/Index` |
@@ -384,9 +384,12 @@ bunx guren deploy --target railway
 
 # Generate all recipes at once with a custom port
 bunx guren deploy --target all --app my-app --port 4000
+
+# GitHub Actions workflow running cloudflare:deploy, one deploy at a time
+bunx guren deploy --target cloudflare
 ```
 
-Supported targets are `docker`, `fly`, `railway`, and `all`. When a file it would write already exists, the command lists every such file and writes none; pass `--force` to overwrite them.
+Supported targets are `docker`, `fly`, `railway`, `cloudflare`, and `all` (`all` covers the first three). `cloudflare` writes `.github/workflows/deploy-cloudflare.yml`, which needs the [cf CLI setup](./cloudflare.md#deploying-with-the-cf-cli-beta) and the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets. When a file it would write already exists, the command lists every such file and writes none; pass `--force` to overwrite them.
 
 Vercel and AWS Lambda use plugins, installed with `bunx guren plugin @guren/plugin-vercel` and `bunx guren plugin @guren/plugin-lambda`, and `--target vercel` is rejected. [Deployment](./deployment.md) walks through both.
 

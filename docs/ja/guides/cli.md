@@ -145,7 +145,7 @@ lint の設定は、`create-guren-app` 1.12 以降で作ったアプリには最
 | コマンド | 説明 | 例 |
 |----------|------|----|
 | `key:generate` | 新しい `APP_KEY` 値を生成。`--write` で `.env` に保存 | `bunx guren key:generate --write` |
-| `deploy` | Docker/Fly.io/Railway 向けデプロイ設定ファイルを生成 | `bunx guren deploy --target all --app my-app --port 3333` |
+| `deploy` | Docker/Fly.io/Railway 向けデプロイ設定ファイル、または Cloudflare へのデプロイ用ワークフローを生成 | `bunx guren deploy --target all --app my-app --port 3333` |
 | `make:controller <Name>` | `app/Http/Controllers` にコントローラーを生成(API専用アプリでは Inertia ページの代わりに JSON を返す) | `bunx guren make:controller PostController` |
 | `make:model <Name>` | 最小のモデルクラスと型定義を `app/Models` に生成(`db/schema` から `camelCase(Name)s` を import) | `bunx guren make:model Post` |
 | `make:view <path>` | `resources/js/pages` に React コンポーネントを生成(API専用アプリでは中断) | `bunx guren make:view posts/Index` |
@@ -329,7 +329,9 @@ bunx guren deploy --target railway
 bunx guren deploy --target all --app my-app --port 4000
 ```
 
-`--target` には `docker` / `fly` / `railway` / `all` を指定できます。書き出すファイルがすでにあると、コマンドは該当するファイルをすべて一覧にして、1 つも書き込みません。上書きしたいときは `--force` を付けてください。
+`--target cloudflare` を指定すると、`cloudflare:deploy` を 1 回ずつ実行する GitHub Actions のワークフロー（`.github/workflows/deploy-cloudflare.yml`）を書き出します。使うには [cf CLI の準備](./cloudflare.md#cf-cli-でのデプロイベータ)と、リポジトリの secrets に `CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` が必要です。
+
+`--target` には `docker` / `fly` / `railway` / `cloudflare` / `all` を指定できます（`all` は最初の 3 つです）。書き出すファイルがすでにあると、コマンドは該当するファイルをすべて一覧にして、1 つも書き込みません。上書きしたいときは `--force` を付けてください。
 
 Vercel と AWS Lambda には、プラグインを使います。Vercel は `bunx guren plugin @guren/plugin-vercel`、AWS Lambda は `bunx guren plugin @guren/plugin-lambda` で導入します。`--target vercel` を指定するとエラーになります。どちらの手順も[デプロイ](./deployment.md)で説明しています。
 

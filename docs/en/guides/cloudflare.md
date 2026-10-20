@@ -40,11 +40,7 @@ The build also refuses a `wrangler.jsonc` that sets `"keep_names": false`, at th
 
 ## Database (D1)
 
-Create the database and record its id in `wrangler.jsonc`:
-
-```bash
-bunx wrangler d1 create my-app
-```
+The scaffolded `wrangler.jsonc` binds the database by name and leaves out `database_id`:
 
 ```jsonc
 {
@@ -52,12 +48,15 @@ bunx wrangler d1 create my-app
     {
       "binding": "DB",
       "database_name": "my-app",
-      "database_id": "<the id wrangler printed>",
       "migrations_dir": ".cloudflare/d1-migrations"
     }
   ]
 }
 ```
+
+On a binding with no id, `wrangler deploy` (Wrangler 4.129 or later) looks for a database named `database_name` and creates it if there is none. A later deploy keeps the database the deployed worker is bound to, so there is no id to copy anywhere. The lookup is by name across the whole account: if another project already has a database called `my-app`, the deploy binds to it, so pick a `database_name` that is unique on the account. Wrangler 4.151 and later also write the new id back into `wrangler.jsonc` when you deploy from a terminal; a CI deploy leaves the file alone and relies on the same lookup.
+
+To use a database you created yourself, run `bunx wrangler d1 create my-app` and add the id it prints as `"database_id"`. Do not leave a made-up value there: Wrangler skips provisioning for any binding that carries an id, so a placeholder fails the deploy. Apps scaffolded by an older plugin have `"database_id": "TODO: wrangler d1 create"`; before the app build runs, the build warns about any id that is not hex (or is all zeros) until you delete the key.
 
 Select the driver by runtime in `config/database.ts`. D1 speaks SQLite, so write your schema in the SQLite dialect and keep a local SQLite file for development:
 
@@ -100,6 +99,16 @@ Migrations are applied out of band, since the app never migrates itself on Worke
 bunx guren cloudflare:build          # regenerates .cloudflare/d1-migrations
 bunx wrangler d1 migrations apply my-app --remote
 ```
+
+On the first deploy the database does not exist until `wrangler deploy` creates it, so the order is build, deploy, then migrate:
+
+```bash
+bunx guren cloudflare:build
+bunx wrangler deploy
+bunx wrangler d1 migrations apply my-app --remote
+```
+
+Until the last command finishes, the new worker is live against an empty database and any request that reads a table fails. Run the three back to back, or create the database with `wrangler d1 create` beforehand and migrate before the first deploy.
 
 Wrangler applies whatever the folder holds, so Guren's destructive-migration
 guard cannot run at that point. `bunx guren check` (and `bunx guren gate`) judge
@@ -397,9 +406,129 @@ When the app has a `config/agents.ts`, `cloudflare:build` does three extra thing
 
 The Free-plan measurements for a deployed agent, the D1 query budget a sweep has to fit in, and everything else about writing one are in [Durable Agents](./durable-agents.md).
 
+## Deploying with the cf CLI (beta)
+
+`cf` is Cloudflare's successor to Wrangler, in open beta. It reads `cloudflare.config.ts` instead of `wrangler.jsonc`, and `cloudflare:build` switches to it when the app has a `cloudflare.config.ts` and declares the `cf` package. Without that file, nothing changes.
+
+The deploy machine needs Node 22.18 or later, because `cf` loads `cloudflare.config.ts` with Node, and Wrangler 4.136 or later, which `cf` hands the bundling to:
+
+```bash
+bun add -d cf wrangler
+```
+
+`bunx guren cloudflare:init` writes the three files this path reads: `cloudflare.config.ts`, `wrangler.config.ts` and `config/cloudflare.ts` (below), and adds `.cloudflare/` to `.gitignore`. On an app that already has a `wrangler.jsonc`, it carries over the Worker name, the compatibility date, the `DB` database name and the `OAUTH_KV` namespace (by id, in `cloudflare.config.ts`), so the first `cf` deploy binds what Wrangler did, and it names every other setting cf would no longer read (routes, vars, other bindings) for you to add after the spread. A file that exists is left as it is unless you pass `--force`. An app whose `wrangler.jsonc` hosts Durable Objects gets a warning: whether a deployed class keeps its storage when its declaration moves from `migrations` to `exports` is not yet confirmed, so try the move on a staging Worker first.
+
+```bash
+bunx guren cloudflare:init
+```
+
+`gurenWorker()` returns the worker `cloudflare:build` assembled: its entry, the `DB` binding by name, `OAUTH_KV` under `--mcp-oauth`, and each agent as a SQLite-backed Durable Object. Your own settings go in the same object, after the spread:
+
+```typescript
+// cloudflare.config.ts
+import { bindings, defineConfig } from 'cf/config'
+import { gurenWorker } from '@guren/plugin-cloudflare/config'
+
+export default defineConfig(async () => {
+  const worker = await gurenWorker({ name: 'my-app' })
+  return {
+    worker: {
+      ...worker,
+      compatibilityDate: '2026-10-01',
+      env: { ...worker.env, MEDIA: bindings.r2({}) },
+    },
+  }
+})
+```
+
+```typescript
+// wrangler.config.ts
+import { defineWranglerConfig } from 'wrangler/experimental-config'
+import { gurenWranglerBundle } from '@guren/plugin-cloudflare/config'
+
+export default defineWranglerConfig(gurenWranglerBundle())
+```
+
+`compatibilityDate` is yours to set and to move. `gurenWranglerBundle()` supplies the module stubs, the build-time `define` entries and the assets directory, with `keepNames` on. It also adds one `* * * * *` cron trigger when the schedule kernel registers tasks; a `triggers` key you write after the spread replaces it. Tasks registered anywhere other than the kernel, and the `--mcp-oauth` storage sweep on its own, need that key. A kernel the build cannot load adds no trigger, and `cloudflare:deploy` then stops rather than deploy without one, until the kernel loads or the config sets `triggers`.
+
+Guren's own deploy settings go in `config/cloudflare.ts`. The build and `cloudflare:deploy` read it, the running app never does, and `guren check` does not ask for it in `createApp({ config })`:
+
+```typescript
+// config/cloudflare.ts
+import { defineCloudflareConfig } from '@guren/plugin-cloudflare/config'
+
+export default defineCloudflareConfig({
+  mcpOAuth: true,
+  resourceNames: { OAUTH_KV: 'my-app-oauth' },
+})
+```
+
+- `mcpOAuth` and `mcpPath` replace the `--mcp-oauth` and `--mcp-path` flags on this path. A flag the file contradicts is refused, and a flag the file does not set is used with a warning, since nothing records it for the next build.
+- `resourceNames` names a binding's resource when the default (`<worker>` for `DB`, `<worker>-<binding>` for the rest) collides with another project's or breaks a naming limit. A KV binding cannot carry its name in `cloudflare.config.ts`, so a plain `cf deploy` would still pick the default; deploy through `cloudflare:deploy` once you set one.
+
+Build, then deploy from the app root:
+
+```bash
+bunx guren cloudflare:build
+bunx cf deploy
+```
+
+On this path the build assembles into `.guren/cloudflare/` and writes `guren-worker.json` there for `gurenWorker()` to read. The directory carries its own `.gitignore`, and `cf`'s files under `.cloudflare/` are left alone. The bindings carry no ids, so `cf deploy` creates the database and namespaces on the first deploy, by the same name lookup as [Wrangler](#database-d1).
+
+`cf d1 migrations apply` takes the database id rather than its name. Look it up with `bunx cf d1 list --name my-app`, then apply the flattened migrations the build wrote (remote is the default; `--local` targets the local simulation):
+
+```bash
+bunx cf d1 migrations apply <database-id> --dir .guren/cloudflare/d1-migrations
+```
+
+That directory records each migration under the same name as `wrangler d1 migrations apply`, so a database migrated through Wrangler keeps its history. `cloudflare:size` measures only the Wrangler path.
+
+### Planning a deploy
+
+`bunx guren cloudflare:deploy --plan` checks the tools, builds, runs `cf build`, and resolves each D1 and KV binding against the account, without writing anything there:
+
+```bash
+bunx guren cloudflare:deploy --plan
+```
+
+Each binding is listed as `existing` (the resource a previous run settled, or an id you wrote), `adopt` (found under the planned name but not yet settled, so check it belongs to this app), or `create on deploy`. The KV name is `<worker>-<binding>` with `_` written as `-`, the name `cf deploy` itself creates. The command exits 1 on a blocker:
+
+- `binding-conflict`: an id in `cloudflare.config.ts` and the planned name point at different resources, or two resources share the name.
+- `resource-missing`: an id you wrote is not in the account, or a resource is missing and the run may not create it. A run with `--ci`, or without a terminal, creates nothing unless `--provision` is passed.
+- `source-unreadable`: `cf` could not list the account's resources, query the migrations tracker, or the app's `config/env.ts` would not load. The plan stops rather than guess.
+- `tracker-layout`: the database's `d1_migrations` records both flattened names (`<folder>.sql`) and nested ones (`<folder>/migration.sql`).
+- `destructive-migration`: a pending migration drops or narrows something without a `-- guren:allow-destructive` comment ([Destructive migrations](./database.md#destructive-migrations)). `--allow-destructive` lists them as a warning instead.
+- `secrets`: a variable `config/env.ts` requires in production has no value on the deployed Worker, in the config, or in `--secrets-file`.
+
+The plan reads which migrations the database has applied, picks the layout its tracker already uses, and prints the `cf d1 migrations apply` arguments for it. A database Wrangler migrated stays on the flattened copy, so nothing is applied twice. A database the deploy will create has applied nothing, so every local migration is judged. For secrets, a first deploy has no Worker to read from, so list the values in a dotenv file and pass it as `--secrets-file .env.production`. The plan reads only the names in it.
+
+Preflight needs Node 22.18 or later as the `node` on PATH, Wrangler 4.136 or later in the app, and a logged-in `cf` (`bunx cf auth login`, or `CLOUDFLARE_API_TOKEN` in CI). `--json` prints `{ plan }` as one object.
+
+### Deploying with one command
+
+Without `--plan`, the same command goes on to deploy:
+
+```bash
+bunx guren cloudflare:deploy --secrets-file .env.production
+```
+
+After showing the plan it asks once, and writes nothing to the account until you answer yes. A plan with a blocker stops there instead. Then it:
+
+1. creates each resource marked `create on deploy`, and records every resolved id in `guren-worker.json` (inside the ignored output directory, never in the repository);
+2. runs `cf build` again when an id changed, and stops if `cloudflare.config.ts` binds a resource other than the one recorded;
+3. records a D1 Time Travel bookmark, lists the pending migrations again, and applies them only if they are still the set the plan judged;
+4. runs `cf deploy --prebuilt --no-provision`, so a resource missing at this point fails the deploy instead of being created unplanned;
+5. prints the URL, what it created and migrated, and how to roll back. A rollback does not revert migrations.
+
+Nothing is ever deleted. If a step fails after something was written, the report lists the `cf d1 delete` / `cf kv namespaces delete` commands for what this run created and, after a migration, the `cf d1 time-travel restore` command for the bookmark. Run them yourself if you want them.
+
+`bunx guren deploy --target cloudflare` writes a GitHub Actions workflow that does this on every push to main. In CI there is no one to answer, so pass `--yes` to deploy, or `--ci` to deploy only when nothing needs creating (`--ci --provision` allows creation). `--skip-migrations` deploys without applying. Run deploys of one Worker one at a time, for example with a GitHub Actions `concurrency` group per Worker: two runs at once can create the same resource or apply the same migration.
+
 ## Upgrading an Existing App
 
 `wrangler.jsonc` is scaffolded once and never overwritten, so an app created before a plugin update keeps its original config. The build prints exactly which entries are missing when it finds an outdated one. Add them and rebuild.
+
+The build also names any placeholder id left in `d1_databases` or `kv_namespaces`, such as the `TODO:` values an older scaffold wrote, in every `env.<name>` block too. Delete the key, or replace it with the real id; see [Database (D1)](#database-d1).
 
 `triggers.crons` is the one entry it does not print. Whether an app registers scheduled tasks is only visible to a build that can find and load its schedule kernel, and a task declared any other way would read as absent, so the build stays quiet rather than guessing. An app that has tasks and wants them to run on Workers adds the trigger by hand; see [Scheduled Tasks](#scheduled-tasks).
 

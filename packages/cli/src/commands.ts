@@ -1660,12 +1660,12 @@ const upgradeCommand = defineCommand({
 const deployCommand = defineCommand({
   meta: {
     name: 'deploy',
-    description: 'Generate deployment recipes for Docker, Fly.io, or Railway.',
+    description: 'Generate deployment recipes for Docker, Fly.io, Railway, or a Cloudflare deploy workflow.',
   },
   args: {
     target: {
       type: 'string',
-      description: 'Deployment target (docker, fly, railway, all)',
+      description: 'Deployment target (docker, fly, railway, cloudflare, all)',
       default: 'docker',
     },
     app: {
@@ -1684,9 +1684,9 @@ const deployCommand = defineCommand({
   },
   async run({ args }) {
     const rawTarget = String(args.target ?? 'docker')
-    const allowedTargets = new Set<DeployTarget>(['docker', 'fly', 'railway', 'all'])
+    const allowedTargets = new Set<DeployTarget>(['docker', 'fly', 'railway', 'cloudflare', 'all'])
     if (!allowedTargets.has(rawTarget as DeployTarget)) {
-      throw new Error(`Invalid deploy target "${rawTarget}". Expected one of: docker, fly, railway, all. For Vercel, use \`bunx guren plugin @guren/plugin-vercel\`; for AWS Lambda, use \`bunx guren plugin @guren/plugin-lambda\`.`)
+      throw new Error(`Invalid deploy target "${rawTarget}". Expected one of: docker, fly, railway, cloudflare, all. For Vercel, use \`bunx guren plugin @guren/plugin-vercel\`; for AWS Lambda, use \`bunx guren plugin @guren/plugin-lambda\`.`)
     }
 
     const port = args.port === undefined ? undefined : Number(args.port)

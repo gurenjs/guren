@@ -76,7 +76,8 @@ describe('cloudflare:build --mcp-oauth', () => {
 
       expect(failure).toContain('"kv_namespaces"')
       expect(failure).toContain('"binding": "OAUTH_KV"')
-      expect(failure).toContain('wrangler kv namespace create OAUTH_KV')
+      expect(failure).toContain('{\n      "binding": "OAUTH_KV"\n    }')
+      expect(failure).toContain('`wrangler deploy` creates the namespace')
     })
 
     test('should accept a config whose OAUTH_KV binding is already there', async () => {
@@ -91,9 +92,8 @@ describe('cloudflare:build --mcp-oauth', () => {
     })
 
     /**
-     * The binding is present but its id is still the scaffolded placeholder, which
-     * `wrangler deploy` rejects. Warned rather than failed: the id is not needed to
-     * *build*, and a --dry-run deploy on an unfinished config is reasonable.
+     * A placeholder id opts the binding out of provisioning and fails `wrangler deploy`.
+     * Warned rather than failed: the id is not needed to *build*.
      */
     test('should warn when the OAUTH_KV binding still has the scaffolded placeholder id', async () => {
       scaffoldApp(root, { mcpPlugin: true, oauthProvider: true })
@@ -106,8 +106,8 @@ describe('cloudflare:build --mcp-oauth', () => {
         buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       )
 
-      expect(warning).toContain('placeholder id')
-      expect(warning).toContain('wrangler kv namespace create OAUTH_KV')
+      expect(warning).toContain('placeholder resource ids')
+      expect(warning).toContain('kv_namespaces[0].id')
       // Warned, not failed.
       expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
     })
@@ -120,7 +120,19 @@ describe('cloudflare:build --mcp-oauth', () => {
         buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       )
 
-      expect(warning).not.toContain('placeholder id')
+      expect(warning).not.toContain('placeholder')
+    })
+
+    test('should accept an OAUTH_KV binding with no id, which wrangler provisions at deploy', async () => {
+      scaffoldApp(root, { mcpPlugin: true, oauthProvider: true })
+      writeJson(join(root, 'wrangler.jsonc'), { ...oauthReadyConfig(), kv_namespaces: [{ binding: 'OAUTH_KV' }] })
+
+      const warning = await captureWarnings(() =>
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
+      )
+
+      expect(warning).not.toContain('placeholder')
+      expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
     })
 
     /**
@@ -353,19 +365,17 @@ describe('cloudflare:build --mcp-oauth', () => {
       )
 
       const config = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'))
-      expect(config.kv_namespaces).toEqual([
-        { binding: 'OAUTH_KV', id: 'TODO: wrangler kv namespace create OAUTH_KV' },
-      ])
+      expect(config.kv_namespaces).toEqual([{ binding: 'OAUTH_KV' }])
     })
 
-    test('should say the namespace still has to be created', async () => {
+    test('should say the first deploy creates the namespace', async () => {
       scaffoldApp(root, { mcpPlugin: true, oauthProvider: true })
 
       const logs = await captureLogs(() =>
         buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       )
 
-      expect(logs).toContain('wrangler kv namespace create OAUTH_KV')
+      expect(logs).toContain('creates the D1 database "demo-app" and the OAUTH_KV namespace')
     })
 
     test('should write no OAUTH_KV binding without the flag', async () => {
