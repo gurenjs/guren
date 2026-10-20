@@ -26,6 +26,8 @@ Before the app build it runs the deploy-runtime checks `guren doctor` reports an
 
 When the app has a `cloudflare.config.ts` and declares the `cf` package, `cloudflare:build` assembles into `.guren/cloudflare/` and writes `guren-worker.json` there instead of scaffolding `wrangler.jsonc`. `@guren/plugin-cloudflare/config` turns that manifest into `cf` configuration: spread `await gurenWorker({ name })` into `defineConfig({ worker })`, and pass `gurenWranglerBundle()` to `defineWranglerConfig()` in `wrangler.config.ts`. `cf` loads both files with Node 22.18 or later, and needs Wrangler 4.136 or later to bundle. The Cloudflare guide has the full setup.
 
+Guren's deploy settings live in `config/cloudflare.ts` (`defineCloudflareConfig({ mcpOAuth, mcpPath, resourceNames })`, from the same subpath), which the build and the deploy read and the running app does not; on this path it replaces the `--mcp-oauth` and `--mcp-path` flags.
+
 `bunx guren cloudflare:deploy --plan` builds, evaluates `cloudflare.config.ts`, and resolves every D1 and KV binding against the account (existing, adopt, or create), exiting 1 on a conflict, a missing resource the run may not create, a listing it could not read, a pending destructive migration no marker acknowledges, or a production variable no secret provides. Without `--plan` it asks once, then creates what is missing, records the resolved ids in the ignored manifest, applies the pending migrations after a Time Travel bookmark, and runs `cf deploy --prebuilt --no-provision`. It never deletes; a failure lists the commands that undo what the run did. `--yes` or `--ci` replace the prompt in CI.
 
 ## API

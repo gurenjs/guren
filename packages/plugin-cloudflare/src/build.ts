@@ -41,6 +41,7 @@ import {
   type WorkerManifest,
 } from './worker-manifest'
 import { detectCloudflareBackend, readManifestDependencies } from './backend'
+import type { CloudflareDeployConfig } from './config'
 import { readLocalMigrations } from './deploy/migrations'
 
 interface PackageJsonLike {
@@ -115,8 +116,13 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   }
 
   const packageJson = readPackageJson(root)
-  const mcpOAuth = options.mcpOAuth === true
-  const mcpPath = options.mcpPath ?? DEFAULT_MCP_PATH
+  const deployConfig = backend === 'cf' ? await readDeployConfig(root) : undefined
+  const mcpOAuth = (backend === 'cf'
+    ? resolveOption('mcpOAuth', '--mcp-oauth', deployConfig?.mcpOAuth, options.mcpOAuth)
+    : options.mcpOAuth) === true
+  const mcpPath = (backend === 'cf'
+    ? resolveOption('mcpPath', '--mcp-path', deployConfig?.mcpPath, options.mcpPath)
+    : options.mcpPath) ?? DEFAULT_MCP_PATH
 
   // Checked before the app build: these are one-line edits to files the developer
   // owns, and reporting them after minutes of Vite output is reporting them where
@@ -164,7 +170,16 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   resetOutputDir(out, root, 'Cloudflare build')
   // Written first so a build failing below still keeps the carried-over ids.
   if (backend === 'cf') {
-    writeWorkerManifest({ root, out, packageName: packageJson.name, mcpOAuth, agents: agents.exports, resolved, ...schedule })
+    writeWorkerManifest({
+      root,
+      out,
+      packageName: packageJson.name,
+      mcpOAuth,
+      agents: agents.exports,
+      resolved,
+      ...schedule,
+      resourceNames: deployConfig?.resourceNames ?? {},
+    })
   }
 
   // Workers Static Assets serves `/` from index.html BEFORE the worker runs,
@@ -251,6 +266,7 @@ function writeWorkerManifest(input: {
   resolved: Record<string, ResolvedResource>
   crons: string[]
   scheduleUnreadable?: string
+  resourceNames: Record<string, string>
 }): void {
   const outRelative = relative(input.root, input.out).split(sep).join('/')
   const manifest: WorkerManifest = {
@@ -262,9 +278,10 @@ function writeWorkerManifest(input: {
     alias: devOnlyAliases(outRelative),
     define: BUNDLE_DEFINES,
     vars: WORKER_VARS,
-    d1: { binding: 'DB', databaseName: workerName(input.packageName) },
+    d1: { binding: 'DB', databaseName: input.resourceNames.DB ?? workerName(input.packageName) },
     kvNamespaces: input.mcpOAuth ? [OAUTH_KV_BINDING] : [],
     crons: input.crons,
+    resourceNames: input.resourceNames,
     ...(input.scheduleUnreadable ? { scheduleUnreadable: input.scheduleUnreadable } : {}),
     agents: input.agents.map((agent) => ({
       exportName: agent.export,
@@ -277,6 +294,54 @@ function writeWorkerManifest(input: {
   writeFileSync(resolve(input.out, WORKER_MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`)
   // The manifest will carry resource ids, which stay out of the repository (RFC 0035 §3.1).
   writeFileSync(resolve(input.out, '.gitignore'), '*\n')
+}
+
+/** RFC 0035 §3: Guren's deploy settings on the cf backend, recorded nowhere else. */
+const DEPLOY_CONFIG_FILE = 'config/cloudflare.ts'
+
+async function readDeployConfig(root: string): Promise<CloudflareDeployConfig | undefined> {
+  const path = resolve(root, DEPLOY_CONFIG_FILE)
+  if (!existsSync(path)) return undefined
+  let exported: unknown
+  try {
+    exported = ((await import(pathToFileURL(path).href)) as { default?: unknown }).default
+  } catch (error) {
+    throw new Error(`Cloudflare build: ${path} failed to import: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  const problems = deployConfigProblems(exported)
+  if (problems.length > 0) {
+    throw new Error(`Cloudflare build: ${path} must default-export defineCloudflareConfig({ ... }):\n  ${problems.join('\n  ')}`)
+  }
+  return exported as CloudflareDeployConfig
+}
+
+function deployConfigProblems(config: unknown): string[] {
+  if (!isRecord(config)) return ['the default export is not an object']
+  const problems: string[] = []
+  if (config.mcpOAuth !== undefined && typeof config.mcpOAuth !== 'boolean') problems.push('mcpOAuth is not a boolean')
+  if (config.mcpPath !== undefined && (typeof config.mcpPath !== 'string' || !config.mcpPath.startsWith('/'))) {
+    problems.push('mcpPath is not a path starting with /')
+  }
+  if (config.resourceNames !== undefined
+    && (!isRecord(config.resourceNames) || Object.values(config.resourceNames).some((name) => typeof name !== 'string' || name === ''))) {
+    problems.push('resourceNames is not a record of non-empty names')
+  }
+  return problems
+}
+
+/**
+ * The file is the record of a deploy setting on the cf backend; the flag, recorded
+ * nowhere, is accepted with a warning and refused when it contradicts the file.
+ */
+function resolveOption<T>(key: string, flag: string, fromFile: T | undefined, fromFlag: T | undefined): T | undefined {
+  if (fromFlag === undefined || fromFlag === false) return fromFile ?? fromFlag
+  if (fromFile !== undefined && fromFile !== fromFlag) {
+    throw new Error(`Cloudflare build: ${flag} contradicts ${key} in ${DEPLOY_CONFIG_FILE}. Drop the flag; the file is what every build and deploy reads.`)
+  }
+  if (fromFile === undefined) {
+    console.warn(`Cloudflare build: ${flag} is recorded nowhere, so a build without it ships a different worker. Set ${key} in ${DEPLOY_CONFIG_FILE} instead.`)
+  }
+  return fromFlag
 }
 
 /** The Worker name, and the D1 database name a fresh binding gets. */

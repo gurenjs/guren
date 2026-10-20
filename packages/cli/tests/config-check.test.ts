@@ -56,6 +56,17 @@ describe('checkConfigWiring', () => {
     })])
   })
 
+  // The deploy plugin reads it while building (RFC 0035 §3); the app never does.
+  test('does not report config/cloudflare.ts, a build-time definition', async () => {
+    const results = await run({
+      ...WITH_CACHE,
+      'config/cloudflare.ts': "import { defineCloudflareConfig } from '@guren/plugin-cloudflare/config'\n\nexport default defineCloudflareConfig({ mcpOAuth: true })\n",
+      'src/app.ts': entry('{ config: [cache] }'),
+    })
+
+    expect(results.map((result) => [result.key, result.status])).toEqual([['config-wired', 'pass']])
+  })
+
   test('fails a listed file that is not a definition, which the boot would die on', async () => {
     const results = await run({
       ...WITH_CACHE,

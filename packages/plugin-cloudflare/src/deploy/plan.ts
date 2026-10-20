@@ -26,7 +26,7 @@ export interface EvaluatedWorker {
 
 export interface PlanContext {
   worker: EvaluatedWorker
-  manifest: Pick<WorkerManifest, 'resolved'>
+  manifest: Pick<WorkerManifest, 'resolved'> & Partial<Pick<WorkerManifest, 'resourceNames'>>
   d1: Read<AccountResource[]>
   kv: Read<AccountResource[]>
   /** Whether this run may create what is missing: an interactive run or `--provision`, never plain `--ci`. */
@@ -278,8 +278,10 @@ function planBinding(
   type: ResourceType,
   findings: Finding[],
 ): PlannedBinding {
-  // KV cannot carry a name (`bindings.kv()` takes only an id), so its name is always the provisioning default.
-  const name = type === 'd1' && entry.name ? entry.name : autoProvisionedName(context.worker.name, binding)
+  // KV cannot carry a name (`bindings.kv()` takes only an id): config/cloudflare.ts names it, or the provisioning default does.
+  const name = type === 'd1' && entry.name
+    ? entry.name
+    : context.manifest.resourceNames?.[binding] ?? autoProvisionedName(context.worker.name, binding)
   const resolvedId = context.manifest.resolved[binding]?.id
   // An id equal to the manifest's came from gurenWorker(), which is a comparison, not a source.
   const configuredId = entry.id !== undefined && entry.id !== resolvedId ? entry.id : undefined

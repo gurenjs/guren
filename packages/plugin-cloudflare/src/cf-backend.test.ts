@@ -146,6 +146,40 @@ describe('cloudflare:build on the cf backend (RFC 0035)', () => {
     expect(warnings).toContain('kernel broke')
   })
 
+  test('should take mcpOAuth and resource names from config/cloudflare.ts', async () => {
+    scaffoldApp(root, { cfBackend: true, mcpPlugin: true, oauthProvider: true })
+    mkdirSync(join(root, 'config'), { recursive: true })
+    writeFileSync(join(root, 'config/cloudflare.ts'), "export default { mcpOAuth: true, resourceNames: { DB: 'demo-db', OAUTH_KV: 'demo-oauth' } }\n")
+
+    await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
+
+    const manifest = readManifest(root)
+    expect(manifest.kvNamespaces).toEqual(['OAUTH_KV'])
+    expect(manifest.d1.databaseName).toBe('demo-db')
+    expect(manifest.resourceNames).toEqual({ DB: 'demo-db', OAUTH_KV: 'demo-oauth' })
+  })
+
+  test('should refuse --mcp-oauth when config/cloudflare.ts says otherwise, and warn when it says nothing', async () => {
+    scaffoldApp(root, { cfBackend: true, mcpPlugin: true, oauthProvider: true })
+    const warnings = await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }))
+    expect(warnings).toContain('Set mcpOAuth in config/cloudflare.ts')
+
+    mkdirSync(join(root, 'config'), { recursive: true })
+    writeFileSync(join(root, 'config/cloudflare.ts'), 'export default { mcpOAuth: false }\n')
+    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true })).rejects.toThrow(/contradicts mcpOAuth/)
+  })
+
+  test('should refuse a config/cloudflare.ts of the wrong shape', async () => {
+    scaffoldApp(root, { cfBackend: true })
+    mkdirSync(join(root, 'config'), { recursive: true })
+    writeFileSync(join(root, 'config/cloudflare.ts'), "export default { mcpOAuth: 'yes', resourceNames: { DB: '' } }\n")
+
+    const failure = await buildCloudflareOutput({ rootDir: root, skipAppBuild: true }).catch((error: Error) => error.message)
+
+    expect(failure).toContain('mcpOAuth is not a boolean')
+    expect(failure).toContain('resourceNames is not a record of non-empty names')
+  })
+
   test('should refuse cloudflare:size, which measures through wrangler.jsonc', () => {
     scaffoldApp(root, { cfBackend: true })
     mkdirSync(join(root, '.guren'), { recursive: true })

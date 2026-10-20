@@ -75,6 +75,16 @@ describe('buildPlan', () => {
     expect(plan.bindings).toEqual([{ binding: 'OAUTH_KV', type: 'kv', action: 'adopt', name: 'demo-app-oauth-kv', id: KV_ID }])
   })
 
+  test('should resolve KV under the name config/cloudflare.ts gives it', () => {
+    const plan = buildPlan(context({
+      env: { OAUTH_KV: { type: 'kv' } },
+      manifest: { resolved: {}, resourceNames: { OAUTH_KV: 'shared-oauth' } },
+      kv: ok([{ id: KV_ID, name: 'shared-oauth' }]),
+    }))
+
+    expect(plan.bindings[0]).toMatchObject({ action: 'adopt', name: 'shared-oauth', id: KV_ID })
+  })
+
   test('should leave bindings it does not provision out of the plan', () => {
     const plan = buildPlan(context({
       env: {

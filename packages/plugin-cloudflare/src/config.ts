@@ -15,6 +15,23 @@ import {
   type WorkerManifest,
 } from './worker-manifest'
 
+/**
+ * Guren's deploy settings, read by `cloudflare:build` and `cloudflare:deploy` and never by
+ * the running app (RFC 0035 §3). Default-exported from `config/cloudflare.ts`.
+ */
+export interface CloudflareDeployConfig {
+  /** Front the App MCP endpoint with the OAuth provider, which binds `OAUTH_KV`. Replaces `--mcp-oauth`. */
+  mcpOAuth?: boolean
+  /** Where the App MCP endpoint is mounted, as `mcpPlugin({ path })` has it. Defaults to `/mcp`. */
+  mcpPath?: string
+  /** Resource names by binding (`DB`, `OAUTH_KV`), for one the default name does not fit or collides with. */
+  resourceNames?: Record<string, string>
+}
+
+export function defineCloudflareConfig(config: CloudflareDeployConfig): CloudflareDeployConfig {
+  return config
+}
+
 export interface GurenWorkerOptions {
   /** The Worker's name, the same one `cf deploy` deploys under. */
   name: string

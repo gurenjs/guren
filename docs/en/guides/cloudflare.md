@@ -439,6 +439,21 @@ export default defineWranglerConfig(gurenWranglerBundle())
 
 `compatibilityDate` is yours to set and to move. `gurenWranglerBundle()` supplies the module stubs, the build-time `define` entries and the assets directory, with `keepNames` on. It also adds one `* * * * *` cron trigger when the schedule kernel registers tasks; a `triggers` key you write after the spread replaces it. Tasks registered anywhere other than the kernel, and the `--mcp-oauth` storage sweep on its own, need that key. A kernel the build cannot load adds no trigger, and `cloudflare:deploy` then stops rather than deploy without one, until the kernel loads or the config sets `triggers`.
 
+Guren's own deploy settings go in `config/cloudflare.ts`. The build and `cloudflare:deploy` read it, the running app never does, and `guren check` does not ask for it in `createApp({ config })`:
+
+```typescript
+// config/cloudflare.ts
+import { defineCloudflareConfig } from '@guren/plugin-cloudflare/config'
+
+export default defineCloudflareConfig({
+  mcpOAuth: true,
+  resourceNames: { OAUTH_KV: 'my-app-oauth' },
+})
+```
+
+- `mcpOAuth` and `mcpPath` replace the `--mcp-oauth` and `--mcp-path` flags on this path. A flag the file contradicts is refused, and a flag the file does not set is used with a warning, since nothing records it for the next build.
+- `resourceNames` names a binding's resource when the default (`<worker>` for `DB`, `<worker>-<binding>` for the rest) collides with another project's or breaks a naming limit. A KV binding cannot carry its name in `cloudflare.config.ts`, so a plain `cf deploy` would still pick the default; deploy through `cloudflare:deploy` once you set one.
+
 Build, then deploy from the app root:
 
 ```bash
