@@ -1047,15 +1047,24 @@ export async function checkDeployRuntime(
   options: DeployRuntimeOptions & {
     /**
      * Introspect the app as that platform runs it (RFC 0035 §2.1). Passed by the deploy plugin
-     * whose `env` subpath honours it; ignored with a caller's own `introspect`, which it cannot reach.
+     * whose `env` subpath honours it; a caller's own `introspect` cannot carry it, so the two are refused together.
      */
     target?: IntrospectTarget
   } = {},
 ): Promise<DeployRuntimeVerdict[]> {
-  const target = options.introspect === undefined ? options.target : undefined
+  const { target } = options
+  if (target && options.introspect !== undefined) {
+    throw new Error('checkDeployRuntime(): `target` sets how the app is introspected, so it cannot be combined with a caller\'s own `introspect`.')
+  }
   const env = target ? { [INTROSPECT_TARGET_ENV]: target } : undefined
   const analysis = await readDeployRuntime(cwd, { introspect: options.introspect ?? checkIntrospection(cwd, { fresh: true, env }) })
   if (analysis.targets.length === 0) return []
   const verdicts = judgeDeployVerdicts(analysis)
-  return target ? verdicts.map((entry) => (entry.evidence === 'manifest' ? { ...entry, introspectedAs: target } : entry)) : verdicts
+  if (!target) return verdicts
+  // A failure on the target's branch reproduces only under the same target.
+  const reproduce = `The app was introspected as ${SERVERLESS_RUNTIME_LABELS[target]} runs it; \`bunx guren introspect --target ${target}\` reproduces the failure.`
+  return verdicts.map((entry) => {
+    if (entry.evidence === 'manifest') return { ...entry, introspectedAs: target }
+    return analysis.introspectionFailure && entry.evidence === 'none' ? { ...entry, fix: `${entry.fix ?? ''} ${reproduce}`.trim() } : entry
+  })
 }

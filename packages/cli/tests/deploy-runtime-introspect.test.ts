@@ -277,6 +277,9 @@ describe('introspecting the Cloudflare branch (RFC 0035 §2.1)', () => {
     // Read while the app registers, which workerd allows only inside a request.
     const eager = await workersApp('branch-eager', branchingApp('getWorkersEnv<{ DB: never }>().DB'))
     const degraded = await checkDeployRuntime(eager, { target: 'cloudflare' })
-    expect(degraded.map((entry) => entry.key)).toContain('deploy-password-hashing-unverified')
+    const unverified = degraded.find((entry) => entry.key === 'deploy-password-hashing-unverified')
+    expect(unverified?.fix).toContain('`bunx guren introspect --target cloudflare` reproduces the failure')
+
+    await expect(checkDeployRuntime(dir, { target: 'cloudflare', introspect: false })).rejects.toThrow(/cannot be combined/)
   }, 60_000)
 })

@@ -52,7 +52,8 @@ export function resetWorkersEnv(): void {
  */
 export function isWorkersRuntime(): boolean {
   if (typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers') return true
+  // The names @guren/cli sets (INTROSPECT_TARGET_ENV); a shim may define `process` without `env`.
   return typeof process !== 'undefined'
-    && process.env.GUREN_INTROSPECT === '1'
-    && process.env.GUREN_INTROSPECT_TARGET === 'cloudflare'
+    && process.env?.GUREN_INTROSPECT === '1'
+    && process.env?.GUREN_INTROSPECT_TARGET === 'cloudflare'
 }

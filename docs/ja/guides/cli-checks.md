@@ -56,6 +56,7 @@ bunx guren introspect                 # provider・ルート・サービス・�
 bunx guren introspect --json          # ツール向けのマニフェスト
 bunx guren introspect --timeout 60    # 遅い register() を 60 秒まで待つ(既定は 30 秒)
 bunx guren introspect --app ../api    # 別のアプリのルートを調べる
+bunx guren introspect --target cloudflare  # Cloudflare のビルドと同じく、Workers 側の分岐(isWorkersRuntime() が true)で登録する
 ```
 
 provider ごとに、登録の結果が次のどれかで示されます。
