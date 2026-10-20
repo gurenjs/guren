@@ -47,6 +47,8 @@ export type MigrationInput =
     unjudged: string[]
     verdict: PendingMigrationVerdict
     allowDestructive: boolean
+    /** sha256 over the pending files as judged; the apply stage refuses a change. */
+    fingerprint: string
   }
 
 export interface SecretsInput {
@@ -75,6 +77,8 @@ export interface PlannedBinding {
   name: string
   /** Absent until the resource exists. */
   id?: string
+  /** The id came from cloudflare.config.ts, which stays its source: the manifest does not record it. */
+  configured?: true
 }
 
 export type CheckName =
@@ -97,7 +101,13 @@ export interface DeployPlan {
   worker: string
   bindings: PlannedBinding[]
   findings: Finding[]
-  migrations?: { layout: MigrationLayout; pending: string[]; applyArgs: string[]; acknowledged: PendingMigrationVerdict['acknowledged'] }
+  migrations?: {
+    layout: MigrationLayout
+    pending: string[]
+    applyArgs: string[]
+    acknowledged: PendingMigrationVerdict['acknowledged']
+    fingerprint: string
+  }
   /** Required names neither the deployed Worker, the config nor `--secrets-file` provides. */
   missingSecrets?: string[]
   /** Sources RFC 0035 §3.1 names that this version does not read yet. */
@@ -176,7 +186,13 @@ function planMigrations(input: MigrationInput, findings: Finding[]): DeployPlan[
       fix: 'Review each one. Put `-- guren:allow-destructive: <reason>` on the first line of its migration.sql, or pass --allow-destructive for this run.',
     })
   }
-  return { layout: input.layout, pending: input.pending, applyArgs: input.applyArgs, acknowledged: input.verdict.acknowledged }
+  return {
+    layout: input.layout,
+    pending: input.pending,
+    applyArgs: input.applyArgs,
+    acknowledged: input.verdict.acknowledged,
+    fingerprint: input.fingerprint,
+  }
 }
 
 function planSecrets(input: SecretsInput, worker: string, findings: Finding[]): string[] | undefined {
@@ -247,7 +263,7 @@ function planBinding(
         'Keep one: remove the id from cloudflare.config.ts, or give the binding another name.',
       ))
     }
-    return { binding, type, action: missing ? 'unknown' : 'existing', name, id: configuredId }
+    return { binding, type, action: missing ? 'unknown' : 'existing', name, id: configuredId, configured: true }
   }
 
   // gurenWorker() puts the manifest's id in the config, so the deploy binds it while it exists.

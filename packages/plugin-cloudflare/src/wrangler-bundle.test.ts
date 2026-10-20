@@ -580,4 +580,65 @@ describe.skipIf(!cfEnabled)('cf builds and dry-runs the cf-backend worker', () =
     },
     120_000,
   )
+  // The stages' write commands, each forced to --dry-run or --local and run logged
+  // out (empty HOME, no token), so nothing here can reach a real account.
+  test(
+    'accepts the write commands the deploy stages send, without touching an account',
+    async () => {
+      const cfCli = await import('./deploy/cf-cli')
+      const sent: string[][] = []
+      const recorder = (args: string[]) => {
+        sent.push(args)
+        return { exitCode: 0, stdout: '{}', stderr: '' }
+      }
+      const id = '00000000-0000-4000-8000-000000000001'
+      cfCli.createD1Database(recorder, 'cf-backend-probe')
+      cfCli.createKvNamespace(recorder, 'cf-backend-probe-oauth-kv')
+      cfCli.getBookmark(recorder, id)
+
+      const home = mkdtempSync(join(tmpdir(), 'guren-cf-home-'))
+      const { CLOUDFLARE_API_TOKEN: _token, ...env } = process.env
+      const isolated = (args: string[]) => {
+        if (!args.includes('--dry-run') && !args.includes('--local')) {
+          throw new Error(`refusing to run cf ${args.join(' ')} without --dry-run or --local`)
+        }
+        const result = Bun.spawnSync({
+          cmd: ['node', join(root, 'node_modules/cf/bin/cf'), ...args],
+          cwd: root,
+          env: { ...env, HOME: home, CI: '1', CLOUDFLARE_ACCOUNT_ID: '0'.repeat(32) },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        })
+        return { exitCode: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString() }
+      }
+      try {
+        const [d1, kv, bookmark] = sent.map((args) => {
+          const result = isolated([...args, '--dry-run'])
+          expect(result.exitCode).toBe(0)
+          return JSON.parse(result.stdout) as { method: string; url: string; body?: unknown }
+        })
+        expect(d1).toMatchObject({ method: 'POST' })
+        expect(d1?.url).toEndWith('/d1/database')
+        expect(JSON.stringify(d1?.body)).toContain('cf-backend-probe')
+        expect(kv?.url).toEndWith('/storage/kv/namespaces')
+        expect(JSON.stringify(kv?.body)).toContain('cf-backend-probe-oauth-kv')
+        expect(bookmark?.url).toContain(`/d1/database/${id}/time_travel/bookmark`)
+
+        // The apply stage's argv, applied for real to a local database.
+        mkdirSync(join(root, 'migrations-probe'), { recursive: true })
+        writeFileSync(join(root, 'migrations-probe/0001_init.sql'), 'create table posts (id integer primary key);\n')
+        const applied = isolated(['d1', 'migrations', 'apply', id, '--dir', 'migrations-probe', '--local', '--persist-to', join(home, 'state')])
+        expect(applied.exitCode).toBe(0)
+        expect(applied.stdout).toContain('0001_init.sql')
+        const broken = join(root, 'migrations-broken')
+        mkdirSync(broken, { recursive: true })
+        writeFileSync(join(broken, '0001_bad.sql'), 'this is not sql;\n')
+        expect(isolated(['d1', 'migrations', 'apply', id, '--dir', 'migrations-broken', '--local', '--persist-to', join(home, 'state')]).exitCode)
+          .not.toBe(0)
+      } finally {
+        rmSync(home, { recursive: true, force: true })
+      }
+    },
+    120_000,
+  )
 })

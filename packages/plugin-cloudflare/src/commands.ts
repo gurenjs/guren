@@ -1,9 +1,8 @@
 import { defineCommand } from 'citty'
 import { detectCloudflareBackend } from './backend'
 import { buildCloudflareOutput } from './build'
-import { planCloudflareDeploy } from './deploy/deploy'
-import { hasBlocker } from './deploy/plan'
-import { formatPlan } from './deploy/report'
+import { runCloudflareDeploy } from './deploy/deploy'
+import { formatResult } from './deploy/report'
 import { printBundleReport, reportBundleSize } from './bundle-size'
 
 const rootArg = {
@@ -91,13 +90,21 @@ const cloudflareDeploy = defineCommand({
   meta: {
     name: 'cloudflare:deploy',
     description:
-      'Plan a deploy through the cf CLI: build, evaluate cloudflare.config.ts, and resolve every D1/KV binding against the account (RFC 0035; only --plan for now)',
+      'Deploy through the cf CLI (RFC 0035): build, plan every D1/KV binding, migration and secret against the account, then create, migrate and deploy after one confirmation',
   },
   args: {
     root: rootArg,
     plan: {
       type: 'boolean',
-      description: 'Stop after the plan, writing nothing to the account (required in this version)',
+      description: 'Stop after the plan, writing nothing to the account',
+    },
+    yes: {
+      type: 'boolean',
+      description: 'Apply the plan without asking; a run with no terminal needs this or --ci',
+    },
+    'skip-migrations': {
+      type: 'boolean',
+      description: 'Deploy without applying the pending migrations',
     },
     ci: {
       type: 'boolean',
@@ -109,7 +116,7 @@ const cloudflareDeploy = defineCommand({
     },
     json: {
       type: 'boolean',
-      description: 'Print { plan } as one JSON object',
+      description: 'Print { plan, created, migrated, deployment, url } as one JSON object',
     },
     'mcp-oauth': {
       type: 'boolean',
@@ -133,9 +140,11 @@ const cloudflareDeploy = defineCommand({
     },
   },
   async run({ args }) {
-    const plan = await planCloudflareDeploy({
+    const result = await runCloudflareDeploy({
       root: args.root || process.cwd(),
       plan: Boolean(args.plan),
+      yes: Boolean(args.yes),
+      skipMigrations: Boolean(args['skip-migrations']),
       ci: Boolean(args.ci),
       provision: Boolean(args.provision),
       mcpOAuth: Boolean(args['mcp-oauth']),
@@ -146,8 +155,8 @@ const cloudflareDeploy = defineCommand({
       logToStderr: Boolean(args.json),
     })
 
-    console.log(args.json ? JSON.stringify({ plan }, null, 2) : formatPlan(plan))
-    if (hasBlocker(plan)) {
+    console.log(args.json ? JSON.stringify(result, null, 2) : formatResult(result))
+    if (result.stopped === 'blocked' || result.stopped === 'declined' || result.failure) {
       process.exitCode = 1
     }
   },

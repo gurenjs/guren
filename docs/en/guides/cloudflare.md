@@ -476,7 +476,27 @@ Each binding is listed as `existing` (the resource a previous run settled, or an
 
 The plan reads which migrations the database has applied, picks the layout its tracker already uses, and prints the `cf d1 migrations apply` arguments for it. A database Wrangler migrated stays on the flattened copy, so nothing is applied twice. A database the deploy will create has applied nothing, so every local migration is judged. For secrets, a first deploy has no Worker to read from, so list the values in a dotenv file and pass it as `--secrets-file .env.production`. The plan reads only the names in it.
 
-Preflight needs Node 22.18 or later as the `node` on PATH, Wrangler 4.136 or later in the app, and a logged-in `cf` (`bunx cf auth login`, or `CLOUDFLARE_API_TOKEN` in CI). `--json` prints `{ plan }` as one object. This version stops at the plan: creating resources, migrating and deploying are still `cf deploy` and `cf d1 migrations apply` as above.
+Preflight needs Node 22.18 or later as the `node` on PATH, Wrangler 4.136 or later in the app, and a logged-in `cf` (`bunx cf auth login`, or `CLOUDFLARE_API_TOKEN` in CI). `--json` prints `{ plan }` as one object.
+
+### Deploying with one command
+
+Without `--plan`, the same command goes on to deploy:
+
+```bash
+bunx guren cloudflare:deploy --secrets-file .env.production
+```
+
+After showing the plan it asks once, and writes nothing to the account until you answer yes. A plan with a blocker stops there instead. Then it:
+
+1. creates each resource marked `create on deploy`, and records every resolved id in `guren-worker.json` (inside the ignored output directory, never in the repository);
+2. runs `cf build` again when an id changed, and stops if `cloudflare.config.ts` binds a resource other than the one recorded;
+3. records a D1 Time Travel bookmark, lists the pending migrations again, and applies them only if they are still the set the plan judged;
+4. runs `cf deploy --prebuilt --no-provision`, so a resource missing at this point fails the deploy instead of being created unplanned;
+5. prints the URL, what it created and migrated, and how to roll back. A rollback does not revert migrations.
+
+Nothing is ever deleted. If a step fails after something was written, the report lists the `cf d1 delete` / `cf kv namespaces delete` commands for what this run created and, after a migration, the `cf d1 time-travel restore` command for the bookmark. Run them yourself if you want them.
+
+In CI there is no one to answer, so pass `--yes` to deploy, or `--ci` to deploy only when nothing needs creating (`--ci --provision` allows creation). `--skip-migrations` deploys without applying. Run deploys of one Worker one at a time, for example with a GitHub Actions `concurrency` group per Worker: two runs at once can create the same resource or apply the same migration.
 
 ## Upgrading an Existing App
 

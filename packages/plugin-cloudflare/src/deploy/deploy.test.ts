@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { installCfTools, scaffoldApp, writeJson } from '../../tests/app-fixture'
+import { installCfTools, scaffoldApp, writeJson, writeMigration } from '../../tests/app-fixture'
 import type { CfResult } from './cf-cli'
 import { planCloudflareDeploy, type CloudflareDeployOptions } from './deploy'
 
@@ -42,11 +42,6 @@ const ENV_SCHEMA = `export default {
 }
 `
 
-function writeMigration(root: string, folder: string, sql: string): void {
-  mkdirSync(join(root, 'db/migrations', folder), { recursive: true })
-  writeFileSync(join(root, 'db/migrations', folder, 'migration.sql'), sql)
-}
-
 describe('cloudflare:deploy --plan', () => {
   let root: string
 
@@ -69,14 +64,6 @@ describe('cloudflare:deploy --plan', () => {
       ...overrides,
     }
   }
-
-  test('should refuse to run without --plan, before building anything', async () => {
-    scaffoldApp(root, { cfBackend: true })
-    installCfTools(root)
-
-    await expect(planCloudflareDeploy(options({ plan: false }))).rejects.toThrow(/only `--plan`/)
-    expect(existsSync(join(root, '.guren/cloudflare'))).toBe(false)
-  })
 
   test('should refuse an app on the wrangler backend', async () => {
     scaffoldApp(root)

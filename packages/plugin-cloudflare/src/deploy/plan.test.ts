@@ -195,12 +195,13 @@ describe('buildPlan', () => {
       unjudged: [],
       verdict: { unacknowledged: [], acknowledged: [] },
       allowDestructive: false,
+      fingerprint: 'f',
     }
 
     test('should report the pending set and how it applies', () => {
       const plan = buildPlan(context({ migrations: ready }))
 
-      expect(plan.migrations).toEqual({ layout: 'flat', pending: ['20261002_drop'], applyArgs: ready.applyArgs, acknowledged: [] })
+      expect(plan.migrations).toEqual({ layout: 'flat', pending: ['20261002_drop'], applyArgs: ready.applyArgs, acknowledged: [], fingerprint: 'f' })
       expect(plan.findings).toEqual([])
     })
 
