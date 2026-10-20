@@ -36,6 +36,8 @@ export interface GurenWorker {
   assets: { htmlHandling: WorkerManifest['htmlHandling'] }
   env: Record<string, GurenBinding>
   exports: Record<string, { type: 'durable-object'; storage: 'sqlite' }>
+  /** Absent when nothing is scheduled; a `triggers` key after the spread replaces it. */
+  triggers?: Array<{ type: 'scheduled'; schedule: string }>
 }
 
 export interface GurenWranglerBundle {
@@ -83,6 +85,7 @@ export async function gurenWorker(options: GurenWorkerOptions): Promise<GurenWor
     assets: { htmlHandling: manifest.htmlHandling },
     env,
     exports,
+    ...(manifest.crons.length > 0 ? { triggers: manifest.crons.map((schedule) => ({ type: 'scheduled' as const, schedule })) } : {}),
   }
 }
 

@@ -96,4 +96,13 @@ describe('@guren/plugin-cloudflare/config', () => {
 
     await expect(gurenWorker({ name: 'demo-app', outputDir })).rejects.toThrow(/reads as no JSON object.*cloudflare:build/s)
   })
+
+  test('should emit the scheduled trigger cf/config builds, and none when nothing is scheduled', async () => {
+    const { triggers } = await import('@cloudflare/config/public')
+    write(manifest({ crons: ['* * * * *'] }))
+    expect((await gurenWorker({ name: 'demo-app', outputDir })).triggers).toEqual([triggers.scheduled({ schedule: '* * * * *' })])
+
+    write(manifest())
+    expect((await gurenWorker({ name: 'demo-app', outputDir })).triggers).toBeUndefined()
+  })
 })

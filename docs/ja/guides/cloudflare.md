@@ -424,7 +424,7 @@ bun add -d cf wrangler
 
 ```typescript
 // cloudflare.config.ts
-import { bindings, defineConfig, triggers } from 'cf/config'
+import { bindings, defineConfig } from 'cf/config'
 import { gurenWorker } from '@guren/plugin-cloudflare/config'
 
 export default defineConfig(async () => {
@@ -434,7 +434,6 @@ export default defineConfig(async () => {
       ...worker,
       compatibilityDate: '2026-10-01',
       env: { ...worker.env, MEDIA: bindings.r2({}) },
-      triggers: [triggers.scheduled({ schedule: '* * * * *' })],
     },
   }
 })
@@ -448,7 +447,7 @@ import { gurenWranglerBundle } from '@guren/plugin-cloudflare/config'
 export default defineWranglerConfig(gurenWranglerBundle())
 ```
 
-`compatibilityDate` は自分で決めて、自分で更新してください。`gurenWranglerBundle()` は、モジュールのスタブ、ビルド時の `define`、アセットのディレクトリを返し、`keepNames` も有効にします。cron のトリガーは、アプリにスケジュールタスクがあるときだけ必要です（[スケジュールタスク](#スケジュールタスク)）。
+`compatibilityDate` は自分で決めて、自分で更新してください。`gurenWranglerBundle()` は、モジュールのスタブ、ビルド時の `define`、アセットのディレクトリを返し、`keepNames` も有効にします。スケジュールカーネルがタスクを登録しているときと、`--mcp-oauth` で OAuth の保存領域の掃除が必要なときは、`* * * * *` の cron トリガーも 1 つ加えます。スプレッドのあとに `triggers` を書けば、そちらに置き換わります。カーネルを読み込めなかったときはトリガーを加えず、ビルドが警告します。
 
 ビルドしてから、アプリのルートでデプロイします。
 
@@ -506,7 +505,7 @@ bunx guren cloudflare:deploy --secrets-file .env.production
 
 リソースを削除することはありません。何かを書き込んだあとで失敗したときは、この実行で作ったものを消す `cf d1 delete` / `cf kv namespaces delete` のコマンドと、マイグレーションのあとなら bookmark に戻す `cf d1 time-travel restore` のコマンドを表示します。必要なら自分で実行してください。
 
-CI では確認に答える人がいないので、デプロイするには `--yes` を付けます。作るものがないときだけデプロイしたいなら `--ci` を付けます（`--ci --provision` で作成も許可します）。`--skip-migrations` を付けると、マイグレーションを適用せずにデプロイします。同じワーカーのデプロイは、GitHub Actions のワーカーごとの `concurrency` グループなどで 1 つずつ実行してください。同時に走ると、同じリソースを作ったり、同じマイグレーションを適用したりすることがあります。
+`bunx guren deploy --target cloudflare` を使うと、main への push のたびにこれを実行する GitHub Actions のワークフローを書き出せます。CI では確認に答える人がいないので、デプロイするには `--yes` を付けます。作るものがないときだけデプロイしたいなら `--ci` を付けます（`--ci --provision` で作成も許可します）。`--skip-migrations` を付けると、マイグレーションを適用せずにデプロイします。同じワーカーのデプロイは、GitHub Actions のワーカーごとの `concurrency` グループなどで 1 つずつ実行してください。同時に走ると、同じリソースを作ったり、同じマイグレーションを適用したりすることがあります。
 
 ## 既存アプリの更新
 

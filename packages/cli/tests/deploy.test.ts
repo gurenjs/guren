@@ -97,6 +97,18 @@ describe('scaffoldDeploy', () => {
     expect(flyToml).toContain('PORT = "4000"')
   })
 
+  it('creates a Cloudflare deploy workflow that runs one deploy per Worker at a time', async () => {
+    const files = await scaffoldDeploy({ target: 'cloudflare' })
+
+    expect(files).toHaveLength(1)
+    const workflow = await readFile('.github/workflows/deploy-cloudflare.yml', 'utf8')
+    expect(workflow).toContain('group: cloudflare-deploy-scope-my-guren-app')
+    expect(workflow).toContain('cancel-in-progress: false')
+    expect(workflow).toContain('run: bunx guren cloudflare:deploy --yes')
+    expect(workflow).toContain('CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}')
+    expect(workflow).toContain('node-version: 24')
+  })
+
   it('reports no overwrites on a fresh app', async () => {
     const overwritten: string[] = []
     const files = await scaffoldDeploy({ target: 'all', overwritten })

@@ -132,6 +132,7 @@ async function prepare(options: CloudflareDeployOptions): Promise<Prepared> {
   const database = buildPlan(context).bindings.find((binding) => binding.binding === databaseBinding)
   const plan = buildPlan({
     ...context,
+    ...(process.env.GITHUB_ACTIONS === 'true' ? { workflow: readRunningWorkflow(root) } : {}),
     migrations: database && !options.skipMigrations ? readMigrations(root, cf, database, options) : undefined,
     secrets: await readSecrets(root, cf, worker, options.secretsFile),
   })
@@ -288,6 +289,18 @@ function cleanupCommands(created: CreatedResource[], bookmark: { id: string; val
       ? `bunx cf d1 delete ${resource.id}`
       : `bunx cf kv namespaces delete ${resource.id}`),
   ]
+}
+
+/** GITHUB_WORKFLOW_REF is `owner/repo/.github/workflows/<file>@<ref>`; the file is read from the checkout. */
+function readRunningWorkflow(root: string): Read<string> {
+  const ref = process.env.GITHUB_WORKFLOW_REF ?? ''
+  const path = /\/(\.github\/workflows\/[^@]+)@/.exec(ref)?.[1]
+  if (!path) return { ok: false, reason: 'GITHUB_WORKFLOW_REF names no workflow file' }
+  try {
+    return { ok: true, value: readFileSync(resolve(process.env.GITHUB_WORKSPACE ?? root, path), 'utf8') }
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 function readMigrations(

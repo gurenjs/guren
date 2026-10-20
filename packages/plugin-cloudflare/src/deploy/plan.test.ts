@@ -268,4 +268,20 @@ describe('buildPlan', () => {
         .toBe('source-unreadable')
     })
   })
+
+  describe('serialization', () => {
+    test('should warn, never block, when the deploy workflow has no concurrency group', () => {
+      const plan = buildPlan(context({ workflow: ok('on: push\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n') }))
+
+      expect(plan.findings.map((finding) => [finding.check, finding.severity])).toEqual([['serialization', 'warning']])
+      expect(plan.findings[0]?.fix).toContain('cloudflare-deploy-demo-app')
+      expect(hasBlocker(plan)).toBe(false)
+    })
+
+    test('should accept a workflow with a concurrency group, and say so when it could not read one', () => {
+      expect(buildPlan(context({ workflow: ok('concurrency:\n  group: cloudflare-deploy-demo-app\n') })).findings).toEqual([])
+      expect(buildPlan(context({ workflow: { ok: false, reason: 'ENOENT' } })).findings[0]?.message).toContain('ENOENT')
+      expect(buildPlan(context()).findings).toEqual([])
+    })
+  })
 })

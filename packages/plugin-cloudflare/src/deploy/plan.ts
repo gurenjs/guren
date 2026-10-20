@@ -31,6 +31,8 @@ export interface PlanContext {
   mayCreate: boolean
   migrations?: MigrationInput
   secrets?: SecretsInput
+  /** In GitHub Actions: the running workflow's text, or why it could not be read. */
+  workflow?: Read<string>
 }
 
 /** What deploy.ts read about the D1 database's migrations; the judging itself is the ORM's. */
@@ -88,6 +90,7 @@ export type CheckName =
   | 'tracker-layout'
   | 'destructive-migration'
   | 'secrets'
+  | 'serialization'
 
 export interface Finding {
   check: CheckName
@@ -142,6 +145,17 @@ export function buildPlan(context: PlanContext): DeployPlan {
         'Rerun once `cf` can reach the account.',
       ))
     }
+  }
+
+  if (context.workflow && !(context.workflow.ok && /^\s*concurrency:/m.test(context.workflow.value))) {
+    findings.push({
+      check: 'serialization',
+      severity: 'warning',
+      message: context.workflow.ok
+        ? 'This GitHub Actions workflow sets no concurrency group, so two deploys of this Worker can run at once and create the same resource or apply the same migration.'
+        : `The running workflow could not be read (${context.workflow.reason}), so whether deploys of this Worker run one at a time is unknown.`,
+      fix: `Add \`concurrency: { group: cloudflare-deploy-${context.worker.name}, cancel-in-progress: false }\`, as \`guren deploy --target cloudflare\` writes it.`,
+    })
   }
 
   const migrations = context.migrations ? planMigrations(context.migrations, findings) : undefined

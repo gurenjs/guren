@@ -414,7 +414,7 @@ Write two files at the app root. `gurenWorker()` returns the worker `cloudflare:
 
 ```typescript
 // cloudflare.config.ts
-import { bindings, defineConfig, triggers } from 'cf/config'
+import { bindings, defineConfig } from 'cf/config'
 import { gurenWorker } from '@guren/plugin-cloudflare/config'
 
 export default defineConfig(async () => {
@@ -424,7 +424,6 @@ export default defineConfig(async () => {
       ...worker,
       compatibilityDate: '2026-10-01',
       env: { ...worker.env, MEDIA: bindings.r2({}) },
-      triggers: [triggers.scheduled({ schedule: '* * * * *' })],
     },
   }
 })
@@ -438,7 +437,7 @@ import { gurenWranglerBundle } from '@guren/plugin-cloudflare/config'
 export default defineWranglerConfig(gurenWranglerBundle())
 ```
 
-`compatibilityDate` is yours to set and to move. `gurenWranglerBundle()` supplies the module stubs, the build-time `define` entries and the assets directory, with `keepNames` on. The cron trigger is only needed when the app has scheduled tasks (see [Scheduled Tasks](#scheduled-tasks)).
+`compatibilityDate` is yours to set and to move. `gurenWranglerBundle()` supplies the module stubs, the build-time `define` entries and the assets directory, with `keepNames` on. It also adds one `* * * * *` cron trigger when the schedule kernel registers tasks, or under `--mcp-oauth` for the OAuth storage sweep; a `triggers` key you write after the spread replaces it. A kernel the build cannot load adds no trigger, and the build warns.
 
 Build, then deploy from the app root:
 
@@ -496,7 +495,7 @@ After showing the plan it asks once, and writes nothing to the account until you
 
 Nothing is ever deleted. If a step fails after something was written, the report lists the `cf d1 delete` / `cf kv namespaces delete` commands for what this run created and, after a migration, the `cf d1 time-travel restore` command for the bookmark. Run them yourself if you want them.
 
-In CI there is no one to answer, so pass `--yes` to deploy, or `--ci` to deploy only when nothing needs creating (`--ci --provision` allows creation). `--skip-migrations` deploys without applying. Run deploys of one Worker one at a time, for example with a GitHub Actions `concurrency` group per Worker: two runs at once can create the same resource or apply the same migration.
+`bunx guren deploy --target cloudflare` writes a GitHub Actions workflow that does this on every push to main. In CI there is no one to answer, so pass `--yes` to deploy, or `--ci` to deploy only when nothing needs creating (`--ci --provision` allows creation). `--skip-migrations` deploys without applying. Run deploys of one Worker one at a time, for example with a GitHub Actions `concurrency` group per Worker: two runs at once can create the same resource or apply the same migration.
 
 ## Upgrading an Existing App
 

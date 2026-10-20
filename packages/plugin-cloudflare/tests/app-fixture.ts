@@ -184,6 +184,7 @@ export function workerManifest(overrides: Partial<WorkerManifest> = {}): WorkerM
     vars: { NODE_ENV: 'production' },
     d1: { binding: 'DB', databaseName: 'demo-app' },
     kvNamespaces: [],
+    crons: [],
     agents: [],
     resolved: {},
     ...overrides,

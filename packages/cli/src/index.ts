@@ -121,6 +121,7 @@ export { parseSchemaTables, parseSchemaTableColumns, type SchemaTable, type Sche
 export { runCheck, renderCheckReport } from './check'
 export { analyzeDeployRuntime, judgeDeployRuntime, checkDeployRuntime } from './deploy-runtime'
 export { requiredDeployEnv, type RequiredDeployEnv } from './deploy-env'
+export { loadScheduleKernel, type KernelLoad } from './schedule'
 export { assignedEnvKeys, envFileKeys } from './plugin-manifest'
 export { runGate, renderGateReport, describeGateFailures, stopGateFindings, GATE_STAGES } from './gate'
 export { planStopHookFindings, MAX_STEP_CONTINUATIONS, type PlanStopHookInput, type PlanStopHookVerdict } from './plan-stop-hook'

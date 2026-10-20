@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { assertCwdUnsupported, kebabCase, writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
 
-export type DeployTarget = 'docker' | 'fly' | 'railway' | 'all'
+export type DeployTarget = 'docker' | 'fly' | 'railway' | 'cloudflare' | 'all'
 
 export interface DeployOptions extends WriterOptions {
   target?: DeployTarget
@@ -143,6 +143,55 @@ function railwayJsonTemplate(): string {
 `
 }
 
+/** The concurrency group `cloudflare:deploy`'s serialization check looks for (RFC 0035 §4). */
+export function cloudflareDeployGroup(worker: string): string {
+  return `cloudflare-deploy-${worker}`
+}
+
+/**
+ * Deploys through `guren cloudflare:deploy` on every push to main. One run per
+ * Worker at a time: two at once could create the same resource or apply the same
+ * migration, and Guren keeps no lock of its own.
+ */
+function cloudflareWorkflowTemplate(appName: string): string {
+  return `name: Deploy to Cloudflare
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${cloudflareDeployGroup(appName)}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+
+      # cf loads cloudflare.config.ts with Node 22.18 or later.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # --yes applies the plan without a prompt; a plan with a blocker still stops here.
+      # Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID as repository secrets.
+      - name: Deploy
+        run: bunx guren cloudflare:deploy --yes
+        env:
+          CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+`
+}
+
 function filesForTarget(target: DeployTarget, appName: string, port: number): ScaffoldFileEntry[] {
   const dockerFile: ScaffoldFileEntry = { path: 'Dockerfile', contents: dockerfileTemplate(port) }
   const flyFile: ScaffoldFileEntry = { path: 'fly.toml', contents: flyTomlTemplate(appName, port) }
@@ -154,6 +203,8 @@ function filesForTarget(target: DeployTarget, appName: string, port: number): Sc
       return [dockerFile, flyFile]
     case 'railway':
       return [dockerFile, railwayFile]
+    case 'cloudflare':
+      return [{ path: '.github/workflows/deploy-cloudflare.yml', contents: cloudflareWorkflowTemplate(appName) }]
     case 'all':
       return [dockerFile, flyFile, railwayFile]
     default: {
