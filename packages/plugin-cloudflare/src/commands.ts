@@ -1,6 +1,8 @@
 import { defineCommand } from 'citty'
 import { detectCloudflareBackend } from './backend'
 import { buildCloudflareOutput } from './build'
+import { hasBlocker, planCloudflareDeploy } from './deploy/deploy'
+import { formatPlan } from './deploy/report'
 import { printBundleReport, reportBundleSize } from './bundle-size'
 
 const rootArg = {
@@ -84,7 +86,58 @@ const cloudflareSize = defineCommand({
   },
 })
 
+const cloudflareDeploy = defineCommand({
+  meta: {
+    name: 'cloudflare:deploy',
+    description:
+      'Plan a deploy through the cf CLI: build, evaluate cloudflare.config.ts, and resolve every D1/KV binding against the account (RFC 0035; only --plan for now)',
+  },
+  args: {
+    root: rootArg,
+    plan: {
+      type: 'boolean',
+      description: 'Stop after the plan, writing nothing to the account (required in this version)',
+    },
+    ci: {
+      type: 'boolean',
+      description: 'Never create a missing resource unless --provision is passed',
+    },
+    provision: {
+      type: 'boolean',
+      description: 'Allow creating missing resources even under --ci or without a terminal',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Print { plan } as one JSON object',
+    },
+    'mcp-oauth': {
+      type: 'boolean',
+      description: 'Build with --mcp-oauth, which binds OAUTH_KV',
+    },
+    'skip-app-build': {
+      type: 'boolean',
+      description: "Skip running the app's build script",
+    },
+  },
+  async run({ args }) {
+    const plan = await planCloudflareDeploy({
+      root: args.root || process.cwd(),
+      plan: Boolean(args.plan),
+      ci: Boolean(args.ci),
+      provision: Boolean(args.provision),
+      mcpOAuth: Boolean(args['mcp-oauth']),
+      skipAppBuild: Boolean(args['skip-app-build']),
+    })
+
+    console.log(args.json ? JSON.stringify({ plan }, null, 2) : formatPlan(plan))
+    if (hasBlocker(plan)) {
+      process.exitCode = 1
+    }
+  },
+})
+
 export default {
   'cloudflare:build': cloudflareBuild,
   'cloudflare:size': cloudflareSize,
+  'cloudflare:deploy': cloudflareDeploy,
 }

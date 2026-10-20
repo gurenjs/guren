@@ -33,7 +33,8 @@
       "entry": "./dist/commands.js",
       "names": [
         "cloudflare:build",
-        "cloudflare:size"
+        "cloudflare:size",
+        "cloudflare:deploy"
       ]
     }
   },
