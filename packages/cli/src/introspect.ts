@@ -44,6 +44,9 @@ export interface IntrospectOptions {
  */
 export const INTROSPECT_TARGET_ENV = 'GUREN_INTROSPECT_TARGET'
 
+/** The targets whose env subpath honours {@link INTROSPECT_TARGET_ENV}. */
+export type IntrospectTarget = 'cloudflare'
+
 /** Set to `1` beside `GUREN_INTROSPECT` for a {@link IntrospectOptions.graph} run. */
 export const INTROSPECT_GRAPH_ENV = 'GUREN_INTROSPECT_GRAPH'
 

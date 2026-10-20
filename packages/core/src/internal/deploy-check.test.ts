@@ -42,6 +42,19 @@ async function captureWarnings(run: () => Promise<void>): Promise<string[]> {
   return warnings
 }
 
+/** Everything a run wrote to `console.log`. */
+async function captureLogs(run: () => Promise<unknown>): Promise<string[]> {
+  const logged: string[] = []
+  const original = console.log
+  console.log = (message: string) => logged.push(message)
+  try {
+    await run()
+  } finally {
+    console.log = original
+  }
+  return logged
+}
+
 describe('reportDeployRuntimeHazards', () => {
   let root: string
 
@@ -80,16 +93,9 @@ describe('reportDeployRuntimeHazards', () => {
   test('should name the platform branch the verdicts were read from', async () => {
     writeIntrospectableApp(root, SESSION_APP)
 
-    const logged: string[] = []
-    const log = console.log
-    console.log = (message: string) => logged.push(message)
-    try {
-      await captureWarnings(async () => {
-        await reportDeployRuntimeHazards({ root, label: 'Cloudflare build', target: 'cloudflare' })
-      })
-    } finally {
-      console.log = log
-    }
+    const logged = await captureLogs(() => captureWarnings(async () => {
+      await reportDeployRuntimeHazards({ root, label: 'Cloudflare build', target: 'cloudflare' })
+    }))
 
     expect(logged.join('\n')).toContain('Deploy Runtime Stores from the introspected app as Cloudflare Workers runs it')
   })

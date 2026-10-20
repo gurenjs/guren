@@ -59,7 +59,7 @@ export async function reportDeployRuntimeHazards(options: ReportDeployRuntimeHaz
 
   let verdicts: DeployRuntimeVerdict[]
   try {
-    verdicts = await cli.checkDeployRuntime(root, target ? { target } : undefined)
+    verdicts = await cli.checkDeployRuntime(root, { target })
   } catch (error) {
     return skipped(label, `the scan failed (${describeError(error)})`)
   }
@@ -89,6 +89,7 @@ function describeEvidence(label: string, verdicts: DeployRuntimeVerdict[]): stri
 }
 
 const EVIDENCE_LABELS = { manifest: 'the introspected app', static: 'source', none: 'nothing verifiable' } as const
+/** Matches `SERVERLESS_RUNTIME_LABELS` in @guren/server, which this module does not import. */
 const TARGET_LABELS = { cloudflare: 'Cloudflare Workers' } as const
 
 function skipped(label: string, reason: string): string[] {

@@ -2,7 +2,8 @@
  * The one place server decides "which serverless runtime is this". Kept
  * import-free so the session middleware and the Lambda adapter can both read
  * it without either dragging the other in. plugin-cloudflare's
- * `isWorkersRuntime()` reads the same user agent.
+ * `isWorkersRuntime()` reads the same user agent, and is also true in the Cloudflare
+ * build's introspection (RFC 0035 §2.1); this is not, since it describes the real process.
  */
 
 export type ServerlessRuntimeId = 'cloudflare' | 'lambda' | 'vercel'

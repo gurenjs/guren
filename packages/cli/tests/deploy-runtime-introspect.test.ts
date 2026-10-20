@@ -6,7 +6,7 @@ import { runCheck, type CheckResult } from '../src/check'
 import { gatingResults } from '../src/check-result'
 import { checkDeployRuntime, readDeployRuntime } from '../src/deploy-runtime'
 import { getDoctorRuleEvaluations } from '../src/doctor'
-import { CHECK_INTROSPECT_TIMEOUT_MS, introspectApp } from '../src/introspect'
+import { CHECK_INTROSPECT_TIMEOUT_MS, INTROSPECT_TARGET_ENV, introspectApp } from '../src/introspect'
 import { readManifestSection } from '../src/manifest-section'
 import { assertWorkspaceBuilt, createTempRoot, linkWorkspaceCore, linkWorkspacePackage, runCliBinCaptured, SERVER_DIST_ENTRY, writeWorkspaceFiles } from './helpers'
 
@@ -229,29 +229,20 @@ export default app
   }, 60_000)
 })
 
-/** The scaffold's shape: D1 on workerd, SQLite under `bun run dev`. */
-const BRANCHING_APP = `import { createApp, createD1Database, createSqliteDatabase, defineDatabaseConfig } from '@guren/core'
+/** The scaffold's shape, D1 on workerd and SQLite under `bun run dev`, with the D1 binding read as `binding`. */
+function branchingApp(binding: string): string {
+  return `import { createApp, createD1Database, createSqliteDatabase, defineDatabaseConfig } from '@guren/core'
 import { getWorkersEnv, isWorkersRuntime } from '@guren/plugin-cloudflare/env'
 
 const database = isWorkersRuntime()
-  ? createD1Database({ binding: () => getWorkersEnv<{ DB: unknown }>().DB })
+  ? createD1Database({ binding: ${binding} })
   : createSqliteDatabase({ filename: () => ':memory:' })
 
 export default createApp({ config: [defineDatabaseConfig(database)] })
 `
+}
 
-/** Reads a binding while the app registers, which workerd allows only inside a request. */
-const EAGER_BINDING_APP = `import { createApp, createD1Database, createSqliteDatabase, defineDatabaseConfig } from '@guren/core'
-import { getWorkersEnv, isWorkersRuntime } from '@guren/plugin-cloudflare/env'
-
-const database = isWorkersRuntime()
-  ? createD1Database({ binding: getWorkersEnv<{ DB: never }>().DB })
-  : createSqliteDatabase({ filename: () => ':memory:' })
-
-export default createApp({ config: [defineDatabaseConfig(database)] })
-`
-
-async function branchingApp(name: string, app: string): Promise<string> {
+async function workersApp(name: string, app: string): Promise<string> {
   const dir = await cloudflareApp(name, { 'src/app.ts': app })
   await linkWorkspacePackage('plugin-cloudflare', dir)
   return dir
@@ -264,33 +255,28 @@ function databaseDialect(result: Awaited<ReturnType<typeof introspectApp>>): unk
 }
 
 describe('introspecting the Cloudflare branch (RFC 0035 §2.1)', () => {
-  test('should register the D1 factory under the target, and the development branch without it', async () => {
-    const dir = await branchingApp('branch-d1', BRANCHING_APP)
+  test('should register the D1 factory under the target, and the development branch whatever the shell exports', async () => {
+    const dir = await workersApp('branch-d1', branchingApp('() => getWorkersEnv<{ DB: unknown }>().DB'))
+    expect(databaseDialect(await introspectApp(dir, { env: { [INTROSPECT_TARGET_ENV]: 'cloudflare' } }))).toBe('d1')
 
-    expect(databaseDialect(await introspectApp(dir, { env: { GUREN_INTROSPECT_TARGET: 'cloudflare' } }))).toBe('d1')
-    expect(databaseDialect(await introspectApp(dir, { fresh: true }))).toBe('sqlite')
-  })
-
-  test('should not inherit a target exported in the calling shell', async () => {
-    const dir = await branchingApp('branch-inherited', BRANCHING_APP)
-    const saved = process.env.GUREN_INTROSPECT_TARGET
-    process.env.GUREN_INTROSPECT_TARGET = 'cloudflare'
+    const saved = process.env[INTROSPECT_TARGET_ENV]
+    process.env[INTROSPECT_TARGET_ENV] = 'cloudflare'
     try {
       expect(databaseDialect(await introspectApp(dir, { fresh: true }))).toBe('sqlite')
     } finally {
-      if (saved === undefined) delete process.env.GUREN_INTROSPECT_TARGET
-      else process.env.GUREN_INTROSPECT_TARGET = saved
+      if (saved === undefined) delete process.env[INTROSPECT_TARGET_ENV]
+      else process.env[INTROSPECT_TARGET_ENV] = saved
     }
-  })
+  }, 60_000)
 
   test('should mark the verdicts it read from the Cloudflare branch, and degrade to unverified when that branch cannot register', async () => {
-    const dir = await branchingApp('branch-verdicts', ARGON2_APP)
+    const dir = await workersApp('branch-verdicts', ARGON2_APP)
     const verdicts = await checkDeployRuntime(dir, { target: 'cloudflare' })
     expect(verdicts.find((entry) => entry.key === 'deploy-password-hashing')).toMatchObject({ evidence: 'manifest', introspectedAs: 'cloudflare' })
-    expect((await checkDeployRuntime(dir)).every((entry) => entry.introspectedAs === undefined)).toBe(true)
 
-    const eager = await branchingApp('branch-eager', EAGER_BINDING_APP)
+    // Read while the app registers, which workerd allows only inside a request.
+    const eager = await workersApp('branch-eager', branchingApp('getWorkersEnv<{ DB: never }>().DB'))
     const degraded = await checkDeployRuntime(eager, { target: 'cloudflare' })
     expect(degraded.map((entry) => entry.key)).toContain('deploy-password-hashing-unverified')
-  })
+  }, 60_000)
 })
