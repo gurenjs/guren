@@ -69,7 +69,7 @@ import {
   type IntrospectSource,
 } from './manifest-section'
 import { describeMethod } from './http-methods'
-import { parseSchemaTableColumns } from './schema-parser'
+import { parseSchemaTableColumns, parseSchemaTables, type SchemaTable } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
 import {
   agentToolActions,
@@ -1255,6 +1255,7 @@ function parseModelSerializationInfo(source: string, filePath: string): ModelSer
 async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void> {
   const modelFiles = await discoverModelFiles(cwd)
   const schemaTables = modelFiles.length > 0 ? await parseSchemaTableColumns(cwd) : null
+  const owners = modelFiles.length > 0 ? await ownerColumnReader(cwd, modelFiles) : null
 
   for (const filePath of modelFiles) {
     const relPath = relative(cwd, filePath)
@@ -1287,8 +1288,26 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
       ),
     )
 
-    // Sensitive columns must be excluded from serialization via hidden/visible.
+    // A fillable column that references the users table lets a request choose the record's owner.
     const info = parseModelSerializationInfo(source, filePath)
+    const fillable = classDecl && !isAuthenticatable ? resolveModelStringArrayConfig(classDecl, 'fillable') : undefined
+    const ownerColumns = fillable && info.tableIdentifier ? (owners?.(info.tableIdentifier) ?? []).filter((column) => fillable.includes(column)) : []
+    if (ownerColumns.length > 0) {
+      const listed = ownerColumns.map((column) => `'${column}'`).join(', ')
+      findings.push(
+        finding(
+          `owner-fillable:${name}`,
+          `${name} owner column fillable`,
+          'warn',
+          `${name} lists ${listed} in fillable, and ${ownerColumns.length === 1 ? 'it references' : 'they reference'} the users table, so a request can choose the record's owner.`,
+          `Remove ${listed} from fillable in ${relPath} and from the request schema, and set the owner on the server: `
+          + `create(data, { set: { ${ownerColumns[0]}: user.id } }) (update(where, data, { set }) for an update).`,
+          relPath,
+        ),
+      )
+    }
+
+    // Sensitive columns must be excluded from serialization via hidden/visible.
     const columns = info.tableIdentifier ? schemaTables?.get(info.tableIdentifier) : undefined
     if (!columns) continue
 
@@ -1320,6 +1339,41 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
       ),
     )
   }
+}
+
+/**
+ * The column property names of a table that reference an authenticatable model's table
+ * (a column `.references()` or a table-level `foreignKey`). Null when the schema cannot
+ * be read; an expression column or constraint it cannot follow names nothing.
+ */
+async function ownerColumnReader(cwd: string, modelFiles: string[]): Promise<((table: string) => string[]) | null> {
+  let tables: SchemaTable[]
+  try {
+    tables = await parseSchemaTables(cwd)
+  } catch {
+    return null
+  }
+  const userTables = new Set<string>()
+  for (const filePath of modelFiles) {
+    const source = await readFile(filePath, 'utf-8')
+    const ast = parseSourceFile(source, filePath)
+    const classDecl = ast ? firstClassDeclaration(ast.program.body) : null
+    if (!classDecl || !classUsesAuthenticatableBase(classDecl)) continue
+    const table = parseModelSerializationInfo(source, filePath).tableIdentifier
+    if (table) userTables.add(table)
+  }
+  if (userTables.size === 0) return () => []
+  const byTable = new Map<string, string[]>()
+  for (const table of tables) {
+    const columns = table.columns.filter((column) => column.references && userTables.has(column.references.table)).map((column) => column.name)
+    for (const constraint of table.constraints) {
+      if (constraint.kind === 'foreignKey' && constraint.references && userTables.has(constraint.references.table) && !constraint.opaqueColumns) {
+        columns.push(...constraint.columns)
+      }
+    }
+    byTable.set(table.identifier, [...new Set(columns)])
+  }
+  return (table) => byTable.get(table) ?? []
 }
 
 export function renderAuditReport(report: AuditReport): void {

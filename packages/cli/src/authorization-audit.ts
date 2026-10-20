@@ -155,7 +155,9 @@ export async function auditAuthorization(
 
   for (const route of routes) {
     const method = route.method.toUpperCase()
-    if (describeMethod(method).safe || !route.controller || GUEST_PATH_PATTERN.test(route.path)) continue
+    // The one safe route judged: the resource `edit` action renders a record's edit form.
+    const editForm = method === 'GET' && route.controller?.action === 'edit'
+    if ((describeMethod(method).safe && !editForm) || !route.controller || GUEST_PATH_PATTERN.test(route.path)) continue
 
     const routeLabel = `${method} ${route.path}`
     const push = (status: AuditFinding['status'], message: string, rest: Partial<AuditFinding> = {}) =>
@@ -207,8 +209,8 @@ export async function auditAuthorization(
     }
 
     const message =
-      `${controllerKey} (${info.filePath}:${info.line}) references ${describeBindings(touched)} on a mutating `
-      + 'route, and neither the middleware chain nor the action body shows an authorization check.'
+      `${controllerKey} (${info.filePath}:${info.line}) references ${describeBindings(touched)} on `
+      + `${editForm ? "a record's edit form" : 'a mutating route'}, and neither the middleware chain nor the action body shows an authorization check.`
     const marker = info.leadingComments.find((comment) => comment.includes(AUDIT_IGNORE_MARKER))
     if (marker !== undefined) {
       push('ignored', message, { ignoreReason: marker, filePath: info.filePath })

@@ -420,3 +420,64 @@ export function registerBillingRoutes(router: any) {
     expect(authorization?.message).toContain('Invoice (InvoicePolicy)')
   })
 })
+
+describe("policy authorization on a record's edit form", () => {
+  const editRoutes = `
+import { Router } from '@guren/core'
+
+class PostController {
+  async edit() { return null }
+  async show() { return null }
+}
+
+export default function registerRoutes(router: Router) {
+  router.get('/posts/:id/edit', [PostController, 'edit'])
+  router.get('/posts/:id', [PostController, 'show'])
+}
+`
+  const editController = (editBody: string) => `import { Controller } from '@guren/core'
+import { Post } from '../../Models/Post'
+
+export default class PostController extends Controller {
+  async edit() {
+${editBody}
+  }
+
+  async show() {
+    const post = await Post.findOrFail(1)
+    return this.json(post)
+  }
+}
+`
+  const files = (editBody: string) => ({
+    'routes/web.ts': editRoutes,
+    'app/Models/Post.ts': model,
+    'app/Policies/PostPolicy.ts': policy,
+    'app/Http/Controllers/PostController.ts': editController(editBody),
+  })
+
+  it('warns when the edit action loads a policed model and never authorizes', async () => {
+    const report = await withWorkspace(files(`    const post = await Post.findOrFail(1)
+    return this.json(post)`))
+
+    const edit = report.findings.find((f) => f.key === 'policy:GET /posts/:id/edit')
+    expect(edit?.status).toBe('warn')
+    expect(edit?.message).toContain("PostController.edit")
+    expect(edit?.message).toContain("a record's edit form")
+  })
+
+  it('passes an edit action that authorizes', async () => {
+    const report = await withWorkspace(files(`    const post = await Post.findOrFail(1)
+    await this.authorize('update', [Post, post])
+    return this.json(post)`))
+
+    expect(report.findings.find((f) => f.key === 'policy:GET /posts/:id/edit')?.status).toBe('pass')
+  })
+
+  it('leaves every other GET action alone', async () => {
+    const report = await withWorkspace(files(`    return this.json({})`))
+
+    expect(report.findings.find((f) => f.key === 'policy:GET /posts/:id')).toBeUndefined()
+  })
+})
+
