@@ -74,17 +74,14 @@ export async function getChangedFilesFromBase(
   const gitRoot = rootLines?.[0]
   if (!gitRoot) return null
 
-  let mergeBase = (await runGit(absoluteCwd, ['merge-base', 'HEAD', 'origin/main']))?.[0]
-  if (!mergeBase) {
-    mergeBase = (await runGit(absoluteCwd, ['merge-base', 'HEAD', 'main']))?.[0]
-  }
-  // The remote's default branch, for a repository whose base is not called main.
-  if (!mergeBase) {
-    mergeBase = (await runGit(absoluteCwd, ['merge-base', 'HEAD', 'origin/HEAD']))?.[0]
-  }
-
+  // `origin/HEAD` is the remote's default branch, for a repository whose base is not called main.
   // A repository with no commit has no HEAD to diff against; everything tracked is then in the index.
-  const head = (await runGit(absoluteCwd, ['rev-parse', '--verify', '--quiet', 'HEAD']))?.[0]
+  const [bases, headLines] = await Promise.all([
+    Promise.all(['origin/main', 'main', 'origin/HEAD'].map((base) => runGit(absoluteCwd, ['merge-base', 'HEAD', base]))),
+    runGit(absoluteCwd, ['rev-parse', '--verify', '--quiet', 'HEAD']),
+  ])
+  const mergeBase = bases.map((lines) => lines?.[0]).find((base) => base !== undefined)
+  const head = headLines?.[0]
   const [committed, uncommitted, untracked] = await Promise.all([
     mergeBase ? runGitPaths(absoluteCwd, ['diff', '--name-only', mergeBase, 'HEAD']) : Promise.resolve([]),
     runGitPaths(absoluteCwd, head ? ['diff', '--name-only', 'HEAD'] : ['diff', '--name-only', '--cached']),

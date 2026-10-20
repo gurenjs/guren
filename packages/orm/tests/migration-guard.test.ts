@@ -409,12 +409,12 @@ describe('post-merge review of #1206: fail closed', () => {
 
   test('should report a rebuild of a table another table references with ON DELETE CASCADE where foreign keys stay on', () => {
     const columns = types([['', 'users', 'id', 'integer'], ['', 'users', 'age', 'text']])
-    const children = [{ table: 'posts', tableTo: 'users', onDelete: 'CASCADE' }]
+    const children = [{ tableTo: 'users', onDelete: 'CASCADE' }]
     const source = sqliteSource(rebuild('`id` integer PRIMARY KEY, `age` text'), { before: columns, after: columns }, { before: children, after: children })
     expect(judgeMigrations([source]).unacknowledged).toMatchObject([{ kind: 'table-rebuild', table: 'users' }])
     expect(judgeMigrations([source], { foreignKeysEnforced: false }).unacknowledged).toEqual([])
     const restricted = sqliteSource(rebuild('`id` integer PRIMARY KEY, `age` text'), { before: columns, after: columns }, {
-      before: [{ table: 'posts', tableTo: 'users', onDelete: 'NO ACTION' }],
+      before: [{ tableTo: 'users', onDelete: 'NO ACTION' }],
     })
     expect(judgeMigrations([restricted]).unacknowledged).toEqual([])
   })
@@ -432,7 +432,7 @@ describe('post-merge review of #1206: fail closed', () => {
     const { path, names } = folder('sqlite-rebuild')
     const [source] = readMigrationSources(path, [names[2]!])
     expect(source!.dialect).toBe('sqlite')
-    expect(source!.foreignKeys?.after).toEqual([{ table: 'posts', tableTo: 'users', onDelete: 'NO ACTION' }])
+    expect(source!.foreignKeys?.after).toEqual([{ tableTo: 'users', onDelete: 'NO ACTION' }])
   })
 })
 

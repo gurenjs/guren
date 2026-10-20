@@ -127,6 +127,12 @@ function lex(sql: string, rules: LexRules, firstLine = 1): Lexed {
 
   /** The index of the quote closing the one at `open`, or -1. A doubled quote is an escaped one in every dialect. */
   const closingQuote = (open: number, quote: string, backslash: boolean): number => {
+    if (!backslash) {
+      for (let end = sql.indexOf(quote, open + 1); end !== -1; end = sql.indexOf(quote, end + 2)) {
+        if (sql[end + 1] !== quote) return end
+      }
+      return -1
+    }
     for (let end = open + 1; end < sql.length; end += 1) {
       if (backslash && sql[end] === '\\') {
         end += 1
@@ -298,7 +304,7 @@ function skipWords(tokens: Token[], start: number, ...words: string[]): number {
   return index
 }
 
-const NON_COLUMN_DROPS = ['CONSTRAINT', 'INDEX', 'KEY', 'PRIMARY', 'FOREIGN', 'CHECK', 'DEFAULT', 'PARTITION']
+const NON_COLUMN_DROPS = ['CONSTRAINT', 'INDEX', 'KEY', 'PRIMARY', 'FOREIGN', 'CHECK', 'DEFAULT']
 
 interface RawFinding extends DestructiveStatement {
   /** For a rebuild's closing rename, which the rebuild finding replaces. */
@@ -812,12 +818,21 @@ const evidence = (statement: DestructiveStatement) => JSON.stringify([statement.
  * every reading has them.
  */
 export function scanMigrationSql(sql: string, { dialect }: ScanOptions = {}): MigrationScan {
-  const readings = (dialect ? LEX_READINGS[dialect] : Object.values(LEX_READINGS).flat()).map((rules) => scanWith(sql, rules))
+  const candidates = dialect ? LEX_READINGS[dialect] : Object.values(LEX_READINGS).flat()
+  // Readings that differ only in backslash escapes read SQL with no backslash alike.
+  const sameRules = (a: LexRules, b: LexRules) => JSON.stringify({ ...a, backslashEscapes: false }) === JSON.stringify({ ...b, backslashEscapes: false })
+  const distinct = sql.includes('\\') ? candidates : candidates.filter((rules, at) => candidates.findIndex((other) => sameRules(other, rules)) === at)
+  const readings = distinct.map((rules) => scanWith(sql, rules))
   if (readings.length === 1) return readings[0]!
   const merged = new Map<string, DestructiveStatement[]>()
   for (const reading of readings) {
     const byKey = new Map<string, DestructiveStatement[]>()
-    for (const statement of reading.statements) byKey.set(findingKey(statement), [...(byKey.get(findingKey(statement)) ?? []), statement])
+    for (const statement of reading.statements) {
+      const key = findingKey(statement)
+      const group = byKey.get(key)
+      if (group) group.push(statement)
+      else byKey.set(key, [statement])
+    }
     for (const [key, found] of byKey) {
       const kept = merged.get(key)
       if (!kept) {
@@ -826,7 +841,7 @@ export function scanMigrationSql(sql: string, { dialect }: ScanOptions = {}): Mi
       }
       const longer = found.length > kept.length ? found : kept
       const agree = kept.length === found.length && kept.every((statement, at) => evidence(statement) === evidence(found[at]!))
-      merged.set(key, agree ? longer : longer.map(({ copiedColumns, copiedColumnTypes, targetType, ...rest }) => rest))
+      merged.set(key, agree ? kept : longer.map(({ copiedColumns, copiedColumnTypes, targetType, ...rest }) => rest))
     }
   }
   const statements = [...merged.values()].flat()
@@ -862,19 +877,19 @@ export function readSnapshotColumnTypes(snapshot: unknown): ColumnTypes | undefi
   return types
 }
 
-export function readSnapshotForeignKeys(snapshot: unknown): ForeignKeyReference[] | undefined {
+function readSnapshotForeignKeys(snapshot: unknown): ForeignKeyReference[] | undefined {
   const ddl = (snapshot as { ddl?: unknown } | null)?.ddl
   if (!Array.isArray(ddl)) return undefined
   return (ddl as Array<Record<string, unknown>>).flatMap((entry) => {
-    const { table, tableTo, onDelete } = entry ?? {}
-    if (entry?.entityType !== 'fks' || typeof table !== 'string' || typeof tableTo !== 'string') return []
+    const { tableTo, onDelete } = entry ?? {}
+    if (entry?.entityType !== 'fks' || typeof tableTo !== 'string') return []
     // An action the snapshot does not spell is read as one that deletes.
-    return [{ table, tableTo, onDelete: typeof onDelete === 'string' ? onDelete : 'CASCADE' }]
+    return [{ tableTo, onDelete: typeof onDelete === 'string' ? onDelete : 'CASCADE' }]
   })
 }
 
 /** drizzle-kit's `dialect`, folded onto how the SQL is lexed; undefined for one it does not name. */
-export function readSnapshotDialect(snapshot: unknown): MigrationDialect | undefined {
+function readSnapshotDialect(snapshot: unknown): MigrationDialect | undefined {
   const dialect = (snapshot as { dialect?: unknown } | null)?.dialect
   if (dialect === 'postgres' || dialect === 'postgresql' || dialect === 'gel') return 'postgres'
   if (dialect === 'mysql' || dialect === 'singlestore') return 'mysql'
@@ -1047,8 +1062,6 @@ export interface MigrationSource {
 }
 
 export interface ForeignKeyReference {
-  /** The referencing table. */
-  table: string
   tableTo: string
   /** As the snapshot spells it: `CASCADE`, `SET NULL`, `NO ACTION`, … */
   onDelete: string
@@ -1200,15 +1213,15 @@ export class DestructiveMigrationError extends Error {
         findings.map((finding) => `  ${formatDestructiveFinding(finding)}`).join('\n') +
         `\nReview each one. To apply it, put \`-- ${ALLOW_DESTRUCTIVE_MARKER}: <reason>\` on the first line of its migration.sql, ` +
         `or set ${ALLOW_DESTRUCTIVE_ENV}=1 for one run.`,
+      trackerError === undefined ? undefined : { cause: trackerError },
     )
     this.name = 'DestructiveMigrationError'
-    if (trackerError !== undefined) this.cause = trackerError
   }
 }
 
 function describeTrackerError(error: unknown): string {
-  if (error === undefined) return 'the migration tracker could not be read'
-  return `the migration tracker could not be read: ${error instanceof Error ? error.message : String(error)}`
+  const why = error === undefined ? '' : `: ${error instanceof Error ? error.message : String(error)}`
+  return `the migration tracker could not be read${why}`
 }
 
 function displayFolder(folder: string): string {

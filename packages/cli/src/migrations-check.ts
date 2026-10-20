@@ -1,8 +1,10 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { ALLOW_DESTRUCTIVE_MARKER, judgeMigrations, readMigrationSources } from '@guren/orm/internal/migration-guard'
 import { getChangedFilesFromBase } from './changed-files'
 import { check, type CheckResult } from './check-result'
+import { DATABASE_CONFIG_CANDIDATES } from './db-migrate'
+import { readIfExists } from './discovery'
 
 const MIGRATION_FILE = /(^|\/)migration\.sql$/
 const TITLE = 'Destructive migrations'
@@ -15,16 +17,11 @@ const SUGGESTION =
  * only for a `createSqliteDatabase()` config (bun:sqlite's runner turns them off)
  * with no D1 in sight. Anything else keeps them on, as D1 does.
  */
-function foreignKeysEnforced(cwd: string): boolean {
+async function foreignKeysEnforced(cwd: string): Promise<boolean> {
   if (['wrangler.json', 'wrangler.jsonc', 'wrangler.toml'].some((file) => existsSync(join(cwd, file)))) return true
-  for (const file of ['config/database.ts', 'config/database.js']) {
-    let source: string
-    try {
-      source = readFileSync(join(cwd, file), 'utf8')
-    } catch {
-      continue
-    }
-    return !(source.includes('createSqliteDatabase(') && !source.includes('createD1Database('))
+  for (const file of DATABASE_CONFIG_CANDIDATES) {
+    const source = await readIfExists(cwd, file).catch(() => null)
+    if (source !== null) return !(source.includes('createSqliteDatabase(') && !source.includes('createD1Database('))
   }
   return true
 }
@@ -67,7 +64,6 @@ export async function checkDestructiveMigrations(
   }
 
   const results: CheckResult[] = []
-  const enforced = foreignKeysEnforced(cwd)
   // Gating, unlike a missing merge base: the listing claims a scope it did not cover.
   if (!changed.complete) {
     results.push(check(
@@ -101,6 +97,8 @@ export async function checkDestructiveMigrations(
     })
   }
   if (byFolder.size === 0) return results
+
+  const enforced = await foreignKeysEnforced(cwd)
 
   for (const [folder, names] of [...byFolder].sort(([a], [b]) => a.localeCompare(b))) {
     names.sort((a, b) => a.localeCompare(b))
