@@ -131,7 +131,7 @@ async function prepare(options: CloudflareDeployOptions): Promise<Prepared> {
 /** No D1 binding could be picked for `db/migrations`: a blocker only when there is something to apply. */
 function unchosenDatabase(root: string, reason: string): MigrationInput | undefined {
   const local = readLocalMigrations(join(root, 'db', 'migrations'))
-  return local.folders.length === 0 && local.files.length === 0 ? undefined : { status: 'unreadable', reason }
+  return local.folders.length === 0 && local.files.length === 0 ? undefined : { status: 'unassigned', reason }
 }
 
 export interface CreatedResource {
@@ -189,7 +189,7 @@ async function confirmOnTerminal(plan: DeployPlan): Promise<boolean> {
 async function applyPlan(prepared: Prepared, options: CloudflareDeployOptions): Promise<DeployResult> {
   const { plan, root, backend, databaseBinding } = prepared
   const result: DeployResult = { plan, created: [] }
-  const fail = (stage: string, message: string, bookmark?: { id: string; name: string; value: string }): DeployResult => ({
+  const fail = (stage: string, message: string, bookmark?: { binding: string; id: string; name: string; value: string }): DeployResult => ({
     ...result,
     failure: {
       stage,
@@ -236,7 +236,7 @@ async function applyPlan(prepared: Prepared, options: CloudflareDeployOptions): 
   const migrations = plan.migrations
   const planned = plan.bindings.find((binding) => binding.binding === databaseBinding)
   const databaseId = databaseBinding ? resolved[databaseBinding]?.id ?? planned?.id : undefined
-  let restore: { id: string; name: string; value: string } | undefined
+  let restore: { binding: string; id: string; name: string; value: string } | undefined
   if (!options.skipMigrations && migrations && migrations.pending.length > 0 && planned && databaseId) {
     const database = { ...planned, action: 'existing' as const, id: databaseId }
     const bookmark = backend.bookmark(database)
@@ -248,7 +248,7 @@ async function applyPlan(prepared: Prepared, options: CloudflareDeployOptions): 
         ? `${now.reason}. Nothing was applied.`
         : 'The pending migrations changed since the plan judged them, by another run or an edit. Nothing was applied; plan again.')
     }
-    restore = { id: databaseId, name: planned.name, value: bookmark.value }
+    restore = { binding: planned.binding, id: databaseId, name: planned.name, value: bookmark.value }
     const applied = backend.applyMigrations(database, migrations.applyArgs)
     if (!applied.ok) return fail('migrate', applied.reason, restore)
     result.migrated = { applied: migrations.pending, bookmark: bookmark.value }

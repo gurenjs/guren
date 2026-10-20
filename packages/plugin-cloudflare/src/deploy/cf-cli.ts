@@ -77,15 +77,21 @@ export function checkAuth(cf: CliRunner): Read<true> {
  * applied" would replay the whole history against live data.
  */
 export function readMigrationTracker(cf: CliRunner, databaseId: string): Read<string[] | null> {
-  return trackerRows(cf(['d1', 'query', databaseId, '--sql', TRACKER_QUERY]), 'cf d1 query')
+  return trackerRows(cf(['d1', 'query', databaseId, '--sql', trackerQuery(DEFAULT_TRACKER)]), 'cf d1 query', DEFAULT_TRACKER)
 }
 
-export const TRACKER_QUERY = 'select name from d1_migrations order by id'
+/** The table both CLIs record applied migrations in, unless wrangler.jsonc names another (`migrations_table`). */
+export const DEFAULT_TRACKER = 'd1_migrations'
+
+export function trackerQuery(table: string): string {
+  const name = /^[A-Za-z_][A-Za-z0-9_]*$/.test(table) ? table : `"${table.replaceAll('"', '""')}"`
+  return `select name from ${name} order by id`
+}
 
 /** A tracker query's result: the API answers `[{ results: [...], success, meta }]`, with or without the envelope. */
-export function trackerRows(result: CliResult, label: string): Read<string[] | null> {
+export function trackerRows(result: CliResult, label: string, table: string): Read<string[] | null> {
   if (result.exitCode !== 0) {
-    if (/no such table:?\s*d1_migrations/i.test(failureText(result))) return { ok: true, value: null }
+    if (failureText(result).toLowerCase().includes(`no such table: ${table.toLowerCase()}`)) return { ok: true, value: null }
     return { ok: false, reason: `${label} on the migrations table failed: ${failureText(result)}` }
   }
   const statements = resultArray(parseJson(result.stdout))

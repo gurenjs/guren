@@ -3,6 +3,7 @@
  * a command spelled for one CLI never shows up in the other's output.
  */
 import type { CloudflareBackend } from '../backend'
+import { WRANGLER_DEPLOY_CONFIG_FILE, WRANGLER_OUTPUT_DIR } from '../worker-manifest'
 
 export interface BackendWords {
   cli: string
@@ -12,9 +13,19 @@ export interface BackendWords {
   /** The apply command as a person would type it, after the plan's arguments. */
   applyMigrations(args: string): string
   rollback(worker: string): string
-  restore(database: { id: string; name: string }, bookmark: string): string
-  delete(resource: { type: 'd1' | 'kv'; id: string; name: string }): string
+  restore(database: CleanupTarget, bookmark: string): string
+  delete(resource: CleanupTarget & { type: 'd1' | 'kv' }): string
 }
+
+/** What a cleanup command addresses a resource by: cf by id; Wrangler by binding, through the deploy config. */
+interface CleanupTarget {
+  binding: string
+  id: string
+  name: string
+}
+
+/** The rendered config holds the resolved ids, so a placeholder id in wrangler.jsonc never stands in. */
+const DEPLOY_CONFIG = `-c ${WRANGLER_OUTPUT_DIR}/${WRANGLER_DEPLOY_CONFIG_FILE}`
 
 export const BACKEND_WORDS: Record<CloudflareBackend, BackendWords> = {
   cf: {
@@ -32,7 +43,9 @@ export const BACKEND_WORDS: Record<CloudflareBackend, BackendWords> = {
     setSecret: (name, worker) => `bunx wrangler secret put ${name} --name ${worker}`,
     applyMigrations: (args) => `wrangler d1 migrations apply <DB binding> ${args}`,
     rollback: (worker) => `Roll back to the previous version with \`bunx wrangler rollback --name ${worker}\`, or pass it an earlier version id.`,
-    restore: (database, bookmark) => `bunx wrangler d1 time-travel restore ${database.name} --bookmark ${bookmark}`,
-    delete: (resource) => (resource.type === 'd1' ? `bunx wrangler d1 delete ${resource.name}` : `bunx wrangler kv namespace delete --namespace-id ${resource.id}`),
+    restore: (database, bookmark) => `bunx wrangler d1 time-travel restore ${database.binding} --bookmark ${bookmark} ${DEPLOY_CONFIG}`,
+    delete: (resource) => (resource.type === 'd1'
+      ? `bunx wrangler d1 delete ${resource.binding} ${DEPLOY_CONFIG}`
+      : `bunx wrangler kv namespace delete --namespace-id ${resource.id}`),
   },
 }

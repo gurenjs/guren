@@ -33,7 +33,7 @@ describe('Wrangler CLI argv', () => {
     const missing = readWranglerTracker((args) => {
       calls.push(args)
       return { exitCode: 1, stdout: '{"error":{"text":"no such table: d1_migrations: SQLITE_ERROR"}}', stderr: '' }
-    }, 'DB', ['-c', '.cloudflare/wrangler.deploy.json'])
+    }, 'DB', 'd1_migrations', ['-c', '.cloudflare/wrangler.deploy.json'])
 
     expect(missing).toEqual({ ok: true, value: null })
     expect(calls[0]).toEqual(['d1', 'execute', 'DB', '--remote', '--json', '--command', 'select name from d1_migrations order by id', '-c', '.cloudflare/wrangler.deploy.json'])
@@ -252,6 +252,26 @@ describe('cloudflare:deploy on the Wrangler backend', () => {
     expect(result.plan.findings).toContainEqual(expect.objectContaining({ check: 'tracker-layout', severity: 'blocker' }))
   })
 
+  test('should read the tracker table wrangler.jsonc names, and block when no binding owns db/migrations', async () => {
+    writeMigration(root, '20261001_init', 'CREATE TABLE posts (id integer primary key);\n')
+    writeJson(join(root, 'wrangler.jsonc'), {
+      name: 'demo-app',
+      main: '.cloudflare/worker.js',
+      d1_databases: [{ binding: 'DB', database_name: 'demo-app', migrations_dir: '.cloudflare/d1-migrations', migrations_table: 'schema_log' }],
+    })
+    const calls: string[][] = []
+    await run({ d1: [{ uuid: EXISTING_DB, name: 'demo-app' }], tracker: [] }, calls, { plan: true })
+    expect(calls.find((call) => call[1] === 'execute')).toContain('select name from schema_log order by id')
+
+    writeJson(join(root, 'wrangler.jsonc'), {
+      name: 'demo-app',
+      main: '.cloudflare/worker.js',
+      d1_databases: [{ binding: 'DB', database_name: 'demo-app' }, { binding: 'LOGS', database_name: 'demo-logs' }],
+    })
+    const result = await run({ d1: [{ uuid: EXISTING_DB, name: 'demo-app' }], tracker: [] }, [], { plan: true })
+    expect(result.plan.findings).toContainEqual(expect.objectContaining({ check: 'tracker-layout', fix: expect.stringContaining('migrations_dir') }))
+  })
+
   test('should list wrangler commands to undo a run that failed after creating', async () => {
     const calls: string[][] = []
 
@@ -260,7 +280,7 @@ describe('cloudflare:deploy on the Wrangler backend', () => {
     expect(result.failure).toEqual({
       stage: 'deploy',
       message: 'wrangler deploy failed: upload failed',
-      cleanup: ['bunx wrangler d1 delete demo-app'],
+      cleanup: ['bunx wrangler d1 delete DB -c .cloudflare/wrangler.deploy.json'],
     })
   })
 
@@ -323,9 +343,9 @@ describe.skipIf(!realWrangler)('the rendered config under Wrangler 4.129', () =>
 
       // The local database stands in for the remote one, whose output has the same shape.
       const local = (args: string[]) => wrangler(args.map((arg) => (arg === '--remote' ? '--local' : arg)))
-      expect(readWranglerTracker(local, 'DB', configArgs)).toEqual({ ok: true, value: null })
+      expect(readWranglerTracker(local, 'DB', 'd1_migrations', configArgs)).toEqual({ ok: true, value: null })
       expect(local(['d1', 'migrations', 'apply', 'DB', '--remote', ...configArgs]).exitCode).toBe(0)
-      expect(readWranglerTracker(local, 'DB', configArgs)).toEqual({ ok: true, value: ['20261001_init.sql'] })
+      expect(readWranglerTracker(local, 'DB', 'd1_migrations', configArgs)).toEqual({ ok: true, value: ['20261001_init.sql'] })
       expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')).not.toContain(EXISTING_DB)
     } finally {
       rmSync(root, { recursive: true, force: true })

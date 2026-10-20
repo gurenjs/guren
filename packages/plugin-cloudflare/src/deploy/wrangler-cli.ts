@@ -12,7 +12,7 @@ import {
   parseResources,
   readField,
   resultArray,
-  TRACKER_QUERY,
+  trackerQuery,
   trackerRows,
   type AccountResource,
   type CliRunner,
@@ -55,9 +55,9 @@ export function createWranglerResource(wrangler: CliRunner, type: 'd1' | 'kv', n
     : { ok: false, reason: `${label} succeeded, but the listing has ${found.length} named "${name}"` }
 }
 
-/** The names `d1_migrations` records, or `null` when the table does not exist yet. */
-export function readWranglerTracker(wrangler: CliRunner, binding: string, configArgs: string[]): Read<string[] | null> {
-  return trackerRows(wrangler(['d1', 'execute', binding, '--remote', '--json', '--command', TRACKER_QUERY, ...configArgs]), 'wrangler d1 execute')
+/** The names the binding's tracker table records, or `null` when the table does not exist yet. */
+export function readWranglerTracker(wrangler: CliRunner, binding: string, table: string, configArgs: string[]): Read<string[] | null> {
+  return trackerRows(wrangler(['d1', 'execute', binding, '--remote', '--json', '--command', trackerQuery(table), ...configArgs]), 'wrangler d1 execute', table)
 }
 
 export function getWranglerBookmark(wrangler: CliRunner, binding: string, configArgs: string[]): Read<string> {

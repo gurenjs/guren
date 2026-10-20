@@ -4,6 +4,7 @@
  * with the resolved ids filled in. wrangler.jsonc itself is never written. Only the
  * top level is deployed; named environments come in a later phase.
  */
+import { existsSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 
 import { isRecord } from '../backend'
@@ -63,6 +64,12 @@ export function wranglerMigrationsBinding(config: Record<string, unknown>, root:
   }
 }
 
+/** The table `wrangler d1 migrations apply` records into for a binding (`migrations_table`). */
+export function wranglerMigrationsTable(config: Record<string, unknown>, binding: string): string | undefined {
+  const entry = asArray(config.d1_databases).find((candidate) => isRecord(candidate) && candidate.binding === binding)
+  return isRecord(entry) && typeof entry.migrations_table === 'string' && entry.migrations_table !== '' ? entry.migrations_table : undefined
+}
+
 /** Keys holding a path wrangler resolves against the config file's directory. */
 const PATH_KEYS = ['main', 'tsconfig', 'base_dir'] as const
 const PATH_MAPS = ['wasm_modules', 'text_blobs', 'data_blobs'] as const
@@ -106,6 +113,12 @@ export function renderWranglerDeployConfig(input: {
     }
     for (const entry of asArray(scope.d1_databases)) {
       if (isRecord(entry) && 'migrations_dir' in entry) entry.migrations_dir = absolute(entry.migrations_dir)
+    }
+    // An image is a Dockerfile path when one exists there, otherwise a registry reference.
+    for (const container of asArray(scope.containers)) {
+      if (!isRecord(container)) continue
+      if (typeof container.image === 'string' && existsSync(resolve(root, container.image))) container.image = absolute(container.image)
+      if ('image_build_context' in container) container.image_build_context = absolute(container.image_build_context)
     }
   }
 

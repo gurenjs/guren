@@ -47,6 +47,8 @@ export interface PlanContext {
 export type MigrationInput =
   | { status: 'unreadable'; reason: string }
   | { status: 'layout-conflict'; nested: string[]; flat: string[] }
+  /** The config does not say which D1 binding `db/migrations` belongs to. */
+  | { status: 'unassigned'; reason: string }
   /** The tracker holds nested names, which this backend cannot apply. */
   | { status: 'layout-unsupported'; nested: string[] }
   | {
@@ -218,6 +220,15 @@ export function buildPlan(context: PlanContext): DeployPlan {
 function planMigrations(input: MigrationInput, findings: Finding[], words: BackendWords): DeployPlan['migrations'] {
   if (input.status === 'unreadable') {
     findings.push(blocker('source-unreadable', undefined, `${input.reason}. Without the tracker the plan cannot tell which migrations are pending.`, `Rerun once \`${words.cli}\` can query the database.`))
+    return undefined
+  }
+  if (input.status === 'unassigned') {
+    findings.push(blocker(
+      'tracker-layout',
+      undefined,
+      `${input.reason}.`,
+      `Set "migrations_dir": ".cloudflare/d1-migrations" on that binding in ${words.config}.`,
+    ))
     return undefined
   }
   if (input.status === 'layout-unsupported') {

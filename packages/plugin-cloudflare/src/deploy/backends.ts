@@ -22,6 +22,7 @@ import {
   listKvNamespaces,
   listWorkerSecrets,
   readMigrationTracker,
+  DEFAULT_TRACKER,
   parseJson,
   type AccountResource,
   type CliRunner,
@@ -44,6 +45,7 @@ import {
   evaluateWranglerConfig,
   renderWranglerDeployConfig,
   wranglerMigrationsBinding,
+  wranglerMigrationsTable,
 } from './wrangler-config'
 
 export interface DeployBackend {
@@ -209,12 +211,12 @@ export function wranglerDeployBackend(options: WranglerBackendOptions): DeployBa
     appliesNested: false,
     preflight() {
       const problems: string[] = []
-      const version = installedVersion(root, 'wrangler')
+      const manifest = wranglerPackage ? readJson(wranglerPackage) : undefined
+      const version = isRecord(manifest) && typeof manifest.version === 'string' ? manifest.version : undefined
       if (!version || !Bun.semver.satisfies(version, `>=${WRANGLER_FLOOR}-0`)) {
         problems.push(`The deploy runs the app's Wrangler, which needs ${WRANGLER_FLOOR} or later; found ${version ?? 'none'}. Run \`bun add -d wrangler@latest\`.`)
       }
-      const engines = wranglerPackage ? readJson(wranglerPackage) : undefined
-      const nodeRange = isRecord(engines) && isRecord(engines.engines) && typeof engines.engines.node === 'string' ? engines.engines.node : undefined
+      const nodeRange = isRecord(manifest) && isRecord(manifest.engines) && typeof manifest.engines.node === 'string' ? manifest.engines.node : undefined
       const node = nodeRange ? nodeVersion() : undefined
       if (nodeRange && (!node || !Bun.semver.satisfies(node, nodeRange))) {
         problems.push(`Wrangler runs on the node on PATH, and this one needs Node ${nodeRange}; found ${node ?? 'no node'}.`)
@@ -243,7 +245,12 @@ export function wranglerDeployBackend(options: WranglerBackendOptions): DeployBa
       return { ok: true, value: true }
     },
     applyArgs: () => ['--remote', ...configArgs],
-    readTracker: (database) => readWranglerTracker(wrangler, database.binding, configArgs),
+    readTracker: (database) => readWranglerTracker(
+      wrangler,
+      database.binding,
+      wranglerMigrationsTable(developerConfig(), database.binding) ?? DEFAULT_TRACKER,
+      configArgs,
+    ),
     bookmark: (database) => getWranglerBookmark(wrangler, database.binding, configArgs),
     applyMigrations: (database, applyArgs) => applyWranglerMigrations(wrangler, database.binding, applyArgs),
     listSecrets: (worker) => listWranglerSecrets(wrangler, worker, configArgs),
