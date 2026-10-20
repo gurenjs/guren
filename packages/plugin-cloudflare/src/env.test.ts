@@ -62,8 +62,9 @@ describe('the env slot @guren/orm reads', () => {
     resetWorkersEnv()
     captureWorkersEnv({ DB: 'binding' })
     try {
-      expect(WORKERS_ENV_SLOT === Symbol.for('guren.workersEnv')).toBe(true)
-      expect((globalThis as unknown as Record<symbol, { env: unknown }>)[Symbol.for('guren.workersEnv')]).toEqual({ env: { DB: 'binding' } })
+      expect(WORKERS_ENV_SLOT.description).toBe('guren.workersEnv')
+      expect(Symbol.keyFor(WORKERS_ENV_SLOT)).toBe('guren.workersEnv')
+      expect((globalThis as typeof globalThis & { [WORKERS_ENV_SLOT]?: unknown })[WORKERS_ENV_SLOT]).toEqual({ env: { DB: 'binding' } })
     } finally {
       resetWorkersEnv()
     }

@@ -325,3 +325,25 @@ describe('database section (RFC 0033 §3)', () => {
     expect(manifest.bindings).not.toContain('database')
   })
 })
+
+describe('a disk that names its Workers binding (RFC 0035 §2.1)', () => {
+  test('should report the binding from the registration, building no disk', () => {
+    let built = 0
+    const storage = new StorageManager({ default: 'files', disks: { files: { driver: 'memory', binding: 'FILES' } as never } })
+    storage.registerDisk('media', () => {
+      built++
+      return storage.disk('files')
+    }, { driver: 'r2', binding: 'MEDIA' })
+    storage.registerDisk('plain', () => storage.disk('files'))
+
+    expect(storage.describe()).toEqual({
+      default: 'files',
+      entries: {
+        files: { driver: 'memory', binding: 'FILES' },
+        media: { driver: 'r2', binding: 'MEDIA' },
+        plain: { driver: null },
+      },
+    })
+    expect(built).toBe(0)
+  })
+})

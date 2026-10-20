@@ -227,21 +227,23 @@ import { isWorkersRuntime } from '@guren/plugin-cloudflare/env'
 
 export default class MediaDiskProvider extends ServiceProvider {
   register(): void {
-    this.container.make('storage').registerDisk('media', () =>
-      isWorkersRuntime()
-        ? new R2Driver({
-            binding: 'MEDIA',
-            publicUrl: 'https://media.example.com',
-          })
-        : new LocalStorageDriver({ root: './storage/app/public', url: '/storage' }),
-    )
+    const storage = this.container.make('storage')
+    if (isWorkersRuntime()) {
+      storage.registerDisk(
+        'media',
+        () => new R2Driver({ binding: 'MEDIA', publicUrl: 'https://media.example.com' }),
+        { driver: 'r2', binding: 'MEDIA' },
+      )
+    } else {
+      storage.registerDisk('media', () => new LocalStorageDriver({ root: './storage/app/public', url: '/storage' }))
+    }
   }
 }
 ```
 
 `storage` を `createApp({ config })` に、`MediaDiskProvider` を `providers` に加えてください。
 
-`binding` には D1 と同じくバインディングの名前を渡し、ドライバは最初の操作のときに Workers の env から読みます。これで、[ストレージガイド](./storage.md)にある `storage.disk('media').put(...)` / `get(...)` / `files(...)` がそのまま動きます。`bun run dev` ではディスクに、`wrangler dev` と本番では R2 に書き込みます。
+`binding` には D1 と同じくバインディングの名前を渡し、ドライバは最初の操作のときに Workers の env から読みます。`registerDisk()` の 3 つ目の引数でファクトリが作るものを伝えておくと、`guren introspect --json` はディスクを作らずに `{ driver: 'r2', binding: 'MEDIA' }` と表示します。これで、[ストレージガイド](./storage.md)にある `storage.disk('media').put(...)` / `get(...)` / `files(...)` がそのまま動きます。`bun run dev` ではディスクに、`wrangler dev` と本番では R2 に書き込みます。
 
 R2 は S3 と仕組みが違うため、次の 3 点で挙動が異なります。
 

@@ -235,21 +235,23 @@ import { isWorkersRuntime } from '@guren/plugin-cloudflare/env'
 
 export default class MediaDiskProvider extends ServiceProvider {
   register(): void {
-    this.container.make('storage').registerDisk('media', () =>
-      isWorkersRuntime()
-        ? new R2Driver({
-            binding: 'MEDIA',
-            publicUrl: 'https://media.example.com',
-          })
-        : new LocalStorageDriver({ root: './storage/app/public', url: '/storage' }),
-    )
+    const storage = this.container.make('storage')
+    if (isWorkersRuntime()) {
+      storage.registerDisk(
+        'media',
+        () => new R2Driver({ binding: 'MEDIA', publicUrl: 'https://media.example.com' }),
+        { driver: 'r2', binding: 'MEDIA' },
+      )
+    } else {
+      storage.registerDisk('media', () => new LocalStorageDriver({ root: './storage/app/public', url: '/storage' }))
+    }
   }
 }
 ```
 
 List `storage` in `createApp({ config })` and `MediaDiskProvider` in `providers`.
 
-`binding` names the binding, as for D1, and the driver reads it from the Workers env at its first operation. Every `storage.disk('media').put(...)` / `get(...)` / `files(...)` call from the [Storage guide](./storage.md) then works unchanged; `bun run dev` writes to disk, `wrangler dev` and production write to R2.
+`binding` names the binding, as for D1, and the driver reads it from the Workers env at its first operation. The third argument of `registerDisk()` says what the factory builds, so `guren introspect --json` lists the disk as `{ driver: 'r2', binding: 'MEDIA' }` without building it. Every `storage.disk('media').put(...)` / `get(...)` / `files(...)` call from the [Storage guide](./storage.md) then works unchanged; `bun run dev` writes to disk, `wrangler dev` and production write to R2.
 
 Three things follow from how R2 differs from S3:
 

@@ -56,11 +56,11 @@ Guren's deploy settings live in `config/cloudflare.ts` (`defineCloudflareConfig(
   import { R2Driver } from '@guren/plugin-cloudflare'
 
   const storage = createStorageManager({ default: 'media' })
-  storage.registerDisk('media', () =>
-    isWorkersRuntime()
-      ? new R2Driver({ binding: 'MEDIA', publicUrl: 'https://media.example.com' })
-      : new LocalStorageDriver({ root: './storage/app/public', url: '/storage' }),
-  )
+  if (isWorkersRuntime()) {
+    storage.registerDisk('media', () => new R2Driver({ binding: 'MEDIA', publicUrl: 'https://media.example.com' }), { driver: 'r2', binding: 'MEDIA' })
+  } else {
+    storage.registerDisk('media', () => new LocalStorageDriver({ root: './storage/app/public', url: '/storage' }))
+  }
   ```
 
   with `"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "my-app-media" }]` in `wrangler.jsonc`. Three methods differ from the S3 driver, because the binding differs from S3: `url()` needs `publicUrl` (a custom domain or the r2.dev subdomain — R2 has no derivable public URL); `temporaryUrl()` needs the optional `presign` credentials, and throws with guidance otherwise (bindings cannot sign URLs); `setVisibility()` / `put({ visibility })` throw when asked for the opposite of the bucket's declared `visibility`, because R2 has no per-object ACL to honour the request with. `putFile()` throws — Workers has no filesystem.

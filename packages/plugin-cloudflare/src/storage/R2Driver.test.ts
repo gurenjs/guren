@@ -45,7 +45,7 @@ describe('R2Driver against the binding', () => {
 
     test('should read a named binding from the captured env, and name it when the env lacks it', async () => {
       const named = new R2Driver({ binding: 'MEDIA' })
-      expect(named.binding).toBe('MEDIA')
+      await expect(named.exists('a.txt')).rejects.toThrow('R2Driver: the "MEDIA" binding was read before the first request')
       captureWorkersEnv({ MEDIA: bucket })
       try {
         await driver.put('a.txt', 'hi')
@@ -54,7 +54,6 @@ describe('R2Driver against the binding', () => {
       } finally {
         resetWorkersEnv()
       }
-      expect(new R2Driver({ binding: () => bucket }).binding).toBeUndefined()
     })
 
     test('should throw with wrangler guidance when the resolver returns nothing', async () => {
