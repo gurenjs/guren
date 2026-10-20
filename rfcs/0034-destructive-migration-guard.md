@@ -53,15 +53,29 @@ splits a migration into statements and reports each destructive one with its
 line. It tokenizes rather than matching the raw text: `--` and `/* */`
 comments, `'…'` strings, `"…"`, `` `…` `` and SQLite's `[…]` identifiers and
 PostgreSQL `$tag$…$tag$` bodies are skipped, statements end at a top-level `;`,
-and `--> statement-breakpoint` is an ordinary comment. Comment text MySQL
-executes is scanned as SQL as well: a `/*! … */` versioned comment, and a `--`
-not followed by whitespace, which MySQL does not read as a comment. A
+and `--> statement-breakpoint` is an ordinary comment. Quoting and comments
+differ by dialect, and a scanner that reads them the wrong way lets a string
+swallow the statement after it, so the scanner takes a dialect: MySQL's
+backslash escapes in `'…'` and `"…"`, its `#` line comment and the comment text
+it executes (a `/*! … */` versioned comment, and a `--` not followed by
+whitespace); PostgreSQL's `E'…'` escapes and dollar quoting. The boot path takes
+the dialect from the driver, `db:migrate` from the factory's `describe()`, and
+`guren check` from each migration's `snapshot.json`. With none of them, the SQL
+is read the way each dialect reads it and every reading's findings count, while
+a `CREATE TABLE` (for the created-in-run exemption) and the marker count only
+when every reading sees them. A
 destructive statement whose target name cannot be read is still reported, and
 an `ALTER TABLE` whose table cannot be read is `unreadable`. A dollar-quoted body is
 scanned again as SQL, so a `DO $$ … DROP TABLE … $$` block is not hidden by its
-quoting, and a statement is read from its first `DROP`, `ALTER`, `RENAME`,
+quoting, and so is a string that is SQL the database runs: the body of a
+`CREATE FUNCTION`/`PROCEDURE` or a `DO` written as a string, and the literal of
+`EXECUTE '…'` or `PREPARE s FROM '…'`. SQL built at run time (`EXECUTE` of a
+concatenation or `format()`, `PREPARE s FROM @sql`) cannot be read, and is
+`unreadable`. A statement is read from its first `DROP`, `ALTER`, `RENAME`,
 `TRUNCATE`, `DELETE` or `CREATE`, so a `BEGIN` or `IF … THEN` in front hides
-nothing either. An unterminated string, comment or body is itself a finding
+nothing either, and a `CREATE` of anything but a table (a procedure, function,
+trigger or event) is read again past its header, so the first statement of its
+body is judged like the rest. An unterminated string, comment or body is itself a finding
 (`unreadable`): the scanner cannot say what follows it, so it does not pass it.
 
 | Kind | Statement (PostgreSQL, MySQL, SQLite as drizzle-kit 1.0.0-rc.4 writes them) |
@@ -71,9 +85,11 @@ nothing either. An unterminated string, comment or body is itself a finding
 | `alter-column-type` | `ALTER TABLE "users" ALTER COLUMN "age" SET DATA TYPE smallint USING …;` (PG), `ALTER TABLE \`users\` MODIFY COLUMN \`age\` smallint;`, `CHANGE COLUMN` (MySQL) |
 | `table-rebuild` | SQLite's `CREATE TABLE \`__new_users\` … INSERT … SELECT … DROP TABLE \`users\`; ALTER TABLE \`__new_users\` RENAME TO \`users\`;`, reported once, at the `DROP TABLE` line |
 | `rename` | `ALTER TABLE … RENAME TO …`, `RENAME COLUMN`, MySQL `RENAME TABLE` |
-| `truncate` | `TRUNCATE …`, one finding per table it names |
+| `truncate` | `TRUNCATE …`, one finding per table it names; MySQL `ALTER TABLE … TRUNCATE PARTITION` |
 | `delete-all` | `DELETE FROM …` (MySQL's `LOW_PRIORITY`/`QUICK`/`IGNORE` and multi-table forms included, a CTE's included) with no `WHERE` at its own paren depth, so a subquery's filter does not count |
 | `drop-schema` | `DROP SCHEMA`, `DROP DATABASE` |
+| `drop-partition` | MySQL `ALTER TABLE … DROP PARTITION`, which drops the partition's rows |
+| `drop-cascade` | Any other `DROP … CASCADE` (`DROP TYPE`, `DROP DOMAIN`, `DROP EXTENSION`), which drops the columns depending on the object, and PostgreSQL `DROP OWNED`, which drops a role's tables |
 | `unreadable` | see above |
 
 A rename loses no rows, but every running instance of the previous deploy
@@ -93,7 +109,9 @@ the type this migration's snapshot records (by no `USING`, or the plain
 `"col"::type` cast drizzle-kit writes, and with no character set or collation
 change), and the change is on a closed widening list (a longer `varchar`,
 `varchar`/`char` to `text`, `mediumtext` or `longtext`, up the integer ladder,
-a `numeric` keeping its integer digits and scale, up MySQL's text ladder).
+a `numeric` keeping its integer digits and scale, up MySQL's text ladder). A
+bare `numeric` is unbounded only in PostgreSQL; MySQL's bare `DECIMAL` is
+`DECIMAL(10,0)`, and a migration whose dialect is unknown is read the MySQL way.
 Snapshot columns are keyed by schema, table and column as written, so a table
 in another schema never borrows another's evidence. Anything else, including a
 snapshot that is missing, unreadable or names no such column, is reported. A
@@ -106,7 +124,23 @@ key. A rebuild is exempt when its `INSERT INTO __new_x(…) SELECT … FROM x`
 copies each column to itself, no other statement touches the copy and none
 touches the original between the copy and the drop, every column the previous
 snapshot gives the table is among the copied ones, and each keeps or widens its
-type in this migration's snapshot. Without the snapshots, or with a column left behind, it is reported.
+type in the copy's own `CREATE TABLE __new_x`. The type is read from that SQL,
+not from this migration's snapshot: a `--custom` migration repeats its
+predecessor's snapshot, which would vouch for a hand-written rebuild that
+changes a type. Without the previous snapshot, or with a column left behind, it is reported.
+
+A rebuild's `DROP TABLE x` deletes every row of `x`, which fires the `ON
+DELETE` of each table referencing it. bun:sqlite's runner turns foreign keys off
+around the migration, so nothing fires there. Cloudflare D1 ignores `PRAGMA
+foreign_keys=OFF`, so a child with `ON DELETE CASCADE` loses its rows and one
+with `SET NULL`/`SET DEFAULT` has them rewritten, the rebuilt table's own
+self-reference included. Unless the runner is known to turn foreign keys off, a
+rebuild of a table that either snapshot or the migration's SQL references with
+one of those actions is reported. The bun:sqlite factory says so at boot;
+`db:migrate` knows it from a factory whose `describe()` names `sqlite` (one it
+cannot describe is judged with foreign keys on); `guren check`, which imports no app
+code, from a `config/database.ts` calling `createSqliteDatabase()` with no
+`createD1Database()` and no wrangler config beside it.
 
 **A statement against a table the same run creates loses nothing.** A fresh
 database (a new clone, a CI test database, `bun test` on a new SQLite file)
@@ -169,7 +203,9 @@ not inherit that. It judges every local migration instead, with the
 created-in-run exemption off: over a set that includes applied migrations, an
 applied `CREATE TABLE posts` would otherwise exempt a new `DROP TABLE posts`.
 That can refuse a historical drop, which is the price of not knowing what is
-pending. `db:migrate` does the same for a config with no `migrationStatus()`. After
+pending. The refusal names why the tracker could not be read and carries that
+error as its `cause`, so an unreachable server or a denied `SELECT` is not
+mistaken for a migration problem. `db:migrate` does the same for a config with no `migrationStatus()`. After
 `resetDatabase()` the drivers skip the tracker read (`reapplyingAfterReset`),
 and the guard skips with it: every table was just dropped, so nothing applied
 in that run can lose data. `db:reset` and `db:fresh` keep their production
@@ -204,17 +240,28 @@ them, whether or not `--changed` was passed. A historical drop that already
 shipped is never reported. An unacknowledged finding is a gating `warn`, so
 `check --ci` and the gate's check stage fail on it, and the Stop hook sends
 the agent back before it ends a turn with one in the tree. Outside a git
-repository, or with no merge base, the rule reports itself as unverified
-(advisory) rather than passing; when a git listing fails, it reports a gating
-finding, since the scope it claims was not read. The rule reads files only: it never imports
+repository the rule reports itself as unverified (advisory) rather than
+passing. The base is `origin/main`, then `main`, then the remote's default
+branch (`origin/HEAD`), then `master`. In an app with migrations, commits with no merge base
+(a shallow clone, which is what `actions/checkout` gives by default, so the
+scaffolded workflow checks out with `fetch-depth: 0`), and a git listing that
+fails, are gating findings, since the committed migrations the rule claims to
+cover were not read. On `main` itself every committed migration counts as
+shipped; the rule then says so (advisory) instead of passing in silence. Paths
+are listed with `git -z`, so a migration folder with a non-ASCII name, which
+git otherwise C-quotes, is not skipped. The rule reads files only: it never imports
 `drizzle.config.ts` or `config/database.ts`, which run app code.
 
 **Cloudflare D1.** D1 migrations are applied by `wrangler d1 migrations apply`,
 which Guren never runs, and `migrationStatus()` throws there because wrangler's
 tracker is authoritative. The `check` rule is the D1 guard: it reads the same
 `db/migrations/<folder>/migration.sql` files `cloudflare:build` flattens for
-wrangler. The D1 docs say to run `bunx guren check` before `wrangler d1
-migrations apply`.
+wrangler. It judges a branch against `main`, and cannot tell which migrations a
+D1 database has applied, so it guards the pull request, not the deploy: the D1
+docs say to run `bunx guren check --ci` in the pull request's CI with full
+history, and that running it on `main` before `wrangler d1 migrations apply`
+judges nothing already merged. Reading wrangler's `d1_migrations` table to judge
+exactly the pending set is left to the Cloudflare deploy work (RFC 0035).
 
 ### 4. The scanner's home
 
@@ -291,6 +338,9 @@ Existing apps:
   `destructiveMigrations: 'refuse'` opts in.
 - `guren check --ci` and `guren gate` fail on an unacknowledged destructive
   migration added on the current branch. Merged migrations are never judged.
+  They also fail in a shallow clone of an app with migrations, so an existing
+  app running the gate in CI adds `fetch-depth: 0` to its `actions/checkout`
+  step, as new apps' workflow does.
 - `guren agent:sync` refreshes the `db-manage` skill and the harness entry.
   `.claude/settings.json` and `.codex/rules/guren.rules` are user-owned, and
   sync never rewrites a policy file, so an existing app adds the `ask` entries

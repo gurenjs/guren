@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { isRecord } from './runtime'
 
-const DATABASE_CONFIG_CANDIDATES = [
+export const DATABASE_CONFIG_CANDIDATES = [
   'config/database.ts',
   'config/database.js',
   'config/database.mjs',

@@ -233,9 +233,14 @@ drizzle-kit は、スキーマの差分から導かれる SQL をそのまま書
 |---|---|
 | `drop-table`、`drop-column`、`drop-schema` | `DROP TABLE`、`ALTER TABLE … DROP COLUMN`、`DROP SCHEMA` / `DROP DATABASE` |
 | `alter-column-type` | PostgreSQL の `ALTER COLUMN … SET DATA TYPE`、MySQL の `MODIFY COLUMN` / `CHANGE COLUMN` |
-| `table-rebuild` | SQLite の `__new_<table>` を作ってコピーし、元を消してリネームする手順。drizzle-kit はたいていのカラム変更をこの形で書きます。default や外部キーを足しただけのように、すべてのカラムを同じ型か広い型でコピーする再作成は報告しません |
+| `table-rebuild` | SQLite の `__new_<table>` を作ってコピーし、元を消してリネームする手順。drizzle-kit はたいていのカラム変更をこの形で書きます。default や外部キーを足しただけのように、`CREATE TABLE __new_<table>` がすべてのカラムを同じ型か広い型でコピーする再作成は報告しません。ただし、外部キーが有効なまま実行される環境(Cloudflare D1)で、ほかのテーブルが `ON DELETE CASCADE`、`SET NULL`、`SET DEFAULT` で参照している場合は報告します。`DROP TABLE` で参照元の行が消えるか書き換わるためです |
 | `rename` | `RENAME TO`、`RENAME COLUMN`、`RENAME TABLE` |
-| `truncate`、`delete-all` | `TRUNCATE` と、`WHERE` のない `DELETE FROM` |
+| `truncate`、`delete-all` | `TRUNCATE`(MySQL の `TRUNCATE PARTITION` を含む)と、`WHERE` のない `DELETE FROM` |
+| `drop-partition` | MySQL の `ALTER TABLE … DROP PARTITION`。パーティションの行も消えます |
+| `drop-cascade` | `DROP TYPE … CASCADE`、`DROP DOMAIN … CASCADE` など `CASCADE` 付きの `DROP` と、PostgreSQL の `DROP OWNED`。依存するカラムもまとめて消えます |
+| `unreadable` | ガードが読めない SQL。閉じていない文字列・コメント・本体と、実行時に組み立てる SQL(連結や `format()` を `EXECUTE` するもの、`PREPARE … FROM @変数`)です |
+
+ガードは、データベースと同じ規則で SQL を読みます。MySQL のバックスラッシュによるエスケープと `#` のコメント、PostgreSQL の `E'…'` とドル記号で囲んだ本体も、その規則どおりに扱います。方言は、起動時はファクトリーから、それ以外は `snapshot.json` から決まり、どちらからもわからなければすべての方言での読み方を合わせて判定します。`CREATE PROCEDURE`、`FUNCTION`、`TRIGGER` の本体と、文字列で書いた関数の本体の中の文も、ほかの文と同じように判定します。
 
 リネームでは行は失われませんが、ひとつ前のデプロイは入れ替わるまで古い名前を読み続けます。型を広げるだけの変更(`varchar` を長くする、`smallint` を `integer` にする)は、drizzle-kit が各マイグレーションの横に書く `snapshot.json` で前後の型が読めれば報告しません。読めなければ報告します。また、未適用のマイグレーションのうち先に実行されるものが作るテーブルに対する文は報告しません。新しいデータベースでは履歴をまとめて適用するので、古い `DROP` があっても止まることはありません。
 

@@ -3,6 +3,7 @@ import { describe, expect, it, setDefaultTimeout } from 'bun:test'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { CLI_BIN_PATH, createTempRoot } from './helpers'
+import { writeCascadeRebuild } from './migration-fixtures'
 
 // Every case spawns the CLI (some twice), past Bun's 5 s default on a loaded runner.
 setDefaultTimeout(30_000)
@@ -219,6 +220,32 @@ export const { migrateDatabase, closeDatabase, migrationStatus } = database
       expect(accepted.exitCode).toBe(0)
       const after = new Database(join(cwd, 'app.db'))
       expect(after.query("SELECT name FROM sqlite_master WHERE name = 'posts'").all()).toEqual([])
+      after.close()
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+  it('applies a rebuild of a table a child references with ON DELETE CASCADE, since bun:sqlite migrates with foreign keys off', async () => {
+    const cwd = await createTempRoot('guren-db-migrate-guard-cascade-')
+    try {
+      await mkdir(join(cwd, 'config'))
+      await writeFile(join(cwd, 'config/database.ts'), `
+import { createSqliteDatabase } from ${JSON.stringify(ORM_SQLITE)}
+const database = createSqliteDatabase({ migrationsFolder: new URL('../db/migrations', import.meta.url), filename: './app.db', destructiveMigrations: 'refuse' })
+export const { migrateDatabase, closeDatabase, migrationStatus, describe } = database
+`)
+      await writeCascadeRebuild(cwd)
+      await rm(join(cwd, 'db/migrations/0002_default'), { recursive: true })
+      expect((await run(cwd, ['db:migrate'])).exitCode).toBe(0)
+      const raw = new Database(join(cwd, 'app.db'))
+      raw.exec("INSERT INTO users (id, age) VALUES (1, '30'); INSERT INTO posts (id, user_id) VALUES (1, 1)")
+      raw.close()
+
+      await writeCascadeRebuild(cwd)
+      const result = await run(cwd, ['db:migrate'])
+      expect(result.exitCode).toBe(0)
+      const after = new Database(join(cwd, 'app.db'))
+      expect(after.query('SELECT count(*) AS c FROM posts').get()).toEqual({ c: 1 })
       after.close()
     } finally {
       await rm(cwd, { recursive: true, force: true })

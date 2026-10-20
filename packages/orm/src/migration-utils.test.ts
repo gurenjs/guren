@@ -423,10 +423,11 @@ describe('readMigrationDrift', () => {
   test('should cost the names, not the boot, when the tracker cannot be read', async () => {
     // The names exist to be logged. A driver that cannot read its tracker must
     // still migrate, so an unreadable one reports nothing rather than throwing.
+    const denied = new Error('permission denied for schema drizzle')
     const drift = await readMigrationDrift(migrationsDir, () => {
-      throw new Error('permission denied for schema drizzle')
+      throw denied
     })
-    expect(drift).toEqual({ pending: [], orphaned: [], readable: false })
+    expect(drift).toEqual({ pending: [], orphaned: [], readable: false, error: denied })
   })
 })
 

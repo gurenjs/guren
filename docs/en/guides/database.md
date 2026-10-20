@@ -241,9 +241,19 @@ applies anything and reports these statements:
 |---|---|
 | `drop-table`, `drop-column`, `drop-schema` | `DROP TABLE`, `ALTER TABLE … DROP COLUMN`, `DROP SCHEMA` / `DROP DATABASE` |
 | `alter-column-type` | PostgreSQL `ALTER COLUMN … SET DATA TYPE`, MySQL `MODIFY COLUMN` / `CHANGE COLUMN` |
-| `table-rebuild` | SQLite's `__new_<table>` copy, drop and rename, which drizzle-kit writes for most column changes. A rebuild that copies every column with the same or a wider type (an added default or foreign key) passes |
+| `table-rebuild` | SQLite's `__new_<table>` copy, drop and rename, which drizzle-kit writes for most column changes. A rebuild whose `CREATE TABLE __new_<table>` copies every column with the same or a wider type (an added default or foreign key) passes, unless another table references it with `ON DELETE CASCADE`, `SET NULL` or `SET DEFAULT` and foreign keys stay on while it runs (Cloudflare D1), where its `DROP TABLE` deletes or rewrites those rows |
 | `rename` | `RENAME TO`, `RENAME COLUMN`, `RENAME TABLE` |
-| `truncate`, `delete-all` | `TRUNCATE`, and `DELETE FROM` with no `WHERE` |
+| `truncate`, `delete-all` | `TRUNCATE` (a MySQL `TRUNCATE PARTITION` too), and `DELETE FROM` with no `WHERE` |
+| `drop-partition` | MySQL `ALTER TABLE … DROP PARTITION`, which drops the partition's rows |
+| `drop-cascade` | `DROP TYPE … CASCADE`, `DROP DOMAIN … CASCADE` and any other `DROP … CASCADE`, which also drop the columns that depend on them, and PostgreSQL `DROP OWNED` |
+| `unreadable` | SQL the guard cannot read: an unterminated string, comment or body, and SQL built at run time (`EXECUTE` of a concatenation or `format()`, `PREPARE … FROM @variable`) |
+
+The guard reads the SQL as the database will: MySQL's backslash escapes and `#`
+comments, PostgreSQL's `E'…'` strings and dollar-quoted bodies. The dialect
+comes from the factory at boot and from `snapshot.json` elsewhere; where neither
+names one, every dialect's reading counts. Statements inside a `CREATE
+PROCEDURE`, `FUNCTION` or `TRIGGER` body, and a function body written as a
+string, are judged like any other.
 
 A rename loses no rows, but the previous deploy keeps reading the old name until
 it is replaced. A type change that only widens (a longer `varchar`, `smallint`

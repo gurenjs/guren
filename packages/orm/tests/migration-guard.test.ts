@@ -7,6 +7,7 @@ import {
   readMigrationSources,
   scanMigrationSql,
   type DestructiveKind,
+  type MigrationDialect,
   type MigrationSource,
 } from '../src/migration-guard'
 
@@ -329,5 +330,158 @@ describe('review regressions (PR #1206)', () => {
     expect(kinds('/*!50000 DROP TABLE posts */;')).toEqual(['drop-table'])
     expect(kinds('-- DROP TABLE posts;')).toEqual([])
     expect(kinds('/* DROP TABLE posts */')).toEqual([])
+  })
+})
+
+describe('post-merge review of #1206: fail closed', () => {
+  const types = (entries: Array<[schema: string, table: string, column: string, type: string]>) =>
+    new Map(entries.map(([schema, table, column, type]) => [[schema, table, column].join('\u0000'), type]))
+  const dialectKinds = (sql: string, dialect?: MigrationDialect) => scanMigrationSql(sql, { dialect }).statements.map((statement) => statement.kind)
+
+  test('should read a MySQL backslash-escaped quote, so a string cannot hide the statement after it', () => {
+    const sql = "INSERT INTO notes VALUES ('it\\''); DROP TABLE users; -- ');"
+    expect(dialectKinds(sql, 'mysql')).toEqual(['drop-table'])
+    expect(dialectKinds(sql)).toEqual(['drop-table'])
+    expect(dialectKinds(sql, 'sqlite')).toEqual([])
+  })
+
+  test("should read a PostgreSQL E'' string's backslash escapes", () => {
+    const sql = "INSERT INTO notes VALUES (E'it\\''); DROP TABLE users; -- ');"
+    expect(dialectKinds(sql, 'postgres')).toEqual(['drop-table'])
+    expect(dialectKinds(sql)).toEqual(['drop-table'])
+  })
+
+  test('should read a MySQL # line comment, so an apostrophe in it opens no string', () => {
+    const sql = "# don't\nDROP TABLE users;\n-- '"
+    expect(dialectKinds(sql, 'mysql')).toEqual(['drop-table'])
+    expect(dialectKinds(sql)).toEqual(['drop-table'])
+  })
+
+  test('should scan the body of a CREATE PROCEDURE, FUNCTION or TRIGGER', () => {
+    expect(kinds('CREATE PROCEDURE purge() BEGIN DROP TABLE users; END;')).toEqual(['drop-table'])
+    expect(kinds('CREATE TRIGGER t AFTER INSERT ON a FOR EACH ROW DROP TABLE users;')).toEqual(['drop-table'])
+    expect(kinds("CREATE FUNCTION purge() RETURNS void AS 'DROP TABLE users' LANGUAGE sql;")).toEqual(['drop-table'])
+    expect(kinds('CREATE OR REPLACE FUNCTION purge() RETURNS void AS $$ TRUNCATE users $$ LANGUAGE sql;')).toEqual(['truncate'])
+  })
+
+  test('should report SQL built at run time as unreadable', () => {
+    expect(kinds("DO $$ BEGIN EXECUTE 'DROP TABLE ' || 'users'; END $$;")).toContain('unreadable')
+    expect(kinds("DO $$ BEGIN EXECUTE format('DROP TABLE %I', 'users'); END $$;")).toContain('unreadable')
+    expect(kinds("DO $$ BEGIN EXECUTE 'DROP TABLE users'; END $$;")).toEqual(['drop-table'])
+    expect(kinds('PREPARE s FROM @sql;')).toEqual(['unreadable'])
+  })
+
+  test('should report a dropped partition and a DROP … CASCADE', () => {
+    expect(kinds('ALTER TABLE logs DROP PARTITION p2024;')).toEqual(['drop-partition'])
+    expect(kinds('ALTER TABLE logs TRUNCATE PARTITION p2024;')).toEqual(['truncate'])
+    expect(kinds('DROP TYPE "mood" CASCADE;')).toEqual(['drop-cascade'])
+    expect(kinds('DROP DOMAIN email CASCADE;')).toEqual(['drop-cascade'])
+    expect(kinds('DROP OWNED BY app;')).toEqual(['drop-cascade'])
+    expect(kinds('DROP TYPE "mood";')).toEqual([])
+    expect(kinds('DROP INDEX "users_email_idx";')).toEqual([])
+  })
+
+  test("should read MySQL's bare DECIMAL as DECIMAL(10,0), so (12,2) to DECIMAL is narrowing there", () => {
+    expect(isWideningTypeChange('decimal(12,2)', 'decimal', 'mysql')).toBe(false)
+    expect(isWideningTypeChange('decimal(12,2)', 'decimal')).toBe(false)
+    expect(isWideningTypeChange('decimal(8,0)', 'decimal', 'mysql')).toBe(true)
+    expect(isWideningTypeChange('numeric(12,2)', 'numeric', 'postgres')).toBe(true)
+  })
+
+  const rebuild = (copyTypes: string, extra = '') => [
+    `CREATE TABLE \`__new_users\` (${copyTypes});`,
+    'INSERT INTO `__new_users`(`id`, `age`) SELECT `id`, `age` FROM `users`;',
+    'DROP TABLE `users`;',
+    'ALTER TABLE `__new_users` RENAME TO `users`;',
+    extra,
+  ].join('\n')
+  const sqliteSource = (sql: string, columnTypes: MigrationSource['columnTypes'], foreignKeys?: MigrationSource['foreignKeys']): MigrationSource => ({
+    name: 'm', file: 'm.sql', dialect: 'sqlite', scan: scanMigrationSql(sql, { dialect: 'sqlite' }), columnTypes, ...(foreignKeys ? { foreignKeys } : {}),
+  })
+
+  test("should judge a rebuild by the copy's SQL types, so a --custom migration's repeated snapshot vouches for nothing", () => {
+    const same = types([['', 'users', 'id', 'integer'], ['', 'users', 'age', 'text']])
+    const narrowed = sqliteSource(rebuild('`id` integer PRIMARY KEY, `age` integer'), { before: same, after: same })
+    expect(judgeMigrations([narrowed]).unacknowledged).toMatchObject([{ kind: 'table-rebuild', table: 'users' }])
+    const kept = sqliteSource(rebuild('`id` integer PRIMARY KEY, `age` text DEFAULT \'0\''), { before: same, after: same })
+    expect(judgeMigrations([kept]).unacknowledged).toEqual([])
+  })
+
+  test('should report a rebuild of a table another table references with ON DELETE CASCADE where foreign keys stay on', () => {
+    const columns = types([['', 'users', 'id', 'integer'], ['', 'users', 'age', 'text']])
+    const children = [{ tableTo: 'users', onDelete: 'CASCADE' }]
+    const source = sqliteSource(rebuild('`id` integer PRIMARY KEY, `age` text'), { before: columns, after: columns }, { before: children, after: children })
+    expect(judgeMigrations([source]).unacknowledged).toMatchObject([{ kind: 'table-rebuild', table: 'users' }])
+    expect(judgeMigrations([source], { foreignKeysEnforced: false }).unacknowledged).toEqual([])
+    const restricted = sqliteSource(rebuild('`id` integer PRIMARY KEY, `age` text'), { before: columns, after: columns }, {
+      before: [{ tableTo: 'users', onDelete: 'NO ACTION' }],
+    })
+    expect(judgeMigrations([restricted]).unacknowledged).toEqual([])
+  })
+
+  test('should report a rebuild whose SQL declares a cascading reference to the rebuilt table, its own copy included', () => {
+    const columns = types([['', 'users', 'id', 'integer'], ['', 'users', 'age', 'text']])
+    const selfReferencing = sqliteSource(
+      rebuild('`id` integer PRIMARY KEY, `age` text, `parent_id` integer REFERENCES `users`(`id`) ON DELETE cascade'),
+      { before: columns, after: columns },
+    )
+    expect(judgeMigrations([selfReferencing]).unacknowledged).toMatchObject([{ kind: 'table-rebuild' }])
+  })
+
+  test('should read the dialect and the foreign keys from the snapshots', () => {
+    const { path, names } = folder('sqlite-rebuild')
+    const [source] = readMigrationSources(path, [names[2]!])
+    expect(source!.dialect).toBe('sqlite')
+    expect(source!.foreignKeys?.after).toEqual([{ tableTo: 'users', onDelete: 'NO ACTION' }])
+  })
+})
+
+describe('post-merge review of #1206: code-review round', () => {
+  test('should end a PostgreSQL block comment where PostgreSQL does, since it nests', () => {
+    const sql = "/* /* */ ' */ DROP TABLE users; -- '"
+    expect(scanMigrationSql(sql, { dialect: 'postgres' }).statements.map((statement) => statement.kind)).toEqual(['drop-table'])
+    expect(kinds(sql)).toEqual(['drop-table'])
+  })
+
+  test('should read a string as a server with the other escape setting would', () => {
+    const sql = "SELECT 'a\\'; DROP TABLE users; -- ';"
+    expect(scanMigrationSql(sql, { dialect: 'mysql' }).statements.map((statement) => statement.kind)).toContain('drop-table')
+    expect(scanMigrationSql(sql, { dialect: 'postgres' }).statements.map((statement) => statement.kind)).toContain('drop-table')
+  })
+
+  test('should run a statement prepared from a literal by name without calling it run-time SQL', () => {
+    expect(kinds("PREPARE s FROM 'UPDATE t SET x = 1 WHERE id = 2';\nEXECUTE s;")).toEqual([])
+    expect(kinds('PREPARE p (int) AS UPDATE t SET x = $1 WHERE id = 2;\nEXECUTE p(1);')).toEqual([])
+    expect(kinds('EXECUTE s;')).toEqual(['unreadable'])
+  })
+
+  test("should not read a trigger's TRUNCATE event as a statement", () => {
+    expect(kinds('CREATE TRIGGER audit BEFORE TRUNCATE ON users FOR EACH STATEMENT EXECUTE FUNCTION log();')).toEqual([])
+    expect(kinds('CREATE TRIGGER audit AFTER INSERT OR TRUNCATE ON users FOR EACH STATEMENT EXECUTE FUNCTION log();')).toEqual([])
+  })
+
+  test('should keep every finding a reading makes on one line', () => {
+    expect(kinds('ALTER TABLE logs DROP PARTITION p1;  ALTER TABLE logs DROP PARTITION p2;')).toEqual(['drop-partition', 'drop-partition'])
+  })
+})
+
+describe('post-merge review of #1206: final review round', () => {
+  test('should read a column named execute as a name, not run-time SQL', () => {
+    expect(kinds('CREATE TABLE jobs ("id" integer, execute boolean);')).toEqual([])
+    expect(kinds('ALTER TABLE jobs ADD COLUMN execute boolean;')).toEqual([])
+    expect(kinds("DO $$ BEGIN EXECUTE 'DROP TABLE users'; END $$;")).toEqual(['drop-table'])
+  })
+
+  test("should read only a function's body string as SQL, not a default or a comment", () => {
+    expect(kinds("CREATE FUNCTION f(a text DEFAULT 'it''s') RETURNS int AS $$ SELECT 1 $$ LANGUAGE sql;")).toEqual([])
+    expect(kinds("CREATE PROCEDURE p() COMMENT 'truncate old logs' BEGIN SELECT 1; END;")).toEqual([])
+  })
+
+  test('should name every partition a DROP PARTITION drops', () => {
+    expect(scanMigrationSql('ALTER TABLE t DROP PARTITION p0, p1;').statements).toMatchObject([{ kind: 'drop-partition', message: 'drops partition p0, p1 of t with its rows' }])
+  })
+
+  test('should not apply backslash escapes to a PostgreSQL identifier', () => {
+    expect(scanMigrationSql('CREATE TABLE "a\\" (id int); DROP TABLE x;', { dialect: 'postgres' }).statements.map((statement) => statement.kind)).toEqual(['drop-table'])
   })
 })

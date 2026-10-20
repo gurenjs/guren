@@ -17,6 +17,8 @@ export type DestructiveKind =
   | 'truncate'
   | 'delete-all'
   | 'drop-schema'
+  | 'drop-partition'
+  | 'drop-cascade'
   | 'unreadable'
 
 export interface DestructiveStatement {
@@ -32,6 +34,8 @@ export interface DestructiveStatement {
   copiedColumns?: string[]
   /** A type change's target type as the SQL spells it, when it converts by a plain cast to that type and nothing else. */
   targetType?: string
+  /** A rebuild's copy, each column's type as its `CREATE TABLE __new_x` spells it: what runs, whatever the snapshot says. */
+  copiedColumnTypes?: Record<string, string>
 }
 
 export interface MigrationAcknowledgement {
@@ -45,6 +49,16 @@ export interface MigrationScan {
   acknowledged: MigrationAcknowledgement | null
   /** Tables a `CREATE TABLE` creates, with the line of each, in file order. */
   creates: Array<{ table: string; line: number }>
+  /** Tables a `REFERENCES` in the SQL names with `ON DELETE CASCADE`, `SET NULL` or `SET DEFAULT`. */
+  cascadeTargets: string[]
+}
+
+/** How a migration's SQL is lexed: strings, comments and quoting differ by dialect. */
+export type MigrationDialect = 'postgres' | 'mysql' | 'sqlite'
+
+export interface ScanOptions {
+  /** Unknown: the SQL is read as each dialect would read it, and every reading's findings count. */
+  dialect?: MigrationDialect
 }
 
 export const ALLOW_DESTRUCTIVE_MARKER = 'guren:allow-destructive'
@@ -64,13 +78,40 @@ interface Token {
 interface Lexed {
   tokens: Token[]
   comments: Array<{ text: string; line: number }>
-  /** Comment text another dialect executes: a MySQL versioned comment (slash-star-bang), and `--x`, which MySQL reads as SQL. */
+  /** Comment text MySQL executes: a versioned comment (slash-star-bang), and `--x`, which MySQL reads as SQL. */
   executable: Array<{ text: string; line: number }>
   /** Where an unterminated string, identifier, comment or body opened. */
   unterminatedAt?: number
 }
 
-function lex(sql: string, firstLine = 1): Lexed {
+interface LexRules {
+  /** MySQL's default: a backslash escapes the next character in `'…'` and `"…"`. */
+  backslashEscapes: boolean
+  /** PostgreSQL's `E'…'`, the one string there a backslash escapes in. */
+  escapeStrings: boolean
+  /** MySQL's `#` line comment, and the comment text it executes. */
+  mysqlComments: boolean
+  /** PostgreSQL's `$tag$…$tag$`; elsewhere `$` is an identifier character or a parameter. */
+  dollarQuotes: boolean
+  /** PostgreSQL nests block comments; MySQL and SQLite end one at the first close. */
+  nestedComments: boolean
+}
+
+const POSTGRES: LexRules = { backslashEscapes: false, escapeStrings: true, mysqlComments: false, dollarQuotes: true, nestedComments: true }
+const MYSQL: LexRules = { backslashEscapes: true, escapeStrings: false, mysqlComments: true, dollarQuotes: false, nestedComments: false }
+
+/**
+ * Each way a dialect's server may read the SQL, all of which count: MySQL under
+ * `NO_BACKSLASH_ESCAPES`, and PostgreSQL with `standard_conforming_strings` off,
+ * close a string where the default does not.
+ */
+const LEX_READINGS: Record<MigrationDialect, LexRules[]> = {
+  postgres: [POSTGRES, { ...POSTGRES, backslashEscapes: true }],
+  mysql: [MYSQL, { ...MYSQL, backslashEscapes: false }],
+  sqlite: [{ backslashEscapes: false, escapeStrings: false, mysqlComments: false, dollarQuotes: false, nestedComments: false }],
+}
+
+function lex(sql: string, rules: LexRules, firstLine = 1): Lexed {
   const tokens: Token[] = []
   const comments: Lexed['comments'] = []
   const executable: Lexed['executable'] = []
@@ -84,6 +125,46 @@ function lex(sql: string, firstLine = 1): Lexed {
     return text
   }
 
+  /** The index of the quote closing the one at `open`, or -1. A doubled quote is an escaped one in every dialect. */
+  const closingQuote = (open: number, quote: string, backslash: boolean): number => {
+    if (!backslash) {
+      for (let end = sql.indexOf(quote, open + 1); end !== -1; end = sql.indexOf(quote, end + 2)) {
+        if (sql[end + 1] !== quote) return end
+      }
+      return -1
+    }
+    for (let end = open + 1; end < sql.length; end += 1) {
+      if (backslash && sql[end] === '\\') {
+        end += 1
+        continue
+      }
+      if (sql[end] !== quote) continue
+      if (sql[end + 1] === quote) {
+        end += 1
+        continue
+      }
+      return end
+    }
+    return -1
+  }
+
+  /** The index of the close of the block comment opened at `open`, or -1. */
+  const closingComment = (open: number): number => {
+    if (!rules.nestedComments) return sql.indexOf('*/', open + 2)
+    let depth = 0
+    for (let at = open; at < sql.length - 1; at += 1) {
+      if (sql[at] === '/' && sql[at + 1] === '*') {
+        depth += 1
+        at += 1
+      } else if (sql[at] === '*' && sql[at + 1] === '/') {
+        depth -= 1
+        if (depth === 0) return at
+        at += 1
+      }
+    }
+    return -1
+  }
+
   while (i < sql.length) {
     const char = sql[i]!
     const startLine = line
@@ -93,41 +174,38 @@ function lex(sql: string, firstLine = 1): Lexed {
       continue
     }
 
-    if (char === '-' && sql[i + 1] === '-') {
+    if ((char === '-' && sql[i + 1] === '-') || (char === '#' && rules.mysqlComments)) {
       const end = sql.indexOf('\n', i)
       const text = advanceTo(end === -1 ? sql.length : end)
-      comments.push({ text: text.slice(2), line: startLine })
+      const body = text.slice(char === '#' ? 1 : 2)
+      comments.push({ text: body, line: startLine })
       // MySQL starts a comment only at `-- ` followed by whitespace; `--1; DROP …` is SQL there.
-      if (!/^[\s]/.test(text.slice(2)) && text.length > 2) executable.push({ text: text.slice(2), line: startLine })
+      if (rules.mysqlComments && char === '-' && body !== '' && !/^\s/.test(body)) executable.push({ text: body, line: startLine })
       continue
     }
 
     if (char === '/' && sql[i + 1] === '*') {
-      const end = sql.indexOf('*/', i + 2)
+      const end = closingComment(i)
       if (end === -1) return { tokens, comments, executable, unterminatedAt: startLine }
       const text = advanceTo(end + 2)
       const inner = text.slice(2, -2)
       comments.push({ text: inner, line: startLine })
-      const versioned = /^M?!\d*/.exec(inner)?.[0]
+      const versioned = rules.mysqlComments ? /^M?!\d*/.exec(inner)?.[0] : undefined
       if (versioned) executable.push({ text: inner.slice(versioned.length), line: startLine })
       continue
     }
 
-    if (char === "'" || char === '"' || char === '`') {
-      let end = i + 1
-      for (;;) {
-        end = sql.indexOf(char, end)
-        if (end === -1) return { tokens, comments, executable, unterminatedAt: startLine }
-        // A doubled quote is an escaped one in all three dialects.
-        if (sql[end + 1] === char) {
-          end += 2
-          continue
-        }
-        break
-      }
-      const text = advanceTo(end + 1)
-      const inner = text.slice(1, -1).replaceAll(char + char, char)
-      tokens.push({ kind: char === "'" ? 'string' : 'ident', value: inner, line: startLine })
+    const escapeString = rules.escapeStrings && (char === 'E' || char === 'e') && sql[i + 1] === "'"
+    if (char === "'" || char === '"' || char === '`' || escapeString) {
+      const open = escapeString ? i + 1 : i
+      const quote = sql[open]!
+      // PostgreSQL never escapes in an identifier; MySQL's `"…"` is a string, which it does.
+      const backslash = escapeString || (rules.backslashEscapes && (quote === "'" || (quote === '"' && rules.mysqlComments)))
+      const end = closingQuote(open, quote, backslash)
+      if (end === -1) return { tokens, comments, executable, unterminatedAt: startLine }
+      const inner = sql.slice(open + 1, end).replaceAll(quote + quote, quote)
+      advanceTo(end + 1)
+      tokens.push({ kind: quote === "'" ? 'string' : 'ident', value: inner, line: startLine })
       continue
     }
 
@@ -140,16 +218,14 @@ function lex(sql: string, firstLine = 1): Lexed {
       continue
     }
 
-    if (char === '$') {
+    if (char === '$' && rules.dollarQuotes) {
       const tag = /^\$[A-Za-z_]*\$/.exec(sql.slice(i))?.[0]
       if (tag) {
         const end = sql.indexOf(tag, i + tag.length)
         if (end === -1) return { tokens, comments, executable, unterminatedAt: startLine }
-        const bodyStart = i + tag.length
-        const bodyLine = startLine
-        const inner = sql.slice(bodyStart, end)
+        const inner = sql.slice(i + tag.length, end)
         advanceTo(end + tag.length)
-        tokens.push({ kind: 'body', value: inner, line: bodyLine })
+        tokens.push({ kind: 'body', value: inner, line: startLine })
         continue
       }
     }
@@ -230,7 +306,7 @@ function skipWords(tokens: Token[], start: number, ...words: string[]): number {
   return index
 }
 
-const NON_COLUMN_DROPS = ['CONSTRAINT', 'INDEX', 'KEY', 'PRIMARY', 'FOREIGN', 'CHECK', 'PARTITION', 'DEFAULT']
+const NON_COLUMN_DROPS = ['CONSTRAINT', 'INDEX', 'KEY', 'PRIMARY', 'FOREIGN', 'CHECK', 'DEFAULT']
 
 interface RawFinding extends DestructiveStatement {
   /** For a rebuild's closing rename, which the rebuild finding replaces. */
@@ -253,7 +329,7 @@ function spellType(tokens: Token[]): string {
 
 const MODIFY_TYPE_END = [
   'NOT', 'NULL', 'DEFAULT', 'COMMENT', 'AFTER', 'FIRST', 'COLLATE', 'CHARACTER', 'CHARSET', 'AUTO_INCREMENT',
-  'ON', 'PRIMARY', 'UNIQUE', 'KEY', 'REFERENCES', 'CHECK', 'GENERATED', 'AS', 'VISIBLE', 'INVISIBLE', 'SRID',
+  'ON', 'PRIMARY', 'UNIQUE', 'KEY', 'REFERENCES', 'CHECK', 'GENERATED', 'AS', 'VISIBLE', 'INVISIBLE', 'SRID', 'CONSTRAINT',
 ]
 
 /**
@@ -292,7 +368,16 @@ function scanAlterTable(statement: Token[], line: number): RawFinding[] {
   }
   const findings: RawFinding[] = []
 
-  for (const action of splitTopLevel(statement.slice(table.next))) {
+  const actions = statement.slice(table.next)
+  // MySQL: a partition's rows go with it. A partition operation is the statement's only action; the commas list partitions.
+  if (isWord(actions[0], 'DROP', 'TRUNCATE') && isWord(actions[1], 'PARTITION')) {
+    const partitions = splitTopLevel(actions.slice(2)).map((part) => readName(part, 0)?.name ?? '?').join(', ')
+    return [isWord(actions[0], 'DROP')
+      ? { kind: 'drop-partition', line, table: table.name, message: `drops partition ${partitions} of ${table.name} with its rows` }
+      : { kind: 'truncate', line, table: table.name, message: `empties partition ${partitions} of ${table.name}` }]
+  }
+
+  for (const action of splitTopLevel(actions)) {
     const [head] = action
     if (!head) continue
 
@@ -408,46 +493,89 @@ function scanDeletes(tokens: Token[]): RawFinding[] {
 
 const STATEMENT_KEYWORDS = ['DROP', 'ALTER', 'RENAME', 'TRUNCATE', 'CREATE']
 
-function scanStatement(tokens: Token[]): { findings: RawFinding[]; creates?: string } {
-  const deletes = scanDeletes(tokens)
-  // From the first DDL keyword, so a `BEGIN` or `IF … THEN` in front hides nothing.
-  const start = tokens.findIndex((token) => isWord(token, ...STATEMENT_KEYWORDS))
-  if (start === -1) return { findings: deletes }
+/** What `DROP` names before the object, for the message; `DROP TABLE`/`SCHEMA`/`DATABASE` are read apart. */
+const DROPPED_OBJECT_WORDS = ['MATERIALIZED', 'FOREIGN', 'TABLE', 'VIEW', 'TYPE', 'DOMAIN', 'EXTENSION', 'SEQUENCE', 'FUNCTION', 'PROCEDURE', 'COLUMN']
+
+/** A column's type in `CREATE TABLE x (…)` as the SQL spells it, for each column it can read. */
+function readColumnTypes(statement: Token[], open: number): Record<string, string> | undefined {
+  if (statement[open]?.value !== '(') return undefined
+  const depth = depths(statement)
+  const close = statement.findIndex((token, at) => at > open && token.value === ')' && depth[at] === depth[open])
+  if (close === -1) return undefined
+  const types: Record<string, string> = {}
+  for (const part of splitTopLevel(statement.slice(open + 1, close))) {
+    if (part.length === 0 || isWord(part[0], 'CONSTRAINT', 'PRIMARY', 'FOREIGN', 'UNIQUE', 'CHECK')) continue
+    const column = readName(part, 0)
+    if (!column) continue
+    const rest = part.slice(column.next)
+    const end = rest.findIndex((token) => isWord(token, ...MODIFY_TYPE_END))
+    types[column.name] = spellType(end === -1 ? rest : rest.slice(0, end))
+  }
+  return types
+}
+
+interface StatementScan {
+  findings: RawFinding[]
+  creates?: string
+  /** A `CREATE TABLE`'s column types, read for the rebuild copy. */
+  columnTypes?: Record<string, string>
+}
+
+/** The statement read from its first DDL keyword, so a `BEGIN` or `IF … THEN` in front hides nothing. */
+function scanDdl(tokens: Token[]): StatementScan {
+  // `BEFORE TRUNCATE ON t` / `INSERT OR TRUNCATE ON t` name a trigger's event, not a statement.
+  const start = tokens.findIndex((token, at) => isWord(token, ...STATEMENT_KEYWORDS) && !(isWord(token, 'TRUNCATE') && isWord(tokens[at + 1], 'ON', 'OR')))
+  if (start === -1) return { findings: [] }
   const statement = tokens.slice(start)
   const [first, second] = statement
   const line = first!.line
-  const withDeletes = (findings: RawFinding[], creates?: string) => ({ findings: [...findings, ...deletes], creates })
 
   if (isWord(first, 'DROP') && isWord(second, 'TABLE')) {
-    const findings: RawFinding[] = splitTopLevel(statement.slice(skipWords(statement, 2, 'IF', 'EXISTS'))).map((part) => {
-      const table = readName(part, 0)?.name
-      return { kind: 'drop-table', line, table, message: `drops table ${table ?? '?'}` }
-    })
-    return withDeletes(findings)
+    return {
+      findings: splitTopLevel(statement.slice(skipWords(statement, 2, 'IF', 'EXISTS'))).map((part) => {
+        const table = readName(part, 0)?.name
+        return { kind: 'drop-table', line, table, message: `drops table ${table ?? '?'}` }
+      }),
+    }
   }
 
   if (isWord(first, 'DROP') && isWord(second, 'SCHEMA', 'DATABASE')) {
     const name = readName(statement, skipWords(statement, 2, 'IF', 'EXISTS'))?.name
-    return withDeletes([{ kind: 'drop-schema', line, message: `drops ${second!.value.toLowerCase()} ${name ?? '?'}` }])
+    return { findings: [{ kind: 'drop-schema', line, message: `drops ${second!.value.toLowerCase()} ${name ?? '?'}` }] }
   }
 
-  if (isWord(first, 'ALTER') && isWord(second, 'TABLE')) {
-    return withDeletes(scanAlterTable(statement, line))
+  // PostgreSQL's DROP OWNED drops every object a role owns, its tables included.
+  if (isWord(first, 'DROP') && isWord(second, 'OWNED')) {
+    return { findings: [{ kind: 'drop-cascade', line, message: 'drops every object a role owns (DROP OWNED), tables included' }] }
   }
+
+  // A type, domain or extension dropped with CASCADE takes every column of that type with it.
+  if (isWord(first, 'DROP') && statement.some((token) => isWord(token, 'CASCADE'))) {
+    const nameAt = skipWords(statement, 1, ...DROPPED_OBJECT_WORDS)
+    const what = spellType(statement.slice(1, nameAt))
+    const name = readName(statement, skipWords(statement, nameAt, 'IF', 'EXISTS'))?.name
+    return { findings: [{ kind: 'drop-cascade', line, message: `drops ${what || 'an object'} ${name ?? '?'} with CASCADE, which also drops every column and object depending on it` }] }
+  }
+
+  if (isWord(first, 'ALTER') && isWord(second, 'TABLE')) return { findings: scanAlterTable(statement, line) }
 
   if (isWord(first, 'RENAME') && isWord(second, 'TABLE')) {
-    return withDeletes(splitTopLevel(statement.slice(2)).map((part): RawFinding => {
-      const from = readName(part, 0)
-      const to = from && isWord(part[from.next], 'TO') ? readName(part, from.next + 1)?.name : undefined
-      return { kind: 'rename', line, table: from?.name, message: `renames table ${from?.name ?? '?'} to ${to ?? '?'}`, renameFrom: from?.name, renameTo: to }
-    }))
+    return {
+      findings: splitTopLevel(statement.slice(2)).map((part): RawFinding => {
+        const from = readName(part, 0)
+        const to = from && isWord(part[from.next], 'TO') ? readName(part, from.next + 1)?.name : undefined
+        return { kind: 'rename', line, table: from?.name, message: `renames table ${from?.name ?? '?'} to ${to ?? '?'}`, renameFrom: from?.name, renameTo: to }
+      }),
+    }
   }
 
   if (isWord(first, 'TRUNCATE')) {
-    return withDeletes(splitTopLevel(statement.slice(skipWords(statement, 1, 'TABLE'))).map((part): RawFinding => {
-      const table = readName(part, skipWords(part, 0, 'ONLY'))?.name
-      return { kind: 'truncate', line, table, message: `empties table ${table ?? '?'}` }
-    }))
+    return {
+      findings: splitTopLevel(statement.slice(skipWords(statement, 1, 'TABLE'))).map((part): RawFinding => {
+        const table = readName(part, skipWords(part, 0, 'ONLY'))?.name
+        return { kind: 'truncate', line, table, message: `empties table ${table ?? '?'}` }
+      }),
+    }
   }
 
   if (isWord(first, 'CREATE')) {
@@ -455,12 +583,85 @@ function scanStatement(tokens: Token[]): { findings: RawFinding[]; creates?: str
     if (isWord(statement[tableAt], 'TABLE')) {
       // `IF NOT EXISTS` counts: drizzle-kit 0.x wrote every create that way, and it can only no-op over
       // a table the tracker never recorded creating (one made by push or by hand).
-      const table = readName(statement, skipWords(statement, tableAt + 1, 'IF', 'NOT', 'EXISTS'))?.name
-      return withDeletes([], table)
+      const table = readName(statement, skipWords(statement, tableAt + 1, 'IF', 'NOT', 'EXISTS'))
+      return { findings: [], creates: table?.name, columnTypes: table && readColumnTypes(statement, table.next) }
     }
+    // A procedure, function, trigger or event carries statements after its header; read them too.
+    return { findings: scanDdl(statement.slice(1)).findings }
   }
 
-  return withDeletes([])
+  return { findings: [] }
+}
+
+function scanStatement(tokens: Token[]): StatementScan {
+  const ddl = scanDdl(tokens)
+  return { ...ddl, findings: [...ddl.findings, ...scanDeletes(tokens)] }
+}
+
+/** The string literals that are SQL the statement runs: a PostgreSQL function's `AS '…'` or a `DO '…'` body, not a default or a comment. */
+function stringBodies(tokens: Token[]): Token[] {
+  const isFunction = isWord(tokens[0], 'CREATE') && isWord(tokens[skipWords(tokens, 1, 'OR', 'REPLACE')], 'FUNCTION', 'PROCEDURE')
+  if (!isFunction && !isWord(tokens[0], 'DO')) return []
+  return tokens.filter((token, at) => token.kind === 'string' && isWord(tokens[at - 1], isFunction ? 'AS' : 'DO'))
+}
+
+/**
+ * SQL a statement builds or runs from a value: `EXECUTE 'literal'` and
+ * `PREPARE s FROM 'literal'` are read as SQL, anything else (a concatenation,
+ * `format()`, a variable) cannot be, and is a finding.
+ */
+const BLOCK_STARTS = ['BEGIN', 'THEN', 'ELSE', 'LOOP', 'DO', 'DECLARE']
+
+function scanDynamicSql(tokens: Token[], prepared: Set<string>): { findings: RawFinding[]; sql: Token[] } {
+  const findings: RawFinding[] = []
+  const sql: Token[] = []
+  const ends = (token: Token | undefined) => token === undefined || token.value === ';' || isWord(token, 'USING', 'INTO')
+  tokens.forEach((token, at) => {
+    let source: number | undefined
+    // Only where a statement starts (a body's statements may follow a block keyword), so a column named `execute` is a name.
+    const startsStatement = at === 0 || isWord(tokens[at - 1], ...BLOCK_STARTS)
+    if (!startsStatement) return
+    if (isWord(token, 'EXECUTE') && !isWord(tokens[at + 1], 'FUNCTION', 'PROCEDURE')) {
+      const name = readName(tokens, at + 1)
+      // A statement this file prepared from SQL the scan read.
+      if (name && tokens[at + 1]?.kind !== 'string' && prepared.has(name.name)) return
+      source = at + 1
+    } else if (isWord(token, 'PREPARE')) {
+      const name = readName(tokens, at + 1)
+      // PostgreSQL's `PREPARE p [(types)] AS <statement>` is read in place.
+      const typesEnd = name && tokens[name.next]?.value === '(' ? tokens.findIndex((each, index) => index > name.next && each.value === ')') : -1
+      if (name && isWord(tokens[typesEnd === -1 ? name.next : typesEnd + 1], 'AS')) prepared.add(name.name)
+      if (name && isWord(tokens[name.next], 'FROM')) {
+        source = name.next + 1
+        if (tokens[source]?.kind === 'string' && ends(tokens[source + 1])) prepared.add(name.name)
+      }
+    }
+    if (source === undefined) return
+    const literal = tokens[source]
+    if (literal?.kind === 'string' && ends(tokens[source + 1])) {
+      sql.push(literal)
+      return
+    }
+    findings.push({ kind: 'unreadable', line: token.line, message: 'runs SQL built at run time, which cannot be read before it runs' })
+  })
+  return { findings, sql }
+}
+
+/** Tables a `REFERENCES` names with an `ON DELETE` that deletes or rewrites the referencing rows. */
+function cascadeTargets(tokens: Token[]): string[] {
+  const targets: string[] = []
+  tokens.forEach((token, at) => {
+    if (!isWord(token, 'REFERENCES')) return
+    const target = readName(tokens, at + 1)
+    if (!target) return
+    for (let next = target.next; next < tokens.length && !isWord(tokens[next], 'REFERENCES'); next += 1) {
+      if (isWord(tokens[next], 'ON') && isWord(tokens[next + 1], 'DELETE') && isWord(tokens[next + 2], 'CASCADE', 'SET')) {
+        targets.push(target.name)
+        return
+      }
+    }
+  })
+  return targets
 }
 
 const REBUILD_PREFIX = '__new_'
@@ -509,27 +710,39 @@ interface IndexedFinding extends RawFinding {
   statement?: number
 }
 
-function scanTokens(lexed: Lexed): Omit<MigrationScan, 'acknowledged'> {
+function scanTokens(lexed: Lexed, rules: LexRules): Omit<MigrationScan, 'acknowledged'> {
   const raw: IndexedFinding[] = []
   const creates: MigrationScan['creates'] = []
+  const cascades: string[] = []
   const copies: Array<{ into: string; from: string; columns: string[]; statement: number }> = []
+  const copyTypes = new Map<string, Record<string, string>>()
   const statements = splitStatements(lexed.tokens)
+  const prepared = new Set<string>()
+  const scanNested = (text: string, line: number) => {
+    const nested = scanTokens(lex(text, rules, line), rules)
+    raw.push(...nested.statements)
+    cascades.push(...nested.cascadeTargets)
+  }
 
   statements.forEach((statement, index) => {
     const result = scanStatement(statement)
     raw.push(...result.findings.map((finding) => ({ ...finding, statement: index })))
     const copy = readCopy(statement)
     if (copy) copies.push({ ...copy, statement: index })
-    if (result.creates) creates.push({ table: result.creates, line: statement[0]!.line })
-    // A dollar-quoted body (a `DO` block, a function) can run the same DDL.
+    if (result.creates) {
+      creates.push({ table: result.creates, line: statement[0]!.line })
+      if (result.columnTypes && unqualified(result.creates).startsWith(REBUILD_PREFIX)) copyTypes.set(result.creates, result.columnTypes)
+    }
+    cascades.push(...cascadeTargets(statement))
+    const dynamic = scanDynamicSql(statement, prepared)
+    raw.push(...dynamic.findings)
+    const bodies = stringBodies(statement)
+    // A dollar-quoted body (a `DO` block, a function), a function body written as a string, and an `EXECUTE`d literal can run the same DDL.
     for (const token of statement) {
-      if (token.kind !== 'body') continue
-      raw.push(...scanTokens(lex(token.value, token.line)).statements)
+      if (token.kind === 'body' || bodies.includes(token) || dynamic.sql.includes(token)) scanNested(token.value, token.line)
     }
   })
-  for (const { text, line } of lexed.executable) {
-    raw.push(...scanTokens(lex(text, line)).statements)
-  }
+  for (const { text, line } of lexed.executable) scanNested(text, line)
 
   if (lexed.unterminatedAt !== undefined) {
     raw.push({ kind: 'unreadable', line: lexed.unterminatedAt, message: 'opens a string, identifier, comment or $$ body that never closes, so nothing after it can be read' })
@@ -545,7 +758,7 @@ function scanTokens(lexed: Lexed): Omit<MigrationScan, 'acknowledged'> {
    * the copy, and nothing touches the original between the copy and the drop:
    * a `DELETE FROM __new_x` in between would empty the table that survives.
    */
-  const intactCopy = (drop: IndexedFinding): { columns: string[] } | undefined => {
+  const intactCopy = (drop: IndexedFinding): { into: string; columns: string[] } | undefined => {
     const table = drop.table!
     const copyName = `${REBUILD_PREFIX}${unqualified(table)}`
     const copy = copies.find((entry) => entry.from === table && unqualified(entry.into) === copyName)
@@ -567,9 +780,11 @@ function scanTokens(lexed: Lexed): Omit<MigrationScan, 'acknowledged'> {
     if (renameTo && rebuilt.has(renameTo) && renameFrom && unqualified(renameFrom).startsWith(REBUILD_PREFIX)) continue
     if (finding.kind === 'drop-table' && finding.table && rebuilt.has(finding.table)) {
       const copy = intactCopy({ ...finding, statement: at })
+      const types = copy && copyTypes.get(copy.into)
       out.push({
         ...finding,
         ...(copy ? { copiedColumns: copy.columns } : {}),
+        ...(types ? { copiedColumnTypes: types } : {}),
         kind: 'table-rebuild',
         message: `rebuilds table ${finding.table} (copies rows into ${REBUILD_PREFIX}${unqualified(finding.table)}, drops ${finding.table}, renames the copy)`,
       })
@@ -578,7 +793,7 @@ function scanTokens(lexed: Lexed): Omit<MigrationScan, 'acknowledged'> {
     out.push(finding)
   }
 
-  return { statements: out.sort((a, b) => a.line - b.line), creates }
+  return { statements: out.sort((a, b) => a.line - b.line), creates, cascadeTargets: [...new Set(cascades)] }
 }
 
 function readAcknowledgement(comments: Lexed['comments']): MigrationAcknowledgement | null {
@@ -593,10 +808,57 @@ function readAcknowledgement(comments: Lexed['comments']): MigrationAcknowledgem
   return null
 }
 
-/** Every destructive statement in one migration file, and its acknowledgement. */
-export function scanMigrationSql(sql: string): MigrationScan {
-  const lexed = lex(sql)
-  return { ...scanTokens(lexed), acknowledged: readAcknowledgement(lexed.comments) }
+function scanWith(sql: string, rules: LexRules): MigrationScan {
+  const lexed = lex(sql, rules)
+  return { ...scanTokens(lexed, rules), acknowledged: readAcknowledgement(lexed.comments) }
+}
+
+const findingKey = (statement: DestructiveStatement) => [statement.kind, statement.line, statement.table, statement.column].join('\u0000')
+const evidence = (statement: DestructiveStatement) => JSON.stringify([statement.copiedColumns, statement.copiedColumnTypes, statement.targetType])
+
+/**
+ * Every destructive statement in one migration file, and its acknowledgement.
+ * Every way the dialect's server may read the SQL (each dialect's, when none is
+ * named) is taken and merged so that none can hide a statement: every finding
+ * counts, while exemption evidence, a create and the marker count only when
+ * every reading has them.
+ */
+export function scanMigrationSql(sql: string, { dialect }: ScanOptions = {}): MigrationScan {
+  const candidates = dialect ? LEX_READINGS[dialect] : Object.values(LEX_READINGS).flat()
+  // Readings that differ only in backslash escapes read SQL with no backslash alike.
+  const sameRules = (a: LexRules, b: LexRules) => JSON.stringify({ ...a, backslashEscapes: false }) === JSON.stringify({ ...b, backslashEscapes: false })
+  const distinct = sql.includes('\\') ? candidates : candidates.filter((rules, at) => candidates.findIndex((other) => sameRules(other, rules)) === at)
+  const readings = distinct.map((rules) => scanWith(sql, rules))
+  if (readings.length === 1) return readings[0]!
+  const merged = new Map<string, DestructiveStatement[]>()
+  for (const reading of readings) {
+    const byKey = new Map<string, DestructiveStatement[]>()
+    for (const statement of reading.statements) {
+      const key = findingKey(statement)
+      const group = byKey.get(key)
+      if (group) group.push(statement)
+      else byKey.set(key, [statement])
+    }
+    for (const [key, found] of byKey) {
+      const kept = merged.get(key)
+      if (!kept) {
+        merged.set(key, found)
+        continue
+      }
+      const longer = found.length > kept.length ? found : kept
+      const agree = kept.length === found.length && kept.every((statement, at) => evidence(statement) === evidence(found[at]!))
+      merged.set(key, agree ? kept : longer.map(({ copiedColumns, copiedColumnTypes, targetType, ...rest }) => rest))
+    }
+  }
+  const statements = [...merged.values()].flat()
+  const createKey = (entry: { table: string; line: number }) => `${entry.table}\u0000${entry.line}`
+  const [first, ...rest] = readings
+  return {
+    statements: statements.sort((a, b) => a.line - b.line),
+    creates: first!.creates.filter((entry) => rest.every((reading) => reading.creates.some((other) => createKey(other) === createKey(entry)))),
+    cascadeTargets: [...new Set(readings.flatMap((reading) => reading.cascadeTargets))],
+    acknowledged: readings.every((reading) => reading.acknowledged) ? first!.acknowledged : null,
+  }
 }
 
 /**
@@ -619,6 +881,26 @@ export function readSnapshotColumnTypes(snapshot: unknown): ColumnTypes | undefi
     types.set([typeof schema === 'string' ? schema : '', table, name].join(KEY_SEPARATOR), type)
   }
   return types
+}
+
+function readSnapshotForeignKeys(snapshot: unknown): ForeignKeyReference[] | undefined {
+  const ddl = (snapshot as { ddl?: unknown } | null)?.ddl
+  if (!Array.isArray(ddl)) return undefined
+  return (ddl as Array<Record<string, unknown>>).flatMap((entry) => {
+    const { tableTo, onDelete } = entry ?? {}
+    if (entry?.entityType !== 'fks' || typeof tableTo !== 'string') return []
+    // An action the snapshot does not spell is read as one that deletes.
+    return [{ tableTo, onDelete: typeof onDelete === 'string' ? onDelete : 'CASCADE' }]
+  })
+}
+
+/** drizzle-kit's `dialect`, folded onto how the SQL is lexed; undefined for one it does not name. */
+function readSnapshotDialect(snapshot: unknown): MigrationDialect | undefined {
+  const dialect = (snapshot as { dialect?: unknown } | null)?.dialect
+  if (dialect === 'postgres' || dialect === 'postgresql' || dialect === 'gel') return 'postgres'
+  if (dialect === 'mysql' || dialect === 'singlestore') return 'mysql'
+  if (dialect === 'sqlite' || dialect === 'turso') return 'sqlite'
+  return undefined
 }
 
 /** The table's key prefixes to try: its own schema when the SQL qualifies it, else PostgreSQL's `public` or no schema. */
@@ -691,7 +973,7 @@ const NUMERIC = new Set(['numeric', 'decimal'])
  * it does not name is not widening. Equal types (a MySQL `MODIFY` that only
  * changes nullability) count, since no value changes.
  */
-export function isWideningTypeChange(before: string, after: string): boolean {
+export function isWideningTypeChange(before: string, after: string, dialect?: MigrationDialect): boolean {
   const from = parseType(before)
   const to = parseType(after)
   if (!from || !to) return false
@@ -711,10 +993,12 @@ export function isWideningTypeChange(before: string, after: string): boolean {
   if (from.base in TEXT_RANK && to.base in TEXT_RANK) return TEXT_RANK[to.base]! >= TEXT_RANK[from.base]!
 
   if (NUMERIC.has(from.base) && NUMERIC.has(to.base)) {
-    if (to.args.length === 0) return true
-    if (from.args.length === 0) return false
-    const [fromPrecision, fromScale = 0] = from.args
-    const [toPrecision, toScale = 0] = to.args
+    // PostgreSQL's bare numeric holds any value; MySQL's bare DECIMAL is DECIMAL(10,0), which an unknown dialect is read as.
+    const unbounded = dialect === 'postgres'
+    if (to.args.length === 0 && unbounded) return true
+    if (from.args.length === 0 && unbounded) return false
+    const [fromPrecision, fromScale = 0] = from.args.length === 0 ? [10] : from.args
+    const [toPrecision, toScale = 0] = to.args.length === 0 ? [10] : to.args
     return toScale >= fromScale && toPrecision! - toScale >= fromPrecision! - fromScale
   }
 
@@ -723,22 +1007,30 @@ export function isWideningTypeChange(before: string, after: string): boolean {
   return false
 }
 
+const DELETING_ACTIONS = new Set(['CASCADE', 'SET NULL', 'SET DEFAULT'])
+
 /**
- * A rebuild loses nothing when the previous snapshot names the table's columns,
- * the copy carries every one of them to itself, and each keeps or widens its
- * type in this migration's snapshot. drizzle-kit rebuilds a SQLite table for an
- * added default or foreign key, so without this every such edit would need sign-off.
+ * Lossless: every column the previous snapshot names is copied to itself, keeping or widening its type in
+ * the copy's own `CREATE TABLE` (a `--custom` migration repeats its predecessor's snapshot, which vouches for nothing),
+ * and, where foreign keys stay on (D1 ignores `PRAGMA foreign_keys=OFF`), no `ON DELETE` fires on the `DROP TABLE`.
+ * drizzle-kit rebuilds a SQLite table for an added default or foreign key, so without this each such edit needs sign-off.
  */
-function isLosslessRebuild(statement: DestructiveStatement, columnTypes: MigrationSource['columnTypes']): boolean {
-  const { before, after } = columnTypes ?? {}
-  if (!statement.table || !statement.copiedColumns || !before || !after) return false
-  const previous = tableColumns(before, statement.table)
+function isLosslessRebuild(statement: DestructiveStatement, source: MigrationSource, foreignKeysEnforced: boolean): boolean {
+  const before = source.columnTypes?.before
+  const { table, copiedColumns, copiedColumnTypes } = statement
+  if (!table || !copiedColumns || !copiedColumnTypes || !before) return false
+  const previous = tableColumns(before, table)
   if (previous.length === 0) return false
-  const copied = new Set(statement.copiedColumns)
-  return previous.every(([column, type]) => {
-    const next = columnType(after, statement.table!, column)
-    return copied.has(column) && next !== undefined && isWideningTypeChange(type, next)
+  const copied = new Set(copiedColumns)
+  const kept = previous.every(([column, type]) => {
+    const next = copiedColumnTypes[column]
+    return copied.has(column) && next !== undefined && isWideningTypeChange(type, next, source.dialect)
   })
+  if (!kept || !foreignKeysEnforced) return kept
+  const name = unqualified(table)
+  if (source.scan.cascadeTargets.some((target) => unqualified(target) === name)) return false
+  const references = [...(source.foreignKeys?.before ?? []), ...(source.foreignKeys?.after ?? [])]
+  return !references.some((reference) => reference.tableTo === name && DELETING_ACTIONS.has(reference.onDelete.toUpperCase()))
 }
 
 /** Two spellings of one type, compared after `parseType()` normalizes case, spacing and arguments. */
@@ -754,11 +1046,11 @@ function sameType(a: string, b: string): boolean {
  * type holding every value of the previous one. A custom migration repeats its
  * predecessor's snapshot, so its SQL target never matches a changed type.
  */
-function isWideningChange(statement: DestructiveStatement, columnTypes: MigrationSource['columnTypes']): boolean {
+function isWideningChange(statement: DestructiveStatement, { columnTypes, dialect }: MigrationSource): boolean {
   if (!statement.table || !statement.column || !statement.targetType) return false
   const before = columnType(columnTypes?.before, statement.table, statement.column)
   const after = columnType(columnTypes?.after, statement.table, statement.column)
-  return before !== undefined && after !== undefined && sameType(statement.targetType, after) && isWideningTypeChange(before, after)
+  return before !== undefined && after !== undefined && sameType(statement.targetType, after) && isWideningTypeChange(before, after, dialect)
 }
 
 export interface MigrationSource {
@@ -769,6 +1061,16 @@ export interface MigrationSource {
   scan: MigrationScan
   /** Column types after this migration, and before it, when its snapshots read. */
   columnTypes?: { before?: ColumnTypes; after?: ColumnTypes }
+  /** Foreign keys after this migration, and before it, when its snapshots read. */
+  foreignKeys?: { before?: ForeignKeyReference[]; after?: ForeignKeyReference[] }
+  /** The dialect the SQL was read in, when the driver or the snapshot names one. */
+  dialect?: MigrationDialect
+}
+
+export interface ForeignKeyReference {
+  tableTo: string
+  /** As the snapshot spells it: `CASCADE`, `SET NULL`, `NO ACTION`, … */
+  onDelete: string
 }
 
 export interface DestructiveFinding extends DestructiveStatement {
@@ -790,6 +1092,12 @@ export interface JudgeOptions {
    * superset (pending unknown), an applied `CREATE` would exempt a new `DROP`.
    */
   exemptCreatedInRun?: boolean
+  /**
+   * Whether a rebuild's `DROP TABLE` fires the `ON DELETE` of the tables
+   * referencing it. Only a runner that turns foreign keys off around the
+   * migration (bun:sqlite's) may say no; Cloudflare D1 keeps them on.
+   */
+  foreignKeysEnforced?: boolean
 }
 
 /**
@@ -797,7 +1105,10 @@ export interface JudgeOptions {
  * table an earlier statement of the run creates is dropped (a fresh database
  * loses nothing), and so is a type change the snapshots show widening.
  */
-export function judgeMigrations(sources: readonly MigrationSource[], { exemptCreatedInRun = true }: JudgeOptions = {}): MigrationGuardReport {
+export function judgeMigrations(
+  sources: readonly MigrationSource[],
+  { exemptCreatedInRun = true, foreignKeysEnforced = true }: JudgeOptions = {},
+): MigrationGuardReport {
   const created = new Map<string, { migration: number; line: number }>()
   const report: MigrationGuardReport = { unacknowledged: [], acknowledged: [] }
 
@@ -812,9 +1123,9 @@ export function judgeMigrations(sources: readonly MigrationSource[], { exemptCre
     }
 
     const findings = source.scan.statements
-      .filter((statement) => statement.kind === 'unreadable' || statement.kind === 'drop-schema' || !createdEarlier(statement.table, statement.line))
-      .filter((statement) => statement.kind !== 'table-rebuild' || !isLosslessRebuild(statement, source.columnTypes))
-      .filter((statement) => statement.kind !== 'alter-column-type' || !isWideningChange(statement, source.columnTypes))
+      .filter((statement) => statement.kind === 'unreadable' || statement.kind === 'drop-schema' || statement.kind === 'drop-cascade' || !createdEarlier(statement.table, statement.line))
+      .filter((statement) => statement.kind !== 'table-rebuild' || !isLosslessRebuild(statement, source, foreignKeysEnforced))
+      .filter((statement) => statement.kind !== 'alter-column-type' || !isWideningChange(statement, source))
       .map((statement): DestructiveFinding => ({ ...statement, migration: source.name, file: source.file }))
 
     if (findings.length === 0) return
@@ -845,6 +1156,7 @@ export function readMigrationSources(
   migrationsFolder: string,
   names: readonly string[],
   displayFolder = migrationsFolder,
+  { dialect }: ScanOptions = {},
 ): MigrationSource[] {
   let snapshotsById: Map<string, unknown> | undefined
   const snapshotById = (id: unknown): unknown => {
@@ -869,13 +1181,22 @@ export function readMigrationSources(
     } catch (error) {
       throw new Error(`Cannot read ${path} to check it for destructive statements: ${(error as Error).message}`)
     }
-    const scan = scanMigrationSql(sql)
-    const source: MigrationSource = { name, file: `${displayFolder.replace(/\/$/, '')}/${name}/migration.sql`, scan }
+    let snapshot: { value: unknown } | undefined
+    const readOwnSnapshot = () => (snapshot ??= { value: readSnapshot(resolve(migrationsFolder, name, 'snapshot.json')) }).value
+    const sourceDialect = dialect ?? readSnapshotDialect(readOwnSnapshot())
+    const scan = scanMigrationSql(sql, { dialect: sourceDialect })
+    const source: MigrationSource = {
+      name,
+      file: `${displayFolder.replace(/\/$/, '')}/${name}/migration.sql`,
+      scan,
+      ...(sourceDialect ? { dialect: sourceDialect } : {}),
+    }
     if (scan.statements.some((statement) => statement.kind === 'alter-column-type' || statement.kind === 'table-rebuild')) {
-      const snapshot = readSnapshot(resolve(migrationsFolder, name, 'snapshot.json'))
+      const snapshot = readOwnSnapshot()
       const previousIds = (snapshot as { prevIds?: unknown } | undefined)?.prevIds
       const previous = Array.isArray(previousIds) && previousIds.length === 1 ? snapshotById(previousIds[0]) : undefined
       source.columnTypes = { after: readSnapshotColumnTypes(snapshot), before: readSnapshotColumnTypes(previous) }
+      source.foreignKeys = { after: readSnapshotForeignKeys(snapshot), before: readSnapshotForeignKeys(previous) }
     }
     return source
   })
@@ -890,16 +1211,23 @@ export function formatDestructiveFinding(finding: DestructiveFinding): string {
 export type DestructiveMigrationMode = 'warn' | 'refuse'
 
 export class DestructiveMigrationError extends Error {
-  constructor(readonly findings: DestructiveFinding[], pendingKnown = true) {
+  /** `trackerError`: why the tracker could not be read, kept as the `cause` so a connection failure is not hidden behind the findings. */
+  constructor(readonly findings: DestructiveFinding[], pendingKnown = true, trackerError?: unknown) {
     super(
       `Refusing to apply ${findings.length} destructive statement(s) that no migration acknowledges:\n` +
-        (pendingKnown ? '' : `  (the migration tracker could not be read, so every local migration was judged, applied ones included)\n`) +
+        (pendingKnown ? '' : `  (${describeTrackerError(trackerError)}, so every local migration was judged, applied ones included)\n`) +
         findings.map((finding) => `  ${formatDestructiveFinding(finding)}`).join('\n') +
         `\nReview each one. To apply it, put \`-- ${ALLOW_DESTRUCTIVE_MARKER}: <reason>\` on the first line of its migration.sql, ` +
         `or set ${ALLOW_DESTRUCTIVE_ENV}=1 for one run.`,
+      trackerError === undefined ? undefined : { cause: trackerError },
     )
     this.name = 'DestructiveMigrationError'
   }
+}
+
+function describeTrackerError(error: unknown): string {
+  const why = error === undefined ? '' : `: ${error instanceof Error ? error.message : String(error)}`
+  return `the migration tracker could not be read${why}`
 }
 
 function displayFolder(folder: string): string {
@@ -916,21 +1244,28 @@ export function guardPendingMigrations(
   migrationsFolder: string,
   pending: readonly string[],
   mode: DestructiveMigrationMode,
-  { pendingKnown = true }: { pendingKnown?: boolean } = {},
+  { pendingKnown = true, trackerError, dialect, foreignKeysEnforced }: {
+    pendingKnown?: boolean
+    /** Why the tracker could not be read, when `pendingKnown` is false. */
+    trackerError?: unknown
+    dialect?: MigrationDialect
+    foreignKeysEnforced?: boolean
+  } = {},
 ): void {
   if (pending.length === 0) return
-  const sources = readMigrationSources(migrationsFolder, pending, displayFolder(migrationsFolder))
-  const { unacknowledged } = judgeMigrations(sources, { exemptCreatedInRun: pendingKnown })
+  const sources = readMigrationSources(migrationsFolder, pending, displayFolder(migrationsFolder), { dialect })
+  const { unacknowledged } = judgeMigrations(sources, { exemptCreatedInRun: pendingKnown, foreignKeysEnforced })
   if (unacknowledged.length === 0) return
 
   const allowed = process.env[ALLOW_DESTRUCTIVE_ENV] === '1'
-  if (mode === 'refuse' && !allowed) throw new DestructiveMigrationError(unacknowledged, pendingKnown)
+  if (mode === 'refuse' && !allowed) throw new DestructiveMigrationError(unacknowledged, pendingKnown, trackerError)
 
   const why = allowed
     ? `${ALLOW_DESTRUCTIVE_ENV}=1 is set`
     : "pass `destructiveMigrations: 'refuse'` to the database factory to stop at these instead"
   console.warn(
     `[guren/orm] Applying ${unacknowledged.length} destructive statement(s) that no migration acknowledges (${why}):\n` +
+      (pendingKnown ? '' : `[guren/orm]   (${describeTrackerError(trackerError)}, so every local migration was judged)\n`) +
       unacknowledged.map((finding) => `[guren/orm]   ${formatDestructiveFinding(finding)}`).join('\n'),
   )
 }

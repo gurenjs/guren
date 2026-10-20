@@ -160,6 +160,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
       await withAdminDb(async (db) => {
         await migrateAndReport(resolvedMigrationsFolder, {
           destructiveMigrations,
+          dialect: 'postgres',
           readApplied: report ? () => readAppliedMigrations(db) : undefined,
           migrate: () => migrate(db, { migrationsFolder: resolvedMigrationsFolder }),
         })

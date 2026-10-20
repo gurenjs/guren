@@ -51,13 +51,22 @@ export async function getChangedFiles(cwd: string): Promise<Set<string> | null> 
   return (await getChangedFilesFromBase(cwd))?.files ?? null
 }
 
+/** NUL-separated paths as git wrote them, never C-quoted (a non-ASCII path is quoted without `-z`). */
+async function runGitPaths(cwd: string, args: string[]): Promise<string[] | null> {
+  const stdout = await runGitRaw(cwd, [...args, '-z'])
+  return stdout === null ? null : stdout.split('\0').filter((path) => path.length > 0)
+}
+
 /**
  * `getChangedFiles()` with the merge base it diffed against, undefined when
- * neither `origin/main` nor `main` shares history with HEAD, in which case
- * `files` holds only uncommitted and untracked changes. `complete` is false
- * when one of the git listings failed, so `files` may be short.
+ * none of `origin/main`, `main`, `origin/HEAD` and `master` shares history with HEAD, in which case
+ * `files` holds only uncommitted and untracked changes. `head` is HEAD's
+ * commit, undefined before the first commit. `complete` is false when one of
+ * the git listings failed, so `files` may be short.
  */
-export async function getChangedFilesFromBase(cwd: string): Promise<{ files: Set<string>; mergeBase?: string; complete: boolean } | null> {
+export async function getChangedFilesFromBase(
+  cwd: string,
+): Promise<{ files: Set<string>; mergeBase?: string; head?: string; complete: boolean } | null> {
   // realpath, not just resolve: git reports --show-toplevel through the real
   // path, and on macOS /tmp is a symlink to /private/tmp.
   const absoluteCwd = await realpath(resolve(cwd)).catch(() => resolve(cwd))
@@ -65,17 +74,19 @@ export async function getChangedFilesFromBase(cwd: string): Promise<{ files: Set
   const gitRoot = rootLines?.[0]
   if (!gitRoot) return null
 
-  let mergeBase = (await runGit(absoluteCwd, ['merge-base', 'HEAD', 'origin/main']))?.[0]
-  if (!mergeBase) {
-    mergeBase = (await runGit(absoluteCwd, ['merge-base', 'HEAD', 'main']))?.[0]
-  }
-
+  // `origin/HEAD` (the remote's default branch) and `master`, for a repository whose base is not called main.
   // A repository with no commit has no HEAD to diff against; everything tracked is then in the index.
-  const hasHead = (await runGit(absoluteCwd, ['rev-parse', '--verify', '--quiet', 'HEAD'])) !== null
+  const [bases, headLines] = await Promise.all([
+    Promise.all(['origin/main', 'main', 'origin/HEAD', 'master'].map((base) => runGit(absoluteCwd, ['merge-base', 'HEAD', base]))),
+    runGit(absoluteCwd, ['rev-parse', '--verify', '--quiet', 'HEAD']),
+  ])
+  const mergeBase = bases.map((lines) => lines?.[0]).find((base) => base !== undefined)
+  const head = headLines?.[0]
   const [committed, uncommitted, untracked] = await Promise.all([
-    mergeBase ? runGit(absoluteCwd, ['diff', '--name-only', mergeBase, 'HEAD']) : Promise.resolve([]),
-    runGit(absoluteCwd, hasHead ? ['diff', '--name-only', 'HEAD'] : ['diff', '--name-only', '--cached']),
-    runGit(absoluteCwd, ['ls-files', '--others', '--exclude-standard']),
+    mergeBase ? runGitPaths(absoluteCwd, ['diff', '--name-only', mergeBase, 'HEAD']) : Promise.resolve([]),
+    runGitPaths(absoluteCwd, head ? ['diff', '--name-only', 'HEAD'] : ['diff', '--name-only', '--cached']),
+    // --full-name: like the diffs, relative to the git root, which the paths below resolve against.
+    runGitPaths(absoluteCwd, ['ls-files', '--others', '--exclude-standard', '--full-name']),
   ])
 
   const gitRootRelativePaths = new Set<string>([
@@ -94,7 +105,7 @@ export async function getChangedFilesFromBase(cwd: string): Promise<{ files: Set
 
   // A listing git failed to produce is missing files, not a list of none.
   const complete = (mergeBase === undefined || committed !== null) && uncommitted !== null && untracked !== null
-  return { files: result, mergeBase, complete }
+  return { files: result, mergeBase, head, complete }
 }
 
 /** Any file that could hold a route's params schema or change what the app's modules evaluate to. */

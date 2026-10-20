@@ -1,8 +1,10 @@
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { ALLOW_DESTRUCTIVE_MARKER, judgeMigrations, readMigrationSources } from '@guren/orm/internal/migration-guard'
-import { getChangedFilesFromBase } from './changed-files'
+import { getChangedFilesFromBase, runGitRaw } from './changed-files'
 import { check, type CheckResult } from './check-result'
+import { DATABASE_CONFIG_CANDIDATES } from './db-migrate'
+import { readIfExists } from './discovery'
 
 const MIGRATION_FILE = /(^|\/)migration\.sql$/
 const TITLE = 'Destructive migrations'
@@ -11,10 +13,24 @@ const SUGGESTION =
   'or regenerate it so it does not drop, narrow or rename (RFC 0034).'
 
 /**
+ * Whether the app's migrations run with foreign keys on, read from source: off
+ * only for a `createSqliteDatabase()` config (bun:sqlite's runner turns them off)
+ * with no D1 in sight. Anything else keeps them on, as D1 does.
+ */
+async function foreignKeysEnforced(cwd: string): Promise<boolean> {
+  if (['wrangler.json', 'wrangler.jsonc', 'wrangler.toml'].some((file) => existsSync(join(cwd, file)))) return true
+  for (const file of DATABASE_CONFIG_CANDIDATES) {
+    const source = await readIfExists(cwd, file).catch(() => null)
+    if (source !== null) return !(source.includes('createSqliteDatabase(') && !source.includes('createD1Database('))
+  }
+  return true
+}
+
+/**
  * `guren check`'s destructive-migration rule (RFC 0034 §3): the migrations not
  * on the base branch yet (merge-base diff, uncommitted and untracked), judged
- * as one pending run per migrations folder, whatever `--changed` says. Reads
- * files only, never `drizzle.config.ts` or `config/database.ts`.
+ * as one pending run per migrations folder, whatever `--changed` says. Imports
+ * no app code: `config/database.ts` is read as text, never `drizzle.config.ts`.
  */
 export async function checkDestructiveMigrations(
   cwd: string,
@@ -58,24 +74,38 @@ export async function checkDestructiveMigrations(
       'Run `git status` and `git diff` to see why git failed, then check again.',
     ))
   }
-  if (!changed.mergeBase) {
+  // Any migration git tracks, wherever drizzle's `out` puts it.
+  const hasMigrations = byFolder.size > 0 || ((await runGitRaw(cwd, ['ls-files', '-z', '--', '*migration.sql', 'migration.sql'])) ?? '') !== ''
+  // Gating: a shallow clone has commits whose migrations nothing judged.
+  if (changed.head && !changed.mergeBase && hasMigrations) {
+    results.push(check(
+      'migrations-destructive-no-base',
+      TITLE,
+      'warn',
+      'No merge base with `main`, `origin/main`, `origin/HEAD` or `master`, so committed migrations cannot be told from shipped ones and only uncommitted and untracked ones were judged.',
+      'Fetch the base branch (`git fetch origin main`, or `fetch-depth: 0` in CI) and check again.',
+    ))
+  } else if (byFolder.size === 0 && changed.head && changed.mergeBase === changed.head && hasMigrations) {
     results.push({
       ...check(
-        'migrations-destructive-no-base',
+        'migrations-destructive-on-base',
         TITLE,
         'warn',
-        'No merge base with `main` or `origin/main`, so only uncommitted and untracked migrations were judged.',
+        'HEAD is on `main`, so the migrations committed there count as shipped and only uncommitted and untracked ones were judged. ' +
+          'This rule judges a branch before it merges; it cannot tell which migrations a database has applied.',
       ),
       advisory: true,
     })
   }
   if (byFolder.size === 0) return results
 
+  const enforced = await foreignKeysEnforced(cwd)
+
   for (const [folder, names] of [...byFolder].sort(([a], [b]) => a.localeCompare(b))) {
     names.sort((a, b) => a.localeCompare(b))
     let report
     try {
-      report = judgeMigrations(readMigrationSources(join(cwd, folder), names, folder))
+      report = judgeMigrations(readMigrationSources(join(cwd, folder), names, folder), { foreignKeysEnforced: enforced })
     } catch (error) {
       results.push(check(`migrations-destructive:${folder}`, TITLE, 'warn', (error as Error).message, undefined, folder))
       continue
