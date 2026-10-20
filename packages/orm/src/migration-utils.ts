@@ -1,6 +1,6 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { guardPendingMigrations, type DestructiveMigrationMode } from './migration-guard'
+import { guardPendingMigrations, type DestructiveMigrationMode, type MigrationDialect } from './migration-guard'
 
 /**
  * What one `migrateDatabase()` call had to work with. `db:migrate` reports
@@ -291,6 +291,8 @@ export interface MigrationDrift {
   orphaned: string[]
   /** False when the tracker could not be read, so `pending` is empty for want of an answer. */
   readable: boolean
+  /** What the tracker read threw, when it did. */
+  error?: unknown
 }
 
 /**
@@ -309,8 +311,8 @@ export async function readMigrationDrift(
       orphaned: status.filter((entry) => entry.orphaned).map((entry) => entry.name),
       readable: true,
     }
-  } catch {
-    return { pending: [], orphaned: [], readable: false }
+  } catch (error) {
+    return { pending: [], orphaned: [], readable: false, error }
   }
 }
 
@@ -322,11 +324,15 @@ export async function readMigrationDrift(
  */
 export async function migrateAndReport(
   migrationsFolder: string,
-  { readApplied, migrate, destructiveMigrations = 'warn' }: {
+  { readApplied, migrate, destructiveMigrations = 'warn', dialect, foreignKeysEnforced }: {
     readApplied?: () => Promise<AppliedMigrationRow[]> | AppliedMigrationRow[]
     /** bun:sqlite's migrator is synchronous; the others return a promise. */
     migrate: () => unknown
     destructiveMigrations?: DestructiveMigrationMode
+    /** How the guard lexes the SQL; the snapshot's, else every dialect's reading, when absent. */
+    dialect?: MigrationDialect
+    /** False only for a runner that turns foreign keys off around `migrate` (bun:sqlite's). */
+    foreignKeysEnforced?: boolean
   },
 ): Promise<void> {
   const drift = readApplied ? await readMigrationDrift(migrationsFolder, readApplied) : { pending: [], orphaned: [], readable: true }
@@ -335,7 +341,9 @@ export async function migrateAndReport(
   // An unreadable tracker judges every local migration, with no created-in-run exemption.
   if (readApplied) {
     const pending = drift.readable ? drift.pending : listLocalMigrations(migrationsFolder).map((entry) => entry.name)
-    guardPendingMigrations(migrationsFolder, pending, destructiveMigrations, { pendingKnown: drift.readable })
+    guardPendingMigrations(migrationsFolder, pending, destructiveMigrations, {
+      pendingKnown: drift.readable, trackerError: drift.error, dialect, foreignKeysEnforced,
+    })
   }
   await migrate()
   reportAppliedMigrations(drift.pending, migrationsFolder)

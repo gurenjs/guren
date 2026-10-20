@@ -3,6 +3,8 @@ import { basename, dirname, resolve } from 'node:path'
 import {
   judgeMigrations,
   readMigrationSources,
+  type JudgeOptions,
+  type MigrationDialect,
   type MigrationGuardReport,
   type MigrationSource,
 } from '@guren/orm/internal/migration-guard'
@@ -20,6 +22,26 @@ export interface PendingMigrationJudgement extends MigrationGuardReport {
   pending: string[]
   /** `status` when `migrationStatus()` named them; `all` when the config exports none, so every local migration was judged. */
   pendingFrom: 'status' | 'all'
+}
+
+/**
+ * How the app's factory runs migrations, read from its `describe()` (exported, or
+ * on the `defineDatabaseConfig()` default export). Only bun:sqlite's runner turns
+ * foreign keys off around a rebuild; anything unread keeps them on.
+ */
+function describeRunner(module: Record<string, unknown>): { dialect?: MigrationDialect } & Pick<JudgeOptions, 'foreignKeysEnforced'> {
+  try {
+    const definition = module.default as { key?: unknown; resolve?: (env: undefined) => { database?: unknown } } | undefined
+    const database = definition?.key === 'database' && typeof definition.resolve === 'function' ? definition.resolve(undefined)?.database : module
+    const describe = (database as { describe?: () => { dialect?: unknown } } | undefined)?.describe
+    const dialect = typeof describe === 'function' ? describe.call(database)?.dialect : undefined
+    if (dialect === 'sqlite') return { dialect: 'sqlite', foreignKeysEnforced: false }
+    if (dialect === 'd1') return { dialect: 'sqlite' }
+    if (dialect === 'postgres' || dialect === 'mysql') return { dialect }
+  } catch {
+    // An unreadable description judges as an unknown runner.
+  }
+  return {}
 }
 
 function localMigrationNames(folder: string): string[] {
@@ -41,13 +63,14 @@ export async function judgePendingMigrations(cwd = process.cwd()): Promise<Pendi
   const module = await resolveDatabaseModule()
   const status = pickFunction<() => Promise<StatusRow[]>>(module, 'migrationStatus')
   const close = pickFunction<() => Promise<void>>(module, 'closeDatabase')
+  const { dialect, foreignKeysEnforced } = describeRunner(module)
 
   if (!status) {
     const folder = await resolveMigrationsOutput(cwd)
     const names = localMigrationNames(folder)
     // Over every migration, applied ones included, an earlier CREATE must not exempt a new DROP.
-    const sources = readMigrationSources(folder, names, describePath(folder))
-    return { ...judgeMigrations(sources, { exemptCreatedInRun: false }), pending: names, pendingFrom: 'all' }
+    const sources = readMigrationSources(folder, names, describePath(folder), { dialect })
+    return { ...judgeMigrations(sources, { exemptCreatedInRun: false, foreignKeysEnforced }), pending: names, pendingFrom: 'all' }
   }
 
   let rows: StatusRow[]
@@ -75,8 +98,8 @@ export async function judgePendingMigrations(cwd = process.cwd()): Promise<Pendi
           "The drizzle config's `out` and the factory's `migrationsFolder` in config/database.ts must name the same folder.",
       )
     }
-    sources.push(...readMigrationSources(folder, [row.name], describePath(folder)))
+    sources.push(...readMigrationSources(folder, [row.name], describePath(folder), { dialect }))
   }
 
-  return { ...judgeMigrations(sources), pending: pending.map((row) => row.name), pendingFrom: 'status' }
+  return { ...judgeMigrations(sources, { foreignKeysEnforced }), pending: pending.map((row) => row.name), pendingFrom: 'status' }
 }

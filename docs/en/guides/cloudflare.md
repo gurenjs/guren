@@ -105,9 +105,15 @@ Wrangler applies whatever the folder holds, so Guren's destructive-migration
 guard cannot run at that point. `bunx guren check` (and `bunx guren gate`) judge
 the migrations your branch adds before they are merged, and report a `DROP`,
 a narrowed type or a table rebuild that carries no
-`-- guren:allow-destructive` comment. Run one of them before applying to
-`--remote`; [Destructive migrations](./database.md#destructive-migrations) covers
-what it reports.
+`-- guren:allow-destructive` comment. That makes the pull request the guard: run
+`bunx guren check --ci` in its CI with the full history (`fetch-depth: 0`), and
+merge only when it passes. On `main` itself the check treats every committed
+migration as shipped and judges nothing, so running it there right before
+`--remote` proves nothing about what wrangler is about to apply.
+[Destructive migrations](./database.md#destructive-migrations) covers what it
+reports. D1 keeps foreign keys on during a migration, so a rebuild of a table
+that another table references with `ON DELETE CASCADE` is reported here even
+though it copies every column.
 
 > [!WARNING]
 > Build first. `migrations_dir` points inside the generated directory, and `wrangler` reports "no migrations to apply" — successfully, with no error — when it finds an empty folder. Applying before building is the one failure here that looks like success.

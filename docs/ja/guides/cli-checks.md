@@ -202,7 +202,8 @@ bunx guren check --changed   # main とのマージベースからの変更フ�
 | `migrations-destructive:<file>:<line>` | (warn)`-- guren:allow-destructive` のコメントがないマイグレーションに破壊的な文があります。`check --ci` と `guren gate` で数えるので、そのままでは Stop hook がエージェントを差し戻します。対象は[破壊的マイグレーション](database.md#破壊的マイグレーション)にあります。 |
 | `migrations-destructive:<file>` | (pass)破壊的な文が承認されています。メッセージに理由が入ります。 |
 | `migrations-destructive-unverified` | (warn、参考扱い)git リポジトリではないので、何も判定していません。 |
-| `migrations-destructive-no-base` | (warn、参考扱い)`main` とのマージベースがないので、未コミットと未追跡のマイグレーションだけを判定しました。 |
+| `migrations-destructive-no-base` | (warn)コミットはあるのに `main` とも `origin/main` とも履歴を共有していないので(shallow clone や、ベースのブランチ名が違う場合)、コミット済みのマイグレーションを判定していません。`check --ci` で数えるので、ベースのブランチを取得してください(CI では `fetch-depth: 0`)。 |
+| `migrations-destructive-on-base` | (warn、参考扱い)HEAD が `main` の上にあるので、そこにコミットされたマイグレーションはリリース済みとみなし、何も判定していません。このルールはマージ前のブランチを判定するもので、データベースに適用済みかどうかはわかりません。 |
 
 ## チェックがアプリを読む仕組み
 

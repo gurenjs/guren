@@ -58,13 +58,23 @@ export async function checkDestructiveMigrations(
       'Run `git status` and `git diff` to see why git failed, then check again.',
     ))
   }
-  if (!changed.mergeBase) {
+  // Gating: a shallow clone has commits whose migrations nothing judged.
+  if (changed.head && !changed.mergeBase) {
+    results.push(check(
+      'migrations-destructive-no-base',
+      TITLE,
+      'warn',
+      'No merge base with `main` or `origin/main`, so committed migrations cannot be told from shipped ones and only uncommitted and untracked ones were judged.',
+      'Fetch the base branch (`git fetch origin main`, or `fetch-depth: 0` in CI) and check again.',
+    ))
+  } else if (byFolder.size === 0 && changed.head && changed.mergeBase === changed.head && existsSync(join(cwd, 'db/migrations'))) {
     results.push({
       ...check(
-        'migrations-destructive-no-base',
+        'migrations-destructive-on-base',
         TITLE,
         'warn',
-        'No merge base with `main` or `origin/main`, so only uncommitted and untracked migrations were judged.',
+        'HEAD is on `main`, so the migrations committed there count as shipped and only uncommitted and untracked ones were judged. ' +
+          'This rule judges a branch before it merges; it cannot tell which migrations a database has applied.',
       ),
       advisory: true,
     })

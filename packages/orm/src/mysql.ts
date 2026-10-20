@@ -164,6 +164,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
         // connect on every cold start.
         await migrateAndReport(resolvedMigrationsFolder, {
           destructiveMigrations,
+          dialect: 'mysql',
           readApplied: report ? () => readAppliedMigrations(migrationDb as unknown as MySql2Database) : undefined,
           migrate: () => migrate(migrationDb, { migrationsFolder: resolvedMigrationsFolder }),
         })

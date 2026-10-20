@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ALLOW_DESTRUCTIVE_ENV } from '../src/migration-guard'
+import { ALLOW_DESTRUCTIVE_ENV, DestructiveMigrationError } from '../src/migration-guard'
 import { migrateAndReport } from '../src/migration-utils'
 import { createSqliteDatabase } from '../src/sqlite'
 
@@ -155,6 +155,24 @@ describe('migrateAndReport', () => {
 
     await expect(run).rejects.toThrow(/tracker could not be read[\s\S]*20260102000000_drop_posts/)
     expect(migrated).toBe(false)
+  })
+
+  test('should name the tracker read error in the refusal, rather than hide it behind the findings', async () => {
+    writeMigration('20260102000000_drop_posts', 'DROP TABLE posts;')
+    const readError = new Error('connect ECONNREFUSED 127.0.0.1:5432')
+
+    const run = migrateAndReport(migrationsDir, {
+      readApplied: () => {
+        throw readError
+      },
+      migrate: () => {},
+      destructiveMigrations: 'refuse',
+    })
+
+    const error = await run.catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(DestructiveMigrationError)
+    expect((error as Error).message).toContain('ECONNREFUSED 127.0.0.1:5432')
+    expect((error as Error).cause).toBe(readError)
   })
 
   test("should not judge a reset's re-apply, which runs without a tracker read", async () => {

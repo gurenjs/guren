@@ -305,7 +305,10 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       const db = await database.get()
       const { migrate } = await import('drizzle-orm/bun-sqlite/migrator')
       await migrateAndReport(resolvedMigrationsFolder, {
-          destructiveMigrations,
+        destructiveMigrations,
+        dialect: 'sqlite',
+        // The migrator below runs with foreign keys off, so a rebuild's DROP TABLE fires no ON DELETE.
+        foreignKeysEnforced: false,
         readApplied: report ? readAppliedMigrations : undefined,
         migrate: () => {
           // The migrator wraps every pending migration in one transaction, where

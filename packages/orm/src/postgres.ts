@@ -156,6 +156,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
         // a round trip on every cold start.
         await migrateAndReport(resolvedMigrationsFolder, {
           destructiveMigrations,
+          dialect: 'postgres',
           readApplied: report ? () => readAppliedMigrations(migrationClient) : undefined,
           migrate: () => migrate(db, { migrationsFolder: resolvedMigrationsFolder }),
         })
