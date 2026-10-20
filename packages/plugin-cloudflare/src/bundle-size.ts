@@ -195,6 +195,16 @@ export interface ReportBundleSizeOptions {
   top?: number
 }
 
+/** The size report runs wrangler's dry run on wrangler.jsonc, which an app on the cf backend does not deploy. */
+export function assertSizeReportable(root: string, requestedBy = 'Cloudflare size'): void {
+  const app = resolve(root)
+  if (detectCloudflareBackend(app) === 'cf') {
+    throw new Error(
+      `${requestedBy}: the size report measures the bundle wrangler.jsonc deploys, and ${app} deploys through cf (cloudflare.config.ts). Drop it; \`cf build\` writes the bundle to .cloudflare/output/v0/workers/default/bundle/.`,
+    )
+  }
+}
+
 /**
  * Run wrangler's dry run on the assembled output and read what it would
  * upload. Needs no credentials. The metafile goes to a temporary directory
@@ -203,11 +213,7 @@ export interface ReportBundleSizeOptions {
  */
 export function reportBundleSize(options: ReportBundleSizeOptions): BundleReport {
   const root = resolve(options.root)
-  if (detectCloudflareBackend(root) === 'cf') {
-    throw new Error(
-      `Cloudflare size: measures the bundle wrangler.jsonc deploys, and ${root} deploys through cf (cloudflare.config.ts). Run \`cf build\` and read the size of .cloudflare/output/v0/workers/default/bundle/ instead.`,
-    )
-  }
+  assertSizeReportable(root)
   const outDir = mkdtempSync(join(tmpdir(), 'guren-cf-size-'))
   const metafile = join(outDir, 'meta.json')
 
