@@ -78,17 +78,21 @@ export function createD1Database(options: D1DatabaseOptions): D1DatabaseHandle {
         ? relative(process.cwd(), fileURLToPath(migrationsFolder))
         : migrationsFolder
 
+  if (binding === '') throw new Error('createD1Database: `binding` names no binding; pass its name, such as \'DB\'.')
   const bindingName = typeof binding === 'string' ? binding : undefined
-  const resolveBinding = typeof binding === 'string' ? () => workersBinding(binding) : binding
-  const databaseHandle = singleFlight(async (): Promise<unknown> => {
-    const client = resolveBinding()
+  const resolveBinding = typeof binding === 'string' ? () => workersBinding(binding) : () => {
+    const client = binding()
     if (client == null) {
       throw new Error(
         'createD1Database: the "binding" resolver returned no D1 binding. ' +
           'On Workers this usually means it ran before the first request — defer access ' +
-          "(e.g. binding: 'DB', or () => getWorkersEnv<Env>().DB) and check the d1_databases entry in wrangler.jsonc.",
+          '(e.g. binding: () => getWorkersEnv<Env>().DB, or name it: binding: \'DB\') and check the d1_databases entry in wrangler.jsonc.',
       )
     }
+    return client
+  }
+  const databaseHandle = singleFlight(async (): Promise<unknown> => {
+    const client = resolveBinding()
 
     // drizzle-orm/d1 only accepts the positional (client, config) form —
     // unlike bun-sqlite there is no `{ client }` object overload.

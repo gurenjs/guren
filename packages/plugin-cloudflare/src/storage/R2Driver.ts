@@ -158,6 +158,7 @@ export class R2Driver implements StorageDriver {
 
   constructor(options: R2DriverOptions) {
     const { binding } = options
+    if (binding === '') throw new Error("R2Driver: `binding` names no binding; pass its name, such as 'MEDIA'.")
     this.resolveBinding = typeof binding === 'string' ? () => readWorkersBinding(binding, 'R2Driver') : binding
     this.publicUrl = options.publicUrl ? trimTrailingSlashes(options.publicUrl) : undefined
     this.prefix = trimSlashes(options.prefix ?? '')
@@ -488,4 +489,15 @@ function trimSlashes(value: string): string {
   while (start < end && value[start] === '/') start++
   while (end > start && value[end - 1] === '/') end--
   return value.slice(start, end)
+}
+
+/**
+ * The arguments `StorageManager.registerDisk()` takes for an R2 disk: its factory, and the
+ * description introspection reports without building it (RFC 0035 §2.1). One options object
+ * feeds both, so the binding the deploy sees is the one the driver reads.
+ * @example storage.registerDisk('media', ...r2Disk({ binding: 'MEDIA', publicUrl }))
+ */
+export function r2Disk(options: R2DriverOptions): [() => R2Driver, { driver: 'r2'; binding?: string }] {
+  const binding = typeof options.binding === 'string' ? options.binding : undefined
+  return [() => new R2Driver(options), binding ? { driver: 'r2', binding } : { driver: 'r2' }]
 }

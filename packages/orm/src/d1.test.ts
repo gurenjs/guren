@@ -151,8 +151,10 @@ describe('createD1Database with a binding name (RFC 0035 §2.1)', () => {
   const slots = globalThis as unknown as Record<symbol, { env: unknown } | undefined>
 
   test('should read the named binding from the captured Workers env, and report the name', async () => {
+    slots[slot] = undefined
     const database = createD1Database({ binding: 'DB' })
     expect(database.describe()).toMatchObject({ dialect: 'd1', binding: 'DB' })
+    expect(() => createD1Database({ binding: '' })).toThrow('names no binding')
 
     await expect(database.getDatabase()).rejects.toThrow('"DB" binding was read before the first request')
     slots[slot] = { env: { DB: createStubBinding() } }

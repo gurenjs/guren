@@ -46,18 +46,18 @@ Guren's deploy settings live in `config/cloudflare.ts` (`defineCloudflareConfig(
   })
   ```
 
-  A closure such as `() => getWorkersEnv<Env>().DB` still works, but only the name shows in `guren introspect --json`.
+  A closure such as `() => getWorkersEnv<Env>().DB` still works, but only a name shows in the introspected app.
 
 - **`R2Driver`** — a storage driver over the R2 bucket binding, for `StorageManager.registerDisk()`. Same `binding` contract as D1; no credentials and no AWS SDK in the bundle:
 
   ```typescript
   import { createStorageManager, LocalStorageDriver } from '@guren/core'
   import { isWorkersRuntime } from '@guren/plugin-cloudflare/env'
-  import { R2Driver } from '@guren/plugin-cloudflare'
+  import { r2Disk } from '@guren/plugin-cloudflare'
 
   const storage = createStorageManager({ default: 'media' })
   if (isWorkersRuntime()) {
-    storage.registerDisk('media', () => new R2Driver({ binding: 'MEDIA', publicUrl: 'https://media.example.com' }), { driver: 'r2', binding: 'MEDIA' })
+    storage.registerDisk('media', ...r2Disk({ binding: 'MEDIA', publicUrl: 'https://media.example.com' }))
   } else {
     storage.registerDisk('media', () => new LocalStorageDriver({ root: './storage/app/public', url: '/storage' }))
   }

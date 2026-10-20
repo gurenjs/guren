@@ -55,5 +55,5 @@ export type {
   ReportBundleSizeOptions,
 } from './bundle-size'
 export type { BuildCloudflareOutputOptions } from './build'
-export { R2Driver } from './storage/R2Driver'
+export { R2Driver, r2Disk } from './storage/R2Driver'
 export type { R2DriverOptions, R2PresignOptions, R2BucketLike } from './storage/R2Driver'

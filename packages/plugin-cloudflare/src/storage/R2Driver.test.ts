@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test'
 import { FakeR2Bucket, type FakeR2BucketOptions } from './fake-r2-bucket'
 import { describeR2DriverConformance } from './r2-driver-conformance'
 import { captureWorkersEnv, resetWorkersEnv } from '../env'
-import { R2Driver, type R2DriverOptions } from './R2Driver'
+import { R2Driver, r2Disk, type R2DriverOptions } from './R2Driver'
 
 // The contract itself, shared with the opt-in workerd run.
 describeR2DriverConformance('R2Driver (FakeR2Bucket)', {
@@ -44,7 +44,9 @@ describe('R2Driver against the binding', () => {
     })
 
     test('should read a named binding from the captured env, and name it when the env lacks it', async () => {
+      resetWorkersEnv()
       const named = new R2Driver({ binding: 'MEDIA' })
+      expect(() => new R2Driver({ binding: '' })).toThrow('names no binding')
       await expect(named.exists('a.txt')).rejects.toThrow('R2Driver: the "MEDIA" binding was read before the first request')
       captureWorkersEnv({ MEDIA: bucket })
       try {
@@ -54,6 +56,13 @@ describe('R2Driver against the binding', () => {
       } finally {
         resetWorkersEnv()
       }
+    })
+
+    test('should give registerDisk() the factory and the binding introspection reports, from one options object', () => {
+      const [factory, description] = r2Disk({ binding: 'MEDIA', publicUrl: 'https://media.example.com' })
+      expect(description).toEqual({ driver: 'r2', binding: 'MEDIA' })
+      expect(factory()).toBeInstanceOf(R2Driver)
+      expect(r2Disk({ binding: () => bucket })[1]).toEqual({ driver: 'r2' })
     })
 
     test('should throw with wrangler guidance when the resolver returns nothing', async () => {

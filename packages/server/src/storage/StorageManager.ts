@@ -19,7 +19,7 @@ export class StorageManager {
   private readonly resolvedDisks: Map<string, StorageDriver> = new Map()
   /** The configured driver per disk, keyed like `diskFactories`; null for a bare `registerDisk()` factory. */
   private readonly diskDrivers: Map<string, string | null> = new Map()
-  /** The Workers binding a disk reads, when its registration names one as a string. */
+  /** The Workers binding a disk reads, when its `registerDisk()` description names one. */
   private readonly diskBindings: Map<string, string> = new Map()
   private driverFactories: Map<string, (options: unknown) => StorageDriver> = new Map()
 
@@ -67,8 +67,6 @@ export class StorageManager {
 
     this.diskFactories.set(name, () => factory(options))
     this.diskDrivers.set(name, driver)
-    const { binding } = options as { binding?: unknown }
-    if (typeof binding === 'string') this.diskBindings.set(name, binding)
   }
 
   disk(name?: string): StorageDriver {
