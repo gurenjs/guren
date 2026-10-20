@@ -25,19 +25,18 @@ function sanitizeFlyAppName(name: string): string {
   return normalized.length > 0 ? normalized : 'guren-app'
 }
 
-async function inferAppName(): Promise<string> {
-  const packagePath = resolve(process.cwd(), 'package.json')
+interface AppManifest {
+  name?: string
+  dependencies?: Record<string, string>
+}
 
+/** The app's package.json, or nothing when it is missing or invalid; callers fall back to the directory name. */
+async function readAppManifest(): Promise<AppManifest> {
   try {
-    const packageJson = JSON.parse(await readFile(packagePath, 'utf8')) as { name?: string }
-    if (packageJson.name?.trim()) {
-      return sanitizeFlyAppName(packageJson.name)
-    }
+    return JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8')) as AppManifest
   } catch {
-    // Fallback to directory name when package.json is missing or invalid.
+    return {}
   }
-
-  return sanitizeFlyAppName(basename(process.cwd()))
 }
 
 /**
@@ -195,13 +194,8 @@ interface CloudflareTarget {
   mcpOAuth: boolean
 }
 
-async function readCloudflareTarget(appName: string | undefined): Promise<CloudflareTarget> {
-  let manifest: { name?: string; dependencies?: Record<string, string> } = {}
-  try {
-    manifest = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8')) as typeof manifest
-  } catch {
-    // The directory name below stands in for a missing or unreadable package.json.
-  }
+/** The scope is dropped as `workerName()` in @guren/plugin-cloudflare drops it; keep the two alike. */
+function cloudflareTarget(appName: string | undefined, manifest: AppManifest): CloudflareTarget {
   const name = appName ?? manifest.name?.replace(/^@[^/]+\//u, '') ?? basename(process.cwd())
   return {
     worker: sanitizeFlyAppName(name),
@@ -238,8 +232,9 @@ export async function scaffoldDeploy(options: DeployOptions = {}): Promise<strin
   assertCwdUnsupported(options, 'guren deploy')
   const target = options.target ?? 'docker'
   const port = normalizePort(options.port)
-  const appName = sanitizeFlyAppName(options.appName ?? await inferAppName())
-  const cloudflare = target === 'cloudflare' ? await readCloudflareTarget(options.appName) : undefined
+  const manifest = await readAppManifest()
+  const appName = sanitizeFlyAppName(options.appName ?? (manifest.name?.trim() || basename(process.cwd())))
+  const cloudflare = target === 'cloudflare' ? cloudflareTarget(options.appName, manifest) : undefined
   const files = filesForTarget(target, appName, port, cloudflare)
   return writeScaffoldFiles(files, { force: Boolean(options.force), overwritten: options.overwritten })
 }

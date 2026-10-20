@@ -126,7 +126,7 @@ const UNREAD_SOURCES = [
   'the deployed Worker\'s bindings (RFC 0035 Open Question 9); the deploy\'s strict inheritance covers them',
 ]
 
-/** The concurrency group `guren deploy --target cloudflare` writes for a Worker. */
+/** The concurrency group `guren deploy --target cloudflare` writes for a Worker; @guren/cli's template spells it too. */
 export function deployConcurrencyGroup(worker: string): string {
   return `cloudflare-deploy-${worker}`
 }
