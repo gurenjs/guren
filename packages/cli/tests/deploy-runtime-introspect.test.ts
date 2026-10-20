@@ -251,7 +251,7 @@ async function workersApp(name: string, app: string): Promise<string> {
 function databaseDialect(result: Awaited<ReturnType<typeof introspectApp>>): unknown {
   if (result.status !== 'ok') throw new Error(`introspection failed: ${JSON.stringify(result)}`)
   const section = readManifestSection(result.manifest, 'database')
-  return section.status === 'described' ? section.value.dialect : section
+  return section.status === 'described' ? section.value?.dialect : section
 }
 
 describe('introspecting the Cloudflare branch (RFC 0035 §2.1)', () => {
