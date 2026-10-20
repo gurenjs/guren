@@ -2,10 +2,11 @@ import { describe, expect, it } from 'bun:test'
 import { runAudit, type AuditReport } from '../src/audit'
 import { createTempWorkspace, writeWorkspaceFiles } from './helpers'
 
-async function audit(files: Record<string, string>): Promise<AuditReport> {
+/** Audits the schema and User model below plus `files`; pass `withUser: false` to leave User out. */
+async function audit(files: Record<string, string>, { withUser = true } = {}): Promise<AuditReport> {
   const workspace = await createTempWorkspace('guren-cli-audit-owner-fillable-')
   try {
-    await writeWorkspaceFiles(workspace.dir, files)
+    await writeWorkspaceFiles(workspace.dir, { 'db/schema.ts': schema, ...(withUser ? { 'app/Models/User.ts': user } : {}), ...files })
     return await runAudit({ cwd: workspace.dir })
   } finally {
     await workspace.cleanup()
@@ -48,8 +49,6 @@ const owner = (report: AuditReport, name: string) => report.findings.find((f) =>
 describe('owner column in fillable', () => {
   it('warns on a fillable column that references the users table', async () => {
     const report = await audit({
-      'db/schema.ts': schema,
-      'app/Models/User.ts': user,
       'app/Models/Post.ts': model('Post', 'posts', ['title', 'authorId']),
     })
     const found = owner(report, 'Post')
@@ -61,8 +60,6 @@ describe('owner column in fillable', () => {
 
   it('reads a table-level foreignKey to the users table too', async () => {
     const report = await audit({
-      'db/schema.ts': schema,
-      'app/Models/User.ts': user,
       'app/Models/Note.ts': model('Note', 'notes', ['ownerId']),
     })
     expect(owner(report, 'Note')?.message).toContain("'ownerId'")
@@ -70,8 +67,6 @@ describe('owner column in fillable', () => {
 
   it('says nothing when the owner column stays out of fillable', async () => {
     const report = await audit({
-      'db/schema.ts': schema,
-      'app/Models/User.ts': user,
       'app/Models/Post.ts': model('Post', 'posts', ['title']),
     })
     expect(owner(report, 'Post')).toBeUndefined()
@@ -79,18 +74,13 @@ describe('owner column in fillable', () => {
 
   it('says nothing about a fillable foreign key to another table', async () => {
     const report = await audit({
-      'db/schema.ts': schema,
-      'app/Models/User.ts': user,
       'app/Models/Post.ts': model('Post', 'posts', ['title', 'categoryId']),
     })
     expect(owner(report, 'Post')).toBeUndefined()
   })
 
   it('says nothing when no model is authenticatable, so no table is the users table', async () => {
-    const report = await audit({
-      'db/schema.ts': schema,
-      'app/Models/Post.ts': model('Post', 'posts', ['title', 'authorId']),
-    })
+    const report = await audit({ 'app/Models/Post.ts': model('Post', 'posts', ['title', 'authorId']) }, { withUser: false })
     expect(owner(report, 'Post')).toBeUndefined()
   })
 })

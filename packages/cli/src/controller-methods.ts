@@ -232,6 +232,17 @@ export const AUTHORIZATION_CALL_PATTERN = controllerMemberCall('authorize', 'can
  */
 const GATE_CALL_PATTERN = /\b[gG]ate\s*\.\s*(?:allows|denies|any|all|none|authorize|inspect|check|forUser)\s*\(/
 
+const ABILITY_LITERAL_PATTERN = /\bthis\s*\.\s*(?:authorize|can)\s*\(\s*(['"`])([^'"`]+)\1/g
+
+/**
+ * The abilities an action names as string literals in `this.authorize()` / `this.can()`, read
+ * from `rawBody` where the blanked `body` (same offsets) still holds code, so a comment or a
+ * string that spells one is not a check.
+ */
+export function literalAbilities(body: string, rawBody: string): string[] {
+  return [...rawBody.matchAll(ABILITY_LITERAL_PATTERN)].filter((match) => body.startsWith('this', match.index)).map((match) => match[2]!)
+}
+
 /** Whether an action body shows an authorization decision: {@link AUTHORIZATION_CALL_PATTERN} or a gate asked by hand. */
 export function consultsAuthorization(body: string): boolean {
   return AUTHORIZATION_CALL_PATTERN.test(body) || GATE_CALL_PATTERN.test(body)

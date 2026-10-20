@@ -1,5 +1,4 @@
-import { resolve, relative, sep } from 'node:path'
-import type { ClassDeclaration } from '@babel/types'
+import { resolve, relative } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { consola } from 'consola'
 import {
@@ -10,6 +9,7 @@ import {
   classNameFromPath,
   isDefinitelyAbsent,
   listModuleNames,
+  moduleNameFor,
 } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
 import { routesEntryOrDefault } from './route-registrar'
@@ -70,7 +70,7 @@ import {
   type IntrospectSource,
 } from './manifest-section'
 import { describeMethod } from './http-methods'
-import { parseSchemaTables, type SchemaTable } from './schema-parser'
+import { parseSchemaTables, tableColumnsOf, type SchemaTable } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
 import {
   agentToolActions,
@@ -80,7 +80,7 @@ import {
   type AiLocalToolListing,
 } from './ai-local-tools-audit'
 import { auditCsrfExemptions, DECLARE_CALL_PATTERN, type CsrfExemptionScan } from './csrf-exemption-audit'
-import { auditAuthorization, GUEST_PATH_PATTERN } from './authorization-audit'
+import { auditAuthorization, GUEST_PATH_PATTERN, isEditFormRoute } from './authorization-audit'
 
 export type AuditStatus = 'pass' | 'warn' | 'fail' | 'ignored'
 
@@ -760,9 +760,8 @@ async function auditIntrospectSource(
 
 /** A route the validation, authentication or policy rule judges. */
 function isJudgedRoute(route: Pick<RouteDefinition, 'method' | 'controller'>): boolean {
-  const method = route.method.toUpperCase()
-  const { safe, bodyCarrying } = describeMethod(method)
-  return !safe || bodyCarrying || (method === 'GET' && route.controller?.action === 'edit')
+  const { safe, bodyCarrying } = describeMethod(route.method.toUpperCase())
+  return !safe || bodyCarrying || isEditFormRoute(route)
 }
 
 function auditRoutes(
@@ -1256,25 +1255,31 @@ function parseModelSerializationInfo(source: string, filePath: string): ModelSer
 
 async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void> {
   const modelFiles = await discoverModelFiles(cwd)
-  const tables = modelFiles.length > 0 ? await parseSchemaTables(cwd) : []
-  const schemaTables = tables.length > 0 ? new Map(tables.map((table) => [table.identifier, table.columns.map((column) => column.name)])) : null
-  const models = await Promise.all(modelFiles.map(async (filePath) => {
-    const source = await readFile(filePath, 'utf-8')
-    const ast = parseSourceFile(source, filePath)
-    const classDecl = ast ? firstClassDeclaration(ast.program.body) : null
-    const table = classDecl ? extractTableIdentifier(classDecl) : undefined
-    return { filePath, source, classDecl, table, module: moduleOf(relative(cwd, filePath)) }
-  }))
+  const [tables, models] = await Promise.all([
+    modelFiles.length > 0 ? parseSchemaTables(cwd) : [],
+    Promise.all(modelFiles.map(async (filePath) => {
+      const source = await readFile(filePath, 'utf-8')
+      // AST classification, not source text: a comment mentioning
+      // AuthenticatableModel must not flip this model to structurally protected.
+      const ast = parseSourceFile(source, filePath)
+      const classDecl = ast ? firstClassDeclaration(ast.program.body) : null
+      return {
+        filePath,
+        source,
+        classDecl,
+        table: classDecl ? extractTableIdentifier(classDecl) : undefined,
+        scope: moduleNameFor(cwd, filePath) ?? '',
+        isAuthenticatable: classDecl ? classUsesAuthenticatableBase(classDecl) : false,
+      }
+    })),
+  ])
+  const schemaTables = tables.length > 0 ? tableColumnsOf(tables) : null
   const ownerColumns = ownerColumnsOf(tables, models)
 
-  for (const { filePath, source, classDecl, table, module } of models) {
+  for (const { filePath, source, classDecl, table, scope, isAuthenticatable } of models) {
     const relPath = relative(cwd, filePath)
     const name = classNameFromPath(filePath)
-
-    // AST classification, not source text: a comment mentioning
-    // AuthenticatableModel must not flip this model to structurally protected.
     const hasFillable = classDecl ? hasModelConfig(classDecl, 'fillable') : false
-    const isAuthenticatable = classDecl ? classUsesAuthenticatableBase(classDecl) : false
 
     // Authenticatable models deny their credential columns from mass assignment
     // structurally, so a missing fillable is not the exposure it is elsewhere.
@@ -1297,7 +1302,7 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
 
     // A fillable column that references the users table lets a request choose which user a record belongs to.
     const fillable = classDecl && !isAuthenticatable ? resolveModelStringArrayConfig(classDecl, 'fillable') : undefined
-    const owners = fillable && table ? (ownerColumns.get(`${module ?? ''}:${table}`) ?? []).filter((owner) => fillable.includes(owner.column)) : []
+    const owners = fillable && table ? (ownerColumns.get(`${scope}:${table}`) ?? []).filter((owner) => fillable.includes(owner.column)) : []
     if (owners.length > 0) {
       const listed = owners.map((owner) => `'${owner.column}'`).join(', ')
       findings.push(
@@ -1350,12 +1355,6 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
   }
 }
 
-/** `modules/<name>/...` → the module name; null for the application root. */
-function moduleOf(relPath: string): string | null {
-  const match = /^modules\/([^/]+)\//.exec(relPath.split(sep).join('/'))
-  return match ? match[1]! : null
-}
-
 /**
  * Per `<module>:<table>` (module empty for the root), the columns referencing the table of an
  * authenticatable model in the same root, by a column `.references()` or a table-level
@@ -1364,11 +1363,9 @@ function moduleOf(relPath: string): string | null {
  */
 function ownerColumnsOf(
   tables: SchemaTable[],
-  models: Array<{ classDecl: ClassDeclaration | null; table?: string; module: string | null }>,
+  models: Array<{ table?: string; scope: string; isAuthenticatable: boolean }>,
 ): Map<string, Array<{ column: string; users: string }>> {
-  const userTables = new Set(
-    models.filter((model) => model.classDecl && model.table && classUsesAuthenticatableBase(model.classDecl)).map((model) => `${model.module ?? ''}:${model.table}`),
-  )
+  const userTables = new Set(models.filter((model) => model.table && model.isAuthenticatable).map((model) => `${model.scope}:${model.table}`))
   const result = new Map<string, Array<{ column: string; users: string }>>()
   for (const table of tables) {
     const scope = table.module ?? ''

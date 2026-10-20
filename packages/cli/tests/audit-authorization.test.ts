@@ -492,4 +492,3 @@ ${editBody}
     expect(report.findings.find((f) => f.key === 'policy:GET /posts/:id')).toBeUndefined()
   })
 })
-

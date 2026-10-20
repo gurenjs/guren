@@ -13,6 +13,7 @@ import type { CheckEvidence } from './check-result'
 import {
   consultsAuthorization,
   controllerMethodFor,
+  literalAbilities,
   type ControllerMethodScan,
 } from './controller-methods'
 import { classNameFromPath, discoverPolicyFiles, moduleNameFromRelPath, toPosixRelative } from './discovery'
@@ -118,7 +119,7 @@ async function authorizeSuggestion(
   controllerKey: string,
   { model, policy, policyFile }: PolicyBinding,
   cache: ParseCache,
-  editForm: boolean,
+  target: { ability: string; when: string },
 ): Promise<string> {
   const parsed = await cache.get(policyFile)
   const abilities = parsed ? readPolicyAbilities(parsed.ast, policy) : null
@@ -126,16 +127,14 @@ async function authorizeSuggestion(
     ? `${policy} declares ${abilities.declared.join(', ') || 'no ability yet'}`
     : `${policy} could not be read as a policy`
   return (
-    `Call await this.authorize('${editForm ? 'update' : '<ability>'}', [${model}, ${camelCase(model)}]) in ${controllerKey} `
-    + `${editForm ? 'before rendering the form' : 'before the write'} `
+    `Call await this.authorize('${target.ability}', [${model}, ${camelCase(model)}]) in ${controllerKey} ${target.when} `
     + `(${declared}), or attach authorize()/authorizeResource() middleware to the route. A helper the action `
     + 'calls is not read: if it authorizes there, say so in a // guren-audit-ignore comment above the action.'
   )
 }
 
 /**
- * One finding per mutating controller route, and per GET route to an `edit` action (the
- * resource convention for a record's edit form), keyed `policy:<METHOD> <path>`,
+ * One finding per mutating controller route, and per {@link isEditFormRoute}, keyed `policy:<METHOD> <path>`,
  * once the app has at least one policy; an app with none contributes nothing.
  * Route-level on purpose: the finding carries no `line`, so `config/audit.ts`
  * ignores it by key (a `line` would make every such entry `unsupported`); a
@@ -158,9 +157,11 @@ export async function auditAuthorization(
 
   for (const route of routes) {
     const method = route.method.toUpperCase()
-    // The one safe route judged: the resource `edit` action renders a record's edit form.
-    const editForm = method === 'GET' && route.controller?.action === 'edit'
+    const editForm = isEditFormRoute(route)
     if ((describeMethod(method).safe && !editForm) || !route.controller || GUEST_PATH_PATTERN.test(route.path)) continue
+    const target = editForm
+      ? { ability: 'update', when: 'before rendering the form', subject: "a record's edit form" }
+      : { ability: '<ability>', when: 'before the write', subject: 'a mutating route' }
 
     const routeLabel = `${method} ${route.path}`
     const push = (status: AuditFinding['status'], message: string, rest: Partial<AuditFinding> = {}) =>
@@ -217,34 +218,33 @@ export async function auditAuthorization(
         ? `${controllerKey} (${info.filePath}:${info.line}) renders a record's edit form for ${describeBindings(touched)} `
           + `but only checks the '${readOnlyCheck}' ability, which lets anyone who may read the record open its form.`
         : `${controllerKey} (${info.filePath}:${info.line}) references ${describeBindings(touched)} on `
-          + `${editForm ? "a record's edit form" : 'a mutating route'}, and neither the middleware chain nor the action body shows an authorization check.`
+          + `${target.subject}, and neither the middleware chain nor the action body shows an authorization check.`
     const marker = info.leadingComments.find((comment) => comment.includes(AUDIT_IGNORE_MARKER))
     if (marker !== undefined) {
       push('ignored', message, { ignoreReason: marker, filePath: info.filePath })
       continue
     }
     push('warn', message, {
-      suggestion: await authorizeSuggestion(controllerKey, touched[0]!, cache, editForm),
+      suggestion: await authorizeSuggestion(controllerKey, touched[0]!, cache, target),
       filePath: info.filePath,
     })
   }
 }
 
-const LITERAL_ABILITY_PATTERN = /\bthis\.(?:authorize|can)\(\s*['"`]([A-Za-z]+)['"`]/g
+/** The one safe route the policy rule judges: GET to an `edit` action, the resource convention for a record's edit form. */
+export function isEditFormRoute(route: { method: string; controller?: { action: string } }): boolean {
+  return route.method.toUpperCase() === 'GET' && route.controller?.action === 'edit'
+}
+
 const EDIT_ABILITIES = new Set(['update', 'edit'])
 
 /**
  * The ability an edit form's action checks when every literal one is a read-only ability
  * (`view`): the form then opens for anyone who may read the record. Undefined when a literal
- * names update/edit, or no ability is a literal (a variable is not judged). Literals are read
- * from `rawBody` at offsets where the blanked `body` holds the same call, so a comment or a
- * string that spells one is not a check.
+ * names update/edit, or no ability is a literal (a variable is not judged).
  */
 function readOnlyAbility(body: string, rawBody: string): string | undefined {
-  const abilities = [...rawBody.matchAll(LITERAL_ABILITY_PATTERN)]
-    .filter((match) => body.startsWith(match[0].slice(0, match[0].indexOf('(') + 1), match.index))
-    .map((match) => match[1]!)
+  const abilities = literalAbilities(body, rawBody)
   if (abilities.length === 0 || abilities.some((ability) => EDIT_ABILITIES.has(ability))) return undefined
   return abilities[0]
 }
-
