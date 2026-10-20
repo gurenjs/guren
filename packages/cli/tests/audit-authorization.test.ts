@@ -459,6 +459,10 @@ describe('policy authorization leaves out a model the action only loads', () => 
     await remove(post)`],
     ['a field of the loaded record assigned', `    const post = await Post.findOrFail(1)
     post.title = 'x'`],
+    ['a field of the loaded record incremented', `    const post = await Post.findOrFail(1)
+    post.views += 1`],
+    ['a method called on a field of the loaded record', `    const post = await Post.findOrFail(1)
+    post.tags.push('x')`],
   ])('warns when the write may come through %s', async (_shape, body) => {
     const report = await withWorkspace(app({
       'app/Http/Controllers/PostController.ts': controller(`${body}

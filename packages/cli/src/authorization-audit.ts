@@ -18,6 +18,7 @@ import {
 } from './controller-methods'
 import { classNameFromPath, discoverPolicyFiles, moduleNameFromRelPath, toPosixRelative } from './discovery'
 import { describeMethod } from './http-methods'
+import { findClosingDelimiter } from './patch-helpers'
 import { discoverModelClasses } from './model-parser'
 import type { ParseCache } from './parse-cache'
 import { readPolicyAbilities } from './plan/policy-abilities'
@@ -266,25 +267,19 @@ function onlyLoadsRecords(body: string, references: RegExp[]): boolean {
       const head = /^\s*\.\s*(?:find|findOrFail)\s*\(/.exec(body.slice(match.index + match[0].length))
       const declared = /\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*await\s*$/.exec(body.slice(0, match.index))
       if (!head || !declared) return false
-      const close = closingParen(body, match.index + match[0].length + head[0].length - 1)
-      if (close === -1 || /^\s*[.?[]/.test(body.slice(close + 1))) return false
+      const close = findClosingDelimiter(body, match.index + match[0].length + head[0].length - 1, '(', ')')
+      if (close === -1) return false
       const rest = body.slice(close + 1)
-      for (const use of rest.matchAll(new RegExp(`(?<![\\w$.])${declared[1]!.replace(/\$/g, '\\$')}(?![\\w$])`, 'g'))) {
-        const after = rest.slice(use.index + use[0].length)
-        if (!/^\s*\??\.\s*[A-Za-z_$][\w$]*(?![\w$]|\s*(?:\(|=(?!=)))/.test(after)) return false
+      if (/^\s*[.?[]/.test(rest)) return false
+      for (const use of rest.matchAll(new RegExp(wholeIdentifierPattern(declared[1]!).source, 'g'))) {
+        if (!FIELD_READ.test(rest.slice(use.index + use[0].length))) return false
       }
       loads += 1
     }
   }
+  // Fail closed for a caller that passes a model the body never names.
   return loads > 0
 }
 
-/** Index of the `)` closing the `(` at `open` in a blanked body, or -1. */
-function closingParen(body: string, open: number): number {
-  let depth = 0
-  for (let index = open; index < body.length; index += 1) {
-    if (body[index] === '(') depth += 1
-    else if (body[index] === ')' && --depth === 0) return index
-  }
-  return -1
-}
+/** `.field` read and nothing more: not called, indexed, chained, assigned or incremented. */
+const FIELD_READ = /^\s*\??\.\s*[A-Za-z_$][\w$]*(?![\w$])(?!\s*(?:[.([]|\?\.|\+\+|--|(?:[-+*/%&|^]|\*\*|<<|>>>?|&&|\|\||\?\?)?=(?!=)))/
