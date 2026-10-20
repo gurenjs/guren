@@ -8,13 +8,12 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
-import { isRecord } from './backend'
+import { isRecord, readPackageJson } from './backend'
 import {
   OAUTH_KV_BINDING,
   asArray,
   configScopes,
   isPlaceholderId,
-  readPackageJson,
   readWranglerConfig,
   workerName,
 } from './build'

@@ -24,23 +24,32 @@ export function detectCloudflareBackend(root: string): CloudflareBackend {
 
 /** Whether the app declares `name` at all: a CLI like `cf` belongs in devDependencies. */
 function appDeclares(root: string, name: string): boolean {
-  const manifest = readManifestDependencies(root)
+  const manifest = readPackageJson(root)
   return (manifest.dependencies?.[name] ?? manifest.devDependencies?.[name]) !== undefined
 }
 
-export function readManifestDependencies(root: string): {
+export interface PackageJsonLike {
+  name?: string
+  scripts?: Record<string, string>
   dependencies?: Record<string, string>
   devDependencies?: Record<string, string>
-} {
+}
+
+/** The app's package.json; an absent, unreadable or malformed one reads as `{}`, and a non-object field as absent. */
+export function readPackageJson(root: string): PackageJsonLike {
+  let manifest: unknown
   try {
-    const manifest: unknown = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
-    if (!isRecord(manifest)) return {}
-    return {
-      dependencies: isRecord(manifest.dependencies) ? (manifest.dependencies as Record<string, string>) : undefined,
-      devDependencies: isRecord(manifest.devDependencies) ? (manifest.devDependencies as Record<string, string>) : undefined,
-    }
+    manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
   } catch {
     return {}
+  }
+  if (!isRecord(manifest)) return {}
+  const record = (value: unknown) => (isRecord(value) ? (value as Record<string, string>) : undefined)
+  return {
+    ...(typeof manifest.name === 'string' ? { name: manifest.name } : {}),
+    scripts: record(manifest.scripts),
+    dependencies: record(manifest.dependencies),
+    devDependencies: record(manifest.devDependencies),
   }
 }
 

@@ -1,10 +1,9 @@
 import { defineCommand } from 'citty'
-import { detectCloudflareBackend } from './backend'
 import { buildCloudflareOutput } from './build'
 import { runCloudflareDeploy } from './deploy/deploy'
 import { initCloudflare } from './init'
 import { formatResult } from './deploy/report'
-import { printBundleReport, reportBundleSize } from './bundle-size'
+import { assertSizeReportable, printBundleReport, reportBundleSize } from './bundle-size'
 
 const rootArg = {
   type: 'string',
@@ -24,7 +23,7 @@ function topOf(value: string | undefined): number | undefined {
 const cloudflareBuild = defineCommand({
   meta: {
     name: 'cloudflare:build',
-    description: 'Assemble a Cloudflare Workers deployment (.cloudflare/) from the app build',
+    description: 'Assemble a Cloudflare Workers deployment from the app build (.cloudflare/, or .guren/cloudflare/ on the cf backend)',
   },
   args: {
     root: rootArg,
@@ -54,9 +53,8 @@ const cloudflareBuild = defineCommand({
   },
   async run({ args }) {
     const rootDir = args.root || process.cwd()
-    if (args['report-size'] && detectCloudflareBackend(rootDir) === 'cf') {
-      throw new Error('Cloudflare build: --report-size measures through wrangler.jsonc, and this app deploys through cf. Drop the flag; `cf build` writes the bundle to .cloudflare/output/.')
-    }
+    // Before the build, so a flag that cannot be honoured does not end a good build with an error.
+    if (args['report-size']) assertSizeReportable(rootDir)
     await buildCloudflareOutput({
       rootDir,
       skipAppBuild: Boolean(args['skip-app-build']),

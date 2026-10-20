@@ -40,14 +40,9 @@ import {
   type ResolvedResource,
   type WorkerManifest,
 } from './worker-manifest'
-import { detectCloudflareBackend, readManifestDependencies } from './backend'
+import { detectCloudflareBackend, isRecord, readPackageJson } from './backend'
 import type { CloudflareDeployConfig } from './config'
 import { readLocalMigrations } from './deploy/migrations'
-
-interface PackageJsonLike {
-  name?: string
-  scripts?: Record<string, string>
-}
 
 export interface BuildCloudflareOutputOptions {
   /** App root directory. Defaults to the current working directory. */
@@ -87,10 +82,11 @@ export interface BuildCloudflareOutputOptions {
 }
 
 /**
- * Assemble a deployable Cloudflare Workers directory (`.cloudflare/`) from a
- * built Guren app: a generated worker entry that statically wires the SSR
- * bundle, static assets for Workers Static Assets, and a one-time
- * `wrangler.jsonc` scaffold. Deploy with `wrangler deploy`.
+ * Assemble a deployable Cloudflare Workers directory from a built Guren app: a
+ * generated worker entry that statically wires the SSR bundle, and static assets
+ * for Workers Static Assets. On the Wrangler backend it goes to `.cloudflare/` with
+ * a one-time `wrangler.jsonc` scaffold; on the cf backend to `.guren/cloudflare/`
+ * with the `guren-worker.json` manifest `gurenWorker()` reads (RFC 0035 §3).
  */
 export async function buildCloudflareOutput(options: BuildCloudflareOutputOptions = {}): Promise<void> {
   const root = resolvePathLike(options.rootDir ?? process.cwd())
@@ -431,7 +427,7 @@ function assertOAuthKvBound(root: string): void {
   throw new Error(
     `Cloudflare build: --mcp-oauth needs a KV namespace bound as ${OAUTH_KV_BINDING} — the OAuth provider stores its clients, grants and tokens there — and ${configPath} has none. Add this entry, alongside whatever the file already has:\n`
     + `  "kv_namespaces": [\n`
-    + `    ${JSON.stringify(oauthKvNamespace(), null, 2).split('\n').join('\n    ')}\n`
+    + `    ${JSON.stringify(OAUTH_KV_NAMESPACE, null, 2).split('\n').join('\n    ')}\n`
     + `  ]\n`
     + `With no "id", \`wrangler deploy\` creates the namespace on the first deploy. To use one you created yourself, add its id from: wrangler kv namespace create ${OAUTH_KV_BINDING}`,
   )
@@ -448,16 +444,14 @@ export function bindsOAuthKv(config: Record<string, unknown>): boolean {
  * The binding entry, spelled once — the scaffold writes it, the guard quotes it.
  * No `id`: an id-less binding is what wrangler's own provisioning creates at deploy.
  */
-function oauthKvNamespace(): Record<string, string> {
-  return { binding: OAUTH_KV_BINDING }
-}
+const OAUTH_KV_NAMESPACE = { binding: OAUTH_KV_BINDING }
 
 /**
  * Whether the app declares `name` under `dependencies` (devDependencies do not
  * ship). An absent, unreadable or malformed manifest answers `false`.
  */
 function appDependsOn(root: string, name: string): boolean {
-  return readManifestDependencies(root).dependencies?.[name] !== undefined
+  return readPackageJson(root).dependencies?.[name] !== undefined
 }
 
 
@@ -610,10 +604,6 @@ function isInside(root: string, target: string): boolean {
   return rel !== '' && !rel.startsWith('..') && !rel.startsWith(`..${sep}`)
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 /**
  * Refuse an app hosting agents that did not install the plugin, before anything
  * is built. Same shape as {@link assertMcpOAuthUsable}: wrangler resolves the
@@ -704,11 +694,7 @@ export function configScopes(config: Record<string, unknown>): ConfigScope[] {
   return scopes
 }
 
-/**
- * wrangler provisions only a binding with no id, so a placeholder id such as
- * `TODO: wrangler d1 create` fails the deploy. D1 ids are UUIDs and KV ids 32 hex
- * digits, so anything but hex and hyphens, or all zeros, is a placeholder.
- */
+/** wrangler provisions only a binding with no id, so a placeholder id (`isPlaceholderId()`) fails the deploy. */
 function warnPlaceholderIds(root: string): void {
   const configPath = resolve(root, 'wrangler.jsonc')
   const config = readWranglerConfig(configPath)
@@ -1138,19 +1124,6 @@ function warnHeaderRuleBudget(merged: string, existing: string): void {
   )
 }
 
-export function readPackageJson(root: string): PackageJsonLike {
-  const packageJsonPath = resolve(root, 'package.json')
-  if (!existsSync(packageJsonPath)) {
-    return {}
-  }
-
-  try {
-    return JSON.parse(readFileSync(packageJsonPath, 'utf8')) as PackageJsonLike
-  } catch {
-    return {}
-  }
-}
-
 function runAppBuild(root: string, scripts: Record<string, string>, toStderr: boolean): void {
   if (!scripts.build) {
     throw new Error(
@@ -1540,7 +1513,7 @@ function scaffoldWranglerConfig(
     // MCP endpoint with OAuth has nothing to store in this namespace, and a
     // binding scaffolded "just in case" is a namespace someone has to create
     // before the config validates.
-    ...(mcpOAuth ? { kv_namespaces: [oauthKvNamespace()] } : {}),
+    ...(mcpOAuth ? { kv_namespaces: [OAUTH_KV_NAMESPACE] } : {}),
     // The legacy `migrations` list rather than the declarative `exports` map:
     // both are accepted by the verifier and by wrangler, and this is the form
     // the agents SDK documents and the workerd test lane runs.
