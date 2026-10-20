@@ -4,9 +4,9 @@
  * to the account before the plan has no blocker and the run is confirmed, and
  * nothing is ever deleted: a failure reports what this run created instead.
  */
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { createInterface } from 'node:readline/promises'
-import { dirname, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import {
   ALLOW_DESTRUCTIVE_ENV,
   judgePendingMigrations,
@@ -16,43 +16,20 @@ import {
 
 import { detectCloudflareBackend, isRecord } from '../backend'
 import { buildCloudflareOutput, readResolvedResources, readWorkerManifest } from '../build'
-import { CF_OUTPUT_DIR, WORKER_MANIFEST_FILE, type ResolvedResource } from '../worker-manifest'
-import {
-  applyMigrations,
-  appCfRunner,
-  cfBuild,
-  createD1Database,
-  createKvNamespace,
-  deployPrebuilt,
-  getBookmark,
-  checkAuth,
-  listD1Databases,
-  listKvNamespaces,
-  listWorkerSecrets,
-  readMigrationTracker,
-  type CfRunner,
-  type Read,
-} from './cf-cli'
-import { decideLayout, fingerprintMigrations, migrationDirArgs, readLocalMigrations } from './migrations'
+import { WORKER_MANIFEST_FILE, type ResolvedResource } from '../worker-manifest'
+import { cfDeployBackend, type DeployBackend } from './backends'
+import type { CfRunner, Read } from './cf-cli'
+import { decideLayout, fingerprintMigrations, readLocalMigrations } from './migrations'
 import { formatPlan } from './report'
 import {
   buildPlan,
   hasBlocker,
   type DeployPlan,
-  type EvaluatedBinding,
   type EvaluatedWorker,
   type MigrationInput,
   type PlannedBinding,
   type SecretsInput,
 } from './plan'
-
-/** cf refuses to load cloudflare.config.ts on older Node (RFC 0035 Appendix C row 10). */
-const NODE_FLOOR = '22.18.0'
-/** The Wrangler cf delegates the bundle to (Appendix C row 17); `-0` admits its pre-releases. */
-const WRANGLER_FLOOR = '4.136.0'
-
-/** Where `cf build` writes the evaluated Worker configuration. */
-const EVALUATED_CONFIG = '.cloudflare/output/v0/workers/default/worker.config.json'
 
 export interface CloudflareDeployOptions {
   root: string
@@ -85,7 +62,7 @@ interface Prepared {
   /** Whether a person can answer the prompt, decided once for the plan and the run. */
   interactive: boolean
   root: string
-  cf: CfRunner
+  backend: DeployBackend
   databaseBinding: string | undefined
 }
 
@@ -95,9 +72,16 @@ export async function planCloudflareDeploy(options: CloudflareDeployOptions): Pr
 
 async function prepare(options: CloudflareDeployOptions): Promise<Prepared> {
   const root = resolve(options.root)
-  const cfBin = resolvePackageFile(root, 'cf/package.json')
-  const cf = options.cf ?? appCfRunner(root, join(dirname(cfBin ?? join(root, 'node_modules/cf/package.json')), 'bin', 'cf'))
-  preflight(root, cf, cfBin, options.nodeVersion ?? nodeOnPathVersion)
+  if (detectCloudflareBackend(root) !== 'cf') {
+    throw new Error(
+      'Cloudflare deploy: needs the cf backend, a cloudflare.config.ts and `cf` declared (see the Cloudflare guide). An app deploying through wrangler.jsonc keeps using `cloudflare:build` and `wrangler deploy`.',
+    )
+  }
+  const backend = cfDeployBackend({ root, ...(options.cf ? { cf: options.cf } : {}), ...(options.nodeVersion ? { nodeVersion: options.nodeVersion } : {}) })
+  const problems = backend.preflight()
+  if (problems.length > 0) {
+    throw new Error(`Cloudflare deploy: preflight failed, before anything was built:\n  ${problems.join('\n  ')}`)
+  }
 
   await withStdoutLogs(options.logToStderr === true, () =>
     buildCloudflareOutput({
@@ -108,39 +92,46 @@ async function prepare(options: CloudflareDeployOptions): Promise<Prepared> {
       appBuildToStderr: options.logToStderr,
     }))
 
-  // A file left by an earlier build must not pass for this evaluation.
-  rmSync(join(root, EVALUATED_CONFIG), { force: true })
-  const built = cfBuild(cf)
-  if (!built.ok) {
-    throw new Error(`Cloudflare deploy: \`cf build\` failed, so cloudflare.config.ts could not be evaluated:\n${built.reason}`)
-  }
-
   const interactive = options.interactive ?? Boolean(process.stdin.isTTY)
-  const worker = readEvaluatedWorker(root)
+  const worker = backend.evaluate()
   const uses = (type: string) => Object.values(worker.env).some((entry) => entry.type === type)
   const unlisted: Read<never[]> = { ok: true, value: [] }
-  const previous = readWorkerManifest(join(root, CF_OUTPUT_DIR))
+  const outDir = join(root, backend.outputDir)
+  const previous = readWorkerManifest(outDir)
   const context = {
     worker,
     manifest: {
-      resolved: readResolvedResources(join(root, CF_OUTPUT_DIR)),
+      resolved: readResolvedResources(outDir),
       ...(isRecord(previous.resourceNames) ? { resourceNames: previous.resourceNames } : {}),
     },
-    d1: uses('d1') ? listD1Databases(cf) : unlisted,
-    kv: uses('kv') ? listKvNamespaces(cf) : unlisted,
+    d1: uses('d1') ? backend.list('d1') : unlisted,
+    kv: uses('kv') ? backend.list('kv') : unlisted,
     mayCreate: Boolean(options.provision) || (!options.ci && (interactive || Boolean(options.yes))),
   }
   // Bindings first: the migrations read the database the plan resolved the build's D1 binding to.
-  const databaseBinding = previous.d1?.binding
-  const database = buildPlan(context).bindings.find((binding) => binding.binding === databaseBinding)
+  const bindings = buildPlan(context).bindings
+  backend.prepareReads(bindings)
+  const chosen = backend.migrationsBinding(worker)
+  const databaseBinding = chosen.ok ? chosen.value : undefined
+  const database = bindings.find((binding) => binding.binding === databaseBinding)
   const plan = buildPlan({
     ...context,
     ...(process.env.GITHUB_ACTIONS === 'true' ? { workflow: readRunningWorkflow(root) } : {}),
     ...(typeof previous.scheduleUnreadable === 'string' ? { scheduleUnreadable: previous.scheduleUnreadable } : {}),
-    migrations: database && !options.skipMigrations ? readMigrations(root, cf, database, options) : undefined,
-    secrets: await readSecrets(root, cf, worker, options.secretsFile),
+    migrations: options.skipMigrations
+      ? undefined
+      : !chosen.ok
+        ? unchosenDatabase(root, chosen.reason)
+        : database ? readMigrations(root, backend, database, options) : undefined,
+    secrets: await readSecrets(backend, worker, options.secretsFile, root),
   })
-  return { plan, interactive, root, cf, databaseBinding }
+  return { plan, interactive, root, backend, databaseBinding }
+}
+
+/** No D1 binding could be picked for `db/migrations`: a blocker only when there is something to apply. */
+function unchosenDatabase(root: string, reason: string): MigrationInput | undefined {
+  const local = readLocalMigrations(join(root, 'db', 'migrations'))
+  return local.folders.length === 0 && local.files.length === 0 ? undefined : { status: 'unreadable', reason }
 }
 
 export interface CreatedResource {
@@ -196,11 +187,18 @@ async function confirmOnTerminal(plan: DeployPlan): Promise<boolean> {
 }
 
 async function applyPlan(prepared: Prepared, options: CloudflareDeployOptions): Promise<DeployResult> {
-  const { plan, root, cf, databaseBinding } = prepared
+  const { plan, root, backend, databaseBinding } = prepared
   const result: DeployResult = { plan, created: [] }
-  const fail = (stage: string, message: string, bookmark?: { id: string; value: string }): DeployResult => ({
+  const fail = (stage: string, message: string, bookmark?: { id: string; name: string; value: string }): DeployResult => ({
     ...result,
-    failure: { stage, message, cleanup: cleanupCommands(result.created, bookmark) },
+    failure: {
+      stage,
+      message,
+      cleanup: [
+        ...(bookmark ? [backend.restoreCommand(bookmark, bookmark.value)] : []),
+        ...result.created.map((resource) => backend.deleteCommand(resource)),
+      ],
+    },
   })
 
   // Stage 4: create what is missing, then settle every binding's identity in the manifest.
@@ -208,7 +206,7 @@ async function applyPlan(prepared: Prepared, options: CloudflareDeployOptions): 
   for (const binding of plan.bindings) {
     let id = binding.id
     if (binding.action === 'create') {
-      const created = binding.type === 'd1' ? createD1Database(cf, binding.name) : createKvNamespace(cf, binding.name)
+      const created = backend.create(binding.type, binding.name)
       if (!created.ok) {
         return fail('provision', `${created.reason}. If the resource was created anyway, the next plan finds it by name and adopts it.`)
       }
@@ -217,7 +215,7 @@ async function applyPlan(prepared: Prepared, options: CloudflareDeployOptions): 
     }
     if (id && !binding.configured) resolved[binding.binding] = binding.type === 'd1' ? { id, name: binding.name } : { id }
   }
-  const outDir = join(root, CF_OUTPUT_DIR)
+  const outDir = join(root, backend.outputDir)
   const previous = readResolvedResources(outDir)
   // A binding this build does not plan (OAUTH_KV without --mcp-oauth) keeps what an earlier deploy settled.
   const merged = { ...previous, ...resolved }
@@ -229,37 +227,34 @@ async function applyPlan(prepared: Prepared, options: CloudflareDeployOptions): 
       return fail('provision', `${join(outDir, WORKER_MANIFEST_FILE)} could not be read back, so the resolved ids were not recorded. Run cloudflare:build, then deploy again.`)
     }
 
-    // Stage 5: gurenWorker() reads the manifest inside `cf build`, so only cf builds again.
-    rmSync(join(root, EVALUATED_CONFIG), { force: true })
-    const rebuilt = cfBuild(cf)
-    if (!rebuilt.ok) return fail('build', `\`cf build\` failed after the resources were settled:\n${rebuilt.reason}`)
-    const drift = boundElsewhere(readEvaluatedWorker(root), resolved)
-    if (drift.length > 0) {
-      return fail('build', `cloudflare.config.ts binds ${drift.join(', ')} to another resource than the plan resolved. Remove the id it sets after the gurenWorker() spread, then plan again.`)
-    }
+    // Stage 5: skipped when stage 4 changed nothing, since stage 3's build already binds the same ids.
+    const rebuilt = backend.rebuild(resolved)
+    if (!rebuilt.ok) return fail('build', rebuilt.reason)
   }
 
   // Stage 6: judged at the plan; applied only if the pending set is still that one.
   const migrations = plan.migrations
-  const databaseId = databaseBinding ? resolved[databaseBinding]?.id : undefined
-  let restore: { id: string; value: string } | undefined
-  if (!options.skipMigrations && migrations && migrations.pending.length > 0 && databaseId) {
-    const bookmark = getBookmark(cf, databaseId)
+  const planned = plan.bindings.find((binding) => binding.binding === databaseBinding)
+  const databaseId = databaseBinding ? resolved[databaseBinding]?.id ?? planned?.id : undefined
+  let restore: { id: string; name: string; value: string } | undefined
+  if (!options.skipMigrations && migrations && migrations.pending.length > 0 && planned && databaseId) {
+    const database = { ...planned, action: 'existing' as const, id: databaseId }
+    const bookmark = backend.bookmark(database)
     if (!bookmark.ok) return fail('migrate', `${bookmark.reason}. No migration was applied without a point to restore to.`)
     // Read again the way the plan read it; the fingerprint covers the names, their order and their text.
-    const now = readMigrations(root, cf, { binding: databaseBinding ?? '', type: 'd1', action: 'existing', name: '', id: databaseId }, options)
+    const now = readMigrations(root, backend, database, options)
     if (now?.status !== 'ready' || now.layout !== migrations.layout || now.fingerprint !== migrations.fingerprint) {
       return fail('migrate', now?.status === 'unreadable'
         ? `${now.reason}. Nothing was applied.`
         : 'The pending migrations changed since the plan judged them, by another run or an edit. Nothing was applied; plan again.')
     }
-    restore = { id: databaseId, value: bookmark.value }
-    const applied = applyMigrations(cf, databaseId, migrations.applyArgs)
+    restore = { id: databaseId, name: planned.name, value: bookmark.value }
+    const applied = backend.applyMigrations(database, migrations.applyArgs)
     if (!applied.ok) return fail('migrate', applied.reason, restore)
     result.migrated = { applied: migrations.pending, bookmark: bookmark.value }
   }
 
-  const deployed = deployPrebuilt(cf, options.secretsFile ? resolve(options.secretsFile) : undefined)
+  const deployed = backend.deploy(options.secretsFile ? resolve(options.secretsFile) : undefined)
   if (!deployed.ok) return fail('deploy', deployed.reason, restore)
   result.deployment = { output: deployed.value }
   const url = /https:\/\/[^\s"'<>]+\.workers\.dev[^\s"'<>]*/.exec(deployed.value)?.[0]
@@ -279,22 +274,6 @@ function writeResolved(outDir: string, resolved: Record<string, ResolvedResource
   return true
 }
 
-/** Bindings the rebuilt config points at another id than the plan settled. */
-function boundElsewhere(worker: EvaluatedWorker, resolved: Record<string, ResolvedResource>): string[] {
-  return Object.entries(resolved)
-    .filter(([binding, resource]) => worker.env[binding]?.id !== resource.id)
-    .map(([binding]) => binding)
-}
-
-function cleanupCommands(created: CreatedResource[], bookmark: { id: string; value: string } | undefined): string[] {
-  return [
-    ...(bookmark ? [`bunx cf d1 time-travel restore ${bookmark.id} --bookmark ${bookmark.value}`] : []),
-    ...created.map((resource) => resource.type === 'd1'
-      ? `bunx cf d1 delete ${resource.id}`
-      : `bunx cf kv namespaces delete ${resource.id}`),
-  ]
-}
-
 /** GITHUB_WORKFLOW_REF is `owner/repo/.github/workflows/<file>@<ref>`; the file is read from the checkout. */
 function readRunningWorkflow(root: string): Read<string> {
   const ref = process.env.GITHUB_WORKFLOW_REF ?? ''
@@ -309,7 +288,7 @@ function readRunningWorkflow(root: string): Read<string> {
 
 function readMigrations(
   root: string,
-  cf: CfRunner,
+  backend: DeployBackend,
   database: PlannedBinding,
   options: CloudflareDeployOptions,
 ): MigrationInput | undefined {
@@ -321,7 +300,7 @@ function readMigrations(
 
   let tracker: string[] | null = null
   if (database.action !== 'create' && database.id) {
-    const read = readMigrationTracker(cf, database.id)
+    const read = backend.readTracker({ ...database, id: database.id })
     if (!read.ok) return { status: 'unreadable', reason: read.reason }
     tracker = read.value
   }
@@ -338,7 +317,7 @@ function readMigrations(
   return {
     status: 'ready',
     layout: decision.layout,
-    applyArgs: migrationDirArgs(decision.layout, `${CF_OUTPUT_DIR}/d1-migrations`),
+    applyArgs: backend.applyArgs(decision.layout),
     pending: decision.pending,
     unjudged: decision.pendingFiles,
     verdict,
@@ -351,10 +330,10 @@ function readMigrations(
 const VALUE_BINDING_TYPES = new Set(['text', 'json'])
 
 async function readSecrets(
-  root: string,
-  cf: CfRunner,
+  backend: DeployBackend,
   worker: EvaluatedWorker,
   secretsFile: string | undefined,
+  root: string,
 ): Promise<SecretsInput> {
   const provided = Object.entries(worker.env)
     .filter(([, entry]) => VALUE_BINDING_TYPES.has(entry.type))
@@ -376,7 +355,7 @@ async function readSecrets(
   const needsDeployed = required.status === 'loaded' && required.required.some((name) => !provided.includes(name))
   return {
     required,
-    deployed: needsDeployed ? listWorkerSecrets(cf, worker.name) : { ok: true, value: [] },
+    deployed: needsDeployed ? backend.listSecrets(worker.name) : { ok: true, value: [] },
     provided,
     ...(secretsFile ? { secretsFile } : {}),
   }
@@ -392,89 +371,3 @@ async function withStdoutLogs<T>(toStderr: boolean, run: () => Promise<T>): Prom
     console.log = log
   }
 }
-
-/** Resolved the way Node resolves it from the app, so a hoisted workspace install is found. */
-function resolvePackageFile(root: string, specifier: string): string | undefined {
-  try {
-    return Bun.resolveSync(specifier, root)
-  } catch {
-    return undefined
-  }
-}
-
-/** Checks only the cf backend's tools, before anything is built (RFC 0035 §7). */
-function preflight(root: string, cf: CfRunner, cfPackage: string | undefined, nodeVersion: () => string | undefined): void {
-  if (detectCloudflareBackend(root) !== 'cf') {
-    throw new Error(
-      'Cloudflare deploy: needs the cf backend, a cloudflare.config.ts and `cf` declared (see the Cloudflare guide). An app deploying through wrangler.jsonc keeps using `cloudflare:build` and `wrangler deploy`.',
-    )
-  }
-
-  const problems: string[] = []
-  if (!cfPackage) {
-    problems.push('cf is declared but not installed. Run `bun install`.')
-  }
-  const node = nodeVersion()
-  if (!node || !Bun.semver.satisfies(node, `>=${NODE_FLOOR}`)) {
-    problems.push(`cf loads cloudflare.config.ts with the node on PATH, which needs Node ${NODE_FLOOR} or later; found ${node ?? 'no node'}.`)
-  }
-  const wrangler = installedVersion(root, 'wrangler')
-  if (!wrangler || !Bun.semver.satisfies(wrangler, `>=${WRANGLER_FLOOR}-0`)) {
-    problems.push(`cf bundles through the app's Wrangler, which needs ${WRANGLER_FLOOR} or later; found ${wrangler ?? 'none'}. Run \`bun add -d wrangler@latest\`.`)
-  }
-  if (problems.length === 0) {
-    const auth = checkAuth(cf)
-    if (!auth.ok) {
-      problems.push(`cf is not logged in (${auth.reason}). Run \`bunx cf auth login\`, or set CLOUDFLARE_API_TOKEN in CI.`)
-    }
-  }
-
-  if (problems.length > 0) {
-    throw new Error(`Cloudflare deploy: preflight failed, before anything was built:\n  ${problems.join('\n  ')}`)
-  }
-}
-
-function readEvaluatedWorker(root: string): EvaluatedWorker {
-  const path = join(root, EVALUATED_CONFIG)
-  const config = readJson(path)
-  if (!isRecord(config) || typeof config.name !== 'string' || (config.env !== undefined && !isRecord(config.env))) {
-    throw new Error(`Cloudflare deploy: ${path} is missing or not the shape \`cf build\` writes, so the bindings could not be read.`)
-  }
-  const env: Record<string, EvaluatedBinding> = {}
-  for (const [binding, entry] of Object.entries(config.env ?? {})) {
-    if (isRecord(entry) && typeof entry.type === 'string') {
-      env[binding] = {
-        type: entry.type,
-        ...(typeof entry.id === 'string' ? { id: entry.id } : {}),
-        ...(typeof entry.name === 'string' ? { name: entry.name } : {}),
-      }
-    }
-  }
-  const triggers = Array.isArray(config.triggers) ? config.triggers : []
-  return { name: config.name, env, scheduled: triggers.some((trigger) => isRecord(trigger) && trigger.type === 'scheduled') }
-}
-
-function nodeOnPathVersion(): string | undefined {
-  try {
-    const result = Bun.spawnSync({ cmd: ['node', '--version'], stdout: 'pipe', stderr: 'pipe' })
-    return result.exitCode === 0 ? result.stdout.toString().trim() : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function installedVersion(root: string, name: string): string | undefined {
-  const path = resolvePackageFile(root, `${name}/package.json`)
-  const manifest = path ? readJson(path) : undefined
-  return isRecord(manifest) && typeof manifest.version === 'string' ? manifest.version : undefined
-}
-
-
-function readJson(path: string): unknown {
-  try {
-    return JSON.parse(readFileSync(path, 'utf8'))
-  } catch {
-    return undefined
-  }
-}
-
