@@ -374,8 +374,17 @@ describe('R2 buckets and what the app names (RFC 0035 §2)', () => {
 
   test('should block a D1 binding config/database.ts names and the Worker does not bind', () => {
     const plan = buildPlan(context({ inference: { r2Buckets: [], databaseBinding: 'DATABASE' } }))
-    expect(plan.findings).toContainEqual(expect.objectContaining({ check: 'binding-conflict', binding: 'DATABASE' }))
+    expect(plan.findings).toContainEqual(expect.objectContaining({ check: 'resource-missing', binding: 'DATABASE' }))
     expect(hasBlocker(buildPlan(context({ inference: { r2Buckets: [], databaseBinding: 'DB' } })))).toBe(false)
+  })
+
+  test('should plan a renamed R2 bucket under its new name, not the one an earlier deploy settled', () => {
+    const plan = buildPlan(context({
+      env: { MEDIA: { type: 'r2', name: 'new-bucket' } },
+      r2: ok([{ id: 'old-bucket', name: 'old-bucket' }]),
+      manifest: { resolved: { MEDIA: { id: 'old-bucket', name: 'old-bucket' } } },
+    }))
+    expect(plan.bindings[0]).toEqual({ binding: 'MEDIA', type: 'r2', action: 'create', name: 'new-bucket' })
   })
 
   test('should warn about a resource name for a binding the Worker does not have, such as a misspelt one', () => {

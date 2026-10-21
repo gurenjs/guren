@@ -16,6 +16,8 @@ interface DeployCheckCliApi {
 }
 
 /**
+ * Restates `DeployTargetApp` in @guren/cli's deploy-runtime.ts structurally, since this module imports
+ * no CLI type: the CLI an app installs may be older or newer than this core.
  * The app as the target runs it, for the deploy plugin to read its bindings from (RFC 0035 §2):
  * the introspected `storage` and `database` sections the CLI vouches for, or why they could not be read.
  */

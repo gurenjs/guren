@@ -13,12 +13,13 @@ describe('inferBindings', () => {
           avatars: { driver: 'r2', binding: 'MEDIA' },
           local: { driver: 'local' },
           vault: { driver: null },
+          avatars2: { driver: 'r2' },
         },
       },
       database: { dialect: 'd1', location: 'unknown', binding: 'DB' },
     })
 
-    expect(inferred).toEqual({ r2Buckets: ['MEDIA'], opaqueDisks: ['vault'], databaseBinding: 'DB' })
+    expect(inferred).toEqual({ r2Buckets: ['MEDIA'], opaqueDisks: ['avatars2', 'vault'], databaseBinding: 'DB' })
   })
 
   test('should record why nothing was inferred, and ignore a binding on another dialect', () => {

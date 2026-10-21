@@ -179,17 +179,20 @@ export function buildPlan(context: PlanContext): DeployPlan {
         'resource-name',
         planned.binding,
         `"${planned.name}" is not a valid ${RESOURCES[planned.type].label} name: ${problem}.`,
-        `Name it in config/cloudflare.ts: resourceNames: { ${planned.binding}: '<name>' }.`,
+        `Name it in config/cloudflare.ts (resourceNames: { ${planned.binding}: '<name>' }), or correct the name ${words.config} gives it, which comes first.`,
       ))
     }
   }
   for (const binding of Object.keys(context.manifest.resourceNames ?? {})) {
-    if (context.worker.env[binding]) continue
+    const bound = context.worker.env[binding]
+    if (bound && bound.type in RESOURCES) continue
     findings.push({
       check: 'resource-name',
       severity: 'warning',
       binding,
-      message: `config/cloudflare.ts names a resource for ${binding}, which the Worker does not bind, so the name is not used.`,
+      message: bound
+        ? `config/cloudflare.ts names a resource for ${binding}, a ${bound.type} binding, which has no resource to name, so the name is not used.`
+        : `config/cloudflare.ts names a resource for ${binding}, which the Worker does not bind, so the name is not used.`,
       fix: `Check the binding's spelling: the Worker binds ${Object.keys(context.worker.env).join(', ') || 'nothing'}.`,
     })
   }
@@ -261,11 +264,14 @@ function planInference(context: PlanContext, findings: Finding[], words: Backend
     ))
   }
   const database = inference.databaseBinding
-  if (database && worker.env[database]?.type !== 'd1') {
+  const bound = database ? worker.env[database] : undefined
+  if (database && bound?.type !== 'd1') {
     findings.push(blocker(
-      'binding-conflict',
+      bound ? 'binding-conflict' : 'resource-missing',
       database,
-      `config/database.ts reads the D1 binding ${database}, which the Worker does not bind as D1.`,
+      bound
+        ? `config/database.ts reads the D1 binding ${database}, which the Worker binds as ${bound.type}.`
+        : `config/database.ts reads the D1 binding ${database}, which the Worker does not bind.`,
       words.addD1(database),
     ))
   }
@@ -420,8 +426,11 @@ function planBinding(
     return { binding, type, action: missing ? 'unknown' : 'existing', name, id: configuredId, configured: true }
   }
 
-  // gurenWorker() puts the manifest's id in the config, so the deploy binds it while it exists.
-  const settled = resolvedId === undefined ? undefined : resources.find((resource) => resource.id === resolvedId)
+  // gurenWorker() puts the manifest's id in the config, so the deploy binds it while it exists. An R2
+  // bucket's id is its name, so a config naming another bucket is not the settled one.
+  const settled = resolvedId === undefined || (!resource.hasId && resolvedId !== name)
+    ? undefined
+    : resources.find((candidate) => candidate.id === resolvedId)
   if (settled) {
     // An earlier deploy pins the binding by id, so a new name in config/cloudflare.ts would be shown but not bound.
     const requested = context.manifest.resourceNames?.[binding]

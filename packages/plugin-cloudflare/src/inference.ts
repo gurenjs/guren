@@ -28,8 +28,12 @@ export function inferBindings(app: DeployTargetApp | undefined): BindingInferenc
   const entries = isRecord(app.storage) && isRecord(app.storage.entries) ? app.storage.entries : {}
   for (const [disk, entry] of Object.entries(entries)) {
     if (!isRecord(entry)) continue
-    if (entry.driver === null) opaqueDisks.push(disk)
-    else if (entry.driver === 'r2' && typeof entry.binding === 'string' && !r2Buckets.includes(entry.binding)) r2Buckets.push(entry.binding)
+    if (entry.driver === 'r2' && typeof entry.binding === 'string') {
+      if (!r2Buckets.includes(entry.binding)) r2Buckets.push(entry.binding)
+    } else if (entry.driver === null || entry.driver === 'r2') {
+      // A bare factory, or r2Disk() given a closure: R2 or not, its bucket cannot be seen.
+      opaqueDisks.push(disk)
+    }
   }
   const databaseBinding = isRecord(app.database) && app.database.dialect === 'd1' && typeof app.database.binding === 'string'
     ? app.database.binding

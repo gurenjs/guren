@@ -190,6 +190,17 @@ describe('cloudflare:build on the cf backend (RFC 0035)', () => {
     expect(readFileSync(join(root, '.guren/cloudflare/worker.js'), 'utf8')).toContain('"/api/mcp"')
   })
 
+  test('should keep the R2 buckets an earlier build found when this one cannot read the app', async () => {
+    scaffoldApp(root, { cfBackend: true })
+    mkdirSync(join(root, '.guren/cloudflare'), { recursive: true })
+    writeFileSync(join(root, '.guren/cloudflare/guren-worker.json'), JSON.stringify({ version: 2, r2Buckets: ['MEDIA'], resolved: {} }))
+
+    await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
+
+    const manifest = JSON.parse(readFileSync(join(root, '.guren/cloudflare/guren-worker.json'), 'utf8')) as { r2Buckets: string[] }
+    expect(manifest.r2Buckets).toEqual(['MEDIA'])
+  })
+
   test('should refuse resourceNames that are not a record of names', async () => {
     scaffoldApp(root, { cfBackend: true })
     mkdirSync(join(root, 'config'), { recursive: true })

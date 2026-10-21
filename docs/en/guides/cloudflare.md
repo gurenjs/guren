@@ -502,8 +502,8 @@ bunx guren cloudflare:deploy --plan
 
 Each binding is listed as `existing` (the resource a previous run settled, or an id you wrote), `adopt` (found under the planned name but not yet settled, so check it belongs to this app), or `create on deploy`. The KV name is `<worker>-<binding>` with `_` written as `-`, the name `cf deploy` itself creates. The command exits 1 on a blocker:
 
-- `binding-conflict`: an id in `cloudflare.config.ts` and the planned name point at different resources, two resources share the name, or `config/database.ts` names a D1 binding the Worker does not bind.
-- `resource-missing`: an id you wrote is not in the account, a resource is missing and the run may not create it, or a storage disk reads an R2 binding the Worker does not bind. A run with `--ci`, or without a terminal, creates nothing unless `--provision` is passed.
+- `binding-conflict`: an id in `cloudflare.config.ts` and the planned name point at different resources, two resources share the name, or `config/database.ts` names a D1 binding the Worker binds as something else.
+- `resource-missing`: an id you wrote is not in the account, a resource is missing and the run may not create it, or a storage disk or `config/database.ts` reads a binding the Worker does not bind. A run with `--ci`, or without a terminal, creates nothing unless `--provision` is passed.
 - `resource-name`: a planned R2 bucket name breaks R2's rule (3 to 63 lowercase letters, digits and hyphens). Name it in `config/cloudflare.ts` under `resourceNames`.
 - `source-unreadable`: `cf` could not list the account's resources, query the migrations tracker, or the app's `config/env.ts` would not load. The plan stops rather than guess.
 - `tracker-layout`: the database's `d1_migrations` records both flattened names (`<folder>.sql`) and nested ones (`<folder>/migration.sql`).

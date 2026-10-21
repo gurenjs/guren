@@ -161,7 +161,10 @@ export async function assembleCloudflareOutput(options: BuildCloudflareOutputOpt
   // As workerd runs it: the config's isWorkersRuntime() branch, not the one `bun run dev` takes.
   // The same introspection names the bindings the app reads (RFC 0035 §2).
   const { app } = await inspectDeployRuntime({ root, label: 'Cloudflare build', target: 'cloudflare' })
-  const inferred = inferBindings(app)
+  // An app this build could not read keeps the buckets an earlier build found: unread is never absent.
+  const fresh = inferBindings(app)
+  const previousBuckets = readWorkerManifest(out).r2Buckets
+  const inferred = fresh.unread && Array.isArray(previousBuckets) ? { ...fresh, r2Buckets: previousBuckets } : fresh
   const schedule = backend === 'cf' ? await cronTriggers(root) : { crons: [] }
   warnDatabaseWithoutD1(root)
 

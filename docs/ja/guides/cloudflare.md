@@ -506,8 +506,8 @@ bunx guren cloudflare:deploy --plan
 
 各バインディングは次のどれかとして表示されます。`existing` は、前回の実行で決まったリソースか、自分で書いた ID のリソースです。`adopt` は、予定の名前で見つかったものの、まだこのアプリのものとして記録されていないリソースなので、このアプリのものか確かめてください。`create on deploy` は、デプロイ時に作られるリソースです。KV の名前は、`cf deploy` 自身が作るときと同じ `<worker>-<binding>`（`_` は `-` に置き換え）です。止める必要のある問題があると、終了コード 1 で終わります。
 
-- `binding-conflict`: `cloudflare.config.ts` に書いた ID と予定の名前が別のリソースを指しているか、同じ名前のリソースが 2 つあるか、`config/database.ts` が Worker にない D1 バインディングを使っています。
-- `resource-missing`: 書いた ID のリソースがアカウントにないか、リソースがなくこの実行では作れないか、ストレージのディスクが Worker にない R2 バインディングを使っています。`--ci` を付けた実行と、ターミナルのない実行では、`--provision` を付けない限り何も作りません。
+- `binding-conflict`: `cloudflare.config.ts` に書いた ID と予定の名前が別のリソースを指しているか、同じ名前のリソースが 2 つあるか、`config/database.ts` が使う D1 バインディングを Worker が別の種類でバインドしています。
+- `resource-missing`: 書いた ID のリソースがアカウントにないか、リソースがなくこの実行では作れないか、ストレージのディスクや `config/database.ts` が Worker にないバインディングを使っています。`--ci` を付けた実行と、ターミナルのない実行では、`--provision` を付けない限り何も作りません。
 - `resource-name`: 予定した R2 バケットの名前が R2 の規則（小文字、数字、ハイフンで 3〜63 文字）に合いません。`config/cloudflare.ts` の `resourceNames` で名前を付けてください。
 - `source-unreadable`: `cf` がアカウントのリソースを一覧できなかったか、マイグレーションの記録表を読めなかったか、アプリの `config/env.ts` を読み込めませんでした。推測で進めずに、計画を止めます。
 - `tracker-layout`: データベースの `d1_migrations` に、平坦化した名前（`<folder>.sql`）と入れ子の名前（`<folder>/migration.sql`）が混在しています。
