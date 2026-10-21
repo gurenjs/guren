@@ -770,11 +770,10 @@ export function moduleSchemaAggregateName(module: string): string {
  */
 export async function parseSchemaTableColumns(cwd: string): Promise<Map<string, string[]> | null> {
   const tables = await parseSchemaTables(cwd)
-  if (tables.length === 0) return null
+  return tables.length === 0 ? null : tableColumnsOf(tables)
+}
 
-  const columns = new Map<string, string[]>()
-  for (const table of tables) {
-    columns.set(table.identifier, table.columns.map((column) => column.name))
-  }
-  return columns
+/** {@link parseSchemaTableColumns} over tables already read. */
+export function tableColumnsOf(tables: readonly SchemaTable[]): Map<string, string[]> {
+  return new Map(tables.map((table) => [table.identifier, table.columns.map((column) => column.name)]))
 }

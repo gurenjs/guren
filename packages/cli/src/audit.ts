@@ -9,6 +9,7 @@ import {
   classNameFromPath,
   isDefinitelyAbsent,
   listModuleNames,
+  moduleNameFor,
 } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
 import { routesEntryOrDefault } from './route-registrar'
@@ -69,7 +70,7 @@ import {
   type IntrospectSource,
 } from './manifest-section'
 import { describeMethod } from './http-methods'
-import { parseSchemaTableColumns } from './schema-parser'
+import { parseSchemaTables, tableColumnsOf, type SchemaTable } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
 import {
   agentToolActions,
@@ -79,7 +80,7 @@ import {
   type AiLocalToolListing,
 } from './ai-local-tools-audit'
 import { auditCsrfExemptions, DECLARE_CALL_PATTERN, type CsrfExemptionScan } from './csrf-exemption-audit'
-import { auditAuthorization, GUEST_PATH_PATTERN } from './authorization-audit'
+import { auditAuthorization, GUEST_PATH_PATTERN, isEditFormRoute } from './authorization-audit'
 
 export type AuditStatus = 'pass' | 'warn' | 'fail' | 'ignored'
 
@@ -752,15 +753,15 @@ async function auditIntrospectSource(
   }
   // A routes file that would not load may still register through the app, so it does not skip the run.
   if (definitions && !definitions.some(isJudgedRoute)) {
-    return { skipped: 'no route mutates or carries a body, so the app was not introspected' }
+    return { skipped: 'no route mutates, carries a body or renders an edit form, so the app was not introspected' }
   }
   return introspectRunner(cwd, options.introspect)
 }
 
-/** A route the validation or authentication rule judges. */
-function isJudgedRoute(route: Pick<RouteDefinition, 'method'>): boolean {
+/** A route the validation, authentication or policy rule judges. */
+function isJudgedRoute(route: Pick<RouteDefinition, 'method' | 'controller'>): boolean {
   const { safe, bodyCarrying } = describeMethod(route.method.toUpperCase())
-  return !safe || bodyCarrying
+  return !safe || bodyCarrying || isEditFormRoute(route)
 }
 
 function auditRoutes(
@@ -1254,19 +1255,31 @@ function parseModelSerializationInfo(source: string, filePath: string): ModelSer
 
 async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void> {
   const modelFiles = await discoverModelFiles(cwd)
-  const schemaTables = modelFiles.length > 0 ? await parseSchemaTableColumns(cwd) : null
+  const [tables, models] = await Promise.all([
+    modelFiles.length > 0 ? parseSchemaTables(cwd) : [],
+    Promise.all(modelFiles.map(async (filePath) => {
+      const source = await readFile(filePath, 'utf-8')
+      // AST classification, not source text: a comment mentioning
+      // AuthenticatableModel must not flip this model to structurally protected.
+      const ast = parseSourceFile(source, filePath)
+      const classDecl = ast ? firstClassDeclaration(ast.program.body) : null
+      return {
+        filePath,
+        source,
+        classDecl,
+        table: classDecl ? extractTableIdentifier(classDecl) : undefined,
+        scope: moduleNameFor(cwd, filePath) ?? '',
+        isAuthenticatable: classDecl ? classUsesAuthenticatableBase(classDecl) : false,
+      }
+    })),
+  ])
+  const schemaTables = tables.length > 0 ? tableColumnsOf(tables) : null
+  const ownerColumns = ownerColumnsOf(tables, models)
 
-  for (const filePath of modelFiles) {
+  for (const { filePath, source, classDecl, table, scope, isAuthenticatable } of models) {
     const relPath = relative(cwd, filePath)
     const name = classNameFromPath(filePath)
-    const source = await readFile(filePath, 'utf-8')
-
-    // AST classification, not source text: a comment mentioning
-    // AuthenticatableModel must not flip this model to structurally protected.
-    const ast = parseSourceFile(source, filePath)
-    const classDecl = ast ? firstClassDeclaration(ast.program.body) : null
     const hasFillable = classDecl ? hasModelConfig(classDecl, 'fillable') : false
-    const isAuthenticatable = classDecl ? classUsesAuthenticatableBase(classDecl) : false
 
     // Authenticatable models deny their credential columns from mass assignment
     // structurally, so a missing fillable is not the exposure it is elsewhere.
@@ -1286,6 +1299,26 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
         relPath,
       ),
     )
+
+    // A fillable column that references the users table lets a request choose which user a record belongs to.
+    const fillable = classDecl && !isAuthenticatable ? resolveModelStringArrayConfig(classDecl, 'fillable') : undefined
+    const owners = fillable && table ? (ownerColumns.get(`${scope}:${table}`) ?? []).filter((owner) => fillable.includes(owner.column)) : []
+    if (owners.length > 0) {
+      const listed = owners.map((owner) => `'${owner.column}'`).join(', ')
+      findings.push(
+        finding(
+          `owner-fillable:${name}`,
+          `${name} owner column fillable`,
+          'warn',
+          `${name} lists ${listed} in fillable, and ${owners.length === 1 ? 'it references' : 'they reference'} ${owners[0]!.users} `
+          + `(an authenticatable model's table), so a request can choose which user the record belongs to.`,
+          `If the server decides it, remove ${listed} from fillable in ${relPath} and from the request schema, and set it on `
+          + `the server: create(data, { set: { ${owners[0]!.column}: user.id } }) (update(where, data, { set }) for an update). `
+          + `If the user picks it on purpose (an assignee), record that in config/audit.ts.`,
+          relPath,
+        ),
+      )
+    }
 
     // Sensitive columns must be excluded from serialization via hidden/visible.
     const info = parseModelSerializationInfo(source, filePath)
@@ -1320,6 +1353,34 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
       ),
     )
   }
+}
+
+/**
+ * Per `<module>:<table>` (module empty for the root), the columns referencing the table of an
+ * authenticatable model in the same root, by a column `.references()` or a table-level
+ * `foreignKey`. A reference through an aliased import, or a constraint whose columns are
+ * expressions, names nothing: those are missed, never reported.
+ */
+function ownerColumnsOf(
+  tables: SchemaTable[],
+  models: Array<{ table?: string; scope: string; isAuthenticatable: boolean }>,
+): Map<string, Array<{ column: string; users: string }>> {
+  const userTables = new Set(models.filter((model) => model.table && model.isAuthenticatable).map((model) => `${model.scope}:${model.table}`))
+  const result = new Map<string, Array<{ column: string; users: string }>>()
+  for (const table of tables) {
+    const scope = table.module ?? ''
+    const owners: Array<{ column: string; users: string }> = []
+    for (const column of table.columns) {
+      if (column.references && userTables.has(`${scope}:${column.references.table}`)) owners.push({ column: column.name, users: column.references.table })
+    }
+    for (const constraint of table.constraints) {
+      if (constraint.kind !== 'foreignKey' || !constraint.references || constraint.opaqueColumns) continue
+      if (!userTables.has(`${scope}:${constraint.references.table}`)) continue
+      for (const column of constraint.columns) owners.push({ column, users: constraint.references.table })
+    }
+    if (owners.length > 0) result.set(`${scope}:${table.identifier}`, owners)
+  }
+  return result
 }
 
 export function renderAuditReport(report: AuditReport): void {

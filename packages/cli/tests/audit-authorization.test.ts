@@ -420,3 +420,127 @@ export function registerBillingRoutes(router: any) {
     expect(authorization?.message).toContain('Invoice (InvoicePolicy)')
   })
 })
+
+describe('policy authorization leaves out a model the action only loads', () => {
+  it('passes an action that loads the policed model by id to write another one', async () => {
+    const report = await withWorkspace(app({
+      'app/Http/Controllers/PostController.ts': controller(`    const post = await Post.findOrFail(1)
+    await Comment.create({ postId: post.id, body: 'x' })
+    return this.redirect('/posts')`),
+    }))
+
+    const finding = report.findings.find((f) => f.key === KEY)
+    expect(finding?.status).toBe('pass')
+    expect(finding?.message).toContain('only loads Post (PostPolicy)')
+  })
+
+  it('warns on a write down a builder chain split over lines', async () => {
+    const report = await withWorkspace(app({
+      'app/Http/Controllers/PostController.ts': controller(`    await Post.where({ id: 1 })
+      .delete()
+    return this.redirect('/posts')`),
+    }))
+
+    expect(report.findings.find((f) => f.key === KEY)?.status).toBe('warn')
+  })
+
+  it.each([
+    ['a transaction scope', `    await Post.transaction(async (trx, posts) => {
+      await posts.delete({ id: 1 })
+    })`],
+    ['a multi-line argument object', `    await Post.where({
+      id: 1,
+    }).delete()`],
+    ['a builder held in a variable', `    const query = Post.where({ id: 1 })
+    await query.delete()`],
+    ['a method called on the loaded record', `    const post = await Post.findOrFail(1)
+    await post.delete()`],
+    ['the loaded record passed on', `    const post = await Post.findOrFail(1)
+    await remove(post)`],
+    ['a field of the loaded record assigned', `    const post = await Post.findOrFail(1)
+    post.title = 'x'`],
+    ['a field of the loaded record incremented', `    const post = await Post.findOrFail(1)
+    post.views += 1`],
+    ['a method called on a field of the loaded record', `    const post = await Post.findOrFail(1)
+    post.tags.push('x')`],
+  ])('warns when the write may come through %s', async (_shape, body) => {
+    const report = await withWorkspace(app({
+      'app/Http/Controllers/PostController.ts': controller(`${body}
+    return this.redirect('/posts')`),
+    }))
+
+    expect(report.findings.find((f) => f.key === KEY)?.status).toBe('warn')
+  })
+})
+
+describe("policy authorization on a record's edit form", () => {
+  const editRoutes = `
+import { Router } from '@guren/core'
+
+class PostController {
+  async edit() { return null }
+  async show() { return null }
+}
+
+export default function registerRoutes(router: Router) {
+  router.get('/posts/:id/edit', [PostController, 'edit'])
+  router.get('/posts/:id', [PostController, 'show'])
+}
+`
+  const editController = (editBody: string) => `import { Controller } from '@guren/core'
+import { Post } from '../../Models/Post'
+
+export default class PostController extends Controller {
+  async edit() {
+${editBody}
+  }
+
+  async show() {
+    const post = await Post.findOrFail(1)
+    return this.json(post)
+  }
+}
+`
+  const files = (editBody: string) => ({
+    'routes/web.ts': editRoutes,
+    'app/Models/Post.ts': model,
+    'app/Policies/PostPolicy.ts': policy,
+    'app/Http/Controllers/PostController.ts': editController(editBody),
+  })
+
+  it('warns when the edit action loads a policed model and never authorizes', async () => {
+    const report = await withWorkspace(files(`    const post = await Post.findOrFail(1)
+    return this.json(post)`))
+
+    const edit = report.findings.find((f) => f.key === 'policy:GET /posts/:id/edit')
+    expect(edit?.status).toBe('warn')
+    expect(edit?.message).toContain("PostController.edit")
+    expect(edit?.message).toContain("a record's edit form")
+  })
+
+  it('passes an edit action that authorizes', async () => {
+    const report = await withWorkspace(files(`    const post = await Post.findOrFail(1)
+    await this.authorize('update', [Post, post])
+    return this.json(post)`))
+
+    expect(report.findings.find((f) => f.key === 'policy:GET /posts/:id/edit')?.status).toBe('pass')
+  })
+
+  it('warns on an edit form that only checks a read ability', async () => {
+    const report = await withWorkspace(files(`    const post = await Post.findOrFail(1)
+    await this.authorize('view', [Post, post])
+    return this.json(post)`))
+
+    const edit = report.findings.find((f) => f.key === 'policy:GET /posts/:id/edit')
+    expect(edit?.status).toBe('warn')
+    expect(edit?.message).toContain("only checks the 'view' ability")
+    expect(edit?.suggestion).toContain("this.authorize('update', [Post, post])")
+    expect(edit?.suggestion).toContain('before rendering the form')
+  })
+
+  it('leaves every other GET action alone', async () => {
+    const report = await withWorkspace(files(`    return this.json({})`))
+
+    expect(report.findings.find((f) => f.key === 'policy:GET /posts/:id')).toBeUndefined()
+  })
+})

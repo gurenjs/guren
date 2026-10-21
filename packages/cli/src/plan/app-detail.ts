@@ -15,7 +15,7 @@ import { memberKeyName, unwrapTypeAssertion, propertyValue, topLevelDeclaration 
 import { createAppOptions, findModuleDescriptor, hidesKeys, moduleMountState } from '../app-entry'
 import { CONTRACT_SEGMENTS } from '../contract-segments'
 import type { ContextRoute } from '../context-route'
-import { blankCommentsAndStrings, VALIDATE_CALL_PATTERN, type ControllerMethodScan } from '../controller-methods'
+import { blankCommentsAndStrings, literalAbilities, VALIDATE_CALL_PATTERN, type ControllerMethodScan } from '../controller-methods'
 import {
   discoverModuleRoutesFiles,
   discoverPolicyFiles,
@@ -214,7 +214,6 @@ export interface PlanAppDetailInput {
 
 const IDENTIFIER_PATTERN = /[A-Za-z_$][\w$]*/g
 const MEMBER_CALL_PATTERN = /\bthis\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/g
-const ABILITY_PATTERN = /\bthis\s*\.\s*(?:authorize|can)\s*\(\s*(['"`])([^'"`]+)\1/g
 
 /** A validator file is imported like the schema, so it gets the schema reader's budget. */
 const VALIDATOR_IMPORT_TIMEOUT_MS = 5000
@@ -403,7 +402,7 @@ export function describeActions(root: string, controllers: ControllerMethodScan)
       file: toPosixRelative(root, resolve(root, info.filePath)),
       pages: extractInertiaPageRefs(info.rawBody, isCode).map((ref) => ref.id),
       calls: unique([...info.body.matchAll(MEMBER_CALL_PATTERN)].map((match) => match[1]!)),
-      abilities: unique([...info.rawBody.matchAll(ABILITY_PATTERN)].filter((match) => isCode(match.index)).map((match) => match[2]!)),
+      abilities: unique(literalAbilities(info.body, info.rawBody)),
       identifiers: unique(info.body.match(IDENTIFIER_PATTERN) ?? []),
       validates: unique([...info.body.matchAll(VALIDATE_CALL_PATTERN)].map((match) => match[1]!.replace(/\s+/g, ''))),
     }

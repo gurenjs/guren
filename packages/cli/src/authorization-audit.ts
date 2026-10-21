@@ -13,10 +13,12 @@ import type { CheckEvidence } from './check-result'
 import {
   consultsAuthorization,
   controllerMethodFor,
+  literalAbilities,
   type ControllerMethodScan,
 } from './controller-methods'
 import { classNameFromPath, discoverPolicyFiles, moduleNameFromRelPath, toPosixRelative } from './discovery'
 import { describeMethod } from './http-methods'
+import { findClosingDelimiter } from './patch-helpers'
 import { discoverModelClasses } from './model-parser'
 import type { ParseCache } from './parse-cache'
 import { readPolicyAbilities } from './plan/policy-abilities'
@@ -118,6 +120,7 @@ async function authorizeSuggestion(
   controllerKey: string,
   { model, policy, policyFile }: PolicyBinding,
   cache: ParseCache,
+  target: { ability: string; when: string },
 ): Promise<string> {
   const parsed = await cache.get(policyFile)
   const abilities = parsed ? readPolicyAbilities(parsed.ast, policy) : null
@@ -125,14 +128,14 @@ async function authorizeSuggestion(
     ? `${policy} declares ${abilities.declared.join(', ') || 'no ability yet'}`
     : `${policy} could not be read as a policy`
   return (
-    `Call await this.authorize('<ability>', [${model}, ${camelCase(model)}]) in ${controllerKey} before the write `
+    `Call await this.authorize('${target.ability}', [${model}, ${camelCase(model)}]) in ${controllerKey} ${target.when} `
     + `(${declared}), or attach authorize()/authorizeResource() middleware to the route. A helper the action `
     + 'calls is not read: if it authorizes there, say so in a // guren-audit-ignore comment above the action.'
   )
 }
 
 /**
- * One finding per mutating controller route, keyed `policy:<METHOD> <path>`,
+ * One finding per mutating controller route, and per {@link isEditFormRoute}, keyed `policy:<METHOD> <path>`,
  * once the app has at least one policy; an app with none contributes nothing.
  * Route-level on purpose: the finding carries no `line`, so `config/audit.ts`
  * ignores it by key (a `line` would make every such entry `unsupported`); a
@@ -155,7 +158,11 @@ export async function auditAuthorization(
 
   for (const route of routes) {
     const method = route.method.toUpperCase()
-    if (describeMethod(method).safe || !route.controller || GUEST_PATH_PATTERN.test(route.path)) continue
+    const editForm = isEditFormRoute(route)
+    if ((describeMethod(method).safe && !editForm) || !route.controller || GUEST_PATH_PATTERN.test(route.path)) continue
+    const target = editForm
+      ? { ability: 'update', when: 'before rendering the form', subject: "a record's edit form" }
+      : { ability: '<ability>', when: 'before the write', subject: 'a mutating route' }
 
     const routeLabel = `${method} ${route.path}`
     const push = (status: AuditFinding['status'], message: string, rest: Partial<AuditFinding> = {}) =>
@@ -189,34 +196,90 @@ export async function auditAuthorization(
       patterns = await modelPatterns(cwd, controllerFile, bindings, cache)
       patternsByFile.set(controllerFile, patterns)
     }
-    const touched = bindings.filter((binding) => patterns!.get(binding)!.some((pattern) => pattern.test(info.body)))
+    // A parent the action only loads (a comment's post) is governed by the child's policy;
+    // an edit form only loads its record, which is what it is judged on.
+    const named = bindings.filter((binding) => patterns!.get(binding)!.some((pattern) => pattern.test(info.body)))
+    const touched = editForm ? named : named.filter((binding) => !onlyLoadsRecords(info.body, patterns!.get(binding)!))
     if (touched.length === 0) {
       push(
         'pass',
-        `${controllerKey} names no model the app keeps a policy for; a write through a service or a `
-        + 'relationship is not judged.',
+        named.length === 0
+          ? `${controllerKey} names no model the app keeps a policy for; a write through a service or a relationship is not judged.`
+          : `${controllerKey} only loads ${describeBindings(named)} with find()/findOrFail() and reads fields of the record.`,
       )
       continue
     }
+    const readOnlyCheck = editForm ? readOnlyAbility(info.body, info.rawBody) : undefined
     if (
-      consultsAuthorization(info.body)
-      || touched.some((binding) => binding.policyPattern.test(info.body))
+      readOnlyCheck === undefined
+      && (consultsAuthorization(info.body) || touched.some((binding) => binding.policyPattern.test(info.body)))
     ) {
       push('pass', `${controllerKey} consults a policy for ${describeBindings(touched)}.`)
       continue
     }
 
     const message =
-      `${controllerKey} (${info.filePath}:${info.line}) references ${describeBindings(touched)} on a mutating `
-      + 'route, and neither the middleware chain nor the action body shows an authorization check.'
+      readOnlyCheck !== undefined
+        ? `${controllerKey} (${info.filePath}:${info.line}) renders a record's edit form for ${describeBindings(touched)} `
+          + `but only checks the '${readOnlyCheck}' ability, which lets anyone who may read the record open its form.`
+        : `${controllerKey} (${info.filePath}:${info.line}) references ${describeBindings(touched)} on `
+          + `${target.subject}, and neither the middleware chain nor the action body shows an authorization check.`
     const marker = info.leadingComments.find((comment) => comment.includes(AUDIT_IGNORE_MARKER))
     if (marker !== undefined) {
       push('ignored', message, { ignoreReason: marker, filePath: info.filePath })
       continue
     }
     push('warn', message, {
-      suggestion: await authorizeSuggestion(controllerKey, touched[0]!, cache),
+      suggestion: await authorizeSuggestion(controllerKey, touched[0]!, cache, target),
       filePath: info.filePath,
     })
   }
 }
+
+/** The one safe route the policy rule judges: GET to an `edit` action, the resource convention for a record's edit form. */
+export function isEditFormRoute(route: { method: string; controller?: { action: string } }): boolean {
+  return route.method.toUpperCase() === 'GET' && route.controller?.action === 'edit'
+}
+
+const EDIT_ABILITIES = new Set(['update', 'edit'])
+
+/**
+ * The ability an edit form's action checks when every literal one is a read-only ability
+ * (`view`): the form then opens for anyone who may read the record. Undefined when a literal
+ * names update/edit, or no ability is a literal (a variable is not judged).
+ */
+function readOnlyAbility(body: string, rawBody: string): string | undefined {
+  const abilities = literalAbilities(body, rawBody)
+  if (abilities.length === 0 || abilities.some((ability) => EDIT_ABILITIES.has(ability))) return undefined
+  return abilities[0]
+}
+
+/**
+ * Whether every reference a blanked action body makes to a model is `const x = await Model.find(…)`
+ * or `findOrFail(…)`, with `x` read afterwards only as `x.field`: the action loads a record it
+ * never writes (a comment's post). Anything else (a write, a builder, a transaction scope, the
+ * record passed on or a method called on it) is not proven read-only, so the model stays judged.
+ */
+function onlyLoadsRecords(body: string, references: RegExp[]): boolean {
+  let loads = 0
+  for (const reference of references) {
+    for (const match of body.matchAll(new RegExp(reference.source, 'g'))) {
+      const head = /^\s*\.\s*(?:find|findOrFail)\s*\(/.exec(body.slice(match.index + match[0].length))
+      const declared = /\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*await\s*$/.exec(body.slice(0, match.index))
+      if (!head || !declared) return false
+      const close = findClosingDelimiter(body, match.index + match[0].length + head[0].length - 1, '(', ')')
+      if (close === -1) return false
+      const rest = body.slice(close + 1)
+      if (/^\s*[.?[]/.test(rest)) return false
+      for (const use of rest.matchAll(new RegExp(wholeIdentifierPattern(declared[1]!).source, 'g'))) {
+        if (!FIELD_READ.test(rest.slice(use.index + use[0].length))) return false
+      }
+      loads += 1
+    }
+  }
+  // Fail closed for a caller that passes a model the body never names.
+  return loads > 0
+}
+
+/** `.field` read and nothing more: not called, indexed, chained, assigned or incremented. */
+const FIELD_READ = /^\s*\??\.\s*[A-Za-z_$][\w$]*(?![\w$])(?!\s*(?:[.([]|\?\.|\+\+|--|(?:[-+*/%&|^]|\*\*|<<|>>>?|&&|\|\||\?\?)?=(?!=)))/
