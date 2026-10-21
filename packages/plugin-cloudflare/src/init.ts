@@ -12,16 +12,16 @@ import { isRecord, readPackageJson } from './backend'
 import {
   OAUTH_KV_BINDING,
   asArray,
+  assertAgentsPluginUsable,
   configScopes,
-  durableObjectBindingName,
+  durableObjectBindings,
+  durableObjectStorage,
   isPlaceholderId,
+  readAgentRegistry,
   readWranglerConfig,
   workerName,
 } from './build'
-
-/** The cf release the cf backend is verified against, and the Wrangler it delegates the bundle to (RFC 0035 §7). */
-const CF_VERSION = '1.0.0-beta.18'
-const CF_WRANGLER_FLOOR = '4.136.0'
+import { CF_VERSION, CF_WRANGLER_FLOOR } from './versions'
 
 /** The build's D1 binding (`WorkerManifest.d1.binding`). */
 const DATABASE_BINDING = 'DB'
@@ -68,7 +68,7 @@ interface DurableObjectCarry {
   storage: 'sqlite' | 'legacy-kv'
 }
 
-export function initCloudflare(options: InitCloudflareOptions): InitCloudflareResult {
+export async function initCloudflare(options: InitCloudflareOptions): Promise<InitCloudflareResult> {
   const root = resolve(options.rootDir)
   const wrangler = readWranglerConfig(resolve(root, 'wrangler.jsonc'))
   const defaultName = workerName(readPackageJson(root).name)
@@ -82,8 +82,10 @@ export function initCloudflare(options: InitCloudflareOptions): InitCloudflareRe
     ...(typeof databaseName === 'string' && databaseName !== worker ? { databaseName } : {}),
     // A placeholder id from an older scaffold is not carried; the plan resolves the namespace by name instead.
     ...(typeof oauthKv?.id === 'string' && !isPlaceholderId(oauthKv.id) ? { oauthKvId: oauthKv.id } : {}),
-    durableObjects: wrangler ? carriedDurableObjects(wrangler, existsSync(resolve(root, 'config/agents.ts'))) : [],
+    durableObjects: [],
   }
+  const durableObjects = wrangler ? sortDurableObjects(wrangler, await agentClasses(root)) : { carried: [], unmoved: [] }
+  carried.durableObjects = durableObjects.carried
 
   const contents: Record<(typeof FILES)[number], string> = {
     'cloudflare.config.ts': cloudflareConfigSource(carried),
@@ -108,7 +110,7 @@ export function initCloudflare(options: InitCloudflareOptions): InitCloudflareRe
     written,
     skipped,
     carried: wrangler ? describeCarried(carried, oauthKv !== undefined) : [],
-    warnings: wrangler ? leftBehind(wrangler, carried.durableObjects) : [],
+    warnings: wrangler ? leftBehind(wrangler, durableObjects.unmoved) : [],
     dependencies: raiseCfDependencies(root),
   }
 }
@@ -127,7 +129,7 @@ function describeCarried(carried: Carried, mcpOAuth: boolean): string[] {
 }
 
 /** Settings cf does not read, so the first cf deploy would drop them unannounced. */
-function leftBehind(wrangler: Record<string, unknown>, durableObjects: readonly DurableObjectCarry[]): string[] {
+function leftBehind(wrangler: Record<string, unknown>, unmoved: readonly string[]): string[] {
   const warnings: string[] = []
   const keys = Object.keys(wrangler).filter((key) => !HANDLED_KEYS.has(key))
   const flags = asArray(wrangler.compatibility_flags).filter((flag) => flag !== 'nodejs_compat')
@@ -148,64 +150,38 @@ function leftBehind(wrangler: Record<string, unknown>, durableObjects: readonly 
   if (declaresDurableObjects(wrangler)) {
     warnings.push('wrangler.jsonc declares Durable Objects through `migrations`, which cloudflare.config.ts now declares as `exports`. Whether a deployed class keeps its storage across that move is unconfirmed (RFC 0035 Open Question 5), so try it on a staging Worker first.')
   }
-  const carriedClasses = new Set(durableObjects.map((object) => object.className))
-  const unmoved = migrationSteps(wrangler).filter((step) => step.renamed || step.deleted || step.transferred)
-  if (unmoved.length > 0) {
+  if (asArray(wrangler.migrations).some((step) => isRecord(step) && ['renamed_classes', 'deleted_classes', 'transferred_classes'].some((key) => asArray(step[key]).length > 0))) {
     warnings.push('wrangler.jsonc migrations rename, delete or transfer a Durable Object class; init does not carry those steps. Declare them with exports.durableObject({ state }) in cloudflare.config.ts.')
   }
-  const foreign = asArray(isRecord(wrangler.durable_objects) ? wrangler.durable_objects.bindings : undefined)
-    .filter(isRecord)
-    .filter((entry) => typeof entry.script_name === 'string' || (typeof entry.class_name === 'string' && !carriedClasses.has(entry.class_name) && !isAgentBinding(entry)))
-    .map((entry) => String(entry.name))
-  if (foreign.length > 0) {
-    warnings.push(`The Durable Object binding ${foreign.join(', ')} points at another Worker or at a class no migration declares; bind it in cloudflare.config.ts with bindings.durableObject().`)
+  if (unmoved.length > 0) {
+    warnings.push(`The Durable Object binding ${unmoved.join(', ')} points at another Worker or at a class no migration declares; bind it in cloudflare.config.ts with bindings.durableObject().`)
   }
   return warnings
 }
 
-interface MigrationStep {
-  sqlite: string[]
-  kv: string[]
-  renamed: boolean
-  deleted: boolean
-  transferred: boolean
-}
-
-function migrationSteps(wrangler: Record<string, unknown>): MigrationStep[] {
-  const strings = (value: unknown) => asArray(value).filter((item): item is string => typeof item === 'string')
-  return asArray(wrangler.migrations).filter(isRecord).map((step) => ({
-    sqlite: strings(step.new_sqlite_classes),
-    kv: strings(step.new_classes),
-    renamed: asArray(step.renamed_classes).length > 0,
-    deleted: asArray(step.deleted_classes).length > 0,
-    transferred: asArray(step.transferred_classes).length > 0,
-  }))
-}
-
-/** An agent's binding, which gurenWorker() emits from the registry (`durableObjectBindingName()`). */
-function isAgentBinding(entry: Record<string, unknown>): boolean {
-  return typeof entry.class_name === 'string' && entry.name === durableObjectBindingName(entry.class_name)
+/** The agent classes gurenWorker() hosts from config/agents.ts, the registry the build reads. */
+async function agentClasses(root: string): Promise<Set<string>> {
+  if (!existsSync(resolve(root, 'config/agents.ts'))) return new Set()
+  assertAgentsPluginUsable(root)
+  return new Set((await readAgentRegistry(root)).exports.map((agent) => agent.export))
 }
 
 /**
- * The top-level Durable Object bindings gurenWorker() will not emit, with the storage their
- * migration declared. With a config/agents.ts, a binding named the way the build names an
- * agent's is the registry's; the others, and every one without a registry, are carried.
+ * The top-level Durable Object bindings: an agent's is gurenWorker()'s, one whose class a
+ * migration declares is carried with its storage, and the rest (another Worker's, or a class
+ * no migration declares) are named for the developer to bind.
  */
-function carriedDurableObjects(wrangler: Record<string, unknown>, hostsAgents: boolean): DurableObjectCarry[] {
-  const storage = new Map<string, DurableObjectCarry['storage']>()
-  for (const step of migrationSteps(wrangler)) {
-    for (const name of step.sqlite) storage.set(name, 'sqlite')
-    for (const name of step.kv) storage.set(name, 'legacy-kv')
+function sortDurableObjects(wrangler: Record<string, unknown>, agents: ReadonlySet<string>): { carried: DurableObjectCarry[]; unmoved: string[] } {
+  const storage = durableObjectStorage(wrangler)
+  const carried: DurableObjectCarry[] = []
+  const unmoved: string[] = []
+  for (const entry of durableObjectBindings(wrangler)) {
+    if (entry.scriptName === undefined && agents.has(entry.className)) continue
+    const kind = entry.scriptName === undefined ? storage.get(entry.className) : undefined
+    if (kind) carried.push({ binding: entry.name, className: entry.className, storage: kind })
+    else unmoved.push(entry.name)
   }
-  return asArray(isRecord(wrangler.durable_objects) ? wrangler.durable_objects.bindings : undefined)
-    .filter(isRecord)
-    .flatMap((entry): DurableObjectCarry[] => {
-      if (typeof entry.name !== 'string' || typeof entry.class_name !== 'string' || entry.script_name !== undefined) return []
-      if (hostsAgents && isAgentBinding(entry)) return []
-      const kind = storage.get(entry.class_name)
-      return kind ? [{ binding: entry.name, className: entry.class_name, storage: kind }] : []
-    })
+  return { carried, unmoved }
 }
 
 /**
@@ -214,34 +190,34 @@ function carriedDurableObjects(wrangler: Record<string, unknown>, hostsAgents: b
  */
 function raiseCfDependencies(root: string): string[] {
   const path = resolve(root, 'package.json')
-  let manifest: Record<string, unknown>
+  const { dependencies: declared, devDependencies: declaredDev } = readPackageJson(root)
+  const range = (name: string) => declared?.[name] ?? declaredDev?.[name]
+  const raised: Record<string, string> = {}
+  if (range('cf') === undefined) raised.cf = CF_VERSION
+  // The lowest version a range admits is its first: `^4.129.0`, `>=4.129 <5`. `-0` admits pre-releases, as the preflight does.
+  const lowest = range('wrangler')?.match(/\d+\.\d+\.\d+(-[\w.]+)?/)?.[0]
+  if (!lowest || !Bun.semver.satisfies(lowest, `>=${CF_WRANGLER_FLOOR}-0`)) raised.wrangler = `^${CF_WRANGLER_FLOOR}`
+  if (Object.keys(raised).length === 0) return []
+
+  let text: string
+  let manifest: unknown
   try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
-    if (!isRecord(parsed)) return []
-    manifest = parsed
+    text = readFileSync(path, 'utf8')
+    manifest = JSON.parse(text)
   } catch {
     return []
   }
-  const declared = (name: string) => [manifest.dependencies, manifest.devDependencies]
-    .map((group) => (isRecord(group) && typeof group[name] === 'string' ? group[name] : undefined))
-    .find((range) => range !== undefined)
-  const raised: Record<string, string> = {}
-  if (declared('cf') === undefined) raised.cf = CF_VERSION
-  const wrangler = declared('wrangler')
-  const lowest = wrangler?.match(/\d+\.\d+\.\d+(-[\w.]+)?/)?.[0]
-  if (!lowest || Bun.semver.order(lowest, CF_WRANGLER_FLOOR) < 0) raised.wrangler = `^${CF_WRANGLER_FLOOR}`
-  if (Object.keys(raised).length === 0) return []
-
+  if (!isRecord(manifest)) return []
   const devDependencies = isRecord(manifest.devDependencies) ? { ...manifest.devDependencies } : {}
   const dependencies = isRecord(manifest.dependencies) ? { ...manifest.dependencies } : undefined
-  for (const [name, range] of Object.entries(raised)) {
+  for (const [name, version] of Object.entries(raised)) {
     // A CLI belongs in devDependencies; one declared under dependencies is raised where it is.
-    if (dependencies && name in dependencies) dependencies[name] = range
-    else devDependencies[name] = range
+    if (dependencies && name in dependencies) dependencies[name] = version
+    else devDependencies[name] = version
   }
-  const indent = /^(\s+)"/m.exec(readFileSync(path, 'utf8'))?.[1] ?? '  '
+  const indent = /^(\s+)"/m.exec(text)?.[1] ?? '  '
   writeFileSync(path, `${JSON.stringify({ ...manifest, ...(dependencies ? { dependencies } : {}), devDependencies }, null, indent)}\n`)
-  return Object.entries(raised).map(([name, range]) => `${name}@${range}`)
+  return Object.entries(raised).map(([name, version]) => `${name}@${version}`)
 }
 
 function declaresDurableObjects(wrangler: Record<string, unknown>): boolean {
@@ -266,14 +242,8 @@ function cloudflareConfigSource(carried: Carried): string {
     ...carried.durableObjects.map((object) => `${object.binding}: bindings.durableObject({ worker: ${JSON.stringify(carried.worker)}, exportName: ${JSON.stringify(object.className)} })`),
   ]
   const exportEntries = carried.durableObjects.map((object) => `${object.className}: exports.durableObject({ storage: ${JSON.stringify(object.storage)} })`)
-  const env = envEntries.length > 0
-    ? `
-      env: { ...worker.env, ${envEntries.join(', ')} },`
-    : ''
-  const exportsLine = exportEntries.length > 0
-    ? `
-      exports: { ...worker.exports, ${exportEntries.join(', ')} },`
-    : ''
+  const spread = (key: 'env' | 'exports', entries: string[]) => (entries.length > 0 ? `
+      ${key}: { ...worker.${key}, ${entries.join(', ')} },` : '')
   const imports = [...(envEntries.length > 0 ? ['bindings'] : []), 'defineConfig', ...(exportEntries.length > 0 ? ['exports'] : [])]
   return `import { ${imports.join(', ')} } from 'cf/config'
 import { gurenWorker } from '@guren/plugin-cloudflare/config'
@@ -283,7 +253,7 @@ export default defineConfig(async () => {
   return {
     worker: {
       ...worker,
-      compatibilityDate: ${JSON.stringify(carried.compatibilityDate)},${env}${exportsLine}
+      compatibilityDate: ${JSON.stringify(carried.compatibilityDate)},${spread('env', envEntries)}${spread('exports', exportEntries)}
     },
   }
 })

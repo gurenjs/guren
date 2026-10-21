@@ -483,7 +483,7 @@ describe.skipIf(!cfEnabled)('cf builds and dry-runs the cf-backend worker', () =
     )
     // The files cloudflare:init writes, so the templates themselves meet the real cf.
     const { initCloudflare } = await import('./init')
-    initCloudflare({ rootDir: root, compatibilityDate: '2026-10-01' })
+    await initCloudflare({ rootDir: root, compatibilityDate: '2026-10-01' })
 
     const { buildCloudflareOutput } = await import('./build')
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })

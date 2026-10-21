@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -8,7 +8,7 @@ import { buildCloudflareOutput } from './build'
 import { initCloudflare } from './init'
 import type { WorkerManifest } from './worker-manifest'
 
-import { captureWarnings, scaffoldApp, writeJson } from '../tests/app-fixture'
+import { captureWarnings, scaffoldApp, writeAgentModule, writeAgentsConfig, writeJson } from '../tests/app-fixture'
 
 describe('cloudflare:init', () => {
   let root: string
@@ -21,11 +21,11 @@ describe('cloudflare:init', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  test('should write the three cf files for the Worker the build names', () => {
+  test('should write the three cf files for the Worker the build names', async () => {
     scaffoldApp(root)
     writeJson(join(root, 'package.json'), { name: '@scope/demo-app' })
 
-    const result = initCloudflare({ rootDir: root, compatibilityDate: '2026-10-20' })
+    const result = await initCloudflare({ rootDir: root, compatibilityDate: '2026-10-20' })
 
     expect(result.written).toEqual(['cloudflare.config.ts', 'wrangler.config.ts', 'config/cloudflare.ts'])
     const config = readFileSync(join(root, 'cloudflare.config.ts'), 'utf8')
@@ -37,7 +37,7 @@ describe('cloudflare:init', () => {
   })
 
   // An existing database keeps its name, and an OAuth app stays one, so the first cf deploy binds what Wrangler did.
-  test('should carry the Worker, date, D1 name and OAUTH_KV namespace over from wrangler.jsonc', () => {
+  test('should carry the Worker, date, D1 name and OAUTH_KV namespace over from wrangler.jsonc', async () => {
     scaffoldApp(root)
     writeFileSync(join(root, 'wrangler.jsonc'), `{
       // comments are allowed
@@ -50,7 +50,7 @@ describe('cloudflare:init', () => {
       "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "0123456789abcdef0123456789abcdef" }],
     }`)
 
-    const result = initCloudflare({ rootDir: root })
+    const result = await initCloudflare({ rootDir: root })
 
     const config = readFileSync(join(root, 'cloudflare.config.ts'), 'utf8')
     expect(config).toContain('gurenWorker({ name: "prod-api" })')
@@ -64,7 +64,7 @@ describe('cloudflare:init', () => {
     expect(result.warnings.join(' ')).toContain('the ANALYTICS binding')
   })
 
-  test('should name what cf would no longer read, and warn about Durable Objects only when there are some', () => {
+  test('should name what cf would no longer read, and warn about Durable Objects only when there are some', async () => {
     scaffoldApp(root)
     writeJson(join(root, 'wrangler.jsonc'), {
       name: 'demo-app',
@@ -76,7 +76,7 @@ describe('cloudflare:init', () => {
       env: { production: { migrations: [{ tag: 'v1', new_sqlite_classes: ['Triager'] }] } },
     })
 
-    const result = initCloudflare({ rootDir: root })
+    const result = await initCloudflare({ rootDir: root })
 
     const [leftBehind, durable] = result.warnings
     expect(leftBehind).toContain('routes, r2_buckets, env')
@@ -85,32 +85,32 @@ describe('cloudflare:init', () => {
     expect(durable).toContain('Open Question 5')
   })
 
-  test('should not carry a placeholder OAUTH_KV id', () => {
+  test('should not carry a placeholder OAUTH_KV id', async () => {
     scaffoldApp(root)
     writeJson(join(root, 'wrangler.jsonc'), { name: 'demo-app', kv_namespaces: [{ binding: 'OAUTH_KV', id: 'TODO: wrangler kv namespace create OAUTH_KV' }] })
 
-    initCloudflare({ rootDir: root })
+    await initCloudflare({ rootDir: root })
 
     expect(readFileSync(join(root, 'cloudflare.config.ts'), 'utf8')).not.toContain('OAUTH_KV')
     expect(readFileSync(join(root, 'config/cloudflare.ts'), 'utf8')).toContain('mcpOAuth: true,')
   })
 
-  test('should leave an existing file as it is without --force', () => {
+  test('should leave an existing file as it is without --force', async () => {
     scaffoldApp(root)
     writeFileSync(join(root, 'wrangler.config.ts'), 'export default {}\n')
 
-    const result = initCloudflare({ rootDir: root })
+    const result = await initCloudflare({ rootDir: root })
 
     expect(result).toMatchObject({ written: ['cloudflare.config.ts', 'config/cloudflare.ts'], skipped: ['wrangler.config.ts'] })
     expect(readFileSync(join(root, 'wrangler.config.ts'), 'utf8')).toBe('export default {}\n')
-    expect(initCloudflare({ rootDir: root, force: true }).written).toContain('wrangler.config.ts')
+    expect((await initCloudflare({ rootDir: root, force: true })).written).toContain('wrangler.config.ts')
   })
 
-  test('should leave an existing .cloudflare/ ignore line alone, CRLF included', () => {
+  test('should leave an existing .cloudflare/ ignore line alone, CRLF included', async () => {
     scaffoldApp(root)
     writeFileSync(join(root, '.gitignore'), 'node_modules\r\n.cloudflare/\r\n')
 
-    initCloudflare({ rootDir: root })
+    await initCloudflare({ rootDir: root })
 
     expect(readFileSync(join(root, '.gitignore'), 'utf8')).toBe('node_modules\r\n.cloudflare/\r\n')
   })
@@ -120,7 +120,7 @@ describe('cloudflare:init', () => {
     rmSync(join(root, 'cloudflare.config.ts'))
     writeFileSync(join(root, 'wrangler.jsonc'), '{ "name": "demo-app", "d1_databases": [{ "binding": "DB", "database_name": "legacy-db" }] }')
 
-    initCloudflare({ rootDir: root })
+    await initCloudflare({ rootDir: root })
     // The written config imports @guren/plugin-cloudflare/config, which this temp app cannot resolve; the build only reads config/cloudflare.ts.
     writeFileSync(join(root, 'config/cloudflare.ts'), readFileSync(join(root, 'config/cloudflare.ts'), 'utf8')
       .replace("import { defineCloudflareConfig } from '@guren/plugin-cloudflare/config'\n", 'const defineCloudflareConfig = <T>(config: T) => config\n'))
@@ -131,7 +131,7 @@ describe('cloudflare:init', () => {
     expect(manifest.d1.databaseName).toBe('legacy-db')
   }, 30_000)
 
-  test('should carry a Durable Object outside the agent registry into cloudflare.config.ts as a cf export', () => {
+  test('should carry a Durable Object outside the agent registry into cloudflare.config.ts as a cf export', async () => {
     scaffoldApp(root)
     writeJson(join(root, 'wrangler.jsonc'), {
       name: 'demo-app',
@@ -139,7 +139,7 @@ describe('cloudflare:init', () => {
       migrations: [{ tag: 'v1', new_sqlite_classes: ['Counter'] }, { tag: 'v2', new_classes: ['Legacy'] }, { tag: 'v3', renamed_classes: [{ from: 'Old', to: 'Counter' }] }],
     })
 
-    const result = initCloudflare({ rootDir: root, compatibilityDate: '2026-10-01' })
+    const result = await initCloudflare({ rootDir: root, compatibilityDate: '2026-10-01' })
 
     const config = readFileSync(join(root, 'cloudflare.config.ts'), 'utf8')
     expect(config).toContain("import { bindings, defineConfig, exports } from 'cf/config'")
@@ -152,32 +152,35 @@ describe('cloudflare:init', () => {
     expect(result.warnings.join('\n')).toContain('REMOTE')
   })
 
-  test('should leave the agent registry\'s Durable Objects to gurenWorker()', () => {
-    scaffoldApp(root)
-    mkdirSync(join(root, 'config'), { recursive: true })
-    writeFileSync(join(root, 'config/agents.ts'), 'export default {}\n')
+  test('should leave the agent registry\'s Durable Objects to gurenWorker()', async () => {
+    scaffoldApp(root, { agentsPlugin: true })
+    writeAgentModule(root, 'app/Agents/SupportTriager.ts', 'SupportTriager')
+    writeAgentsConfig(root, { triage: { module: 'app/Agents/SupportTriager.ts', export: 'SupportTriager' } })
     writeJson(join(root, 'wrangler.jsonc'), {
       name: 'demo-app',
-      durable_objects: { bindings: [{ name: 'SUPPORT_TRIAGER', class_name: 'SupportTriager' }] },
-      migrations: [{ tag: 'v1', new_sqlite_classes: ['SupportTriager'] }],
+      durable_objects: { bindings: [{ name: 'SUPPORT_TRIAGER', class_name: 'SupportTriager' }, { name: 'COUNTER', class_name: 'Counter' }] },
+      migrations: [{ tag: 'v1', new_sqlite_classes: ['SupportTriager', 'Counter'] }],
     })
 
-    initCloudflare({ rootDir: root, compatibilityDate: '2026-10-01' })
+    await initCloudflare({ rootDir: root, compatibilityDate: '2026-10-01' })
 
-    expect(readFileSync(join(root, 'cloudflare.config.ts'), 'utf8')).not.toContain('SupportTriager')
+    // Counter is named the way an agent's binding is, and is still carried: the registry decides.
+    const config = readFileSync(join(root, 'cloudflare.config.ts'), 'utf8')
+    expect(config).not.toContain('SupportTriager')
+    expect(config).toContain('Counter: exports.durableObject({ storage: "sqlite" })')
   })
 
-  test('should raise cf and wrangler to what the cf backend needs, and leave a satisfying range alone', () => {
+  test('should raise cf and wrangler to what the cf backend needs, and leave a satisfying range alone', async () => {
     scaffoldApp(root)
     const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as Record<string, unknown>
     writeJson(join(root, 'package.json'), { ...manifest, devDependencies: { wrangler: '^4.129.0' } })
 
-    expect(initCloudflare({ rootDir: root }).dependencies).toEqual(['cf@1.0.0-beta.18', 'wrangler@^4.136.0'])
+    expect((await initCloudflare({ rootDir: root })).dependencies).toEqual(['cf@1.0.0-beta.18', 'wrangler@^4.136.0'])
     expect((JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { devDependencies: unknown }).devDependencies).toEqual({
       wrangler: '^4.136.0',
       cf: '1.0.0-beta.18',
     })
 
-    expect(initCloudflare({ rootDir: root, force: true }).dependencies).toEqual([])
+    expect((await initCloudflare({ rootDir: root, force: true })).dependencies).toEqual([])
   })
 })

@@ -180,13 +180,15 @@ const cloudflareInit = defineCommand({
   },
   async run({ args }) {
     const rootDir = args.root || process.cwd()
-    const result = initCloudflare({ rootDir, force: Boolean(args.force) })
+    const result = await initCloudflare({ rootDir, force: Boolean(args.force) })
     if (result.written.length > 0) console.log(`Cloudflare init: wrote ${result.written.join(', ')}.`)
     if (result.skipped.length > 0) console.log(`Cloudflare init: left ${result.skipped.join(', ')} as they are; --force rewrites them.`)
     if (result.dependencies.length > 0) console.log(`Cloudflare init: raised ${result.dependencies.join(', ')} in package.json; run \`bun install\`.`)
     for (const carried of result.carried) console.log(`  Carried over from wrangler.jsonc: ${carried}.`)
     for (const warning of result.warnings) console.warn(`  ${warning}`)
-    if (!args.plan) {
+    // The plan's preflight checks what is installed, which a raised range is not yet.
+    if (!args.plan || result.dependencies.length > 0) {
+      if (args.plan) console.log('Cloudflare init: not planning until the raised dependencies are installed.')
       console.log([
         'Next:',
         ...(result.dependencies.length > 0 ? ['  bun install'] : []),

@@ -503,7 +503,7 @@ const NO_AGENTS: AgentRegistry = { exports: [], routing: false }
  * Duck-typed rather than typed against the plugin, which this package
  * deliberately does not depend on.
  */
-async function readAgentRegistry(root: string): Promise<AgentRegistry> {
+export async function readAgentRegistry(root: string): Promise<AgentRegistry> {
   const configPath = resolve(root, AGENTS_CONFIG_FILE)
   let module: { default?: unknown }
   try {
@@ -626,7 +626,7 @@ function isInside(root: string, target: string): boolean {
  * generated worker's imports at deploy time, from a *production* install, so a
  * devDependency does not answer.
  */
-function assertAgentsPluginUsable(root: string): void {
+export function assertAgentsPluginUsable(root: string): void {
   if (appDependsOn(root, AGENTS_PLUGIN_PACKAGE)) {
     return
   }
@@ -810,7 +810,7 @@ function assertAgentScopeHosts(
 }
 
 /** `Triager` → `TRIAGER`, `TriagerAgent` → `TRIAGER_AGENT`. */
-export function durableObjectBindingName(exportName: string): string {
+function durableObjectBindingName(exportName: string): string {
   return exportName
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
@@ -833,37 +833,37 @@ interface DurableObjectBinding {
  */
 function registeredBindings(config: Record<string, unknown>, agents: AgentExport[]): DurableObjectBinding[] {
   const registered = new Set(agents.map((agent) => agent.export))
+  return durableObjectBindings(config)
+    .filter((entry) => entry.scriptName === undefined && registered.has(entry.className))
+    .map((entry) => ({ name: entry.name, class_name: entry.className }))
+}
+
+/** The `durable_objects.bindings` of one scope; `scriptName` names another Worker that hosts the class. */
+export function durableObjectBindings(config: Record<string, unknown>): Array<{ name: string; className: string; scriptName?: unknown }> {
   const durableObjects = config.durable_objects
-  const hosting: DurableObjectBinding[] = []
-
-  for (const entry of asArray(isRecord(durableObjects) ? durableObjects.bindings : undefined)) {
-    if (!isRecord(entry)) continue
-    const { name, class_name: className, script_name: scriptName } = entry
-    if (scriptName !== undefined) continue
-    if (typeof name !== 'string' || typeof className !== 'string') continue
-    if (!registered.has(className)) continue
-    hosting.push({ name, class_name: className })
-  }
-
-  return hosting
+  return asArray(isRecord(durableObjects) ? durableObjects.bindings : undefined).flatMap((entry) => {
+    if (!isRecord(entry) || typeof entry.name !== 'string' || typeof entry.class_name !== 'string') return []
+    return [{ name: entry.name, className: entry.class_name, ...(entry.script_name !== undefined ? { scriptName: entry.script_name } : {}) }]
+  })
 }
 
 /**
- * Classes wrangler will give a SQLite storage backend, in either form. The
- * `migrations` list is *history*, folded in order: a class created in `v1` and
- * deleted in `v2` is gone, a rename carries the backend to the new name. A
- * declarative `exports` entry counts while it is live — `created` (the default)
- * or `expecting-transfer` — and `deleted`/`renamed` declare the class gone.
+ * Every live Durable Object class and the storage wrangler gives it, in either form. The
+ * `migrations` list is *history*, folded in order: a class created in `v1` and deleted in
+ * `v2` is gone, a rename carries the storage to the new name. A declarative `exports`
+ * entry counts while it is live — `created` (the default) or `expecting-transfer`.
  */
-function sqliteBackedClasses(config: Record<string, unknown>): Set<string> {
-  const classes = new Set<string>()
+export function durableObjectStorage(config: Record<string, unknown>): Map<string, 'sqlite' | 'legacy-kv'> {
+  const classes = new Map<string, 'sqlite' | 'legacy-kv'>()
 
   for (const migration of asArray(config.migrations)) {
     if (!isRecord(migration)) continue
-    for (const name of strings(migration.new_sqlite_classes)) classes.add(name)
+    for (const name of strings(migration.new_sqlite_classes)) classes.set(name, 'sqlite')
+    for (const name of strings(migration.new_classes)) classes.set(name, 'legacy-kv')
     for (const rename of asArray(migration.renamed_classes)) {
       if (!isRecord(rename) || typeof rename.from !== 'string' || typeof rename.to !== 'string') continue
-      if (classes.delete(rename.from)) classes.add(rename.to)
+      const storage = classes.get(rename.from)
+      if (storage && classes.delete(rename.from)) classes.set(rename.to, storage)
     }
     for (const name of strings(migration.deleted_classes)) classes.delete(name)
   }
@@ -871,13 +871,17 @@ function sqliteBackedClasses(config: Record<string, unknown>): Set<string> {
   const exported = config.exports
   if (isRecord(exported)) {
     for (const [name, entry] of Object.entries(exported)) {
-      if (!isRecord(entry)) continue
+      if (!isRecord(entry) || entry.type !== 'durable-object') continue
       const live = entry.state === undefined || entry.state === 'created' || entry.state === 'expecting-transfer'
-      if (entry.type === 'durable-object' && entry.storage === 'sqlite' && live) classes.add(name)
+      if (live && (entry.storage === 'sqlite' || entry.storage === 'legacy-kv')) classes.set(name, entry.storage)
     }
   }
 
   return classes
+}
+
+function sqliteBackedClasses(config: Record<string, unknown>): Set<string> {
+  return new Set([...durableObjectStorage(config)].filter(([, storage]) => storage === 'sqlite').map(([name]) => name))
 }
 
 export function asArray(value: unknown): unknown[] {

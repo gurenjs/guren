@@ -7,6 +7,7 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { isRecord, type CloudflareBackend } from '../backend'
+import { CF_NODE_FLOOR, CF_WRANGLER_FLOOR } from '../versions'
 import { readWorkerManifest, readWranglerConfig } from '../build'
 import { D1_MIGRATIONS_DIR, outputDirFor, WRANGLER_DEPLOY_CONFIG_FILE, type ResolvedResource } from '../worker-manifest'
 import {
@@ -75,10 +76,6 @@ export interface DeployBackend {
   deploy(secretsFile: string | undefined): Read<string>
 }
 
-/** cf refuses to load cloudflare.config.ts on older Node (RFC 0035 Appendix C row 10). */
-const NODE_FLOOR = '22.18.0'
-/** The Wrangler cf delegates the bundle to (Appendix C row 17); `-0` admits its pre-releases. */
-const CF_WRANGLER_FLOOR = '4.136.0'
 
 /** Where `cf build` writes the evaluated Worker configuration. */
 const EVALUATED_CONFIG = '.cloudflare/output/v0/workers/default/worker.config.json'
@@ -111,8 +108,8 @@ export function cfDeployBackend(options: CfBackendOptions): DeployBackend {
         problems.push('cf is declared but not installed. Run `bun install`.')
       }
       const node = nodeVersion()
-      if (!node || !Bun.semver.satisfies(node, `>=${NODE_FLOOR}`)) {
-        problems.push(`cf loads cloudflare.config.ts with the node on PATH, which needs Node ${NODE_FLOOR} or later; found ${node ?? 'no node'}.`)
+      if (!node || !Bun.semver.satisfies(node, `>=${CF_NODE_FLOOR}`)) {
+        problems.push(`cf loads cloudflare.config.ts with the node on PATH, which needs Node ${CF_NODE_FLOOR} or later; found ${node ?? 'no node'}.`)
       }
       const wrangler = installedVersion(root, 'wrangler')
       if (!wrangler || !Bun.semver.satisfies(wrangler, `>=${CF_WRANGLER_FLOOR}-0`)) {
