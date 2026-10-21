@@ -16,10 +16,12 @@ import {
   checkAuth,
   createD1Database,
   createKvNamespace,
+  createR2Bucket,
   deployPrebuilt,
   getBookmark,
   listD1Databases,
   listKvNamespaces,
+  listR2Buckets,
   listWorkerSecrets,
   readMigrationTracker,
   DEFAULT_TRACKER,
@@ -29,7 +31,7 @@ import {
   type Read,
 } from './cf-cli'
 import { migrationDirArgs, type MigrationLayout } from './migrations'
-import type { EvaluatedBinding, EvaluatedWorker, PlannedBinding, ResourceType } from './plan'
+import type { EvaluatedBinding, EvaluatedWorker, PlannedBinding } from './plan'
 import {
   applyWranglerMigrations,
   checkWranglerAuth,
@@ -60,9 +62,11 @@ export interface DeployBackend {
   migrationsBinding(): Read<string | undefined>
   /** Called once the bindings are planned and before any read that needs a database by its id. */
   prepareReads(bindings: readonly PlannedBinding[]): void
-  list(type: ResourceType): Read<AccountResource[]>
+  list(type: 'd1' | 'kv'): Read<AccountResource[]>
   /** The new resource's id. */
-  create(type: ResourceType, name: string): Read<string>
+  create(type: 'd1' | 'kv', name: string): Read<string>
+  /** R2, looked up by bucket name; absent on a backend that cannot list buckets (Wrangler prints no JSON). */
+  readonly r2?: { list(names: readonly string[]): Read<AccountResource[]>; create(name: string): Read<string> }
   /** Makes the deploy build bind `resolved`, after stage 4 changed it; the message names the problem. */
   rebuild(resolved: Readonly<Record<string, { id?: string }>>): Read<true>
   /** Whether the nested layout (`<folder>/migration.sql`) can be applied at all. */
@@ -139,6 +143,7 @@ export function cfDeployBackend(options: CfBackendOptions): DeployBackend {
     prepareReads() {},
     list: (type) => (type === 'd1' ? listD1Databases(cf) : listKvNamespaces(cf)),
     create: (type, name) => (type === 'd1' ? createD1Database(cf, name) : createKvNamespace(cf, name)),
+    r2: { list: (names) => listR2Buckets(cf, names), create: (name) => createR2Bucket(cf, name) },
     rebuild(resolved) {
       // gurenWorker() reads the manifest inside `cf build`, so only cf builds again.
       const rebuilt = build()

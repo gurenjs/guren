@@ -1,7 +1,8 @@
 import { describe, test, expect } from 'bun:test'
 
 import type { AccountResource, Read } from './cf-cli'
-import { autoProvisionedName, buildPlan, hasBlocker, type EvaluatedWorker, type PlanContext } from './plan'
+import { autoProvisionedName } from '../worker-manifest'
+import { buildPlan, hasBlocker, type EvaluatedWorker, type PlanContext } from './plan'
 
 const DB_ID = 'e902bc31-46b4-47dc-9d46-194d0b86148c'
 const OTHER_DB_ID = '0b0e1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d'
@@ -326,5 +327,76 @@ describe('buildPlan', () => {
       scheduleUnreadable: unreadable,
       worker: { name: 'demo-app', env: { DB: { type: 'd1', name: 'demo-app' } }, scheduled: true },
     })).findings).toEqual([])
+  })
+})
+
+describe('R2 buckets and what the app names (RFC 0035 §2)', () => {
+  const r2Env = { DB: { type: 'd1', name: 'demo-app' }, MEDIA: { type: 'r2', name: 'demo-app-media' } }
+
+  test('should create, adopt or keep an R2 bucket by its name', () => {
+    const create = buildPlan(context({ env: r2Env, r2: ok<AccountResource[]>([]) }))
+    expect(create.bindings.find((binding) => binding.binding === 'MEDIA')).toEqual({ binding: 'MEDIA', type: 'r2', action: 'create', name: 'demo-app-media' })
+
+    const adopt = buildPlan(context({ env: r2Env, r2: ok([{ id: 'demo-app-media', name: 'demo-app-media' }]) }))
+    expect(adopt.bindings.find((binding) => binding.binding === 'MEDIA')).toMatchObject({ action: 'adopt', id: 'demo-app-media' })
+
+    const existing = buildPlan(context({
+      env: r2Env,
+      r2: ok([{ id: 'demo-app-media', name: 'demo-app-media' }]),
+      manifest: { resolved: { MEDIA: { id: 'demo-app-media', name: 'demo-app-media' } } },
+    }))
+    expect(existing.bindings.find((binding) => binding.binding === 'MEDIA')).toMatchObject({ action: 'existing' })
+    expect(hasBlocker(existing)).toBe(false)
+  })
+
+  test('should leave R2 to the deploy when the backend cannot list buckets', () => {
+    const plan = buildPlan(context({ backend: 'wrangler', env: r2Env }))
+    expect(plan.bindings.map((binding) => binding.binding)).toEqual(['DB'])
+    expect(hasBlocker(plan)).toBe(false)
+  })
+
+  test('should refuse an R2 bucket name R2 would reject, before anything is created', () => {
+    const plan = buildPlan(context({ env: { MEDIA: { type: 'r2', name: 'Demo_App.Media' } }, r2: ok<AccountResource[]>([]) }))
+    expect(plan.findings).toContainEqual(expect.objectContaining({ check: 'resource-name', binding: 'MEDIA', severity: 'blocker' }))
+  })
+
+  test('should block a bucket a disk reads and the Worker lacks, in the backend\'s own words', () => {
+    const inference = { r2Buckets: ['MEDIA'] }
+    const cf = buildPlan(context({ inference, r2: ok<AccountResource[]>([]) }))
+    expect(cf.findings).toContainEqual(expect.objectContaining({ check: 'resource-missing', binding: 'MEDIA', fix: expect.stringContaining('gurenWorker() binds MEDIA') }))
+
+    const wrangler = buildPlan(context({ backend: 'wrangler', inference }))
+    expect(wrangler.findings).toContainEqual(expect.objectContaining({
+      check: 'resource-missing',
+      fix: expect.stringContaining('"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "demo-app-media" }]'),
+    }))
+  })
+
+  test('should block a D1 binding config/database.ts names and the Worker does not bind', () => {
+    const plan = buildPlan(context({ inference: { r2Buckets: [], databaseBinding: 'DATABASE' } }))
+    expect(plan.findings).toContainEqual(expect.objectContaining({ check: 'resource-missing', binding: 'DATABASE' }))
+    expect(hasBlocker(buildPlan(context({ inference: { r2Buckets: [], databaseBinding: 'DB' } })))).toBe(false)
+  })
+
+  test('should plan a renamed R2 bucket under its new name, not the one an earlier deploy settled', () => {
+    const plan = buildPlan(context({
+      env: { MEDIA: { type: 'r2', name: 'new-bucket' } },
+      r2: ok([{ id: 'old-bucket', name: 'old-bucket' }]),
+      manifest: { resolved: { MEDIA: { id: 'old-bucket', name: 'old-bucket' } } },
+    }))
+    expect(plan.bindings[0]).toEqual({ binding: 'MEDIA', type: 'r2', action: 'create', name: 'new-bucket' })
+  })
+
+  test('should warn about a resource name for a binding the Worker does not have, such as a misspelt one', () => {
+    const plan = buildPlan(context({ manifest: { resolved: {}, resourceNames: { db: 'shared-db' } } }))
+    expect(plan.findings).toContainEqual(expect.objectContaining({ check: 'resource-name', severity: 'warning', binding: 'db' }))
+    expect(hasBlocker(plan)).toBe(false)
+  })
+
+  test('should list what could not be inferred without blocking', () => {
+    const plan = buildPlan(context({ inference: { r2Buckets: [], unread: 'introspection failed with import', opaqueDisks: ['media'] } }))
+    expect(hasBlocker(plan)).toBe(false)
+    expect(plan.unread.join('\n')).toContain('introspection failed with import')
+    expect(plan.unread.join('\n')).toContain('r2Disk()')
   })
 })

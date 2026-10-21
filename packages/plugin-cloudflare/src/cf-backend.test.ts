@@ -190,12 +190,23 @@ describe('cloudflare:build on the cf backend (RFC 0035)', () => {
     expect(readFileSync(join(root, '.guren/cloudflare/worker.js'), 'utf8')).toContain('"/api/mcp"')
   })
 
-  test('should refuse a resource name for a binding that cannot take one', async () => {
+  test('should keep the R2 buckets an earlier build found when this one cannot read the app', async () => {
+    scaffoldApp(root, { cfBackend: true })
+    mkdirSync(join(root, '.guren/cloudflare'), { recursive: true })
+    writeFileSync(join(root, '.guren/cloudflare/guren-worker.json'), JSON.stringify({ version: 2, r2Buckets: ['MEDIA'], resolved: {} }))
+
+    await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
+
+    const manifest = JSON.parse(readFileSync(join(root, '.guren/cloudflare/guren-worker.json'), 'utf8')) as { r2Buckets: string[] }
+    expect(manifest.r2Buckets).toEqual(['MEDIA'])
+  })
+
+  test('should refuse resourceNames that are not a record of names', async () => {
     scaffoldApp(root, { cfBackend: true })
     mkdirSync(join(root, 'config'), { recursive: true })
-    writeFileSync(join(root, 'config/cloudflare.ts'), "export default { resourceNames: { db: 'shared-db' } }\n")
+    writeFileSync(join(root, 'config/cloudflare.ts'), "export default { resourceNames: { DB: '' } }\n")
 
-    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(/names db, and only DB and OAUTH_KV take a name/)
+    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(/resourceNames is not a record of non-empty names/)
   })
 
   test('should warn that the wrangler backend ignores config/cloudflare.ts', async () => {

@@ -55,6 +55,18 @@ export interface WorkerManifest {
   scheduleUnreadable?: string
   /** Agent classes hosted as SQLite-backed Durable Objects, with the binding each gets. */
   agents: Array<{ exportName: string; binding: string }>
+  /** R2 bucket bindings the introspected app's disks name (RFC 0035 §2); absent from a manifest older than that. */
+  r2Buckets?: string[]
   /** Keyed by binding name. The build never writes an entry, only carries them over. */
   resolved: Record<string, ResolvedResource>
+}
+
+/** The name `cf` and Wrangler provision a binding under: `<worker>-<binding>`, `_` as `-` (RFC 0035 §4). */
+export function autoProvisionedName(worker: string, binding: string): string {
+  return `${worker}-${binding.toLowerCase().replaceAll('_', '-')}`
+}
+
+/** A binding's resource name: one the config states, then `config/cloudflare.ts`'s, then the default. */
+export function resourceName(worker: string, binding: string, resourceNames: Readonly<Record<string, string>> | undefined, stated?: string): string {
+  return stated ?? resourceNames?.[binding] ?? autoProvisionedName(worker, binding)
 }

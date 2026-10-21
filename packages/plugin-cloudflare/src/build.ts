@@ -24,7 +24,7 @@ import {
   type SqlClientSpecifier,
   type PathLike,
 } from '@guren/core/internal/deploy-build'
-import { reportDeployRuntimeHazards } from '@guren/core/internal/deploy-check'
+import { inspectDeployRuntime } from '@guren/core/internal/deploy-check'
 import { readScheduledTasks } from '@guren/core/internal/deploy-plan'
 
 import {
@@ -43,6 +43,7 @@ import {
   type WorkerManifest,
 } from './worker-manifest'
 import { detectCloudflareBackend, isRecord, readPackageJson } from './backend'
+import { inferBindings, type BindingInference } from './inference'
 import type { CloudflareDeployConfig } from './config'
 import { readLocalMigrations } from './deploy/migrations'
 
@@ -91,6 +92,11 @@ export interface BuildCloudflareOutputOptions {
  * with the `guren-worker.json` manifest `gurenWorker()` reads (RFC 0035 §3).
  */
 export async function buildCloudflareOutput(options: BuildCloudflareOutputOptions = {}): Promise<void> {
+  await assembleCloudflareOutput(options)
+}
+
+/** {@link buildCloudflareOutput}, returning what it learnt about the app, which `cloudflare:deploy` plans from (RFC 0035 §2). */
+export async function assembleCloudflareOutput(options: BuildCloudflareOutputOptions = {}): Promise<{ inference: BindingInference }> {
   const root = resolvePathLike(options.rootDir ?? process.cwd())
   const backend = detectCloudflareBackend(root)
   const out = resolvePathLike(
@@ -153,7 +159,12 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   // drops every login after deploy, and the warning belongs where the
   // developer is still reading (RFC 0020 Part 0).
   // As workerd runs it: the config's isWorkersRuntime() branch, not the one `bun run dev` takes.
-  await reportDeployRuntimeHazards({ root, label: 'Cloudflare build', target: 'cloudflare' })
+  // The same introspection names the bindings the app reads (RFC 0035 §2).
+  const { app } = await inspectDeployRuntime({ root, label: 'Cloudflare build', target: 'cloudflare' })
+  // An app this build could not read keeps the buckets an earlier build found: unread is never absent.
+  const fresh = inferBindings(app)
+  const previousBuckets = readWorkerManifest(out).r2Buckets
+  const inferred = fresh.unread && Array.isArray(previousBuckets) ? { ...fresh, r2Buckets: previousBuckets } : fresh
   const schedule = backend === 'cf' ? await cronTriggers(root) : { crons: [] }
   warnDatabaseWithoutD1(root)
 
@@ -185,6 +196,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
       resolved,
       ...schedule,
       resourceNames: deployConfig?.resourceNames ?? {},
+      inferred,
     })
   }
 
@@ -224,6 +236,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   if (backend === 'wrangler') {
     scaffoldWranglerConfig(root, out, packageJson.name, mcpOAuth, agents.exports)
   }
+  return { inference: inferred }
 }
 
 /** The manifest a build left in `out`, or an empty object when there is none to read. */
@@ -273,6 +286,7 @@ function writeWorkerManifest(input: {
   crons: string[]
   scheduleUnreadable?: string
   resourceNames: Record<string, string>
+  inferred: BindingInference
 }): void {
   const outRelative = relative(input.root, input.out).split(sep).join('/')
   const manifest: WorkerManifest = {
@@ -293,6 +307,7 @@ function writeWorkerManifest(input: {
       exportName: agent.export,
       binding: durableObjectBindingName(agent.export),
     })),
+    r2Buckets: input.inferred.r2Buckets,
     resolved: input.resolved,
   }
 
@@ -347,9 +362,6 @@ function deployConfigProblems(config: unknown): string[] {
   if (config.resourceNames !== undefined
     && (!isRecord(config.resourceNames) || Object.values(config.resourceNames).some((name) => typeof name !== 'string' || name === ''))) {
     problems.push('resourceNames is not a record of non-empty names')
-  } else if (isRecord(config.resourceNames)) {
-    const unknown = Object.keys(config.resourceNames).filter((binding) => !NAMEABLE_BINDINGS.has(binding))
-    if (unknown.length > 0) problems.push(`resourceNames names ${unknown.join(', ')}, and only ${[...NAMEABLE_BINDINGS].join(' and ')} take a name`)
   }
   return problems
 }
@@ -385,9 +397,6 @@ const MCP_OAUTH_SEAM_SPECIFIER = '@guren/plugin-mcp/oauth'
 
 /** The KV binding name `OAuthProvider` requires, fixed by the provider. */
 export const OAUTH_KV_BINDING = 'OAUTH_KV'
-
-/** The bindings a resource name can be given for: the build's D1 database and its KV namespace. */
-const NAMEABLE_BINDINGS = new Set(['DB', OAUTH_KV_BINDING])
 
 /** The three endpoints the provider owns or hands back, in one place. */
 const OAUTH_ENDPOINTS = {
