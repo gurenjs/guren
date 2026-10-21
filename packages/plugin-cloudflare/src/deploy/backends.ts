@@ -3,7 +3,7 @@
  * Every operation on the account or a CLI goes through one of these, so the stages
  * in `deploy.ts` are written once. Which backend runs is `detectCloudflareBackend()`'s.
  */
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { isRecord, type CloudflareBackend } from '../backend'
@@ -32,7 +32,7 @@ import {
   type Read,
 } from './cf-cli'
 import { migrationDirArgs, type MigrationLayout } from './migrations'
-import type { EvaluatedBinding, EvaluatedWorker, PlannedBinding } from './plan'
+import { boundIdentity, type EvaluatedBinding, type EvaluatedWorker, type PlannedBinding } from './plan'
 import {
   applyWranglerMigrations,
   checkWranglerAuth,
@@ -81,7 +81,7 @@ export interface DeployBackend {
 }
 
 
-/** Where `cf build` writes the evaluated Worker configuration. */
+/** Where the cf build writes the evaluated Worker configuration. */
 const EVALUATED_CONFIG = '.cloudflare/output/v0/workers/default/worker.config.json'
 
 export interface CfBackendOptions {
@@ -93,13 +93,18 @@ export interface CfBackendOptions {
 export function cfDeployBackend(options: CfBackendOptions): DeployBackend {
   const { root } = options
   const cfPackage = resolvePackageFile(root, 'cf/package.json')
-  const cf = options.cf ?? appCliRunner(root, join(dirname(cfPackage ?? join(root, 'node_modules/cf/package.json')), 'bin', 'cf'))
+  const cf = options.cf ?? appCliRunner(root, packageBin(root, 'cf', 'cf', cfPackage))
   const nodeVersion = options.nodeVersion ?? nodeOnPathVersion
+  // `cf build` hands an app with Vite in its package.json (every SSR scaffold) to `vite build`,
+  // which writes no Build Output; Wrangler's cf implementation is what cf runs for any other app.
+  const buildEntry = packageBin(root, 'wrangler', CF_WRANGLER_BUILD_ENTRY)
+  const buildLabel = `the cf build (\`${CF_WRANGLER_BUILD_ENTRY} build\`)`
+  const builder = options.cf ?? appCliRunner(root, buildEntry)
 
   const build = (): Read<true> => {
     // A file left by an earlier build must not pass for this evaluation.
     rmSync(join(root, EVALUATED_CONFIG), { force: true })
-    return cfBuild(cf)
+    return cfBuild(builder)
   }
 
   return {
@@ -118,6 +123,8 @@ export function cfDeployBackend(options: CfBackendOptions): DeployBackend {
       const wrangler = installedVersion(root, 'wrangler')
       if (!wrangler || !Bun.semver.satisfies(wrangler, `>=${CF_WRANGLER_FLOOR}-0`)) {
         problems.push(`cf bundles through the app's Wrangler, which needs ${CF_WRANGLER_FLOOR} or later; found ${wrangler ?? 'none'}. Run \`bun add -d wrangler@latest\`.`)
+      } else if (!existsSync(buildEntry)) {
+        problems.push(`The app's Wrangler ${wrangler} has no bin/${CF_WRANGLER_BUILD_ENTRY}, the build cf runs for a Worker. Run \`bun add -d wrangler@latest\`.`)
       }
       if (problems.length === 0) {
         const auth = checkAuth(cf)
@@ -130,7 +137,7 @@ export function cfDeployBackend(options: CfBackendOptions): DeployBackend {
     evaluate() {
       const built = build()
       if (!built.ok) {
-        throw new Error(`Cloudflare deploy: \`cf build\` failed, so cloudflare.config.ts could not be evaluated:\n${built.reason}`)
+        throw new Error(`Cloudflare deploy: ${buildLabel} failed, so cloudflare.config.ts could not be evaluated:\n${built.reason}`)
       }
       return readEvaluatedWorker(root)
     },
@@ -142,12 +149,12 @@ export function cfDeployBackend(options: CfBackendOptions): DeployBackend {
     create: (type, name) => (type === 'd1' ? createD1Database(cf, name) : createKvNamespace(cf, name)),
     r2: { list: (names) => listR2Buckets(cf, names), create: (name) => createR2Bucket(cf, name) },
     rebuild(resolved) {
-      // gurenWorker() reads the manifest inside `cf build`, so only cf builds again.
+      // gurenWorker() reads the manifest inside the cf build, so only it runs again.
       const rebuilt = build()
-      if (!rebuilt.ok) return { ok: false, reason: `\`cf build\` failed after the resources were settled:\n${rebuilt.reason}` }
+      if (!rebuilt.ok) return { ok: false, reason: `${buildLabel} failed after the resources were settled:\n${rebuilt.reason}` }
       const worker = readEvaluatedWorker(root)
       const drift = Object.entries(resolved)
-        .filter(([binding, resource]) => worker.env[binding]?.id !== resource.id)
+        .filter(([binding, resource]) => boundIdentity(worker.env[binding]) !== resource.id)
         .map(([binding]) => binding)
       return drift.length > 0
         ? { ok: false, reason: `cloudflare.config.ts binds ${drift.join(', ')} to another resource than the plan resolved. Remove the id it sets after the gurenWorker() spread, then plan again.` }
@@ -179,8 +186,7 @@ export interface WranglerBackendOptions {
 export function wranglerDeployBackend(options: WranglerBackendOptions): DeployBackend {
   const { root } = options
   const wranglerPackage = resolvePackageFile(root, 'wrangler/package.json')
-  const wrangler = options.wrangler
-    ?? appCliRunner(root, join(dirname(wranglerPackage ?? join(root, 'node_modules/wrangler/package.json')), 'bin', 'wrangler.js'))
+  const wrangler = options.wrangler ?? appCliRunner(root, packageBin(root, 'wrangler', 'wrangler.js', wranglerPackage))
   const nodeVersion = options.nodeVersion ?? nodeOnPathVersion
   const outputDir = outputDirFor('wrangler')
   const outDir = join(root, outputDir)
@@ -264,7 +270,7 @@ function readEvaluatedWorker(root: string): EvaluatedWorker {
   const path = join(root, EVALUATED_CONFIG)
   const config = readJson(path)
   if (!isRecord(config) || typeof config.name !== 'string' || (config.env !== undefined && !isRecord(config.env))) {
-    throw new Error(`Cloudflare deploy: ${path} is missing or not the shape \`cf build\` writes, so the bindings could not be read.`)
+    throw new Error(`Cloudflare deploy: ${path} is missing or not the shape the cf build writes, so the bindings could not be read.`)
   }
   const env: Record<string, EvaluatedBinding> = {}
   for (const [binding, entry] of Object.entries(config.env ?? {})) {
@@ -278,6 +284,14 @@ function readEvaluatedWorker(root: string): EvaluatedWorker {
   }
   const triggers = Array.isArray(config.triggers) ? config.triggers : []
   return { name: config.name, env, scheduled: triggers.some((trigger) => isRecord(trigger) && trigger.type === 'scheduled') }
+}
+
+/** The entry cf spawns for `build` when it picks the Wrangler implementation (wrangler 4.136+). */
+export const CF_WRANGLER_BUILD_ENTRY = 'cf-wrangler.js'
+
+/** A file under an installed package's `bin/`, from its resolved `package.json` when the caller has it. */
+export function packageBin(root: string, name: string, file: string, manifest = resolvePackageFile(root, `${name}/package.json`)): string {
+  return join(dirname(manifest ?? join(root, 'node_modules', name, 'package.json')), 'bin', file)
 }
 
 /** Resolved the way Node resolves it from the app, so a hoisted workspace install is found. */

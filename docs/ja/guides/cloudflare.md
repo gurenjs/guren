@@ -487,8 +487,11 @@ export default defineCloudflareConfig({
 
 ```bash
 bunx guren cloudflare:build
-bunx cf deploy
+node node_modules/wrangler/bin/cf-wrangler.js build
+bunx cf deploy --prebuilt
 ```
+
+ここでは、ただの `cf build` や `cf deploy` は使えません。`cf` は `package.json` に Vite があるとビルドを `vite build` に任せますが、そのビルドは `cf` がデプロイする Worker を書き出さないからです。2 行目では、Vite のないアプリで `cf` が選ぶ Wrangler のビルドを直接実行します（ワークスペースでは、巻き上げられた `wrangler` パッケージのパスを指定してください）。`cloudflare:deploy` も同じ方法でビルドします。同じ理由で、`cf dev` は Worker ではなく Vite の開発サーバーを起動します。
 
 この経路では、ビルドの出力先が `.guren/cloudflare/` になり、`gurenWorker()` が読む `guren-worker.json` もそこに書かれます。このディレクトリには専用の `.gitignore` が置かれ、`.cloudflare/` の下にある `cf` のファイルには触りません。バインディングに ID がないので、最初の `cf deploy` がデータベースと名前空間を作ります。名前での探し方は [Wrangler の場合](#データベースd1)と同じです。
 

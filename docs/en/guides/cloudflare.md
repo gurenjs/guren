@@ -483,8 +483,11 @@ Build, then deploy from the app root:
 
 ```bash
 bunx guren cloudflare:build
-bunx cf deploy
+node node_modules/wrangler/bin/cf-wrangler.js build
+bunx cf deploy --prebuilt
 ```
+
+A plain `cf build` or `cf deploy` does not work here. cf sees Vite in `package.json` and hands the build to `vite build`, which writes no Worker for cf to deploy. The middle line runs the Wrangler build that cf would pick for an app without Vite (in a workspace, point it at the hoisted `wrangler` package), and `cloudflare:deploy` builds the same way. For the same reason, `cf dev` starts the Vite dev server rather than the Worker.
 
 On this path the build assembles into `.guren/cloudflare/` and writes `guren-worker.json` there for `gurenWorker()` to read. The directory carries its own `.gitignore`, and `cf`'s files under `.cloudflare/` are left alone. The bindings carry no ids, so `cf deploy` creates the database and namespaces on the first deploy, by the same name lookup as [Wrangler](#database-d1).
 

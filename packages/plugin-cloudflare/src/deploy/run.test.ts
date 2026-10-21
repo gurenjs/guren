@@ -21,6 +21,8 @@ interface FakeAccount {
   overrideDbId?: string
   /** An id cloudflare.config.ts sets for DB from the start, which the manifest never records. */
   configuredDbId?: string
+  /** R2 buckets in the account; set to give the worker a MEDIA bucket binding. */
+  r2?: string[]
 }
 
 /**
@@ -48,6 +50,8 @@ function fakeCf(root: string, account: FakeAccount, calls: string[][]) {
         env: {
           // The override is written after the spread, so it wins once gurenWorker() emits an id.
           DB: { type: 'd1', name: db?.name ?? 'demo-app', ...(db?.id ? { id: account.overrideDbId ?? db.id } : {}) },
+          // R2 has no id, so gurenWorker() binds the bucket by name alone, resolved or not.
+          ...(account.r2 ? { MEDIA: { type: 'r2', name: manifest.resolved.MEDIA?.name ?? 'demo-app-media' } } : {}),
         },
       })
       return ok(null)
@@ -68,6 +72,11 @@ function fakeCf(root: string, account: FakeAccount, calls: string[][]) {
     if (command === 'd1' && sub === 'time-travel') return failed('bookmark') ?? ok({ bookmark: '0000-bookmark' })
     if (command === 'd1' && sub === 'migrations') return failed('apply') ?? { exitCode: 0, stdout: 'applied', stderr: '' }
     if (command === 'kv') return ok([])
+    if (command === 'r2' && args[2] === 'list') return ok({ buckets: (account.r2 ?? []).map((name) => ({ name })) })
+    if (command === 'r2' && args[2] === 'create') {
+      account.r2?.push(args[4] as string)
+      return ok(null)
+    }
     if (command === 'deploy') {
       return failed('deploy') ?? { exitCode: 0, stdout: 'Deployed demo-app\n  https://demo-app.example.workers.dev\n', stderr: '' }
     }
@@ -106,6 +115,17 @@ describe('cloudflare:deploy', () => {
       ...overrides,
     })
   }
+
+  test('should deploy after creating an R2 bucket, which the rebuilt worker binds by name', async () => {
+    const calls: string[][] = []
+
+    const result = await run({ d1: [{ uuid: EXISTING_DB, name: 'demo-app' }], tracker: [], r2: [] }, calls)
+
+    expect(result.failure).toBeUndefined()
+    expect(result.created).toEqual([{ binding: 'MEDIA', type: 'r2', name: 'demo-app-media', id: 'demo-app-media' }])
+    expect(calls).toContainEqual(['r2', 'buckets', 'create', '--name', 'demo-app-media'])
+    expect(calls).toContainEqual(['deploy', '--prebuilt', '--no-provision'])
+  })
 
   test('should create, settle, rebuild, migrate and deploy, in that order', async () => {
     writeMigration(root, '20261001_init', 'CREATE TABLE posts (id integer primary key);\n')

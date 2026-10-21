@@ -178,7 +178,7 @@ export function readField(cf: CliRunner, args: string[], label: string, key: str
   return typeof value === 'string' ? { ok: true, value } : { ok: false, reason: `${label} printed no ${key}` }
 }
 
-/** `cf build`: evaluates cloudflare.config.ts and writes the build output the plan reads. */
+/** `build` through cf's implementation protocol: evaluates cloudflare.config.ts and writes the build output the plan reads. */
 export function cfBuild(cf: CliRunner): Read<true> {
   const result = cf(['build'])
   return result.exitCode === 0 ? { ok: true, value: true } : { ok: false, reason: failureText(result) }

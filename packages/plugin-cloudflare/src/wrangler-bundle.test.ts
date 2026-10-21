@@ -470,8 +470,10 @@ describe.skipIf(!cfEnabled)('cf builds and dry-runs the cf-backend worker', () =
 
     // cf delegates the esbuild bundle to the app's own Wrangler, at 4.136.0 or later.
     vendorClosure(root, 'cf-backend-probe', workspaceClosure('@guren/plugin-cloudflare'), {
-      extra: { cf: '1.0.0-beta.18', wrangler: '4.151.1' },
+      // Vite as every SSR scaffold has it, which makes a plain `cf build` delegate to `vite build`.
+      extra: { cf: '1.0.0-beta.18', wrangler: '4.151.1', vite: '^8.0.0' },
     })
+    writeFileSync(join(root, 'vite.config.ts'), 'export default {}\n')
 
     mkdirSync(join(root, 'src'), { recursive: true })
     writeFileSync(join(root, 'src/app.ts'), 'export default { boot: async () => {}, fetch: async () => new Response("ok") }\n')
@@ -495,10 +497,11 @@ describe.skipIf(!cfEnabled)('cf builds and dry-runs the cf-backend worker', () =
 
   test(
     'builds the manifest into a worker cf accepts',
-    () => {
-      const build = cf(['build'])
-      expect(build.output).not.toMatch(/Invalid|Could not resolve/)
-      expect(build.exitCode).toBe(0)
+    async () => {
+      const { appCliRunner, cfBuild } = await import('./deploy/cf-cli')
+      const { CF_WRANGLER_BUILD_ENTRY, packageBin } = await import('./deploy/backends')
+      const build = cfBuild(appCliRunner(root, packageBin(root, 'wrangler', CF_WRANGLER_BUILD_ENTRY)))
+      expect(build).toEqual({ ok: true, value: true })
 
       const workerDir = join(root, '.cloudflare/output/v0/workers/default')
       const config = JSON.parse(readFileSync(join(workerDir, 'worker.config.json'), 'utf8')) as Record<string, unknown>

@@ -136,7 +136,7 @@ async function readWorkerManifest(outputDir = CF_OUTPUT_DIR): Promise<WorkerMani
     text = await readFile(path, 'utf8')
   } catch {
     throw new Error(
-      `@guren/plugin-cloudflare/config: ${path} not found. Run \`bunx guren cloudflare:build\` before \`cf build\` or \`cf deploy\`; it writes this manifest. A build given another outputDir needs the same outputDir here.`,
+      `@guren/plugin-cloudflare/config: ${path} not found. Run \`bunx guren cloudflare:build\` first (\`bunx guren cloudflare:deploy\` runs it for you); it writes this manifest. A build given another outputDir needs the same outputDir here.`,
     )
   }
 

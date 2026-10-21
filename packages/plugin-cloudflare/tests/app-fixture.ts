@@ -198,7 +198,8 @@ export function installCfTools(root: string, wranglerVersion = '4.151.1'): void 
   mkdirSync(join(root, 'node_modules/cf/bin'), { recursive: true })
   writeFileSync(join(root, 'node_modules/cf/bin/cf'), '')
   writeJson(join(root, 'node_modules/cf/package.json'), { name: 'cf', version: CF_VERSION })
-  mkdirSync(join(root, 'node_modules/wrangler'), { recursive: true })
+  mkdirSync(join(root, 'node_modules/wrangler/bin'), { recursive: true })
+  writeFileSync(join(root, 'node_modules/wrangler/bin/cf-wrangler.js'), '')
   writeJson(join(root, 'node_modules/wrangler/package.json'), { name: 'wrangler', version: wranglerVersion })
 }
 
