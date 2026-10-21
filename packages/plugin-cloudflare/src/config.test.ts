@@ -105,4 +105,18 @@ describe('@guren/plugin-cloudflare/config', () => {
     write(manifest())
     expect((await gurenWorker({ name: 'demo-app', outputDir })).triggers).toBeUndefined()
   })
+
+  test('should bind each R2 bucket the app names, by its resolved, configured or default name', async () => {
+    write(manifest({
+      r2Buckets: ['MEDIA', 'UPLOADS', 'ARCHIVE'],
+      resourceNames: { UPLOADS: 'shared-uploads' },
+      resolved: { MEDIA: { id: 'media-bucket', name: 'media-bucket' } },
+    }))
+
+    const worker = await gurenWorker({ name: 'demo-app', outputDir })
+
+    expect(worker.env.MEDIA).toEqual(bindings.r2({ name: 'media-bucket' }))
+    expect(worker.env.UPLOADS).toEqual(bindings.r2({ name: 'shared-uploads' }))
+    expect(worker.env.ARCHIVE).toEqual(bindings.r2({ name: 'demo-app-archive' }))
+  })
 })

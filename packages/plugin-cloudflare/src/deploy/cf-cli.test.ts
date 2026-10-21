@@ -3,6 +3,8 @@ import { describe, test, expect } from 'bun:test'
 import {
   cfBuild,
   checkAuth,
+  createR2Bucket,
+  listR2Buckets,
   listD1Databases,
   listKvNamespaces,
   listWorkerSecrets,
@@ -113,5 +115,29 @@ describe('cf CLI wrappers', () => {
     expect(listWorkerSecrets(cf, 'demo-app')).toEqual({ ok: true, value: ['B'] })
     expect(cf.calls[0]).toEqual(['workers', 'secrets', 'list', '--worker', 'demo-app'])
     expect(listWorkerSecrets(scripted([{ exitCode: 1, stdout: '', stderr: 'workers.api.error.script_not_found' }]), 'x').ok).toBe(false)
+  })
+})
+
+describe('cf R2 buckets', () => {
+  test('should find each bucket by its exact name, through either output shape', () => {
+    const cf = scripted([
+      json({ buckets: [{ name: 'demo-app-media' }, { name: 'demo-app-media-old' }] }),
+      json({ result: { buckets: [] } }),
+    ])
+
+    expect(listR2Buckets(cf, ['demo-app-media', 'demo-app-uploads'])).toEqual({ ok: true, value: [{ id: 'demo-app-media', name: 'demo-app-media' }] })
+    expect(cf.calls[0]).toEqual(['r2', 'buckets', 'list', '--name-contains', 'demo-app-media', '--per-page', '1000'])
+  })
+
+  test('should read a full page or an unexpected shape as unreadable, never as absent', () => {
+    const full = Array.from({ length: 1000 }, (_, index) => ({ name: `demo-app-media-${index}` }))
+    expect(listR2Buckets(scripted([json({ buckets: full })]), ['demo-app-media']).ok).toBe(false)
+    expect(listR2Buckets(scripted([json({ items: [] })]), ['demo-app-media']).ok).toBe(false)
+  })
+
+  test('should create a bucket by name, its name being its id', () => {
+    const cf = scripted([json({ name: 'demo-app-media' })])
+    expect(createR2Bucket(cf, 'demo-app-media')).toEqual({ ok: true, value: 'demo-app-media' })
+    expect(cf.calls[0]).toEqual(['r2', 'buckets', 'create', '--name', 'demo-app-media'])
   })
 })

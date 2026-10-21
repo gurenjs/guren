@@ -9,6 +9,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 import {
+  autoProvisionedName,
   CF_OUTPUT_DIR,
   WORKER_MANIFEST_FILE,
   WORKER_MANIFEST_VERSION,
@@ -43,6 +44,7 @@ export interface GurenWorkerOptions {
 export type GurenBinding =
   | { type: 'd1'; name?: string; id?: string }
   | { type: 'kv'; id?: string }
+  | { type: 'r2'; name?: string }
   | { type: 'durable-object'; worker: string; exportName: string }
   | { type: 'text'; value: string }
 
@@ -83,6 +85,10 @@ export async function gurenWorker(options: GurenWorkerOptions): Promise<GurenWor
   for (const binding of manifest.kvNamespaces) {
     const id = resolved[binding]?.id
     env[binding] = { type: 'kv', ...(id ? { id } : {}) }
+  }
+  // R2 has no id: the bucket's name is its identity.
+  for (const binding of manifest.r2Buckets ?? []) {
+    env[binding] = { type: 'r2', name: resolved[binding]?.name ?? manifest.resourceNames[binding] ?? autoProvisionedName(options.name, binding) }
   }
 
   for (const [key, value] of Object.entries(manifest.vars)) {

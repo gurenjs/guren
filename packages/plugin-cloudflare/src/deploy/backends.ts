@@ -16,10 +16,12 @@ import {
   checkAuth,
   createD1Database,
   createKvNamespace,
+  createR2Bucket,
   deployPrebuilt,
   getBookmark,
   listD1Databases,
   listKvNamespaces,
+  listR2Buckets,
   listWorkerSecrets,
   readMigrationTracker,
   DEFAULT_TRACKER,
@@ -60,7 +62,10 @@ export interface DeployBackend {
   migrationsBinding(): Read<string | undefined>
   /** Called once the bindings are planned and before any read that needs a database by its id. */
   prepareReads(bindings: readonly PlannedBinding[]): void
-  list(type: ResourceType): Read<AccountResource[]>
+  /** Whether `list('r2')` can tell an existing bucket from a missing one; Wrangler prints no JSON listing. */
+  readonly listsR2: boolean
+  /** `names` are the planned R2 bucket names, which R2 is looked up by; D1 and KV list everything. */
+  list(type: ResourceType, names: readonly string[]): Read<AccountResource[]>
   /** The new resource's id. */
   create(type: ResourceType, name: string): Read<string>
   /** Makes the deploy build bind `resolved`, after stage 4 changed it; the message names the problem. */
@@ -137,8 +142,9 @@ export function cfDeployBackend(options: CfBackendOptions): DeployBackend {
       return { ok: true, value: readWorkerManifest(join(root, outputDirFor('cf'))).d1?.binding }
     },
     prepareReads() {},
-    list: (type) => (type === 'd1' ? listD1Databases(cf) : listKvNamespaces(cf)),
-    create: (type, name) => (type === 'd1' ? createD1Database(cf, name) : createKvNamespace(cf, name)),
+    listsR2: true,
+    list: (type, names) => (type === 'd1' ? listD1Databases(cf) : type === 'kv' ? listKvNamespaces(cf) : listR2Buckets(cf, names)),
+    create: (type, name) => (type === 'd1' ? createD1Database(cf, name) : type === 'kv' ? createKvNamespace(cf, name) : createR2Bucket(cf, name)),
     rebuild(resolved) {
       // gurenWorker() reads the manifest inside `cf build`, so only cf builds again.
       const rebuilt = build()
@@ -238,8 +244,9 @@ export function wranglerDeployBackend(options: WranglerBackendOptions): DeployBa
       }
       render(ids)
     },
-    list: (type) => (type === 'd1' ? listWranglerD1(wrangler) : listWranglerKv(wrangler)),
-    create: (type, name) => createWranglerResource(wrangler, type, name),
+    listsR2: false,
+    list: (type) => (type === 'd1' ? listWranglerD1(wrangler) : type === 'kv' ? listWranglerKv(wrangler) : { ok: false, reason: 'wrangler r2 bucket list prints no JSON' }),
+    create: (type, name) => (type === 'r2' ? { ok: false, reason: 'the Wrangler backend never creates an R2 bucket' } : createWranglerResource(wrangler, type, name)),
     rebuild(resolved) {
       render(resolved)
       return { ok: true, value: true }

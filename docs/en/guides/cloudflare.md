@@ -141,6 +141,7 @@ It reads `wrangler.jsonc` and never writes it. The ids it resolves go into `.clo
 - Preflight needs Wrangler 4.129 or later in the app, the Node version that Wrangler requires as the `node` on PATH, and a logged-in Wrangler (`bunx wrangler login`, or `CLOUDFLARE_API_TOKEN` in CI).
 - The D1 database is looked up by its `database_name`. Migrations go to the binding whose `migrations_dir` is `.cloudflare/d1-migrations` (the scaffold's `DB`), as the flattened copy. A database whose `d1_migrations` holds nested names (`<folder>/migration.sql`) from a cf deploy is a `tracker-layout` blocker, since Wrangler would apply its whole history again.
 - Only the top level of `wrangler.jsonc` is deployed, not its `env.<name>` blocks.
+- R2 buckets are neither listed nor created, since Wrangler prints no JSON bucket listing. A disk's R2 binding missing from `r2_buckets` is a `resource-missing` blocker with the entry to add; a bucket listed there but missing from the account fails the upload.
 - The cleanup and rollback commands it prints are Wrangler's: `wrangler d1 delete`, `wrangler kv namespace delete`, `wrangler d1 time-travel restore` and `wrangler rollback`.
 
 ## Sessions and OAuth State Must Be Database-Backed
@@ -501,12 +502,15 @@ bunx guren cloudflare:deploy --plan
 
 Each binding is listed as `existing` (the resource a previous run settled, or an id you wrote), `adopt` (found under the planned name but not yet settled, so check it belongs to this app), or `create on deploy`. The KV name is `<worker>-<binding>` with `_` written as `-`, the name `cf deploy` itself creates. The command exits 1 on a blocker:
 
-- `binding-conflict`: an id in `cloudflare.config.ts` and the planned name point at different resources, or two resources share the name.
-- `resource-missing`: an id you wrote is not in the account, or a resource is missing and the run may not create it. A run with `--ci`, or without a terminal, creates nothing unless `--provision` is passed.
+- `binding-conflict`: an id in `cloudflare.config.ts` and the planned name point at different resources, two resources share the name, or `config/database.ts` names a D1 binding the Worker does not bind.
+- `resource-missing`: an id you wrote is not in the account, a resource is missing and the run may not create it, or a storage disk reads an R2 binding the Worker does not bind. A run with `--ci`, or without a terminal, creates nothing unless `--provision` is passed.
+- `resource-name`: a planned R2 bucket name breaks R2's rule (3 to 63 lowercase letters, digits and hyphens). Name it in `config/cloudflare.ts` under `resourceNames`.
 - `source-unreadable`: `cf` could not list the account's resources, query the migrations tracker, or the app's `config/env.ts` would not load. The plan stops rather than guess.
 - `tracker-layout`: the database's `d1_migrations` records both flattened names (`<folder>.sql`) and nested ones (`<folder>/migration.sql`).
 - `destructive-migration`: a pending migration drops or narrows something without a `-- guren:allow-destructive` comment ([Destructive migrations](./database.md#destructive-migrations)). `--allow-destructive` lists them as a warning instead.
 - `secrets`: a variable `config/env.ts` requires in production has no value on the deployed Worker, in the config, or in `--secrets-file`.
+
+The build introspects the app as Workers runs it, and the bindings the app names go into the plan: an R2 disk registered with `r2Disk()` gets a bucket named `<worker>-<binding>` (or its `resourceNames` entry), bound by `gurenWorker()` and created like the database. A disk registered with a bare factory is listed under "Not read", since its driver cannot be seen without building it. App KV is not inferred: no KV storage driver ships yet.
 
 The plan reads which migrations the database has applied, picks the layout its tracker already uses, and prints the `cf d1 migrations apply` arguments for it. A database Wrangler migrated stays on the flattened copy, so nothing is applied twice. A database the deploy will create has applied nothing, so every local migration is judged. For secrets, a first deploy has no Worker to read from, so list the values in a dotenv file and pass it as `--secrets-file .env.production`. The plan reads only the names in it.
 

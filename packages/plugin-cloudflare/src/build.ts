@@ -24,7 +24,7 @@ import {
   type SqlClientSpecifier,
   type PathLike,
 } from '@guren/core/internal/deploy-build'
-import { reportDeployRuntimeHazards } from '@guren/core/internal/deploy-check'
+import { inspectDeployRuntime } from '@guren/core/internal/deploy-check'
 import { readScheduledTasks } from '@guren/core/internal/deploy-plan'
 
 import {
@@ -43,6 +43,7 @@ import {
   type WorkerManifest,
 } from './worker-manifest'
 import { detectCloudflareBackend, isRecord, readPackageJson } from './backend'
+import { inferBindings, type InferredBindings } from './inference'
 import type { CloudflareDeployConfig } from './config'
 import { readLocalMigrations } from './deploy/migrations'
 
@@ -153,7 +154,9 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   // drops every login after deploy, and the warning belongs where the
   // developer is still reading (RFC 0020 Part 0).
   // As workerd runs it: the config's isWorkersRuntime() branch, not the one `bun run dev` takes.
-  await reportDeployRuntimeHazards({ root, label: 'Cloudflare build', target: 'cloudflare' })
+  // The same introspection names the bindings the app reads (RFC 0035 §2).
+  const { app } = await inspectDeployRuntime({ root, label: 'Cloudflare build', target: 'cloudflare' })
+  const inferred = inferBindings(app)
   const schedule = backend === 'cf' ? await cronTriggers(root) : { crons: [] }
   warnDatabaseWithoutD1(root)
 
@@ -174,7 +177,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   resetOutputDir(out, root, 'Cloudflare build')
   // Written first so a build failing below still keeps the carried-over ids.
   if (backend === 'wrangler') {
-    writeResolvedOnly(out, resolved)
+    writeResolvedOnly(out, resolved, inferred)
   } else {
     writeWorkerManifest({
       root,
@@ -185,6 +188,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
       resolved,
       ...schedule,
       resourceNames: deployConfig?.resourceNames ?? {},
+      inferred,
     })
   }
 
@@ -273,6 +277,7 @@ function writeWorkerManifest(input: {
   crons: string[]
   scheduleUnreadable?: string
   resourceNames: Record<string, string>
+  inferred: InferredBindings
 }): void {
   const outRelative = relative(input.root, input.out).split(sep).join('/')
   const manifest: WorkerManifest = {
@@ -293,6 +298,8 @@ function writeWorkerManifest(input: {
       exportName: agent.export,
       binding: durableObjectBindingName(agent.export),
     })),
+    r2Buckets: input.inferred.r2Buckets,
+    inference: input.inferred.inference,
     resolved: input.resolved,
   }
 
@@ -303,13 +310,14 @@ function writeWorkerManifest(input: {
 }
 
 /**
- * The Wrangler backend's manifest holds only what `cloudflare:deploy` settled, since
- * wrangler.jsonc is the rest. The ignore names only the files carrying ids, because
+ * The Wrangler backend's manifest holds only what `cloudflare:deploy` settled and what the app
+ * names, since wrangler.jsonc is the rest. The ignore names only the files carrying ids, because
  * an app may commit the rest of `.cloudflare/` for a host that deploys without building.
  */
-function writeResolvedOnly(out: string, resolved: Record<string, ResolvedResource>): void {
+function writeResolvedOnly(out: string, resolved: Record<string, ResolvedResource>, inferred: InferredBindings): void {
   mkdirSync(out, { recursive: true })
-  writeFileSync(resolve(out, WORKER_MANIFEST_FILE), `${JSON.stringify({ version: WORKER_MANIFEST_VERSION, resolved }, null, 2)}\n`)
+  const manifest = { version: WORKER_MANIFEST_VERSION, r2Buckets: inferred.r2Buckets, inference: inferred.inference, resolved }
+  writeFileSync(resolve(out, WORKER_MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`)
   writeFileSync(resolve(out, '.gitignore'), `${WORKER_MANIFEST_FILE}\n${WRANGLER_DEPLOY_CONFIG_FILE}\n.wrangler/\n`)
 }
 

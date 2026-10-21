@@ -16,7 +16,7 @@ import {
 
 import { detectCloudflareBackend, isRecord } from '../backend'
 import { buildCloudflareOutput, readResolvedResources, readWorkerManifest } from '../build'
-import { WORKER_MANIFEST_FILE, type ResolvedResource } from '../worker-manifest'
+import { autoProvisionedName, WORKER_MANIFEST_FILE, type ResolvedResource } from '../worker-manifest'
 import { cfDeployBackend, wranglerDeployBackend, type DeployBackend } from './backends'
 import type { CliRunner, Read } from './cf-cli'
 import { decideLayout, fingerprintMigrations, readLocalMigrations } from './migrations'
@@ -29,6 +29,7 @@ import {
   type EvaluatedWorker,
   type MigrationInput,
   type PlannedBinding,
+  type ResourceType,
   type SecretsInput,
 } from './plan'
 
@@ -97,15 +98,21 @@ async function prepare(options: CloudflareDeployOptions): Promise<Prepared> {
   const unlisted: Read<never[]> = { ok: true, value: [] }
   const outDir = join(root, backend.outputDir)
   const previous = readWorkerManifest(outDir)
+  const resourceNames = isRecord(previous.resourceNames) ? previous.resourceNames : undefined
+  const r2Names = Object.entries(worker.env)
+    .filter(([, entry]) => entry.type === 'r2')
+    .map(([binding, entry]) => entry.name ?? resourceNames?.[binding] ?? autoProvisionedName(worker.name, binding))
   const context = {
     backend: backend.kind,
     worker,
     manifest: {
       resolved: readResolvedResources(outDir),
-      ...(isRecord(previous.resourceNames) ? { resourceNames: previous.resourceNames } : {}),
+      ...(resourceNames ? { resourceNames } : {}),
     },
-    d1: uses('d1') ? backend.list('d1') : unlisted,
-    kv: uses('kv') ? backend.list('kv') : unlisted,
+    d1: uses('d1') ? backend.list('d1', []) : unlisted,
+    kv: uses('kv') ? backend.list('kv', []) : unlisted,
+    ...(backend.listsR2 ? { r2: r2Names.length > 0 ? backend.list('r2', r2Names) : unlisted } : {}),
+    ...(isRecord(previous.inference) ? { inference: { ...previous.inference, r2Buckets: previous.r2Buckets ?? [] } } : {}),
     mayCreate: Boolean(options.provision) || (!options.ci && (interactive || Boolean(options.yes))),
   }
   // Bindings first: the migrations read the database the plan resolved the build's D1 binding to.
@@ -136,7 +143,7 @@ function unchosenDatabase(root: string, reason: string): MigrationInput | undefi
 
 export interface CreatedResource {
   binding: string
-  type: 'd1' | 'kv'
+  type: ResourceType
   name: string
   id: string
 }
@@ -213,7 +220,7 @@ async function applyPlan(prepared: Prepared, options: CloudflareDeployOptions): 
       id = created.value
       result.created.push({ binding: binding.binding, type: binding.type, name: binding.name, id })
     }
-    if (id && !binding.configured) resolved[binding.binding] = binding.type === 'd1' ? { id, name: binding.name } : { id }
+    if (id && !binding.configured) resolved[binding.binding] = binding.type === 'kv' ? { id } : { id, name: binding.name }
   }
   const outDir = join(root, backend.outputDir)
   const previous = readResolvedResources(outDir)

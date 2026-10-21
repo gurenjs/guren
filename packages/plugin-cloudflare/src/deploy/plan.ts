@@ -7,7 +7,9 @@
 import type { DeployEnvRequirement, PendingMigrationVerdict } from '@guren/core/internal/deploy-plan'
 
 import type { CloudflareBackend } from '../backend'
-import type { WorkerManifest } from '../worker-manifest'
+import { autoProvisionedName, type BindingInference, type WorkerManifest } from '../worker-manifest'
+
+export { autoProvisionedName }
 import type { AccountResource, Read } from './cf-cli'
 import type { MigrationLayout } from './migrations'
 import { BACKEND_WORDS, type BackendWords } from './words'
@@ -33,6 +35,10 @@ export interface PlanContext {
   manifest: Pick<WorkerManifest, 'resolved'> & Partial<Pick<WorkerManifest, 'resourceNames'>>
   d1: Read<AccountResource[]>
   kv: Read<AccountResource[]>
+  /** R2 buckets by name; absent when the backend cannot list them, which leaves R2 bindings to the deploy. */
+  r2?: Read<AccountResource[]>
+  /** What the build learnt from the app as Workers runs it (WorkerManifest.inference). */
+  inference?: BindingInference & { r2Buckets: string[] }
   /** Whether this run may create what is missing: an interactive run or `--provision`, never plain `--ci`. */
   mayCreate: boolean
   migrations?: MigrationInput
@@ -73,7 +79,7 @@ export interface SecretsInput {
   secretsFile?: string
 }
 
-export type ResourceType = 'd1' | 'kv'
+export type ResourceType = 'd1' | 'kv' | 'r2'
 
 /**
  * - `existing`: the resource the manifest already resolved, or the id the config names.
@@ -98,6 +104,7 @@ export interface PlannedBinding {
 export type CheckName =
   | 'binding-conflict'
   | 'resource-missing'
+  | 'resource-name'
   | 'source-unreadable'
   | 'tracker-layout'
   | 'destructive-migration'
@@ -155,10 +162,6 @@ function serializesRuns(workflow: string): boolean {
   return typeof group === 'string' && group.trim() !== '' && cancel !== true
 }
 
-/** Bindings cf's provisioning would create under `<worker>-<binding>`, with `_` as `-` (RFC 0035 §4). */
-export function autoProvisionedName(worker: string, binding: string): string {
-  return `${worker}-${binding.toLowerCase().replaceAll('_', '-')}`
-}
 
 export function buildPlan(context: PlanContext): DeployPlan {
   const { backend } = context
@@ -167,13 +170,24 @@ export function buildPlan(context: PlanContext): DeployPlan {
   const bindings: PlannedBinding[] = []
 
   for (const [binding, entry] of Object.entries(context.worker.env)) {
-    if (entry.type !== 'd1' && entry.type !== 'kv') continue
+    if (entry.type !== 'd1' && entry.type !== 'kv' && !(entry.type === 'r2' && context.r2)) continue
     const planned = planBinding(context, binding, entry, entry.type, findings, words)
     bindings.push(planned)
   }
+  for (const planned of bindings) {
+    if (planned.type === 'r2' && !planned.configured && !isR2BucketName(planned.name)) {
+      findings.push(blocker(
+        'resource-name',
+        planned.binding,
+        `"${planned.name}" is not a valid R2 bucket name: 3 to 63 lowercase letters, digits and hyphens, starting and ending with a letter or digit.`,
+        `Name the bucket in config/cloudflare.ts: resourceNames: { ${planned.binding}: '<name>' }.`,
+      ))
+    }
+  }
+  const unread = [...UNREAD_SOURCES, ...planInference(context, findings, words)]
 
-  for (const [type, listing] of [['d1', context.d1], ['kv', context.kv]] as const) {
-    if (!listing.ok && bindings.some((planned) => planned.type === type)) {
+  for (const [type, listing] of [['d1', context.d1], ['kv', context.kv], ['r2', context.r2]] as const) {
+    if (listing && !listing.ok && bindings.some((planned) => planned.type === type)) {
       findings.push(blocker(
         'source-unreadable',
         undefined,
@@ -213,8 +227,44 @@ export function buildPlan(context: PlanContext): DeployPlan {
     findings,
     ...(migrations ? { migrations } : {}),
     ...(missingSecrets ? { missingSecrets } : {}),
-    unread: UNREAD_SOURCES,
+    unread,
   }
+}
+
+/** R2's naming rule; a name that breaks it fails the create after other resources exist (RFC 0035 §4). */
+function isR2BucketName(name: string): boolean {
+  return /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(name)
+}
+
+/** The bindings the app names but the Worker lacks, and what could not be inferred (RFC 0035 §2). */
+function planInference(context: PlanContext, findings: Finding[], words: BackendWords): string[] {
+  const { inference, worker } = context
+  if (!inference) return []
+  const unread: string[] = []
+  if (inference.unread) unread.push(`the bindings the app names (R2 disks, the D1 binding): ${inference.unread}`)
+  if (inference.opaqueDisks?.length) {
+    unread.push(`the disks ${inference.opaqueDisks.join(', ')}, registered with a bare factory; register an R2 disk with r2Disk() so the deploy sees its bucket`)
+  }
+  for (const binding of inference.r2Buckets) {
+    if (worker.env[binding]?.type === 'r2') continue
+    const bucket = context.manifest.resourceNames?.[binding] ?? autoProvisionedName(worker.name, binding)
+    findings.push(blocker(
+      'resource-missing',
+      binding,
+      `A storage disk reads the R2 bucket binding ${binding}, which the Worker does not bind, so its first file operation would throw.`,
+      words.addR2(binding, bucket),
+    ))
+  }
+  const database = inference.databaseBinding
+  if (database && worker.env[database]?.type !== 'd1') {
+    findings.push(blocker(
+      'binding-conflict',
+      database,
+      `config/database.ts reads the D1 binding ${database}, which the Worker does not bind as D1.`,
+      words.addD1(database),
+    ))
+  }
+  return unread
 }
 
 function planMigrations(input: MigrationInput, findings: Finding[], words: BackendWords): DeployPlan['migrations'] {
@@ -301,6 +351,8 @@ export function hasBlocker(plan: DeployPlan): boolean {
   return plan.findings.some((finding) => finding.severity === 'blocker')
 }
 
+const RESOURCE_LABELS: Record<ResourceType, string> = { d1: 'D1 database', kv: 'KV namespace', r2: 'R2 bucket' }
+
 function planBinding(
   context: PlanContext,
   binding: string,
@@ -310,20 +362,20 @@ function planBinding(
   words: BackendWords,
 ): PlannedBinding {
   // KV cannot carry a name (`bindings.kv()` takes only an id): config/cloudflare.ts names it, or the provisioning default does.
-  const name = type === 'd1' && entry.name
+  const name = type !== 'kv' && entry.name
     ? entry.name
     : context.manifest.resourceNames?.[binding] ?? autoProvisionedName(context.worker.name, binding)
   const resolvedId = context.manifest.resolved[binding]?.id
-  // An id equal to the manifest's came from gurenWorker(), which is a comparison, not a source.
-  const configuredId = entry.id !== undefined && entry.id !== resolvedId ? entry.id : undefined
+  // An id equal to the manifest's came from gurenWorker(), which is a comparison, not a source. R2 has no id at all.
+  const configuredId = type !== 'r2' && entry.id !== undefined && entry.id !== resolvedId ? entry.id : undefined
 
-  const listing = type === 'd1' ? context.d1 : context.kv
+  const listing = (type === 'd1' ? context.d1 : type === 'kv' ? context.kv : context.r2) ?? { ok: false, reason: 'R2 buckets were not listed' }
   if (!listing.ok) {
     return { binding, type, action: 'unknown', name, ...(configuredId ? { id: configuredId } : {}) }
   }
   const resources = listing.value
   const byName = resources.filter((resource) => resource.name === name)
-  const label = type === 'd1' ? 'D1 database' : 'KV namespace'
+  const label = RESOURCE_LABELS[type]
 
   if (configuredId !== undefined) {
     const missing = !resources.some((resource) => resource.id === configuredId)
