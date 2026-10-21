@@ -7,16 +7,21 @@
 import type { DeployTargetApp } from '@guren/core/internal/deploy-check'
 
 import { isRecord } from './backend'
-import type { BindingInference } from './worker-manifest'
 
-export interface InferredBindings {
+export interface BindingInference {
+  /** R2 bucket bindings the disks name; `gurenWorker()` binds them from the manifest. */
   r2Buckets: string[]
-  inference: BindingInference
+  /** Why the app could not be introspected; nothing was inferred. */
+  unread?: string
+  /** Disks registered with a bare factory, which may be R2 without saying so. */
+  opaqueDisks?: string[]
+  /** The D1 binding `config/database.ts` names, when it names one as a string. */
+  databaseBinding?: string
 }
 
-export function inferBindings(app: DeployTargetApp | undefined): InferredBindings {
-  if (!app) return { r2Buckets: [], inference: { unread: 'the build did not introspect the app' } }
-  if (app.status === 'unread') return { r2Buckets: [], inference: { unread: app.reason } }
+export function inferBindings(app: DeployTargetApp | undefined): BindingInference {
+  if (!app) return { r2Buckets: [], unread: 'the build did not introspect the app' }
+  if (app.status === 'unread') return { r2Buckets: [], unread: app.reason }
 
   const r2Buckets: string[] = []
   const opaqueDisks: string[] = []
@@ -32,9 +37,7 @@ export function inferBindings(app: DeployTargetApp | undefined): InferredBinding
 
   return {
     r2Buckets: r2Buckets.sort(),
-    inference: {
-      ...(opaqueDisks.length > 0 ? { opaqueDisks: opaqueDisks.sort() } : {}),
-      ...(databaseBinding ? { databaseBinding } : {}),
-    },
+    ...(opaqueDisks.length > 0 ? { opaqueDisks: opaqueDisks.sort() } : {}),
+    ...(databaseBinding ? { databaseBinding } : {}),
   }
 }

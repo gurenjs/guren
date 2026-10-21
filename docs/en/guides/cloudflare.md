@@ -473,7 +473,7 @@ export default defineCloudflareConfig({
 ```
 
 - `mcpOAuth` and `mcpPath` replace the `--mcp-oauth` and `--mcp-path` flags on this path. A flag the file contradicts is refused, and a flag the file does not set is used with a warning, since nothing records it for the next build.
-- `resourceNames` names a binding's resource when the default (`<worker>` for `DB`, `<worker>-<binding>` for the rest) collides with another project's or breaks a naming limit. A KV binding cannot carry its name in `cloudflare.config.ts`, so a plain `cf deploy` would still pick the default; deploy through `cloudflare:deploy` once you set one.
+- `resourceNames` names a binding's resource when the default (`<worker>` for `DB`, `<worker>-<binding>` for the rest) collides with another project's or breaks a naming limit. A KV binding cannot carry its name in `cloudflare.config.ts`, so a plain `cf deploy` would still pick the default; deploy through `cloudflare:deploy` once you set one. A name for a binding the Worker does not have, such as a misspelt one, is a `resource-name` warning in the plan.
 
 Build, then deploy from the app root:
 

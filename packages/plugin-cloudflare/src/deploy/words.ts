@@ -3,6 +3,7 @@
  * a command spelled for one CLI never shows up in the other's output.
  */
 import type { CloudflareBackend } from '../backend'
+import type { ResourceType } from './plan'
 import { WRANGLER_DEPLOY_CONFIG_FILE, WRANGLER_OUTPUT_DIR } from '../worker-manifest'
 
 export interface BackendWords {
@@ -14,7 +15,7 @@ export interface BackendWords {
   applyMigrations(args: string): string
   rollback(worker: string): string
   restore(database: CleanupTarget, bookmark: string): string
-  delete(resource: CleanupTarget & { type: 'd1' | 'kv' | 'r2' }): string
+  delete(resource: CleanupTarget & { type: ResourceType }): string
   /** The fix for an R2 binding a disk reads and the Worker lacks. */
   addR2(binding: string, bucket: string): string
   /** The fix for a D1 binding config/database.ts names and the Worker lacks. */

@@ -477,7 +477,7 @@ export default defineCloudflareConfig({
 ```
 
 - `mcpOAuth` と `mcpPath` は、この経路では `--mcp-oauth` と `--mcp-path` のフラグの代わりになります。ファイルと食い違うフラグは受け付けません。ファイルが設定していないフラグは使いますが、次のビルドに残らないので警告します。
-- `resourceNames` では、バインディングごとのリソース名を指定します。既定の名前（`DB` は `<worker>`、ほかは `<worker>-<binding>`）が別のプロジェクトと重なるときや、名前の制限に合わないときに使います。KV のバインディングは `cloudflare.config.ts` に名前を持てないので、ただの `cf deploy` では既定の名前のままになります。名前を指定したら、`cloudflare:deploy` でデプロイしてください。
+- `resourceNames` では、バインディングごとのリソース名を指定します。既定の名前（`DB` は `<worker>`、ほかは `<worker>-<binding>`）が別のプロジェクトと重なるときや、名前の制限に合わないときに使います。KV のバインディングは `cloudflare.config.ts` に名前を持てないので、ただの `cf deploy` では既定の名前のままになります。名前を指定したら、`cloudflare:deploy` でデプロイしてください。Worker にないバインディング（綴りの誤りなど）に名前を付けると、計画に `resource-name` の警告が出ます。
 
 ビルドしてから、アプリのルートでデプロイします。
 

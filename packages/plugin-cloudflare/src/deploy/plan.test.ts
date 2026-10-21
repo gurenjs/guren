@@ -1,7 +1,8 @@
 import { describe, test, expect } from 'bun:test'
 
 import type { AccountResource, Read } from './cf-cli'
-import { autoProvisionedName, buildPlan, hasBlocker, type EvaluatedWorker, type PlanContext } from './plan'
+import { autoProvisionedName } from '../worker-manifest'
+import { buildPlan, hasBlocker, type EvaluatedWorker, type PlanContext } from './plan'
 
 const DB_ID = 'e902bc31-46b4-47dc-9d46-194d0b86148c'
 const OTHER_DB_ID = '0b0e1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d'
@@ -375,6 +376,12 @@ describe('R2 buckets and what the app names (RFC 0035 §2)', () => {
     const plan = buildPlan(context({ inference: { r2Buckets: [], databaseBinding: 'DATABASE' } }))
     expect(plan.findings).toContainEqual(expect.objectContaining({ check: 'binding-conflict', binding: 'DATABASE' }))
     expect(hasBlocker(buildPlan(context({ inference: { r2Buckets: [], databaseBinding: 'DB' } })))).toBe(false)
+  })
+
+  test('should warn about a resource name for a binding the Worker does not have, such as a misspelt one', () => {
+    const plan = buildPlan(context({ manifest: { resolved: {}, resourceNames: { db: 'shared-db' } } }))
+    expect(plan.findings).toContainEqual(expect.objectContaining({ check: 'resource-name', severity: 'warning', binding: 'db' }))
+    expect(hasBlocker(plan)).toBe(false)
   })
 
   test('should list what could not be inferred without blocking', () => {

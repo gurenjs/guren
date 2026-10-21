@@ -31,7 +31,7 @@ import {
   type Read,
 } from './cf-cli'
 import { migrationDirArgs, type MigrationLayout } from './migrations'
-import type { EvaluatedBinding, EvaluatedWorker, PlannedBinding, ResourceType } from './plan'
+import type { EvaluatedBinding, EvaluatedWorker, PlannedBinding } from './plan'
 import {
   applyWranglerMigrations,
   checkWranglerAuth,
@@ -62,12 +62,11 @@ export interface DeployBackend {
   migrationsBinding(): Read<string | undefined>
   /** Called once the bindings are planned and before any read that needs a database by its id. */
   prepareReads(bindings: readonly PlannedBinding[]): void
-  /** Whether `list('r2')` can tell an existing bucket from a missing one; Wrangler prints no JSON listing. */
-  readonly listsR2: boolean
-  /** `names` are the planned R2 bucket names, which R2 is looked up by; D1 and KV list everything. */
-  list(type: ResourceType, names: readonly string[]): Read<AccountResource[]>
+  list(type: 'd1' | 'kv'): Read<AccountResource[]>
   /** The new resource's id. */
-  create(type: ResourceType, name: string): Read<string>
+  create(type: 'd1' | 'kv', name: string): Read<string>
+  /** R2, looked up by bucket name; absent on a backend that cannot list buckets (Wrangler prints no JSON). */
+  readonly r2?: { list(names: readonly string[]): Read<AccountResource[]>; create(name: string): Read<string> }
   /** Makes the deploy build bind `resolved`, after stage 4 changed it; the message names the problem. */
   rebuild(resolved: Readonly<Record<string, { id?: string }>>): Read<true>
   /** Whether the nested layout (`<folder>/migration.sql`) can be applied at all. */
@@ -142,9 +141,9 @@ export function cfDeployBackend(options: CfBackendOptions): DeployBackend {
       return { ok: true, value: readWorkerManifest(join(root, outputDirFor('cf'))).d1?.binding }
     },
     prepareReads() {},
-    listsR2: true,
-    list: (type, names) => (type === 'd1' ? listD1Databases(cf) : type === 'kv' ? listKvNamespaces(cf) : listR2Buckets(cf, names)),
-    create: (type, name) => (type === 'd1' ? createD1Database(cf, name) : type === 'kv' ? createKvNamespace(cf, name) : createR2Bucket(cf, name)),
+    list: (type) => (type === 'd1' ? listD1Databases(cf) : listKvNamespaces(cf)),
+    create: (type, name) => (type === 'd1' ? createD1Database(cf, name) : createKvNamespace(cf, name)),
+    r2: { list: (names) => listR2Buckets(cf, names), create: (name) => createR2Bucket(cf, name) },
     rebuild(resolved) {
       // gurenWorker() reads the manifest inside `cf build`, so only cf builds again.
       const rebuilt = build()
@@ -244,9 +243,8 @@ export function wranglerDeployBackend(options: WranglerBackendOptions): DeployBa
       }
       render(ids)
     },
-    listsR2: false,
-    list: (type) => (type === 'd1' ? listWranglerD1(wrangler) : type === 'kv' ? listWranglerKv(wrangler) : { ok: false, reason: 'wrangler r2 bucket list prints no JSON' }),
-    create: (type, name) => (type === 'r2' ? { ok: false, reason: 'the Wrangler backend never creates an R2 bucket' } : createWranglerResource(wrangler, type, name)),
+    list: (type) => (type === 'd1' ? listWranglerD1(wrangler) : listWranglerKv(wrangler)),
+    create: (type, name) => createWranglerResource(wrangler, type, name),
     rebuild(resolved) {
       render(resolved)
       return { ok: true, value: true }

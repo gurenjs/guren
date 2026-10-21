@@ -1063,6 +1063,27 @@ export interface DeployTargetInspection {
   verdicts: DeployRuntimeVerdict[]
   /** The one introspection the verdicts were read from; absent when the app declares no deploy target. */
   introspection?: Introspection
+  /**
+   * The app's `storage` and `database` sections from that run, under RFC 0026 §5's trust rules: a
+   * section a provider's failure leaves unverified is absent, never passed off as described.
+   */
+  app: DeployTargetApp
+}
+
+export type DeployTargetApp =
+  | { status: 'read'; storage?: unknown; database?: unknown }
+  | { status: 'unread'; reason: string }
+
+function readTargetApp(introspection: Introspection | undefined): DeployTargetApp {
+  if (!introspection) return { status: 'unread', reason: 'the app declares no deploy target, so it was not introspected' }
+  if (introspection.status !== 'ok') return { status: 'unread', reason: `introspection failed with ${describeIntrospectionFailure(introspection)}` }
+  const storage = readManifestSection(introspection.manifest, 'storage')
+  const database = readManifestSection(introspection.manifest, 'database')
+  return {
+    status: 'read',
+    ...(storage.status === 'described' ? { storage: storage.value } : {}),
+    ...(database.status === 'described' ? { database: database.value } : {}),
+  }
 }
 
 /**
@@ -1083,6 +1104,7 @@ export async function inspectDeployTarget(cwd: string, options: { target: Intros
       return analysis.introspectionFailure && entry.evidence === 'none' ? { ...entry, fix: `${entry.fix ?? ''} ${reproduce}`.trim() } : entry
     }),
     ...(introspection ? { introspection } : {}),
+    app: readTargetApp(introspection),
   }
 }
 

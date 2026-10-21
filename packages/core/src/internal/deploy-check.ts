@@ -12,17 +12,12 @@ interface DeployCheckCliApi {
   /** Absent on a @guren/cli older than RFC 0020 Part 0; `options` is ignored by one older than RFC 0035 §2.1. */
   checkDeployRuntime?(cwd: string, options?: { target?: 'cloudflare' }): Promise<DeployRuntimeVerdict[]>
   /** Absent on a @guren/cli older than RFC 0035 §2. */
-  inspectDeployTarget?(cwd: string, options: { target: 'cloudflare' }): Promise<{ verdicts: DeployRuntimeVerdict[]; introspection?: IntrospectionResult }>
+  inspectDeployTarget?(cwd: string, options: { target: 'cloudflare' }): Promise<{ verdicts: DeployRuntimeVerdict[]; app: DeployTargetApp }>
 }
-
-/** The part of the CLI's `Introspection` a deploy reads; every other field is ignored. */
-type IntrospectionResult =
-  | { status: 'ok'; manifest: { storage?: unknown; database?: unknown } }
-  | { status: 'failed'; reason: string; message: string }
 
 /**
  * The app as the target runs it, for the deploy plugin to read its bindings from (RFC 0035 §2):
- * the introspected `storage` and `database` sections, or why they could not be read.
+ * the introspected `storage` and `database` sections the CLI vouches for, or why they could not be read.
  */
 export type DeployTargetApp =
   | { status: 'read'; storage?: unknown; database?: unknown }
@@ -70,33 +65,30 @@ export async function inspectDeployRuntime(
   options: ReportDeployRuntimeHazardsOptions,
 ): Promise<{ hazards: string[]; app?: DeployTargetApp }> {
   const { root, label, target } = options
+  const bail = (reason: string) => ({ hazards: skipped(label, reason), ...(target ? { app: unread(reason) } : {}) })
 
   let cli: DeployCheckCliApi
   try {
     cli = (await import('@guren/cli')) as DeployCheckCliApi
   } catch (error) {
-    const reason = `@guren/cli could not be loaded (${describeError(error)})`
-    return { hazards: skipped(label, reason), ...(target ? { app: { status: 'unread', reason } } : {}) }
+    return bail(`@guren/cli could not be loaded (${describeError(error)})`)
   }
 
   if (typeof cli.checkDeployRuntime !== 'function') {
-    return { hazards: skipped(label, 'the installed @guren/cli predates them; upgrade it'), ...(target ? { app: { status: 'unread', reason: 'the installed @guren/cli predates the deploy checks' } } : {}) }
+    return bail('the installed @guren/cli predates them; upgrade it')
   }
 
   let verdicts: DeployRuntimeVerdict[]
   let app: DeployTargetApp | undefined
   try {
     if (target && typeof cli.inspectDeployTarget === 'function') {
-      const inspection = await cli.inspectDeployTarget(root, { target })
-      verdicts = inspection.verdicts
-      app = readTargetApp(inspection.introspection)
+      ;({ verdicts, app } = await cli.inspectDeployTarget(root, { target }))
     } else {
       verdicts = await cli.checkDeployRuntime(root, { target })
-      if (target) app = { status: 'unread', reason: 'the installed @guren/cli predates inspectDeployTarget(); upgrade it' }
+      if (target) app = unread('the installed @guren/cli predates inspectDeployTarget(); upgrade it')
     }
   } catch (error) {
-    const reason = `the scan failed (${describeError(error)})`
-    return { hazards: skipped(label, reason), ...(target ? { app: { status: 'unread', reason } } : {}) }
+    return bail(`the scan failed (${describeError(error)})`)
   }
 
   const evidence = describeEvidence(label, verdicts)
@@ -111,11 +103,8 @@ export async function inspectDeployRuntime(
   return { hazards: lines, ...(app ? { app } : {}) }
 }
 
-function readTargetApp(introspection: IntrospectionResult | undefined): DeployTargetApp {
-  if (!introspection) return { status: 'unread', reason: 'the app declares no deploy target, so it was not introspected' }
-  if (introspection.status !== 'ok') return { status: 'unread', reason: `introspection failed with ${introspection.reason}: ${introspection.message}` }
-  const { storage, database } = introspection.manifest
-  return { status: 'read', ...(storage !== undefined ? { storage } : {}), ...(database !== undefined ? { database } : {}) }
+function unread(reason: string): DeployTargetApp {
+  return { status: 'unread', reason }
 }
 
 /** One line naming what each verdict was judged from, and why the source when the app could not be read. */

@@ -43,7 +43,7 @@ import {
   type WorkerManifest,
 } from './worker-manifest'
 import { detectCloudflareBackend, isRecord, readPackageJson } from './backend'
-import { inferBindings, type InferredBindings } from './inference'
+import { inferBindings, type BindingInference } from './inference'
 import type { CloudflareDeployConfig } from './config'
 import { readLocalMigrations } from './deploy/migrations'
 
@@ -92,6 +92,11 @@ export interface BuildCloudflareOutputOptions {
  * with the `guren-worker.json` manifest `gurenWorker()` reads (RFC 0035 §3).
  */
 export async function buildCloudflareOutput(options: BuildCloudflareOutputOptions = {}): Promise<void> {
+  await assembleCloudflareOutput(options)
+}
+
+/** {@link buildCloudflareOutput}, returning what it learnt about the app, which `cloudflare:deploy` plans from (RFC 0035 §2). */
+export async function assembleCloudflareOutput(options: BuildCloudflareOutputOptions = {}): Promise<{ inference: BindingInference }> {
   const root = resolvePathLike(options.rootDir ?? process.cwd())
   const backend = detectCloudflareBackend(root)
   const out = resolvePathLike(
@@ -177,7 +182,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   resetOutputDir(out, root, 'Cloudflare build')
   // Written first so a build failing below still keeps the carried-over ids.
   if (backend === 'wrangler') {
-    writeResolvedOnly(out, resolved, inferred)
+    writeResolvedOnly(out, resolved)
   } else {
     writeWorkerManifest({
       root,
@@ -228,6 +233,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   if (backend === 'wrangler') {
     scaffoldWranglerConfig(root, out, packageJson.name, mcpOAuth, agents.exports)
   }
+  return { inference: inferred }
 }
 
 /** The manifest a build left in `out`, or an empty object when there is none to read. */
@@ -277,7 +283,7 @@ function writeWorkerManifest(input: {
   crons: string[]
   scheduleUnreadable?: string
   resourceNames: Record<string, string>
-  inferred: InferredBindings
+  inferred: BindingInference
 }): void {
   const outRelative = relative(input.root, input.out).split(sep).join('/')
   const manifest: WorkerManifest = {
@@ -299,7 +305,6 @@ function writeWorkerManifest(input: {
       binding: durableObjectBindingName(agent.export),
     })),
     r2Buckets: input.inferred.r2Buckets,
-    inference: input.inferred.inference,
     resolved: input.resolved,
   }
 
@@ -310,14 +315,13 @@ function writeWorkerManifest(input: {
 }
 
 /**
- * The Wrangler backend's manifest holds only what `cloudflare:deploy` settled and what the app
- * names, since wrangler.jsonc is the rest. The ignore names only the files carrying ids, because
+ * The Wrangler backend's manifest holds only what `cloudflare:deploy` settled, since
+ * wrangler.jsonc is the rest. The ignore names only the files carrying ids, because
  * an app may commit the rest of `.cloudflare/` for a host that deploys without building.
  */
-function writeResolvedOnly(out: string, resolved: Record<string, ResolvedResource>, inferred: InferredBindings): void {
+function writeResolvedOnly(out: string, resolved: Record<string, ResolvedResource>): void {
   mkdirSync(out, { recursive: true })
-  const manifest = { version: WORKER_MANIFEST_VERSION, r2Buckets: inferred.r2Buckets, inference: inferred.inference, resolved }
-  writeFileSync(resolve(out, WORKER_MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`)
+  writeFileSync(resolve(out, WORKER_MANIFEST_FILE), `${JSON.stringify({ version: WORKER_MANIFEST_VERSION, resolved }, null, 2)}\n`)
   writeFileSync(resolve(out, '.gitignore'), `${WORKER_MANIFEST_FILE}\n${WRANGLER_DEPLOY_CONFIG_FILE}\n.wrangler/\n`)
 }
 
@@ -355,9 +359,6 @@ function deployConfigProblems(config: unknown): string[] {
   if (config.resourceNames !== undefined
     && (!isRecord(config.resourceNames) || Object.values(config.resourceNames).some((name) => typeof name !== 'string' || name === ''))) {
     problems.push('resourceNames is not a record of non-empty names')
-  } else if (isRecord(config.resourceNames)) {
-    const unknown = Object.keys(config.resourceNames).filter((binding) => !NAMEABLE_BINDINGS.has(binding))
-    if (unknown.length > 0) problems.push(`resourceNames names ${unknown.join(', ')}, and only ${[...NAMEABLE_BINDINGS].join(' and ')} take a name`)
   }
   return problems
 }
@@ -393,9 +394,6 @@ const MCP_OAUTH_SEAM_SPECIFIER = '@guren/plugin-mcp/oauth'
 
 /** The KV binding name `OAuthProvider` requires, fixed by the provider. */
 export const OAUTH_KV_BINDING = 'OAUTH_KV'
-
-/** The bindings a resource name can be given for: the build's D1 database and its KV namespace. */
-const NAMEABLE_BINDINGS = new Set(['DB', OAUTH_KV_BINDING])
 
 /** The three endpoints the provider owns or hands back, in one place. */
 const OAUTH_ENDPOINTS = {

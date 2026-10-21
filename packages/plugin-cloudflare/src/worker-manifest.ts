@@ -2,7 +2,7 @@
  * The build manifest `cloudflare:build` writes for the `cf` backend (RFC 0035 §3):
  * what `gurenWorker()` turns into `cloudflare.config.ts` bindings. It is written
  * by the Bun build and read under Node by `cf`, so this module imports nothing.
- * On the Wrangler backend it holds only `version`, `resolved` and what the app names (`r2Buckets`, `inference`).
+ * On the Wrangler backend it holds only `version` and `resolved`.
  */
 
 /** The file name inside the output directory. */
@@ -57,22 +57,16 @@ export interface WorkerManifest {
   agents: Array<{ exportName: string; binding: string }>
   /** R2 bucket bindings the introspected app's disks name (RFC 0035 §2); absent from a manifest older than that. */
   r2Buckets?: string[]
-  /** What the build learnt from the app as Workers runs it, beside the bindings above. */
-  inference?: BindingInference
   /** Keyed by binding name. The build never writes an entry, only carries them over. */
   resolved: Record<string, ResolvedResource>
-}
-
-export interface BindingInference {
-  /** Why the app could not be introspected; nothing was inferred. */
-  unread?: string
-  /** Disks registered with a bare factory, which may be R2 without saying so. */
-  opaqueDisks?: string[]
-  /** The D1 binding `config/database.ts` names, when it names one as a string. */
-  databaseBinding?: string
 }
 
 /** The name `cf` and Wrangler provision a binding under: `<worker>-<binding>`, `_` as `-` (RFC 0035 §4). */
 export function autoProvisionedName(worker: string, binding: string): string {
   return `${worker}-${binding.toLowerCase().replaceAll('_', '-')}`
+}
+
+/** A binding's resource name: one the config states, then `config/cloudflare.ts`'s, then the default. */
+export function resourceName(worker: string, binding: string, resourceNames: Readonly<Record<string, string>> | undefined, stated?: string): string {
+  return stated ?? resourceNames?.[binding] ?? autoProvisionedName(worker, binding)
 }

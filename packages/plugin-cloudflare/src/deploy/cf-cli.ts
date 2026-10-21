@@ -115,24 +115,21 @@ export function listWorkerSecrets(cf: CliRunner, worker: string): Read<string[]>
 const R2_PAGE_SIZE = 1000
 
 /**
- * The buckets named exactly as `names`, as `{ id: name, name }` since R2 has no id. Looked up
+ * The buckets named exactly as `bucketNames`, as `{ id: name, name }` since R2 has no id. Looked up
  * by `--name-contains`, because a listing pages by a cursor that cf may not print.
  */
-export function listR2Buckets(cf: CliRunner, names: readonly string[]): Read<AccountResource[]> {
+export function listR2Buckets(cf: CliRunner, bucketNames: readonly string[]): Read<AccountResource[]> {
   const found: AccountResource[] = []
-  for (const name of names) {
+  for (const name of new Set(bucketNames)) {
     const result = cf(['r2', 'buckets', 'list', '--name-contains', name, '--per-page', String(R2_PAGE_SIZE)])
     if (result.exitCode !== 0) return { ok: false, reason: `cf r2 buckets list failed: ${failureText(result)}` }
     const value = parseJson(result.stdout)
     const buckets = Array.isArray(value) ? value : resultObject(value)?.buckets
     if (!Array.isArray(buckets)) return { ok: false, reason: 'cf r2 buckets list printed no list of buckets' }
     if (buckets.length >= R2_PAGE_SIZE) return { ok: false, reason: `cf r2 buckets list matched ${R2_PAGE_SIZE} or more buckets containing "${name}"` }
-    for (const bucket of buckets) {
-      if (!isRecord(bucket) || typeof bucket.name !== 'string') {
-        return { ok: false, reason: `cf r2 buckets list returned an entry of an unexpected shape: ${JSON.stringify(bucket)}` }
-      }
-      if (bucket.name === name) found.push({ id: name, name })
-    }
+    const listed = names(buckets)
+    if (!listed) return { ok: false, reason: 'cf r2 buckets list returned a bucket with no name' }
+    if (listed.includes(name)) found.push({ id: name, name })
   }
   return { ok: true, value: found }
 }

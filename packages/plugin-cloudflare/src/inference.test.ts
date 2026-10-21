@@ -18,14 +18,11 @@ describe('inferBindings', () => {
       database: { dialect: 'd1', location: 'unknown', binding: 'DB' },
     })
 
-    expect(inferred).toEqual({ r2Buckets: ['MEDIA'], inference: { opaqueDisks: ['vault'], databaseBinding: 'DB' } })
+    expect(inferred).toEqual({ r2Buckets: ['MEDIA'], opaqueDisks: ['vault'], databaseBinding: 'DB' })
   })
 
   test('should record why nothing was inferred, and ignore a binding on another dialect', () => {
-    expect(inferBindings({ status: 'unread', reason: 'introspection failed with import' })).toEqual({
-      r2Buckets: [],
-      inference: { unread: 'introspection failed with import' },
-    })
-    expect(inferBindings({ status: 'read', database: { dialect: 'sqlite', location: 'local', binding: 'DB' } }).inference).toEqual({})
+    expect(inferBindings({ status: 'unread', reason: 'introspection failed with import' })).toEqual({ r2Buckets: [], unread: 'introspection failed with import' })
+    expect(inferBindings({ status: 'read', database: { dialect: 'sqlite', location: 'local', binding: 'DB' } })).toEqual({ r2Buckets: [] })
   })
 })
