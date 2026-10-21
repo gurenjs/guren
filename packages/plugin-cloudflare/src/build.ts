@@ -810,7 +810,7 @@ function assertAgentScopeHosts(
 }
 
 /** `Triager` → `TRIAGER`, `TriagerAgent` → `TRIAGER_AGENT`. */
-function durableObjectBindingName(exportName: string): string {
+export function durableObjectBindingName(exportName: string): string {
   return exportName
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')

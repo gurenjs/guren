@@ -13,10 +13,15 @@ import {
   OAUTH_KV_BINDING,
   asArray,
   configScopes,
+  durableObjectBindingName,
   isPlaceholderId,
   readWranglerConfig,
   workerName,
 } from './build'
+
+/** The cf release the cf backend is verified against, and the Wrangler it delegates the bundle to (RFC 0035 §7). */
+const CF_VERSION = '1.0.0-beta.18'
+const CF_WRANGLER_FLOOR = '4.136.0'
 
 /** The build's D1 binding (`WorkerManifest.d1.binding`). */
 const DATABASE_BINDING = 'DB'
@@ -36,6 +41,8 @@ export interface InitCloudflareResult {
   carried: string[]
   /** What the move cannot settle by itself. */
   warnings: string[]
+  /** devDependencies raised in package.json, as `name@range`; run `bun install` after. */
+  dependencies: string[]
 }
 
 const FILES = ['cloudflare.config.ts', 'wrangler.config.ts', 'config/cloudflare.ts'] as const
@@ -51,6 +58,14 @@ interface Carried {
   compatibilityDate: string
   databaseName?: string
   oauthKvId?: string
+  /** Durable Objects wrangler.jsonc hosts outside the agent registry, which gurenWorker() does not emit. */
+  durableObjects: DurableObjectCarry[]
+}
+
+interface DurableObjectCarry {
+  binding: string
+  className: string
+  storage: 'sqlite' | 'legacy-kv'
 }
 
 export function initCloudflare(options: InitCloudflareOptions): InitCloudflareResult {
@@ -67,6 +82,7 @@ export function initCloudflare(options: InitCloudflareOptions): InitCloudflareRe
     ...(typeof databaseName === 'string' && databaseName !== worker ? { databaseName } : {}),
     // A placeholder id from an older scaffold is not carried; the plan resolves the namespace by name instead.
     ...(typeof oauthKv?.id === 'string' && !isPlaceholderId(oauthKv.id) ? { oauthKvId: oauthKv.id } : {}),
+    durableObjects: wrangler ? carriedDurableObjects(wrangler, existsSync(resolve(root, 'config/agents.ts'))) : [],
   }
 
   const contents: Record<(typeof FILES)[number], string> = {
@@ -92,7 +108,8 @@ export function initCloudflare(options: InitCloudflareOptions): InitCloudflareRe
     written,
     skipped,
     carried: wrangler ? describeCarried(carried, oauthKv !== undefined) : [],
-    warnings: wrangler ? leftBehind(wrangler) : [],
+    warnings: wrangler ? leftBehind(wrangler, carried.durableObjects) : [],
+    dependencies: raiseCfDependencies(root),
   }
 }
 
@@ -105,11 +122,12 @@ function describeCarried(carried: Carried, mcpOAuth: boolean): string[] {
     `the Worker name "${carried.worker}" and compatibility date ${carried.compatibilityDate}`,
     ...(carried.databaseName ? [`the D1 database "${carried.databaseName}" (resourceNames.DB)`] : []),
     ...(mcpOAuth ? [`the OAUTH_KV binding (mcpOAuth: true${carried.oauthKvId ? `, its namespace id in cloudflare.config.ts` : ''})`] : []),
+    ...carried.durableObjects.map((object) => `the Durable Object ${object.binding} (${object.className}, ${object.storage} storage) as a cf export`),
   ]
 }
 
 /** Settings cf does not read, so the first cf deploy would drop them unannounced. */
-function leftBehind(wrangler: Record<string, unknown>): string[] {
+function leftBehind(wrangler: Record<string, unknown>, durableObjects: readonly DurableObjectCarry[]): string[] {
   const warnings: string[] = []
   const keys = Object.keys(wrangler).filter((key) => !HANDLED_KEYS.has(key))
   const flags = asArray(wrangler.compatibility_flags).filter((flag) => flag !== 'nodejs_compat')
@@ -128,9 +146,102 @@ function leftBehind(wrangler: Record<string, unknown>): string[] {
     warnings.push(`wrangler.jsonc sets ${notCarried.join(', ')}, which cf does not read. Add them to cloudflare.config.ts after the gurenWorker() spread before deploying.`)
   }
   if (declaresDurableObjects(wrangler)) {
-    warnings.push('wrangler.jsonc declares Durable Objects through `migrations`; on cf they are `exports`. Whether a deployed class keeps its storage across that move is unconfirmed (RFC 0035 Open Question 5), so try it on a staging Worker first.')
+    warnings.push('wrangler.jsonc declares Durable Objects through `migrations`, which cloudflare.config.ts now declares as `exports`. Whether a deployed class keeps its storage across that move is unconfirmed (RFC 0035 Open Question 5), so try it on a staging Worker first.')
+  }
+  const carriedClasses = new Set(durableObjects.map((object) => object.className))
+  const unmoved = migrationSteps(wrangler).filter((step) => step.renamed || step.deleted || step.transferred)
+  if (unmoved.length > 0) {
+    warnings.push('wrangler.jsonc migrations rename, delete or transfer a Durable Object class; init does not carry those steps. Declare them with exports.durableObject({ state }) in cloudflare.config.ts.')
+  }
+  const foreign = asArray(isRecord(wrangler.durable_objects) ? wrangler.durable_objects.bindings : undefined)
+    .filter(isRecord)
+    .filter((entry) => typeof entry.script_name === 'string' || (typeof entry.class_name === 'string' && !carriedClasses.has(entry.class_name) && !isAgentBinding(entry)))
+    .map((entry) => String(entry.name))
+  if (foreign.length > 0) {
+    warnings.push(`The Durable Object binding ${foreign.join(', ')} points at another Worker or at a class no migration declares; bind it in cloudflare.config.ts with bindings.durableObject().`)
   }
   return warnings
+}
+
+interface MigrationStep {
+  sqlite: string[]
+  kv: string[]
+  renamed: boolean
+  deleted: boolean
+  transferred: boolean
+}
+
+function migrationSteps(wrangler: Record<string, unknown>): MigrationStep[] {
+  const strings = (value: unknown) => asArray(value).filter((item): item is string => typeof item === 'string')
+  return asArray(wrangler.migrations).filter(isRecord).map((step) => ({
+    sqlite: strings(step.new_sqlite_classes),
+    kv: strings(step.new_classes),
+    renamed: asArray(step.renamed_classes).length > 0,
+    deleted: asArray(step.deleted_classes).length > 0,
+    transferred: asArray(step.transferred_classes).length > 0,
+  }))
+}
+
+/** An agent's binding, which gurenWorker() emits from the registry (`durableObjectBindingName()`). */
+function isAgentBinding(entry: Record<string, unknown>): boolean {
+  return typeof entry.class_name === 'string' && entry.name === durableObjectBindingName(entry.class_name)
+}
+
+/**
+ * The top-level Durable Object bindings gurenWorker() will not emit, with the storage their
+ * migration declared. With a config/agents.ts, a binding named the way the build names an
+ * agent's is the registry's; the others, and every one without a registry, are carried.
+ */
+function carriedDurableObjects(wrangler: Record<string, unknown>, hostsAgents: boolean): DurableObjectCarry[] {
+  const storage = new Map<string, DurableObjectCarry['storage']>()
+  for (const step of migrationSteps(wrangler)) {
+    for (const name of step.sqlite) storage.set(name, 'sqlite')
+    for (const name of step.kv) storage.set(name, 'legacy-kv')
+  }
+  return asArray(isRecord(wrangler.durable_objects) ? wrangler.durable_objects.bindings : undefined)
+    .filter(isRecord)
+    .flatMap((entry): DurableObjectCarry[] => {
+      if (typeof entry.name !== 'string' || typeof entry.class_name !== 'string' || entry.script_name !== undefined) return []
+      if (hostsAgents && isAgentBinding(entry)) return []
+      const kind = storage.get(entry.class_name)
+      return kind ? [{ binding: entry.name, className: entry.class_name, storage: kind }] : []
+    })
+}
+
+/**
+ * Raises what the cf backend needs in package.json's devDependencies (RFC 0035 §7):
+ * `cf` when absent, and `wrangler` when its declared range admits a version below the delegate floor.
+ */
+function raiseCfDependencies(root: string): string[] {
+  const path = resolve(root, 'package.json')
+  let manifest: Record<string, unknown>
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
+    if (!isRecord(parsed)) return []
+    manifest = parsed
+  } catch {
+    return []
+  }
+  const declared = (name: string) => [manifest.dependencies, manifest.devDependencies]
+    .map((group) => (isRecord(group) && typeof group[name] === 'string' ? group[name] : undefined))
+    .find((range) => range !== undefined)
+  const raised: Record<string, string> = {}
+  if (declared('cf') === undefined) raised.cf = CF_VERSION
+  const wrangler = declared('wrangler')
+  const lowest = wrangler?.match(/\d+\.\d+\.\d+(-[\w.]+)?/)?.[0]
+  if (!lowest || Bun.semver.order(lowest, CF_WRANGLER_FLOOR) < 0) raised.wrangler = `^${CF_WRANGLER_FLOOR}`
+  if (Object.keys(raised).length === 0) return []
+
+  const devDependencies = isRecord(manifest.devDependencies) ? { ...manifest.devDependencies } : {}
+  const dependencies = isRecord(manifest.dependencies) ? { ...manifest.dependencies } : undefined
+  for (const [name, range] of Object.entries(raised)) {
+    // A CLI belongs in devDependencies; one declared under dependencies is raised where it is.
+    if (dependencies && name in dependencies) dependencies[name] = range
+    else devDependencies[name] = range
+  }
+  const indent = /^(\s+)"/m.exec(readFileSync(path, 'utf8'))?.[1] ?? '  '
+  writeFileSync(path, `${JSON.stringify({ ...manifest, ...(dependencies ? { dependencies } : {}), devDependencies }, null, indent)}\n`)
+  return Object.entries(raised).map(([name, range]) => `${name}@${range}`)
 }
 
 function declaresDurableObjects(wrangler: Record<string, unknown>): boolean {
@@ -150,11 +261,21 @@ function ignoreCfOutput(root: string): void {
 
 function cloudflareConfigSource(carried: Carried): string {
   // A KV binding carries no name, so the namespace Wrangler bound is pinned by id here.
-  const env = carried.oauthKvId
+  const envEntries = [
+    ...(carried.oauthKvId ? [`OAUTH_KV: bindings.kv({ id: ${JSON.stringify(carried.oauthKvId)} })`] : []),
+    ...carried.durableObjects.map((object) => `${object.binding}: bindings.durableObject({ worker: ${JSON.stringify(carried.worker)}, exportName: ${JSON.stringify(object.className)} })`),
+  ]
+  const exportEntries = carried.durableObjects.map((object) => `${object.className}: exports.durableObject({ storage: ${JSON.stringify(object.storage)} })`)
+  const env = envEntries.length > 0
     ? `
-      env: { ...worker.env, OAUTH_KV: bindings.kv({ id: ${JSON.stringify(carried.oauthKvId)} }) },`
+      env: { ...worker.env, ${envEntries.join(', ')} },`
     : ''
-  return `import { ${carried.oauthKvId ? 'bindings, ' : ''}defineConfig } from 'cf/config'
+  const exportsLine = exportEntries.length > 0
+    ? `
+      exports: { ...worker.exports, ${exportEntries.join(', ')} },`
+    : ''
+  const imports = [...(envEntries.length > 0 ? ['bindings'] : []), 'defineConfig', ...(exportEntries.length > 0 ? ['exports'] : [])]
+  return `import { ${imports.join(', ')} } from 'cf/config'
 import { gurenWorker } from '@guren/plugin-cloudflare/config'
 
 export default defineConfig(async () => {
@@ -162,7 +283,7 @@ export default defineConfig(async () => {
   return {
     worker: {
       ...worker,
-      compatibilityDate: ${JSON.stringify(carried.compatibilityDate)},${env}
+      compatibilityDate: ${JSON.stringify(carried.compatibilityDate)},${env}${exportsLine}
     },
   }
 })

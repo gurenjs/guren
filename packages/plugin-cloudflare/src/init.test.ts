@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -130,4 +130,54 @@ describe('cloudflare:init', () => {
     const manifest = JSON.parse(readFileSync(join(root, '.guren/cloudflare/guren-worker.json'), 'utf8')) as WorkerManifest
     expect(manifest.d1.databaseName).toBe('legacy-db')
   }, 30_000)
+
+  test('should carry a Durable Object outside the agent registry into cloudflare.config.ts as a cf export', () => {
+    scaffoldApp(root)
+    writeJson(join(root, 'wrangler.jsonc'), {
+      name: 'demo-app',
+      durable_objects: { bindings: [{ name: 'COUNTER', class_name: 'Counter' }, { name: 'LEGACY', class_name: 'Legacy' }, { name: 'REMOTE', class_name: 'Remote', script_name: 'other' }] },
+      migrations: [{ tag: 'v1', new_sqlite_classes: ['Counter'] }, { tag: 'v2', new_classes: ['Legacy'] }, { tag: 'v3', renamed_classes: [{ from: 'Old', to: 'Counter' }] }],
+    })
+
+    const result = initCloudflare({ rootDir: root, compatibilityDate: '2026-10-01' })
+
+    const config = readFileSync(join(root, 'cloudflare.config.ts'), 'utf8')
+    expect(config).toContain("import { bindings, defineConfig, exports } from 'cf/config'")
+    expect(config).toContain('COUNTER: bindings.durableObject({ worker: "demo-app", exportName: "Counter" })')
+    expect(config).toContain('Counter: exports.durableObject({ storage: "sqlite" })')
+    expect(config).toContain('Legacy: exports.durableObject({ storage: "legacy-kv" })')
+    expect(config).not.toContain('Remote')
+    expect(result.carried).toContainEqual('the Durable Object COUNTER (Counter, sqlite storage) as a cf export')
+    expect(result.warnings.join('\n')).toContain('rename, delete or transfer')
+    expect(result.warnings.join('\n')).toContain('REMOTE')
+  })
+
+  test('should leave the agent registry\'s Durable Objects to gurenWorker()', () => {
+    scaffoldApp(root)
+    mkdirSync(join(root, 'config'), { recursive: true })
+    writeFileSync(join(root, 'config/agents.ts'), 'export default {}\n')
+    writeJson(join(root, 'wrangler.jsonc'), {
+      name: 'demo-app',
+      durable_objects: { bindings: [{ name: 'SUPPORT_TRIAGER', class_name: 'SupportTriager' }] },
+      migrations: [{ tag: 'v1', new_sqlite_classes: ['SupportTriager'] }],
+    })
+
+    initCloudflare({ rootDir: root, compatibilityDate: '2026-10-01' })
+
+    expect(readFileSync(join(root, 'cloudflare.config.ts'), 'utf8')).not.toContain('SupportTriager')
+  })
+
+  test('should raise cf and wrangler to what the cf backend needs, and leave a satisfying range alone', () => {
+    scaffoldApp(root)
+    const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as Record<string, unknown>
+    writeJson(join(root, 'package.json'), { ...manifest, devDependencies: { wrangler: '^4.129.0' } })
+
+    expect(initCloudflare({ rootDir: root }).dependencies).toEqual(['cf@1.0.0-beta.18', 'wrangler@^4.136.0'])
+    expect((JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { devDependencies: unknown }).devDependencies).toEqual({
+      wrangler: '^4.136.0',
+      cf: '1.0.0-beta.18',
+    })
+
+    expect(initCloudflare({ rootDir: root, force: true }).dependencies).toEqual([])
+  })
 })

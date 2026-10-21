@@ -424,11 +424,15 @@ The deploy machine needs Node 22.18 or later, because `cf` loads `cloudflare.con
 bun add -d cf wrangler
 ```
 
-`bunx guren cloudflare:init` writes the three files this path reads: `cloudflare.config.ts`, `wrangler.config.ts` and `config/cloudflare.ts` (below), and adds `.cloudflare/` to `.gitignore`. On an app that already has a `wrangler.jsonc`, it carries over the Worker name, the compatibility date, the `DB` database name and the `OAUTH_KV` namespace (by id, in `cloudflare.config.ts`), so the first `cf` deploy binds what Wrangler did, and it names every other setting cf would no longer read (routes, vars, other bindings) for you to add after the spread. A file that exists is left as it is unless you pass `--force`. An app whose `wrangler.jsonc` hosts Durable Objects gets a warning: whether a deployed class keeps its storage when its declaration moves from `migrations` to `exports` is not yet confirmed, so try the move on a staging Worker first.
+`bunx guren cloudflare:init` writes the three files this path reads: `cloudflare.config.ts`, `wrangler.config.ts` and `config/cloudflare.ts` (below), and adds `.cloudflare/` to `.gitignore`. On an app that already has a `wrangler.jsonc`, it carries over the Worker name, the compatibility date, the `DB` database name and the `OAUTH_KV` namespace (by id, in `cloudflare.config.ts`), so the first `cf` deploy binds what Wrangler did, and it names every other setting cf would no longer read (routes, vars, other bindings) for you to add after the spread. A file that exists is left as it is unless you pass `--force`. It also raises `cf` and `wrangler` in `package.json` to the versions this path needs, when they are missing or older, and tells you to run `bun install`.
+
+Durable Objects move from Wrangler's `migrations` to cf's `exports`. Agents registered in `config/agents.ts` come from `gurenWorker()`. Any other class a `durable_objects` binding names is written into `cloudflare.config.ts`, as a `bindings.durableObject()` and an `exports.durableObject()` with the storage its migration declared. A renamed, deleted or transferred class, or a binding to another Worker, is named for you to declare. Whether a deployed class keeps its storage across that move is not yet confirmed, so try it on a staging Worker first.
 
 ```bash
-bunx guren cloudflare:init
+bunx guren cloudflare:init --plan
 ```
+
+`--plan` goes on to plan a deploy once the files are written. On an app that moved from Wrangler it should show nothing to create, since every binding resolves to what Wrangler bound. It needs the dependencies installed and `cf` logged in, so run it again after `bun install` if it stops there.
 
 `gurenWorker()` returns the worker `cloudflare:build` assembled: its entry, the `DB` binding by name, `OAUTH_KV` under `--mcp-oauth`, and each agent as a SQLite-backed Durable Object. Your own settings go in the same object, after the spread:
 
