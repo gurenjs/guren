@@ -291,7 +291,7 @@ export function envFileKeys(content: string): Set<string> {
 
 /** The keys a dotenv file assigns a value to: `KEY=`, `KEY=""` or `KEY= # note` is unset to an env schema. */
 export function assignedEnvKeys(content: string): Set<string> {
-  const blank = /^[ \t]*(?:""|'')?[ \t]*(?:#.*)?$/u
+  const blank = /^[ \t]*(?:(?:""|'')[ \t]*)?(?:#.*)?$/u
   return new Set([...content.matchAll(ENV_ASSIGNMENT)].filter((match) => !blank.test(match[2] ?? '')).map((match) => match[1]))
 }
 

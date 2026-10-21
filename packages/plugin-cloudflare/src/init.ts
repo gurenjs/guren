@@ -5,7 +5,7 @@
  * exists unless forced. From a `wrangler.jsonc` it carries over what decides which
  * resources the Worker binds, and names every setting it leaves behind.
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync, writeSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
 import { isRecord, readPackageJson } from './backend'
@@ -85,12 +85,14 @@ export async function initCloudflare(options: InitCloudflareOptions): Promise<In
   const skipped: string[] = []
   for (const file of FILES) {
     const path = resolve(root, file)
-    if (existsSync(path) && !options.force) {
+    mkdirSync(dirname(path), { recursive: true })
+    try {
+      writeFileSync(path, contents[file], { flag: options.force ? 'w' : 'wx' })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
       skipped.push(file)
       continue
     }
-    mkdirSync(dirname(path), { recursive: true })
-    writeFileSync(path, contents[file])
     written.push(file)
   }
   ignoreCfOutput(root)
@@ -230,10 +232,14 @@ function declaresDurableObjects(wrangler: Record<string, unknown>): boolean {
 
 /** `cf build` writes `.cloudflare/`, which is output; the build's own `.guren/cloudflare/` ignores itself. */
 function ignoreCfOutput(root: string): void {
-  const path = resolve(root, '.gitignore')
-  const current = existsSync(path) ? readFileSync(path, 'utf8') : ''
-  if (/^\/?\.cloudflare\/?\r?$/m.test(current)) return
-  appendFileSync(path, `${current === '' || current.endsWith('\n') ? '' : '\n'}.cloudflare/\n`)
+  const fd = openSync(resolve(root, '.gitignore'), 'a+')
+  try {
+    const current = readFileSync(fd, 'utf8')
+    if (/^\/?\.cloudflare\/?\r?$/m.test(current)) return
+    writeSync(fd, `${current === '' || current.endsWith('\n') ? '' : '\n'}.cloudflare/\n`)
+  } finally {
+    closeSync(fd)
+  }
 }
 
 function cloudflareConfigSource(carried: Carried): string {
