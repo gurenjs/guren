@@ -1,9 +1,9 @@
 /**
  * `guren cloudflare:init` (RFC 0035 §3): moves an app onto the `cf` backend by
  * writing `cloudflare.config.ts`, `wrangler.config.ts` and `config/cloudflare.ts`.
- * It installs nothing and skips a file that exists unless forced. From a
- * `wrangler.jsonc` it carries over what decides which resources the Worker binds,
- * and names every setting it leaves behind.
+ * It installs nothing, raises `cf` and `wrangler` in package.json, and skips a file that
+ * exists unless forced. From a `wrangler.jsonc` it carries over what decides which
+ * resources the Worker binds, and names every setting it leaves behind.
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -12,11 +12,16 @@ import { isRecord, readPackageJson } from './backend'
 import {
   OAUTH_KV_BINDING,
   asArray,
+  assertAgentsPluginUsable,
   configScopes,
+  durableObjectBindings,
+  durableObjectStorage,
   isPlaceholderId,
+  readAgentRegistry,
   readWranglerConfig,
   workerName,
 } from './build'
+import { CF_VERSION, CF_WRANGLER_FLOOR } from './versions'
 
 /** The build's D1 binding (`WorkerManifest.d1.binding`). */
 const DATABASE_BINDING = 'DB'
@@ -36,6 +41,8 @@ export interface InitCloudflareResult {
   carried: string[]
   /** What the move cannot settle by itself. */
   warnings: string[]
+  /** devDependencies raised in package.json, as `name@range`; run `bun install` after. */
+  dependencies: string[]
 }
 
 const FILES = ['cloudflare.config.ts', 'wrangler.config.ts', 'config/cloudflare.ts'] as const
@@ -53,7 +60,7 @@ interface Carried {
   oauthKvId?: string
 }
 
-export function initCloudflare(options: InitCloudflareOptions): InitCloudflareResult {
+export async function initCloudflare(options: InitCloudflareOptions): Promise<InitCloudflareResult> {
   const root = resolve(options.rootDir)
   const wrangler = readWranglerConfig(resolve(root, 'wrangler.jsonc'))
   const defaultName = workerName(readPackageJson(root).name)
@@ -92,7 +99,8 @@ export function initCloudflare(options: InitCloudflareOptions): InitCloudflareRe
     written,
     skipped,
     carried: wrangler ? describeCarried(carried, oauthKv !== undefined) : [],
-    warnings: wrangler ? leftBehind(wrangler) : [],
+    warnings: wrangler ? [...leftBehind(wrangler), ...await durableObjectWarnings(root, wrangler)] : [],
+    dependencies: raiseCfDependencies(root),
   }
 }
 
@@ -127,10 +135,90 @@ function leftBehind(wrangler: Record<string, unknown>): string[] {
   if (notCarried.length > 0) {
     warnings.push(`wrangler.jsonc sets ${notCarried.join(', ')}, which cf does not read. Add them to cloudflare.config.ts after the gurenWorker() spread before deploying.`)
   }
-  if (declaresDurableObjects(wrangler)) {
-    warnings.push('wrangler.jsonc declares Durable Objects through `migrations`; on cf they are `exports`. Whether a deployed class keeps its storage across that move is unconfirmed (RFC 0035 Open Question 5), so try it on a staging Worker first.')
+  return warnings
+}
+
+/**
+ * gurenWorker() declares the agents config/agents.ts registers as cf `exports`, and the generated
+ * worker exports only those classes. Any other live class, or a binding to another Worker, has no
+ * declaration on cf, so the first deploy could drop its storage; each is named.
+ */
+async function durableObjectWarnings(root: string, wrangler: Record<string, unknown>): Promise<string[]> {
+  if (!declaresDurableObjects(wrangler)) return []
+  const warnings = ['wrangler.jsonc declares Durable Objects through `migrations`; on cf, gurenWorker() declares the registered agents as `exports`. Whether a deployed class keeps its storage across that move is unconfirmed (RFC 0035 Open Question 5), so try it on a staging Worker first.']
+
+  let agents: Set<string>
+  try {
+    agents = await agentClasses(root)
+  } catch (error) {
+    return [...warnings, `config/agents.ts could not be read (${error instanceof Error ? error.message : String(error)}), so which Durable Objects are agents is unknown; check every class before deploying.`]
+  }
+  const live = new Set(configScopes(wrangler).flatMap(({ config }) => [...durableObjectStorage(config).keys()]))
+  const unregistered = [...live].filter((name) => !agents.has(name))
+  if (unregistered.length > 0) {
+    warnings.push(`The Durable Object class ${unregistered.join(', ')} is not an agent in config/agents.ts. The worker cloudflare:build generates exports only registered agents, so on cf nothing declares it: register it as an agent, or export it from the worker and declare it with exports.durableObject().`)
+  }
+  const remote = configScopes(wrangler).flatMap(({ config }) => durableObjectBindings(config).filter((entry) => entry.scriptName !== undefined).map((entry) => entry.name))
+  if (remote.length > 0) {
+    warnings.push(`The Durable Object binding ${remote.join(', ')} points at another Worker; bind it in cloudflare.config.ts with bindings.durableObject().`)
+  }
+  if (asArray(wrangler.migrations).some((step) => isRecord(step) && ['renamed_classes', 'deleted_classes', 'transferred_classes'].some((key) => asArray(step[key]).length > 0))) {
+    warnings.push('wrangler.jsonc migrations rename, delete or transfer a Durable Object class; declare those steps with exports.durableObject({ state }) in cloudflare.config.ts.')
   }
   return warnings
+}
+
+/** The agent classes gurenWorker() hosts from config/agents.ts, the registry the build reads. */
+async function agentClasses(root: string): Promise<Set<string>> {
+  if (!existsSync(resolve(root, 'config/agents.ts'))) return new Set()
+  assertAgentsPluginUsable(root)
+  return new Set((await readAgentRegistry(root)).exports.map((agent) => agent.export))
+}
+
+/**
+ * Raises what the cf backend needs in package.json (RFC 0035 §7): `cf` and `wrangler` when absent
+ * or when the declared range starts below the verified version. A range it cannot read (`latest`,
+ * `catalog:`, `workspace:*`) is left as it is: the preflight checks what is installed.
+ */
+function raiseCfDependencies(root: string): string[] {
+  const path = resolve(root, 'package.json')
+  let text: string
+  let manifest: unknown
+  try {
+    text = readFileSync(path, 'utf8')
+    manifest = JSON.parse(text)
+  } catch {
+    return []
+  }
+  if (!isRecord(manifest)) return []
+  const dependencies = isRecord(manifest.dependencies) ? { ...manifest.dependencies } : undefined
+  const devDependencies = isRecord(manifest.devDependencies) ? { ...manifest.devDependencies } : {}
+  const raised: Record<string, string> = {}
+  for (const [name, floor, range] of [['cf', CF_VERSION, CF_VERSION], ['wrangler', CF_WRANGLER_FLOOR, `^${CF_WRANGLER_FLOOR}`]] as const) {
+    const declared = dependencies?.[name] ?? devDependencies[name]
+    if (declared === undefined || startsBelow(declared, floor)) raised[name] = range
+  }
+  if (Object.keys(raised).length === 0) return []
+
+  for (const [name, range] of Object.entries(raised)) {
+    // A CLI belongs in devDependencies; one declared under dependencies is raised where it is.
+    if (dependencies && name in dependencies) dependencies[name] = range
+    else devDependencies[name] = range
+  }
+  const indent = /^(\s+)"/m.exec(text)?.[1] ?? '  '
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const json = JSON.stringify({ ...manifest, ...(dependencies ? { dependencies } : {}), devDependencies }, null, indent)
+  writeFileSync(path, `${json.replaceAll('\n', eol)}${eol}`)
+  return Object.entries(raised).map(([name, range]) => `${name}@${range}`)
+}
+
+/** Whether a range's lowest version (`^4.140`, `>=4.129.0 <5`, `1.0.0-beta.10`) is below `floor`; false when there is none to read. */
+function startsBelow(range: unknown, floor: string): boolean {
+  const match = typeof range === 'string' ? /(\d+)(?:\.(\d+))?(?:\.(\d+))?(-[\w.]+)?/.exec(range) : null
+  if (!match) return false
+  const lowest = `${match[1]}.${match[2] ?? 0}.${match[3] ?? 0}${match[4] ?? ''}`
+  // `-0` admits a release's pre-releases, as the preflight does; a floor that is one already compares as is.
+  return !Bun.semver.satisfies(lowest, `>=${floor}${floor.includes('-') ? '' : '-0'}`)
 }
 
 function declaresDurableObjects(wrangler: Record<string, unknown>): boolean {

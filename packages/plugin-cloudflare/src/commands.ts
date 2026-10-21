@@ -1,8 +1,8 @@
 import { defineCommand } from 'citty'
 import { buildCloudflareOutput } from './build'
-import { runCloudflareDeploy } from './deploy/deploy'
+import { planCloudflareDeploy, runCloudflareDeploy } from './deploy/deploy'
 import { initCloudflare } from './init'
-import { formatResult } from './deploy/report'
+import { formatPlan, formatResult } from './deploy/report'
 import { assertSizeReportable, printBundleReport, reportBundleSize } from './bundle-size'
 
 const rootArg = {
@@ -173,18 +173,36 @@ const cloudflareInit = defineCommand({
       type: 'boolean',
       description: 'Rewrite those files when they exist (otherwise they are left as they are)',
     },
+    plan: {
+      type: 'boolean',
+      description: 'Then plan a deploy on the cf backend, which should show nothing to create (needs the dependencies installed)',
+    },
   },
-  run({ args }) {
-    const result = initCloudflare({ rootDir: args.root || process.cwd(), force: Boolean(args.force) })
+  async run({ args }) {
+    const rootDir = args.root || process.cwd()
+    const result = await initCloudflare({ rootDir, force: Boolean(args.force) })
     if (result.written.length > 0) console.log(`Cloudflare init: wrote ${result.written.join(', ')}.`)
     if (result.skipped.length > 0) console.log(`Cloudflare init: left ${result.skipped.join(', ')} as they are; --force rewrites them.`)
+    if (result.dependencies.length > 0) console.log(`Cloudflare init: raised ${result.dependencies.join(', ')} in package.json; run \`bun install\`.`)
     for (const carried of result.carried) console.log(`  Carried over from wrangler.jsonc: ${carried}.`)
     for (const warning of result.warnings) console.warn(`  ${warning}`)
-    console.log([
-      'Next:',
-      '  bun add -d cf wrangler@latest      # cf, and the Wrangler 4.136+ it bundles with',
-      '  bunx guren cloudflare:deploy --plan  # needs Node 22.18+ as the node on PATH, and `bunx cf auth login`',
-    ].join('\n'))
+    // The plan's preflight checks what is installed, which a raised range is not yet.
+    if (!args.plan || result.dependencies.length > 0) {
+      if (args.plan) console.log('Cloudflare init: not planning until the raised dependencies are installed.')
+      console.log([
+        'Next:',
+        ...(result.dependencies.length > 0 ? ['  bun install'] : []),
+        '  bunx guren cloudflare:deploy --plan  # needs Node 22.18+ as the node on PATH, and `bunx cf auth login`',
+      ].join('\n'))
+      return
+    }
+    // RFC 0035 Migration Path: a moved app should plan nothing to create.
+    try {
+      console.log(formatPlan(await planCloudflareDeploy({ root: rootDir })))
+    } catch (error) {
+      console.error(`Cloudflare init: the files are written, but the plan could not run: ${error instanceof Error ? error.message : String(error)}`)
+      process.exitCode = 1
+    }
   },
 })
 

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
+import { CF_VERSION } from '../src/versions'
 import { WORKER_MANIFEST_VERSION, type WorkerManifest } from '../src/worker-manifest'
 
 /**
@@ -64,7 +65,7 @@ export function scaffoldApp(root: string, options: ScaffoldAppOptions = {}): voi
   if (oauthProviderAsDevDependency) devDependencies['@cloudflare/workers-oauth-provider'] = '^0.10.3'
   if (agentsPluginAsDevDependency) devDependencies['@guren/plugin-agents'] = '^0.1.0'
   if (cfBackend) {
-    devDependencies.cf = '1.0.0-beta.18'
+    devDependencies.cf = CF_VERSION
     writeFileSync(join(root, 'cloudflare.config.ts'), 'export default {}\n')
   }
 
@@ -196,7 +197,7 @@ export function workerManifest(overrides: Partial<WorkerManifest> = {}): WorkerM
 export function installCfTools(root: string, wranglerVersion = '4.151.1'): void {
   mkdirSync(join(root, 'node_modules/cf/bin'), { recursive: true })
   writeFileSync(join(root, 'node_modules/cf/bin/cf'), '')
-  writeJson(join(root, 'node_modules/cf/package.json'), { name: 'cf', version: '1.0.0-beta.18' })
+  writeJson(join(root, 'node_modules/cf/package.json'), { name: 'cf', version: CF_VERSION })
   mkdirSync(join(root, 'node_modules/wrangler'), { recursive: true })
   writeJson(join(root, 'node_modules/wrangler/package.json'), { name: 'wrangler', version: wranglerVersion })
 }

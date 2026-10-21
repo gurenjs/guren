@@ -429,11 +429,15 @@ Workers は、アプリケーションが自分でホストするエージェン
 bun add -d cf wrangler
 ```
 
-`bunx guren cloudflare:init` を実行すると、この経路で読む 3 つのファイル（`cloudflare.config.ts`、`wrangler.config.ts`、`config/cloudflare.ts`。中身は下のとおり）を書き出し、`.gitignore` に `.cloudflare/` を加えます。すでに `wrangler.jsonc` があるアプリでは、ワーカー名、互換性の日付、`DB` のデータベース名、`OAUTH_KV` の名前空間（`cloudflare.config.ts` に ID で書きます）を引き継ぐので、最初の `cf` のデプロイも Wrangler のときと同じリソースに結び付きます。`cf` が読まなくなるほかの設定（routes、vars、ほかのバインディング）は名前を挙げて知らせるので、スプレッドのあとに書き足してください。既存のファイルは、`--force` を付けない限りそのまま残します。`wrangler.jsonc` で Durable Object を使っているアプリには警告を出します。宣言を `migrations` から `exports` に移したときに、デプロイ済みのクラスが保存領域を引き継ぐかはまだ確かめられていないので、先にステージング用のワーカーで試してください。
+`bunx guren cloudflare:init` を実行すると、この経路で読む 3 つのファイル（`cloudflare.config.ts`、`wrangler.config.ts`、`config/cloudflare.ts`。中身は下のとおり）を書き出し、`.gitignore` に `.cloudflare/` を加えます。すでに `wrangler.jsonc` があるアプリでは、ワーカー名、互換性の日付、`DB` のデータベース名、`OAUTH_KV` の名前空間（`cloudflare.config.ts` に ID で書きます）を引き継ぐので、最初の `cf` のデプロイも Wrangler のときと同じリソースに結び付きます。`cf` が読まなくなるほかの設定（routes、vars、ほかのバインディング）は名前を挙げて知らせるので、スプレッドのあとに書き足してください。既存のファイルは、`--force` を付けない限りそのまま残します。`package.json` の `cf` と `wrangler` がないか古いときは、この経路に必要なバージョンまで上げて、`bun install` を実行するよう知らせます。
+
+Durable Object の宣言は、Wrangler の `migrations` から cf の `exports` に移ります。`config/agents.ts` に登録したエージェントは `gurenWorker()` が宣言し、`cloudflare:build` が生成するワーカーも export するのはそのクラスだけです。それ以外にマイグレーションで生きているクラス、別のワーカーへのバインディング、名前の変更・削除・移管は、cf では自分で宣言するまでどこにも書かれないので、init が名前を挙げて知らせます。デプロイ済みのクラスがこの移行で保存領域を引き継ぐかはまだ確かめられていないので、先にステージング用のワーカーで試してください。
 
 ```bash
-bunx guren cloudflare:init
+bunx guren cloudflare:init --plan
 ```
+
+`--plan` を付けると、ファイルを書き出したあとにデプロイの計画まで進みます。Wrangler から移ったアプリなら、すべてのバインディングが Wrangler のときと同じリソースに解決されるので、作るものは表示されないはずです。依存のインストールと `cf` のログインが必要なので、そこで止まったら `bun install` のあとにもう一度実行してください。
 
 `gurenWorker()` は、`cloudflare:build` が組み立てたワーカーを返します。中身はエントリ、名前で指定した `DB` バインディング、`--mcp-oauth` のときの `OAUTH_KV`、SQLite を使う Durable Object としての各エージェントです。自分の設定は、同じオブジェクトの中でスプレッドのあとに書きます。
 
