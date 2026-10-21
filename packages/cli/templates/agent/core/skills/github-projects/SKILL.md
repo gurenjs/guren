@@ -1,6 +1,6 @@
 ---
 name: github-projects
-description: Work an issue the way this app tracks work. GitHub Issues and Projects hold the task, its progress and its assignee; docs/ holds the decision and links to the issue. Use when the user says "work on #412", "pick up the issue", "open an issue for this", "update the board", "move it to In Progress", "what is in flight on User", or hands you a GitHub issue URL.
+description: "Work a GitHub issue the way this app tracks work (\"work on #412\", \"open an issue\", \"update the board\"); the decision goes to docs/, progress to the issue."
 ---
 
 # GitHub Projects Skill

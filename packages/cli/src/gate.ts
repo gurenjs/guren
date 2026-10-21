@@ -13,7 +13,9 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { consola } from 'consola'
 import { runAudit } from './audit'
-import { getChangedFiles, runGit } from './changed-files'
+import { escalatesOnChange } from './audit-taxonomy'
+import { toPosixRelative } from './discovery'
+import { getChangedFiles, getUncommittedFiles, runGit } from './changed-files'
 import { runCheck } from './check'
 import { formatAdvisoryFinding, formatFinding, gatingResults } from './check-result'
 import { capFindings, codegenFallback, OUTPUT_ERROR_PATTERN, outputFindings, outputTail, readScripts, resolveScriptCommand } from './command-output'
@@ -38,6 +40,14 @@ export interface GateStageResult {
   reason?: string
   /** A step the stage ran beyond its default (`--deps` adds the dependency scan to audit). */
   detail?: string
+  /** Audit warnings `escalatesOnChange()` on the files a `--changed` run touched: never failing, shown by the Stop hook. */
+  changedWarnings?: ChangedWarning[]
+}
+
+export interface ChangedWarning {
+  /** App-relative POSIX path of the file the finding names. */
+  file: string
+  text: string
 }
 
 export interface GateReport {
@@ -187,7 +197,13 @@ async function auditStage(ctx: StageContext): Promise<StageOutcome> {
       reason: 'route-level checks did not run (routes could not be loaded; pass --routes if the entry is elsewhere)',
     }
   }
-  return { status: failing.length > 0 ? 'fail' : 'pass', findings, detail }
+  const changedWarnings: ChangedWarning[] = []
+  for (const finding of report.findings) {
+    if (finding.status !== 'warn' || finding.filePath === undefined || !escalatesOnChange(finding.key)) continue
+    const file = toPosixRelative(ctx.cwd, resolve(ctx.cwd, finding.filePath))
+    if (ctx.changedFiles?.has(file)) changedWarnings.push({ file, text: formatFinding(finding) })
+  }
+  return { status: failing.length > 0 ? 'fail' : 'pass', findings, detail, changedWarnings: changedWarnings.length > 0 ? changedWarnings : undefined }
 }
 
 const STAGE_RUNNERS: Record<GateStageName, (ctx: StageContext) => Promise<StageOutcome>> = {
@@ -245,19 +261,36 @@ export async function runGate(options: RunGateOptions = {}): Promise<GateReport>
 
 /**
  * The stop-hook verdict for an agent ending a turn in the app at `cwd`: `null` when
- * the app's working tree is clean or the gate passes, else the failures as text to
- * feed back. Outside a git repository the tree cannot be judged clean, so the gate
+ * the app's working tree is clean, else the failures and the escalating audit warnings
+ * on this session's files as text to feed back (`null` when there are neither; `warnings:
+ * false` leaves the warnings out). Outside a git repository the tree cannot be judged clean, so the gate
  * runs. Shared by every agent's stop hook; only the stdin/stdout contract differs.
  */
-export async function stopGateFindings(cwd = process.cwd()): Promise<string | null> {
+export async function stopGateFindings(cwd = process.cwd(), options: { warnings?: boolean } = {}): Promise<string | null> {
   // Scoped to the app: a monorepo app is not the git root.
   const tree = await runGit(cwd, ['status', '--porcelain', '--', '.'])
   if (tree?.length === 0) return null
   // `--changed`: check and lint on what this session touched; typecheck, audit,
   // and the tests answer for the whole app either way.
   const report = await runGate({ cwd, changed: true })
-  if (report.ok) return null
-  return `${describeGateFailures(report)}\nRun \`bunx guren gate\` to see every stage.`
+  const warned = options.warnings !== false && report.stages.some((stage) => stage.changedWarnings !== undefined)
+  return stopFindingsMessage(report, warned ? ((await getUncommittedFiles(cwd)) ?? new Set()) : new Set())
+}
+
+/**
+ * What the Stop hook says for a `--changed` gate report: the failing stages, and the audit
+ * warnings on files of `session` (this session's uncommitted work, not the branch's earlier
+ * commits). A warning never fails the gate, so it is the only time the agent sees one.
+ */
+export function stopFindingsMessage(report: GateReport, session: ReadonlySet<string>): string | null {
+  const warnings = report.stages.flatMap((stage) => stage.changedWarnings ?? []).filter((warning) => session.has(warning.file))
+  const warningLines = warnings.length === 0 ? [] : [
+    `guren audit warns on files this change touched${report.ok ? ' (the gate passed)' : ''}:`,
+    ...warnings.map((warning) => `- ${warning.text}`),
+    'Fix them; `bunx guren audit` says how to record a deliberate exception.',
+  ]
+  if (report.ok) return warningLines.length === 0 ? null : warningLines.join('\n')
+  return [describeGateFailures(report), ...warningLines, 'Run `bunx guren gate` to see every stage.'].join('\n')
 }
 
 /** The failing stages as plain text, one line per finding. */
@@ -286,6 +319,9 @@ export function renderGateReport(report: GateReport): void {
     log(`${label} ${name} (${stage.durationMs}ms)${stage.reason ? `: ${stage.reason}` : ''}`)
     for (const finding of stage.findings) {
       consola.info(`       - ${finding}`)
+    }
+    for (const warning of stage.changedWarnings ?? []) {
+      consola.warn(`       - ${warning.text}`)
     }
   }
 

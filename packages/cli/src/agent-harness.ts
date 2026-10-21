@@ -3,7 +3,7 @@ import type { Dirent } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import process from 'node:process'
-import { fileExists, readIfExists, toPosixRelative } from './discovery'
+import { fileExists, formatTruncatedList, readIfExists, toPosixRelative } from './discovery'
 import {
   DETECTABLE_COMPONENTS,
   componentsForTargets,
@@ -55,6 +55,8 @@ export interface AgentHarnessResult {
    * discarded an older template version or a local edit, which nothing can tell apart.
    */
   replaced: string[]
+  /** The subset of `written` that is framework-managed: new or changed files `agent:sync` refreshes. */
+  writtenManaged: string[]
   /** Planned files whose on-disk contents already matched — nothing written. */
   unchanged: string[]
   /**
@@ -342,6 +344,7 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
 
   const written: string[] = []
   const replaced: string[] = []
+  const writtenManaged: string[] = []
   const unchanged: string[] = []
   const skipped: string[] = []
   const mergeHints: AgentHarnessResult['mergeHints'] = []
@@ -389,6 +392,9 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
       await writeFile(destPath, file.content, 'utf8')
     }
     written.push(file.path)
+    if (file.managed) {
+      writtenManaged.push(file.path)
+    }
     if (exists) {
       replaced.push(file.path)
     }
@@ -418,6 +424,7 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
   return {
     written,
     replaced,
+    writtenManaged,
     unchanged,
     mode,
     dryRun,
@@ -429,4 +436,21 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
     mergeHints,
     legacyHookCommands,
   }
+}
+
+/**
+ * One line for `guren context` (the SessionStart map) when `agent:sync` would add or
+ * replace managed harness files: an outdated rule set is context the agent carries on
+ * every turn. Silent when nothing is installed or the comparison itself fails.
+ */
+export async function staleHarnessNote(cwd: string): Promise<string | undefined> {
+  const result = await installAgentHarness({ cwd, mode: 'sync', dryRun: true }).catch(() => undefined)
+  // Under sync only managed files are overwritten, so these two are managed files
+  // already on disk: with neither, there is no harness to call out of date.
+  const installed = result !== undefined && result.unchanged.length + result.replaced.length > 0
+  const files = installed ? result.writtenManaged : []
+  if (files.length === 0) {
+    return undefined
+  }
+  return `> The agent harness differs from the templates of the installed @guren/cli (${formatTruncatedList(files)}). \`bunx guren agent:sync\` refreshes these framework-managed files.`
 }

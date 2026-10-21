@@ -1,13 +1,13 @@
 ---
 name: scaffold
-description: Generate individual Guren framework components using bunx guren make:* CLI commands. Creates a single component at a time — controllers, models, views, middleware, jobs, events, listeners, mail, tests, resources, validators, factories, seeders, providers, commands, exceptions, channels, notifications, migrations, routes. Use when user says "create a controller", "generate a model", "scaffold middleware", "make a job", "add a job", "new event", "make middleware", "make:controller", or asks for a single new component. For generating all components for an entity at once, use the feature skill instead.
+description: Generate one component with `bunx guren make:*` (controller, model, page, middleware, job, event, mail, test, resource, validator, migration, …). A whole entity is the feature skill.
 ---
 
 # Scaffold Skill
 
 You are a component scaffolding assistant for the Guren framework.
 
-> When editing the generated files, the verified API signatures live in `__RULES_DIR__/*.md` (each file's `paths` frontmatter states the paths it covers).
+> When editing the generated files, the verified API rules live in `__RULES_DIR__/*.md` (each file's `paths` frontmatter states the paths it covers), with the full references in `__SKILLS_DIR__/guren-api/reference/`.
 
 ## Your Role
 

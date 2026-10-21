@@ -69,121 +69,35 @@ bun run db:seed                    # run seeders
 bun run build
 bun run test
 bunx guren gate                    # every CI stage (codegen, typecheck, lint, check, audit, test); exit 0 = done
-
-# Implementation plans (the plan-write skill writes and revises one; plan-implement builds an approved one)
-bunx guren plan "<request>" --print-prompt   # the prompt and JSON Schema to write docs/plans/<slug>/plan.json from
-bunx guren plan:render <plan> --json         # check the plan against the app and write its review page; fix every failing check
-bunx guren plan:revise <plan> --edited <copy> --message "<why>"  # record a change to the plan (--feedback for the page's review)
-bunx guren plan:next <plan>                  # the next step to implement, with its elements, behaviours and verify commands
-bunx guren plan:verify <plan> --step <id>    # run the step's verify commands and tests, record the verdict under .guren/plans/
-bunx guren plan:status <plan>                # which plan elements exist in the code, and which are verified
-
-# Browser verification (the verify-in-browser skill; evidence for the person, never a gate)
-bunx guren browser:map --check               # docs/browser/: features, landmarks, what approved plans expect
-bunx guren browser:serve                     # one instance on 127.0.0.1, refused unless its database is local
-bunx guren browser:record --begin --url <origin> --feature <name>  # open a run under .guren/browser/
-bunx guren browser:doctor --url <origin> --evidence <run>          # every landmark served, no server error
 ```
+
+Implementation plans: the `plan-write` and `plan-implement` skills. Browser
+verification: the `verify-in-browser` skill. Each lists its own commands.
 
 ## MCP Server (AI Agent Integration)
 
-`bun run dev` starts an MCP endpoint alongside the dev server (enabled by
-`GUREN_MCP=1` in the `dev` script; if your script lacks it, run
-`GUREN_MCP=1 bun run dev`; the flag has no effect in production):
-
-```
-http://localhost:3333/_guren/mcp
-```
-
-`bunx guren agent:init` writes the MCP client config for the agents you
-selected: `.mcp.json` (Claude Code), `.cursor/mcp.json` (Cursor),
-`.vscode/mcp.json` (VS Code / Copilot), `.codex/config.toml` (Codex — a
-project-scoped config Codex reads in trusted projects only), or the `mcp`
-entry in `opencode.json` (OpenCode). If your agent is not configured yet,
-point it at the URL above as a streamable-HTTP server.
-
-The endpoint only accepts requests from this machine: browser pages on other
-origins (including DNS rebinding) and requests from other hosts on the LAN
-are rejected with 403.
-
-### Available tools
-
-| Tool | Description |
-|------|-------------|
-| `guren_get_context` | Project structure map (models, routes, pages, controllers, …) |
-| `guren_entity_context` | Entity-centric context bundle (model, routes, pages, linked docs) |
-| `guren_check` | Validate route ↔ controller ↔ page consistency, doc links, spec freshness |
-| `guren_gate` | Every CI stage (codegen, typecheck, lint, check, audit, test) in one verdict; `ok` = the change is done |
-| `guren_docs_graph` | OKF docs relation graph (narrow with entity/path) — impact query before renames |
-| `guren_agent_surface` | Routes an autonomous agent can already call (`.agent()` tools) — check before editing one |
-| `guren_get_application_graph` | Routes, controllers, models and pages with their relationships, coverage and evidence |
-| `guren_get_runtime_errors` | Server errors the running dev app retained: status, route, project stack frames |
-| `guren_get_plans` | Implementation plans not closed yet, drafts included: approval, step outcomes, the active step, the next command |
-| `guren_list_models` | List models (relations, soft deletes, auth trait) |
-| `guren_generate_guidelines` | Generate project-specific coding guidelines |
-| `guren_doctor` | Project health check + suggested next actions |
-| `guren_make_feature` | Scaffold a complete CRUD feature |
-| `guren_make_component` | Scaffold a single component |
-| `guren_codegen` | Generate typed manifests (routes.gen.ts, pages.gen.ts, …) |
+`bun run dev` serves an MCP endpoint at `http://localhost:3333/_guren/mcp`
+(loopback only; `GUREN_MCP=1` in the `dev` script). Its tools mirror the CLI
+(`guren_get_context`, `guren_check`, `guren_gate`, …); the `dev-workflow` skill
+lists them.
 
 ## Architecture Overview
 
-The request lifecycle: `routes/web.ts` registers routes on a `Router`, each pointing
-at a `[Controller, 'method']` tuple. Controllers validate input with Zod schemas,
-query models, and render Inertia pages or JSON.
-
-```typescript
-// routes/web.ts
-router.get('/posts', [PostController, 'index']).name('posts.index')
-router.post('/posts', { name: 'posts.store', body: CreatePostSchema }, [PostController, 'store'])
-
-// app/Http/Controllers/PostController.ts
-export class PostController extends Controller {
-  async store() {
-    const { body: data } = this.validated('posts.store')     // the route's body schema answered 422 already
-    const user = await this.auth.userOrFail<UserRecord>()    // 401 if unauthenticated
-    const post = await Post.create(data, { set: { authorId: user.id } })  // server-chosen column
-    return this.redirect('/posts')
-  }
-}
-
-// app/Models/Post.ts
-export class Post extends defineModel(posts, {
-  fillable: ['title', 'body'],  // typed against the table's columns; authorId stays out (set above)
-}) {}
-```
-
-- Models: `await Post.findOrFail(id)` throws a 404; `Post.where(...)` starts a query
-  builder chain. Full API in `__RULES_DIR__/orm-models.md`.
-- Attaching a Zod schema to a route both validates the request automatically and
-  feeds `bunx guren codegen` typed manifests. Details in `__RULES_DIR__/routes-codegen.md`.
-- Middleware: `defineMiddleware(async (c, next) => { ... })` from `@guren/core`;
-  register aliases via `const router = baseRouter.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))`
-  — the return value carries the alias name in the router's type, so dropping it makes
-  a later `.middleware('auth')` fail to compile.
+`routes/web.ts` registers routes on a `Router`, each pointing at a
+`[Controller, 'method']` tuple. A route's Zod `body`/`query`/`params` schemas are
+validated before the action (422) and feed `bunx guren codegen`. Controllers read
+`this.validated('<route name>')`, query models and render Inertia pages or JSON.
+The signatures are in the `guren context` digest; each file kind's rules attach
+from `__RULES_DIR__/` when you open it.
 
 ## Testing
 
-Uses `bun:test` + `@guren/testing`. Requests run in-process via `app.fetch()` — no server needed.
-
-```typescript
-import { TestApp } from '@guren/testing'
-
-const app = await TestApp.create()
-await app.get('/posts').assertOk()
-await app.actingAs(user).json().post('/posts', { title: 'Hi' }).assertCreated()
-```
-
-Full client and assertion reference: `__RULES_DIR__/testing.md`.
+`bun:test` + `@guren/testing`; requests run in-process through `TestApp`, no
+server. Rules: `__RULES_DIR__/testing.md`.
 
 ## Key Files
 
 | Path | Purpose |
 |------|---------|
-| `bin/serve.ts` | Server entry point |
-| `config/` | Application configuration |
-| `db/schema.ts` | Database table definitions |
-| `routes/web.ts` | Web route definitions |
-| `app/Providers/` | Service providers |
-| `resources/js/pages/` | React page components |
 | `__RULES_DIR__/` | Verified API rules (each file's `paths` frontmatter states the covered paths) |
+| `__SKILLS_DIR__/guren-api/reference/` | The full API reference behind each rule, read on demand |

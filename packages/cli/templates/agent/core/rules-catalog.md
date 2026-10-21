@@ -1,7 +1,8 @@
-The rule files: `orm-models.md` (models, queries, relations),
+The rule files: `orm-models.md` (models, mass assignment, queries that bite),
 `controllers-http.md` (validation, Inertia, auth), `routes-codegen.md`
-(route options, schema binding, codegen), `testing.md` (TestApp assertions),
-`docs-and-spec.md` (linked ADRs/docs, generated spec views), `comments.md`
-(what a comment may carry, the size limits, the oxlint rules behind them).
-For framework signatures, check the `guren context` digest first, then the
-matching rule file; only read `node_modules/@guren/*` for APIs neither covers.
+(registering routes, codegen), `testing.md` (TestApp, assertions, common
+mistakes), `docs-and-spec.md` (docs under `docs/`), `comments.md` (what a
+comment may carry). Each ends with what its full reference under
+`__SKILLS_DIR__/guren-api/reference/` adds; read that file only when the task
+needs it. For framework signatures, check the `guren context` digest first,
+then the matching rule; only read `node_modules/@guren/*` for APIs neither covers.

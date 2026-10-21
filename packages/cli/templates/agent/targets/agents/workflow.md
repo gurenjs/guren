@@ -20,7 +20,9 @@ so make them part of your loop:
    uncommitted changes, feeding the findings back into the turn (Codex asks
    you to trust the hook once, via `/hooks`; Cursor reads the config from the
    workspace root, so open the app as its own workspace); Copilot and
-   OpenCode have no such hook, so run it yourself. The same hook verifies the
+   OpenCode have no such hook, so run it yourself. The hook also reports
+   `audit` warnings on files you changed (a mutating action with no
+   authorization, request data in a force write), which never fail the gate. The same hook verifies the
    plan step `bunx guren plan:next` marked (`plan-implement` skill); without
    it, run `bunx guren plan:verify <plan> --step <id>` yourself before
    committing the step.

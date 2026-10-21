@@ -1,6 +1,6 @@
 ---
 name: verify-in-browser
-description: Check a change the way a user sees it, in a browser, against an instance this app starts safely, and keep the evidence (RFC 0033). Use when the user says "check it in the browser", "verify the UI", "does the page work", "bug bash", "click through it", or after a change to a page, a form or a route an Inertia page submits to, once the tests pass. Not a gate, and never a reason to call a plan step done.
+description: Check a page or form change in a browser against a safely started instance and keep the evidence (RFC 0033), once tests pass ("check it in the browser"). Never a gate.
 ---
 
 # Browser Verification Skill

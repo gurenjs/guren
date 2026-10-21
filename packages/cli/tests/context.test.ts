@@ -299,40 +299,42 @@ describe('renderContextMarkdown', () => {
 
 describe('GUREN_API_DIGEST', () => {
   // The digest is a hand-written summary of the rule files, so each token has
-  // to appear in both and a one-sided edit fails here.
-  const tokensByRuleFile: Record<string, string[]> = {
-    'orm-models.md': [
+  // to appear in both and a one-sided edit fails here. Each token is pinned to
+  // the file that carries it: the rule an edit attaches (`rules/`), or the full
+  // reference behind it (`skills/guren-api/reference/`), so moving one is a
+  // deliberate edit here too.
+  const tokensByFile: Record<string, string[]> = {
+    'skills/guren-api/reference/orm-models.md': [
       '`=` `!=` `>` `<` `>=` `<=` `like` `in` `not in` `is null` `is not null`',
       'whereNull(field)',
       'whereNotNull(field)',
       "'is null', null)",
       "belongsToMany(name, related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey = 'id', relatedKey = 'id')",
       "hasManyThrough(name, related, through, firstKey, secondKey, localKey = 'id', secondLocalKey = 'id')",
+      'withPaginate',
+    ],
+    'rules/orm-models.md': [
+      'create(data, { set: { authorId } })',
       'paginate(result, { path?, query?, fragment? })',
       'PaginatorOptions',
-      'withPaginate',
-      'create(data, { set: { authorId } })',
     ],
-    'controllers-http.md': [
+    'rules/controllers-http.md': [
       'validateBody',
       'userOrFail',
       'bind: { id: Post }',
-      "bind: { slug: [Post, 'slug'] }",
       "await this.authorize('update', [Post, post])",
     ],
-    'routes-codegen.md': ['.agent({ description })', 'One declaration per route'],
-    'testing.md': ['actingAs', 'withCsrf', 'assertUnprocessable', 'assertInertia', 'query(path, body?)'],
+    'skills/guren-api/reference/controllers-http.md': ["bind: { slug: [Post, 'slug'] }"],
+    'skills/guren-api/reference/routes-codegen.md': ['.agent({ description })', 'One declaration per route'],
+    'rules/testing.md': ['actingAs', 'withCsrf', 'assertUnprocessable', 'assertInertia', 'query(path, body?)'],
   }
 
-  for (const [ruleFile, tokens] of Object.entries(tokensByRuleFile)) {
-    it(`stays in sync with the ${ruleFile} rule file`, async () => {
-      const ruleText = await readFile(
-        new URL(`../templates/agent/core/rules/${ruleFile}`, import.meta.url),
-        'utf8',
-      )
+  for (const [file, tokens] of Object.entries(tokensByFile)) {
+    it(`stays in sync with ${file}`, async () => {
+      const text = await readFile(new URL(`../templates/agent/core/${file}`, import.meta.url), 'utf8')
       for (const token of tokens) {
         expect(GUREN_API_DIGEST).toContain(token)
-        expect(ruleText).toContain(token)
+        expect(text).toContain(token)
       }
     })
   }

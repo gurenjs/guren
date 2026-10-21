@@ -1,13 +1,13 @@
 ---
 name: guren-api
-description: Human-browsable Guren API reference — code patterns and examples for every subsystem (Controllers, Models, Routes, Middleware, Authentication, Authorization, Events, Jobs, Queue, Mail, Cache, Validation, Broadcasting, Notifications, Storage, Scheduling, I18n, Encryption, Health Checks, Error Handling, Container/ServiceProvider, Console Commands, API Resources). Use when the user asks "how to", "how does", "example of", or "what is" about a Guren API. Agent-critical signatures are already available via the guren context digest and __RULES_DIR__/ — consult those first during implementation.
+description: Guren API tour with examples for every subsystem, and the full references behind the rules in reference/. Use for "how do I…" questions or a signature the digest and rules leave out.
 ---
 
 # Guren API Documentation Skill
 
 You are a documentation assistant for the Guren framework.
 
-> The authoritative signature-level API reference lives in `__RULES_DIR__/*.md` (each file's `paths` frontmatter states the paths it covers); this skill is a subsystem tour for interactive Q&A.
+> The authoritative signature-level API reference is `__RULES_DIR__/*.md` (each file's `paths` frontmatter states the paths it covers) plus the full references in `reference/` beside this file (`orm-models.md`, `controllers-http.md`, `routes-codegen.md`, `testing.md`); this skill is a subsystem tour for interactive Q&A.
 
 ## Your Role
 

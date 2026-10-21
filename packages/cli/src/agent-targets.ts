@@ -86,7 +86,9 @@ type PatternNamespace = Extract<ManagedNamespace, { kind: 'pattern' }>
  * value, so a renamed root cannot leave the claim pointing at the old
  * location (where prune would then eat the freshly written files).
  */
-function canonicalDirs(root: '.claude' | '.agents'): { rules: string; skills: string } {
+type CanonicalDirs = { rules: string; skills: string }
+
+function canonicalDirs(root: '.claude' | '.agents'): CanonicalDirs {
   return { rules: `${root}/rules`, skills: `${root}/skills` }
 }
 
@@ -352,6 +354,7 @@ export function componentsForTargets(targets: AgentTarget[]): HarnessComponent[]
 }
 
 const RULES_DIR_TOKEN = '__RULES_DIR__'
+const SKILLS_DIR_TOKEN = '__SKILLS_DIR__'
 const APP_TITLE_TOKEN = '__APP_TITLE__'
 const TOKEN_RE = /__[A-Z][A-Z_]*__/u
 
@@ -435,21 +438,23 @@ export function planComponents(
       .filter(([path]) => path.startsWith(prefix))
       .map(([path, content]) => [path.slice(prefix.length), content])
 
-  const render = (content: string, rulesDir?: string): string => {
+  const render = (content: string, dirs?: CanonicalDirs): string => {
     const withTitle = content.replaceAll(APP_TITLE_TOKEN, appTitle)
-    return rulesDir === undefined ? withTitle : withTitle.replaceAll(RULES_DIR_TOKEN, rulesDir)
+    return dirs === undefined
+      ? withTitle
+      : withTitle.replaceAll(RULES_DIR_TOKEN, dirs.rules).replaceAll(SKILLS_DIR_TOKEN, dirs.skills)
   }
 
   /**
    * Entry document: shared intro + per-target workflow + shared rule catalog
    * + shared body. The workflow fragment owns its own headings (or continues
    * the intro's last section) and ends with its target's lead-in to the
-   * catalog; catalog and body stay target-neutral apart from __RULES_DIR__.
+   * catalog; catalog and body stay target-neutral apart from __RULES_DIR__ / __SKILLS_DIR__.
    */
-  const entryDoc = (workflowPath: string, rulesDir: string): string =>
+  const entryDoc = (workflowPath: string, dirs: CanonicalDirs): string =>
     render(
       `${get('core/entry-intro.md')}\n${get(workflowPath)}\n${get('core/rules-catalog.md')}\n${get('core/entry-body.md')}`,
-      rulesDir,
+      dirs,
     )
 
   /** A user-owned config the harness only seeds: merge-hinted when it already exists without `marker`. */
@@ -492,10 +497,10 @@ export function planComponents(
           `Agent harness rule ${rel} must be a flat file — a nested rule cannot be claimed for pruning`,
         )
       }
-      add({ path: `${dirs.rules}/${rel}`, content: render(content), managed: true })
+      add({ path: `${dirs.rules}/${rel}`, content: render(content, dirs), managed: true })
     }
     for (const [rel, content] of under('core/skills/')) {
-      add({ path: `${dirs.skills}/${rel}`, content: render(content, dirs.rules), managed: true })
+      add({ path: `${dirs.skills}/${rel}`, content: render(content, dirs), managed: true })
     }
   }
 
@@ -505,7 +510,7 @@ export function planComponents(
     // body; only the workflow section differs (hooks vs. manual loop).
     add({
       path: 'CLAUDE.md',
-      content: entryDoc('targets/claude/workflow.md', canonicalDirs('.claude').rules),
+      content: entryDoc('targets/claude/workflow.md', canonicalDirs('.claude')),
       managed: false,
     })
     addMcpConfig('.mcp.json', 'targets/claude/mcp.json')
@@ -526,7 +531,7 @@ export function planComponents(
   if (components.includes('agents')) {
     add({
       path: 'AGENTS.md',
-      content: entryDoc('targets/agents/workflow.md', canonicalDirs('.agents').rules),
+      content: entryDoc('targets/agents/workflow.md', canonicalDirs('.agents')),
       managed: false,
     })
     addCanonical('.agents')
@@ -540,7 +545,8 @@ export function planComponents(
     components.includes('cursor') || components.includes('copilot')
       ? under('core/rules/').map(([rel, content]) => [
           rel.replace(/\.md$/u, ''),
-          parseRuleDoc(rel, content),
+          // The references a rule points to ship under `.agents/skills/`, which every non-Claude target installs.
+          parseRuleDoc(rel, render(content, canonicalDirs('.agents'))),
         ])
       : []
 

@@ -1,6 +1,6 @@
 ---
 name: db-manage
-description: Database management for Guren with safety checks. Handles migrations, rollbacks, seeding, resets, and container management. Use when user mentions "database", "migration", "migrate", "rollback", "seed", "reset", "db:up", "db:down", "db:reset", "fresh database", or database-related tasks.
+description: "Database work with safety checks: migrations, seeding, resets, containers (\"migrate\", \"seed\", \"db:reset\", \"fresh database\")."
 ---
 
 # Database Management Skill

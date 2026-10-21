@@ -6,12 +6,14 @@ the edited file when the app has an `.oxlintrc.json` (`bunx guren add lint`
 writes one; warnings are reported too), feeding findings back immediately. A
 `Stop` hook (`.claude/hooks/gate-on-stop.ts`) runs `guren gate` when you finish a
 turn with uncommitted changes: codegen, typecheck, lint, `check`, `audit`, and
-the test suite, the same stages CI runs. If any stage fails, the stop is blocked
-once and the findings come back to you — fix them in the same turn rather than
-leaving them for CI. Run `bunx guren gate` yourself before declaring a change
-done. The same hook verifies the plan step `bunx guren plan:next` marked
-(`plan-implement` skill): while the step is not verified it sends you back, up
-to three times, then records the step as stalled and says why. The injected map
+the test suite, the same stages CI runs. If any stage fails, or `audit` warns
+on a file you changed (a mutating action with no authorization, request data in
+a force write), the stop is blocked once and the findings come back to you — fix
+them in the same turn rather than leaving them for CI. Run `bunx guren gate`
+yourself before declaring a change done. The same hook verifies the plan step
+`bunx guren plan:next` marked (`plan-implement` skill): while the step is not
+verified it sends you back, up to three times, then records the step as stalled
+and says why. The injected map
 ends with a "Guren API Signatures"
 digest of the ORM, controller, and testing APIs — those signatures are already
 in your context before you write any code. Framework-managed files

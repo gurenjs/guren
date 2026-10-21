@@ -109,6 +109,7 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
 - \`await app.get('/posts').assertOk()\` · assertions: \`assertStatus / assertCreated / assertRedirect(url?) /
   assertUnprocessable / assertJson / assertJsonPath(path, value) / assertInertia(component, props?)\`
 
-Full reference and gotchas: \`.claude/rules/orm-models.md\`, \`controllers-http.md\`, \`routes-codegen.md\`, \`testing.md\`;
+Rules and gotchas: \`.claude/rules/orm-models.md\`, \`controllers-http.md\`, \`routes-codegen.md\`, \`testing.md\`
+(attached by path); the full reference behind each: the \`guren-api\` skill's \`reference/\` directory;
 health checks, redirect safety, API tokens, rate limiting: \`docs/en/guides/health-checks.md\`, \`authentication.md\`,
 \`api-tokens.md\`, \`rate-limiting.md\` in the Guren framework repo.`

@@ -1,6 +1,6 @@
 ---
 name: plan-implement
-description: Implement an approved implementation plan (a `*.plan.json`, RFC 0030) one derived step at a time — `plan:next` names the step and what it covers, you implement exactly that, `plan:verify` records the result, one commit per step. Use when the user says "implement the plan", "next step", "continue the plan", "work through the plan", or names a plan file with the intent of building it.
+description: Implement an approved `*.plan.json` (RFC 0030) one step at a time with plan:next and plan:verify ("implement the plan", "next step").
 ---
 
 # Plan Implementation Skill
@@ -9,7 +9,8 @@ You implement a plan the way Guren derives it: step by step, in task order,
 with completion read from the code rather than reported by you.
 
 > The API rules in `__RULES_DIR__/` (orm-models, controllers-http, routes-codegen,
-> testing) carry the verified signatures for what each step writes.
+> testing) and their full references in `__SKILLS_DIR__/guren-api/reference/` carry
+> the verified signatures for what each step writes.
 
 ## The loop
 

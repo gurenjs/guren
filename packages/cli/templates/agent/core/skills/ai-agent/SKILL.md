@@ -1,6 +1,6 @@
 ---
 name: ai-agent
-description: Write, wire and test an in-process AI agent with @guren/plugin-ai (an Agent class that calls a language model and reaches the app through its .agent() routes). Use when the user asks to "add an AI feature", "call Claude/OpenAI from the app", "summarize/classify/triage with an LLM", "make an AI agent", "add a chat", or mentions app/Ai/Agents, config/ai.ts, appTools(), fakeAi() or make:ai-agent. Not for durable Workers agents (make:agent) or for exposing routes to external agents (agent-interface).
+description: Write, wire and test an in-process AI agent with @guren/plugin-ai (app/Ai/Agents, config/ai.ts, appTools(), fakeAi()) when the app itself should call a model ("add an AI feature", "summarize with an LLM").
 ---
 
 # AI Agent Skill
@@ -81,4 +81,4 @@ expect(ai.calls(TicketDigest)[0]!.toolCalls[0]?.output).toBeDefined()   // the r
 
 A passing fake test proves wiring, not answer quality. Do not claim an agent "works well" from fake tests alone, and never call a real provider from `bun test` or CI. Answer quality is measured by an eval: `defineEval()` in `tests/evals/<flow>.eval.ts` and `bunx guren ai:eval <flow>`, which calls the real model, costs money, and is never part of `guren check` or `guren gate`. Run it when asked, with `--dry-run` first.
 
-Full guide: `docs/en/guides/ai-agents.md` (or `docs/ja/guides/ai-agents.md`) in the Guren framework repo. Routing reference: `__RULES_DIR__/routes-codegen.md`.
+Full guide: `docs/en/guides/ai-agents.md` (or `docs/ja/guides/ai-agents.md`) in the Guren framework repo. Routing reference: `__SKILLS_DIR__/guren-api/reference/routes-codegen.md`.

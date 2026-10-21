@@ -46,7 +46,9 @@ try {
 
 // The app root is this script's grandparent (`<app>/.cursor/hooks/`).
 const root = resolve(import.meta.dir, '../..')
-const findings = await cli.stopGateFindings(root)
+// Audit warnings ride on the first follow-up only: they never fail the gate, and a
+// deliberate one would otherwise spend every follow-up the plan step needs.
+const findings = await cli.stopGateFindings(root, { warnings: loopCount === 0 })
 // null when the tree is clean, so a turn that ends by committing is not gated
 // here: run `guren gate` before committing.
 if (findings !== null) {
