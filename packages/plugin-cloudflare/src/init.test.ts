@@ -131,43 +131,35 @@ describe('cloudflare:init', () => {
     expect(manifest.d1.databaseName).toBe('legacy-db')
   }, 30_000)
 
-  test('should carry a Durable Object outside the agent registry into cloudflare.config.ts as a cf export', async () => {
-    scaffoldApp(root)
-    writeJson(join(root, 'wrangler.jsonc'), {
-      name: 'demo-app',
-      durable_objects: { bindings: [{ name: 'COUNTER', class_name: 'Counter' }, { name: 'LEGACY', class_name: 'Legacy' }, { name: 'REMOTE', class_name: 'Remote', script_name: 'other' }] },
-      migrations: [{ tag: 'v1', new_sqlite_classes: ['Counter'] }, { tag: 'v2', new_classes: ['Legacy'] }, { tag: 'v3', renamed_classes: [{ from: 'Old', to: 'Counter' }] }],
-    })
-
-    const result = await initCloudflare({ rootDir: root, compatibilityDate: '2026-10-01' })
-
-    const config = readFileSync(join(root, 'cloudflare.config.ts'), 'utf8')
-    expect(config).toContain("import { bindings, defineConfig, exports } from 'cf/config'")
-    expect(config).toContain('COUNTER: bindings.durableObject({ worker: "demo-app", exportName: "Counter" })')
-    expect(config).toContain('Counter: exports.durableObject({ storage: "sqlite" })')
-    expect(config).toContain('Legacy: exports.durableObject({ storage: "legacy-kv" })')
-    expect(config).not.toContain('Remote')
-    expect(result.carried).toContainEqual('the Durable Object COUNTER (Counter, sqlite storage) as a cf export')
-    expect(result.warnings.join('\n')).toContain('rename, delete or transfer')
-    expect(result.warnings.join('\n')).toContain('REMOTE')
-  })
-
-  test('should leave the agent registry\'s Durable Objects to gurenWorker()', async () => {
+  test('should name every Durable Object class no agent registers, and a binding to another Worker', async () => {
     scaffoldApp(root, { agentsPlugin: true })
     writeAgentModule(root, 'app/Agents/SupportTriager.ts', 'SupportTriager')
     writeAgentsConfig(root, { triage: { module: 'app/Agents/SupportTriager.ts', export: 'SupportTriager' } })
     writeJson(join(root, 'wrangler.jsonc'), {
       name: 'demo-app',
-      durable_objects: { bindings: [{ name: 'SUPPORT_TRIAGER', class_name: 'SupportTriager' }, { name: 'COUNTER', class_name: 'Counter' }] },
-      migrations: [{ tag: 'v1', new_sqlite_classes: ['SupportTriager', 'Counter'] }],
+      durable_objects: { bindings: [{ name: 'SUPPORT_TRIAGER', class_name: 'SupportTriager' }, { name: 'REMOTE', class_name: 'Remote', script_name: 'other' }] },
+      migrations: [{ tag: 'v1', new_sqlite_classes: ['SupportTriager', 'Counter'] }, { tag: 'v2', new_classes: ['Old'] }, { tag: 'v3', deleted_classes: ['Old'] }],
     })
 
-    await initCloudflare({ rootDir: root, compatibilityDate: '2026-10-01' })
+    const warnings = (await initCloudflare({ rootDir: root, compatibilityDate: '2026-10-01' })).warnings.join('\n')
 
-    // Counter is named the way an agent's binding is, and is still carried: the registry decides.
-    const config = readFileSync(join(root, 'cloudflare.config.ts'), 'utf8')
-    expect(config).not.toContain('SupportTriager')
-    expect(config).toContain('Counter: exports.durableObject({ storage: "sqlite" })')
+    // Counter has no binding here and Old is deleted; only a live, unregistered class is named.
+    expect(warnings).toContain('The Durable Object class Counter is not an agent')
+    expect(warnings).not.toContain('SupportTriager is not')
+    expect(warnings).toContain('The Durable Object binding REMOTE points at another Worker')
+    expect(warnings).toContain('rename, delete or transfer')
+    expect(readFileSync(join(root, 'cloudflare.config.ts'), 'utf8')).not.toContain('durableObject')
+  })
+
+  test('should keep going when config/agents.ts cannot be read, and say so', async () => {
+    scaffoldApp(root)
+    writeAgentsConfig(root, { triage: { module: 'app/Agents/SupportTriager.ts', export: 'SupportTriager' } })
+    writeJson(join(root, 'wrangler.jsonc'), { name: 'demo-app', migrations: [{ tag: 'v1', new_sqlite_classes: ['SupportTriager'] }] })
+
+    const result = await initCloudflare({ rootDir: root, compatibilityDate: '2026-10-01' })
+
+    expect(result.written).toContain('cloudflare.config.ts')
+    expect(result.warnings.join('\n')).toContain('config/agents.ts could not be read')
   })
 
   test('should raise cf and wrangler to what the cf backend needs, and leave a satisfying range alone', async () => {
@@ -181,6 +173,17 @@ describe('cloudflare:init', () => {
       cf: '1.0.0-beta.18',
     })
 
+    expect((await initCloudflare({ rootDir: root, force: true })).dependencies).toEqual([])
+  })
+
+  test('should read a range written short, leave one it cannot read, and keep CRLF line endings', async () => {
+    scaffoldApp(root)
+    const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as Record<string, unknown>
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ ...manifest, devDependencies: { cf: '1.0.0-beta.10', wrangler: '^4.140' } }, null, 2).replaceAll('\n', '\r\n'))
+    expect((await initCloudflare({ rootDir: root })).dependencies).toEqual(['cf@1.0.0-beta.18'])
+    expect(readFileSync(join(root, 'package.json'), 'utf8')).toContain('\r\n')
+
+    writeJson(join(root, 'package.json'), { ...manifest, devDependencies: { cf: 'catalog:', wrangler: 'latest' } })
     expect((await initCloudflare({ rootDir: root, force: true })).dependencies).toEqual([])
   })
 })
