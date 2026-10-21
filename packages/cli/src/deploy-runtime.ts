@@ -1056,15 +1056,58 @@ export async function checkDeployRuntime(
   if (target && options.introspect !== undefined) {
     throw new Error('checkDeployRuntime(): `target` sets how the app is introspected, so it cannot be combined with a caller\'s own `introspect`.')
   }
-  const env = target ? { [INTROSPECT_TARGET_ENV]: target } : undefined
-  const analysis = await readDeployRuntime(cwd, { introspect: options.introspect ?? checkIntrospection(cwd, { fresh: true, env }) })
-  if (analysis.targets.length === 0) return []
-  const verdicts = judgeDeployVerdicts(analysis)
-  if (!target) return verdicts
+  return target ? (await inspectDeployTarget(cwd, { target })).verdicts : judgeIfTargeted(await readDeployRuntime(cwd, { introspect: options.introspect ?? checkIntrospection(cwd, { fresh: true }) }))
+}
+
+export interface DeployTargetInspection {
+  verdicts: DeployRuntimeVerdict[]
+  /** The one introspection the verdicts were read from; absent when the app declares no deploy target. */
+  introspection?: Introspection
+  /**
+   * The app's `storage` and `database` sections from that run, under RFC 0026 §5's trust rules: a
+   * section a provider's failure leaves unverified is absent, never passed off as described.
+   */
+  app: DeployTargetApp
+}
+
+export type DeployTargetApp =
+  | { status: 'read'; storage?: unknown; database?: unknown }
+  | { status: 'unread'; reason: string }
+
+function readTargetApp(introspection: Introspection | undefined): DeployTargetApp {
+  if (!introspection) return { status: 'unread', reason: 'the app declares no deploy target, so it was not introspected' }
+  if (introspection.status !== 'ok') return { status: 'unread', reason: `introspection failed with ${describeIntrospectionFailure(introspection)}` }
+  const storage = readManifestSection(introspection.manifest, 'storage')
+  const database = readManifestSection(introspection.manifest, 'database')
+  return {
+    status: 'read',
+    ...(storage.status === 'described' ? { storage: storage.value } : {}),
+    ...(database.status === 'described' ? { database: database.value } : {}),
+  }
+}
+
+/**
+ * {@link checkDeployRuntime} for a deploy plugin's build, returning the introspection too, so the
+ * plugin reads the app's bindings from the same run (RFC 0035 §2.1) instead of starting a second child.
+ */
+export async function inspectDeployTarget(cwd: string, options: { target: IntrospectTarget }): Promise<DeployTargetInspection> {
+  const { target } = options
+  const run = checkIntrospection(cwd, { fresh: true, env: { [INTROSPECT_TARGET_ENV]: target } })
+  let introspection: Introspection | undefined
+  const analysis = await readDeployRuntime(cwd, { introspect: async () => (introspection = await run()) })
+  const verdicts = judgeIfTargeted(analysis)
   // A failure on the target's branch reproduces only under the same target.
   const reproduce = `The app was introspected as ${SERVERLESS_RUNTIME_LABELS[target]} runs it; \`bunx guren introspect --target ${target}\` reproduces the failure.`
-  return verdicts.map((entry) => {
-    if (entry.evidence === 'manifest') return { ...entry, introspectedAs: target }
-    return analysis.introspectionFailure && entry.evidence === 'none' ? { ...entry, fix: `${entry.fix ?? ''} ${reproduce}`.trim() } : entry
-  })
+  return {
+    verdicts: verdicts.map((entry) => {
+      if (entry.evidence === 'manifest') return { ...entry, introspectedAs: target }
+      return analysis.introspectionFailure && entry.evidence === 'none' ? { ...entry, fix: `${entry.fix ?? ''} ${reproduce}`.trim() } : entry
+    }),
+    ...(introspection ? { introspection } : {}),
+    app: readTargetApp(introspection),
+  }
+}
+
+function judgeIfTargeted(analysis: DeployRuntimeFacts): DeployRuntimeVerdict[] {
+  return analysis.targets.length === 0 ? [] : judgeDeployVerdicts(analysis)
 }

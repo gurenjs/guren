@@ -14,7 +14,7 @@ export function formatPlan(plan: DeployPlan): string {
   const lines = [`Cloudflare deploy plan for ${plan.worker}:`]
 
   if (plan.bindings.length === 0) {
-    lines.push('  No D1 or KV bindings.')
+    lines.push('  No D1, KV or R2 bindings.')
   }
   for (const binding of plan.bindings) {
     const id = binding.id ? ` ${binding.id}` : ''

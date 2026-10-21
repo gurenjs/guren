@@ -11,7 +11,19 @@
 interface DeployCheckCliApi {
   /** Absent on a @guren/cli older than RFC 0020 Part 0; `options` is ignored by one older than RFC 0035 §2.1. */
   checkDeployRuntime?(cwd: string, options?: { target?: 'cloudflare' }): Promise<DeployRuntimeVerdict[]>
+  /** Absent on a @guren/cli older than RFC 0035 §2. */
+  inspectDeployTarget?(cwd: string, options: { target: 'cloudflare' }): Promise<{ verdicts: DeployRuntimeVerdict[]; app: DeployTargetApp }>
 }
+
+/**
+ * Restates `DeployTargetApp` in @guren/cli's deploy-runtime.ts structurally, since this module imports
+ * no CLI type: the CLI an app installs may be older or newer than this core.
+ * The app as the target runs it, for the deploy plugin to read its bindings from (RFC 0035 §2):
+ * the introspected `storage` and `database` sections the CLI vouches for, or why they could not be read.
+ */
+export type DeployTargetApp =
+  | { status: 'read'; storage?: unknown; database?: unknown }
+  | { status: 'unread'; reason: string }
 
 interface DeployRuntimeVerdict {
   title: string
@@ -44,24 +56,41 @@ function describeError(error: unknown): string {
  * prints one line saying so rather than nothing: silence would read as a clean report.
  */
 export async function reportDeployRuntimeHazards(options: ReportDeployRuntimeHazardsOptions): Promise<string[]> {
+  return (await inspectDeployRuntime(options)).hazards
+}
+
+/**
+ * {@link reportDeployRuntimeHazards}, also returning the introspected app when `target` is set, from
+ * the same child. A CLI that cannot return it leaves `app` unread, which fails nothing.
+ */
+export async function inspectDeployRuntime(
+  options: ReportDeployRuntimeHazardsOptions,
+): Promise<{ hazards: string[]; app?: DeployTargetApp }> {
   const { root, label, target } = options
+  const bail = (reason: string) => ({ hazards: skipped(label, reason), ...(target ? { app: unread(reason) } : {}) })
 
   let cli: DeployCheckCliApi
   try {
     cli = (await import('@guren/cli')) as DeployCheckCliApi
   } catch (error) {
-    return skipped(label, `@guren/cli could not be loaded (${describeError(error)})`)
+    return bail(`@guren/cli could not be loaded (${describeError(error)})`)
   }
 
   if (typeof cli.checkDeployRuntime !== 'function') {
-    return skipped(label, 'the installed @guren/cli predates them; upgrade it')
+    return bail('the installed @guren/cli predates them; upgrade it')
   }
 
   let verdicts: DeployRuntimeVerdict[]
+  let app: DeployTargetApp | undefined
   try {
-    verdicts = await cli.checkDeployRuntime(root, { target })
+    if (target && typeof cli.inspectDeployTarget === 'function') {
+      ;({ verdicts, app } = await cli.inspectDeployTarget(root, { target }))
+    } else {
+      verdicts = await cli.checkDeployRuntime(root, { target })
+      if (target) app = unread('the installed @guren/cli predates inspectDeployTarget(); upgrade it')
+    }
   } catch (error) {
-    return skipped(label, `the scan failed (${describeError(error)})`)
+    return bail(`the scan failed (${describeError(error)})`)
   }
 
   const evidence = describeEvidence(label, verdicts)
@@ -73,7 +102,11 @@ export async function reportDeployRuntimeHazards(options: ReportDeployRuntimeHaz
   for (const line of lines) {
     console.warn(line)
   }
-  return lines
+  return { hazards: lines, ...(app ? { app } : {}) }
+}
+
+function unread(reason: string): DeployTargetApp {
+  return { status: 'unread', reason }
 }
 
 /** One line naming what each verdict was judged from, and why the source when the app could not be read. */

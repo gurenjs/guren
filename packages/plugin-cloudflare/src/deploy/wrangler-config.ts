@@ -31,6 +31,10 @@ export function evaluateWranglerConfig(config: Record<string, unknown>): Evaluat
     if (!isRecord(entry) || typeof entry.binding !== 'string') continue
     env[entry.binding] = { type: 'kv', ...(realId(entry.id) ? { id: entry.id as string } : {}) }
   }
+  for (const entry of asArray(config.r2_buckets)) {
+    if (!isRecord(entry) || typeof entry.binding !== 'string') continue
+    env[entry.binding] = { type: 'r2', ...(typeof entry.bucket_name === 'string' ? { name: entry.bucket_name } : {}) }
+  }
   for (const [name, value] of Object.entries(isRecord(config.vars) ? config.vars : {})) {
     env[name] = { type: typeof value === 'string' ? 'text' : 'json' }
   }

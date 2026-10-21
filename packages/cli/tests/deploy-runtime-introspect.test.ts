@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { runCheck, type CheckResult } from '../src/check'
 import { gatingResults } from '../src/check-result'
-import { checkDeployRuntime, readDeployRuntime } from '../src/deploy-runtime'
+import { checkDeployRuntime, inspectDeployTarget, readDeployRuntime } from '../src/deploy-runtime'
 import { getDoctorRuleEvaluations } from '../src/doctor'
 import { CHECK_INTROSPECT_TIMEOUT_MS, INTROSPECT_TARGET_ENV, introspectApp } from '../src/introspect'
 import { readManifestSection } from '../src/manifest-section'
@@ -281,5 +281,33 @@ describe('introspecting the Cloudflare branch (RFC 0035 §2.1)', () => {
     expect(unverified?.fix).toContain('`bunx guren introspect --target cloudflare` reproduces the failure')
 
     await expect(checkDeployRuntime(dir, { target: 'cloudflare', introspect: false })).rejects.toThrow(/cannot be combined/)
+  }, 60_000)
+})
+
+/** An R2 disk on the Workers branch, registered through r2Disk() so its binding is described. */
+const R2_DISK_APP = `import { createApp, ServiceProvider, StorageManager } from '@guren/core'
+import { r2Disk } from '@guren/plugin-cloudflare'
+import { isWorkersRuntime } from '@guren/plugin-cloudflare/env'
+
+class MediaProvider extends ServiceProvider {
+  register(): void {
+    const storage = new StorageManager({ default: 'media' })
+    if (isWorkersRuntime()) storage.registerDisk('media', ...r2Disk({ binding: 'MEDIA' }))
+    this.container.instance('storage', storage)
+  }
+}
+
+export default createApp({ providers: [MediaProvider] })
+`
+
+describe('reading the bindings a deploy infers (RFC 0035 §2)', () => {
+  test('should return the one introspection, with the R2 disk the Workers branch registers', async () => {
+    const dir = await workersApp('inspect-r2', R2_DISK_APP)
+
+    const inspection = await inspectDeployTarget(dir, { target: 'cloudflare' })
+
+    expect(inspection.introspection?.status).toBe('ok')
+    const storage = inspection.introspection?.status === 'ok' ? readManifestSection(inspection.introspection.manifest, 'storage') : undefined
+    expect(storage).toMatchObject({ status: 'described', value: { entries: { media: { driver: 'r2', binding: 'MEDIA' } } } })
   }, 60_000)
 })
