@@ -83,6 +83,15 @@ describe('cloudflare:deploy --plan', () => {
     expect(failure).toContain('4.136.0 or later; found 4.129.0')
   })
 
+  test('should fail preflight on a Wrangler without the cf build entry, which a Vite app is built through', async () => {
+    scaffoldApp(root, { cfBackend: true })
+    installCfTools(root)
+    rmSync(join(root, 'node_modules/wrangler/bin/cf-wrangler.js'))
+
+    await expect(planCloudflareDeploy(options())).rejects.toThrow(/has no bin\/cf-wrangler\.js/)
+    expect(existsSync(join(root, '.guren/cloudflare'))).toBe(false)
+  })
+
   test('should fail preflight when cf is not logged in, naming the login', async () => {
     scaffoldApp(root, { cfBackend: true })
     installCfTools(root)

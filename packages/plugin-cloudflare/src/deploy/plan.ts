@@ -358,6 +358,11 @@ function planSecrets(input: SecretsInput, worker: string, findings: Finding[], w
   return missing
 }
 
+/** The identity a binding carries for its resource: the id, or for an id-less type (R2) the name. */
+export function boundIdentity(entry: EvaluatedBinding | undefined): string | undefined {
+  return entry && entry.type in RESOURCES && !RESOURCES[entry.type as ResourceType].hasId ? entry.name : entry?.id
+}
+
 export function hasBlocker(plan: DeployPlan): boolean {
   return plan.findings.some((finding) => finding.severity === 'blocker')
 }

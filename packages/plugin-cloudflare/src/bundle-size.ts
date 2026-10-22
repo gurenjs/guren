@@ -200,7 +200,7 @@ export function assertSizeReportable(root: string, requestedBy = 'Cloudflare siz
   const app = resolve(root)
   if (detectCloudflareBackend(app) === 'cf') {
     throw new Error(
-      `${requestedBy}: the size report measures the bundle wrangler.jsonc deploys, and ${app} deploys through cf (cloudflare.config.ts). Drop it; \`cf build\` writes the bundle to .cloudflare/output/v0/workers/default/bundle/.`,
+      `${requestedBy}: the size report measures the bundle wrangler.jsonc deploys, and ${app} deploys through cf (cloudflare.config.ts). Drop it; the cf build writes the bundle to .cloudflare/output/v0/workers/default/bundle/.`,
     )
   }
 }
