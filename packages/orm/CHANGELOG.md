@@ -1,5 +1,31 @@
 # @guren/orm
 
+## 2.15.0
+
+### Minor Changes
+
+- b8bb897: `createD1Database({ binding: 'DB' })` and `new R2Driver({ binding: 'MEDIA' })` take the binding's name (RFC 0035 §2.1). The name is read from the Workers env the first request captured, at the first query or storage operation. A D1 factory given a name reports it from `describe()`, so the introspected app names the binding the database uses. `StorageManager.registerDisk(name, factory, { driver, binding })` records what a factory builds, and `describe()` reports it without building the disk. `r2Disk(options)` from `@guren/plugin-cloudflare` returns both arguments from one options object. An empty binding name is refused when the factory or driver is created. The closure form keeps working. `@guren/plugin-cloudflare/env` keeps the captured env under `Symbol.for('guren.workersEnv')` on `globalThis`, which is how `@guren/orm` reads it without importing the plugin.
+- e4707a1: The introspection manifest gains a `database` section (RFC 0033 §3): the dialect and whether the database is `local`, `remote` or `unknown`, read without connecting and never including the connection string. Every built-in factory (`createPostgresDatabase`, `createMySqlDatabase`, `createSqliteDatabase`, `createD1Database`) has a `describe(context?)` that resolves its connection setting under the app's env; `ConfigurableDatabase` declares it as optional, so a custom adapter without it leaves the section unverified. Anything not shown to be on a loopback host or a local file reads as `unknown`, never `local`.
+- fbdf3cd: Add the destructive-migration guard (RFC 0034). A pending migration that drops a table or column, narrows a column type, rebuilds a SQLite table (`__new_<table>`), renames, truncates, or deletes every row is reported with its `migration.sql:<line>` unless its file carries a `-- guren:allow-destructive: <reason>` comment. A statement against a table an earlier pending migration creates is exempt, so a fresh database still applies the whole history, and a type change the drizzle-kit snapshots show widening passes, as does a SQLite rebuild they show copying every column (an added default or foreign key).
+
+  - **`guren db:migrate` now refuses such a migration before applying anything, in every environment.** This is a behaviour change: a deploy script running `db:migrate` over an unacknowledged drop stops with a non-zero exit. Add the comment to the migration, or pass `--allow-destructive` for one run. `--dry-run` judges the pending migrations without applying them (it now reads the database's migration tracker) and exits 1 on a finding; `--json` reports what was judged under `destructive`.
+  - The SQLite, PostgreSQL, MySQL and Data API factories take `destructiveMigrations: 'warn' | 'refuse'` for the migrations they apply at boot. The default is `'warn'`, which prints the statements and applies them; new apps scaffolded by `create-guren-app` set `'refuse'`. `GUREN_ALLOW_DESTRUCTIVE_MIGRATIONS=1` lets one refused run through. `DestructiveMigrationError` and the `DestructiveMigrationMode` type are exported from `@guren/core`.
+  - `migrationStatus()` rows carry the `path` of each local `migration.sql`.
+  - `guren check` (and so `check --ci` and `guren gate`) reports an unacknowledged destructive migration among those not yet on `main`. This is also the guard for Cloudflare D1, whose migrations wrangler applies.
+  - A newly installed agent harness asks before `db:fresh`, `db:reset`, `db:migrate --allow-destructive` and `queue:flush` (Claude `permissions.ask`, Codex `prompt` rules). `agent:sync` does not rewrite an existing `.claude/settings.json` or `.codex/rules/guren.rules`, so add those entries by hand. The `db-manage` skill, which sync does refresh, tells the agent to ask the user before acknowledging a destructive migration.
+
+### Patch Changes
+
+- d267cde: Close gaps in the destructive-migration guard (RFC 0034), each of which let a destructive statement through:
+
+  - The scanner reads SQL in the migration's dialect (from the driver, the factory's `describe()`, or `snapshot.json`; every dialect's reading when none names one): MySQL backslash escapes and `#` comments, PostgreSQL `E'…'` strings. A string can no longer hide the statement after it.
+  - Statements in a `CREATE PROCEDURE`/`FUNCTION`/`TRIGGER` body, a function body written as a string and an `EXECUTE '…'` literal are judged; SQL built at run time is reported `unreadable`.
+  - New kinds: `drop-partition` (MySQL `DROP PARTITION`) and `drop-cascade` (`DROP TYPE … CASCADE` and the like, PostgreSQL `DROP OWNED`). `TRUNCATE PARTITION` is a `truncate`.
+  - A SQLite rebuild is exempt only when the copy's own `CREATE TABLE` keeps every column's type, so a `--custom` migration's repeated snapshot vouches for nothing, and not when another table references it with `ON DELETE CASCADE`/`SET NULL`/`SET DEFAULT` where foreign keys stay on (Cloudflare D1).
+  - MySQL's bare `DECIMAL` is `DECIMAL(10,0)`, so `DECIMAL(12,2)` to `DECIMAL` is narrowing.
+  - A refusal over an unreadable migration tracker names the read error and keeps it as the `cause`.
+  - `guren check` lists changed paths with `git -z`, so a migration folder with a non-ASCII name is judged, and falls back to `origin/HEAD`, then `master`, when there is no `main`; untracked paths are listed root-relative (`--full-name`), so an untracked migration in an app below the repository root is no longer dropped. In an app with migrations, commits with no merge base (a shallow clone) are now a gating `migrations-destructive-no-base` finding, so a CI checkout needs the base branch's history: the scaffolded workflow now checks out with `fetch-depth: 0`, and an existing app running `guren gate` in CI should do the same. On `main` itself the rule says that merged migrations are not judged (`migrations-destructive-on-base`, advisory). It reads `config/database.ts` to tell a bun:sqlite app, whose rebuilds run with foreign keys off, from a D1 one.
+
 ## 2.14.0
 
 ### Minor Changes

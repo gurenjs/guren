@@ -1,5 +1,62 @@
 # @guren/core
 
+## 1.25.0
+
+### Minor Changes
+
+- 970ec32: Cron triggers and a deploy workflow for the `cf` backend (RFC 0035 §2, §4).
+
+  - `cloudflare:build` on the `cf` backend records a `* * * * *` cron in the manifest when the schedule kernel registers tasks, and `gurenWorker()` emits it as `triggers`. A kernel the build cannot load adds no trigger and is recorded, and `cloudflare:deploy` blocks (`schedule-unreadable`) unless the config sets its own `triggers`, rather than deploy away a trigger the Worker may have. The manifest version moves to 2, so `cf build` against an older manifest asks for a rebuild. `@guren/cli` exports `loadScheduleKernel()`, read through `readScheduledTasks()` in `@guren/core/internal/deploy-plan`, so the build and `schedule:list` read the kernel alike.
+  - `guren deploy --target cloudflare` writes `.github/workflows/deploy-cloudflare.yml`: `bunx guren cloudflare:deploy --yes` on every push to main (with `--mcp-oauth` when the app depends on `@cloudflare/workers-oauth-provider`), under a `cloudflare-deploy-<worker>` concurrency group with `cancel-in-progress: false`.
+  - `cloudflare:deploy` running in GitHub Actions warns (`serialization`) when the running workflow has no top-level concurrency group, or one that cancels a running deploy.
+
+- c80fffb: `guren cloudflare:deploy --plan` now checks migrations and secrets (RFC 0035 §5, §6).
+
+  - **Migrations.** The plan reads the D1 database's `d1_migrations` tracker through `cf d1 query`. A database not created yet has applied nothing. The plan picks the layout from the names the tracker records: flattened `<folder>.sql` (Wrangler, or cf over `.guren/cloudflare/d1-migrations`) or nested `<folder>/migration.sql`. A tracker holding both forms is a `tracker-layout` blocker. The plan judges the pending migrations with RFC 0034's destructive-migration guard. An unacknowledged statement is a `destructive-migration` blocker unless `--allow-destructive` (or `GUREN_ALLOW_DESTRUCTIVE_MIGRATIONS=1`) turns it into a warning. The plan prints the `cf d1 migrations apply` arguments for the layout. A tracker it cannot read is `source-unreadable`, never "nothing applied".
+  - **Secrets.** The required variables come from `config/env.ts`, parsed as production would parse it. The plan compares them with the deployed Worker's secrets, the config's text bindings, and the names in `--secrets-file` (whose values are never read). Anything missing is a `secrets` blocker that names the command to fix it.
+  - `@guren/core/internal/deploy-plan` gives deploy plugins `judgePendingMigrations()`, `readRequiredDeployEnv()` and `readEnvFileKeys()`. `@guren/cli` exports `requiredDeployEnv()`, `envFileKeys()` and `assignedEnvKeys()` (the keys a dotenv file assigns a non-blank value to) for it.
+
+- cef5220: The Cloudflare build judges its deploy-runtime checks on the branch the app takes on Workers (RFC 0035 §2.1). Under `GUREN_INTROSPECT=1` with `GUREN_INTROSPECT_TARGET=cloudflare`, `isWorkersRuntime()` returns true. The target variable alone does nothing, so an exported value cannot move `bun run dev`. `checkDeployRuntime(cwd, { target: 'cloudflare' })` introspects the app with that variable, and `reportDeployRuntimeHazards({ target })` passes it on. The evidence line names the branch the checks read (`as Cloudflare Workers runs it`). An ordinary introspection no longer inherits the variable from the calling shell. `guren doctor` and `guren check` keep judging the development branch. `guren introspect --target cloudflare` registers the app the same way. When that branch fails to register, the unverified checks name it as the command that reproduces the failure.
+- 5c6f123: `cloudflare:deploy` binds and creates the R2 buckets the app's disks name (RFC 0035 §2). The Cloudflare build introspects the app once, on its Workers branch, and reads two things from that run. Every disk registered with `r2Disk()` gets a bucket named `<worker>-<binding>`, or its `resourceNames` entry. The cf backend lists the bucket by name and creates it when it is missing; `gurenWorker()` then binds it. The D1 binding `config/database.ts` names is checked against the Worker's bindings. A new `resource-name` check refuses an R2 bucket name R2 would reject, before anything is created. On the Wrangler backend, an R2 binding a disk reads but `wrangler.jsonc` lacks is a `resource-missing` blocker. `inspectDeployTarget()` (`@guren/cli`) and `inspectDeployRuntime()` (`@guren/core/internal/deploy-check`) return the introspection beside the deploy-runtime verdicts. App KV is not inferred: no KV storage driver ships yet.
+- e4707a1: The introspection manifest gains a `database` section (RFC 0033 §3): the dialect and whether the database is `local`, `remote` or `unknown`, read without connecting and never including the connection string. Every built-in factory (`createPostgresDatabase`, `createMySqlDatabase`, `createSqliteDatabase`, `createD1Database`) has a `describe(context?)` that resolves its connection setting under the app's env; `ConfigurableDatabase` declares it as optional, so a custom adapter without it leaves the section unverified. Anything not shown to be on a loopback host or a local file reads as `unknown`, never `local`.
+- fbdf3cd: Add the destructive-migration guard (RFC 0034). A pending migration that drops a table or column, narrows a column type, rebuilds a SQLite table (`__new_<table>`), renames, truncates, or deletes every row is reported with its `migration.sql:<line>` unless its file carries a `-- guren:allow-destructive: <reason>` comment. A statement against a table an earlier pending migration creates is exempt, so a fresh database still applies the whole history, and a type change the drizzle-kit snapshots show widening passes, as does a SQLite rebuild they show copying every column (an added default or foreign key).
+
+  - **`guren db:migrate` now refuses such a migration before applying anything, in every environment.** This is a behaviour change: a deploy script running `db:migrate` over an unacknowledged drop stops with a non-zero exit. Add the comment to the migration, or pass `--allow-destructive` for one run. `--dry-run` judges the pending migrations without applying them (it now reads the database's migration tracker) and exits 1 on a finding; `--json` reports what was judged under `destructive`.
+  - The SQLite, PostgreSQL, MySQL and Data API factories take `destructiveMigrations: 'warn' | 'refuse'` for the migrations they apply at boot. The default is `'warn'`, which prints the statements and applies them; new apps scaffolded by `create-guren-app` set `'refuse'`. `GUREN_ALLOW_DESTRUCTIVE_MIGRATIONS=1` lets one refused run through. `DestructiveMigrationError` and the `DestructiveMigrationMode` type are exported from `@guren/core`.
+  - `migrationStatus()` rows carry the `path` of each local `migration.sql`.
+  - `guren check` (and so `check --ci` and `guren gate`) reports an unacknowledged destructive migration among those not yet on `main`. This is also the guard for Cloudflare D1, whose migrations wrangler applies.
+  - A newly installed agent harness asks before `db:fresh`, `db:reset`, `db:migrate --allow-destructive` and `queue:flush` (Claude `permissions.ask`, Codex `prompt` rules). `agent:sync` does not rewrite an existing `.claude/settings.json` or `.codex/rules/guren.rules`, so add those entries by hand. The `db-manage` skill, which sync does refresh, tells the agent to ask the user before acknowledging a destructive migration.
+
+### Patch Changes
+
+- Updated dependencies [5c5ae43]
+- Updated dependencies [b7dc613]
+- Updated dependencies [8e36ea8]
+- Updated dependencies [b273d53]
+- Updated dependencies [4228de2]
+- Updated dependencies [4bff8cf]
+- Updated dependencies [fc73586]
+- Updated dependencies [98d270a]
+- Updated dependencies [970ec32]
+- Updated dependencies [c80fffb]
+- Updated dependencies [cef5220]
+- Updated dependencies [5c6f123]
+- Updated dependencies [b8bb897]
+- Updated dependencies [e4707a1]
+- Updated dependencies [fbdf3cd]
+- Updated dependencies [a9b8ecb]
+- Updated dependencies [ad2ad1b]
+- Updated dependencies [a676a0a]
+- Updated dependencies [a221fb6]
+- Updated dependencies [1c08560]
+- Updated dependencies [d267cde]
+- Updated dependencies [359d7e1]
+- Updated dependencies [a124322]
+- Updated dependencies [b1b49d5]
+  - @guren/cli@2.32.0
+  - @guren/orm@2.15.0
+  - @guren/server@2.31.0
+
 ## 1.24.0
 
 ### Minor Changes
