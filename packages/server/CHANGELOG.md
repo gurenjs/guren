@@ -1,5 +1,21 @@
 # @guren/server
 
+## 2.31.0
+
+### Minor Changes
+
+- b8bb897: `createD1Database({ binding: 'DB' })` and `new R2Driver({ binding: 'MEDIA' })` take the binding's name (RFC 0035 §2.1). The name is read from the Workers env the first request captured, at the first query or storage operation. A D1 factory given a name reports it from `describe()`, so the introspected app names the binding the database uses. `StorageManager.registerDisk(name, factory, { driver, binding })` records what a factory builds, and `describe()` reports it without building the disk. `r2Disk(options)` from `@guren/plugin-cloudflare` returns both arguments from one options object. An empty binding name is refused when the factory or driver is created. The closure form keeps working. `@guren/plugin-cloudflare/env` keeps the captured env under `Symbol.for('guren.workersEnv')` on `globalThis`, which is how `@guren/orm` reads it without importing the plugin.
+- e4707a1: The introspection manifest gains a `database` section (RFC 0033 §3): the dialect and whether the database is `local`, `remote` or `unknown`, read without connecting and never including the connection string. Every built-in factory (`createPostgresDatabase`, `createMySqlDatabase`, `createSqliteDatabase`, `createD1Database`) has a `describe(context?)` that resolves its connection setting under the app's env; `ConfigurableDatabase` declares it as optional, so a custom adapter without it leaves the section unverified. Anything not shown to be on a loopback host or a local file reads as `unknown`, never `local`.
+- a676a0a: The Inertia initial-page element is written and read in one place, beside the engine: `initialPageElement()`, `INITIAL_PAGE_SELECTOR` and `readInitialPage()` in `@guren/server/internal/inertia-page`. `@guren/testing`'s controller mock writes its element through it, `readInertiaResponse()` and `guren browser:doctor` read through it instead of their own copies, and the doctor now reports a payload that is not JSON apart from a page that carries none. The browser-tests support template reads `window.__INERTIA_PAGE__`, which the page shell sets from the same element, and parses the element itself when a CSP kept the shell's inline script from running. A legacy `data-page` attribute now also decodes `&#39;` in `readInertiaResponse()`.
+
+### Patch Changes
+
+- Updated dependencies [b8bb897]
+- Updated dependencies [e4707a1]
+- Updated dependencies [fbdf3cd]
+- Updated dependencies [d267cde]
+  - @guren/orm@2.15.0
+
 ## 2.30.0
 
 ### Minor Changes

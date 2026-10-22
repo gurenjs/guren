@@ -1,5 +1,18 @@
 # @guren/plugin-markdown
 
+## 0.4.2
+
+### Patch Changes
+
+- efc72cc: Require sanitize-html 2.18.1 or later, which fixes GHSA-x3q4-9hxx-gx8m, GHSA-374f-7chj-9948 and GHSA-cv27-6wvh-8x7j.
+- Updated dependencies [970ec32]
+- Updated dependencies [c80fffb]
+- Updated dependencies [cef5220]
+- Updated dependencies [5c6f123]
+- Updated dependencies [e4707a1]
+- Updated dependencies [fbdf3cd]
+  - @guren/core@1.25.0
+
 ## 0.4.1
 
 ### Patch Changes

@@ -1,5 +1,0 @@
----
-"@guren/plugin-cloudflare": minor
----
-
-Add `guren cloudflare:init`, which moves an app onto the `cf` backend (RFC 0035 §3). It writes `cloudflare.config.ts` (the `gurenWorker()` spread, named after the package without its scope, with today's `compatibilityDate`), `wrangler.config.ts` (`gurenWranglerBundle()`) and `config/cloudflare.ts`, and adds `.cloudflare/` to `.gitignore`. From an existing `wrangler.jsonc` it carries over the Worker `name`, the `compatibility_date`, the `DB` binding's `database_name` (as `resourceNames.DB` when it differs) and the `OAUTH_KV` namespace (as `mcpOAuth: true`, with its id pinned in `cloudflare.config.ts`). It names every setting cf would no longer read (routes, vars, other bindings and flags), and warns when Durable Objects are declared in any scope, since their storage across the move to `exports` is unconfirmed. A file that exists is left as it is unless `--force`, and nothing is installed; it prints the `bun add -d cf wrangler@latest` and `cloudflare:deploy --plan` steps.
