@@ -44,13 +44,19 @@ const ENV_SCHEMA = `export default {
 
 describe('cloudflare:deploy --plan', () => {
   let root: string
+  // A run inside GitHub Actions reads the workflow file for the serialization check;
+  // the release workflow has no concurrency group, so the runner's env would add a finding.
+  const githubActions = process.env.GITHUB_ACTIONS
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'guren-cf-deploy-'))
+    delete process.env.GITHUB_ACTIONS
   })
 
   afterEach(() => {
     rmSync(root, { recursive: true, force: true })
+    if (githubActions === undefined) delete process.env.GITHUB_ACTIONS
+    else process.env.GITHUB_ACTIONS = githubActions
   })
 
   function options(overrides: Partial<CloudflareDeployOptions> = {}): CloudflareDeployOptions {
