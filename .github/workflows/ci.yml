@@ -237,11 +237,11 @@ jobs:
         # Linux runners as well as on macOS ARM64. oven-sh/bun#34069 (spawnSync
         # loses a child exit, a worker then spins at 100% CPU) is open as of
         # 1.4.2. `--shard` splits the files across jobs instead.
-        bun-version: ['1.4.2', '1.4.3']
+        bun-version: ['1.4.2', '1.4.4']
         # scripts/workflow-shards.test.ts holds this list to 1/n..n/n.
         shard: ['1/3', '2/3', '3/3']
         include:
-          - bun-version: '1.4.3'
+          - bun-version: '1.4.4'
             trial: true
     services:
       redis:
