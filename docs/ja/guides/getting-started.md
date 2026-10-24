@@ -11,7 +11,7 @@
 
 ### 前提条件
 
-- **Bun 1.4.2**。必要なのはこれだけです。
+- **Bun 1.4.4**。必要なのはこれだけです。
 
 ```bash
 curl -fsSL https://bun.sh/install | bash

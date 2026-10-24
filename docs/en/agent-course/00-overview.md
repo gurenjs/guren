@@ -58,7 +58,7 @@ Each stage has a short checklist in its chapter. The checklists are what you tak
 
 ## Before you start
 
-- **[Bun](https://bun.sh) 1.4.2** and **git.** The app uses SQLite, so there is no database server to install.
+- **[Bun](https://bun.sh) 1.4.4** and **git.** The app uses SQLite, so there is no database server to install.
 - **[Claude Code](https://claude.com/claude-code).** The prompts are written for it. The harness also supports Codex, Cursor, Copilot and OpenCode.
 - **TypeScript.** You read the code the agent writes; you rarely write it.
 

@@ -58,7 +58,7 @@ flowchart LR
 
 ## 始める前に
 
-- **[Bun](https://bun.sh) 1.4.2** と **git**。アプリは SQLite を使うため、データベースサーバーを別に用意する必要はありません。
+- **[Bun](https://bun.sh) 1.4.4** と **git**。アプリは SQLite を使うため、データベースサーバーを別に用意する必要はありません。
 - **[Claude Code](https://claude.com/claude-code)**。講座のプロンプトは Claude Code 向けに書いていますが、ハーネス自体は Codex、Cursor、Copilot、OpenCode にも対応しています。
 - **TypeScript**。エージェントが書いたコードを読むために使います。自分で書く場面はあまりありません。
 
