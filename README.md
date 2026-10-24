@@ -65,7 +65,7 @@ Then `bun run codegen` to refresh the types, and `bun run build` when you ship. 
 
 ## Requirements
 
-[Bun](https://bun.sh/) 1.4.2. Docker only if you want PostgreSQL or MySQL instead of SQLite.
+[Bun](https://bun.sh/) 1.4.4. Docker only if you want PostgreSQL or MySQL instead of SQLite.
 
 ## Contributing
 

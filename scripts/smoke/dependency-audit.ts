@@ -24,14 +24,6 @@ interface IgnoredAdvisory {
 
 const IGNORED_ADVISORIES: IgnoredAdvisory[] = [
   {
-    id: 'GHSA-vfj7-8cjw-p6xm',
-    reason:
-      'braces <=3.0.3 stack-exhaustion DoS on deeply nested patterns; no patched release. ' +
-      'The only holder is the root devDependency @changesets/cli, through micromatch and ' +
-      'fast-glob (`bun pm why braces`), matching globs from this repo\'s own config. ' +
-      'Nothing published or scaffolded installs it. Remove once braces ships a fix.',
-  },
-  {
     id: 'GHSA-238p-pmpm-9mq7',
     reason:
       'katex <0.18.2 trust-restriction bypass that needs an existing prototype pollution; low ' +

@@ -725,7 +725,7 @@ The CLI copies the default template, updates metadata, and prompts for a renderi
 It also asks which coding agents to install the [agent harness](./agent-harness.md#choosing-agents) for. Answer with `--agents codex,cursor`, or skip the harness with `--agents none`.
 
 ## Troubleshooting
-- `command not found: bunx`: Your Bun version may be outdated. Install the supported Bun 1.4.2 baseline.
+- `command not found: bunx`: Your Bun version may be outdated. Install the supported Bun 1.4.4 baseline.
 - `Error: Port already in use`: The development server (default port 3333) is occupied. Update `PORT` in `.env` and restart.
 - `Database connection failed`: A new app uses SQLite at `./data/guren.db`, so check `DATABASE_URL` in `.env`. On an app created with `--db postgres` or `--db mysql`, make sure the database is running (`bun run db:up`) and that `DATABASE_URL` points at it.
 

@@ -663,7 +663,7 @@ CLI はデフォルトのテンプレートをコピーし、メタデータを�
 雛形を作るときには、[エージェントハーネス](./agent-harness.md#エージェントを選ぶ)を入れるエージェントを選ぶよう求められます。`--agents codex,cursor` のように指定するか、`--agents none` でハーネスを入れずに済ませられます。
 
 ## トラブルシューティング
-- `command not found: bunx`: Bun が古いのかもしれません。サポートの基準になっている Bun 1.4.2 をインストールしてください。
+- `command not found: bunx`: Bun が古いのかもしれません。サポートの基準になっている Bun 1.4.4 をインストールしてください。
 - `Error: Port already in use`: 開発サーバーのポート(デフォルトは 3333)がほかで使われています。`.env` の `PORT` を変えてから再起動してください。
 - `Database connection failed`: 新しいアプリは SQLite（`./data/guren.db`）を使うので、`.env` の `DATABASE_URL` を確認してください。`--db postgres` や `--db mysql` で作ったアプリでは、データベースが起動していて（`bun run db:up`）、`DATABASE_URL` がそれを指していることを確かめてください。
 
