@@ -32,6 +32,18 @@ class TestController extends Controller {
     const result = this.validateParamsSafe(ParamsSchema)
     return this.json(result)
   }
+
+  async exceptRole() {
+    const result = await this.except('role')
+    return this.json({
+      keys: Object.keys(result),
+      ownProto: Object.hasOwn(result, '__proto__'),
+      hasRole: 'role' in result,
+      hasEmail: 'email' in result,
+      plainPrototype: Object.getPrototypeOf(result) === Object.prototype,
+      assignedRole: Object.assign({}, result).role ?? null,
+    })
+  }
 }
 
 function createApp() {
@@ -53,6 +65,12 @@ function createApp() {
     const ctrl = new TestController()
     ctrl.setContext(c)
     return ctrl.paramsSafe()
+  })
+
+  app.post('/except-role', async (c) => {
+    const ctrl = new TestController()
+    ctrl.setContext(c)
+    return ctrl.exceptRole()
   })
 
   return app
@@ -156,6 +174,62 @@ describe('Controller Safe Validation', () => {
       const json = await res.json()
       expect(json.success).toBe(false)
       expect(json.errors).toBeDefined()
+    })
+  })
+
+  describe('except', () => {
+    // Raw strings: `JSON.stringify({ __proto__: … })` would set the literal's
+    // prototype and never send the key.
+    async function exceptRole(body: string) {
+      const res = await app.request('/except-role', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      })
+      expect(res.status).toBe(200)
+      return res.json()
+    }
+
+    test('removes the excluded keys and keeps the rest', async () => {
+      const json = await exceptRole('{"name":"x","email":"e@example.com","role":"admin"}')
+
+      expect(json).toEqual({
+        keys: ['name', 'email'],
+        ownProto: false,
+        hasRole: false,
+        hasEmail: true,
+        plainPrototype: true,
+        assignedRole: null,
+      })
+    })
+
+    test('keeps an excluded key out when it is nested under __proto__', async () => {
+      const json = await exceptRole('{"name":"x","__proto__":{"role":"admin"}}')
+
+      expect(json).toEqual({
+        keys: ['name'],
+        ownProto: false,
+        hasRole: false,
+        hasEmail: false,
+        plainPrototype: true,
+        assignedRole: null,
+      })
+    })
+
+    test('does not expose another key nested under __proto__', async () => {
+      const json = await exceptRole('{"name":"x","__proto__":{"email":"e@example.com"}}')
+
+      expect(json.keys).toEqual(['name'])
+      expect(json.hasEmail).toBe(false)
+      expect(json.plainPrototype).toBe(true)
+    })
+
+    test('drops a harmless __proto__ key without failing', async () => {
+      const json = await exceptRole('{"name":"x","__proto__":{}}')
+
+      expect(json.keys).toEqual(['name'])
+      expect(json.ownProto).toBe(false)
+      expect(json.plainPrototype).toBe(true)
     })
   })
 })
