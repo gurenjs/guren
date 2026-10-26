@@ -2,9 +2,9 @@ import { describe, expect, it } from 'bun:test'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Hono, type MiddlewareHandler } from 'hono'
-import { ValidationException } from '@guren/core'
+import { AUTH_CONTEXT_KEY, ValidationException } from '@guren/core'
 
-import { throttleLogin, throttlePasswordResetRequest } from '../templates/scaffold/auth/app/Http/Middleware/AuthThrottle'
+import { throttleLogin, throttlePasswordResetRequest, throttleProfileUpdate } from '../templates/scaffold/auth/app/Http/Middleware/AuthThrottle'
 import { AUTH_THROTTLE_TRANSLATIONS } from '../src/lang'
 
 const TEMPLATE = join(import.meta.dir, '../templates/scaffold/auth/app/Http/Middleware/AuthThrottle.ts')
@@ -92,6 +92,75 @@ describe('scaffolded AuthThrottle', () => {
 
     expect(caught()).toBeInstanceOf(ValidationException)
     expect((caught() as ValidationException).getFirstError('message')).toStartWith('Too many login attempts.')
+  })
+
+  describe('throttleProfileUpdate', () => {
+    // Each test signs in as its own user id, since the counts share one store.
+    function profileHarness(userId: number): Harness {
+      const signIn: MiddlewareHandler = async (c, next) => {
+        c.set(AUTH_CONTEXT_KEY as never, { id: async () => userId } as never)
+        await next()
+      }
+      return harness(throttleProfileUpdate, signIn)
+    }
+
+    function update(app: Hono, fields: Record<string, string>, headers: Record<string, string> = {}): Promise<Response> {
+      return Promise.resolve(app.request('/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', ...headers },
+        body: new URLSearchParams({ name: 'Ada', ...fields }).toString(),
+      }))
+    }
+
+    it('answers the sixth current password guess for one user with 429', async () => {
+      const { app } = profileHarness(101)
+
+      for (let attempt = 0; attempt < 5; attempt++) {
+        expect((await update(app, { email: `guess-${attempt}@example.com`, currentPassword: `guess-${attempt}` })).status).toBe(200)
+      }
+
+      expect((await update(app, { email: 'guess-5@example.com', currentPassword: 'guess-5' })).status).toBe(429)
+    })
+
+    it('counts each user separately', async () => {
+      const busy = profileHarness(102)
+      for (let attempt = 0; attempt < 6; attempt++) {
+        await update(busy.app, { currentPassword: 'wrong' })
+      }
+
+      expect((await update(profileHarness(103).app, { currentPassword: 'wrong' })).status).toBe(200)
+    })
+
+    it('does not count a save that carries no current password', async () => {
+      const { app } = profileHarness(104)
+
+      for (let attempt = 0; attempt < 6; attempt++) {
+        expect((await update(app, {})).status).toBe(200)
+        expect((await update(app, { currentPassword: '' })).status).toBe(200)
+      }
+    })
+
+    it('counts a whitespace current password, which the controller verifies', async () => {
+      const { app } = profileHarness(105)
+
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await update(app, { currentPassword: ' ' })
+      }
+
+      expect((await update(app, { currentPassword: ' ' })).status).toBe(429)
+    })
+
+    it('puts the message under currentPassword for an Inertia request', async () => {
+      const { app, caught } = profileHarness(106)
+      const inertia = { 'x-inertia': 'true' }
+
+      for (let attempt = 0; attempt < 6; attempt++) {
+        await update(app, { currentPassword: 'wrong' }, inertia)
+      }
+
+      expect(caught()).toBeInstanceOf(ValidationException)
+      expect((caught() as ValidationException).getFirstError('currentPassword')).toStartWith('Too many requests.')
+    })
   })
 
   it('reads the message from the request translator when the app has one', async () => {
