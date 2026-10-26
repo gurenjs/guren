@@ -6,7 +6,7 @@ on:
       - published
 
 jobs:
-  publish:
+  validate:
     runs-on: ubuntu-latest
     # Measured max 6m30s over 15 releases. Deliberately looser than CI's
     # caps: this job legitimately runs the scaffolding smokes, and a
@@ -39,8 +39,6 @@ jobs:
       REDIS_URL: redis://localhost:6379
     permissions:
       contents: read
-      packages: write
-      id-token: write
 
     steps:
       - name: Checkout repository
@@ -50,8 +48,7 @@ jobs:
       # pull request is tested on — a release gate running a different Bun is a
       # gate a green CI does not predict. `scripts/workflow-bun-version.test.ts`
       # holds every workflow to that.
-      # To test against multiple versions, convert the publish job
-      # into a validate + publish split with a matrix on validate.
+      # To test against multiple versions, add a matrix to this job.
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -125,6 +122,36 @@ jobs:
 
       - name: Run tests
         run: bun run test
+
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # id-token: write belongs to this job only. It lets every step of the job
+    # request an OIDC token for this workflow, the credential npm trusted
+    # publishing accepts, and validate's smokes run dependencies that
+    # `bun install` resolves without a lockfile.
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.4"
+
+      - name: Setup Node for npm publish
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       - name: Publish packages
         env:
