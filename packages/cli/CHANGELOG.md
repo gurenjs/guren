@@ -1,5 +1,15 @@
 # @guren/cli
 
+## 2.32.1
+
+### Patch Changes
+
+- 7825754: Guren is now tested on Bun 1.4.4 as its primary runtime; Bun 1.4.2 keeps a non-blocking CI lane. 1.4.4 fixes the `bun install` and `bunx` regressions that shipped in 1.4.3, and Guren's suite passes on it unchanged. `guren doctor` and `guren upgrade` still judge against Bun 1.4.0.
+- 08e1ebb: `guren make:auth` now scaffolds a profile update that asks for the current password before it changes the account's email or password, so a stolen or unattended session can no longer replace both and lock the owner out. `ProfileUpdateSchema` gains a `currentPassword` field, the profile page a "Current password" input, and `ProfileController.update()` checks it through `auth.guard().validate()` before the email conflict lookup. A save that changes only the name needs no password, including when the stored address differs from the submitted one only in case. An account with no password hash (created through OAuth) can no longer set a password or change its email from the profile page. `--oauth-only` output is unchanged, and apps scaffolded earlier are not modified.
+- 75795a3: `guren make:auth` now throttles `PUT /profile` per signed-in user with `throttleProfileUpdate` from `app/Http/Middleware/AuthThrottle.ts`: five requests carrying a current password per minute, so a stolen session cannot guess the password the profile form asks for before it changes the account's email or password. A save without a current password (a name change) is not counted, and an Inertia request shows the message under the current password field. `--oauth-only` output is unchanged, and apps scaffolded earlier are not modified.
+- Updated dependencies [4340817]
+  - @guren/server@2.31.1
+
 ## 2.32.0
 
 ### Minor Changes
