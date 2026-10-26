@@ -58,7 +58,7 @@ export interface PagePropsMap {
   'Home': { message: string }
   'profile/Edit': {
   profile: { name: string; email: string }
-  errors?: ValidationErrors<'name' | 'email' | 'password'>
+  errors?: ValidationErrors<'name' | 'email' | 'password' | 'currentPassword'>
   status?: string
 }
 }

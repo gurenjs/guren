@@ -1405,10 +1405,15 @@ export default app
       expect(validator).not.toContain('email: z')
       expect(validator).toContain('name: z')
       expect(validator).toContain('password: z')
-      expect(controller).toContain('const { name, password } = await this.validateBody(ProfileUpdateSchema)')
+      expect(controller).toContain('const { name, password, currentPassword } = await this.validateBody(ProfileUpdateSchema)')
       expect(controller).not.toContain('emailChanged')
       expect(controller).not.toContain('Email is already in use.')
       expect(controller).toContain('profile: { name, email: user.email }')
+      // Setting a password from a session alone would let whoever holds it lock the owner out.
+      expect(controller).toContain('if (password) {\n      await this.currentPasswordCheck(user.email, currentPassword)\n    }')
+      expect(controller).toContain("import { Controller, ValidationException } from '@guren/core'")
+      expect(validator).toContain('currentPassword: z')
+      expect(view).toContain("ValidationErrors<'name' | 'password' | 'currentPassword'>")
 
       expect(view).toContain('{profile.email}')
       expect(view).toContain('Managed by your sign-in provider.')
@@ -1419,6 +1424,7 @@ export default app
       expect(view).not.toMatch(/<label[^>]*>\s*Email/)
       expect(view).toContain('id={nameId}')
       expect(view).toContain('id={passwordId}')
+      expect(view).toContain('id={currentPasswordId}')
     } finally {
       await workspace.cleanup()
     }
@@ -1437,7 +1443,7 @@ export default app
       expect(validator).not.toContain('email: z')
       expect(validator).toContain('name: z')
       expect(validator).toContain('password: z')
-      expect(controller).toContain('const { name, password } = await this.validateBody(ProfileUpdateSchema)')
+      expect(controller).toContain('const { name, password, currentPassword } = await this.validateBody(ProfileUpdateSchema)')
       expect(view).toContain('Managed by your sign-in provider.')
     } finally {
       await workspace.cleanup()
@@ -1455,7 +1461,7 @@ export default app
       const { controller, validator, view } = await readProfileScaffold(workspace.dir)
 
       expect(validator).toContain("email('Enter a valid email address.')")
-      expect(controller).toContain('const { name, email, password } = await this.validateBody(ProfileUpdateSchema)')
+      expect(controller).toContain('const { name, email, password, currentPassword } = await this.validateBody(ProfileUpdateSchema)')
       // A replacement address loses the old one's verified status and has to
       // be re-proven before it counts.
       expect(controller).toContain('await User.update({ id: user.id }, data, { set: { emailVerifiedAt: null } })')
@@ -1476,15 +1482,42 @@ export default app
       const { controller, validator, view } = await readProfileScaffold(workspace.dir)
 
       expect(validator).toContain("email('Enter a valid email address.')")
-      expect(controller).toContain('const { name, email, password } = await this.validateBody(ProfileUpdateSchema)')
+      expect(controller).toContain('const { name, email, password, currentPassword } = await this.validateBody(ProfileUpdateSchema)')
       expect(controller).toContain('Email is already in use.')
       expect(view).toContain("form.setData('email'")
       // getByLabel() and screen readers find a field only through this pairing.
-      for (const id of ['nameId', 'emailId', 'passwordId']) {
+      for (const id of ['nameId', 'emailId', 'passwordId', 'currentPasswordId']) {
         expect(view).toContain(`<label htmlFor={${id}}`)
         expect(view).toContain(`id={${id}}`)
       }
       expect(view).not.toMatch(/<label className=/)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('asks for the current password before the profile changes the email or password', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-profile-current-password-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+
+      await makeAuth({ force: true })
+
+      const { controller, validator, view } = await readProfileScaffold(workspace.dir)
+
+      expect(validator).toContain('currentPassword: z')
+      // The schema lowercases `email`, so a stored address differing only in
+      // case must not make a name-only save ask for the password.
+      expect(controller).toContain("const credentialsChanged = email !== user.email.trim().toLowerCase() || password !== ''")
+      expect(controller).toContain('const emailChanged = email !== user.email\n')
+      expect(controller).toContain('this.auth.guard().validate({ email, password: currentPassword })')
+      // Before the conflict lookup, so a session alone cannot probe which addresses are taken.
+      const gate = controller.indexOf('await this.currentPasswordCheck(user.email, currentPassword)')
+      expect(gate).toBeGreaterThan(-1)
+      expect(gate).toBeLessThan(controller.indexOf('await User.where({ email })'))
+      expect(view).toContain("form.setData('currentPassword'")
+      expect(view).toContain('{form.errors.currentPassword}')
     } finally {
       await workspace.cleanup()
     }

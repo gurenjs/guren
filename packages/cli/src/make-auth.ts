@@ -386,10 +386,19 @@ ${serverColumns}      user = await User.create({ name: profile.name ?? email, em
  * OAuthController's collision check would then reject the real owner.
  */
 function buildProviderOwnedEmailProfileControllerTemplate(includePassword: boolean): string {
-  const destructuredFields = includePassword ? '{ name, password }' : '{ name }'
+  const coreImports = includePassword ? 'Controller, ValidationException' : 'Controller'
+  const destructuredFields = includePassword ? '{ name, password, currentPassword }' : '{ name }'
   const updateFields = includePassword ? '{ name, ...(password ? { password } : {}) }' : '{ name }'
+  const passwordGate = includePassword
+    ? `
+    if (password) {
+      await this.currentPasswordCheck(user.email, currentPassword)
+    }
+`
+    : ''
+  const currentPasswordMethod = includePassword ? `\n${CURRENT_PASSWORD_CHECK_METHOD}` : ''
 
-  return `import { Controller } from '@guren/core'
+  return `import { ${coreImports} } from '@guren/core'
 import { User, type UserRecord } from '../../Models/User.js'
 import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'
 import { pages } from '@/.guren/pages.gen'
@@ -417,7 +426,7 @@ export default class ProfileController extends Controller {
 
     // The email belongs to the OAuth provider — it is not editable here.
     const ${destructuredFields} = await this.validateBody(ProfileUpdateSchema)
-
+${passwordGate}
     await User.update({ id: user.id }, ${updateFields})
 
     const refreshed = await User.find(user.id)
@@ -430,9 +439,22 @@ export default class ProfileController extends Controller {
       status: 'Profile updated successfully.',
     }, { title: 'Profile' })
   }
-}
+${currentPasswordMethod}}
 `
 }
+
+const CURRENT_PASSWORD_CHECK_METHOD = `  // A session alone must not rotate the credentials that recover the account.
+  // An account with no password hash (created through OAuth) fails here too.
+  private async currentPasswordCheck(email: string, currentPassword: string): Promise<void> {
+    if (currentPassword === '') {
+      throw ValidationException.withMessages({ currentPassword: 'Enter your current password to make this change.' })
+    }
+    const confirmed = await this.auth.guard().validate({ email, password: currentPassword })
+    if (!confirmed) {
+      throw ValidationException.withMessages({ currentPassword: 'The current password is incorrect.' })
+    }
+  }
+`
 
 function buildProfileControllerTemplate({ includeVerify, includePassword, providerOwnedEmail }: AuthFeatures): string {
   if (providerOwnedEmail) {
@@ -486,7 +508,18 @@ import { sendEmailVerificationMail } from '../../Mail/EmailVerificationMail.js'`
         : 'Profile updated successfully.'`
     : `'Profile updated successfully.'`
 
-  const destructuredFields = includePassword ? '{ name, email, password }' : '{ name, email }'
+  const destructuredFields = includePassword ? '{ name, email, password, currentPassword }' : '{ name, email }'
+  const credentialsGate = includePassword
+    ? `
+    // Normalized as the schema normalizes \`email\`: a stored address differing
+    // only in case or whitespace is the same mailbox, so not a credential change.
+    const credentialsChanged = email !== user.email.trim().toLowerCase() || password !== ''
+    if (credentialsChanged) {
+      await this.currentPasswordCheck(user.email, currentPassword)
+    }
+`
+    : ''
+  const currentPasswordMethod = includePassword ? `\n${CURRENT_PASSWORD_CHECK_METHOD}` : ''
 
   return `import { ${coreImports} } from '@guren/core'
 import { User, type UserRecord } from '../../Models/User.js'
@@ -516,7 +549,7 @@ export default class ProfileController extends Controller {
 
     const ${destructuredFields} = await this.validateBody(ProfileUpdateSchema)
     const emailChanged = email !== user.email
-
+${credentialsGate}
     if (emailChanged) {
       const existing = await User.where({ email })
       const conflict = existing.find((candidate) => candidate.id !== user.id)
@@ -537,7 +570,7 @@ ${verifyResend}
       status: ${statusMessage},
     }, { title: 'Profile' })
   }
-}
+${currentPasswordMethod}}
 `
 }
 
@@ -591,7 +624,12 @@ function buildProfileValidatorTemplate({ includePassword, providerOwnedEmail }: 
     .trim()
     .optional()
     .transform((value) => value ?? '')
-    .refine((value) => value === '' || value.length >= 8, 'Password must be at least 8 characters.'),`
+    .refine((value) => value === '' || value.length >= 8, 'Password must be at least 8 characters.'),
+  // Untrimmed, as LoginSchema reads it: it is checked against the stored hash.
+  currentPassword: z
+    .string()
+    .optional()
+    .transform((value) => value ?? ''),`
     : ''
 
   return `import { z } from 'zod'
@@ -944,10 +982,10 @@ ${buildOAuthButtonsTemplate(oauthProviders)}
 function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthFeatures): string {
   const errorFields = providerOwnedEmail
     ? includePassword
-      ? `'name' | 'password'`
+      ? `'name' | 'password' | 'currentPassword'`
       : `'name'`
     : includePassword
-      ? `'name' | 'email' | 'password'`
+      ? `'name' | 'email' | 'password' | 'currentPassword'`
       : `'name' | 'email'`
   const emailFormField = providerOwnedEmail
     ? ''
@@ -982,12 +1020,17 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
           </div>`
   const passwordFormField = includePassword
     ? `
-  password: string`
+  password: string
+  currentPassword: string`
     : ''
   const passwordFormValue = includePassword
     ? `
-    password: '',`
+    password: '',
+    currentPassword: '',`
     : ''
+  const currentPasswordHint = providerOwnedEmail
+    ? 'Required to set a new password.'
+    : 'Required to change your email or password.'
   const passwordInput = includePassword
     ? `
           <div>
@@ -1003,6 +1046,21 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
             />
             {form.errors.password ? <p className="mt-1 text-sm text-g-danger">{form.errors.password}</p> : null}
           </div>
+
+          <div>
+            <label htmlFor={currentPasswordId} className="${FIELD_LABEL_CLASS}">
+              Current password
+            </label>
+            <input
+              id={currentPasswordId}
+              type="password"
+              value={form.data.currentPassword}
+              onChange={(event) => form.setData('currentPassword', event.target.value)}
+              className="mt-1 ${FORM_INPUT_CLASS}"
+            />
+            <p className="mt-1 text-xs text-g-muted">${currentPasswordHint}</p>
+            {form.errors.currentPassword ? <p className="mt-1 text-sm text-g-danger">{form.errors.currentPassword}</p> : null}
+          </div>
 `
     : ''
   const emailIdDeclaration = providerOwnedEmail
@@ -1011,7 +1069,8 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
   const emailId = useId()`
   const passwordIdDeclaration = includePassword
     ? `
-  const passwordId = useId()`
+  const passwordId = useId()
+  const currentPasswordId = useId()`
     : ''
   const description = includePassword
     ? 'Update your account details and password.'
