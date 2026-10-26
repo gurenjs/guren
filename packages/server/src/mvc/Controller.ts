@@ -450,13 +450,13 @@ export class Controller {
   protected async except(...keys: string[]): Promise<Record<string, unknown>> {
     const body = await this.getBody()
     const excluded = new Set(keys)
-    const result: Record<string, unknown> = {}
-    for (const [key, value] of Object.entries(body)) {
-      if (!excluded.has(key)) {
-        result[key] = value
-      }
-    }
-    return result
+    // `JSON.parse` keeps `__proto__` as an own key. Assigned, it re-parents the
+    // result onto the sender's object, past the exclusion list; kept as an own
+    // key, the next `[[Set]]` of it (`Object.assign`, drizzle's insert builder)
+    // does the same.
+    return Object.fromEntries(
+      Object.entries(body).filter(([key]) => key !== '__proto__' && !excluded.has(key)),
+    )
   }
 
   /** Check if a key exists in the request body. */
