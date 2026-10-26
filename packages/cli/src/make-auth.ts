@@ -1213,7 +1213,9 @@ function buildRoutesTemplate({
   const throttles = [
     ...(includePassword ? ['throttleLogin'] : []),
     ...(includeExtras ? ['throttleRegistration', 'throttlePasswordResetRequest'] : []),
+    ...(includePassword ? ['throttleProfileUpdate'] : []),
   ]
+  const profileUpdateThrottle = includePassword ? ', throttleProfileUpdate' : ''
   const throttleImport = throttles.length > 0
     ? `\nimport { ${throttles.join(', ')} } from '../app/Http/Middleware/AuthThrottle.js'`
     : ''
@@ -1229,7 +1231,7 @@ export function registerAuthRoutes(router: Router): void {
 ${registerRoutes}${resetRoutes}${verifyRoutes}${oauthRoutes}
   router.get('/dashboard', [DashboardController, 'index'], ${dashboardMiddleware}).name('dashboard')
   router.get('/profile', [ProfileController, 'edit'], requireAuthenticated({ redirectTo: '/login' })).name('profile.edit')
-  router.put('/profile', [ProfileController, 'update'], requireAuthenticated({ redirectTo: '/login' })).name('profile.update')
+  router.put('/profile', [ProfileController, 'update'], requireAuthenticated({ redirectTo: '/login' })${profileUpdateThrottle}).name('profile.update')
 }
 `
 }

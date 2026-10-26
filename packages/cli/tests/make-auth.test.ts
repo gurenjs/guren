@@ -128,10 +128,11 @@ export function registerWebRoutes(router: Router): void {
       expect(authRoutes).toContain("router.post('/forgot-password'")
       expect(authRoutes).toContain("router.get('/reset-password'")
       expect(authRoutes).toContain("router.post('/reset-password'")
-      expect(authRoutes).toContain("import { throttleLogin, throttleRegistration, throttlePasswordResetRequest } from '../app/Http/Middleware/AuthThrottle.js'")
+      expect(authRoutes).toContain("import { throttleLogin, throttleRegistration, throttlePasswordResetRequest, throttleProfileUpdate } from '../app/Http/Middleware/AuthThrottle.js'")
       expect(authRoutes).toContain("requireGuest({ redirectTo: '/dashboard' }), throttleLogin).name('login.store')")
       expect(authRoutes).toContain("requireGuest({ redirectTo: '/dashboard' }), throttleRegistration).name('register.store')")
       expect(authRoutes).toContain("requireGuest({ redirectTo: '/dashboard' }), throttlePasswordResetRequest).name('forgot-password.store')")
+      expect(authRoutes).toContain("requireAuthenticated({ redirectTo: '/login' }), throttleProfileUpdate).name('profile.update')")
       expect(JSON.parse(await readFile(join(workspace.dir, 'lang/en/auth.json'), 'utf8'))).toHaveProperty('throttle')
 
       // Emailed links must never be built from the request URL: it comes from
@@ -282,7 +283,7 @@ export type AppSchema = typeof schema
       expect(authRoutes).not.toContain('ForgotPasswordController')
       expect(authRoutes).not.toContain("router.get('/register'")
       expect(authRoutes).not.toContain("router.get('/forgot-password'")
-      expect(authRoutes).toContain("import { throttleLogin } from '../app/Http/Middleware/AuthThrottle.js'")
+      expect(authRoutes).toContain("import { throttleLogin, throttleProfileUpdate } from '../app/Http/Middleware/AuthThrottle.js'")
 
       const loginPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'), 'utf8')
       expect(loginPage).not.toContain('href="/register"')
