@@ -458,7 +458,7 @@ describe('PostController', () => {
   describe('edit()', () => {
     it('returns edit form with post data', async () => {
       mockFindOrFail.mockResolvedValue(samplePost)
-      const auth = createAuthStub()
+      const auth = createAuthStub({ id: samplePost.authorId, name: 'John Doe' })
       const ctx = createControllerContext('http://blog.test/posts/1/edit', {
         headers: { 'X-Inertia': 'true' },
       }, {
@@ -475,6 +475,22 @@ describe('PostController', () => {
       expect(payload.component).toBe('posts/Edit')
       expect(payload.props.post).toBeDefined()
       expect(payload.props.postId).toBe(1)
+    })
+
+    it('returns 403 when the requester is not the author', async () => {
+      mockFindOrFail.mockResolvedValue(samplePost)
+      const auth = createAuthStub({ id: samplePost.authorId + 1, name: 'Someone Else' })
+      const ctx = createControllerContext('http://blog.test/posts/1/edit', {
+        headers: { 'X-Inertia': 'true' },
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
+      }) as unknown as Context
+      setRouteParams(ctx, { id: '1' })
+
+      const controller = createControllerWithAuth(PostController, auth, ctx)
+      await expect(controller.edit()).rejects.toMatchObject({ statusCode: 403 })
+      expect(mockWithAttachments).not.toHaveBeenCalled()
     })
 
     it('returns 404 for non-existent post', async () => {
@@ -497,7 +513,7 @@ describe('PostController', () => {
     it('updates post and redirects', async () => {
       mockFindOrFail.mockResolvedValue(samplePost)
       mockUpdate.mockResolvedValue(samplePost)
-      const auth = createAuthStub()
+      const auth = createAuthStub({ id: samplePost.authorId, name: 'John Doe' })
       const ctx = createControllerContext('http://blog.test/posts/1', {
         method: 'PUT',
         body: JSON.stringify({ title: 'Updated Title', excerpt: 'Updated excerpt', body: 'Updated body' }),
@@ -526,7 +542,7 @@ describe('PostController', () => {
       mockFindOrFail.mockResolvedValue(samplePost)
       mockUpdate.mockResolvedValue(samplePost)
       mockAttach.mockResolvedValue({ id: '01ARZ3NDEKTSV4RRFFQ69G5FAV' })
-      const auth = createAuthStub()
+      const auth = createAuthStub({ id: samplePost.authorId, name: 'John Doe' })
 
       const formData = new FormData()
       formData.append('title', 'Updated Title')
@@ -549,6 +565,33 @@ describe('PostController', () => {
 
       expect(response.status).toBe(303)
       expect(mockAttach).toHaveBeenCalledWith(1, 'cover', expect.any(File))
+    })
+
+    it('returns 403 when the requester is not the author, leaving the post and its cover untouched', async () => {
+      mockFindOrFail.mockResolvedValue(samplePost)
+      const auth = createAuthStub({ id: samplePost.authorId + 1, name: 'Someone Else' })
+
+      const formData = new FormData()
+      formData.append('title', 'Updated Title')
+      formData.append('excerpt', 'Updated excerpt')
+      formData.append('body', 'Updated body')
+      formData.append('cover', new File([new Uint8Array([137, 80, 78, 71])], 'new-cover.png', { type: 'image/png' }))
+
+      const ctx = createControllerContext('http://blog.test/posts/1', {
+        method: 'PUT',
+        body: formData,
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
+        ...updateInput,
+      }) as unknown as Context
+      setRouteParams(ctx, { id: '1' })
+
+      const controller = createControllerWithAuth(PostController, auth, ctx)
+      await expect(controller.update()).rejects.toMatchObject({ statusCode: 403 })
+      expect(mockUpdate).not.toHaveBeenCalled()
+      expect(mockInvalidatePost).not.toHaveBeenCalled()
+      expect(mockAttach).not.toHaveBeenCalled()
     })
 
     it('returns 404 for non-existent post', async () => {

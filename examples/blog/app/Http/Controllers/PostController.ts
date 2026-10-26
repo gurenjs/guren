@@ -29,6 +29,13 @@ export default class PostController extends Controller {
     return new PostCacheService(this.make('cache'))
   }
 
+  async #requireAuthor(post: BoundPost, message: string): Promise<void> {
+    const authUser = await this.auth.userOrFail<UserRecord>()
+    if (post.authorId !== authUser.id) {
+      throw new HttpException(403, message)
+    }
+  }
+
   async index(): Promise<InertiaResponse<'posts/Index', PostsIndexInertiaProps> | Response> {
     const { page } = this.validateQuery(PageQuerySchema)
     const requestedPage = page ?? 1
@@ -82,6 +89,7 @@ export default class PostController extends Controller {
   async edit(): Promise<InertiaResponse<'posts/Edit', PostEditInertiaProps> | Response> {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id) as BoundPost
+    await this.#requireAuthor(post, 'You can only edit your own posts.')
     const formPost = PostFormSchema.parse(post)
     const [withCover] = await Post.withAttachments([post], ['cover'])
 
@@ -95,6 +103,7 @@ export default class PostController extends Controller {
   async update(): Promise<Response> {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id) as BoundPost
+    await this.#requireAuthor(post, 'You can only edit your own posts.')
     const { body: data } = this.validated(['posts.update', 'posts.patch'])
 
     await Post.update({ id: post.id }, data)
@@ -117,11 +126,7 @@ export default class PostController extends Controller {
   async destroy(): Promise<Response> {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id) as BoundPost
-
-    const authUser = await this.auth.userOrFail<UserRecord>()
-    if (post.authorId !== authUser.id) {
-      throw new HttpException(403, 'You can only delete your own posts.')
-    }
+    await this.#requireAuthor(post, 'You can only delete your own posts.')
 
     // The polymorphic attachable pair cannot carry a foreign key, so there is
     // no database cascade — purge explicitly, objects first, rows after.
