@@ -182,6 +182,14 @@ shows every step by task with its last `plan:verify` outcome, the step
 `plan:next` and `plan:verify` print that path, so an agent can hand it over when
 the next decision is yours.
 
+**Review this plan** on that page opens `/_guren/plans/<slug>/review`, the page
+`plan:render` wrote, served so that each verdict, comment and answer is saved to
+`.guren/plans/<slug>.feedback.json` as you make it. The plan page then counts
+the saved review and gives you the message to send the agent; `plan:revise`
+applies the file when it is run without `--feedback`. That route is the Dev
+Center's one write: it takes the review document from the page's own origin,
+for the plan as it stands, and runs no command. Approving stays `plan:approve`.
+
 The plan views read the plan files, their approvals and decision logs, and
 `.guren/plans/` only, the same data as the `guren_get_plans` MCP tool. They run
 no command and import nothing from the application, so a step that `plan:next`

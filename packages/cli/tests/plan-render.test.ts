@@ -296,7 +296,8 @@ describe('the plan template', () => {
     // A stylesheet reaches the network through `url()`, which no attribute pattern sees.
     // Guren UI's own sheet loads its fonts that way, so this is the copy-paste to catch.
     expect(source).not.toMatch(/url\(\s*["']?(https?:)?\/\//)
-    expect(source).not.toContain('fetch(')
+    // Only the Dev Center's review (served.ts) calls a server, and the policy above has no connect-src for it anywhere else.
+    expect(modules.replace(planPageModule('served.ts'), '')).not.toContain('fetch(')
     expect(source).not.toContain('XMLHttpRequest')
     expect(source).not.toMatch(/<script[^>]*\ssrc=|<link\b|\bimport\s*\(/)
   })

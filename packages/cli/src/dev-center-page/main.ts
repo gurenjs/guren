@@ -255,12 +255,12 @@ async function loadPlan(slug: string): Promise<void> {
       body.append(text('p', meta, 'lede mono'), attentionBox(planAttention(plan)))
       // Shown apart from the attention box, which a draft's or an edited plan's approval outranks.
       if (plan.unreadable?.length) body.append(card('Records', ...plan.unreadable.map((reason) => text('p', reason, 'warning'))))
+      body.append(reviewCard(plan))
       const steps = stepsByTask(plan).flatMap((group) => [text('h3', group.task), ...group.steps.map(stepRow)])
       body.append(card('Steps', ...progress(plan), ...(steps.length ? steps : [empty('No steps', 'The plan derives no steps.')])))
       if (plan.waivers.length) {
         body.append(card('Waivers', ...plan.waivers.map((waiver) => text('p', `${waiver.elementId}: ${waiver.reason} (${byline(waiver.at, waiver.by)})`, 'meta'))))
       }
-      body.append(reviewCard(plan))
       body.append(card('Commands', text('p', 'What the records say comes next, then the full status:', 'meta'), ...[...plan.next, plan.status].map(commandRow)))
     }
   } catch (error) {
