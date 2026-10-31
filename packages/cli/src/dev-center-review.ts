@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises'
 
 import { CliError, formatSchemaIssues } from './cli-error'
 import type { ReviewRoute } from './dev-center-links'
-import { toPosixRelative } from './discovery'
+import { relativeUnreadableDirs, toPosixRelative } from './discovery'
 import { escapeHtml } from './docs-render'
 import { planCommand } from './docs-viewer-plans'
 import { discoverPlanFiles } from './plan-check'
@@ -33,6 +33,8 @@ function problem(status: number, code: string, message: string): Response {
 /** The plan a slug names. Throws the response for none or for two, which the handler returns. */
 async function locate(cwd: string, slug: string): Promise<{ path: string; file: string; digest: string }> {
   const discovery = await discoverPlanFiles(cwd)
+  // A plan of this slug may sit in a directory that would not list, so the one found is not known to be the only one.
+  if (discovery.unreadable.length > 0) throw problem(503, 'unreadable', `${relativeUnreadableDirs(cwd, discovery.unreadable).map(({ dir }) => dir).join(', ')} could not be listed, so this plan is not known to be the only one of its name.`)
   const shared = discovery.sharedSlugs.get(slug)
   if (shared) throw problem(409, 'shared-slug', `${shared.length} plans share this name, so feedback could reach the wrong one; rename one of them.`)
   const path = discovery.files.find((file) => planSlug(file) === slug)

@@ -84,27 +84,44 @@ async function canonicalPath(path: string): Promise<string> {
   return realpath(path).catch(() => resolve(path))
 }
 
-/**
- * The discovered plans other than `planPath` whose slug is its own, app-relative. A plan outside
- * the discovered places still shares a state file with a discovered plan of its slug.
- */
-export async function plansSharingSlug(appRoot: string, planPath: string): Promise<string[]> {
+export interface PlansSharingSlug {
+  /** The discovered plans other than `planPath` whose slug is its own, app-relative. */
+  others: string[]
+  /** Directories discovery could not list, app-relative: a plan of the same slug may sit in one. */
+  unreadable: Array<{ dir: string; reason: string }>
+}
+
+/** A plan outside the discovered places still shares a state file with a discovered plan of its slug. */
+export async function plansSharingSlug(appRoot: string, planPath: string): Promise<PlansSharingSlug> {
   const slug = planSlug(planPath)
-  const candidates = (await discoverPlanFiles(appRoot)).files.filter((file) => planSlug(file) === slug)
-  if (candidates.length === 0) return []
+  const discovery = await discoverPlanFiles(appRoot)
+  const unreadable = relativeUnreadableDirs(appRoot, discovery.unreadable)
+  const candidates = discovery.files.filter((file) => planSlug(file) === slug)
+  if (candidates.length === 0) return { others: [], unreadable }
   const own = await canonicalPath(planPath)
   const others: string[] = []
   for (const file of candidates) if ((await canonicalPath(file)) !== own) others.push(toPosixRelative(appRoot, file))
-  return others
+  return { others, unreadable }
 }
 
-/** Refuses a plan whose state, closing document or test directory another discovered plan's would overwrite. */
+/** Why a plan's slug-keyed files are not its own to write, or `undefined` once discovery read every place a plan could be and found no other. */
+export function sharedSlugReason(planPath: string, sharing: PlansSharingSlug): string | undefined {
+  const slug = planSlug(planPath)
+  if (sharing.others.length > 0) return `${planPath} shares the slug "${slug}" with ${sharing.others.join(', ')}`
+  if (sharing.unreadable.length > 0) {
+    const dirs = sharing.unreadable.map(({ dir, reason }) => `${dir} (${reason})`).join(', ')
+    return `no other plan named "${slug}" can be ruled out, since ${dirs} could not be listed`
+  }
+  return undefined
+}
+
+/** Refuses a plan whose state, closing document or test directory another discovered plan's would overwrite, or may. */
 export async function refuseSharedPlanSlug(appRoot: string, planPath: string, consequence: string): Promise<void> {
-  const others = await plansSharingSlug(appRoot, planPath)
-  if (others.length === 0) return
+  const reason = sharedSlugReason(planPath, await plansSharingSlug(appRoot, planPath))
+  if (reason === undefined) return
   const slug = planSlug(planPath)
   throw new CliError(
-    `${planPath} shares the slug "${slug}" with ${others.join(', ')}, so ${consequence}: both keep their step records in .guren/plans/${slug}.state.json and close into docs/plans/${slug}.md, and each run overwrites the other's. Rename all but one plan file (or its directory); guren check --plan lists every shared slug.`,
+    `${reason}, so ${consequence}: plans of one slug keep their step records in .guren/plans/${slug}.state.json and close into docs/plans/${slug}.md, and each run overwrites the other's. Rename all but one plan file (or its directory), or fix the directory permissions; guren check --plan lists every shared slug.`,
   )
 }
 

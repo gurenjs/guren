@@ -222,9 +222,9 @@ describe('guren check --plan', () => {
       const dir = await createApp('sharing')
       await writeWorkspaceFiles(dir, { 'docs/plans/comments/plan.json': '{}', 'docs/plans/tags.plan.json': '{}' })
 
-      expect(await plansSharingSlug(dir, join(dir, 'comments.plan.json'))).toEqual(['docs/plans/comments/plan.json'])
-      expect(await plansSharingSlug(dir, `${dir}/docs/plans/../plans/comments/plan.json`)).toEqual(['comments.plan.json'])
-      expect(await plansSharingSlug(dir, join(dir, 'docs/plans/tags.plan.json'))).toEqual([])
+      expect((await plansSharingSlug(dir, join(dir, 'comments.plan.json'))).others).toEqual(['docs/plans/comments/plan.json'])
+      expect((await plansSharingSlug(dir, `${dir}/docs/plans/../plans/comments/plan.json`)).others).toEqual(['comments.plan.json'])
+      expect(await plansSharingSlug(dir, join(dir, 'docs/plans/tags.plan.json'))).toEqual({ others: [], unreadable: [] })
     })
 
     test('should count a plan outside the discovered places, whose state file a discovered plan shares', async () => {
@@ -232,12 +232,28 @@ describe('guren check --plan', () => {
       await writeWorkspaceFiles(dir, { 'drafts/comments.plan.json': '{}' })
       const outside = join(dir, 'drafts/comments.plan.json')
 
-      expect(await plansSharingSlug(dir, outside)).toEqual(['comments.plan.json'])
+      expect((await plansSharingSlug(dir, outside)).others).toEqual(['comments.plan.json'])
       await expect(refuseSharedPlanSlug(dir, outside, 'nothing is done')).rejects.toThrow(
-        `${outside} shares the slug "comments" with comments.plan.json, so nothing is done: both keep their step records in .guren/plans/comments.state.json`,
+        `${outside} shares the slug "comments" with comments.plan.json, so nothing is done: plans of one slug keep their step records in .guren/plans/comments.state.json`,
       )
       await rm(join(dir, 'comments.plan.json'))
       await refuseSharedPlanSlug(dir, outside, 'nothing is done')
+    })
+
+    test.skipIf(!CAN_DENY_FILE_READS)('should refuse when a directory that may hold a plan of the slug will not list', async () => {
+      const dir = await createApp('sharing-unlisted')
+      await writeWorkspaceFiles(dir, { 'docs/plans/comments/plan.json': '{}' })
+      await chmod(join(dir, 'docs/plans/comments'), 0o000)
+      try {
+        const sharing = await plansSharingSlug(dir, join(dir, 'comments.plan.json'))
+        expect(sharing.others).toEqual([])
+        expect(sharing.unreadable.map(({ dir: unlisted }) => unlisted)).toEqual(['docs/plans/comments'])
+        await expect(refuseSharedPlanSlug(dir, join(dir, 'comments.plan.json'), 'nothing is done')).rejects.toThrow(
+          'no other plan named "comments" can be ruled out, since docs/plans/comments (',
+        )
+      } finally {
+        await chmod(join(dir, 'docs/plans/comments'), 0o755)
+      }
     })
   })
 
