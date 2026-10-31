@@ -122,8 +122,12 @@ function viewCase(entry: BrowserMapView, options: SpecOptions): SpecCase {
   ])
 }
 
-/** One spec per approved plan with views: each view's form labels and action names, found on the page that renders it. */
-export function buildPlanSpecs(map: BrowserMap, options: SpecOptions): ScaffoldFileEntry[] {
+/**
+ * One spec per approved plan with views: each view's form labels and action names, found on the page
+ * that renders it. `sharedSlugs` is `PlanDiscovery.sharedSlugs` with app-relative files; a plan whose
+ * slug another plan shares, approved or not, refuses, since its spec is named by that slug.
+ */
+export function buildPlanSpecs(map: BrowserMap, options: SpecOptions, sharedSlugs: ReadonlyMap<string, readonly string[]>): ScaffoldFileEntry[] {
   const views = [...map.features.flatMap((feature) => feature.views), ...map.unplacedViews].filter((entry) => entry.view.change.kind !== 'drop')
   const byPlan = new Map<string, BrowserMapView[]>()
   for (const entry of views) {
@@ -131,12 +135,10 @@ export function buildPlanSpecs(map: BrowserMap, options: SpecOptions): ScaffoldF
     if (list) list.push(entry)
     else byPlan.set(entry.plan, [entry])
   }
-  const bySlug = new Map<string, string>()
   return [...byPlan.keys()].sort(compareStrings).map((plan) => {
     const slug = planSlug(plan)
-    const other = bySlug.get(slug)
-    if (other) throw new CliError(`${other} and ${plan} share the slug ${slug}, so their browser specs would be one file; rename one plan (guren check --plan reports this too).`)
-    bySlug.set(slug, plan)
+    const shared = sharedSlugs.get(slug)
+    if (shared) throw new CliError(`${shared.join(', ')} share the slug ${slug}, so ${plan}'s browser spec would be named for more than one plan; rename all but one (guren check --plan reports this too).`)
     const cases = [...byPlan.get(plan)!].sort((a, b) => compareStrings(a.view.id, b.view.id)).map((entry) => viewCase(entry, options))
     return { path: `${GENERATED_SPECS_DIR}/plans/${slug}.browser.ts`, contents: spec(cases, '../../support') }
   })

@@ -96,7 +96,9 @@ async function generatedSpecs(cwd: string, map: BrowserMap, planned: SpecOptions
     return { outputs: new Map(), onDisk: new Map(), held: 'the browser map is incomplete or a plan could not be read' }
   }
   const options = planned ?? { signIn: await pathExists(join(cwd, BROWSER_TESTS_SETUP)) }
-  const outputs = new Map([[SMOKE_SPEC_FILE, buildSmokeSpec(map, options)], ...buildPlanSpecs(map, options).map((entry): [string, string] => [entry.path, entry.contents])])
+  const discovery = await discoverPlanFiles(cwd)
+  const sharedSlugs = new Map([...discovery.sharedSlugs].map(([slug, files]) => [slug, files.map((file) => toPosixRelative(cwd, file))]))
+  const outputs = new Map([[SMOKE_SPEC_FILE, buildSmokeSpec(map, options)], ...buildPlanSpecs(map, options, sharedSlugs).map((entry): [string, string] => [entry.path, entry.contents])])
   const onDisk = new Map([...await readExisting(cwd, GENERATED_SPECS_DIR, '.browser.ts'), ...await readExisting(cwd, `${GENERATED_SPECS_DIR}/plans`, '.browser.ts')])
   return { outputs, onDisk }
 }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { readFile } from 'node:fs/promises'
+import { chmod, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { createDevCenterHandler } from '../src/dev-center'
@@ -8,7 +8,7 @@ import { readPlanFile } from '../src/plan-render'
 import { planDigest } from '../src/plan/identity'
 import { renderPlanHtml } from '../src/plan/render'
 import { readSavedPlanFeedback, writeSavedPlanFeedback } from '../src/plan/saved-feedback'
-import { createTempWorkspace, writeWorkspaceFiles, type TempWorkspace } from './helpers'
+import { CAN_DENY_FILE_READS, createTempWorkspace, writeWorkspaceFiles, type TempWorkspace } from './helpers'
 import { loadCommentsPlan } from './plan-fixture'
 import { planPageModule } from './plan-page-dom'
 
@@ -88,13 +88,32 @@ test('feedback is refused from another origin, in another type, off its schema, 
 test('feedback refuses a slug two plans share, and the review takes only its own methods', async () => {
   await writeSavedPlanFeedback(workspace.dir, 'comments', digest, { answers: [], elements: [] })
   await writeWorkspaceFiles(workspace.dir, { 'docs/plans/comments/plan.json': JSON.stringify(loadCommentsPlan()) })
-  expect((await post({ planDigest: digest, feedback })).status).toBe(409)
+  const saved = await post({ planDigest: digest, feedback })
+  expect(saved.status).toBe(409)
+  expect(await saved.json()).toMatchObject({ error: { code: 'shared-slug', message: expect.stringContaining('2 plans share this name') } })
+  expect((await get('/_guren/plans/comments/review')).status).toBe(409)
+  expect((await get('/_guren/plans/comments/feedback')).status).toBe(409)
   // Neither plan is credited with a file that could belong to the other.
   const overview = await (await get('/_guren/plans.json')).json() as { plans: Array<{ feedback?: unknown }> }
   expect(overview.plans.map((plan) => plan.feedback)).toEqual([undefined, undefined])
   const put = await handler().fetch(new Request(`${ORIGIN}/_guren/plans/comments/review`, { method: 'POST' }))
   expect(put.status).toBe(405)
   expect(put.headers.get('allow')).toBe('GET')
+})
+
+test.skipIf(!CAN_DENY_FILE_READS)('feedback refuses while a plans directory will not list, since another plan of the name may sit in it', async () => {
+  await writeWorkspaceFiles(workspace.dir, { 'docs/plans/comments/plan.json': '{}' })
+  const unlisted = join(workspace.dir, 'docs/plans/comments')
+  await chmod(unlisted, 0o000)
+  try {
+    const saved = await post({ planDigest: digest, feedback })
+    expect(saved.status).toBe(503)
+    expect(await saved.json()).toMatchObject({ error: { code: 'unreadable', message: expect.stringContaining('docs/plans/comments could not be listed') } })
+    expect((await get('/_guren/plans/comments/review')).status).toBe(503)
+  } finally {
+    await chmod(unlisted, 0o755)
+  }
+  expect((await readSavedPlanFeedback(workspace.dir, 'comments')).saved).toBeUndefined()
 })
 
 test('the plan overview counts the saved review and says whether it names the plan as it stands', async () => {

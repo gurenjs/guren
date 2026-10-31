@@ -9,17 +9,17 @@
  */
 
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { join } from 'node:path'
 
 import { z } from 'zod'
 
 import { formatSchemaIssues } from '../cli-error'
-import { planFileStem } from './beside'
 import { planDigest } from './identity'
 import { PLAN_VERIFY_COMMANDS } from './tasks'
 
 // What keys a record, exported beside the records so their readers and tests import one module.
 export { planDigest }
+export { planSlug } from './beside'
 
 export const PLAN_STATE_VERSION = 1
 
@@ -154,18 +154,6 @@ export interface PlanStateRead {
   state: PlanState | undefined
   /** Set when a file exists and would not read; `state` is then `undefined`. */
   unreadable?: string
-}
-
-/**
- * The plan file's slug: `comments.plan.json` and `comments.json` are both `comments`, and
- * `docs/plans/comments/plan.json` (the §9 layout) is named by its directory, as its sibling
- * records are. A handle, never an identity: two plans of one slug share a state file and a
- * step-id namespace, so the later run overwrites the earlier one's records.
- */
-export function planSlug(planPath: string): string {
-  const name = basename(planPath)
-  if (name === 'plan.json') return basename(dirname(planPath))
-  return planFileStem(name)
 }
 
 export function planStatePath(appRoot: string, slug: string): string {
