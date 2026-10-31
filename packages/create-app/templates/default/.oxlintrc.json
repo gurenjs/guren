@@ -3,7 +3,7 @@
   // The guren rules ship with @guren/cli: await-async-assertion (a bare
   // `expect(...).rejects` statement can never fail its test), no-nullish-env-default
   // (`process.env.FOO ?? 'x'` keeps a blank `FOO=` as ''), no-unvalidated-env-read
-  // (below), and the comment rules.
+  // and no-raw-color (below), and the comment rules.
   "jsPlugins": ["@guren/cli/oxlint"],
   "ignorePatterns": ["node_modules/**", ".guren/**", "dist/**", "public/build/**"],
   "rules": {
@@ -24,6 +24,13 @@
       // `env` a config definition receives. bin/ and drizzle.config.ts run outside the app.
       "files": ["app/**", "config/**", "routes/**", "src/**", "modules/*/**"],
       "rules": { "guren/no-unvalidated-env-read": "error" }
+    },
+    {
+      // Pages and components style with the Guren UI tokens in resources/css/guren.css
+      // (bg-g-panel, text-g-text, var(--g-accent)), which carry the dark theme; a
+      // palette class or a hex literal does not.
+      "files": ["resources/js/**"],
+      "rules": { "guren/no-raw-color": "error" }
     }
   ]
   // Type-aware rules (typescript/no-floating-promises and friends) need
