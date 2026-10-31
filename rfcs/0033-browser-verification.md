@@ -4,7 +4,7 @@
 **Date:** 2026-10-14
 **Status:** Accepted (2026-10-15; the deciding maintainer asked for implementation to start
 and shortened the standard discussion period.) The amendment in §12 (accessibility checks and
-visual change between runs) is in Discussion from 2026-10-31.
+visual change between runs) was accepted on 2026-10-31.
 
 ## Problem
 
@@ -550,7 +550,7 @@ plan should at least point at the latest run for an id is Open Question 8.
 | M2 | `database` manifest section, `browser:serve`, `browser:doctor`, `browser:record`, **the skill** | §3, §4 and §7 rules hold in fixtures, including `NODE_ENV=test` on the SQLite scaffold and a custom resolver reading `unknown` |
 | M3 | `add browser-tests`, specs from plan views | A scaffolded app with one approved plan gets a spec whose locators resolve on the live page |
 | M4 | Gate decision | Measured flake rate and CI cost on the golden-path smoke decide whether an acceptance may require a browser run |
-| M5 | Accessibility spec and visual change between runs (§12, proposed) | The measurement app has no axe violation under the §12.2 tags before the spec ships; `--close` reports `unchanged`, `changed` and `new` in fixtures and never moves a result |
+| M5 | Accessibility spec and visual change between runs (§12) | The measurement app has no axe violation under the §12.2 tags before the spec ships; `--close` reports `unchanged`, `changed` and `new` in fixtures and never moves a result |
 
 **Amended in implementation:** the skill moved from M1 to M2. Its launch, doctor
 and evidence steps name `browser:serve`, `browser:doctor` and `browser:record`;
@@ -651,7 +651,7 @@ package, and no change to what `verified` means.
 
 ### 12. Amendment after acceptance (2026-10-31): accessibility and visual change
 
-**Proposed; in Discussion.** Guren is gaining design-system features (UI
+**Accepted 2026-10-31.** Guren is gaining design-system features (UI
 components, form fields derived from route contracts, a token stylesheet an app
 can upgrade). A design system holds on real pages only if something looks at
 them, and the browser specs are the one place that does. Two defects the M3
@@ -764,6 +764,17 @@ accessibility field. An agent driving a page live reports an accessibility
 problem through the rule §5 already sets for findings: once an `a11y` test in
 `tests/browser/` fails on it. The skill tells the agent to run `test:browser`
 after changing a page and to report a failing `a11y` test with its rule ids.
+
+**Amended in implementation:**
+- Why the checks are off (the package not in `package.json`, or no
+  `tests/browser/a11y.ts`) is printed by `browser:map` and `add browser-tests`,
+  not written into the index: the index is the same in every app, with or
+  without the blueprint, and the reason is about the install.
+- Before running axe, a test waits for `#app` to hold an element and for the
+  network to go idle, so a client-rendered page is read after it renders.
+- A view whose route a landmark already checks is not checked twice.
+- Both packages are installed in one `bun add -d`, and only the ones the
+  manifest lacks, so a rerun on an app with Playwright adds axe alone.
 
 **Measurement.** The nightly measurement already classifies every test in
 `test:browser`, so the `a11y` tests are measured from the night they ship. They

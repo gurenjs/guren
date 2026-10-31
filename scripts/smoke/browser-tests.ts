@@ -5,6 +5,7 @@
  * Writes `metrics.json` and each start's Playwright report into `GUREN_BROWSER_OUT`, rewriting the
  * metrics after every start. `--aggregate <dir>` reads the metrics of earlier nights instead and
  * reports the streak of clean nights the proposed rule counts. Exits 1 when nothing was measured.
+ * The accessibility tests (RFC 0033 §12.2) are counted as a set of their own, so they never move M4's streak.
  */
 import { appendFile, mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
@@ -32,6 +33,8 @@ const RULE_OF_THREE_MIN = 30
 const CI_SPURIOUS_RATE = 0.018
 /** The rule's cost ceiling for one start, in ms. */
 const MAX_START_MS = 120_000
+/** How `buildA11ySpec()` titles every test it writes; the measurement splits the sets on it. */
+const A11Y_TITLE_PREFIX = 'a11y '
 
 function startCount(): number {
   const raw = process.env.GUREN_BROWSER_STARTS
@@ -181,6 +184,8 @@ interface StartRecord {
   errors: string[]
 }
 
+interface SetSummary { flaky: number; notRun: number; defects: number; clean: boolean }
+
 interface Metrics {
   measuredAt: string
   commit: string | null
@@ -188,15 +193,29 @@ interface Metrics {
   starts: StartRecord[]
   phases: Array<{ phase: string; ms: number }>
   tests: Array<{ test: string; verdict: Verdict } & Tally>
-  summary: { startupFailures: number; flaky: number; notRun: number; defects: number; clean: boolean }
+  /** The set M4 is judged on: every test but the accessibility ones. */
+  summary: { startupFailures: number } & SetSummary
+  /** Absent on nights measured before the accessibility spec existed. */
+  accessibility?: { tests: number } & SetSummary
 }
 
-function summarize(tallies: Map<string, Tally>, starts: readonly StartRecord[]): Pick<Metrics, 'tests' | 'summary'> {
+const isA11yTest = (key: string): boolean => (key.split(' › ').at(-1) ?? '').startsWith(A11Y_TITLE_PREFIX)
+
+function summarize(tallies: Map<string, Tally>, starts: readonly StartRecord[]): Pick<Metrics, 'tests' | 'summary' | 'accessibility'> {
   const tests = [...tallies].map(([test, tally]) => ({ test, verdict: verdictOf(tally), ...tally })).sort((a, b) => a.test.localeCompare(b.test))
-  const count = (verdict: Verdict): number => tests.filter((entry) => entry.verdict === verdict).length
-  const summary = { startupFailures: starts.filter((entry) => !entry.reported).length, flaky: count('flaky'), notRun: count('not-run'), defects: count('defect') }
+  const startupFailures = starts.filter((entry) => !entry.reported).length
   // A defect fails every run the same way, so it says nothing about how reliable a gate would be.
-  return { tests, summary: { ...summary, clean: summary.startupFailures === 0 && summary.flaky === 0 && summary.notRun === 0 } }
+  const setSummary = (set: typeof tests): SetSummary => {
+    const count = (verdict: Verdict): number => set.filter((entry) => entry.verdict === verdict).length
+    const summary = { flaky: count('flaky'), notRun: count('not-run'), defects: count('defect') }
+    return { ...summary, clean: startupFailures === 0 && summary.flaky === 0 && summary.notRun === 0 }
+  }
+  const a11y = tests.filter((entry) => isA11yTest(entry.test))
+  return {
+    tests,
+    summary: { startupFailures, ...setSummary(tests.filter((entry) => !isA11yTest(entry.test))) },
+    ...(a11y.length > 0 ? { accessibility: { tests: a11y.length, ...setSummary(a11y) } } : {}),
+  }
 }
 
 function summaryLines(metrics: Metrics): string[] {
@@ -206,6 +225,9 @@ function summaryLines(metrics: Metrics): string[] {
     '## Browser specs measurement (RFC 0033 M4)',
     '',
     `${metrics.starts.length} cold start(s), no retries, Playwright ${metrics.runner.playwright ?? 'unknown'}. ${summary.clean ? 'Clean' : 'Not clean'}: start-up failures ${summary.startupFailures}, flaky ${summary.flaky}, not run ${summary.notRun}; defects ${summary.defects}.`,
+    ...(metrics.accessibility
+      ? [`Accessibility tests, counted apart (${metrics.accessibility.tests}): ${metrics.accessibility.clean ? 'clean' : 'not clean'}; flaky ${metrics.accessibility.flaky}, not run ${metrics.accessibility.notRun}, defects ${metrics.accessibility.defects}.`]
+      : []),
     costs.length > 0 ? `One start: ${(Math.min(...costs) / 1000).toFixed(1)}-${(Math.max(...costs) / 1000).toFixed(1)} s.` : 'No start produced a report.',
     '',
     '| Phase | Seconds |', '| --- | --- |',
@@ -318,12 +340,17 @@ async function aggregate(dir: string): Promise<void> {
   }
   const coldStarts = nights.slice(0, cleanNights).reduce((total, night) => total + night.starts.length, 0)
   const needed = Math.ceil(3 / CI_SPURIOUS_RATE)
+  // Its own streak, from the first night it was measured: a night before the spec existed ends it.
+  const a11yStreak = nights.findIndex((night) => !night.accessibility?.clean)
+  const a11yCleanNights = a11yStreak === -1 ? nights.length : a11yStreak
+  const a11yStarts = nights.slice(0, a11yCleanNights).reduce((total, night) => total + night.starts.length, 0)
   await writeSummary([
     '## Browser specs measurement across nights (RFC 0033 M4)',
     '',
     `${nights.length} night(s) read. The latest ${cleanNights} in a row are clean (${coldStarts} cold starts with no start-up failure, flake or test left unrun${coldStarts >= RULE_OF_THREE_MIN ? `; by the rule of three a failure rate under ${(300 / coldStarts).toFixed(1)}% at 95% confidence` : ''}).`,
     starts.length > 0 ? `One start, median ${(starts[Math.floor(starts.length / 2)]! / 1000).toFixed(1)} s, slowest ${(starts.at(-1)! / 1000).toFixed(1)} s.` : '',
     `The rule (RFC 0033 §9, adopted provisionally) needs ${needed} clean cold starts in a row, which bounds the rate under the CI baseline of ${(CI_SPURIOUS_RATE * 100).toFixed(1)}%, and every start under ${MAX_START_MS / 1000} s: ${coldStarts >= needed && (starts.at(-1) ?? 0) < MAX_START_MS ? 'met' : 'not met yet'}.`,
+    `The accessibility tests, counted apart (RFC 0033 §12.2): the latest ${a11yCleanNights} night(s) in a row are clean (${a11yStarts} cold starts); they need ${needed} of their own: ${a11yStarts >= needed ? 'met' : 'not met yet'}.`,
     '',
     '| Test | Nights not passing | Verdicts |', '| --- | --- | --- |',
     ...[...failingTests].map(([test, seen]) => `| ${test.replaceAll('|', '\\|')} | ${seen.nights} | ${[...seen.verdicts].join(', ')} |`),

@@ -6,7 +6,8 @@ import { addBrowserTests, BROWSER_TEST_SCRIPT } from '../src/add-browser-tests'
 import { isParameterless, type BrowserFeature, type BrowserMap, type BrowserMapRoute, type BrowserMapView } from '../src/browser-map'
 import { runBrowserMap } from '../src/browser-map-files'
 import {
-  BROWSER_ACCOUNT_EMAIL, BROWSER_SEEDER_FILE, BROWSER_TESTS_CONFIG, buildBrowserSeeder, buildPlanSpecs, buildSmokeSpec, GENERATED_HEADER, SMOKE_SPEC_FILE,
+  A11Y_OPTIONS_FILE, A11Y_SPEC_FILE, BROWSER_ACCOUNT_EMAIL, BROWSER_SEEDER_FILE, BROWSER_TESTS_CONFIG, buildA11ySpec, buildBrowserSeeder, buildPlanSpecs,
+  buildSmokeSpec, GENERATED_HEADER, SMOKE_SPEC_FILE,
 } from '../src/browser-specs'
 import { buildLoginViewTemplate } from '../src/make-auth'
 import type { PlanView } from '../src/plan/schema'
@@ -128,6 +129,43 @@ describe('the plan specs', () => {
   })
 })
 
+describe('the accessibility spec', () => {
+  const plan = 'docs/plans/comments/plan.json'
+  const newComment = route('GET', '/comments/new', ['comments/Create'])
+  const indexView: BrowserMapView = { plan, view: view('posts.index', 'posts/Index'), routes: [route('GET', '/posts', ['posts/Index'])] }
+
+  test('checks each landmark and each view the other specs open, visiting a route once', () => {
+    const create: BrowserMapView = { plan, view: view('comments.create', 'comments/Create'), routes: [newComment] }
+    const source = buildA11ySpec(mapOf([POSTS], [indexView, create]), { signIn: false })
+    expect(source.startsWith(GENERATED_HEADER)).toBe(true)
+    expect(source).toContain("import { expect, test, type Page, type TestInfo } from '@playwright/test'")
+    expect(source).toContain("import { AxeBuilder } from '@axe-core/playwright'")
+    expect(source).toContain("import { a11y } from '../a11y'")
+    expect(source).toContain("const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']")
+    expect(source).toContain("test('a11y posts: GET /posts renders posts/Index', async ({ page }, testInfo) => {")
+    expect(source).toContain("test('a11y view comments.create (comments/Create) on GET /comments/new', async ({ page }, testInfo) => {")
+    expect(source).not.toContain('view posts.index')
+    expect(source.match(/await checkAccessibility\(page, testInfo\)/gu)).toHaveLength(2)
+    expect(source).toContain('expect(violations, ')
+    expect(() => transpiler.transformSync(source)).not.toThrow()
+  })
+
+  test('marks what the smoke spec cannot visit as fixme, for the same reason', () => {
+    const source = buildA11ySpec(mapOf([DASHBOARD, COMMENTS]), { signIn: false })
+    expect(source).toContain("test.fixme('a11y dashboard: GET /dashboard renders Dashboard: needs a signed-in user")
+    expect(source).toContain("test.fixme('a11y comments: every route rendering it takes a path parameter', () => {})")
+    expect(source).not.toContain('@axe-core/playwright')
+    expect(source).not.toContain('checkAccessibility')
+    expect(() => transpiler.transformSync(source)).not.toThrow()
+  })
+
+  test('puts a route requiring a user under the signed-in storage state', () => {
+    const source = buildA11ySpec(mapOf([DASHBOARD]), { signIn: true })
+    expect(source).toContain("  test('a11y dashboard: GET /dashboard renders Dashboard', async ({ page }, testInfo) => {")
+    expect(source).toContain("import { AUTH_FILE, initialComponent } from '../support'")
+  })
+})
+
 describe('the browser account seeder', () => {
   test('writes nothing without the flag browser:serve sets, nor in production', () => {
     const source = buildBrowserSeeder('pg', { name: true, emailVerifiedAt: false })
@@ -192,7 +230,7 @@ describe('guren add browser-tests', () => {
       const result = await addBrowserTests({ install: false, loadMap: async () => mapOf([POSTS]) })
 
       expect(result.signIn).toBe(false)
-      for (const file of [BROWSER_TESTS_CONFIG, 'tests/browser/support.ts']) {
+      for (const file of [BROWSER_TESTS_CONFIG, 'tests/browser/support.ts', A11Y_OPTIONS_FILE]) {
         expect(await readFile(join(workspace.dir, file), 'utf8')).toBe(await template(file))
       }
       expect(await Bun.file(join(workspace.dir, 'tests/browser/auth.setup.ts')).exists()).toBe(false)
@@ -203,6 +241,9 @@ describe('guren add browser-tests', () => {
       for (const entry of ['test-results/', 'playwright-report/', 'tests/browser/.auth/']) expect(gitignore.split('\n')).toContain(entry)
       expect(result.mapped.changed).toContain(SMOKE_SPEC_FILE)
       expect(await readFile(join(workspace.dir, SMOKE_SPEC_FILE), 'utf8')).toBe(buildSmokeSpec(mapOf([POSTS]), { signIn: false }))
+      // Not installed (--no-install), so no accessibility spec that would fail to import.
+      expect(result.mapped.accessibilityOff).toBe('@axe-core/playwright is not in package.json')
+      expect(await Bun.file(join(workspace.dir, A11Y_SPEC_FILE)).exists()).toBe(false)
     } finally {
       await workspace.cleanup()
     }
@@ -284,6 +325,31 @@ describe('browser:map keeps the generated specs', () => {
 
       const check = await runBrowserMap({ cwd: workspace.dir, write: false, map: mapOf([POSTS, DASHBOARD]) })
       expect(check.changed).toContain(SMOKE_SPEC_FILE)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  test('writes the accessibility spec only with axe declared and the options file present, and removes it when either goes', async () => {
+    const workspace = await createTempWorkspace('guren-browser-map-specs-a11y-')
+    try {
+      const withAxe = '{ "name": "app", "devDependencies": { "@axe-core/playwright": "~4.14.0" } }\n'
+      await writeWorkspaceFiles(workspace.dir, { [BROWSER_TESTS_CONFIG]: '// config\n', 'package.json': withAxe })
+      const missingOptions = await runBrowserMap({ cwd: workspace.dir, write: true, map: mapOf([POSTS]) })
+      expect(missingOptions.accessibilityOff).toBe(`${A11Y_OPTIONS_FILE} does not exist`)
+      expect(await Bun.file(join(workspace.dir, A11Y_SPEC_FILE)).exists()).toBe(false)
+
+      await writeWorkspaceFiles(workspace.dir, { [A11Y_OPTIONS_FILE]: await template(A11Y_OPTIONS_FILE) })
+      const on = await runBrowserMap({ cwd: workspace.dir, write: true, map: mapOf([POSTS]) })
+      expect(on.accessibilityOff).toBeUndefined()
+      expect(on.changed).toContain(A11Y_SPEC_FILE)
+      expect(await readFile(join(workspace.dir, A11Y_SPEC_FILE), 'utf8')).toBe(buildA11ySpec(mapOf([POSTS]), { signIn: false }))
+
+      await writeWorkspaceFiles(workspace.dir, { 'package.json': '{ "name": "app" }\n' })
+      const off = await runBrowserMap({ cwd: workspace.dir, write: true, map: mapOf([POSTS]) })
+      expect(off.accessibilityOff).toBe('@axe-core/playwright is not in package.json')
+      expect(off.removed).toEqual([A11Y_SPEC_FILE])
+      expect(await Bun.file(join(workspace.dir, A11Y_SPEC_FILE)).exists()).toBe(false)
     } finally {
       await workspace.cleanup()
     }
