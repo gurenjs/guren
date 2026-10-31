@@ -412,6 +412,13 @@ in the server process, since it reads plan files and `.guren/plans/` only.
 M2 limits stand: one read on open, refresh buttons, no command execution, and
 no held-step judgement, which needs the application read.
 
+The same day the plan review moved here as RFC 0030's served mode:
+`/_guren/plans/<slug>/review` serves the page `plan:render` wrote, and
+`/_guren/plans/<slug>/feedback` saves the person's verdicts, comments and
+answers to `.guren/plans/<slug>.feedback.json`. That route is the Dev Center's
+only write. It checks the `Origin`, the schema and the plan's digest, runs no
+command, and leaves approval to `plan:approve`.
+
 ## M3 graph readers
 
 Toward plan reader convergence, the remaining node kinds and relations adapt
