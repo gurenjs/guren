@@ -33,6 +33,14 @@ const IGNORED_ADVISORIES: IgnoredAdvisory[] = [
       'the web docs and the docs viewer serve mermaid/dist/mermaid.min.js, which inlines its own ' +
       'katex. Remove once a mermaid release depends on katex >=0.18.2.',
   },
+  {
+    id: 'GHSA-g3hv-75wg-m249',
+    reason:
+      'minimatch <11.0.1 globparts DoS; moderate. The only holder is aws-cdk-lib (`bun pm why ' +
+      'minimatch`), an optional peer and devDependency of plugin-lambda, which bundles its own ' +
+      'minimatch (bundledDependencies), so an override does not reach it. aws-cdk-lib 2.275.0 still ' +
+      'requires ^10.2.6. Remove once an aws-cdk-lib release bundles minimatch >=11.0.1.',
+  },
 ]
 
 const ignoredIds = new Set<string>()
