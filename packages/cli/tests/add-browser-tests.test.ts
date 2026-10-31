@@ -248,7 +248,8 @@ describe('guren add browser-tests', () => {
     const workspace = await createTempWorkspace('guren-add-browser-tests-slug-')
     try {
       await seedInertiaApp(workspace.dir)
-      await writeWorkspaceFiles(workspace.dir, { 'package.json': INERTIA_MANIFEST })
+      // The collision is read from the plan files discovery finds, not from the map.
+      await writeWorkspaceFiles(workspace.dir, { 'package.json': INERTIA_MANIFEST, 'comments.plan.json': '{}', 'docs/plans/comments/plan.json': '{}' })
       const shared = ['comments.plan.json', 'docs/plans/comments/plan.json'].map((plan): BrowserMapView => ({ plan, view: view('comments.create', 'comments/Create'), routes: [] }))
       await expect(addBrowserTests({ install: false, loadMap: async () => mapOf([POSTS], shared) })).rejects.toThrow('share the slug comments')
       expect(await readFile(join(workspace.dir, 'package.json'), 'utf8')).toBe(INERTIA_MANIFEST)
