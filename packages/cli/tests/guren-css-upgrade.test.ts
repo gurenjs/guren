@@ -7,21 +7,15 @@ import { judgeTokenSheet, planTokenSheet, readTokenSheet, SHIPPED_UNMARKED_SHEET
 import { loadScaffoldTemplate } from '../src/scaffold-templates'
 import { upgradeCanary } from '../src/upgrade'
 
-const repoRoot = join(import.meta.dir, '../../..')
 const shipped = loadScaffoldTemplate('guren-ui/resources/css/guren.css')
 const OPEN = '/* guren:tokens begin: replaced by guren upgrade */'
 const CLOSE = '/* guren:tokens end */'
 
-/** The sheets released before the markers, from the commits that last changed them. */
-const UNMARKED_RELEASES = [
-  '6fc315695:packages/cli/templates/scaffold/guren-ui/resources/css/guren.css',
-  'a06b28d85:packages/cli/templates/scaffold/guren-ui/resources/css/guren.css',
-]
+/** The sheets released before the markers, copied from the commits named in their file names. */
+const UNMARKED_RELEASES = ['unmarked-6fc315695.css', 'unmarked-a06b28d85.css']
 
-function gitShow(spec: string): string {
-  const git = Bun.spawnSync(['git', 'show', spec], { cwd: repoRoot })
-  if (git.exitCode !== 0) throw new Error(`git show ${spec} exited ${git.exitCode}: ${git.stderr.toString().trim()}`)
-  return git.stdout.toString()
+function unmarkedRelease(name: string): Promise<string> {
+  return readFile(join(import.meta.dir, 'fixtures/guren-ui-sheets', name), 'utf8')
 }
 
 describe('readTokenSheet', () => {
@@ -77,18 +71,19 @@ describe('planTokenSheet', () => {
     expect(planTokenSheet(next, shipped)).toEqual({ kind: 'current' })
   })
 
-  it('adopts every sheet released before the markers', () => {
-    const digests = UNMARKED_RELEASES.map((spec) => {
-      const sheet = gitShow(spec)
+  it('adopts every sheet released before the markers', async () => {
+    const digests: string[] = []
+    for (const name of UNMARKED_RELEASES) {
+      const sheet = await unmarkedRelease(name)
       expect(planTokenSheet(sheet, shipped)).toEqual({ kind: 'adopt', next: shipped })
       expect(planTokenSheet(sheet.replace(/\n/g, '\r\n'), shipped)).toEqual({ kind: 'adopt', next: shipped.replace(/\n/g, '\r\n') })
-      return createHash('sha256').update(sheet).digest('hex')
-    })
+      digests.push(createHash('sha256').update(sheet).digest('hex'))
+    }
     expect(new Set(digests)).toEqual(new Set(SHIPPED_UNMARKED_SHEETS))
   })
 
-  it('does not touch an edited sheet without markers', () => {
-    expect(planTokenSheet(`${gitShow(UNMARKED_RELEASES[1])}.brand {}\n`, shipped)).toEqual({ kind: 'unmarked' })
+  it('does not touch an edited sheet without markers', async () => {
+    expect(planTokenSheet(`${await unmarkedRelease(UNMARKED_RELEASES[1])}.brand {}\n`, shipped)).toEqual({ kind: 'unmarked' })
   })
 
   it('does not touch a sheet whose markers are broken', () => {
