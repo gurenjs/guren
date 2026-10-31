@@ -74,16 +74,34 @@ li{overflow-wrap:anywhere;margin:5px 0}
 .event-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .foot{margin-top:16px;color:var(--g-text-2);font-size:12.5px}
 .rel{margin-top:6px}
+.section-gap{margin-top:40px}
+.plans{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.plan-card{display:block;padding:16px 18px;color:inherit;text-decoration:none}
+a.plan-card:hover{border-color:var(--g-line-strong);background:var(--g-raised)}
+.plan-card .g-card-title{margin:6px 0 4px}
+.attention{display:flex;flex-direction:column;gap:2px;margin-top:10px;padding:10px 12px;border-radius:var(--g-r-ctl);background:var(--g-raised);border-left:3px solid var(--g-line-strong)}
+.attention.person{border-left-color:var(--g-accent);background:var(--g-accent-tint)}
+.attention strong{color:var(--g-heading)}
+.progress{height:6px;margin-top:10px;border-radius:999px;background:var(--g-line);overflow:hidden}
+.progress span{display:block;height:100%;background:var(--g-ok)}
+.g-badge-ok{color:var(--g-ok);background:var(--g-raised)}.g-badge-warn{color:var(--g-warn);background:var(--g-raised)}.g-badge-muted{color:var(--g-muted);background:var(--g-raised)}
+.step{display:grid;grid-template-columns:150px 1fr;gap:12px;padding:10px 0;border-top:1px solid var(--g-line)}
+.step:first-of-type{border-top:0}
+.step .id{overflow-wrap:anywhere}
+.marked{color:var(--g-accent-text);font-weight:700}
+.commands code{display:block;margin:4px 0}
+#plan-body>.g-card,#plan-body>.attention{margin-top:16px}
 .g-card-body>p+p,#errors{margin-top:8px}
 .event-head+.meta{margin-top:4px}
-@media(max-width:700px){.g-topbar{padding:10px 20px}.layout{grid-template-columns:1fr}main{padding:20px}}
+@media(max-width:700px){.g-topbar{padding:10px 20px}.layout,.step{grid-template-columns:1fr}main{padding:20px}}
 </style></head><body>
 <header class="g-topbar"><a class="brand" href="/_guren"><svg viewBox="0 0 299 516" width="13" height="22" fill="none" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M120.853 0C169.647 25.1364 195.255 83.7877 184.353 136.5C175.756 178.065 136.039 208.749 137.372 253.138C138.729 298.251 168.879 330.194 161.353 377.5C181.444 352.982 200.458 332.078 208.353 300.5C214.367 261.839 179.943 229.848 190.898 190.72C194.731 177.22 208.153 147.3 231.353 136.5C218.919 181.573 237.455 211.003 266.353 245C300.243 280.246 308.266 343.188 284.853 386C253.141 442.376 189.378 465.573 149.853 515.5C121.558 476.749 77.5264 459.842 48.8528 424C-12.4118 347.419 -19.5127 245.133 47.3528 169C80.8397 130.872 165.348 59.327 120.853 0Z" fill="url(#flame)"/><defs><linearGradient id="flame" x1="149.117" y1="0" x2="149.117" y2="515.5" gradientUnits="userSpaceOnUse"><stop stop-color="#FF3C28"/><stop offset="1" stop-color="#8B0000"/></linearGradient></defs></svg><b>Guren</b><span>Dev Center</span></a><nav aria-label="Developer tools"><a href="/_guren/docs">Docs &amp; plans</a><a href="/_guren/graph.json">Graph JSON</a></nav></header>
-<main><h1 class="g-title">Application graph</h1><p class="lede">Inspect registered routes and source relationships. Coverage describes what the readers can establish.</p>
+<main><div id="home"><section aria-labelledby="plans-title"><h1 id="plans-title" class="g-title">Plans</h1><p class="lede">Plans not closed at their current hash. The ones waiting on a person come first: an approval, a stall, or a close.</p><div class="toolbar"><button id="refresh-plans" class="g-btn g-btn-secondary" type="button">Refresh plans</button><span id="plans-status" role="status"></span></div><div id="plans" class="plans"></div><ul id="plans-unreadable" class="meta"></ul></section><h2 class="g-title section-gap">Application graph</h2><p class="lede">Inspect registered routes and source relationships. Coverage describes what the readers can establish.</p>
 <div class="toolbar"><button id="refresh" class="g-btn g-btn-secondary" type="button">Refresh graph</button><span id="graph-status" role="status">Ready to read your application.</span></div><p id="snapshot" class="meta"></p>
 <div class="stats" aria-label="Snapshot totals"><div class="g-card g-card-body"><div class="label">symbols</div><div id="stat-symbols" class="value">–</div></div><div class="g-card g-card-body"><div class="label">relationships</div><div id="stat-edges" class="value">–</div></div><div class="g-card g-card-body"><div class="label">unresolved</div><div id="stat-unresolved" class="value">–</div></div><div class="g-card g-card-body"><div class="label">runtime errors</div><div id="stat-errors" class="value">–</div></div></div>
 <div class="layout"><section class="g-card" aria-label="Routes and symbols"><div class="g-card-body"><div class="toolbar tight"><input id="search" class="g-input" type="search" aria-label="Filter symbols" placeholder="Filter by name, file or module"><select id="kind" class="g-select" aria-label="Symbol kind"><option value="route">Routes</option><option value="">All symbols</option><option value="controller">Controllers</option><option value="model">Models</option><option value="page">Pages</option><option value="middleware">Middleware</option><option value="validator">Validators</option><option value="policy">Policies</option><option value="test">Tests</option></select></div><div id="nodes" class="list"></div></div></section><section class="g-card" aria-label="Selected symbol"><div id="detail" class="g-card-body"></div></section></div>
 <section class="g-card wide"><div class="g-card-head"><h2 class="g-card-title">Coverage</h2></div><div class="g-card-body"><div id="coverage"></div><details><summary id="unresolved-title">Unresolved relationships</summary><ul id="unresolved"></ul></details></div></section>
 <section class="g-card wide"><div class="g-card-head"><h2 class="g-card-title">Runtime errors</h2><button id="refresh-errors" class="g-btn g-btn-secondary" type="button">Refresh errors</button></div><div class="g-card-body"><p class="meta">Framework-handled server exceptions retained by this development process. Messages and request values are omitted.</p><p id="error-status" class="meta" role="status"></p><div id="errors"></div></div></section>
-<p class="foot">Enable the existing docs and plan viewer with <code class="mono">GUREN_DOCS=1</code>. Graph reads do not run verification commands.</p>
+<p class="foot">Enable the existing docs and plan viewer with <code class="mono">GUREN_DOCS=1</code>. Graph and plan reads do not run verification commands.</p></div>
+<div id="plan-view" hidden><p class="meta"><a href="/_guren">All plans</a></p><h1 id="plan-title" class="g-title">Plan</h1><div class="toolbar"><button id="refresh-plan" class="g-btn g-btn-secondary" type="button">Refresh plan</button><span id="plan-status" role="status"></span></div><div id="plan-body"></div><p class="foot">Read from the plan files and <code class="mono">.guren/plans/</code> only. A step <code class="mono">plan:next</code> holds because the application changed since approval is reported by <code class="mono">plan:next</code>, not here.</p></div>
 </main><script>__GUREN_DEV_CENTER_SCRIPT__</script></body></html>

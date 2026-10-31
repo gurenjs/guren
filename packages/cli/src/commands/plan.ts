@@ -202,7 +202,7 @@ export const planVerifyCommand = defineCommand({
       step: args.step,
       timeoutMs: seconds === undefined ? undefined : seconds * 1000,
     })
-    console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanVerify(report))
+    console.log(args.json ? JSON.stringify(report, null, 2) : formatPlanVerify(report, args.plan))
     if (args.ci && report.steps.some((step) => step.record.outcome !== 'verified')) markCommandFailed()
   },
 })

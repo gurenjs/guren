@@ -400,6 +400,18 @@ shell has a script-hash CSP, disallows framing, and all Dev Center responses
 use no-store caching. Route filtering and symbol navigation are presentation
 operations over the shared graph, not another parser or verification system.
 
+### Plans in the Dev Center
+
+On 2026-10-31 the maintainer asked for the Dev Center to follow agent-driven
+work, where a person acts at decisions rather than starting from the graph.
+`/_guren` now opens on the open plans, those waiting on a person first, and
+`/_guren/plans/<slug>` shows one plan's steps and records. Both read
+`/_guren/plans.json`, the `guren_get_plans` overview with each plan's slug,
+in the server process, since it reads plan files and `.guren/plans/` only.
+`plan:next` and `plan:verify` print the path so an agent can hand it over. The
+M2 limits stand: one read on open, refresh buttons, no command execution, and
+no held-step judgement, which needs the application read.
+
 ## M3 graph readers
 
 Toward plan reader convergence, the remaining node kinds and relations adapt

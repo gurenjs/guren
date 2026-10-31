@@ -1,0 +1,80 @@
+import type { DevCenterPlans } from '../dev-center-links'
+import type { DocsViewerStepState } from '../docs-viewer-plans'
+
+export type DevCenterPlan = DevCenterPlans['plans'][number]
+
+/** `person`: nothing moves until someone reads the plan and decides. `agent`: the loop can continue on its own. */
+export interface PlanAttention {
+  who: 'person' | 'agent'
+  title: string
+  detail: string
+}
+
+export const STEP_TONE: Record<DocsViewerStepState, 'ok' | 'warn' | 'danger' | 'muted'> = {
+  verified: 'ok',
+  drifted: 'warn',
+  incomplete: 'warn',
+  outdated: 'warn',
+  'waiver-withdrawn': 'warn',
+  failed: 'danger',
+  blocked: 'danger',
+  'not-run': 'muted',
+}
+
+/** Read from the overview alone: a held step needs the application read, which only `plan:next` does. */
+export function planAttention(plan: DevCenterPlan): PlanAttention {
+  if (plan.standing === 'unreadable' || plan.standing === 'baseline-removed') {
+    return { who: 'person', title: 'Cannot be judged', detail: plan.reason ?? 'The plan or its approvals would not read.' }
+  }
+  if (plan.standing === 'draft') {
+    return { who: 'person', title: 'Review and approve', detail: 'A draft. Read the rendered plan, answer its open questions, and approve it with plan:approve.' }
+  }
+  if (plan.standing === 'unapproved') {
+    return { who: 'person', title: 'Approve the edited plan', detail: 'Edited after it was approved, so plan:next refuses it until it is approved again.' }
+  }
+  if (plan.unreadable?.length) {
+    return { who: 'person', title: 'Records would not read', detail: plan.unreadable.join(' ') }
+  }
+  const stalled = plan.steps.find((step) => step.stall)
+  if (stalled?.stall) {
+    return { who: 'person', title: `Stalled on ${stalled.id}`, detail: `${stalled.stall.reason} Fix the environment, revise the plan, or waive the element with plan:waive.` }
+  }
+  if (plan.steps.length > 0 && plan.steps.every((step) => step.state === 'verified')) {
+    return { who: 'person', title: 'Ready to close', detail: 'Every step is verified. Read the work, then close the plan with plan:close.' }
+  }
+  const active = plan.steps.find((step) => step.active)
+  const next = active ?? plan.steps.find((step) => step.state !== 'verified')
+  return {
+    who: 'agent',
+    title: 'In progress',
+    detail: next ? `${active ? 'Marked by plan:next' : 'Next unverified step'}: ${next.id}.` : 'No step is marked yet.',
+  }
+}
+
+export function verifiedCount(plan: DevCenterPlan): number {
+  return plan.steps.filter((step) => step.state === 'verified').length
+}
+
+/** Plans a person has to act on first, each group in the overview's order. */
+export function sortPlans(plans: DevCenterPlan[]): DevCenterPlan[] {
+  const person = plans.filter((plan) => planAttention(plan).who === 'person')
+  return [...person, ...plans.filter((plan) => !person.includes(plan))]
+}
+
+/** Steps in task order, grouped under the task each belongs to. */
+export function stepsByTask(plan: DevCenterPlan): Array<{ task: string; steps: DevCenterPlan['steps'] }> {
+  const groups: Array<{ task: string; steps: DevCenterPlan['steps'] }> = []
+  for (const step of plan.steps) {
+    const last = groups.at(-1)
+    if (last?.task === step.task) last.steps.push(step)
+    else groups.push({ task: step.task, steps: [step] })
+  }
+  return groups
+}
+
+/** The slug a plan page is served under, or `undefined` off a plan page. */
+export function planSlugFromPath(pathname: string): string | undefined {
+  const match = /^\/_guren\/plans\/([^/]+)$/.exec(pathname)
+  if (!match) return undefined
+  try { return decodeURIComponent(match[1]!) } catch { return undefined }
+}

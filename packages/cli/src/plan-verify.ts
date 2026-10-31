@@ -10,6 +10,7 @@ import { basename } from 'node:path'
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { CliError } from './cli-error'
 import { readScripts } from './command-output'
+import { devCenterPlanLine } from './dev-center-links'
 import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
 import { formatPlanStatus, type PlanStatusReport, PLAN_STATUS_REPORT_VERSION } from './plan-status'
@@ -214,7 +215,8 @@ export function formatPlanStepRecord(stepId: string, record: PlanStepRecord): st
   return lines
 }
 
-export function formatPlanVerify(report: PlanVerifyReport): string {
+/** `planArgument` is the plan path as given: `report.plan.file` is a basename, which names no slug for a `plan.json`. */
+export function formatPlanVerify(report: PlanVerifyReport, planArgument?: string): string {
   const lines: string[] = []
   const codegenFailed = report.steps.filter(({ record }) => record.commands.some((command) => command.command === 'codegen' && command.status !== 'pass'))
   for (const { stepId, record } of report.steps) {
@@ -236,5 +238,6 @@ export function formatPlanVerify(report: PlanVerifyReport): string {
   }
   // plan:verify runs only on an approved plan (or a draft), so the approval line would say nothing.
   lines.push(formatPlanStatus({ ...report, approval: undefined }))
+  if (planArgument !== undefined) lines.push('', devCenterPlanLine(planArgument))
   return lines.join('\n')
 }

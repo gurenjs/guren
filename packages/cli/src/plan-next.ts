@@ -14,6 +14,7 @@ import { basename, resolve } from 'node:path'
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { runGit } from './changed-files'
 import { CliError } from './cli-error'
+import { devCenterPlanLine } from './dev-center-links'
 import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
 import { planScaffoldTargets, type PlanScaffoldTargets } from './plan-scaffold'
@@ -639,5 +640,6 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     lines.push('', `The application could not be read, so no step was held: ${report.freshnessUnreadable}`, 'On a fresh clone, run `bunx guren codegen` first: the routes file imports the generated files.')
   }
   if (report.decisionsUnreadable) lines.push('', `Decision log not read, so no waiver was applied: ${report.decisionsUnreadable}`)
+  lines.push('', devCenterPlanLine(planArgument))
   return lines.join('\n')
 }

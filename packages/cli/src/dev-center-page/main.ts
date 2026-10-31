@@ -1,5 +1,7 @@
 import type { GraphNode, GurenApplicationGraph, GraphResult } from '../application-graph'
+import type { DevCenterPlans } from '../dev-center-links'
 import type { RuntimeErrorResult } from '../runtime-errors'
+import { planAttention, planSlugFromPath, sortPlans, STEP_TONE, stepsByTask, verifiedCount, type DevCenterPlan } from './plans'
 
 function element<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id)
@@ -142,9 +144,132 @@ async function loadErrors(): Promise<void> {
   } catch (error) { status.textContent = `Runtime unavailable: ${error instanceof Error ? error.message : 'Read failed'}. Refresh to retry.` }
   finally { errorsButton.disabled = false }
 }
+async function readPlans(): Promise<DevCenterPlans> {
+  const result = await readJson('/_guren/plans.json') as DevCenterPlans | { error: { message: string } }
+  if ('error' in result) throw new Error(result.error.message)
+  if (result.schemaVersion !== 1 || !Array.isArray(result.plans)) throw new Error('Unsupported plans payload')
+  return result
+}
+function attentionBox(plan: DevCenterPlan): HTMLElement {
+  const attention = planAttention(plan)
+  const box = text('div', '', `attention ${attention.who}`)
+  box.append(text('span', attention.who === 'person' ? 'Waiting on a person' : 'Agent can continue', 'label'), text('strong', attention.title), text('span', attention.detail, 'meta'))
+  return box
+}
+function progress(plan: DevCenterPlan): HTMLElement[] {
+  const done = verifiedCount(plan)
+  const bar = text('div', '', 'progress')
+  const fill = document.createElement('span')
+  fill.style.width = plan.steps.length ? `${(done / plan.steps.length) * 100}%` : '0'
+  bar.append(fill)
+  return [text('div', `${done} of ${plan.steps.length} steps verified`, 'meta'), bar]
+}
+async function loadPlans(): Promise<void> {
+  const button = element<HTMLButtonElement>('refresh-plans')
+  const status = element('plans-status')
+  const list = element('plans')
+  button.disabled = true
+  status.textContent = 'Reading plans…'
+  list.replaceChildren()
+  element('plans-unreadable').replaceChildren()
+  try {
+    const result = await readPlans()
+    const plans = sortPlans(result.plans)
+    const waiting = plans.filter((plan) => planAttention(plan).who === 'person').length
+    status.textContent = `${plans.length} open ${plans.length === 1 ? 'plan' : 'plans'} · ${waiting} waiting on a person`
+    status.className = waiting ? 'warning' : ''
+    if (!plans.length) list.append(empty('No open plans', 'Plans appear here once an agent writes one with the plan-write skill.'))
+    for (const plan of plans) {
+      const card = text('a', '', 'g-card plan-card') as HTMLAnchorElement
+      card.href = `/_guren/plans/${encodeURIComponent(plan.slug)}`
+      card.append(text('span', plan.standing, 'kind'), text('h3', plan.title, 'g-card-title'), text('div', plan.file, 'meta mono'), ...progress(plan), attentionBox(plan))
+      list.append(card)
+    }
+    element('plans-unreadable').replaceChildren(...result.unreadable.map((dir) => text('li', `${dir.dir} would not list, so its plans are missing: ${dir.reason}`)))
+  } catch (error) {
+    status.textContent = `Plans unavailable: ${error instanceof Error ? error.message : 'Read failed'}. Refresh to retry.`
+    status.className = 'error'
+  } finally { button.disabled = false }
+}
+function card(title: string, ...body: Node[]): HTMLElement {
+  const section = text('section', '', 'g-card')
+  const head = text('div', '', 'g-card-head')
+  head.append(text('h2', title, 'g-card-title'))
+  const inner = text('div', '', 'g-card-body')
+  inner.append(...body)
+  section.append(head, inner)
+  return section
+}
+function stepRow(step: DevCenterPlan['steps'][number]): HTMLElement {
+  const row = text('div', '', 'step')
+  const badge = text('div', '')
+  badge.append(text('span', step.state, `g-badge g-badge-${STEP_TONE[step.state]}`))
+  const body = text('div', '')
+  body.append(text('div', step.id, 'id mono'))
+  if (step.active) body.append(text('div', 'Marked by plan:next: the Stop hook verifies this step on every stop.', 'meta marked'))
+  if (step.ranAt) body.append(text('div', `Last plan:verify run ${step.ranAt}`, 'meta mono'))
+  if (step.stall) body.append(text('div', `Stalled ${step.stall.at}: ${step.stall.reason}`, 'meta error'))
+  if (step.changed?.length) body.append(text('div', `Changed since verified: ${step.changed.join(', ')}`, 'meta mono'))
+  row.append(badge, body)
+  return row
+}
+function commands(lines: string[]): HTMLElement {
+  const box = text('div', '', 'commands')
+  box.append(...lines.map((line) => text('code', line, 'mono')))
+  return box
+}
+async function loadPlan(slug: string): Promise<void> {
+  const button = element<HTMLButtonElement>('refresh-plan')
+  const status = element('plan-status')
+  const body = element('plan-body')
+  button.disabled = true
+  status.textContent = 'Reading plan…'
+  body.replaceChildren()
+  try {
+    const matching = (await readPlans()).plans.filter((plan) => plan.slug === slug)
+    if (!matching.length) {
+      element('plan-title').textContent = slug
+      status.textContent = 'No open plan has this name: it may be closed, renamed or unreadable.'
+      status.className = 'warning'
+      return
+    }
+    // Two plans may share a slug; `guren check --plan` warns about it, and both are shown.
+    status.textContent = matching.length > 1 ? `${matching.length} open plans share this name` : ''
+    status.className = matching.length > 1 ? 'warning' : ''
+    element('plan-title').textContent = matching[0]!.title
+    document.title = `${matching[0]!.title} · Guren Dev Center`
+    for (const plan of matching) {
+      const approval = plan.approval ? ` · approved ${plan.approval.at}${plan.approval.by ? ` by ${plan.approval.by}` : ''}` : ''
+      body.append(text('p', `${plan.file} · ${plan.standing}${approval}${plan.entities.length ? ` · ${plan.entities.join(', ')}` : ''}`, 'lede mono'), attentionBox(plan))
+      const steps = stepsByTask(plan).flatMap((group) => [text('h3', group.task), ...group.steps.map(stepRow)])
+      body.append(card('Steps', ...progress(plan), ...(steps.length ? steps : [empty('No steps', 'The plan derives no steps.')])))
+      if (plan.waivers.length) {
+        body.append(card('Waivers', ...plan.waivers.map((waiver) => text('p', `${waiver.elementId}: ${waiver.reason} (${waiver.at}${waiver.by ? `, ${waiver.by}` : ''})`, 'meta'))))
+      }
+      const rendered = text('p', '', 'meta')
+      const link = text('a', `/_guren/docs/plans/${slug}`, 'mono') as HTMLAnchorElement
+      link.href = `/_guren/docs/plans/${encodeURIComponent(slug)}`
+      rendered.append(document.createTextNode('The rendered plan, once plan:render has written it and GUREN_DOCS=1 is set: '), link)
+      body.append(card('Commands', text('p', 'What the records say comes next, then the full status:', 'meta'), commands([...plan.next, plan.status]), rendered))
+    }
+  } catch (error) {
+    status.textContent = `Plan unavailable: ${error instanceof Error ? error.message : 'Read failed'}. Refresh to retry.`
+    status.className = 'error'
+  } finally { button.disabled = false }
+}
 search.oninput = renderNodes
 kind.onchange = renderNodes
 refresh.onclick = () => { void loadGraph() }
 errorsButton.onclick = () => { void loadErrors() }
-void loadGraph()
-void loadErrors()
+const planPage = planSlugFromPath(location.pathname)
+if (planPage === undefined) {
+  element<HTMLButtonElement>('refresh-plans').onclick = () => { void loadPlans() }
+  void loadPlans()
+  void loadGraph()
+  void loadErrors()
+} else {
+  element('home').hidden = true
+  element('plan-view').hidden = false
+  element<HTMLButtonElement>('refresh-plan').onclick = () => { void loadPlan(planPage) }
+  void loadPlan(planPage)
+}

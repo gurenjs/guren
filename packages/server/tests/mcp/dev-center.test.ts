@@ -5,7 +5,7 @@ const original = { ...process.env }
 afterEach(() => { process.env = { ...original } })
 const local = { server: { requestIP: () => ({ address: '127.0.0.1' }) } }
 
-test('Dev Center uses the MCP opt-in and guards both shell and graph routes', async () => {
+test('Dev Center uses the MCP opt-in and guards its shell, graph and plan routes', async () => {
   process.env.NODE_ENV = 'development'
   process.env.GUREN_MCP = '1'
   delete process.env.GUREN_ALLOW_UNVERIFIED_PEER
@@ -15,7 +15,7 @@ test('Dev Center uses the MCP opt-in and guards both shell and graph routes', as
     const page = await app.fetch(new Request('http://localhost/_guren'), local)
     expect(page.status).toBe(200)
     expect(await page.text()).toContain('Dev Center')
-    for (const path of ['/_guren', '/_guren/', '/_guren/graph.json']) {
+    for (const path of ['/_guren', '/_guren/', '/_guren/graph.json', '/_guren/plans.json', '/_guren/plans/comments']) {
       const req = () => new Request(`http://localhost${path}`)
       expect((await app.fetch(req())).status).toBe(403)
       expect((await app.fetch(req(), { server: { requestIP: () => ({ address: '203.0.113.1' }) } })).status).toBe(403)
