@@ -5,6 +5,7 @@
  * Writes `metrics.json` and each start's Playwright report into `GUREN_BROWSER_OUT`, rewriting the
  * metrics after every start. `--aggregate <dir>` reads the metrics of earlier nights instead and
  * reports the streak of clean nights the proposed rule counts. Exits 1 when nothing was measured.
+ * The accessibility tests (RFC 0033 §12.2) are counted as a set of their own, so they never move M4's streak.
  */
 import { appendFile, mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
@@ -14,6 +15,7 @@ import process from 'node:process'
 
 import type { z } from 'zod'
 
+import { A11Y_SPEC_FILE, A11Y_TITLE_PREFIX } from '../../packages/cli/src/browser-specs'
 import type { PlanDraftSchema } from '../../packages/cli/src/plan/schema'
 import { PLAN_VERSION } from '../../packages/cli/src/plan/version'
 import { inheritedEnv } from './inherited-env'
@@ -177,9 +179,16 @@ interface StartRecord {
   wallMs: number
   /** The tests' own time; the rest of `wallMs` is the app starting and the browser launching. */
   testMs: number
+  /** The accessibility tests' share of `testMs`, which M4's cost ceiling leaves out. */
+  a11yMs?: number
   reported: boolean
   errors: string[]
 }
+
+/** A start's cost as M4 judges it: the accessibility tests are counted apart, their time included. */
+const m4Cost = (entry: StartRecord): number => entry.wallMs - (entry.a11yMs ?? 0)
+
+interface SetSummary { flaky: number; notRun: number; defects: number; clean: boolean }
 
 interface Metrics {
   measuredAt: string
@@ -188,24 +197,41 @@ interface Metrics {
   starts: StartRecord[]
   phases: Array<{ phase: string; ms: number }>
   tests: Array<{ test: string; verdict: Verdict } & Tally>
-  summary: { startupFailures: number; flaky: number; notRun: number; defects: number; clean: boolean }
+  /** The set M4 is judged on: every test but the accessibility ones. */
+  summary: { startupFailures: number } & SetSummary
+  /** Absent on nights measured before the accessibility spec existed. */
+  accessibility?: { tests: number } & SetSummary
 }
 
-function summarize(tallies: Map<string, Tally>, starts: readonly StartRecord[]): Pick<Metrics, 'tests' | 'summary'> {
+const isA11yTest = (key: string): boolean => (key.split(' › ').at(-1) ?? '').startsWith(A11Y_TITLE_PREFIX)
+
+function summarize(tallies: Map<string, Tally>, starts: readonly StartRecord[]): Pick<Metrics, 'tests' | 'summary' | 'accessibility'> {
   const tests = [...tallies].map(([test, tally]) => ({ test, verdict: verdictOf(tally), ...tally })).sort((a, b) => a.test.localeCompare(b.test))
-  const count = (verdict: Verdict): number => tests.filter((entry) => entry.verdict === verdict).length
-  const summary = { startupFailures: starts.filter((entry) => !entry.reported).length, flaky: count('flaky'), notRun: count('not-run'), defects: count('defect') }
+  const startupFailures = starts.filter((entry) => !entry.reported).length
   // A defect fails every run the same way, so it says nothing about how reliable a gate would be.
-  return { tests, summary: { ...summary, clean: summary.startupFailures === 0 && summary.flaky === 0 && summary.notRun === 0 } }
+  const setSummary = (set: typeof tests): SetSummary => {
+    const count = (verdict: Verdict): number => set.filter((entry) => entry.verdict === verdict).length
+    const summary = { flaky: count('flaky'), notRun: count('not-run'), defects: count('defect') }
+    return { ...summary, clean: startupFailures === 0 && summary.flaky === 0 && summary.notRun === 0 }
+  }
+  const a11y = tests.filter((entry) => isA11yTest(entry.test))
+  return {
+    tests,
+    summary: { startupFailures, ...setSummary(tests.filter((entry) => !isA11yTest(entry.test))) },
+    ...(a11y.length > 0 ? { accessibility: { tests: a11y.length, ...setSummary(a11y) } } : {}),
+  }
 }
 
 function summaryLines(metrics: Metrics): string[] {
   const { summary } = metrics
-  const costs = metrics.starts.filter((entry) => entry.reported).map((entry) => entry.wallMs)
+  const costs = metrics.starts.filter((entry) => entry.reported).map(m4Cost)
   return [
     '## Browser specs measurement (RFC 0033 M4)',
     '',
     `${metrics.starts.length} cold start(s), no retries, Playwright ${metrics.runner.playwright ?? 'unknown'}. ${summary.clean ? 'Clean' : 'Not clean'}: start-up failures ${summary.startupFailures}, flaky ${summary.flaky}, not run ${summary.notRun}; defects ${summary.defects}.`,
+    ...(metrics.accessibility
+      ? [`Accessibility tests, counted apart (${metrics.accessibility.tests}): ${metrics.accessibility.clean ? 'clean' : 'not clean'}; flaky ${metrics.accessibility.flaky}, not run ${metrics.accessibility.notRun}, defects ${metrics.accessibility.defects}.`]
+      : []),
     costs.length > 0 ? `One start: ${(Math.min(...costs) / 1000).toFixed(1)}-${(Math.max(...costs) / 1000).toFixed(1)} s.` : 'No start produced a report.',
     '',
     '| Phase | Seconds |', '| --- | --- |',
@@ -255,6 +281,8 @@ async function measure(): Promise<void> {
     await mustRun(app, ['bun', CLI, 'add', 'browser-tests'])
     // The config starts the app with `bunx guren`; without the app's own bin that is npm's placeholder.
     if (!(await Bun.file(join(app, 'node_modules/.bin/guren')).exists())) throw new Error('The app has no node_modules/.bin/guren, so the generated config cannot start it.')
+    // Without it the accessibility set would read as never measured, with nothing saying why.
+    if (!(await Bun.file(join(app, A11Y_SPEC_FILE)).exists())) throw new Error(`add browser-tests wrote no ${A11Y_SPEC_FILE}; the accessibility set cannot be measured.`)
     const env = await readFile(join(app, '.env'), 'utf8')
     const seeded = env.replace(/^BROWSER_TEST_PASSWORD=.*$/mu, `BROWSER_TEST_PASSWORD=${randomBytes(18).toString('base64url')}`)
     if (seeded === env) throw new Error('.env has no BROWSER_TEST_PASSWORD line to set, so the setup project could not sign in.')
@@ -281,10 +309,13 @@ async function measure(): Promise<void> {
     const exitCode = await run(app, ['bun', 'run', 'test:browser', '--', '--retries=0', '--reporter=list,json'], { PLAYWRIGHT_JSON_OUTPUT_FILE: reportPath })
     const wallMs = Math.round(performance.now() - began)
     const report = await readFile(reportPath, 'utf8').then((text) => JSON.parse(text) as JsonReport, () => undefined)
-    const results = specsOf(report?.suites).flatMap((spec) => spec.tests.flatMap((test) => test.results))
+    const specs = specsOf(report?.suites)
+    const results = specs.flatMap((spec) => spec.tests.flatMap((test) => test.results))
+    const a11yResults = specs.filter((spec) => spec.title.startsWith(A11Y_TITLE_PREFIX)).flatMap((spec) => spec.tests.flatMap((test) => test.results))
     metrics.starts.push({
       start, exitCode, wallMs,
       testMs: results.reduce((total, result) => total + result.duration, 0),
+      a11yMs: a11yResults.reduce((total, result) => total + result.duration, 0),
       reported: results.length > 0,
       errors: (report?.errors ?? []).map((error) => firstLine(error.message)),
     })
@@ -306,7 +337,7 @@ async function aggregate(dir: string): Promise<void> {
   if (nights.length === 0) throw new Error(`No metrics.json under ${dir}.`)
   const streak = nights.findIndex((night) => !night.summary.clean)
   const cleanNights = streak === -1 ? nights.length : streak
-  const starts = nights.flatMap((night) => night.starts.filter((entry) => entry.reported).map((entry) => entry.wallMs)).sort((a, b) => a - b)
+  const starts = nights.flatMap((night) => night.starts.filter((entry) => entry.reported).map(m4Cost)).sort((a, b) => a - b)
   const failingTests = new Map<string, { nights: number; verdicts: Set<Verdict> }>()
   for (const night of nights) {
     for (const test of night.tests.filter((entry) => entry.verdict !== 'pass' && entry.verdict !== 'fixme')) {
@@ -318,12 +349,17 @@ async function aggregate(dir: string): Promise<void> {
   }
   const coldStarts = nights.slice(0, cleanNights).reduce((total, night) => total + night.starts.length, 0)
   const needed = Math.ceil(3 / CI_SPURIOUS_RATE)
+  // Its own streak, from the first night it was measured: a night before the spec existed ends it.
+  const a11yStreak = nights.findIndex((night) => !night.accessibility?.clean)
+  const a11yCleanNights = a11yStreak === -1 ? nights.length : a11yStreak
+  const a11yStarts = nights.slice(0, a11yCleanNights).reduce((total, night) => total + night.starts.length, 0)
   await writeSummary([
     '## Browser specs measurement across nights (RFC 0033 M4)',
     '',
     `${nights.length} night(s) read. The latest ${cleanNights} in a row are clean (${coldStarts} cold starts with no start-up failure, flake or test left unrun${coldStarts >= RULE_OF_THREE_MIN ? `; by the rule of three a failure rate under ${(300 / coldStarts).toFixed(1)}% at 95% confidence` : ''}).`,
     starts.length > 0 ? `One start, median ${(starts[Math.floor(starts.length / 2)]! / 1000).toFixed(1)} s, slowest ${(starts.at(-1)! / 1000).toFixed(1)} s.` : '',
     `The rule (RFC 0033 §9, adopted provisionally) needs ${needed} clean cold starts in a row, which bounds the rate under the CI baseline of ${(CI_SPURIOUS_RATE * 100).toFixed(1)}%, and every start under ${MAX_START_MS / 1000} s: ${coldStarts >= needed && (starts.at(-1) ?? 0) < MAX_START_MS ? 'met' : 'not met yet'}.`,
+    `The accessibility tests, counted apart (RFC 0033 §12.2): the latest ${a11yCleanNights} night(s) in a row are clean (${a11yStarts} cold starts); they need ${needed} of their own: ${a11yStarts >= needed ? 'met' : 'not met yet'}.`,
     '',
     '| Test | Nights not passing | Verdicts |', '| --- | --- | --- |',
     ...[...failingTests].map(([test, seen]) => `| ${test.replaceAll('|', '\\|')} | ${seen.nights} | ${[...seen.verdicts].join(', ')} |`),

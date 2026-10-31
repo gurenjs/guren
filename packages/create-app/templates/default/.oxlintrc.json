@@ -24,6 +24,13 @@
       // `env` a config definition receives. bin/ and drizzle.config.ts run outside the app.
       "files": ["app/**", "config/**", "routes/**", "src/**", "modules/*/**"],
       "rules": { "guren/no-unvalidated-env-read": "error" }
+    },
+    {
+      // Pages and components style with the Guren UI tokens in resources/css/guren.css
+      // (bg-g-panel, text-g-text, var(--g-accent)), which carry the dark theme; a
+      // palette class or a hex literal does not.
+      "files": ["resources/js/**"],
+      "rules": { "guren/no-raw-color": "error" }
     }
   ]
   // Type-aware rules (typescript/no-floating-promises and friends) need

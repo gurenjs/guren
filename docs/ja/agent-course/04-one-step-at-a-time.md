@@ -318,7 +318,7 @@ export default function MeetupForm({ initial, submit, label }: Props) {
         <input type="number" className={inputClass} value={form.data.capacity} onChange={(event) => form.setData('capacity', Number(event.target.value))} />
       </label>
       {form.errors.capacity && <p className="text-sm text-g-danger">{form.errors.capacity}</p>}
-      <button type="submit" disabled={form.processing} className="rounded-g-ctl bg-g-accent px-4 py-2 font-bold text-white">
+      <button type="submit" disabled={form.processing} className="rounded-g-ctl bg-g-accent px-4 py-2 font-bold text-g-on-accent">
         {label}
       </button>
     </form>

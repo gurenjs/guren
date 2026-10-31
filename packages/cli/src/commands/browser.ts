@@ -26,7 +26,7 @@ export const browserMapCommand = defineCommand({
     const failed = !map.complete || map.unreadablePlans.length > 0 || (args.check === true && stale.length > 0)
     if (failed) markCommandFailed()
     if (args.json) {
-      console.log(JSON.stringify({ ...map, changed: run.changed, orphans: run.orphans, removed: run.removed, ...(run.specsHeld ? { specsHeld: run.specsHeld } : {}) }))
+      console.log(JSON.stringify({ ...map, changed: run.changed, orphans: run.orphans, removed: run.removed, ...(run.specsHeld ? { specsHeld: run.specsHeld } : {}), ...(run.accessibilityOff ? { accessibilityOff: run.accessibilityOff } : {}) }))
       return
     }
     const lines: string[] = []
@@ -41,6 +41,7 @@ export const browserMapCommand = defineCommand({
       if (run.removed.length > 0) lines.push(`Removed generated specs nothing produces any more: ${run.removed.join(', ')}.`)
     }
     if (run.specsHeld) lines.push(`The generated specs were left as they are: ${run.specsHeld}.`)
+    if (run.accessibilityOff) lines.push(`Accessibility checks are off: ${run.accessibilityOff}. Run guren add browser-tests again to add them.`)
     console.log(lines.join('\n'))
   },
 })

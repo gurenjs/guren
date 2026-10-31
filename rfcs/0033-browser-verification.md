@@ -3,7 +3,8 @@
 **Author:** Guren contributors
 **Date:** 2026-10-14
 **Status:** Accepted (2026-10-15; the deciding maintainer asked for implementation to start
-and shortened the standard discussion period.)
+and shortened the standard discussion period.) The amendment in §12 (accessibility checks and
+visual change between runs) was accepted on 2026-10-31.
 
 ## Problem
 
@@ -549,6 +550,7 @@ plan should at least point at the latest run for an id is Open Question 8.
 | M2 | `database` manifest section, `browser:serve`, `browser:doctor`, `browser:record`, **the skill** | §3, §4 and §7 rules hold in fixtures, including `NODE_ENV=test` on the SQLite scaffold and a custom resolver reading `unknown` |
 | M3 | `add browser-tests`, specs from plan views | A scaffolded app with one approved plan gets a spec whose locators resolve on the live page |
 | M4 | Gate decision | Measured flake rate and CI cost on the golden-path smoke decide whether an acceptance may require a browser run |
+| M5 | Accessibility spec and visual change between runs (§12) | The measurement app has no axe violation under the §12.2 tags before the spec ships; `--close` reports `unchanged`, `changed` and `new` in fixtures and never moves a result |
 
 **Amended in implementation:** the skill moved from M1 to M2. Its launch, doctor
 and evidence steps name `browser:serve`, `browser:doctor` and `browser:record`;
@@ -641,9 +643,263 @@ under three minutes, so a night makes forty.
 
 ### 11. Non-goals
 
-No model calls from Guren, no agentic test runner, no visual regression, no
+No model calls from Guren, no agentic test runner, ~~no visual regression~~ no
+visual regression baseline or gate (**amended in §12:** no committed reference
+image, no pixel threshold, and no result a screenshot can pass), no
 mobile engine, no production use, no new dependency in any `@guren/*` runtime
 package, and no change to what `verified` means.
+
+### 12. Amendment after acceptance (2026-10-31): accessibility and visual change
+
+**Accepted 2026-10-31.** Guren is gaining design-system features (UI
+components, form fields derived from route contracts, a token stylesheet an app
+can upgrade). A design system holds on real pages only if something looks at
+them, and the browser specs are the one place that does. Two defects the M3
+specs found, form fields `make:feature` wrote with no label (#1196) and labels
+on `make:auth`'s profile page tied to no input (#1193), were found by locating
+fields by label, which is an accessibility check the specs ran by accident.
+This amendment makes it deliberate, and lets a run say whether a page looks as
+it did in an earlier run.
+
+#### 12.1 Why this is an amendment
+
+- §11 names visual regression as a non-goal. Comparing screenshots between
+  runs is close enough to it that the line has to be redrawn in the RFC, not in
+  a pull request.
+- §6 lists what the blueprint installs. A second devDependency, under a licence
+  the app has not taken on before (MPL-2.0), is the kind of change the RFC
+  process lists as needing one ("new dependencies").
+- §7's step record gains a field, and §10's acceptance list pins what the
+  record holds.
+- §9's M4 rule was met on the current spec set (14 clean nights, 560 cold
+  starts, as read on 2026-10-31). A new set of tests in `test:browser` changes
+  what that measurement covers, so the RFC has to say how the new tests are
+  counted.
+
+#### 12.2 Accessibility checks in the generated specs
+
+**Engine.** `@axe-core/playwright`, Deque's wrapper around `axe-core`. As
+checked on 2026-10-31: both are maintained by Deque in public repositories
+(`dequelabs/axe-core`, `dequelabs/axe-core-npm`), neither archived, both pushed
+to that week. `axe-core` 4.14.0 was released on 2026-10-05 and the wrapper's
+4.14.0 on 2026-10-15, after minors in June and August. The wrapper's one
+dependency is `axe-core ~4.14.0`, and its peer is `playwright-core >= 1.0.0`,
+which `@playwright/test` brings. Both are MPL-2.0, a file-level copyleft: the app
+installs them as devDependencies and ships none of their files, and no
+`@guren/*` package depends on them, so §11's rule on runtime packages holds.
+
+**Range.** A new `axe-core` minor adds and tightens rules, so an unchanged page
+can fail after an install. The blueprint installs the range `@guren/cli`
+declares for its own devDependency, as it does for `@playwright/test`, and that
+range is a tilde (`~4.14.0`): a new rule set reaches an app when `@guren/cli`
+moves the range, in a release whose changeset says so.
+
+**Installation.** `guren add browser-tests` installs `@axe-core/playwright`
+beside `@playwright/test` and writes `tests/browser/a11y.ts` once (author-owned,
+like `support.ts`):
+
+```ts
+/** Read by tests/browser/generated/a11y.browser.ts. Say why beside every entry. */
+export const a11y = {
+  /** axe rule ids not checked, e.g. 'color-contrast' while the palette is being replaced. */
+  disableRules: [] as string[],
+  /** CSS selectors axe does not descend into, e.g. a third-party widget. */
+  exclude: [] as string[],
+}
+```
+
+An app that ran the blueprint before runs it again: it writes only files that
+are missing and installs only packages the manifest does not declare, so the
+rerun adds these two and changes nothing else.
+
+**The spec.** `browser:map` writes `tests/browser/generated/a11y.browser.ts`
+only when the app's manifest declares `@axe-core/playwright` and
+`tests/browser/a11y.ts` exists (positive evidence, as for password sign-in).
+Otherwise it writes none, removes one it wrote before, and ~~the map index says~~
+**the command prints that** (amended in implementation, below)
+the accessibility checks are off and names the rerun. The spec holds one test
+per mapped landmark and one per plan view the view specs open, titled
+`a11y <feature>: GET <path>` and `a11y view <id>`, with the same visit, the same
+signed-in grouping and the same `test.fixme` rules: a visit the smoke or view
+spec cannot make is a `fixme` here too. The checks sit in their own tests, not
+inside the smoke tests, so a page that renders the wrong component and a page
+that fails a rule are two facts, and the measurement can count them apart.
+
+Each test, after the visit and the component assertion that shows the page is
+the one meant:
+
+1. runs `new AxeBuilder({ page })` with the tags `wcag2a`, `wcag2aa`,
+   `wcag21a`, `wcag21aa` and `wcag22aa`, the rules of `a11y.disableRules`
+   disabled and the selectors of `a11y.exclude` excluded;
+2. attaches ~~the whole result~~ the violations and the `incomplete` results
+   (amended in implementation: axe's passes and inapplicable rules are left out)
+   as JSON to the test, so the report a run files as
+   `spec-report.json` (§6) carries it, and names every disabled rule and
+   excluded selector there, so an exemption stays visible in every report;
+3. fails when `violations` is not empty, with a message listing each rule id,
+   its impact, its help URL and the first targets of its nodes. `incomplete`
+   (a rule axe could not decide, such as contrast over an image) is attached
+   and never fails the test.
+
+`best-practice` rules (landmark regions, heading order) are left out: they are
+advice rather than conformance criteria, and on an existing app they are most
+of what axe reports. An author who wants them adds a spec beside the generated
+ones.
+
+**Failing, and advisory.** A violation fails its test. A check that cannot fail
+tells nobody anything, and a Playwright annotation on a passing test is read by
+no one. The specs are already advisory where it matters (§8): no gate reads
+them, so a failing accessibility test reddens `test:browser` and nothing else.
+The noise on an existing app is bounded by opting in twice (the blueprint, then
+the package), by the pinned rule set, and by `a11y.ts` for what a team decides
+to leave for later. A baseline of accepted violations, keyed by rule and
+selector, is not part of this amendment: selectors change with every markup
+edit, so such a file goes stale faster than it is read (Open Question 10).
+
+**The scaffold first.** A new app must not start with a red `test:browser`.
+Before the spec ships, the measurement app (`smoke:browser-tests`: `make:auth`
+and a posts resource on SQLite) is run with the spec, and every violation found
+there is fixed in the template that wrote the page, as #1196 and #1193 fixed the
+labels. M5 is done only once that run reports none.
+
+**Live drives.** The CLI runs no axe, and the step record (§7) gains no
+accessibility field. An agent driving a page live reports an accessibility
+problem through the rule §5 already sets for findings: once an `a11y` test in
+`tests/browser/` fails on it. The skill tells the agent to run `test:browser`
+after changing a page and to report a failing `a11y` test with its rule ids.
+
+**Amended in implementation:**
+- Why the checks are off (the package not in `package.json`, or no
+  `tests/browser/a11y.ts`) is printed by `browser:map` and `add browser-tests`,
+  not written into the index: the index is the same in every app, with or
+  without the blueprint, and the reason is about the install.
+- Before running axe, a test waits for `#app` to hold an element and for the
+  network to go idle, so a client-rendered page is read after it renders.
+- A view whose route a landmark already checks is not checked twice, and a
+  `fixme` two plans share is written once: every plan's views share this file,
+  and Playwright refuses to load a file with two tests of one title.
+- A start's cost under §9's ceiling leaves out the accessibility tests' time,
+  which the measurement reports with their set.
+- Both packages are installed in one `bun add -d`, and only the ones the
+  manifest lacks, so a rerun on an app with Playwright adds axe alone.
+- The first measurement run with the spec found two violations, both on pages
+  `make:auth` writes: `link-in-text-block` on `/login` (the sign-up link inside
+  a sentence was told apart by colour alone) and `color-contrast` on `/profile`
+  (helper text in `text-g-muted`, about 2.5:1 on the panel). The links are
+  underlined and the helper text uses `text-g-text-2`; the next run reported
+  none of the six tests failing. `--g-muted` itself is too faint for any text,
+  which is the token stylesheet's to settle, not this spec's.
+
+**Measurement.** The nightly measurement already classifies every test in
+`test:browser`, so the `a11y` tests are measured from the night they ship. They
+are reported as their own set (tests whose title starts with `a11y `), and their
+defects, flakes and unrun tests do not reset the streak of the set M4 was
+judged on. Whatever M4 decides covers the smoke and view specs; the `a11y` set
+joins such a requirement only after its own 167 clean cold starts under §9's
+rule.
+
+#### 12.3 Visual change between runs
+
+**What is compared.** `browser:record --close` already stores each screenshot of
+a step with its sha256 (§7). For each screenshot it now also finds the latest
+earlier run (run names sort by their UTC stamp) of the same feature that
+recorded a step with the same id holding a screenshot at the same path under
+`screenshots/`, and records the pairing in the step's `cli` group:
+
+```ts
+screenshots: Array<{
+  path: string
+  sha256: string
+  /** Absent when no earlier run of this feature recorded this step with a screenshot at this path. */
+  previous?: { run: string; sha256: string; commit: { rev: string; dirty: boolean } | null }
+}>
+```
+
+The close prints each screenshot as `unchanged since <run>` (equal digests),
+`changed since <run>` (both paths, so a person can open the two), or `new`. A
+changed digest where both runs name the same commit with a clean tree is printed
+as changed at the same commit: the page does not render the same twice (a
+timestamp, seeded data, an animation caught mid-way), which a reader needs to
+know before treating any other change as the code's doing. An earlier
+`run.json` that does not read is skipped and counted in the output, never
+compared.
+
+**Never a result.** The comparison is reported and stored, and that is all. It
+does not enter `lowerResult()`, which keeps lowering on the error window alone,
+and nothing it finds raises a result. `unchanged` is not a pass and `changed` is
+not a failure: both say only whether to look.
+
+**Bytes, not pixels.** Equal digests prove the images are equal. Different
+digests prove less: another Chromium build, font hinting or a timestamp on the
+page changes the bytes of an image a person would call the same. Erring that way
+is the safe side for a report whose only use is "look here". Comparing pixels
+needs a PNG decoder in `@guren/cli` and a threshold someone has to tune
+(Open Question 11).
+
+**The key.** A screenshot is paired by feature, step id and its path under
+`screenshots/`, so a pairing holds only while the agent names a screenshot the
+same way in every run. The skill tells it to name each screenshot after the
+state it shows (`comment-posted.png`), never by the order it was taken in.
+The origin is not part of the key, since `browser:serve` may start on another
+port each session.
+
+**Scope.** `.guren/browser/` is git-ignored, so a run is compared with earlier
+runs in the same checkout. `run.json` keeps `schemaVersion: 1`: `previous` is
+optional, an older record reads unchanged, and an older CLI reading a newer
+record drops the field.
+
+**What stays a non-goal.** Playwright's `toHaveScreenshot()` in the generated
+specs: it needs reference images committed per platform (macOS and Linux render
+fonts differently), a ritual to update them and a pixel threshold, and it turns
+a screenshot into a test result. That is the visual regression §11 keeps out.
+
+#### 12.4 What changes in §§5 to 10
+
+| Section | Change |
+| --- | --- |
+| §5 skill | Run `test:browser` after changing a page and report a failing `a11y` test with its rule ids; name screenshots by the state they show; report `changed` screenshots as a prompt to look, never as a regression or a pass |
+| §6 blueprint | Also installs `@axe-core/playwright` and writes `tests/browser/a11y.ts`; `browser:map` owns `generated/a11y.browser.ts` under the conditions in §12.2 |
+| §7 evidence | `cli.screenshots[].previous`; the close output names `unchanged`, `changed` or `new` per screenshot |
+| §8 gates | Unchanged: no gate reads an accessibility result or a screenshot comparison |
+| §9 delivery | M5 |
+| §10 acceptance | The additions below |
+
+#### 12.5 Acceptance for this amendment
+
+- `browser:map` writes `a11y.browser.ts` only when the manifest declares
+  `@axe-core/playwright` and `tests/browser/a11y.ts` exists, removes the one it
+  wrote when either goes, and ~~the index names~~ `browser:map` prints why the
+  checks are off.
+- An `a11y` test fails on a page with an input that has no label, passes on the
+  same page with the label, and names the disabled rules and excluded selectors
+  in its attachment.
+- A landmark the smoke spec marks `fixme` is a `fixme` in the `a11y` spec, with
+  the same reason.
+- `smoke:browser-tests` reports no violation on the measurement app before M5
+  ships, and reports the `a11y` set apart from the set M4 was judged on.
+- `--close` records `previous` for a screenshot an earlier run of the feature
+  and step holds at the same path, reports `unchanged`, `changed`, `changed at
+  the same commit` and `new` in fixtures, and leaves `result` and `lowered`
+  exactly as `lowerResult()` set them in every case.
+
+#### 12.6 Alternatives considered
+
+**Inject `axe-core` without the wrapper.** `page.addScriptTag()` with the
+`axe-core` file and an `axe.run()` call works and drops one package, but the
+wrapper also runs axe in every frame and merges the results, which a page with
+an embedded widget needs. The wrapper is 48 KB on top of `axe-core`.
+
+**Lighthouse or pa11y.** Both drive their own browser rather than the page the
+spec already opened and signed in to, and Lighthouse reports a score, which
+invites a threshold. axe reports rule violations with selectors, which is what
+a fix needs.
+
+**Warnings only.** Attach the violations and let the test pass. Nobody reads an
+annotation on a green run, and the specs are advisory to every gate already, so
+a failing test is the advisory form.
+
+**Check accessibility in `browser:doctor`.** The doctor opens no browser (§4),
+and axe needs a rendered DOM.
 
 ## Alternatives Considered
 
@@ -725,3 +981,15 @@ changes behaviour.
    complete. A controller from any other package is still unresolved: nothing
    proves where it lives. The map lists a package-handled route in the index as
    handled outside the app, never as a gap.
+10. (§12) Should an app be able to accept a known accessibility violation
+    without disabling its rule everywhere, and keyed by what, when selectors
+    change with every markup edit? A rule id per page is coarse; a selector is
+    stale by the next refactor.
+11. (§12) Should the screenshot comparison look at pixels? It needs a PNG
+    decoder in `@guren/cli` and a threshold. Measuring first how often digests
+    differ at the same commit on the measurement app says whether bytes are
+    too noisy to be worth reading.
+12. (§12) Should the `a11y` spec also check the states a plan's
+    `views[].states` names (a form showing its 422 errors, an empty list)? A
+    visit reaches only the landing state; another state needs a drive the map
+    does not describe yet.
