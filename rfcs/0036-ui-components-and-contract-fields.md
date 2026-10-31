@@ -36,9 +36,9 @@ export const PRIMARY_SUBMIT_CLASS = `w-full ${PRIMARY_BUTTON_CLASS} disabled:cur
 ```
 
 `make:feature` and `make:auth` interpolate them into the pages they write. The
-strings are shared at generation time and duplicated at run time: an app with
-five resources and the auth pages holds the input class in about twenty-five
-places. Changing the focus ring, or the button's padding, means editing every
+strings are shared at generation time and duplicated at run time: the input
+class is written once per field on every New and Edit page, and again in each
+auth page. Changing the focus ring, or the button's padding, means editing every
 page or regenerating it. The same holds for markup that is not a class string
 at all: the danger callout `make:auth` builds with `calloutRow()`, the card
 markup on index pages, the error paragraph under each field.
@@ -186,7 +186,9 @@ export const postsUpdateForm: RouteFormContract<'posts.update', ApiRoutes['posts
   so `Field` can still bind it with an explicit `as` or children.
 - **What a field carries.** `type` (`string | number | integer | boolean |
   array | object | unknown`), `required` (from the object's `required` set),
-  `nullable`, and the keywords the walker emits that have an HTML counterpart:
+  `nullable` (the walker renders `.nullable()` as a union with `null`;
+  `forms-types.ts` folds that back into the inner `type` plus `nullable: true`),
+  and the keywords the walker emits that have an HTML counterpart:
   `format`, `enum`, `minLength`, `maxLength`, `minimum`, `maximum`, `pattern`.
   Nothing else is copied, so the artifact stays small and its shape is the
   package's to version.
@@ -236,7 +238,9 @@ export type FieldInput =
   | 'text' | 'textarea' | 'number' | 'checkbox' | 'select' | 'date' | 'datetime'
   | 'file' | 'hidden' | 'email' | 'url' | 'password'
 
-/** Inertia's useForm, bound to the contract's route; `submit` substitutes `params` into its path. */
+/** Inertia's useForm, bound to the contract's route. `handleSubmit` is an `onSubmit` handler that
+    prevents the default and sends to the contract's method and path with `params` substituted;
+    it does not shadow `useForm`'s own `submit(method, url)`. */
 export function useRouteForm<TName extends string, TBody extends Record<string, unknown>>(
   contract: RouteFormContract<TName, TBody>,
   initial: TBody,
@@ -278,13 +282,15 @@ export function humanizeFieldName(name: string): string
 | `string`, `format: 'email'` | `email` | |
 | `string`, `format: 'uri'` | `url` | |
 | `string`, `format: 'date'` | `date` | value sliced to `YYYY-MM-DD`, as `make:feature` does today |
-| `string`, `format: 'date-time'` | `datetime` (`type="datetime-local"`) | |
+| `string`, `format: 'date-time'` | `datetime` (`type="datetime-local"`) | the walker renders `z.date()` and `z.coerce.date()` this way |
 | `string` | `text` | `minLength`, `maxLength`, `pattern` |
 | `array`, `object`, `unknown` | `text`, with a development warning naming the field | |
 
 `textarea`, `password`, `file` and `hidden` cannot be read off a JSON Schema;
-the caller states them with `as`. `make:feature` knows a `text` column is a
-textarea, `make:auth` knows which fields are passwords, and a plan view names
+the caller states them with `as`. Neither can `date` for a schema written
+with `z.coerce.date()`, the shape `make:validator` writes, since the walker
+renders every Zod date as `format: 'date-time'`. `make:feature` knows a `text`
+column is a textarea and a `date` column is a date, `make:auth` knows which fields are passwords, and a plan view names
 the input outright. `required` is set only when the contract says so and the
 field is not a checkbox (a required checkbox means "must be ticked", which a
 `z.boolean()` does not).
@@ -356,7 +362,7 @@ export default function NewPost() {
   return (
     <main className="min-h-screen bg-g-page font-sans text-g-text">
       <div className="mx-auto max-w-3xl px-6 py-12">
-        <form className="space-y-4" onSubmit={form.submit}>
+        <form className="space-y-4" onSubmit={form.handleSubmit}>
           <Field form={form} name="title" />
           <Field form={form} name="body" as="textarea" />
           <Field form={form} name="published" />
@@ -374,6 +380,11 @@ export default function NewPost() {
   (in `guren-css.ts`, beside `ensureGurenUiTokens()`), which writes the
   components the page imports when they are missing and never touches one that
   exists. A generated page therefore never imports a file that is not there.
+- A generator passes `as` wherever the column type decides an input the
+  contract cannot: `textarea` for a `text` column, `date` for a `date` column.
+  Every other `make:feature` type reaches the right row on its own:
+  `z.coerce.number()` is a `number`, `z.boolean()` a checkbox, and the trimmed
+  `z.string().min(1)` a required text input.
 - `generateFormField()`, `fieldMessages()`, `errorAttributes()`,
   `labelledControl()` and the `fieldIds` hook go. A `json` field stays
   generator-written, composed from `Label` and `Textarea` directly, since its
@@ -403,7 +414,9 @@ what `getByLabel()` finds. Its resolution order is:
 3. `humanizeFieldName(name)`.
 
 Step 2 needs to know whether a key exists. `t()` returns the key on a miss, so
-`Translation` gains an additive `has(key)`, and `useField` reads `_i18n`
+the package exports a standalone `hasTranslation(i18n, key)` beside
+`createTranslator()` (a new member on the exported `Translation` interface would
+break any object literal typed with it), and `useField` reads `_i18n`
 without the one-time warning `useTranslation()` prints, since an app without
 i18n is the common case here. Select option labels resolve the same way under
 `fields.<name>.options.<value>`.
@@ -541,7 +554,7 @@ removed.
 
 Release order and gates:
 
-- `@guren/inertia-client` (minor: the `forms` subpath, `Translation.has()`)
+- `@guren/inertia-client` (minor: the `forms` subpath, `hasTranslation()`)
   must be published before generators emit the import. Generated pages and
   copied components resolve it from npm, so `smoke:starter:npm` is red between
   the template change and that release, as `common-pitfalls.md` describes.
