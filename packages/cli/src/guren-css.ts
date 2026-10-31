@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { consola } from 'consola'
 import { readIfExists } from './discovery'
+import { writeFileAtomic } from './plan/beside'
 import { loadScaffoldTemplate, scaffoldTemplatePath } from './scaffold-templates'
 
 export const TOKENS_PATH = 'resources/css/guren.css'
@@ -23,8 +24,10 @@ export const PRIMARY_SUBMIT_CLASS = `w-full ${PRIMARY_BUTTON_CLASS} disabled:cur
     address the original. A commented-out import is neither an active one nor a
     place to insert after. */
 function maskCssComments(css: string): string {
-  return css.replace(/\/\*[\s\S]*?\*\//g, (match) => ' '.repeat(match.length))
+  return css.replace(CSS_COMMENT, (match) => ' '.repeat(match.length))
 }
+
+const CSS_COMMENT = /\/\*[\s\S]*?\*\//g
 
 const GUREN_IMPORT_RE = /@import\s+(?:url\(\s*)?['"](?:\.\/)?guren\.css['"]/
 
@@ -75,8 +78,10 @@ export async function ensureGurenUiTokens(cwd: string = process.cwd()): Promise<
 }
 
 const TOKENS_BLOCK = 'guren:tokens'
-const TOKENS_OPEN = /^\/\*\s*guren:tokens\s+begin\b.*\*\/$/u
+const TOKENS_OPEN = /^\/\*\s*guren:tokens\s+begin\b/u
 const TOKENS_CLOSE = /^\/\*\s*guren:tokens\s+end\s*\*\/$/u
+
+const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex')
 
 /**
  * sha256 of every guren.css a release wrote before the sheet carried markers, read with LF line
@@ -88,6 +93,16 @@ export const SHIPPED_UNMARKED_SHEETS: ReadonlySet<string> = new Set([
   '3b4a633fd3c5635804112cb3d4d12adfa0586df73f2a5900248cd43a8c3bc57c',
 ])
 
+/**
+ * sha256 of every `guren:tokens` block a release shipped, markers included, lines joined by LF.
+ * Only a block listed here is replaced: any other was edited, or written by a newer Guren than the
+ * running CLI. Append the hash of each new block; `tests/guren-css-upgrade.test.ts` fails until the
+ * shipped block is listed.
+ */
+export const SHIPPED_TOKEN_BLOCKS: ReadonlySet<string> = new Set([
+  '2b56a75e643f0c15db89d922115042a78ca7ebc7d415160e12fcd54f154d0f57',
+])
+
 interface TokenSheet {
   lines: string[]
   eol: '\n' | '\r\n'
@@ -96,33 +111,19 @@ interface TokenSheet {
   problems: string[]
 }
 
-/** Whether each line starts inside a block comment, so a marker commented out is no marker. */
-function linesInComment(lines: readonly string[]): boolean[] {
-  let inComment = false
-  let quote: string | undefined
-  return lines.map((line) => {
-    const startsInComment = inComment
-    for (let index = 0; index < line.length; index++) {
-      const pair = line.slice(index, index + 2)
-      if (inComment) {
-        if (pair === '*/') {
-          inComment = false
-          index++
-        }
-      } else if (quote) {
-        if (line[index] === '\\') index++
-        else if (line[index] === quote) quote = undefined
-      } else if (pair === '/*') {
-        inComment = true
-        index++
-      } else if (line[index] === '"' || line[index] === "'") {
-        quote = line[index]
-      }
-    }
-    // A CSS string cannot span lines without an escape, so an unterminated one ends here.
-    quote = undefined
-    return startsInComment
-  })
+/**
+ * Each line that holds one comment and nothing else, by the comment rule {@link maskCssComments}
+ * uses, so a marker inside a longer comment or beside a rule is no marker.
+ */
+function commentLines(css: string, lines: readonly string[]): Map<number, string> {
+  const found = new Map<number, string>()
+  let line = 0
+  let scanned = 0
+  for (const match of css.matchAll(CSS_COMMENT)) {
+    for (; scanned < match.index; scanned++) if (css[scanned] === '\n') line++
+    if (lines[line]?.trim() === match[0]) found.set(line, match[0])
+  }
+  return found
 }
 
 /**
@@ -133,7 +134,6 @@ function linesInComment(lines: readonly string[]): boolean[] {
 export function readTokenSheet(css: string): TokenSheet {
   const eol = css.includes('\r\n') ? '\r\n' : '\n'
   const lines = css.split(/\r?\n/u)
-  const inComment = linesInComment(lines)
   const problems: string[] = []
   let block: TokenSheet['block']
   let open: number | undefined
@@ -141,13 +141,11 @@ export function readTokenSheet(css: string): TokenSheet {
     if (open !== undefined) problems.push(`line ${open + 1}: the block "${TOKENS_BLOCK}" opens and never closes`)
     open = undefined
   }
-  lines.forEach((line, index) => {
-    if (inComment[index]) return
-    const text = line.trim()
-    if (TOKENS_OPEN.test(text)) {
+  for (const [index, comment] of commentLines(css, lines)) {
+    if (TOKENS_OPEN.test(comment)) {
       unclosed()
       open = index
-    } else if (TOKENS_CLOSE.test(text)) {
+    } else if (TOKENS_CLOSE.test(comment)) {
       if (open === undefined) {
         problems.push(`line ${index + 1}: the block "${TOKENS_BLOCK}" closes and never opened`)
       } else if (block) {
@@ -158,17 +156,25 @@ export function readTokenSheet(css: string): TokenSheet {
         open = undefined
       }
     }
-  })
+  }
   unclosed()
   return { lines, eol, ...(block ? { block } : {}), problems }
 }
 
+/** The block's lines, markers included; the caller has read a block. */
+function blockLines(sheet: TokenSheet): string[] {
+  const { open, close } = sheet.block!
+  return sheet.lines.slice(open, close + 1)
+}
+
 export type TokenSheetPlan =
   | { kind: 'current' }
-  /** Marked, with a block other than the shipped one: `next` replaces the block alone. */
+  /** A block an earlier release shipped: `next` replaces the block alone. */
   | { kind: 'update'; next: string }
   /** Unmarked, and byte-identical to a sheet an earlier release wrote. */
   | { kind: 'adopt'; next: string }
+  /** A block no release shipped: edited, or newer than this CLI. */
+  | { kind: 'edited' }
   /** Unmarked and edited: nothing tells the tokens from the user's text. */
   | { kind: 'unmarked' }
   | { kind: 'unsafe'; problems: string[] }
@@ -182,90 +188,36 @@ export function planTokenSheet(current: string, shipped: string): TokenSheetPlan
   if (!source.block || source.problems.length > 0) {
     throw new Error(`The shipped ${TOKENS_PATH} carries no readable ${TOKENS_BLOCK} block: ${source.problems.join('; ')}`)
   }
-  const shippedBlock = source.lines.slice(source.block.open, source.block.close + 1)
 
   if (!sheet.block) {
-    const digest = createHash('sha256').update(current.replace(/\r\n/gu, '\n')).digest('hex')
-    if (!SHIPPED_UNMARKED_SHEETS.has(digest)) return { kind: 'unmarked' }
+    if (!SHIPPED_UNMARKED_SHEETS.has(sha256(current.replace(/\r\n/gu, '\n')))) return { kind: 'unmarked' }
     return { kind: 'adopt', next: source.lines.join(sheet.eol) }
   }
 
+  const block = blockLines(sheet).join('\n')
+  const shippedBlock = blockLines(source)
+  if (block === shippedBlock.join('\n')) return { kind: 'current' }
+  if (!SHIPPED_TOKEN_BLOCKS.has(sha256(block))) return { kind: 'edited' }
   const { open, close } = sheet.block
-  const block = sheet.lines.slice(open, close + 1)
-  if (block.length === shippedBlock.length && block.every((line, index) => line === shippedBlock[index])) {
-    return { kind: 'current' }
-  }
   const next = [...sheet.lines.slice(0, open), ...shippedBlock, ...sheet.lines.slice(close + 1)]
   return { kind: 'update', next: next.join(sheet.eol) }
 }
 
-export interface TokenSheetVerdict {
-  status: 'pass' | 'warn'
-  message: string
-  fix?: string
-  manualFix?: string
-  canAutofix?: boolean
+/** The plan for the app's own sheet, or `undefined` when it has none. Throws when it cannot be read. */
+export async function planAppTokenSheet(cwd: string): Promise<TokenSheetPlan | undefined> {
+  const current = await readIfExists(cwd, TOKENS_PATH)
+  return current === null ? undefined : planTokenSheet(current, loadScaffoldTemplate(SHIPPED_SHEET))
 }
 
 /** The sheet the running CLI ships, from the app root when it is installed there. */
-function shippedSheetLocation(cwd: string): string {
+export function shippedTokenSheetLocation(cwd: string): string {
   const path = scaffoldTemplatePath(SHIPPED_SHEET)
   const fromApp = relative(cwd, path)
   return fromApp.startsWith('..') || isAbsolute(fromApp) ? path : fromApp
 }
 
-/** `guren doctor`'s reading of the app's token sheet; `guren upgrade` applies the fix it offers. */
-export async function judgeTokenSheet(cwd: string): Promise<TokenSheetVerdict> {
-  const current = await readIfExists(cwd, TOKENS_PATH)
-  if (current === null) return { status: 'pass', message: `No ${TOKENS_PATH}; the app does not use the Guren UI tokens.` }
-
-  const plan = planTokenSheet(current, loadScaffoldTemplate(SHIPPED_SHEET))
-  switch (plan.kind) {
-    case 'current':
-      return { status: 'pass', message: `${TOKENS_PATH} carries the Guren UI tokens this CLI ships.` }
-    case 'update':
-      return {
-        status: 'warn',
-        message: `The ${TOKENS_BLOCK} block in ${TOKENS_PATH} differs from the one this CLI ships.`,
-        fix: `Run \`guren upgrade\` to replace the block between the ${TOKENS_BLOCK} markers; text outside them is kept.`,
-        canAutofix: true,
-      }
-    case 'adopt':
-      return {
-        status: 'warn',
-        message: `${TOKENS_PATH} is an unedited sheet from an earlier release, with no ${TOKENS_BLOCK} markers to update it by.`,
-        fix: `Run \`guren upgrade\` to replace it with the current sheet, whose ${TOKENS_BLOCK} block later upgrades keep current.`,
-        canAutofix: true,
-      }
-    case 'unmarked': {
-      const steps =
-        `Copy your own rules out of ${TOKENS_PATH}, replace the file with ${shippedSheetLocation(cwd)}, `
-        + 'and add your rules back after its `/* guren:tokens end */` line.'
-      return {
-        status: 'warn',
-        message: `${TOKENS_PATH} has no ${TOKENS_BLOCK} markers and differs from every shipped sheet, so upgrades cannot update its tokens.`,
-        fix: steps,
-        manualFix: steps,
-      }
-    }
-    case 'unsafe': {
-      const steps = `Leave one \`/* guren:tokens begin … */\` line and one \`/* guren:tokens end */\` line after it in ${TOKENS_PATH}.`
-      return {
-        status: 'warn',
-        message: `The ${TOKENS_BLOCK} markers in ${TOKENS_PATH} cannot be rewritten safely: ${plan.problems.join('; ')}.`,
-        fix: steps,
-        manualFix: steps,
-      }
-    }
-  }
-}
-
-/** Rewrite the app's token sheet when {@link planTokenSheet} allows it; reports whether it wrote. */
-export async function updateTokenSheet(cwd: string): Promise<boolean> {
-  const current = await readIfExists(cwd, TOKENS_PATH)
-  if (current === null) return false
-  const plan = planTokenSheet(current, loadScaffoldTemplate(SHIPPED_SHEET))
-  if (plan.kind !== 'update' && plan.kind !== 'adopt') return false
-  await writeFile(resolve(cwd, TOKENS_PATH), plan.next, 'utf8')
-  return true
+/** Rewrite the app's token sheet when {@link planTokenSheet} allows it. */
+export async function updateTokenSheet(cwd: string): Promise<void> {
+  const plan = await planAppTokenSheet(cwd)
+  if (plan?.kind === 'update' || plan?.kind === 'adopt') await writeFileAtomic(resolve(cwd, TOKENS_PATH), plan.next)
 }

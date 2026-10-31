@@ -1651,7 +1651,8 @@ const upgradeCommand = defineCommand({
 
     if (args['dry-run']) {
       consola.info('Dry run complete. Files were not modified.')
-    } else if (result.updatedDependencies.length > 0 || result.autofixes.some((autofix) => autofix.applied)) {
+    } else if (result.updatedDependencies.length > 0) {
+      // Applied autofixes name their own files in the box above; this line is the manifest's.
       consola.info(`Updated ${result.packageJsonPath}`)
     }
   },

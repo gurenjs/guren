@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createTempWorkspace, type TempWorkspace } from './helpers'
-import { judgeTokenSheet, planTokenSheet, readTokenSheet, SHIPPED_UNMARKED_SHEETS, updateTokenSheet } from '../src/guren-css'
+import { getDoctorRuleEvaluations } from '../src/doctor'
+import { planTokenSheet, readTokenSheet, SHIPPED_TOKEN_BLOCKS, SHIPPED_UNMARKED_SHEETS } from '../src/guren-css'
 import { loadScaffoldTemplate } from '../src/scaffold-templates'
 import { upgradeCanary } from '../src/upgrade'
 
@@ -39,36 +40,51 @@ describe('readTokenSheet', () => {
     expect(readTokenSheet(`${block}${block}`).problems).toEqual(['line 4: the block "guren:tokens" appears twice'])
   })
 
-  it('ignores a marker inside a block comment', () => {
-    const sheet = readTokenSheet(`/*\n${CLOSE.slice(0, -2)}\n*/\n${OPEN}\n${CLOSE}\n`)
+  it('ignores a marker-shaped line inside a longer comment', () => {
+    // Without the comment rule, line 2 reads as a close with no open.
+    const sheet = readTokenSheet(`/* notes:\n${CLOSE}\n${OPEN}\n${CLOSE}\n`)
     expect(sheet.problems).toEqual([])
-    expect(sheet.block).toEqual({ open: 3, close: 4 })
+    expect(sheet.block).toEqual({ open: 2, close: 3 })
+  })
+
+  it('ignores a marker sharing its line with a rule', () => {
+    expect(readTokenSheet(`${OPEN}\n${CLOSE} .brand {}\n`).problems).toEqual(['line 1: the block "guren:tokens" opens and never closes'])
   })
 })
 
+const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex')
+
+function blockOf(sheet: string): string {
+  const read = readTokenSheet(sheet)
+  return read.lines.slice(read.block!.open, read.block!.close + 1).join('\n')
+}
+
 describe('planTokenSheet', () => {
-  const sheetWith = (block: string, before = '', after = ''): string => `${before}${OPEN}\n${block}\n${CLOSE}\n${after}`
+  /** A later release's sheet, so the block shipped today is the earlier release's. */
+  const newer = shipped.replace('--g-accent: #db1b1b;', '--g-accent: #c81818;')
+
+  it('lists the shipped block among the released ones', () => {
+    // Append the new block's hash to SHIPPED_TOKEN_BLOCKS whenever the sheet changes.
+    expect(SHIPPED_TOKEN_BLOCKS.has(sha256(blockOf(shipped)))).toBe(true)
+  })
 
   it('leaves the shipped sheet as it is', () => {
     expect(planTokenSheet(shipped, shipped)).toEqual({ kind: 'current' })
   })
 
-  it('replaces the block alone and keeps the text around it', () => {
-    const current = sheetWith(':root { --g-accent: #000; }', '/* mine */\n', '.brand { color: red; }\n')
-    const plan = planTokenSheet(current, shipped)
-    expect(plan.kind).toBe('update')
-    const next = (plan as { next: string }).next
-    expect(next.startsWith('/* mine */\n/* guren:tokens begin')).toBe(true)
-    expect(next.endsWith(`${CLOSE}\n.brand { color: red; }\n`)).toBe(true)
-    expect(next).toContain('--g-accent: #db1b1b;')
-    expect(planTokenSheet(next, shipped)).toEqual({ kind: 'current' })
+  it('replaces a released block alone and keeps the text around it', () => {
+    const plan = planTokenSheet(`/* mine */\n${shipped}.brand { color: red; }\n`, newer)
+    expect(plan).toEqual({ kind: 'update', next: `/* mine */\n${newer}.brand { color: red; }\n` })
   })
 
   it('keeps CRLF line ends', () => {
-    const plan = planTokenSheet(sheetWith(':root {}', '', '.x {}\n').replace(/\n/g, '\r\n'), shipped)
-    const next = (plan as { next: string }).next
-    expect(next).not.toMatch(/[^\r]\n/)
-    expect(planTokenSheet(next, shipped)).toEqual({ kind: 'current' })
+    const crlf = (text: string): string => text.replace(/\n/g, '\r\n')
+    expect(planTokenSheet(crlf(`${shipped}.x {}\n`), newer)).toEqual({ kind: 'update', next: crlf(`${newer}.x {}\n`) })
+  })
+
+  it('leaves a block no release shipped: edited, or newer than this CLI', () => {
+    expect(planTokenSheet(newer, shipped)).toEqual({ kind: 'edited' })
+    expect(planTokenSheet(`${OPEN}\n:root {}\n${CLOSE}\n`, shipped)).toEqual({ kind: 'edited' })
   })
 
   it('adopts every sheet released before the markers', async () => {
@@ -77,7 +93,7 @@ describe('planTokenSheet', () => {
       const sheet = await unmarkedRelease(name)
       expect(planTokenSheet(sheet, shipped)).toEqual({ kind: 'adopt', next: shipped })
       expect(planTokenSheet(sheet.replace(/\n/g, '\r\n'), shipped)).toEqual({ kind: 'adopt', next: shipped.replace(/\n/g, '\r\n') })
-      digests.push(createHash('sha256').update(sheet).digest('hex'))
+      digests.push(sha256(sheet))
     }
     expect(new Set(digests)).toEqual(new Set(SHIPPED_UNMARKED_SHEETS))
   })
@@ -94,6 +110,8 @@ describe('planTokenSheet', () => {
 describe('the guren-ui-tokens doctor rule', () => {
   let workspace: TempWorkspace
   const sheetPath = (): string => join(workspace.dir, 'resources/css/guren.css')
+  const tokensCheck = async () =>
+    (await getDoctorRuleEvaluations({ cwd: workspace.dir })).evaluations.find((evaluation) => evaluation.check.key === 'guren-ui-tokens')!
 
   beforeEach(async () => {
     workspace = await createTempWorkspace('guren-css-upgrade-')
@@ -105,35 +123,36 @@ describe('the guren-ui-tokens doctor rule', () => {
     await workspace.cleanup()
   })
 
-  it('passes an app with no token sheet and writes none', async () => {
-    await workspace.cleanup()
-    workspace = await createTempWorkspace('guren-css-upgrade-')
-    expect((await judgeTokenSheet(workspace.dir)).status).toBe('pass')
-    expect(await updateTokenSheet(workspace.dir)).toBe(false)
+  it('passes an app with no token sheet', async () => {
+    expect((await tokensCheck()).check.status).toBe('pass')
   })
 
-  it('reports an edited unmarked sheet with the steps to adopt the markers, and leaves it', async () => {
+  it('reports an edited unmarked sheet with the steps to adopt the markers, and offers no autofix', async () => {
     await writeFile(sheetPath(), ':root { --g-accent: #000; }\n', 'utf8')
-    const verdict = await judgeTokenSheet(workspace.dir)
-    expect(verdict.status).toBe('warn')
-    expect(verdict.canAutofix).toBeUndefined()
-    expect(verdict.manualFix).toContain('/* guren:tokens end */')
-    expect(await updateTokenSheet(workspace.dir)).toBe(false)
-    expect(await readFile(sheetPath(), 'utf8')).toBe(':root { --g-accent: #000; }\n')
+    const { check, autofix } = await tokensCheck()
+    expect(check.status).toBe('warn')
+    expect(autofix).toBeNull()
+    expect(check.manualFix).toContain('/* guren:tokens end */')
+  })
+
+  it('reports a sheet it cannot read instead of failing the run', async () => {
+    await mkdir(sheetPath())
+    const { check } = await tokensCheck()
+    expect(check.status).toBe('warn')
+    expect(check.message).toContain('could not be read')
   })
 
   it('is applied by guren upgrade, and previewed under --dry-run', async () => {
-    const stale = `${OPEN}\n:root { --g-accent: #000; }\n${CLOSE}\n.brand {}\n`
-    await writeFile(sheetPath(), stale, 'utf8')
+    const released = await unmarkedRelease(UNMARKED_RELEASES[1])
+    await writeFile(sheetPath(), released, 'utf8')
 
     const preview = await upgradeCanary({ cwd: workspace.dir, tag: 'canary', dryRun: true })
     expect(preview.autofixes.find((autofix) => autofix.key === 'guren-ui-tokens')?.applied).toBe(false)
-    expect(await readFile(sheetPath(), 'utf8')).toBe(stale)
+    expect(await readFile(sheetPath(), 'utf8')).toBe(released)
 
     const result = await upgradeCanary({ cwd: workspace.dir, tag: 'canary' })
     expect(result.autofixes.find((autofix) => autofix.key === 'guren-ui-tokens')?.applied).toBe(true)
-    const updated = await readFile(sheetPath(), 'utf8')
-    expect(updated.endsWith(`${CLOSE}\n.brand {}\n`)).toBe(true)
-    expect((await judgeTokenSheet(workspace.dir)).status).toBe('pass')
+    expect(await readFile(sheetPath(), 'utf8')).toBe(shipped)
+    expect((await tokensCheck()).check.status).toBe('pass')
   })
 })

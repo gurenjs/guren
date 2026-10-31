@@ -40,7 +40,7 @@ bun run test
 /* guren:tokens end */
 ```
 
-When a release changes the tokens, `bunx guren doctor` reports the `guren-ui-tokens` check and `bunx guren upgrade` replaces the block. Lines outside the markers stay as you wrote them, so put your own overrides after the end marker. `bunx guren upgrade` runs the CLI the app has installed, so a token change reaches the file on the first upgrade after `bun install` brings in the release that carries it.
+When a release changes the tokens, `bunx guren doctor` reports the `guren-ui-tokens` check and `bunx guren upgrade` replaces the block. Lines outside the markers stay as you wrote them, so put your own overrides after the end marker. Upgrade replaces only a block some release shipped: if you edited the block, or a newer Guren wrote it, doctor warns and leaves the file to you. `bunx guren upgrade` runs the CLI the app has installed, so a token change reaches the file on the first upgrade after `bun install` brings in the release that carries it.
 
 An app created before the markers existed has a `guren.css` without them. If you never edited it, `bunx guren upgrade` swaps it for the marked sheet. If you did, doctor leaves it alone and prints how to move your edits after the end marker of the current sheet. Broken markers (a begin with no end, an end with no begin, two blocks) are reported too, and upgrade writes nothing to the file until you fix them.
 
