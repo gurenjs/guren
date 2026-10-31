@@ -12,7 +12,7 @@
 import { readPlanTemplate } from './assets'
 import { planDiagram } from './diagram'
 import { layoutPlanFlows } from './flow'
-import { planHashOrNull } from './identity'
+import { planDigest, planHashOrNull } from './identity'
 import { impactBreakingChanges, type PlanImpactEntry } from './impact'
 import { loadPlanDictionaries, matchPlanLocale, type PlanLocale } from './locales'
 import { hasBaseline, listPlanElements, type Plan, type PlanDraft } from './schema'
@@ -226,6 +226,7 @@ export function buildPlanPayload(input: RenderPlanInput): PlanPagePayload {
   return {
     plan,
     planHash: planHashOrNull(plan),
+    planDigest: planDigest(plan),
     checks: [...(input.checks ?? [])],
     breaking: input.impact ? [...breaking, ...impactBreakingChanges(plan, input.impact, breaking)] : breaking,
     impact: input.impact ? [...input.impact] : null,

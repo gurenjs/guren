@@ -7,6 +7,16 @@ export function planPagePath(slug: string): string {
   return `/_guren/plans/${encodeURIComponent(slug)}`
 }
 
+/** The plan page `plan:render` wrote, served for review with its feedback saved (RFC 0030 §8). */
+export function planReviewPath(slug: string): string {
+  return `${planPagePath(slug)}/review`
+}
+
+/** What the person sends the agent once the review is saved: the file, never the review itself. */
+export function savedReviewPrompt(file: string, slug: string): string {
+  return `Revise ${file} from my review with the plan-write skill. The review is saved in .guren/plans/${slug}.feedback.json.`
+}
+
 /** The slug a plan page is served under, or `undefined` off a plan page. */
 export function planSlugFromPath(pathname: string): string | undefined {
   const match = PLAN_PAGE.exec(pathname)

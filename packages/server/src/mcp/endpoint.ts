@@ -10,6 +10,19 @@ export { isLoopbackAddress, isLoopbackOrigin } from '../http/middleware/loopback
 
 export const MCP_ENDPOINT_PATH = '/_guren/mcp'
 
+/** Where the Dev Center saves a plan review's feedback (RFC 0030 §8), its one write route. */
+export const DEV_CENTER_FEEDBACK_ROUTE = '/_guren/plans/:slug/feedback'
+const DEV_CENTER_FEEDBACK_PATH = /^\/_guren\/plans\/[^/]+\/feedback$/
+
+/**
+ * The page posts without an `XSRF-TOKEN`: an app with no auth issues none. The CLI handler
+ * requires the request's own `Origin` instead, behind the loopback guard, and the route
+ * exists only while {@link isMcpEndpointEnabled} holds.
+ */
+export function isDevCenterFeedbackRequest(path: string): boolean {
+  return DEV_CENTER_FEEDBACK_PATH.test(path) && isMcpEndpointEnabled()
+}
+
 /**
  * Whether the MCP endpoint is mounted: opt-in via `GUREN_MCP=1`, never in
  * production (it exposes project introspection and code generation). The env

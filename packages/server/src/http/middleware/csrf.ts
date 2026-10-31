@@ -5,7 +5,7 @@ import { defaultCookieSecure, getSessionFromContext, type Session } from './sess
 import { deriveAppKeyring, getAppKeyringFromEnv } from '../../encryption/app-key'
 import { MessageSigner } from '../../encryption/MessageSigner'
 import { secureCompare } from '../../encryption/Hash'
-import { isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from '../../mcp/endpoint'
+import { isDevCenterFeedbackRequest, isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from '../../mcp/endpoint'
 import { hasBearerHeader } from '../../auth/api-token'
 import { readAgentPrincipal } from '../../internal/agent-principal'
 
@@ -122,9 +122,10 @@ function isExcluded(path: string, excludePatterns: string[]): boolean {
  * MCP clients POST JSON-RPC without a preceding GET, so they never pick up an
  * `XSRF-TOKEN`. Nothing is exempted in production or without `GUREN_MCP=1` —
  * the route does not exist there, and the endpoint guards local-only access.
+ * The Dev Center's feedback route is exempt on the same terms, and checks its own `Origin`.
  */
 function isMcpEndpointRequest(path: string): boolean {
-  return path === MCP_ENDPOINT_PATH && isMcpEndpointEnabled()
+  return (path === MCP_ENDPOINT_PATH && isMcpEndpointEnabled()) || isDevCenterFeedbackRequest(path)
 }
 
 /**

@@ -11,14 +11,15 @@ import { PLAN_VERSION } from '../version'
 import { indexPlan } from './card'
 import { mountDiagram } from './diagram'
 import { byId } from './dom'
-import { mountFeedback } from './feedback'
+import { feedbackDocument, mountFeedback } from './feedback'
 import { renderHeader, renderPinned } from './header'
 import { initLocale, mountLocaleSwitch, words } from './locale'
 import { mountFilters, mountTabs } from './navigation'
 import type { PlanPagePayload } from './payload'
 import { refreshAnswers, renderQuestions } from './questions'
-import { loadReview } from './review'
+import { loadReview, seedReview } from './review'
 import { diagramHost } from './sections'
+import { loadServedFeedback, servedReview, startAutosave } from './served'
 
 const REFUSED_CHROME = ['plan-meta', 'plan-scope', 'questions', 'tabs', 'controls', 'panels', 'footer']
 
@@ -32,7 +33,7 @@ function refuse(found: unknown): void {
   for (const id of REFUSED_CHROME) byId(id).hidden = true
 }
 
-function start(): void {
+async function start(): Promise<void> {
   const data = JSON.parse(byId('plan-data').textContent) as PlanPagePayload
   initLocale(data.i18n)
 
@@ -42,17 +43,23 @@ function start(): void {
     return
   }
 
+  // Read before anything renders: each card and question starts from the review it shows.
+  const served = servedReview()
+  const saved = served ? await loadServedFeedback(served.feedbackUrl, data.planDigest) : null
+
   indexPlan(data)
   renderHeader(data)
   renderPinned(data)
-  renderQuestions(data.plan.questions)
+  renderQuestions(data.plan.questions, saved?.answers)
   loadReview(data.planHash)
+  if (saved) seedReview(saved.elements)
   mountTabs(data)
   refreshAnswers()
   if (diagramHost) mountDiagram(diagramHost, data.diagram)
   mountFilters(data.entities)
-  mountFeedback(data)
+  mountFeedback(data, served?.savedTo ?? null)
+  if (served) startAutosave(served.feedbackUrl, data.planDigest, () => feedbackDocument(data.planHash), byId('save-status'))
   mountLocaleSwitch()
 }
 
-start()
+void start()

@@ -36,6 +36,12 @@
   "footer.copied": "Copied the feedback JSON.",
   "footer.clipboardRefused": "The browser refused the clipboard. Use Download instead.",
   "footer.downloaded": "Downloaded feedback.json.",
+  "footer.servedNote": "Comment on any element from the mark in its heading. In the Dev Center each change is saved to {file}, which {command} reads when the agent revises the plan. Nothing else in the project changes.",
+  "footer.servedPrompt": "Revise {plan} from my review with the plan-write skill. The review is saved in {file}.",
+  "footer.saving": "Saving the review…",
+  "footer.saved": "Review saved at {time}.",
+  "footer.saveFailed": "The review was not saved: {reason}",
+  "footer.serverUnreachable": "the development server did not answer.",
 
   "review.approve": "Approve",
   "review.requestChanges": "Request changes",

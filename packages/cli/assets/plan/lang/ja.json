@@ -36,6 +36,12 @@
   "footer.copied": "フィードバックの JSON をコピーしました。",
   "footer.clipboardRefused": "ブラウザがクリップボードへの書き込みを拒否しました。ダウンロードを使ってください。",
   "footer.downloaded": "feedback.json をダウンロードしました。",
+  "footer.servedNote": "各要素の見出しにある印からコメントを付けられます。Dev Center では変更するたびに {file} へ保存され、エージェントがプランを改訂するときに {command} がそれを読みます。プロジェクトのほかのファイルは変わりません。",
+  "footer.servedPrompt": "{plan} に私のレビューを plan-write スキルで反映してください。レビューは {file} に保存してあります。",
+  "footer.saving": "レビューを保存しています…",
+  "footer.saved": "{time} にレビューを保存しました。",
+  "footer.saveFailed": "レビューを保存できませんでした: {reason}",
+  "footer.serverUnreachable": "開発サーバーから応答がありません。",
 
   "review.approve": "承認",
   "review.requestChanges": "修正を依頼",

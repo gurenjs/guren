@@ -14,6 +14,7 @@ import { readPlanApprovalStanding } from './plan/approvals'
 import { touchedModels } from './plan/close-docs'
 import { planHashOrNull } from './plan/identity'
 import { readPlanClosedHash } from './plan/open-plan'
+import { readSavedPlanFeedback, summarizeSavedFeedback, type SavedFeedbackSummary } from './plan/saved-feedback'
 import type { Plan } from './plan/schema'
 import { planDigest, planSlug, readPlanState } from './plan/state'
 import { describePlanTask, derivePlanTasks, listPlanSteps } from './plan/tasks'
@@ -53,8 +54,10 @@ export interface DocsViewerOpenPlan {
   entities: string[]
   steps: DocsViewerPlanStep[]
   waivers: Array<{ elementId: string; reason: string; at: string; by?: string }>
-  /** `.guren/plans/<slug>.state.json` or the decision log would not read. */
+  /** `.guren/plans/<slug>.state.json`, the decision log or the saved review would not read. */
   unreadable?: string[]
+  /** The review the Dev Center saved for this plan (RFC 0030 §8), counted rather than carried. */
+  feedback?: SavedFeedbackSummary
   /** The commands the records say come next, in order; a reading of them, not `plan:next`'s decision. */
   next: string[]
   /** `plan:status` for what the viewer does not read: element states and freshness. */
@@ -115,7 +118,12 @@ async function readViewerPlan(context: PlanReadContext, path: string, file: stri
     if (closed.hash === hash) return { hash }
   }
 
-  const [standingRead, stateRead, log] = await Promise.all([readPlanApprovalStanding(path, plan), readPlanState(appRoot, slug), readPlanWaivers(path, plan)])
+  const [standingRead, stateRead, log, review] = await Promise.all([
+    readPlanApprovalStanding(path, plan),
+    readPlanState(appRoot, slug),
+    readPlanWaivers(path, plan),
+    readSavedPlanFeedback(appRoot, slug),
+  ])
   const standing: DocsViewerPlanStanding = standingRead?.state ?? 'draft'
   const digest = planDigest(plan)
   const records = stateRead.state?.steps ?? {}
@@ -151,7 +159,7 @@ async function readViewerPlan(context: PlanReadContext, path: string, file: stri
     next = [command('plan:approve')]
   } else reason = `The approvals beside the plan cannot be read, so it counts as approved by no one: ${standingRead.reason}`
 
-  const unreadable = [stateRead.unreadable, log.unreadable].filter((entry): entry is string => entry !== undefined)
+  const unreadable = [stateRead.unreadable, log.unreadable, review.unreadable].filter((entry): entry is string => entry !== undefined)
   return {
     hash,
     open: {
@@ -167,6 +175,7 @@ async function readViewerPlan(context: PlanReadContext, path: string, file: stri
       steps,
       waivers: [...log.waivers.values()].map(({ elementId, reason: why, at, by }) => ({ elementId, reason: why, at, ...(by ? { by } : {}) })),
       ...(unreadable.length > 0 ? { unreadable } : {}),
+      ...(review.saved ? { feedback: summarizeSavedFeedback(review.saved, digest) } : {}),
       next,
       status: command('plan:status'),
     },

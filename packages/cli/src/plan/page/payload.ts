@@ -43,6 +43,8 @@ export interface PlanPagePayload {
   plan: PlanDraft | Plan
   /** Absent for a draft: identity covers the baseline, which a draft does not have. */
   planHash: string | null
+  /** `planDigest()`: names a draft too, so the Dev Center saves feedback only against the plan the page shows. */
+  planDigest: string
   checks: PlanCheckResult[]
   breaking: PlanBreakingChange[]
   /** `null` when the page was rendered with no application to read, which is not an empty Impact. */

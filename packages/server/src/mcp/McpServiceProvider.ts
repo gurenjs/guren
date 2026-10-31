@@ -1,7 +1,7 @@
 import type { RuntimeErrorBuffer, RuntimeErrorQuery } from './runtime-errors'
 import { RUNTIME_ERRORS_BINDING, RUNTIME_ERRORS_PATH } from './runtime-error-capture'
 import { ServiceProvider } from '../container/ServiceProvider'
-import { createMcpAccessGuard, isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from './endpoint'
+import { createMcpAccessGuard, DEV_CENTER_FEEDBACK_ROUTE, isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from './endpoint'
 
 /**
  * What this provider calls on `@guren/cli`, spelled here: the package cannot be
@@ -63,10 +63,12 @@ export class McpServiceProvider extends ServiceProvider {
     // Optional capability: older CLIs keep serving their existing MCP tools.
     if (cli.createDevCenterHandler) {
       const center = cli.createDevCenterHandler({ cwd: process.cwd() })
-      for (const path of ['/_guren', '/_guren/', '/_guren/graph.json', '/_guren/plans.json', '/_guren/plans/:slug']) {
+      for (const path of ['/_guren', '/_guren/', '/_guren/graph.json', '/_guren/plans.json', '/_guren/plans/:slug', '/_guren/plans/:slug/review', DEV_CENTER_FEEDBACK_ROUTE]) {
         hono.use(path, createMcpAccessGuard())
         hono.get(path, (ctx) => isMcpEndpointEnabled() ? center.fetch(ctx.req.raw) : ctx.notFound())
       }
+      // The Dev Center's one write (RFC 0030 §8): the CLI checks the Origin, the schema and the plan's digest.
+      hono.post(DEV_CENTER_FEEDBACK_ROUTE, (ctx) => isMcpEndpointEnabled() ? center.fetch(ctx.req.raw) : ctx.notFound())
     }
 
     const buffer = this.container.makeOptional<RuntimeErrorBuffer>(RUNTIME_ERRORS_BINDING)

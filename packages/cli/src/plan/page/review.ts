@@ -1,6 +1,7 @@
 /** The verdict and comment someone leaves on an element, kept per plan hash (RFC 0030 §4). */
 
 import type { PlanFeedback } from '../feedback'
+import { reviewChanged } from './changes'
 import { el, idMap, type IdMap } from './dom'
 import { ariaLabel, currentLocale, localise, t, tel } from './locale'
 
@@ -58,7 +59,20 @@ export function loadReview(planHash: string | null): void {
   }
 }
 
+/** The review the Dev Center saved, which replaces what this browser kept: the server's copy is the one `plan:revise` reads. */
+export function seedReview(elements: unknown): void {
+  if (!Array.isArray(elements)) return
+  const stored: Record<string, unknown> = {}
+  for (const entry of elements as unknown[]) {
+    if (!entry || typeof entry !== 'object') continue
+    const { elementId, verdict, comment } = entry as Record<string, unknown>
+    if (typeof elementId === 'string') stored[elementId] = { verdict, comment }
+  }
+  review = restore(stored)
+}
+
 function saveReview(): void {
+  reviewChanged()
   if (!storageKey) return
   try {
     window.localStorage.setItem(storageKey, JSON.stringify(reviewed()))

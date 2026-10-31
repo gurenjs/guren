@@ -3,6 +3,7 @@
 import type { PlanFeedback } from '../feedback'
 import type { PlanQuestion } from '../schema'
 import { card, dependsMarks, linkLine } from './card'
+import { reviewChanged } from './changes'
 import { byId, el } from './dom'
 import { ariaLabel, tel } from './locale'
 
@@ -46,14 +47,14 @@ export function givenAnswers(): PlanFeedback['answers'] {
   })
 }
 
-function questionCard(question: PlanQuestion, questionIndex: number): HTMLElement {
+function questionCard(question: PlanQuestion, questionIndex: number, saved: PlanFeedback['answers'][number] | undefined): HTMLElement {
   // `option` stays null until someone picks one: the assumed answer is
   // preselected so the plan reads the way it was written, and RFC 0030 §4 is
   // explicit that silence is not an answer.
   const answer: Answer = {
     questionId: question.id,
-    option: null,
-    text: '',
+    option: saved && question.options.some((option) => option.label === saved.option) ? (saved.option as string) : null,
+    text: typeof saved?.text === 'string' ? saved.text : '',
     badge: tel('span', 'badge badge-alter', 'badge.unanswered'),
   }
   answers.push(answer)
@@ -68,11 +69,12 @@ function questionCard(question: PlanQuestion, questionIndex: number): HTMLElemen
     // The index, not the id: two questions sharing an id would otherwise put
     // their options in one radio group and answer each other.
     radio.name = 'question-' + questionIndex
-    radio.checked = option.label === question.assumed
+    radio.checked = option.label === (answer.option ?? question.assumed)
     const choose = (): void => {
       if (!radio.checked) return
       answer.option = option.label
       refreshAnswers()
+      reviewChanged()
     }
     // `click` as well as `change`: clicking the preselected option is how
     // someone confirms the assumption, and that fires no `change`.
@@ -93,10 +95,12 @@ function questionCard(question: PlanQuestion, questionIndex: number): HTMLElemen
   answerLabel.appendChild(tel('span', 'note', 'questions.answer'))
   const answerBox = el('textarea')
   answerBox.rows = 2
+  answerBox.value = answer.text
   ariaLabel(answerBox, 'questions.answerTo', { id: question.id })
   answerBox.addEventListener('input', () => {
     answer.text = answerBox.value
     refreshAnswers()
+    reviewChanged()
   })
   answerLabel.appendChild(answerBox)
   body.appendChild(answerLabel)
@@ -113,13 +117,15 @@ function questionCard(question: PlanQuestion, questionIndex: number): HTMLElemen
   })
 }
 
-export function renderQuestions(questions: readonly PlanQuestion[]): void {
+/** `saved` is the Dev Center's copy of the answers, read as untrusted: one naming no option of its question keeps only its text. */
+export function renderQuestions(questions: readonly PlanQuestion[], saved: PlanFeedback['answers'] = []): void {
   if (!questions.length) return
   const panel = el('section', 'panel')
   panel.appendChild(tel('h2', null, 'questions.heading'))
   panel.appendChild(tel('p', 'note', 'questions.note'))
   questions.forEach((question, index) => {
-    panel.appendChild(questionCard(question, index))
+    const given = Array.isArray(saved) ? saved.find((answer) => answer && answer.questionId === question.id) : undefined
+    panel.appendChild(questionCard(question, index, given))
   })
   byId('questions').appendChild(panel)
 }

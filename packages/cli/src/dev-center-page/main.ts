@@ -1,5 +1,5 @@
 import type { GraphNode, GurenApplicationGraph, GraphResult } from '../application-graph'
-import { planPagePath, planSlugFromPath } from '../dev-center-links'
+import { planPagePath, planReviewPath, planSlugFromPath, savedReviewPrompt } from '../dev-center-links'
 import type { PlanOverview } from '../docs-viewer-plans'
 import { commandRow } from '../docs-viewer-page/dom'
 import type { RuntimeErrorResult } from '../runtime-errors'
@@ -213,6 +213,18 @@ function stepRow(step: DevCenterPlan['steps'][number]): HTMLElement {
   row.append(badge, body)
   return row
 }
+function reviewCard(plan: DevCenterPlan): HTMLElement {
+  const link = text('a', 'Review this plan', 'g-btn g-btn-secondary') as HTMLAnchorElement
+  link.href = planReviewPath(plan.slug)
+  const parts: Node[] = [text('p', 'Mark each element and answer the open questions on the page plan:render wrote. Every change is saved for plan:revise to read.', 'meta'), link]
+  const saved = plan.feedback
+  if (saved) {
+    parts.push(text('p', `Saved ${saved.savedAt}: ${saved.approved} approved, ${saved.changes} changes requested, ${saved.comments} commented, ${saved.answers} answered.`, 'meta mono'))
+    if (saved.current) parts.push(text('p', 'Send the agent:', 'meta'), commandRow(savedReviewPrompt(plan.file, plan.slug)))
+    else parts.push(text('p', 'Saved on an earlier version of the plan, so plan:revise will not apply it. Review the plan again.', 'meta warning'))
+  }
+  return card('Review', ...parts)
+}
 function byline(at: string, by: string | undefined): string {
   return by ? `${at} by ${by}` : at
 }
@@ -248,11 +260,8 @@ async function loadPlan(slug: string): Promise<void> {
       if (plan.waivers.length) {
         body.append(card('Waivers', ...plan.waivers.map((waiver) => text('p', `${waiver.elementId}: ${waiver.reason} (${byline(waiver.at, waiver.by)})`, 'meta'))))
       }
-      const rendered = text('p', '', 'meta')
-      const link = text('a', `/_guren/docs/plans/${slug}`, 'mono') as HTMLAnchorElement
-      link.href = `/_guren/docs/plans/${encodeURIComponent(slug)}`
-      rendered.append(document.createTextNode('The rendered plan, once plan:render has written it and GUREN_DOCS=1 is set: '), link)
-      body.append(card('Commands', text('p', 'What the records say comes next, then the full status:', 'meta'), ...[...plan.next, plan.status].map(commandRow), rendered))
+      body.append(reviewCard(plan))
+      body.append(card('Commands', text('p', 'What the records say comes next, then the full status:', 'meta'), ...[...plan.next, plan.status].map(commandRow)))
     }
   } catch (error) {
     status.textContent = `Plan unavailable: ${error instanceof Error ? error.message : 'Read failed'}. Refresh to retry.`

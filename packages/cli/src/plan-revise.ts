@@ -15,11 +15,13 @@ import { readPlanFile } from './plan-render'
 import { describeUnapproved, PLAN_APPROVAL_GATED_COMMANDS, readPlanApprovalStanding } from './plan/approvals'
 import { writeFileAtomic } from './plan/beside'
 import { readPlanDecisions } from './plan/decisions'
-import { FEEDBACK_STDIN, readJsonWithinLimit, readPlanFeedback, recoverStdinDash } from './plan/feedback'
+import { FEEDBACK_STDIN, readJsonWithinLimit, readPlanFeedback, recoverStdinDash, type PlanFeedback } from './plan/feedback'
 import { canonicalJson, planDigest } from './plan/identity'
 import { readPlanRevisionRecords, writePlanRevisionRecord } from './plan/revision-records'
+import { readSavedPlanFeedback, savedFeedbackPath } from './plan/saved-feedback'
 import { createPlanRevision, diffPlans, type PlanReopenedElement, type PlanRevisionRejection, type PlanRevisionOp } from './plan/revision'
 import { hasBaseline, planBaseline, PlanDraftSchema, planSchemaFor, type Plan, type PlanDraft } from './plan/schema'
+import { planSlug } from './plan/state'
 
 export const PLAN_REVISE_REPORT_VERSION = 1
 
@@ -36,6 +38,8 @@ export interface PlanReviseReport {
   reopened: PlanReopenedElement[]
   /** Questions the feedback answered, which the revision removed. */
   answered: string[]
+  /** The review the Dev Center saved, read because `--feedback` was omitted: the file, or why it was left out. */
+  savedFeedback?: { used: string } | { skipped: string }
   /** The plan has a baseline, so the new hash needs `plan:approve` before the gated commands accept it. */
   approvalNeeded: boolean
   /** Elements the decision log waived at the parent hash: a waiver names its hash, so the result inherits none. */
@@ -186,13 +190,28 @@ function revisedDocument(parentDocument: unknown, result: PlanDraft | Plan): Rec
   )
 }
 
+/**
+ * The review the Dev Center saved for this plan (RFC 0030 §8), applied only while it names the plan
+ * as it stands: feedback on an earlier version would lock or answer elements the person never saw.
+ */
+async function savedFeedbackFor(root: string, path: string, plan: PlanDraft | Plan): Promise<{ feedback?: PlanFeedback; report: { used: string } | { skipped: string } } | undefined> {
+  const slug = planSlug(path)
+  const file = toPosixRelative(root, savedFeedbackPath(root, slug))
+  const { saved, unreadable } = await readSavedPlanFeedback(root, slug)
+  if (unreadable) return { report: { skipped: unreadable } }
+  if (!saved) return undefined
+  if (saved.planDigest !== planDigest(plan)) return { report: { skipped: `${file} was saved on another version of the plan, so it was not applied. Render the plan again and review it in the Dev Center.` } }
+  return { feedback: saved.feedback, report: { used: file } }
+}
+
 export async function planReviseFile(planPath: string, options: PlanReviseFileOptions): Promise<PlanReviseReport> {
   refuseInputs(options)
   const cwd = options.cwd ?? process.cwd()
   const { path, plan, document } = await readPlanFile(planPath, cwd)
   const root = resolve(options.app ?? cwd)
   await requireRevisableParent(path, plan)
-  const feedback = options.feedback === undefined ? undefined : await readPlanFeedback(options.feedback, { cwd, stdin: options.stdin })
+  const saved = options.feedback === undefined ? await savedFeedbackFor(root, path, plan) : undefined
+  const feedback = options.feedback === undefined ? saved?.feedback : await readPlanFeedback(options.feedback, { cwd, stdin: options.stdin })
 
   let edited: { child: PlanDraft | Plan; raw: string } | undefined
   let opsDocument: unknown
@@ -244,6 +263,7 @@ export async function planReviseFile(planPath: string, options: PlanReviseFileOp
     ops: revision.ops.length,
     reopened: created.reopened,
     answered: (feedback?.answers ?? []).map((answer) => answer.questionId),
+    ...(saved ? { savedFeedback: saved.report } : {}),
     approvalNeeded: hasBaseline(created.plan),
     waiversLeft,
     ...(decisions.unreadable ? { decisionsUnreadable: decisions.unreadable } : {}),
@@ -260,6 +280,8 @@ export function formatPlanRevise(report: PlanReviseReport, planArgument: string)
   if (report.reopened.length > 0) {
     lines.push('Reopened, though the feedback approved them:', ...report.reopened.map((entry) => `  ${entry.id} (ops[${entry.op}]): ${entry.reason}`))
   }
+  if (report.savedFeedback && 'used' in report.savedFeedback) lines.push(`Applied the review saved in ${report.savedFeedback.used}.`)
+  if (report.savedFeedback && 'skipped' in report.savedFeedback) lines.push(`Warning: ${report.savedFeedback.skipped}`)
   if (report.answered.length > 0) lines.push(`Answered and removed: ${report.answered.join(', ')}`)
   if (report.waiversLeft.length > 0) {
     lines.push(

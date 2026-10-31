@@ -26,7 +26,7 @@ export const PLAN_STATE_VERSION = 1
 /** Where state lives under the application root. `plan:verify` writes the `.gitignore` there. */
 export const PLAN_STATE_DIR = '.guren/plans'
 const STATE_SUFFIX = '.state.json'
-export const PLAN_STATE_GITIGNORE = '*.state.json\n.gitignore\n'
+export const PLAN_STATE_GITIGNORE = '*.state.json\n*.feedback.json\n.gitignore\n'
 
 const PlanCommandRecordSchema = z.object({
   command: z.enum(PLAN_VERIFY_COMMANDS),
@@ -219,8 +219,13 @@ export async function ensurePlanStateIgnored(appRoot: string): Promise<void> {
   await mkdir(dir, { recursive: true })
   const ignore = join(dir, '.gitignore')
   const current = await readFile(ignore, 'utf8').catch(() => undefined)
-  if (current === undefined) await writeFile(ignore, PLAN_STATE_GITIGNORE, 'utf8')
-  else if (!current.split('\n').includes('.gitignore')) await writeFile(ignore, `${current.replace(/\n?$/u, '\n')}.gitignore\n`, 'utf8')
+  if (current === undefined) {
+    await writeFile(ignore, PLAN_STATE_GITIGNORE, 'utf8')
+    return
+  }
+  const lines = current.split('\n')
+  const missing = PLAN_STATE_GITIGNORE.split('\n').filter((line) => line !== '' && !lines.includes(line))
+  if (missing.length > 0) await writeFile(ignore, `${current.replace(/\n?$/u, '\n')}${missing.join('\n')}\n`, 'utf8')
 }
 
 /**

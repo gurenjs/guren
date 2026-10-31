@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { freshApplicationGraph } from './application-graph-fresh'
 import type { GraphResult } from './application-graph'
 import { planSlugFromPath } from './dev-center-links'
+import { handleReviewRequest } from './dev-center-review'
 import { devCenterShell } from './dev-center-shell'
 import { readPlanOverview, type PlanOverview } from './docs-viewer-plans'
 
@@ -37,6 +38,8 @@ export function createDevCenterHandler(options: {
     async fetch(request) {
       const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }
       const path = new URL(request.url).pathname
+      const review = await handleReviewRequest(options.cwd, request)
+      if (review) return review
       if (request.method !== 'GET') return new Response('Method not allowed', { status: 405, headers: { ...headers, Allow: 'GET' } })
       if (path === '/_guren/graph.json') {
         try { return Response.json(await scanAfterArrival(), { headers }) }

@@ -26,8 +26,11 @@ export function planAttention(plan: DevCenterPlan): PlanAttention {
   if (plan.standing === 'unreadable' || plan.standing === 'baseline-removed') {
     return { who: 'person', title: 'Cannot be judged', detail: plan.reason ?? 'The plan or its approvals would not read.' }
   }
+  if ((plan.standing === 'draft' || plan.standing === 'unapproved') && plan.feedback?.current) {
+    return { who: 'person', title: 'Review saved', detail: 'Tell the agent to revise the plan from your review, or approve it with plan:approve once it says what you mean to build.' }
+  }
   if (plan.standing === 'draft') {
-    return { who: 'person', title: 'Review and approve', detail: 'A draft. Read the rendered plan, answer its open questions, and approve it with plan:approve.' }
+    return { who: 'person', title: 'Review and approve', detail: 'A draft. Review it here, answer its open questions, and approve it with plan:approve.' }
   }
   if (plan.standing === 'unapproved') {
     return { who: 'person', title: 'Approve the edited plan', detail: 'Edited after it was approved, so plan:next refuses it until it is approved again.' }
