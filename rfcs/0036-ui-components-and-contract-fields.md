@@ -98,7 +98,10 @@ and is classified as a generator in `PLAN_COMMAND_CLASSES`
 (`packages/cli/src/plan/command-allowlist.ts`), so a plan may list it.
 
 **What it writes.** One file per component under
-`resources/js/components/ui/`, plus an `index.ts` barrel:
+`resources/js/components/ui/`. There is no barrel: a page imports each
+component from its own file (`@/resources/js/components/ui/Field`), so
+installing one more component never requires editing a file the app already
+owns.
 
 | File | Renders | Replaces |
 |------|---------|----------|
@@ -108,7 +111,7 @@ and is classified as a generator in `PLAN_COMMAND_CLASSES`
 | `Textarea.tsx` | `<textarea>`, same styling | `FORM_INPUT_CLASS` on textareas |
 | `Select.tsx` | native `<select>`; `options?: { value, label }[]` or children | nothing today (plans can name `select`) |
 | `Checkbox.tsx` | `<input type="checkbox">` inside its `<label>` | the inline checkbox in `generateFormField()` |
-| `Field.tsx` | label, control, hint and error for one form key (section 2) | `generateFormField()`'s fifteen lines |
+| `Field.tsx` | label, control, hint and error for one form key (section 2.3) | `generateFormField()`'s fifteen lines |
 | `Card.tsx` | `<section>` with `rounded-g-card border-g-line bg-g-panel shadow-g-card`, optional `title` | the card markup on index pages |
 | `Alert.tsx` | `tone: 'ok' \| 'warn' \| 'danger'`; `role="alert"` for danger, `role="status"` otherwise | `calloutRow()` in `make-auth.ts` |
 
@@ -127,6 +130,9 @@ parse-gates them, as with the other static scaffold templates.
 - `guren.css` is written first if absent, through `ensureGurenUiTokens()`.
 - An API-only app is refused through `packages/cli/src/app-surface.ts`, the
   rule the page-emitting scaffolders already share.
+- `add ui` checks that the installed `@guren/inertia-client` exports the
+  `forms` subpath before writing `Field.tsx`, and names the upgrade otherwise
+  (Migration Path).
 - Each file opens with a one-line header naming the component and the template
   version it was copied from (`// guren-ui: Field v1`). Nothing reads it in v1;
   it is what an upgrade command needs to tell a pristine copy from an edited
@@ -139,41 +145,46 @@ parse-gates them, as with the other static scaffold templates.
 
 The client cannot import the validator: validator files may import server-only
 modules, and shipping zod to every page for a handful of attributes is the wrong
-trade. Codegen already holds the runtime schema. `generateRouteTypes()` loads
-registered definitions, each carrying `schemas.body` as the Zod object the
-route binds, and renders it as a type through `schemaToTypeString()`. The same
-definitions can be rendered as data through the JSON Schema walker
-`@guren/server/internal/zod-json-schema`, which RFC 0016's agent tools and
-`@guren/openapi` already share. `.guren/agents.gen.ts` is the precedent: its
-`inputSchema` is a JSON Schema literal written with `renderLiteral()`.
+trade. Codegen already holds the runtime schema. `src/codegen.ts` loads the
+registered route definitions once, each carrying `schemas.body` as the Zod
+object the route binds, and hands them to each generator;
+`generateApiClientTypes()` (`api-client-types.ts`) renders the body as a type
+through `schemaToTypeString()`. The same definitions can be rendered as data.
+`.guren/agents.gen.ts` is the precedent: its `inputSchema` is a JSON Schema
+literal, produced by the walker in `@guren/server/internal/zod-json-schema` and
+written with `renderLiteral()`.
 
-`guren codegen` gains a fifth artifact, `.guren/forms.gen.ts`, written by a new
-`packages/cli/src/forms-types.ts`:
+`guren codegen` gains one more conditional artifact, `.guren/forms.gen.ts`,
+written by a new `packages/cli/src/forms-types.ts`:
 
 ```ts
 // Generated from routes/web.ts — DO NOT EDIT
 import type { RouteFormContract } from '@guren/inertia-client/forms'
 import type { ApiRoutes } from './api-client.gen'
 
-export const postsStoreForm: RouteFormContract<'posts.store', ApiRoutes['posts.store']['body']> = {
+export const postsStoreForm: RouteFormContract<'posts.store', 'POST', '/posts', ApiRoutes['posts.store']['body']> = {
   route: 'posts.store',
   method: 'POST',
   path: '/posts',
   fields: {
     title: { type: 'string', required: true, minLength: 1, maxLength: 120 },
     body: { type: 'string', required: true, minLength: 1 },
-    published: { type: 'boolean', required: false },
+    published: { type: 'boolean', required: true },
     category: { type: 'string', required: true, enum: ['news', 'howto'] },
     contactEmail: { type: 'string', required: false, nullable: true, format: 'email' },
   },
 }
 
-export const postsUpdateForm: RouteFormContract<'posts.update', ApiRoutes['posts.update']['body']> = { … }
+export const postsUpdateForm: RouteFormContract<'posts.update', 'PUT', '/posts/:id', ApiRoutes['posts.update']['body']> = { … }
 ```
 
-- **Which routes.** Every named route whose `body` schema
-  `readObjectSchema(body, warnings, label, 'input')` reads as an object.
-  `io: 'input'` because the form describes what the browser sends, the side
+- **Which apps.** Only an app that depends on `@guren/inertia-client`
+  (positive evidence, read from `package.json` as `app-surface.ts` reads it).
+  An API-only app gets no `forms.gen.ts`, since its `tsconfig.json` includes
+  `.guren/**/*` and the import would not resolve. When the last eligible route
+  goes, codegen removes the file rather than leaving a stale one.
+- **Which routes.** Every named route whose `body` schema is an object.
+  `io: 'input'`, because the form describes what the browser sends, the side
   `ApiRoutes.body` already renders. A route with no body schema, or one that is
   not an object, gets no export.
 - **One export per route, not one map.** A page imports only the contract it
@@ -181,55 +192,82 @@ export const postsUpdateForm: RouteFormContract<'posts.update', ApiRoutes['posts
   camel case plus `Form` (`posts.store` → `postsStoreForm`). Two route names
   that camel-case alike fail codegen with both names in the message
   (Open Question 4).
-- **Flat keys only in v1.** Top-level properties become fields. A property
-  whose type is `object` or `array` is emitted with `type` and `required` only,
-  so `Field` can still bind it with an explicit `as` or children.
+- **Literal method and path.** The contract's type keeps both as literals, so
+  `useRouteForm` can require `params` exactly when the path has parameters,
+  with the `PathParamsOf` helpers `components.tsx` already mirrors.
+- **Every key survives.** `readObjectSchema()` drops a property the walker
+  cannot render (`z.file()`, `z.unknown()`), with its requiredness. That is
+  right for OpenAPI and agent tools and wrong here, where a missing key means a
+  field `Field` cannot bind. `forms-types.ts` walks the object shape itself
+  (`objectShape()` and `isOptional()` from the same modules) and keeps an
+  unrenderable property as `type: 'unknown'` with its `required`. The shared
+  walker's behaviour for its existing callers does not change.
 - **What a field carries.** `type` (`string | number | integer | boolean |
-  array | object | unknown`), `required` (from the object's `required` set),
-  `nullable` (the walker renders `.nullable()` as a union with `null`;
-  `forms-types.ts` folds that back into the inner `type` plus `nullable: true`),
-  and the keywords the walker emits that have an HTML counterpart:
-  `format`, `enum`, `minLength`, `maxLength`, `minimum`, `maximum`, `pattern`.
-  Nothing else is copied, so the artifact stays small and its shape is the
-  package's to version.
-- **Warnings degrade, never fail.** A node the walker cannot read becomes
-  `type: 'unknown'` with whatever it could read, and the walker's warning is
-  printed as codegen prints the agent manifest's. The page still renders a text
-  input; the server still validates.
-- **Freshness.** The Vite plugin already regenerates on route edits; the new
-  file joins the set `guren check` and `guren doctor --fix` treat as generated
-  (`fix: { kind: 'command', args: ['codegen'] }`), so a stale contract is
-  reported like a stale `routes.gen.ts`.
+  array | object | unknown`), `required`, `nullable` (the walker renders
+  `.nullable()` as a union with `null`; `forms-types.ts` folds that back into the
+  inner `type` plus `nullable: true`), and the keywords with an HTML
+  counterpart: `format`, `enum`, `minLength`, `maxLength`, `minimum`, `maximum`,
+  `multipleOf`. A date also records `value: 'Date' | 'string'`, since the walker
+  renders `z.date()` (whose input is a `Date`) and `z.coerce.date()` or
+  `z.iso.datetime()` (whose input is a string) alike as `format: 'date-time'`.
+- **What it leaves out.** `pattern`: the walker emits substring patterns
+  (`'x'` for `.includes('x')`), while an HTML `pattern` must match the whole
+  value under different compilation rules, so copying it would reject input the
+  server accepts. A pipe's later stages: the input side of
+  `z.string().trim().toLowerCase().pipe(z.email())` is the plain string, so no
+  `format: 'email'` is derived from it. Unions such as the login page's
+  `z.union([z.boolean(), z.string().transform(…)])` become `unknown`. Callers
+  that know better pass `as` (section 3).
+- **Warnings degrade, never fail.** Whatever the walker cannot read becomes
+  `type: 'unknown'` with whatever it could read, and the warning is printed as
+  codegen prints the agent manifest's. The page still renders a text input; the
+  server still validates.
+- **Freshness.** The motivating edit is a validator change, and today the Vite
+  plugin regenerates on the routes entry, pages, resources and catalogs, not on
+  `app/Http/Validators/` or the route modules the entry imports
+  (`vite/route-types.ts`). That already leaves `ApiRoutes` body types stale
+  after a validator edit; `forms.gen.ts` inherits the gap unless the watcher
+  learns the validator directories (root and `modules/*/`) and the routes
+  entry's local imports. This RFC adds both. `guren check` today only checks
+  that a manifest exists (`check.ts`); for `forms.gen.ts` it renders the
+  expected content in memory and reports a difference with the `codegen` fix,
+  as `check --spec` does for the spec views.
 
 The attributes are hints for the browser. The server stays the authority:
 `.refine()`, `.superRefine()`, cross-field rules and transforms are invisible to
-the walker, and a browser that ignores `required` still meets `validateBody()`.
+the walker, and a browser that ignores `required` still meets the route's
+validation.
 
 #### 2.2 The headless half: `@guren/inertia-client/forms`
 
-A new subpath, beside `typed-forms` and `components`. It depends on
-`@inertiajs/react` (already a dependency) and nothing new.
+A new subpath, beside `typed-forms` and `components`, with its own entry in
+`packages/inertia-client/tsdown.config.ts` and `package.json` `exports`. It
+depends on `@inertiajs/react` and `@inertiajs/core`, both already dependencies,
+and re-exports `FormDataType` so a copied component needs no import from
+`@inertiajs/core`.
 
 ```ts
-export type FieldType = 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object' | 'unknown'
+import type { FormDataType } from '@inertiajs/core' // already a dependency of @guren/inertia-client
+import type { InertiaFormProps } from '@inertiajs/react'
 
 export interface FieldContract {
-  type: FieldType
+  type: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object' | 'unknown'
   required: boolean
   nullable?: boolean
   format?: string
+  value?: 'Date' | 'string'
   enum?: readonly (string | number)[]
   minLength?: number
   maxLength?: number
   minimum?: number
   maximum?: number
-  pattern?: string
+  multipleOf?: number
 }
 
-export interface RouteFormContract<TName extends string, TBody> {
+export interface RouteFormContract<TName extends string, TMethod extends string, TPath extends string, TBody> {
   route: TName
-  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE'
-  path: string
+  method: TMethod
+  path: TPath
   fields: { [K in keyof TBody & string]?: FieldContract }
 }
 
@@ -238,69 +276,94 @@ export type FieldInput =
   | 'text' | 'textarea' | 'number' | 'checkbox' | 'select' | 'date' | 'datetime'
   | 'file' | 'hidden' | 'email' | 'url' | 'password'
 
-/** Inertia's useForm, bound to the contract's route. `handleSubmit` is an `onSubmit` handler that
-    prevents the default and sends to the contract's method and path with `params` substituted;
-    it does not shadow `useForm`'s own `submit(method, url)`. */
-export function useRouteForm<TName extends string, TBody extends Record<string, unknown>>(
-  contract: RouteFormContract<TName, TBody>,
-  initial: TBody,
-  options?: { params?: Record<string, string | number> },
-): RouteForm<TName, TBody>
-
-export interface FieldState {
-  id: string
-  label: string
-  input: FieldInput
-  error?: string
-  errorId: string
-  hint?: string
-  hintId: string
-  options?: { value: string; label: string }[]
-  /** Spread onto the control: id, name, type, required, minLength, maxLength, min, max, step,
-      pattern, value or checked, onChange, aria-invalid, aria-describedby. */
-  controlProps: Record<string, unknown>
+export type RouteForm<TBody extends FormDataType<TBody>> = InertiaFormProps<TBody> & {
+  contract?: RouteFormContract<string, string, string, TBody>
+  /** An `onSubmit` handler: prevents the default and calls Inertia's own `submit()`. */
+  handleSubmit: (event?: { preventDefault(): void }) => void
 }
 
-export function useField<TBody, K extends keyof TBody & string>(
-  form: RouteForm<string, TBody>,
+export function useRouteForm<TName extends string, TMethod extends string, TPath extends string, TBody extends FormDataType<TBody>>(
+  contract: RouteFormContract<TName, TMethod, TPath, TBody>,
+  initial: TBody,
+  // A tuple, so the options (and `params` in them) are required exactly when TPath has parameters.
+  ...options: RouteFormOptionsArgs<TPath>
+): RouteForm<TBody>
+```
+
+- **It wraps Inertia, it does not replace it.** `useRouteForm` calls Inertia
+  3's `useForm(method, url, data)` overload, so the returned object is Inertia's
+  form with its own `submit()`, `processing`, `errors`, `clearErrors()` and
+  precognition methods intact, bound to the contract's method and path.
+  `handleSubmit` is the only addition, and does not shadow `submit`.
+- **Body constraint.** `TBody extends FormDataType<TBody>`, Inertia's recursive
+  constraint. A plain `Record<string, unknown>` does not satisfy it, which is
+  why `make:validator` writes `z.record(z.string(), z.any())` for JSON columns
+  (`make-validator.ts`). The implementation typechecks representative bodies
+  (optional keys, a JSON column, a `File`) against Inertia's own types.
+- **Parameters.** `params` is typed from the literal path and substituted with
+  the encoded helper `components.tsx` already uses; a token left unresolved
+  throws instead of submitting to `/posts/:id`.
+- **Page errors.** `options.adoptPageErrors: true` seeds the form's errors once,
+  on mount, from the page's shared `errors` prop, for the redirect-back that
+  was not this form's visit (the case `make:auth`'s login page handles today by
+  reading page props). Nothing falls back to page errors afterwards, so two
+  forms with an `email` field do not show each other's errors and
+  `clearErrors()` behaves as Inertia defines it. `errorBag` passes through.
+
+```ts
+export function useField<TBody extends FormDataType<TBody>, K extends keyof TBody & string>(
+  form: RouteForm<TBody> | InertiaFormProps<TBody>,
   name: K,
-  overrides?: { label?: string; as?: FieldInput; hint?: string; options?: FieldState['options'] },
-): FieldState
+  overrides?: { label?: string; as?: FieldInput; hint?: string; options?: { value: TBody[K]; label: string }[] },
+): FieldState<TBody[K]>
 
 /** The default label for a field name: `startsAt` and `starts_at` both give "Starts at". */
 export function humanizeFieldName(name: string): string
 ```
 
+`useField` accepts a plain Inertia form too. With no contract it derives
+nothing: the input comes from `as` (default `text`) and the label from `label`
+or the field name. That is how a page whose route binds no body schema still
+uses `Field`.
+
+`FieldState` is a union discriminated by `input`, so each kind carries the
+control props it can take rather than one `Record<string, unknown>`: `checked`
+for a checkbox, `value` for text-like inputs, no `value` and a `files` handler
+for a file input, options for a select. Every kind carries `id`, `label`,
+`error`, `errorId`, `hint`, `hintId`, and `aria-invalid` and
+`aria-describedby` while an error shows, the wiring `make:feature` writes per
+field today, now written once.
+
 **Input kind.** `as` wins. Otherwise:
 
-| Contract | `input` | Extra attributes |
-|----------|---------|------------------|
-| `boolean` | `checkbox` | `checked` instead of `value` |
-| has `enum` | `select` | `options` from the values, labelled with `humanizeFieldName` |
-| `integer` | `number` | `step={1}` |
-| `number` | `number` | `min`, `max` from `minimum`, `maximum` |
-| `string`, `format: 'email'` | `email` | |
-| `string`, `format: 'uri'` | `url` | |
+| Contract | `input` | Control attributes and value handling |
+|----------|---------|---------------------------------------|
+| `boolean` | `checkbox` | `checked`; never `required` (a required checkbox means "must be ticked", which `z.boolean()` does not) |
+| has `enum` | `select` | options from the values; the chosen option maps back to the original member, so a numeric enum submits a number |
+| `integer` | `number` | `step={multipleOf ?? 1}`, `min`, `max` |
+| `number` | `number` | `step={multipleOf ?? 'any'}`, `min`, `max`; without `any` the browser's default step of 1 rejects `1.5` |
+| `string`, `format: 'email'` | `email` | `minLength`, `maxLength` |
+| `string`, `format: 'uri'` | `url` | `minLength`, `maxLength` |
 | `string`, `format: 'date'` | `date` | value sliced to `YYYY-MM-DD`, as `make:feature` does today |
-| `string`, `format: 'date-time'` | `datetime` (`type="datetime-local"`) | the walker renders `z.date()` and `z.coerce.date()` this way |
-| `string` | `text` | `minLength`, `maxLength`, `pattern` |
+| `string`, `format: 'date-time'` | `datetime` (`type="datetime-local"`) | shown in the browser's local time; submitted as an ISO string in UTC (`Z`), or as a `Date` when `value: 'Date'` |
+| `string` | `text` | `minLength`, `maxLength` |
 | `array`, `object`, `unknown` | `text`, with a development warning naming the field | |
 
-`textarea`, `password`, `file` and `hidden` cannot be read off a JSON Schema;
-the caller states them with `as`. Neither can `date` for a schema written
-with `z.coerce.date()`, the shape `make:validator` writes, since the walker
-renders every Zod date as `format: 'date-time'`. `make:feature` knows a `text`
-column is a textarea and a `date` column is a date, `make:auth` knows which fields are passwords, and a plan view names
-the input outright. `required` is set only when the contract says so and the
-field is not a checkbox (a required checkbox means "must be ticked", which a
-`z.boolean()` does not).
+`textarea`, `password`, `file` and `hidden` cannot be read off a JSON Schema,
+and neither can a type the walker could not see through (a pipe, a union). The
+caller states them with `as`. A file input reads `event.target.files` (the
+first file, or the list when `multiple` is set) and never sets `value`.
 
-**Errors.** `error` is `form.errors[name]`, falling back to the page's shared
-`errors` prop for a redirect-back that was not this form's visit (the case
-`make:auth`'s login page handles by reading page props today). An array keeps
-its first message. While an error shows, `controlProps` carries
-`aria-invalid` and `aria-describedby={errorId}`, the wiring `make:feature`
-writes per field today, now written once.
+**`required` and blank values.** JSON Schema's `required` says the key must be
+present; an HTML `required` says the control must be non-empty. They differ for
+`z.string()` with no `min(1)`, which accepts `''`. `useField` sets HTML
+`required` only when the key is required, the field is not nullable, and the
+field is not a string or has `minLength >= 1`. On submit, `useRouteForm`
+normalizes a blank control: `''` becomes `null` for a nullable field, and the
+key is left out for an optional field that is not nullable. This is what makes
+a `.nullable().optional()` column from `make:validator` submit `null` rather
+than an empty string that `.min(1)` rejects, or a `z.coerce.number()` turns
+into `0`. PATCH-style dirty-field submission is out of scope.
 
 **Edit pages.** A page submits to one route and binds that route's contract.
 `make:feature`'s Edit page types its data with the `.store` body today and
@@ -313,30 +376,32 @@ form. That is correct: the server accepts the omission.
 `guren add ui` writes `Field.tsx` as a thin composition the app can restyle:
 
 ```tsx
-import { useField, type FieldInput, type RouteForm } from '@guren/inertia-client/forms'
+import type { ReactNode } from 'react'
+import { useField, type FieldInput, type FieldState, type FormDataType, type RouteForm } from '@guren/inertia-client/forms'
 import { Checkbox } from './Checkbox'
 import { Input } from './Input'
 import { Label } from './Label'
 import { Select } from './Select'
 import { Textarea } from './Textarea'
 
-export function Field<TBody, K extends keyof TBody & string>(props: {
-  form: RouteForm<string, TBody>
+export function Field<TBody extends FormDataType<TBody>, K extends keyof TBody & string>(props: {
+  form: RouteForm<TBody>
   name: K
   label?: string
   as?: FieldInput
   hint?: string
+  options?: { value: TBody[K]; label: string }[]
+  /** Renders the control in place of the default one; label, hint and error stay. */
+  children?: (field: FieldState<TBody[K]>) => ReactNode
 }) {
   const field = useField(props.form, props.name, props)
-  if (field.input === 'hidden') return <input type="hidden" {...field.controlProps} />
+  if (field.input === 'hidden') return <input type="hidden" {...field.control} />
   return (
     <div>
-      {field.input === 'checkbox'
-        ? <Checkbox {...field.controlProps}>{field.label}</Checkbox>
+      {field.input === 'checkbox' && !props.children
+        ? <Checkbox {...field.control}>{field.label}</Checkbox>
         : <Label htmlFor={field.id}>{field.label}</Label>}
-      {field.input === 'textarea' && <Textarea {...field.controlProps} />}
-      {field.input === 'select' && <Select options={field.options} {...field.controlProps} />}
-      {!['checkbox', 'textarea', 'select'].includes(field.input) && <Input {...field.controlProps} />}
+      {props.children ? props.children(field) : <DefaultControl field={field} />}
       {field.hint && <p id={field.hintId} className="mt-1 text-sm text-g-text-2">{field.hint}</p>}
       {field.error && <p id={field.errorId} className="mt-1 text-sm text-g-danger">{field.error}</p>}
     </div>
@@ -344,21 +409,28 @@ export function Field<TBody, K extends keyof TBody & string>(props: {
 }
 ```
 
-`form` is a prop rather than a context. The New and Edit pages already hold
+`DefaultControl` switches on `field.input` to `Input`, `Textarea` or `Select`.
+`form` is a prop rather than a context: the New and Edit pages already hold
 `form`, a prop keeps each field's binding visible in the page, and `name` is
-checked against that form's body type at compile time.
+checked against that form's body type at compile time. The `children` render
+prop is the escape hatch for an `object` or `array` field and for any control
+the set does not cover; it receives the same `id`, `errorId` and aria props,
+so a custom control keeps its label and error association.
 
 ### 3. Generators emit components
 
-`make:feature`'s New page after this RFC:
+`make:feature`'s New page after this RFC, for the contract above:
 
 ```tsx
 import { useRouteForm } from '@guren/inertia-client/forms'
 import { postsStoreForm } from '@/.guren/forms.gen'
-import { Button, Field } from '@/resources/js/components/ui'
+import { Button } from '@/resources/js/components/ui/Button'
+import { Field } from '@/resources/js/components/ui/Field'
 
 export default function NewPost() {
-  const form = useRouteForm(postsStoreForm, { title: '', body: '', published: false })
+  const form = useRouteForm(postsStoreForm, {
+    title: '', body: '', published: false, category: 'news', contactEmail: null,
+  })
   return (
     <main className="min-h-screen bg-g-page font-sans text-g-text">
       <div className="mx-auto max-w-3xl px-6 py-12">
@@ -366,6 +438,8 @@ export default function NewPost() {
           <Field form={form} name="title" />
           <Field form={form} name="body" as="textarea" />
           <Field form={form} name="published" />
+          <Field form={form} name="category" />
+          <Field form={form} name="contactEmail" />
           <Button type="submit" disabled={form.processing}>Create</Button>
         </form>
       </div>
@@ -374,32 +448,52 @@ export default function NewPost() {
 }
 ```
 
-- Generators import from `@/resources/js/components/ui`, which resolves from
-  the project root whatever the page's depth.
+- Generators import each component from its file under
+  `@/resources/js/components/ui/`, which resolves from the project root
+  whatever the page's depth.
 - Before writing pages, a generator calls `ensureUiComponents(appRoot, names)`
   (in `guren-css.ts`, beside `ensureGurenUiTokens()`), which writes the
   components the page imports when they are missing and never touches one that
   exists. A generated page therefore never imports a file that is not there.
-- A generator passes `as` wherever the column type decides an input the
-  contract cannot: `textarea` for a `text` column, `date` for a `date` column.
-  Every other `make:feature` type reaches the right row on its own:
-  `z.coerce.number()` is a `number`, `z.boolean()` a checkbox, and the trimmed
-  `z.string().min(1)` a required text input.
-- `generateFormField()`, `fieldMessages()`, `errorAttributes()`,
-  `labelledControl()` and the `fieldIds` hook go. A `json` field stays
-  generator-written, composed from `Label` and `Textarea` directly, since its
-  parse error is client state the contract cannot know.
-- `make:auth`'s login, register, password and profile pages use `Field`,
-  `Button` and `Alert`; `calloutRow()` goes.
-- `make:feature --prototype` pages (`make-feature-prototype.ts`) share the page
-  generators and follow. A prototype route has no body schema until promoted,
-  so its pages bind a contract the prototype fixture declares (Open Question 5).
+- A generator passes `as` wherever its own knowledge decides an input the
+  contract cannot: `textarea` for a `text` column, `date` for a `date` column
+  (the walker renders `z.coerce.date()`, the shape `make:validator` writes, as
+  `format: 'date-time'`). Every other `make:feature` type reaches the right row
+  on its own: `z.coerce.number()` is a `number` with `step="any"`, `z.boolean()`
+  a checkbox, the trimmed `z.string().min(1)` a required text input.
+- A `json` field uses `Field`'s `children` render prop, keeping its own parse
+  state and the second message for half-typed JSON, with the ids `useField`
+  supplies. `generateFormField()`, `errorAttributes()`, `labelledControl()` and
+  the `fieldIds` hook go; `fieldMessages()` shrinks to the JSON case.
+- `make:feature --prototype` already writes the validator and binds it to the
+  store and update routes through the shared registration builder, so its
+  pages get contracts like any other, and promotion changes nothing in them.
+
+**`make:auth`.** Its POST routes register no body schema today: each controller
+validates with its own schema (`make-auth.ts`, and the blog template's
+`routes/auth.ts`). Under the rule in 2.1 they would get no contracts. The
+generator therefore binds each validator it already writes to its route
+(`{ body: LoginSchema }` and so on, for login, register, forgot and reset
+password, and profile, across every flag combination). A bound body is
+enforced by the router before the action (`Router.ts`), with the same schema
+and the same 422 shape; the action reads the parsed body with
+`this.validated()` instead of validating it again. The pages use `Field`,
+`Button` and `Alert`, and pass `as` where the schema cannot say: `email` (the
+email schema is a pipe), `password`, and `checkbox` for "remember me" (a
+union). The login page sets `adoptPageErrors`. `calloutRow()` goes. An app
+whose auth routes stay unbound keeps working: `Field` takes a plain Inertia
+form, with labels and inputs from props.
+
+**Other output.**
+
 - `FORM_INPUT_CLASS`, `FIELD_LABEL_CLASS`, `PRIMARY_BUTTON_CLASS` and
   `PRIMARY_SUBMIT_CLASS` are removed once nothing imports them. They are
   internal to `@guren/cli`, not exported.
-- `create-guren-app`'s static templates (the blog template's `pages/auth`, the
-  default `Home.tsx`) adopt the components in the same release, so a new app
-  and a generated page look alike.
+- `create-guren-app`'s static templates (the blog template's `pages/auth` and
+  `routes/auth.ts`, the default `Home.tsx`) adopt the components in the same
+  release, so a new app and a generated page look alike. The auth scaffold
+  templates byte-identical to the blog's stay so, under
+  `tests/scaffold-blog-sync.test.ts`.
 
 A design change now edits `Button.tsx` or `Field.tsx`, once.
 
@@ -409,17 +503,25 @@ The label is the field's accessible name, which is what a person reads and
 what `getByLabel()` finds. Its resolution order is:
 
 1. the `label` prop;
-2. the translation `fields.<route>.<name>` (`fields.posts.store.title`), then
-   `fields.<name>`, when the app shares `_i18n` and the key exists;
+2. the translation `fields.<route>.<name>.label`
+   (`fields.posts.store.title.label`), then `fields.<name>.label`, when the app
+   shares `_i18n` and the key exists in the current locale or its fallback, in
+   that order;
 3. `humanizeFieldName(name)`.
+
+Labels live under a `.label` leaf so that option labels can sit beside them
+without a string and an object sharing one key:
+`fields.category.options.news`. The translator stops at a string
+(`i18n.ts`), and a key containing a dot is unreachable, so an option value that
+is not a plain identifier segment has no translation key and falls back to
+`humanizeFieldName(String(value))` or to `options`.
 
 Step 2 needs to know whether a key exists. `t()` returns the key on a miss, so
 the package exports a standalone `hasTranslation(i18n, key)` beside
 `createTranslator()` (a new member on the exported `Translation` interface would
-break any object literal typed with it), and `useField` reads `_i18n`
-without the one-time warning `useTranslation()` prints, since an app without
-i18n is the common case here. Select option labels resolve the same way under
-`fields.<name>.options.<value>`.
+break any object literal typed with it), and `useField` reads `_i18n` without
+the one-time warning `useTranslation()` prints, since an app without i18n is
+the common case here.
 
 Validation messages are not labels and are not changed here: they are the
 strings the server put in `errors`.
@@ -447,10 +549,16 @@ chose different words, and then the page passes `label`. The CLI restates
 pinned against the package's copy by a test, as `components.tsx` and
 `routes-types-fragments.ts` already pin the path parameter helpers.
 
-**Locale.** Browser specs run the app under its default locale. A plan's labels
-are written in that locale. Where a lang file renames a field, the spec fails
-until the plan or the lang file agrees, which is the drift the spec exists to
-report.
+**Locale is pinned, not assumed.** A plan's labels are written in the app's
+default locale, but nothing makes a browser run use it today: the Playwright
+config `add browser-tests` writes sets no locale, and the server picks a locale
+from the query string, a cookie or `Accept-Language` before the default
+(`detect-locale.ts`), and the signed-in storage state may carry a locale
+cookie. The config template sets `locale` to the app's default locale and
+clears a locale cookie from the storage state, and the generated spec checks
+`window.__INERTIA_PAGE__.props._i18n.locale` (when shared) before asserting
+labels. Where a lang file then renames a field, the spec fails until the plan
+or the lang file agrees, which is the drift the spec exists to report.
 
 **Plan views map onto `Field` one to one.** A plan view's
 `form.fields[].input` (RFC 0030, `packages/cli/src/plan/schema.ts`) uses the
@@ -466,13 +574,24 @@ writes this shape.
 association and `aria-describedby`. Both now come from `useField`, so a
 violation is fixed in one place and every page picks it up.
 
+**Server rendering.** `useId()` gives the server and the client the same ids
+only when the client hydrates the server's markup. `startInertiaClient()`'s
+default setup calls `createRoot()` (`app.tsx`), so an SSR app's first render
+replaces the server DOM, ids included. That is an existing limitation of the
+SSR bootstrap, not one this RFC adds: ids stay consistent within the client
+tree, which is all `htmlFor` needs. Moving the default setup to `hydrateRoot()`
+for server-rendered pages is separate work (Open Question 7); until then the
+SSR template's smoke checks labels after hydration, not in the server HTML.
+
 ### 6. Non-goals
 
 - Client-side validation. The contract sets HTML constraints; it does not run
-  the schema in the browser.
+  the schema in the browser. Inertia 3's precognition is the route to that
+  later, and `useRouteForm` keeps its methods available.
 - Nested objects and arrays as generated sub-forms.
 - Query-string forms (search, filters). A `query` schema could feed the same
   contract shape later.
+- PATCH-style submission of dirty fields only.
 - A component for every UI need. The set covers what the generators write and
   what plan views name.
 
@@ -542,31 +661,57 @@ removed.
 - **Existing pages are not rewritten.** There is no codemod: pages written by
   earlier generators have been edited, and a rewrite would have to guess which
   edits to keep. `guren add ui` writes the components; a page adopts them by
-  hand. The guide shows one field before and after, and the Edit page change
-  from the `.store` body to the `.update` contract.
+  hand. The guide shows one field before and after, the Edit page change from
+  the `.store` body to the `.update` contract, and binding an auth route's
+  schema.
 - **New generator output uses the components** from the release that ships
   this, writing any that are missing.
-- **`codegen` writes `forms.gen.ts`** in every app with a body-bound named
+- **`codegen` writes `forms.gen.ts`** in an Inertia app with a body-bound named
   route. The scaffolds commit their `.guren/*.gen.ts` files (only
   `.guren/ssr/` is ignored), so the new file is committed beside
   `routes.gen.ts`, and a template whose routes bind a body ships its first
   copy.
 
-Release order and gates:
+**Version floor.** `@guren/cli` has no dependency on `@guren/inertia-client`,
+and the starters allow `^1.2.2`, which predates the `forms` subpath. An app
+that upgrades the CLI alone would get a `forms.gen.ts` and generated pages
+importing a subpath its client lacks, and could stop typechecking without
+touching a page. So:
 
-- `@guren/inertia-client` (minor: the `forms` subpath, `hasTranslation()`)
-  must be published before generators emit the import. Generated pages and
-  copied components resolve it from npm, so `smoke:starter:npm` is red between
-  the template change and that release, as `common-pitfalls.md` describes.
-- `@guren/cli` (minor): `add ui`, `forms-types.ts`, the generator changes.
-  `tests/generator-bytes.test.ts`, `tests/scaffold-output.test.ts` and
-  `audit:starter-template` pin today's output literally and change with it;
-  `tests/plan-command-allowlist.test.ts` fails until `add ui` is classified.
-- `create-guren-app` (minor): the templates adopt the components; run
-  `smoke:starter` and `smoke:starter:api` (the API template must stay
-  untouched).
-- `CLAUDE.md` and the codegen guide name four artifacts plus `agents.gen.ts`;
-  both gain `forms.gen.ts`.
+- codegen writes `forms.gen.ts` only when the installed client exports
+  `./forms` (read from its `package.json`), and otherwise prints the
+  `bun add @guren/inertia-client@^<minor>` line once;
+- `make:feature`, `make:auth` and `add ui` refuse to emit an import the
+  installed client cannot resolve, naming the same command;
+- `guren upgrade` aligns `@guren/inertia-client` with the CLI it installs, as
+  it does for the other `@guren/*` packages, and `sync:template-deps` raises the
+  starters' range in the release that ships the subpath.
+
+**Release order.** `@guren/inertia-client` (minor: the `forms` subpath,
+`hasTranslation()`) publishes first; `@guren/cli` (minor: `add ui`,
+`forms-types.ts`, the watcher and check changes, the generator changes) and
+`create-guren-app` (minor: the templates) follow. Generated pages and copied
+components resolve the client from npm, so `smoke:starter:npm` is red between
+the template change and that release, as `common-pitfalls.md` describes.
+
+**Gates that change with it.**
+
+- `tests/generator-bytes.test.ts`, `tests/scaffold-output.test.ts` and
+  `audit:starter-template` pin today's output literally.
+- `tests/scaffold-builder-typecheck.test.ts` and
+  `tests/make-output-typecheck.test.ts` compile rendered `make:auth` and
+  `make:feature` output. They regenerate `pages.gen.ts` only today; they must
+  run the full codegen so `forms.gen.ts` exists, and cover `--prototype`.
+- `tests/plan-command-allowlist.test.ts` fails until `add ui` is classified.
+- `tests/scaffold-blog-sync.test.ts` pins the auth templates the blog shares.
+- A new test pins `FieldInput` to the plan schema's `input` enum, and the CLI's
+  copy of `humanizeFieldName()` to the package's.
+- Smokes: `smoke:starter`, `smoke:starter:blog` (its auth pages change),
+  `smoke:starter:api` (must stay without `forms.gen.ts`), and after the client
+  release `smoke:starter:npm` and `smoke:starter:npm:blog`; the packed smoke
+  checks the `forms` subpath is in the tarball's exports.
+- `CLAUDE.md` and the codegen guide list the codegen artifacts; both gain
+  `forms.gen.ts` and say which artifacts are conditional.
 
 ## Open Questions
 
@@ -575,20 +720,25 @@ Release order and gates:
    template version and offer the new one when the copy is unedited? The
    `guren.css` upgrade work answers the same question for the token sheet; one
    mechanism should serve both.
-2. **Translation namespace.** `fields.<route>.<name>` then `fields.<name>`, or
-   Laravel's `validation.attributes.<name>`, which also lets server messages
-   name the field? The second couples labels to validation messages that do
-   not interpolate attribute names today.
+2. **Translation namespace.** `fields.<route>.<name>.label` then
+   `fields.<name>.label`, or Laravel's `validation.attributes.<name>`, which
+   would also let server messages name the field? The second couples labels to
+   validation messages that do not interpolate attribute names today.
 3. **`description` as hint.** Should `.describe()` fill `hint` when no
    translation exists? It is written for agents and may read badly to people.
 4. **Identifier collisions.** Fail codegen on two route names that camel-case
    alike, or suffix one deterministically?
-5. **Prototype pages.** Should the prototype fixture declare field contracts so
-   prototype forms derive the same attributes before a validator exists, or
-   should prototype pages pass `as`/`label` explicitly until promoted?
+5. **Format through a pipe.** Should `forms-types.ts` take `format` from a
+   pipe's output stage when its input stage is a plain string, so
+   `.trim().toLowerCase().pipe(z.email())` derives `email` without an `as`? The
+   output stage sees the normalized value, so the browser's check is slightly
+   stricter than the server's.
 6. **A check for the copied components.** Generators emit against the props
    listed above. Should `guren check` warn when a copied component no longer
    exports what generated pages import, or is `typecheck` enough?
+7. **SSR hydration.** Should `startInertiaClient()`'s default setup hydrate a
+   server-rendered page (`hydrateRoot()`) instead of `createRoot()`, in this
+   RFC's release or separately?
 
 ## Future Work
 
