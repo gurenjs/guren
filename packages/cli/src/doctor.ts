@@ -42,6 +42,7 @@ import { commandFix, type CheckEvidence, type CheckFix, type CheckFixRun } from 
 import { hasPendingRepair, repairDoctorReport } from './doctor-fix'
 import { summarizeDoctorReport, type DoctorStatus } from './doctor-report'
 import { detectConfigMigrations, undeclaredEnv, type ConfigMigration, type EnvDeclaration } from './config-migration'
+import { planAppTokenSheet, shippedTokenSheetLocation, TOKENS_PATH, updateTokenSheet, type TokenSheetPlan } from './guren-css'
 
 export type { DoctorStatus } from './doctor-report'
 export { DOCTOR_RECOMMENDED_COMMANDS, DOCTOR_STATUSES, summarizeDoctorReport } from './doctor-report'
@@ -1253,6 +1254,66 @@ async function detectPluginCompatibility(context: DoctorRuleContext): Promise<Do
 }
 
 
+async function detectGurenUiTokens(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const check = (status: DoctorStatus, message: string, options?: Parameters<typeof createCheck>[4]): DoctorCheck =>
+    createCheck('guren-ui-tokens', 'Guren UI Tokens', status, message, options)
+  const manual = (message: string, steps: string): DoctorCheck => check('warn', message, { fix: steps, manualFix: steps })
+
+  let plan: TokenSheetPlan | undefined
+  try {
+    plan = await planAppTokenSheet(context.cwd)
+  } catch (error) {
+    return manual(`${TOKENS_PATH} could not be read: ${error instanceof Error ? error.message : String(error)}`, `Make ${TOKENS_PATH} a readable file.`)
+  }
+  if (!plan) return check('pass', `No ${TOKENS_PATH}; the app does not use the Guren UI tokens.`)
+
+  const shipped = shippedTokenSheetLocation(context.cwd)
+  switch (plan.kind) {
+    case 'current':
+      return check('pass', `${TOKENS_PATH} carries the Guren UI tokens this CLI ships.`)
+    case 'update':
+      return check('warn', `The guren:tokens block in ${TOKENS_PATH} is an earlier release's.`, {
+        fix: 'Run `guren upgrade` to replace the block between the guren:tokens markers; text outside them is kept.',
+        canAutofix: true,
+      })
+    case 'adopt':
+      return check('warn', `${TOKENS_PATH} is an unedited sheet from an earlier release, with no guren:tokens markers to update it by.`, {
+        fix: 'Run `guren upgrade` to replace it with the current sheet, whose guren:tokens block later upgrades keep current.',
+        canAutofix: true,
+      })
+    case 'edited':
+      return manual(
+        `The guren:tokens block in ${TOKENS_PATH} matches no released block: it was edited, or a newer Guren wrote it.`,
+        `Move your own rules after the end marker, then replace the lines from \`/* guren:tokens begin\` to \`/* guren:tokens end */\` with those of ${shipped}.`,
+      )
+    case 'unmarked':
+      return manual(
+        `${TOKENS_PATH} has no guren:tokens markers and differs from every shipped sheet, so upgrades cannot update its tokens.`,
+        `Copy your own rules out of ${TOKENS_PATH}, replace the file with ${shipped}, and add your rules back after its \`/* guren:tokens end */\` line.`,
+      )
+    case 'unsafe':
+      return manual(
+        `The guren:tokens markers in ${TOKENS_PATH} cannot be rewritten safely: ${plan.problems.join('; ')}.`,
+        `Leave one \`/* guren:tokens begin … */\` line and one \`/* guren:tokens end */\` line after it in ${TOKENS_PATH}.`,
+      )
+  }
+}
+
+async function createGurenUiTokensAutofix(_context: DoctorRuleContext, check: DoctorCheck): Promise<DoctorAutofix | null> {
+  if (check.status === 'pass' || !check.canAutofix) {
+    return null
+  }
+
+  return {
+    key: check.key,
+    title: check.title,
+    summary: 'Replace the guren:tokens block of resources/css/guren.css with the sheet this CLI ships.',
+    async apply(cwd: string) {
+      await updateTokenSheet(cwd)
+    },
+  }
+}
+
 const doctorRules: DoctorRule[] = [
   { key: 'runtime', title: 'Runtime Environment', detect: detectRuntime },
   { key: 'bun-version', title: 'Bun Version', detect: detectBunVersion },
@@ -1273,6 +1334,7 @@ const doctorRules: DoctorRule[] = [
   { key: 'database-config', title: 'Database Configuration', detect: detectDatabaseConfig },
   { key: 'test-infrastructure', title: 'Test Infrastructure', detect: detectTestInfrastructure },
   { key: 'plugin-compatibility', title: 'Plugin Compatibility', detect: detectPluginCompatibility },
+  { key: 'guren-ui-tokens', title: 'Guren UI Tokens', detect: detectGurenUiTokens, autofix: createGurenUiTokensAutofix },
 ]
 
 /**
