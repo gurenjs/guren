@@ -78,6 +78,11 @@ A spec file ends in `.browser.ts`, since `bun test` collects `*.spec.ts`. Write
 your own beside `tests/browser/generated/`, which `guren browser:map` rewrites.
 Without that setup, write no spec files.
 
+After changing a page, run `bun run test:browser`. A test titled `a11y …` runs
+axe on a page and fails on a WCAG A or AA violation; report one with the rule
+ids its message names. Fix the page rather than adding a rule to
+`tests/browser/a11y.ts`, which is the person's call.
+
 Save each screenshot under `.guren/browser/<run>/screenshots/`, then close the
 step. `result` and `action` are required; the rest is what you observed, and
 no other field is accepted:

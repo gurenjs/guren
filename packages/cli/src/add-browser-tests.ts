@@ -12,7 +12,9 @@ import { consola } from 'consola'
 import { assertNotApiOnly } from './app-surface'
 import { loadBrowserMap, runBrowserMap } from './browser-map-files'
 import type { BrowserMap } from './browser-map'
-import { BROWSER_SEEDER_FILE, BROWSER_TESTS_CONFIG, BROWSER_TESTS_SETUP, buildBrowserSeeder, type BrowserSeederColumns } from './browser-specs'
+import {
+  A11Y_OPTIONS_FILE, AXE_PACKAGE, BROWSER_SEEDER_FILE, BROWSER_TESTS_CONFIG, BROWSER_TESTS_SETUP, buildBrowserSeeder, type BrowserSeederColumns,
+} from './browser-specs'
 import { cliDependencyRange } from './cli-manifest'
 import { CliError } from './cli-error'
 import { appDependsOn, readIfExists } from './discovery'
@@ -23,11 +25,13 @@ import { findDeclaredTable, type SchemaTable } from './schema-parser'
 import { assertCwdUnsupported, runCommand, writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
 
 const PLAYWRIGHT_PACKAGE = '@playwright/test'
+// Installed at the ranges package.json declares; axe's is a tilde, since a new minor adds rules.
+const DEV_PACKAGES = [PLAYWRIGHT_PACKAGE, AXE_PACKAGE] as const
 export const BROWSER_TEST_SCRIPT = { name: 'test:browser', command: `playwright test -c ${BROWSER_TESTS_CONFIG}` } as const
 const GITIGNORE_ENTRIES = ['test-results/', 'playwright-report/', 'tests/browser/.auth/'] as const
 
 export interface AddBrowserTestsOptions extends WriterOptions {
-  /** Run `bun add -d` for Playwright; false prints the command instead. */
+  /** Run `bun add -d` for Playwright and axe; false prints the command instead. */
   install?: boolean
   /** The test seam: how the browser map is read before anything is written. */
   loadMap?: (cwd: string) => Promise<BrowserMap>
@@ -37,7 +41,7 @@ export interface AddBrowserTestsResult {
   /** Files written once, by this run. */
   created: string[]
   /** What the closing `browser:map` run wrote and removed, app-relative. */
-  mapped: { changed: string[]; removed: string[]; held?: string }
+  mapped: { changed: string[]; removed: string[]; held?: string; accessibilityOff?: string }
   /** A setup project signs in as the seeded browser account. */
   signIn: boolean
   map: BrowserMap
@@ -71,12 +75,16 @@ async function readManifest(cwd: string, force: boolean): Promise<Manifest | und
   return manifest
 }
 
-async function installPlaywright(cwd: string, install: boolean): Promise<void> {
-  // An unreadable manifest answers null; installing then is what the user asked for.
-  if ((await appDependsOn(cwd, PLAYWRIGHT_PACKAGE)) === true) return
-  const spec = `${PLAYWRIGHT_PACKAGE}@${cliDependencyRange('devDependencies', PLAYWRIGHT_PACKAGE)}`
-  if (install) await runCommand('bun', ['add', '-d', spec], { cwd })
-  else consola.info(`Run: bun add -d ${spec}`)
+/** Only what the manifest does not declare, so a rerun on an app that has Playwright adds axe alone. */
+async function installDevPackages(cwd: string, install: boolean): Promise<void> {
+  const missing: string[] = []
+  for (const name of DEV_PACKAGES) {
+    // An unreadable manifest answers null; installing then is what the user asked for.
+    if ((await appDependsOn(cwd, name)) !== true) missing.push(`${name}@${cliDependencyRange('devDependencies', name)}`)
+  }
+  if (missing.length === 0) return
+  if (install) await runCommand('bun', ['add', '-d', ...missing], { cwd })
+  else consola.info(`Run: bun add -d ${missing.join(' ')}`)
 }
 
 export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Promise<AddBrowserTestsResult> {
@@ -97,11 +105,12 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
   const account = passwordSignIn(users, map)
   // The closing browser:map run, written nowhere: its refusals (a slug two plans share, a spec of
   // the author's at a generated path, broken markers) come before anything else is written.
-  await runBrowserMap({ cwd, write: false, map, specs: { signIn: account !== undefined } })
+  await runBrowserMap({ cwd, write: false, map, specs: { signIn: account !== undefined, accessibility: true } })
 
   const files: ScaffoldFileEntry[] = [
     scaffoldTemplateFile('browser-tests', BROWSER_TESTS_CONFIG),
     scaffoldTemplateFile('browser-tests', 'tests/browser/support.ts'),
+    scaffoldTemplateFile('browser-tests', A11Y_OPTIONS_FILE),
     ...(account && users
       ? [scaffoldTemplateFile('browser-tests', BROWSER_TESTS_SETUP), { path: BROWSER_SEEDER_FILE, contents: buildBrowserSeeder(users.dialect, account) }]
       : []),
@@ -122,12 +131,16 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
       { declare: { secret: true } },
     )
   }
-  await installPlaywright(cwd, options.install ?? true)
+  await installDevPackages(cwd, options.install ?? true)
 
   const mapped = await runBrowserMap({ cwd, write: true, map })
   return {
     created,
-    mapped: { changed: mapped.changed, removed: mapped.removed, ...(mapped.specsHeld ? { held: mapped.specsHeld } : {}) },
+    mapped: {
+      changed: mapped.changed, removed: mapped.removed,
+      ...(mapped.specsHeld ? { held: mapped.specsHeld } : {}),
+      ...(mapped.accessibilityOff ? { accessibilityOff: mapped.accessibilityOff } : {}),
+    },
     signIn: account !== undefined,
     map,
     seedsOnBoot: database?.includes('seedOnBoot') === true,
