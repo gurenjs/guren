@@ -5,7 +5,7 @@
  */
 import type { DocsViewerPlanPage } from '../docs-viewer'
 import type { DocsViewerOpenPlan, DocsViewerStepState } from '../docs-viewer-plans'
-import { byId, el } from './dom'
+import { byId, commandRow, el } from './dom'
 import { planNodeId, scanWarnings } from './model'
 import { actorLine, metaRow, openPanel, relationItem, relationSection } from './panel'
 import { BASE_URL, state } from './state'
@@ -39,26 +39,6 @@ export function renderScanWarnings(): void {
   const host = byId('scan-warnings')
   host.textContent = ''
   for (const warning of scanWarnings(state.data)) host.append(el('p', '', warning))
-}
-
-export function commandRow(text: string): HTMLElement {
-  const row = el('div', 'command')
-  const code = el('code', '', text)
-  const button = el('button', '', 'copy')
-  button.addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(text)
-      button.textContent = 'copied'
-    } catch {
-      getSelection()?.selectAllChildren(code)
-      button.textContent = 'selected'
-    }
-    setTimeout(() => {
-      button.textContent = 'copy'
-    }, 1600)
-  })
-  row.append(code, button)
-  return row
 }
 
 /** The page link, and where the page is older than its plan, the command that renders it again. */

@@ -1,6 +1,7 @@
 import type { GraphNode, GurenApplicationGraph, GraphResult } from '../application-graph'
 import { planPagePath, planSlugFromPath } from '../dev-center-links'
 import type { PlanOverview } from '../docs-viewer-plans'
+import { commandRow } from '../docs-viewer-page/dom'
 import type { RuntimeErrorResult } from '../runtime-errors'
 import { planAttention, sortPlans, STEP_TONE, stepsByTask, verifiedCount, type DevCenterPlan, type PlanAttention } from './plans'
 
@@ -212,11 +213,6 @@ function stepRow(step: DevCenterPlan['steps'][number]): HTMLElement {
   row.append(badge, body)
   return row
 }
-function commands(lines: string[]): HTMLElement {
-  const box = text('div', '', 'commands')
-  box.append(...lines.map((line) => text('code', line, 'mono')))
-  return box
-}
 function byline(at: string, by: string | undefined): string {
   return by ? `${at} by ${by}` : at
 }
@@ -256,7 +252,7 @@ async function loadPlan(slug: string): Promise<void> {
       const link = text('a', `/_guren/docs/plans/${slug}`, 'mono') as HTMLAnchorElement
       link.href = `/_guren/docs/plans/${encodeURIComponent(slug)}`
       rendered.append(document.createTextNode('The rendered plan, once plan:render has written it and GUREN_DOCS=1 is set: '), link)
-      body.append(card('Commands', text('p', 'What the records say comes next, then the full status:', 'meta'), commands([...plan.next, plan.status]), rendered))
+      body.append(card('Commands', text('p', 'What the records say comes next, then the full status:', 'meta'), ...[...plan.next, plan.status].map(commandRow), rendered))
     }
   } catch (error) {
     status.textContent = `Plan unavailable: ${error instanceof Error ? error.message : 'Read failed'}. Refresh to retry.`

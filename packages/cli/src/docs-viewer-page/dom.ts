@@ -19,3 +19,24 @@ export function byId<T extends Element = HTMLElement>(id: string): T {
   if (!found) throw new Error(`The docs viewer template has no #${id}.`)
   return found as unknown as T
 }
+
+/** A command to copy, never run; the Dev Center's plan page shares it. Where the clipboard is refused, it selects the text. */
+export function commandRow(text: string): HTMLElement {
+  const row = el('div', 'command')
+  const code = el('code', '', text)
+  const button = el('button', '', 'copy')
+  button.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      button.textContent = 'copied'
+    } catch {
+      getSelection()?.selectAllChildren(code)
+      button.textContent = 'selected'
+    }
+    setTimeout(() => {
+      button.textContent = 'copy'
+    }, 1600)
+  })
+  row.append(code, button)
+  return row
+}
