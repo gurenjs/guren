@@ -1,6 +1,8 @@
 import { afterEach, expect, test } from 'bun:test'
 import { Application } from '../../src/http/Application'
 
+// The auth app's session middleware signs cookies with it; set before `original`, so every test keeps it.
+process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 const original = { ...process.env }
 afterEach(() => { process.env = { ...original } })
 const local = { server: { requestIP: () => ({ address: '127.0.0.1' }) } }
