@@ -63,7 +63,7 @@ export class McpServiceProvider extends ServiceProvider {
     // Optional capability: older CLIs keep serving their existing MCP tools.
     if (cli.createDevCenterHandler) {
       const center = cli.createDevCenterHandler({ cwd: process.cwd() })
-      for (const path of ['/_guren', '/_guren/', '/_guren/graph.json']) {
+      for (const path of ['/_guren', '/_guren/', '/_guren/graph.json', '/_guren/plans.json', '/_guren/plans/:slug']) {
         hono.use(path, createMcpAccessGuard())
         hono.get(path, (ctx) => isMcpEndpointEnabled() ? center.fetch(ctx.req.raw) : ctx.notFound())
       }

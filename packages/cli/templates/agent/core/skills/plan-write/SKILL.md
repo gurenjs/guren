@@ -29,6 +29,8 @@ bunx guren plan:render docs/plans/<slug>/plan.json --json
 Run it until no check has `"status": "fail"`, then tell the person:
 
 - where the page is (`path` in the output), which is what they review
+- with the dev server running, `/_guren/plans/<slug>`, where the plan waits
+  for their approval beside the other open plans
 - the questions still open, each with the option the plan assumes
 - the warnings you left, and why
 

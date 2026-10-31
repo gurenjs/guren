@@ -90,3 +90,34 @@ test('serves a self-contained shell with hashed scripts, no-store, and fixed rou
   expect((await handler.fetch(new Request('http://localhost/_guren/unknown'))).status).toBe(404)
   expect((await handler.fetch(new Request('http://localhost/_guren/graph.json', { method: 'POST' }))).status).toBe(405)
 })
+
+const overview = {
+  schemaVersion: 1 as const,
+  plans: [{ file: 'docs/plans/comments/plan.json', slug: 'comments', title: 'Comments', standing: 'draft' as const, entities: [], steps: [], waivers: [], next: [], status: 'bunx guren plan:status docs/plans/comments/plan.json' }],
+  active: [],
+  unreadable: [],
+}
+
+test('plans.json returns the plan overview with the slug each plan page is served under', async () => {
+  const handler = createDevCenterHandler({ cwd: '/fixture', graph: async () => graph, plans: async () => overview })
+  const response = await handler.fetch(new Request('http://localhost/_guren/plans.json'))
+  expect(response.headers.get('cache-control')).toBe('no-store')
+  const body = await response.json()
+  expect(body.plans[0]).toMatchObject({ file: 'docs/plans/comments/plan.json', slug: 'comments' })
+})
+
+test('a failed plan read answers 503 without the exception text', async () => {
+  const handler = createDevCenterHandler({ cwd: '/fixture', plans: async () => { throw new Error('secret') } })
+  const response = await handler.fetch(new Request('http://localhost/_guren/plans.json'))
+  expect(response.status).toBe(503)
+  expect(await response.text()).not.toContain('secret')
+})
+
+test('a plan page is the shell, and only one path segment names a plan', async () => {
+  const handler = createDevCenterHandler({ cwd: '/fixture', plans: async () => overview })
+  const page = await handler.fetch(new Request('http://localhost/_guren/plans/comments'))
+  expect(page.status).toBe(200)
+  expect(await page.text()).toContain('id="plan-view"')
+  expect((await handler.fetch(new Request('http://localhost/_guren/plans/comments/extra'))).status).toBe(404)
+  expect((await handler.fetch(new Request('http://localhost/_guren/plans/'))).status).toBe(404)
+})

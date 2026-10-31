@@ -400,6 +400,18 @@ shell has a script-hash CSP, disallows framing, and all Dev Center responses
 use no-store caching. Route filtering and symbol navigation are presentation
 operations over the shared graph, not another parser or verification system.
 
+### Plans in the Dev Center
+
+On 2026-10-31 the maintainer asked for the Dev Center to follow agent-driven
+work, where a person acts at decisions rather than starting from the graph.
+`/_guren` now opens on the open plans, those waiting on a person first, and
+`/_guren/plans/<slug>` shows one plan's steps and records. Both read
+`/_guren/plans.json`, the `guren_get_plans` overview with each plan's slug,
+in the server process, since it reads plan files and `.guren/plans/` only.
+`plan:next` and `plan:verify` print the path so an agent can hand it over. The
+M2 limits stand: one read on open, refresh buttons, no command execution, and
+no held-step judgement, which needs the application read.
+
 ## M3 graph readers
 
 Toward plan reader convergence, the remaining node kinds and relations adapt
@@ -628,8 +640,9 @@ boundary this RFC promised:
   assembling the worker. Importing the collector or `@guren/cli/arch` into the
   worker made it fail, naming the file.
 - After deploying, `web/scripts/check-production-endpoints.ts` expects `/` to
-  answer 200 and `/_guren`, `/_guren/graph.json`, `/_guren/runtime/errors` and
-  `/_guren/mcp` to answer 404 on the live site. It reports and does not roll
+  answer 200 and `/_guren`, `/_guren/graph.json`, `/_guren/plans.json`, a
+  `/_guren/plans/<slug>` page, `/_guren/runtime/errors` and `/_guren/mcp` to
+  answer 404 on the live site. It reports and does not roll
   back. It cannot tell the new Worker from an earlier one still served at the
   edge, and an earlier one answers the same, so a pass shows the boundary holds
   on whatever answers, not that the new version was the one read.

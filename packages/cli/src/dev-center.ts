@@ -1,14 +1,19 @@
 import { createHash } from 'node:crypto'
 import { freshApplicationGraph } from './application-graph-fresh'
 import type { GraphResult } from './application-graph'
+import { planSlugFromPath } from './dev-center-links'
 import { devCenterShell } from './dev-center-shell'
+import { readPlanOverview, type PlanOverview } from './docs-viewer-plans'
 
 /** The mounting server owns activation and peer/origin checks, as for dev MCP. */
 export function createDevCenterHandler(options: {
   cwd: string
   graph?: (cwd: string) => Promise<GraphResult>
+  plans?: (cwd: string) => Promise<PlanOverview>
 }): { fetch(request: Request): Promise<Response> } {
   const load = options.graph ?? freshApplicationGraph
+  // Plan files and .guren/plans/ only, as `guren_get_plans` reads them, so no child process is needed.
+  const loadPlans = options.plans ?? readPlanOverview
   let running: Promise<GraphResult> | undefined
   let queued: Promise<GraphResult> | undefined
   const start = (): Promise<GraphResult> => {
@@ -37,7 +42,13 @@ export function createDevCenterHandler(options: {
         try { return Response.json(await scanAfterArrival(), { headers }) }
         catch { return Response.json({ schemaVersion: 1, error: { code: 'collection-failed', message: 'Graph collection failed.' } }, { headers, status: 503 }) }
       }
-      if (path !== '/_guren' && path !== '/_guren/') return new Response('Not found', { status: 404, headers })
+      if (path === '/_guren/plans.json') {
+        try { return Response.json(await loadPlans(options.cwd), { headers }) }
+        catch { return Response.json({ schemaVersion: 1, error: { code: 'read-failed', message: 'Plans could not be read.' } }, { headers, status: 503 }) }
+      }
+      // A plan page is the same shell; the page looks its slug up in plans.json and never reads a path from it.
+      const page = path === '/_guren' || path === '/_guren/' || planSlugFromPath(path) !== undefined
+      if (!page) return new Response('Not found', { status: 404, headers })
       const html = devCenterShell()
       const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi)]
         .map((match) => `'sha256-${createHash('sha256').update(match[1]!).digest('base64')}'`).join(' ')

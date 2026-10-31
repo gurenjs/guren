@@ -10,6 +10,7 @@ import { basename } from 'node:path'
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { CliError } from './cli-error'
 import { readScripts } from './command-output'
+import { devCenterPlanLine, planPagePath } from './dev-center-links'
 import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
 import { formatPlanStatus, type PlanStatusReport, PLAN_STATUS_REPORT_VERSION } from './plan-status'
@@ -30,6 +31,8 @@ import { runCaptured } from './subprocess'
 export const DEFAULT_VERIFY_TIMEOUT_MS = 10 * 60 * 1000
 
 export interface PlanVerifyReport extends PlanStatusReport {
+  /** The Dev Center page of this plan, for the person deciding what the agent cannot. */
+  devCenter: string
   /** The steps this run verified, in the order they ran. */
   steps: PlanStepVerification[]
   /** Steps a whole-plan run left alone: verified before, at a fingerprint that still matches. */
@@ -179,6 +182,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   return {
     reportVersion: PLAN_STATUS_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: approval?.hash ?? null },
+    devCenter: planPagePath(slug),
     ...overlaid.status,
     verification: overlaid.verification,
     steps,
@@ -236,5 +240,6 @@ export function formatPlanVerify(report: PlanVerifyReport): string {
   }
   // plan:verify runs only on an approved plan (or a draft), so the approval line would say nothing.
   lines.push(formatPlanStatus({ ...report, approval: undefined }))
+  lines.push('', devCenterPlanLine(report.devCenter))
   return lines.join('\n')
 }

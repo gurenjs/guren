@@ -170,3 +170,21 @@ plan views. That viewer requires `GUREN_DOCS=1`. The Dev Center itself requires
 `GUREN_MCP=1` and the same loopback check as the MCP endpoint; it is disabled in
 production. Older CLI versions without the page factory keep their MCP tools but
 do not mount the Dev Center. Upgrade Guren if `/_guren` returns 404.
+
+### Plans
+
+The top of the page lists the plans not closed at their current hash, with the
+ones waiting on a person first: a draft to approve, a plan edited after it was
+approved, a step the Stop hook stalled on, or a plan whose every step is
+verified and is ready to close. Each card opens `/_guren/plans/<slug>`, which
+shows every step by task with its last `plan:verify` outcome, the step
+`plan:next` marked, the waivers, and the commands the records say come next.
+`plan:next` and `plan:verify` print that path, so an agent can hand it over when
+the next decision is yours.
+
+The plan views read the plan files, their approvals and decision logs, and
+`.guren/plans/` only, the same data as the `guren_get_plans` MCP tool. They run
+no command and import nothing from the application, so a step that `plan:next`
+holds because the application changed since approval appears in `plan:next`'s
+output, not on the page. **Refresh plans** and **Refresh plan** read the records
+again.

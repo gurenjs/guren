@@ -11,6 +11,8 @@ const EXPECTED: ReadonlyArray<[path: string, status: number]> = [
   ['/', 200],
   ['/_guren', 404],
   ['/_guren/graph.json', 404],
+  ['/_guren/plans.json', 404],
+  ['/_guren/plans/production-check', 404],
   ['/_guren/runtime/errors?limit=1', 404],
   ['/_guren/mcp', 404],
 ]

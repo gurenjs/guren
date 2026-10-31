@@ -158,6 +158,16 @@ wait for it. Report it and leave the close to the person. A task's actions and
 the routes to them come after its `tests` step, so do not mount a route a
 later task owns to finish an earlier step.
 
+## Showing the person
+
+Whenever the next move is the person's (an approval, a held step, a stall, a
+close), send them the Dev Center page `plan:next` and `plan:verify` print,
+`/_guren/plans/<slug>` on the running dev server (`bun run dev`, or the origin
+`browser:serve` printed). It lists each step's last `plan:verify` outcome, the
+marked step and its stall, and the waivers, so they decide from the records
+rather than from your summary. It reads the records only: a held step is in
+`plan:next`'s output, not on the page.
+
 ## The Stop hook
 
 While a step is marked, the `Stop` hook verifies it whenever you end a turn and

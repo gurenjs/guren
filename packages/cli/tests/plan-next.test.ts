@@ -108,6 +108,7 @@ describe('plan:next', () => {
 
     const report = await planNextFile(plan, { appRoot: app, app: planAppState(), now: NOW })
     const text = formatPlanNext(report, 'comments.plan.json')
+    expect(text).toContain('Dev Center: /_guren/plans/comments on the running dev server')
 
     const command = `bunx guren plan:scaffold comments.plan.json --step ${SCAFFOLD}`
     expect(report.step!.scaffold).toEqual({
