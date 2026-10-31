@@ -7,14 +7,15 @@
  */
 
 import type { Dirent } from 'node:fs'
-import { readdir } from 'node:fs/promises'
-import { join, posix, sep } from 'node:path'
+import { readdir, realpath } from 'node:fs/promises'
+import { join, posix, resolve, sep } from 'node:path'
 
 import type { CheckResult } from './check-result'
+import { CliError } from './cli-error'
 import { relativeUnreadableDirs, toPosixRelative } from './discovery'
 import type { PlanAppState } from './plan/app-state'
 import type { PlanAppTarget } from './plan/app-targets'
-import { isPlanRevisionsDirName, type planSiblingPath } from './plan/beside'
+import { isPlanRevisionsDirName, planSlug, type planSiblingPath } from './plan/beside'
 import type { OpenPlan } from './plan/open-plan'
 
 /** Where plans are found: `docs/plans/**` (the §9 layout and `<slug>.plan.json`) and the app root's own `*.plan.json`. */
@@ -39,11 +40,16 @@ export interface PlanDiscovery {
   files: string[]
   /** Directories that exist and would not list, with why; a plan in one is not checked. */
   unreadable: Array<{ dir: string; reason: string }>
+  /**
+   * Each `planSlug()` two or more of `files` share, with those files (absolute, sorted). They share
+   * `.guren/plans/<slug>.state.json`, `docs/plans/<slug>.md`, the saved review and the Dev Center page.
+   */
+  sharedSlugs: Map<string, string[]>
 }
 
 /** A revisions directory (`revisions/`, `<slug>.revisions/`) is skipped: it holds a plan's revision records (§9), not plans. */
 export async function discoverPlanFiles(appRoot: string): Promise<PlanDiscovery> {
-  const discovery: PlanDiscovery = { files: [], unreadable: [] }
+  const discovery: PlanDiscovery = { files: [], unreadable: [], sharedSlugs: new Map() }
   const entries = async (dir: string): Promise<Dirent[]> => {
     try {
       return await readdir(dir, { withFileTypes: true })
@@ -68,13 +74,43 @@ export async function discoverPlanFiles(appRoot: string): Promise<PlanDiscovery>
   }
   await walk(join(appRoot, PLAN_DIR))
   discovery.files.sort()
+  const bySlug = new Map<string, string[]>()
+  for (const file of discovery.files) bySlug.set(planSlug(file), [...(bySlug.get(planSlug(file)) ?? []), file])
+  for (const [slug, files] of bySlug) if (files.length > 1) discovery.sharedSlugs.set(slug, files)
   return discovery
 }
 
+async function canonicalPath(path: string): Promise<string> {
+  return realpath(path).catch(() => resolve(path))
+}
+
+/**
+ * The discovered plans other than `planPath` whose slug is its own, app-relative. A plan outside
+ * the discovered places still shares a state file with a discovered plan of its slug.
+ */
+export async function plansSharingSlug(appRoot: string, planPath: string): Promise<string[]> {
+  const slug = planSlug(planPath)
+  const candidates = (await discoverPlanFiles(appRoot)).files.filter((file) => planSlug(file) === slug)
+  if (candidates.length === 0) return []
+  const own = await canonicalPath(planPath)
+  const others: string[] = []
+  for (const file of candidates) if ((await canonicalPath(file)) !== own) others.push(toPosixRelative(appRoot, file))
+  return others
+}
+
+/** Refuses a plan whose state, closing document or test directory another discovered plan's would overwrite. */
+export async function refuseSharedPlanSlug(appRoot: string, planPath: string, consequence: string): Promise<void> {
+  const others = await plansSharingSlug(appRoot, planPath)
+  if (others.length === 0) return
+  const slug = planSlug(planPath)
+  throw new CliError(
+    `${planPath} shares the slug "${slug}" with ${others.join(', ')}, so ${consequence}: both keep their step records in .guren/plans/${slug}.state.json and close into docs/plans/${slug}.md, and each run overwrites the other's. Rename all but one plan file (or its directory); guren check --plan lists every shared slug.`,
+  )
+}
+
 async function loadModules() {
-  const [openPlan, state, targets, status, appState, allowlist] = await Promise.all([
+  const [openPlan, targets, status, appState, allowlist] = await Promise.all([
     import('./plan/open-plan'),
-    import('./plan/state'),
     import('./plan/app-targets'),
     import('./plan-status'),
     import('./plan/app-state'),
@@ -82,7 +118,6 @@ async function loadModules() {
   ])
   return {
     readOpenPlan: openPlan.readOpenPlan,
-    planSlug: state.planSlug,
     listPlanAppTargets: targets.listPlanAppTargets,
     planStatusFile: status.planStatusFile,
     loadPlanAppState: appState.loadPlanAppState,
@@ -212,12 +247,9 @@ export async function checkPlans(options: PlanCheckOptions): Promise<CheckResult
   if (discovery.files.length === 0) return results
 
   const m = await loadModules()
-  const slugs = new Map<string, string[]>()
   const open: OpenPlan[] = []
   for (const path of discovery.files) {
     const file = toPosixRelative(appRoot, path)
-    const slug = m.planSlug(path)
-    slugs.set(slug, [...(slugs.get(slug) ?? []), file])
     const classified = await m.readOpenPlan(appRoot, path)
     if (classified.kind === 'open') open.push(classified.plan)
     else if (classified.kind === 'unreadable') results.push(unreadable(file, `${file} was not checked: ${classified.reason}`, 'Fix the file so guren plan:status can read it.'))
@@ -234,8 +266,8 @@ export async function checkPlans(options: PlanCheckOptions): Promise<CheckResult
     }
   }
 
-  for (const [slug, files] of slugs) {
-    if (files.length < 2) continue
+  for (const [slug, paths] of discovery.sharedSlugs) {
+    const files = paths.map((path) => toPosixRelative(appRoot, path))
     results.push({
       key: `plan:slug:${slug}`,
       title: 'Plans share a slug',

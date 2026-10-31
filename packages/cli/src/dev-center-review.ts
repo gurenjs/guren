@@ -32,10 +32,11 @@ function problem(status: number, code: string, message: string): Response {
 
 /** The plan a slug names. Throws the response for none or for two, which the handler returns. */
 async function locate(cwd: string, slug: string): Promise<{ path: string; file: string; digest: string }> {
-  const files = (await discoverPlanFiles(cwd)).files.filter((file) => planSlug(file) === slug)
-  if (files.length === 0) throw problem(404, 'no-plan', 'No plan has this name.')
-  if (files.length > 1) throw problem(409, 'shared-slug', `${files.length} plans share this name, so feedback could reach the wrong one; rename one of them.`)
-  const path = files[0]!
+  const discovery = await discoverPlanFiles(cwd)
+  const shared = discovery.sharedSlugs.get(slug)
+  if (shared) throw problem(409, 'shared-slug', `${shared.length} plans share this name, so feedback could reach the wrong one; rename one of them.`)
+  const path = discovery.files.find((file) => planSlug(file) === slug)
+  if (path === undefined) throw problem(404, 'no-plan', 'No plan has this name.')
   const { plan } = await readPlanFile(path, cwd)
   return { path, file: toPosixRelative(cwd, path), digest: planDigest(plan) }
 }

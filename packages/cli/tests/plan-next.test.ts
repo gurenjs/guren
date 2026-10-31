@@ -296,6 +296,14 @@ describe('plan:next', () => {
     expect([await mark('comments'), await mark('billing')]).toEqual(['docs/plans/comments/plan.json', 'docs/plans/billing/plan.json'])
   })
 
+  test('should refuse a plan whose slug another plan shares, before it marks a step', async () => {
+    const { app, plan } = await createApp('shared-slug')
+    await writeWorkspaceFiles(app, { 'docs/plans/comments/plan.json': JSON.stringify(loadCommentsPlan()) })
+
+    await expect(planNextFile(plan, { appRoot: app, now: NOW })).rejects.toThrow('shares the slug "comments" with docs/plans/comments/plan.json, so no step of it is handed out')
+    await expect(readFile(join(app, '.guren/plans/comments.state.json'), 'utf8')).rejects.toThrow()
+  })
+
   test('should skip the steps whose record still holds and carry the elements of the one it returns', async () => {
     const { app, plan } = await createApp('holding')
     const record = await holding(app)

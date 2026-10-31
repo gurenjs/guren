@@ -92,7 +92,7 @@ describe('the plan specs', () => {
 
   test('checks each form label and action name on the page that renders the view', () => {
     const map = mapOf([feature('comments', [newComment], [{ plan, view: create, routes: [newComment] }])])
-    const [spec] = buildPlanSpecs(map, { signIn: false })
+    const [spec] = buildPlanSpecs(map, { signIn: false }, new Map())
     expect(spec!.path).toBe('tests/browser/generated/plans/comments.browser.ts')
     expect(spec!.contents).toContain("test('view comments.create (comments/Create) on GET /comments/new', async ({ page }) => {")
     expect(spec!.contents).toContain("await expect(page.getByLabel('Comment', { exact: true }).filter({ visible: true }).first()).toBeVisible()")
@@ -104,7 +104,7 @@ describe('the plan specs', () => {
 
   test('carries no bracketed acceptance id, so plan:verify never reads it as a behaviour test', () => {
     const map = mapOf([feature('comments', [newComment], [{ plan, view: { ...create, id: 'AC-comments-1' }, routes: [newComment] }])])
-    expect(buildPlanSpecs(map, { signIn: false })[0]!.contents).not.toMatch(/\[AC-/u)
+    expect(buildPlanSpecs(map, { signIn: false }, new Map())[0]!.contents).not.toMatch(/\[AC-/u)
   })
 
   test('marks a view it cannot open as fixme, keeps one no feature holds, and leaves a dropped view out', () => {
@@ -115,16 +115,18 @@ describe('the plan specs', () => {
       { plan, view: view('comments.old', 'comments/Old', { change: { kind: 'drop', reason: 'merged into show' } }), routes: [] },
     ]
     const invoices: BrowserMapView = { plan, view: view('invoices.create', 'invoices/Create'), routes: [] }
-    const contents = buildPlanSpecs(mapOf([feature('comments', [showRoute], views)], [invoices]), { signIn: false })[0]!.contents
+    const contents = buildPlanSpecs(mapOf([feature('comments', [showRoute], views)], [invoices]), { signIn: false }, new Map())[0]!.contents
     expect(contents).toContain("test.fixme('view comments.show (comments/Show): GET /comments/:id takes a path parameter; open a record to check it', () => {})")
     expect(contents).toContain("test.fixme('view comments.edit (comments/Edit): no GET route renders it yet', () => {})")
     expect(contents).toContain("test.fixme('view invoices.create (invoices/Create): no GET route renders it yet', () => {})")
     expect(contents).not.toContain('comments.old')
   })
 
-  test('refuses two plans whose specs would be one file', () => {
-    const views = ['comments.plan.json', 'docs/plans/comments/plan.json'].map((file): BrowserMapView => ({ plan: file, view: create, routes: [] }))
-    expect(() => buildPlanSpecs(mapOf([], views), { signIn: false })).toThrow('share the slug comments')
+  test('refuses a plan whose slug another discovered plan shares, approved or not', () => {
+    const shared = new Map([['comments', ['comments.plan.json', 'docs/plans/comments/plan.json']]])
+    const views: BrowserMapView[] = [{ plan: 'comments.plan.json', view: create, routes: [] }]
+    expect(() => buildPlanSpecs(mapOf([], views), { signIn: false }, shared)).toThrow('comments.plan.json, docs/plans/comments/plan.json share the slug comments')
+    expect(buildPlanSpecs(mapOf([], views), { signIn: false }, new Map())).toHaveLength(1)
   })
 })
 

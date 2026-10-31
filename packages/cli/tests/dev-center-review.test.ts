@@ -88,7 +88,11 @@ test('feedback is refused from another origin, in another type, off its schema, 
 test('feedback refuses a slug two plans share, and the review takes only its own methods', async () => {
   await writeSavedPlanFeedback(workspace.dir, 'comments', digest, { answers: [], elements: [] })
   await writeWorkspaceFiles(workspace.dir, { 'docs/plans/comments/plan.json': JSON.stringify(loadCommentsPlan()) })
-  expect((await post({ planDigest: digest, feedback })).status).toBe(409)
+  const saved = await post({ planDigest: digest, feedback })
+  expect(saved.status).toBe(409)
+  expect(await saved.json()).toMatchObject({ error: { code: 'shared-slug', message: expect.stringContaining('2 plans share this name') } })
+  expect((await get('/_guren/plans/comments/review')).status).toBe(409)
+  expect((await get('/_guren/plans/comments/feedback')).status).toBe(409)
   // Neither plan is credited with a file that could belong to the other.
   const overview = await (await get('/_guren/plans.json')).json() as { plans: Array<{ feedback?: unknown }> }
   expect(overview.plans.map((plan) => plan.feedback)).toEqual([undefined, undefined])

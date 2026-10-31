@@ -268,6 +268,28 @@ describe('buildDocsViewerData and closed plans', () => {
 })
 
 describe('buildDocsViewerData and plan pages', () => {
+  it('names no page for a slug two plans share, as the review route refuses it', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-viewer-shared-slug-')
+    try {
+      const dir = workspace.dir
+      await mkdir(join(dir, 'docs/plans/comments'), { recursive: true })
+      await writeFile(join(dir, 'package.json'), '{}', 'utf8')
+      await writeFile(join(dir, 'docs/plans/comments/plan.json'), '{}', 'utf8')
+      await writeFile(join(dir, 'docs/plans/comments/plan.html'), '<title>Comments plan</title>', 'utf8')
+      await writeFile(join(dir, 'docs/plans/comments.plan.json'), '{}', 'utf8')
+      await writeFile(join(dir, 'docs/plans/tags.plan.json'), '{}', 'utf8')
+      await writeFile(join(dir, 'docs/plans/tags.plan.html'), '<title>Tags plan</title>', 'utf8')
+
+      const data = await buildDocsViewerData(dir)
+
+      expect(data.planPages.map((page) => page.slug)).toEqual(['tags'])
+      expect(await docsViewerPlanPage(dir, 'comments')).toBeUndefined()
+      expect(await docsViewerPlanPage(dir, 'tags')).toContain('Tags plan')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('marks a page rendered at an older hash than its plan stale, with the command that renders it again', async () => {
     const workspace = await createTempWorkspace('guren-cli-docs-viewer-stale-page-')
     try {

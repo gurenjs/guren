@@ -9,7 +9,7 @@ import { ciSuiteConflict, runCheck } from '../src/check'
 import { gatingResults, type CheckResult } from '../src/check-result'
 import { builtinSubCommands } from '../src/commands'
 import { relativeUnreadableDirs } from '../src/discovery'
-import { checkPlans, discoverPlanFiles, isPlanInput } from '../src/plan-check'
+import { checkPlans, discoverPlanFiles, isPlanInput, plansSharingSlug, refuseSharedPlanSlug } from '../src/plan-check'
 import { planApprovalsPath } from '../src/plan/approvals'
 import { planDocClosedHash, renderPlanDoc } from '../src/plan/close-docs'
 import { planHash } from '../src/plan/identity'
@@ -135,7 +135,7 @@ describe('guren check --plan', () => {
       const dir = await createApp('none')
       await rm(join(dir, 'comments.plan.json'))
 
-      expect(await discoverPlanFiles(dir)).toEqual({ files: [], unreadable: [] })
+      expect(await discoverPlanFiles(dir)).toEqual({ files: [], unreadable: [], sharedSlugs: new Map() })
       expect(await checkPlans({ cwd: dir })).toEqual([])
     })
 
@@ -155,6 +155,19 @@ describe('guren check --plan', () => {
 
       const { files } = await discoverPlanFiles(dir)
       expect(files.map((path) => path.slice(dir.length + 1))).toEqual(['comments.plan.json', 'docs/plans/status/plan.json', 'docs/plans/tags.plan.json'])
+    })
+
+    test('should report each slug two or more plans share, once, with every file holding it', async () => {
+      const dir = await createApp('shared-slugs')
+      await writeWorkspaceFiles(dir, {
+        'docs/plans/comments/plan.json': '{}',
+        'docs/plans/comments.plan.json': '{}',
+        'docs/plans/tags.plan.json': '{}',
+      })
+
+      const { sharedSlugs } = await discoverPlanFiles(dir)
+      const relative = [...sharedSlugs].map(([slug, files]) => [slug, files.map((path) => path.slice(dir.length + 1))])
+      expect(relative).toEqual([['comments', ['comments.plan.json', 'docs/plans/comments.plan.json', 'docs/plans/comments/plan.json']]])
     })
 
     test.skipIf(!CAN_DENY_FILE_READS)('should report a docs/plans directory that will not list, rather than throw', async () => {
@@ -201,6 +214,30 @@ describe('guren check --plan', () => {
       expect(shared).toHaveLength(1)
       expect(shared[0]).toMatchObject({ key: 'plan:slug:comments', status: 'warn', advisory: true })
       expect(shared[0].message).toContain('comments.plan.json, docs/plans/comments/plan.json')
+    })
+  })
+
+  describe('a plan whose slug another plan shares', () => {
+    test('should name the other discovered plans, never the plan itself however its path is spelled', async () => {
+      const dir = await createApp('sharing')
+      await writeWorkspaceFiles(dir, { 'docs/plans/comments/plan.json': '{}', 'docs/plans/tags.plan.json': '{}' })
+
+      expect(await plansSharingSlug(dir, join(dir, 'comments.plan.json'))).toEqual(['docs/plans/comments/plan.json'])
+      expect(await plansSharingSlug(dir, `${dir}/docs/plans/../plans/comments/plan.json`)).toEqual(['comments.plan.json'])
+      expect(await plansSharingSlug(dir, join(dir, 'docs/plans/tags.plan.json'))).toEqual([])
+    })
+
+    test('should count a plan outside the discovered places, whose state file a discovered plan shares', async () => {
+      const dir = await createApp('sharing-outside')
+      await writeWorkspaceFiles(dir, { 'drafts/comments.plan.json': '{}' })
+      const outside = join(dir, 'drafts/comments.plan.json')
+
+      expect(await plansSharingSlug(dir, outside)).toEqual(['comments.plan.json'])
+      await expect(refuseSharedPlanSlug(dir, outside, 'nothing is done')).rejects.toThrow(
+        `${outside} shares the slug "comments" with comments.plan.json, so nothing is done: both keep their step records in .guren/plans/comments.state.json`,
+      )
+      await rm(join(dir, 'comments.plan.json'))
+      await refuseSharedPlanSlug(dir, outside, 'nothing is done')
     })
   })
 
