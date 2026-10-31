@@ -32,13 +32,19 @@ bun run dev
 2. `route.meetups.store` の policy の警告は、第 2 章で意図した選択と判断したので、そのままにします。
 3. ページ下部に **Review saved at** と時刻が表示されたら、回答は保存されています(`--locale ja` で描画したページでは「〜にレビューを保存しました」)。
 
+![レビューページの質問カード。「Can guests browse meetups?」の yes が選ばれていて assumed の印が付き、その下に no があります。Answer の欄には「Yes, browsing is public.」と入力されています。欄の下には、この質問が route.meetups.index と route.meetups.show に影響することが表示されています](../../images/agent-course-review-question.png)
+
 要素ごとの判定、コメント、回答は、操作して少し経つと `.guren/plans/meetups.feedback.json` に保存されます。あとでページを開き直すと、保存した内容が読み込まれます。このファイルは `.guren/plans/` にあるほかのファイルと同じく Git の管理対象外です。プロジェクトのほかのファイルは変わらず、`plan.json` もエージェントが書いたときのままです。エージェントがレビューを反映するまでは、`plan:approve` も質問が未回答のままだとして承認を拒否します。
 
 **開発サーバーを使わない場合:** `docs/plans/meetups/plan.html` をファイルとして開き、同じようにレビューします。このページは何も保存しないので、ページ下部の **Copy prompt for the agent** を押します(`--locale ja` で描画したページでは「エージェントへの依頼文をコピー」)。レビューの内容が JSON で入った依頼文がコピーされるので、次の節のプロンプトの 1 段落目の代わりに、その依頼文を送ってください。
 
 ## 2. レビューをエージェントに渡す
 
-Dev Center の計画のページに戻ると、**Review** の欄に保存した操作の件数 (`1 answered`) と、エージェントに送る依頼文がコピーボタン付きで表示されています。第 2 章で見つけた足りない振る舞いはページからは伝わらないので、依頼文の下に書き足します。Claude Code のセッションに、次のプロンプトを送ります。
+Dev Center の計画のページに戻ると、**Review** の欄に保存した操作の件数 (`1 answered`) と、エージェントに送る依頼文がコピーボタン付きで表示されています。
+
+![レビュー後の Dev Center の計画のページ。「Waiting on a person」の枠に「Review saved」とあり、レビューをもとに計画を改訂するようエージェントに伝える案内が出ています。その下の Review カードには Review this plan のボタン、0 approved、0 changes requested、0 commented、1 answered という件数の行があります。「Send the agent:」の下には「Revise docs/plans/meetups/plan.json from my review with the plan-write skill. The review is saved in .guren/plans/meetups.feedback.json.」という依頼文とコピーボタンが並びます](../../images/agent-course-dev-center-review.png)
+
+第 2 章で見つけた足りない振る舞いはページからは伝わらないので、依頼文の下に書き足します。Claude Code のセッションに、次のプロンプトを送ります。
 
 ```text
 docs/plans/meetups/plan.json に私のレビューを plan-write スキルで反映してください。レビューは .guren/plans/meetups.feedback.json に保存してあります。

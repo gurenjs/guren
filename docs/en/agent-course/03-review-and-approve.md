@@ -32,13 +32,19 @@ For this plan:
 2. On `route.meetups.store`, leave the policy warning alone. It is a choice you made in chapter 2.
 3. Check the footer: it reads **Review saved at** and a time once your answer is on disk.
 
+![The question card on the review page: "Can guests browse meetups?" with yes selected and marked assumed, no below it, and "Yes, browsing is public." in the Answer box. Under the box, the question affects route.meetups.index and route.meetups.show](../../images/agent-course-review-question.png)
+
 Each verdict, comment and answer goes to `.guren/plans/meetups.feedback.json` a moment after you make it, and the page loads it again when you come back. Git ignores the file, like everything under `.guren/plans/`. Nothing else changes: `plan.json` is still what the agent wrote, and `plan:approve` finds the question open until the agent applies your review.
 
 **Without the dev server:** open `docs/plans/meetups/plan.html` from disk and review it the same way. Nothing is saved there, so click **Copy prompt for the agent** at the bottom: it copies a prompt that carries the whole review as JSON. Send that prompt in place of the first line of the one in the next section.
 
 ## 2. Hand the review to the agent
 
-Go back to the plan's page in the Dev Center. Its **Review** card now counts what you saved (`1 answered`) and gives you the message to send the agent, with a copy button. The page cannot know about the missing behaviours from chapter 2, so they go below that message. Send this to the Claude Code session:
+Go back to the plan's page in the Dev Center. Its **Review** card now counts what you saved (`1 answered`) and gives you the message to send the agent, with a copy button.
+
+![The plan's page in the Dev Center after the review. A box headed "Waiting on a person" reads "Review saved" and says to tell the agent to revise the plan from the review. Below it, the Review card has a Review this plan button, a line counting 0 approved, 0 changes requested, 0 commented and 1 answered, and under "Send the agent:" the message "Revise docs/plans/meetups/plan.json from my review with the plan-write skill. The review is saved in .guren/plans/meetups.feedback.json." with a copy button](../../images/agent-course-dev-center-review.png)
+
+The page cannot know about the missing behaviours from chapter 2, so they go below that message. Send this to the Claude Code session:
 
 ```text
 Revise docs/plans/meetups/plan.json from my review with the plan-write skill. The review is saved in .guren/plans/meetups.feedback.json.
