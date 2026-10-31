@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { addBrowserTests, BROWSER_TEST_SCRIPT } from '../src/add-browser-tests'
 import { isParameterless, type BrowserFeature, type BrowserMap, type BrowserMapRoute, type BrowserMapView } from '../src/browser-map'
 import { runBrowserMap } from '../src/browser-map-files'
+import { BROWSER_RUN_NAME } from '../src/browser-record'
 import {
   A11Y_OPTIONS_FILE, A11Y_SPEC_FILE, BROWSER_ACCOUNT_EMAIL, BROWSER_SEEDER_FILE, BROWSER_TESTS_CONFIG, buildA11ySpec, buildBrowserSeeder, buildPlanSpecs,
   buildSmokeSpec, GENERATED_HEADER, SMOKE_SPEC_FILE,
@@ -221,9 +222,8 @@ describe('the browser account seeder', () => {
 
 describe('what the templates restate', () => {
   test('the run name is the one browser:record --begin writes', async () => {
-    const recorder = await readFile(join(import.meta.dir, '../src/browser-record.ts'), 'utf8')
     const pattern = /const RUN_NAME = (\/.+\/u)\n/u
-    expect(pattern.exec(await template(BROWSER_TESTS_CONFIG))?.[1]).toBe(pattern.exec(recorder)![1]!)
+    expect(pattern.exec(await template(BROWSER_TESTS_CONFIG))?.[1]).toBe(String(BROWSER_RUN_NAME))
   })
 
   test('the account email is the one the seeder writes', async () => {

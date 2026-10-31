@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
 import { freshApplicationGraph } from './application-graph-fresh'
 import type { GraphResult } from './application-graph'
-import { planSlugFromPath, reviewRoute } from './dev-center-links'
+import { handleEvidenceRequest, serveBrowserScreenshot } from './dev-center-evidence'
+import { browserScreenshotRoute, planEvidenceSlug, planSlugFromPath, reviewRoute } from './dev-center-links'
 import { handleReviewRequest } from './dev-center-review'
 import { devCenterShell } from './dev-center-shell'
 import { readPlanOverview, type PlanOverview } from './docs-viewer-plans'
@@ -46,6 +47,10 @@ export function createDevCenterHandler(options: {
         try { return Response.json(await scanAfterArrival(), { headers }) }
         catch { return Response.json({ schemaVersion: 1, error: { code: 'collection-failed', message: 'Graph collection failed.' } }, { headers, status: 503 }) }
       }
+      const evidence = planEvidenceSlug(path)
+      if (evidence !== undefined) return handleEvidenceRequest(options.cwd, evidence)
+      const screenshot = browserScreenshotRoute(path)
+      if (screenshot) return serveBrowserScreenshot(options.cwd, screenshot.run, screenshot.sha256)
       if (path === '/_guren/plans.json') {
         try { return Response.json(await loadPlans(options.cwd), { headers }) }
         catch { return Response.json({ schemaVersion: 1, error: { code: 'read-failed', message: 'Plans could not be read.' } }, { headers, status: 503 }) }
@@ -57,7 +62,7 @@ export function createDevCenterHandler(options: {
       const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi)]
         .map((match) => `'sha256-${createHash('sha256').update(match[1]!).digest('base64')}'`).join(' ')
       return new Response(html, { headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8',
-        'Content-Security-Policy': `default-src 'none'; script-src ${scripts}; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'`,
+        'Content-Security-Policy': `default-src 'none'; script-src ${scripts}; style-src 'unsafe-inline'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'`,
       } })
     },
   }

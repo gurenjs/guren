@@ -419,6 +419,22 @@ answers to `.guren/plans/<slug>.feedback.json`. That route is the Dev Center's
 only write. It checks the `Origin`, the schema and the plan's digest, runs no
 command, and leaves approval to `plan:approve`.
 
+Also on 2026-10-31, the plan page gained each step's evidence, so a person can
+judge a step without asking the agent. `/_guren/plans/<slug>/evidence` returns,
+per derived step, the plan routes its elements touch (its routes, the routes to
+its actions and controllers, the routes its views render from or submit to, and
+its behaviours' routes), the last `plan:verify` record's fingerprinted files and
+`work`, and the RFC 0033 browser steps recorded under `.guren/browser/` whose id
+is one of the step's acceptance ids, or whose run names the feature of a page
+the step renders. The routes come from the plan alone; the page says when a step
+names none. The page reads `/_guren/runtime/errors` as the home does and keeps
+the events whose route has a step route's method and path. Screenshots are
+served from `/_guren/browser/<run>/screenshots/<sha256>`: the run is found among
+the directories `.guren/browser/` lists, the screenshot among the ones its
+`run.json` records, and the bytes are served only while they still hash to it.
+The M2 limits hold, and RFC 0033 §8 is unchanged: the evidence is shown, no plan
+command reads it, and no gate counts it.
+
 ## M3 graph readers
 
 Toward plan reader convergence, the remaining node kinds and relations adapt

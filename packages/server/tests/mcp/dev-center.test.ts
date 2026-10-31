@@ -6,7 +6,7 @@ process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 const original = { ...process.env }
 afterEach(() => { process.env = { ...original } })
 const local = { server: { requestIP: () => ({ address: '127.0.0.1' }) } }
-const DEV_CENTER_PATHS = ['/_guren', '/_guren/', '/_guren/graph.json', '/_guren/plans.json', '/_guren/plans/comments', '/_guren/plans/comments/review', '/_guren/plans/comments/feedback']
+const DEV_CENTER_PATHS = ['/_guren', '/_guren/', '/_guren/graph.json', '/_guren/plans.json', '/_guren/plans/comments', '/_guren/plans/comments/review', '/_guren/plans/comments/feedback', '/_guren/plans/comments/evidence', `/_guren/browser/2026-10-31T00-00-00Z-posts/screenshots/${'0'.repeat(64)}`]
 
 test('Dev Center uses the MCP opt-in and guards its shell, graph and plan routes', async () => {
   process.env.NODE_ENV = 'development'

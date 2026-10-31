@@ -18,20 +18,21 @@ import { readWithinLimit } from './plan/feedback'
 import { planDigest } from './plan/identity'
 import { renderedPlanDigest } from './plan/render'
 import { readSavedPlanFeedback, savedFeedbackFile, SavedFeedbackPostSchema, writeSavedPlanFeedback } from './plan/saved-feedback'
+import type { Plan, PlanDraft } from './plan/schema'
 import { planSlug } from './plan/state'
 
 /** The policy `plan/page/index.html` declares, and the one the review serves: the same plus `connect-src 'self'`. */
 export const STATIC_PAGE_POLICY = `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'; require-trusted-types-for 'script'`
 const SERVED_PAGE_POLICY = STATIC_PAGE_POLICY.replace(`img-src data:;`, `img-src data:; connect-src 'self';`)
 
-const NO_STORE = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }
+export const NO_STORE = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }
 
-function problem(status: number, code: string, message: string): Response {
+export function problem(status: number, code: string, message: string): Response {
   return Response.json({ schemaVersion: 1, error: { code, message } }, { status, headers: NO_STORE })
 }
 
 /** The plan a slug names. Throws the response for none or for two, which the handler returns. */
-async function locate(cwd: string, slug: string): Promise<{ path: string; file: string; digest: string }> {
+export async function locatePlan(cwd: string, slug: string): Promise<{ path: string; file: string; digest: string; plan: PlanDraft | Plan }> {
   const discovery = await discoverPlanFiles(cwd)
   // A plan of this slug may sit in a directory that would not list, so the one found is not known to be the only one.
   if (discovery.unreadable.length > 0) throw problem(503, 'unreadable', `${relativeUnreadableDirs(cwd, discovery.unreadable).map(({ dir }) => dir).join(', ')} could not be listed, so this plan is not known to be the only one of its name.`)
@@ -40,7 +41,7 @@ async function locate(cwd: string, slug: string): Promise<{ path: string; file: 
   const path = discovery.files.find((file) => planSlug(file) === slug)
   if (path === undefined) throw problem(404, 'no-plan', 'No plan has this name.')
   const { plan } = await readPlanFile(path, cwd)
-  return { path, file: toPosixRelative(cwd, path), digest: planDigest(plan) }
+  return { path, file: toPosixRelative(cwd, path), digest: planDigest(plan), plan }
 }
 
 function notServed(file: string, reason: string): Response {
@@ -50,7 +51,7 @@ function notServed(file: string, reason: string): Response {
 }
 
 async function servePage(cwd: string, slug: string): Promise<Response> {
-  const located = await locate(cwd, slug)
+  const located = await locatePlan(cwd, slug)
   let html: string
   try {
     html = await readFile(planOutputPath(located.path), 'utf8')
@@ -69,7 +70,7 @@ async function servePage(cwd: string, slug: string): Promise<Response> {
 
 /** The review saved for the plan as it stands, or `null`: one saved on another version is not this plan's. */
 async function readFeedback(cwd: string, slug: string): Promise<Response> {
-  const located = await locate(cwd, slug)
+  const located = await locatePlan(cwd, slug)
   const { saved, unreadable } = await readSavedPlanFeedback(cwd, slug)
   if (unreadable) return problem(503, 'unreadable', unreadable)
   const current = saved?.planDigest === located.digest ? saved : null
@@ -91,7 +92,7 @@ async function saveFeedback(cwd: string, slug: string, request: Request): Promis
   try { body = JSON.parse(text) } catch { return problem(400, 'json', 'The feedback is not JSON.') }
   const parsed = SavedFeedbackPostSchema.safeParse(body)
   if (!parsed.success) return problem(400, 'schema', `The feedback does not match its schema:\n${formatSchemaIssues(parsed.error)}`)
-  const located = await locate(cwd, slug)
+  const located = await locatePlan(cwd, slug)
   if (parsed.data.planDigest !== located.digest) {
     return problem(409, 'plan-changed', `The plan changed after this page was rendered. Run ${planCommand('plan:render', located.file)} and review the new page.`)
   }

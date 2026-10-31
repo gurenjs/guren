@@ -1,9 +1,10 @@
 import type { GraphNode, GurenApplicationGraph, GraphResult } from '../application-graph'
-import { planPagePath, planReviewPath, planSlugFromPath, savedReviewPrompt } from '../dev-center-links'
+import type { PlanEvidence, StepBrowserEvidence, StepEvidence } from '../dev-center-evidence'
+import { browserScreenshotPath, planEvidencePath, planPagePath, planReviewPath, planSlugFromPath, savedReviewPrompt } from '../dev-center-links'
 import type { PlanOverview } from '../docs-viewer-plans'
 import { commandRow } from '../docs-viewer-page/dom'
 import type { RuntimeErrorResult } from '../runtime-errors'
-import { planAttention, sortPlans, STEP_TONE, stepsByTask, verifiedCount, type DevCenterPlan, type PlanAttention } from './plans'
+import { planAttention, sortPlans, STEP_TONE, stepRuntimeErrors, stepsByTask, verifiedCount, type DevCenterPlan, type PlanAttention } from './plans'
 
 function element<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id)
@@ -200,7 +201,115 @@ function card(title: string, ...body: Node[]): HTMLElement {
   section.append(head, inner)
   return section
 }
-function stepRow(step: DevCenterPlan['steps'][number]): HTMLElement {
+/** What the plan page read beside the plans: either half may be missing, and says why. */
+interface PlanEvidenceRead {
+  evidence: PlanEvidence | { error: string }
+  errors: RuntimeErrorResult | { error: string }
+}
+function readFailure(error: unknown): { error: string } {
+  return { error: error instanceof Error ? error.message : 'Read failed' }
+}
+async function readEvidence(slug: string): Promise<PlanEvidenceRead> {
+  const [evidence, errors] = await Promise.all([
+    fetch(planEvidencePath(slug), { cache: 'no-store', redirect: 'error' }).then(async (response) => {
+      const body = await response.json().catch(() => undefined) as PlanEvidence | { error?: { message?: string } } | undefined
+      if (response.status === 404 && !body) throw new Error('this dev server predates step evidence; update @guren/core')
+      if (!response.ok) throw new Error(body && 'error' in body && body.error?.message ? body.error.message : `HTTP ${response.status}`)
+      if (!body || !('schemaVersion' in body) || body.schemaVersion !== 1 || !Array.isArray(body.steps)) throw new Error('Unsupported evidence payload')
+      return body
+    }).catch(readFailure),
+    (readJson('/_guren/runtime/errors?limit=100') as Promise<RuntimeErrorResult>).then((result) => {
+      if (result?.schemaVersion !== 1 || (result.status === 'available' && !Array.isArray(result.events))) throw new Error('Unsupported runtime payload')
+      return result
+    }).catch(readFailure),
+  ])
+  return { evidence, errors }
+}
+function runtimeErrorsBlock(evidence: StepEvidence, errors: PlanEvidenceRead['errors']): HTMLElement[] {
+  if ('error' in errors) return [text('p', `Runtime errors unavailable: ${errors.error}.`, 'meta warning')]
+  if (errors.status === 'unavailable') return [text('p', `Runtime errors unavailable: ${errors.reason}`, 'meta warning')]
+  if (!evidence.routes.length) return [text('p', 'So no runtime error can be tied to this step.', 'meta')]
+  const matched = stepRuntimeErrors(evidence.routes, errors.events)
+  if (!matched.length) return [text('p', `No retained server error on these routes since ${errors.startedAt}.`, 'meta good')]
+  return [
+    text('p', `${matched.length} retained server ${matched.length === 1 ? 'error' : 'errors'} on these routes:`, 'meta error'),
+    ...[...matched].reverse().map((event) => {
+      const frames = event.frames.map((frame) => `${frame.file}:${frame.line ?? '?'}:${frame.column ?? '?'}`).join('\n')
+      const row = text('div', '', 'evidence-item')
+      row.append(text('div', `${event.status} ${event.method} ${event.route!.pattern} · ${event.occurredAt} · #${event.sequence}`, 'meta mono'))
+      if (frames) row.append(text('pre', frames, 'g-code'))
+      return row
+    }),
+  ]
+}
+function recordBlock(evidence: StepEvidence): HTMLElement[] {
+  const record = evidence.record
+  if (!record) return [text('p', 'No plan:verify record yet.', 'meta')]
+  const parts = [text('p', `plan:verify ${record.outcome} at ${record.ranAt}${record.current ? '' : ', against another version of the plan'}.`, 'meta mono')]
+  const work = record.work
+  if (work?.measured) parts.push(text('p', `Work since ${work.from.slice(0, 12)}: ${work.files.length} ${work.files.length === 1 ? 'file' : 'files'}, +${work.added} −${work.removed}${work.settled ? '' : ' (not settled)'}.`, 'meta mono'))
+  else if (work) parts.push(text('p', `Work not measured: ${work.reason}`, 'meta'))
+  if (record.files.length) {
+    const files = text('details', '')
+    files.append(text('summary', `${record.files.length} fingerprinted ${record.files.length === 1 ? 'file' : 'files'}`), text('pre', record.files.join('\n'), 'g-code'))
+    parts.push(files)
+  } else parts.push(text('p', 'The record fingerprinted no file.', 'meta'))
+  return parts
+}
+function browserItem(entry: StepBrowserEvidence): HTMLElement {
+  const { step } = entry
+  const item = text('div', '', 'evidence-item')
+  const head = text('div', '')
+  const tone = step.result === 'pass' ? 'ok' : step.result === 'fail' ? 'danger' : 'warn'
+  head.append(text('span', step.result, `g-badge g-badge-${tone}`), text('span', ` ${step.id} in ${entry.run}`, 'mono'))
+  item.append(head)
+  const why = entry.match === 'acceptance' ? 'recorded for this acceptance id' : `a step of a run of the ${entry.feature} feature`
+  const commit = entry.commit ? ` · commit ${entry.commit.rev.slice(0, 12)}${entry.commit.dirty ? ' (dirty tree)' : ''}` : ''
+  item.append(text('div', `${why} · ${entry.origin}${commit}`, 'meta'))
+  if (step.lowered) item.append(text('div', `Lowered by browser:record: ${step.lowered}`, 'meta warning'))
+  item.append(text('div', `Recorder: ${step.recorder.action}${step.recorder.landed ? ` → ${step.recorder.landed.url}${step.recorder.landed.component ? ` (${step.recorder.landed.component})` : ''}` : ''}`, 'meta'))
+  const window = step.cli.runtimeErrors
+  item.append(text('div', `Error window ${window.window}, ${window.events} ${window.events === 1 ? 'event' : 'events'}${window.reason ? `: ${window.reason}` : ''}`, 'meta mono'))
+  if (step.recorder.errorsShown?.length) item.append(text('div', `Errors shown: ${step.recorder.errorsShown.join(', ')}`, 'meta mono'))
+  if (step.cli.screenshots.length) {
+    const shots = text('div', '', 'shots')
+    for (const shot of step.cli.screenshots) {
+      const link = text('a', '', '') as HTMLAnchorElement
+      link.href = browserScreenshotPath(entry.run, shot.sha256)
+      link.target = '_blank'
+      link.rel = 'noopener'
+      const image = document.createElement('img')
+      image.src = link.href
+      image.alt = shot.path
+      image.loading = 'lazy'
+      link.append(image)
+      shots.append(link)
+    }
+    item.append(shots)
+  }
+  return item
+}
+function evidenceBlock(stepId: string, read: PlanEvidenceRead): HTMLElement {
+  const block = text('details', '', 'evidence')
+  block.append(text('summary', 'Evidence'))
+  if ('error' in read.evidence) {
+    block.append(text('p', `Evidence unavailable: ${read.evidence.error}.`, 'meta warning'))
+    return block
+  }
+  const evidence = read.evidence.steps.find((entry) => entry.id === stepId)
+  if (!evidence) {
+    block.append(text('p', 'The evidence was read from another version of the plan. Refresh the plan.', 'meta warning'))
+    return block
+  }
+  const routes = evidence.routes.length
+    ? text('p', `Routes: ${evidence.routes.map((route) => `${route.method} ${route.path}`).join(', ')}`, 'meta mono')
+    : text('p', 'Routes: none. The step touches no route the plan declares.', 'meta')
+  block.append(text('h4', 'Runtime errors'), routes, ...runtimeErrorsBlock(evidence, read.errors), text('h4', 'plan:verify'), ...recordBlock(evidence), text('h4', 'Browser runs'))
+  if (evidence.browser.length) block.append(...evidence.browser.map(browserItem))
+  else block.append(text('p', `No browser:record step names ${evidence.features.length ? `this step's acceptance ids or the ${evidence.features.join(', ')} feature` : "this step's acceptance ids"}.`, 'meta'))
+  return block
+}
+function stepRow(step: DevCenterPlan['steps'][number], read: PlanEvidenceRead): HTMLElement {
   const row = text('div', '', 'step')
   const badge = text('div', '')
   badge.append(text('span', step.state, `g-badge g-badge-${STEP_TONE[step.state]}`))
@@ -210,8 +319,18 @@ function stepRow(step: DevCenterPlan['steps'][number]): HTMLElement {
   if (step.ranAt) body.append(text('div', `Last plan:verify run ${step.ranAt}`, 'meta mono'))
   if (step.stall) body.append(text('div', `Stalled ${step.stall.at}: ${step.stall.reason}`, 'meta error'))
   if (step.changed?.length) body.append(text('div', `Changed since verified: ${step.changed.join(', ')}`, 'meta mono'))
+  body.append(evidenceBlock(step.id, read))
   row.append(badge, body)
   return row
+}
+function evidenceNotes(read: PlanEvidenceRead): HTMLElement[] {
+  if ('error' in read.evidence) return []
+  const { runs, unreadable } = read.evidence
+  const notes: HTMLElement[] = []
+  if (unreadable) notes.push(text('p', unreadable, 'meta warning'))
+  for (const run of runs.unreadable) notes.push(text('p', `Browser run ${run.run} would not read: ${run.reason}`, 'meta warning'))
+  if (runs.skipped) notes.push(text('p', `Only the newest ${runs.read + runs.unreadable.length} browser runs were read; ${runs.skipped} older ones were not.`, 'meta'))
+  return notes
 }
 function reviewCard(plan: DevCenterPlan): HTMLElement {
   const link = text('a', 'Review this plan', 'g-btn g-btn-secondary') as HTMLAnchorElement
@@ -237,7 +356,8 @@ async function loadPlan(slug: string): Promise<void> {
   status.textContent = 'Reading plan…'
   body.replaceChildren()
   try {
-    const matching = (await readPlans()).plans.filter((plan) => plan.slug === slug)
+    const [overview, read] = await Promise.all([readPlans(), readEvidence(slug)])
+    const matching = overview.plans.filter((plan) => plan.slug === slug)
     if (!matching.length) {
       element('plan-title').textContent = slug
       status.textContent = 'No open plan has this name: it may be closed, renamed or unreadable.'
@@ -257,8 +377,8 @@ async function loadPlan(slug: string): Promise<void> {
       // Shown apart from the attention box, which a draft's or an edited plan's approval outranks.
       if (plan.unreadable?.length) body.append(card('Records', ...plan.unreadable.map((reason) => text('p', reason, 'warning'))))
       body.append(reviewCard(plan))
-      const steps = stepsByTask(plan).flatMap((group) => [text('h3', group.task), ...group.steps.map(stepRow)])
-      body.append(card('Steps', ...progress(plan), ...(steps.length ? steps : [empty('No steps', 'The plan derives no steps.')])))
+      const steps = stepsByTask(plan).flatMap((group) => [text('h3', group.task), ...group.steps.map((step) => stepRow(step, read))])
+      body.append(card('Steps', ...progress(plan), ...evidenceNotes(read), ...(steps.length ? steps : [empty('No steps', 'The plan derives no steps.')])))
       if (plan.waivers.length) {
         body.append(card('Waivers', ...plan.waivers.map((waiver) => text('p', `${waiver.elementId}: ${waiver.reason} (${byline(waiver.at, waiver.by)})`, 'meta'))))
       }
