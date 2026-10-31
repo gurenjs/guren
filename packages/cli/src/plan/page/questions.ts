@@ -53,8 +53,8 @@ function questionCard(question: PlanQuestion, questionIndex: number, saved: Plan
   // explicit that silence is not an answer.
   const answer: Answer = {
     questionId: question.id,
-    option: saved && question.options.some((option) => option.label === saved.option) ? (saved.option as string) : null,
-    text: typeof saved?.text === 'string' ? saved.text : '',
+    option: question.options.find((option) => option.label === saved?.option)?.label ?? null,
+    text: saved?.text ?? '',
     badge: tel('span', 'badge badge-alter', 'badge.unanswered'),
   }
   answers.push(answer)
@@ -117,14 +117,14 @@ function questionCard(question: PlanQuestion, questionIndex: number, saved: Plan
   })
 }
 
-/** `saved` is the Dev Center's copy of the answers, read as untrusted: one naming no option of its question keeps only its text. */
+/** `saved` is the Dev Center's copy of the answers: one naming no option of its question keeps only its text. */
 export function renderQuestions(questions: readonly PlanQuestion[], saved: PlanFeedback['answers'] = []): void {
   if (!questions.length) return
   const panel = el('section', 'panel')
   panel.appendChild(tel('h2', null, 'questions.heading'))
   panel.appendChild(tel('p', 'note', 'questions.note'))
   questions.forEach((question, index) => {
-    const given = Array.isArray(saved) ? saved.find((answer) => answer && answer.questionId === question.id) : undefined
+    const given = saved.find((answer) => answer.questionId === question.id)
     panel.appendChild(questionCard(question, index, given))
   })
   byId('questions').appendChild(panel)

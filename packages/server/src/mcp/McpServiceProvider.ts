@@ -67,8 +67,13 @@ export class McpServiceProvider extends ServiceProvider {
         hono.use(path, createMcpAccessGuard())
         hono.get(path, (ctx) => isMcpEndpointEnabled() ? center.fetch(ctx.req.raw) : ctx.notFound())
       }
-      // The Dev Center's one write (RFC 0030 §8): the CLI checks the Origin, the schema and the plan's digest.
-      hono.post(DEV_CENTER_FEEDBACK_ROUTE, (ctx) => isMcpEndpointEnabled() ? center.fetch(ctx.req.raw) : ctx.notFound())
+      // The Dev Center's one write (RFC 0030 §8), exempt from the CSRF token: the request's own origin is
+      // required here, whatever CLI answers it, and the CLI checks it again with the schema and the plan's digest.
+      hono.post(DEV_CENTER_FEEDBACK_ROUTE, (ctx) => {
+        if (!isMcpEndpointEnabled()) return ctx.notFound()
+        if (ctx.req.header('origin') !== new URL(ctx.req.url).origin) return ctx.json({ schemaVersion: 1, error: { code: 'origin', message: 'Feedback is accepted from the Dev Center page only.' } }, 403)
+        return center.fetch(ctx.req.raw)
+      })
     }
 
     const buffer = this.container.makeOptional<RuntimeErrorBuffer>(RUNTIME_ERRORS_BINDING)

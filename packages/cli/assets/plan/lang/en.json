@@ -42,6 +42,8 @@
   "footer.saved": "Review saved at {time}.",
   "footer.saveFailed": "The review was not saved: {reason}",
   "footer.serverUnreachable": "the development server did not answer.",
+  "footer.servedRevise": "{command} records the agent's change to the plan as a revision and checks it against the review saved here: an element approved here changes only with a reason (--reopens), and an answered question must be removed. It does not turn comments into changes. Then render the plan again:",
+  "footer.loadFailed": "The saved review could not be read, so this page is not saving. Reload it once the development server answers.",
 
   "review.approve": "Approve",
   "review.requestChanges": "Request changes",

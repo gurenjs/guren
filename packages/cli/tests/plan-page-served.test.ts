@@ -27,7 +27,7 @@ async function served(saved: unknown, onPost: (call: Call) => ReturnType<typeof 
       fetch: (url, init) => {
         const call: Call = { url, method: init?.method ?? 'GET', ...(init?.body ? { body: JSON.parse(init.body) as Call['body'] } : {}) }
         calls.push(call)
-        return call.method === 'POST' ? onPost(call) : answer(true, 200, { schemaVersion: 1, planDigest: digest, saved })
+        return call.method === 'POST' ? onPost(call) : answer(true, 200, { schemaVersion: 1, file: '.guren/plans/comments.feedback.json', saved })
       },
     },
   })
@@ -80,7 +80,7 @@ describe('the plan page served for review in the Dev Center', () => {
     expect(posts()).toHaveLength(1)
     release()
     await settle()
-    await settle()
+    await runTimers()
     expect(posts()).toHaveLength(2)
     expect(posts()[1]!.body!.feedback.elements[0]).toMatchObject({ verdict: 'changes' })
   })
@@ -95,6 +95,37 @@ describe('the plan page served for review in the Dev Center', () => {
     await runTimers()
     expect(posts()).toHaveLength(2)
     expect(page.window.dispatch('beforeunload')).toBe(false)
+  })
+
+  test('saves nothing when the saved review could not be read, so it never replaces one it did not load', async () => {
+    const posts: unknown[] = []
+    const timers: Array<() => void> = []
+    const page = openPlanPage(html, {
+      timers,
+      served: {
+        pathname: PATHNAME,
+        fetch: (_url, init) => {
+          if (init?.method === 'POST') posts.push(init.body)
+          return init?.method === 'POST' ? answer(true, 200, {}) : answer(false, 503, { error: { message: 'restarting' } })
+        },
+      },
+    })
+    await settle()
+    button(page, 'Approve').click()
+    for (const run of timers.splice(0)) run()
+    await settle()
+    expect(posts).toHaveLength(0)
+    expect(page.byId('save-status').textContent).toContain('could not be read')
+  })
+
+  test('posts nothing when a change leaves the document as it was saved', async () => {
+    const { page, posts, runTimers } = await served(null)
+    button(page, 'Approve').click()
+    await runTimers()
+    button(page, 'Approve').click()
+    button(page, 'Approve').click()
+    await runTimers()
+    expect(posts()).toHaveLength(1)
   })
 
   test('does not retry a save the server refused', async () => {

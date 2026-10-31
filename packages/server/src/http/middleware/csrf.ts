@@ -122,10 +122,9 @@ function isExcluded(path: string, excludePatterns: string[]): boolean {
  * MCP clients POST JSON-RPC without a preceding GET, so they never pick up an
  * `XSRF-TOKEN`. Nothing is exempted in production or without `GUREN_MCP=1` —
  * the route does not exist there, and the endpoint guards local-only access.
- * The Dev Center's feedback route is exempt on the same terms, and checks its own `Origin`.
  */
 function isMcpEndpointRequest(path: string): boolean {
-  return (path === MCP_ENDPOINT_PATH && isMcpEndpointEnabled()) || isDevCenterFeedbackRequest(path)
+  return path === MCP_ENDPOINT_PATH && isMcpEndpointEnabled()
 }
 
 /**
@@ -369,6 +368,8 @@ export function createCsrfMiddleware(
     if (
       isExcluded(path, exclude)
       || isMcpEndpointRequest(path)
+      // Exempt on the MCP endpoint's terms; the route requires the request's own `Origin` instead.
+      || isDevCenterFeedbackRequest(path)
       || isCookielessAuthEndpoint(path, cookielessAuthEndpoints)
       || isBearerRequestWithoutCookies(ctx)
       || isSeamPrincipalRequest(ctx)

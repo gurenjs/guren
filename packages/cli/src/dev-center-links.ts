@@ -1,6 +1,13 @@
 // Imports nothing, so the Dev Center page bundles it beside the handler that serves the same paths.
 
 const PLAN_PAGE = /^\/_guren\/plans\/([^/]+)$/
+// `endpoint.ts` in @guren/server spells the feedback path for its CSRF rule, and `plan/page/served.ts` the review's.
+const REVIEW_PATH = /^\/_guren\/plans\/([^/]+)\/(review|feedback)$/
+
+export interface ReviewRoute {
+  slug: string
+  resource: 'review' | 'feedback'
+}
 
 /** A path on the running dev server, which owns the origin; `McpServiceProvider` mounts it. */
 export function planPagePath(slug: string): string {
@@ -12,9 +19,16 @@ export function planReviewPath(slug: string): string {
   return `${planPagePath(slug)}/review`
 }
 
+/** A review page or its feedback endpoint, or `undefined` for any other path. */
+export function reviewRoute(pathname: string): ReviewRoute | undefined {
+  const match = REVIEW_PATH.exec(pathname)
+  if (!match) return undefined
+  try { return { slug: decodeURIComponent(match[1]!), resource: match[2] as ReviewRoute['resource'] } } catch { return undefined }
+}
+
 /** What the person sends the agent once the review is saved: the file, never the review itself. */
-export function savedReviewPrompt(file: string, slug: string): string {
-  return `Revise ${file} from my review with the plan-write skill. The review is saved in .guren/plans/${slug}.feedback.json.`
+export function savedReviewPrompt(plan: string, reviewFile: string): string {
+  return `Revise ${plan} from my review with the plan-write skill. The review is saved in ${reviewFile}.`
 }
 
 /** The slug a plan page is served under, or `undefined` off a plan page. */

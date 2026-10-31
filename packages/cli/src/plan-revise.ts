@@ -7,7 +7,7 @@
  */
 
 import { stat } from 'node:fs/promises'
-import { basename, resolve } from 'node:path'
+import { basename, dirname, resolve, sep } from 'node:path'
 
 import { CliError, formatSchemaIssues } from './cli-error'
 import { toPosixRelative } from './discovery'
@@ -18,7 +18,7 @@ import { readPlanDecisions } from './plan/decisions'
 import { FEEDBACK_STDIN, readJsonWithinLimit, readPlanFeedback, recoverStdinDash, type PlanFeedback } from './plan/feedback'
 import { canonicalJson, planDigest } from './plan/identity'
 import { readPlanRevisionRecords, writePlanRevisionRecord } from './plan/revision-records'
-import { readSavedPlanFeedback, savedFeedbackPath } from './plan/saved-feedback'
+import { readSavedPlanFeedback, savedFeedbackFile } from './plan/saved-feedback'
 import { createPlanRevision, diffPlans, type PlanReopenedElement, type PlanRevisionRejection, type PlanRevisionOp } from './plan/revision'
 import { hasBaseline, planBaseline, PlanDraftSchema, planSchemaFor, type Plan, type PlanDraft } from './plan/schema'
 import { planSlug } from './plan/state'
@@ -190,13 +190,19 @@ function revisedDocument(parentDocument: unknown, result: PlanDraft | Plan): Rec
   )
 }
 
+/** The app root a discovered plan sits in, as `discoverPlanFiles()` finds plans: under `docs/plans/`, else beside it. */
+function planAppRoot(path: string): string {
+  const at = path.lastIndexOf(`${sep}docs${sep}plans${sep}`)
+  return at >= 0 ? path.slice(0, at) : dirname(path)
+}
+
 /**
  * The review the Dev Center saved for this plan (RFC 0030 §8), applied only while it names the plan
  * as it stands: feedback on an earlier version would lock or answer elements the person never saw.
  */
 async function savedFeedbackFor(root: string, path: string, plan: PlanDraft | Plan): Promise<{ feedback?: PlanFeedback; report: { used: string } | { skipped: string } } | undefined> {
   const slug = planSlug(path)
-  const file = toPosixRelative(root, savedFeedbackPath(root, slug))
+  const file = savedFeedbackFile(slug)
   const { saved, unreadable } = await readSavedPlanFeedback(root, slug)
   if (unreadable) return { report: { skipped: unreadable } }
   if (!saved) return undefined
@@ -210,7 +216,8 @@ export async function planReviseFile(planPath: string, options: PlanReviseFileOp
   const { path, plan, document } = await readPlanFile(planPath, cwd)
   const root = resolve(options.app ?? cwd)
   await requireRevisableParent(path, plan)
-  const saved = options.feedback === undefined ? await savedFeedbackFor(root, path, plan) : undefined
+  // The dev server writes the review under the app root, which a run from elsewhere without --app does not name.
+  const saved = options.feedback === undefined ? await savedFeedbackFor(options.app ? root : planAppRoot(path), path, plan) : undefined
   const feedback = options.feedback === undefined ? saved?.feedback : await readPlanFeedback(options.feedback, { cwd, stdin: options.stdin })
 
   let edited: { child: PlanDraft | Plan; raw: string } | undefined

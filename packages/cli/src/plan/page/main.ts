@@ -19,7 +19,7 @@ import type { PlanPagePayload } from './payload'
 import { refreshAnswers, renderQuestions } from './questions'
 import { loadReview, seedReview } from './review'
 import { diagramHost } from './sections'
-import { loadServedFeedback, servedReview, startAutosave } from './served'
+import { loadServedFeedback, servedFeedbackUrl, startAutosave } from './served'
 
 const REFUSED_CHROME = ['plan-meta', 'plan-scope', 'questions', 'tabs', 'controls', 'panels', 'footer']
 
@@ -44,21 +44,23 @@ async function start(): Promise<void> {
   }
 
   // Read before anything renders: each card and question starts from the review it shows.
-  const served = servedReview()
-  const saved = served ? await loadServedFeedback(served.feedbackUrl, data.planDigest) : null
+  const served = servedFeedbackUrl()
+  const loaded = served ? await loadServedFeedback(served, data.planDigest) : null
 
   indexPlan(data)
   renderHeader(data)
   renderPinned(data)
-  renderQuestions(data.plan.questions, saved?.answers)
-  loadReview(data.planHash)
-  if (saved) seedReview(saved.elements)
+  renderQuestions(data.plan.questions, loaded?.saved?.answers)
+  // Served, the server's copy is the review: one kept in this browser alone would show marks nothing saved.
+  if (served) seedReview(loaded?.saved?.elements ?? [])
+  else loadReview(data.planHash)
   mountTabs(data)
   refreshAnswers()
   if (diagramHost) mountDiagram(diagramHost, data.diagram)
   mountFilters(data.entities)
-  mountFeedback(data, served?.savedTo ?? null)
-  if (served) startAutosave(served.feedbackUrl, data.planDigest, () => feedbackDocument(data.planHash), byId('save-status'))
+  mountFeedback(data, loaded?.file ?? null)
+  if (served && loaded) startAutosave(served, data.planDigest, () => feedbackDocument(data.planHash), byId('save-status'))
+  else if (served) words(byId('save-status'), 'footer.loadFailed')
   mountLocaleSwitch()
 }
 

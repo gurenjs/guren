@@ -251,23 +251,22 @@ const EMBEDDED_PAYLOAD = /<script type="application\/json" id="plan-data">([\s\S
  * where the page holds no payload this reads, such as one an older template wrote.
  */
 export function renderedPlanHash(html: string): string | null | undefined {
-  const embedded = EMBEDDED_PAYLOAD.exec(html)?.[1]
-  if (embedded === undefined) return undefined
-  try {
-    const hash = (JSON.parse(embedded) as { planHash?: unknown }).planHash
-    return typeof hash === 'string' || hash === null ? hash : undefined
-  } catch {
-    return undefined
-  }
+  const hash = renderedPayload(html)?.planHash
+  return typeof hash === 'string' || hash === null ? hash : undefined
 }
 
 /** The `planDigest()` a page carries, or `undefined` where it holds none, as a page from an older CLI does. */
 export function renderedPlanDigest(html: string): string | undefined {
+  const digest = renderedPayload(html)?.planDigest
+  return typeof digest === 'string' ? digest : undefined
+}
+
+function renderedPayload(html: string): Record<string, unknown> | undefined {
   const embedded = EMBEDDED_PAYLOAD.exec(html)?.[1]
   if (embedded === undefined) return undefined
   try {
-    const digest = (JSON.parse(embedded) as { planDigest?: unknown }).planDigest
-    return typeof digest === 'string' ? digest : undefined
+    const payload: unknown = JSON.parse(embedded)
+    return payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : undefined
   } catch {
     return undefined
   }

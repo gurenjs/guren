@@ -41,7 +41,7 @@ export function mountFeedback({ planHash, planFile }: PlanPagePayload, savedTo: 
   words(byId('footer-prompt-note'), 'footer.promptNote', { command: 'plan:revise' })
   if (savedTo) words(byId('footer-note'), 'footer.servedNote', { file: savedTo, command: 'plan:revise' })
   else words(byId('footer-note'), 'footer.note')
-  words(byId('footer-revise-note'), 'footer.revise', { command: 'plan:revise' })
+  words(byId('footer-revise-note'), savedTo ? 'footer.servedRevise' : 'footer.revise', { command: 'plan:revise' })
   words(byId('footer-approve-note'), 'footer.approve')
 
   // `planFile` is already held to a relative path with no shell metacharacter, because

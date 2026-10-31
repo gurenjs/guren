@@ -264,6 +264,16 @@ describe('plan:revise', () => {
       expect(skipped.reopened).toEqual([])
     })
 
+    test('should find the saved review under the app root the plan sits in when --app is not given', async () => {
+      const app = join(ROOT, 'derived')
+      const plan = await writeJson('derived/docs/plans/comments/plan.json', loadCommentsPlan())
+      const copy = await writeJson('derived-copy.json', edited(loadCommentsPlan(), retypeBody))
+      const { plan: parsed } = await readPlanFile(plan)
+      await writeSavedPlanFeedback(app, 'comments', planDigest(parsed), { answers: [], elements: [{ elementId: 'column.comment.body', verdict: 'approve', comment: '' }] })
+
+      await expect(planReviseFile(plan, { edited: copy, message: 'short' })).rejects.toThrow(/approved column\.comment\.body/u)
+    })
+
     test('should match a draft\'s feedback, which carries no plan hash', async () => {
       const plan = await writeJson('draft-feedback/comments.plan.json', loadCommentsPlan())
       const copy = await writeJson('draft-feedback/copy.json', edited(loadCommentsPlan(), retypeBody))

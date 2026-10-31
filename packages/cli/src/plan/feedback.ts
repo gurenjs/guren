@@ -84,7 +84,7 @@ function overSizeMessage(what: string, origin: string): string {
  * before the open describes whatever the path pointed at then, and a FIFO or a
  * `/proc` file reports none at all.
  */
-async function readWithinLimit(chunks: AsyncIterable<Uint8Array>, what: string, origin: string): Promise<string> {
+export async function readWithinLimit(chunks: AsyncIterable<Uint8Array>, what: string, origin: string): Promise<string> {
   const decoder = new TextDecoder()
   const parts: string[] = []
   let bytes = 0

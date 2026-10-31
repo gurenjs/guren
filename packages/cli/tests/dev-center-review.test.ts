@@ -68,8 +68,8 @@ test('feedback is saved against the plan as it stands, and read back', async () 
   expect((await readSavedPlanFeedback(workspace.dir, 'comments')).saved).toMatchObject({ planDigest: digest, feedback })
   expect(await readFile(join(workspace.dir, '.guren/plans/.gitignore'), 'utf8')).toContain('*.feedback.json')
 
-  const read = await (await get('/_guren/plans/comments/feedback')).json() as { planDigest: string; saved: { feedback: unknown } }
-  expect(read.planDigest).toBe(digest)
+  const read = await (await get('/_guren/plans/comments/feedback')).json() as { file: string; saved: { feedback: unknown } }
+  expect(read.file).toBe('.guren/plans/comments.feedback.json')
   expect(read.saved.feedback).toEqual(feedback)
 })
 
@@ -86,8 +86,12 @@ test('feedback is refused from another origin, in another type, off its schema, 
 })
 
 test('feedback refuses a slug two plans share, and the review takes only its own methods', async () => {
+  await writeSavedPlanFeedback(workspace.dir, 'comments', digest, { answers: [], elements: [] })
   await writeWorkspaceFiles(workspace.dir, { 'docs/plans/comments/plan.json': JSON.stringify(loadCommentsPlan()) })
   expect((await post({ planDigest: digest, feedback })).status).toBe(409)
+  // Neither plan is credited with a file that could belong to the other.
+  const overview = await (await get('/_guren/plans.json')).json() as { plans: Array<{ feedback?: unknown }> }
+  expect(overview.plans.map((plan) => plan.feedback)).toEqual([undefined, undefined])
   const put = await handler().fetch(new Request(`${ORIGIN}/_guren/plans/comments/review`, { method: 'POST' }))
   expect(put.status).toBe(405)
   expect(put.headers.get('allow')).toBe('GET')

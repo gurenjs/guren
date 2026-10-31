@@ -59,16 +59,9 @@ export function loadReview(planHash: string | null): void {
   }
 }
 
-/** The review the Dev Center saved, which replaces what this browser kept: the server's copy is the one `plan:revise` reads. */
-export function seedReview(elements: unknown): void {
-  if (!Array.isArray(elements)) return
-  const stored: Record<string, unknown> = {}
-  for (const entry of elements as unknown[]) {
-    if (!entry || typeof entry !== 'object') continue
-    const { elementId, verdict, comment } = entry as Record<string, unknown>
-    if (typeof elementId === 'string') stored[elementId] = { verdict, comment }
-  }
-  review = restore(stored)
+/** The review the Dev Center saved: the server's copy is the one `plan:revise` reads. */
+export function seedReview(elements: PlanFeedback['elements']): void {
+  review = restore(Object.fromEntries(elements.map(({ elementId, verdict, comment }) => [elementId, { verdict, comment }])))
 }
 
 function saveReview(): void {

@@ -21,6 +21,7 @@ import { planHash } from './plan/identity'
 import { behaviourCanReach } from './plan/reach'
 import { hasBaseline } from './plan/render'
 import { PlanSchema, type Plan, type PlanDraft } from './plan/schema'
+import { savedFeedbackFile } from './plan/saved-feedback'
 import { PLAN_STATE_DIR, planSlug } from './plan/state'
 import { readAlterProperties } from './plan/status'
 import { settleBuiltFindings, validatePlan } from './plan/validate'
@@ -82,7 +83,7 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
     // The review page writes nothing, so a reader who answered there lands here with the plan unchanged.
     const answerHint =
       plan.questions.length > 0
-        ? `\nAn answer chosen on the review page does not change the plan file. Send the agent the prompt the page copies with "Copy prompt for the agent", or remove each answered question yourself with plan:revise (--edited with a copy of the plan, or --ops with a remove op), passing the page's feedback with --feedback. A review saved in the Dev Center is in .guren/plans/${planSlug(path)}.feedback.json, which plan:revise applies when --feedback is omitted.`
+        ? `\nAn answer chosen on the review page does not change the plan file. Send the agent the prompt the page copies with "Copy prompt for the agent", or remove each answered question yourself with plan:revise (--edited with a copy of the plan, or --ops with a remove op), passing the page's feedback with --feedback. A review saved in the Dev Center is in ${savedFeedbackFile(planSlug(path))}, which plan:revise applies when --feedback is omitted.`
         : ''
     throw new CliError(
       `${path} is not approved while a check fails or a question is open; an assumption nobody confirmed is not approved by silence.\n${blockers.join('\n')}${answerHint}`,

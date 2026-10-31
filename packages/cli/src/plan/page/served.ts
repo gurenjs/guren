@@ -9,35 +9,38 @@ import type { PlanFeedback } from '../feedback'
 import { onReviewChange } from './changes'
 import { t } from './locale'
 
-const REVIEW_PATH = /^\/_guren\/plans\/([^/]+)\/review$/
+const REVIEW_PATH = /^\/_guren\/plans\/[^/]+\/review$/
 const SAVE_DELAY_MS = 600
 const RETRY_CAP_MS = 30_000
 
-/** The feedback endpoint beside this page and the file it saves to, or `null` for the static page. */
-export function servedReview(): { feedbackUrl: string; savedTo: string } | null {
-  const match = REVIEW_PATH.exec(window.location.pathname)
-  if (!/^https?:$/.test(window.location.protocol) || !match) return null
-  let slug: string
-  try {
-    slug = decodeURIComponent(match[1] as string)
-  } catch {
-    return null
-  }
-  return { feedbackUrl: window.location.pathname.replace(/review$/, 'feedback'), savedTo: `.guren/plans/${slug}.feedback.json` }
+/** The feedback endpoint beside this page, or `null` for the static page. */
+export function servedFeedbackUrl(): string | null {
+  if (!/^https?:$/.test(window.location.protocol) || !REVIEW_PATH.test(window.location.pathname)) return null
+  return window.location.pathname.replace(/review$/, 'feedback')
 }
 
-/** The saved feedback for the plan this page shows; anything else, including a failed read, is none. */
-export async function loadServedFeedback(url: string, planDigest: string): Promise<PlanFeedback | null> {
+/**
+ * The saved review and the file it is in, `saved: null` when none names this version. A failed read is
+ * `null` as a whole: the first save would replace a review the page never loaded, so saving stays off.
+ */
+export async function loadServedFeedback(url: string, planDigest: string): Promise<{ file: string; saved: PlanFeedback | null } | null> {
   try {
     const response = await window.fetch(url, { cache: 'no-store', credentials: 'same-origin' })
     if (!response.ok) return null
-    const body = (await response.json()) as { saved?: { planDigest?: unknown; feedback?: unknown } | null }
+    const body = (await response.json()) as { file?: unknown; saved?: { planDigest?: unknown; feedback?: unknown } | null }
+    if (typeof body.file !== 'string') return null
     const saved = body.saved
-    if (!saved || saved.planDigest !== planDigest || !saved.feedback || typeof saved.feedback !== 'object') return null
-    return saved.feedback as PlanFeedback
+    const current = saved && saved.planDigest === planDigest && isFeedback(saved.feedback) ? saved.feedback : null
+    return { file: body.file, saved: current }
   } catch {
     return null
   }
+}
+
+/** The server validated it on the way in; this is only the shape the page reads, checked once here. */
+function isFeedback(value: unknown): value is PlanFeedback {
+  const feedback = value as PlanFeedback | null
+  return !!feedback && Array.isArray(feedback.answers) && Array.isArray(feedback.elements)
 }
 
 /**
@@ -49,25 +52,24 @@ export async function loadServedFeedback(url: string, planDigest: string): Promi
 export function startAutosave(url: string, planDigest: string, feedback: () => PlanFeedback, status: HTMLElement): void {
   let timer: number | null = null
   let saving = false
-  let again = false
-  let unsaved = false
+  let failed = false
   let failures = 0
+  let lastSaved: string | null = null
 
   const schedule = (delay: number): void => {
     if (timer) window.clearTimeout(timer)
     timer = window.setTimeout(() => {
       timer = null
-      void save()
+      // One request at a time: a change made during a save is posted after it.
+      if (saving) schedule(SAVE_DELAY_MS)
+      else void save()
     }, delay)
   }
 
   const save = async (): Promise<void> => {
-    if (saving) {
-      again = true
-      return
-    }
+    const body = JSON.stringify({ planDigest, feedback: feedback() })
+    if (body === lastSaved) return
     saving = true
-    unsaved = false
     status.textContent = t('footer.saving')
     let retry = false
     try {
@@ -75,38 +77,28 @@ export function startAutosave(url: string, planDigest: string, feedback: () => P
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planDigest: planDigest, feedback: feedback() }),
+        body,
       })
-      const body = (await response.json().catch(() => ({}))) as { savedAt?: string; error?: { message?: string } }
-      if (response.ok) {
-        failures = 0
-        status.textContent = t('footer.saved', { time: new Date(body.savedAt ?? Date.now()).toLocaleTimeString() })
-      } else {
-        unsaved = true
-        retry = response.status >= 500
-        status.textContent = t('footer.saveFailed', { reason: body.error?.message ?? String(response.status) })
-      }
+      const answer = (await response.json().catch(() => ({}))) as { savedAt?: string; error?: { message?: string } }
+      failed = !response.ok
+      retry = response.status >= 500
+      if (response.ok) lastSaved = body
+      status.textContent = response.ok
+        ? t('footer.saved', { time: new Date(answer.savedAt ?? Date.now()).toLocaleTimeString() })
+        : t('footer.saveFailed', { reason: answer.error?.message ?? String(response.status) })
     } catch {
-      unsaved = true
+      failed = true
       retry = true
       status.textContent = t('footer.saveFailed', { reason: t('footer.serverUnreachable') })
     } finally {
       saving = false
-      if (again) {
-        again = false
-        void save()
-      } else if (retry) {
-        failures += 1
-        schedule(Math.min(RETRY_CAP_MS, SAVE_DELAY_MS * 2 ** failures))
-      }
     }
+    failures = retry ? failures + 1 : 0
+    if (retry && !timer) schedule(Math.min(RETRY_CAP_MS, SAVE_DELAY_MS * 2 ** failures))
   }
 
-  onReviewChange(() => {
-    unsaved = true
-    schedule(SAVE_DELAY_MS)
-  })
+  onReviewChange(() => schedule(SAVE_DELAY_MS))
   window.addEventListener('beforeunload', (event: Event) => {
-    if (unsaved || timer || saving) event.preventDefault()
+    if (failed || timer || saving) event.preventDefault()
   })
 }
