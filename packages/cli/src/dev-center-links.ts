@@ -1,9 +1,14 @@
+import { resolve } from 'node:path'
+
 import type { DocsViewerOpenPlan, PlanOverview } from './docs-viewer-plans'
 import { planSlug } from './plan/state'
 
-/** A path on the running dev server, which owns the origin; `McpServiceProvider` mounts it. */
-export function devCenterPlanPath(planFile: string): string {
-  return `/_guren/plans/${encodeURIComponent(planSlug(planFile))}`
+/**
+ * A path on the running dev server, which owns the origin; `McpServiceProvider` mounts it.
+ * Resolved against cwd as the plan commands read it: `planSlug('plan.json')` alone is `.`.
+ */
+export function devCenterPlanPath(planFile: string, cwd = process.cwd()): string {
+  return `/_guren/plans/${encodeURIComponent(planSlug(resolve(cwd, planFile)))}`
 }
 
 /** One line for a plan command's text output, naming where the person reads the plan's state. */

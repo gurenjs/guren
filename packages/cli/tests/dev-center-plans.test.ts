@@ -24,6 +24,10 @@ describe('planAttention', () => {
     expect(planAttention(plan({ steps: [step('a', 'verified'), step('b', 'verified')] }))).toMatchObject({ who: 'person', title: 'Ready to close' })
   })
 
+  test('should wait on a person for an approved plan that derives no steps, as plan:next hands out none', () => {
+    expect(planAttention(plan({ steps: [] }))).toMatchObject({ who: 'person', title: 'Nothing to implement' })
+  })
+
   test('should leave an approved plan in progress to the agent, naming the marked step', () => {
     const working = plan({ steps: [step('a', 'verified'), step('b', 'failed', { active: true }), step('c', 'not-run')] })
     expect(planAttention(working)).toEqual({ who: 'agent', title: 'In progress', detail: 'Marked by plan:next: b.' })
@@ -53,4 +57,9 @@ test('devCenterPlanPath should name the slug of a plan.json and of a *.plan.json
   expect(devCenterPlanPath('docs/plans/comments/plan.json')).toBe('/_guren/plans/comments')
   expect(devCenterPlanPath('comments.plan.json')).toBe('/_guren/plans/comments')
   expect(devCenterPlanLine('docs/plans/comments/plan.json')).toContain('/_guren/plans/comments')
+})
+
+test('devCenterPlanPath should resolve a bare plan.json against cwd, as the plan commands do', () => {
+  expect(devCenterPlanPath('plan.json', '/app/docs/plans/comments')).toBe('/_guren/plans/comments')
+  expect(devCenterPlanPath('./plan.json', '/app/docs/plans/comments')).toBe('/_guren/plans/comments')
 })

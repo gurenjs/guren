@@ -39,7 +39,11 @@ export function planAttention(plan: DevCenterPlan): PlanAttention {
   if (stalled?.stall) {
     return { who: 'person', title: `Stalled on ${stalled.id}`, detail: `${stalled.stall.reason} Fix the environment, revise the plan, or waive the element with plan:waive.` }
   }
-  if (plan.steps.length > 0 && plan.steps.every((step) => step.state === 'verified')) {
+  // plan:next hands out nothing for a plan that derives no steps, and the overview's next command is plan:close.
+  if (plan.steps.length === 0) {
+    return { who: 'person', title: 'Nothing to implement', detail: 'The plan derives no steps. Close it with plan:close, or revise it.' }
+  }
+  if (plan.steps.every((step) => step.state === 'verified')) {
     return { who: 'person', title: 'Ready to close', detail: 'Every step is verified. Read the work, then close the plan with plan:close.' }
   }
   const active = plan.steps.find((step) => step.active)
