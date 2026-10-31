@@ -34,16 +34,16 @@ export default function Index({ data, pagination }: Props) {
       <Head title="Posts" />
       <div className="space-y-4">
         {data.map((post) => (
-          <article key={post.id} className="rounded border border-slate-200 p-4">
+          <article key={post.id} className="rounded-g-card border border-g-line bg-g-panel p-4">
             <h2 className="text-lg font-semibold">{post.title}</h2>
-            <p className="text-slate-600">{post.excerpt}</p>
-            <Link className="text-blue-600 underline" href={`/posts/${post.id}`}>
+            <p className="text-g-text-2">{post.excerpt}</p>
+            <Link className="text-g-accent-text underline" href={`/posts/${post.id}`}>
               Read more
             </Link>
           </article>
         ))}
       </div>
-      <p className="mt-4 text-sm text-slate-500">{pagination.meta.total} posts</p>
+      <p className="mt-4 text-sm text-g-text-2">{pagination.meta.total} posts</p>
     </>
   )
 }
@@ -58,8 +58,8 @@ Wrap pages with layout components to keep navigation and shared UI consistent:
 // resources/js/components/Layout.tsx
 export function Layout({ children }: React.PropsWithChildren) {
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b bg-white">
+    <div className="min-h-screen bg-g-page text-g-text">
+      <header className="border-b border-g-line bg-g-panel">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
           <a href="/">Guren</a>
         </div>
@@ -174,6 +174,8 @@ export default function Index({ users, permissions }: Props) {
 
 ## Assets and Styling
 The scaffold ships with Tailwind CSS preconfigured. Edit `resources/css/app.css` or add custom CSS frameworks as needed. If you introduce additional assets (images, fonts), place them under `public/`.
+
+Colors come from the Guren UI tokens in `resources/css/guren.css`: CSS variables such as `--g-accent` and `--g-text`, and Tailwind utilities over them such as `bg-g-panel`, `text-g-text-2` and `border-g-line`. The tokens switch with the system's dark mode, so a page styled with them needs no `dark:` variants. The scaffolded `.oxlintrc.json` enables `guren/no-raw-color` on `resources/js/`, which reports a palette class such as `bg-white` or `text-slate-500`, an arbitrary color such as `bg-[#db1b1b]`, and a hex value in a `style` prop.
 
 ## Favicon and Document Head
 The production document is built by the server, not from `public/index.html`, so a `<link>` added to that file never reaches a browser. Register site-wide head markup with the `inertia` option instead. The scaffold already links the placeholder `public/favicon.svg` from `src/app.ts`:

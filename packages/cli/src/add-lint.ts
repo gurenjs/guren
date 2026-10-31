@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { consola } from 'consola'
@@ -23,6 +24,15 @@ export const LINT_SCRIPTS: Readonly<Record<string, string>> = {
   'lint:fix': 'bunx oxlint --fix',
 }
 
+// The `resources/js` override as the lint template writes it; `withoutRawColorOverride` throws
+// if the template drifts from this shape, so the drop below cannot silently stop matching.
+const RAW_COLOR_OVERRIDE = /,\n {4}\{\n(?: {6}\/\/[^\n]*\n)* {6}"files": \["resources\/js\/\*\*"\],\n {6}"rules": \{ "guren\/no-raw-color": "error" \}\n {4}\}/u
+
+export function withoutRawColorOverride(config: string): string {
+  if (!RAW_COLOR_OVERRIDE.test(config)) throw new Error('the lint template no longer carries the guren/no-raw-color override')
+  return config.replace(RAW_COLOR_OVERRIDE, '')
+}
+
 interface Manifest extends DependencyManifest {
   scripts?: Record<string, string>
 }
@@ -37,7 +47,15 @@ export async function addLint(options: WriterOptions = {}): Promise<string[]> {
   // must not leave a half-installed lint setup (or, with --force, a clobbered config).
   const manifestPath = resolve(writeRoot(options), 'package.json')
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Manifest
-  const created = await writeScaffoldFiles([scaffoldTemplateFile('lint', '.oxlintrc.json')], options)
+  // An app older than the Guren UI tokens has nothing to replace a palette class with, so
+  // `guren/no-raw-color` would only turn its first lint red.
+  const config = scaffoldTemplateFile('lint', '.oxlintrc.json')
+  const hasTokens = existsSync(resolve(writeRoot(options), 'resources/css/guren.css'))
+  if (!hasTokens) config.contents = withoutRawColorOverride(config.contents)
+  const created = await writeScaffoldFiles([config], options)
+  if (!hasTokens && existsSync(resolve(writeRoot(options), 'resources/js'))) {
+    consola.info('resources/css/guren.css not found, so guren/no-raw-color is left out of .oxlintrc.json. Add its resources/js/** override once the pages style with Guren UI tokens.')
+  }
 
   const scripts = manifest.scripts ?? {}
   const missingScripts = Object.entries(LINT_SCRIPTS).filter(([name]) => scripts[name] === undefined)

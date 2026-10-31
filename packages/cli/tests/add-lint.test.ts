@@ -89,21 +89,45 @@ describe('guren add lint', () => {
     return { output: result.stdout.toString(), exitCode: result.exitCode }
   }
 
-  // RFC 0027 §7: the shipped config scopes the rule to application code by glob.
-  it('reports a raw env read in application code and nowhere else', async () => {
+  // RFC 0027 §7 for env reads; the Guren UI tokens for raw colors. The shipped config scopes each by glob.
+  it.each([
+    {
+      rule: 'no-unvalidated-env-read',
+      source: 'export const url = process.env.SMTP_HOST\n',
+      inScope: ['app/Services/Mailer.ts', 'config/mail.ts', 'routes/web.ts', 'src/app.ts', 'modules/billing/index.ts'],
+      outOfScope: ['bin/serve.ts', 'drizzle.config.ts'],
+    },
+    {
+      rule: 'no-raw-color',
+      source: "export const tone = 'bg-red-500'\n",
+      inScope: ['resources/js/pages/Home.tsx', 'resources/js/components/Badge.tsx'],
+      outOfScope: ['app/Mail/WelcomeMail.tsx', 'src/app.ts'],
+    },
+  ])('reports $rule in its scope and nowhere else', async ({ rule, source, inScope, outOfScope }) => {
     await linkWorkspacePackage('cli', workspace.dir)
+    await mkdir('resources/css', { recursive: true })
+    await writeFile('resources/css/guren.css', ':root {}\n')
     await addLint()
-    const inScope = ['app/Services/Mailer.ts', 'config/mail.ts', 'routes/web.ts', 'src/app.ts', 'modules/billing/index.ts']
-    const outOfScope = ['bin/serve.ts', 'drizzle.config.ts']
     for (const path of [...inScope, ...outOfScope]) {
       await mkdir(dirname(resolve(path)), { recursive: true })
-      await writeFile(path, 'export const url = process.env.SMTP_HOST\n')
+      await writeFile(path, source)
     }
 
     const { output } = lintApp(workspace.dir)
 
-    const reported = [...output.matchAll(/^(.+?):\d+:\d+: .*no-unvalidated-env-read/gmu)].map((match) => match[1]).sort()
+    const reported = [...output.matchAll(new RegExp(`^(.+?):\\d+:\\d+: .*${rule}`, 'gmu'))].map((match) => match[1]).sort()
     expect(reported).toEqual([...inScope].sort())
+  })
+
+  // An app older than guren.css would start red on every page, with nothing to switch to.
+  it('leaves no-raw-color out of the config of an app with no Guren UI tokens', async () => {
+    await mkdir('resources/js', { recursive: true })
+
+    await addLint()
+
+    const config = await readFile('.oxlintrc.json', 'utf8')
+    expect(config).not.toContain('guren/no-raw-color')
+    expect(config).toContain('"guren/no-unvalidated-env-read": "error"')
   })
 
   // Every provider form still ships for apps with no config/env.ts, and each reads

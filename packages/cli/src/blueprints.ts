@@ -12,6 +12,7 @@ import { makeAuth } from './make-auth'
 import { channelFile } from './make-channel'
 import { API_ONLY_FEATURE_ALTERNATIVE, buildRouteRegistrationHint, makeFeature } from './make-feature'
 import { parseFieldsString, type FieldDefinition } from './fields'
+import { ensureGurenUiTokens } from './guren-css'
 import { collectionSlug, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
 import { autoIncrementPrimaryKey, buildFieldColumn, TABLE_FACTORY } from './schema-columns'
 import { schemaDeclaresTable, schemaPathFor, type SchemaDialect } from './schema-parser'
@@ -152,6 +153,8 @@ export default registerAdminRoutes
       ], writerOptions)
 
       await wireRouteRegistrar('registerAdminRoutes', "import registerAdminRoutes from './admin.js'")
+      // The dashboard styles with the Guren UI tokens, as make:feature's pages do.
+      await ensureGurenUiTokens()
 
       return created
     },
