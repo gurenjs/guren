@@ -1,4 +1,6 @@
+import type { StepEvidenceRoute } from '../dev-center-evidence'
 import type { DocsViewerOpenPlan, DocsViewerStepState } from '../docs-viewer-plans'
+import type { RuntimeErrorResult } from '../runtime-errors'
 
 export type DevCenterPlan = DocsViewerOpenPlan
 
@@ -73,4 +75,15 @@ export function stepsByTask(plan: DevCenterPlan): Array<{ task: string; steps: D
     else groups.push({ task: step.task, steps: [step] })
   }
   return groups
+}
+
+type RuntimeErrorEvent = Extract<RuntimeErrorResult, { status: 'available' }>['events'][number]
+
+/**
+ * The retained events a step's routes account for: the event's registered route has a step route's
+ * method and path. An event with no route, or an ambiguous one, is never attributed.
+ */
+export function stepRuntimeErrors(routes: readonly StepEvidenceRoute[], events: readonly RuntimeErrorEvent[]): RuntimeErrorEvent[] {
+  return events.filter((event) => event.correlation === 'matched' && event.route
+    && routes.some((route) => route.method === event.route!.method && route.path === event.route!.pattern))
 }

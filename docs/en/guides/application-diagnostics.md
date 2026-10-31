@@ -190,9 +190,33 @@ applies the file when it is run without `--feedback`. That route is the Dev
 Center's one write: it takes the review document from the page's own origin,
 for the plan as it stands, and runs no command. Approving stays `plan:approve`.
 
-The plan views read the plan files, their approvals and decision logs, and
-`.guren/plans/` only, the same data as the `guren_get_plans` MCP tool. They run
+Each step on the plan page has an **Evidence** section, so you can judge the
+step without asking the agent:
+
+- **Runtime errors**: the retained server errors whose registered route has the
+  method and path of a route the step touches. Those routes come from the plan
+  alone: the step's own routes, the routes to its actions and controllers, the
+  routes its views render from or submit to, and its behaviours' routes. A step
+  that touches none says so, and an error the collector could not tie to one
+  route is never counted.
+- **plan:verify**: the outcome of the step's last run, the files it
+  fingerprinted, and the work measured for the step (files touched and lines
+  changed since `plan:next` marked it).
+- **Browser runs**: the steps `guren browser:record` recorded under
+  `.guren/browser/` whose id is one of the step's acceptance ids, or that belong
+  to a run of a feature the step renders, with the result, the reason
+  `browser:record` lowered it, the error window and the screenshots. The newest
+  50 runs are read. A screenshot is served from
+  `/_guren/browser/<run>/screenshots/<sha256>` only while the file still has the
+  digest its `run.json` records.
+
+The evidence is there for you to read. No plan command reads a browser run, and
+none of it counts toward `plan:verify` or `plan:close`.
+
+The plan views read the plan files, their approvals and decision logs,
+`.guren/plans/`, `.guren/browser/` and the dev server's retained runtime errors
+only; the plan list is the same data as the `guren_get_plans` MCP tool. They run
 no command and import nothing from the application, so a step that `plan:next`
 holds because the application changed since approval appears in `plan:next`'s
 output, not on the page. **Refresh plans** and **Refresh plan** read the records
-again.
+again; nothing on the page polls.
