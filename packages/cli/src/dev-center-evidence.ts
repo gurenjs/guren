@@ -5,7 +5,7 @@
  * imported, so a step's routes are the plan's own, which the page matches runtime errors against.
  */
 
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { open, readdir, type FileHandle } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
 
 import { isConfirmedApiOnlyApp } from './app-surface'
@@ -162,12 +162,17 @@ export async function serveBrowserScreenshot(appRoot: string, run: string, diges
   if (!recorded || !type || !recorded.path.startsWith(prefix)) return missing
   const target = await resolveInside(join(dir, name, BROWSER_SCREENSHOTS_DIR), recorded.path.slice(prefix.length))
   if (!target) return missing
+  let handle: FileHandle | undefined
   try {
-    if ((await stat(target)).size > MAX_SCREENSHOT_BYTES) return problem(413, 'too-large', 'The screenshot is larger than the Dev Center serves.')
-    const bytes = await readFile(target)
+    // One handle for the size check and the read, so both see the same file.
+    handle = await open(target, 'r')
+    if ((await handle.stat()).size > MAX_SCREENSHOT_BYTES) return problem(413, 'too-large', 'The screenshot is larger than the Dev Center serves.')
+    const bytes = await handle.readFile()
     if (sha256(bytes) !== digest) return problem(409, 'changed', 'The screenshot changed after browser:record digested it.')
     return new Response(bytes, { headers: { ...NO_STORE, 'Content-Type': type, 'Content-Security-Policy': "default-src 'none'; sandbox" } })
   } catch {
     return missing
+  } finally {
+    await handle?.close()
   }
 }
