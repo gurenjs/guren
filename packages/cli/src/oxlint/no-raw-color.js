@@ -92,32 +92,20 @@ function isPaintAttribute(node) {
   return SVG_PAINT_ATTRIBUTES.has(node.name.name) && element?.type === 'JSXIdentifier' && /^[a-z]/u.test(element.name)
 }
 
-const TOKEN_HINT = 'Use a Guren UI token from resources/css/guren.css (bg-g-panel, text-g-text, border-g-line, bg-g-accent, …)'
-
-function reportClasses(context, node, tokens) {
-  for (const token of tokens) {
-    if (token === '' || !rawColorClass(token)) continue
-    context.report({
-      message: `\`${token}\` is a raw color. ${TOKEN_HINT}, or disable this line with the reason this color is not a token.`,
-      node,
-    })
-  }
-}
-
-/** The values of a `style={{ … }}` object, through nesting and conditionals. */
-function* styleValues(node) {
+/** Values a paint attribute or `style={{ … }}` object holds, through nesting, spreads and conditionals. */
+function* colorValues(node) {
   const n = unwrap(node)
   if (!n) return
   if (n.type === 'ObjectExpression') {
     for (const property of n.properties) {
-      yield* styleValues(property.type === 'SpreadElement' ? property.argument : property.value)
+      yield* colorValues(property.type === 'SpreadElement' ? property.argument : property.value)
     }
   } else if (n.type === 'ConditionalExpression') {
-    yield* styleValues(n.consequent)
-    yield* styleValues(n.alternate)
+    yield* colorValues(n.consequent)
+    yield* colorValues(n.alternate)
   } else if (n.type === 'LogicalExpression') {
-    yield* styleValues(n.left)
-    yield* styleValues(n.right)
+    yield* colorValues(n.left)
+    yield* colorValues(n.right)
   } else if (n.type === 'Literal' && typeof n.value === 'string') {
     yield { node: n, text: n.value }
   } else if (n.type === 'TemplateLiteral') {
@@ -125,20 +113,12 @@ function* styleValues(node) {
   }
 }
 
-function isModuleSpecifier(node) {
-  const parent = node.parent
-  if (!parent) return false
-  if (parent.type === 'ImportDeclaration' || parent.type === 'ExportAllDeclaration' || parent.type === 'ExportNamedDeclaration') {
-    return parent.source === node
-  }
-  return parent.type === 'ImportExpression'
-}
-
 /** `class`, `className`, and a component's own class props (`inputClassName`, `iconClass`). */
 const CLASS_ATTRIBUTE = /[cC]lass(?:Name)?$/u
 
-/** Inside a JSX attribute other than a class list (`title`, `data-testid`, `alt`), a string is not a class. */
-function inNonClassAttribute(node) {
+/** A module specifier, or a string inside a JSX attribute that is not a class list (`title`, `alt`). */
+function cannotBeClasses(node) {
+  if (node.parent?.source === node) return true
   for (let n = node.parent; n; n = n.parent) {
     if (n.type === 'JSXAttribute') return n.name?.type !== 'JSXIdentifier' || !CLASS_ATTRIBUTE.test(n.name.name)
     if (n.type === 'JSXElement' || n.type === 'JSXFragment') return false
@@ -146,39 +126,42 @@ function inNonClassAttribute(node) {
   return false
 }
 
-/** A quasi's whole tokens: the ones at an edge an interpolation continues are unknown. */
-function templateTokens(node) {
-  const text = node.value.cooked ?? node.value.raw
-  const tokens = text.split(/\s+/u)
-  const quasis = node.parent?.quasis ?? [node]
-  if (quasis[0] !== node && !/^\s/u.test(text)) tokens.shift()
-  if (!node.tail && !/\s$/u.test(text)) tokens.pop()
-  return tokens
+function report(context, node, subject, hint) {
+  context.report({ message: `${subject} is a raw color. ${hint}, or disable this line with the reason this color is not a token.`, node })
 }
+
+const CLASS_HINT = 'Use a Guren UI token from resources/css/guren.css (bg-g-panel, text-g-text, border-g-line, bg-g-accent, …)'
 
 const rule = {
   create(context) {
+    /** Reports `[node, tokens]` pairs, asking whether the strings can hold classes only once one matched. */
+    function reportClasses(holder, pieces) {
+      const found = pieces.flatMap(([node, tokens]) => tokens.filter(rawColorClass).map((token) => [node, token]))
+      if (found.length === 0 || cannotBeClasses(holder)) return
+      for (const [node, token] of found) report(context, node, `\`${token}\``, CLASS_HINT)
+    }
+
     return {
       Literal(node) {
-        if (typeof node.value !== 'string' || isModuleSpecifier(node) || inNonClassAttribute(node)) return
-        reportClasses(context, node, node.value.split(/\s+/u))
+        if (typeof node.value === 'string') reportClasses(node, [[node, node.value.split(/\s+/u)]])
       },
-      TemplateElement(node) {
-        const literal = node.parent
-        if (!literal || isModuleSpecifier(literal) || inNonClassAttribute(literal)) return
-        reportClasses(context, node, templateTokens(node))
+      TemplateLiteral(node) {
+        // A token at a quasi's edge that an interpolation continues (`bg-${tone}-500`) is unknown.
+        reportClasses(node, node.quasis.map((quasi, i) => {
+          const text = quasi.value.cooked ?? quasi.value.raw
+          const tokens = text.split(/\s+/u)
+          if (i > 0 && !/^\s/u.test(text)) tokens.shift()
+          if (!quasi.tail && !/\s$/u.test(text)) tokens.pop()
+          return [quasi, tokens]
+        }))
       },
       JSXAttribute(node) {
         if (!isPaintAttribute(node)) return
         const expression = node.value?.type === 'JSXExpressionContainer' ? node.value.expression : node.value
-        for (const { node: value, text } of styleValues(expression)) {
-          if (!isRawColorValue(text)) continue
-          context.report({
-            message:
-              `\`${text.trim()}\` in \`${node.name.name}\` is a raw color. Use a token instead (\`var(--g-accent)\`, \`var(--g-text)\`, …), `
-              + 'or disable this line with the reason this color is not a token.',
-            node: value,
-          })
+        for (const { node: value, text } of colorValues(expression)) {
+          if (isRawColorValue(text)) {
+            report(context, value, `\`${text.trim()}\` in \`${node.name.name}\``, 'Use a token instead (`var(--g-accent)`, `var(--g-text)`, …)')
+          }
         }
       },
     }

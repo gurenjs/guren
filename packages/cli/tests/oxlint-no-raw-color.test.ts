@@ -3,17 +3,18 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { lintFixture, OXLINT_BIN } from './helpers'
-import { collectFiles, toPosixRelative } from '../src/discovery'
+import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 
 // Exercised through the real oxlint binary, like the sibling rules: what has to
 // hold is that the plugin loads and reports on the AST oxlint hands it.
 
 const repoRoot = resolve(import.meta.dir, '../../..')
-const plugin = resolve(import.meta.dir, '../src/oxlint/no-raw-color.js')
+const RULE = 'guren-no-raw-color/no-raw-color'
+const CONFIG = { jsPlugins: [resolve(import.meta.dir, '../src/oxlint/no-raw-color.js')], rules: { [RULE]: 'error' } }
 
 function lint(source: string): string {
   return lintFixture({
-    config: { jsPlugins: [plugin], rules: { 'guren-no-raw-color/no-raw-color': 'error' } },
+    config: CONFIG,
     file: 'case.tsx',
     source,
   })
@@ -46,7 +47,6 @@ const c = <p className="text-shadow-sm text-shadow-sky-300" />
 `)).toEqual(['bg-[#db1b1b]', 'shadow-[0_1px_#000]', 'text-[color:rgb(0_0_0)]', 'bg-[oklch(60%_0.2_30)]'])
   })
 
-  // Tailwind writes a space as `_`, a word character, so a hex before it has no `\b`.
   test('reports arbitrary properties, underscore-separated hex and whole named colors', () => {
     expect(reported(`const a = <p className="[color:#fff] [--brand:#f00] [mask-type:luminance]" />
 const b = <p className="bg-[linear-gradient(#fff_0%,#000_100%)] shadow-[#000_0px_1px_2px]" />
@@ -93,7 +93,6 @@ const c = <div style={{ ...{ color: 'red' }, outlineColor: 'transparent' }} />
 `)).toEqual(['#fff', 'rgb(0 0 0)', 'hsl(0 0% 50%)', 'red'])
   })
 
-  // On a component, `color="red"` is whatever the component makes of it, often a variant name.
   test('reports an SVG paint attribute, but not currentColor, none, a paint server or a component prop', () => {
     expect(reported(`const a = <svg><path fill="#db1b1b" stroke="currentColor" /><stop stopColor={'#000'} /><rect fill="none" /></svg>
 const b = <svg><path fill="white" /><path fill="url(#abc)" /></svg>
@@ -111,7 +110,7 @@ const c = <><Badge color="red" fill="white" /><link rel="mask-icon" href="/m.svg
   test('passes every page and component Guren ships into an app', async () => {
     const files: string[] = []
     for (const root of ['packages/create-app/templates', 'packages/cli/templates/scaffold']) {
-      for (const file of await collectFiles(join(repoRoot, root), new Set(['.ts', '.tsx']), new Set(['node_modules']))) {
+      for (const file of await collectFiles(join(repoRoot, root), IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES)) {
         const path = toPosixRelative(repoRoot, file)
         if (path.includes('/resources/js/')) files.push(path)
       }
@@ -119,9 +118,10 @@ const c = <><Badge color="red" fill="white" /><link rel="mask-icon" href="/m.svg
     expect(files.length).toBeGreaterThan(0)
     const dir = mkdtempSync(join(tmpdir(), 'guren-oxlint-raw-color-'))
     try {
-      writeFileSync(join(dir, 'oxlintrc.json'), JSON.stringify({ jsPlugins: [plugin], rules: { 'guren-no-raw-color/no-raw-color': 'error' } }))
+      // Not lintFixture: it writes its config into `cwd`, which here is the repository root.
+      writeFileSync(join(dir, 'oxlintrc.json'), JSON.stringify(CONFIG))
       const result = Bun.spawnSync(
-        [OXLINT_BIN, '--disable-nested-config', '-c', join(dir, 'oxlintrc.json'), '-A', 'all', '-D', 'guren-no-raw-color/no-raw-color', '--format', 'unix', ...files],
+        [OXLINT_BIN, '--disable-nested-config', '-c', join(dir, 'oxlintrc.json'), '-A', 'all', '-D', RULE, '--format', 'unix', ...files],
         { cwd: repoRoot, stdout: 'pipe', stderr: 'pipe' },
       )
       expect(result.stderr.toString()).toBe('')
