@@ -3,7 +3,7 @@
 // carry the dark theme; `bg-white` or `#db1b1b` stays light when the system goes dark.
 // Reports Tailwind palette utilities and arbitrary color values in any string outside
 // a non-class JSX attribute (so a class in a constant or a `clsx()` call counts), and
-// hex, color-function or named-color values in a JSX `style` prop or SVG paint attribute.
+// hex, color-function or named-color values in a JSX `style` prop or an SVG paint attribute.
 // A class token an interpolation continues (`bg-${tone}-500`) is not judged.
 // Tests: `tests/oxlint-no-raw-color.test.ts`.
 import { unwrap } from './ast.js'
@@ -11,7 +11,7 @@ import { unwrap } from './ast.js'
 const PALETTE =
   'slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose'
 const COLOR_UTILITY =
-  'bg|text|border(?:-[xytrblse])?|ring(?:-offset)?|inset-ring|outline|divide|fill|stroke|from|via|to|placeholder|caret|accent|decoration|shadow|inset-shadow|drop-shadow'
+  'bg|text|text-shadow|border(?:-[xytrblse])?|ring(?:-offset)?|inset-ring|outline|divide|fill|stroke|from|via|to|placeholder|caret|accent|decoration|shadow|inset-shadow|drop-shadow'
 const PALETTE_CLASS = new RegExp(`^(?:${COLOR_UTILITY})-(?:(?:${PALETTE})-(?:50|[1-9]00|950)|black|white)$`, 'u')
 // `(?![0-9a-z])`, not `\b`: Tailwind writes a space as `_`, a word character (`#fff_0%`).
 const COLOR_VALUE = /#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})(?![0-9a-z])|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(/iu
@@ -57,7 +57,8 @@ function withoutUrlsAndStrings(value) {
   return value.replace(/url\([^)]*\)|'[^']*'|"[^"]*"/giu, '')
 }
 
-/** A CSS value that is, or holds, a literal color. A named color counts only as the whole value. */
+/** A CSS value that is, or holds, a literal color. A named color counts only as the whole value
+    (or a whole template quasi), so `1px solid red` is not judged. */
 function isRawColorValue(value) {
   const stripped = withoutUrlsAndStrings(value).trim()
   return COLOR_VALUE.test(stripped) || NAMED_COLORS.has(stripped.toLowerCase())
@@ -67,15 +68,29 @@ function rawColorClass(token) {
   const utility = utilityOf(token)
   if (PALETTE_CLASS.test(utility)) return true
   if (!utility.endsWith(']')) return false
-  // `bg-[#fff]`, `bg-[color:red]`, and the arbitrary property `[color:#fff]`.
-  const open = utility.startsWith('[') ? 0 : utility.indexOf('-[') + 1
-  if (open === 0 && utility[0] !== '[') return false
-  const inner = utility.slice(open + 1, -1)
+  // The arbitrary property `[color:#fff]`, or the arbitrary value of `bg-[#fff]` / `bg-[color:red]`.
+  let inner
+  if (utility.startsWith('[')) {
+    inner = utility.slice(1, -1)
+  } else {
+    const open = utility.indexOf('-[')
+    if (open === -1) return false
+    inner = utility.slice(open + 2, -1)
+  }
   const typed = /^[a-z-]+:/u.exec(inner)
   return isRawColorValue((typed ? inner.slice(typed[0].length) : inner).replaceAll('_', ' '))
 }
 
-const PAINT_ATTRIBUTES = new Set(['style', 'fill', 'stroke', 'color', 'stopColor', 'floodColor', 'lightingColor'])
+// Judged on intrinsic elements only: on a component, `fill` or `color` is whatever the component
+// makes of it (a variant name, say), not CSS.
+const SVG_PAINT_ATTRIBUTES = new Set(['fill', 'stroke', 'stopColor', 'floodColor', 'lightingColor'])
+
+function isPaintAttribute(node) {
+  if (node.name?.type !== 'JSXIdentifier') return false
+  if (node.name.name === 'style') return true
+  const element = node.parent?.name
+  return SVG_PAINT_ATTRIBUTES.has(node.name.name) && element?.type === 'JSXIdentifier' && /^[a-z]/u.test(element.name)
+}
 
 const TOKEN_HINT = 'Use a Guren UI token from resources/css/guren.css (bg-g-panel, text-g-text, border-g-line, bg-g-accent, …)'
 
@@ -120,7 +135,7 @@ function isModuleSpecifier(node) {
 }
 
 /** `class`, `className`, and a component's own class props (`inputClassName`, `iconClass`). */
-const CLASS_ATTRIBUTE = /^class$|(?:c|C)lass(?:Name)?$/u
+const CLASS_ATTRIBUTE = /[cC]lass(?:Name)?$/u
 
 /** Inside a JSX attribute other than a class list (`title`, `data-testid`, `alt`), a string is not a class. */
 function inNonClassAttribute(node) {
@@ -154,7 +169,7 @@ const rule = {
         reportClasses(context, node, templateTokens(node))
       },
       JSXAttribute(node) {
-        if (node.name?.type !== 'JSXIdentifier' || !PAINT_ATTRIBUTES.has(node.name.name)) return
+        if (!isPaintAttribute(node)) return
         const expression = node.value?.type === 'JSXExpressionContainer' ? node.value.expression : node.value
         for (const { node: value, text } of styleValues(expression)) {
           if (!isRawColorValue(text)) continue

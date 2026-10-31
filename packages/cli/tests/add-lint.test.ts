@@ -106,6 +106,22 @@ describe('guren add lint', () => {
     expect(reported).toEqual([...inScope].sort())
   })
 
+  it('reports a raw color in resources/js and nowhere else', async () => {
+    await linkWorkspacePackage('cli', workspace.dir)
+    await addLint()
+    const inScope = ['resources/js/pages/Home.tsx', 'resources/js/components/Badge.tsx']
+    const outOfScope = ['app/Mail/WelcomeMail.tsx', 'src/app.ts']
+    for (const path of [...inScope, ...outOfScope]) {
+      await mkdir(dirname(resolve(path)), { recursive: true })
+      await writeFile(path, "export const tone = 'bg-red-500'\n")
+    }
+
+    const { output } = lintApp(workspace.dir)
+
+    const reported = [...output.matchAll(/^(.+?):\d+:\d+: .*no-raw-color/gmu)].map((match) => match[1]).sort()
+    expect(reported).toEqual([...inScope].sort())
+  })
+
   // Every provider form still ships for apps with no config/env.ts, and each reads
   // process.env on purpose; `add lint` in such an app must not start red.
   it('lints every scaffold template that reads process.env with no errors', async () => {

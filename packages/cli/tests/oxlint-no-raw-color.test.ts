@@ -33,9 +33,11 @@ describe('guren/no-raw-color', () => {
   test('reports Tailwind palette utilities under variants, important and opacity', () => {
     expect(reported(`const a = <p className="text-zinc-500 md:hover:!bg-red-500/50 [&:hover]:border-gray-100 bg-black/40" />
 const b = <p className="ring-blue-600 ring-offset-white from-rose-50 to-rose-950 border-x-slate-200 fill-white" />
+const c = <p className="text-shadow-sm text-shadow-sky-300" />
 `)).toEqual([
       'text-zinc-500', 'md:hover:!bg-red-500/50', '[&:hover]:border-gray-100', 'bg-black/40',
       'ring-blue-600', 'ring-offset-white', 'from-rose-50', 'to-rose-950', 'border-x-slate-200', 'fill-white',
+      'text-shadow-sky-300',
     ])
   })
 
@@ -91,10 +93,12 @@ const c = <div style={{ ...{ color: 'red' }, outlineColor: 'transparent' }} />
 `)).toEqual(['#fff', 'rgb(0 0 0)', 'hsl(0 0% 50%)', 'red'])
   })
 
-  test('reports an SVG paint attribute, but not currentColor, none or a paint server', () => {
+  // On a component, `color="red"` is whatever the component makes of it, often a variant name.
+  test('reports an SVG paint attribute, but not currentColor, none, a paint server or a component prop', () => {
     expect(reported(`const a = <svg><path fill="#db1b1b" stroke="currentColor" /><stop stopColor={'#000'} /><rect fill="none" /></svg>
 const b = <svg><path fill="white" /><path fill="url(#abc)" /></svg>
-`)).toEqual(['#db1b1b', '#000', 'white'])
+const c = <><Badge color="red" fill="white" /><link rel="mask-icon" href="/m.svg" color="#000" /><Icon style={{ color: 'red' }} /></>
+`)).toEqual(['#db1b1b', '#000', 'white', 'red'])
   })
 
   test('names the token vocabulary, so the message is actionable', () => {
