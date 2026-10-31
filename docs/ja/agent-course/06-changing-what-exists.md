@@ -333,7 +333,13 @@ mkdir -p docs/plans/registrations
 bunx guren plan:render docs/plans/registrations/plan.json
 ```
 
-`docs/plans/registrations/plan.html` を開いて **Changes only** をオンにすると、残った要素は次の 3 種類に分かれます。
+第 3 章と同じく Dev Center でレビューします。開発サーバーを起動します。
+
+```bash run background
+bun run dev
+```
+
+[http://localhost:3333/_guren/plans/registrations](http://localhost:3333/_guren/plans/registrations) を開いて **Review this plan** を押し、**Changes only** をオンにします (開発サーバーを使わない場合は、`docs/plans/registrations/plan.html` をファイルとして開きます)。残った要素は次の 3 種類に分かれます。
 
 | change | 要素 | 意味 |
 |---|---|---|
@@ -364,11 +370,15 @@ bunx guren plan:render docs/plans/registrations/plan.json
 
 ## 4. 回答して承認する
 
-質問には第 3 章と同じ手順で答えます。ページで **refuse** を選んで **Copy prompt for the agent** を押し、コピーした依頼文を Claude Code のセッションに貼り付けます。送る前に、その下へ次の文を書き足してください。
+質問には第 3 章と同じ手順で答えます。レビューページで **refuse** を選び、ページ下部に **Review saved at** が表示されるのを待ちます。Dev Center の計画のページにエージェントへ送る依頼文が出るので、その下に理由を書き足します。Claude Code のセッションに、次のプロンプトを送ります。
 
 ```text
+docs/plans/registrations/plan.json に私のレビューを plan-write スキルで反映してください。レビューは .guren/plans/registrations.feedback.json に保存してあります。
+
 満席の勉強会は登録を断ります。キャンセル待ちは後の変更で扱います。registrations.store の 2 つの警告は残してください。サインインしたユーザーなら誰でも登録でき、リクエストにボディもないからです。
 ```
+
+ファイルとして開いたページでレビューした場合は、**Copy prompt for the agent** でコピーした依頼文を送り、その下に上の 2 段落目を書き足してください。
 
 **エージェントなしの場合:**
 
@@ -398,6 +408,12 @@ bunx guren plan:approve docs/plans/registrations/plan.json
 ```bash run
 git add docs/plans
 git commit -m "docs: approve the registrations plan"
+```
+
+開発サーバーを止めます。
+
+```bash run stop-background
+# Press Ctrl-C in the terminal running bun run dev.
 ```
 
 ## ここまでの状態

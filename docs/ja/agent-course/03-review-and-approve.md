@@ -4,13 +4,21 @@
 
 **この章で学ぶこと:**
 
-- レビューページでの判断を、エージェントが反映できるフィードバックにする方法
+- Dev Center でのレビューが保存される場所と、エージェントがそれを反映する流れ
 - `plan:revise` が記録する内容と、改訂のたびに理由を残す意味
 - 承認によって固定されるものと、承認の前に確かめるチェック表
 
-## 1. ページでレビューする
+## 1. Dev Center でレビューする
 
-`docs/plans/meetups/plan.html` をもう一度開きます。このページで行う次の 3 種類の操作が、エージェントへのフィードバックになります。
+Dev Center は開発サーバーの一部なので、まずサーバーを起動します。
+
+```bash run background
+bun run dev
+```
+
+[http://localhost:3333/_guren/plans/meetups](http://localhost:3333/_guren/plans/meetups) を開くと、Dev Center にこの計画のページが表示されます。計画はまだ下書きなので、ページにはレビューと承認を求める案内が出ています。**Review this plan** を押すと `/_guren/plans/meetups/review` が開きます。第 2 章で `plan:render` が書いたページを開発サーバーが配信したもので、レビューの操作をするたびに内容が保存されます。
+
+このページで行う次の 3 種類の操作が、エージェントへのフィードバックになります。
 
 | ページでの操作 | フィードバックでの意味 |
 |---|---|
@@ -22,21 +30,33 @@
 
 1. **Can guests browse meetups?** では **yes** が選ばれた状態のまま、回答欄に「Yes, browsing is public.」と入力します。
 2. `route.meetups.store` の policy の警告は、第 2 章で意図した選択と判断したので、そのままにします。
-3. ページ下部の **Copy prompt for the agent** を押します(`--locale ja` で描画したページでは「エージェントへの依頼文をコピー」)。
+3. ページ下部に **Review saved at** と時刻が表示されたら、回答は保存されています(`--locale ja` で描画したページでは「〜にレビューを保存しました」)。
 
-ページで回答を選んだり要素を承認したりしても、それだけでは `plan.json` は変わりません。エージェントがレビューを反映するまでは、`plan:approve` も質問が未回答のままだとして承認を拒否します。このボタンは、計画のパスと「plan-write スキルでレビューを反映してほしい」という依頼に、ページのフィードバックを付けた依頼文をまとめてコピーします。
+![レビューページの質問カード。「Can guests browse meetups?」の yes が選ばれていて assumed の印が付き、その下に no があります。Answer の欄には「Yes, browsing is public.」と入力されています。欄の下には、この質問が route.meetups.index と route.meetups.show に影響することが表示されています](../../images/agent-course-review-question.png)
+
+要素ごとの判定、コメント、回答は、操作して少し経つと `.guren/plans/meetups.feedback.json` に保存されます。あとでページを開き直すと、保存した内容が読み込まれます。このファイルは `.guren/plans/` にあるほかのファイルと同じく Git の管理対象外です。プロジェクトのほかのファイルは変わらず、`plan.json` もエージェントが書いたときのままです。エージェントがレビューを反映するまでは、`plan:approve` も質問が未回答のままだとして承認を拒否します。
+
+**開発サーバーを使わない場合:** `docs/plans/meetups/plan.html` をファイルとして開き、同じようにレビューします。このページは何も保存しないので、ページ下部の **Copy prompt for the agent** を押します(`--locale ja` で描画したページでは「エージェントへの依頼文をコピー」)。レビューの内容が JSON で入った依頼文がコピーされるので、次の節のプロンプトの 1 段落目の代わりに、その依頼文を送ってください。
 
 ## 2. レビューをエージェントに渡す
 
-コピーした依頼文を Claude Code のセッションに貼り付けます。第 2 章で見つけた足りない振る舞いはページからは伝わらないので、送る前に、貼り付けた依頼文の下へ次の文を書き足してください。
+Dev Center の計画のページに戻ると、**Review** の欄に保存した操作の件数 (`1 answered`) と、エージェントに送る依頼文がコピーボタン付きで表示されています。
+
+![レビュー後の Dev Center の計画のページ。「Waiting on a person」の枠に「Review saved」とあり、レビューをもとに計画を改訂するようエージェントに伝える案内が出ています。その下の Review カードには Review this plan のボタン、0 approved、0 changes requested、0 commented、1 answered という件数の行があります。「Send the agent:」の下には「Revise docs/plans/meetups/plan.json from my review with the plan-write skill. The review is saved in .guren/plans/meetups.feedback.json.」という依頼文とコピーボタンが並びます](../../images/agent-course-dev-center-review.png)
+
+第 2 章で見つけた足りない振る舞いはページからは伝わらないので、依頼文の下に書き足します。Claude Code のセッションに、次のプロンプトを送ります。
 
 ```text
+docs/plans/meetups/plan.json に私のレビューを plan-write スキルで反映してください。レビューは .guren/plans/meetups.feedback.json に保存してあります。
+
 あわせて、ページの受け入れ振る舞いの警告ごとに振る舞いを足してください。meetups.create と meetups.update には unauthenticated、meetups.edit には forbidden、meetups.update には validation です。主催者が meetups.edit を開ける success の振る舞いも足してください。meetups.store の警告は残してください。サインインしたユーザーなら誰でも主催できるからです。
 ```
 
-エージェントは `plan-write` スキルの手順に従い、リポジトリの外に作った計画のコピーを編集してから、そのコピーとフィードバックを渡して `bunx guren plan:revise` を実行します。回答済みの質問がコピーに残っていると、`plan:revise` はそのコピーを受け付けません。受け付けた変更は、1 つずつ理由を添えて `docs/plans/meetups/revisions/0001.json` に記録されます。
+1 段落目は、レビューページを日本語表示にしたとき、ページ下部の依頼文コピーのボタンがコピーする文と同じです。Dev Center の計画のページには同じ依頼文が英語で表示されるので、そちらを送ってもかまいません。
 
-**エージェントなしの場合:** 変更を操作 (op) の形で渡します。op にはそれぞれ理由を書きます。
+エージェントは `plan-write` スキルの手順に従って、保存されたファイルからコメントと回答を読み、リポジトリの外に作った計画のコピーを編集してから、そのコピーを渡して `bunx guren plan:revise` を実行します。`--feedback` を付けずに実行すると、`plan:revise` は Dev Center が保存したレビューを反映し、`Applied the review saved in .guren/plans/meetups.feedback.json.` と表示します。回答済みの質問がコピーに残っていると、`plan:revise` はそのコピーを受け付けません。受け付けた変更は、1 つずつ理由を添えて `docs/plans/meetups/revisions/0001.json` に記録されます。
+
+**エージェントなしの場合:** 変更を操作 (op) の形で渡します。op にはそれぞれ理由を書きます。Dev Center でレビューしていれば、このコマンドもそのレビューを反映し、同じ `Applied the review saved in …` の行を表示します。
 
 <details>
 <summary>振る舞い 5 つの追加と質問への回答を反映する plan:revise</summary>
@@ -67,7 +87,13 @@ EOF
 bunx guren plan:render docs/plans/meetups/plan.json
 ```
 
-ブラウザでページを再読み込みすると、**Needs attention** の警告は、残すと決めた `meetups.store` の policy の警告 1 件だけになっています。**Tasks & acceptance** には振る舞いが 12 件並びます。
+レビューページを再読み込みすると、**Needs attention** の警告は、残すと決めた `meetups.store` の policy の警告 1 件だけになっています。**Tasks & acceptance** には振る舞いが 12 件並び、質問は消えています。さきほどの操作は改訂前の版に対するもので、エージェントがすでに反映したため、ページには表示されません。同じ理由で、Dev Center の計画のページには、保存されたレビューが以前の版のものだという表示が出ます。
+
+この章では、開発サーバーはここで止めます。
+
+```bash run stop-background
+# Press Ctrl-C in the terminal running bun run dev.
+```
 
 改訂の内容はデータとしてファイルに残っているので、エージェントが何をしたのかを正確に確認できます。
 
@@ -129,7 +155,9 @@ git commit -m "docs: approve the meetups plan"
 
 ## よくあるつまずき
 
-- **`plan:approve` に、作業ツリーが汚れていると言われる。** 先に改訂した計画をコミットしてください。エージェントがアプリのルートに残したファイル (計画のコピーや `feedback.json`) も未コミットの変更として数えられるので、リポジトリの外へ移します。
+- **`plan:approve` に、作業ツリーが汚れていると言われる。** 先に改訂した計画をコミットしてください。エージェントがアプリのルートに残したファイル (計画のコピーや、ファイルとして開いたページの `feedback.json`) も未コミットの変更として数えられるので、リポジトリの外へ移します。Dev Center が保存したレビューは、`.guren/plans/` ごと Git の管理対象外なので数えられません。
+- **レビューページに、計画の別の版から描画されたページだと表示される。** `plan:render` を最後に実行したあとで `plan.json` が変わっています。ページに書かれたコマンドを実行してから、再読み込みしてください。
+- **レビューが計画の別の版に保存されたものだと `plan:revise` に警告される。** レビューしたあとで計画が変わっています。今の形を見ていない要素にレビューを当てはめないよう、`plan:revise` はそのレビューを反映しませんでした。計画を描画し直してもう一度レビューし、依頼文をエージェントに送り直してください。
 - **回答済みの質問が残っているため `plan:revise` が拒否する。** コピーの `questions` に質問が残ったままです。答えは `assumptions` に書いてください。
 - **フィードバックで承認した要素が変更されると `plan:revise` に言われる。** その要素でページの **Approve** を押しています。変更そのものが誤っているか、そうでなければ `--reopens "<理由>"` で理由を示す必要があります。
 
