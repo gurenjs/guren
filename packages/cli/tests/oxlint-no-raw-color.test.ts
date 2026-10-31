@@ -44,13 +44,34 @@ const b = <p className="ring-blue-600 ring-offset-white from-rose-50 to-rose-950
 `)).toEqual(['bg-[#db1b1b]', 'shadow-[0_1px_#000]', 'text-[color:rgb(0_0_0)]', 'bg-[oklch(60%_0.2_30)]'])
   })
 
+  // Tailwind writes a space as `_`, a word character, so a hex before it has no `\b`.
+  test('reports arbitrary properties, underscore-separated hex and whole named colors', () => {
+    expect(reported(`const a = <p className="[color:#fff] [--brand:#f00] [mask-type:luminance]" />
+const b = <p className="bg-[linear-gradient(#fff_0%,#000_100%)] shadow-[#000_0px_1px_2px]" />
+const c = <p className="bg-[red] bg-[color:rebeccapurple]" />
+`)).toEqual([
+      '[color:#fff]', '[--brand:#f00]',
+      'bg-[linear-gradient(#fff_0%,#000_100%)]', 'shadow-[#000_0px_1px_2px]',
+      'bg-[red]', 'bg-[color:rebeccapurple]',
+    ])
+  })
+
   // A class string is a class string wherever it is held: an agent that moves
   // `bg-red-500` into a lookup table has not moved it onto a token.
   test('reads class strings outside className: helpers, constants, template literals', () => {
     expect(reportedLines(`const a = <p className={clsx('border-white', ok && 'ring-blue-600')} />
 const tones = { danger: 'bg-red-50 text-red-700' }
 const b = <p className={\`p-4 \${size} bg-[#db1b1b]\`} />
-`)).toEqual([1, 1, 2, 2, 3])
+const c = <Field inputClassName="border-white" iconClass="text-red-600" />
+`)).toEqual([1, 1, 2, 2, 3, 4, 4])
+  })
+
+  test('does not read a token an interpolation continues, or a non-class attribute', () => {
+    expect(reported(`const a = <p className={\`bg-red-500\${suffix}\`} />
+const b = <p className={\`custom-\${x}bg-red-500 text-zinc-500 x\${y}\`} />
+const c = <div data-testid="text-red-500" title="Pick bg-red-500 here" alt={ok ? 'bg-white' : ''} />
+const d = import(\`bg-red-500\`)
+`)).toEqual(['text-zinc-500'])
   })
 
   test('leaves tokens, non-color utilities and module specifiers alone', () => {
@@ -59,18 +80,21 @@ const a = <p className="bg-g-accent text-g-on-accent border-g-line bg-[var(--g-a
 const b = <p className="text-lg bg-red border-2 to-50% from-g-accent grid-cols-[1fr_2fr] bg-red-500-ish" />
 const c = <p className={\`bg-\${tone}-500\`} />
 const d = 'see #123 for details'
+const e = <p className="bg-[url(/logo.svg#abc)] before:content-['#fff']" />
 `)).toEqual([])
   })
 
   test('reports a hex or color function in a style prop, through conditionals', () => {
     expect(reported(`const a = <div style={{ color: '#fff', background: ok ? 'rgb(0 0 0)' : 'var(--g-page)', width: 10 }} />
 const b = <div style={{ borderColor: \`hsl(0 0% 50%)\`, boxShadow: 'var(--g-shadow-card)' }} />
-`)).toEqual(['#fff', 'rgb(0 0 0)', 'hsl(0 0% 50%)'])
+const c = <div style={{ ...{ color: 'red' }, outlineColor: 'transparent' }} />
+`)).toEqual(['#fff', 'rgb(0 0 0)', 'hsl(0 0% 50%)', 'red'])
   })
 
-  test('reports an SVG paint attribute, but not currentColor or none', () => {
+  test('reports an SVG paint attribute, but not currentColor, none or a paint server', () => {
     expect(reported(`const a = <svg><path fill="#db1b1b" stroke="currentColor" /><stop stopColor={'#000'} /><rect fill="none" /></svg>
-`)).toEqual(['#db1b1b', '#000'])
+const b = <svg><path fill="white" /><path fill="url(#abc)" /></svg>
+`)).toEqual(['#db1b1b', '#000', 'white'])
   })
 
   test('names the token vocabulary, so the message is actionable', () => {
