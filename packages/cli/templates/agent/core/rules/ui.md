@@ -7,11 +7,12 @@ paths:
 # UI: Guren UI tokens
 
 Pages style with the Guren UI design tokens: the `--g-*` custom properties in
-`resources/css/guren.css`, which `resources/css/app.css` imports and maps onto
-Tailwind as `g-` utilities (`bg-g-page`, `text-g-accent-text`, `border-g-line`,
-`rounded-g-card`, `shadow-g-card`). Every color, radius and shadow on a page
-comes from them. An app with no `guren.css` gets one, with its import, from the
-first `bunx guren make:feature` or `make:auth`.
+`resources/css/guren.css`, whose `@theme inline` block maps them onto Tailwind
+as `g-` utilities (`bg-g-page`, `text-g-accent-text`, `border-g-line`,
+`rounded-g-card`, `shadow-g-card`); `resources/css/app.css` imports it. Every
+color, radius and shadow on a page comes from them. An app with no `guren.css`
+gets one from the first `bunx guren make:feature` or `make:auth`, which also
+adds the import when `resources/css/app.css` exists.
 
 ## The tokens
 
@@ -27,8 +28,8 @@ first `bunx guren make:feature` or `make:auth`.
 | Tick | `tick` | `bg-[image:var(--g-tick)]` on a thin bar marking the current place, once per screen |
 
 Each color token is mapped as `--color-g-<name>`, so it works with every
-Tailwind color prefix (`bg-`, `text-`, `border-`, `outline-`, `accent-`,
-`placeholder:`).
+Tailwind color prefix (`bg-`, `text-`, `border-`, `outline-`, `accent-`), under
+any variant (`placeholder:text-g-muted`).
 
 ## The red budget
 
@@ -52,7 +53,8 @@ already switch, and drifts from the theme the moment `guren.css` changes. A
 color no token covers is a new token in `resources/css/app.css`, after the
 `guren.css` import and under the app's own prefix (`--app-…`, so a later
 `guren.css` cannot collide with it): its light value in `:root`, its dark value
-in the same media query, and a `--color-app-…` line in `@theme inline`.
+in the same media query, and a `--color-app-…` line in an `@theme inline` block
+of its own in `app.css`.
 
 ## The shared class strings
 
