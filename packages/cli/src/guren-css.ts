@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { consola } from 'consola'
 import { readIfExists } from './discovery'
-import { loadScaffoldTemplate } from './scaffold-templates'
+import { loadScaffoldTemplate, scaffoldTemplatePath } from './scaffold-templates'
 
 export const TOKENS_PATH = 'resources/css/guren.css'
 const SHIPPED_SHEET = 'guren-ui/resources/css/guren.css'
@@ -207,7 +207,12 @@ export interface TokenSheetVerdict {
   canAutofix?: boolean
 }
 
-const SHIPPED_SHEET_LOCATION = `node_modules/@guren/cli/templates/scaffold/${SHIPPED_SHEET}`
+/** The sheet the running CLI ships, from the app root when it is installed there. */
+function shippedSheetLocation(cwd: string): string {
+  const path = scaffoldTemplatePath(SHIPPED_SHEET)
+  const fromApp = relative(cwd, path)
+  return fromApp.startsWith('..') || isAbsolute(fromApp) ? path : fromApp
+}
 
 /** `guren doctor`'s reading of the app's token sheet; `guren upgrade` applies the fix it offers. */
 export async function judgeTokenSheet(cwd: string): Promise<TokenSheetVerdict> {
@@ -234,7 +239,7 @@ export async function judgeTokenSheet(cwd: string): Promise<TokenSheetVerdict> {
       }
     case 'unmarked': {
       const steps =
-        `Copy your own rules out of ${TOKENS_PATH}, replace the file with ${SHIPPED_SHEET_LOCATION}, `
+        `Copy your own rules out of ${TOKENS_PATH}, replace the file with ${shippedSheetLocation(cwd)}, `
         + 'and add your rules back after its `/* guren:tokens end */` line.'
       return {
         status: 'warn',
