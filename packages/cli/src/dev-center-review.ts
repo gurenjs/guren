@@ -124,10 +124,10 @@ async function saveFeedback(cwd: string, slug: string, request: Request): Promis
   return Response.json({ schemaVersion: 1, savedAt: saved.savedAt }, { headers: NO_STORE })
 }
 
-/** `undefined` for a path that is not the review's; the caller answers those. */
-export async function handleReviewRequest(cwd: string, request: Request): Promise<Response | undefined> {
+/** A request on a {@link reviewRoute} path; any other path is 404. */
+export async function handleReviewRequest(cwd: string, request: Request): Promise<Response> {
   const route = reviewRoute(new URL(request.url).pathname)
-  if (!route) return undefined
+  if (!route) return problem(404, 'not-found', 'Not found.')
   const allowed = route.resource === 'feedback' ? 'GET, POST' : 'GET'
   if (!allowed.split(', ').includes(request.method)) return new Response('Method not allowed', { status: 405, headers: { ...NO_STORE, Allow: allowed } })
   try {
