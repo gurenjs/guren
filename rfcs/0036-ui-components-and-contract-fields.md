@@ -91,6 +91,7 @@ re-copy.
 ```bash
 bunx guren add ui                 # every component
 bunx guren add ui button field    # only these (and what they import)
+bunx guren add ui field --diff    # print an existing copy against the current template; writes nothing
 ```
 
 It is a blueprint under `add`, beside `add session` and `add browser-tests`,
@@ -134,10 +135,38 @@ parse-gates them, as with the other static scaffold templates.
   `forms` subpath before writing `Field.tsx`, and names the upgrade otherwise
   (Migration Path).
 - Each file opens with a one-line header naming the component and the template
-  version it was copied from (`// guren-ui: Field v1`). Nothing reads it in v1;
-  it is what an upgrade command needs to tell a pristine copy from an edited
-  one. How that command works is the token-upgrade work's question too, and the
-  two should share one mechanism (Open Question 1).
+  version it was copied from (`// guren-ui: Field v1`), and saying that
+  `guren upgrade` replaces the file only while it is unedited. The header is for
+  the reader; the upgrade path below identifies a copy by its content, not by
+  the header.
+
+**Upgrading a copy.** `guren upgrade` reaches the token sheet through a doctor
+check and its autofix (PR #1246: the `guren-ui-tokens` check, a marked block in
+`guren.css`, and `SHIPPED_UNMARKED_SHEETS` for the sheets released before the
+markers). The components use the same path, with the one difference that
+follows from ownership: a component file is the app's whole, so there is no
+block to mark, and a copy is judged by its content alone.
+
+- A new doctor check, `guren-ui-components`, reads each file under
+  `resources/js/components/ui/` whose name is a shipped component and hashes
+  it (sha256 over LF-normalized bytes).
+- The CLI carries, per component, the hashes of every template version it has
+  released (`SHIPPED_UI_COMPONENTS`, closed like `SHIPPED_UNMARKED_SHEETS`;
+  the current template is hashed at run time, not listed).
+
+| Copy | Check | Upgrade |
+|------|-------|---------|
+| absent | pass | nothing (creating it stays with `add ui` and the generators) |
+| identical to the current template | pass | nothing |
+| identical to an earlier released version | warn | the autofix replaces the file with the current template |
+| matches no released version (edited) | warn, naming the component and the template version its header claims | nothing; the message points at `guren add ui <name> --diff`, which prints the edited copy against the current template |
+
+Because it is a doctor autofix, `guren upgrade --dry-run` previews it,
+`--no-autofix` leaves it as a warning, and the first `guren upgrade` after the
+new CLI is installed applies it, exactly as for the token sheet. A component
+change that alters the props a generator emits against ships with the template
+change in the same release, so an app whose copy is unedited gets both at once,
+and an app whose copy is edited is told which file to reconcile.
 
 ### 2. Contract-derived fields
 
@@ -612,8 +641,9 @@ A `@guren/ui` package would update by version bump. It was not chosen because:
   edit is one it works around with inline classes, which is the problem this
   RFC removes.
 
-The cost of copying is upgrades, handled by the header and the shared upgrade
-mechanism (Open Question 1). The headless logic is packaged for the opposite
+The cost of copying is upgrades, handled by the doctor check and `guren
+upgrade` autofix the token sheet already uses, which replace an unedited copy
+and report an edited one. The headless logic is packaged for the opposite
 reason: it reads `forms.gen.ts`, whose format the package owns.
 
 ### Component classes in `guren.css`
@@ -703,6 +733,9 @@ the template change and that release, as `common-pitfalls.md` describes.
   `make:feature` output. They regenerate `pages.gen.ts` only today; they must
   run the full codegen so `forms.gen.ts` exists, and cover `--prototype`.
 - `tests/plan-command-allowlist.test.ts` fails until `add ui` is classified.
+- The `guren-ui-components` doctor check gets the case table above as tests,
+  and a test fails when a component template changes without its previous
+  hash joining `SHIPPED_UI_COMPONENTS`.
 - `tests/scaffold-blog-sync.test.ts` pins the auth templates the blog shares.
 - A new test pins `FieldInput` to the plan schema's `input` enum, and the CLI's
   copy of `humanizeFieldName()` to the package's.
@@ -715,11 +748,10 @@ the template change and that release, as `common-pitfalls.md` describes.
 
 ## Open Questions
 
-1. **Upgrading copied components.** The header records the template version.
-   Should `guren add ui --diff` (or `guren upgrade`) compare a copy against its
-   template version and offer the new one when the copy is unedited? The
-   `guren.css` upgrade work answers the same question for the token sheet; one
-   mechanism should serve both.
+1. **Edited copies.** An unedited copy is replaced by `guren upgrade`; an edited
+   one is only reported. Should `add ui <name> --diff` go further and offer a
+   three-way merge, using the released version the header names as the base?
+   That needs every released template kept as source, not only its hash.
 2. **Translation namespace.** `fields.<route>.<name>.label` then
    `fields.<name>.label`, or Laravel's `validation.attributes.<name>`, which
    would also let server messages name the field? The second couples labels to
