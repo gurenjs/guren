@@ -230,6 +230,8 @@ Behaviours to write, as test titles `[<id>] <description>`, failing:
 
 Implement this step only, then run `bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/tests` and commit once it is verified.
 Marked in .guren/plans/comments.state.json
+
+Dev Center: /_guren/plans/comments on the running dev server shows the person every step of this plan.
 ```
 
 `plan:next` が表示するのは 1 つのステップだけで、計画全体は出しません。`--json` を付けると、同じ内容をデータで返します。表示したステップには状態ファイルで印が付き、Stop フックはこの印を読みます。承認のない計画は、先に述べたとおり拒否されます。未コミットの変更がある作業ツリーも、その変更が印の付いたステップ自身の作業でない限り拒否されるので、`plan:next` はステップに取りかかる前に実行してください。

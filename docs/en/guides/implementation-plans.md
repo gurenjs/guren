@@ -206,6 +206,8 @@ Behaviours to write, as test titles `[<id>] <description>`, failing:
 
 Implement this step only, then run `bunx guren plan:verify docs/plans/comments/plan.json --step task/entity/model.comment/tests` and commit once it is verified.
 Marked in .guren/plans/comments.state.json
+
+Dev Center: /_guren/plans/comments on the running dev server shows the person every step of this plan.
 ```
 
 `plan:next` prints one step and never the whole plan. `--json` prints the same as data. It marks the step in the state file, which is what the Stop hook reads. It refuses a plan no approval names, as above, and a working tree with uncommitted changes unless they are the marked step's own, so run it before you start a step, not after:

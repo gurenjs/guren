@@ -640,8 +640,9 @@ boundary this RFC promised:
   assembling the worker. Importing the collector or `@guren/cli/arch` into the
   worker made it fail, naming the file.
 - After deploying, `web/scripts/check-production-endpoints.ts` expects `/` to
-  answer 200 and `/_guren`, `/_guren/graph.json`, `/_guren/runtime/errors` and
-  `/_guren/mcp` to answer 404 on the live site. It reports and does not roll
+  answer 200 and `/_guren`, `/_guren/graph.json`, `/_guren/plans.json`, a
+  `/_guren/plans/<slug>` page, `/_guren/runtime/errors` and `/_guren/mcp` to
+  answer 404 on the live site. It reports and does not roll
   back. It cannot tell the new Worker from an earlier one still served at the
   edge, and an earlier one answers the same, so a pass shows the boundary holds
   on whatever answers, not that the new version was the one read.
