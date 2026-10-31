@@ -34,16 +34,16 @@ export default function Index({ data, pagination }: Props) {
       <Head title="Posts" />
       <div className="space-y-4">
         {data.map((post) => (
-          <article key={post.id} className="rounded border border-slate-200 p-4">
+          <article key={post.id} className="rounded-g-card border border-g-line bg-g-panel p-4">
             <h2 className="text-lg font-semibold">{post.title}</h2>
-            <p className="text-slate-600">{post.excerpt}</p>
-            <Link className="text-blue-600 underline" href={`/posts/${post.id}`}>
+            <p className="text-g-text-2">{post.excerpt}</p>
+            <Link className="text-g-accent-text underline" href={`/posts/${post.id}`}>
               Read more
             </Link>
           </article>
         ))}
       </div>
-      <p className="mt-4 text-sm text-slate-500">{pagination.meta.total} posts</p>
+      <p className="mt-4 text-sm text-g-text-2">{pagination.meta.total} posts</p>
     </>
   )
 }
@@ -58,8 +58,8 @@ props に TypeScript の型を付けておけば、コントローラーとの�
 // resources/js/components/Layout.tsx
 export function Layout({ children }: React.PropsWithChildren) {
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b bg-white">
+    <div className="min-h-screen bg-g-page text-g-text">
+      <header className="border-b border-g-line bg-g-panel">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
           <a href="/">Guren</a>
         </div>
@@ -176,6 +176,8 @@ export default function Index({ users, permissions }: Props) {
 
 ## アセットとスタイル
 生成されたアプリには Tailwind CSS が設定済みです。`resources/css/app.css` を編集するか、好みの CSS フレームワークを追加してください。画像やフォントなどのアセットを足すときは `public/` の下に置きます。
+
+色は `resources/css/guren.css` にある Guren UI のトークンから選びます。`--g-accent` や `--g-text` といった CSS 変数と、それを使う `bg-g-panel`・`text-g-text-2`・`border-g-line` などの Tailwind ユーティリティがあります。トークンはシステムのダークモードに合わせて切り替わるので、`dark:` の指定は要りません。生成された `.oxlintrc.json` は `resources/js/` で `guren/no-raw-color` を有効にしていて、`bg-white` や `text-slate-500` のようなパレットのクラス、`bg-[#db1b1b]` のような任意の色、`style` に書いた hex 値を報告します。
 
 ## favicon とドキュメント head
 本番の HTML はサーバー側で組み立てるもので、`public/index.html` は読み込まれません。そのため、このファイルに `<link>` を書いてもブラウザには届きません。サイト全体の head に入れるマークアップは `inertia` オプションで登録します。生成されたアプリでは、`src/app.ts` からプレースホルダーの `public/favicon.svg` にリンクしてあります。

@@ -1450,7 +1450,7 @@ const addBrowserTestsCommand = defineCommand({
     install: {
       type: 'boolean',
       default: true,
-      description: 'Run bun add -d @playwright/test when it is missing (--no-install prints the command instead).',
+      description: 'Run bun add -d for @playwright/test and @axe-core/playwright when either is missing (--no-install prints the command instead).',
     },
   },
   async run({ args }) {
@@ -1460,6 +1460,7 @@ const addBrowserTestsCommand = defineCommand({
     announceWrittenFiles(result.created, overwritten)
     if (result.mapped.changed.length > 0) consola.success(`browser:map wrote ${result.mapped.changed.join(', ')}`)
     if (result.mapped.removed.length > 0) consola.success(`browser:map removed ${result.mapped.removed.join(', ')}`)
+    if (result.mapped.accessibilityOff) consola.info(`browser:map wrote no accessibility spec: ${result.mapped.accessibilityOff}. Run bunx guren browser:map once it is installed.`)
     if (result.mapped.held) consola.warn(`browser:map wrote no specs: ${result.mapped.held}. Run bunx guren browser:map once it reads the whole app.`)
     if (!result.map.complete) consola.warn(`The browser map is incomplete (${result.map.gaps.map((gap) => gap.section).join(', ')}), so the specs may miss features; run bunx guren browser:map --check for the reasons.`)
     if (result.signIn) {
@@ -1651,7 +1652,8 @@ const upgradeCommand = defineCommand({
 
     if (args['dry-run']) {
       consola.info('Dry run complete. Files were not modified.')
-    } else if (result.updatedDependencies.length > 0 || result.autofixes.some((autofix) => autofix.applied)) {
+    } else if (result.updatedDependencies.length > 0) {
+      // Applied autofixes name their own files in the box above; this line is the manifest's.
       consola.info(`Updated ${result.packageJsonPath}`)
     }
   },

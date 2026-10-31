@@ -671,7 +671,7 @@ function buildOAuthButtonsTemplate(providers: string[], { divider = true } = {})
 
   const dividerBlock = divider
     ? `
-          <div className="flex items-center gap-3 text-xs uppercase tracking-wide text-g-muted">
+          <div className="flex items-center gap-3 text-xs uppercase tracking-wide text-g-text-2">
             <span className="h-px flex-1 bg-g-line" />
             Or continue with
             <span className="h-px flex-1 bg-g-line" />
@@ -724,7 +724,7 @@ export function buildLoginViewTemplate(includeRegister: boolean, includeReset: b
     ? `
         <p className="mt-2 text-center text-sm text-g-text-2">
           Don&apos;t have an account?{' '}
-          <Link href="/register" className="text-g-accent-text transition hover:underline">
+          <Link href="/register" className="text-g-accent-text underline underline-offset-2 transition hover:no-underline">
             Sign up
           </Link>
         </p>`
@@ -968,7 +968,7 @@ export default function Register({ errors = {} }: Props) {
 ${buildOAuthButtonsTemplate(oauthProviders)}
         <p className="mt-6 text-center text-sm text-g-text-2">
           Already have an account?{' '}
-          <Link href="/login" className="text-g-accent-text transition hover:underline">
+          <Link href="/login" className="text-g-accent-text underline underline-offset-2 transition hover:no-underline">
             Sign in
           </Link>
         </p>
@@ -999,10 +999,10 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
     ? `
           <div>
             <p className="${FIELD_LABEL_CLASS}">Email</p>
-            <p className="mt-1 w-full rounded-g-ctl border border-g-line bg-g-raised px-3 py-2 text-g-muted">
+            <p className="mt-1 w-full rounded-g-ctl border border-g-line bg-g-raised px-3 py-2 text-g-text-2">
               {profile.email}
             </p>
-            <p className="mt-1 text-xs text-g-muted">Managed by your sign-in provider.</p>
+            <p className="mt-1 text-xs text-g-text-2">Managed by your sign-in provider.</p>
           </div>`
     : `
           <div>
@@ -1058,7 +1058,7 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
               onChange={(event) => form.setData('currentPassword', event.target.value)}
               className="mt-1 ${FORM_INPUT_CLASS}"
             />
-            <p className="mt-1 text-xs text-g-muted">${currentPasswordHint}</p>
+            <p className="mt-1 text-xs text-g-text-2">${currentPasswordHint}</p>
             {form.errors.currentPassword ? <p className="mt-1 text-sm text-g-danger">{form.errors.currentPassword}</p> : null}
           </div>
 `

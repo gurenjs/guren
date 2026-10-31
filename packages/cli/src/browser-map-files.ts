@@ -15,12 +15,12 @@ import {
   type ApprovedPlanInput, type BrowserMap,
 } from './browser-map'
 import {
-  BROWSER_TESTS_CONFIG, BROWSER_TESTS_SETUP, buildPlanSpecs, buildSmokeSpec, GENERATED_HEADER, GENERATED_SPECS_DIR, SMOKE_SPEC_FILE,
-  type SpecOptions,
+  A11Y_OPTIONS_FILE, A11Y_SPEC_FILE, AXE_PACKAGE, BROWSER_TESTS_CONFIG, BROWSER_TESTS_SETUP, buildA11ySpec, buildPlanSpecs, buildSmokeSpec,
+  GENERATED_HEADER, GENERATED_SPECS_DIR, SMOKE_SPEC_FILE, type SpecOptions,
 } from './browser-specs'
 import { CliError } from './cli-error'
 import { compareStrings } from './spec-artifact'
-import { relativeUnreadableDirs, toPosixRelative } from './discovery'
+import { appDependsOn, relativeUnreadableDirs, toPosixRelative } from './discovery'
 import { discoverPlanFiles } from './plan-check'
 import { writeFileAtomic } from './plan/beside'
 import { readApprovedPlan } from './plan/open-plan'
@@ -35,6 +35,8 @@ interface BrowserMapRun {
   removed: string[]
   /** Why the generated specs were left as they are this run. */
   specsHeld?: string
+  /** Why the generated specs this run writes leave out the accessibility spec (RFC 0033 §12.2). */
+  accessibilityOff?: string
 }
 
 /**
@@ -83,6 +85,16 @@ interface GeneratedSpecs {
   outputs: Map<string, string>
   onDisk: Map<string, string>
   held?: string
+  accessibilityOff?: string
+}
+
+/** Positive evidence only: the package in the manifest and the author's options file beside the specs. */
+async function accessibilityOff(cwd: string): Promise<string | undefined> {
+  const declared = await appDependsOn(cwd, AXE_PACKAGE)
+  if (declared === null) return 'package.json is missing or does not parse'
+  if (!declared) return `${AXE_PACKAGE} is not in package.json`
+  if (!(await pathExists(join(cwd, A11Y_OPTIONS_FILE)))) return `${A11Y_OPTIONS_FILE} does not exist`
+  return undefined
 }
 
 /**
@@ -95,12 +107,17 @@ async function generatedSpecs(cwd: string, map: BrowserMap, planned: SpecOptions
   if (!map.complete || map.unreadablePlans.length > 0) {
     return { outputs: new Map(), onDisk: new Map(), held: 'the browser map is incomplete or a plan could not be read' }
   }
+  const off = planned ? (planned.accessibility ? undefined : 'not requested') : await accessibilityOff(cwd)
   const options = planned ?? { signIn: await pathExists(join(cwd, BROWSER_TESTS_SETUP)) }
   const discovery = await discoverPlanFiles(cwd)
   const sharedSlugs = new Map([...discovery.sharedSlugs].map(([slug, files]) => [slug, files.map((file) => toPosixRelative(cwd, file))]))
-  const outputs = new Map([[SMOKE_SPEC_FILE, buildSmokeSpec(map, options)], ...buildPlanSpecs(map, options, sharedSlugs).map((entry): [string, string] => [entry.path, entry.contents])])
+  const outputs = new Map([
+    [SMOKE_SPEC_FILE, buildSmokeSpec(map, options)],
+    ...(off ? [] : [[A11Y_SPEC_FILE, buildA11ySpec(map, options)] as [string, string]]),
+    ...buildPlanSpecs(map, options, sharedSlugs).map((entry): [string, string] => [entry.path, entry.contents]),
+  ])
   const onDisk = new Map([...await readExisting(cwd, GENERATED_SPECS_DIR, '.browser.ts'), ...await readExisting(cwd, `${GENERATED_SPECS_DIR}/plans`, '.browser.ts')])
-  return { outputs, onDisk }
+  return { outputs, onDisk, ...(off ? { accessibilityOff: off } : {}) }
 }
 
 /** Every document as a run would leave it; refuses, writing nothing, when any document's markers are unsafe. */
@@ -153,5 +170,9 @@ export async function runBrowserMap(options: { cwd: string; write: boolean; map?
     }
     for (const file of removed) await rm(join(cwd, file))
   }
-  return { map, changed, orphans, removed, ...(specs.held ? { specsHeld: specs.held } : {}) }
+  return {
+    map, changed, orphans, removed,
+    ...(specs.held ? { specsHeld: specs.held } : {}),
+    ...(specs.accessibilityOff ? { accessibilityOff: specs.accessibilityOff } : {}),
+  }
 }
