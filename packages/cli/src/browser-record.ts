@@ -6,7 +6,7 @@
  * Commands are read-modify-write without a lock, so steps of one run are recorded one at a time.
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { z } from 'zod'
 
@@ -26,6 +26,8 @@ const SCREENSHOTS_DIR = 'screenshots'
 const RUN_NAME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z-[a-z0-9-]+$/u
 /** An acceptance id or a charter slug; never a key `Object.prototype` already holds. */
 const STEP_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/u
+
+const commitSchema = z.object({ rev: z.string(), dirty: z.boolean() }).nullable()
 
 const windowStartSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('available'), head: z.object({ sessionId: z.string(), after: z.number().int() }), dropped: z.number().int() }),
@@ -49,7 +51,12 @@ const stepSchema = z.object({
   lowered: z.string().optional(),
   recorder: recorderInputSchema.omit({ screenshots: true }),
   cli: z.object({
-    screenshots: z.array(z.object({ path: z.string(), sha256: z.string() })),
+    screenshots: z.array(z.object({
+      path: z.string(),
+      sha256: z.string(),
+      /** Absent when no earlier run of this feature recorded this step with a screenshot at this path (§12.3). */
+      previous: z.object({ run: z.string(), sha256: z.string(), commit: commitSchema }).optional(),
+    })),
     runtimeErrors: z.object({ window: z.enum(['conclusive', 'inconclusive', 'unavailable']), reason: z.string().optional(), events: z.number().int() }),
   }),
 })
@@ -61,7 +68,7 @@ const runSchema = z.object({
   origin: z.string(),
   feature: z.string(),
   graphSnapshot: z.string().nullable(),
-  commit: z.object({ rev: z.string(), dirty: z.boolean() }).nullable(),
+  commit: commitSchema,
   steps: z.array(stepSchema),
   open: z.record(z.string(), windowStartSchema),
 })
@@ -142,9 +149,9 @@ export async function openStep(cwd: string, name: string, step: string, deps: Re
 }
 
 /** Each screenshot as a path inside the run's `screenshots/`, links resolved, with its digest; refuses anything else. */
-async function screenshotDigests(dir: string, paths: readonly string[]): Promise<BrowserStep['cli']['screenshots']> {
+async function screenshotDigests(dir: string, paths: readonly string[]): Promise<Array<{ path: string; sha256: string }>> {
   const root = join(dir, SCREENSHOTS_DIR)
-  const digests: BrowserStep['cli']['screenshots'] = []
+  const digests: Array<{ path: string; sha256: string }> = []
   for (const path of paths) {
     const inside = isAbsolute(path) ? null : relative(root, resolve(dir, path))
     const target = inside ? await resolveInside(root, inside) : null
@@ -167,7 +174,86 @@ export function lowerResult(result: RecorderInput['result'], window: { status: s
   return { result }
 }
 
-export async function closeStep(cwd: string, name: string, step: string, input: unknown, deps: RecordDeps): Promise<BrowserStep> {
+/** Run names in the order `--begin` took them: by stamp, then by the `-<n>` a name taken in the same second gets. */
+export function compareRunNames(a: string, b: string): number {
+  return a.localeCompare(b, 'en', { numeric: true })
+}
+
+/**
+ * Each screenshot paired with the latest earlier run of the feature whose step `id` holds one at
+ * the same path (RFC 0033 §12.3). A `run.json` that does not read is skipped and counted, never
+ * compared; the walk stops once every screenshot is paired, so only runs that could have held a
+ * later pairing are counted. A screenshot comparison is never a result.
+ */
+async function pairWithEarlierRuns(
+  cwd: string,
+  run: BrowserRun,
+  id: string,
+  digests: ReadonlyArray<{ path: string; sha256: string }>,
+): Promise<{ screenshots: BrowserStep['cli']['screenshots']; unreadableRuns: number }> {
+  const screenshots: BrowserStep['cli']['screenshots'] = digests.map((digest) => ({ ...digest }))
+  let unreadableRuns = 0
+  if (screenshots.length === 0) return { screenshots, unreadableRuns }
+  const slug = slugifyProse(run.feature, '-', 'feature')
+  const sameSlug = new RegExp(`^.{20}-${slug}(?:-\\d+)?$`, 'u')
+  const earlier = (await readdir(join(resolve(cwd), BROWSER_RUNS_DIR)))
+    .filter((name) => RUN_NAME.test(name) && sameSlug.test(name) && compareRunNames(name, run.run) < 0)
+    .sort((a, b) => compareRunNames(b, a))
+  for (const name of earlier) {
+    if (screenshots.every((shot) => shot.previous)) break
+    const read = await readBesideRecord(join(runDir(cwd, name), RUN_FILE), runSchema, 'browser run')
+    if (read.unreadable || (read.value && read.value.run !== name)) {
+      unreadableRuns++
+      continue
+    }
+    if (!read.value || read.value.feature !== run.feature) continue
+    const recorded = read.value.steps.find((entry) => entry.id === id)
+    if (!recorded) continue
+    for (const shot of screenshots) {
+      if (shot.previous) continue
+      const match = recorded.cli.screenshots.find((entry) => entry.path === shot.path)
+      if (match) shot.previous = { run: name, sha256: match.sha256, commit: read.value.commit }
+    }
+  }
+  return { screenshots, unreadableRuns }
+}
+
+export type ScreenshotChange = 'new' | 'unchanged' | 'changed' | 'changed-same-commit'
+
+/** `changed-same-commit` when both runs name one rev with clean trees: the page renders differently on its own. */
+export function screenshotChange(commit: BrowserRun['commit'], shot: BrowserStep['cli']['screenshots'][number]): ScreenshotChange {
+  if (!shot.previous) return 'new'
+  if (shot.previous.sha256 === shot.sha256) return 'unchanged'
+  const before = shot.previous.commit
+  return commit && before && commit.rev === before.rev && !commit.dirty && !before.dirty ? 'changed-same-commit' : 'changed'
+}
+
+/** The close report's lines on screenshots: whether to look, never whether the step passed. */
+export function screenshotChangeLines(closed: ClosedStep): string[] {
+  const at = (run: string, path: string) => `${BROWSER_RUNS_DIR}/${run}/${path}`
+  const lines = closed.step.cli.screenshots.map((shot) => {
+    const previous = shot.previous
+    switch (screenshotChange(closed.commit, shot)) {
+      case 'new': return `${shot.path}: new`
+      case 'unchanged': return `${shot.path}: unchanged since ${previous!.run}`
+      case 'changed': return `${shot.path}: changed since ${previous!.run}: ${at(previous!.run, shot.path)} ${at(closed.run, shot.path)}`
+      case 'changed-same-commit': return `${shot.path}: changed at the same commit since ${previous!.run}, so the page does not render the same twice: ${at(previous!.run, shot.path)} ${at(closed.run, shot.path)}`
+    }
+  })
+  if (closed.unreadableRuns > 0) lines.push(`${closed.unreadableRuns} earlier run(s) of ${closed.feature} could not be read and were not compared.`)
+  return lines
+}
+
+export interface ClosedStep {
+  step: BrowserStep
+  run: string
+  feature: string
+  commit: BrowserRun['commit']
+  /** Earlier runs skipped because their `run.json` does not read. */
+  unreadableRuns: number
+}
+
+export async function closeStep(cwd: string, name: string, step: string, input: unknown, deps: RecordDeps): Promise<ClosedStep> {
   const id = stepId(step)
   const run = await readRun(cwd, name)
   if (run.steps.some((entry) => entry.id === id)) throw new CliError(`Step ${id} is already recorded in ${name}.`)
@@ -176,19 +262,19 @@ export async function closeStep(cwd: string, name: string, step: string, input: 
   if (!parsed.success) throw new CliError(`The step input is not what browser:record reads:\n${formatSchemaIssues(parsed.error)}`)
   const { screenshots, ...recorder } = parsed.data
   const dir = runDir(cwd, name)
-  const digests = await screenshotDigests(dir, screenshots)
+  const { screenshots: shots, unreadableRuns } = await pairWithEarlierRuns(cwd, run, id, await screenshotDigests(dir, screenshots))
 
   const window = await windowSince(deps.readErrors, run.origin, run.open[id]!)
   if (window.events.length > 0) await appendEvents(dir, window.events)
 
   const record: BrowserStep = {
     id, ...lowerResult(recorder.result, window), recorder,
-    cli: { screenshots: digests, runtimeErrors: { window: window.status, ...(window.reason ? { reason: window.reason } : {}), events: window.events.length } },
+    cli: { screenshots: shots, runtimeErrors: { window: window.status, ...(window.reason ? { reason: window.reason } : {}), events: window.events.length } },
   }
   delete run.open[id]
   run.steps.push(record)
   await writeRun(cwd, run)
-  return record
+  return { step: record, run: run.run, feature: run.feature, commit: run.commit, unreadableRuns }
 }
 
 /** Appended by session and sequence, so a retry after a failed run write records no event twice. */

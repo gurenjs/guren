@@ -5,7 +5,7 @@ import { markCommandFailed } from '../command-status'
 import { runBrowserMap } from '../browser-map-files'
 import { startBrowserServe } from '../browser-serve'
 import { runBrowserDoctor, type DoctorReport } from '../browser-doctor'
-import { beginRun, closeStep, openStep, readRun, writeDoctorEvidence, type RecordDeps } from '../browser-record'
+import { beginRun, closeStep, openStep, readRun, screenshotChangeLines, writeDoctorEvidence, type RecordDeps } from '../browser-record'
 import { loadApplicationGraph } from '../application-graph-load'
 import { runGit } from '../changed-files'
 import { readJsonWithinLimit, recoverStdinDash } from '../plan/feedback'
@@ -163,8 +163,10 @@ export const browserRecordCommand = defineCommand({
     const input = recoverStdinDash(args.input, 'input', rawArgs)
     if (!input) throw new CliError('browser:record --close needs --input <file|->.')
     const { document } = await readJsonWithinLimit(input, { cwd, what: 'step input' })
-    const step = await closeStep(cwd, args.run, args.step, document, deps)
-    if (step.result !== 'pass') markCommandFailed()
-    console.log(JSON.stringify(step))
+    const closed = await closeStep(cwd, args.run, args.step, document, deps)
+    if (closed.step.result !== 'pass') markCommandFailed()
+    console.log(JSON.stringify(closed.step))
+    // stdout stays the one JSON line; the screenshot comparison is for a person to read.
+    for (const line of screenshotChangeLines(closed)) console.error(line)
   },
 })

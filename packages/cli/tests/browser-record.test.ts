@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 
-import { BROWSER_RUNS_DIR, beginRun, closeStep, lowerResult, openStep, writeDoctorEvidence, type RecordDeps } from '../src/browser-record'
+import { BROWSER_RUNS_DIR, beginRun, closeStep, compareRunNames, lowerResult, openStep, screenshotChange, screenshotChangeLines, writeDoctorEvidence, type ClosedStep, type RecordDeps } from '../src/browser-record'
 import { recoverStdinDash } from '../src/plan/feedback'
 import type { RuntimeErrorEvent } from '../src/runtime-error-window'
 import type { RuntimeErrorQuery } from '../src/runtime-errors'
@@ -16,7 +16,7 @@ function event(sequence: number): RuntimeErrorEvent {
   return { sessionId: 's1', sequence, occurredAt: '2026-10-16T00:00:00.000Z', method: 'GET', route: { method: 'GET', pattern: '/' }, correlation: 'matched', status: 500, category: 'server-error', frames: [] }
 }
 
-function deps(events: RuntimeErrorEvent[], options: { unavailable?: boolean } = {}): RecordDeps {
+function deps(events: RuntimeErrorEvent[], options: { unavailable?: boolean; commit?: { rev: string; dirty: boolean } | null; now?: string } = {}): RecordDeps {
   return {
     async readErrors(_origin, query: RuntimeErrorQuery) {
       if (options.unavailable) return { schemaVersion: 1, status: 'unavailable', reason: 'offline' }
@@ -27,8 +27,8 @@ function deps(events: RuntimeErrorEvent[], options: { unavailable?: boolean } = 
       }
     },
     graphSnapshot: async () => 'snapshot-1',
-    commit: async () => ({ rev: 'abc123', dirty: false }),
-    now: () => new Date('2026-10-16T10:42:07.123Z'),
+    commit: async () => (options.commit === undefined ? { rev: 'abc123', dirty: false } : options.commit),
+    now: () => new Date(options.now ?? '2026-10-16T10:42:07.123Z'),
   }
 }
 
@@ -62,7 +62,7 @@ describe('a recorded run', () => {
     await openStep(cwd, run, 'AC-posts-1', deps(events))
     events.push(event(2))
     await writeFile(join(cwd, BROWSER_RUNS_DIR, run, 'screenshots', 'after.png'), 'png')
-    const step = await closeStep(cwd, run, 'AC-posts-1', { ...passing, screenshots: ['screenshots/after.png'] }, deps(events))
+    const { step } = await closeStep(cwd, run, 'AC-posts-1', { ...passing, screenshots: ['screenshots/after.png'] }, deps(events))
 
     expect(step).toMatchObject({ id: 'AC-posts-1', result: 'fail', lowered: '1 server error(s) during the step.', recorder: passing })
     expect(step.cli.screenshots).toEqual([{ path: 'screenshots/after.png', sha256: expect.stringMatching(/^[0-9a-f]{64}$/u) }])
@@ -77,7 +77,7 @@ describe('a recorded run', () => {
   test('makes a pass inconclusive when the collector could not be read', async () => {
     const { run } = await beginRun(cwd, { url: 'http://127.0.0.1:4317', feature: 'Posts' }, deps([]))
     await openStep(cwd, run, 'AC-posts-1', deps([], { unavailable: true }))
-    const step = await closeStep(cwd, run, 'AC-posts-1', passing, deps([]))
+    const { step } = await closeStep(cwd, run, 'AC-posts-1', passing, deps([]))
     expect(step).toMatchObject({ result: 'inconclusive', cli: { runtimeErrors: { window: 'unavailable', events: 0 } } })
   })
 
@@ -112,7 +112,7 @@ describe('a recorded run', () => {
     await symlink(join(cwd, 'secret.txt'), join(shots, 'link.png'))
     await openStep(relativeRoot, run, 'AC-posts-1', deps([]))
     await expect(closeStep(relativeRoot, run, 'AC-posts-1', { ...passing, screenshots: ['screenshots/link.png'] }, deps([]))).rejects.toThrow('is not a file inside')
-    const step = await closeStep(relativeRoot, run, 'AC-posts-1', { ...passing, screenshots: ['screenshots/ok.png'] }, deps([]))
+    const { step } = await closeStep(relativeRoot, run, 'AC-posts-1', { ...passing, screenshots: ['screenshots/ok.png'] }, deps([]))
     expect(step.cli.screenshots.map((shot) => shot.path)).toEqual(['screenshots/ok.png'])
   })
 
@@ -149,6 +149,124 @@ describe('a recorded run', () => {
     await expect(writeDoctorEvidence(cwd, run, { origin: 'http://127.0.0.1:9999' })).rejects.toThrow('not http://127.0.0.1:9999')
     await writeDoctorEvidence(cwd, run, { origin: 'http://127.0.0.1:4317' })
     expect(JSON.parse(await readFile(join(cwd, BROWSER_RUNS_DIR, run, 'doctor.json'), 'utf8'))).toEqual({ origin: 'http://127.0.0.1:4317' })
+  })
+})
+
+describe('screenshots compared with earlier runs (RFC 0033 §12.3)', () => {
+  interface Recording {
+    at: string
+    shots: Record<string, string>
+    feature?: string
+    step?: string
+    commit?: { rev: string; dirty: boolean } | null
+    result?: 'pass' | 'fail'
+    serverError?: boolean
+  }
+
+  async function record(options: Recording): Promise<ClosedStep> {
+    const events: RuntimeErrorEvent[] = []
+    const d = deps(events, { commit: options.commit, now: options.at })
+    const { run } = await beginRun(cwd, { url: 'http://127.0.0.1:4317', feature: options.feature ?? 'Posts' }, d)
+    const step = options.step ?? 'AC-posts-1'
+    await openStep(cwd, run, step, d)
+    for (const [name, bytes] of Object.entries(options.shots)) await writeFile(join(cwd, BROWSER_RUNS_DIR, run, 'screenshots', name), bytes)
+    if (options.serverError) events.push(event(1))
+    return closeStep(cwd, run, step, { ...passing, result: options.result ?? 'pass', screenshots: Object.keys(options.shots).map((name) => `screenshots/${name}`) }, d)
+  }
+
+  /** The comparison never moves a result: what lowerResult() made of the window is what is stored. */
+  function expectResultUntouched(closed: ClosedStep, serverError = false) {
+    if (serverError) {
+      expect(closed.step).toMatchObject({ result: 'fail', lowered: '1 server error(s) during the step.' })
+    } else {
+      expect(closed.step.result).toBe('pass')
+      expect(closed.step).not.toHaveProperty('lowered')
+    }
+  }
+
+  test('reports a screenshot no earlier run holds as new', async () => {
+    const closed = await record({ at: '2026-10-16T10:00:00Z', shots: { 'post-form.png': 'a' } })
+    expect(closed.step.cli.screenshots[0]).not.toHaveProperty('previous')
+    expect(screenshotChangeLines(closed)).toEqual(['screenshots/post-form.png: new'])
+    expectResultUntouched(closed)
+  })
+
+  test('reports equal digests as unchanged, and keeps a server error lowering the result', async () => {
+    const first = await record({ at: '2026-10-16T10:00:00Z', shots: { 'post-form.png': 'a' } })
+    const closed = await record({ at: '2026-10-16T11:00:00Z', shots: { 'post-form.png': 'a' }, serverError: true })
+    expect(closed.step.cli.screenshots[0]!.previous).toEqual({ run: first.run, sha256: first.step.cli.screenshots[0]!.sha256, commit: { rev: 'abc123', dirty: false } })
+    expect(screenshotChangeLines(closed)).toEqual([`screenshots/post-form.png: unchanged since ${first.run}`])
+    expectResultUntouched(closed, true)
+    const stored = JSON.parse(await readFile(join(cwd, BROWSER_RUNS_DIR, closed.run, 'run.json'), 'utf8')) as { steps: Array<{ cli: { screenshots: Array<{ previous?: { run: string } }> } }> }
+    expect(stored.steps[0]!.cli.screenshots[0]!.previous?.run).toBe(first.run)
+  })
+
+  test('reports a changed digest with both paths, whatever result the earlier run had', async () => {
+    const first = await record({ at: '2026-10-16T10:00:00Z', shots: { 'post-form.png': 'a' }, commit: { rev: 'abc123', dirty: false }, result: 'fail' })
+    const closed = await record({ at: '2026-10-16T11:00:00Z', shots: { 'post-form.png': 'b' }, commit: { rev: 'def456', dirty: false } })
+    expect(screenshotChange(closed.commit, closed.step.cli.screenshots[0]!)).toBe('changed')
+    expect(screenshotChangeLines(closed)).toEqual([
+      `screenshots/post-form.png: changed since ${first.run}: ${BROWSER_RUNS_DIR}/${first.run}/screenshots/post-form.png ${BROWSER_RUNS_DIR}/${closed.run}/screenshots/post-form.png`,
+    ])
+    expectResultUntouched(closed)
+  })
+
+  test('says a change happened at the same commit only when both runs name one rev with clean trees', async () => {
+    const first = await record({ at: '2026-10-16T10:00:00Z', shots: { 'post-form.png': 'a' } })
+    const closed = await record({ at: '2026-10-16T11:00:00Z', shots: { 'post-form.png': 'b' } })
+    expect(screenshotChange(closed.commit, closed.step.cli.screenshots[0]!)).toBe('changed-same-commit')
+    expect(screenshotChangeLines(closed)[0]).toStartWith(`screenshots/post-form.png: changed at the same commit since ${first.run}`)
+    expectResultUntouched(closed)
+
+    const shot = closed.step.cli.screenshots[0]!
+    expect(screenshotChange({ rev: 'abc123', dirty: true }, shot)).toBe('changed')
+    expect(screenshotChange(null, shot)).toBe('changed')
+    expect(screenshotChange({ rev: 'abc123', dirty: false }, { ...shot, previous: { ...shot.previous!, commit: { rev: 'abc123', dirty: true } } })).toBe('changed')
+    expect(screenshotChange({ rev: 'abc123', dirty: false }, { ...shot, previous: { ...shot.previous!, commit: null } })).toBe('changed')
+  })
+
+  test('skips and counts an earlier run.json that does not read, never comparing it', async () => {
+    const corrupt = async (at: string) => {
+      const { run } = await beginRun(cwd, { url: 'http://127.0.0.1:4317', feature: 'Posts' }, deps([], { now: at }))
+      await writeFile(join(cwd, BROWSER_RUNS_DIR, run, 'run.json'), '{ not json')
+    }
+    await corrupt('2026-10-16T09:00:00Z')
+    const paired = await record({ at: '2026-10-16T10:00:00Z', shots: { 'post-form.png': 'a' } })
+    await corrupt('2026-10-16T11:00:00Z')
+    await mkdir(join(cwd, BROWSER_RUNS_DIR, '2026-10-16T11-30-00Z-posts'))
+    const closed = await record({ at: '2026-10-16T12:00:00Z', shots: { 'post-form.png': 'a' } })
+    expect(closed.step.cli.screenshots[0]!.previous?.run).toBe(paired.run)
+    expect(closed.unreadableRuns).toBe(1)
+    expect(screenshotChangeLines(closed)).toEqual([
+      `screenshots/post-form.png: unchanged since ${paired.run}`,
+      '1 earlier run(s) of Posts could not be read and were not compared.',
+    ])
+    expectResultUntouched(closed)
+  })
+
+  test('pairs only the same feature, step and path, and only with a run before this one', async () => {
+    const paired = await record({ at: '2026-10-16T10:00:00Z', shots: { 'post-form.png': 'a' } })
+    await record({ at: '2026-10-16T10:10:00Z', shots: { 'post-form.png': 'b' }, feature: 'Comments' })
+    await record({ at: '2026-10-16T10:20:00Z', shots: { 'post-form.png': 'b' }, feature: 'posts' })
+    await record({ at: '2026-10-16T10:30:00Z', shots: { 'post-form.png': 'b' }, step: 'AC-posts-2' })
+    await record({ at: '2026-10-16T10:40:00Z', shots: { 'post-list.png': 'b' } })
+    const events: RuntimeErrorEvent[] = []
+    const d = deps(events, { now: '2026-10-16T11:00:00Z' })
+    const { run } = await beginRun(cwd, { url: 'http://127.0.0.1:4317', feature: 'Posts' }, d)
+    await record({ at: '2026-10-16T12:00:00Z', shots: { 'post-form.png': 'b' } })
+    await openStep(cwd, run, 'AC-posts-1', d)
+    await writeFile(join(cwd, BROWSER_RUNS_DIR, run, 'screenshots', 'post-form.png'), 'a')
+    await writeFile(join(cwd, BROWSER_RUNS_DIR, run, 'screenshots', 'post-saved.png'), 'a')
+    const closed = await closeStep(cwd, run, 'AC-posts-1', { ...passing, screenshots: ['screenshots/post-form.png', 'screenshots/post-saved.png'] }, d)
+    expect(closed.step.cli.screenshots.map((shot) => shot.previous?.run)).toEqual([paired.run, undefined])
+    expect(screenshotChangeLines(closed)).toEqual([`screenshots/post-form.png: unchanged since ${paired.run}`, 'screenshots/post-saved.png: new'])
+    expect(closed.unreadableRuns).toBe(0)
+    expectResultUntouched(closed)
+  })
+
+  test('orders run names as --begin took them within one second', () => {
+    const names = ['2026-10-16T10-00-00Z-posts-10', '2026-10-16T10-00-01Z-posts', '2026-10-16T10-00-00Z-posts-2', '2026-10-16T10-00-00Z-posts']
+    expect(names.sort(compareRunNames)).toEqual(['2026-10-16T10-00-00Z-posts', '2026-10-16T10-00-00Z-posts-2', '2026-10-16T10-00-00Z-posts-10', '2026-10-16T10-00-01Z-posts'])
   })
 })
 

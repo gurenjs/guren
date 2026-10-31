@@ -95,7 +95,7 @@ bunx guren browser:record <run> --step <id> --close --input - <<'JSON'
   "landed": { "url": "/posts/7", "component": "posts/Show" },
   "errorsShown": [],
   "database": [{ "table": "comments", "has": { "body": "Nice post" }, "found": true }],
-  "screenshots": ["screenshots/01-comment-posted.png"]
+  "screenshots": ["screenshots/comment-posted.png"]
 }
 JSON
 ```
@@ -104,6 +104,17 @@ The command may lower your result: a server error during the step makes it
 `fail`, a window it could not read makes a `pass` `inconclusive`. It exits 1 on
 anything but `pass` and has still recorded the step. Report the result it
 prints, not the one you sent. Never write `run.json` yourself.
+
+Name each screenshot after the state it shows (`comment-posted.png`), never by
+the order you took it in, and give the same state the same name in every run.
+The close compares each screenshot with the latest earlier run of the feature
+that recorded the same step id and file name, and prints on stderr whether it
+is `unchanged since <run>`, `changed since <run>` (with both paths),
+`changed at the same commit` (the page renders differently on its own, through
+a timestamp, seeded data or an animation), or `new`. Report a `changed`
+screenshot as a prompt to look at the two images, never as a regression, and
+an `unchanged` one never as a pass: the comparison is of bytes, and it never
+moves the step's result.
 
 ## Proof standards
 
