@@ -29,6 +29,14 @@ function maskCssComments(css: string): string {
 
 const CSS_COMMENT = /\/\*[\s\S]*?\*\//g
 
+// A Guren UI utility (`bg-g-panel`, `focus:outline-g-accent`) or token variable (`var(--g-line)`).
+const GUREN_UI_USE_RE = /(?<![\w-])[a-z][a-z0-9-]*-g-[a-z]|--g-[a-z]/
+
+/** Whether a scaffolded file under `resources/` styles with the Guren UI tokens. */
+export function usesGurenUiTokens(entry: { path: string; contents: string }): boolean {
+  return /(?:^|\/)resources\//.test(entry.path) && GUREN_UI_USE_RE.test(entry.contents)
+}
+
 const GUREN_IMPORT_RE = /@import\s+(?:url\(\s*)?['"](?:\.\/)?guren\.css['"]/
 
 /**
@@ -36,6 +44,7 @@ const GUREN_IMPORT_RE = /@import\s+(?:url\(\s*)?['"](?:\.\/)?guren\.css['"]/
  * style with: write `resources/css/guren.css` when the app has none, and add
  * its `@import` to `resources/css/app.css`. Both halves are idempotent, and an
  * existing guren.css is never overwritten here: `guren upgrade` updates its marked block.
+ * `writeScaffoldFiles` calls it for a batch `usesGurenUiTokens` accepts.
  */
 export async function ensureGurenUiTokens(cwd: string = process.cwd()): Promise<void> {
   const tokensPath = resolve(cwd, TOKENS_PATH)

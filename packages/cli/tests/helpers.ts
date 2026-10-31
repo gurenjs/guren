@@ -132,6 +132,42 @@ export function lintFixture(options: {
   }
 }
 
+/** `guren/no-raw-color` alone, for tests that run it over whole files. */
+export const NO_RAW_COLOR_RULE = 'guren-no-raw-color/no-raw-color'
+export const NO_RAW_COLOR_CONFIG = {
+  jsPlugins: [join(repoRoot, 'packages/cli/src/oxlint/no-raw-color.js')],
+  rules: { [NO_RAW_COLOR_RULE]: 'error' },
+}
+
+/**
+ * Lint existing files through the real oxlint with only `config`'s rules on, and
+ * return `--format unix` stdout. The config goes to a temp dir rather than `cwd`,
+ * which may be the repository root; nested configs are off for the same reason.
+ * Throws on stderr output or a non-zero exit with nothing reported.
+ */
+export function lintFiles(options: {
+  config: { jsPlugins: string[]; rules: Record<string, string> }
+  files: string[]
+  cwd: string
+}): string {
+  const dir = mkdtempSync(join(tmpdir(), 'guren-oxlint-files-'))
+  try {
+    writeFileSync(join(dir, 'oxlintrc.json'), JSON.stringify(options.config))
+    const denies = Object.keys(options.config.rules).flatMap((rule) => ['-D', rule])
+    const result = Bun.spawnSync(
+      [OXLINT_BIN, '--disable-nested-config', '-c', join(dir, 'oxlintrc.json'), '-A', 'all', ...denies, '--format', 'unix', ...options.files],
+      { cwd: options.cwd, stdout: 'pipe', stderr: 'pipe' },
+    )
+    const stdout = result.stdout.toString()
+    const stderr = result.stderr.toString()
+    if (stderr.trim() !== '') throw new Error(`oxlint wrote to stderr:\n${stderr}`)
+    if (result.exitCode !== 0 && stdout.trim() === '') throw new Error(`oxlint exited ${result.exitCode} with no report`)
+    return stdout
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
 /**
  * Write a fake locally-installed package the way Bun materializes `file:`,
  * `link:` and `workspace:` deps: a real directory tree under

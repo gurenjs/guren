@@ -21,7 +21,7 @@ import { addSession, appConfiguresSessions } from './add-session'
 import { appendOAuthStateTable } from './oauth-state-table'
 import { registerConsoleCommand } from './console-registrar'
 import { generateSchemaMigration } from './make-migration'
-import { ensureGurenUiTokens, FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_SUBMIT_CLASS } from './guren-css'
+import { FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_SUBMIT_CLASS } from './guren-css'
 import { appMailBindings, MAIL_SCAFFOLD, reportKeptMail } from './mail-scaffold'
 import { KNOWN_OAUTH_PROVIDERS, OAUTH_PROVIDER_LABELS, oauthEnvEntries } from './oauth-scaffold'
 import { definitionTemplateFile, scaffoldTemplateFile } from './scaffold-templates'
@@ -1750,9 +1750,6 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     ...(mailSetup === 'definition' ? scaffoldEnv(MAIL_SCAFFOLD, true) : []),
     ...oauthEnvEntries(oauthProviders),
   ])
-
-  // The pages above style with Guren UI tokens (bg-g-page, …).
-  await ensureGurenUiTokens()
 
   await updateSchema(features)
 
