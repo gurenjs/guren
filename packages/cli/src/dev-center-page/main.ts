@@ -242,8 +242,8 @@ async function loadPlan(slug: string): Promise<void> {
     element('plan-title').textContent = title
     document.title = `${title} · Guren Dev Center`
     for (const plan of matching) {
-      const approval = plan.approval && `approved ${byline(plan.approval.at, plan.approval.by)}`
-      const meta = [plan.file, plan.standing, approval, plan.entities.join(', ')].filter(Boolean).join(' · ')
+      const standing = plan.approval ? `approved ${byline(plan.approval.at, plan.approval.by)}` : plan.standing
+      const meta = [plan.file, standing, plan.entities.join(', ')].filter(Boolean).join(' · ')
       body.append(text('p', meta, 'lede mono'), attentionBox(planAttention(plan)))
       // Shown apart from the attention box, which a draft's or an edited plan's approval outranks.
       if (plan.unreadable?.length) body.append(card('Records', ...plan.unreadable.map((reason) => text('p', reason, 'warning'))))
