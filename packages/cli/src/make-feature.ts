@@ -15,7 +15,7 @@ import { authAliasLine, routeCall } from './make-route'
 import { testFile } from './make-test'
 import { validatorFile } from './make-validator'
 import { parseAttachString, parseFieldsString, type AttachmentDefinition, type FieldDefinition, type FieldType } from './fields'
-import { ensureGurenUiTokens, FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
+import { FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
 import { ParseCache } from './parse-cache'
 import { findDeclaredTable, moduleSchemaAggregateName, schemaPathFor } from './schema-parser'
 import { appHasPrototypeFixture, PROTOTYPE_FIXTURE_PATH } from './add-prototype'
@@ -181,7 +181,6 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
       ...pageFiles,
     ]
     const created = await writeScaffoldFiles(files, { ...writerOptions, subject: singular })
-    await ensureGurenUiTokens(appRoot)
     const appended = await appendPrototypeEntries(appRoot, { singular, collection: routeVar, routeName, variableName, fields })
     // `guren add prototype` created the fixture; this run only appended to it.
     const patchedFixture = appended === 'patched' ? resolve(appRoot, PROTOTYPE_FIXTURE_PATH) : undefined
@@ -219,9 +218,6 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const created = await writeScaffoldFiles(files, { ...writerOptions, subject: singular })
   const kept = keptFiles.map((file) => resolve(appRoot, file.path))
   options.kept?.push(...kept)
-
-  // The pages above style with Guren UI tokens (bg-g-page, …).
-  await ensureGurenUiTokens(appRoot)
 
   if (options.announce === false) {
     return created

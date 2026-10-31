@@ -243,6 +243,8 @@ export async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+const RESOURCES_PATH = /(?:^|\/)resources\//
+
 export type ScaffoldFilesOptions = WriterOptions & {
   /**
    * Report and skip a file that exists instead of throwing, so a blueprint
@@ -257,7 +259,8 @@ export type ScaffoldFilesOptions = WriterOptions & {
  * `writeFileSafe` for generated scaffolds. Before the first write every path is checked for
  * containment, then, unless `force`, for existence: an existing file is skipped under
  * `skipExisting` and otherwise refuses the whole batch. `wx` on each write still stops
- * one that appears after the probe.
+ * one that appears after the probe. A batch writing a page styled with Guren UI tokens
+ * also ensures `resources/css/guren.css`, so no generator has to remember to.
  */
 export async function writeScaffoldFiles(
   entries: ScaffoldFileEntry[],
@@ -286,6 +289,12 @@ export async function writeScaffoldFiles(
 
   for (const entry of pending) {
     created.push(await writeFileSafe(entry.path, entry.contents, { ...options, cwd }))
+  }
+  // Imported here: guren-css.ts reaches this module back through discovery.ts.
+  // `entries`, not `pending`: a `skipExisting` re-run repairs a missing guren.css too.
+  if (entries.some((entry) => RESOURCES_PATH.test(entry.path))) {
+    const { ensureGurenUiTokens, usesGurenUiTokens } = await import('./guren-css')
+    if (entries.some(usesGurenUiTokens)) await ensureGurenUiTokens(cwd)
   }
 
   return created
