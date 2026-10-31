@@ -104,6 +104,8 @@ bunx guren plan:render docs/plans/comments/plan.json
 
 「エージェントへの依頼文をコピー」を押すと、計画のパス、`plan-write` スキルでレビューを反映してほしいという依頼、フィードバックをまとめた依頼文が、ページの表示言語でコピーされます。これをエージェントに送れば、レビューがリビジョンとして計画に取り込まれます。`plan:revise` は `feedback.json` から承認と回答を読みます (後述)。コメントの内容は、読者かエージェントが計画のコピーに反映します。フッターには、計画を直したあとに実行する `plan:render` と `plan:approve` の 2 つのコマンドが表示されます。
 
+開発サーバーを `GUREN_MCP=1` で動かしていれば、同じページを [Dev Center](./application-diagnostics.md) の計画のページから開けます (**Review this plan**、`/_guren/plans/<slug>/review`)。この場合は判定、コメント、回答を付けるたびに `.guren/plans/<slug>.feedback.json` へ保存され、次に開いたときもその状態から始まります。保存したファイルには、レビューした計画の版が記録されます。計画が変わったあとは、`plan:render` でページを作り直すまでレビューを受け付けません。エージェントにはレビューしたことを伝えるだけでよく、JSON を貼り付ける必要はありません。
+
 検査は、今のアプリケーションに対して実行されます。報告される内容には、たとえば次のようなものがあります。
 
 - 計画にないアクションを指すルート
@@ -129,7 +131,7 @@ bunx guren plan:render docs/plans/comments/plan.json
 ```text
  ERROR  docs/plans/comments/plan.json is not approved while a check fails or a question is open; an assumption nobody confirmed is not approved by silence.
   question Q-delete is unanswered: Does deleting a comment remove the row?
-An answer chosen on the review page does not change the plan file. Send the agent the prompt the page copies with "Copy prompt for the agent", or remove each answered question yourself with plan:revise (--edited with a copy of the plan, or --ops with a remove op), passing the page's feedback with --feedback.
+An answer chosen on the review page does not change the plan file. Send the agent the prompt the page copies with "Copy prompt for the agent", or remove each answered question yourself with plan:revise (--edited with a copy of the plan, or --ops with a remove op), passing the page's feedback with --feedback. A review saved in the Dev Center is in .guren/plans/comments.feedback.json, which plan:revise applies when --feedback is omitted.
 ```
 
 問題がなくなったら承認します。
@@ -172,6 +174,8 @@ bunx guren plan:revise docs/plans/comments/plan.json --edited /tmp/comments.edit
 `--ops ops.json` を使えば、変更操作を直接渡せます。渡すのは `{ "ops": [...] }` の形の文書で、操作ごとに `reason` を書きます。
 
 `--feedback feedback.json` を付けると、ページでのレビュー結果が制約として効きます (コピーしたテキストを渡す場合は `-` を指定します)。ページで承認した要素は、`--reopens "<reason>"` で理由を示したときだけ変更できます。ページで回答した質問は、改訂後の計画から消えていなければなりません。フィードバックから読むのはこの 2 つだけなので、コメントの内容はコピーに自分で反映してください。
+
+`--feedback` を省くと、`plan:revise` は Dev Center で保存したレビューを読みます。現在の版の計画へのレビューがあるときだけ反映し、どのファイルを使ったかを出力します。前の版で保存したレビューは反映せず、警告を出します。
 
 承認後の計画は、この方法で変更します。`plan.json` をその場で編集すると、ハッシュがどの承認にもリビジョンにもない値に変わるので、`plan:revise` はその計画を拒否します。その場合は `git checkout -- docs/plans/comments/plan.json` で元に戻し、編集内容をコピーに移して `--edited` で渡してください。
 

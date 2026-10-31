@@ -156,8 +156,11 @@ export class PageNode {
     ;(this.listeners[type] ??= []).push(listener)
   }
 
-  dispatch(type: string): void {
-    for (const listener of this.listeners[type] ?? []) listener({ preventDefault() {} })
+  /** True when a listener called `preventDefault()`, as a `beforeunload` that asks first does. */
+  dispatch(type: string): boolean {
+    let prevented = false
+    for (const listener of this.listeners[type] ?? []) listener({ preventDefault() { prevented = true } })
+    return prevented
   }
 
   click(): void {
@@ -246,6 +249,10 @@ export interface PageOptions {
   width?: number
   /** Stands in for the page's `JSON`, so a test can watch what the page reads off its payload. */
   json?: Pick<JSON, 'parse' | 'stringify'>
+  /** Opens the page as the Dev Center serves it, at `pathname` over http, with `fetch` as its network. */
+  served?: { pathname: string; fetch: (url: string, init?: { method?: string; body?: string }) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }> }
+  /** Collects what the page hands `setTimeout`, for the test to run; absent, a timer never fires. */
+  timers?: Array<() => void>
 }
 
 export interface Page {
@@ -253,7 +260,7 @@ export interface Page {
   storage: Record<string, string>
   /** Every text the page wrote to the clipboard, oldest first. */
   clipboard: string[]
-  location: { hash: string }
+  location: { hash: string; pathname?: string; protocol?: string }
   window: PageNode
   byId(id: string): PageNode
 }
@@ -308,7 +315,8 @@ export function openPlanPage(html: string, options: PageOptions = {}): Page {
   if (wrap) wrap.clientWidth = options.width ?? 1100
 
   const storage: Record<string, string> = { ...options.storage }
-  const location = { hash: options.hash ?? '' }
+  const location = { hash: options.hash ?? '', ...(options.served ? { pathname: options.served.pathname, protocol: 'http:' } : {}) }
+  const timers = options.timers
   const clipboard: string[] = []
   const window = new PageNode('#window')
   Object.assign(window, {
@@ -328,7 +336,8 @@ export function openPlanPage(html: string, options: PageOptions = {}): Page {
       },
     },
     requestAnimationFrame: (callback: () => void) => callback(),
-    setTimeout: () => 0,
+    setTimeout: (callback: () => void) => (timers ? timers.push(callback) : 0),
+    ...(options.served ? { fetch: options.served.fetch } : {}),
     clearTimeout: () => {},
     matchMedia: () => ({ matches: false, addEventListener() {} }),
   })

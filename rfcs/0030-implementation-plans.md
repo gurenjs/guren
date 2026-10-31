@@ -2796,8 +2796,9 @@ approval. The viewer shows state and names the command; it never runs one.
   (`planHash` in its payload). Where that differs from the plan's current
   hash the link is marked stale and names `plan:render`. A draft's page
   carries no hash and is not judged.
-- The served mode stays deferred. The viewer's one route that takes a
-  parameter serves a file `plan:render` wrote and accepts no write.
+- The viewer's one route that takes a parameter serves a file `plan:render`
+  wrote and accepts no write. The served mode went to the Dev Center instead
+  (§8, amended 2026-10-31).
 
 ### 8. Producers
 
@@ -2987,6 +2988,41 @@ one placeholder `renderPlanHtml()` fills. What it changes:
   feedback and its request marker, under `.guren/` and never under `docs/`.
   Approval stays a CLI act (`plan:approve`), so a compromised page cannot
   approve a plan.
+
+**Amended in implementation (2026-10-31), the served mode in the Dev Center.**
+The served mode ships without the live `plan:status` results that held it
+back, and differs from the text above in four places:
+
+- **Where it is served.** Under the Dev Center (RFC 0032), at
+  `/_guren/plans/<slug>/review`, behind `GUREN_MCP=1` and the Dev Center's
+  loopback guard rather than `GUREN_DOCS=1`, so the person reaches the review
+  from the plan page the commands print. The route serves the file
+  `plan:render` wrote, found among the discovered plans by slug, never by
+  joining the slug into a path. A page from an older CLI, or one rendered
+  from another version of the plan, is not served for review: the route names
+  `plan:render`. The docs viewer's copy stays the static page.
+- **Policy.** The server swaps the page's own policy for one that adds
+  `connect-src 'self'`, since a header cannot loosen a policy the document
+  declares, and adds `frame-ancestors 'none'` as a header. Saved feedback is
+  fetched as JSON and never written into the HTML, where a `</script>` in a
+  comment would end the data block.
+- **What is written.** Each change posts the whole feedback document, stamped
+  with the plan's digest (`planDigest()`, which names a draft as well as an
+  approved plan), to `/_guren/plans/<slug>/feedback`. The server checks the
+  `Origin` equals its own, the body against `PlanFeedbackSchema` under a size
+  cap, and the digest against the plan as it stands, then writes
+  `.guren/plans/<slug>.feedback.json`, which the state directory's
+  `.gitignore` covers. No request marker is written: the person tells the
+  agent they reviewed, and `guren_get_plans` and the Dev Center report the
+  saved feedback.
+- **Who reads it.** The model-free `plan:revise` reads the saved feedback
+  when `--feedback` is omitted, only while its digest matches the parent, and
+  says which file it used; an explicit `--feedback` still wins. The `plan-write`
+  skill reads the comments from the same file.
+
+The route is the Dev Center's first write, and the only one: it accepts the
+feedback document and nothing else, runs no command, and writes under
+`.guren/` only. Approval stays `plan:approve`.
 
 Like `ai:eval`, `guren plan` is opt-in, costs money, and is never part of
 `check` or `gate`. `guren check --plan` is advisory: it reports approved plans

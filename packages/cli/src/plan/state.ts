@@ -9,24 +9,25 @@
  */
 
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { join } from 'node:path'
 
 import { z } from 'zod'
 
 import { formatSchemaIssues } from '../cli-error'
-import { planFileStem } from './beside'
 import { planDigest } from './identity'
 import { PLAN_VERIFY_COMMANDS } from './tasks'
 
 // What keys a record, exported beside the records so their readers and tests import one module.
 export { planDigest }
+export { planSlug } from './beside'
 
 export const PLAN_STATE_VERSION = 1
 
 /** Where state lives under the application root. `plan:verify` writes the `.gitignore` there. */
 export const PLAN_STATE_DIR = '.guren/plans'
 const STATE_SUFFIX = '.state.json'
-export const PLAN_STATE_GITIGNORE = '*.state.json\n.gitignore\n'
+// `.*.tmp` is `writeFileAtomic()`'s temporary file, which a write killed before its rename leaves behind.
+export const PLAN_STATE_GITIGNORE = '*.state.json\n*.feedback.json\n.*.tmp\n.gitignore\n'
 
 const PlanCommandRecordSchema = z.object({
   command: z.enum(PLAN_VERIFY_COMMANDS),
@@ -155,18 +156,6 @@ export interface PlanStateRead {
   unreadable?: string
 }
 
-/**
- * The plan file's slug: `comments.plan.json` and `comments.json` are both `comments`, and
- * `docs/plans/comments/plan.json` (the §9 layout) is named by its directory, as its sibling
- * records are. A handle, never an identity: two plans of one slug share a state file and a
- * step-id namespace, so the later run overwrites the earlier one's records.
- */
-export function planSlug(planPath: string): string {
-  const name = basename(planPath)
-  if (name === 'plan.json') return basename(dirname(planPath))
-  return planFileStem(name)
-}
-
 export function planStatePath(appRoot: string, slug: string): string {
   return join(appRoot, PLAN_STATE_DIR, `${slug}${STATE_SUFFIX}`)
 }
@@ -219,8 +208,13 @@ export async function ensurePlanStateIgnored(appRoot: string): Promise<void> {
   await mkdir(dir, { recursive: true })
   const ignore = join(dir, '.gitignore')
   const current = await readFile(ignore, 'utf8').catch(() => undefined)
-  if (current === undefined) await writeFile(ignore, PLAN_STATE_GITIGNORE, 'utf8')
-  else if (!current.split('\n').includes('.gitignore')) await writeFile(ignore, `${current.replace(/\n?$/u, '\n')}.gitignore\n`, 'utf8')
+  if (current === undefined) {
+    await writeFile(ignore, PLAN_STATE_GITIGNORE, 'utf8')
+    return
+  }
+  const lines = current.split('\n')
+  const missing = PLAN_STATE_GITIGNORE.split('\n').filter((line) => line !== '' && !lines.includes(line))
+  if (missing.length > 0) await writeFile(ignore, `${current.replace(/\n?$/u, '\n')}${missing.join('\n')}\n`, 'utf8')
 }
 
 /**

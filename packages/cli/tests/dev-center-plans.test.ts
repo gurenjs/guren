@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { DevCenterPlan } from '../src/dev-center-page/plans'
-import { planAttention, sortPlans, stepsByTask } from '../src/dev-center-page/plans'
+import { planAttention, sortPlans, stepRuntimeErrors, stepsByTask } from '../src/dev-center-page/plans'
 import { devCenterPlanLine, planPagePath, planSlugFromPath } from '../src/dev-center-links'
 
 function plan(overrides: Partial<DevCenterPlan> = {}): DevCenterPlan {
@@ -64,4 +64,18 @@ test('planSlugFromPath should read one encoded segment and nothing deeper', () =
 test('planPagePath should be the path planSlugFromPath reads back', () => {
   for (const slug of ['comments', 'a b', 'ünïcode']) expect(planSlugFromPath(planPagePath(slug))).toBe(slug)
   expect(devCenterPlanLine(planPagePath('comments'))).toContain('/_guren/plans/comments')
+})
+
+test('stepRuntimeErrors should keep the matched events whose route has a step route\'s method and path', () => {
+  const event = (sequence: number, extra: Record<string, unknown>) => ({ sessionId: 's', sequence, occurredAt: '2026-10-31T00:00:00Z', method: 'POST', status: 500, category: 'server-error' as const, frames: [], correlation: 'matched' as const, ...extra })
+  const routes = [{ id: 'route.comments.store', method: 'POST', path: '/posts/:postId/comments', name: 'comments.store' }]
+  const events = [
+    event(1, { route: { method: 'POST', pattern: '/posts/:postId/comments' } }),
+    event(2, { route: { method: 'GET', pattern: '/posts/:postId/comments' } }),
+    event(3, { route: { method: 'POST', pattern: '/posts' } }),
+    event(4, { correlation: 'ambiguous' }),
+    event(5, { correlation: 'unavailable' }),
+  ]
+  expect(stepRuntimeErrors(routes, events).map((entry) => entry.sequence)).toEqual([1])
+  expect(stepRuntimeErrors([], events)).toEqual([])
 })

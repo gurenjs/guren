@@ -88,8 +88,14 @@ a.plan-card:hover{border-color:var(--g-line-strong);background:var(--g-raised)}
 h3+.step{border-top:0}
 .step .id{overflow-wrap:anywhere}
 .marked{color:var(--g-accent-text);font-weight:700}
+.evidence h4{margin:12px 0 4px;font-size:12.5px;color:var(--g-heading)}
+.evidence-item{margin:8px 0;padding:8px 10px;border:1px solid var(--g-line);border-radius:var(--g-r-ctl)}
+.evidence-item>div+div{margin-top:3px}
+.shots{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.shots img{display:block;max-width:240px;max-height:160px;border:1px solid var(--g-line);border-radius:var(--g-r-ctl)}
 .command{display:flex;gap:8px;align-items:center;margin:6px 0}.command code{flex:1;overflow-wrap:anywhere;font:12.5px/1.5 var(--g-font-mono);color:var(--g-text);background:var(--g-panel);border:1px solid var(--g-line);border-radius:var(--g-r-ctl);padding:6px 10px}.command button{font:12px var(--g-font-mono);color:var(--g-ok);background:var(--g-panel);border:1px solid var(--g-ok);border-radius:var(--g-r-ctl);padding:5px 10px;cursor:pointer;white-space:nowrap}.command button:hover{background:var(--g-raised)}.command button:focus-visible{outline:2px solid var(--g-accent);outline-offset:2px}
 #plan-body>.g-card,#plan-body>.attention{margin-top:16px}
+#plan-body .g-card-body>.g-btn{margin:8px 0}
 .g-card-body>p+p,#errors{margin-top:8px}
 .event-head+.meta{margin-top:4px}
 @media(max-width:700px){.g-topbar{padding:10px 20px}.layout,.step{grid-template-columns:1fr}main{padding:20px}}
@@ -102,5 +108,5 @@ h3+.step{border-top:0}
 <section class="g-card wide"><div class="g-card-head"><h2 class="g-card-title">Coverage</h2></div><div class="g-card-body"><div id="coverage"></div><details><summary id="unresolved-title">Unresolved relationships</summary><ul id="unresolved"></ul></details></div></section>
 <section class="g-card wide"><div class="g-card-head"><h2 class="g-card-title">Runtime errors</h2><button id="refresh-errors" class="g-btn g-btn-secondary" type="button">Refresh errors</button></div><div class="g-card-body"><p class="meta">Framework-handled server exceptions retained by this development process. Messages and request values are omitted.</p><p id="error-status" class="meta" role="status"></p><div id="errors"></div></div></section>
 <p class="foot">Enable the existing docs and plan viewer with <code class="mono">GUREN_DOCS=1</code>. Graph and plan reads do not run verification commands.</p></div>
-<div id="plan-view" hidden><p class="meta"><a href="/_guren">All plans</a></p><h1 id="plan-title" class="g-title">Plan</h1><div class="toolbar"><button id="refresh-plan" class="g-btn g-btn-secondary" type="button">Refresh plan</button><span id="plan-status" role="status"></span></div><div id="plan-body"></div><p class="foot">Read from the plan files and <code class="mono">.guren/plans/</code> only. A step <code class="mono">plan:next</code> holds because the application changed since approval is reported by <code class="mono">plan:next</code>, not here.</p></div>
+<div id="plan-view" hidden><p class="meta"><a href="/_guren">All plans</a></p><h1 id="plan-title" class="g-title">Plan</h1><div class="toolbar"><button id="refresh-plan" class="g-btn g-btn-secondary" type="button">Refresh plan</button><span id="plan-status" role="status"></span></div><div id="plan-body"></div><p class="foot">Read from the plan files, <code class="mono">.guren/plans/</code>, <code class="mono">.guren/browser/</code> and this dev server's retained runtime errors only. A step <code class="mono">plan:next</code> holds because the application changed since approval is reported by <code class="mono">plan:next</code>, not here.</p></div>
 </main><script>__GUREN_DEV_CENTER_SCRIPT__</script></body></html>

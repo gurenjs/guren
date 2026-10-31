@@ -7,12 +7,14 @@ import { runCommand } from 'citty'
 import { builtinSubCommands } from '../src/commands'
 import { planApproveFile } from '../src/plan-approve'
 import { formatPlanRevise, planReviseFile, withStdinDashes, type PlanReviseFileOptions, type PlanReviseReport } from '../src/plan-revise'
+import { readPlanFile } from '../src/plan-render'
 import { planWaiveFile } from '../src/plan-waive'
 import { loadPlanAppState } from '../src/plan/app-state'
 import { planApprovalsPath } from '../src/plan/approvals'
 import { planRevisionsDir } from '../src/plan/beside'
 import type { PlanFeedback } from '../src/plan/feedback'
 import { planDigest, planHash } from '../src/plan/identity'
+import { writeSavedPlanFeedback } from '../src/plan/saved-feedback'
 import { readPlanRevisionRecords } from '../src/plan/revision-records'
 import { applyRevision, PlanHeadSchema } from '../src/plan/revision'
 import { PlanDraftSchema, PlanSchema, type PlanDraft } from '../src/plan/schema'
@@ -238,6 +240,50 @@ describe('plan:revise', () => {
       await expect(revise(plan, { edited: kept, message: 'm', feedback })).rejects.toThrow(/remove the question from the edited plan/u)
       const report = await revise(plan, { edited: removed, message: 'soft delete', feedback })
       expect(report.answered).toEqual(['Q-delete'])
+    })
+
+    test('should apply the review the Dev Center saved when --feedback is omitted, only while it names the plan as it stands', async () => {
+      const app = join(ROOT, 'saved')
+      const plan = await writeJson('saved/comments.plan.json', loadCommentsPlan())
+      const copy = await writeJson('saved/copy.json', edited(loadCommentsPlan(), retypeBody))
+      const { plan: parsed } = await readPlanFile(plan)
+      await writeSavedPlanFeedback(app, 'comments', planDigest(parsed), { answers: [], elements: [{ elementId: 'column.comment.body', verdict: 'approve', comment: 'keep it text' }] })
+
+      await expect(planReviseFile(plan, { app, edited: copy, message: 'short' })).rejects.toThrow(/approved column\.comment\.body/u)
+      const report = await planReviseFile(plan, { app, edited: copy, message: 'short', reopens: 'agreed on review' })
+      expect(report.savedFeedback).toEqual({ used: '.guren/plans/comments.feedback.json' })
+      expect(formatPlanRevise(report, plan)).toContain('Applied the review saved in .guren/plans/comments.feedback.json.')
+
+      // The plan moved on, so the saved review names another version and is left out with a warning.
+      const back = await writeJson('saved/back.json', edited(await readJson(plan), (doc) => {
+        const body = columnsOf(doc, 'model.comment').find((column) => column.id === 'column.comment.body') as Json
+        body.type = 'text'
+      }))
+      const skipped = await planReviseFile(plan, { app, edited: back, message: 'back to text' })
+      expect(skipped.savedFeedback).toMatchObject({ skipped: expect.stringContaining('another version of the plan') })
+      expect(skipped.reopened).toEqual([])
+    })
+
+    test('should apply no saved review under a slug another plan shares, as the Dev Center overview attributes none', async () => {
+      const app = join(ROOT, 'saved-shared')
+      const plan = await writeJson('saved-shared/comments.plan.json', loadCommentsPlan())
+      await writeJson('saved-shared/docs/plans/comments/plan.json', loadCommentsPlan())
+      const copy = await writeJson('saved-shared/copy.json', edited(loadCommentsPlan(), retypeBody))
+      const { plan: parsed } = await readPlanFile(plan)
+      await writeSavedPlanFeedback(app, 'comments', planDigest(parsed), { answers: [], elements: [{ elementId: 'column.comment.body', verdict: 'approve', comment: '' }] })
+
+      const report = await planReviseFile(plan, { app, edited: copy, message: 'short' })
+      expect(report.savedFeedback).toMatchObject({ skipped: expect.stringContaining('shares the slug "comments" with docs/plans/comments/plan.json') })
+    })
+
+    test('should find the saved review under the app root the plan sits in when --app is not given', async () => {
+      const app = join(ROOT, 'derived')
+      const plan = await writeJson('derived/docs/plans/comments/plan.json', loadCommentsPlan())
+      const copy = await writeJson('derived-copy.json', edited(loadCommentsPlan(), retypeBody))
+      const { plan: parsed } = await readPlanFile(plan)
+      await writeSavedPlanFeedback(app, 'comments', planDigest(parsed), { answers: [], elements: [{ elementId: 'column.comment.body', verdict: 'approve', comment: '' }] })
+
+      await expect(planReviseFile(plan, { edited: copy, message: 'short' })).rejects.toThrow(/approved column\.comment\.body/u)
     })
 
     test('should match a draft\'s feedback, which carries no plan hash', async () => {

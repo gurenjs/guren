@@ -394,6 +394,22 @@ describe('createCsrfMiddleware', () => {
     expect(otherRes.status).toBe(403)
   })
 
+  it('exempts the Dev Center feedback route on the MCP endpoint\'s terms', async () => {
+    process.env.GUREN_MCP = '1'
+    const app = createTestApp()
+    for (const path of ['/_guren/plans/comments/feedback', '/_guren/plans/comments/review', '/_guren/plans/a/b/feedback']) {
+      app.post(path, (c) => c.text('posted'))
+    }
+
+    // The page posts without a token; the CLI handler checks its Origin instead.
+    expect((await app.request('/_guren/plans/comments/feedback', { method: 'POST' })).status).toBe(200)
+    expect((await app.request('/_guren/plans/comments/review', { method: 'POST' })).status).toBe(403)
+    expect((await app.request('/_guren/plans/a/b/feedback', { method: 'POST' })).status).toBe(403)
+
+    delete process.env.GUREN_MCP
+    expect((await app.request('/_guren/plans/comments/feedback', { method: 'POST' })).status).toBe(403)
+  })
+
   it('exempts a declared cookieless-auth path, and only by exact match', async () => {
     const declared = new Set(['/mcp'])
     const app = new Hono()

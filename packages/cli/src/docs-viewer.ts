@@ -20,7 +20,7 @@ import type { AcceptanceTestRef } from './docs-acceptance'
 import { planDocClosedHashIn, planDocPath, readPlanBlocks } from './plan/close-docs'
 import { renderedPlanHash } from './plan/render'
 import { planCommand, readViewerPlans, type DocsViewerOpenPlan, type DocsViewerUnreadableDir } from './docs-viewer-plans'
-import { discoverPlanFiles } from './plan-check'
+import { discoverPlanFiles, type PlanDiscovery } from './plan-check'
 import { planOutputPath } from './plan/beside'
 import { planSlug } from './plan/state'
 import { FileDiscoveryError, fileExists, relativeUnreadableDirs, toPosixRelative } from './discovery'
@@ -130,10 +130,14 @@ async function judgePageFreshness(cwd: string, pages: DocsViewerPlanPage[], hash
 
 /**
  * Each discovered plan whose page exists where `plan:render` writes it by default; a page
- * written elsewhere with `-o` is not found. Of two plans sharing a slug, the first with a page wins.
+ * written elsewhere with `-o` is not found. A slug two plans share names neither page, as the
+ * review route refuses it: `/_guren/plans/<slug>` could show one plan under the other's name.
  */
-async function findPlanPages(cwd: string, files: readonly string[], onlySlug?: string): Promise<DocsViewerPlanPage[]> {
-  const candidates = onlySlug === undefined ? files : files.filter((file) => planSlug(file) === onlySlug)
+async function findPlanPages(cwd: string, discovery: PlanDiscovery, onlySlug?: string): Promise<DocsViewerPlanPage[]> {
+  const candidates = discovery.files.filter((file) => {
+    const slug = planSlug(file)
+    return !discovery.sharedSlugs.has(slug) && (onlySlug === undefined || slug === onlySlug)
+  })
   const found = await Promise.all(
     candidates.map(async (file): Promise<DocsViewerPlanPage | undefined> => {
       const page = planOutputPath(file)
@@ -142,9 +146,7 @@ async function findPlanPages(cwd: string, files: readonly string[], onlySlug?: s
       return { slug, plan: toPosixRelative(cwd, file), page: toPosixRelative(cwd, page), doc: planDocPath(slug) }
     }),
   )
-  const bySlug = new Map<string, DocsViewerPlanPage>()
-  for (const page of found) if (page && !bySlug.has(page.slug)) bySlug.set(page.slug, page)
-  return [...bySlug.values()]
+  return found.filter((page) => page !== undefined)
 }
 
 /**
@@ -152,7 +154,7 @@ async function findPlanPages(cwd: string, files: readonly string[], onlySlug?: s
  * discovered plans, never joined into a path, so a request cannot reach another file.
  */
 export async function docsViewerPlanPage(cwd: string, slug: string): Promise<string | undefined> {
-  const [page] = await findPlanPages(cwd, (await discoverPlanFiles(cwd)).files, slug)
+  const [page] = await findPlanPages(cwd, await discoverPlanFiles(cwd), slug)
   return page ? readFile(resolve(cwd, page.page), 'utf-8') : undefined
 }
 
@@ -286,7 +288,7 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
     [pagesFound, plans],
   ] = await Promise.all([
     loadViewerDocsGraph(cwd),
-    discoverPlanFiles(cwd).then((discovery) => Promise.all([findPlanPages(cwd, discovery.files), readViewerPlans(cwd, discovery)])),
+    discoverPlanFiles(cwd).then((discovery) => Promise.all([findPlanPages(cwd, discovery), readViewerPlans(cwd, discovery)])),
   ])
   const planPages = await judgePageFreshness(cwd, pagesFound, plans.hashes)
   const staleDocs = new Set(

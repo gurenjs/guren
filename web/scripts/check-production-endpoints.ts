@@ -13,6 +13,10 @@ const EXPECTED: ReadonlyArray<[path: string, status: number]> = [
   ['/_guren/graph.json', 404],
   ['/_guren/plans.json', 404],
   ['/_guren/plans/production-check', 404],
+  ['/_guren/plans/production-check/review', 404],
+  ['/_guren/plans/production-check/feedback', 404],
+  ['/_guren/plans/production-check/evidence', 404],
+  ['/_guren/browser/2026-10-31T00-00-00Z-check/screenshots/0000000000000000000000000000000000000000000000000000000000000000', 404],
   ['/_guren/runtime/errors?limit=1', 404],
   ['/_guren/mcp', 404],
 ]

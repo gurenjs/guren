@@ -1,4 +1,6 @@
+import type { StepEvidenceRoute } from '../dev-center-evidence'
 import type { DocsViewerOpenPlan, DocsViewerStepState } from '../docs-viewer-plans'
+import type { RuntimeErrorResult } from '../runtime-errors'
 
 export type DevCenterPlan = DocsViewerOpenPlan
 
@@ -26,8 +28,11 @@ export function planAttention(plan: DevCenterPlan): PlanAttention {
   if (plan.standing === 'unreadable' || plan.standing === 'baseline-removed') {
     return { who: 'person', title: 'Cannot be judged', detail: plan.reason ?? 'The plan or its approvals would not read.' }
   }
+  if ((plan.standing === 'draft' || plan.standing === 'unapproved') && plan.feedback?.current) {
+    return { who: 'person', title: 'Review saved', detail: 'Tell the agent to revise the plan from your review, or approve it with plan:approve once it says what you mean to build.' }
+  }
   if (plan.standing === 'draft') {
-    return { who: 'person', title: 'Review and approve', detail: 'A draft. Read the rendered plan, answer its open questions, and approve it with plan:approve.' }
+    return { who: 'person', title: 'Review and approve', detail: 'A draft. Review it here, answer its open questions, and approve it with plan:approve.' }
   }
   if (plan.standing === 'unapproved') {
     return { who: 'person', title: 'Approve the edited plan', detail: 'Edited after it was approved, so plan:next refuses it until it is approved again.' }
@@ -70,4 +75,15 @@ export function stepsByTask(plan: DevCenterPlan): Array<{ task: string; steps: D
     else groups.push({ task: step.task, steps: [step] })
   }
   return groups
+}
+
+type RuntimeErrorEvent = Extract<RuntimeErrorResult, { status: 'available' }>['events'][number]
+
+/**
+ * The retained events a step's routes account for: the event's registered route has a step route's
+ * method and path. An event with no route, or an ambiguous one, is never attributed.
+ */
+export function stepRuntimeErrors(routes: readonly StepEvidenceRoute[], events: readonly RuntimeErrorEvent[]): RuntimeErrorEvent[] {
+  return events.filter((event) => event.correlation === 'matched' && event.route
+    && routes.some((route) => route.method === event.route!.method && route.path === event.route!.pattern))
 }
