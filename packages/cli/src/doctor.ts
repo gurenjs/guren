@@ -42,6 +42,7 @@ import { commandFix, type CheckEvidence, type CheckFix, type CheckFixRun } from 
 import { hasPendingRepair, repairDoctorReport } from './doctor-fix'
 import { summarizeDoctorReport, type DoctorStatus } from './doctor-report'
 import { detectConfigMigrations, undeclaredEnv, type ConfigMigration, type EnvDeclaration } from './config-migration'
+import { judgeTokenSheet, updateTokenSheet } from './guren-css'
 
 export type { DoctorStatus } from './doctor-report'
 export { DOCTOR_RECOMMENDED_COMMANDS, DOCTOR_STATUSES, summarizeDoctorReport } from './doctor-report'
@@ -1253,6 +1254,26 @@ async function detectPluginCompatibility(context: DoctorRuleContext): Promise<Do
 }
 
 
+async function detectGurenUiTokens(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const { status, message, ...remedy } = await judgeTokenSheet(context.cwd)
+  return createCheck('guren-ui-tokens', 'Guren UI Tokens', status, message, remedy)
+}
+
+async function createGurenUiTokensAutofix(_context: DoctorRuleContext, check: DoctorCheck): Promise<DoctorAutofix | null> {
+  if (check.status === 'pass' || !check.canAutofix) {
+    return null
+  }
+
+  return {
+    key: check.key,
+    title: check.title,
+    summary: 'Replace the guren:tokens block of resources/css/guren.css with the sheet this CLI ships.',
+    async apply(cwd: string) {
+      await updateTokenSheet(cwd)
+    },
+  }
+}
+
 const doctorRules: DoctorRule[] = [
   { key: 'runtime', title: 'Runtime Environment', detect: detectRuntime },
   { key: 'bun-version', title: 'Bun Version', detect: detectBunVersion },
@@ -1273,6 +1294,7 @@ const doctorRules: DoctorRule[] = [
   { key: 'database-config', title: 'Database Configuration', detect: detectDatabaseConfig },
   { key: 'test-infrastructure', title: 'Test Infrastructure', detect: detectTestInfrastructure },
   { key: 'plugin-compatibility', title: 'Plugin Compatibility', detect: detectPluginCompatibility },
+  { key: 'guren-ui-tokens', title: 'Guren UI Tokens', detect: detectGurenUiTokens, autofix: createGurenUiTokensAutofix },
 ]
 
 /**

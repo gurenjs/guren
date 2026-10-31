@@ -30,6 +30,20 @@ bun run typecheck
 bun run test
 ```
 
+## Guren UI のトークン
+
+`resources/css/guren.css` には Guren UI のデザイントークンが入っています。Guren が管理する範囲は、次の 2 行のマーカーで挟まれた部分です。
+
+```css
+/* guren:tokens begin: `guren upgrade` replaces everything up to the end marker. Add your own rules after it. */
+...
+/* guren:tokens end */
+```
+
+リリースでトークンが変わると、`bunx guren doctor` の `guren-ui-tokens` チェックが差分を知らせ、`bunx guren upgrade` がこの範囲を置き換えます。マーカーの外の行は書いたまま残るので、独自の上書きは end マーカーの後に書いてください。`bunx guren upgrade` はアプリにインストール済みの CLI で動きます。そのため、トークンの変更がファイルに反映されるのは、そのリリースを `bun install` で入れた後の最初の upgrade です。
+
+マーカーができる前に作ったアプリの `guren.css` には、マーカーがありません。手を加えていなければ、`bunx guren upgrade` がマーカー付きのシートに差し替えます。手を加えている場合はファイルに触れず、変更を現行シートの end マーカーの後へ移す手順を doctor が表示します。マーカーが壊れている場合（begin に対応する end がない、end だけがある、範囲が 2 つある）も doctor が知らせ、直すまで upgrade はファイルに何も書き込みません。
+
 ## 移行メモ
 
 ### 2.26.x → 2.27.0

@@ -1,3 +1,4 @@
+/* guren:tokens begin: `guren upgrade` replaces everything up to the end marker. Add your own rules after it. */
 /* Guren UI — design tokens (https://github.com/gurenjs/guren-ui)
    Light is the guren.dev docs light theme (white + crimson); dark is its
    docs dark theme (rose-pine-moon ground, rose accent text). The dark block
@@ -137,3 +138,4 @@
   --shadow-g-card: var(--g-shadow-card);
   --shadow-g-float: var(--g-shadow-float);
 }
+/* guren:tokens end */
