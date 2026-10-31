@@ -14,7 +14,7 @@ import { basename, resolve } from 'node:path'
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { runGit } from './changed-files'
 import { CliError } from './cli-error'
-import { devCenterPlanLine } from './dev-center-links'
+import { devCenterPlanLine, planPagePath } from './dev-center-links'
 import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
 import { planScaffoldTargets, type PlanScaffoldTargets } from './plan-scaffold'
@@ -118,6 +118,8 @@ export interface PlanNextHeldStep {
 export interface PlanNextReport {
   reportVersion: typeof PLAN_NEXT_REPORT_VERSION
   plan: { file: string; title: string; hash: string | null }
+  /** The Dev Center page of this plan, for the person deciding what the agent cannot. */
+  devCenter: string
   /** Steps whose record still holds, in task order. */
   verified: string[]
   /** The verified steps whose record fingerprinted nothing: done on their commands, their elements never lifted by `plan:status`. */
@@ -333,6 +335,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   const head = {
     reportVersion: PLAN_NEXT_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: approval?.hash ?? null },
+    devCenter: planPagePath(slug),
     verified,
     onCommandsAlone,
     held,
@@ -640,6 +643,6 @@ export function formatPlanNext(report: PlanNextReport, planArgument: string): st
     lines.push('', `The application could not be read, so no step was held: ${report.freshnessUnreadable}`, 'On a fresh clone, run `bunx guren codegen` first: the routes file imports the generated files.')
   }
   if (report.decisionsUnreadable) lines.push('', `Decision log not read, so no waiver was applied: ${report.decisionsUnreadable}`)
-  lines.push('', devCenterPlanLine(planArgument))
+  lines.push('', devCenterPlanLine(report.devCenter))
   return lines.join('\n')
 }

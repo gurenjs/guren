@@ -62,6 +62,7 @@ function report(stepId: string, stepRecord: PlanStepRecord, blocked: string[] = 
   return {
     reportVersion: PLAN_STATUS_REPORT_VERSION,
     plan: { file: 'comments.plan.json', title: PLAN.title, hash: null },
+    devCenter: '/_guren/plans/comments',
     elements,
     summary: status.summary,
     verification: { stateFile: '.guren/plans/comments.state.json', staleSteps: [], decisionsFile: 'comments.decisions.json', staleWaivers: [] },

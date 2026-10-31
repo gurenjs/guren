@@ -1,7 +1,6 @@
-import type { DevCenterPlans } from '../dev-center-links'
-import type { DocsViewerStepState } from '../docs-viewer-plans'
+import type { DocsViewerOpenPlan, DocsViewerStepState } from '../docs-viewer-plans'
 
-export type DevCenterPlan = DevCenterPlans['plans'][number]
+export type DevCenterPlan = DocsViewerOpenPlan
 
 /** `person`: nothing moves until someone reads the plan and decides. `agent`: the loop can continue on its own. */
 export interface PlanAttention {
@@ -10,14 +9,15 @@ export interface PlanAttention {
   detail: string
 }
 
+/** The docs viewer's step colours (`.state-*` in docs-viewer-page/index.html), so a step reads alike in both. */
 export const STEP_TONE: Record<DocsViewerStepState, 'ok' | 'warn' | 'danger' | 'muted'> = {
   verified: 'ok',
   drifted: 'warn',
   incomplete: 'warn',
-  outdated: 'warn',
+  blocked: 'warn',
   'waiver-withdrawn': 'warn',
   failed: 'danger',
-  blocked: 'danger',
+  outdated: 'muted',
   'not-run': 'muted',
 }
 
@@ -43,26 +43,22 @@ export function planAttention(plan: DevCenterPlan): PlanAttention {
   if (plan.steps.length === 0) {
     return { who: 'person', title: 'Nothing to implement', detail: 'The plan derives no steps. Close it with plan:close, or revise it.' }
   }
-  if (plan.steps.every((step) => step.state === 'verified')) {
+  const unverified = plan.steps.find((step) => step.state !== 'verified')
+  if (!unverified) {
     return { who: 'person', title: 'Ready to close', detail: 'Every step is verified. Read the work, then close the plan with plan:close.' }
   }
   const active = plan.steps.find((step) => step.active)
-  const next = active ?? plan.steps.find((step) => step.state !== 'verified')
-  return {
-    who: 'agent',
-    title: 'In progress',
-    detail: next ? `${active ? 'Marked by plan:next' : 'Next unverified step'}: ${next.id}.` : 'No step is marked yet.',
-  }
+  return { who: 'agent', title: 'In progress', detail: active ? `Marked by plan:next: ${active.id}.` : `Next unverified step: ${unverified.id}.` }
 }
 
 export function verifiedCount(plan: DevCenterPlan): number {
   return plan.steps.filter((step) => step.state === 'verified').length
 }
 
-/** Plans a person has to act on first, each group in the overview's order. */
-export function sortPlans(plans: DevCenterPlan[]): DevCenterPlan[] {
-  const person = plans.filter((plan) => planAttention(plan).who === 'person')
-  return [...person, ...plans.filter((plan) => !person.includes(plan))]
+/** Each plan with its attention, the ones waiting on a person first, each group in the overview's order. */
+export function sortPlans(plans: DevCenterPlan[]): Array<{ plan: DevCenterPlan; attention: PlanAttention }> {
+  const judged = plans.map((plan) => ({ plan, attention: planAttention(plan) }))
+  return [...judged.filter(({ attention }) => attention.who === 'person'), ...judged.filter(({ attention }) => attention.who === 'agent')]
 }
 
 /** Steps in task order, grouped under the task each belongs to. */
@@ -74,11 +70,4 @@ export function stepsByTask(plan: DevCenterPlan): Array<{ task: string; steps: D
     else groups.push({ task: step.task, steps: [step] })
   }
   return groups
-}
-
-/** The slug a plan page is served under, or `undefined` off a plan page. */
-export function planSlugFromPath(pathname: string): string | undefined {
-  const match = /^\/_guren\/plans\/([^/]+)$/.exec(pathname)
-  if (!match) return undefined
-  try { return decodeURIComponent(match[1]!) } catch { return undefined }
 }

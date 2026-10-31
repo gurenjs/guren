@@ -42,6 +42,8 @@ export interface DocsViewerPlanStep {
 export interface DocsViewerOpenPlan {
   /** App-relative, POSIX separators. */
   file: string
+  /** `planSlug()` of the plan's path: its state file's name and its Dev Center page. */
+  slug: string
   title: string
   standing: DocsViewerPlanStanding
   /** Why the plan cannot be judged or approved as it stands. */
@@ -91,8 +93,8 @@ function fileHasher(appRoot: string): (files: string[]) => Promise<Map<string, s
   }
 }
 
-function unreadablePlan(file: string, reason: string): DocsViewerOpenPlan {
-  return { file, title: file, standing: 'unreadable', reason, entities: [], steps: [], waivers: [], next: [], status: planCommand('plan:status', file) }
+function unreadablePlan(file: string, slug: string, reason: string): DocsViewerOpenPlan {
+  return { file, slug, title: file, standing: 'unreadable', reason, entities: [], steps: [], waivers: [], next: [], status: planCommand('plan:status', file) }
 }
 
 interface PlanReadContext {
@@ -154,6 +156,7 @@ async function readViewerPlan(context: PlanReadContext, path: string, file: stri
     hash,
     open: {
       file,
+      slug,
       title: plan.title,
       standing,
       ...(reason ? { reason } : {}),
@@ -204,7 +207,7 @@ export async function readViewerPlans(appRoot: string, discovery: PlanDiscovery)
       const file = toPosixRelative(appRoot, path)
       const slug = planSlug(path)
       const entry: { open?: DocsViewerOpenPlan; hash?: string | null } = await readViewerPlan(context, path, file, slug).catch((error: unknown) => ({
-        open: unreadablePlan(file, (error as Error).message),
+        open: unreadablePlan(file, slug, (error as Error).message),
       }))
       return { file, ...entry }
     }),

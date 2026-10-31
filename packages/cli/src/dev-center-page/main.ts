@@ -1,7 +1,8 @@
 import type { GraphNode, GurenApplicationGraph, GraphResult } from '../application-graph'
-import type { DevCenterPlans } from '../dev-center-links'
+import { planPagePath, planSlugFromPath } from '../dev-center-links'
+import type { PlanOverview } from '../docs-viewer-plans'
 import type { RuntimeErrorResult } from '../runtime-errors'
-import { planAttention, planSlugFromPath, sortPlans, STEP_TONE, stepsByTask, verifiedCount, type DevCenterPlan } from './plans'
+import { planAttention, sortPlans, STEP_TONE, stepsByTask, verifiedCount, type DevCenterPlan, type PlanAttention } from './plans'
 
 function element<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id)
@@ -144,14 +145,12 @@ async function loadErrors(): Promise<void> {
   } catch (error) { status.textContent = `Runtime unavailable: ${error instanceof Error ? error.message : 'Read failed'}. Refresh to retry.` }
   finally { errorsButton.disabled = false }
 }
-async function readPlans(): Promise<DevCenterPlans> {
-  const result = await readJson('/_guren/plans.json') as DevCenterPlans | { error: { message: string } }
-  if ('error' in result) throw new Error(result.error.message)
+async function readPlans(): Promise<PlanOverview> {
+  const result = await readJson('/_guren/plans.json') as PlanOverview
   if (result.schemaVersion !== 1 || !Array.isArray(result.plans)) throw new Error('Unsupported plans payload')
   return result
 }
-function attentionBox(plan: DevCenterPlan): HTMLElement {
-  const attention = planAttention(plan)
+function attentionBox(attention: PlanAttention): HTMLElement {
   const box = text('div', '', `attention ${attention.who}`)
   box.append(text('span', attention.who === 'person' ? 'Waiting on a person' : 'Agent can continue', 'label'), text('strong', attention.title), text('span', attention.detail, 'meta'))
   return box
@@ -175,14 +174,14 @@ async function loadPlans(): Promise<void> {
   try {
     const result = await readPlans()
     const plans = sortPlans(result.plans)
-    const waiting = plans.filter((plan) => planAttention(plan).who === 'person').length
+    const waiting = plans.filter(({ attention }) => attention.who === 'person').length
     status.textContent = `${plans.length} open ${plans.length === 1 ? 'plan' : 'plans'} · ${waiting} waiting on a person`
     status.className = waiting ? 'warning' : ''
     if (!plans.length) list.append(empty('No open plans', 'Plans appear here once an agent writes one with the plan-write skill.'))
-    for (const plan of plans) {
+    for (const { plan, attention } of plans) {
       const card = text('a', '', 'g-card plan-card') as HTMLAnchorElement
-      card.href = `/_guren/plans/${encodeURIComponent(plan.slug)}`
-      card.append(text('span', plan.standing, 'kind'), text('h3', plan.title, 'g-card-title'), text('div', plan.file, 'meta mono'), ...progress(plan), attentionBox(plan))
+      card.href = planPagePath(plan.slug)
+      card.append(text('span', plan.standing, 'kind'), text('h3', plan.title, 'g-card-title'), text('div', plan.file, 'meta mono'), ...progress(plan), attentionBox(attention))
       list.append(card)
     }
     element('plans-unreadable').replaceChildren(...result.unreadable.map((dir) => text('li', `${dir.dir} would not list, so its plans are missing: ${dir.reason}`)))
@@ -218,6 +217,9 @@ function commands(lines: string[]): HTMLElement {
   box.append(...lines.map((line) => text('code', line, 'mono')))
   return box
 }
+function byline(at: string, by: string | undefined): string {
+  return by ? `${at} by ${by}` : at
+}
 async function loadPlan(slug: string): Promise<void> {
   const button = element<HTMLButtonElement>('refresh-plan')
   const status = element('plan-status')
@@ -236,17 +238,19 @@ async function loadPlan(slug: string): Promise<void> {
     // Two plans may share a slug; `guren check --plan` warns about it, and both are shown.
     status.textContent = matching.length > 1 ? `${matching.length} open plans share this name` : ''
     status.className = matching.length > 1 ? 'warning' : ''
-    element('plan-title').textContent = matching[0]!.title
-    document.title = `${matching[0]!.title} · Guren Dev Center`
+    const { title } = matching[0]!
+    element('plan-title').textContent = title
+    document.title = `${title} · Guren Dev Center`
     for (const plan of matching) {
-      const approval = plan.approval ? ` · approved ${plan.approval.at}${plan.approval.by ? ` by ${plan.approval.by}` : ''}` : ''
-      body.append(text('p', `${plan.file} · ${plan.standing}${approval}${plan.entities.length ? ` · ${plan.entities.join(', ')}` : ''}`, 'lede mono'), attentionBox(plan))
+      const approval = plan.approval && `approved ${byline(plan.approval.at, plan.approval.by)}`
+      const meta = [plan.file, plan.standing, approval, plan.entities.join(', ')].filter(Boolean).join(' · ')
+      body.append(text('p', meta, 'lede mono'), attentionBox(planAttention(plan)))
       // Shown apart from the attention box, which a draft's or an edited plan's approval outranks.
       if (plan.unreadable?.length) body.append(card('Records', ...plan.unreadable.map((reason) => text('p', reason, 'warning'))))
       const steps = stepsByTask(plan).flatMap((group) => [text('h3', group.task), ...group.steps.map(stepRow)])
       body.append(card('Steps', ...progress(plan), ...(steps.length ? steps : [empty('No steps', 'The plan derives no steps.')])))
       if (plan.waivers.length) {
-        body.append(card('Waivers', ...plan.waivers.map((waiver) => text('p', `${waiver.elementId}: ${waiver.reason} (${waiver.at}${waiver.by ? `, ${waiver.by}` : ''})`, 'meta'))))
+        body.append(card('Waivers', ...plan.waivers.map((waiver) => text('p', `${waiver.elementId}: ${waiver.reason} (${byline(waiver.at, waiver.by)})`, 'meta'))))
       }
       const rendered = text('p', '', 'meta')
       const link = text('a', `/_guren/docs/plans/${slug}`, 'mono') as HTMLAnchorElement

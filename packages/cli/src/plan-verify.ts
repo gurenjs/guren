@@ -10,7 +10,7 @@ import { basename } from 'node:path'
 import { isConfirmedApiOnlyApp } from './app-surface'
 import { CliError } from './cli-error'
 import { readScripts } from './command-output'
-import { devCenterPlanLine } from './dev-center-links'
+import { devCenterPlanLine, planPagePath } from './dev-center-links'
 import { toPosixRelative } from './discovery'
 import { readPlanFile } from './plan-render'
 import { formatPlanStatus, type PlanStatusReport, PLAN_STATUS_REPORT_VERSION } from './plan-status'
@@ -31,6 +31,8 @@ import { runCaptured } from './subprocess'
 export const DEFAULT_VERIFY_TIMEOUT_MS = 10 * 60 * 1000
 
 export interface PlanVerifyReport extends PlanStatusReport {
+  /** The Dev Center page of this plan, for the person deciding what the agent cannot. */
+  devCenter: string
   /** The steps this run verified, in the order they ran. */
   steps: PlanStepVerification[]
   /** Steps a whole-plan run left alone: verified before, at a fingerprint that still matches. */
@@ -180,6 +182,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   return {
     reportVersion: PLAN_STATUS_REPORT_VERSION,
     plan: { file: basename(path), title: plan.title, hash: approval?.hash ?? null },
+    devCenter: planPagePath(slug),
     ...overlaid.status,
     verification: overlaid.verification,
     steps,
@@ -215,8 +218,7 @@ export function formatPlanStepRecord(stepId: string, record: PlanStepRecord): st
   return lines
 }
 
-/** `planArgument` is the plan path as given: `report.plan.file` is a basename, which names no slug for a `plan.json`. */
-export function formatPlanVerify(report: PlanVerifyReport, planArgument?: string): string {
+export function formatPlanVerify(report: PlanVerifyReport): string {
   const lines: string[] = []
   const codegenFailed = report.steps.filter(({ record }) => record.commands.some((command) => command.command === 'codegen' && command.status !== 'pass'))
   for (const { stepId, record } of report.steps) {
@@ -238,6 +240,6 @@ export function formatPlanVerify(report: PlanVerifyReport, planArgument?: string
   }
   // plan:verify runs only on an approved plan (or a draft), so the approval line would say nothing.
   lines.push(formatPlanStatus({ ...report, approval: undefined }))
-  if (planArgument !== undefined) lines.push('', devCenterPlanLine(planArgument))
+  lines.push('', devCenterPlanLine(report.devCenter))
   return lines.join('\n')
 }

@@ -93,7 +93,7 @@ test('serves a self-contained shell with hashed scripts, no-store, and fixed rou
 
 const overview = {
   schemaVersion: 1 as const,
-  plans: [{ file: 'docs/plans/comments/plan.json', title: 'Comments', standing: 'draft' as const, entities: [], steps: [], waivers: [], next: [], status: 'bunx guren plan:status docs/plans/comments/plan.json' }],
+  plans: [{ file: 'docs/plans/comments/plan.json', slug: 'comments', title: 'Comments', standing: 'draft' as const, entities: [], steps: [], waivers: [], next: [], status: 'bunx guren plan:status docs/plans/comments/plan.json' }],
   active: [],
   unreadable: [],
 }

@@ -44,6 +44,7 @@ describe('readViewerPlans', () => {
       expect(open).toHaveLength(1)
       const [plan] = open
       expect(plan.standing).toBe('draft')
+      expect(plan.slug).toBe('comments')
       expect(plan.entities).toEqual(['Post', 'Comment'])
       expect(plan.steps.length).toBeGreaterThan(0)
       expect(plan.steps.every((step) => step.state === 'not-run')).toBe(true)

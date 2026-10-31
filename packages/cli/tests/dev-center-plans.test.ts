@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { DevCenterPlan } from '../src/dev-center-page/plans'
-import { planAttention, planSlugFromPath, sortPlans, stepsByTask } from '../src/dev-center-page/plans'
-import { devCenterPlanLine, devCenterPlanPath } from '../src/dev-center-links'
+import { planAttention, sortPlans, stepsByTask } from '../src/dev-center-page/plans'
+import { devCenterPlanLine, planPagePath, planSlugFromPath } from '../src/dev-center-links'
 
 function plan(overrides: Partial<DevCenterPlan> = {}): DevCenterPlan {
   return { file: 'docs/plans/comments/plan.json', slug: 'comments', title: 'Comments', standing: 'approved', entities: [], steps: [], waivers: [], next: [], status: 'bunx guren plan:status docs/plans/comments/plan.json', ...overrides }
@@ -43,7 +43,9 @@ describe('planAttention', () => {
 test('sortPlans should put the plans waiting on a person first', () => {
   const working = plan({ file: 'a.plan.json', steps: [step('a', 'not-run')] })
   const draft = plan({ file: 'b.plan.json', standing: 'draft' })
-  expect(sortPlans([working, draft]).map((entry) => entry.file)).toEqual(['b.plan.json', 'a.plan.json'])
+  const sorted = sortPlans([working, draft])
+  expect(sorted.map((entry) => entry.plan.file)).toEqual(['b.plan.json', 'a.plan.json'])
+  expect(sorted.map((entry) => entry.attention.who)).toEqual(['person', 'agent'])
 })
 
 test('stepsByTask should group consecutive steps of one task', () => {
@@ -59,13 +61,7 @@ test('planSlugFromPath should read one encoded segment and nothing deeper', () =
   expect(planSlugFromPath('/_guren/plans/%E0')).toBeUndefined()
 })
 
-test('devCenterPlanPath should name the slug of a plan.json and of a *.plan.json', () => {
-  expect(devCenterPlanPath('docs/plans/comments/plan.json')).toBe('/_guren/plans/comments')
-  expect(devCenterPlanPath('comments.plan.json')).toBe('/_guren/plans/comments')
-  expect(devCenterPlanLine('docs/plans/comments/plan.json')).toContain('/_guren/plans/comments')
-})
-
-test('devCenterPlanPath should resolve a bare plan.json against cwd, as the plan commands do', () => {
-  expect(devCenterPlanPath('plan.json', '/app/docs/plans/comments')).toBe('/_guren/plans/comments')
-  expect(devCenterPlanPath('./plan.json', '/app/docs/plans/comments')).toBe('/_guren/plans/comments')
+test('planPagePath should be the path planSlugFromPath reads back', () => {
+  for (const slug of ['comments', 'a b', 'ünïcode']) expect(planSlugFromPath(planPagePath(slug))).toBe(slug)
+  expect(devCenterPlanLine(planPagePath('comments'))).toContain('/_guren/plans/comments')
 })

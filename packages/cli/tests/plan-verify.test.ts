@@ -1316,6 +1316,7 @@ describe('formatPlanVerify', () => {
     const report = (steps: Array<[string, PlanStepRecord]>): PlanVerifyReport => ({
       reportVersion: PLAN_STATUS_REPORT_VERSION,
       plan: { file: 'comments.plan.json', title: 'Comments', hash: null },
+      devCenter: '/_guren/plans/comments',
       elements: [],
       summary: summarize([]),
       verification: { stateFile: '.guren/plans/comments.state.json', staleSteps: [], decisionsFile: 'comments.decisions.json', staleWaivers: [] },
@@ -1337,6 +1338,7 @@ describe('formatPlanVerify', () => {
     const report = (reverified: string[], recheckPending: string[]): PlanVerifyReport => ({
       reportVersion: PLAN_STATUS_REPORT_VERSION,
       plan: { file: 'comments.plan.json', title: 'Comments', hash: null },
+      devCenter: '/_guren/plans/comments',
       elements: [],
       summary: summarize([]),
       verification: { stateFile: '.guren/plans/comments.state.json', staleSteps: [], decisionsFile: 'comments.decisions.json', staleWaivers: [] },

@@ -1,26 +1,20 @@
-import { resolve } from 'node:path'
+// Imports nothing, so the Dev Center page bundles it beside the handler that serves the same paths.
 
-import type { DocsViewerOpenPlan, PlanOverview } from './docs-viewer-plans'
-import { planSlug } from './plan/state'
+const PLAN_PAGE = /^\/_guren\/plans\/([^/]+)$/
 
-/**
- * A path on the running dev server, which owns the origin; `McpServiceProvider` mounts it.
- * Resolved against cwd as the plan commands read it: `planSlug('plan.json')` alone is `.`.
- */
-export function devCenterPlanPath(planFile: string, cwd = process.cwd()): string {
-  return `/_guren/plans/${encodeURIComponent(planSlug(resolve(cwd, planFile)))}`
+/** A path on the running dev server, which owns the origin; `McpServiceProvider` mounts it. */
+export function planPagePath(slug: string): string {
+  return `/_guren/plans/${encodeURIComponent(slug)}`
+}
+
+/** The slug a plan page is served under, or `undefined` off a plan page. */
+export function planSlugFromPath(pathname: string): string | undefined {
+  const match = PLAN_PAGE.exec(pathname)
+  if (!match) return undefined
+  try { return decodeURIComponent(match[1]!) } catch { return undefined }
 }
 
 /** One line for a plan command's text output, naming where the person reads the plan's state. */
-export function devCenterPlanLine(planFile: string): string {
-  return `Dev Center: ${devCenterPlanPath(planFile)} on the running dev server shows the person every step of this plan.`
-}
-
-/** What `/_guren/plans.json` returns: `guren_get_plans`'s overview, each plan with the slug its page is served under. */
-export interface DevCenterPlans extends Omit<PlanOverview, 'plans'> {
-  plans: Array<DocsViewerOpenPlan & { slug: string }>
-}
-
-export function devCenterPlans(overview: PlanOverview): DevCenterPlans {
-  return { ...overview, plans: overview.plans.map((plan) => ({ ...plan, slug: planSlug(plan.file) })) }
+export function devCenterPlanLine(path: string): string {
+  return `Dev Center: ${path} on the running dev server shows the person every step of this plan.`
 }
