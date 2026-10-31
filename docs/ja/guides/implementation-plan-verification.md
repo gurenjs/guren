@@ -270,7 +270,7 @@ bunx guren check --plan
 ℹ        → Land or close one plan before implementing the other, or revise one so they stop changing the same element.
 ```
 
-2 つの計画ファイルが同じ slug を持つ場合 (状態ファイルと `docs/plans/<slug>.md` を共有してしまうため) と、計画ファイルや計画のディレクトリを読めない場合にも警告します。結果はすべて警告で、終了コードは 0 です。
+2 つの計画ファイルが同じ slug を持つ場合 (状態ファイルと `docs/plans/<slug>.md` を共有してしまうため) と、計画ファイルや計画のディレクトリを読めない場合にも警告します。同じ slug の計画は、1 つを残してファイル名を変えるまで `plan:next`、`plan:verify`、`plan:scaffold`、`plan:close` が受け付けません。結果はすべて警告で、終了コードは 0 です。
 
 計画の検査は `--plan` を付けたときだけ実行されます。`db/schema.ts` と validator のファイルを import するので、フラグなしの `guren check`、`check --ci`、`guren gate` には含まれません。
 

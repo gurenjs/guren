@@ -36,6 +36,18 @@ export function planFileStem(name: string): string {
   return name.replace(/(\.plan)?\.json$/u, '')
 }
 
+/**
+ * The plan file's slug: `comments.plan.json` and `comments.json` are both `comments`, and
+ * `docs/plans/comments/plan.json` (the §9 layout) is named by its directory, as its sibling
+ * records are. A handle, never an identity: two plans of one slug share a state file and a
+ * step-id namespace, so the later run overwrites the earlier one's records.
+ */
+export function planSlug(planPath: string): string {
+  const name = basename(planPath)
+  if (name === 'plan.json') return basename(dirname(planPath))
+  return planFileStem(name)
+}
+
 /** `name` beside a `plan.json`, `<stem>.<name>` beside any other plan. */
 function besidePlan(planPath: string, name: string): string {
   const file = basename(planPath)

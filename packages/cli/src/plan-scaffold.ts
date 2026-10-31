@@ -32,6 +32,7 @@ import { DIALECT_BARRELS } from './drizzle-specifiers'
 import { discoverModelClasses } from './model-parser'
 import { parseSourceFile, ParseCache } from './parse-cache'
 import { appendTableToSchema, detectSchemaDialect, ensureNamedImports } from './patch-helpers'
+import { refuseSharedPlanSlug } from './plan-check'
 import { readPlanFile } from './plan-render'
 import { exportedNames, readValidatorExports } from './plan/app-detail'
 import { requirePlanApproval } from './plan/approvals'
@@ -111,6 +112,7 @@ async function approvedPlan(planPath: string, options: PlanScaffoldFileOptions, 
   if (!approval) {
     refuse([`${basename(path)} is a draft: plan:scaffold writes code from an approved plan only. Run guren plan:approve ${planPath} first.`], outcome)
   }
+  await refuseSharedPlanSlug(options.appRoot, path, outcome.approval)
   return { path, plan: plan as Plan, hash: approval.hash }
 }
 

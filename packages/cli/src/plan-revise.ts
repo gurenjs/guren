@@ -11,6 +11,7 @@ import { basename, dirname, resolve, sep } from 'node:path'
 
 import { CliError, formatSchemaIssues } from './cli-error'
 import { toPosixRelative } from './discovery'
+import { plansSharingSlug, sharedSlugReason } from './plan-check'
 import { readPlanFile } from './plan-render'
 import { describeUnapproved, PLAN_APPROVAL_GATED_COMMANDS, readPlanApprovalStanding } from './plan/approvals'
 import { writeFileAtomic } from './plan/beside'
@@ -206,6 +207,9 @@ async function savedFeedbackFor(root: string, path: string, plan: PlanDraft | Pl
   const { saved, unreadable } = await readSavedPlanFeedback(root, slug)
   if (unreadable) return { report: { skipped: unreadable } }
   if (!saved) return undefined
+  // As in the Dev Center overview: a review under a slug two plans share is attributed to neither.
+  const shared = sharedSlugReason(path, await plansSharingSlug(root, path))
+  if (shared !== undefined) return { report: { skipped: `${file} was not applied: ${shared}, so the review may be another plan's.` } }
   if (saved.planDigest !== planDigest(plan)) return { report: { skipped: `${file} was saved on another version of the plan, so it was not applied. Render the plan again and review it in the Dev Center.` } }
   return { feedback: saved.feedback, report: { used: file } }
 }

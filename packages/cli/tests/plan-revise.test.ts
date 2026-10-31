@@ -264,6 +264,18 @@ describe('plan:revise', () => {
       expect(skipped.reopened).toEqual([])
     })
 
+    test('should apply no saved review under a slug another plan shares, as the Dev Center overview attributes none', async () => {
+      const app = join(ROOT, 'saved-shared')
+      const plan = await writeJson('saved-shared/comments.plan.json', loadCommentsPlan())
+      await writeJson('saved-shared/docs/plans/comments/plan.json', loadCommentsPlan())
+      const copy = await writeJson('saved-shared/copy.json', edited(loadCommentsPlan(), retypeBody))
+      const { plan: parsed } = await readPlanFile(plan)
+      await writeSavedPlanFeedback(app, 'comments', planDigest(parsed), { answers: [], elements: [{ elementId: 'column.comment.body', verdict: 'approve', comment: '' }] })
+
+      const report = await planReviseFile(plan, { app, edited: copy, message: 'short' })
+      expect(report.savedFeedback).toMatchObject({ skipped: expect.stringContaining('shares the slug "comments" with docs/plans/comments/plan.json') })
+    })
+
     test('should find the saved review under the app root the plan sits in when --app is not given', async () => {
       const app = join(ROOT, 'derived')
       const plan = await writeJson('derived/docs/plans/comments/plan.json', loadCommentsPlan())

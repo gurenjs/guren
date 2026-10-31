@@ -13,6 +13,7 @@ import { CliError } from './cli-error'
 import { toPosixRelative } from './discovery'
 import { SAFE_MODULE_NAME_RE } from './utils'
 import { frontmatterEntities } from './docs-index'
+import { refuseSharedPlanSlug } from './plan-check'
 import { planStatusFile } from './plan-status'
 import { readPlanFile } from './plan-render'
 import type { PlanAppState } from './plan/app-state'
@@ -78,6 +79,7 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
     throw new CliError(`${path} is a draft: it was never approved, so there is nothing to close. Run guren plan:approve on it first.`)
   }
   const approved = await requirePlanApproval(path, plan, 'it is not closed')
+  await refuseSharedPlanSlug(appRoot, path, 'it is not closed')
   const { hash, approval } = approved
   const slug = planSlug(path)
   if (!MARKER_SLUG.test(slug)) {

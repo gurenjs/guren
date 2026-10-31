@@ -227,6 +227,7 @@ describe('the plan directories that would not list', () => {
       const plansDir = join(dir, 'docs/plans')
       const { open, unreadable } = await readViewerPlans(dir, {
         files: [],
+        sharedSlugs: new Map(),
         unreadable: [
           { dir: plansDir, reason: `EACCES: permission denied, scandir '${plansDir}'` },
           { dir, reason: 'EACCES: permission denied' },
