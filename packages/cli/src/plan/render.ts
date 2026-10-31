@@ -261,6 +261,18 @@ export function renderedPlanHash(html: string): string | null | undefined {
   }
 }
 
+/** The `planDigest()` a page carries, or `undefined` where it holds none, as a page from an older CLI does. */
+export function renderedPlanDigest(html: string): string | undefined {
+  const embedded = EMBEDDED_PAYLOAD.exec(html)?.[1]
+  if (embedded === undefined) return undefined
+  try {
+    const digest = (JSON.parse(embedded) as { planDigest?: unknown }).planDigest
+    return typeof digest === 'string' ? digest : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** The plan as one self-contained HTML document. Pure: nothing but the template is read. */
 export function renderPlanHtml(input: RenderPlanInput): string {
   const payload = escapeJsonForScript(JSON.stringify(buildPlanPayload(input)))

@@ -26,7 +26,8 @@ export const PLAN_STATE_VERSION = 1
 /** Where state lives under the application root. `plan:verify` writes the `.gitignore` there. */
 export const PLAN_STATE_DIR = '.guren/plans'
 const STATE_SUFFIX = '.state.json'
-export const PLAN_STATE_GITIGNORE = '*.state.json\n*.feedback.json\n.gitignore\n'
+// `.*.tmp` is `writeFileAtomic()`'s temporary file, which a write killed before its rename leaves behind.
+export const PLAN_STATE_GITIGNORE = '*.state.json\n*.feedback.json\n.*.tmp\n.gitignore\n'
 
 const PlanCommandRecordSchema = z.object({
   command: z.enum(PLAN_VERIFY_COMMANDS),

@@ -59,6 +59,8 @@ test('Dev Center feedback reaches the CLI handler in an auth app, which issues n
     expect(response.status).toBe(404)
     expect(await response.json()).toMatchObject({ error: { code: 'no-plan' } })
     expect((await app.fetch(post('https://hostile.example'), local)).status).toBe(403)
+    // The guard covers the POST too: a request the handler would accept is refused from another machine.
+    expect((await app.fetch(post('http://localhost'), { server: { requestIP: () => ({ address: '203.0.113.1' }) } })).status).toBe(403)
     // The exemption is the feedback route alone: any other Dev Center path still needs a token.
     expect((await app.fetch(new Request('http://localhost/_guren/plans/comments/review', { method: 'POST', headers: { origin: 'http://localhost' } }), local)).status).toBe(403)
   } finally { await app.stop() }

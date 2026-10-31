@@ -11,6 +11,7 @@ import { t } from './locale'
 
 const REVIEW_PATH = /^\/_guren\/plans\/([^/]+)\/review$/
 const SAVE_DELAY_MS = 600
+const RETRY_CAP_MS = 30_000
 
 /** The feedback endpoint beside this page and the file it saves to, or `null` for the static page. */
 export function servedReview(): { feedbackUrl: string; savedTo: string } | null {
@@ -39,11 +40,26 @@ export async function loadServedFeedback(url: string, planDigest: string): Promi
   }
 }
 
-/** Posts the document a moment after the last change, one request at a time, and says how it went. */
+/**
+ * Posts the document a moment after the last change, one request at a time, and says how it went.
+ * A save the server never answered (a restart mid `bun --hot` reload) is tried again with backoff;
+ * one it refused is not, since the same document would be refused again. Leaving with a change
+ * not yet saved asks first: the next visit loads the server's copy, which would not have it.
+ */
 export function startAutosave(url: string, planDigest: string, feedback: () => PlanFeedback, status: HTMLElement): void {
   let timer: number | null = null
   let saving = false
   let again = false
+  let unsaved = false
+  let failures = 0
+
+  const schedule = (delay: number): void => {
+    if (timer) window.clearTimeout(timer)
+    timer = window.setTimeout(() => {
+      timer = null
+      void save()
+    }, delay)
+  }
 
   const save = async (): Promise<void> => {
     if (saving) {
@@ -51,7 +67,9 @@ export function startAutosave(url: string, planDigest: string, feedback: () => P
       return
     }
     saving = true
+    unsaved = false
     status.textContent = t('footer.saving')
+    let retry = false
     try {
       const response = await window.fetch(url, {
         method: 'POST',
@@ -60,25 +78,35 @@ export function startAutosave(url: string, planDigest: string, feedback: () => P
         body: JSON.stringify({ planDigest: planDigest, feedback: feedback() }),
       })
       const body = (await response.json().catch(() => ({}))) as { savedAt?: string; error?: { message?: string } }
-      status.textContent = response.ok
-        ? t('footer.saved', { time: new Date(body.savedAt ?? Date.now()).toLocaleTimeString() })
-        : t('footer.saveFailed', { reason: body.error?.message ?? String(response.status) })
+      if (response.ok) {
+        failures = 0
+        status.textContent = t('footer.saved', { time: new Date(body.savedAt ?? Date.now()).toLocaleTimeString() })
+      } else {
+        unsaved = true
+        retry = response.status >= 500
+        status.textContent = t('footer.saveFailed', { reason: body.error?.message ?? String(response.status) })
+      }
     } catch {
+      unsaved = true
+      retry = true
       status.textContent = t('footer.saveFailed', { reason: t('footer.serverUnreachable') })
     } finally {
       saving = false
       if (again) {
         again = false
         void save()
+      } else if (retry) {
+        failures += 1
+        schedule(Math.min(RETRY_CAP_MS, SAVE_DELAY_MS * 2 ** failures))
       }
     }
   }
 
   onReviewChange(() => {
-    if (timer) window.clearTimeout(timer)
-    timer = window.setTimeout(() => {
-      timer = null
-      void save()
-    }, SAVE_DELAY_MS)
+    unsaved = true
+    schedule(SAVE_DELAY_MS)
+  })
+  window.addEventListener('beforeunload', (event: Event) => {
+    if (unsaved || timer || saving) event.preventDefault()
   })
 }

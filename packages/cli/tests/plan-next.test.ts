@@ -91,10 +91,10 @@ describe('plan:next', () => {
     // Outside a repository git reads no HEAD: `null`, which a mark from before the field (no key) is told apart from.
     expect((await readState(app)).active).toEqual({ plan: 'comments.plan.json', step: SCAFFOLD, startedAt: '2026-09-21T10:00:00.000Z', continuations: 0, from: null })
     // The mark's `.gitignore` ignores itself, so a plan loop leaves no untracked file behind; one that does not gains the lines it lacks.
-    expect(await readFile(join(app, '.guren/plans/.gitignore'), 'utf8')).toBe('*.state.json\n*.feedback.json\n.gitignore\n')
+    expect(await readFile(join(app, '.guren/plans/.gitignore'), 'utf8')).toBe('*.state.json\n*.feedback.json\n.*.tmp\n.gitignore\n')
     await writeFile(join(app, '.guren/plans/.gitignore'), '*.state.json\nnotes/', 'utf8')
     await planNextFile(plan, { appRoot: app, now: NOW })
-    expect(await readFile(join(app, '.guren/plans/.gitignore'), 'utf8')).toBe('*.state.json\nnotes/\n*.feedback.json\n.gitignore\n')
+    expect(await readFile(join(app, '.guren/plans/.gitignore'), 'utf8')).toBe('*.state.json\nnotes/\n*.feedback.json\n.*.tmp\n.gitignore\n')
 
     const again = await planNextFile(plan, { appRoot: app, now: NOW })
     expect(again.step!.id).toBe(SCAFFOLD)

@@ -14,6 +14,7 @@ import { readPlanFile } from './plan-render'
 import { planOutputPath } from './plan/beside'
 import { FEEDBACK_MAX_BYTES } from './plan/feedback'
 import { planDigest } from './plan/identity'
+import { renderedPlanDigest } from './plan/render'
 import { readSavedPlanFeedback, SavedFeedbackPostSchema, writeSavedPlanFeedback } from './plan/saved-feedback'
 import { planSlug } from './plan/state'
 
@@ -46,18 +47,6 @@ async function locate(cwd: string, slug: string): Promise<Located> {
   return { path, file: toPosixRelative(cwd, path), digest: planDigest(plan) }
 }
 
-/** The digest a page was rendered at, or `undefined` for a page from a CLI that embedded none. */
-function renderedDigest(html: string): string | undefined {
-  const match = /<script\b[^>]*\bid="plan-data"[^>]*>([\s\S]*?)<\/script>/.exec(html)
-  if (!match) return undefined
-  try {
-    const digest = (JSON.parse(match[1]!) as { planDigest?: unknown }).planDigest
-    return typeof digest === 'string' ? digest : undefined
-  } catch {
-    return undefined
-  }
-}
-
 const escapeHtml = (text: string): string => text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`)
 
 function notServed(file: string, reason: string): Response {
@@ -77,8 +66,9 @@ async function servePage(cwd: string, slug: string): Promise<Response> {
   }
   // A header cannot loosen the policy the page declares, so the declared one is replaced, once.
   const sites = html.split(STATIC_PAGE_POLICY).length - 1
-  if (sites !== 1 || renderedDigest(html) === undefined) return notServed(located.file, 'The page was rendered by an older Guren CLI.')
-  if (renderedDigest(html) !== located.digest) return notServed(located.file, 'The page was rendered from another version of the plan.')
+  const rendered = renderedPlanDigest(html)
+  if (sites !== 1 || rendered === undefined) return notServed(located.file, 'The page was rendered by an older Guren CLI.')
+  if (rendered !== located.digest) return notServed(located.file, 'The page was rendered from another version of the plan.')
   return new Response(html.replace(STATIC_PAGE_POLICY, () => SERVED_PAGE_POLICY), {
     headers: { ...NO_STORE, 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "frame-ancestors 'none'" },
   })
@@ -125,7 +115,12 @@ async function saveFeedback(cwd: string, slug: string, request: Request): Promis
   if (parsed.data.planDigest !== located.digest) {
     return problem(409, 'plan-changed', `The plan changed after this page was rendered. Run ${planCommand('plan:render', located.file)} and review the new page.`)
   }
-  const saved = await writeSavedPlanFeedback(cwd, slug, located.digest, parsed.data.feedback)
+  let saved
+  try {
+    saved = await writeSavedPlanFeedback(cwd, slug, located.digest, parsed.data.feedback)
+  } catch (error) {
+    return problem(503, 'write-failed', `The review could not be written to .guren/plans/ (${(error as NodeJS.ErrnoException).code ?? 'write error'}).`)
+  }
   return Response.json({ schemaVersion: 1, savedAt: saved.savedAt }, { headers: NO_STORE })
 }
 

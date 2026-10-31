@@ -221,7 +221,8 @@ function reviewCard(plan: DevCenterPlan): HTMLElement {
   if (saved) {
     parts.push(text('p', `Saved ${saved.savedAt}: ${saved.approved} approved, ${saved.changes} changes requested, ${saved.comments} commented, ${saved.answers} answered.`, 'meta mono'))
     if (saved.current) parts.push(text('p', 'Send the agent:', 'meta'), commandRow(savedReviewPrompt(plan.file, plan.slug)))
-    else parts.push(text('p', 'Saved on an earlier version of the plan, so plan:revise will not apply it. Review the plan again.', 'meta warning'))
+    // Approving stamps a baseline, which moves the digest, so an approved plan's earlier review is no prompt to review again.
+    else if (plan.standing !== 'approved') parts.push(text('p', 'Saved on an earlier version of the plan, so plan:revise will not apply it. Review the plan again.', 'meta warning'))
   }
   return card('Review', ...parts)
 }
