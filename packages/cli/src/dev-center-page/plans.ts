@@ -33,7 +33,7 @@ export function planAttention(plan: DevCenterPlan): PlanAttention {
     return { who: 'person', title: 'Approve the edited plan', detail: 'Edited after it was approved, so plan:next refuses it until it is approved again.' }
   }
   if (plan.unreadable?.length) {
-    return { who: 'person', title: 'Records would not read', detail: plan.unreadable.join(' ') }
+    return { who: 'person', title: 'Records would not read', detail: 'The step outcomes and waivers below may be incomplete until the files named under Records read again.' }
   }
   const stalled = plan.steps.find((step) => step.stall)
   if (stalled?.stall) {

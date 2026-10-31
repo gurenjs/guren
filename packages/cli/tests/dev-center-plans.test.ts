@@ -15,6 +15,12 @@ describe('planAttention', () => {
     expect(planAttention(plan({ standing: 'unreadable', reason: 'bad JSON' }))).toEqual({ who: 'person', title: 'Cannot be judged', detail: 'bad JSON' })
   })
 
+  test('should rank a draft\'s approval over records that would not read, and name those records otherwise', () => {
+    const records = { unreadable: ['.guren/plans/comments.state.json would not read: bad JSON'] }
+    expect(planAttention(plan({ standing: 'draft', ...records }))).toMatchObject({ title: 'Review and approve' })
+    expect(planAttention(plan({ steps: [step('a', 'not-run')], ...records }))).toMatchObject({ who: 'person', title: 'Records would not read' })
+  })
+
   test('should wait on a person when the Stop hook stalled a step', () => {
     const stalled = plan({ steps: [step('a', 'failed', { active: true, stall: { at: '2026-10-31T00:00:00Z', reason: 'Three continuations.' } })] })
     expect(planAttention(stalled)).toMatchObject({ who: 'person', title: 'Stalled on a' })

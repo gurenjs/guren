@@ -241,6 +241,8 @@ async function loadPlan(slug: string): Promise<void> {
     for (const plan of matching) {
       const approval = plan.approval ? ` · approved ${plan.approval.at}${plan.approval.by ? ` by ${plan.approval.by}` : ''}` : ''
       body.append(text('p', `${plan.file} · ${plan.standing}${approval}${plan.entities.length ? ` · ${plan.entities.join(', ')}` : ''}`, 'lede mono'), attentionBox(plan))
+      // Shown apart from the attention box, which a draft's or an edited plan's approval outranks.
+      if (plan.unreadable?.length) body.append(card('Records', ...plan.unreadable.map((reason) => text('p', reason, 'warning'))))
       const steps = stepsByTask(plan).flatMap((group) => [text('h3', group.task), ...group.steps.map(stepRow)])
       body.append(card('Steps', ...progress(plan), ...(steps.length ? steps : [empty('No steps', 'The plan derives no steps.')])))
       if (plan.waivers.length) {
