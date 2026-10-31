@@ -25,7 +25,7 @@ import { findDeclaredTable, type SchemaTable } from './schema-parser'
 import { assertCwdUnsupported, runCommand, writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
 
 const PLAYWRIGHT_PACKAGE = '@playwright/test'
-/** `@guren/cli` pins axe with a tilde: a new minor adds rules, so it reaches an app only when the CLI moves the range. */
+// Installed at the ranges package.json declares; axe's is a tilde, since a new minor adds rules.
 const DEV_PACKAGES = [PLAYWRIGHT_PACKAGE, AXE_PACKAGE] as const
 export const BROWSER_TEST_SCRIPT = { name: 'test:browser', command: `playwright test -c ${BROWSER_TESTS_CONFIG}` } as const
 const GITIGNORE_ENTRIES = ['test-results/', 'playwright-report/', 'tests/browser/.auth/'] as const

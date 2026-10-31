@@ -15,6 +15,7 @@ import process from 'node:process'
 
 import type { z } from 'zod'
 
+import { A11Y_SPEC_FILE, A11Y_TITLE_PREFIX } from '../../packages/cli/src/browser-specs'
 import type { PlanDraftSchema } from '../../packages/cli/src/plan/schema'
 import { PLAN_VERSION } from '../../packages/cli/src/plan/version'
 import { inheritedEnv } from './inherited-env'
@@ -33,8 +34,6 @@ const RULE_OF_THREE_MIN = 30
 const CI_SPURIOUS_RATE = 0.018
 /** The rule's cost ceiling for one start, in ms. */
 const MAX_START_MS = 120_000
-/** How `buildA11ySpec()` titles every test it writes; the measurement splits the sets on it. */
-const A11Y_TITLE_PREFIX = 'a11y '
 
 function startCount(): number {
   const raw = process.env.GUREN_BROWSER_STARTS
@@ -180,9 +179,14 @@ interface StartRecord {
   wallMs: number
   /** The tests' own time; the rest of `wallMs` is the app starting and the browser launching. */
   testMs: number
+  /** The accessibility tests' share of `testMs`, which M4's cost ceiling leaves out. */
+  a11yMs?: number
   reported: boolean
   errors: string[]
 }
+
+/** A start's cost as M4 judges it: the accessibility tests are counted apart, their time included. */
+const m4Cost = (entry: StartRecord): number => entry.wallMs - (entry.a11yMs ?? 0)
 
 interface SetSummary { flaky: number; notRun: number; defects: number; clean: boolean }
 
@@ -220,7 +224,7 @@ function summarize(tallies: Map<string, Tally>, starts: readonly StartRecord[]):
 
 function summaryLines(metrics: Metrics): string[] {
   const { summary } = metrics
-  const costs = metrics.starts.filter((entry) => entry.reported).map((entry) => entry.wallMs)
+  const costs = metrics.starts.filter((entry) => entry.reported).map(m4Cost)
   return [
     '## Browser specs measurement (RFC 0033 M4)',
     '',
@@ -277,6 +281,8 @@ async function measure(): Promise<void> {
     await mustRun(app, ['bun', CLI, 'add', 'browser-tests'])
     // The config starts the app with `bunx guren`; without the app's own bin that is npm's placeholder.
     if (!(await Bun.file(join(app, 'node_modules/.bin/guren')).exists())) throw new Error('The app has no node_modules/.bin/guren, so the generated config cannot start it.')
+    // Without it the accessibility set would read as never measured, with nothing saying why.
+    if (!(await Bun.file(join(app, A11Y_SPEC_FILE)).exists())) throw new Error(`add browser-tests wrote no ${A11Y_SPEC_FILE}; the accessibility set cannot be measured.`)
     const env = await readFile(join(app, '.env'), 'utf8')
     const seeded = env.replace(/^BROWSER_TEST_PASSWORD=.*$/mu, `BROWSER_TEST_PASSWORD=${randomBytes(18).toString('base64url')}`)
     if (seeded === env) throw new Error('.env has no BROWSER_TEST_PASSWORD line to set, so the setup project could not sign in.')
@@ -303,10 +309,13 @@ async function measure(): Promise<void> {
     const exitCode = await run(app, ['bun', 'run', 'test:browser', '--', '--retries=0', '--reporter=list,json'], { PLAYWRIGHT_JSON_OUTPUT_FILE: reportPath })
     const wallMs = Math.round(performance.now() - began)
     const report = await readFile(reportPath, 'utf8').then((text) => JSON.parse(text) as JsonReport, () => undefined)
-    const results = specsOf(report?.suites).flatMap((spec) => spec.tests.flatMap((test) => test.results))
+    const specs = specsOf(report?.suites)
+    const results = specs.flatMap((spec) => spec.tests.flatMap((test) => test.results))
+    const a11yResults = specs.filter((spec) => spec.title.startsWith(A11Y_TITLE_PREFIX)).flatMap((spec) => spec.tests.flatMap((test) => test.results))
     metrics.starts.push({
       start, exitCode, wallMs,
       testMs: results.reduce((total, result) => total + result.duration, 0),
+      a11yMs: a11yResults.reduce((total, result) => total + result.duration, 0),
       reported: results.length > 0,
       errors: (report?.errors ?? []).map((error) => firstLine(error.message)),
     })
@@ -328,7 +337,7 @@ async function aggregate(dir: string): Promise<void> {
   if (nights.length === 0) throw new Error(`No metrics.json under ${dir}.`)
   const streak = nights.findIndex((night) => !night.summary.clean)
   const cleanNights = streak === -1 ? nights.length : streak
-  const starts = nights.flatMap((night) => night.starts.filter((entry) => entry.reported).map((entry) => entry.wallMs)).sort((a, b) => a - b)
+  const starts = nights.flatMap((night) => night.starts.filter((entry) => entry.reported).map(m4Cost)).sort((a, b) => a - b)
   const failingTests = new Map<string, { nights: number; verdicts: Set<Verdict> }>()
   for (const night of nights) {
     for (const test of night.tests.filter((entry) => entry.verdict !== 'pass' && entry.verdict !== 'fixme')) {

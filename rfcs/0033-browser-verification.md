@@ -715,7 +715,8 @@ rerun adds these two and changes nothing else.
 **The spec.** `browser:map` writes `tests/browser/generated/a11y.browser.ts`
 only when the app's manifest declares `@axe-core/playwright` and
 `tests/browser/a11y.ts` exists (positive evidence, as for password sign-in).
-Otherwise it writes none, removes one it wrote before, and the map index says
+Otherwise it writes none, removes one it wrote before, and ~~the map index says~~
+**the command prints that** (amended in implementation, below)
 the accessibility checks are off and names the rerun. The spec holds one test
 per mapped landmark and one per plan view the view specs open, titled
 `a11y <feature>: GET <path>` and `a11y view <id>`, with the same visit, the same
@@ -730,7 +731,9 @@ the one meant:
 1. runs `new AxeBuilder({ page })` with the tags `wcag2a`, `wcag2aa`,
    `wcag21a`, `wcag21aa` and `wcag22aa`, the rules of `a11y.disableRules`
    disabled and the selectors of `a11y.exclude` excluded;
-2. attaches the whole result as JSON to the test, so the report a run files as
+2. attaches ~~the whole result~~ the violations and the `incomplete` results
+   (amended in implementation: axe's passes and inapplicable rules are left out)
+   as JSON to the test, so the report a run files as
    `spec-report.json` (§6) carries it, and names every disabled rule and
    excluded selector there, so an exemption stays visible in every report;
 3. fails when `violations` is not empty, with a message listing each rule id,
@@ -772,9 +775,20 @@ after changing a page and to report a failing `a11y` test with its rule ids.
   without the blueprint, and the reason is about the install.
 - Before running axe, a test waits for `#app` to hold an element and for the
   network to go idle, so a client-rendered page is read after it renders.
-- A view whose route a landmark already checks is not checked twice.
+- A view whose route a landmark already checks is not checked twice, and a
+  `fixme` two plans share is written once: every plan's views share this file,
+  and Playwright refuses to load a file with two tests of one title.
+- A start's cost under §9's ceiling leaves out the accessibility tests' time,
+  which the measurement reports with their set.
 - Both packages are installed in one `bun add -d`, and only the ones the
   manifest lacks, so a rerun on an app with Playwright adds axe alone.
+- The first measurement run with the spec found two violations, both on pages
+  `make:auth` writes: `link-in-text-block` on `/login` (the sign-up link inside
+  a sentence was told apart by colour alone) and `color-contrast` on `/profile`
+  (helper text in `text-g-muted`, about 2.5:1 on the panel). The links are
+  underlined and the helper text uses `text-g-text-2`; the next run reported
+  none of the six tests failing. `--g-muted` itself is too faint for any text,
+  which is the token stylesheet's to settle, not this spec's.
 
 **Measurement.** The nightly measurement already classifies every test in
 `test:browser`, so the `a11y` tests are measured from the night they ship. They
@@ -854,7 +868,8 @@ a screenshot into a test result. That is the visual regression §11 keeps out.
 
 - `browser:map` writes `a11y.browser.ts` only when the manifest declares
   `@axe-core/playwright` and `tests/browser/a11y.ts` exists, removes the one it
-  wrote when either goes, and the index names why the checks are off.
+  wrote when either goes, and ~~the index names~~ `browser:map` prints why the
+  checks are off.
 - An `a11y` test fails on a page with an input that has no label, passes on the
   same page with the label, and names the disabled rules and excluded selectors
   in its attachment.

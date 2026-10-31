@@ -23,6 +23,8 @@ export const A11Y_OPTIONS_FILE = 'tests/browser/a11y.ts'
 export const AXE_PACKAGE = '@axe-core/playwright'
 /** RFC 0033 §12.2: conformance criteria only; `best-practice` rules are advice, and most of what axe reports on an existing app. */
 export const A11Y_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] as const
+/** Every accessibility test's title starts with it; the browser measurement splits its sets on it. */
+export const A11Y_TITLE_PREFIX = 'a11y '
 export const BROWSER_SEEDER_FILE = 'db/seeders/browser-account.ts'
 /** Restated in the support template's `BROWSER_ACCOUNT_EMAIL`; a test pins the two together. */
 export const BROWSER_ACCOUNT_EMAIL = 'browser@example.test'
@@ -207,28 +209,32 @@ async function checkAccessibility(page: Page, testInfo: TestInfo): Promise<void>
 
 /**
  * One test per landmark and per plan view the other specs open (RFC 0033 §12.2), each visit once:
- * a view on a landmark's route is not checked twice. A page another spec cannot open is a fixme here too.
+ * a view on a landmark's route is not checked twice. A page another spec cannot open is a fixme here too,
+ * once per title, since every plan's views share this file and Playwright refuses a duplicate title.
  */
 export function buildA11ySpec(map: BrowserMap, options: SpecOptions): string {
   const targets = [...map.features.map(landmarkTarget), ...plannedViews(map).sort((a, b) => compareStrings(a.plan, b.plan) || compareStrings(a.view.id, b.view.id)).map(viewTarget)]
   const visited = new Set<string>()
+  const titles = new Set<string>()
   const cases: SpecCase[] = []
   for (const target of targets) {
     if ('fixme' in target) {
-      cases.push(fixme(`a11y ${target.fixme}`))
+      const title = `${A11Y_TITLE_PREFIX}${target.fixme}`
+      if (!titles.has(title)) cases.push(fixme(title))
+      titles.add(title)
       continue
     }
     const key = describeRoute(target.route)
     if (visited.has(key)) continue
     visited.add(key)
-    const entry = visit(target.route, `a11y ${target.title}`, options, [
+    const entry = visit(target.route, `${A11Y_TITLE_PREFIX}${target.title}`, options, [
       `await page.goto(${quoteString(target.route.path)})`,
       componentAssertion(target.pages),
       'await checkAccessibility(page, testInfo)',
     ])
     cases.push(entry.body ? { ...entry, testInfo: true } : entry)
   }
-  return spec(cases.length > 0 ? cases : [fixme('a11y the browser map has no feature to check yet')], '../support', A11Y_PRELUDE)
+  return spec(cases.length > 0 ? cases : [fixme(`${A11Y_TITLE_PREFIX}the browser map has no feature to check yet`)], '../support', A11Y_PRELUDE)
 }
 
 export interface BrowserSeederColumns {

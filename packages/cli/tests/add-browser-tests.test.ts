@@ -11,9 +11,10 @@ import {
 } from '../src/browser-specs'
 import { buildLoginViewTemplate } from '../src/make-auth'
 import type { PlanView } from '../src/plan/schema'
-import { createTempWorkspace, ENV_SCHEMA_FIXTURE, seedInertiaApp, writeWorkspaceFiles } from './helpers'
+import { checkTypes, createTempWorkspace, ENV_SCHEMA_FIXTURE, seedInertiaApp, templateCompilerOptions, TSC_TIMEOUT, writeWorkspaceFiles } from './helpers'
 
-const TEMPLATE_ROOT = join(import.meta.dir, '../templates/scaffold/browser-tests')
+const CLI_ROOT = join(import.meta.dir, '..')
+const TEMPLATE_ROOT = join(CLI_ROOT, 'templates/scaffold/browser-tests')
 const transpiler = new Bun.Transpiler({ loader: 'ts' })
 const template = (path: string): Promise<string> => readFile(join(TEMPLATE_ROOT, path), 'utf8')
 
@@ -158,6 +159,35 @@ describe('the accessibility spec', () => {
     expect(source).not.toContain('checkAccessibility')
     expect(() => transpiler.transformSync(source)).not.toThrow()
   })
+
+  test('writes a fixme two plans share once, since Playwright refuses a file with a duplicate title', () => {
+    const showRoute = route('GET', '/posts/:id', ['posts/Show'])
+    const shared = ['docs/plans/a/plan.json', 'docs/plans/b/plan.json'].map((file): BrowserMapView => ({ plan: file, view: view('posts.show', 'posts/Show'), routes: [showRoute] }))
+    const source = buildA11ySpec(mapOf([], shared), { signIn: false })
+    expect(source.match(/test\.fixme\('a11y view posts\.show/gu)).toHaveLength(1)
+  })
+
+  test('typechecks against Playwright and axe beside the templates it imports', async () => {
+    const workspace = await createTempWorkspace('guren-a11y-spec-types-')
+    try {
+      const files = {
+        [A11Y_SPEC_FILE]: buildA11ySpec(mapOf([POSTS, DASHBOARD, COMMENTS]), { signIn: true }),
+        [A11Y_OPTIONS_FILE]: await template(A11Y_OPTIONS_FILE),
+        'tests/browser/support.ts': await template('tests/browser/support.ts'),
+      }
+      await writeWorkspaceFiles(workspace.dir, files)
+      const diagnostics = checkTypes(Object.keys(files).map((file) => join(workspace.dir, file)), {
+        ...templateCompilerOptions({
+          '@playwright/test': [join(CLI_ROOT, 'node_modules/@playwright/test')],
+          '@axe-core/playwright': [join(CLI_ROOT, 'node_modules/@axe-core/playwright')],
+        }),
+        types: ['bun-types', 'node'],
+      })
+      expect(diagnostics).toEqual([])
+    } finally {
+      await workspace.cleanup()
+    }
+  }, TSC_TIMEOUT)
 
   test('puts a route requiring a user under the signed-in storage state', () => {
     const source = buildA11ySpec(mapOf([DASHBOARD]), { signIn: true })
