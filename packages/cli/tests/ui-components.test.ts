@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { addUi, resolveUiComponentNames } from '../src/add-ui'
@@ -172,14 +172,16 @@ describe('guren add ui', () => {
     await writeFile(join(workspace.dir, uiComponentPath('Button')), '// mine\n', 'utf8')
     rmSync(join(workspace.dir, uiComponentPath('Label')))
     const rerun = await addUi()
-    expect(rerun.created).toEqual([join(workspace.dir, uiComponentPath('Label'))])
+    // The command writes under process.cwd(), the realpath of the macOS tmpdir symlink.
+    expect(rerun.created).toEqual([join(await realpath(workspace.dir), uiComponentPath('Label'))])
     expect(await readFile(join(workspace.dir, uiComponentPath('Button')), 'utf8')).toBe('// mine\n')
   })
 
   it('writes only the named components, matched without case', async () => {
     await seedInertiaApp(workspace.dir)
     const { created } = await addUi({ names: ['button', 'CARD'] })
-    expect(created).toEqual([join(workspace.dir, uiComponentPath('Button')), join(workspace.dir, uiComponentPath('Card'))])
+    const root = await realpath(workspace.dir)
+    expect(created).toEqual([join(root, uiComponentPath('Button')), join(root, uiComponentPath('Card'))])
   })
 
   it('replaces an existing copy under --force', async () => {
