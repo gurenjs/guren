@@ -42,7 +42,7 @@ bun run dev
 
 Dev Center の計画のページに戻ると、**Review** の欄に保存した操作の件数 (`1 answered`) と、エージェントに送る依頼文がコピーボタン付きで表示されています。
 
-![レビュー後の Dev Center の計画のページ。「Waiting on a person」の枠に「Review saved」とあり、レビューをもとに計画を改訂するようエージェントに伝える案内が出ています。その下の Review カードには Review this plan のボタン、0 approved、0 changes requested、0 commented、1 answered という件数の行があります。「Send the agent:」の下には「Revise docs/plans/meetups/plan.json from my review with the plan-write skill. The review is saved in .guren/plans/meetups.feedback.json.」という依頼文とコピーボタンが並びます](../../images/agent-course-dev-center-review.png)
+![レビュー後の Dev Center の計画のページ。「Waiting on a person」の枠に「Review saved」とあり、レビューをもとに計画を改訂するようエージェントに伝える案内が出ています。その下に Check plan:approve のボタンを持つ Approve カードがあり、続く Review カードには Review this plan のボタン、0 approved、0 changes requested、0 commented、1 answered という件数の行があります。「Send the agent:」の下には「Revise docs/plans/meetups/plan.json from my review with the plan-write skill. The review is saved in .guren/plans/meetups.feedback.json.」という依頼文とコピーボタンが並びます](../../images/agent-course-dev-center-review.png)
 
 第 2 章で見つけた足りない振る舞いはページからは伝わらないので、依頼文の下に書き足します。Claude Code のセッションに、次のプロンプトを送ります。
 
