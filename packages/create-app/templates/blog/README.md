@@ -7,17 +7,24 @@ and a seeded demo account, ready to run.
 
 ```bash
 bun install
+<!-- guren:container -->
+bun run db:up        # start the __DATABASE_LABEL__ container
+<!-- /guren:container -->
 bun run db:make      # generate the first migration from db/schema.ts
 bun run db:migrate
 bun run db:seed      # demo@example.com / secret, plus two sample posts
 bun run dev
 ```
 
+<!-- guren:container -->
+__DATABASE_LABEL__ runs in the container `docker-compose.yml` defines, and `DATABASE_URL` in `.env` points at it. `bun run db:down` stops it.
+<!-- /guren:container -->
+<!-- guren:no-container -->
+No Docker and no database server: SQLite keeps the database in the file `DATABASE_URL` names in `.env`.
+<!-- /guren:no-container -->
+
 Visit `http://localhost:3333`, then sign in as `demo@example.com` with the
 password `secret` and publish a post from `/posts/create`.
-
-If you scaffolded with PostgreSQL or MySQL, run `bun run db:up` first to start
-the database container.
 
 ## What's Included
 
@@ -70,6 +77,31 @@ bunx guren add broadcasting   # realtime channels
 bunx guren add schedule       # task scheduling
 ```
 
+<!-- guren:ssr -->
+## Server-Side Rendering
+
+Pages render on the server through Inertia SSR. During development the Bun server reads `resources/js/ssr.tsx` directly. Production builds use the SSR bundle and manifest Vite generates, which `src/main.ts` wires up through `autoConfigureInertiaAssets`.
+
+`bun run build` runs `vite build` for the client and `vite build --ssr` for the server bundle, so the first request is answered with pre-rendered HTML. `bun run preview` then starts the same Bun server in production mode against those manifests.
+
+### Deploy to Vercel
+
+Vercel support is an opt-in plugin for SSR apps:
+
+```bash
+bunx guren plugin @guren/plugin-vercel
+bun add @guren/plugin-vercel
+bun run vercel:build
+```
+
+Then deploy with Vercel's prebuilt flow:
+
+```bash
+vercel build
+vercel deploy --prebuilt
+```
+
+<!-- /guren:ssr -->
 ## Favicon
 
 `public/favicon.svg` ships as a placeholder and is linked from `src/app.ts` via
@@ -89,6 +121,10 @@ deployments (AWS Lambda, for example) serve them from a CDN instead.
 | `bun run build` | Build for production |
 | `bun run preview` | Start the built app with the Bun production server |
 | `bun run start` | Start the app in production mode (`NODE_ENV=production`); what a deployment runs |
+<!-- guren:container -->
+| `bun run db:up` | Start the __DATABASE_LABEL__ container |
+| `bun run db:down` | Stop the __DATABASE_LABEL__ container |
+<!-- /guren:container -->
 | `bun run db:make` | Generate a migration from `db/schema.ts` |
 | `bun run db:migrate` | Run database migrations |
 | `bun run db:seed` | Seed the database |

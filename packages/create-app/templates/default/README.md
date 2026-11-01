@@ -49,7 +49,14 @@ bunx guren add schedule       # task scheduling
 
 ## Database
 
-This app uses __DATABASE_LABEL__. `config/database.ts` creates the connection, and `DATABASE_URL` in `.env` selects the database. Switching to another driver means changing three files together: the factory in `config/database.ts` (`createSqliteDatabase`, `createPostgresDatabase` or `createMySqlDatabase`), the `dialect` in `drizzle.config.ts`, and the table builders in `db/schema.ts`.
+This app uses __DATABASE_LABEL__. `config/database.ts` creates the connection, and `DATABASE_URL` in `.env` selects the database.
+
+To switch to another driver:
+
+- install its client: `bun add postgres` for PostgreSQL, `bun add mysql2` for MySQL (SQLite needs none);
+- change the factory in `config/database.ts` (`createSqliteDatabase`, `createPostgresDatabase` or `createMySqlDatabase`), the `dialect` in `drizzle.config.ts`, and the table builders in `db/schema.ts`;
+- empty `db/migrations/` and regenerate it with `bun run db:make`, since a migration is written in one dialect's SQL;
+- for PostgreSQL or MySQL, run a server and point `DATABASE_URL` at it. `docker-compose.yml` is written only when the app is created with one of them.
 
 See the [database guide](https://guren.dev/docs/guides/database) for details.
 

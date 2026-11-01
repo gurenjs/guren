@@ -244,12 +244,12 @@ const DATABASE_LABELS: Record<DatabaseDriver, string> = {
 export type ReadmeBlockName = 'ssr' | 'container' | 'no-container'
 
 const README_BLOCK = /^<!-- (\/?)guren:([a-z-]+) -->$/u
+const README_BLOCK_LIKE = /<!--\s*\/?guren:/u
 
 /**
  * Keeps or drops each `<!-- guren:<name> -->` … `<!-- /guren:<name> -->` line
  * block of a template README, so one README covers every rendering mode and
- * driver (an overlay README per mode is how the SSR one drifted to PostgreSQL).
- * An unknown, nested or unclosed marker throws rather than ship a marker.
+ * driver. A malformed, unknown, nested or unclosed marker throws.
  */
 export function renderReadmeBlocks(content: string, blocks: Record<ReadmeBlockName, boolean>): string {
   const kept: string[] = []
@@ -258,6 +258,9 @@ export function renderReadmeBlocks(content: string, blocks: Record<ReadmeBlockNa
   for (const line of content.split('\n')) {
     const marker = README_BLOCK.exec(line)
     if (!marker) {
+      if (README_BLOCK_LIKE.test(line)) {
+        throw new Error(`README line "${line}" looks like a block marker but is not one; write \`<!-- guren:<name> -->\` on its own line.`)
+      }
       if (open === null || blocks[open]) {
         kept.push(line)
       }
@@ -284,14 +287,11 @@ async function renderReadme(destination: string, renderingMode: RenderingMode, d
   const path = join(destination, 'README.md')
   const content = await readFile(path, 'utf8')
   const container = usesDatabaseContainer(database)
-  const rendered = renderReadmeBlocks(content, {
+  await writeFile(path, renderReadmeBlocks(content, {
     ssr: renderingMode === 'ssr',
     container,
     'no-container': !container,
-  })
-  if (rendered !== content) {
-    await writeFile(path, rendered, 'utf8')
-  }
+  }), 'utf8')
 }
 
 async function scaffoldEnvFiles(destination: string): Promise<void> {

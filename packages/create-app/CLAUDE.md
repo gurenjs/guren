@@ -79,12 +79,14 @@ Scaffolding CLI that copies templates from `templates/default` and replaces toke
   pairing, one shared table shape across the three, the verbatim copy into
   every blueprint that falls back, tarball inclusion, both branches around the
   fallback, and that no template ships a plain `db/schema.ts`.
-- **One README per base template, none in an overlay.** An overlay README
-  replaces the base one wholesale, which is how `default-ssr`'s kept describing
-  PostgreSQL after the default moved to SQLite. Mode- and driver-specific text
-  lives in `<!-- guren:ssr|container|no-container -->` blocks of
-  `templates/default/README.md`, kept or dropped by `renderReadmeBlocks()`;
-  `tests/readme-template.test.ts` pins the result.
+- **A README in a later layer replaces the earlier one wholesale**, so every
+  README that can land (`default`, `api-only`, `blog`) carries its own mode-
+  and driver-specific text in `<!-- guren:ssr|container|no-container -->`
+  blocks, kept or dropped by `renderReadmeBlocks()` on whatever README the
+  layers leave. `default-ssr` ships none. `tests/readme-template.test.ts`
+  checks every blueprint × mode × driver, and that each block another README
+  carries is one `templates/default/README.md` carries verbatim, so edit a
+  block there and copy it.
 - **Advertise nothing without a smoke.** Each blueprint gets a
   `smoke:starter:<name>` script and a CI step — `bun run typecheck` and
   `bun run build` inside a real scaffold are the only things that catch a
