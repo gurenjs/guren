@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from 'bun:test'
-import { readdir, readFile, writeFile } from 'node:fs/promises'
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { runCommand } from 'citty'
@@ -427,6 +427,8 @@ describe('plan:close', () => {
   test('should name a plan in the docs/plans/<slug>/plan.json layout by its directory, in its state and its documents', async () => {
     const dir = join(ROOT, 'layout')
     await writePlanVerifyApp(dir)
+    // The root comments.plan.json would share the slug, which plan:close refuses.
+    await rm(join(dir, 'comments.plan.json'))
     const document = loadApprovedCommentsPlan()
     const plan = join(dir, 'docs/plans/comments/plan.json')
     await writeWorkspaceFiles(dir, { 'docs/plans/comments/plan.json': JSON.stringify(document) })

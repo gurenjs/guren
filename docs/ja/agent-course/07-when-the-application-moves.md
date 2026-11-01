@@ -420,7 +420,7 @@ export default function Show({ meetup, registrationId }: Props) {
         {registrationId !== null ? (
           <button type="button" className="text-g-danger" onClick={() => router.delete(`/registrations/${registrationId}`)}>Cancel</button>
         ) : meetup.seatsLeft > 0 ? (
-          <button type="button" className="rounded-g-ctl bg-g-accent px-4 py-2 font-bold text-white" onClick={() => router.post(`/meetups/${meetup.id}/registrations`)}>Register</button>
+          <button type="button" className="rounded-g-ctl bg-g-accent px-4 py-2 font-bold text-g-on-accent" onClick={() => router.post(`/meetups/${meetup.id}/registrations`)}>Register</button>
         ) : (
           <p className="text-g-text-2">The meetup is full.</p>
         )}

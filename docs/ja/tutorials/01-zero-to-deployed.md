@@ -200,7 +200,7 @@ bunx guren context
 
 `.claude/` のそれ以外のファイルは、セッションの開始時ではなく、必要になったときに読み込まれます。
 
-- **`rules/`** には、領域ごとに検証済みの API ルールが入っています(`orm-models.md`、`controllers-http.md`、`routes-codegen.md`、`testing.md`、`docs-and-spec.md`、`comments.md`)。各ファイルは frontmatter の `paths` で対象のファイルを指定しているので、たとえば `routes-codegen.md` は、エージェントがルートを編集するときに初めて読み込まれます。
+- **`rules/`** には、領域ごとに検証済みの API ルールが入っています(`orm-models.md`、`controllers-http.md`、`routes-codegen.md`、`testing.md`、`docs-and-spec.md`、`comments.md`、`ui.md`)。各ファイルは frontmatter の `paths` で対象のファイルを指定しているので、たとえば `routes-codegen.md` は、エージェントがルートを編集するときに初めて読み込まれます。
 - **`skills/`** は、依頼に応じてエージェントが従う手順です。`scaffold`(ファイルを手で書かずに `bunx guren make:*` を使う)、`feature`、`db-manage`、`dev-workflow`、`plan-write` などがあります。
 - **`agents/`** には、それぞれ専用の指示書を持つ 2 つのサブエージェント、`code-review` と `test-writer` が入っています。
 - **`.mcp.json`** は、`dev` スクリプトがマウントした開発用 MCP エンドポイントの場所をエージェントに伝えます。これでエージェントは、動いているアプリに問い合わせられます。

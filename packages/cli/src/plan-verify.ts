@@ -12,6 +12,7 @@ import { CliError } from './cli-error'
 import { readScripts } from './command-output'
 import { devCenterPlanLine, planPagePath } from './dev-center-links'
 import { toPosixRelative } from './discovery'
+import { refuseSharedPlanSlug } from './plan-check'
 import { readPlanFile } from './plan-render'
 import { formatPlanStatus, type PlanStatusReport, PLAN_STATUS_REPORT_VERSION } from './plan-status'
 import type { PlanAppState } from './plan/app-state'
@@ -79,6 +80,7 @@ export async function planVerifyFile(planPath: string, options: PlanVerifyFileOp
   const app = options.app
   const loadApp = typeof app === 'function' ? app : async () => app
   const root = options.appRoot
+  await refuseSharedPlanSlug(root, path, 'no step is verified against it')
   // The app is not loaded before the first codegen: a load imports the routes file, and Bun
   // caches a failed import of a generated file for the process, codegen or no codegen.
   const derivation = derivePlanTasks(plan, { apiOnly: await isConfirmedApiOnlyApp(root).catch(() => false) })

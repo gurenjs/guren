@@ -26,10 +26,11 @@ describe('@guren/cli/oxlint', () => {
             'guren/no-nullish-env-default': 'error',
             'guren/no-unvalidated-env-read': 'error',
             'guren/no-discarded-patch-result': 'error',
+            'guren/no-raw-color': 'error',
           },
         },
         file: 'case.ts',
-        source: `import { expect, test } from 'bun:test'\nimport { addImport } from './patch-helpers'\n// ---- banner ----\ntest('x', async () => {\n  expect(Promise.resolve(1)).resolves.toBe(1)\n})\nconst store = process.env.CACHE_STORE ?? 'memory'\nawait addImport('a.ts', 'import x from "y"')\n`,
+        source: `import { expect, test } from 'bun:test'\nimport { addImport } from './patch-helpers'\n// ---- banner ----\ntest('x', async () => {\n  expect(Promise.resolve(1)).resolves.toBe(1)\n})\nconst store = process.env.CACHE_STORE ?? 'memory'\nawait addImport('a.ts', 'import x from "y"')\nconst tone = 'bg-red-500'\n`,
       })
 
       expect(output).toContain('case.ts:3:1:')
@@ -41,6 +42,8 @@ describe('@guren/cli/oxlint', () => {
       expect(output).toContain('guren(no-unvalidated-env-read)')
       expect(output).toContain('case.ts:8:1:')
       expect(output).toContain('guren(no-discarded-patch-result)')
+      expect(output).toContain('case.ts:9:14:')
+      expect(output).toContain('guren(no-raw-color)')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

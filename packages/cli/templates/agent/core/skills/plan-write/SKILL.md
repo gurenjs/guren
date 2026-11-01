@@ -28,17 +28,30 @@ bunx guren plan:render docs/plans/<slug>/plan.json --json
 
 Run it until no check has `"status": "fail"`, then tell the person:
 
-- where the page is (`path` in the output), which is what they review
-- with the dev server running, `/_guren/plans/<slug>`, where the plan waits
-  for their approval beside the other open plans
+- with the dev server running (`GUREN_MCP=1`), `/_guren/plans/<slug>`, where
+  the plan waits for their approval beside the other open plans; **Review this
+  plan** there opens the page and saves their review as they make it
+- without the server, where the page is (`path` in the output), which they
+  review from disk and export by hand
 - the questions still open, each with the option the plan assumes
 - the warnings you left, and why
 
 ## 3. Revise
 
 Before the first review, edit `plan.json` directly. After a review, apply the
-person's changes and the page's exported feedback to a copy of the plan,
-leaving `baseline` as it is, and record them:
+person's changes to a copy of the plan, leaving `baseline` as it is, and record
+them. When they reviewed in the Dev Center, the review is in
+`.guren/plans/<slug>.feedback.json`: read its comments and answers from there,
+and `plan:revise` applies its approvals and answers on its own:
+
+```bash
+bunx guren plan:revise docs/plans/<slug>/plan.json \
+  --edited <copy> --message "<what changed and why>"
+```
+
+It says which file it applied, and warns instead when the review was given on
+an earlier version of the plan: render again and ask for a new review. When
+they pasted the page's feedback instead, pass it in:
 
 ```bash
 bunx guren plan:revise docs/plans/<slug>/plan.json \

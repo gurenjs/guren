@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
@@ -9,6 +10,8 @@ import {
   SKIPPED_GENERATORS,
   assertWorkspaceBuilt,
   createTempWorkspace,
+  lintFiles,
+  NO_RAW_COLOR_CONFIG,
   seedApiOnlyApp,
   seedAttachmentsConfig,
   seedInertiaApp,
@@ -17,6 +20,7 @@ import {
 import { parseSourceFile } from '../src/parse-cache'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { builtinSubCommands } from '../src/commands'
+import { TOKENS_PATH } from '../src/guren-css'
 import { buildOAuthConfigTemplate, buildOAuthProviderTemplate, makeAuth, type MakeAuthOptions } from '../src/make-auth'
 import { KNOWN_OAUTH_PROVIDERS } from '../src/oauth-scaffold'
 import { runBlueprint } from '../src/blueprints'
@@ -93,6 +97,31 @@ async function unparseableSources(dir: string): Promise<string[]> {
   return failures
 }
 
+/** A Guren UI utility or token variable, spelled independently of `usesGurenUiTokens`. */
+const GUREN_UI_CLASS = /-g-[a-z]/
+
+/** Test prefixes of the cases that wrote a page or component under resources/js; read by the coverage gate. */
+const casesWithPages = new Set<string>()
+
+/**
+ * The shipped .oxlintrc.json turns `guren/no-raw-color` on for resources/js/**, so a
+ * generated page has to pass it; and a page styled with `g-` utilities is unstyled
+ * unless the run also left resources/css/guren.css behind (the seeds carry none).
+ */
+async function expectPagesUseTokens(dir: string, prefix: string): Promise<void> {
+  const pages = (await collectFiles(join(dir, 'resources/js'), IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES))
+    .map((file) => toPosixRelative(dir, file))
+  if (pages.length === 0) return
+  casesWithPages.add(prefix)
+  expect(lintFiles({ config: NO_RAW_COLOR_CONFIG, files: pages, cwd: dir })).toBe('')
+
+  const styled: string[] = []
+  for (const page of pages) {
+    if (GUREN_UI_CLASS.test(await readFile(join(dir, page), 'utf8'))) styled.push(page)
+  }
+  if (styled.length > 0) expect(existsSync(join(dir, TOKENS_PATH)), `${TOKENS_PATH} for ${styled.join(', ')}`).toBe(true)
+}
+
 async function expectAllOutputsParse(
   prefix: string,
   run: () => Promise<unknown>,
@@ -103,6 +132,7 @@ async function expectAllOutputsParse(
     await seed?.(workspace.dir)
     await run()
     expect(await unparseableSources(workspace.dir)).toEqual([])
+    await expectPagesUseTokens(workspace.dir, prefix)
     return workspace.dir
   } finally {
     await workspace.cleanup()
@@ -230,6 +260,24 @@ describe('generated sources parse', () => {
       await expectAllOutputsParse(`guren-parse-${label.replace(/[^a-z]+/g, '-')}-`, run)
     })
   }
+
+  // Not a make:* generator, but the other scaffold that writes a styled page.
+  it('add admin', async () => {
+    await expectAllOutputsParse('guren-parse-add-admin-', () => runBlueprint('admin', {}), seedInertiaApp)
+  })
+
+  // Runs after the cases above: a generator whose pages moved out of resources/js
+  // would leave the raw-color and token checks above with nothing to judge.
+  it('the page checks saw pages from every page-writing generator', () => {
+    const prefixes = {
+      'make:auth': 'guren-parse-auth-',
+      'make:feature': 'guren-parse-feature-',
+      'make:view': 'guren-parse-make-view-',
+      'add admin': 'guren-parse-add-admin-',
+    }
+    const seen = (prefix: string) => [...casesWithPages].some((key) => key.startsWith(prefix))
+    expect(Object.entries(prefixes).filter(([, prefix]) => !seen(prefix)).map(([name]) => name)).toEqual([])
+  })
 })
 
 describe('shipped templates reach published users', () => {

@@ -14,6 +14,7 @@ import { readPlanApprovalStanding } from './plan/approvals'
 import { touchedModels } from './plan/close-docs'
 import { planHashOrNull } from './plan/identity'
 import { readPlanClosedHash } from './plan/open-plan'
+import { readSavedPlanFeedback, summarizeSavedFeedback, type SavedFeedbackSummary } from './plan/saved-feedback'
 import type { Plan } from './plan/schema'
 import { planDigest, planSlug, readPlanState } from './plan/state'
 import { describePlanTask, derivePlanTasks, listPlanSteps } from './plan/tasks'
@@ -53,8 +54,10 @@ export interface DocsViewerOpenPlan {
   entities: string[]
   steps: DocsViewerPlanStep[]
   waivers: Array<{ elementId: string; reason: string; at: string; by?: string }>
-  /** `.guren/plans/<slug>.state.json` or the decision log would not read. */
+  /** `.guren/plans/<slug>.state.json`, the decision log or the saved review would not read. */
   unreadable?: string[]
+  /** The review the Dev Center saved for this plan (RFC 0030 §8), counted rather than carried. */
+  feedback?: SavedFeedbackSummary
   /** The commands the records say come next, in order; a reading of them, not `plan:next`'s decision. */
   next: string[]
   /** `plan:status` for what the viewer does not read: element states and freshness. */
@@ -97,10 +100,14 @@ function unreadablePlan(file: string, slug: string, reason: string): DocsViewerO
   return { file, slug, title: file, standing: 'unreadable', reason, entities: [], steps: [], waivers: [], next: [], status: planCommand('plan:status', file) }
 }
 
+const NO_SAVED_REVIEW: Awaited<ReturnType<typeof readSavedPlanFeedback>> = {}
+
 interface PlanReadContext {
   appRoot: string
   apiOnly: boolean
   hash: (files: string[]) => Promise<Map<string, string | null>>
+  /** `PlanDiscovery.sharedSlugs`: the Dev Center saves no review for them, so none is attributed. */
+  sharedSlugs: ReadonlyMap<string, readonly string[]>
 }
 
 async function readViewerPlan(context: PlanReadContext, path: string, file: string, slug: string): Promise<{ open?: DocsViewerOpenPlan; hash?: string | null }> {
@@ -115,7 +122,12 @@ async function readViewerPlan(context: PlanReadContext, path: string, file: stri
     if (closed.hash === hash) return { hash }
   }
 
-  const [standingRead, stateRead, log] = await Promise.all([readPlanApprovalStanding(path, plan), readPlanState(appRoot, slug), readPlanWaivers(path, plan)])
+  const [standingRead, stateRead, log, review] = await Promise.all([
+    readPlanApprovalStanding(path, plan),
+    readPlanState(appRoot, slug),
+    readPlanWaivers(path, plan),
+    context.sharedSlugs.has(slug) ? NO_SAVED_REVIEW : readSavedPlanFeedback(appRoot, slug),
+  ])
   const standing: DocsViewerPlanStanding = standingRead?.state ?? 'draft'
   const digest = planDigest(plan)
   const records = stateRead.state?.steps ?? {}
@@ -151,7 +163,7 @@ async function readViewerPlan(context: PlanReadContext, path: string, file: stri
     next = [command('plan:approve')]
   } else reason = `The approvals beside the plan cannot be read, so it counts as approved by no one: ${standingRead.reason}`
 
-  const unreadable = [stateRead.unreadable, log.unreadable].filter((entry): entry is string => entry !== undefined)
+  const unreadable = [stateRead.unreadable, log.unreadable, review.unreadable].filter((entry): entry is string => entry !== undefined)
   return {
     hash,
     open: {
@@ -167,6 +179,7 @@ async function readViewerPlan(context: PlanReadContext, path: string, file: stri
       steps,
       waivers: [...log.waivers.values()].map(({ elementId, reason: why, at, by }) => ({ elementId, reason: why, at, ...(by ? { by } : {}) })),
       ...(unreadable.length > 0 ? { unreadable } : {}),
+      ...(review.saved ? { feedback: summarizeSavedFeedback(review.saved, slug, digest) } : {}),
       next,
       status: command('plan:status'),
     },
@@ -200,7 +213,7 @@ export async function readViewerPlans(appRoot: string, discovery: PlanDiscovery)
   const { files } = discovery
   const unreadable = relativeUnreadableDirs(appRoot, discovery.unreadable)
   if (files.length === 0) return { open: [], hashes: new Map(), unreadable }
-  const context: PlanReadContext = { appRoot, apiOnly: await isConfirmedApiOnlyApp(appRoot).catch(() => false), hash: fileHasher(appRoot) }
+  const context: PlanReadContext = { appRoot, apiOnly: await isConfirmedApiOnlyApp(appRoot).catch(() => false), hash: fileHasher(appRoot), sharedSlugs: discovery.sharedSlugs }
   // One plan the readers choke on is that plan's problem, never the whole payload's.
   const read = await Promise.all(
     files.map(async (path) => {

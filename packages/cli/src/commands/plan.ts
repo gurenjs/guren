@@ -394,7 +394,7 @@ export const planReviseCommand = defineCommand({
     },
     feedback: {
       type: 'string',
-      description: "The feedback the plan page exports (feedback.json); - reads standard input. Its approvals lock elements and its answers must be applied.",
+      description: "The feedback the plan page exports (feedback.json); - reads standard input. Its approvals lock elements and its answers must be applied. Omitted, the review the Dev Center saved in .guren/plans/<slug>.feedback.json is applied while it names the plan as it stands.",
       valueHint: 'feedback.json',
     },
     message: {

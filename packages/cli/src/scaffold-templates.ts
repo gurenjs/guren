@@ -17,7 +17,12 @@ const scaffoldTemplateDir = fileURLToPath(new URL('../templates/scaffold', impor
  * raw read, for assets that are not scaffold entries; prefer {@link scaffoldTemplateFile}.
  */
 export function loadScaffoldTemplate(relativePath: string): string {
-  return readFileSync(join(scaffoldTemplateDir, ...relativePath.split('/')), 'utf8')
+  return readFileSync(scaffoldTemplatePath(relativePath), 'utf8')
+}
+
+/** Where the running CLI keeps one shipped template, for a message that sends someone to copy it. */
+export function scaffoldTemplatePath(relativePath: string): string {
+  return join(scaffoldTemplateDir, ...relativePath.split('/'))
 }
 
 /**
