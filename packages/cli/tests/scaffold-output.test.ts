@@ -18,6 +18,7 @@ import {
   writeWorkspaceFiles,
 } from './helpers'
 import { parseSourceFile } from '../src/parse-cache'
+import { formTagProblems } from './form-tags'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { builtinSubCommands } from '../src/commands'
 import { buildFormContracts } from '../src/forms-types'
@@ -118,9 +119,13 @@ async function expectPagesUseTokens(dir: string, prefix: string): Promise<void> 
   expect(lintFiles({ config: NO_RAW_COLOR_CONFIG, files: pages, cwd: dir })).toBe('')
 
   const styled: string[] = []
+  const formProblems: string[] = []
   for (const page of pages) {
-    if (GUREN_UI_CLASS.test(await readFile(join(dir, page), 'utf8'))) styled.push(page)
+    const source = await readFile(join(dir, page), 'utf8')
+    if (GUREN_UI_CLASS.test(source)) styled.push(page)
+    formProblems.push(...formTagProblems(source, page))
   }
+  expect(formProblems).toEqual([])
   if (styled.length > 0) expect(existsSync(join(dir, TOKENS_PATH)), `${TOKENS_PATH} for ${styled.join(', ')}`).toBe(true)
 }
 

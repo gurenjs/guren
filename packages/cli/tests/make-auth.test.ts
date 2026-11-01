@@ -167,7 +167,6 @@ export function registerWebRoutes(router: Router): void {
       expect(loginPage).toContain('<Field form={form} name="email" />')
       expect(loginPage).toContain('<Field form={form} name="password" as="password" />')
       expect(loginPage).toContain('<Field form={form} name="remember" label="Remember me" />')
-      // Submitted before hydration, the form must POST to its route, never GET the password into the URL.
       expect(loginPage).toContain('<form method="post" action={loginStoreForm.path} ')
       // The copied components a page imports are written beside it.
       for (const name of ['Field', 'Button', 'Alert', 'Input', 'Checkbox', 'Label']) {
