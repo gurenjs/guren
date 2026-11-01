@@ -8,6 +8,8 @@ import {
 } from './context'
 import { isOptionalExpiryPast } from '../support/expiry'
 import { AuthenticationException } from '../errors/exceptions/AuthenticationException'
+import { grantsOnlyAgentTools } from '../agent/scopes'
+import { isAgentDispatch } from '../internal/agent-principal'
 
 /**
  * API token data stored in the backing store.
@@ -225,6 +227,16 @@ export interface VerifiedApiToken {
 }
 
 /**
+ * Whether a verified token may authenticate this request. A token granting only
+ * agent tools (`tool:` / `tools:` abilities) answers for the tool calls the
+ * pipeline dispatched after judging its scopes, never for a request a client
+ * sent straight to a route: there nothing would check those scopes.
+ */
+export function tokenAuthenticatesRequest(verified: VerifiedApiToken, request: Request): boolean {
+  return !grantsOnlyAgentTools(verified.abilities) || isAgentDispatch(request)
+}
+
+/**
  * Verify an API token and return the associated user ID.
  */
 export async function verifyApiToken(
@@ -402,6 +414,11 @@ export function createBearerTokenMiddleware(
     if (!result) {
       if (onUnauthorized) return onUnauthorized(ctx)
       return ctx.json({ error: 'Invalid or expired token' }, 401)
+    }
+
+    if (!tokenAuthenticatesRequest(result, ctx.req.raw)) {
+      if (onUnauthorized) return onUnauthorized(ctx)
+      return ctx.json({ error: 'This token only grants agent tools' }, 401)
     }
 
     if (abilities && abilities.length > 0) {

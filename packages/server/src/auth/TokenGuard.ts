@@ -6,6 +6,7 @@ import {
   parseApiToken,
   readBearerToken,
   revokePresentedToken,
+  tokenAuthenticatesRequest,
   verifyApiToken,
   type ApiTokenStore,
   type VerifiedApiToken,
@@ -59,9 +60,10 @@ export class TokenGuard<User = unknown> implements Guard<User> {
           return existing
         }
 
-        const result = await verifyApiToken(plainTextToken, this.store, {
+        const verified = await verifyApiToken(plainTextToken, this.store, {
           updateLastUsed: this.updateLastUsed,
         })
+        const result = verified && tokenAuthenticatesRequest(verified, this.ctx.req.raw) ? verified : null
         if (result) {
           this.ctx.set(API_TOKEN_KEY, result)
         }

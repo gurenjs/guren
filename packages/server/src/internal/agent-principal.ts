@@ -43,3 +43,20 @@ export function installAgentPrincipal(
 export function readAgentPrincipal(request: Request): InstalledAgentPrincipal | undefined {
   return installed.get(request)
 }
+
+const dispatched = new WeakSet<Request>()
+
+/**
+ * Mark `request` as a tool call the pipeline scope-gated before dispatching,
+ * returning that same object. Keyed on identity like the principal: a token
+ * whose abilities grant only agent tools authenticates such a request and no other.
+ */
+export function markAgentDispatch(request: Request): Request {
+  dispatched.add(request)
+  return request
+}
+
+/** Whether the pipeline dispatched this exact request object. */
+export function isAgentDispatch(request: Request): boolean {
+  return dispatched.has(request)
+}

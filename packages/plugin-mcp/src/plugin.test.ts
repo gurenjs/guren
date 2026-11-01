@@ -2,6 +2,7 @@ import { describe, test, expect, beforeAll } from 'bun:test'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { z } from 'zod'
 import {
+  AUTH_CONTEXT_KEY,
   AgentToolInvoked,
   EventServiceProvider,
   MemoryApiTokenStore,
@@ -14,6 +15,7 @@ import {
   type AgentApprovalRequest,
   type AgentApprovalStore,
   type Application,
+  type AuthContext,
   type EventManager,
   type Router,
 } from '@guren/core'
@@ -269,6 +271,34 @@ describe('mcpPlugin bearer forwarding (integration)', () => {
       userId: 99,
       canCallTools: true,
     })
+  })
+
+  test('should refuse the same tools-only token sent straight to the route', async () => {
+    const response = await app.fetch(
+      new Request('http://localhost/token-echo', { headers: { Authorization: `Bearer ${token}` } }),
+    )
+
+    expect(response.status).toBe(401)
+  })
+
+  test('should refuse it on a route the token guard resolves, outside any token middleware', async () => {
+    const guarded = createApp({
+      routes: (router: Router) => {
+        router.get('/whoami', async (c) => {
+          const auth = c.get(AUTH_CONTEXT_KEY) as AuthContext
+          return Response.json({ authenticated: await auth.check() })
+        })
+      },
+      providers: [mcpPlugin()],
+    })
+    guarded.auth.useTokens(tokens)
+    await guarded.boot()
+
+    const response = await guarded.fetch(
+      new Request('http://localhost/whoami', { headers: { Authorization: `Bearer ${token}` } }),
+    )
+
+    expect(await response.json()).toEqual({ authenticated: false })
   })
 })
 
