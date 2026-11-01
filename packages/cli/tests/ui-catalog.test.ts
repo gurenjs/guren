@@ -68,7 +68,7 @@ describe('the preview entry', () => {
     copy('Field')
     const source = uiCatalogEntrySource(root)
     expect(source).toContain(`import '${UI_CATALOG_STYLESHEET_ID}'`)
-    expect(source).toContain("stylesheet: 'resources/css/app.css'")
+    expect(source).toContain('styled: true')
     expect(source).toContain(`Button: () => import('${UI_CATALOG_COMPONENT_PREFIX}Button')`)
     expect(source).toContain(`Field: () => import('${UI_CATALOG_COMPONENT_PREFIX}Field')`)
     expect(source).not.toContain('Card:')
@@ -76,9 +76,10 @@ describe('the preview entry', () => {
 
   it('falls back to guren.css, then to no stylesheet', () => {
     write('resources/css/guren.css', ':root {}\n')
-    expect(uiCatalogEntrySource(root)).toContain("stylesheet: 'resources/css/guren.css'")
+    expect(uiCatalogHooks(() => root).resolveId(UI_CATALOG_STYLESHEET_ID)).toBe(join(root, 'resources/css/guren.css'))
     rmSync(join(root, 'resources'), { recursive: true })
-    expect(uiCatalogEntrySource(root)).toContain('stylesheet: null')
+    expect(uiCatalogEntrySource(root)).toContain('styled: false')
+    expect(uiCatalogEntrySource(root)).not.toContain(UI_CATALOG_STYLESHEET_ID)
   })
 
   it('is served by the Vite plugin under its virtual ids', () => {

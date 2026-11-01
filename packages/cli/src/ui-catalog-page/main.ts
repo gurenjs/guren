@@ -1,6 +1,6 @@
 // Bundled to one ES module that the app's Vite serves as `virtual:guren/ui-catalog-client`; `react` and
-// `@inertiajs/react` stay imports, resolved from the app. Styled inline with the app's `--g-*` tokens, since
-// Tailwind never scans this module for classes.
+// `@inertiajs/react` stay imports, resolved from the app, and the entry passes `createRoot` in (the CLI has
+// no react-dom types). Styled inline with the app's `--g-*` tokens, since Tailwind never scans this module.
 
 import { App } from '@inertiajs/react'
 import { Component, createElement as h, useState, type ComponentType, type CSSProperties, type ReactNode } from 'react'
@@ -16,8 +16,9 @@ interface Root {
   render(node: ReactNode): void
 }
 
-export interface UiCatalogOptions {
-  stylesheet: string | null
+interface UiCatalogOptions {
+  /** Whether the app has a stylesheet to load; without one the copies render unstyled. */
+  styled: boolean
   loaders: Loaders
 }
 
@@ -30,13 +31,8 @@ function example(label: string, ...children: ReactNode[]): ReactNode {
   return h('div', { key: label }, h('p', { style: caption }, label), h('div', { style: row }, ...children))
 }
 
-function exported(module: Module, name: string): AnyComponent | undefined {
-  const value = module[name]
-  return typeof value === 'function' ? (value as AnyComponent) : undefined
-}
-
-function missingExport(file: string, name: string): ReactNode {
-  return h('p', { style: note }, `${file} no longer exports ${name}, so the shipped examples cannot render it.`)
+function missingExport(component: string, name: string): ReactNode {
+  return h('p', { style: note }, `${component}.tsx no longer exports ${name}, so the shipped examples cannot render it.`)
 }
 
 class Boundary extends Component<{ name: string; children?: ReactNode }, { error?: string }> {
@@ -54,16 +50,13 @@ const ALERT_TEXT: Record<string, string> = { ok: 'The post was saved.', warn: 'T
 
 const prevent = (event: { preventDefault(): void }) => event.preventDefault()
 
-const DEMOS: Record<UiComponentName, (module: Module) => ReactNode> = {
-  Alert(module) {
-    const Alert = exported(module, 'Alert')
-    if (!Alert) return missingExport('Alert.tsx', 'Alert')
-    return h('div', { style: stack }, ...UI_CATALOG_VARIANTS.alertTones.map((tone) =>
-      example(`tone="${tone}"`, h('div', { style: { flex: 1 } }, h(Alert, { tone }, ALERT_TEXT[tone])))))
-  },
-  Button(module) {
-    const Button = exported(module, 'Button')
-    if (!Button) return missingExport('Button.tsx', 'Button')
+const OPTIONS = [{ value: 'draft', label: 'Draft' }, { value: 'published', label: 'Published' }]
+
+/** Each takes the export named after its component; `missingExport()` stands in when the copy lost it. */
+const DEMOS: Record<UiComponentName, (Shown: AnyComponent, module: Module) => ReactNode> = {
+  Alert: (Alert) => h('div', { style: stack }, ...UI_CATALOG_VARIANTS.alertTones.map((tone) =>
+    example(`tone="${tone}"`, h('div', { style: { flex: 1 } }, h(Alert, { tone }, ALERT_TEXT[tone]))))),
+  Button(Button, module) {
     const buttonClass = typeof module.buttonClass === 'function' ? (module.buttonClass as (options: Record<string, unknown>) => string) : undefined
     return h('div', { style: { display: 'grid', gap: '16px' } },
       ...UI_CATALOG_VARIANTS.buttonVariants.map((variant) => example(`variant="${variant}"`,
@@ -72,79 +65,51 @@ const DEMOS: Record<UiComponentName, (module: Module) => ReactNode> = {
       example('block', h('div', { style: { width: '20rem' } }, h(Button, { block: true }, 'Sign in'))),
       buttonClass
         ? example('buttonClass() on a link', h('a', { href: '#', onClick: prevent, className: buttonClass({ variant: 'secondary' }) }, 'Edit post'))
-        : missingExport('Button.tsx', 'buttonClass'))
+        : missingExport('Button', 'buttonClass'))
   },
-  Card(module) {
-    const Card = exported(module, 'Card')
-    if (!Card) return missingExport('Card.tsx', 'Card')
-    return h('div', { style: stack },
-      example('as="section" with a title', h('div', { style: { flex: 1 } }, h(Card, { title: 'Recent posts' }, 'A section of the page.'))),
-      example('as="article"', h('div', { style: { flex: 1 } }, h(Card, { as: 'article' }, 'One item of a list.'))))
-  },
-  Checkbox(module) {
-    const Checkbox = exported(module, 'Checkbox')
-    if (!Checkbox) return missingExport('Checkbox.tsx', 'Checkbox')
-    return example('unchecked · checked · disabled',
-      h(Checkbox, { key: 'off', label: 'Remember me' }),
-      h(Checkbox, { key: 'on', label: 'Published', defaultChecked: true }),
-      h(Checkbox, { key: 'disabled', label: 'Archived', disabled: true }))
-  },
-  Field(module) {
-    const Field = exported(module, 'Field')
-    if (!Field) return missingExport('Field.tsx', 'Field')
-    return h(FieldExamples, { Field })
-  },
-  Input(module) {
-    const Input = exported(module, 'Input')
-    if (!Input) return missingExport('Input.tsx', 'Input')
-    return h('div', { style: stack },
-      example('placeholder', h(Input, { placeholder: 'you@example.com', 'aria-label': 'Email' })),
-      example('value', h(Input, { defaultValue: 'Hello, Guren', 'aria-label': 'Title' })),
-      example('disabled', h(Input, { defaultValue: 'Read only', disabled: true, 'aria-label': 'Slug' })),
-      example('aria-invalid (an error)', h(Input, { defaultValue: 'not-an-email', 'aria-invalid': true, 'aria-label': 'Email' })))
-  },
-  Label(module) {
-    const Label = exported(module, 'Label')
-    if (!Label) return missingExport('Label.tsx', 'Label')
-    return example('for a control', h(Label, { htmlFor: 'guren-ui-label-example' }, 'Title'),
-      h('input', { id: 'guren-ui-label-example', type: 'text', style: { padding: '4px 8px', border: '1px solid var(--g-line-strong)', borderRadius: '4px' } }))
-  },
-  Select(module) {
-    const Select = exported(module, 'Select')
-    if (!Select) return missingExport('Select.tsx', 'Select')
-    const options = [{ value: 'draft', label: 'Draft' }, { value: 'published', label: 'Published' }]
-    return h('div', { style: stack },
-      example('options', h(Select, { options, 'aria-label': 'Status' })),
-      example('disabled', h(Select, { options, disabled: true, 'aria-label': 'Status' })),
-      example('aria-invalid (an error)', h(Select, { options, 'aria-invalid': true, 'aria-label': 'Status' })))
-  },
-  Textarea(module) {
-    const Textarea = exported(module, 'Textarea')
-    if (!Textarea) return missingExport('Textarea.tsx', 'Textarea')
-    return h('div', { style: stack },
-      example('placeholder', h(Textarea, { placeholder: 'Write something', rows: 3, 'aria-label': 'Body' })),
-      example('disabled', h(Textarea, { defaultValue: 'Read only', rows: 2, disabled: true, 'aria-label': 'Body' })),
-      example('aria-invalid (an error)', h(Textarea, { defaultValue: '', rows: 2, 'aria-invalid': true, 'aria-label': 'Body' })))
-  },
+  Card: (Card) => h('div', { style: stack },
+    example('as="section" with a title', h('div', { style: { flex: 1 } }, h(Card, { title: 'Recent posts' }, 'A section of the page.'))),
+    example('as="article"', h('div', { style: { flex: 1 } }, h(Card, { as: 'article' }, 'One item of a list.')))),
+  Checkbox: (Checkbox) => example('unchecked · checked · disabled',
+    h(Checkbox, { key: 'off', label: 'Remember me' }),
+    h(Checkbox, { key: 'on', label: 'Published', defaultChecked: true }),
+    h(Checkbox, { key: 'disabled', label: 'Archived', disabled: true })),
+  Field: (Field) => h(FieldExamples, { Field }),
+  Input: (Input) => h('div', { style: stack },
+    example('placeholder', h(Input, { placeholder: 'you@example.com', 'aria-label': 'Email' })),
+    example('value', h(Input, { defaultValue: 'Hello, Guren', 'aria-label': 'Title' })),
+    example('disabled', h(Input, { defaultValue: 'Read only', disabled: true, 'aria-label': 'Slug' })),
+    example('aria-invalid (an error)', h(Input, { defaultValue: 'not-an-email', 'aria-invalid': true, 'aria-label': 'Email' }))),
+  Label: (Label) => example('for a control', h(Label, { htmlFor: 'guren-ui-label-example' }, 'Title'),
+    h('input', { id: 'guren-ui-label-example', type: 'text', style: { padding: '4px 8px', border: '1px solid var(--g-line-strong)', borderRadius: '4px' } })),
+  Select: (Select) => h('div', { style: stack },
+    example('options', h(Select, { options: OPTIONS, 'aria-label': 'Status' })),
+    example('disabled', h(Select, { options: OPTIONS, disabled: true, 'aria-label': 'Status' })),
+    example('aria-invalid (an error)', h(Select, { options: OPTIONS, 'aria-invalid': true, 'aria-label': 'Status' }))),
+  Textarea: (Textarea) => h('div', { style: stack },
+    example('placeholder', h(Textarea, { placeholder: 'Write something', rows: 3, 'aria-label': 'Body' })),
+    example('disabled', h(Textarea, { defaultValue: 'Read only', rows: 2, disabled: true, 'aria-label': 'Body' })),
+    example('aria-invalid (an error)', h(Textarea, { defaultValue: '', rows: 2, 'aria-invalid': true, 'aria-label': 'Body' }))),
 }
 
-const FIELD_OPTIONS = [{ value: 'draft', label: 'Draft' }, { value: 'published', label: 'Published' }]
-const FIELD_HINTS: Partial<Record<string, string>> = { text: 'Shown as the page heading.' }
-const FIELD_ERRORS: Partial<Record<string, string>> = { email: 'The email field must be a valid email address.' }
+const FIELD_HINT = 'Shown as the page heading.'
+const FIELD_ERROR = 'The email field must be a valid email address.'
 
 /** A plain form object, which `FieldForm` accepts: `useField` reads `data` and `errors` and writes through `setData`. */
 function FieldExamples({ Field }: { Field: AnyComponent }): ReactNode {
   const [data, setState] = useState<Record<string, unknown>>(() =>
     Object.fromEntries(UI_CATALOG_VARIANTS.fieldInputs.map((input) => [input, input === 'checkbox' ? false : input === 'email' ? 'not-an-email' : ''])))
-  const form = { data, errors: FIELD_ERRORS, setData: (name: string, value: unknown) => setState((current) => ({ ...current, [name]: value })) }
-  return h('div', { style: stack }, ...UI_CATALOG_VARIANTS.fieldInputs.map((input) => example(`as="${input}"${FIELD_ERRORS[input] ? ' with an error' : FIELD_HINTS[input] ? ' with a hint' : ''}`,
-    h('div', { style: { flex: 1 } }, h(Field, {
+  const form = { data, errors: { email: FIELD_ERROR }, setData: (name: string, value: unknown) => setState((current) => ({ ...current, [name]: value })) }
+  return h('div', { style: stack }, ...UI_CATALOG_VARIANTS.fieldInputs.map((input) => {
+    const extra = input === 'email' ? ' with an error' : input === 'text' ? ' with a hint' : ''
+    return example(`as="${input}"${extra}`, h('div', { style: { flex: 1 } }, h(Field, {
       form,
       name: input,
       as: input,
-      ...(FIELD_HINTS[input] ? { hint: FIELD_HINTS[input] } : {}),
-      ...(input === 'select' ? { options: FIELD_OPTIONS } : {}),
-    })))))
+      ...(input === 'text' ? { hint: FIELD_HINT } : {}),
+      ...(input === 'select' ? { options: OPTIONS } : {}),
+    })))
+  }))
 }
 
 function section(name: string, body: ReactNode): ReactNode {
@@ -153,13 +118,17 @@ function section(name: string, body: ReactNode): ReactNode {
     h(Boundary, { name }, body))
 }
 
-function catalog(modules: Map<string, Module | Error>, stylesheet: string | null): AnyComponent {
+function demo(name: UiComponentName, module: Module | Error): ReactNode {
+  if (module instanceof Error) return h('p', { style: note }, `${name}.tsx could not be loaded: ${module.message}`)
+  const Shown = module[name]
+  return typeof Shown === 'function' ? DEMOS[name](Shown as AnyComponent, module) : missingExport(name, name)
+}
+
+function catalog(modules: Map<string, Module | Error>, styled: boolean): AnyComponent {
   return function UiCatalog() {
-    const sections = [...modules].map(([name, module]) => section(name, module instanceof Error
-      ? h('p', { style: note }, `${name}.tsx could not be loaded: ${module.message}`)
-      : DEMOS[name as UiComponentName](module)))
+    const sections = [...modules].map(([name, module]) => section(name, demo(name as UiComponentName, module)))
     return h('main', { style: { padding: '8px 24px 24px', background: 'var(--g-page)', color: 'var(--g-text)', fontFamily: 'var(--g-font-sans, sans-serif)' } },
-      stylesheet ? null : h('p', { style: note }, 'The app has no resources/css/app.css or guren.css, so the copies render unstyled.'),
+      styled ? null : h('p', { style: note }, 'The app has no resources/css/app.css or guren.css, so the copies render unstyled.'),
       sections.length ? sections : h('p', { style: { color: 'var(--g-text-2)' } }, 'No copied components. Run `bunx guren add ui` to copy them.'))
   }
 }
@@ -176,7 +145,7 @@ export async function renderUiCatalog(container: HTMLElement | null, createRoot:
   const entries = await Promise.all(Object.entries(options.loaders).map(async ([name, load]) => {
     try { return [name, await load()] as const } catch (error) { return [name, error instanceof Error ? error : new Error(String(error))] as const }
   }))
-  const UiCatalog = catalog(new Map<string, Module | Error>(entries), options.stylesheet)
+  const UiCatalog = catalog(new Map<string, Module | Error>(entries), options.styled)
   // `Field` reads the page through `usePage()`, which needs Inertia's page context: the catalog is the app's one page.
   const initialPage = {
     component: 'GurenUiCatalog',

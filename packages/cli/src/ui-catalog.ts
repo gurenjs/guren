@@ -4,7 +4,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { planAppUiComponents, UI_COMPONENTS, UI_COMPONENTS_DIR, uiComponentPath, uiComponentTemplate, uiComponentVersion, type UiComponentName } from './guren-css'
+import { APP_CSS_PATH, planAppUiComponents, TOKENS_PATH, UI_COMPONENTS, UI_COMPONENTS_DIR, uiComponentPath, uiComponentTemplate, uiComponentVersion, type UiComponentName } from './guren-css'
 import { bundlePageScript } from './page-bundle'
 
 /** Served by the app's Vite dev server, never by the app: only Vite can compile the app's Tailwind and `.tsx`. */
@@ -16,17 +16,15 @@ export const UI_CATALOG_COMPONENT_PREFIX = 'virtual:guren/ui-catalog/component/'
 export const UI_CATALOG_STYLESHEET_ID = 'virtual:guren/ui-catalog/stylesheet'
 export const UI_CATALOG_ASSET = 'assets/ui-catalog/catalog.js'
 /** The client imports these, resolved from the app so the catalog shares its React and Inertia. */
-export const UI_CATALOG_EXTERNALS = ['react', '@inertiajs/react'] as const
-
-/** `planUiComponent()`'s verdict on a copy, or `missing` for a component the app has not copied. */
-export type UiCatalogState = 'current' | 'update' | 'edited' | 'missing'
+const UI_CATALOG_EXTERNALS = ['react', '@inertiajs/react']
 
 export interface UiCatalogComponent {
   name: UiComponentName
   path: string
   /** The version this CLI's template header names, such as `Button v1`. */
   template?: string
-  state: UiCatalogState
+  /** `planUiComponent()`'s verdict on a copy, or `missing` for a component the app has not copied. */
+  state: 'current' | 'update' | 'edited' | 'missing'
   /** For an edited copy: the version its own header names. */
   claimed?: string
 }
@@ -87,7 +85,7 @@ export function uiCatalogHtml(): string {
 
 /** The stylesheet the app's own pages load: `app.css` imports Tailwind and `guren.css`, which alone styles nothing. */
 export function uiCatalogStylesheet(root: string): string | undefined {
-  return ['resources/css/app.css', 'resources/css/guren.css'].find((path) => existsSync(join(root, path)))
+  return [APP_CSS_PATH, TOKENS_PATH].find((path) => existsSync(join(root, path)))
 }
 
 /**
@@ -104,7 +102,7 @@ export function uiCatalogEntrySource(root: string): string {
     ...(stylesheet ? [`import '${UI_CATALOG_STYLESHEET_ID}'`] : []),
     '',
     `renderUiCatalog(document.getElementById('guren-ui-catalog'), createRoot, {`,
-    `  stylesheet: ${stylesheet ? `'${stylesheet}'` : 'null'},`,
+    `  styled: ${stylesheet !== undefined},`,
     '  loaders: {',
     ...loaders,
     '  },',

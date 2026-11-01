@@ -23,6 +23,8 @@ const RESOLVED_CLIENT = `\0${UI_CATALOG_CLIENT_ID}`
 export function uiCatalogHooks(appRoot: () => string) {
   return {
     resolveId(id: string): string | undefined {
+      // Vite asks every plugin about every import, so anything else leaves at once.
+      if (!id.startsWith(UI_CATALOG_ENTRY_ID)) return undefined
       if (id === UI_CATALOG_ENTRY_ID) return RESOLVED_ENTRY
       if (id === UI_CATALOG_CLIENT_ID) return RESOLVED_CLIENT
       // Absolute files under the app root, which `routeTypesPlugin({ appRoot })` may set apart from Vite's root.

@@ -1,6 +1,7 @@
 import { UI_CATALOG_HEIGHT_MESSAGE, UI_CATALOG_JSON_PATH } from '../dev-center-links'
 import { commandRow, el } from '../docs-viewer-page/dom'
 import { gurenCommandLine } from '../shell-quote'
+import { card, readJson } from './dom'
 import type { UiCatalog, UiCatalogComponent } from '../ui-catalog'
 
 export interface UiComponentDescription {
@@ -49,16 +50,16 @@ function componentRow(component: UiCatalogComponent): HTMLElement {
 }
 
 // A refresh replaces the frame, so the one listener reads whichever frame is on the page now.
-let shown: { frame: HTMLIFrameElement; origin: string } | undefined
-function sizeToContent(frame: HTMLIFrameElement, origin: string): void {
+let shown: HTMLIFrameElement | undefined
+function sizeToContent(frame: HTMLIFrameElement): void {
   if (!shown) {
     window.addEventListener('message', (event: MessageEvent<unknown>) => {
-      if (!shown || event.origin !== shown.origin || event.source !== shown.frame.contentWindow) return
+      if (!shown || event.origin !== new URL(shown.src).origin || event.source !== shown.contentWindow) return
       const data = event.data as { type?: unknown; height?: unknown } | null
-      if (data?.type === UI_CATALOG_HEIGHT_MESSAGE && typeof data.height === 'number') shown.frame.style.height = `${Math.ceil(data.height)}px`
+      if (data?.type === UI_CATALOG_HEIGHT_MESSAGE && typeof data.height === 'number') shown.style.height = `${Math.ceil(data.height)}px`
     })
   }
-  shown = { frame, origin }
+  shown = frame
 }
 
 function preview(catalog: UiCatalog): HTMLElement[] {
@@ -67,7 +68,7 @@ function preview(catalog: UiCatalog): HTMLElement[] {
   const frame = el('iframe', 'ui-preview')
   frame.title = 'Copied components rendered by the app'
   frame.src = url
-  sizeToContent(frame, new URL(url).origin)
+  sizeToContent(frame)
   const reload = el('button', 'g-btn g-btn-secondary', 'Reload preview')
   reload.type = 'button'
   reload.onclick = () => { frame.src = url }
@@ -76,24 +77,12 @@ function preview(catalog: UiCatalog): HTMLElement[] {
   return [source, reload, frame]
 }
 
-function card(title: string, ...body: Node[]): HTMLElement {
-  const section = el('section', 'g-card wide')
-  const head = el('div', 'g-card-head')
-  head.append(el('h2', 'g-card-title', title))
-  const inner = el('div', 'g-card-body')
-  inner.append(...body)
-  section.append(head, inner)
-  return section
-}
-
 export async function loadUiCatalog(status: HTMLElement, body: HTMLElement, button: HTMLButtonElement): Promise<void> {
   button.disabled = true
   status.textContent = 'Reading the copied components…'
   status.className = ''
   try {
-    const response = await fetch(UI_CATALOG_JSON_PATH, { cache: 'no-store', redirect: 'error' })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    const catalog = await response.json() as UiCatalog
+    const catalog = await readJson(UI_CATALOG_JSON_PATH) as UiCatalog
     const copied = catalog.components.filter((component) => component.state !== 'missing').length
     status.textContent = `${copied} of ${catalog.components.length} components copied into ${catalog.dir}`
     body.replaceChildren(

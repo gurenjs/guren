@@ -9,7 +9,7 @@ import { writeScaffoldFiles, type ScaffoldFileEntry } from './utils'
 
 export const TOKENS_PATH = 'resources/css/guren.css'
 const SHIPPED_SHEET = 'guren-ui/resources/css/guren.css'
-const APP_CSS_PATH = 'resources/css/app.css'
+export const APP_CSS_PATH = 'resources/css/app.css'
 const IMPORT_LINE = "@import './guren.css';"
 
 /** Same-length blanking of block comments, so indices found on the masked text
