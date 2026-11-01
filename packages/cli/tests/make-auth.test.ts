@@ -1889,11 +1889,14 @@ import { registerAuthRoutes } from '../routes/auth.js'
 export default createApp({ routes: registerAuthRoutes })
 `,
     })
-    await makeAuth({ force: true, session: false })
+    // Linked before makeAuth, whose client check resolves from the app root: linked after it,
+    // the import below could not find @guren/core on CI.
     await linkWorkspaceCore(workspace.dir)
     await linkWorkspacePackage('orm', workspace.dir)
+    await linkWorkspacePackage('inertia-client', workspace.dir)
     await symlink(WORKSPACE_DRIZZLE, join(workspace.dir, 'node_modules/drizzle-orm'), 'dir')
     await symlink(WORKSPACE_ZOD, join(workspace.dir, 'node_modules/zod'), 'dir')
+    await makeAuth({ force: true, session: false })
     process.chdir(workspace.originalCwd)
 
     const booting = ((await import(join(workspace.dir, 'src/requests-app.ts'))) as { default: Application }).default
