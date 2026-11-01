@@ -85,7 +85,7 @@ export default function Index({ posts }: Props) {
 
 ### UI components
 
-`bunx guren add ui` copies a small set of token-styled components into `resources/js/components/ui/` (`Button`, `Label`, `Input`, `Textarea`, `Select`, `Checkbox`, `Card`, `Alert`), and the pages `make:feature` and `make:auth` write import them. The files belong to the app: change the focus ring in `Input.tsx` or the padding in `Button.tsx`, and every page that imports them follows.
+`bunx guren add ui` copies a small set of token-styled components into `resources/js/components/ui/` (`Button`, `Label`, `Input`, `Textarea`, `Select`, `Checkbox`, `Field`, `Card`, `Alert`), and the pages `make:feature` and `make:auth` write import them. The files belong to the app: change the focus ring in `Input.tsx` or the padding in `Button.tsx`, and every page that imports them follows.
 
 ```tsx
 import { Button } from '@/resources/js/components/ui/Button'
@@ -96,6 +96,25 @@ import { Label } from '@/resources/js/components/ui/Label'
 <Input id={emailId} type="email" className="mt-1" aria-invalid={form.errors.email ? true : undefined} />
 <Button type="submit" block disabled={form.processing}>Sign in</Button>
 ```
+
+`Field` wires one form key. It reads the route's form contract from `.guren/forms.gen.ts`, which `guren codegen` writes for every named POST, PUT, PATCH or DELETE route whose body schema is an object, and renders the label, a control carrying the `required`, length and range limits the validator declares, and the server's error under it. The New and Edit pages `make:feature` writes use it:
+
+```tsx
+import { useRouteForm } from '@guren/inertia-client/forms'
+import { postsStoreForm } from '@/.guren/forms.gen'
+import { Button } from '@/resources/js/components/ui/Button'
+import { Field } from '@/resources/js/components/ui/Field'
+
+const form = useRouteForm(postsStoreForm, { title: '', body: '' })
+
+<form onSubmit={form.handleSubmit}>
+  <Field form={form} name="title" />
+  <Field form={form} name="body" as="textarea" />
+  <Button type="submit" disabled={form.processing}>Create</Button>
+</form>
+```
+
+The label defaults to the field name as words (`startsAt` reads "Starts at"). Pass `label` to change it, and `as` for an input the schema cannot express (`textarea`, `password`, `file`). `Field` and `useRouteForm` need an `@guren/inertia-client` that exports `/forms`.
 
 See [`add ui`](./cli.md#add-ui) for re-running, `--diff` and `--force`.
 

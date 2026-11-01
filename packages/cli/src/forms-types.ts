@@ -11,6 +11,7 @@ import { objectShape, pipeSides, typeOf, unwrapSingleChild, type ZodSchemaLike }
 import { isZodSchema, toJsonSchema, type JsonSchemaObject } from '@guren/server/internal/zod-json-schema'
 
 import type { RouteDefinitionLike } from './api-client-types'
+import { CliError } from './cli-error'
 import { appDependsOn } from './discovery'
 import { objectNode, permitsOmission } from './route-contract-check'
 import { escapeSingleQuoted, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
@@ -280,4 +281,15 @@ export async function generateFormTypes(
 
   const outputPath = await writeGeneratedFileIn(appRoot, outputFile, buildFormsContent(plan.contracts), { force: options.force })
   return { outputPath, warnings: plan.warnings }
+}
+
+/**
+ * Refuses, before any write, to emit an import of `@guren/inertia-client/forms` into an app whose
+ * installed client predates it. An app with no client installed yet is let through: nothing can be
+ * read, and the import resolves once it installs a current one.
+ */
+export async function assertClientExportsForms(appRoot: string, what: string): Promise<void> {
+  if ((await installedClientExportsForms(appRoot)) === false) {
+    throw new CliError(`${what} ${CLIENT_PACKAGE}/forms, which the installed ${CLIENT_PACKAGE} does not export. Run: bun add ${CLIENT_PACKAGE}@latest`)
+  }
 }

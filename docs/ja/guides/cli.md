@@ -104,7 +104,7 @@ lint の設定は、`create-guren-app` 1.12 以降で作ったアプリには最
 
 ### `add ui`
 
-`add ui` は、トークンでスタイルを付けた React コンポーネントを `resources/js/components/ui/` にコピーします。対象は `Button`、`Label`、`Input`、`Textarea`、`Select`、`Checkbox`、`Card`、`Alert` です。どれもネイティブの要素と `g-` ユーティリティだけでできた 1 ファイルで、渡した `className` は既定のクラスの後ろに追加されます。コピーした後のファイルはアプリのものなので、デザインを変えるときは全ページではなく、該当するファイルを 1 つ編集します。
+`add ui` は、トークンでスタイルを付けた React コンポーネントを `resources/js/components/ui/` にコピーします。対象は `Button`、`Label`、`Input`、`Textarea`、`Select`、`Checkbox`、`Field`、`Card`、`Alert` です。`field` を指定すると、`Field` が import する 5 つのコンポーネントも一緒にコピーします。どれもネイティブの要素と `g-` ユーティリティだけでできた 1 ファイルで、渡した `className` は既定のクラスの後ろに追加されます。コピーした後のファイルはアプリのものなので、デザインを変えるときは全ページではなく、該当するファイルを 1 つ編集します。
 
 ```bash
 bunx guren add ui                 # すべてのコンポーネント
