@@ -61,7 +61,7 @@ const DOCUMENT = `## The document
 - Write it to \`docs/plans/<slug>/plan.json\`, where \`<slug>\` is a short kebab-case name for the change (\`comments\`).
 - It must validate against the JSON Schema (draft-07) given with this prompt. Every plan has \`planVersion\` (\`1\`), \`title\`, \`summary\`, \`scope\` with its \`goals\` and \`nonGoals\`, and \`locale\`.
 - Never write \`baseline\`. \`plan:approve\` stamps it when the person approves the plan, and the draft schema has no such field.
-- \`locale\` is the BCP 47 tag of the request's language (\`en\`, \`ja\`). Write every piece of prose in that language: the summary, descriptions, rules, questions and acceptance descriptions.
+- \`locale\` is the BCP 47 tag of the request's language (\`en\`, \`ja\`). Write every piece of prose in that language: the summary, descriptions, rules, questions and acceptance descriptions. View labels (\`views[].form.fields[].label\` and \`views[].actions[].label\`) are the exception: they are the text the page shows, and the browser specs look for them on a page rendered in the app's default locale, so write them in that locale even when the request is in another (the \`fallback\` of \`createApp({ i18n })\` in the app entry, else the first of its \`supported\`). With no \`i18n\` option, write them as the page shows them.
 - Every other section is optional. Leave out the ones the change does not touch.`
 
 const SCOPE = `## Goals, non-goals, assumptions and hints

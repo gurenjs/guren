@@ -9,7 +9,7 @@ import { ciSuiteConflict, runCheck } from '../src/check'
 import { gatingResults, type CheckResult } from '../src/check-result'
 import { builtinSubCommands } from '../src/commands'
 import { relativeUnreadableDirs } from '../src/discovery'
-import { checkPlans, discoverPlanFiles, isPlanInput, plansSharingSlug, refuseSharedPlanSlug } from '../src/plan-check'
+import { checkPlans, discoverPlanFiles, isPlanInput, labelledPlanViews, plansSharingSlug, refuseSharedPlanSlug, viewLabelLocaleResult } from '../src/plan-check'
 import { planApprovalsPath } from '../src/plan/approvals'
 import { planDocClosedHash, renderPlanDoc } from '../src/plan/close-docs'
 import { planHash } from '../src/plan/identity'
@@ -403,6 +403,83 @@ describe('guren check --plan', () => {
       } finally {
         error.mockRestore()
       }
+    })
+  })
+
+  describe('view labels and the default locale', () => {
+    const openPlan = (document: PlanDocument) => {
+      const plan = PlanSchema.parse(document)
+      return { path: '/app/comments.plan.json', file: 'comments.plan.json', plan, hash: planHash(plan) }
+    }
+    const comments = (locale: string): PlanDocument => ({ ...loadApprovedCommentsPlan(), locale })
+    const appEntry = (i18n: string): Record<string, string> => ({
+      'src/app.ts': `import { createApp } from '@guren/core'
+import { registerWebRoutes } from '../routes/web.js'
+
+const i18nOptions = { supported: ['ja'] }
+export default createApp({ routes: registerWebRoutes, ${i18n} })
+`,
+    })
+
+    test('should ask for a look at the labels of a plan written in another language than the default locale', () => {
+      const result = viewLabelLocaleResult(openPlan(comments('ja')), 'en')
+
+      expect(result).toMatchObject({ key: 'plan:locale:comments.plan.json', status: 'warn', advisory: true, filePath: 'comments.plan.json' })
+      expect(result?.message).toBe(
+        "comments.plan.json is written in ja, and the app's default locale is en (createApp({ i18n })). The browser specs look for the form field and action labels of view.posts.show on a page rendered in en, so those labels are written in en whatever the language of the rest of the plan.",
+      )
+      expect(result?.suggestion).toBe('Check that those labels are in en; if they are not, correct them with guren plan:revise comments.plan.json.')
+    })
+
+    test.each([
+      ['the same tag', 'en', 'en'],
+      ['a region subtag on the plan', 'en-US', 'en'],
+      ['a region subtag on the app', 'ja', 'ja-JP'],
+      ['another casing', 'JA', 'ja'],
+    ])('should say nothing for %s', (_name, planLocale, appLocale) => {
+      expect(viewLabelLocaleResult(openPlan(comments(planLocale)), appLocale)).toBeUndefined()
+    })
+
+    test('should say nothing when the default locale cannot be read', () => {
+      expect(viewLabelLocaleResult(openPlan(comments('ja')), undefined)).toBeUndefined()
+    })
+
+    test('should say nothing for a plan with no label a browser spec looks for', () => {
+      const document = comments('ja')
+      const [view] = document.views as Section
+      const hiddenOnly = { ...view, actions: [], form: { ...(view.form as Record<string, unknown>), fields: [{ field: 'postId', label: 'Post', input: 'hidden' }] } }
+      const dropped = { ...view, change: { kind: 'drop', reason: 'Retired.' } }
+
+      expect(labelledPlanViews(PlanSchema.parse({ ...document, views: [hiddenOnly, dropped] }))).toEqual([])
+      expect(viewLabelLocaleResult(openPlan({ ...document, views: [hiddenOnly, dropped] }), 'en')).toBeUndefined()
+      expect(viewLabelLocaleResult(openPlan({ ...document, views: [] }), 'en')).toBeUndefined()
+    })
+
+    test('should read the default locale from the app entry', async () => {
+      const dir = await createApp('locale-differs')
+      await writePlan(join(dir, 'comments.plan.json'), comments('en'))
+      await writeWorkspaceFiles(dir, appEntry("i18n: { supported: ['ja', 'en'] }"))
+
+      expect(byKey(await checkPlans({ cwd: dir }), 'plan:locale:').map((result) => result.key)).toEqual(['plan:locale:comments.plan.json'])
+    })
+
+    test('should say nothing for an app with no i18n option or one it cannot read', async () => {
+      const none = await createApp('locale-none')
+      await writePlan(join(none, 'comments.plan.json'), comments('ja'))
+      const unread = await createApp('locale-unread')
+      await writePlan(join(unread, 'comments.plan.json'), comments('ja'))
+      await writeWorkspaceFiles(unread, appEntry('i18n: i18nOptions'))
+
+      expect(byKey(await checkPlans({ cwd: none }), 'plan:locale:')).toEqual([])
+      expect(byKey(await checkPlans({ cwd: unread }), 'plan:locale:')).toEqual([])
+    })
+
+    test('should not judge a draft nobody approved', async () => {
+      const dir = await createApp('locale-draft')
+      await writeFile(join(dir, 'comments.plan.json'), JSON.stringify({ ...loadCommentsPlan(), locale: 'ja' }), 'utf8')
+      await writeWorkspaceFiles(dir, appEntry("i18n: { supported: ['en'] }"))
+
+      expect(byKey(await checkPlans({ cwd: dir }), 'plan:locale:')).toEqual([])
     })
   })
 
