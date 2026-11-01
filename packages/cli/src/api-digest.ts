@@ -50,7 +50,7 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
   binds every route with that param; its value arrives as a positional arg after the context (models also via \`this.model()\`) —
   never on \`this.ctx.get()\`
 - \`await this.authorize('update', [Post, post])\` (throws → 403); an ability with no record takes the bare class,
-  \`await this.authorize('create', Post)\` (a one-element \`[Post]\` is denied). Register the policy in a provider's
+  \`await this.authorize('create', Post)\`. Register the policy in a provider's
   \`boot()\`: \`this.container.make('gate').policy(Post, PostPolicy)\`, or every check is denied
 
 ### Routes (@guren/core)

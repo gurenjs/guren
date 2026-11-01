@@ -57,12 +57,14 @@ The awaited `TestResponse` has `status`, `headers`, `raw`, `await text()`,
 `assertBadRequest()`, `assertServerError()`, and the async
 `await res.assertJson / assertJsonPath / assertJsonContains / assertBodyContains`.
 `assertInertia`, `assertJsonCount`, `assertJsonStructure` and the cookie asserts
-exist only on the chain: `await http.json().get(url).assertInertia('posts/Show', { post })`.
+exist only on the chain.
 
-**`assertInertia` reads the page as JSON, so send `http.json()`.** A plain
+**`assertInertia` reads the page as JSON, so send `http.json()`:**
+`await http.json().get(url).assertInertia('posts/Show', { post })`. A plain
 GET returns the HTML shell and fails with `JSON Parse error: Unrecognized
-token '<'`. Prefer `json()` over `withHeader('X-Inertia', 'true')`: once the
-client is built, an `X-Inertia` GET without the asset version answers 409.
+token '<'`. Prefer `json()` over `withHeader('X-Inertia', 'true')`: where an
+asset version is set (a built client manifest, or `GUREN_INERTIA_VERSION`),
+an `X-Inertia` GET without that version answers 409.
 
 Validation failures are 422 with `{ message, errors: Record<string, string[]> }`:
 `assertJsonPath('errors.title.0', 'Title is required')`.
@@ -81,8 +83,7 @@ Validation failures are 422 with `{ message, errors: Record<string, string[]> }`
 - **Create a user with `password`**, not `passwordHash`: the scaffolded `User`
   model hashes it (`requireOnCreate: ['password']`).
 - **The response body is `await res.json()`**; `res.response` is private.
-- There is no `asInertia()`: Inertia pages are asserted with
-  `http.json().get(url).assertInertia(component, props?)`.
+- There is no `asInertia()`: Inertia pages are asserted with `assertInertia()`.
 
 ## Faking mail and queues
 

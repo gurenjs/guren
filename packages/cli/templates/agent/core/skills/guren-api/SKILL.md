@@ -308,7 +308,7 @@ export default class AuthorizationProvider extends ServiceProvider {
 ```
 
 In a controller, a record ability takes `[Model, record]` and a class ability
-takes the bare class; a one-element `[Post]` reaches no policy and is denied:
+takes the bare class:
 
 ```typescript
 await this.authorize('update', [Post, post])   // PostPolicy.update(user, post)
@@ -530,7 +530,7 @@ Source: `packages/server/src/redis/`
 | Routes | `packages/server/src/mvc/Route.ts` |
 | Auth | `packages/server/src/auth/` |
 | Testing | `packages/testing/src/` |
-| Authorization | `packages/server/src/authorization/` (guide: https://guren.dev/docs/guides/authorization) |
+| Authorization | `packages/server/src/authorization/` |
 | Events | `packages/server/src/events/` |
 | Queue/Jobs | `packages/server/src/queue/` |
 | Mail | `packages/server/src/mail/` |

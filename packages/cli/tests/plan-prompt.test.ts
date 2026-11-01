@@ -30,6 +30,8 @@ const RULES = [
   'View labels (`views[].form.fields[].label` and `views[].actions[].label`) are the exception',
   'Ids share one namespace across the whole plan',
   'Keep ids stable',
+  'not its page path `posts/Show`',
+  'not the class `User`',
   'A model `alter` or a class `rename` needs none of its own',
   '`plan:approve` warns about an `alter` whose readable properties all hold already',
   "Each behaviour's `id` starts with `AC-`",

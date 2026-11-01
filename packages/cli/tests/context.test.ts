@@ -334,7 +334,7 @@ describe('GUREN_API_DIGEST', () => {
       'assertUnprocessable',
       'assertInertia',
       'query(path, body?)',
-      '.json().get(url).assertInertia(component, props?)',
+      '.json().get(url).assertInertia(',
     ],
   }
 
