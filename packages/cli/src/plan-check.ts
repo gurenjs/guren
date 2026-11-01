@@ -1,6 +1,7 @@
 /**
- * `guren check --plan` (RFC 0030 §8): approved plans with `drifted` elements or a command the
- * allowlist refuses, and two open plans that change the same application target. Advisory
+ * `guren check --plan` (RFC 0030 §8): approved plans with `drifted` elements, a command the
+ * allowlist refuses or view labels in another language than the app's default locale, and two
+ * open plans that change the same application target. Advisory
  * throughout, so it never sets an exit code, and it runs only under `--plan`: judging a plan
  * imports `db/schema.ts` and every validator file, which plain `check` never does. An app with
  * no plan file reads nothing else.
@@ -17,6 +18,7 @@ import type { PlanAppState } from './plan/app-state'
 import type { PlanAppTarget } from './plan/app-targets'
 import { isPlanRevisionsDirName, planSlug, type planSiblingPath } from './plan/beside'
 import type { OpenPlan } from './plan/open-plan'
+import type { Plan } from './plan/schema'
 
 /** Where plans are found: `docs/plans/**` (the §9 layout and `<slug>.plan.json`) and the app root's own `*.plan.json`. */
 export const PLAN_DIR = 'docs/plans'
@@ -126,14 +128,16 @@ export async function refuseSharedPlanSlug(appRoot: string, planPath: string, co
 }
 
 async function loadModules() {
-  const [openPlan, targets, status, appState, allowlist] = await Promise.all([
+  const [openPlan, targets, status, appState, allowlist, appLocale] = await Promise.all([
     import('./plan/open-plan'),
     import('./plan/app-targets'),
     import('./plan-status'),
     import('./plan/app-state'),
     import('./plan/command-allowlist'),
+    import('./app-locale'),
   ])
   return {
+    readAppDefaultLocale: appLocale.readAppDefaultLocale,
     readOpenPlan: openPlan.readOpenPlan,
     listPlanAppTargets: targets.listPlanAppTargets,
     planStatusFile: status.planStatusFile,
@@ -240,6 +244,40 @@ function overlaps(m: Modules, plans: readonly OpenPlan[]): CheckResult[] {
   return results
 }
 
+/** The views whose labels a browser spec looks for: a form field it shows, or an action. A dropped view is checked by none. */
+export function labelledPlanViews(plan: Plan): string[] {
+  return plan.views
+    .filter((view) => view.change.kind !== 'drop')
+    .filter((view) => view.actions.length > 0 || (view.form?.fields ?? []).some((field) => field.input !== 'hidden'))
+    .map((view) => view.id)
+}
+
+/** Two tags name one language when their primary subtags agree, as `detectLocaleMiddleware` matches `ja-JP` to `ja`. */
+function sameLanguage(a: string, b: string): boolean {
+  const language = (tag: string): string => tag.trim().toLowerCase().split('-')[0]!
+  return language(a) === language(b)
+}
+
+/**
+ * RFC 0030 §1 and RFC 0036 §5: view labels are written in the app's default locale, which the browser
+ * specs render in, while the rest of the prose follows the plan's `locale`. A plan in another language
+ * may still carry correct labels, so this asks for a look rather than stating a defect.
+ */
+export function viewLabelLocaleResult(plan: OpenPlan, appLocale: string | undefined): CheckResult | undefined {
+  if (appLocale === undefined || sameLanguage(plan.plan.locale, appLocale)) return undefined
+  const views = labelledPlanViews(plan.plan)
+  if (views.length === 0) return undefined
+  return {
+    key: `plan:locale:${plan.file}`,
+    title: 'Plan view labels may not be in the default locale',
+    status: 'warn',
+    message: `${plan.file} is written in ${plan.plan.locale}, and the app's default locale is ${appLocale} (createApp({ i18n })). The browser specs look for the form field and action labels of ${views.join(', ')} on a page rendered in ${appLocale}, so those labels are written in ${appLocale} whatever the language of the rest of the plan.`,
+    suggestion: `Check that those labels are in ${appLocale}; if they are not, correct them with guren plan:revise ${plan.file}.`,
+    filePath: plan.file,
+    advisory: true,
+  }
+}
+
 export interface PlanCheckOptions {
   cwd: string
   routesFile?: string
@@ -310,6 +348,11 @@ export async function checkPlans(options: PlanCheckOptions): Promise<CheckResult
         advisory: true,
       })
     }
+  }
+  const appLocale = await m.readAppDefaultLocale(appRoot)
+  for (const plan of open) {
+    const result = viewLabelLocaleResult(plan, appLocale)
+    if (result) results.push(result)
   }
   let app: Promise<PlanAppState> | undefined
   const loadApp = (): Promise<PlanAppState> => (app ??= m.loadPlanAppState(appRoot, { detail: true, routesFile: options.routesFile }))

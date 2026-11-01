@@ -7,7 +7,7 @@ This page describes the plan file itself: its sections, element ids and changes,
 | Field | Holds |
 |---|---|
 | `planVersion` | `1` |
-| `title`, `summary`, `locale` | What the plan is about, and the language its prose is written in (`en`, `ja`) |
+| `title`, `summary`, `locale` | What the plan is about, and the language its prose is written in (`en`, `ja`), view labels excepted |
 | `scope` | `goals` and `nonGoals` |
 | `assumptions`, `questions` | What the plan decided without being told, and what it could not decide |
 | `models`, `validators`, `controllers`, `routes`, `views`, `resources`, `policies`, `sideEffects` | The design, one section per kind of element |
@@ -77,7 +77,7 @@ A model lists only the columns the plan touches or references. This is the new `
 
 Column types are an abstract vocabulary rather than Drizzle builders: `string`, `text`, `integer`, `number`, `decimal`, `boolean`, `date`, `datetime`, `json`, `uuid`. `datetime` takes `withTimezone`, and `decimal` takes `precision` and `scale`.
 
-The other sections follow the same pattern. A controller holds its actions, each with the validator its `body`, `params` or `query` uses, its `authorization` (middleware, and a policy ability), its `response` (an Inertia view, a redirect, a resource) and its business `rules` as prose. A route names its method, path, name, action id, middleware and `bind`. A view names its page id, its props, and a form whose fields point at a validator's fields rather than restating their rules. Elements in an application module carry `module`.
+The other sections follow the same pattern. A controller holds its actions, each with the validator its `body`, `params` or `query` uses, its `authorization` (middleware, and a policy ability), its `response` (an Inertia view, a redirect, a resource) and its business `rules` as prose. A route names its method, path, name, action id, middleware and `bind`. A view names its page id, its props, and a form whose fields point at a validator's fields rather than restating their rules. Its form field and action labels are the text the page shows, so they are written in the application's default locale even when the rest of the plan is in another language: the browser specs look for them on a page rendered in that locale. Elements in an application module carry `module`.
 
 ## Acceptance behaviours
 

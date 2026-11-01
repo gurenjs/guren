@@ -687,9 +687,12 @@ chose different words, and then the page passes `label`. The CLI restates
 pinned against the package's copy by a test, as `components.tsx` and
 `routes-types-fragments.ts` already pin the path parameter helpers.
 
-**Locale is pinned, not assumed.** A plan's labels are written in the app's
-default locale, but nothing makes a browser run use it today: the Playwright
-config `add browser-tests` writes sets no locale, and the server picks a locale
+**Locale is pinned, not assumed.** A plan's view labels are written in the
+app's default locale, whatever the plan's `locale`, which governs the rest of
+its prose (RFC 0030 §1, amended for view labels); `guren check --plan` warns
+about an open plan whose `locale` is another language. Nothing made a browser
+run use the default locale: the Playwright config `add browser-tests` wrote
+set no locale, and the server picks a locale
 from the query string, a cookie or `Accept-Language` before the default
 (`detect-locale.ts`), and the signed-in storage state may carry a locale
 cookie. The config template sets `locale` to the app's default locale and
