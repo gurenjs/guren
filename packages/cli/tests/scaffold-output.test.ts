@@ -110,6 +110,7 @@ const casesWithPages = new Set<string>()
  * The shipped .oxlintrc.json turns `guren/no-raw-color` on for resources/js/**, so a
  * generated page has to pass it; and a page styled with `g-` utilities is unstyled
  * unless the run also left resources/css/guren.css behind (the seeds carry none).
+ * Every `<form>` must also say `method="post"` with an action (`formTagProblems`).
  */
 async function expectPagesUseTokens(dir: string, prefix: string): Promise<void> {
   const pages = (await collectFiles(join(dir, 'resources/js'), IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES))
