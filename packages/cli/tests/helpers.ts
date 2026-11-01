@@ -680,6 +680,7 @@ export function renderedAppCompilerOptions(workspaceDir: string): TsconfigCompil
       '@/.guren/pages.gen': [join(workspaceDir, '.guren/pages.gen.ts')],
       '@/.guren/routes.gen': [join(workspaceDir, '.guren/routes.gen.ts')],
       '@/.guren/api-client.gen': [join(workspaceDir, '.guren/api-client.gen.ts')],
+      '@/.guren/forms.gen': [join(workspaceDir, '.guren/forms.gen.ts')],
       '@/resources/js/components/ui/*': [join(workspaceDir, 'resources/js/components/ui/*')],
       '@/*': [join(workspaceDir, '*')],
       zod: [join(cliRoot, 'node_modules/zod')],

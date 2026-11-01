@@ -122,7 +122,7 @@ Apps scaffolded by `create-guren-app` 1.12 or later already carry this setup; `a
 
 ### `add ui`
 
-`add ui` copies the token-styled React components into `resources/js/components/ui/`: `Button`, `Label`, `Input`, `Textarea`, `Select`, `Checkbox`, `Card` and `Alert`. Each one is a single file built from native elements and the `g-` utilities, and a `className` you pass is appended. The files are yours from then on, so a design change is an edit to one of them rather than to every page.
+`add ui` copies the token-styled React components into `resources/js/components/ui/`: `Button`, `Label`, `Input`, `Textarea`, `Select`, `Checkbox`, `Field`, `Card` and `Alert`. Asking for `field` also copies the five components it imports. Each one is a single file built from native elements and the `g-` utilities, and a `className` you pass is appended. The files are yours from then on, so a design change is an edit to one of them rather than to every page.
 
 ```bash
 bunx guren add ui                 # every component

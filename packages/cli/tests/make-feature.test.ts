@@ -365,9 +365,8 @@ describe('makeFeature', () => {
       )
 
       const newPage = await readFile(join(workspace.dir, 'resources/js/pages/events/New.tsx'), 'utf8')
-      // `type="date"` renders nothing for a full ISO timestamp.
-      expect(newPage).toContain('value={form.data.startsAt.slice(0, 10)}')
-      expect(newPage).toContain("setData('startsAt', event.target.value)")
+      // The validator's `z.coerce.date()` reads as a date-time; `useField` slices the value for `type="date"`.
+      expect(newPage).toContain('<Field form={form} name="startsAt" as="date" />')
       expect(newPage).toContain("startsAt: ''")
     } finally {
       await workspace.cleanup()
@@ -433,7 +432,7 @@ describe('makeFeature', () => {
       expect(newPage).toMatch(/import \{[^}]*\buseState\b[^}]*\} from 'react'/)
       expect(newPage).toContain('const [jsonErrors, setJsonErrors] = useState<Record<string, boolean>>({})')
       expect(newPage).toContain('setJsonErrors((prev) => ({ ...prev, meta: true }))')
-      expect(newPage).toContain('{jsonErrors.meta && <p id={`${fieldIds.meta}-json-error`}')
+      expect(newPage).toContain('{jsonErrors.meta && <p id={`${field.id}-json-error`}')
 
       const showPage = await readFile(join(workspace.dir, 'resources/js/pages/events/Show.tsx'), 'utf8')
       // An object is not a valid React child.
@@ -480,9 +479,9 @@ describe('makeFeature', () => {
     }
   })
 
-  // A placeholder is no accessible name: screen readers and Playwright's
-  // `getByLabel()` find a field only through a label tied to it by id.
-  it('labels every form control, tying each label to its control with useId()', async () => {
+  // A placeholder is no accessible name: screen readers and Playwright's `getByLabel()` find a
+  // field only through a label tied to it by id, which `Field` does for every control (RFC 0036).
+  it('renders every form field through Field, passing the input the validator cannot say', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-labels-')
 
     try {
@@ -490,15 +489,14 @@ describe('makeFeature', () => {
 
       for (const page of ['New.tsx', 'Edit.tsx']) {
         const source = await readFile(join(workspace.dir, 'resources/js/pages/events', page), 'utf8')
-        expect(source).toContain("import { useId, useState } from 'react'")
-        expect(source).toContain('const fieldIds = { title: useId(), body: useId(), meta: useId(), seats: useId(), startsAt: useId(), pinned: useId() }')
-        for (const name of ['title', 'body', 'meta', 'seats', 'startsAt']) {
-          expect(source).toContain(`<Label htmlFor={fieldIds.${name}}>${name}</Label>`)
-          expect(source.match(new RegExp(`id=\\{fieldIds\\.${name}\\}`, 'g'))).toHaveLength(1)
-        }
-        // The checkbox is named by the label wrapping it; its id only names its error.
-        expect(source).not.toContain('id={fieldIds.pinned}')
-        expect(source).toMatch(/<Checkbox label="pinned" checked=/)
+        expect(source).toContain("import { Field } from '@/resources/js/components/ui/Field'")
+        expect(source).toContain('<Field form={form} name="title" />')
+        expect(source).toContain('<Field form={form} name="body" as="textarea" />')
+        expect(source).toContain('<Field form={form} name="seats" />')
+        expect(source).toContain('<Field form={form} name="startsAt" as="date" />')
+        expect(source).toContain('<Field form={form} name="pinned" />')
+        expect(source).toContain('<Field form={form} name="meta">')
+        expect(source).not.toContain('useId')
         expect(source).not.toContain('placeholder=')
       }
     } finally {
@@ -506,15 +504,15 @@ describe('makeFeature', () => {
     }
   })
 
-  it('imports only useId for a form of checkboxes only', async () => {
+  it('imports nothing from react for a form without json fields', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-checkbox-only-')
 
     try {
       await makeFeature('Flag', { fields: 'enabled:boolean' })
 
       const newPage = await readFile(join(workspace.dir, 'resources/js/pages/flags/New.tsx'), 'utf8')
-      expect(newPage).toContain("import { useId } from 'react'")
-      expect(newPage).toContain('const fieldIds = { enabled: useId() }')
+      expect(newPage).not.toContain("from 'react'")
+      expect(newPage).toContain('<Field form={form} name="enabled" />')
     } finally {
       await workspace.cleanup()
     }
@@ -522,39 +520,19 @@ describe('makeFeature', () => {
 
   // A validation failure reaches the page as `form.errors` only:
   // InertiaServiceProvider flashes it into the shared `errors` prop on the redirect back.
-  it('shows each field\'s validation error and ties it to its control', async () => {
+  it('ties a json field\'s two messages to its own control', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-errors-')
 
     try {
-      await makeFeature('Event', { fields: 'title:string,body:text?,meta:json,seats:number?,startsAt:date,pinned:boolean' })
-
-      // The aria attributes belong on the control itself, not on a wrapping label.
-      const controlOf = (source: string, name: string): string => {
-        const start = name === 'pinned'
-          ? source.indexOf('<Checkbox label="pinned"')
-          : source.lastIndexOf('<', source.indexOf(`id={fieldIds.${name}}`))
-        expect(start).toBeGreaterThanOrEqual(0)
-        return source.slice(start, source.indexOf('/>', start))
-      }
+      await makeFeature('Event', { fields: 'title:string,meta:json' })
 
       for (const page of ['New.tsx', 'Edit.tsx']) {
         const source = await readFile(join(workspace.dir, 'resources/js/pages/events', page), 'utf8')
-        for (const name of ['title', 'body', 'seats', 'startsAt', 'pinned']) {
-          expect(source).toContain(
-            `{form.errors.${name} && <p id={\`\${fieldIds.${name}}-error\`} className="mt-1 text-sm text-g-danger">{form.errors.${name}}</p>}`,
-          )
-          const control = controlOf(source, name)
-          expect(control).toContain(`aria-invalid={form.errors.${name} ? true : undefined}`)
-          expect(control).toContain(`aria-describedby={form.errors.${name} ? \`\${fieldIds.${name}}-error\` : undefined}`)
-        }
-
-        // A json field describes itself by whichever of its two messages shows.
-        expect(source).toContain('{form.errors.meta && <p id={`${fieldIds.meta}-error`}')
-        const meta = controlOf(source, 'meta')
-        expect(meta).toStartWith('<Textarea')
-        expect(meta).toContain('aria-invalid={jsonErrors.meta || form.errors.meta ? true : undefined}')
+        const meta = source.slice(source.indexOf('<Textarea'), source.indexOf('/>', source.indexOf('<Textarea')))
+        expect(meta).toContain('id={field.id}')
+        expect(meta).toContain('aria-invalid={jsonErrors.meta || field.error ? true : undefined}')
         expect(meta).toContain(
-          "aria-describedby={[jsonErrors.meta && `${fieldIds.meta}-json-error`, form.errors.meta && `${fieldIds.meta}-error`].filter(Boolean).join(' ') || undefined}",
+          "aria-describedby={[jsonErrors.meta && `${field.id}-json-error`, field.error && field.errorId].filter(Boolean).join(' ') || undefined}",
         )
       }
 
@@ -570,19 +548,23 @@ describe('makeFeature', () => {
     }
   })
 
-  it('derives form types through RouteBody rather than indexing ApiRoutes', async () => {
+  it('binds the New page to the store contract and the Edit page to the update contract', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-routebody-')
 
     try {
-      await makeFeature('Post', { fields: 'title:string' })
+      await makeFeature('Post', { fields: 'title:string,subtitle:string?' })
 
-      for (const page of ['New.tsx', 'Edit.tsx']) {
-        const source = await readFile(join(workspace.dir, 'resources/js/pages/posts', page), 'utf8')
-        expect(source).toContain("type PostFormData = RouteBody<ApiRoutes, 'posts.store'>")
-        expect(source).toContain("from '@guren/inertia-client/typed-forms'")
-        // The record is named `post` here, but an entity whose variable name is
-        // `event` would collide with a submit handler that also took `event`.
-        expect(source).toContain('onSubmit={(submitEvent) =>')
+      const newPage = await readFile(join(workspace.dir, 'resources/js/pages/posts/New.tsx'), 'utf8')
+      expect(newPage).toContain("import { postsStoreForm } from '@/.guren/forms.gen'")
+      expect(newPage).toContain("const form = useRouteForm(postsStoreForm, { title: '', subtitle: null })")
+      expect(newPage).toContain('onSubmit={form.handleSubmit}')
+
+      const editPage = await readFile(join(workspace.dir, 'resources/js/pages/posts/Edit.tsx'), 'utf8')
+      expect(editPage).toContain("import { postsUpdateForm } from '@/.guren/forms.gen'")
+      expect(editPage).toContain("post: RouteBody<ApiRoutes, 'posts.update'> & { id: number }")
+      expect(editPage).toContain('const form = useRouteForm(postsUpdateForm, { title: post.title, subtitle: (post.subtitle ?? null) }, { params: { id: post.id } })')
+      for (const source of [newPage, editPage]) {
+        expect(source).toContain("from '@guren/inertia-client/forms'")
         // No json field, so nothing on the page needs state.
         expect(source).not.toContain('useState')
       }
@@ -590,6 +572,25 @@ describe('makeFeature', () => {
       await workspace.cleanup()
     }
   })
+
+  it('refuses before writing when the installed client predates the forms subpath', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-old-client-')
+
+    try {
+      const client = join(workspace.dir, 'node_modules/@guren/inertia-client')
+      await mkdir(client, { recursive: true })
+      await writeFile(join(client, 'package.json'), JSON.stringify({
+        name: '@guren/inertia-client',
+        exports: { '.': './dist/index.js', './package.json': './package.json' },
+      }))
+
+      await expect(makeFeature('Post', { fields: 'title:string' })).rejects.toThrow('bun add @guren/inertia-client@latest')
+      expect(await readFile(join(workspace.dir, 'resources/js/pages/posts/New.tsx'), 'utf8').catch(() => null)).toBeNull()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
 
   it('scaffolds app/ files under modules/<name>/ but namespaces pages instead of colocating them (--module)', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-module-')
