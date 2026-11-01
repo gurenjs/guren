@@ -6,7 +6,7 @@
  */
 export function testingHeaderValue(value: unknown): string {
   return JSON.stringify(value).replace(
-    /[\u007f-￿]/g,
+    /[\u007f-\uffff]/g,
     (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`,
   )
 }
