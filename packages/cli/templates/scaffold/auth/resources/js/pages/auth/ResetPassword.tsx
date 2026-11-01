@@ -1,10 +1,10 @@
-import { Head, useForm } from '@inertiajs/react'
-import { useId } from 'react'
+import { Head } from '@inertiajs/react'
+import { useRouteForm } from '@guren/inertia-client/forms'
 import Layout from '../../components/Layout.js'
+import { resetPasswordStoreForm } from '@/.guren/forms.gen'
 import { Alert } from '@/resources/js/components/ui/Alert'
 import { Button } from '@/resources/js/components/ui/Button'
-import { Input } from '@/resources/js/components/ui/Input'
-import { Label } from '@/resources/js/components/ui/Label'
+import { Field } from '@/resources/js/components/ui/Field'
 import type { ValidationErrors } from '@guren/core'
 
 interface Props {
@@ -13,21 +13,9 @@ interface Props {
   errors?: ValidationErrors<'token' | 'password' | 'passwordConfirmation'>
 }
 
-type ResetPasswordFormData = {
-  token: string
-  password: string
-  passwordConfirmation: string
-}
-
 export default function ResetPassword({ token, email, errors = {} }: Props) {
-  const form = useForm<ResetPasswordFormData>({
-    token,
-    password: '',
-    passwordConfirmation: '',
-  })
-
-  const passwordId = useId()
-  const passwordConfirmationId = useId()
+  // The token rides in the form data with no control: its error shows above the form.
+  const form = useRouteForm(resetPasswordStoreForm, { token, password: '', passwordConfirmation: '' })
 
   return (
     <Layout>
@@ -47,50 +35,10 @@ export default function ResetPassword({ token, email, errors = {} }: Props) {
           <Alert tone="danger" className="mt-4">{errors.token}</Alert>
         )}
 
-        <form
-          className="mt-6 space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault()
-            form.post('/reset-password')
-          }}
-        >
-          <div>
-            <Label htmlFor={passwordId}>
-              New password
-            </Label>
-            <Input
-              id={passwordId}
-              type="password"
-              value={form.data.password}
-              onChange={(event) => form.setData('password', event.target.value)}
-              required
-              className="mt-1"
-            />
-            {errors.password && <p className="mt-1 text-sm text-g-danger">{errors.password}</p>}
-          </div>
-
-          <div>
-            <Label htmlFor={passwordConfirmationId}>
-              Confirm new password
-            </Label>
-            <Input
-              id={passwordConfirmationId}
-              type="password"
-              value={form.data.passwordConfirmation}
-              onChange={(event) => form.setData('passwordConfirmation', event.target.value)}
-              required
-              className="mt-1"
-            />
-            {errors.passwordConfirmation && (
-              <p className="mt-1 text-sm text-g-danger">{errors.passwordConfirmation}</p>
-            )}
-          </div>
-
-          <Button
-            type="submit"
-            disabled={form.processing}
-            block
-          >
+        <form className="mt-6 space-y-4" onSubmit={form.handleSubmit}>
+          <Field form={form} name="password" as="password" label="New password" />
+          <Field form={form} name="passwordConfirmation" as="password" label="Confirm new password" />
+          <Button type="submit" disabled={form.processing} block>
             Reset password
           </Button>
         </form>

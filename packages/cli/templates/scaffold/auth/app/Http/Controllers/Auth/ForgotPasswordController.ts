@@ -1,5 +1,4 @@
 import { Controller, createPasswordResetToken, buildPasswordResetUrl } from '@guren/core'
-import { ForgotPasswordSchema } from '../../Validators/ForgotPasswordValidator.js'
 import { User } from '../../../Models/User.js'
 import { passwordResetStore } from '../../../Auth/PasswordResetStore.js'
 import { appUrl } from '../../../Auth/AppUrl.js'
@@ -14,7 +13,7 @@ export default class ForgotPasswordController extends Controller {
   }
 
   async store(): Promise<Response> {
-    const { email } = await this.validateBody(ForgotPasswordSchema)
+    const { email } = this.validated('forgot-password.store').body
 
     // Resolved before the lookup on purpose: a misconfigured APP_URL throws,
     // and throwing only for addresses that turned out to exist would answer

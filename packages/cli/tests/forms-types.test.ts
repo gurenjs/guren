@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
 import {
+  assertClientExportsForms,
   buildFormContracts,
   buildFormsContent,
   FORMS_MANIFEST_FILE,
   formIdentifier,
   generateFormTypes,
+  installedClientExportsForms,
   planFormsManifest,
   readFieldContract,
 } from '../src/forms-types'
@@ -150,6 +152,20 @@ describe('planFormsManifest and generateFormTypes', () => {
     const { outputPath } = await generateFormTypes(definitions, { appRoot: root, force: true })
     expect(outputPath).not.toBe('')
     expect(await readFile(join(root, FORMS_MANIFEST_FILE), 'utf8')).toContain('postsStoreForm')
+  })
+
+  // Bun's createRequire().resolve() falls back to its global install cache, so the check walks
+  // node_modules itself: only a copy installed from the app root up counts.
+  it('reads the client from the node_modules chain alone', async () => {
+    await app({ dependsOnClient: true })
+    expect(await installedClientExportsForms(root)).toBeNull()
+    await expect(assertClientExportsForms(root, 'This page imports')).resolves.toBeUndefined()
+
+    const nested = join(root, 'apps/web')
+    await mkdir(nested, { recursive: true })
+    await app({ dependsOnClient: true, clientExports: { '.': './dist/index.js' } })
+    expect(await installedClientExportsForms(nested)).toBe(false)
+    await expect(assertClientExportsForms(nested, 'This page imports')).rejects.toThrow('bun add @guren/inertia-client@latest')
   })
 })
 

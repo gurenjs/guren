@@ -1,10 +1,10 @@
-import { Head, useForm } from '@inertiajs/react'
-import { useId, type FormEvent } from 'react'
+import { Head } from '@inertiajs/react'
+import { useRouteForm } from '@guren/inertia-client/forms'
 import Layout from '../../components/Layout.js'
+import { profileUpdateForm } from '@/.guren/forms.gen'
 import { Alert } from '@/resources/js/components/ui/Alert'
 import { Button } from '@/resources/js/components/ui/Button'
-import { Input } from '@/resources/js/components/ui/Input'
-import { Label } from '@/resources/js/components/ui/Label'
+import { Field } from '@/resources/js/components/ui/Field'
 import type { ValidationErrors } from '@guren/core'
 
 interface Props {
@@ -13,27 +13,8 @@ interface Props {
   status?: string
 }
 
-type ProfileFormValues = {
-  name: string
-  email: string
-  password: string
-}
-
 export default function ProfileEdit({ profile, status }: Props) {
-  const form = useForm<ProfileFormValues>({
-    name: profile.name,
-    email: profile.email,
-    password: '',
-  })
-
-  const nameId = useId()
-  const emailId = useId()
-  const passwordId = useId()
-
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    form.put('/profile')
-  }
+  const form = useRouteForm(profileUpdateForm, { name: profile.name, email: profile.email, password: '' })
 
   return (
     <Layout>
@@ -51,54 +32,11 @@ export default function ProfileEdit({ profile, status }: Props) {
           <Alert>{status}</Alert>
         ) : null}
 
-        <form className="space-y-4" onSubmit={handleSubmit}>
-          <div>
-            <Label htmlFor={nameId}>
-              Name
-            </Label>
-            <Input
-              id={nameId}
-              type="text"
-              value={form.data.name}
-              onChange={(event) => form.setData('name', event.target.value)}
-              className="mt-1"
-            />
-            {form.errors.name ? <p className="mt-1 text-sm text-g-danger">{form.errors.name}</p> : null}
-          </div>
-
-          <div>
-            <Label htmlFor={emailId}>
-              Email
-            </Label>
-            <Input
-              id={emailId}
-              type="email"
-              value={form.data.email}
-              onChange={(event) => form.setData('email', event.target.value)}
-              className="mt-1"
-            />
-            {form.errors.email ? <p className="mt-1 text-sm text-g-danger">{form.errors.email}</p> : null}
-          </div>
-
-          <div>
-            <Label htmlFor={passwordId}>
-              New password
-            </Label>
-            <Input
-              id={passwordId}
-              type="password"
-              value={form.data.password}
-              onChange={(event) => form.setData('password', event.target.value)}
-              className="mt-1"
-            />
-            {form.errors.password ? <p className="mt-1 text-sm text-g-danger">{form.errors.password}</p> : null}
-          </div>
-
-          <Button
-            type="submit"
-            disabled={form.processing}
-            block
-          >
+        <form className="space-y-4" onSubmit={form.handleSubmit}>
+          <Field form={form} name="name" />
+          <Field form={form} name="email" as="email" />
+          <Field form={form} name="password" as="password" label="New password" />
+          <Button type="submit" disabled={form.processing} block>
             Save changes
           </Button>
         </form>

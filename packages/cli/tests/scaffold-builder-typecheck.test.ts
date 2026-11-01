@@ -2,16 +2,16 @@ import { describe, expect, it } from 'bun:test'
 import { readFile, writeFile } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { checkTypes, TSC_TIMEOUT, createTempWorkspace, renderedAppCompilerOptions, seedInertiaApp, writeWorkspaceFiles } from './helpers'
+import { prepareRenderedApp, runRouteCodegen } from './rendered-app'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { makeAuth, type MakeAuthOptions } from '../src/make-auth'
-import { generatePageTypes } from '../src/pages-types'
 
 /**
  * The compile gate for make:auth's *builder* output: flag-dependent
  * `build*Template()` code exists only at generation time, so a type error in a
- * branch survives the parse gate. Renders flag combinations into a workspace,
- * regenerates `.guren/pages.gen.ts`, and typechecks the lot as one program. The
- * three combos (oauth+verify, oauth, oauth-only) reach every builder branch.
+ * branch survives the parse gate. Renders flag combinations, runs the route codegen
+ * the pages need (`forms.gen.ts` comes from the schemas `routes/auth.ts` binds), and
+ * typechecks the lot. The three combos (oauth+verify, oauth, oauth-only) reach every builder branch.
  */
 
 const cliRoot = join(import.meta.dir, '..')
@@ -62,6 +62,7 @@ describe('rendered make:auth output typechecks', () => {
         const workspace = await createTempWorkspace(`guren-typecheck-auth-${label}-`)
         try {
           await seedInertiaApp(workspace.dir)
+          await prepareRenderedApp(workspace.dir)
           if (declaresEnv) await writeWorkspaceFiles(workspace.dir, { 'config/env.ts': await readFile(DECLARED_ENV, 'utf8') })
           // Relative to cwd, not workspace.dir: the macOS tmpdir is a
           // symlink (/var → /private/var), and makeAuth reports the realpath.
@@ -71,7 +72,7 @@ describe('rendered make:auth output typechecks', () => {
             expect(created).toContain(path)
           }
 
-          await generatePageTypes({ appRoot: workspace.dir, extractProps: true })
+          await runRouteCodegen(workspace.dir, 'routes/auth.ts')
           await writeFile(join(workspace.dir, 'pages-probe.ts'), PAGES_PROBE, 'utf8')
 
           const rootNames = await collectFiles(workspace.dir, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES)

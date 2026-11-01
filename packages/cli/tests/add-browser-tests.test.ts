@@ -13,6 +13,7 @@ import {
   buildSmokeSpec, GENERATED_HEADER, LOCALE_COOKIE, SMOKE_SPEC_FILE,
 } from '../src/browser-specs'
 import { buildLoginViewTemplate } from '../src/make-auth'
+import { humanizeFieldName } from '../../inertia-client/src/forms'
 import type { PlanView } from '../src/plan/schema'
 import { checkTypes, createTempWorkspace, ENV_SCHEMA_FIXTURE, seedInertiaApp, templateCompilerOptions, TSC_TIMEOUT, writeWorkspaceFiles } from './helpers'
 
@@ -324,9 +325,11 @@ describe('what the templates restate', () => {
   test('the setup project signs in through the labels make:auth writes', async () => {
     const setup = await template('tests/browser/auth.setup.ts')
     const page = buildLoginViewTemplate(true, true)
-    for (const label of ['Email', 'Password']) {
+    for (const [name, label] of [['email', 'Email'], ['password', 'Password']] as const) {
       expect(setup).toContain(`getByLabel('${label}')`)
-      expect(page).toMatch(new RegExp(`<Label[^>]*>\\s*${label}\\s*</Label>`, 'u'))
+      // Given no `label`, Field labels the key with humanizeFieldName().
+      expect(page).toMatch(new RegExp(`<Field form=\\{form\\} name="${name}"(?![^>]*label=)[^>]*/>`, 'u'))
+      expect(humanizeFieldName(name)).toBe(label)
     }
     expect(setup).toContain("getByRole('button', { name: 'Sign in', exact: true })")
     expect(page).toMatch(/<Button[^>]*>\s*Sign in\s*<\/Button>/u)

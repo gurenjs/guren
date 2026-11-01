@@ -1,5 +1,4 @@
 import { Controller, ValidationException, completePasswordReset } from '@guren/core'
-import { ResetPasswordSchema } from '../../Validators/ResetPasswordValidator.js'
 import { User } from '../../../Models/User.js'
 import { passwordResetStore } from '../../../Auth/PasswordResetStore.js'
 import { pages } from '@/.guren/pages.gen'
@@ -14,7 +13,7 @@ export default class ResetPasswordController extends Controller {
   }
 
   async store(): Promise<Response> {
-    const { token, password } = await this.validateBody(ResetPasswordSchema)
+    const { token, password } = this.validated('reset-password.store').body
 
     const user = await completePasswordReset(token, password, passwordResetStore, {
       async retrieveByCredentials({ email }) {

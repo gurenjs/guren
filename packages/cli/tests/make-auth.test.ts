@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import { consola } from 'consola'
-import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, APP_FIXTURE, BLOG_ROUTES_FIXTURE, captureInfos, captureWarnings, CONSOLE_FIXTURE, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, ENV_SCHEMA_FIXTURE, linkWorkspaceCore, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, seedApiOnlyApp, SQLITE_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
+import type { Application, UserProvider } from '@guren/core'
+import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, APP_FIXTURE, BLOG_ROUTES_FIXTURE, captureInfos, captureWarnings, CONSOLE_FIXTURE, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, ENV_SCHEMA_FIXTURE, linkWorkspaceCore, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, seedApiOnlyApp, seedInertiaApp, SQLITE_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
+import { prepareRenderedApp } from './rendered-app'
 import { checkEnvExample } from '../src/app-env'
 import { runBlueprint } from '../src/blueprints'
 import { appMailBindings } from '../src/mail-scaffold'
@@ -129,10 +131,15 @@ export function registerWebRoutes(router: Router): void {
       expect(authRoutes).toContain("router.get('/reset-password'")
       expect(authRoutes).toContain("router.post('/reset-password'")
       expect(authRoutes).toContain("import { throttleLogin, throttleRegistration, throttlePasswordResetRequest, throttleProfileUpdate } from '../app/Http/Middleware/AuthThrottle.js'")
-      expect(authRoutes).toContain("requireGuest({ redirectTo: '/dashboard' }), throttleLogin).name('login.store')")
-      expect(authRoutes).toContain("requireGuest({ redirectTo: '/dashboard' }), throttleRegistration).name('register.store')")
-      expect(authRoutes).toContain("requireGuest({ redirectTo: '/dashboard' }), throttlePasswordResetRequest).name('forgot-password.store')")
-      expect(authRoutes).toContain("requireAuthenticated({ redirectTo: '/login' }), throttleProfileUpdate).name('profile.update')")
+      // Each validator is its route's body contract, behind the throttle (RFC 0036 §3).
+      expect(authRoutes).toContain("{ name: 'login.store', body: LoginSchema, middlewares: [requireGuest({ redirectTo: '/dashboard' }), throttleLogin] }")
+      expect(authRoutes).toContain("{ name: 'register.store', body: RegisterSchema, middlewares: [requireGuest({ redirectTo: '/dashboard' }), throttleRegistration] }")
+      expect(authRoutes).toContain("{ name: 'forgot-password.store', body: ForgotPasswordSchema, middlewares: [requireGuest({ redirectTo: '/dashboard' }), throttlePasswordResetRequest] }")
+      expect(authRoutes).toContain("{ name: 'reset-password.store', body: ResetPasswordSchema, middlewares: [requireGuest({ redirectTo: '/dashboard' })] }")
+      expect(authRoutes).toContain("{ name: 'profile.update', body: ProfileUpdateSchema, middlewares: [requireAuthenticated({ redirectTo: '/login' }), throttleProfileUpdate] }")
+      for (const [schema, file] of [['LoginSchema', 'LoginValidator'], ['RegisterSchema', 'RegisterValidator'], ['ForgotPasswordSchema', 'ForgotPasswordValidator'], ['ResetPasswordSchema', 'ResetPasswordValidator'], ['ProfileUpdateSchema', 'ProfileValidator']]) {
+        expect(authRoutes).toContain(`import { ${schema} } from '../app/Http/Validators/${file}.js'`)
+      }
       expect(JSON.parse(await readFile(join(workspace.dir, 'lang/en/auth.json'), 'utf8'))).toHaveProperty('throttle')
 
       // Emailed links must never be built from the request URL: it comes from
@@ -156,12 +163,21 @@ export function registerWebRoutes(router: Router): void {
 
       const loginPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'), 'utf8')
       expect(loginPage).toContain('interface Props')
+      expect(loginPage).toContain("useRouteForm(loginStoreForm, { email, password: '', remember: false }, { adoptPageErrors: true })")
+      expect(loginPage).toContain('<Field form={form} name="email" as="email" />')
+      expect(loginPage).toContain('<Field form={form} name="password" as="password" />')
+      expect(loginPage).toContain('<Field form={form} name="remember" as="checkbox" label="Remember me" />')
+      // The copied components a page imports are written beside it.
+      for (const name of ['Field', 'Button', 'Alert', 'Input', 'Checkbox', 'Label']) {
+        expect(existsSync(join(workspace.dir, `resources/js/components/ui/${name}.tsx`))).toBe(true)
+      }
       expect(loginPage).toContain('href="/register"')
       expect(loginPage).toContain('href="/forgot-password"')
       expect(loginPage).not.toContain('Contact your administrator.')
 
       const loginController = await readFile(join(workspace.dir, 'app/Http/Controllers/Auth/LoginController.ts'), 'utf8')
-      expect(loginController).toContain('validateBody(LoginSchema)')
+      expect(loginController).toContain("this.validated('login.store').body")
+      expect(loginController).not.toContain('validateBody(')
       expect(loginController).toContain('pages.auth.Login')
       expect(loginController).not.toContain('safeParse')
 
@@ -169,7 +185,7 @@ export function registerWebRoutes(router: Router): void {
         join(workspace.dir, 'app/Http/Controllers/Auth/RegisterController.ts'),
         'utf8',
       )
-      expect(registerController).toContain('validateBody(RegisterSchema)')
+      expect(registerController).toContain("this.validated('register.store').body")
       expect(registerController).toContain('pages.auth.Register')
       expect(registerController).toContain('User.create(')
 
@@ -183,13 +199,14 @@ export function registerWebRoutes(router: Router): void {
 
       const registerPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Register.tsx'), 'utf8')
       expect(registerPage).toContain('interface Props')
-      expect(registerPage).toContain("form.post('/register')")
+      expect(registerPage).toContain('useRouteForm(registerStoreForm,')
+      expect(registerPage).toContain("import { registerStoreForm } from '@/.guren/forms.gen'")
 
       const forgotController = await readFile(
         join(workspace.dir, 'app/Http/Controllers/Auth/ForgotPasswordController.ts'),
         'utf8',
       )
-      expect(forgotController).toContain('validateBody(ForgotPasswordSchema)')
+      expect(forgotController).toContain("this.validated('forgot-password.store').body")
       expect(forgotController).toContain('createPasswordResetToken(')
       // Not awaited: the transport round-trip only happens for known
       // accounts, so awaiting it would leak account existence via timing.
@@ -206,7 +223,7 @@ export function registerWebRoutes(router: Router): void {
         join(workspace.dir, 'app/Http/Controllers/Auth/ResetPasswordController.ts'),
         'utf8',
       )
-      expect(resetController).toContain('validateBody(ResetPasswordSchema)')
+      expect(resetController).toContain("this.validated('reset-password.store').body")
       expect(resetController).toContain('completePasswordReset(')
       expect(resetController).toContain('User.update(')
 
@@ -1027,7 +1044,7 @@ export const posts = pgTable('posts', {
       // No password form left behind, and no "or" divider dangling above a
       // form that is not there.
       expect(loginPage).not.toContain('type="password"')
-      expect(loginPage).not.toContain("form.post('/login')")
+      expect(loginPage).not.toContain('loginStoreForm')
       expect(loginPage).not.toContain('Or continue with')
       expect(loginPage).not.toContain('href="/register"')
       expect(loginPage).not.toContain('href="/forgot-password"')
@@ -1050,10 +1067,10 @@ export const posts = pgTable('posts', {
       // Nothing re-verifies the email in this mode, so a profile that could
       // replace it would claim an address the account never proved.
       expect(profileValidator).not.toContain('email')
-      expect(profileController).toContain('const { name } = await this.validateBody(ProfileUpdateSchema)')
+      expect(profileController).toContain('const { name } = this.validated(\'profile.update\').body')
       expect(profileController).not.toContain('Email is already in use.')
       expect(profileController).toContain('User.update({ id: user.id }, { name })')
-      expect(profilePage).not.toContain("form.setData('email'")
+      expect(profilePage).not.toContain('name="email"')
       expect(profilePage).toContain('Managed by your sign-in provider.')
 
       const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
@@ -1406,7 +1423,7 @@ export default app
       expect(validator).not.toContain('email: z')
       expect(validator).toContain('name: z')
       expect(validator).toContain('password: z')
-      expect(controller).toContain('const { name, password, currentPassword } = await this.validateBody(ProfileUpdateSchema)')
+      expect(controller).toContain('const { name, password, currentPassword } = this.validated(\'profile.update\').body')
       expect(controller).not.toContain('emailChanged')
       expect(controller).not.toContain('Email is already in use.')
       expect(controller).toContain('profile: { name, email: user.email }')
@@ -1418,14 +1435,13 @@ export default app
 
       expect(view).toContain('{profile.email}')
       expect(view).toContain('Managed by your sign-in provider.')
-      expect(view).not.toContain("form.setData('email'")
       expect(view).not.toContain("ValidationErrors<'name' | 'email' | 'password'>")
       // The read-only email has no control to label.
-      expect(view).not.toContain('emailId')
+      expect(view).not.toContain('name="email"')
       expect(view).not.toMatch(/<label[^>]*>\s*Email/i)
-      expect(view).toContain('id={nameId}')
-      expect(view).toContain('id={passwordId}')
-      expect(view).toContain('id={currentPasswordId}')
+      expect(view).toContain('<Field form={form} name="name" />')
+      expect(view).toContain('<Field form={form} name="password" as="password" label="New password" />')
+      expect(view).toContain('<Field form={form} name="currentPassword" as="password" hint="Required to set a new password." />')
     } finally {
       await workspace.cleanup()
     }
@@ -1444,7 +1460,7 @@ export default app
       expect(validator).not.toContain('email: z')
       expect(validator).toContain('name: z')
       expect(validator).toContain('password: z')
-      expect(controller).toContain('const { name, password, currentPassword } = await this.validateBody(ProfileUpdateSchema)')
+      expect(controller).toContain('const { name, password, currentPassword } = this.validated(\'profile.update\').body')
       expect(view).toContain('Managed by your sign-in provider.')
     } finally {
       await workspace.cleanup()
@@ -1462,11 +1478,11 @@ export default app
       const { controller, validator, view } = await readProfileScaffold(workspace.dir)
 
       expect(validator).toContain("email('Enter a valid email address.')")
-      expect(controller).toContain('const { name, email, password, currentPassword } = await this.validateBody(ProfileUpdateSchema)')
+      expect(controller).toContain('const { name, email, password, currentPassword } = this.validated(\'profile.update\').body')
       // A replacement address loses the old one's verified status and has to
       // be re-proven before it counts.
       expect(controller).toContain('await User.update({ id: user.id }, data, { set: { emailVerifiedAt: null } })')
-      expect(view).toContain("form.setData('email'")
+      expect(view).toContain('<Field form={form} name="email" as="email" />')
     } finally {
       await workspace.cleanup()
     }
@@ -1483,14 +1499,13 @@ export default app
       const { controller, validator, view } = await readProfileScaffold(workspace.dir)
 
       expect(validator).toContain("email('Enter a valid email address.')")
-      expect(controller).toContain('const { name, email, password, currentPassword } = await this.validateBody(ProfileUpdateSchema)')
+      expect(controller).toContain('const { name, email, password, currentPassword } = this.validated(\'profile.update\').body')
       expect(controller).toContain('Email is already in use.')
-      expect(view).toContain("form.setData('email'")
-      // getByLabel() and screen readers find a field only through this pairing.
-      for (const id of ['nameId', 'emailId', 'passwordId', 'currentPasswordId']) {
-        expect(view).toContain(`<Label htmlFor={${id}}`)
-        expect(view).toContain(`id={${id}}`)
+      // Field pairs each label with its control, which getByLabel() and screen readers need.
+      for (const name of ['name', 'email', 'password', 'currentPassword']) {
+        expect(view).toContain(`<Field form={form} name="${name}"`)
       }
+      expect(view).toContain("useRouteForm(profileUpdateForm, { name: profile.name, email: profile.email, password: '', currentPassword: '' })")
       expect(view).not.toMatch(/<label className=/i)
     } finally {
       await workspace.cleanup()
@@ -1517,8 +1532,7 @@ export default app
       const gate = controller.indexOf('await this.currentPasswordCheck(user.email, currentPassword)')
       expect(gate).toBeGreaterThan(-1)
       expect(gate).toBeLessThan(controller.indexOf('await User.where({ email })'))
-      expect(view).toContain("form.setData('currentPassword'")
-      expect(view).toContain('{form.errors.currentPassword}')
+      expect(view).toContain('<Field form={form} name="currentPassword" as="password" hint="Required to change your email or password." />')
     } finally {
       await workspace.cleanup()
     }
@@ -1844,5 +1858,97 @@ export default class NotifierProvider extends ServiceProvider {
     } finally {
       await workspace.cleanup()
     }
+  })
+})
+
+// RFC 0036 §3: the router validates each auth body through the route's contract, after the
+// route's own middleware. The rendered routes file runs in this process on a session-less app
+// whose user provider knows nobody, so nothing reaches a database.
+describe('make:auth routes judge the body through their contracts', () => {
+  const nobody: UserProvider = {
+    retrieveById: async () => null,
+    retrieveByCredentials: async () => null,
+    validateCredentials: async () => false,
+    getId: () => undefined,
+  }
+  let workspace: Awaited<ReturnType<typeof createTempWorkspace>> | undefined
+  let app: Application | undefined
+
+  beforeAll(async () => {
+    workspace = await createTempWorkspace('guren-cli-make-auth-requests-')
+    await seedInertiaApp(workspace.dir)
+    await prepareRenderedApp(workspace.dir)
+    await writeWorkspaceFiles(workspace.dir, {
+      // The actions under test never render, so no page needs to resolve.
+      '.guren/pages.gen.ts': 'export const pages: Record<string, Record<string, string>> = { auth: {}, dashboard: {}, profile: {} }\n',
+      // Built inside the app, so the app and its routes share the @guren/core it resolves.
+      'src/requests-app.ts': `import { createApp } from '@guren/core'
+import { registerAuthRoutes } from '../routes/auth.js'
+
+export default createApp({ routes: registerAuthRoutes })
+`,
+    })
+    await makeAuth({ force: true, session: false })
+    process.chdir(workspace.originalCwd)
+
+    const booting = ((await import(join(workspace.dir, 'src/requests-app.ts'))) as { default: Application }).default
+    booting.auth.registerProvider('users', () => nobody)
+    await booting.boot()
+    app = booting
+  }, 60_000)
+
+  afterAll(async () => {
+    await app?.stop()
+    // cleanup() also restores the cwd, which a setup that threw before its own chdir left in the app.
+    await workspace?.cleanup()
+  })
+
+  function login(body: Record<string, unknown>, headers: Record<string, string> = {}): Promise<Response> {
+    if (!app) throw new Error('the app did not boot')
+    return Promise.resolve(app.fetch(new Request('http://localhost/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    })))
+  }
+
+  function flashedErrors(response: Response): Record<string, string> {
+    const cookie = response.headers.get('set-cookie') ?? ''
+    const value = /guren_validation_errors=([^;]+)/u.exec(cookie)?.[1]
+    if (!value) throw new Error(`no flashed validation errors in: ${cookie}`)
+    return JSON.parse(decodeURIComponent(value)) as Record<string, string>
+  }
+
+  it('redirects an invalid Inertia login back with the field message', async () => {
+    const response = await login(
+      { email: 'not-an-email', password: 'secret' },
+      { 'x-inertia': 'true', referer: 'http://localhost/login' },
+    )
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get('location')).toBe('http://localhost/login')
+    expect(flashedErrors(response)).toEqual({ email: 'The email address is badly formatted.' })
+  })
+
+  it('answers a request over the throttle limit with the throttle, whatever its body', async () => {
+    // Each rejected body still counts towards the limit: the throttle runs first.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const rejected = await login({ email: 'over-limit@example.com', password: '' })
+      expect(rejected.status).toBe(422)
+      expect(((await rejected.json()) as { errors: Record<string, string[]> }).errors).toEqual({ password: ['Password is required.'] })
+    }
+
+    const limited = await login({ email: 'over-limit@example.com', password: '' })
+
+    expect(limited.status).toBe(429)
+    expect(limited.headers.get('retry-after')).not.toBeNull()
+    expect(((await limited.json()) as { message: string }).message).toStartWith('Too many login attempts.')
+  })
+
+  it('still reports wrong credentials under message', async () => {
+    const response = await login({ email: 'nobody@example.com', password: 'not-the-password' })
+
+    expect(response.status).toBe(422)
+    expect(((await response.json()) as { errors: Record<string, string[]> }).errors).toEqual({ message: ['Invalid credentials.'] })
   })
 })

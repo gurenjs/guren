@@ -1,5 +1,4 @@
 import { Controller, ValidationException } from '@guren/core'
-import { RegisterSchema } from '../../Validators/RegisterValidator.js'
 import { User } from '../../../Models/User.js'
 import { pages } from '@/.guren/pages.gen'
 
@@ -9,7 +8,7 @@ export default class RegisterController extends Controller {
   }
 
   async store(): Promise<Response> {
-    const { name, email, password } = await this.validateBody(RegisterSchema)
+    const { name, email, password } = this.validated('register.store').body
 
     const existing = await User.where({ email })
     if (existing.length > 0) {

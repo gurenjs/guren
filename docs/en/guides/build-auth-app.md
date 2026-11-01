@@ -67,11 +67,10 @@ Visit `http://localhost:3333/register` to create an account, then `http://localh
 
 ### LoginController
 
-The generated controller validates credentials with `LoginSchema` (generated alongside it in `app/Http/Validators/LoginValidator.ts`) and delegates to the auth guard:
+The generated `login.store` route binds `LoginSchema` (generated in `app/Http/Validators/LoginValidator.ts`) as its body schema, so the router validates the credentials before the controller runs. The controller reads the parsed body with `this.validated()` and delegates to the auth guard:
 
 ```typescript
 import { Controller, ValidationException } from '@guren/core'
-import { LoginSchema } from '../../Validators/LoginValidator.js'
 import { pages } from '@/.guren/pages.gen'
 
 export default class LoginController extends Controller {
@@ -81,7 +80,7 @@ export default class LoginController extends Controller {
   }
 
   async store(): Promise<Response> {
-    const { email, password, remember } = await this.validateBody(LoginSchema)
+    const { email, password, remember } = this.validated('login.store').body
 
     this.auth.session()?.regenerate()
 
@@ -102,18 +101,20 @@ export default class LoginController extends Controller {
 }
 ```
 
-A failed attempt throws `ValidationException.withMessages()`, which the framework renders as a 422 carrying an `errors` payload; the generated login page shows `errors.message`. Use a field name as the key (`{ email: '...' }`) to attach the message to a single input instead.
+An invalid body never reaches the action: the router answers it the same way, with the error under the field's name. A failed attempt throws `ValidationException.withMessages()`, which the framework renders as a 422 carrying an `errors` payload; the generated login page shows `errors.message`. Use a field name as the key (`{ email: '...' }`) to attach the message to a single input instead.
 
 ### Auth Middleware
 
-The generator writes `routes/auth.ts` and calls it from your route registrar. Each route carries its own guard:
+The generator writes `routes/auth.ts` and calls it from your route registrar. Each route carries its own guard; a route with options lists it under `middlewares`, which run before the body is validated, so the login throttle counts an attempt with an invalid body too:
 
 ```typescript
 import { Router, requireAuthenticated, requireGuest } from '@guren/core'
+import { throttleLogin } from '../app/Http/Middleware/AuthThrottle.js'
+import { LoginSchema } from '../app/Http/Validators/LoginValidator.js'
 
 export function registerAuthRoutes(router: Router): void {
   router.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('login')
-  router.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('login.store')
+  router.post('/login', { name: 'login.store', body: LoginSchema, middlewares: [requireGuest({ redirectTo: '/dashboard' }), throttleLogin] }, [LoginController, 'store'])
   router.post('/logout', [LoginController, 'destroy'], requireAuthenticated({ redirectTo: '/login' })).name('logout')
 
   router.get('/dashboard', [DashboardController, 'index'], requireAuthenticated({ redirectTo: '/login' })).name('dashboard')
