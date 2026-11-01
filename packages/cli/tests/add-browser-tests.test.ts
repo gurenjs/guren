@@ -308,7 +308,7 @@ describe('what the templates restate', () => {
     const setup = await template('tests/browser/auth.setup.ts')
     expect(setup).toContain(`await context.addCookies(cookies.filter((cookie) => cookie.name !== '${LOCALE_COOKIE}'))`)
     // A filter clearCookies() ignores before Playwright 1.43 would drop the session cookie with it.
-    expect(setup).not.toMatch(/clearCookies\(\{/u)
+    expect(setup).not.toMatch(/\.clearCookies\(\{/u)
     expect(await readFile(join(CLI_ROOT, '../server/src/http/middleware/detect-locale.ts'), 'utf8')).toContain(`const cookieName = options.cookieName ?? '${LOCALE_COOKIE}'`)
   })
 
