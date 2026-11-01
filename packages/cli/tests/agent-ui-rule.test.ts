@@ -1,7 +1,8 @@
 import { expect, it } from 'bun:test'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { PRIMARY_BUTTON_CLASS, PRIMARY_SUBMIT_CLASS } from '../src/guren-css'
+import { UI_COMPONENTS, uiComponentPath } from '../src/guren-css'
+import { buttonClass } from '../templates/scaffold/ui/resources/js/components/ui/Button'
 
 const read = (path: string) => readFile(join(import.meta.dir, '..', path), 'utf8')
 const readRule = () => read('templates/agent/core/rules/ui.md')
@@ -17,9 +18,9 @@ function section(markdown: string, heading: string): string {
 it('every class string the ui rule lists is one the generators emit', async () => {
   const [rule, ...sources] = await Promise.all([
     readRule(),
-    read('src/guren-css.ts'),
     read('src/make-feature.ts'),
     read('src/make-auth.ts'),
+    ...UI_COMPONENTS.map((name) => read(`templates/scaffold/ui/${uiComponentPath(name)}`)),
   ])
   const strings = [...section(rule, 'The shared class strings').matchAll(/^\| [^|]+ \| `([^`]+)`/gm)].map(
     (match) => match[1]!,
@@ -28,10 +29,13 @@ it('every class string the ui rule lists is one the generators emit', async () =
   expect(strings.filter((classes) => !sources.some((source) => source.includes(classes)))).toEqual([])
 })
 
-it('the ui rule describes the full-width submit as PRIMARY_SUBMIT_CLASS is built', async () => {
-  const row = section(await readRule(), 'The shared class strings').match(/^\| Full-width submit \|.*$/m)?.[0] ?? ''
+it('the ui rule describes the full-width submit as the Button component builds its block variant', async () => {
+  const strings = section(await readRule(), 'The shared class strings')
+  const primary = strings.match(/^\| Primary button \| `([^`]+)`/m)?.[1]
+  const row = strings.match(/^\| Full-width submit \|.*$/m)?.[0] ?? ''
   const [first, last] = [...row.matchAll(/`([^`]+)`/g)].map((match) => match[1]!)
-  expect(PRIMARY_SUBMIT_CLASS).toBe(`${first} ${PRIMARY_BUTTON_CLASS} ${last}`)
+  expect(primary).toBeDefined()
+  expect(buttonClass({ block: true })).toBe(`${first} ${primary} ${last}`)
 })
 
 it('the ui rule lists exactly the tokens guren.css declares', async () => {

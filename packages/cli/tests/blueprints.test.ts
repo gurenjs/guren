@@ -36,6 +36,7 @@ import { addResource, listBlueprints, runBlueprint } from '../src/blueprints'
 import { CliError } from '../src/cli-error'
 import { builtinSubCommands } from '../src/commands'
 import { runCheck } from '../src/check'
+import { UI_COMPONENTS, uiComponentPath } from '../src/guren-css'
 
 /** Materialize an app file for the provider-wiring patches to target. */
 async function seedAppFile(source: string): Promise<void> {
@@ -314,8 +315,9 @@ export default registerWebRoutes
       'resources/js/types/Post.ts': 'export interface PostData extends Record<string, unknown> { id: number }\n',
       'app/Http/Validators/PostValidator.ts': 'export {}\n',
       'resources/js/pages/posts/Index.tsx': 'export default function Index() { return null }\n',
-      // Present, so ensureGurenUiTokens stays quiet: it announces its own write.
+      // Present, so ensureGurenUiTokens and ensureUiComponents stay quiet: each announces its own write.
       'resources/css/guren.css': '',
+      ...Object.fromEntries(UI_COMPONENTS.map((name) => [uiComponentPath(name), ''])),
     })
 
     const lines = await captureConsolaLines(['info', 'success'], () =>

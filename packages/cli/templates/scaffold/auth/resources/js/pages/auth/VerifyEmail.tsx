@@ -1,5 +1,7 @@
 import { Head, useForm } from '@inertiajs/react'
 import Layout from '../../components/Layout.js'
+import { Alert } from '@/resources/js/components/ui/Alert'
+import { Button } from '@/resources/js/components/ui/Button'
 
 interface Props {
   status?: string
@@ -21,10 +23,7 @@ export default function VerifyEmail({ status }: Props) {
         </p>
 
         {status ? (
-          <p className="mt-4 flex gap-3 border-y border-g-line py-2.5 text-sm">
-            <span className="w-10 shrink-0 text-right font-mono text-xs font-bold leading-5 text-g-ok">ok</span>
-            <span className="text-g-text">{status}</span>
-          </p>
+          <Alert className="mt-4">{status}</Alert>
         ) : null}
 
         <form
@@ -34,13 +33,13 @@ export default function VerifyEmail({ status }: Props) {
             form.post('/verify-email')
           }}
         >
-          <button
+          <Button
             type="submit"
             disabled={form.processing}
-            className="w-full rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down disabled:cursor-not-allowed disabled:opacity-45"
+            block
           >
             Resend verification email
-          </button>
+          </Button>
         </form>
       </section>
     </Layout>

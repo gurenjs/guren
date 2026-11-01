@@ -92,6 +92,12 @@ export async function auditStarterTemplate(root: string): Promise<void> {
 
   const homePage = await read(root, 'resources/js/pages/Home.tsx')
   assert(homePage.includes('interface Props'), 'Starter template Home page must define Props interface.')
+  const components = [...homePage.matchAll(/from '@\/resources\/js\/components\/ui\/(\w+)'/g)].map((match) => match[1]!)
+  assert(components.length > 0, 'Starter template Home page must style its links with the copied Button (RFC 0036).')
+  for (const component of components) {
+    const copy = await read(root, `resources/js/components/ui/${component}.tsx`).catch(() => '')
+    assert(copy.startsWith(`// guren-ui: ${component} v`), `Starter template imports the ${component} component, which it does not ship under resources/js/components/ui/.`)
+  }
 
   const routes = await read(root, 'routes/web.ts')
   assert(routes.includes("from '@guren/core'"), 'Starter template routes must import from @guren/core.')

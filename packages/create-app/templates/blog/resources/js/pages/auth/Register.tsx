@@ -1,6 +1,10 @@
 import { Head, Link, useForm } from '@inertiajs/react'
 import { useId } from 'react'
 import Layout from '../../components/Layout.js'
+import { Alert } from '@/resources/js/components/ui/Alert'
+import { Button } from '@/resources/js/components/ui/Button'
+import { Input } from '@/resources/js/components/ui/Input'
+import { Label } from '@/resources/js/components/ui/Label'
 import type { ValidationErrors } from '@guren/core'
 
 interface Props {
@@ -40,10 +44,7 @@ export default function Register({ errors = {} }: Props) {
         </p>
 
         {errors.message && (
-          <p className="mt-4 flex gap-3 border-y border-g-line py-2.5 text-sm">
-            <span className="w-10 shrink-0 text-right font-mono text-xs font-bold leading-5 text-g-danger">error</span>
-            <span className="text-g-text">{errors.message}</span>
-          </p>
+          <Alert tone="danger" className="mt-4">{errors.message}</Alert>
         )}
 
         <form
@@ -54,74 +55,74 @@ export default function Register({ errors = {} }: Props) {
           }}
         >
           <div>
-            <label htmlFor={nameId} className="block text-sm font-bold text-g-heading">
+            <Label htmlFor={nameId}>
               Name
-            </label>
-            <input
+            </Label>
+            <Input
               id={nameId}
               type="text"
               value={form.data.name}
               onChange={(event) => form.setData('name', event.target.value)}
               required
-              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+              className="mt-1"
             />
             {errors.name && <p className="mt-1 text-sm text-g-danger">{errors.name}</p>}
           </div>
 
           <div>
-            <label htmlFor={emailId} className="block text-sm font-bold text-g-heading">
+            <Label htmlFor={emailId}>
               Email
-            </label>
-            <input
+            </Label>
+            <Input
               id={emailId}
               type="email"
               value={form.data.email}
               onChange={(event) => form.setData('email', event.target.value)}
               required
-              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+              className="mt-1"
             />
             {errors.email && <p className="mt-1 text-sm text-g-danger">{errors.email}</p>}
           </div>
 
           <div>
-            <label htmlFor={passwordId} className="block text-sm font-bold text-g-heading">
+            <Label htmlFor={passwordId}>
               Password
-            </label>
-            <input
+            </Label>
+            <Input
               id={passwordId}
               type="password"
               value={form.data.password}
               onChange={(event) => form.setData('password', event.target.value)}
               required
-              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+              className="mt-1"
             />
             {errors.password && <p className="mt-1 text-sm text-g-danger">{errors.password}</p>}
           </div>
 
           <div>
-            <label htmlFor={passwordConfirmationId} className="block text-sm font-bold text-g-heading">
+            <Label htmlFor={passwordConfirmationId}>
               Confirm password
-            </label>
-            <input
+            </Label>
+            <Input
               id={passwordConfirmationId}
               type="password"
               value={form.data.passwordConfirmation}
               onChange={(event) => form.setData('passwordConfirmation', event.target.value)}
               required
-              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+              className="mt-1"
             />
             {errors.passwordConfirmation && (
               <p className="mt-1 text-sm text-g-danger">{errors.passwordConfirmation}</p>
             )}
           </div>
 
-          <button
+          <Button
             type="submit"
             disabled={form.processing}
-            className="w-full rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down disabled:cursor-not-allowed disabled:opacity-45"
+            block
           >
             Create account
-          </button>
+          </Button>
         </form>
 
         <p className="mt-6 text-center text-sm text-g-text-2">

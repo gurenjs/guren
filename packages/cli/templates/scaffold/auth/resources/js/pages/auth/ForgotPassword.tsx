@@ -1,6 +1,10 @@
 import { Head, useForm } from '@inertiajs/react'
 import { useId } from 'react'
 import Layout from '../../components/Layout.js'
+import { Alert } from '@/resources/js/components/ui/Alert'
+import { Button } from '@/resources/js/components/ui/Button'
+import { Input } from '@/resources/js/components/ui/Input'
+import { Label } from '@/resources/js/components/ui/Label'
 import type { ValidationErrors } from '@guren/core'
 
 interface Props {
@@ -30,17 +34,11 @@ export default function ForgotPassword({ errors = {}, status }: Props) {
         </p>
 
         {status ? (
-          <p className="mt-4 flex gap-3 border-y border-g-line py-2.5 text-sm">
-            <span className="w-10 shrink-0 text-right font-mono text-xs font-bold leading-5 text-g-ok">ok</span>
-            <span className="text-g-text">{status}</span>
-          </p>
+          <Alert className="mt-4">{status}</Alert>
         ) : null}
 
         {errors.message && (
-          <p className="mt-4 flex gap-3 border-y border-g-line py-2.5 text-sm">
-            <span className="w-10 shrink-0 text-right font-mono text-xs font-bold leading-5 text-g-danger">error</span>
-            <span className="text-g-text">{errors.message}</span>
-          </p>
+          <Alert tone="danger" className="mt-4">{errors.message}</Alert>
         )}
 
         <form
@@ -51,27 +49,27 @@ export default function ForgotPassword({ errors = {}, status }: Props) {
           }}
         >
           <div>
-            <label htmlFor={emailId} className="block text-sm font-bold text-g-heading">
+            <Label htmlFor={emailId}>
               Email
-            </label>
-            <input
+            </Label>
+            <Input
               id={emailId}
               type="email"
               value={form.data.email}
               onChange={(event) => form.setData('email', event.target.value)}
               required
-              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+              className="mt-1"
             />
             {errors.email && <p className="mt-1 text-sm text-g-danger">{errors.email}</p>}
           </div>
 
-          <button
+          <Button
             type="submit"
             disabled={form.processing}
-            className="w-full rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down disabled:cursor-not-allowed disabled:opacity-45"
+            block
           >
             Send reset link
-          </button>
+          </Button>
         </form>
       </section>
     </Layout>

@@ -1,4 +1,6 @@
 import { Head } from '@inertiajs/react'
+import { buttonClass } from '@/resources/js/components/ui/Button'
+
 interface Props {
   message: string
 }
@@ -36,13 +38,13 @@ export default function Home({ message }: Props) {
           <div className="mb-12 flex flex-wrap gap-3">
             <a
               href="https://guren.dev/docs"
-              className="inline-flex items-center rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down"
+              className={buttonClass({ className: 'inline-flex items-center' })}
             >
               Documentation
             </a>
             <a
               href="https://github.com/gurenjs/guren"
-              className="inline-flex items-center rounded-g-ctl border border-g-line-strong bg-g-panel px-4 py-2 text-sm font-bold text-g-text transition hover:border-g-muted"
+              className={buttonClass({ variant: 'secondary', className: 'inline-flex items-center' })}
             >
               GitHub
             </a>
