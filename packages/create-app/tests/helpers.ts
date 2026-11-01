@@ -25,7 +25,7 @@ export async function createTempWorkspace(prefix: string): Promise<TempWorkspace
   }
 }
 
-const GIT_IDENTITY = {
+export const GIT_IDENTITY = {
   GIT_AUTHOR_NAME: 'Guren Test',
   GIT_AUTHOR_EMAIL: 'guren-test@example.com',
   GIT_COMMITTER_NAME: 'Guren Test',

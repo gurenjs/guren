@@ -267,10 +267,10 @@ async function installDependencies(cwd: string): Promise<boolean> {
 }
 
 /**
- * The shipped `.guren/*.gen.ts` match the bare template, but `add auth` and
- * `add prototype` add pages and routes they do not list: without this the
- * initial commit holds stale files and a boot before codegen 500s on /login.
- * Under `--no-install` no generator ran, so the shipped files still hold.
+ * The shipped `.guren/*.gen.ts` match the bare template only: `add auth` and
+ * `add prototype` add pages and routes they do not list, and both the initial
+ * commit and a boot before `bun run dev` read them. Under `--no-install` no
+ * generator runs, so the shipped files still hold.
  */
 async function runCodegen(cwd: string): Promise<boolean> {
   consola.start('Generating route and page types...')
@@ -444,7 +444,13 @@ const command = defineCommand({
       }
     }
 
-    const codegenRan = installed && await runCodegen(targetDir)
+    // add auth may fail halfway; types generated over that would describe an
+    // app that is not there yet.
+    const authFailed = includeAuth && !authInstalled
+    if (installed && authFailed) {
+      consola.info('Skipping codegen until authentication is scaffolded; run `bun run codegen` after `bunx guren add auth`.')
+    }
+    const codegenRan = installed && !authFailed && await runCodegen(targetDir)
 
     // Last, so the harness, auth scaffolding and generated types land in the initial commit.
     if (shouldInitGit) {
