@@ -64,7 +64,11 @@ function redactStack(error: Error, message: string): string | undefined {
 function needsRedaction(error: Error, seen: Set<Error>): boolean {
   if (seen.has(error)) return false
   seen.add(error)
-  if (Reflect.ownKeys(error).some((key) => isSensitive(error, key, (error as unknown as Fields)[key]))) return true
+  const sensitive = Reflect.ownKeys(error).some((key) => {
+    const descriptor = Object.getOwnPropertyDescriptor(error, key)!
+    return 'value' in descriptor && isSensitive(error, key, descriptor.value)
+  })
+  if (sensitive) return true
   if (redactText(error.message) !== error.message) return true
   if (typeof error.stack === 'string' && redactText(error.stack, undefined, true) !== error.stack) return true
   const { cause } = error
@@ -96,7 +100,8 @@ function redactCopy(error: Error, seen: Map<Error, Error>): Error {
 /**
  * The value itself unless it is an error that, or whose cause chain, carries
  * bound parameters; then a copy with the same prototype and own properties
- * whose message, stack, parameter fields and causes are redacted.
+ * whose message, stack, parameter fields and causes are redacted. Being a copy,
+ * it carries no `#private` field a custom renderer or `toResponse()` reads.
  */
 export function redactQueryParams<T>(error: T): T {
   if (!(error instanceof Error) || !needsRedaction(error, new Set())) return error

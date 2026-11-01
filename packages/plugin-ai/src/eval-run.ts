@@ -15,6 +15,8 @@ import {
   ToolChoiceViolationError,
 } from 'ai'
 
+import { redactQueryParams } from '@guren/core/internal/redact-query-params'
+
 import { resolveAgentName } from './agent'
 import type { Agent, AgentResponse, BoundAgent, PromptOptions } from './agent'
 import type { AiProviderConfig } from './config'
@@ -391,7 +393,7 @@ async function settle(work: () => unknown, what: string, caseId: string): Promis
   try {
     await work()
   } catch (error) {
-    console.error(`[@guren/plugin-ai] ${what} failed for eval case "${caseId}".`, error)
+    console.error(`[@guren/plugin-ai] ${what} failed for eval case "${caseId}".`, redactQueryParams(error))
   }
 }
 

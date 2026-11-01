@@ -1,1 +1,1 @@
-export { redactQueryParams } from '../errors/redact-query-params'
+export { redactQueryParams, redactedMessage } from '../errors/redact-query-params'

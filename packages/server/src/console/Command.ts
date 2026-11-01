@@ -2,6 +2,7 @@ import type { Container } from '../container'
 import type { OutputInterface, CommandInstance, ConsoleHandleOptions } from './types'
 import { Input } from './Input'
 import { Output } from './Output'
+import { redactQueryParams } from '../errors/redact-query-params'
 import * as readline from 'readline'
 
 /** Base class for console commands. */
@@ -39,7 +40,7 @@ export abstract class Command implements CommandInstance {
       return typeof result === 'number' ? result : 0
     } catch (error) {
       if (error instanceof Error) {
-        this.error(error.message)
+        this.error(redactQueryParams(error).message)
       }
       return 1
     }

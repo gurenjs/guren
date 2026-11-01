@@ -1,6 +1,7 @@
 import { consola } from 'consola'
 import { runCommand, showUsage } from 'citty'
 import type { CommandDef } from 'citty'
+import { redactQueryParams } from '@guren/server/internal/redact-query-params'
 import { CliError } from './cli-error'
 import { runWithCommandStatus } from './command-status'
 import { unknownCommandHint } from './unknown-command'
@@ -117,12 +118,12 @@ export async function runCli(cmd: AnyCommandDef, rawArgs: string[]): Promise<num
       return failWithUsage(hint ? `${error.message}\n${hint}` : error.message)
     }
     if (error instanceof CliError) {
-      consola.error(error.message)
+      consola.error(redactQueryParams(error).message)
       return 1
     }
     // Non-Error throwables (Bun's ResolveMessage, for one) render as an
     // empty object when handed to consola directly, hiding the message.
-    consola.error(error instanceof Error ? error : String(error))
+    consola.error(error instanceof Error ? redactQueryParams(error) : String(error))
     return 1
   }
 }
