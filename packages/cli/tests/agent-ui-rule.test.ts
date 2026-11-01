@@ -29,6 +29,20 @@ it('every class string the ui rule lists is one the generators emit', async () =
   expect(strings.filter((classes) => !sources.some((source) => source.includes(classes)))).toEqual([])
 })
 
+// Tailwind v4's `outline-none` sets the style variable `outline-2` reads, so the ring needs its own style.
+it('every component that drops the outline gives its focus state a solid one', async () => {
+  const [rule, ...sources] = await Promise.all([
+    readRule(),
+    ...UI_COMPONENTS.map((name) => read(`templates/scaffold/ui/${uiComponentPath(name)}`)),
+  ])
+  // A class list has spaces; the rule's prose names `outline-none` alone.
+  const strings = [rule, ...sources]
+    .flatMap((text) => [...text.matchAll(/[`'"]([^`'"\n]*\boutline-none\b[^`'"\n]*)[`'"]/g)].map((match) => match[1]!))
+    .filter((classes) => classes.includes(' '))
+  expect(strings.length).toBeGreaterThan(3)
+  expect(strings.filter((classes) => !classes.split(' ').includes('focus:outline-solid'))).toEqual([])
+})
+
 it('the ui rule describes the full-width submit as the Button component builds its block variant', async () => {
   const strings = section(await readRule(), 'The shared class strings')
   const primary = strings.match(/^\| Primary button \| `([^`]+)`/m)?.[1]

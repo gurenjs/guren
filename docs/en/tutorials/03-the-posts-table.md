@@ -463,14 +463,14 @@ export default function NewPost() {
               value={form.data.title}
               onChange={(event) => form.setData('title', event.target.value)}
               placeholder="Title"
-              className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+              className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:outline-solid focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
             />
             <textarea
               value={form.data.body}
               onChange={(event) => form.setData('body', event.target.value)}
               placeholder="Body"
               rows={8}
-              className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+              className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:outline-solid focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
             />
             <button type="submit" className="rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down">
               Publish

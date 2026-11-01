@@ -1,8 +1,8 @@
-// guren-ui: Select v1. `guren upgrade` replaces this file only while it is unedited.
+// guren-ui: Select v2. `guren upgrade` replaces this file only while it is unedited.
 import type { SelectHTMLAttributes } from 'react'
 
 const SELECT_CLASS =
-  'w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent aria-invalid:border-g-danger-chip'
+  'w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none focus:outline-solid focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent aria-invalid:border-g-danger-chip'
 
 export interface SelectOption {
   value: string

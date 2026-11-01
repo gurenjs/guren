@@ -29,7 +29,7 @@
   --g-heading: #111827;
   --g-text: #1f2937;
   --g-text-2: #4b5563;
-  --g-muted: #9ca3af;
+  --g-muted: #6b7280; /* 4.67:1 on --g-raised, the lowest of the three surfaces (AA is 4.5) */
 
   /* text printed on the ink surface */
   --g-on-ink: #fff5f5;
@@ -74,7 +74,7 @@
     --g-heading: #e0def4;
     --g-text: #e0def4;
     --g-text-2: #908caa;
-    --g-muted: #6e6a86;
+    --g-muted: #8d89a7; /* 4.52:1 on --g-raised; rose-pine's #6e6a86 is 2.94:1 */
 
     /* fills stay crimson in both themes; accent TEXT moves to rose —
        crimson measures 4.42:1 on this ground */

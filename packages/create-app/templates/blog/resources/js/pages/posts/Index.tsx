@@ -66,7 +66,7 @@ export default function PostsIndex({ data, pagination }: Props) {
             value={keywords}
             onChange={(event) => setKeywords(event.target.value)}
             placeholder="Search posts…"
-            className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+            className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:outline-solid focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
           />
           <button
             type="submit"

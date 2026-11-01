@@ -66,7 +66,7 @@ a new input or button style:
 |---------|---------|
 | Page shell | `min-h-screen bg-g-page font-sans text-g-text` |
 | Field label | `block text-sm font-bold text-g-heading` |
-| Text input, textarea, select | `w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent` (after `mt-1` under its label) |
+| Text input, textarea, select | `w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:outline-solid focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent` (after `mt-1` under its label) |
 | Checkbox | `h-4 w-4 rounded accent-g-accent` |
 | Field error | `mt-1 text-sm text-g-danger` |
 | Primary button | `rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down` |
@@ -78,3 +78,9 @@ a new input or button style:
 
 When a page repeats one of these, lift it into a constant or a component in
 the app rather than letting the copies diverge.
+
+A control that sets `outline-none` needs `focus:outline-solid` beside its
+`focus:outline-2`: in Tailwind v4 `outline-none` sets the outline style to
+`none`, `outline-2` only sets the width, and the focused control shows no ring.
+Buttons, checkboxes and links keep the browser's own focus ring, so never give
+them `outline-none`.

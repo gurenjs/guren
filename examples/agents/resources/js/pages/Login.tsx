@@ -43,7 +43,7 @@ export default function Login({ errors = {} }: Props) {
               spellCheck={false}
               value={form.data.token}
               onChange={(event) => form.setData('token', event.target.value)}
-              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 font-mono text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 font-mono text-g-text transition outline-none placeholder:text-g-muted focus:outline-solid focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
             />
             <div className="mt-1 min-h-5 text-sm text-g-danger">
               {errors.token ?? form.errors.token ?? ''}

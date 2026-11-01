@@ -11,7 +11,7 @@ interface Props {
 }
 
 const fieldClass =
-  'mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent'
+  'mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:outline-solid focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent'
 
 export default function EditPost({ post }: Props) {
   const form = useForm<PostFormData>({
