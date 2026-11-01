@@ -1,5 +1,27 @@
 # @guren/example-api
 
+## 0.1.58
+
+### Patch Changes
+
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+  - @guren/cli@2.33.0
+
 ## 0.1.57
 
 ### Patch Changes

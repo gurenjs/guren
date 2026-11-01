@@ -1,5 +1,29 @@
 # @guren/example-agents
 
+## 0.1.26
+
+### Patch Changes
+
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+- Updated dependencies [c440b2b]
+  - @guren/cli@2.33.0
+  - @guren/inertia-client@1.3.0
+
 ## 0.1.25
 
 ### Patch Changes
