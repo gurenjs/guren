@@ -1,5 +1,29 @@
 # create-guren-app
 
+## 1.20.0
+
+### Minor Changes
+
+- 894f722: The blog starter ships `.guren/forms.gen.ts`, the form contracts `guren codegen` writes for its `posts.store` and `posts.update` routes (RFC 0036). It imports `@guren/inertia-client/forms`, so the starter needs the `@guren/inertia-client` release that adds that subpath.
+- 95ba9fb: `guren add ui` copies a `Field` component (RFC 0036 §2.3), and the default starter ships it. `Field` renders one form key from `useField()` with the copied `Label`, `Input`, `Textarea`, `Select` and `Checkbox`, all of which `add ui` and the generators now write along with it. `make:feature`'s New and Edit pages bind `useRouteForm()` to the route's contract from `.guren/forms.gen.ts` and render each field as `<Field form={form} name="…" />`, so labels read as words ("Starts at") and each control carries the `required`, length and range limits its validator declares. A nullable column starts at `null`. `make:feature` and `add ui field` refuse, before writing, when the installed `@guren/inertia-client` predates the `forms` subpath. `@guren/inertia-client/forms` exports `FieldForm`, the form type `useField()` accepts.
+- 7e3c02b: Add `guren add ui`, which copies token-styled React components into `resources/js/components/ui/`: `Button` (with `buttonClass()` for a link styled as a button), `Label`, `Input`, `Textarea`, `Select`, `Checkbox`, `Card` and `Alert`. The app owns the copies, so a design change edits one file instead of every page. A re-run writes only the missing components; `--diff` prints a copy against the current template and `--force` replaces it.
+
+  `make:feature` and `make:auth` now render their pages with these components and copy any the app lacks, never touching one it has. The wiring is unchanged (`useForm`, the `useId()` field ids, the raw field name as label). New apps from `create-guren-app` ship the components, and the default home page and the blog template's auth and profile pages use them.
+
+  A new `guren-ui-components` doctor check reports a copy that an earlier release wrote and `guren upgrade` replaces it with the current template. A copy that matches no released template (edited, or reformatted) is reported with the `guren add ui <name> --diff` command and left alone.
+
+- 8740dda: `make:auth` binds each validator it writes to its route as the body schema: login, register, forgot password, reset password and profile. The router validates the body after the route's guard and throttle, and the actions read it with `this.validated()`. Checks that need the database or the session stay in the action, so wrong credentials still report under `message`.
+
+  The auth pages `make:auth` writes, and the blog template's sign-in, sign-up and profile pages, use the copied `Field`, `Button` and `Alert` components with `useRouteForm()` and the contracts in `.guren/forms.gen.ts`. `make:auth` refuses to write them into an app whose installed `@guren/inertia-client` lacks `./forms`.
+
+  The `remember` field of `LoginSchema` and the password fields of `ProfileUpdateSchema` now end in a schema rather than a transform, so codegen types the parsed values as `boolean` and `string`. They accept and produce the same values as before. Codegen also writes a union whose members render alike once (`boolean`, not `boolean | boolean`).
+
+- 980e422: `@guren/cli/oxlint` adds `guren/no-raw-color`, which reports a raw color where a Guren UI token belongs: a Tailwind palette utility (`bg-red-500`, `text-zinc-500`, `border-white/10`) or an arbitrary color value (`bg-[#db1b1b]`, `[color:#fff]`) in any string but a non-class JSX attribute such as `title`, and a hex, color-function or named-color value in a JSX `style` prop or an SVG `fill`/`stroke`. The `.oxlintrc.json` that `create-guren-app` and `guren add lint` write enables it as an error on `resources/js/**`, so a page that styles with `bg-white` instead of `bg-g-panel` fails `bun run lint` and `guren gate`. `guren add lint` leaves the rule out for an app with no `resources/css/guren.css`, which has no tokens to switch to. An app that already has a config keeps it; add the override by hand to opt in. The `guren add admin` dashboard now styles with the tokens too, and writes `resources/css/guren.css` when the app has none.
+
+### Patch Changes
+
+- abfa7a2: `guren upgrade` now keeps the Guren UI tokens in `resources/css/guren.css` current. The sheet's framework-owned part sits between `/* guren:tokens begin … */` and `/* guren:tokens end */` markers, and a new `guren-ui-tokens` doctor check reports when that block differs from the sheet the CLI ships; `guren upgrade` replaces a block some release shipped and keeps every line outside it. A block no release shipped (edited, or written by a newer Guren than the installed CLI) is reported and left alone. A sheet with no markers is replaced only when it is byte-identical to one an earlier release wrote; an edited one is left alone, and doctor prints how to move its edits after the end marker. Broken markers (an open with no close, a close with no open, two blocks) are reported and nothing is written. New apps and `make:auth` / `make:feature` write the marked sheet.
+
 ## 1.19.1
 
 ### Patch Changes
