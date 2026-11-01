@@ -87,18 +87,21 @@ export function uiCatalogStylesheet(root: string): string | undefined {
   return ['resources/css/app.css', 'resources/css/guren.css'].find((path) => existsSync(join(root, path)))
 }
 
-/** The entry module: the stylesheet, one loader per copied component, and the client's render call. */
+/**
+ * The entry module: the stylesheet, one loader per copied component, and the client's render call. Every
+ * path it writes comes from the closed lists above, never from the app, so each is quoted as it stands.
+ */
 export function uiCatalogEntrySource(root: string): string {
   const stylesheet = uiCatalogStylesheet(root)
   const loaders = UI_COMPONENTS.filter((name) => existsSync(join(root, uiComponentPath(name))))
-    .map((name) => `  ${name}: () => import(${JSON.stringify(`/${uiComponentPath(name)}`)}),`)
+    .map((name) => `  ${name}: () => import('/${uiComponentPath(name)}'),`)
   return [
     `import { createRoot } from 'react-dom/client'`,
     `import { renderUiCatalog } from '${UI_CATALOG_CLIENT_ID}'`,
-    ...(stylesheet ? [`import ${JSON.stringify(`/${stylesheet}`)}`] : []),
+    ...(stylesheet ? [`import '/${stylesheet}'`] : []),
     '',
     `renderUiCatalog(document.getElementById('guren-ui-catalog'), createRoot, {`,
-    `  stylesheet: ${JSON.stringify(stylesheet ?? null)},`,
+    `  stylesheet: ${stylesheet ? `'${stylesheet}'` : 'null'},`,
     '  loaders: {',
     ...loaders,
     '  },',
