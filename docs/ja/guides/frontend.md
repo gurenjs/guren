@@ -118,6 +118,8 @@ const form = useRouteForm(postsStoreForm, { title: '', body: '' })
 
 再実行、`--diff`、`--force` については [`add ui`](./cli.md#add-ui) を参照してください。
 
+Dev Center の [Components ページ](./application-diagnostics.md#コンポーネント)では、コピーを variant と状態ごとに描画し、テンプレートと違うコピーがどれかも確認できます。
+
 ## フォームとナビゲーション
 クライアント側の画面遷移とフォーム送信には、Inertia のヘルパーを使います。
 

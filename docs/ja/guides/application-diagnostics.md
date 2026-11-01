@@ -129,3 +129,13 @@ Dev Center には、`guren graph` と同じアプリケーショングラフと�
 この欄は人が読むためのものです。ブラウザでの確認の記録を読む計画コマンドはなく、`plan:verify` や `plan:close` の判定にも使われません。
 
 計画の表示が読むのは、計画ファイルとその承認・決定ログ、`.guren/plans/`、`.guren/browser/`、開発サーバーが保持している実行時エラーだけです。計画の一覧は MCP ツールの `guren_get_plans` と同じデータです。判断の確認で `--dry-run` 付きのコマンドを別のプロセスで動かすとき以外は、コマンドを実行せず、アプリのコードも読み込みません。そのため、承認後にアプリが変わったことで `plan:next` が保留にしたステップは、このページではなく `plan:next` の出力に表示されます。**Refresh plans**（計画の更新）と **Refresh plan** を押すと記録を読み直し、ページが自動で読み直すことはありません。
+
+### コンポーネント
+
+上部の **Components**（コンポーネント）を押すと `/_guren/ui` が開き、[`guren add ui`](./cli.md#add-ui) が `resources/js/components/ui/` にコピーするコンポーネントが一覧で表示されます。コピーごとに、インストール済みの CLI が持つテンプレートと一致しているか、以前のリリースのまま編集されていないか、編集されているか、まだコピーされていないかが分かります。
+
+以前のリリースのままのコピーは `guren upgrade` が置き換えます。編集済みのコピーは upgrade では変わらないので、`guren add ui <name> --diff` でテンプレートとの差分を確かめてください。この判定には、doctor の `guren-ui-components` チェックや `guren upgrade` と同じテンプレートのハッシュ一覧を使っています。
+
+一覧の下には、アプリにあるコピーが、テンプレートの props で選べる variant と状態ごとに描画されます。Button の variant とサイズ、無効状態のボタン、エラー状態の入力欄、Alert の各 tone、ヒントやエラーを付けた複数の入力欄の Field などです。このプレビューはアプリの Vite 開発サーバーが `/__guren/ui-catalog` で配信するページで、Dev Center の画面には iframe で埋め込まれます。そのため、アプリ自身の Tailwind のビルドと、`guren.css` を import している `resources/css/app.css` で描画されます。
+
+プレビューを表示するには、`vite.config.ts` に `@guren/cli/vite` の `routeTypesPlugin()` があり（scaffold したアプリには最初からあります）、Vite 開発サーバーが動いている必要があります。API 専用のアプリでは一覧だけが表示されます。例はテンプレートの props に合わせて書かれているので、編集済みのコピーに足した variant は表示されません。コンポーネントを export しなくなったコピーや描画中に例外を投げたコピーでは、例の代わりにその理由が表示されます。

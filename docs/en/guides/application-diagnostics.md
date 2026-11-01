@@ -232,3 +232,28 @@ no command and import nothing from the application, so a step that `plan:next`
 holds because the application changed since approval appears in `plan:next`'s
 output, not on the page. **Refresh plans** and **Refresh plan** read the records
 again; nothing on the page polls.
+
+### Components
+
+**Components** in the top bar opens `/_guren/ui`, which lists the components
+[`guren add ui`](./cli.md#add-ui) copies into `resources/js/components/ui/`. For
+each one it shows whether the app's copy matches the template the installed CLI
+ships, is an unedited copy of an earlier release, has been edited, or is not
+copied. `guren upgrade` replaces an unedited earlier copy and leaves an edited
+one, which `guren add ui <name> --diff` compares with the template. The verdict
+comes from the same list of template hashes the `guren-ui-components` doctor
+check and `guren upgrade` read.
+
+Below the list, the page renders every copy the app has in each variant and
+state its shipped props allow: each Button variant and size, disabled buttons,
+inputs with an error, each Alert tone, and Field with several inputs, a hint and
+an error. The preview is a page the app's Vite dev server serves at
+`/__guren/ui-catalog`, framed in the Dev Center, so the copies render through the
+app's own Tailwind build and `resources/css/app.css`, which imports `guren.css`.
+
+The preview needs `routeTypesPlugin()` from `@guren/cli/vite` in
+`vite.config.ts`, which scaffolded apps already list, and a running Vite dev
+server. An API-only app gets the list without the preview. The examples follow
+the props the templates ship, so a variant added to an edited copy has no
+example. A copy that no longer exports its component, or throws while
+rendering, shows the reason in place of its examples.
