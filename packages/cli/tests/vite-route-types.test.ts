@@ -64,6 +64,7 @@ describe('routeTypesPlugin CI skip', () => {
 
     plugin.configureServer({
       config: { root },
+      middlewares: { use: () => undefined },
       watcher: {
         on(event: string, callback: (file: string) => void) {
           handlers[event] = callback

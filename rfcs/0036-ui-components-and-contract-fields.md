@@ -962,7 +962,12 @@ the template change and that release, as `common-pitfalls.md` describes.
 
 - **A component catalog in the Dev Center**: a page listing the app's copied
   components rendered with the app's own `guren.css`, each variant and state,
-  and whether the copy differs from its template version.
+  and whether the copy differs from its template version. **Amended in
+  implementation:** `guren.css` alone styles nothing (its `@theme` needs
+  Tailwind), so the preview is a page the app's Vite dev server serves at
+  `/__guren/ui-catalog` through `routeTypesPlugin()`, rendering the copies with
+  `resources/css/app.css`, and `/_guren/ui` frames it beside each copy's state
+  from `planUiComponent()`.
 - **The component list in the agent harness UI rule**: the harness rule that
   tells agents to style with Guren UI tokens names `resources/js/components/ui/`
   and its components, so an agent reaches for `Field` and `Button` before

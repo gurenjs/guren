@@ -121,3 +121,39 @@ test('a plan page is the shell, and only one path segment names a plan', async (
   expect((await handler.fetch(new Request('http://localhost/_guren/plans/comments/extra'))).status).toBe(404)
   expect((await handler.fetch(new Request('http://localhost/_guren/plans/'))).status).toBe(404)
 })
+
+const uiCatalog = {
+  schemaVersion: 1 as const,
+  dir: 'resources/js/components/ui',
+  components: [{ name: 'Button' as const, path: 'resources/js/components/ui/Button.tsx', template: 'Button v1', state: 'current' as const }],
+  preview: { url: 'http://localhost:5173/__guren/ui-catalog' },
+}
+
+test('ui.json returns the component catalog, read with the Vite URL the app publishes', async () => {
+  const seen: Array<string | undefined> = []
+  const handler = createDevCenterHandler({ cwd: '/fixture', viteUrl: () => 'http://localhost:5173/', uiCatalog: async (_cwd, viteUrl) => { seen.push(viteUrl); return uiCatalog } })
+  const response = await handler.fetch(new Request('http://localhost/_guren/ui.json'))
+  expect(response.headers.get('cache-control')).toBe('no-store')
+  expect(await response.json()).toEqual(uiCatalog)
+  expect(seen).toEqual(['http://localhost:5173/'])
+})
+
+test('a failed component read answers 503 without the exception text', async () => {
+  const handler = createDevCenterHandler({ cwd: '/fixture', uiCatalog: async () => { throw new Error('secret') } })
+  const response = await handler.fetch(new Request('http://localhost/_guren/ui.json'))
+  expect(response.status).toBe(503)
+  expect(await response.text()).not.toContain('secret')
+})
+
+test('the catalog page is the shell, framing only the Vite origin', async () => {
+  const handler = createDevCenterHandler({ cwd: '/fixture', viteUrl: () => 'http://localhost:5173/' })
+  const page = await handler.fetch(new Request('http://localhost/_guren/ui'))
+  expect(page.status).toBe(200)
+  expect(await page.text()).toContain('id="ui-view"')
+  expect(page.headers.get('content-security-policy')).toContain('frame-src http://localhost:5173;')
+  const home = await handler.fetch(new Request('http://localhost/_guren'))
+  expect(home.headers.get('content-security-policy')).not.toContain('frame-src')
+  const noVite = createDevCenterHandler({ cwd: '/fixture', viteUrl: () => undefined })
+  expect((await noVite.fetch(new Request('http://localhost/_guren/ui'))).headers.get('content-security-policy')).not.toContain('frame-src')
+  expect((await handler.fetch(new Request('http://localhost/_guren/ui/extra'))).status).toBe(404)
+})

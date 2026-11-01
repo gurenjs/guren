@@ -97,7 +97,7 @@ describe('routeTypesPlugin', () => {
   function connectWatcher(plugin: Plugin): EventEmitter {
     const watcher = new EventEmitter()
     const handler = plugin.configureServer as (server: ViteDevServer) => void
-    handler({ watcher, config: { root: tempDir } } as unknown as ViteDevServer)
+    handler({ watcher, config: { root: tempDir }, middlewares: { use: () => undefined } } as unknown as ViteDevServer)
     return watcher
   }
 

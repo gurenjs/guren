@@ -1,11 +1,13 @@
 import type { GraphNode, GurenApplicationGraph, GraphResult } from '../application-graph'
 import type { PlanEvidence, StepBrowserEvidence, StepEvidence } from '../dev-center-evidence'
 import type { PlanReadiness } from '../dev-center-readiness'
-import { browserScreenshotPath, planEvidencePath, planPagePath, planReadinessPath, planReviewPath, planSlugFromPath, savedReviewPrompt, type PlanDecision } from '../dev-center-links'
+import { browserScreenshotPath, planEvidencePath, planPagePath, planReadinessPath, planReviewPath, planSlugFromPath, savedReviewPrompt, UI_CATALOG_PAGE_PATH, type PlanDecision } from '../dev-center-links'
 import type { PlanOverview } from '../docs-viewer-plans'
 import { commandRow } from '../docs-viewer-page/dom'
 import type { RuntimeErrorResult } from '../runtime-errors'
 import { gurenCommandLine } from '../shell-quote'
+import { card, readJson } from './dom'
+import { loadUiCatalog } from './ui'
 import { attentionDecision, planAttention, sortPlans, STEP_TONE, stepRuntimeErrors, stepsByTask, verifiedCount, type DevCenterPlan, type PlanAttention } from './plans'
 
 function element<T extends HTMLElement>(id: string): T {
@@ -72,11 +74,6 @@ function renderNodes(): void {
     button.onclick = () => { showNode(node); renderNodes() }
     nodes.append(button)
   }
-}
-async function readJson(path: string): Promise<unknown> {
-  const response = await fetch(path, { cache: 'no-store', redirect: 'error' })
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  return response.json()
 }
 async function loadGraph(): Promise<void> {
   refresh.disabled = true
@@ -193,15 +190,6 @@ async function loadPlans(): Promise<void> {
     status.textContent = `Plans unavailable: ${error instanceof Error ? error.message : 'Read failed'}. Refresh to retry.`
     status.className = 'error'
   } finally { button.disabled = false }
-}
-function card(title: string, ...body: Node[]): HTMLElement {
-  const section = text('section', '', 'g-card')
-  const head = text('div', '', 'g-card-head')
-  head.append(text('h2', title, 'g-card-title'))
-  const inner = text('div', '', 'g-card-body')
-  inner.append(...body)
-  section.append(head, inner)
-  return section
 }
 /** What the plan page read beside the plans: either half may be missing, and says why. */
 interface PlanEvidenceRead {
@@ -477,7 +465,15 @@ kind.onchange = renderNodes
 refresh.onclick = () => { void loadGraph() }
 errorsButton.onclick = () => { void loadErrors() }
 const planPage = planSlugFromPath(location.pathname)
-if (planPage === undefined) {
+if (location.pathname === UI_CATALOG_PAGE_PATH) {
+  element('home').hidden = true
+  element('ui-view').hidden = false
+  document.title = 'Components · Guren Dev Center'
+  const button = element<HTMLButtonElement>('refresh-ui')
+  const load = () => loadUiCatalog(element('ui-status'), element('ui-body'), button)
+  button.onclick = () => { void load() }
+  void load()
+} else if (planPage === undefined) {
   element<HTMLButtonElement>('refresh-plans').onclick = () => { void loadPlans() }
   void loadPlans()
   void loadGraph()

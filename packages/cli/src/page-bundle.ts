@@ -11,10 +11,16 @@ import { join } from 'node:path'
  * Identifiers are left alone and nothing is minified: the page is read by whoever opens its
  * source, and neither page is large.
  */
-export function bundlePageScript(pageDir: string, entry: string, what: string): string {
+export function bundlePageScript(
+  pageDir: string,
+  entry: string,
+  what: string,
+  options: { format?: 'iife' | 'esm'; external?: readonly string[] } = {},
+): string {
   if (typeof Bun === 'undefined') throw new Error(`The ${what} is bundled with Bun; run this from a Bun process.`)
+  const external = (options.external ?? []).map((specifier) => `--external=${specifier}`)
   // Spawned rather than `Bun.build()`, which is async: `renderPlanHtml()` is synchronous and reaches this from source.
-  const built = Bun.spawnSync([process.execPath, 'build', entry, '--format=iife', '--target=browser'], {
+  const built = Bun.spawnSync([process.execPath, 'build', entry, `--format=${options.format ?? 'iife'}`, '--target=browser', ...external], {
     // The bundler names each module in a comment, relative to here: any other directory would write the caller's into the page.
     cwd: pageDir,
     stdout: 'pipe',

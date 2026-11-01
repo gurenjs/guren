@@ -5,6 +5,7 @@ import { IMPORTABLE_EXTENSIONS, MODELS_DIR, RESOURCES_DIR, toPosixRelative, VALI
 import { MODULE_ENTRY_FILE, MODULE_ROUTES_FILE } from '../import-resolution'
 import { escapeRegExp } from '../utils'
 import { cliEntry } from '../cli-entry'
+import { uiCatalogHooks } from './ui-catalog'
 
 export interface RouteTypesPluginOptions {
   /**
@@ -204,14 +205,20 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
       || MODULE_ROUTES_PATTERN.test(relativeFile)
   }
 
+  // `configResolved` sets `appRoot` before Vite loads a module or serves a request.
+  const catalog = uiCatalogHooks(() => appRoot ?? process.cwd())
+
   return {
     name: 'guren-route-types',
+    resolveId: catalog.resolveId,
+    load: catalog.load,
     async configResolved(config: ResolvedConfig) {
       appRoot = resolve(config.root, options.appRoot ?? '.')
       logger = config.logger
       await scheduleGeneration(appRoot)
     },
     configureServer(server: ViteDevServer) {
+      catalog.configureServer(server)
       // handleHotUpdate only fires for updates; creation and deletion must regenerate too.
       const root = () => appRoot ?? server.config.root
       const onFileEvent = (file: string) => {

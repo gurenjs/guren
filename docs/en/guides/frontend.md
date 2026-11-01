@@ -118,6 +118,8 @@ The label defaults to a [translation](./i18n.md#form-labels) when the app has on
 
 See [`add ui`](./cli.md#add-ui) for re-running, `--diff` and `--force`.
 
+The Dev Center's [Components page](./application-diagnostics.md#components) renders each copy in every variant and state, and shows which copies differ from their template.
+
 ## Forms and Navigation
 Inertia provides helpers for client-side navigation and form submissions:
 
