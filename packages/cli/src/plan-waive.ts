@@ -35,13 +35,20 @@ export interface PlanWaiveReport {
   removed: PlanWaiver[]
   /** Whether the log changed. False where there was nothing to record, and no file was touched. */
   written: boolean
+  /** Every refusal ran and nothing was written; `written` says whether a real run would write. */
+  dryRun: boolean
 }
 
 export interface PlanWaiveFileOptions {
   elementIds: readonly string[]
-  /** Required unless `remove` is set: a waiver with no reason is not a decision. */
+  /** Required unless `remove` or `dryRun` is set: a waiver with no reason is not a decision. */
   reason?: string
   remove?: boolean
+  /**
+   * Judge the elements and write nothing. A reason is not required, since the Dev Center's
+   * readiness check (RFC 0030 §8) never sends the one the person types.
+   */
+  dryRun?: boolean
   /** What `decisionsFile` is reported relative to; the plan is not read from it. Defaults to `cwd`. */
   app?: string
   cwd?: string
@@ -90,12 +97,14 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
   if (options.elementIds.length === 0) throw new CliError('Name at least one element id to waive.')
   const { path, plan } = await readPlanFile(planPath, options.cwd)
   const root = resolve(options.app ?? options.cwd ?? process.cwd())
+  const dryRun = options.dryRun === true
   const head = (hash: string | null) =>
     ({
       reportVersion: PLAN_WAIVE_REPORT_VERSION,
       plan: { file: basename(path), title: plan.title, hash },
       decisionsFile: toPosixRelative(root, planDecisionsPath(path)),
-    }) satisfies Pick<PlanWaiveReport, 'reportVersion' | 'plan' | 'decisionsFile'>
+      dryRun,
+    }) satisfies Pick<PlanWaiveReport, 'reportVersion' | 'plan' | 'decisionsFile' | 'dryRun'>
 
   // Removal matches on the element id and ignores the hash, so it asks none of the questions
   // below: withdrawing the waiver of an element a revision dropped is what it is for.
@@ -103,7 +112,7 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
     const removed: PlanWaiver[] = []
     let written = false
     for (const id of options.elementIds) {
-      const result = await removePlanWaiver(path, id)
+      const result = await removePlanWaiver(path, id, { dryRun })
       if (result.removed) removed.push(result.removed)
       written ||= result.written
     }
@@ -134,8 +143,8 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
     }
   }
 
-  const reason = options.reason?.trim()
-  if (!reason) throw new CliError('A waiver records why an element was accepted incomplete, so --reason is required.')
+  const reason = options.reason?.trim() ?? ''
+  if (!reason && !dryRun) throw new CliError('A waiver records why an element was accepted incomplete, so --reason is required.')
 
   const at = (options.now ?? (() => new Date()))().toISOString()
   const by = await gitAuthor(root, options.exec ?? runCaptured)
@@ -144,7 +153,7 @@ export async function planWaiveFile(planPath: string, options: PlanWaiveFileOpti
   let written = false
   for (const id of options.elementIds) {
     const waiver: PlanWaiver = { elementId: id, planHash: hash, reason, at, ...(by ? { by } : {}) }
-    const result = await writePlanWaiver(path, waiver)
+    const result = await writePlanWaiver(path, waiver, { dryRun })
     waived.push(waiver)
     written ||= result.written
     if (result.replaced) replaced.push(result.replaced)
@@ -160,6 +169,10 @@ export function formatPlanWaive(report: PlanWaiveReport): string {
     const replaced = report.replaced.find((earlier) => earlier.elementId === waiver.elementId)
     lines.push(`Waived ${waiver.elementId}: ${waiver.reason}`)
     if (replaced) lines.push(`  replaces the waiver of ${replaced.at}: ${replaced.reason}`)
+  }
+  if (report.dryRun) {
+    lines.push('', report.written ? `Dry run: a real run would record this in ${report.decisionsFile}; nothing was written.` : `Dry run: nothing to record, and nothing was written.`)
+    return lines.join('\n')
   }
   lines.push(
     '',

@@ -11,7 +11,7 @@ import { basename, dirname, join } from 'node:path'
 
 import type { z } from 'zod'
 
-import { formatSchemaIssues } from '../cli-error'
+import { CliError, formatSchemaIssues } from '../cli-error'
 import { toPosixRelative } from '../discovery'
 import type { CapturedExec } from '../subprocess'
 
@@ -135,11 +135,22 @@ export async function readBesideRecord<T>(path: string, schema: z.ZodType<T>, wh
   return { value: parsed.data }
 }
 
+/** Set on the Dev Center's readiness children (RFC 0030 §8), so a dropped `--dry-run` still writes nothing. */
+export const PLAN_DRY_RUN_ENV = 'GUREN_PLAN_DRY_RUN'
+
+/** Every plan writer calls this first: under {@link PLAN_DRY_RUN_ENV} a run may only check. */
+export function refuseWriteInDryRun(path: string): void {
+  if (process.env[PLAN_DRY_RUN_ENV] === '1') {
+    throw new CliError(`Refusing to write ${path}: ${PLAN_DRY_RUN_ENV}=1 is set, so this run may only check.`)
+  }
+}
+
 /**
  * Through a hidden temporary file beside the target, so a reader never sees half a record.
  * A symlinked target is written through to the file it names, and an existing file keeps its mode.
  */
 export async function writeFileAtomic(path: string, content: string): Promise<void> {
+  refuseWriteInDryRun(path)
   let target = path
   let mode: number | undefined
   try {

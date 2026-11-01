@@ -253,6 +253,19 @@ describe('plan:waive', () => {
     expect(await readPlanDecisions(plan)).toEqual({ decisions: undefined })
   })
 
+  test('should judge an element under --dry-run with no reason and write nothing, while a real run still needs one', async () => {
+    const plan = await writePlan('dry-run.plan.json')
+
+    const report = await planWaiveFile(plan, { elementIds: ['model.comment'], dryRun: true, now: NOW, exec: noAuthor, app: ROOT })
+
+    expect(report).toMatchObject({ dryRun: true, written: true, waived: [{ elementId: 'model.comment', planHash: HASH }] })
+    expect(formatPlanWaive(report)).toContain('Dry run: a real run would record this')
+    expect(await readPlanDecisions(plan)).toEqual({ decisions: undefined })
+    // The refusals a real run makes still run.
+    await expect(planWaiveFile(plan, { elementIds: ['column.post.id'], dryRun: true })).rejects.toThrow('is an existing element')
+    await expect(planWaiveFile(plan, { elementIds: ['model.comment'] })).rejects.toThrow('--reason is required')
+  })
+
   test('should refuse a draft, which has no hash a waiver could name', async () => {
     const draft = await writePlan('draft.plan.json', loadCommentsPlan())
 

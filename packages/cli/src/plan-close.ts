@@ -18,7 +18,8 @@ import { planStatusFile } from './plan-status'
 import { readPlanFile } from './plan-render'
 import type { PlanAppState } from './plan/app-state'
 import { requirePlanApproval, type PlanApproval } from './plan/approvals'
-import { writeFileAtomic } from './plan/beside'
+import { refuseWriteInDryRun, writeFileAtomic } from './plan/beside'
+import { shellQuote } from './shell-quote'
 import { entityDocPath, planDocPath, renderEntityDoc, renderPlanDoc, touchedModels, type PlanCloseContext } from './plan/close-docs'
 import { describeCloseBlockers, formatCloseBlocker } from './plan/close-remedy'
 import type { PlanWaiver } from './plan/decisions'
@@ -65,11 +66,6 @@ export interface PlanCloseFileOptions {
 const MARKER_SLUG = /^[A-Za-z0-9_.-]+$/u
 /** A model's class name becomes the file name written for it; a module name follows `safeModuleName()`'s rule. */
 const CLASS_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u
-
-/** Single-quoted for a POSIX shell, so a title carrying `$`, a backtick or `"` is printed as text. */
-function shellQuote(text: string): string {
-  return `'${text.replaceAll("'", `'\\''`)}'`
-}
 
 export async function planCloseFile(planPath: string, options: PlanCloseFileOptions): Promise<PlanCloseReport> {
   const read = await readPlanFile(planPath, options.cwd)
@@ -154,6 +150,7 @@ export async function planCloseFile(planPath: string, options: PlanCloseFileOpti
     const target = resolve(appRoot, entry.path)
     const action: PlanCloseWriteAction = entry.before === undefined ? 'create' : entry.before === entry.content ? 'unchanged' : 'update'
     if (!options.dryRun && action !== 'unchanged') {
+      refuseWriteInDryRun(target)
       await mkdir(dirname(target), { recursive: true })
       await writeFileAtomic(target, entry.content)
     }
