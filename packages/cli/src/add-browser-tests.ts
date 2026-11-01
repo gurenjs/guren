@@ -9,7 +9,7 @@ import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { consola } from 'consola'
 
-import { readAppDefaultLocale } from './app-locale'
+import { readAppLocale } from './app-locale'
 import { assertNotApiOnly } from './app-surface'
 import { loadBrowserMap, runBrowserMap } from './browser-map-files'
 import type { BrowserMap } from './browser-map'
@@ -116,7 +116,7 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
     findDeclaredTable(cwd, 'users'),
     readManifest(cwd, options.force === true),
     readIfExists(cwd, 'config/database.ts'),
-    readAppDefaultLocale(cwd),
+    readAppLocale(cwd),
   ])
   const account = passwordSignIn(users, map)
   // The closing browser:map run, written nowhere: its refusals (a slug two plans share, a spec of
@@ -124,7 +124,7 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
   await runBrowserMap({ cwd, write: false, map, specs: { signIn: account !== undefined, accessibility: true } })
 
   const files: ScaffoldFileEntry[] = [
-    pinConfigLocale(scaffoldTemplateFile('browser-tests', BROWSER_TESTS_CONFIG), locale),
+    pinConfigLocale(scaffoldTemplateFile('browser-tests', BROWSER_TESTS_CONFIG), locale.kind === 'locale' ? locale.locale : undefined),
     scaffoldTemplateFile('browser-tests', 'tests/browser/support.ts'),
     scaffoldTemplateFile('browser-tests', A11Y_OPTIONS_FILE),
     ...(account && users
@@ -132,6 +132,9 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
       : []),
   ]
   const created = await writeScaffoldFiles(files, { force: options.force, overwritten: options.overwritten, skipExisting: true })
+  if (locale.kind === 'unknown' && created.includes(resolve(cwd, BROWSER_TESTS_CONFIG))) {
+    consola.warn(`The app's default locale could not be read from createApp({ i18n }), so ${BROWSER_TESTS_CONFIG} sends en. If the app falls back to another locale, set LOCALE there; the plan specs fail until it matches.`)
+  }
 
   if (manifest) {
     manifest.scripts = { ...manifest.scripts, [BROWSER_TEST_SCRIPT.name]: BROWSER_TEST_SCRIPT.command }

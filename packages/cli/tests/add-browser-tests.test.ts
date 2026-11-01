@@ -1,8 +1,10 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { consola } from 'consola'
 
 import { addBrowserTests, BROWSER_TEST_SCRIPT, CONFIG_LOCALE_LINE, pinConfigLocale } from '../src/add-browser-tests'
+import { readAppLocale, type AppLocaleReading } from '../src/app-locale'
 import { isParameterless, type BrowserFeature, type BrowserMap, type BrowserMapRoute, type BrowserMapView } from '../src/browser-map'
 import { runBrowserMap } from '../src/browser-map-files'
 import { BROWSER_RUN_NAME } from '../src/browser-record'
@@ -239,6 +241,32 @@ describe('the accessibility spec', () => {
   })
 })
 
+describe('reading the app\'s default locale', () => {
+  const entry = (options: string): Record<string, string> => ({ 'src/app.ts': `import { createApp } from '@guren/core'\nexport default createApp(${options})\n` })
+
+  test('tells an app without i18n from one whose locale it cannot read', async () => {
+    const workspace = await createTempWorkspace('guren-app-locale-')
+    try {
+      const cases: Array<[string, AppLocaleReading]> = [
+        ["{ routes: () => {}, i18n: { supported: ['ja', 'en'], fallback: 'en' } }", { kind: 'locale', locale: 'en' }],
+        ["{ routes: () => {}, i18n: { supported: ['ja', 'en'] } }", { kind: 'locale', locale: 'ja' }],
+        ['{ routes: () => {} }', { kind: 'none' }],
+        ['{ routes: () => {}, ...shared }', { kind: 'unknown' }],
+        ['options', { kind: 'unknown' }],
+        ['{ routes: () => {}, i18n }', { kind: 'unknown' }],
+        ["{ routes: () => {}, i18n: { ...base, supported: ['ja'] } }", { kind: 'unknown' }],
+        ['{ routes: () => {}, i18n: { supported: locales } }', { kind: 'unknown' }],
+      ]
+      for (const [options, expected] of cases) {
+        await writeWorkspaceFiles(workspace.dir, entry(options))
+        expect({ options, reading: await readAppLocale(workspace.dir) }).toEqual({ options, reading: expected })
+      }
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
 describe('the browser account seeder', () => {
   test('writes nothing without the flag browser:serve sets, nor in production', () => {
     const source = buildBrowserSeeder('pg', { name: true, emailVerifiedAt: false })
@@ -277,7 +305,10 @@ describe('what the templates restate', () => {
   })
 
   test('the setup project clears the locale cookie the server reads by default', async () => {
-    expect(await template('tests/browser/auth.setup.ts')).toContain(`await page.context().clearCookies({ name: '${LOCALE_COOKIE}' })`)
+    const setup = await template('tests/browser/auth.setup.ts')
+    expect(setup).toContain(`await context.addCookies(cookies.filter((cookie) => cookie.name !== '${LOCALE_COOKIE}'))`)
+    // A filter clearCookies() ignores before Playwright 1.43 would drop the session cookie with it.
+    expect(setup).not.toMatch(/clearCookies\(\{/u)
     expect(await readFile(join(CLI_ROOT, '../server/src/http/middleware/detect-locale.ts'), 'utf8')).toContain(`const cookieName = options.cookieName ?? '${LOCALE_COOKIE}'`)
   })
 
@@ -363,7 +394,7 @@ describe('guren add browser-tests', () => {
     }
   })
 
-  test('writes the app\'s default locale into the config, and keeps en where it cannot read one', async () => {
+  test('writes the app\'s default locale into the config', async () => {
     const workspace = await createTempWorkspace('guren-add-browser-tests-locale-')
     try {
       await seedInertiaApp(workspace.dir)
@@ -375,6 +406,24 @@ describe('guren add browser-tests', () => {
       const config = await readFile(join(workspace.dir, BROWSER_TESTS_CONFIG), 'utf8')
       expect(config).toBe((await template(BROWSER_TESTS_CONFIG)).replace(CONFIG_LOCALE_LINE, "const LOCALE = 'ja'\n"))
     } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  test('keeps en and says so when createApp({ i18n }) is there but cannot be read', async () => {
+    const workspace = await createTempWorkspace('guren-add-browser-tests-locale-unread-')
+    const warn = spyOn(consola, 'warn').mockImplementation((() => {}) as never)
+    try {
+      await seedInertiaApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, {
+        'package.json': INERTIA_MANIFEST,
+        'src/app.ts': "import { createApp } from '@guren/core'\nimport registerWebRoutes from '../routes/web.js'\nimport { i18n } from '../config/i18n.js'\n\nexport default createApp({ routes: registerWebRoutes, i18n })\n",
+      })
+      await addBrowserTests({ install: false, loadMap: async () => mapOf([POSTS]) })
+      expect(await readFile(join(workspace.dir, BROWSER_TESTS_CONFIG), 'utf8')).toBe(await template(BROWSER_TESTS_CONFIG))
+      expect(warn.mock.calls.map((args) => String(args[0])).some((message) => message.includes('set LOCALE there'))).toBe(true)
+    } finally {
+      warn.mockRestore()
       await workspace.cleanup()
     }
   })

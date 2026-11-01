@@ -14,6 +14,10 @@ setup('sign in as the browser account', async ({ page }) => {
   expect(await initialComponent(page)).not.toMatch(/^auth\//u)
   // The server reads a locale cookie ahead of the config's `locale`, so one set at sign-in would carry into every signed-in spec.
   // `locale` is the name unless createApp({ i18n: { detect: { cookieName } } }) renames it.
-  await page.context().clearCookies({ name: 'locale' })
-  await page.context().storageState({ path: AUTH_FILE })
+  // Not clearCookies({ name }): before Playwright 1.43 it ignores the filter and drops the session cookie too.
+  const context = page.context()
+  const cookies = await context.cookies()
+  await context.clearCookies()
+  await context.addCookies(cookies.filter((cookie) => cookie.name !== 'locale'))
+  await context.storageState({ path: AUTH_FILE })
 })
