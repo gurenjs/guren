@@ -42,7 +42,7 @@ Each verdict, comment and answer goes to `.guren/plans/meetups.feedback.json` a 
 
 Go back to the plan's page in the Dev Center. Its **Review** card now counts what you saved (`1 answered`) and gives you the message to send the agent, with a copy button.
 
-![The plan's page in the Dev Center after the review. A box headed "Waiting on a person" reads "Review saved" and says to tell the agent to revise the plan from the review. Below it, the Review card has a Review this plan button, a line counting 0 approved, 0 changes requested, 0 commented and 1 answered, and under "Send the agent:" the message "Revise docs/plans/meetups/plan.json from my review with the plan-write skill. The review is saved in .guren/plans/meetups.feedback.json." with a copy button](../../images/agent-course-dev-center-review.png)
+![The plan's page in the Dev Center after the review. A box headed "Waiting on a person" reads "Review saved" and says to tell the agent to revise the plan from the review. Below it, an Approve card has a Check plan:approve button, and the Review card has a Review this plan button, a line counting 0 approved, 0 changes requested, 0 commented and 1 answered, and under "Send the agent:" the message "Revise docs/plans/meetups/plan.json from my review with the plan-write skill. The review is saved in .guren/plans/meetups.feedback.json." with a copy button](../../images/agent-course-dev-center-review.png)
 
 The page cannot know about the missing behaviours from chapter 2, so they go below that message. Send this to the Claude Code session:
 
