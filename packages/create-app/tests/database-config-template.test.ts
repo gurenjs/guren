@@ -36,6 +36,10 @@ describe('database config templates', () => {
       // The one assertion keeping the shipped file equal to DATABASE_DEFAULTS.
       expect(source).toContain(`'${DATABASE_DEFAULTS[driver].url}'`)
       expect(source).toContain(`${EXPECTED_FACTORY[driver]}({`)
+      // Seeding by allowlist: an unset NODE_ENV must not run the demo seeders.
+      // `packages/cli/src/seed-on-boot.ts` spells the same expression for the doctor's manual fix.
+      expect(source).toContain("seedOnBoot: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test',")
+      expect(source).not.toContain("NODE_ENV !== 'production'")
     })
 
     it(`scaffolds the ${driver} config verbatim`, async () => {
