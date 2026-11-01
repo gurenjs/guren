@@ -235,6 +235,65 @@ async function applyTokenTransforms(destination: string, files: string[], tokens
   }
 }
 
+const DATABASE_LABELS: Record<DatabaseDriver, string> = {
+  sqlite: 'SQLite',
+  postgres: 'PostgreSQL',
+  mysql: 'MySQL',
+}
+
+export type ReadmeBlockName = 'ssr' | 'container' | 'no-container'
+
+const README_BLOCK = /^<!-- (\/?)guren:([a-z-]+) -->$/u
+const README_BLOCK_LIKE = /<!--\s*\/?guren:/u
+
+/**
+ * Keeps or drops each `<!-- guren:<name> -->` … `<!-- /guren:<name> -->` line
+ * block of a template README, so one README covers every rendering mode and
+ * driver. A malformed, unknown, nested or unclosed marker throws.
+ */
+export function renderReadmeBlocks(content: string, blocks: Record<ReadmeBlockName, boolean>): string {
+  const kept: string[] = []
+  let open: ReadmeBlockName | null = null
+
+  for (const line of content.split('\n')) {
+    const marker = README_BLOCK.exec(line)
+    if (!marker) {
+      if (README_BLOCK_LIKE.test(line)) {
+        throw new Error(`README line "${line}" looks like a block marker but is not one; write \`<!-- guren:<name> -->\` on its own line.`)
+      }
+      if (open === null || blocks[open]) {
+        kept.push(line)
+      }
+      continue
+    }
+
+    const [, closing, name] = marker
+    if (!Object.hasOwn(blocks, name!)) {
+      throw new Error(`README marker "${line}" names no known block (${Object.keys(blocks).join(', ')}).`)
+    }
+    if (closing ? open !== name : open !== null) {
+      throw new Error(`README marker "${line}" does not match the open block (${open ?? 'none'}).`)
+    }
+    open = closing ? null : name as ReadmeBlockName
+  }
+
+  if (open !== null) {
+    throw new Error(`README block "${open}" is never closed.`)
+  }
+  return kept.join('\n')
+}
+
+async function renderReadme(destination: string, renderingMode: RenderingMode, database: DatabaseDriver): Promise<void> {
+  const path = join(destination, 'README.md')
+  const content = await readFile(path, 'utf8')
+  const container = usesDatabaseContainer(database)
+  await writeFile(path, renderReadmeBlocks(content, {
+    ssr: renderingMode === 'ssr',
+    container,
+    'no-container': !container,
+  }), 'utf8')
+}
+
 async function scaffoldEnvFiles(destination: string): Promise<void> {
   const envExamplePath = join(destination, '.env.example')
   const envPath = join(destination, '.env')
@@ -527,6 +586,7 @@ export async function scaffoldAppBlueprint(options: ScaffoldAppBlueprintOptions)
     ['guren-app-placeholder', packageName],
     ['__APP_TITLE__', appTitle],
     ['__APP_NAME__', appName],
+    ['__DATABASE_LABEL__', DATABASE_LABELS[options.database]],
   ])
 
   // Up front so a missing layer fails before anything is written.
@@ -537,6 +597,7 @@ export async function scaffoldAppBlueprint(options: ScaffoldAppBlueprintOptions)
   }
 
   await applyTokenTransforms(options.destination, blueprint.transformFiles, tokenMap)
+  await renderReadme(options.destination, options.renderingMode, options.database)
   await scaffoldEnvFiles(options.destination)
   await applyDatabaseConfig(options.destination, options.database)
   await blueprint.postScaffold?.(context)

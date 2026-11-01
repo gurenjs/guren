@@ -1,0 +1,5 @@
+---
+'create-guren-app': patch
+---
+
+Three fixes to what a new app starts with. The README now matches the rendering mode and database the app was created with, in the default, blog and api blueprints alike: the SSR template no longer replaces it with one describing PostgreSQL, a PostgreSQL or MySQL app is told to run `bun run db:up` before `bun run db:make` and `bun run db:migrate`, an SQLite app is not told to start a container, and an SSR app gets the SSR and Vercel notes. The `api` template declares `zod`, which the validators `guren make:validator` writes import, instead of resolving it through `@guren/cli`. Whenever dependencies were installed, the scaffolder runs `bun run codegen` after the agent harness, `guren add prototype` and `guren add auth`, so `.guren/` lists every page and route before the initial commit; previously an `--auth` app's commit held stale generated files and a boot before codegen failed on `/login`. When `guren add auth` fails, codegen is skipped and left in the next steps. With `--no-install` nothing is generated, and the shipped `.guren/` files already match the bare template.

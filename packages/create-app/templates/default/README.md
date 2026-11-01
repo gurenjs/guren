@@ -6,10 +6,20 @@ A fullstack TypeScript application built with [Guren](https://guren.dev).
 
 ```bash
 bun install
+<!-- guren:container -->
+bun run db:up        # start the __DATABASE_LABEL__ container
+<!-- /guren:container -->
+bun run db:make      # generate a migration from db/schema.ts
+bun run db:migrate   # apply it
 bun run dev
 ```
 
-That's it. No Docker, no database setup — SQLite is ready out of the box.
+<!-- guren:container -->
+__DATABASE_LABEL__ runs in the container `docker-compose.yml` defines, and `DATABASE_URL` in `.env` points at it. `bun run db:down` stops it.
+<!-- /guren:container -->
+<!-- guren:no-container -->
+No Docker and no database server: SQLite keeps the database in the file `DATABASE_URL` names in `.env`.
+<!-- /guren:no-container -->
 
 Visit `http://localhost:3333` to see your app running.
 
@@ -30,13 +40,52 @@ bunx guren add schedule       # task scheduling
 
 ## Project Structure
 
-- `routes/web.ts` — route definitions
+- `routes/web.ts` — route definitions, a registrar `src/app.ts` passes to `createApp({ routes })`
 - `app/Http/Controllers/` — request handlers
 - `app/Models/` — ORM models
 - `resources/js/pages/` — React pages (rendered via Inertia.js)
 - `config/database.ts` — database configuration
 - `db/schema.ts` — Drizzle table definitions
 
+## Database
+
+This app uses __DATABASE_LABEL__. `config/database.ts` creates the connection, and `DATABASE_URL` in `.env` selects the database.
+
+To switch to another driver:
+
+1. Scaffold a reference app with `bunx create-guren-app ../reference --db <driver> --no-install`, and copy its `config/database.ts` and `drizzle.config.ts` over yours. Rewrite `db/schema.ts` in that dialect, following the reference's `users` table.
+2. Add the client: `bun add postgres` for PostgreSQL, `bun add mysql2` for MySQL. SQLite needs none.
+3. Set `DATABASE_URL` in `.env` in the new driver's form: a connection string such as `postgres://user:pass@localhost:5432/app` or `mysql://user:pass@localhost:3306/app`, or a file path such as `./data/guren.db` for SQLite.
+4. Empty `db/migrations/` and run `bun run db:make`, since a migration is written in one dialect's SQL.
+5. For PostgreSQL or MySQL, start a server that `DATABASE_URL` reaches. The reference app's `docker-compose.yml` runs one; an app gets that file only when it is created with PostgreSQL or MySQL.
+
+See the [database guide](https://guren.dev/docs/guides/database) for details.
+
+<!-- guren:ssr -->
+## Server-Side Rendering
+
+Pages render on the server through Inertia SSR. During development the Bun server reads `resources/js/ssr.tsx` directly. Production builds use the SSR bundle and manifest Vite generates, which `src/main.ts` wires up through `autoConfigureInertiaAssets`.
+
+`bun run build` runs `vite build` for the client and `vite build --ssr` for the server bundle, so the first request is answered with pre-rendered HTML. `bun run preview` then starts the same Bun server in production mode against those manifests.
+
+### Deploy to Vercel
+
+Vercel support is an opt-in plugin for SSR apps:
+
+```bash
+bunx guren plugin @guren/plugin-vercel
+bun add @guren/plugin-vercel
+bun run vercel:build
+```
+
+Then deploy with Vercel's prebuilt flow:
+
+```bash
+vercel build
+vercel deploy --prebuilt
+```
+
+<!-- /guren:ssr -->
 ## Favicon
 
 `public/favicon.svg` ships as a placeholder and is linked from `src/app.ts` via
@@ -56,20 +105,13 @@ deployments (AWS Lambda, for example) serve them from a CDN instead.
 | `bun run build` | Build for production |
 | `bun run preview` | Start the built app with the Bun production server |
 | `bun run start` | Start the app in production mode (`NODE_ENV=production`); what a deployment runs |
+<!-- guren:container -->
+| `bun run db:up` | Start the __DATABASE_LABEL__ container |
+| `bun run db:down` | Stop the __DATABASE_LABEL__ container |
+<!-- /guren:container -->
+| `bun run db:make` | Generate a migration from `db/schema.ts` |
 | `bun run db:migrate` | Run database migrations |
 | `bun run db:seed` | Seed the database |
 | `bun run codegen` | Regenerate route/page types |
 
-If you scaffolded with PostgreSQL or MySQL, this project also has a `docker-compose.yml` and `bun run db:up` / `bun run db:down` to start and stop the database container. Start it before `bun run db:migrate`.
-
 Run `bun run build` before `bun run preview` so the production server can read the generated manifests from `public/assets`.
-
-## Switching to PostgreSQL
-
-Update `config/database.ts` to use `createPostgresDatabase` and set `DATABASE_URL`:
-
-```bash
-DATABASE_URL=postgres://user:pass@localhost:5432/myapp
-```
-
-See the [database guide](https://guren.dev/docs/guides/database) for details.
