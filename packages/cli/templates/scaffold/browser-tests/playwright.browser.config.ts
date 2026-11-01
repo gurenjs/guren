@@ -4,6 +4,11 @@ import { defineConfig, devices } from '@playwright/test'
 /** Away from the dev server's port, so a run never meets `bun run dev`. */
 const PORT = 4317
 const ORIGIN = `http://127.0.0.1:${PORT}`
+/**
+ * The app's default locale, which plan labels are written in; sent as Accept-Language, which the server reads after the query and a cookie.
+ * `guren add browser-tests` wrote it from createApp({ i18n }); change it with the app's `fallback`.
+ */
+const LOCALE = 'en'
 
 // Playwright loads no .env. These are the files Bun loads for the app, most specific first; a value already set wins.
 if (typeof process.loadEnvFile !== 'function') throw new Error(`The browser tests need Node 20.12 or later to load .env; this is Node ${process.version}.`)
@@ -28,6 +33,7 @@ export default defineConfig({
   reporter: run ? [['list'], ['json', { outputFile: `.guren/browser/${run}/spec-report.json` }]] : 'list',
   use: {
     baseURL: ORIGIN,
+    locale: LOCALE,
     trace: 'off',
   },
   projects: [

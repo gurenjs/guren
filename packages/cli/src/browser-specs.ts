@@ -154,8 +154,41 @@ function viewCase(entry: BrowserMapView, options: SpecOptions): SpecCase {
   return visit(target.route, target.title, options, [
     `await page.goto(${quoteString(target.route.path)})`,
     componentAssertion(target.pages),
+    'await expectDefaultLocale(page)',
     ...locatorLines(entry),
   ])
+}
+
+/** The cookie the auth setup clears; restated in `tests/browser/auth.setup.ts`, which a test pins. */
+export const LOCALE_COOKIE = 'locale'
+
+/**
+ * RFC 0036 §5: labels are the plan's, in the app's default locale. In the spec rather than support.ts,
+ * which is written once, so a spec rewritten in an older app still finds it. Reads the element
+ * support.ts's `initialComponent()` falls back to, which a test pins.
+ */
+const PLAN_PRELUDE: SpecPrelude = {
+  imports: [],
+  playwrightTypes: ['Page'],
+  source: `type InitialPage = { props?: { _i18n?: { locale?: unknown; fallbackLocale?: unknown } } } | null
+
+/** The page rendered in the app's default locale, when the app shares \`_i18n\` (createApp({ i18n }) does unless \`share: false\`). */
+async function expectDefaultLocale(page: Page): Promise<void> {
+  const i18n = await page.evaluate(() => {
+    let initial = (window as Window & { __INERTIA_PAGE__?: InitialPage }).__INERTIA_PAGE__
+    if (!initial) {
+      try {
+        initial = JSON.parse(document.querySelector('script[data-page="app"][type="application/json"]')?.textContent ?? 'null') as InitialPage
+      } catch {
+        initial = null
+      }
+    }
+    const shared = initial?.props?._i18n
+    return shared ? { locale: String(shared.locale), fallbackLocale: String(shared.fallbackLocale) } : null
+  })
+  if (!i18n) return
+  expect(i18n.locale, \`the page rendered in \${i18n.locale}, not the app's default \${i18n.fallbackLocale}, which the plan's labels are in: set LOCALE in playwright.browser.config.ts, then look for a ${LOCALE_COOKIE} cookie in the signed-in storage state\`).toBe(i18n.fallbackLocale)
+}`,
 }
 
 /** The views the plan specs check: every approved plan's, placed or not, but a dropped one. */
@@ -181,7 +214,7 @@ export function buildPlanSpecs(map: BrowserMap, options: SpecOptions, sharedSlug
     const shared = sharedSlugs.get(slug)
     if (shared) throw new CliError(`${shared.join(', ')} share the slug ${slug}, so ${plan}'s browser spec would be named for more than one plan; rename all but one (guren check --plan reports this too).`)
     const cases = [...byPlan.get(plan)!].sort((a, b) => compareStrings(a.view.id, b.view.id)).map((entry) => viewCase(entry, options))
-    return { path: `${GENERATED_SPECS_DIR}/plans/${slug}.browser.ts`, contents: spec(cases, '../../support') }
+    return { path: `${GENERATED_SPECS_DIR}/plans/${slug}.browser.ts`, contents: spec(cases, '../../support', PLAN_PRELUDE) }
   })
 }
 
