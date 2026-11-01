@@ -231,7 +231,7 @@ export const SHIPPED_UI_COMPONENTS: Readonly<Record<UiComponentName, ReadonlySet
   Button: new Set(['52b772daee828464bd1708e92995fe6c3f7227776aa50da49950857cc5a6f1f9']),
   Card: new Set(['0b399883734e631bbaf9de5daebd87eb345f968fca503b81a113ab1a49c9015f']),
   Checkbox: new Set(['b42805cd83473ebadca103a75fa6ca90d7b134dcb495410c7c3d92a249c88b5a']),
-  Field: new Set(['83c3463479f5c483d9d3278b3829c2111b45e6b73b40d5ec4f61be99cc5cfbdc']),
+  Field: new Set(['c9387e1ceaf4ae96d2d530afeadf283f4c4e22652bbdf7f76b51fdb96b736331']),
   Input: new Set(['ea7215126e14061445ba343f52e010eae0eb1b634e76c601d86b6aa009b386b7']),
   Label: new Set(['f6230461533783175f577743b33e3824e0a4dad8cbc5f939bdf315e56ad5cb53']),
   Select: new Set(['e8d24f137fc1f9a197522589ba6f54de547a9f00b64de31389f59b6a35ff2dea']),

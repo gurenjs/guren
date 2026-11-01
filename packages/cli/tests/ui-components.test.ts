@@ -36,6 +36,13 @@ describe('the shipped component templates', () => {
     expect(template.split('\n')[0]).toStartWith(`// guren-ui: ${name} v${released.size}. `)
   })
 
+  // The generators gate Field on the client exporting ./forms, which the first forms release does without later names.
+  it('Field imports only what the first client exporting ./forms exports', () => {
+    const imported = /import \{([^}]+)\} from '@guren\/inertia-client\/forms'/u.exec(uiComponentTemplate('Field'))?.[1] ?? ''
+    const names = imported.split(',').map((name) => name.replace(/^\s*type\s+/u, '').trim()).filter(Boolean).sort()
+    expect(names).toEqual(['FieldInput', 'FieldOption', 'FieldState', 'FormDataType', 'useField'])
+  })
+
   it('are the copies create-guren-app ships', () => {
     for (const name of UI_COMPONENTS) {
       expect(readFileSync(join(STARTER_DIR, `${name}.tsx`), 'utf8')).toBe(uiComponentTemplate(name))

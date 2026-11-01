@@ -1,6 +1,6 @@
 // guren-ui: Field v1. `guren upgrade` replaces this file only while it is unedited.
 import type { ReactNode } from 'react'
-import { useField, type FieldForm, type FieldInput, type FieldOption, type FieldState, type FormDataType } from '@guren/inertia-client/forms'
+import { useField, type FieldInput, type FieldOption, type FieldState, type FormDataType } from '@guren/inertia-client/forms'
 import { Checkbox } from './Checkbox'
 import { Input } from './Input'
 import { Label } from './Label'
@@ -8,7 +8,7 @@ import { Select } from './Select'
 import { Textarea } from './Textarea'
 
 export interface FieldProps<TBody extends FormDataType<TBody>, K extends keyof TBody & string> {
-  form: FieldForm<TBody>
+  form: Parameters<typeof useField<TBody, K>>[0]
   name: K
   label?: string
   as?: FieldInput
