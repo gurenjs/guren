@@ -34,7 +34,7 @@ export default function ProfileEdit({ profile, status }: Props) {
 
         <form className="space-y-4" onSubmit={form.handleSubmit}>
           <Field form={form} name="name" />
-          <Field form={form} name="email" as="email" />
+          <Field form={form} name="email" />
           <Field form={form} name="password" as="password" label="New password" />
           <Button type="submit" disabled={form.processing} block>
             Save changes

@@ -69,13 +69,22 @@ describe('schemaToTypeString', () => {
       expect(output(schema)).toBe('number')
     })
 
-    // `.transform()` is a pipe whose out side is an opaque function, so there
-    // is no parsed type to recover — the in side stays the best available.
-    it('falls back to the in side for a transform', () => {
+    // `.transform()` is a pipe whose out side is an opaque function. Borrowing the
+    // in side typed `z.string().transform(Number)` as `string` in `validated()`.
+    it('renders a transform as unknown on the way out', () => {
       const schema = z.object({ title: z.string() }).transform((v) => v.title)
 
       expect(input(schema)).toBe('{ title: string }')
-      expect(output(schema)).toBe('{ title: string }')
+      expect(output(schema)).toBe('unknown')
+      expect(output(z.string().transform(Number))).toBe('unknown')
+    })
+
+    // The schema after a transform is an outer pipe's out side, which states the type.
+    it('takes the type of a pipe that follows a transform', () => {
+      const schema = z.string().transform(Number).pipe(z.number())
+
+      expect(input(schema)).toBe('string')
+      expect(output(schema)).toBe('number')
     })
 
     // Structural: a schema that genuinely parses to `unknown` must keep saying
@@ -85,6 +94,12 @@ describe('schemaToTypeString', () => {
 
       expect(input(schema)).toBe('string')
       expect(output(schema)).toBe('unknown')
+    })
+
+    it('keeps an unpiped transform member of a union unknown', () => {
+      const schema = z.union([z.boolean(), z.string().transform((value) => value === 'on')])
+
+      expect(output(schema)).toBe('boolean | unknown')
     })
 
     it('renders union members that read alike once', () => {
@@ -139,13 +154,13 @@ describe('schemaToTypeString', () => {
       }
     })
 
-    // The type comes from the in side for a transform; presence has to agree,
-    // or one field is described by two different nodes.
-    it('agrees with the rendered type when a pipe output is a transform', () => {
+    // zod keeps the key once a transform has run, as `z.output` types it; the
+    // value is `unknown`, which admits the `undefined` an optional in side passes on.
+    it('keeps a key whose pipe output is a transform', () => {
       const schema = z.object({ a: z.string().optional().transform((s) => s?.length) })
 
       expect(input(schema)).toBe('{ a?: string }')
-      expect(output(schema)).toBe('{ a?: string }')
+      expect(output(schema)).toBe('{ a: unknown }')
     })
   })
 

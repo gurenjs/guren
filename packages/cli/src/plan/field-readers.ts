@@ -21,6 +21,7 @@ import { isZodSchema, toJsonSchema, type JsonSchemaObject } from '@guren/server/
 import { readResourceDefinitions, type ResourceDefinition } from '../data-types'
 import { parseSourceFile } from '../parse-cache'
 import { readMember, type PagePropKey } from '../page-props-extractor'
+import { BUILT_IN_OVERWRITES } from '../zod-overwrites'
 import type { PlanAppUnreadable } from './unreadable'
 
 /** Whether a client must send a non-null value, or why that cannot be read on every zod version. */
@@ -70,9 +71,6 @@ const ALLOWED_CHECKS = new Set(['min_length', 'max_length', 'length_equals', 'gr
 
 /** A coercion that accepts `null`; the string and boolean ones also accepted a missing key before zod 4.4. */
 const COERCES_NULL = new Set(['string', 'boolean', 'number', 'date'])
-
-/** zod's own `.trim()`, `.toLowerCase()`, `.toUpperCase()` and `.normalize()`; any other `.overwrite()` may rewrite a value past its bounds. */
-const BUILT_IN_OVERWRITES = new Set(['(input) => input.trim()', '(input) => input.toLowerCase()', '(input) => input.toUpperCase()', '(input) => input.normalize(form)'])
 
 /** A walk that throws (a recursive getter schema overflows the walker) leaves this export's fields unread, never the command. */
 export function readSchemaFields(name: string, value: unknown): PlanAppSchemaFields {

@@ -49,8 +49,36 @@ describe('readFieldContract', () => {
     expect(read(z.iso.datetime())).toMatchObject({ format: 'date-time', value: 'string' })
   })
 
-  it('takes no format from a pipe whose input stage is a plain string', () => {
-    expect(read(z.string().trim().toLowerCase().pipe(z.email()))).toEqual({ type: 'string', required: true })
+  // The shape every make:auth validator writes for an email.
+  it('takes the email format from a pipe whose first stage only trims, changes case and bounds the length', () => {
+    expect(read(z.string().trim().min(1).toLowerCase().pipe(z.email('bad')))).toEqual({ type: 'string', required: true, format: 'email', minLength: 1 })
+    expect(read(z.string().toUpperCase().pipe(z.string().email()).optional().nullable()))
+      .toEqual({ type: 'string', required: false, nullable: true, format: 'email' })
+  })
+
+  // Each of these could turn a value an email input would refuse into one the out side accepts.
+  it('takes no format from a pipe whose first stage could rewrite the value', () => {
+    expect(read(z.string().regex(/x/u).pipe(z.email()))).toEqual({ type: 'string', required: true })
+    expect(read(z.string().overwrite((value) => value.replaceAll(' ', '')).pipe(z.email()))).toEqual({ type: 'string', required: true })
+    expect(read(z.string().normalize('NFKC').pipe(z.email()))).toEqual({ type: 'string', required: true })
+    expect(read(z.string().transform((value) => value).pipe(z.email()))).toEqual({ type: 'string', required: true })
+    expect(read(z.coerce.string().pipe(z.email()))).toEqual({ type: 'string', required: true })
+  })
+
+  it('takes no format other than email from a pipe', () => {
+    expect(read(z.string().trim().pipe(z.url()))).toEqual({ type: 'string', required: true })
+  })
+
+  // LoginSchema.remember: a checkbox sends a boolean, a plain form post a string.
+  it('types a union boolean when every member parses to a boolean', () => {
+    const remember = z.union([z.boolean(), z.string().transform((value) => value === 'on').pipe(z.boolean())])
+    expect(read(remember.default(false))).toEqual({ type: 'boolean', required: false })
+    expect(read(remember.nullable())).toEqual({ type: 'boolean', required: true, nullable: true })
+  })
+
+  // A transform's result has no schema, so it could be anything.
+  it('keeps a union with an unpiped transform member unknown', () => {
+    expect(read(z.union([z.boolean(), z.string().transform((value) => value === 'on')]))).toEqual({ type: 'unknown', required: true })
   })
 
   it('keeps a key the walker cannot render, with its requiredness', () => {

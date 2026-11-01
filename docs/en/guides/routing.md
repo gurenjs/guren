@@ -202,6 +202,7 @@ export default class PostsController extends Controller {
 ```
 
 - Values arrive after coercion, defaults and transforms, so a `z.coerce.number()` param is a `number`. A segment the route declares no schema for is `undefined`.
+- A field ending in `.transform()` is typed `unknown`, since codegen cannot read what the function returns. Follow it with a schema to type it: `z.string().transform(Number).pipe(z.number())` is a `number`.
 - Once `guren codegen` has generated the route types, the route name is checked at compile time and the result is typed from the contract. A name other than the route being served throws at runtime.
 - An action mounted on several routes, such as a PUT and a PATCH, passes every name: `this.validated(['posts.update', 'posts.patch'])`.
 - The contract runs before the action, so an invalid body gets its 422 before a check inside the action (such as `this.auth.userOrFail()`) runs. When an unauthenticated request must get a 401 first, put the check in route middleware.

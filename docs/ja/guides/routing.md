@@ -204,6 +204,7 @@ export default class PostsController extends Controller {
 ```
 
 - 値は型変換、デフォルト値、変換処理を適用した後の形で届くので、`z.coerce.number()` のパラメータは `number` になります。スキーマを宣言していないセグメントは `undefined` です。
+- `.transform()` で終わるフィールドは `unknown` 型になります。関数が返す値の型を codegen が読めないためです。型を付けたいときは後ろにスキーマをつなぎます。`z.string().transform(Number).pipe(z.number())` なら `number` になります。
 - `guren codegen` でルートの型を生成しておくと、ルート名がコンパイル時に検査され、戻り値もコントラクトから型付けされます。処理中のルートと違う名前を渡すと、実行時に例外になります。
 - PUT と PATCH のように 1 つのアクションを複数のルートに割り当てる場合は、`this.validated(['posts.update', 'posts.patch'])` のようにすべての名前を渡します。
 - コントラクトはアクションより先に実行されるので、不正なボディには、アクションの中の検査（`this.auth.userOrFail()` など）より先に 422 が返ります。未認証のリクエストに 401 を先に返したい場合は、その検査をルートのミドルウェアに置いてください。

@@ -33,9 +33,9 @@ export default function Login({ email = '', errors = {} }: Props) {
         )}
 
         <form className="mt-6 space-y-4" onSubmit={form.handleSubmit}>
-          <Field form={form} name="email" as="email" />
+          <Field form={form} name="email" />
           <Field form={form} name="password" as="password" />
-          <Field form={form} name="remember" as="checkbox" label="Remember me" />
+          <Field form={form} name="remember" label="Remember me" />
           <Button type="submit" disabled={form.processing} block>
             Sign in
           </Button>
