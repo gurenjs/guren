@@ -1,5 +1,5 @@
 import { describe, test, expect, spyOn } from 'bun:test'
-import { createTranslator, resolveTranslation, type I18nPageProps, type Translation } from '../src/i18n'
+import { createTranslator, hasTranslation, resolveTranslation, type I18nPageProps, type Translation } from '../src/i18n'
 // Parity oracle: the server-side Translator this module mirrors. Test-only
 // import — the shipped bundle must stay free of server code.
 import { Translator, pluralizationRules } from '../../server/src/i18n'
@@ -112,6 +112,41 @@ describe('resolveTranslation', () => {
 
       resolveTranslation(undefined)
       expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+})
+
+describe('hasTranslation', () => {
+  const i18n: I18nPageProps = { locale: 'ja', fallbackLocale: 'en', messages: MESSAGES }
+
+  test('finds a key in the current locale', () => {
+    expect(hasTranslation(i18n, 'messages.hello')).toBe(true)
+  })
+
+  test('finds a key only the fallback locale has', () => {
+    expect(hasTranslation(i18n, 'messages.enOnly')).toBe(true)
+  })
+
+  test('counts an empty translation as present, as t() returns it', () => {
+    expect(hasTranslation(i18n, 'messages.empty')).toBe(true)
+  })
+
+  test('misses a key neither catalog has', () => {
+    expect(hasTranslation(i18n, 'messages.absent')).toBe(false)
+  })
+
+  test('misses a key that ends on a group or walks through a string', () => {
+    expect(hasTranslation(i18n, 'messages.nested')).toBe(false)
+    expect(hasTranslation(i18n, 'messages.hello.more')).toBe(false)
+  })
+
+  test('misses every key without the _i18n prop, and warns about nothing', () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(hasTranslation(undefined, 'messages.hello')).toBe(false)
+      expect(warn).not.toHaveBeenCalled()
     } finally {
       warn.mockRestore()
     }

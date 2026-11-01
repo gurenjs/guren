@@ -194,6 +194,31 @@ export function createTranslator(props: I18nPageProps): Translation {
   }
 }
 
+/**
+ * Whether `key` has a translation in the current locale or its fallback. `t()` returns the key
+ * on a miss, so it cannot tell a missing key from one translated as itself.
+ */
+export function hasTranslation(i18n: I18nPageProps | undefined, key: string): boolean {
+  if (!i18n) return false
+  return (getRawTranslation(i18n.messages, i18n.locale, key) ?? getRawTranslation(i18n.messages, i18n.fallbackLocale, key)) !== undefined
+}
+
+/**
+ * The first non-empty translation among `keys`, every key tried in the current locale before
+ * any in the fallback, with no interpolation.
+ * @internal shared with `useField`'s label resolution
+ */
+export function findTranslation(i18n: I18nPageProps | undefined, keys: readonly string[]): string | undefined {
+  if (!i18n) return undefined
+  for (const locale of [i18n.locale, i18n.fallbackLocale]) {
+    for (const key of keys) {
+      const translation = getRawTranslation(i18n.messages, locale, key)
+      if (translation) return translation
+    }
+  }
+  return undefined
+}
+
 let warnedMissingProps = false
 
 const identityTranslation: Translation = {

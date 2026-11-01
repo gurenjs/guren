@@ -114,7 +114,7 @@ const form = useRouteForm(postsStoreForm, { title: '', body: '' })
 </form>
 ```
 
-ラベルは既定でフィールド名を単語に分けたものになります(`startsAt` なら「Starts at」)。変えるときは `label` を、スキーマから決まらない入力欄(`textarea`、`password`、`file`)には `as` を渡します。`Field` と `useRouteForm` を使うには、`/forms` を export している `@guren/inertia-client` が必要です。
+ラベルは、アプリに[翻訳](./i18n.md#フォームのラベル)があればその翻訳、無ければフィールド名を単語に分けたものになります(`startsAt` なら「Starts at」)。変えるときは `label` を、スキーマから決まらない入力欄(`textarea`、`password`、`file`)には `as` を渡します。`Field` と `useRouteForm` を使うには、`/forms` を export している `@guren/inertia-client` が必要です。
 
 再実行、`--diff`、`--force` については [`add ui`](./cli.md#add-ui) を参照してください。
 

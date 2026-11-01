@@ -114,7 +114,7 @@ const form = useRouteForm(postsStoreForm, { title: '', body: '' })
 </form>
 ```
 
-The label defaults to the field name as words (`startsAt` reads "Starts at"). Pass `label` to change it, and `as` for an input the schema cannot express (`textarea`, `password`, `file`). `Field` and `useRouteForm` need an `@guren/inertia-client` that exports `/forms`.
+The label defaults to a [translation](./i18n.md#form-labels) when the app has one, else the field name as words (`startsAt` reads "Starts at"). Pass `label` to change it, and `as` for an input the schema cannot express (`textarea`, `password`, `file`). `Field` and `useRouteForm` need an `@guren/inertia-client` that exports `/forms`.
 
 See [`add ui`](./cli.md#add-ui) for re-running, `--diff` and `--force`.
 
