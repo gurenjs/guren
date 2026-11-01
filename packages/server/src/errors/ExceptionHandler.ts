@@ -13,6 +13,7 @@ import type {
 import { HttpException } from './HttpException'
 import { renderErrorPage } from './error-page'
 import { renderDebugPage } from './debug-page'
+import { redactQueryParams } from './redact-query-params'
 import { ambientBinding, bindAmbient } from '../http/default-application'
 import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
 
@@ -62,7 +63,9 @@ export class ExceptionHandler {
     return process.env.NODE_ENV !== 'production'
   }
 
-  async handle(error: Error, ctx: Context): Promise<Response> {
+  /** Reporters and renderers receive the error with SQL bound parameters redacted. */
+  async handle(thrown: Error, ctx: Context): Promise<Response> {
+    const error = redactQueryParams(thrown)
     if (!this.shouldNotReport(error)) captureRuntimeError(error, ctx, resolveExceptionStatus(error))
     await this.reportException(error)
 
@@ -80,14 +83,17 @@ export class ExceptionHandler {
     // rejected request. Not `shouldNotReport()` — a *registered* reporter
     // still receives 4xx.
     if (this.reporters.length === 0 && resolveExceptionStatus(error) >= 500) {
-      console.error('Unhandled exception:', error)
+      console.error('Unhandled exception:', redactQueryParams(error))
     }
 
     for (const reporter of this.reporters) {
       try {
         await reporter(error)
       } catch (reporterError) {
-        console.error('Exception reporter failed:', reporterError)
+        console.error(
+          'Exception reporter failed:',
+          reporterError instanceof Error ? redactQueryParams(reporterError) : reporterError,
+        )
       }
     }
   }
@@ -118,7 +124,8 @@ export class ExceptionHandler {
     return this.renderDefaultException(error, ctx)
   }
 
-  protected renderDefaultException(error: Error, ctx: Context): Response {
+  protected renderDefaultException(thrown: Error, ctx: Context): Response {
+    const error = redactQueryParams(thrown)
     const debug = this.shouldShowDetails()
     // Resolved before the branch so this renders with the same number
     // `reportException` judged it by; `toResponse()` supplies only the body.

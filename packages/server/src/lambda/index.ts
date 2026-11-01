@@ -5,6 +5,7 @@ import type { Scheduler } from '../scheduling/Scheduler'
 import type { ConsoleKernel } from '../console/ConsoleKernel'
 import { getJob } from '../queue/Job'
 import { deserializeQueuedJob } from '../queue/serialize'
+import { redactedMessage } from '../errors/redact-query-params'
 import type { QueuedJob } from '../queue/types'
 import { detectServerlessRuntime } from '../runtime/serverless'
 
@@ -123,7 +124,7 @@ async function processSqsRecord(record: SqsRecord): Promise<void> {
           await instance.failed(job.payload, error as Error)
         } catch (hookError) {
           // Keep the original failure in the partial batch response for redrive.
-          logSqsFailure({ msg: 'Error in job.failed() handler', messageId: record.messageId, job: job.name, error: (hookError as Error).message })
+          logSqsFailure({ msg: 'Error in job.failed() handler', messageId: record.messageId, job: job.name, error: redactedMessage(hookError) })
         }
       }
       throw error
@@ -138,7 +139,7 @@ async function processSqsRecord(record: SqsRecord): Promise<void> {
       queue: job?.queue,
       attempt: job?.attempts,
       maxAttempts: job?.maxAttempts,
-      error: (error as Error).message,
+      error: redactedMessage(error),
     })
     throw error
   }

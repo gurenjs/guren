@@ -15,6 +15,7 @@ import { resolveNotifiableType } from './notifiable-type'
 import { Job, registerJob } from '../queue'
 import { ambientBinding, bindAmbient } from '../http/default-application'
 import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
+import { redactQueryParams } from '../errors/redact-query-params'
 
 /** Sends notifications through multiple registered channels. */
 export class NotificationManager {
@@ -122,7 +123,7 @@ export class NotificationManager {
         } catch (error) {
           console.error(
             `Failed to send notification via ${channelName}:`,
-            error
+            error instanceof Error ? redactQueryParams(error) : error
           )
           throw error
         }
