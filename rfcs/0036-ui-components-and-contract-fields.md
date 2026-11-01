@@ -279,10 +279,12 @@ export const postsUpdateForm: RouteFormContract<'posts.update', 'PUT', '/posts/:
   `.toUpperCase()`) and bounds the length, and whose out side is an email,
   carries `format: 'email'`: a browser's email input strips surrounding
   whitespace and accepts either case, so it holds what that stage hands on.
-  Any other check, overwrite or transform there leaves the format out. A
-  union every member of which parses to a boolean (each a `z.boolean()`, or
-  a transform followed by `.pipe(z.boolean())`) is typed `boolean`; a member
-  ending in a bare transform keeps the union `unknown`. The generated auth
+  Any other check, overwrite or transform there, or a `.catch()` anywhere on
+  the way, leaves the format out. A union every member of which parses to a
+  boolean (each a `z.boolean()`, or a transform followed by
+  `.pipe(z.boolean())`) is typed `boolean` when one member takes a boolean as
+  sent, since a checkbox submits `checked`; a member ending in a bare
+  transform keeps the union `unknown`. The generated auth
   pages then drop `as="email"` and `as="checkbox"`, so a validator edited
   away from those shapes changes the input with it rather than being
   contradicted by a hint in the page. `as="password"` stays, since no schema

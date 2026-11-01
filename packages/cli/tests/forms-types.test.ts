@@ -65,6 +65,12 @@ describe('readFieldContract', () => {
     expect(read(z.coerce.string().pipe(z.email()))).toEqual({ type: 'string', required: true })
   })
 
+  // `.catch()` turns every rejected string into its fallback, so an email input would refuse valid submissions.
+  it('takes no email format from a pipe that catches a failure', () => {
+    expect(read(z.string().pipe(z.email().catch('fallback@example.com')))).not.toHaveProperty('format')
+    expect(read(z.string().trim().pipe(z.email()).catch('fallback@example.com'))).not.toHaveProperty('format')
+  })
+
   it('takes no format other than email from a pipe', () => {
     expect(read(z.string().trim().pipe(z.url()))).toEqual({ type: 'string', required: true })
   })
@@ -74,6 +80,15 @@ describe('readFieldContract', () => {
     const remember = z.union([z.boolean(), z.string().transform((value) => value === 'on').pipe(z.boolean())])
     expect(read(remember.default(false))).toEqual({ type: 'boolean', required: false })
     expect(read(remember.nullable())).toEqual({ type: 'boolean', required: true, nullable: true })
+  })
+
+  // A checkbox submits `checked`, which neither member would accept.
+  it('keeps a union that takes no boolean as sent unknown', () => {
+    const flag = z.union([
+      z.string().transform((value) => value === 'on').pipe(z.boolean()),
+      z.number().transform((value) => value === 1).pipe(z.boolean()),
+    ])
+    expect(read(flag)).toEqual({ type: 'unknown', required: true })
   })
 
   // A transform's result has no schema, so it could be anything.

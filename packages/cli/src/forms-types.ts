@@ -186,6 +186,7 @@ const LENGTH_CHECKS = new Set(['min_length', 'max_length', 'length_equals'])
  * the field's format. Any other check or transform there could turn a non-email into one.
  */
 function emailBehindPipe(schema: ZodSchemaLike): boolean {
+  if (swallowsFailure(schema)) return false
   const pipe = fieldCore(schema)
   if (typeOf(pipe) !== 'pipe') return false
   const from = schemaAt(pipe._def ?? {}, 'in')
@@ -198,10 +199,31 @@ function emailBehindPipe(schema: ZodSchemaLike): boolean {
   return out?.type === 'string' && out.format === 'email'
 }
 
-/** A union every member of which parses to a boolean (`z.union([z.boolean(), z.string().transform(…).pipe(z.boolean())])`). */
+/**
+ * A `.catch()` on the way to the email accepts any string, so no format may block one.
+ * Reads wrappers and both pipe sides; a `lazy` child is unreadable and counts as swallowing.
+ */
+function swallowsFailure(schema: ZodSchemaLike, depth = 0): boolean {
+  if (depth > 32) return true
+  const type = typeOf(schema)
+  if (type === 'catch' || type === 'lazy') return true
+  if (type === 'pipe') {
+    const { from, to } = pipeSides(schema._def ?? {})
+    return Boolean((from && swallowsFailure(from, depth + 1)) || (to && swallowsFailure(to, depth + 1)))
+  }
+  if (!PRESENCE_WRAPPERS.has(type) && !TRANSPARENT_WRAPPERS.has(type) && type !== 'nullable') return false
+  const inner = innerSchema(schema._def ?? {})
+  return inner ? swallowsFailure(inner, depth + 1) : false
+}
+
+/**
+ * A union every member of which parses to a boolean, one of them taking a boolean as sent
+ * (`z.union([z.boolean(), z.string().transform(…).pipe(z.boolean())])`): a checkbox submits `checked`.
+ */
 function parsesToBoolean(schema: ZodSchemaLike): boolean {
   const core = fieldCore(schema)
-  return typeOf(core) === 'union' && schemaToTypeString(core, { io: 'output' }) === 'boolean'
+  if (typeOf(core) !== 'union' || schemaToTypeString(core, { io: 'output' }) !== 'boolean') return false
+  return (schemaToTypeString(core, { io: 'input' }) ?? '').split(' | ').includes('boolean')
 }
 
 /** One body key as a contract field. A key the walker cannot render stays, as `unknown`. */
