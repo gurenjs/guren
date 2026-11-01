@@ -5,8 +5,10 @@ import {
   fromDateTimeLocal,
   humanizeFieldName,
   normalizeBlankFields,
+  numberAttributes,
   requiresValue,
   resolveRouteUrl,
+  selectErrorBag,
   toDateTimeLocal,
   useRouteForm,
   type DescribeFieldInput,
@@ -90,6 +92,31 @@ describe('normalizeBlankFields', () => {
   it('leaves filled values and keys outside the contract alone', () => {
     const data = { title: 'Hi', note: 'n', subtitle: 's', tagline: 't', extra: '' }
     expect(normalizeBlankFields(fields, data, data)).toEqual(data)
+  })
+})
+
+describe('numberAttributes', () => {
+  it('raises min to the first multiple of the step, which the browser counts from', () => {
+    expect(numberAttributes({ type: 'number', required: true, minimum: 1, multipleOf: 2 })).toEqual({ min: 2, step: 2 })
+    expect(numberAttributes({ type: 'integer', required: true, minimum: 0.5 })).toEqual({ min: 1, step: 1 })
+    expect(numberAttributes({ type: 'number', required: true, minimum: 0.1, multipleOf: 0.1 })).toEqual({ min: 0.1, step: 0.1 })
+  })
+
+  it('leaves min alone when any value is allowed', () => {
+    expect(numberAttributes({ type: 'number', required: true, minimum: 1.5, maximum: 9 })).toEqual({ min: 1.5, max: 9, step: 'any' })
+  })
+})
+
+describe('selectErrorBag', () => {
+  it('adopts the flat errors, or the named bag', () => {
+    expect(selectErrorBag({ email: 'Invalid' })).toEqual({ email: 'Invalid' })
+    expect(selectErrorBag({ profile: { email: 'Invalid' } }, 'profile')).toEqual({ email: 'Invalid' })
+  })
+
+  it('adopts nothing when the bag is absent or empty', () => {
+    expect(selectErrorBag({ email: 'Invalid' }, 'profile')).toBeUndefined()
+    expect(selectErrorBag({})).toBeUndefined()
+    expect(selectErrorBag(undefined)).toBeUndefined()
   })
 })
 

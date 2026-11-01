@@ -79,14 +79,21 @@ export function useRouteForm<
   ...args: RouteFormOptionsArgs<TPath>
 ): RouteForm<TBody> {
   const options = args[0] as RouteFormOptions<string> | undefined
-  const url = resolveRouteUrl(contract.path, options?.params)
-  const form = useForm<TBody>(contract.method.toLowerCase() as Method, url, initial)
+  // Inertia keeps the endpoint its first render passed, so getters read the latest params.
+  const endpoint = { method: contract.method, url: resolveRouteUrl(contract.path, options?.params) }
+  const endpointRef = useRef(endpoint)
+  endpointRef.current = endpoint
+  const form = useForm<TBody>(
+    () => endpointRef.current.method.toLowerCase() as Method,
+    () => endpointRef.current.url,
+    initial,
+  )
   const initialRef = useRef(initial)
   const pageErrors = usePage().props.errors
 
   useEffect(() => {
-    if (!options?.adoptPageErrors || !pageErrors || typeof pageErrors !== 'object') return
-    if (Object.keys(pageErrors).length > 0) form.setError(pageErrors as FormDataErrors<TBody>)
+    const adopted = options?.adoptPageErrors ? selectErrorBag(pageErrors, options.errorBag) : undefined
+    if (adopted) form.setError(adopted as FormDataErrors<TBody>)
     // Once, on mount: a later page error belongs to whichever form made that visit.
   }, [])
 
@@ -100,6 +107,18 @@ export function useRouteForm<
       form.submit(options?.errorBag ? { errorBag: options.errorBag } : {})
     },
   }
+}
+
+/**
+ * The page errors a form adopts: those under `errorBag` when one is named (Inertia nests a bag's
+ * errors under its name), else the flat set. `undefined` when there are none to adopt.
+ */
+export function selectErrorBag(pageErrors: unknown, errorBag?: string): Record<string, unknown> | undefined {
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value)
+  if (!isRecord(pageErrors)) return undefined
+  const selected = errorBag ? pageErrors[errorBag] : pageErrors
+  return isRecord(selected) && Object.keys(selected).length > 0 ? selected : undefined
 }
 
 /**
@@ -182,6 +201,22 @@ export function requiresValue(field: FieldContract | undefined, input: FieldInpu
   if (!field || field.nullable || input === 'checkbox' || input === 'hidden') return false
   if (field.type === 'string' && !(field.minLength !== undefined && field.minLength >= 1)) return false
   return field.required || !isBlank(initialValue)
+}
+
+/**
+ * `min`, `max` and `step` for a number control. The browser counts steps from `min`, so `min` is
+ * raised to the first multiple of the step: `min={1} step={2}` would accept 3 and reject 2.
+ */
+export function numberAttributes(contract: FieldContract | undefined): { min?: number; max?: number; step: number | 'any' } {
+  // Without `any` the browser's default step of 1 rejects `1.5`.
+  const step = contract?.multipleOf ?? (contract?.type === 'integer' ? 1 : 'any')
+  const minimum = contract?.minimum
+  const min = minimum === undefined || step === 'any' ? minimum : Number((Math.ceil(minimum / step - 1e-9) * step).toPrecision(12))
+  return {
+    ...(min !== undefined ? { min } : {}),
+    ...(contract?.maximum !== undefined ? { max: contract.maximum } : {}),
+    step,
+  }
 }
 
 function pad(value: number): string {
@@ -412,10 +447,7 @@ export function describeField<TValue>(input: DescribeFieldInput<TValue>): FieldS
           ...requiredProp,
           type: 'number',
           value: isBlank(value) ? '' : String(value),
-          ...(contract?.minimum !== undefined ? { min: contract.minimum } : {}),
-          ...(contract?.maximum !== undefined ? { max: contract.maximum } : {}),
-          // Without `any` the browser's default step of 1 rejects `1.5`.
-          step: contract?.multipleOf ?? (contract?.type === 'integer' ? 1 : 'any'),
+          ...numberAttributes(contract),
           onChange: (event) => setValue(Number.isNaN(event.target.valueAsNumber) ? '' : event.target.valueAsNumber),
         },
       }

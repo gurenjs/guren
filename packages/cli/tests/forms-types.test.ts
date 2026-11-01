@@ -59,6 +59,17 @@ describe('readFieldContract', () => {
   it('leaves out a pattern, which an HTML pattern would read differently', () => {
     expect(read(z.string().includes('x'))).toEqual({ type: 'string', required: true })
   })
+
+  it('treats a key whose schema accepts undefined as optional', () => {
+    expect(read(z.string().or(z.undefined()))).toMatchObject({ required: false })
+    expect(read(z.unknown())).toMatchObject({ required: false })
+    expect(read(z.unknown().nonoptional())).toMatchObject({ required: true })
+  })
+
+  it('folds every nullable layer back into the inner type', () => {
+    expect(read(z.number().nullable().nullable())).toEqual({ type: 'number', required: true, nullable: true })
+    expect(read(z.date().nullable().nullable())).toMatchObject({ type: 'string', format: 'date-time', value: 'Date', nullable: true })
+  })
 })
 
 describe('buildFormContracts', () => {
@@ -86,6 +97,11 @@ describe('buildFormsContent', () => {
     expect(content).toContain("import type { RouteFormContract } from '@guren/inertia-client/forms'")
     expect(content).toContain("export const postsUpdateForm: RouteFormContract<'posts.update', 'PUT', '/posts/:id', ApiRoutes['posts.update']['body']> = {")
     expect(content).toContain(`["meta-title"]: { type: 'string', required: true },`)
+  })
+
+  it('keeps a key named __proto__ as an own property', () => {
+    const content = buildFormsContent(buildFormContracts([route('posts.store', z.object({ ['__proto__']: z.string() }))], []))
+    expect(content).toContain(`["__proto__"]: { type: 'string', required: true },`)
   })
 })
 

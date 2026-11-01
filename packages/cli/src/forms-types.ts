@@ -7,7 +7,7 @@
 import { readFile, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
-import { objectShape, typeOf, unwrapSingleChild, type ZodSchemaLike } from '@guren/server/internal/zod-compat'
+import { objectShape, pipeSides, typeOf, unwrapSingleChild, type ZodSchemaLike } from '@guren/server/internal/zod-compat'
 import { isZodSchema, toJsonSchema, type JsonSchemaObject } from '@guren/server/internal/zod-json-schema'
 
 import type { RouteDefinitionLike } from './api-client-types'
@@ -105,20 +105,51 @@ function dateValueKind(schema: ZodSchemaLike): 'Date' | 'string' {
   return typeOf(leaf) === 'date' && (leaf._def as { coerce?: unknown } | undefined)?.coerce !== true ? 'Date' : 'string'
 }
 
-/** The walker renders `.nullable()` as `anyOf: [inner, null]`; fold it back into the inner type. */
+function isNullSchema(node: JsonSchemaObject): boolean {
+  return node.type === 'null' || (Array.isArray(node.type) && node.type.length === 1 && node.type[0] === 'null')
+}
+
+/** The walker renders `.nullable()` as `anyOf: [inner, null]`, once per wrapper; fold every layer back. */
 function foldNullable(rendered: JsonSchemaObject): { node: JsonSchemaObject | undefined; nullable: boolean } {
-  const isNull = (node: JsonSchemaObject) => node.type === 'null' || (Array.isArray(node.type) && node.type.length === 1 && node.type[0] === 'null')
-  if (isNull(rendered)) return { node: undefined, nullable: true }
-  if (rendered.anyOf?.length === 2) {
-    const inner = rendered.anyOf.find((option) => !isNull(option))
-    if (inner && rendered.anyOf.some(isNull)) return { node: inner, nullable: true }
+  let node: JsonSchemaObject = rendered
+  let nullable = false
+  for (;;) {
+    if (isNullSchema(node)) return { node: undefined, nullable: true }
+    const inner = node.anyOf?.length === 2 && node.anyOf.some(isNullSchema) ? node.anyOf.find((option) => !isNullSchema(option)) : undefined
+    if (!inner) return { node, nullable }
+    node = inner
+    nullable = true
   }
-  return { node: rendered, nullable: false }
+}
+
+const OMISSIBLE_LEAVES = new Set(['undefined', 'void', 'unknown', 'any'])
+
+/**
+ * Whether a request may leave the key out: `permitsOmission()`, which reads the presence
+ * wrappers, plus the leaves and union members that accept `undefined` (`z.unknown()`,
+ * `z.string().or(z.undefined())`), which it reports as required.
+ */
+function acceptsOmission(schema: ZodSchemaLike, depth = 0): boolean {
+  if (permitsOmission(schema)) return true
+  if (depth > 32) return false
+  const type = typeOf(schema)
+  if (type === 'nonoptional') return false
+  if (OMISSIBLE_LEAVES.has(type)) return true
+  if (type === 'union') {
+    const options = (schema._def as { options?: unknown } | undefined)?.options
+    return Array.isArray(options) && options.some((option) => acceptsOmission(option as ZodSchemaLike, depth + 1))
+  }
+  if (type === 'pipe') {
+    const { from, to } = pipeSides(schema._def ?? {})
+    return Boolean(from && acceptsOmission(from, depth + 1) && (!to || acceptsOmission(to, depth + 1)))
+  }
+  const nested = unwrapSingleChild(schema, 'input')
+  return nested ? acceptsOmission(nested, depth + 1) : false
 }
 
 /** One body key as a contract field. A key the walker cannot render stays, as `unknown`. */
 export function readFieldContract(schema: ZodSchemaLike, warnings: string[], label: string): FieldContract {
-  const required = !permitsOmission(schema)
+  const required = !acceptsOmission(schema)
   const rendered = toJsonSchema(schema, warnings, label, 'input')
   if (!rendered) return { type: 'unknown', required }
 
@@ -174,7 +205,8 @@ export function buildFormContracts(definitions: readonly RouteDefinitionLike[], 
     }
     byIdentifier.set(identifier, name)
 
-    const fields: Record<string, FieldContract> = {}
+    // No prototype, so a key named `__proto__` is an own property like any other.
+    const fields: Record<string, FieldContract> = Object.create(null)
     for (const [key, schema] of Object.entries(shape)) {
       fields[key] = readFieldContract(schema, warnings, `${definition.method} ${definition.path} body.${key}`)
     }
