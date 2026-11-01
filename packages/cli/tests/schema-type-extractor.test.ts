@@ -86,6 +86,13 @@ describe('schemaToTypeString', () => {
       expect(input(schema)).toBe('string')
       expect(output(schema)).toBe('unknown')
     })
+
+    it('renders union members that read alike once', () => {
+      const schema = z.union([z.boolean(), z.string().transform((value) => value === 'on').pipe(z.boolean())])
+
+      expect(input(schema)).toBe('boolean | string')
+      expect(output(schema)).toBe('boolean')
+    })
   })
 
   describe('optionality', () => {

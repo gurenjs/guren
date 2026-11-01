@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { readFile, symlink, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import {
   SERVER_DIST_ENTRY,
@@ -8,12 +8,12 @@ import {
   assertWorkspaceBuilt,
   checkTypes,
   createTempWorkspace,
-  linkWorkspacePackage,
   renderedAppCompilerOptions,
   seedApiOnlyApp,
   seedInertiaApp,
   writeWorkspaceFiles,
 } from './helpers'
+import { prepareRenderedApp, runRouteCodegen } from './rendered-app'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { builtinSubCommands } from '../src/commands'
 import { parseFieldsString, type FieldDefinition, type FieldType } from '../src/fields'
@@ -21,11 +21,7 @@ import { collectionSlug, schemaIdentifierFor, tableNameFor } from '../src/inflec
 import { ensurePgImports } from '../src/patch-helpers'
 import { camelCase, pascalCase } from '../src/utils'
 import { loadScaffoldTemplate } from '../src/scaffold-templates'
-import { generateApiClientTypes } from '../src/api-client-types'
-import { generateDataTypes } from '../src/data-types'
 import { generatePageTypes } from '../src/pages-types'
-import { generateRouteTypes } from '../src/routes-types'
-import { generateFormTypes } from '../src/forms-types'
 import { buildRouteRegistrationHint, makeFeature, type MakeFeatureOptions } from '../src/make-feature'
 import { makeChannel } from '../src/make-channel'
 import { makeCommand } from '../src/make-command'
@@ -64,22 +60,6 @@ const LINKED_DIST_ENTRIES = [SERVER_DIST_ENTRY, ...['core', 'orm'].map((name) =>
 
 /** Every FIELD_TYPES member plus a nullable, so each column mapper branch renders. */
 const ALL_FIELDS = 'title:string,count:number,published:boolean,body:text,postedAt:date,meta:json,subtitle:string?'
-
-/**
- * Bun resolves a rendered app's `@/` imports through the nearest tsconfig, and
- * the app's own routes file is *imported* by route codegen, so the rendered
- * controllers, models and validators evaluate for real. That import graph reaches
- * `@guren/core`, `@guren/orm` and `zod`, which a temp directory cannot resolve.
- */
-async function prepareRenderedApp(dir: string): Promise<void> {
-  await writeFile(join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { paths: { '@/*': ['./*'] } } }))
-  // Codegen writes forms.gen.ts only for an app depending on a client that exports ./forms.
-  await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'rendered-app', dependencies: { '@guren/inertia-client': 'workspace:*' } }))
-  await linkWorkspacePackage('inertia-client', dir)
-  await linkWorkspacePackage('core', dir)
-  await linkWorkspacePackage('orm', dir)
-  await symlink(join(cliRoot, 'node_modules/zod'), join(dir, 'node_modules/zod'), 'dir')
-}
 
 const PG_TABLE_BUILDERS = ['boolean', 'integer', 'jsonb', 'pgTable', 'serial', 'text', 'timestamp']
 
@@ -143,15 +123,6 @@ ${body}
 
 export default ${registrar}
 `
-}
-
-/** `guren codegen`'s route-dependent half, in its order: pages first, since the routes file's controllers import them. */
-async function runCodegen(appRoot: string): Promise<void> {
-  await generatePageTypes({ appRoot, extractProps: true, force: true })
-  const { definitions } = await generateRouteTypes({ appRoot, routesFile: 'routes/web.ts', force: true })
-  const { definitions: resources } = await generateDataTypes({ appRoot, force: true })
-  await generateApiClientTypes(definitions, { appRoot, resources, force: true })
-  await generateFormTypes(definitions, { appRoot, force: true })
 }
 
 async function typecheckRenderedApp(dir: string, created: string[]): Promise<void> {
@@ -239,7 +210,7 @@ describe('rendered make:feature output typechecks', () => {
             expect(created).toContain(path)
           }
 
-          await runCodegen(workspace.dir)
+          await runRouteCodegen(workspace.dir)
           await typecheckRenderedApp(workspace.dir, created)
         } finally {
           await workspace.cleanup()

@@ -29,6 +29,9 @@
       "@/.guren/pages.gen": [
         "./tests/fixtures/scaffold-typecheck/auth/.guren/pages.gen.ts"
       ],
+      "@/.guren/forms.gen": [
+        "./tests/fixtures/scaffold-typecheck/auth/.guren/forms.gen.ts"
+      ],
       "@/.guren/routes.gen": [
         "./tests/fixtures/scaffold-typecheck/prototype/.guren/routes.gen.ts"
       ],

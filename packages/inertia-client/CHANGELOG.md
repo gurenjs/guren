@@ -1,16 +1,5 @@
 # @guren/inertia-client
 
-## 1.3.0
-
-### Minor Changes
-
-- 73a3ceb: `useField` (and so the copied `Field` component) resolves a label it is not given from the app's translations (RFC 0036 §4): `fields.<route>.<name>.label`, then `fields.<name>.label`, both in the current locale before the fallback locale, then the field name as words. An enum's option labels read `fields.<name>.options.<value>` the same way; a value or field name containing a dot has no key and reads as words. The `_i18n` page prop is read without the warning `useTranslation()` prints, so an app without i18n sees no change in what renders. Reading it calls Inertia's `usePage()`, so `useField` now needs the page context, as `useRouteForm` already did: a component test or story that renders `Field` with a plain `useForm()` outside Inertia's `<App>` has to wrap it in one. `hasTranslation(i18n, key)` is exported beside `createTranslator()` and reports whether a key exists in the current locale or its fallback, which `t()` cannot tell apart from a key translated as itself.
-- 894f722: Add the `@guren/inertia-client/forms` subpath (RFC 0036 §2.2). `useRouteForm(contract, initial)` binds an Inertia form to a route's form contract from `.guren/forms.gen.ts`, with `params` required exactly when the route's path has parameters, `adoptPageErrors` to take the errors of a redirect-back once on mount, and a `handleSubmit` that sends a blank control as `null` for a nullable key, leaves out an optional key that was always blank, and sends a cleared one as `''`. `useField(form, name)` returns one key's label, control props and error state, deriving the input kind and HTML constraints (`required`, lengths, `min`/`max`, `step`) from the contract; a plain Inertia form works too. `humanizeFieldName()` is the default label (`startsAt` → "Starts at"). The styled `Field` component that renders it is copied by `guren add ui` in a later release.
-
-### Patch Changes
-
-- 95ba9fb: `guren add ui` copies a `Field` component (RFC 0036 §2.3), and the default starter ships it. `Field` renders one form key from `useField()` with the copied `Label`, `Input`, `Textarea`, `Select` and `Checkbox`, all of which `add ui` and the generators now write along with it. `make:feature`'s New and Edit pages bind `useRouteForm()` to the route's contract from `.guren/forms.gen.ts` and render each field as `<Field form={form} name="…" />`, so labels read as words ("Starts at") and each control carries the `required`, length and range limits its validator declares. A nullable column starts at `null`. `make:feature` and `add ui field` refuse, before writing, when the installed `@guren/inertia-client` predates the `forms` subpath. `@guren/inertia-client/forms` exports `FieldForm`, the form type `useField()` accepts.
-
 ## 1.2.2
 
 ### Patch Changes

@@ -5,8 +5,7 @@
  * exports `./forms`; otherwise a stale file is removed, as `agents.gen.ts` is.
  */
 import { readFile, rm } from 'node:fs/promises'
-import { createRequire } from 'node:module'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { objectShape, pipeSides, typeOf, unwrapSingleChild, type ZodSchemaLike } from '@guren/server/internal/zod-compat'
 import { isZodSchema, toJsonSchema, type JsonSchemaObject } from '@guren/server/internal/zod-json-schema'
 
@@ -59,19 +58,23 @@ const FORM_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
 const FIELD_TYPES = new Set<FieldContract['type']>(['string', 'number', 'integer', 'boolean', 'array', 'object'])
 
-/** Whether the client the app installs exports `./forms`: `null` when none resolves from the app root. */
+/**
+ * Whether the client the app installs exports `./forms`: `null` when no `node_modules` from the
+ * app root up holds one. Walked by hand: Bun's `createRequire().resolve()` falls back to its global
+ * install cache, whose copy is no install of the app's.
+ */
 export async function installedClientExportsForms(appRoot: string): Promise<boolean | null> {
-  let manifestPath: string
-  try {
-    manifestPath = createRequire(join(appRoot, 'package.json')).resolve(`${CLIENT_PACKAGE}/package.json`)
-  } catch {
-    return null
-  }
-  try {
-    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as { exports?: Record<string, unknown> }
-    return Boolean(manifest.exports && FORMS_SUBPATH in manifest.exports)
-  } catch {
-    return null
+  for (let dir = resolve(appRoot); ; dir = dirname(dir)) {
+    const text = await readFile(join(dir, 'node_modules', CLIENT_PACKAGE, 'package.json'), 'utf8').catch(() => undefined)
+    if (text !== undefined) {
+      try {
+        const manifest = JSON.parse(text) as { exports?: Record<string, unknown> }
+        return Boolean(manifest.exports && FORMS_SUBPATH in manifest.exports)
+      } catch {
+        return null
+      }
+    }
+    if (dirname(dir) === dir) return null
   }
 }
 

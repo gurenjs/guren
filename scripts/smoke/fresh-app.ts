@@ -310,7 +310,9 @@ async function assertCoreFirstStarter(
 
 async function assertCanonicalScaffolds(appDir: string): Promise<void> {
   const loginController = await readFile(join(appDir, 'app/Http/Controllers/Auth/LoginController.ts'), 'utf8')
-  assert(loginController.includes('await this.validateBody('), 'Auth scaffold must use validateBody() in LoginController.')
+  assert(loginController.includes("this.validated('login.store')"), 'Auth scaffold must read the body its route contract validated in LoginController.')
+  const authRoutes = await readFile(join(appDir, 'routes/auth.ts'), 'utf8')
+  assert(authRoutes.includes('body: LoginSchema'), 'Auth scaffold must bind LoginSchema to the login route as its body contract.')
   assert(!loginController.includes('.safeParse('), 'Auth scaffold must not use manual safeParse() in LoginController.')
   assert(!loginController.includes('getEventManager'), 'Auth scaffold must not use event helper singletons in LoginController.')
 

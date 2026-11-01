@@ -29,6 +29,7 @@ export interface ApiRoutes {
   'login.store': {
     method: 'POST'
     path: '/login'
+    body: { email: string; password: string; remember?: boolean | string }
   }
   'logout': {
     method: 'POST'
@@ -77,6 +78,7 @@ export interface ApiRoutes {
   'profile.update': {
     method: 'PUT'
     path: '/profile'
+    body: { name: string; email: string; password?: string }
   }
   'register': {
     method: 'GET'
@@ -85,6 +87,7 @@ export interface ApiRoutes {
   'register.store': {
     method: 'POST'
     path: '/register'
+    body: { name: string; email: string; password: string; passwordConfirmation: string }
   }
 }
 

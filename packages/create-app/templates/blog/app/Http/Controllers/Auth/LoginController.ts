@@ -1,5 +1,4 @@
 import { Controller, ValidationException } from '@guren/core'
-import { LoginSchema } from '../../Validators/LoginValidator.js'
 import { pages } from '@/.guren/pages.gen'
 
 export default class LoginController extends Controller {
@@ -9,7 +8,7 @@ export default class LoginController extends Controller {
   }
 
   async store(): Promise<Response> {
-    const { email, password, remember } = await this.validateBody(LoginSchema)
+    const { email, password, remember } = this.validated('login.store').body
 
     this.auth.session()?.regenerate()
 

@@ -67,11 +67,10 @@ bun run dev
 
 ### LoginController
 
-生成されたコントローラーは、入力を `LoginSchema` で検証してから、認証の処理をガードに任せます。`LoginSchema` は、同時に生成される `app/Http/Validators/LoginValidator.ts` にあります。
+生成される `login.store` ルートには、本文のスキーマとして `LoginSchema` が渡されているので、コントローラーが動く前にルーターが入力を検証します。`LoginSchema` は、同時に生成される `app/Http/Validators/LoginValidator.ts` にあります。コントローラーは検証済みの本文を `this.validated()` で受け取り、認証の処理をガードに任せます。
 
 ```typescript
 import { Controller, ValidationException } from '@guren/core'
-import { LoginSchema } from '../../Validators/LoginValidator.js'
 import { pages } from '@/.guren/pages.gen'
 
 export default class LoginController extends Controller {
@@ -81,7 +80,7 @@ export default class LoginController extends Controller {
   }
 
   async store(): Promise<Response> {
-    const { email, password, remember } = await this.validateBody(LoginSchema)
+    const { email, password, remember } = this.validated('login.store').body
 
     this.auth.session()?.regenerate()
 
@@ -102,18 +101,20 @@ export default class LoginController extends Controller {
 }
 ```
 
-認証に失敗したときは `ValidationException.withMessages()` の例外を投げます。フレームワークはこれを `errors` 付きの 422 として返し、生成されたログインページが `errors.message` を表示します。メッセージを特定の入力欄に出したいときは、キーにフィールド名を使ってください（`{ email: '...' }`）。
+本文が不正なリクエストはアクションまで届かず、ルーターが同じ形の応答を返します。このときエラーのキーはフィールド名です。認証に失敗したときは `ValidationException.withMessages()` の例外を投げます。フレームワークはこれを `errors` 付きの 422 として返し、生成されたログインページが `errors.message` を表示します。メッセージを特定の入力欄に出したいときは、キーにフィールド名を使ってください（`{ email: '...' }`）。
 
 ### 認証ミドルウェア
 
-ジェネレーターは `routes/auth.ts` を生成し、ルートの registrar から呼び出されるようにつなぎます。ガードはルートごとに指定します。
+ジェネレーターは `routes/auth.ts` を生成し、ルートの registrar から呼び出されるようにつなぎます。ガードはルートごとに指定します。オプションを渡すルートでは、ガードを `middlewares` に並べます。ここに並べたミドルウェアは本文の検証より先に動くので、本文が不正な試行もログインのスロットルに数えられます。
 
 ```typescript
 import { Router, requireAuthenticated, requireGuest } from '@guren/core'
+import { throttleLogin } from '../app/Http/Middleware/AuthThrottle.js'
+import { LoginSchema } from '../app/Http/Validators/LoginValidator.js'
 
 export function registerAuthRoutes(router: Router): void {
   router.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('login')
-  router.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('login.store')
+  router.post('/login', { name: 'login.store', body: LoginSchema, middlewares: [requireGuest({ redirectTo: '/dashboard' }), throttleLogin] }, [LoginController, 'store'])
   router.post('/logout', [LoginController, 'destroy'], requireAuthenticated({ redirectTo: '/login' })).name('logout')
 
   router.get('/dashboard', [DashboardController, 'index'], requireAuthenticated({ redirectTo: '/login' })).name('dashboard')
