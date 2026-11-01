@@ -40,6 +40,8 @@ export interface PlanApproveReport {
   approval: PlanApproval
   /** The hash was approved before, and nothing was written. */
   alreadyApproved: boolean
+  /** Every refusal ran and nothing was written: the plan file, the baseline and the approvals are as they were. */
+  dryRun: boolean
   /** Elements whose collision or absence did not refuse, since the application reads as the plan leaves them. */
   builtByPlan?: string[]
   /** `alter` elements whose readings (RFC 0030 §6) this run wrote to the approvals file, carried over or read now; absent when it wrote none. */
@@ -64,6 +66,8 @@ export interface PlanApproveFileOptions {
   exec?: CapturedExec
   /** Approve although a section could not be read, leaving its elements unstamped. */
   allowUnstamped?: boolean
+  /** Run every refusal and write nothing; the report says what a real run would record. */
+  dryRun?: boolean
 }
 
 export async function planApproveFile(planPath: string, options: PlanApproveFileOptions): Promise<PlanApproveReport> {
@@ -113,7 +117,7 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
     const stampedDocument = { ...(document as Record<string, unknown>), baseline: { rev, contextHash: stamp.contextHash } }
     const parsed = PlanSchema.safeParse(stampedDocument)
     if (!parsed.success) throw new CliError(`The stamped plan does not match the plan schema:\n${formatSchemaIssues(parsed.error)}`)
-    await writeFileAtomic(path, `${JSON.stringify(stampedDocument, null, 2)}\n`)
+    if (!options.dryRun) await writeFileAtomic(path, `${JSON.stringify(stampedDocument, null, 2)}\n`)
     approved = parsed.data
     stamped = { rev, elements: Object.keys(stamp.contextHash).length, unstamped: stamp.unstamped }
   }
@@ -128,7 +132,7 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
     ...(by ? { approvedBy: by } : {}),
     ...(readings.properties.length > 0 ? { readings } : {}),
   }
-  const recorded = await recordPlanApproval(path, approvals, approval)
+  const recorded = await recordPlanApproval(path, approvals, approval, { dryRun: options.dryRun })
   const readingsRecorded = [...new Set(recorded.readingsAdded.map((reading) => reading.element))]
   const entry = recorded.existing ?? approval
   const reachable = behaviourCanReach(approved)
@@ -140,6 +144,7 @@ export async function planApproveFile(planPath: string, options: PlanApproveFile
     ...(stamped ? { stamped } : {}),
     approval: entry,
     alreadyApproved: recorded.existing !== undefined,
+    dryRun: options.dryRun === true,
     ...(settled.built.length > 0 ? { builtByPlan: settled.built } : {}),
     ...(readingsRecorded.length > 0 ? { readingsRecorded } : {}),
     ...(warnings.length > 0 ? { heldAlters: warnings } : {}),
@@ -208,6 +213,7 @@ async function headRevision(appRoot: string, exec: CapturedExec): Promise<string
 
 export function formatPlanApprove(report: PlanApproveReport): string {
   const lines = [`${report.plan.title} (${report.plan.file})`, '']
+  if (report.dryRun) return formatDryRun(report, lines)
   if (report.stamped) {
     lines.push(`Stamped the baseline at ${report.stamped.rev}: ${report.stamped.elements} element(s) hashed.`)
     if (report.stamped.unstamped.length > 0) {
@@ -227,5 +233,16 @@ export function formatPlanApprove(report: PlanApproveReport): string {
   if (report.heldAlters) {
     lines.push('', 'Warning, advisory (the approval stands):', ...report.heldAlters.map((alter) => `  ${alter.message}`))
   }
+  return lines.join('\n')
+}
+
+function formatDryRun(report: PlanApproveReport, lines: string[]): string {
+  if (report.stamped) lines.push(`Would stamp the baseline at ${report.stamped.rev}: ${report.stamped.elements} element(s) hashed.`)
+  if (report.builtByPlan) lines.push(`Built as the plan leaves them: ${report.builtByPlan.join(', ')}`)
+  if (!report.alreadyApproved) lines.push(`Would approve ${report.plan.hash}, recorded in ${report.approvalsFile}.`)
+  else if (report.readingsRecorded) lines.push(`Already approved; would record the readings it lacks: ${report.readingsRecorded.join(', ')}.`)
+  else lines.push(`Already approved at ${report.approval.approvedAt}; a real run writes nothing.`)
+  if (report.heldAlters) lines.push('', 'Warning, advisory:', ...report.heldAlters.map((alter) => `  ${alter.message}`))
+  lines.push('', 'Dry run: nothing was written.')
   return lines.join('\n')
 }

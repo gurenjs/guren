@@ -3060,7 +3060,9 @@ rule one page away from being broken by accident.
   while it is set, whatever the argv says. A route test runs each readiness
   path against a temporary repository holding a draft and an approved plan
   and requires the plan, its records, `docs/plans/` and `docs/entities/` to be
-  byte-identical afterwards; with `--dry-run` taken out of the argv it fails.
+  byte-identical afterwards, and runs again with `--dry-run` taken out of the
+  argv and again with the variable taken out of the environment, so each guard
+  is shown to hold on its own.
 - **Three answers, one of them ready.** `ready` carries what the command would
   write, `refused` the CLI's refusal (the `CliError` message on stderr, with
   a non-zero exit), and `unavailable` a timeout, a crash or output that does

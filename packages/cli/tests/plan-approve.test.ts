@@ -127,6 +127,27 @@ describe('guren plan:approve', () => {
     expect(await readFile(planApprovalsPath(plan), 'utf8')).toBe(approvalBytes)
   })
 
+  test('should run every refusal under --dry-run and write nothing, reporting the hash a real run records', async () => {
+    const { app, plan } = await createApp('dry-run', answeredPlan())
+    const head = git(app, 'rev-parse', 'HEAD')
+    const before = await readFile(plan, 'utf8')
+
+    const report = await planApproveFile(plan, { app: planAppState(), appRoot: app, now: NOW, dryRun: true })
+
+    expect(report).toMatchObject({ dryRun: true, alreadyApproved: false, stamped: { rev: head } })
+    expect(await readFile(plan, 'utf8')).toBe(before)
+    expect((await readPlanApprovals(plan)).value).toBeUndefined()
+    const real = await planApproveFile(plan, { app: planAppState(), appRoot: app, now: NOW })
+    expect(real.plan.hash).toBe(report.plan.hash)
+  })
+
+  test('should still refuse a dirty tree under --dry-run', async () => {
+    const { app, plan } = await createApp('dry-run-dirty', answeredPlan())
+    await writeFile(join(app, 'stray.ts'), 'export {}\n')
+
+    await expect(planApproveFile(plan, { app: planAppState(), appRoot: app, dryRun: true })).rejects.toThrow(/uncommitted changes/)
+  })
+
   test('should never restamp a plan that carries a baseline, and approve the hash it already has', async () => {
     const document = answeredPlan(loadApprovedCommentsPlan())
     const { app, plan } = await createApp('baseline', document, { planFile: 'docs/plans/comments/plan.json' })
@@ -491,6 +512,17 @@ describe('plan:status freshness', () => {
 })
 
 describe('writeFileAtomic', () => {
+  test('should refuse every write while GUREN_PLAN_DRY_RUN=1 is set, whatever the caller asked', async () => {
+    const target = join(ROOT, 'dry-run-guard.json')
+    process.env.GUREN_PLAN_DRY_RUN = '1'
+    try {
+      await expect(writeFileAtomic(target, '{}\n')).rejects.toThrow('GUREN_PLAN_DRY_RUN=1 is set')
+    } finally {
+      delete process.env.GUREN_PLAN_DRY_RUN
+    }
+    await expect(readFile(target, 'utf8')).rejects.toThrow()
+  })
+
   test('should keep the mode of the file it replaces, and write through a symlink to the file it names', async () => {
     const dir = join(ROOT, 'atomic')
     await writeWorkspaceFiles(dir, { 'real.json': '{}\n' })

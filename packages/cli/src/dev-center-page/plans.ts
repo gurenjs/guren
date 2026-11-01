@@ -1,4 +1,5 @@
 import type { StepEvidenceRoute } from '../dev-center-evidence'
+import type { PlanDecision } from '../dev-center-links'
 import type { DocsViewerOpenPlan, DocsViewerStepState } from '../docs-viewer-plans'
 import type { RuntimeErrorResult } from '../runtime-errors'
 
@@ -54,6 +55,16 @@ export function planAttention(plan: DevCenterPlan): PlanAttention {
   }
   const active = plan.steps.find((step) => step.active)
   return { who: 'agent', title: 'In progress', detail: active ? `Marked by plan:next: ${active.id}.` : `Next unverified step: ${unverified.id}.` }
+}
+
+/**
+ * The decision the attention card names, which the page checks with a dry run and copies (RFC 0030 §8).
+ * A waiver is offered on the stalled step instead, where its elements are listed.
+ */
+export function attentionDecision(plan: DevCenterPlan): Exclude<PlanDecision, 'waive'> | undefined {
+  if (plan.standing === 'draft' || plan.standing === 'unapproved') return 'approve'
+  if (plan.standing !== 'approved' || plan.unreadable?.length || plan.steps.some((step) => step.stall)) return undefined
+  return plan.steps.every((step) => step.state === 'verified') ? 'close' : undefined
 }
 
 export function verifiedCount(plan: DevCenterPlan): number {

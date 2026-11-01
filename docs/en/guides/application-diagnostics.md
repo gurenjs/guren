@@ -190,6 +190,17 @@ applies the file when it is run without `--feedback`. That route is the Dev
 Center's one write: it takes the review document from the page's own origin,
 for the plan as it stands, and runs no command. Approving stays `plan:approve`.
 
+Where a decision is yours, the plan page offers a check for it: **Check
+plan:approve** on a draft or a plan edited after approval, **Check plan:close**
+once every step is verified, and **Waive an element** on a stalled step, which
+lists the step's elements with a field for your reason. A check runs the command
+with `--dry-run` in a separate process and shows whether it would go through, or
+the refusal it would print. Then it gives you the command to copy and run in your
+own terminal. A waiver's reason is quoted into that command in the page and never
+sent to the server. The page never runs the command itself: the Dev Center cannot
+tell you from an agent's browser pointed at the same server, so approving,
+waiving and closing stay commands you run.
+
 Each step on the plan page has an **Evidence** section, so you can judge the
 step without asking the agent:
 
@@ -215,7 +226,8 @@ none of it counts toward `plan:verify` or `plan:close`.
 
 The plan views read the plan files, their approvals and decision logs,
 `.guren/plans/`, `.guren/browser/` and the dev server's retained runtime errors
-only; the plan list is the same data as the `guren_get_plans` MCP tool. They run
+only; the plan list is the same data as the `guren_get_plans` MCP tool. Apart
+from the decision checks, which run a dry run in a separate process, they run
 no command and import nothing from the application, so a step that `plan:next`
 holds because the application changed since approval appears in `plan:next`'s
 output, not on the page. **Refresh plans** and **Refresh plan** read the records
