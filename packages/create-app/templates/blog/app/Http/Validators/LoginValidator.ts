@@ -12,15 +12,16 @@ export const LoginSchema = z.object({
   password: z
     .string()
     .min(1, 'Password is required.'),
+  // Each branch ends in a boolean schema, so codegen types the parsed value as
+  // a boolean (it cannot see what a trailing transform returns).
   remember: z
     .union([
       z.boolean(),
       z
         .string()
-        .transform((value) => ['true', 'on', '1'].includes(value.toLowerCase())),
+        .transform((value) => ['true', 'on', '1'].includes(value.toLowerCase()))
+        .pipe(z.boolean()),
     ])
-    .optional()
-    .transform((value) => Boolean(value))
     .default(false),
 })
 

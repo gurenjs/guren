@@ -1,10 +1,10 @@
-import { Head, useForm } from '@inertiajs/react'
-import { useId } from 'react'
+import { Head } from '@inertiajs/react'
+import { useRouteForm } from '@guren/inertia-client/forms'
 import Layout from '../../components/Layout.js'
+import { forgotPasswordStoreForm } from '@/.guren/forms.gen'
 import { Alert } from '@/resources/js/components/ui/Alert'
 import { Button } from '@/resources/js/components/ui/Button'
-import { Input } from '@/resources/js/components/ui/Input'
-import { Label } from '@/resources/js/components/ui/Label'
+import { Field } from '@/resources/js/components/ui/Field'
 import type { ValidationErrors } from '@guren/core'
 
 interface Props {
@@ -12,14 +12,8 @@ interface Props {
   status?: string
 }
 
-type ForgotPasswordFormData = {
-  email: string
-}
-
 export default function ForgotPassword({ errors = {}, status }: Props) {
-  const form = useForm<ForgotPasswordFormData>({ email: '' })
-
-  const emailId = useId()
+  const form = useRouteForm(forgotPasswordStoreForm, { email: '' })
 
   return (
     <Layout>
@@ -41,33 +35,9 @@ export default function ForgotPassword({ errors = {}, status }: Props) {
           <Alert tone="danger" className="mt-4">{errors.message}</Alert>
         )}
 
-        <form
-          className="mt-6 space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault()
-            form.post('/forgot-password')
-          }}
-        >
-          <div>
-            <Label htmlFor={emailId}>
-              Email
-            </Label>
-            <Input
-              id={emailId}
-              type="email"
-              value={form.data.email}
-              onChange={(event) => form.setData('email', event.target.value)}
-              required
-              className="mt-1"
-            />
-            {errors.email && <p className="mt-1 text-sm text-g-danger">{errors.email}</p>}
-          </div>
-
-          <Button
-            type="submit"
-            disabled={form.processing}
-            block
-          >
+        <form className="mt-6 space-y-4" onSubmit={form.handleSubmit}>
+          <Field form={form} name="email" as="email" />
+          <Button type="submit" disabled={form.processing} block>
             Send reset link
           </Button>
         </form>

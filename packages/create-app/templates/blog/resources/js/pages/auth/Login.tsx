@@ -1,11 +1,10 @@
-import { Head, Link, useForm } from '@inertiajs/react'
-import { useId } from 'react'
+import { Head, Link } from '@inertiajs/react'
+import { useRouteForm } from '@guren/inertia-client/forms'
 import Layout from '../../components/Layout.js'
+import { loginStoreForm } from '@/.guren/forms.gen'
 import { Alert } from '@/resources/js/components/ui/Alert'
 import { Button } from '@/resources/js/components/ui/Button'
-import { Checkbox } from '@/resources/js/components/ui/Checkbox'
-import { Input } from '@/resources/js/components/ui/Input'
-import { Label } from '@/resources/js/components/ui/Label'
+import { Field } from '@/resources/js/components/ui/Field'
 import type { ValidationErrors } from '@guren/core'
 
 interface Props {
@@ -13,21 +12,9 @@ interface Props {
   errors?: ValidationErrors<'email' | 'password'>
 }
 
-type LoginFormData = {
-  email: string
-  password: string
-  remember: boolean
-}
-
 export default function Login({ email = '', errors = {} }: Props) {
-  const form = useForm<LoginFormData>({
-    email,
-    password: '',
-    remember: false,
-  })
-
-  const emailId = useId()
-  const passwordId = useId()
+  // Shows a redirect-back's field errors even when this form did not make the visit.
+  const form = useRouteForm(loginStoreForm, { email, password: '', remember: false }, { adoptPageErrors: true })
 
   return (
     <Layout>
@@ -45,59 +32,14 @@ export default function Login({ email = '', errors = {} }: Props) {
           <Alert tone="danger" className="mt-4">{errors.message}</Alert>
         )}
 
-        <form
-          className="mt-6 space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault()
-            form.post('/login')
-          }}
-        >
-          <div>
-            <Label htmlFor={emailId}>
-              Email
-            </Label>
-            <Input
-              id={emailId}
-              type="email"
-              value={form.data.email}
-              onChange={(event) => form.setData('email', event.target.value)}
-              required
-              className="mt-1"
-            />
-            {errors.email && <p className="mt-1 text-sm text-g-danger">{errors.email}</p>}
-          </div>
-
-          <div>
-            <Label htmlFor={passwordId}>
-              Password
-            </Label>
-            <Input
-              id={passwordId}
-              type="password"
-              value={form.data.password}
-              onChange={(event) => form.setData('password', event.target.value)}
-              required
-              className="mt-1"
-            />
-            {errors.password && <p className="mt-1 text-sm text-g-danger">{errors.password}</p>}
-          </div>
-
-          <Checkbox
-            label="Remember me"
-            checked={form.data.remember}
-            onChange={(event) => form.setData('remember', event.target.checked)}
-            className="text-sm text-g-text"
-          />
-
-            <Button
-              type="submit"
-              disabled={form.processing}
-              block
-            >
-              Sign in
+        <form className="mt-6 space-y-4" onSubmit={form.handleSubmit}>
+          <Field form={form} name="email" as="email" />
+          <Field form={form} name="password" as="password" />
+          <Field form={form} name="remember" as="checkbox" label="Remember me" />
+          <Button type="submit" disabled={form.processing} block>
+            Sign in
           </Button>
         </form>
-
 
         <p className="mt-6 text-center text-sm text-g-text-2">
           Don&apos;t have an account?{' '}

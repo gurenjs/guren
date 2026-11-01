@@ -1,6 +1,5 @@
 import { Controller, ValidationException } from '@guren/core'
 import { User, type UserRecord } from '../../Models/User.js'
-import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'
 import { pages } from '@/.guren/pages.gen'
 
 export default class ProfileController extends Controller {
@@ -24,7 +23,7 @@ export default class ProfileController extends Controller {
       return this.redirect('/login')
     }
 
-    const { name, email, password } = await this.validateBody(ProfileUpdateSchema)
+    const { name, email, password } = this.validated('profile.update').body
     const emailChanged = email !== user.email
 
     if (emailChanged) {

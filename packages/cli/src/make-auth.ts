@@ -22,6 +22,7 @@ import { appendOAuthStateTable } from './oauth-state-table'
 import { registerConsoleCommand } from './console-registrar'
 import { generateSchemaMigration } from './make-migration'
 import { ensureUiComponents, uiComponentsImportedBy } from './guren-css'
+import { assertClientExportsForms } from './forms-types'
 import { appMailBindings, MAIL_SCAFFOLD, reportKeptMail } from './mail-scaffold'
 import { KNOWN_OAUTH_PROVIDERS, OAUTH_PROVIDER_LABELS, oauthEnvEntries } from './oauth-scaffold'
 import { definitionTemplateFile, scaffoldTemplateFile } from './scaffold-templates'
@@ -45,12 +46,9 @@ ${indent}</h1>`
 }
 
 // A passwordless app keeps show() and destroy() but registers no POST /login,
-// so a scaffolded store() would be dead code pulling in the password validator.
+// so a scaffolded store() would be dead code.
 function buildLoginControllerTemplate(includePassword: boolean): string {
   const coreImports = includePassword ? 'Controller, ValidationException' : 'Controller'
-  const validatorImport = includePassword
-    ? `\nimport { LoginSchema } from '../../Validators/LoginValidator.js'`
-    : ''
 
   const showBody = includePassword
     ? `    const email = this.request.query('email') ?? ''
@@ -60,7 +58,7 @@ function buildLoginControllerTemplate(includePassword: boolean): string {
   const storeAction = includePassword
     ? `
   async store(): Promise<Response> {
-    const { email, password, remember } = await this.validateBody(LoginSchema)
+    const { email, password, remember } = this.validated('login.store').body
 
     this.auth.session()?.regenerate()
 
@@ -75,7 +73,7 @@ function buildLoginControllerTemplate(includePassword: boolean): string {
 `
     : ''
 
-  return `import { ${coreImports} } from '@guren/core'${validatorImport}
+  return `import { ${coreImports} } from '@guren/core'
 import { pages } from '@/.guren/pages.gen'
 
 export default class LoginController extends Controller {
@@ -115,7 +113,6 @@ import { sendEmailVerificationMail } from '../../../Mail/EmailVerificationMail.j
   const redirectPath = includeVerify ? '/verify-email' : '/dashboard'
 
   return `import { ${coreImports} } from '@guren/core'
-import { RegisterSchema } from '../../Validators/RegisterValidator.js'
 import { User } from '../../../Models/User.js'${verifyImports}
 import { pages } from '@/.guren/pages.gen'
 
@@ -125,7 +122,7 @@ export default class RegisterController extends Controller {
   }
 
   async store(): Promise<Response> {
-    const { name, email, password } = await this.validateBody(RegisterSchema)
+    const { name, email, password } = this.validated('register.store').body
 
     const existing = await User.where({ email })
     if (existing.length > 0) {
@@ -389,7 +386,6 @@ function buildProviderOwnedEmailProfileControllerTemplate(includePassword: boole
 
   return `import { ${coreImports} } from '@guren/core'
 import { User, type UserRecord } from '../../Models/User.js'
-import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'
 import { pages } from '@/.guren/pages.gen'
 
 export default class ProfileController extends Controller {
@@ -414,7 +410,7 @@ export default class ProfileController extends Controller {
     }
 
     // The email belongs to the OAuth provider — it is not editable here.
-    const ${destructuredFields} = await this.validateBody(ProfileUpdateSchema)
+    const ${destructuredFields} = this.validated('profile.update').body
 ${passwordGate}
     await User.update({ id: user.id }, ${updateFields})
 
@@ -511,8 +507,7 @@ import { sendEmailVerificationMail } from '../../Mail/EmailVerificationMail.js'`
   const currentPasswordMethod = includePassword ? `\n${CURRENT_PASSWORD_CHECK_METHOD}` : ''
 
   return `import { ${coreImports} } from '@guren/core'
-import { User, type UserRecord } from '../../Models/User.js'
-import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'${verifyImports}
+import { User, type UserRecord } from '../../Models/User.js'${verifyImports}
 import { pages } from '@/.guren/pages.gen'
 
 export default class ProfileController extends Controller {
@@ -536,7 +531,7 @@ export default class ProfileController extends Controller {
       return this.redirect('/login')
     }
 
-    const ${destructuredFields} = await this.validateBody(ProfileUpdateSchema)
+    const ${destructuredFields} = this.validated('profile.update').body
     const emailChanged = email !== user.email
 ${credentialsGate}
     if (emailChanged) {
@@ -608,17 +603,14 @@ function buildProfileValidatorTemplate({ includePassword, providerOwnedEmail }: 
 
   const passwordField = includePassword
     ? `
+  // Defaults rather than transforms, so codegen types the parsed values as strings.
   password: z
     .string()
     .trim()
-    .optional()
-    .transform((value) => value ?? '')
+    .default('')
     .refine((value) => value === '' || value.length >= 8, 'Password must be at least 8 characters.'),
   // Untrimmed, as LoginSchema reads it: it is checked against the stored hash.
-  currentPassword: z
-    .string()
-    .optional()
-    .transform((value) => value ?? ''),`
+  currentPassword: z.string().default(''),`
     : ''
 
   return `import { z } from 'zod'
@@ -733,14 +725,13 @@ export function buildLoginViewTemplate(includeRegister: boolean, includeReset: b
           Forgot your password? Contact your administrator.
         </p>`
 
-  return `import { Head, Link, useForm } from '@inertiajs/react'
-import { useId } from 'react'
+  return `import { Head, Link } from '@inertiajs/react'
+import { useRouteForm } from '@guren/inertia-client/forms'
 import Layout from '../../components/Layout.js'
+import { loginStoreForm } from '@/.guren/forms.gen'
 import { Alert } from '@/resources/js/components/ui/Alert'
 ${oauthProviders.length > 0 ? "import { Button, buttonClass } from '@/resources/js/components/ui/Button'" : "import { Button } from '@/resources/js/components/ui/Button'"}
-import { Checkbox } from '@/resources/js/components/ui/Checkbox'
-import { Input } from '@/resources/js/components/ui/Input'
-import { Label } from '@/resources/js/components/ui/Label'
+import { Field } from '@/resources/js/components/ui/Field'
 import type { ValidationErrors } from '@guren/core'
 
 interface Props {
@@ -748,21 +739,9 @@ interface Props {
   errors?: ValidationErrors<'email' | 'password'>
 }
 
-type LoginFormData = {
-  email: string
-  password: string
-  remember: boolean
-}
-
 export default function Login({ email = '', errors = {} }: Props) {
-  const form = useForm<LoginFormData>({
-    email,
-    password: '',
-    remember: false,
-  })
-
-  const emailId = useId()
-  const passwordId = useId()
+  // Shows a redirect-back's field errors even when this form did not make the visit.
+  const form = useRouteForm(loginStoreForm, { email, password: '', remember: false }, { adoptPageErrors: true })
 
   return (
     <Layout>
@@ -777,56 +756,12 @@ export default function Login({ email = '', errors = {} }: Props) {
           <Alert tone="danger" className="mt-4">{errors.message}</Alert>
         )}
 
-        <form
-          className="mt-6 space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault()
-            form.post('/login')
-          }}
-        >
-          <div>
-            <Label htmlFor={emailId}>
-              Email
-            </Label>
-            <Input
-              id={emailId}
-              type="email"
-              value={form.data.email}
-              onChange={(event) => form.setData('email', event.target.value)}
-              required
-              className="mt-1"
-            />
-            {errors.email && <p className="mt-1 text-sm text-g-danger">{errors.email}</p>}
-          </div>
-
-          <div>
-            <Label htmlFor={passwordId}>
-              Password
-            </Label>
-            <Input
-              id={passwordId}
-              type="password"
-              value={form.data.password}
-              onChange={(event) => form.setData('password', event.target.value)}
-              required
-              className="mt-1"
-            />
-            {errors.password && <p className="mt-1 text-sm text-g-danger">{errors.password}</p>}
-          </div>
-
-          <Checkbox
-            label="Remember me"
-            checked={form.data.remember}
-            onChange={(event) => form.setData('remember', event.target.checked)}
-            className="text-sm text-g-text"
-          />
-
-            <Button
-              type="submit"
-              disabled={form.processing}
-              block
-            >
-              Sign in
+        <form className="mt-6 space-y-4" onSubmit={form.handleSubmit}>
+          <Field form={form} name="email" as="email" />
+          <Field form={form} name="password" as="password" />
+          <Field form={form} name="remember" as="checkbox" label="Remember me" />
+          <Button type="submit" disabled={form.processing} block>
+            Sign in
           </Button>
         </form>
 ${buildOAuthButtonsTemplate(oauthProviders)}
@@ -839,38 +774,21 @@ ${forgotPasswordText}${signUpLink}
 }
 
 function buildRegisterViewTemplate(oauthProviders: string[] = []): string {
-  return `import { Head, Link, useForm } from '@inertiajs/react'
-import { useId } from 'react'
+  return `import { Head, Link } from '@inertiajs/react'
+import { useRouteForm } from '@guren/inertia-client/forms'
 import Layout from '../../components/Layout.js'
+import { registerStoreForm } from '@/.guren/forms.gen'
 import { Alert } from '@/resources/js/components/ui/Alert'
 ${oauthProviders.length > 0 ? "import { Button, buttonClass } from '@/resources/js/components/ui/Button'" : "import { Button } from '@/resources/js/components/ui/Button'"}
-import { Input } from '@/resources/js/components/ui/Input'
-import { Label } from '@/resources/js/components/ui/Label'
+import { Field } from '@/resources/js/components/ui/Field'
 import type { ValidationErrors } from '@guren/core'
 
 interface Props {
   errors?: ValidationErrors<'name' | 'email' | 'password' | 'passwordConfirmation'>
 }
 
-type RegisterFormData = {
-  name: string
-  email: string
-  password: string
-  passwordConfirmation: string
-}
-
 export default function Register({ errors = {} }: Props) {
-  const form = useForm<RegisterFormData>({
-    name: '',
-    email: '',
-    password: '',
-    passwordConfirmation: '',
-  })
-
-  const nameId = useId()
-  const emailId = useId()
-  const passwordId = useId()
-  const passwordConfirmationId = useId()
+  const form = useRouteForm(registerStoreForm, { name: '', email: '', password: '', passwordConfirmation: '' })
 
   return (
     <Layout>
@@ -885,80 +803,12 @@ export default function Register({ errors = {} }: Props) {
           <Alert tone="danger" className="mt-4">{errors.message}</Alert>
         )}
 
-        <form
-          className="mt-6 space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault()
-            form.post('/register')
-          }}
-        >
-          <div>
-            <Label htmlFor={nameId}>
-              Name
-            </Label>
-            <Input
-              id={nameId}
-              type="text"
-              value={form.data.name}
-              onChange={(event) => form.setData('name', event.target.value)}
-              required
-              className="mt-1"
-            />
-            {errors.name && <p className="mt-1 text-sm text-g-danger">{errors.name}</p>}
-          </div>
-
-          <div>
-            <Label htmlFor={emailId}>
-              Email
-            </Label>
-            <Input
-              id={emailId}
-              type="email"
-              value={form.data.email}
-              onChange={(event) => form.setData('email', event.target.value)}
-              required
-              className="mt-1"
-            />
-            {errors.email && <p className="mt-1 text-sm text-g-danger">{errors.email}</p>}
-          </div>
-
-          <div>
-            <Label htmlFor={passwordId}>
-              Password
-            </Label>
-            <Input
-              id={passwordId}
-              type="password"
-              value={form.data.password}
-              onChange={(event) => form.setData('password', event.target.value)}
-              required
-              className="mt-1"
-            />
-            {errors.password && <p className="mt-1 text-sm text-g-danger">{errors.password}</p>}
-          </div>
-
-          <div>
-            <Label htmlFor={passwordConfirmationId}>
-              Confirm password
-            </Label>
-            <Input
-              id={passwordConfirmationId}
-              type="password"
-              value={form.data.passwordConfirmation}
-              onChange={(event) => form.setData('passwordConfirmation', event.target.value)}
-              required
-              className="mt-1"
-            />
-            {errors.passwordConfirmation && (
-              <p className="mt-1 text-sm text-g-danger">{errors.passwordConfirmation}</p>
-            )}
-          </div>
-
-          <Button
-            type="submit"
-            disabled={form.processing}
-            block
-          >
+        <form className="mt-6 space-y-4" onSubmit={form.handleSubmit}>
+          <Field form={form} name="name" />
+          <Field form={form} name="email" as="email" />
+          <Field form={form} name="password" as="password" />
+          <Field form={form} name="passwordConfirmation" as="password" label="Confirm password" />
+          <Button type="submit" disabled={form.processing} block>
             Create account
           </Button>
         </form>
@@ -984,15 +834,12 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
     : includePassword
       ? `'name' | 'email' | 'password' | 'currentPassword'`
       : `'name' | 'email'`
-  const emailFormField = providerOwnedEmail
-    ? ''
-    : `
-  email: string`
-  const emailFormValue = providerOwnedEmail
-    ? ''
-    : `
-    email: profile.email,`
-  const emailInput = providerOwnedEmail
+  const initial = [
+    'name: profile.name',
+    ...(providerOwnedEmail ? [] : ['email: profile.email']),
+    ...(includePassword ? [`password: ''`, `currentPassword: ''`] : []),
+  ].join(', ')
+  const emailField = providerOwnedEmail
     ? `
           <div>
             <p className="block text-sm font-bold text-g-heading">Email</p>
@@ -1002,84 +849,26 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
             <p className="mt-1 text-xs text-g-text-2">Managed by your sign-in provider.</p>
           </div>`
     : `
-          <div>
-            <Label htmlFor={emailId}>
-              Email
-            </Label>
-            <Input
-              id={emailId}
-              type="email"
-              value={form.data.email}
-              onChange={(event) => form.setData('email', event.target.value)}
-              className="mt-1"
-            />
-            {form.errors.email ? <p className="mt-1 text-sm text-g-danger">{form.errors.email}</p> : null}
-          </div>`
-  const passwordFormField = includePassword
-    ? `
-  password: string
-  currentPassword: string`
-    : ''
-  const passwordFormValue = includePassword
-    ? `
-    password: '',
-    currentPassword: '',`
-    : ''
+          <Field form={form} name="email" as="email" />`
   const currentPasswordHint = providerOwnedEmail
     ? 'Required to set a new password.'
     : 'Required to change your email or password.'
-  const passwordInput = includePassword
+  const passwordFields = includePassword
     ? `
-          <div>
-            <Label htmlFor={passwordId}>
-              New password
-            </Label>
-            <Input
-              id={passwordId}
-              type="password"
-              value={form.data.password}
-              onChange={(event) => form.setData('password', event.target.value)}
-              className="mt-1"
-            />
-            {form.errors.password ? <p className="mt-1 text-sm text-g-danger">{form.errors.password}</p> : null}
-          </div>
-
-          <div>
-            <Label htmlFor={currentPasswordId}>
-              Current password
-            </Label>
-            <Input
-              id={currentPasswordId}
-              type="password"
-              value={form.data.currentPassword}
-              onChange={(event) => form.setData('currentPassword', event.target.value)}
-              className="mt-1"
-            />
-            <p className="mt-1 text-xs text-g-text-2">${currentPasswordHint}</p>
-            {form.errors.currentPassword ? <p className="mt-1 text-sm text-g-danger">{form.errors.currentPassword}</p> : null}
-          </div>
-`
-    : ''
-  const emailIdDeclaration = providerOwnedEmail
-    ? ''
-    : `
-  const emailId = useId()`
-  const passwordIdDeclaration = includePassword
-    ? `
-  const passwordId = useId()
-  const currentPasswordId = useId()`
+          <Field form={form} name="password" as="password" label="New password" />
+          <Field form={form} name="currentPassword" as="password" hint="${currentPasswordHint}" />`
     : ''
   const description = includePassword
     ? 'Update your account details and password.'
     : 'Update your account details.'
 
-  return `import { Head, useForm } from '@inertiajs/react'
-import { useId, type FormEvent } from 'react'
+  return `import { Head } from '@inertiajs/react'
+import { useRouteForm } from '@guren/inertia-client/forms'
 import Layout from '../../components/Layout.js'
+import { profileUpdateForm } from '@/.guren/forms.gen'
 import { Alert } from '@/resources/js/components/ui/Alert'
 import { Button } from '@/resources/js/components/ui/Button'
-import { Input } from '@/resources/js/components/ui/Input'
-import { Label } from '@/resources/js/components/ui/Label'
+import { Field } from '@/resources/js/components/ui/Field'
 import type { ValidationErrors } from '@guren/core'
 
 interface Props {
@@ -1088,21 +877,8 @@ interface Props {
   status?: string
 }
 
-type ProfileFormValues = {
-  name: string${emailFormField}${passwordFormField}
-}
-
 export default function ProfileEdit({ profile, status }: Props) {
-  const form = useForm<ProfileFormValues>({
-    name: profile.name,${emailFormValue}${passwordFormValue}
-  })
-
-  const nameId = useId()${emailIdDeclaration}${passwordIdDeclaration}
-
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    form.put('/profile')
-  }
+  const form = useRouteForm(profileUpdateForm, { ${initial} })
 
   return (
     <Layout>
@@ -1117,27 +893,9 @@ export default function ProfileEdit({ profile, status }: Props) {
           <Alert>{status}</Alert>
         ) : null}
 
-        <form className="space-y-4" onSubmit={handleSubmit}>
-          <div>
-            <Label htmlFor={nameId}>
-              Name
-            </Label>
-            <Input
-              id={nameId}
-              type="text"
-              value={form.data.name}
-              onChange={(event) => form.setData('name', event.target.value)}
-              className="mt-1"
-            />
-            {form.errors.name ? <p className="mt-1 text-sm text-g-danger">{form.errors.name}</p> : null}
-          </div>
-${emailInput}
-${passwordInput}
-          <Button
-            type="submit"
-            disabled={form.processing}
-            block
-          >
+        <form className="space-y-4" onSubmit={form.handleSubmit}>
+          <Field form={form} name="name" />${emailField}${passwordFields}
+          <Button type="submit" disabled={form.processing} block>
             Save changes
           </Button>
         </form>
@@ -1161,7 +919,7 @@ function buildRoutesTemplate({
   const registerRoutes = includeExtras
     ? `
   router.get('/register', [RegisterController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('register')
-  router.post('/register', [RegisterController, 'store'], requireGuest({ redirectTo: '/dashboard' }), throttleRegistration).name('register.store')
+  router.post('/register', { name: 'register.store', body: RegisterSchema, middlewares: [requireGuest({ redirectTo: '/dashboard' }), throttleRegistration] }, [RegisterController, 'store'])
 `
     : ''
 
@@ -1171,9 +929,9 @@ function buildRoutesTemplate({
   const resetRoutes = includeExtras
     ? `
   router.get('/forgot-password', [ForgotPasswordController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('forgot-password')
-  router.post('/forgot-password', [ForgotPasswordController, 'store'], requireGuest({ redirectTo: '/dashboard' }), throttlePasswordResetRequest).name('forgot-password.store')
+  router.post('/forgot-password', { name: 'forgot-password.store', body: ForgotPasswordSchema, middlewares: [requireGuest({ redirectTo: '/dashboard' }), throttlePasswordResetRequest] }, [ForgotPasswordController, 'store'])
   router.get('/reset-password', [ResetPasswordController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('reset-password')
-  router.post('/reset-password', [ResetPasswordController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('reset-password.store')
+  router.post('/reset-password', { name: 'reset-password.store', body: ResetPasswordSchema, middlewares: [requireGuest({ redirectTo: '/dashboard' })] }, [ResetPasswordController, 'store'])
 `
     : ''
 
@@ -1208,7 +966,7 @@ function buildRoutesTemplate({
   // Passwordless apps expose /login only as the OAuth button page — there is
   // no credential exchange to POST to.
   const loginStoreRoute = includePassword
-    ? `\n  router.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' }), throttleLogin).name('login.store')`
+    ? `\n  router.post('/login', { name: 'login.store', body: LoginSchema, middlewares: [requireGuest({ redirectTo: '/dashboard' }), throttleLogin] }, [LoginController, 'store'])`
     : ''
 
   const throttles = [
@@ -1220,9 +978,21 @@ function buildRoutesTemplate({
   const throttleImport = throttles.length > 0
     ? `\nimport { ${throttles.join(', ')} } from '../app/Http/Middleware/AuthThrottle.js'`
     : ''
+  // Each body schema is the route's contract (RFC 0036 §3): the router validates the body after
+  // the throttles, and codegen derives the page's form contract from it.
+  const validators = [
+    ...(includePassword ? [['LoginSchema', 'LoginValidator']] : []),
+    ...(includeExtras
+      ? [['RegisterSchema', 'RegisterValidator'], ['ForgotPasswordSchema', 'ForgotPasswordValidator'], ['ResetPasswordSchema', 'ResetPasswordValidator']]
+      : []),
+    ['ProfileUpdateSchema', 'ProfileValidator'],
+  ]
+  const validatorImports = validators
+    .map(([schema, file]) => `\nimport { ${schema} } from '../app/Http/Validators/${file}.js'`)
+    .join('')
 
   return `import { Router, requireAuthenticated, requireGuest${requireVerifiedImport} } from '@guren/core'
-import LoginController from '../app/Http/Controllers/Auth/LoginController.js'${registerImport}${resetImport}${verifyImport}${oauthImport}${throttleImport}
+import LoginController from '../app/Http/Controllers/Auth/LoginController.js'${registerImport}${resetImport}${verifyImport}${oauthImport}${throttleImport}${validatorImports}
 import DashboardController from '../app/Http/Controllers/DashboardController.js'
 import ProfileController from '../app/Http/Controllers/ProfileController.js'
 
@@ -1232,7 +1002,7 @@ export function registerAuthRoutes(router: Router): void {
 ${registerRoutes}${resetRoutes}${verifyRoutes}${oauthRoutes}
   router.get('/dashboard', [DashboardController, 'index'], ${dashboardMiddleware}).name('dashboard')
   router.get('/profile', [ProfileController, 'edit'], requireAuthenticated({ redirectTo: '/login' })).name('profile.edit')
-  router.put('/profile', [ProfileController, 'update'], requireAuthenticated({ redirectTo: '/login' })${profileUpdateThrottle}).name('profile.update')
+  router.put('/profile', { name: 'profile.update', body: ProfileUpdateSchema, middlewares: [requireAuthenticated({ redirectTo: '/login' })${profileUpdateThrottle}] }, [ProfileController, 'update'])
 }
 `
 }
@@ -1652,6 +1422,8 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     does: 'The auth scaffold renders Inertia sign-in pages',
     instead: 'Guard routes/api.ts with createBearerTokenMiddleware from @guren/core instead',
   })
+  // Every variant writes the profile form, and the sign-in forms when it has passwords.
+  await assertClientExportsForms(process.cwd(), 'The auth pages make:auth writes import')
 
   const features = resolveAuthFeatures(options)
   const { includeExtras, includeVerify, includePassword, passwordOnlySignUp, oauthProviders } = features

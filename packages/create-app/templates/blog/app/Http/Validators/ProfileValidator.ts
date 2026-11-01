@@ -12,11 +12,11 @@ export const ProfileUpdateSchema = z.object({
     .min(1, 'Email is required.')
     .toLowerCase()
     .pipe(z.email('Enter a valid email address.')),
+  // A default rather than a transform, so codegen types the parsed value as a string.
   password: z
     .string()
     .trim()
-    .optional()
-    .transform((value) => value ?? '')
+    .default('')
     .refine((value) => value === '' || value.length >= 8, 'Password must be at least 8 characters.'),
 })
 
