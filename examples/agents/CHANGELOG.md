@@ -1,5 +1,33 @@
 # @guren/example-agents
 
+## 0.1.26
+
+### Patch Changes
+
+- Updated dependencies [796b05c]
+- Updated dependencies [4e1ea96]
+- Updated dependencies [9df4186]
+- Updated dependencies [894f722]
+- Updated dependencies [7f072ea]
+- Updated dependencies [868bb56]
+- Updated dependencies [f54ef9b]
+- Updated dependencies [868bb56]
+- Updated dependencies [95ba9fb]
+- Updated dependencies [73a3ceb]
+- Updated dependencies [7e3c02b]
+- Updated dependencies [abfa7a2]
+- Updated dependencies [73a3ceb]
+- Updated dependencies [1cd80f8]
+- Updated dependencies [894f722]
+- Updated dependencies [8740dda]
+- Updated dependencies [980e422]
+- Updated dependencies [8581377]
+- Updated dependencies [868bb56]
+- Updated dependencies [c2e6167]
+- Updated dependencies [8ff0283]
+  - @guren/cli@2.33.0
+  - @guren/inertia-client@1.3.0
+
 ## 0.1.25
 
 ### Patch Changes

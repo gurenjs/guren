@@ -1,5 +1,14 @@
 # @guren/server
 
+## 2.32.0
+
+### Minor Changes
+
+- 7f072ea: Mount the Dev Center's decision checks, `/_guren/plans/<slug>/readiness/<decision>`, behind the same `GUREN_MCP=1` opt-in and loopback guard as the other Dev Center routes. An app needs this `@guren/server` and a `@guren/cli` that answers the route for the plan page's **Check plan:approve**, **Check plan:close** and **Waive an element** buttons.
+- 868bb56: Review a plan in the Dev Center. **Review this plan** on `/_guren/plans/<slug>` opens `/_guren/plans/<slug>/review`, the page `plan:render` wrote, served so each verdict, comment and answer is saved to `.guren/plans/<slug>.feedback.json` (stamped with the plan's digest) as it is made, and loaded again on the next visit. `plan:revise` applies that file when `--feedback` is omitted, only while it names the plan as it stands, `guren_get_plans` and the Dev Center report it, and the `plan-write` skill reads the comments from it, so the person no longer pastes the page's JSON. The server mounts the review behind `GUREN_MCP=1` and the loopback guard; `/_guren/plans/<slug>/feedback` is the Dev Center's one write route, exempt from the CSRF token on the MCP endpoint's terms, and the CLI checks its `Origin`, schema and plan digest. Approval stays `plan:approve`.
+- f54ef9b: The Dev Center at `/_guren` opens on the open implementation plans, those waiting on a person first (a draft to approve, a plan edited after approval, a stalled step, a plan ready to close), and `/_guren/plans/<slug>` shows one plan's steps with their last `plan:verify` outcome, the marked step, waivers and the commands that come next. `plan:next` and `plan:verify` print that path (and carry it as `devCenter` in `--json`), `guren_get_plans` gives each plan its `slug`, and the plan skills tell agents to hand it to the person at each decision. The server mounts `/_guren/plans.json` and `/_guren/plans/:slug` behind the same `GUREN_MCP=1` opt-in and loopback guard as the rest of the Dev Center.
+- 868bb56: Show each step's evidence on the Dev Center plan page. Every step on `/_guren/plans/<slug>` opens an **Evidence** section with the retained runtime errors on the plan routes the step touches (matched by method and path, read from the plan, never the application), its last `plan:verify` record's fingerprinted files and `work`, and the `guren browser:record` steps under `.guren/browser/` recorded for its acceptance ids or for a feature it renders, with their result, error window and screenshots. The data comes from the new read-only `/_guren/plans/<slug>/evidence`; screenshots are served from `/_guren/browser/<run>/screenshots/<sha256>`, found among the runs `.guren/browser/` lists and the digests their `run.json` records, and only while the file still has that digest. The server mounts both behind `GUREN_MCP=1` and the loopback guard. The page reads once on open and on **Refresh plan**, and runs no command.
+
 ## 2.31.1
 
 ### Patch Changes
