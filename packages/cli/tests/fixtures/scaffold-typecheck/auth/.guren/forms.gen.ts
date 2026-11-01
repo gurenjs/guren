@@ -8,7 +8,7 @@ export const forgotPasswordStoreForm: RouteFormContract<'forgot-password.store',
   method: 'POST',
   path: '/forgot-password',
   fields: {
-    email: { type: 'string', required: true, minLength: 1 },
+    email: { type: 'string', required: true, format: 'email', minLength: 1 },
   },
 }
 

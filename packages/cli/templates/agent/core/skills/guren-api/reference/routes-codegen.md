@@ -92,9 +92,10 @@ Codegen walks schemas at runtime (Zod v3 and v4):
   regex etc. stay `string`
 - **Coercion follows the side being rendered**: `z.coerce.number()` is `number | string`
   in `body` and `number` in `response`; `z.coerce.date()` is `string` then `Date`
-- **`.transform()` extracts the input type**: the output of a transform function is a
-  runtime value with no type to read, so it is NOT reflected on either side.
-  `z.string().pipe(z.number())` — a real pipe, not a transform — does resolve both sides
+- **`.transform()` has no parsed type**: the function's result has no schema to read, so
+  a transform renders its input in `body` and `unknown` where the parsed value is typed
+  (`response`, `this.validated()`). Follow it with `.pipe(schema)` to state that type:
+  `z.string().transform(Number).pipe(z.number())` is `string` in and `number` out
 - **Degrades**: `tuple` → `unknown[]`, `z.nativeEnum()` → `string | number`,
   unrecognized constructs → `unknown`
 

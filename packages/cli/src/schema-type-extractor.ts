@@ -9,11 +9,13 @@ import {
   enumValues,
   getTypeName,
   innerSchema,
+  isTransform,
   isZod3Schema,
   literalValues,
   objectShape,
   pipeSide,
   recordValueType,
+  schemaAt,
   type SchemaIo,
   TRANSPARENT_WRAPPERS,
   typeOf,
@@ -176,6 +178,9 @@ function zodToType(z: ZodSchemaLike, options: SchemaTypeOptions): string {
     }
 
     case 'pipe': {
+      // A transform's out side is a function: what it returns has no schema to read, so the
+      // in side's type would be a guess. A later `.pipe(schema)` is an outer pipe and types it.
+      if (io === 'output' && transformsOutput(def)) return 'unknown'
       const side = pipeSide(def, io)
       return side ? zodToType(side, options) : 'unknown'
     }
@@ -252,12 +257,18 @@ function isOptional(z: ZodSchemaLike, io: SchemaIo): boolean {
       return child()
     // Reads the side being rendered, so presence matches the type reported for this node.
     // An approximation: `z.string().optional().pipe(z.string())` reports omissible even
-    // though the second stage rejects a missing value.
+    // though the second stage rejects a missing value. A transform's output is `unknown`,
+    // which already admits `undefined`, and zod keeps the key once the function has run.
     case 'pipe':
-      return child()
+      return io === 'output' && transformsOutput(z._def ?? {}) ? false : child()
     default:
       return false
   }
+}
+
+function transformsOutput(def: Record<string, unknown>): boolean {
+  const out = schemaAt(def, 'out')
+  return out !== undefined && isTransform(out)
 }
 
 function wrapComplex(type: string): string {

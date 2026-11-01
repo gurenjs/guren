@@ -272,6 +272,23 @@ export const postsUpdateForm: RouteFormContract<'posts.update', 'PUT', '/posts/:
   `format: 'email'` is derived from it. Unions such as the login page's
   `z.union([z.boolean(), z.string().transform(…)])` become `unknown`. Callers
   that know better pass `as` (section 3).
+  **Amended in implementation:** two such shapes are read after all, because
+  every `make:auth` validator writes them and the generator was the caller
+  passing `as` for them by hand. A pipe whose first stage is a plain string
+  that only trims, changes case (zod's own `.trim()`, `.toLowerCase()`,
+  `.toUpperCase()`) and bounds the length, and whose out side is an email,
+  carries `format: 'email'`: a browser's email input strips surrounding
+  whitespace and accepts either case, so it holds what that stage hands on.
+  Any other check, overwrite or transform there, or a `.catch()` anywhere on
+  the way, leaves the format out. A union every member of which parses to a
+  boolean (each a `z.boolean()`, or a transform followed by
+  `.pipe(z.boolean())`) is typed `boolean` when one member takes a boolean as
+  sent, since a checkbox submits `checked`; a member ending in a bare
+  transform keeps the union `unknown`. The generated auth
+  pages then drop `as="email"` and `as="checkbox"`, so a validator edited
+  away from those shapes changes the input with it rather than being
+  contradicted by a hint in the page. `as="password"` stays, since no schema
+  says it.
 - **Warnings degrade, never fail.** Whatever the walker cannot read becomes
   `type: 'unknown'` with whatever it could read, and the warning is printed as
   codegen prints the agent manifest's. The page still renders a text input; the
@@ -410,7 +427,9 @@ field today, now written once.
 
 `textarea`, `password`, `file` and `hidden` cannot be read off a JSON Schema,
 and neither can a type the walker could not see through (a pipe, a union). The
-caller states them with `as`. A file input reads `event.target.files` (the
+caller states them with `as`. **Amended in implementation:** except the email
+pipe and the boolean union described in section 2.1, which the contract now
+carries. A file input reads `event.target.files` (the
 first file, or the list when `multiple` is set) and never sets `value`.
 
 **Date-time round trip.** An Edit page receives a timestamp the way a Resource

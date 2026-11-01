@@ -42,9 +42,11 @@ seven actions named `posts.index` etc. Verbs: `get / post / put / patch / delete
 `bunx guren codegen` regenerates `.guren/pages.gen.ts`, `routes.gen.ts`,
 `data.gen.ts`, `api-client.gen.ts`. Re-run after changing route names, paths or
 schemas, a page's `interface Props`, or a Resource class. Schema types are read
-from the request side (`z.coerce.number()` is `number | string` in `body`); a
-`.transform()` output is not reflected, and an unsupported construct comes out
-`unknown`: simplify the schema instead of reading `node_modules`.
+from the request side (`z.coerce.number()` is `number | string` in `body`).
+`this.validated()` reads the parsed side, where a trailing `.transform()` is
+`unknown`: end it in `.pipe(z.number())` (or another schema) to type it. An
+unsupported construct comes out `unknown`: simplify the schema instead of
+reading `node_modules`.
 
 Agent tools (`.agent()`), the generated `ApiRoutes` shape, `createApiClient`
 and CSRF, and which Zod constructs survive extraction:

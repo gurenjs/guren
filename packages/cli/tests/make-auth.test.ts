@@ -164,9 +164,9 @@ export function registerWebRoutes(router: Router): void {
       const loginPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'), 'utf8')
       expect(loginPage).toContain('interface Props')
       expect(loginPage).toContain("useRouteForm(loginStoreForm, { email, password: '', remember: false }, { adoptPageErrors: true })")
-      expect(loginPage).toContain('<Field form={form} name="email" as="email" />')
+      expect(loginPage).toContain('<Field form={form} name="email" />')
       expect(loginPage).toContain('<Field form={form} name="password" as="password" />')
-      expect(loginPage).toContain('<Field form={form} name="remember" as="checkbox" label="Remember me" />')
+      expect(loginPage).toContain('<Field form={form} name="remember" label="Remember me" />')
       // The copied components a page imports are written beside it.
       for (const name of ['Field', 'Button', 'Alert', 'Input', 'Checkbox', 'Label']) {
         expect(existsSync(join(workspace.dir, `resources/js/components/ui/${name}.tsx`))).toBe(true)
@@ -1482,7 +1482,7 @@ export default app
       // A replacement address loses the old one's verified status and has to
       // be re-proven before it counts.
       expect(controller).toContain('await User.update({ id: user.id }, data, { set: { emailVerifiedAt: null } })')
-      expect(view).toContain('<Field form={form} name="email" as="email" />')
+      expect(view).toContain('<Field form={form} name="email" />')
     } finally {
       await workspace.cleanup()
     }

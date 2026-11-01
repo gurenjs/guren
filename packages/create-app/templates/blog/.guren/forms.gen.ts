@@ -8,9 +8,9 @@ export const loginStoreForm: RouteFormContract<'login.store', 'POST', '/login', 
   method: 'POST',
   path: '/login',
   fields: {
-    email: { type: 'string', required: true, minLength: 1 },
+    email: { type: 'string', required: true, format: 'email', minLength: 1 },
     password: { type: 'string', required: true, minLength: 1 },
-    remember: { type: 'unknown', required: false },
+    remember: { type: 'boolean', required: false },
   },
 }
 
@@ -42,7 +42,7 @@ export const profileUpdateForm: RouteFormContract<'profile.update', 'PUT', '/pro
   path: '/profile',
   fields: {
     name: { type: 'string', required: true, minLength: 1, maxLength: 120 },
-    email: { type: 'string', required: true, minLength: 1 },
+    email: { type: 'string', required: true, format: 'email', minLength: 1 },
     password: { type: 'string', required: false },
   },
 }
@@ -53,7 +53,7 @@ export const registerStoreForm: RouteFormContract<'register.store', 'POST', '/re
   path: '/register',
   fields: {
     name: { type: 'string', required: true, minLength: 1, maxLength: 120 },
-    email: { type: 'string', required: true, minLength: 1 },
+    email: { type: 'string', required: true, format: 'email', minLength: 1 },
     password: { type: 'string', required: true, minLength: 8 },
     passwordConfirmation: { type: 'string', required: true, minLength: 1 },
   },

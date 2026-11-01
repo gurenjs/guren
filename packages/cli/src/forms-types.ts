@@ -6,14 +6,28 @@
  */
 import { readFile, rm } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import { objectShape, pipeSides, typeOf, unwrapSingleChild, type ZodSchemaLike } from '@guren/server/internal/zod-compat'
+import {
+  innerSchema,
+  objectShape,
+  pipeSides,
+  PRESENCE_WRAPPERS,
+  schemaAt,
+  schemaChecks,
+  schemaFormat,
+  TRANSPARENT_WRAPPERS,
+  typeOf,
+  unwrapSingleChild,
+  type ZodSchemaLike,
+} from '@guren/server/internal/zod-compat'
 import { isZodSchema, toJsonSchema, type JsonSchemaObject } from '@guren/server/internal/zod-json-schema'
 
 import type { RouteDefinitionLike } from './api-client-types'
 import { CliError } from './cli-error'
 import { appDependsOn } from './discovery'
 import { objectNode, permitsOmission } from './route-contract-check'
+import { schemaToTypeString } from './schema-type-extractor'
 import { escapeSingleQuoted, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
+import { WHITESPACE_AND_CASE_OVERWRITES } from './zod-overwrites'
 
 export const FORMS_MANIFEST_FILE = '.guren/forms.gen.ts'
 
@@ -151,6 +165,67 @@ function acceptsOmission(schema: ZodSchemaLike, depth = 0): boolean {
   return nested ? acceptsOmission(nested, depth + 1) : false
 }
 
+/** The node a field is once its presence, nullable and transparent wrappers are looked through. */
+function fieldCore(schema: ZodSchemaLike): ZodSchemaLike {
+  let node = schema
+  for (let depth = 0; depth < 32; depth += 1) {
+    const type = typeOf(node)
+    if (!PRESENCE_WRAPPERS.has(type) && !TRANSPARENT_WRAPPERS.has(type) && type !== 'nullable') return node
+    const inner = innerSchema(node._def ?? {})
+    if (!inner) return node
+    node = inner
+  }
+  return node
+}
+
+const LENGTH_CHECKS = new Set(['min_length', 'max_length', 'length_equals'])
+
+/**
+ * `z.string().trim().toLowerCase().pipe(z.email())`: a first stage that only trims, changes case
+ * and bounds the length hands the out side what an email input holds, so the email it must be is
+ * the field's format. Any other check or transform there could turn a non-email into one.
+ */
+function emailBehindPipe(schema: ZodSchemaLike): boolean {
+  if (swallowsFailure(schema)) return false
+  const pipe = fieldCore(schema)
+  if (typeOf(pipe) !== 'pipe') return false
+  const from = schemaAt(pipe._def ?? {}, 'in')
+  const to = schemaAt(pipe._def ?? {}, 'out')
+  if (!from || !to || typeOf(from) !== 'string' || schemaFormat(from) !== undefined || from._def?.coerce === true) return false
+  const normalizes = schemaChecks(from).every((check) =>
+    LENGTH_CHECKS.has(check.check) || (check.check === 'overwrite' && WHITESPACE_AND_CASE_OVERWRITES.has(String(check.tx))))
+  if (!normalizes) return false
+  const out = toJsonSchema(to, [], 'pipe out', 'input')
+  return out?.type === 'string' && out.format === 'email'
+}
+
+/**
+ * A `.catch()` on the way to the email accepts any string, so no format may block one.
+ * Reads wrappers and both pipe sides; a `lazy` child is unreadable and counts as swallowing.
+ */
+function swallowsFailure(schema: ZodSchemaLike, depth = 0): boolean {
+  if (depth > 32) return true
+  const type = typeOf(schema)
+  if (type === 'catch' || type === 'lazy') return true
+  if (type === 'pipe') {
+    const { from, to } = pipeSides(schema._def ?? {})
+    return Boolean((from && swallowsFailure(from, depth + 1)) || (to && swallowsFailure(to, depth + 1)))
+  }
+  if (!PRESENCE_WRAPPERS.has(type) && !TRANSPARENT_WRAPPERS.has(type) && type !== 'nullable') return false
+  const inner = innerSchema(schema._def ?? {})
+  return inner ? swallowsFailure(inner, depth + 1) : false
+}
+
+/**
+ * A union every member of which parses to a boolean, one of them taking a boolean as sent
+ * (`z.union([z.boolean(), z.string().transform(…).pipe(z.boolean())])`): a checkbox submits `checked`.
+ */
+function parsesToBoolean(schema: ZodSchemaLike): boolean {
+  const core = fieldCore(schema)
+  if (typeOf(core) !== 'union' || schemaToTypeString(core, { io: 'output' }) !== 'boolean') return false
+  return (schemaToTypeString(core, { io: 'input' }) ?? '').split(' | ').includes('boolean')
+}
+
 /** One body key as a contract field. A key the walker cannot render stays, as `unknown`. */
 export function readFieldContract(schema: ZodSchemaLike, warnings: string[], label: string): FieldContract {
   const required = !acceptsOmission(schema)
@@ -158,14 +233,16 @@ export function readFieldContract(schema: ZodSchemaLike, warnings: string[], lab
   if (!rendered) return { type: 'unknown', required }
 
   const { node, nullable } = foldNullable(rendered)
-  const type = node && typeof node.type === 'string' && FIELD_TYPES.has(node.type as FieldContract['type'])
+  const read = node && typeof node.type === 'string' && FIELD_TYPES.has(node.type as FieldContract['type'])
     ? node.type as FieldContract['type']
     : 'unknown'
+  const type = read === 'unknown' && node && parsesToBoolean(schema) ? 'boolean' : read
   const field: FieldContract = { type, required }
   if (nullable) field.nullable = true
   if (!node) return field
 
   if (node.format) field.format = node.format
+  else if (type === 'string' && emailBehindPipe(schema)) field.format = 'email'
   if (node.format === 'date-time') field.value = dateValueKind(schema)
   if (node.enum && node.enum.length > 0) field.enum = [...node.enum]
   const bounds = {
