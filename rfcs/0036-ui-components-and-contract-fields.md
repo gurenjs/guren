@@ -2,7 +2,9 @@
 
 **Author:** Guren contributors
 **Date:** 2026-10-31
-**Status:** Draft
+**Status:** Accepted (2026-11-01; the maintainer accepted it after M1 to M4
+landed, with the amendments marked "Amended in implementation" and questions 2
+and 4 below settled by the implementation.)
 
 > Guren ships design tokens (`resources/css/guren.css`) but no components, so
 > every generated page carries its own copy of the input, label, button and
@@ -937,6 +939,8 @@ the template change and that release, as `common-pitfalls.md` describes.
    `fields.<name>.label`, or Laravel's `validation.attributes.<name>`, which
    would also let server messages name the field? The second couples labels to
    validation messages that do not interpolate attribute names today.
+   **Resolved in implementation:** `fields.<route>.<name>.label` then
+   `fields.<name>.label`, as section 4 now describes.
 3. **`description` as hint.** Should `.describe()` fill `hint` when no
    translation exists? It is written for agents and may read badly to people.
 4. **Format through a pipe.** Should `forms-types.ts` take `format` from a
@@ -944,6 +948,9 @@ the template change and that release, as `common-pitfalls.md` describes.
    `.trim().toLowerCase().pipe(z.email())` derives `email` without an `as`? The
    output stage sees the normalized value, so the browser's check is slightly
    stricter than the server's.
+   **Resolved in implementation:** yes, when every stage before the pipe only
+   trims, changes case or bounds the length; any other stage leaves `format`
+   unset.
 5. **A check for the copied components.** Generators emit against the props
    listed above. Should `guren check` warn when a copied component no longer
    exports what generated pages import, or is `typecheck` enough?

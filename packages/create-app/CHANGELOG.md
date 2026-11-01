@@ -22,6 +22,10 @@
 
 ### Patch Changes
 
+- 2a762bc: Codegen types a schema ending in `.transform()` as `unknown` where it renders the parsed value: the `this.validated()` types in `.guren/routes.gen.ts`, response types and agent tool results. It used to render the transform's input, so `z.string().transform(Number)` came out `string`. Follow the transform with a schema to type it: `z.string().transform(Number).pipe(z.number())` is `number`. A controller that read such a field as its input type now needs that `.pipe()` to typecheck.
+
+  `.guren/forms.gen.ts` reads two shapes it used to leave out. A field like `z.string().trim().min(1).toLowerCase().pipe(z.email())` carries `format: 'email'`, and a union every member of which parses to a boolean, one of them a plain `z.boolean()` (`z.union([z.boolean(), z.string().transform(…).pipe(z.boolean())])`), is typed `boolean`. The auth pages `make:auth` writes and the blog template's sign-in, sign-up and profile pages no longer pass `as="email"` or `as="checkbox"`; the field reads both from its contract.
+
 - abfa7a2: `guren upgrade` now keeps the Guren UI tokens in `resources/css/guren.css` current. The sheet's framework-owned part sits between `/* guren:tokens begin … */` and `/* guren:tokens end */` markers, and a new `guren-ui-tokens` doctor check reports when that block differs from the sheet the CLI ships; `guren upgrade` replaces a block some release shipped and keeps every line outside it. A block no release shipped (edited, or written by a newer Guren than the installed CLI) is reported and left alone. A sheet with no markers is replaced only when it is byte-identical to one an earlier release wrote; an edited one is left alone, and doctor prints how to move its edits after the end marker. Broken markers (an open with no close, a close with no open, two blocks) are reported and nothing is written. New apps and `make:auth` / `make:feature` write the marked sheet.
 
 ## 1.19.1
