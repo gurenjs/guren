@@ -670,8 +670,8 @@ export function templateCompilerOptions(paths: Record<string, string[]> = {}): T
  * {@link templateCompilerOptions} for an app a generator rendered into
  * `workspaceDir`: the `@/` alias and the codegen artifacts resolve to that render,
  * and React, Inertia and zod to this package's copies, since the render has no
- * node_modules. The three `.gen` entries override the fixture-pointing ones the
- * templates config carries, which an exact key wins over `@/*`.
+ * node_modules. The three `.gen` entries and the components override the template-pointing
+ * ones the templates config carries, which a more specific key wins over `@/*`.
  */
 export function renderedAppCompilerOptions(workspaceDir: string): TsconfigCompilerOptions {
   const cliRoot = join(repoRoot, 'packages/cli')
@@ -680,6 +680,7 @@ export function renderedAppCompilerOptions(workspaceDir: string): TsconfigCompil
       '@/.guren/pages.gen': [join(workspaceDir, '.guren/pages.gen.ts')],
       '@/.guren/routes.gen': [join(workspaceDir, '.guren/routes.gen.ts')],
       '@/.guren/api-client.gen': [join(workspaceDir, '.guren/api-client.gen.ts')],
+      '@/resources/js/components/ui/*': [join(workspaceDir, 'resources/js/components/ui/*')],
       '@/*': [join(workspaceDir, '*')],
       zod: [join(cliRoot, 'node_modules/zod')],
       '@inertiajs/react': [join(cliRoot, 'node_modules/@inertiajs/react')],
