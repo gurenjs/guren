@@ -10,6 +10,7 @@ import { isOptionalExpiryPast } from '../support/expiry'
 import { AuthenticationException } from '../errors/exceptions/AuthenticationException'
 import { grantsOnlyAgentTools } from '../agent/scopes'
 import { isAgentDispatch } from '../internal/agent-principal'
+import { tryGetRequestContainer } from '../http/request-container'
 
 /**
  * API token data stored in the backing store.
@@ -226,14 +227,34 @@ export interface VerifiedApiToken {
   abilities: string[]
 }
 
+/** The paths whose own endpoint judges tool scopes; `Application` supplies its declared ones. */
+export type AgentEndpointPaths = () => ReadonlySet<string>
+
 /**
  * Whether a verified token may authenticate this request. A token granting only
  * agent tools (`tool:` / `tools:` abilities) answers for the tool calls the
- * pipeline dispatched after judging its scopes, never for a request a client
- * sent straight to a route: there nothing would check those scopes.
+ * pipeline dispatched after judging its scopes, and for a request to an endpoint
+ * that judges them itself (the MCP endpoint, reached through app-wide auth
+ * middleware); never for a request a client sent straight to a route.
  */
-export function tokenAuthenticatesRequest(verified: VerifiedApiToken, request: Request): boolean {
-  return !grantsOnlyAgentTools(verified.abilities) || isAgentDispatch(request)
+export function tokenAuthenticatesRequest(
+  verified: VerifiedApiToken,
+  ctx: Context,
+  agentEndpoints?: AgentEndpointPaths,
+): boolean {
+  if (!grantsOnlyAgentTools(verified.abilities)) return true
+  if (isAgentDispatch(ctx.req.raw)) return true
+  const path = requestPathname(ctx)
+  return path !== undefined && (agentEndpoints?.().has(path) ?? false)
+}
+
+// The pathname CSRF matches declared paths against, so both judge one path alike.
+function requestPathname(ctx: Context): string | undefined {
+  try {
+    return new URL(ctx.req.url).pathname
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -384,6 +405,12 @@ export interface BearerTokenMiddlewareOptions {
  * app.use('/api/*', createBearerTokenMiddleware({ store, abilities: ['posts:delete'] }))
  * ```
  */
+// The middleware has no handle on the app, so it reaches the declared paths through the request's container.
+function appAgentEndpoints(ctx: Context): AgentEndpointPaths | undefined {
+  const app = tryGetRequestContainer(ctx)?.makeOptional<{ getCookielessAuthPaths?: AgentEndpointPaths }>('app')
+  return app?.getCookielessAuthPaths ? () => app.getCookielessAuthPaths!() : undefined
+}
+
 export function createBearerTokenMiddleware(
   options: BearerTokenMiddlewareOptions
 ): MiddlewareHandler {
@@ -416,7 +443,7 @@ export function createBearerTokenMiddleware(
       return ctx.json({ error: 'Invalid or expired token' }, 401)
     }
 
-    if (!tokenAuthenticatesRequest(result, ctx.req.raw)) {
+    if (!tokenAuthenticatesRequest(result, ctx, appAgentEndpoints(ctx))) {
       if (onUnauthorized) return onUnauthorized(ctx)
       return ctx.json({ error: 'This token only grants agent tools' }, 401)
     }

@@ -22,6 +22,8 @@ export type MaybeApplication = {
     hostname?: string
   }) => unknown | Promise<{ port: number; hostname: string; url: string } | undefined>
   boot?: () => Promise<void> | void
+  /** The paths an endpoint declared it authenticates without cookies; plugin-mcp declares its own. */
+  getCookielessAuthPaths?: () => ReadonlySet<string>
   /** Bun's listener handle, when the app is one that reports having a server. */
   stop?: (closeConnections?: boolean) => void | Promise<void>
   /**

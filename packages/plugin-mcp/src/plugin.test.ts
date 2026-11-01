@@ -10,6 +10,7 @@ import {
   createApp,
   createBearerTokenMiddleware,
   getApiToken,
+  requireAuthenticated,
   tokenCan,
   type AgentApprovalMatch,
   type AgentApprovalRequest,
@@ -299,6 +300,32 @@ describe('mcpPlugin bearer forwarding (integration)', () => {
     )
 
     expect(await response.json()).toEqual({ authenticated: false })
+  })
+
+  test('should reach the endpoint through app-wide authentication middleware', async () => {
+    const behindAuth = createApp({
+      routes: (router: Router) => {
+        router.get('/posts', () => Response.json({ posts: [] })).name('posts.index').agent({ description: 'List posts' })
+      },
+      providers: [mcpPlugin()],
+    })
+    behindAuth.use('*', requireAuthenticated())
+    behindAuth.auth.useTokens(tokens)
+    await behindAuth.boot()
+
+    const transport = new StreamableHTTPClientTransport(new URL('http://localhost/mcp'), {
+      fetch: (input, init) => behindAuth.fetch(new Request(input, init)),
+      requestInit: { headers: { Authorization: `Bearer ${token}` } },
+    })
+    const client = new Client({ name: 'behind-auth', version: '1.0.0' })
+    await client.connect(transport)
+
+    const { tools } = await client.listTools()
+    expect(tools.map((tool) => tool.name)).toContain('posts.index')
+    const direct = await behindAuth.fetch(
+      new Request('http://localhost/posts', { headers: { Authorization: `Bearer ${token}` } }),
+    )
+    expect(direct.status).toBe(401)
   })
 })
 

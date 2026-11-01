@@ -9,7 +9,7 @@ import { ModelUserProvider, type ModelUserProviderOptions } from './providers/Mo
 import { sanitizeUser } from './providers/UserProvider'
 import { SessionGuard } from './SessionGuard'
 import { TokenGuard } from './TokenGuard'
-import { hasBearerHeader, type ApiTokenStore } from './api-token'
+import { hasBearerHeader, type AgentEndpointPaths, type ApiTokenStore } from './api-token'
 import { bindPasswordHasher, createPasswordHasher } from './password/configured-hasher'
 import { describePasswordHasher } from './password/describe-hasher'
 import type { PasswordHasher } from './password/PasswordHasher'
@@ -68,6 +68,7 @@ export class AuthManager implements AuthManagerContract {
   private tokenGuard: string | null = null
   private apiTokenStore: ApiTokenStore | null = null
   private apiTokenOptions: ApiTokenGuardOptions = {}
+  private agentEndpoints?: AgentEndpointPaths
   private readonly passwordHasher: PasswordHasher
 
   constructor(options: AuthManagerOptions = {}) {
@@ -282,6 +283,16 @@ export class AuthManager implements AuthManagerContract {
   }
 
   /**
+   * Where a token granting only agent tools is accepted besides a pipeline
+   * dispatch: endpoints that judge its scopes themselves. `Application` passes
+   * its cookieless-auth paths, which only plugin-mcp declares, and which refuse
+   * a path an app route already answers, so only the declaring endpoint is there.
+   */
+  setAgentEndpoints(endpoints: AgentEndpointPaths): void {
+    this.agentEndpoints = endpoints
+  }
+
+  /**
    * Register a bearer-token guard backed by an ApiTokenStore and enable
    * header-based guard selection: requests carrying `Authorization: Bearer`
    * resolve to this guard, everything else keeps the default (session) guard.
@@ -311,6 +322,7 @@ export class AuthManager implements AuthManagerContract {
         ctx,
         provider,
         updateLastUsed: options.updateLastUsed,
+        agentEndpoints: this.agentEndpoints,
       })
     })
 

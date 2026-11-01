@@ -320,6 +320,7 @@ export class Application {
     this.container = new Container()
     this.router = new Router()
     this.authManager = new AuthManager({ hasher: options.auth?.hasher })
+    this.authManager.setAgentEndpoints(() => this.cookielessAuthPaths)
     this.providerManager = new ProviderManager(this.container)
 
     // Not in boot(): Hono composes matched handlers in registration order, and

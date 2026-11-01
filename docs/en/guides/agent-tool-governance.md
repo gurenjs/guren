@@ -24,7 +24,9 @@ The reverse holds too. **A token whose abilities are all `tool:` and `tools:`
 entries authenticates only the tool calls it reaches through the agent
 surface.** Sent straight to a route, with the token guard of `useTokens()` or
 behind `createBearerTokenMiddleware`, it answers as unauthenticated, since no
-route checks tool scopes. A token that also carries an ordinary ability (or
+route checks tool scopes. The MCP endpoint itself is the exception: it judges the
+scopes, so app-wide authentication middleware in front of it accepts the token
+there. A token that also carries an ordinary ability (or
 `['*']`) is an API token as well, and authenticates routes as before.
 
 Four scope forms, and no more:

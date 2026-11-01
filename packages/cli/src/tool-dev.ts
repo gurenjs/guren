@@ -120,6 +120,18 @@ export async function runToolDev(options: ToolDevOptions = {}): Promise<ToolDevS
 
   const app = await loadBootedApplication(options.appRoot)
 
+  // Asked of the app, not the network: app-wide auth middleware in front of a missing
+  // endpoint answers 401 to the probe's tools-only token, which says nothing about the plugin.
+  const declared = app.getCookielessAuthPaths?.()
+  if (declared && !declared.has(path)) {
+    await stopQuietly(app)
+    throw new Error(
+      `No App MCP endpoint is mounted at ${path}: the application declares none there. `
+        + 'Install and register the plugin — `guren plugin @guren/plugin-mcp`, then add '
+        + '`mcpPlugin()` to createApp({ providers }) — or pass --path if it is mounted elsewhere.',
+    )
+  }
+
   if (typeof app.auth?.useTokens !== 'function') {
     throw new Error(
       'This application\'s auth manager cannot accept a token store, so tool:dev has no way to '

@@ -9,6 +9,7 @@ export function fakeContext(
   return {
     req: {
       raw,
+      url: raw.url,
       header: (name: string) => headers[name] ?? headers[name.toLowerCase()],
     },
     set: (key: string, value: unknown) => {

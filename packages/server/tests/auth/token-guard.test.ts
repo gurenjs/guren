@@ -219,6 +219,19 @@ describe('TokenGuard', () => {
       expect(await guard.id()).toBe(42)
     })
 
+    test('should authenticate it on an endpoint that judges tool scopes itself', async () => {
+      const store = new MemoryApiTokenStore()
+      const { plainTextToken } = await issueToken(store, { abilities: ['tools:read'] })
+      const headers = { Authorization: `Bearer ${plainTextToken}` }
+      const agentEndpoints = () => new Set(['/mcp'])
+
+      const onEndpoint = fakeContext({ headers, raw: new Request('http://localhost/mcp', { method: 'POST' }) })
+      expect(await new TokenGuard({ store, ctx: onEndpoint, agentEndpoints }).check()).toBe(true)
+
+      const elsewhere = fakeContext({ headers, raw: new Request('http://localhost/mcp/notes') })
+      expect(await new TokenGuard({ store, ctx: elsewhere, agentEndpoints }).check()).toBe(false)
+    })
+
     test('should keep authenticating a token that grants an ability besides agent tools', async () => {
       const store = new MemoryApiTokenStore()
       const { plainTextToken } = await issueToken(store, { abilities: ['tools:read', 'notes:read'] })
