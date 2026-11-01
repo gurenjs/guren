@@ -109,10 +109,12 @@ async function generatedSpecs(cwd: string, map: BrowserMap, planned: SpecOptions
   }
   const off = planned ? (planned.accessibility ? undefined : 'not requested') : await accessibilityOff(cwd)
   const options = planned ?? { signIn: await pathExists(join(cwd, BROWSER_TESTS_SETUP)) }
+  const discovery = await discoverPlanFiles(cwd)
+  const sharedSlugs = new Map([...discovery.sharedSlugs].map(([slug, files]) => [slug, files.map((file) => toPosixRelative(cwd, file))]))
   const outputs = new Map([
     [SMOKE_SPEC_FILE, buildSmokeSpec(map, options)],
     ...(off ? [] : [[A11Y_SPEC_FILE, buildA11ySpec(map, options)] as [string, string]]),
-    ...buildPlanSpecs(map, options).map((entry): [string, string] => [entry.path, entry.contents]),
+    ...buildPlanSpecs(map, options, sharedSlugs).map((entry): [string, string] => [entry.path, entry.contents]),
   ])
   const onDisk = new Map([...await readExisting(cwd, GENERATED_SPECS_DIR, '.browser.ts'), ...await readExisting(cwd, `${GENERATED_SPECS_DIR}/plans`, '.browser.ts')])
   return { outputs, onDisk, ...(off ? { accessibilityOff: off } : {}) }

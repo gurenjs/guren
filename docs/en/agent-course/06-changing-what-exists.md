@@ -333,7 +333,13 @@ As in chapter 2, chapters 6 and 7 name elements of this reference plan. If you k
 bunx guren plan:render docs/plans/registrations/plan.json
 ```
 
-Open `docs/plans/registrations/plan.html` and turn on **Changes only**. What remains sorts into three kinds:
+Review it in the Dev Center, as in chapter 3. Start the dev server:
+
+```bash run background
+bun run dev
+```
+
+Open [http://localhost:3333/_guren/plans/registrations](http://localhost:3333/_guren/plans/registrations), click **Review this plan**, and turn on **Changes only**. (Without the dev server, open `docs/plans/registrations/plan.html` from disk instead.) What remains sorts into three kinds:
 
 | Change | Elements | Meaning |
 |---|---|---|
@@ -364,11 +370,15 @@ This plan changes no column, so it needs no data migration. Chapter 2's checklis
 
 ## 4. Answer and approve
 
-Answer the question the same way as in chapter 3: pick **refuse** on the page, click **Copy prompt for the agent**, and paste the prompt into the Claude Code session. Add this below it before you send it:
+Answer the question the same way as in chapter 3: pick **refuse** on the review page and wait for **Review saved at** in the footer. The plan's page in the Dev Center then gives you the message to send. Send it to the Claude Code session, with your reasons below it:
 
 ```text
+Revise docs/plans/registrations/plan.json from my review with the plan-write skill. The review is saved in .guren/plans/registrations.feedback.json.
+
 A full meetup refuses the registration; a waitlist is a later change. Keep both warnings on registrations.store, since any signed-in user may register and the request has no body.
 ```
+
+If you reviewed the static page instead, send the prompt its **Copy prompt for the agent** button copies, with the second paragraph above below it.
 
 **Without an agent:**
 
@@ -398,6 +408,12 @@ The approval also recorded, in `approvals.json`, how each `alter` read at this m
 ```bash run
 git add docs/plans
 git commit -m "docs: approve the registrations plan"
+```
+
+Stop the dev server:
+
+```bash run stop-background
+# Press Ctrl-C in the terminal running bun run dev.
 ```
 
 ## Where you are

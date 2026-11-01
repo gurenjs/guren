@@ -19,11 +19,11 @@ import { runtimeOrigin } from './runtime-errors'
 import { slugifyProse } from './utils'
 
 export const BROWSER_RUNS_DIR = '.guren/browser'
-const RUN_FILE = 'run.json'
+export const BROWSER_RUN_FILE = 'run.json'
 const ERRORS_FILE = 'runtime-errors.json'
-const SCREENSHOTS_DIR = 'screenshots'
+export const BROWSER_SCREENSHOTS_DIR = 'screenshots'
 /** Only the names `--begin` writes: a stamp and a slug, so no name leaves the runs directory. */
-const RUN_NAME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z-[a-z0-9-]+$/u
+export const BROWSER_RUN_NAME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z-[a-z0-9-]+$/u
 /** An acceptance id or a charter slug; never a key `Object.prototype` already holds. */
 const STEP_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/u
 
@@ -64,7 +64,7 @@ const stepSchema = z.object({
 })
 export type BrowserStep = z.infer<typeof stepSchema>
 
-const runSchema = z.object({
+export const browserRunSchema = z.object({
   schemaVersion: z.literal(1),
   run: z.string(),
   origin: z.string(),
@@ -74,7 +74,7 @@ const runSchema = z.object({
   steps: z.array(stepSchema),
   open: z.record(z.string(), windowStartSchema),
 })
-type BrowserRun = z.infer<typeof runSchema>
+export type BrowserRun = z.infer<typeof browserRunSchema>
 
 const eventsSchema = z.array(z.object({ sessionId: z.string(), sequence: z.number().int() }).passthrough())
 
@@ -87,7 +87,7 @@ export interface RecordDeps {
 }
 
 function runDir(cwd: string, run: string): string {
-  if (!RUN_NAME.test(run)) throw new CliError(`${run} is not a run name browser:record --begin wrote.`)
+  if (!BROWSER_RUN_NAME.test(run)) throw new CliError(`${run} is not a run name browser:record --begin wrote.`)
   return join(resolve(cwd), BROWSER_RUNS_DIR, run)
 }
 
@@ -97,8 +97,8 @@ function stepId(step: string): string {
 }
 
 export async function readRun(cwd: string, name: string): Promise<BrowserRun> {
-  const path = join(runDir(cwd, name), RUN_FILE)
-  const read = await readBesideRecord(path, runSchema, 'browser run')
+  const path = join(runDir(cwd, name), BROWSER_RUN_FILE)
+  const read = await readBesideRecord(path, browserRunSchema, 'browser run')
   if (read.unreadable) throw new CliError(read.unreadable)
   if (!read.value) throw new CliError(`No run ${name}: start one with browser:record --begin.`)
   if (read.value.run !== name) throw new CliError(`${path} names run ${read.value.run}; it was copied from another run.`)
@@ -106,7 +106,7 @@ export async function readRun(cwd: string, name: string): Promise<BrowserRun> {
 }
 
 async function writeRun(cwd: string, run: BrowserRun): Promise<void> {
-  await writeFileAtomic(join(runDir(cwd, run.run), RUN_FILE), `${JSON.stringify(run, null, 2)}\n`)
+  await writeFileAtomic(join(runDir(cwd, run.run), BROWSER_RUN_FILE), `${JSON.stringify(run, null, 2)}\n`)
 }
 
 /** The runs directory, ignoring itself and everything in it; a `.gitignore` already there is kept. */
@@ -134,7 +134,7 @@ export async function beginRun(cwd: string, options: { url: string; feature: str
       name = `${base}-${n}`
     }
   }
-  await mkdir(join(runDir(cwd, name), SCREENSHOTS_DIR))
+  await mkdir(join(runDir(cwd, name), BROWSER_SCREENSHOTS_DIR))
   const [graphSnapshot, commit] = await Promise.all([deps.graphSnapshot(), deps.commit()])
   const run: BrowserRun = { schemaVersion: 1, run: name, origin, feature: options.feature, graphSnapshot, commit, steps: [], open: {} }
   await writeRun(cwd, run)
@@ -152,12 +152,12 @@ export async function openStep(cwd: string, name: string, step: string, deps: Re
 
 /** Each screenshot as a path inside the run's `screenshots/`, links resolved, with its digest; refuses anything else. */
 async function screenshotDigests(dir: string, paths: readonly string[]): Promise<Array<{ path: string; sha256: string }>> {
-  const root = join(dir, SCREENSHOTS_DIR)
+  const root = join(dir, BROWSER_SCREENSHOTS_DIR)
   const digests: Array<{ path: string; sha256: string }> = []
   for (const path of paths) {
     const inside = isAbsolute(path) ? null : relative(root, resolve(dir, path))
     const target = inside ? await resolveInside(root, inside) : null
-    if (!target) throw new CliError(`Screenshot ${path} is not a file inside the run's ${SCREENSHOTS_DIR}/; save it there and name it relative to the run.`)
+    if (!target) throw new CliError(`Screenshot ${path} is not a file inside the run's ${BROWSER_SCREENSHOTS_DIR}/; save it there and name it relative to the run.`)
     let bytes: Buffer
     try {
       bytes = await readFile(target)
@@ -199,11 +199,11 @@ async function pairWithEarlierRuns(
   const slug = slugifyProse(run.feature, '-', 'feature')
   const sameSlug = new RegExp(`^.{20}-${slug}(?:-\\d+)?$`, 'u')
   const earlier = (await readdir(join(resolve(cwd), BROWSER_RUNS_DIR)))
-    .filter((name) => RUN_NAME.test(name) && sameSlug.test(name) && compareRunNames(name, run.run) < 0)
+    .filter((name) => BROWSER_RUN_NAME.test(name) && sameSlug.test(name) && compareRunNames(name, run.run) < 0)
     .sort((a, b) => compareRunNames(b, a))
   for (const name of earlier) {
     if (screenshots.every((shot) => shot.previous)) break
-    const read = await readBesideRecord(join(runDir(cwd, name), RUN_FILE), runSchema, 'browser run')
+    const read = await readBesideRecord(join(runDir(cwd, name), BROWSER_RUN_FILE), browserRunSchema, 'browser run')
     if (read.unreadable || (read.value && read.value.run !== name)) {
       unreadableRuns++
       continue

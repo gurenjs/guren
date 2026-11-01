@@ -1,16 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { lintFixture, OXLINT_BIN } from './helpers'
+import { lintFiles, lintFixture, NO_RAW_COLOR_CONFIG as CONFIG } from './helpers'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 
 // Exercised through the real oxlint binary, like the sibling rules: what has to
 // hold is that the plugin loads and reports on the AST oxlint hands it.
 
 const repoRoot = resolve(import.meta.dir, '../../..')
-const RULE = 'guren-no-raw-color/no-raw-color'
-const CONFIG = { jsPlugins: [resolve(import.meta.dir, '../src/oxlint/no-raw-color.js')], rules: { [RULE]: 'error' } }
 
 function lint(source: string): string {
   return lintFixture({
@@ -107,6 +103,7 @@ const c = <><Badge color="red" fill="white" /><link rel="mask-icon" href="/m.svg
 
   // The shipped config enables the rule on resources/js/**, so every page and
   // component Guren writes into an app has to pass it, or a fresh app starts red.
+  // Pages a generator builds as strings are swept in scaffold-output.test.ts.
   test('passes every page and component Guren ships into an app', async () => {
     const files: string[] = []
     for (const root of ['packages/create-app/templates', 'packages/cli/templates/scaffold']) {
@@ -116,19 +113,6 @@ const c = <><Badge color="red" fill="white" /><link rel="mask-icon" href="/m.svg
       }
     }
     expect(files.length).toBeGreaterThan(0)
-    const dir = mkdtempSync(join(tmpdir(), 'guren-oxlint-raw-color-'))
-    try {
-      // Not lintFixture: it writes its config into `cwd`, which here is the repository root.
-      writeFileSync(join(dir, 'oxlintrc.json'), JSON.stringify(CONFIG))
-      const result = Bun.spawnSync(
-        [OXLINT_BIN, '--disable-nested-config', '-c', join(dir, 'oxlintrc.json'), '-A', 'all', '-D', RULE, '--format', 'unix', ...files],
-        { cwd: repoRoot, stdout: 'pipe', stderr: 'pipe' },
-      )
-      expect(result.stderr.toString()).toBe('')
-      expect(result.stdout.toString()).toBe('')
-      expect(result.exitCode).toBe(0)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
+    expect(lintFiles({ config: CONFIG, files, cwd: repoRoot })).toBe('')
   }, 30_000)
 })
