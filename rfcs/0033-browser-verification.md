@@ -856,6 +856,10 @@ record drops the field.
 - stdout stays the step record as one JSON line, now carrying `previous`; the
   per-screenshot lines and the count are printed on stderr, as `browser:serve`
   keeps its own report off stdout.
+- The commit each side is judged by is the tree when its step closed, recorded
+  as `cli.commit` on the step, not the run's `--begin` commit, which an edit
+  made during a run leaves stale. An earlier step recorded without one reads as
+  no commit, so it is never called the same commit.
 
 **What stays a non-goal.** Playwright's `toHaveScreenshot()` in the generated
 specs: it needs reference images committed per platform (macOS and Linux render

@@ -57,6 +57,8 @@ const stepSchema = z.object({
       /** Absent when no earlier run of this feature recorded this step with a screenshot at this path (§12.3). */
       previous: z.object({ run: z.string(), sha256: z.string(), commit: commitSchema }).optional(),
     })),
+    /** The tree when the step closed, which `--begin`'s commit cannot vouch for once the run outlives an edit (§12.3). */
+    commit: commitSchema.optional(),
     runtimeErrors: z.object({ window: z.enum(['conclusive', 'inconclusive', 'unavailable']), reason: z.string().optional(), events: z.number().int() }),
   }),
 })
@@ -212,7 +214,7 @@ async function pairWithEarlierRuns(
     for (const shot of screenshots) {
       if (shot.previous) continue
       const match = recorded.cli.screenshots.find((entry) => entry.path === shot.path)
-      if (match) shot.previous = { run: name, sha256: match.sha256, commit: read.value.commit }
+      if (match) shot.previous = { run: name, sha256: match.sha256, commit: recorded.cli.commit ?? null }
     }
   }
   return { screenshots, unreadableRuns }
@@ -248,6 +250,7 @@ export interface ClosedStep {
   step: BrowserStep
   run: string
   feature: string
+  /** The tree when this step closed, not when the run began. */
   commit: BrowserRun['commit']
   /** Earlier runs skipped because their `run.json` does not read. */
   unreadableRuns: number
@@ -263,18 +266,19 @@ export async function closeStep(cwd: string, name: string, step: string, input: 
   const { screenshots, ...recorder } = parsed.data
   const dir = runDir(cwd, name)
   const { screenshots: shots, unreadableRuns } = await pairWithEarlierRuns(cwd, run, id, await screenshotDigests(dir, screenshots))
+  const commit = await deps.commit()
 
   const window = await windowSince(deps.readErrors, run.origin, run.open[id]!)
   if (window.events.length > 0) await appendEvents(dir, window.events)
 
   const record: BrowserStep = {
     id, ...lowerResult(recorder.result, window), recorder,
-    cli: { screenshots: shots, runtimeErrors: { window: window.status, ...(window.reason ? { reason: window.reason } : {}), events: window.events.length } },
+    cli: { screenshots: shots, commit, runtimeErrors: { window: window.status, ...(window.reason ? { reason: window.reason } : {}), events: window.events.length } },
   }
   delete run.open[id]
   run.steps.push(record)
   await writeRun(cwd, run)
-  return { step: record, run: run.run, feature: run.feature, commit: run.commit, unreadableRuns }
+  return { step: record, run: run.run, feature: run.feature, commit, unreadableRuns }
 }
 
 /** Appended by session and sequence, so a retry after a failed run write records no event twice. */

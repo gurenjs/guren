@@ -110,8 +110,9 @@ the order you took it in, and give the same state the same name in every run.
 The close compares each screenshot with the latest earlier run of the feature
 that recorded the same step id and file name, and prints on stderr whether it
 is `unchanged since <run>`, `changed since <run>` (with both paths),
-`changed at the same commit` (the page renders differently on its own, through
-a timestamp, seeded data or an animation), or `new`. Report a `changed`
+`changed at the same commit` (both steps closed on one clean commit, so the
+page renders differently on its own, through a timestamp, seeded data or an
+animation), or `new`. Report a `changed`
 screenshot as a prompt to look at the two images, never as a regression, and
 an `unchanged` one never as a pass: the comparison is of bytes, and it never
 moves the step's result.

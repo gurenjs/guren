@@ -264,6 +264,38 @@ describe('screenshots compared with earlier runs (RFC 0033 §12.3)', () => {
     expectResultUntouched(closed)
   })
 
+  test('pairs with the latest earlier run, a suffixed name within one second included', async () => {
+    await record({ at: '2026-10-16T10:00:00Z', shots: { 'post-form.png': 'a' } })
+    const latest = await record({ at: '2026-10-16T10:00:00Z', shots: { 'post-form.png': 'b' } })
+    expect(latest.run).toEndWith('-posts-2')
+    const closed = await record({ at: '2026-10-16T11:00:00Z', shots: { 'post-form.png': 'b' } })
+    expect(closed.step.cli.screenshots[0]!.previous?.run).toBe(latest.run)
+    expect(screenshotChangeLines(closed)).toEqual([`screenshots/post-form.png: unchanged since ${latest.run}`])
+  })
+
+  test('judges the same commit by the trees the steps closed on, not the ones their runs began on', async () => {
+    await record({ at: '2026-10-16T10:00:00Z', shots: { 'post-form.png': 'a' } })
+    const { run } = await beginRun(cwd, { url: 'http://127.0.0.1:4317', feature: 'Posts' }, deps([], { now: '2026-10-16T11:00:00Z' }))
+    const edited = deps([], { now: '2026-10-16T11:00:00Z', commit: { rev: 'abc123', dirty: true } })
+    await openStep(cwd, run, 'AC-posts-1', edited)
+    await writeFile(join(cwd, BROWSER_RUNS_DIR, run, 'screenshots', 'post-form.png'), 'b')
+    const closed = await closeStep(cwd, run, 'AC-posts-1', { ...passing, screenshots: ['screenshots/post-form.png'] }, edited)
+    expect(closed.commit).toEqual({ rev: 'abc123', dirty: true })
+    expect(closed.step.cli.commit).toEqual({ rev: 'abc123', dirty: true })
+    expect(screenshotChange(closed.commit, closed.step.cli.screenshots[0]!)).toBe('changed')
+  })
+
+  test('reads an earlier step that recorded no closing tree as no commit, never as the same one', async () => {
+    const first = await record({ at: '2026-10-16T10:00:00Z', shots: { 'post-form.png': 'a' } })
+    const path = join(cwd, BROWSER_RUNS_DIR, first.run, 'run.json')
+    const stored = JSON.parse(await readFile(path, 'utf8')) as { steps: Array<{ cli: Record<string, unknown> }> }
+    delete stored.steps[0]!.cli.commit
+    await writeFile(path, JSON.stringify(stored))
+    const closed = await record({ at: '2026-10-16T11:00:00Z', shots: { 'post-form.png': 'b' } })
+    expect(closed.step.cli.screenshots[0]!.previous).toMatchObject({ run: first.run, commit: null })
+    expect(screenshotChange(closed.commit, closed.step.cli.screenshots[0]!)).toBe('changed')
+  })
+
   test('orders run names as --begin took them within one second', () => {
     const names = ['2026-10-16T10-00-00Z-posts-10', '2026-10-16T10-00-01Z-posts', '2026-10-16T10-00-00Z-posts-2', '2026-10-16T10-00-00Z-posts']
     expect(names.sort(compareRunNames)).toEqual(['2026-10-16T10-00-00Z-posts', '2026-10-16T10-00-00Z-posts-2', '2026-10-16T10-00-00Z-posts-10', '2026-10-16T10-00-01Z-posts'])
