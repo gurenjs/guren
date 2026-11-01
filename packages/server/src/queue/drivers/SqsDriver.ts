@@ -1,4 +1,5 @@
 import type { QueueDriver, QueuedJob, FailedJob } from '../types'
+import { redactQueryParams } from '../../errors/redact-query-params'
 import { deserializeQueuedJob } from '../serialize'
 import { warnOnce } from '../../support/warn-once'
 
@@ -263,11 +264,12 @@ export class SqsDriver implements QueueDriver {
   }
 
   async fail(job: QueuedJob, error: Error): Promise<void> {
+    const { message, stack } = redactQueryParams(error)
     const failedJob: FailedJob = {
       ...job,
       failedAt: new Date(),
-      error: error.message,
-      stack: error.stack,
+      error: message,
+      stack,
     }
     this.failedJobs.set(job.id, failedJob)
 

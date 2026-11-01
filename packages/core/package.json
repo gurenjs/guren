@@ -81,6 +81,10 @@
       "types": "./dist/internal/route-path.d.ts",
       "default": "./dist/internal/route-path.js"
     },
+    "./internal/redact-query-params": {
+      "types": "./dist/internal/redact-query-params.d.ts",
+      "default": "./dist/internal/redact-query-params.js"
+    },
     "./internal/zod-compat": {
       "types": "./dist/internal/zod-compat.d.ts",
       "default": "./dist/internal/zod-compat.js"

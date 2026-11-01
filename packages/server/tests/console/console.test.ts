@@ -488,6 +488,26 @@ describe('Command', () => {
     expect(output.contains('Command failed')).toBe(true)
   })
 
+  test('prints a failed query without its bound parameters', async () => {
+    const secret = ['scrypt', '16384', 'c2VjcmV0LWhhc2g'].join('$')
+    class ImportUsersCommand extends Command {
+      static signature = 'users:import'
+      async handle(): Promise<number> {
+        throw Object.assign(new Error(`Failed query: insert into "users" values ($1)\nparams: ${secret}`), {
+          query: 'insert into "users" values ($1)',
+          params: [secret],
+        })
+      }
+    }
+    const command = new ImportUsersCommand()
+    command.setInput([])
+    command.setOutput(output)
+
+    expect(await command.run()).toBe(1)
+    expect(output.contains('params: [redacted 1 value]')).toBe(true)
+    expect(output.contains(secret)).toBe(false)
+  })
+
   test('returns custom exit code', async () => {
     const command = new ReturnCodeCommand()
     command.setInput(['42'])

@@ -1,9 +1,11 @@
 import type { MiddlewareHandler } from 'hono'
 import { matchingOpenParen } from '../support/stack-frames'
 import { warnDeprecated } from '../support/deprecate'
+import { redactQueryParams } from './redact-query-params'
 
 /** Development-only error page: exposes the stack trace and request details. */
-export function renderDebugPage(error: Error, request?: Request): string {
+export function renderDebugPage(thrown: Error, request?: Request): string {
+  const error = redactQueryParams(thrown)
   const errorName = error.name || 'Error'
   const errorMessage = escapeHtml(error.message || 'An unknown error occurred')
   const stackFrames = parseStackTrace(error.stack ?? '')

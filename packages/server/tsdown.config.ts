@@ -44,6 +44,7 @@ export default defineConfig({
     // a .d.ts with no .js.
     'src/internal/app-conventions.ts',
     'src/internal/inertia-page.ts',
+    'src/internal/redact-query-params.ts',
     'src/internal/request.ts',
     'src/internal/route-path.ts',
     'src/internal/testing.ts',

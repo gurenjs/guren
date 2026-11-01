@@ -1,5 +1,6 @@
 import type { QueueDriver, QueuedJob, WorkerOptions } from './types'
 import { getJob, type Job, type JobClass } from './Job'
+import { redactQueryParams } from '../errors/redact-query-params'
 
 class ReservationLostError extends Error {}
 
@@ -129,9 +130,11 @@ export class Worker {
 
   private async handleFailedJob(
     job: QueuedJob,
-    error: Error,
+    thrown: Error,
     JobClass: JobClass
   ): Promise<void> {
+    // What the logs and the jobFailed listener print; the job's own failed() hook gets the original.
+    const error = redactQueryParams(thrown)
     const willRetry = job.attempts < job.maxAttempts
 
     if (willRetry) {
@@ -146,10 +149,10 @@ export class Worker {
       try {
         const instance = this.instantiate(JobClass)
         if (instance.failed) {
-          await instance.failed(job.payload, error)
+          await instance.failed(job.payload, thrown)
         }
       } catch (failedError) {
-        console.error(`Error in job.failed() handler:`, failedError)
+        console.error(`Error in job.failed() handler:`, redactQueryParams(failedError))
       }
     }
 

@@ -24,6 +24,7 @@ import { asRecord, parseRequestPayload } from '../http/request'
 import { randomHex } from '../encryption/Random'
 import { ambientBinding, bindAmbient } from '../http/default-application'
 import { warnDeprecatedGetter, warnDeprecatedSetter } from '../support/deprecate'
+import { redactQueryParams } from '../errors/redact-query-params'
 
 /**
  * Best-effort identity for the user behind a connection: `getUser` is
@@ -470,7 +471,7 @@ export class BroadcastManager {
     }
 
     const result = await this.authorizeAndAttach(channel, user, clientId).catch((error: unknown) => {
-      console.error(`Error authorizing broadcast channel "${channel}":`, error)
+      console.error(`Error authorizing broadcast channel "${channel}":`, redactQueryParams(error))
       return { authorized: false } as const
     })
     await client.send('subscription', { channel, ...result })

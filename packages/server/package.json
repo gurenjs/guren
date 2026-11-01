@@ -148,6 +148,10 @@
       "types": "./dist/internal/inertia-page.d.ts",
       "default": "./dist/internal/inertia-page.js"
     },
+    "./internal/redact-query-params": {
+      "types": "./dist/internal/redact-query-params.d.ts",
+      "default": "./dist/internal/redact-query-params.js"
+    },
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.ts",
       "default": "./dist/jsx-runtime.js"
