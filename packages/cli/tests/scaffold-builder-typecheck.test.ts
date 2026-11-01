@@ -1,14 +1,10 @@
 import { describe, expect, it } from 'bun:test'
-import { readFile, symlink, writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { extname, join } from 'node:path'
-import { checkTypes, TSC_TIMEOUT, createTempWorkspace, linkWorkspacePackage, renderedAppCompilerOptions, seedInertiaApp, writeWorkspaceFiles } from './helpers'
-import { generateApiClientTypes } from '../src/api-client-types'
-import { generateDataTypes } from '../src/data-types'
+import { checkTypes, TSC_TIMEOUT, createTempWorkspace, renderedAppCompilerOptions, seedInertiaApp, writeWorkspaceFiles } from './helpers'
+import { prepareRenderedApp, runRouteCodegen } from './rendered-app'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
-import { generateFormTypes } from '../src/forms-types'
 import { makeAuth, type MakeAuthOptions } from '../src/make-auth'
-import { generatePageTypes } from '../src/pages-types'
-import { generateRouteTypes } from '../src/routes-types'
 
 /**
  * The compile gate for make:auth's *builder* output: flag-dependent
@@ -58,29 +54,6 @@ const compiledCombos: Array<[string, MakeAuthOptions, string[], boolean?]> = [
   ],
 ]
 
-/**
- * Route codegen imports `routes/auth.ts`, whose controllers, models and validators
- * evaluate for real and reach `@guren/core`, `@guren/orm` and `zod`. Codegen writes
- * forms.gen.ts only for an app depending on a client that exports ./forms.
- */
-async function prepareRenderedApp(dir: string): Promise<void> {
-  await writeFile(join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { paths: { '@/*': ['./*'] } } }))
-  await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'rendered-auth', dependencies: { '@guren/inertia-client': 'workspace:*' } }))
-  await linkWorkspacePackage('inertia-client', dir)
-  await linkWorkspacePackage('core', dir)
-  await linkWorkspacePackage('orm', dir)
-  await symlink(join(cliRoot, 'node_modules/zod'), join(dir, 'node_modules/zod'), 'dir')
-}
-
-/** `guren codegen`'s route-dependent half, in its order: pages first, since the controllers import them. */
-async function runCodegen(appRoot: string): Promise<void> {
-  await generatePageTypes({ appRoot, extractProps: true, force: true })
-  const { definitions } = await generateRouteTypes({ appRoot, routesFile: 'routes/auth.ts', force: true })
-  const { definitions: resources } = await generateDataTypes({ appRoot, force: true })
-  await generateApiClientTypes(definitions, { appRoot, resources, force: true })
-  await generateFormTypes(definitions, { appRoot, force: true })
-}
-
 describe('rendered make:auth output typechecks', () => {
   for (const [label, options, expectedWrites, declaresEnv] of compiledCombos) {
     it(
@@ -99,7 +72,7 @@ describe('rendered make:auth output typechecks', () => {
             expect(created).toContain(path)
           }
 
-          await runCodegen(workspace.dir)
+          await runRouteCodegen(workspace.dir, 'routes/auth.ts')
           await writeFile(join(workspace.dir, 'pages-probe.ts'), PAGES_PROBE, 'utf8')
 
           const rootNames = await collectFiles(workspace.dir, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES)

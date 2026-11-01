@@ -22,7 +22,8 @@ import { appendOAuthStateTable } from './oauth-state-table'
 import { registerConsoleCommand } from './console-registrar'
 import { generateSchemaMigration } from './make-migration'
 import { ensureUiComponents, uiComponentsImportedBy } from './guren-css'
-import { assertClientExportsForms } from './forms-types'
+import { assertClientExportsForms, formIdentifier } from './forms-types'
+import { routeCall } from './make-route'
 import { appMailBindings, MAIL_SCAFFOLD, reportKeptMail } from './mail-scaffold'
 import { KNOWN_OAUTH_PROVIDERS, OAUTH_PROVIDER_LABELS, oauthEnvEntries } from './oauth-scaffold'
 import { definitionTemplateFile, scaffoldTemplateFile } from './scaffold-templates'
@@ -30,6 +31,7 @@ import { AUTH_THROTTLE_TRANSLATIONS } from './lang'
 import { appendScaffoldEnv, installsConfigDefinition, scaffoldEnv } from './service-scaffold'
 
 const AUTH_LANG_FILE = 'lang/en/auth.json'
+const GUEST = "requireGuest({ redirectTo: '/dashboard' })"
 
 function authFile(path: string): ScaffoldFileEntry {
   return scaffoldTemplateFile('auth', path)
@@ -728,7 +730,7 @@ export function buildLoginViewTemplate(includeRegister: boolean, includeReset: b
   return `import { Head, Link } from '@inertiajs/react'
 import { useRouteForm } from '@guren/inertia-client/forms'
 import Layout from '../../components/Layout.js'
-import { loginStoreForm } from '@/.guren/forms.gen'
+import { ${formIdentifier('login.store')} } from '@/.guren/forms.gen'
 import { Alert } from '@/resources/js/components/ui/Alert'
 ${oauthProviders.length > 0 ? "import { Button, buttonClass } from '@/resources/js/components/ui/Button'" : "import { Button } from '@/resources/js/components/ui/Button'"}
 import { Field } from '@/resources/js/components/ui/Field'
@@ -741,7 +743,7 @@ interface Props {
 
 export default function Login({ email = '', errors = {} }: Props) {
   // Shows a redirect-back's field errors even when this form did not make the visit.
-  const form = useRouteForm(loginStoreForm, { email, password: '', remember: false }, { adoptPageErrors: true })
+  const form = useRouteForm(${formIdentifier('login.store')}, { email, password: '', remember: false }, { adoptPageErrors: true })
 
   return (
     <Layout>
@@ -777,7 +779,7 @@ function buildRegisterViewTemplate(oauthProviders: string[] = []): string {
   return `import { Head, Link } from '@inertiajs/react'
 import { useRouteForm } from '@guren/inertia-client/forms'
 import Layout from '../../components/Layout.js'
-import { registerStoreForm } from '@/.guren/forms.gen'
+import { ${formIdentifier('register.store')} } from '@/.guren/forms.gen'
 import { Alert } from '@/resources/js/components/ui/Alert'
 ${oauthProviders.length > 0 ? "import { Button, buttonClass } from '@/resources/js/components/ui/Button'" : "import { Button } from '@/resources/js/components/ui/Button'"}
 import { Field } from '@/resources/js/components/ui/Field'
@@ -788,7 +790,7 @@ interface Props {
 }
 
 export default function Register({ errors = {} }: Props) {
-  const form = useRouteForm(registerStoreForm, { name: '', email: '', password: '', passwordConfirmation: '' })
+  const form = useRouteForm(${formIdentifier('register.store')}, { name: '', email: '', password: '', passwordConfirmation: '' })
 
   return (
     <Layout>
@@ -827,18 +829,10 @@ ${buildOAuthButtonsTemplate(oauthProviders)}
 }
 
 function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthFeatures): string {
-  const errorFields = providerOwnedEmail
-    ? includePassword
-      ? `'name' | 'password' | 'currentPassword'`
-      : `'name'`
-    : includePassword
-      ? `'name' | 'email' | 'password' | 'currentPassword'`
-      : `'name' | 'email'`
-  const initial = [
-    'name: profile.name',
-    ...(providerOwnedEmail ? [] : ['email: profile.email']),
-    ...(includePassword ? [`password: ''`, `currentPassword: ''`] : []),
-  ].join(', ')
+  const fields = ['name', ...(providerOwnedEmail ? [] : ['email']), ...(includePassword ? ['password', 'currentPassword'] : [])]
+  const startsAt: Record<string, string> = { name: 'profile.name', email: 'profile.email', password: "''", currentPassword: "''" }
+  const errorFields = fields.map((field) => `'${field}'`).join(' | ')
+  const initial = fields.map((field) => `${field}: ${startsAt[field]}`).join(', ')
   const emailField = providerOwnedEmail
     ? `
           <div>
@@ -865,7 +859,7 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
   return `import { Head } from '@inertiajs/react'
 import { useRouteForm } from '@guren/inertia-client/forms'
 import Layout from '../../components/Layout.js'
-import { profileUpdateForm } from '@/.guren/forms.gen'
+import { ${formIdentifier('profile.update')} } from '@/.guren/forms.gen'
 import { Alert } from '@/resources/js/components/ui/Alert'
 import { Button } from '@/resources/js/components/ui/Button'
 import { Field } from '@/resources/js/components/ui/Field'
@@ -878,7 +872,7 @@ interface Props {
 }
 
 export default function ProfileEdit({ profile, status }: Props) {
-  const form = useRouteForm(profileUpdateForm, { ${initial} })
+  const form = useRouteForm(${formIdentifier('profile.update')}, { ${initial} })
 
   return (
     <Layout>
@@ -906,6 +900,11 @@ export default function ProfileEdit({ profile, status }: Props) {
 `
 }
 
+/** A POST or PUT whose body schema is the route's contract (RFC 0036 §3), behind `middlewares`. */
+function contractRoute(method: string, path: string, name: string, body: string, middlewares: string, handler: string): string {
+  return routeCall('router', method, path, handler, { contract: `{ name: '${name}', body: ${body}, middlewares: [${middlewares}] }` })
+}
+
 function buildRoutesTemplate({
   includeExtras,
   includeVerify,
@@ -919,7 +918,7 @@ function buildRoutesTemplate({
   const registerRoutes = includeExtras
     ? `
   router.get('/register', [RegisterController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('register')
-  router.post('/register', { name: 'register.store', body: RegisterSchema, middlewares: [requireGuest({ redirectTo: '/dashboard' }), throttleRegistration] }, [RegisterController, 'store'])
+  ${contractRoute('post', '/register', 'register.store', 'RegisterSchema', `${GUEST}, throttleRegistration`, "[RegisterController, 'store']")}
 `
     : ''
 
@@ -929,9 +928,9 @@ function buildRoutesTemplate({
   const resetRoutes = includeExtras
     ? `
   router.get('/forgot-password', [ForgotPasswordController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('forgot-password')
-  router.post('/forgot-password', { name: 'forgot-password.store', body: ForgotPasswordSchema, middlewares: [requireGuest({ redirectTo: '/dashboard' }), throttlePasswordResetRequest] }, [ForgotPasswordController, 'store'])
+  ${contractRoute('post', '/forgot-password', 'forgot-password.store', 'ForgotPasswordSchema', `${GUEST}, throttlePasswordResetRequest`, "[ForgotPasswordController, 'store']")}
   router.get('/reset-password', [ResetPasswordController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('reset-password')
-  router.post('/reset-password', { name: 'reset-password.store', body: ResetPasswordSchema, middlewares: [requireGuest({ redirectTo: '/dashboard' })] }, [ResetPasswordController, 'store'])
+  ${contractRoute('post', '/reset-password', 'reset-password.store', 'ResetPasswordSchema', GUEST, "[ResetPasswordController, 'store']")}
 `
     : ''
 
@@ -966,7 +965,7 @@ function buildRoutesTemplate({
   // Passwordless apps expose /login only as the OAuth button page — there is
   // no credential exchange to POST to.
   const loginStoreRoute = includePassword
-    ? `\n  router.post('/login', { name: 'login.store', body: LoginSchema, middlewares: [requireGuest({ redirectTo: '/dashboard' }), throttleLogin] }, [LoginController, 'store'])`
+    ? `\n  ${contractRoute('post', '/login', 'login.store', 'LoginSchema', `${GUEST}, throttleLogin`, "[LoginController, 'store']")}`
     : ''
 
   const throttles = [
@@ -1002,7 +1001,7 @@ export function registerAuthRoutes(router: Router): void {
 ${registerRoutes}${resetRoutes}${verifyRoutes}${oauthRoutes}
   router.get('/dashboard', [DashboardController, 'index'], ${dashboardMiddleware}).name('dashboard')
   router.get('/profile', [ProfileController, 'edit'], requireAuthenticated({ redirectTo: '/login' })).name('profile.edit')
-  router.put('/profile', { name: 'profile.update', body: ProfileUpdateSchema, middlewares: [requireAuthenticated({ redirectTo: '/login' })${profileUpdateThrottle}] }, [ProfileController, 'update'])
+  ${contractRoute('put', '/profile', 'profile.update', 'ProfileUpdateSchema', `requireAuthenticated({ redirectTo: '/login' })${profileUpdateThrottle}`, "[ProfileController, 'update']")}
 }
 `
 }

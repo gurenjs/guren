@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import { consola } from 'consola'
 import type { Application, UserProvider } from '@guren/core'
-import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, APP_FIXTURE, BLOG_ROUTES_FIXTURE, captureInfos, captureWarnings, CONSOLE_FIXTURE, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, ENV_SCHEMA_FIXTURE, linkWorkspaceCore, linkWorkspacePackage, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, seedApiOnlyApp, seedInertiaApp, SQLITE_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
+import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, APP_FIXTURE, BLOG_ROUTES_FIXTURE, captureInfos, captureWarnings, CONSOLE_FIXTURE, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, ENV_SCHEMA_FIXTURE, linkWorkspaceCore, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, seedApiOnlyApp, seedInertiaApp, SQLITE_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
+import { prepareRenderedApp } from './rendered-app'
 import { checkEnvExample } from '../src/app-env'
 import { runBlueprint } from '../src/blueprints'
 import { appMailBindings } from '../src/mail-scaffold'
@@ -1864,8 +1865,6 @@ export default class NotifierProvider extends ServiceProvider {
 // route's own middleware. The rendered routes file runs in this process on a session-less app
 // whose user provider knows nobody, so nothing reaches a database.
 describe('make:auth routes judge the body through their contracts', () => {
-  const WORKSPACE_DRIZZLE = resolve(import.meta.dir, '../../orm/node_modules/drizzle-orm')
-  const WORKSPACE_ZOD = resolve(import.meta.dir, '../node_modules/zod')
   const nobody: UserProvider = {
     retrieveById: async () => null,
     retrieveByCredentials: async () => null,
@@ -1878,8 +1877,8 @@ describe('make:auth routes judge the body through their contracts', () => {
   beforeAll(async () => {
     workspace = await createTempWorkspace('guren-cli-make-auth-requests-')
     await seedInertiaApp(workspace.dir)
+    await prepareRenderedApp(workspace.dir)
     await writeWorkspaceFiles(workspace.dir, {
-      'tsconfig.json': JSON.stringify({ compilerOptions: { paths: { '@/*': ['./*'] } } }),
       // The actions under test never render, so no page needs to resolve.
       '.guren/pages.gen.ts': 'export const pages: Record<string, Record<string, string>> = { auth: {}, dashboard: {}, profile: {} }\n',
       // Built inside the app, so the app and its routes share the @guren/core it resolves.
@@ -1889,13 +1888,6 @@ import { registerAuthRoutes } from '../routes/auth.js'
 export default createApp({ routes: registerAuthRoutes })
 `,
     })
-    // Linked before makeAuth, whose client check resolves from the app root: linked after it,
-    // the import below could not find @guren/core on CI.
-    await linkWorkspaceCore(workspace.dir)
-    await linkWorkspacePackage('orm', workspace.dir)
-    await linkWorkspacePackage('inertia-client', workspace.dir)
-    await symlink(WORKSPACE_DRIZZLE, join(workspace.dir, 'node_modules/drizzle-orm'), 'dir')
-    await symlink(WORKSPACE_ZOD, join(workspace.dir, 'node_modules/zod'), 'dir')
     await makeAuth({ force: true, session: false })
     process.chdir(workspace.originalCwd)
 
@@ -1907,7 +1899,8 @@ export default createApp({ routes: registerAuthRoutes })
 
   afterAll(async () => {
     await app?.stop()
-    if (workspace) await rm(workspace.dir, { recursive: true, force: true })
+    // cleanup() also restores the cwd, which a setup that threw before its own chdir left in the app.
+    await workspace?.cleanup()
   })
 
   function login(body: Record<string, unknown>, headers: Record<string, string> = {}): Promise<Response> {
