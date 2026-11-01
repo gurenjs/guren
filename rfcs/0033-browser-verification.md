@@ -848,6 +848,19 @@ runs in the same checkout. `run.json` keeps `schemaVersion: 1`: `previous` is
 optional, an older record reads unchanged, and an older CLI reading a newer
 record drops the field.
 
+**Amended in implementation:**
+- Only runs whose name carries the feature's slug are read, and the search
+  stops once every screenshot is paired, so an unreadable `run.json` is counted
+  only where it could have held a later pairing. A run directory with no
+  `run.json` (a `--begin` still writing it) is skipped without being counted.
+- stdout stays the step record as one JSON line, now carrying `previous`; the
+  per-screenshot lines and the count are printed on stderr, as `browser:serve`
+  keeps its own report off stdout.
+- The commit each side is judged by is the tree when its step closed, recorded
+  as `cli.commit` on the step, not the run's `--begin` commit, which an edit
+  made during a run leaves stale. An earlier step recorded without one reads as
+  no commit, so it is never called the same commit.
+
 **What stays a non-goal.** Playwright's `toHaveScreenshot()` in the generated
 specs: it needs reference images committed per platform (macOS and Linux render
 fonts differently), a ritual to update them and a pixel threshold, and it turns

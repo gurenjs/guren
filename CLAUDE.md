@@ -338,7 +338,7 @@ export const requireAuth = defineMiddleware(async (c, next) => {
 - **API Client**: `createApiClient<ApiRoutes>()` provides typed `request()` with route name autocomplete, param checking, and body types
 - **Bidirectional Forms**: `RouteBody<ApiRoutes, 'posts.store'>` and `RouteErrors<PostForm>` from `@guren/inertia-client/typed-forms`
 - **Typed Components**: `createTypedLink(routeManifest)` and `createTypedForm(routeManifest)` provide `<Link route="posts.show" params={{ id: 1 }}>` with compile-time route name and param checking
-- **Vite HMR**: The Vite plugin watches `routes/web.ts`, `resources/js/pages/`, and `app/Http/Resources/` — changes trigger automatic codegen
+- **Vite HMR**: The Vite plugin watches `routes/` (the entry and the registrars beside it), `resources/js/pages/`, `lang/`, and the Resources, Models and Validators directories and module routes, root and `modules/*/` alike — changes trigger automatic codegen
 
 ## Testing
 
