@@ -30,7 +30,7 @@ export default function Register({ errors = {} }: Props) {
           <Alert tone="danger" className="mt-4">{errors.message}</Alert>
         )}
 
-        <form className="mt-6 space-y-4" onSubmit={form.handleSubmit}>
+        <form method="post" action={registerStoreForm.path} className="mt-6 space-y-4" onSubmit={form.handleSubmit}>
           <Field form={form} name="name" />
           <Field form={form} name="email" />
           <Field form={form} name="password" as="password" />

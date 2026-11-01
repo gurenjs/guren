@@ -694,7 +694,7 @@ export default function New${singular}() {
 ${state.hooks}  return (
     <main className="min-h-screen bg-g-page font-sans text-g-text">
       <div className="mx-auto max-w-3xl px-6 py-12">
-        <form className="space-y-4" onSubmit={form.handleSubmit}>
+        <form method="post" action={${contract}.path} className="space-y-4" onSubmit={form.handleSubmit}>
 ${fields.map((f) => generateFormField(f, 'form')).join('\n')}
           <Button type="submit" disabled={form.processing}>Create</Button>
         </form>
@@ -718,6 +718,7 @@ function generateEditPage(
   return `${state.imports}import { useRouteForm } from '@guren/inertia-client/forms'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
 import { ${contract} } from '@/.guren/forms.gen'
+import { route } from '@/.guren/routes.gen'
 import type { RouteBody } from '@guren/inertia-client/typed-forms'
 ${uiImports(formComponents(fields))}
 interface Props {
@@ -729,7 +730,7 @@ export default function Edit${singular}({ ${variableName} }: Props) {
 ${state.hooks}  return (
     <main className="min-h-screen bg-g-page font-sans text-g-text">
       <div className="mx-auto max-w-3xl px-6 py-12">
-        <form className="space-y-4" onSubmit={form.handleSubmit}>
+        <form method="post" action={route('${routeName}.update', { id: ${variableName}.id })} className="space-y-4" onSubmit={form.handleSubmit}>
 ${fields.map((f) => generateFormField(f, 'form')).join('\n')}
           <Button type="submit" disabled={form.processing}>Save</Button>
         </form>

@@ -558,11 +558,16 @@ describe('makeFeature', () => {
       expect(newPage).toContain("import { postsStoreForm } from '@/.guren/forms.gen'")
       expect(newPage).toContain("const form = useRouteForm(postsStoreForm, { title: '', subtitle: null })")
       expect(newPage).toContain('onSubmit={form.handleSubmit}')
+      // A submit before hydration posts to the route instead of a GET carrying the fields.
+      expect(newPage).toContain('<form method="post" action={postsStoreForm.path} ')
 
       const editPage = await readFile(join(workspace.dir, 'resources/js/pages/posts/Edit.tsx'), 'utf8')
       expect(editPage).toContain("import { postsUpdateForm } from '@/.guren/forms.gen'")
       expect(editPage).toContain("post: RouteBody<ApiRoutes, 'posts.update'> & { id: number }")
       expect(editPage).toContain('const form = useRouteForm(postsUpdateForm, { title: post.title, subtitle: (post.subtitle ?? null) }, { params: { id: post.id } })')
+      // HTML forms send GET or POST only; the PUT stays the client's.
+      expect(editPage).toContain("<form method=\"post\" action={route('posts.update', { id: post.id })} ")
+      expect(editPage).toContain("import { route } from '@/.guren/routes.gen'")
       for (const source of [newPage, editPage]) {
         expect(source).toContain("from '@guren/inertia-client/forms'")
         // No json field, so nothing on the page needs state.

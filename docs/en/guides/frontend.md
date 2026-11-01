@@ -107,12 +107,14 @@ import { Field } from '@/resources/js/components/ui/Field'
 
 const form = useRouteForm(postsStoreForm, { title: '', body: '' })
 
-<form onSubmit={form.handleSubmit}>
+<form method="post" action={postsStoreForm.path} onSubmit={form.handleSubmit}>
   <Field form={form} name="title" />
   <Field form={form} name="body" as="textarea" />
   <Button type="submit" disabled={form.processing}>Create</Button>
 </form>
 ```
+
+`method="post"` and `action` matter before the page hydrates: a submit then is a plain browser POST to the route, not a GET that puts every field, the password included, in the URL. HTML forms send only GET and POST, so a PUT or PATCH form still says `post`.
 
 The label defaults to a [translation](./i18n.md#form-labels) when the app has one, else the field name as words (`startsAt` reads "Starts at"). Pass `label` to change it, and `as` for an input the schema cannot express (`textarea`, `password`, `file`). `Field` and `useRouteForm` need an `@guren/inertia-client` that exports `/forms`.
 

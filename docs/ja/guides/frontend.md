@@ -107,12 +107,14 @@ import { Field } from '@/resources/js/components/ui/Field'
 
 const form = useRouteForm(postsStoreForm, { title: '', body: '' })
 
-<form onSubmit={form.handleSubmit}>
+<form method="post" action={postsStoreForm.path} onSubmit={form.handleSubmit}>
   <Field form={form} name="title" />
   <Field form={form} name="body" as="textarea" />
   <Button type="submit" disabled={form.processing}>Create</Button>
 </form>
 ```
+
+`method="post"` と `action` は、ページのハイドレーションが終わる前に効きます。その間に送信すると、ブラウザはルートへそのまま POST するので、パスワードを含むフィールドの値が GET の URL に載ることはありません。HTML のフォームは GET と POST しか送れないため、PUT や PATCH のフォームでも `post` と書きます。
 
 ラベルは、アプリに[翻訳](./i18n.md#フォームのラベル)があればその翻訳、無ければフィールド名を単語に分けたものになります(`startsAt` なら「Starts at」)。変えるときは `label` を、スキーマから決まらない入力欄(`textarea`、`password`、`file`)には `as` を渡します。`Field` と `useRouteForm` を使うには、`/forms` を export している `@guren/inertia-client` が必要です。
 

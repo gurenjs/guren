@@ -167,6 +167,8 @@ export function registerWebRoutes(router: Router): void {
       expect(loginPage).toContain('<Field form={form} name="email" />')
       expect(loginPage).toContain('<Field form={form} name="password" as="password" />')
       expect(loginPage).toContain('<Field form={form} name="remember" label="Remember me" />')
+      // Submitted before hydration, the form must POST to its route, never GET the password into the URL.
+      expect(loginPage).toContain('<form method="post" action={loginStoreForm.path} ')
       // The copied components a page imports are written beside it.
       for (const name of ['Field', 'Button', 'Alert', 'Input', 'Checkbox', 'Label']) {
         expect(existsSync(join(workspace.dir, `resources/js/components/ui/${name}.tsx`))).toBe(true)
@@ -201,6 +203,7 @@ export function registerWebRoutes(router: Router): void {
       expect(registerPage).toContain('interface Props')
       expect(registerPage).toContain('useRouteForm(registerStoreForm,')
       expect(registerPage).toContain("import { registerStoreForm } from '@/.guren/forms.gen'")
+      expect(registerPage).toContain('<form method="post" action={registerStoreForm.path} ')
 
       const forgotController = await readFile(
         join(workspace.dir, 'app/Http/Controllers/Auth/ForgotPasswordController.ts'),
@@ -1435,6 +1438,7 @@ export default app
 
       expect(view).toContain('{profile.email}')
       expect(view).toContain('Managed by your sign-in provider.')
+      expect(view).toContain('<form method="post" action={profileUpdateForm.path} ')
       expect(view).not.toContain("ValidationErrors<'name' | 'email' | 'password'>")
       // The read-only email has no control to label.
       expect(view).not.toContain('name="email"')
