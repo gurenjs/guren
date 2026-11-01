@@ -15,6 +15,7 @@ import { ValidationException } from '../errors/exceptions/ValidationException'
 import { getApiTokenOrFail } from '../auth/api-token'
 import { resolveGate, type Gate } from '../authorization/Gate'
 import { resolveOptional } from '../container/resolve-optional'
+import { withDefaultHeaders } from '../support/default-headers'
 import type { AuthUser } from '../authorization/types'
 import {
   getValidatedInput,
@@ -94,18 +95,6 @@ export interface RedirectOptions {
 }
 
 export type InertiaResponseOptions = Omit<InertiaOptions, 'url' | 'request' | 'container'> & { url?: string }
-
-/**
- * Header names are case-insensitive, so the caller's `content-type` must replace the
- * default rather than sit beside it; spreading a `Headers` or tuple list would drop it.
- */
-function withDefaultHeader(init: HeadersInit | undefined, name: string, value: string): Headers {
-  const headers = new Headers(init)
-  if (!headers.has(name)) {
-    headers.set(name, value)
-  }
-  return headers
-}
 
 type InertiaPageComponent<TPage extends InertiaPageContractLike> = TPage['id']
 type InertiaPageProps<TPage extends InertiaPageContractLike> = NonNullable<TPage['__props']>
@@ -373,14 +362,14 @@ export class Controller {
   protected json<T>(data: T, init: ResponseInit = {}): Response {
     return new Response(JSON.stringify(data), {
       ...init,
-      headers: withDefaultHeader(init.headers, 'Content-Type', 'application/json; charset=utf-8'),
+      headers: withDefaultHeaders(init.headers, { 'Content-Type': 'application/json; charset=utf-8' }),
     })
   }
 
   protected text(body: string, init: ResponseInit = {}): Response {
     return new Response(body, {
       ...init,
-      headers: withDefaultHeader(init.headers, 'Content-Type', 'text/plain; charset=utf-8'),
+      headers: withDefaultHeaders(init.headers, { 'Content-Type': 'text/plain; charset=utf-8' }),
     })
   }
 
@@ -390,7 +379,7 @@ export class Controller {
     const { status = defaultStatus, headers } = options
     return new Response(null, {
       status,
-      headers: withDefaultHeader(headers, 'Location', url),
+      headers: withDefaultHeaders(headers, { Location: url }),
     })
   }
 
@@ -413,7 +402,7 @@ export class Controller {
     return new Response(JSON.stringify(data), {
       status,
       ...init,
-      headers: withDefaultHeader(init.headers, 'Content-Type', 'application/json; charset=utf-8'),
+      headers: withDefaultHeaders(init.headers, { 'Content-Type': 'application/json; charset=utf-8' }),
     })
   }
 

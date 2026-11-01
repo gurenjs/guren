@@ -8,6 +8,7 @@ import { resolveOptional } from "../../container/resolve-optional";
 import { warnDeprecatedSetter } from "../../support/deprecate";
 import { INITIAL_PAGE_SELECTOR, initialPageElement } from "./initial-page";
 import { readPartialReload, resolveInertiaProps } from "./props";
+import { withDefaultHeaders } from "../../support/default-headers";
 
 ensureErrorStackTracePolyfill();
 
@@ -233,15 +234,14 @@ export async function renderInertia(
     page,
     response: new Response(body, {
       status: options.status ?? 200,
-      headers: {
+      headers: withDefaultHeaders(options.headers, {
         "Content-Type": wantsJson
           ? "application/json; charset=utf-8"
           : "text/html; charset=utf-8",
         "X-Inertia": "true",
         Vary: INERTIA_VARY,
         ...versionHeader,
-        ...options.headers,
-      },
+      }),
     }),
   };
 }

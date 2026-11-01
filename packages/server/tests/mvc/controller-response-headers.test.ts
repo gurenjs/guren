@@ -18,19 +18,25 @@ class HeadersController extends Controller {
   away(headers: HeadersInit) {
     return this.redirect('/default', { headers })
   }
+
+  page(headers: HeadersInit) {
+    return this.inertia('Feed', {}, { headers })
+  }
 }
 
-type Action = 'feed' | 'report' | 'made' | 'away'
+type Action = 'feed' | 'report' | 'made' | 'away' | 'page'
 
-async function respond(action: Action, headers: HeadersInit): Promise<Response> {
+async function respond(action: Action, headers: HeadersInit, requestHeaders: HeadersInit = {}): Promise<Response> {
   const app = new Hono()
   app.get('/', (c) => {
     const controller = new HeadersController()
     controller.setContext(c)
     return controller[action](headers)
   })
-  return app.request('/')
+  return app.request('/', { headers: requestHeaders })
 }
+
+const INERTIA_VISIT = { 'X-Inertia': 'true', Accept: 'application/json' }
 
 const RSS = 'application/rss+xml; charset=utf-8'
 
@@ -62,6 +68,25 @@ describe('Controller response helpers merge headers case-insensitively', () => {
     test(`redirect() lets ${label} replace the location`, async () => {
       const res = await respond('away', build('Location', '/elsewhere'))
       expect(res.headers.get('location')).toBe('/elsewhere')
+    })
+
+    test(`inertia() lets ${label} replace the engine's content type`, async () => {
+      const res = await respond('page', build('Content-Type', 'application/vnd.feed+json'), INERTIA_VISIT)
+      expect(res.headers.get('content-type')).toBe('application/vnd.feed+json')
+      expect(res.headers.get('x-inertia')).toBe('true')
+      expect(((await res.json()) as { component: string }).component).toBe('Feed')
+    })
+
+    test(`inertia() keeps one X-Inertia when ${label} sets it again`, async () => {
+      const res = await respond('page', build('X-Inertia', 'true'), INERTIA_VISIT)
+      expect(res.headers.get('x-inertia')).toBe('true')
+      expect(res.headers.get('content-type')).toBe('application/json; charset=utf-8')
+    })
+
+    test(`inertia() keeps other headers passed as ${label}`, async () => {
+      const res = await respond('page', build('Cache-Control', 'no-store'), INERTIA_VISIT)
+      expect(res.headers.get('cache-control')).toBe('no-store')
+      expect(res.headers.get('vary')).not.toBeNull()
     })
 
     test(`text() keeps other headers passed as ${label}`, async () => {
