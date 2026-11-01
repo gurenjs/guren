@@ -640,7 +640,11 @@ what `getByLabel()` finds. Its resolution order is:
 2. the translation `fields.<route>.<name>.label`
    (`fields.posts.store.title.label`), then `fields.<name>.label`, when the app
    shares `_i18n` and the key exists in the current locale or its fallback, in
-   that order;
+   that order; **Amended in implementation:** both keys are tried in the
+   current locale before either is tried in the fallback, so a route-scoped
+   label that exists only in the fallback never replaces a field label the
+   current locale has, and an empty translation counts as missing, since it
+   would leave the control without an accessible name;
 3. `humanizeFieldName(name)`.
 
 Labels live under a `.label` leaf so that option labels can sit beside them
@@ -683,9 +687,12 @@ chose different words, and then the page passes `label`. The CLI restates
 pinned against the package's copy by a test, as `components.tsx` and
 `routes-types-fragments.ts` already pin the path parameter helpers.
 
-**Locale is pinned, not assumed.** A plan's labels are written in the app's
-default locale, but nothing makes a browser run use it today: the Playwright
-config `add browser-tests` writes sets no locale, and the server picks a locale
+**Locale is pinned, not assumed.** A plan's view labels are written in the
+app's default locale, whatever the plan's `locale`, which governs the rest of
+its prose (RFC 0030 §1, amended for view labels); `guren check --plan` warns
+about an open plan whose `locale` is another language. Nothing made a browser
+run use the default locale: the Playwright config `add browser-tests` wrote
+set no locale, and the server picks a locale
 from the query string, a cookie or `Accept-Language` before the default
 (`detect-locale.ts`), and the signed-in storage state may carry a locale
 cookie. The config template sets `locale` to the app's default locale and

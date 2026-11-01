@@ -7,7 +7,7 @@
 | フィールド | 中身 |
 |---|---|
 | `planVersion` | `1` |
-| `title`、`summary`、`locale` | 計画の題と要約、本文の言語 (`en`、`ja`) |
+| `title`、`summary`、`locale` | 計画の題と要約、本文の言語 (`en`、`ja`。ビューのラベルは除く) |
 | `scope` | `goals` と `nonGoals` |
 | `assumptions`、`questions` | 指示なしに決めたことと、決めきれなかったこと |
 | `models`、`validators`、`controllers`、`routes`、`views`、`resources`、`policies`、`sideEffects` | 設計の本体。要素の種類ごとに 1 セクション |
@@ -77,7 +77,7 @@
 
 カラム型は、Drizzle のビルダー名ではなく抽象的な型名で書きます。使えるのは `string`、`text`、`integer`、`number`、`decimal`、`boolean`、`date`、`datetime`、`json`、`uuid` の 10 種類です。`datetime` には `withTimezone` を、`decimal` には `precision` と `scale` を指定できます。
 
-ほかのセクションも同じような形です。コントローラーにはアクションを並べ、各アクションに `body`、`params`、`query` で使う validator、`authorization` (ミドルウェアと Policy の ability)、`response` (Inertia のビュー、リダイレクト、Resource)、業務ルールを文章で書いた `rules` を書きます。ルートにはメソッド、パス、ルート名、アクションの id、ミドルウェア、`bind` を書きます。ビューにはページ id と props を書きます。フォームのフィールドにはルールを書き直さず、validator のフィールドを指定します。アプリケーションモジュールに属する要素には `module` を付けます。
+ほかのセクションも同じような形です。コントローラーにはアクションを並べ、各アクションに `body`、`params`、`query` で使う validator、`authorization` (ミドルウェアと Policy の ability)、`response` (Inertia のビュー、リダイレクト、Resource)、業務ルールを文章で書いた `rules` を書きます。ルートにはメソッド、パス、ルート名、アクションの id、ミドルウェア、`bind` を書きます。ビューにはページ id と props を書きます。フォームのフィールドにはルールを書き直さず、validator のフィールドを指定します。フォームのフィールドとアクションのラベルはページに表示される文字列なので、計画のほかの部分を別の言語で書く場合でも、アプリケーションの既定のロケールで書きます。ブラウザテストは、既定のロケールで表示したページでこのラベルを探します。アプリケーションモジュールに属する要素には `module` を付けます。
 
 ## 受け入れ振る舞い
 

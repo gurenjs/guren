@@ -23,7 +23,7 @@ export {
   createTypedLink,
   createTypedForm,
 } from './components'
-export { useTranslation, createTranslator } from './i18n'
+export { useTranslation, createTranslator, hasTranslation } from './i18n'
 export type {
   Translation,
   I18nPageProps,

@@ -380,7 +380,11 @@ Accept-Language), and shares the `_i18n` prop with Inertia pages.
 Translate with `this.t()` / `this.tc()` / `this.locale` in controllers and
 `useTranslation()` from `@guren/inertia-client` in pages. `guren codegen`
 emits typed keys (`.guren/translations.gen.ts`); `guren check --i18n`
-validates catalog parity and placeholders.
+validates catalog parity and placeholders. A `Field` with no `label` prop
+reads `fields.<route>.<name>.label`, then `fields.<name>.label`
+(`lang/<locale>/fields.json`; current locale first, then the fallback), and
+a select option `fields.<name>.options.<value>`, before the field name as
+words. `hasTranslation(i18n, key)` tells a missing key from one `t()` echoes.
 
 ### Encryption
 Source: `packages/server/src/encryption/`

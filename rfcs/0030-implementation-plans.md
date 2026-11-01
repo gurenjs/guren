@@ -193,6 +193,21 @@ messages) stay English: they are CLI output at the same layer as `guren check`,
 and a translated page text that differs from the terminal would be two
 statements of one finding.
 
+**Amended after acceptance (2026-11-01), view labels.** A view's
+`form.fields[].label` and `actions[].label` are not prose: they are the text
+the page shows, which RFC 0033's browser specs look for with `getByLabel` and
+`getByRole` on a run pinned to the application's default locale (RFC 0036 §5).
+They are written in that locale, the `fallback` of `createApp({ i18n })` or
+else the first of its `supported`, whatever the plan's `locale`. The other
+labels (a question option's, a flow edge's) stay prose. A spec cannot render
+in the plan's `locale` instead: `detectLocaleMiddleware`'s `queryParam` and
+`sources` are the application's to configure, so no request is sure to be read
+in a locale other than the default. `guren check --plan` warns about an open
+plan with labelled views whose `locale` is another language than the default
+(primary subtags compared, as the middleware matches `ja-JP` to `ja`), since
+the producer may have followed the request's language there; it stays a
+warning, because a plan in another language can carry correct labels.
+
 A headless producer cannot stop and ask. A question is therefore data, and the
 model keeps going on a stated assumption:
 
