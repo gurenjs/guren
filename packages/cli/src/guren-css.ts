@@ -271,6 +271,11 @@ export const uiComponentHash = (text: string): string => sha256(text.replace(/\r
 
 const UI_HEADER = /^\/\/ guren-ui: (\w+ v\d+)\b/u
 
+/** The version a component's `// guren-ui: <Name> vN` header names, or `undefined` without one. */
+export function uiComponentVersion(text: string): string | undefined {
+  return UI_HEADER.exec(text)?.[1]
+}
+
 export type UiComponentPlan =
   | { kind: 'current' }
   /** Byte-identical, up to line ends, to a template an earlier release shipped. */
@@ -283,7 +288,7 @@ export function planUiComponent(current: string, template: string, released: Rea
   const hash = uiComponentHash(current)
   if (hash === uiComponentHash(template)) return { kind: 'current' }
   if (released.has(hash)) return { kind: 'update', next: template }
-  const claimed = UI_HEADER.exec(current)?.[1]
+  const claimed = uiComponentVersion(current)
   return claimed ? { kind: 'edited', claimed } : { kind: 'edited' }
 }
 

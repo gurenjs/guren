@@ -1,11 +1,12 @@
 import type { GraphNode, GurenApplicationGraph, GraphResult } from '../application-graph'
 import type { PlanEvidence, StepBrowserEvidence, StepEvidence } from '../dev-center-evidence'
 import type { PlanReadiness } from '../dev-center-readiness'
-import { browserScreenshotPath, planEvidencePath, planPagePath, planReadinessPath, planReviewPath, planSlugFromPath, savedReviewPrompt, type PlanDecision } from '../dev-center-links'
+import { browserScreenshotPath, planEvidencePath, planPagePath, planReadinessPath, planReviewPath, planSlugFromPath, savedReviewPrompt, UI_CATALOG_PAGE_PATH, type PlanDecision } from '../dev-center-links'
 import type { PlanOverview } from '../docs-viewer-plans'
 import { commandRow } from '../docs-viewer-page/dom'
 import type { RuntimeErrorResult } from '../runtime-errors'
 import { gurenCommandLine } from '../shell-quote'
+import { loadUiCatalog } from './ui'
 import { attentionDecision, planAttention, sortPlans, STEP_TONE, stepRuntimeErrors, stepsByTask, verifiedCount, type DevCenterPlan, type PlanAttention } from './plans'
 
 function element<T extends HTMLElement>(id: string): T {
@@ -477,7 +478,14 @@ kind.onchange = renderNodes
 refresh.onclick = () => { void loadGraph() }
 errorsButton.onclick = () => { void loadErrors() }
 const planPage = planSlugFromPath(location.pathname)
-if (planPage === undefined) {
+if (location.pathname === UI_CATALOG_PAGE_PATH) {
+  element('home').hidden = true
+  element('ui-view').hidden = false
+  document.title = 'Components · Guren Dev Center'
+  const load = () => loadUiCatalog(element('ui-status'), element('ui-body'), element<HTMLButtonElement>('refresh-ui'))
+  element<HTMLButtonElement>('refresh-ui').onclick = () => { void load() }
+  void load()
+} else if (planPage === undefined) {
   element<HTMLButtonElement>('refresh-plans').onclick = () => { void loadPlans() }
   void loadPlans()
   void loadGraph()

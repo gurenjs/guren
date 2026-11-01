@@ -1,5 +1,11 @@
 // Imports nothing, so the Dev Center page bundles it beside the handler that serves the same paths.
 
+/** The component catalog (RFC 0036 Future Work); `McpServiceProvider` in @guren/server mounts both paths. */
+export const UI_CATALOG_PAGE_PATH = '/_guren/ui'
+export const UI_CATALOG_JSON_PATH = '/_guren/ui.json'
+/** The preview posts its height under this type, so the Dev Center can size the frame to it. */
+export const UI_CATALOG_HEIGHT_MESSAGE = 'guren:ui-catalog:height'
+
 const PLAN_PAGE = /^\/_guren\/plans\/([^/]+)$/
 // `endpoint.ts` in @guren/server spells the feedback path for its CSRF rule, and `plan/page/served.ts` the review's.
 const REVIEW_PATH = /^\/_guren\/plans\/([^/]+)\/(review|feedback)$/
