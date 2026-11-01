@@ -164,6 +164,9 @@ describe('guren add ui', () => {
     await seedInertiaApp(workspace.dir)
     const created = await addUi()
     expect(created.created).toHaveLength(UI_COMPONENTS.length)
+    for (const name of UI_COMPONENTS) {
+      expect(await readFile(join(workspace.dir, uiComponentPath(name)), 'utf8')).toBe(uiComponentTemplate(name))
+    }
     expect(await readFile(join(workspace.dir, 'resources/css/guren.css'), 'utf8')).toContain('guren:tokens begin')
 
     await writeFile(join(workspace.dir, uiComponentPath('Button')), '// mine\n', 'utf8')

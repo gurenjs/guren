@@ -507,6 +507,7 @@ describe('blueprint scaffold templates are written by their blueprints', () => {
       + 'its templates are byte-pinned by the attachments fixture pin above',
     ai: 'not a registry blueprint (guren add ai takes --provider); pinned per provider by the add ai gate below',
     'browser-tests': 'not a registry blueprint (it reads the browser map); pinned byte-identical in tests/add-browser-tests.test.ts',
+    ui: 'not a registry blueprint (guren add ui takes component names, --diff and --force); pinned byte-identical in tests/ui-components.test.ts',
   }
 
   it('add ai writes each provider template byte-identical and declares only what the companion does', async () => {
