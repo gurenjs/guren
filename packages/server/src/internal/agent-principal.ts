@@ -1,7 +1,7 @@
 /**
- * The principal handoff seam (RFC 0017 §2), a leaf module the pipeline writes
- * and the auth context reads — in either of them, one would import the other's
- * whole layer. Keyed on the **object identity** of the `Request` handed to
+ * The principal handoff seam (RFC 0017 §2) and the scope-gated dispatch mark,
+ * a leaf module the pipeline writes and the auth context reads — in either of
+ * them, one would import the other's whole layer. Keyed on the **object identity** of the `Request` handed to
  * `app.fetch`, so it has no wire representation to forge, needs no
  * `AsyncLocalStorage` (identical on workerd and Bun), and is collected with the
  * request. `new Request(original)` and `clone()` carry nothing: that is the
@@ -47,9 +47,10 @@ export function readAgentPrincipal(request: Request): InstalledAgentPrincipal | 
 const dispatched = new WeakSet<Request>()
 
 /**
- * Mark `request` as a tool call the pipeline scope-gated before dispatching,
- * returning that same object. Keyed on identity like the principal: a token
- * whose abilities grant only agent tools authenticates such a request and no other.
+ * Mark `request` as a tool call the pipeline scope-gated, returning that same
+ * object: a token granting only agent tools authenticates such a request and no
+ * other. Not `markDispatchedToolRequest()`, which `buildToolRequest` sets for
+ * un-gated callers too (`guren tool:call`, `TestApp.agent()`, plugin-webmcp).
  */
 export function markAgentDispatch(request: Request): Request {
   dispatched.add(request)

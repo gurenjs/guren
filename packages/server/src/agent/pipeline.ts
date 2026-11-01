@@ -431,9 +431,9 @@ export function createAgentInvocationPipeline(
           return { status: 'executed', outcome }
         }
 
-        // The principal handoff, on the exact object about to be dispatched.
-        // `installAgentPrincipal` returns the same object; assigning its
-        // result is what keeps a future refactor from dispatching a copy.
+        // The dispatch mark and principal handoff, on the exact object about to
+        // be dispatched. Both return the same object; assigning the result is
+        // what keeps a future refactor from dispatching a copy.
         const request = markAgentDispatch(
           options.handoff === 'seam' && options.principal
             ? installAgentPrincipal(built.request, {

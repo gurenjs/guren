@@ -363,7 +363,7 @@ export interface BearerTokenMiddlewareOptions {
 
   loadUser?: (userId: string | number) => Promise<unknown>
 
-  /** Required abilities. Any valid token is accepted when unset. */
+  /** Required abilities. Unset, any valid token is accepted except one granting only agent tools. */
   abilities?: string[]
 
   onUnauthorized?: (ctx: Context) => Response | Promise<Response>
