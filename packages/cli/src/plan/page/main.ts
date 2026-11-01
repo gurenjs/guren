@@ -11,14 +11,15 @@ import { PLAN_VERSION } from '../version'
 import { indexPlan } from './card'
 import { mountDiagram } from './diagram'
 import { byId } from './dom'
-import { mountFeedback } from './feedback'
+import { feedbackDocument, mountFeedback } from './feedback'
 import { renderHeader, renderPinned } from './header'
 import { initLocale, mountLocaleSwitch, words } from './locale'
 import { mountFilters, mountTabs } from './navigation'
 import type { PlanPagePayload } from './payload'
 import { refreshAnswers, renderQuestions } from './questions'
-import { loadReview } from './review'
+import { loadReview, seedReview } from './review'
 import { diagramHost } from './sections'
+import { loadServedFeedback, servedFeedbackUrl, startAutosave } from './served'
 
 const REFUSED_CHROME = ['plan-meta', 'plan-scope', 'questions', 'tabs', 'controls', 'panels', 'footer']
 
@@ -32,7 +33,7 @@ function refuse(found: unknown): void {
   for (const id of REFUSED_CHROME) byId(id).hidden = true
 }
 
-function start(): void {
+async function start(): Promise<void> {
   const data = JSON.parse(byId('plan-data').textContent) as PlanPagePayload
   initLocale(data.i18n)
 
@@ -42,17 +43,25 @@ function start(): void {
     return
   }
 
+  // Read before anything renders: each card and question starts from the review it shows.
+  const served = servedFeedbackUrl()
+  const loaded = served ? await loadServedFeedback(served, data.planDigest) : null
+
   indexPlan(data)
   renderHeader(data)
   renderPinned(data)
-  renderQuestions(data.plan.questions)
-  loadReview(data.planHash)
+  renderQuestions(data.plan.questions, loaded?.saved?.answers)
+  // Served, the server's copy is the review: one kept in this browser alone would show marks nothing saved.
+  if (served) seedReview(loaded?.saved?.elements ?? [])
+  else loadReview(data.planHash)
   mountTabs(data)
   refreshAnswers()
   if (diagramHost) mountDiagram(diagramHost, data.diagram)
   mountFilters(data.entities)
-  mountFeedback(data)
+  mountFeedback(data, loaded?.file ?? null)
+  if (served && loaded) startAutosave(served, data.planDigest, () => feedbackDocument(data.planHash), byId('save-status'))
+  else if (served) words(byId('save-status'), 'footer.loadFailed')
   mountLocaleSwitch()
 }
 
-start()
+void start()

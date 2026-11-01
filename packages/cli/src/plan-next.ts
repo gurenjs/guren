@@ -16,6 +16,7 @@ import { runGit } from './changed-files'
 import { CliError } from './cli-error'
 import { devCenterPlanLine, planPagePath } from './dev-center-links'
 import { toPosixRelative } from './discovery'
+import { refuseSharedPlanSlug } from './plan-check'
 import { readPlanFile } from './plan-render'
 import { planScaffoldTargets, type PlanScaffoldTargets } from './plan-scaffold'
 import { planStatusFile } from './plan-status'
@@ -268,6 +269,7 @@ export async function planNextFile(planPath: string, options: PlanNextFileOption
   // A draft passes the gate above without §2 having run, and an approval may predate the allowlist.
   refuseDisallowedCommands(path, plan)
   const root = options.appRoot
+  await refuseSharedPlanSlug(root, path, 'no step of it is handed out')
   const derivation = derivePlanTasks(plan, { apiOnly: await isConfirmedApiOnlyApp(root).catch(() => false) })
   const digest = planDigest(plan)
   const slug = planSlug(path)
