@@ -94,6 +94,7 @@ export const SHIPPED_UNMARKED_SHEETS: ReadonlySet<string> = new Set([
  */
 export const SHIPPED_TOKEN_BLOCKS: ReadonlySet<string> = new Set([
   '2b56a75e643f0c15db89d922115042a78ca7ebc7d415160e12fcd54f154d0f57',
+  '1198fbd7b5ff322e830bf04e33f2d59c4f384dfeb80b6cff30fffe5a462a6c98',
 ])
 
 interface TokenSheet {
@@ -232,10 +233,19 @@ export const SHIPPED_UI_COMPONENTS: Readonly<Record<UiComponentName, ReadonlySet
   Card: new Set(['0b399883734e631bbaf9de5daebd87eb345f968fca503b81a113ab1a49c9015f']),
   Checkbox: new Set(['b42805cd83473ebadca103a75fa6ca90d7b134dcb495410c7c3d92a249c88b5a']),
   Field: new Set(['c9387e1ceaf4ae96d2d530afeadf283f4c4e22652bbdf7f76b51fdb96b736331']),
-  Input: new Set(['ea7215126e14061445ba343f52e010eae0eb1b634e76c601d86b6aa009b386b7']),
+  Input: new Set([
+    'ea7215126e14061445ba343f52e010eae0eb1b634e76c601d86b6aa009b386b7',
+    '1db23cf34507ee9789fe6e0c8cca993f3a5efb0f1441eee318c9b74a22212ee8',
+  ]),
   Label: new Set(['f6230461533783175f577743b33e3824e0a4dad8cbc5f939bdf315e56ad5cb53']),
-  Select: new Set(['e8d24f137fc1f9a197522589ba6f54de547a9f00b64de31389f59b6a35ff2dea']),
-  Textarea: new Set(['d56e8e8b3e8dc5e686326a44bd877879e9de638dce56f7d829be2585158adcf0']),
+  Select: new Set([
+    'e8d24f137fc1f9a197522589ba6f54de547a9f00b64de31389f59b6a35ff2dea',
+    '89bb37ed98e1fbe5a7e2613a2538619cd74c2c3ce291dfbd7ab39dd0311734f8',
+  ]),
+  Textarea: new Set([
+    'd56e8e8b3e8dc5e686326a44bd877879e9de638dce56f7d829be2585158adcf0',
+    'c6bc6d3885328ee905cf13b5b7594c733bdc88da6d37198777b9fa12b2841356',
+  ]),
 }
 
 /** The shipped components each one imports, which are copied with it so no copy imports a missing file. */

@@ -219,7 +219,7 @@ export default function NewPost() {
                 value={form.data.title}
                 onChange={(event) => form.setData('title', event.target.value)}
                 placeholder="Title"
-                className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+                className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:outline-solid focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
               />
               {form.errors.title && <p className="mt-1 text-sm text-g-danger">{form.errors.title}</p>}
             </div>
@@ -229,7 +229,7 @@ export default function NewPost() {
                 onChange={(event) => form.setData('body', event.target.value)}
                 placeholder="Body"
                 rows={8}
-                className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+                className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:outline-solid focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
               />
               {form.errors.body && <p className="mt-1 text-sm text-g-danger">{form.errors.body}</p>}
             </div>
@@ -790,7 +790,7 @@ export default function EditPost({ post }: Props) {
                 value={form.data.title}
                 onChange={(event) => form.setData('title', event.target.value)}
                 placeholder="Title"
-                className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+                className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:outline-solid focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
               />
               {form.errors.title && <p className="mt-1 text-sm text-g-danger">{form.errors.title}</p>}
             </div>
@@ -800,7 +800,7 @@ export default function EditPost({ post }: Props) {
                 onChange={(event) => form.setData('body', event.target.value)}
                 placeholder="Body"
                 rows={8}
-                className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+                className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:outline-solid focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
               />
               {form.errors.body && <p className="mt-1 text-sm text-g-danger">{form.errors.body}</p>}
             </div>

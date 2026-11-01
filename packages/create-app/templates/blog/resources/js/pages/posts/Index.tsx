@@ -4,6 +4,7 @@ import type { PaginatedPageProps } from '@guren/core'
 import type { PostResourceData } from '@/app/Http/Resources/PostResource'
 import { route } from '@/.guren/routes.gen'
 import { createApiClient, type ApiRoutes } from '@/.guren/api-client.gen'
+import { Input } from '@/resources/js/components/ui/Input'
 import Layout from '../../components/Layout.js'
 
 interface Props extends PaginatedPageProps<PostResourceData> {}
@@ -61,12 +62,11 @@ export default function PostsIndex({ data, pagination }: Props) {
         </h1>
 
         <form className="flex gap-2" onSubmit={search}>
-          <input
+          <Input
             type="search"
             value={keywords}
             onChange={(event) => setKeywords(event.target.value)}
             placeholder="Search posts…"
-            className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
           />
           <button
             type="submit"

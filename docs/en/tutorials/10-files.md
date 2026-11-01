@@ -535,7 +535,7 @@ import { route } from '@/.guren/routes.gen'
 type PostForm = RouteBody<ApiRoutes, 'posts.store'> & { cover: File | null }
 
 const inputClass =
-  'w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent'
+  'w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:outline-solid focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent'
 
 export default function NewPost() {
   const form = useForm<PostForm>({ title: '', body: '', tags: '', cover: null })
@@ -702,7 +702,7 @@ export default function PostShow({ post, canManage, comments }: Props) {
                   onChange={(event) => form.setData('body', event.target.value)}
                   placeholder="Add a comment"
                   rows={3}
-                  className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+                  className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:outline-solid focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
                 />
                 {form.errors.body && <p className="text-sm text-g-danger">{form.errors.body}</p>}
                 <button type="submit" disabled={form.processing} className="rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down">
@@ -1208,7 +1208,7 @@ import { route } from '@/.guren/routes.gen'
 type PostForm = RouteBody<ApiRoutes, 'posts.store'> & { cover: File | null; images: File[] }
 
 const inputClass =
-  'w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent'
+  'w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:outline-solid focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent'
 
 export default function NewPost() {
   const form = useForm<PostForm>({ title: '', body: '', tags: '', cover: null, images: [] })
@@ -1396,7 +1396,7 @@ export default function PostShow({ post, canManage, comments }: Props) {
                   onChange={(event) => form.setData('body', event.target.value)}
                   placeholder="Add a comment"
                   rows={3}
-                  className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+                  className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:outline-solid focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
                 />
                 {form.errors.body && <p className="text-sm text-g-danger">{form.errors.body}</p>}
                 <button type="submit" disabled={form.processing} className="rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down">
