@@ -34,7 +34,7 @@ export function uiCatalogHooks(appRoot: () => string) {
       // The entry lists the copies on disk, so `guren add ui` adding one must reach the next load.
       const onCopy = (file: string) => {
         if (!resolve(file).startsWith(`${resolve(appRoot(), UI_COMPONENTS_DIR)}/`)) return
-        const module = server.moduleGraph.getModuleById(RESOLVED_ENTRY)
+        const module = server.moduleGraph?.getModuleById(RESOLVED_ENTRY)
         if (module) server.moduleGraph.invalidateModule(module)
       }
       server.watcher.on('add', onCopy)
