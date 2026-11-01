@@ -57,7 +57,14 @@ The awaited `TestResponse` has `status`, `headers`, `raw`, `await text()`,
 `assertBadRequest()`, `assertServerError()`, and the async
 `await res.assertJson / assertJsonPath / assertJsonContains / assertBodyContains`.
 `assertInertia`, `assertJsonCount`, `assertJsonStructure` and the cookie asserts
-exist only on the chain: `await http.get(url).assertInertia('posts/Show')`.
+exist only on the chain.
+
+**`assertInertia` reads the page as JSON, so send `http.json()`:**
+`await http.json().get(url).assertInertia('posts/Show', { post })`. A plain
+GET returns the HTML shell and fails with `JSON Parse error: Unrecognized
+token '<'`. Prefer `json()` over `withHeader('X-Inertia', 'true')`: where an
+asset version is set (a built client manifest, or `GUREN_INERTIA_VERSION`),
+an `X-Inertia` GET without that version answers 409.
 
 Validation failures are 422 with `{ message, errors: Record<string, string[]> }`:
 `assertJsonPath('errors.title.0', 'Title is required')`.
@@ -77,6 +84,34 @@ Validation failures are 422 with `{ message, errors: Record<string, string[]> }`
   model hashes it (`requireOnCreate: ['password']`).
 - **The response body is `await res.json()`**; `res.response` is private.
 - There is no `asInertia()`: Inertia pages are asserted with `assertInertia()`.
+
+## Faking mail and queues
+
+Bind the fake on the `app` that `src/app.ts` exports (the TestApp's container
+is private), with `using` inside the test, after `fromApp()` has booted it.
+The container holds managers, so wrap the fake in one:
+
+```typescript
+import { MailManager, createQueueManager } from '@guren/core'
+import { fakeMail, fakeQueue } from '@guren/testing'
+
+const mail = fakeMail()
+const mailer = new MailManager({ default: 'fake', from: { email: 'app@example.com', name: 'App' } })
+mailer.registerTransport('fake', () => mail.getTransport())
+using _mail = app.container.fake('mail', mailer)
+
+const queue = fakeQueue()
+using _queue = app.container.fake('queue', createQueueManager({ default: 'fake', drivers: { fake: () => queue.getDriver() } }))
+
+// ...make the request, then:
+mail.assertSentTo('ada@example.com')
+queue.assertPushed<ProcessOrderPayload>(ProcessOrderJob, (payload) => payload.sku === 'book')
+```
+
+Events: `const events = fakeEvent()`, then
+`using _events = app.container.fake('events', events.getManager())` and
+`events.assertDispatched(OrderPlaced)`. Binding the bare fake instead of a
+manager answers 500 at first use.
 
 `bunx guren make:test <Name>` writes a test file (`--controller` for
 `tests/controllers/`). TestApp variants (`create`, `fromFetch`), CSRF
