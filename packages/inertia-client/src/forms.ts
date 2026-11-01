@@ -350,6 +350,7 @@ export type FieldForm<TBody extends FormDataType<TBody>> = RouteForm<TBody> | In
  * contract nothing is derived, the input comes from `as` (default `text`) and the label from
  * `label`, a `fields.<name>.label` translation, or the field name. Translations come from the
  * `_i18n` page prop, read without `useTranslation()`'s warning since most apps share none.
+ * Reading it needs Inertia's page context, so a component test renders `Field` inside `<App>`.
  */
 export function useField<TBody extends FormDataType<TBody>, K extends keyof TBody & string>(
   form: FieldForm<TBody>,

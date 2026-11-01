@@ -280,8 +280,9 @@ describe('translated labels', () => {
   })
 
   it('humanizes an option value that is not a key segment', () => {
-    const shared = i18n('en', { en: { fields: { rate: { options: { 1: 'One', 5: 'Half' } } } } })
-    expect(resolveOptionLabel('rate', 1, shared)).toBe('One')
+    // Nested so that, unguarded, `options.1.5` would reach 'Half'.
+    const shared = i18n('en', { en: { fields: { rate: { options: { 1: { 5: 'Half' } } } } } })
+    expect(resolveOptionLabel('rate', 2, shared)).toBe('2')
     expect(resolveOptionLabel('rate', 1.5, shared)).toBe('1 5')
   })
 
