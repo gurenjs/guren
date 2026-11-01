@@ -9,6 +9,7 @@ import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { consola } from 'consola'
 
+import { readAppLocale } from './app-locale'
 import { assertNotApiOnly } from './app-surface'
 import { loadBrowserMap, runBrowserMap } from './browser-map-files'
 import type { BrowserMap } from './browser-map'
@@ -21,6 +22,7 @@ import { appDependsOn, readIfExists } from './discovery'
 import { appendEnvEntry } from './env-registrar'
 import { ensureGitignoreEntry } from './plugin-scaffold'
 import { scaffoldTemplateFile } from './scaffold-templates'
+import { quoteString } from './schema-columns'
 import { findDeclaredTable, type SchemaTable } from './schema-parser'
 import { assertCwdUnsupported, runCommand, writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
 
@@ -56,6 +58,19 @@ function passwordSignIn(users: SchemaTable | undefined, map: BrowserMap): Browse
   const routes = [...map.features.flatMap((feature) => feature.routes), ...map.unassigned]
   if (!routes.some((route) => route.method === 'POST' && route.path === '/login')) return undefined
   return { name: columns.has('name'), emailVerifiedAt: columns.has('emailVerifiedAt') }
+}
+
+/** The config template's locale line; `guren add browser-tests` writes the app's default locale there. */
+export const CONFIG_LOCALE_LINE = "const LOCALE = 'en'\n"
+
+/**
+ * The config with the app's default locale (RFC 0036 §5). An app whose `createApp({ i18n })` this cannot
+ * read keeps `en`, the locale the server falls back to without `i18n`; a plan spec names a mismatch.
+ */
+export function pinConfigLocale(config: ScaffoldFileEntry, locale: string | undefined): ScaffoldFileEntry {
+  if (config.contents.split(CONFIG_LOCALE_LINE).length !== 2) throw new Error(`${BROWSER_TESTS_CONFIG} has no single ${CONFIG_LOCALE_LINE.trim()} line to write the app's locale on.`)
+  if (locale === undefined) return config
+  return { ...config, contents: config.contents.replace(CONFIG_LOCALE_LINE, () => `const LOCALE = ${quoteString(locale)}\n`) }
 }
 
 interface Manifest {
@@ -96,11 +111,12 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
   })
 
   // Everything is read before the first write, so a refusal or a graph that will not load leaves the app untouched.
-  const [map, users, manifest, database] = await Promise.all([
+  const [map, users, manifest, database, locale] = await Promise.all([
     (options.loadMap ?? loadBrowserMap)(cwd),
     findDeclaredTable(cwd, 'users'),
     readManifest(cwd, options.force === true),
     readIfExists(cwd, 'config/database.ts'),
+    readAppLocale(cwd),
   ])
   const account = passwordSignIn(users, map)
   // The closing browser:map run, written nowhere: its refusals (a slug two plans share, a spec of
@@ -108,7 +124,7 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
   await runBrowserMap({ cwd, write: false, map, specs: { signIn: account !== undefined, accessibility: true } })
 
   const files: ScaffoldFileEntry[] = [
-    scaffoldTemplateFile('browser-tests', BROWSER_TESTS_CONFIG),
+    pinConfigLocale(scaffoldTemplateFile('browser-tests', BROWSER_TESTS_CONFIG), locale.kind === 'locale' ? locale.locale : undefined),
     scaffoldTemplateFile('browser-tests', 'tests/browser/support.ts'),
     scaffoldTemplateFile('browser-tests', A11Y_OPTIONS_FILE),
     ...(account && users
@@ -116,6 +132,9 @@ export async function addBrowserTests(options: AddBrowserTestsOptions = {}): Pro
       : []),
   ]
   const created = await writeScaffoldFiles(files, { force: options.force, overwritten: options.overwritten, skipExisting: true })
+  if (locale.kind === 'unknown' && created.includes(resolve(cwd, BROWSER_TESTS_CONFIG))) {
+    consola.warn(`The app's default locale could not be read from createApp({ i18n }), so ${BROWSER_TESTS_CONFIG} sends en. If the app falls back to another locale, set LOCALE there; the plan specs fail until it matches.`)
+  }
 
   if (manifest) {
     manifest.scripts = { ...manifest.scripts, [BROWSER_TEST_SCRIPT.name]: BROWSER_TEST_SCRIPT.command }
