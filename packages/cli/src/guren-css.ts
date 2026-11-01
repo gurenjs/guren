@@ -94,7 +94,7 @@ export const SHIPPED_UNMARKED_SHEETS: ReadonlySet<string> = new Set([
  */
 export const SHIPPED_TOKEN_BLOCKS: ReadonlySet<string> = new Set([
   '2b56a75e643f0c15db89d922115042a78ca7ebc7d415160e12fcd54f154d0f57',
-  'e0919db4433d4b24ed3e67fe5bacf45a1a4213bd93058666de3bdee52b8cadd5',
+  '1198fbd7b5ff322e830bf04e33f2d59c4f384dfeb80b6cff30fffe5a462a6c98',
 ])
 
 interface TokenSheet {

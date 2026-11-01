@@ -2,12 +2,12 @@ import { Head, useForm } from '@inertiajs/react'
 import { useId } from 'react'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
 import { route } from '@/.guren/routes.gen'
+import { Input } from '@/resources/js/components/ui/Input'
+import { Label } from '@/resources/js/components/ui/Label'
+import { Textarea } from '@/resources/js/components/ui/Textarea'
 import Layout from '../../components/Layout.js'
 
 type PostFormData = ApiRoutes['posts.store']['body']
-
-const fieldClass =
-  'mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:outline-solid focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent'
 
 export default function NewPost() {
   const form = useForm<PostFormData>({ title: '', excerpt: '', body: '' })
@@ -33,43 +33,37 @@ export default function NewPost() {
           }}
         >
           <div>
-            <label htmlFor={titleId} className="block text-sm font-bold text-g-heading">
-              Title
-            </label>
-            <input
+            <Label htmlFor={titleId}>Title</Label>
+            <Input
               id={titleId}
               type="text"
               value={form.data.title}
               onChange={(event) => form.setData('title', event.target.value)}
-              className={fieldClass}
+              className="mt-1"
             />
             {form.errors.title ? <p className="mt-1 text-sm text-g-danger">{form.errors.title}</p> : null}
           </div>
 
           <div>
-            <label htmlFor={excerptId} className="block text-sm font-bold text-g-heading">
-              Excerpt
-            </label>
-            <input
+            <Label htmlFor={excerptId}>Excerpt</Label>
+            <Input
               id={excerptId}
               type="text"
               value={form.data.excerpt}
               onChange={(event) => form.setData('excerpt', event.target.value)}
-              className={fieldClass}
+              className="mt-1"
             />
             {form.errors.excerpt ? <p className="mt-1 text-sm text-g-danger">{form.errors.excerpt}</p> : null}
           </div>
 
           <div>
-            <label htmlFor={bodyId} className="block text-sm font-bold text-g-heading">
-              Body
-            </label>
-            <textarea
+            <Label htmlFor={bodyId}>Body</Label>
+            <Textarea
               id={bodyId}
               rows={10}
               value={form.data.body}
               onChange={(event) => form.setData('body', event.target.value)}
-              className={fieldClass}
+              className="mt-1"
             />
             {form.errors.body ? <p className="mt-1 text-sm text-g-danger">{form.errors.body}</p> : null}
           </div>

@@ -73,7 +73,7 @@
 
     --g-heading: #e0def4;
     --g-text: #e0def4;
-    --g-text-2: #908caa;
+    --g-text-2: #aeabc9; /* 1.51:1 over --g-muted, as light's text-2 is 1.56:1 over its muted */
     --g-muted: #8d89a7; /* 4.52:1 on --g-raised; rose-pine's #6e6a86 is 2.94:1 */
 
     /* fills stay crimson in both themes; accent TEXT moves to rose —

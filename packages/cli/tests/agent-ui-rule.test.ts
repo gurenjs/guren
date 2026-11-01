@@ -29,14 +29,22 @@ it('every class string the ui rule lists is one the generators emit', async () =
   expect(strings.filter((classes) => !sources.some((source) => source.includes(classes)))).toEqual([])
 })
 
+const repoRoot = join(import.meta.dir, '../../..')
+const PAGE_SOURCES = ['packages/cli/templates/scaffold', 'packages/create-app/templates', 'examples/agents/resources/js']
+
 // Tailwind v4's `outline-none` sets the style variable `outline-2` reads, so the ring needs its own style.
-it('every component that drops the outline gives its focus state a solid one', async () => {
-  const [rule, ...sources] = await Promise.all([
+it('every class list that drops the outline gives its focus state a solid one', async () => {
+  const pages = PAGE_SOURCES.flatMap((dir) =>
+    [...new Bun.Glob('**/*.tsx').scanSync({ cwd: join(repoRoot, dir) })].map((path) => join(repoRoot, dir, path)),
+  )
+  const sources = await Promise.all([
     readRule(),
-    ...UI_COMPONENTS.map((name) => read(`templates/scaffold/ui/${uiComponentPath(name)}`)),
+    read('src/make-feature.ts'),
+    read('src/make-auth.ts'),
+    ...pages.map((path) => readFile(path, 'utf8')),
   ])
   // A class list has spaces; the rule's prose names `outline-none` alone.
-  const strings = [rule, ...sources]
+  const strings = sources
     .flatMap((text) => [...text.matchAll(/[`'"]([^`'"\n]*\boutline-none\b[^`'"\n]*)[`'"]/g)].map((match) => match[1]!))
     .filter((classes) => classes.includes(' '))
   expect(strings.length).toBeGreaterThan(3)
