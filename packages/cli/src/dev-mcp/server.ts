@@ -69,6 +69,8 @@ export interface DevMcpApi {
     definitions: unknown[],
     opts: WriterOptions & { resources?: ResourceDefinition[] },
   ): Promise<DevMcpCodegenResult>
+  /** Runs after `generateApiClientTypes`: each contract's type names an `ApiRoutes` body (RFC 0036). */
+  generateFormTypes(definitions: unknown[], opts: WriterOptions): Promise<DevMcpCodegenResult>
   buildDocsGraphReport(options: DocsGraphReportOptions): Promise<DocsGraphReport>
   renderDocsGraphMarkdown(report: DocsGraphReport): string
   readPlanOverview(appRoot: string): Promise<PlanOverview>
@@ -466,6 +468,7 @@ export function createDevMcpServer(options: CreateDevMcpServerOptions): McpServe
 
       await run(['.guren/agents.gen.ts'], () => api.generateAgentTypes(routeManifest(), derived))
       await run(['.guren/api-client.gen.ts'], () => api.generateApiClientTypes(routeManifest(), derived))
+      await run(['.guren/forms.gen.ts'], () => api.generateFormTypes(routeManifest(), codegenOptions))
 
       return {
         content: [json({ generated, skipped, warnings })],

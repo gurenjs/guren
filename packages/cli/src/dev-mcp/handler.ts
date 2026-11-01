@@ -1,5 +1,6 @@
 import type { RuntimeErrorReader } from '../runtime-errors'
 import { generateAgentTypes } from '../agents-types'
+import { generateFormTypes } from '../forms-types'
 import { generateApiClientTypes } from '../api-client-types'
 import { generateChannelTypes } from '../channel-types'
 import { runCheck } from '../check'
@@ -62,6 +63,7 @@ function defaultApi(): DevMcpApi {
     generateChannelTypes,
     generateAgentTypes,
     generateApiClientTypes,
+    generateFormTypes,
     buildDocsGraphReport,
     renderDocsGraphMarkdown,
     readPlanOverview,
