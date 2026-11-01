@@ -46,6 +46,16 @@ export const runReadinessChild: ReadinessRunner = (argv, cwd, env) =>
     })
   })
 
+/** An error the CLI did not mean to raise prints its stack; a refusal (`CliError`) prints the message alone. */
+const STACK_FRAME = /\n\s+at /u
+
+/** The report is the last thing printed, pretty-printed from a `{` at the start of a line; an app module may print before it. */
+function lastReport(stdout: string): unknown {
+  const line = stdout.lastIndexOf('\n{')
+  const start = line >= 0 ? line + 1 : stdout.startsWith('{') ? 0 : -1
+  return start < 0 ? undefined : JSON.parse(stdout.slice(start))
+}
+
 /** consola prints a refusal as ` ERROR  <message>`; the level is the CLI's, not the message's. */
 function refusalText(stderr: string): string {
   const text = stderr.replace(/^\s*ERROR\s+/u, '').trim()
@@ -77,13 +87,14 @@ export async function planReadiness(
   if (child.failed) return { ...head, status: 'unavailable', message: child.failed }
   if (child.exitCode === 0) {
     try {
-      const report = JSON.parse(child.stdout) as { dryRun?: unknown }
-      if (report.dryRun === true) return { ...head, status: 'ready', report }
+      const report = lastReport(child.stdout) as { dryRun?: unknown } | undefined
+      if (report?.dryRun === true) return { ...head, status: 'ready', report }
     } catch {
       // Falls through: output that is not the dry run's report is never read as ready.
     }
     return { ...head, status: 'unavailable', message: 'The check did not print a dry-run report.' }
   }
+  if (child.exitCode === 1 && STACK_FRAME.test(child.stderr)) return { ...head, status: 'unavailable', message: `The check crashed: ${refusalText(child.stderr)}` }
   if (child.exitCode === 1 && child.stderr.trim()) return { ...head, status: 'refused', message: refusalText(child.stderr) }
   return { ...head, status: 'unavailable', message: `The check exited with ${child.exitCode} and said nothing.` }
 }

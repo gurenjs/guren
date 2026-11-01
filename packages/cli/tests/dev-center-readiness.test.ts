@@ -5,6 +5,8 @@ import { join, relative } from 'node:path'
 import { createDevCenterHandler } from '../src/dev-center'
 import { planReadinessPath, planReadinessRoute } from '../src/dev-center-links'
 import { runReadinessChild, type PlanReadiness, type ReadinessRunner } from '../src/dev-center-readiness'
+import { planWaiveFile } from '../src/plan-waive'
+import { listPlanElements, PlanSchema } from '../src/plan/schema'
 import { gurenCommandLine, shellQuote } from '../src/shell-quote'
 import { createTempRoot, writeWorkspaceFiles } from './helpers'
 import { approvePlanFile, loadApprovedCommentsPlan, loadCommentsPlan, PLAN_APP_FILES } from './plan-fixture'
@@ -27,8 +29,11 @@ function git(dir: string, ...args: string[]): void {
   if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr.toString()}`)
 }
 
-/** A committed app holding an answered draft and an approved plan; bunfig stops Bun installing what it cannot resolve. */
-async function createApp(name: string): Promise<string> {
+/**
+ * A committed app holding an answered draft and an approved plan; bunfig stops Bun installing what it cannot resolve.
+ * `closable` waives every element `plan:waive` takes, so `plan:close` would go through.
+ */
+async function createApp(name: string, { closable = false } = {}): Promise<string> {
   const app = join(ROOT, name)
   await writeWorkspaceFiles(app, {
     'bunfig.toml': '[install]\nauto = "disable"\n',
@@ -37,6 +42,11 @@ async function createApp(name: string): Promise<string> {
     [APPROVED]: JSON.stringify(loadApprovedCommentsPlan()),
   })
   await approvePlanFile(join(app, APPROVED))
+  if (closable) {
+    for (const { id } of listPlanElements(PlanSchema.parse(loadApprovedCommentsPlan()))) {
+      await planWaiveFile(join(app, APPROVED), { elementIds: [id], reason: 'closing the fixture' }).catch(() => undefined)
+    }
+  }
   git(app, 'init', '-q')
   git(app, 'add', '-A')
   git(app, 'commit', '-q', '-m', 'init')
@@ -102,6 +112,11 @@ describe('the readiness check', () => {
     expect(stopped.body).toMatchObject({ status: 'unavailable', message: 'The check took too long or was stopped.' })
     const silent = await check(app, planReadinessPath('draft', 'approve'), answering({ exitCode: 2, stdout: '', stderr: '' }))
     expect(silent.body.status).toBe('unavailable')
+    const crashed = await check(app, planReadinessPath('draft', 'approve'), answering({ exitCode: 1, stdout: '', stderr: ' ERROR  boom\n    at load (src/x.ts:1:1)\n' }))
+    expect(crashed.body).toMatchObject({ status: 'unavailable', message: expect.stringContaining('crashed') })
+    // An app module that prints at import comes before the report, which is still read.
+    const noisy = await check(app, planReadinessPath('draft', 'approve'), answering({ exitCode: 0, stdout: 'booting {x}\n{\n  "dryRun": true\n}\n', stderr: '' }))
+    expect(noisy.body.status).toBe('ready')
   })
 
   test('should start no child for an element the plan does not declare, a missing one, or another method', async () => {
@@ -117,7 +132,9 @@ describe('the readiness check', () => {
 })
 
 describe('the readiness check against the real CLI', () => {
-  const dropFlag: ReadinessRunner = (argv, cwd, env) => runReadinessChild(argv.filter((arg) => arg !== '--dry-run'), cwd, env)
+  // A waiver needs a reason before it reaches its writer, which the page never sends; the guard is the writer's.
+  const dropFlag: ReadinessRunner = (argv, cwd, env) =>
+    runReadinessChild([...argv.filter((arg) => arg !== '--dry-run'), ...(argv[0] === 'plan:waive' ? ['--reason', 'x'] : [])], cwd, env)
   const dropEnv: ReadinessRunner = (argv, cwd, env) => {
     const { GUREN_PLAN_DRY_RUN: _dropped, ...rest } = env
     return runReadinessChild(argv, cwd, rest)
@@ -144,7 +161,18 @@ describe('the readiness check against the real CLI', () => {
     const approve = await check(app, planReadinessPath('draft', 'approve'), dropFlag)
     expect(approve.body).toMatchObject({ status: 'refused', message: expect.stringContaining('GUREN_PLAN_DRY_RUN=1 is set') })
     const waive = await check(app, planReadinessPath('comments', 'waive', 'model.comment'), dropFlag)
-    expect(waive.body.status).toBe('refused')
+    expect(waive.body).toMatchObject({ status: 'refused', message: expect.stringContaining('GUREN_PLAN_DRY_RUN=1 is set') })
+
+    expect(await snapshot(app)).toEqual(before)
+  }, 120_000)
+
+  test('should close nothing with --dry-run dropped from the argv, and answer ready with it', async () => {
+    const app = await createApp('closable', { closable: true })
+    const before = await snapshot(app)
+
+    expect((await check(app, planReadinessPath('comments', 'close'))).body).toMatchObject({ status: 'ready', report: { dryRun: true } })
+    const dropped = await check(app, planReadinessPath('comments', 'close'), dropFlag)
+    expect(dropped.body).toMatchObject({ status: 'refused', message: expect.stringContaining('GUREN_PLAN_DRY_RUN=1 is set') })
 
     expect(await snapshot(app)).toEqual(before)
   }, 120_000)
