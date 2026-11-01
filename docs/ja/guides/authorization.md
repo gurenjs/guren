@@ -175,7 +175,7 @@ const post = await Post.findOrFail(id)
 // ORM レコードには [モデルクラス, レコード] を渡す
 const canUpdate = await gate.allows('update', [Post, post])
 
-// レコードを伴わないアビリティはクラス単体を渡す
+// レコードを伴わないアビリティはクラス単体か [Post] を渡す
 const canCreate = await gate.allows('create', Post)
 
 // 文字列キーも同様に使える
@@ -193,7 +193,7 @@ const canView = await gate.allows('view', somePostInstance)
 
 プレーンなレコードをタプルにせずに渡すと、ポリシーは見つかりません。その ability のゲートも定義されていなければ、チェックは拒否を返さずに `Error` を投げます。エラーメッセージには ability 名と、`[Model, record]` に直すよう促す内容が入ります。レコードの持ち主本人が理由のわからない 403 を受け取るのではなく、誤りが 500 として表に出るようにするためです。
 
-`before()` コールバックと、その ability に定義したゲートには、プレーンなレコードがそのまま渡ります。ポリシーのないクラスのインスタンスや、ポリシーのないモデルのタプルを渡した場合は拒否になります。
+`before()` コールバックと、その ability に定義したゲートには、プレーンなレコードがそのまま渡ります。ポリシーのないクラスのインスタンスや、ポリシーのないモデルのタプルを渡した場合は拒否になります。それ以外の配列(レコードだけを括弧に入れたもの、要素が 3 つのもの、レコードの一覧など)もポリシーを示さないので、その ability に定義したゲートが受け取らない限り、同じように `Error` を投げます。
 
 `gate.any()` と、配列を渡した `authorizeMiddleware()` は、ability を先頭から順に確認します。プレーンなレコードを渡すと、何も解決できなかった最初の ability で例外になり、後ろの ability が許可する場合でもそこで止まります。こちらでもタプルを渡してください。`authorizeMiddleware()` や `authorizeResourceMiddleware()` に渡す `modelResolver` も、レコードではなく `[Model, record]` を返すようにします。
 

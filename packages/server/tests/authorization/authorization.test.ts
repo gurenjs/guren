@@ -401,6 +401,63 @@ describe('Policy', () => {
     expect(await guestGate.allows('create', Post)).toBe(false)
   })
 
+  test('resolves policy via a one-element [ModelClass] for record-less abilities', async () => {
+    const userGate = gate.forUser({ id: 1, role: 'user' } as TestUser)
+    const guestGate = gate.forUser(null)
+
+    expect(await userGate.allows('create', [Post])).toBe(true)
+    expect(await guestGate.allows('create', [Post])).toBe(false)
+    expect(await guestGate.denies('create', [Post])).toBe(true)
+    await userGate.authorize('create', [Post])
+    await expect(guestGate.authorize('create', [Post])).rejects.toBeInstanceOf(AuthorizationException)
+  })
+
+  test('calls a record-less ability with no subject for [ModelClass]', async () => {
+    const seen: unknown[][] = []
+    class CountingPolicy extends Policy {
+      create(...args: unknown[]) {
+        seen.push(args)
+        return true
+      }
+    }
+    gate.policy(Post, CountingPolicy)
+
+    await gate.forUser({ id: 1, role: 'user' } as TestUser).allows('create', [Post])
+    expect(seen).toEqual([[{ id: 1, role: 'user' }]])
+  })
+
+  test('resolves policy via a one-element [stringKey]', async () => {
+    gate.policy('post', PostPolicy)
+
+    expect(await gate.forUser({ id: 1, role: 'user' } as TestUser).allows('create', ['post'])).toBe(true)
+  })
+
+  test('still denies a [ModelClass] whose model has no policy', async () => {
+    class Draft {}
+
+    expect(await gate.forUser({ id: 5, role: 'user' } as TestUser).allows('create', [Draft])).toBe(false)
+  })
+
+  test('throws for an array that names no policy and reaches no gate', async () => {
+    const userGate = gate.forUser({ id: 5, role: 'user' } as TestUser)
+    const record = { id: 1, authorId: 5 }
+
+    for (const subject of [[], [record], [Post, record, 'extra'], [new Post(1, 5), new Post(2, 5)]]) {
+      await expect(userGate.allows('update', subject)).rejects.toThrow('names no policy; pass [Model, record]')
+    }
+    const error = await userGate.authorize('update', [record]).catch((thrown: unknown) => thrown)
+    expect(error).toBeInstanceOf(Error)
+    expect(error).not.toBeInstanceOf(AuthorizationException)
+  })
+
+  test('passes an array that names no policy to a gate defined for the ability', async () => {
+    gate.define('publish-many', (_user, posts: Post[]) => posts.every((post) => post.authorId === 5))
+
+    const userGate = gate.forUser({ id: 5, role: 'user' } as TestUser)
+    expect(await userGate.allows('publish-many', [new Post(1, 5), new Post(2, 5)])).toBe(true)
+    expect(await userGate.allows('publish-many', [new Post(1, 5), new Post(2, 6)])).toBe(false)
+  })
+
   test('resolves policy via [stringKey, record] tuple', async () => {
     gate.policy('post', PostPolicy)
     const plainRecord = { id: 1, authorId: 5, published: true }

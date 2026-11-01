@@ -227,11 +227,11 @@ export class Controller {
   }
 
   /**
-   * Authorize the current user (or guest) for an ability; throws
-   * AuthorizationException (403) when denied. ORM records are plain objects
-   * with no constructor information, so pass the model class alongside the
-   * record: `await this.authorize('update', [Post, post])`. A bare record that
-   * resolves no policy and no gate throws an Error rather than denying.
+   * Authorize the current user (or guest) for an ability; throws AuthorizationException
+   * (403) when denied. An ORM record is a plain object, so pass its class beside it:
+   * `this.authorize('update', [Post, post])`; an ability with no record takes `Post`
+   * or `[Post]`. A bare record or another array that resolves no policy and no gate
+   * throws an Error rather than denying.
    */
   protected async authorize(ability: string, ...args: unknown[]): Promise<void> {
     await this.#resolveGate().forUser(await this.gateUser()).authorize(ability, ...args)
