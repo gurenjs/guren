@@ -36,6 +36,7 @@ const GUREN_IMPORT_RE = /@import\s+(?:url\(\s*)?['"](?:\.\/)?guren\.css['"]/
  * style with: write `resources/css/guren.css` when the app has none, and add
  * its `@import` to `resources/css/app.css`. Both halves are idempotent, and an
  * existing guren.css is never overwritten here: `guren upgrade` updates its marked block.
+ * `writeScaffoldFiles` calls it for a batch that writes a styled page.
  */
 export async function ensureGurenUiTokens(cwd: string = process.cwd()): Promise<void> {
   const tokensPath = resolve(cwd, TOKENS_PATH)
